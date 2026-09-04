@@ -1217,7 +1217,7 @@ pub const App = struct {
         const rows = try q.toe(al, g);
         var texts: std.ArrayListUnmanaged([]const u8) = .empty;
         for (rows) |r| try texts.append(al, r.text);
-        const lw: u16 = if (b.w > 120) b.w * 45 / 100 else b.w;
+        const lw: u16 = if (b.w > 120) b.w * 55 / 100 else b.w;
         self.listPane(.{ .x = b.x, .y = b.y, .w = lw, .h = b.h }, "TO&E", texts.items, 0, self.focus == 0, true);
         if (lw < b.w) {
             const c = self.cur(0).*;

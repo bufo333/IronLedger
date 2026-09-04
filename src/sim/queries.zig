@@ -37,6 +37,23 @@ pub fn money(alloc: Alloc, v: types.CBills) ![]const u8 {
 
 /// Pad plain `text` to `width` cells, then wrap it in markup — so the
 /// markup never counts toward a column's width.
+/// Pad to `width` terminal cells, counting code points rather than bytes
+/// (an em dash is one cell, three bytes), so columns line up.
+pub fn padCells(alloc: Alloc, mk: []const u8, text: []const u8, width: usize) ![]const u8 {
+    var out: std.ArrayListUnmanaged(u8) = .empty;
+    try out.appendSlice(alloc, mk);
+    var cells: usize = 0;
+    var it = std.unicode.Utf8View.initUnchecked(text).iterator();
+    while (it.nextCodepointSlice()) |cp| {
+        if (cells >= width) break;
+        try out.appendSlice(alloc, cp);
+        cells += 1;
+    }
+    while (cells < width) : (cells += 1) try out.append(alloc, ' ');
+    if (mk.len > 0) try out.appendSlice(alloc, "{/}");
+    return out.toOwnedSlice(alloc);
+}
+
 pub fn padMk(alloc: Alloc, mk: []const u8, text: []const u8, width: usize) ![]const u8 {
     const shown = if (text.len > width) text[0..width] else text;
     var out: std.ArrayListUnmanaged(u8) = .empty;
@@ -661,11 +678,16 @@ pub fn toe(alloc: Alloc, gs: *GameState) ![]ToeRow {
                 .damaged, .repairing, .refitting => "{a}",
                 else => "{c}",
             };
-            try out.append(alloc, .{ .force = .none, .unit = u.id, .text = try std.fmt.allocPrint(alloc, "    #{d: <3} {s: <8} {s: <16} {d: >3}t  {s: <20} {s: <20} {s}{s}{{/}} armor {d}%{s} · {s}/mo", .{
-                @intFromEnum(u.id),                u.chassis_key,      if (ch) |c| c.name else "?", if (ch) |c| c.tonnage else 0,
-                "—",
-                "—",
-                st_mk,                             @tagName(u.status), u.armor_pct,                 try damageMarks(alloc, u),
+            try out.append(alloc, .{ .force = .none, .unit = u.id, .text = try std.fmt.allocPrint(alloc, "    #{d: <3} {s: <8} {s} {d: >3}t  {s} {s} {s} armor {d}%{s} · {s}/mo", .{
+                @intFromEnum(u.id),
+                u.chassis_key,
+                try padCells(alloc, "", if (ch) |c| c.name else "?", 14),
+                if (ch) |c| c.tonnage else 0,
+                try padCells(alloc, "", "—", 16),
+                try padCells(alloc, "", "—", 16),
+                try padCells(alloc, st_mk, @tagName(u.status), 9),
+                u.armor_pct,
+                try damageMarks(alloc, u),
                 try money(alloc, u.monthlyBill()),
             }) });
         }
@@ -690,16 +712,15 @@ fn toeInto(alloc: Alloc, gs: *GameState, out: *std.ArrayListUnmanaged(ToeRow), i
             .damaged, .repairing, .refitting => "{a}",
             else => "{c}",
         };
-        try out.append(alloc, .{ .force = id, .unit = uid, .text = try std.fmt.allocPrint(alloc, "{s}    #{d: <3} {s: <8} {s: <16} {d: >3}t  {s: <20} {s: <20} {s}{s}{{/}} armor {d}%{s}", .{
+        try out.append(alloc, .{ .force = id, .unit = uid, .text = try std.fmt.allocPrint(alloc, "{s}    #{d: <3} {s: <8} {s} {d: >3}t  {s} {s} {s} armor {d}%{s}", .{
             indent,
             @intFromEnum(uid),
             u.chassis_key,
-            if (ch) |c| c.name else "?",
+            try padCells(alloc, "", if (ch) |c| c.name else "?", 14),
             if (ch) |c| c.tonnage else 0,
-            if (pilot) |p| try std.fmt.allocPrint(alloc, "{s} {s}", .{ p.first_name, p.last_name }) else "{c}— no pilot{/}",
-            if (tech) |t| try std.fmt.allocPrint(alloc, "{s} {s}", .{ t.first_name, t.last_name }) else if (needs_tech) "{c}— no tech{/}" else "—",
-            st_mk,
-            @tagName(u.status),
+            if (pilot) |p| try padCells(alloc, "", try std.fmt.allocPrint(alloc, "{s} {s}", .{ p.first_name, p.last_name }), 16) else try padCells(alloc, "{c}", "— no pilot", 16),
+            if (tech) |t| try padCells(alloc, "", try std.fmt.allocPrint(alloc, "{s} {s}", .{ t.first_name, t.last_name }), 16) else if (needs_tech) try padCells(alloc, "{c}", "— no tech", 16) else try padCells(alloc, "", "—", 16),
+            try padCells(alloc, st_mk, @tagName(u.status), 9),
             u.armor_pct,
             try damageMarks(alloc, u),
         }) });
@@ -2088,6 +2109,17 @@ test "hall filter groups roles and map classifies worlds" {
     try std.testing.expect(rec.len > 6);
     _ = try openSeats(al, &gs, everyone.rows[0].id);
     try std.testing.expectEqualStrings("active", try stripMarkup(al, "{g}active{/}"));
+}
+
+test "padCells counts cells, not bytes" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const dash = try padCells(a, "", "— no pilot", 12);
+    try std.testing.expectEqual(@as(usize, 12), try std.unicode.utf8CountCodepoints(dash));
+    const plain = try padCells(a, "", "Lori Kalmar", 12);
+    try std.testing.expectEqual(@as(usize, 12), plain.len);
+    try std.testing.expectEqualStrings("{c}Abc{/}", try padCells(a, "{c}", "Abcdef", 3));
 }
 
 test "money formats with separators" {
