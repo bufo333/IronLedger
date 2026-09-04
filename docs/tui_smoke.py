@@ -61,7 +61,11 @@ assert "F1 Desk" in p and "END-TURN CHECKLIST" in p, p[-4000:]
 if b"38;2;" in out:
     print("emblem: half-block colour cells emitted")
 send("4")                      # contracts tab
-assert "CONTRACT BOARD" in plain()
+assert "CONTRACT BOARD" in plain() and "HISTORY" in plain(), plain()[-3000:]
+send("\t"); send("\t", 0.6)    # focus the history pane; read-only
+send("j"); send("c", 0.6)
+assert "no closed contracts yet" in plain()[-30000:], plain()[-2000:]
+send("\t", 0.6)
 send("5")
 assert "TREASURIES" in plain()
 send("3")

@@ -1636,6 +1636,8 @@ pub const World = struct {
     hq_here: types.HqId,
     companies_here: u32,
     offers_here: u32,
+    /// Contracts worked here (any outcome): an HQ can be founded on such a world.
+    worked: u32,
 };
 
 pub const MapHq = struct {
@@ -1715,9 +1717,67 @@ pub fn map(alloc: Alloc, gs: *GameState) !Map {
             .hq_here = hq_here,
             .companies_here = companies,
             .offers_here = offers,
+            .worked = contractsWorkedAt(gs, p.key),
         });
     }
     return .{ .worlds = try worlds.toOwnedSlice(alloc), .hqs = try hqs.toOwnedSlice(alloc), .in_ring = in_ring, .in_band = in_band, .dark = dark, .band_ly = market_mod.beachhead_band_ly };
+}
+
+pub const HistoryRow = struct {
+    id: types.ContractId,
+    planet_key: []const u8,
+    text: []const u8,
+};
+
+/// Every closed contract, newest first: what it was, where, how it ended,
+/// and what it paid. The worlds listed here are the ones an HQ can be
+/// founded on. AARs for a row come from `battleLog`.
+pub fn contractHistory(alloc: Alloc, gs: *GameState) ![]HistoryRow {
+    var out: std.ArrayListUnmanaged(HistoryRow) = .empty;
+    const vals = gs.contracts.values();
+    var i: usize = vals.len;
+    while (i > 0) {
+        i -= 1;
+        const c = &vals[i];
+        if (c.status != .completed and c.status != .breached and c.status != .failed) continue;
+        var received: types.CBills = 0;
+        for (gs.ledger.transactions.items) |t| if (t.contract == c.id and t.amount > 0) {
+            received += t.amount;
+        };
+        const start = c.arrive_day orelse c.start_day;
+        const served: ?u32 = if (start != null and c.end_day != null) c.end_day.? -| start.? else null;
+        const st_mk: []const u8 = switch (c.status) {
+            .completed => "{g}",
+            .breached => "{c}",
+            else => "{a}",
+        };
+        try out.append(alloc, .{ .id = c.id, .planet_key = c.planet_key, .text = try std.fmt.allocPrint(alloc, "[{d: <3}] {s: <14} {s: <4} {s: <16} {s}{s: <9}{{/}} {s: >5}  {d: >3} VP  {s: >13}  co:{d} {s}", .{
+            @intFromEnum(c.id),
+            @tagName(c.kind),
+            c.employer_key,
+            clip(planetName(c.planet_key), 16),
+            st_mk,
+            @tagName(c.status),
+            if (served) |d| try std.fmt.allocPrint(alloc, "{d}d", .{d}) else "—",
+            c.victory_points,
+            try money(alloc, received),
+            @intFromEnum(c.assigned_company),
+            clip(forceName(gs, c.assigned_company), 14),
+        }) });
+    }
+    return out.toOwnedSlice(alloc);
+}
+
+pub const history_header = "id    kind           emp  world            outcome    served   VP        received  company";
+
+/// Contracts the outfit has worked on a world (any outcome): the founding
+/// rule counts them as reach.
+pub fn contractsWorkedAt(gs: *GameState, planet_key: []const u8) u32 {
+    var n: u32 = 0;
+    for (gs.contracts.values()) |c| if (std.mem.eql(u8, c.planet_key, planet_key) and c.status != .offer) {
+        n += 1;
+    };
+    return n;
 }
 
 /// Offer rows for one world (text only).
@@ -2036,6 +2096,36 @@ test "damage marks and the company damage report name the components a hull need
     _ = gs.takeStock(.{ .hq = report.home }, "comp_torso", gs.stockCount(.{ .hq = report.home }, "comp_torso"));
     const again = try companyDamage(a, &gs, co);
     try std.testing.expectEqualStrings("comp_torso", again.short_key.?);
+}
+
+test "contract history lists closed contracts with their world; the map counts worked worlds" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 2025 });
+    defer gs.deinit();
+    const commands = @import("commands.zig");
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "E", .origin = .CC, .profession = .paymaster } });
+    const co = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    try std.testing.expectEqual(@as(usize, 0), (try contractHistory(a, &gs)).len);
+    _ = try commands.execute(&gs, .{ .accept_contract = .{ .offer_index = 0, .company = co } });
+    const c = &gs.contracts.values()[0];
+    try std.testing.expectEqual(@as(usize, 0), (try contractHistory(a, &gs)).len); // still open
+    c.status = .completed;
+    c.arrive_day = 10;
+    c.end_day = 100;
+    c.victory_points = 7;
+    const rows = try contractHistory(a, &gs);
+    try std.testing.expectEqual(@as(usize, 1), rows.len);
+    try std.testing.expectEqualStrings(c.planet_key, rows[0].planet_key);
+    try std.testing.expect(std.mem.indexOf(u8, rows[0].text, planetName(c.planet_key)) != null);
+    try std.testing.expect(std.mem.indexOf(u8, rows[0].text, "completed") != null);
+    try std.testing.expect(std.mem.indexOf(u8, rows[0].text, "90d") != null);
+    try std.testing.expectEqual(@as(u32, 1), contractsWorkedAt(&gs, c.planet_key));
+    const m = try map(a, &gs);
+    var worked: u32 = 0;
+    for (m.worlds) |w| worked += w.worked;
+    try std.testing.expectEqual(@as(u32, 1), worked);
 }
 
 test "desk and ledger queries build on a fresh campaign" {

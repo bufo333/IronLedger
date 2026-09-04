@@ -143,7 +143,11 @@ the one it is shortest of.
 
 The board with every column that matters, and the active contract with
 its opposition pool, duration, victory points, breach exposure, salvage
-capacity and battle history.
+capacity and battle history. A HISTORY pane keeps every closed
+contract with its outcome, world, days served, victory points and pay
+received; the log pane follows whichever contract the cursor is on. The
+Map marks worlds you have worked with `=`, since an HQ can be founded on
+any of them.
 
 ![Contracts](docs/screenshots/contracts.svg)
 

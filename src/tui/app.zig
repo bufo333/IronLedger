@@ -911,11 +911,12 @@ pub const App = struct {
             const nst: Style = if (is_cursor) .sel else if (w.band == .dark) .dim else .normal;
             const nw: u16 = @intCast(@max(0, @min(@as(i32, @intCast(w.name.len)), inner.x + inner.w - c[0] - 2)));
             _ = s.text(c[0] + 2, c[1], nw, w.name, nst);
+            if (w.worked > 0 and w.hq_here == .none) s.put(c[0] + 3 + @as(i32, nw), c[1], '=', .purple);
             if (w.offers_here > 0) s.put(c[0] + 3 + @as(i32, nw), c[1], '^', .amber);
             if (w.companies_here > 0 and w.hq_here == .none) s.put(c[0] + 3 + @as(i32, nw), c[1], '+', .good);
         }
         if (mw < b.w) {
-            s.textPad(inner.x, inner.y + inner.h - 1, inner.w, "{d}@ HQ   * cursor   ^ offers   + company   . influence ring   , beachhead band   dim = out of reach{/}", .normal);
+            s.textPad(inner.x, inner.y + inner.h - 1, inner.w, "{d}@ HQ   * cursor   ^ offers   + company   = worked (HQ can be founded)   . influence ring   , beachhead band   dim = out of reach{/}", .normal);
         } else {
             const w = view.worlds[self.map_cursor];
             s.textPad(inner.x, inner.y + inner.h - 1, inner.w, try std.fmt.allocPrint(al, "{{a}}{s}{{/}} {s} · ind {d} · {d} LY · {s} · {d} offers  {{d}}[f] found [o] board{{/}}", .{
@@ -944,6 +945,7 @@ pub const App = struct {
             try rows.append(al, "");
             if (w.hq_here != .none) try rows.append(al, try std.fmt.allocPrint(al, "HQ here      {{a}}{s}{{/}}", .{q.hqName(g, w.hq_here)}));
             try rows.append(al, try std.fmt.allocPrint(al, "companies    {d} here", .{w.companies_here}));
+            if (w.worked > 0) try rows.append(al, try std.fmt.allocPrint(al, "history      {{p}}{d} contract{s} worked here{{/}} · an HQ can be founded (F4 History lists them)", .{ w.worked, if (w.worked == 1) "" else "s" }));
             try rows.append(al, try std.fmt.allocPrint(al, "local supply {s}", .{switch (w.band) {
                 .ring => "×1.0 (in ring)",
                 .beachhead => "{a}×2.5{/} (beachhead)",
@@ -1126,19 +1128,38 @@ pub const App = struct {
             }
         }
         if (view.active.len == 0) try act.append(al, "{d}no active contracts{/}");
-        const act_w: u16 = if (b.w > 140) b.w * 3 / 5 else b.w;
+        const wide = b.w > 140;
+        const act_w: u16 = if (wide) b.w * 3 / 5 else b.w;
+        const history = try q.contractHistory(al, g);
+        const c2 = self.cur(2);
+        if (history.len > 0 and c2.* >= history.len) c2.* = history.len - 1;
+        // Narrow: the active list gives up its lower part to the history.
+        const act_h: u16 = if (wide) b.h - board_h else (b.h - board_h) * 3 / 5;
         const c1 = self.cur(1);
         if (view.active.len > 0 and c1.* >= view.active.len) c1.* = view.active.len - 1;
-        const inner2 = self.screen.pane(.{ .x = b.x, .y = b.y + board_h, .w = act_w, .h = b.h - board_h }, .{ .title = "ACTIVE", .focused = self.focus == 1, .right_title = "[c] complete  [R] recall" });
+        const inner2 = self.screen.pane(.{ .x = b.x, .y = b.y + board_h, .w = act_w, .h = act_h }, .{ .title = "ACTIVE", .focused = self.focus == 1, .right_title = "[c] complete  [R] recall" });
         var first: usize = 0;
         for (act_index.items, 0..) |ai, li| if (ai == c1.* and first == 0 and li > 0) {
             first = li;
         };
         self.screen.lines(inner2, act.items, if (first + inner2.h > act.items.len and act.items.len > inner2.h) act.items.len - inner2.h else first, if (self.focus == 1 and view.active.len > 0) first else null);
-        if (act_w < b.w and view.active.len > 0) {
-            const sel = view.active[c1.*];
-            const log = try q.battleLog(al, g, sel.id, 40);
-            self.listPane(.{ .x = b.x + act_w, .y = b.y + board_h, .w = b.w - act_w, .h = b.h - board_h }, "CONTRACT LOG", log, 2, false, false);
+
+        var hist: std.ArrayListUnmanaged([]const u8) = .empty;
+        try hist.append(al, q.history_header);
+        for (history) |h| try hist.append(al, h.text);
+        if (history.len == 0) try hist.append(al, "{d}no closed contracts yet — completed, breached and failed contracts land here, and an HQ can be founded on any world worked{/}");
+        const hist_rect: screen_mod.Rect = if (wide)
+            .{ .x = b.x + act_w, .y = b.y + board_h, .w = b.w - act_w, .h = (b.h - board_h) / 2 }
+        else
+            .{ .x = b.x, .y = b.y + board_h + act_h, .w = b.w, .h = b.h - board_h - act_h };
+        const hist_inner = self.screen.pane(hist_rect, .{ .title = "HISTORY", .focused = self.focus == 2, .right_title = "Tab here · log follows the cursor" });
+        self.screen.lines(hist_inner, hist.items, if (c2.* + 2 > hist_inner.h and hist_inner.h > 1) c2.* + 2 - hist_inner.h else 0, if (self.focus == 2 and history.len > 0) c2.* + 1 else null);
+
+        if (wide) {
+            // The log follows whichever contract the cursor is on: an active one, or a closed one in the history.
+            const log_id: types.ContractId = if (self.focus == 2 and history.len > 0) history[c2.*].id else if (view.active.len > 0) view.active[c1.*].id else .none;
+            const log = if (log_id != .none) try q.battleLog(al, g, log_id, 40) else &[_][]const u8{"{d}no contract under the cursor{/}"};
+            self.listPane(.{ .x = b.x + act_w, .y = b.y + board_h + hist_rect.h, .w = b.w - act_w, .h = b.h - board_h - hist_rect.h }, "CONTRACT LOG", log, 3, false, false);
         }
     }
 
@@ -1957,7 +1978,7 @@ pub const App = struct {
     fn paneCount(self: *App) u8 {
         return switch (self.tab) {
             .desk => 3,
-            .contracts => 2,
+            .contracts => 3,
             .ledger => 2,
             .forces => 2,
             .hq => 2,
@@ -1980,7 +2001,7 @@ pub const App = struct {
             },
             .contracts => {
                 const view = try q.contracts(al, g);
-                if (self.focus == 0) self.moveCursor(0, delta, view.board.len) else self.moveCursor(1, delta, view.active.len);
+                if (self.focus == 0) self.moveCursor(0, delta, view.board.len) else if (self.focus == 1) self.moveCursor(1, delta, view.active.len) else self.moveCursor(2, delta, (try q.contractHistory(al, g)).len);
             },
             .ledger => {
                 if (self.focus == 0) {
@@ -2241,6 +2262,7 @@ pub const App = struct {
                 else => {},
             },
             .contracts => {
+                if (self.focus == 2) return; // history is read-only: the log pane follows the cursor
                 const view = try q.contracts(al, g);
                 if (view.active.len == 0) return;
                 const sel = view.active[@min(self.cur(1).*, view.active.len - 1)];

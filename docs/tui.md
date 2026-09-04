@@ -105,7 +105,7 @@ entity ids. Results land in the Desk log pane.
 | F1 | Desk | Emblem · Checklist · Inbox · Companies · Log · HQs | Enter on inbox → `resolve_decision`; Enter on checklist → jump to fixing screen |
 | F2 | Map | Star map · World | `o` offers here · `f` → `found_hq` · `r` rings toggle |
 | F3 | Forces | TO&E tree · Hull/Person detail · Unassigned pool | `a` → `assign`, `u` → `unassign`, `A` → `auto_assign`, `t` → `train`, `x` → `transfer_unit`/`transfer_person`, `m` medbay modal (`triage`, `leave`) |
-| F4 | Contracts | Board · Active | Enter → `accept_contract` (company picker), `c` → `complete_contract`, `R` → `recall_company`, `v` AARs |
+| F4 | Contracts | Board · Active · History (closed contracts: outcome, world, days served, VP, pay received) · Contract log | Enter → `accept_contract` (company picker), `c` → `complete_contract`, `R` → `recall_company`; Tab to History, the log follows the cursor |
 | F5 | Ledger | Treasuries · P&L · Ledger | `t` → `transfer`, `p` → `set_policy`, `L` → `take_loan`, `[ ]` period |
 | F6 | Supply | Sites · Demand · Order form · Shop | `o` → `order_part`, `s` → `ship_stock`, `b` → `buy_listing`, Enter on demand → order shortfall, `P` → `set_supply_policy`, `K` → `set_stock_policy` (keep an HQ line stocked), `$` on an HQ row → `sell_stock` |
 | F7 | HQ | Facilities/projects · Bays · Back office · Hiring hall | `u` → `upgrade_facility`, `T` → `upgrade_tier`, `f` → `fabricate`, `P` → `post_person`, `h` → `hire_candidate`, `[ ]` switch HQ |
