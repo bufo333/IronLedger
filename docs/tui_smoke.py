@@ -71,6 +71,22 @@ send("2")                      # map
 p = plain()
 assert "STAR MAP" in p and "REACH" in p, p[-3000:]
 send("l"); send("j"); send("h"); send("k")
+send("9")                      # people
+p = plain()
+assert "PERSONNEL" in p and "RECORD" in p and "OPEN SEATS" in p, p[-3000:]
+send("/"); send("/")
+assert "filter techs" in plain(), plain()[-2000:]
+send("a", 0.8)                 # seat picker
+assert "ASSIGN" in plain(), plain()[-2000:]
+send("\x1b")
+send("D", 0.8)                 # fire confirm
+assert "FIRE?" in plain(), plain()[-2000:]
+send("\x1b")
+send("1"); send("e", 1.5)      # emblem picker on the Desk
+p = plain()
+assert "EMBLEM ·" in p and "preset   Wolf's Head" in p, p[-2000:]
+send("j"); send("\r", 1.0)     # pick the second preset
+assert "emblem set to preset" in plain(), plain()[-2000:]
 send("8")                      # lab
 p = plain()
 assert "MOUNTS" in p and "RULES: legal fit" in p, p[-3000:]

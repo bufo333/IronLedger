@@ -99,10 +99,10 @@ pub fn status(alloc: Alloc, gs: *GameState) !Status {
     while (uit.next()) |e| if (e.value_ptr.status != .destroyed) {
         hulls += 1;
     };
-    var people: u32 = 0;
+    var headcount: u32 = 0;
     var pit = gs.people.iterator();
     while (pit.next()) |e| if (e.value_ptr.status == .active or e.value_ptr.status == .wounded) {
-        people += 1;
+        headcount += 1;
     };
     const warnings = try checklist.turnWarnings(gs, alloc);
     var blocking: usize = 0;
@@ -117,7 +117,7 @@ pub fn status(alloc: Alloc, gs: *GameState) !Status {
         .companies = companies,
         .hqs = @intCast(gs.hqs.count()),
         .hulls = hulls,
-        .people = people,
+        .people = headcount,
         .inbox = gs.event_queue.unresolvedCount(),
         .checklist = warnings.len,
         .blocking = blocking,
@@ -852,6 +852,174 @@ pub fn hall(alloc: Alloc, gs: *GameState, hq_id: types.HqId, filter: HallFilter)
     };
 }
 
+// --------------------------------------------------------------- personnel
+
+pub const PersonRow = struct {
+    id: types.PersonId,
+    text: []const u8,
+};
+
+pub const People = struct {
+    header: []const u8,
+    rows: []PersonRow,
+    total: usize,
+};
+
+fn skillsText(alloc: Alloc, p: *const person_mod.Person) ![]const u8 {
+    const primary = p.role.primarySkill();
+    const second: ?types.SkillType = switch (p.role) {
+        .mekwarrior => .piloting_mek,
+        .vehicle_crew => .driving_vee,
+        .aero_pilot => .piloting_aero,
+        else => null,
+    };
+    if (second) |s| return std.fmt.allocPrint(alloc, "{d}/{d}", .{ p.skill(primary) orelse 7, p.skill(s) orelse 8 });
+    return std.fmt.allocPrint(alloc, "{d}", .{p.skill(primary) orelse 7});
+}
+
+/// What a person is doing right now, in one short phrase.
+pub fn assignmentText(alloc: Alloc, gs: *GameState, p: *const person_mod.Person) ![]const u8 {
+    const seat = gs.pilotSeat(p.id);
+    if (seat != .none) {
+        const u = gs.unit(seat).?;
+        return std.fmt.allocPrint(alloc, "pilot #{d} {s}", .{ @intFromEnum(seat), u.chassis_key });
+    }
+    var techs: std.ArrayListUnmanaged(u8) = .empty;
+    var uit = gs.units.iterator();
+    while (uit.next()) |e| if (e.value_ptr.tech == p.id) {
+        if (techs.items.len > 0) try techs.appendSlice(alloc, ",");
+        try techs.appendSlice(alloc, try std.fmt.allocPrint(alloc, "#{d}", .{@intFromEnum(e.value_ptr.id)}));
+    };
+    if (techs.items.len > 0) return std.fmt.allocPrint(alloc, "tech {s}", .{techs.items});
+    if (p.posted_hq != .none) return std.fmt.allocPrint(alloc, "HQ · {s}", .{clip(hqName(gs, p.posted_hq), 16)});
+    if (p.assigned_force != .none) return std.fmt.allocPrint(alloc, "{s} (no seat)", .{clip(forceName(gs, p.assigned_force), 12)});
+    return "{a}unassigned{/}";
+}
+
+pub fn statusText(alloc: Alloc, gs: *GameState, p: *const person_mod.Person) ![]const u8 {
+    const day = gs.clock.day_index;
+    if (p.status == .wounded) return std.fmt.allocPrint(alloc, "{{c}}wounded{{/}} heals d{d}", .{p.wound_heal_day orelse day});
+    if (p.status != .active) return try std.fmt.allocPrint(alloc, "{{c}}{s}{{/}}", .{@tagName(p.status)});
+    if (p.leave_until_day) |until| if (day < until) return std.fmt.allocPrint(alloc, "{{a}}on leave{{/}} until d{d}", .{until});
+    if (p.training) |t| return std.fmt.allocPrint(alloc, "{{a}}training{{/}} {s} d{d}", .{ @tagName(t.skill), t.done_day });
+    return "{g}active{/}";
+}
+
+fn locationText(gs: *GameState, p: *const person_mod.Person) []const u8 {
+    if (p.posted_hq != .none) return planetName(if (gs.hqs.getPtr(p.posted_hq)) |h| h.planet_key else null);
+    const co = gs.companyOf(p.assigned_force);
+    if (gs.forces.getPtr(co)) |f| {
+        if (f.location_planet) |loc| return planetName(loc);
+        if (gs.hqs.getPtr(f.supplying_hq)) |h| return planetName(h.planet_key);
+    }
+    return "—";
+}
+
+/// Everyone on the payroll (active, wounded, missing), filtered by role group.
+pub fn people(alloc: Alloc, gs: *GameState, filter: HallFilter) !People {
+    var rows: std.ArrayListUnmanaged(PersonRow) = .empty;
+    var total: usize = 0;
+    var it = gs.people.iterator();
+    while (it.next()) |e| {
+        const p = e.value_ptr;
+        if (p.status == .kia or p.status == .retired or p.status == .resigned) continue;
+        total += 1;
+        if (!filter.matches(p.role)) continue;
+        const name = try std.fmt.allocPrint(alloc, "{s} {s}", .{ p.first_name, p.last_name });
+        try rows.append(alloc, .{ .id = p.id, .text = try std.fmt.allocPrint(alloc, "{d: <4} {s: <20} {s: <15} {s: <7} {s: <5} {d: >3} {s} {s} {s: <11} {d: >3} {d: >3} {s: >7}", .{
+            @intFromEnum(p.id),                          clip(name, 20),
+            @tagName(p.role),                            @tagName(p.experience()),
+            try skillsText(alloc, p),                    p.xp,
+            try padMk(alloc, "", try stripMarkup(alloc, try statusText(alloc, gs, p)), 18), try padMk(alloc, "", try stripMarkup(alloc, try assignmentText(alloc, gs, p)), 22),
+            clip(locationText(gs, p), 11),               p.fatigue,
+            p.morale,                                    try money(alloc, p.monthlySalary()),
+        }) });
+    }
+    return .{
+        .header = "id   name                 role            exp     skill  XP status             assignment             where       fat mor     pay",
+        .rows = try rows.toOwnedSlice(alloc),
+        .total = total,
+    };
+}
+
+/// Remove `{x}` markup tokens (for fixed-width columns).
+pub fn stripMarkup(alloc: Alloc, s: []const u8) ![]const u8 {
+    var out: std.ArrayListUnmanaged(u8) = .empty;
+    var i: usize = 0;
+    while (i < s.len) : (i += 1) {
+        if (s[i] == '{' and i + 2 < s.len and s[i + 2] == '}' and std.mem.indexOfScalar(u8, "agcsdtp/", s[i + 1]) != null) {
+            i += 2;
+            continue;
+        }
+        try out.append(alloc, s[i]);
+    }
+    return out.toOwnedSlice(alloc);
+}
+
+/// One person's full record.
+pub fn personRecord(alloc: Alloc, gs: *GameState, id: types.PersonId) ![]const []const u8 {
+    var out: std.ArrayListUnmanaged([]const u8) = .empty;
+    const p = gs.person(id) orelse return out.toOwnedSlice(alloc);
+    const day = gs.clock.day_index;
+    try out.append(alloc, try std.fmt.allocPrint(alloc, "{{a}}{s} {s}{{/}}{s}  ·  {s} · {s}", .{ p.first_name, p.last_name, if (p.callsign) |c| try std.fmt.allocPrint(alloc, " \"{s}\"", .{c}) else "", @tagName(p.role), @tagName(p.experience()) }));
+    try out.append(alloc, try std.fmt.allocPrint(alloc, "status      {s}", .{try statusText(alloc, gs, p)}));
+    try out.append(alloc, try std.fmt.allocPrint(alloc, "assignment  {s}", .{try assignmentText(alloc, gs, p)}));
+    try out.append(alloc, try std.fmt.allocPrint(alloc, "unit        {s} · at {s}", .{ if (p.assigned_force != .none) forceName(gs, p.assigned_force) else "—", locationText(gs, p) }));
+    try out.append(alloc, "");
+    try out.append(alloc, try std.fmt.allocPrint(alloc, "XP {{a}}{d}{{/}} · fatigue {d} · morale {d} · pay {s}/mo · recruited day {d}", .{ p.xp, p.fatigue, p.morale, try money(alloc, p.monthlySalary()), p.recruited_day }));
+    try out.append(alloc, "");
+    try out.append(alloc, "skill               level   next   XP cost");
+    inline for (@typeInfo(types.SkillType).@"enum".fields) |f| {
+        const st: types.SkillType = @enumFromInt(f.value);
+        if (p.skill(st)) |lvl| {
+            const primary = st == p.role.primarySkill();
+            if (lvl == 0) {
+                try out.append(alloc, try std.fmt.allocPrint(alloc, "{s}{s: <19} {d: >5}   mastered{{/}}", .{ if (primary) "{a}" else "", f.name, lvl }));
+            } else {
+                const cost = person_mod.improveCost(lvl - 1);
+                try out.append(alloc, try std.fmt.allocPrint(alloc, "{s}{s: <19} {d: >5} {d: >6} {d: >8}{s}{{/}}", .{ if (primary) "{a}" else "", f.name, lvl, lvl - 1, cost, if (p.xp >= cost) "  {g}affordable{/}" else "" }));
+            }
+        }
+    }
+    try out.append(alloc, "");
+    if (p.training) |t| {
+        try out.append(alloc, try std.fmt.allocPrint(alloc, "training    {s} → done day {d} ({d} days left)", .{ @tagName(t.skill), t.done_day, if (t.done_day > day) t.done_day - day else 0 }));
+    } else {
+        try out.append(alloc, "training    none");
+        try out.append(alloc, "            {d}[t] starts a program on the primary skill (training ground at home){/}");
+    }
+    if (p.leave_until_day) |until| if (day < until) try out.append(alloc, try std.fmt.allocPrint(alloc, "leave       until day {d}", .{until}));
+    if (p.medbay_priority > 0) try out.append(alloc, try std.fmt.allocPrint(alloc, "medbay      priority {d}", .{p.medbay_priority}));
+    try out.append(alloc, try std.fmt.allocPrint(alloc, "available   {s}", .{if (p.isAvailable(day)) "{g}yes{/}" else "{c}no{/}"}));
+    return out.toOwnedSlice(alloc);
+}
+
+pub const Seat = struct {
+    unit: types.UnitId,
+    slot: state_mod.Slot,
+    text: []const u8,
+};
+
+/// Open pilot/tech seats this person could take, across the outfit.
+pub fn openSeats(alloc: Alloc, gs: *GameState, id: types.PersonId) ![]Seat {
+    var out: std.ArrayListUnmanaged(Seat) = .empty;
+    const p = gs.person(id) orelse return out.toOwnedSlice(alloc);
+    var it = gs.units.iterator();
+    while (it.next()) |e| {
+        const u = e.value_ptr;
+        if (u.status == .destroyed or u.status == .mothballed or u.force == .none) continue;
+        const ch = chassis_mod.find(u.chassis_key);
+        const label = try std.fmt.allocPrint(alloc, "#{d: <3} {s: <8} {s: <16} {s}", .{ @intFromEnum(u.id), u.chassis_key, if (ch) |c| c.name else "?", clip(forceName(gs, gs.companyOf(u.force)), 20) });
+        if (unit_mod.crewRoleFor(u.kind) == p.role and gs.person(u.pilot) == null) {
+            try out.append(alloc, .{ .unit = u.id, .slot = .pilot, .text = try std.fmt.allocPrint(alloc, "{s}  {{a}}pilot seat{{/}}", .{label}) });
+        }
+        if (unit_mod.techRoleFor(u.kind) == p.role and gs.person(u.tech) == null) {
+            try out.append(alloc, .{ .unit = u.id, .slot = .tech, .text = try std.fmt.allocPrint(alloc, "{s}  {{a}}tech slot{{/}}", .{label}) });
+        }
+    }
+    return out.toOwnedSlice(alloc);
+}
+
 // --------------------------------------------------------------------- map
 
 pub const Band = enum { ring, beachhead, dark };
@@ -1095,6 +1263,16 @@ test "hall filter groups roles and map classifies worlds" {
     const l = try lab(al, &gs, meks[0]);
     try std.testing.expect(l.mounts.len > 0);
     try std.testing.expect(l.legal);
+
+    // Personnel: everyone listed, filter narrows, record and seats build.
+    const everyone = try people(al, &gs, .all);
+    try std.testing.expect(everyone.rows.len > 20);
+    const techs = try people(al, &gs, .techs);
+    try std.testing.expect(techs.rows.len > 0 and techs.rows.len < everyone.rows.len);
+    const rec = try personRecord(al, &gs, everyone.rows[0].id);
+    try std.testing.expect(rec.len > 6);
+    _ = try openSeats(al, &gs, everyone.rows[0].id);
+    try std.testing.expectEqualStrings("active", try stripMarkup(al, "{g}active{/}"));
 }
 
 test "money formats with separators" {

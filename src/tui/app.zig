@@ -24,8 +24,8 @@ const Command = game.commands.Command;
 const GameState = game.state.GameState;
 const Treasury = game.state.Treasury;
 
-const Tab = enum(u8) { desk, map, forces, contracts, ledger, supply, hq, lab };
-const tab_names = [_][]const u8{ "F1 Desk", "F2 Map", "F3 Forces", "F4 Contracts", "F5 Ledger", "F6 Supply", "F7 HQ", "F8 Lab" };
+const Tab = enum(u8) { desk, map, forces, contracts, ledger, supply, hq, lab, people };
+const tab_names = [_][]const u8{ "F1 Desk", "F2 Map", "F3 Forces", "F4 Contracts", "F5 Ledger", "F6 Supply", "F7 HQ", "F8 Lab", "F9 People" };
 
 const Mode = enum { welcome, wizard, game };
 const WizardStep = enum(u8) { commander, outfit, company, review };
@@ -39,6 +39,12 @@ const Modal = union(enum) {
     decision: usize,
     input: InputKind,
     help,
+    /// Confirm firing a person.
+    fire: types.PersonId,
+    /// Pick an open pilot/tech seat for a person.
+    seat: types.PersonId,
+    /// Change the outfit's emblem: presets, then pictures from the logo dirs.
+    emblem,
 };
 
 const Emblem = struct { name: []const u8, art: [3][]const u8 };
@@ -137,8 +143,10 @@ pub const App = struct {
     ledger_sel: usize = 0,
     hq_sel: usize = 0,
     hall_filter: q.HallFilter = .all,
+    people_filter: q.HallFilter = .all,
     map_cursor: usize = 0,
     lab_sel: usize = 0,
+    modal_cursor: usize = 0,
 
     // ------------------------------------------------------------------ lifecycle
 
@@ -593,13 +601,64 @@ pub const App = struct {
             .hq => try self.drawHq(),
             .map => try self.drawMap(),
             .lab => try self.drawLab(),
+            .people => try self.drawPeople(),
         }
         self.footer(switch (self.tab) {
+            .desk => "? help · F1-F9 screens · Tab pane · Enter act · e emblem · : command · n end turn · q welcome",
+            .people => "/ filter · t train · a assign seat · P post to HQ · x transfer · L leave · D fire · Enter record",
             .map => "h j k l move between worlds · f found HQ here · o offers here · n end turn · q welcome",
             .lab => "[ ] switch hull · j/k mount · - remove · + install… · c clear plan · Enter commit · q welcome",
             .hq => "[ ] switch HQ · Tab hall · f/F hall filter · Enter hire · u upgrade · S autostaff · b fabricate",
             else => "? help · F1-F8 screens · Tab pane · j/k cursor · Enter act · : command · n end turn · q welcome",
         });
+    }
+
+    // ---- people ----
+
+    fn drawPeople(self: *App) !void {
+        const al = self.a();
+        const g = &self.gs.?;
+        const b = self.body();
+        const view = try q.people(al, g, self.people_filter);
+        var rows: std.ArrayListUnmanaged([]const u8) = .empty;
+        try rows.append(al, view.header);
+        for (view.rows) |r| try rows.append(al, r.text);
+        if (view.rows.len == 0) try rows.append(al, "{d}nobody matches this filter{/}");
+        const lw: u16 = if (b.w > 150) @max(b.w * 62 / 100, @min(b.w - 60, 128)) else b.w;
+        const title = try std.fmt.allocPrint(al, "PERSONNEL · filter {{a}}{s}{{/}} · {d} of {d}", .{ @tagName(self.people_filter), view.rows.len, view.total });
+        const inner = self.screen.pane(.{ .x = b.x, .y = b.y, .w = lw, .h = b.h }, .{ .title = title, .focused = true, .right_title = "[/] next filter  [?] previous" });
+        const c = self.cur(0);
+        if (view.rows.len > 0 and c.* >= view.rows.len) c.* = view.rows.len - 1;
+        self.screen.lines(inner, rows.items, firstRow(c.* + 1, inner.h), if (view.rows.len > 0) c.* + 1 else null);
+        if (lw < b.w and view.rows.len > 0) {
+            const id = view.rows[c.*].id;
+            const rec = try q.personRecord(al, g, id);
+            const rec_h: u16 = b.h * 3 / 5;
+            self.listPane(.{ .x = b.x + lw, .y = b.y, .w = b.w - lw, .h = rec_h }, "RECORD", rec, 1, false, false);
+            const seats = try q.openSeats(al, g, id);
+            var st: std.ArrayListUnmanaged([]const u8) = .empty;
+            for (seats) |s| try st.append(al, s.text);
+            if (seats.len == 0) try st.append(al, "{d}no open seat for this role right now{/}");
+            try st.append(al, "");
+            try st.append(al, "{d}[a] assign to a seat  [t] train  [P] post to HQ  [x] transfer  [L] leave  [D] fire{/}");
+            self.listPane(.{ .x = b.x + lw, .y = b.y + rec_h, .w = b.w - lw, .h = b.h - rec_h }, "OPEN SEATS", st.items, 2, false, false);
+        }
+    }
+
+    fn selectedPerson(self: *App) !?types.PersonId {
+        const view = try q.people(self.a(), &self.gs.?, self.people_filter);
+        if (view.rows.len == 0) return null;
+        return view.rows[@min(self.cur(0).*, view.rows.len - 1)].id;
+    }
+
+    /// Change the emblem on every company (the crest is outfit-wide).
+    fn applyEmblem(self: *App, image: []const u8) !void {
+        const g = &self.gs.?;
+        var ids: std.ArrayListUnmanaged(types.ForceId) = .empty;
+        var fit = g.forces.iterator();
+        while (fit.next()) |e| if (e.value_ptr.echelon == .company) try ids.append(self.a(), e.value_ptr.id);
+        for (ids.items) |id| try self.exec(.{ .set_emblem = .{ .force = id, .image = image } });
+        self.refreshEmblem();
     }
 
     // ---- map ----
@@ -1005,13 +1064,15 @@ pub const App = struct {
                     "  {a}contracts{/}   Enter accepts the offer under the cursor · c completes · R recalls",
                     "  {a}ledger{/}      j/k picks the treasury · t transfer · p policy · L loan",
                     "  {a}forces{/}      a assign · u unassign · A auto-assign the company · t train",
-                    "  {a}hq{/}          [ ] switch HQ · u upgrade · S autostaff · h hire candidate",
+                    "  {a}hq{/}          [ ] switch HQ · u upgrade · S autostaff · h hire · f/F hall filter",
+                    "  {a}people{/}      / filter · t train · a assign seat · P post · x transfer · L leave · D fire",
+                    "  {a}emblem{/}      e on the Desk (or :emblem) changes the crest: presets or a PNG from ./, logos/, docs/logos/",
                     "  {a}command{/}     : opens the command line — every CLI verb works: day, transfer, order, accept, …",
                     "  {a}leave{/}       q returns to the welcome screen (save / discard / stay)",
                     "",
                     "  {d}[Esc] close{/}",
                 };
-                const r = self.modalRect(104, 15);
+                const r = self.modalRect(112, 17);
                 const inner = self.screen.pane(r, .{ .title = "HELP", .double = true });
                 self.screen.lines(inner, &rows, 0, null);
             },
@@ -1067,6 +1128,40 @@ pub const App = struct {
                 const r = self.modalRect(90, @intCast(@min(rows.items.len + 2, 30)));
                 const inner = self.screen.pane(r, .{ .title = "DECISION", .double = true });
                 self.screen.lines(inner, rows.items, 0, null);
+            },
+            .fire => |id| {
+                const g = &self.gs.?;
+                const name = try q.personName(al, g, id);
+                const rows = [_][]const u8{
+                    "",
+                    try std.fmt.allocPrint(al, "  Fire {{c}}{s}{{/}}? They leave the outfit today; their seat opens.", .{name}),
+                    "",
+                    "  {s} [y] fire {/}   {d}[Esc] keep{/}",
+                };
+                const r = self.modalRect(70, 7);
+                const inner = self.screen.pane(r, .{ .title = "FIRE?", .double = true });
+                self.screen.lines(inner, &rows, 0, null);
+            },
+            .seat => |id| {
+                const g = &self.gs.?;
+                const seats = try q.openSeats(al, g, id);
+                var rows: std.ArrayListUnmanaged([]const u8) = .empty;
+                for (seats) |s| try rows.append(al, s.text);
+                if (seats.len == 0) try rows.append(al, "{d}no open seat for this role{/}");
+                if (self.modal_cursor >= seats.len and seats.len > 0) self.modal_cursor = seats.len - 1;
+                const r = self.modalRect(80, @intCast(@min(seats.len + 4, 30)));
+                const inner = self.screen.pane(r, .{ .title = try std.fmt.allocPrint(al, "ASSIGN {s} · [Enter] take seat · [Esc] cancel", .{try q.personName(al, g, id)}), .double = true });
+                self.screen.lines(inner, rows.items, firstRow(self.modal_cursor, inner.h), if (seats.len > 0) self.modal_cursor else null);
+            },
+            .emblem => {
+                var rows: std.ArrayListUnmanaged([]const u8) = .empty;
+                for (emblems) |e| try rows.append(al, try std.fmt.allocPrint(al, "preset   {s}", .{e.name}));
+                for (self.logos) |l| try rows.append(al, try std.fmt.allocPrint(al, "picture  {s}", .{l}));
+                const n = rows.items.len;
+                if (self.modal_cursor >= n) self.modal_cursor = n - 1;
+                const r = self.modalRect(80, @intCast(@min(n + 4, 30)));
+                const inner = self.screen.pane(r, .{ .title = "EMBLEM · [Enter] use · [Esc] cancel", .double = true, .right_title = "pictures from ., logos/, docs/logos/" });
+                self.screen.lines(inner, rows.items, firstRow(self.modal_cursor, inner.h), self.modal_cursor);
             },
             .input => |kind| {
                 if (kind == .command) return; // drawn in the footer
@@ -1288,17 +1383,21 @@ pub const App = struct {
         }
     }
 
+    fn loadLogoList(self: *App) !void {
+        _ = self.lobby.reset(.retain_capacity);
+        var all: std.ArrayListUnmanaged([]const u8) = .empty;
+        const la = self.lobby.allocator();
+        for (logo_dirs) |d| {
+            const names = try emblem_mod.listPngs(self.io, la, d);
+            for (names) |n| try all.append(la, try std.fmt.allocPrint(la, "{s}/{s}", .{ d, n }));
+        }
+        self.logos = try all.toOwnedSlice(la);
+    }
+
     fn setEmblemSource(self: *App, src: u8) !void {
         self.w_src = src;
         if (src == 1 and self.logos.len == 0) {
-            _ = self.lobby.reset(.retain_capacity);
-            var all: std.ArrayListUnmanaged([]const u8) = .empty;
-            const la = self.lobby.allocator();
-            for (logo_dirs) |d| {
-                const names = try emblem_mod.listPngs(self.io, la, d);
-                for (names) |n| try all.append(la, try std.fmt.allocPrint(la, "{s}/{s}", .{ d, n }));
-            }
-            self.logos = try all.toOwnedSlice(la);
+            try self.loadLogoList();
             self.w_logo = 0;
             try self.loadPreview();
         }
@@ -1382,7 +1481,7 @@ pub const App = struct {
 
     fn handleGameKey(self: *App, key: Key) !void {
         switch (key) {
-            .f => |n| if (n >= 1 and n <= 8) self.switchTab(@enumFromInt(n - 1)),
+            .f => |n| if (n >= 1 and n <= 9) self.switchTab(@enumFromInt(n - 1)),
             .tab => self.focus = (self.focus + 1) % self.paneCount(),
             .backtab => self.focus = (self.focus + self.paneCount() - 1) % self.paneCount(),
             .down => try self.screenMove(1),
@@ -1394,7 +1493,7 @@ pub const App = struct {
             .enter => try self.screenEnter(),
             .escape => self.msg.len = 0,
             .char => |ch| switch (ch) {
-                '1'...'8' => self.switchTab(@enumFromInt(ch - '1')),
+                '1'...'9' => self.switchTab(@enumFromInt(ch - '1')),
                 'j' => try self.screenMove(1),
                 'k' => try self.screenMove(-1),
                 ':' => {
@@ -1483,6 +1582,10 @@ pub const App = struct {
                 const view = try q.lab(al, g, uid);
                 self.moveCursor(0, delta, view.mounts.len);
             },
+            .people => {
+                const view = try q.people(al, g, self.people_filter);
+                self.moveCursor(0, delta, view.rows.len);
+            },
         }
     }
 
@@ -1570,6 +1673,11 @@ pub const App = struct {
                 try self.exec(.{ .refit_commit = uid });
                 self.say(.good, "refit committed to the bay queue", .{});
             },
+            .people => {
+                const id = (try self.selectedPerson()) orelse return;
+                self.modal_cursor = 0;
+                self.modal = .{ .seat = id };
+            },
             else => {},
         }
     }
@@ -1578,6 +1686,39 @@ pub const App = struct {
         const al = self.a();
         const g = &self.gs.?;
         switch (self.tab) {
+            .desk => switch (ch) {
+                'e' => {
+                    self.logos = &.{};
+                    try self.loadLogoList();
+                    self.modal_cursor = 0;
+                    self.modal = .emblem;
+                },
+                else => {},
+            },
+            .people => {
+                const id = (try self.selectedPerson()) orelse return;
+                var buf: [96]u8 = undefined;
+                switch (ch) {
+                    '/' => {
+                        self.people_filter = self.people_filter.next();
+                        self.cur(0).* = 0;
+                    },
+                    't' => {
+                        const p = g.person(id).?;
+                        self.openCommand(std.fmt.bufPrint(&buf, "train {d} {s}", .{ @intFromEnum(id), @tagName(p.role.primarySkill()) }) catch "train ");
+                    },
+                    'a' => {
+                        self.modal_cursor = 0;
+                        self.modal = .{ .seat = id };
+                    },
+                    'P' => self.openCommand(std.fmt.bufPrint(&buf, "post {d} hq:", .{@intFromEnum(id)}) catch "post "),
+                    'x' => self.openCommand(std.fmt.bufPrint(&buf, "xfer person {d} co:", .{@intFromEnum(id)}) catch "xfer person "),
+                    'L' => self.openCommand(std.fmt.bufPrint(&buf, "leave {d} 7", .{@intFromEnum(id)}) catch "leave "),
+                    'T' => self.openCommand(std.fmt.bufPrint(&buf, "triage {d} 1", .{@intFromEnum(id)}) catch "triage "),
+                    'D' => self.modal = .{ .fire = id },
+                    else => {},
+                }
+            },
             .contracts => {
                 const view = try q.contracts(al, g);
                 if (view.active.len == 0) return;
@@ -1705,7 +1846,6 @@ pub const App = struct {
                     else => {},
                 }
             },
-            else => {},
         }
     }
 
@@ -1789,6 +1929,67 @@ pub const App = struct {
                         self.modal = .none;
                         self.leaveGame();
                     },
+                    else => {},
+                },
+                else => {},
+            },
+            .fire => |id| switch (key) {
+                .escape => self.modal = .none,
+                .char => |ch| if (ch == 'y') {
+                    self.modal = .none;
+                    const name = try q.personName(self.a(), &self.gs.?, id);
+                    try self.exec(.{ .fire = id });
+                    self.say(.amber, "{s} has left the outfit", .{name});
+                },
+                else => {},
+            },
+            .seat => |id| switch (key) {
+                .escape => self.modal = .none,
+                .down => self.modal_cursor +|= 1,
+                .up => self.modal_cursor -|= 1,
+                .enter => {
+                    const seats = try q.openSeats(self.a(), &self.gs.?, id);
+                    self.modal = .none;
+                    if (seats.len == 0) return;
+                    const s = seats[@min(self.modal_cursor, seats.len - 1)];
+                    try self.exec(.{ .assign = .{ .unit = s.unit, .slot = s.slot, .person = id } });
+                    self.say(.good, "assigned as {s} of #{d}", .{ @tagName(s.slot), @intFromEnum(s.unit) });
+                },
+                .char => |ch| switch (ch) {
+                    'j' => self.modal_cursor +|= 1,
+                    'k' => self.modal_cursor -|= 1,
+                    else => {},
+                },
+                else => {},
+            },
+            .emblem => switch (key) {
+                .escape => self.modal = .none,
+                .down => self.modal_cursor +|= 1,
+                .up => self.modal_cursor -|= 1,
+                .enter => {
+                    self.modal = .none;
+                    const i = self.modal_cursor;
+                    if (i < emblems.len) {
+                        try self.applyEmblem(emblems[i].name);
+                        self.say(.good, "emblem set to preset {s}", .{emblems[i].name});
+                    } else if (i - emblems.len < self.logos.len) {
+                        const path = self.logos[i - emblems.len];
+                        const bytes = emblem_mod.readFile(self.io, self.gpa, path) catch |err| {
+                            self.say(.crit, "could not read {s}: {s}", .{ path, @errorName(err) });
+                            return;
+                        };
+                        defer self.gpa.free(bytes);
+                        if (!png.isPng(bytes)) {
+                            self.say(.crit, "{s} is not a PNG", .{path});
+                            return;
+                        }
+                        try self.applyEmblem(bytes);
+                        self.say(.good, "emblem set from {s}{s}", .{ path, if (self.emblem == null) " (could not decode it — 8-bit non-interlaced PNG only)" else "" });
+                    }
+                },
+                .char => |ch| switch (ch) {
+                    'j' => self.modal_cursor +|= 1,
+                    'k' => self.modal_cursor -|= 1,
                     else => {},
                 },
                 else => {},
@@ -1910,6 +2111,12 @@ pub const App = struct {
         }
         if (eq(u8, verb, "help")) {
             self.modal = .help;
+            return;
+        }
+        if (eq(u8, verb, "emblem")) {
+            try self.loadLogoList();
+            self.modal_cursor = 0;
+            self.modal = .emblem;
             return;
         }
         const cmd = parseCommand(verb, &tokens) catch |err| {
