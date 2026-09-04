@@ -1854,6 +1854,176 @@ pub fn stripMarkup(alloc: Alloc, s: []const u8) ![]const u8 {
 }
 
 /// One person's full record.
+/// Plain text for the CLI: drop the `{a}…{/}` markup the TUI colours.
+pub fn stripMarks(alloc: Alloc, text: []const u8) ![]const u8 {
+    var out: std.ArrayListUnmanaged(u8) = .empty;
+    var i: usize = 0;
+    while (i < text.len) {
+        if (text[i] == '{' and i + 2 < text.len and text[i + 2] == '}' and (text[i + 1] == 'a' or text[i + 1] == 'g' or text[i + 1] == 'c' or text[i + 1] == 'd' or text[i + 1] == '/')) {
+            i += 3;
+            continue;
+        }
+        try out.append(alloc, text[i]);
+        i += 1;
+    }
+    return out.toOwnedSlice(alloc);
+}
+
+// --------------------------------------------------------------- readiness
+
+pub const ReadinessRow = struct {
+    company: types.ForceId,
+    deployed: bool,
+    heads: u32,
+    fatigue: u32,
+    morale: u32,
+    wounded: u32,
+    permanent: u32,
+    training: u32,
+    banked_xp: u32,
+    hulls: u32,
+    depot: u32,
+    avg_quality: types.Quality,
+    contracts_since_rotation: u16,
+    days_since_rotation: ?u32,
+    text: []const u8,
+};
+
+pub const readiness_header = "company             posture     heads  fatigue  morale  wounded  perm  training  banked XP  hulls  depot  quality  rotation";
+
+/// The per-company readiness report (ARCH §9.7, Stage 12.16): the P&L's
+/// companion — profit now vs. force quality later. Banked XP is what the
+/// crews could spend at a training ground; depot is hulls waiting on a bay.
+pub fn readiness(alloc: Alloc, gs: *GameState) ![]ReadinessRow {
+    var out: std.ArrayListUnmanaged(ReadinessRow) = .empty;
+    const day = gs.clock.day_index;
+    var fit = gs.forces.iterator();
+    while (fit.next()) |fe| {
+        const co = fe.value_ptr;
+        if (co.echelon != .company) continue;
+        var row: ReadinessRow = .{
+            .company = co.id,
+            .deployed = gs.deploymentContract(co.id) != null,
+            .heads = 0,
+            .fatigue = 0,
+            .morale = 0,
+            .wounded = 0,
+            .permanent = 0,
+            .training = 0,
+            .banked_xp = 0,
+            .hulls = 0,
+            .depot = 0,
+            .avg_quality = .c,
+            .contracts_since_rotation = co.contracts_since_rotation,
+            .days_since_rotation = if (co.last_rotation_day) |d| day -| d else null,
+            .text = "",
+        };
+        var fat: u64 = 0;
+        var mor: u64 = 0;
+        var pit = gs.people.iterator();
+        while (pit.next()) |pe| {
+            const p = pe.value_ptr;
+            if (p.status != .active and p.status != .wounded) continue;
+            if (gs.companyOf(p.assigned_force) != co.id) continue;
+            row.heads += 1;
+            fat += p.fatigue;
+            mor += p.morale;
+            if (p.status == .wounded) row.wounded += 1;
+            if (p.permanentPenalty() > 0) row.permanent += 1;
+            if (p.training != null) row.training += 1;
+            if (p.role.isCombat()) row.banked_xp += p.xp;
+        }
+        if (row.heads > 0) {
+            row.fatigue = @intCast(fat / row.heads);
+            row.morale = @intCast(mor / row.heads);
+        }
+        var qsum: u64 = 0;
+        var uit = gs.units.iterator();
+        while (uit.next()) |ue| {
+            const u = ue.value_ptr;
+            if (gs.companyOf(u.force) != co.id or u.status == .mothballed or u.kind.isTransport()) continue;
+            row.hulls += 1;
+            qsum += @intFromEnum(u.quality);
+            if (u.needsDepot()) row.depot += 1;
+        }
+        if (row.hulls > 0) row.avg_quality = @enumFromInt(qsum / row.hulls);
+        const fat_mk: []const u8 = if (row.fatigue >= 60) "{c}" else if (row.fatigue >= 30) "{a}" else "{g}";
+        const mor_mk: []const u8 = if (row.morale < 30) "{c}" else if (row.morale < 50) "{a}" else "{g}";
+        const rot: []const u8 = if (row.days_since_rotation) |d| try std.fmt.allocPrint(alloc, "{d} tours · {d}d", .{ row.contracts_since_rotation, d }) else try std.fmt.allocPrint(alloc, "{d} tours", .{row.contracts_since_rotation});
+        row.text = try std.fmt.allocPrint(alloc, "{s} {s} {d: >5}  {s}{d: >7}{{/}}  {s}{d: >6}{{/}}  {s}{d: >7}{{/}}  {d: >4}  {d: >8}  {d: >9}  {d: >5}  {s}{d: >5}{{/}}  {s: >7}  {s}", .{
+            try padCells(alloc, "{a}", co.name, 19),
+            try padCells(alloc, if (row.deployed) "{a}" else "", if (row.deployed) "deployed" else if (gs.isCompanyHome(co.id)) "at home" else "afield", 11),
+            row.heads,
+            fat_mk,
+            row.fatigue,
+            mor_mk,
+            row.morale,
+            if (row.wounded > 0) "{a}" else "",
+            row.wounded,
+            row.permanent,
+            row.training,
+            row.banked_xp,
+            row.hulls,
+            if (row.depot > 0) "{c}" else "",
+            row.depot,
+            @tagName(row.avg_quality),
+            rot,
+        });
+        try out.append(alloc, row);
+    }
+    return out.toOwnedSlice(alloc);
+}
+
+/// One company's readiness as a pane: the row's numbers spelled out, and
+/// who is hurt, training, or carrying a permanent injury.
+pub fn readinessLines(alloc: Alloc, gs: *GameState, company: types.ForceId) ![]const []const u8 {
+    var out: std.ArrayListUnmanaged([]const u8) = .empty;
+    const rows = try readiness(alloc, gs);
+    var row: ?ReadinessRow = null;
+    for (rows) |r| if (r.company == company) {
+        row = r;
+    };
+    const r = row orelse {
+        try out.append(alloc, "{d}not a company{/}");
+        return out.toOwnedSlice(alloc);
+    };
+    const day = gs.clock.day_index;
+    try out.append(alloc, try std.fmt.allocPrint(alloc, "{d} personnel · fatigue {s}{d}{{/}} · morale {s}{d}{{/}} · {s} · {d} contracts since rotation{s}", .{
+        r.heads,
+        if (r.fatigue >= 60) "{c}" else if (r.fatigue >= 30) "{a}" else "{g}",
+        r.fatigue,
+        if (r.morale < 30) "{c}" else if (r.morale < 50) "{a}" else "{g}",
+        r.morale,
+        if (r.deployed) "{a}deployed{/}" else if (gs.isCompanyHome(company)) "at home" else "afield",
+        r.contracts_since_rotation,
+        if (r.days_since_rotation) |d| try std.fmt.allocPrint(alloc, " · {d} days since", .{d}) else "",
+    }));
+    try out.append(alloc, try std.fmt.allocPrint(alloc, "{d} hulls · avg quality {s} · {s}{d} need depot time{{/}} · {d} XP banked in the cockpits{s}", .{
+        r.hulls, @tagName(r.avg_quality), if (r.depot > 0) "{c}" else "", r.depot, r.banked_xp, if (r.banked_xp > 0 and !r.deployed) " — a training ground turns it into skill" else "",
+    }));
+    try out.append(alloc, "");
+    try out.append(alloc, try std.fmt.allocPrint(alloc, "wounded {d} · permanent injuries {d} · in training {d}", .{ r.wounded, r.permanent, r.training }));
+    var pit = gs.people.iterator();
+    while (pit.next()) |pe| {
+        const p = pe.value_ptr;
+        if (gs.companyOf(p.assigned_force) != company) continue;
+        if (p.status == .wounded) {
+            var where: std.ArrayListUnmanaged(u8) = .empty;
+            for (p.injuries.items) |inj| {
+                if (inj.healed) continue;
+                if (where.items.len > 0) try where.appendSlice(alloc, ", ");
+                try where.appendSlice(alloc, try std.fmt.allocPrint(alloc, "{s} {s}", .{ @import("medical.zig").severityLabel(inj.severity), @tagName(inj.location) }));
+            }
+            try out.append(alloc, try std.fmt.allocPrint(alloc, "  {{a}}{s} {s}{{/}} {s} — {s}{s}", .{ p.first_name, p.last_name, @tagName(p.role), where.items, if (p.wound_heal_day) |h| try std.fmt.allocPrint(alloc, " · back day {d} ({d}d)", .{ h, h -| day }) else if (p.medbay_admitted) " · triage tomorrow" else " · {c}not admitted{/}" }));
+        } else if (p.permanentPenalty() > 0) {
+            try out.append(alloc, try std.fmt.allocPrint(alloc, "  {s} {s} {s} — permanent injury, +{d} to skill rolls", .{ p.first_name, p.last_name, @tagName(p.role), p.permanentPenalty() }));
+        } else if (p.training) |t| {
+            try out.append(alloc, try std.fmt.allocPrint(alloc, "  {s} {s} {s} — training {s}, done day {d}", .{ p.first_name, p.last_name, @tagName(p.role), @tagName(t.skill), t.done_day }));
+        }
+    }
+    return out.toOwnedSlice(alloc);
+}
+
 pub fn personRecord(alloc: Alloc, gs: *GameState, id: types.PersonId) ![]const []const u8 {
     var out: std.ArrayListUnmanaged([]const u8) = .empty;
     const p = gs.person(id) orelse return out.toOwnedSlice(alloc);
@@ -1884,6 +2054,16 @@ pub fn personRecord(alloc: Alloc, gs: *GameState, id: types.PersonId) ![]const [
     } else {
         try out.append(alloc, "training    none");
         try out.append(alloc, "            {d}[t] starts a program on the primary skill (training ground at home){/}");
+    }
+    for (p.injuries.items, 0..) |inj, i| {
+        try out.append(alloc, try std.fmt.allocPrint(alloc, "{s}{s} {s} {s}{s}{s}", .{
+            if (i == 0) "injuries    " else "            ",
+            if (inj.healed) "{d}healed" else if (inj.severity >= 3) "{c}" else "{a}",
+            @import("medical.zig").severityLabel(inj.severity),
+            @tagName(inj.location),
+            if (inj.permanent) " · PERMANENT" else "",
+            if (inj.healed) "{/}" else if (inj.heal_done_day) |h| try std.fmt.allocPrint(alloc, " · closes day {d} ({d}d){{/}}", .{ h, h -| day }) else " · awaiting triage{/}",
+        }));
     }
     if (p.leave_until_day) |until| if (day < until) try out.append(alloc, try std.fmt.allocPrint(alloc, "leave       until day {d}", .{until}));
     if (p.medbay_priority > 0) try out.append(alloc, try std.fmt.allocPrint(alloc, "medbay      priority {d}", .{p.medbay_priority}));
@@ -2507,4 +2687,39 @@ test "desk and ledger queries build on a fresh campaign" {
     try std.testing.expect(rows.len > 10);
     const c = try contracts(a, &gs);
     try std.testing.expect(c.board.len > 0);
+}
+
+test "12.16: readiness counts wounded, permanent injuries, banked XP and depot hulls; marks strip for the CLI" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1216 });
+    defer gs.deinit();
+    _ = try gs.createCommander("T", .LC, .paymaster);
+    const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var first_pilot: types.PersonId = .none;
+    var first_mek: types.UnitId = .none;
+    var uit = gs.units.iterator();
+    while (uit.next()) |e| if (e.value_ptr.kind == .mek and first_mek == .none) {
+        first_mek = e.value_ptr.id;
+        first_pilot = e.value_ptr.pilot;
+    };
+    try @import("medical.zig").inflict(&gs, first_pilot, .combat, 2, "test");
+    try gs.person(first_pilot).?.injuries.append(gs.allocator(), .{ .location = .head, .severity = 3, .incurred_day = 0, .permanent = true, .healed = true });
+    for (gs.unit(first_mek).?.slots.items) |*sl| if (sl.class == .structure) {
+        sl.condition = .damaged;
+        break;
+    };
+    const rows = try readiness(a, &gs);
+    try std.testing.expectEqual(@as(usize, 1), rows.len);
+    const r = rows[0];
+    try std.testing.expectEqual(co, r.company);
+    try std.testing.expectEqual(@as(u32, 1), r.wounded);
+    try std.testing.expectEqual(@as(u32, 1), r.permanent);
+    try std.testing.expectEqual(@as(u32, 1), r.depot);
+    try std.testing.expect(r.hulls >= 12 and r.heads > 12);
+    try std.testing.expect(r.banked_xp > 0 or r.heads > 0);
+    const lines = try readinessLines(a, &gs, co);
+    try std.testing.expect(lines.len >= 5);
+    try std.testing.expectEqualStrings("abc def", try stripMarks(a, "{a}abc{/} {c}def{/}"));
 }

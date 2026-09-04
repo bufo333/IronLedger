@@ -81,6 +81,12 @@ assert "no air wing slot" in plain()[-800:], plain()[-1000:]
 send(":", 0.6); send("newlance co:1 air Sky Lance\r", 1.0)
 assert "no air wing slot" in plain()[-800:], plain()[-1000:]
 send("k")
+send("r", 0.8)                 # readiness pane on the company row
+assert "READINESS" in plain()[-30000:] and "banked" in plain()[-30000:], plain()[-3000:]
+send("r", 0.6)
+send(":"); send("readiness\r", 0.8)
+assert "READINESS · every company" in plain()[-30000:], plain()[-3000:]
+send("\x1b", 0.6)
 send(":"); send("manning co:1\r", 0.8)   # crews table for the existing company
 assert "CREWS" in plain()[-30000:] and "mekwarrior" in plain()[-30000:], plain()[-3000:]
 send("\x1b", 0.6)

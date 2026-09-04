@@ -13,6 +13,7 @@ const contract_mod = @import("../domain/contract.zig");
 const chassis_mod = @import("../domain/chassis.zig");
 const force_mod = @import("../domain/force.zig");
 const part_mod = @import("../domain/part.zig");
+const medical = @import("medical.zig");
 const GameState = @import("state.zig").GameState;
 
 /// Days between engagements: ~2/month with variance. // TUNE
@@ -138,8 +139,10 @@ fn playerSide(gs: *GameState, c: *const contract_mod.Contract) !SideState {
             lance_bv += unit_bv;
             condition_sum += u.conditionPct();
             quality_sum += @intFromEnum(u.quality);
-            gunnery_sum += pilot.skill(.gunnery_mek) orelse 4;
-            piloting_sum += pilot.skill(.piloting_mek) orelse 5;
+            // Old wounds ride along: a permanent head injury is a point of
+            // skill lost for good (Stage 12.16).
+            gunnery_sum += (pilot.skill(.gunnery_mek) orelse 4) + pilot.permanentPenalty();
+            piloting_sum += (pilot.skill(.piloting_mek) orelse 5) + pilot.permanentPenalty();
             try side.engaged.append(gs.allocator(), uid);
             n += 1;
         }
@@ -327,16 +330,19 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
         // chance on hard hits. // TUNE
         if (gs.person(u.pilot)) |p| {
             if (p.status == .active) {
+                // Wound severity follows the hit (Stage 12.16): 8–9 light,
+                // 10–11 serious, 12 crippling (survivable only with MASH).
+                const wound_severity: u8 = if (severity >= 12) 3 else if (severity >= 10) 2 else 1;
                 if (severity == 12 and !player.mods.has_mash_lance) {
                     p.status = .kia;
                     kia += 1;
                 } else if (severity >= 11) {
-                    p.status = .wounded;
+                    try medical.inflict(gs, u.pilot, .combat, wound_severity, "battle");
                     wounded += 1;
                 } else if (severity >= 8) {
                     const need: u8 = if (player.mods.has_mash_lance) 9 else 8;
                     if (gs.rng.roll2d6(.battle) >= need) {
-                        p.status = .wounded;
+                        try medical.inflict(gs, u.pilot, .combat, wound_severity, "battle");
                         wounded += 1;
                     }
                 }
@@ -566,6 +572,11 @@ test "hard hits wound pilots: a season of fighting sends someone to the medbay" 
         hurt += 1;
     };
     try std.testing.expect(hurt > 0);
+    // Every wound is a located injury (Stage 12.16).
+    var injured_it = gs.people.iterator();
+    while (injured_it.next()) |e| if (e.value_ptr.status == .wounded) {
+        try std.testing.expect(e.value_ptr.injuries.items.len > 0);
+    };
 }
 
 test "9B: dry mounts are silenced — ammo is combat power" {

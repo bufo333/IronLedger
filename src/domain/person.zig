@@ -79,13 +79,20 @@ pub const Role = enum {
 
 pub const Status = enum { active, wounded, mia, kia, retired, resigned, pow };
 
+pub const InjuryLocation = enum { head, torso, left_arm, right_arm, left_leg, right_leg, internal };
+
+/// One wound (Stage 12.16, MekHQ advanced medical `Injury`): where, how
+/// bad (1 light … 3 crippling), when, and when a doctor expects it closed.
+/// A permanent injury stays on the record after it heals and costs the
+/// crew a point of skill (`permanentPenalty`).
 pub const Injury = struct {
-    location: enum { head, torso, left_arm, right_arm, left_leg, right_leg, internal },
+    location: InjuryLocation,
     severity: u8,
     incurred_day: u32,
     heal_done_day: ?u32 = null,
     doctor: types.PersonId = .none,
     permanent: bool = false,
+    healed: bool = false,
 };
 
 pub const Person = struct {
@@ -112,8 +119,12 @@ pub const Person = struct {
     medbay_priority: u8 = 0,
     /// R&R: unavailable until this day, fatigue decays double.
     leave_until_day: ?u32 = null,
-    /// Set by the medical system once a doctor triages the wound (Stage 8).
+    /// Set by the medical system once a doctor triages the wound (Stage 8):
+    /// the day the last open injury closes (mirror of `healDoneDay`).
     wound_heal_day: ?u32 = null,
+    /// Per-location injuries (Stage 12.16); open ones keep the person in
+    /// the medbay, permanent ones stay on the record.
+    injuries: std.ArrayListUnmanaged(Injury) = .empty,
     /// A wound only starts healing once the player admits them (the
     /// `admit` command) — untreated wounded block the turn (Stage 12).
     medbay_admitted: bool = false,
@@ -122,6 +133,38 @@ pub const Person = struct {
 
     pub fn deinit(self: *Person, alloc: std.mem.Allocator) void {
         self.skills.deinit(alloc);
+        self.injuries.deinit(alloc);
+    }
+
+    /// Injuries still healing.
+    pub fn openInjuries(self: *const Person) u32 {
+        var n: u32 = 0;
+        for (self.injuries.items) |i| if (!i.healed) {
+            n += 1;
+        };
+        return n;
+    }
+
+    /// The day the last open injury closes (null: nothing triaged yet).
+    pub fn healDoneDay(self: *const Person) ?u32 {
+        var latest: ?u32 = null;
+        for (self.injuries.items) |i| {
+            if (i.healed) continue;
+            const d = i.heal_done_day orelse continue;
+            latest = @max(latest orelse 0, d);
+        }
+        return latest;
+    }
+
+    /// Lasting damage (MekHQ advanced medical modifiers, approximated):
+    /// every permanent head or internal injury costs one skill point in the
+    /// cockpit. // TUNE
+    pub fn permanentPenalty(self: *const Person) u8 {
+        var n: u8 = 0;
+        for (self.injuries.items) |i| {
+            if (i.permanent and (i.location == .head or i.location == .internal)) n += 1;
+        }
+        return n;
     }
 
     /// Fit for duty today: active, not on leave.
@@ -262,4 +305,17 @@ test "salary follows CamOps table with experience multiplier" {
     try p.skills.put(std.testing.allocator, .piloting_mek, 3);
     try std.testing.expectEqual(types.ExperienceLevel.elite, p.experience());
     try std.testing.expectEqual(@as(types.CBills, 4_800), p.monthlySalary()); // 1500 × 3.2
+}
+
+test "injuries: open ones set the discharge day, permanent head wounds cost skill" {
+    var p: Person = .{ .id = @enumFromInt(1), .first_name = "A", .last_name = "B", .role = .mekwarrior };
+    defer p.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(?u32, null), p.healDoneDay());
+    try p.injuries.append(std.testing.allocator, .{ .location = .left_leg, .severity = 1, .incurred_day = 0, .heal_done_day = 12 });
+    try p.injuries.append(std.testing.allocator, .{ .location = .head, .severity = 3, .incurred_day = 0, .heal_done_day = 30, .permanent = true });
+    try std.testing.expectEqual(@as(u32, 2), p.openInjuries());
+    try std.testing.expectEqual(@as(?u32, 30), p.healDoneDay());
+    p.injuries.items[1].healed = true;
+    try std.testing.expectEqual(@as(?u32, 12), p.healDoneDay());
+    try std.testing.expectEqual(@as(u8, 1), p.permanentPenalty());
 }

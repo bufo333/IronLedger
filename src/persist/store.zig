@@ -25,7 +25,7 @@ const contract_events = @import("../sim/contract_events.zig");
 const network = @import("../sim/network.zig");
 const clock_mod = @import("../sim/clock.zig");
 
-pub const schema_version = 6;
+pub const schema_version = 7;
 
 const ddl =
     \\CREATE TABLE IF NOT EXISTS player (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_seq INTEGER NOT NULL);
@@ -37,6 +37,7 @@ const ddl =
     \\CREATE TABLE IF NOT EXISTS commander (cid INTEGER PRIMARY KEY, name TEXT NOT NULL, origin TEXT NOT NULL, profession TEXT NOT NULL);
     \\CREATE TABLE IF NOT EXISTS person (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, first TEXT, last TEXT, callsign TEXT, role TEXT, xp INTEGER, status TEXT, fatigue INTEGER, morale INTEGER, recruited_day INTEGER, salary_override INTEGER, assigned_force INTEGER, posted_hq INTEGER, weekly_hours INTEGER, medbay_priority INTEGER, leave_until INTEGER, wound_heal_day INTEGER, training_skill TEXT, training_done INTEGER, admitted INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (cid, id));
     \\CREATE TABLE IF NOT EXISTS person_skill (cid INTEGER NOT NULL, person_id INTEGER NOT NULL, skill TEXT NOT NULL, level INTEGER NOT NULL);
+    \\CREATE TABLE IF NOT EXISTS injury (cid INTEGER NOT NULL, person_id INTEGER NOT NULL, ord INTEGER NOT NULL, location TEXT NOT NULL, severity INTEGER NOT NULL, incurred INTEGER NOT NULL, heal_done INTEGER, doctor INTEGER NOT NULL DEFAULT 0, permanent INTEGER NOT NULL DEFAULT 0, healed INTEGER NOT NULL DEFAULT 0);
     \\CREATE TABLE IF NOT EXISTS unit (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, chassis_key TEXT, name TEXT, kind TEXT, force INTEGER, pilot INTEGER, tech INTEGER, armor_pct INTEGER, quality TEXT, status TEXT, last_maint INTEGER, acquired_day INTEGER, price INTEGER, reactivation_done INTEGER, berth_hq INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (cid, id));
     \\CREATE TABLE IF NOT EXISTS unit_slot (cid INTEGER NOT NULL, unit_id INTEGER NOT NULL, ord INTEGER NOT NULL, slot_key TEXT, part_key TEXT, class TEXT, condition TEXT);
     \\CREATE TABLE IF NOT EXISTS force (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, parent INTEGER, name TEXT, emblem BLOB, local_funds INTEGER, echelon TEXT, commander INTEGER, supplying_hq INTEGER, role TEXT, support_kind TEXT, last_rotation INTEGER, contracts_since_rotation INTEGER, location_planet TEXT, return_eta INTEGER, shortage_days INTEGER, PRIMARY KEY (cid, id));
@@ -67,7 +68,7 @@ const ddl =
 ;
 
 const tables = [_][]const u8{
-    "meta",       "meta_text",   "rng",          "commander",       "person",       "person_skill",
+    "meta",       "meta_text",   "rng",          "commander",       "person",       "person_skill", "injury",
     "unit",       "unit_slot",   "force",        "force_unit",      "force_child",  "stock",
     "hq",         "hq_facility", "hq_project",   "contract",        "txn",          "loan",
     "courier",    "policy",      "bay_job",      "candidate",       "hq_link",      "unit_transfer",
@@ -312,6 +313,8 @@ pub const Store = struct {
             defer st.finalize();
             const sk = try self.db.prepare("INSERT INTO person_skill VALUES (?1, ?2, ?3, ?4)");
             defer sk.finalize();
+            const inj = try self.db.prepare("INSERT INTO injury VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)");
+            defer inj.finalize();
             var it = gs.people.iterator();
             var ord: i64 = 0;
             while (it.next()) |entry| : (ord += 1) {
@@ -332,6 +335,10 @@ pub const Store = struct {
                 while (skit.next()) |s| {
                     try sk.bindAll(.{ cid, @intFromEnum(p.id), s.key_ptr.*, @as(i64, s.value_ptr.*) });
                     try sk.run();
+                }
+                for (p.injuries.items, 0..) |i, n| {
+                    try inj.bindAll(.{ cid, @intFromEnum(p.id), @as(i64, @intCast(n)), i.location, @as(i64, i.severity), @as(i64, i.incurred_day), i.heal_done_day, @intFromEnum(i.doctor), @as(i64, @intFromBool(i.permanent)), @as(i64, @intFromBool(i.healed)) });
+                    try inj.run();
                 }
             }
         }
@@ -720,6 +727,22 @@ pub const Store = struct {
                 const p = gs.people.getPtr(toId(types.PersonId, sk.int(0))) orelse continue;
                 const skill = sk.enumValue(types.SkillType, 1) orelse continue;
                 try p.skills.put(alloc, skill, @intCast(sk.int(2)));
+            }
+            const inj = try self.db.prepare("SELECT person_id, location, severity, incurred, heal_done, doctor, permanent, healed FROM injury WHERE cid = ?1 ORDER BY person_id, ord");
+            defer inj.finalize();
+            try inj.bindAll(.{cid});
+            while (try inj.next()) {
+                const p = gs.people.getPtr(toId(types.PersonId, inj.int(0))) orelse continue;
+                const location = inj.enumValue(person_mod.InjuryLocation, 1) orelse continue;
+                try p.injuries.append(alloc, .{
+                    .location = location,
+                    .severity = @intCast(inj.int(2)),
+                    .incurred_day = @intCast(inj.int(3)),
+                    .heal_done_day = optU32(inj.optInt(4)),
+                    .doctor = toId(types.PersonId, inj.int(5)),
+                    .permanent = inj.int(6) != 0,
+                    .healed = inj.int(7) != 0,
+                });
             }
         }
 
@@ -1187,6 +1210,9 @@ test "save → load → identical hash, and the loaded campaign keeps playing" {
     _ = try commands.execute(&gs, .{ .set_stock_policy = .{ .hq = gs.hqs.keys()[0], .part_key = "ammo_lrm", .min = 10, .target = 30 } });
     _ = try commands.execute(&gs, .{ .set_auto_admit = true });
     _ = try commands.execute(&gs, .{ .advance_days = 40 }); // battles, events, deliveries, couriers
+    // A permanent injury on someone's record (Stage 12.16) rides along.
+    const scarred = gs.people.keys()[3];
+    try gs.people.getPtr(scarred).?.injuries.append(gs.allocator(), .{ .location = .head, .severity = 3, .incurred_day = 5, .heal_done_day = 40, .permanent = true, .healed = true });
     // A dropship holding a berth (Stage 12.15) rides along.
     const ship = try gs.addUnit("LEOPARD");
     gs.unit(ship).?.berth_hq = gs.hqs.keys()[0];
@@ -1201,6 +1227,9 @@ test "save → load → identical hash, and the loaded campaign keeps playing" {
     defer loaded.deinit();
     try std.testing.expectEqual(before, loaded.hash());
     try std.testing.expectEqual(gs.hqs.keys()[0], loaded.unit(ship).?.berth_hq);
+    try std.testing.expectEqual(@as(usize, 1), loaded.person(scarred).?.injuries.items.len);
+    try std.testing.expect(loaded.person(scarred).?.injuries.items[0].permanent);
+    try std.testing.expectEqual(person_mod.InjuryLocation.head, loaded.person(scarred).?.injuries.items[0].location);
     try std.testing.expectEqualStrings("Kalmar's Free Legion", loaded.outfit_name);
     try std.testing.expectEqual(gs.people.count(), loaded.people.count());
     try std.testing.expectEqual(gs.event_log.items.len, loaded.event_log.items.len);

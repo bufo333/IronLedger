@@ -511,60 +511,15 @@ fn forceBv(gs: *game.state.GameState, force_id: game.types.ForceId) u64 {
 /// The per-company readiness report (ARCH §9.7): the P&L's companion —
 /// profit is meaningless if the force that earned it is spent.
 fn printReadiness(gs: *game.state.GameState) void {
-    var fit = gs.forces.iterator();
-    while (fit.next()) |fentry| {
-        const company = fentry.value_ptr;
-        if (company.echelon != .company) continue;
-
-        var fatigue_sum: u64 = 0;
-        var morale_sum: u64 = 0;
-        var wounded: u32 = 0;
-        var training: u32 = 0;
-        var heads: u32 = 0;
-        var pit = gs.people.iterator();
-        while (pit.next()) |pentry| {
-            const p = pentry.value_ptr;
-            if (p.status != .active and p.status != .wounded) continue;
-            var walk = p.assigned_force;
-            const in_company = while (walk != .none) {
-                if (walk == company.id) break true;
-                walk = (gs.force(walk) orelse break false).parent;
-            } else false;
-            if (!in_company) continue;
-            heads += 1;
-            fatigue_sum += p.fatigue;
-            morale_sum += p.morale;
-            if (p.status == .wounded) wounded += 1;
-            if (p.training != null) training += 1;
-        }
-
-        var depot: u32 = 0;
-        var quality_sum: u64 = 0;
-        var hulls: u32 = 0;
-        var uit = gs.units.iterator();
-        while (uit.next()) |uentry| {
-            const u = uentry.value_ptr;
-            if (gs.companyOf(u.force) != company.id) continue;
-            hulls += 1;
-            quality_sum += @intFromEnum(u.quality);
-            if (u.needsDepot()) depot += 1;
-        }
-
-        const deployed = gs.deploymentContract(company.id) != null;
-        std.debug.print("[{d}] {s} — {s}\n", .{
-            @intFromEnum(company.id), company.name, if (deployed) "DEPLOYED" else "at home",
-        });
-        if (heads > 0) {
-            std.debug.print("  {d} personnel | fatigue {d} | morale {d} | {d} wounded | {d} in training\n", .{
-                heads, fatigue_sum / heads, morale_sum / heads, wounded, training,
-            });
-        }
-        if (hulls > 0) {
-            const q: types_quality = @enumFromInt(quality_sum / hulls);
-            std.debug.print("  {d} hulls | avg quality {s} | {d} need depot time | {d} contracts since rotation\n", .{
-                hulls, @tagName(q), depot, company.contracts_since_rotation,
-            });
-        }
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const rows = game.queries.readiness(arena.allocator(), gs) catch return;
+    std.debug.print("{s}\n", .{game.queries.readiness_header});
+    for (rows) |r| std.debug.print("{s}\n", .{game.queries.stripMarks(arena.allocator(), r.text) catch r.text});
+    for (rows) |r| {
+        std.debug.print("\n[{d}] {s}\n", .{ @intFromEnum(r.company), game.queries.forceName(gs, r.company) });
+        const lines = game.queries.readinessLines(arena.allocator(), gs, r.company) catch continue;
+        for (lines) |l| std.debug.print("  {s}\n", .{game.queries.stripMarks(arena.allocator(), l) catch l});
     }
 }
 

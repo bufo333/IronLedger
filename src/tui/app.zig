@@ -80,6 +80,8 @@ const Modal = union(enum) {
     upgrade: types.HqId,
     /// Lance picker for a hull.
     lance_pick: types.UnitId,
+    /// Every company's readiness report (fatigue, morale, wounded, banked XP, depot).
+    readiness,
 };
 
 /// Size tiers (docs/tui.md): the largest that fits decides how many panes
@@ -99,6 +101,7 @@ const office_roles = [_]game.person.Role{ .admin_command, .admin_logistics, .adm
 const verbs = [_][]const u8{
     "admit",       "repay",     "sell",     "sellhq",     "disband",   "depot",    "role",     "supplypolicy", "move",   "newlance",
     "stockpolicy", "autoadmit", "settings", "sellstock",  "trim",      "raise",    "crew",     "manning",      "day",    "save",
+    "readiness",
     "quit",        "help",      "emblem",   "transfer",   "policy",    "loan",     "accept",   "resolve",      "order",  "ship",
     "buy",         "assign",    "unassign", "autoassign", "autostaff", "upgrade",  "tier",     "fabricate",    "hire",   "recruit",
     "fire",        "post",      "train",    "triage",     "leave",     "mothball", "activate", "complete",     "recall", "found",
@@ -209,6 +212,8 @@ pub const App = struct {
     map_cursor: usize = 0,
     /// Forces screen view: index into queries.toeViews (all, each company, unassigned).
     forces_view: usize = 0,
+    /// Forces side pane on a company row: DAMAGE (false) or READINESS (true).
+    forces_readiness: bool = false,
     /// The raise-a-company wizard's state.
     raise: RaiseState = .{},
     /// Star map zoom: 1 = every world fitted into the pane; 2/4/8 = that
@@ -761,7 +766,7 @@ pub const App = struct {
             .market => "Tab pane · Enter buy / order / order shortfall · b fabricate component · K keep stocked (pane: Enter edit, x remove) · [ ] HQ board · q welcome",
             .ledger => "j/k treasury · t send cash to it · T pull cash back to the outfit · p top-up policy · x clear its policy · L loan · R repay",
             .supply => "company: t/T cash · p/P cash/resupply policy · s ship · o order · R trim to plan · H parts home · HQ: K keep stocked · $ sell stock",
-            .forces => "[ ] company / pool · + raise a company · w air wing · Enter assign · a/u seat · A auto · l lance · o role · d depot · m mothball · x company · b fabricate · R recall · $ sell · X disband",
+            .forces => "[ ] company / pool · + raise a company · w air wing · r readiness · Enter assign · a/u seat · A auto · l lance · o role · d depot · m mothball · x company · b fabricate · R recall · $ sell · X disband",
             .map => "h j k l move between worlds (the view follows) · + / - zoom · f found HQ here · o offers here · q welcome",
             .lab => "[ ] hull · j/k mount · - remove · + install · R order replacement · D send to depot (structure) · c clear · Enter commit",
             .hq => "[ ] switch HQ · u upgrade the highlighted facility (picker elsewhere) · T tier · S autostaff · Tab hall · f/F filter · Enter hire",
@@ -1247,8 +1252,13 @@ pub const App = struct {
                 self.listPane(.{ .x = b.x + lw, .y = b.y, .w = b.w - lw, .h = detail_h }, "HULL", detail, 1, false, false);
             } else if (rows.len > 0 and c < rows.len and rows[c].force != .none and g.companyOf(rows[c].force) != .none) {
                 const co = g.companyOf(rows[c].force);
-                const dmg = try q.companyDamage(al, g, co);
-                self.listPane(.{ .x = b.x + lw, .y = b.y, .w = b.w - lw, .h = detail_h }, try std.fmt.allocPrint(al, "DAMAGE · {s}", .{q.forceName(g, co)}), dmg.lines, 1, false, false);
+                if (self.forces_readiness) {
+                    const lines = try q.readinessLines(al, g, co);
+                    self.listPane(.{ .x = b.x + lw, .y = b.y, .w = b.w - lw, .h = detail_h }, try std.fmt.allocPrint(al, "READINESS · {s} · r = damage", .{q.forceName(g, co)}), lines, 1, false, false);
+                } else {
+                    const dmg = try q.companyDamage(al, g, co);
+                    self.listPane(.{ .x = b.x + lw, .y = b.y, .w = b.w - lw, .h = detail_h }, try std.fmt.allocPrint(al, "DAMAGE · {s} · r = readiness", .{q.forceName(g, co)}), dmg.lines, 1, false, false);
+                }
             } else {
                 const empty = [_][]const u8{"{d}select a hull in the TO&E{/}"};
                 self.listPane(.{ .x = b.x + lw, .y = b.y, .w = b.w - lw, .h = detail_h }, "HULL", &empty, 1, false, false);
@@ -1440,7 +1450,7 @@ pub const App = struct {
                     "  {a}desk{/}        Enter on an inbox row opens the decision · Enter on a checklist row jumps to its screen",
                     "  {a}contracts{/}   Enter accepts the offer under the cursor · c completes · R recalls",
                     "  {a}ledger{/}      j/k picks the treasury · t transfer · p policy · L loan",
-                    "  {a}forces{/}      [ ] page through all forces, each company, the unassigned pool · a assign · u unassign · A auto-assign the company · t train · cursor on a company = DAMAGE pane (struct = depot, gear = field) · b fabricates the shortest comp_*",
+                    "  {a}forces{/}      [ ] page through all forces, each company, the unassigned pool · a assign · u unassign · A auto-assign the company · t train · cursor on a company = DAMAGE pane (struct = depot, gear = field), r swaps it for READINESS · w air wing · b fabricates the shortest comp_*",
                     "  {a}hq{/}          [ ] switch HQ · u upgrade · S autostaff · h hire · f/F hall filter",
                     "  {a}people{/}      / filter · m admit wounded · t train · a assign seat · P post · x transfer · L leave · D fire",
                     "  {a}market{/}      F10/0: / , filter (mechs, vehicles, aero, dropships, jumpships, weapons, ammo, equipment, components, supplies)",
@@ -1567,6 +1577,19 @@ pub const App = struct {
                 const r = self.modalRect(@min(self.screen.cols -| 2, 150), @intCast(rows.items.len + 4));
                 const inner = self.screen.pane(r, .{ .title = try std.fmt.allocPrint(al, "RAISE {s} · SUPPORT TRAIN · Enter/b buy one · n crews · Esc leave", .{q.forceName(g, self.raise.company)}), .double = true });
                 self.screen.lines(inner, rows.items, 0, self.modal_cursor + 1);
+            },
+            .readiness => {
+                const g = &self.gs.?;
+                var rows: std.ArrayListUnmanaged([]const u8) = .empty;
+                try rows.append(al, q.readiness_header);
+                const rr = try q.readiness(al, g);
+                for (rr) |r| try rows.append(al, r.text);
+                if (rr.len == 0) try rows.append(al, "{d}no companies{/}");
+                try rows.append(al, "");
+                try rows.append(al, "{d}fatigue falls only at a regional HQ; banked XP becomes skill at a training ground; depot hulls wait on a mek bay · Forces r shows one company in detail{/}");
+                const r = self.modalRect(@min(self.screen.cols -| 2, 150), @intCast(rows.items.len + 3));
+                const inner = self.screen.pane(r, .{ .title = "READINESS · every company", .double = true, .right_title = "any key closes" });
+                self.screen.lines(inner, rows.items, 0, null);
             },
             .raise_crews => {
                 const g = &self.gs.?;
@@ -2605,6 +2628,10 @@ pub const App = struct {
                         }
                     },
                     't' => self.openCommand("train "),
+                    'r' => {
+                        self.forces_readiness = !self.forces_readiness;
+                        if (self.narrow()) self.modal = .readiness;
+                    },
                     'w' => if (row) |r| {
                         const co = g.companyOf(r.force);
                         if (co == .none) {
@@ -3016,7 +3043,7 @@ pub const App = struct {
     fn handleModalKey(self: *App, key: Key) !void {
         switch (self.modal) {
             .none => {},
-            .help, .hull, .record => self.modal = .none,
+            .help, .hull, .record, .readiness => self.modal = .none,
             .raise_hulls => switch (key) {
                 .escape => {
                     self.modal = .none;
@@ -3531,6 +3558,10 @@ pub const App = struct {
         }
         if (eq(u8, verb, "settings")) {
             self.modal = .settings;
+            return;
+        }
+        if (eq(u8, verb, "readiness")) {
+            self.modal = .readiness;
             return;
         }
         if (eq(u8, verb, "manning")) {

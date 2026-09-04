@@ -1576,6 +1576,8 @@ pub const GameState = struct {
             h.update(std.mem.asBytes(&p.xp));
             h.update(std.mem.asBytes(&p.fatigue));
             h.update(std.mem.asBytes(&p.morale));
+            const injuries: u64 = p.injuries.items.len;
+            h.update(std.mem.asBytes(&injuries));
         }
         var uit = self.units.iterator();
         while (uit.next()) |entry| {

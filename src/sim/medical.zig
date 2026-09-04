@@ -20,6 +20,63 @@ pub fn trainingDaysFor(gs: *GameState) u32 {
     return @max(15, training_days -| 3 * hr.count);
 }
 
+pub const WoundCause = enum { combat, accident };
+
+/// Where a wound lands (Stage 12.16; MekHQ `InjuryUtil` hit locations,
+/// collapsed to 2d6): head and internal on the extremes, limbs in the
+/// middle. Accidents in the bay break arms, legs and ribs, not skulls.
+pub fn rollLocation(gs: *GameState, cause: WoundCause) person_mod.InjuryLocation {
+    const roll = gs.rng.roll2d6(.medical);
+    const combat: person_mod.InjuryLocation = switch (roll) {
+        2 => .head,
+        3, 4 => .internal,
+        5, 6 => .torso,
+        7 => .left_leg,
+        8 => .right_leg,
+        9 => .left_arm,
+        10 => .right_arm,
+        11 => .torso,
+        else => .head,
+    };
+    if (cause == .combat) return combat;
+    return switch (combat) {
+        .head => .right_arm,
+        .internal => .torso,
+        else => |loc| loc,
+    };
+}
+
+/// Wound someone: they leave duty with a new injury of `severity` (1
+/// light, 2 serious, 3 crippling) at a rolled location. A crippling head
+/// or internal wound is permanent on 2d6 ≤ 4 (`.medical` stream). Healing
+/// starts when the medbay admits them. // TUNE
+pub fn inflict(gs: *GameState, person_id: types.PersonId, cause: WoundCause, severity: u8, why: []const u8) !void {
+    const p = gs.person(person_id) orelse return;
+    if (p.status == .kia) return;
+    const location = rollLocation(gs, cause);
+    const permanent = severity >= 3 and (location == .head or location == .internal) and gs.rng.roll2d6(.medical) <= 4;
+    try p.injuries.append(gs.allocator(), .{
+        .location = location,
+        .severity = @min(severity, 3),
+        .incurred_day = gs.clock.day_index,
+        .permanent = permanent,
+    });
+    p.status = .wounded;
+    p.wound_heal_day = null; // triage again with the new wound
+    if (!gs.auto_admit) p.medbay_admitted = false;
+    try gs.log(.medical, .{ .company = gs.companyOf(p.assigned_force) }, "[medbay] {s} {s} wounded ({s}): {s} {s}{s}", .{
+        p.first_name, p.last_name, why, severityLabel(severity), @tagName(location), if (permanent) " — permanent" else "",
+    });
+}
+
+pub fn severityLabel(severity: u8) []const u8 {
+    return switch (severity) {
+        0, 1 => "light",
+        2 => "serious",
+        else => "crippling",
+    };
+}
+
 /// Is this person's posting currently deployed?
 fn isDeployed(gs: *GameState, p: *const person_mod.Person) bool {
     return gs.deploymentContract(gs.companyOf(p.assigned_force)) != null;
@@ -142,12 +199,31 @@ pub fn runDailyHealing(gs: *GameState) !void {
             const deployed = isDeployed(gs, p);
             var days = healDays(gs, deployed);
             if (!gs.takeStock(gs.siteForForce(p.assigned_force), "medical_supplies", 1)) days = days * 3 / 2;
-            p.wound_heal_day = gs.clock.day_index + days;
+            // A wound with no record behind it (older saves, event
+            // effects): one light internal injury stands in for it.
+            if (p.openInjuries() == 0) try p.injuries.append(gs.allocator(), .{ .location = .internal, .severity = 1, .incurred_day = gs.clock.day_index });
+            // Every open injury closes on its own day: serious ones take
+            // half again as long, crippling ones twice as long. // TUNE
+            for (p.injuries.items) |*inj| {
+                if (inj.healed or inj.heal_done_day != null) continue;
+                inj.heal_done_day = gs.clock.day_index + days * (@as(u32, inj.severity) + 1) / 2;
+            }
+            p.wound_heal_day = p.healDoneDay() orelse gs.clock.day_index + days;
         } else if (gs.clock.day_index >= p.wound_heal_day.?) {
             p.status = .active;
             p.wound_heal_day = null;
             p.medbay_admitted = false;
-            try gs.log(.medical, .{ .company = gs.companyOf(p.assigned_force) }, "[medical] {s} {s} returns to duty", .{ p.first_name, p.last_name });
+            // Close the record: permanent injuries stay, the rest are history.
+            var lasting: u32 = 0;
+            var i: usize = 0;
+            while (i < p.injuries.items.len) {
+                if (p.injuries.items[i].permanent) {
+                    p.injuries.items[i].healed = true;
+                    lasting += 1;
+                    i += 1;
+                } else _ = p.injuries.orderedRemove(i);
+            }
+            try gs.log(.medical, .{ .company = gs.companyOf(p.assigned_force) }, "[medical] {s} {s} returns to duty{s}", .{ p.first_name, p.last_name, if (lasting > 0) " — with a permanent injury on the record" else "" });
         }
     }
 }
@@ -293,4 +369,57 @@ test "rested companies reset their rotation debt" {
     for (0..12) |_| try runWeeklyRest(&gs);
     try std.testing.expectEqual(@as(u16, 0), gs.force(co).?.contracts_since_rotation);
     try std.testing.expect(gs.force(co).?.last_rotation_day != null);
+}
+
+test "12.16: injuries land by location, heal on their own days, and permanent ones scar the record" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1216 });
+    defer gs.deinit();
+    _ = try gs.createCommander("T", .LC, .paymaster);
+    const id = try gs.hirePerson("Lori", "Kalmar", .mekwarrior);
+    _ = try gs.hirePerson("Ivan", "Petrov", .doctor);
+    try gs.addStock(.{ .hq = gs.hqs.keys()[0] }, "medical_supplies", 10);
+
+    try inflict(&gs, id, .combat, 1, "test");
+    try inflict(&gs, id, .accident, 3, "test");
+    const p = gs.person(id).?;
+    try std.testing.expectEqual(person_mod.Status.wounded, p.status);
+    try std.testing.expectEqual(@as(u32, 2), p.openInjuries());
+    // Accidents never hit the head or the innards.
+    try std.testing.expect(p.injuries.items[1].location != .head and p.injuries.items[1].location != .internal);
+    try std.testing.expect(!p.injuries.items[1].permanent);
+
+    p.medbay_admitted = true;
+    try runDailyHealing(&gs); // triage
+    const light = p.injuries.items[0].heal_done_day.?;
+    const crippling = p.injuries.items[1].heal_done_day.?;
+    try std.testing.expect(crippling > light);
+    try std.testing.expectEqual(crippling, p.wound_heal_day.?);
+    // The light wound closes first; still in the medbay for the other.
+    gs.clock.day_index = light;
+    try runDailyHealing(&gs);
+    try std.testing.expectEqual(person_mod.Status.wounded, p.status);
+    gs.clock.day_index = crippling;
+    try runDailyHealing(&gs);
+    try std.testing.expectEqual(person_mod.Status.active, p.status);
+    try std.testing.expectEqual(@as(usize, 0), p.injuries.items.len); // nothing permanent: clean record
+
+    // A permanent head wound survives healing and costs a skill point.
+    try p.injuries.append(gs.allocator(), .{ .location = .head, .severity = 3, .incurred_day = gs.clock.day_index, .permanent = true });
+    p.status = .wounded;
+    p.medbay_admitted = true;
+    try runDailyHealing(&gs);
+    gs.clock.day_index = p.wound_heal_day.?;
+    try runDailyHealing(&gs);
+    try std.testing.expectEqual(person_mod.Status.active, p.status);
+    try std.testing.expectEqual(@as(usize, 1), p.injuries.items.len);
+    try std.testing.expect(p.injuries.items[0].healed);
+    try std.testing.expectEqual(@as(u8, 1), p.permanentPenalty());
+    try std.testing.expectEqual(@as(u32, 0), p.openInjuries());
+
+    // A wound with no record (legacy) gets one at triage.
+    const other = try gs.hirePerson("Ana", "Ruiz", .mekwarrior);
+    gs.person(other).?.status = .wounded;
+    gs.person(other).?.medbay_admitted = true;
+    try runDailyHealing(&gs);
+    try std.testing.expectEqual(@as(u32, 1), gs.person(other).?.openInjuries());
 }
