@@ -1155,6 +1155,8 @@ test "save → load → identical hash, and the loaded campaign keeps playing" {
     const co = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
     _ = try commands.execute(&gs, .{ .accept_contract = .{ .offer_index = 0, .company = co } });
     _ = try commands.execute(&gs, .{ .set_policy = .{ .entity = .{ .company = co }, .floor = 200_000, .monthly_cap = 300_000 } });
+    _ = try commands.execute(&gs, .{ .set_supply_policy = .{ .company = co, .min_days = 14, .tons = 20 } });
+    _ = try commands.execute(&gs, .{ .set_supply_policy = .{ .company = co, .min_days = 30, .tons = 60 } }); // re-setting replaces
     _ = try commands.execute(&gs, .{ .advance_days = 40 }); // battles, events, deliveries, couriers
     const before = gs.hash();
 
@@ -1170,6 +1172,12 @@ test "save → load → identical hash, and the loaded campaign keeps playing" {
     try std.testing.expectEqual(gs.people.count(), loaded.people.count());
     try std.testing.expectEqual(gs.event_log.items.len, loaded.event_log.items.len);
     try std.testing.expectEqual(gs.event_queue.pending.items.len, loaded.event_queue.pending.items.len);
+    // Policies survive the round trip with their current numbers.
+    try std.testing.expectEqual(@as(usize, 1), loaded.policies.items.len);
+    try std.testing.expectEqual(gs.policies.items[0].sent_this_month, loaded.policies.items[0].sent_this_month);
+    try std.testing.expectEqual(@as(usize, 1), loaded.supply_policies.items.len);
+    try std.testing.expectEqual(@as(u16, 30), loaded.supply_policies.items[0].min_days);
+    try std.testing.expectEqual(@as(u32, 60), loaded.supply_policies.items[0].tons);
 
     // Determinism survives the round trip: both worlds evolve identically.
     _ = try commands.execute(&gs, .{ .advance_days = 30 });

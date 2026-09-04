@@ -759,7 +759,30 @@ pub fn supply(alloc: Alloc, gs: *GameState) !Supply {
     return .{ .rows = try out.toOwnedSlice(alloc), .site = try sites.toOwnedSlice(alloc) };
 }
 
-/// Stock at one site as a table: part, quantity, tonnage.
+/// The munition families a company's weapons fire (keys, deduplicated).
+pub fn neededMunitions(alloc: Alloc, gs: *GameState, company: types.ForceId) ![]const []const u8 {
+    const part_mod = @import("../domain/part.zig");
+    var out: std.ArrayListUnmanaged([]const u8) = .empty;
+    var uit = gs.units.iterator();
+    while (uit.next()) |e| {
+        const u = e.value_ptr;
+        if (u.status == .destroyed or gs.companyOf(u.force) != company) continue;
+        for (u.slots.items) |s| {
+            if (s.class != .weapon) continue;
+            const key = part_mod.munitionFor(s.part_key) orelse continue;
+            var seen = false;
+            for (out.items) |k| if (std.mem.eql(u8, k, key)) {
+                seen = true;
+            };
+            if (!seen) try out.append(alloc, key);
+        }
+    }
+    return out.toOwnedSlice(alloc);
+}
+
+/// Stock at one site as a table: part, quantity, tonnage. Lines a site is
+/// expected to hold (provisions, medical, armor, the munitions its
+/// company's weapons fire) stay listed at zero, in red, instead of vanishing.
 pub fn stockTable(alloc: Alloc, gs: *GameState, site: types.Site) ![]const []const u8 {
     const part_mod = @import("../domain/part.zig");
     var out: std.ArrayListUnmanaged([]const u8) = .empty;
@@ -770,12 +793,13 @@ pub fn stockTable(alloc: Alloc, gs: *GameState, site: types.Site) ![]const []con
     };
     try out.append(alloc, "part                     qty     tons  kind");
     var total: u32 = 0;
+    var listed: std.ArrayListUnmanaged([]const u8) = .empty;
     if (stock) |m| {
         var it = m.iterator();
         while (it.next()) |e| {
             const qty = e.value_ptr.*;
-            if (qty == 0) continue;
             const key = e.key_ptr.*;
+            try listed.append(alloc, key);
             const tons = qty * part_mod.tons(key);
             total += tons;
             const kind: []const u8 = if (part_mod.isComponent(key)) "component" else if (part_mod.find(key)) |p| switch (p.mount) {
@@ -784,8 +808,27 @@ pub fn stockTable(alloc: Alloc, gs: *GameState, site: types.Site) ![]const []con
                 .equipment => "equipment",
                 .none => "supplies",
             } else "supplies";
-            try out.append(alloc, try std.fmt.allocPrint(alloc, "{s: <22} {d: >6} {d: >7}t  {s}", .{ clip(key, 22), qty, tons, kind }));
+            try out.append(alloc, try std.fmt.allocPrint(alloc, "{s}{s: <22} {d: >6} {d: >7}t  {s}{{/}}", .{ if (qty == 0) "{c}" else "", clip(key, 22), qty, tons, kind }));
         }
+    }
+    // Expected lines that have never been stocked here.
+    var expected: std.ArrayListUnmanaged([]const u8) = .empty;
+    try expected.append(alloc, "provisions");
+    try expected.append(alloc, "medical_supplies");
+    try expected.append(alloc, "armor");
+    switch (site) {
+        .company => |id| for (try neededMunitions(alloc, gs, id)) |k| try expected.append(alloc, k),
+        .hq => for (part_mod.munition_keys) |k| try expected.append(alloc, k),
+        .outfit => {},
+    }
+    for (expected.items) |key| {
+        var have = false;
+        for (listed.items) |k| if (std.mem.eql(u8, k, key)) {
+            have = true;
+        };
+        if (have) continue;
+        const kind: []const u8 = if (part_mod.find(key)) |p| (if (p.mount == .ammo) "ammo" else "supplies") else "supplies";
+        try out.append(alloc, try std.fmt.allocPrint(alloc, "{{c}}{s: <22} {d: >6} {d: >7}t  {s} · none{{/}}", .{ clip(key, 22), 0, 0, kind }));
     }
     if (out.items.len == 1) try out.append(alloc, "{d}empty{/}");
     const cap = gs.siteCapacityTons(site);
@@ -856,9 +899,9 @@ fn siteLines(alloc: Alloc, gs: *GameState, out: *std.ArrayListUnmanaged([]const 
         var it = m.iterator();
         var n: usize = 0;
         while (it.next()) |entry| {
-            if (entry.value_ptr.* == 0) continue;
             if (n > 0) try line.appendSlice(alloc, " · ");
-            try line.appendSlice(alloc, try std.fmt.allocPrint(alloc, "{s} {d}", .{ entry.key_ptr.*, entry.value_ptr.* }));
+            const qty = entry.value_ptr.*;
+            try line.appendSlice(alloc, try std.fmt.allocPrint(alloc, "{s}{s} {d}{s}", .{ if (qty == 0) "{c}" else "", entry.key_ptr.*, qty, if (qty == 0) "{/}" else "" }));
             n += 1;
         }
         if (n == 0) try line.appendSlice(alloc, "empty");
