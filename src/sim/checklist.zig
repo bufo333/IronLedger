@@ -36,6 +36,38 @@ pub const Warning = struct {
     text: []const u8,
 };
 
+test "depot backlog only counts hulls whose company is home" {
+    const commands = @import("commands.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 21 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    const res = try commands.execute(&gs, .{ .new_company = "Alpha" });
+    // Break a structure slot on one hull.
+    const uid = gs.units.keys()[0];
+    const u = gs.unit(uid).?;
+    for (u.slots.items) |*s| if (s.class == .structure) {
+        s.condition = .destroyed;
+        break;
+    };
+    try std.testing.expect(u.needsDepot());
+    // Empty the warehouse of components so the bay cannot start the job.
+    if (gs.hqs.getPtr(gs.hqs.keys()[0])) |h| h.stock.clearRetainingCapacity();
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const home = try turnWarnings(&gs, arena.allocator());
+    var found = false;
+    for (home) |w| if (w.kind == .depot_backlog) {
+        found = true;
+    };
+    try std.testing.expect(found);
+
+    // Send the company away: the same damage is no longer a backlog.
+    gs.forces.getPtr(res.created_force).?.location_planet = "galatea";
+    const away = try turnWarnings(&gs, arena.allocator());
+    for (away) |w| try std.testing.expect(w.kind != .depot_backlog);
+}
+
 /// Build the checklist. `alloc` owns the returned slice and texts.
 pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
     var out: std.ArrayListUnmanaged(Warning) = .empty;
@@ -136,7 +168,10 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
         var uit = gs.units.iterator();
         while (uit.next()) |uentry| {
             const u = uentry.value_ptr;
-            if (u.needsDepot() and u.status != .repairing and gs.deploymentContract(gs.companyOf(u.force)) == null and !hq_ops.hasJobForUnit(gs, u.id)) waiting += 1;
+            // Only hulls that are actually home count: a deployed, idle-afield
+            // or returning company cannot use the bay, so its structural damage
+            // is not a backlog yet (it shows in the Lab instead).
+            if (u.needsDepot() and u.status != .repairing and gs.isCompanyHome(gs.companyOf(u.force)) and !hq_ops.hasJobForUnit(gs, u.id)) waiting += 1;
         }
         if (waiting > 0 and idle > 0) {
             try out.append(alloc, .{ .kind = .depot_backlog, .text = try std.fmt.allocPrint(alloc, "{d} hull(s) need depot work and {d} bay slot(s) sit idle — components or techs missing (see `demand`, `roster`)", .{ waiting, idle }) });
