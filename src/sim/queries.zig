@@ -1169,6 +1169,35 @@ fn siteLines(alloc: Alloc, gs: *GameState, out: *std.ArrayListUnmanaged([]const 
 pub fn hqDetail(alloc: Alloc, gs: *GameState, id: types.HqId) ![]const []const u8 {
     var out: std.ArrayListUnmanaged([]const u8) = .empty;
     const h = gs.hqs.getPtr(id) orelse return out.toOwnedSlice(alloc);
+    // Tier first: what this HQ can host, and how to raise it.
+    {
+        const hq_ops_mod = @import("hq_ops.zig");
+        const hosted = gs.companiesAtHq(id);
+        switch (h.tier) {
+            .field => {
+                var upgrading: ?@import("../domain/hq.zig").Project = null;
+                for (h.projects.items) |p| if (p.kind == .tier_upgrade) {
+                    upgrading = p;
+                };
+                try out.append(alloc, "tier       {c}field HQ — hosts no company{/} (a beachhead: staff, funds, a supply link)");
+                if (upgrading) |p| {
+                    try out.append(alloc, try std.fmt.allocPrint(alloc, "           {{a}}regional upgrade under way{{/}} · paperwork done d{d} · construction done d{d} (today d{d})", .{ p.paperwork_done_day, p.construction_done_day, gs.clock.day_index }));
+                } else {
+                    const paperwork = hq_ops_mod.paperworkDaysFor(gs, id);
+                    const afford = h.funds >= hq_ops_mod.tier_upgrade_cost;
+                    try out.append(alloc, try std.fmt.allocPrint(alloc, "           to regional: {{a}}[T]{{/}} costs {s} from this HQ's treasury ({s}{s}{{/}} here{s}) · {d} days paperwork (command admins posted here shorten it) + {d} days build", .{
+                        try money(alloc, hq_ops_mod.tier_upgrade_cost), if (afford) "{g}" else "{c}",       try money(alloc, h.funds),
+                        if (afford) "" else " — Supply/Ledger t sends cash by courier",
+                        paperwork,                                      hq_ops_mod.tier_upgrade_build_days,
+                    }));
+                    try out.append(alloc, "           then: S autostaff · :newco@ hq:N <name> raises a company here, or :assignco co:N hq:M moves one in");
+                }
+            },
+            .regional => try out.append(alloc, try std.fmt.allocPrint(alloc, "tier       regional HQ · hosts 1 combat company ({d} here{s}) · {{d}}brigade tier is not buildable yet — a second company needs its own regional HQ{{/}}", .{ hosted, if (hosted == 0) ", {g}slot free{/}" else "" })),
+            .brigade => try out.append(alloc, try std.fmt.allocPrint(alloc, "tier       brigade HQ · hosts 2 combat companies ({d} here)", .{hosted})),
+        }
+        try out.append(alloc, "");
+    }
     try out.append(alloc, "facility           built  effective  next level cost");
     for (h.facilities.items) |f| {
         const eff = h.effectiveFacilityLevel(f.kind);
@@ -2234,6 +2263,27 @@ test "contract history lists closed contracts with their world; the map counts w
     var worked: u32 = 0;
     for (m.worlds) |w| worked += w.worked;
     try std.testing.expectEqual(@as(u32, 1), worked);
+}
+
+test "hq detail says a field HQ hosts no company and how to raise it" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 7 });
+    defer gs.deinit();
+    const commands = @import("commands.zig");
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "Test", .origin = .LC, .profession = .quartermaster } });
+    _ = try commands.execute(&gs, .{ .found_hq = .{ .name = "Firebase", .planet_key = "zebebelgenubi" } });
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const lines = try hqDetail(a, &gs, gs.hqs.keys()[1]);
+    var says_none = false;
+    var says_how = false;
+    for (lines) |l| {
+        if (std.mem.indexOf(u8, l, "hosts no company") != null) says_none = true;
+        if (std.mem.indexOf(u8, l, "to regional") != null and std.mem.indexOf(u8, l, "days build") != null) says_how = true;
+    }
+    try std.testing.expect(says_none and says_how);
+    const home = try hqDetail(a, &gs, gs.hqs.keys()[0]);
+    try std.testing.expect(std.mem.indexOf(u8, home[0], "regional HQ") != null);
 }
 
 test "desk and ledger queries build on a fresh campaign" {
