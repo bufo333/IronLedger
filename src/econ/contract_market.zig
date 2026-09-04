@@ -9,6 +9,9 @@ const planet = @import("../domain/planet.zig");
 const market = @import("market.zig");
 const logistics = @import("logistics.zig");
 const GameState = @import("../sim/state.zig").GameState;
+const hq_mod = @import("../domain/hq.zig");
+const person_mod = @import("../domain/person.zig");
+const person_gen = @import("../gen/person_gen.zig");
 
 /// Employer payment multiplier by faction, basis points. // TUNE
 pub fn employerMultBp(faction_key: []const u8) types.Bp {
@@ -298,11 +301,31 @@ fn refreshBoard(gs: *GameState, hq_id: types.HqId) !void {
     }
 }
 
+/// Who walks into a hiring hall: combat crews and techs most often, then
+/// medical and every back-office desk (Stage 12: finance, command and
+/// transport admins were missing, so those desks could never be filled).
+const hall_roles = [_]person_mod.Role{
+    .mekwarrior, .mekwarrior,    .tech_mek,        .tech_mek,   .tech_mechanic, .vehicle_crew,
+    .astech,     .astech,        .medic,           .doctor,     .admin_logistics, .admin_hr,
+    .admin_finance, .admin_command, .admin_transport,
+};
+
+/// An admin desk this HQ is short on, if any — the hall favours it.
+fn shortAdminRole(gs: *GameState, hq: *const hq_mod.Hq) ?person_mod.Role {
+    const req = hq.staffRequired();
+    const desks = [_]struct { role: person_mod.Role, need: u32 }{
+        .{ .role = .admin_command, .need = req.admin },
+        .{ .role = .admin_logistics, .need = req.logistics },
+        .{ .role = .admin_hr, .need = req.hr },
+        .{ .role = .admin_finance, .need = req.finance },
+    };
+    for (desks) |d| if (gs.hqStaff(hq.id, d.role).count < d.need) return d.role;
+    return null;
+}
+
 /// Daily hiring-hall churn (Stage 9C.3): people move fast. Each turn some
 /// candidates walk out and, on a good roll, someone new walks in.
 pub fn churnCandidates(gs: *GameState) !void {
-    const person_gen = @import("../gen/person_gen.zig");
-    const person_mod = @import("../domain/person.zig");
     const day = gs.clock.day_index;
 
     var i: usize = 0;
@@ -322,12 +345,9 @@ pub fn churnCandidates(gs: *GameState) !void {
         const roll = @as(u32, gs.rng.roll2d6(.market)) + hall + hr / 2;
         if (roll < 8) continue; // quiet day at the hall // TUNE
         const arrivals: u32 = if (roll >= 12) 2 else 1;
-        const roles = [_]person_mod.Role{
-            .mekwarrior, .mekwarrior, .tech_mek, .tech_mek, .tech_mechanic, .vehicle_crew,
-            .astech,     .astech,     .medic,    .doctor,   .admin_logistics, .admin_hr,
-        };
         for (0..arrivals) |_| {
-            const role = roles[gs.rng.random(.market).uintLessThan(usize, roles.len)];
+            // A short desk gets every other arrival until it is staffed.
+            const role = if (shortAdminRole(gs, hq)) |short| (if (gs.rng.roll2d6(.market) >= 7) short else hall_roles[gs.rng.random(.market).uintLessThan(usize, hall_roles.len)]) else hall_roles[gs.rng.random(.market).uintLessThan(usize, hall_roles.len)];
             const spec = person_gen.generateWithBonus(&gs.rng, role, gs.recruitBonus());
             const salary = types.applyBp(role.baseSalary(), spec.experience.salaryMultBp());
             try gs.candidates.append(gs.allocator(), .{
@@ -344,8 +364,6 @@ pub fn churnCandidates(gs: *GameState) !void {
 /// Hiring-hall boards (Stage 9C.2): weekly candidates per HQ, count and
 /// quality by hiring-hall level + HR staff; they move on after three weeks.
 pub fn refreshCandidates(gs: *GameState) !void {
-    const person_gen = @import("../gen/person_gen.zig");
-    const person_mod = @import("../domain/person.zig");
     const day = gs.clock.day_index;
 
     // Expire the stale.
@@ -363,12 +381,9 @@ pub fn refreshCandidates(gs: *GameState) !void {
         if (hall == 0) continue;
         const hr = gs.hqStaff(hq.id, .admin_hr).count;
         const count: u32 = 2 + hall + hr / 2;
-        const roles = [_]person_mod.Role{
-            .mekwarrior, .mekwarrior, .tech_mek, .tech_mek, .tech_mechanic, .vehicle_crew,
-            .astech,     .astech,     .medic,    .doctor,   .admin_logistics, .admin_hr,
-        };
         for (0..count) |_| {
-            const role = roles[gs.rng.random(.market).uintLessThan(usize, roles.len)];
+            // A short desk gets every other arrival until it is staffed.
+            const role = if (shortAdminRole(gs, hq)) |short| (if (gs.rng.roll2d6(.market) >= 7) short else hall_roles[gs.rng.random(.market).uintLessThan(usize, hall_roles.len)]) else hall_roles[gs.rng.random(.market).uintLessThan(usize, hall_roles.len)];
             const spec = person_gen.generateWithBonus(&gs.rng, role, gs.recruitBonus());
             const salary = types.applyBp(role.baseSalary(), spec.experience.salaryMultBp());
             try gs.candidates.append(gs.allocator(), .{
@@ -488,6 +503,25 @@ test "9C.3: hiring halls churn daily" {
     }
     try std.testing.expect(arrivals > 5);
     try std.testing.expect(departures > 5);
+}
+
+test "12: every admin desk walks into the hall, short desks first" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 21 });
+    defer gs.deinit();
+    _ = try gs.createCommander("T", .DC, .paymaster);
+    // The fresh commander's HQ has no finance clerk; the hall must offer one.
+    var seen_finance = false;
+    var seen_command = false;
+    for (0..40) |_| {
+        try refreshCandidates(&gs);
+        for (gs.candidates.items) |c| {
+            if (c.spec.role == .admin_finance) seen_finance = true;
+            if (c.spec.role == .admin_command) seen_command = true;
+        }
+        gs.clock.day_index += 7;
+    }
+    try std.testing.expect(seen_finance);
+    try std.testing.expect(seen_command);
 }
 
 test "no HQ, no reputation, no offers" {
