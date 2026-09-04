@@ -809,6 +809,25 @@ pub const GameState = struct {
         _ = try self.moveStock(home, dest, "armor", 10);
     }
 
+    /// Crate goods a company picked up in the field (salvaged structure,
+    /// windfalls it cannot use out there) for the next convoy home: they
+    /// arrive at the home warehouse after the map transit, no freight — the
+    /// salvage crews haul them. Structural work is depot work (Stage 12).
+    pub fn sendHome(self: *GameState, company: types.ForceId, key: []const u8, qty: u32) !void {
+        const home = self.homeHqFor(company);
+        if (home == .none or qty == 0) return;
+        const days = @max(3, self.courierEtaDays(.{ .company = company }));
+        try self.part_orders.append(self.allocator(), .{
+            .part_key = key,
+            .quantity = qty,
+            .dest = .{ .hq = home },
+            .ordered_day = self.clock.day_index,
+            .eta_day = self.clock.day_index + days,
+            .cost = 0,
+            .status = .in_transit,
+        });
+    }
+
     /// The treasury that pays for a site's logistics.
     pub fn siteTreasury(site: types.Site) Treasury {
         return switch (site) {

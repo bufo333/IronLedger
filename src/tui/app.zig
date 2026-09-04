@@ -736,7 +736,7 @@ pub const App = struct {
             .people => "/ , filter (…, wounded) · m admit to medbay · t train · a seat · P post · x transfer · L leave · D fire · r record",
             .market => "Tab pane · Enter buy / order / order shortfall · b fabricate component · [ ] HQ board · q welcome",
             .ledger => "j/k treasury · t send cash to it · T pull cash back to the outfit · p top-up policy · L loan · R repay",
-            .supply => "j/k site · on a company: t send cash · T pull cash home · p cash policy · P resupply policy · s ship now · o order to the field",
+            .supply => "on a company: t/T cash out/home · p cash policy · P resupply policy · s ship now · o order · H send structural parts home",
             .forces => "Enter assign · a/u seat · A auto · o role · d depot · m mothball · x move · R recall idle company · $ sell · X disband",
             .map => "h j k l move between worlds · f found HQ here · o offers here · n end turn · q welcome",
             .lab => "[ ] hull · j/k mount · - remove · + install · R order replacement · D send to depot (structure) · c clear · Enter commit",
@@ -2386,6 +2386,36 @@ pub const App = struct {
                         .company => |id| std.fmt.bufPrint(&buf, "supplypolicy co:{d} 14 20", .{@intFromEnum(id)}) catch "supplypolicy ",
                         else => "supplypolicy co:",
                     } else "supplypolicy co:"),
+                    'H' => {
+                        // Send every structural component in the field stores home.
+                        const co: types.ForceId = if (site) |s| (if (s == .company) s.company else .none) else .none;
+                        if (co == .none) {
+                            self.say(.dim, "move the cursor onto a company's field stores", .{});
+                            return;
+                        }
+                        const home = g.homeHqFor(co);
+                        const f = g.forces.getPtr(co) orelse return;
+                        var keys: std.ArrayListUnmanaged([]const u8) = .empty;
+                        var qtys: std.ArrayListUnmanaged(u32) = .empty;
+                        var it = f.stock.iterator();
+                        while (it.next()) |e| if (game.part.isComponent(e.key_ptr.*) and e.value_ptr.* > 0) {
+                            try keys.append(al, e.key_ptr.*);
+                            try qtys.append(al, e.value_ptr.*);
+                        };
+                        if (keys.items.len == 0) {
+                            self.say(.dim, "no structural components in {s}'s field stores", .{f.name});
+                            return;
+                        }
+                        var sent: u32 = 0;
+                        for (keys.items, qtys.items) |k, n| {
+                            _ = game.commands.execute(g, .{ .ship_stock = .{ .part_key = k, .quantity = n, .from = .{ .company = co }, .to = .{ .hq = home } } }) catch |err| {
+                                self.say(.crit, "{s}: {s}", .{ k, App.errorText(err) });
+                                return;
+                            };
+                            sent += n;
+                        }
+                        self.say(.good, "{d} component{s} shipped from {s} to {s} (freight from local funds)", .{ sent, if (sent == 1) "" else "s", f.name, q.hqName(g, home) });
+                    },
                     'T' => self.openCommand(if (site) |s| switch (s) {
                         .company => |id| std.fmt.bufPrint(&buf, "transfer co:{d} outfit {d}", .{ @intFromEnum(id), @max(0, @divTrunc(g.treasuryBalance(.{ .company = id }), 2)) }) catch "transfer ",
                         .hq => |id| std.fmt.bufPrint(&buf, "transfer hq:{d} outfit {d}", .{ @intFromEnum(id), @max(0, @divTrunc(g.treasuryBalance(.{ .hq = id }), 2)) }) catch "transfer ",

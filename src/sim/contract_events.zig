@@ -315,9 +315,15 @@ fn applyEffects(gs: *GameState, effects: []const events.Effect, contract: ?*cont
             .fatigue => |amount| applyToCompany(gs, company, .fatigue, @intCast(amount)),
             .xp_all => |amount| applyToCompany(gs, company, .xp, @intCast(amount)),
             .parts_windfall => |n| {
-                const site: types.Site = if (company != .none) .{ .company = company } else gs.defaultSite();
-                try gs.addStock(site, "comp_arm", n);
-                try gs.addStock(site, "mlas", n);
+                // Weapons stay with the company (field techs can fit them);
+                // structure goes home with the next convoy (depot work).
+                if (company != .none) {
+                    try gs.addStock(.{ .company = company }, "mlas", n);
+                    try gs.sendHome(company, "comp_arm", n);
+                } else {
+                    try gs.addStock(gs.defaultSite(), "comp_arm", n);
+                    try gs.addStock(gs.defaultSite(), "mlas", n);
+                }
             },
             .damage_random_units => |n| damageRandomUnits(gs, company, n),
         }
@@ -425,5 +431,12 @@ test "effects change real state: cash, reputation, score, spares" {
     try std.testing.expectEqual(@as(i64, 10_000_000), gs.funds);
     try std.testing.expectEqual(@as(i32, 2), gs.reputation);
     try std.testing.expectEqual(@as(i32, 3), c.score);
-    try std.testing.expectEqual(@as(u32, 2), gs.stockCount(.{ .company = co }, "comp_arm"));
+    // Weapons stay with the company; structural parts are crated home (Stage 12).
+    try std.testing.expectEqual(@as(u32, 2), gs.stockCount(.{ .company = co }, "mlas"));
+    try std.testing.expectEqual(@as(u32, 0), gs.stockCount(.{ .company = co }, "comp_arm"));
+    var crated: u32 = 0;
+    for (gs.part_orders.items) |o| if (std.mem.eql(u8, o.part_key, "comp_arm") and o.dest == .hq and o.status == .in_transit) {
+        crated += o.quantity;
+    };
+    try std.testing.expectEqual(@as(u32, 2), crated);
 }

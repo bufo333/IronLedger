@@ -365,10 +365,12 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
         // Stripped limbs ride home in the trucks — if there's room to spare
         // after the reloads (crews won't bury the ammo under wrecks).
         const stripped: u32 = @intCast(@min(2, @divTrunc(enemy_destroyed_bv, 500)));
+        // Structural salvage is crated straight home: it is depot stock, and
+        // dead weight on the trucks out here (Stage 12).
         const salvage_keys = [_][]const u8{ "comp_arm", "comp_leg" };
         for (0..stripped) |i| {
             const key = salvage_keys[i % salvage_keys.len];
-            if (gs.siteFreeTons(player.site) -| 20 >= part_mod.tons(key)) try gs.addStock(player.site, key, 1);
+            try gs.sendHome(c.assigned_company, key, 1);
         }
     }
 
