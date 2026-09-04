@@ -76,6 +76,9 @@ p = plain()
 assert "PERSONNEL" in p and "RECORD" in p and "OPEN SEATS" in p, p[-3000:]
 send("/"); send("/")
 assert "filter techs" in plain(), plain()[-2000:]
+for _ in range(8): send("/", 0.3)          # … other → wounded
+assert "filter wounded" in plain()[-30000:], plain()[-2000:]
+send("/", 0.5)                              # back to all
 send("a", 0.8)                 # seat picker
 assert "ASSIGN" in plain()[-30000:], plain()[-2000:]
 send("\x1b")

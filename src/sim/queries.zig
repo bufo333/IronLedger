@@ -891,10 +891,11 @@ pub const HallFilter = enum {
     admin_hr,
     admin_finance,
     other, // infantry, battle armor, everything else
+    wounded, // personnel screen only: anyone hurt, in the medbay or waiting
 
     pub fn matches(self: HallFilter, role: person_mod.Role) bool {
         return switch (self) {
-            .all => true,
+            .all, .wounded => true,
             .combat => role == .mekwarrior or role == .vehicle_crew or role == .aero_pilot,
             .techs => role == .tech_mek or role == .tech_mechanic or role == .tech_aero or role == .tech_ba or role == .astech,
             .medical => role == .doctor or role == .medic,
@@ -1161,7 +1162,7 @@ pub fn assignmentText(alloc: Alloc, gs: *GameState, p: *const person_mod.Person)
 
 pub fn statusText(alloc: Alloc, gs: *GameState, p: *const person_mod.Person) ![]const u8 {
     const day = gs.clock.day_index;
-    if (p.status == .wounded) return std.fmt.allocPrint(alloc, "{{c}}wounded{{/}} heals d{d}", .{p.wound_heal_day orelse day});
+    if (p.status == .wounded) return if (p.medbay_admitted) "{a}medbay{/}" else "{c}wounded{/}";
     if (p.status != .active) return try std.fmt.allocPrint(alloc, "{{c}}{s}{{/}}", .{@tagName(p.status)});
     if (p.leave_until_day) |until| if (day < until) return std.fmt.allocPrint(alloc, "{{a}}on leave{{/}} until d{d}", .{until});
     if (p.training) |t| return std.fmt.allocPrint(alloc, "{{a}}training{{/}} {s} d{d}", .{ @tagName(t.skill), t.done_day });
@@ -1188,6 +1189,7 @@ pub fn people(alloc: Alloc, gs: *GameState, filter: HallFilter) !People {
         if (p.status == .kia or p.status == .retired or p.status == .resigned) continue;
         total += 1;
         if (!filter.matches(p.role)) continue;
+        if (filter == .wounded and p.status != .wounded) continue;
         const name = try std.fmt.allocPrint(alloc, "{s} {s}", .{ p.first_name, p.last_name });
         try rows.append(alloc, .{ .id = p.id, .text = try std.fmt.allocPrint(alloc, "{d: <4} {s: <20} {s: <15} {s: <7} {s: <5} {d: >3} {s} {s} {s: <11} {d: >3} {d: >3} {s: >7}", .{
             @intFromEnum(p.id),                          clip(name, 20),
@@ -1225,7 +1227,7 @@ pub fn personRecord(alloc: Alloc, gs: *GameState, id: types.PersonId) ![]const [
     const p = gs.person(id) orelse return out.toOwnedSlice(alloc);
     const day = gs.clock.day_index;
     try out.append(alloc, try std.fmt.allocPrint(alloc, "{{a}}{s} {s}{{/}}{s}  ·  {s} · {s}", .{ p.first_name, p.last_name, if (p.callsign) |c| try std.fmt.allocPrint(alloc, " \"{s}\"", .{c}) else "", @tagName(p.role), @tagName(p.experience()) }));
-    try out.append(alloc, try std.fmt.allocPrint(alloc, "status      {s}", .{try statusText(alloc, gs, p)}));
+    try out.append(alloc, try std.fmt.allocPrint(alloc, "status      {s}{s}", .{ try statusText(alloc, gs, p), if (p.status == .wounded) (if (p.wound_heal_day) |h| try std.fmt.allocPrint(alloc, " · discharged day {d} ({d} days)", .{ h, h -| day }) else if (p.medbay_admitted) " · triage tomorrow" else " · {c}not admitted — [m] admits{/}") else "" }));
     try out.append(alloc, try std.fmt.allocPrint(alloc, "assignment  {s}", .{try assignmentText(alloc, gs, p)}));
     try out.append(alloc, try std.fmt.allocPrint(alloc, "unit        {s} · at {s}", .{ if (p.assigned_force != .none) forceName(gs, p.assigned_force) else "—", locationText(gs, p) }));
     try out.append(alloc, "");
