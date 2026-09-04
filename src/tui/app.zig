@@ -702,7 +702,7 @@ pub const App = struct {
             .supply => "j/k site · on a company: t send cash · p top-up policy · s ship provisions from home · o order to the field",
             .forces => "Tab pane · Enter assign · a/u seat · A auto · t train · x transfer · $ sell hull · X disband company",
             .map => "h j k l move between worlds · f found HQ here · o offers here · n end turn · q welcome",
-            .lab => "[ ] hull · j/k mount · - remove · + install (part, then location) · R order replacement · c clear · Enter commit",
+            .lab => "[ ] hull · j/k mount · - remove · + install · R order replacement · D send to depot (structure) · c clear · Enter commit",
             .hq => "[ ] switch HQ · Tab hall · f/F hall filter · Enter hire · u upgrade · S autostaff · b fabricate",
             else => "? help · F1-F8 screens · Tab pane · j/k cursor · Enter act · : command · n end turn · q welcome",
         });
@@ -1241,6 +1241,7 @@ pub const App = struct {
                     "  {a}market{/}      F10/0: / , filter (mechs, vehicles, aero, dropships, jumpships, weapons, ammo, equipment, components, supplies)",
                     "               boards (Enter buys) · catalog (Enter orders, b fabricates comp_*) · demand (Enter orders shortfall)",
                     "  {a}lab{/}         + picks a part then a location (green = rules allow) · R orders a replacement for damaged gear · dim rows = full",
+                    "  {a}structure{/}   not fitted in the Lab: D (Lab) or d (Forces) sends the hull to the depot; the bay consumes comp_* parts from the home HQ",
                     "  {a}money{/}       Ledger: L loan (simple interest) · R repay · Forces: $ sell hull · X disband company · HQ: $ sell HQ",
                     "  {a}field cash{/}  Ledger or Supply, on a company: t courier cash now (days in transit) · p policy = keep it above a floor, at most cap/month",
                     "  {a}resupply{/}    Supply, on a deployed company: s ship provisions/ammo from its home warehouse · o order straight to the field (slower, pricier)",
@@ -1251,7 +1252,7 @@ pub const App = struct {
                     "",
                     "  {d}[Esc] close{/}",
                 };
-                const r = self.modalRect(130, 25);
+                const r = self.modalRect(130, 26);
                 const inner = self.screen.pane(r, .{ .title = "HELP", .double = true });
                 self.screen.lines(inner, &rows, 0, null);
             },
@@ -2185,6 +2186,12 @@ pub const App = struct {
                     '$' => if (row) |r| {
                         if (r.unit != .none) self.modal = .{ .sell_unit = r.unit };
                     },
+                    'd' => if (row) |r| {
+                        if (r.unit != .none) {
+                            try self.exec(.{ .depot = r.unit });
+                            if (self.msg_style != .crit) self.say(.good, "#{d} queued for depot repair", .{@intFromEnum(r.unit)});
+                        }
+                    },
                     'X' => if (row) |r| {
                         const co = g.companyOf(r.force);
                         if (co != .none) self.modal = .{ .disband = co };
@@ -2302,6 +2309,10 @@ pub const App = struct {
                         }
                     },
                     'c' => try self.exec(.{ .refit_clear = uid }),
+                    'D' => {
+                        try self.exec(.{ .depot = uid });
+                        if (self.msg.len == 0 or self.msg_style != .crit) self.say(.good, "#{d} queued for depot repair — see the HQ screen's bays", .{@intFromEnum(uid)});
+                    },
                     else => {},
                 }
             },
@@ -2765,6 +2776,7 @@ pub const App = struct {
             return .{ .transfer = .{ .from = try parseTreasury(try need(tokens.next())), .to = try parseTreasury(try need(tokens.next())), .amount = try num(i64, tokens.next()) } };
         }
         if (eq(u8, verb, "admit")) return .{ .admit = @enumFromInt(try num(u32, tokens.next())) };
+        if (eq(u8, verb, "depot")) return .{ .depot = @enumFromInt(try num(u32, tokens.next())) };
         if (eq(u8, verb, "repay")) return .{ .repay_loan = .{ .index = try num(usize, tokens.next()), .amount = try num(i64, tokens.next()) } };
         if (eq(u8, verb, "sell")) return .{ .sell_unit = @enumFromInt(try num(u32, tokens.next())) };
         if (eq(u8, verb, "sellhq")) {
@@ -2952,6 +2964,10 @@ pub const App = struct {
             error.NotWounded => "that person is not wounded",
             error.NoSuchLoan => "no such loan (or nothing to repay)",
             error.NoSuchListing => "that listing is gone",
+            error.NothingToRepair => "that hull has no structural damage — the Lab handles gear, the depot handles structure",
+            error.MissingComponents => "structural components missing at the home HQ — order or fabricate them on the Market screen first",
+            error.NoBay => "no mek bay that can do structural work — a regional HQ with a mek_bay is needed",
+            error.UnitAway => "that hull is away from home — depot work happens at the home HQ",
             else => @errorName(err),
         };
     }

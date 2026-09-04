@@ -143,6 +143,9 @@ pub const Command = union(enum) {
     sell_hq: types.HqId,
     /// Close a company: hulls sold, people released, forces struck.
     disband_company: types.ForceId,
+    /// Send a hull to the depot now for structural repair (otherwise the
+    /// weekly maintenance pass queues it when the components are in stock).
+    depot: types.UnitId,
 };
 
 pub const Error = error{
@@ -213,6 +216,7 @@ pub const Error = error{
     Insolvent,
     /// Nothing left to sell or borrow: game over.
     Bankrupt,
+    NothingToRepair,
 } || std.mem.Allocator.Error;
 
 pub const Result = struct {
@@ -462,6 +466,20 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             if (u.status == .mothballed) return Error.AlreadyMothballed;
             if (gs.deploymentContract(gs.companyOf(u.force)) != null) return Error.UnitDeployed;
             u.status = .mothballed;
+            return .{};
+        },
+        .depot => |unit_id| {
+            const u = gs.unit(unit_id) orelse return Error.UnknownUnit;
+            if (!u.needsDepot()) return Error.NothingToRepair;
+            if (gs.deploymentContract(gs.companyOf(u.force)) != null) return Error.UnitDeployed;
+            if (!gs.isCompanyHome(gs.companyOf(u.force))) return Error.UnitAway;
+            const queued = hq_ops.queueDepotRepair(gs, unit_id) catch |err| return switch (err) {
+                error.NoHq => Error.NoHq,
+                error.NoBay => Error.NoBay,
+                error.UnknownUnit => Error.UnknownUnit,
+                else => Error.NoBay,
+            };
+            if (!queued) return Error.MissingComponents;
             return .{};
         },
         .admit => |pid| {
