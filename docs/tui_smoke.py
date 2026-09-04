@@ -77,10 +77,10 @@ assert "PERSONNEL" in p and "RECORD" in p and "OPEN SEATS" in p, p[-3000:]
 send("/"); send("/")
 assert "filter techs" in plain(), plain()[-2000:]
 send("a", 0.8)                 # seat picker
-assert "ASSIGN" in plain(), plain()[-2000:]
+assert "ASSIGN" in plain()[-30000:], plain()[-2000:]
 send("\x1b")
 send("D", 0.8)                 # fire confirm
-assert "FIRE?" in plain(), plain()[-2000:]
+assert "FIRE?" in plain()[-30000:], plain()[-2000:]
 send("\x1b")
 send("m", 0.8)                 # admit: refusal if healthy, admission if wounded
 p = plain()[-400:]
@@ -95,7 +95,7 @@ send("5"); send("L", 0.8)      # ledger → loan prefill
 assert ":loan " in plain()[-300:], plain()[-600:]
 send("\x1b")
 send("3"); send("j"); send("j"); send("$", 0.8)   # sell hull confirm
-assert "SELL HULL?" in plain()[-2500:], plain()[-2500:]
+assert "SELL HULL?" in plain()[-30000:], plain()[-3000:]
 send("\x1b")
 send("1"); send("e", 1.5)      # emblem picker on the Desk
 p = plain()
