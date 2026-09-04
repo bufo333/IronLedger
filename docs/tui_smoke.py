@@ -74,6 +74,10 @@ send("5")
 assert "TREASURIES" in plain()
 send("3")
 assert "TO&E" in plain()
+send("]", 0.6)                 # forces: page to the first company
+assert "(2/" in plain()[-30000:], plain()[-3000:]
+send("[", 0.6)
+assert "all forces" in plain()[-30000:], plain()[-3000:]
 send("7")
 assert "back office" in plain() and "HIRING HALL" in plain()
 send("u", 0.8)                 # cursor on the header row → picker

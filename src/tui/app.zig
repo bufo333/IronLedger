@@ -193,6 +193,8 @@ pub const App = struct {
     people_filter: q.HallFilter = .all,
     market_filter: q.MarketFilter = .all,
     map_cursor: usize = 0,
+    /// Forces screen view: index into queries.toeViews (all, each company, unassigned).
+    forces_view: usize = 0,
     /// Star map zoom: 1 = every world fitted into the pane; 2/4/8 = that
     /// many times closer, centred on the cursor world.
     map_zoom: u8 = 1,
@@ -743,7 +745,7 @@ pub const App = struct {
             .market => "Tab pane · Enter buy / order / order shortfall · b fabricate component · K keep stocked (pane: Enter edit, x remove) · [ ] HQ board · q welcome",
             .ledger => "j/k treasury · t send cash to it · T pull cash back to the outfit · p top-up policy · x clear its policy · L loan · R repay",
             .supply => "company: t/T cash · p/P cash/resupply policy · s ship · o order · R trim to plan · H parts home · HQ: K keep stocked · $ sell stock",
-            .forces => "Enter assign · a/u seat · A auto · l lance · o role · d depot · m mothball · x company · b fabricate short comp · R recall · $ sell · X disband",
+            .forces => "[ ] company / pool · Enter assign · a/u seat · A auto · l lance · o role · d depot · m mothball · x company · b fabricate · R recall · $ sell · X disband",
             .map => "h j k l move between worlds (the view follows) · + / - zoom · f found HQ here · o offers here · q welcome",
             .lab => "[ ] hull · j/k mount · - remove · + install · R order replacement · D send to depot (structure) · c clear · Enter commit",
             .hq => "[ ] switch HQ · u upgrade the highlighted facility (picker elsewhere) · T tier · S autostaff · Tab hall · f/F filter · Enter hire",
@@ -1214,11 +1216,13 @@ pub const App = struct {
         const al = self.a();
         const g = &self.gs.?;
         const b = self.body();
-        const rows = try q.toe(al, g);
+        const views = try q.toeViews(al, g);
+        if (self.forces_view >= views.len) self.forces_view = 0;
+        const rows = try q.toeFiltered(al, g, views[self.forces_view].filter);
         var texts: std.ArrayListUnmanaged([]const u8) = .empty;
         for (rows) |r| try texts.append(al, r.text);
         const lw: u16 = if (b.w > 120) b.w * 55 / 100 else b.w;
-        self.listPane(.{ .x = b.x, .y = b.y, .w = lw, .h = b.h }, "TO&E", texts.items, 0, self.focus == 0, true);
+        self.listPane(.{ .x = b.x, .y = b.y, .w = lw, .h = b.h }, try std.fmt.allocPrint(al, "TO&E · {{a}}{s}{{/}} ({d}/{d}) · [ ] switch", .{ views[self.forces_view].label, self.forces_view + 1, views.len }), texts.items, 0, self.focus == 0, true);
         if (lw < b.w) {
             const c = self.cur(0).*;
             const detail_h: u16 = b.h * 3 / 5;
@@ -1267,6 +1271,14 @@ pub const App = struct {
         const c = self.cur(0).*;
         if (c >= view.site.len) return null;
         return view.site[c];
+    }
+
+    /// The TO&E rows for the current Forces view.
+    fn toeRows(self: *App) ![]q.ToeRow {
+        const g = &self.gs.?;
+        const views = try q.toeViews(self.a(), g);
+        if (self.forces_view >= views.len) self.forces_view = 0;
+        return q.toeFiltered(self.a(), g, views[self.forces_view].filter);
     }
 
     fn homeHqOf(self: *App, company: types.ForceId) u32 {
@@ -1327,7 +1339,7 @@ pub const App = struct {
                     "  {a}desk{/}        Enter on an inbox row opens the decision · Enter on a checklist row jumps to its screen",
                     "  {a}contracts{/}   Enter accepts the offer under the cursor · c completes · R recalls",
                     "  {a}ledger{/}      j/k picks the treasury · t transfer · p policy · L loan",
-                    "  {a}forces{/}      a assign · u unassign · A auto-assign the company · t train · cursor on a company = DAMAGE pane (struct = depot, gear = field) · b fabricates the shortest comp_*",
+                    "  {a}forces{/}      [ ] page through all forces, each company, the unassigned pool · a assign · u unassign · A auto-assign the company · t train · cursor on a company = DAMAGE pane (struct = depot, gear = field) · b fabricates the shortest comp_*",
                     "  {a}hq{/}          [ ] switch HQ · u upgrade · S autostaff · h hire · f/F hall filter",
                     "  {a}people{/}      / filter · m admit wounded · t train · a assign seat · P post · x transfer · L leave · D fire",
                     "  {a}market{/}      F10/0: / , filter (mechs, vehicles, aero, dropships, jumpships, weapons, ammo, equipment, components, supplies)",
@@ -2041,7 +2053,7 @@ pub const App = struct {
             },
             .forces => {
                 if (self.focus == 0) {
-                    const rows = try q.toe(al, g);
+                    const rows = try self.toeRows();
                     self.moveCursor(0, delta, rows.len);
                 } else {
                     const pool = try q.unassigned(al, g);
@@ -2145,7 +2157,7 @@ pub const App = struct {
                 self.modal = .{ .input = .command };
             },
             .forces => {
-                const rows = try q.toe(al, g);
+                const rows = try self.toeRows();
                 const c = self.cur(0).*;
                 if (self.focus == 0 and c < rows.len and rows[c].unit != .none) {
                     if (self.narrow()) {
@@ -2396,7 +2408,7 @@ pub const App = struct {
                 else => {},
             },
             .forces => {
-                const rows = try q.toe(al, g);
+                const rows = try self.toeRows();
                 const c = self.cur(0).*;
                 const row: ?q.ToeRow = if (c < rows.len) rows[c] else null;
                 switch (ch) {
@@ -2431,6 +2443,11 @@ pub const App = struct {
                         }
                         self.modal_cursor = 0;
                         self.modal = .{ .lance_pick = r.unit };
+                    },
+                    ']', '[' => {
+                        const views = try q.toeViews(al, g);
+                        self.forces_view = if (ch == ']') (self.forces_view + 1) % views.len else (self.forces_view + views.len - 1) % views.len;
+                        self.cur(0).* = 0;
                     },
                     'b' => if (row) |r| {
                         const co = g.companyOf(r.force);

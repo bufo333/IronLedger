@@ -651,13 +651,41 @@ pub const ToeRow = struct {
 /// The TO&E as an indented tree, one row per force and hull, followed by
 /// the hulls that belong to no force (bought, salvaged, or pulled out).
 pub fn toe(alloc: Alloc, gs: *GameState) ![]ToeRow {
-    var out: std.ArrayListUnmanaged(ToeRow) = .empty;
+    return toeFiltered(alloc, gs, .all);
+}
+
+/// What the Forces screen shows: everything, one company, or the hulls
+/// that belong to no force.
+pub const ToeFilter = union(enum) { all, company: types.ForceId, unassigned };
+
+pub const ToeView = struct { filter: ToeFilter, label: []const u8 };
+
+/// The views the Forces screen can page through with [ and ].
+pub fn toeViews(alloc: Alloc, gs: *GameState) ![]ToeView {
+    var out: std.ArrayListUnmanaged(ToeView) = .empty;
+    try out.append(alloc, .{ .filter = .all, .label = "all forces" });
     var fit = gs.forces.iterator();
     while (fit.next()) |e| {
         const f = e.value_ptr;
         if (f.parent != .none) continue;
-        try toeInto(alloc, gs, &out, f.id, 0);
+        try out.append(alloc, .{ .filter = .{ .company = f.id }, .label = f.name });
     }
+    try out.append(alloc, .{ .filter = .unassigned, .label = "unassigned hulls" });
+    return out.toOwnedSlice(alloc);
+}
+
+pub fn toeFiltered(alloc: Alloc, gs: *GameState, filter: ToeFilter) ![]ToeRow {
+    var out: std.ArrayListUnmanaged(ToeRow) = .empty;
+    if (filter != .unassigned) {
+        var fit = gs.forces.iterator();
+        while (fit.next()) |e| {
+            const f = e.value_ptr;
+            if (f.parent != .none) continue;
+            if (filter == .company and filter.company != f.id) continue;
+            try toeInto(alloc, gs, &out, f.id, 0);
+        }
+    }
+    if (filter == .company) return out.toOwnedSlice(alloc);
     var loose: u32 = 0;
     var upkeep: types.CBills = 0;
     var uit = gs.units.iterator();
@@ -665,6 +693,7 @@ pub fn toe(alloc: Alloc, gs: *GameState) ![]ToeRow {
         loose += 1;
         upkeep += e.value_ptr.monthlyBill();
     };
+    if (loose == 0 and filter == .unassigned) try out.append(alloc, .{ .force = .none, .unit = .none, .text = "{d}no unassigned hulls — everything bought or salvaged is in a company{/}" });
     if (loose > 0) {
         try out.append(alloc, .{ .force = .none, .unit = .none, .text = try std.fmt.allocPrint(alloc, "{{a}}[—] Unassigned hulls{{/}}  {d} · {s}/mo upkeep · {{d}}no tech: they degrade; [x] place in a company, [m] mothball{{/}}", .{ loose, try money(alloc, upkeep) }) });
         var it2 = gs.units.iterator();

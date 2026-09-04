@@ -130,7 +130,8 @@ cursor.
 
 ### F3 Forces
 
-The TO&E as a tree with pilot, tech and state per hull; the selected
+The TO&E as a tree with pilot, tech and state per hull, paged with `[`
+and `]` between all forces, each company and the unassigned pool; the selected
 hull's mounts, ammo and repair needs; the unassigned pool; the person;
 the medbay. `o` sets a lance's role (fighting, defense, scouting,
 training), `d` sends a hull to the depot, `$` sells one, `X` disbands a
