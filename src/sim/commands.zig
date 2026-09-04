@@ -155,6 +155,10 @@ pub const Command = union(enum) {
     /// whenever the deployed company's stores fall under `min_days`.
     /// `tons` = 0 removes the policy.
     set_supply_policy: struct { company: types.ForceId, min_days: u16, tons: u32, ammo_battles: u8 = 0 },
+    /// Put a hull into a lance (line or support) of its company, at home.
+    move_unit: struct { unit: types.UnitId, force: types.ForceId },
+    /// Raise a new line lance under a company (HQ lance capacity permitting).
+    new_lance: struct { company: types.ForceId, name: []const u8 },
 };
 
 pub const Error = error{
@@ -478,6 +482,30 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             if (gs.deploymentContract(gs.companyOf(u.force)) != null) return Error.UnitDeployed;
             u.status = .mothballed;
             return .{};
+        },
+        .move_unit => |m| {
+            const u = gs.unit(m.unit) orelse return Error.UnknownUnit;
+            const dest = gs.force(m.force) orelse return Error.UnknownForce;
+            if (dest.echelon != .lance and dest.echelon != .support_lance and dest.echelon != .company and dest.echelon != .air_lance) return Error.NotACompany;
+            const co = gs.companyOf(m.force);
+            if (co == .none) return Error.NotACompany;
+            if (gs.deploymentContract(co) != null or !gs.isCompanyHome(co)) return Error.CompanyDeployed;
+            const from_co = gs.companyOf(u.force);
+            if (from_co != .none and from_co != co) return Error.SameForce; // use transfer_unit between companies
+            if (dest.echelon == .lance and dest.units.items.len >= force_mod.lance_size) return Error.TooManyLances;
+            if (u.status == .in_transit) return Error.Unavailable;
+            try gs.moveUnitToForce(m.unit, m.force);
+            return .{};
+        },
+        .new_lance => |nl| {
+            const co = gs.force(nl.company) orelse return Error.UnknownForce;
+            if (co.echelon != .company) return Error.NotACompany;
+            if (nl.name.len == 0) return Error.UnknownForce;
+            const hq = gs.hqs.getPtr(co.supplying_hq);
+            const cap: u32 = if (hq) |h| h.capacity().lances_per_company else 3;
+            if (gs.combatLancesOf(nl.company) >= cap) return Error.TooManyLances;
+            const id = try gs.createForce(nl.name, .lance, nl.company);
+            return .{ .created_force = id };
         },
         .set_supply_policy => |sp| {
             const f = gs.force(sp.company) orelse return Error.UnknownForce;
@@ -1286,6 +1314,37 @@ test "policies run daily under a monthly cap; resupply ships provisions to a com
     // tons = 0 removes it
     _ = try execute(&gs, .{ .set_supply_policy = .{ .company = co, .min_days = 14, .tons = 0 } });
     try std.testing.expectEqual(@as(usize, 0), gs.supply_policies.items.len);
+}
+
+test "hulls move between lances at home; a new lance respects the HQ's lance cap" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 33 });
+    defer gs.deinit();
+    _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .FS, .profession = .chief_engineer } });
+    const co = (try execute(&gs, .{ .new_company = "Alpha" })).created_force;
+    // A bought truck joins the company in the first line lance with room…
+    const truck = try gs.addUnit("CGT-3");
+    _ = try execute(&gs, .{ .transfer_unit = .{ .unit = truck, .to_company = co } });
+    // …and can be moved into the logistics lance.
+    var log_lance: types.ForceId = .none;
+    var fit = gs.forces.iterator();
+    while (fit.next()) |e| if (e.value_ptr.echelon == .support_lance and e.value_ptr.support_kind == .transport and gs.companyOf(e.value_ptr.id) == co) {
+        log_lance = e.value_ptr.id;
+    };
+    try std.testing.expect(log_lance != .none);
+    _ = try execute(&gs, .{ .move_unit = .{ .unit = truck, .force = log_lance } });
+    try std.testing.expectEqual(log_lance, gs.unit(truck).?.force);
+    // Three line lances plus the recon lance fill a level-1 bay's four; the
+    // fifth needs a level-3 mek bay.
+    try std.testing.expectEqual(@as(u32, 4), gs.combatLancesOf(co));
+    try std.testing.expectError(Error.TooManyLances, execute(&gs, .{ .new_lance = .{ .company = co, .name = "5th Lance" } }));
+    const hq = gs.hqs.getPtr(gs.hqs.keys()[0]).?;
+    for (hq.facilities.items) |*f| if (f.kind == .mek_bay) {
+        f.level = 3;
+    };
+    gs.refreshHqStaffing();
+    if (hq.staff_assigned < hq.staffRequired().total()) _ = try execute(&gs, .{ .autostaff = hq.id });
+    _ = try execute(&gs, .{ .new_lance = .{ .company = co, .name = "5th Lance" } });
+    try std.testing.expectEqual(@as(u32, 5), gs.combatLancesOf(co));
 }
 
 test "lance roles: set on lances only, persisted on the force" {

@@ -64,6 +64,8 @@ const Modal = union(enum) {
     settings,
     /// HQ facility upgrade picker.
     upgrade: types.HqId,
+    /// Lance picker for a hull.
+    lance_pick: types.UnitId,
 };
 
 /// Size tiers (docs/tui.md): the largest that fits decides how many panes
@@ -81,7 +83,7 @@ fn tierFor(cols: u16, rows: u16) Tier {
 const office_roles = [_]game.person.Role{ .admin_command, .admin_logistics, .admin_transport, .admin_hr, .admin_finance };
 
 const verbs = [_][]const u8{
-    "admit",   "repay",   "sell",      "sellhq",    "disband",  "depot",    "role",   "supplypolicy",
+    "admit",   "repay",   "sell",      "sellhq",    "disband",  "depot",    "role",   "supplypolicy", "move", "newlance",
     "day",     "save",    "quit",      "help",      "emblem",   "transfer", "policy", "loan",     "accept", "resolve",
     "order",   "ship",    "buy",       "assign",    "unassign", "autoassign", "autostaff", "upgrade", "tier",   "fabricate",
     "hire",    "recruit", "fire",      "post",      "train",    "triage",   "leave",  "mothball", "activate", "complete",
@@ -737,7 +739,7 @@ pub const App = struct {
             .market => "Tab pane · Enter buy / order / order shortfall · b fabricate component · [ ] HQ board · q welcome",
             .ledger => "j/k treasury · t send cash to it · T pull cash back to the outfit · p top-up policy · L loan · R repay",
             .supply => "on a company: t/T cash out/home · p cash policy · P resupply policy · s ship now · o order · H send structural parts home",
-            .forces => "Enter assign · a/u seat · A auto · o role · d depot · m mothball · x move · R recall idle company · $ sell · X disband",
+            .forces => "Enter assign · a/u seat · A auto · l lance · o role · d depot · m mothball · x company · R recall · $ sell · X disband",
             .map => "h j k l move between worlds · f found HQ here · o offers here · n end turn · q welcome",
             .lab => "[ ] hull · j/k mount · - remove · + install · R order replacement · D send to depot (structure) · c clear · Enter commit",
             .hq => "[ ] switch HQ · u upgrade the highlighted facility (picker elsewhere) · T tier · S autostaff · Tab hall · f/F filter · Enter hire",
@@ -1347,6 +1349,16 @@ pub const App = struct {
                 const r = self.modalRect(90, @intCast(@min(rows.items.len + 2, 30)));
                 const inner = self.screen.pane(r, .{ .title = "DECISION", .double = true });
                 self.screen.lines(inner, rows.items, 0, null);
+            },
+            .lance_pick => |uid| {
+                const lances = try self.lanceChoices(uid);
+                var rows: std.ArrayListUnmanaged([]const u8) = .empty;
+                for (lances) |lc| try rows.append(al, lc.text);
+                if (lances.len == 0) try rows.append(al, "{d}no lances — the hull must belong to a company that is home{/}");
+                if (self.modal_cursor >= lances.len and lances.len > 0) self.modal_cursor = lances.len - 1;
+                const r = self.modalRect(84, @intCast(@min(rows.items.len + 3, self.screen.rows)));
+                const inner = self.screen.pane(r, .{ .title = try std.fmt.allocPrint(al, "MOVE #{d} TO · [Enter] choose · [Esc] cancel", .{@intFromEnum(uid)}), .double = true, .right_title = ":newlance co:N <name> adds a lance" });
+                self.screen.lines(inner, rows.items, firstRow(self.modal_cursor, inner.h), if (lances.len > 0) self.modal_cursor else null);
             },
             .upgrade => |hid| {
                 const g = &self.gs.?;
@@ -2298,6 +2310,14 @@ pub const App = struct {
                         var buf: [64]u8 = undefined;
                         self.openCommand(if (r.unit != .none) std.fmt.bufPrint(&buf, "xfer unit {d} co:", .{@intFromEnum(r.unit)}) catch "xfer unit " else "xfer unit ");
                     },
+                    'l' => if (row) |r| {
+                        if (r.unit == .none) {
+                            self.say(.dim, "put the cursor on a hull to move it into a lance", .{});
+                            return;
+                        }
+                        self.modal_cursor = 0;
+                        self.modal = .{ .lance_pick = r.unit };
+                    },
                     'm' => if (row) |r| {
                         if (r.unit == .none) return;
                         const u = g.unit(r.unit) orelse return;
@@ -2535,6 +2555,46 @@ pub const App = struct {
         }
     }
 
+    const LanceChoice = struct { force: types.ForceId, name: []const u8, text: []const u8 };
+
+    /// The lances (line and support) of the hull's company, with room noted.
+    fn lanceChoices(self: *App, uid: types.UnitId) ![]LanceChoice {
+        const al = self.a();
+        const g = &self.gs.?;
+        var out: std.ArrayListUnmanaged(LanceChoice) = .empty;
+        const u = g.unit(uid) orelse return out.toOwnedSlice(al);
+        var co = g.companyOf(u.force);
+        if (co == .none) {
+            // an unassigned hull: offer every company's lances
+            var fit = g.forces.iterator();
+            while (fit.next()) |e| if (e.value_ptr.echelon == .company and g.isCompanyHome(e.value_ptr.id)) {
+                co = e.value_ptr.id;
+                try self.lancesOf(&out, co, u);
+            };
+            return out.toOwnedSlice(al);
+        }
+        try self.lancesOf(&out, co, u);
+        return out.toOwnedSlice(al);
+    }
+
+    fn lancesOf(self: *App, out: *std.ArrayListUnmanaged(LanceChoice), co: types.ForceId, u: *const game.unit.Unit) !void {
+        const al = self.a();
+        const g = &self.gs.?;
+        const company = g.forces.getPtr(co) orelse return;
+        for (company.children.items) |cid| {
+            const f = g.forces.getPtr(cid) orelse continue;
+            if (f.echelon == .lance or f.echelon == .air_lance) {
+                const full = f.units.items.len >= game.force.lance_size;
+                try out.append(al, .{ .force = cid, .name = f.name, .text = try std.fmt.allocPrint(al, "{s}[{d}] {s: <22} line lance · {s} · {d}/{d} hulls{s}{{/}}", .{ if (full) "{d}" else if (u.force == cid) "{a}" else "", @intFromEnum(cid), f.name, @tagName(f.role), f.units.items.len, game.force.lance_size, if (full) " · full" else if (u.force == cid) " · here" else "" }) });
+            } else if (f.echelon == .support_company) {
+                for (f.children.items) |sid| {
+                    const sl = g.forces.getPtr(sid) orelse continue;
+                    try out.append(al, .{ .force = sid, .name = sl.name, .text = try std.fmt.allocPrint(al, "{s}[{d}] {s: <22} support · {s} · {d} hulls{s}{{/}}", .{ if (u.force == sid) "{a}" else "", @intFromEnum(sid), sl.name, if (sl.support_kind) |k| @tagName(k) else "support", sl.units.items.len, if (u.force == sid) " · here" else "" }) });
+                }
+            }
+        }
+    }
+
     fn hqSelId(self: *App, g: *GameState) u32 {
         var i: usize = 0;
         var it = g.hqs.iterator();
@@ -2584,6 +2644,25 @@ pub const App = struct {
         switch (self.modal) {
             .none => {},
             .help, .hull, .record => self.modal = .none,
+            .lance_pick => |uid| switch (key) {
+                .escape => self.modal = .none,
+                .down => self.modal_cursor +|= 1,
+                .up => self.modal_cursor -|= 1,
+                .enter => {
+                    const lances = try self.lanceChoices(uid);
+                    if (lances.len == 0) return;
+                    const lc = lances[@min(self.modal_cursor, lances.len - 1)];
+                    self.modal = .none;
+                    try self.exec(.{ .move_unit = .{ .unit = uid, .force = lc.force } });
+                    if (self.msg_style != .crit) self.say(.good, "#{d} moved to {s}", .{ @intFromEnum(uid), lc.name });
+                },
+                .char => |ch| switch (ch) {
+                    'j' => self.modal_cursor +|= 1,
+                    'k' => self.modal_cursor -|= 1,
+                    else => {},
+                },
+                else => {},
+            },
             .upgrade => |hid| switch (key) {
                 .escape => self.modal = .none,
                 .down => self.modal_cursor +|= 1,
@@ -3028,6 +3107,14 @@ pub const App = struct {
         }
         if (eq(u8, verb, "admit")) return .{ .admit = @enumFromInt(try num(u32, tokens.next())) };
         if (eq(u8, verb, "depot")) return .{ .depot = @enumFromInt(try num(u32, tokens.next())) };
+        if (eq(u8, verb, "move")) return .{ .move_unit = .{ .unit = @enumFromInt(try num(u32, tokens.next())), .force = @enumFromInt(try num(u32, tokens.next())) } };
+        if (eq(u8, verb, "newlance")) {
+            const site = try parseSite(try need(tokens.next()));
+            if (site != .company) return error.BadSite;
+            const name = tokens.rest();
+            if (name.len == 0) return error.BadArguments;
+            return .{ .new_lance = .{ .company = site.company, .name = name } };
+        }
         if (eq(u8, verb, "role")) {
             const fid: types.ForceId = @enumFromInt(try num(u32, tokens.next()));
             const role = std.meta.stringToEnum(game.force.LanceRole, try need(tokens.next())) orelse return error.BadArguments;
@@ -3228,6 +3315,8 @@ pub const App = struct {
             error.NotWounded => "that person is not wounded",
             error.NoSuchLoan => "no such loan (or nothing to repay)",
             error.NoSuchListing => "that listing is gone",
+            error.TooManyLances => "that lance is full (4 hulls), or the HQ allows no more lances — :newlance co:N <name> raises one",
+            error.SameForce => "that hull belongs to another company — x moves it between companies",
             error.NothingToRepair => "that hull has no structural damage — the Lab handles gear, the depot handles structure",
             error.MissingComponents => "structural components missing at the home HQ — order or fabricate them on the Market screen first",
             error.NoBay => "no mek bay that can do structural work — a regional HQ with a mek_bay is needed",

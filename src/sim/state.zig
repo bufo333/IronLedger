@@ -1242,6 +1242,25 @@ pub const GameState = struct {
     /// Move a hull into a company: the first lance with a seat free, else
     /// the company's own pool. The pilot rides along; the old tech stays
     /// behind (transfers cost coverage until reassigned).
+    /// Move a hull between forces (lance ↔ lance, into a support lance, or
+    /// straight under a company): roster lists and the pilot's posting
+    /// follow it; the tech seat is kept.
+    pub fn moveUnitToForce(self: *GameState, unit_id: types.UnitId, force_id: types.ForceId) !void {
+        const u = self.unit(unit_id) orelse return error.UnknownUnit;
+        const dest = self.forces.getPtr(force_id) orelse return error.UnknownForce;
+        if (self.forces.getPtr(u.force)) |old| {
+            for (old.units.items, 0..) |id, i| {
+                if (id == unit_id) {
+                    _ = old.units.orderedRemove(i);
+                    break;
+                }
+            }
+        }
+        u.force = force_id;
+        try dest.units.append(self.allocator(), unit_id);
+        if (self.person(u.pilot)) |p| p.assigned_force = force_id;
+    }
+
     pub fn placeUnitInCompany(self: *GameState, unit_id: types.UnitId, company: types.ForceId) !void {
         const u = self.unit(unit_id) orelse return error.UnknownUnit;
         // Leave the old force's roster.
