@@ -83,12 +83,12 @@ fn tierFor(cols: u16, rows: u16) Tier {
 const office_roles = [_]game.person.Role{ .admin_command, .admin_logistics, .admin_transport, .admin_hr, .admin_finance };
 
 const verbs = [_][]const u8{
-    "admit",       "repay",     "sell",      "sellhq", "disband", "depot", "role",     "supplypolicy", "move",       "newlance",
-    "stockpolicy", "autoadmit", "settings",  "day",    "save",    "quit",  "help",     "emblem",       "transfer",   "policy",
-    "loan",        "accept",    "resolve",   "order",  "ship",    "buy",   "assign",   "unassign",     "autoassign", "autostaff",
-    "upgrade",     "tier",      "fabricate", "hire",   "recruit", "fire",  "post",     "train",        "triage",     "leave",
-    "mothball",    "activate",  "complete",  "recall", "found",   "link",  "assignco", "newco",        "newco@",     "xfer",
-    "rename",      "refit",
+    "admit",       "repay",     "sell",     "sellhq",    "disband", "depot",   "role", "supplypolicy", "move",     "newlance",
+    "stockpolicy", "autoadmit", "settings", "sellstock", "day",     "save",    "quit", "help",         "emblem",   "transfer",
+    "policy",      "loan",      "accept",   "resolve",   "order",   "ship",    "buy",  "assign",       "unassign", "autoassign",
+    "autostaff",   "upgrade",   "tier",     "fabricate", "hire",    "recruit", "fire", "post",         "train",    "triage",
+    "leave",       "mothball",  "activate", "complete",  "recall",  "found",   "link", "assignco",     "newco",    "newco@",
+    "xfer",        "rename",    "refit",
 };
 
 const Emblem = struct { name: []const u8, art: [3][]const u8 };
@@ -739,7 +739,7 @@ pub const App = struct {
             .people => "/ , filter (…, wounded) · m admit to medbay · t train · a seat · P post · x transfer · L leave · D fire · r record",
             .market => "Tab pane · Enter buy / order / order shortfall · b fabricate component · K keep stocked · [ ] HQ board · q welcome",
             .ledger => "j/k treasury · t send cash to it · T pull cash back to the outfit · p top-up policy · L loan · R repay",
-            .supply => "company: t/T cash out/home · p cash policy · P resupply policy · s ship · o order · H structural parts home · HQ: K keep stocked",
+            .supply => "company: t/T cash out/home · p cash policy · P resupply policy · s ship · o order · H structural parts home · HQ: K keep stocked · $ sell stock",
             .forces => "Enter assign · a/u seat · A auto · l lance · o role · d depot · m mothball · x company · b fabricate short comp · R recall · $ sell · X disband",
             .map => "h j k l move between worlds · f found HQ here · o offers here · n end turn · q welcome",
             .lab => "[ ] hull · j/k mount · - remove · + install · R order replacement · D send to depot (structure) · c clear · Enter commit",
@@ -1292,6 +1292,7 @@ pub const App = struct {
                     "  {a}money{/}       Ledger: L loan (simple interest) · R repay · Forces: $ sell hull · X disband company · HQ: $ sell HQ",
                     "  {a}field cash{/}  t courier cash out · T courier cash back to the outfit · p policy = keep above a floor, checked daily, cap per month",
                     "  {a}resupply{/}    P policy `supplypolicy co:N days tons [battles]` — provisions under D days → ship N t; ammo per family sized to the link (or [battles])",
+                    "  {a}sell stock{/}  $ on a Supply HQ row → `sellstock hq:N part qty` — half catalogue value (40% for comp_*) into the HQ treasury; never under a keep-stocked minimum",
                     "  {a}warehouse{/}   K `stockpolicy hq:N part min [target]` (Supply on an HQ, Market on a catalogue row) — under min → order/fabricate to target, daily · target 0 removes",
                     "  {a}medbay{/}      Settings (F12 or :settings) → a: auto-admit the wounded every morning, or `:autoadmit on|off`",
                     "  {a}turn rules{/}  wounded must be admitted (m) and a negative treasury covered before the day can end; bankruptcy ends the game",
@@ -2445,6 +2446,10 @@ pub const App = struct {
                         .hq => |id| std.fmt.bufPrint(&buf, "stockpolicy hq:{d} ", .{@intFromEnum(id)}) catch "stockpolicy ",
                         else => "stockpolicy hq:",
                     } else "stockpolicy hq:"),
+                    '$' => self.openCommand(if (site) |s| switch (s) {
+                        .hq => |id| std.fmt.bufPrint(&buf, "sellstock hq:{d} ", .{@intFromEnum(id)}) catch "sellstock ",
+                        else => "sellstock hq:",
+                    } else "sellstock hq:"),
                     'H' => {
                         // Send every structural component in the field stores home.
                         const co: types.ForceId = if (site) |s| (if (s == .company) s.company else .none) else .none;
@@ -3170,6 +3175,13 @@ pub const App = struct {
         }
         if (eq(u8, verb, "repay")) return .{ .repay_loan = .{ .index = try num(usize, tokens.next()), .amount = try num(i64, tokens.next()) } };
         if (eq(u8, verb, "sell")) return .{ .sell_unit = @enumFromInt(try num(u32, tokens.next())) };
+        if (eq(u8, verb, "sellstock")) {
+            const site = try parseSite(try need(tokens.next()));
+            if (site != .hq) return error.BadSite;
+            const part = try need(tokens.next());
+            const qty = std.fmt.parseInt(u32, tokens.next() orelse "1", 10) catch return error.BadNumber;
+            return .{ .sell_stock = .{ .hq = site.hq, .part_key = part, .quantity = qty } };
+        }
         if (eq(u8, verb, "sellhq")) {
             const site = try parseSite(try need(tokens.next()));
             if (site != .hq) return error.BadSite;
@@ -3351,6 +3363,7 @@ pub const App = struct {
     fn errorText(err: anyerror) []const u8 {
         return switch (err) {
             error.InsufficientTreasury => "not enough money in that treasury — transfer funds first",
+            error.KeepStocked => "that would drop the line under its keep-stocked minimum — lower the policy first (K)",
             error.StorageFull => "the destination cannot hold that tonnage",
             error.CompanyDeployed => "that company is deployed",
             error.NotReachable => "outside your influence rings and beachhead bands",

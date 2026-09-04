@@ -163,7 +163,8 @@ row: `t` sends cash by courier, `p` sets a top-up policy, `P` a resupply
 policy, `s` ships provisions from home, `o` orders straight to the
 field. On an HQ row (or a Market catalogue row) `K` sets a keep-stocked
 line: under the minimum, the warehouse reorders or fabricates up to the
-target on its own.
+target on its own. `$` on an HQ row sells part of a line for its resale
+value to free warehouse space.
 
 ![Supply](docs/screenshots/supply.svg)
 

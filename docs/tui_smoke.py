@@ -116,6 +116,10 @@ send("6")
 assert "keep stocked" in plain()[-30000:], plain()[-3000:]
 send("K", 0.8)                  # on the HQ row: policy prefill
 assert ":stockpolicy hq:" in plain()[-300:], plain()[-600:]
+send("\x1b"); send("$", 0.8)   # on the HQ row: sell stock prefill
+assert ":sellstock hq:" in plain()[-300:], plain()[-600:]
+send("ammo_lrm 1\r", 1.0)
+assert "done: sellstock" in plain()[-600:] or "keep-stocked minimum" in plain()[-600:], plain()[-800:]
 send("\x1b")
 send("3"); send("j", 0.6)       # forces: cursor on the company → damage pane
 assert "DAMAGE ·" in plain()[-30000:] or "every hull is whole" in plain()[-30000:], plain()[-3000:]

@@ -68,6 +68,12 @@ pub const SiteKind = enum {
 pub const structural_fab_cost_mult_bp: types.Bp = 15_000; // ×1.5 vs. catalog
 pub const structural_fab_days = 7;
 
+/// What a warehouse line fetches when sold off (Stage 12 `sell_stock`):
+/// a fraction of catalogue cost, like a hull at half value. Components
+/// move slower on the second-hand market. // TUNE
+pub const stock_resale_bp: types.Bp = 5_000;
+pub const component_resale_bp: types.Bp = 4_000;
+
 pub const Rarity = types.Rarity; // canonical home: domain/types.zig
 
 /// One availability roll: does an item of this rarity show up in this
@@ -118,10 +124,10 @@ pub const Listing = struct {
 /// Parts always on every board (weapons and ammo are readily available;
 /// the rare slots are for everything else). // TUNE
 pub const staple_keys = [_][]const u8{
-    "ammo_ac5", "ammo_ac20", "ammo_lrm", "ammo_srm", "ammo_mg",
-    "armor",    "provisions", "medical_supplies",
-    "mlas",     "slas",      "mg",       "srm2",     "srm4",   "srm6",
-    "lrm5",     "lrm10",     "ac5",
+    "ammo_ac5", "ammo_ac20",  "ammo_lrm",         "ammo_srm", "ammo_mg",
+    "armor",    "provisions", "medical_supplies", "mlas",     "slas",
+    "mg",       "srm2",       "srm4",             "srm6",     "lrm5",
+    "lrm10",    "ac5",
 };
 
 /// Roll a listed hull's condition: most are used, some are new, a few are

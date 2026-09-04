@@ -107,7 +107,7 @@ entity ids. Results land in the Desk log pane.
 | F3 | Forces | TO&E tree · Hull/Person detail · Unassigned pool | `a` → `assign`, `u` → `unassign`, `A` → `auto_assign`, `t` → `train`, `x` → `transfer_unit`/`transfer_person`, `m` medbay modal (`triage`, `leave`) |
 | F4 | Contracts | Board · Active | Enter → `accept_contract` (company picker), `c` → `complete_contract`, `R` → `recall_company`, `v` AARs |
 | F5 | Ledger | Treasuries · P&L · Ledger | `t` → `transfer`, `p` → `set_policy`, `L` → `take_loan`, `[ ]` period |
-| F6 | Supply | Sites · Demand · Order form · Shop | `o` → `order_part`, `s` → `ship_stock`, `b` → `buy_listing`, Enter on demand → order shortfall, `P` → `set_supply_policy`, `K` → `set_stock_policy` (keep an HQ line stocked) |
+| F6 | Supply | Sites · Demand · Order form · Shop | `o` → `order_part`, `s` → `ship_stock`, `b` → `buy_listing`, Enter on demand → order shortfall, `P` → `set_supply_policy`, `K` → `set_stock_policy` (keep an HQ line stocked), `$` on an HQ row → `sell_stock` |
 | F7 | HQ | Facilities/projects · Bays · Back office · Hiring hall | `u` → `upgrade_facility`, `T` → `upgrade_tier`, `f` → `fabricate`, `P` → `post_person`, `h` → `hire_candidate`, `[ ]` switch HQ |
 | F8 | Lab | Budget/crits · Mounts · Plan & rules | `-` → `refit_remove`, `+` → `refit_install`, `c` → `refit_clear`, Enter → `refit_commit`, `[ ]` switch hull |
 | F9 | People | Personnel (pinned header, role filter) · Record · Open seats | `m` → `admit`, `t` → `train`, `a`/Enter seat picker → `assign`, `P` → `post_person`, `x` → `transfer_person`, `L` → `leave`, `D` → `fire`, `r` record |

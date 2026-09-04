@@ -483,9 +483,9 @@ pub const GameState = struct {
         // The back office is people (Stage 9C): recruit the starter HQ's
         // staff to requirement and post them. Their payroll is the tail.
         const staff_plan = [_]struct { person_mod.Role, u32 }{
-            .{ .admin_command, req.admin }, .{ .admin_logistics, req.logistics / 2 },
-            .{ .admin_transport, req.logistics - req.logistics / 2 },
-            .{ .admin_hr, req.hr },         .{ .admin_finance, req.finance },
+            .{ .admin_command, req.admin },                           .{ .admin_logistics, req.logistics / 2 },
+            .{ .admin_transport, req.logistics - req.logistics / 2 }, .{ .admin_hr, req.hr },
+            .{ .admin_finance, req.finance },
         };
         for (staff_plan) |entry| {
             for (0..entry[1]) |_| {
@@ -1350,10 +1350,27 @@ pub const GameState = struct {
 
     /// Everything the outfit could raise by selling hulls and all HQs but
     /// the first.
+    /// Resale value of `qty` of a stock line (Stage 12): market.stock_resale_bp
+    /// of catalogue cost, component_resale_bp for comp_* parts.
+    pub fn stockSaleValue(self: *GameState, key: []const u8, qty: u32) types.CBills {
+        _ = self;
+        const market = @import("../econ/market.zig");
+        const def = part_mod.find(key) orelse return 0;
+        const bp: types.Bp = if (part_mod.isComponent(key)) market.component_resale_bp else market.stock_resale_bp;
+        return types.applyBp(def.cost * qty, bp);
+    }
+
     pub fn liquidationValue(self: *GameState) types.CBills {
         var total: types.CBills = 0;
         var uit = self.units.iterator();
         while (uit.next()) |e| total += self.unitSaleValue(e.value_ptr);
+        var sit = self.spare_parts.iterator();
+        while (sit.next()) |e| total += self.stockSaleValue(e.key_ptr.*, e.value_ptr.*);
+        var hqs_it = self.hqs.iterator();
+        while (hqs_it.next()) |e| {
+            var st = e.value_ptr.stock.iterator();
+            while (st.next()) |line| total += self.stockSaleValue(line.key_ptr.*, line.value_ptr.*);
+        }
         var first = true;
         var hit = self.hqs.iterator();
         while (hit.next()) |e| {

@@ -222,10 +222,10 @@ pub fn desk(alloc: Alloc, gs: *GameState, log_rows: usize) !Desk {
         };
         try hqs.append(alloc, try std.fmt.allocPrint(alloc, "hq:{d} {{a}}{s}{{/}}  {s} · ring {d} LY · {s}", .{ @intFromEnum(h.id), h.name, @tagName(h.tier), h.influenceLy(), planetName(h.planet_key) }));
         try hqs.append(alloc, try std.fmt.allocPrint(alloc, "     funds {s}{s}{{/}} · staff {s}{d}/{d}{{/}} · companies {d}/{d} · bays {d} busy, {d} queued", .{
-            funds_mk,                                    funds_s,
+            funds_mk,                                     funds_s,
             if (h.staff_assigned < req) "{c}" else "{g}", h.staff_assigned,
-            req,                                         gs.companiesAtHq(h.id),
-            h.capacity().combat_companies,               busy,
+            req,                                          gs.companiesAtHq(h.id),
+            h.capacity().combat_companies,                busy,
             queued,
         }));
         const tons = gs.siteTons(.{ .hq = h.id });
@@ -336,12 +336,12 @@ fn companyRow(alloc: Alloc, gs: *GameState, id: types.ForceId) ![]const u8 {
     const cap_mk: []const u8 = if (cap > 0 and tons * 4 < cap) "{a}" else "{g}";
     const supply_s = try padMk(alloc, cap_mk, try std.fmt.allocPrint(alloc, "{d}t / {d}t", .{ tons, cap }), 13);
     return std.fmt.allocPrint(alloc, "{d: <4} {s: <17} {s: <24} {s} {s: <18} {s: <15} {d: >3}  {d: >3}  {d: >5}   {d: >5}  {s}  {s: >14}", .{
-        @intFromEnum(id),                                 clip(f.name, 17),
-        clip(hqName(gs, f.supplying_hq), 24),             posture,
-        clip(contract_s, 18),                             clip(location, 15),
-        fat / n,                                          mor / n,
-        hulls,                                            ready,
-        supply_s,                                         try money(alloc, f.local_funds),
+        @intFromEnum(id),                     clip(f.name, 17),
+        clip(hqName(gs, f.supplying_hq), 24), posture,
+        clip(contract_s, 18),                 clip(location, 15),
+        fat / n,                              mor / n,
+        hulls,                                ready,
+        supply_s,                             try money(alloc, f.local_funds),
     });
 }
 
@@ -372,12 +372,12 @@ pub fn contracts(alloc: Alloc, gs: *GameState) !Contracts {
     for (gs.contract_offers.items, 0..) |c, i| {
         const total = c.terms.totalBasePay();
         try board.append(alloc, .{ .index = i, .text = try std.fmt.allocPrint(alloc, "{s: <18} {s: <16} {s: <4} {d: >4}  {s} {d: >3}  {s: >12}  {s: >13}  {s: <5} {d: >3}%  {s: <11} {d: >4} days", .{
-            @tagName(c.kind),                                       clip(planetName(c.planet_key), 16),
-            c.employer_key,                                         c.dist_ly,
+            @tagName(c.kind),                                                                                  clip(planetName(c.planet_key), 16),
+            c.employer_key,                                                                                    c.dist_ly,
             try padMk(alloc, if (c.beachhead) "{a}" else "", if (c.beachhead) "beachhead" else "in ring", 10), c.terms.length_months,
-            try money(alloc, c.terms.base_pay_month),               try money(alloc, total),
-            c.enemy_key,                                            c.terms.salvage_pct,
-            @tagName(c.terms.command_rights),                       c.transit_days,
+            try money(alloc, c.terms.base_pay_month),                                                          try money(alloc, total),
+            c.enemy_key,                                                                                       c.terms.salvage_pct,
+            @tagName(c.terms.command_rights),                                                                  c.transit_days,
         }) });
     }
 
@@ -388,9 +388,9 @@ pub fn contracts(alloc: Alloc, gs: *GameState) !Contracts {
         if (c.status != .transit and c.status != .active) continue;
         var lines: std.ArrayListUnmanaged([]const u8) = .empty;
         try lines.append(alloc, try std.fmt.allocPrint(alloc, "[{d}] {{a}}{s}{{/}}  {s}  co:{d} {s} on {s}  ·  employer {s} · vs {s}  ·  {s} objective", .{
-            @intFromEnum(c.id),     @tagName(c.kind),                   @tagName(c.status),
+            @intFromEnum(c.id),               @tagName(c.kind),                  @tagName(c.status),
             @intFromEnum(c.assigned_company), forceName(gs, c.assigned_company), planetName(c.planet_key),
-            c.employer_key,         c.enemy_key,                         @tagName(c.objective),
+            c.employer_key,                   c.enemy_key,                       @tagName(c.objective),
         }));
         var bar_buf: [30]u8 = undefined;
         if (c.objective == .attrition) {
@@ -404,13 +404,15 @@ pub fn contracts(alloc: Alloc, gs: *GameState) !Contracts {
             try lines.append(alloc, try std.fmt.allocPrint(alloc, "    duration    {{d}}{s}{{/}}  day {d} of {d} · {d} days left", .{ barText(&bar_buf, done, total), @max(0, done), @max(0, total), @max(0, total - done) }));
         }
         try lines.append(alloc, try std.fmt.allocPrint(alloc, "    victory pts {{g}}{d}{{/}} · score {d} · battles {d} · casualties {d} · next engagement {s}", .{
-            c.victory_points, c.score, c.battles_fought, c.casualties, if (c.next_battle_day) |nb| try std.fmt.allocPrint(alloc, "~day {d}", .{nb}) else "—",
+            c.victory_points, c.score, c.battles_fought, c.casualties,
+            if (c.next_battle_day) |nb| try std.fmt.allocPrint(alloc, "~day {d}", .{nb}) else "—",
         }));
         const fieldable = contract_control.fieldableBv(gs, c.assigned_company);
         const pct: i64 = if (c.committed_bv > 0) @divTrunc(fieldable * 100, c.committed_bv) else 0;
         const pct_mk: []const u8 = if (pct < 50) "{c}" else if (pct < 75) "{a}" else "{g}";
         try lines.append(alloc, try std.fmt.allocPrint(alloc, "    committed   {d} BV · fieldable {d} BV {s}({d}%){{/}} · ineffective below 50%{s}", .{
-            c.committed_bv, fieldable, pct_mk, pct, if (c.ineffective_since) |since| try std.fmt.allocPrint(alloc, " · {{c}}grace since day {d}{{/}}", .{since}) else "",
+            c.committed_bv, fieldable, pct_mk, pct,
+            if (c.ineffective_since) |since| try std.fmt.allocPrint(alloc, " · {{c}}grace since day {d}{{/}}", .{since}) else "",
         }));
         try lines.append(alloc, try std.fmt.allocPrint(alloc, "    pay         {s} / month · advance {s} · salvage {d}% · {s} rights", .{
             try money(alloc, c.terms.base_pay_month), try money(alloc, c.terms.advanceAmount()), c.terms.salvage_pct, @tagName(c.terms.command_rights),
@@ -434,7 +436,8 @@ pub fn contracts(alloc: Alloc, gs: *GameState) !Contracts {
             var per_battle: types.CBills = @divTrunc(haul_bv * 2_000 * c.terms.salvage_pct, 100);
             if (salvage_lance) per_battle = types.applyBp(per_battle, 12_500);
             try lines.append(alloc, try std.fmt.allocPrint(alloc, "    salvage     {d} SVT-1 truck{s} haul up to {d} BV per won battle → up to {s} at {d}%{s}", .{
-                trucks, if (trucks == 1) "" else "s", haul_bv, try money(alloc, per_battle), c.terms.salvage_pct, if (salvage_lance) " (+25% crewed salvage lance)" else " (no salvage lance: −25%)",
+                trucks, if (trucks == 1) "" else "s", haul_bv, try money(alloc, per_battle), c.terms.salvage_pct,
+                if (salvage_lance) " (+25% crewed salvage lance)" else " (no salvage lance: −25%)",
             }));
         }
         if (c.objectivesMet()) try lines.append(alloc, "    {g}objectives met{/} — [c] complete closes out (remainder forfeited)");
@@ -660,7 +663,11 @@ pub fn toe(alloc: Alloc, gs: *GameState) ![]ToeRow {
                 else => "{c}",
             };
             try out.append(alloc, .{ .force = .none, .unit = u.id, .text = try std.fmt.allocPrint(alloc, "    #{d: <3} {s: <8} {s: <16} {d: >3}t  {s: <20} {s: <20} {s}{s}{{/}} armor {d}%{s} · {s}/mo", .{
-                @intFromEnum(u.id), u.chassis_key, if (ch) |c| c.name else "?", if (ch) |c| c.tonnage else 0, "—", "—", st_mk, @tagName(u.status), u.armor_pct, try damageMarks(alloc, u), try money(alloc, u.monthlyBill()),
+                @intFromEnum(u.id),                u.chassis_key,      if (ch) |c| c.name else "?", if (ch) |c| c.tonnage else 0,
+                "—",
+                "—",
+                st_mk,                             @tagName(u.status), u.armor_pct,                 try damageMarks(alloc, u),
+                try money(alloc, u.monthlyBill()),
             }) });
         }
     }
@@ -885,7 +892,10 @@ pub fn supply(alloc: Alloc, gs: *GameState) !Supply {
             resupply = try std.fmt.allocPrint(alloc, " · resupply {d}t under {d} days + ammo ({s})", .{ sp.tons, sp.min_days, if (sp.ammo_battles > 0) try std.fmt.allocPrint(alloc, "{d} battles", .{sp.ammo_battles}) else "auto" });
         };
         const title = try std.fmt.allocPrint(alloc, "co:{d} {{a}}{s}{{/}} field stores{s}{s} · funds {s}{s}", .{
-            @intFromEnum(f.id), f.name, if (home) "" else " · {a}DEPLOYED{/}", if (days_left) |d| try std.fmt.allocPrint(alloc, " · {s}{d} days of provisions{{/}}", .{ if (d < 10) "{c}" else "{g}", d }) else "", try money(alloc, f.local_funds), resupply,
+            @intFromEnum(f.id),              f.name,
+            if (home) "" else " · {a}DEPLOYED{/}",
+            if (days_left) |d| try std.fmt.allocPrint(alloc, " · {s}{d} days of provisions{{/}}", .{ if (d < 10) "{c}" else "{g}", d }) else "",
+            try money(alloc, f.local_funds), resupply,
         });
         try siteLines(alloc, gs, &out, .{ .company = f.id }, title);
         while (sites.items.len < out.items.len) try sites.append(alloc, if (sites.items.len < out.items.len - 1) .{ .company = f.id } else null);
@@ -993,7 +1003,7 @@ pub fn stockTable(alloc: Alloc, gs: *GameState, site: types.Site) ![]const []con
             const have = gs.stockCount(site, sp.part_key);
             try out.append(alloc, try std.fmt.allocPrint(alloc, "  {s: <20} min {d: >4}  target {d: >4}  {s}{d} on hand{{/}}", .{ clip(sp.part_key, 20), sp.min, sp.target, if (have < sp.min) "{c}" else "{g}", have }));
         };
-        if (!any) try out.append(alloc, "{d}no keep-stocked lines · K here or on a Market catalogue row sets one{/}");
+        if (!any) try out.append(alloc, "{d}no keep-stocked lines · K here or on a Market catalogue row sets one · $ sells a line{/}");
     }
     const cap = gs.siteCapacityTons(site);
     try out.append(alloc, "");
@@ -1281,7 +1291,10 @@ pub fn upgrades(alloc: Alloc, gs: *GameState, hq_id: types.HqId) ![]UpgradeRow {
         const state: []const u8 = if (in_progress) "{a}project running{/}" else if (maxed) "{d}max{/}" else if (!affordable) "{c}HQ funds short{/}" else "{g}ready{/}";
         const reason: []const u8 = if (in_progress) "a project is already running" else if (maxed) "already at maximum level" else if (!affordable) try std.fmt.allocPrint(alloc, "HQ funds short: needs {s} C, has {s} C", .{ try money(alloc, cost), try money(alloc, h.funds) }) else "ready";
         try out.append(alloc, .{ .kind = kind, .possible = !in_progress and !maxed and affordable, .reason = reason, .text = try std.fmt.allocPrint(alloc, "{s: <16} lv {d} → {d}   {s: >11} C   {d: >2} + {d: >2} days   {s: <44} {s}", .{
-            f.name, lvl, if (maxed) lvl else next, if (maxed) "—" else try money(alloc, cost), paperwork, if (maxed) 0 else 14 * @as(u32, next), buys, state,
+            f.name,    lvl,                                   if (maxed) lvl else next,
+            if (maxed) "—" else try money(alloc, cost),
+            paperwork, if (maxed) 0 else 14 * @as(u32, next), buys,
+            state,
         }) });
     }
     return out.toOwnedSlice(alloc);
@@ -1513,12 +1526,12 @@ pub fn people(alloc: Alloc, gs: *GameState, filter: HallFilter) !People {
         if (filter == .wounded and p.status != .wounded) continue;
         const name = try std.fmt.allocPrint(alloc, "{s} {s}", .{ p.first_name, p.last_name });
         try rows.append(alloc, .{ .id = p.id, .text = try std.fmt.allocPrint(alloc, "{d: <4} {s: <20} {s: <15} {s: <7} {s: <5} {d: >3} {s} {s} {s: <11} {d: >3} {d: >3} {s: >7}", .{
-            @intFromEnum(p.id),                          clip(name, 20),
-            @tagName(p.role),                            @tagName(p.experience()),
-            try skillsText(alloc, p),                    p.xp,
+            @intFromEnum(p.id),                                                             clip(name, 20),
+            @tagName(p.role),                                                               @tagName(p.experience()),
+            try skillsText(alloc, p),                                                       p.xp,
             try padMk(alloc, "", try stripMarkup(alloc, try statusText(alloc, gs, p)), 18), try padMk(alloc, "", try stripMarkup(alloc, try assignmentText(alloc, gs, p)), 22),
-            clip(locationText(gs, p), 11),               p.fatigue,
-            p.morale,                                    try money(alloc, p.monthlySalary()),
+            clip(locationText(gs, p), 11),                                                  p.fatigue,
+            p.morale,                                                                       try money(alloc, p.monthlySalary()),
         }) });
     }
     return .{
@@ -1713,7 +1726,8 @@ pub fn offersAt(alloc: Alloc, gs: *GameState, planet_key: []const u8) ![]const [
     for (gs.contract_offers.items, 0..) |c, i| {
         if (!std.mem.eql(u8, c.planet_key, planet_key)) continue;
         try out.append(alloc, try std.fmt.allocPrint(alloc, "[{d}] {{a}}{s}{{/}} {d} mo · {s}/mo · {s} vs {s} · salvage {d}%{s}", .{
-            i, @tagName(c.kind), c.terms.length_months, try money(alloc, c.terms.base_pay_month), c.employer_key, c.enemy_key, c.terms.salvage_pct, if (c.beachhead) " · {a}beachhead{/}" else "",
+            i, @tagName(c.kind), c.terms.length_months, try money(alloc, c.terms.base_pay_month), c.employer_key, c.enemy_key, c.terms.salvage_pct,
+            if (c.beachhead) " · {a}beachhead{/}" else "",
         }));
     }
     return out.toOwnedSlice(alloc);

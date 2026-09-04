@@ -164,6 +164,9 @@ pub const Command = union(enum) {
     set_stock_policy: struct { hq: types.HqId, part_key: []const u8, min: u32, target: u32 },
     /// Let the medbay admit the wounded on its own each morning.
     set_auto_admit: bool,
+    /// Sell part of a warehouse line for its resale value (into the HQ's
+    /// treasury). Refused below a keep-stocked line's minimum.
+    sell_stock: struct { hq: types.HqId, part_key: []const u8, quantity: u32 },
 };
 
 pub const Error = error{
@@ -235,6 +238,7 @@ pub const Error = error{
     /// Nothing left to sell or borrow: game over.
     Bankrupt,
     NothingToRepair,
+    KeepStocked,
 } || std.mem.Allocator.Error;
 
 pub const Result = struct {
@@ -551,6 +555,21 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             }
             if (sp.target == 0) return .{};
             try gs.stock_policies.append(gs.allocator(), .{ .hq = sp.hq, .part_key = def.key, .min = sp.min, .target = target });
+            return .{};
+        },
+        .sell_stock => |sale| {
+            const h = gs.hqs.getPtr(sale.hq) orelse return Error.UnknownHq;
+            const def = part_mod.find(sale.part_key) orelse return Error.UnknownPart;
+            if (sale.quantity == 0) return .{};
+            const have = gs.stockCount(.{ .hq = sale.hq }, def.key);
+            if (have < sale.quantity) return Error.InsufficientStock;
+            for (gs.stock_policies.items) |sp| {
+                if (sp.hq == sale.hq and std.mem.eql(u8, sp.part_key, def.key) and have - sale.quantity < sp.min) return Error.KeepStocked;
+            }
+            const value = gs.stockSaleValue(def.key, sale.quantity);
+            _ = gs.takeStock(.{ .hq = sale.hq }, def.key, sale.quantity);
+            try gs.postTreasury(.{ .hq = sale.hq }, .{ .day = gs.clock.day_index, .amount = value, .category = .unit_sale, .hq = sale.hq, .note = def.key });
+            try gs.log(.market, .{ .hq = sale.hq }, "[sale] {d} {s} sold from {s} for {d}", .{ sale.quantity, def.key, h.name, value });
             return .{};
         },
         .set_auto_admit => |on| {
@@ -1244,9 +1263,9 @@ fn acceptContract(gs: *GameState, offer_index: usize, company_id: types.ForceId)
     try gs.loadOutCompany(company_id);
     const site: types.Site = .{ .company = company_id };
     try gs.log(.delivery, .{ .company = company_id, .contract = id }, "[loadout] trucks loaded: {d}t of {d}t — {d}t provisions, {d}t LRM, {d}t SRM, {d}t AC/5", .{
-        gs.siteTons(site),                     gs.siteCapacityTons(site) orelse 0,
-        gs.stockCount(site, "provisions"),     gs.stockCount(site, "ammo_lrm"),
-        gs.stockCount(site, "ammo_srm"),       gs.stockCount(site, "ammo_ac5"),
+        gs.siteTons(site),                 gs.siteCapacityTons(site) orelse 0,
+        gs.stockCount(site, "provisions"), gs.stockCount(site, "ammo_lrm"),
+        gs.stockCount(site, "ammo_srm"),   gs.stockCount(site, "ammo_ac5"),
     });
     return .{};
 }
@@ -1481,6 +1500,24 @@ test "12: a stock policy reorders a warehouse line to its target, once, and can 
     try std.testing.expectEqual(@as(u32, 5), gs.stock_policies.items[0].target); // clamped up to min
     _ = try execute(&gs, .{ .set_stock_policy = .{ .hq = hq, .part_key = "ammo_lrm", .min = 0, .target = 0 } });
     try std.testing.expectEqual(@as(usize, 0), gs.stock_policies.items.len);
+}
+
+test "12: selling warehouse stock pays the HQ and respects a keep-stocked minimum" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 12 });
+    defer gs.deinit();
+    _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    const hq = gs.hqs.keys()[0];
+    try gs.addStock(.{ .hq = hq }, "ammo_lrm", 20);
+    const have = gs.stockCount(.{ .hq = hq }, "ammo_lrm");
+    const funds_before = gs.hqs.getPtr(hq).?.funds;
+    try std.testing.expectError(Error.InsufficientStock, execute(&gs, .{ .sell_stock = .{ .hq = hq, .part_key = "ammo_lrm", .quantity = have + 1 } }));
+    _ = try execute(&gs, .{ .sell_stock = .{ .hq = hq, .part_key = "ammo_lrm", .quantity = 10 } });
+    try std.testing.expectEqual(have - 10, gs.stockCount(.{ .hq = hq }, "ammo_lrm"));
+    try std.testing.expectEqual(funds_before + gs.stockSaleValue("ammo_lrm", 10), gs.hqs.getPtr(hq).?.funds);
+    try std.testing.expect(gs.stockSaleValue("ammo_lrm", 10) > 0);
+    _ = try execute(&gs, .{ .set_stock_policy = .{ .hq = hq, .part_key = "ammo_lrm", .min = have - 12, .target = have } });
+    try std.testing.expectError(Error.KeepStocked, execute(&gs, .{ .sell_stock = .{ .hq = hq, .part_key = "ammo_lrm", .quantity = 5 } }));
+    _ = try execute(&gs, .{ .sell_stock = .{ .hq = hq, .part_key = "ammo_lrm", .quantity = 2 } });
 }
 
 test "golden master: same seed + same script = same state hash" {
