@@ -97,8 +97,10 @@ pub fn runWeeklyMaintenance(gs: *GameState) !void {
         }
 
         // Accidents happen in the hangar (Stage 9C.2): snake-eyes while
-        // working a hull hurts the tech.
-        if (covered and raw == 2) try injureTech(gs, tech_id, 5 + gs.rng.roll2d6(.medical), "maintenance accident");
+        // working a hull, and then only one bad week in six hurts the tech
+        // (≈0.5% per hull-week; a 32-hull company sees one every couple of
+        // months rather than one a week). // TUNE
+        if (covered and raw == 2 and gs.rng.roll2d6(.maintenance) <= 4) try injureTech(gs, tech_id, 5 + gs.rng.roll2d6(.medical), "maintenance accident");
 
         if (covered) {
             u.last_maintenance_day = gs.clock.day_index;

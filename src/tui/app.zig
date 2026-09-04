@@ -75,7 +75,7 @@ fn tierFor(cols: u16, rows: u16) Tier {
 const office_roles = [_]game.person.Role{ .admin_command, .admin_logistics, .admin_transport, .admin_hr, .admin_finance };
 
 const verbs = [_][]const u8{
-    "admit",   "repay",   "sell",      "sellhq",    "disband",
+    "admit",   "repay",   "sell",      "sellhq",    "disband",  "depot",    "role",
     "day",     "save",    "quit",      "help",      "emblem",   "transfer", "policy", "loan",     "accept", "resolve",
     "order",   "ship",    "buy",       "assign",    "unassign", "autoassign", "autostaff", "upgrade", "tier",   "fabricate",
     "hire",    "recruit", "fire",      "post",      "train",    "triage",   "leave",  "mothball", "activate", "complete",
@@ -700,7 +700,7 @@ pub const App = struct {
             .market => "Tab pane · Enter buy / order / order shortfall · b fabricate component · [ ] HQ board · q welcome",
             .ledger => "j/k treasury · t send cash to it by courier · p standing top-up (floor + monthly cap) · L loan · R repay",
             .supply => "j/k site · on a company: t send cash · p top-up policy · s ship provisions from home · o order to the field",
-            .forces => "Tab pane · Enter assign · a/u seat · A auto · t train · x transfer · $ sell hull · X disband company",
+            .forces => "Enter assign · a/u seat · A auto · o lance role · d depot · t train · x transfer · $ sell hull · X disband",
             .map => "h j k l move between worlds · f found HQ here · o offers here · n end turn · q welcome",
             .lab => "[ ] hull · j/k mount · - remove · + install · R order replacement · D send to depot (structure) · c clear · Enter commit",
             .hq => "[ ] switch HQ · Tab hall · f/F hall filter · Enter hire · u upgrade · S autostaff · b fabricate",
@@ -2193,6 +2193,26 @@ pub const App = struct {
                             if (self.msg_style != .crit) self.say(.good, "#{d} queued for depot repair", .{@intFromEnum(r.unit)});
                         }
                     },
+                    'o' => if (row) |r| {
+                        const f = g.force(r.force) orelse return;
+                        if (f.echelon != .lance and f.echelon != .air_lance) {
+                            self.say(.dim, "roles are set on lances — move the cursor onto a lance row", .{});
+                            return;
+                        }
+                        const roles = [_]game.force.LanceRole{ .fighting, .defense, .scouting, .training };
+                        var next: game.force.LanceRole = roles[0];
+                        for (roles, 0..) |ro, i| if (ro == f.role) {
+                            next = roles[(i + 1) % roles.len];
+                        };
+                        try self.exec(.{ .set_role = .{ .force = r.force, .role = next } });
+                        self.say(.good, "{s} → {s}: {s}", .{ f.name, @tagName(next), switch (next) {
+                            .fighting => "fights in every engagement",
+                            .defense => "+10% power on garrison-class contracts",
+                            .scouting => "recon: better intel before battles",
+                            .training => "held out of battles; crews gain XP weekly at home",
+                            .unassigned => "",
+                        } });
+                    },
                     'X' => if (row) |r| {
                         const co = g.companyOf(r.force);
                         if (co != .none) self.modal = .{ .disband = co };
@@ -2778,6 +2798,11 @@ pub const App = struct {
         }
         if (eq(u8, verb, "admit")) return .{ .admit = @enumFromInt(try num(u32, tokens.next())) };
         if (eq(u8, verb, "depot")) return .{ .depot = @enumFromInt(try num(u32, tokens.next())) };
+        if (eq(u8, verb, "role")) {
+            const fid: types.ForceId = @enumFromInt(try num(u32, tokens.next()));
+            const role = std.meta.stringToEnum(game.force.LanceRole, try need(tokens.next())) orelse return error.BadArguments;
+            return .{ .set_role = .{ .force = fid, .role = role } };
+        }
         if (eq(u8, verb, "repay")) return .{ .repay_loan = .{ .index = try num(usize, tokens.next()), .amount = try num(i64, tokens.next()) } };
         if (eq(u8, verb, "sell")) return .{ .sell_unit = @enumFromInt(try num(u32, tokens.next())) };
         if (eq(u8, verb, "sellhq")) {

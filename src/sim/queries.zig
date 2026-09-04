@@ -383,6 +383,28 @@ pub fn contracts(alloc: Alloc, gs: *GameState) !Contracts {
         try lines.append(alloc, try std.fmt.allocPrint(alloc, "    pay         {s} / month · advance {s} · salvage {d}% · {s} rights", .{
             try money(alloc, c.terms.base_pay_month), try money(alloc, c.terms.advanceAmount()), c.terms.salvage_pct, @tagName(c.terms.command_rights),
         }));
+        {
+            // Salvage capacity (battle.zig): what the trucks can haul off a won field. // TUNE mirrors battle.zig
+            var trucks: i64 = 0;
+            var salvage_lance = false;
+            var uit = gs.units.iterator();
+            while (uit.next()) |ue| {
+                const u = ue.value_ptr;
+                if (u.status == .destroyed or gs.companyOf(u.force) != c.assigned_company) continue;
+                if (std.mem.eql(u8, u.chassis_key, "SVT-1")) trucks += 1;
+            }
+            var fit = gs.forces.iterator();
+            while (fit.next()) |fe| {
+                const f = fe.value_ptr;
+                if (f.echelon == .support_lance and f.support_kind == .salvage and f.units.items.len > 0 and gs.companyOf(f.id) == c.assigned_company) salvage_lance = true;
+            }
+            const haul_bv: i64 = if (trucks > 0) trucks * 300 else 150;
+            var per_battle: types.CBills = @divTrunc(haul_bv * 2_000 * c.terms.salvage_pct, 100);
+            if (salvage_lance) per_battle = types.applyBp(per_battle, 12_500);
+            try lines.append(alloc, try std.fmt.allocPrint(alloc, "    salvage     {d} SVT-1 truck{s} haul up to {d} BV per won battle → up to {s} at {d}%{s}", .{
+                trucks, if (trucks == 1) "" else "s", haul_bv, try money(alloc, per_battle), c.terms.salvage_pct, if (salvage_lance) " (+25% crewed salvage lance)" else " (no salvage lance: −25%)",
+            }));
+        }
         if (c.objectivesMet()) try lines.append(alloc, "    {g}objectives met{/} — [c] complete closes out (remainder forfeited)");
         try lines.append(alloc, "");
         try active.append(alloc, .{ .id = c.id, .company = c.assigned_company, .lines = try lines.toOwnedSlice(alloc), .objectives_met = c.objectivesMet() });

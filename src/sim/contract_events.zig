@@ -92,6 +92,66 @@ fn combatDeck(roll: u8) Entry {
     };
 }
 
+/// Weekly happenings (Stage 12): rolled every week a contract is active,
+/// on top of the monthly deck. Most weeks are quiet; the tails bring
+/// small choices so the player has something to decide between battles.
+fn weeklyDeck(garrison: bool, roll: u8) Entry {
+    if (garrison) return switch (roll) {
+        2 => .{ .kind = .night_raid, .log = "Saboteurs slip through the wire at night", .auto_effects = &.{
+            .{ .damage_random_units = 1 }, .{ .morale = -2 }, .{ .xp_all = 1 },
+        } },
+        3 => .{ .kind = .smuggler_offer, .log = "A smuggler offers parts off the back of a truck", .options = &.{
+            .{ .label = "Buy them, no questions", .effects = &.{ .{ .parts_windfall = 2 }, .{ .cash = -40_000 }, .{ .reputation = -1 } } },
+            .{ .label = "Turn them in to the employer", .effects = &.{.{ .reputation = 1 }} },
+            .{ .label = "Send them away", .effects = &.{} },
+        }, .default_choice = 2 },
+        4 => .{ .kind = .employer_inspection, .log = "The employer's liaison announces an inspection", .options = &.{
+            .{ .label = "Full parade and hangar tour", .effects = &.{ .{ .reputation = 1 }, .{ .fatigue = 4 } } },
+            .{ .label = "Working visit only", .effects = &.{} },
+            .{ .label = "Plead operational tempo", .effects = &.{.{ .reputation = -1 }} },
+        }, .default_choice = 1 },
+        10 => .{ .kind = .local_festival, .log = "The town holds its harvest festival", .options = &.{
+            .{ .label = "Sponsor it (50k)", .effects = &.{ .{ .cash = -50_000 }, .{ .morale = 6 }, .{ .reputation = 1 } } },
+            .{ .label = "Give the company the day", .effects = &.{ .{ .morale = 3 }, .{ .fatigue = 2 } } },
+            .{ .label = "Keep to the schedule", .effects = &.{} },
+        }, .default_choice = 1 },
+        11 => .{ .kind = .training_exercise, .log = "Quiet week — time for a live-fire exercise?", .options = &.{
+            .{ .label = "Run it hard", .effects = &.{ .{ .xp_all = 2 }, .{ .fatigue = 6 } } },
+            .{ .label = "Light drills", .effects = &.{.{ .xp_all = 1 }} },
+            .{ .label = "Stand down", .effects = &.{.{ .morale = 2 }} },
+        }, .default_choice = 1 },
+        12 => .{ .kind = .press_visit, .log = "A news crew wants to embed with the company", .options = &.{
+            .{ .label = "Welcome them", .effects = &.{ .{ .reputation = 2 }, .{ .fatigue = 2 } } },
+            .{ .label = "Refuse", .effects = &.{} },
+        }, .default_choice = 0 },
+        else => .{ .kind = .quiet_week, .log = "" },
+    };
+    return switch (roll) {
+        2 => .{ .kind = .night_raid, .log = "Enemy raiders hit the laager before dawn", .auto_effects = &.{
+            .{ .damage_random_units = 1 }, .{ .morale = -3 }, .{ .xp_all = 1 }, .{ .score = -1 },
+        } },
+        3 => .{ .kind = .ambush_warning, .log = "Locals warn of an ambush on the supply road", .options = &.{
+            .{ .label = "Escort the convoy in force", .effects = &.{ .{ .fatigue = 6 }, .{ .score = 1 } } },
+            .{ .label = "Reroute and delay", .effects = &.{.{ .supply_loss = 20_000 }} },
+            .{ .label = "Ignore it", .effects = &.{ .{ .damage_random_units = 1 }, .{ .score = -1 } } },
+        }, .default_choice = 0 },
+        4 => .{ .kind = .bad_weather, .log = "A week of storms grounds both sides", .auto_effects = &.{
+            .{ .morale = 2 },
+        } },
+        10 => .{ .kind = .supply_cache, .log = "Patrols overrun an enemy supply cache", .auto_effects = &.{
+            .{ .parts_windfall = 1 }, .{ .xp_all = 1 },
+        } },
+        11 => .{ .kind = .prisoner_exchange, .log = "The enemy proposes a prisoner exchange", .options = &.{
+            .{ .label = "Exchange — honour among soldiers", .effects = &.{ .{ .reputation = 2 }, .{ .morale = 2 } } },
+            .{ .label = "Ransom them instead (50k)", .effects = &.{ .{ .cash = 50_000 }, .{ .reputation = -1 } } },
+        }, .default_choice = 0 },
+        12 => .{ .kind = .field_promotion, .log = "A lance leader distinguishes themselves", .auto_effects = &.{
+            .{ .xp_all = 2 }, .{ .morale = 3 },
+        } },
+        else => .{ .kind = .quiet_week, .log = "" },
+    };
+}
+
 /// The static deck entry for an event kind (options live in the decks, so
 /// a saved pending decision is rebuilt from its kind — Stage 11).
 pub fn entryForKind(kind: events.EventKind) ?Entry {
@@ -101,8 +161,52 @@ pub fn entryForKind(kind: events.EventKind) ?Entry {
         if (g.kind == kind) return g;
         const c = combatDeck(roll);
         if (c.kind == kind) return c;
+        const wg = weeklyDeck(true, roll);
+        if (wg.kind == kind) return wg;
+        const wc = weeklyDeck(false, roll);
+        if (wc.kind == kind) return wc;
     }
     return null;
+}
+
+/// Weekly roll for every active contract (Stage 12): quiet most weeks.
+pub fn rollWeekly(gs: *GameState) !void {
+    var it = gs.contracts.iterator();
+    while (it.next()) |entry| {
+        const c = entry.value_ptr;
+        if (c.status != .active) continue;
+        const roll = gs.rng.roll2d6(.events);
+        const deck = weeklyDeck(c.kind.isGarrisonClass(), roll);
+        if (deck.kind == .quiet_week) continue;
+        const ctx: @import("state.zig").LogCtx = .{ .company = c.assigned_company, .contract = c.id };
+        if (deck.options.len == 0) {
+            try applyEffects(gs, deck.auto_effects, c);
+            try gs.log(.contract, ctx, "[{s}] {s}", .{ @tagName(c.kind), deck.log });
+        } else {
+            try gs.event_queue.push(gs.allocator(), .{
+                .day = gs.clock.day_index,
+                .kind = deck.kind,
+                .contract = c.id,
+                .company = c.assigned_company,
+                .options = deck.options,
+                .default_choice = deck.default_choice,
+                .deadline_day = gs.clock.day_index + decision_window_days,
+            });
+            try gs.log(.decision, ctx, "[{s}] DECISION: {s} (inbox, {d} days to answer)", .{ @tagName(c.kind), deck.log, decision_window_days });
+        }
+    }
+}
+
+test "weekly deck: every non-quiet kind resolves through entryForKind" {
+    var roll: u8 = 2;
+    while (roll <= 12) : (roll += 1) {
+        for ([_]bool{ true, false }) |g| {
+            const e = weeklyDeck(g, roll);
+            if (e.kind == .quiet_week) continue;
+            try std.testing.expect(entryForKind(e.kind) != null);
+            if (e.options.len > 0) try std.testing.expect(e.default_choice < e.options.len);
+        }
+    }
 }
 
 // ----------------------------------------------------------------- engine

@@ -43,12 +43,29 @@ pub fn advanceDay(gs: *GameState) !void {
     try runContracts(gs); // contract lifecycle
     try contract_control.runReturns(gs); // companies travelling home arrive
     if (gs.clock.date.day == 1) try contract_events.rollMonthly(gs); // event decks
+    if (gs.clock.day_index % 7 == 3) try contract_events.rollWeekly(gs); // weekly happenings (Stage 12)
     try battle.runDaily(gs); // battle_resolution: due engagements resolve
     try contract_control.checkEffectiveness(gs); // the ineffectiveness clock (Stage 9E)
-    if (gs.clock.day_index % 7 == 0 and gs.clock.day_index > 0)
+    if (gs.clock.day_index % 7 == 0 and gs.clock.day_index > 0) {
         try medical.runWeeklyRest(gs); // morale_fatigue phase
+        runTrainingLances(gs); // lance roles (Stage 12)
+    }
     try runFinances(gs);
     try contract_events.expireDue(gs); // decisions phase: deadlines pass
+}
+
+/// Training lances (MekHQ lance role): held out of engagements, and their
+/// crews drill for XP every week the company is home. // TUNE
+fn runTrainingLances(gs: *GameState) void {
+    var pit = gs.people.iterator();
+    while (pit.next()) |entry| {
+        const p = entry.value_ptr;
+        if (p.status != .active) continue;
+        const lance = gs.forces.getPtr(p.assigned_force) orelse continue;
+        if (lance.role != .training) continue;
+        if (!gs.isCompanyHome(gs.companyOf(lance.id))) continue;
+        p.xp += 1;
+    }
 }
 
 /// travel phase: part deliveries land, fund couriers arrive, cold-storage

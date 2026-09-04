@@ -22,6 +22,7 @@ const hq_mod = @import("../domain/hq.zig");
 const network = @import("network.zig");
 const contract_control = @import("contract_control.zig");
 const meklab = @import("../domain/meklab.zig");
+const force_mod = @import("../domain/force.zig");
 
 pub const Command = union(enum) {
     /// End the turn: advance one day. Turn-based — time only moves here,
@@ -146,6 +147,10 @@ pub const Command = union(enum) {
     /// Send a hull to the depot now for structural repair (otherwise the
     /// weekly maintenance pass queues it when the components are in stock).
     depot: types.UnitId,
+    /// Lance role, MekHQ-style: fighting (default), defense (+power on
+    /// garrison contracts), scouting (recon), training (held out of
+    /// battles, gains XP at home).
+    set_role: struct { force: types.ForceId, role: force_mod.LanceRole },
 };
 
 pub const Error = error{
@@ -466,6 +471,12 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             if (u.status == .mothballed) return Error.AlreadyMothballed;
             if (gs.deploymentContract(gs.companyOf(u.force)) != null) return Error.UnitDeployed;
             u.status = .mothballed;
+            return .{};
+        },
+        .set_role => |r| {
+            const f = gs.force(r.force) orelse return Error.UnknownForce;
+            if (f.echelon != .lance and f.echelon != .air_lance) return Error.NotACompany;
+            f.role = r.role;
             return .{};
         },
         .depot => |unit_id| {
@@ -1199,6 +1210,22 @@ test "insolvency holds the turn; bankruptcy ends the campaign" {
     try std.testing.expect(gs.bankrupt);
 }
 
+test "lance roles: set on lances only, persisted on the force" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 3 });
+    defer gs.deinit();
+    _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .DC, .profession = .line_officer } });
+    const res = try execute(&gs, .{ .new_company = "Alpha" });
+    try std.testing.expectError(Error.NotACompany, execute(&gs, .{ .set_role = .{ .force = res.created_force, .role = .training } }));
+    const co = gs.force(res.created_force).?;
+    var lance: types.ForceId = .none;
+    for (co.children.items) |cid| if (gs.force(cid).?.echelon == .lance) {
+        lance = cid;
+        break;
+    };
+    _ = try execute(&gs, .{ .set_role = .{ .force = lance, .role = .training } });
+    try std.testing.expectEqual(force_mod.LanceRole.training, gs.force(lance).?.role);
+}
+
 test "wounded only heal once admitted" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 9 });
     defer gs.deinit();
@@ -1331,11 +1358,18 @@ test "stage 4 end to end: commander, company, contract to completion" {
         .accept_contract = .{ .offer_index = 0, .company = co },
     }));
 
-    // Run to completion: transit + length + slack.
+    // Run to completion: transit + length + slack. The player's one duty
+    // along the way (Stage 12): admit the wounded, or they never heal and
+    // the company bleeds out to combat-ineffectiveness.
     const total_days = c.transit_days + @as(u32, c.terms.length_months) * 30 + 40;
     var advanced: u32 = 0;
-    while (advanced < total_days) : (advanced += 30) {
-        _ = try execute(&gs, .{ .advance_days = 30 });
+    while (advanced < total_days) : (advanced += 7) {
+        _ = try execute(&gs, .{ .advance_days = 7 });
+        var pit = gs.people.iterator();
+        while (pit.next()) |entry| {
+            const p = entry.value_ptr;
+            if (p.status == .wounded and !p.medbay_admitted) _ = try execute(&gs, .{ .admit = p.id });
+        }
     }
     const done = gs.contracts.values()[0];
     try std.testing.expectEqual(@import("../domain/contract.zig").ContractStatus.completed, done.status);

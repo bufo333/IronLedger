@@ -99,6 +99,8 @@ fn playerSide(gs: *GameState, c: *const contract_mod.Contract) !SideState {
     for (company.children.items) |child_id| {
         const lance = gs.force(child_id) orelse continue;
         if (lance.echelon != .lance and lance.echelon != .air_lance) continue;
+        // Lance roles (MekHQ): training lances are held out of the fight.
+        if (lance.role == .training) continue;
 
         var lance_bv: i64 = 0;
         var gunnery_sum: u32 = 0;
@@ -151,7 +153,10 @@ fn playerSide(gs: *GameState, c: *const contract_mod.Contract) !SideState {
             .avg_quality = @enumFromInt(quality_sum / n),
         };
         side.bv += lance_bv;
-        side.power += elem.effectivePower(side.mods);
+        var lance_power = elem.effectivePower(side.mods);
+        // Defense lances dig in: +10% on garrison-class work. // TUNE
+        if (lance.role == .defense and c.kind.isGarrisonClass()) lance_power = types.applyBp(lance_power, 11_000);
+        side.power += lance_power;
     }
     return side;
 }
@@ -304,14 +309,25 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
             damage_value += @divTrunc(u.purchase_price, 2);
         }
 
-        // Crew casualties: MASH coverage turns the worst rolls survivable.
+        // Crew casualties (AtB-style): a hard hit (8+) wounds the pilot on a
+        // follow-up 2d6 of 8+, a crippling one (11+) always; the worst roll
+        // kills unless a MASH lance is forward. MASH also halves the wound
+        // chance on hard hits. // TUNE
         if (gs.person(u.pilot)) |p| {
-            if (severity == 12 and !player.mods.has_mash_lance and p.status == .active) {
-                p.status = .kia;
-                kia += 1;
-            } else if (severity >= 10 and p.status == .active) {
-                p.status = .wounded;
-                wounded += 1;
+            if (p.status == .active) {
+                if (severity == 12 and !player.mods.has_mash_lance) {
+                    p.status = .kia;
+                    kia += 1;
+                } else if (severity >= 11) {
+                    p.status = .wounded;
+                    wounded += 1;
+                } else if (severity >= 8) {
+                    const need: u8 = if (player.mods.has_mash_lance) 10 else 8;
+                    if (gs.rng.roll2d6(.battle) >= need) {
+                        p.status = .wounded;
+                        wounded += 1;
+                    }
+                }
             }
         }
     }

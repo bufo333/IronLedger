@@ -29,6 +29,19 @@ pub const EventKind = enum {
     captured_salvage,
     local_support_offer,
     daring_opportunity,
+    // Weekly deck (Stage 12): smaller happenings between the monthly ones.
+    quiet_week,
+    local_festival,
+    press_visit,
+    training_exercise,
+    smuggler_offer,
+    employer_inspection,
+    ambush_warning,
+    prisoner_exchange,
+    night_raid,
+    supply_cache,
+    bad_weather,
+    field_promotion,
 };
 
 /// One consequence of an event option. Relative where it must scale
