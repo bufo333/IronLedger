@@ -1605,7 +1605,8 @@ test "hall filter groups roles and map classifies worlds" {
     try std.testing.expect(HallFilter.techs.matches(.tech_mechanic));
     try std.testing.expect(!HallFilter.techs.matches(.admin_hr));
     try std.testing.expect(HallFilter.admin_logistics.matches(.admin_logistics));
-    try std.testing.expectEqual(HallFilter.all, HallFilter.other.next());
+    try std.testing.expectEqual(HallFilter.wounded, HallFilter.other.next());
+    try std.testing.expectEqual(HallFilter.all, HallFilter.wounded.next());
 
     var gs = GameState.init(std.testing.allocator, .{ .seed = 11 });
     defer gs.deinit();

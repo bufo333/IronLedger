@@ -696,7 +696,7 @@ pub const App = struct {
         }
         self.footer(switch (self.tab) {
             .desk => "? help · F1-F10 / 1-0 screens · Tab pane · Enter act · e emblem · : command · n end turn · q welcome",
-            .people => "/ filter · m admit to medbay · t train · a assign seat · P post · x transfer · L leave · D fire · r record",
+            .people => "/ , filter (…, wounded) · m admit to medbay · t train · a seat · P post · x transfer · L leave · D fire · r record",
             .market => "Tab pane · Enter buy / order / order shortfall · b fabricate component · [ ] HQ board · q welcome",
             .ledger => "j/k treasury · t send cash to it by courier · p standing top-up (floor + monthly cap) · L loan · R repay",
             .supply => "j/k site · on a company: t send cash · p top-up policy · s ship provisions from home · o order to the field",
@@ -2050,13 +2050,14 @@ pub const App = struct {
                 else => {},
             },
             .people => {
+                if (ch == '/' or ch == ',') {
+                    self.people_filter = if (ch == '/') self.people_filter.next() else self.people_filter.prev();
+                    self.cur(0).* = 0;
+                    return;
+                }
                 const id = (try self.selectedPerson()) orelse return;
                 var buf: [96]u8 = undefined;
                 switch (ch) {
-                    '/' => {
-                        self.people_filter = self.people_filter.next();
-                        self.cur(0).* = 0;
-                    },
                     't' => {
                         const p = g.person(id).?;
                         self.openCommand(std.fmt.bufPrint(&buf, "train {d} {s}", .{ @intFromEnum(id), @tagName(p.role.primarySkill()) }) catch "train ");
