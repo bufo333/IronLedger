@@ -1337,7 +1337,7 @@ pub const App = struct {
                     "  {a}companies{/}   :newco <name> at the first HQ · :newco@ hq:N <name> · :assignco co:N hq:M — each regional HQ hosts one combat company",
                     "  {a}money{/}       Ledger: L loan (simple interest) · R repay · Forces: $ sell hull · X disband company · HQ: $ sell HQ",
                     "  {a}field cash{/}  t courier cash out · T courier cash back to the outfit · p policy = keep above a floor, checked daily, cap per month · Ledger x clears one (or `:policy co:N 0 0`)",
-                    "  {a}resupply{/}    P policy `supplypolicy co:N days tons [battles]` — provisions under D days → ship N t; ammo per family sized to the link (or [battles])",
+                    "  {a}resupply{/}    P policy `supplypolicy co:N days [max_tons] [battles]` — every line (provisions, medical, armor, each ammo family) kept to a field plan sized to the transit and the trucks; days = safety days past the transit; 0 days removes",
                     "  {a}sell stock{/}  $ on a Supply HQ row → `sellstock hq:N part qty` — half catalogue value (40% for comp_*) into the HQ treasury; never under a keep-stocked minimum",
                     "  {a}warehouse{/}   K `stockpolicy hq:N part min [target]` (Supply on an HQ, Market on a catalogue row) — under min → order/fabricate to target, daily · Market KEEP STOCKED pane: Enter edits, x removes",
                     "  {a}medbay{/}      Settings (F12 or :settings) → a: auto-admit the wounded every morning, or `:autoadmit on|off`",
@@ -2528,7 +2528,7 @@ pub const App = struct {
                         .outfit => "policy ",
                     } else "policy "),
                     'P' => self.openCommand(if (site) |s| switch (s) {
-                        .company => |id| std.fmt.bufPrint(&buf, "supplypolicy co:{d} 14 20", .{@intFromEnum(id)}) catch "supplypolicy ",
+                        .company => |id| std.fmt.bufPrint(&buf, "supplypolicy co:{d} 14 0", .{@intFromEnum(id)}) catch "supplypolicy ",
                         else => "supplypolicy co:",
                     } else "supplypolicy co:"),
                     'K' => self.openCommand(if (site) |s| switch (s) {

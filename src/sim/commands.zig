@@ -153,7 +153,7 @@ pub const Command = union(enum) {
     set_role: struct { force: types.ForceId, role: force_mod.LanceRole },
     /// Automatic provisions resupply: ship `tons` from the home warehouse
     /// whenever the deployed company's stores fall under `min_days`.
-    /// `tons` = 0 removes the policy.
+    /// `tons` caps one shipment (0 = no cap); `min_days` = 0 removes the policy.
     set_supply_policy: struct { company: types.ForceId, min_days: u16, tons: u32, ammo_battles: u8 = 0 },
     /// Put a hull into a lance (line or support) of its company, at home.
     move_unit: struct { unit: types.UnitId, force: types.ForceId },
@@ -522,7 +522,7 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             var i: usize = 0;
             while (i < gs.supply_policies.items.len) : (i += 1) {
                 if (gs.supply_policies.items[i].company == sp.company) {
-                    if (sp.tons == 0) {
+                    if (sp.min_days == 0) {
                         _ = gs.supply_policies.orderedRemove(i);
                     } else {
                         gs.supply_policies.items[i].min_days = sp.min_days;
@@ -532,7 +532,7 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
                     return .{};
                 }
             }
-            if (sp.tons == 0) return .{};
+            if (sp.min_days == 0) return .{};
             try gs.supply_policies.append(gs.allocator(), .{ .company = sp.company, .min_days = sp.min_days, .tons = sp.tons, .ammo_battles = sp.ammo_battles });
             return .{};
         },
@@ -1379,8 +1379,8 @@ test "policies run daily under a monthly cap; resupply ships provisions to a com
         lrm_shipped += o.quantity;
     };
     try std.testing.expect(lrm_shipped > 0);
-    // tons = 0 removes it
-    _ = try execute(&gs, .{ .set_supply_policy = .{ .company = co, .min_days = 14, .tons = 0 } });
+    // zero safety days removes it
+    _ = try execute(&gs, .{ .set_supply_policy = .{ .company = co, .min_days = 0, .tons = 0 } });
     try std.testing.expectEqual(@as(usize, 0), gs.supply_policies.items.len);
 }
 
@@ -2240,4 +2240,36 @@ test "identity commands: outfit and company names, emblem bytes" {
     const f = gs.force(r.created_force).?;
     try std.testing.expectEqualStrings("The Iron Ledger", f.name);
     try std.testing.expect(f.emblem != null);
+}
+
+test "12: the resupply plan keeps a deployed company fed and armed on a long line" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 2025 });
+    defer gs.deinit();
+    _ = try execute(&gs, .{ .create_commander = .{ .name = "E", .origin = .CC, .profession = .paymaster } });
+    const co = (try execute(&gs, .{ .new_company = "Alpha" })).created_force;
+    const hq = gs.hqs.keys()[0];
+    const site: types.Site = .{ .company = co };
+    for (part_mod.munition_keys) |k| try gs.addStock(.{ .hq = hq }, k, 60);
+    try gs.addStock(.{ .hq = hq }, "provisions", 400);
+    try gs.addStock(.{ .hq = hq }, "medical_supplies", 30);
+    try gs.addStock(.{ .hq = hq }, "armor", 60);
+    _ = try execute(&gs, .{ .accept_contract = .{ .offer_index = 0, .company = co } });
+    // The load-out follows the plan: within capacity, no munitions the company cannot fire.
+    const cap = gs.siteCapacityTons(site).?;
+    try std.testing.expect(gs.siteTons(site) <= cap);
+    _ = try execute(&gs, .{ .set_supply_policy = .{ .company = co, .min_days = 14, .tons = 0 } });
+    _ = try execute(&gs, .{ .set_policy = .{ .entity = .{ .company = co }, .floor = 300_000, .monthly_cap = 600_000 } });
+    var day: u32 = 0;
+    var hungry_days: u32 = 0;
+    var dry_battles: u32 = 0;
+    while (day < 150) : (day += 1) {
+        _ = try execute(&gs, .advance_day);
+        try std.testing.expect(gs.siteTons(site) <= cap);
+        if (gs.stockCount(site, "provisions") == 0) hungry_days += 1;
+    }
+    for (gs.event_log.items) |e| if (std.mem.indexOf(u8, e.text, "silenced") != null and std.mem.indexOf(u8, e.text, "| 0 mounts silenced") == null) {
+        dry_battles += 1;
+    };
+    try std.testing.expectEqual(@as(u32, 0), hungry_days);
+    try std.testing.expectEqual(@as(u32, 0), dry_battles);
 }

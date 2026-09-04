@@ -19,6 +19,7 @@ const network = @import("network.zig");
 const contract_control = @import("contract_control.zig");
 const planet_mod = @import("../domain/planet.zig");
 const logistics = @import("../econ/logistics.zig");
+const field_supply = @import("field_supply.zig");
 
 /// Advance exactly one day — one turn. Turn-based: nothing blocks time;
 /// decision events sit in the inbox with deadlines, and the deadline applies
@@ -80,81 +81,45 @@ fn runPolicies(gs: *GameState) !void {
         try gs.log(.finance, .{ .company = tags.company, .hq = tags.hq }, "[finance] standing policy dispatches {d} c-bills (eta {d} days, {d} of {d} this month)", .{ amount, eta, policy.sent_this_month, policy.monthly_cap });
     }
 
+    // Resupply (Stage 12): every line of the company's field plan —
+    // provisions, medical, armor, each munition family it fires — is kept
+    // between a floor and a target sized to the line's transit and the
+    // trucks' tonnage (field_supply.plan). A line ships when on hand plus
+    // inbound drops under its floor, at most once a week per line, never
+    // past what the trucks can hold.
     const commands = @import("commands.zig");
     for (gs.supply_policies.items) |sp| {
         const f = gs.forces.getPtr(sp.company) orelse continue;
         if (gs.isCompanyHome(sp.company) or f.return_eta_day != null) continue;
-        const heads = gs.companyHeadcount(sp.company);
-        const per_day: u32 = @max(1, (heads + part_mod.provisions_person_days_per_ton - 1) / part_mod.provisions_person_days_per_ton);
-        const tons = gs.stockCount(.{ .company = sp.company }, "provisions");
-        if (tons / per_day >= sp.min_days) continue;
-        var in_flight = false;
-        for (gs.part_orders.items) |o| {
-            if (o.dest == .company and o.dest.company == sp.company and std.mem.eql(u8, o.part_key, "provisions") and (o.status == .in_transit or o.status == .sourcing)) in_flight = true;
-        }
-        if (in_flight) continue;
         const home = gs.homeHqFor(sp.company);
         if (home == .none) continue;
-        const available = gs.stockCount(.{ .hq = home }, "provisions");
-        const qty = @min(sp.tons, available);
-        if (qty == 0) {
-            if (gs.clock.day_index % 7 == 0) try gs.log(.delivery, .{ .company = sp.company, .hq = home }, "[supply] resupply policy: no provisions at {s} to ship to {s}", .{ gs.hqs.getPtr(home).?.name, f.name });
-            continue;
-        }
-        _ = commands.execute(gs, .{ .ship_stock = .{ .part_key = "provisions", .quantity = qty, .from = .{ .hq = home }, .to = .{ .company = sp.company } } }) catch |err| {
-            if (gs.clock.day_index % 7 == 0) try gs.log(.delivery, .{ .company = sp.company, .hq = home }, "[supply] resupply policy could not ship to {s}: {s}", .{ f.name, @errorName(err) });
-            continue;
-        };
-        try gs.log(.delivery, .{ .company = sp.company, .hq = home }, "[supply] resupply policy ships {d}t of provisions to {s} ({d} days left in the field)", .{ qty, f.name, tons / per_day });
-    }
-
-    // Munitions under the same policy: each family the company's weapons
-    // fire is kept at a few battles' worth (battle.mounts_per_ammo_ton per ton), one
-    // shipment per family in flight at a time.
-    for (gs.supply_policies.items) |sp| {
-        const f = gs.forces.getPtr(sp.company) orelse continue;
-        if (gs.isCompanyHome(sp.company) or f.return_eta_day != null) continue;
-        const home = gs.homeHqFor(sp.company);
-        if (home == .none) continue;
-        for (part_mod.munition_keys) |key| {
-            var mounts: u32 = 0;
-            var uit = gs.units.iterator();
-            while (uit.next()) |e| {
-                const u = e.value_ptr;
-                if (u.status == .destroyed or u.status == .mothballed or gs.companyOf(u.force) != sp.company) continue;
-                for (u.slots.items) |s| {
-                    if (s.class != .weapon or s.condition != .ok) continue;
-                    const fam = part_mod.munitionFor(s.part_key) orelse continue;
-                    if (std.mem.eql(u8, fam, key)) mounts += 1;
-                }
-            }
-            if (mounts == 0) continue;
-            const per_battle: u32 = std.math.divCeil(u32, mounts, battle.mounts_per_ammo_ton) catch 1;
-            // Battles come every ~15 days; a shipment takes the link's transit
-            // time. Floor = enough to fight through the transit plus one;
-            // target = floor + 2. `ammo_battles` overrides the target.
-            const transit = gs.courierEtaDays(.{ .company = sp.company });
-            const floor_battles: u32 = 1 + (transit + 14) / 15; // ceil(transit / 15) battles fought while a shipment travels
-            const target_battles: u32 = if (sp.ammo_battles > 0) @max(@as(u32, sp.ammo_battles), floor_battles) else floor_battles + 2;
-            const have = gs.stockCount(.{ .company = sp.company }, key);
-            if (have >= per_battle * floor_battles) continue;
-            var in_flight = false;
-            for (gs.part_orders.items) |o| {
-                if (o.dest == .company and o.dest.company == sp.company and std.mem.eql(u8, o.part_key, key) and (o.status == .in_transit or o.status == .sourcing)) in_flight = true;
-            }
-            if (in_flight) continue;
-            const available = gs.stockCount(.{ .hq = home }, key);
-            const want = per_battle * target_battles - have;
+        const site: types.Site = .{ .company = sp.company };
+        const transit = gs.courierEtaDays(.{ .company = sp.company });
+        var arena = std.heap.ArenaAllocator.init(gs.allocator());
+        defer arena.deinit();
+        const p = try field_supply.plan(arena.allocator(), gs, sp.company, transit, sp.min_days, sp.ammo_battles);
+        for (p.lines) |line| {
+            const on_hand = gs.stockCount(site, line.key);
+            const inbound = field_supply.inboundQty(gs, sp.company, line.key);
+            if (on_hand + inbound >= line.floor) continue;
+            var recent = false;
+            for (gs.part_orders.items) |o| if (o.dest == .company and o.dest.company == sp.company and std.mem.eql(u8, o.part_key, line.key) and o.ordered_day + 7 > gs.clock.day_index) {
+                recent = true;
+            };
+            if (recent) continue;
+            var want = line.target - on_hand - inbound;
+            if (sp.tons > 0) want = @min(want, sp.tons);
+            const available = gs.stockCount(.{ .hq = home }, line.key);
             const qty = @min(want, available);
             if (qty == 0) {
-                if (gs.clock.day_index % 7 == 0) try gs.log(.delivery, .{ .company = sp.company, .hq = home }, "[supply] resupply policy: no {s} at {s} to ship to {s}", .{ key, gs.hqs.getPtr(home).?.name, f.name });
+                if (gs.clock.day_index % 7 == 0) try gs.log(.delivery, .{ .company = sp.company, .hq = home }, "[supply] resupply policy: no {s} at {s} to ship to {s} ({d}t on hand, floor {d}t)", .{ line.key, gs.hqs.getPtr(home).?.name, f.name, on_hand, line.floor });
                 continue;
             }
-            _ = commands.execute(gs, .{ .ship_stock = .{ .part_key = key, .quantity = qty, .from = .{ .hq = home }, .to = .{ .company = sp.company } } }) catch |err| {
-                if (gs.clock.day_index % 7 == 0) try gs.log(.delivery, .{ .company = sp.company, .hq = home }, "[supply] resupply policy could not ship {s} to {s}: {s}", .{ key, f.name, @errorName(err) });
+            _ = commands.execute(gs, .{ .ship_stock = .{ .part_key = line.key, .quantity = qty, .from = .{ .hq = home }, .to = site } }) catch |err| {
+                if (gs.clock.day_index % 7 == 0) try gs.log(.delivery, .{ .company = sp.company, .hq = home }, "[supply] resupply policy could not ship {s} to {s}: {s}", .{ line.key, f.name, @errorName(err) });
                 continue;
             };
-            try gs.log(.delivery, .{ .company = sp.company, .hq = home }, "[supply] resupply policy ships {d}t of {s} to {s} ({d} mounts, {d}t on hand, target {d} battles for a {d}-day line)", .{ qty, key, f.name, mounts, have, target_battles, transit });
+            try gs.log(.delivery, .{ .company = sp.company, .hq = home }, "[supply] resupply policy ships {d}t of {s} to {s} ({d}t on hand + {d}t inbound, floor {d}t, target {d}t, {d}-day line)", .{ qty, line.key, f.name, on_hand, inbound, line.floor, line.target, transit });
         }
     }
 }
@@ -224,7 +189,8 @@ fn runTravel(gs: *GameState) !void {
             try gs.addStock(dest, order.part_key, landed);
             const tags = GameState.treasuryTags(GameState.siteTreasury(dest));
             try gs.log(.delivery, .{ .company = tags.company, .hq = tags.hq }, "[delivery] {s} x{d} received{s}", .{
-                order.part_key, landed, if (landed < order.quantity) " — NO ROOM for the rest, written off" else "",
+                order.part_key, landed,
+                if (landed < order.quantity) " — NO ROOM for the rest, written off" else "",
             });
         }
     }

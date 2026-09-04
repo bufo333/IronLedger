@@ -52,7 +52,7 @@ const SideState = struct {
 /// A ton of a munition family feeds this many mounts for one engagement
 /// (~10 turns of fire at tabletop rates; halved on 2026-09-04 because
 /// resupply tonnage was swamping the field trucks). // TUNE
-pub const mounts_per_ammo_ton = 6;
+pub const mounts_per_ammo_ton = @import("field_supply.zig").mounts_per_ammo_ton;
 
 fn hasTech(gs: *GameState, u: *const @import("../domain/unit.zig").Unit) bool {
     const t = gs.person(u.tech) orelse return false;
@@ -434,9 +434,9 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
 
     const ctx: @import("state.zig").LogCtx = .{ .company = c.assigned_company, .contract = c.id };
     try gs.log(.battle, ctx, "[AAR] {s} vs {s}: {s} — power {d} vs {d} (recon {d}, fatigue {d}, morale {d})", .{
-        @tagName(c.kind),          c.enemy_key,           @tagName(outcome),
-        player.power,              enemy_power,           player.mods.recon_quality,
-        player.mods.avg_fatigue,   player.mods.avg_morale,
+        @tagName(c.kind),        c.enemy_key,            @tagName(outcome),
+        player.power,            enemy_power,            player.mods.recon_quality,
+        player.mods.avg_fatigue, player.mods.avg_morale,
     });
     try gs.log(.battle, ctx, "[AAR]   losses: {d} hit / {d} destroyed, {d} wounded, {d} KIA | salvage {d} | comp {d} | score {d}", .{
         hits, destroyed, wounded, kia, salvage, comp, c.score,

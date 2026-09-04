@@ -19,6 +19,7 @@ pub const hq = @import("domain/hq.zig");
 // sim/ — state, time, randomness, events, battle resolution
 pub const state = @import("sim/state.zig");
 pub const tick = @import("sim/tick.zig");
+pub const field_supply = @import("sim/field_supply.zig");
 pub const maintenance = @import("sim/maintenance.zig");
 pub const medical = @import("sim/medical.zig");
 pub const hq_ops = @import("sim/hq_ops.zig");

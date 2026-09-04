@@ -61,7 +61,9 @@ pub const StandingPolicy = struct {
 /// the supply link (Stage 12). One inbound shipment at a time.
 pub const SupplyPolicy = struct {
     company: types.ForceId,
+    /// Safety days of provisions to hold past the line's transit.
     min_days: u16,
+    /// Cap on one shipment in tons (0 = the plan decides).
     tons: u32,
     /// Munition target in battles' worth per family; 0 = derive from the
     /// supply line: 1 + ceil(transit/15) battles as the floor, floor + 2 as the target.
@@ -815,14 +817,22 @@ pub const GameState = struct {
     /// of provisions, medical, ammo for its weapons, armor and structure —
     /// as far as its trucks can carry. // TUNE
     pub fn loadOutCompany(self: *GameState, company_id: types.ForceId) !void {
+        const field_supply = @import("field_supply.zig");
         const home = self.homeSiteFor(company_id);
         const dest: types.Site = .{ .company = company_id };
-        const heads = self.companyHeadcount(company_id);
-        const provisions = std.math.divCeil(u32, heads * 30, part_mod.provisions_person_days_per_ton) catch 0;
-        _ = try self.moveStock(home, dest, "provisions", provisions);
-        _ = try self.moveStock(home, dest, "medical_supplies", 4);
-        for (part_mod.munition_keys) |key| _ = try self.moveStock(home, dest, key, 10);
-        _ = try self.moveStock(home, dest, "armor", 10);
+        // The same plan the resupply policy follows, sized for the contract's
+        // transit so the trucks land with the line already covered.
+        const transit: u32 = if (self.deploymentContract(company_id)) |c| c.transit_days else 0;
+        var arena = std.heap.ArenaAllocator.init(self.allocator());
+        defer arena.deinit();
+        const p = try field_supply.plan(arena.allocator(), self, company_id, transit, 14, 0);
+        // Capped lines first; provisions fill whatever the trucks have left.
+        for (p.lines) |l| if (!std.mem.eql(u8, l.key, "provisions")) {
+            _ = try self.moveStock(home, dest, l.key, l.target);
+        };
+        for (p.lines) |l| if (std.mem.eql(u8, l.key, "provisions")) {
+            _ = try self.moveStock(home, dest, l.key, l.target);
+        };
     }
 
     /// Crate goods a company picked up in the field (salvaged structure,

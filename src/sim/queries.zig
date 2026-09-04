@@ -551,7 +551,7 @@ pub fn ledger(alloc: Alloc, gs: *GameState, selected: state_mod.Treasury, period
         try extras.append(alloc, try std.fmt.allocPrint(alloc, "  {s}  top up to {s} · {s} of {s} sent this month", .{ try treasuryLabel(alloc, gs, p.entity), try money(alloc, p.floor), try money(alloc, p.sent_this_month), try money(alloc, p.monthly_cap) }));
     }
     for (gs.supply_policies.items) |sp| {
-        try extras.append(alloc, try std.fmt.allocPrint(alloc, "  co:{d} {s}  resupply {d}t provisions under {d} days · ammo target {s}", .{ @intFromEnum(sp.company), clip(forceName(gs, sp.company), 16), sp.tons, sp.min_days, if (sp.ammo_battles > 0) try std.fmt.allocPrint(alloc, "{d} battles", .{sp.ammo_battles}) else "auto (1 + ceil(transit/15) battles, +2)" }));
+        try extras.append(alloc, try std.fmt.allocPrint(alloc, "  co:{d} {s}  resupply every line to its field plan · {d} safety days past the transit · ammo target {s}{s}", .{ @intFromEnum(sp.company), clip(forceName(gs, sp.company), 16), sp.min_days, if (sp.ammo_battles > 0) try std.fmt.allocPrint(alloc, "{d} battles", .{sp.ammo_battles}) else "auto", if (sp.tons > 0) try std.fmt.allocPrint(alloc, " · max {d}t per shipment", .{sp.tons}) else "" }));
     }
     if (gs.policies.items.len + gs.supply_policies.items.len > 0) try extras.append(alloc, "  {d}x on a treasury row clears its policy · keep-stocked lines live on the Market screen{/}");
     try extras.append(alloc, "");
@@ -887,7 +887,7 @@ pub fn supply(alloc: Alloc, gs: *GameState) !Supply {
         } else null;
         var resupply: []const u8 = "";
         for (gs.supply_policies.items) |sp| if (sp.company == f.id) {
-            resupply = try std.fmt.allocPrint(alloc, " · resupply {d}t under {d} days + ammo ({s})", .{ sp.tons, sp.min_days, if (sp.ammo_battles > 0) try std.fmt.allocPrint(alloc, "{d} battles", .{sp.ammo_battles}) else "auto" });
+            resupply = try std.fmt.allocPrint(alloc, " · resupply plan on ({d} safety days, ammo {s})", .{ sp.min_days, if (sp.ammo_battles > 0) try std.fmt.allocPrint(alloc, "{d} battles", .{sp.ammo_battles}) else "auto" });
         };
         const title = try std.fmt.allocPrint(alloc, "co:{d} {{a}}{s}{{/}} field stores{s}{s} · funds {s}{s}", .{
             @intFromEnum(f.id),              f.name,
@@ -990,6 +990,25 @@ pub fn stockTable(alloc: Alloc, gs: *GameState, site: types.Site) ![]const []con
         try out.append(alloc, try std.fmt.allocPrint(alloc, "{{c}}{s: <22} {d: >6} {d: >7}t  {s} · none{{/}}", .{ clip(key, 22), 0, 0, kind }));
     }
     if (out.items.len == 1) try out.append(alloc, "{d}empty{/}");
+    if (site == .company) {
+        var policy: ?state_mod.SupplyPolicy = null;
+        for (gs.supply_policies.items) |sp| if (sp.company == site.company) {
+            policy = sp;
+        };
+        const field_supply = @import("field_supply.zig");
+        const transit = gs.courierEtaDays(.{ .company = site.company });
+        const p = try field_supply.plan(alloc, gs, site.company, transit, if (policy) |sp| sp.min_days else 14, if (policy) |sp| sp.ammo_battles else 0);
+        try out.append(alloc, "");
+        try out.append(alloc, try std.fmt.allocPrint(alloc, "field plan · {d}t trucks · {d}-day line{s}", .{ p.capacity, transit, if (policy != null) "" else " · {c}no resupply policy — P sets one{/}" }));
+        try out.append(alloc, "  line                  floor  target  on hand  inbound");
+        for (p.lines) |l| {
+            const have = gs.stockCount(site, l.key);
+            const coming = field_supply.inboundQty(gs, site.company, l.key);
+            const mk: []const u8 = if (have + coming < l.floor) "{c}" else if (have < l.floor) "{a}" else "{g}";
+            try out.append(alloc, try std.fmt.allocPrint(alloc, "  {s: <20} {d: >6} {d: >7} {s}{d: >8}{{/}} {d: >8}  {{d}}{s}{{/}}", .{ clip(l.key, 20), l.floor, l.target, mk, have, coming, l.note }));
+        }
+        try out.append(alloc, try std.fmt.allocPrint(alloc, "  {{d}}truck shares: ammo {d}% · armor {d}% · medical {d}% · provisions take the rest · a line ships when on hand + inbound < floor{{/}}", .{ field_supply.ammo_share_pct, field_supply.armor_share_pct, field_supply.medical_share_pct }));
+    }
     if (site == .hq) {
         var any = false;
         for (gs.stock_policies.items) |sp| if (sp.hq == site.hq) {

@@ -167,7 +167,11 @@ Every warehouse and field store as a tonnage bar; the selected site's
 stock as a table; everything inbound with delivery days. On a company
 row: `t` sends cash by courier, `p` sets a top-up policy, `P` a resupply
 policy, `s` ships provisions from home, `o` orders straight to the
-field. On an HQ row (or a Market catalogue row) `K` sets a keep-stocked
+field. A deployed company's stock table ends with its field plan: every
+line it burns (provisions, medical, armor, each ammo family it fires)
+with a floor and target sized to the line's transit time and the trucks,
+ammo capped at 40% of the trucks so provisions always have room, and a
+convoy leaves whenever on hand plus inbound drops under the floor. On an HQ row (or a Market catalogue row) `K` sets a keep-stocked
 line: under the minimum, the warehouse reorders or fabricates up to the
 target on its own; the Market's KEEP STOCKED pane lists, edits and
 removes them. `$` on an HQ row sells part of a line for its resale
