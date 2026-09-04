@@ -83,11 +83,12 @@ fn tierFor(cols: u16, rows: u16) Tier {
 const office_roles = [_]game.person.Role{ .admin_command, .admin_logistics, .admin_transport, .admin_hr, .admin_finance };
 
 const verbs = [_][]const u8{
-    "admit",   "repay",   "sell",      "sellhq",    "disband",  "depot",    "role",   "supplypolicy", "move", "newlance",
-    "day",     "save",    "quit",      "help",      "emblem",   "transfer", "policy", "loan",     "accept", "resolve",
-    "order",   "ship",    "buy",       "assign",    "unassign", "autoassign", "autostaff", "upgrade", "tier",   "fabricate",
-    "hire",    "recruit", "fire",      "post",      "train",    "triage",   "leave",  "mothball", "activate", "complete",
-    "recall",  "found",   "link",      "assignco",  "newco",    "newco@",   "xfer",   "rename",   "refit",
+    "admit",       "repay",     "sell",      "sellhq", "disband", "depot", "role",     "supplypolicy", "move",       "newlance",
+    "stockpolicy", "autoadmit", "settings",  "day",    "save",    "quit",  "help",     "emblem",       "transfer",   "policy",
+    "loan",        "accept",    "resolve",   "order",  "ship",    "buy",   "assign",   "unassign",     "autoassign", "autostaff",
+    "upgrade",     "tier",      "fabricate", "hire",   "recruit", "fire",  "post",     "train",        "triage",     "leave",
+    "mothball",    "activate",  "complete",  "recall", "found",   "link",  "assignco", "newco",        "newco@",     "xfer",
+    "rename",      "refit",
 };
 
 const Emblem = struct { name: []const u8, art: [3][]const u8 };
@@ -708,13 +709,13 @@ pub const App = struct {
             return;
         }
         const line = try std.fmt.allocPrint(al, "{{a}}{s}{{/}}  day {d}  ·  outfit {{a}}{s}{{/}} C  ·  rep {s}{d}{{/}}  ·  {d} companies · {d} HQs · {d} hulls · {d} people  ·  inbox {s}{d}{{/}}  ·  checklist {s}{d}{{/}}  ·  turn ready: {s}", .{
-            st.date,                                     st.day,
-            st.funds,                                    if (st.reputation < 0) "{c}" else "{g}",
-            st.reputation,                               st.companies,
-            st.hqs,                                      st.hulls,
-            st.people,                                   if (st.inbox > 0) "{c}" else "{g}",
-            st.inbox,                                    if (st.blocking > 0) "{c}" else if (st.checklist > 0) "{a}" else "{g}",
-            st.checklist,                                if (st.blocking > 0) "{c}NO{/}" else "{g}YES{/}",
+            st.date,       st.day,
+            st.funds,      if (st.reputation < 0) "{c}" else "{g}",
+            st.reputation, st.companies,
+            st.hqs,        st.hulls,
+            st.people,     if (st.inbox > 0) "{c}" else "{g}",
+            st.inbox,      if (st.blocking > 0) "{c}" else if (st.checklist > 0) "{a}" else "{g}",
+            st.checklist,  if (st.blocking > 0) "{c}NO{/}" else "{g}YES{/}",
         });
         s.textPad(0, 1, s.cols, line, .normal);
     }
@@ -734,12 +735,12 @@ pub const App = struct {
             .market => try self.drawMarket(),
         }
         self.footer(switch (self.tab) {
-            .desk => "? help · F1-F10 / 1-0 screens · Tab pane · Enter act · e emblem · : command · n end turn · q welcome",
+            .desk => "? help · F1-F10 / 1-0 screens · Tab pane · Enter act · e emblem · F12 settings · : command · n end turn · q welcome",
             .people => "/ , filter (…, wounded) · m admit to medbay · t train · a seat · P post · x transfer · L leave · D fire · r record",
-            .market => "Tab pane · Enter buy / order / order shortfall · b fabricate component · [ ] HQ board · q welcome",
+            .market => "Tab pane · Enter buy / order / order shortfall · b fabricate component · K keep stocked · [ ] HQ board · q welcome",
             .ledger => "j/k treasury · t send cash to it · T pull cash back to the outfit · p top-up policy · L loan · R repay",
-            .supply => "on a company: t/T cash out/home · p cash policy · P resupply policy · s ship now · o order · H send structural parts home",
-            .forces => "Enter assign · a/u seat · A auto · l lance · o role · d depot · m mothball · x company · R recall · $ sell · X disband",
+            .supply => "company: t/T cash out/home · p cash policy · P resupply policy · s ship · o order · H structural parts home · HQ: K keep stocked",
+            .forces => "Enter assign · a/u seat · A auto · l lance · o role · d depot · m mothball · x company · b fabricate short comp · R recall · $ sell · X disband",
             .map => "h j k l move between worlds · f found HQ here · o offers here · n end turn · q welcome",
             .lab => "[ ] hull · j/k mount · - remove · + install · R order replacement · D send to depot (structure) · c clear · Enter commit",
             .hq => "[ ] switch HQ · u upgrade the highlighted facility (picker elsewhere) · T tier · S autostaff · Tab hall · f/F filter · Enter hire",
@@ -918,11 +919,13 @@ pub const App = struct {
         } else {
             const w = view.worlds[self.map_cursor];
             s.textPad(inner.x, inner.y + inner.h - 1, inner.w, try std.fmt.allocPrint(al, "{{a}}{s}{{/}} {s} · ind {d} · {d} LY · {s} · {d} offers  {{d}}[f] found [o] board{{/}}", .{
-                w.name, w.faction, w.industry, w.dist_ly, switch (w.band) {
+                w.name,        w.faction, w.industry, w.dist_ly,
+                switch (w.band) {
                     .ring => "{g}in ring{/}",
                     .beachhead => "{a}beachhead{/}",
                     .dark => "{d}out of reach{/}",
-                }, w.offers_here,
+                },
+                w.offers_here,
             }), .normal);
         }
 
@@ -1176,6 +1179,10 @@ pub const App = struct {
             if (rows.len > 0 and c < rows.len and rows[c].unit != .none) {
                 const detail = try q.hull(al, g, rows[c].unit);
                 self.listPane(.{ .x = b.x + lw, .y = b.y, .w = b.w - lw, .h = detail_h }, "HULL", detail, 1, false, false);
+            } else if (rows.len > 0 and c < rows.len and rows[c].force != .none and g.companyOf(rows[c].force) != .none) {
+                const co = g.companyOf(rows[c].force);
+                const dmg = try q.companyDamage(al, g, co);
+                self.listPane(.{ .x = b.x + lw, .y = b.y, .w = b.w - lw, .h = detail_h }, try std.fmt.allocPrint(al, "DAMAGE · {s}", .{q.forceName(g, co)}), dmg.lines, 1, false, false);
             } else {
                 const empty = [_][]const u8{"{d}select a hull in the TO&E{/}"};
                 self.listPane(.{ .x = b.x + lw, .y = b.y, .w = b.w - lw, .h = detail_h }, "HULL", &empty, 1, false, false);
@@ -1274,7 +1281,7 @@ pub const App = struct {
                     "  {a}desk{/}        Enter on an inbox row opens the decision · Enter on a checklist row jumps to its screen",
                     "  {a}contracts{/}   Enter accepts the offer under the cursor · c completes · R recalls",
                     "  {a}ledger{/}      j/k picks the treasury · t transfer · p policy · L loan",
-                    "  {a}forces{/}      a assign · u unassign · A auto-assign the company · t train",
+                    "  {a}forces{/}      a assign · u unassign · A auto-assign the company · t train · cursor on a company = DAMAGE pane (struct = depot, gear = field) · b fabricates the shortest comp_*",
                     "  {a}hq{/}          [ ] switch HQ · u upgrade · S autostaff · h hire · f/F hall filter",
                     "  {a}people{/}      / filter · m admit wounded · t train · a assign seat · P post · x transfer · L leave · D fire",
                     "  {a}market{/}      F10/0: / , filter (mechs, vehicles, aero, dropships, jumpships, weapons, ammo, equipment, components, supplies)",
@@ -1285,6 +1292,8 @@ pub const App = struct {
                     "  {a}money{/}       Ledger: L loan (simple interest) · R repay · Forces: $ sell hull · X disband company · HQ: $ sell HQ",
                     "  {a}field cash{/}  t courier cash out · T courier cash back to the outfit · p policy = keep above a floor, checked daily, cap per month",
                     "  {a}resupply{/}    P policy `supplypolicy co:N days tons [battles]` — provisions under D days → ship N t; ammo per family sized to the link (or [battles])",
+                    "  {a}warehouse{/}   K `stockpolicy hq:N part min [target]` (Supply on an HQ, Market on a catalogue row) — under min → order/fabricate to target, daily · target 0 removes",
+                    "  {a}medbay{/}      Settings (F12 or :settings) → a: auto-admit the wounded every morning, or `:autoadmit on|off`",
                     "  {a}turn rules{/}  wounded must be admitted (m) and a negative treasury covered before the day can end; bankruptcy ends the game",
                     "  {a}reputation{/}  every offer's pay × (1 + rep × 0.5%), clamped 0.8–1.3, and more offers per board · complete +1 (+VP) · breach −2 · decisions show their rep effect",
                     "  {a}emblem{/}      e on the Desk (or :emblem) changes the crest: presets or a PNG from ./, logos/, docs/logos/",
@@ -1386,6 +1395,10 @@ pub const App = struct {
                     try rows.append(al, "  {d}no soundtrack loaded — start without --no-music and keep tracks in data/music/{/}");
                 }
                 try rows.append(al, "");
+                if (self.gs) |*gs| {
+                    try rows.append(al, try std.fmt.allocPrint(al, "  medbay       auto-admit the wounded {s}     {{d}}[a] toggle — off: you admit each casualty (m on People) and the turn waits{{/}}", .{if (gs.auto_admit) "{g}on{/} " else "{c}off{/}"}));
+                    try rows.append(al, "");
+                }
                 try rows.append(al, try std.fmt.allocPrint(al, "  graphics     {s} · colour {s} · glyphs {s}", .{ if (self.graphics == .kitty) "kitty protocol" else "half-block", if (self.screen.truecolor) "24-bit" else "256", if (self.screen.ascii) "ascii" else "box-drawing" }));
                 try rows.append(al, "");
                 try rows.append(al, "  {d}[Esc] close{/}");
@@ -1901,7 +1914,9 @@ pub const App = struct {
 
     fn handleGameKey(self: *App, key: Key) !void {
         switch (key) {
-            .f => |n| if (n >= 1 and n <= 10) self.switchTab(@enumFromInt(n - 1)),
+            .f => |n| if (n >= 1 and n <= 10) self.switchTab(@enumFromInt(n - 1)) else if (n == 12) {
+                self.modal = .settings;
+            },
             .tab => self.focus = (self.focus + 1) % self.paneCount(),
             .backtab => self.focus = (self.focus + self.paneCount() - 1) % self.paneCount(),
             .down => try self.screenMove(1),
@@ -2208,6 +2223,14 @@ pub const App = struct {
                         self.openCommand(std.fmt.bufPrint(&buf, "fabricate hq:{d} {s} 1", .{ self.hqSelId(g), r.key }) catch "fabricate ");
                     } else self.say(.dim, "select a comp_* row in the catalog, then b", .{});
                 },
+                'K' => {
+                    const view = try q.market(al, g, self.market_filter);
+                    if (self.focus == 1 and view.catalog.len > 0) {
+                        const r = view.catalog[@min(self.cur(1).*, view.catalog.len - 1)];
+                        var buf: [96]u8 = undefined;
+                        self.openCommand(std.fmt.bufPrint(&buf, "stockpolicy hq:{d} {s} 5 10", .{ self.hqSelId(g), r.key }) catch "stockpolicy ");
+                    } else self.say(.dim, "select a catalogue row (Tab), then K to keep it stocked at the HQ", .{});
+                },
                 ']', '[' => {
                     var n: usize = 0;
                     var hit = g.hqs.iterator();
@@ -2318,6 +2341,18 @@ pub const App = struct {
                         self.modal_cursor = 0;
                         self.modal = .{ .lance_pick = r.unit };
                     },
+                    'b' => if (row) |r| {
+                        const co = g.companyOf(r.force);
+                        if (co == .none) {
+                            self.say(.dim, "put the cursor on a company or one of its hulls", .{});
+                            return;
+                        }
+                        const dmg = try q.companyDamage(al, g, co);
+                        if (dmg.short_key) |key| {
+                            var buf: [96]u8 = undefined;
+                            self.openCommand(std.fmt.bufPrint(&buf, "fabricate hq:{d} {s} 1", .{ self.homeHqOf(co), key }) catch "fabricate ");
+                        } else self.say(.good, "{s} needs no structural components the home HQ lacks", .{q.forceName(g, co)});
+                    },
                     'm' => if (row) |r| {
                         if (r.unit == .none) return;
                         const u = g.unit(r.unit) orelse return;
@@ -2406,6 +2441,10 @@ pub const App = struct {
                         .company => |id| std.fmt.bufPrint(&buf, "supplypolicy co:{d} 14 20", .{@intFromEnum(id)}) catch "supplypolicy ",
                         else => "supplypolicy co:",
                     } else "supplypolicy co:"),
+                    'K' => self.openCommand(if (site) |s| switch (s) {
+                        .hq => |id| std.fmt.bufPrint(&buf, "stockpolicy hq:{d} ", .{@intFromEnum(id)}) catch "stockpolicy ",
+                        else => "stockpolicy hq:",
+                    } else "stockpolicy hq:"),
                     'H' => {
                         // Send every structural component in the field stores home.
                         const co: types.ForceId = if (site) |s| (if (s == .company) s.company else .none) else .none;
@@ -2693,6 +2732,11 @@ pub const App = struct {
                     '+', '=' => try self.adjustVolume(10),
                     '-' => try self.adjustVolume(-10),
                     '>' => if (self.music) |*m| m.skip(),
+                    'a', 'A' => if (self.gs) |*gs| {
+                        const on = !gs.auto_admit;
+                        try self.exec(.{ .set_auto_admit = on });
+                        self.say(.good, "medbay auto-admit {s}", .{if (on) "on — casualties are admitted each morning" else "off — admit casualties yourself (m on People)"});
+                    },
                     'q' => self.modal = .none,
                     else => {},
                 },
@@ -3056,6 +3100,10 @@ pub const App = struct {
             self.modal = .help;
             return;
         }
+        if (eq(u8, verb, "settings")) {
+            self.modal = .settings;
+            return;
+        }
         if (eq(u8, verb, "emblem")) {
             try self.loadLogoList();
             self.modal_cursor = 0;
@@ -3142,6 +3190,18 @@ pub const App = struct {
             const tons = try num(u32, tokens.next());
             const battles: u8 = if (tokens.next()) |t| (std.fmt.parseInt(u8, t, 10) catch return error.BadNumber) else 0;
             return .{ .set_supply_policy = .{ .company = site.company, .min_days = min_days, .tons = tons, .ammo_battles = battles } };
+        }
+        if (eq(u8, verb, "stockpolicy")) {
+            const site = try parseSite(try need(tokens.next()));
+            if (site != .hq) return error.BadSite;
+            const part = try need(tokens.next());
+            const min = try num(u32, tokens.next());
+            const target = std.fmt.parseInt(u32, tokens.next() orelse "0", 10) catch return error.BadNumber;
+            return .{ .set_stock_policy = .{ .hq = site.hq, .part_key = part, .min = min, .target = if (target == 0 and min > 0) min * 2 else target } };
+        }
+        if (eq(u8, verb, "autoadmit")) {
+            const arg = tokens.next() orelse "on";
+            return .{ .set_auto_admit = eq(u8, arg, "on") or eq(u8, arg, "1") or eq(u8, arg, "yes") };
         }
         if (eq(u8, verb, "loan")) {
             return .{ .take_loan = .{ .principal = try num(i64, tokens.next()), .term_months = try num(u16, tokens.next()) } };

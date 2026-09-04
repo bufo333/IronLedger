@@ -68,6 +68,17 @@ pub const SupplyPolicy = struct {
     ammo_battles: u8 = 0,
 };
 
+/// "Keep this warehouse stocked": when an HQ's count of `part_key` drops
+/// under `min`, enough is ordered (components: fabricated when the HQ has a
+/// bay) to bring it back to `target`. Checked daily; one order per line in
+/// flight, and a failed sourcing roll is not retried for a week (Stage 12).
+pub const StockPolicy = struct {
+    hq: types.HqId,
+    part_key: []const u8,
+    min: u32,
+    target: u32,
+};
+
 /// Structured campaign log (Stage 9A): every entry tagged so any entity's
 /// history is a filter, not an archaeology dig.
 pub const LogCategory = enum {
@@ -182,6 +193,10 @@ pub const GameState = struct {
     /// Set when the treasury went negative beyond what loans and sales
     /// could cover: game over (Stage 12). Persisted; advancing refuses.
     bankrupt: bool = false,
+    /// Stage 12: the medbay admits the wounded itself each morning instead
+    /// of waiting for the commander's signature (an untreated-wounded
+    /// warning never blocks the turn while this is on).
+    auto_admit: bool = false,
     ledger: finance_mod.Ledger = .{},
     event_queue: events_mod.EventQueue = .{},
 
@@ -207,6 +222,7 @@ pub const GameState = struct {
     policies: std.ArrayListUnmanaged(StandingPolicy) = .empty,
     /// Automatic provisions resupply for deployed companies.
     supply_policies: std.ArrayListUnmanaged(SupplyPolicy) = .empty,
+    stock_policies: std.ArrayListUnmanaged(StockPolicy) = .empty,
     /// Mek bay queues across all HQs (Stage 9C).
     bay_jobs: std.ArrayListUnmanaged(BayJob) = .empty,
     /// Hiring-hall boards (Stage 9C.2), churned daily.

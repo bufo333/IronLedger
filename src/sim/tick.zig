@@ -32,6 +32,7 @@ pub fn advanceDay(gs: *GameState) !void {
     if (gs.clock.day_index % 7 == 0) network.resetWeeklyThroughput(gs); // links' week (Stage 9D)
     try runTravel(gs); // deliveries, couriers, transfers
     try runPolicies(gs); // standing cash top-ups and resupply (Stage 12: daily)
+    try runStockPolicies(gs); // warehouse reorder points (Stage 12)
     try hq_ops.runDaily(gs); // bays, fabrication, construction (Stage 9C)
     try runSupplyConsumption(gs); // supply_consumption phase (Stage 9B)
     try medical.runDailyHealing(gs); // medical phase
@@ -108,7 +109,7 @@ fn runPolicies(gs: *GameState) !void {
     }
 
     // Munitions under the same policy: each family the company's weapons
-    // fire is kept at two battles' worth (one ton feeds three mounts), one
+    // fire is kept at a few battles' worth (battle.mounts_per_ammo_ton per ton), one
     // shipment per family in flight at a time.
     for (gs.supply_policies.items) |sp| {
         const f = gs.forces.getPtr(sp.company) orelse continue;
@@ -128,7 +129,7 @@ fn runPolicies(gs: *GameState) !void {
                 }
             }
             if (mounts == 0) continue;
-            const per_battle: u32 = (mounts + 2) / 3; // TUNE mirrors battle.mounts_per_ammo_ton
+            const per_battle: u32 = std.math.divCeil(u32, mounts, battle.mounts_per_ammo_ton) catch 1;
             // Battles come every ~15 days; a shipment takes the link's transit
             // time. Floor = enough to fight through the transit plus one;
             // target = floor + 2. `ammo_battles` overrides the target.
@@ -155,6 +156,42 @@ fn runPolicies(gs: *GameState) !void {
             };
             try gs.log(.delivery, .{ .company = sp.company, .hq = home }, "[supply] resupply policy ships {d}t of {s} to {s} ({d} mounts, {d}t on hand, target {d} battles for a {d}-day line)", .{ qty, key, f.name, mounts, have, target_battles, transit });
         }
+    }
+}
+
+/// Warehouse reorder points (Stage 12): every line an HQ keeps stocked is
+/// checked daily; under `min` the shortfall to `target` is fabricated
+/// (components, when the HQ has a bay) or ordered through the catalogue.
+/// One order per line in flight; a failed sourcing roll waits a week.
+fn runStockPolicies(gs: *GameState) !void {
+    const commands = @import("commands.zig");
+    const today = gs.clock.day_index;
+    for (gs.stock_policies.items) |sp| {
+        const hq = gs.hqs.getPtr(sp.hq) orelse continue;
+        const have = gs.stockCount(.{ .hq = sp.hq }, sp.part_key);
+        if (have >= sp.min) continue;
+        var pending: u32 = 0;
+        var failed_recently = false;
+        for (gs.part_orders.items) |o| {
+            if (!std.mem.eql(u8, o.part_key, sp.part_key)) continue;
+            if (o.dest == .hq and o.dest.hq == sp.hq and (o.status == .in_transit or o.status == .sourcing)) pending += o.quantity;
+            if (o.status == .failed and o.ordered_day + 7 > today) failed_recently = true;
+        }
+        for (gs.bay_jobs.items) |j| if (j.hq == sp.hq and j.kind == .fabrication and j.done_day == null and std.mem.eql(u8, j.item_key, sp.part_key)) {
+            pending += 1;
+        };
+        if (pending > 0 or failed_recently) continue;
+        const want = sp.target - have;
+        const fabricate = part_mod.isComponent(sp.part_key) and hq_ops.baySlots(gs, sp.hq) > 0;
+        const cmd: commands.Command = if (fabricate)
+            .{ .fabricate = .{ .hq = sp.hq, .part_key = sp.part_key, .quantity = want } }
+        else
+            .{ .order_part = .{ .part_key = sp.part_key, .quantity = want, .dest = .{ .hq = sp.hq } } };
+        _ = commands.execute(gs, cmd) catch |err| {
+            if (today % 7 == 0) try gs.log(.market, .{ .hq = sp.hq }, "[stock] policy could not restock {s} at {s}: {s}", .{ sp.part_key, hq.name, @errorName(err) });
+            continue;
+        };
+        try gs.log(.market, .{ .hq = sp.hq }, "[stock] policy {s} {d} {s} for {s} ({d} on hand, keep {d}-{d})", .{ if (fabricate) "fabricates" else "orders", want, sp.part_key, hq.name, have, sp.min, sp.target });
     }
 }
 

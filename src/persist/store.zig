@@ -25,7 +25,7 @@ const contract_events = @import("../sim/contract_events.zig");
 const network = @import("../sim/network.zig");
 const clock_mod = @import("../sim/clock.zig");
 
-pub const schema_version = 4;
+pub const schema_version = 5;
 
 const ddl =
     \\CREATE TABLE IF NOT EXISTS player (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_seq INTEGER NOT NULL);
@@ -52,6 +52,7 @@ const ddl =
     \\CREATE TABLE IF NOT EXISTS courier (cid INTEGER NOT NULL, ord INTEGER NOT NULL, to_kind TEXT, to_id INTEGER, amount INTEGER, sent INTEGER, eta INTEGER);
     \\CREATE TABLE IF NOT EXISTS policy (cid INTEGER NOT NULL, ord INTEGER NOT NULL, entity_kind TEXT, entity_id INTEGER, floor INTEGER, cap INTEGER, sent INTEGER NOT NULL DEFAULT 0);
     \\CREATE TABLE IF NOT EXISTS supply_policy (cid INTEGER NOT NULL, ord INTEGER NOT NULL, company INTEGER, min_days INTEGER, tons INTEGER, ammo_battles INTEGER NOT NULL DEFAULT 0);
+    \\CREATE TABLE IF NOT EXISTS stock_policy (cid INTEGER NOT NULL, ord INTEGER NOT NULL, hq INTEGER, part_key TEXT, min_qty INTEGER, target INTEGER);
     \\CREATE TABLE IF NOT EXISTS bay_job (cid INTEGER NOT NULL, ord INTEGER NOT NULL, hq INTEGER, kind TEXT, unit INTEGER, item_key TEXT, duration INTEGER, queued INTEGER, started INTEGER, done INTEGER, cost INTEGER);
     \\CREATE TABLE IF NOT EXISTS candidate (cid INTEGER NOT NULL, ord INTEGER NOT NULL, hq INTEGER, first TEXT, last TEXT, callsign TEXT, role TEXT, experience TEXT, primary_skill INTEGER, secondary_skill INTEGER, bonus INTEGER, listed INTEGER, expires INTEGER);
     \\CREATE TABLE IF NOT EXISTS hq_link (cid INTEGER NOT NULL, ord INTEGER NOT NULL, a INTEGER, b INTEGER, level INTEGER, tons INTEGER, established INTEGER);
@@ -70,7 +71,7 @@ const tables = [_][]const u8{
     "unit",       "unit_slot",   "force",        "force_unit",      "force_child",  "stock",
     "hq",         "hq_facility", "hq_project",   "contract",        "txn",          "loan",
     "courier",    "policy",      "bay_job",      "candidate",       "hq_link",      "unit_transfer",
-    "supply_policy",
+    "supply_policy", "stock_policy",
     "faction_cooling", "listing", "part_order",  "event_log",       "pending_event", "refit_plan",
     "refit_op",
 };
@@ -274,6 +275,7 @@ pub const Store = struct {
                 .{ "month", gs.clock.date.month },         .{ "day", gs.clock.date.day },
                 .{ "funds", gs.funds },                    .{ "reputation", gs.reputation },
                 .{ "bankrupt", @as(i64, @intFromBool(gs.bankrupt)) },
+                .{ "auto_admit", @as(i64, @intFromBool(gs.auto_admit)) },
                 .{ "next_person_id", gs.next_person_id },  .{ "next_unit_id", gs.next_unit_id },
                 .{ "next_force_id", gs.next_force_id },    .{ "next_hq_id", gs.next_hq_id },
                 .{ "next_contract_id", gs.next_contract_id },
@@ -478,6 +480,14 @@ pub const Store = struct {
             }
         }
         {
+            const st = try self.db.prepare("INSERT INTO stock_policy VALUES (?1,?2,?3,?4,?5,?6)");
+            defer st.finalize();
+            for (gs.stock_policies.items, 0..) |p, i| {
+                try st.bindAll(.{ cid, @as(i64, @intCast(i)), @intFromEnum(p.hq), p.part_key, @as(i64, p.min), @as(i64, p.target) });
+                try st.run();
+            }
+        }
+        {
             const st = try self.db.prepare("INSERT INTO bay_job VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)");
             defer st.finalize();
             for (gs.bay_jobs.items, 0..) |j, i| {
@@ -631,6 +641,7 @@ pub const Store = struct {
                 if (std.mem.eql(u8, key, "funds")) gs.funds = v;
                 if (std.mem.eql(u8, key, "reputation")) gs.reputation = @intCast(v);
                 if (std.mem.eql(u8, key, "bankrupt")) gs.bankrupt = v != 0;
+                if (std.mem.eql(u8, key, "auto_admit")) gs.auto_admit = v != 0;
                 if (std.mem.eql(u8, key, "next_person_id")) gs.next_person_id = @intCast(v);
                 if (std.mem.eql(u8, key, "next_unit_id")) gs.next_unit_id = @intCast(v);
                 if (std.mem.eql(u8, key, "next_force_id")) gs.next_force_id = @intCast(v);
@@ -939,6 +950,14 @@ pub const Store = struct {
             }
         }
         {
+            const st = try self.db.prepare("SELECT hq, part_key, min_qty, target FROM stock_policy WHERE cid = ?1 ORDER BY ord");
+            defer st.finalize();
+            try st.bindAll(.{cid});
+            while (try st.next()) {
+                try gs.stock_policies.append(alloc, .{ .hq = toId(types.HqId, st.int(0)), .part_key = try st.text(1, alloc), .min = @intCast(st.int(2)), .target = @intCast(st.int(3)) });
+            }
+        }
+        {
             const st = try self.db.prepare("SELECT hq, kind, unit, item_key, duration, queued, started, done, cost FROM bay_job WHERE cid = ?1 ORDER BY ord");
             defer st.finalize();
             try st.bindAll(.{cid});
@@ -1160,6 +1179,8 @@ test "save → load → identical hash, and the loaded campaign keeps playing" {
     _ = try commands.execute(&gs, .{ .set_policy = .{ .entity = .{ .company = co }, .floor = 200_000, .monthly_cap = 300_000 } });
     _ = try commands.execute(&gs, .{ .set_supply_policy = .{ .company = co, .min_days = 14, .tons = 20 } });
     _ = try commands.execute(&gs, .{ .set_supply_policy = .{ .company = co, .min_days = 30, .tons = 60 } }); // re-setting replaces
+    _ = try commands.execute(&gs, .{ .set_stock_policy = .{ .hq = gs.hqs.keys()[0], .part_key = "ammo_lrm", .min = 10, .target = 30 } });
+    _ = try commands.execute(&gs, .{ .set_auto_admit = true });
     _ = try commands.execute(&gs, .{ .advance_days = 40 }); // battles, events, deliveries, couriers
     const before = gs.hash();
 
@@ -1181,6 +1202,10 @@ test "save → load → identical hash, and the loaded campaign keeps playing" {
     try std.testing.expectEqual(@as(usize, 1), loaded.supply_policies.items.len);
     try std.testing.expectEqual(@as(u16, 30), loaded.supply_policies.items[0].min_days);
     try std.testing.expectEqual(@as(u32, 60), loaded.supply_policies.items[0].tons);
+    try std.testing.expectEqual(@as(usize, 1), loaded.stock_policies.items.len);
+    try std.testing.expectEqualStrings("ammo_lrm", loaded.stock_policies.items[0].part_key);
+    try std.testing.expectEqual(@as(u32, 30), loaded.stock_policies.items[0].target);
+    try std.testing.expect(loaded.auto_admit);
 
     // Determinism survives the round trip: both worlds evolve identically.
     _ = try commands.execute(&gs, .{ .advance_days = 30 });

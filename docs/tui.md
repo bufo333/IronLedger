@@ -107,11 +107,11 @@ entity ids. Results land in the Desk log pane.
 | F3 | Forces | TO&E tree · Hull/Person detail · Unassigned pool | `a` → `assign`, `u` → `unassign`, `A` → `auto_assign`, `t` → `train`, `x` → `transfer_unit`/`transfer_person`, `m` medbay modal (`triage`, `leave`) |
 | F4 | Contracts | Board · Active | Enter → `accept_contract` (company picker), `c` → `complete_contract`, `R` → `recall_company`, `v` AARs |
 | F5 | Ledger | Treasuries · P&L · Ledger | `t` → `transfer`, `p` → `set_policy`, `L` → `take_loan`, `[ ]` period |
-| F6 | Supply | Sites · Demand · Order form · Shop | `o` → `order_part`, `s` → `ship_stock`, `b` → `buy_listing`, Enter on demand → order shortfall |
+| F6 | Supply | Sites · Demand · Order form · Shop | `o` → `order_part`, `s` → `ship_stock`, `b` → `buy_listing`, Enter on demand → order shortfall, `P` → `set_supply_policy`, `K` → `set_stock_policy` (keep an HQ line stocked) |
 | F7 | HQ | Facilities/projects · Bays · Back office · Hiring hall | `u` → `upgrade_facility`, `T` → `upgrade_tier`, `f` → `fabricate`, `P` → `post_person`, `h` → `hire_candidate`, `[ ]` switch HQ |
 | F8 | Lab | Budget/crits · Mounts · Plan & rules | `-` → `refit_remove`, `+` → `refit_install`, `c` → `refit_clear`, Enter → `refit_commit`, `[ ]` switch hull |
 | F9 | People | Personnel (pinned header, role filter) · Record · Open seats | `m` → `admit`, `t` → `train`, `a`/Enter seat picker → `assign`, `P` → `post_person`, `x` → `transfer_person`, `L` → `leave`, `D` → `fire`, `r` record |
-| F10 | Market | Boards · Order catalog · Demand | Enter → `buy_listing` / `order_part` / order the shortfall, `b` → `fabricate`, `[ ]` buyer HQ |
+| F10 | Market | Boards · Order catalog · Demand | Enter → `buy_listing` / `order_part` / order the shortfall, `b` → `fabricate`, `K` → `set_stock_policy` on a catalogue row, `[ ]` buyer HQ |
 
 Money keys: Ledger `L` → `take_loan`, `R` → `repay_loan`; Forces `$` →
 `sell_unit`, `X` → `disband_company`; HQ `$` → `sell_hq`. Turn rules the

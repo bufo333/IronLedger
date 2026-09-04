@@ -109,6 +109,23 @@ assert "filter mechs" in plain()[-30000:], plain()[-3000:]
 send(",", 0.8)
 send("\t"); send("\r", 0.8)    # catalog → order prefill
 assert ":order " in plain()[-300:], plain()[-600:]
+send("\x1b"); send("K", 0.8)   # catalog → keep-stocked prefill
+assert ":stockpolicy hq:" in plain()[-300:], plain()[-600:]
+send("\r", 1.0)                 # set it (min 5, target 10)
+send("6")
+assert "keep stocked" in plain()[-30000:], plain()[-3000:]
+send("K", 0.8)                  # on the HQ row: policy prefill
+assert ":stockpolicy hq:" in plain()[-300:], plain()[-600:]
+send("\x1b")
+send("3"); send("j", 0.6)       # forces: cursor on the company → damage pane
+assert "DAMAGE ·" in plain()[-30000:] or "every hull is whole" in plain()[-30000:], plain()[-3000:]
+send("b", 0.8)
+assert "needs no structural components" in plain()[-400:] or ":fabricate hq:" in plain()[-400:], plain()[-800:]
+send("\x1b")
+send(":"); send("settings\r", 0.8)   # settings in-game: medbay auto-admit toggle
+assert "auto-admit the wounded" in plain()[-30000:], plain()[-2000:]
+send("a", 0.8)
+assert "medbay auto-admit on" in plain()[-600:], plain()[-800:]
 send("\x1b")
 send("6")                      # supply: cash and provisions to a company
 p = plain()

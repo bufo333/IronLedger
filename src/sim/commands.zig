@@ -159,6 +159,11 @@ pub const Command = union(enum) {
     move_unit: struct { unit: types.UnitId, force: types.ForceId },
     /// Raise a new line lance under a company (HQ lance capacity permitting).
     new_lance: struct { company: types.ForceId, name: []const u8 },
+    /// Keep an HQ warehouse stocked: under `min` → order/fabricate up to
+    /// `target`, checked daily. `target` = 0 removes the line.
+    set_stock_policy: struct { hq: types.HqId, part_key: []const u8, min: u32, target: u32 },
+    /// Let the medbay admit the wounded on its own each morning.
+    set_auto_admit: bool,
 };
 
 pub const Error = error{
@@ -525,6 +530,38 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             }
             if (sp.tons == 0) return .{};
             try gs.supply_policies.append(gs.allocator(), .{ .company = sp.company, .min_days = sp.min_days, .tons = sp.tons, .ammo_battles = sp.ammo_battles });
+            return .{};
+        },
+        .set_stock_policy => |sp| {
+            if (gs.hqs.getPtr(sp.hq) == null) return Error.UnknownHq;
+            const def = part_mod.find(sp.part_key) orelse return Error.UnknownPart;
+            const target = @max(sp.target, sp.min);
+            var i: usize = 0;
+            while (i < gs.stock_policies.items.len) : (i += 1) {
+                const line = &gs.stock_policies.items[i];
+                if (line.hq == sp.hq and std.mem.eql(u8, line.part_key, def.key)) {
+                    if (sp.target == 0) {
+                        _ = gs.stock_policies.orderedRemove(i);
+                    } else {
+                        line.min = sp.min;
+                        line.target = target;
+                    }
+                    return .{};
+                }
+            }
+            if (sp.target == 0) return .{};
+            try gs.stock_policies.append(gs.allocator(), .{ .hq = sp.hq, .part_key = def.key, .min = sp.min, .target = target });
+            return .{};
+        },
+        .set_auto_admit => |on| {
+            gs.auto_admit = on;
+            if (on) {
+                // Nobody waits for the morning round: admit today's wounded now.
+                var it = gs.people.iterator();
+                while (it.next()) |e| if (e.value_ptr.status == .wounded and !e.value_ptr.medbay_admitted) {
+                    e.value_ptr.medbay_admitted = true;
+                };
+            }
             return .{};
         },
         .set_role => |r| {
@@ -1376,6 +1413,74 @@ test "wounded only heal once admitted" {
     _ = try execute(&gs, .{ .admit = pid });
     _ = try execute(&gs, .advance_day);
     try std.testing.expect(gs.person(pid).?.wound_heal_day != null);
+}
+
+test "12: auto-admit sends the wounded to the medbay on its own and never blocks the turn" {
+    const checklist = @import("checklist.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 9 });
+    defer gs.deinit();
+    _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    _ = try execute(&gs, .{ .new_company = "Alpha" });
+    const pid = gs.people.keys()[0];
+    gs.person(pid).?.status = .wounded;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var blocked = false;
+    for (try checklist.turnWarnings(&gs, arena.allocator())) |w| if (w.kind == .untreated_wounded) {
+        blocked = true;
+    };
+    try std.testing.expect(blocked);
+    _ = try execute(&gs, .{ .set_auto_admit = true });
+    try std.testing.expect(gs.person(pid).?.medbay_admitted);
+    blocked = false;
+    for (try checklist.turnWarnings(&gs, arena.allocator())) |w| if (w.kind == .untreated_wounded) {
+        blocked = true;
+    };
+    try std.testing.expect(!blocked);
+    // A later casualty is picked up by the morning round.
+    const other = gs.people.keys()[1];
+    gs.person(other).?.status = .wounded;
+    _ = try execute(&gs, .advance_day);
+    try std.testing.expect(gs.person(other).?.medbay_admitted);
+    try std.testing.expect(gs.person(other).?.wound_heal_day != null);
+}
+
+test "12: a stock policy reorders a warehouse line to its target, once, and can be removed" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 12 });
+    defer gs.deinit();
+    _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    const hq = gs.hqs.keys()[0];
+    gs.hqs.getPtr(hq).?.funds = 20_000_000;
+    try std.testing.expectError(Error.UnknownPart, execute(&gs, .{ .set_stock_policy = .{ .hq = hq, .part_key = "unobtainium", .min = 1, .target = 2 } }));
+    _ = try execute(&gs, .{ .set_stock_policy = .{ .hq = hq, .part_key = "ammo_lrm", .min = 10, .target = 30 } });
+    try std.testing.expectEqual(@as(usize, 1), gs.stock_policies.items.len);
+    // The founding warehouse holds some reloads already: above the minimum, nothing happens.
+    _ = try execute(&gs, .advance_day);
+    try std.testing.expectEqual(@as(usize, 0), gs.part_orders.items.len);
+    _ = gs.takeStock(.{ .hq = hq }, "ammo_lrm", gs.stockCount(.{ .hq = hq }, "ammo_lrm") - 4);
+    // A few days for the sourcing roll to land (a miss waits a week).
+    var ordered: u32 = 0;
+    var days: u32 = 0;
+    while (ordered == 0 and days < 30) : (days += 1) {
+        _ = try execute(&gs, .advance_day);
+        for (gs.part_orders.items) |o| if (std.mem.eql(u8, o.part_key, "ammo_lrm") and o.dest == .hq and o.status != .failed) {
+            ordered += o.quantity;
+        };
+    }
+    try std.testing.expectEqual(@as(u32, 30 - 4), ordered);
+    // Nothing more is ordered while that one is in flight.
+    _ = try execute(&gs, .advance_day);
+    var live: usize = 0;
+    for (gs.part_orders.items) |o| if (std.mem.eql(u8, o.part_key, "ammo_lrm") and o.status != .failed) {
+        live += 1;
+    };
+    try std.testing.expectEqual(@as(usize, 1), live);
+    // Re-setting replaces; target 0 removes.
+    _ = try execute(&gs, .{ .set_stock_policy = .{ .hq = hq, .part_key = "ammo_lrm", .min = 5, .target = 3 } });
+    try std.testing.expectEqual(@as(usize, 1), gs.stock_policies.items.len);
+    try std.testing.expectEqual(@as(u32, 5), gs.stock_policies.items[0].target); // clamped up to min
+    _ = try execute(&gs, .{ .set_stock_policy = .{ .hq = hq, .part_key = "ammo_lrm", .min = 0, .target = 0 } });
+    try std.testing.expectEqual(@as(usize, 0), gs.stock_policies.items.len);
 }
 
 test "golden master: same seed + same script = same state hash" {

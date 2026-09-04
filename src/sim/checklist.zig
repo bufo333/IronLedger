@@ -88,7 +88,7 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
         while (pit.next()) |e| if (e.value_ptr.status == .wounded and !e.value_ptr.medbay_admitted) {
             n += 1;
         };
-        if (n > 0) try out.append(alloc, .{ .kind = .untreated_wounded, .text = try std.fmt.allocPrint(alloc, "{d} wounded await{s} medbay admission (they don't heal until admitted)", .{ n, if (n == 1) "s" else "" }) });
+        if (n > 0 and !gs.auto_admit) try out.append(alloc, .{ .kind = .untreated_wounded, .text = try std.fmt.allocPrint(alloc, "{d} wounded await{s} medbay admission (they don't heal until admitted)", .{ n, if (n == 1) "s" else "" }) });
     }
 
     // Decisions about to default.

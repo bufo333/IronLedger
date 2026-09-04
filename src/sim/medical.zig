@@ -128,8 +128,13 @@ pub fn runDailyHealing(gs: *GameState) !void {
         if (p.status != .wounded) continue;
         if (p.wound_heal_day == null) {
             // Nobody heals in a corridor: the player admits the wounded
-            // (`admit`), and only then does triage run.
-            if (!p.medbay_admitted) continue;
+            // (`admit`), and only then does triage run — unless the medbay
+            // runs its own morning round (Stage 12 auto-admit).
+            if (!p.medbay_admitted) {
+                if (!gs.auto_admit) continue;
+                p.medbay_admitted = true;
+                try gs.log(.medical, .{ .company = gs.companyOf(p.assigned_force) }, "[medbay] {s} {s} admitted (auto)", .{ p.first_name, p.last_name });
+            }
             // MASH coverage only helps if their company fields a MASH lance
             // in the field; at home the hospital takes over. Triage consumes
             // a ton of medical supplies from wherever they lie (Stage 9B);

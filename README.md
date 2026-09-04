@@ -132,7 +132,10 @@ The TO&E as a tree with pilot, tech and state per hull; the selected
 hull's mounts, ammo and repair needs; the unassigned pool; the person;
 the medbay. `o` sets a lance's role (fighting, defense, scouting,
 training), `d` sends a hull to the depot, `$` sells one, `X` disbands a
-company.
+company. Rows flag `struct lt,ra` (depot work, needs a component) and
+`gear N` (field work); the cursor on a company opens a DAMAGE pane with
+the components the home warehouse must have ready, and `b` fabricates
+the one it is shortest of.
 
 ![Forces](docs/screenshots/forces.svg)
 
@@ -156,8 +159,11 @@ everything you own, a P&L in two periods, and the transactions.
 
 Every warehouse and field store as a tonnage bar; the selected site's
 stock as a table; everything inbound with delivery days. On a company
-row: `t` sends cash by courier, `p` sets a top-up policy, `s` ships
-provisions from home, `o` orders straight to the field.
+row: `t` sends cash by courier, `p` sets a top-up policy, `P` a resupply
+policy, `s` ships provisions from home, `o` orders straight to the
+field. On an HQ row (or a Market catalogue row) `K` sets a keep-stocked
+line: under the minimum, the warehouse reorders or fabricates up to the
+target on its own.
 
 ![Supply](docs/screenshots/supply.svg)
 
@@ -183,7 +189,8 @@ depot for structural work.
 
 Everyone on the payroll with status, assignment and location; the full
 record with skills and XP costs; open seats. `m` admits the wounded to
-the medbay — they do not heal until you do.
+the medbay — they do not heal until you do, unless Settings (F12) has
+auto-admit on.
 
 ![People](docs/screenshots/people.svg)
 

@@ -550,6 +550,9 @@ pub fn ledger(alloc: Alloc, gs: *GameState, selected: state_mod.Treasury, period
     for (gs.supply_policies.items) |sp| {
         try extras.append(alloc, try std.fmt.allocPrint(alloc, "  co:{d} {s}  resupply {d}t provisions under {d} days · ammo target {s}", .{ @intFromEnum(sp.company), clip(forceName(gs, sp.company), 16), sp.tons, sp.min_days, if (sp.ammo_battles > 0) try std.fmt.allocPrint(alloc, "{d} battles", .{sp.ammo_battles}) else "auto (1 + ceil(transit/15) battles, +2)" }));
     }
+    for (gs.stock_policies.items) |sp| {
+        try extras.append(alloc, try std.fmt.allocPrint(alloc, "  hq:{d} {s}  keep {s} at {d}-{d} ({d} on hand)", .{ @intFromEnum(sp.hq), clip(if (gs.hqs.getPtr(sp.hq)) |h| h.name else "?", 16), sp.part_key, sp.min, sp.target, gs.stockCount(.{ .hq = sp.hq }, sp.part_key) }));
+    }
     try extras.append(alloc, "");
     try extras.append(alloc, try std.fmt.allocPrint(alloc, "loans · credit {s} of {s}", .{ try money(alloc, gs.creditRemaining()), try money(alloc, gs.creditLimit()) }));
     if (gs.loans.items.len == 0) try extras.append(alloc, "  none · [L] take one (12%/yr simple interest)");
@@ -656,8 +659,8 @@ pub fn toe(alloc: Alloc, gs: *GameState) ![]ToeRow {
                 .damaged, .repairing, .refitting => "{a}",
                 else => "{c}",
             };
-            try out.append(alloc, .{ .force = .none, .unit = u.id, .text = try std.fmt.allocPrint(alloc, "    #{d: <3} {s: <8} {s: <16} {d: >3}t  {s: <20} {s: <20} {s}{s}{{/}} armor {d}% · {s}/mo", .{
-                @intFromEnum(u.id), u.chassis_key, if (ch) |c| c.name else "?", if (ch) |c| c.tonnage else 0, "—", "—", st_mk, @tagName(u.status), u.armor_pct, try money(alloc, u.monthlyBill()),
+            try out.append(alloc, .{ .force = .none, .unit = u.id, .text = try std.fmt.allocPrint(alloc, "    #{d: <3} {s: <8} {s: <16} {d: >3}t  {s: <20} {s: <20} {s}{s}{{/}} armor {d}%{s} · {s}/mo", .{
+                @intFromEnum(u.id), u.chassis_key, if (ch) |c| c.name else "?", if (ch) |c| c.tonnage else 0, "—", "—", st_mk, @tagName(u.status), u.armor_pct, try damageMarks(alloc, u), try money(alloc, u.monthlyBill()),
             }) });
         }
     }
@@ -681,7 +684,7 @@ fn toeInto(alloc: Alloc, gs: *GameState, out: *std.ArrayListUnmanaged(ToeRow), i
             .damaged, .repairing, .refitting => "{a}",
             else => "{c}",
         };
-        try out.append(alloc, .{ .force = id, .unit = uid, .text = try std.fmt.allocPrint(alloc, "{s}    #{d: <3} {s: <8} {s: <16} {d: >3}t  {s: <20} {s: <20} {s}{s}{{/}} armor {d}%", .{
+        try out.append(alloc, .{ .force = id, .unit = uid, .text = try std.fmt.allocPrint(alloc, "{s}    #{d: <3} {s: <8} {s: <16} {d: >3}t  {s: <20} {s: <20} {s}{s}{{/}} armor {d}%{s}", .{
             indent,
             @intFromEnum(uid),
             u.chassis_key,
@@ -692,9 +695,109 @@ fn toeInto(alloc: Alloc, gs: *GameState, out: *std.ArrayListUnmanaged(ToeRow), i
             st_mk,
             @tagName(u.status),
             u.armor_pct,
+            try damageMarks(alloc, u),
         }) });
     }
     for (f.children.items) |cid| try toeInto(alloc, gs, out, cid, depth + 1);
+}
+
+/// Location tag of a slot key ("lt.structure" → "lt").
+fn slotLocation(slot_key: []const u8) []const u8 {
+    const dot = std.mem.indexOfScalar(u8, slot_key, '.') orelse return slot_key;
+    return slot_key[0..dot];
+}
+
+/// A hull's damage at a glance, for the TO&E row: structure hits (depot
+/// work, each needs a comp_* part) by location in red, then a count of
+/// damaged or destroyed gear (field work) in amber. Empty when whole.
+pub fn damageMarks(alloc: Alloc, u: *const unit_mod.Unit) ![]const u8 {
+    var locs: std.ArrayListUnmanaged(u8) = .empty;
+    var gear: u32 = 0;
+    for (u.slots.items) |s| {
+        if (s.condition == .ok) continue;
+        if (s.class == .structure) {
+            if (locs.items.len > 0) try locs.append(alloc, ',');
+            try locs.appendSlice(alloc, slotLocation(s.slot_key));
+        } else gear += 1;
+    }
+    if (locs.items.len == 0 and gear == 0) return "";
+    var out: std.ArrayListUnmanaged(u8) = .empty;
+    if (locs.items.len > 0) try out.appendSlice(alloc, try std.fmt.allocPrint(alloc, " · {{c}}struct {s}{{/}}", .{locs.items}));
+    if (gear > 0) try out.appendSlice(alloc, try std.fmt.allocPrint(alloc, " · {{a}}gear {d}{{/}}", .{gear}));
+    return out.toOwnedSlice(alloc);
+}
+
+pub const CompanyDamage = struct {
+    lines: []const []const u8,
+    /// The structural component the company is shortest of (null = none short).
+    short_key: ?[]const u8,
+    /// Where the components would be fabricated/stocked.
+    home: types.HqId,
+};
+
+/// One company's repair picture, for the Forces screen: every hull with
+/// damage, what each location needs, and the structural components the
+/// home warehouse must have ready before the company comes back.
+pub fn companyDamage(alloc: Alloc, gs: *GameState, company: types.ForceId) !CompanyDamage {
+    const part_mod = @import("../domain/part.zig");
+    var lines: std.ArrayListUnmanaged([]const u8) = .empty;
+    const home = gs.homeHqFor(company);
+    var need: std.StringArrayHashMapUnmanaged(u32) = .empty;
+    var hulls: u32 = 0;
+    var uit = gs.units.iterator();
+    while (uit.next()) |e| {
+        const u = e.value_ptr;
+        if (u.status == .destroyed or gs.companyOf(u.force) != company) continue;
+        var structure: std.ArrayListUnmanaged(u8) = .empty;
+        var gear_damaged: u32 = 0;
+        var gear_destroyed: u32 = 0;
+        for (u.slots.items) |s| {
+            if (s.condition == .ok) continue;
+            if (s.class == .structure) {
+                const comp = part_mod.componentForSlot(s.slot_key);
+                const g = try need.getOrPut(alloc, comp);
+                if (!g.found_existing) g.value_ptr.* = 0;
+                g.value_ptr.* += 1;
+                if (structure.items.len > 0) try structure.appendSlice(alloc, ", ");
+                try structure.appendSlice(alloc, try std.fmt.allocPrint(alloc, "{s}→{s}", .{ slotLocation(s.slot_key), comp }));
+            } else if (s.condition == .damaged) gear_damaged += 1 else gear_destroyed += 1;
+        }
+        if (structure.items.len == 0 and gear_damaged + gear_destroyed == 0) continue;
+        hulls += 1;
+        const ch = chassis_mod.find(u.chassis_key);
+        try lines.append(alloc, try std.fmt.allocPrint(alloc, "{{a}}#{d} {s} {s}{{/}}  armor {d}% · {s}", .{ @intFromEnum(u.id), u.chassis_key, if (ch) |c| clip(c.name, 14) else "?", u.armor_pct, @tagName(u.status) }));
+        if (structure.items.len > 0) try lines.append(alloc, try std.fmt.allocPrint(alloc, "    {{c}}structure{{/}}  {s}  {{d}}depot work at home{{/}}", .{structure.items}));
+        if (gear_damaged + gear_destroyed > 0) try lines.append(alloc, try std.fmt.allocPrint(alloc, "    {{a}}gear{{/}}       {d} damaged, {d} destroyed  {{d}}field work: techs + spares (Lab R orders replacements){{/}}", .{ gear_damaged, gear_destroyed }));
+    }
+    if (hulls == 0) try lines.append(alloc, "{g}every hull is whole{/}");
+    var short_key: ?[]const u8 = null;
+    var short_most: u32 = 0;
+    if (need.count() > 0) {
+        try lines.append(alloc, "");
+        try lines.append(alloc, try std.fmt.allocPrint(alloc, "components to have ready at {s}", .{if (gs.hqs.getPtr(home)) |h| h.name else "the home HQ"}));
+        try lines.append(alloc, "  part          need  at home  coming  short");
+        var it = need.iterator();
+        while (it.next()) |e| {
+            const key = e.key_ptr.*;
+            const n = e.value_ptr.*;
+            const on_hand: u32 = if (home != .none) gs.stockCount(.{ .hq = home }, key) else 0;
+            var coming: u32 = 0;
+            for (gs.part_orders.items) |o| if (std.mem.eql(u8, o.part_key, key) and o.dest == .hq and o.dest.hq == home and (o.status == .sourcing or o.status == .in_transit)) {
+                coming += o.quantity;
+            };
+            for (gs.bay_jobs.items) |j| if (j.hq == home and j.kind == .fabrication and j.done_day == null and std.mem.eql(u8, j.item_key, key)) {
+                coming += 1;
+            };
+            const short: u32 = n -| (on_hand + coming);
+            if (short > short_most) {
+                short_most = short;
+                short_key = key;
+            }
+            try lines.append(alloc, try std.fmt.allocPrint(alloc, "  {s: <12} {d: >5} {d: >8} {d: >7}  {s}{d: >5}{{/}}", .{ clip(key, 12), n, on_hand, coming, if (short > 0) "{c}" else "{g}", short }));
+        }
+        try lines.append(alloc, if (short_key != null) "  {d}[b] fabricates the shortest line at the home HQ · :stockpolicy keeps it stocked{/}" else "  {d}covered — the depot can start the day they land{/}");
+    }
+    return .{ .lines = try lines.toOwnedSlice(alloc), .short_key = short_key, .home = home };
 }
 
 /// Detail lines for one hull.
@@ -879,6 +982,19 @@ pub fn stockTable(alloc: Alloc, gs: *GameState, site: types.Site) ![]const []con
         try out.append(alloc, try std.fmt.allocPrint(alloc, "{{c}}{s: <22} {d: >6} {d: >7}t  {s} · none{{/}}", .{ clip(key, 22), 0, 0, kind }));
     }
     if (out.items.len == 1) try out.append(alloc, "{d}empty{/}");
+    if (site == .hq) {
+        var any = false;
+        for (gs.stock_policies.items) |sp| if (sp.hq == site.hq) {
+            if (!any) {
+                try out.append(alloc, "");
+                try out.append(alloc, "keep stocked  {d}(checked daily · under min → order/fabricate to target){/}");
+                any = true;
+            }
+            const have = gs.stockCount(site, sp.part_key);
+            try out.append(alloc, try std.fmt.allocPrint(alloc, "  {s: <20} min {d: >4}  target {d: >4}  {s}{d} on hand{{/}}", .{ clip(sp.part_key, 20), sp.min, sp.target, if (have < sp.min) "{c}" else "{g}", have }));
+        };
+        if (!any) try out.append(alloc, "{d}no keep-stocked lines · K here or on a Market catalogue row sets one{/}");
+    }
     const cap = gs.siteCapacityTons(site);
     try out.append(alloc, "");
     try out.append(alloc, try std.fmt.allocPrint(alloc, "total {d}t{s}", .{ total, if (cap) |c| try std.fmt.allocPrint(alloc, " of {d}t capacity · {d}t free", .{ c, c -| total }) else "" }));
@@ -1861,6 +1977,51 @@ test "money formats with separators" {
     try std.testing.expectEqualStrings("-192,880", try money(a, -192_880));
     try std.testing.expectEqualStrings("0", try money(a, 0));
     try std.testing.expectEqualStrings("999", try money(a, 999));
+}
+
+test "damage marks and the company damage report name the components a hull needs" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 7 });
+    defer gs.deinit();
+    const commands = @import("commands.zig");
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "Test", .origin = .LC, .profession = .quartermaster } });
+    const co = (try commands.execute(&gs, .{ .new_company = "Alpha Company" })).created_force;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    // Pick the company's first mek and wreck a torso and a weapon.
+    var target: ?*unit_mod.Unit = null;
+    var uit = gs.units.iterator();
+    while (uit.next()) |e| if (e.value_ptr.kind == .mek and gs.companyOf(e.value_ptr.force) == co) {
+        target = e.value_ptr;
+        break;
+    };
+    const u = target.?;
+    try std.testing.expectEqualStrings("", try damageMarks(a, u));
+    var hit_structure = false;
+    var hit_weapon = false;
+    for (u.slots.items) |*s| {
+        if (!hit_structure and s.class == .structure and std.mem.startsWith(u8, s.slot_key, "lt.")) {
+            s.condition = .destroyed;
+            hit_structure = true;
+        } else if (!hit_weapon and s.class == .weapon) {
+            s.condition = .damaged;
+            hit_weapon = true;
+        }
+    }
+    try std.testing.expect(hit_structure and hit_weapon);
+    const marks = try damageMarks(a, u);
+    try std.testing.expect(std.mem.indexOf(u8, marks, "struct lt") != null);
+    try std.testing.expect(std.mem.indexOf(u8, marks, "gear 1") != null);
+    const report = try companyDamage(a, &gs, co);
+    var saw_torso = false;
+    for (report.lines) |line| if (std.mem.indexOf(u8, line, "lt→comp_torso") != null) {
+        saw_torso = true;
+    };
+    try std.testing.expect(saw_torso);
+    // The founding warehouse has no side torsos: that is the line to fabricate.
+    _ = gs.takeStock(.{ .hq = report.home }, "comp_torso", gs.stockCount(.{ .hq = report.home }, "comp_torso"));
+    const again = try companyDamage(a, &gs, co);
+    try std.testing.expectEqualStrings("comp_torso", again.short_key.?);
 }
 
 test "desk and ledger queries build on a fresh campaign" {

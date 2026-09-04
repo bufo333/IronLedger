@@ -305,8 +305,8 @@ fn refreshBoard(gs: *GameState, hq_id: types.HqId) !void {
 /// medical and every back-office desk (Stage 12: finance, command and
 /// transport admins were missing, so those desks could never be filled).
 const hall_roles = [_]person_mod.Role{
-    .mekwarrior, .mekwarrior,    .tech_mek,        .tech_mek,   .tech_mechanic, .vehicle_crew,
-    .astech,     .astech,        .medic,           .doctor,     .admin_logistics, .admin_hr,
+    .mekwarrior,    .mekwarrior,    .tech_mek,        .tech_mek, .tech_mechanic,   .vehicle_crew,
+    .astech,        .astech,        .medic,           .doctor,   .admin_logistics, .admin_hr,
     .admin_finance, .admin_command, .admin_transport,
 };
 

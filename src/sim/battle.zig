@@ -50,8 +50,9 @@ const SideState = struct {
 };
 
 /// A ton of a munition family feeds this many mounts for one engagement
-/// (~10 turns of fire at tabletop rates). // TUNE
-const mounts_per_ammo_ton = 3;
+/// (~10 turns of fire at tabletop rates; halved on 2026-09-04 because
+/// resupply tonnage was swamping the field trucks). // TUNE
+pub const mounts_per_ammo_ton = 6;
 
 fn hasTech(gs: *GameState, u: *const @import("../domain/unit.zig").Unit) bool {
     const t = gs.person(u.tech) orelse return false;
