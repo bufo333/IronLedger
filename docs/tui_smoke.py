@@ -116,6 +116,11 @@ assert ":order " in plain()[-300:], plain()[-600:]
 send("\x1b"); send("K", 0.8)   # catalog → keep-stocked prefill
 assert ":stockpolicy hq:" in plain()[-300:], plain()[-600:]
 send("\r", 1.0)                 # set it (min 5, target 10)
+assert "KEEP STOCKED" in plain()[-30000:], plain()[-3000:]
+send("\t"); send("\t", 0.6)    # focus the keep-stocked pane
+send("x", 0.8)
+assert "keep-stocked line for" in plain()[-600:], plain()[-800:]
+send("\t", 0.6); send("K", 0.8); send("\r", 1.0)   # back to the catalogue: set it again for the Supply check
 send("6")
 assert "keep stocked" in plain()[-30000:], plain()[-3000:]
 send("K", 0.8)                  # on the HQ row: policy prefill
@@ -151,7 +156,8 @@ send("\r", 1.0)                                       # set it: 14 days, 20 t
 assert "resupply 20t under 14 days + ammo (auto)" in plain()[-30000:], plain()[-2000:]
 send("5"); send("j", 0.6); send("j", 0.6); send("p", 0.8)   # ledger: policy for the selected company
 assert ":policy co:" in plain()[-400:], plain()[-800:]
-send("\x1b")
+send("\x1b"); send("x", 0.8)                          # clears the resupply policy set above (no cash policy yet)
+assert "policy for" in plain()[-600:] and "cleared" in plain()[-600:], plain()[-800:]
 send("5"); send("L", 0.8)      # ledger → loan prefill
 assert ":loan " in plain()[-300:], plain()[-600:]
 send("\x1b")

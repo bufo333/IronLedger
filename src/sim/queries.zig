@@ -553,9 +553,7 @@ pub fn ledger(alloc: Alloc, gs: *GameState, selected: state_mod.Treasury, period
     for (gs.supply_policies.items) |sp| {
         try extras.append(alloc, try std.fmt.allocPrint(alloc, "  co:{d} {s}  resupply {d}t provisions under {d} days · ammo target {s}", .{ @intFromEnum(sp.company), clip(forceName(gs, sp.company), 16), sp.tons, sp.min_days, if (sp.ammo_battles > 0) try std.fmt.allocPrint(alloc, "{d} battles", .{sp.ammo_battles}) else "auto (1 + ceil(transit/15) battles, +2)" }));
     }
-    for (gs.stock_policies.items) |sp| {
-        try extras.append(alloc, try std.fmt.allocPrint(alloc, "  hq:{d} {s}  keep {s} at {d}-{d} ({d} on hand)", .{ @intFromEnum(sp.hq), clip(if (gs.hqs.getPtr(sp.hq)) |h| h.name else "?", 16), sp.part_key, sp.min, sp.target, gs.stockCount(.{ .hq = sp.hq }, sp.part_key) }));
-    }
+    if (gs.policies.items.len + gs.supply_policies.items.len > 0) try extras.append(alloc, "  {d}x on a treasury row clears its policy · keep-stocked lines live on the Market screen{/}");
     try extras.append(alloc, "");
     try extras.append(alloc, try std.fmt.allocPrint(alloc, "loans · credit {s} of {s}", .{ try money(alloc, gs.creditRemaining()), try money(alloc, gs.creditLimit()) }));
     if (gs.loans.items.len == 0) try extras.append(alloc, "  none · [L] take one (12%/yr simple interest)");
@@ -1318,6 +1316,35 @@ pub const DemandRow = struct {
     short: u32,
     text: []const u8,
 };
+
+pub const StockPolicyRow = struct {
+    key: []const u8,
+    min: u32,
+    target: u32,
+    text: []const u8,
+};
+
+pub const stock_policy_header = "part                  min  target  on hand  state";
+
+/// The keep-stocked lines of one HQ (Market screen): reorder point,
+/// target, what is on hand and whether a restock is under way.
+pub fn stockPolicies(alloc: Alloc, gs: *GameState, hq: types.HqId) ![]StockPolicyRow {
+    var out: std.ArrayListUnmanaged(StockPolicyRow) = .empty;
+    for (gs.stock_policies.items) |sp| {
+        if (sp.hq != hq) continue;
+        const have = gs.stockCount(.{ .hq = hq }, sp.part_key);
+        var coming: u32 = 0;
+        for (gs.part_orders.items) |o| if (std.mem.eql(u8, o.part_key, sp.part_key) and o.dest == .hq and o.dest.hq == hq and (o.status == .sourcing or o.status == .in_transit)) {
+            coming += o.quantity;
+        };
+        for (gs.bay_jobs.items) |j| if (j.hq == hq and j.kind == .fabrication and j.done_day == null and std.mem.eql(u8, j.item_key, sp.part_key)) {
+            coming += 1;
+        };
+        const state: []const u8 = if (coming > 0) try std.fmt.allocPrint(alloc, "{{a}}{d} coming{{/}}", .{coming}) else if (have < sp.min) "{c}short — reorders tomorrow{/}" else "{g}stocked{/}";
+        try out.append(alloc, .{ .key = sp.part_key, .min = sp.min, .target = sp.target, .text = try std.fmt.allocPrint(alloc, "{s: <20} {d: >5} {d: >7} {d: >8}  {s}", .{ clip(sp.part_key, 20), sp.min, sp.target, have, state }) });
+    }
+    return out.toOwnedSlice(alloc);
+}
 
 pub const Market = struct {
     board_header: []const u8,

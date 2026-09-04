@@ -737,8 +737,8 @@ pub const App = struct {
         self.footer(switch (self.tab) {
             .desk => "? help · F1-F10 / 1-0 screens · Tab pane · Enter act · e emblem · F12 settings · : command · n end turn · q welcome",
             .people => "/ , filter (…, wounded) · m admit to medbay · t train · a seat · P post · x transfer · L leave · D fire · r record",
-            .market => "Tab pane · Enter buy / order / order shortfall · b fabricate component · K keep stocked · [ ] HQ board · q welcome",
-            .ledger => "j/k treasury · t send cash to it · T pull cash back to the outfit · p top-up policy · L loan · R repay",
+            .market => "Tab pane · Enter buy / order / order shortfall · b fabricate component · K keep stocked (pane: Enter edit, x remove) · [ ] HQ board · q welcome",
+            .ledger => "j/k treasury · t send cash to it · T pull cash back to the outfit · p top-up policy · x clear its policy · L loan · R repay",
             .supply => "company: t/T cash out/home · p cash policy · P resupply policy · s ship · o order · H structural parts home · HQ: K keep stocked · $ sell stock",
             .forces => "Enter assign · a/u seat · A auto · l lance · o role · d depot · m mothball · x company · b fabricate short comp · R recall · $ sell · X disband",
             .map => "h j k l move between worlds · f found HQ here · o offers here · n end turn · q welcome",
@@ -772,8 +772,15 @@ pub const App = struct {
             var dem: std.ArrayListUnmanaged([]const u8) = .empty;
             for (view.demand) |r| try dem.append(al, r.text);
             if (view.demand.len == 0) try dem.append(al, "{g}nothing damaged{/}");
-            const inner3 = self.screen.pane(.{ .x = b.x + cw, .y = b.y + top_h, .w = b.w - cw, .h = b.h - top_h }, .{ .title = "DEMAND · damaged slots", .focused = self.focus == 2, .right_title = "[Enter] order shortfall" });
+            const dem_h: u16 = (b.h - top_h) * 55 / 100;
+            const inner3 = self.screen.pane(.{ .x = b.x + cw, .y = b.y + top_h, .w = b.w - cw, .h = dem_h }, .{ .title = "DEMAND · damaged slots", .focused = self.focus == 2, .right_title = "[Enter] order shortfall" });
             self.stickyList(inner3, view.demand_header, dem.items, 2, self.focus == 2);
+            const pol = try q.stockPolicies(al, g, hq_id);
+            var pol_rows: std.ArrayListUnmanaged([]const u8) = .empty;
+            for (pol) |r| try pol_rows.append(al, r.text);
+            if (pol.len == 0) try pol_rows.append(al, "{d}none — K on a catalogue row keeps that part stocked here{/}");
+            const inner4 = self.screen.pane(.{ .x = b.x + cw, .y = b.y + top_h + dem_h, .w = b.w - cw, .h = b.h - top_h - dem_h }, .{ .title = try std.fmt.allocPrint(al, "KEEP STOCKED · {s} · checked daily", .{q.hqName(g, hq_id)}), .focused = self.focus == 3, .right_title = "[Enter] edit  [x] remove" });
+            self.stickyList(inner4, q.stock_policy_header, pol_rows.items, 3, self.focus == 3);
         }
     }
 
@@ -1311,10 +1318,10 @@ pub const App = struct {
                     "  {a}structure{/}   not fitted in the Lab: D (Lab) or d (Forces) sends the hull to the depot; the bay consumes comp_* parts from the home HQ",
                     "  {a}companies{/}   :newco <name> at the first HQ · :newco@ hq:N <name> · :assignco co:N hq:M — each regional HQ hosts one combat company",
                     "  {a}money{/}       Ledger: L loan (simple interest) · R repay · Forces: $ sell hull · X disband company · HQ: $ sell HQ",
-                    "  {a}field cash{/}  t courier cash out · T courier cash back to the outfit · p policy = keep above a floor, checked daily, cap per month",
+                    "  {a}field cash{/}  t courier cash out · T courier cash back to the outfit · p policy = keep above a floor, checked daily, cap per month · Ledger x clears one (or `:policy co:N 0 0`)",
                     "  {a}resupply{/}    P policy `supplypolicy co:N days tons [battles]` — provisions under D days → ship N t; ammo per family sized to the link (or [battles])",
                     "  {a}sell stock{/}  $ on a Supply HQ row → `sellstock hq:N part qty` — half catalogue value (40% for comp_*) into the HQ treasury; never under a keep-stocked minimum",
-                    "  {a}warehouse{/}   K `stockpolicy hq:N part min [target]` (Supply on an HQ, Market on a catalogue row) — under min → order/fabricate to target, daily · target 0 removes",
+                    "  {a}warehouse{/}   K `stockpolicy hq:N part min [target]` (Supply on an HQ, Market on a catalogue row) — under min → order/fabricate to target, daily · Market KEEP STOCKED pane: Enter edits, x removes",
                     "  {a}medbay{/}      Settings (F12 or :settings) → a: auto-admit the wounded every morning, or `:autoadmit on|off`",
                     "  {a}turn rules{/}  wounded must be admitted (m) and a negative treasury covered before the day can end; bankruptcy ends the game",
                     "  {a}reputation{/}  every offer's pay × (1 + rep × 0.5%), clamped 0.8–1.3, and more offers per board · complete +1 (+VP) · breach −2 · decisions show their rep effect",
@@ -1982,7 +1989,7 @@ pub const App = struct {
             .ledger => 2,
             .forces => 2,
             .hq => 2,
-            .market => if (self.narrow()) 2 else 3,
+            .market => if (self.narrow()) 2 else 4,
             else => 1,
         };
     }
@@ -2051,7 +2058,8 @@ pub const App = struct {
                 switch (self.focus) {
                     0 => self.moveCursor(0, delta, view.board.len),
                     1 => self.moveCursor(1, delta, view.catalog.len),
-                    else => self.moveCursor(2, delta, view.demand.len),
+                    2 => self.moveCursor(2, delta, view.demand.len),
+                    else => self.moveCursor(3, delta, (try q.stockPolicies(al, g, @enumFromInt(self.hqSelId(g)))).len),
                 }
             },
         }
@@ -2164,6 +2172,13 @@ pub const App = struct {
                         var buf: [96]u8 = undefined;
                         self.openCommand(std.fmt.bufPrint(&buf, "order {s} 1 hq:{d}", .{ r.key, @intFromEnum(hq_id) }) catch "order ");
                     },
+                    3 => {
+                        const pol = try q.stockPolicies(al, g, hq_id);
+                        if (pol.len == 0) return;
+                        const r = pol[@min(self.cur(3).*, pol.len - 1)];
+                        var buf: [96]u8 = undefined;
+                        self.openCommand(std.fmt.bufPrint(&buf, "stockpolicy hq:{d} {s} {d} {d}", .{ @intFromEnum(hq_id), r.key, r.min, r.target }) catch "stockpolicy ");
+                    },
                     else => if (view.demand.len > 0) {
                         const d = view.demand[@min(self.cur(2).*, view.demand.len - 1)];
                         if (d.short == 0) {
@@ -2245,6 +2260,18 @@ pub const App = struct {
                         self.openCommand(std.fmt.bufPrint(&buf, "fabricate hq:{d} {s} 1", .{ self.hqSelId(g), r.key }) catch "fabricate ");
                     } else self.say(.dim, "select a comp_* row in the catalog, then b", .{});
                 },
+                'x' => {
+                    if (self.focus != 3) {
+                        self.say(.dim, "Tab to KEEP STOCKED, then x removes the highlighted line", .{});
+                        return;
+                    }
+                    const hq_id: types.HqId = @enumFromInt(self.hqSelId(g));
+                    const pol = try q.stockPolicies(al, g, hq_id);
+                    if (pol.len == 0) return;
+                    const r = pol[@min(self.cur(3).*, pol.len - 1)];
+                    try self.exec(.{ .set_stock_policy = .{ .hq = hq_id, .part_key = r.key, .min = 0, .target = 0 } });
+                    if (self.msg_style != .crit) self.say(.good, "keep-stocked line for {s} removed", .{r.key});
+                },
                 'K' => {
                     const view = try q.market(al, g, self.market_filter);
                     if (self.focus == 1 and view.catalog.len > 0) {
@@ -2312,6 +2339,28 @@ pub const App = struct {
                         const existing = q.policyFor(g, sel);
                         self.openCommand(std.fmt.bufPrint(&buf, "policy {s} {d} {d}", .{ tok, if (existing) |p| p.floor else 250_000, if (existing) |p| p.monthly_cap else 500_000 }) catch "policy ");
                     }
+                },
+                'x' => {
+                    const all = try q.allTreasuries(al, g);
+                    const sel: Treasury = if (self.ledger_sel < all.len) all[self.ledger_sel] else .outfit;
+                    if (sel == .outfit) {
+                        self.say(.dim, "select the HQ or company row whose policy you want cleared", .{});
+                        return;
+                    }
+                    const label = try q.treasuryLabel(al, g, sel);
+                    if (q.policyFor(g, sel) != null) {
+                        try self.exec(.{ .set_policy = .{ .entity = sel, .floor = 0, .monthly_cap = 0 } });
+                        if (self.msg_style != .crit) self.say(.good, "cash top-up policy for {s} cleared", .{label});
+                        return;
+                    }
+                    if (sel == .company) {
+                        for (g.supply_policies.items) |sp| if (sp.company == sel.company) {
+                            try self.exec(.{ .set_supply_policy = .{ .company = sel.company, .min_days = 0, .tons = 0 } });
+                            if (self.msg_style != .crit) self.say(.good, "resupply policy for {s} cleared", .{label});
+                            return;
+                        };
+                    }
+                    self.say(.dim, "{s} has no standing policy", .{label});
                 },
                 'L' => {
                     var buf: [96]u8 = undefined;

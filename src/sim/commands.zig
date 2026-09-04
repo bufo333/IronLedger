@@ -826,14 +826,20 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
         .set_policy => |p| {
             try validateTreasury(gs, p.entity);
             if (p.entity == .outfit) return Error.UnknownTreasury;
-            // One policy per entity: replace if present.
-            for (gs.policies.items) |*existing| {
+            // One policy per entity: replace if present; a zero floor or cap removes it.
+            const remove = p.floor <= 0 or p.monthly_cap <= 0;
+            for (gs.policies.items, 0..) |*existing, i| {
                 if (std.meta.eql(existing.entity, p.entity)) {
-                    existing.floor = p.floor;
-                    existing.monthly_cap = p.monthly_cap;
+                    if (remove) {
+                        _ = gs.policies.orderedRemove(i);
+                    } else {
+                        existing.floor = p.floor;
+                        existing.monthly_cap = p.monthly_cap;
+                    }
                     return .{};
                 }
             }
+            if (remove) return .{};
             try gs.policies.append(gs.allocator(), .{ .entity = p.entity, .floor = p.floor, .monthly_cap = p.monthly_cap });
             return .{};
         },
@@ -1337,6 +1343,12 @@ test "policies run daily under a monthly cap; resupply ships provisions to a com
     try std.testing.expectEqual(@as(i64, 300_000), gs.policies.items[0].sent_this_month);
     _ = try execute(&gs, .advance_day);
     try std.testing.expectEqual(@as(usize, 1), gs.fund_couriers.items.len);
+    // A zero floor clears the policy; setting it again starts fresh.
+    _ = try execute(&gs, .{ .set_policy = .{ .entity = .{ .company = co }, .floor = 0, .monthly_cap = 0 } });
+    try std.testing.expectEqual(@as(usize, 0), gs.policies.items.len);
+    _ = try execute(&gs, .{ .set_policy = .{ .entity = .{ .company = co }, .floor = 300_000, .monthly_cap = 400_000 } });
+    try std.testing.expectEqual(@as(usize, 1), gs.policies.items.len);
+    gs.policies.items[0].sent_this_month = 300_000;
 
     // Provisions: the company is afield with empty stores; the policy ships
     // from home once, and not again while that shipment is in transit.
