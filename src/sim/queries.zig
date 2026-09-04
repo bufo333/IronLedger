@@ -782,7 +782,15 @@ pub fn hqDetail(alloc: Alloc, gs: *GameState, id: types.HqId) ![]const []const u
         try out.append(alloc, try std.fmt.allocPrint(alloc, "  {s: <16} {s}{d: >4}  {d: >4}{{/}}", .{ @tagName(r.role), mk, s.count, r.need }));
     }
     try out.append(alloc, "");
-    try out.append(alloc, "bays");
+    {
+        const slots = @import("hq_ops.zig").baySlots(gs, id);
+        var busy: u32 = 0;
+        var queued: u32 = 0;
+        for (gs.bay_jobs.items) |j| if (j.hq == id) {
+            if (j.started_day != null) busy += 1 else queued += 1;
+        };
+        try out.append(alloc, try std.fmt.allocPrint(alloc, "bays   {s}{d} of {d} slots busy{{/}} · {d} queued · {d} free", .{ if (busy >= slots) "{c}" else "{g}", busy, slots, queued, slots -| busy }));
+    }
     var any = false;
     for (gs.bay_jobs.items) |j| {
         if (j.hq != id) continue;
@@ -921,10 +929,67 @@ pub const Market = struct {
 
 const market_mod = @import("../econ/market.zig");
 
+/// Market filter (Stage 12): hull kinds and part categories.
+pub const MarketFilter = enum {
+    all,
+    mechs,
+    vehicles,
+    aerofighters,
+    dropships,
+    jumpships,
+    weapons,
+    ammo,
+    equipment,
+    components,
+    supplies,
+
+    pub fn next(self: MarketFilter) MarketFilter {
+        const n = @typeInfo(MarketFilter).@"enum".fields.len;
+        return @enumFromInt((@intFromEnum(self) + 1) % n);
+    }
+
+    pub fn prev(self: MarketFilter) MarketFilter {
+        const n = @typeInfo(MarketFilter).@"enum".fields.len;
+        return @enumFromInt((@intFromEnum(self) + n - 1) % n);
+    }
+
+    pub fn matchesUnit(self: MarketFilter, kind: unit_mod.UnitKind) bool {
+        return switch (self) {
+            .all => true,
+            .mechs => kind == .mek,
+            .vehicles => kind == .vehicle or kind == .mash or kind == .cargo or kind == .mobile_field_base,
+            .aerofighters => kind == .aerospace,
+            .dropships => kind == .dropship,
+            .jumpships => kind == .jumpship,
+            else => false,
+        };
+    }
+
+    pub fn matchesPart(self: MarketFilter, key: []const u8) bool {
+        const part_mod = @import("../domain/part.zig");
+        const p = part_mod.find(key);
+        const mount: part_mod.MountType = if (p) |pd| pd.mount else .none;
+        return switch (self) {
+            .all => true,
+            .weapons => mount == .energy or mount == .ballistic or mount == .missile,
+            .ammo => mount == .ammo,
+            .equipment => mount == .equipment or std.mem.eql(u8, key, "armor"),
+            .components => part_mod.isComponent(key),
+            .supplies => mount == .none and !part_mod.isComponent(key) and !std.mem.eql(u8, key, "armor"),
+            else => false,
+        };
+    }
+};
+
 /// The site boards, the orderable catalog, and what the damaged hulls need.
-pub fn market(alloc: Alloc, gs: *GameState) !Market {
+pub fn market(alloc: Alloc, gs: *GameState, filter: MarketFilter) !Market {
     var board: std.ArrayListUnmanaged(ListingRow) = .empty;
     for (gs.market_listings.items, 0..) |l, i| {
+        const keep = switch (l.kind) {
+            .unit => filter.matchesUnit(if (chassis_mod.find(l.item_key)) |c| c.kind else .mek),
+            .part => filter.matchesPart(l.item_key),
+        };
+        if (!keep) continue;
         const cond: []const u8 = if (l.condition) |c| try std.fmt.allocPrint(alloc, "{{a}}{s}{{/}} armor {d}% · {d} dmg · {d} missing", .{ c.label(), c.armor_pct, c.damaged_slots, c.missing_components }) else if (l.kind == .unit) "{g}new{/}" else "";
         const name: []const u8 = if (l.kind == .unit) (if (chassis_mod.find(l.item_key)) |c| c.name else l.item_key) else (if (@import("../domain/part.zig").find(l.item_key)) |p| p.name else l.item_key);
         try board.append(alloc, .{ .index = i, .text = try std.fmt.allocPrint(alloc, "[{d: <3}] {s: <5} {s: <10} {s: <20} {s: >13}  x{d: <3} {s: <8} {s: <6} d{d: <5} {s}", .{
@@ -934,6 +999,7 @@ pub fn market(alloc: Alloc, gs: *GameState) !Market {
     var catalog: std.ArrayListUnmanaged(CatalogRow) = .empty;
     const part_mod = @import("../domain/part.zig");
     for (part_mod.catalog) |p| {
+        if (!filter.matchesPart(p.key)) continue;
         const component = part_mod.isComponent(p.key);
         try catalog.append(alloc, .{ .key = p.key, .component = component, .text = try std.fmt.allocPrint(alloc, "{s: <16} {s: <22} {s: >12}  {d: >3}t  {s}", .{
             clip(p.key, 16), clip(p.name, 22), try money(alloc, p.cost), part_mod.tons(p.key), if (component) "{a}fabricable at a regional HQ{/}" else if (isStaple(p.key)) "{g}staple{/}" else "{d}rolls vs rarity{/}",
@@ -1273,6 +1339,72 @@ pub const MountRow = struct {
     text: []const u8,
 };
 
+pub const InstallCandidate = struct {
+    key: []const u8,
+    on_hand: u32,
+    text: []const u8,
+};
+
+/// Parts the lab could install on a hull: stock at the home HQ first, then
+/// the catalog (bought or ordered at commit time).
+pub fn installCandidates(alloc: Alloc, gs: *GameState, uid: types.UnitId) ![]InstallCandidate {
+    const part_mod = @import("../domain/part.zig");
+    var out: std.ArrayListUnmanaged(InstallCandidate) = .empty;
+    const u = gs.unit(uid) orelse return out.toOwnedSlice(alloc);
+    const home = gs.homeHqFor(u.force);
+    for (part_mod.catalog) |p| {
+        if (!p.mountable()) continue;
+        const on_hand = gs.stockCount(.{ .hq = home }, p.key) + gs.spareCount(p.key);
+        try out.append(alloc, .{ .key = p.key, .on_hand = on_hand, .text = try std.fmt.allocPrint(alloc, "{s: <12} {s: <22} {s: <9} {d: >2}.{d}t {d: >2}c heat {d: >2}  {s}", .{
+            clip(p.key, 12), clip(p.name, 22), @tagName(p.mount), p.mass_half_tons / 2, (p.mass_half_tons % 2) * 5, p.crits, p.heat, if (on_hand > 0) try std.fmt.allocPrint(alloc, "{{g}}{d} in stock{{/}}", .{on_hand}) else try std.fmt.allocPrint(alloc, "{{d}}buy {s}{{/}}", .{try money(alloc, p.cost)}),
+        }) });
+    }
+    // Stocked parts first.
+    std.mem.sort(InstallCandidate, out.items, {}, struct {
+        fn lt(_: void, a: InstallCandidate, b: InstallCandidate) bool {
+            if ((a.on_hand > 0) != (b.on_hand > 0)) return a.on_hand > 0;
+            return std.mem.lessThan(u8, a.key, b.key);
+        }
+    }.lt);
+    return out.toOwnedSlice(alloc);
+}
+
+pub const InstallLocation = struct {
+    location: meklab.Location,
+    legal: bool,
+    text: []const u8,
+};
+
+/// Every location with the rules' verdict for putting `part_key` there
+/// (a trial validation on top of the current plan).
+pub fn installLocations(alloc: Alloc, gs: *GameState, uid: types.UnitId, part_key: []const u8) ![]InstallLocation {
+    var out: std.ArrayListUnmanaged(InstallLocation) = .empty;
+    const u = gs.unit(uid) orelse return out.toOwnedSlice(alloc);
+    const design = chassis_mod.find(u.chassis_key) orelse return out.toOwnedSlice(alloc);
+    const base = try gs.labItems(uid, alloc);
+    inline for (@typeInfo(meklab.Location).@"enum".fields) |f| {
+        const loc: meklab.Location = @enumFromInt(f.value);
+        var items = try alloc.alloc(meklab.Item, base.len + 1);
+        @memcpy(items[0..base.len], base);
+        items[base.len] = .{ .location = loc, .part_key = part_key };
+        const r = try meklab.validate(design, items, alloc);
+        var why: []const u8 = "";
+        if (!r.legal) {
+            for (r.violations) |v| {
+                if (v.rule == .crits or v.rule == .location or v.rule == .ammo) {
+                    why = v.text;
+                    break;
+                }
+                why = v.text;
+            }
+        }
+        try out.append(alloc, .{ .location = loc, .legal = r.legal, .text = try std.fmt.allocPrint(alloc, "{s}{s: <3} free crits {d: >2}   {s}{s}{{/}}", .{
+            if (r.legal) "{g}" else "{c}", f.name, r.crits_free[f.value], if (r.legal) "fits" else "no: ", if (r.legal) "" else why,
+        }) });
+    }
+    return out.toOwnedSlice(alloc);
+}
+
 pub const Lab = struct {
     title: []const u8,
     budget: []const []const u8,
@@ -1314,18 +1446,38 @@ pub fn lab(alloc: Alloc, gs: *GameState, uid: types.UnitId) !Lab {
     try budget.append(alloc, try std.fmt.allocPrint(alloc, "heat      alpha strike {d} · sinks {d}", .{ r.heat_per_alpha, design.heat_sinks }));
     try budget.append(alloc, try std.fmt.allocPrint(alloc, "movement  walk {d}{s} · engine {d}", .{ design.walk_mp, if (design.jump_mp > 0) " · jump" else "", design.engineRating() }));
     try budget.append(alloc, "");
-    try budget.append(alloc, "location   used  free");
+    try budget.append(alloc, "location   used  free   {d}(dim = no free crits){/}");
+    const home_hq = gs.homeHqFor(u.force);
     inline for (@typeInfo(meklab.Location).@"enum".fields) |f| {
-        const mk: []const u8 = if (r.crits_free[f.value] == 0) "{d}" else "";
-        try budget.append(alloc, try std.fmt.allocPrint(alloc, "{s}{s: <10} {d: >4}  {d: >4}{{/}}", .{ mk, f.name, r.crits_used[f.value], r.crits_free[f.value] }));
+        const loc: meklab.Location = @enumFromInt(f.value);
+        const full = r.crits_free[f.value] == 0;
+        // Structure state per location: the frame must be sound before
+        // anything is fitted into it.
+        var struct_note: []const u8 = "";
+        for (u.slots.items) |s| {
+            if (s.class != .structure) continue;
+            if (meklab.parseLocation(s.slot_key) != loc) continue;
+            if (s.condition != .ok) {
+                const comp = @import("../domain/part.zig").componentForSlot(s.slot_key);
+                struct_note = try std.fmt.allocPrint(alloc, "  {{c}}structure {s}{{/}} → depot with {s} ({d} on hand)", .{ @tagName(s.condition), comp, gs.stockCount(.{ .hq = home_hq }, comp) });
+            }
+        }
+        try budget.append(alloc, try std.fmt.allocPrint(alloc, "{s}{s: <10} {d: >4}  {d: >4}{s}{{/}}{s}", .{ if (full) "{d}" else "", f.name, r.crits_used[f.value], r.crits_free[f.value], if (full) "  full" else "", struct_note }));
     }
     try budget.append(alloc, "");
-    if (gs.hqs.getPtr(gs.homeHqFor(u.force))) |h| {
-        try budget.append(alloc, try std.fmt.allocPrint(alloc, "refit ceiling  class {{a}}{s}{{/}}", .{if (h.refitClassCeiling()) |c| @tagName(c) else "none"}));
-        try budget.append(alloc, try std.fmt.allocPrint(alloc, "{{d}}at {s}{{/}}", .{clip(h.name, 30)}));
+    if (gs.hqs.getPtr(home_hq)) |h| {
+        const slots = @import("hq_ops.zig").baySlots(gs, home_hq);
+        var busy: u32 = 0;
+        var queued: u32 = 0;
+        for (gs.bay_jobs.items) |j| if (j.hq == home_hq) {
+            if (j.started_day != null) busy += 1 else queued += 1;
+        };
+        try budget.append(alloc, try std.fmt.allocPrint(alloc, "bays at {s}", .{clip(h.name, 28)}));
+        try budget.append(alloc, try std.fmt.allocPrint(alloc, "  {s}{d} of {d} slots busy{{/}} · {d} queued · refit ceiling class {{a}}{s}{{/}}", .{ if (busy >= slots) "{c}" else "{g}", busy, slots, queued, if (h.refitClassCeiling()) |c| @tagName(c) else "none" }));
     }
-    try budget.append(alloc, "{d}A ammo/armor · B like-for-like{/}");
-    try budget.append(alloc, "{d}C new weapons · D structure{/}");
+    try budget.append(alloc, "{d}A ammo/armor · B like-for-like · C new weapons · D structure{/}");
+    try budget.append(alloc, "{d}any weapon or gear fits any location with free crits;{/}");
+    try budget.append(alloc, "{d}ammo bins go where free crits are; the head takes 1 crit{/}");
 
     var removed_count: usize = 0;
     const p = gs.refitPlanFor(uid);
@@ -1342,8 +1494,17 @@ pub fn lab(alloc: Alloc, gs: *GameState, uid: types.UnitId) !Lab {
             else => "{c}",
         };
         const part = @import("../domain/part.zig").find(s.part_key);
-        try mounts.append(alloc, .{ .slot_key = s.slot_key, .text = try std.fmt.allocPrint(alloc, "{s}{s: <17} {s: <11} {s: <7} {d: >2}.{d}t {d: >2}c {s}{s}{{/}}", .{
-            mk, clip(s.slot_key, 17), clip(s.part_key, 11), clip(@tagName(s.class), 7), if (part) |pd| pd.mass_half_tons / 2 else 0, if (part) |pd| (pd.mass_half_tons % 2) * 5 else 0, if (part) |pd| pd.crits else 0, @tagName(s.condition), if (removed) " (removing)" else "",
+        var repair_note: []const u8 = "";
+        if (!removed and s.condition != .ok) {
+            const on_hand = gs.stockCount(.{ .hq = home_hq }, s.part_key) + gs.spareCount(s.part_key);
+            var on_order: u32 = 0;
+            for (gs.part_orders.items) |o| if (std.mem.eql(u8, o.part_key, s.part_key) and (o.status == .sourcing or o.status == .in_transit)) {
+                on_order += o.quantity;
+            };
+            repair_note = if (on_hand > 0) "  {g}part in stock — techs fit it on the next repair pass{/}" else if (on_order > 0) try std.fmt.allocPrint(alloc, "  {{a}}{d} on order{{/}}", .{on_order}) else "  {c}no part — [R] orders one{/}";
+        }
+        try mounts.append(alloc, .{ .slot_key = s.slot_key, .text = try std.fmt.allocPrint(alloc, "{s}{s: <17} {s: <11} {s: <7} {d: >2}.{d}t {d: >2}c {s}{s}{{/}}{s}", .{
+            mk, clip(s.slot_key, 17), clip(s.part_key, 11), clip(@tagName(s.class), 7), if (part) |pd| pd.mass_half_tons / 2 else 0, if (part) |pd| (pd.mass_half_tons % 2) * 5 else 0, if (part) |pd| pd.crits else 0, @tagName(s.condition), if (removed) " (removing)" else "", repair_note,
         }) });
     }
 

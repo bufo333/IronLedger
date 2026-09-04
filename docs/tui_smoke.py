@@ -88,6 +88,9 @@ assert "not wounded" in p or "admitted to the medbay" in p, plain()[-800:]
 send("0")                      # market
 p = plain()
 assert "MARKET BOARDS" in p and "ORDER CATALOG" in p and "DEMAND" in p, p[-3000:]
+send("/", 0.8)                 # market filter cycles
+assert "filter mechs" in plain()[-30000:], plain()[-3000:]
+send(",", 0.8)
 send("\t"); send("\r", 0.8)    # catalog → order prefill
 assert ":order " in plain()[-300:], plain()[-600:]
 send("\x1b")
@@ -119,6 +122,11 @@ p = plain()
 assert "MOUNTS" in p and "RULES: legal fit" in p, p[-3000:]
 send("-", 0.8)                 # stage a removal
 assert "remove" in plain(), plain()[-2000:]
+send("+", 0.8)                 # install picker: part, then location
+assert "INSTALL · pick a part" in plain()[-30000:], plain()[-3000:]
+send("\r", 0.8)
+assert "pick a location" in plain()[-30000:], plain()[-3000:]
+send("\x1b"); send("\x1b")
 send("c", 0.8)                 # clear the plan
 send("1")
 send("n", 1.5)                 # end turn (modal or advance)

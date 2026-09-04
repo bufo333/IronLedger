@@ -55,6 +55,9 @@ const Modal = union(enum) {
     disband: types.ForceId,
     /// The outfit folded.
     game_over,
+    /// Lab install: pick a part, then a location with the rules' verdict.
+    install_part: types.UnitId,
+    install_loc: struct { unit: types.UnitId, part: []const u8 },
 };
 
 /// Size tiers (docs/tui.md): the largest that fits decides how many panes
@@ -176,6 +179,7 @@ pub const App = struct {
     hq_sel: usize = 0,
     hall_filter: q.HallFilter = .all,
     people_filter: q.HallFilter = .all,
+    market_filter: q.MarketFilter = .all,
     map_cursor: usize = 0,
     lab_sel: usize = 0,
     modal_cursor: usize = 0,
@@ -698,7 +702,7 @@ pub const App = struct {
             .supply => "j/k site · on a company: t send cash · p top-up policy · s ship provisions from home · o order to the field",
             .forces => "Tab pane · Enter assign · a/u seat · A auto · t train · x transfer · $ sell hull · X disband company",
             .map => "h j k l move between worlds · f found HQ here · o offers here · n end turn · q welcome",
-            .lab => "[ ] switch hull · j/k mount · - remove · + install… · c clear plan · Enter commit · q welcome",
+            .lab => "[ ] hull · j/k mount · - remove · + install (part, then location) · R order replacement · c clear · Enter commit",
             .hq => "[ ] switch HQ · Tab hall · f/F hall filter · Enter hire · u upgrade · S autostaff · b fabricate",
             else => "? help · F1-F8 screens · Tab pane · j/k cursor · Enter act · : command · n end turn · q welcome",
         });
@@ -710,13 +714,13 @@ pub const App = struct {
         const al = self.a();
         const g = &self.gs.?;
         const b = self.body();
-        const view = try q.market(al, g);
+        const view = try q.market(al, g, self.market_filter);
         const top_h: u16 = @max(6, b.h * 2 / 5);
         var board: std.ArrayListUnmanaged([]const u8) = .empty;
         for (view.board) |r| try board.append(al, r.text);
         if (view.board.len == 0) try board.append(al, "{d}nothing on the boards — they refresh on the 1st, staples restock as they sell{/}");
         const hq_id: types.HqId = @enumFromInt(self.hqSelId(g));
-        const inner = self.screen.pane(.{ .x = b.x, .y = b.y, .w = b.w, .h = top_h }, .{ .title = try std.fmt.allocPrint(al, "MARKET BOARDS · {d} listings · buyer {s}", .{ view.board.len, q.hqName(g, hq_id) }), .focused = self.focus == 0, .right_title = "[Enter] buy" });
+        const inner = self.screen.pane(.{ .x = b.x, .y = b.y, .w = b.w, .h = top_h }, .{ .title = try std.fmt.allocPrint(al, "MARKET BOARDS · filter {{a}}{s}{{/}} · {d} listings · buyer {s}", .{ @tagName(self.market_filter), view.board.len, q.hqName(g, hq_id) }), .focused = self.focus == 0, .right_title = "[/] next filter  [,] previous  [Enter] buy" });
         self.stickyList(inner, view.board_header, board.items, 0, self.focus == 0);
 
         const cw: u16 = if (self.narrow()) b.w else b.w * 55 / 100;
@@ -1219,7 +1223,9 @@ pub const App = struct {
                     "  {a}forces{/}      a assign · u unassign · A auto-assign the company · t train",
                     "  {a}hq{/}          [ ] switch HQ · u upgrade · S autostaff · h hire · f/F hall filter",
                     "  {a}people{/}      / filter · m admit wounded · t train · a assign seat · P post · x transfer · L leave · D fire",
-                    "  {a}market{/}      F10/0: boards (Enter buys) · catalog (Enter orders, b fabricates comp_*) · demand (Enter orders shortfall)",
+                    "  {a}market{/}      F10/0: / , filter (mechs, vehicles, aero, dropships, jumpships, weapons, ammo, equipment, components, supplies)",
+                    "               boards (Enter buys) · catalog (Enter orders, b fabricates comp_*) · demand (Enter orders shortfall)",
+                    "  {a}lab{/}         + picks a part then a location (green = rules allow) · R orders a replacement for damaged gear · dim rows = full",
                     "  {a}money{/}       Ledger: L loan (simple interest) · R repay · Forces: $ sell hull · X disband company · HQ: $ sell HQ",
                     "  {a}field cash{/}  Ledger or Supply, on a company: t courier cash now (days in transit) · p policy = keep it above a floor, at most cap/month",
                     "  {a}resupply{/}    Supply, on a deployed company: s ship provisions/ammo from its home warehouse · o order straight to the field (slower, pricier)",
@@ -1230,7 +1236,7 @@ pub const App = struct {
                     "",
                     "  {d}[Esc] close{/}",
                 };
-                const r = self.modalRect(130, 22);
+                const r = self.modalRect(130, 25);
                 const inner = self.screen.pane(r, .{ .title = "HELP", .double = true });
                 self.screen.lines(inner, &rows, 0, null);
             },
@@ -1286,6 +1292,26 @@ pub const App = struct {
                 const r = self.modalRect(90, @intCast(@min(rows.items.len + 2, 30)));
                 const inner = self.screen.pane(r, .{ .title = "DECISION", .double = true });
                 self.screen.lines(inner, rows.items, 0, null);
+            },
+            .install_part => |uid| {
+                const cands = try q.installCandidates(al, &self.gs.?, uid);
+                var rows: std.ArrayListUnmanaged([]const u8) = .empty;
+                for (cands) |c| try rows.append(al, c.text);
+                if (self.modal_cursor >= cands.len and cands.len > 0) self.modal_cursor = cands.len - 1;
+                const r = self.modalRect(100, @intCast(@min(cands.len + 3, self.screen.rows)));
+                const inner = self.screen.pane(r, .{ .title = "INSTALL · pick a part · [Enter] choose location · [Esc] cancel", .double = true, .right_title = "stock at the home HQ first" });
+                self.screen.lines(inner, rows.items, firstRow(self.modal_cursor, inner.h), if (cands.len > 0) self.modal_cursor else null);
+            },
+            .install_loc => |il| {
+                const locs = try q.installLocations(al, &self.gs.?, il.unit, il.part);
+                var rows: std.ArrayListUnmanaged([]const u8) = .empty;
+                try rows.append(al, try std.fmt.allocPrint(al, "  {{a}}{s}{{/}} — where does it go?", .{il.part}));
+                try rows.append(al, "");
+                for (locs) |l| try rows.append(al, l.text);
+                if (self.modal_cursor >= locs.len and locs.len > 0) self.modal_cursor = locs.len - 1;
+                const r = self.modalRect(90, @intCast(@min(rows.items.len + 3, self.screen.rows)));
+                const inner = self.screen.pane(r, .{ .title = "INSTALL · pick a location · [Enter] stage · [Esc] back", .double = true });
+                self.screen.lines(inner, rows.items, 0, if (locs.len > 0) self.modal_cursor + 2 else null);
             },
             .sell_unit => |uid| {
                 const g = &self.gs.?;
@@ -1862,7 +1888,7 @@ pub const App = struct {
                 self.moveCursor(0, delta, view.rows.len);
             },
             .market => {
-                const view = try q.market(al, g);
+                const view = try q.market(al, g, self.market_filter);
                 switch (self.focus) {
                     0 => self.moveCursor(0, delta, view.board.len),
                     1 => self.moveCursor(1, delta, view.catalog.len),
@@ -1966,7 +1992,7 @@ pub const App = struct {
                 self.modal = .{ .seat = id };
             },
             .market => {
-                const view = try q.market(al, g);
+                const view = try q.market(al, g, self.market_filter);
                 const hq_id: types.HqId = @enumFromInt(self.hqSelId(g));
                 switch (self.focus) {
                     0 => if (view.board.len > 0) {
@@ -2037,8 +2063,18 @@ pub const App = struct {
                 }
             },
             .market => switch (ch) {
+                '/' => {
+                    self.market_filter = self.market_filter.next();
+                    self.cur(0).* = 0;
+                    self.cur(1).* = 0;
+                },
+                ',' => {
+                    self.market_filter = self.market_filter.prev();
+                    self.cur(0).* = 0;
+                    self.cur(1).* = 0;
+                },
                 'b' => {
-                    const view = try q.market(al, g);
+                    const view = try q.market(al, g, self.market_filter);
                     if (self.focus == 1 and view.catalog.len > 0) {
                         const r = view.catalog[@min(self.cur(1).*, view.catalog.len - 1)];
                         if (!r.component) {
@@ -2232,8 +2268,23 @@ pub const App = struct {
                         try self.exec(.{ .refit_remove = .{ .unit = uid, .slot_key = m.slot_key } });
                     },
                     '+' => {
-                        var buf: [64]u8 = undefined;
-                        self.openCommand(std.fmt.bufPrint(&buf, "refit {d} install ", .{@intFromEnum(uid)}) catch "refit ");
+                        self.modal_cursor = 0;
+                        self.modal = .{ .install_part = uid };
+                    },
+                    'R' => if (view.mounts.len > 0) {
+                        const m = view.mounts[@min(self.cur(0).*, view.mounts.len - 1)];
+                        const u = g.unit(uid).?;
+                        for (u.slots.items) |s| {
+                            if (!std.mem.eql(u8, s.slot_key, m.slot_key)) continue;
+                            if (s.condition == .ok) {
+                                self.say(.dim, "{s} is fine — [R] orders a replacement for damaged or destroyed gear", .{s.slot_key});
+                                return;
+                            }
+                            const home = g.homeHqFor(u.force);
+                            try self.exec(.{ .order_part = .{ .part_key = s.part_key, .quantity = 1, .dest = .{ .hq = home } } });
+                            self.say(.good, "ordered 1 × {s} to {s}; techs fit it on the next repair pass once it lands", .{ s.part_key, q.hqName(g, home) });
+                            return;
+                        }
                     },
                     'c' => try self.exec(.{ .refit_clear = uid }),
                     else => {},
@@ -2338,6 +2389,50 @@ pub const App = struct {
                 .enter, .escape => {
                     self.modal = .none;
                     self.leaveGame();
+                },
+                else => {},
+            },
+            .install_part => |uid| switch (key) {
+                .escape => self.modal = .none,
+                .down => self.modal_cursor +|= 1,
+                .up => self.modal_cursor -|= 1,
+                .enter => {
+                    const cands = try q.installCandidates(self.a(), &self.gs.?, uid);
+                    if (cands.len == 0) return;
+                    const c = cands[@min(self.modal_cursor, cands.len - 1)];
+                    self.modal = .{ .install_loc = .{ .unit = uid, .part = c.key } };
+                    self.modal_cursor = 0;
+                },
+                .char => |ch| switch (ch) {
+                    'j' => self.modal_cursor +|= 1,
+                    'k' => self.modal_cursor -|= 1,
+                    else => {},
+                },
+                else => {},
+            },
+            .install_loc => |il| switch (key) {
+                .escape => {
+                    self.modal = .{ .install_part = il.unit };
+                    self.modal_cursor = 0;
+                },
+                .down => self.modal_cursor +|= 1,
+                .up => self.modal_cursor -|= 1,
+                .enter => {
+                    const locs = try q.installLocations(self.a(), &self.gs.?, il.unit, il.part);
+                    if (locs.len == 0) return;
+                    const l = locs[@min(self.modal_cursor, locs.len - 1)];
+                    if (!l.legal) {
+                        self.say(.amber, "the rules refuse {s} in {s} — pick a green location", .{ il.part, @tagName(l.location) });
+                        return;
+                    }
+                    self.modal = .none;
+                    try self.exec(.{ .refit_install = .{ .unit = il.unit, .location = l.location, .part_key = il.part } });
+                    self.say(.good, "staged: install {s} in {s} — Enter in the Lab commits it to a bay", .{ il.part, @tagName(l.location) });
+                },
+                .char => |ch| switch (ch) {
+                    'j' => self.modal_cursor +|= 1,
+                    'k' => self.modal_cursor -|= 1,
+                    else => {},
                 },
                 else => {},
             },
