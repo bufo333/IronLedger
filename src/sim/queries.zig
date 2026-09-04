@@ -882,6 +882,18 @@ pub fn stockTable(alloc: Alloc, gs: *GameState, site: types.Site) ![]const []con
     const cap = gs.siteCapacityTons(site);
     try out.append(alloc, "");
     try out.append(alloc, try std.fmt.allocPrint(alloc, "total {d}t{s}", .{ total, if (cap) |c| try std.fmt.allocPrint(alloc, " of {d}t capacity · {d}t free", .{ c, c -| total }) else "" }));
+    if (site == .company) {
+        var cgt: u32 = 0;
+        var svt: u32 = 0;
+        var uit = gs.units.iterator();
+        while (uit.next()) |e| {
+            const u = e.value_ptr;
+            if (u.status == .destroyed or gs.companyOf(u.force) != site.company) continue;
+            if (std.mem.eql(u8, u.chassis_key, "CGT-3")) cgt += 1;
+            if (std.mem.eql(u8, u.chassis_key, "SVT-1")) svt += 1;
+        }
+        try out.append(alloc, try std.fmt.allocPrint(alloc, "{{d}}capacity = {d} CGT-3 × 20t + {d} SVT-1 × 5t · more trucks: Market (vehicles), then Forces x to move them in{{/}}", .{ cgt, svt }));
+    }
     return out.toOwnedSlice(alloc);
 }
 
