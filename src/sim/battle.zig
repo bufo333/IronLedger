@@ -322,7 +322,7 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
                     p.status = .wounded;
                     wounded += 1;
                 } else if (severity >= 8) {
-                    const need: u8 = if (player.mods.has_mash_lance) 10 else 8;
+                    const need: u8 = if (player.mods.has_mash_lance) 9 else 8;
                     if (gs.rng.roll2d6(.battle) >= need) {
                         p.status = .wounded;
                         wounded += 1;
@@ -521,6 +521,37 @@ test "battles resolve with consequences and stronger forces win more" {
     // And the ledger saw salvage income at 30% rights.
     const s = @import("../econ/finance.zig").summarize(&gs.ledger, 0, gs.clock.day_index + 1, .all);
     try std.testing.expect(s.category(.salvage) > 0);
+}
+
+test "hard hits wound pilots: a season of fighting sends someone to the medbay" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 4242 });
+    defer gs.deinit();
+    _ = try gs.createCommander("T", .LC, .line_officer);
+    const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
+        .id = @enumFromInt(1),
+        .kind = .objective_raid,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 3, .base_pay_month = 400_000 },
+        .status = .active,
+        .assigned_company = co,
+    });
+    const c = gs.contracts.getPtr(@enumFromInt(1)).?;
+    var battles: u32 = 0;
+    while (battles < 12) : (battles += 1) {
+        try resolveEngagement(&gs, c);
+        // keep the hulls fighting so hits keep landing
+        var uit = gs.units.iterator();
+        while (uit.next()) |e| e.value_ptr.armor_pct = 100;
+    }
+    var hurt: u32 = 0;
+    var pit = gs.people.iterator();
+    while (pit.next()) |e| if (e.value_ptr.status == .wounded or e.value_ptr.status == .kia) {
+        hurt += 1;
+    };
+    try std.testing.expect(hurt > 0);
 }
 
 test "9B: dry mounts are silenced — ammo is combat power" {
