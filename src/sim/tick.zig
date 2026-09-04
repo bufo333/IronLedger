@@ -106,6 +106,50 @@ fn runPolicies(gs: *GameState) !void {
         };
         try gs.log(.delivery, .{ .company = sp.company, .hq = home }, "[supply] resupply policy ships {d}t of provisions to {s} ({d} days left in the field)", .{ qty, f.name, tons / per_day });
     }
+
+    // Munitions under the same policy: each family the company's weapons
+    // fire is kept at two battles' worth (one ton feeds three mounts), one
+    // shipment per family in flight at a time.
+    for (gs.supply_policies.items) |sp| {
+        const f = gs.forces.getPtr(sp.company) orelse continue;
+        if (gs.isCompanyHome(sp.company) or f.return_eta_day != null) continue;
+        const home = gs.homeHqFor(sp.company);
+        if (home == .none) continue;
+        for (part_mod.munition_keys) |key| {
+            var mounts: u32 = 0;
+            var uit = gs.units.iterator();
+            while (uit.next()) |e| {
+                const u = e.value_ptr;
+                if (u.status == .destroyed or u.status == .mothballed or gs.companyOf(u.force) != sp.company) continue;
+                for (u.slots.items) |s| {
+                    if (s.class != .weapon or s.condition != .ok) continue;
+                    const fam = part_mod.munitionFor(s.part_key) orelse continue;
+                    if (std.mem.eql(u8, fam, key)) mounts += 1;
+                }
+            }
+            if (mounts == 0) continue;
+            const per_battle: u32 = (mounts + 2) / 3; // TUNE mirrors battle.mounts_per_ammo_ton
+            const have = gs.stockCount(.{ .company = sp.company }, key);
+            if (have >= per_battle) continue;
+            var in_flight = false;
+            for (gs.part_orders.items) |o| {
+                if (o.dest == .company and o.dest.company == sp.company and std.mem.eql(u8, o.part_key, key) and (o.status == .in_transit or o.status == .sourcing)) in_flight = true;
+            }
+            if (in_flight) continue;
+            const available = gs.stockCount(.{ .hq = home }, key);
+            const want = 2 * per_battle - have;
+            const qty = @min(want, available);
+            if (qty == 0) {
+                if (gs.clock.day_index % 7 == 0) try gs.log(.delivery, .{ .company = sp.company, .hq = home }, "[supply] resupply policy: no {s} at {s} to ship to {s}", .{ key, gs.hqs.getPtr(home).?.name, f.name });
+                continue;
+            }
+            _ = commands.execute(gs, .{ .ship_stock = .{ .part_key = key, .quantity = qty, .from = .{ .hq = home }, .to = .{ .company = sp.company } } }) catch |err| {
+                if (gs.clock.day_index % 7 == 0) try gs.log(.delivery, .{ .company = sp.company, .hq = home }, "[supply] resupply policy could not ship {s} to {s}: {s}", .{ key, f.name, @errorName(err) });
+                continue;
+            };
+            try gs.log(.delivery, .{ .company = sp.company, .hq = home }, "[supply] resupply policy ships {d}t of {s} to {s} ({d} mounts, {d}t on hand)", .{ qty, key, f.name, mounts, have });
+        }
+    }
 }
 
 /// Training lances (MekHQ lance role): held out of engagements, and their

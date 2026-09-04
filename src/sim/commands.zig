@@ -1270,6 +1270,16 @@ test "policies run daily under a monthly cap; resupply ships provisions to a com
         shipments += 1;
     };
     try std.testing.expectEqual(@as(usize, 1), shipments);
+    // Munitions ride the same policy: a family the weapons fire, at zero in
+    // the field, gets two battles' worth from home.
+    try gs.addStock(.{ .hq = hq }, "ammo_lrm", 40);
+    _ = gs.takeStock(.{ .company = co }, "ammo_lrm", gs.stockCount(.{ .company = co }, "ammo_lrm"));
+    _ = try execute(&gs, .advance_day);
+    var lrm_shipped: u32 = 0;
+    for (gs.part_orders.items) |o| if (std.mem.eql(u8, o.part_key, "ammo_lrm") and o.dest == .company and o.status != .delivered) {
+        lrm_shipped += o.quantity;
+    };
+    try std.testing.expect(lrm_shipped > 0);
     // tons = 0 removes it
     _ = try execute(&gs, .{ .set_supply_policy = .{ .company = co, .min_days = 14, .tons = 0 } });
     try std.testing.expectEqual(@as(usize, 0), gs.supply_policies.items.len);
