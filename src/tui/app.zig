@@ -83,12 +83,12 @@ fn tierFor(cols: u16, rows: u16) Tier {
 const office_roles = [_]game.person.Role{ .admin_command, .admin_logistics, .admin_transport, .admin_hr, .admin_finance };
 
 const verbs = [_][]const u8{
-    "admit",       "repay",     "sell",     "sellhq",    "disband", "depot",   "role", "supplypolicy", "move",     "newlance",
-    "stockpolicy", "autoadmit", "settings", "sellstock", "day",     "save",    "quit", "help",         "emblem",   "transfer",
-    "policy",      "loan",      "accept",   "resolve",   "order",   "ship",    "buy",  "assign",       "unassign", "autoassign",
-    "autostaff",   "upgrade",   "tier",     "fabricate", "hire",    "recruit", "fire", "post",         "train",    "triage",
-    "leave",       "mothball",  "activate", "complete",  "recall",  "found",   "link", "assignco",     "newco",    "newco@",
-    "xfer",        "rename",    "refit",
+    "admit",       "repay",     "sell",     "sellhq",    "disband",   "depot",  "role",    "supplypolicy", "move",     "newlance",
+    "stockpolicy", "autoadmit", "settings", "sellstock", "trim",      "day",    "save",    "quit",         "help",     "emblem",
+    "transfer",    "policy",    "loan",     "accept",    "resolve",   "order",  "ship",    "buy",          "assign",   "unassign",
+    "autoassign",  "autostaff", "upgrade",  "tier",      "fabricate", "hire",   "recruit", "fire",         "post",     "train",
+    "triage",      "leave",     "mothball", "activate",  "complete",  "recall", "found",   "link",         "assignco", "newco",
+    "newco@",      "xfer",      "rename",   "refit",
 };
 
 const Emblem = struct { name: []const u8, art: [3][]const u8 };
@@ -742,7 +742,7 @@ pub const App = struct {
             .people => "/ , filter (…, wounded) · m admit to medbay · t train · a seat · P post · x transfer · L leave · D fire · r record",
             .market => "Tab pane · Enter buy / order / order shortfall · b fabricate component · K keep stocked (pane: Enter edit, x remove) · [ ] HQ board · q welcome",
             .ledger => "j/k treasury · t send cash to it · T pull cash back to the outfit · p top-up policy · x clear its policy · L loan · R repay",
-            .supply => "company: t/T cash out/home · p cash policy · P resupply policy · s ship · o order · H structural parts home · HQ: K keep stocked · $ sell stock",
+            .supply => "company: t/T cash · p/P cash/resupply policy · s ship · o order · R trim to plan · H parts home · HQ: K keep stocked · $ sell stock",
             .forces => "Enter assign · a/u seat · A auto · l lance · o role · d depot · m mothball · x company · b fabricate short comp · R recall · $ sell · X disband",
             .map => "h j k l move between worlds (the view follows) · + / - zoom · f found HQ here · o offers here · q welcome",
             .lab => "[ ] hull · j/k mount · - remove · + install · R order replacement · D send to depot (structure) · c clear · Enter commit",
@@ -1338,6 +1338,7 @@ pub const App = struct {
                     "  {a}money{/}       Ledger: L loan (simple interest) · R repay · Forces: $ sell hull · X disband company · HQ: $ sell HQ",
                     "  {a}field cash{/}  t courier cash out · T courier cash back to the outfit · p policy = keep above a floor, checked daily, cap per month · Ledger x clears one (or `:policy co:N 0 0`)",
                     "  {a}resupply{/}    P policy `supplypolicy co:N days [max_tons] [battles]` — every line (provisions, medical, armor, each ammo family) kept to a field plan sized to the transit and the trucks; days = safety days past the transit; 0 days removes",
+                    "  {a}trim{/}        R on a Supply company row (or `:trim co:N`) returns everything over the field plan — and consumables it has no line for — to the home HQ, free",
                     "  {a}sell stock{/}  $ on a Supply HQ row → `sellstock hq:N part qty` — half catalogue value (40% for comp_*) into the HQ treasury; never under a keep-stocked minimum",
                     "  {a}warehouse{/}   K `stockpolicy hq:N part min [target]` (Supply on an HQ, Market on a catalogue row) — under min → order/fabricate to target, daily · Market KEEP STOCKED pane: Enter edits, x removes",
                     "  {a}medbay{/}      Settings (F12 or :settings) → a: auto-admit the wounded every morning, or `:autoadmit on|off`",
@@ -2539,6 +2540,22 @@ pub const App = struct {
                         .hq => |id| std.fmt.bufPrint(&buf, "sellstock hq:{d} ", .{@intFromEnum(id)}) catch "sellstock ",
                         else => "sellstock hq:",
                     } else "sellstock hq:"),
+                    'R' => {
+                        const co: types.ForceId = if (site) |s| (if (s == .company) s.company else .none) else .none;
+                        if (co == .none) {
+                            self.say(.dim, "move the cursor onto a company's field stores", .{});
+                            return;
+                        }
+                        const r = game.commands.execute(g, .{ .trim_stock = co }) catch |err| {
+                            self.say(.crit, "{s}", .{errorText(err)});
+                            return;
+                        };
+                        if (r.tons_moved == 0) {
+                            self.say(.dim, "{s}'s stores already match the field plan", .{q.forceName(g, co)});
+                        } else {
+                            self.say(.good, "{s} returns {d}t over the plan to the home HQ — riding the empty convoys, no freight", .{ q.forceName(g, co), r.tons_moved });
+                        }
+                    },
                     'H' => {
                         // Send every structural component in the field stores home.
                         const co: types.ForceId = if (site) |s| (if (s == .company) s.company else .none) else .none;
@@ -3266,6 +3283,11 @@ pub const App = struct {
         }
         if (eq(u8, verb, "repay")) return .{ .repay_loan = .{ .index = try num(usize, tokens.next()), .amount = try num(i64, tokens.next()) } };
         if (eq(u8, verb, "sell")) return .{ .sell_unit = @enumFromInt(try num(u32, tokens.next())) };
+        if (eq(u8, verb, "trim")) {
+            const site = try parseSite(try need(tokens.next()));
+            if (site != .company) return error.BadSite;
+            return .{ .trim_stock = site.company };
+        }
         if (eq(u8, verb, "sellstock")) {
             const site = try parseSite(try need(tokens.next()));
             if (site != .hq) return error.BadSite;

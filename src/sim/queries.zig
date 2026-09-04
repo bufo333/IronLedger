@@ -1007,7 +1007,7 @@ pub fn stockTable(alloc: Alloc, gs: *GameState, site: types.Site) ![]const []con
             const mk: []const u8 = if (have + coming < l.floor) "{c}" else if (have < l.floor) "{a}" else "{g}";
             try out.append(alloc, try std.fmt.allocPrint(alloc, "  {s: <20} {d: >6} {d: >7} {s}{d: >8}{{/}} {d: >8}  {{d}}{s}{{/}}", .{ clip(l.key, 20), l.floor, l.target, mk, have, coming, l.note }));
         }
-        try out.append(alloc, try std.fmt.allocPrint(alloc, "  {{d}}truck shares: ammo {d}% · armor {d}% · medical {d}% · provisions take the rest · a line ships when on hand + inbound < floor{{/}}", .{ field_supply.ammo_share_pct, field_supply.armor_share_pct, field_supply.medical_share_pct }));
+        try out.append(alloc, try std.fmt.allocPrint(alloc, "  {{d}}truck shares: ammo {d}% · armor {d}% · medical {d}% · provisions take the rest · a line ships when on hand + inbound < floor · R returns anything over target home{{/}}", .{ field_supply.ammo_share_pct, field_supply.armor_share_pct, field_supply.medical_share_pct }));
     }
     if (site == .hq) {
         var any = false;

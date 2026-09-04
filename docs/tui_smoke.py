@@ -154,7 +154,9 @@ send("\x1b"); send("p", 0.8)
 assert ":policy co:" in plain()[-400:], plain()[-800:]
 send("\x1b"); send("s", 0.8)
 assert ":ship provisions 10 hq:" in plain()[-400:], plain()[-800:]
-send("\x1b"); send("P", 0.8)
+send("\x1b"); send("R", 0.8)                          # trim field stores to the plan (company at home: nothing or something, never an error)
+assert "match the field plan" in plain()[-600:] or "to the home HQ" in plain()[-600:], plain()[-800:]
+send("P", 0.8)
 assert ":supplypolicy co:" in plain()[-400:], plain()[-800:]
 send("\r", 1.0)                                       # set it: 14 safety days
 assert "resupply plan on (14 safety days, ammo auto)" in plain()[-30000:], plain()[-2000:]

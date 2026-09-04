@@ -702,7 +702,7 @@ pub const GameState = struct {
     // warehouse (capped by warehouse level), each deployed company's field
     // stores (capped by its logistics trucks). Pallets have tonnage.
 
-    fn stockMap(self: *GameState, site: types.Site) ?*std.StringArrayHashMapUnmanaged(u32) {
+    pub fn stockMap(self: *GameState, site: types.Site) ?*std.StringArrayHashMapUnmanaged(u32) {
         return switch (site) {
             .outfit => &self.spare_parts,
             .hq => |id| if (self.hqs.getPtr(id)) |h| &h.stock else null,

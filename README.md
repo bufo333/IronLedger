@@ -171,7 +171,9 @@ field. A deployed company's stock table ends with its field plan: every
 line it burns (provisions, medical, armor, each ammo family it fires)
 with a floor and target sized to the line's transit time and the trucks,
 ammo capped at 40% of the trucks so provisions always have room, and a
-convoy leaves whenever on hand plus inbound drops under the floor. On an HQ row (or a Market catalogue row) `K` sets a keep-stocked
+convoy leaves whenever on hand plus inbound drops under the floor. `R`
+trims the stores to that plan, sending anything over target, and any
+consumable the plan has no line for, home on the empty convoys. On an HQ row (or a Market catalogue row) `K` sets a keep-stocked
 line: under the minimum, the warehouse reorders or fabricates up to the
 target on its own; the Market's KEEP STOCKED pane lists, edits and
 removes them. `$` on an HQ row sells part of a line for its resale

@@ -167,6 +167,11 @@ pub const Command = union(enum) {
     /// Sell part of a warehouse line for its resale value (into the HQ's
     /// treasury). Refused below a keep-stocked line's minimum.
     sell_stock: struct { hq: types.HqId, part_key: []const u8, quantity: u32 },
+    /// Trim a deployed company's field stores to its field plan: anything
+    /// over a line's target, and consumables the plan has no line for
+    /// (munitions nothing fires, structural components), ride the empty
+    /// convoys home to the HQ. Weapon and equipment spares stay.
+    trim_stock: types.ForceId,
 };
 
 pub const Error = error{
@@ -245,6 +250,8 @@ pub const Result = struct {
     days_advanced: u32 = 0,
     hired: types.PersonId = .none,
     created_force: types.ForceId = .none,
+    /// Tons a `trim_stock` sent home.
+    tons_moved: u32 = 0,
 };
 
 pub fn execute(gs: *GameState, cmd: Command) Error!Result {
@@ -571,6 +578,46 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             try gs.postTreasury(.{ .hq = sale.hq }, .{ .day = gs.clock.day_index, .amount = value, .category = .unit_sale, .hq = sale.hq, .note = def.key });
             try gs.log(.market, .{ .hq = sale.hq }, "[sale] {d} {s} sold from {s} for {d}", .{ sale.quantity, def.key, h.name, value });
             return .{};
+        },
+        .trim_stock => |company| {
+            const f = gs.force(company) orelse return Error.UnknownForce;
+            if (f.echelon != .company) return Error.NotACompany;
+            const field_supply = @import("field_supply.zig");
+            var arena = std.heap.ArenaAllocator.init(gs.allocator());
+            defer arena.deinit();
+            var min_days: u32 = 14;
+            var battles: u8 = 0;
+            for (gs.supply_policies.items) |sp| if (sp.company == company) {
+                min_days = sp.min_days;
+                battles = sp.ammo_battles;
+            };
+            const transit = gs.courierEtaDays(.{ .company = company });
+            const p = try field_supply.plan(arena.allocator(), gs, company, transit, min_days, battles);
+            const site: types.Site = .{ .company = company };
+            var moved: u32 = 0;
+            // Snapshot the keys first: sending home edits the stock map.
+            var keys: std.ArrayListUnmanaged([]const u8) = .empty;
+            if (gs.stockMap(site)) |m| {
+                var it = m.iterator();
+                while (it.next()) |e| try keys.append(arena.allocator(), e.key_ptr.*);
+            }
+            for (keys.items) |key| {
+                const have = gs.stockCount(site, key);
+                if (have == 0) continue;
+                var target: ?u32 = null;
+                for (p.lines) |l| if (std.mem.eql(u8, l.key, key)) {
+                    target = l.target;
+                };
+                const def = part_mod.find(key);
+                const consumable = part_mod.isComponent(key) or (def != null and (def.?.mount == .ammo or def.?.mount == .none));
+                const excess: u32 = if (target) |t| have -| t else if (consumable) have else 0;
+                if (excess == 0) continue;
+                _ = gs.takeStock(site, key, excess);
+                try gs.sendHome(company, key, excess);
+                moved += excess * part_mod.tons(key);
+                try gs.log(.delivery, .{ .company = company }, "[supply] {s} returns {d} {s} to the home HQ ({s})", .{ f.name, excess, key, if (target != null) "over the plan's target" else "no line in the plan" });
+            }
+            return .{ .tons_moved = moved };
         },
         .set_auto_admit => |on| {
             gs.auto_admit = on;
@@ -1530,6 +1577,41 @@ test "12: selling warehouse stock pays the HQ and respects a keep-stocked minimu
     _ = try execute(&gs, .{ .set_stock_policy = .{ .hq = hq, .part_key = "ammo_lrm", .min = have - 12, .target = have } });
     try std.testing.expectError(Error.KeepStocked, execute(&gs, .{ .sell_stock = .{ .hq = hq, .part_key = "ammo_lrm", .quantity = 5 } }));
     _ = try execute(&gs, .{ .sell_stock = .{ .hq = hq, .part_key = "ammo_lrm", .quantity = 2 } });
+}
+
+test "12: trim_stock returns excess and unplanned consumables home, keeps spares" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 2025 });
+    defer gs.deinit();
+    _ = try execute(&gs, .{ .create_commander = .{ .name = "E", .origin = .CC, .profession = .paymaster } });
+    const co = (try execute(&gs, .{ .new_company = "Alpha" })).created_force;
+    const site: types.Site = .{ .company = co };
+    _ = try execute(&gs, .{ .accept_contract = .{ .offer_index = 0, .company = co } });
+    // Overstock one family, add a family nothing fires, a component and a spare laser.
+    _ = gs.takeStock(site, "provisions", gs.stockCount(site, "provisions"));
+    try gs.addStock(site, "ammo_lrm", 30);
+    try gs.addStock(site, "ammo_ac20", 3);
+    try gs.addStock(site, "comp_arm", 1);
+    try gs.addStock(site, "mlas", 2);
+    const before = gs.part_orders.items.len;
+    const r = try execute(&gs, .{ .trim_stock = co });
+    try std.testing.expect(r.tons_moved > 0);
+    try std.testing.expect(gs.part_orders.items.len > before);
+    try std.testing.expectEqual(@as(u32, 0), gs.stockCount(site, "comp_arm"));
+    try std.testing.expectEqual(@as(u32, 2), gs.stockCount(site, "mlas"));
+    var lrm_target: u32 = 0;
+    var ac20_planned = false;
+    const fs = @import("field_supply.zig");
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const p = try fs.plan(arena.allocator(), &gs, co, gs.courierEtaDays(.{ .company = co }), 14, 0);
+    for (p.lines) |l| {
+        if (std.mem.eql(u8, l.key, "ammo_lrm")) lrm_target = l.target;
+        if (std.mem.eql(u8, l.key, "ammo_ac20")) ac20_planned = true;
+    }
+    try std.testing.expect(gs.stockCount(site, "ammo_lrm") <= lrm_target);
+    if (!ac20_planned) try std.testing.expectEqual(@as(u32, 0), gs.stockCount(site, "ammo_ac20"));
+    // Trimming again moves nothing.
+    try std.testing.expectEqual(@as(u32, 0), (try execute(&gs, .{ .trim_stock = co })).tons_moved);
 }
 
 test "golden master: same seed + same script = same state hash" {
