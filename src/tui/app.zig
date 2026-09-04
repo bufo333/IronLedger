@@ -193,6 +193,9 @@ pub const App = struct {
     people_filter: q.HallFilter = .all,
     market_filter: q.MarketFilter = .all,
     map_cursor: usize = 0,
+    /// Star map zoom: 1 = every world fitted into the pane; 2/4/8 = that
+    /// many times closer, centred on the cursor world.
+    map_zoom: u8 = 1,
     lab_sel: usize = 0,
     modal_cursor: usize = 0,
     w_office: usize = 0,
@@ -741,7 +744,7 @@ pub const App = struct {
             .ledger => "j/k treasury · t send cash to it · T pull cash back to the outfit · p top-up policy · x clear its policy · L loan · R repay",
             .supply => "company: t/T cash out/home · p cash policy · P resupply policy · s ship · o order · H structural parts home · HQ: K keep stocked · $ sell stock",
             .forces => "Enter assign · a/u seat · A auto · l lance · o role · d depot · m mothball · x company · b fabricate short comp · R recall · $ sell · X disband",
-            .map => "h j k l move between worlds · f found HQ here · o offers here · n end turn · q welcome",
+            .map => "h j k l move between worlds (the view follows) · + / - zoom · f found HQ here · o offers here · q welcome",
             .lab => "[ ] hull · j/k mount · - remove · + install · R order replacement · D send to depot (structure) · c clear · Enter commit",
             .hq => "[ ] switch HQ · u upgrade the highlighted facility (picker elsewhere) · T tier · S autostaff · Tab hall · f/F filter · Enter hire",
             else => "? help · F1-F8 screens · Tab pane · j/k cursor · Enter act · : command · n end turn · q welcome",
@@ -860,7 +863,7 @@ pub const App = struct {
         }
     };
 
-    fn mapGeom(view: q.Map, inner: Rect) MapGeom {
+    fn mapGeom(view: q.Map, inner: Rect, zoom: u8, center: ?[2]i32) MapGeom {
         var min_x: i32 = std.math.maxInt(i32);
         var max_x: i32 = std.math.minInt(i32);
         var min_y: i32 = std.math.maxInt(i32);
@@ -881,6 +884,16 @@ pub const App = struct {
         var sy: f64 = @as(f64, @floatFromInt(max_y - min_y)) / usable_h;
         // keep the 2:1 cell aspect so rings stay round
         if (sy < 2 * sx) sy = 2 * sx else sx = sy / 2;
+        if (zoom > 1) {
+            // Closer in: the same aspect, `zoom` times fewer LY per cell,
+            // and the cursor world sits in the middle of the pane.
+            const z: f64 = @floatFromInt(zoom);
+            sx /= z;
+            sy /= z;
+            const c = center orelse .{ @divTrunc(min_x + max_x, 2), @divTrunc(min_y + max_y, 2) };
+            min_x = c[0] - @as(i32, @intFromFloat(usable_w * sx / 2));
+            max_y = c[1] + @as(i32, @intFromFloat(usable_h * sy / 2));
+        }
         return .{ .inner = inner, .min_x = min_x, .max_y = max_y, .sx = sx, .sy = sy };
     }
 
@@ -893,8 +906,13 @@ pub const App = struct {
         if (view.worlds.len == 0) return;
         if (self.map_cursor >= view.worlds.len) self.map_cursor = 0;
         const mw: u16 = if (b.w > 120) b.w * 3 / 4 else b.w;
-        const inner = s.pane(.{ .x = b.x, .y = b.y, .w = mw, .h = b.h }, .{ .title = "STAR MAP", .focused = true, .right_title = try std.fmt.allocPrint(al, "{d} worlds · {d} in ring · {d} beachhead · {d} dark", .{ view.worlds.len, view.in_ring, view.in_band, view.dark }) });
-        const geom = mapGeom(view, inner);
+        const inner = s.pane(.{ .x = b.x, .y = b.y, .w = mw, .h = b.h }, .{ .title = "STAR MAP", .focused = true, .right_title = try std.fmt.allocPrint(al, "{d} worlds · {d} in ring · {d} beachhead · {d} dark · zoom ×{d} [+] [-]", .{ view.worlds.len, view.in_ring, view.in_band, view.dark, self.map_zoom }) });
+        const cw = view.worlds[self.map_cursor];
+        const geom = mapGeom(view, inner, self.map_zoom, .{ cw.x, cw.y });
+        var offscreen: u32 = 0;
+        for (view.worlds) |w| if (!geom.inside(geom.cell(w.x, w.y))) {
+            offscreen += 1;
+        };
         // rings and beachhead bands
         for (view.hqs) |h| {
             var k: usize = 0;
@@ -923,7 +941,7 @@ pub const App = struct {
             if (w.companies_here > 0 and w.hq_here == .none) s.put(c[0] + 3 + @as(i32, nw), c[1], '+', .good);
         }
         if (mw < b.w) {
-            s.textPad(inner.x, inner.y + inner.h - 1, inner.w, "{d}@ HQ   * cursor   ^ offers   + company   = worked (HQ can be founded)   . influence ring   , beachhead band   dim = out of reach{/}", .normal);
+            s.textPad(inner.x, inner.y + inner.h - 1, inner.w, if (offscreen > 0) try std.fmt.allocPrint(al, "{{d}}@ HQ   * cursor   ^ offers   + company   = worked   . ring   , band   dim = out of reach   ·   +/- zoom, h j k l pan by world   ·{{/}} {{a}}{d} off screen{{/}}", .{offscreen}) else "{d}@ HQ   * cursor   ^ offers   + company   = worked (HQ can be founded)   . influence ring   , beachhead band   dim = out of reach   ·   +/- zoom{/}", .normal);
         } else {
             const w = view.worlds[self.map_cursor];
             s.textPad(inner.x, inner.y + inner.h - 1, inner.w, try std.fmt.allocPrint(al, "{{a}}{s}{{/}} {s} · ind {d} · {d} LY · {s} · {d} offers  {{d}}[f] found [o] board{{/}}", .{
@@ -2620,6 +2638,8 @@ pub const App = struct {
             .map => switch (ch) {
                 'h' => try self.mapMove(-1, 0),
                 'l' => try self.mapMove(1, 0),
+                '+', '=' => self.map_zoom = @min(8, self.map_zoom * 2),
+                '-' => self.map_zoom = @max(1, self.map_zoom / 2),
                 'f' => {
                     const view = try q.map(al, g);
                     if (view.worlds.len == 0) return;

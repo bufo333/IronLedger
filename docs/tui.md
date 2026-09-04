@@ -103,7 +103,7 @@ entity ids. Results land in the Desk log pane.
 | Tab | Screen | Panes | Local keys → commands |
 |---|---|---|---|
 | F1 | Desk | Emblem · Checklist · Inbox · Companies · Log · HQs | Enter on inbox → `resolve_decision`; Enter on checklist → jump to fixing screen |
-| F2 | Map | Star map · World | `o` offers here · `f` → `found_hq` · `r` rings toggle |
+| F2 | Map | Star map · World | `h j k l` move by world (view follows) · `+`/`-` zoom ×1–×8 centred on the cursor · `o` offers here · `f` → `found_hq` |
 | F3 | Forces | TO&E tree · Hull/Person detail · Unassigned pool | `a` → `assign`, `u` → `unassign`, `A` → `auto_assign`, `t` → `train`, `x` → `transfer_unit`/`transfer_person`, `m` medbay modal (`triage`, `leave`) |
 | F4 | Contracts | Board · Active · History (closed contracts: outcome, world, days served, VP, pay received) · Contract log | Enter → `accept_contract` (company picker), `c` → `complete_contract`, `R` → `recall_company`; Tab to History, the log follows the cursor |
 | F5 | Ledger | Treasuries · P&L · Ledger | `t` → `transfer`, `p` → `set_policy`, `x` clears the row's cash or resupply policy, `L` → `take_loan`, `[ ]` period |

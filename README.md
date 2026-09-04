@@ -121,7 +121,9 @@ posture, the log since last turn, and the HQ network.
 
 The star map from the real planet table: influence rings and beachhead
 bands around each HQ, offers pinned to worlds, deployed companies marked.
-`h j k l` move between worlds; `f` founds an HQ on the one under the
+`h j k l` move between worlds and the view follows the cursor; `+` and
+`-` zoom in and out (×1 fits every world, up to ×8 centred on the cursor,
+with a count of worlds off screen); `f` founds an HQ on the one under the
 cursor.
 
 ![Map](docs/screenshots/map.svg)
