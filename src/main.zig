@@ -23,15 +23,17 @@ pub fn main(init: std.process.Init) !void {
     _ = args.next(); // exe name
     var repl = false;
     var tui = false;
+    var ascii = false;
     var store_path: [:0]const u8 = "campaigns.db";
     while (args.next()) |arg| {
         if (std.mem.eql(u8, arg, "--repl")) repl = true;
         if (std.mem.eql(u8, arg, "--tui")) tui = true;
+        if (std.mem.eql(u8, arg, "--ascii")) ascii = true;
         if (std.mem.eql(u8, arg, "--store")) store_path = args.next() orelse store_path;
     }
 
     if (tui) {
-        try @import("tui/app.zig").run(init.io, init.gpa, store_path);
+        try @import("tui/app.zig").run(init.io, init.gpa, store_path, .{ .ascii = ascii });
     } else if (repl) {
         try runRepl(&gs, init.io, init.gpa, store_path);
     } else {

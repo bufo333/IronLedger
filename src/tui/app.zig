@@ -45,6 +45,31 @@ const Modal = union(enum) {
     seat: types.PersonId,
     /// Change the outfit's emblem: presets, then pictures from the logo dirs.
     emblem,
+    /// Hull detail as a modal (narrow terminals have no side pane).
+    hull: types.UnitId,
+    /// A person's record as a modal.
+    record: types.PersonId,
+};
+
+/// Size tiers (docs/tui.md): the largest that fits decides how many panes
+/// a screen shows. Narrow (< 120 cols) drops side panes; short (< 30
+/// rows) drops the third band.
+const Tier = enum { minimum, compact, wide, full };
+
+fn tierFor(cols: u16, rows: u16) Tier {
+    if (cols >= 200 and rows >= 50) return .full;
+    if (cols >= 160 and rows >= 45) return .wide;
+    if (cols >= 118 and rows >= 36) return .compact;
+    return .minimum;
+}
+
+const office_roles = [_]game.person.Role{ .admin_command, .admin_logistics, .admin_transport, .admin_hr, .admin_finance };
+
+const verbs = [_][]const u8{
+    "day",     "save",    "quit",      "help",      "emblem",   "transfer", "policy", "loan",     "accept", "resolve",
+    "order",   "ship",    "buy",       "assign",    "unassign", "autoassign", "autostaff", "upgrade", "tier",   "fabricate",
+    "hire",    "recruit", "fire",      "post",      "train",    "triage",   "leave",  "mothball", "activate", "complete",
+    "recall",  "found",   "link",      "assignco",  "newco",    "newco@",   "xfer",   "rename",   "refit",
 };
 
 const Emblem = struct { name: []const u8, art: [3][]const u8 };
@@ -147,6 +172,7 @@ pub const App = struct {
     map_cursor: usize = 0,
     lab_sel: usize = 0,
     modal_cursor: usize = 0,
+    w_office: usize = 0,
 
     // ------------------------------------------------------------------ lifecycle
 
@@ -306,6 +332,15 @@ pub const App = struct {
         return .{ .x = 0, .y = 2, .w = s.cols, .h = if (s.rows > 3) s.rows - 3 else 0 };
     }
 
+    fn tier(self: *App) Tier {
+        return tierFor(self.screen.cols, self.screen.rows);
+    }
+
+    /// Side panes are dropped below this width.
+    fn narrow(self: *App) bool {
+        return self.screen.cols < 120;
+    }
+
     fn titleBar(self: *App, title: []const u8, right: []const u8) void {
         const s = &self.screen;
         s.textPad(0, 0, s.cols, "", .normal);
@@ -323,6 +358,11 @@ pub const App = struct {
             var buf: [160]u8 = undefined;
             const line = std.fmt.bufPrint(&buf, ":{s}_", .{self.input.slice()}) catch ":";
             s.textPad(0, y, s.cols, line, .normal);
+            // completion candidates / parse errors sit to the right of the prompt
+            if (self.msg.len > 0) {
+                const used: i32 = @intCast(screen_mod.visibleLen(line) + 3);
+                if (used < s.cols) _ = s.text(used, y, @intCast(s.cols - @as(u16, @intCast(used))), self.msg.slice(), self.msg_style);
+            }
             return;
         }
         if (self.msg.len > 0) {
@@ -505,22 +545,54 @@ pub const App = struct {
                     var texts: std.ArrayListUnmanaged([]const u8) = .empty;
                     for (rows) |r| try texts.append(al, r.text);
                     const lw: u16 = if (b.w > 120) b.w * 3 / 5 else b.w;
-                    self.listPane(.{ .x = 0, .y = b.y, .w = lw, .h = b.h }, "GENERATED COMPANY", texts.items, 0, true, true);
+                    self.listPane(.{ .x = 0, .y = b.y, .w = lw, .h = b.h }, "GENERATED COMPANY", texts.items, 0, self.w_field == 0, true);
                     if (lw < b.w) {
-                        var hq_id: types.HqId = .none;
-                        var hit = g.hqs.iterator();
-                        if (hit.next()) |e| hq_id = e.value_ptr.id;
-                        const detail = try q.hqDetail(al, g, hq_id);
+                        const hq_id = self.firstHq(g);
+                        const h = g.hqs.getPtr(hq_id);
+                        const req = if (h) |hh| hh.staffRequired() else null;
+                        var office: std.ArrayListUnmanaged([]const u8) = .empty;
+                        try office.append(al, "role               have   need   payroll/mo   effect");
+                        for (office_roles, 0..) |role, i| {
+                            const have = g.hqStaff(hq_id, role).count;
+                            const required: ?u32 = if (req) |r| switch (role) {
+                                .admin_command => r.admin,
+                                .admin_logistics => r.logistics,
+                                .admin_hr => r.hr,
+                                .admin_finance => r.finance,
+                                else => null,
+                            } else null;
+                            const pay = role.baseSalary() * have;
+                            const short = required != null and have < required.?;
+                            try office.append(al, try std.fmt.allocPrint(al, "{s}{s: <18} {d: >4}   {s: >4}   {s: >10}   {s}{{/}}", .{
+                                if (self.w_field == 1 and i == self.w_office) "{s}" else if (short) "{c}" else "",
+                                @tagName(role),
+                                have,
+                                if (required) |n| try std.fmt.allocPrint(al, "{d}", .{n}) else "—",
+                                try q.money(al, pay),
+                                switch (role) {
+                                    .admin_command => "orders, morale",
+                                    .admin_logistics => "order rolls",
+                                    .admin_transport => "shipping ETAs",
+                                    .admin_hr => "hiring, training",
+                                    .admin_finance => "paperwork days",
+                                    else => "",
+                                },
+                            }));
+                        }
                         const st = try q.status(al, g);
-                        var side: std.ArrayListUnmanaged([]const u8) = .empty;
-                        try side.append(al, try std.fmt.allocPrint(al, "starter HQ  {{a}}{s}{{/}}", .{q.hqName(g, hq_id)}));
-                        try side.append(al, try std.fmt.allocPrint(al, "treasury    {{a}}{s}{{/}} C · {d} hulls · {d} people", .{ st.funds, st.hulls, st.people }));
-                        try side.append(al, "");
-                        for (detail) |d| try side.append(al, d);
-                        self.listPane(.{ .x = lw + 1, .y = b.y, .w = b.w - lw - 1, .h = b.h }, "HQ & BACK OFFICE", side.items, 1, false, false);
+                        try office.append(al, "");
+                        try office.append(al, try std.fmt.allocPrint(al, "staff {d} / {d} required · payroll {s}/mo · treasury {{a}}{s}{{/}} C", .{ if (h) |hh| hh.staff_assigned else 0, if (req) |r| r.total() else 0, try q.money(al, g.monthlyPayroll()), st.funds }));
+                        try office.append(al, "{d}under-hiring is allowed: facilities run a level lower and paperwork slows{/}");
+                        try office.append(al, "{d}[Tab] focus · [j/k] role · [-] fewer · [+] more{/}");
+                        const oh: u16 = @min(b.h, 12);
+                        self.listPane(.{ .x = lw + 1, .y = b.y, .w = b.w - lw - 1, .h = oh }, "BACK OFFICE", office.items, 1, self.w_field == 1, false);
+                        if (b.h > oh + 3) {
+                            const detail = try q.hqDetail(al, g, hq_id);
+                            self.listPane(.{ .x = lw + 1, .y = b.y + oh, .w = b.w - lw - 1, .h = b.h - oh }, try std.fmt.allocPrint(al, "starter HQ · {s}", .{q.hqName(g, hq_id)}), detail, 2, false, false);
+                        }
                     }
                 }
-                self.footer("[r] reroll (new seed)  [Enter] next step  [Esc] back");
+                self.footer("[r] reroll (new seed)  [Tab] company / back office  [-/+] adjust headcount  [Enter] next step  [Esc] back");
             },
             .review => {
                 var rows: std.ArrayListUnmanaged([]const u8) = .empty;
@@ -578,6 +650,13 @@ pub const App = struct {
         }
         _ = s.text(@as(i32, s.cols) - @as(i32, @intCast(right.len)) - 1 - mark_w, 0, @intCast(right.len), right, .dim);
         const st = try q.status(al, g);
+        if (self.narrow()) {
+            const short = try std.fmt.allocPrint(al, "{{a}}{s}{{/}} d{d} · {{a}}{s}{{/}} C · rep {d} · inbox {s}{d}{{/}} · chk {s}{d}{{/}} · ready {s}", .{
+                st.date, st.day, st.funds, st.reputation, if (st.inbox > 0) "{c}" else "{g}", st.inbox, if (st.blocking > 0) "{c}" else "{g}", st.checklist, if (st.blocking > 0) "{c}NO{/}" else "{g}YES{/}",
+            });
+            s.textPad(0, 1, s.cols, short, .normal);
+            return;
+        }
         const line = try std.fmt.allocPrint(al, "{{a}}{s}{{/}}  day {d}  ·  outfit {{a}}{s}{{/}} C  ·  rep {s}{d}{{/}}  ·  {d} companies · {d} HQs · {d} hulls · {d} people  ·  inbox {s}{d}{{/}}  ·  checklist {s}{d}{{/}}  ·  turn ready: {s}", .{
             st.date,                                     st.day,
             st.funds,                                    if (st.reputation < 0) "{c}" else "{g}",
@@ -742,7 +821,18 @@ pub const App = struct {
             if (w.offers_here > 0) s.put(c[0] + 3 + @as(i32, nw), c[1], '^', .amber);
             if (w.companies_here > 0 and w.hq_here == .none) s.put(c[0] + 3 + @as(i32, nw), c[1], '+', .good);
         }
-        s.textPad(inner.x, inner.y + inner.h - 1, inner.w, "{d}@ HQ   * cursor   ^ offers   + company   . influence ring   , beachhead band   dim = out of reach{/}", .normal);
+        if (mw < b.w) {
+            s.textPad(inner.x, inner.y + inner.h - 1, inner.w, "{d}@ HQ   * cursor   ^ offers   + company   . influence ring   , beachhead band   dim = out of reach{/}", .normal);
+        } else {
+            const w = view.worlds[self.map_cursor];
+            s.textPad(inner.x, inner.y + inner.h - 1, inner.w, try std.fmt.allocPrint(al, "{{a}}{s}{{/}} {s} · ind {d} · {d} LY · {s} · {d} offers  {{d}}[f] found [o] board{{/}}", .{
+                w.name, w.faction, w.industry, w.dist_ly, switch (w.band) {
+                    .ring => "{g}in ring{/}",
+                    .beachhead => "{a}beachhead{/}",
+                    .dark => "{d}out of reach{/}",
+                }, w.offers_here,
+            }), .normal);
+        }
 
         if (mw < b.w) {
             const w = view.worlds[self.map_cursor];
@@ -822,9 +912,9 @@ pub const App = struct {
         }
         if (self.lab_sel >= meks.len) self.lab_sel = 0;
         const view = try q.lab(al, g, meks[self.lab_sel]);
-        const lw: u16 = @max(30, b.w * 3 / 10);
-        const mw: u16 = @max(40, b.w * 7 / 20);
-        self.listPane(.{ .x = b.x, .y = b.y, .w = lw, .h = b.h }, view.title, view.budget, 1, false, false);
+        const lw: u16 = if (self.narrow()) 0 else @max(30, b.w * 3 / 10);
+        const mw: u16 = if (self.narrow()) b.w * 3 / 5 else @max(40, b.w * 7 / 20);
+        if (lw > 0) self.listPane(.{ .x = b.x, .y = b.y, .w = lw, .h = b.h }, view.title, view.budget, 1, false, false);
         var mounts: std.ArrayListUnmanaged([]const u8) = .empty;
         for (view.mounts) |m| try mounts.append(al, m.text);
         if (view.mounts.len == 0) try mounts.append(al, "{d}no mounts{/}");
@@ -898,9 +988,9 @@ pub const App = struct {
 
         const rest_h: u16 = b.h - top_h - co_h;
         if (rest_h >= 3) {
-            const log_w: u16 = b.w * 3 / 5;
+            const log_w: u16 = if (self.narrow()) b.w else b.w * 3 / 5;
             self.listPane(.{ .x = b.x, .y = b.y + top_h + co_h, .w = log_w, .h = rest_h }, "LOG", view.log, 2, self.focus == 2, true);
-            self.listPane(.{ .x = b.x + log_w, .y = b.y + top_h + co_h, .w = b.w - log_w, .h = rest_h }, "HQs", view.hqs, 3, false, false);
+            if (log_w < b.w) self.listPane(.{ .x = b.x + log_w, .y = b.y + top_h + co_h, .w = b.w - log_w, .h = rest_h }, "HQs", view.hqs, 3, false, false);
         }
     }
 
@@ -964,15 +1054,15 @@ pub const App = struct {
         const all = try q.allTreasuries(al, g);
         if (self.ledger_sel >= all.len) self.ledger_sel = 0;
         const view = try q.ledger(al, g, all[self.ledger_sel], 31, 200);
-        const tw: u16 = @max(30, b.w / 4);
-        const pw: u16 = @max(30, b.w * 3 / 10);
+        const tw: u16 = if (self.narrow()) b.w * 2 / 5 else @max(30, b.w / 4);
+        const pw: u16 = if (self.narrow()) 0 else @max(30, b.w * 3 / 10);
         var rows: std.ArrayListUnmanaged([]const u8) = .empty;
         for (view.treasuries) |t| try rows.append(al, t.text);
         try rows.append(al, "");
         for (view.extras) |e| try rows.append(al, e);
         const inner = self.screen.pane(.{ .x = b.x, .y = b.y, .w = tw, .h = b.h }, .{ .title = "TREASURIES", .focused = self.focus == 0, .right_title = "[t] transfer [p] policy" });
         self.screen.lines(inner, rows.items, 0, if (self.focus == 0) self.ledger_sel else null);
-        self.listPane(.{ .x = b.x + tw, .y = b.y, .w = pw, .h = b.h }, view.pnl_title, view.pnl, 1, false, false);
+        if (pw > 0) self.listPane(.{ .x = b.x + tw, .y = b.y, .w = pw, .h = b.h }, view.pnl_title, view.pnl, 1, false, false);
         var led: std.ArrayListUnmanaged([]const u8) = .empty;
         try led.append(al, view.ledger_header);
         for (view.ledger) |l| try led.append(al, l);
@@ -1163,6 +1253,18 @@ pub const App = struct {
                 const inner = self.screen.pane(r, .{ .title = "EMBLEM · [Enter] use · [Esc] cancel", .double = true, .right_title = "pictures from ., logos/, docs/logos/" });
                 self.screen.lines(inner, rows.items, firstRow(self.modal_cursor, inner.h), self.modal_cursor);
             },
+            .hull => |uid| {
+                const detail = try q.hull(al, &self.gs.?, uid);
+                const r = self.modalRect(@min(self.screen.cols, 100), @intCast(@min(detail.len + 3, self.screen.rows)));
+                const inner = self.screen.pane(r, .{ .title = "HULL · [Esc] close", .double = true });
+                self.screen.lines(inner, detail, 0, null);
+            },
+            .record => |pid| {
+                const rec = try q.personRecord(al, &self.gs.?, pid);
+                const r = self.modalRect(@min(self.screen.cols, 100), @intCast(@min(rec.len + 3, self.screen.rows)));
+                const inner = self.screen.pane(r, .{ .title = "RECORD · [Esc] close", .double = true });
+                self.screen.lines(inner, rec, 0, null);
+            },
             .input => |kind| {
                 if (kind == .command) return; // drawn in the footer
                 const prompt: []const u8 = switch (kind) {
@@ -1352,15 +1454,18 @@ pub const App = struct {
             .company => switch (key) {
                 .escape => self.step = .outfit,
                 .enter => self.step = .review,
-                .down => self.moveCursor(0, 1, 1000),
-                .up => self.moveCursor(0, -1, 1000),
+                .tab, .backtab => self.w_field = if (self.w_field == 0) 1 else 0,
+                .down => self.companyMove(1),
+                .up => self.companyMove(-1),
                 .char => |ch| switch (ch) {
                     'r' => {
                         self.w_seed += 1;
                         try self.generateCampaign();
                     },
-                    'j' => self.moveCursor(0, 1, 1000),
-                    'k' => self.moveCursor(0, -1, 1000),
+                    'j' => self.companyMove(1),
+                    'k' => self.companyMove(-1),
+                    '+', '=' => try self.officeAdjust(1),
+                    '-' => try self.officeAdjust(-1),
                     else => {},
                 },
                 else => {},
@@ -1380,6 +1485,49 @@ pub const App = struct {
                 },
                 else => {},
             },
+        }
+    }
+
+    fn firstHq(self: *App, g: *GameState) types.HqId {
+        _ = self;
+        var it = g.hqs.iterator();
+        if (it.next()) |e| return e.value_ptr.id;
+        return .none;
+    }
+
+    fn companyMove(self: *App, delta: i32) void {
+        if (self.w_field == 0) {
+            self.moveCursor(0, delta, 1000);
+        } else {
+            self.w_office = @intCast(@max(0, @min(@as(i32, office_roles.len - 1), @as(i32, @intCast(self.w_office)) + delta)));
+        }
+    }
+
+    /// Hire (recruit + post) or release one admin of the selected desk in
+    /// the generated campaign — the wizard's back-office sizing.
+    fn officeAdjust(self: *App, delta: i32) !void {
+        const g = &(self.gs orelse return);
+        self.w_field = 1;
+        const hq_id = self.firstHq(g);
+        const role = office_roles[self.w_office];
+        if (delta > 0) {
+            const res = try game.commands.execute(g, .{ .recruit = role });
+            _ = try game.commands.execute(g, .{ .post_person = .{ .person = res.hired, .hq = hq_id } });
+            self.say(.good, "hired one {s}", .{@tagName(role)});
+        } else {
+            var last: types.PersonId = .none;
+            var it = g.people.iterator();
+            while (it.next()) |e| {
+                const p = e.value_ptr;
+                if (p.status == .active and p.role == role and p.posted_hq == hq_id) last = p.id;
+            }
+            if (last == .none) {
+                self.say(.amber, "no {s} to release", .{@tagName(role)});
+                return;
+            }
+            _ = try game.commands.execute(g, .{ .fire = last });
+            g.refreshHqStaffing();
+            self.say(.amber, "released one {s}", .{@tagName(role)});
         }
     }
 
@@ -1653,6 +1801,10 @@ pub const App = struct {
                 const rows = try q.toe(al, g);
                 const c = self.cur(0).*;
                 if (self.focus == 0 and c < rows.len and rows[c].unit != .none) {
+                    if (self.narrow()) {
+                        self.modal = .{ .hull = rows[c].unit };
+                        return;
+                    }
                     var buf: [64]u8 = undefined;
                     self.input.set(std.fmt.bufPrint(&buf, "assign {d} ", .{@intFromEnum(rows[c].unit)}) catch "assign ");
                     self.modal = .{ .input = .command };
@@ -1716,6 +1868,7 @@ pub const App = struct {
                     'L' => self.openCommand(std.fmt.bufPrint(&buf, "leave {d} 7", .{@intFromEnum(id)}) catch "leave "),
                     'T' => self.openCommand(std.fmt.bufPrint(&buf, "triage {d} 1", .{@intFromEnum(id)}) catch "triage "),
                     'D' => self.modal = .{ .fire = id },
+                    'r' => self.modal = .{ .record = id },
                     else => {},
                 }
             },
@@ -1889,7 +2042,7 @@ pub const App = struct {
     fn handleModalKey(self: *App, key: Key) !void {
         switch (self.modal) {
             .none => {},
-            .help => self.modal = .none,
+            .help, .hull, .record => self.modal = .none,
             .end_turn => switch (key) {
                 .escape => self.modal = .none,
                 .char => |ch| switch (ch) {
@@ -2007,6 +2160,7 @@ pub const App = struct {
             .input => |kind| switch (key) {
                 .escape => self.modal = .none,
                 .backspace => self.input.pop(),
+                .tab => if (kind == .command) try self.completeCommand(),
                 .enter => {
                     self.modal = .none;
                     try self.submitInput(kind);
@@ -2084,6 +2238,60 @@ pub const App = struct {
     }
 
     // --------------------------------------------------------------- commands
+
+    /// Tab completion on the command line: verbs first, then ids and names
+    /// the sim knows (sites, facilities, roles, skills, parts, worlds).
+    fn completeCommand(self: *App) !void {
+        const al = self.a();
+        const line = self.input.slice();
+        const start: usize = if (std.mem.lastIndexOfScalar(u8, line, ' ')) |i| i + 1 else 0;
+        const prefix = line[start..];
+        var cands: std.ArrayListUnmanaged([]const u8) = .empty;
+        if (start == 0) {
+            for (verbs) |v| if (std.mem.startsWith(u8, v, prefix)) try cands.append(al, v);
+        } else {
+            const g = &self.gs.?;
+            var pool: std.ArrayListUnmanaged([]const u8) = .empty;
+            try pool.append(al, "outfit");
+            try pool.append(al, "pilot");
+            try pool.append(al, "tech");
+            var hit = g.hqs.iterator();
+            while (hit.next()) |e| try pool.append(al, try std.fmt.allocPrint(al, "hq:{d}", .{@intFromEnum(e.value_ptr.id)}));
+            var fit = g.forces.iterator();
+            while (fit.next()) |e| if (e.value_ptr.echelon == .company) try pool.append(al, try std.fmt.allocPrint(al, "co:{d}", .{@intFromEnum(e.value_ptr.id)}));
+            inline for (@typeInfo(game.hq.FacilityKind).@"enum".fields) |f| try pool.append(al, f.name);
+            inline for (@typeInfo(game.person.Role).@"enum".fields) |f| try pool.append(al, f.name);
+            inline for (@typeInfo(types.SkillType).@"enum".fields) |f| try pool.append(al, f.name);
+            for (game.part.catalog) |p| try pool.append(al, p.key);
+            for (game.planet.catalog) |p| try pool.append(al, p.key);
+            for (pool.items) |c| if (std.mem.startsWith(u8, c, prefix)) try cands.append(al, c);
+        }
+        if (cands.items.len == 0) {
+            self.say(.dim, "no completion for '{s}'", .{prefix});
+            return;
+        }
+        var common = cands.items[0];
+        for (cands.items[1..]) |c| {
+            var n: usize = 0;
+            while (n < common.len and n < c.len and common[n] == c[n]) : (n += 1) {}
+            common = common[0..n];
+        }
+        if (common.len > prefix.len or cands.items.len == 1) {
+            const rebuilt = try std.fmt.allocPrint(al, "{s}{s}{s}", .{ line[0..start], common, if (cands.items.len == 1) " " else "" });
+            self.input.set(rebuilt);
+        }
+        if (cands.items.len > 1) {
+            var shown: std.ArrayListUnmanaged(u8) = .empty;
+            for (cands.items[0..@min(cands.items.len, 14)], 0..) |c, i| {
+                if (i > 0) try shown.appendSlice(al, "  ");
+                try shown.appendSlice(al, c);
+            }
+            if (cands.items.len > 14) try shown.appendSlice(al, "  …");
+            self.say(.dim, "{s}", .{shown.items});
+        } else {
+            self.msg.len = 0;
+        }
+    }
 
     fn runCommandLine(self: *App, line: []const u8) !void {
         if (line.len == 0) return;
@@ -2334,8 +2542,14 @@ pub const App = struct {
     }
 };
 
+pub const Options = struct {
+    /// Box-drawing and block glyphs replaced by ASCII (terminals that draw
+    /// them double-width).
+    ascii: bool = false,
+};
+
 /// Entry point from main: open the store, take the terminal, run the app.
-pub fn run(io: std.Io, gpa: std.mem.Allocator, store_path: [:0]const u8) !void {
+pub fn run(io: std.Io, gpa: std.mem.Allocator, store_path: [:0]const u8, options: Options) !void {
     const store = game.store.Store.open(store_path) catch |err| {
         std.debug.print("could not open save store '{s}': {s}\n", .{ store_path, @errorName(err) });
         return err;
@@ -2349,7 +2563,15 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, store_path: [:0]const u8) !void {
 
     var app = try App.init(gpa, io, &term, store);
     defer app.deinit();
+    app.screen.ascii = options.ascii;
     try app.run();
+}
+
+test "size tiers follow the documented thresholds" {
+    try std.testing.expectEqual(Tier.full, tierFor(200, 50));
+    try std.testing.expectEqual(Tier.wide, tierFor(170, 45));
+    try std.testing.expectEqual(Tier.compact, tierFor(118, 36));
+    try std.testing.expectEqual(Tier.minimum, tierFor(80, 24));
 }
 
 test "command line parses the common verbs" {

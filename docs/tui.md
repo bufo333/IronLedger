@@ -191,8 +191,10 @@ view model each frame from an arena.
    probe at startup (`Term.probe`), transmit once per campaign, delete-all
    + place every frame, placements hidden while a modal is open.
    ⬜ iTerm2 inline images, the cell editor, wizard back-office sizing.
-7. ⬜ Command-line completion; `tui/layout.zig` size tiers; 80×24
-   degradation; `--ascii`.
+7. ✅ Command-line Tab completion; size tiers as inline rules (`narrow()`
+   = under 120 columns drops side panes, Enter opens hull/record modals;
+   the status strip shortens); `--ascii`; wizard back-office sizing.
+   The pty smoke test runs a second pass at 80×24 with `--ascii`.
 
 Smoke test: `python3 docs/tui_smoke.py zig-out/bin/game /tmp/smoke.db`
 drives the binary through a pty (create player → wizard → begin → every

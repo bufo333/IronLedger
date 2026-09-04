@@ -81,6 +81,8 @@ pub const Screen = struct {
     cells: []Cell,
     /// Emit 24-bit SGR for pixel cells; otherwise the nearest of the 256-colour cube.
     truecolor: bool = true,
+    /// Replace box-drawing and block glyphs with ASCII (`--ascii`).
+    ascii: bool = false,
 
     pub fn init(alloc: std.mem.Allocator, cols: u16, rows: u16) !Screen {
         const cells = try alloc.alloc(Cell, @as(usize, cols) * rows);
@@ -169,12 +171,13 @@ pub const Screen = struct {
     /// Draw a bordered pane; returns its inner rect.
     pub fn pane(self: *Screen, r: Rect, opts: PaneOpts) Rect {
         if (r.w < 2 or r.h < 2) return r.inner();
-        const h: u21 = if (opts.double) '═' else '─';
-        const v: u21 = if (opts.double) '║' else '│';
-        const tl: u21 = if (opts.double) '╔' else '┌';
-        const tr: u21 = if (opts.double) '╗' else '┐';
-        const bl: u21 = if (opts.double) '╚' else '└';
-        const br: u21 = if (opts.double) '╝' else '┘';
+        const a = self.ascii;
+        const h: u21 = if (a) (if (opts.double) '=' else '-') else if (opts.double) '═' else '─';
+        const v: u21 = if (a) '|' else if (opts.double) '║' else '│';
+        const tl: u21 = if (a) '+' else if (opts.double) '╔' else '┌';
+        const tr: u21 = if (a) '+' else if (opts.double) '╗' else '┐';
+        const bl: u21 = if (a) '+' else if (opts.double) '╚' else '└';
+        const br: u21 = if (a) '+' else if (opts.double) '╝' else '┘';
         const x0: i32 = r.x;
         const y0: i32 = r.y;
         const x1: i32 = r.x + r.w - 1;
@@ -292,10 +295,11 @@ pub const Screen = struct {
             while (x < self.cols) : (x += 1) {
                 const c = self.get(x, y);
                 if (c.px) |p| {
+                    const glyph: []const u8 = if (self.ascii) "#" else "▀";
                     if (self.truecolor) {
-                        try out.print("\x1b[0;38;2;{d};{d};{d};48;2;{d};{d};{d}m▀", .{ p.top[0], p.top[1], p.top[2], p.bottom[0], p.bottom[1], p.bottom[2] });
+                        try out.print("\x1b[0;38;2;{d};{d};{d};48;2;{d};{d};{d}m{s}", .{ p.top[0], p.top[1], p.top[2], p.bottom[0], p.bottom[1], p.bottom[2], glyph });
                     } else {
-                        try out.print("\x1b[0;38;5;{d};48;5;{d}m▀", .{ c256(p.top), c256(p.bottom) });
+                        try out.print("\x1b[0;38;5;{d};48;5;{d}m{s}", .{ c256(p.top), c256(p.bottom), glyph });
                     }
                     cur = null;
                     continue;

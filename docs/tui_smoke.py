@@ -107,4 +107,33 @@ assert "back at the welcome screen" in p, p[-3000:]
 send("q", 0.5)
 drain(0.5)
 print(plain()[-6000:])
+
+# ---- second pass: the minimum tier (80x24) and --ascii, every screen ----
+pid, fd = pty.fork()
+if pid == 0:
+    os.execv(exe, [exe, "--tui", "--ascii", "--store", db])
+fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
+out = b""
+drain(1.0)
+assert "MERCENARY" in plain(), plain()[-2000:]
+send("\t"); send("\r", 3.0)
+p = plain()
+assert "F1 Desk" in p and "+-" in p, p[-2000:]          # ascii borders
+for k in "234567891":
+    send(k, 0.6)
+send("3"); send("j"); send("j"); send("\r", 0.8)            # hull modal at narrow width
+assert "HULL" in plain(), plain()[-2000:]
+send("\x1b")
+send(":"); send("acc"); send("\t", 0.6)                     # completion: unique verb
+assert ":accept _" in plain()[-300:], plain()[-800:]
+send("\x1b")
+send(":"); send("tra"); send("\t", 0.6)                     # ambiguous: candidates listed
+p = plain()[-300:]
+assert "transfer" in p and "train" in p, p
+send("\x1b")
+send("n", 2.0)
+if "END TURN?" in plain(): send("n", 2.0)
+send("q"); send("r"); send("q")
+drain(0.5)
+print("80x24 + --ascii pass OK")
 print("SMOKE OK")
