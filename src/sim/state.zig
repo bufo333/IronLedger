@@ -164,6 +164,9 @@ pub const GameState = struct {
     commander: ?commander_mod.Commander = null,
     /// Row id in the save store's campaign registry (Stage 11); 0 = never saved.
     campaign_id: i64 = 0,
+    /// Set when the treasury went negative beyond what loans and sales
+    /// could cover: game over (Stage 12). Persisted; advancing refuses.
+    bankrupt: bool = false,
     ledger: finance_mod.Ledger = .{},
     event_queue: events_mod.EventQueue = .{},
 
@@ -1245,6 +1248,81 @@ pub const GameState = struct {
             if (p.status == .active or p.status == .wounded) total += p.monthlySalary();
         }
         return types.applyBp(total, self.commanderMultBp(.payroll));
+    }
+
+    // ------------------------------------------------------- liquidation
+
+    /// What a hull fetches on a forced sale: half its value, scaled by
+    /// condition (Stage 12). // TUNE
+    pub fn unitSaleValue(self: *GameState, u: *const unit_mod.Unit) types.CBills {
+        _ = self;
+        if (u.status == .destroyed) return 0;
+        const base: types.CBills = if (u.purchase_price > 0) u.purchase_price else if (chassis_mod.find(u.chassis_key)) |c| c.cost else 0;
+        return @divTrunc(base * @as(types.CBills, u.conditionPct()), 200);
+    }
+
+    /// What an HQ's facilities fetch: 40% of what they cost to build. // TUNE
+    pub fn hqSaleValue(self: *GameState, h: *const hq_mod.Hq) types.CBills {
+        _ = self;
+        var total: types.CBills = 0;
+        for (h.facilities.items) |f| {
+            var lvl: u8 = 1;
+            while (lvl <= f.level) : (lvl += 1) total += hq_mod.upgradeCost(f.kind, lvl);
+        }
+        return @divTrunc(total * 40, 100);
+    }
+
+    /// Everything the outfit could raise by selling hulls and all HQs but
+    /// the first.
+    pub fn liquidationValue(self: *GameState) types.CBills {
+        var total: types.CBills = 0;
+        var uit = self.units.iterator();
+        while (uit.next()) |e| total += self.unitSaleValue(e.value_ptr);
+        var first = true;
+        var hit = self.hqs.iterator();
+        while (hit.next()) |e| {
+            if (first) {
+                first = false;
+                continue;
+            }
+            total += self.hqSaleValue(e.value_ptr);
+        }
+        return total;
+    }
+
+    /// Lenders extend half the liquidation value plus a floor. // TUNE
+    pub fn creditLimit(self: *GameState) types.CBills {
+        return @divTrunc(self.liquidationValue(), 2) + 2_000_000;
+    }
+
+    pub fn creditRemaining(self: *GameState) types.CBills {
+        var owed: types.CBills = 0;
+        for (self.loans.items) |l| owed += l.balance;
+        return @max(0, self.creditLimit() - owed);
+    }
+
+    /// Strike a hull from the books: seats open, bay work and refit plans
+    /// for it vanish, its force forgets it.
+    pub fn removeUnit(self: *GameState, unit_id: types.UnitId) void {
+        if (self.forces.getPtr(if (self.unit(unit_id)) |u| u.force else .none)) |f| {
+            for (f.units.items, 0..) |id, i| if (id == unit_id) {
+                _ = f.units.orderedRemove(i);
+                break;
+            };
+        }
+        var i: usize = 0;
+        while (i < self.bay_jobs.items.len) {
+            if (self.bay_jobs.items[i].unit == unit_id) _ = self.bay_jobs.orderedRemove(i) else i += 1;
+        }
+        i = 0;
+        while (i < self.refit_plans.items.len) {
+            if (self.refit_plans.items[i].unit == unit_id) _ = self.refit_plans.orderedRemove(i) else i += 1;
+        }
+        i = 0;
+        while (i < self.unit_transfers.items.len) {
+            if (self.unit_transfers.items[i].unit == unit_id) _ = self.unit_transfers.orderedRemove(i) else i += 1;
+        }
+        _ = self.units.orderedRemove(unit_id);
     }
 
     // ------------------------------------------------------- golden master

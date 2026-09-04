@@ -25,7 +25,7 @@ const contract_events = @import("../sim/contract_events.zig");
 const network = @import("../sim/network.zig");
 const clock_mod = @import("../sim/clock.zig");
 
-pub const schema_version = 2;
+pub const schema_version = 3;
 
 const ddl =
     \\CREATE TABLE IF NOT EXISTS player (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_seq INTEGER NOT NULL);
@@ -34,7 +34,7 @@ const ddl =
     \\CREATE TABLE IF NOT EXISTS meta_text (cid INTEGER NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (cid, key));
     \\CREATE TABLE IF NOT EXISTS rng (cid INTEGER PRIMARY KEY, state BLOB NOT NULL);
     \\CREATE TABLE IF NOT EXISTS commander (cid INTEGER PRIMARY KEY, name TEXT NOT NULL, origin TEXT NOT NULL, profession TEXT NOT NULL);
-    \\CREATE TABLE IF NOT EXISTS person (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, first TEXT, last TEXT, callsign TEXT, role TEXT, xp INTEGER, status TEXT, fatigue INTEGER, morale INTEGER, recruited_day INTEGER, salary_override INTEGER, assigned_force INTEGER, posted_hq INTEGER, weekly_hours INTEGER, medbay_priority INTEGER, leave_until INTEGER, wound_heal_day INTEGER, training_skill TEXT, training_done INTEGER, PRIMARY KEY (cid, id));
+    \\CREATE TABLE IF NOT EXISTS person (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, first TEXT, last TEXT, callsign TEXT, role TEXT, xp INTEGER, status TEXT, fatigue INTEGER, morale INTEGER, recruited_day INTEGER, salary_override INTEGER, assigned_force INTEGER, posted_hq INTEGER, weekly_hours INTEGER, medbay_priority INTEGER, leave_until INTEGER, wound_heal_day INTEGER, training_skill TEXT, training_done INTEGER, admitted INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (cid, id));
     \\CREATE TABLE IF NOT EXISTS person_skill (cid INTEGER NOT NULL, person_id INTEGER NOT NULL, skill TEXT NOT NULL, level INTEGER NOT NULL);
     \\CREATE TABLE IF NOT EXISTS unit (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, chassis_key TEXT, name TEXT, kind TEXT, force INTEGER, pilot INTEGER, tech INTEGER, armor_pct INTEGER, quality TEXT, status TEXT, last_maint INTEGER, acquired_day INTEGER, price INTEGER, reactivation_done INTEGER, PRIMARY KEY (cid, id));
     \\CREATE TABLE IF NOT EXISTS unit_slot (cid INTEGER NOT NULL, unit_id INTEGER NOT NULL, ord INTEGER NOT NULL, slot_key TEXT, part_key TEXT, class TEXT, condition TEXT);
@@ -83,6 +83,10 @@ pub const Store = struct {
         // Schema v1 → v2: campaigns gained an owning player.
         if (!try hasColumn(db, "campaign", "player_id")) {
             try db.exec("ALTER TABLE campaign ADD COLUMN player_id INTEGER NOT NULL DEFAULT 0");
+        }
+        // Schema v2 → v3: medbay admission is the player's call.
+        if (!try hasColumn(db, "person", "admitted")) {
+            try db.exec("ALTER TABLE person ADD COLUMN admitted INTEGER NOT NULL DEFAULT 0");
         }
         return .{ .db = db };
     }
@@ -240,6 +244,7 @@ pub const Store = struct {
                 .{ "day_index", gs.clock.day_index },      .{ "year", gs.clock.date.year },
                 .{ "month", gs.clock.date.month },         .{ "day", gs.clock.date.day },
                 .{ "funds", gs.funds },                    .{ "reputation", gs.reputation },
+                .{ "bankrupt", @as(i64, @intFromBool(gs.bankrupt)) },
                 .{ "next_person_id", gs.next_person_id },  .{ "next_unit_id", gs.next_unit_id },
                 .{ "next_force_id", gs.next_force_id },    .{ "next_hq_id", gs.next_hq_id },
                 .{ "next_contract_id", gs.next_contract_id },
@@ -269,7 +274,7 @@ pub const Store = struct {
 
         // People.
         {
-            const st = try self.db.prepare("INSERT INTO person VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21)");
+            const st = try self.db.prepare("INSERT INTO person VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22)");
             defer st.finalize();
             const sk = try self.db.prepare("INSERT INTO person_skill VALUES (?1, ?2, ?3, ?4)");
             defer sk.finalize();
@@ -286,6 +291,7 @@ pub const Store = struct {
                     @as(i64, p.weekly_hours),       @as(i64, p.medbay_priority),    p.leave_until_day,
                     p.wound_heal_day,               if (p.training) |t| @as(?[]const u8, @tagName(t.skill)) else null,
                     if (p.training) |t| @as(?u32, t.done_day) else null,
+                    @as(i64, @intFromBool(p.medbay_admitted)),
                 });
                 try st.run();
                 var skit = p.skills.iterator();
@@ -587,6 +593,7 @@ pub const Store = struct {
                 if (std.mem.eql(u8, key, "day")) gs.clock.date.day = @intCast(v);
                 if (std.mem.eql(u8, key, "funds")) gs.funds = v;
                 if (std.mem.eql(u8, key, "reputation")) gs.reputation = @intCast(v);
+                if (std.mem.eql(u8, key, "bankrupt")) gs.bankrupt = v != 0;
                 if (std.mem.eql(u8, key, "next_person_id")) gs.next_person_id = @intCast(v);
                 if (std.mem.eql(u8, key, "next_unit_id")) gs.next_unit_id = @intCast(v);
                 if (std.mem.eql(u8, key, "next_force_id")) gs.next_force_id = @intCast(v);
@@ -625,7 +632,7 @@ pub const Store = struct {
 
         // People.
         {
-            const st = try self.db.prepare("SELECT id, first, last, callsign, role, xp, status, fatigue, morale, recruited_day, salary_override, assigned_force, posted_hq, weekly_hours, medbay_priority, leave_until, wound_heal_day, training_skill, training_done FROM person WHERE cid = ?1 ORDER BY ord");
+            const st = try self.db.prepare("SELECT id, first, last, callsign, role, xp, status, fatigue, morale, recruited_day, salary_override, assigned_force, posted_hq, weekly_hours, medbay_priority, leave_until, wound_heal_day, training_skill, training_done, admitted FROM person WHERE cid = ?1 ORDER BY ord");
             defer st.finalize();
             try st.bindAll(.{cid});
             while (try st.next()) {
@@ -647,6 +654,7 @@ pub const Store = struct {
                     .medbay_priority = @intCast(st.int(14)),
                     .leave_until_day = optU32(st.optInt(15)),
                     .wound_heal_day = optU32(st.optInt(16)),
+                    .medbay_admitted = st.int(19) != 0,
                 };
                 if (st.enumValue(types.SkillType, 17)) |skill| {
                     if (st.optInt(18)) |done| p.training = .{ .skill = skill, .done_day = @intCast(done) };

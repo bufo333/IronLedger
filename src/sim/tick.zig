@@ -345,8 +345,11 @@ fn runFinances(gs: *GameState) !void {
     // Loan service.
     for (gs.loans.items) |*loan| {
         if (loan.balance <= 0) continue;
-        const interest = @divTrunc(loan.balance * loan.rate_bp, 10_000 * 12);
-        const principal_part = @min(loan.payment - interest, loan.balance);
+        // Simple interest on the original principal, spread over the term
+        // (Stage 12 rule): every month costs the same, so early repayment
+        // (`repay_loan`) saves the interest that hasn't been charged yet.
+        const interest = @divTrunc(loan.principal * loan.rate_bp, 10_000 * 12);
+        const principal_part = @min(@max(0, loan.payment - interest), loan.balance);
         loan.balance -= principal_part;
         try gs.postTransaction(.{ .day = gs.clock.day_index, .amount = -interest, .category = .loan_interest, .note = "loan interest" });
         try gs.postTransaction(.{ .day = gs.clock.day_index, .amount = -principal_part, .category = .loan_principal, .note = "loan principal" });

@@ -24,6 +24,11 @@ pub const WarningKind = enum {
     combat_ineffective,
     objectives_met,
     company_idle_afield,
+    /// Wounded people nobody has admitted to a medbay (they don't heal).
+    untreated_wounded,
+    /// The outfit treasury is negative: the turn cannot advance until a
+    /// loan or a sale covers it; past the credit limit, the outfit folds.
+    insolvent,
 };
 
 pub const Warning = struct {
@@ -35,6 +40,24 @@ pub const Warning = struct {
 pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
     var out: std.ArrayListUnmanaged(Warning) = .empty;
     const day = gs.clock.day_index;
+
+    // Money first: nothing else matters if the outfit cannot pay.
+    if (gs.funds < 0) {
+        const cover = gs.funds + gs.liquidationValue() + gs.creditRemaining();
+        try out.append(alloc, .{ .kind = .insolvent, .text = try std.fmt.allocPrint(alloc, "outfit treasury overdrawn ({d}) — take a loan (credit {d}) or sell assets (worth {d}){s}", .{
+            gs.funds, gs.creditRemaining(), gs.liquidationValue(), if (cover < 0) "; nothing left covers it: the outfit folds" else "",
+        }) });
+    }
+
+    // Wounded waiting for a bed.
+    {
+        var n: u32 = 0;
+        var pit = gs.people.iterator();
+        while (pit.next()) |e| if (e.value_ptr.status == .wounded and !e.value_ptr.medbay_admitted) {
+            n += 1;
+        };
+        if (n > 0) try out.append(alloc, .{ .kind = .untreated_wounded, .text = try std.fmt.allocPrint(alloc, "{d} wounded await{s} medbay admission (they don't heal until admitted)", .{ n, if (n == 1) "s" else "" }) });
+    }
 
     // Decisions about to default.
     for (gs.event_queue.pending.items) |ev| {

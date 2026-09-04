@@ -110,6 +110,15 @@ entity ids. Results land in the Desk log pane.
 | F6 | Supply | Sites · Demand · Order form · Shop | `o` → `order_part`, `s` → `ship_stock`, `b` → `buy_listing`, Enter on demand → order shortfall |
 | F7 | HQ | Facilities/projects · Bays · Back office · Hiring hall | `u` → `upgrade_facility`, `T` → `upgrade_tier`, `f` → `fabricate`, `P` → `post_person`, `h` → `hire_candidate`, `[ ]` switch HQ |
 | F8 | Lab | Budget/crits · Mounts · Plan & rules | `-` → `refit_remove`, `+` → `refit_install`, `c` → `refit_clear`, Enter → `refit_commit`, `[ ]` switch hull |
+| F9 | People | Personnel (pinned header, role filter) · Record · Open seats | `m` → `admit`, `t` → `train`, `a`/Enter seat picker → `assign`, `P` → `post_person`, `x` → `transfer_person`, `L` → `leave`, `D` → `fire`, `r` record |
+| F10 | Market | Boards · Order catalog · Demand | Enter → `buy_listing` / `order_part` / order the shortfall, `b` → `fabricate`, `[ ]` buyer HQ |
+
+Money keys: Ledger `L` → `take_loan`, `R` → `repay_loan`; Forces `$` →
+`sell_unit`, `X` → `disband_company`; HQ `$` → `sell_hq`. Turn rules the
+client surfaces: untreated wounded and a negative outfit treasury are
+blocking checklist items; `advance` refuses with `Insolvent` until a loan
+or sale covers it, and `Bankrupt` (game over modal, campaign saved as it
+ended) once nothing could.
 
 Modals: **End turn** (checklist rows with jump targets, `n` proceed) ·
 **Decision** (options with effects, default marked) · **Order / Transfer /

@@ -127,6 +127,9 @@ pub fn runDailyHealing(gs: *GameState) !void {
         const p = entry.value_ptr;
         if (p.status != .wounded) continue;
         if (p.wound_heal_day == null) {
+            // Nobody heals in a corridor: the player admits the wounded
+            // (`admit`), and only then does triage run.
+            if (!p.medbay_admitted) continue;
             // MASH coverage only helps if their company fields a MASH lance
             // in the field; at home the hospital takes over. Triage consumes
             // a ton of medical supplies from wherever they lie (Stage 9B);
@@ -138,6 +141,7 @@ pub fn runDailyHealing(gs: *GameState) !void {
         } else if (gs.clock.day_index >= p.wound_heal_day.?) {
             p.status = .active;
             p.wound_heal_day = null;
+            p.medbay_admitted = false;
             try gs.log(.medical, .{ .company = gs.companyOf(p.assigned_force) }, "[medical] {s} {s} returns to duty", .{ p.first_name, p.last_name });
         }
     }
@@ -241,6 +245,7 @@ test "wounds heal; the field is slower than a home hospital" {
 
     const p = gs.person(id).?;
     p.status = .wounded;
+    p.medbay_admitted = true;
     try runDailyHealing(&gs); // triage
     try std.testing.expect(p.wound_heal_day != null);
 

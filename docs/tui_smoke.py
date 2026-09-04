@@ -82,6 +82,21 @@ send("\x1b")
 send("D", 0.8)                 # fire confirm
 assert "FIRE?" in plain(), plain()[-2000:]
 send("\x1b")
+send("m", 0.8)                 # admit: refusal if healthy, admission if wounded
+p = plain()[-400:]
+assert "not wounded" in p or "admitted to the medbay" in p, plain()[-800:]
+send("0")                      # market
+p = plain()
+assert "MARKET BOARDS" in p and "ORDER CATALOG" in p and "DEMAND" in p, p[-3000:]
+send("\t"); send("\r", 0.8)    # catalog → order prefill
+assert ":order " in plain()[-300:], plain()[-600:]
+send("\x1b")
+send("5"); send("L", 0.8)      # ledger → loan prefill
+assert ":loan " in plain()[-300:], plain()[-600:]
+send("\x1b")
+send("3"); send("j"); send("j"); send("$", 0.8)   # sell hull confirm
+assert "SELL HULL?" in plain()[-2500:], plain()[-2500:]
+send("\x1b")
 send("1"); send("e", 1.5)      # emblem picker on the Desk
 p = plain()
 assert "EMBLEM ·" in p and "preset   Wolf's Head" in p, p[-2000:]

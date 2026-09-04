@@ -24,8 +24,8 @@ const Command = game.commands.Command;
 const GameState = game.state.GameState;
 const Treasury = game.state.Treasury;
 
-const Tab = enum(u8) { desk, map, forces, contracts, ledger, supply, hq, lab, people };
-const tab_names = [_][]const u8{ "F1 Desk", "F2 Map", "F3 Forces", "F4 Contracts", "F5 Ledger", "F6 Supply", "F7 HQ", "F8 Lab", "F9 People" };
+const Tab = enum(u8) { desk, map, forces, contracts, ledger, supply, hq, lab, people, market };
+const tab_names = [_][]const u8{ "F1 Desk", "F2 Map", "F3 Forces", "F4 Contracts", "F5 Ledger", "F6 Supply", "F7 HQ", "F8 Lab", "F9 People", "F10 Market" };
 
 const Mode = enum { welcome, wizard, game };
 const WizardStep = enum(u8) { commander, outfit, company, review };
@@ -49,6 +49,12 @@ const Modal = union(enum) {
     hull: types.UnitId,
     /// A person's record as a modal.
     record: types.PersonId,
+    /// Liquidation confirmations.
+    sell_unit: types.UnitId,
+    sell_hq: types.HqId,
+    disband: types.ForceId,
+    /// The outfit folded.
+    game_over,
 };
 
 /// Size tiers (docs/tui.md): the largest that fits decides how many panes
@@ -66,6 +72,7 @@ fn tierFor(cols: u16, rows: u16) Tier {
 const office_roles = [_]game.person.Role{ .admin_command, .admin_logistics, .admin_transport, .admin_hr, .admin_finance };
 
 const verbs = [_][]const u8{
+    "admit",   "repay",   "sell",      "sellhq",    "disband",
     "day",     "save",    "quit",      "help",      "emblem",   "transfer", "policy", "loan",     "accept", "resolve",
     "order",   "ship",    "buy",       "assign",    "unassign", "autoassign", "autostaff", "upgrade", "tier",   "fabricate",
     "hire",    "recruit", "fire",      "post",      "train",    "triage",   "leave",  "mothball", "activate", "complete",
@@ -681,15 +688,58 @@ pub const App = struct {
             .map => try self.drawMap(),
             .lab => try self.drawLab(),
             .people => try self.drawPeople(),
+            .market => try self.drawMarket(),
         }
         self.footer(switch (self.tab) {
-            .desk => "? help · F1-F9 screens · Tab pane · Enter act · e emblem · : command · n end turn · q welcome",
-            .people => "/ filter · t train · a assign seat · P post to HQ · x transfer · L leave · D fire · Enter record",
+            .desk => "? help · F1-F10 / 1-0 screens · Tab pane · Enter act · e emblem · : command · n end turn · q welcome",
+            .people => "/ filter · m admit to medbay · t train · a assign seat · P post · x transfer · L leave · D fire · r record",
+            .market => "Tab pane · Enter buy / order / order shortfall · b fabricate component · [ ] HQ board · q welcome",
+            .ledger => "j/k treasury · L loan · R repay · t transfer · p policy · $ liquidation values in the pane · q welcome",
+            .forces => "Tab pane · Enter assign · a/u seat · A auto · t train · x transfer · $ sell hull · X disband company",
             .map => "h j k l move between worlds · f found HQ here · o offers here · n end turn · q welcome",
             .lab => "[ ] switch hull · j/k mount · - remove · + install… · c clear plan · Enter commit · q welcome",
             .hq => "[ ] switch HQ · Tab hall · f/F hall filter · Enter hire · u upgrade · S autostaff · b fabricate",
             else => "? help · F1-F8 screens · Tab pane · j/k cursor · Enter act · : command · n end turn · q welcome",
         });
+    }
+
+    // ---- market ----
+
+    fn drawMarket(self: *App) !void {
+        const al = self.a();
+        const g = &self.gs.?;
+        const b = self.body();
+        const view = try q.market(al, g);
+        const top_h: u16 = @max(6, b.h * 2 / 5);
+        var board: std.ArrayListUnmanaged([]const u8) = .empty;
+        for (view.board) |r| try board.append(al, r.text);
+        if (view.board.len == 0) try board.append(al, "{d}nothing on the boards — they refresh on the 1st, staples restock as they sell{/}");
+        const hq_id: types.HqId = @enumFromInt(self.hqSelId(g));
+        const inner = self.screen.pane(.{ .x = b.x, .y = b.y, .w = b.w, .h = top_h }, .{ .title = try std.fmt.allocPrint(al, "MARKET BOARDS · {d} listings · buyer {s}", .{ view.board.len, q.hqName(g, hq_id) }), .focused = self.focus == 0, .right_title = "[Enter] buy" });
+        self.stickyList(inner, view.board_header, board.items, 0, self.focus == 0);
+
+        const cw: u16 = if (self.narrow()) b.w else b.w * 55 / 100;
+        var cat: std.ArrayListUnmanaged([]const u8) = .empty;
+        for (view.catalog) |r| try cat.append(al, r.text);
+        const inner2 = self.screen.pane(.{ .x = b.x, .y = b.y + top_h, .w = cw, .h = b.h - top_h }, .{ .title = try std.fmt.allocPrint(al, "ORDER CATALOG · delivered to {s}", .{q.hqName(g, hq_id)}), .focused = self.focus == 1, .right_title = "[Enter] order  [b] fabricate" });
+        self.stickyList(inner2, view.catalog_header, cat.items, 1, self.focus == 1);
+        if (cw < b.w) {
+            var dem: std.ArrayListUnmanaged([]const u8) = .empty;
+            for (view.demand) |r| try dem.append(al, r.text);
+            if (view.demand.len == 0) try dem.append(al, "{g}nothing damaged{/}");
+            const inner3 = self.screen.pane(.{ .x = b.x + cw, .y = b.y + top_h, .w = b.w - cw, .h = b.h - top_h }, .{ .title = "DEMAND · damaged slots", .focused = self.focus == 2, .right_title = "[Enter] order shortfall" });
+            self.stickyList(inner3, view.demand_header, dem.items, 2, self.focus == 2);
+        }
+    }
+
+    /// A list with its header row pinned above the scrolling rows.
+    fn stickyList(self: *App, inner: Rect, header: []const u8, items: []const []const u8, pane_idx: u8, focused: bool) void {
+        if (inner.h == 0) return;
+        self.screen.textPad(inner.x, inner.y, inner.w, header, .dim);
+        const body_r: Rect = .{ .x = inner.x, .y = inner.y + 1, .w = inner.w, .h = inner.h - 1 };
+        const c = self.cur(pane_idx);
+        if (items.len > 0 and c.* >= items.len) c.* = items.len - 1;
+        self.screen.lines(body_r, items, firstRow(c.*, body_r.h), if (focused and items.len > 0) c.* else null);
     }
 
     // ---- people ----
@@ -700,15 +750,13 @@ pub const App = struct {
         const b = self.body();
         const view = try q.people(al, g, self.people_filter);
         var rows: std.ArrayListUnmanaged([]const u8) = .empty;
-        try rows.append(al, view.header);
         for (view.rows) |r| try rows.append(al, r.text);
         if (view.rows.len == 0) try rows.append(al, "{d}nobody matches this filter{/}");
         const lw: u16 = if (b.w > 150) @max(b.w * 62 / 100, @min(b.w - 60, 128)) else b.w;
         const title = try std.fmt.allocPrint(al, "PERSONNEL · filter {{a}}{s}{{/}} · {d} of {d}", .{ @tagName(self.people_filter), view.rows.len, view.total });
         const inner = self.screen.pane(.{ .x = b.x, .y = b.y, .w = lw, .h = b.h }, .{ .title = title, .focused = true, .right_title = "[/] next filter  [?] previous" });
         const c = self.cur(0);
-        if (view.rows.len > 0 and c.* >= view.rows.len) c.* = view.rows.len - 1;
-        self.screen.lines(inner, rows.items, firstRow(c.* + 1, inner.h), if (view.rows.len > 0) c.* + 1 else null);
+        self.stickyList(inner, view.header, rows.items, 0, view.rows.len > 0);
         if (lw < b.w and view.rows.len > 0) {
             const id = view.rows[c.*].id;
             const rec = try q.personRecord(al, g, id);
@@ -1155,14 +1203,17 @@ pub const App = struct {
                     "  {a}ledger{/}      j/k picks the treasury · t transfer · p policy · L loan",
                     "  {a}forces{/}      a assign · u unassign · A auto-assign the company · t train",
                     "  {a}hq{/}          [ ] switch HQ · u upgrade · S autostaff · h hire · f/F hall filter",
-                    "  {a}people{/}      / filter · t train · a assign seat · P post · x transfer · L leave · D fire",
+                    "  {a}people{/}      / filter · m admit wounded · t train · a assign seat · P post · x transfer · L leave · D fire",
+                    "  {a}market{/}      F10/0: boards (Enter buys) · catalog (Enter orders, b fabricates comp_*) · demand (Enter orders shortfall)",
+                    "  {a}money{/}       Ledger: L loan (simple interest) · R repay · Forces: $ sell hull · X disband company · HQ: $ sell HQ",
+                    "  {a}turn rules{/}  wounded must be admitted (m) and a negative treasury covered before the day can end; bankruptcy ends the game",
                     "  {a}emblem{/}      e on the Desk (or :emblem) changes the crest: presets or a PNG from ./, logos/, docs/logos/",
                     "  {a}command{/}     : opens the command line — every CLI verb works: day, transfer, order, accept, …",
                     "  {a}leave{/}       q returns to the welcome screen (save / discard / stay)",
                     "",
                     "  {d}[Esc] close{/}",
                 };
-                const r = self.modalRect(112, 17);
+                const r = self.modalRect(118, 20);
                 const inner = self.screen.pane(r, .{ .title = "HELP", .double = true });
                 self.screen.lines(inner, &rows, 0, null);
             },
@@ -1218,6 +1269,63 @@ pub const App = struct {
                 const r = self.modalRect(90, @intCast(@min(rows.items.len + 2, 30)));
                 const inner = self.screen.pane(r, .{ .title = "DECISION", .double = true });
                 self.screen.lines(inner, rows.items, 0, null);
+            },
+            .sell_unit => |uid| {
+                const g = &self.gs.?;
+                const u = g.unit(uid);
+                const rows = [_][]const u8{
+                    "",
+                    if (u) |uu| try std.fmt.allocPrint(al, "  Sell {{a}}#{d} {s}{{/}} for {{g}}{s}{{/}} C? Half value scaled by condition; the crew goes to the pool.", .{ @intFromEnum(uid), uu.chassis_key, try q.money(al, g.unitSaleValue(uu)) }) else "  no such hull",
+                    "",
+                    "  {s} [y] sell {/}   {d}[Esc] keep{/}",
+                };
+                const inner = self.screen.pane(self.modalRect(96, 7), .{ .title = "SELL HULL?", .double = true });
+                self.screen.lines(inner, &rows, 0, null);
+            },
+            .sell_hq => |hid| {
+                const g = &self.gs.?;
+                const h = g.hqs.getPtr(hid);
+                const rows = [_][]const u8{
+                    "",
+                    if (h) |hh| try std.fmt.allocPrint(al, "  Sell off {{a}}{s}{{/}} for {{g}}{s}{{/}} C (40% of build cost + its treasury)?", .{ hh.name, try q.money(al, g.hqSaleValue(hh) + hh.funds) }) else "  no such HQ",
+                    "  Staff posted there become unassigned; its stock, board, bay work and links are lost.",
+                    "  Companies must be assigned elsewhere first (:assignco co:N hq:M).",
+                    "",
+                    "  {s} [y] sell {/}   {d}[Esc] keep{/}",
+                };
+                const inner = self.screen.pane(self.modalRect(96, 9), .{ .title = "SELL HQ?", .double = true });
+                self.screen.lines(inner, &rows, 0, null);
+            },
+            .disband => |fid| {
+                const g = &self.gs.?;
+                var value: types.CBills = 0;
+                var uit = g.units.iterator();
+                while (uit.next()) |e| if (g.companyOf(e.value_ptr.force) == fid) {
+                    value += g.unitSaleValue(e.value_ptr);
+                };
+                const rows = [_][]const u8{
+                    "",
+                    try std.fmt.allocPrint(al, "  Disband {{a}}{s}{{/}}? Every hull under it sells for about {{g}}{s}{{/}} C and everyone in it is released.", .{ q.forceName(g, fid), try q.money(al, value) }),
+                    "  This cannot be undone.",
+                    "",
+                    "  {s} [y] disband {/}   {d}[Esc] keep{/}",
+                };
+                const inner = self.screen.pane(self.modalRect(100, 8), .{ .title = "DISBAND COMPANY?", .double = true });
+                self.screen.lines(inner, &rows, 0, null);
+            },
+            .game_over => {
+                const g = &self.gs.?;
+                const rows = [_][]const u8{
+                    "",
+                    try std.fmt.allocPrint(al, "  {{c}}{s}{{/}} could not cover its debts on day {d}.", .{ g.outfit_name, g.clock.day_index }),
+                    "  Loans are exhausted and nothing left to sell would close the gap. The creditors take the rest.",
+                    "",
+                    "  The campaign is saved as it ended; delete it from the welcome screen, or keep it as a record.",
+                    "",
+                    "  {s} [Enter] return to the welcome screen {/}",
+                };
+                const inner = self.screen.pane(self.modalRect(100, 10), .{ .title = "BANKRUPT — GAME OVER", .double = true });
+                self.screen.lines(inner, &rows, 0, null);
             },
             .fire => |id| {
                 const g = &self.gs.?;
@@ -1629,7 +1737,7 @@ pub const App = struct {
 
     fn handleGameKey(self: *App, key: Key) !void {
         switch (key) {
-            .f => |n| if (n >= 1 and n <= 9) self.switchTab(@enumFromInt(n - 1)),
+            .f => |n| if (n >= 1 and n <= 10) self.switchTab(@enumFromInt(n - 1)),
             .tab => self.focus = (self.focus + 1) % self.paneCount(),
             .backtab => self.focus = (self.focus + self.paneCount() - 1) % self.paneCount(),
             .down => try self.screenMove(1),
@@ -1642,6 +1750,7 @@ pub const App = struct {
             .escape => self.msg.len = 0,
             .char => |ch| switch (ch) {
                 '1'...'9' => self.switchTab(@enumFromInt(ch - '1')),
+                '0' => self.switchTab(.market),
                 'j' => try self.screenMove(1),
                 'k' => try self.screenMove(-1),
                 ':' => {
@@ -1671,6 +1780,7 @@ pub const App = struct {
             .ledger => 2,
             .forces => 2,
             .hq => 2,
+            .market => if (self.narrow()) 2 else 3,
             else => 1,
         };
     }
@@ -1733,6 +1843,14 @@ pub const App = struct {
             .people => {
                 const view = try q.people(al, g, self.people_filter);
                 self.moveCursor(0, delta, view.rows.len);
+            },
+            .market => {
+                const view = try q.market(al, g);
+                switch (self.focus) {
+                    0 => self.moveCursor(0, delta, view.board.len),
+                    1 => self.moveCursor(1, delta, view.catalog.len),
+                    else => self.moveCursor(2, delta, view.demand.len),
+                }
             },
         }
     }
@@ -1830,6 +1948,31 @@ pub const App = struct {
                 self.modal_cursor = 0;
                 self.modal = .{ .seat = id };
             },
+            .market => {
+                const view = try q.market(al, g);
+                const hq_id: types.HqId = @enumFromInt(self.hqSelId(g));
+                switch (self.focus) {
+                    0 => if (view.board.len > 0) {
+                        const l = view.board[@min(self.cur(0).*, view.board.len - 1)];
+                        try self.exec(.{ .buy_listing = l.index });
+                        self.say(.good, "bought listing [{d}]", .{l.index});
+                    },
+                    1 => if (view.catalog.len > 0) {
+                        const r = view.catalog[@min(self.cur(1).*, view.catalog.len - 1)];
+                        var buf: [96]u8 = undefined;
+                        self.openCommand(std.fmt.bufPrint(&buf, "order {s} 1 hq:{d}", .{ r.key, @intFromEnum(hq_id) }) catch "order ");
+                    },
+                    else => if (view.demand.len > 0) {
+                        const d = view.demand[@min(self.cur(2).*, view.demand.len - 1)];
+                        if (d.short == 0) {
+                            self.say(.dim, "{s}: nothing short — on hand or already on order", .{d.key});
+                            return;
+                        }
+                        try self.exec(.{ .order_part = .{ .part_key = d.key, .quantity = d.short, .dest = .{ .hq = hq_id } } });
+                        self.say(.good, "ordered {d} × {s} to {s}", .{ d.short, d.key, q.hqName(g, hq_id) });
+                    },
+                }
+            },
             else => {},
         }
     }
@@ -1869,8 +2012,33 @@ pub const App = struct {
                     'T' => self.openCommand(std.fmt.bufPrint(&buf, "triage {d} 1", .{@intFromEnum(id)}) catch "triage "),
                     'D' => self.modal = .{ .fire = id },
                     'r' => self.modal = .{ .record = id },
+                    'm' => {
+                        try self.exec(.{ .admit = id });
+                        self.say(.good, "{s} admitted to the medbay — healing starts tomorrow", .{try q.personName(al, g, id)});
+                    },
                     else => {},
                 }
+            },
+            .market => switch (ch) {
+                'b' => {
+                    const view = try q.market(al, g);
+                    if (self.focus == 1 and view.catalog.len > 0) {
+                        const r = view.catalog[@min(self.cur(1).*, view.catalog.len - 1)];
+                        if (!r.component) {
+                            self.say(.amber, "only structural components (comp_*) are fabricated; order the rest", .{});
+                            return;
+                        }
+                        var buf: [96]u8 = undefined;
+                        self.openCommand(std.fmt.bufPrint(&buf, "fabricate hq:{d} {s} 1", .{ self.hqSelId(g), r.key }) catch "fabricate ");
+                    } else self.say(.dim, "select a comp_* row in the catalog, then b", .{});
+                },
+                ']', '[' => {
+                    var n: usize = 0;
+                    var hit = g.hqs.iterator();
+                    while (hit.next()) |_| n += 1;
+                    if (n > 0) self.hq_sel = if (ch == ']') (self.hq_sel + 1) % n else (self.hq_sel + n - 1) % n;
+                },
+                else => {},
             },
             .contracts => {
                 const view = try q.contracts(al, g);
@@ -1891,7 +2059,18 @@ pub const App = struct {
             .ledger => switch (ch) {
                 't' => self.openCommand("transfer outfit "),
                 'p' => self.openCommand("policy "),
-                'L' => self.openCommand("loan "),
+                'L' => {
+                    var buf: [96]u8 = undefined;
+                    self.openCommand(std.fmt.bufPrint(&buf, "loan {d} 12", .{@min(g.creditRemaining(), 1_000_000)}) catch "loan ");
+                },
+                'R' => {
+                    if (g.loans.items.len == 0) {
+                        self.say(.dim, "no loans to repay", .{});
+                        return;
+                    }
+                    var buf: [96]u8 = undefined;
+                    self.openCommand(std.fmt.bufPrint(&buf, "repay 0 {d}", .{@min(g.loans.items[0].balance, @max(0, g.funds))}) catch "repay ");
+                },
                 else => {},
             },
             .forces => {
@@ -1920,6 +2099,13 @@ pub const App = struct {
                     },
                     't' => self.openCommand("train "),
                     'x' => self.openCommand("xfer unit "),
+                    '$' => if (row) |r| {
+                        if (r.unit != .none) self.modal = .{ .sell_unit = r.unit };
+                    },
+                    'X' => if (row) |r| {
+                        const co = g.companyOf(r.force);
+                        if (co != .none) self.modal = .{ .disband = co };
+                    },
                     else => {},
                 }
             },
@@ -1965,6 +2151,7 @@ pub const App = struct {
                         var buf: [64]u8 = undefined;
                         self.openCommand(std.fmt.bufPrint(&buf, "fabricate hq:{d} ", .{self.hqSelId(g)}) catch "fabricate ");
                     },
+                    '$' => self.modal = .{ .sell_hq = @enumFromInt(self.hqSelId(g)) },
                     else => {},
                 }
             },
@@ -2027,7 +2214,15 @@ pub const App = struct {
 
     fn advance(self: *App, days: u32) !void {
         const g = &self.gs.?;
+        const before = g.clock.day_index;
         try self.exec(if (days == 1) .advance_day else .{ .advance_days = days });
+        if (g.bankrupt) {
+            self.store.player_id = self.player_id;
+            self.store.save(g) catch {};
+            self.modal = .game_over;
+            return;
+        }
+        if (g.clock.day_index == before) return; // refused — the message says why
         self.say(.good, "day {d} · {d}-{d:0>2}-{d:0>2}", .{ g.clock.day_index, g.clock.date.year, g.clock.date.month, g.clock.date.day });
     }
 
@@ -2083,6 +2278,42 @@ pub const App = struct {
                         self.leaveGame();
                     },
                     else => {},
+                },
+                else => {},
+            },
+            .game_over => switch (key) {
+                .enter, .escape => {
+                    self.modal = .none;
+                    self.leaveGame();
+                },
+                else => {},
+            },
+            .sell_unit => |uid| switch (key) {
+                .escape => self.modal = .none,
+                .char => |ch| if (ch == 'y') {
+                    self.modal = .none;
+                    try self.exec(.{ .sell_unit = uid });
+                    self.say(.amber, "hull #{d} sold", .{@intFromEnum(uid)});
+                },
+                else => {},
+            },
+            .sell_hq => |hid| switch (key) {
+                .escape => self.modal = .none,
+                .char => |ch| if (ch == 'y') {
+                    self.modal = .none;
+                    try self.exec(.{ .sell_hq = hid });
+                    self.hq_sel = 0;
+                    self.say(.amber, "HQ sold off", .{});
+                },
+                else => {},
+            },
+            .disband => |fid| switch (key) {
+                .escape => self.modal = .none,
+                .char => |ch| if (ch == 'y') {
+                    self.modal = .none;
+                    try self.exec(.{ .disband_company = fid });
+                    self.cur(0).* = 0;
+                    self.say(.amber, "company disbanded", .{});
                 },
                 else => {},
             },
@@ -2370,6 +2601,19 @@ pub const App = struct {
         if (eq(u8, verb, "transfer")) {
             return .{ .transfer = .{ .from = try parseTreasury(try need(tokens.next())), .to = try parseTreasury(try need(tokens.next())), .amount = try num(i64, tokens.next()) } };
         }
+        if (eq(u8, verb, "admit")) return .{ .admit = @enumFromInt(try num(u32, tokens.next())) };
+        if (eq(u8, verb, "repay")) return .{ .repay_loan = .{ .index = try num(usize, tokens.next()), .amount = try num(i64, tokens.next()) } };
+        if (eq(u8, verb, "sell")) return .{ .sell_unit = @enumFromInt(try num(u32, tokens.next())) };
+        if (eq(u8, verb, "sellhq")) {
+            const site = try parseSite(try need(tokens.next()));
+            if (site != .hq) return error.BadSite;
+            return .{ .sell_hq = site.hq };
+        }
+        if (eq(u8, verb, "disband")) {
+            const site = try parseSite(try need(tokens.next()));
+            if (site != .company) return error.BadSite;
+            return .{ .disband_company = site.company };
+        }
         if (eq(u8, verb, "policy")) {
             return .{ .set_policy = .{ .entity = try parseTreasury(try need(tokens.next())), .floor = try num(i64, tokens.next()), .monthly_cap = try num(i64, tokens.next()) } };
         }
@@ -2537,6 +2781,14 @@ pub const App = struct {
             error.NoTechSlot => "that hull takes no tech",
             error.WrongRole => "wrong role for that seat",
             error.Unavailable => "that person is unavailable",
+            error.Insolvent => "the outfit treasury is negative — take a loan (Ledger, L) or sell assets (Forces $, X · HQ $) before the day can end",
+            error.Bankrupt => "the outfit is bankrupt",
+            error.CreditExceeded => "that exceeds the remaining credit line (see the Ledger)",
+            error.LastHq => "you cannot sell your only HQ",
+            error.HqInUse => "reassign the companies at that HQ first (:assignco co:N hq:M)",
+            error.NotWounded => "that person is not wounded",
+            error.NoSuchLoan => "no such loan (or nothing to repay)",
+            error.NoSuchListing => "that listing is gone",
             else => @errorName(err),
         };
     }

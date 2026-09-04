@@ -132,6 +132,17 @@ pub const Command = union(enum) {
         event_index: usize,
         choice: usize,
     },
+    // ---- Stage 12: the player's hand on the money and the medbay ----
+    /// Admit a wounded person to the medbay: healing only starts here.
+    admit: types.PersonId,
+    /// Pay a loan down early (simple interest: only charged months cost).
+    repay_loan: struct { index: usize, amount: types.CBills },
+    /// Liquidate a hull at half value scaled by condition.
+    sell_unit: types.UnitId,
+    /// Sell off an HQ (not the last one; companies must be reassigned first).
+    sell_hq: types.HqId,
+    /// Close a company: hulls sold, people released, forces struck.
+    disband_company: types.ForceId,
 };
 
 pub const Error = error{
@@ -193,6 +204,15 @@ pub const Error = error{
     UnitAway,
     NotAMek,
     NoSuchSlot,
+    NotWounded,
+    NoSuchLoan,
+    CreditExceeded,
+    LastHq,
+    HqInUse,
+    /// Outfit treasury negative: the turn waits for a loan or a sale.
+    Insolvent,
+    /// Nothing left to sell or borrow: game over.
+    Bankrupt,
 } || std.mem.Allocator.Error;
 
 pub const Result = struct {
@@ -444,6 +464,99 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             u.status = .mothballed;
             return .{};
         },
+        .admit => |pid| {
+            const p = gs.person(pid) orelse return Error.UnknownPerson;
+            if (p.status != .wounded) return Error.NotWounded;
+            p.medbay_admitted = true;
+            try gs.log(.medical, .{ .company = gs.companyOf(p.assigned_force) }, "[medbay] {s} {s} admitted", .{ p.first_name, p.last_name });
+            return .{};
+        },
+        .repay_loan => |r| {
+            if (r.index >= gs.loans.items.len) return Error.NoSuchLoan;
+            const loan = &gs.loans.items[r.index];
+            const amount = @min(r.amount, loan.balance);
+            if (amount <= 0) return Error.NoSuchLoan;
+            if (gs.funds < amount) return Error.InsufficientTreasury;
+            loan.balance -= amount;
+            try gs.postTransaction(.{ .day = gs.clock.day_index, .amount = -amount, .category = .loan_principal, .note = "early repayment" });
+            if (loan.balance <= 0) _ = gs.loans.orderedRemove(r.index);
+            return .{};
+        },
+        .sell_unit => |unit_id| {
+            const u = gs.unit(unit_id) orelse return Error.UnknownUnit;
+            if (gs.deploymentContract(gs.companyOf(u.force)) != null) return Error.UnitDeployed;
+            const value = gs.unitSaleValue(u);
+            const key = u.chassis_key;
+            gs.removeUnit(unit_id);
+            try gs.postTransaction(.{ .day = gs.clock.day_index, .amount = value, .category = .unit_sale, .note = key });
+            try gs.log(.market, .{}, "[sale] {s} #{d} sold for {d}", .{ key, @intFromEnum(unit_id), value });
+            return .{};
+        },
+        .sell_hq => |hq_id| {
+            const h = gs.hqs.getPtr(hq_id) orelse return Error.UnknownHq;
+            if (gs.hqs.count() <= 1) return Error.LastHq;
+            if (gs.companiesAtHq(hq_id) > 0) return Error.HqInUse;
+            const value = gs.hqSaleValue(h) + h.funds;
+            const name = h.name;
+            var pit = gs.people.iterator();
+            while (pit.next()) |e| if (e.value_ptr.posted_hq == hq_id) {
+                e.value_ptr.posted_hq = .none;
+            };
+            var i: usize = 0;
+            while (i < gs.bay_jobs.items.len) {
+                if (gs.bay_jobs.items[i].hq == hq_id) _ = gs.bay_jobs.orderedRemove(i) else i += 1;
+            }
+            i = 0;
+            while (i < gs.hq_links.items.len) {
+                const l = gs.hq_links.items[i];
+                if (l.a == hq_id or l.b == hq_id) _ = gs.hq_links.orderedRemove(i) else i += 1;
+            }
+            i = 0;
+            while (i < gs.candidates.items.len) {
+                if (gs.candidates.items[i].hq == hq_id) _ = gs.candidates.orderedRemove(i) else i += 1;
+            }
+            i = 0;
+            while (i < gs.market_listings.items.len) {
+                if (gs.market_listings.items[i].hq == hq_id) _ = gs.market_listings.orderedRemove(i) else i += 1;
+            }
+            _ = gs.hqs.orderedRemove(hq_id);
+            gs.refreshHqStaffing();
+            try gs.postTransaction(.{ .day = gs.clock.day_index, .amount = value, .category = .unit_sale, .note = "HQ sold" });
+            try gs.log(.market, .{}, "[sale] {s} sold off for {d}", .{ name, value });
+            return .{};
+        },
+        .disband_company => |co| {
+            const f = gs.forces.getPtr(co) orelse return Error.UnknownForce;
+            if (f.echelon != .company) return Error.NotACompany;
+            if (gs.deploymentContract(co) != null or f.location_planet != null) return Error.CompanyDeployed;
+            const name = f.name;
+            var total: types.CBills = f.local_funds;
+            // Hulls under the subtree, then people, then the forces.
+            var uids: std.ArrayListUnmanaged(types.UnitId) = .empty;
+            defer uids.deinit(gs.allocator());
+            var uit = gs.units.iterator();
+            while (uit.next()) |e| if (gs.companyOf(e.value_ptr.force) == co) try uids.append(gs.allocator(), e.value_ptr.id);
+            for (uids.items) |uid| {
+                total += gs.unitSaleValue(gs.unit(uid).?);
+                gs.removeUnit(uid);
+            }
+            var pit = gs.people.iterator();
+            while (pit.next()) |e| {
+                const p = e.value_ptr;
+                if (gs.companyOf(p.assigned_force) == co and (p.status == .active or p.status == .wounded)) {
+                    p.status = .resigned;
+                    p.assigned_force = .none;
+                }
+            }
+            var fids: std.ArrayListUnmanaged(types.ForceId) = .empty;
+            defer fids.deinit(gs.allocator());
+            var fit = gs.forces.iterator();
+            while (fit.next()) |e| if (gs.companyOf(e.value_ptr.id) == co) try fids.append(gs.allocator(), e.value_ptr.id);
+            for (fids.items) |fid| _ = gs.forces.orderedRemove(fid);
+            try gs.postTransaction(.{ .day = gs.clock.day_index, .amount = total, .category = .unit_sale, .note = "company disbanded" });
+            try gs.log(.market, .{}, "[sale] {s} disbanded: {d} hulls sold, people released, {d} raised", .{ name, uids.items.len, total });
+            return .{};
+        },
         .reactivate => |unit_id| {
             const u = gs.unit(unit_id) orelse return Error.UnknownUnit;
             if (u.status != .mothballed) return Error.NotMothballed;
@@ -586,7 +699,9 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             return .{};
         },
         .take_loan => |l| {
-            const rate_bp: types.Bp = 1_200; // 12%/yr // TUNE: reputation-scaled
+            if (l.principal <= 0 or l.term_months == 0) return Error.NoSuchLoan;
+            if (l.principal > gs.creditRemaining()) return Error.CreditExceeded;
+            const rate_bp: types.Bp = 1_200; // 12%/yr simple interest // TUNE: reputation-scaled
             const total_interest = @divTrunc(l.principal * rate_bp * l.term_months, 10_000 * 12);
             try gs.loans.append(gs.allocator(), .{
                 .principal = l.principal,
@@ -1018,13 +1133,67 @@ fn acceptContract(gs: *GameState, offer_index: usize, company_id: types.ForceId)
 
 fn advance(gs: *GameState, days: u32) Error!Result {
     // Turn-based: each day is a turn; nothing interrupts the advance.
-    // Decisions wait in the inbox and default at their deadlines.
+    // Decisions wait in the inbox and default at their deadlines — except
+    // money (Stage 12): a negative outfit treasury holds the turn until a
+    // loan or a sale covers it, and past all credit the outfit folds.
     var result: Result = .{};
     for (0..days) |_| {
+        if (gs.bankrupt) return Error.Bankrupt;
+        if (gs.funds < 0) {
+            if (gs.funds + gs.liquidationValue() + gs.creditRemaining() < 0) {
+                gs.bankrupt = true;
+                try gs.log(.finance, .{}, "[bankrupt] the outfit cannot cover {d}: creditors seize what is left", .{gs.funds});
+                return Error.Bankrupt;
+            }
+            return Error.Insolvent;
+        }
         try tick.advanceDay(gs);
         result.days_advanced += 1;
     }
     return result;
+}
+
+test "insolvency holds the turn; bankruptcy ends the campaign" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 5 });
+    defer gs.deinit();
+    _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .FS, .profession = .paymaster } });
+    _ = try execute(&gs, .{ .new_company = "Alpha" });
+    gs.funds = -1;
+    try std.testing.expectError(Error.Insolvent, execute(&gs, .advance_day));
+    // A loan within the credit limit unblocks the turn.
+    _ = try execute(&gs, .{ .take_loan = .{ .principal = 100_000, .term_months = 6 } });
+    try std.testing.expect(gs.funds > 0);
+    _ = try execute(&gs, .advance_day);
+    // Early repayment clears the loan.
+    gs.funds = 1_000_000;
+    const bal = gs.loans.items[0].balance;
+    _ = try execute(&gs, .{ .repay_loan = .{ .index = 0, .amount = bal } });
+    try std.testing.expectEqual(@as(usize, 0), gs.loans.items.len);
+    // Selling a hull raises money; disbanding the company raises the rest.
+    const before = gs.funds;
+    const uid = gs.units.keys()[0];
+    _ = try execute(&gs, .{ .sell_unit = uid });
+    try std.testing.expect(gs.funds > before);
+    try std.testing.expect(gs.unit(uid) == null);
+    // Beyond everything: game over.
+    gs.funds = -1_000_000_000;
+    try std.testing.expectError(Error.Bankrupt, execute(&gs, .advance_day));
+    try std.testing.expect(gs.bankrupt);
+}
+
+test "wounded only heal once admitted" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 9 });
+    defer gs.deinit();
+    _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    _ = try execute(&gs, .{ .new_company = "Alpha" });
+    const pid = gs.people.keys()[0];
+    gs.person(pid).?.status = .wounded;
+    _ = try execute(&gs, .{ .advance_days = 3 });
+    try std.testing.expect(gs.person(pid).?.wound_heal_day == null);
+    try std.testing.expectError(Error.NotWounded, execute(&gs, .{ .admit = gs.people.keys()[1] }));
+    _ = try execute(&gs, .{ .admit = pid });
+    _ = try execute(&gs, .advance_day);
+    try std.testing.expect(gs.person(pid).?.wound_heal_day != null);
 }
 
 test "golden master: same seed + same script = same state hash" {
@@ -1489,6 +1658,7 @@ test "9C.2: medbay beds and triage decide who heals when it's crowded" {
     for (&ids) |*id| {
         id.* = try gs.hirePerson("W", "Ounded", .mekwarrior);
         gs.person(id.*).?.status = .wounded;
+        gs.person(id.*).?.medbay_admitted = true;
     }
     _ = try execute(&gs, .{ .triage = .{ .person = ids[10], .priority = 9 } });
     _ = try execute(&gs, .{ .triage = .{ .person = ids[11], .priority = 9 } });

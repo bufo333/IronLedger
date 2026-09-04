@@ -127,7 +127,7 @@ pub fn status(alloc: Alloc, gs: *GameState) !Status {
 /// Warnings that should stop a turn until acknowledged (the rest are notices).
 pub fn isBlocking(kind: checklist.WarningKind) bool {
     return switch (kind) {
-        .decision_due, .understaffed_hq, .overdrawn, .combat_ineffective, .dry_ammo, .hungry => true,
+        .decision_due, .understaffed_hq, .overdrawn, .combat_ineffective, .dry_ammo, .hungry, .untreated_wounded, .insolvent => true,
         else => false,
     };
 }
@@ -167,9 +167,10 @@ fn jumpFor(kind: checklist.WarningKind) u8 {
         .decision_due => 0,
         .open_slots, .tech_overloaded, .medbay_over_capacity => 2,
         .combat_ineffective, .objectives_met, .company_idle_afield => 3,
-        .overdrawn => 4,
+        .overdrawn, .insolvent => 4,
         .hungry, .dry_ammo => 5,
         .understaffed_hq, .depot_backlog => 6,
+        .untreated_wounded => 8,
     };
 }
 
@@ -477,11 +478,14 @@ pub fn ledger(alloc: Alloc, gs: *GameState, selected: state_mod.Treasury, period
         try extras.append(alloc, try std.fmt.allocPrint(alloc, "  {s}  top up to {s} · cap {s}/mo", .{ try treasuryLabel(alloc, gs, p.entity), try money(alloc, p.floor), try money(alloc, p.monthly_cap) }));
     }
     try extras.append(alloc, "");
-    try extras.append(alloc, "loans");
-    if (gs.loans.items.len == 0) try extras.append(alloc, "  none");
-    for (gs.loans.items) |l| {
-        try extras.append(alloc, try std.fmt.allocPrint(alloc, "  balance {s} · payment {s} · next day {d}", .{ try money(alloc, l.balance), try money(alloc, l.payment), l.next_pay_day }));
+    try extras.append(alloc, try std.fmt.allocPrint(alloc, "loans · credit {s} of {s}", .{ try money(alloc, gs.creditRemaining()), try money(alloc, gs.creditLimit()) }));
+    if (gs.loans.items.len == 0) try extras.append(alloc, "  none · [L] take one (12%/yr simple interest)");
+    for (gs.loans.items, 0..) |l, i| {
+        try extras.append(alloc, try std.fmt.allocPrint(alloc, "  [{d}] owe {s} of {s} · {s}/mo · next d{d}", .{ i, try money(alloc, l.balance), try money(alloc, l.principal), try money(alloc, l.payment), l.next_pay_day }));
     }
+    try extras.append(alloc, "");
+    try extras.append(alloc, try std.fmt.allocPrint(alloc, "liquidation value    {s}", .{try money(alloc, gs.liquidationValue())}));
+    try extras.append(alloc, "  {d}hulls at half value × condition · HQs at 40% of build cost{/}");
     try extras.append(alloc, "");
     try extras.append(alloc, "next 30 days (estimate)");
     const payroll = gs.monthlyPayroll();
@@ -852,6 +856,98 @@ pub fn hall(alloc: Alloc, gs: *GameState, hq_id: types.HqId, filter: HallFilter)
     };
 }
 
+// ------------------------------------------------------------------ market
+
+pub const ListingRow = struct {
+    index: usize,
+    text: []const u8,
+};
+
+pub const CatalogRow = struct {
+    key: []const u8,
+    component: bool,
+    text: []const u8,
+};
+
+pub const DemandRow = struct {
+    key: []const u8,
+    short: u32,
+    text: []const u8,
+};
+
+pub const Market = struct {
+    board_header: []const u8,
+    board: []ListingRow,
+    catalog_header: []const u8,
+    catalog: []CatalogRow,
+    demand_header: []const u8,
+    demand: []DemandRow,
+};
+
+const market_mod = @import("../econ/market.zig");
+
+/// The site boards, the orderable catalog, and what the damaged hulls need.
+pub fn market(alloc: Alloc, gs: *GameState) !Market {
+    var board: std.ArrayListUnmanaged(ListingRow) = .empty;
+    for (gs.market_listings.items, 0..) |l, i| {
+        const cond: []const u8 = if (l.condition) |c| try std.fmt.allocPrint(alloc, "{{a}}{s}{{/}} armor {d}% · {d} dmg · {d} missing", .{ c.label(), c.armor_pct, c.damaged_slots, c.missing_components }) else if (l.kind == .unit) "{g}new{/}" else "";
+        const name: []const u8 = if (l.kind == .unit) (if (chassis_mod.find(l.item_key)) |c| c.name else l.item_key) else (if (@import("../domain/part.zig").find(l.item_key)) |p| p.name else l.item_key);
+        try board.append(alloc, .{ .index = i, .text = try std.fmt.allocPrint(alloc, "[{d: <3}] {s: <5} {s: <10} {s: <20} {s: >13}  x{d: <3} {s: <8} {s: <6} d{d: <5} {s}", .{
+            i, @tagName(l.kind), clip(l.item_key, 10), clip(name, 20), try money(alloc, l.price), l.quantity, @tagName(l.rarity), if (l.staple) "staple" else "", l.expires_day, cond,
+        }) });
+    }
+    var catalog: std.ArrayListUnmanaged(CatalogRow) = .empty;
+    const part_mod = @import("../domain/part.zig");
+    for (part_mod.catalog) |p| {
+        const component = part_mod.isComponent(p.key);
+        try catalog.append(alloc, .{ .key = p.key, .component = component, .text = try std.fmt.allocPrint(alloc, "{s: <16} {s: <22} {s: >12}  {d: >3}t  {s}", .{
+            clip(p.key, 16), clip(p.name, 22), try money(alloc, p.cost), part_mod.tons(p.key), if (component) "{a}fabricable at a regional HQ{/}" else if (isStaple(p.key)) "{g}staple{/}" else "{d}rolls vs rarity{/}",
+        }) });
+    }
+    // Demand: damaged / destroyed / missing slots by part.
+    var need: std.StringArrayHashMapUnmanaged(u32) = .empty;
+    var uit = gs.units.iterator();
+    while (uit.next()) |e| {
+        const u = e.value_ptr;
+        if (u.status == .destroyed) continue;
+        for (u.slots.items) |s| {
+            if (s.condition == .ok) continue;
+            const key: []const u8 = if (s.class == .structure) part_mod.componentForSlot(s.slot_key) else s.part_key;
+            const g = try need.getOrPut(alloc, key);
+            if (!g.found_existing) g.value_ptr.* = 0;
+            g.value_ptr.* += 1;
+        }
+    }
+    var demand: std.ArrayListUnmanaged(DemandRow) = .empty;
+    var dit = need.iterator();
+    while (dit.next()) |e| {
+        const key = e.key_ptr.*;
+        const n = e.value_ptr.*;
+        var on_hand: u32 = gs.spareCount(key);
+        var hit = gs.hqs.iterator();
+        while (hit.next()) |h| on_hand += gs.stockCount(.{ .hq = h.value_ptr.id }, key);
+        var on_order: u32 = 0;
+        for (gs.part_orders.items) |o| if (std.mem.eql(u8, o.part_key, key) and (o.status == .sourcing or o.status == .in_transit)) {
+            on_order += o.quantity;
+        };
+        const short: u32 = if (n > on_hand + on_order) n - on_hand - on_order else 0;
+        try demand.append(alloc, .{ .key = key, .short = short, .text = try std.fmt.allocPrint(alloc, "{s: <16} {d: >4} {d: >8} {d: >9} {s}{d: >6}{{/}}", .{ clip(key, 16), n, on_hand, on_order, if (short > 0) "{c}" else "{g}", short }) });
+    }
+    return .{
+        .board_header = "idx   kind  key        name                         price  qty  rarity   staple expires  condition",
+        .board = try board.toOwnedSlice(alloc),
+        .catalog_header = "part             name                           cost  tons  source",
+        .catalog = try catalog.toOwnedSlice(alloc),
+        .demand_header = "part             need  on hand  on order  short",
+        .demand = try demand.toOwnedSlice(alloc),
+    };
+}
+
+fn isStaple(key: []const u8) bool {
+    for (market_mod.staple_keys) |k| if (std.mem.eql(u8, k, key)) return true;
+    return false;
+}
+
 // --------------------------------------------------------------- personnel
 
 pub const PersonRow = struct {
@@ -1057,7 +1153,6 @@ pub const Map = struct {
 };
 
 pub fn map(alloc: Alloc, gs: *GameState) !Map {
-    const market = @import("../econ/market.zig");
     var hqs: std.ArrayListUnmanaged(MapHq) = .empty;
     var hit = gs.hqs.iterator();
     while (hit.next()) |e| {
@@ -1082,7 +1177,7 @@ pub fn map(alloc: Alloc, gs: *GameState) !Map {
                 best = d;
                 nearest = h.id;
             }
-            const b: Band = if (d <= h.ring_ly) .ring else if (d <= h.ring_ly + market.beachhead_band_ly) .beachhead else .dark;
+            const b: Band = if (d <= h.ring_ly) .ring else if (d <= h.ring_ly + market_mod.beachhead_band_ly) .beachhead else .dark;
             if (@intFromEnum(b) < @intFromEnum(band)) band = b;
         }
         switch (band) {
@@ -1119,7 +1214,7 @@ pub fn map(alloc: Alloc, gs: *GameState) !Map {
             .offers_here = offers,
         });
     }
-    return .{ .worlds = try worlds.toOwnedSlice(alloc), .hqs = try hqs.toOwnedSlice(alloc), .in_ring = in_ring, .in_band = in_band, .dark = dark, .band_ly = market.beachhead_band_ly };
+    return .{ .worlds = try worlds.toOwnedSlice(alloc), .hqs = try hqs.toOwnedSlice(alloc), .in_ring = in_ring, .in_band = in_band, .dark = dark, .band_ly = market_mod.beachhead_band_ly };
 }
 
 /// Offer rows for one world (text only).

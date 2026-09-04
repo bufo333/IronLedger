@@ -123,7 +123,7 @@ pub fn injureTech(gs: *GameState, tech_id: types.PersonId, days: u32, cause: []c
     const t = gs.person(tech_id) orelse return;
     if (t.status != .active) return;
     t.status = .wounded;
-    t.wound_heal_day = gs.clock.day_index + days;
+    t.medbay_admitted = false; // healing starts when the player admits them
     const company = gs.companyOf(t.assigned_force);
     try gs.log(.medical, .{ .company = company }, "[medbay] {s} {s} injured ({s}) — {d} days", .{ t.first_name, t.last_name, cause, days });
 

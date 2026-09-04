@@ -114,6 +114,9 @@ pub const Person = struct {
     leave_until_day: ?u32 = null,
     /// Set by the medical system once a doctor triages the wound (Stage 8).
     wound_heal_day: ?u32 = null,
+    /// A wound only starts healing once the player admits them (the
+    /// `admit` command) — untreated wounded block the turn (Stage 12).
+    medbay_admitted: bool = false,
     /// In-progress training program (regional/brigade HQ only, ARCH §9.7).
     training: ?struct { skill: types.SkillType, done_day: u32 } = null,
 
