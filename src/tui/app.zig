@@ -1282,7 +1282,7 @@ pub const App = struct {
                     "  {a}companies{/}   :newco <name> at the first HQ · :newco@ hq:N <name> · :assignco co:N hq:M — each regional HQ hosts one combat company",
                     "  {a}money{/}       Ledger: L loan (simple interest) · R repay · Forces: $ sell hull · X disband company · HQ: $ sell HQ",
                     "  {a}field cash{/}  t courier cash now · p policy = keep above a floor, checked daily, at most cap per month, one courier in flight at a time",
-                    "  {a}resupply{/}    s ship now · o order to the field · P policy = provisions under D days → ship N t; every ammo family kept at 2 battles",
+                    "  {a}resupply{/}    P policy `supplypolicy co:N days tons [battles]` — provisions under D days → ship N t; ammo per family sized to the link (or [battles])",
                     "  {a}turn rules{/}  wounded must be admitted (m) and a negative treasury covered before the day can end; bankruptcy ends the game",
                     "  {a}emblem{/}      e on the Desk (or :emblem) changes the crest: presets or a PNG from ./, logos/, docs/logos/",
                     "  {a}command{/}     : opens the command line — every CLI verb works: day, transfer, order, accept, …",
@@ -2984,7 +2984,10 @@ pub const App = struct {
         if (eq(u8, verb, "supplypolicy")) {
             const site = try parseSite(try need(tokens.next()));
             if (site != .company) return error.BadSite;
-            return .{ .set_supply_policy = .{ .company = site.company, .min_days = try num(u16, tokens.next()), .tons = try num(u32, tokens.next()) } };
+            const min_days = try num(u16, tokens.next());
+            const tons = try num(u32, tokens.next());
+            const battles: u8 = if (tokens.next()) |t| (std.fmt.parseInt(u8, t, 10) catch return error.BadNumber) else 0;
+            return .{ .set_supply_policy = .{ .company = site.company, .min_days = min_days, .tons = tons, .ammo_battles = battles } };
         }
         if (eq(u8, verb, "loan")) {
             return .{ .take_loan = .{ .principal = try num(i64, tokens.next()), .term_months = try num(u16, tokens.next()) } };

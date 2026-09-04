@@ -154,7 +154,7 @@ pub const Command = union(enum) {
     /// Automatic provisions resupply: ship `tons` from the home warehouse
     /// whenever the deployed company's stores fall under `min_days`.
     /// `tons` = 0 removes the policy.
-    set_supply_policy: struct { company: types.ForceId, min_days: u16, tons: u32 },
+    set_supply_policy: struct { company: types.ForceId, min_days: u16, tons: u32, ammo_battles: u8 = 0 },
 };
 
 pub const Error = error{
@@ -488,12 +488,13 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
                     } else {
                         gs.supply_policies.items[i].min_days = sp.min_days;
                         gs.supply_policies.items[i].tons = sp.tons;
+                        gs.supply_policies.items[i].ammo_battles = sp.ammo_battles;
                     }
                     return .{};
                 }
             }
             if (sp.tons == 0) return .{};
-            try gs.supply_policies.append(gs.allocator(), .{ .company = sp.company, .min_days = sp.min_days, .tons = sp.tons });
+            try gs.supply_policies.append(gs.allocator(), .{ .company = sp.company, .min_days = sp.min_days, .tons = sp.tons, .ammo_battles = sp.ammo_battles });
             return .{};
         },
         .set_role => |r| {

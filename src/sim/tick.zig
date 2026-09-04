@@ -129,15 +129,21 @@ fn runPolicies(gs: *GameState) !void {
             }
             if (mounts == 0) continue;
             const per_battle: u32 = (mounts + 2) / 3; // TUNE mirrors battle.mounts_per_ammo_ton
+            // Battles come every ~15 days; a shipment takes the link's transit
+            // time. Floor = enough to fight through the transit plus one;
+            // target = floor + 2. `ammo_battles` overrides the target.
+            const transit = gs.courierEtaDays(.{ .company = sp.company });
+            const floor_battles: u32 = 1 + transit / 15;
+            const target_battles: u32 = if (sp.ammo_battles > 0) @max(@as(u32, sp.ammo_battles), floor_battles) else floor_battles + 2;
             const have = gs.stockCount(.{ .company = sp.company }, key);
-            if (have >= per_battle) continue;
+            if (have >= per_battle * floor_battles) continue;
             var in_flight = false;
             for (gs.part_orders.items) |o| {
                 if (o.dest == .company and o.dest.company == sp.company and std.mem.eql(u8, o.part_key, key) and (o.status == .in_transit or o.status == .sourcing)) in_flight = true;
             }
             if (in_flight) continue;
             const available = gs.stockCount(.{ .hq = home }, key);
-            const want = 2 * per_battle - have;
+            const want = per_battle * target_battles - have;
             const qty = @min(want, available);
             if (qty == 0) {
                 if (gs.clock.day_index % 7 == 0) try gs.log(.delivery, .{ .company = sp.company, .hq = home }, "[supply] resupply policy: no {s} at {s} to ship to {s}", .{ key, gs.hqs.getPtr(home).?.name, f.name });
@@ -147,7 +153,7 @@ fn runPolicies(gs: *GameState) !void {
                 if (gs.clock.day_index % 7 == 0) try gs.log(.delivery, .{ .company = sp.company, .hq = home }, "[supply] resupply policy could not ship {s} to {s}: {s}", .{ key, f.name, @errorName(err) });
                 continue;
             };
-            try gs.log(.delivery, .{ .company = sp.company, .hq = home }, "[supply] resupply policy ships {d}t of {s} to {s} ({d} mounts, {d}t on hand)", .{ qty, key, f.name, mounts, have });
+            try gs.log(.delivery, .{ .company = sp.company, .hq = home }, "[supply] resupply policy ships {d}t of {s} to {s} ({d} mounts, {d}t on hand, target {d} battles for a {d}-day line)", .{ qty, key, f.name, mounts, have, target_battles, transit });
         }
     }
 }

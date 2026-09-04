@@ -51,7 +51,7 @@ const ddl =
     \\CREATE TABLE IF NOT EXISTS loan (cid INTEGER NOT NULL, ord INTEGER NOT NULL, principal INTEGER, balance INTEGER, rate_bp INTEGER, term INTEGER, next_pay INTEGER, payment INTEGER);
     \\CREATE TABLE IF NOT EXISTS courier (cid INTEGER NOT NULL, ord INTEGER NOT NULL, to_kind TEXT, to_id INTEGER, amount INTEGER, sent INTEGER, eta INTEGER);
     \\CREATE TABLE IF NOT EXISTS policy (cid INTEGER NOT NULL, ord INTEGER NOT NULL, entity_kind TEXT, entity_id INTEGER, floor INTEGER, cap INTEGER, sent INTEGER NOT NULL DEFAULT 0);
-    \\CREATE TABLE IF NOT EXISTS supply_policy (cid INTEGER NOT NULL, ord INTEGER NOT NULL, company INTEGER, min_days INTEGER, tons INTEGER);
+    \\CREATE TABLE IF NOT EXISTS supply_policy (cid INTEGER NOT NULL, ord INTEGER NOT NULL, company INTEGER, min_days INTEGER, tons INTEGER, ammo_battles INTEGER NOT NULL DEFAULT 0);
     \\CREATE TABLE IF NOT EXISTS bay_job (cid INTEGER NOT NULL, ord INTEGER NOT NULL, hq INTEGER, kind TEXT, unit INTEGER, item_key TEXT, duration INTEGER, queued INTEGER, started INTEGER, done INTEGER, cost INTEGER);
     \\CREATE TABLE IF NOT EXISTS candidate (cid INTEGER NOT NULL, ord INTEGER NOT NULL, hq INTEGER, first TEXT, last TEXT, callsign TEXT, role TEXT, experience TEXT, primary_skill INTEGER, secondary_skill INTEGER, bonus INTEGER, listed INTEGER, expires INTEGER);
     \\CREATE TABLE IF NOT EXISTS hq_link (cid INTEGER NOT NULL, ord INTEGER NOT NULL, a INTEGER, b INTEGER, level INTEGER, tons INTEGER, established INTEGER);
@@ -86,6 +86,9 @@ pub const Store = struct {
         // Schema v1 → v2: campaigns gained an owning player.
         if (!try hasColumn(db, "campaign", "player_id")) {
             try db.exec("ALTER TABLE campaign ADD COLUMN player_id INTEGER NOT NULL DEFAULT 0");
+        }
+        if (!try hasColumn(db, "supply_policy", "ammo_battles")) {
+            try db.exec("ALTER TABLE supply_policy ADD COLUMN ammo_battles INTEGER NOT NULL DEFAULT 0");
         }
         // Schema v3 → v4: policies track what they sent this month.
         if (!try hasColumn(db, "policy", "sent")) {
@@ -467,10 +470,10 @@ pub const Store = struct {
             }
         }
         {
-            const st = try self.db.prepare("INSERT INTO supply_policy VALUES (?1,?2,?3,?4,?5)");
+            const st = try self.db.prepare("INSERT INTO supply_policy VALUES (?1,?2,?3,?4,?5,?6)");
             defer st.finalize();
             for (gs.supply_policies.items, 0..) |p, i| {
-                try st.bindAll(.{ cid, @as(i64, @intCast(i)), @intFromEnum(p.company), @as(i64, p.min_days), @as(i64, p.tons) });
+                try st.bindAll(.{ cid, @as(i64, @intCast(i)), @intFromEnum(p.company), @as(i64, p.min_days), @as(i64, p.tons), @as(i64, p.ammo_battles) });
                 try st.run();
             }
         }
@@ -928,11 +931,11 @@ pub const Store = struct {
             }
         }
         {
-            const st = try self.db.prepare("SELECT company, min_days, tons FROM supply_policy WHERE cid = ?1 ORDER BY ord");
+            const st = try self.db.prepare("SELECT company, min_days, tons, ammo_battles FROM supply_policy WHERE cid = ?1 ORDER BY ord");
             defer st.finalize();
             try st.bindAll(.{cid});
             while (try st.next()) {
-                try gs.supply_policies.append(alloc, .{ .company = toId(types.ForceId, st.int(0)), .min_days = @intCast(st.int(1)), .tons = @intCast(st.int(2)) });
+                try gs.supply_policies.append(alloc, .{ .company = toId(types.ForceId, st.int(0)), .min_days = @intCast(st.int(1)), .tons = @intCast(st.int(2)), .ammo_battles = @intCast(st.int(3)) });
             }
         }
         {

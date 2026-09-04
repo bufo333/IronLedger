@@ -63,6 +63,9 @@ pub const SupplyPolicy = struct {
     company: types.ForceId,
     min_days: u16,
     tons: u32,
+    /// Munition target in battles' worth per family; 0 = derive from the
+    /// supply line: 1 + transit/15 battles as the floor, floor + 2 as the target.
+    ammo_battles: u8 = 0,
 };
 
 /// Structured campaign log (Stage 9A): every entry tagged so any entity's

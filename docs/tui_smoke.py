@@ -123,7 +123,7 @@ assert ":ship provisions 10 hq:" in plain()[-400:], plain()[-800:]
 send("\x1b"); send("P", 0.8)
 assert ":supplypolicy co:" in plain()[-400:], plain()[-800:]
 send("\r", 1.0)                                       # set it: 14 days, 20 t
-assert "resupply 20t under 14 days + ammo" in plain()[-30000:], plain()[-2000:]
+assert "resupply 20t under 14 days + ammo (auto)" in plain()[-30000:], plain()[-2000:]
 send("5"); send("j", 0.6); send("j", 0.6); send("p", 0.8)   # ledger: policy for the selected company
 assert ":policy co:" in plain()[-400:], plain()[-800:]
 send("\x1b")
