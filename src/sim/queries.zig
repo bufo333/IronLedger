@@ -578,7 +578,8 @@ pub const ToeRow = struct {
     text: []const u8,
 };
 
-/// The TO&E as an indented tree, one row per force and hull.
+/// The TO&E as an indented tree, one row per force and hull, followed by
+/// the hulls that belong to no force (bought, salvaged, or pulled out).
 pub fn toe(alloc: Alloc, gs: *GameState) ![]ToeRow {
     var out: std.ArrayListUnmanaged(ToeRow) = .empty;
     var fit = gs.forces.iterator();
@@ -586,6 +587,31 @@ pub fn toe(alloc: Alloc, gs: *GameState) ![]ToeRow {
         const f = e.value_ptr;
         if (f.parent != .none) continue;
         try toeInto(alloc, gs, &out, f.id, 0);
+    }
+    var loose: u32 = 0;
+    var upkeep: types.CBills = 0;
+    var uit = gs.units.iterator();
+    while (uit.next()) |e| if (e.value_ptr.force == .none and e.value_ptr.status != .destroyed) {
+        loose += 1;
+        upkeep += e.value_ptr.monthlyBill();
+    };
+    if (loose > 0) {
+        try out.append(alloc, .{ .force = .none, .unit = .none, .text = try std.fmt.allocPrint(alloc, "{{a}}[—] Unassigned hulls{{/}}  {d} · {s}/mo upkeep · {{d}}no tech: they degrade; [x] place in a company, [m] mothball{{/}}", .{ loose, try money(alloc, upkeep) }) });
+        var it2 = gs.units.iterator();
+        while (it2.next()) |e| {
+            const u = e.value_ptr;
+            if (u.force != .none or u.status == .destroyed) continue;
+            const ch = chassis_mod.find(u.chassis_key);
+            const st_mk: []const u8 = switch (u.status) {
+                .ready => "{g}",
+                .mothballed => "{d}",
+                .damaged, .repairing, .refitting => "{a}",
+                else => "{c}",
+            };
+            try out.append(alloc, .{ .force = .none, .unit = u.id, .text = try std.fmt.allocPrint(alloc, "    #{d: <3} {s: <8} {s: <16} {d: >3}t  {s: <20} {s: <20} {s}{s}{{/}} armor {d}% · {s}/mo", .{
+                @intFromEnum(u.id), u.chassis_key, if (ch) |c| c.name else "?", if (ch) |c| c.tonnage else 0, "—", "—", st_mk, @tagName(u.status), u.armor_pct, try money(alloc, u.monthlyBill()),
+            }) });
+        }
     }
     return out.toOwnedSlice(alloc);
 }

@@ -737,7 +737,7 @@ pub const App = struct {
             .market => "Tab pane · Enter buy / order / order shortfall · b fabricate component · [ ] HQ board · q welcome",
             .ledger => "j/k treasury · t send cash to it by courier · p standing top-up (floor + monthly cap) · L loan · R repay",
             .supply => "j/k site · on a company: t cash · p cash top-up policy · P resupply policy (days, tons) · s ship now · o order to the field",
-            .forces => "Enter assign · a/u seat · A auto · o lance role · d depot · t train · x transfer · $ sell hull · X disband",
+            .forces => "Enter assign · a/u seat · A auto · o lance role · d depot · m mothball/activate · x move to company · $ sell · X disband",
             .map => "h j k l move between worlds · f found HQ here · o offers here · n end turn · q welcome",
             .lab => "[ ] hull · j/k mount · - remove · + install · R order replacement · D send to depot (structure) · c clear · Enter commit",
             .hq => "[ ] switch HQ · u upgrade the highlighted facility (picker elsewhere) · T tier · S autostaff · Tab hall · f/F filter · Enter hire",
@@ -1279,6 +1279,7 @@ pub const App = struct {
                     "               boards (Enter buys) · catalog (Enter orders, b fabricates comp_*) · demand (Enter orders shortfall)",
                     "  {a}lab{/}         + picks a part then a location (green = rules allow) · R orders a replacement for damaged gear · dim rows = full",
                     "  {a}structure{/}   not fitted in the Lab: D (Lab) or d (Forces) sends the hull to the depot; the bay consumes comp_* parts from the home HQ",
+                    "  {a}companies{/}   :newco <name> at the first HQ · :newco@ hq:N <name> · :assignco co:N hq:M — each regional HQ hosts one combat company",
                     "  {a}money{/}       Ledger: L loan (simple interest) · R repay · Forces: $ sell hull · X disband company · HQ: $ sell HQ",
                     "  {a}field cash{/}  t courier cash now · p policy = keep above a floor, checked daily, at most cap per month, one courier in flight at a time",
                     "  {a}resupply{/}    s ship now · o order to the field · P policy = ship N tons from home whenever the company drops under D days of provisions",
@@ -1289,7 +1290,7 @@ pub const App = struct {
                     "",
                     "  {d}[Esc] close{/}",
                 };
-                const r = self.modalRect(130, 26);
+                const r = self.modalRect(130, 27);
                 const inner = self.screen.pane(r, .{ .title = "HELP", .double = true });
                 self.screen.lines(inner, &rows, 0, null);
             },
@@ -2275,7 +2276,21 @@ pub const App = struct {
                         }
                     },
                     't' => self.openCommand("train "),
-                    'x' => self.openCommand("xfer unit "),
+                    'x' => if (row) |r| {
+                        var buf: [64]u8 = undefined;
+                        self.openCommand(if (r.unit != .none) std.fmt.bufPrint(&buf, "xfer unit {d} co:", .{@intFromEnum(r.unit)}) catch "xfer unit " else "xfer unit ");
+                    },
+                    'm' => if (row) |r| {
+                        if (r.unit == .none) return;
+                        const u = g.unit(r.unit) orelse return;
+                        if (u.status == .mothballed) {
+                            try self.exec(.{ .reactivate = r.unit });
+                            if (self.msg_style != .crit) self.say(.good, "#{d} reactivating — tech-days before it can fight or move", .{@intFromEnum(r.unit)});
+                        } else {
+                            try self.exec(.{ .mothball = r.unit });
+                            if (self.msg_style != .crit) self.say(.good, "#{d} mothballed — 20% upkeep, no maintenance wear, no crew needed", .{@intFromEnum(r.unit)});
+                        }
+                    },
                     '$' => if (row) |r| {
                         if (r.unit != .none) self.modal = .{ .sell_unit = r.unit };
                     },
