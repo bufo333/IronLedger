@@ -151,6 +151,10 @@ pub const Command = union(enum) {
     /// garrison contracts), scouting (recon), training (held out of
     /// battles, gains XP at home).
     set_role: struct { force: types.ForceId, role: force_mod.LanceRole },
+    /// Automatic provisions resupply: ship `tons` from the home warehouse
+    /// whenever the deployed company's stores fall under `min_days`.
+    /// `tons` = 0 removes the policy.
+    set_supply_policy: struct { company: types.ForceId, min_days: u16, tons: u32 },
 };
 
 pub const Error = error{
@@ -471,6 +475,25 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             if (u.status == .mothballed) return Error.AlreadyMothballed;
             if (gs.deploymentContract(gs.companyOf(u.force)) != null) return Error.UnitDeployed;
             u.status = .mothballed;
+            return .{};
+        },
+        .set_supply_policy => |sp| {
+            const f = gs.force(sp.company) orelse return Error.UnknownForce;
+            if (f.echelon != .company) return Error.NotACompany;
+            var i: usize = 0;
+            while (i < gs.supply_policies.items.len) : (i += 1) {
+                if (gs.supply_policies.items[i].company == sp.company) {
+                    if (sp.tons == 0) {
+                        _ = gs.supply_policies.orderedRemove(i);
+                    } else {
+                        gs.supply_policies.items[i].min_days = sp.min_days;
+                        gs.supply_policies.items[i].tons = sp.tons;
+                    }
+                    return .{};
+                }
+            }
+            if (sp.tons == 0) return .{};
+            try gs.supply_policies.append(gs.allocator(), .{ .company = sp.company, .min_days = sp.min_days, .tons = sp.tons });
             return .{};
         },
         .set_role => |r| {
@@ -1210,6 +1233,48 @@ test "insolvency holds the turn; bankruptcy ends the campaign" {
     try std.testing.expect(gs.bankrupt);
 }
 
+test "policies run daily under a monthly cap; resupply ships provisions to a company in the field" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 12 });
+    defer gs.deinit();
+    _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    const co = (try execute(&gs, .{ .new_company = "Alpha" })).created_force;
+    const hq = gs.hqs.keys()[0];
+
+    // Cash: a top-up dispatches on the next day, not on payday, and no second
+    // courier leaves while the first is in flight.
+    _ = try execute(&gs, .{ .set_policy = .{ .entity = .{ .company = co }, .floor = 300_000, .monthly_cap = 400_000 } });
+    gs.forces.getPtr(co).?.local_funds = 0;
+    gs.clock.date.day = 10; // well away from payday
+    _ = try execute(&gs, .advance_day);
+    try std.testing.expectEqual(@as(usize, 1), gs.fund_couriers.items.len);
+    try std.testing.expectEqual(@as(i64, 300_000), gs.policies.items[0].sent_this_month);
+    _ = try execute(&gs, .advance_day);
+    try std.testing.expectEqual(@as(usize, 1), gs.fund_couriers.items.len);
+
+    // Provisions: the company is afield with empty stores; the policy ships
+    // from home once, and not again while that shipment is in transit.
+    try gs.addStock(.{ .hq = hq }, "provisions", 50);
+    gs.forces.getPtr(co).?.location_planet = "galatea";
+    _ = gs.takeStock(.{ .company = co }, "provisions", gs.stockCount(.{ .company = co }, "provisions"));
+    _ = try execute(&gs, .{ .set_supply_policy = .{ .company = co, .min_days = 14, .tons = 20 } });
+    _ = try execute(&gs, .advance_day);
+    var shipments: usize = 0;
+    for (gs.part_orders.items) |o| if (std.mem.eql(u8, o.part_key, "provisions") and o.dest == .company) {
+        shipments += 1;
+        try std.testing.expectEqual(@as(u32, 20), o.quantity);
+    };
+    try std.testing.expectEqual(@as(usize, 1), shipments);
+    _ = try execute(&gs, .advance_day);
+    shipments = 0;
+    for (gs.part_orders.items) |o| if (std.mem.eql(u8, o.part_key, "provisions") and o.dest == .company and o.status != .delivered) {
+        shipments += 1;
+    };
+    try std.testing.expectEqual(@as(usize, 1), shipments);
+    // tons = 0 removes it
+    _ = try execute(&gs, .{ .set_supply_policy = .{ .company = co, .min_days = 14, .tons = 0 } });
+    try std.testing.expectEqual(@as(usize, 0), gs.supply_policies.items.len);
+}
+
 test "lance roles: set on lances only, persisted on the force" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 3 });
     defer gs.deinit();
@@ -1619,12 +1684,15 @@ test "9A: couriers debit now, credit on arrival; policies top up on payday" {
         .transfer = .{ .from = .{ .company = co }, .to = .outfit, .amount = 999_999 },
     }));
 
-    // Standing policy: below the floor on payday → courier dispatched, capped.
+    // Standing policy (Stage 12: checked daily, capped per month): below the
+    // floor → a courier leaves the next day for the month's cap; payday
+    // opens a fresh cap, so crossing Feb 1 brings a second 100k — never the
+    // full 350k gap.
     _ = try execute(&gs, .{ .set_policy = .{ .entity = .{ .company = co }, .floor = 600_000, .monthly_cap = 100_000 } });
-    _ = try execute(&gs, .{ .advance_days = 30 }); // crosses Feb 1
-    try std.testing.expect(gs.fund_couriers.items.len >= 1 or gs.force(co).?.local_funds > 250_000);
     _ = try execute(&gs, .{ .advance_days = 5 });
-    try std.testing.expectEqual(@as(i64, 350_000), gs.force(co).?.local_funds); // +100k cap, not +350k
+    try std.testing.expectEqual(@as(i64, 350_000), gs.force(co).?.local_funds); // January's cap, arrived
+    _ = try execute(&gs, .{ .advance_days = 30 }); // crosses Feb 1
+    try std.testing.expectEqual(@as(i64, 450_000), gs.force(co).?.local_funds); // February's cap, and no more
 }
 
 test "9A: the structured log filters by entity and category" {

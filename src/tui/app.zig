@@ -81,7 +81,7 @@ fn tierFor(cols: u16, rows: u16) Tier {
 const office_roles = [_]game.person.Role{ .admin_command, .admin_logistics, .admin_transport, .admin_hr, .admin_finance };
 
 const verbs = [_][]const u8{
-    "admit",   "repay",   "sell",      "sellhq",    "disband",  "depot",    "role",
+    "admit",   "repay",   "sell",      "sellhq",    "disband",  "depot",    "role",   "supplypolicy",
     "day",     "save",    "quit",      "help",      "emblem",   "transfer", "policy", "loan",     "accept", "resolve",
     "order",   "ship",    "buy",       "assign",    "unassign", "autoassign", "autostaff", "upgrade", "tier",   "fabricate",
     "hire",    "recruit", "fire",      "post",      "train",    "triage",   "leave",  "mothball", "activate", "complete",
@@ -736,7 +736,7 @@ pub const App = struct {
             .people => "/ , filter (…, wounded) · m admit to medbay · t train · a seat · P post · x transfer · L leave · D fire · r record",
             .market => "Tab pane · Enter buy / order / order shortfall · b fabricate component · [ ] HQ board · q welcome",
             .ledger => "j/k treasury · t send cash to it by courier · p standing top-up (floor + monthly cap) · L loan · R repay",
-            .supply => "j/k site · on a company: t send cash · p top-up policy · s ship provisions from home · o order to the field",
+            .supply => "j/k site · on a company: t cash · p cash top-up policy · P resupply policy (days, tons) · s ship now · o order to the field",
             .forces => "Enter assign · a/u seat · A auto · o lance role · d depot · t train · x transfer · $ sell hull · X disband",
             .map => "h j k l move between worlds · f found HQ here · o offers here · n end turn · q welcome",
             .lab => "[ ] hull · j/k mount · - remove · + install · R order replacement · D send to depot (structure) · c clear · Enter commit",
@@ -1280,8 +1280,8 @@ pub const App = struct {
                     "  {a}lab{/}         + picks a part then a location (green = rules allow) · R orders a replacement for damaged gear · dim rows = full",
                     "  {a}structure{/}   not fitted in the Lab: D (Lab) or d (Forces) sends the hull to the depot; the bay consumes comp_* parts from the home HQ",
                     "  {a}money{/}       Ledger: L loan (simple interest) · R repay · Forces: $ sell hull · X disband company · HQ: $ sell HQ",
-                    "  {a}field cash{/}  Ledger or Supply, on a company: t courier cash now (days in transit) · p policy = keep it above a floor, at most cap/month",
-                    "  {a}resupply{/}    Supply, on a deployed company: s ship provisions/ammo from its home warehouse · o order straight to the field (slower, pricier)",
+                    "  {a}field cash{/}  t courier cash now · p policy = keep above a floor, checked daily, at most cap per month, one courier in flight at a time",
+                    "  {a}resupply{/}    s ship now · o order to the field · P policy = ship N tons from home whenever the company drops under D days of provisions",
                     "  {a}turn rules{/}  wounded must be admitted (m) and a negative treasury covered before the day can end; bankruptcy ends the game",
                     "  {a}emblem{/}      e on the Desk (or :emblem) changes the crest: presets or a PNG from ./, logos/, docs/logos/",
                     "  {a}command{/}     : opens the command line — every CLI verb works: day, transfer, order, accept, …",
@@ -2335,6 +2335,10 @@ pub const App = struct {
                         .hq => |id| std.fmt.bufPrint(&buf, "policy hq:{d} 500000 1000000", .{@intFromEnum(id)}) catch "policy ",
                         .outfit => "policy ",
                     } else "policy "),
+                    'P' => self.openCommand(if (site) |s| switch (s) {
+                        .company => |id| std.fmt.bufPrint(&buf, "supplypolicy co:{d} 14 20", .{@intFromEnum(id)}) catch "supplypolicy ",
+                        else => "supplypolicy co:",
+                    } else "supplypolicy co:"),
                     else => {},
                 }
             },
@@ -2961,6 +2965,11 @@ pub const App = struct {
         }
         if (eq(u8, verb, "policy")) {
             return .{ .set_policy = .{ .entity = try parseTreasury(try need(tokens.next())), .floor = try num(i64, tokens.next()), .monthly_cap = try num(i64, tokens.next()) } };
+        }
+        if (eq(u8, verb, "supplypolicy")) {
+            const site = try parseSite(try need(tokens.next()));
+            if (site != .company) return error.BadSite;
+            return .{ .set_supply_policy = .{ .company = site.company, .min_days = try num(u16, tokens.next()), .tons = try num(u32, tokens.next()) } };
         }
         if (eq(u8, verb, "loan")) {
             return .{ .take_loan = .{ .principal = try num(i64, tokens.next()), .term_months = try num(u16, tokens.next()) } };

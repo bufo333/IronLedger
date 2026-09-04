@@ -497,7 +497,10 @@ pub fn ledger(alloc: Alloc, gs: *GameState, selected: state_mod.Treasury, period
     try extras.append(alloc, "standing policies");
     if (gs.policies.items.len == 0) try extras.append(alloc, "  none");
     for (gs.policies.items) |p| {
-        try extras.append(alloc, try std.fmt.allocPrint(alloc, "  {s}  top up to {s} · cap {s}/mo", .{ try treasuryLabel(alloc, gs, p.entity), try money(alloc, p.floor), try money(alloc, p.monthly_cap) }));
+        try extras.append(alloc, try std.fmt.allocPrint(alloc, "  {s}  top up to {s} · {s} of {s} sent this month", .{ try treasuryLabel(alloc, gs, p.entity), try money(alloc, p.floor), try money(alloc, p.sent_this_month), try money(alloc, p.monthly_cap) }));
+    }
+    for (gs.supply_policies.items) |sp| {
+        try extras.append(alloc, try std.fmt.allocPrint(alloc, "  co:{d} {s}  resupply {d}t provisions when under {d} days", .{ @intFromEnum(sp.company), clip(forceName(gs, sp.company), 16), sp.tons, sp.min_days }));
     }
     try extras.append(alloc, "");
     try extras.append(alloc, try std.fmt.allocPrint(alloc, "loans · credit {s} of {s}", .{ try money(alloc, gs.creditRemaining()), try money(alloc, gs.creditLimit()) }));
@@ -700,8 +703,12 @@ pub fn supply(alloc: Alloc, gs: *GameState) !Supply {
             const per_day = @max(1, heads / 200); // provisions_person_days_per_ton = 200
             break :blk tons / per_day;
         } else null;
-        const title = try std.fmt.allocPrint(alloc, "co:{d} {{a}}{s}{{/}} field stores{s}{s} · funds {s}", .{
-            @intFromEnum(f.id), f.name, if (home) "" else " · {a}DEPLOYED{/}", if (days_left) |d| try std.fmt.allocPrint(alloc, " · {s}{d} days of provisions{{/}}", .{ if (d < 10) "{c}" else "{g}", d }) else "", try money(alloc, f.local_funds),
+        var resupply: []const u8 = "";
+        for (gs.supply_policies.items) |sp| if (sp.company == f.id) {
+            resupply = try std.fmt.allocPrint(alloc, " · resupply {d}t under {d} days", .{ sp.tons, sp.min_days });
+        };
+        const title = try std.fmt.allocPrint(alloc, "co:{d} {{a}}{s}{{/}} field stores{s}{s} · funds {s}{s}", .{
+            @intFromEnum(f.id), f.name, if (home) "" else " · {a}DEPLOYED{/}", if (days_left) |d| try std.fmt.allocPrint(alloc, " · {s}{d} days of provisions{{/}}", .{ if (d < 10) "{c}" else "{g}", d }) else "", try money(alloc, f.local_funds), resupply,
         });
         try siteLines(alloc, gs, &out, .{ .company = f.id }, title);
         while (sites.items.len < out.items.len) try sites.append(alloc, if (sites.items.len < out.items.len - 1) .{ .company = f.id } else null);

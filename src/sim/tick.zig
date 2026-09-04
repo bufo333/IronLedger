@@ -31,6 +31,7 @@ pub fn advanceDay(gs: *GameState) !void {
     // Phase order per clock.DayPhase — stubs marked with their stage.
     if (gs.clock.day_index % 7 == 0) network.resetWeeklyThroughput(gs); // links' week (Stage 9D)
     try runTravel(gs); // deliveries, couriers, transfers
+    try runPolicies(gs); // standing cash top-ups and resupply (Stage 12: daily)
     try hq_ops.runDaily(gs); // bays, fabrication, construction (Stage 9C)
     try runSupplyConsumption(gs); // supply_consumption phase (Stage 9B)
     try medical.runDailyHealing(gs); // medical phase
@@ -52,6 +53,59 @@ pub fn advanceDay(gs: *GameState) !void {
     }
     try runFinances(gs);
     try contract_events.expireDue(gs); // decisions phase: deadlines pass
+}
+
+/// Standing policies, daily (Stage 12). Cash: top an entity up to its
+/// floor by courier, at most the monthly cap per month, and never while a
+/// courier to it is already in flight. Provisions: ship the policy's
+/// tonnage from the home warehouse when a deployed company's days of
+/// supply fall under the floor, one shipment in flight at a time.
+fn runPolicies(gs: *GameState) !void {
+    for (gs.policies.items) |*policy| {
+        const balance = gs.treasuryBalance(policy.entity);
+        if (balance >= policy.floor) continue;
+        if (policy.sent_this_month >= policy.monthly_cap) continue;
+        var in_flight = false;
+        for (gs.fund_couriers.items) |c| if (std.meta.eql(c.to, policy.entity)) {
+            in_flight = true;
+        };
+        if (in_flight) continue;
+        const amount = @min(policy.floor - balance, policy.monthly_cap - policy.sent_this_month);
+        if (amount <= 0) continue;
+        const eta = gs.courierEtaDays(policy.entity);
+        gs.transferFunds(.outfit, policy.entity, amount, eta) catch continue;
+        policy.sent_this_month += amount;
+        const tags = GameState.treasuryTags(policy.entity);
+        try gs.log(.finance, .{ .company = tags.company, .hq = tags.hq }, "[finance] standing policy dispatches {d} c-bills (eta {d} days, {d} of {d} this month)", .{ amount, eta, policy.sent_this_month, policy.monthly_cap });
+    }
+
+    const commands = @import("commands.zig");
+    for (gs.supply_policies.items) |sp| {
+        const f = gs.forces.getPtr(sp.company) orelse continue;
+        if (gs.isCompanyHome(sp.company) or f.return_eta_day != null) continue;
+        const heads = gs.companyHeadcount(sp.company);
+        const per_day: u32 = @max(1, (heads + part_mod.provisions_person_days_per_ton - 1) / part_mod.provisions_person_days_per_ton);
+        const tons = gs.stockCount(.{ .company = sp.company }, "provisions");
+        if (tons / per_day >= sp.min_days) continue;
+        var in_flight = false;
+        for (gs.part_orders.items) |o| {
+            if (o.dest == .company and o.dest.company == sp.company and std.mem.eql(u8, o.part_key, "provisions") and (o.status == .in_transit or o.status == .sourcing)) in_flight = true;
+        }
+        if (in_flight) continue;
+        const home = gs.homeHqFor(sp.company);
+        if (home == .none) continue;
+        const available = gs.stockCount(.{ .hq = home }, "provisions");
+        const qty = @min(sp.tons, available);
+        if (qty == 0) {
+            if (gs.clock.day_index % 7 == 0) try gs.log(.delivery, .{ .company = sp.company, .hq = home }, "[supply] resupply policy: no provisions at {s} to ship to {s}", .{ gs.hqs.getPtr(home).?.name, f.name });
+            continue;
+        }
+        _ = commands.execute(gs, .{ .ship_stock = .{ .part_key = "provisions", .quantity = qty, .from = .{ .hq = home }, .to = .{ .company = sp.company } } }) catch |err| {
+            if (gs.clock.day_index % 7 == 0) try gs.log(.delivery, .{ .company = sp.company, .hq = home }, "[supply] resupply policy could not ship to {s}: {s}", .{ f.name, @errorName(err) });
+            continue;
+        };
+        try gs.log(.delivery, .{ .company = sp.company, .hq = home }, "[supply] resupply policy ships {d}t of provisions to {s} ({d} days left in the field)", .{ qty, f.name, tons / per_day });
+    }
 }
 
 /// Training lances (MekHQ lance role): held out of engagements, and their
@@ -295,16 +349,9 @@ fn runFinances(gs: *GameState) !void {
         });
     }
 
-    // Standing policies: top entities up to their floor, capped, by courier.
-    for (gs.policies.items) |policy| {
-        const balance = gs.treasuryBalance(policy.entity);
-        if (balance >= policy.floor) continue;
-        const amount = @min(policy.floor - balance, policy.monthly_cap);
-        const eta = gs.courierEtaDays(policy.entity);
-        gs.transferFunds(.outfit, policy.entity, amount, eta) catch continue;
-        const tags = GameState.treasuryTags(policy.entity);
-        try gs.log(.finance, .{ .company = tags.company, .hq = tags.hq }, "[finance] standing policy dispatches {d} c-bills (eta {d} days)", .{ amount, eta });
-    }
+    // Standing policies are checked daily (runPolicies); payday opens a
+    // fresh monthly cap.
+    for (gs.policies.items) |*policy| policy.sent_this_month = 0;
 
     // Active contracts pay monthly; beachhead deployments cost hardship pay
     // (ARCH §9.6) — both lines itemized per company.

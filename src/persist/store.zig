@@ -25,7 +25,7 @@ const contract_events = @import("../sim/contract_events.zig");
 const network = @import("../sim/network.zig");
 const clock_mod = @import("../sim/clock.zig");
 
-pub const schema_version = 3;
+pub const schema_version = 4;
 
 const ddl =
     \\CREATE TABLE IF NOT EXISTS player (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_seq INTEGER NOT NULL);
@@ -50,7 +50,8 @@ const ddl =
     \\CREATE TABLE IF NOT EXISTS txn (cid INTEGER NOT NULL, ord INTEGER NOT NULL, day INTEGER, amount INTEGER, category TEXT, company INTEGER, hq INTEGER, contract INTEGER, note TEXT);
     \\CREATE TABLE IF NOT EXISTS loan (cid INTEGER NOT NULL, ord INTEGER NOT NULL, principal INTEGER, balance INTEGER, rate_bp INTEGER, term INTEGER, next_pay INTEGER, payment INTEGER);
     \\CREATE TABLE IF NOT EXISTS courier (cid INTEGER NOT NULL, ord INTEGER NOT NULL, to_kind TEXT, to_id INTEGER, amount INTEGER, sent INTEGER, eta INTEGER);
-    \\CREATE TABLE IF NOT EXISTS policy (cid INTEGER NOT NULL, ord INTEGER NOT NULL, entity_kind TEXT, entity_id INTEGER, floor INTEGER, cap INTEGER);
+    \\CREATE TABLE IF NOT EXISTS policy (cid INTEGER NOT NULL, ord INTEGER NOT NULL, entity_kind TEXT, entity_id INTEGER, floor INTEGER, cap INTEGER, sent INTEGER NOT NULL DEFAULT 0);
+    \\CREATE TABLE IF NOT EXISTS supply_policy (cid INTEGER NOT NULL, ord INTEGER NOT NULL, company INTEGER, min_days INTEGER, tons INTEGER);
     \\CREATE TABLE IF NOT EXISTS bay_job (cid INTEGER NOT NULL, ord INTEGER NOT NULL, hq INTEGER, kind TEXT, unit INTEGER, item_key TEXT, duration INTEGER, queued INTEGER, started INTEGER, done INTEGER, cost INTEGER);
     \\CREATE TABLE IF NOT EXISTS candidate (cid INTEGER NOT NULL, ord INTEGER NOT NULL, hq INTEGER, first TEXT, last TEXT, callsign TEXT, role TEXT, experience TEXT, primary_skill INTEGER, secondary_skill INTEGER, bonus INTEGER, listed INTEGER, expires INTEGER);
     \\CREATE TABLE IF NOT EXISTS hq_link (cid INTEGER NOT NULL, ord INTEGER NOT NULL, a INTEGER, b INTEGER, level INTEGER, tons INTEGER, established INTEGER);
@@ -69,6 +70,7 @@ const tables = [_][]const u8{
     "unit",       "unit_slot",   "force",        "force_unit",      "force_child",  "stock",
     "hq",         "hq_facility", "hq_project",   "contract",        "txn",          "loan",
     "courier",    "policy",      "bay_job",      "candidate",       "hq_link",      "unit_transfer",
+    "supply_policy",
     "faction_cooling", "listing", "part_order",  "event_log",       "pending_event", "refit_plan",
     "refit_op",
 };
@@ -84,6 +86,10 @@ pub const Store = struct {
         // Schema v1 → v2: campaigns gained an owning player.
         if (!try hasColumn(db, "campaign", "player_id")) {
             try db.exec("ALTER TABLE campaign ADD COLUMN player_id INTEGER NOT NULL DEFAULT 0");
+        }
+        // Schema v3 → v4: policies track what they sent this month.
+        if (!try hasColumn(db, "policy", "sent")) {
+            try db.exec("ALTER TABLE policy ADD COLUMN sent INTEGER NOT NULL DEFAULT 0");
         }
         // Schema v2 → v3: medbay admission is the player's call.
         if (!try hasColumn(db, "person", "admitted")) {
@@ -452,11 +458,19 @@ pub const Store = struct {
             }
         }
         {
-            const st = try self.db.prepare("INSERT INTO policy VALUES (?1,?2,?3,?4,?5,?6)");
+            const st = try self.db.prepare("INSERT INTO policy VALUES (?1,?2,?3,?4,?5,?6,?7)");
             defer st.finalize();
             for (gs.policies.items, 0..) |p, i| {
                 const t = treasuryCols(p.entity);
-                try st.bindAll(.{ cid, @as(i64, @intCast(i)), t.kind, t.id, p.floor, p.monthly_cap });
+                try st.bindAll(.{ cid, @as(i64, @intCast(i)), t.kind, t.id, p.floor, p.monthly_cap, p.sent_this_month });
+                try st.run();
+            }
+        }
+        {
+            const st = try self.db.prepare("INSERT INTO supply_policy VALUES (?1,?2,?3,?4,?5)");
+            defer st.finalize();
+            for (gs.supply_policies.items, 0..) |p, i| {
+                try st.bindAll(.{ cid, @as(i64, @intCast(i)), @intFromEnum(p.company), @as(i64, p.min_days), @as(i64, p.tons) });
                 try st.run();
             }
         }
@@ -906,11 +920,19 @@ pub const Store = struct {
             }
         }
         {
-            const st = try self.db.prepare("SELECT entity_kind, entity_id, floor, cap FROM policy WHERE cid = ?1 ORDER BY ord");
+            const st = try self.db.prepare("SELECT entity_kind, entity_id, floor, cap, sent FROM policy WHERE cid = ?1 ORDER BY ord");
             defer st.finalize();
             try st.bindAll(.{cid});
             while (try st.next()) {
-                try gs.policies.append(alloc, .{ .entity = treasuryFromCols(try st.text(0, alloc), st.int(1)), .floor = st.int(2), .monthly_cap = st.int(3) });
+                try gs.policies.append(alloc, .{ .entity = treasuryFromCols(try st.text(0, alloc), st.int(1)), .floor = st.int(2), .monthly_cap = st.int(3), .sent_this_month = st.int(4) });
+            }
+        }
+        {
+            const st = try self.db.prepare("SELECT company, min_days, tons FROM supply_policy WHERE cid = ?1 ORDER BY ord");
+            defer st.finalize();
+            try st.bindAll(.{cid});
+            while (try st.next()) {
+                try gs.supply_policies.append(alloc, .{ .company = toId(types.ForceId, st.int(0)), .min_days = @intCast(st.int(1)), .tons = @intCast(st.int(2)) });
             }
         }
         {

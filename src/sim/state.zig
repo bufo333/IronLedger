@@ -51,6 +51,18 @@ pub const StandingPolicy = struct {
     entity: Treasury,
     floor: types.CBills,
     monthly_cap: types.CBills,
+    /// Dispatched so far this month (Stage 12: policies are checked daily,
+    /// the cap is per month; reset on payday).
+    sent_this_month: types.CBills = 0,
+};
+
+/// "Keep this company's field stores above `min_days` of provisions":
+/// when they drop under, `tons` are shipped from its home warehouse over
+/// the supply link (Stage 12). One inbound shipment at a time.
+pub const SupplyPolicy = struct {
+    company: types.ForceId,
+    min_days: u16,
+    tons: u32,
 };
 
 /// Structured campaign log (Stage 9A): every entry tagged so any entity's
@@ -188,8 +200,10 @@ pub const GameState = struct {
     event_log: std.ArrayListUnmanaged(LogEntry) = .empty,
     /// Money in transit between treasuries.
     fund_couriers: std.ArrayListUnmanaged(FundCourier) = .empty,
-    /// Standing top-up policies, executed on payday.
+    /// Standing top-up policies, checked daily under a monthly cap.
     policies: std.ArrayListUnmanaged(StandingPolicy) = .empty,
+    /// Automatic provisions resupply for deployed companies.
+    supply_policies: std.ArrayListUnmanaged(SupplyPolicy) = .empty,
     /// Mek bay queues across all HQs (Stage 9C).
     bay_jobs: std.ArrayListUnmanaged(BayJob) = .empty,
     /// Hiring-hall boards (Stage 9C.2), churned daily.
