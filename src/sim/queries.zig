@@ -651,28 +651,63 @@ pub fn unassigned(alloc: Alloc, gs: *GameState) ![]const []const u8 {
 
 // ------------------------------------------------------------------ supply
 
-pub fn supply(alloc: Alloc, gs: *GameState) ![]const []const u8 {
+pub const Supply = struct {
+    rows: []const []const u8,
+    /// The site each row belongs to (null for inbound/other rows).
+    site: []const ?types.Site,
+};
+
+pub fn supply(alloc: Alloc, gs: *GameState) !Supply {
     var out: std.ArrayListUnmanaged([]const u8) = .empty;
+    var sites: std.ArrayListUnmanaged(?types.Site) = .empty;
     var hit = gs.hqs.iterator();
     while (hit.next()) |e| {
         const h = e.value_ptr;
+        const before = out.items.len;
         try siteLines(alloc, gs, &out, .{ .hq = h.id }, try std.fmt.allocPrint(alloc, "hq:{d} {{a}}{s}{{/}} warehouse lv{d}", .{ @intFromEnum(h.id), h.name, h.effectiveFacilityLevel(.warehouse) }));
+        while (sites.items.len < out.items.len) try sites.append(alloc, if (sites.items.len < out.items.len - 1 or before == out.items.len) .{ .hq = h.id } else null);
     }
     var fit = gs.forces.iterator();
     while (fit.next()) |e| {
         const f = e.value_ptr;
         if (f.echelon != .company) continue;
-        try siteLines(alloc, gs, &out, .{ .company = f.id }, try std.fmt.allocPrint(alloc, "co:{d} {{a}}{s}{{/}} field stores{s}", .{ @intFromEnum(f.id), f.name, if (gs.isCompanyHome(f.id)) "" else " · {a}DEPLOYED{/}" }));
+        const home = gs.isCompanyHome(f.id);
+        const days_left: ?u32 = if (!home) blk: {
+            const heads = gs.companyHeadcount(f.id);
+            const tons = gs.stockCount(.{ .company = f.id }, "provisions");
+            const per_day = @max(1, heads / 200); // provisions_person_days_per_ton = 200
+            break :blk tons / per_day;
+        } else null;
+        const title = try std.fmt.allocPrint(alloc, "co:{d} {{a}}{s}{{/}} field stores{s}{s} · funds {s}", .{
+            @intFromEnum(f.id), f.name, if (home) "" else " · {a}DEPLOYED{/}", if (days_left) |d| try std.fmt.allocPrint(alloc, " · {s}{d} days of provisions{{/}}", .{ if (d < 10) "{c}" else "{g}", d }) else "", try money(alloc, f.local_funds),
+        });
+        try siteLines(alloc, gs, &out, .{ .company = f.id }, title);
+        while (sites.items.len < out.items.len) try sites.append(alloc, if (sites.items.len < out.items.len - 1) .{ .company = f.id } else null);
     }
     try out.append(alloc, "inbound");
+    try sites.append(alloc, null);
     var any = false;
     for (gs.part_orders.items) |o| {
         if (o.status == .delivered) continue;
         any = true;
         try out.append(alloc, try std.fmt.allocPrint(alloc, "  {s} x{d} → {s}  {s}  eta day {d}  cost {s}", .{ o.part_key, o.quantity, try siteLabel(alloc, gs, o.dest), @tagName(o.status), o.eta_day orelse 0, try money(alloc, o.cost) }));
+        try sites.append(alloc, null);
     }
-    if (!any) try out.append(alloc, "  none");
-    return out.toOwnedSlice(alloc);
+    if (!any) {
+        try out.append(alloc, "  none");
+        try sites.append(alloc, null);
+    }
+    try out.append(alloc, "");
+    try sites.append(alloc, null);
+    try out.append(alloc, "{d}on a company row: [t] send cash by courier · [p] standing top-up policy · [s] ship provisions from home · [o] order to the field{/}");
+    try sites.append(alloc, null);
+    return .{ .rows = try out.toOwnedSlice(alloc), .site = try sites.toOwnedSlice(alloc) };
+}
+
+/// The standing policy for a treasury, if any.
+pub fn policyFor(gs: *GameState, t: state_mod.Treasury) ?state_mod.StandingPolicy {
+    for (gs.policies.items) |p| if (std.meta.eql(p.entity, t)) return p;
+    return null;
 }
 
 pub fn siteLabel(alloc: Alloc, gs: *GameState, site: types.Site) ![]const u8 {
@@ -1358,6 +1393,10 @@ test "hall filter groups roles and map classifies worlds" {
     const l = try lab(al, &gs, meks[0]);
     try std.testing.expect(l.mounts.len > 0);
     try std.testing.expect(l.legal);
+
+    const sup = try supply(al, &gs);
+    try std.testing.expectEqual(sup.rows.len, sup.site.len);
+    try std.testing.expect(sup.site[0] != null and sup.site[0].? == .hq);
 
     // Personnel: everyone listed, filter narrows, record and seats build.
     const everyone = try people(al, &gs, .all);

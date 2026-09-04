@@ -694,7 +694,8 @@ pub const App = struct {
             .desk => "? help · F1-F10 / 1-0 screens · Tab pane · Enter act · e emblem · : command · n end turn · q welcome",
             .people => "/ filter · m admit to medbay · t train · a assign seat · P post · x transfer · L leave · D fire · r record",
             .market => "Tab pane · Enter buy / order / order shortfall · b fabricate component · [ ] HQ board · q welcome",
-            .ledger => "j/k treasury · L loan · R repay · t transfer · p policy · $ liquidation values in the pane · q welcome",
+            .ledger => "j/k treasury · t send cash to it by courier · p standing top-up (floor + monthly cap) · L loan · R repay",
+            .supply => "j/k site · on a company: t send cash · p top-up policy · s ship provisions from home · o order to the field",
             .forces => "Tab pane · Enter assign · a/u seat · A auto · t train · x transfer · $ sell hull · X disband company",
             .map => "h j k l move between worlds · f found HQ here · o offers here · n end turn · q welcome",
             .lab => "[ ] switch hull · j/k mount · - remove · + install… · c clear plan · Enter commit · q welcome",
@@ -1145,8 +1146,22 @@ pub const App = struct {
         const al = self.a();
         const g = &self.gs.?;
         const b = self.body();
-        const rows = try q.supply(al, g);
-        self.listPane(b, "SITES", rows, 0, true, true);
+        const view = try q.supply(al, g);
+        self.listPane(b, "SITES", view.rows, 0, true, true);
+    }
+
+    /// The site under the Supply cursor, if the row belongs to one.
+    fn supplySite(self: *App) !?types.Site {
+        const view = try q.supply(self.a(), &self.gs.?);
+        const c = self.cur(0).*;
+        if (c >= view.site.len) return null;
+        return view.site[c];
+    }
+
+    fn homeHqOf(self: *App, company: types.ForceId) u32 {
+        const g = &self.gs.?;
+        const id = g.homeHqFor(company);
+        return if (id != .none) @intFromEnum(id) else self.hqSelId(g);
     }
 
     fn drawHq(self: *App) !void {
@@ -1206,6 +1221,8 @@ pub const App = struct {
                     "  {a}people{/}      / filter · m admit wounded · t train · a assign seat · P post · x transfer · L leave · D fire",
                     "  {a}market{/}      F10/0: boards (Enter buys) · catalog (Enter orders, b fabricates comp_*) · demand (Enter orders shortfall)",
                     "  {a}money{/}       Ledger: L loan (simple interest) · R repay · Forces: $ sell hull · X disband company · HQ: $ sell HQ",
+                    "  {a}field cash{/}  Ledger or Supply, on a company: t courier cash now (days in transit) · p policy = keep it above a floor, at most cap/month",
+                    "  {a}resupply{/}    Supply, on a deployed company: s ship provisions/ammo from its home warehouse · o order straight to the field (slower, pricier)",
                     "  {a}turn rules{/}  wounded must be admitted (m) and a negative treasury covered before the day can end; bankruptcy ends the game",
                     "  {a}emblem{/}      e on the Desk (or :emblem) changes the crest: presets or a PNG from ./, logos/, docs/logos/",
                     "  {a}command{/}     : opens the command line — every CLI verb works: day, transfer, order, accept, …",
@@ -1213,7 +1230,7 @@ pub const App = struct {
                     "",
                     "  {d}[Esc] close{/}",
                 };
-                const r = self.modalRect(118, 20);
+                const r = self.modalRect(130, 22);
                 const inner = self.screen.pane(r, .{ .title = "HELP", .double = true });
                 self.screen.lines(inner, &rows, 0, null);
             },
@@ -1821,8 +1838,8 @@ pub const App = struct {
                 }
             },
             .supply => {
-                const rows = try q.supply(al, g);
-                self.moveCursor(0, delta, rows.len);
+                const view = try q.supply(al, g);
+                self.moveCursor(0, delta, view.rows.len);
             },
             .hq => {
                 const id: types.HqId = @enumFromInt(self.hqSelId(g));
@@ -2057,8 +2074,23 @@ pub const App = struct {
                 }
             },
             .ledger => switch (ch) {
-                't' => self.openCommand("transfer outfit "),
-                'p' => self.openCommand("policy "),
+                't', 'p' => {
+                    const all = try q.allTreasuries(al, g);
+                    const sel: Treasury = if (self.ledger_sel < all.len) all[self.ledger_sel] else .outfit;
+                    const label = try q.treasuryLabel(al, g, sel);
+                    const tok = if (std.mem.indexOfScalar(u8, label, ' ')) |i| label[0..i] else label;
+                    var buf: [128]u8 = undefined;
+                    if (ch == 't') {
+                        self.openCommand(if (sel == .outfit) "transfer outfit " else std.fmt.bufPrint(&buf, "transfer outfit {s} 250000", .{tok}) catch "transfer outfit ");
+                    } else {
+                        if (sel == .outfit) {
+                            self.say(.dim, "select an HQ or company row first — policies top up from the outfit treasury", .{});
+                            return;
+                        }
+                        const existing = q.policyFor(g, sel);
+                        self.openCommand(std.fmt.bufPrint(&buf, "policy {s} {d} {d}", .{ tok, if (existing) |p| p.floor else 250_000, if (existing) |p| p.monthly_cap else 500_000 }) catch "policy ");
+                    }
+                },
                 'L' => {
                     var buf: [96]u8 = undefined;
                     self.openCommand(std.fmt.bufPrint(&buf, "loan {d} 12", .{@min(g.creditRemaining(), 1_000_000)}) catch "loan ");
@@ -2109,10 +2141,31 @@ pub const App = struct {
                     else => {},
                 }
             },
-            .supply => switch (ch) {
-                'o' => self.openCommand("order "),
-                's' => self.openCommand("ship "),
-                else => {},
+            .supply => {
+                const site = try self.supplySite();
+                var buf: [128]u8 = undefined;
+                switch (ch) {
+                    'o' => self.openCommand(if (site) |s| switch (s) {
+                        .company => |id| std.fmt.bufPrint(&buf, "order provisions 10 co:{d}", .{@intFromEnum(id)}) catch "order ",
+                        .hq => |id| std.fmt.bufPrint(&buf, "order provisions 10 hq:{d}", .{@intFromEnum(id)}) catch "order ",
+                        .outfit => "order ",
+                    } else "order "),
+                    's' => self.openCommand(if (site) |s| switch (s) {
+                        .company => |id| std.fmt.bufPrint(&buf, "ship provisions 10 hq:{d} co:{d}", .{ self.homeHqOf(id), @intFromEnum(id) }) catch "ship ",
+                        else => "ship provisions 10 ",
+                    } else "ship provisions 10 "),
+                    't' => self.openCommand(if (site) |s| switch (s) {
+                        .company => |id| std.fmt.bufPrint(&buf, "transfer outfit co:{d} 250000", .{@intFromEnum(id)}) catch "transfer outfit ",
+                        .hq => |id| std.fmt.bufPrint(&buf, "transfer outfit hq:{d} 500000", .{@intFromEnum(id)}) catch "transfer outfit ",
+                        .outfit => "transfer outfit ",
+                    } else "transfer outfit "),
+                    'p' => self.openCommand(if (site) |s| switch (s) {
+                        .company => |id| std.fmt.bufPrint(&buf, "policy co:{d} 250000 500000", .{@intFromEnum(id)}) catch "policy ",
+                        .hq => |id| std.fmt.bufPrint(&buf, "policy hq:{d} 500000 1000000", .{@intFromEnum(id)}) catch "policy ",
+                        .outfit => "policy ",
+                    } else "policy "),
+                    else => {},
+                }
             },
             .hq => {
                 var n: usize = 0;
