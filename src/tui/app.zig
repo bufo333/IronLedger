@@ -1284,13 +1284,14 @@ pub const App = struct {
                     "  {a}field cash{/}  t courier cash now · p policy = keep above a floor, checked daily, at most cap per month, one courier in flight at a time",
                     "  {a}resupply{/}    P policy `supplypolicy co:N days tons [battles]` — provisions under D days → ship N t; ammo per family sized to the link (or [battles])",
                     "  {a}turn rules{/}  wounded must be admitted (m) and a negative treasury covered before the day can end; bankruptcy ends the game",
+                    "  {a}reputation{/}  every offer's pay × (1 + rep × 0.5%), clamped 0.8–1.3, and more offers per board · complete +1 (+VP) · breach −2 · decisions show their rep effect",
                     "  {a}emblem{/}      e on the Desk (or :emblem) changes the crest: presets or a PNG from ./, logos/, docs/logos/",
                     "  {a}command{/}     : opens the command line — every CLI verb works: day, transfer, order, accept, …",
                     "  {a}leave{/}       q returns to the welcome screen (save / discard / stay)",
                     "",
                     "  {d}[Esc] close{/}",
                 };
-                const r = self.modalRect(130, 27);
+                const r = self.modalRect(134, 28);
                 const inner = self.screen.pane(r, .{ .title = "HELP", .double = true });
                 self.screen.lines(inner, &rows, 0, null);
             },

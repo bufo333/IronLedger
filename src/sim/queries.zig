@@ -186,7 +186,7 @@ pub fn desk(alloc: Alloc, gs: *GameState, log_rows: usize) !Desk {
     for (gs.event_queue.pending.items, 0..) |ev, i| {
         if (!ev.needsDecision()) continue;
         var opts: std.ArrayListUnmanaged([]const u8) = .empty;
-        for (ev.options) |o| try opts.append(alloc, o.label);
+        for (ev.options) |o| try opts.append(alloc, try std.fmt.allocPrint(alloc, "{s}   {s}", .{ o.label, try effectsText(alloc, o.effects) }));
         const entry = contract_events.entryForKind(ev.kind);
         try inbox.append(alloc, .{
             .event_index = i,
@@ -249,6 +249,38 @@ pub fn desk(alloc: Alloc, gs: *GameState, log_rows: usize) !Desk {
         .hqs = try hqs.toOwnedSlice(alloc),
         .log = try log.toOwnedSlice(alloc),
     };
+}
+
+/// An option's consequences as coloured tags: green for gains, red for
+/// costs — reputation first, because it is the one that lingers.
+pub fn effectsText(alloc: Alloc, effects: []const @import("events.zig").Effect) ![]const u8 {
+    var out: std.ArrayListUnmanaged(u8) = .empty;
+    if (effects.len == 0) return "{d}no effect{/}";
+    // reputation first
+    for (effects) |e| switch (e) {
+        .reputation => |d| try appendTag(alloc, &out, d >= 0, try std.fmt.allocPrint(alloc, "rep {s}{d}", .{ if (d >= 0) "+" else "", d })),
+        else => {},
+    };
+    for (effects) |e| switch (e) {
+        .reputation => {},
+        .cash => |c| try appendTag(alloc, &out, c >= 0, try std.fmt.allocPrint(alloc, "{s}{s} C", .{ if (c >= 0) "+" else "", try money(alloc, c) })),
+        .cash_monthly_pct => |p| try appendTag(alloc, &out, p >= 0, try std.fmt.allocPrint(alloc, "{s}{d}% of a month's pay", .{ if (p >= 0) "+" else "", p })),
+        .morale => |m| try appendTag(alloc, &out, m >= 0, try std.fmt.allocPrint(alloc, "morale {s}{d}", .{ if (m >= 0) "+" else "", m })),
+        .fatigue => |f| try appendTag(alloc, &out, false, try std.fmt.allocPrint(alloc, "fatigue +{d}", .{f})),
+        .xp_all => |x| try appendTag(alloc, &out, true, try std.fmt.allocPrint(alloc, "XP +{d} all", .{x})),
+        .score => |s| try appendTag(alloc, &out, s >= 0, try std.fmt.allocPrint(alloc, "contract score {s}{d}", .{ if (s >= 0) "+" else "", s })),
+        .damage_random_units => |n| try appendTag(alloc, &out, false, try std.fmt.allocPrint(alloc, "{d} hull{s} damaged", .{ n, if (n == 1) "" else "s" })),
+        .parts_windfall => |n| try appendTag(alloc, &out, true, try std.fmt.allocPrint(alloc, "parts windfall ×{d}", .{n})),
+        .supply_loss => |c| try appendTag(alloc, &out, false, try std.fmt.allocPrint(alloc, "supplies −{s} C", .{try money(alloc, c)})),
+    };
+    return out.toOwnedSlice(alloc);
+}
+
+fn appendTag(alloc: Alloc, out: *std.ArrayListUnmanaged(u8), good: bool, text: []const u8) !void {
+    if (out.items.len > 0) try out.appendSlice(alloc, " ");
+    try out.appendSlice(alloc, if (good) "{g}[" else "{c}[");
+    try out.appendSlice(alloc, text);
+    try out.appendSlice(alloc, "]{/}");
 }
 
 pub fn logRow(alloc: Alloc, e: *const state_mod.LogEntry) ![]const u8 {
