@@ -56,6 +56,20 @@ pub fn hopCostMultBp(via_warehouse: u8, via_spaceport: u8) types.Bp {
     return @max(10_000, 14_000 - 500 * hub);
 }
 
+/// Transit charter multiplier when the outfit's own ships lift part of a
+/// company (Stage 12.15): the carried share still pays the jumpship collar
+/// (half the charter) unless an owned jumpship makes the run too. // TUNE
+pub fn transitFreightBp(covered_bp: types.Bp, own_jumpship: bool) types.Bp {
+    const covered = @min(covered_bp, 10_000);
+    const collar_bp: types.Bp = if (own_jumpship) 0 else 5_000;
+    return 10_000 - covered + @divTrunc(covered * collar_bp, 10_000);
+}
+
+/// Per-hop delay multiplier on a dedicated line: your own jumpship, no
+/// waiting for a charter. Freight on that hop is the ship's carry cost,
+/// already billed monthly. // TUNE
+pub const dedicated_line_cost_bp: types.Bp = 8_000;
+
 /// Total door-to-door days for a route.
 pub fn routeDelayDays(hops: []const Hop) u32 {
     var total: u32 = 0;
@@ -71,6 +85,7 @@ pub fn routeCostMultBp(hops: []const Hop) types.Bp {
     var mult: types.Bp = 10_000;
     for (hops) |h| {
         mult = @divTrunc(mult * hopCostMultBp(h.via_warehouse, h.via_spaceport), 10_000);
+        if (h.link_level >= 3) mult = @divTrunc(mult * dedicated_line_cost_bp, 10_000);
     }
     return mult;
 }
@@ -148,4 +163,14 @@ test "local purchases: expensive but viable, capped, eased by industry" {
     try std.testing.expectEqual(@as(types.Bp, 25_000), localPurchaseMultBp(35, 0)); // one jump beyond: ×2.5
     try std.testing.expectEqual(@as(types.Bp, 40_000), localPurchaseMultBp(300, 0)); // deep space: capped ×4
     try std.testing.expect(localPurchaseMultBp(65, 3) < localPurchaseMultBp(65, 0)); // industry helps
+}
+
+test "own lift cuts the transit charter: dropship halves it, jumpship waives it" {
+    try std.testing.expectEqual(@as(types.Bp, 10_000), transitFreightBp(0, false));
+    try std.testing.expectEqual(@as(types.Bp, 5_000), transitFreightBp(10_000, false));
+    try std.testing.expectEqual(@as(types.Bp, 0), transitFreightBp(10_000, true));
+    try std.testing.expectEqual(@as(types.Bp, 7_500), transitFreightBp(5_000, false));
+    const charter = [_]Hop{.{ .link_level = 1 }};
+    const dedicated = [_]Hop{.{ .link_level = 3 }};
+    try std.testing.expect(routeCostMultBp(&dedicated) < routeCostMultBp(&charter));
 }

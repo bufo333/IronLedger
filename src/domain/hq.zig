@@ -6,6 +6,7 @@
 
 const std = @import("std");
 const types = @import("types.zig");
+const SupportLanceKind = @import("force.zig").SupportLanceKind;
 
 pub const HqTier = enum {
     brigade, // home base: best facilities, deepest stock, one only
@@ -46,6 +47,9 @@ pub const Capacity = struct {
     combat_companies: u8,
     lances_per_company: u8, // 3 base, up to 5 with mek bay investment
     support_companies: u8,
+    /// Support lances the support company may hold (GAMEPLAY: hospital,
+    /// mess and warehouse levels unlock lance slots).
+    support_lances: u8,
     air_companies: u8,
     dropship_berths: u8,
     jumpship_berths: u8,
@@ -193,6 +197,13 @@ pub const Hq = struct {
         // A company's 3 line lances + recon at bay level 1; the fifth lance
         // needs a level-3 bay. // TUNE
         const lance_cap: u8 = if (bay == 0) 3 else if (bay >= 3) 5 else 4;
+        // The four staple support lances (salvage, MASH, logistics,
+        // security) come with the slot; a mess needs a real mess hall, and
+        // a deep hospital or warehouse opens one more. // TUNE
+        const mess = self.effectiveFacilityLevel(.mess);
+        const hospital = self.effectiveFacilityLevel(.hospital);
+        const warehouse = self.effectiveFacilityLevel(.warehouse);
+        const support_cap: u8 = 4 + @as(u8, @intFromBool(mess >= 2)) + @as(u8, @intFromBool(hospital >= 3 or warehouse >= 3));
 
         return switch (self.tier) {
             .field => .{
@@ -200,6 +211,7 @@ pub const Hq = struct {
                 .combat_companies = 0,
                 .lances_per_company = 3,
                 .support_companies = 0,
+                .support_lances = 0,
                 .air_companies = 0,
                 .dropship_berths = 0,
                 .jumpship_berths = 0,
@@ -208,6 +220,7 @@ pub const Hq = struct {
                 .combat_companies = 1,
                 .lances_per_company = lance_cap,
                 .support_companies = 1,
+                .support_lances = support_cap,
                 .air_companies = if (port >= 3) 1 else 0,
                 .dropship_berths = 1 + port / 2,
                 .jumpship_berths = if (port >= 4 and comms >= 3) 1 else 0,
@@ -216,10 +229,24 @@ pub const Hq = struct {
                 .combat_companies = 2,
                 .lances_per_company = lance_cap,
                 .support_companies = 2,
+                .support_lances = support_cap + 2,
                 .air_companies = 1 + @as(u8, @intFromBool(port >= 4)),
                 .dropship_berths = 2 + port,
                 .jumpship_berths = 1 + @as(u8, @intFromBool(port >= 4 and comms >= 4)),
             },
+        };
+    }
+
+    /// Whether this HQ's facilities can stand up a support lance of `kind`
+    /// (Stage 12.15): a mess lance needs a mess hall (≥ 2), MASH a hospital,
+    /// a logistics lance a warehouse; salvage and security always. // TUNE
+    pub fn supportLanceAllowed(self: *const Hq, kind: SupportLanceKind) bool {
+        if (self.tier == .field) return false;
+        return switch (kind) {
+            .mess => self.effectiveFacilityLevel(.mess) >= 2,
+            .mash => self.effectiveFacilityLevel(.hospital) >= 1,
+            .transport => self.effectiveFacilityLevel(.warehouse) >= 1,
+            .salvage, .security => true,
         };
     }
 
@@ -281,6 +308,14 @@ test "capacity: field < regional < brigade; facilities open slots" {
     cap = hq.capacity();
     try std.testing.expectEqual(@as(u8, 5), cap.lances_per_company); // the 5-lance company
     try std.testing.expectEqual(@as(u8, 1), cap.air_companies);
+    try std.testing.expectEqual(@as(u8, 4), cap.support_lances); // no mess, hospital or warehouse yet
+    try std.testing.expect(!hq.supportLanceAllowed(.mess));
+    try std.testing.expect(hq.supportLanceAllowed(.salvage));
+    try hq.facilities.append(std.testing.allocator, .{ .kind = .mess, .level = 2 });
+    try hq.facilities.append(std.testing.allocator, .{ .kind = .warehouse, .level = 3 });
+    try std.testing.expectEqual(@as(u8, 6), hq.capacity().support_lances);
+    try std.testing.expect(hq.supportLanceAllowed(.mess));
+    try std.testing.expect(hq.supportLanceAllowed(.transport));
     try std.testing.expectEqual(@as(u8, 3), cap.dropship_berths);
     try std.testing.expectEqual(@as(u8, 1), cap.jumpship_berths);
 

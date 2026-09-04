@@ -1206,7 +1206,9 @@ pub fn hqDetail(alloc: Alloc, gs: *GameState, id: types.HqId) ![]const []const u
     }
     try out.append(alloc, "");
     const cap = h.capacity();
-    try out.append(alloc, try std.fmt.allocPrint(alloc, "capacity   {d} companies · ≤{d} lances each · {d} support · {d} berths · {d}t storage", .{ cap.combat_companies, cap.lances_per_company, cap.support_companies, cap.dropship_berths, h.warehouseCapacityTons() }));
+    try out.append(alloc, try std.fmt.allocPrint(alloc, "capacity   {d} companies · ≤{d} lances each · {d} support lances · {d} air wing{s} ({d} here) · {d}t storage", .{ cap.combat_companies, cap.lances_per_company, cap.support_lances, cap.air_companies, if (cap.air_companies == 1) "" else "s", gs.airCompaniesAtHq(id), h.warehouseCapacityTons() }));
+    try out.append(alloc, try std.fmt.allocPrint(alloc, "berths     {d} dropship ({d} held) · {d} jumpship ({d} held){s}", .{ cap.dropship_berths, gs.transportsBerthedAt(id, .dropship), cap.jumpship_berths, gs.transportsBerthedAt(id, .jumpship), if (cap.air_companies == 0) " · {d}spaceport 3 opens an air wing slot, 4 (+comms 3) a jumpship berth{/}" else "" }));
+    for (try berths(alloc, gs, id)) |line| try out.append(alloc, line);
     try out.append(alloc, try std.fmt.allocPrint(alloc, "upkeep     {s} / month · funds {s}", .{ try money(alloc, h.monthly_upkeep), try money(alloc, h.funds) }));
     try out.append(alloc, "");
     try out.append(alloc, "projects");
@@ -1597,6 +1599,7 @@ pub fn manning(alloc: Alloc, gs: *GameState, company: types.ForceId) ![]ManningR
     var vehicles: u32 = 0;
     var platoons: u32 = 0;
     var mash: u32 = 0;
+    var fighters: u32 = 0;
     var uit = gs.units.iterator();
     while (uit.next()) |e| {
         const u = e.value_ptr;
@@ -1609,6 +1612,8 @@ pub fn manning(alloc: Alloc, gs: *GameState, company: types.ForceId) ![]ManningR
         switch (u.kind) {
             .mek => meks += 1,
             .infantry => platoons += 1,
+            .aerospace => fighters += 1,
+            .dropship, .jumpship => {}, // crewed by ship crews at the berth, not the company
             .mash => {
                 vehicles += 1;
                 mash += 1;
@@ -1622,6 +1627,8 @@ pub fn manning(alloc: Alloc, gs: *GameState, company: types.ForceId) ![]ManningR
         .{ .role = .mekwarrior, .need = meks, .why = "one per mek" },
         .{ .role = .vehicle_crew, .need = vehicles, .why = "one per truck, rig or ambulance" },
         .{ .role = .infantry, .need = platoons, .why = "one per security platoon" },
+        .{ .role = .aero_pilot, .need = fighters, .why = "one per fighter" },
+        .{ .role = .tech_aero, .need = fighters, .why = "one per fighter" },
         .{ .role = .tech_mek, .need = staff.techs, .why = "one per mek" },
         .{ .role = .astech, .need = staff.astechs, .why = "six per mek tech (hours)" },
         .{ .role = .tech_mechanic, .need = vehicles / 2, .why = "one per two vehicles" },
@@ -1701,6 +1708,40 @@ pub fn raiseCandidates(alloc: Alloc, gs: *GameState, company: types.ForceId, pas
         try out.append(alloc, .{ .kind = .listing, .listing = i, .text = try std.fmt.allocPrint(alloc, "{{a}}{s}{{/}} #{d: <3} {s: <8} {s} {d: >3}t  {s}  {s: >10}  {s}", .{ try padCells(alloc, "", if (board) |h| h.name else "board", 12), i, l.item_key, try padCells(alloc, "", ch.name, 16), ch.tonnage, try padCells(alloc, "", cond_text, 52), try money(alloc, l.price), if (days == 0) "now" else try std.fmt.allocPrint(alloc, "{d} days", .{days}) }) });
     }
     return out.toOwnedSlice(alloc);
+}
+
+/// The ships holding berths at an HQ: crew, status, and which company
+/// they are away with (Stage 12.15).
+pub fn berths(alloc: Alloc, gs: *GameState, hq_id: types.HqId) ![][]const u8 {
+    var out: std.ArrayListUnmanaged([]const u8) = .empty;
+    var it = gs.units.iterator();
+    while (it.next()) |e| {
+        const u = e.value_ptr;
+        if (!u.kind.isTransport() or u.berth_hq != hq_id) continue;
+        const ch = chassis_mod.find(u.chassis_key);
+        const crew = gs.person(u.pilot);
+        const lift_text = if (ch) |c| (if (c.kind == .dropship) try std.fmt.allocPrint(alloc, "{d} mek · {d} fighter · {d}t cargo", .{ c.mek_bays, c.asf_bays, c.cargo_tons }) else try std.fmt.allocPrint(alloc, "{d} collar{s}", .{ c.collars, if (c.collars == 1) "" else "s" })) else "";
+        const where: []const u8 = if (u.force != .none) try std.fmt.allocPrint(alloc, "{{a}}away with {s}{{/}}", .{forceName(gs, u.force)}) else if (u.status != .ready) try std.fmt.allocPrint(alloc, "{{c}}{s}{{/}}", .{@tagName(u.status)}) else "{g}at berth{/}";
+        try out.append(alloc, try std.fmt.allocPrint(alloc, "  #{d: <3} {s: <9} {s: <9} {s}  {s}  {s}", .{
+            @intFromEnum(u.id), u.chassis_key, if (ch) |c| c.name else "?", try padCells(alloc, "", lift_text, 30),
+            if (crew) |c| try padCells(alloc, "", try std.fmt.allocPrint(alloc, "{s} {s}", .{ c.first_name, c.last_name }), 18) else try padCells(alloc, "{c}", "— no crew", 18),
+            where,
+        }));
+    }
+    return out.toOwnedSlice(alloc);
+}
+
+/// What the outfit's own ships would lift for a company's next contract.
+pub fn liftText(alloc: Alloc, gs: *GameState, company: types.ForceId) ![]const u8 {
+    const commands = @import("commands.zig");
+    const plan = commands.planLift(gs, company, false) catch return "";
+    if (plan.needed == 0) return "";
+    if (plan.ships == 0 and !plan.own_jumpship) return "lift: charter for every hull (no dropship of your own at the home berth)";
+    const bp: u32 = @intCast(@import("../econ/logistics.zig").transitFreightBp(plan.covered_bp, plan.own_jumpship));
+    return try std.fmt.allocPrint(alloc, "lift: {d} of {d} hulls on {d} own dropship{s}{s} — charter ×{d}.{d:0>2}", .{
+        plan.carried, plan.needed, plan.ships, if (plan.ships == 1) "" else "s", if (plan.own_jumpship) " + own jumpship" else "",
+        bp / 10_000,                                                                                          (bp % 10_000) / 100,
+    });
 }
 
 fn planetMod() type {

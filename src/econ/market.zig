@@ -74,6 +74,10 @@ pub const structural_fab_days = 7;
 pub const stock_resale_bp: types.Bp = 5_000;
 pub const component_resale_bp: types.Bp = 4_000;
 
+/// Transports list at a fraction of their canon price (Stage 12.15): a
+/// Leopard is a mid-game capital purchase, not a decade of profit. // TUNE
+pub const transport_price_bp: types.Bp = 2_500;
+
 pub const Rarity = types.Rarity; // canonical home: domain/types.zig
 
 /// One availability roll: does an item of this rarity show up in this

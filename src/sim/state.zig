@@ -639,6 +639,116 @@ pub const GameState = struct {
         return n;
     }
 
+    /// Air wings of the companies assigned to an HQ (Stage 12.15).
+    pub fn airCompaniesAtHq(self: *GameState, hq_id: types.HqId) u32 {
+        var n: u32 = 0;
+        var it = self.forces.iterator();
+        while (it.next()) |entry| {
+            const f = entry.value_ptr;
+            if (f.echelon != .air_company) continue;
+            const co = self.forces.getPtr(f.parent) orelse continue;
+            if (co.supplying_hq == hq_id) n += 1;
+        }
+        return n;
+    }
+
+    /// The company's air wing, if raised.
+    pub fn airCompanyOf(self: *GameState, company: types.ForceId) ?types.ForceId {
+        const f = self.forces.getPtr(company) orelse return null;
+        for (f.children.items) |cid| {
+            const c = self.forces.getPtr(cid) orelse continue;
+            if (c.echelon == .air_company) return cid;
+        }
+        return null;
+    }
+
+    /// The company's support echelon (Omega Company), if any.
+    pub fn supportCompanyOf(self: *GameState, company: types.ForceId) ?types.ForceId {
+        const f = self.forces.getPtr(company) orelse return null;
+        for (f.children.items) |cid| {
+            const c = self.forces.getPtr(cid) orelse continue;
+            if (c.echelon == .support_company) return cid;
+        }
+        return null;
+    }
+
+    /// Lances under a force of one echelon (air lances of a wing, support
+    /// lances of a support company).
+    pub fn lancesOfEchelon(self: *GameState, parent: types.ForceId, echelon: force_mod.Echelon) u32 {
+        const f = self.forces.getPtr(parent) orelse return 0;
+        var n: u32 = 0;
+        for (f.children.items) |cid| {
+            const c = self.forces.getPtr(cid) orelse continue;
+            if (c.echelon == echelon) n += 1;
+        }
+        return n;
+    }
+
+    /// Transports of one kind holding a berth at an HQ.
+    pub fn transportsBerthedAt(self: *GameState, hq_id: types.HqId, kind: unit_mod.UnitKind) u32 {
+        var n: u32 = 0;
+        var it = self.units.iterator();
+        while (it.next()) |entry| {
+            const u = entry.value_ptr;
+            if (u.kind == kind and u.berth_hq == hq_id and u.status != .destroyed) n += 1;
+        }
+        return n;
+    }
+
+    /// A ship is fit to sail when it is berthed, ready, crewed and not
+    /// already carrying a company (its `force` is set for the tour).
+    pub fn transportAvailable(self: *GameState, u: *const unit_mod.Unit) bool {
+        if (!u.kind.isTransport() or u.status != .ready or u.force != .none) return false;
+        const crew = self.person(u.pilot) orelse return false;
+        return crew.isAvailable(self.clock.day_index);
+    }
+
+    pub const Lift = struct {
+        mek: u32 = 0,
+        asf: u32 = 0,
+        vehicle: u32 = 0,
+        cargo_tons: u32 = 0,
+        dropships: u32 = 0,
+        jumpship_collars: u32 = 0,
+    };
+
+    /// What the crewed, idle ships berthed at an HQ can lift (Stage 12.15).
+    pub fn availableLift(self: *GameState, hq_id: types.HqId) Lift {
+        var lift: Lift = .{};
+        var it = self.units.iterator();
+        while (it.next()) |entry| {
+            const u = entry.value_ptr;
+            if (u.berth_hq != hq_id or !self.transportAvailable(u)) continue;
+            const design = chassis_mod.find(u.chassis_key) orelse continue;
+            switch (u.kind) {
+                .dropship => {
+                    lift.mek += design.mek_bays;
+                    lift.asf += design.asf_bays;
+                    lift.vehicle += design.vehicle_bays;
+                    lift.cargo_tons += design.cargo_tons;
+                    lift.dropships += 1;
+                },
+                .jumpship => lift.jumpship_collars += design.collars,
+                else => {},
+            }
+        }
+        return lift;
+    }
+
+    /// A crewed jumpship berthed at either end of a link (the dedicated
+    /// line of a level-3 supply link, GAMEPLAY "requires owning one").
+    pub fn ownsCrewedJumpshipAt(self: *GameState, a: types.HqId, b: types.HqId) bool {
+        var it = self.units.iterator();
+        while (it.next()) |entry| {
+            const u = entry.value_ptr;
+            if (u.kind != .jumpship or (u.berth_hq != a and u.berth_hq != b)) continue;
+            if (u.status == .destroyed) continue;
+            const crew = self.person(u.pilot) orelse continue;
+            if (crew.isAvailable(self.clock.day_index)) return true;
+        }
+        return false;
+    }
+
     pub const AssignHqError = error{ UnknownForce, UnknownHq, NotACompany, CapacityFull, TooManyLances };
 
     /// Assign a company to an HQ, enforcing the HQ's capacity slots
@@ -1300,11 +1410,25 @@ pub const GameState = struct {
         }
         var dest = company;
         if (self.forces.getPtr(company)) |co| {
-            for (co.children.items) |cid| {
-                const lance = self.forces.getPtr(cid) orelse continue;
-                if (lance.echelon == .lance and lance.units.items.len < force_mod.lance_size) {
-                    dest = cid;
-                    break;
+            if (u.kind == .aerospace) {
+                // Fighters go to the air wing's first lance with room.
+                if (self.airCompanyOf(company)) |wing_id| {
+                    const wing = self.forces.getPtr(wing_id).?;
+                    for (wing.children.items) |cid| {
+                        const lance = self.forces.getPtr(cid) orelse continue;
+                        if (lance.echelon == .air_lance and lance.units.items.len < force_mod.lance_size) {
+                            dest = cid;
+                            break;
+                        }
+                    }
+                }
+            } else if (u.kind == .mek) {
+                for (co.children.items) |cid| {
+                    const lance = self.forces.getPtr(cid) orelse continue;
+                    if (lance.echelon == .lance and lance.units.items.len < force_mod.lance_size) {
+                        dest = cid;
+                        break;
+                    }
                 }
             }
         }
@@ -1463,6 +1587,7 @@ pub const GameState = struct {
             h.update(std.mem.asBytes(&u.armor_pct));
             h.update(std.mem.asBytes(&u.force));
             h.update(std.mem.asBytes(&u.pilot));
+            h.update(std.mem.asBytes(&u.berth_hq));
         }
         var fit = self.forces.iterator();
         while (fit.next()) |entry| {

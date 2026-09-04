@@ -26,6 +26,14 @@ pub const SupportLanceKind = enum {
     transport, // supply buffer, shipment handling at the deployed end
 };
 
+/// What `new_lance` raises (Stage 12.15): a line lance, an air lance under
+/// the company's air wing, or a support lance of one kind under Omega.
+pub const NewLanceKind = union(enum) {
+    line,
+    air,
+    support: SupportLanceKind,
+};
+
 /// AtB lance roles: what a lance is tasked with while on contract; drives
 /// scenario generation odds and training XP (Stage 6/7).
 pub const LanceRole = enum { fighting, defense, scouting, training, unassigned };
@@ -78,6 +86,8 @@ pub const lance_size = 4;
 /// (`Hq.capacity().lances_per_company`, ARCH §9.3).
 pub const base_lances_per_company = 3;
 pub const max_lances_per_company = 5;
+/// Air lances per air wing. // TUNE
+pub const max_air_lances = 3;
 pub const base_meks_per_company = lance_size * base_lances_per_company;
 
 test "company math" {

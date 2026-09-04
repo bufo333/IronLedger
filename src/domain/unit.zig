@@ -18,6 +18,20 @@ pub const UnitKind = enum {
     dropship,
     jumpship,
 
+    pub fn isTransport(self: UnitKind) bool {
+        return self == .dropship or self == .jumpship;
+    }
+
+    /// Which dropship bay kind carries this hull (null: rides as cargo/crew).
+    pub fn bayKind(self: UnitKind) ?BayKind {
+        return switch (self) {
+            .mek => .mek,
+            .aerospace => .asf,
+            .vehicle, .mash, .mobile_field_base, .cargo => .vehicle,
+            else => null,
+        };
+    }
+
     pub fn isCombat(self: UnitKind) bool {
         return switch (self) {
             .mek, .vehicle, .aerospace, .battle_armor, .infantry => true,
@@ -25,6 +39,8 @@ pub const UnitKind = enum {
         };
     }
 };
+
+pub const BayKind = enum { mek, asf, vehicle };
 
 pub const UnitStatus = enum { ready, damaged, repairing, refitting, mothballed, destroyed, in_transit };
 
@@ -152,6 +168,8 @@ pub const Unit = struct {
     purchase_price: types.CBills = 0,
     /// Non-null while techs wake this hull from cold storage (ARCH §9.8).
     reactivation_done_day: ?u32 = null,
+    /// Transports only (Stage 12.15): the HQ whose berth this ship holds.
+    berth_hq: types.HqId = .none,
 
     pub fn deinit(self: *Unit, alloc: std.mem.Allocator) void {
         self.slots.deinit(alloc);

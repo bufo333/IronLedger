@@ -76,6 +76,11 @@ send("3")
 assert "TO&E" in plain()
 send("+", 0.8)                 # raise a company: the only HQ already hosts one
 assert "no HQ has a free company slot" in plain()[-600:], plain()[-800:]
+send("j"); send("w", 0.8)      # air wing: the starter HQ has a level-1 spaceport
+assert "no air wing slot" in plain()[-800:], plain()[-1000:]
+send(":", 0.6); send("newlance co:1 air Sky Lance\r", 1.0)
+assert "no air wing slot" in plain()[-800:], plain()[-1000:]
+send("k")
 send(":"); send("manning co:1\r", 0.8)   # crews table for the existing company
 assert "CREWS" in plain()[-30000:] and "mekwarrior" in plain()[-30000:], plain()[-3000:]
 send("\x1b", 0.6)

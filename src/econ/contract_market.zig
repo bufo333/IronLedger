@@ -9,6 +9,7 @@ const planet = @import("../domain/planet.zig");
 const market = @import("market.zig");
 const logistics = @import("logistics.zig");
 const GameState = @import("../sim/state.zig").GameState;
+const unit_mod = @import("../domain/unit.zig");
 const hq_mod = @import("../domain/hq.zig");
 const person_mod = @import("../domain/person.zig");
 const person_gen = @import("../gen/person_gen.zig");
@@ -249,6 +250,7 @@ fn refreshBoard(gs: *GameState, hq_id: types.HqId) !void {
     var attempts: u32 = 0;
     while (hulls < lot_size and attempts < 12) : (attempts += 1) {
         const design = &chassis_mod.catalog[r.uintLessThan(usize, chassis_mod.catalog.len)];
+        if (design.kind != .mek) continue; // fighters and ships have their own slot below
         if (!market.listingAppears(&gs.rng, design.rarity, world.industry, warehouse)) continue;
         const cond = market.rollHullCondition(&gs.rng);
         const price_roll: types.Bp = 10_000 + (@as(types.Bp, gs.rng.roll2d6(.market)) - 7) * 500;
@@ -272,6 +274,43 @@ fn refreshBoard(gs: *GameState, hq_id: types.HqId) !void {
             .hq = hq_id,
         });
         hulls += 1;
+    }
+
+    // The transport slot (Stage 12.15): a spaceport of some size sees a
+    // fighter, a dropship or a jumpship for sale now and then — one
+    // attempt per refresh, at the design's rarity, priced by
+    // transport_price_bp. New hulls; ships need a berth to buy.
+    const port = hq.effectiveFacilityLevel(.spaceport);
+    if (!thin and port >= 2) {
+        var already = false;
+        for (gs.market_listings.items) |l| {
+            if (l.kind != .unit or l.hq != hq_id or l.staple) continue;
+            if (chassis_mod.find(l.item_key)) |d| if (d.kind != .mek) {
+                already = true;
+            };
+        }
+        if (!already) {
+            const comms = hq.effectiveFacilityLevel(.comms);
+            const kind: unit_mod.UnitKind = if (port >= 4 and comms >= 3 and r.uintLessThan(u8, 3) == 0) .jumpship else if (port >= 3 and r.boolean()) .dropship else .aerospace;
+            var buf: [16]*const chassis_mod.Chassis = undefined;
+            const pool = chassis_mod.ofKind(kind, &buf);
+            if (pool.len > 0) {
+                const design = pool[r.uintLessThan(usize, pool.len)];
+                if (market.listingAppears(&gs.rng, design.rarity, world.industry, port)) {
+                    const price_roll: types.Bp = 10_000 + (@as(types.Bp, gs.rng.roll2d6(.market)) - 7) * 500;
+                    const base = if (design.kind == .aerospace) design.cost else types.applyBp(design.cost, market.transport_price_bp);
+                    try gs.market_listings.append(gs.allocator(), .{
+                        .kind = .unit,
+                        .item_key = design.key,
+                        .rarity = design.rarity,
+                        .price = types.applyBp(base, price_roll),
+                        .listed_day = day,
+                        .expires_day = day + 60 + @as(u32, gs.rng.roll2d6(.market)) * 5,
+                        .hq = hq_id,
+                    });
+                }
+            }
+        }
     }
 
     // Support vehicles are always on offer at a regional or brigade board
@@ -305,9 +344,10 @@ fn refreshBoard(gs: *GameState, hq_id: types.HqId) !void {
 /// medical and every back-office desk (Stage 12: finance, command and
 /// transport admins were missing, so those desks could never be filled).
 const hall_roles = [_]person_mod.Role{
-    .mekwarrior,    .mekwarrior,    .tech_mek,        .tech_mek, .tech_mechanic,   .vehicle_crew,
-    .astech,        .astech,        .medic,           .doctor,   .admin_logistics, .admin_hr,
-    .admin_finance, .admin_command, .admin_transport,
+    .mekwarrior,    .mekwarrior,    .tech_mek,        .tech_mek,      .tech_mechanic, .vehicle_crew,
+    .astech,        .astech,        .medic,           .doctor,        .admin_logistics, .admin_hr,
+    .admin_finance, .admin_command, .admin_transport, .aero_pilot,    .tech_aero,     .dropship_crew,
+    .jumpship_crew,
 };
 
 /// An admin desk this HQ is short on, if any — the hall favours it.
@@ -529,4 +569,39 @@ test "no HQ, no reputation, no offers" {
     defer gs.deinit();
     try refresh(&gs);
     try std.testing.expectEqual(@as(usize, 0), gs.contract_offers.items.len);
+}
+
+test "12.15: the transport slot opens with the spaceport; ordinary lots are meks only" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 21 });
+    defer gs.deinit();
+    _ = try gs.createCommander("T", .LC, .quartermaster);
+    const chassis_mod = @import("../domain/chassis.zig");
+    // Spaceport 1: never a fighter or ship, however many refreshes.
+    for (0..12) |_| {
+        gs.clock.day_index += 31;
+        try refreshListings(&gs);
+        for (gs.market_listings.items) |l| if (l.kind == .unit) {
+            try std.testing.expect(chassis_mod.find(l.item_key).?.kind == .mek or l.staple);
+        };
+    }
+    // Spaceport 4 + comms 3, staffed: over a year something non-mek shows up.
+    const hq = &gs.hqs.values()[0];
+    for (hq.facilities.items) |*f| {
+        if (f.kind == .spaceport) f.level = 4;
+        if (f.kind == .comms) f.level = 3;
+    }
+    hq.staff_assigned = 999;
+    var seen = false;
+    for (0..24) |_| {
+        gs.clock.day_index += 31;
+        try refreshListings(&gs);
+        for (gs.market_listings.items) |l| if (l.kind == .unit and !l.staple) {
+            const d = chassis_mod.find(l.item_key).?;
+            if (d.kind != .mek) {
+                seen = true;
+                if (d.kind.isTransport()) try std.testing.expect(l.price < d.cost); // scaled by transport_price_bp
+            }
+        };
+    }
+    try std.testing.expect(seen);
 }

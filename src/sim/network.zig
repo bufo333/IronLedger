@@ -27,8 +27,10 @@ pub const HqLink = struct {
         return logistics.linkThroughputPerWeek(self.level) * 4;
     }
 
-    /// Monthly upkeep by level. // TUNE
+    /// Monthly upkeep by level; a dedicated line (level 3) rides your own
+    /// jumpship, whose carry cost is already on the hangar ledger. // TUNE
     pub fn monthlyCost(self: HqLink) types.CBills {
+        if (self.level >= 3) return 0;
         return @as(types.CBills, self.level) * 60_000;
     }
 };

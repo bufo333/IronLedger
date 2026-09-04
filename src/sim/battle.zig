@@ -203,7 +203,18 @@ fn companyMods(gs: *GameState, c: *const contract_mod.Contract) autoresolve.Camp
         const child = gs.force(child_id) orelse continue;
         if (child.echelon == .lance and child.role == .scouting and child.units.items.len > 0)
             mods.recon_quality = 2;
-        if (child.echelon == .air_company) mods.has_air_cover = true;
+        if (child.echelon == .air_company) {
+            // Air cover is a fighter that can fly: ready, with a pilot.
+            for (child.children.items) |al_id| {
+                const al = gs.force(al_id) orelse continue;
+                for (al.units.items) |uid| {
+                    const u = gs.unit(uid) orelse continue;
+                    if (u.kind != .aerospace or u.status != .ready) continue;
+                    const pilot = gs.person(u.pilot) orelse continue;
+                    if (pilot.isAvailable(gs.clock.day_index)) mods.has_air_cover = true;
+                }
+            }
+        }
         if (child.echelon == .support_company) {
             for (child.children.items) |sl_id| {
                 const sl = gs.force(sl_id) orelse continue;
@@ -609,4 +620,33 @@ test "an empty company concedes and bleeds score" {
     const c = gs.contracts.getPtr(@enumFromInt(1)).?;
     try resolveEngagement(&gs, c);
     try std.testing.expectEqual(@as(i32, -2), c.score);
+}
+
+test "12.15: air cover is a fighter that can fly, not an empty wing" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 15 });
+    defer gs.deinit();
+    _ = try gs.createCommander("T", .LC, .line_officer);
+    const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
+        .id = @enumFromInt(1),
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "PER",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 6, .base_pay_month = 400_000 },
+        .status = .active,
+        .assigned_company = co,
+        .monthly_net = 300_000,
+    });
+    const c = gs.contracts.getPtr(@enumFromInt(1)).?;
+    try std.testing.expect(!companyMods(&gs, c).has_air_cover);
+    const wing = try gs.createForce("Air Wing", .air_company, co);
+    const lance = try gs.createForce("1st Air Lance", .air_lance, wing);
+    try std.testing.expect(!companyMods(&gs, c).has_air_cover); // an empty wing
+    const fighter = try gs.addUnit("SPR-H5");
+    try gs.moveUnitToForce(fighter, lance);
+    try std.testing.expect(!companyMods(&gs, c).has_air_cover); // no pilot
+    const pilot = try gs.hirePerson("Ace", "Ito", .aero_pilot);
+    try gs.assignSlot(fighter, .pilot, pilot);
+    try std.testing.expect(companyMods(&gs, c).has_air_cover);
 }

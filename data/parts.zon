@@ -43,6 +43,7 @@
     .{ .key = "mash_theater", .name = "MASH Operating Theater", .cost = 250_000, .rarity = .uncommon, .pallet_tons = 5 },
     .{ .key = "cargo_bay", .name = "Cargo Bay", .cost = 10_000, .rarity = .common, .pallet_tons = 2 },
     .{ .key = "rifles", .name = "Infantry Weapons", .cost = 8_000, .rarity = .common, .pallet_tons = 1 },
+    .{ .key = "ship_bays", .name = "Ship bays and collars", .cost = 2_000_000, .rarity = .rare, .pallet_tons = 50 },
 
     // ---- munitions: one unit = one ton of reloads for that weapon family;
     // mounted, a ton is one crit ----

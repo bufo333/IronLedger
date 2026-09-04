@@ -161,4 +161,71 @@
     .{ .key = "SEC-PLT", .name = "Security Platoon", .tonnage = 5, .bv = 80, .cost = 60_000, .rarity = .common, .kind = .infantry, .loadout = .{
         .{ .slot = "squad.rifles.1", .part = "rifles", .class = .equipment },
     } },
+
+    // ------- aerospace (TRO:3025 fighters; BV/cost approximate // TUNE) -------
+    // Slot keys prefix the airframe location (nose/lw/rw/aft); the MekLab
+    // ignores non-mek kinds. Fighters fly from an HQ's air company slot
+    // (spaceport ≥ 3) and give the company air cover in battle.
+    .{ .key = "SPR-H5", .name = "Sparrowhawk", .tonnage = 30, .bv = 605, .cost = 1_402_000, .rarity = .uncommon, .kind = .aerospace, .loadout = .{
+        .{ .slot = "nose.mlas.1", .part = "mlas", .class = .weapon },
+        .{ .slot = "lw.mlas.1", .part = "mlas", .class = .weapon },
+        .{ .slot = "rw.mlas.1", .part = "mlas", .class = .weapon },
+        .{ .slot = "aft.slas.1", .part = "slas", .class = .weapon },
+    } },
+    .{ .key = "CSR-V12", .name = "Corsair", .tonnage = 50, .bv = 1050, .cost = 2_311_000, .rarity = .uncommon, .kind = .aerospace, .loadout = .{
+        .{ .slot = "nose.llas.1", .part = "llas", .class = .weapon },
+        .{ .slot = "lw.mlas.1", .part = "mlas", .class = .weapon },
+        .{ .slot = "rw.mlas.1", .part = "mlas", .class = .weapon },
+        .{ .slot = "lw.slas.1", .part = "slas", .class = .weapon },
+        .{ .slot = "rw.slas.1", .part = "slas", .class = .weapon },
+    } },
+    .{ .key = "LCF-R15", .name = "Lucifer", .tonnage = 65, .bv = 1145, .cost = 3_598_000, .rarity = .rare, .kind = .aerospace, .loadout = .{
+        .{ .slot = "nose.llas.1", .part = "llas", .class = .weapon },
+        .{ .slot = "nose.lrm10.1", .part = "lrm10", .class = .weapon },
+        .{ .slot = "lw.mlas.1", .part = "mlas", .class = .weapon },
+        .{ .slot = "rw.mlas.1", .part = "mlas", .class = .weapon },
+        .{ .slot = "aft.ammo_lrm.1", .part = "ammo_lrm", .class = .ammo },
+    } },
+    .{ .key = "SL-15", .name = "Slayer", .tonnage = 80, .bv = 1410, .cost = 4_478_000, .rarity = .rare, .kind = .aerospace, .loadout = .{
+        .{ .slot = "nose.ac5.1", .part = "ac5", .class = .weapon },
+        .{ .slot = "nose.mlas.1", .part = "mlas", .class = .weapon },
+        .{ .slot = "lw.llas.1", .part = "llas", .class = .weapon },
+        .{ .slot = "rw.llas.1", .part = "llas", .class = .weapon },
+        .{ .slot = "aft.mlas.1", .part = "mlas", .class = .weapon },
+        .{ .slot = "aft.ammo_ac5.1", .part = "ammo_ac5", .class = .ammo },
+    } },
+    .{ .key = "STU-K5", .name = "Stuka", .tonnage = 100, .bv = 1625, .cost = 5_912_000, .rarity = .very_rare, .kind = .aerospace, .loadout = .{
+        .{ .slot = "nose.llas.1", .part = "llas", .class = .weapon },
+        .{ .slot = "nose.llas.2", .part = "llas", .class = .weapon },
+        .{ .slot = "lw.lrm10.1", .part = "lrm10", .class = .weapon },
+        .{ .slot = "rw.lrm10.1", .part = "lrm10", .class = .weapon },
+        .{ .slot = "lw.mlas.1", .part = "mlas", .class = .weapon },
+        .{ .slot = "rw.mlas.1", .part = "mlas", .class = .weapon },
+        .{ .slot = "aft.ammo_lrm.1", .part = "ammo_lrm", .class = .ammo },
+        .{ .slot = "aft.ammo_lrm.2", .part = "ammo_lrm", .class = .ammo },
+    } },
+
+    // ------- transports (TRO:3025 DropShips & JumpShips) -------
+    // Canon list prices; the market scales them by transport_price_bp
+    // (market.zig) so a Leopard is a mid-game capital purchase. A berthed,
+    // crewed dropship lifts a company to its contract (bays by hull kind);
+    // an owned jumpship is what a level-3 dedicated supply line rides on.
+    .{ .key = "LEOPARD", .name = "Leopard", .tonnage = 200, .bv = 1200, .cost = 82_500_000, .rarity = .rare, .kind = .dropship, .mek_bays = 4, .asf_bays = 2, .cargo_tons = 160, .loadout = .{
+        .{ .slot = "hull.bays.1", .part = "ship_bays", .class = .equipment },
+    } },
+    .{ .key = "UNION", .name = "Union", .tonnage = 200, .bv = 2100, .cost = 220_000_000, .rarity = .rare, .kind = .dropship, .mek_bays = 12, .asf_bays = 2, .cargo_tons = 500, .loadout = .{
+        .{ .slot = "hull.bays.1", .part = "ship_bays", .class = .equipment },
+    } },
+    .{ .key = "OVERLORD", .name = "Overlord", .tonnage = 200, .bv = 3500, .cost = 458_000_000, .rarity = .very_rare, .kind = .dropship, .mek_bays = 36, .asf_bays = 6, .cargo_tons = 1200, .loadout = .{
+        .{ .slot = "hull.bays.1", .part = "ship_bays", .class = .equipment },
+    } },
+    .{ .key = "SCOUT", .name = "Scout", .tonnage = 200, .bv = 200, .cost = 226_000_000, .rarity = .rare, .kind = .jumpship, .collars = 1, .cargo_tons = 100, .loadout = .{
+        .{ .slot = "hull.collars.1", .part = "ship_bays", .class = .equipment },
+    } },
+    .{ .key = "MERCHANT", .name = "Merchant", .tonnage = 200, .bv = 300, .cost = 313_000_000, .rarity = .very_rare, .kind = .jumpship, .collars = 2, .cargo_tons = 300, .loadout = .{
+        .{ .slot = "hull.collars.1", .part = "ship_bays", .class = .equipment },
+    } },
+    .{ .key = "INVADER", .name = "Invader", .tonnage = 200, .bv = 400, .cost = 430_000_000, .rarity = .very_rare, .kind = .jumpship, .collars = 3, .cargo_tons = 400, .loadout = .{
+        .{ .slot = "hull.collars.1", .part = "ship_bays", .class = .equipment },
+    } },
 }

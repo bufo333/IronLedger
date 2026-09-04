@@ -178,6 +178,27 @@ pub fn checkEffectiveness(gs: *GameState) !void {
     }
 }
 
+/// The transports that sailed with a company (Stage 12.15) go back to
+/// their berths once it is home. Returns how many.
+pub fn releaseCarriers(gs: *GameState, company: types.ForceId) !u32 {
+    var n: u32 = 0;
+    var it = gs.units.iterator();
+    while (it.next()) |entry| {
+        const u = entry.value_ptr;
+        if (!u.kind.isTransport() or u.force != company) continue;
+        if (gs.force(company)) |f| {
+            for (f.units.items, 0..) |id, i| if (id == u.id) {
+                _ = f.units.orderedRemove(i);
+                break;
+            };
+        }
+        u.force = .none;
+        if (gs.person(u.pilot)) |p| p.assigned_force = .none;
+        n += 1;
+    }
+    return n;
+}
+
 /// Daily: companies travelling home arrive.
 pub fn runReturns(gs: *GameState) !void {
     var it = gs.forces.iterator();
@@ -186,7 +207,8 @@ pub fn runReturns(gs: *GameState) !void {
         if (f.return_eta_day) |eta| if (gs.clock.day_index >= eta) {
             f.return_eta_day = null;
             f.location_planet = null;
-            try gs.log(.contract, .{ .company = f.id }, "[movement] {s} is home", .{f.name});
+            const ships = try releaseCarriers(gs, f.id);
+            try gs.log(.contract, .{ .company = f.id }, "[movement] {s} is home{s}", .{ f.name, if (ships > 0) " — its ships return to their berths" else "" });
         };
     }
 }

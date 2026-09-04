@@ -102,7 +102,7 @@ const verbs = [_][]const u8{
     "quit",        "help",      "emblem",   "transfer",   "policy",    "loan",     "accept",   "resolve",      "order",  "ship",
     "buy",         "assign",    "unassign", "autoassign", "autostaff", "upgrade",  "tier",     "fabricate",    "hire",   "recruit",
     "fire",        "post",      "train",    "triage",     "leave",     "mothball", "activate", "complete",     "recall", "found",
-    "link",        "assignco",  "newco",    "newco@",     "xfer",      "rename",   "refit",
+    "link",        "assignco",  "newco",    "newco@",     "xfer",      "rename",   "refit",        "wing",
 };
 
 const Emblem = struct { name: []const u8, art: [3][]const u8 };
@@ -761,7 +761,7 @@ pub const App = struct {
             .market => "Tab pane · Enter buy / order / order shortfall · b fabricate component · K keep stocked (pane: Enter edit, x remove) · [ ] HQ board · q welcome",
             .ledger => "j/k treasury · t send cash to it · T pull cash back to the outfit · p top-up policy · x clear its policy · L loan · R repay",
             .supply => "company: t/T cash · p/P cash/resupply policy · s ship · o order · R trim to plan · H parts home · HQ: K keep stocked · $ sell stock",
-            .forces => "[ ] company / pool · + raise a company · Enter assign · a/u seat · A auto · l lance · o role · d depot · m mothball · x company · b fabricate · R recall · $ sell · X disband",
+            .forces => "[ ] company / pool · + raise a company · w air wing · Enter assign · a/u seat · A auto · l lance · o role · d depot · m mothball · x company · b fabricate · R recall · $ sell · X disband",
             .map => "h j k l move between worlds (the view follows) · + / - zoom · f found HQ here · o offers here · q welcome",
             .lab => "[ ] hull · j/k mount · - remove · + install · R order replacement · D send to depot (structure) · c clear · Enter commit",
             .hq => "[ ] switch HQ · u upgrade the highlighted facility (picker elsewhere) · T tier · S autostaff · Tab hall · f/F filter · Enter hire",
@@ -2311,8 +2311,9 @@ pub const App = struct {
                         }
                     }
                     if (count == 1) {
+                        const lift = try q.liftText(al, g, home.?);
                         try self.exec(.{ .accept_contract = .{ .offer_index = view.board[self.cur(0).*].index, .company = home.? } });
-                        self.say(.good, "accepted — {s} is on its way", .{q.forceName(g, home.?)});
+                        if (self.msg.len == 0 or self.msg_style != .crit) self.say(.good, "accepted — {s} is on its way{s}{s}", .{ q.forceName(g, home.?), if (lift.len > 0) " · " else "", lift });
                     } else {
                         self.input.len = 0;
                         self.modal = .{ .input = .accept_company };
@@ -2364,8 +2365,11 @@ pub const App = struct {
                 switch (self.focus) {
                     0 => if (view.board.len > 0) {
                         const l = view.board[@min(self.cur(0).*, view.board.len - 1)];
+                        const ship = if (l.index < g.market_listings.items.len) (if (game.chassis.find(g.market_listings.items[l.index].item_key)) |d| d.kind.isTransport() else false) else false;
                         try self.exec(.{ .buy_listing = l.index });
-                        self.say(.good, "bought listing [{d}]", .{l.index});
+                        if (self.msg.len == 0 or self.msg_style != .crit) {
+                            if (ship) self.say(.good, "bought listing [{d}] — berthed at {s}; hire a ship crew from the hall and it lifts the next deployment", .{ l.index, q.hqName(g, hq_id) }) else self.say(.good, "bought listing [{d}]", .{l.index});
+                        }
                     },
                     1 => if (view.catalog.len > 0) {
                         const r = view.catalog[@min(self.cur(1).*, view.catalog.len - 1)];
@@ -2601,6 +2605,15 @@ pub const App = struct {
                         }
                     },
                     't' => self.openCommand("train "),
+                    'w' => if (row) |r| {
+                        const co = g.companyOf(r.force);
+                        if (co == .none) {
+                            self.say(.dim, "put the cursor on a company to raise its air wing", .{});
+                            return;
+                        }
+                        try self.exec(.{ .raise_air_company = co });
+                        if (self.msg.len == 0 or self.msg_style != .crit) self.say(.good, "{s} has an air wing — fighters go in its air lances (Market: aero filter; :newlance co:N air <name> adds a lance)", .{q.forceName(g, co)});
+                    },
                     'x' => if (row) |r| {
                         var buf: [64]u8 = undefined;
                         self.openCommand(if (r.unit != .none) std.fmt.bufPrint(&buf, "xfer unit {d} co:", .{@intFromEnum(r.unit)}) catch "xfer unit " else "xfer unit ");
@@ -3538,9 +3551,9 @@ pub const App = struct {
             return;
         };
         if (cmd) |c| {
-            const before = self.msg.len;
+            self.msg.len = 0; // a refusal of the same length as the last message is still a refusal
             try self.exec(c);
-            if (self.msg.len == before) self.say(.good, "done: {s}", .{verb});
+            if (self.msg.len == 0) self.say(.good, "done: {s}", .{verb});
         } else {
             self.say(.amber, "unknown verb '{s}' — see ? for the list, or use the CLI (--repl) for the rest", .{verb});
         }
@@ -3580,11 +3593,30 @@ pub const App = struct {
         if (eq(u8, verb, "depot")) return .{ .depot = @enumFromInt(try num(u32, tokens.next())) };
         if (eq(u8, verb, "move")) return .{ .move_unit = .{ .unit = @enumFromInt(try num(u32, tokens.next())), .force = @enumFromInt(try num(u32, tokens.next())) } };
         if (eq(u8, verb, "newlance")) {
+            // newlance co:N [line|air|mash|mess|salvage|security|transport] <name>
             const site = try parseSite(try need(tokens.next()));
             if (site != .company) return error.BadSite;
-            const name = tokens.rest();
+            var kind: game.force.NewLanceKind = .line;
+            var name = std.mem.trim(u8, tokens.rest(), " ");
+            var words = std.mem.tokenizeScalar(u8, name, ' ');
+            if (words.next()) |first| {
+                if (eq(u8, first, "line")) {
+                    name = std.mem.trim(u8, words.rest(), " ");
+                } else if (eq(u8, first, "air")) {
+                    kind = .air;
+                    name = std.mem.trim(u8, words.rest(), " ");
+                } else if (std.meta.stringToEnum(game.force.SupportLanceKind, first)) |sk| {
+                    kind = .{ .support = sk };
+                    name = std.mem.trim(u8, words.rest(), " ");
+                }
+            }
             if (name.len == 0) return error.BadArguments;
-            return .{ .new_lance = .{ .company = site.company, .name = name } };
+            return .{ .new_lance = .{ .company = site.company, .name = name, .kind = kind } };
+        }
+        if (eq(u8, verb, "wing")) {
+            const site = try parseSite(try need(tokens.next()));
+            if (site != .company) return error.BadSite;
+            return .{ .raise_air_company = site.company };
         }
         if (eq(u8, verb, "role")) {
             const fid: types.ForceId = @enumFromInt(try num(u32, tokens.next()));
@@ -3831,6 +3863,11 @@ pub const App = struct {
             error.UnitAway => "that hull is away from home — depot work happens at the home HQ",
             error.UnitDeployed => "that hull is with a deployed company — bring the company home first (HQ work like fabrication and orders is unaffected)",
             error.PersonDeployed => "that person is deployed with their company",
+            error.NoAirSlot => "no air wing slot: the home HQ needs a spaceport at level 3 (brigade HQs host one from the start), and a company has one wing",
+            error.NoSupportSlot => "the support company is full for this HQ, or its facilities can't stand up that lance (mess needs a mess hall ≥ 2, MASH a hospital, logistics a warehouse)",
+            error.NoBerth => "no free berth at that HQ — spaceport levels add dropship berths; a jumpship berth needs spaceport 4 and comms 3",
+            error.NoJumpship => "a dedicated line (level 3) needs a crewed jumpship berthed at one end",
+            error.WrongHullKind => "fighters fly in air lances, meks walk in line lances, and ships hold berths",
             else => @errorName(err),
         };
     }

@@ -160,8 +160,13 @@ pub const Command = union(enum) {
     set_supply_policy: struct { company: types.ForceId, min_days: u16, tons: u32, ammo_battles: u8 = 0 },
     /// Put a hull into a lance (line or support) of its company, at home.
     move_unit: struct { unit: types.UnitId, force: types.ForceId },
-    /// Raise a new line lance under a company (HQ lance capacity permitting).
-    new_lance: struct { company: types.ForceId, name: []const u8 },
+    /// Raise a new lance under a company (Stage 12.15): a line lance (HQ
+    /// lance cap), an air lance under the air wing, or a support lance of
+    /// one kind under Omega (facility-gated, support-lance cap).
+    new_lance: struct { company: types.ForceId, name: []const u8, kind: force_mod.NewLanceKind = .line },
+    /// Raise a company's air wing — an empty air company with one air lance
+    /// — in the home HQ's air slot (spaceport ≥ 3).
+    raise_air_company: types.ForceId,
     /// Keep an HQ warehouse stocked: under `min` → order/fabricate up to
     /// `target`, checked daily. `target` = 0 removes the line.
     set_stock_policy: struct { hq: types.HqId, part_key: []const u8, min: u32, target: u32 },
@@ -258,6 +263,16 @@ pub const Error = error{
     Bankrupt,
     NothingToRepair,
     KeepStocked,
+    /// The home HQ's spaceport hosts no (more) air wings.
+    NoAirSlot,
+    /// The support company is full, or the facilities can't stand up that lance kind.
+    NoSupportSlot,
+    /// No free dropship/jumpship berth at that HQ.
+    NoBerth,
+    /// A dedicated supply line needs a crewed jumpship at one end.
+    NoJumpship,
+    /// Fighters fly in air lances, meks walk in line lances.
+    WrongHullKind,
 } || std.mem.Allocator.Error;
 
 pub const Result = struct {
@@ -361,6 +376,8 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             const existing = network.findLink(gs, l.a, l.b);
             const from_level: u8 = if (existing) |e| e.level else 0;
             if (l.level <= from_level) return Error.BadLevel;
+            // A dedicated line is your own jumpship on the run (Stage 12.15).
+            if (l.level >= 3 and !gs.ownsCrewedJumpshipAt(l.a, l.b)) return Error.NoJumpship;
             const cost = network.linkCost(l.level) - network.linkCost(from_level);
             try debitPurchase(gs, .outfit, .{
                 .day = gs.clock.day_index,
@@ -484,6 +501,15 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             const listing = gs.market_listings.items[index];
             // The board's own HQ pays and receives (Stage 9D).
             const hq_id: types.HqId = if (listing.hq != .none) listing.hq else gs.hqs.keys()[0];
+            // Transports need a berth at the board's HQ (Stage 12.15).
+            var berth_kind: ?unit_mod.UnitKind = null;
+            if (listing.kind == .unit) if (chassis_mod.find(listing.item_key)) |design| if (design.kind.isTransport()) {
+                const h = gs.hqs.getPtr(hq_id) orelse return Error.UnknownHq;
+                const cap = h.capacity();
+                const berths: u32 = if (design.kind == .dropship) cap.dropship_berths else cap.jumpship_berths;
+                if (gs.transportsBerthedAt(hq_id, design.kind) >= berths) return Error.NoBerth;
+                berth_kind = design.kind;
+            };
             try debitPurchase(gs, .{ .hq = hq_id }, .{
                 .day = gs.clock.day_index,
                 .amount = -listing.price,
@@ -498,8 +524,9 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
                     if (listing.staple and l.quantity > 1) l.quantity -= 1 else _ = gs.market_listings.orderedRemove(index);
                     const uid = try gs.addUnit(listing.item_key);
                     if (listing.condition) |cond| gs.applyHullCondition(uid, cond);
-                    try gs.log(.market, .{ .hq = hq_id }, "[market] bought {s} ({s}) for {d}", .{
-                        listing.item_key, if (listing.condition) |c| c.label() else "new", listing.price,
+                    if (berth_kind != null) gs.unit(uid).?.berth_hq = hq_id;
+                    try gs.log(.market, .{ .hq = hq_id }, "[market] bought {s} ({s}) for {d}{s}", .{
+                        listing.item_key, if (listing.condition) |c| c.label() else "new", listing.price, if (berth_kind != null) " — berthed here" else "",
                     });
                 },
                 .part => {
@@ -527,8 +554,11 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             if (gs.deploymentContract(co) != null or !gs.isCompanyHome(co)) return Error.CompanyDeployed;
             const from_co = gs.companyOf(u.force);
             if (from_co != .none and from_co != co) return Error.SameForce; // use transfer_unit between companies
-            if (dest.echelon == .lance and dest.units.items.len >= force_mod.lance_size) return Error.TooManyLances;
+            if ((dest.echelon == .lance or dest.echelon == .air_lance) and dest.units.items.len >= force_mod.lance_size) return Error.TooManyLances;
             if (u.status == .in_transit) return Error.Unavailable;
+            if (dest.echelon == .air_lance and u.kind != .aerospace) return Error.WrongHullKind;
+            if (dest.echelon == .lance and u.kind != .mek) return Error.WrongHullKind;
+            if (u.kind.isTransport()) return Error.WrongHullKind; // ships hold berths, not lance slots
             try gs.moveUnitToForce(m.unit, m.force);
             return .{};
         },
@@ -537,10 +567,43 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             if (co.echelon != .company) return Error.NotACompany;
             if (nl.name.len == 0) return Error.UnknownForce;
             const hq = gs.hqs.getPtr(co.supplying_hq);
-            const cap: u32 = if (hq) |h| h.capacity().lances_per_company else 3;
-            if (gs.combatLancesOf(nl.company) >= cap) return Error.TooManyLances;
-            const id = try gs.createForce(nl.name, .lance, nl.company);
-            return .{ .created_force = id };
+            switch (nl.kind) {
+                .line => {
+                    const cap: u32 = if (hq) |h| h.capacity().lances_per_company else 3;
+                    if (gs.lancesOfEchelon(nl.company, .lance) >= cap) return Error.TooManyLances;
+                    const id = try gs.createForce(nl.name, .lance, nl.company);
+                    return .{ .created_force = id };
+                },
+                .air => {
+                    const wing = gs.airCompanyOf(nl.company) orelse return Error.NoAirSlot;
+                    if (gs.lancesOfEchelon(wing, .air_lance) >= force_mod.max_air_lances) return Error.TooManyLances;
+                    const id = try gs.createForce(nl.name, .air_lance, wing);
+                    return .{ .created_force = id };
+                },
+                .support => |kind| {
+                    const h = hq orelse return Error.NoSupportSlot;
+                    const omega = gs.supportCompanyOf(nl.company) orelse return Error.NoSupportSlot;
+                    if (!h.supportLanceAllowed(kind)) return Error.NoSupportSlot;
+                    if (gs.lancesOfEchelon(omega, .support_lance) >= h.capacity().support_lances) return Error.NoSupportSlot;
+                    const id = try gs.createForce(nl.name, .support_lance, omega);
+                    gs.force(id).?.support_kind = kind;
+                    return .{ .created_force = id };
+                },
+            }
+        },
+        .raise_air_company => |company| {
+            const co = gs.force(company) orelse return Error.UnknownForce;
+            if (co.echelon != .company) return Error.NotACompany;
+            if (gs.airCompanyOf(company) != null) return Error.NoAirSlot;
+            const h = gs.hqs.getPtr(co.supplying_hq) orelse return Error.NoHq;
+            if (gs.airCompaniesAtHq(h.id) >= h.capacity().air_companies) return Error.NoAirSlot;
+            const hq_id = h.id;
+            const wing = try gs.createForce("Air Wing", .air_company, company);
+            _ = try gs.createForce("1st Air Lance", .air_lance, wing);
+            // Re-fetch: creating forces may have moved the map's storage.
+            const co_now = gs.force(company).?;
+            try gs.log(.decision, .{ .company = company, .hq = hq_id }, "[raise] {s} stands up an air wing at {s} — buy fighters, hire aero pilots and techs", .{ co_now.name, gs.hqs.getPtr(hq_id).?.name });
+            return .{ .created_force = wing };
         },
         .set_supply_policy => |sp| {
             const f = gs.force(sp.company) orelse return Error.UnknownForce;
@@ -1365,6 +1428,72 @@ fn orderPart(gs: *GameState, part_key: []const u8, quantity: u32, dest_opt: ?typ
     return .{};
 }
 
+pub const LiftPlan = struct {
+    needed: u32 = 0,
+    carried: u32 = 0,
+    covered_bp: types.Bp = 0,
+    own_jumpship: bool = false,
+    ships: u32 = 0,
+};
+
+/// How much of a company the outfit's own ships can lift (Stage 12.15).
+/// At home: the crewed, idle ships berthed at the home HQ. Away (a
+/// redeploy from the field): the ships already carrying it. `commit`
+/// marks the ships as sailing with the company (`force` = company).
+pub fn planLift(gs: *GameState, company_id: types.ForceId, commit: bool) Error!LiftPlan {
+    var plan: LiftPlan = .{};
+    var need: [3]u32 = .{ 0, 0, 0 };
+    var uit = gs.units.iterator();
+    while (uit.next()) |e| {
+        const u = e.value_ptr;
+        if (gs.companyOf(u.force) != company_id or u.status == .destroyed or u.status == .mothballed or u.status == .in_transit) continue;
+        const bay = u.kind.bayKind() orelse continue;
+        need[@intFromEnum(bay)] += 1;
+    }
+    plan.needed = need[0] + need[1] + need[2];
+    if (plan.needed == 0) return plan;
+    const at_home = gs.isCompanyHome(company_id);
+    const home = gs.homeHqFor(company_id);
+    var have: [3]u32 = .{ 0, 0, 0 };
+    var ships: std.ArrayListUnmanaged(types.UnitId) = .empty;
+    defer ships.deinit(gs.allocator());
+    var sit = gs.units.iterator();
+    while (sit.next()) |e| {
+        const u = e.value_ptr;
+        if (!u.kind.isTransport() or u.status == .destroyed) continue;
+        const usable = if (at_home) (u.berth_hq == home and gs.transportAvailable(u)) else u.force == company_id;
+        if (!usable) continue;
+        const design = chassis_mod.find(u.chassis_key) orelse continue;
+        switch (u.kind) {
+            .dropship => {
+                // Only ships that carry something come along.
+                const adds = @min(design.mek_bays, need[0] -| have[0]) + @min(design.asf_bays, need[1] -| have[1]) + @min(design.vehicle_bays, need[2] -| have[2]);
+                if (adds == 0) continue;
+                have[0] += design.mek_bays;
+                have[1] += design.asf_bays;
+                have[2] += design.vehicle_bays;
+                plan.ships += 1;
+                try ships.append(gs.allocator(), u.id);
+            },
+            .jumpship => plan.own_jumpship = true,
+            else => {},
+        }
+    }
+    plan.carried = @min(have[0], need[0]) + @min(have[1], need[1]) + @min(have[2], need[2]);
+    plan.covered_bp = @intCast(@as(u64, plan.carried) * 10_000 / plan.needed);
+    if (commit and at_home) {
+        for (ships.items) |sid| try gs.moveUnitToForce(sid, company_id);
+    }
+    return plan;
+}
+
+fn commitLift(gs: *GameState, company_id: types.ForceId) Error!LiftPlan {
+    return planLift(gs, company_id, true) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return .{},
+    };
+}
+
 fn acceptContract(gs: *GameState, offer_index: usize, company_id: types.ForceId) Error!Result {
     if (offer_index >= gs.contract_offers.items.len) return Error.NoSuchOffer;
     const company = gs.force(company_id) orelse return Error.UnknownForce;
@@ -1409,6 +1538,11 @@ fn acceptContract(gs: *GameState, offer_index: usize, company_id: types.ForceId)
     const freight_base: types.CBills = @as(types.CBills, c.dist_ly) * 2_000; // TUNE
     var freight = @divTrunc(freight_base * (100 - @as(i64, c.terms.transport_pct)), 100);
     freight = types.applyBp(freight, gs.commanderMultBp(.freight));
+    // Your own ships lift what they can (Stage 12.15): every hull a berthed
+    // dropship carries is charter you don't pay; a jumpship of your own
+    // removes the collar fee too. The ships sail with the company.
+    const lift = try commitLift(gs, company_id);
+    freight = types.applyBp(freight, logistics.transitFreightBp(lift.covered_bp, lift.own_jumpship));
     if (freight > 0) {
         try gs.postTransaction(.{
             .day = gs.clock.day_index,
@@ -1416,9 +1550,12 @@ fn acceptContract(gs: *GameState, offer_index: usize, company_id: types.ForceId)
             .category = .transport_charter,
             .company = company_id,
             .contract = id,
-            .note = "outbound transit charter",
+            .note = if (lift.covered_bp > 0) "outbound transit charter (own lift credited)" else "outbound transit charter",
         });
     }
+    if (lift.ships > 0) try gs.log(.delivery, .{ .company = company_id, .contract = id }, "[lift] {d} of {d} hulls ride the outfit's own ships ({d} dropship{s}{s}) — charter {s}", .{
+        lift.carried, lift.needed, lift.ships, if (lift.ships == 1) "" else "s", if (lift.own_jumpship) ", own jumpship" else "", if (freight > 0) "reduced" else "waived",
+    });
     try gs.contracts.put(gs.allocator(), id, c);
     if (gs.force(company_id)) |f| f.location_planet = null; // underway
 
@@ -2525,4 +2662,136 @@ test "12: the resupply plan keeps a deployed company fed and armed on a long lin
     };
     try std.testing.expectEqual(@as(u32, 0), hungry_days);
     try std.testing.expectEqual(@as(u32, 0), dry_battles);
+}
+
+fn setFacilityLevel(gs: *GameState, hq_id: types.HqId, kind: hq_mod.FacilityKind, level: u8) !void {
+    const h = gs.hqs.getPtr(hq_id).?;
+    for (h.facilities.items) |*f| if (f.kind == kind) {
+        f.level = level;
+        h.staff_assigned = 999;
+        return;
+    };
+    try h.facilities.append(gs.allocator(), .{ .kind = kind, .level = level });
+    h.staff_assigned = 999;
+}
+
+test "12.15: air wings need a spaceport; fighters fly in air lances; support lances are facility-gated" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 15 });
+    defer gs.deinit();
+    _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    const hq = gs.hqs.keys()[0];
+    const co = (try execute(&gs, .{ .raise_company = .{ .name = "Bravo", .hq = hq } })).created_force;
+    // Spaceport 1: no air slot.
+    try std.testing.expectError(Error.NoAirSlot, execute(&gs, .{ .raise_air_company = co }));
+    try std.testing.expectError(Error.NoAirSlot, execute(&gs, .{ .new_lance = .{ .company = co, .name = "Sky", .kind = .air } }));
+    try setFacilityLevel(&gs, hq, .spaceport, 3);
+    const wing = (try execute(&gs, .{ .raise_air_company = co })).created_force;
+    try std.testing.expectEqual(force_mod.Echelon.air_company, gs.force(wing).?.echelon);
+    try std.testing.expectEqual(@as(u32, 1), gs.lancesOfEchelon(wing, .air_lance));
+    try std.testing.expectError(Error.NoAirSlot, execute(&gs, .{ .raise_air_company = co })); // one wing per company
+    _ = try execute(&gs, .{ .new_lance = .{ .company = co, .name = "2nd Air Lance", .kind = .air } });
+    _ = try execute(&gs, .{ .new_lance = .{ .company = co, .name = "3rd Air Lance", .kind = .air } });
+    try std.testing.expectError(Error.TooManyLances, execute(&gs, .{ .new_lance = .{ .company = co, .name = "4th", .kind = .air } }));
+
+    // A fighter goes to an air lance, never a line lance; a mek never to an air lance.
+    const fighter = try gs.addUnit("SPR-H5");
+    const mek = try gs.addUnit("LCT-1V");
+    var line: types.ForceId = .none;
+    var air: types.ForceId = .none;
+    for (gs.force(co).?.children.items) |cid| if (gs.force(cid).?.echelon == .lance and line == .none) {
+        line = cid;
+    };
+    for (gs.force(wing).?.children.items) |cid| if (air == .none) {
+        air = cid;
+    };
+    try std.testing.expectError(Error.WrongHullKind, execute(&gs, .{ .move_unit = .{ .unit = fighter, .force = line } }));
+    try std.testing.expectError(Error.WrongHullKind, execute(&gs, .{ .move_unit = .{ .unit = mek, .force = air } }));
+    _ = try execute(&gs, .{ .move_unit = .{ .unit = fighter, .force = air } });
+    try std.testing.expectEqual(air, gs.unit(fighter).?.force);
+    try gs.placeUnitInCompany(try gs.addUnit("CSR-V12"), co);
+    try std.testing.expectEqual(@as(usize, 2), gs.force(air).?.units.items.len);
+
+    // Support lances: four staples fill the slot; a mess needs a mess hall.
+    try std.testing.expectError(Error.NoSupportSlot, execute(&gs, .{ .new_lance = .{ .company = co, .name = "Mess", .kind = .{ .support = .mess } } }));
+    try setFacilityLevel(&gs, hq, .mess, 2);
+    const mess = (try execute(&gs, .{ .new_lance = .{ .company = co, .name = "Mess Lance", .kind = .{ .support = .mess } } })).created_force;
+    try std.testing.expectEqual(force_mod.SupportLanceKind.mess, gs.force(mess).?.support_kind.?);
+    try std.testing.expectError(Error.NoSupportSlot, execute(&gs, .{ .new_lance = .{ .company = co, .name = "More", .kind = .{ .support = .salvage } } }));
+}
+
+test "12.15: ships need berths, lift the company for less charter, and come home with it; a dedicated line needs a jumpship" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 16 });
+    defer gs.deinit();
+    _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    const hq = gs.hqs.keys()[0];
+    gs.hqs.getPtr(hq).?.funds = 500_000_000;
+    gs.funds = 50_000_000;
+    const co = (try execute(&gs, .{ .new_company = "Alpha" })).created_force;
+
+    // One dropship berth at spaceport 1: the second Leopard is refused.
+    try gs.market_listings.append(gs.allocator(), .{ .kind = .unit, .item_key = "LEOPARD", .rarity = .rare, .price = 20_000_000, .hq = hq, .listed_day = 0, .expires_day = 400 });
+    try gs.market_listings.append(gs.allocator(), .{ .kind = .unit, .item_key = "LEOPARD", .rarity = .rare, .price = 20_000_000, .hq = hq, .listed_day = 0, .expires_day = 400 });
+    const first = gs.market_listings.items.len - 2;
+    _ = try execute(&gs, .{ .buy_listing = first });
+    const ship: types.UnitId = @enumFromInt(gs.next_unit_id - 1);
+    try std.testing.expectEqual(hq, gs.unit(ship).?.berth_hq);
+    try std.testing.expectError(Error.NoBerth, execute(&gs, .{ .buy_listing = gs.market_listings.items.len - 1 }));
+    try std.testing.expectEqual(@as(u32, 1), gs.transportsBerthedAt(hq, .dropship));
+
+    // No jumpship: a dedicated line is refused; charter and scheduled are fine.
+    _ = try execute(&gs, .{ .found_hq = .{ .name = "Far", .planet_key = "zebebelgenubi" } });
+    const far = gs.hqs.keys()[1];
+    try std.testing.expectError(Error.NoJumpship, execute(&gs, .{ .link = .{ .a = hq, .b = far, .level = 3 } }));
+    _ = try execute(&gs, .{ .link = .{ .a = hq, .b = far, .level = 2 } });
+
+    // Uncrewed, the ship lifts nothing: full charter.
+    const offer = 0;
+    const charter_full = blk: {
+        const c = gs.contract_offers.items[offer];
+        break :blk @divTrunc(@as(types.CBills, c.dist_ly) * 2_000 * (100 - @as(i64, c.terms.transport_pct)), 100);
+    };
+    try std.testing.expectEqual(@as(types.Bp, 0), (try planLift(&gs, co, false)).covered_bp);
+    // Crew it: a dropship crew in the pilot seat.
+    const crew = try gs.hirePerson("Ina", "Voss", .dropship_crew);
+    try gs.assignSlot(ship, .pilot, crew);
+    const plan = try planLift(&gs, co, false);
+    try std.testing.expectEqual(@as(u32, 1), plan.ships);
+    try std.testing.expect(plan.carried >= 4 and plan.carried <= plan.needed);
+    try std.testing.expect(plan.covered_bp > 0 and plan.covered_bp < 10_000);
+
+    // Accept: the charter posted is below the full price, and the ship sails with the company.
+    const ledger_before = gs.ledger.transactions.items.len;
+    _ = try execute(&gs, .{ .accept_contract = .{ .offer_index = offer, .company = co } });
+    var charter_paid: types.CBills = 0;
+    for (gs.ledger.transactions.items[ledger_before..]) |t| if (t.category == .transport_charter) {
+        charter_paid = -t.amount;
+    };
+    try std.testing.expect(charter_paid > 0 and charter_paid < types.applyBp(charter_full, gs.commanderMultBp(.freight)));
+    try std.testing.expectEqual(co, gs.unit(ship).?.force);
+    try std.testing.expect(!gs.transportAvailable(gs.unit(ship).?));
+    try std.testing.expectEqual(@as(u32, 0), (try planLift(&gs, co, false)).ships -| 1); // still one ship, the one carrying it
+
+    // Home again: the ship returns to its berth.
+    const cid = gs.contracts.keys()[0];
+    gs.contracts.getPtr(cid).?.status = .completed;
+    gs.force(co).?.location_planet = gs.contracts.getPtr(cid).?.planet_key;
+    _ = try contract_control.recall(&gs, co);
+    gs.force(co).?.return_eta_day = gs.clock.day_index;
+    try contract_control.runReturns(&gs);
+    try std.testing.expectEqual(types.ForceId.none, gs.unit(ship).?.force);
+    try std.testing.expect(gs.transportAvailable(gs.unit(ship).?));
+
+    // A crewed jumpship at the berth (spaceport 4, comms 3) unlocks the dedicated line.
+    try setFacilityLevel(&gs, hq, .spaceport, 4);
+    try setFacilityLevel(&gs, hq, .comms, 3);
+    try gs.market_listings.append(gs.allocator(), .{ .kind = .unit, .item_key = "SCOUT", .rarity = .rare, .price = 50_000_000, .hq = hq, .listed_day = 0, .expires_day = 400 });
+    _ = try execute(&gs, .{ .buy_listing = gs.market_listings.items.len - 1 });
+    const jump: types.UnitId = @enumFromInt(gs.next_unit_id - 1);
+    try std.testing.expectError(Error.NoJumpship, execute(&gs, .{ .link = .{ .a = hq, .b = far, .level = 3 } }));
+    try gs.assignSlot(jump, .pilot, try gs.hirePerson("Oda", "Ferro", .jumpship_crew));
+    _ = try execute(&gs, .{ .link = .{ .a = hq, .b = far, .level = 3 } });
+    try std.testing.expectEqual(@as(u8, 3), network.findLink(&gs, hq, far).?.level);
+    try std.testing.expectEqual(@as(types.CBills, 0), network.findLink(&gs, hq, far).?.monthlyCost());
+    // With a jumpship of its own the company's next lift waives the collar fee too.
+    try std.testing.expect((try planLift(&gs, co, false)).own_jumpship);
 }

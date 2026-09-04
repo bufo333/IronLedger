@@ -28,6 +28,14 @@ pub const Chassis = struct {
     jump_mp: u8 = 0,
     heat_sinks: u8 = 10,
     armor_half_tons: u16 = 0,
+    // Transport facts (Stage 12.15; dropships/jumpships only, TRO:3025).
+    // A dropship lifts hulls by bay kind; a jumpship carries dropships on
+    // its docking collars. Tonnage is nominal for ships (u8).
+    mek_bays: u8 = 0,
+    asf_bays: u8 = 0,
+    vehicle_bays: u8 = 0,
+    cargo_tons: u32 = 0,
+    collars: u8 = 0,
     loadout: []const LoadoutSlot,
 
     pub fn engineRating(self: *const Chassis) u32 {
@@ -66,6 +74,18 @@ pub fn ofWeightClass(class: WeightClass, buf: []*const Chassis) []*const Chassis
     return buf[0..n];
 }
 
+/// Every catalog entry of one unit kind (transports, fighters, ...).
+pub fn ofKind(kind: unit.UnitKind, buf: []*const Chassis) []*const Chassis {
+    var n: usize = 0;
+    for (catalog) |*c| {
+        if (c.kind == kind and n < buf.len) {
+            buf[n] = c;
+            n += 1;
+        }
+    }
+    return buf[0..n];
+}
+
 /// Meks suitable for a scout lance: at or under `max_tonnage`.
 pub fn scoutPool(max_tonnage: u8, buf: []*const Chassis) []*const Chassis {
     var n: usize = 0;
@@ -89,6 +109,18 @@ test "catalog loads from zon with sane values and unique keys" {
             try std.testing.expect(!std.mem.eql(u8, c.key, other.key));
         }
     }
+}
+
+test "transports and fighters are in the catalog with lift facts" {
+    var buf: [16]*const Chassis = undefined;
+    const ships = ofKind(.dropship, &buf);
+    try std.testing.expect(ships.len >= 3);
+    for (ships) |s| try std.testing.expect(s.mek_bays > 0);
+    const jumpers = ofKind(.jumpship, &buf);
+    try std.testing.expect(jumpers.len >= 3);
+    for (jumpers) |j| try std.testing.expect(j.collars > 0);
+    try std.testing.expect(ofKind(.aerospace, &buf).len >= 5);
+    try std.testing.expectEqual(@as(u8, 4), find("LEOPARD").?.mek_bays);
 }
 
 test "scout pool excludes heavies and support vehicles" {
