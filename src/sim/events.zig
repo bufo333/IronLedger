@@ -54,7 +54,8 @@ pub const Effect = union(enum) {
     fatigue: u8,
     xp_all: u16,
     score: i16, // contract success score (drives Stage 7 outcomes)
-    damage_random_units: u8, // N units take abstract battle wear
+    damage_random_units: u8, // N line-lance hulls take abstract battle wear
+    damage_convoy_units: u8, // N support-echelon vehicles (trucks, ambulances) take wear
     parts_windfall: u8, // salvaged spares into the pool
     supply_loss: types.CBills, // posted as a supplies expense
 };

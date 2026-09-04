@@ -9,6 +9,7 @@ const types = @import("../domain/types.zig");
 const events = @import("events.zig");
 const contract_mod = @import("../domain/contract.zig");
 const GameState = @import("state.zig").GameState;
+const unit_mod = @import("../domain/unit.zig");
 
 pub const decision_window_days = 7; // TUNE
 
@@ -133,7 +134,7 @@ fn weeklyDeck(garrison: bool, roll: u8) Entry {
         3 => .{ .kind = .ambush_warning, .log = "Locals warn of an ambush on the supply road", .options = &.{
             .{ .label = "Escort the convoy in force", .effects = &.{ .{ .fatigue = 6 }, .{ .score = 1 } } },
             .{ .label = "Reroute and delay", .effects = &.{.{ .supply_loss = 20_000 }} },
-            .{ .label = "Ignore it", .effects = &.{ .{ .damage_random_units = 1 }, .{ .score = -1 } } },
+            .{ .label = "Ignore it", .effects = &.{ .{ .damage_convoy_units = 1 }, .{ .score = -1 } } },
         }, .default_choice = 0 },
         4 => .{ .kind = .bad_weather, .log = "A week of storms grounds both sides", .auto_effects = &.{
             .{ .morale = 2 },
@@ -325,7 +326,8 @@ fn applyEffects(gs: *GameState, effects: []const events.Effect, contract: ?*cont
                     try gs.addStock(gs.defaultSite(), "mlas", n);
                 }
             },
-            .damage_random_units => |n| damageRandomUnits(gs, company, n),
+            .damage_random_units => |n| damageRandomUnits(gs, company, n, .line),
+            .damage_convoy_units => |n| damageRandomUnits(gs, company, n, .support),
         }
     }
 }
@@ -351,9 +353,23 @@ fn applyToCompany(gs: *GameState, company: types.ForceId, stat: PersonStat, delt
     }
 }
 
-/// Abstract battle wear until Stage 7's real autoresolve: armor loss, and
-/// on a bad roll a broken slot.
-fn damageRandomUnits(gs: *GameState, company: types.ForceId, n: u8) void {
+/// Which echelon an event's wear lands on: the line lances that stand in
+/// the way of raids, or the support train (trucks, ambulances, salvage
+/// rigs) that sits in the rear and only gets hit when the convoy does.
+const Echelon = enum { line, support };
+
+fn inEchelon(gs: *GameState, u: *const unit_mod.Unit, which: Echelon) bool {
+    const f = gs.force(u.force) orelse return false;
+    return switch (which) {
+        .line => f.echelon == .lance or f.echelon == .air_lance,
+        .support => f.echelon == .support_lance and u.kind != .infantry,
+    };
+}
+
+/// Abstract wear from an event: armor loss, and on a bad roll a broken
+/// slot. Line-lance hulls by default; the support echelon is in reserve
+/// and is only touched by convoy events.
+fn damageRandomUnits(gs: *GameState, company: types.ForceId, n: u8, which: Echelon) void {
     if (gs.units.count() == 0) return;
     const values = gs.units.values();
     var applied: u8 = 0;
@@ -361,6 +377,7 @@ fn damageRandomUnits(gs: *GameState, company: types.ForceId, n: u8) void {
     while (applied < n and attempts < 40) : (attempts += 1) {
         const u = &values[gs.rng.random(.events).uintLessThan(usize, values.len)];
         if (gs.companyOf(u.force) != company or u.status == .destroyed or u.status == .mothballed) continue;
+        if (!inEchelon(gs, u, which)) continue;
         const wear = gs.rng.roll2d6(.events);
         u.armor_pct -|= wear * 3;
         if (wear >= 10 and u.slots.items.len > 0) {
@@ -369,6 +386,32 @@ fn damageRandomUnits(gs: *GameState, company: types.ForceId, n: u8) void {
         }
         applied += 1;
     }
+}
+
+test "event wear lands on the line lances; only convoy events touch the support train" {
+    const commands = @import("commands.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 2025 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "E", .origin = .CC, .profession = .paymaster } });
+    const co = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
+    for (0..30) |_| damageRandomUnits(&gs, co, 2, .line);
+    var uit = gs.units.iterator();
+    var line_worn: u32 = 0;
+    while (uit.next()) |e| {
+        const u = e.value_ptr;
+        if (gs.companyOf(u.force) != co) continue;
+        if (inEchelon(&gs, u, .support)) {
+            try std.testing.expectEqual(@as(u8, 100), u.armor_pct);
+        } else if (u.armor_pct < 100) line_worn += 1;
+    }
+    try std.testing.expect(line_worn > 0);
+    damageRandomUnits(&gs, co, 3, .support);
+    var support_worn: u32 = 0;
+    uit = gs.units.iterator();
+    while (uit.next()) |e| if (inEchelon(&gs, e.value_ptr, .support) and e.value_ptr.armor_pct < 100) {
+        support_worn += 1;
+    };
+    try std.testing.expect(support_worn > 0);
 }
 
 test "auto events apply, decisions queue with deadlines, defaults fire" {

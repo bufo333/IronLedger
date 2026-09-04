@@ -269,7 +269,8 @@ pub fn effectsText(alloc: Alloc, effects: []const @import("events.zig").Effect) 
         .fatigue => |f| try appendTag(alloc, &out, false, try std.fmt.allocPrint(alloc, "fatigue +{d}", .{f})),
         .xp_all => |x| try appendTag(alloc, &out, true, try std.fmt.allocPrint(alloc, "XP +{d} all", .{x})),
         .score => |s| try appendTag(alloc, &out, s >= 0, try std.fmt.allocPrint(alloc, "contract score {s}{d}", .{ if (s >= 0) "+" else "", s })),
-        .damage_random_units => |n| try appendTag(alloc, &out, false, try std.fmt.allocPrint(alloc, "{d} hull{s} damaged", .{ n, if (n == 1) "" else "s" })),
+        .damage_random_units => |n| try appendTag(alloc, &out, false, try std.fmt.allocPrint(alloc, "{d} line hull{s} damaged", .{ n, if (n == 1) "" else "s" })),
+        .damage_convoy_units => |n| try appendTag(alloc, &out, false, try std.fmt.allocPrint(alloc, "{d} support vehicle{s} damaged", .{ n, if (n == 1) "" else "s" })),
         .parts_windfall => |n| try appendTag(alloc, &out, true, try std.fmt.allocPrint(alloc, "parts windfall ×{d}", .{n})),
         .supply_loss => |c| try appendTag(alloc, &out, false, try std.fmt.allocPrint(alloc, "supplies −{s} C", .{try money(alloc, c)})),
     };
