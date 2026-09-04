@@ -31,6 +31,21 @@ pub const WarningKind = enum {
     insolvent,
 };
 
+/// Does any working weapon in the company draw on this munition family?
+fn companyFires(gs: *GameState, company: types.ForceId, family: []const u8) bool {
+    var uit = gs.units.iterator();
+    while (uit.next()) |e| {
+        const u = e.value_ptr;
+        if (u.status == .destroyed or u.status == .mothballed or gs.companyOf(u.force) != company) continue;
+        for (u.slots.items) |slot| {
+            if (slot.class != .weapon or slot.condition != .ok) continue;
+            const fam = part_mod.munitionFor(slot.part_key) orelse continue;
+            if (std.mem.eql(u8, fam, family)) return true;
+        }
+    }
+    return false;
+}
+
 pub const Warning = struct {
     kind: WarningKind,
     text: []const u8,
@@ -123,11 +138,17 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
             try out.append(alloc, .{ .kind = .hungry, .text = try std.fmt.allocPrint(alloc, "{s} has been hungry {d} day(s) — send provisions or funds", .{ f.name, f.supply_shortage_days }) });
         }
         if (gs.deploymentContract(f.id) != null) {
+            // Only the families the company's working mounts actually fire.
             var dry: u32 = 0;
+            var names: std.ArrayListUnmanaged(u8) = .empty;
             for (part_mod.munition_keys) |key| {
-                if (gs.stockCount(.{ .company = f.id }, key) == 0) dry += 1;
+                if (!companyFires(gs, f.id, key)) continue;
+                if (gs.stockCount(.{ .company = f.id }, key) > 0) continue;
+                dry += 1;
+                if (names.items.len > 0) try names.appendSlice(alloc, ", ");
+                try names.appendSlice(alloc, key);
             }
-            if (dry > 0) try out.append(alloc, .{ .kind = .dry_ammo, .text = try std.fmt.allocPrint(alloc, "{s}: {d} munition famil{s} at zero in the field stores", .{ f.name, dry, if (dry == 1) "y" else "ies" }) });
+            if (dry > 0) try out.append(alloc, .{ .kind = .dry_ammo, .text = try std.fmt.allocPrint(alloc, "{s}: {s} at zero in the field stores — those mounts fall silent", .{ f.name, names.items }) });
             if (f.local_funds < 0) try out.append(alloc, .{ .kind = .overdrawn, .text = try std.fmt.allocPrint(alloc, "{s} operating funds overdrawn ({d})", .{ f.name, f.local_funds }) });
         }
     }
@@ -221,4 +242,42 @@ test "the checklist names open slots and overloaded techs" {
         if (w.kind == .open_slots) saw_open = true;
     }
     try std.testing.expect(saw_open);
+}
+
+test "dry-ammo warning names only the families the company fires" {
+    const commands = @import("commands.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 2025 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "E", .origin = .CC, .profession = .paymaster } });
+    const co = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
+    _ = try commands.execute(&gs, .{ .accept_contract = .{ .offer_index = 0, .company = co } });
+    const site: types.Site = .{ .company = co };
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    // Find a family the company fires and one it does not.
+    var fired: ?[]const u8 = null;
+    var unused: ?[]const u8 = null;
+    for (part_mod.munition_keys) |key| {
+        if (companyFires(&gs, co, key)) {
+            if (fired == null) fired = key;
+        } else if (unused == null) unused = key;
+    }
+    try std.testing.expect(fired != null and unused != null);
+    // Empty the unused family: no warning.
+    _ = gs.takeStock(site, unused.?, gs.stockCount(site, unused.?));
+    var dry_warnings: u32 = 0;
+    for (try turnWarnings(&gs, a)) |w| if (w.kind == .dry_ammo) {
+        dry_warnings += 1;
+    };
+    try std.testing.expectEqual(@as(u32, 0), dry_warnings);
+    // Empty a fired family: one warning that names it.
+    _ = gs.takeStock(site, fired.?, gs.stockCount(site, fired.?));
+    var named = false;
+    for (try turnWarnings(&gs, a)) |w| if (w.kind == .dry_ammo) {
+        dry_warnings += 1;
+        if (std.mem.indexOf(u8, w.text, fired.?) != null) named = true;
+    };
+    try std.testing.expectEqual(@as(u32, 1), dry_warnings);
+    try std.testing.expect(named);
 }
