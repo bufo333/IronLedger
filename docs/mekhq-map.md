@@ -74,3 +74,4 @@ re-implemented in Zig. Paths below are under `MekHQ/src/mekhq/campaign/`.
   costs, contract payment multipliers, reputation, refit classes, maintenance
   target numbers. Our tables in `data/tables/` cite chapter names.
 - BattleTech TechManual — part/equipment catalog structure, tech ratings.
+| Per-company field plan for deployed trucks (no MekHQ analog; AtB resupply drops are the nearest) | Stage 12: `src/sim/field_supply.zig` — floors/targets per line from consumption, transit and truck shares | 12 |
