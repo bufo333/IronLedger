@@ -32,10 +32,24 @@ const tab_names = [_][]const u8{ "F1 Desk", "F2 Map", "F3 Forces", "F4 Contracts
 const Mode = enum { welcome, wizard, game };
 const WizardStep = enum(u8) { commander, outfit, company, review };
 
-const InputKind = enum { command, new_player, delete_campaign, delete_player, accept_company };
+const InputKind = enum { command, new_player, delete_campaign, delete_player, accept_company, raise_name };
+
+const RaiseState = struct {
+    company: types.ForceId = .none,
+    hq: types.HqId = .none,
+    /// Which line lance the hull picker fills.
+    lance_idx: usize = 0,
+    /// Listings passed on (hidden for the rest of the session).
+    passed: [64]q.PassedKey = undefined,
+    passed_len: usize = 0,
+};
 
 const Modal = union(enum) {
     none,
+    /// Raise-a-company wizard (Stage 12): hulls per lance, support train, crews.
+    raise_hulls,
+    raise_support,
+    raise_crews,
     end_turn,
     quit,
     decision: usize,
@@ -83,12 +97,12 @@ fn tierFor(cols: u16, rows: u16) Tier {
 const office_roles = [_]game.person.Role{ .admin_command, .admin_logistics, .admin_transport, .admin_hr, .admin_finance };
 
 const verbs = [_][]const u8{
-    "admit",       "repay",     "sell",     "sellhq",    "disband",   "depot",  "role",    "supplypolicy", "move",     "newlance",
-    "stockpolicy", "autoadmit", "settings", "sellstock", "trim",      "day",    "save",    "quit",         "help",     "emblem",
-    "transfer",    "policy",    "loan",     "accept",    "resolve",   "order",  "ship",    "buy",          "assign",   "unassign",
-    "autoassign",  "autostaff", "upgrade",  "tier",      "fabricate", "hire",   "recruit", "fire",         "post",     "train",
-    "triage",      "leave",     "mothball", "activate",  "complete",  "recall", "found",   "link",         "assignco", "newco",
-    "newco@",      "xfer",      "rename",   "refit",
+    "admit",       "repay",     "sell",     "sellhq",     "disband",   "depot",    "role",     "supplypolicy", "move",   "newlance",
+    "stockpolicy", "autoadmit", "settings", "sellstock",  "trim",      "raise",    "crew",     "manning",      "day",    "save",
+    "quit",        "help",      "emblem",   "transfer",   "policy",    "loan",     "accept",   "resolve",      "order",  "ship",
+    "buy",         "assign",    "unassign", "autoassign", "autostaff", "upgrade",  "tier",     "fabricate",    "hire",   "recruit",
+    "fire",        "post",      "train",    "triage",     "leave",     "mothball", "activate", "complete",     "recall", "found",
+    "link",        "assignco",  "newco",    "newco@",     "xfer",      "rename",   "refit",
 };
 
 const Emblem = struct { name: []const u8, art: [3][]const u8 };
@@ -195,6 +209,8 @@ pub const App = struct {
     map_cursor: usize = 0,
     /// Forces screen view: index into queries.toeViews (all, each company, unassigned).
     forces_view: usize = 0,
+    /// The raise-a-company wizard's state.
+    raise: RaiseState = .{},
     /// Star map zoom: 1 = every world fitted into the pane; 2/4/8 = that
     /// many times closer, centred on the cursor world.
     map_zoom: u8 = 1,
@@ -745,7 +761,7 @@ pub const App = struct {
             .market => "Tab pane · Enter buy / order / order shortfall · b fabricate component · K keep stocked (pane: Enter edit, x remove) · [ ] HQ board · q welcome",
             .ledger => "j/k treasury · t send cash to it · T pull cash back to the outfit · p top-up policy · x clear its policy · L loan · R repay",
             .supply => "company: t/T cash · p/P cash/resupply policy · s ship · o order · R trim to plan · H parts home · HQ: K keep stocked · $ sell stock",
-            .forces => "[ ] company / pool · Enter assign · a/u seat · A auto · l lance · o role · d depot · m mothball · x company · b fabricate · R recall · $ sell · X disband",
+            .forces => "[ ] company / pool · + raise a company · Enter assign · a/u seat · A auto · l lance · o role · d depot · m mothball · x company · b fabricate · R recall · $ sell · X disband",
             .map => "h j k l move between worlds (the view follows) · + / - zoom · f found HQ here · o offers here · q welcome",
             .lab => "[ ] hull · j/k mount · - remove · + install · R order replacement · D send to depot (structure) · c clear · Enter commit",
             .hq => "[ ] switch HQ · u upgrade the highlighted facility (picker elsewhere) · T tier · S autostaff · Tab hall · f/F filter · Enter hire",
@@ -1273,6 +1289,91 @@ pub const App = struct {
         return view.site[c];
     }
 
+    /// The raise wizard's company line lances (in TO&E order).
+    fn raiseLances(self: *App) ![]types.ForceId {
+        const g = &self.gs.?;
+        var out: std.ArrayListUnmanaged(types.ForceId) = .empty;
+        const co = g.force(self.raise.company) orelse return out.toOwnedSlice(self.a());
+        for (co.children.items) |cid| if (g.force(cid)) |l| if (l.echelon == .lance) try out.append(self.a(), cid);
+        return out.toOwnedSlice(self.a());
+    }
+
+    /// Take or buy the highlighted candidate into the current lance.
+    fn raiseTake(self: *App) !void {
+        const al = self.a();
+        const g = &self.gs.?;
+        const lances = try self.raiseLances();
+        if (lances.len == 0) return;
+        const lance = lances[@min(self.raise.lance_idx, lances.len - 1)];
+        if (g.force(lance).?.units.items.len >= game.force.lance_size) {
+            self.say(.amber, "{s} is full — ] moves to the next lance", .{g.force(lance).?.name});
+            return;
+        }
+        const cands = try q.raiseCandidates(al, g, self.raise.company, self.raise.passed[0..self.raise.passed_len]);
+        if (cands.len == 0) return;
+        const c = cands[@min(self.modal_cursor, cands.len - 1)];
+        switch (c.kind) {
+            .pool => {
+                try self.exec(.{ .move_unit = .{ .unit = c.unit, .force = lance } });
+                if (self.msg_style != .crit) self.say(.good, "#{d} joins {s}", .{ @intFromEnum(c.unit), g.force(lance).?.name });
+            },
+            .mothballed => {
+                try self.exec(.{ .reactivate = c.unit });
+                if (self.msg_style == .crit) return;
+                try self.exec(.{ .move_unit = .{ .unit = c.unit, .force = lance } });
+                if (self.msg_style != .crit) self.say(.good, "#{d} reactivating and assigned to {s}", .{ @intFromEnum(c.unit), g.force(lance).?.name });
+            },
+            .listing => {
+                const r = game.commands.execute(g, .{ .buy_hull_for = .{ .listing = c.listing, .company = self.raise.company, .lance = lance } }) catch |err| {
+                    self.say(.crit, "{s}", .{errorText(err)});
+                    return;
+                };
+                if (r.eta_days == 0) {
+                    self.say(.good, "#{d} bought and placed in {s}", .{ @intFromEnum(r.unit), g.force(lance).?.name });
+                } else {
+                    self.say(.good, "#{d} bought — {d} days in transit, it joins the first lance with room on arrival", .{ @intFromEnum(r.unit), r.eta_days });
+                }
+            },
+        }
+    }
+
+    /// Buy one hull of the highlighted support line into its lance.
+    fn raiseBuySupport(self: *App) !void {
+        const g = &self.gs.?;
+        const line = support_lines[@min(self.modal_cursor, support_lines.len - 1)];
+        const home = g.homeHqFor(self.raise.company);
+        var idx: ?usize = null;
+        for (g.market_listings.items, 0..) |l, i| if (l.kind == .unit and l.staple and l.hq == home and std.mem.eql(u8, l.item_key, line.key)) {
+            idx = i;
+        };
+        if (idx == null) {
+            self.say(.amber, "{s} is not on the home board right now — staple lines restock as the board refreshes", .{line.key});
+            return;
+        }
+        const r = game.commands.execute(g, .{ .buy_hull_for = .{ .listing = idx.?, .company = self.raise.company, .lance = self.supportLanceOf(line.kind) } }) catch |err| {
+            self.say(.crit, "{s}", .{errorText(err)});
+            return;
+        };
+        self.say(.good, "{s} #{d} bought into the {s} lance", .{ line.key, @intFromEnum(r.unit), @tagName(line.kind) });
+    }
+
+    fn supportLanceOf(self: *App, kind: game.force.SupportLanceKind) types.ForceId {
+        const g = &self.gs.?;
+        var fit = g.forces.iterator();
+        while (fit.next()) |e| {
+            const f = e.value_ptr;
+            if (f.echelon == .support_lance and f.support_kind == kind and g.companyOf(f.id) == self.raise.company) return f.id;
+        }
+        return .none;
+    }
+
+    const support_lines = [_]struct { key: []const u8, kind: game.force.SupportLanceKind, note: []const u8 }{
+        .{ .key = "CGT-3", .kind = .transport, .note = "20t of field stores each — the trucks are the company's supply capacity" },
+        .{ .key = "SVT-1", .kind = .salvage, .note = "5t each and 300 BV of salvage hauled per won battle" },
+        .{ .key = "MASH-27", .kind = .mash, .note = "wounded heal in the field; four medics ride with the lance" },
+        .{ .key = "SEC-PLT", .kind = .security, .note = "guards the laager against raids (infantry, no hull crew)" },
+    };
+
     /// The TO&E rows for the current Forces view.
     fn toeRows(self: *App) ![]q.ToeRow {
         const g = &self.gs.?;
@@ -1346,7 +1447,8 @@ pub const App = struct {
                     "               boards (Enter buys) · catalog (Enter orders, b fabricates comp_*) · demand (Enter orders shortfall)",
                     "  {a}lab{/}         + picks a part then a location (green = rules allow) · R orders a replacement for damaged gear · dim rows = full",
                     "  {a}structure{/}   not fitted in the Lab: D (Lab) or d (Forces) sends the hull to the depot; the bay consumes comp_* parts from the home HQ",
-                    "  {a}companies{/}   :newco <name> at the first HQ · :newco@ hq:N <name> · :assignco co:N hq:M — each regional HQ hosts one combat company",
+                    "  {a}companies{/}   Forces + (or :raise hq:N <name>) raises an empty company and walks a wizard: pick meks per lance from the pool, mothballs and every board (buy or pass; damaged listings show the repair bill and delivery days), buy the support train, then crews",
+                    "               :crew co:N fills open seats from the halls · :manning co:N shows how many of each role a company of that shape needs · :assignco co:N hq:M — each regional HQ hosts one combat company",
                     "  {a}money{/}       Ledger: L loan (simple interest) · R repay · Forces: $ sell hull · X disband company · HQ: $ sell HQ",
                     "  {a}field cash{/}  t courier cash out · T courier cash back to the outfit · p policy = keep above a floor, checked daily, cap per month · Ledger x clears one (or `:policy co:N 0 0`)",
                     "  {a}resupply{/}    P policy `supplypolicy co:N days [max_tons] [battles]` — every line (provisions, medical, armor, each ammo family) kept to a field plan sized to the transit and the trucks; days = safety days past the transit; 0 days removes",
@@ -1417,6 +1519,71 @@ pub const App = struct {
                 if (!found) try rows.append(al, "  {d}this decision has been resolved{/}");
                 const r = self.modalRect(90, @intCast(@min(rows.items.len + 2, 30)));
                 const inner = self.screen.pane(r, .{ .title = "DECISION", .double = true });
+                self.screen.lines(inner, rows.items, 0, null);
+            },
+            .raise_hulls => {
+                const g = &self.gs.?;
+                const lances = try self.raiseLances();
+                if (self.raise.lance_idx >= lances.len and lances.len > 0) self.raise.lance_idx = lances.len - 1;
+                const cands = try q.raiseCandidates(al, g, self.raise.company, self.raise.passed[0..self.raise.passed_len]);
+                var rows: std.ArrayListUnmanaged([]const u8) = .empty;
+                var lance_line: std.ArrayListUnmanaged(u8) = .empty;
+                for (lances, 0..) |lid, i| {
+                    const l = g.force(lid).?;
+                    try lance_line.appendSlice(al, try std.fmt.allocPrint(al, "{s}{s} {d}/{d}{s}  ", .{ if (i == self.raise.lance_idx) "{a}▶ " else "{d}", l.name, l.units.items.len, game.force.lance_size, "{/}" }));
+                }
+                try rows.append(al, lance_line.items);
+                try rows.append(al, "");
+                try rows.append(al, q.raise_header);
+                for (cands) |c| try rows.append(al, c.text);
+                if (cands.len == 0) try rows.append(al, "{d}nothing left to pick — no loose meks and no mek listings on any board (boards refresh on the 1st){/}");
+                if (self.modal_cursor >= cands.len and cands.len > 0) self.modal_cursor = cands.len - 1;
+                const r = self.modalRect(@min(self.screen.cols -| 2, 160), @intCast(@min(rows.items.len + 4, self.screen.rows -| 2)));
+                const inner = self.screen.pane(r, .{ .title = try std.fmt.allocPrint(al, "RAISE {s} · HULLS · [ ] lance · Enter/b take or buy · p pass · n support train · Esc leave (the company keeps what it has)", .{q.forceName(g, self.raise.company)}), .double = true });
+                const sel: ?usize = if (cands.len > 0) self.modal_cursor + 3 else null;
+                self.screen.lines(inner, rows.items, if (sel != null and sel.? + 1 > inner.h) sel.? + 1 - inner.h else 0, sel);
+            },
+            .raise_support => {
+                const g = &self.gs.?;
+                const home = g.homeHqFor(self.raise.company);
+                var rows: std.ArrayListUnmanaged([]const u8) = .empty;
+                try rows.append(al, "hull      name                  owned   price (staple line at home)   what it does");
+                for (support_lines) |line| {
+                    const ch = game.chassis.find(line.key);
+                    var owned: u32 = 0;
+                    var uit = g.units.iterator();
+                    while (uit.next()) |e| if (g.companyOf(e.value_ptr.force) == self.raise.company and std.mem.eql(u8, e.value_ptr.chassis_key, line.key)) {
+                        owned += 1;
+                    };
+                    var price: ?types.CBills = null;
+                    for (g.market_listings.items) |l| if (l.kind == .unit and l.staple and l.hq == home and std.mem.eql(u8, l.item_key, line.key)) {
+                        price = l.price;
+                    };
+                    try rows.append(al, try std.fmt.allocPrint(al, "{s: <9} {s: <20} {d: >5}   {s: >12}                 {{d}}{s}{{/}}", .{ line.key, if (ch) |c| c.name else "?", owned, if (price) |pr| try q.money(al, pr) else "{c}not on the board{/}", line.note }));
+                }
+                try rows.append(al, "");
+                try rows.append(al, try std.fmt.allocPrint(al, "field capacity {d}t  ·  a generated company carries 4 of each", .{g.siteCapacityTons(.{ .company = self.raise.company }) orelse 0}));
+                if (self.modal_cursor >= support_lines.len) self.modal_cursor = support_lines.len - 1;
+                const r = self.modalRect(@min(self.screen.cols -| 2, 150), @intCast(rows.items.len + 4));
+                const inner = self.screen.pane(r, .{ .title = try std.fmt.allocPrint(al, "RAISE {s} · SUPPORT TRAIN · Enter/b buy one · n crews · Esc leave", .{q.forceName(g, self.raise.company)}), .double = true });
+                self.screen.lines(inner, rows.items, 0, self.modal_cursor + 1);
+            },
+            .raise_crews => {
+                const g = &self.gs.?;
+                var rows: std.ArrayListUnmanaged([]const u8) = .empty;
+                try rows.append(al, q.manning_header);
+                var open_total: u32 = 0;
+                for (try q.manning(al, g, self.raise.company)) |m| {
+                    try rows.append(al, m.text);
+                    open_total += m.need -| m.have;
+                }
+                try rows.append(al, "");
+                try rows.append(al, try std.fmt.allocPrint(al, "{d} open · the counts match a generated starter company of this shape", .{open_total}));
+                try rows.append(al, "  {a}[a]{/} hire from the halls now: a pilot per crewless hull and a tech where none has hours (signing bonuses from the outfit)");
+                try rows.append(al, "  {d}or hire by hand later: HQ screen Tab into the hall (f filters by role), People P posts staff · this table is also :manning co:N{/}");
+                try rows.append(al, "  {a}[Enter]{/} finish");
+                const r = self.modalRect(@min(self.screen.cols -| 2, 120), @intCast(rows.items.len + 4));
+                const inner = self.screen.pane(r, .{ .title = try std.fmt.allocPrint(al, "RAISE {s} · CREWS", .{q.forceName(g, self.raise.company)}), .double = true });
                 self.screen.lines(inner, rows.items, 0, null);
             },
             .lance_pick => |uid| {
@@ -1596,6 +1763,7 @@ pub const App = struct {
                     .delete_campaign => "type the outfit name to confirm deletion",
                     .delete_player => "type the player name to confirm deletion (all their campaigns go too)",
                     .accept_company => "company id to send (e.g. 1)",
+                    .raise_name => "name of the new company (it starts empty: you pick every hull and crew)",
                     .command => "",
                 };
                 const rows = [_][]const u8{
@@ -1612,6 +1780,7 @@ pub const App = struct {
                     .delete_campaign => "DELETE CAMPAIGN?",
                     .delete_player => "DELETE PLAYER?",
                     .accept_company => "ACCEPT CONTRACT",
+                    .raise_name => "RAISE A COMPANY",
                     .command => "",
                 }, .double = true });
                 self.screen.lines(inner, &rows, 0, null);
@@ -2444,6 +2613,28 @@ pub const App = struct {
                         self.modal_cursor = 0;
                         self.modal = .{ .lance_pick = r.unit };
                     },
+                    '+', '=' => {
+                        // An HQ with a free combat-company slot: the selected one if it has room, else the first that does.
+                        var pick: types.HqId = .none;
+                        const sel: types.HqId = @enumFromInt(self.hqSelId(g));
+                        if (g.hqs.getPtr(sel)) |h| if (g.companiesAtHq(sel) < h.capacity().combat_companies) {
+                            pick = sel;
+                        };
+                        if (pick == .none) {
+                            var hit = g.hqs.iterator();
+                            while (hit.next()) |e| if (g.companiesAtHq(e.value_ptr.id) < e.value_ptr.capacity().combat_companies) {
+                                pick = e.value_ptr.id;
+                                break;
+                            };
+                        }
+                        if (pick == .none) {
+                            self.say(.crit, "no HQ has a free company slot — a regional HQ hosts one company; raise a field HQ to regional (HQ screen, T)", .{});
+                            return;
+                        }
+                        self.raise.hq = pick;
+                        self.input.len = 0;
+                        self.modal = .{ .input = .raise_name };
+                    },
                     ']', '[' => {
                         const views = try q.toeViews(al, g);
                         self.forces_view = if (ch == ']') (self.forces_view + 1) % views.len else (self.forces_view + views.len - 1) % views.len;
@@ -2813,6 +3004,87 @@ pub const App = struct {
         switch (self.modal) {
             .none => {},
             .help, .hull, .record => self.modal = .none,
+            .raise_hulls => switch (key) {
+                .escape => {
+                    self.modal = .none;
+                    self.say(.dim, "wizard closed — the company keeps its hulls; Market/Forces l fill the rest, :manning co:N shows the crews it needs", .{});
+                },
+                .down => self.modal_cursor +|= 1,
+                .up => self.modal_cursor -|= 1,
+                .enter => try self.raiseTake(),
+                .char => |ch| switch (ch) {
+                    'j' => self.modal_cursor +|= 1,
+                    'k' => self.modal_cursor -|= 1,
+                    'b' => try self.raiseTake(),
+                    'p' => {
+                        const g = &self.gs.?;
+                        const cands = try q.raiseCandidates(self.a(), g, self.raise.company, self.raise.passed[0..self.raise.passed_len]);
+                        if (cands.len == 0) return;
+                        const c = cands[@min(self.modal_cursor, cands.len - 1)];
+                        if (c.kind != .listing) {
+                            self.say(.dim, "only board listings can be passed — hulls on hand just stay in the pool", .{});
+                            return;
+                        }
+                        if (self.raise.passed_len >= self.raise.passed.len) return;
+                        const l = g.market_listings.items[c.listing];
+                        self.raise.passed[self.raise.passed_len] = .{ .hq = l.hq, .item_key = l.item_key, .listed_day = l.listed_day, .price = l.price };
+                        self.raise.passed_len += 1;
+                    },
+                    ']', '[' => {
+                        const lances = try self.raiseLances();
+                        if (lances.len == 0) return;
+                        self.raise.lance_idx = if (ch == ']') (self.raise.lance_idx + 1) % lances.len else (self.raise.lance_idx + lances.len - 1) % lances.len;
+                    },
+                    'n' => {
+                        self.modal_cursor = 0;
+                        self.modal = .raise_support;
+                    },
+                    else => {},
+                },
+                else => {},
+            },
+            .raise_support => switch (key) {
+                .escape => self.modal = .none,
+                .down => self.modal_cursor +|= 1,
+                .up => self.modal_cursor -|= 1,
+                .enter => try self.raiseBuySupport(),
+                .char => |ch| switch (ch) {
+                    'j' => self.modal_cursor +|= 1,
+                    'k' => self.modal_cursor -|= 1,
+                    'b' => try self.raiseBuySupport(),
+                    'n' => self.modal = .raise_crews,
+                    else => {},
+                },
+                else => {},
+            },
+            .raise_crews => switch (key) {
+                .escape, .enter => {
+                    const g = &self.gs.?;
+                    self.modal = .none;
+                    var hulls: u32 = 0;
+                    var coming: u32 = 0;
+                    var uit = g.units.iterator();
+                    while (uit.next()) |e| if (g.companyOf(e.value_ptr.force) == self.raise.company) {
+                        hulls += 1;
+                    };
+                    for (g.unit_transfers.items) |t| if (t.to_company == self.raise.company) {
+                        coming += 1;
+                    };
+                    self.say(.good, "{s} stands: {d} hulls on hand, {d} arriving · People/HQ hall for crews, Forces l to rearrange lances", .{ q.forceName(g, self.raise.company), hulls, coming });
+                },
+                .char => |ch| switch (ch) {
+                    'a', 'A' => {
+                        const g = &self.gs.?;
+                        const r = game.commands.execute(g, .{ .crew_company = self.raise.company }) catch |err| {
+                            self.say(.crit, "{s}", .{errorText(err)});
+                            return;
+                        };
+                        self.say(if (r.hired_count > 0) .good else .amber, "{d} hired from the halls and seated — open lines above are what the halls could not supply", .{r.hired_count});
+                    },
+                    else => {},
+                },
+                else => {},
+            },
             .lance_pick => |uid| switch (key) {
                 .escape => self.modal = .none,
                 .down => self.modal_cursor +|= 1,
@@ -3142,6 +3414,20 @@ pub const App = struct {
                 try self.exec(.{ .accept_contract = .{ .offer_index = view.board[@min(self.cur(0).*, view.board.len - 1)].index, .company = @enumFromInt(id) } });
                 self.say(.good, "accepted", .{});
             },
+            .raise_name => {
+                if (text.len == 0) return;
+                const g = &self.gs.?;
+                const r = game.commands.execute(g, .{ .raise_company = .{ .name = text, .hq = self.raise.hq } }) catch |err| {
+                    self.say(.crit, "{s}", .{errorText(err)});
+                    return;
+                };
+                self.raise.company = r.created_force;
+                self.raise.lance_idx = 0;
+                self.raise.passed_len = 0;
+                self.modal_cursor = 0;
+                self.modal = .raise_hulls;
+                self.say(.good, "{s} raised at {s} — empty lances: pick hulls from the pool and every board", .{ text, q.hqName(g, self.raise.hq) });
+            },
             .command => try self.runCommandLine(text),
         }
     }
@@ -3234,6 +3520,13 @@ pub const App = struct {
             self.modal = .settings;
             return;
         }
+        if (eq(u8, verb, "manning")) {
+            const site = parseSite(try need(tokens.next())) catch return error.BadSite;
+            if (site != .company) return error.BadSite;
+            self.raise.company = site.company;
+            self.modal = .raise_crews;
+            return;
+        }
         if (eq(u8, verb, "emblem")) {
             try self.loadLogoList();
             self.modal_cursor = 0;
@@ -3300,6 +3593,18 @@ pub const App = struct {
         }
         if (eq(u8, verb, "repay")) return .{ .repay_loan = .{ .index = try num(usize, tokens.next()), .amount = try num(i64, tokens.next()) } };
         if (eq(u8, verb, "sell")) return .{ .sell_unit = @enumFromInt(try num(u32, tokens.next())) };
+        if (eq(u8, verb, "raise")) {
+            const site = try parseSite(try need(tokens.next()));
+            if (site != .hq) return error.BadSite;
+            const name = std.mem.trim(u8, tokens.rest(), " ");
+            if (name.len == 0) return error.BadArguments;
+            return .{ .raise_company = .{ .name = name, .hq = site.hq } };
+        }
+        if (eq(u8, verb, "crew")) {
+            const site = try parseSite(try need(tokens.next()));
+            if (site != .company) return error.BadSite;
+            return .{ .crew_company = site.company };
+        }
         if (eq(u8, verb, "trim")) {
             const site = try parseSite(try need(tokens.next()));
             if (site != .company) return error.BadSite;

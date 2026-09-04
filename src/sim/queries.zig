@@ -1576,6 +1576,137 @@ fn isStaple(key: []const u8) bool {
     return false;
 }
 
+// ------------------------------------------------------- raising a company
+
+pub const ManningRow = struct {
+    role: person_mod.Role,
+    have: u32,
+    need: u32,
+    text: []const u8,
+};
+
+pub const manning_header = "role              have  need  open   why";
+
+/// What a well-run company of this shape needs on the payroll, by role,
+/// against who is on it now — the same ratios the starter generator
+/// uses (`company_gen.supportStaffFor`), so a raised company can be
+/// crewed by hand to the starter company's standard.
+pub fn manning(alloc: Alloc, gs: *GameState, company: types.ForceId) ![]ManningRow {
+    const company_gen = @import("../gen/company_gen.zig");
+    var meks: u32 = 0;
+    var vehicles: u32 = 0;
+    var platoons: u32 = 0;
+    var mash: u32 = 0;
+    var uit = gs.units.iterator();
+    while (uit.next()) |e| {
+        const u = e.value_ptr;
+        if (u.status == .destroyed) continue;
+        var ours = gs.companyOf(u.force) == company;
+        if (!ours) for (gs.unit_transfers.items) |t| if (t.unit == u.id and t.to_company == company) {
+            ours = true;
+        };
+        if (!ours) continue;
+        switch (u.kind) {
+            .mek => meks += 1,
+            .infantry => platoons += 1,
+            .mash => {
+                vehicles += 1;
+                mash += 1;
+            },
+            else => vehicles += 1,
+        }
+    }
+    const combat = meks + vehicles + platoons;
+    const staff = company_gen.supportStaffFor(meks, combat);
+    const needs = [_]struct { role: person_mod.Role, need: u32, why: []const u8 }{
+        .{ .role = .mekwarrior, .need = meks, .why = "one per mek" },
+        .{ .role = .vehicle_crew, .need = vehicles, .why = "one per truck, rig or ambulance" },
+        .{ .role = .infantry, .need = platoons, .why = "one per security platoon" },
+        .{ .role = .tech_mek, .need = staff.techs, .why = "one per mek" },
+        .{ .role = .astech, .need = staff.astechs, .why = "six per mek tech (hours)" },
+        .{ .role = .tech_mechanic, .need = vehicles / 2, .why = "one per two vehicles" },
+        .{ .role = .doctor, .need = staff.doctors, .why = "one per 25 combat crew" },
+        .{ .role = .medic, .need = staff.medics + (if (mash > 0) @as(u32, 4) else 0), .why = "four per doctor, four with the MASH lance" },
+        .{ .role = .admin_command, .need = 1, .why = "company office" },
+        .{ .role = .admin_logistics, .need = 1, .why = "company office" },
+        .{ .role = .admin_transport, .need = 1, .why = "company office" },
+        .{ .role = .admin_hr, .need = staff.admins -| 3, .why = "one per 10 combat crew beyond the office" },
+    };
+    var out: std.ArrayListUnmanaged(ManningRow) = .empty;
+    for (needs) |n| {
+        var have: u32 = 0;
+        var pit = gs.people.iterator();
+        while (pit.next()) |e| {
+            const p = e.value_ptr;
+            if (p.role != n.role or (p.status != .active and p.status != .wounded)) continue;
+            if (gs.companyOf(p.assigned_force) == company) have += 1;
+        }
+        const open = n.need -| have;
+        try out.append(alloc, .{ .role = n.role, .have = have, .need = n.need, .text = try std.fmt.allocPrint(alloc, "{s: <16} {d: >5} {d: >5} {s}{d: >5}{{/}}   {{d}}{s}{{/}}", .{ @tagName(n.role), have, n.need, if (open > 0) "{c}" else "{g}", open, n.why }) });
+    }
+    return out.toOwnedSlice(alloc);
+}
+
+/// A listing the wizard has passed on (listings have no id; this tuple is
+/// stable until the board turns over).
+pub const PassedKey = struct { hq: types.HqId, item_key: []const u8, listed_day: u32, price: types.CBills };
+
+pub const RaiseCand = struct {
+    kind: enum { pool, mothballed, listing },
+    unit: types.UnitId = .none,
+    listing: usize = 0,
+    text: []const u8,
+};
+
+pub const raise_header = "source        hull                              tons  condition                              price      delivery";
+
+/// Every mek a raised company could take next: hulls on hand (free),
+/// mothballed hulls (free, reactivation days), and mek listings from
+/// every HQ's board with their condition, price and delivery time.
+pub fn raiseCandidates(alloc: Alloc, gs: *GameState, company: types.ForceId, passed: []const PassedKey) ![]RaiseCand {
+    const logistics = @import("../econ/logistics.zig");
+    var out: std.ArrayListUnmanaged(RaiseCand) = .empty;
+    var uit = gs.units.iterator();
+    while (uit.next()) |e| {
+        const u = e.value_ptr;
+        if (u.kind != .mek or u.force != .none or u.status == .destroyed or u.status == .in_transit) continue;
+        const ch = chassis_mod.find(u.chassis_key);
+        const marks = try damageMarks(alloc, u);
+        if (u.status == .mothballed) {
+            try out.append(alloc, .{ .kind = .mothballed, .unit = u.id, .text = try std.fmt.allocPrint(alloc, "{{d}}mothballed{{/}}   #{d: <3} {s: <8} {s} {d: >3}t  quality {s} · armor {d}%{s}  {{g}}free{{/}}       {d} days to reactivate", .{ @intFromEnum(u.id), u.chassis_key, try padCells(alloc, "", if (ch) |c| c.name else "?", 16), if (ch) |c| c.tonnage else 0, @tagName(u.quality), u.armor_pct, marks, unit_mod.reactivationDays(u.quality) }) });
+        } else {
+            try out.append(alloc, .{ .kind = .pool, .unit = u.id, .text = try std.fmt.allocPrint(alloc, "{{g}}on hand{{/}}      #{d: <3} {s: <8} {s} {d: >3}t  quality {s} · armor {d}%{s}  {{g}}free{{/}}       now", .{ @intFromEnum(u.id), u.chassis_key, try padCells(alloc, "", if (ch) |c| c.name else "?", 16), if (ch) |c| c.tonnage else 0, @tagName(u.quality), u.armor_pct, marks }) });
+        }
+    }
+    const home = gs.homeHqFor(company);
+    const home_world = if (gs.hqs.getPtr(home)) |h| planetMod().find(h.planet_key) else null;
+    for (gs.market_listings.items, 0..) |l, i| {
+        if (l.kind != .unit or l.staple) continue;
+        const ch = chassis_mod.find(l.item_key) orelse continue;
+        if (ch.kind != .mek) continue;
+        var skip = false;
+        for (passed) |pk| if (pk.hq == l.hq and pk.listed_day == l.listed_day and pk.price == l.price and std.mem.eql(u8, pk.item_key, l.item_key)) {
+            skip = true;
+        };
+        if (skip) continue;
+        const board = gs.hqs.getPtr(l.hq);
+        const board_world = if (board) |h| planetMod().find(h.planet_key) else null;
+        const days: u32 = if (home_world != null and board_world != null and home_world.? != board_world.?) logistics.transitDays(planetMod().jumpsBetween(board_world.?, home_world.?)) else 0;
+        var cond_text: []const u8 = "{g}new{/}";
+        if (l.condition) |c| {
+            const repair: types.CBills = @as(types.CBills, c.destroyed_slots) * 40_000 + @as(types.CBills, c.damaged_slots) * 5_000 + @as(types.CBills, c.missing_components) * 150_000 + @as(types.CBills, (100 - @as(u32, c.armor_pct)) / 15) * 10_000; // TUNE rough repair bill
+            const mk: []const u8 = if (c.missing_components > 0) "{c}" else if (c.destroyed_slots > 0) "{c}" else if (c.armor_pct < 100 or c.damaged_slots > 0) "{a}" else "{g}";
+            cond_text = try std.fmt.allocPrint(alloc, "{s}{s}{{/}} armor {d}% · {d} dmg {d} dest {d} missing · ≈{s} to fix{s}", .{ mk, c.label(), c.armor_pct, c.damaged_slots, c.destroyed_slots, c.missing_components, try money(alloc, repair), if (c.missing_components > 0) " (depot)" else "" });
+        }
+        try out.append(alloc, .{ .kind = .listing, .listing = i, .text = try std.fmt.allocPrint(alloc, "{{a}}{s}{{/}} #{d: <3} {s: <8} {s} {d: >3}t  {s}  {s: >10}  {s}", .{ try padCells(alloc, "", if (board) |h| h.name else "board", 12), i, l.item_key, try padCells(alloc, "", ch.name, 16), ch.tonnage, try padCells(alloc, "", cond_text, 52), try money(alloc, l.price), if (days == 0) "now" else try std.fmt.allocPrint(alloc, "{d} days", .{days}) }) });
+    }
+    return out.toOwnedSlice(alloc);
+}
+
+fn planetMod() type {
+    return @import("../domain/planet.zig");
+}
+
 // --------------------------------------------------------------- personnel
 
 pub const PersonRow = struct {
@@ -2284,6 +2415,35 @@ test "hq detail says a field HQ hosts no company and how to raise it" {
     try std.testing.expect(says_none and says_how);
     const home = try hqDetail(a, &gs, gs.hqs.keys()[0]);
     try std.testing.expect(std.mem.indexOf(u8, home[0], "regional HQ") != null);
+}
+
+test "manning matches the starter generator's ratios; raise candidates list pool hulls and mek listings" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 7 });
+    defer gs.deinit();
+    const commands = @import("commands.zig");
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "Test", .origin = .LC, .profession = .quartermaster } });
+    const co = (try commands.execute(&gs, .{ .new_company = "Alpha Company" })).created_force;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    // A generated company is fully manned by definition.
+    for (try manning(a, &gs, co)) |row| try std.testing.expect(row.have >= row.need);
+    // A loose mek shows as a free candidate; a mek listing as a priced one.
+    const loose = try gs.addUnit("LCT-1V");
+    const hq = gs.hqs.keys()[0];
+    try gs.market_listings.append(gs.allocator(), .{ .kind = .unit, .item_key = "LCT-1V", .rarity = .common, .price = 1_500_000, .hq = hq, .listed_day = 0, .expires_day = 400, .condition = .{ .armor_pct = 60, .quality = .c, .damaged_slots = 1, .destroyed_slots = 1, .missing_components = 0 } });
+    const cands = try raiseCandidates(a, &gs, co, &.{});
+    var saw_pool = false;
+    var saw_listing = false;
+    for (cands) |c| {
+        if (c.kind == .pool and c.unit == loose) saw_pool = true;
+        if (c.kind == .listing and std.mem.indexOf(u8, c.text, "worn") != null) saw_listing = true;
+    }
+    try std.testing.expect(saw_pool and saw_listing);
+    // Passing a listing hides it.
+    const l = gs.market_listings.items[gs.market_listings.items.len - 1];
+    const after = try raiseCandidates(a, &gs, co, &.{.{ .hq = l.hq, .item_key = l.item_key, .listed_day = l.listed_day, .price = l.price }});
+    try std.testing.expect(after.len == cands.len - 1);
 }
 
 test "desk and ledger queries build on a fresh campaign" {

@@ -74,6 +74,11 @@ send("5")
 assert "TREASURIES" in plain()
 send("3")
 assert "TO&E" in plain()
+send("+", 0.8)                 # raise a company: the only HQ already hosts one
+assert "no HQ has a free company slot" in plain()[-600:], plain()[-800:]
+send(":"); send("manning co:1\r", 0.8)   # crews table for the existing company
+assert "CREWS" in plain()[-30000:] and "mekwarrior" in plain()[-30000:], plain()[-3000:]
+send("\x1b", 0.6)
 send("]", 0.6)                 # forces: page to the first company
 assert "(2/" in plain()[-30000:], plain()[-3000:]
 send("[", 0.6)

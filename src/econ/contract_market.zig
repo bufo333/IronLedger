@@ -278,7 +278,7 @@ fn refreshBoard(gs: *GameState, hq_id: types.HqId) !void {
     // (Stage 12): trucks are how a company's field capacity grows, so they
     // are a staple line, new, at list price, two at a time.
     if (!thin) {
-        const support_keys = [_][]const u8{ "CGT-3", "SVT-1", "MASH-27" };
+        const support_keys = [_][]const u8{ "CGT-3", "SVT-1", "MASH-27", "SEC-PLT" };
         for (support_keys) |key| {
             var present = false;
             for (gs.market_listings.items) |l| {

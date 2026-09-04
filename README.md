@@ -138,7 +138,12 @@ training), `d` sends a hull to the depot, `$` sells one, `X` disbands a
 company. Rows flag `struct lt,ra` (depot work, needs a component) and
 `gear N` (field work); the cursor on a company opens a DAMAGE pane with
 the components the home warehouse must have ready, and `b` fabricates
-the one it is shortest of.
+the one it is shortest of. `+` raises a new company as an empty skeleton
+and walks a wizard: pick meks for each lance from the unassigned pool,
+mothballed hulls and every HQ's market board (buy or pass; damaged
+listings show the repair bill and delivery time), buy the support train,
+then see how many of each role the company needs and optionally hire
+them from the halls.
 
 ![Forces](docs/screenshots/forces.svg)
 

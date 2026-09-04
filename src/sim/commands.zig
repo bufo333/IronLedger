@@ -23,6 +23,9 @@ const network = @import("network.zig");
 const contract_control = @import("contract_control.zig");
 const meklab = @import("../domain/meklab.zig");
 const force_mod = @import("../domain/force.zig");
+const unit_mod = @import("../domain/unit.zig");
+const chassis_mod = @import("../domain/chassis.zig");
+const person_gen = @import("../gen/person_gen.zig");
 
 pub const Command = union(enum) {
     /// End the turn: advance one day. Turn-based — time only moves here,
@@ -167,6 +170,17 @@ pub const Command = union(enum) {
     /// Sell part of a warehouse line for its resale value (into the HQ's
     /// treasury). Refused below a keep-stocked line's minimum.
     sell_stock: struct { hq: types.HqId, part_key: []const u8, quantity: u32 },
+    /// Raise a company as a skeleton (Stage 12): empty line lances up to
+    /// the HQ's lance cap, an empty support echelon, no hulls, no crews.
+    /// The wizard (or the market and the halls) fills it.
+    raise_company: struct { name: []const u8, hq: types.HqId },
+    /// Buy a hull listing for a company: on hand when the board belongs to
+    /// its home HQ (placed in `lance`, or the first lance with room),
+    /// otherwise shipped with the map transit.
+    buy_hull_for: struct { listing: usize, company: types.ForceId, lance: types.ForceId = .none },
+    /// Fill a company's open seats from the hiring halls: a pilot per
+    /// crewless hull, a tech where no posted tech has hours left.
+    crew_company: types.ForceId,
     /// Trim a deployed company's field stores to its field plan: anything
     /// over a line's target, and consumables the plan has no line for
     /// (munitions nothing fires, structural components), ride the empty
@@ -252,6 +266,11 @@ pub const Result = struct {
     created_force: types.ForceId = .none,
     /// Tons a `trim_stock` sent home.
     tons_moved: u32 = 0,
+    /// The hull a `buy_hull_for` bought, and its delivery time (0 = on hand).
+    unit: types.UnitId = .none,
+    eta_days: u32 = 0,
+    /// People a `crew_company` hired from the halls.
+    hired_count: u32 = 0,
 };
 
 pub fn execute(gs: *GameState, cmd: Command) Error!Result {
@@ -578,6 +597,55 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             try gs.postTreasury(.{ .hq = sale.hq }, .{ .day = gs.clock.day_index, .amount = value, .category = .unit_sale, .hq = sale.hq, .note = def.key });
             try gs.log(.market, .{ .hq = sale.hq }, "[sale] {d} {s} sold from {s} for {d}", .{ sale.quantity, def.key, h.name, value });
             return .{};
+        },
+        .raise_company => |r| return raiseCompany(gs, r.name, r.hq),
+        .buy_hull_for => |b| {
+            const dest = gs.force(b.company) orelse return Error.UnknownForce;
+            if (dest.echelon != .company) return Error.NotACompany;
+            if (b.listing >= gs.market_listings.items.len) return Error.NoSuchListing;
+            const listing = gs.market_listings.items[b.listing];
+            if (listing.kind != .unit) return Error.NoSuchListing;
+            const board_hq: types.HqId = if (listing.hq != .none) listing.hq else gs.hqs.keys()[0];
+            _ = try execute(gs, .{ .buy_listing = b.listing });
+            const uid: types.UnitId = @enumFromInt(gs.next_unit_id - 1);
+            const home = gs.homeHqFor(b.company);
+            const from = if (gs.hqs.getPtr(board_hq)) |h| planet_mod.find(h.planet_key) else null;
+            const to = if (gs.hqs.getPtr(home)) |h| planet_mod.find(h.planet_key) else null;
+            const days: u32 = if (from != null and to != null and from.? != to.?) logistics.transitDays(planet_mod.jumpsBetween(from.?, to.?)) else 0;
+            if (days == 0) {
+                const lance_ok = if (gs.force(b.lance)) |l| (gs.companyOf(b.lance) == b.company and (l.echelon != .lance or l.units.items.len < force_mod.lance_size)) else false;
+                if (lance_ok) gs.moveUnitToForce(uid, b.lance) catch return Error.UnknownForce else gs.placeUnitInCompany(uid, b.company) catch return Error.UnknownForce;
+                try gs.log(.market, .{ .company = b.company }, "[raise] {s} #{d} joins {s}", .{ listing.item_key, @intFromEnum(uid), dest.name });
+            } else {
+                const u = gs.unit(uid).?;
+                u.status = .in_transit;
+                try gs.unit_transfers.append(gs.allocator(), .{ .unit = uid, .to_company = b.company, .eta_day = gs.clock.day_index + days });
+                try gs.log(.market, .{ .company = b.company }, "[raise] {s} #{d} bought at {s} — {d} days to {s}", .{ listing.item_key, @intFromEnum(uid), gs.hqs.getPtr(board_hq).?.name, days, dest.name });
+            }
+            return .{ .unit = uid, .eta_days = days };
+        },
+        .crew_company => |company| {
+            const f = gs.force(company) orelse return Error.UnknownForce;
+            if (f.echelon != .company) return Error.NotACompany;
+            var hired: u32 = 0;
+            var uit = gs.units.iterator();
+            while (uit.next()) |e| {
+                const u = e.value_ptr;
+                if (gs.companyOf(u.force) != company or u.status == .destroyed) continue;
+                if (u.pilot == .none and u.kind != .infantry) {
+                    if (try hireRoleFromHall(gs, unit_mod.crewRoleFor(u.kind), company)) hired += 1;
+                }
+                if (u.tech == .none) if (unit_mod.techRoleFor(u.kind)) |role| {
+                    const tonnage: u8 = if (chassis_mod.find(u.chassis_key)) |d| d.tonnage else 50;
+                    const hours = unit_mod.maintenanceHours(u.kind, tonnage);
+                    if (gs.findFreeTech(role, company, hours) == null) {
+                        if (try hireRoleFromHall(gs, role, company)) hired += 1;
+                    }
+                };
+            }
+            _ = try gs.autoAssign(company);
+            try gs.log(.decision, .{ .company = company }, "[raise] {s}: {d} hired from the halls to fill open seats", .{ f.name, hired });
+            return .{ .hired_count = hired };
         },
         .trim_stock => |company| {
             const f = gs.force(company) orelse return Error.UnknownForce;
@@ -916,6 +984,49 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             return .{};
         },
     }
+}
+
+/// Hire the first hall candidate with `role` (any HQ's hall) into `company`.
+fn hireRoleFromHall(gs: *GameState, role: person_mod.Role, company: types.ForceId) Error!bool {
+    for (gs.candidates.items, 0..) |c, i| if (c.spec.role == role) {
+        const r = try execute(gs, .{ .hire_candidate = i });
+        if (gs.person(r.hired)) |p| p.assigned_force = company;
+        return true;
+    };
+    return false;
+}
+
+/// The skeleton a raised company starts from: the HQ's lance cap in empty
+/// line lances (the last one a recon lance when there are four or more),
+/// and an empty Omega Company of salvage, MASH, logistics and security
+/// lances — the same shape as a generated starter company, with nothing
+/// in it yet.
+fn raiseCompany(gs: *GameState, name: []const u8, hq_id: types.HqId) Error!Result {
+    const hq = gs.hqs.getPtr(hq_id) orelse return Error.UnknownHq;
+    if (gs.companiesAtHq(hq_id) >= hq.capacity().combat_companies) return Error.CapacityFull;
+    const id = try gs.createForce(name, .company, .none);
+    const n: usize = @max(3, hq.capacity().lances_per_company);
+    const names = [_][]const u8{ "1st Lance", "2nd Lance", "3rd Lance", "4th Lance", "5th Lance" };
+    for (0..n) |i| {
+        const recon = i + 1 == n and n >= 4;
+        const lid = try gs.createForce(if (recon) "Recon Lance" else names[i], .lance, id);
+        if (recon) gs.force(lid).?.role = .scouting;
+    }
+    const omega = try gs.createForce("Omega Company", .support_company, id);
+    const plan = [_]struct { []const u8, force_mod.SupportLanceKind }{
+        .{ "Salvage Lance", .salvage }, .{ "MASH Lance", .mash }, .{ "Logistics Lance", .transport }, .{ "Security Lance", .security },
+    };
+    for (plan) |entry| {
+        const lid = try gs.createForce(entry[0], .support_lance, omega);
+        gs.force(lid).?.support_kind = entry[1];
+    }
+    gs.assignCompanyToHq(id, hq_id) catch |err| switch (err) {
+        error.CapacityFull => return Error.CapacityFull,
+        error.TooManyLances => return Error.TooManyLances,
+        else => return Error.UnknownHq,
+    };
+    try gs.log(.decision, .{ .company = id, .hq = hq_id }, "[raise] {s} raised at {s}: {d} empty line lances and a support echelon — buy hulls, hire crews", .{ name, hq.name, n });
+    return .{ .created_force = id };
 }
 
 fn newCompanyAt(gs: *GameState, name: []const u8, hq_id: types.HqId) Error!Result {
@@ -1612,6 +1723,66 @@ test "12: trim_stock returns excess and unplanned consumables home, keeps spares
     if (!ac20_planned) try std.testing.expectEqual(@as(u32, 0), gs.stockCount(site, "ammo_ac20"));
     // Trimming again moves nothing.
     try std.testing.expectEqual(@as(u32, 0), (try execute(&gs, .{ .trim_stock = co })).tons_moved);
+}
+
+test "12: a raised company is an empty skeleton; hulls bought for it land in a lance or ship with the map transit; halls crew it" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 12 });
+    defer gs.deinit();
+    _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    const hq = gs.hqs.keys()[0];
+    gs.hqs.getPtr(hq).?.funds = 50_000_000;
+    const co = (try execute(&gs, .{ .raise_company = .{ .name = "Bravo", .hq = hq } })).created_force;
+    // The slot is taken: a second one is refused.
+    try std.testing.expectError(Error.CapacityFull, execute(&gs, .{ .raise_company = .{ .name = "Charlie", .hq = hq } }));
+    var line: u32 = 0;
+    var support: u32 = 0;
+    var fit = gs.forces.iterator();
+    while (fit.next()) |e| {
+        const f = e.value_ptr;
+        if (gs.companyOf(f.id) != co) continue;
+        try std.testing.expectEqual(@as(usize, 0), f.units.items.len);
+        if (f.echelon == .lance) line += 1;
+        if (f.echelon == .support_lance) support += 1;
+    }
+    try std.testing.expectEqual(gs.hqs.getPtr(hq).?.capacity().lances_per_company, @as(u8, @intCast(line)));
+    try std.testing.expectEqual(@as(u32, 4), support);
+    try std.testing.expectEqual(hq, gs.force(co).?.supplying_hq);
+
+    // A mek on the home board: bought straight into the first lance.
+    var first_lance: types.ForceId = .none;
+    for (gs.force(co).?.children.items) |cid| if (gs.force(cid).?.echelon == .lance and first_lance == .none) {
+        first_lance = cid;
+    };
+    var mek_listing: ?usize = null;
+    for (gs.market_listings.items, 0..) |l, i| if (l.kind == .unit and l.hq == hq and !l.staple and chassis_mod.find(l.item_key) != null and chassis_mod.find(l.item_key).?.kind == .mek) {
+        mek_listing = i;
+        break;
+    };
+    if (mek_listing == null) {
+        try gs.market_listings.append(gs.allocator(), .{ .kind = .unit, .item_key = "LCT-1V", .rarity = .common, .price = 1_500_000, .hq = hq, .listed_day = 0, .expires_day = 400 });
+        mek_listing = gs.market_listings.items.len - 1;
+    }
+    const r = try execute(&gs, .{ .buy_hull_for = .{ .listing = mek_listing.?, .company = co, .lance = first_lance } });
+    try std.testing.expectEqual(@as(u32, 0), r.eta_days);
+    try std.testing.expectEqual(first_lance, gs.unit(r.unit).?.force);
+
+    // The same hull on a distant HQ's board ships with the map transit.
+    _ = try execute(&gs, .{ .found_hq = .{ .name = "Far", .planet_key = "zebebelgenubi" } });
+    const far = gs.hqs.keys()[1];
+    gs.hqs.getPtr(far).?.funds = 5_000_000;
+    try gs.market_listings.append(gs.allocator(), .{ .kind = .unit, .item_key = "LCT-1V", .rarity = .common, .price = 1_500_000, .hq = far, .listed_day = 0, .expires_day = 400 });
+    const r2 = try execute(&gs, .{ .buy_hull_for = .{ .listing = gs.market_listings.items.len - 1, .company = co, .lance = first_lance } });
+    try std.testing.expect(r2.eta_days > 0);
+    try std.testing.expectEqual(unit_mod.UnitStatus.in_transit, gs.unit(r2.unit).?.status);
+    try std.testing.expectEqual(@as(usize, 1), gs.unit_transfers.items.len);
+
+    // Crews come from the halls: seed one of each role and fill the seats.
+    try gs.candidates.append(gs.allocator(), .{ .hq = hq, .spec = person_gen.generate(&gs.rng, .mekwarrior), .asking_bonus = 0, .listed_day = 0, .expires_day = 400 });
+    try gs.candidates.append(gs.allocator(), .{ .hq = hq, .spec = person_gen.generate(&gs.rng, .tech_mek), .asking_bonus = 0, .listed_day = 0, .expires_day = 400 });
+    const c = try execute(&gs, .{ .crew_company = co });
+    try std.testing.expectEqual(@as(u32, 2), c.hired_count);
+    try std.testing.expect(gs.unit(r.unit).?.pilot != .none);
+    try std.testing.expect(gs.unit(r.unit).?.tech != .none);
 }
 
 test "golden master: same seed + same script = same state hash" {
