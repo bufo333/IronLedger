@@ -12,6 +12,8 @@ const term_mod = @import("term.zig");
 const screen_mod = @import("screen.zig");
 const emblem_mod = @import("emblem.zig");
 const png = @import("png.zig");
+const music_mod = @import("music.zig");
+const splash = @import("splash.zig");
 
 const Term = term_mod.Term;
 const Key = term_mod.Key;
@@ -58,6 +60,8 @@ const Modal = union(enum) {
     /// Lab install: pick a part, then a location with the rules' verdict.
     install_part: types.UnitId,
     install_loc: struct { unit: types.UnitId, part: []const u8 },
+    /// Client settings (music).
+    settings,
 };
 
 /// Size tiers (docs/tui.md): the largest that fits decides how many panes
@@ -139,6 +143,9 @@ pub const App = struct {
     gs: ?GameState = null,
     running: bool = true,
 
+    // soundtrack and title screen
+    music: ?music_mod.Player = null,
+    show_splash: bool = true,
     // emblem display
     graphics: emblem_mod.Graphics = .none,
     emblem: ?emblem_mod.Emblem = null,
@@ -201,6 +208,7 @@ pub const App = struct {
     }
 
     pub fn deinit(self: *App) void {
+        if (self.music) |*m| m.deinit();
         if (self.gs) |*g| g.deinit();
         if (self.emblem) |*e| e.deinit(self.gpa);
         if (self.w_preview) |*e| e.deinit(self.gpa);
@@ -225,6 +233,12 @@ pub const App = struct {
         self.w_company.set("Alpha Company");
         self.pickDefaultPlayer();
         self.probeTerminal();
+        if (self.music) |*m| {
+            m.setEnabled(self.store.getSetting("music", 1) != 0);
+            m.setVolume(@intCast(std.math.clamp(self.store.getSetting("music_volume", 60), 0, 100)));
+            m.poll(); // the soundtrack starts with the title screen
+        }
+        if (self.show_splash) try self.runSplash();
         while (self.running) {
             if (self.term.tookResize()) {
                 const size = self.term.size();
@@ -232,6 +246,7 @@ pub const App = struct {
             }
             try self.draw();
             const key = self.term.readKey(500);
+            if (self.music) |*m| m.poll();
             if (key == .none) continue;
             _ = self.frame.reset(.retain_capacity);
             self.handleKey(key) catch |err| self.say(.crit, "error: {s}", .{@errorName(err)});
@@ -240,6 +255,23 @@ pub const App = struct {
 
     fn a(self: *App) std.mem.Allocator {
         return self.frame.allocator();
+    }
+
+    /// Title screen: five seconds, or any key.
+    fn runSplash(self: *App) !void {
+        splash.draw(&self.screen, self.screen.ascii);
+        try self.screen.flush(self.term.out);
+        var ticks: u32 = 0;
+        while (ticks < 50) : (ticks += 1) {
+            if (self.term.readKey(100) != .none) break;
+            if (self.music) |*m| m.poll();
+        }
+    }
+
+    fn nowPlaying(self: *App) []const u8 {
+        const m = &(self.music orelse return "");
+        if (!m.enabled) return "♪ off";
+        return m.nowPlaying() orelse "";
     }
 
     fn say(self: *App, style: Style, comptime fmt: []const u8, args: anytype) void {
@@ -408,8 +440,11 @@ pub const App = struct {
         var right_buf: [96]u8 = undefined;
         const players = try self.store.listPlayers(al);
         const campaigns = try self.store.listCampaignsOf(al, self.player_id);
-        const right = std.fmt.bufPrint(&right_buf, "{d} players · {d} campaigns · schema v{d}", .{ players.len, campaigns.len, game.store.schema_version }) catch "";
-        self.titleBar("MERCENARY COMMAND CONSOLE", right);
+        const np = self.nowPlaying();
+        const right = std.fmt.bufPrint(&right_buf, "{s}{s}{d} players · {d} campaigns · schema v{d}", .{ if (np.len > 0) "♪ " else "", if (np.len > 0) np else "", players.len, campaigns.len, game.store.schema_version }) catch "";
+        // (the separator between track and counts)
+        var title_buf: [64]u8 = undefined;
+        self.titleBar(std.fmt.bufPrint(&title_buf, "{s} · MERCENARY COMMAND CONSOLE", .{splash.game_name}) catch splash.game_name, right);
 
         const b = self.body();
         const pw: u16 = @min(30, b.w / 4);
@@ -444,7 +479,7 @@ pub const App = struct {
             }
             self.listPane(.{ .x = b.x, .y = b.y + top_h, .w = b.w, .h = b.h - top_h }, "SNAPSHOT", snap.items, 2, false, false);
         }
-        self.footer("[Enter] continue  [n] new campaign  [d] delete campaign  [p] new player  [D] delete player  [Tab] pane  [q] quit");
+        self.footer("[Enter] continue  [n] new campaign  [d] delete campaign  [p] new player  [D] delete player  [s] settings  [M] music  [q] quit");
     }
 
     fn drawWizard(self: *App) !void {
@@ -1309,6 +1344,25 @@ pub const App = struct {
                 const inner = self.screen.pane(r, .{ .title = "DECISION", .double = true });
                 self.screen.lines(inner, rows.items, 0, null);
             },
+            .settings => {
+                var rows: std.ArrayListUnmanaged([]const u8) = .empty;
+                try rows.append(al, "");
+                if (self.music) |*m| {
+                    try rows.append(al, try std.fmt.allocPrint(al, "  music        {s}     {{d}}[m] toggle{{/}}", .{if (m.enabled) "{g}on{/}" else "{c}off{/}"}));
+                    try rows.append(al, try std.fmt.allocPrint(al, "  volume       {d: >3}      {{d}}[-] [+] (restarts the track){{/}}", .{m.volume}));
+                    try rows.append(al, try std.fmt.allocPrint(al, "  now playing  {s}     {{d}}[>] next track{{/}}", .{m.nowPlaying() orelse "—"}));
+                    try rows.append(al, try std.fmt.allocPrint(al, "  tracks       {d} in data/music · player: {s}", .{ m.tracks.len, m.player_cmd orelse "{c}none found (afplay, mpv, ffplay, aplay){/}" }));
+                } else {
+                    try rows.append(al, "  {d}no soundtrack loaded — start without --no-music and keep tracks in data/music/{/}");
+                }
+                try rows.append(al, "");
+                try rows.append(al, try std.fmt.allocPrint(al, "  graphics     {s} · colour {s} · glyphs {s}", .{ if (self.graphics == .kitty) "kitty protocol" else "half-block", if (self.screen.truecolor) "24-bit" else "256", if (self.screen.ascii) "ascii" else "box-drawing" }));
+                try rows.append(al, "");
+                try rows.append(al, "  {d}[Esc] close{/}");
+                const r = self.modalRect(84, @intCast(rows.items.len + 2));
+                const inner = self.screen.pane(r, .{ .title = "SETTINGS", .double = true });
+                self.screen.lines(inner, rows.items, 0, null);
+            },
             .install_part => |uid| {
                 const cands = try q.installCandidates(al, &self.gs.?, uid);
                 var rows: std.ArrayListUnmanaged([]const u8) = .empty;
@@ -1525,11 +1579,32 @@ pub const App = struct {
                     self.input.len = 0;
                     self.modal = .{ .input = .delete_player };
                 },
+                's' => self.modal = .settings,
+                'M' => try self.toggleMusic(),
                 '?' => self.modal = .help,
                 else => {},
             },
             else => {},
         }
+    }
+
+    fn toggleMusic(self: *App) !void {
+        const m = &(self.music orelse {
+            self.say(.dim, "no soundtrack: put tracks in data/music/ and have afplay, mpv, ffplay or aplay on PATH", .{});
+            return;
+        });
+        m.setEnabled(!m.enabled);
+        try self.store.setSetting("music", @intFromBool(m.enabled));
+        if (m.enabled) m.poll();
+        self.say(.dim, "music {s}", .{if (m.enabled) "on" else "off"});
+    }
+
+    fn adjustVolume(self: *App, delta: i32) !void {
+        const m = &(self.music orelse return);
+        const v: i32 = std.math.clamp(@as(i32, m.volume) + delta, 0, 100);
+        m.setVolume(@intCast(v));
+        try self.store.setSetting("music_volume", v);
+        m.skip(); // restart the current track at the new level
     }
 
     fn welcomeMove(self: *App, delta: i32, players: []game.store.Store.PlayerInfo, campaigns: []game.store.Store.CampaignInfo) void {
@@ -1820,6 +1895,7 @@ pub const App = struct {
                 'n' => try self.endTurnRequest(1),
                 'N' => try self.endTurnRequest(7),
                 'q' => self.modal = .quit,
+                'M' => try self.toggleMusic(),
                 '?' => self.modal = .help,
                 else => try self.screenKey(ch),
             },
@@ -2389,6 +2465,18 @@ pub const App = struct {
         switch (self.modal) {
             .none => {},
             .help, .hull, .record => self.modal = .none,
+            .settings => switch (key) {
+                .escape, .enter => self.modal = .none,
+                .char => |ch| switch (ch) {
+                    'm', 'M' => try self.toggleMusic(),
+                    '+', '=' => try self.adjustVolume(10),
+                    '-' => try self.adjustVolume(-10),
+                    '>' => if (self.music) |*m| m.skip(),
+                    'q' => self.modal = .none,
+                    else => {},
+                },
+                else => {},
+            },
             .end_turn => switch (key) {
                 .escape => self.modal = .none,
                 .char => |ch| switch (ch) {
@@ -3005,6 +3093,10 @@ pub const Options = struct {
     /// Box-drawing and block glyphs replaced by ASCII (terminals that draw
     /// them double-width).
     ascii: bool = false,
+    /// Skip the title screen (tests, scripts).
+    no_splash: bool = false,
+    /// Don't start the soundtrack at all.
+    no_music: bool = false,
 };
 
 /// Entry point from main: open the store, take the terminal, run the app.
@@ -3023,6 +3115,14 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, store_path: [:0]const u8, options
     var app = try App.init(gpa, io, &term, store);
     defer app.deinit();
     app.screen.ascii = options.ascii;
+    app.show_splash = !options.no_splash;
+    if (!options.no_music) {
+        const player = music_mod.Player.init(io, gpa, "data/music");
+        if (player.available()) app.music = player else {
+            var p = player;
+            p.deinit();
+        }
+    }
     try app.run();
 }
 

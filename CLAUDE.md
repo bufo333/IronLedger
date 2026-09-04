@@ -1,6 +1,8 @@
 # Project guide
 
-BattleTech mercenary-company management sim in Zig 0.16. No external deps yet.
+**IRON LEDGER** — BattleTech mercenary-company management sim in Zig 0.16.
+No external deps (SQLite via the system library; music via the system
+command-line player as a child process).
 Read ARCHITECTURE.md before changing sim behavior; ROADMAP.md defines stage
 order — implement stages in order unless told otherwise.
 
@@ -8,7 +10,9 @@ order — implement stages in order unless told otherwise.
 
 - `zig build test --summary all` — run all tests (must stay green)
 - `zig build run` — demo CLI; `zig build run -- --repl` command console;
-  `zig build run -- --tui [--store path]` terminal client (Stage 12)
+  `zig build run -- --tui [--store path] [--ascii] [--no-splash] [--no-music]`
+  terminal client (Stage 12); `docs/tui_smoke.py zig-out/bin/game /tmp/x.db`
+  drives it through a pty
 - TUI code lives in `src/tui/` (outside the pure `game` module); it may
   only call `game.commands.execute` and read through `game.queries`.
 

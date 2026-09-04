@@ -8,6 +8,8 @@ test {
     _ = @import("tui/app.zig");
     _ = @import("tui/png.zig");
     _ = @import("tui/emblem.zig");
+    _ = @import("tui/splash.zig");
+    _ = @import("tui/music.zig");
 }
 
 const std = @import("std");
@@ -24,16 +26,20 @@ pub fn main(init: std.process.Init) !void {
     var repl = false;
     var tui = false;
     var ascii = false;
+    var no_splash = false;
+    var no_music = false;
     var store_path: [:0]const u8 = "campaigns.db";
     while (args.next()) |arg| {
         if (std.mem.eql(u8, arg, "--repl")) repl = true;
         if (std.mem.eql(u8, arg, "--tui")) tui = true;
         if (std.mem.eql(u8, arg, "--ascii")) ascii = true;
+        if (std.mem.eql(u8, arg, "--no-splash")) no_splash = true;
+        if (std.mem.eql(u8, arg, "--no-music")) no_music = true;
         if (std.mem.eql(u8, arg, "--store")) store_path = args.next() orelse store_path;
     }
 
     if (tui) {
-        try @import("tui/app.zig").run(init.io, init.gpa, store_path, .{ .ascii = ascii });
+        try @import("tui/app.zig").run(init.io, init.gpa, store_path, .{ .ascii = ascii, .no_splash = no_splash, .no_music = no_music });
     } else if (repl) {
         try runRepl(&gs, init.io, init.gpa, store_path);
     } else {

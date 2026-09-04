@@ -11,7 +11,7 @@ if os.path.exists(db):
 
 pid, fd = pty.fork()
 if pid == 0:
-    os.execv(exe, [exe, "--tui", "--store", db])
+    os.execv(exe, [exe, "--tui", "--no-splash", "--no-music", "--store", db])
 
 # 200x50 terminal
 fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 50, 200, 0, 0))
@@ -37,6 +37,9 @@ def plain():
 
 drain(1.0)
 assert "MERCENARY COMMAND CONSOLE" in plain(), "welcome screen missing"
+send("s", 0.8)
+assert "SETTINGS" in plain()[-30000:], plain()[-2000:]
+send("\x1b")
 send("p"); send("John\r")
 assert "player \"John\" created" in plain(), plain()[-3000:]
 send("n")                      # new campaign
@@ -155,7 +158,7 @@ print(plain()[-6000:])
 # ---- second pass: the minimum tier (80x24) and --ascii, every screen ----
 pid, fd = pty.fork()
 if pid == 0:
-    os.execv(exe, [exe, "--tui", "--ascii", "--store", db])
+    os.execv(exe, [exe, "--tui", "--ascii", "--no-splash", "--no-music", "--store", db])
 fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
 out = b""
 drain(1.0)

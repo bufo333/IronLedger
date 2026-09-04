@@ -29,6 +29,7 @@ pub const schema_version = 3;
 
 const ddl =
     \\CREATE TABLE IF NOT EXISTS player (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_seq INTEGER NOT NULL);
+    \\CREATE TABLE IF NOT EXISTS setting (key TEXT PRIMARY KEY, value INTEGER NOT NULL);
     \\CREATE TABLE IF NOT EXISTS campaign (id INTEGER PRIMARY KEY, name TEXT NOT NULL, commander TEXT, day INTEGER NOT NULL, date TEXT NOT NULL, schema_version INTEGER NOT NULL, save_seq INTEGER NOT NULL, player_id INTEGER NOT NULL DEFAULT 0);
     \\CREATE TABLE IF NOT EXISTS meta (cid INTEGER NOT NULL, key TEXT NOT NULL, value INTEGER NOT NULL, PRIMARY KEY (cid, key));
     \\CREATE TABLE IF NOT EXISTS meta_text (cid INTEGER NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (cid, key));
@@ -148,6 +149,25 @@ pub const Store = struct {
             });
         }
         return out.toOwnedSlice(alloc);
+    }
+
+    // -------------------------------------------------------------- settings
+
+    /// Client settings (music on/off, volume …) live in the store so they
+    /// follow the save file, not the terminal.
+    pub fn getSetting(self: Store, key: []const u8, default: i64) i64 {
+        const st = self.db.prepare("SELECT value FROM setting WHERE key = ?1") catch return default;
+        defer st.finalize();
+        st.bindAll(.{key}) catch return default;
+        const has = st.next() catch return default;
+        return if (has) st.int(0) else default;
+    }
+
+    pub fn setSetting(self: Store, key: []const u8, value: i64) !void {
+        const st = try self.db.prepare("INSERT INTO setting (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = excluded.value");
+        defer st.finalize();
+        try st.bindAll(.{ key, value });
+        try st.run();
     }
 
     // --------------------------------------------------------------- players
