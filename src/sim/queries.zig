@@ -704,6 +704,72 @@ pub fn supply(alloc: Alloc, gs: *GameState) !Supply {
     return .{ .rows = try out.toOwnedSlice(alloc), .site = try sites.toOwnedSlice(alloc) };
 }
 
+/// Stock at one site as a table: part, quantity, tonnage.
+pub fn stockTable(alloc: Alloc, gs: *GameState, site: types.Site) ![]const []const u8 {
+    const part_mod = @import("../domain/part.zig");
+    var out: std.ArrayListUnmanaged([]const u8) = .empty;
+    const stock: ?*const std.StringArrayHashMapUnmanaged(u32) = switch (site) {
+        .outfit => &gs.spare_parts,
+        .hq => |id| if (gs.hqs.getPtr(id)) |h| &h.stock else null,
+        .company => |id| if (gs.forces.getPtr(id)) |f| &f.stock else null,
+    };
+    try out.append(alloc, "part                     qty     tons  kind");
+    var total: u32 = 0;
+    if (stock) |m| {
+        var it = m.iterator();
+        while (it.next()) |e| {
+            const qty = e.value_ptr.*;
+            if (qty == 0) continue;
+            const key = e.key_ptr.*;
+            const tons = qty * part_mod.tons(key);
+            total += tons;
+            const kind: []const u8 = if (part_mod.isComponent(key)) "component" else if (part_mod.find(key)) |p| switch (p.mount) {
+                .energy, .ballistic, .missile => "weapon",
+                .ammo => "ammo",
+                .equipment => "equipment",
+                .none => "supplies",
+            } else "supplies";
+            try out.append(alloc, try std.fmt.allocPrint(alloc, "{s: <22} {d: >6} {d: >7}t  {s}", .{ clip(key, 22), qty, tons, kind }));
+        }
+    }
+    if (out.items.len == 1) try out.append(alloc, "{d}empty{/}");
+    const cap = gs.siteCapacityTons(site);
+    try out.append(alloc, "");
+    try out.append(alloc, try std.fmt.allocPrint(alloc, "total {d}t{s}", .{ total, if (cap) |c| try std.fmt.allocPrint(alloc, " of {d}t capacity · {d}t free", .{ c, c -| total }) else "" }));
+    return out.toOwnedSlice(alloc);
+}
+
+/// Orders and shipments still on their way, soonest first.
+pub fn inbound(alloc: Alloc, gs: *GameState) ![]const []const u8 {
+    const day = gs.clock.day_index;
+    var out: std.ArrayListUnmanaged([]const u8) = .empty;
+    try out.append(alloc, "part               qty  to                      status      eta          cost");
+    const Row = struct { eta: u32, text: []const u8 };
+    var rows: std.ArrayListUnmanaged(Row) = .empty;
+    for (gs.part_orders.items) |o| {
+        if (o.status == .delivered or o.status == .cancelled) continue;
+        const eta = o.eta_day orelse std.math.maxInt(u32);
+        const eta_s: []const u8 = if (o.eta_day) |e| (if (e > day) try std.fmt.allocPrint(alloc, "d{d} ({d} days)", .{ e, e - day }) else "today") else if (o.status == .failed) "{c}not found{/}" else "{a}sourcing{/}";
+        try rows.append(alloc, .{ .eta = eta, .text = try std.fmt.allocPrint(alloc, "{s: <18} {d: >4}  {s: <22}  {s: <10}  {s: <12} {s: >10}", .{
+            clip(o.part_key, 18), o.quantity, clip(try siteLabel(alloc, gs, o.dest), 22), @tagName(o.status), eta_s, try money(alloc, o.cost),
+        }) });
+    }
+    for (gs.fund_couriers.items) |c| {
+        try rows.append(alloc, .{ .eta = c.eta_day, .text = try std.fmt.allocPrint(alloc, "{s: <18} {s: >4}  {s: <22}  {s: <10}  d{d} ({d} days)", .{ "cash courier", "", clip(try treasuryLabel(alloc, gs, c.to), 22), "in transit", c.eta_day, c.eta_day -| day }) });
+    }
+    for (gs.unit_transfers.items) |t| {
+        try rows.append(alloc, .{ .eta = t.eta_day, .text = try std.fmt.allocPrint(alloc, "{s: <18} {s: >4}  {s: <22}  {s: <10}  d{d} ({d} days)", .{ try std.fmt.allocPrint(alloc, "hull #{d}", .{@intFromEnum(t.unit)}), "", clip(forceName(gs, t.to_company), 22), "in transit", t.eta_day, t.eta_day -| day }) });
+    }
+    std.mem.sort(Row, rows.items, {}, struct {
+        fn lt(_: void, a: Row, b: Row) bool {
+            return a.eta < b.eta;
+        }
+    }.lt);
+    for (rows.items) |r| try out.append(alloc, r.text);
+    if (rows.items.len == 0) try out.append(alloc, "{d}nothing on the way{/}");
+    return out.toOwnedSlice(alloc);
+}
+
 /// The standing policy for a treasury, if any.
 pub fn policyFor(gs: *GameState, t: state_mod.Treasury) ?state_mod.StandingPolicy {
     for (gs.policies.items) |p| if (std.meta.eql(p.entity, t)) return p;

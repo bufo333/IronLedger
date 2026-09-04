@@ -95,6 +95,8 @@ send("\t"); send("\r", 0.8)    # catalog → order prefill
 assert ":order " in plain()[-300:], plain()[-600:]
 send("\x1b")
 send("6")                      # supply: cash and provisions to a company
+p = plain()
+assert "STOCK ·" in p and "INBOUND" in p and "capacity" in p, p[-3000:]
 send("j"); send("j"); send("j")                     # onto the company block
 send("t", 0.8)
 assert ":transfer outfit co:" in plain()[-400:], plain()[-800:]

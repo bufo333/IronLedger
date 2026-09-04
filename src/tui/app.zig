@@ -1151,7 +1151,22 @@ pub const App = struct {
         const g = &self.gs.?;
         const b = self.body();
         const view = try q.supply(al, g);
-        self.listPane(b, "SITES", view.rows, 0, true, true);
+        const lw: u16 = if (self.narrow()) b.w else b.w * 55 / 100;
+        self.listPane(.{ .x = b.x, .y = b.y, .w = lw, .h = b.h }, "SITES", view.rows, 0, true, true);
+        if (lw < b.w) {
+            const c = self.cur(0).*;
+            const site: ?types.Site = if (c < view.site.len) view.site[c] else null;
+            const top_h: u16 = b.h / 2;
+            if (site) |s| {
+                const table = try q.stockTable(al, g, s);
+                self.listPane(.{ .x = b.x + lw, .y = b.y, .w = b.w - lw, .h = top_h }, try std.fmt.allocPrint(al, "STOCK · {s}", .{try q.siteLabel(al, g, s)}), table, 1, false, false);
+            } else {
+                const hint = [_][]const u8{"{d}move the cursor onto a site to see its stock{/}"};
+                self.listPane(.{ .x = b.x + lw, .y = b.y, .w = b.w - lw, .h = top_h }, "STOCK", &hint, 1, false, false);
+            }
+            const inb = try q.inbound(al, g);
+            self.listPane(.{ .x = b.x + lw, .y = b.y + top_h, .w = b.w - lw, .h = b.h - top_h }, "INBOUND · soonest first", inb, 2, false, false);
+        }
     }
 
     /// The site under the Supply cursor, if the row belongs to one.
