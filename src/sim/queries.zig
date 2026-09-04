@@ -409,6 +409,22 @@ pub fn contracts(alloc: Alloc, gs: *GameState) !Contracts {
         try lines.append(alloc, "");
         try active.append(alloc, .{ .id = c.id, .company = c.assigned_company, .lines = try lines.toOwnedSlice(alloc), .objectives_met = c.objectivesMet() });
     }
+    // Companies whose contract is over but who are still out there: they
+    // idle on that world (eating from their trucks) until recalled.
+    var fit = gs.forces.iterator();
+    while (fit.next()) |e| {
+        const f = e.value_ptr;
+        if (f.echelon != .company or gs.isCompanyHome(f.id) or gs.deploymentContract(f.id) != null) continue;
+        var lines: std.ArrayListUnmanaged([]const u8) = .empty;
+        if (f.return_eta_day) |eta| {
+            try lines.append(alloc, try std.fmt.allocPrint(alloc, "[—] {{a}}returning{{/}}  co:{d} {s} on the way home from {s}  ·  arrives day {d} ({d} days)", .{ @intFromEnum(f.id), f.name, planetName(f.location_planet), eta, eta -| day }));
+        } else {
+            try lines.append(alloc, try std.fmt.allocPrint(alloc, "[—] {{a}}idle afield{{/}}  co:{d} {s} on {s}  ·  contract over, no orders", .{ @intFromEnum(f.id), f.name, planetName(f.location_planet) }));
+            try lines.append(alloc, "    {d}eats from its trucks and pays field prices until it moves · [R] recall home (free) · or accept a new offer with it from here{/}");
+        }
+        try lines.append(alloc, "");
+        try active.append(alloc, .{ .id = .none, .company = f.id, .lines = try lines.toOwnedSlice(alloc), .objectives_met = false });
+    }
 
     return .{
         .board_header = "kind               world            emp    LY  band        mo     pay/month          total  enemy  salv  rights      transit",

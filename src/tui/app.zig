@@ -737,7 +737,7 @@ pub const App = struct {
             .market => "Tab pane · Enter buy / order / order shortfall · b fabricate component · [ ] HQ board · q welcome",
             .ledger => "j/k treasury · t send cash to it by courier · p standing top-up (floor + monthly cap) · L loan · R repay",
             .supply => "j/k site · on a company: t cash · p cash top-up policy · P resupply policy (days, tons) · s ship now · o order to the field",
-            .forces => "Enter assign · a/u seat · A auto · o lance role · d depot · m mothball/activate · x move to company · $ sell · X disband",
+            .forces => "Enter assign · a/u seat · A auto · o role · d depot · m mothball · x move · R recall idle company · $ sell · X disband",
             .map => "h j k l move between worlds · f found HQ here · o offers here · n end turn · q welcome",
             .lab => "[ ] hull · j/k mount · - remove · + install · R order replacement · D send to depot (structure) · c clear · Enter commit",
             .hq => "[ ] switch HQ · u upgrade the highlighted facility (picker elsewhere) · T tier · S autostaff · Tab hall · f/F filter · Enter hire",
@@ -2209,12 +2209,22 @@ pub const App = struct {
                 const sel = view.active[@min(self.cur(1).*, view.active.len - 1)];
                 switch (ch) {
                     'c' => {
+                        if (sel.id == .none) {
+                            self.say(.dim, "no contract to complete — [R] recalls the company", .{});
+                            return;
+                        }
                         try self.exec(.{ .complete_contract = sel.id });
                         self.say(.good, "contract [{d}] closed out", .{@intFromEnum(sel.id)});
                     },
                     'R' => {
+                        const under_contract = sel.id != .none;
                         try self.exec(.{ .recall_company = sel.company });
-                        self.say(.amber, "{s} recalled — the breach clause applies if the contract was active", .{q.forceName(g, sel.company)});
+                        if (self.msg_style == .crit) return;
+                        if (under_contract) {
+                            self.say(.amber, "{s} recalled under the breach clause: advance clawed back, remaining pay forfeited, reputation −2", .{q.forceName(g, sel.company)});
+                        } else {
+                            self.say(.good, "{s} is coming home", .{q.forceName(g, sel.company)});
+                        }
                     },
                     else => {},
                 }
@@ -2323,6 +2333,20 @@ pub const App = struct {
                     'X' => if (row) |r| {
                         const co = g.companyOf(r.force);
                         if (co != .none) self.modal = .{ .disband = co };
+                    },
+                    'R' => if (row) |r| {
+                        const co = g.companyOf(r.force);
+                        if (co == .none) return;
+                        if (g.isCompanyHome(co)) {
+                            self.say(.dim, "{s} is already home", .{q.forceName(g, co)});
+                            return;
+                        }
+                        if (g.deploymentContract(co) != null) {
+                            self.say(.amber, "{s} is under contract — recall from the Contracts screen (R there) to accept the breach clause", .{q.forceName(g, co)});
+                            return;
+                        }
+                        try self.exec(.{ .recall_company = co });
+                        if (self.msg_style != .crit) self.say(.good, "{s} is coming home", .{q.forceName(g, co)});
                     },
                     else => {},
                 }
