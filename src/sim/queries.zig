@@ -1528,7 +1528,14 @@ pub fn lab(alloc: Alloc, gs: *GameState, uid: types.UnitId) !Lab {
             if (s.condition != .ok) {
                 const comp = @import("../domain/part.zig").componentForSlot(s.slot_key);
                 const on_hand = gs.stockCount(.{ .hq = home_hq }, comp);
-                struct_note = try std.fmt.allocPrint(alloc, "  {{c}}structure {s}{{/}} · needs {s} ({d} on hand) · {s}", .{ @tagName(s.condition), comp, on_hand, if (on_hand > 0 or s.condition == .damaged) "{g}[D] send to depot{/}" else "{a}order or fabricate it (Market){/}" });
+                const at_home = gs.isCompanyHome(gs.companyOf(u.force));
+                const action: []const u8 = if (!at_home)
+                    "{a}hull is away — depot work waits for it to come home; fabricate the part meanwhile (Market, b){/}"
+                else if (on_hand > 0 or s.condition == .damaged)
+                    "{g}[D] send to depot{/}"
+                else
+                    "{a}order or fabricate it (Market){/}";
+                struct_note = try std.fmt.allocPrint(alloc, "  {{c}}structure {s}{{/}} · needs {s} ({d} on hand) · {s}", .{ @tagName(s.condition), comp, on_hand, action });
             }
         }
         try budget.append(alloc, try std.fmt.allocPrint(alloc, "{s}{s: <10} {d: >4}  {d: >4}{s}{{/}}{s}", .{ if (full) "{d}" else "", f.name, r.crits_used[f.value], r.crits_free[f.value], if (full) "  full" else "", struct_note }));
@@ -1544,7 +1551,7 @@ pub fn lab(alloc: Alloc, gs: *GameState, uid: types.UnitId) !Lab {
         try budget.append(alloc, try std.fmt.allocPrint(alloc, "bays at {s}", .{clip(h.name, 28)}));
         try budget.append(alloc, try std.fmt.allocPrint(alloc, "  {s}{d} of {d} slots busy{{/}} · {d} queued · refit ceiling class {{a}}{s}{{/}}", .{ if (busy >= slots) "{c}" else "{g}", busy, slots, queued, if (h.refitClassCeiling()) |c| @tagName(c) else "none" }));
     }
-    if (u.needsDepot()) try budget.append(alloc, "{a}structure damaged: [D] sends this hull to the depot (bay job); the weekly pass also queues it when parts are in stock{/}");
+    if (u.needsDepot()) try budget.append(alloc, if (gs.isCompanyHome(gs.companyOf(u.force))) "{a}structure damaged: [D] sends this hull to the depot (bay job); the weekly pass also queues it when parts are in stock{/}" else "{a}structure damaged: the hull is away with its company — HQ can fabricate or order the component now; the bay job runs once it is home{/}");
     try budget.append(alloc, "{d}A ammo/armor · B like-for-like · C new weapons · D structure{/}");
     try budget.append(alloc, "{d}any weapon or gear fits any location with free crits;{/}");
     try budget.append(alloc, "{d}ammo bins go where free crits are; the head takes 1 crit{/}");

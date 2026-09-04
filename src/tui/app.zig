@@ -2969,6 +2969,8 @@ pub const App = struct {
             error.MissingComponents => "structural components missing at the home HQ — order or fabricate them on the Market screen first",
             error.NoBay => "no mek bay that can do structural work — a regional HQ with a mek_bay is needed",
             error.UnitAway => "that hull is away from home — depot work happens at the home HQ",
+            error.UnitDeployed => "that hull is with a deployed company — bring the company home first (HQ work like fabrication and orders is unaffected)",
+            error.PersonDeployed => "that person is deployed with their company",
             else => @errorName(err),
         };
     }
