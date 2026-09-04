@@ -133,7 +133,7 @@ fn runPolicies(gs: *GameState) !void {
             // time. Floor = enough to fight through the transit plus one;
             // target = floor + 2. `ammo_battles` overrides the target.
             const transit = gs.courierEtaDays(.{ .company = sp.company });
-            const floor_battles: u32 = 1 + transit / 15;
+            const floor_battles: u32 = 1 + (transit + 14) / 15; // ceil(transit / 15) battles fought while a shipment travels
             const target_battles: u32 = if (sp.ammo_battles > 0) @max(@as(u32, sp.ammo_battles), floor_battles) else floor_battles + 2;
             const have = gs.stockCount(.{ .company = sp.company }, key);
             if (have >= per_battle * floor_battles) continue;

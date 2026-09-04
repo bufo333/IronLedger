@@ -500,7 +500,7 @@ pub fn ledger(alloc: Alloc, gs: *GameState, selected: state_mod.Treasury, period
         try extras.append(alloc, try std.fmt.allocPrint(alloc, "  {s}  top up to {s} · {s} of {s} sent this month", .{ try treasuryLabel(alloc, gs, p.entity), try money(alloc, p.floor), try money(alloc, p.sent_this_month), try money(alloc, p.monthly_cap) }));
     }
     for (gs.supply_policies.items) |sp| {
-        try extras.append(alloc, try std.fmt.allocPrint(alloc, "  co:{d} {s}  resupply {d}t provisions under {d} days · ammo target {s}", .{ @intFromEnum(sp.company), clip(forceName(gs, sp.company), 16), sp.tons, sp.min_days, if (sp.ammo_battles > 0) try std.fmt.allocPrint(alloc, "{d} battles", .{sp.ammo_battles}) else "auto (1 + transit/15 days, +2)" }));
+        try extras.append(alloc, try std.fmt.allocPrint(alloc, "  co:{d} {s}  resupply {d}t provisions under {d} days · ammo target {s}", .{ @intFromEnum(sp.company), clip(forceName(gs, sp.company), 16), sp.tons, sp.min_days, if (sp.ammo_battles > 0) try std.fmt.allocPrint(alloc, "{d} battles", .{sp.ammo_battles}) else "auto (1 + ceil(transit/15) battles, +2)" }));
     }
     try extras.append(alloc, "");
     try extras.append(alloc, try std.fmt.allocPrint(alloc, "loans · credit {s} of {s}", .{ try money(alloc, gs.creditRemaining()), try money(alloc, gs.creditLimit()) }));

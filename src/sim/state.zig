@@ -64,7 +64,7 @@ pub const SupplyPolicy = struct {
     min_days: u16,
     tons: u32,
     /// Munition target in battles' worth per family; 0 = derive from the
-    /// supply line: 1 + transit/15 battles as the floor, floor + 2 as the target.
+    /// supply line: 1 + ceil(transit/15) battles as the floor, floor + 2 as the target.
     ammo_battles: u8 = 0,
 };
 
