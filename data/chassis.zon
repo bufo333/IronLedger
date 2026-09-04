@@ -1,0 +1,164 @@
+// Curated 3025 chassis catalog (Succession Wars classics). Typed against
+// domain/chassis.zig `[]const Chassis` at comptime.
+//
+// Construction facts (Stage 10 MekLab, TechManual standard IS tech):
+//   walk_mp → engine rating = tonnage × walk_mp (weight from the engine
+//   table); jump_mp jump jets (0.5/1/2 t by weight class); heat_sinks total
+//   (10 come free with a fusion engine); armor_half_tons of standard armor.
+//   Loadouts carry the signature weapons AND their ammunition tons; slot
+//   keys prefix the location (hd/ct/lt/rt/la/ra/ll/rl).
+// BV2 and cost values are approximate (// TUNE). Licensing: values
+// re-encoded by hand, no MegaMek files copied.
+.{
+    .{ .key = "LCT-1V", .name = "Locust", .tonnage = 20, .bv = 432, .cost = 1_512_400, .rarity = .common, .walk_mp = 8, .heat_sinks = 10, .armor_half_tons = 8, .loadout = .{
+        .{ .slot = "ct.mlas.1", .part = "mlas", .class = .weapon },
+        .{ .slot = "la.mg.1", .part = "mg", .class = .weapon },
+        .{ .slot = "ra.mg.1", .part = "mg", .class = .weapon },
+        .{ .slot = "ct.ammo_mg.1", .part = "ammo_mg", .class = .ammo },
+    } },
+    .{ .key = "COM-2D", .name = "Commando", .tonnage = 25, .bv = 541, .cost = 1_846_625, .rarity = .uncommon, .walk_mp = 6, .heat_sinks = 10, .armor_half_tons = 8, .loadout = .{
+        .{ .slot = "ct.srm6.1", .part = "srm6", .class = .weapon },
+        .{ .slot = "la.srm4.1", .part = "srm4", .class = .weapon },
+        .{ .slot = "ra.mlas.1", .part = "mlas", .class = .weapon },
+        .{ .slot = "lt.ammo_srm.1", .part = "ammo_srm", .class = .ammo },
+    } },
+    .{ .key = "JR7-D", .name = "Jenner", .tonnage = 35, .bv = 875, .cost = 3_286_750, .rarity = .uncommon, .walk_mp = 7, .jump_mp = 5, .heat_sinks = 10, .armor_half_tons = 8, .loadout = .{
+        .{ .slot = "la.mlas.1", .part = "mlas", .class = .weapon },
+        .{ .slot = "la.mlas.2", .part = "mlas", .class = .weapon },
+        .{ .slot = "ra.mlas.1", .part = "mlas", .class = .weapon },
+        .{ .slot = "ra.mlas.2", .part = "mlas", .class = .weapon },
+        .{ .slot = "ct.srm4.1", .part = "srm4", .class = .weapon },
+        .{ .slot = "rt.ammo_srm.1", .part = "ammo_srm", .class = .ammo },
+    } },
+    .{ .key = "PNT-9R", .name = "Panther", .tonnage = 35, .bv = 769, .cost = 2_955_193, .rarity = .uncommon, .walk_mp = 4, .jump_mp = 4, .heat_sinks = 13, .armor_half_tons = 13, .loadout = .{
+        .{ .slot = "ra.ppc.1", .part = "ppc", .class = .weapon },
+        .{ .slot = "ct.srm4.1", .part = "srm4", .class = .weapon },
+        .{ .slot = "lt.ammo_srm.1", .part = "ammo_srm", .class = .ammo },
+    } },
+    .{ .key = "PXH-1", .name = "Phoenix Hawk", .tonnage = 45, .bv = 1041, .cost = 4_066_250, .rarity = .common, .walk_mp = 6, .jump_mp = 6, .heat_sinks = 10, .armor_half_tons = 16, .loadout = .{
+        .{ .slot = "ra.llas.1", .part = "llas", .class = .weapon },
+        .{ .slot = "la.mg.1", .part = "mg", .class = .weapon },
+        .{ .slot = "ra.mg.1", .part = "mg", .class = .weapon },
+        .{ .slot = "rt.ammo_mg.1", .part = "ammo_mg", .class = .ammo },
+    } },
+    .{ .key = "SHD-2H", .name = "Shadow Hawk", .tonnage = 55, .bv = 1064, .cost = 4_672_315, .rarity = .common, .walk_mp = 5, .jump_mp = 3, .heat_sinks = 12, .armor_half_tons = 19, .loadout = .{
+        .{ .slot = "lt.ac5.1", .part = "ac5", .class = .weapon },
+        .{ .slot = "rt.lrm5.1", .part = "lrm5", .class = .weapon },
+        .{ .slot = "ra.mlas.1", .part = "mlas", .class = .weapon },
+        .{ .slot = "hd.srm2.1", .part = "srm2", .class = .weapon },
+        .{ .slot = "lt.ammo_ac5.1", .part = "ammo_ac5", .class = .ammo },
+        .{ .slot = "rt.ammo_lrm.1", .part = "ammo_lrm", .class = .ammo },
+        .{ .slot = "ct.ammo_srm.1", .part = "ammo_srm", .class = .ammo },
+    } },
+    .{ .key = "GRF-1N", .name = "Griffin", .tonnage = 55, .bv = 1272, .cost = 4_864_438, .rarity = .common, .walk_mp = 5, .jump_mp = 5, .heat_sinks = 12, .armor_half_tons = 19, .loadout = .{
+        .{ .slot = "ra.ppc.1", .part = "ppc", .class = .weapon },
+        .{ .slot = "rt.lrm10.1", .part = "lrm10", .class = .weapon },
+        .{ .slot = "rt.ammo_lrm.1", .part = "ammo_lrm", .class = .ammo },
+        .{ .slot = "rt.ammo_lrm.2", .part = "ammo_lrm", .class = .ammo },
+    } },
+    .{ .key = "WVR-6R", .name = "Wolverine", .tonnage = 55, .bv = 1101, .cost = 4_764_938, .rarity = .common, .walk_mp = 5, .jump_mp = 5, .heat_sinks = 12, .armor_half_tons = 19, .loadout = .{
+        .{ .slot = "ra.ac5.1", .part = "ac5", .class = .weapon },
+        .{ .slot = "lt.srm6.1", .part = "srm6", .class = .weapon },
+        .{ .slot = "hd.mlas.1", .part = "mlas", .class = .weapon },
+        .{ .slot = "ra.ammo_ac5.1", .part = "ammo_ac5", .class = .ammo },
+        .{ .slot = "lt.ammo_srm.1", .part = "ammo_srm", .class = .ammo },
+    } },
+    .{ .key = "RFL-3N", .name = "Rifleman", .tonnage = 60, .bv = 1039, .cost = 4_860_013, .rarity = .uncommon, .walk_mp = 4, .heat_sinks = 10, .armor_half_tons = 15, .loadout = .{
+        .{ .slot = "ra.llas.1", .part = "llas", .class = .weapon },
+        .{ .slot = "la.llas.1", .part = "llas", .class = .weapon },
+        .{ .slot = "ra.ac5.1", .part = "ac5", .class = .weapon },
+        .{ .slot = "la.ac5.1", .part = "ac5", .class = .weapon },
+        .{ .slot = "rt.mlas.1", .part = "mlas", .class = .weapon },
+        .{ .slot = "lt.mlas.1", .part = "mlas", .class = .weapon },
+        .{ .slot = "rt.ammo_ac5.1", .part = "ammo_ac5", .class = .ammo },
+    } },
+    .{ .key = "CPLT-C1", .name = "Catapult", .tonnage = 65, .bv = 1165, .cost = 5_790_375, .rarity = .uncommon, .walk_mp = 4, .jump_mp = 4, .heat_sinks = 15, .armor_half_tons = 20, .loadout = .{
+        .{ .slot = "ra.lrm15.1", .part = "lrm15", .class = .weapon },
+        .{ .slot = "la.lrm15.1", .part = "lrm15", .class = .weapon },
+        .{ .slot = "rt.mlas.1", .part = "mlas", .class = .weapon },
+        .{ .slot = "lt.mlas.1", .part = "mlas", .class = .weapon },
+        .{ .slot = "ct.mlas.1", .part = "mlas", .class = .weapon },
+        .{ .slot = "ct.mlas.2", .part = "mlas", .class = .weapon },
+        .{ .slot = "rt.ammo_lrm.1", .part = "ammo_lrm", .class = .ammo },
+        .{ .slot = "lt.ammo_lrm.1", .part = "ammo_lrm", .class = .ammo },
+    } },
+    .{ .key = "TDR-5S", .name = "Thunderbolt", .tonnage = 65, .bv = 1335, .cost = 5_265_463, .rarity = .common, .walk_mp = 4, .heat_sinks = 15, .armor_half_tons = 26, .loadout = .{
+        .{ .slot = "ra.llas.1", .part = "llas", .class = .weapon },
+        .{ .slot = "lt.lrm15.1", .part = "lrm15", .class = .weapon },
+        .{ .slot = "rt.mlas.1", .part = "mlas", .class = .weapon },
+        .{ .slot = "rt.mlas.2", .part = "mlas", .class = .weapon },
+        .{ .slot = "rt.mlas.3", .part = "mlas", .class = .weapon },
+        .{ .slot = "lt.srm2.1", .part = "srm2", .class = .weapon },
+        .{ .slot = "lt.ammo_lrm.1", .part = "ammo_lrm", .class = .ammo },
+        .{ .slot = "lt.ammo_lrm.2", .part = "ammo_lrm", .class = .ammo },
+        .{ .slot = "rt.ammo_srm.1", .part = "ammo_srm", .class = .ammo },
+    } },
+    .{ .key = "MAD-3R", .name = "Marauder", .tonnage = 75, .bv = 1363, .cost = 5_899_393, .rarity = .uncommon, .walk_mp = 4, .heat_sinks = 16, .armor_half_tons = 23, .loadout = .{
+        .{ .slot = "ra.ppc.1", .part = "ppc", .class = .weapon },
+        .{ .slot = "la.ppc.1", .part = "ppc", .class = .weapon },
+        .{ .slot = "ra.mlas.1", .part = "mlas", .class = .weapon },
+        .{ .slot = "la.mlas.1", .part = "mlas", .class = .weapon },
+        .{ .slot = "rt.ac5.1", .part = "ac5", .class = .weapon },
+        .{ .slot = "rt.ammo_ac5.1", .part = "ammo_ac5", .class = .ammo },
+    } },
+    .{ .key = "WHM-6R", .name = "Warhammer", .tonnage = 70, .bv = 1299, .cost = 6_265_363, .rarity = .common, .walk_mp = 4, .heat_sinks = 18, .armor_half_tons = 20, .loadout = .{
+        .{ .slot = "ra.ppc.1", .part = "ppc", .class = .weapon },
+        .{ .slot = "la.ppc.1", .part = "ppc", .class = .weapon },
+        .{ .slot = "rt.srm6.1", .part = "srm6", .class = .weapon },
+        .{ .slot = "rt.mlas.1", .part = "mlas", .class = .weapon },
+        .{ .slot = "lt.mlas.1", .part = "mlas", .class = .weapon },
+        .{ .slot = "rt.ammo_srm.1", .part = "ammo_srm", .class = .ammo },
+    } },
+    .{ .key = "ARC-2R", .name = "Archer", .tonnage = 70, .bv = 1477, .cost = 6_171_475, .rarity = .common, .walk_mp = 4, .heat_sinks = 10, .armor_half_tons = 26, .loadout = .{
+        .{ .slot = "ra.lrm20.1", .part = "lrm20", .class = .weapon },
+        .{ .slot = "la.lrm20.1", .part = "lrm20", .class = .weapon },
+        .{ .slot = "ct.mlas.1", .part = "mlas", .class = .weapon },
+        .{ .slot = "ct.mlas.2", .part = "mlas", .class = .weapon },
+        .{ .slot = "rt.ammo_lrm.1", .part = "ammo_lrm", .class = .ammo },
+        .{ .slot = "rt.ammo_lrm.2", .part = "ammo_lrm", .class = .ammo },
+        .{ .slot = "lt.ammo_lrm.1", .part = "ammo_lrm", .class = .ammo },
+        .{ .slot = "lt.ammo_lrm.2", .part = "ammo_lrm", .class = .ammo },
+    } },
+    .{ .key = "AWS-8Q", .name = "Awesome", .tonnage = 80, .bv = 1605, .cost = 6_173_410, .rarity = .rare, .walk_mp = 3, .heat_sinks = 28, .armor_half_tons = 30, .loadout = .{
+        .{ .slot = "ra.ppc.1", .part = "ppc", .class = .weapon },
+        .{ .slot = "rt.ppc.1", .part = "ppc", .class = .weapon },
+        .{ .slot = "lt.ppc.1", .part = "ppc", .class = .weapon },
+        .{ .slot = "hd.slas.1", .part = "slas", .class = .weapon },
+    } },
+    .{ .key = "BLR-1G", .name = "BattleMaster", .tonnage = 85, .bv = 1519, .cost = 7_650_713, .rarity = .rare, .walk_mp = 4, .heat_sinks = 18, .armor_half_tons = 26, .loadout = .{
+        .{ .slot = "ra.ppc.1", .part = "ppc", .class = .weapon },
+        .{ .slot = "rt.mlas.1", .part = "mlas", .class = .weapon },
+        .{ .slot = "rt.mlas.2", .part = "mlas", .class = .weapon },
+        .{ .slot = "lt.mlas.1", .part = "mlas", .class = .weapon },
+        .{ .slot = "lt.mlas.2", .part = "mlas", .class = .weapon },
+        .{ .slot = "ct.srm6.1", .part = "srm6", .class = .weapon },
+        .{ .slot = "lt.ammo_srm.1", .part = "ammo_srm", .class = .ammo },
+    } },
+    .{ .key = "AS7-D", .name = "Atlas", .tonnage = 100, .bv = 1897, .cost = 9_626_000, .rarity = .rare, .walk_mp = 3, .heat_sinks = 20, .armor_half_tons = 38, .loadout = .{
+        .{ .slot = "rt.ac20.1", .part = "ac20", .class = .weapon },
+        .{ .slot = "lt.lrm20.1", .part = "lrm20", .class = .weapon },
+        .{ .slot = "ra.mlas.1", .part = "mlas", .class = .weapon },
+        .{ .slot = "la.mlas.1", .part = "mlas", .class = .weapon },
+        .{ .slot = "ct.srm6.1", .part = "srm6", .class = .weapon },
+        .{ .slot = "rt.ammo_ac20.1", .part = "ammo_ac20", .class = .ammo },
+        .{ .slot = "rt.ammo_ac20.2", .part = "ammo_ac20", .class = .ammo },
+        .{ .slot = "lt.ammo_lrm.1", .part = "ammo_lrm", .class = .ammo },
+        .{ .slot = "lt.ammo_lrm.2", .part = "ammo_lrm", .class = .ammo },
+        .{ .slot = "lt.ammo_srm.1", .part = "ammo_srm", .class = .ammo },
+    } },
+
+    // ------- support echelon (ARCH §9.3): the trucks that win battles -------
+    .{ .key = "SVT-1", .name = "Salvage Truck", .tonnage = 60, .bv = 45, .cost = 250_000, .rarity = .common, .kind = .cargo, .loadout = .{
+        .{ .slot = "bed.crane.1", .part = "crane", .class = .equipment },
+        .{ .slot = "bed.winch.1", .part = "winch", .class = .equipment },
+    } },
+    .{ .key = "MASH-27", .name = "MASH Truck", .tonnage = 35, .bv = 25, .cost = 500_000, .rarity = .common, .kind = .mash, .loadout = .{
+        .{ .slot = "bay.theater.1", .part = "mash_theater", .class = .equipment },
+    } },
+    .{ .key = "CGT-3", .name = "Logistics Truck", .tonnage = 50, .bv = 20, .cost = 120_000, .rarity = .common, .kind = .cargo, .loadout = .{
+        .{ .slot = "bed.cargo.1", .part = "cargo_bay", .class = .equipment },
+    } },
+    .{ .key = "SEC-PLT", .name = "Security Platoon", .tonnage = 5, .bv = 80, .cost = 60_000, .rarity = .common, .kind = .infantry, .loadout = .{
+        .{ .slot = "squad.rifles.1", .part = "rifles", .class = .equipment },
+    } },
+}

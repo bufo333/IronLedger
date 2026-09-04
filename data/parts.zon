@@ -1,0 +1,58 @@
+// Part catalog: every part_key referenced by chassis loadouts, plus
+// structural, munition and supply stock items. Costs approximate 3025
+// c-bill values (// TUNE — verify against TechManual when tuning).
+//
+// pallet_tons: storage/shipping weight per unit of stock (Stage 9B).
+// Construction facts for mountable items (Stage 10 MekLab, TechManual):
+//   mass_half_tons (installed mass in half-tons), crits (critical slots),
+//   heat (per firing), mount (energy/ballistic/missile/equipment).
+.{
+    // energy weapons (no ammunition)
+    .{ .key = "slas", .name = "Small Laser", .cost = 11_250, .rarity = .common, .pallet_tons = 1, .mass_half_tons = 1, .crits = 1, .heat = 1, .mount = .energy },
+    .{ .key = "mlas", .name = "Medium Laser", .cost = 40_000, .rarity = .common, .pallet_tons = 1, .mass_half_tons = 2, .crits = 1, .heat = 3, .mount = .energy },
+    .{ .key = "llas", .name = "Large Laser", .cost = 100_000, .rarity = .uncommon, .pallet_tons = 5, .mass_half_tons = 10, .crits = 2, .heat = 8, .mount = .energy },
+    .{ .key = "ppc", .name = "PPC", .cost = 200_000, .rarity = .uncommon, .pallet_tons = 7, .mass_half_tons = 14, .crits = 3, .heat = 10, .mount = .energy },
+    // ballistics
+    .{ .key = "mg", .name = "Machine Gun", .cost = 5_000, .rarity = .common, .pallet_tons = 1, .mass_half_tons = 1, .crits = 1, .heat = 0, .mount = .ballistic },
+    .{ .key = "ac5", .name = "Autocannon/5", .cost = 125_000, .rarity = .common, .pallet_tons = 8, .mass_half_tons = 16, .crits = 4, .heat = 1, .mount = .ballistic },
+    .{ .key = "ac20", .name = "Autocannon/20", .cost = 300_000, .rarity = .uncommon, .pallet_tons = 14, .mass_half_tons = 28, .crits = 10, .heat = 7, .mount = .ballistic },
+    // missiles
+    .{ .key = "srm2", .name = "SRM-2", .cost = 10_000, .rarity = .common, .pallet_tons = 1, .mass_half_tons = 2, .crits = 1, .heat = 2, .mount = .missile },
+    .{ .key = "srm4", .name = "SRM-4", .cost = 60_000, .rarity = .common, .pallet_tons = 2, .mass_half_tons = 4, .crits = 1, .heat = 3, .mount = .missile },
+    .{ .key = "srm6", .name = "SRM-6", .cost = 80_000, .rarity = .common, .pallet_tons = 3, .mass_half_tons = 6, .crits = 2, .heat = 4, .mount = .missile },
+    .{ .key = "lrm5", .name = "LRM-5", .cost = 30_000, .rarity = .common, .pallet_tons = 2, .mass_half_tons = 4, .crits = 1, .heat = 2, .mount = .missile },
+    .{ .key = "lrm10", .name = "LRM-10", .cost = 100_000, .rarity = .common, .pallet_tons = 5, .mass_half_tons = 10, .crits = 2, .heat = 4, .mount = .missile },
+    .{ .key = "lrm15", .name = "LRM-15", .cost = 175_000, .rarity = .uncommon, .pallet_tons = 7, .mass_half_tons = 14, .crits = 3, .heat = 5, .mount = .missile },
+    .{ .key = "lrm20", .name = "LRM-20", .cost = 250_000, .rarity = .uncommon, .pallet_tons = 10, .mass_half_tons = 20, .crits = 5, .heat = 6, .mount = .missile },
+    // mek internals the lab can add or remove
+    .{ .key = "heat_sink", .name = "Heat Sink", .cost = 2_000, .rarity = .common, .pallet_tons = 1, .mass_half_tons = 2, .crits = 1, .heat = 0, .mount = .equipment },
+    .{ .key = "jump_jet", .name = "Jump Jet", .cost = 20_000, .rarity = .uncommon, .pallet_tons = 1, .mass_half_tons = 1, .crits = 1, .heat = 0, .mount = .equipment },
+    // structural components (Stage 9C): per-location assemblies. Bought on
+    // the market when rarity allows, or fabricated at a regional HQ mek bay
+    // — guaranteed, at a premium, over bay time.
+    .{ .key = "comp_head", .name = "Head assembly", .cost = 40_000, .rarity = .uncommon, .pallet_tons = 2 },
+    .{ .key = "comp_ct", .name = "Center torso assembly", .cost = 120_000, .rarity = .rare, .pallet_tons = 8 },
+    .{ .key = "comp_torso", .name = "Side torso assembly", .cost = 90_000, .rarity = .uncommon, .pallet_tons = 6 },
+    .{ .key = "comp_arm", .name = "Arm assembly", .cost = 60_000, .rarity = .uncommon, .pallet_tons = 4 },
+    .{ .key = "comp_leg", .name = "Leg assembly", .cost = 70_000, .rarity = .uncommon, .pallet_tons = 5 },
+    .{ .key = "comp_chassis", .name = "Vehicle chassis frame", .cost = 50_000, .rarity = .common, .pallet_tons = 5 },
+    .{ .key = "armor", .name = "Armor (ton)", .cost = 10_000, .rarity = .common, .pallet_tons = 1 },
+    // support equipment
+    .{ .key = "crane", .name = "Salvage Crane", .cost = 20_000, .rarity = .common, .pallet_tons = 3 },
+    .{ .key = "winch", .name = "Recovery Winch", .cost = 5_000, .rarity = .common, .pallet_tons = 1 },
+    .{ .key = "mash_theater", .name = "MASH Operating Theater", .cost = 250_000, .rarity = .uncommon, .pallet_tons = 5 },
+    .{ .key = "cargo_bay", .name = "Cargo Bay", .cost = 10_000, .rarity = .common, .pallet_tons = 2 },
+    .{ .key = "rifles", .name = "Infantry Weapons", .cost = 8_000, .rarity = .common, .pallet_tons = 1 },
+
+    // ---- munitions: one unit = one ton of reloads for that weapon family;
+    // mounted, a ton is one crit ----
+    .{ .key = "ammo_ac5", .name = "AC/5 ammunition (ton)", .cost = 4_500, .rarity = .common, .pallet_tons = 1, .mass_half_tons = 2, .crits = 1, .mount = .ammo },
+    .{ .key = "ammo_ac20", .name = "AC/20 ammunition (ton)", .cost = 10_000, .rarity = .uncommon, .pallet_tons = 1, .mass_half_tons = 2, .crits = 1, .mount = .ammo },
+    .{ .key = "ammo_lrm", .name = "LRM reloads (ton)", .cost = 30_000, .rarity = .common, .pallet_tons = 1, .mass_half_tons = 2, .crits = 1, .mount = .ammo },
+    .{ .key = "ammo_srm", .name = "SRM reloads (ton)", .cost = 27_000, .rarity = .common, .pallet_tons = 1, .mass_half_tons = 2, .crits = 1, .mount = .ammo },
+    .{ .key = "ammo_mg", .name = "MG ammunition (ton)", .cost = 1_000, .rarity = .common, .pallet_tons = 1, .mass_half_tons = 2, .crits = 1, .mount = .ammo },
+
+    // ---- supplies: one unit = one ton ----
+    .{ .key = "provisions", .name = "Provisions (ton, 200 person-days)", .cost = 2_000, .rarity = .common, .pallet_tons = 1 },
+    .{ .key = "medical_supplies", .name = "Medical supplies (ton)", .cost = 15_000, .rarity = .common, .pallet_tons = 1 },
+}

@@ -1,0 +1,38 @@
+// Curated 3025 star map: a ~250 LY region centered on Galatea (the
+// mercenary hiring hub — the starter HQ world). Typed against
+// domain/planet.zig `[]const Planet`.
+//
+// Coordinates are approximate LY offsets from Galatea (// TUNE — swap for
+// SUCS-accurate coords when the map grows). Faction keys: LC (Lyran
+// Commonwealth), DC (Draconis Combine), FS (Federated Suns), CC (Capellan
+// Confederation), FWL (Free Worlds League), PER (periphery/pirates).
+// industry: 0–5, drives local markets & acquisition (ARCH §9.1/§9.8).
+.{
+    .{ .key = "galatea", .name = "Galatea", .faction = "LC", .x = 0, .y = 0, .industry = 3 },
+    .{ .key = "solaris7", .name = "Solaris VII", .faction = "LC", .x = -28, .y = 22, .industry = 5 },
+    .{ .key = "skye", .name = "Skye", .faction = "LC", .x = -55, .y = 8, .industry = 4 },
+    .{ .key = "zebebelgenubi", .name = "Zebebelgenubi", .faction = "LC", .x = 24, .y = 14, .industry = 2 },
+    .{ .key = "lyons", .name = "Lyons", .faction = "LC", .x = 38, .y = -18, .industry = 2 },
+    .{ .key = "atria", .name = "Atria", .faction = "LC", .x = -12, .y = -42, .industry = 2 },
+    .{ .key = "summer", .name = "Summer", .faction = "LC", .x = -40, .y = -15, .industry = 3 },
+    .{ .key = "alkaid", .name = "Alkaid", .faction = "LC", .x = -70, .y = 35, .industry = 1 },
+    .{ .key = "dyev", .name = "Dyev", .faction = "DC", .x = 52, .y = 12, .industry = 2 },
+    .{ .key = "imbros3", .name = "Imbros III", .faction = "DC", .x = 66, .y = -12, .industry = 2 },
+    .{ .key = "sabik", .name = "Sabik", .faction = "DC", .x = 44, .y = 38, .industry = 3 },
+    .{ .key = "moore", .name = "Moore", .faction = "DC", .x = 60, .y = 45, .industry = 2 },
+    .{ .key = "vega", .name = "Vega", .faction = "DC", .x = 105, .y = 28, .industry = 3 },
+    .{ .key = "konstance", .name = "Konstance", .faction = "DC", .x = 90, .y = -30, .industry = 1 },
+    .{ .key = "caph", .name = "Caph", .faction = "FS", .x = 15, .y = -25, .industry = 3 },
+    .{ .key = "errai", .name = "Errai", .faction = "FS", .x = 35, .y = -35, .industry = 2 },
+    .{ .key = "quentin", .name = "Quentin", .faction = "FS", .x = 48, .y = -28, .industry = 3 },
+    .{ .key = "komephoros", .name = "Komephoros", .faction = "CC", .x = 20, .y = -70, .industry = 2 },
+    .{ .key = "sheratan", .name = "Sheratan", .faction = "CC", .x = 30, .y = -55, .industry = 1 },
+    .{ .key = "epsilon_eridani", .name = "Epsilon Eridani", .faction = "CC", .x = 5, .y = -95, .industry = 3 },
+    .{ .key = "terra_firma", .name = "Terra Firma", .faction = "CC", .x = -25, .y = -90, .industry = 2 },
+    .{ .key = "new_home", .name = "New Home", .faction = "CC", .x = -55, .y = -75, .industry = 3 },
+    .{ .key = "carver5", .name = "Carver V", .faction = "FWL", .x = -85, .y = -40, .industry = 2 },
+    .{ .key = "outreach", .name = "Outreach", .faction = "FWL", .x = -75, .y = -60, .industry = 3 },
+    .{ .key = "oliver", .name = "Oliver", .faction = "FWL", .x = -95, .y = -10, .industry = 3 },
+    .{ .key = "graham4", .name = "Graham IV", .faction = "FWL", .x = -110, .y = 15, .industry = 2 },
+    .{ .key = "callison", .name = "Callison", .faction = "FWL", .x = -120, .y = -25, .industry = 2 },
+}

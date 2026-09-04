@@ -1,0 +1,14 @@
+# build outputs
+.zig-cache/
+zig-out/
+
+# save stores (one SQLite file, many campaigns)
+*.db
+*.db-journal
+
+# large media kept out of git: the soundtrack lives in data/music/ locally
+# (1.5 GB); wire it through Git LFS or a release asset when audio lands.
+data/music/
+
+# OS noise
+.DS_Store
