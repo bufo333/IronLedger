@@ -434,7 +434,7 @@ test "effects change real state: cash, reputation, score, spares" {
     // Weapons stay with the company; structural parts are crated home (Stage 12).
     try std.testing.expectEqual(@as(u32, 2), gs.stockCount(.{ .company = co }, "mlas"));
     try std.testing.expectEqual(@as(u32, 0), gs.stockCount(.{ .company = co }, "comp_arm"));
-    var crated: u32 = 0;
+    var crated: u32 = gs.stockCount(gs.defaultSite(), "comp_arm"); // no HQ in this test → the outfit depot
     for (gs.part_orders.items) |o| if (std.mem.eql(u8, o.part_key, "comp_arm") and o.dest == .hq and o.status == .in_transit) {
         crated += o.quantity;
     };

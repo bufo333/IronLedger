@@ -814,8 +814,13 @@ pub const GameState = struct {
     /// arrive at the home warehouse after the map transit, no freight — the
     /// salvage crews haul them. Structural work is depot work (Stage 12).
     pub fn sendHome(self: *GameState, company: types.ForceId, key: []const u8, qty: u32) !void {
+        if (qty == 0) return;
         const home = self.homeHqFor(company);
-        if (home == .none or qty == 0) return;
+        if (home == .none) {
+            // No HQ yet (tests, pre-commander): straight into the outfit depot.
+            try self.addStock(self.defaultSite(), key, qty);
+            return;
+        }
         const days = @max(3, self.courierEtaDays(.{ .company = company }));
         try self.part_orders.append(self.allocator(), .{
             .part_key = key,

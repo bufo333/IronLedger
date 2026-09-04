@@ -238,9 +238,9 @@ fn completeJob(gs: *GameState, job: state_mod.BayJob) !void {
             }
             if (u.status == .repairing) u.status = .ready;
             try gs.log(.construction, .{ .hq = job.hq }, "[bay] {s} structural repair complete", .{u.chassis_key});
-            // Big jobs hurt people (Stage 9C.2): 2–3 on 2d6 injures the
-            // hull's tech on the last day of the rebuild.
-            if (gs.rng.roll2d6(.medical) <= 3 and u.tech != .none) {
+            // Big jobs hurt people (Stage 9C.2): snake-eyes on 2d6 (≈3%)
+            // injures the hull's tech on the last day of the rebuild. // TUNE
+            if (gs.rng.roll2d6(.medical) == 2 and u.tech != .none) {
                 try @import("maintenance.zig").injureTech(gs, u.tech, 10 + gs.rng.roll2d6(.medical), "bay accident");
             }
         },
