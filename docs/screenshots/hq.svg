@@ -1,0 +1,736 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1240" height="691" viewBox="0 0 1240 691">
+<rect width="100%" height="100%" fill="#0b0f0d"/>
+<g font-family="Menlo, DejaVu Sans Mono, Consolas, monospace" font-size="12" xml:space="preserve">
+<rect x="468.8" y="8.0" width="7.2" height="15" fill="#e0a33a"/>
+<rect x="476.0" y="8.0" width="7.2" height="15" fill="#e0a33a"/>
+<rect x="483.2" y="8.0" width="7.2" height="15" fill="#e0a33a"/>
+<rect x="490.4" y="8.0" width="7.2" height="15" fill="#e0a33a"/>
+<rect x="497.6" y="8.0" width="7.2" height="15" fill="#e0a33a"/>
+<rect x="504.8" y="8.0" width="7.2" height="15" fill="#e0a33a"/>
+<rect x="512.0" y="8.0" width="7.2" height="15" fill="#e0a33a"/>
+<rect x="1181.6" y="8.0" width="7.2" height="7.5" fill="#000000"/>
+<rect x="1181.6" y="15.5" width="7.2" height="7.5" fill="#0e0b0f"/>
+<rect x="1188.8" y="8.0" width="7.2" height="7.5" fill="#131012"/>
+<rect x="1188.8" y="15.5" width="7.2" height="7.5" fill="#211f1e"/>
+<rect x="1196.0" y="8.0" width="7.2" height="7.5" fill="#2f2c2a"/>
+<rect x="1196.0" y="15.5" width="7.2" height="7.5" fill="#282628"/>
+<rect x="1203.2" y="8.0" width="7.2" height="7.5" fill="#312e2b"/>
+<rect x="1203.2" y="15.5" width="7.2" height="7.5" fill="#3f3a35"/>
+<rect x="1210.4" y="8.0" width="7.2" height="7.5" fill="#191716"/>
+<rect x="1210.4" y="15.5" width="7.2" height="7.5" fill="#232120"/>
+<rect x="1217.6" y="8.0" width="7.2" height="7.5" fill="#000000"/>
+<rect x="1217.6" y="15.5" width="7.2" height="7.5" fill="#100e11"/>
+<text y="19" fill="#6f7d73" x="15.2 22.4">F1</text>
+<text y="19" fill="#6f7d73" x="36.8 44.0 51.2 58.4">Desk</text>
+<text y="19" fill="#6f7d73" x="80.0 87.2">F2</text>
+<text y="19" fill="#6f7d73" x="101.6 108.8 116.0">Map</text>
+<text y="19" fill="#6f7d73" x="137.6 144.8">F3</text>
+<text y="19" fill="#6f7d73" x="159.2 166.4 173.6 180.8 188.0 195.2">Forces</text>
+<text y="19" fill="#6f7d73" x="216.8 224.0">F4</text>
+<text y="19" fill="#6f7d73" x="238.4 245.6 252.8 260.0 267.2 274.4 281.6 288.8 296.0">Contracts</text>
+<text y="19" fill="#6f7d73" x="317.6 324.8">F5</text>
+<text y="19" fill="#6f7d73" x="339.2 346.4 353.6 360.8 368.0 375.2">Ledger</text>
+<text y="19" fill="#6f7d73" x="396.8 404.0">F6</text>
+<text y="19" fill="#6f7d73" x="418.4 425.6 432.8 440.0 447.2 454.4">Supply</text>
+<text y="19" fill="#0b0f0d" x="476.0 483.2">F7</text>
+<text y="19" fill="#0b0f0d" x="497.6 504.8">HQ</text>
+<text y="19" fill="#6f7d73" x="526.4 533.6">F8</text>
+<text y="19" fill="#6f7d73" x="548.0 555.2 562.4">Lab</text>
+<text y="19" fill="#6f7d73" x="584.0 591.2">F9</text>
+<text y="19" fill="#6f7d73" x="605.6 612.8 620.0 627.2 634.4 641.6">People</text>
+<text y="19" fill="#6f7d73" x="663.2 670.4 677.6">F10</text>
+<text y="19" fill="#6f7d73" x="692.0 699.2 706.4 713.6 720.8 728.0">Market</text>
+<text y="19" fill="#6f7d73" x="1066.4 1073.6 1080.8">The</text>
+<text y="19" fill="#6f7d73" x="1095.2 1102.4 1109.6 1116.8 1124.0 1131.2 1138.4 1145.6 1152.8 1160.0">Unforgiven</text>
+<text y="34" fill="#e0a33a" x="8.0 15.2 22.4 29.6 36.8 44.0 51.2 58.4 65.6 72.8">3025-02-10</text>
+<text y="34" fill="#c8d3c5" x="94.4 101.6 108.8">day</text>
+<text y="34" fill="#c8d3c5" x="123.2 130.4">40</text>
+<text y="34" fill="#c8d3c5" x="152.0">·</text>
+<text y="34" fill="#c8d3c5" x="173.6 180.8 188.0 195.2 202.4 209.6">outfit</text>
+<text y="34" fill="#e0a33a" x="224.0 231.2 238.4 245.6 252.8 260.0 267.2 274.4 281.6">8,649,790</text>
+<text y="34" fill="#c8d3c5" x="296.0">C</text>
+<text y="34" fill="#c8d3c5" x="317.6">·</text>
+<text y="34" fill="#c8d3c5" x="339.2 346.4 353.6">rep</text>
+<text y="34" fill="#7fc97f" x="368.0">0</text>
+<text y="34" fill="#c8d3c5" x="389.6">·</text>
+<text y="34" fill="#c8d3c5" x="411.2">1</text>
+<text y="34" fill="#c8d3c5" x="425.6 432.8 440.0 447.2 454.4 461.6 468.8 476.0 483.2">companies</text>
+<text y="34" fill="#c8d3c5" x="497.6">·</text>
+<text y="34" fill="#c8d3c5" x="512.0">1</text>
+<text y="34" fill="#c8d3c5" x="526.4 533.6 540.8">HQs</text>
+<text y="34" fill="#c8d3c5" x="555.2">·</text>
+<text y="34" fill="#c8d3c5" x="569.6 576.8">32</text>
+<text y="34" fill="#c8d3c5" x="591.2 598.4 605.6 612.8 620.0">hulls</text>
+<text y="34" fill="#c8d3c5" x="634.4">·</text>
+<text y="34" fill="#c8d3c5" x="648.8 656.0 663.2">196</text>
+<text y="34" fill="#c8d3c5" x="677.6 684.8 692.0 699.2 706.4 713.6">people</text>
+<text y="34" fill="#c8d3c5" x="735.2">·</text>
+<text y="34" fill="#c8d3c5" x="756.8 764.0 771.2 778.4 785.6">inbox</text>
+<text y="34" fill="#7fc97f" x="800.0">0</text>
+<text y="34" fill="#c8d3c5" x="821.6">·</text>
+<text y="34" fill="#c8d3c5" x="843.2 850.4 857.6 864.8 872.0 879.2 886.4 893.6 900.8">checklist</text>
+<text y="34" fill="#7fc97f" x="915.2">0</text>
+<text y="34" fill="#c8d3c5" x="936.8">·</text>
+<text y="34" fill="#c8d3c5" x="958.4 965.6 972.8 980.0">turn</text>
+<text y="34" fill="#c8d3c5" x="994.4 1001.6 1008.8 1016.0 1023.2 1030.4">ready:</text>
+<text y="34" fill="#7fc97f" x="1044.8 1052.0 1059.2">YES</text>
+<rect x="15.2" y="38.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="22.4" y="38.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="29.6" y="38.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="36.8" y="38.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="44.0" y="38.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="51.2" y="38.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="58.4" y="38.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="65.6" y="38.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="72.8" y="38.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="80.0" y="38.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="87.2" y="38.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="94.4" y="38.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="101.6" y="38.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="108.8" y="38.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="116.0" y="38.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="123.2" y="38.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="130.4" y="38.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="137.6" y="38.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="144.8" y="38.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="152.0" y="38.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="159.2" y="38.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="166.4" y="38.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="173.6" y="38.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="180.8" y="38.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="188.0" y="38.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="195.2" y="38.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="202.4" y="38.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="209.6" y="38.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="216.8" y="38.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="224.0" y="38.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="540.8" y="38.0" width="7.2" height="15" fill="#0f5c5c"/>
+<text y="49" fill="#c8d3c5" x="8.0">┌</text>
+<text y="49" fill="#0b0f0d" x="22.4 29.6 36.8 44.0">hq:1</text>
+<text y="49" fill="#0b0f0d" x="58.4 65.6 72.8 80.0 87.2 94.4 101.6">Solaris</text>
+<text y="49" fill="#0b0f0d" x="116.0 123.2 130.4">VII</text>
+<text y="49" fill="#0b0f0d" x="144.8 152.0 159.2 166.4 173.6 180.8 188.0 195.2">Regional</text>
+<text y="49" fill="#0b0f0d" x="209.6 216.8">HQ</text>
+<text y="49" fill="#6f7d73" x="238.4">[</text>
+<text y="49" fill="#6f7d73" x="252.8">]</text>
+<text y="49" fill="#6f7d73" x="267.2 274.4 281.6 288.8 296.0 303.2">switch</text>
+<text y="49" fill="#6f7d73" x="317.6 324.8">HQ</text>
+<text y="49" fill="#6f7d73" x="346.4 353.6 360.8">[u]</text>
+<text y="49" fill="#6f7d73" x="375.2 382.4 389.6 396.8 404.0 411.2 418.4">upgrade</text>
+<text y="49" fill="#6f7d73" x="440.0 447.2 454.4">[S]</text>
+<text y="49" fill="#6f7d73" x="468.8 476.0 483.2 490.4 497.6 504.8 512.0 519.2 526.4">autostaff</text>
+<text y="49" fill="#c8d3c5" x="548.0 555.2">┐┌</text>
+<text y="49" fill="#c8d3c5" x="569.6 576.8 584.0 591.2 598.4 605.6">HIRING</text>
+<text y="49" fill="#c8d3c5" x="620.0 627.2 634.4 641.6">HALL</text>
+<text y="49" fill="#c8d3c5" x="656.0">·</text>
+<text y="49" fill="#c8d3c5" x="670.4 677.6 684.8 692.0 699.2 706.4">filter</text>
+<text y="49" fill="#e0a33a" x="720.8 728.0 735.2">all</text>
+<text y="49" fill="#c8d3c5" x="749.6">·</text>
+<text y="49" fill="#c8d3c5" x="764.0 771.2">14</text>
+<text y="49" fill="#c8d3c5" x="785.6 792.8">of</text>
+<text y="49" fill="#c8d3c5" x="807.2 814.4">14</text>
+<text y="49" fill="#c8d3c5" x="828.8 836.0 843.2 850.4 857.6 864.8 872.0 879.2 886.4">─────────</text>
+<text y="49" fill="#6f7d73" x="900.8 908.0 915.2">[f]</text>
+<text y="49" fill="#6f7d73" x="929.6 936.8 944.0 951.2">next</text>
+<text y="49" fill="#6f7d73" x="965.6 972.8 980.0 987.2 994.4 1001.6">filter</text>
+<text y="49" fill="#6f7d73" x="1023.2 1030.4 1037.6">[F]</text>
+<text y="49" fill="#6f7d73" x="1052.0 1059.2 1066.4 1073.6 1080.8 1088.0 1095.2 1102.4">previous</text>
+<text y="49" fill="#6f7d73" x="1124.0 1131.2 1138.4 1145.6 1152.8 1160.0 1167.2">[Enter]</text>
+<text y="49" fill="#6f7d73" x="1181.6 1188.8 1196.0 1203.2">hire</text>
+<text y="49" fill="#c8d3c5" x="1217.6 1224.8">─┐</text>
+<rect x="22.4" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="29.6" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="36.8" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="44.0" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="51.2" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="58.4" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="65.6" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="72.8" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="80.0" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="87.2" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="94.4" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="101.6" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="108.8" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="116.0" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="123.2" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="130.4" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="137.6" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="144.8" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="152.0" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="159.2" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="166.4" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="173.6" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="180.8" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="188.0" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="195.2" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="202.4" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="209.6" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="216.8" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="224.0" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="231.2" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="238.4" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="245.6" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="252.8" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="260.0" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="267.2" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="274.4" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="281.6" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="288.8" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="296.0" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="303.2" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="310.4" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="317.6" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="324.8" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="332.0" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="339.2" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="346.4" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="353.6" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="360.8" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="368.0" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="375.2" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="382.4" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="389.6" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="396.8" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="404.0" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="411.2" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="418.4" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="425.6" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="432.8" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="440.0" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="447.2" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="454.4" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="461.6" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="468.8" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="476.0" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="483.2" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="490.4" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="497.6" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="504.8" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="512.0" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="519.2" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="526.4" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="533.6" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<text y="64" fill="#c8d3c5" x="8.0">│</text>
+<text y="64" fill="#0b0f0d" x="22.4 29.6 36.8 44.0 51.2 58.4 65.6 72.8">facility</text>
+<text y="64" fill="#0b0f0d" x="159.2 166.4 173.6 180.8 188.0">built</text>
+<text y="64" fill="#0b0f0d" x="209.6 216.8 224.0 231.2 238.4 245.6 252.8 260.0 267.2">effective</text>
+<text y="64" fill="#0b0f0d" x="288.8 296.0 303.2 310.4">next</text>
+<text y="64" fill="#0b0f0d" x="324.8 332.0 339.2 346.4 353.6">level</text>
+<text y="64" fill="#0b0f0d" x="368.0 375.2 382.4 389.6">cost</text>
+<text y="64" fill="#c8d3c5" x="548.0 555.2">││</text>
+<text y="64" fill="#c8d3c5" x="569.6 576.8 584.0">idx</text>
+<text y="64" fill="#c8d3c5" x="612.8 620.0 627.2 634.4">name</text>
+<text y="64" fill="#c8d3c5" x="778.4 785.6 792.8 800.0">role</text>
+<text y="64" fill="#c8d3c5" x="893.6 900.8 908.0">exp</text>
+<text y="64" fill="#c8d3c5" x="958.4 965.6">sk</text>
+<text y="64" fill="#c8d3c5" x="1008.8 1016.0 1023.2 1030.4 1037.6">bonus</text>
+<text y="64" fill="#c8d3c5" x="1059.2 1066.4 1073.6 1080.8 1088.0 1095.2">leaves</text>
+<text y="64" fill="#c8d3c5" x="1109.6 1116.8 1124.0 1131.2">note</text>
+<text y="64" fill="#c8d3c5" x="1224.8">│</text>
+<text y="79" fill="#c8d3c5" x="8.0">│</text>
+<text y="79" fill="#c8d3c5" x="22.4 29.6 36.8 44.0 51.2 58.4 65.6">mek_bay</text>
+<text y="79" fill="#c8d3c5" x="188.0">1</text>
+<text y="79" fill="#c8d3c5" x="267.2">1</text>
+<text y="79" fill="#c8d3c5" x="288.8 296.0 303.2 310.4 317.6 324.8 332.0 339.2 346.4">3,200,000</text>
+<text y="79" fill="#c8d3c5" x="548.0 555.2">││</text>
+<text y="79" fill="#c8d3c5" x="569.6 576.8">[0</text>
+<text y="79" fill="#c8d3c5" x="598.4">]</text>
+<text y="79" fill="#c8d3c5" x="612.8 620.0 627.2 634.4 641.6">Elena</text>
+<text y="79" fill="#c8d3c5" x="656.0 663.2 670.4 677.6 684.8 692.0 699.2 706.4">Calderon</text>
+<text y="79" fill="#c8d3c5" x="778.4 785.6 792.8 800.0 807.2 814.4 821.6 828.8 836.0 843.2 850.4 857.6 864.8">tech_mechanic</text>
+<text y="79" fill="#c8d3c5" x="893.6 900.8 908.0 915.2 922.4 929.6 936.8">regular</text>
+<text y="79" fill="#c8d3c5" x="965.6">4</text>
+<text y="79" fill="#c8d3c5" x="1008.8 1016.0 1023.2 1030.4 1037.6">1,280</text>
+<text y="79" fill="#c8d3c5" x="1059.2 1066.4 1073.6">d52</text>
+<text y="79" fill="#c8d3c5" x="1224.8">│</text>
+<text y="94" fill="#c8d3c5" x="8.0">│</text>
+<text y="94" fill="#c8d3c5" x="22.4 29.6 36.8 44.0 51.2 58.4 65.6 72.8 80.0">warehouse</text>
+<text y="94" fill="#c8d3c5" x="188.0">1</text>
+<text y="94" fill="#c8d3c5" x="267.2">1</text>
+<text y="94" fill="#c8d3c5" x="288.8 296.0 303.2 310.4 317.6 324.8 332.0 339.2 346.4">1,600,000</text>
+<text y="94" fill="#c8d3c5" x="548.0 555.2">││</text>
+<text y="94" fill="#c8d3c5" x="569.6 576.8">[1</text>
+<text y="94" fill="#c8d3c5" x="598.4">]</text>
+<text y="94" fill="#c8d3c5" x="612.8 620.0 627.2 634.4">Chen</text>
+<text y="94" fill="#c8d3c5" x="648.8 656.0 663.2 670.4 677.6 684.8">Yamada</text>
+<text y="94" fill="#c8d3c5" x="778.4 785.6 792.8 800.0 807.2 814.4 821.6 828.8 836.0 843.2 850.4 857.6 864.8 872.0 879.2">admin_logistics</text>
+<text y="94" fill="#c8d3c5" x="893.6 900.8 908.0 915.2 922.4">elite</text>
+<text y="94" fill="#c8d3c5" x="965.6">2</text>
+<text y="94" fill="#c8d3c5" x="1008.8 1016.0 1023.2 1030.4 1037.6">6,400</text>
+<text y="94" fill="#c8d3c5" x="1059.2 1066.4 1073.6">d42</text>
+<text y="94" fill="#7fc97f" x="1102.4 1109.6 1116.8 1124.0 1131.2">fills</text>
+<text y="94" fill="#7fc97f" x="1145.6 1152.8 1160.0 1167.2 1174.4 1181.6 1188.8 1196.0 1203.2 1210.4">admin_logi</text>
+<text y="94" fill="#c8d3c5" x="1224.8">│</text>
+<text y="109" fill="#c8d3c5" x="8.0">│</text>
+<text y="109" fill="#c8d3c5" x="22.4 29.6 36.8 44.0 51.2 58.4 65.6 72.8">hospital</text>
+<text y="109" fill="#c8d3c5" x="188.0">1</text>
+<text y="109" fill="#c8d3c5" x="267.2">1</text>
+<text y="109" fill="#c8d3c5" x="288.8 296.0 303.2 310.4 317.6 324.8 332.0 339.2 346.4">2,000,000</text>
+<text y="109" fill="#c8d3c5" x="548.0 555.2">││</text>
+<text y="109" fill="#c8d3c5" x="569.6 576.8">[2</text>
+<text y="109" fill="#c8d3c5" x="598.4">]</text>
+<text y="109" fill="#c8d3c5" x="612.8 620.0 627.2 634.4">Hiro</text>
+<text y="109" fill="#c8d3c5" x="648.8 656.0 663.2 670.4 677.6">Mbeki</text>
+<text y="109" fill="#c8d3c5" x="778.4 785.6 792.8 800.0 807.2 814.4 821.6 828.8 836.0 843.2 850.4 857.6">vehicle_crew</text>
+<text y="109" fill="#c8d3c5" x="893.6 900.8 908.0 915.2 922.4 929.6 936.8">veteran</text>
+<text y="109" fill="#c8d3c5" x="965.6">3</text>
+<text y="109" fill="#c8d3c5" x="1008.8 1016.0 1023.2 1030.4 1037.6">4,320</text>
+<text y="109" fill="#c8d3c5" x="1059.2 1066.4 1073.6">d52</text>
+<text y="109" fill="#c8d3c5" x="1224.8">│</text>
+<text y="124" fill="#c8d3c5" x="8.0">│</text>
+<text y="124" fill="#c8d3c5" x="22.4 29.6 36.8 44.0">mess</text>
+<text y="124" fill="#c8d3c5" x="188.0">1</text>
+<text y="124" fill="#c8d3c5" x="267.2">1</text>
+<text y="124" fill="#c8d3c5" x="288.8 296.0 303.2 310.4 317.6 324.8 332.0">600,000</text>
+<text y="124" fill="#c8d3c5" x="548.0 555.2">││</text>
+<text y="124" fill="#c8d3c5" x="569.6 576.8">[3</text>
+<text y="124" fill="#c8d3c5" x="598.4">]</text>
+<text y="124" fill="#c8d3c5" x="612.8 620.0 627.2 634.4 641.6">Boris</text>
+<text y="124" fill="#c8d3c5" x="656.0 663.2 670.4 677.6 684.8">Ulmer</text>
+<text y="124" fill="#c8d3c5" x="778.4 785.6 792.8 800.0 807.2 814.4 821.6 828.8 836.0 843.2 850.4 857.6 864.8">tech_mechanic</text>
+<text y="124" fill="#c8d3c5" x="893.6 900.8 908.0 915.2 922.4">elite</text>
+<text y="124" fill="#c8d3c5" x="965.6">2</text>
+<text y="124" fill="#c8d3c5" x="1008.8 1016.0 1023.2 1030.4 1037.6">8,192</text>
+<text y="124" fill="#c8d3c5" x="1059.2 1066.4 1073.6">d43</text>
+<text y="124" fill="#c8d3c5" x="1224.8">│</text>
+<text y="139" fill="#c8d3c5" x="8.0">│</text>
+<text y="139" fill="#c8d3c5" x="22.4 29.6 36.8 44.0 51.2">comms</text>
+<text y="139" fill="#c8d3c5" x="188.0">1</text>
+<text y="139" fill="#c8d3c5" x="267.2">1</text>
+<text y="139" fill="#c8d3c5" x="288.8 296.0 303.2 310.4 317.6 324.8 332.0 339.2 346.4">2,400,000</text>
+<text y="139" fill="#c8d3c5" x="548.0 555.2">││</text>
+<text y="139" fill="#c8d3c5" x="569.6 576.8">[4</text>
+<text y="139" fill="#c8d3c5" x="598.4">]</text>
+<text y="139" fill="#c8d3c5" x="612.8 620.0 627.2 634.4">Ivan</text>
+<text y="139" fill="#c8d3c5" x="648.8 656.0 663.2 670.4 677.6">Ulmer</text>
+<text y="139" fill="#c8d3c5" x="778.4 785.6 792.8 800.0 807.2 814.4 821.6 828.8">tech_mek</text>
+<text y="139" fill="#c8d3c5" x="893.6 900.8 908.0 915.2 922.4">elite</text>
+<text y="139" fill="#c8d3c5" x="965.6">2</text>
+<text y="139" fill="#c8d3c5" x="1001.6 1008.8 1016.0 1023.2 1030.4 1037.6">10,240</text>
+<text y="139" fill="#c8d3c5" x="1059.2 1066.4 1073.6">d45</text>
+<text y="139" fill="#c8d3c5" x="1224.8">│</text>
+<text y="154" fill="#c8d3c5" x="8.0">│</text>
+<text y="154" fill="#c8d3c5" x="22.4 29.6 36.8 44.0 51.2 58.4 65.6 72.8 80.0">spaceport</text>
+<text y="154" fill="#c8d3c5" x="188.0">1</text>
+<text y="154" fill="#c8d3c5" x="267.2">1</text>
+<text y="154" fill="#c8d3c5" x="288.8 296.0 303.2 310.4 317.6 324.8 332.0 339.2 346.4">4,800,000</text>
+<text y="154" fill="#c8d3c5" x="548.0 555.2">││</text>
+<text y="154" fill="#c8d3c5" x="569.6 576.8">[5</text>
+<text y="154" fill="#c8d3c5" x="598.4">]</text>
+<text y="154" fill="#c8d3c5" x="612.8 620.0 627.2 634.4">Zhao</text>
+<text y="154" fill="#c8d3c5" x="648.8 656.0 663.2 670.4 677.6 684.8">Yamada</text>
+<text y="154" fill="#c8d3c5" x="778.4 785.6 792.8 800.0 807.2 814.4 821.6 828.8 836.0 843.2 850.4 857.6 864.8 872.0 879.2">admin_logistics</text>
+<text y="154" fill="#c8d3c5" x="893.6 900.8 908.0 915.2 922.4 929.6 936.8">regular</text>
+<text y="154" fill="#c8d3c5" x="965.6">4</text>
+<text y="154" fill="#c8d3c5" x="1008.8 1016.0 1023.2 1030.4 1037.6">1,000</text>
+<text y="154" fill="#c8d3c5" x="1059.2 1066.4 1073.6">d44</text>
+<text y="154" fill="#7fc97f" x="1102.4 1109.6 1116.8 1124.0 1131.2">fills</text>
+<text y="154" fill="#7fc97f" x="1145.6 1152.8 1160.0 1167.2 1174.4 1181.6 1188.8 1196.0 1203.2 1210.4">admin_logi</text>
+<text y="154" fill="#c8d3c5" x="1224.8">│</text>
+<text y="169" fill="#c8d3c5" x="8.0">│</text>
+<text y="169" fill="#c8d3c5" x="22.4 29.6 36.8 44.0 51.2 58.4 65.6 72.8 80.0 87.2 94.4">hiring_hall</text>
+<text y="169" fill="#c8d3c5" x="188.0">1</text>
+<text y="169" fill="#c8d3c5" x="267.2">1</text>
+<text y="169" fill="#c8d3c5" x="288.8 296.0 303.2 310.4 317.6 324.8 332.0">800,000</text>
+<text y="169" fill="#c8d3c5" x="548.0 555.2">││</text>
+<text y="169" fill="#c8d3c5" x="569.6 576.8">[6</text>
+<text y="169" fill="#c8d3c5" x="598.4">]</text>
+<text y="169" fill="#c8d3c5" x="612.8 620.0 627.2 634.4 641.6">Carla</text>
+<text y="169" fill="#c8d3c5" x="656.0 663.2 670.4 677.6 684.8 692.0 699.2 706.4">Castille</text>
+<text y="169" fill="#c8d3c5" x="778.4 785.6 792.8 800.0 807.2 814.4 821.6 828.8">tech_mek</text>
+<text y="169" fill="#c8d3c5" x="893.6 900.8 908.0 915.2 922.4">elite</text>
+<text y="169" fill="#c8d3c5" x="965.6">2</text>
+<text y="169" fill="#c8d3c5" x="1001.6 1008.8 1016.0 1023.2 1030.4 1037.6">10,240</text>
+<text y="169" fill="#c8d3c5" x="1059.2 1066.4 1073.6">d50</text>
+<text y="169" fill="#c8d3c5" x="1224.8">│</text>
+<text y="184" fill="#c8d3c5" x="8.0">│</text>
+<text y="184" fill="#c8d3c5" x="22.4 29.6 36.8 44.0 51.2 58.4 65.6 72.8 80.0 87.2 94.4 101.6 108.8 116.0 123.2">training_ground</text>
+<text y="184" fill="#c8d3c5" x="188.0">1</text>
+<text y="184" fill="#c8d3c5" x="267.2">1</text>
+<text y="184" fill="#c8d3c5" x="288.8 296.0 303.2 310.4 317.6 324.8 332.0 339.2 346.4">1,200,000</text>
+<text y="184" fill="#c8d3c5" x="548.0 555.2">││</text>
+<text y="184" fill="#c8d3c5" x="569.6 576.8">[7</text>
+<text y="184" fill="#c8d3c5" x="598.4">]</text>
+<text y="184" fill="#c8d3c5" x="612.8 620.0 627.2 634.4 641.6">Tanya</text>
+<text y="184" fill="#c8d3c5" x="656.0 663.2 670.4 677.6 684.8">Ulmer</text>
+<text y="184" fill="#c8d3c5" x="778.4 785.6 792.8 800.0 807.2 814.4 821.6 828.8 836.0 843.2 850.4 857.6 864.8">tech_mechanic</text>
+<text y="184" fill="#c8d3c5" x="893.6 900.8 908.0 915.2 922.4 929.6 936.8">regular</text>
+<text y="184" fill="#c8d3c5" x="965.6">4</text>
+<text y="184" fill="#c8d3c5" x="1008.8 1016.0 1023.2 1030.4 1037.6">1,280</text>
+<text y="184" fill="#c8d3c5" x="1059.2 1066.4 1073.6">d47</text>
+<text y="184" fill="#c8d3c5" x="1224.8">│</text>
+<text y="199" fill="#c8d3c5" x="8.0">│</text>
+<text y="199" fill="#c8d3c5" x="548.0 555.2">││</text>
+<text y="199" fill="#c8d3c5" x="569.6 576.8">[8</text>
+<text y="199" fill="#c8d3c5" x="598.4">]</text>
+<text y="199" fill="#c8d3c5" x="612.8 620.0 627.2 634.4">Ines</text>
+<text y="199" fill="#c8d3c5" x="648.8 656.0 663.2 670.4 677.6 684.8 692.0 699.2 706.4">Jankowski</text>
+<text y="199" fill="#c8d3c5" x="778.4 785.6 792.8 800.0 807.2 814.4 821.6 828.8">tech_mek</text>
+<text y="199" fill="#c8d3c5" x="893.6 900.8 908.0 915.2 922.4 929.6 936.8">regular</text>
+<text y="199" fill="#c8d3c5" x="965.6">4</text>
+<text y="199" fill="#c8d3c5" x="1008.8 1016.0 1023.2 1030.4 1037.6">1,600</text>
+<text y="199" fill="#c8d3c5" x="1059.2 1066.4 1073.6">d53</text>
+<text y="199" fill="#c8d3c5" x="1224.8">│</text>
+<text y="214" fill="#c8d3c5" x="8.0">│</text>
+<text y="214" fill="#c8d3c5" x="22.4 29.6 36.8 44.0 51.2 58.4 65.6 72.8">capacity</text>
+<text y="214" fill="#c8d3c5" x="101.6">1</text>
+<text y="214" fill="#c8d3c5" x="116.0 123.2 130.4 137.6 144.8 152.0 159.2 166.4 173.6">companies</text>
+<text y="214" fill="#c8d3c5" x="188.0">·</text>
+<text y="214" fill="#c8d3c5" x="202.4 209.6">≤4</text>
+<text y="214" fill="#c8d3c5" x="224.0 231.2 238.4 245.6 252.8 260.0">lances</text>
+<text y="214" fill="#c8d3c5" x="274.4 281.6 288.8 296.0">each</text>
+<text y="214" fill="#c8d3c5" x="310.4">·</text>
+<text y="214" fill="#c8d3c5" x="324.8">1</text>
+<text y="214" fill="#c8d3c5" x="339.2 346.4 353.6 360.8 368.0 375.2 382.4">support</text>
+<text y="214" fill="#c8d3c5" x="396.8">·</text>
+<text y="214" fill="#c8d3c5" x="411.2">1</text>
+<text y="214" fill="#c8d3c5" x="425.6 432.8 440.0 447.2 454.4 461.6">berths</text>
+<text y="214" fill="#c8d3c5" x="476.0">·</text>
+<text y="214" fill="#c8d3c5" x="490.4 497.6 504.8 512.0">200t</text>
+<text y="214" fill="#c8d3c5" x="526.4 533.6">st</text>
+<text y="214" fill="#c8d3c5" x="548.0 555.2">││</text>
+<text y="214" fill="#c8d3c5" x="569.6 576.8">[9</text>
+<text y="214" fill="#c8d3c5" x="598.4">]</text>
+<text y="214" fill="#c8d3c5" x="612.8 620.0 627.2 634.4 641.6">Petra</text>
+<text y="214" fill="#c8d3c5" x="656.0 663.2 670.4 677.6 684.8 692.0 699.2">Marlowe</text>
+<text y="214" fill="#c8d3c5" x="778.4 785.6 792.8 800.0 807.2">medic</text>
+<text y="214" fill="#c8d3c5" x="893.6 900.8 908.0 915.2 922.4 929.6 936.8">regular</text>
+<text y="214" fill="#c8d3c5" x="965.6">4</text>
+<text y="214" fill="#c8d3c5" x="1023.2 1030.4 1037.6">800</text>
+<text y="214" fill="#c8d3c5" x="1059.2 1066.4 1073.6">d50</text>
+<text y="214" fill="#c8d3c5" x="1224.8">│</text>
+<text y="229" fill="#c8d3c5" x="8.0">│</text>
+<text y="229" fill="#c8d3c5" x="22.4 29.6 36.8 44.0 51.2 58.4">upkeep</text>
+<text y="229" fill="#c8d3c5" x="101.6 108.8 116.0 123.2 130.4 137.6">25,000</text>
+<text y="229" fill="#c8d3c5" x="152.0">/</text>
+<text y="229" fill="#c8d3c5" x="166.4 173.6 180.8 188.0 195.2">month</text>
+<text y="229" fill="#c8d3c5" x="209.6">·</text>
+<text y="229" fill="#c8d3c5" x="224.0 231.2 238.4 245.6 252.8">funds</text>
+<text y="229" fill="#c8d3c5" x="267.2 274.4 281.6 288.8 296.0 303.2 310.4">843,530</text>
+<text y="229" fill="#c8d3c5" x="548.0 555.2">││</text>
+<text y="229" fill="#c8d3c5" x="569.6 576.8 584.0">[10</text>
+<text y="229" fill="#c8d3c5" x="598.4">]</text>
+<text y="229" fill="#c8d3c5" x="612.8 620.0 627.2 634.4">Lars</text>
+<text y="229" fill="#c8d3c5" x="648.8 656.0 663.2 670.4 677.6 684.8">Gruber</text>
+<text y="229" fill="#c8d3c5" x="778.4 785.6 792.8 800.0 807.2 814.4 821.6 828.8">admin_hr</text>
+<text y="229" fill="#c8d3c5" x="893.6 900.8 908.0 915.2 922.4 929.6 936.8">regular</text>
+<text y="229" fill="#c8d3c5" x="965.6">4</text>
+<text y="229" fill="#c8d3c5" x="1008.8 1016.0 1023.2 1030.4 1037.6">1,000</text>
+<text y="229" fill="#c8d3c5" x="1059.2 1066.4 1073.6">d48</text>
+<text y="229" fill="#6f7d73" x="1102.4 1109.6 1116.8 1124.0">desk</text>
+<text y="229" fill="#6f7d73" x="1138.4 1145.6 1152.8 1160.0 1167.2 1174.4 1181.6">already</text>
+<text y="229" fill="#6f7d73" x="1196.0 1203.2 1210.4">sta</text>
+<text y="229" fill="#c8d3c5" x="1224.8">│</text>
+<text y="244" fill="#c8d3c5" x="8.0">│</text>
+<text y="244" fill="#c8d3c5" x="548.0 555.2">││</text>
+<text y="244" fill="#c8d3c5" x="569.6 576.8 584.0">[11</text>
+<text y="244" fill="#c8d3c5" x="598.4">]</text>
+<text y="244" fill="#c8d3c5" x="612.8 620.0 627.2 634.4">Anna</text>
+<text y="244" fill="#c8d3c5" x="648.8 656.0">Xu</text>
+<text y="244" fill="#c8d3c5" x="778.4 785.6 792.8 800.0 807.2">medic</text>
+<text y="244" fill="#c8d3c5" x="893.6 900.8 908.0 915.2 922.4 929.6 936.8">regular</text>
+<text y="244" fill="#c8d3c5" x="965.6">4</text>
+<text y="244" fill="#c8d3c5" x="1023.2 1030.4 1037.6">800</text>
+<text y="244" fill="#c8d3c5" x="1059.2 1066.4 1073.6">d47</text>
+<text y="244" fill="#c8d3c5" x="1224.8">│</text>
+<text y="259" fill="#c8d3c5" x="8.0">│</text>
+<text y="259" fill="#c8d3c5" x="22.4 29.6 36.8 44.0 51.2 58.4 65.6 72.8">projects</text>
+<text y="259" fill="#c8d3c5" x="548.0 555.2">││</text>
+<text y="259" fill="#c8d3c5" x="569.6 576.8 584.0">[12</text>
+<text y="259" fill="#c8d3c5" x="598.4">]</text>
+<text y="259" fill="#c8d3c5" x="612.8 620.0 627.2 634.4 641.6">Tomas</text>
+<text y="259" fill="#c8d3c5" x="656.0 663.2 670.4 677.6 684.8 692.0 699.2 706.4 713.6">Jankowski</text>
+<text y="259" fill="#c8d3c5" x="778.4 785.6 792.8 800.0 807.2 814.4">astech</text>
+<text y="259" fill="#c8d3c5" x="893.6 900.8 908.0 915.2 922.4">green</text>
+<text y="259" fill="#c8d3c5" x="965.6">5</text>
+<text y="259" fill="#c8d3c5" x="1023.2 1030.4 1037.6">240</text>
+<text y="259" fill="#c8d3c5" x="1059.2 1066.4 1073.6">d54</text>
+<text y="259" fill="#c8d3c5" x="1224.8">│</text>
+<text y="274" fill="#c8d3c5" x="8.0">│</text>
+<text y="274" fill="#c8d3c5" x="36.8 44.0 51.2 58.4">none</text>
+<text y="274" fill="#c8d3c5" x="548.0 555.2">││</text>
+<text y="274" fill="#c8d3c5" x="569.6 576.8 584.0">[13</text>
+<text y="274" fill="#c8d3c5" x="598.4">]</text>
+<text y="274" fill="#c8d3c5" x="612.8 620.0 627.2 634.4">Ivan</text>
+<text y="274" fill="#c8d3c5" x="648.8 656.0 663.2 670.4 677.6">Ikeda</text>
+<text y="274" fill="#c8d3c5" x="778.4 785.6 792.8 800.0 807.2 814.4 821.6 828.8 836.0 843.2 850.4 857.6 864.8">tech_mechanic</text>
+<text y="274" fill="#c8d3c5" x="893.6 900.8 908.0 915.2 922.4 929.6 936.8">regular</text>
+<text y="274" fill="#c8d3c5" x="965.6">4</text>
+<text y="274" fill="#c8d3c5" x="1008.8 1016.0 1023.2 1030.4 1037.6">1,280</text>
+<text y="274" fill="#c8d3c5" x="1059.2 1066.4 1073.6">d54</text>
+<text y="274" fill="#c8d3c5" x="1224.8">│</text>
+<text y="289" fill="#c8d3c5" x="8.0">│</text>
+<text y="289" fill="#c8d3c5" x="548.0 555.2">││</text>
+<text y="289" fill="#c8d3c5" x="1224.8">│</text>
+<text y="304" fill="#c8d3c5" x="8.0">│</text>
+<text y="304" fill="#c8d3c5" x="22.4 29.6 36.8 44.0">back</text>
+<text y="304" fill="#c8d3c5" x="58.4 65.6 72.8 80.0 87.2 94.4">office</text>
+<text y="304" fill="#c8d3c5" x="159.2 166.4 173.6 180.8">have</text>
+<text y="304" fill="#c8d3c5" x="202.4 209.6 216.8 224.0">need</text>
+<text y="304" fill="#c8d3c5" x="548.0 555.2">││</text>
+<text y="304" fill="#c8d3c5" x="1224.8">│</text>
+<text y="319" fill="#c8d3c5" x="8.0">│</text>
+<text y="319" fill="#c8d3c5" x="36.8 44.0 51.2 58.4 65.6 72.8 80.0 87.2 94.4 101.6 108.8 116.0 123.2">admin_command</text>
+<text y="319" fill="#c8d3c5" x="180.8">5</text>
+<text y="319" fill="#c8d3c5" x="224.0">5</text>
+<text y="319" fill="#c8d3c5" x="548.0 555.2">││</text>
+<text y="319" fill="#c8d3c5" x="1224.8">│</text>
+<text y="334" fill="#c8d3c5" x="8.0">│</text>
+<text y="334" fill="#c8d3c5" x="36.8 44.0 51.2 58.4 65.6 72.8 80.0 87.2 94.4 101.6 108.8 116.0 123.2 130.4 137.6">admin_logistics</text>
+<text y="334" fill="#e05a4f" x="180.8">4</text>
+<text y="334" fill="#e05a4f" x="224.0">8</text>
+<text y="334" fill="#c8d3c5" x="548.0 555.2">││</text>
+<text y="334" fill="#c8d3c5" x="1224.8">│</text>
+<text y="349" fill="#c8d3c5" x="8.0">│</text>
+<text y="349" fill="#c8d3c5" x="36.8 44.0 51.2 58.4 65.6 72.8 80.0 87.2">admin_hr</text>
+<text y="349" fill="#c8d3c5" x="180.8">8</text>
+<text y="349" fill="#c8d3c5" x="224.0">8</text>
+<text y="349" fill="#c8d3c5" x="548.0 555.2">││</text>
+<text y="349" fill="#c8d3c5" x="1224.8">│</text>
+<text y="364" fill="#c8d3c5" x="8.0">│</text>
+<text y="364" fill="#c8d3c5" x="36.8 44.0 51.2 58.4 65.6 72.8 80.0 87.2 94.4 101.6 108.8 116.0 123.2">admin_finance</text>
+<text y="364" fill="#c8d3c5" x="180.8">7</text>
+<text y="364" fill="#c8d3c5" x="224.0">7</text>
+<text y="364" fill="#c8d3c5" x="548.0 555.2">││</text>
+<text y="364" fill="#c8d3c5" x="1224.8">│</text>
+<text y="379" fill="#c8d3c5" x="8.0">│</text>
+<text y="379" fill="#c8d3c5" x="548.0 555.2">││</text>
+<text y="379" fill="#c8d3c5" x="1224.8">│</text>
+<text y="394" fill="#c8d3c5" x="8.0">│</text>
+<text y="394" fill="#c8d3c5" x="22.4 29.6 36.8 44.0">bays</text>
+<text y="394" fill="#7fc97f" x="72.8">0</text>
+<text y="394" fill="#7fc97f" x="87.2 94.4">of</text>
+<text y="394" fill="#7fc97f" x="108.8">2</text>
+<text y="394" fill="#7fc97f" x="123.2 130.4 137.6 144.8 152.0">slots</text>
+<text y="394" fill="#7fc97f" x="166.4 173.6 180.8 188.0">busy</text>
+<text y="394" fill="#c8d3c5" x="202.4">·</text>
+<text y="394" fill="#c8d3c5" x="216.8">0</text>
+<text y="394" fill="#c8d3c5" x="231.2 238.4 245.6 252.8 260.0 267.2">queued</text>
+<text y="394" fill="#c8d3c5" x="281.6">·</text>
+<text y="394" fill="#c8d3c5" x="296.0">2</text>
+<text y="394" fill="#c8d3c5" x="310.4 317.6 324.8 332.0">free</text>
+<text y="394" fill="#c8d3c5" x="548.0 555.2">││</text>
+<text y="394" fill="#c8d3c5" x="1224.8">│</text>
+<text y="409" fill="#c8d3c5" x="8.0">│</text>
+<text y="409" fill="#c8d3c5" x="36.8 44.0 51.2 58.4">idle</text>
+<text y="409" fill="#c8d3c5" x="548.0 555.2">││</text>
+<text y="409" fill="#c8d3c5" x="1224.8">│</text>
+<text y="424" fill="#c8d3c5" x="8.0">│</text>
+<text y="424" fill="#c8d3c5" x="548.0 555.2">││</text>
+<text y="424" fill="#c8d3c5" x="1224.8">│</text>
+<text y="439" fill="#c8d3c5" x="8.0">│</text>
+<text y="439" fill="#c8d3c5" x="22.4 29.6 36.8 44.0 51.2 58.4">hiring</text>
+<text y="439" fill="#c8d3c5" x="72.8 80.0 87.2 94.4">hall</text>
+<text y="439" fill="#c8d3c5" x="548.0 555.2">││</text>
+<text y="439" fill="#c8d3c5" x="1224.8">│</text>
+<text y="454" fill="#c8d3c5" x="8.0">│</text>
+<text y="454" fill="#c8d3c5" x="36.8 44.0 51.2">[0]</text>
+<text y="454" fill="#c8d3c5" x="65.6 72.8 80.0 87.2 94.4">Elena</text>
+<text y="454" fill="#c8d3c5" x="108.8 116.0 123.2 130.4 137.6 144.8 152.0 159.2">Calderon</text>
+<text y="454" fill="#c8d3c5" x="180.8 188.0 195.2 202.4 209.6 216.8 224.0 231.2 238.4 245.6 252.8 260.0 267.2">tech_mechanic</text>
+<text y="454" fill="#c8d3c5" x="281.6 288.8 296.0 303.2 310.4 317.6 324.8">regular</text>
+<text y="454" fill="#c8d3c5" x="346.4 353.6 360.8 368.0 375.2">bonus</text>
+<text y="454" fill="#c8d3c5" x="389.6 396.8 404.0 411.2 418.4">1,280</text>
+<text y="454" fill="#c8d3c5" x="440.0 447.2 454.4 461.6 468.8 476.0 483.2">expires</text>
+<text y="454" fill="#c8d3c5" x="497.6 504.8 512.0">day</text>
+<text y="454" fill="#c8d3c5" x="526.4 533.6">52</text>
+<text y="454" fill="#c8d3c5" x="548.0 555.2">││</text>
+<text y="454" fill="#c8d3c5" x="1224.8">│</text>
+<text y="469" fill="#c8d3c5" x="8.0">│</text>
+<text y="469" fill="#c8d3c5" x="36.8 44.0 51.2">[1]</text>
+<text y="469" fill="#c8d3c5" x="65.6 72.8 80.0 87.2">Chen</text>
+<text y="469" fill="#c8d3c5" x="101.6 108.8 116.0 123.2 130.4 137.6">Yamada</text>
+<text y="469" fill="#c8d3c5" x="159.2 166.4 173.6 180.8 188.0 195.2 202.4 209.6 216.8 224.0 231.2 238.4 245.6 252.8 260.0">admin_logistics</text>
+<text y="469" fill="#c8d3c5" x="274.4 281.6 288.8 296.0 303.2">elite</text>
+<text y="469" fill="#c8d3c5" x="324.8 332.0 339.2 346.4 353.6">bonus</text>
+<text y="469" fill="#c8d3c5" x="368.0 375.2 382.4 389.6 396.8">6,400</text>
+<text y="469" fill="#c8d3c5" x="418.4 425.6 432.8 440.0 447.2 454.4 461.6">expires</text>
+<text y="469" fill="#c8d3c5" x="476.0 483.2 490.4">day</text>
+<text y="469" fill="#c8d3c5" x="504.8 512.0">42</text>
+<text y="469" fill="#c8d3c5" x="548.0 555.2">││</text>
+<text y="469" fill="#c8d3c5" x="1224.8">│</text>
+<text y="484" fill="#c8d3c5" x="8.0">│</text>
+<text y="484" fill="#c8d3c5" x="36.8 44.0 51.2">[2]</text>
+<text y="484" fill="#c8d3c5" x="65.6 72.8 80.0 87.2">Hiro</text>
+<text y="484" fill="#c8d3c5" x="101.6 108.8 116.0 123.2 130.4">Mbeki</text>
+<text y="484" fill="#c8d3c5" x="152.0 159.2 166.4 173.6 180.8 188.0 195.2 202.4 209.6 216.8 224.0 231.2">vehicle_crew</text>
+<text y="484" fill="#c8d3c5" x="245.6 252.8 260.0 267.2 274.4 281.6 288.8">veteran</text>
+<text y="484" fill="#c8d3c5" x="310.4 317.6 324.8 332.0 339.2">bonus</text>
+<text y="484" fill="#c8d3c5" x="353.6 360.8 368.0 375.2 382.4">4,320</text>
+<text y="484" fill="#c8d3c5" x="404.0 411.2 418.4 425.6 432.8 440.0 447.2">expires</text>
+<text y="484" fill="#c8d3c5" x="461.6 468.8 476.0">day</text>
+<text y="484" fill="#c8d3c5" x="490.4 497.6">52</text>
+<text y="484" fill="#c8d3c5" x="548.0 555.2">││</text>
+<text y="484" fill="#c8d3c5" x="1224.8">│</text>
+<text y="499" fill="#c8d3c5" x="8.0">│</text>
+<text y="499" fill="#c8d3c5" x="36.8 44.0 51.2">[3]</text>
+<text y="499" fill="#c8d3c5" x="65.6 72.8 80.0 87.2 94.4">Boris</text>
+<text y="499" fill="#c8d3c5" x="108.8 116.0 123.2 130.4 137.6">Ulmer</text>
+<text y="499" fill="#c8d3c5" x="159.2 166.4 173.6 180.8 188.0 195.2 202.4 209.6 216.8 224.0 231.2 238.4 245.6">tech_mechanic</text>
+<text y="499" fill="#c8d3c5" x="260.0 267.2 274.4 281.6 288.8">elite</text>
+<text y="499" fill="#c8d3c5" x="310.4 317.6 324.8 332.0 339.2">bonus</text>
+<text y="499" fill="#c8d3c5" x="353.6 360.8 368.0 375.2 382.4">8,192</text>
+<text y="499" fill="#c8d3c5" x="404.0 411.2 418.4 425.6 432.8 440.0 447.2">expires</text>
+<text y="499" fill="#c8d3c5" x="461.6 468.8 476.0">day</text>
+<text y="499" fill="#c8d3c5" x="490.4 497.6">43</text>
+<text y="499" fill="#c8d3c5" x="548.0 555.2">││</text>
+<text y="499" fill="#c8d3c5" x="1224.8">│</text>
+<text y="514" fill="#c8d3c5" x="8.0">│</text>
+<text y="514" fill="#c8d3c5" x="36.8 44.0 51.2">[4]</text>
+<text y="514" fill="#c8d3c5" x="65.6 72.8 80.0 87.2">Ivan</text>
+<text y="514" fill="#c8d3c5" x="101.6 108.8 116.0 123.2 130.4">Ulmer</text>
+<text y="514" fill="#c8d3c5" x="152.0 159.2 166.4 173.6 180.8 188.0 195.2 202.4">tech_mek</text>
+<text y="514" fill="#c8d3c5" x="216.8 224.0 231.2 238.4 245.6">elite</text>
+<text y="514" fill="#c8d3c5" x="267.2 274.4 281.6 288.8 296.0">bonus</text>
+<text y="514" fill="#c8d3c5" x="310.4 317.6 324.8 332.0 339.2 346.4">10,240</text>
+<text y="514" fill="#c8d3c5" x="368.0 375.2 382.4 389.6 396.8 404.0 411.2">expires</text>
+<text y="514" fill="#c8d3c5" x="425.6 432.8 440.0">day</text>
+<text y="514" fill="#c8d3c5" x="454.4 461.6">45</text>
+<text y="514" fill="#c8d3c5" x="548.0 555.2">││</text>
+<text y="514" fill="#c8d3c5" x="1224.8">│</text>
+<text y="529" fill="#c8d3c5" x="8.0">│</text>
+<text y="529" fill="#c8d3c5" x="36.8 44.0 51.2">[5]</text>
+<text y="529" fill="#c8d3c5" x="65.6 72.8 80.0 87.2">Zhao</text>
+<text y="529" fill="#c8d3c5" x="101.6 108.8 116.0 123.2 130.4 137.6">Yamada</text>
+<text y="529" fill="#c8d3c5" x="159.2 166.4 173.6 180.8 188.0 195.2 202.4 209.6 216.8 224.0 231.2 238.4 245.6 252.8 260.0">admin_logistics</text>
+<text y="529" fill="#c8d3c5" x="274.4 281.6 288.8 296.0 303.2 310.4 317.6">regular</text>
+<text y="529" fill="#c8d3c5" x="339.2 346.4 353.6 360.8 368.0">bonus</text>
+<text y="529" fill="#c8d3c5" x="382.4 389.6 396.8 404.0 411.2">1,000</text>
+<text y="529" fill="#c8d3c5" x="432.8 440.0 447.2 454.4 461.6 468.8 476.0">expires</text>
+<text y="529" fill="#c8d3c5" x="490.4 497.6 504.8">day</text>
+<text y="529" fill="#c8d3c5" x="519.2 526.4">44</text>
+<text y="529" fill="#c8d3c5" x="548.0 555.2">││</text>
+<text y="529" fill="#c8d3c5" x="1224.8">│</text>
+<text y="544" fill="#c8d3c5" x="8.0">│</text>
+<text y="544" fill="#c8d3c5" x="36.8 44.0 51.2">[6]</text>
+<text y="544" fill="#c8d3c5" x="65.6 72.8 80.0 87.2 94.4">Carla</text>
+<text y="544" fill="#c8d3c5" x="108.8 116.0 123.2 130.4 137.6 144.8 152.0 159.2">Castille</text>
+<text y="544" fill="#c8d3c5" x="180.8 188.0 195.2 202.4 209.6 216.8 224.0 231.2">tech_mek</text>
+<text y="544" fill="#c8d3c5" x="245.6 252.8 260.0 267.2 274.4">elite</text>
+<text y="544" fill="#c8d3c5" x="296.0 303.2 310.4 317.6 324.8">bonus</text>
+<text y="544" fill="#c8d3c5" x="339.2 346.4 353.6 360.8 368.0 375.2">10,240</text>
+<text y="544" fill="#c8d3c5" x="396.8 404.0 411.2 418.4 425.6 432.8 440.0">expires</text>
+<text y="544" fill="#c8d3c5" x="454.4 461.6 468.8">day</text>
+<text y="544" fill="#c8d3c5" x="483.2 490.4">50</text>
+<text y="544" fill="#c8d3c5" x="548.0 555.2">││</text>
+<text y="544" fill="#c8d3c5" x="1224.8">│</text>
+<text y="559" fill="#c8d3c5" x="8.0">│</text>
+<text y="559" fill="#c8d3c5" x="36.8 44.0 51.2">[7]</text>
+<text y="559" fill="#c8d3c5" x="65.6 72.8 80.0 87.2 94.4">Tanya</text>
+<text y="559" fill="#c8d3c5" x="108.8 116.0 123.2 130.4 137.6">Ulmer</text>
+<text y="559" fill="#c8d3c5" x="159.2 166.4 173.6 180.8 188.0 195.2 202.4 209.6 216.8 224.0 231.2 238.4 245.6">tech_mechanic</text>
+<text y="559" fill="#c8d3c5" x="260.0 267.2 274.4 281.6 288.8 296.0 303.2">regular</text>
+<text y="559" fill="#c8d3c5" x="324.8 332.0 339.2 346.4 353.6">bonus</text>
+<text y="559" fill="#c8d3c5" x="368.0 375.2 382.4 389.6 396.8">1,280</text>
+<text y="559" fill="#c8d3c5" x="418.4 425.6 432.8 440.0 447.2 454.4 461.6">expires</text>
+<text y="559" fill="#c8d3c5" x="476.0 483.2 490.4">day</text>
+<text y="559" fill="#c8d3c5" x="504.8 512.0">47</text>
+<text y="559" fill="#c8d3c5" x="548.0 555.2">││</text>
+<text y="559" fill="#c8d3c5" x="1224.8">│</text>
+<text y="574" fill="#c8d3c5" x="8.0">│</text>
+<text y="574" fill="#c8d3c5" x="36.8 44.0 51.2">[8]</text>
+<text y="574" fill="#c8d3c5" x="65.6 72.8 80.0 87.2">Ines</text>
+<text y="574" fill="#c8d3c5" x="101.6 108.8 116.0 123.2 130.4 137.6 144.8 152.0 159.2">Jankowski</text>
+<text y="574" fill="#c8d3c5" x="180.8 188.0 195.2 202.4 209.6 216.8 224.0 231.2">tech_mek</text>
+<text y="574" fill="#c8d3c5" x="245.6 252.8 260.0 267.2 274.4 281.6 288.8">regular</text>
+<text y="574" fill="#c8d3c5" x="310.4 317.6 324.8 332.0 339.2">bonus</text>
+<text y="574" fill="#c8d3c5" x="353.6 360.8 368.0 375.2 382.4">1,600</text>
+<text y="574" fill="#c8d3c5" x="404.0 411.2 418.4 425.6 432.8 440.0 447.2">expires</text>
+<text y="574" fill="#c8d3c5" x="461.6 468.8 476.0">day</text>
+<text y="574" fill="#c8d3c5" x="490.4 497.6">53</text>
+<text y="574" fill="#c8d3c5" x="548.0 555.2">││</text>
+<text y="574" fill="#c8d3c5" x="1224.8">│</text>
+<text y="589" fill="#c8d3c5" x="8.0">│</text>
+<text y="589" fill="#c8d3c5" x="36.8 44.0 51.2">[9]</text>
+<text y="589" fill="#c8d3c5" x="65.6 72.8 80.0 87.2 94.4">Petra</text>
+<text y="589" fill="#c8d3c5" x="108.8 116.0 123.2 130.4 137.6 144.8 152.0">Marlowe</text>
+<text y="589" fill="#c8d3c5" x="173.6 180.8 188.0 195.2 202.4">medic</text>
+<text y="589" fill="#c8d3c5" x="216.8 224.0 231.2 238.4 245.6 252.8 260.0">regular</text>
+<text y="589" fill="#c8d3c5" x="281.6 288.8 296.0 303.2 310.4">bonus</text>
+<text y="589" fill="#c8d3c5" x="324.8 332.0 339.2">800</text>
+<text y="589" fill="#c8d3c5" x="360.8 368.0 375.2 382.4 389.6 396.8 404.0">expires</text>
+<text y="589" fill="#c8d3c5" x="418.4 425.6 432.8">day</text>
+<text y="589" fill="#c8d3c5" x="447.2 454.4">50</text>
+<text y="589" fill="#c8d3c5" x="548.0 555.2">││</text>
+<text y="589" fill="#c8d3c5" x="1224.8">│</text>
+<text y="604" fill="#c8d3c5" x="8.0">│</text>
+<text y="604" fill="#c8d3c5" x="36.8 44.0 51.2 58.4">[10]</text>
+<text y="604" fill="#c8d3c5" x="72.8 80.0 87.2 94.4">Lars</text>
+<text y="604" fill="#c8d3c5" x="108.8 116.0 123.2 130.4 137.6 144.8">Gruber</text>
+<text y="604" fill="#c8d3c5" x="166.4 173.6 180.8 188.0 195.2 202.4 209.6 216.8">admin_hr</text>
+<text y="604" fill="#c8d3c5" x="231.2 238.4 245.6 252.8 260.0 267.2 274.4">regular</text>
+<text y="604" fill="#c8d3c5" x="296.0 303.2 310.4 317.6 324.8">bonus</text>
+<text y="604" fill="#c8d3c5" x="339.2 346.4 353.6 360.8 368.0">1,000</text>
+<text y="604" fill="#c8d3c5" x="389.6 396.8 404.0 411.2 418.4 425.6 432.8">expires</text>
+<text y="604" fill="#c8d3c5" x="447.2 454.4 461.6">day</text>
+<text y="604" fill="#c8d3c5" x="476.0 483.2">48</text>
+<text y="604" fill="#c8d3c5" x="548.0 555.2">││</text>
+<text y="604" fill="#c8d3c5" x="1224.8">│</text>
+<text y="619" fill="#c8d3c5" x="8.0">│</text>
+<text y="619" fill="#c8d3c5" x="36.8 44.0 51.2 58.4">[11]</text>
+<text y="619" fill="#c8d3c5" x="72.8 80.0 87.2 94.4">Anna</text>
+<text y="619" fill="#c8d3c5" x="108.8 116.0">Xu</text>
+<text y="619" fill="#c8d3c5" x="137.6 144.8 152.0 159.2 166.4">medic</text>
+<text y="619" fill="#c8d3c5" x="180.8 188.0 195.2 202.4 209.6 216.8 224.0">regular</text>
+<text y="619" fill="#c8d3c5" x="245.6 252.8 260.0 267.2 274.4">bonus</text>
+<text y="619" fill="#c8d3c5" x="288.8 296.0 303.2">800</text>
+<text y="619" fill="#c8d3c5" x="324.8 332.0 339.2 346.4 353.6 360.8 368.0">expires</text>
+<text y="619" fill="#c8d3c5" x="382.4 389.6 396.8">day</text>
+<text y="619" fill="#c8d3c5" x="411.2 418.4">47</text>
+<text y="619" fill="#c8d3c5" x="548.0 555.2">││</text>
+<text y="619" fill="#c8d3c5" x="1224.8">│</text>
+<text y="634" fill="#c8d3c5" x="8.0">│</text>
+<text y="634" fill="#c8d3c5" x="36.8 44.0 51.2 58.4">[12]</text>
+<text y="634" fill="#c8d3c5" x="72.8 80.0 87.2 94.4 101.6">Tomas</text>
+<text y="634" fill="#c8d3c5" x="116.0 123.2 130.4 137.6 144.8 152.0 159.2 166.4 173.6">Jankowski</text>
+<text y="634" fill="#c8d3c5" x="195.2 202.4 209.6 216.8 224.0 231.2">astech</text>
+<text y="634" fill="#c8d3c5" x="245.6 252.8 260.0 267.2 274.4">green</text>
+<text y="634" fill="#c8d3c5" x="296.0 303.2 310.4 317.6 324.8">bonus</text>
+<text y="634" fill="#c8d3c5" x="339.2 346.4 353.6">240</text>
+<text y="634" fill="#c8d3c5" x="375.2 382.4 389.6 396.8 404.0 411.2 418.4">expires</text>
+<text y="634" fill="#c8d3c5" x="432.8 440.0 447.2">day</text>
+<text y="634" fill="#c8d3c5" x="461.6 468.8">54</text>
+<text y="634" fill="#c8d3c5" x="548.0 555.2">││</text>
+<text y="634" fill="#c8d3c5" x="1224.8">│</text>
+<text y="649" fill="#c8d3c5" x="8.0">│</text>
+<text y="649" fill="#c8d3c5" x="36.8 44.0 51.2 58.4">[13]</text>
+<text y="649" fill="#c8d3c5" x="72.8 80.0 87.2 94.4">Ivan</text>
+<text y="649" fill="#c8d3c5" x="108.8 116.0 123.2 130.4 137.6">Ikeda</text>
+<text y="649" fill="#c8d3c5" x="159.2 166.4 173.6 180.8 188.0 195.2 202.4 209.6 216.8 224.0 231.2 238.4 245.6">tech_mechanic</text>
+<text y="649" fill="#c8d3c5" x="260.0 267.2 274.4 281.6 288.8 296.0 303.2">regular</text>
+<text y="649" fill="#c8d3c5" x="324.8 332.0 339.2 346.4 353.6">bonus</text>
+<text y="649" fill="#c8d3c5" x="368.0 375.2 382.4 389.6 396.8">1,280</text>
+<text y="649" fill="#c8d3c5" x="418.4 425.6 432.8 440.0 447.2 454.4 461.6">expires</text>
+<text y="649" fill="#c8d3c5" x="476.0 483.2 490.4">day</text>
+<text y="649" fill="#c8d3c5" x="504.8 512.0">54</text>
+<text y="649" fill="#c8d3c5" x="548.0 555.2">││</text>
+<text y="649" fill="#c8d3c5" x="1224.8">│</text>
+<text y="664" fill="#c8d3c5" x="8.0 15.2 22.4 29.6 36.8 44.0 51.2 58.4 65.6 72.8 80.0 87.2 94.4 101.6 108.8 116.0 123.2 130.4 137.6 144.8 152.0 159.2 166.4 173.6 180.8 188.0 195.2 202.4 209.6 216.8 224.0 231.2 238.4 245.6 252.8 260.0 267.2 274.4 281.6 288.8 296.0 303.2 310.4 317.6 324.8 332.0 339.2 346.4 353.6 360.8 368.0 375.2 382.4 389.6 396.8 404.0 411.2 418.4 425.6 432.8 440.0 447.2 454.4 461.6 468.8 476.0 483.2 490.4 497.6 504.8 512.0 519.2 526.4 533.6 540.8 548.0 555.2 562.4 569.6 576.8 584.0 591.2 598.4 605.6 612.8 620.0 627.2 634.4 641.6 648.8 656.0 663.2 670.4 677.6 684.8 692.0 699.2 706.4 713.6 720.8 728.0 735.2 742.4 749.6 756.8 764.0 771.2 778.4 785.6 792.8 800.0 807.2 814.4 821.6 828.8 836.0 843.2 850.4 857.6 864.8 872.0 879.2 886.4 893.6 900.8 908.0 915.2 922.4 929.6 936.8 944.0 951.2 958.4 965.6 972.8 980.0 987.2 994.4 1001.6 1008.8 1016.0 1023.2 1030.4 1037.6 1044.8 1052.0 1059.2 1066.4 1073.6 1080.8 1088.0 1095.2 1102.4 1109.6 1116.8 1124.0 1131.2 1138.4 1145.6 1152.8 1160.0 1167.2 1174.4 1181.6 1188.8 1196.0 1203.2 1210.4 1217.6 1224.8">└──────────────────────────────────────────────────────────────────────────┘└────────────────────────────────────────────────────────────────────────────────────────────┘</text>
+<text y="679" fill="#7fc97f" x="8.0 15.2 22.4">day</text>
+<text y="679" fill="#7fc97f" x="36.8 44.0">40</text>
+<text y="679" fill="#7fc97f" x="58.4">·</text>
+<text y="679" fill="#7fc97f" x="72.8 80.0 87.2 94.4 101.6 108.8 116.0 123.2 130.4 137.6">3025-02-10</text>
+<text y="679" fill="#6f7d73" x="548.0">[</text>
+<text y="679" fill="#6f7d73" x="562.4">]</text>
+<text y="679" fill="#6f7d73" x="576.8 584.0 591.2 598.4 605.6 612.8">switch</text>
+<text y="679" fill="#6f7d73" x="627.2 634.4">HQ</text>
+<text y="679" fill="#6f7d73" x="648.8">·</text>
+<text y="679" fill="#6f7d73" x="663.2 670.4 677.6">Tab</text>
+<text y="679" fill="#6f7d73" x="692.0 699.2 706.4 713.6">hall</text>
+<text y="679" fill="#6f7d73" x="728.0">·</text>
+<text y="679" fill="#6f7d73" x="742.4 749.6 756.8">f/F</text>
+<text y="679" fill="#6f7d73" x="771.2 778.4 785.6 792.8">hall</text>
+<text y="679" fill="#6f7d73" x="807.2 814.4 821.6 828.8 836.0 843.2">filter</text>
+<text y="679" fill="#6f7d73" x="857.6">·</text>
+<text y="679" fill="#6f7d73" x="872.0 879.2 886.4 893.6 900.8">Enter</text>
+<text y="679" fill="#6f7d73" x="915.2 922.4 929.6 936.8">hire</text>
+<text y="679" fill="#6f7d73" x="951.2">·</text>
+<text y="679" fill="#6f7d73" x="965.6">u</text>
+<text y="679" fill="#6f7d73" x="980.0 987.2 994.4 1001.6 1008.8 1016.0 1023.2">upgrade</text>
+<text y="679" fill="#6f7d73" x="1037.6">·</text>
+<text y="679" fill="#6f7d73" x="1052.0">S</text>
+<text y="679" fill="#6f7d73" x="1066.4 1073.6 1080.8 1088.0 1095.2 1102.4 1109.6 1116.8 1124.0">autostaff</text>
+<text y="679" fill="#6f7d73" x="1138.4">·</text>
+<text y="679" fill="#6f7d73" x="1152.8">b</text>
+<text y="679" fill="#6f7d73" x="1167.2 1174.4 1181.6 1188.8 1196.0 1203.2 1210.4 1217.6 1224.8">fabricate</text>
+</g></svg>

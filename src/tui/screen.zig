@@ -18,6 +18,7 @@ pub const Style = enum(u8) {
     tab, // active tab
     purple,
     box, // borders
+    focus, // the focused pane's border line
 
     fn sgr(self: Style) []const u8 {
         return switch (self) {
@@ -30,6 +31,7 @@ pub const Style = enum(u8) {
             .tab => "\x1b[0;1;30;43m",
             .purple => "\x1b[0;35m",
             .box => "\x1b[0;37m",
+            .focus => "\x1b[0;36m",
         };
     }
 
@@ -184,9 +186,10 @@ pub const Screen = struct {
         const y1: i32 = r.y + r.h - 1;
         self.fill(r.inner(), ' ', .normal);
         const tstyle: Style = if (opts.focused) .sel else .box;
+        const line_style: Style = if (opts.focused) .focus else .box;
         var x: i32 = x0 + 1;
         while (x < x1) : (x += 1) {
-            self.put(x, y0, h, tstyle);
+            self.put(x, y0, h, line_style);
             self.put(x, y1, h, .box);
         }
         var y: i32 = y0 + 1;
