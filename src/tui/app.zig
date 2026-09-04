@@ -735,8 +735,8 @@ pub const App = struct {
             .desk => "? help · F1-F10 / 1-0 screens · Tab pane · Enter act · e emblem · : command · n end turn · q welcome",
             .people => "/ , filter (…, wounded) · m admit to medbay · t train · a seat · P post · x transfer · L leave · D fire · r record",
             .market => "Tab pane · Enter buy / order / order shortfall · b fabricate component · [ ] HQ board · q welcome",
-            .ledger => "j/k treasury · t send cash to it by courier · p standing top-up (floor + monthly cap) · L loan · R repay",
-            .supply => "j/k site · on a company: t cash · p cash top-up policy · P resupply policy (days, tons) · s ship now · o order to the field",
+            .ledger => "j/k treasury · t send cash to it · T pull cash back to the outfit · p top-up policy · L loan · R repay",
+            .supply => "j/k site · on a company: t send cash · T pull cash home · p cash policy · P resupply policy · s ship now · o order to the field",
             .forces => "Enter assign · a/u seat · A auto · o role · d depot · m mothball · x move · R recall idle company · $ sell · X disband",
             .map => "h j k l move between worlds · f found HQ here · o offers here · n end turn · q welcome",
             .lab => "[ ] hull · j/k mount · - remove · + install · R order replacement · D send to depot (structure) · c clear · Enter commit",
@@ -1281,7 +1281,7 @@ pub const App = struct {
                     "  {a}structure{/}   not fitted in the Lab: D (Lab) or d (Forces) sends the hull to the depot; the bay consumes comp_* parts from the home HQ",
                     "  {a}companies{/}   :newco <name> at the first HQ · :newco@ hq:N <name> · :assignco co:N hq:M — each regional HQ hosts one combat company",
                     "  {a}money{/}       Ledger: L loan (simple interest) · R repay · Forces: $ sell hull · X disband company · HQ: $ sell HQ",
-                    "  {a}field cash{/}  t courier cash now · p policy = keep above a floor, checked daily, at most cap per month, one courier in flight at a time",
+                    "  {a}field cash{/}  t courier cash out · T courier cash back to the outfit · p policy = keep above a floor, checked daily, cap per month",
                     "  {a}resupply{/}    P policy `supplypolicy co:N days tons [battles]` — provisions under D days → ship N t; ammo per family sized to the link (or [battles])",
                     "  {a}turn rules{/}  wounded must be admitted (m) and a negative treasury covered before the day can end; bankruptcy ends the game",
                     "  {a}reputation{/}  every offer's pay × (1 + rep × 0.5%), clamped 0.8–1.3, and more offers per board · complete +1 (+VP) · breach −2 · decisions show their rep effect",
@@ -2231,7 +2231,7 @@ pub const App = struct {
                 }
             },
             .ledger => switch (ch) {
-                't', 'p' => {
+                't', 'T', 'p' => {
                     const all = try q.allTreasuries(al, g);
                     const sel: Treasury = if (self.ledger_sel < all.len) all[self.ledger_sel] else .outfit;
                     const label = try q.treasuryLabel(al, g, sel);
@@ -2239,6 +2239,13 @@ pub const App = struct {
                     var buf: [128]u8 = undefined;
                     if (ch == 't') {
                         self.openCommand(if (sel == .outfit) "transfer outfit " else std.fmt.bufPrint(&buf, "transfer outfit {s} 250000", .{tok}) catch "transfer outfit ");
+                    } else if (ch == 'T') {
+                        if (sel == .outfit) {
+                            self.say(.dim, "select the HQ or company row to pull money back from", .{});
+                            return;
+                        }
+                        const bal = g.treasuryBalance(sel);
+                        self.openCommand(std.fmt.bufPrint(&buf, "transfer {s} outfit {d}", .{ tok, @max(0, @divTrunc(bal, 2)) }) catch "transfer ");
                     } else {
                         if (sel == .outfit) {
                             self.say(.dim, "select an HQ or company row first — policies top up from the outfit treasury", .{});
@@ -2379,6 +2386,11 @@ pub const App = struct {
                         .company => |id| std.fmt.bufPrint(&buf, "supplypolicy co:{d} 14 20", .{@intFromEnum(id)}) catch "supplypolicy ",
                         else => "supplypolicy co:",
                     } else "supplypolicy co:"),
+                    'T' => self.openCommand(if (site) |s| switch (s) {
+                        .company => |id| std.fmt.bufPrint(&buf, "transfer co:{d} outfit {d}", .{ @intFromEnum(id), @max(0, @divTrunc(g.treasuryBalance(.{ .company = id }), 2)) }) catch "transfer ",
+                        .hq => |id| std.fmt.bufPrint(&buf, "transfer hq:{d} outfit {d}", .{ @intFromEnum(id), @max(0, @divTrunc(g.treasuryBalance(.{ .hq = id }), 2)) }) catch "transfer ",
+                        .outfit => "transfer ",
+                    } else "transfer "),
                     else => {},
                 }
             },
