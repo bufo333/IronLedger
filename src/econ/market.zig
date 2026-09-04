@@ -3,6 +3,7 @@
 //! Stage 4 implements generation; refresh cadence and offer shapes live here.
 
 const std = @import("std");
+const tuning = @import("../domain/tuning.zig").t;
 const types = @import("../domain/types.zig");
 const contract = @import("../domain/contract.zig");
 const person = @import("../domain/person.zig");
@@ -27,8 +28,8 @@ pub fn contractOfferCount(reputation: i32, comms_level: u8) u8 {
 /// flagged with a penalty preview; beyond that the map is dark.
 pub const OfferVisibility = enum { in_ring, beachhead, hidden };
 
-/// Width of the beachhead band past the influence ring. // TUNE
-pub const beachhead_band_ly = 30;
+/// Width of the beachhead band past the influence ring.
+pub const beachhead_band_ly = tuning.market.beachhead_band_ly;
 
 pub fn visibilityFor(dist_ly: u32, influence_ly: u32) OfferVisibility {
     if (dist_ly <= influence_ly) return .in_ring;
@@ -47,12 +48,12 @@ pub const SiteKind = enum {
     contract_planet,
 
     /// Listing slots rolled per refresh. Regional depth scales with the
-    /// warehouse; the rest are what they are. // TUNE
+    /// warehouse; the rest are what they are.
     pub fn listingSlots(self: SiteKind, warehouse_level: u8) u8 {
         return switch (self) {
-            .regional_hq => 4 + warehouse_level,
-            .field_hq => 2,
-            .contract_planet => 3,
+            .regional_hq => tuning.market.regional_slots_base + warehouse_level,
+            .field_hq => tuning.market.field_slots,
+            .contract_planet => tuning.market.contract_planet_slots,
         };
     }
 
@@ -64,19 +65,19 @@ pub const SiteKind = enum {
     }
 };
 
-/// Cost multiplier and lead time for guaranteed structural fabrication. // TUNE
-pub const structural_fab_cost_mult_bp: types.Bp = 15_000; // ×1.5 vs. catalog
-pub const structural_fab_days = 7;
+/// Cost multiplier and lead time for guaranteed structural fabrication.
+pub const structural_fab_cost_mult_bp: types.Bp = tuning.market.fab_cost_bp; // ×1.5 vs. catalog
+pub const structural_fab_days = tuning.market.fab_days;
 
 /// What a warehouse line fetches when sold off (Stage 12 `sell_stock`):
 /// a fraction of catalogue cost, like a hull at half value. Components
-/// move slower on the second-hand market. // TUNE
-pub const stock_resale_bp: types.Bp = 5_000;
-pub const component_resale_bp: types.Bp = 4_000;
+/// move slower on the second-hand market.
+pub const stock_resale_bp: types.Bp = tuning.market.stock_resale_bp;
+pub const component_resale_bp: types.Bp = tuning.market.component_resale_bp;
 
 /// Transports list at a fraction of their canon price (Stage 12.15): a
-/// Leopard is a mid-game capital purchase, not a decade of profit. // TUNE
-pub const transport_price_bp: types.Bp = 2_500;
+/// Leopard is a mid-game capital purchase, not a decade of profit.
+pub const transport_price_bp: types.Bp = tuning.market.transport_price_bp;
 
 pub const Rarity = types.Rarity; // canonical home: domain/types.zig
 

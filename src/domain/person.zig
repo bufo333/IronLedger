@@ -3,6 +3,7 @@
 //! (MekHQ default values). Stage 2 fleshes this out.
 
 const std = @import("std");
+const tuning = @import("tuning.zig").t;
 const types = @import("types.zig");
 
 pub const Role = enum {
@@ -113,8 +114,8 @@ pub const Person = struct {
     assigned_force: types.ForceId = .none,
     /// HQ staff posting (Stage 9C back office): admins here run the HQ.
     posted_hq: types.HqId = .none,
-    /// Tech-time budget per week (techs only; Stage 9C.2). // TUNE
-    weekly_hours: u16 = 40,
+    /// Tech-time budget per week (techs only; Stage 9C.2).
+    weekly_hours: u16 = tuning.person.weekly_hours,
     /// Medbay: higher heals first when beds/doctors are short.
     medbay_priority: u8 = 0,
     /// R&R: unavailable until this day, fatigue decays double.
@@ -216,10 +217,10 @@ pub const Person = struct {
 // brigade HQ (ARCH §9.7, Stage 8 wires the gate). The machinery lives here.
 
 /// XP cost to improve a skill TO `new_level` (lower level = better, combat
-/// convention). Costs double per step toward mastery. // TUNE
+/// convention). Costs double per step toward mastery.
 pub fn improveCost(new_level: u8) u32 {
-    if (new_level >= 5) return 4;
-    return @as(u32, 8) << @intCast(4 - new_level);
+    if (new_level >= 5) return tuning.person.improve_cost_base / 2;
+    return tuning.person.improve_cost_base << @intCast(4 - new_level);
 }
 
 pub const TrainError = error{ NotTrained, InsufficientXp, AlreadyMastered };
@@ -264,22 +265,22 @@ test "spending xp improves a skill and drains the pool" {
 // at 100: degraded, never spiraling. Applied to every person attached to the
 // deploying company.
 
-pub const max_fatigue = 100;
+pub const max_fatigue = tuning.person.max_fatigue;
 
 /// Fatigue gained at the end of a contract, scaled by how long it ran and
 /// how hard it fought: a quiet garrison wears lightly, a bloody raid
-/// campaign wears hard. // TUNE
+/// campaign wears hard.
 pub fn contractFatigueGain(length_months: u8, battles_fought: u8, casualties_pct: u8) u8 {
     const gain: u32 = @as(u32, length_months) +
-        @as(u32, battles_fought) * 3 +
-        @as(u32, casualties_pct) / 5;
-    return @intCast(@min(gain, 50));
+        @as(u32, battles_fought) * tuning.person.fatigue_per_battle +
+        @as(u32, casualties_pct) / tuning.person.fatigue_casualty_divisor;
+    return @intCast(@min(gain, tuning.person.fatigue_contract_cap));
 }
 
 /// Weekly fatigue recovery at a regional/brigade HQ; a better mess means
-/// better R&R. In the field: zero. // TUNE
+/// better R&R. In the field: zero.
 pub fn fatigueDecayPerWeek(mess_level: u8) u8 {
-    return 5 + 2 * mess_level;
+    return tuning.person.fatigue_decay_base + tuning.person.fatigue_decay_per_mess * mess_level;
 }
 
 pub fn applyFatigue(current: u8, gain: u8) u8 {

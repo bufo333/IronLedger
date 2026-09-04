@@ -2,9 +2,10 @@
 //! influence rings, capacity slots, staffing overhead, and upgrade projects.
 //! No MekHQ equivalent — this is the game's centerpiece (ARCH §9, GAMEPLAY.md).
 //!
-//! All constants here are initial tuning values, destined for data/tables/.
+//! Tuning values live in data/tables/tuning.zon (`tuning.hq`).
 
 const std = @import("std");
+const tuning = @import("tuning.zig").t;
 const types = @import("types.zig");
 const SupportLanceKind = @import("force.zig").SupportLanceKind;
 
@@ -13,12 +14,21 @@ pub const HqTier = enum {
     regional, // per region of space: projects the influence ring
     field, // beachhead toehold: minimal, upgradeable to regional
 
-    /// Base influence radius in light-years (ARCH §9.2). // TUNE
+    /// Base influence radius in light-years (ARCH §9.2).
     pub fn baseInfluenceLy(self: HqTier) u32 {
         return switch (self) {
-            .field => 15,
-            .regional => 60,
-            .brigade => 90,
+            .field => tuning.hq.influence_ly.field,
+            .regional => tuning.hq.influence_ly.regional,
+            .brigade => tuning.hq.influence_ly.brigade,
+        };
+    }
+
+    /// Monthly upkeep of an HQ of this tier.
+    pub fn monthlyUpkeep(self: HqTier) types.CBills {
+        return switch (self) {
+            .field => tuning.hq.upkeep.field,
+            .regional => tuning.hq.upkeep.regional,
+            .brigade => tuning.hq.upkeep.brigade,
         };
     }
 };
@@ -90,23 +100,22 @@ pub const Project = struct {
     }
 };
 
-/// Paperwork lead time in days for a new project. // TUNE
+/// Paperwork lead time in days for a new project.
 pub fn paperworkDays(admin_effective_level: u32) u32 {
-    const base: u32 = 21;
-    return @max(5, base -| admin_effective_level * 3);
+    return @max(tuning.hq.paperwork_min_days, tuning.hq.paperwork_base_days -| admin_effective_level * tuning.hq.paperwork_days_per_admin_level);
 }
 
-/// C-bill cost to raise `kind` to `to_level` (quadratic in level). // TUNE
+/// C-bill cost to raise `kind` to `to_level` (quadratic in level).
 pub fn upgradeCost(kind: FacilityKind, to_level: u8) types.CBills {
     const per_level: types.CBills = switch (kind) {
-        .mek_bay => 800_000,
-        .warehouse => 400_000,
-        .hospital => 500_000,
-        .mess => 150_000,
-        .training_ground => 300_000,
-        .hiring_hall => 200_000,
-        .comms => 600_000,
-        .spaceport => 1_200_000,
+        .mek_bay => tuning.hq.upgrade_cost_per_level.mek_bay,
+        .warehouse => tuning.hq.upgrade_cost_per_level.warehouse,
+        .hospital => tuning.hq.upgrade_cost_per_level.hospital,
+        .mess => tuning.hq.upgrade_cost_per_level.mess,
+        .training_ground => tuning.hq.upgrade_cost_per_level.training_ground,
+        .hiring_hall => tuning.hq.upgrade_cost_per_level.hiring_hall,
+        .comms => tuning.hq.upgrade_cost_per_level.comms,
+        .spaceport => tuning.hq.upgrade_cost_per_level.spaceport,
     };
     const lvl: types.CBills = to_level;
     return per_level * lvl * lvl;
@@ -128,10 +137,10 @@ pub const Hq = struct {
     /// `warehouseCapacityTons` of the effective warehouse level.
     stock: std.StringArrayHashMapUnmanaged(u32) = .empty,
 
-    /// Storage tonnage the warehouse holds — the reason to expand it. // TUNE
+    /// Storage tonnage the warehouse holds — the reason to expand it.
     pub fn warehouseCapacityTons(self: *const Hq) u32 {
         const lvl: u32 = self.effectiveFacilityLevel(.warehouse);
-        return 200 * lvl * lvl; // 200 / 800 / 1800 / 3200 / 5000
+        return tuning.hq.warehouse_tons_per_level_sq * lvl * lvl;
     }
 
     pub fn deinit(self: *Hq, alloc: std.mem.Allocator) void {
@@ -181,11 +190,11 @@ pub const Hq = struct {
     }
 
     /// Influence ring radius in LY (ARCH §9.2): reputation travels by HPG
-    /// and word of mouth, and yours only reaches so far. // TUNE
+    /// and word of mouth, and yours only reaches so far.
     pub fn influenceLy(self: *const Hq) u32 {
         return self.tier.baseInfluenceLy() +
-            10 * @as(u32, self.effectiveFacilityLevel(.comms)) +
-            5 * @as(u32, self.effectiveFacilityLevel(.spaceport));
+            tuning.hq.influence_per_comms_ly * @as(u32, self.effectiveFacilityLevel(.comms)) +
+            tuning.hq.influence_per_spaceport_ly * @as(u32, self.effectiveFacilityLevel(.spaceport));
     }
 
     /// Capacity slots (ARCH §9.3). // TUNE

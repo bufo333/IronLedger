@@ -52,6 +52,16 @@ pub fn build(b: *std.Build) void {
     mod.addAnonymousImport("parts_zon", .{
         .root_source_file = b.path("data/parts.zon"),
     });
+    // Tables (Stage 12.17): tuning knobs, MekLab construction tables, names.
+    mod.addAnonymousImport("tuning_zon", .{
+        .root_source_file = b.path("data/tables/tuning.zon"),
+    });
+    mod.addAnonymousImport("meklab_zon", .{
+        .root_source_file = b.path("data/tables/meklab.zon"),
+    });
+    mod.addAnonymousImport("names_zon", .{
+        .root_source_file = b.path("data/tables/names.zon"),
+    });
 
     // Persistence (Stage 11): the system SQLite library, bound by hand in
     // src/persist/sqlite.zig (no translate-c dependency).

@@ -3,6 +3,7 @@
 //! (tonnage, loadout, BV) comes from the chassis catalog in data/ (Stage 3).
 
 const std = @import("std");
+const tuning = @import("tuning.zig").t;
 const types = @import("types.zig");
 
 pub const UnitKind = enum {
@@ -89,23 +90,24 @@ pub fn maintenanceHours(kind: UnitKind, tonnage: u8) u32 {
 // allocation, insurance, tech attention. Cold storage (mothballing at a
 // regional HQ) cuts the bill to a fraction but costs reactivation time.
 
-/// Monthly per-hull carry cost by unit kind, C-bills. // TUNE
+/// Monthly per-hull carry cost by unit kind, C-bills.
 pub fn monthlyCarryCost(kind: UnitKind) types.CBills {
+    const c = tuning.unit.carry;
     return switch (kind) {
-        .mek => 2_000,
-        .vehicle => 1_200,
-        .aerospace => 3_000,
-        .battle_armor => 500,
-        .infantry => 200,
-        .mash, .mobile_field_base => 800,
-        .cargo => 500,
-        .dropship => 15_000,
-        .jumpship => 50_000,
+        .mek => c.mek,
+        .vehicle => c.vehicle,
+        .aerospace => c.aerospace,
+        .battle_armor => c.battle_armor,
+        .infantry => c.infantry,
+        .mash, .mobile_field_base => c.mash,
+        .cargo => c.cargo,
+        .dropship => c.dropship,
+        .jumpship => c.jumpship,
     };
 }
 
-/// Cold-storage carry cost: 20% of active. // TUNE
-pub const cold_storage_cost_bp: types.Bp = 2_000;
+/// Cold-storage carry cost: 20% of active.
+pub const cold_storage_cost_bp: types.Bp = tuning.unit.cold_storage_bp;
 
 pub fn carryCost(kind: UnitKind, in_cold_storage: bool) types.CBills {
     const base = monthlyCarryCost(kind);
@@ -113,9 +115,9 @@ pub fn carryCost(kind: UnitKind, in_cold_storage: bool) types.CBills {
 }
 
 /// Tech-days to wake a mothballed hull before it can transfer or fight;
-/// a neglected machine (low quality) takes longer. // TUNE
+/// a neglected machine (low quality) takes longer.
 pub fn reactivationDays(quality: types.Quality) u32 {
-    return 7 + (5 - @as(u32, @intFromEnum(quality))) * 3; // F: 7 days .. A: 22
+    return tuning.unit.reactivation_base_days + (5 - @as(u32, @intFromEnum(quality))) * tuning.unit.reactivation_days_per_quality_step; // F: 7 days .. A: 22
 }
 
 pub const PartCondition = enum { ok, damaged, destroyed, missing };

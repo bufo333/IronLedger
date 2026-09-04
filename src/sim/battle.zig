@@ -7,6 +7,7 @@
 //! reasons. Legibility over drama: a loss should trace to causes.
 
 const std = @import("std");
+const tuning = @import("../domain/tuning.zig").t;
 const types = @import("../domain/types.zig");
 const autoresolve = @import("autoresolve.zig");
 const contract_mod = @import("../domain/contract.zig");
@@ -16,9 +17,9 @@ const part_mod = @import("../domain/part.zig");
 const medical = @import("medical.zig");
 const GameState = @import("state.zig").GameState;
 
-/// Days between engagements: ~2/month with variance. // TUNE
+/// Days between engagements: ~2/month with variance.
 fn nextBattleGap(gs: *GameState) u32 {
-    return 8 + gs.rng.roll2d6(.battle);
+    return tuning.battle.gap_base_days + gs.rng.roll2d6(.battle);
 }
 
 /// battle_resolution phase, daily: schedule and resolve engagements for
@@ -52,8 +53,8 @@ const SideState = struct {
 
 /// A ton of a munition family feeds this many mounts for one engagement
 /// (~10 turns of fire at tabletop rates; halved on 2026-09-04 because
-/// resupply tonnage was swamping the field trucks). // TUNE
-pub const mounts_per_ammo_ton = @import("field_supply.zig").mounts_per_ammo_ton;
+/// resupply tonnage was swamping the field trucks).
+pub const mounts_per_ammo_ton = tuning.battle.mounts_per_ammo_ton;
 
 fn hasTech(gs: *GameState, u: *const @import("../domain/unit.zig").Unit) bool {
     const t = gs.person(u.tech) orelse return false;
@@ -132,7 +133,7 @@ fn playerSide(gs: *GameState, c: *const contract_mod.Contract) !SideState {
             }
             var unit_bv: i64 = design.bv;
             if (mounts > 0 and silenced_x100 > 0) {
-                const penalty_pct: i64 = @divTrunc(60 * @as(i64, silenced_x100), 100 * @as(i64, mounts)); // TUNE
+                const penalty_pct: i64 = @divTrunc(tuning.battle.silence_penalty_pct * @as(i64, silenced_x100), 100 * @as(i64, mounts));
                 unit_bv = @divTrunc(unit_bv * (100 - penalty_pct), 100);
                 side.silenced_mounts += (silenced_x100 + 50) / 100;
             }
@@ -158,8 +159,8 @@ fn playerSide(gs: *GameState, c: *const contract_mod.Contract) !SideState {
         };
         side.bv += lance_bv;
         var lance_power = elem.effectivePower(side.mods);
-        // Defense lances dig in: +10% on garrison-class work. // TUNE
-        if (lance.role == .defense and c.kind.isGarrisonClass()) lance_power = types.applyBp(lance_power, 11_000);
+        // Defense lances dig in: +10% on garrison-class work.
+        if (lance.role == .defense and c.kind.isGarrisonClass()) lance_power = types.applyBp(lance_power, tuning.battle.defense_bonus_bp);
         side.power += lance_power;
     }
     return side;
@@ -356,14 +357,14 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     const held_field = outcome == .decisive_victory or outcome == .victory or outcome == .draw;
     const enemy_destroyed_bv = @divTrunc(enemy_bv * enemy_loss_pct, 100);
     // What the crews can actually haul off the field is bounded by the
-    // salvage trucks on hand (400 BV-worth each; 200 hand-carried). // TUNE
+    // salvage trucks on hand (300 BV-worth each; 150 hand-carried).
     var trucks: i64 = 0;
     var tit = gs.units.iterator();
     while (tit.next()) |entry| {
         const u = entry.value_ptr;
         if (u.status != .destroyed and std.mem.eql(u8, u.chassis_key, "SVT-1") and gs.companyOf(u.force) == c.assigned_company) trucks += 1;
     }
-    const haulable_bv = @min(enemy_destroyed_bv, if (trucks > 0) trucks * 300 else 150);
+    const haulable_bv = @min(enemy_destroyed_bv, if (trucks > 0) trucks * tuning.battle.salvage_bv_per_truck else tuning.battle.salvage_bv_by_hand);
     var salvage: types.CBills = if (held_field)
         @divTrunc(haulable_bv * 2_000 * c.terms.salvage_pct, 100)
     else

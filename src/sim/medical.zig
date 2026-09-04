@@ -5,19 +5,20 @@
 //! regional/brigade HQ with a training ground.
 
 const std = @import("std");
+const tuning = @import("../domain/tuning.zig").t;
 const types = @import("../domain/types.zig");
 const person_mod = @import("../domain/person.zig");
 const GameState = @import("state.zig").GameState;
 
-/// Days of training to improve a skill one step. // TUNE
-pub const training_days = 30;
+/// Days of training to improve a skill one step.
+pub const training_days = tuning.medical.training_days;
 
 /// Training program length at the outfit's HQ: a staffed HR office runs a
-/// tighter schedule (Stage 9C back office). // TUNE
+/// tighter schedule (Stage 9C back office).
 pub fn trainingDaysFor(gs: *GameState) u32 {
     if (gs.hqs.count() == 0) return training_days;
     const hr = gs.hqStaff(gs.hqs.keys()[0], .admin_hr);
-    return @max(15, training_days -| 3 * hr.count);
+    return @max(tuning.medical.training_min_days, training_days -| tuning.medical.training_days_per_hr_staff * hr.count);
 }
 
 pub const WoundCause = enum { combat, accident };
@@ -54,7 +55,7 @@ pub fn inflict(gs: *GameState, person_id: types.PersonId, cause: WoundCause, sev
     const p = gs.person(person_id) orelse return;
     if (p.status == .kia) return;
     const location = rollLocation(gs, cause);
-    const permanent = severity >= 3 and (location == .head or location == .internal) and gs.rng.roll2d6(.medical) <= 4;
+    const permanent = severity >= 3 and (location == .head or location == .internal) and gs.rng.roll2d6(.medical) <= tuning.medical.permanent_target;
     try p.injuries.append(gs.allocator(), .{
         .location = location,
         .severity = @min(severity, 3),
@@ -82,9 +83,10 @@ fn isDeployed(gs: *GameState, p: *const person_mod.Person) bool {
     return gs.deploymentContract(gs.companyOf(p.assigned_force)) != null;
 }
 
-/// Triage & recovery time for a fresh wound. // TUNE
+/// Triage & recovery time for a fresh wound.
 pub fn healDays(gs: *GameState, deployed_with_mash: bool) u32 {
-    var days: u32 = 10 + gs.rng.roll2d6(.medical);
+    const m = tuning.medical;
+    var days: u32 = m.heal_base_days + gs.rng.roll2d6(.medical);
 
     // Doctor coverage: 1 doctor per 25 patients (MekHQ ratio).
     var doctors: u32 = 0;
@@ -95,35 +97,35 @@ pub fn healDays(gs: *GameState, deployed_with_mash: bool) u32 {
         if (p.status == .active and p.role == .doctor) doctors += 1;
         if (p.status == .wounded) wounded += 1;
     }
-    if (wounded > doctors * 25) days = days * 3 / 2; // understaffed infirmary
+    if (wounded > doctors * m.patients_per_doctor) days = @intCast(types.applyBp(days, m.understaffed_bp)); // understaffed infirmary
 
-    if (deployed_with_mash) days = days * 4 / 5; // MASH lance forward surgery
+    if (deployed_with_mash) days = @intCast(types.applyBp(days, m.mash_bp)); // MASH lance forward surgery
     // Home hospital: better facilities, shorter stays.
     var hqit = gs.hqs.iterator();
     var best_hospital: u8 = 0;
     while (hqit.next()) |entry| {
         best_hospital = @max(best_hospital, entry.value_ptr.effectiveFacilityLevel(.hospital));
     }
-    if (!deployed_with_mash and best_hospital > 0) days = days * 7 / 10;
+    if (!deployed_with_mash and best_hospital > 0) days = @intCast(types.applyBp(days, m.hospital_bp));
 
-    return @max(days, 5);
+    return @max(days, m.heal_min_days);
 }
 
 /// Medbay beds (Stage 9C.2): hospital level × 10 at home; 4 per MASH truck
-/// with a deployed company. // TUNE
+/// with a deployed company.
 pub fn bedCapacity(gs: *GameState, company: types.ForceId, deployed: bool) u32 {
     if (deployed) {
         var beds: u32 = 0;
         var it = gs.units.iterator();
         while (it.next()) |entry| {
             const u = entry.value_ptr;
-            if (u.kind == .mash and u.status != .destroyed and gs.companyOf(u.force) == company) beds += 4;
+            if (u.kind == .mash and u.status != .destroyed and gs.companyOf(u.force) == company) beds += tuning.medical.beds_per_mash;
         }
         return beds;
     }
     var best: u32 = 0;
     var hqit = gs.hqs.iterator();
-    while (hqit.next()) |entry| best = @max(best, @as(u32, entry.value_ptr.effectiveFacilityLevel(.hospital)) * 10);
+    while (hqit.next()) |entry| best = @max(best, @as(u32, entry.value_ptr.effectiveFacilityLevel(.hospital)) * tuning.medical.beds_per_hospital_level);
     return best;
 }
 
@@ -198,7 +200,7 @@ pub fn runDailyHealing(gs: *GameState) !void {
             // an empty dispensary heals half again as slowly.
             const deployed = isDeployed(gs, p);
             var days = healDays(gs, deployed);
-            if (!gs.takeStock(gs.siteForForce(p.assigned_force), "medical_supplies", 1)) days = days * 3 / 2;
+            if (!gs.takeStock(gs.siteForForce(p.assigned_force), "medical_supplies", 1)) days = @intCast(types.applyBp(days, tuning.medical.no_supplies_bp));
             // A wound with no record behind it (older saves, event
             // effects): one light internal injury stands in for it.
             if (p.openInjuries() == 0) try p.injuries.append(gs.allocator(), .{ .location = .internal, .severity = 1, .incurred_day = gs.clock.day_index });

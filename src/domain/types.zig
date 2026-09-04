@@ -120,13 +120,14 @@ pub const Rarity = enum {
     very_rare,
 
     /// 2d6 availability target per refresh roll (roll + modifiers ≥ target
-    /// ⇒ the item appears). // TUNE
+    /// ⇒ the item appears).
     pub fn availabilityTarget(self: Rarity) u8 {
+        const t = @import("tuning.zig").t.market.rarity_target;
         return switch (self) {
-            .common => 5,
-            .uncommon => 7,
-            .rare => 9,
-            .very_rare => 11,
+            .common => t.common,
+            .uncommon => t.uncommon,
+            .rare => t.rare,
+            .very_rare => t.very_rare,
         };
     }
 };

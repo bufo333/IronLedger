@@ -4,6 +4,7 @@
 //! whole staff must be there for facilities to run at built level.
 
 const std = @import("std");
+const tuning = @import("../domain/tuning.zig").t;
 const types = @import("../domain/types.zig");
 const hq_mod = @import("../domain/hq.zig");
 const part_mod = @import("../domain/part.zig");
@@ -11,10 +12,10 @@ const unit_mod = @import("../domain/unit.zig");
 const state_mod = @import("state.zig");
 const GameState = state_mod.GameState;
 
-/// Work slots a mek bay grants. // TUNE
+/// Work slots a mek bay grants.
 pub fn baySlots(gs: *GameState, hq_id: types.HqId) u32 {
     const hq = gs.hqs.getPtr(hq_id) orelse return 0;
-    return @as(u32, hq.effectiveFacilityLevel(.mek_bay)) * 2;
+    return @as(u32, hq.effectiveFacilityLevel(.mek_bay)) * tuning.hq_ops.slots_per_bay_level;
 }
 
 pub fn activeJobs(gs: *GameState, hq_id: types.HqId) u32 {
@@ -71,7 +72,7 @@ pub fn queueDepotRepair(gs: *GameState, unit_id: types.UnitId) QueueError!bool {
         .hq = hq_id,
         .kind = .depot_repair,
         .unit = unit_id,
-        .duration_days = 7 + 5 * needed, // TUNE
+        .duration_days = tuning.hq_ops.depot_base_days + tuning.hq_ops.depot_days_per_component * needed,
         .queued_day = gs.clock.day_index,
         .cost = @divTrunc(u.purchase_price, 25) * needed,
     });
@@ -117,7 +118,7 @@ pub fn startUpgrade(gs: *GameState, hq_id: types.HqId, kind: hq_mod.FacilityKind
     const to_level = hq.facilityLevel(kind) + 1;
     if (to_level > hq_mod.max_facility_level) return error.MaxLevel;
     const paperwork = paperworkDaysFor(gs, hq_id);
-    const build_days: u32 = 14 * @as(u32, to_level); // TUNE
+    const build_days: u32 = tuning.hq_ops.build_days_per_level * @as(u32, to_level);
     try hq.projects.append(gs.allocator(), .{
         .kind = .facility_upgrade,
         .facility = kind,
@@ -134,9 +135,9 @@ pub fn startUpgrade(gs: *GameState, hq_id: types.HqId, kind: hq_mod.FacilityKind
 
 /// Field → regional (Stage 9D): the beachhead becomes a ring. A project
 /// with paperwork then a long build; on completion the HQ gains the
-/// regional facility set and starts projecting influence. // TUNE
-pub const tier_upgrade_cost: types.CBills = 3_000_000;
-pub const tier_upgrade_build_days: u32 = 60;
+/// regional facility set and starts projecting influence.
+pub const tier_upgrade_cost: types.CBills = tuning.hq_ops.tier_upgrade_cost;
+pub const tier_upgrade_build_days: u32 = tuning.hq_ops.tier_upgrade_build_days;
 
 pub fn startTierUpgrade(gs: *GameState, hq_id: types.HqId) !void {
     const hq = gs.hqs.getPtr(hq_id) orelse return error.UnknownHq;

@@ -5,13 +5,14 @@
 //! time never stops; the default applies if the deadline passes).
 
 const std = @import("std");
+const tuning = @import("../domain/tuning.zig").t;
 const types = @import("../domain/types.zig");
 const events = @import("events.zig");
 const contract_mod = @import("../domain/contract.zig");
 const GameState = @import("state.zig").GameState;
 const unit_mod = @import("../domain/unit.zig");
 
-pub const decision_window_days = 7; // TUNE
+pub const decision_window_days = tuning.contract.decision_window_days;
 
 // ------------------------------------------------------------------ decks
 // Static decks; dynamic magnitudes go through relative effects.

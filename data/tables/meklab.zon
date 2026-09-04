@@ -1,0 +1,39 @@
+// MekLab construction tables (TechManual, standard Inner Sphere tech).
+// Typed against domain/meklab.zig `Tables` at comptime.
+.{
+    // Master Engine Table (TechManual p.49): standard fusion engine mass in
+    // half-tons, one entry per rating from 10 to 400 in steps of 5.
+    .engine_half_tons = .{
+        1,  1,  1,  1,  2,  2,  2,  2,  3,  3, // 10–55
+        3,  4,  4,  4,  5,  5,  6,  6,  6,  7, // 60–105
+        7,  8,  8,  8,  9,  9,  10, 10, 11, 11, // 110–155
+        12, 12, 12, 14, 14, 15, 15, 16, 17, 17, // 160–205
+        18, 19, 20, 20, 21, 22, 23, 24, 25, 26, // 210–255
+        27, 28, 29, 31, 32, 33, 35, 36, 38, 39, // 260–305
+        41, 43, 45, 47, 49, 51, 54, 57, 59, 63, // 310–355
+        66, 69, 73, 77, 82, 87, 92, 98, 105, // 360–400
+    },
+    // Internal Structure Table (TechManual p.47): points per location by
+    // tonnage, 20–100 in steps of 5. Head is 3 on every 'Mech.
+    .internal_structure = .{
+        .{ .tonnage = 20, .ct = 6, .side = 5, .arm = 3, .leg = 4 },
+        .{ .tonnage = 25, .ct = 8, .side = 6, .arm = 4, .leg = 6 },
+        .{ .tonnage = 30, .ct = 10, .side = 7, .arm = 5, .leg = 7 },
+        .{ .tonnage = 35, .ct = 11, .side = 8, .arm = 6, .leg = 8 },
+        .{ .tonnage = 40, .ct = 12, .side = 10, .arm = 6, .leg = 10 },
+        .{ .tonnage = 45, .ct = 14, .side = 11, .arm = 7, .leg = 11 },
+        .{ .tonnage = 50, .ct = 16, .side = 12, .arm = 8, .leg = 12 },
+        .{ .tonnage = 55, .ct = 18, .side = 13, .arm = 9, .leg = 13 },
+        .{ .tonnage = 60, .ct = 20, .side = 14, .arm = 10, .leg = 14 },
+        .{ .tonnage = 65, .ct = 21, .side = 15, .arm = 10, .leg = 15 },
+        .{ .tonnage = 70, .ct = 22, .side = 15, .arm = 11, .leg = 15 },
+        .{ .tonnage = 75, .ct = 23, .side = 16, .arm = 12, .leg = 16 },
+        .{ .tonnage = 80, .ct = 25, .side = 17, .arm = 13, .leg = 17 },
+        .{ .tonnage = 85, .ct = 27, .side = 18, .arm = 14, .leg = 18 },
+        .{ .tonnage = 90, .ct = 29, .side = 19, .arm = 15, .leg = 19 },
+        .{ .tonnage = 95, .ct = 30, .side = 20, .arm = 16, .leg = 20 },
+        .{ .tonnage = 100, .ct = 31, .side = 21, .arm = 17, .leg = 21 },
+    },
+    .head_structure = 3,
+    .head_max_armor = 9,
+}

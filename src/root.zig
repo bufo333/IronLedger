@@ -8,6 +8,7 @@ pub const types = @import("domain/types.zig");
 pub const person = @import("domain/person.zig");
 pub const unit = @import("domain/unit.zig");
 pub const chassis = @import("domain/chassis.zig");
+pub const tuning = @import("domain/tuning.zig");
 pub const planet = @import("domain/planet.zig");
 pub const meklab = @import("domain/meklab.zig");
 pub const commander = @import("domain/commander.zig");

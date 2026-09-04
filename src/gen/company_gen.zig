@@ -5,6 +5,7 @@
 //! tables and full person generation.
 
 const std = @import("std");
+const tuning = @import("../domain/tuning.zig").t;
 const types = @import("../domain/types.zig");
 const force = @import("../domain/force.zig");
 const person = @import("../domain/person.zig");
@@ -65,8 +66,8 @@ pub fn rollWeightClass(rng: *rng_mod.Rng) chassis.WeightClass {
     };
 }
 
-/// Max tonnage for the recon lance's scout meks. // TUNE
-pub const scout_max_tonnage = 40;
+/// Max tonnage for the recon lance's scout meks.
+pub const scout_max_tonnage = tuning.generation.scout_max_tonnage;
 
 /// Generate a full starter company into the campaign:
 ///   - 3 line lances × 4 meks (RAT weight-class rolls) with pilots

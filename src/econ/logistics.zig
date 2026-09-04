@@ -4,12 +4,13 @@
 //! over jump routes with real delays.
 
 const std = @import("std");
+const tuning = @import("../domain/tuning.zig").t;
 const types = @import("../domain/types.zig");
 
 /// Standard JumpShip hop: ~30 LY, then recharge at the jump point.
-pub const ly_per_jump = 30;
-pub const recharge_days = 7; // solar sail recharge (varies by star; Stage 9)
-pub const burn_days_default = 5; // in-system transit, jump point ↔ planet
+pub const ly_per_jump = tuning.logistics.ly_per_jump;
+pub const recharge_days = tuning.logistics.recharge_days; // solar sail recharge (varies by star; Stage 9)
+pub const burn_days_default = tuning.logistics.burn_days; // in-system transit, jump point ↔ planet
 
 /// Transit time in days for a route of `jumps` hops. First-cut model:
 /// burn out + (jumps × recharge, pipelining the first) + burn in.
@@ -44,31 +45,31 @@ pub const Hop = struct {
 };
 
 /// Per-hop delay multiplier, basis points: ×1.5 for charter down to ×1.0
-/// for a dedicated line. // TUNE
+/// for a dedicated line.
 pub fn hopDelayMultBp(link_level: u8) types.Bp {
-    return @max(10_000, 15_000 - 1_000 * @as(types.Bp, link_level));
+    return @max(10_000, tuning.logistics.charter_delay_bp - tuning.logistics.delay_step_per_level_bp * @as(types.Bp, link_level));
 }
 
 /// Per-hop freight cost multiplier: ×1.4 raw, reduced by the pass-through
-/// HQ's warehouse+spaceport levels (a real hub charges less friction). // TUNE
+/// HQ's warehouse+spaceport levels (a real hub charges less friction).
 pub fn hopCostMultBp(via_warehouse: u8, via_spaceport: u8) types.Bp {
     const hub: types.Bp = @as(types.Bp, via_warehouse) + via_spaceport;
-    return @max(10_000, 14_000 - 500 * hub);
+    return @max(10_000, tuning.logistics.raw_hop_cost_bp - tuning.logistics.hub_discount_per_level_bp * hub);
 }
 
 /// Transit charter multiplier when the outfit's own ships lift part of a
 /// company (Stage 12.15): the carried share still pays the jumpship collar
-/// (half the charter) unless an owned jumpship makes the run too. // TUNE
+/// (half the charter) unless an owned jumpship makes the run too.
 pub fn transitFreightBp(covered_bp: types.Bp, own_jumpship: bool) types.Bp {
     const covered = @min(covered_bp, 10_000);
-    const collar_bp: types.Bp = if (own_jumpship) 0 else 5_000;
+    const collar_bp: types.Bp = if (own_jumpship) 0 else tuning.logistics.collar_charter_bp;
     return 10_000 - covered + @divTrunc(covered * collar_bp, 10_000);
 }
 
 /// Per-hop delay multiplier on a dedicated line: your own jumpship, no
 /// waiting for a charter. Freight on that hop is the ship's carry cost,
-/// already billed monthly. // TUNE
-pub const dedicated_line_cost_bp: types.Bp = 8_000;
+/// already billed monthly.
+pub const dedicated_line_cost_bp: types.Bp = tuning.logistics.dedicated_line_cost_bp;
 
 /// Total door-to-door days for a route.
 pub fn routeDelayDays(hops: []const Hop) u32 {
@@ -90,9 +91,9 @@ pub fn routeCostMultBp(hops: []const Hop) types.Bp {
     return mult;
 }
 
-/// Supply units/week a link level can move. // TUNE
+/// Supply units/week a link level can move.
 pub fn linkThroughputPerWeek(link_level: u8) u32 {
-    return @as(u32, link_level) * 10;
+    return @as(u32, link_level) * tuning.logistics.throughput_per_level;
 }
 
 /// A route moves only what its weakest hop can carry: stack two companies
@@ -108,11 +109,12 @@ pub fn routeThroughputPerWeek(hops: []const Hop) u32 {
 /// Price multiplier for buying supplies locally beyond every influence ring
 /// (ARCH §9.6): ×2.0 base +0.5 per 30 LY beyond, capped ×4.0, eased by the
 /// planet's industry rating. Expensive but viable — the valve that prevents
-/// a death spiral, itemized on the P&L as 'local_supplies'. // TUNE
+/// a death spiral, itemized on the P&L as 'local_supplies'.
 pub fn localPurchaseMultBp(ly_beyond_ring: u32, planet_industry: u8) types.Bp {
-    const base: types.Bp = 20_000 + 5_000 * @as(types.Bp, ly_beyond_ring / 30);
-    const eased = base - 1_000 * @as(types.Bp, planet_industry);
-    return std.math.clamp(eased, 20_000, 40_000);
+    const l = tuning.logistics;
+    const base: types.Bp = l.local_base_bp + l.local_step_bp * @as(types.Bp, ly_beyond_ring / l.local_step_ly);
+    const eased = base - l.local_industry_ease_bp * @as(types.Bp, planet_industry);
+    return std.math.clamp(eased, l.local_base_bp, l.local_max_bp);
 }
 
 /// Daily consumption per deployed company (Stage 5 tunes per roster size and

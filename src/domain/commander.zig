@@ -6,6 +6,7 @@
 //! good logistics.
 
 const std = @import("std");
+const tuning = @import("tuning.zig").t;
 const types = @import("types.zig");
 
 pub const Faction = enum {
@@ -49,7 +50,7 @@ pub const Profession = enum {
 /// The cost/rate hooks a profession can touch.
 pub const BonusKind = enum { freight, payroll, repair, fatigue_recovery };
 
-pub const bonus_bp: types.Bp = 200; // 2% // TUNE
+pub const bonus_bp: types.Bp = tuning.commander.bonus_bp; // 2%
 
 pub const Commander = struct {
     name: []const u8,

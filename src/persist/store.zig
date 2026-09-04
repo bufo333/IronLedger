@@ -82,28 +82,55 @@ pub const Store = struct {
     /// The player new campaigns are filed under (Stage 12 lobby); 0 = none.
     player_id: i64 = 0,
 
+    /// One schema step (Stage 12.17): the version it brings the store to,
+    /// and the column it adds. `CREATE TABLE IF NOT EXISTS` in `ddl` covers
+    /// new tables; columns on existing tables are the only thing SQLite
+    /// makes us migrate by hand. Steps are idempotent (column-guarded) so a
+    /// store that predates the version key still upgrades cleanly.
+    pub const Migration = struct { version: u32, table: []const u8, column: []const u8, sql: [*:0]const u8 };
+    pub const migrations = [_]Migration{
+        .{ .version = 2, .table = "campaign", .column = "player_id", .sql = "ALTER TABLE campaign ADD COLUMN player_id INTEGER NOT NULL DEFAULT 0" },
+        .{ .version = 3, .table = "person", .column = "admitted", .sql = "ALTER TABLE person ADD COLUMN admitted INTEGER NOT NULL DEFAULT 0" },
+        .{ .version = 4, .table = "policy", .column = "sent", .sql = "ALTER TABLE policy ADD COLUMN sent INTEGER NOT NULL DEFAULT 0" },
+        .{ .version = 5, .table = "supply_policy", .column = "ammo_battles", .sql = "ALTER TABLE supply_policy ADD COLUMN ammo_battles INTEGER NOT NULL DEFAULT 0" },
+        .{ .version = 6, .table = "unit", .column = "berth_hq", .sql = "ALTER TABLE unit ADD COLUMN berth_hq INTEGER NOT NULL DEFAULT 0" },
+        // v7: the `injury` table (created by ddl); campaign data is
+        // upgraded on load (`upgradeCampaign`).
+    };
+
     pub fn open(path: [*:0]const u8) !Store {
-        const db = try sqlite.Db.open(path);
+        return fromDb(try sqlite.Db.open(path));
+    }
+
+    /// Adopt an open database: create what's missing, migrate what's old.
+    pub fn fromDb(db: sqlite.Db) !Store {
         try db.exec(ddl);
-        // Schema v1 → v2: campaigns gained an owning player.
-        if (!try hasColumn(db, "campaign", "player_id")) {
-            try db.exec("ALTER TABLE campaign ADD COLUMN player_id INTEGER NOT NULL DEFAULT 0");
+        const store: Store = .{ .db = db };
+        const stored: u32 = @intCast(@max(1, store.getSetting("schema_version", 1)));
+        if (stored > schema_version) return error.StoreNewerThanGame;
+        try db.exec("BEGIN");
+        errdefer db.exec("ROLLBACK") catch {};
+        for (migrations) |m| {
+            if (m.version <= stored) continue;
+            if (!try hasColumnRt(db, m.table, m.column)) try db.exec(m.sql);
         }
-        if (!try hasColumn(db, "supply_policy", "ammo_battles")) {
-            try db.exec("ALTER TABLE supply_policy ADD COLUMN ammo_battles INTEGER NOT NULL DEFAULT 0");
+        try store.setSetting("schema_version", schema_version);
+        try db.exec("COMMIT");
+        return store;
+    }
+
+    fn hasColumnRt(db: sqlite.Db, table: []const u8, column: []const u8) !bool {
+        var sql_buf: [96]u8 = undefined;
+        const sql = try std.fmt.bufPrint(&sql_buf, "PRAGMA table_info({s})", .{table});
+        var buf: [64]u8 = undefined;
+        const st = try db.prepare(sql);
+        defer st.finalize();
+        while (try st.next()) {
+            var fba = std.heap.FixedBufferAllocator.init(&buf);
+            const name = st.text(1, fba.allocator()) catch continue;
+            if (std.mem.eql(u8, name, column)) return true;
         }
-        // Schema v3 → v4: policies track what they sent this month.
-        if (!try hasColumn(db, "policy", "sent")) {
-            try db.exec("ALTER TABLE policy ADD COLUMN sent INTEGER NOT NULL DEFAULT 0");
-        }
-        // Schema v2 → v3: medbay admission is the player's call.
-        if (!try hasColumn(db, "person", "admitted")) {
-            try db.exec("ALTER TABLE person ADD COLUMN admitted INTEGER NOT NULL DEFAULT 0");
-        }
-        if (!try hasColumn(db, "unit", "berth_hq")) {
-            try db.exec("ALTER TABLE unit ADD COLUMN berth_hq INTEGER NOT NULL DEFAULT 0");
-        }
-        return .{ .db = db };
+        return false;
     }
 
     fn hasColumn(db: sqlite.Db, comptime table: []const u8, column: []const u8) !bool {
@@ -637,6 +664,14 @@ pub const Store = struct {
         errdefer gs.deinit();
         const alloc = gs.allocator();
         gs.campaign_id = cid;
+        var saved_version: u32 = schema_version;
+        {
+            const st = try self.db.prepare("SELECT schema_version FROM campaign WHERE id = ?1");
+            defer st.finalize();
+            try st.bindAll(.{cid});
+            if (try st.next()) saved_version = @intCast(@max(1, st.int(0)));
+        }
+        if (saved_version > schema_version) return error.SaveNewerThanGame;
 
         {
             const st = try self.db.prepare("SELECT key, value FROM meta WHERE cid = ?1");
@@ -1154,8 +1189,25 @@ pub const Store = struct {
         }
 
         gs.refreshHqStaffing();
+        try upgradeCampaign(&gs, saved_version);
         return gs;
     }
+
+    /// Data-level fixes for campaigns saved by an older schema (Stage
+    /// 12.17). v7: wounds gained located injuries — a wounded person with no
+    /// record gets one so the medbay has something to heal.
+    pub fn upgradeCampaign(gs: *GameState, from_version: u32) !void {
+        if (from_version < 7) {
+            var it = gs.people.iterator();
+            while (it.next()) |e| {
+                const p = e.value_ptr;
+                if (p.status == .wounded and p.injuries.items.len == 0) {
+                    try p.injuries.append(gs.allocator(), .{ .location = .internal, .severity = 1, .incurred_day = gs.clock.day_index, .heal_done_day = p.wound_heal_day });
+                }
+            }
+        }
+    }
+
 };
 
 fn toId(comptime T: type, v: i64) T {
@@ -1324,4 +1376,41 @@ test "one store, many playthroughs: list, overwrite, delete" {
     var still = try store.load(std.testing.allocator, b.campaign_id);
     defer still.deinit();
     try std.testing.expectEqual(b.hash(), still.hash());
+}
+
+test "12.17: a v5 store upgrades in place — columns added, version stamped, wounded backfilled" {
+    // A store as the game wrote it at schema 5: no berth_hq on unit, no
+    // injury table, no schema_version setting. Only the tables the fixture
+    // touches are created by hand; `fromDb` creates the rest.
+    const raw = try sqlite.Db.open(":memory:");
+    try raw.exec(
+        \\CREATE TABLE setting (key TEXT PRIMARY KEY, value INTEGER NOT NULL);
+        \\CREATE TABLE campaign (id INTEGER PRIMARY KEY, name TEXT NOT NULL, commander TEXT, day INTEGER NOT NULL, date TEXT NOT NULL, schema_version INTEGER NOT NULL, save_seq INTEGER NOT NULL, player_id INTEGER NOT NULL DEFAULT 0);
+        \\CREATE TABLE unit (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, chassis_key TEXT, name TEXT, kind TEXT, force INTEGER, pilot INTEGER, tech INTEGER, armor_pct INTEGER, quality TEXT, status TEXT, last_maint INTEGER, acquired_day INTEGER, price INTEGER, reactivation_done INTEGER, PRIMARY KEY (cid, id));
+        \\CREATE TABLE person (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, first TEXT, last TEXT, callsign TEXT, role TEXT, xp INTEGER, status TEXT, fatigue INTEGER, morale INTEGER, recruited_day INTEGER, salary_override INTEGER, assigned_force INTEGER, posted_hq INTEGER, weekly_hours INTEGER, medbay_priority INTEGER, leave_until INTEGER, wound_heal_day INTEGER, training_skill TEXT, training_done INTEGER, admitted INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (cid, id));
+        \\CREATE TABLE meta (cid INTEGER NOT NULL, key TEXT NOT NULL, value INTEGER NOT NULL);
+        \\INSERT INTO campaign VALUES (1, 'Old Outfit', 'K', 12, '3025-01-13', 5, 1, 0);
+        \\INSERT INTO meta VALUES (1, 'day_index', 12);
+        \\INSERT INTO unit VALUES (1, 0, 1, 'LCT-1V', NULL, 'mek', 0, 0, 0, 100, 'c', 'ready', NULL, 0, 1500000, NULL);
+        \\INSERT INTO person VALUES (1, 0, 1, 'Lori', 'Kalmar', NULL, 'mekwarrior', 0, 'wounded', 0, 50, 0, NULL, 0, 0, 40, 0, NULL, 30, NULL, NULL, 1);
+    );
+
+    const store = try Store.fromDb(raw);
+    defer store.close();
+    try std.testing.expect(try Store.hasColumnRt(store.db, "unit", "berth_hq"));
+    try std.testing.expect(try Store.hasColumnRt(store.db, "injury", "location"));
+    try std.testing.expectEqual(@as(i64, schema_version), store.getSetting("schema_version", 0));
+
+    var gs = try store.load(std.testing.allocator, 1);
+    defer gs.deinit();
+    try std.testing.expectEqual(@as(u32, 12), gs.clock.day_index);
+    const lori = gs.person(@enumFromInt(1)).?;
+    try std.testing.expectEqual(person_mod.Status.wounded, lori.status);
+    try std.testing.expectEqual(@as(usize, 1), lori.injuries.items.len); // backfilled
+    try std.testing.expectEqual(@as(?u32, 30), lori.injuries.items[0].heal_done_day);
+    try std.testing.expectEqual(types.HqId.none, gs.unit(@enumFromInt(1)).?.berth_hq);
+
+    // A save from a newer game is refused rather than misread.
+    try store.db.exec("UPDATE campaign SET schema_version = 99 WHERE id = 1");
+    try std.testing.expectError(error.SaveNewerThanGame, store.load(std.testing.allocator, 1));
 }

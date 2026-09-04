@@ -5,6 +5,7 @@
 //! hub — and a link at capacity refuses more freight until next week.
 
 const std = @import("std");
+const tuning = @import("../domain/tuning.zig").t;
 const types = @import("../domain/types.zig");
 const logistics = @import("../econ/logistics.zig");
 const planet_mod = @import("../domain/planet.zig");
@@ -22,22 +23,22 @@ pub const HqLink = struct {
         return (self.a == x and self.b == y) or (self.a == y and self.b == x);
     }
 
-    /// Weekly tonnage the link can move. // TUNE
+    /// Weekly tonnage the link can move.
     pub fn capacityPerWeek(self: HqLink) u32 {
-        return logistics.linkThroughputPerWeek(self.level) * 4;
+        return logistics.linkThroughputPerWeek(self.level) * tuning.network.weeks_of_capacity;
     }
 
     /// Monthly upkeep by level; a dedicated line (level 3) rides your own
-    /// jumpship, whose carry cost is already on the hangar ledger. // TUNE
+    /// jumpship, whose carry cost is already on the hangar ledger.
     pub fn monthlyCost(self: HqLink) types.CBills {
         if (self.level >= 3) return 0;
-        return @as(types.CBills, self.level) * 60_000;
+        return @as(types.CBills, self.level) * tuning.network.upkeep_per_level;
     }
 };
 
-/// One-time cost to establish or raise a link to `level`. // TUNE
+/// One-time cost to establish or raise a link to `level`.
 pub fn linkCost(level: u8) types.CBills {
-    return @as(types.CBills, level) * @as(types.CBills, level) * 250_000;
+    return @as(types.CBills, level) * @as(types.CBills, level) * tuning.network.link_cost_per_level_sq;
 }
 
 pub fn findLink(gs: *GameState, a: types.HqId, b: types.HqId) ?*HqLink {

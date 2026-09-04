@@ -11,24 +11,25 @@
 //! screen shows it.
 
 const std = @import("std");
+const tuning = @import("../domain/tuning.zig").t;
 const types = @import("../domain/types.zig");
 const part_mod = @import("../domain/part.zig");
 const GameState = @import("state.zig").GameState;
 
 /// Truck budget per category, in percent of field capacity: ammo, armor
 /// and medical are capped so provisions — the one line that burns every
-/// day — always has the rest of the trucks. // TUNE
-pub const ammo_share_pct: u32 = 40;
-pub const armor_share_pct: u32 = 10;
-pub const medical_share_pct: u32 = 5;
+/// day — always has the rest of the trucks.
+pub const ammo_share_pct: u32 = tuning.field_supply.ammo_share_pct;
+pub const armor_share_pct: u32 = tuning.field_supply.armor_share_pct;
+pub const medical_share_pct: u32 = tuning.field_supply.medical_share_pct;
 
 /// A ton of a munition family feeds this many mounts for one engagement
-/// (mirrors battle.mounts_per_ammo_ton; kept here to avoid a cycle). // TUNE
-pub const mounts_per_ammo_ton: u32 = 6;
-/// Engagements come roughly this often on station. // TUNE
-pub const days_per_battle: u32 = 15;
-/// A provisions shipment tops up this many days past the floor. // TUNE
-pub const provisions_cadence_days: u32 = 14;
+/// (one source for battle and resupply: the tuning table).
+pub const mounts_per_ammo_ton: u32 = tuning.battle.mounts_per_ammo_ton;
+/// Engagements come roughly this often on station.
+pub const days_per_battle: u32 = tuning.field_supply.days_per_battle;
+/// A provisions shipment tops up this many days past the floor.
+pub const provisions_cadence_days: u32 = tuning.field_supply.provisions_cadence_days;
 
 pub const Line = struct {
     key: []const u8,

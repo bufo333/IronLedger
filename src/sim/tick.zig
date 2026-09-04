@@ -5,6 +5,7 @@
 //! fills in its phase without touching the order. Order is part of the spec.
 
 const std = @import("std");
+const tuning = @import("../domain/tuning.zig").t;
 const GameState = @import("state.zig").GameState;
 const types = @import("../domain/types.zig");
 const contract_market = @import("../econ/contract_market.zig");
@@ -246,7 +247,7 @@ fn runSupplyConsumption(gs: *GameState) !void {
 
         // Local purchase valve: price by remoteness, paid from local funds.
         const industry = if (planet_mod.find(planet_key)) |w| w.industry else 0;
-        const mult = if (beachhead) logistics.localPurchaseMultBp(30, industry) else 15_000; // field markup // TUNE
+        const mult = if (beachhead) logistics.localPurchaseMultBp(30, industry) else tuning.finance.field_markup_bp; // field markup
         const price = types.applyBp(part_mod.cost("provisions") * need, mult);
         if (f.local_funds >= price) {
             try gs.postTreasury(.{ .company = f.id }, .{
@@ -339,8 +340,8 @@ fn landStock(gs: *GameState, site: types.Site, key: []const u8, qty: u32) !u32 {
 
 /// finances phase: payday on the 1st of the month — salaries out, and a
 /// month of service XP in (MekHQ's idle-XP analog; scenario and task XP
-/// arrive with Stages 5/7). // TUNE
-const monthly_service_xp = 1;
+/// arrive with Stages 5/7).
+const monthly_service_xp = tuning.person.monthly_service_xp;
 
 fn runFinances(gs: *GameState) !void {
     if (!gs.clock.date.isPayday()) return;
@@ -421,7 +422,7 @@ fn runFinances(gs: *GameState) !void {
             .note = "monthly contract payment",
         });
         if (c.beachhead) {
-            const hardship = types.applyBp(gs.companyMonthlyPayroll(c.assigned_company), 1_500); // +15% TUNE
+            const hardship = types.applyBp(gs.companyMonthlyPayroll(c.assigned_company), tuning.finance.hardship_bp); // +15%
             if (hardship > 0) {
                 try gs.postTreasury(.{ .company = c.assigned_company }, .{
                     .day = gs.clock.day_index,

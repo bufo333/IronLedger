@@ -1,7 +1,6 @@
 //! Person & name generation. Mirrors MekHQ's `RandomNameGenerator` +
 //! AtB personnel generation: experience rolled on 2d6, skills set from the
-//! experience band. Name tables are a compact Inner Sphere mix for now;
-//! Stage 3+ moves them to data/tables/ keyed by faction/origin.
+//! experience band. Name tables live in data/tables/names.zon.
 
 const std = @import("std");
 const types = @import("../domain/types.zig");
@@ -9,29 +8,11 @@ const person = @import("../domain/person.zig");
 const rng_mod = @import("../sim/rng.zig");
 const company_gen = @import("company_gen.zig");
 
-// // TUNE — placeholder tables; replace with faction-keyed data files.
-const first_names = [_][]const u8{
-    "Adam",   "Aiko",    "Alexei",  "Anna",   "Boris",  "Carla",  "Chen",
-    "Dana",   "Dieter",  "Elena",   "Erik",   "Fatima", "Franz",  "Grace",
-    "Hana",   "Hiro",    "Ines",    "Ivan",   "Jamal",  "Karin",  "Kenji",
-    "Lars",   "Leilani", "Marcus",  "Mei",    "Nadia",  "Omar",   "Petra",
-    "Rafael", "Sana",    "Sergei",  "Tanya",  "Tomas",  "Ulla",   "Viktor",
-    "Wei",    "Xenia",   "Yusuf",   "Zara",   "Zhao",
-};
-
-const last_names = [_][]const u8{
-    "Abara",    "Baxter",   "Calderon", "Davion",    "Eriksson", "Fujita",
-    "Gruber",   "Halloran", "Ikeda",    "Jankowski", "Kim",      "Larsen",
-    "Mbeki",    "Novak",    "O'Reilly", "Petrov",    "Quintana", "Reyes",
-    "Sato",     "Tanaka",   "Ulmer",    "Vasquez",   "Weber",    "Xu",
-    "Yamada",   "Zhukov",   "Steiner-Kohl", "Marlowe", "Drummond", "Castille",
-};
-
-const callsigns = [_][]const u8{
-    "Reaper",  "Duchess", "Hammer", "Ghost",   "Sparks", "Bulldog",
-    "Vixen",   "Anvil",   "Cobra",  "Duster",  "Echo",   "Fireball",
-    "Gunsel",  "Havoc",   "Ice",    "Jinx",    "Kodiak", "Longshot",
-};
+/// Name tables from data/tables/names.zon (Stage 12.17).
+const names: struct { first: []const []const u8, last: []const []const u8, callsigns: []const []const u8 } = @import("names_zon");
+const first_names = names.first;
+const last_names = names.last;
+const callsigns = names.callsigns;
 
 pub const GeneratedPerson = struct {
     first: []const u8,

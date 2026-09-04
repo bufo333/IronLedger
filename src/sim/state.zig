@@ -4,6 +4,7 @@
 //! lives in the system modules (tick.zig, commands.zig, ...).
 
 const std = @import("std");
+const tuning = @import("../domain/tuning.zig").t;
 const types = @import("../domain/types.zig");
 const person_mod = @import("../domain/person.zig");
 const unit_mod = @import("../domain/unit.zig");
@@ -473,7 +474,7 @@ pub const GameState = struct {
             .name = try std.fmt.allocPrint(self.allocator(), "{s} Regional HQ", .{world.name}),
             .tier = .regional,
             .planet_key = world.key,
-            .monthly_upkeep = 25_000, // // TUNE
+            .monthly_upkeep = hq_mod.HqTier.regional.monthlyUpkeep(),
         };
         const starter_facilities = [_]hq_mod.FacilityKind{ .mek_bay, .warehouse, .hospital, .mess, .comms, .spaceport, .hiring_hall, .training_ground };
         for (starter_facilities) |kind| {
@@ -498,16 +499,17 @@ pub const GameState = struct {
         self.refreshHqStaffing();
 
         // Founding capital: the HQ opens with its own operating treasury,
-        // handed over on-site (no courier). // TUNE
-        self.transferFunds(.outfit, .{ .hq = id }, 1_000_000, 0) catch {};
+        // handed over on-site (no courier).
+        self.transferFunds(.outfit, .{ .hq = id }, tuning.hq.founding_funds, 0) catch {};
 
-        // A modestly stocked warehouse to start (Stage 9B). // TUNE
+        // A modestly stocked warehouse to start (Stage 9B).
         const site: types.Site = .{ .hq = id };
-        try self.addStock(site, "provisions", 60);
-        try self.addStock(site, "medical_supplies", 10);
-        try self.addStock(site, "armor", 20);
-        for (part_mod.component_keys) |key| try self.addStock(site, key, 1);
-        for (part_mod.munition_keys) |key| try self.addStock(site, key, 12);
+        const g = tuning.generation;
+        try self.addStock(site, "provisions", g.starter_provisions);
+        try self.addStock(site, "medical_supplies", g.starter_medical);
+        try self.addStock(site, "armor", g.starter_armor);
+        for (part_mod.component_keys) |key| try self.addStock(site, key, g.starter_components_each);
+        for (part_mod.munition_keys) |key| try self.addStock(site, key, g.starter_munitions_each);
         return id;
     }
 
@@ -591,11 +593,7 @@ pub const GameState = struct {
             .name = try self.allocator().dupe(u8, name),
             .tier = tier,
             .planet_key = world.key,
-            .monthly_upkeep = switch (tier) {
-                .field => 10_000,
-                .regional => 25_000,
-                .brigade => 60_000,
-            }, // TUNE
+            .monthly_upkeep = tier.monthlyUpkeep(),
         };
         const base = [_]hq_mod.FacilityKind{ .mek_bay, .warehouse, .mess };
         for (base) |kind| try hq.facilities.append(self.allocator(), .{ .kind = kind, .level = 1 });
@@ -885,7 +883,7 @@ pub const GameState = struct {
     }
 
     /// Storage capacity (null = unlimited outfit depot). A company's cap is
-    /// its logistics trucks: 20t per cargo truck, 5t per salvage truck. // TUNE
+    /// its logistics trucks: 20t per cargo truck, 5t per salvage truck.
     pub fn siteCapacityTons(self: *GameState, site: types.Site) ?u32 {
         switch (site) {
             .outfit => return null,
@@ -896,8 +894,8 @@ pub const GameState = struct {
                 while (it.next()) |entry| {
                     const u = entry.value_ptr;
                     if (u.status == .destroyed or self.companyOf(u.force) != id) continue;
-                    if (std.mem.eql(u8, u.chassis_key, "CGT-3")) cap += 20;
-                    if (std.mem.eql(u8, u.chassis_key, "SVT-1")) cap += 5;
+                    if (std.mem.eql(u8, u.chassis_key, "CGT-3")) cap += tuning.unit.truck_tons.cargo;
+                    if (std.mem.eql(u8, u.chassis_key, "SVT-1")) cap += tuning.unit.truck_tons.salvage;
                 }
                 return cap;
             },
@@ -1463,15 +1461,15 @@ pub const GameState = struct {
     // ------------------------------------------------------- liquidation
 
     /// What a hull fetches on a forced sale: half its value, scaled by
-    /// condition (Stage 12). // TUNE
+    /// condition (Stage 12).
     pub fn unitSaleValue(self: *GameState, u: *const unit_mod.Unit) types.CBills {
         _ = self;
         if (u.status == .destroyed) return 0;
         const base: types.CBills = if (u.purchase_price > 0) u.purchase_price else if (chassis_mod.find(u.chassis_key)) |c| c.cost else 0;
-        return @divTrunc(base * @as(types.CBills, u.conditionPct()), 200);
+        return @divTrunc(base * @as(types.CBills, u.conditionPct()) * tuning.unit.sale_bp, 10_000 * 100);
     }
 
-    /// What an HQ's facilities fetch: 40% of what they cost to build. // TUNE
+    /// What an HQ's facilities fetch: 40% of what they cost to build.
     pub fn hqSaleValue(self: *GameState, h: *const hq_mod.Hq) types.CBills {
         _ = self;
         var total: types.CBills = 0;
@@ -1479,7 +1477,7 @@ pub const GameState = struct {
             var lvl: u8 = 1;
             while (lvl <= f.level) : (lvl += 1) total += hq_mod.upgradeCost(f.kind, lvl);
         }
-        return @divTrunc(total * 40, 100);
+        return @divTrunc(total * @as(types.CBills, tuning.hq.sale_pct), 100);
     }
 
     /// Everything the outfit could raise by selling hulls and all HQs but
@@ -1517,9 +1515,9 @@ pub const GameState = struct {
         return total;
     }
 
-    /// Lenders extend half the liquidation value plus a floor. // TUNE
+    /// Lenders extend half the liquidation value plus a floor.
     pub fn creditLimit(self: *GameState) types.CBills {
-        return @divTrunc(self.liquidationValue(), 2) + 2_000_000;
+        return types.applyBp(self.liquidationValue(), tuning.finance.credit_liquidation_bp) + tuning.finance.credit_floor;
     }
 
     pub fn creditRemaining(self: *GameState) types.CBills {

@@ -3,6 +3,7 @@
 //! terms; extended with per-place visibility and beachhead flagging.
 
 const std = @import("std");
+const tuning = @import("../domain/tuning.zig").t;
 const types = @import("../domain/types.zig");
 const contract = @import("../domain/contract.zig");
 const planet = @import("../domain/planet.zig");
@@ -36,8 +37,8 @@ pub fn reputationMultBp(reputation: i32) types.Bp {
 }
 
 /// Employers price contracts off your operating costs with a market margin
-/// on top (CamOps' negotiation environment, abstracted). // TUNE
-pub const market_margin_bp: types.Bp = 18_000; // ×1.8
+/// on top (CamOps' negotiation environment, abstracted).
+pub const market_margin_bp: types.Bp = tuning.market.market_margin_bp; // ×1.8
 
 /// AtB-flavored contract-type roll: garrison work dominates the boards.
 fn rollKind(gs: *GameState) contract.ContractKind {
@@ -111,7 +112,7 @@ pub fn refresh(gs: *GameState) !void {
     // Employers price off what fielding your outfit costs per month:
     // payroll, hulls, and expected maintenance consumables.
     const ops_cost = gs.monthlyPayroll() + hullUpkeep(gs) + maintenanceEstimate(gs);
-    const base = types.applyBp(@max(ops_cost, 50_000), market_margin_bp);
+    const base = types.applyBp(@max(ops_cost, tuning.market.min_ops_cost), market_margin_bp);
 
     const offer_count = market.contractOfferCount(gs.reputation, best_comms);
     var attempts: u32 = 0;
@@ -128,13 +129,13 @@ pub fn refresh(gs: *GameState) !void {
             30,
         ));
 
-        // Beachhead employers pay a premium — nobody else will go. // TUNE
+        // Beachhead employers pay a premium — nobody else will go.
         var pay = contract.monthlyPayment(base, kind, employerMultBp(world.faction), reputationMultBp(gs.reputation));
-        if (vis[0] == .beachhead) pay = types.applyBp(pay, 13_000);
+        if (vis[0] == .beachhead) pay = types.applyBp(pay, tuning.market.beachhead_pay_bp);
         // A cooling employer (Stage 9E breach): half the offers, 70% pay.
         if (gs.factionCooling(world.faction)) {
             if (gs.rng.random(.market).boolean()) continue;
-            pay = types.applyBp(pay, 7_000);
+            pay = types.applyBp(pay, tuning.market.cooling_pay_bp);
         }
 
         try gs.contract_offers.append(gs.allocator(), .{
@@ -200,8 +201,8 @@ fn refreshBoard(gs: *GameState, hq_id: types.HqId) !void {
     const thin = hq.tier == .field;
 
     // Staples: weapons, armor, munitions, supplies — always here, priced by
-    // local industry (rich worlds undercut). // TUNE
-    const industry_bp: types.Bp = 12_000 - 400 * @as(types.Bp, world.industry);
+    // local industry (rich worlds undercut).
+    const industry_bp: types.Bp = tuning.market.staple_price_base_bp - tuning.market.staple_price_per_industry_bp * @as(types.Bp, world.industry);
     for (market.staple_keys) |key| {
         const def = part_mod.find(key) orelse continue;
         try gs.market_listings.append(gs.allocator(), .{
@@ -383,7 +384,7 @@ pub fn churnCandidates(gs: *GameState) !void {
         if (hall == 0) continue;
         const hr = gs.hqStaff(hq.id, .admin_hr).count;
         const roll = @as(u32, gs.rng.roll2d6(.market)) + hall + hr / 2;
-        if (roll < 8) continue; // quiet day at the hall // TUNE
+        if (roll < tuning.market.hall_arrival_target) continue; // quiet day at the hall
         const arrivals: u32 = if (roll >= 12) 2 else 1;
         for (0..arrivals) |_| {
             // A short desk gets every other arrival until it is staffed.

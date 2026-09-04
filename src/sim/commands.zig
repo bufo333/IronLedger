@@ -3,6 +3,7 @@
 //! an audit log, replayability, and scriptable golden-master tests for free.
 
 const std = @import("std");
+const tuning = @import("../domain/tuning.zig").t;
 const types = @import("../domain/types.zig");
 const person_mod = @import("../domain/person.zig");
 const state_mod = @import("state.zig");
@@ -327,7 +328,7 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
         .found_hq => |f| {
             const world = planet_mod.find(f.planet_key) orelse return Error.UnknownPlanet;
             if (!reachable(gs, world)) return Error.NotReachable;
-            const cost: types.CBills = 500_000; // TUNE
+            const cost: types.CBills = tuning.hq.found_field_hq_cost;
             try debitPurchase(gs, .outfit, .{
                 .day = gs.clock.day_index,
                 .amount = -cost,
@@ -1024,7 +1025,7 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
         .take_loan => |l| {
             if (l.principal <= 0 or l.term_months == 0) return Error.NoSuchLoan;
             if (l.principal > gs.creditRemaining()) return Error.CreditExceeded;
-            const rate_bp: types.Bp = 1_200; // 12%/yr simple interest // TUNE: reputation-scaled
+            const rate_bp: types.Bp = tuning.finance.loan_rate_bp; // 12%/yr simple interest
             const total_interest = @divTrunc(l.principal * rate_bp * l.term_months, 10_000 * 12);
             try gs.loans.append(gs.allocator(), .{
                 .principal = l.principal,
@@ -1214,7 +1215,7 @@ fn commitRefit(gs: *GameState, unit_id: types.UnitId) Error!Result {
         .unit = unit_id,
         .duration_days = @max(1, std.math.divCeil(u32, hours, 8) catch 1),
         .queued_day = gs.clock.day_index,
-        .cost = @as(types.CBills, hours) * 500, // labor // TUNE
+        .cost = @as(types.CBills, hours) * tuning.hq_ops.refit_labor_per_hour, // labor
     });
     try gs.log(.construction, .{ .hq = hq_id }, "[lab] {s} refit committed: class {s}, {d} tech-hours, {d} bay day(s)", .{
         u.chassis_key, @tagName(class), hours, @max(1, std.math.divCeil(u32, hours, 8) catch 1),
@@ -1377,7 +1378,7 @@ fn orderPart(gs: *GameState, part_key: []const u8, quantity: u32, dest_opt: ?typ
     const hq = gs.hqs.getPtr(hq_id) orelse return Error.UnknownHq;
     const world = planet_mod.find(hq.planet_key) orelse return Error.UnknownPlanet;
 
-    const cost_mult: types.Bp = 11_000; // 10% procurement markup // TUNE
+    const cost_mult: types.Bp = tuning.market.procurement_markup_bp; // 10% procurement markup
     var lead_days: u32 = logistics.transitDays(1);
     // Onward shipment to a deployed company: more days, freight on top.
     const onward = try freightBetween(gs, .{ .hq = hq_id }, dest, quantity * def.pallet_tons);
@@ -1535,7 +1536,7 @@ fn acceptContract(gs: *GameState, offer_index: usize, company_id: types.ForceId)
         .contract = id,
         .note = "contract advance + signing bonus",
     });
-    const freight_base: types.CBills = @as(types.CBills, c.dist_ly) * 2_000; // TUNE
+    const freight_base: types.CBills = @as(types.CBills, c.dist_ly) * tuning.logistics.freight_per_ly;
     var freight = @divTrunc(freight_base * (100 - @as(i64, c.terms.transport_pct)), 100);
     freight = types.applyBp(freight, gs.commanderMultBp(.freight));
     // Your own ships lift what they can (Stage 12.15): every hull a berthed

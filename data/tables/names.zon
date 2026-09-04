@@ -1,0 +1,24 @@
+// Name tables (MekHQ `RandomNameGenerator` stand-in): a compact Inner
+// Sphere mix. Faction-keyed tables can grow here without touching code.
+.{
+    .first = .{
+        "Adam",   "Aiko",    "Alexei",  "Anna",   "Boris",  "Carla",  "Chen",
+        "Dana",   "Dieter",  "Elena",   "Erik",   "Fatima", "Franz",  "Grace",
+        "Hana",   "Hiro",    "Ines",    "Ivan",   "Jamal",  "Karin",  "Kenji",
+        "Lars",   "Leilani", "Marcus",  "Mei",    "Nadia",  "Omar",   "Petra",
+        "Rafael", "Sana",    "Sergei",  "Tanya",  "Tomas",  "Ulla",   "Viktor",
+        "Wei",    "Xenia",   "Yusuf",   "Zara",   "Zhao",
+    },
+    .last = .{
+        "Abara",    "Baxter",   "Calderon", "Davion",    "Eriksson", "Fujita",
+        "Gruber",   "Halloran", "Ikeda",    "Jankowski", "Kim",      "Larsen",
+        "Mbeki",    "Novak",    "O'Reilly", "Petrov",    "Quintana", "Reyes",
+        "Sato",     "Tanaka",   "Ulmer",    "Vasquez",   "Weber",    "Xu",
+        "Yamada",   "Zhukov",   "Steiner-Kohl", "Marlowe", "Drummond", "Castille",
+    },
+    .callsigns = .{
+        "Reaper",  "Duchess", "Hammer", "Ghost",   "Sparks", "Bulldog",
+        "Vixen",   "Anvil",   "Cobra",  "Duster",  "Echo",   "Fireball",
+        "Gunsel",  "Havoc",   "Ice",    "Jinx",    "Kodiak", "Longshot",
+    },
+}

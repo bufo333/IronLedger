@@ -40,26 +40,43 @@ pub fn isLeg(loc: Location) bool {
     return loc == .ll or loc == .rl;
 }
 
-/// Standard fusion engine mass in half-tons by rating (TechManual table,
-/// linearly interpolated between the 20-point rows). // TUNE: full table
-const engine_rows = [_]struct { u32, u32 }{
-    .{ 60, 3 },   .{ 80, 5 },   .{ 100, 6 },  .{ 120, 8 },  .{ 140, 10 }, .{ 160, 12 },
-    .{ 180, 14 }, .{ 200, 17 }, .{ 220, 20 }, .{ 240, 23 }, .{ 260, 27 }, .{ 280, 32 },
-    .{ 300, 38 }, .{ 320, 45 }, .{ 340, 54 }, .{ 360, 66 }, .{ 380, 82 }, .{ 400, 105 },
+/// Construction tables from data/tables/meklab.zon (TechManual): the
+/// Master Engine Table and the Internal Structure Table.
+pub const Tables = struct {
+    engine_half_tons: []const u32, // rating 10..400 step 5
+    internal_structure: []const StructureRow,
+    head_structure: u8,
+    head_max_armor: u8,
 };
+pub const StructureRow = struct { tonnage: u8, ct: u8, side: u8, arm: u8, leg: u8 };
+pub const tables: Tables = @import("meklab_zon");
 
+/// Standard fusion engine mass in half-tons by rating (Master Engine
+/// Table; ratings are rounded up to the next multiple of 5).
 pub fn engineHalfTons(rating: u32) u32 {
-    if (rating <= engine_rows[0][0]) return engine_rows[0][1];
-    var i: usize = 1;
-    while (i < engine_rows.len) : (i += 1) {
-        if (rating <= engine_rows[i][0]) {
-            const lo = engine_rows[i - 1];
-            const hi = engine_rows[i];
-            const span = hi[0] - lo[0];
-            return lo[1] + (hi[1] - lo[1]) * (rating - lo[0]) / span;
-        }
-    }
-    return engine_rows[engine_rows.len - 1][1];
+    const t = tables.engine_half_tons;
+    if (rating <= 10) return t[0];
+    const idx = (rating - 10 + 4) / 5;
+    return t[@min(idx, t.len - 1)];
+}
+
+/// Internal structure points per location for a tonnage (rounded up to
+/// the next 5 tons).
+pub fn structureRow(tonnage: u8) StructureRow {
+    for (tables.internal_structure) |row| if (tonnage <= row.tonnage) return row;
+    return tables.internal_structure[tables.internal_structure.len - 1];
+}
+
+/// Most armor a chassis can carry, in points: twice the structure per
+/// location (head 9), TechManual armor rules.
+pub fn maxArmorPoints(tonnage: u8) u32 {
+    const r = structureRow(tonnage);
+    return @as(u32, tables.head_max_armor) + 2 * (@as(u32, r.ct) + 2 * @as(u32, r.side) + 2 * @as(u32, r.arm) + 2 * @as(u32, r.leg));
+}
+
+/// ...and in half-tons of standard armor (16 points per ton).
+pub fn maxArmorHalfTons(tonnage: u8) u32 {
+    return maxArmorPoints(tonnage) / 8;
 }
 
 /// Jump jet mass by weight class (half-tons each).
@@ -82,7 +99,7 @@ pub fn fixedHalfTons(design: *const chassis_mod.Chassis) u32 {
 }
 
 pub const Violation = struct {
-    rule: enum { overweight, crits, heat_sinks, ammo, location, unknown_part },
+    rule: enum { overweight, crits, heat_sinks, ammo, location, unknown_part, armor },
     text: []const u8,
 };
 
@@ -192,6 +209,11 @@ pub fn validate(design: *const chassis_mod.Chassis, items: []const Item, alloc: 
     if (design.heat_sinks < 10) {
         try violations.append(alloc, .{ .rule = .heat_sinks, .text = try std.fmt.allocPrint(alloc, "a mek needs at least 10 heat sinks (has {d})", .{design.heat_sinks}) });
     }
+    // Armor cannot exceed twice the internal structure (head 9).
+    if (@as(u32, design.armor_half_tons) * 8 > maxArmorPoints(design.tonnage)) {
+        try violations.append(alloc, .{ .rule = .armor, .text = try std.fmt.allocPrint(alloc, "{d} armor points exceed the {d} a {d}-ton frame can carry", .{ @as(u32, design.armor_half_tons) * 8, maxArmorPoints(design.tonnage), design.tonnage }) });
+    }
+
     var nit = ammo_needed.iterator();
     while (nit.next()) |entry| {
         if (!ammo_have.contains(entry.key_ptr.*)) {
@@ -361,4 +383,27 @@ test "refit classes: ammo is A, a like-for-like swap is B, new guns are C, jets 
     try std.testing.expectEqual(RefitClass.c, classify(&.{.{ .install = .{ .location = .lt, .part_key = "srm6" } }}, &slots));
     try std.testing.expectEqual(RefitClass.d, classify(&.{.{ .install = .{ .location = .ll, .part_key = "jump_jet" } }}, &slots));
     try std.testing.expect(refitHours(&.{.{ .install = .{ .location = .lt, .part_key = "ppc" } }}, &slots, .c) > refitHours(&.{.{ .remove = "ct.ammo_srm.1" }}, &slots, .a));
+}
+
+test "12.17: TechManual tables — engine masses and structure points are exact, armor is capped" {
+    try std.testing.expectEqual(@as(u32, 38), engineHalfTons(300)); // 19 t
+    try std.testing.expectEqual(@as(u32, 29), engineHalfTons(270)); // 14.5 t
+    try std.testing.expectEqual(@as(u32, 17), engineHalfTons(200)); // 8.5 t
+    try std.testing.expectEqual(@as(u32, 105), engineHalfTons(400)); // 52.5 t
+    try std.testing.expectEqual(@as(u32, 31), engineHalfTons(275)); // 15.5 t (was interpolated before)
+    try std.testing.expectEqual(@as(u8, 31), structureRow(100).ct); // Atlas
+    try std.testing.expectEqual(@as(u8, 4), structureRow(20).leg); // Locust
+    try std.testing.expectEqual(@as(u32, 307), maxArmorPoints(100));
+    try std.testing.expectEqual(@as(u32, 69), maxArmorPoints(20));
+    // A Locust with 10 tons of armor is not a Locust.
+    var over = chassis_mod.find("LCT-1V").?.*;
+    over.armor_half_tons = 20;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const r = try validate(&over, &.{}, arena.allocator());
+    var armor_rule = false;
+    for (r.violations) |v| if (v.rule == .armor) {
+        armor_rule = true;
+    };
+    try std.testing.expect(armor_rule);
 }

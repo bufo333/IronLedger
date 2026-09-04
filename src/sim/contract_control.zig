@@ -7,6 +7,7 @@
 //! cooling employer.
 
 const std = @import("std");
+const tuning = @import("../domain/tuning.zig").t;
 const types = @import("../domain/types.zig");
 const contract_mod = @import("../domain/contract.zig");
 const chassis_mod = @import("../domain/chassis.zig");
@@ -14,8 +15,8 @@ const planet_mod = @import("../domain/planet.zig");
 const logistics = @import("../econ/logistics.zig");
 const GameState = @import("state.zig").GameState;
 
-pub const grace_days: u32 = 14; // TUNE
-pub const cooling_days: u32 = 365; // TUNE
+pub const grace_days: u32 = tuning.contract.grace_days;
+pub const cooling_days: u32 = tuning.contract.cooling_days;
 
 /// Combat BV a company can actually field today: hulls with a fit pilot,
 /// not destroyed, not in the depot.
