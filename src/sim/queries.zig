@@ -988,6 +988,53 @@ pub fn hall(alloc: Alloc, gs: *GameState, hq_id: types.HqId, filter: HallFilter)
     };
 }
 
+// ---------------------------------------------------------- hq upgrades
+
+pub const UpgradeRow = struct {
+    kind: @import("../domain/hq.zig").FacilityKind,
+    possible: bool,
+    /// Why it cannot start right now (plain text), or "ready".
+    reason: []const u8,
+    text: []const u8,
+};
+
+/// Every facility with what its next level costs, takes and buys.
+pub fn upgrades(alloc: Alloc, gs: *GameState, hq_id: types.HqId) ![]UpgradeRow {
+    const hq_mod = @import("../domain/hq.zig");
+    const hq_ops = @import("hq_ops.zig");
+    var out: std.ArrayListUnmanaged(UpgradeRow) = .empty;
+    const h = gs.hqs.getPtr(hq_id) orelse return out.toOwnedSlice(alloc);
+    const paperwork = hq_ops.paperworkDaysFor(gs, hq_id);
+    inline for (@typeInfo(hq_mod.FacilityKind).@"enum".fields) |f| {
+        const kind: hq_mod.FacilityKind = @enumFromInt(f.value);
+        const lvl = h.facilityLevel(kind);
+        const next: u8 = lvl + 1;
+        var in_progress = false;
+        for (h.projects.items) |p| if (p.facility == kind and p.phase(gs.clock.day_index) != .complete) {
+            in_progress = true;
+        };
+        const maxed = next > hq_mod.max_facility_level;
+        const cost = if (maxed) 0 else hq_mod.upgradeCost(kind, next);
+        const affordable = h.funds >= cost;
+        const buys: []const u8 = if (maxed) "at maximum" else switch (kind) {
+            .mek_bay => try std.fmt.allocPrint(alloc, "{d} bay slots · refit class ceiling rises", .{2 * @as(u32, next)}),
+            .warehouse => try std.fmt.allocPrint(alloc, "{d}t storage", .{200 * @as(u32, next) * @as(u32, next)}),
+            .hospital => try std.fmt.allocPrint(alloc, "{d} beds · shorter stays", .{10 * @as(u32, next)}),
+            .mess => "faster fatigue recovery, morale",
+            .training_ground => "training available · shorter programs",
+            .hiring_hall => "more and better candidates",
+            .comms => try std.fmt.allocPrint(alloc, "ring +10 LY → {d} LY · more offers", .{h.influenceLy() + 10}),
+            .spaceport => try std.fmt.allocPrint(alloc, "ring +5 LY · berths · cheaper freight", .{}),
+        };
+        const state: []const u8 = if (in_progress) "{a}project running{/}" else if (maxed) "{d}max{/}" else if (!affordable) "{c}HQ funds short{/}" else "{g}ready{/}";
+        const reason: []const u8 = if (in_progress) "a project is already running" else if (maxed) "already at maximum level" else if (!affordable) try std.fmt.allocPrint(alloc, "HQ funds short: needs {s} C, has {s} C", .{ try money(alloc, cost), try money(alloc, h.funds) }) else "ready";
+        try out.append(alloc, .{ .kind = kind, .possible = !in_progress and !maxed and affordable, .reason = reason, .text = try std.fmt.allocPrint(alloc, "{s: <16} lv {d} → {d}   {s: >11} C   {d: >2} + {d: >2} days   {s: <44} {s}", .{
+            f.name, lvl, if (maxed) lvl else next, if (maxed) "—" else try money(alloc, cost), paperwork, if (maxed) 0 else 14 * @as(u32, next), buys, state,
+        }) });
+    }
+    return out.toOwnedSlice(alloc);
+}
+
 // ------------------------------------------------------------------ market
 
 pub const ListingRow = struct {

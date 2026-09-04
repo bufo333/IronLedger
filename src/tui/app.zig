@@ -62,6 +62,8 @@ const Modal = union(enum) {
     install_loc: struct { unit: types.UnitId, part: []const u8 },
     /// Client settings (music).
     settings,
+    /// HQ facility upgrade picker.
+    upgrade: types.HqId,
 };
 
 /// Size tiers (docs/tui.md): the largest that fits decides how many panes
@@ -738,7 +740,7 @@ pub const App = struct {
             .forces => "Enter assign · a/u seat · A auto · o lance role · d depot · t train · x transfer · $ sell hull · X disband",
             .map => "h j k l move between worlds · f found HQ here · o offers here · n end turn · q welcome",
             .lab => "[ ] hull · j/k mount · - remove · + install · R order replacement · D send to depot (structure) · c clear · Enter commit",
-            .hq => "[ ] switch HQ · Tab hall · f/F hall filter · Enter hire · u upgrade · S autostaff · b fabricate",
+            .hq => "[ ] switch HQ · u upgrade the highlighted facility (picker elsewhere) · T tier · S autostaff · Tab hall · f/F filter · Enter hire",
             else => "? help · F1-F8 screens · Tab pane · j/k cursor · Enter act · : command · n end turn · q welcome",
         });
     }
@@ -1343,6 +1345,20 @@ pub const App = struct {
                 const r = self.modalRect(90, @intCast(@min(rows.items.len + 2, 30)));
                 const inner = self.screen.pane(r, .{ .title = "DECISION", .double = true });
                 self.screen.lines(inner, rows.items, 0, null);
+            },
+            .upgrade => |hid| {
+                const g = &self.gs.?;
+                const rows_v = try q.upgrades(al, g, hid);
+                var rows: std.ArrayListUnmanaged([]const u8) = .empty;
+                try rows.append(al, "facility         level        cost       paperwork + build   next level buys                              status");
+                for (rows_v) |r| try rows.append(al, r.text);
+                try rows.append(al, "");
+                try rows.append(al, try std.fmt.allocPrint(al, "{{d}}paid from the HQ treasury ({s} C) when the project starts · paperwork is admin_command staffing, +2 days per missing finance admin{{/}}", .{try q.money(al, if (g.hqs.getPtr(hid)) |h| h.funds else 0)}));
+                try rows.append(al, "{d}every level raises the staff the HQ must keep on payroll; understaffed HQs run a level lower{/}");
+                if (self.modal_cursor >= rows_v.len and rows_v.len > 0) self.modal_cursor = rows_v.len - 1;
+                const r = self.modalRect(@min(self.screen.cols, 130), @intCast(@min(rows.items.len + 3, self.screen.rows)));
+                const inner = self.screen.pane(r, .{ .title = try std.fmt.allocPrint(al, "UPGRADE · {s} · [Enter] start · [Esc] cancel", .{q.hqName(g, hid)}), .double = true });
+                self.screen.lines(inner, rows.items, 0, self.modal_cursor + 1);
             },
             .settings => {
                 var rows: std.ArrayListUnmanaged([]const u8) = .empty;
@@ -2334,8 +2350,25 @@ pub const App = struct {
                         self.hq_sel = (self.hq_sel + n - 1) % n;
                     },
                     'u' => {
-                        var buf: [64]u8 = undefined;
-                        self.openCommand(std.fmt.bufPrint(&buf, "upgrade hq:{d} ", .{self.hqSelId(g)}) catch "upgrade ");
+                        // The facility rows sit right under the header in the
+                        // HQ pane: with the cursor on one, upgrade it directly.
+                        const hid: types.HqId = @enumFromInt(self.hqSelId(g));
+                        const c = self.cur(0).*;
+                        if (self.focus == 0 and g.hqs.getPtr(hid) != null and c >= 1 and c <= g.hqs.getPtr(hid).?.facilities.items.len) {
+                            const kind = g.hqs.getPtr(hid).?.facilities.items[c - 1].kind;
+                            const rows = try q.upgrades(al, g, hid);
+                            for (rows) |r| if (r.kind == kind) {
+                                if (!r.possible) {
+                                    self.say(.amber, "{s}: {s}", .{ @tagName(kind), r.reason });
+                                    return;
+                                }
+                            };
+                            try self.exec(.{ .upgrade_facility = .{ .hq = hid, .kind = kind } });
+                            if (self.msg_style != .crit) self.say(.good, "{s} upgrade started — paperwork first, then construction; watch PROJECTS", .{@tagName(kind)});
+                            return;
+                        }
+                        self.modal_cursor = 0;
+                        self.modal = .{ .upgrade = hid };
                     },
                     'S' => {
                         try self.exec(.{ .autostaff = @enumFromInt(self.hqSelId(g)) });
@@ -2465,6 +2498,29 @@ pub const App = struct {
         switch (self.modal) {
             .none => {},
             .help, .hull, .record => self.modal = .none,
+            .upgrade => |hid| switch (key) {
+                .escape => self.modal = .none,
+                .down => self.modal_cursor +|= 1,
+                .up => self.modal_cursor -|= 1,
+                .enter => {
+                    const rows = try q.upgrades(self.a(), &self.gs.?, hid);
+                    if (rows.len == 0) return;
+                    const r = rows[@min(self.modal_cursor, rows.len - 1)];
+                    if (!r.possible) {
+                        self.say(.amber, "{s}: {s}", .{ @tagName(r.kind), r.reason });
+                        return;
+                    }
+                    self.modal = .none;
+                    try self.exec(.{ .upgrade_facility = .{ .hq = hid, .kind = r.kind } });
+                    if (self.msg_style != .crit) self.say(.good, "{s} upgrade started — paperwork first, then construction; watch PROJECTS", .{@tagName(r.kind)});
+                },
+                .char => |ch| switch (ch) {
+                    'j' => self.modal_cursor +|= 1,
+                    'k' => self.modal_cursor -|= 1,
+                    else => {},
+                },
+                else => {},
+            },
             .settings => switch (key) {
                 .escape, .enter => self.modal = .none,
                 .char => |ch| switch (ch) {

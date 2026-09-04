@@ -68,6 +68,12 @@ send("3")
 assert "TO&E" in plain()
 send("7")
 assert "back office" in plain() and "HIRING HALL" in plain()
+send("u", 0.8)                 # cursor on the header row → picker
+assert "UPGRADE ·" in plain()[-30000:] and "paperwork + build" in plain()[-30000:], plain()[-3000:]
+send("\x1b")
+send("j"); send("u", 0.8)      # cursor on the first facility → starts (or says why not)
+p = plain()[-600:]
+assert "upgrade started" in p or "HQ funds short" in p or "project running" in p, plain()[-1500:]
 send("f"); send("f")
 assert "filter techs" in plain(), plain()[-3000:]
 send("2")                      # map
