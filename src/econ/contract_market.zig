@@ -241,7 +241,7 @@ fn refreshBoard(gs: *GameState, hq_id: types.HqId) !void {
     const lot_size: u32 = if (thin) 1 else 2 + warehouse;
     var hulls: u32 = 0;
     for (gs.market_listings.items) |l| {
-        if (l.kind == .unit and l.hq == hq_id) hulls += 1;
+        if (l.kind == .unit and l.hq == hq_id and !l.staple) hulls += 1;
     }
     var attempts: u32 = 0;
     while (hulls < lot_size and attempts < 12) : (attempts += 1) {
@@ -269,6 +269,32 @@ fn refreshBoard(gs: *GameState, hq_id: types.HqId) !void {
             .hq = hq_id,
         });
         hulls += 1;
+    }
+
+    // Support vehicles are always on offer at a regional or brigade board
+    // (Stage 12): trucks are how a company's field capacity grows, so they
+    // are a staple line, new, at list price, two at a time.
+    if (!thin) {
+        const support_keys = [_][]const u8{ "CGT-3", "SVT-1", "MASH-27" };
+        for (support_keys) |key| {
+            var present = false;
+            for (gs.market_listings.items) |l| {
+                if (l.kind == .unit and l.hq == hq_id and l.staple and std.mem.eql(u8, l.item_key, key)) present = true;
+            }
+            if (present) continue;
+            const design = chassis_mod.find(key) orelse continue;
+            try gs.market_listings.append(gs.allocator(), .{
+                .kind = .unit,
+                .item_key = design.key,
+                .rarity = .common,
+                .price = design.cost,
+                .hq = hq_id,
+                .quantity = 2,
+                .staple = true,
+                .listed_day = day,
+                .expires_day = day + 3650,
+            });
+        }
     }
 }
 
@@ -402,6 +428,12 @@ test "9C.3: hulls persist across refreshes, staples are always stocked" {
     _ = try gs.createCommander("T", .LC, .quartermaster);
     try refreshListings(&gs);
 
+    // Support vehicles are a staple hull line at every regional board.
+    var trucks = false;
+    for (gs.market_listings.items) |l| {
+        if (l.kind == .unit and l.staple and std.mem.eql(u8, l.item_key, "CGT-3")) trucks = true;
+    }
+    try std.testing.expect(trucks);
     // Every staple line is on the board.
     for (market.staple_keys) |key| {
         var found = false;

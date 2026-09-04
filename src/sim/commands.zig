@@ -454,7 +454,9 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             });
             switch (listing.kind) {
                 .unit => {
-                    _ = gs.market_listings.orderedRemove(index);
+                    // Staple hull lines (support trucks) sell one at a time.
+                    const l = &gs.market_listings.items[index];
+                    if (listing.staple and l.quantity > 1) l.quantity -= 1 else _ = gs.market_listings.orderedRemove(index);
                     const uid = try gs.addUnit(listing.item_key);
                     if (listing.condition) |cond| gs.applyHullCondition(uid, cond);
                     try gs.log(.market, .{ .hq = hq_id }, "[market] bought {s} ({s}) for {d}", .{
