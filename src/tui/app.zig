@@ -1170,7 +1170,10 @@ pub const App = struct {
             try cl.append(al, try std.fmt.allocPrint(al, "{s} {s}   {{d}}→ {s}{{/}}", .{ if (w.blocking) "{c}!{/}" else "{a}·{/}", w.text, tab_names[w.jump] }));
         }
         if (view.checklist.len == 0) try cl.append(al, "{g}all clear{/} — nothing blocks the turn");
-        self.listPane(.{ .x = x, .y = b.y, .w = cl_w, .h = top_h }, "END-TURN CHECKLIST", cl.items, 0, self.focus == 0, true);
+        // The Dragoons rating (12C.6) rides in the title so the cursor still maps onto the warnings.
+        const rating_plain = try q.stripMarks(al, view.rating_line);
+        const cl_title = try std.fmt.allocPrint(al, "END-TURN CHECKLIST · {s}", .{q.clip(rating_plain, if (cl_w > 30) cl_w - 26 else 0)});
+        self.listPane(.{ .x = x, .y = b.y, .w = cl_w, .h = top_h }, cl_title, cl.items, 0, self.focus == 0, true);
         x += cl_w;
         var ib: std.ArrayListUnmanaged([]const u8) = .empty;
         var ib_index: std.ArrayListUnmanaged(usize) = .empty;

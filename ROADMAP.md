@@ -790,13 +790,15 @@ item: tests green, both smokes, ROADMAP tick, one commit.
 
 ### Block B — Unit rating & the board (AtB/CamOps Dragoons rating)
 
-- ⬜ 12C.6 **Dragoons rating** (CamOps "Mercenary Rating", MekHQ
-  `UnitRating`). `queries.rating`: experience (average combat skill),
-  command (commander skills + admins), combat record (contract grades and
-  breaches, replaces the bare `reputation` int), transport (lift owned vs
-  needed, 12.15), support (tech/astech/medic manning vs need), finances
-  (debt, unpaid payroll). Letter F–A* with the score breakdown; shown on
-  the Desk and Contracts screens; `rating` REPL verb.
+- ✅ 12C.6 **Dragoons rating** (CamOps "Mercenary Rating", MekHQ
+  `UnitRating`). `queries.rating`: experience (average combat skill,
+  0–40), command (desks staffed + officers, 0–20), combat record
+  (contract outcomes by grade, breaches and failures, plus the event
+  reputation, ±40), transport (own lift share, +10 own jumpship),
+  support (tech/astech/medical posts filled, 0–20), finances (debt
+  against payroll, overdrawn −20). Letters F/D/C/B/A/A* at
+  `tuning.rating` thresholds. Desk checklist title and the Contracts
+  notes line carry it; `rating` REPL verb prints the parts.
 - ⬜ 12C.7 **Rating drives the board**: offer count and employer tier by
   rating letter (F: pirates and periphery only; C+: Great Houses; A:
   ComStar/major-house planetary assaults), pay multiplier by letter

@@ -523,6 +523,15 @@ fn printReadiness(gs: *game.state.GameState) void {
     }
 }
 
+/// The Dragoons rating (12C.6) with its parts.
+fn printRating(gs: *game.state.GameState) void {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const r = game.queries.rating(arena.allocator(), gs) catch return;
+    std.debug.print("Dragoons rating {s} ({d})\n", .{ r.letter, r.score });
+    for (r.parts) |p| std.debug.print("  {s: <14} {d: >4}   {s}\n", .{ p.name, p.score, p.note });
+}
+
 const types_quality = game.types.Quality;
 
 /// Stocks at every site with tonnage vs. capacity; burn & days-of-supply
@@ -947,7 +956,7 @@ fn runRepl(gs: *game.state.GameState, io: std.Io, gpa: std.mem.Allocator, store_
         \\          save | campaigns | load <id> | delete <id> | new (fresh campaign) | quit
         \\views:    status | toe | hqs | offers | contracts | roster [co:<id>|hq:<id>] | medbay | hall [filter]
         \\          checklist | inbox | log [n] [filter] | pnl | ledger | treasuries | units | parts | orders
-        \\          shop | supplies | demand | bays | projects | staff | lab <unit> | readiness | manning co:<id>
+        \\          shop | supplies | demand | bays | projects | staff | lab <unit> | readiness | rating | manning co:<id>
         \\turn:     day [n] [force]   (the checklist gates it)
         \\commands: `help` lists every verb with its usage — the same verbs the TUI's `:` line takes
         \\factions: LC DC FS CC FWL — professions: quartermaster paymaster chief_engineer line_officer
@@ -1032,6 +1041,8 @@ fn runRepl(gs: *game.state.GameState, io: std.Io, gpa: std.mem.Allocator, store_
             printOffers(gs);
         } else if (std.mem.eql(u8, verb, "readiness")) {
             printReadiness(gs);
+        } else if (std.mem.eql(u8, verb, "rating")) {
+            printRating(gs);
         } else if (std.mem.eql(u8, verb, "inbox")) {
             printInbox(gs);
         } else if (std.mem.eql(u8, verb, "log")) {

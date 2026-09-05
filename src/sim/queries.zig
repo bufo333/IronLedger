@@ -171,6 +171,8 @@ pub const InboxRow = struct {
 };
 
 pub const Desk = struct {
+    /// The outfit's Dragoons rating in a line (12C.6).
+    rating_line: []const u8,
     checklist: []ChecklistRow,
     inbox: []InboxRow,
     company_header: []const u8,
@@ -260,6 +262,7 @@ pub fn desk(alloc: Alloc, gs: *GameState, log_rows: usize) !Desk {
     }
 
     return .{
+        .rating_line = (try rating(alloc, gs)).line,
         .checklist = try cl.toOwnedSlice(alloc),
         .inbox = try inbox.toOwnedSlice(alloc),
         .company_header = "co   name              hq                       posture                    contract           location        fat  mor  hulls   ready  supply            local funds",
@@ -524,7 +527,7 @@ pub fn contracts(alloc: Alloc, gs: *GameState) !Contracts {
         .board_header = "kind               world            emp    LY  band        mo     pay/month          total  enemy  salv  rights      transit",
         .board = try board.toOwnedSlice(alloc),
         .active = try active.toOwnedSlice(alloc),
-        .notes = "{d}beachhead: ×1.3 pay · +15% hardship · local supplies ×2.5 · resupply via link only  ·  rights: integrated = more fights, salvage ×0.5, defeats −2, no training lances, pay +10% · house = ×0.75, +5% · liaison = ×0.9 · independent = fewer fights, full salvage, −5% · $ = salvage exchange (cash, no wrecks)  ·  board refreshes on the 1st{/}",
+        .notes = try std.fmt.allocPrint(alloc, "{s}  ·  {{d}}beachhead: ×1.3 pay · +15% hardship · local supplies ×2.5 · resupply via link only  ·  rights: integrated = more fights, salvage ×0.5, defeats −2, no training lances, pay +10% · house = ×0.75, +5% · liaison = ×0.9 · independent = fewer fights, full salvage, −5% · $ = salvage exchange (cash, no wrecks)  ·  board refreshes on the 1st{{/}}", .{(try rating(alloc, gs)).line}),
     .standings = try standings(alloc, gs), };
 }
 
@@ -1864,6 +1867,165 @@ pub fn assignmentText(alloc: Alloc, gs: *GameState, p: *const person_mod.Person)
     return "{a}unassigned{/}";
 }
 
+// ------------------------------------------------------------------ rating (12C.6)
+
+pub const RatingPart = struct { name: []const u8, score: i32, note: []const u8 };
+
+/// The outfit's Dragoons rating (CamOps "Mercenary Rating", MekHQ
+/// `UnitRating`): six scored parts and a letter.
+pub const Rating = struct {
+    score: i32,
+    letter: []const u8,
+    parts: []RatingPart,
+    /// One-line summary for headers: "rating B (61) · experience 30 · …".
+    line: []const u8,
+};
+
+pub fn ratingLetter(score: i32) []const u8 {
+    const t = @import("../domain/tuning.zig").t.rating;
+    if (score >= t.letter_a_star) return "A*";
+    if (score >= t.letter_a) return "A";
+    if (score >= t.letter_b) return "B";
+    if (score >= t.letter_c) return "C";
+    if (score >= t.letter_d) return "D";
+    return "F";
+}
+
+pub fn rating(alloc: Alloc, gs: *GameState) !Rating {
+    const t = @import("../domain/tuning.zig").t.rating;
+    const personnel = @import("personnel.zig");
+    var parts: std.ArrayListUnmanaged(RatingPart) = .empty;
+    const day = gs.clock.day_index;
+
+    // Experience: average primary+secondary skill of the active combat crews.
+    {
+        var sum: u32 = 0;
+        var n: u32 = 0;
+        var pit = gs.people.iterator();
+        while (pit.next()) |e| {
+            const p = e.value_ptr;
+            if (p.status != .active or !p.role.isCombat()) continue;
+            const prim = p.skill(p.role.primarySkill()) orelse 7;
+            sum += prim;
+            n += 1;
+        }
+        const avg_x10: u32 = if (n > 0) sum * 10 / n else 70;
+        const score: i32 = if (avg_x10 <= 30) 40 else if (avg_x10 <= 40) 30 else if (avg_x10 <= 50) 20 else if (avg_x10 <= 60) 10 else 0;
+        try parts.append(alloc, .{ .name = "experience", .score = score, .note = try std.fmt.allocPrint(alloc, "{d} combat crew, average skill {d}.{d}", .{ n, avg_x10 / 10, avg_x10 % 10 }) });
+    }
+    // Command: desks staffed at every HQ, officers on the books.
+    {
+        var need: u32 = 0;
+        var have: u32 = 0;
+        var hit = gs.hqs.iterator();
+        while (hit.next()) |e| {
+            const hq = e.value_ptr;
+            const req = hq.staffRequired();
+            const desks = [_]struct { person_mod.Role, u32 }{ .{ .admin_command, req.admin }, .{ .admin_logistics, req.logistics }, .{ .admin_hr, req.hr }, .{ .admin_finance, req.finance } };
+            for (desks) |d| {
+                need += d[1];
+                have += @min(d[1], gs.hqStaff(hq.id, d[0]).count);
+            }
+        }
+        var officers: u32 = 0;
+        var pit = gs.people.iterator();
+        while (pit.next()) |e| if (e.value_ptr.status == .active and e.value_ptr.rank.isOfficer()) {
+            officers += 1;
+        };
+        const desk_score: i32 = if (need == 0) 10 else @intCast(have * 10 / need);
+        const officer_score: i32 = @intCast(@min(10, officers * 2));
+        try parts.append(alloc, .{ .name = "command", .score = desk_score + officer_score, .note = try std.fmt.allocPrint(alloc, "{d} of {d} desks staffed, {d} officer{s}", .{ have, need, officers, if (officers == 1) "" else "s" }) });
+    }
+    // Combat record: every contract's outcome, plus what events did to the name.
+    {
+        var pts: i32 = 0;
+        var done: u32 = 0;
+        for (gs.contracts.values()) |c| {
+            switch (c.status) {
+                .completed => {
+                    done += 1;
+                    pts += if (c.victory_points >= 50) t.record_outstanding else if (c.victory_points >= 25) t.record_strong else if (c.victory_points >= 0) t.record_satisfactory else t.record_poor;
+                },
+                .failed => {
+                    done += 1;
+                    pts += t.record_failed;
+                },
+                .breached => {
+                    done += 1;
+                    pts += t.record_breached;
+                },
+                else => {},
+            }
+        }
+        pts += gs.reputation;
+        const score = std.math.clamp(pts, -t.record_cap, t.record_cap);
+        try parts.append(alloc, .{ .name = "combat record", .score = score, .note = try std.fmt.allocPrint(alloc, "{d} contract{s} closed, reputation {d}", .{ done, if (done == 1) "" else "s", gs.reputation }) });
+    }
+    // Transport: own lift for the companies at home, own jumpship.
+    {
+        const commands = @import("commands.zig");
+        var covered_sum: i64 = 0;
+        var companies: u32 = 0;
+        var jumpship = false;
+        var fit = gs.forces.iterator();
+        while (fit.next()) |e| {
+            const f = e.value_ptr;
+            if (f.echelon != .company) continue;
+            companies += 1;
+            const plan = commands.planLift(gs, f.id, false) catch continue;
+            covered_sum += plan.covered_bp;
+            if (plan.own_jumpship) jumpship = true;
+        }
+        const covered_bp: i64 = if (companies > 0) @divTrunc(covered_sum, companies) else 0;
+        var score: i32 = @intCast(@divTrunc(covered_bp * 20, 10_000));
+        if (jumpship) score += 10;
+        try parts.append(alloc, .{ .name = "transport", .score = score, .note = try std.fmt.allocPrint(alloc, "own ships lift {d}% of the line{s}", .{ @divTrunc(covered_bp, 100), if (jumpship) ", own jumpship" else "" }) });
+    }
+    // Support: techs, astechs and medical against the manning tables.
+    {
+        var need: u32 = 0;
+        var have: u32 = 0;
+        var fit = gs.forces.iterator();
+        while (fit.next()) |e| {
+            const f = e.value_ptr;
+            if (f.echelon != .company) continue;
+            for (personnel.manningNeeds(gs, f.id)) |n| {
+                if (!(n.role.isTech() or n.role == .astech or n.role == .doctor or n.role == .medic)) continue;
+                need += n.need;
+                have += @min(n.need, personnel.manningHave(gs, f.id, n.role));
+            }
+        }
+        const score: i32 = if (need == 0) 10 else @intCast(have * 20 / need);
+        try parts.append(alloc, .{ .name = "support", .score = score, .note = try std.fmt.allocPrint(alloc, "{d} of {d} tech and medical posts filled", .{ have, need }) });
+    }
+    // Finances: debt against payroll, and the colour of the treasury.
+    {
+        var debt: types.CBills = 0;
+        for (gs.loans.items) |l| debt += l.balance;
+        const payroll = gs.monthlyPayroll();
+        var score: i32 = 10;
+        var note: []const u8 = "no debt";
+        if (debt > 0) {
+            const months = if (payroll > 0) @divTrunc(debt, payroll) else 99;
+            score = if (months <= 6) 0 else -10;
+            note = try std.fmt.allocPrint(alloc, "{s} owed ({d} months of payroll)", .{ try money(alloc, debt), months });
+        }
+        if (gs.funds < 0) {
+            score -= 20;
+            note = try std.fmt.allocPrint(alloc, "{s}, treasury overdrawn", .{note});
+        }
+        try parts.append(alloc, .{ .name = "finances", .score = score, .note = note });
+    }
+
+    var total: i32 = 0;
+    for (parts.items) |pt| total += pt.score;
+    var line: std.ArrayListUnmanaged(u8) = .empty;
+    try line.appendSlice(alloc, try std.fmt.allocPrint(alloc, "rating {{a}}{s}{{/}} ({d})", .{ ratingLetter(total), total }));
+    for (parts.items) |pt| try line.appendSlice(alloc, try std.fmt.allocPrint(alloc, " · {s} {d}", .{ pt.name, pt.score }));
+    _ = day;
+    return .{ .score = total, .letter = ratingLetter(total), .parts = try parts.toOwnedSlice(alloc), .line = try line.toOwnedSlice(alloc) };
+}
+
 /// " · loyal: founder, veteran" or nothing (12C.5).
 fn loyaltyNote(alloc: Alloc, p: *const person_mod.Person, day: u32) ![]const u8 {
     const l = p.loyalty(day);
@@ -2854,6 +3016,31 @@ test "people: the unassigned filter lists only people with no seat, posting or c
     try std.testing.expectEqual(HallFilter.unassigned, HallFilter.other.next());
     try std.testing.expectEqual(HallFilter.wounded, HallFilter.unassigned.next());
     try std.testing.expectEqual(HallFilter.all, HallFilter.wounded.next());
+}
+
+test "12C.6: the rating scores six parts and a fresh outfit lands in the low letters" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 126 });
+    defer gs.deinit();
+    const commands = @import("commands.zig");
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "Test", .origin = .LC, .profession = .quartermaster } });
+    _ = try commands.execute(&gs, .{ .new_company = "Alpha Company" });
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const r = try rating(a, &gs);
+    try std.testing.expectEqual(@as(usize, 6), r.parts.len);
+    var sum: i32 = 0;
+    for (r.parts) |pt| sum += pt.score;
+    try std.testing.expectEqual(sum, r.score);
+    try std.testing.expectEqualStrings(ratingLetter(r.score), r.letter);
+    try std.testing.expectEqualStrings("F", ratingLetter(-1));
+    try std.testing.expectEqualStrings("A*", ratingLetter(100));
+    // An overdrawn treasury and a breach drag the letter down.
+    const before = r.score;
+    gs.funds = -1;
+    gs.reputation -= 30;
+    try std.testing.expect((try rating(a, &gs)).score < before);
+    try std.testing.expect(std.mem.indexOf(u8, (try desk(a, &gs, 5)).rating_line, "rating") != null);
 }
 
 test "desk and ledger queries build on a fresh campaign" {

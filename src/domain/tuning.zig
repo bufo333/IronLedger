@@ -218,6 +218,23 @@ pub const Tuning = struct {
         tier_upgrade_build_days: u32,
         refit_labor_per_hour: types.CBills,
     },
+    /// Dragoons rating (12C.6, CamOps "Mercenary Rating", MekHQ
+    /// `UnitRating`): the letter thresholds on the summed score and the
+    /// points each contract outcome adds to the combat record.
+    rating: struct {
+        letter_d: i32,
+        letter_c: i32,
+        letter_b: i32,
+        letter_a: i32,
+        letter_a_star: i32,
+        record_outstanding: i32,
+        record_strong: i32,
+        record_satisfactory: i32,
+        record_poor: i32,
+        record_failed: i32,
+        record_breached: i32,
+        record_cap: i32,
+    },
     contract: struct {
         grace_days: u32,
         cooling_days: u32,

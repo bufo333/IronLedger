@@ -163,6 +163,21 @@
         .tier_upgrade_build_days = 60,
         .refit_labor_per_hour = 500,
     },
+    .rating = .{
+        // CamOps p.? Dragoons rating bands, rescaled to this sim's 0–150 score.
+        .letter_d = 0,
+        .letter_c = 25,
+        .letter_b = 50,
+        .letter_a = 75,
+        .letter_a_star = 100,
+        .record_outstanding = 10,
+        .record_strong = 7,
+        .record_satisfactory = 5,
+        .record_poor = 2,
+        .record_failed = -5,
+        .record_breached = -10,
+        .record_cap = 40,
+    },
     .contract = .{
         .grace_days = 14,
         .cooling_days = 365,

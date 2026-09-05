@@ -13,6 +13,7 @@ out=$(printf '%s\n' \
   'raise hq:1 Bravo' \
   'manning co:1' \
   'readiness' \
+  'rating' \
   'sellstock hq:1 ammo_lrm 1' \
   'stockpolicy hq:1 ammo_lrm 4 8' \
   'autoadmit off' \
@@ -29,6 +30,7 @@ check 'no air wing slot'
 check 'CapacityFull'
 check 'role              have  need'
 check 'banked XP'
+check 'Dragoons rating'
 check 'done.'
 check 'hired #'
 check 'fabricate'
