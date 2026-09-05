@@ -755,12 +755,13 @@ item: tests green, both smokes, ROADMAP tick, one commit.
   the band and its cost. Knobs `fatigue_tired`, `exhausted_fatigue`,
   `fatigue_spent`. The company-average fatigue power modifier in
   autoresolve stays as the logistics-level effect.
-- ⬜ 12C.2 **Departure payout** (MekHQ retirement bonus / AtB "retirement
-  payment"). Leaving on notice, retirement or being let go owes one
-  month's salary per full year of service (capped at 12, `// data`),
-  debited from the outfit as `.payroll` "severance"; a plain `fire` pays
-  half, a notice answered with "let go" pays it in full.
-  The notice inbox entry prices each option; the Finance ledger shows it.
+- ✅ 12C.2 **Departure payout** (MekHQ retirement bonus / AtB "retirement
+  payment"). Leaving owes one month's salary per full year served
+  (`severance_months_per_year`, capped at `severance_cap_months` = 12),
+  posted to the outfit as payroll "severance" / "retirement payout"; a
+  plain `fire` pays `fire_severance_bp` (half) and now vacates the seat;
+  disbanding a company pays everyone out. One `personnel.depart` does
+  every exit. The notice inbox line and the fire modal both price it.
 - ⬜ 12C.3 **Shares** (AtB shares system). `Person.shares: u8` — a
   founder (on the books day 0) gets 2, every combat/tech role gets 1 after
   a year, +1 per rank above sergeant; owners can set `shares_pct` of net

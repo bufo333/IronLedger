@@ -287,6 +287,15 @@ pub const Person = struct {
         return types.applyBp(types.applyBp(self.role.baseSalary(), self.experience().salaryMultBp()), self.rank.payBp());
     }
 
+    /// What the outfit owes when this person leaves (12C.2): a month's
+    /// pay per full year served, capped. Under a year: nothing.
+    pub fn severance(self: *const Person, day: u32) types.CBills {
+        const t = tuning.person;
+        const years = self.tenureMonths(day) / 12;
+        const months = @min(years * t.severance_months_per_year, t.severance_cap_months);
+        return self.monthlySalary() * @as(types.CBills, months);
+    }
+
     /// "Sgt. Lori Kalmar" for rosters and AARs.
     pub fn rankedName(self: *const Person, alloc: std.mem.Allocator) ![]const u8 {
         return std.fmt.allocPrint(alloc, "{s} {s} {s}", .{ self.rank.abbrev(), self.first_name, self.last_name });

@@ -329,7 +329,9 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
         },
         .fire => |id| {
             const p = gs.person(id) orelse return Error.UnknownPerson;
-            p.status = .resigned; // Stage 2: severance, contract-breach rules
+            // 12C.2: a firing pays half the departure payout; seats open.
+            const paid = try @import("personnel.zig").depart(gs, id, .resigned, tuning.person.fire_severance_bp, "severance (fired)");
+            if (paid > 0) try gs.log(.rotation, .{ .company = gs.companyOf(p.assigned_force) }, "[personnel] {s} {s} fired — {d} c-bills severance", .{ p.first_name, p.last_name, paid });
             return .{};
         },
         .new_company => |name| {
@@ -929,7 +931,7 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             while (pit.next()) |e| {
                 const p = e.value_ptr;
                 if (gs.companyOf(p.assigned_force) == co and (p.status == .active or p.status == .wounded)) {
-                    p.status = .resigned;
+                    _ = try @import("personnel.zig").depart(gs, p.id, .resigned, 10_000, "severance (disbanded)");
                     p.assigned_force = .none;
                 }
             }

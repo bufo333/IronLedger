@@ -446,14 +446,9 @@ fn letGo(gs: *GameState, person_id: types.PersonId, replace: bool) !void {
     if (p.status != .active) return;
     const t = @import("../domain/tuning.zig").t.person;
     const retiring = p.tenureMonths(gs.clock.day_index) >= t.retire_tenure_months;
-    p.status = if (retiring) .retired else .resigned;
     const company = gs.companyOf(p.assigned_force);
-    var uit = gs.units.iterator();
-    while (uit.next()) |ue| {
-        if (ue.value_ptr.pilot == person_id) ue.value_ptr.pilot = .none;
-        if (ue.value_ptr.tech == person_id) ue.value_ptr.tech = .none;
-    }
-    try gs.log(.rotation, .{ .company = company, .hq = p.posted_hq }, "[turnover] {s} {s} ({s}) {s}", .{ p.first_name, p.last_name, @tagName(p.role), if (retiring) "retires" else "resigns" });
+    const paid = try @import("personnel.zig").depart(gs, person_id, if (retiring) .retired else .resigned, 10_000, if (retiring) "retirement payout" else "severance");
+    try gs.log(.rotation, .{ .company = company, .hq = p.posted_hq }, "[turnover] {s} {s} ({s}) {s}{s}", .{ p.first_name, p.last_name, @tagName(p.role), if (retiring) "retires" else "resigns", if (paid > 0) try std.fmt.allocPrint(gs.allocator(), " — {d} c-bills paid out for {d} years' service", .{ paid, p.tenureMonths(gs.clock.day_index) / 12 }) else "" });
     if (!replace) return;
     for (gs.candidates.items, 0..) |cand, i| if (cand.spec.role == p.role) {
         const r = @import("commands.zig").execute(gs, .{ .hire_candidate = i }) catch |err| {

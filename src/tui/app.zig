@@ -1837,10 +1837,11 @@ pub const App = struct {
                 const rows = [_][]const u8{
                     "",
                     try std.fmt.allocPrint(al, "  Fire {{c}}{s}{{/}}? They leave the outfit today; their seat opens.", .{name}),
+                    try std.fmt.allocPrint(al, "  Severance owed: {{a}}{d}{{/}} c-bills (half of a month per year served).", .{q.severanceOwed(g, id, true)}),
                     "",
                     "  {s} [y] fire {/}   {d}[Esc] keep{/}",
                 };
-                const r = self.modalRect(70, 7);
+                const r = self.modalRect(74, 8);
                 const inner = self.screen.pane(r, .{ .title = "FIRE?", .double = true });
                 self.screen.lines(inner, &rows, 0, null);
             },

@@ -11,6 +11,23 @@ const chassis_mod = @import("../domain/chassis.zig");
 const GameState = @import("state.zig").GameState;
 const company_gen = @import("../gen/company_gen.zig");
 
+/// Someone leaves the outfit (12C.2): status set, every seat vacated, and
+/// the departure payout posted to the outfit as payroll ("severance") —
+/// `share_bp` of the full amount (a firing pays half, a notice or a
+/// retirement all of it). Returns what was paid.
+pub fn depart(gs: *GameState, person_id: types.PersonId, status: person_mod.Status, share_bp: types.Bp, note: []const u8) !types.CBills {
+    const p = gs.person(person_id) orelse return 0;
+    p.status = status;
+    var uit = gs.units.iterator();
+    while (uit.next()) |ue| {
+        if (ue.value_ptr.pilot == person_id) ue.value_ptr.pilot = .none;
+        if (ue.value_ptr.tech == person_id) ue.value_ptr.tech = .none;
+    }
+    const owed = types.applyBp(p.severance(gs.clock.day_index), share_bp);
+    if (owed > 0) try gs.postTransaction(.{ .day = gs.clock.day_index, .amount = -owed, .category = .payroll, .company = gs.companyOf(p.assigned_force), .note = note });
+    return owed;
+}
+
 /// One line of a company's manning table (MekHQ: the personnel-count
 /// panel plus the astech/medic pool "full complement" numbers).
 pub const Need = struct { role: person_mod.Role, need: u32, why: []const u8 };
@@ -277,4 +294,26 @@ test "12B.5: kills are credited to engaged pilots and awards follow the counters
     try std.testing.expect(ace.hasAward("first_blood") and ace.hasAward("ace") and !ace.hasAward("double_ace"));
     const again = try checkAwards(&gs, ace.id);
     try std.testing.expectEqual(@as(u32, 0), again); // no duplicates
+}
+
+test "12C.2: severance is a month per year served, capped; a firing pays half; under a year nothing" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 122 });
+    defer gs.deinit();
+    const t = @import("../domain/tuning.zig").t.person;
+    const rookie = try gs.hirePerson("New", "Hand", .astech);
+    gs.clock.day_index = 200;
+    try std.testing.expectEqual(@as(types.CBills, 0), gs.person(rookie).?.severance(200));
+    const vet = try gs.hirePerson("Old", "Hand", .mekwarrior);
+    gs.person(vet).?.recruited_day = 0;
+    gs.clock.day_index = 3 * 365;
+    const pay = gs.person(vet).?.monthlySalary();
+    try std.testing.expectEqual(pay * 3 * t.severance_months_per_year, gs.person(vet).?.severance(gs.clock.day_index));
+    gs.clock.day_index = 40 * 365;
+    try std.testing.expectEqual(pay * t.severance_cap_months, gs.person(vet).?.severance(gs.clock.day_index));
+    gs.clock.day_index = 2 * 365;
+    const funds = gs.funds;
+    const paid = try depart(&gs, vet, .resigned, t.fire_severance_bp, "severance (fired)");
+    try std.testing.expectEqual(pay, paid); // half of two months
+    try std.testing.expectEqual(funds - pay, gs.funds);
+    try std.testing.expectEqual(person_mod.Status.resigned, gs.person(vet).?.status);
 }

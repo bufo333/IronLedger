@@ -123,6 +123,13 @@ pub const Tuning = struct {
         fatigue_spent: u8,
         turnover_target: u8,
         retire_tenure_months: u32,
+        /// Departure payout (12C.2, MekHQ retirement bonus / AtB retirement
+        /// payment): `severance_months_per_year` months' salary per full
+        /// year served, capped at `severance_cap_months`; a plain firing
+        /// pays `fire_severance_bp` of it.
+        severance_months_per_year: u32,
+        severance_cap_months: u32,
+        fire_severance_bp: types.Bp,
     },
     unit: struct {
         carry: struct { mek: types.CBills, vehicle: types.CBills, aerospace: types.CBills, battle_armor: types.CBills, infantry: types.CBills, mash: types.CBills, cargo: types.CBills, dropship: types.CBills, jumpship: types.CBills },
