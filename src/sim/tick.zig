@@ -178,6 +178,12 @@ fn runTrainingLances(gs: *GameState) void {
 /// travel phase: part deliveries land, fund couriers arrive, cold-storage
 /// reactivations finish. Nothing material happens silently.
 pub fn runTravel(gs: *GameState) !void {
+    // Failed sourcing attempts stay visible for two weeks, then clear.
+    var fi: usize = 0;
+    while (fi < gs.part_orders.items.len) {
+        const o = gs.part_orders.items[fi];
+        if (o.status == .failed and o.ordered_day + 14 <= gs.clock.day_index) _ = gs.part_orders.orderedRemove(fi) else fi += 1;
+    }
     for (gs.part_orders.items) |*order| {
         if (order.status != .in_transit) continue;
         if (order.eta_day != null and gs.clock.day_index >= order.eta_day.?) {

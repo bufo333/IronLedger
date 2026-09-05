@@ -289,6 +289,9 @@ pub const Result = struct {
     eta_days: u32 = 0,
     /// People a `crew_company` hired from the halls.
     hired_count: u32 = 0,
+    /// `order_part`: false when logistics failed the sourcing roll (the
+    /// order is recorded as failed; retry after the refresh or fabricate).
+    sourced: bool = true,
 };
 
 pub fn execute(gs: *GameState, cmd: Command) Error!Result {
@@ -1410,11 +1413,15 @@ fn orderPart(gs: *GameState, part_key: []const u8, quantity: u32, dest_opt: ?typ
         try gs.part_orders.append(gs.allocator(), .{
             .part_key = def.key,
             .quantity = quantity,
+            .dest = dest,
             .ordered_day = gs.clock.day_index,
             .cost = 0,
             .status = .failed,
         });
-        return .{};
+        try gs.log(.delivery, .{ .hq = hq_id }, "[order] logistics could not source {d} × {s} this time ({s}, roll {d} vs {d}) — retry after the monthly refresh{s}", .{
+            quantity, def.key, @tagName(def.rarity), roll, def.rarity.availabilityTarget(), if (part_mod.isComponent(def.key)) ", or fabricate it in the bay" else "",
+        });
+        return .{ .sourced = false };
     }
 
     // Orders placed at the HQ are paid from the HQ's treasury (Stage 9A),
@@ -2389,6 +2396,28 @@ test "9A: the structured log filters by entity and category" {
     try std.testing.expectEqual(@as(usize, 2), battles);
     try std.testing.expectEqual(@as(usize, 2), mine);
     try std.testing.expectEqual(@as(usize, 1), hq_lines);
+}
+
+test "12.28: a failed sourcing roll is reported, keeps its destination, and clears after two weeks" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1228 });
+    defer gs.deinit();
+    _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    const hq = gs.hqs.keys()[0];
+    gs.hqs.getPtr(hq).?.funds = 50_000_000;
+    // Order a rare component many times: at least one roll fails.
+    var failed: ?usize = null;
+    var tries: u32 = 0;
+    while (failed == null and tries < 40) : (tries += 1) {
+        const r = try execute(&gs, .{ .order_part = .{ .part_key = "comp_ct", .quantity = 1, .dest = .{ .hq = hq } } });
+        if (!r.sourced) failed = gs.part_orders.items.len - 1;
+    }
+    try std.testing.expect(failed != null);
+    const o = gs.part_orders.items[failed.?];
+    try std.testing.expect(o.status == .failed and o.dest == .hq and o.dest.hq == hq);
+    // Two weeks on, the failed record is gone.
+    gs.clock.day_index += 14;
+    try tick.runTravel(&gs);
+    for (gs.part_orders.items) |po| try std.testing.expect(po.status != .failed);
 }
 
 test "12.26: assign without a slot word picks the seat by role, on pool hulls too" {

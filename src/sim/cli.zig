@@ -152,6 +152,7 @@ pub fn parseCommand(verb: []const u8, tokens: *std.mem.TokenIterator(u8, .scalar
         return .{ .resolve_decision = .{ .event_index = try num(usize, tokens.next()), .choice = (try num(usize, tokens.next())) -| 1 } };
     }
     if (eq(u8, verb, "order")) {
+        // A failed sourcing roll is reported by the frontends via Result.sourced.
         const part = try need(tokens.next());
         const qty = std.fmt.parseInt(u32, tokens.next() orelse "1", 10) catch return error.BadNumber;
         const dest: ?types.Site = if (tokens.next()) |t| try parseSite(t) else null;

@@ -2409,8 +2409,18 @@ pub const App = struct {
                             self.say(.dim, "{s}: nothing short — on hand or already on order", .{d.key});
                             return;
                         }
-                        try self.exec(.{ .order_part = .{ .part_key = d.key, .quantity = d.short, .dest = .{ .hq = hq_id } } });
-                        self.say(.good, "ordered {d} × {s} to {s}", .{ d.short, d.key, q.hqName(g, hq_id) });
+                        // Structural components are guaranteed by fabrication at a
+                        // regional bay (ARCH §9.8); everything else is an acquisition roll.
+                        if (game.part.isComponent(d.key) and game.hq_ops.baySlots(g, hq_id) > 0) {
+                            try self.exec(.{ .fabricate = .{ .hq = hq_id, .part_key = d.key, .quantity = d.short } });
+                            if (self.msg.len == 0 or self.msg_style != .crit) self.say(.good, "fabricating {d} × {s} at {s} — a bay job, see the HQ screen", .{ d.short, d.key, q.hqName(g, hq_id) });
+                            return;
+                        }
+                        const r = game.commands.execute(g, .{ .order_part = .{ .part_key = d.key, .quantity = d.short, .dest = .{ .hq = hq_id } } }) catch |err| {
+                            self.say(.crit, "refused: {s}", .{game.cli.errorText(err)});
+                            return;
+                        };
+                        if (r.sourced) self.say(.good, "ordered {d} × {s} to {s}", .{ d.short, d.key, q.hqName(g, hq_id) }) else self.say(.amber, "logistics could not source {s} this time — retry after the monthly market refresh, or buy it off a board", .{d.key});
                     },
                 }
             },
