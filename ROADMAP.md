@@ -829,12 +829,16 @@ item: tests green, both smokes, ROADMAP tick, one commit.
   breakthroughs, base defence and extractions) and, for convoy escorts,
   puts the support train in the line of fire on a defeat. The AAR header
   names the scenario and its shift.
-- ⬜ 12C.10 **Terrain and weather**: per-world terrain class from
-  `planets.zon` (plains, hills, forest, urban, badlands, jungle, tundra),
-  weather rolled per battle (clear, rain, snow, storm, night, dust); each
-  a small modifier to hit chances, movement-heavy scenarios and
-  aerospace cover, and a fatigue point for the hard ones. Battle log and
-  AAR carry the line.
+- ✅ 12C.10 **Terrain and weather** (`data/tables/terrain.zon` +
+  `domain/terrain.zig`): every world has a terrain class (plains, hills,
+  forest, urban, badlands, jungle, tundra — named in `planets.zon` for
+  the famous worlds, a stable pick from the key for the rest) and every
+  battle rolls 2d6 weather (clear, rain, snow, storm, night, dust; tundra
+  turns rain to snow, badlands to dust). Close terrain (woods, streets,
+  jungle) caps the power-ratio bonus at +2 and dents recon; night, storms
+  and dust ground the fighters; storms and dust take −1 off the roll;
+  harsh ground and weather each cost a fatigue point. The AAR header
+  reads "… — ambush on city streets, night action: …".
 - ⬜ 12C.11 **Morale from the field**: a won battle +2 company morale,
   a rout −5, a scenario objective met +1; a contract completed at grade
   A/B +5 outfit-wide, breach −10. Ties into 12C.1 bands and turnover.

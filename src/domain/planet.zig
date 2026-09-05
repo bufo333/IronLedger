@@ -12,6 +12,8 @@ pub const Planet = struct {
     x: i32, // LY offset on the map plane
     y: i32,
     industry: u8, // 0–5: local markets, acquisition, local-purchase easing
+    /// Terrain class (12C.10); null = derived from the key (`terrain.terrainOf`).
+    terrain: ?@import("terrain.zig").Terrain = null,
 };
 
 pub const catalog: []const Planet = @import("planets_zon");

@@ -1,0 +1,28 @@
+// Terrain and weather (Stage 12C.10). AtB/BattleTech planetary conditions,
+// abridged to the autoresolver's levers. Typed against domain/terrain.zig
+// `Table`. Terrain: `close` (forest, urban, jungle) evens the odds — the
+// power ratio bonus is capped — and dents recon; `harsh` costs a fatigue
+// point. Weather: 2d6 on `weather_2d6` (index roll−2), a tundra world
+// turns rain to snow and a badlands world turns rain to dust; `roll_mod`
+// shifts the engagement roll, `grounds_air` keeps fighters on the ground,
+// `harsh` costs a fatigue point.
+.{
+    .terrain = .{
+        .{ .kind = .plains, .name = "open plains", .close = false, .harsh = false, .recon_mod = 0 },
+        .{ .kind = .hills, .name = "broken hills", .close = false, .harsh = false, .recon_mod = 0 },
+        .{ .kind = .forest, .name = "heavy woods", .close = true, .harsh = false, .recon_mod = -1 },
+        .{ .kind = .urban, .name = "city streets", .close = true, .harsh = false, .recon_mod = -1 },
+        .{ .kind = .badlands, .name = "badlands", .close = false, .harsh = true, .recon_mod = 0 },
+        .{ .kind = .jungle, .name = "jungle", .close = true, .harsh = true, .recon_mod = -1 },
+        .{ .kind = .tundra, .name = "tundra", .close = false, .harsh = true, .recon_mod = 0 },
+    },
+    .weather = .{
+        .{ .kind = .clear, .name = "clear skies", .roll_mod = 0, .grounds_air = false, .harsh = false },
+        .{ .kind = .rain, .name = "driving rain", .roll_mod = 0, .grounds_air = false, .harsh = false },
+        .{ .kind = .snow, .name = "snow", .roll_mod = 0, .grounds_air = false, .harsh = true },
+        .{ .kind = .storm, .name = "storm", .roll_mod = -1, .grounds_air = true, .harsh = true },
+        .{ .kind = .night, .name = "night action", .roll_mod = 0, .grounds_air = true, .harsh = false },
+        .{ .kind = .dust, .name = "dust storm", .roll_mod = -1, .grounds_air = true, .harsh = true },
+    },
+    .weather_2d6 = .{ .storm, .storm, .rain, .rain, .clear, .clear, .clear, .night, .night, .rain, .storm },
+}

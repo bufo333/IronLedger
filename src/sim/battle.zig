@@ -65,8 +65,20 @@ fn hasTech(gs: *GameState, u: *const @import("../domain/unit.zig").Unit) bool {
 }
 
 /// Gather the company's combat lances into engaged units + summed power.
+const terrain_mod = @import("../domain/terrain.zig");
+const planet_mod = @import("../domain/planet.zig");
+
 fn playerSide(gs: *GameState, c: *const contract_mod.Contract) !SideState {
-    var side: SideState = .{ .mods = companyMods(gs, c), .site = .{ .company = c.assigned_company } };
+    return playerSideIn(gs, c, .{});
+}
+
+/// The player's side under given conditions (12C.10): night and storms
+/// ground the fighters, close terrain dents recon.
+fn playerSideIn(gs: *GameState, c: *const contract_mod.Contract, env: terrain_mod.Environment) !SideState {
+    var mods = companyMods(gs, c);
+    if (env.groundsAir()) mods.has_air_cover = false;
+    mods.recon_quality = @intCast(@max(0, @as(i32, mods.recon_quality) + env.reconMod()));
+    var side: SideState = .{ .mods = mods, .site = .{ .company = c.assigned_company } };
 
     const company = gs.force(c.assigned_company) orelse return side;
 
@@ -259,7 +271,13 @@ fn ratioBonus(player_power: i64, enemy_power: i64) i32 {
 }
 
 pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
-    var player = try playerSide(gs, c);
+    // Where and in what (12C.10): the world's ground, the day's weather.
+    const env: terrain_mod.Environment = blk: {
+        const world = planet_mod.find(c.planet_key) orelse break :blk .{};
+        const t = terrain_mod.terrainOf(world);
+        break :blk .{ .terrain = t, .weather = terrain_mod.rollWeather(&gs.rng, .battle, t) };
+    };
+    var player = try playerSideIn(gs, c, env);
     defer player.engaged.deinit(gs.allocator());
     if (player.engaged.items.len == 0) {
         c.score -= 2;
@@ -291,8 +309,10 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     // ARCH §7 steps 3–4 collapse into the margin).
     // The scenario's tilt, and what scouts give back (an ambush spotted
     // is half an ambush).
-    const scenario_mod: i32 = @as(i32, scenario.roll_mod) + (if (player.mods.recon_quality > 0) @as(i32, scenario.scout_bonus) else 0);
-    var roll = @as(i32, gs.rng.roll2d6(.battle)) + ratioBonus(player.power, enemy_power) + scenario_mod;
+    const scenario_mod: i32 = @as(i32, scenario.roll_mod) + (if (player.mods.recon_quality > 0) @as(i32, scenario.scout_bonus) else 0) + env.rollMod();
+    // Close terrain evens the odds: numbers count for less in the woods and the streets.
+    const ratio_bonus: i32 = if (env.close()) @min(ratioBonus(player.power, enemy_power), 2) else ratioBonus(player.power, enemy_power);
+    var roll = @as(i32, gs.rng.roll2d6(.battle)) + ratio_bonus + scenario_mod;
     // Edge (12B.6): a pilot with Edge to spend re-rolls a lost engagement once per contract.
     var edge_used_by: ?*person_mod.Person = null;
     if (roll < 6) {
@@ -302,7 +322,7 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
             if (p.has("edge") and !p.edge_spent) {
                 p.edge_spent = true;
                 edge_used_by = p;
-                roll = @as(i32, gs.rng.roll2d6(.battle)) + ratioBonus(player.power, enemy_power) + scenario_mod;
+                roll = @as(i32, gs.rng.roll2d6(.battle)) + ratio_bonus + scenario_mod;
                 break;
             }
         }
@@ -511,7 +531,7 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
         .rout => -10,
     };
     if (morale_delta < 0 and player.mods.has_mess_lance) morale_delta += 2; // hot food after a bad day
-    applyCompanyAftermath(gs, c.assigned_company, morale_delta, 4);
+    applyCompanyAftermath(gs, c.assigned_company, morale_delta, 4 + env.fatigue());
     for (engaged) |uid| {
         const u = gs.unit(uid) orelse continue;
         if (gs.person(u.pilot)) |p| {
@@ -527,11 +547,14 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     };
 
     const ctx: @import("state.zig").LogCtx = .{ .company = c.assigned_company, .contract = c.id };
-    try gs.log(.battle, ctx, "[AAR] {s} vs {s} — {s}: {s} — power {d} vs {d} (recon {d}, fatigue {d}, morale {d}{s}){s}{s}", .{
+    try gs.log(.battle, ctx, "[AAR] {s} vs {s} — {s} on {s}, {s}: {s} — power {d} vs {d} (recon {d}, fatigue {d}, morale {d}{s}{s}{s}){s}{s}", .{
         @tagName(c.kind),        c.enemy_key,            scenario.name,
+        terrain_mod.terrainRow(env.terrain).name, terrain_mod.weatherRow(env.weather).name,
         @tagName(outcome),       player.power,           enemy_power,
         player.mods.recon_quality, player.mods.avg_fatigue, player.mods.avg_morale,
-        if (scenario_mod != 0) try std.fmt.allocPrint(gs.allocator(), ", scenario {s}{d} to the roll", .{ if (scenario_mod > 0) "+" else "", scenario_mod }) else "",
+        if (scenario_mod != 0) try std.fmt.allocPrint(gs.allocator(), ", conditions {s}{d} to the roll", .{ if (scenario_mod > 0) "+" else "", scenario_mod }) else "",
+        if (env.close()) ", close terrain caps the odds" else "",
+        if (env.groundsAir()) ", fighters grounded" else "",
         if (convoy_hit) " · the convoy was hit — support train damaged" else "",
         if (edge_used_by) |p| try std.fmt.allocPrint(gs.allocator(), " · {s} spent Edge to re-roll a lost engagement", .{try p.rankedName(gs.allocator())}) else "",
     });
@@ -595,7 +618,6 @@ fn claimSalvage(gs: *GameState, c: *contract_mod.Contract, claim_bv: i64) ![]con
     var remaining = claim_bv;
     const company_gen = @import("../gen/company_gen.zig");
     const market = @import("../econ/market.zig");
-    const planet_mod = @import("../domain/planet.zig");
     const logistics = @import("../econ/logistics.zig");
     const home = gs.hqs.getPtr(gs.homeHqFor(c.assigned_company));
     const from = planet_mod.find(c.planet_key);
