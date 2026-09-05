@@ -1099,7 +1099,23 @@ pub const App = struct {
             for (view.hqs) |h| try reach.append(al, try std.fmt.allocPrint(al, "{s}  ring {d} LY (+{d} band)", .{ q.clip(h.name, 24), h.ring_ly, view.band_ly }));
             try reach.append(al, "");
             try reach.append(al, "{d}rings grow with comms and spaceport levels{/}");
-            self.listPane(.{ .x = b.x + mw, .y = b.y + side_h, .w = b.w - mw, .h = b.h - side_h }, "REACH", reach.items, 2, false, false);
+            if (self.map_color == .faction) {
+                // The legend in full (play feedback): every key on the map with its name.
+                try reach.append(al, "");
+                try reach.append(al, "factions   {d}key · colour · name{/}");
+                for (game.faction.table) |f| {
+                    const mark: []const u8 = switch (f.color) {
+                        .red => "{c}",
+                        .yellow => "{a}",
+                        .green => "{g}",
+                        .magenta => "{p}",
+                        .grey => "{d}",
+                        .blue, .cyan, .white => "",
+                    };
+                    try reach.append(al, try std.fmt.allocPrint(al, "  {s}{s: <4} {s: <8}{{/}} {s}{s}", .{ mark, f.key, @tagName(f.color), f.name, if (!f.hires) " {d}(posts no contracts){/}" else "" }));
+                }
+            }
+            self.listPane(.{ .x = b.x + mw, .y = b.y + side_h, .w = b.w - mw, .h = b.h - side_h }, if (self.map_color == .faction) "REACH · FACTIONS" else "REACH", reach.items, 2, false, false);
         }
     }
 

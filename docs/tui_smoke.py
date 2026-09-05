@@ -130,6 +130,7 @@ assert "already a regional HQ" in plain()[-800:], plain()[-1200:]
 send("f"); send("f")
 assert "filter techs" in plain(), plain()[-3000:]
 send("2")                      # map
+assert "Lyran Commonwealth" in plain()[-30000:], plain()[-3000:]   # faction legend in the side pane
 p = plain()
 assert "STAR MAP" in p and "REACH" in p, p[-3000:]
 send("l"); send("j"); send("h"); send("k")
