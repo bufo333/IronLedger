@@ -17,6 +17,10 @@ pub const decision_window_days = tuning.contract.decision_window_days;
 // ------------------------------------------------------------------ decks
 // Static decks; dynamic magnitudes go through relative effects.
 
+// The inbox rule (12.24, play feedback): an event that only moves
+// fatigue or morale happens on its own and goes to the log; anything that
+// spends XP, breaks hulls, or costs supplies is a decision the player sees.
+
 pub const Entry = struct {
     kind: events.EventKind,
     log: []const u8,
@@ -27,15 +31,18 @@ pub const Entry = struct {
 
 fn garrisonDeck(roll: u8) Entry {
     return switch (roll) {
-        2 => .{ .kind = .pirate_raid, .log = "Pirate raiders hit the perimeter", .auto_effects = &.{
-            .{ .damage_random_units = 2 }, .{ .morale = -5 }, .{ .xp_all = 1 }, .{ .score = 1 },
-        } },
+        2 => .{ .kind = .pirate_raid, .log = "Pirate raiders hit the perimeter", .options = &.{
+            .{ .label = "Sortie and run them down", .effects = &.{ .{ .damage_random_units = 1 }, .{ .xp_all = 2 }, .{ .fatigue = 6 }, .{ .score = 2 } } },
+            .{ .label = "Hold the perimeter", .effects = &.{ .{ .damage_random_units = 1 }, .{ .morale = -3 }, .{ .score = 1 } } },
+            .{ .label = "Leave it to the militia", .effects = &.{ .{ .morale = -3 }, .{ .score = -1 } } },
+        }, .default_choice = 1 },
         3 => .{ .kind = .disease_outbreak, .log = "Disease outbreak in the cantonment", .auto_effects = &.{
             .{ .fatigue = 10 }, .{ .morale = -5 },
         } },
-        4 => .{ .kind = .logistics_failure, .log = "Supply convoy lost to breakdowns", .auto_effects = &.{
-            .{ .supply_loss = 40_000 },
-        } },
+        4 => .{ .kind = .logistics_failure, .log = "Supply convoy lost to breakdowns", .options = &.{
+            .{ .label = "Buy replacements locally", .effects = &.{.{ .supply_loss = 40_000 }} },
+            .{ .label = "Tighten rations until the next convoy", .effects = &.{ .{ .morale = -4 }, .{ .fatigue = 3 } } },
+        }, .default_choice = 0 },
         5 => .{ .kind = .civil_disturbance, .log = "Civil disturbance in the capital", .options = &.{
             .{ .label = "Suppress it firmly (employer pays, locals resent)", .effects = &.{ .{ .cash = 100_000 }, .{ .reputation = -2 } } },
             .{ .label = "Measured response (long patrols)", .effects = &.{ .{ .reputation = 2 }, .{ .fatigue = 5 } } },
@@ -55,8 +62,10 @@ fn garrisonDeck(roll: u8) Entry {
             .{ .label = "Accept the side job", .effects = &.{ .{ .cash_monthly_pct = 150 }, .{ .reputation = -2 }, .{ .fatigue = 8 } } },
             .{ .label = "Decline politely", .effects = &.{.{ .reputation = 1 }} },
         }, .default_choice = 1 },
+        // Routine XP comes from payday service and training lances; a quiet
+        // month just keeps spirits steady.
         else => .{ .kind = .quiet_month, .log = "A quiet month on station", .auto_effects = &.{
-            .{ .xp_all = 1 },
+            .{ .morale = 1 },
         } },
     };
 }
@@ -66,17 +75,20 @@ fn combatDeck(roll: u8) Entry {
         2 => .{ .kind = .betrayal, .log = "Liaison feeds the enemy your patrol routes", .auto_effects = &.{
             .{ .morale = -8 }, .{ .score = -2 },
         } },
-        3 => .{ .kind = .supply_interdiction, .log = "Enemy interdiction chokes resupply", .auto_effects = &.{
-            .{ .supply_loss = 60_000 }, .{ .fatigue = 5 },
-        } },
+        3 => .{ .kind = .supply_interdiction, .log = "Enemy interdiction chokes resupply", .options = &.{
+            .{ .label = "Run the blockade in force", .effects = &.{ .{ .fatigue = 6 }, .{ .damage_random_units = 1 }, .{ .score = 1 } } },
+            .{ .label = "Pay smugglers to bring it through", .effects = &.{.{ .supply_loss = 60_000 }} },
+            .{ .label = "Ration and wait it out", .effects = &.{ .{ .morale = -5 }, .{ .fatigue = 3 } } },
+        }, .default_choice = 1 },
         4 => .{ .kind = .enemy_reinforcements, .log = "Enemy reinforcements land", .auto_effects = &.{
             .{ .score = -1 },
         } },
-        9 => .{ .kind = .intel_windfall, .log = "Recon delivers an intel windfall", .auto_effects = &.{
-            .{ .score = 2 }, .{ .xp_all = 1 },
-        } },
-        10 => .{ .kind = .captured_salvage, .log = "Battlefield salvage recovered", .auto_effects = &.{
-            .{ .parts_windfall = 2 }, .{ .cash = 100_000 },
+        9 => .{ .kind = .intel_windfall, .log = "Recon delivers an intel windfall", .options = &.{
+            .{ .label = "Act on it tonight", .effects = &.{ .{ .score = 2 }, .{ .xp_all = 1 }, .{ .fatigue = 4 } } },
+            .{ .label = "Pass it to the employer", .effects = &.{ .{ .score = 1 }, .{ .employer_standing = 1 } } },
+        }, .default_choice = 1 },
+        10 => .{ .kind = .captured_salvage, .log = "Battlefield salvage recovered: parts and armor crated home", .auto_effects = &.{
+            .{ .parts_windfall = 2 }, .{ .field_stock = .{ .key = "armor", .qty = 4 } },
         } },
         11 => .{ .kind = .local_support_offer, .log = "Local militia offers support — for a price", .options = &.{
             .{ .label = "Pay them 100k", .effects = &.{ .{ .cash = -100_000 }, .{ .score = 2 } } },
@@ -94,7 +106,7 @@ fn combatDeck(roll: u8) Entry {
         // Real engagements (sim/battle.zig) carry the damage now; the deck's
         // middle band is the grind between them.
         else => .{ .kind = .heavy_fighting, .log = "Sustained patrol operations grind on", .auto_effects = &.{
-            .{ .fatigue = 5 }, .{ .xp_all = 1 },
+            .{ .fatigue = 5 },
         } },
     };
 }
@@ -104,39 +116,37 @@ fn combatDeck(roll: u8) Entry {
 /// small choices so the player has something to decide between battles.
 fn weeklyDeck(garrison: bool, roll: u8) Entry {
     if (garrison) return switch (roll) {
-        2 => .{ .kind = .night_raid, .log = "Saboteurs slip through the wire at night", .auto_effects = &.{
-            .{ .damage_random_units = 1 }, .{ .morale = -2 }, .{ .xp_all = 1 },
-        } },
+        2 => .{ .kind = .night_raid, .log = "Saboteurs are probing the wire at night", .options = &.{
+            .{ .label = "Stand-to all night", .effects = &.{ .{ .fatigue = 4 }, .{ .xp_all = 1 } } },
+            .{ .label = "Trust the pickets", .effects = &.{ .{ .damage_random_units = 1 }, .{ .morale = -2 } } },
+        }, .default_choice = 0 },
         3 => .{ .kind = .smuggler_offer, .log = "A smuggler offers parts off the back of a truck", .options = &.{
             .{ .label = "Buy them, no questions", .effects = &.{ .{ .parts_windfall = 2 }, .{ .cash = -40_000 }, .{ .reputation = -1 } } },
             .{ .label = "Turn them in to the employer", .effects = &.{.{ .reputation = 1 }} },
             .{ .label = "Send them away", .effects = &.{} },
         }, .default_choice = 2 },
-        4 => .{ .kind = .employer_inspection, .log = "The employer's liaison announces an inspection", .options = &.{
-            .{ .label = "Full parade and hangar tour", .effects = &.{ .{ .reputation = 1 }, .{ .fatigue = 4 } } },
-            .{ .label = "Working visit only", .effects = &.{} },
-            .{ .label = "Plead operational tempo", .effects = &.{.{ .reputation = -1 }} },
-        }, .default_choice = 1 },
-        10 => .{ .kind = .local_festival, .log = "The town holds its harvest festival", .options = &.{
-            .{ .label = "Sponsor it (50k)", .effects = &.{ .{ .cash = -50_000 }, .{ .morale = 6 }, .{ .reputation = 1 } } },
-            .{ .label = "Give the company the day", .effects = &.{ .{ .morale = 3 }, .{ .fatigue = 2 } } },
-            .{ .label = "Keep to the schedule", .effects = &.{} },
-        }, .default_choice = 1 },
+        // Flavour happens on its own (12.24): the inbox is for trade-offs.
+        4 => .{ .kind = .employer_inspection, .log = "The employer's liaison inspects the hangar — a long day of parade polish", .auto_effects = &.{
+            .{ .fatigue = 2 },
+        } },
+        10 => .{ .kind = .local_festival, .log = "The town's harvest festival — the company gets the day", .auto_effects = &.{
+            .{ .morale = 3 },
+        } },
         11 => .{ .kind = .training_exercise, .log = "Quiet week — time for a live-fire exercise?", .options = &.{
             .{ .label = "Run it hard", .effects = &.{ .{ .xp_all = 2 }, .{ .fatigue = 6 } } },
             .{ .label = "Light drills", .effects = &.{.{ .xp_all = 1 }} },
             .{ .label = "Stand down", .effects = &.{.{ .morale = 2 }} },
         }, .default_choice = 1 },
-        12 => .{ .kind = .press_visit, .log = "A news crew wants to embed with the company", .options = &.{
-            .{ .label = "Welcome them", .effects = &.{ .{ .reputation = 2 }, .{ .fatigue = 2 } } },
-            .{ .label = "Refuse", .effects = &.{} },
-        }, .default_choice = 0 },
+        12 => .{ .kind = .press_visit, .log = "A news crew embeds with the company for a week; the troops enjoy the attention", .auto_effects = &.{
+            .{ .morale = 2 }, .{ .fatigue = 1 },
+        } },
         else => .{ .kind = .quiet_week, .log = "" },
     };
     return switch (roll) {
-        2 => .{ .kind = .night_raid, .log = "Enemy raiders hit the laager before dawn", .auto_effects = &.{
-            .{ .damage_random_units = 1 }, .{ .morale = -3 }, .{ .xp_all = 1 }, .{ .score = -1 },
-        } },
+        2 => .{ .kind = .night_raid, .log = "Enemy raiders are working toward the laager in the dark", .options = &.{
+            .{ .label = "Stand-to and meet them", .effects = &.{ .{ .fatigue = 5 }, .{ .xp_all = 1 }, .{ .score = 1 } } },
+            .{ .label = "Trust the pickets", .effects = &.{ .{ .damage_random_units = 1 }, .{ .morale = -3 }, .{ .score = -1 } } },
+        }, .default_choice = 0 },
         3 => .{ .kind = .ambush_warning, .log = "Locals warn of an ambush on the supply road", .options = &.{
             .{ .label = "Escort the convoy in force", .effects = &.{ .{ .fatigue = 6 }, .{ .score = 1 } } },
             .{ .label = "Reroute and delay", .effects = &.{.{ .supply_loss = 20_000 }} },
@@ -150,15 +160,16 @@ fn weeklyDeck(garrison: bool, roll: u8) Entry {
             .{ .label = "Tip off the employer's provost", .effects = &.{ .{ .employer_standing = 3 }, .{ .morale = -1 } } },
             .{ .label = "Decline", .effects = &.{} },
         }, .default_choice = 2 },
-        10 => .{ .kind = .supply_cache, .log = "Patrols overrun an enemy supply cache", .auto_effects = &.{
-            .{ .parts_windfall = 1 }, .{ .xp_all = 1 },
-        } },
+        10 => .{ .kind = .supply_cache, .log = "Patrols overrun an enemy supply cache", .options = &.{
+            .{ .label = "Haul it back (a long night)", .effects = &.{ .{ .parts_windfall = 1 }, .{ .field_stock = .{ .key = "ammo_srm", .qty = 2 } }, .{ .fatigue = 3 } } },
+            .{ .label = "Mark it and move on", .effects = &.{} },
+        }, .default_choice = 0 },
         11 => .{ .kind = .prisoner_exchange, .log = "The enemy proposes a prisoner exchange", .options = &.{
             .{ .label = "Exchange — honour among soldiers", .effects = &.{ .{ .reputation = 2 }, .{ .morale = 2 } } },
             .{ .label = "Ransom them instead (50k)", .effects = &.{ .{ .cash = 50_000 }, .{ .reputation = -1 } } },
         }, .default_choice = 0 },
-        12 => .{ .kind = .field_promotion, .log = "A lance leader distinguishes themselves", .auto_effects = &.{
-            .{ .xp_all = 2 }, .{ .morale = 3 },
+        12 => .{ .kind = .field_promotion, .log = "A lance leader distinguishes themselves — the company stands taller", .auto_effects = &.{
+            .{ .morale = 3 },
         } },
         else => .{ .kind = .quiet_week, .log = "" },
     };
@@ -187,6 +198,8 @@ pub fn rollWeekly(gs: *GameState) !void {
     while (it.next()) |entry| {
         const c = entry.value_ptr;
         if (c.status != .active) continue;
+        // Most weeks nothing worth a line happens (12.24: play feedback).
+        if (gs.rng.random(.events).uintLessThan(u32, 10_000) >= tuning.contract.weekly_event_chance_bp) continue;
         const roll = gs.rng.roll2d6(.events);
         const deck = weeklyDeck(c.kind.isGarrisonClass(), roll);
         if (deck.kind == .quiet_week) continue;
@@ -539,4 +552,21 @@ test "12.22: the black market and a salvage dispute move standing and field stoc
     // Both kinds are in a deck the rollers reach.
     try std.testing.expect(combatDeck(8).kind == .salvage_dispute);
     try std.testing.expect(weeklyDeck(false, 9).kind == .black_market_contact);
+}
+
+test "12.24: automatic events touch only fatigue and morale; XP, hull damage and supply costs are decisions" {
+    var roll: u8 = 2;
+    while (roll <= 12) : (roll += 1) {
+        const decks = [_]Entry{ garrisonDeck(roll), combatDeck(roll), weeklyDeck(true, roll), weeklyDeck(false, roll) };
+        for (decks) |e| {
+            if (e.options.len > 0) continue;
+            for (e.auto_effects) |fx| switch (fx) {
+                .fatigue, .morale, .score, .reputation, .cash, .cash_monthly_pct, .parts_windfall, .field_stock, .employer_standing => {},
+                .xp_all, .damage_random_units, .damage_convoy_units, .supply_loss => {
+                    std.debug.print("auto event {s} carries a player-facing effect\n", .{@tagName(e.kind)});
+                    return error.TestUnexpectedResult;
+                },
+            };
+        }
+    }
 }

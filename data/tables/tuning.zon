@@ -150,6 +150,7 @@
         .standing_pay_bp_per_point = 25, // ±25% pay at ±100
         .standing_shun_depth = 40,
         .standing_drift_per_month = 1,
+        .weekly_event_chance_bp = 5_000,
     },
     .generation = .{
         .scout_max_tonnage = 40,

@@ -2211,8 +2211,11 @@ test "9B: deployment eats field stores, then buys local, then goes hungry" {
     const loaded = gs.stockCount(site, "provisions");
     try std.testing.expect(loaded > 0);
     try std.testing.expect(gs.siteTons(site) <= gs.siteCapacityTons(site).?);
-    // No employer convoys for this test: the trucks are all they have.
+    // No employer convoys, no resupply policy, no float for this test (the
+    // 12.19 defaults would feed them): the trucks are all they have.
     gs.contracts.values()[0].terms.overhead_pct = 0;
+    gs.supply_policies.clearRetainingCapacity();
+    gs.policies.clearRetainingCapacity();
 
     // On station, provisions burn daily out of the field stores.
     const c = gs.contracts.values()[0];

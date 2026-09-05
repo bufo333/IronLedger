@@ -176,6 +176,9 @@ pub const Tuning = struct {
         /// Shunned when standing is at or under −this.
         standing_shun_depth: i32,
         standing_drift_per_month: i32,
+        /// Chance a contract rolls on the weekly deck at all (bp). Play
+        /// feedback (12.24): too many small happenings.
+        weekly_event_chance_bp: types.Bp,
     },
     generation: struct {
         scout_max_tonnage: u8,
