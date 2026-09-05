@@ -179,6 +179,7 @@ fn weeklyDeck(garrison: bool, roll: u8) Entry {
 /// The static deck entry for an event kind (options live in the decks, so
 /// a saved pending decision is rebuilt from its kind — Stage 11).
 pub fn entryForKind(kind: events.EventKind) ?Entry {
+    if (kind == .notice_given) return noticeEntry();
     var roll: u8 = 2;
     while (roll <= 12) : (roll += 1) {
         const g = garrisonDeck(roll);
@@ -297,7 +298,7 @@ pub fn resolveChoice(gs: *GameState, event_index: usize, choice: usize) !void {
 
     ev.chosen = choice;
     const c = if (ev.contract != .none) gs.contracts.getPtr(ev.contract) else null;
-    try applyEffects(gs, ev.options[choice].effects, c);
+    try applyEffectsFor(gs, ev.options[choice].effects, c, ev.person);
     try gs.log(.decision, .{ .company = ev.company, .contract = ev.contract }, "[decision] {s}: chose \"{s}\"", .{ @tagName(ev.kind), ev.options[choice].label });
     _ = gs.event_queue.pending.orderedRemove(event_index);
 }
@@ -310,7 +311,7 @@ pub fn expireDue(gs: *GameState) !void {
         if (ev.needsDecision() and gs.clock.day_index >= ev.deadline_day) {
             const opt = ev.options[ev.default_choice];
             const c = if (ev.contract != .none) gs.contracts.getPtr(ev.contract) else null;
-            try applyEffects(gs, opt.effects, c);
+            try applyEffectsFor(gs, opt.effects, c, ev.person);
             try gs.log(.decision, .{ .company = ev.company, .contract = ev.contract }, "[deadline] {s}: no answer — defaulted to \"{s}\"", .{ @tagName(ev.kind), opt.label });
             _ = gs.event_queue.pending.orderedRemove(i);
         } else {
@@ -320,7 +321,11 @@ pub fn expireDue(gs: *GameState) !void {
 }
 
 fn applyEffects(gs: *GameState, effects: []const events.Effect, contract: ?*contract_mod.Contract) !void {
-    const company: types.ForceId = if (contract) |c| c.assigned_company else .none;
+    return applyEffectsFor(gs, effects, contract, .none);
+}
+
+fn applyEffectsFor(gs: *GameState, effects: []const events.Effect, contract: ?*contract_mod.Contract, person_id: types.PersonId) !void {
+    const company: types.ForceId = if (contract) |c| c.assigned_company else if (gs.person(person_id)) |p| gs.companyOf(p.assigned_force) else .none;
     const contract_id: types.ContractId = if (contract) |c| c.id else .none;
 
     // Field events move field money (Stage 9A): company-tagged cash flows
@@ -378,6 +383,20 @@ fn applyEffects(gs: *GameState, effects: []const events.Effect, contract: ?*cont
                 const now = try gs.adjustStanding(c.employer_key, delta);
                 try gs.log(.contract, .{ .company = company, .contract = contract_id }, "[standing] {s} {s}{d} → {d}", .{ c.employer_key, if (delta < 0) "−" else "+", @abs(delta), now });
             },
+            .raise_pct => |pct| if (gs.person(person_id)) |p| {
+                const was = p.monthlySalary();
+                p.salary_override = types.applyBp(was, 10_000 + @as(types.Bp, pct) * 100);
+                p.morale = @intCast(@min(100, @as(u32, p.morale) + 10));
+                try gs.log(.rotation, .{ .company = company }, "[turnover] {s} {s} stays on a raise: {d} → {d} c-bills/mo", .{ p.first_name, p.last_name, was, p.monthlySalary() });
+            },
+            .retention_bonus_months => |months| if (gs.person(person_id)) |p| {
+                const bonus = p.monthlySalary() * months;
+                try gs.postTransaction(.{ .day = gs.clock.day_index, .amount = -bonus, .category = .payroll, .company = company, .note = "retention bonus" });
+                p.morale = @intCast(@min(100, @as(u32, p.morale) + 5));
+                try gs.log(.rotation, .{ .company = company }, "[turnover] {s} {s} stays for a {d} c-bill retention bonus", .{ p.first_name, p.last_name, bonus });
+            },
+            .let_go => try letGo(gs, person_id, false),
+            .replace_from_hall => try letGo(gs, person_id, true),
             .field_stock => |fs| {
                 const site: types.Site = if (company != .none) .{ .company = company } else gs.defaultSite();
                 // Trucks have finite room: what does not fit is left on the dock.
@@ -387,6 +406,65 @@ fn applyEffects(gs: *GameState, effects: []const events.Effect, contract: ?*cont
             },
         }
     }
+}
+
+/// Someone leaves: status by service length, seats vacated; optionally
+/// the halls are asked for a replacement in the same role.
+fn letGo(gs: *GameState, person_id: types.PersonId, replace: bool) !void {
+    const p = gs.person(person_id) orelse return;
+    if (p.status != .active) return;
+    const t = @import("../domain/tuning.zig").t.person;
+    const retiring = p.tenureMonths(gs.clock.day_index) >= t.retire_tenure_months;
+    p.status = if (retiring) .retired else .resigned;
+    const company = gs.companyOf(p.assigned_force);
+    var uit = gs.units.iterator();
+    while (uit.next()) |ue| {
+        if (ue.value_ptr.pilot == person_id) ue.value_ptr.pilot = .none;
+        if (ue.value_ptr.tech == person_id) ue.value_ptr.tech = .none;
+    }
+    try gs.log(.rotation, .{ .company = company, .hq = p.posted_hq }, "[turnover] {s} {s} ({s}) {s}", .{ p.first_name, p.last_name, @tagName(p.role), if (retiring) "retires" else "resigns" });
+    if (!replace) return;
+    for (gs.candidates.items, 0..) |cand, i| if (cand.spec.role == p.role) {
+        const r = @import("commands.zig").execute(gs, .{ .hire_candidate = i }) catch |err| {
+            try gs.log(.rotation, .{ .company = company }, "[turnover] no replacement hired: {s}", .{@errorName(err)});
+            return;
+        };
+        if (gs.person(r.hired)) |np| {
+            np.assigned_force = company;
+            try gs.log(.rotation, .{ .company = company }, "[turnover] {s} {s} hired from the hall to replace them — assign a seat", .{ np.first_name, np.last_name });
+        }
+        return;
+    };
+    try gs.log(.rotation, .{ .company = company }, "[turnover] no {s} on the hiring halls to replace them — hire when one walks in", .{@tagName(p.role)});
+}
+
+/// The notice decision (Stage 12.25): keep them or let them go.
+pub fn noticeEntry() Entry {
+    return .{ .kind = .notice_given, .log = "hands in notice — morale or fatigue has worn them down", .options = &.{
+        .{ .label = "A raise (+25% for good)", .effects = &.{.{ .raise_pct = 25 }} },
+        .{ .label = "A retention bonus (3 months' pay, once)", .effects = &.{.{ .retention_bonus_months = 3 }} },
+        .{ .label = "Let them go and hire a replacement from the hall", .effects = &.{.replace_from_hall} },
+        .{ .label = "Let them go", .effects = &.{.let_go} },
+    }, .default_choice = 3 };
+}
+
+/// Queue the notice decision for a person unless one is already pending.
+pub fn queueNotice(gs: *GameState, person_id: types.PersonId) !void {
+    for (gs.event_queue.pending.items) |ev| if (ev.person == person_id and ev.needsDecision()) return;
+    const p = gs.person(person_id) orelse return;
+    const e = noticeEntry();
+    try gs.event_queue.push(gs.allocator(), .{
+        .day = gs.clock.day_index,
+        .kind = .notice_given,
+        .company = gs.companyOf(p.assigned_force),
+        .person = person_id,
+        .options = e.options,
+        .default_choice = e.default_choice,
+        .deadline_day = gs.clock.day_index + decision_window_days,
+    });
+    try gs.log(.decision, .{ .company = gs.companyOf(p.assigned_force), .hq = p.posted_hq }, "[turnover] DECISION: {s} {s} ({s}, {d} c-bills/mo, morale {d}, fatigue {d}) hands in notice — raise, bonus, replace, or let go (inbox, {d} days)", .{
+        p.first_name, p.last_name, @tagName(p.role), p.monthlySalary(), p.morale, p.fatigue, decision_window_days,
+    });
 }
 
 const PersonStat = enum { morale, fatigue, xp };
@@ -584,11 +662,45 @@ test "12.24: automatic events never move money, stock or hulls — those are dec
             if (e.options.len > 0) continue;
             for (e.auto_effects) |fx| switch (fx) {
                 .fatigue, .morale, .xp_all, .score, .reputation, .employer_standing => {},
-                .cash, .cash_monthly_pct, .supply_loss, .parts_windfall, .field_stock, .damage_random_units, .damage_convoy_units => {
+                .cash, .cash_monthly_pct, .supply_loss, .parts_windfall, .field_stock, .damage_random_units, .damage_convoy_units, .raise_pct, .retention_bonus_months, .let_go, .replace_from_hall => {
                     std.debug.print("auto event {s} carries a player-facing effect\n", .{@tagName(e.kind)});
                     return error.TestUnexpectedResult;
                 },
             };
         }
     }
+}
+
+test "12.25: notice is a decision — a raise keeps them, letting go vacates the seat, replacing hires from the hall" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1225 });
+    defer gs.deinit();
+    _ = try gs.createCommander("T", .LC, .paymaster);
+    const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    var pilot: types.PersonId = .none;
+    var mek: types.UnitId = .none;
+    var uit = gs.units.iterator();
+    while (uit.next()) |e| if (e.value_ptr.kind == .mek and pilot == .none) {
+        pilot = e.value_ptr.pilot;
+        mek = e.value_ptr.id;
+    };
+    try queueNotice(&gs, pilot);
+    try queueNotice(&gs, pilot); // no duplicate
+    try std.testing.expectEqual(@as(usize, 1), gs.event_queue.pending.items.len);
+    const before = gs.person(pilot).?.monthlySalary();
+    try resolveChoice(&gs, 0, 0); // raise
+    try std.testing.expect(gs.person(pilot).?.monthlySalary() > before);
+    try std.testing.expectEqual(@import("../domain/person.zig").Status.active, gs.person(pilot).?.status);
+    // Let go: the seat opens.
+    try queueNotice(&gs, pilot);
+    try resolveChoice(&gs, 0, 3);
+    try std.testing.expectEqual(@import("../domain/person.zig").Status.resigned, gs.person(pilot).?.status);
+    try std.testing.expectEqual(types.PersonId.none, gs.unit(mek).?.pilot);
+    // Replace: a mekwarrior on the hall is hired into the company.
+    const other = gs.unit(gs.units.keys()[1]).?.pilot;
+    try gs.candidates.append(gs.allocator(), .{ .hq = gs.hqs.keys()[0], .spec = @import("../gen/person_gen.zig").generate(&gs.rng, .mekwarrior), .asking_bonus = 0, .listed_day = 0, .expires_day = 400 });
+    const people_before = gs.people.count();
+    try queueNotice(&gs, other);
+    try resolveChoice(&gs, 0, 2);
+    try std.testing.expectEqual(people_before + 1, gs.people.count());
+    try std.testing.expectEqual(co, gs.person(gs.people.keys()[gs.people.count() - 1]).?.assigned_force);
 }

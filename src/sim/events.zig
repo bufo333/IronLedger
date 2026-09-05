@@ -45,6 +45,8 @@ pub const EventKind = enum {
     // Stage 12.22, hooked into faction standing:
     black_market_contact,
     salvage_dispute,
+    /// Personnel (Stage 12.25): someone restless hands in notice.
+    notice_given,
 };
 
 /// One consequence of an event option. Relative where it must scale
@@ -65,6 +67,16 @@ pub const Effect = union(enum) {
     employer_standing: i16,
     /// Stock landed in the company's field stores (munitions off the books).
     field_stock: struct { key: []const u8, qty: u16 },
+    // Personnel effects (Stage 12.25) act on the event's `person`.
+    /// Permanent raise, percent of the current salary; they stay.
+    raise_pct: u8,
+    /// One-off bonus of N months' salary from the outfit; they stay.
+    retention_bonus_months: u8,
+    /// They leave; seats are vacated.
+    let_go,
+    /// They leave, and the halls are asked for a replacement in the same
+    /// role (hired into the same company if one is listed).
+    replace_from_hall,
 };
 
 pub const Option = struct {
@@ -77,6 +89,8 @@ pub const Event = struct {
     kind: EventKind,
     contract: types.ContractId = .none,
     company: types.ForceId = .none,
+    /// Personnel events: who this is about.
+    person: types.PersonId = .none,
     /// Empty = auto event (applied at roll time, never queued).
     options: []const Option = &.{},
     /// Applied automatically at the deadline if the player never answers.

@@ -239,7 +239,7 @@ pub fn runDailyHealing(gs: *GameState) !void {
 pub fn runMonthlyTurnover(gs: *GameState) !u32 {
     const t = tuning.person;
     const day = gs.clock.day_index;
-    var left: u32 = 0;
+    var notices: u32 = 0;
     var it = gs.people.iterator();
     while (it.next()) |entry| {
         const p = entry.value_ptr;
@@ -251,19 +251,12 @@ pub fn runMonthlyTurnover(gs: *GameState) !u32 {
         if (restless == 0) continue;
         const roll = gs.rng.roll2d6(.medical);
         if (roll >= t.turnover_target + restless) continue;
-        const retiring = p.tenureMonths(day) >= t.retire_tenure_months;
-        p.status = if (retiring) .retired else .resigned;
-        var uit = gs.units.iterator();
-        while (uit.next()) |ue| {
-            if (ue.value_ptr.pilot == p.id) ue.value_ptr.pilot = .none;
-            if (ue.value_ptr.tech == p.id) ue.value_ptr.tech = .none;
-        }
-        left += 1;
-        try gs.log(.rotation, .{ .company = gs.companyOf(p.assigned_force), .hq = p.posted_hq }, "[turnover] {s} {s} ({s}, {d} months) {s} — morale {d}, fatigue {d}", .{
-            p.first_name, p.last_name, @tagName(p.role), p.tenureMonths(day), if (retiring) "retires" else "resigns", p.morale, p.fatigue,
-        });
+        // Notice, not a disappearance (12.25): the inbox offers a raise, a
+        // bonus, a replacement from the hall, or the door.
+        try @import("contract_events.zig").queueNotice(gs, p.id);
+        notices += 1;
     }
-    return left;
+    return notices;
 }
 
 /// training phase, daily: finish programs that came due.
@@ -462,29 +455,32 @@ test "12.16: injuries land by location, heal on their own days, and permanent on
     try std.testing.expectEqual(@as(u32, 1), gs.person(other).?.openInjuries());
 }
 
-test "12.20: the restless leave after a year, the content stay, long service retires" {
+test "12.20/12.25: the restless hand in notice after a year (an inbox decision), the content stay" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1220 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .paymaster);
-    const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
-    _ = co;
-    // Content and fresh: nobody leaves however low the dice.
+    _ = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    // Content and fresh: nobody stirs however low the dice.
     gs.clock.day_index = 400;
     try std.testing.expectEqual(@as(u32, 0), try runMonthlyTurnover(&gs));
-    // Everyone miserable with a year in: some hand in notice, seats open up.
+    // Everyone miserable with a year in: notices land in the inbox, nobody has left yet.
     var pit = gs.people.iterator();
     while (pit.next()) |e| {
         e.value_ptr.morale = 5;
         e.value_ptr.fatigue = 90;
     }
-    const gone = try runMonthlyTurnover(&gs);
-    try std.testing.expect(gone > 0 and gone < gs.people.count());
-    var open_seats: u32 = 0;
-    var uit = gs.units.iterator();
-    while (uit.next()) |e| if (e.value_ptr.kind == .mek and e.value_ptr.pilot == .none) {
-        open_seats += 1;
+    const notices = try runMonthlyTurnover(&gs);
+    try std.testing.expect(notices > 0 and notices < gs.people.count());
+    try std.testing.expectEqual(@as(usize, notices), gs.event_queue.pending.items.len);
+    var gone: u32 = 0;
+    var rit = gs.people.iterator();
+    while (rit.next()) |e| if (e.value_ptr.status != .active) {
+        gone += 1;
     };
-    try std.testing.expect(open_seats > 0);
+    try std.testing.expectEqual(@as(u32, 0), gone);
+    // Another payday never queues a second notice for the same person.
+    _ = try runMonthlyTurnover(&gs);
+    for (gs.event_queue.pending.items, 0..) |a, i| for (gs.event_queue.pending.items[i + 1 ..]) |b| try std.testing.expect(a.person != b.person);
     // Under a year on the books: restless but rolls nothing.
     var fresh = GameState.init(std.testing.allocator, .{ .seed = 1221 });
     defer fresh.deinit();
@@ -494,13 +490,4 @@ test "12.20: the restless leave after a year, the content stay, long service ret
     while (fit.next()) |e| e.value_ptr.morale = 0;
     fresh.clock.day_index = 100;
     try std.testing.expectEqual(@as(u32, 0), try runMonthlyTurnover(&fresh));
-    // Five years in, the same roll retires rather than resigns.
-    fresh.clock.day_index = 30 * 61;
-    _ = try runMonthlyTurnover(&fresh);
-    var retired: u32 = 0;
-    var rit = fresh.people.iterator();
-    while (rit.next()) |e| if (e.value_ptr.status == .retired) {
-        retired += 1;
-    };
-    try std.testing.expect(retired > 0);
 }

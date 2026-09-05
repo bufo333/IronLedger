@@ -807,8 +807,8 @@ fn printInbox(gs: *game.state.GameState) void {
     }
     std.debug.print("inbox ({d} pending — unanswered decisions default at their deadline):\n", .{pending.len});
     for (pending, 0..) |ev, i| {
-        std.debug.print("  [{d}] {s} (answer by day {d}, today is {d})\n", .{
-            i, @tagName(ev.kind), ev.deadline_day, gs.clock.day_index,
+        std.debug.print("  [{d}] {s}{s} (answer by day {d}, today is {d})\n", .{
+            i, @tagName(ev.kind), if (gs.person(ev.person)) |p| p.last_name else "", ev.deadline_day, gs.clock.day_index,
         });
         for (ev.options, 0..) |opt, j| {
             std.debug.print("      {d}: {s}{s}\n", .{
