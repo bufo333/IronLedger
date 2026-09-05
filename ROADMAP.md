@@ -618,7 +618,7 @@ playthrough exposed. Order: the contract terms first (they change the
 Contracts screen every game), then personnel, then data breadth, then the
 map. Each item ends green with a ROADMAP tick, as before.
 
-- ⬜ 12B.1 **Command rights that matter** (AtB/CamOps). `Terms.command_rights`
+- ✅ 12B.1 **Command rights that matter** (AtB/CamOps). `Terms.command_rights`
   already rolls independent / liaison / house / integrated; wire it in:
   battle cadence (integrated and house employers pick more fights:
   `gap_base_days` −2/−1; independent picks fewer, +2), salvage share (the

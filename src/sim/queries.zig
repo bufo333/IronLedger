@@ -449,6 +449,7 @@ pub fn contracts(alloc: Alloc, gs: *GameState) !Contracts {
             const done: i64 = @as(i64, day) - @as(i64, start);
             try lines.append(alloc, try std.fmt.allocPrint(alloc, "    duration    {{d}}{s}{{/}}  day {d} of {d} · {d} days left", .{ barText(&bar_buf, done, total), @max(0, done), @max(0, total), @max(0, total - done) }));
         }
+        try lines.append(alloc, try std.fmt.allocPrint(alloc, "    rights      {s}", .{c.terms.command_rights.describe()}));
         try lines.append(alloc, try std.fmt.allocPrint(alloc, "    verdict     {s}{s}{{/}} so far · {s}score {d}{{/}} (breach on performance at {d}) · outstanding ≥ 50 VP, strong ≥ 25, satisfactory ≥ 0", .{
             if (c.victory_points < 0) "{a}" else "{g}", c.grade(), if (c.score <= contract_mod.Contract.fail_score + 2) "{c}" else "", c.score, contract_mod.Contract.fail_score,
         }));
@@ -515,7 +516,7 @@ pub fn contracts(alloc: Alloc, gs: *GameState) !Contracts {
         .board_header = "kind               world            emp    LY  band        mo     pay/month          total  enemy  salv  rights      transit",
         .board = try board.toOwnedSlice(alloc),
         .active = try active.toOwnedSlice(alloc),
-        .notes = "{d}beachhead: ×1.3 pay · +15% hardship · local supplies ×2.5 · resupply via link only  ·  board refreshes on the 1st{/}",
+        .notes = "{d}beachhead: ×1.3 pay · +15% hardship · local supplies ×2.5 · resupply via link only  ·  rights: integrated = more fights, salvage ×0.5, defeats −2, no training lances, pay +10% · house = ×0.75, +5% · liaison = ×0.9 · independent = fewer fights, full salvage, −5%  ·  board refreshes on the 1st{/}",
     .standings = try standings(alloc, gs), };
 }
 

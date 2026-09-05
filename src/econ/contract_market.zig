@@ -148,6 +148,14 @@ pub fn refresh(gs: *GameState) !void {
         const standing = gs.standing(world.faction);
         if (standing <= -tuning.contract.standing_shun_depth and gs.rng.random(.market).boolean()) continue;
         pay = types.applyBp(pay, standingPayBp(standing));
+        // Command rights (12B.1): the employer pays for the reins.
+        const rights: contract.CommandRights = switch (gs.rng.roll2d6(.market)) {
+            2, 3, 4 => .integrated,
+            5, 6, 7 => .house,
+            8, 9, 10 => .liaison,
+            else => .independent,
+        };
+        pay = types.applyBp(pay, rights.payBp());
 
         try gs.contract_offers.append(gs.allocator(), .{
             .id = .none, // assigned on acceptance
@@ -173,12 +181,7 @@ pub fn refresh(gs: *GameState) !void {
                 },
                 .battle_loss_pct = if (gs.rng.roll2d6(.market) >= 8) 30 else 0,
                 .salvage_pct = @intCast(@as(u32, gs.rng.roll2d6(.market) -| 2) * 5), // 0–50%
-                .command_rights = switch (gs.rng.roll2d6(.market)) {
-                    2, 3, 4 => .integrated,
-                    5, 6, 7 => .house,
-                    8, 9, 10 => .liaison,
-                    else => .independent,
-                },
+                .command_rights = rights,
             },
         });
     }

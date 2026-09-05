@@ -19,8 +19,10 @@ const person_mod = @import("../domain/person.zig");
 const GameState = @import("state.zig").GameState;
 
 /// Days between engagements: ~2/month with variance.
-fn nextBattleGap(gs: *GameState) u32 {
-    return tuning.battle.gap_base_days + gs.rng.roll2d6(.battle);
+fn nextBattleGap(gs: *GameState, c: *const contract_mod.Contract) u32 {
+    // Command rights set the tempo (12B.1): integrated employers pick fights.
+    const base: i32 = @as(i32, @intCast(tuning.battle.gap_base_days)) + @as(i32, gs.rng.roll2d6(.battle)) + c.terms.command_rights.gapDelta();
+    return @intCast(@max(3, base));
 }
 
 /// battle_resolution phase, daily: schedule and resolve engagements for
@@ -31,12 +33,12 @@ pub fn runDaily(gs: *GameState) !void {
         const c = entry.value_ptr;
         if (c.status != .active or c.kind.isGarrisonClass()) continue;
         if (c.next_battle_day == null) {
-            c.next_battle_day = gs.clock.day_index + nextBattleGap(gs);
+            c.next_battle_day = gs.clock.day_index + nextBattleGap(gs, c);
             continue;
         }
         if (gs.clock.day_index >= c.next_battle_day.?) {
             try resolveEngagement(gs, c);
-            c.next_battle_day = gs.clock.day_index + nextBattleGap(gs);
+            c.next_battle_day = gs.clock.day_index + nextBattleGap(gs, c);
         }
     }
 }
@@ -103,8 +105,9 @@ fn playerSide(gs: *GameState, c: *const contract_mod.Contract) !SideState {
     for (company.children.items) |child_id| {
         const lance = gs.force(child_id) orelse continue;
         if (lance.echelon != .lance and lance.echelon != .air_lance) continue;
-        // Lance roles (MekHQ): training lances are held out of the fight.
-        if (lance.role == .training) continue;
+        // Lance roles (MekHQ): training lances are held out of the fight —
+        // unless the employer commands (12B.1 integrated rights).
+        if (lance.role == .training and c.terms.command_rights.allowsTrainingLances()) continue;
 
         var lance_bv: i64 = 0;
         var gunnery_sum: u32 = 0;
@@ -206,7 +209,7 @@ fn companyMods(gs: *GameState, c: *const contract_mod.Contract) autoresolve.Camp
     const company = gs.force(c.assigned_company) orelse return mods;
     for (company.children.items) |child_id| {
         const child = gs.force(child_id) orelse continue;
-        if (child.echelon == .lance and child.role == .scouting and child.units.items.len > 0)
+        if (child.echelon == .lance and child.role == .scouting and child.units.items.len > 0 and !c.terms.command_rights.overridesScouting())
             mods.recon_quality = 2;
         if (child.echelon == .air_company) {
             // Air cover is a fighter that can fly: ready, with a pilot.
@@ -386,6 +389,11 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     // home HQ depot — to store, strip, or rebuild into a working hull.
     var salvage_bv: i64 = if (held_field) @divTrunc(haulable_bv * c.terms.salvage_pct, 100) else 0;
     if (player.mods.has_salvage_lance) salvage_bv = types.applyBp(salvage_bv, tuning.battle.salvage_lance_bonus_bp); // crews strip fast
+    // The liaison's cut (12B.1): under tighter command rights the employer
+    // claims part of what you haul.
+    const before_cut = salvage_bv;
+    salvage_bv = types.applyBp(salvage_bv, c.terms.command_rights.salvageShareBp());
+    const liaison_cut = before_cut - salvage_bv;
     const spoils = try claimSalvage(gs, c, salvage_bv);
     const salvage = salvage_bv; // for the AAR
 
@@ -425,7 +433,7 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
         .decisive_victory => 2,
         .victory => 1,
         .draw => 0,
-        .defeat => -1,
+        .defeat => c.terms.command_rights.defeatScore(),
         .rout => -2,
     };
     c.score += score_delta;
@@ -472,7 +480,7 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
             if (!h.destroyed and h.slot == null and h.crew.len == 0) " · armor only" else "",
         });
     }
-    if (spoils.len > 0) try gs.log(.battle, ctx, "[AAR]   salvage: {s}", .{spoils}) else if (held_field) try gs.log(.battle, ctx, "[AAR]   salvage: field held, nothing worth hauling ({d} BV destroyed, {d} haulable, {d}% rights)", .{ enemy_destroyed_bv, haulable_bv, c.terms.salvage_pct }) else try gs.log(.battle, ctx, "[AAR]   salvage: none — the field was not held", .{});
+    if (spoils.len > 0) try gs.log(.battle, ctx, "[AAR]   salvage: {s}{s}", .{ spoils, if (liaison_cut > 0) try std.fmt.allocPrint(gs.allocator(), " (the employer's liaison claimed {d} BV under {s} command rights)", .{ liaison_cut, @tagName(c.terms.command_rights) }) else "" }) else if (held_field) try gs.log(.battle, ctx, "[AAR]   salvage: field held, nothing worth hauling ({d} BV destroyed, {d} haulable, {d}% rights)", .{ enemy_destroyed_bv, haulable_bv, c.terms.salvage_pct }) else try gs.log(.battle, ctx, "[AAR]   salvage: none — the field was not held", .{});
     var expended_ac5: u32 = 0;
     var expended_ac20: u32 = 0;
     var expended_lrm: u32 = 0;
@@ -810,4 +818,50 @@ test "12.23: a salvage claim becomes a wreck in transit to the depot pool and pa
     try @import("tick.zig").runTravel(&gs);
     try std.testing.expectEqual(types.ForceId.none, gs.unit(wreck.?).?.force);
     try std.testing.expectEqual(@import("../domain/unit.zig").UnitStatus.damaged, gs.unit(wreck.?).?.status);
+}
+
+test "12B.1: integrated command sends training lances to fight and pulls the scouts' recon bonus" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1231 });
+    defer gs.deinit();
+    _ = try gs.createCommander("T", .LC, .line_officer);
+    const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
+        .id = @enumFromInt(1),
+        .kind = .objective_raid,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 3, .base_pay_month = 400_000, .command_rights = .independent },
+        .status = .active,
+        .assigned_company = co,
+        .monthly_net = 300_000,
+    });
+    const c = gs.contracts.getPtr(@enumFromInt(1)).?;
+    // Mark the first line lance as training and one as scouting.
+    var marked_training = false;
+    var marked_scouting = false;
+    for (gs.force(co).?.children.items) |cid| if (gs.force(cid)) |l| if (l.echelon == .lance) {
+        if (!marked_training) {
+            l.role = .training;
+            marked_training = true;
+        } else if (!marked_scouting) {
+            l.role = .scouting;
+            marked_scouting = true;
+        }
+    };
+    var independent = try playerSide(&gs, c);
+    defer independent.engaged.deinit(gs.allocator());
+    try std.testing.expectEqual(@as(u8, 2), independent.mods.recon_quality);
+    c.terms.command_rights = .integrated;
+    var integrated = try playerSide(&gs, c);
+    defer integrated.engaged.deinit(gs.allocator());
+    try std.testing.expect(integrated.engaged.items.len > independent.engaged.items.len);
+    try std.testing.expectEqual(@as(u8, 0), integrated.mods.recon_quality);
+    // Tempo: integrated fights come sooner on average.
+    var sum_i: u32 = 0;
+    var sum_n: u32 = 0;
+    for (0..20) |_| sum_i += nextBattleGap(&gs, c);
+    c.terms.command_rights = .independent;
+    for (0..20) |_| sum_n += nextBattleGap(&gs, c);
+    try std.testing.expect(sum_i < sum_n);
 }

@@ -184,6 +184,18 @@ pub const Tuning = struct {
         /// Chance a contract rolls on the weekly deck at all (bp). Play
         /// feedback (12.24): too many small happenings.
         weekly_event_chance_bp: types.Bp,
+        /// Command rights (12B.1, AtB/CamOps): what the employer's grip on
+        /// your company costs and buys, from integrated to independent.
+        rights: struct {
+            /// Days off the battle gap: the employer picks more fights.
+            gap_delta: struct { integrated: i32, house: i32, liaison: i32, independent: i32 },
+            /// Your share of the salvage claim after the liaison's cut.
+            salvage_share_bp: struct { integrated: types.Bp, house: types.Bp, liaison: types.Bp, independent: types.Bp },
+            /// Pay multiplier priced into the offer.
+            pay_bp: struct { integrated: types.Bp, house: types.Bp, liaison: types.Bp, independent: types.Bp },
+            /// Score a defeat costs under integrated command (harder grading).
+            integrated_defeat_score: i32,
+        },
     },
     generation: struct {
         scout_max_tonnage: u8,
@@ -204,7 +216,9 @@ pub const t: Tuning = @import("tuning_zon");
 
 fn checkPositive(comptime T: type, value: T, comptime name: []const u8) !void {
     switch (@typeInfo(T)) {
-        .int => {
+        .int => |info| {
+            // Signed knobs (deltas, scores) may be zero or negative by design.
+            if (info.signedness == .signed) return;
             if (value <= 0) {
                 std.debug.print("tuning field {s} must be positive\n", .{name});
                 return error.BadTuning;

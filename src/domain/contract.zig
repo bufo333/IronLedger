@@ -63,7 +63,70 @@ pub const ContractKind = enum {
     }
 };
 
-pub const CommandRights = enum { integrated, house, liaison, independent };
+/// Who runs the show (AtB/CamOps command rights, 12B.1). Integrated: the
+/// employer's officers command — more fights, half the salvage, harder
+/// grading, no training lances, scouts pulled into the line, +10% pay.
+/// Independent: your war, your salvage, fewer fights, −5% pay.
+pub const CommandRights = enum {
+    integrated,
+    house,
+    liaison,
+    independent,
+
+    const t = @import("tuning.zig").t.contract.rights;
+
+    pub fn gapDelta(self: CommandRights) i32 {
+        return switch (self) {
+            .integrated => t.gap_delta.integrated,
+            .house => t.gap_delta.house,
+            .liaison => t.gap_delta.liaison,
+            .independent => t.gap_delta.independent,
+        };
+    }
+
+    pub fn salvageShareBp(self: CommandRights) types.Bp {
+        return switch (self) {
+            .integrated => t.salvage_share_bp.integrated,
+            .house => t.salvage_share_bp.house,
+            .liaison => t.salvage_share_bp.liaison,
+            .independent => t.salvage_share_bp.independent,
+        };
+    }
+
+    pub fn payBp(self: CommandRights) types.Bp {
+        return switch (self) {
+            .integrated => t.pay_bp.integrated,
+            .house => t.pay_bp.house,
+            .liaison => t.pay_bp.liaison,
+            .independent => t.pay_bp.independent,
+        };
+    }
+
+    /// Score a defeat costs; integrated employers grade harder.
+    pub fn defeatScore(self: CommandRights) i32 {
+        return if (self == .integrated) t.integrated_defeat_score else -1;
+    }
+
+    /// Training lances sit out fights — unless the employer commands.
+    pub fn allowsTrainingLances(self: CommandRights) bool {
+        return self != .integrated;
+    }
+
+    /// Integrated command pulls scouts into the line: no recon bonus.
+    pub fn overridesScouting(self: CommandRights) bool {
+        return self == .integrated;
+    }
+
+    /// One line for the screens.
+    pub fn describe(self: CommandRights) []const u8 {
+        return switch (self) {
+            .integrated => "integrated: their officers command — fights every ~2 days sooner, salvage ×0.5, defeats −2, no training lances, scouts in the line, pay +10%",
+            .house => "house: their staff sets the tempo — fights a day sooner, salvage ×0.75, pay +5%",
+            .liaison => "liaison: an observer rides along — salvage ×0.9",
+            .independent => "independent: your war — fewer fights (+2 days), full salvage, pay −5%",
+        };
+    }
+};
 
 pub const ContractStatus = enum { offer, accepted, transit, active, completed, breached, failed };
 
@@ -209,4 +272,14 @@ test "advance is a percentage of total base pay" {
     const t: Terms = .{ .length_months = 12, .base_pay_month = 500_000, .advance_pct = 25 };
     try std.testing.expectEqual(@as(types.CBills, 6_000_000), t.totalBasePay());
     try std.testing.expectEqual(@as(types.CBills, 1_500_000), t.advanceAmount());
+}
+
+test "12B.1: command rights trade pay for tempo and salvage" {
+    try std.testing.expect(CommandRights.integrated.payBp() > CommandRights.independent.payBp());
+    try std.testing.expect(CommandRights.integrated.salvageShareBp() < CommandRights.independent.salvageShareBp());
+    try std.testing.expect(CommandRights.integrated.gapDelta() < CommandRights.independent.gapDelta());
+    try std.testing.expectEqual(@as(i32, -2), CommandRights.integrated.defeatScore());
+    try std.testing.expectEqual(@as(i32, -1), CommandRights.house.defeatScore());
+    try std.testing.expect(!CommandRights.integrated.allowsTrainingLances());
+    try std.testing.expect(CommandRights.liaison.allowsTrainingLances());
 }
