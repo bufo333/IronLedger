@@ -1214,6 +1214,22 @@ pub fn stockTable(alloc: Alloc, gs: *GameState, site: types.Site) ![]const []con
     return out.toOwnedSlice(alloc);
 }
 
+/// " — availability D −1, periphery market −2" for a part at a site's home
+/// HQ (12C.14), or nothing when the world and the part are ordinary.
+fn sourcingNote(alloc: Alloc, gs: *GameState, part_key: []const u8, dest: types.Site) ![]const u8 {
+    const def = @import("../domain/part.zig").find(part_key) orelse return "";
+    const hq_id: types.HqId = switch (dest) {
+        .hq => |id| id,
+        .company => |id| gs.homeHqFor(id),
+        .outfit => if (gs.hqs.count() > 0) gs.hqs.keys()[0] else .none,
+    };
+    const hq = gs.hqs.getPtr(hq_id) orelse return "";
+    const world = planet_mod.find(hq.planet_key) orelse return "";
+    const src = @import("../domain/part.zig").sourcing(def, @import("../domain/faction.zig").isPeriphery(world.faction), hq.effectiveFacilityLevel(.comms));
+    const txt = try src.text(alloc, def);
+    return if (txt.len == 0) "" else try std.fmt.allocPrint(alloc, " — {s}", .{txt});
+}
+
 /// Orders and shipments still on their way, soonest first.
 pub fn inbound(alloc: Alloc, gs: *GameState) ![]const []const u8 {
     const day = gs.clock.day_index;
@@ -1224,7 +1240,7 @@ pub fn inbound(alloc: Alloc, gs: *GameState) ![]const []const u8 {
     for (gs.part_orders.items) |o| {
         if (o.status == .delivered or o.status == .cancelled) continue;
         const eta = o.eta_day orelse std.math.maxInt(u32);
-        const eta_s: []const u8 = if (o.eta_day) |e| (if (e > day) try std.fmt.allocPrint(alloc, "d{d} ({d} days)", .{ e, e - day }) else "today") else if (o.status == .failed) "{c}not found{/}" else "{a}sourcing{/}";
+        const eta_s: []const u8 = if (o.eta_day) |e| (if (e > day) try std.fmt.allocPrint(alloc, "d{d} ({d} days)", .{ e, e - day }) else "today") else if (o.status == .failed) try std.fmt.allocPrint(alloc, "{{c}}not found{{/}}{s}", .{try sourcingNote(alloc, gs, o.part_key, o.dest)}) else "{a}sourcing{/}";
         try rows.append(alloc, .{ .eta = eta, .text = try std.fmt.allocPrint(alloc, "{s: <18} {d: >4}  {s: <22}  {s: <10}  {s: <12} {s: >10}", .{
             clip(o.part_key, 18), o.quantity, clip(try siteLabel(alloc, gs, o.dest), 22), @tagName(o.status), eta_s, try money(alloc, o.cost),
         }) });

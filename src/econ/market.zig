@@ -90,8 +90,9 @@ pub fn listingAppears(
     rarity: Rarity,
     planet_industry: u8, // 0–5
     site_bonus: u8, // from facilities, 0–3
+    extra: i32, // sourcing modifiers (12C.14): availability, periphery, comms
 ) bool {
-    const roll = rng.roll2d6(.market) + planet_industry / 2 + site_bonus;
+    const roll: i32 = @as(i32, rng.roll2d6(.market)) + planet_industry / 2 + site_bonus + extra;
     return roll >= rarity.availabilityTarget();
 }
 
@@ -207,8 +208,8 @@ test "rarity works: common floods the boards, very rare is an event" {
     var common_hits: u32 = 0;
     var very_rare_hits: u32 = 0;
     for (0..10_000) |_| {
-        if (listingAppears(&rng, .common, 2, 0)) common_hits += 1;
-        if (listingAppears(&rng, .very_rare, 2, 0)) very_rare_hits += 1;
+        if (listingAppears(&rng, .common, 2, 0, 0)) common_hits += 1;
+        if (listingAppears(&rng, .very_rare, 2, 0, 0)) very_rare_hits += 1;
     }
     try std.testing.expect(common_hits > 8_000);
     try std.testing.expect(very_rare_hits < 2_500);

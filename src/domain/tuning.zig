@@ -70,6 +70,14 @@ pub const Tuning = struct {
         hall_floor_combat: u32,
         procurement_markup_bp: types.Bp,
         rarity_target: struct { common: u8, uncommon: u8, rare: u8, very_rare: u8 },
+        /// Part availability (12C.14, MekHQ acquisition target by tech base
+        /// and TechManual availability code): the roll modifier per
+        /// availability letter, the penalty a periphery world puts on
+        /// Inner Sphere parts rated D or worse, and what comms reach adds
+        /// per two facility levels.
+        avail_mod: struct { a: i8, b: i8, c: i8, d: i8, e: i8, f: i8 },
+        periphery_penalty: i32,
+        comms_bonus_per_two_levels: i32,
     },
     medical: struct {
         training_days: u32,

@@ -236,7 +236,9 @@ fn refreshBoard(gs: *GameState, hq_id: types.HqId) !void {
         while (def.rarity == .common and tries < 6) : (tries += 1) {
             def = &part_mod.catalog[r.uintLessThan(usize, part_mod.catalog.len)];
         }
-        if (!market.listingAppears(&gs.rng, def.rarity, world.industry, warehouse)) continue;
+        // Sourcing (12C.14): scarce parts, periphery shelves, comms reach.
+        const src = part_mod.sourcing(def, @import("../domain/faction.zig").isPeriphery(world.faction), hq.effectiveFacilityLevel(.comms));
+        if (!market.listingAppears(&gs.rng, def.rarity, world.industry, warehouse, src.total())) continue;
         const price_roll: types.Bp = 10_000 + (@as(types.Bp, gs.rng.roll2d6(.market)) - 7) * 500;
         try gs.market_listings.append(gs.allocator(), .{
             .kind = .part,
@@ -267,7 +269,7 @@ fn refreshBoard(gs: *GameState, hq_id: types.HqId) !void {
             if (vehicles.len == 0) continue;
             break :blk vehicles[r.uintLessThan(usize, vehicles.len)];
         } else @import("../domain/rat.zig").roll(&gs.rng, .market, world.faction, @import("../gen/company_gen.zig").rollWeightClass(&gs.rng));
-        if (!market.listingAppears(&gs.rng, design.rarity, world.industry, warehouse)) continue;
+        if (!market.listingAppears(&gs.rng, design.rarity, world.industry, warehouse, 0)) continue;
         const cond = market.rollHullCondition(&gs.rng);
         const price_roll: types.Bp = 10_000 + (@as(types.Bp, gs.rng.roll2d6(.market)) - 7) * 500;
         var weapon_value: types.CBills = 0;
@@ -312,7 +314,7 @@ fn refreshBoard(gs: *GameState, hq_id: types.HqId) !void {
             const pool = chassis_mod.ofKind(kind, &buf);
             if (pool.len > 0) {
                 const design = pool[r.uintLessThan(usize, pool.len)];
-                if (market.listingAppears(&gs.rng, design.rarity, world.industry, port)) {
+                if (market.listingAppears(&gs.rng, design.rarity, world.industry, port, 0)) {
                     const price_roll: types.Bp = 10_000 + (@as(types.Bp, gs.rng.roll2d6(.market)) - 7) * 500;
                     const base = if (design.kind == .aerospace) design.cost else types.applyBp(design.cost, market.transport_price_bp);
                     try gs.market_listings.append(gs.allocator(), .{

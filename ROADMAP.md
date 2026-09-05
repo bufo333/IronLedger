@@ -868,11 +868,15 @@ item: tests green, both smokes, ROADMAP tick, one commit.
   line, and quality now prices resale (`quality_sale_bp_per_step`, ±5%
   per step from C) on top of reactivation days, the maintenance target
   and the repair check (12C.12).
-- ⬜ 12C.14 **Part availability** (MekHQ acquisition target by tech base
-  and rarity): `parts.zon` gains `tech_base` (inner sphere / periphery)
-  and `availability` (A–F); order sourcing target uses it plus the HQ's
-  comms and the world's faction; failed orders say why ("rare at this
-  world").
+- ✅ 12C.14 **Part availability** (MekHQ acquisition target by tech base
+  and TechManual availability code): `parts.zon` rows carry
+  `availability` (A staple … F almost nowhere; PPCs, large lasers, AC/20s,
+  big LRM racks, torso/head assemblies and MASH theatres are D, ship bays
+  E) and `tech_base`. Every acquisition roll and every rare market slot
+  adds `avail_mod` per letter, a `periphery_penalty` on a periphery world
+  for Inner Sphere parts rated D or worse, and `comms_bonus_per_two_levels`
+  from the HQ's comms. The failed-order log line and the inbound view's
+  "not found" say why ("availability d −1, periphery market −2").
 - ⬜ 12C.15 **Tech target numbers**: the flat hours-per-tonne maintenance
   model gets a target-number layer — tech skill, astech coverage, hull
   quality, era of the design — so the same tech is slower on an exotic

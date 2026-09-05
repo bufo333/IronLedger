@@ -31,6 +31,14 @@ pub fn get(key: []const u8) *const FactionRow {
     return find(key) orelse find("PER").?;
 }
 
+/// Off the Inner Sphere's factory floors (12C.14): anyone but the five
+/// Great Houses and ComStar.
+pub fn isPeriphery(key: []const u8) bool {
+    const core = [_][]const u8{ "LC", "DC", "FS", "CC", "FWL", "CS" };
+    for (core) |c| if (std.mem.eql(u8, c, key)) return false;
+    return true;
+}
+
 pub fn name(key: []const u8) []const u8 {
     return get(key).name;
 }

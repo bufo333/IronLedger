@@ -7,6 +7,58 @@ const types = @import("types.zig");
 /// How a mountable item attaches (Stage 10 MekLab).
 pub const MountType = enum { none, energy, ballistic, missile, equipment, ammo };
 
+/// Who builds it (12C.14): periphery worlds source Inner Sphere parts
+/// rated D or worse with a penalty.
+pub const TechBase = enum { inner_sphere, periphery };
+
+/// TechManual availability code for 3025 (A everywhere … F almost nowhere).
+pub const Availability = enum { a, b, c, d, e, f };
+
+/// The sourcing modifiers on an acquisition roll (12C.14).
+pub const Sourcing = struct {
+    avail: i32,
+    periphery: i32,
+    comms: i32,
+
+    pub fn total(self: Sourcing) i32 {
+        return self.avail + self.periphery + self.comms;
+    }
+
+    /// "availability D −1, periphery market −2, comms +1" (empty when all zero).
+    pub fn text(self: Sourcing, alloc: std.mem.Allocator, def: *const PartDef) ![]const u8 {
+        var out: std.ArrayListUnmanaged(u8) = .empty;
+        if (self.avail != 0) try out.appendSlice(alloc, try std.fmt.allocPrint(alloc, "availability {s} {s}{d}", .{ @tagName(def.availability), if (self.avail > 0) "+" else "", self.avail }));
+        if (self.periphery != 0) {
+            if (out.items.len > 0) try out.appendSlice(alloc, ", ");
+            try out.appendSlice(alloc, try std.fmt.allocPrint(alloc, "periphery market {d}", .{self.periphery}));
+        }
+        if (self.comms != 0) {
+            if (out.items.len > 0) try out.appendSlice(alloc, ", ");
+            try out.appendSlice(alloc, try std.fmt.allocPrint(alloc, "comms reach +{d}", .{self.comms}));
+        }
+        return out.toOwnedSlice(alloc);
+    }
+};
+
+/// What this world and this HQ do to a part's acquisition roll.
+pub fn sourcing(def: *const PartDef, periphery_world: bool, comms_level: u8) Sourcing {
+    const t = @import("tuning.zig").t.market;
+    const avail: i32 = switch (def.availability) {
+        .a => t.avail_mod.a,
+        .b => t.avail_mod.b,
+        .c => t.avail_mod.c,
+        .d => t.avail_mod.d,
+        .e => t.avail_mod.e,
+        .f => t.avail_mod.f,
+    };
+    const scarce = @intFromEnum(def.availability) >= @intFromEnum(Availability.d);
+    return .{
+        .avail = avail,
+        .periphery = if (periphery_world and def.tech_base == .inner_sphere and scarce) -t.periphery_penalty else 0,
+        .comms = @as(i32, comms_level / 2) * t.comms_bonus_per_two_levels,
+    };
+}
+
 /// Static part definition; catalog data in data/parts.zon.
 pub const PartDef = struct {
     key: []const u8,
@@ -15,6 +67,9 @@ pub const PartDef = struct {
     rarity: types.Rarity,
     /// Storage/shipping weight per stock unit (Stage 9B).
     pallet_tons: u16 = 1,
+    /// Sourcing (12C.14): who builds it and how widely it is stocked.
+    tech_base: TechBase = .inner_sphere,
+    availability: Availability = .c,
     // Construction facts for mountable items (Stage 10); `mount == .none`
     // means the lab can't install it.
     mass_half_tons: u16 = 0,
@@ -122,6 +177,22 @@ pub const AcquisitionOrder = struct {
     cost: types.CBills,
     status: OrderStatus = .sourcing,
 };
+
+test "12C.14: sourcing modifiers — scarce parts, periphery worlds and comms reach" {
+    const ppc = find("ppc").?;
+    try std.testing.expect(@intFromEnum(ppc.availability) >= @intFromEnum(Availability.d));
+    const home = sourcing(ppc, false, 0);
+    const fringe = sourcing(ppc, true, 0);
+    const wired = sourcing(ppc, true, 4);
+    try std.testing.expect(fringe.total() < home.total());
+    try std.testing.expect(wired.total() > fringe.total());
+    const mlas = find("mlas").?;
+    try std.testing.expectEqual(@as(i32, 0), sourcing(mlas, true, 0).periphery); // a staple is a staple everywhere
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const txt = try fringe.text(arena.allocator(), ppc);
+    try std.testing.expect(std.mem.indexOf(u8, txt, "periphery market") != null);
+}
 
 test "every chassis loadout part resolves in the part catalog" {
     const chassis = @import("chassis.zig");

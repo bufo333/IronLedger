@@ -61,6 +61,9 @@
         .hall_floor_combat = 3,
         .procurement_markup_bp = 11_000,
         .rarity_target = .{ .common = 5, .uncommon = 7, .rare = 9, .very_rare = 11 },
+        .avail_mod = .{ .a = 2, .b = 1, .c = 0, .d = -1, .e = -2, .f = -3 },
+        .periphery_penalty = 2,
+        .comms_bonus_per_two_levels = 1,
     },
     .medical = .{
         .training_days = 30,

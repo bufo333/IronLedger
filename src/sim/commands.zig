@@ -1473,7 +1473,10 @@ fn orderPart(gs: *GameState, part_key: []const u8, quantity: u32, dest_opt: ?typ
     const logi = gs.hqStaff(hq_id, .admin_logistics);
     const admin_bonus: i32 = if (logi.count == 0) -2 else 5 - @as(i32, logi.best_skill);
     lead_days = @max(3, lead_days -| @min(4, logi.count / 2));
-    const roll = @as(i32, gs.rng.roll2d6(.acquisition)) + admin_bonus + world.industry / 2;
+    // Sourcing (12C.14): the part's availability code, the world's shelves,
+    // the HQ's comms reach.
+    const src = part_mod.sourcing(def, @import("../domain/faction.zig").isPeriphery(world.faction), hq.effectiveFacilityLevel(.comms));
+    const roll = @as(i32, gs.rng.roll2d6(.acquisition)) + admin_bonus + world.industry / 2 + src.total();
     const sourced = roll >= def.rarity.availabilityTarget();
 
     if (!sourced) {
@@ -1485,8 +1488,9 @@ fn orderPart(gs: *GameState, part_key: []const u8, quantity: u32, dest_opt: ?typ
             .cost = 0,
             .status = .failed,
         });
-        try gs.log(.delivery, .{ .hq = hq_id }, "[order] logistics could not source {d} × {s} this time ({s}, roll {d} vs {d}) — retry after the monthly refresh{s}", .{
-            quantity, def.key, @tagName(def.rarity), roll, def.rarity.availabilityTarget(), if (part_mod.isComponent(def.key)) ", or fabricate it in the bay" else "",
+        const why = try src.text(gs.allocator(), def);
+        try gs.log(.delivery, .{ .hq = hq_id }, "[order] logistics could not source {d} × {s} this time ({s}, roll {d} vs {d}{s}{s}) — retry after the monthly refresh{s}", .{
+            quantity, def.key, @tagName(def.rarity), roll, def.rarity.availabilityTarget(), if (why.len > 0) "; " else "", why, if (part_mod.isComponent(def.key)) ", or fabricate it in the bay" else "",
         });
         return .{ .sourced = false };
     }
