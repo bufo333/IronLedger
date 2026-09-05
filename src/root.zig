@@ -16,6 +16,22 @@ pub const rat = @import("domain/rat.zig");
 pub const faction = @import("domain/faction.zig");
 pub const scenario = @import("domain/scenario.zig");
 pub const terrain = @import("domain/terrain.zig");
+/// Build-time facts (12C.18): the data directory overlaid with `-Ddata=`,
+/// and which files it replaced. Constants, not state.
+pub const build_info = @import("build_options");
+
+/// "stock tables" or "mod <dir>: 3 files (chassis.zon, …)" for settings
+/// screens and banners.
+pub fn dataProvenance(alloc: std.mem.Allocator) ![]const u8 {
+    if (build_info.data_dir) |dir| {
+        var out: std.ArrayListUnmanaged(u8) = .empty;
+        try out.appendSlice(alloc, try std.fmt.allocPrint(alloc, "mod {s}: {d} file{s} overlaid", .{ dir, build_info.data_overlays.len, if (build_info.data_overlays.len == 1) "" else "s" }));
+        for (build_info.data_overlays, 0..) |f, i| try out.appendSlice(alloc, try std.fmt.allocPrint(alloc, "{s}{s}", .{ if (i == 0) " (" else ", ", f }));
+        if (build_info.data_overlays.len > 0) try out.append(alloc, ')');
+        return out.toOwnedSlice(alloc);
+    }
+    return "stock tables (data/)";
+}
 pub const personnel = @import("sim/personnel.zig");
 pub const planet = @import("domain/planet.zig");
 pub const meklab = @import("domain/meklab.zig");

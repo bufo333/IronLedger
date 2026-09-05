@@ -1775,6 +1775,7 @@ pub const App = struct {
                     try rows.append(al, "");
                 }
                 try rows.append(al, try std.fmt.allocPrint(al, "  graphics     {s} · colour {s} · glyphs {s}", .{ if (self.graphics == .kitty) "kitty protocol" else "half-block", if (self.screen.truecolor) "24-bit" else "256", if (self.screen.ascii) "ascii" else "box-drawing" }));
+                try rows.append(al, try std.fmt.allocPrint(al, "  data         {s}     {{d}}`zig build -Ddata=<dir>` overlays data/*.zon — docs/modding.md{{/}}", .{try game.dataProvenance(al)}));
                 try rows.append(al, "");
                 try rows.append(al, "  {d}[Esc] close{/}");
                 const r = self.modalRect(84, @intCast(rows.items.len + 2));

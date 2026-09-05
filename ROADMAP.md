@@ -913,10 +913,16 @@ item: tests green, both smokes, ROADMAP tick, one commit.
   sale still costs a point with the world's house and earns one with the
   pirates. The Market row is marked "fence · black market". Schema v19
   (`listing.black`).
-- ⬜ 12C.18 **Mod support**: `--data <dir>` overlays any `data/*.zon` and
-  `data/tables/*.zon` from a directory at startup (ZON parsed at runtime
-  for the overlay, comptime tables stay the default); the settings screen
-  says which files are overridden; `docs/modding.md`.
+- ✅ 12C.18 **Mod support** (build-time, not runtime — the tables are
+  comptime constants and the sim core stays free of global state):
+  `zig build -Ddata=<dir>` overlays any `data/*.zon` or
+  `data/tables/*.zon` file present in <dir> at the same relative path,
+  the rest falling back to stock; the typed structs are the schema, so a
+  malformed mod fails the build with a line number, and `zig build test
+  -Ddata=<dir>` runs the catalogue link tests against the mod. A
+  `build_options` module records the directory and the overlaid files;
+  the settings screen's `data` row and the REPL banner report them.
+  `docs/modding.md` documents every file and the rules.
 
 ### Block F — Terminal cosmetics
 

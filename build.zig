@@ -43,46 +43,51 @@ pub fn build(b: *std.Build) void {
 
     // Static game data: .zon files imported at comptime by the sim core
     // (e.g. `@import("chassis_zon")` in src/domain/chassis.zig).
-    mod.addAnonymousImport("chassis_zon", .{
-        .root_source_file = b.path("data/chassis.zon"),
-    });
-    mod.addAnonymousImport("planets_zon", .{
-        .root_source_file = b.path("data/planets.zon"),
-    });
-    mod.addAnonymousImport("parts_zon", .{
-        .root_source_file = b.path("data/parts.zon"),
-    });
-    // Tables (Stage 12.17): tuning knobs, MekLab construction tables, names.
-    mod.addAnonymousImport("tuning_zon", .{
-        .root_source_file = b.path("data/tables/tuning.zon"),
-    });
-    mod.addAnonymousImport("meklab_zon", .{
-        .root_source_file = b.path("data/tables/meklab.zon"),
-    });
-    mod.addAnonymousImport("names_zon", .{
-        .root_source_file = b.path("data/tables/names.zon"),
-    });
-    mod.addAnonymousImport("ranks_zon", .{
-        .root_source_file = b.path("data/tables/ranks.zon"),
-    });
-    mod.addAnonymousImport("awards_zon", .{
-        .root_source_file = b.path("data/tables/awards.zon"),
-    });
-    mod.addAnonymousImport("abilities_zon", .{
-        .root_source_file = b.path("data/tables/abilities.zon"),
-    });
-    mod.addAnonymousImport("rat_zon", .{
-        .root_source_file = b.path("data/tables/rat.zon"),
-    });
-    mod.addAnonymousImport("factions_zon", .{
-        .root_source_file = b.path("data/tables/factions.zon"),
-    });
-    mod.addAnonymousImport("scenarios_zon", .{
-        .root_source_file = b.path("data/tables/scenarios.zon"),
-    });
-    mod.addAnonymousImport("terrain_zon", .{
-        .root_source_file = b.path("data/tables/terrain.zon"),
-    });
+    //
+    // Mod support (Stage 12C.18): `zig build -Ddata=<dir>` overlays any of
+    // these files from <dir> (same relative path: <dir>/chassis.zon,
+    // <dir>/tables/tuning.zon …). Missing files fall back to data/. The
+    // typed structs the tables import into are the schema: a malformed mod
+    // fails the build, not the campaign. See docs/modding.md.
+    const data_dir = b.option([]const u8, "data", "Directory overlaying data/*.zon and data/tables/*.zon (mod support)");
+    const DataFile = struct { import_name: []const u8, rel: []const u8 };
+    const data_files = [_]DataFile{
+        .{ .import_name = "chassis_zon", .rel = "chassis.zon" },
+        .{ .import_name = "planets_zon", .rel = "planets.zon" },
+        .{ .import_name = "parts_zon", .rel = "parts.zon" },
+        // Tables (Stage 12.17): tuning knobs, MekLab construction tables, names …
+        .{ .import_name = "tuning_zon", .rel = "tables/tuning.zon" },
+        .{ .import_name = "meklab_zon", .rel = "tables/meklab.zon" },
+        .{ .import_name = "names_zon", .rel = "tables/names.zon" },
+        .{ .import_name = "ranks_zon", .rel = "tables/ranks.zon" },
+        .{ .import_name = "awards_zon", .rel = "tables/awards.zon" },
+        .{ .import_name = "abilities_zon", .rel = "tables/abilities.zon" },
+        .{ .import_name = "rat_zon", .rel = "tables/rat.zon" },
+        .{ .import_name = "factions_zon", .rel = "tables/factions.zon" },
+        .{ .import_name = "scenarios_zon", .rel = "tables/scenarios.zon" },
+        .{ .import_name = "terrain_zon", .rel = "tables/terrain.zon" },
+    };
+    var overlaid = std.ArrayList([]const u8).empty;
+    for (data_files) |f| {
+        var path: std.Build.LazyPath = b.path(b.fmt("data/{s}", .{f.rel}));
+        if (data_dir) |dir| {
+            const candidate = b.pathJoin(&.{ dir, f.rel });
+            const exists = if (std.fs.path.isAbsolute(candidate))
+                std.Io.Dir.accessAbsolute(b.graph.io, candidate, .{})
+            else
+                b.build_root.handle.access(b.graph.io, candidate, .{});
+            if (exists) |_| {
+                path = if (std.fs.path.isAbsolute(candidate)) .{ .cwd_relative = candidate } else b.path(candidate);
+                overlaid.append(b.allocator, f.rel) catch @panic("OOM");
+            } else |_| {}
+        }
+        mod.addAnonymousImport(f.import_name, .{ .root_source_file = path });
+    }
+    // What the binary can say about its data (settings screen, REPL banner).
+    const build_options = b.addOptions();
+    build_options.addOption(?[]const u8, "data_dir", data_dir);
+    build_options.addOption([]const []const u8, "data_overlays", overlaid.items);
+    mod.addImport("build_options", build_options.createModule());
 
     // Persistence (Stage 11): the system SQLite library, bound by hand in
     // src/persist/sqlite.zig (no translate-c dependency).

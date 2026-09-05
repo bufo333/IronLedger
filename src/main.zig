@@ -960,8 +960,9 @@ fn runRepl(gs: *game.state.GameState, io: std.Io, gpa: std.mem.Allocator, store_
         \\turn:     day [n] [force]   (the checklist gates it)
         \\commands: `help` lists every verb with its usage — the same verbs the TUI's `:` line takes
         \\factions: LC DC FS CC FWL — professions: quartermaster paymaster chief_engineer line_officer
+        \\data:     {s}
         \\
-    , .{});
+    , .{game.dataProvenance(std.heap.page_allocator) catch "stock tables (data/)"});
 
     var stdin_buf: [4096]u8 = undefined;
     var stdin_reader = std.Io.File.stdin().readerStreaming(io, &stdin_buf);
