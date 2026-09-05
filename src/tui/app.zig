@@ -832,13 +832,13 @@ pub const App = struct {
         const al = self.a();
         const g = &self.gs.?;
         const b = self.body();
-        const view = try q.market(al, g, self.market_filter);
+        const view = try q.market(al, g, self.market_filter, @enumFromInt(self.hqSelId(g)));
         const top_h: u16 = @max(6, b.h * 2 / 5);
         var board: std.ArrayListUnmanaged([]const u8) = .empty;
         for (view.board) |r| try board.append(al, r.text);
         if (view.board.len == 0) try board.append(al, "{d}nothing on the boards — they refresh on the 1st, staples restock as they sell{/}");
         const hq_id: types.HqId = @enumFromInt(self.hqSelId(g));
-        const inner = self.screen.pane(.{ .x = b.x, .y = b.y, .w = b.w, .h = top_h }, .{ .title = try std.fmt.allocPrint(al, "MARKET BOARDS · filter {{a}}{s}{{/}} · {d} listings · buyer {s}", .{ @tagName(self.market_filter), view.board.len, q.hqName(g, hq_id) }), .focused = self.focus == 0, .right_title = "[/] next filter  [,] previous  [Enter] buy" });
+        const inner = self.screen.pane(.{ .x = b.x, .y = b.y, .w = b.w, .h = top_h }, .{ .title = try std.fmt.allocPrint(al, "MARKET BOARD · {{a}}{s}{{/}} pays from its treasury ({s}) · filter {{a}}{s}{{/}} · {d} listings", .{ q.hqName(g, hq_id), try q.money(al, g.treasuryBalance(.{ .hq = hq_id })), @tagName(self.market_filter), view.board.len }), .focused = self.focus == 0, .right_title = "[ ] other HQ's board  [/] filter  [Enter] buy" });
         self.stickyList(inner, view.board_header, board.items, 0, self.focus == 0);
 
         const cw: u16 = if (self.narrow()) b.w else b.w * 55 / 100;
@@ -2498,7 +2498,7 @@ pub const App = struct {
                 self.moveCursor(0, delta, view.rows.len);
             },
             .market => {
-                const view = try q.market(al, g, self.market_filter);
+                const view = try q.market(al, g, self.market_filter, @enumFromInt(self.hqSelId(g)));
                 switch (self.focus) {
                     0 => self.moveCursor(0, delta, view.board.len),
                     1 => self.moveCursor(1, delta, view.catalog.len),
@@ -2604,12 +2604,21 @@ pub const App = struct {
                 self.modal = .{ .seat = id };
             },
             .market => {
-                const view = try q.market(al, g, self.market_filter);
+                const view = try q.market(al, g, self.market_filter, @enumFromInt(self.hqSelId(g)));
                 const hq_id: types.HqId = @enumFromInt(self.hqSelId(g));
                 switch (self.focus) {
                     0 => if (view.board.len > 0) {
                         const l = view.board[@min(self.cur(0).*, view.board.len - 1)];
                         const ship = if (l.index < g.market_listings.items.len) (if (game.chassis.find(g.market_listings.items[l.index].item_key)) |d| d.kind.isTransport() else false) else false;
+                        // Say which till is short before the sim refuses in the abstract.
+                        if (l.index < g.market_listings.items.len) {
+                            const price = g.market_listings.items[l.index].price;
+                            const have = g.treasuryBalance(.{ .hq = l.hq });
+                            if (have < price) {
+                                self.say(.crit, "{s}'s treasury has {s}; this listing costs {s} — Ledger t couriers funds there (outfit has {s})", .{ q.hqName(g, l.hq), try q.money(al, have), try q.money(al, price), try q.money(al, g.funds) });
+                                return;
+                            }
+                        }
                         try self.exec(.{ .buy_listing = l.index });
                         if (self.msg.len == 0 or self.msg_style != .crit) {
                             if (ship) self.say(.good, "bought listing [{d}] — berthed at {s}; hire a ship crew from the hall and it lifts the next deployment", .{ l.index, q.hqName(g, hq_id) }) else self.say(.good, "bought listing [{d}]", .{l.index});
@@ -2707,7 +2716,7 @@ pub const App = struct {
                     self.cur(1).* = 0;
                 },
                 'b' => {
-                    const view = try q.market(al, g, self.market_filter);
+                    const view = try q.market(al, g, self.market_filter, @enumFromInt(self.hqSelId(g)));
                     if (self.focus == 1 and view.catalog.len > 0) {
                         const r = view.catalog[@min(self.cur(1).*, view.catalog.len - 1)];
                         if (!r.component) {
@@ -2731,7 +2740,7 @@ pub const App = struct {
                     if (self.msg_style != .crit) self.say(.good, "keep-stocked line for {s} removed", .{r.key});
                 },
                 'K' => {
-                    const view = try q.market(al, g, self.market_filter);
+                    const view = try q.market(al, g, self.market_filter, @enumFromInt(self.hqSelId(g)));
                     if (self.focus == 1 and view.catalog.len > 0) {
                         const r = view.catalog[@min(self.cur(1).*, view.catalog.len - 1)];
                         var buf: [96]u8 = undefined;

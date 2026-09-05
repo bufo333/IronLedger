@@ -897,6 +897,13 @@ item: tests green, both smokes, ROADMAP tick, one commit.
   gained rows), so the highlighted mess hall resolved to the spaceport.
   `queries.hqFacilityAtRow` now maps the rendered row back to its
   facility; rows outside the table open the picker.
+- ✅ Fix (play feedback 2026-09-05): the Market screen showed every HQ's
+  listings on one board while naming the selected HQ as buyer; a purchase
+  always drew on the listing's own HQ, so "not enough money in that
+  treasury" could point at a till you were not looking at. The board is
+  now per HQ (`[ ]` switches), the title names the paying treasury and
+  its balance, and a short till is refused with both numbers and where to
+  courier funds from.
 - ✅ 12C.15 **Tech target numbers**: `GameState.hullHours` scales the
   class table by quality (`hours_quality_bp`: an A-grade wreck wants ×1.5,
   an F-grade machine ×0.8) and by an exotic design (`hours_exotic_bp`,

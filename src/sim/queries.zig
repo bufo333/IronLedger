@@ -1568,6 +1568,8 @@ pub fn upgrades(alloc: Alloc, gs: *GameState, hq_id: types.HqId) ![]UpgradeRow {
 pub const ListingRow = struct {
     index: usize,
     text: []const u8,
+    /// The HQ whose board this is — and whose treasury pays.
+    hq: types.HqId,
 };
 
 pub const CatalogRow = struct {
@@ -1675,9 +1677,13 @@ pub const MarketFilter = enum {
 };
 
 /// The site boards, the orderable catalog, and what the damaged hulls need.
-pub fn market(alloc: Alloc, gs: *GameState, filter: MarketFilter) !Market {
+/// The selected HQ's board (every HQ has its own; that HQ's treasury pays
+/// for what is bought from it), the orderable catalog, and what the
+/// damaged hulls need.
+pub fn market(alloc: Alloc, gs: *GameState, filter: MarketFilter, hq: types.HqId) !Market {
     var board: std.ArrayListUnmanaged(ListingRow) = .empty;
     for (gs.market_listings.items, 0..) |l, i| {
+        if (l.hq != hq and l.hq != .none) continue;
         const keep = switch (l.kind) {
             .unit => filter.matchesUnit(if (chassis_mod.find(l.item_key)) |c| c.kind else .mek),
             .part => filter.matchesPart(l.item_key),
@@ -1685,7 +1691,7 @@ pub fn market(alloc: Alloc, gs: *GameState, filter: MarketFilter) !Market {
         if (!keep) continue;
         const cond: []const u8 = if (l.condition) |c| try std.fmt.allocPrint(alloc, "{{a}}{s}{{/}} armor {d}% · {d} dmg · {d} missing", .{ c.label(), c.armor_pct, c.damaged_slots, c.missing_components }) else if (l.kind == .unit) "{g}new{/}" else "";
         const name: []const u8 = if (l.kind == .unit) (if (chassis_mod.find(l.item_key)) |c| c.name else l.item_key) else (if (@import("../domain/part.zig").find(l.item_key)) |p| p.name else l.item_key);
-        try board.append(alloc, .{ .index = i, .text = try std.fmt.allocPrint(alloc, "[{d: <3}] {s: <5} {s: <10} {s: <20} {s: >13}  x{d: <3} {s: <8} {s: <6} d{d: <5} {s}", .{
+        try board.append(alloc, .{ .index = i, .hq = l.hq, .text = try std.fmt.allocPrint(alloc, "[{d: <3}] {s: <5} {s: <10} {s: <20} {s: >13}  x{d: <3} {s: <8} {s: <6} d{d: <5} {s}", .{
             i, @tagName(l.kind), clip(l.item_key, 10), clip(name, 20), try money(alloc, l.price), l.quantity, @tagName(l.rarity), if (l.black_market) "{c}fence{/}" else if (l.staple) "staple" else "", l.expires_day, if (l.black_market) try std.fmt.allocPrint(alloc, "{{c}}black market{{/}} — no questions, maybe a fraud (2d6 ≤ {d}); the house frowns, the pirates smile · {s}", .{ @import("../domain/tuning.zig").t.market.black_market_fraud_target, cond }) else cond,
         }) });
     }
@@ -3327,6 +3333,28 @@ test "12C.8: the campaign summary reads counters, ledger and history" {
     try std.testing.expect(std.mem.indexOf(u8, joined.items, "2 wrecks salvaged") != null);
     try std.testing.expect(std.mem.indexOf(u8, joined.items, "3025: C (44)") != null);
     try std.testing.expect(std.mem.indexOf(u8, joined.items, "CONTRACTS") != null);
+}
+
+test "each HQ's market board shows only its own listings" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 72 });
+    defer gs.deinit();
+    const commands = @import("commands.zig");
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    const home = gs.hqs.keys()[0];
+    const far: types.HqId = @enumFromInt(99);
+    gs.market_listings.clearRetainingCapacity();
+    try gs.market_listings.append(gs.allocator(), .{ .kind = .unit, .item_key = "LCT-1V", .rarity = .common, .price = 1, .hq = home, .listed_day = 0, .expires_day = 400 });
+    try gs.market_listings.append(gs.allocator(), .{ .kind = .unit, .item_key = "SHD-2H", .rarity = .common, .price = 1, .hq = far, .listed_day = 0, .expires_day = 400 });
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const mine = try market(a, &gs, .all, home);
+    try std.testing.expectEqual(@as(usize, 1), mine.board.len);
+    try std.testing.expectEqual(@as(usize, 0), mine.board[0].index);
+    try std.testing.expectEqual(home, mine.board[0].hq);
+    const theirs = try market(a, &gs, .all, far);
+    try std.testing.expectEqual(@as(usize, 1), theirs.board.len);
+    try std.testing.expectEqual(@as(usize, 1), theirs.board[0].index); // the global index buy_listing takes
 }
 
 test "desk and ledger queries build on a fresh campaign" {
