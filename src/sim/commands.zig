@@ -436,10 +436,17 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
         },
         .refit_clear => |unit_id| {
             for (gs.refit_plans.items, 0..) |p, i| {
-                if (p.unit == unit_id and !p.committed) {
-                    _ = gs.refit_plans.orderedRemove(i);
-                    break;
+                if (p.unit != unit_id) continue;
+                if (p.committed) {
+                    // A committed plan lives with its bay job; one without a
+                    // job is an orphan (12.27) — clear it and give the parts back.
+                    if (hq_ops.hasJobForUnit(gs, unit_id)) return Error.ProjectInProgress;
+                    const home: types.Site = .{ .hq = gs.homeHqFor(if (gs.unit(unit_id)) |u| u.force else .none) };
+                    for (p.ops.items) |op| if (op == .install) try gs.addStock(home, op.install.part_key, 1);
+                    try gs.log(.construction, .{}, "[lab] orphaned refit plan on #{d} cleared — parts returned to the warehouse", .{@intFromEnum(unit_id)});
                 }
+                _ = gs.refit_plans.orderedRemove(i);
+                break;
             }
             return .{};
         },

@@ -2570,6 +2570,19 @@ pub fn lab(alloc: Alloc, gs: *GameState, uid: types.UnitId) !Lab {
     if (p) |pl| {
         const class = meklab.classify(pl.ops.items, u.slots.items);
         try plan.append(alloc, try std.fmt.allocPrint(alloc, "{s} plan · class {{a}}{s}{{/}} · {d} tech-hours", .{ if (pl.committed) "committed" else "staged", @tagName(class), meklab.refitHours(pl.ops.items, u.slots.items, class) }));
+        if (pl.committed) {
+            // Where the work stands (12.27): the bay job this plan became.
+            var job_line: ?[]const u8 = null;
+            var ahead: u32 = 0;
+            for (gs.bay_jobs.items) |j| {
+                if (j.unit == uid and j.kind == .refit) {
+                    job_line = if (j.started_day != null) try std.fmt.allocPrint(alloc, "  {{g}}in the bay at {s}{{/}} — done day {d} ({d} day{s} left)", .{ hqName(gs, j.hq), j.done_day orelse 0, (j.done_day orelse gs.clock.day_index) -| gs.clock.day_index, if ((j.done_day orelse gs.clock.day_index) -| gs.clock.day_index == 1) "" else "s" }) else try std.fmt.allocPrint(alloc, "  {{a}}queued at {s}{{/}} — {d} job{s} ahead, {d} bay slot{s}; see the HQ screen (F7) bays list", .{ hqName(gs, j.hq), ahead, if (ahead == 1) "" else "s", @import("hq_ops.zig").baySlots(gs, j.hq), if (@import("hq_ops.zig").baySlots(gs, j.hq) == 1) "" else "s" });
+                    break;
+                }
+                if (j.hq == gs.homeHqFor(u.force) and j.started_day == null) ahead += 1;
+            }
+            try plan.append(alloc, job_line orelse "  {c}committed but no bay job exists — [c] clears it and returns the parts to the warehouse{/}");
+        }
         for (pl.ops.items) |op| switch (op) {
             .remove => |k| try plan.append(alloc, try std.fmt.allocPrint(alloc, "  − remove {s}", .{k})),
             .install => |it| try plan.append(alloc, try std.fmt.allocPrint(alloc, "  + install {s} in {s}", .{ it.part_key, @tagName(it.location) })),
