@@ -123,6 +123,10 @@ pub const Person = struct {
     /// Set by the medical system once a doctor triages the wound (Stage 8):
     /// the day the last open injury closes (mirror of `healDoneDay`).
     wound_heal_day: ?u32 = null,
+    /// Rank (12B.4): set by seat and experience each payday unless pinned
+    /// by `promote`. Scales pay through `monthlySalary`.
+    rank: @import("rank.zig").Rank = .private,
+    rank_pinned: bool = false,
     /// Per-location injuries (Stage 12.16); open ones keep the person in
     /// the medbay, permanent ones stay on the record.
     injuries: std.ArrayListUnmanaged(Injury) = .empty,
@@ -221,7 +225,12 @@ pub const Person = struct {
     /// Monthly salary: CamOps base × experience multiplier, unless overridden.
     pub fn monthlySalary(self: *const Person) types.CBills {
         if (self.salary_override) |s| return s;
-        return types.applyBp(self.role.baseSalary(), self.experience().salaryMultBp());
+        return types.applyBp(types.applyBp(self.role.baseSalary(), self.experience().salaryMultBp()), self.rank.payBp());
+    }
+
+    /// "Sgt. Lori Kalmar" for rosters and AARs.
+    pub fn rankedName(self: *const Person, alloc: std.mem.Allocator) ![]const u8 {
+        return std.fmt.allocPrint(alloc, "{s} {s} {s}", .{ self.rank.abbrev(), self.first_name, self.last_name });
     }
 };
 

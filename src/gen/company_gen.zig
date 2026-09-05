@@ -157,6 +157,7 @@ pub fn generateInto(gs: *GameState, name: []const u8) !types.ForceId {
 
     // Every hull gets its tech (Stage 9C.2): the tail is sized for it.
     _ = try gs.autoAssign(company_id);
+    _ = try @import("../sim/personnel.zig").refreshRanks(gs); // 12B.4: officers by seat
     return company_id;
 }
 

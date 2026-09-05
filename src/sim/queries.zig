@@ -1935,7 +1935,7 @@ pub fn people(alloc: Alloc, gs: *GameState, filter: HallFilter) !People {
         total += 1;
         if (!filter.matches(p.role)) continue;
         if (filter == .wounded and p.status != .wounded) continue;
-        const name = try std.fmt.allocPrint(alloc, "{s} {s}", .{ p.first_name, p.last_name });
+        const name = try p.rankedName(alloc);
         try rows.append(alloc, .{ .id = p.id, .text = try std.fmt.allocPrint(alloc, "{d: <4} {s: <20} {s: <15} {s: <7} {s: <5} {d: >3} {s} {s} {s: <11} {d: >3} {d: >3} {s: >7}", .{
             @intFromEnum(p.id),                                                             clip(name, 20),
             @tagName(p.role),                                                               @tagName(p.experience()),
@@ -2141,7 +2141,7 @@ pub fn personRecord(alloc: Alloc, gs: *GameState, id: types.PersonId) ![]const [
     var out: std.ArrayListUnmanaged([]const u8) = .empty;
     const p = gs.person(id) orelse return out.toOwnedSlice(alloc);
     const day = gs.clock.day_index;
-    try out.append(alloc, try std.fmt.allocPrint(alloc, "{{a}}{s} {s}{{/}}{s}  ·  {s} · {s}", .{ p.first_name, p.last_name, if (p.callsign) |c| try std.fmt.allocPrint(alloc, " \"{s}\"", .{c}) else "", @tagName(p.role), @tagName(p.experience()) }));
+    try out.append(alloc, try std.fmt.allocPrint(alloc, "{{a}}{s} {s} {s}{{/}}{s}  ·  {s} · {s} · {s}{s}", .{ p.rank.abbrev(), p.first_name, p.last_name, if (p.callsign) |c| try std.fmt.allocPrint(alloc, " \"{s}\"", .{c}) else "", @tagName(p.role), @tagName(p.experience()), p.rank.name(), if (p.rank_pinned) " (pinned — :promote <id> <rank> unpin lets seats decide)" else "" }));
     try out.append(alloc, try std.fmt.allocPrint(alloc, "status      {s}{s}", .{ try statusText(alloc, gs, p), if (p.status == .wounded) (if (p.wound_heal_day) |h| try std.fmt.allocPrint(alloc, " · discharged day {d} ({d} days)", .{ h, h -| day }) else if (p.medbay_admitted) " · triage tomorrow" else " · {c}not admitted — [m] admits{/}") else "" }));
     try out.append(alloc, try std.fmt.allocPrint(alloc, "assignment  {s}", .{try assignmentText(alloc, gs, p)}));
     try out.append(alloc, try std.fmt.allocPrint(alloc, "unit        {s} · at {s}", .{ if (p.assigned_force != .none) forceName(gs, p.assigned_force) else "—", locationText(gs, p) }));

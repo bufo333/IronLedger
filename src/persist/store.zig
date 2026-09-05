@@ -25,7 +25,7 @@ const contract_events = @import("../sim/contract_events.zig");
 const network = @import("../sim/network.zig");
 const clock_mod = @import("../sim/clock.zig");
 
-pub const schema_version = 10;
+pub const schema_version = 11;
 
 const ddl =
     \\CREATE TABLE IF NOT EXISTS player (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_seq INTEGER NOT NULL);
@@ -35,7 +35,7 @@ const ddl =
     \\CREATE TABLE IF NOT EXISTS meta_text (cid INTEGER NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (cid, key));
     \\CREATE TABLE IF NOT EXISTS rng (cid INTEGER PRIMARY KEY, state BLOB NOT NULL);
     \\CREATE TABLE IF NOT EXISTS commander (cid INTEGER PRIMARY KEY, name TEXT NOT NULL, origin TEXT NOT NULL, profession TEXT NOT NULL);
-    \\CREATE TABLE IF NOT EXISTS person (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, first TEXT, last TEXT, callsign TEXT, role TEXT, xp INTEGER, status TEXT, fatigue INTEGER, morale INTEGER, recruited_day INTEGER, salary_override INTEGER, assigned_force INTEGER, posted_hq INTEGER, weekly_hours INTEGER, medbay_priority INTEGER, leave_until INTEGER, wound_heal_day INTEGER, training_skill TEXT, training_done INTEGER, admitted INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (cid, id));
+    \\CREATE TABLE IF NOT EXISTS person (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, first TEXT, last TEXT, callsign TEXT, role TEXT, xp INTEGER, status TEXT, fatigue INTEGER, morale INTEGER, recruited_day INTEGER, salary_override INTEGER, assigned_force INTEGER, posted_hq INTEGER, weekly_hours INTEGER, medbay_priority INTEGER, leave_until INTEGER, wound_heal_day INTEGER, training_skill TEXT, training_done INTEGER, admitted INTEGER NOT NULL DEFAULT 0, rank TEXT NOT NULL DEFAULT 'private', rank_pinned INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (cid, id));
     \\CREATE TABLE IF NOT EXISTS person_skill (cid INTEGER NOT NULL, person_id INTEGER NOT NULL, skill TEXT NOT NULL, level INTEGER NOT NULL);
     \\CREATE TABLE IF NOT EXISTS injury (cid INTEGER NOT NULL, person_id INTEGER NOT NULL, ord INTEGER NOT NULL, location TEXT NOT NULL, severity INTEGER NOT NULL, incurred INTEGER NOT NULL, heal_done INTEGER, doctor INTEGER NOT NULL DEFAULT 0, permanent INTEGER NOT NULL DEFAULT 0, healed INTEGER NOT NULL DEFAULT 0);
     \\CREATE TABLE IF NOT EXISTS unit (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, chassis_key TEXT, name TEXT, kind TEXT, force INTEGER, pilot INTEGER, tech INTEGER, armor_pct INTEGER, quality TEXT, status TEXT, last_maint INTEGER, acquired_day INTEGER, price INTEGER, reactivation_done INTEGER, berth_hq INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (cid, id));
@@ -100,6 +100,8 @@ pub const Store = struct {
         // (created by ddl; absent rows read as 0).
         .{ .version = 9, .table = "pending_event", .column = "person", .sql = "ALTER TABLE pending_event ADD COLUMN person INTEGER NOT NULL DEFAULT 0" },
         .{ .version = 10, .table = "contract", .column = "negotiated", .sql = "ALTER TABLE contract ADD COLUMN negotiated INTEGER NOT NULL DEFAULT 0" },
+        .{ .version = 11, .table = "person", .column = "rank", .sql = "ALTER TABLE person ADD COLUMN rank TEXT NOT NULL DEFAULT 'private'" },
+        .{ .version = 11, .table = "person", .column = "rank_pinned", .sql = "ALTER TABLE person ADD COLUMN rank_pinned INTEGER NOT NULL DEFAULT 0" },
     };
 
     pub fn open(path: [*:0]const u8) !Store {
@@ -340,7 +342,7 @@ pub const Store = struct {
 
         // People.
         {
-            const st = try self.db.prepare("INSERT INTO person VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22)");
+            const st = try self.db.prepare("INSERT INTO person VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24)");
             defer st.finalize();
             const sk = try self.db.prepare("INSERT INTO person_skill VALUES (?1, ?2, ?3, ?4)");
             defer sk.finalize();
@@ -360,6 +362,7 @@ pub const Store = struct {
                     p.wound_heal_day,               if (p.training) |t| @as(?[]const u8, @tagName(t.skill)) else null,
                     if (p.training) |t| @as(?u32, t.done_day) else null,
                     @as(i64, @intFromBool(p.medbay_admitted)),
+                    p.rank,                         @as(i64, @intFromBool(p.rank_pinned)),
                 });
                 try st.run();
                 var skit = p.skills.iterator();
@@ -739,7 +742,7 @@ pub const Store = struct {
 
         // People.
         {
-            const st = try self.db.prepare("SELECT id, first, last, callsign, role, xp, status, fatigue, morale, recruited_day, salary_override, assigned_force, posted_hq, weekly_hours, medbay_priority, leave_until, wound_heal_day, training_skill, training_done, admitted FROM person WHERE cid = ?1 ORDER BY ord");
+            const st = try self.db.prepare("SELECT id, first, last, callsign, role, xp, status, fatigue, morale, recruited_day, salary_override, assigned_force, posted_hq, weekly_hours, medbay_priority, leave_until, wound_heal_day, training_skill, training_done, admitted, rank, rank_pinned FROM person WHERE cid = ?1 ORDER BY ord");
             defer st.finalize();
             try st.bindAll(.{cid});
             while (try st.next()) {
@@ -762,6 +765,8 @@ pub const Store = struct {
                     .leave_until_day = optU32(st.optInt(15)),
                     .wound_heal_day = optU32(st.optInt(16)),
                     .medbay_admitted = st.int(19) != 0,
+                    .rank = st.enumValue(@import("../domain/rank.zig").Rank, 20) orelse .private,
+                    .rank_pinned = st.int(21) != 0,
                 };
                 if (st.enumValue(types.SkillType, 17)) |skill| {
                     if (st.optInt(18)) |done| p.training = .{ .skill = skill, .done_day = @intCast(done) };

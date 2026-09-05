@@ -1,0 +1,14 @@
+// Mercenary rank ladder (Stage 12B.4; MekHQ `personnel/ranks`, CamOps
+// officer pay). Typed against domain/rank.zig `RankRow` at comptime, one
+// row per `Rank` enum value in order. pay_bp scales the CamOps salary.
+.{
+    .{ .key = "recruit", .name = "Recruit", .abbrev = "Rct.", .pay_bp = 10_000, .officer = false },
+    .{ .key = "private", .name = "Private", .abbrev = "Pvt.", .pay_bp = 10_000, .officer = false },
+    .{ .key = "corporal", .name = "Corporal", .abbrev = "Cpl.", .pay_bp = 11_000, .officer = false },
+    .{ .key = "sergeant", .name = "Sergeant", .abbrev = "Sgt.", .pay_bp = 12_000, .officer = false },
+    .{ .key = "master_sergeant", .name = "Master Sergeant", .abbrev = "MSgt.", .pay_bp = 13_000, .officer = false },
+    .{ .key = "lieutenant", .name = "Lieutenant", .abbrev = "Lt.", .pay_bp = 15_000, .officer = true },
+    .{ .key = "captain", .name = "Captain", .abbrev = "Cpt.", .pay_bp = 18_000, .officer = true },
+    .{ .key = "major", .name = "Major", .abbrev = "Maj.", .pay_bp = 22_000, .officer = true },
+    .{ .key = "colonel", .name = "Colonel", .abbrev = "Col.", .pay_bp = 25_000, .officer = true },
+}

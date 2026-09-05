@@ -57,6 +57,8 @@ pub const Command = union(enum) {
     },
     /// Accept an offer off the current board and send a company.
     accept_contract: struct { offer_index: usize, company: types.ForceId },
+    /// Pin a rank on a person (12B.4); `.private` unpinned lets seats decide again.
+    promote: struct { person: types.PersonId, rank: @import("../domain/rank.zig").Rank, pin: bool = true },
     /// One negotiation round on an offer (12B.3): improve a term, harden
     /// the offer, or lose it.
     negotiate: struct { offer_index: usize, term: contract_mod.NegotiableTerm },
@@ -517,6 +519,15 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
         },
         .accept_contract => |a| return acceptContract(gs, a.offer_index, a.company),
         .negotiate => |n| return negotiate(gs, n.offer_index, n.term),
+        .promote => |pr| {
+            const p = gs.person(pr.person) orelse return Error.UnknownPerson;
+            const was = p.rank;
+            p.rank = pr.rank;
+            p.rank_pinned = pr.pin;
+            if (!pr.pin) _ = try @import("personnel.zig").refreshRanks(gs);
+            try gs.log(.rotation, .{ .company = gs.companyOf(p.assigned_force), .hq = p.posted_hq }, "[rank] {s} {s}: {s} → {s}{s} · {d} c-bills/mo", .{ p.first_name, p.last_name, was.name(), p.rank.name(), if (pr.pin) " (pinned)" else "", p.monthlySalary() });
+            return .{};
+        },
         .order_part => |o| return orderPart(gs, o.part_key, o.quantity, o.dest),
         .ship_stock => |s| return shipStock(gs, s.part_key, s.quantity, s.from, s.to),
         .buy_listing => |index| {
@@ -2067,12 +2078,12 @@ test "payroll drains funds over three months, resignations stop costing" {
     const warrior = (try execute(&gs, .{ .hire = .{ .first = "A", .last = "B", .role = .mekwarrior } })).hired;
     _ = try execute(&gs, .{ .hire = .{ .first = "C", .last = "D", .role = .astech } });
 
-    _ = try execute(&gs, .{ .advance_days = 31 }); // Feb 1: 1500 + 400
-    try std.testing.expectEqual(@as(i64, 998_100), gs.funds);
+    _ = try execute(&gs, .{ .advance_days = 31 }); // Feb 1: (1500 + 400) × 1.1 — regulars rank Corporal (12B.4)
+    try std.testing.expectEqual(@as(i64, 997_910), gs.funds);
 
     _ = try execute(&gs, .{ .fire = warrior });
-    _ = try execute(&gs, .{ .advance_days = 28 }); // Mar 1: 400 only
-    try std.testing.expectEqual(@as(i64, 997_700), gs.funds);
+    _ = try execute(&gs, .{ .advance_days = 28 }); // Mar 1: 440 only
+    try std.testing.expectEqual(@as(i64, 997_470), gs.funds);
 }
 
 test "turn-based decisions: time never blocks, deadlines default" {

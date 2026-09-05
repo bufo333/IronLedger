@@ -362,6 +362,8 @@ fn runFinances(gs: *GameState) !void {
         const p = entry.value_ptr;
         if (p.status == .active) p.xp += monthly_service_xp;
     }
+    // Seats and experience set ranks before pay is counted (12B.4).
+    _ = try @import("personnel.zig").refreshRanks(gs);
     // Notice is handed in on payday (Stage 12.20); grudges fade (12.21).
     _ = try @import("medical.zig").runMonthlyTurnover(gs);
     @import("contract_control.zig").driftStanding(gs);
@@ -491,7 +493,7 @@ fn runFinances(gs: *GameState) !void {
 test "payday fires on the 1st and only on the 1st" {
     var gs = GameState.init(std.testing.allocator, .{ .start_funds = 1_000_000 });
     defer gs.deinit();
-    _ = try gs.hirePerson("Natasha", "Kerensky", .mekwarrior); // 1500/mo regular
+    _ = try gs.hirePerson("Natasha", "Kerensky", .mekwarrior); // 1500/mo regular → Corporal ×1.1 on payday (12B.4)
 
     // Jan 1 (day 0) start → advancing 30 days lands on Jan 31: no payroll yet.
     for (0..30) |_| _ = try advanceDay(&gs);
@@ -499,7 +501,7 @@ test "payday fires on the 1st and only on the 1st" {
 
     // One more day → Feb 1: payroll posts, a month of service XP lands.
     _ = try advanceDay(&gs);
-    try std.testing.expectEqual(@as(i64, 998_500), gs.funds);
+    try std.testing.expectEqual(@as(i64, 998_350), gs.funds);
     try std.testing.expectEqual(@as(usize, 1), gs.ledger.transactions.items.len);
     try std.testing.expectEqual(@as(u32, monthly_service_xp), gs.people.values()[0].xp);
 }

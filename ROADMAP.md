@@ -643,7 +643,7 @@ map. Each item ends green with a ROADMAP tick, as before.
   (pay −5%) or, on a 2, withdraws it. Contracts screen `b` (bargain) opens a term
   picker; the offer row shows "negotiated" and what changed. Persisted
   (`negotiated` flag on the offer, store bump).
-- ⬜ 12B.4 **Ranks** (MekHQ `personnel/ranks`; CamOps mercenary table).
+- ✅ 12B.4 **Ranks** (MekHQ `personnel/ranks`; CamOps mercenary table).
   `data/tables/ranks.zon`: a mercenary rank ladder (Recruit → Private →
   Corporal → Sergeant → Lieutenant → Captain → Major → Colonel) with pay
   multipliers (CamOps officer pay) and slots: the commander is Colonel,

@@ -352,7 +352,7 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
                 if (severity == 12 and !player.mods.has_mash_lance) {
                     p.status = .kia;
                     kia += 1;
-                    rec.crew = try std.fmt.allocPrint(gs.allocator(), "{s} {s} KIA", .{ p.first_name, p.last_name });
+                    rec.crew = try std.fmt.allocPrint(gs.allocator(), "{s} KIA", .{try p.rankedName(gs.allocator())});
                 } else if (severity >= 11) {
                     try medical.inflict(gs, u.pilot, .combat, wound_severity, "battle");
                     wounded += 1;
@@ -522,9 +522,9 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
 
 /// "Lori Kalmar wounded (serious torso)" from the injury just inflicted.
 fn woundText(gs: *GameState, p: *const person_mod.Person) ![]const u8 {
-    if (p.injuries.items.len == 0) return try std.fmt.allocPrint(gs.allocator(), "{s} {s} wounded", .{ p.first_name, p.last_name });
+    if (p.injuries.items.len == 0) return try std.fmt.allocPrint(gs.allocator(), "{s} wounded", .{try p.rankedName(gs.allocator())});
     const inj = p.injuries.items[p.injuries.items.len - 1];
-    return try std.fmt.allocPrint(gs.allocator(), "{s} {s} wounded ({s} {s}{s})", .{ p.first_name, p.last_name, medical.severityLabel(inj.severity), @tagName(inj.location), if (inj.permanent) ", permanent" else "" });
+    return try std.fmt.allocPrint(gs.allocator(), "{s} wounded ({s} {s}{s})", .{ try p.rankedName(gs.allocator()), medical.severityLabel(inj.severity), @tagName(inj.location), if (inj.permanent) ", permanent" else "" });
 }
 
 /// Turn a salvage claim in BV into things (Stage 12.23): whole wrecks

@@ -137,6 +137,13 @@ pub fn parseCommand(verb: []const u8, tokens: *std.mem.TokenIterator(u8, .scalar
     if (eq(u8, verb, "loan")) {
         return .{ .take_loan = .{ .principal = try num(i64, tokens.next()), .term_months = if (tokens.next()) |t| (std.fmt.parseInt(u16, t, 10) catch return error.BadNumber) else 12 } };
     }
+    if (eq(u8, verb, "promote")) {
+        // promote <person> <rank> [unpin]
+        const pid: types.PersonId = @enumFromInt(try num(u32, tokens.next()));
+        const r = std.meta.stringToEnum(game.rank.Rank, try need(tokens.next())) orelse return error.BadArguments;
+        const pin = if (tokens.next()) |t| !eq(u8, t, "unpin") else true;
+        return .{ .promote = .{ .person = pid, .rank = r, .pin = pin } };
+    }
     if (eq(u8, verb, "negotiate")) {
         // negotiate <offer#> advance|salvage|transport|support|rights|pay
         const idx = try num(usize, tokens.next());
@@ -387,6 +394,7 @@ pub const verbs = [_][]const u8{
     "loan",
     "accept",
     "negotiate",
+    "promote",
     "resolve",
     "order",
     "ship",
@@ -445,6 +453,7 @@ pub fn usage(verb: []const u8) ?[]const u8 {
         .{ "loan", "loan <amount> [months]" },
         .{ "accept", "accept <offer#> <co:N|N>" },
         .{ "negotiate", "negotiate <offer#> advance|salvage|transport|support|rights|pay  (one round per offer)" },
+        .{ "promote", "promote <person> recruit|private|corporal|sergeant|master_sergeant|lieutenant|captain|major|colonel [unpin]" },
         .{ "resolve", "resolve <event#> <option#>" },
         .{ "order", "order <part> [qty] [hq:N|co:N]" },
         .{ "ship", "ship <part> <qty> <from site> <to site>" },
