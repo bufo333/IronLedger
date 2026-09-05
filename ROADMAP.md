@@ -675,7 +675,7 @@ map. Each item ends green with a ROADMAP tick, as before.
   or recruitment after a loyalty roll (a mekwarrior for your seats,
   morale −2 for the company). The flat 50k ransom goes away. Store: POW
   rows are people; a `captor` field.
-- ⬜ 12B.8 **Catalogue breadth** (TRO:3025 and 3026, re-encoded by hand,
+- ✅ 12B.8 **Catalogue breadth** (TRO:3025 and 3026, re-encoded by hand,
   approximate BV/cost flagged // TUNE). Meks: the rest of the 3025 set —
   Wasp, Stinger, Valkyrie, Urbanmech, Spider, Firestarter, Javelin,
   Hermes II, Cicada, Whitworth, Vindicator, Clint, Hunchback, Blackjack,

@@ -181,7 +181,7 @@
         .starter_medical = 10,
         .starter_armor = 20,
         .starter_components_each = 1,
-        .starter_munitions_each = 12,
+        .starter_munitions_each = 8, // seven families now (12B.8): keeps the founding warehouse under its 200t
         .provisions_keep_min = 30,
         .provisions_keep_target = 90,
     },

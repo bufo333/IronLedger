@@ -1474,7 +1474,7 @@ pub const GameState = struct {
                         }
                     }
                 }
-            } else if (u.kind == .mek) {
+            } else if (u.kind == .mek or u.kind == .vehicle) {
                 for (co.children.items) |cid| {
                     const lance = self.forces.getPtr(cid) orelse continue;
                     if (lance.echelon == .lance and lance.units.items.len < force_mod.lance_size) {

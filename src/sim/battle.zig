@@ -533,24 +533,20 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
         });
     }
     if (spoils.len > 0) try gs.log(.battle, ctx, "[AAR]   salvage: {s}{s}", .{ spoils, if (liaison_cut > 0) try std.fmt.allocPrint(gs.allocator(), " (the employer's liaison claimed {d} BV under {s} command rights)", .{ liaison_cut, @tagName(c.terms.command_rights) }) else "" }) else if (held_field) try gs.log(.battle, ctx, "[AAR]   salvage: field held, nothing worth hauling ({d} BV destroyed, {d} haulable, {d}% rights)", .{ enemy_destroyed_bv, haulable_bv, c.terms.salvage_pct }) else try gs.log(.battle, ctx, "[AAR]   salvage: none — the field was not held", .{});
-    var expended_ac5: u32 = 0;
-    var expended_ac20: u32 = 0;
-    var expended_lrm: u32 = 0;
-    var expended_srm: u32 = 0;
-    var expended_mg: u32 = 0;
-    var eit = player.ammo_reserved.iterator();
-    while (eit.next()) |entry| {
-        const k = entry.key_ptr.*;
-        const v = entry.value_ptr.*;
-        if (std.mem.eql(u8, k, "ammo_ac5")) expended_ac5 = v;
-        if (std.mem.eql(u8, k, "ammo_ac20")) expended_ac20 = v;
-        if (std.mem.eql(u8, k, "ammo_lrm")) expended_lrm = v;
-        if (std.mem.eql(u8, k, "ammo_srm")) expended_srm = v;
-        if (std.mem.eql(u8, k, "ammo_mg")) expended_mg = v;
+    // Expended per family, and what is left in the trucks (12B.8: every family in the catalogue).
+    var spent: std.ArrayListUnmanaged(u8) = .empty;
+    var left: std.ArrayListUnmanaged(u8) = .empty;
+    for (part_mod.munition_keys, 0..) |key, ki| {
+        const used: u32 = player.ammo_reserved.get(key) orelse 0;
+        if (ki > 0) {
+            try spent.appendSlice(gs.allocator(), ", ");
+            try left.appendSlice(gs.allocator(), ", ");
+        }
+        try spent.appendSlice(gs.allocator(), try std.fmt.allocPrint(gs.allocator(), "{d}t {s}", .{ used, part_mod.munitionLabel(key) }));
+        try left.appendSlice(gs.allocator(), try std.fmt.allocPrint(gs.allocator(), "{d}t {s}", .{ gs.stockCount(player.site, key), part_mod.munitionLabel(key) }));
     }
-    try gs.log(.battle, ctx, "[AAR]   expended: {d}t AC/5, {d}t AC/20, {d}t LRM, {d}t SRM, {d}t MG | {d} mounts silenced (dry) | left in the trucks: {d}t AC/5, {d}t AC/20, {d}t LRM, {d}t SRM, {d}t MG, {d}t armor", .{
-        expended_ac5,                                 expended_ac20,                                 expended_lrm,                                 expended_srm,                                 expended_mg,                                 player.silenced_mounts,
-        gs.stockCount(player.site, "ammo_ac5"),      gs.stockCount(player.site, "ammo_ac20"),      gs.stockCount(player.site, "ammo_lrm"),      gs.stockCount(player.site, "ammo_srm"),      gs.stockCount(player.site, "ammo_mg"),      gs.stockCount(player.site, "armor"),
+    try gs.log(.battle, ctx, "[AAR]   expended: {s} | {d} mounts silenced (dry) | left in the trucks: {s}, {d}t armor", .{
+        spent.items, player.silenced_mounts, left.items, gs.stockCount(player.site, "armor"),
     });
 
     // Objectives (Stage 9E): the pool shrinks, VP accrue, and a broken pool
@@ -587,10 +583,8 @@ fn claimSalvage(gs: *GameState, c: *contract_mod.Contract, claim_bv: i64) ![]con
     var wrecks: u32 = 0;
     var tries: u8 = 0;
     while (wrecks < 2 and tries < 4) : (tries += 1) {
-        var buf: [32]*const chassis_mod.Chassis = undefined;
-        const pool = chassis_mod.ofWeightClass(company_gen.rollWeightClass(&gs.rng), &buf);
-        if (pool.len == 0) continue;
-        const design = pool[gs.rng.random(.battle).uintLessThan(usize, pool.len)];
+        // Off the enemy house's table (12B.8): Combine wrecks are Dragons.
+        const design = @import("../domain/rat.zig").roll(&gs.rng, .battle, c.enemy_key, company_gen.rollWeightClass(&gs.rng));
         if (design.bv > remaining) continue;
         remaining -= design.bv;
         const uid = try gs.addUnit(design.key);

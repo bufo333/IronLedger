@@ -87,8 +87,9 @@ pub fn generateInto(gs: *GameState, name: []const u8) !types.ForceId {
         const lance_id = try gs.createForce(lance_name, .lance, company_id);
         for (0..force.lance_size) |_| {
             const class = rollWeightClass(&gs.rng);
-            const pool = chassis.ofWeightClass(class, &scratch);
-            const design = pool[gs.rng.random(.generation).uintLessThan(usize, pool.len)];
+            // The house you come from fields what it fields (12B.8 RAT).
+            const home: []const u8 = if (gs.commander) |c| c.origin.key() else "PER";
+            const design = @import("../domain/rat.zig").roll(&gs.rng, .generation, home, class);
 
             const unit_id = try gs.addUnit(design.key);
             const pilot_id = try gs.recruitGenerated(.mekwarrior);

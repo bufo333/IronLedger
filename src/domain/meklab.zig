@@ -333,6 +333,7 @@ test "the canonical designs are legal and close to their tonnage" {
         for (r.violations) |v| std.debug.print("{s}: {s}\n", .{ design.key, v.text });
         try std.testing.expect(r.legal);
         // Abridged loadouts: never more than a few tons under.
+        if (r.free_half_tons < 0 or r.free_half_tons > 14) std.debug.print("{s}: free {d} half-tons (fixed {d}, loadout {d})\n", .{ design.key, r.free_half_tons, r.fixed_half_tons, r.loadout_half_tons });
         try std.testing.expect(r.free_half_tons >= 0 and r.free_half_tons <= 14);
     }
 }

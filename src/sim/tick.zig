@@ -90,6 +90,7 @@ fn runPolicies(gs: *GameState) !void {
     // inbound drops under its floor, at most once a week per line, never
     // past what the trucks can hold.
     const commands = @import("commands.zig");
+const Result = commands.Result;
     for (gs.supply_policies.items) |sp| {
         const f = gs.forces.getPtr(sp.company) orelse continue;
         if (gs.isCompanyHome(sp.company) or f.return_eta_day != null) continue;
@@ -111,6 +112,19 @@ fn runPolicies(gs: *GameState) !void {
             if (recent) continue;
             var want = line.target - on_hand - inbound;
             if (sp.tons > 0) want = @min(want, sp.tons);
+            // Ship what the trucks can take (12B.8 fix: a top-up larger than
+            // the free tonnage used to be refused outright and the company
+            // starved beside a full warehouse). Trucks packed with surplus
+            // ammo from employer convoys are trimmed first — excess rides
+            // home on the empty convoy so the food can land.
+            const room_now = gs.siteFreeTons(site) -| field_supply.inboundTons(gs, sp.company);
+            if (room_now < want * part_mod.tons(line.key)) {
+                const moved = (commands.execute(gs, .{ .trim_stock = sp.company }) catch Result{}).tons_moved;
+                if (moved > 0) try gs.log(.delivery, .{ .company = sp.company }, "[supply] trucks full: {d}t of surplus sent home to make room for {s}", .{ moved, line.key });
+            }
+            // Room counts what is already on the road (the shipment check does).
+            const free_tons = (gs.siteFreeTons(site) -| field_supply.inboundTons(gs, sp.company)) / @max(1, part_mod.tons(line.key));
+            want = @min(want, free_tons);
             const available = gs.stockCount(.{ .hq = home }, line.key);
             const qty = @min(want, available);
             if (qty == 0) {

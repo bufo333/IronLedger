@@ -615,7 +615,7 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             if ((dest.echelon == .lance or dest.echelon == .air_lance) and dest.units.items.len >= force_mod.lance_size) return Error.TooManyLances;
             if (u.status == .in_transit) return Error.Unavailable;
             if (dest.echelon == .air_lance and u.kind != .aerospace) return Error.WrongHullKind;
-            if (dest.echelon == .lance and u.kind != .mek) return Error.WrongHullKind;
+            if (dest.echelon == .lance and u.kind != .mek and u.kind != .vehicle) return Error.WrongHullKind; // mixed mek/vehicle lances are AtB-legal
             if (u.kind.isTransport()) return Error.WrongHullKind; // ships hold berths, not lance slots
             try gs.moveUnitToForce(m.unit, m.force);
             return .{};
@@ -1922,7 +1922,7 @@ test "12: a stock policy reorders a warehouse line to its target, once, and can 
     gs.hqs.getPtr(hq).?.funds = 20_000_000;
     gs.stock_policies.clearRetainingCapacity(); // drop the default provisions line (12.19) — this test counts lines
     try std.testing.expectError(Error.UnknownPart, execute(&gs, .{ .set_stock_policy = .{ .hq = hq, .part_key = "unobtainium", .min = 1, .target = 2 } }));
-    _ = try execute(&gs, .{ .set_stock_policy = .{ .hq = hq, .part_key = "ammo_lrm", .min = 10, .target = 30 } });
+    _ = try execute(&gs, .{ .set_stock_policy = .{ .hq = hq, .part_key = "ammo_lrm", .min = 5, .target = 30 } });
     try std.testing.expectEqual(@as(usize, 1), gs.stock_policies.items.len);
     // The founding warehouse holds some reloads already: above the minimum, nothing happens.
     _ = try execute(&gs, .advance_day);
@@ -2340,9 +2340,10 @@ test "9B: deployment eats field stores, then buys local, then goes hungry" {
     try std.testing.expect(gs.force(co).?.supply_shortage_days > 0 or
         mid.category(.supplies) + mid.category(.local_supplies) < 0);
 
-    // ...until a courier arrives and the local-purchase valve opens.
+    // ...until a courier arrives and the local-purchase valve opens (the
+    // courier takes the map transit, however far this seed's contract is).
     _ = try execute(&gs, .{ .transfer = .{ .from = .outfit, .to = .{ .company = co }, .amount = 500_000 } });
-    _ = try execute(&gs, .{ .advance_days = 25 });
+    _ = try execute(&gs, .{ .advance_days = gs.courierEtaDays(.{ .company = co }) + 3 });
     try std.testing.expectEqual(@as(u16, 0), gs.force(co).?.supply_shortage_days);
     const s = @import("../econ/finance.zig").summarize(&gs.ledger, 0, gs.clock.day_index, .{ .company = co });
     try std.testing.expect(s.category(.supplies) + s.category(.local_supplies) < 0);

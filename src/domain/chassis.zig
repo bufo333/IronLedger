@@ -111,6 +111,29 @@ test "catalog loads from zon with sane values and unique keys" {
     }
 }
 
+test "12B.8: the catalogue is broad — TRO:3025 meks, 3026 vehicles, fighters" {
+    var meks: u32 = 0;
+    var vehicles: u32 = 0;
+    var fighters: u32 = 0;
+    for (catalog) |c| switch (c.kind) {
+        .mek => meks += 1,
+        .vehicle => vehicles += 1,
+        .aerospace => fighters += 1,
+        else => {},
+    };
+    try std.testing.expect(meks >= 60);
+    try std.testing.expect(vehicles >= 12);
+    try std.testing.expect(fighters >= 10);
+    // Every loadout part resolves in the parts catalogue.
+    const part = @import("part.zig");
+    for (catalog) |c| for (c.loadout) |l| {
+        if (part.find(l.part) == null) {
+            std.debug.print("{s}: unknown part {s}\n", .{ c.key, l.part });
+            return error.TestUnexpectedResult;
+        }
+    };
+}
+
 test "transports and fighters are in the catalog with lift facts" {
     var buf: [16]*const Chassis = undefined;
     const ships = ofKind(.dropship, &buf);

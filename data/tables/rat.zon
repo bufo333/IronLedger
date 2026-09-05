@@ -1,0 +1,36 @@
+// Random assignment tables (Stage 12B.8; AtB RATs abridged): which designs
+// a house fields, by weight class. Repetition weights a design. Typed
+// against domain/rat.zig `RatRow`. PER stands for pirates and the near
+// Periphery: old, cheap and everywhere.
+.{
+    .{ .faction = "LC",
+        .light = .{ "COM-2D", "COM-2D", "LCT-1V", "STG-3R", "WSP-1A", "FS9-H", "UM-R60", "JVN-10N" },
+        .medium = .{ "GRF-1N", "GRF-1N", "SHD-2H", "WVR-6R", "WVR-6R", "PXH-1", "HBK-4G", "CN9-A", "WTH-1", "CDA-2A" },
+        .heavy = .{ "RFL-3N", "WHM-6R", "WHM-6D", "ARC-2R", "CPLT-C1", "TDR-5S", "OSR-2C", "JM6-S", "GHR-5H", "CRD-3R" },
+        .assault = .{ "ZEU-6S", "ZEU-6S", "BNC-3E", "BNC-3E", "AS7-D", "STK-3F", "AWS-8Q", "BLR-1G", "CGR-1A1" } },
+    .{ .faction = "DC",
+        .light = .{ "PNT-9R", "PNT-9R", "JR7-D", "JR7-D", "LCT-1V", "STG-3R", "WSP-1A", "SDR-5V", "UM-R60" },
+        .medium = .{ "SHD-2H", "GRF-1N", "WVR-6R", "PXH-1", "HBK-4G", "TBT-5N", "WTH-1", "CN9-A", "ASN-21" },
+        .heavy = .{ "DRG-1N", "DRG-1N", "DRG-1N", "QKD-4G", "QKD-4G", "GHR-5H", "CRD-3R", "WHM-6R", "ARC-2R", "MAD-3R", "OTL-4D" },
+        .assault = .{ "CGR-1A1", "CGR-1A1", "AS7-D", "BLR-1G", "STK-3F", "VTR-9B", "AWS-8Q", "CP-10-Z" } },
+    .{ .faction = "FS",
+        .light = .{ "VLK-QA", "VLK-QA", "LCT-1V", "STG-3R", "WSP-1A", "COM-2D", "JVN-10N", "FS9-H" },
+        .medium = .{ "ENF-4R", "ENF-4R", "CN9-A", "CN9-A", "DV-6M", "BJ-1", "SHD-2H", "WVR-6R", "GRF-1N", "PXH-1", "TBT-5N" },
+        .heavy = .{ "JM6-S", "JM6-S", "RFL-3N", "CRD-3R", "MAD-3R", "WHM-6R", "ARC-2R", "TDR-5S", "OSR-2C", "ON1-K" },
+        .assault = .{ "VTR-9B", "VTR-9B", "AS7-D", "BLR-1G", "STK-3F", "ZEU-6S", "CP-10-Z", "LGB-0W" } },
+    .{ .faction = "CC",
+        .light = .{ "UM-R60", "UM-R60", "LCT-1V", "STG-3R", "WSP-1A", "COM-2D", "SDR-5V", "JVN-10N" },
+        .medium = .{ "VND-1R", "VND-1R", "VND-1R", "CDA-2A", "PXH-1", "SHD-2H", "GRF-1N", "HBK-4G", "WTH-1", "CLNT-2-3T" },
+        .heavy = .{ "CPLT-C1", "CPLT-C1", "CPLT-K2", "WHM-6R", "MAD-3R", "RFL-3N", "OSR-2C", "TDR-5S", "CRD-3R" },
+        .assault = .{ "AWS-8Q", "STK-3F", "STK-3F", "BLR-1G", "CGR-1A1", "AS7-D", "GOL-1H" } },
+    .{ .faction = "FWL",
+        .light = .{ "STG-3R", "STG-3R", "LCT-1V", "LCT-1E", "WSP-1A", "WSP-1A", "SDR-5V", "FS9-H" },
+        .medium = .{ "TBT-5N", "TBT-5N", "HER-2S", "HER-2S", "HBK-4G", "WVR-6R", "SHD-2H", "GRF-1S", "PXH-1", "CDA-2A", "CN9-A", "CRB-20" },
+        .heavy = .{ "ON1-K", "ON1-K", "ARC-2R", "MAD-3D", "WHM-6R", "TDR-5S", "QKD-4G", "RFL-3N", "GHR-5H" },
+        .assault = .{ "AWS-8Q", "AWS-8Q", "THG-10E", "STK-3F", "BLR-1G", "AS7-D", "LGB-0W", "BNC-3E" } },
+    .{ .faction = "PER",
+        .light = .{ "LCT-1V", "LCT-1V", "STG-3R", "STG-3R", "WSP-1A", "WSP-1A", "UM-R60", "COM-2D", "JVN-10N" },
+        .medium = .{ "SHD-2H", "SHD-2H", "GRF-1N", "WVR-6R", "PXH-1", "HBK-4G", "VND-1R", "WTH-1", "CLNT-2-3T", "ASN-21" },
+        .heavy = .{ "RFL-3N", "RFL-3N", "WHM-6R", "ARC-2R", "TDR-5S", "OSR-2C", "DRG-1N", "CRD-3R" },
+        .assault = .{ "BNC-3E", "CGR-1A1", "STK-3F", "AWS-8Q", "BLR-1G" } },
+}

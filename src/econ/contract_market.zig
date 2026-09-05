@@ -266,8 +266,14 @@ fn refreshBoard(gs: *GameState, hq_id: types.HqId) !void {
     }
     var attempts: u32 = 0;
     while (hulls < lot_size and attempts < 12) : (attempts += 1) {
-        const design = &chassis_mod.catalog[r.uintLessThan(usize, chassis_mod.catalog.len)];
-        if (design.kind != .mek) continue; // fighters and ships have their own slot below
+        // Meks off the local house's table (12B.8), the odd combat vehicle
+        // from anywhere; fighters and ships have their own slot below.
+        const design = if (r.uintLessThan(u8, 4) == 0) blk: {
+            var vbuf: [32]*const chassis_mod.Chassis = undefined;
+            const vehicles = chassis_mod.ofKind(.vehicle, &vbuf);
+            if (vehicles.len == 0) continue;
+            break :blk vehicles[r.uintLessThan(usize, vehicles.len)];
+        } else @import("../domain/rat.zig").roll(&gs.rng, .market, world.faction, @import("../gen/company_gen.zig").rollWeightClass(&gs.rng));
         if (!market.listingAppears(&gs.rng, design.rarity, world.industry, warehouse)) continue;
         const cond = market.rollHullCondition(&gs.rng);
         const price_roll: types.Bp = 10_000 + (@as(types.Bp, gs.rng.roll2d6(.market)) - 7) * 500;
@@ -598,7 +604,8 @@ test "12.15: the transport slot opens with the spaceport; ordinary lots are meks
         gs.clock.day_index += 31;
         try refreshListings(&gs);
         for (gs.market_listings.items) |l| if (l.kind == .unit) {
-            try std.testing.expect(chassis_mod.find(l.item_key).?.kind == .mek or l.staple);
+            const k = chassis_mod.find(l.item_key).?.kind;
+            try std.testing.expect(k == .mek or k == .vehicle or l.staple);
         };
     }
     // Spaceport 4 + comms 3, staffed: over a year something non-mek shows up.

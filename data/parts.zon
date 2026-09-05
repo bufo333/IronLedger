@@ -15,6 +15,9 @@
     // ballistics
     .{ .key = "mg", .name = "Machine Gun", .cost = 5_000, .rarity = .common, .pallet_tons = 1, .mass_half_tons = 1, .crits = 1, .heat = 0, .mount = .ballistic },
     .{ .key = "ac5", .name = "Autocannon/5", .cost = 125_000, .rarity = .common, .pallet_tons = 8, .mass_half_tons = 16, .crits = 4, .heat = 1, .mount = .ballistic },
+    .{ .key = "ac2", .name = "Autocannon/2", .cost = 75_000, .rarity = .common, .pallet_tons = 6, .mass_half_tons = 12, .crits = 1, .heat = 1, .mount = .ballistic },
+    .{ .key = "ac10", .name = "Autocannon/10", .cost = 200_000, .rarity = .common, .pallet_tons = 12, .mass_half_tons = 24, .crits = 7, .heat = 3, .mount = .ballistic },
+    .{ .key = "flamer", .name = "Flamer", .cost = 7_500, .rarity = .common, .pallet_tons = 1, .mass_half_tons = 2, .crits = 1, .heat = 3, .mount = .energy },
     .{ .key = "ac20", .name = "Autocannon/20", .cost = 300_000, .rarity = .uncommon, .pallet_tons = 14, .mass_half_tons = 28, .crits = 10, .heat = 7, .mount = .ballistic },
     // missiles
     .{ .key = "srm2", .name = "SRM-2", .cost = 10_000, .rarity = .common, .pallet_tons = 1, .mass_half_tons = 2, .crits = 1, .heat = 2, .mount = .missile },
@@ -48,6 +51,8 @@
     // ---- munitions: one unit = one ton of reloads for that weapon family;
     // mounted, a ton is one crit ----
     .{ .key = "ammo_ac5", .name = "AC/5 ammunition (ton)", .cost = 4_500, .rarity = .common, .pallet_tons = 1, .mass_half_tons = 2, .crits = 1, .mount = .ammo },
+    .{ .key = "ammo_ac2", .name = "AC/2 ammunition (ton)", .cost = 1_000, .rarity = .common, .pallet_tons = 1, .mass_half_tons = 2, .crits = 1, .mount = .ammo },
+    .{ .key = "ammo_ac10", .name = "AC/10 ammunition (ton)", .cost = 6_000, .rarity = .common, .pallet_tons = 1, .mass_half_tons = 2, .crits = 1, .mount = .ammo },
     .{ .key = "ammo_ac20", .name = "AC/20 ammunition (ton)", .cost = 10_000, .rarity = .uncommon, .pallet_tons = 1, .mass_half_tons = 2, .crits = 1, .mount = .ammo },
     .{ .key = "ammo_lrm", .name = "LRM reloads (ton)", .cost = 30_000, .rarity = .common, .pallet_tons = 1, .mass_half_tons = 2, .crits = 1, .mount = .ammo },
     .{ .key = "ammo_srm", .name = "SRM reloads (ton)", .cost = 27_000, .rarity = .common, .pallet_tons = 1, .mass_half_tons = 2, .crits = 1, .mount = .ammo },

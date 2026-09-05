@@ -129,10 +129,10 @@ pub const Listing = struct {
 /// Parts always on every board (weapons and ammo are readily available;
 /// the rare slots are for everything else). // TUNE
 pub const staple_keys = [_][]const u8{
-    "ammo_ac5", "ammo_ac20",  "ammo_lrm",         "ammo_srm", "ammo_mg",
-    "armor",    "provisions", "medical_supplies", "mlas",     "slas",
-    "mg",       "srm2",       "srm4",             "srm6",     "lrm5",
-    "lrm10",    "ac5",
+    "ammo_ac2", "ammo_ac5",   "ammo_ac10",        "ammo_ac20", "ammo_lrm", "ammo_srm", "ammo_mg",
+    "armor",    "provisions", "medical_supplies", "mlas",      "slas",     "flamer",
+    "mg",       "srm2",       "srm4",             "srm6",      "lrm5",
+    "lrm10",    "ac2",        "ac5",              "ac10",
 };
 
 /// Roll a listed hull's condition: most are used, some are new, a few are

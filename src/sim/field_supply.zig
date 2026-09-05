@@ -136,6 +136,16 @@ pub fn plan(alloc: std.mem.Allocator, gs: *GameState, company: types.ForceId, tr
 }
 
 /// Tons of a line already on the way to the company.
+/// Tons already on the road to a company's trucks (every line).
+pub fn inboundTons(gs: *GameState, company: types.ForceId) u32 {
+    var n: u32 = 0;
+    for (gs.part_orders.items) |o| {
+        if (o.dest != .company or o.dest.company != company) continue;
+        if (o.status == .sourcing or o.status == .in_transit) n += o.quantity * part_mod.tons(o.part_key);
+    }
+    return n;
+}
+
 pub fn inboundQty(gs: *GameState, company: types.ForceId, key: []const u8) u32 {
     var n: u32 = 0;
     for (gs.part_orders.items) |o| {
