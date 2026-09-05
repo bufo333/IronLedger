@@ -109,6 +109,10 @@
         .age_retire = 65,
         .age_young = 25,
         .xp_young_bp = 12_000,
+        .founder_morale_floor = 20,
+        .veteran_tours = 5,
+        .raise_loyalty_days = 365,
+        .award_loyalty_days = 180,
     },
     .unit = .{
         .carry = .{ .mek = 2_000, .vehicle = 1_200, .aerospace = 3_000, .battle_armor = 500, .infantry = 200, .mash = 800, .cargo = 500, .dropship = 15_000, .jumpship = 50_000 },

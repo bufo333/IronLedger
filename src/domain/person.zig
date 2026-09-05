@@ -155,6 +155,10 @@ pub const Person = struct {
     /// Birthday as a day index relative to campaign start (negative for
     /// everyone born before it); null = unknown (legacy saves, bare hires).
     born_day: ?i32 = null,
+    /// Loyalty timers (12C.5): the last raise or bonus accepted, the last
+    /// award pinned on.
+    last_raise_day: ?u32 = null,
+    last_award_day: ?u32 = null,
     /// Per-location injuries (Stage 12.16); open ones keep the person in
     /// the medbay, permanent ones stay on the record.
     injuries: std.ArrayListUnmanaged(Injury) = .empty,
@@ -253,6 +257,17 @@ pub const Person = struct {
         const age = self.ageYears(day) orelse return base;
         if (age >= t.age_young) return base;
         return @intCast(@divTrunc(@as(u64, base) * t.xp_young_bp + 9_999, 10_000));
+    }
+
+    /// Reasons to stay (12C.5): which loyalty modifiers are in play today.
+    pub fn loyalty(self: *const Person, day: u32) Loyalty {
+        const t = tuning.person;
+        return .{
+            .founder = self.isFounder(),
+            .veteran = self.tours >= t.veteran_tours,
+            .recent_raise = if (self.last_raise_day) |d| day -| d < t.raise_loyalty_days else false,
+            .recent_award = if (self.last_award_day) |d| day -| d < t.award_loyalty_days else false,
+        };
     }
 
     /// On the books from day one (12C.3): founders hold more shares and
@@ -409,6 +424,47 @@ test "spending xp improves a skill and drains the pool" {
 // deploying company.
 
 pub const max_fatigue = tuning.person.max_fatigue;
+
+/// The loyalty modifiers (12C.5); `count()` is how many restless flags
+/// they cancel on the payday roll.
+pub const Loyalty = struct {
+    founder: bool = false,
+    veteran: bool = false,
+    recent_raise: bool = false,
+    recent_award: bool = false,
+
+    pub fn count(self: Loyalty) u8 {
+        return @as(u8, @intFromBool(self.founder)) + @intFromBool(self.veteran) + @intFromBool(self.recent_raise) + @intFromBool(self.recent_award);
+    }
+
+    /// "founder, veteran (tours), recent raise" for logs and the record.
+    pub fn text(self: Loyalty, alloc: std.mem.Allocator) ![]const u8 {
+        var out: std.ArrayListUnmanaged(u8) = .empty;
+        const parts = [_]struct { bool, []const u8 }{ .{ self.founder, "founder" }, .{ self.veteran, "veteran" }, .{ self.recent_raise, "recent raise" }, .{ self.recent_award, "recent award" } };
+        for (parts) |pt| if (pt[0]) {
+            if (out.items.len > 0) try out.appendSlice(alloc, ", ");
+            try out.appendSlice(alloc, pt[1]);
+        };
+        return out.toOwnedSlice(alloc);
+    }
+};
+
+test "12C.5: loyalty modifiers count and name themselves" {
+    const t = tuning.person;
+    var p: Person = .{ .id = @enumFromInt(1), .first_name = "A", .last_name = "B", .role = .mekwarrior, .recruited_day = 10 };
+    try std.testing.expectEqual(@as(u8, 0), p.loyalty(1000).count());
+    p.tours = t.veteran_tours;
+    p.last_raise_day = 900;
+    try std.testing.expectEqual(@as(u8, 2), p.loyalty(1000).count());
+    try std.testing.expect(!p.loyalty(900 + t.raise_loyalty_days).recent_raise);
+    p.recruited_day = 0;
+    p.last_award_day = 990;
+    const l = p.loyalty(1000);
+    try std.testing.expectEqual(@as(u8, 4), l.count());
+    const txt = try l.text(std.testing.allocator);
+    defer std.testing.allocator.free(txt);
+    try std.testing.expectEqualStrings("founder, veteran, recent raise, recent award", txt);
+}
 
 /// CamOps fatigue bands (12C.1). MekHQ: `Fatigue` option thresholds.
 pub const FatigueBand = enum {

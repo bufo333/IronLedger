@@ -388,12 +388,14 @@ fn applyEffectsFor(gs: *GameState, effects: []const events.Effect, contract: ?*c
                 const was = p.monthlySalary();
                 p.salary_override = types.applyBp(was, 10_000 + @as(types.Bp, pct) * 100);
                 p.morale = @intCast(@min(100, @as(u32, p.morale) + 10));
+                p.last_raise_day = gs.clock.day_index; // 12C.5
                 try gs.log(.rotation, .{ .company = company }, "[turnover] {s} {s} stays on a raise: {d} → {d} c-bills/mo", .{ p.first_name, p.last_name, was, p.monthlySalary() });
             },
             .retention_bonus_months => |months| if (gs.person(person_id)) |p| {
                 const bonus = p.monthlySalary() * months;
                 try gs.postTransaction(.{ .day = gs.clock.day_index, .amount = -bonus, .category = .payroll, .company = company, .note = "retention bonus" });
                 p.morale = @intCast(@min(100, @as(u32, p.morale) + 5));
+                p.last_raise_day = gs.clock.day_index; // 12C.5
                 try gs.log(.rotation, .{ .company = company }, "[turnover] {s} {s} stays for a {d} c-bill retention bonus", .{ p.first_name, p.last_name, bonus });
             },
             .let_go => try letGo(gs, person_id, false),
@@ -511,8 +513,9 @@ pub fn queueNotice(gs: *GameState, person_id: types.PersonId) !void {
         .default_choice = e.default_choice,
         .deadline_day = gs.clock.day_index + decision_window_days,
     });
-    try gs.log(.decision, .{ .company = gs.companyOf(p.assigned_force), .hq = p.posted_hq }, "[turnover] DECISION: {s} {s} ({s}, {d} c-bills/mo, morale {d}, fatigue {d}) hands in notice — raise, bonus, replace, or let go (inbox, {d} days)", .{
-        p.first_name, p.last_name, @tagName(p.role), p.monthlySalary(), p.morale, p.fatigue, decision_window_days,
+    const loyal = try p.loyalty(gs.clock.day_index).text(gs.allocator());
+    try gs.log(.decision, .{ .company = gs.companyOf(p.assigned_force), .hq = p.posted_hq }, "[turnover] DECISION: {s} {s} ({s}, {d} c-bills/mo, morale {d}, fatigue {d}{s}{s}) hands in notice — raise, bonus, replace, or let go (inbox, {d} days)", .{
+        p.first_name, p.last_name, @tagName(p.role), p.monthlySalary(), p.morale, p.fatigue, if (loyal.len > 0) ", despite: " else "", loyal, decision_window_days,
     });
 }
 

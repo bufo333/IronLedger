@@ -779,11 +779,14 @@ item: tests green, both smokes, ROADMAP tick, one commit.
   XP awards are ×`xp_young_bp` (1.2, rounded up). Hall rows show age; the
   record names the age and what it means. Schema v16 with a birthday
   backfill for older saves.
-- ⬜ 12C.5 **Loyalty** (AtB founder/loyalty modifiers). Founders never roll
-  turnover while morale ≥ 20; five or more tours grants `veteran_loyalty`
-  (−1 restless); a raise or bonus accepted in the last 12 months is −1 for
-  that year; an award in the last 6 months −1. The notice inbox entry names
-  the modifiers in play.
+- ✅ 12C.5 **Loyalty** (AtB founder/loyalty modifiers). Founders never roll
+  turnover while morale ≥ `founder_morale_floor` (20); each modifier in
+  play cancels a restless flag: founder, `veteran_tours` (5) served, a
+  raise or bonus accepted within `raise_loyalty_days` (a year), an award
+  within `award_loyalty_days` (six months). The notice log line and the
+  inbox row name the modifiers in play ("despite: founder, veteran"); the
+  record has a loyalty line. Schema v17 (`last_raise_day`,
+  `last_award_day`).
 
 ### Block B — Unit rating & the board (AtB/CamOps Dragoons rating)
 

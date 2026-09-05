@@ -150,6 +150,16 @@ pub const Tuning = struct {
         age_retire: u32,
         age_young: u32,
         xp_young_bp: types.Bp,
+        /// Loyalty (12C.5, AtB founder/loyalty modifiers): each modifier in
+        /// play cancels one restless flag on the payday roll — a founder
+        /// (who also never rolls at all while morale is at least
+        /// `founder_morale_floor`), `veteran_tours` or more tours served, a
+        /// raise or bonus accepted within `raise_loyalty_days`, an award
+        /// within `award_loyalty_days`.
+        founder_morale_floor: u8,
+        veteran_tours: u32,
+        raise_loyalty_days: u32,
+        award_loyalty_days: u32,
     },
     unit: struct {
         carry: struct { mek: types.CBills, vehicle: types.CBills, aerospace: types.CBills, battle_armor: types.CBills, infantry: types.CBills, mash: types.CBills, cargo: types.CBills, dropship: types.CBills, jumpship: types.CBills },

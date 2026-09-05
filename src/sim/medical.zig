@@ -271,6 +271,11 @@ pub fn runMonthlyTurnover(gs: *GameState) !u32 {
         if (p.tenureMonths(day) < t.turnover_min_tenure_months) continue;
         var restless = p.restlessness();
         if (age != null and age.? >= t.age_old) restless += 1;
+        // Loyalty (12C.5): founders stand by the outfit unless truly
+        // miserable; every other modifier cancels a restless flag.
+        const loyal = p.loyalty(day);
+        if (loyal.founder and p.morale >= t.founder_morale_floor) continue;
+        restless -|= loyal.count();
         if (restless == 0) continue;
         const roll = gs.rng.roll2d6(.medical);
         if (roll >= t.turnover_target + restless) continue;
@@ -555,12 +560,43 @@ test "12C.4: the old retire on payday with their payout; the merely older roll t
     // Fifty and content: one restless flag from age alone, so they roll (some seeds notice).
     const older = try gs.hirePerson("Mid", "Career", .mekwarrior);
     gs.person(older).?.born_day = -55 * 365;
-    gs.person(older).?.recruited_day = 0;
+    gs.person(older).?.recruited_day = 1; // a year in, not a founder
     gs.person(older).?.morale = 100;
     var noticed = false;
     for (0..40) |_| {
         _ = try runMonthlyTurnover(&gs);
         for (gs.event_queue.pending.items) |ev| if (ev.person == older) {
+            noticed = true;
+        };
+        if (noticed) break;
+    }
+    try std.testing.expect(noticed);
+}
+
+test "12C.5: a founder never rolls while morale holds; a veteran's loyalty cancels a flag" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 125 });
+    defer gs.deinit();
+    _ = try gs.createCommander("T", .LC, .paymaster);
+    gs.clock.day_index = 400;
+    const founder = try gs.hirePerson("Day", "One", .mekwarrior);
+    gs.person(founder).?.recruited_day = 0;
+    gs.person(founder).?.morale = 20;
+    gs.person(founder).?.fatigue = 100;
+    const vet = try gs.hirePerson("Five", "Tours", .tech_mek);
+    gs.person(vet).?.recruited_day = 1;
+    gs.person(vet).?.tours = 5;
+    gs.person(vet).?.morale = 100;
+    gs.person(vet).?.fatigue = 100; // one flag, cancelled by the veteran modifier
+    for (0..60) |_| {
+        _ = try runMonthlyTurnover(&gs);
+        for (gs.event_queue.pending.items) |ev| try std.testing.expect(ev.person != founder and ev.person != vet);
+    }
+    // Miserable founders do roll.
+    gs.person(founder).?.morale = 0;
+    var noticed = false;
+    for (0..60) |_| {
+        _ = try runMonthlyTurnover(&gs);
+        for (gs.event_queue.pending.items) |ev| if (ev.person == founder) {
             noticed = true;
         };
         if (noticed) break;

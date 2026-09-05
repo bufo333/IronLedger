@@ -212,7 +212,7 @@ pub fn desk(alloc: Alloc, gs: *GameState, log_rows: usize) !Desk {
             .company = forceName(gs, ev.company),
             .deadline_day = ev.deadline_day,
             .days_left = @as(i64, ev.deadline_day) - @as(i64, day),
-            .description = if (ev.person != .none) (if (gs.person(ev.person)) |p| (if (p.status == .pow) try std.fmt.allocPrint(alloc, "{s} {s} of {s} ({s} {s}, gunnery {d}) {s}", .{ p.first_name, p.last_name, p.faction, @tagName(p.experience()), @tagName(p.role), p.skill(p.role.primarySkill()) orelse 7, if (entry) |e| e.log else "" }) else try std.fmt.allocPrint(alloc, "{s} {s} ({s}, {s}, {s}/mo, morale {d}, fatigue {d}) {s}{s}", .{ p.first_name, p.last_name, @tagName(p.role), @tagName(p.experience()), try money(alloc, p.monthlySalary()), p.morale, p.fatigue, if (entry) |e| e.log else "", if (ev.kind == .notice_given) try std.fmt.allocPrint(alloc, " · letting go owes {s} severance", .{try money(alloc, severanceOwed(gs, p.id, false))}) else "" })) else "") else if (entry) |e| e.log else "",
+            .description = if (ev.person != .none) (if (gs.person(ev.person)) |p| (if (p.status == .pow) try std.fmt.allocPrint(alloc, "{s} {s} of {s} ({s} {s}, gunnery {d}) {s}", .{ p.first_name, p.last_name, p.faction, @tagName(p.experience()), @tagName(p.role), p.skill(p.role.primarySkill()) orelse 7, if (entry) |e| e.log else "" }) else try std.fmt.allocPrint(alloc, "{s} {s} ({s}, {s}, {s}/mo, morale {d}, fatigue {d}) {s}{s}", .{ p.first_name, p.last_name, @tagName(p.role), @tagName(p.experience()), try money(alloc, p.monthlySalary()), p.morale, p.fatigue, if (entry) |e| e.log else "", if (ev.kind == .notice_given) try std.fmt.allocPrint(alloc, " · letting go owes {s} severance{s}", .{ try money(alloc, severanceOwed(gs, p.id, false)), try loyaltyNote(alloc, p, day) }) else "" })) else "") else if (entry) |e| e.log else "",
             .options = try opts.toOwnedSlice(alloc),
             .default_choice = ev.default_choice,
         });
@@ -1864,6 +1864,13 @@ pub fn assignmentText(alloc: Alloc, gs: *GameState, p: *const person_mod.Person)
     return "{a}unassigned{/}";
 }
 
+/// " · loyal: founder, veteran" or nothing (12C.5).
+fn loyaltyNote(alloc: Alloc, p: *const person_mod.Person, day: u32) ![]const u8 {
+    const l = p.loyalty(day);
+    if (l.count() == 0) return "";
+    return std.fmt.allocPrint(alloc, " · loyal: {s}", .{try l.text(alloc)});
+}
+
 /// What letting this person go would cost today (12C.2); `fired` halves it.
 pub fn severanceOwed(gs: *GameState, id: types.PersonId, fired: bool) types.CBills {
     const p = gs.person(id) orelse return 0;
@@ -2177,6 +2184,10 @@ pub fn personRecord(alloc: Alloc, gs: *GameState, id: types.PersonId) ![]const [
     if (p.ageYears(day)) |age| {
         const tp = @import("../domain/tuning.zig").t.person;
         try out.append(alloc, try std.fmt.allocPrint(alloc, "age         {d}{s}", .{ age, if (age >= tp.age_retire) " · {c}retiring on the next payday home{/}" else if (age >= tp.age_old) " · {a}getting on — an extra restless flag on payday{/}" else if (age < tp.age_young) " · {g}young — learns 20% faster{/}" else "" }));
+    }
+    {
+        const l = p.loyalty(day);
+        if (l.count() > 0) try out.append(alloc, try std.fmt.allocPrint(alloc, "loyalty     {s} — cancels {d} restless flag{s} on payday{s}", .{ try l.text(alloc), l.count(), if (l.count() == 1) "" else "s", if (l.founder) "; founders never roll while morale holds" else "" }));
     }
     if (p.shares > 0 or p.isFounder()) try out.append(alloc, try std.fmt.allocPrint(alloc, "shares      {d} share{s}{s} · {d}% of contract income is split among shareholders at completion", .{ p.shares, if (p.shares == 1) "" else "s", if (p.isFounder()) " · founder" else "", @divTrunc(gs.share_profit_bp, 100) }));
     try out.append(alloc, try std.fmt.allocPrint(alloc, "record      {d} kill{s} ({d} BV) · {d} battle{s} · {d} tour{s}{s}", .{ p.kills, if (p.kills == 1) "" else "s", p.kill_bv, p.battles, if (p.battles == 1) "" else "s", p.tours, if (p.tours == 1) "" else "s", if (p.outstanding_tours > 0) try std.fmt.allocPrint(alloc, " ({d} outstanding)", .{p.outstanding_tours}) else "" }));

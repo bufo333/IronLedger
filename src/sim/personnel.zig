@@ -205,6 +205,7 @@ pub fn checkAwards(gs: *GameState, person_id: types.PersonId) !u32 {
         if (p.hasAward(a.key)) continue;
         if (p.counter(a.kind, gs.clock.day_index) < a.threshold) continue;
         try p.awards.append(gs.allocator(), a.key);
+        p.last_award_day = gs.clock.day_index; // 12C.5
         p.morale = @intCast(@min(100, @as(u32, p.morale) + a.morale));
         n += 1;
         try gs.log(.rotation, .{ .company = gs.companyOf(p.assigned_force), .hq = p.posted_hq }, "[award] {s} receives the {s} ({s} {d})", .{ try p.rankedName(gs.allocator()), a.name, @tagName(a.kind), p.counter(a.kind, gs.clock.day_index) });
