@@ -87,6 +87,10 @@ send("r", 0.6)
 send(":"); send("readiness\r", 0.8)
 assert "READINESS · every company" in plain()[-30000:], plain()[-3000:]
 send("\x1b", 0.6)
+send(":"); send("role 3 defense\r", 0.8)         # shared parser: lance role
+assert "done: role" in plain()[-800:], plain()[-1000:]
+send(":"); send("autoadmit off\r", 0.8)
+assert "done: autoadmit" in plain()[-800:], plain()[-1000:]
 send(":"); send("manning co:1\r", 0.8)   # crews table for the existing company
 assert "CREWS" in plain()[-30000:] and "mekwarrior" in plain()[-30000:], plain()[-3000:]
 send("\x1b", 0.6)

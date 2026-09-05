@@ -94,9 +94,13 @@ cursor · `Enter` act on cursor row · `Esc` close/back · `:` command line ·
 `q` return to welcome (save / discard / stay). Screen-local keys are listed per screen below;
 they are shortcuts for commands the command line can also run.
 
-The command line accepts every REPL verb (`accept`, `order`, `transfer`,
-`assign`, `refit`, `found`, `link`, …) with tab completion over verbs and
-entity ids. Results land in the Desk log pane.
+The command line and the REPL share one parser, `src/sim/cli.zig`
+(`game.cli.parseCommand`, `verbs`, `usage`, `errorText`): every command
+verb (`accept`, `order`, `transfer`, `assign`, `refit`, `found`, `link`,
+`raise`, `sellstock`, …) works in both, with tab completion over verbs and
+entity ids here. Frontend-only verbs (`day`, `save`, `quit`, `help`,
+`settings`, `emblem`, `manning`, `readiness`) stay in `app.zig`. Results
+land in the Desk log pane.
 
 ## Screens
 
@@ -205,7 +209,8 @@ view model each frame from an arena.
    the status strip shortens); `--ascii`; wizard back-office sizing.
    The pty smoke test runs a second pass at 80×24 with `--ascii`.
 
-Smoke test: `python3 docs/tui_smoke.py zig-out/bin/game /tmp/smoke.db`
+Smoke test: `python3 docs/tui_smoke.py zig-out/bin/game /tmp/smoke.db`;
+the REPL has its own: `docs/repl_smoke.sh zig-out/bin/game /tmp/repl.db`.
 drives the binary through a pty (create player → wizard → begin → every
 screen → end turn → `:day 3` → save & return) and asserts on landmarks.
 Run it after any change under `src/tui/`, alongside `zig build test`.

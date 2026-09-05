@@ -812,7 +812,7 @@ fn printInbox(gs: *game.state.GameState) void {
         });
         for (ev.options, 0..) |opt, j| {
             std.debug.print("      {d}: {s}{s}\n", .{
-                j, opt.label, if (j == ev.default_choice) " (default)" else "",
+                j + 1, opt.label, if (j == ev.default_choice) " (default)" else "",
             });
         }
     }
@@ -957,28 +957,13 @@ fn runRepl(gs: *game.state.GameState, io: std.Io, gpa: std.mem.Allocator, store_
     printCampaigns(store);
 
     std.debug.print(
-        \\=== BattleTech Mercenary Command — command console ===
-        \\          save | campaigns | load <id> | delete <id> | new (fresh campaign)
-        \\commands: start <faction> <profession> <name> | status | toe | hqs | offers
-        \\          roster [co:<id>|hq:<id>] | medbay | hall | hire <candidate#> | checklist
-        \\          assign <unit> pilot|tech <person> | unassign <unit> pilot|tech | autoassign co:<id>
-        \\          triage <person> <priority> | leave <person> <days>
-        \\          day [n] [force] (end turn(s); the checklist gates it) | inbox | resolve <event#> <option#> | readiness
-        \\          log [n] [battle|decision|delivery|...|co:<id>|hq:<id>]
-        \\          pnl [co:<id>|hq:<id>] | ledger [co:<id>|hq:<id>] [n] | treasuries
-        \\          transfer <from> <to> <amount> | policy <hq:<id>|co:<id>> <floor> <cap>
-        \\          train <person id> <skill>
-        \\          newco <name> | accept <offer#> <company id> | loan <amount> <months>
-        \\          units | parts | orders | order <part> [qty] [hq:<id>|co:<id>] | shop | buy <idx>
-        \\          supplies | demand | ship <part> <qty> <from site> <to site>
-        \\          bays | projects | staff | upgrade hq:<id> <facility> | fabricate <comp> [qty] | post <person> hq:<id>
-        \\          found <planet> <name> | tier hq:<id> | link hq:<a> hq:<b> [lvl] | assignco co:<id> hq:<id>
-        \\          newco@ hq:<id> <name> | xfer unit|person <id> co:<id>
-        \\          contracts | complete <contract id> | recall co:<id>
-        \\          lab <unit> | refit <unit> remove <slot>|install <loc> <part>|clear|commit
-        \\          mothball <unit id> | activate <unit id>
-        \\          recruit <role> | hire <role> <first> <last> | fire <id>
-        \\          rename outfit|<forceid> <name> | quit
+        \\=== IRON LEDGER — command console ===
+        \\          save | campaigns | load <id> | delete <id> | new (fresh campaign) | quit
+        \\views:    status | toe | hqs | offers | contracts | roster [co:<id>|hq:<id>] | medbay | hall [filter]
+        \\          checklist | inbox | log [n] [filter] | pnl | ledger | treasuries | units | parts | orders
+        \\          shop | supplies | demand | bays | projects | staff | lab <unit> | readiness | manning co:<id>
+        \\turn:     day [n] [force]   (the checklist gates it)
+        \\commands: `help` lists every verb with its usage — the same verbs the TUI's `:` line takes
         \\factions: LC DC FS CC FWL — professions: quartermaster paymaster chief_engineer line_officer
         \\
     , .{});
@@ -1053,55 +1038,6 @@ fn runRepl(gs: *game.state.GameState, io: std.Io, gpa: std.mem.Allocator, store_
             printCandidates(gs, filter);
         } else if (std.mem.eql(u8, verb, "checklist")) {
             if (printChecklist(gs) == 0) std.debug.print("all clear.\n", .{});
-        } else if (std.mem.eql(u8, verb, "assign") or std.mem.eql(u8, verb, "unassign")) {
-            const uid = std.fmt.parseInt(u32, tokens.next() orelse "", 10) catch 0;
-            const slot = std.meta.stringToEnum(game.state.Slot, tokens.next() orelse "");
-            if (uid == 0 or slot == null) {
-                std.debug.print("usage: {s} <unit id> pilot|tech [person id]\n", .{verb});
-                continue;
-            }
-            const unit_id: game.types.UnitId = @enumFromInt(uid);
-            var cmd: Command = .{ .unassign = .{ .unit = unit_id, .slot = slot.? } };
-            if (verb[0] == 'a') {
-                const pid = std.fmt.parseInt(u32, tokens.next() orelse "", 10) catch 0;
-                if (pid == 0) {
-                    std.debug.print("usage: assign <unit id> pilot|tech <person id>\n", .{});
-                    continue;
-                }
-                cmd = .{ .assign = .{ .unit = unit_id, .slot = slot.?, .person = @enumFromInt(pid) } };
-            }
-            _ = game.commands.execute(gs, cmd) catch |err| {
-                std.debug.print("error: {s}\n", .{@errorName(err)});
-                continue;
-            };
-            std.debug.print("done — see `roster co:<id>`\n", .{});
-        } else if (std.mem.eql(u8, verb, "autoassign")) {
-            const site = parseSite(tokens.next() orelse "");
-            if (site == null or site.? != .company) {
-                std.debug.print("usage: autoassign co:<id>\n", .{});
-                continue;
-            }
-            _ = game.commands.execute(gs, .{ .auto_assign = site.?.company }) catch |err| {
-                std.debug.print("error: {s}\n", .{@errorName(err)});
-                continue;
-            };
-            printCompanyRoster(gs, site.?.company);
-        } else if (std.mem.eql(u8, verb, "triage") or std.mem.eql(u8, verb, "leave")) {
-            const pid = std.fmt.parseInt(u32, tokens.next() orelse "", 10) catch 0;
-            const n = std.fmt.parseInt(u16, tokens.next() orelse "", 10) catch 0;
-            if (pid == 0) {
-                std.debug.print("usage: triage <person> <priority> | leave <person> <days>\n", .{});
-                continue;
-            }
-            const cmd: Command = if (verb[0] == 't')
-                .{ .triage = .{ .person = @enumFromInt(pid), .priority = @intCast(@min(n, 9)) } }
-            else
-                .{ .leave = .{ .person = @enumFromInt(pid), .days = if (n == 0) 7 else n } };
-            _ = game.commands.execute(gs, cmd) catch |err| {
-                std.debug.print("error: {s}\n", .{@errorName(err)});
-                continue;
-            };
-            std.debug.print("done.\n", .{});
         } else if (std.mem.eql(u8, verb, "toe")) {
             printToe(gs);
         } else if (std.mem.eql(u8, verb, "hqs")) {
@@ -1110,36 +1046,8 @@ fn runRepl(gs: *game.state.GameState, io: std.Io, gpa: std.mem.Allocator, store_
             printOffers(gs);
         } else if (std.mem.eql(u8, verb, "readiness")) {
             printReadiness(gs);
-        } else if (std.mem.eql(u8, verb, "train")) {
-            const pid = std.fmt.parseInt(u32, tokens.next() orelse "", 10) catch {
-                std.debug.print("usage: train <person id> <skill> (e.g. gunnery_mek)\n", .{});
-                continue;
-            };
-            const skill = std.meta.stringToEnum(game.types.SkillType, tokens.next() orelse "") orelse {
-                std.debug.print("unknown skill — try gunnery_mek, piloting_mek, tech_mek, ...\n", .{});
-                continue;
-            };
-            _ = game.commands.execute(gs, .{ .train = .{ .person = @enumFromInt(pid), .skill = skill } }) catch |err| {
-                std.debug.print("error: {s}\n", .{@errorName(err)});
-                continue;
-            };
-            std.debug.print("training program started ({d} days)\n", .{game.medical.training_days});
         } else if (std.mem.eql(u8, verb, "inbox")) {
             printInbox(gs);
-        } else if (std.mem.eql(u8, verb, "resolve")) {
-            const ev_idx = std.fmt.parseInt(usize, tokens.next() orelse "", 10) catch {
-                std.debug.print("usage: resolve <event#> <option#>\n", .{});
-                continue;
-            };
-            const choice = std.fmt.parseInt(usize, tokens.next() orelse "", 10) catch {
-                std.debug.print("usage: resolve <event#> <option#>\n", .{});
-                continue;
-            };
-            _ = game.commands.execute(gs, .{ .resolve_decision = .{ .event_index = ev_idx, .choice = choice } }) catch |err| {
-                std.debug.print("error: {s}\n", .{@errorName(err)});
-                continue;
-            };
-            std.debug.print("resolved.\n", .{});
         } else if (std.mem.eql(u8, verb, "log")) {
             // log [n] [filter] — filter: outfit-wide default, a category name,
             // or co:<id> / hq:<id> for one entity's full history.
@@ -1163,39 +1071,6 @@ fn runRepl(gs: *game.state.GameState, io: std.Io, gpa: std.mem.Allocator, store_
             printLog(gs, n, filter);
         } else if (std.mem.eql(u8, verb, "treasuries")) {
             printTreasuries(gs);
-        } else if (std.mem.eql(u8, verb, "transfer")) {
-            const from = parseTreasury(tokens.next() orelse "") orelse {
-                std.debug.print("usage: transfer <outfit|hq:<id>|co:<id>> <outfit|hq:<id>|co:<id>> <amount>\n", .{});
-                continue;
-            };
-            const to = parseTreasury(tokens.next() orelse "") orelse {
-                std.debug.print("usage: transfer <from> <to> <amount>\n", .{});
-                continue;
-            };
-            const amount = std.fmt.parseInt(i64, tokens.next() orelse "", 10) catch {
-                std.debug.print("usage: transfer <from> <to> <amount>\n", .{});
-                continue;
-            };
-            _ = game.commands.execute(gs, .{ .transfer = .{ .from = from, .to = to, .amount = amount } }) catch |err| {
-                std.debug.print("error: {s}\n", .{@errorName(err)});
-                continue;
-            };
-            std.debug.print("courier dispatched — see `treasuries`\n", .{});
-        } else if (std.mem.eql(u8, verb, "policy")) {
-            const entity = parseTreasury(tokens.next() orelse "") orelse {
-                std.debug.print("usage: policy <hq:<id>|co:<id>> <floor> <monthly cap>\n", .{});
-                continue;
-            };
-            const floor = std.fmt.parseInt(i64, tokens.next() orelse "", 10) catch {
-                std.debug.print("usage: policy <entity> <floor> <monthly cap>\n", .{});
-                continue;
-            };
-            const cap = std.fmt.parseInt(i64, tokens.next() orelse "", 10) catch floor;
-            _ = game.commands.execute(gs, .{ .set_policy = .{ .entity = entity, .floor = floor, .monthly_cap = cap } }) catch |err| {
-                std.debug.print("error: {s}\n", .{@errorName(err)});
-                continue;
-            };
-            std.debug.print("policy set.\n", .{});
         } else if (std.mem.eql(u8, verb, "ledger")) {
             // ledger [co:<id>|hq:<id>] [n]
             var filter: game.finance.EntityFilter = .all;
@@ -1243,226 +1118,18 @@ fn runRepl(gs: *game.state.GameState, io: std.Io, gpa: std.mem.Allocator, store_
                 continue;
             }
             printLab(gs, @enumFromInt(uid));
-        } else if (std.mem.eql(u8, verb, "refit")) {
-            const uid = std.fmt.parseInt(u32, tokens.next() orelse "", 10) catch 0;
-            const sub = tokens.next() orelse "";
-            if (uid == 0 or sub.len == 0) {
-                std.debug.print("usage: refit <unit> remove <slot key> | install <hd|ct|lt|rt|la|ra|ll|rl> <part> | clear | commit\n", .{});
-                continue;
-            }
-            const unit_id: game.types.UnitId = @enumFromInt(uid);
-            var cmd: ?Command = null;
-            if (std.mem.eql(u8, sub, "remove")) {
-                const slot = tokens.next() orelse "";
-                if (slot.len > 0) cmd = .{ .refit_remove = .{ .unit = unit_id, .slot_key = slot } };
-            } else if (std.mem.eql(u8, sub, "install")) {
-                const loc = std.meta.stringToEnum(game.meklab.Location, tokens.next() orelse "");
-                const part = tokens.next() orelse "";
-                if (loc != null and part.len > 0) cmd = .{ .refit_install = .{ .unit = unit_id, .location = loc.?, .part_key = part } };
-            } else if (std.mem.eql(u8, sub, "clear")) {
-                cmd = .{ .refit_clear = unit_id };
-            } else if (std.mem.eql(u8, sub, "commit")) {
-                cmd = .{ .refit_commit = unit_id };
-            }
-            const c = cmd orelse {
-                std.debug.print("usage: refit <unit> remove <slot key> | install <loc> <part> | clear | commit\n", .{});
-                continue;
-            };
-            _ = game.commands.execute(gs, c) catch |err| {
-                std.debug.print("error: {s}\n", .{@errorName(err)});
-                if (err == error.IllegalFit) printLab(gs, unit_id);
-                continue;
-            };
-            printLab(gs, unit_id);
         } else if (std.mem.eql(u8, verb, "contracts")) {
             printContracts(gs);
-        } else if (std.mem.eql(u8, verb, "complete")) {
-            const cid = std.fmt.parseInt(u32, tokens.next() orelse "", 10) catch 0;
-            if (cid == 0) {
-                std.debug.print("usage: complete <contract id>  (attrition objectives ≥75% destroyed)\n", .{});
-                continue;
-            }
-            _ = game.commands.execute(gs, .{ .complete_contract = @enumFromInt(cid) }) catch |err| {
-                std.debug.print("error: {s}\n", .{@errorName(err)});
-                continue;
-            };
-            printContracts(gs);
-        } else if (std.mem.eql(u8, verb, "recall")) {
-            const site = parseSite(tokens.next() orelse "");
-            if (site == null or site.? != .company) {
-                std.debug.print("usage: recall co:<id>  (mid-contract = breach clause)\n", .{});
-                continue;
-            }
-            _ = game.commands.execute(gs, .{ .recall_company = site.?.company }) catch |err| {
-                std.debug.print("error: {s}\n", .{@errorName(err)});
-                continue;
-            };
-            printContracts(gs);
-        } else if (std.mem.eql(u8, verb, "found")) {
-            const planet_key = tokens.next() orelse "";
-            const name = std.mem.trim(u8, tokens.rest(), " ");
-            if (planet_key.len == 0 or name.len == 0) {
-                std.debug.print("usage: found <planet key> <name>  (500k from the outfit; world must be in a ring/band or a contract site)\n", .{});
-                continue;
-            }
-            _ = game.commands.execute(gs, .{ .found_hq = .{ .name = name, .planet_key = planet_key } }) catch |err| {
-                std.debug.print("error: {s}\n", .{@errorName(err)});
-                continue;
-            };
-            printHqs(gs);
-        } else if (std.mem.eql(u8, verb, "autostaff")) {
-            const site = parseSite(tokens.next() orelse "");
-            if (site == null or site.? != .hq) {
-                std.debug.print("usage: autostaff hq:<id>\n", .{});
-                continue;
-            }
-            _ = game.commands.execute(gs, .{ .autostaff = site.?.hq }) catch |err| {
-                std.debug.print("error: {s}\n", .{@errorName(err)});
-                continue;
-            };
-            printHqRoster(gs, site.?.hq);
-        } else if (std.mem.eql(u8, verb, "tier")) {
-            const site = parseSite(tokens.next() orelse "");
-            if (site == null or site.? != .hq) {
-                std.debug.print("usage: tier hq:<id>   (field → regional, {d} c-bills from the HQ, {d}+ days)\n", .{ game.hq_ops.tier_upgrade_cost, game.hq_ops.tier_upgrade_build_days });
-                continue;
-            }
-            _ = game.commands.execute(gs, .{ .upgrade_tier = site.?.hq }) catch |err| {
-                std.debug.print("error: {s}\n", .{@errorName(err)});
-                continue;
-            };
-            std.debug.print("regional upgrade started — see `projects`\n", .{});
-        } else if (std.mem.eql(u8, verb, "assignco")) {
-            const co = parseSite(tokens.next() orelse "");
-            const hq = parseSite(tokens.next() orelse "");
-            if (co == null or co.? != .company or hq == null or hq.? != .hq) {
-                std.debug.print("usage: assignco co:<id> hq:<id>\n", .{});
-                continue;
-            }
-            _ = game.commands.execute(gs, .{ .assign_company = .{ .company = co.?.company, .hq = hq.?.hq } }) catch |err| {
-                std.debug.print("error: {s}\n", .{@errorName(err)});
-                continue;
-            };
-            printHqs(gs);
-        } else if (std.mem.eql(u8, verb, "link")) {
-            const a = parseSite(tokens.next() orelse "");
-            const b = parseSite(tokens.next() orelse "");
-            const level = std.fmt.parseInt(u8, tokens.next() orelse "1", 10) catch 1;
-            if (a == null or a.? != .hq or b == null or b.? != .hq) {
-                std.debug.print("usage: link hq:<a> hq:<b> [level 1-3]  (cost {d}/{d}/{d})\n", .{ game.network.linkCost(1), game.network.linkCost(2), game.network.linkCost(3) });
-                continue;
-            }
-            _ = game.commands.execute(gs, .{ .link = .{ .a = a.?.hq, .b = b.?.hq, .level = level } }) catch |err| {
-                std.debug.print("error: {s}\n", .{@errorName(err)});
-                continue;
-            };
-            printHqs(gs);
-        } else if (std.mem.eql(u8, verb, "newco@")) {
-            const hq = parseSite(tokens.next() orelse "");
-            const name = std.mem.trim(u8, tokens.rest(), " ");
-            if (hq == null or hq.? != .hq or name.len == 0) {
-                std.debug.print("usage: newco@ hq:<id> <name>\n", .{});
-                continue;
-            }
-            const r = game.commands.execute(gs, .{ .new_company_at = .{ .name = name, .hq = hq.?.hq } }) catch |err| {
-                std.debug.print("error: {s}\n", .{@errorName(err)});
-                continue;
-            };
-            std.debug.print("stood up company [{d}] \"{s}\" at hq:{d}\n", .{ @intFromEnum(r.created_force), name, @intFromEnum(hq.?.hq) });
-        } else if (std.mem.eql(u8, verb, "xfer")) {
-            const what = tokens.next() orelse "";
-            const id = std.fmt.parseInt(u32, tokens.next() orelse "", 10) catch 0;
-            const dest = parseSite(tokens.next() orelse "");
-            if (id == 0 or dest == null or dest.? != .company) {
-                std.debug.print("usage: xfer unit|person <id> co:<id>\n", .{});
-                continue;
-            }
-            const cmd: Command = if (std.mem.eql(u8, what, "unit"))
-                .{ .transfer_unit = .{ .unit = @enumFromInt(id), .to_company = dest.?.company } }
-            else
-                .{ .transfer_person = .{ .person = @enumFromInt(id), .to_force = dest.?.company } };
-            _ = game.commands.execute(gs, cmd) catch |err| {
-                std.debug.print("error: {s}\n", .{@errorName(err)});
-                continue;
-            };
-            std.debug.print("transfer ordered — see `hqs` / `roster`\n", .{});
         } else if (std.mem.eql(u8, verb, "bays")) {
             printBays(gs);
         } else if (std.mem.eql(u8, verb, "projects")) {
             printProjects(gs);
         } else if (std.mem.eql(u8, verb, "staff")) {
             printStaff(gs);
-        } else if (std.mem.eql(u8, verb, "upgrade")) {
-            const site = parseSite(tokens.next() orelse "");
-            const kind = std.meta.stringToEnum(game.hq.FacilityKind, tokens.next() orelse "");
-            if (site == null or site.? != .hq or kind == null) {
-                std.debug.print("usage: upgrade hq:<id> <mek_bay|warehouse|hospital|mess|training_ground|hiring_hall|comms|spaceport>\n", .{});
-                continue;
-            }
-            _ = game.commands.execute(gs, .{ .upgrade_facility = .{ .hq = site.?.hq, .kind = kind.? } }) catch |err| {
-                std.debug.print("error: {s}\n", .{@errorName(err)});
-                continue;
-            };
-            std.debug.print("project started — see `projects`\n", .{});
-        } else if (std.mem.eql(u8, verb, "fabricate")) {
-            const key = tokens.next() orelse "";
-            const qty = std.fmt.parseInt(u32, tokens.next() orelse "1", 10) catch 1;
-            if (gs.hqs.count() == 0) {
-                std.debug.print("no HQ\n", .{});
-                continue;
-            }
-            _ = game.commands.execute(gs, .{ .fabricate = .{ .hq = gs.hqs.keys()[0], .part_key = key, .quantity = qty } }) catch |err| {
-                std.debug.print("error: {s} (components: comp_head comp_ct comp_torso comp_arm comp_leg comp_chassis)\n", .{@errorName(err)});
-                continue;
-            };
-            std.debug.print("fabrication queued — see `bays`\n", .{});
-        } else if (std.mem.eql(u8, verb, "post")) {
-            const pid = std.fmt.parseInt(u32, tokens.next() orelse "", 10) catch 0;
-            const site = parseSite(tokens.next() orelse "");
-            if (pid == 0 or site == null or site.? != .hq) {
-                std.debug.print("usage: post <person id> hq:<id>\n", .{});
-                continue;
-            }
-            _ = game.commands.execute(gs, .{ .post_person = .{ .person = @enumFromInt(pid), .hq = site.?.hq } }) catch |err| {
-                std.debug.print("error: {s}\n", .{@errorName(err)});
-                continue;
-            };
-            std.debug.print("posted — see `staff`\n", .{});
         } else if (std.mem.eql(u8, verb, "supplies")) {
             printSupplies(gs);
         } else if (std.mem.eql(u8, verb, "demand")) {
             printDemand(gs);
-        } else if (std.mem.eql(u8, verb, "ship")) {
-            const key = tokens.next() orelse "";
-            const qty = std.fmt.parseInt(u32, tokens.next() orelse "", 10) catch 0;
-            const from = parseSite(tokens.next() orelse "");
-            const to = parseSite(tokens.next() orelse "");
-            if (qty == 0 or from == null or to == null) {
-                std.debug.print("usage: ship <part> <qty> <hq:<id>|co:<id>> <hq:<id>|co:<id>>\n", .{});
-                continue;
-            }
-            _ = game.commands.execute(gs, .{ .ship_stock = .{ .part_key = key, .quantity = qty, .from = from.?, .to = to.? } }) catch |err| {
-                std.debug.print("error: {s}\n", .{@errorName(err)});
-                continue;
-            };
-            std.debug.print("shipment dispatched — see `supplies`\n", .{});
-        } else if (std.mem.eql(u8, verb, "order")) {
-            const key = tokens.next() orelse {
-                std.debug.print("usage: order <part key> [qty] [hq:<id>|co:<id>]\n", .{});
-                continue;
-            };
-            const qty = std.fmt.parseInt(u32, tokens.next() orelse "1", 10) catch 1;
-            const dest = if (tokens.next()) |t| parseSite(t) else null;
-            _ = game.commands.execute(gs, .{ .order_part = .{ .part_key = key, .quantity = qty, .dest = dest } }) catch |err| {
-                std.debug.print("error: {s}\n", .{@errorName(err)});
-                continue;
-            };
-            const o = gs.part_orders.items[gs.part_orders.items.len - 1];
-            if (o.status == .failed) {
-                std.debug.print("logistics couldn't source {s} this time (retry after refresh)\n", .{key});
-            } else {
-                std.debug.print("ordered {s} x{d}, eta day {d}, {d} c-bills\n", .{ key, qty, o.eta_day.?, o.cost });
-            }
         } else if (std.mem.eql(u8, verb, "shop")) {
             std.debug.print("site market ({d} listings):\n", .{gs.market_listings.items.len});
             for (gs.market_listings.items, 0..) |l, i| {
@@ -1476,104 +1143,6 @@ fn runRepl(gs: *game.state.GameState, io: std.Io, gpa: std.mem.Allocator, store_
                     });
                 }
             }
-        } else if (std.mem.eql(u8, verb, "buy")) {
-            const idx = std.fmt.parseInt(usize, tokens.next() orelse "", 10) catch {
-                std.debug.print("usage: buy <listing #>\n", .{});
-                continue;
-            };
-            _ = game.commands.execute(gs, .{ .buy_listing = idx }) catch |err| {
-                std.debug.print("error: {s}\n", .{@errorName(err)});
-                continue;
-            };
-            std.debug.print("bought.\n", .{});
-        } else if (std.mem.eql(u8, verb, "mothball") or std.mem.eql(u8, verb, "activate")) {
-            const id = std.fmt.parseInt(u32, tokens.next() orelse "", 10) catch {
-                std.debug.print("usage: {s} <unit id>\n", .{verb});
-                continue;
-            };
-            const cmd: Command = if (verb[0] == 'm') .{ .mothball = @enumFromInt(id) } else .{ .reactivate = @enumFromInt(id) };
-            _ = game.commands.execute(gs, cmd) catch |err| {
-                std.debug.print("error: {s}\n", .{@errorName(err)});
-                continue;
-            };
-            std.debug.print("done — see `units`\n", .{});
-        } else if (std.mem.eql(u8, verb, "start")) {
-            const faction_str = tokens.next() orelse "";
-            const prof_str = tokens.next() orelse "";
-            const name = std.mem.trim(u8, tokens.rest(), " ");
-            const faction = std.meta.stringToEnum(game.commander.Faction, faction_str) orelse {
-                std.debug.print("usage: start <LC|DC|FS|CC|FWL> <profession> <name>\n", .{});
-                continue;
-            };
-            const prof = std.meta.stringToEnum(game.commander.Profession, prof_str) orelse {
-                std.debug.print("professions: quartermaster paymaster chief_engineer line_officer\n", .{});
-                continue;
-            };
-            _ = game.commands.execute(gs, .{ .create_commander = .{
-                .name = if (name.len > 0) name else "Commander",
-                .origin = faction,
-                .profession = prof,
-            } }) catch |err| {
-                std.debug.print("error: {s}\n", .{@errorName(err)});
-                continue;
-            };
-            printHqs(gs);
-            printOffers(gs);
-        } else if (std.mem.eql(u8, verb, "accept")) {
-            const idx_str = tokens.next() orelse "";
-            const co_str = tokens.next() orelse "";
-            const idx = std.fmt.parseInt(usize, idx_str, 10) catch {
-                std.debug.print("usage: accept <offer#> <company force id>\n", .{});
-                continue;
-            };
-            const co = std.fmt.parseInt(u32, co_str, 10) catch {
-                std.debug.print("usage: accept <offer#> <company force id>\n", .{});
-                continue;
-            };
-            _ = game.commands.execute(gs, .{ .accept_contract = .{ .offer_index = idx, .company = @enumFromInt(co) } }) catch |err| {
-                std.debug.print("error: {s}\n", .{@errorName(err)});
-                continue;
-            };
-            const c = gs.contracts.values()[gs.contracts.count() - 1];
-            std.debug.print("under contract: {s} on {s}, {d} days transit, {d}/mo net\n", .{
-                @tagName(c.kind), game.planet.find(c.planet_key).?.name, c.transit_days, c.monthly_net,
-            });
-        } else if (std.mem.eql(u8, verb, "loan")) {
-            const amt = std.fmt.parseInt(i64, tokens.next() orelse "", 10) catch {
-                std.debug.print("usage: loan <amount> <months>\n", .{});
-                continue;
-            };
-            const months = std.fmt.parseInt(u16, tokens.next() orelse "12", 10) catch 12;
-            _ = try game.commands.execute(gs, .{ .take_loan = .{ .principal = amt, .term_months = months } });
-            std.debug.print("drew {d} c-bills over {d} months\n", .{ amt, months });
-        } else if (std.mem.eql(u8, verb, "newco")) {
-            const name = std.mem.trim(u8, tokens.rest(), " ");
-            if (name.len == 0) {
-                std.debug.print("usage: newco <company name>\n", .{});
-                continue;
-            }
-            const r = try game.commands.execute(gs, .{ .new_company = name });
-            std.debug.print("stood up company [{d}] \"{s}\" — see `toe`\n", .{ @intFromEnum(r.created_force), name });
-        } else if (std.mem.eql(u8, verb, "rename")) {
-            const target = tokens.next() orelse {
-                std.debug.print("usage: rename outfit|<forceid> <new name>\n", .{});
-                continue;
-            };
-            const name = std.mem.trim(u8, tokens.rest(), " ");
-            if (name.len == 0) {
-                std.debug.print("usage: rename outfit|<forceid> <new name>\n", .{});
-                continue;
-            }
-            if (std.mem.eql(u8, target, "outfit")) {
-                _ = try game.commands.execute(gs, .{ .rename_outfit = name });
-            } else {
-                const fid = std.fmt.parseInt(u32, target, 10) catch continue;
-                _ = game.commands.execute(gs, .{ .rename_force = .{ .force = @enumFromInt(fid), .name = name } }) catch |err| {
-                    std.debug.print("error: {s}\n", .{@errorName(err)});
-                    continue;
-                };
-            }
-            std.debug.print("renamed to \"{s}\"\n", .{name});
         } else if (std.mem.eql(u8, verb, "pnl")) {
             // pnl [co:<id>|hq:<id>] — last 31 days for the outfit or one entity.
             const from = if (gs.clock.day_index > 31) gs.clock.day_index - 31 else 0;
@@ -1586,20 +1155,6 @@ fn runRepl(gs: *game.state.GameState, io: std.Io, gpa: std.mem.Allocator, store_
                 };
             }
             printPnl(gs, from, gs.clock.day_index, filter);
-        } else if (std.mem.eql(u8, verb, "recruit")) {
-            const role_str = tokens.next() orelse {
-                std.debug.print("usage: recruit <role>\n", .{});
-                continue;
-            };
-            const role = std.meta.stringToEnum(game.person.Role, role_str) orelse {
-                std.debug.print("unknown role '{s}'\n", .{role_str});
-                continue;
-            };
-            const r = try game.commands.execute(gs, .{ .recruit = role });
-            const p = gs.person(r.hired).?;
-            std.debug.print("recruited #{d}: {s} {s} ({s}, {d} c-bills/mo)\n", .{
-                @intFromEnum(r.hired), p.first_name, p.last_name, @tagName(p.experience()), p.monthlySalary(),
-            });
         } else if (std.mem.eql(u8, verb, "day")) {
             // day [n] [force] — the end-turn checklist gates the advance
             // (Stage 9C.2): fix it, or `day force` to proceed regardless.
@@ -1620,38 +1175,81 @@ fn runRepl(gs: *game.state.GameState, io: std.Io, gpa: std.mem.Allocator, store_
             };
             std.debug.print("advanced {d} day(s)\n", .{r.days_advanced});
             printStatus(gs);
-        } else if (std.mem.eql(u8, verb, "hire")) {
-            const role_str = tokens.next() orelse {
-                std.debug.print("usage: hire <candidate#> (see `hall`) | hire <role> <first> <last>\n", .{});
+        } else if (std.mem.eql(u8, verb, "manning")) {
+            const site = parseSite(tokens.next() orelse "");
+            if (site == null or site.? != .company) {
+                std.debug.print("usage: manning co:<id>\n", .{});
                 continue;
-            };
-            if (std.fmt.parseInt(usize, role_str, 10)) |idx| {
-                const r = game.commands.execute(gs, .{ .hire_candidate = idx }) catch |err| {
-                    std.debug.print("error: {s}\n", .{@errorName(err)});
-                    continue;
-                };
-                const p = gs.person(r.hired).?;
-                std.debug.print("hired #{d}: {s} {s} ({s} {s})\n", .{ @intFromEnum(r.hired), p.first_name, p.last_name, @tagName(p.experience()), @tagName(p.role) });
-                continue;
-            } else |_| {}
-            const role = std.meta.stringToEnum(game.person.Role, role_str) orelse {
-                std.debug.print("unknown role '{s}'\n", .{role_str});
-                continue;
-            };
-            const first = tokens.next() orelse "New";
-            const last = tokens.next() orelse "Recruit";
-            const r = try game.commands.execute(gs, .{ .hire = .{ .first = first, .last = last, .role = role } });
-            std.debug.print("hired #{d}\n", .{@intFromEnum(r.hired)});
-        } else if (std.mem.eql(u8, verb, "fire")) {
-            const id_str = tokens.next() orelse continue;
-            const id = std.fmt.parseInt(u32, id_str, 10) catch continue;
-            _ = game.commands.execute(gs, .{ .fire = @enumFromInt(id) }) catch |err| {
-                std.debug.print("error: {s}\n", .{@errorName(err)});
-                continue;
-            };
-            std.debug.print("person #{d} resigned\n", .{id});
+            }
+            var arena = std.heap.ArenaAllocator.init(gpa);
+            defer arena.deinit();
+            std.debug.print("{s}\n", .{game.queries.manning_header});
+            for (game.queries.manning(arena.allocator(), gs, site.?.company) catch continue) |row| {
+                std.debug.print("{s}\n", .{game.queries.stripMarks(arena.allocator(), row.text) catch row.text});
+            }
+        } else if (std.mem.eql(u8, verb, "help") or std.mem.eql(u8, verb, "?")) {
+            for (game.cli.verbs) |v| std.debug.print("  {s}\n", .{game.cli.usage(v) orelse v});
         } else {
-            std.debug.print("unknown command '{s}'\n", .{verb});
+            // Every command verb goes through the parser both frontends share (Stage 12.18).
+            const parsed = game.cli.parseCommand(verb, &tokens) catch |err| {
+                std.debug.print("{s} — usage: {s}\n", .{ @errorName(err), game.cli.usage(verb) orelse verb });
+                continue;
+            };
+            const cmd = parsed orelse {
+                std.debug.print("unknown command '{s}' — `help` lists the verbs\n", .{verb});
+                continue;
+            };
+            const r = game.commands.execute(gs, cmd) catch |err| {
+                std.debug.print("error: {s} — {s}\n", .{ @errorName(err), game.cli.errorText(err) });
+                if (err == error.IllegalFit) if (refitUnit(cmd)) |u| printLab(gs, u);
+                continue;
+            };
+            printResult(gs, cmd, r);
         }
+    }
+}
+
+fn refitUnit(cmd: Command) ?game.types.UnitId {
+    return switch (cmd) {
+        .refit_install => |x| x.unit,
+        .refit_remove => |x| x.unit,
+        .refit_clear => |u| u,
+        .refit_commit => |u| u,
+        else => null,
+    };
+}
+
+/// What the REPL says after a command lands: ids created, hires, hulls
+/// bought, and the screen the verb naturally leads to.
+fn printResult(gs: *game.state.GameState, cmd: Command, r: game.commands.Result) void {
+    switch (cmd) {
+        .create_commander => {
+            printHqs(gs);
+            printOffers(gs);
+        },
+        .accept_contract => {
+            const c = gs.contracts.values()[gs.contracts.count() - 1];
+            std.debug.print("under contract: {s} on {s}, {d} days transit, {d}/mo net\n", .{
+                @tagName(c.kind), game.planet.find(c.planet_key).?.name, c.transit_days, c.monthly_net,
+            });
+        },
+        .new_company, .new_company_at, .raise_company, .new_lance, .raise_air_company => std.debug.print("created force [{d}] — see `toe`\n", .{@intFromEnum(r.created_force)}),
+        .hire, .hire_candidate, .recruit => if (gs.person(r.hired)) |p| std.debug.print("hired #{d}: {s} {s} ({s} {s}, {d} c-bills/mo)\n", .{
+            @intFromEnum(r.hired), p.first_name, p.last_name, @tagName(p.experience()), @tagName(p.role), p.monthlySalary(),
+        }),
+        .crew_company => std.debug.print("{d} hired from the halls\n", .{r.hired_count}),
+        .buy_hull_for => std.debug.print("hull #{d}, {d} days out\n", .{ @intFromEnum(r.unit), r.eta_days }),
+        .trim_stock => std.debug.print("{d} tons sent home\n", .{r.tons_moved}),
+        .refit_install, .refit_remove, .refit_clear, .refit_commit => printLab(gs, refitUnit(cmd).?),
+        .complete_contract, .recall_company => printContracts(gs),
+        .found_hq, .link, .assign_company => printHqs(gs),
+        .auto_assign => |co| printCompanyRoster(gs, co),
+        .autostaff => |hq| printHqRoster(gs, hq),
+        .order_part => |o| if (gs.part_orders.items.len > 0) {
+            const last = gs.part_orders.items[gs.part_orders.items.len - 1];
+            if (last.status == .failed) std.debug.print("logistics couldn't source {s} this time (retry after refresh)\n", .{o.part_key}) else std.debug.print("ordered {s} x{d}, eta day {d}, {d} c-bills\n", .{ o.part_key, o.quantity, last.eta_day orelse 0, last.cost });
+        },
+        .take_loan => |l| std.debug.print("drew {d} c-bills over {d} months\n", .{ l.principal, l.term_months }),
+        else => std.debug.print("done.\n", .{}),
     }
 }

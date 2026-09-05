@@ -33,6 +33,7 @@ pub const queries = @import("sim/queries.zig");
 pub const sqlite = @import("persist/sqlite.zig");
 pub const store = @import("persist/store.zig");
 pub const commands = @import("sim/commands.zig");
+pub const cli = @import("sim/cli.zig");
 pub const rng = @import("sim/rng.zig");
 pub const clock = @import("sim/clock.zig");
 pub const events = @import("sim/events.zig");

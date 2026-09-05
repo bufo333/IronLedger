@@ -882,7 +882,9 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             try hq_ops.queueReactivation(gs, unit_id); // a bay job (Stage 9C)
             return .{};
         },
-        .fabricate => |f| {
+        .fabricate => |f0| {
+            var f = f0;
+            if (f.hq == .none and gs.hqs.count() > 0) f.hq = gs.hqs.keys()[0]; // the outfit's seat
             if (gs.hqs.getPtr(f.hq) == null) return Error.UnknownHq;
             const def = part_mod.find(f.part_key) orelse return Error.UnknownPart;
             if (!part_mod.isComponent(def.key)) return Error.NotAComponent;
