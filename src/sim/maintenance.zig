@@ -6,6 +6,7 @@
 //! Techs get hurt doing it, and free techs are swapped in when they do.
 
 const std = @import("std");
+const tuning = @import("../domain/tuning.zig").t;
 const types = @import("../domain/types.zig");
 const unit_mod = @import("../domain/unit.zig");
 const part_mod = @import("../domain/part.zig");
@@ -76,7 +77,8 @@ pub fn runWeeklyMaintenance(gs: *GameState) !void {
         const raw = gs.rng.roll2d6(.maintenance);
         const total: i32 = @as(i32, raw) + (5 - @as(i32, skill));
 
-        if (total <= tn - 2) {
+        const before_q = u.quality;
+        if (total <= tn - tuning.maintenance.quality_drop_margin) {
             // Clear miss: quality drifts toward A; a snake-eyes week also
             // breaks a piece of gear (weapon, equipment, ammo feed, armor —
             // field-fixable). Neglect never cores a torso: structure is
@@ -104,11 +106,15 @@ pub fn runWeeklyMaintenance(gs: *GameState) !void {
                     }
                 }
             }
-        } else if (total >= tn + 8) {
+        } else if (total >= tn + tuning.maintenance.quality_rise_margin) {
             // Exceptional work slowly restores a machine (rare by design).
             const q = @intFromEnum(u.quality);
             if (q < 5) u.quality = @enumFromInt(q + 1);
         }
+        // Quality drift is news (12C.13): the letter on the resale ticket moved.
+        if (u.quality != before_q) try gs.log(.construction, .{ .company = gs.companyOf(u.force) }, "[maintenance] {s} #{d} quality {s} {s} → {s}{s}", .{
+            u.chassis_key, @intFromEnum(u.id), if (@intFromEnum(u.quality) < @intFromEnum(before_q)) "slips" else "lifts", @tagName(before_q), @tagName(u.quality), if (!covered) " (nobody turning wrenches)" else "",
+        });
 
         // Accidents happen in the hangar (Stage 9C.2): snake-eyes while
         // working a hull, and then only one bad week in twelve hurts the

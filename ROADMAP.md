@@ -860,11 +860,14 @@ item: tests green, both smokes, ROADMAP tick, one commit.
   tech is the hull's own, else the sharpest one at home. The refit
   commit log and the HQ bay queue rows show "tech skill 4 vs target 7 ·
   72% clean / 17% fault / 11% redo" before the work starts.
-- ⬜ 12C.13 **Quality drift** (MekHQ maintenance quality): the weekly
-  maintenance roll moves a hull's quality letter one step on margins of
-  ±4, so neglected machines slide to F and a well-staffed bay lifts them
-  toward A; quality feeds breakdown chance, resale, reactivation days
-  (already) and the rating's support score.
+- ✅ 12C.13 **Quality drift** (MekHQ maintenance quality; A worst … F
+  best). The weekly maintenance roll already moved the letter; the
+  margins are now knobs (`quality_drop_margin` 2, `quality_rise_margin` 7
+  — a skilled, covered tech lifts a hull roughly one week in six, an
+  uncovered hull slips most weeks), every move is a [maintenance] log
+  line, and quality now prices resale (`quality_sale_bp_per_step`, ±5%
+  per step from C) on top of reactivation days, the maintenance target
+  and the repair check (12C.12).
 - ⬜ 12C.14 **Part availability** (MekHQ acquisition target by tech base
   and rarity): `parts.zon` gains `tech_base` (inner sphere / periphery)
   and `availability` (A–F); order sourcing target uses it plus the HQ's

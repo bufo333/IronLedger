@@ -169,6 +169,11 @@
         .repair_fault_margin = 2,
         .repair_redo_bp = 5_000,
     },
+    .maintenance = .{
+        .quality_drop_margin = 2,
+        .quality_rise_margin = 7,
+        .quality_sale_bp_per_step = 500,
+    },
     .rating = .{
         // CamOps p.? Dragoons rating bands, rescaled to this sim's 0–150 score.
         .letter_d = 0,

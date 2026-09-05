@@ -235,6 +235,17 @@ pub const Tuning = struct {
         repair_fault_margin: i32,
         repair_redo_bp: types.Bp,
     },
+    /// Quality drift (12C.13, MekHQ maintenance quality). The weekly
+    /// maintenance roll (2d6 + 5 − tech skill vs. 4 + quality modifier, +1
+    /// afield, +3 uncovered) moves the hull's letter one step toward A
+    /// (worst) on a miss by `quality_drop_margin` or more, one step toward
+    /// F (best) on a success by `quality_rise_margin` or more; resale moves
+    /// `quality_sale_bp_per_step` per step from C.
+    maintenance: struct {
+        quality_drop_margin: i32,
+        quality_rise_margin: i32,
+        quality_sale_bp_per_step: types.Bp,
+    },
     /// Dragoons rating (12C.6, CamOps "Mercenary Rating", MekHQ
     /// `UnitRating`): the letter thresholds on the summed score and the
     /// points each contract outcome adds to the combat record.

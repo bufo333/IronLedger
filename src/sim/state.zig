@@ -1551,7 +1551,10 @@ pub const GameState = struct {
         _ = self;
         if (u.status == .destroyed) return 0;
         const base: types.CBills = if (u.purchase_price > 0) u.purchase_price else if (chassis_mod.find(u.chassis_key)) |c| c.cost else 0;
-        return @divTrunc(base * @as(types.CBills, u.conditionPct()) * tuning.unit.sale_bp, 10_000 * 100);
+        const by_condition = @divTrunc(base * @as(types.CBills, u.conditionPct()) * tuning.unit.sale_bp, 10_000 * 100);
+        // Quality on the ticket (12C.13): ± per step from C (A worst, F best).
+        const steps: i64 = @as(i64, @intFromEnum(u.quality)) - @intFromEnum(types.Quality.c);
+        return types.applyBp(by_condition, @intCast(10_000 + steps * tuning.maintenance.quality_sale_bp_per_step));
     }
 
     /// What an HQ's facilities fetch: 40% of what they cost to build.
@@ -1786,4 +1789,17 @@ test "12C.1: auto-assign benches a spent pilot when a fresher one is free, keeps
     _ = try gs.autoAssign(co);
     try std.testing.expectEqual(fresh, gs.unit(mek).?.pilot);
     try std.testing.expect(gs.pilotSeat(worn) == .none);
+}
+
+test "12C.13: quality moves the resale ticket" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1213 });
+    defer gs.deinit();
+    const uid = try gs.addUnit("SHD-2H");
+    const u = gs.unit(uid).?;
+    u.quality = .c;
+    const c = gs.unitSaleValue(u);
+    u.quality = .f;
+    try std.testing.expect(gs.unitSaleValue(u) > c);
+    u.quality = .a;
+    try std.testing.expect(gs.unitSaleValue(u) < c);
 }
