@@ -3116,8 +3116,8 @@ pub const App = struct {
                         // HQ pane: with the cursor on one, upgrade it directly.
                         const hid: types.HqId = @enumFromInt(self.hqSelId(g));
                         const c = self.cur(0).*;
-                        if (self.focus == 0 and g.hqs.getPtr(hid) != null and c >= 1 and c <= g.hqs.getPtr(hid).?.facilities.items.len) {
-                            const kind = g.hqs.getPtr(hid).?.facilities.items[c - 1].kind;
+                        const under_cursor = if (self.focus == 0) try q.hqFacilityAtRow(al, g, hid, c) else null;
+                        if (under_cursor) |kind| {
                             const rows = try q.upgrades(al, g, hid);
                             for (rows) |r| if (r.kind == kind) {
                                 if (!r.possible) {

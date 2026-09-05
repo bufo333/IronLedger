@@ -1307,6 +1307,27 @@ fn siteLines(alloc: Alloc, gs: *GameState, out: *std.ArrayListUnmanaged([]const 
 
 // ---------------------------------------------------------------------- hq
 
+/// Which facility a row of `hqDetail` names, or null. The tier section
+/// above the facility table varies in length (field HQs explain how to
+/// become regional), so the HQ screen's `u` reads the cursor through this
+/// rather than by position.
+pub fn hqFacilityAtRow(alloc: Alloc, gs: *GameState, id: types.HqId, row: usize) !?@import("../domain/hq.zig").FacilityKind {
+    const lines = try hqDetail(alloc, gs, id);
+    if (row >= lines.len) return null;
+    // The table runs from the "facility" header to the next blank line.
+    var header: ?usize = null;
+    for (lines, 0..) |l, i| if (std.mem.startsWith(u8, l, "facility ")) {
+        header = i;
+        break;
+    };
+    const start = (header orelse return null) + 1;
+    if (row < start) return null;
+    for (lines[start..row + 1]) |l| if (l.len == 0) return null;
+    var it = std.mem.tokenizeScalar(u8, lines[row], ' ');
+    const tag = it.next() orelse return null;
+    return std.meta.stringToEnum(@import("../domain/hq.zig").FacilityKind, tag);
+}
+
 pub fn hqDetail(alloc: Alloc, gs: *GameState, id: types.HqId) ![]const []const u8 {
     var out: std.ArrayListUnmanaged([]const u8) = .empty;
     const h = gs.hqs.getPtr(id) orelse return out.toOwnedSlice(alloc);
@@ -3153,6 +3174,30 @@ test "contract history lists closed contracts with their world; the map counts w
     var worked: u32 = 0;
     for (m.worlds) |w| worked += w.worked;
     try std.testing.expectEqual(@as(u32, 1), worked);
+}
+
+test "the HQ screen's facility rows map back to facilities whatever sits above them" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 71 });
+    defer gs.deinit();
+    const commands = @import("commands.zig");
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const hq = gs.hqs.keys()[0];
+    const lines = try hqDetail(a, &gs, hq);
+    const h = gs.hqs.getPtr(hq).?;
+    var seen: usize = 0;
+    for (lines, 0..) |l, i| {
+        const kind = try hqFacilityAtRow(a, &gs, hq, i);
+        if (kind) |k| {
+            try std.testing.expect(std.mem.startsWith(u8, l, @tagName(k)));
+            try std.testing.expectEqual(h.facilities.items[seen].kind, k);
+            seen += 1;
+        }
+    }
+    try std.testing.expectEqual(h.facilities.items.len, seen);
+    try std.testing.expect((try hqFacilityAtRow(a, &gs, hq, 0)) == null); // the header
 }
 
 test "hq detail says a field HQ hosts no company and how to raise it" {

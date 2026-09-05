@@ -891,6 +891,12 @@ item: tests green, both smokes, ROADMAP tick, one commit.
   on an HQ that is already regional. The `tier` command also debited the
   HQ before checking it could start (a refusal kept the money); it now
   checks tier, project and funds first and pays once.
+- ✅ Fix (play feedback 2026-09-05): HQ screen `u` upgraded the wrong
+  facility — it read the cursor as "row − 1 into the facility list", but
+  the tier section above the table varies in length (a promoted firebase
+  gained rows), so the highlighted mess hall resolved to the spaceport.
+  `queries.hqFacilityAtRow` now maps the rendered row back to its
+  facility; rows outside the table open the picker.
 - ✅ 12C.15 **Tech target numbers**: `GameState.hullHours` scales the
   class table by quality (`hours_quality_bp`: an A-grade wreck wants ×1.5,
   an F-grade machine ×0.8) and by an exotic design (`hours_exotic_bp`,

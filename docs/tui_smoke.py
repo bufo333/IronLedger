@@ -122,7 +122,7 @@ assert "back office" in plain() and "HIRING HALL" in plain()
 send("u", 0.8)                 # cursor on the header row → picker
 assert "UPGRADE ·" in plain()[-30000:] and "paperwork + build" in plain()[-30000:], plain()[-3000:]
 send("\x1b")
-send("j"); send("u", 0.8)      # cursor on the first facility → starts (or says why not)
+send("j"); send("j"); send("j"); send("u", 0.8)   # cursor on the first facility row (tier line, blank, header, then facilities) → starts (or says why not)
 p = plain()[-600:]
 assert "upgrade started" in p or "HQ funds short" in p or "project running" in p, plain()[-1500:]
 send("T", 0.8)                 # tier: the starter HQ is already regional → says so (the key exists)
