@@ -667,7 +667,7 @@ map. Each item ends green with a ROADMAP tick, as before.
   the autoresolve already understands (gunnery/piloting points, wound
   survival, morale resistance, one re-roll per contract for Edge). `train
   <person> ability <key>`; shown on the record. Store bump.
-- ⬜ 12B.7 **Prisoners as people** (MekHQ prisoners). A held field with a
+- ✅ 12B.7 **Prisoners as people** (MekHQ prisoners). A held field with a
   security lance captures enemy crew as `Person` rows with `status = .pow`
   (generated from the enemy faction, experience by enemy quality), held at
   the company and moved home with it. They eat provisions, and the inbox

@@ -47,6 +47,8 @@ pub const EventKind = enum {
     salvage_dispute,
     /// Personnel (Stage 12.25): someone restless hands in notice.
     notice_given,
+    /// A prisoner of war held by the company (12B.7).
+    prisoner_held,
 };
 
 /// One consequence of an event option. Relative where it must scale
@@ -77,6 +79,13 @@ pub const Effect = union(enum) {
     /// They leave, and the halls are asked for a replacement in the same
     /// role (hired into the same company if one is listed).
     replace_from_hall,
+    // Prisoner effects (12B.7) act on the event's `person`, a POW.
+    /// Their house pays by experience; they go home.
+    ransom_prisoner,
+    /// Released unpaid: +2 standing with their house.
+    release_prisoner,
+    /// A loyalty roll; success puts them on your payroll as a mekwarrior.
+    recruit_prisoner,
 };
 
 pub const Option = struct {

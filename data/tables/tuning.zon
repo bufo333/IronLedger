@@ -167,6 +167,13 @@
         .negotiation_standing_per = 25,
         .negotiation_fail_pay_bp = 9_500,
         .negotiation_pay_step_bp = 11_000,
+        .prisoners_per_kills = 2,
+        .prisoners_max_per_battle = 3,
+        .ransom_green = 20_000,
+        .ransom_regular = 40_000,
+        .ransom_veteran = 80_000,
+        .ransom_elite = 150_000,
+        .recruit_prisoner_target = 8,
     },
     .generation = .{
         .scout_max_tonnage = 40,

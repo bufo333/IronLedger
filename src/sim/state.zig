@@ -1072,7 +1072,8 @@ pub const GameState = struct {
         var it = self.people.iterator();
         while (it.next()) |entry| {
             const p = entry.value_ptr;
-            if (p.status != .active and p.status != .wounded) continue;
+            // Prisoners eat too (12B.7).
+            if (p.status != .active and p.status != .wounded and p.status != .pow) continue;
             var f = p.assigned_force;
             while (f != .none) {
                 if (f == company_id) {

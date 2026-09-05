@@ -180,6 +180,7 @@ fn weeklyDeck(garrison: bool, roll: u8) Entry {
 /// a saved pending decision is rebuilt from its kind — Stage 11).
 pub fn entryForKind(kind: events.EventKind) ?Entry {
     if (kind == .notice_given) return noticeEntry();
+    if (kind == .prisoner_held) return prisonerEntry();
     var roll: u8 = 2;
     while (roll <= 12) : (roll += 1) {
         const g = garrisonDeck(roll);
@@ -397,6 +398,36 @@ fn applyEffectsFor(gs: *GameState, effects: []const events.Effect, contract: ?*c
             },
             .let_go => try letGo(gs, person_id, false),
             .replace_from_hall => try letGo(gs, person_id, true),
+            .ransom_prisoner => if (gs.person(person_id)) |p| {
+                const t = @import("../domain/tuning.zig").t.contract;
+                const price: types.CBills = switch (p.experience()) {
+                    .green => t.ransom_green,
+                    .regular => t.ransom_regular,
+                    .veteran => t.ransom_veteran,
+                    .elite => t.ransom_elite,
+                };
+                try gs.postTreasury(if (company != .none) .{ .company = company } else .outfit, .{ .day = gs.clock.day_index, .amount = price, .category = .event, .company = company, .note = "prisoner ransom" });
+                p.status = .released;
+                try gs.log(.contract, .{ .company = company }, "[prisoner] {s} {s} ({s} {s}) ransomed to {s} for {d} c-bills", .{ p.first_name, p.last_name, @tagName(p.experience()), @tagName(p.role), p.faction, price });
+            },
+            .release_prisoner => if (gs.person(person_id)) |p| {
+                p.status = .released;
+                const now = if (p.faction.len > 0 and !std.mem.eql(u8, p.faction, "PER")) try gs.adjustStanding(p.faction, 2) else 0;
+                try gs.log(.contract, .{ .company = company }, "[prisoner] {s} {s} released to {s}{s}", .{ p.first_name, p.last_name, p.faction, if (p.faction.len > 0 and !std.mem.eql(u8, p.faction, "PER")) try std.fmt.allocPrint(gs.allocator(), " — standing +2 → {d}", .{now}) else "" });
+            },
+            .recruit_prisoner => if (gs.person(person_id)) |p| {
+                const roll = gs.rng.roll2d6(.events);
+                if (roll >= @import("../domain/tuning.zig").t.contract.recruit_prisoner_target) {
+                    p.status = .active;
+                    p.recruited_day = gs.clock.day_index;
+                    p.morale = 40;
+                    applyToCompany(gs, company, .morale, -2);
+                    try gs.log(.contract, .{ .company = company }, "[prisoner] {s} {s} ({s} {s} of {s}) takes your coin (2d6 = {d}) — assign a seat; the company mutters (morale −2)", .{ p.first_name, p.last_name, @tagName(p.experience()), @tagName(p.role), p.faction, roll });
+                } else {
+                    p.status = .released;
+                    try gs.log(.contract, .{ .company = company }, "[prisoner] {s} {s} refuses your offer (2d6 = {d}) and is released", .{ p.first_name, p.last_name, roll });
+                }
+            },
             .field_stock => |fs| {
                 const site: types.Site = if (company != .none) .{ .company = company } else gs.defaultSite();
                 // Trucks have finite room: what does not fit is left on the dock.
@@ -436,6 +467,29 @@ fn letGo(gs: *GameState, person_id: types.PersonId, replace: bool) !void {
         return;
     };
     try gs.log(.rotation, .{ .company = company }, "[turnover] no {s} on the hiring halls to replace them — hire when one walks in", .{@tagName(p.role)});
+}
+
+/// The prisoner decision (12B.7): ransom, release, or recruit.
+pub fn prisonerEntry() Entry {
+    return .{ .kind = .prisoner_held, .log = "is held prisoner by the company — ransom to their house, release for goodwill, or offer them a contract", .options = &.{
+        .{ .label = "Ransom them to their house", .effects = &.{.ransom_prisoner} },
+        .{ .label = "Release them (+2 standing with their house)", .effects = &.{.release_prisoner} },
+        .{ .label = "Offer them a contract (loyalty roll)", .effects = &.{.recruit_prisoner} },
+    }, .default_choice = 1 };
+}
+
+/// Queue the prisoner decision for a captive (12B.7).
+pub fn queuePrisoner(gs: *GameState, person_id: types.PersonId, company: types.ForceId) !void {
+    const e = prisonerEntry();
+    try gs.event_queue.push(gs.allocator(), .{
+        .day = gs.clock.day_index,
+        .kind = .prisoner_held,
+        .company = company,
+        .person = person_id,
+        .options = e.options,
+        .default_choice = e.default_choice,
+        .deadline_day = gs.clock.day_index + decision_window_days * 2,
+    });
 }
 
 /// The notice decision (Stage 12.25): keep them or let them go.
@@ -662,7 +716,7 @@ test "12.24: automatic events never move money, stock or hulls — those are dec
             if (e.options.len > 0) continue;
             for (e.auto_effects) |fx| switch (fx) {
                 .fatigue, .morale, .xp_all, .score, .reputation, .employer_standing => {},
-                .cash, .cash_monthly_pct, .supply_loss, .parts_windfall, .field_stock, .damage_random_units, .damage_convoy_units, .raise_pct, .retention_bonus_months, .let_go, .replace_from_hall => {
+                .cash, .cash_monthly_pct, .supply_loss, .parts_windfall, .field_stock, .damage_random_units, .damage_convoy_units, .raise_pct, .retention_bonus_months, .let_go, .replace_from_hall, .ransom_prisoner, .release_prisoner, .recruit_prisoner => {
                     std.debug.print("auto event {s} carries a player-facing effect\n", .{@tagName(e.kind)});
                     return error.TestUnexpectedResult;
                 },
@@ -703,4 +757,54 @@ test "12.25: notice is a decision — a raise keeps them, letting go vacates the
     try resolveChoice(&gs, 0, 2);
     try std.testing.expectEqual(people_before + 1, gs.people.count());
     try std.testing.expectEqual(co, gs.person(gs.people.keys()[gs.people.count() - 1]).?.assigned_force);
+}
+
+test "12B.7: a prisoner can be ransomed, released for standing, or recruited on a loyalty roll" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1237 });
+    defer gs.deinit();
+    _ = try gs.createCommander("T", .LC, .line_officer);
+    const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    const mk = struct {
+        fn captive(g: *GameState, company: types.ForceId) !types.PersonId {
+            const spec = @import("../gen/person_gen.zig").generate(&g.rng, .mekwarrior);
+            const pid = try g.hireFromSpec(spec);
+            const p = g.person(pid).?;
+            p.status = .pow;
+            p.assigned_force = company;
+            p.faction = "DC";
+            try queuePrisoner(g, pid, company);
+            return pid;
+        }
+    };
+    // Ransom pays the company by experience.
+    const a = try mk.captive(&gs, co);
+    const funds_before = gs.force(co).?.local_funds;
+    try resolveChoice(&gs, 0, 0);
+    try std.testing.expectEqual(@import("../domain/person.zig").Status.released, gs.person(a).?.status);
+    try std.testing.expect(gs.force(co).?.local_funds > funds_before);
+    // Release earns standing with their house.
+    const b = try mk.captive(&gs, co);
+    try resolveChoice(&gs, 0, 1);
+    try std.testing.expectEqual(@import("../domain/person.zig").Status.released, gs.person(b).?.status);
+    try std.testing.expectEqual(@as(i32, 2), gs.standing("DC"));
+    // Recruitment: over enough tries, someone joins and someone refuses.
+    var joined = false;
+    var refused = false;
+    var tries: u32 = 0;
+    while ((!joined or !refused) and tries < 40) : (tries += 1) {
+        const c = try mk.captive(&gs, co);
+        try resolveChoice(&gs, 0, 2);
+        switch (gs.person(c).?.status) {
+            .active => joined = true,
+            .released => refused = true,
+            else => unreachable,
+        }
+    }
+    try std.testing.expect(joined and refused);
+    // Prisoners are not paid but do eat.
+    const heads_before = gs.companyHeadcount(co);
+    const payroll_before = gs.monthlyPayroll();
+    _ = try mk.captive(&gs, co);
+    try std.testing.expectEqual(heads_before + 1, gs.companyHeadcount(co));
+    try std.testing.expectEqual(payroll_before, gs.monthlyPayroll());
 }

@@ -78,7 +78,7 @@ pub const Role = enum {
     }
 };
 
-pub const Status = enum { active, wounded, mia, kia, retired, resigned, pow };
+pub const Status = enum { active, wounded, mia, kia, retired, resigned, pow, released };
 
 pub const InjuryLocation = enum { head, torso, left_arm, right_arm, left_leg, right_leg, internal };
 
@@ -140,6 +140,8 @@ pub const Person = struct {
     /// is spent once per contract.
     abilities: std.ArrayListUnmanaged([]const u8) = .empty,
     edge_spent: bool = false,
+    /// House of origin (12B.7): set for prisoners of war, empty for your own.
+    faction: []const u8 = "",
     /// Per-location injuries (Stage 12.16); open ones keep the person in
     /// the medbay, permanent ones stay on the record.
     injuries: std.ArrayListUnmanaged(Injury) = .empty,

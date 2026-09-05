@@ -211,7 +211,7 @@ pub fn desk(alloc: Alloc, gs: *GameState, log_rows: usize) !Desk {
             .company = forceName(gs, ev.company),
             .deadline_day = ev.deadline_day,
             .days_left = @as(i64, ev.deadline_day) - @as(i64, day),
-            .description = if (ev.person != .none) (if (gs.person(ev.person)) |p| try std.fmt.allocPrint(alloc, "{s} {s} ({s}, {s}, {s}/mo, morale {d}, fatigue {d}) {s}", .{ p.first_name, p.last_name, @tagName(p.role), @tagName(p.experience()), try money(alloc, p.monthlySalary()), p.morale, p.fatigue, if (entry) |e| e.log else "" }) else "") else if (entry) |e| e.log else "",
+            .description = if (ev.person != .none) (if (gs.person(ev.person)) |p| (if (p.status == .pow) try std.fmt.allocPrint(alloc, "{s} {s} of {s} ({s} {s}, gunnery {d}) {s}", .{ p.first_name, p.last_name, p.faction, @tagName(p.experience()), @tagName(p.role), p.skill(p.role.primarySkill()) orelse 7, if (entry) |e| e.log else "" }) else try std.fmt.allocPrint(alloc, "{s} {s} ({s}, {s}, {s}/mo, morale {d}, fatigue {d}) {s}", .{ p.first_name, p.last_name, @tagName(p.role), @tagName(p.experience()), try money(alloc, p.monthlySalary()), p.morale, p.fatigue, if (entry) |e| e.log else "" })) else "") else if (entry) |e| e.log else "",
             .options = try opts.toOwnedSlice(alloc),
             .default_choice = ev.default_choice,
         });
@@ -292,6 +292,9 @@ pub fn effectsText(alloc: Alloc, effects: []const @import("events.zig").Effect) 
         .supply_loss => |c| try appendTag(alloc, &out, false, try std.fmt.allocPrint(alloc, "supplies −{s} C", .{try money(alloc, c)})),
         .employer_standing => |d| try appendTag(alloc, &out, d >= 0, try std.fmt.allocPrint(alloc, "employer standing {s}{d}", .{ if (d >= 0) "+" else "−", @abs(d) })),
         .field_stock => |fs| try appendTag(alloc, &out, true, try std.fmt.allocPrint(alloc, "+{d} {s} to the trucks", .{ fs.qty, fs.key })),
+        .ransom_prisoner => try appendTag(alloc, &out, true, "ransom by experience, they go home"),
+        .release_prisoner => try appendTag(alloc, &out, true, "+2 standing with their house"),
+        .recruit_prisoner => try appendTag(alloc, &out, false, "loyalty roll 2d6 ≥ 8: joins as a mekwarrior, company morale −2; else released"),
         .raise_pct => |p| try appendTag(alloc, &out, false, try std.fmt.allocPrint(alloc, "salary +{d}% for good", .{p})),
         .retention_bonus_months => |m| try appendTag(alloc, &out, false, try std.fmt.allocPrint(alloc, "{d} months' pay once", .{m})),
         .let_go => try appendTag(alloc, &out, false, "they leave, seat opens"),
@@ -1908,6 +1911,7 @@ pub fn assignmentText(alloc: Alloc, gs: *GameState, p: *const person_mod.Person)
 pub fn statusText(alloc: Alloc, gs: *GameState, p: *const person_mod.Person) ![]const u8 {
     const day = gs.clock.day_index;
     if (p.status == .wounded) return if (p.medbay_admitted) "{a}medbay{/}" else "{c}wounded{/}";
+    if (p.status == .pow) return try std.fmt.allocPrint(alloc, "{{a}}prisoner ({s}){{/}}", .{p.faction});
     if (p.status != .active) return try std.fmt.allocPrint(alloc, "{{c}}{s}{{/}}", .{@tagName(p.status)});
     if (p.leave_until_day) |until| if (day < until) return std.fmt.allocPrint(alloc, "{{a}}on leave{{/}} until d{d}", .{until});
     if (p.training) |t| return std.fmt.allocPrint(alloc, "{{a}}training{{/}} {s} d{d}", .{ @tagName(t.skill), t.done_day });
@@ -1931,7 +1935,7 @@ pub fn people(alloc: Alloc, gs: *GameState, filter: HallFilter) !People {
     var it = gs.people.iterator();
     while (it.next()) |e| {
         const p = e.value_ptr;
-        if (p.status == .kia or p.status == .retired or p.status == .resigned) continue;
+        if (p.status == .kia or p.status == .retired or p.status == .resigned or p.status == .released) continue;
         total += 1;
         if (!filter.matches(p.role)) continue;
         if (filter == .wounded and p.status != .wounded) continue;

@@ -211,6 +211,16 @@ pub const Tuning = struct {
         negotiation_standing_per: i32,
         negotiation_fail_pay_bp: types.Bp,
         negotiation_pay_step_bp: types.Bp,
+        /// Prisoners (12B.7): captured per battle when a security lance holds
+        /// the field — one per this many kills, capped; ransom by experience
+        /// (green…elite); the 2d6 target a captive must meet to take your coin.
+        prisoners_per_kills: u32,
+        prisoners_max_per_battle: u32,
+        ransom_green: types.CBills,
+        ransom_regular: types.CBills,
+        ransom_veteran: types.CBills,
+        ransom_elite: types.CBills,
+        recruit_prisoner_target: u8,
     },
     generation: struct {
         scout_max_tonnage: u8,

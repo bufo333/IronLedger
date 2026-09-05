@@ -440,16 +440,24 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     while (ammo_it.next()) |entry| {
         _ = gs.takeStock(player.site, entry.key_ptr.*, entry.value_ptr.*);
     }
-    const ransom: types.CBills = if (held_field and player.mods.has_security_lance and enemy_loss_pct >= 15) 50_000 else 0;
-    if (ransom > 0) {
-        try gs.postTreasury(.{ .company = c.assigned_company }, .{
-            .day = gs.clock.day_index,
-            .amount = ransom,
-            .category = .event,
-            .company = c.assigned_company,
-            .contract = c.id,
-            .note = "prisoner ransom",
-        });
+    // Prisoners (12B.7): a security lance on a held field takes enemy crews
+    // alive — people with a house, held by the company until the inbox
+    // decides ransom, release or recruitment.
+    var captured: u32 = 0;
+    if (held_field and player.mods.has_security_lance and enemy_loss_pct >= 15) {
+        const t = tuning.contract;
+        const kills_est: u32 = @intCast(@divTrunc(enemy_destroyed_bv + 500, 1000));
+        captured = @min(t.prisoners_max_per_battle, kills_est / t.prisoners_per_kills);
+        for (0..captured) |_| {
+            const spec = @import("../gen/person_gen.zig").generateWithBonus(&gs.rng, .mekwarrior, if (std.mem.eql(u8, c.enemy_key, "PER")) -1 else 0);
+            const pid = try gs.hireFromSpec(spec);
+            const pow = gs.person(pid).?;
+            pow.status = .pow;
+            pow.assigned_force = c.assigned_company;
+            pow.faction = c.enemy_key;
+            pow.morale = 20;
+            try @import("contract_events.zig").queuePrisoner(gs, pid, c.assigned_company);
+        }
     }
     const comp = @divTrunc(damage_value * c.terms.battle_loss_pct, 100);
     if (comp > 0) {
@@ -504,8 +512,8 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
         player.power,            enemy_power,            player.mods.recon_quality,
         player.mods.avg_fatigue, player.mods.avg_morale, if (edge_used_by) |p| try std.fmt.allocPrint(gs.allocator(), " · {s} spent Edge to re-roll a lost engagement", .{try p.rankedName(gs.allocator())}) else "",
     });
-    try gs.log(.battle, ctx, "[AAR]   losses: {d} hit / {d} destroyed, {d} wounded, {d} KIA | enemy losses {d} BV ≈ {d} kill{s} credited | salvage {d} BV claimed | comp {d} | score {d}", .{
-        hits, destroyed, wounded, kia, enemy_destroyed_bv, kills_credited, if (kills_credited == 1) "" else "s", salvage, comp, c.score,
+    try gs.log(.battle, ctx, "[AAR]   losses: {d} hit / {d} destroyed, {d} wounded, {d} KIA | enemy losses {d} BV ≈ {d} kill{s} credited{s} | salvage {d} BV claimed | comp {d} | score {d}", .{
+        hits, destroyed, wounded, kia, enemy_destroyed_bv, kills_credited, if (kills_credited == 1) "" else "s", if (captured > 0) try std.fmt.allocPrint(gs.allocator(), ", {d} prisoner{s} taken (inbox)", .{ captured, if (captured == 1) "" else "s" }) else "", salvage, comp, c.score,
     });
     // Every hit on record.
     for (hit_log.items) |h| {
