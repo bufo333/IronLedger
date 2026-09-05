@@ -1394,11 +1394,12 @@ pub const HallFilter = enum {
     admin_hr,
     admin_finance,
     other, // infantry, battle armor, everything else
+    unassigned, // personnel screen only: no seat, no HQ posting, no company
     wounded, // personnel screen only: anyone hurt, in the medbay or waiting
 
     pub fn matches(self: HallFilter, role: person_mod.Role) bool {
         return switch (self) {
-            .all, .wounded => true,
+            .all, .unassigned, .wounded => true,
             .combat => role == .mekwarrior or role == .vehicle_crew or role == .aero_pilot,
             .techs => role == .tech_mek or role == .tech_mechanic or role == .tech_aero or role == .tech_ba or role == .astech,
             .medical => role == .doctor or role == .medic,
@@ -1912,6 +1913,16 @@ pub fn assignmentText(alloc: Alloc, gs: *GameState, p: *const person_mod.Person)
     return "{a}unassigned{/}";
 }
 
+/// Nobody's pilot, nobody's tech, not posted to an HQ, not on a company's
+/// books: the people the assignment column shows as "unassigned".
+pub fn isUnassigned(gs: *GameState, p: *const person_mod.Person) bool {
+    if (p.posted_hq != .none or p.assigned_force != .none) return false;
+    if (gs.pilotSeat(p.id) != .none) return false;
+    var uit = gs.units.iterator();
+    while (uit.next()) |e| if (e.value_ptr.tech == p.id) return false;
+    return true;
+}
+
 pub fn statusText(alloc: Alloc, gs: *GameState, p: *const person_mod.Person) ![]const u8 {
     const day = gs.clock.day_index;
     if (p.status == .wounded) return if (p.medbay_admitted) "{a}medbay{/}" else "{c}wounded{/}";
@@ -1943,6 +1954,7 @@ pub fn people(alloc: Alloc, gs: *GameState, filter: HallFilter) !People {
         total += 1;
         if (!filter.matches(p.role)) continue;
         if (filter == .wounded and p.status != .wounded) continue;
+        if (filter == .unassigned and !isUnassigned(gs, p)) continue;
         const name = try p.rankedName(alloc);
         try rows.append(alloc, .{ .id = p.id, .text = try std.fmt.allocPrint(alloc, "{d: <4} {s: <20} {s: <15} {s: <7} {s: <5} {d: >3} {s} {s} {s: <11} {d: >3} {d: >3} {s: >7}", .{
             @intFromEnum(p.id),                                                             clip(name, 20),
@@ -2642,7 +2654,7 @@ test "hall filter groups roles and map classifies worlds" {
     try std.testing.expect(HallFilter.techs.matches(.tech_mechanic));
     try std.testing.expect(!HallFilter.techs.matches(.admin_hr));
     try std.testing.expect(HallFilter.admin_logistics.matches(.admin_logistics));
-    try std.testing.expectEqual(HallFilter.wounded, HallFilter.other.next());
+    try std.testing.expectEqual(HallFilter.unassigned, HallFilter.other.next());
     try std.testing.expectEqual(HallFilter.all, HallFilter.wounded.next());
 
     var gs = GameState.init(std.testing.allocator, .{ .seed = 11 });
@@ -2822,6 +2834,35 @@ test "manning matches the starter generator's ratios; raise candidates list pool
     const l = gs.market_listings.items[gs.market_listings.items.len - 1];
     const after = try raiseCandidates(a, &gs, co, &.{.{ .hq = l.hq, .item_key = l.item_key, .listed_day = l.listed_day, .price = l.price }});
     try std.testing.expect(after.len == cands.len - 1);
+}
+
+test "people: the unassigned filter lists only people with no seat, posting or company" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 7 });
+    defer gs.deinit();
+    const commands = @import("commands.zig");
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "Test", .origin = .LC, .profession = .quartermaster } });
+    _ = try commands.execute(&gs, .{ .new_company = "Alpha Company" });
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    // A generated company is fully assigned; the commander sits at an HQ.
+    const before = try people(a, &gs, .unassigned);
+    try std.testing.expectEqual(@as(usize, 0), before.rows.len);
+    // A fresh hire with no seat shows up; giving them a mek to tech hides them again.
+    const loose = try gs.hirePerson("Loose", "Hand", .tech_mek);
+    try std.testing.expect(isUnassigned(&gs, gs.people.getPtr(loose).?));
+    const mid = try people(a, &gs, .unassigned);
+    try std.testing.expectEqual(@as(usize, 1), mid.rows.len);
+    try std.testing.expectEqual(loose, mid.rows[0].id);
+    try std.testing.expect(mid.total > 1);
+    const spare = try gs.addUnit("LCT-1V");
+    gs.units.getPtr(spare).?.tech = loose;
+    try std.testing.expect(!isUnassigned(&gs, gs.people.getPtr(loose).?));
+    try std.testing.expectEqual(@as(usize, 0), (try people(a, &gs, .unassigned)).rows.len);
+    // The cycle passes through unassigned before wounded and wraps to all.
+    try std.testing.expectEqual(HallFilter.unassigned, HallFilter.other.next());
+    try std.testing.expectEqual(HallFilter.wounded, HallFilter.unassigned.next());
+    try std.testing.expectEqual(HallFilter.all, HallFilter.wounded.next());
 }
 
 test "desk and ledger queries build on a fresh campaign" {
