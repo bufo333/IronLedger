@@ -2941,13 +2941,22 @@ test "12.15: ships need berths, lift the company for less charter, and come home
     try std.testing.expectEqual(@as(u32, 1), gs.transportsBerthedAt(hq, .dropship));
 
     // No jumpship: a dedicated line is refused; charter and scheduled are fine.
-    _ = try execute(&gs, .{ .found_hq = .{ .name = "Far", .planet_key = "zebebelgenubi" } });
+    // Found the second HQ on a world inside the starter ring (the map is
+    // Terra-wide now, 12B.9; the starter world moves with the seed).
+    const home_world = planet_mod.find(gs.hqs.getPtr(hq).?.planet_key).?;
+    var far_key: []const u8 = "";
+    for (planet_mod.catalog) |*p| if (p != home_world and planet_mod.distanceLy(p, home_world) <= gs.hqs.getPtr(hq).?.influenceLy() and far_key.len == 0) {
+        far_key = p.key;
+    };
+    _ = try execute(&gs, .{ .found_hq = .{ .name = "Far", .planet_key = far_key } });
     const far = gs.hqs.keys()[1];
     try std.testing.expectError(Error.NoJumpship, execute(&gs, .{ .link = .{ .a = hq, .b = far, .level = 3 } }));
     _ = try execute(&gs, .{ .link = .{ .a = hq, .b = far, .level = 2 } });
 
-    // Uncrewed, the ship lifts nothing: full charter.
+    // Uncrewed, the ship lifts nothing: full charter. (The employer pays no
+    // transport share here so the charter is a real number to compare.)
     const offer = 0;
+    gs.contract_offers.items[offer].terms.transport_pct = 0;
     const charter_full = blk: {
         const c = gs.contract_offers.items[offer];
         break :blk @divTrunc(@as(types.CBills, c.dist_ly) * 2_000 * (100 - @as(i64, c.terms.transport_pct)), 100);

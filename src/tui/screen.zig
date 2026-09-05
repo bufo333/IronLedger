@@ -19,6 +19,15 @@ pub const Style = enum(u8) {
     purple,
     box, // borders
     focus, // the focused pane's border line
+    // Political colours for the star map (12B.9).
+    blue,
+    red,
+    yellow,
+    green,
+    magenta,
+    cyan,
+    white,
+    grey,
 
     fn sgr(self: Style) []const u8 {
         return switch (self) {
@@ -32,6 +41,14 @@ pub const Style = enum(u8) {
             .purple => "\x1b[0;35m",
             .box => "\x1b[0;37m",
             .focus => "\x1b[0;36m",
+            .blue => "\x1b[0;94m",
+            .red => "\x1b[0;91m",
+            .yellow => "\x1b[0;93m",
+            .green => "\x1b[0;92m",
+            .magenta => "\x1b[0;95m",
+            .cyan => "\x1b[0;96m",
+            .white => "\x1b[0;97m",
+            .grey => "\x1b[0;90m",
         };
     }
 

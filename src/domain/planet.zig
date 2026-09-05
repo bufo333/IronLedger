@@ -52,6 +52,20 @@ pub fn weightedPickByFaction(rng: *rng_mod.Rng, faction_key: []const u8) ?*const
     unreachable;
 }
 
+test "12B.9: every world's faction is in the factions table and every capital is on the map" {
+    const faction = @import("faction.zig");
+    try std.testing.expect(catalog.len >= 150);
+    for (catalog) |p| try std.testing.expect(faction.find(p.faction) != null);
+    for (faction.table) |f| {
+        if (find(f.capital) == null) {
+            std.debug.print("faction {s}: capital {s} not on the map\n", .{ f.key, f.capital });
+            return error.TestUnexpectedResult;
+        }
+    }
+    // The original worlds keep their keys so saves still resolve.
+    for ([_][]const u8{ "galatea", "solaris7", "skye", "new_home", "outreach", "zebebelgenubi" }) |k| try std.testing.expect(find(k) != null);
+}
+
 test "map loads with unique keys and all five houses present" {
     try std.testing.expect(catalog.len >= 20);
     for (catalog, 0..) |p, i| {

@@ -20,6 +20,11 @@ pub const Faction = enum {
         return @tagName(self);
     }
 
+    pub fn isHouse(k: []const u8) bool {
+        inline for (@typeInfo(Faction).@"enum".fields) |f| if (std.mem.eql(u8, f.name, k)) return true;
+        return false;
+    }
+
     pub fn fullName(self: Faction) []const u8 {
         return switch (self) {
             .LC => "Lyran Commonwealth",

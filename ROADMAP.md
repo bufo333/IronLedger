@@ -690,7 +690,7 @@ map. Each item ends green with a ROADMAP tick, as before.
   Lightning, Eagle, Riever, Chippewa. RAT weights per house and weight
   class in `data/tables/rat.zon` (AtB) so Lyran companies field Zeuses and
   Combine ones Dragons.
-- ⬜ 12B.9 **The full star map and factions** (MegaMek `planets.xml` is
+- ✅ 12B.9 **The full star map and factions** (234 systems in this cut) (MegaMek `planets.xml` is
   GPL data; we re-encode). `data/planets.zon` grows to the 3025 Inner
   Sphere at roughly 400 named systems: every house capital, regional
   capitals, the mercenary hubs, the border worlds that appear in the

@@ -401,8 +401,11 @@ pub fn standings(alloc: Alloc, gs: *GameState) ![]const []const u8 {
     var out: std.ArrayListUnmanaged([]const u8) = .empty;
     const cm = @import("../econ/contract_market.zig");
     const t = @import("../domain/tuning.zig").t.contract;
-    inline for (@typeInfo(@import("../domain/commander.zig").Faction).@"enum".fields) |f| {
+    for (@import("../domain/faction.zig").table) |fr| {
+        if (!fr.hires) continue;
+        const f = .{ .name = fr.key };
         const s = gs.standing(f.name);
+        if (s == 0 and !@import("../domain/commander.zig").Faction.isHouse(fr.key)) continue; // periphery rows appear once they matter
         const bp = cm.standingPayBp(s);
         const mk: []const u8 = if (s <= -t.standing_shun_depth) "{c}" else if (s < 0) "{a}" else if (s >= 25) "{g}" else "";
         const note: []const u8 = if (gs.factionCooling(f.name)) " · {c}cooling after a breach{/}" else if (s <= -t.standing_shun_depth) " · {c}shunned: half their offers{/}" else if (s >= 25) " · {g}favoured{/}" else "";

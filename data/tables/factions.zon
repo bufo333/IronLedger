@@ -1,0 +1,19 @@
+// Factions of 3025 (Stage 12B.9). Typed against domain/faction.zig
+// `FactionRow`. `foes` feeds the contract market's enemy picks; `pay_bp`
+// the employer multiplier; `hires` whether the faction posts contracts;
+// `color` is the Map screen's political colouring.
+.{
+    .{ .key = "LC", .name = "Lyran Commonwealth", .color = .blue, .capital = "tharkad", .foes = .{ "DC", "FWL" }, .pay_bp = 10_500, .hires = true },
+    .{ .key = "DC", .name = "Draconis Combine", .color = .red, .capital = "luthien", .foes = .{ "LC", "FS" }, .pay_bp = 10_000, .hires = true },
+    .{ .key = "FS", .name = "Federated Suns", .color = .yellow, .capital = "new_avalon", .foes = .{ "DC", "CC" }, .pay_bp = 11_000, .hires = true },
+    .{ .key = "CC", .name = "Capellan Confederation", .color = .green, .capital = "sian", .foes = .{ "FS", "FWL" }, .pay_bp = 9_500, .hires = true },
+    .{ .key = "FWL", .name = "Free Worlds League", .color = .magenta, .capital = "atreus", .foes = .{ "LC", "CC" }, .pay_bp = 10_000, .hires = true },
+    .{ .key = "TC", .name = "Taurian Concordat", .color = .cyan, .capital = "taurus", .foes = .{ "FS", "PER" }, .pay_bp = 9_000, .hires = true },
+    .{ .key = "MOC", .name = "Magistracy of Canopus", .color = .white, .capital = "canopus4", .foes = .{ "FWL", "PER" }, .pay_bp = 9_000, .hires = true },
+    .{ .key = "OA", .name = "Outworlds Alliance", .color = .cyan, .capital = "alpheratz", .foes = .{ "DC", "PER" }, .pay_bp = 8_500, .hires = true },
+    .{ .key = "MH", .name = "Marian Hegemony", .color = .grey, .capital = "alphard_mh", .foes = .{ "FWL", "PER" }, .pay_bp = 8_500, .hires = true },
+    .{ .key = "CIR", .name = "Circinus Federation", .color = .grey, .capital = "circinus", .foes = .{ "LC", "MH" }, .pay_bp = 8_000, .hires = true },
+    .{ .key = "OBR", .name = "Oberon Confederation", .color = .grey, .capital = "oberon6", .foes = .{ "LC", "DC" }, .pay_bp = 8_000, .hires = true },
+    .{ .key = "CS", .name = "ComStar", .color = .white, .capital = "terra", .foes = .{}, .pay_bp = 10_000, .hires = false },
+    .{ .key = "PER", .name = "Periphery / pirates", .color = .grey, .capital = "galatea", .foes = .{"PER"}, .pay_bp = 8_000, .hires = true },
+}

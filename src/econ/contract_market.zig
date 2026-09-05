@@ -17,18 +17,7 @@ const person_gen = @import("../gen/person_gen.zig");
 
 /// Employer payment multiplier by faction, basis points. // TUNE
 pub fn employerMultBp(faction_key: []const u8) types.Bp {
-    const table = [_]struct { []const u8, types.Bp }{
-        .{ "LC", 10_500 }, // Lyran money is good money
-        .{ "FS", 11_000 },
-        .{ "DC", 10_000 },
-        .{ "CC", 9_500 },
-        .{ "FWL", 10_000 },
-        .{ "PER", 8_000 },
-    };
-    for (table) |row| {
-        if (std.mem.eql(u8, row[0], faction_key)) return row[1];
-    }
-    return 10_000;
+    return @import("../domain/faction.zig").get(faction_key).pay_bp; // data/tables/factions.zon (12B.9)
 }
 
 /// Standing payment multiplier (Stage 12.21): ±25 bp per point of a
@@ -64,18 +53,9 @@ fn rollKind(gs: *GameState) contract.ContractKind {
 fn pickEnemy(gs: *GameState, employer: []const u8, kind: contract.ContractKind) []const u8 {
     // Garrison-class work is as often about pirates as neighbors.
     if (kind.isGarrisonClass() and gs.rng.random(.market).boolean()) return "PER";
-    const foes: []const []const u8 = if (std.mem.eql(u8, employer, "LC"))
-        &.{ "DC", "FWL" }
-    else if (std.mem.eql(u8, employer, "DC"))
-        &.{ "LC", "FS" }
-    else if (std.mem.eql(u8, employer, "FS"))
-        &.{ "DC", "CC" }
-    else if (std.mem.eql(u8, employer, "CC"))
-        &.{ "FS", "FWL" }
-    else if (std.mem.eql(u8, employer, "FWL"))
-        &.{ "LC", "CC" }
-    else
-        &.{"PER"};
+    // The faction table's foes (12B.9): a house fights its neighbours.
+    const foes = @import("../domain/faction.zig").get(employer).foes;
+    if (foes.len == 0) return "PER";
     return foes[gs.rng.random(.market).uintLessThan(usize, foes.len)];
 }
 
@@ -122,8 +102,9 @@ pub fn refresh(gs: *GameState) !void {
 
     const offer_count = market.contractOfferCount(gs.reputation, best_comms);
     var attempts: u32 = 0;
-    while (gs.contract_offers.items.len < offer_count and attempts < 40) : (attempts += 1) {
+    while (gs.contract_offers.items.len < offer_count and attempts < 400) : (attempts += 1) {
         const world = &planet.catalog[gs.rng.random(.market).uintLessThan(usize, planet.catalog.len)];
+        if (!@import("../domain/faction.zig").get(world.faction).hires) continue; // ComStar posts nothing
         const vis = bestVisibility(gs, world);
         if (vis[0] == .hidden) continue;
 

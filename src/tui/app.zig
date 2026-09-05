@@ -215,6 +215,8 @@ pub const App = struct {
     /// Star map zoom: 1 = every world fitted into the pane; 2/4/8 = that
     /// many times closer, centred on the cursor world.
     map_zoom: u8 = 1,
+    /// Star-map colouring (12B.9): by faction, industry, standing, or activity.
+    map_color: enum { faction, industry, standing, activity } = .faction,
     lab_sel: usize = 0,
     modal_cursor: usize = 0,
     w_office: usize = 0,
@@ -925,7 +927,7 @@ pub const App = struct {
         if (view.worlds.len == 0) return;
         if (self.map_cursor >= view.worlds.len) self.map_cursor = 0;
         const mw: u16 = if (b.w > 120) b.w * 3 / 4 else b.w;
-        const inner = s.pane(.{ .x = b.x, .y = b.y, .w = mw, .h = b.h }, .{ .title = "STAR MAP", .focused = true, .right_title = try std.fmt.allocPrint(al, "{d} worlds · {d} in ring · {d} beachhead · {d} dark · zoom ×{d} [+] [-]", .{ view.worlds.len, view.in_ring, view.in_band, view.dark, self.map_zoom }) });
+        const inner = s.pane(.{ .x = b.x, .y = b.y, .w = mw, .h = b.h }, .{ .title = try std.fmt.allocPrint(al, "STAR MAP · colour by {s} [c]", .{@tagName(self.map_color)}), .focused = true, .right_title = try std.fmt.allocPrint(al, "{d} worlds · {d} in ring · {d} beachhead · {d} dark · zoom ×{d} [+] [-]", .{ view.worlds.len, view.in_ring, view.in_band, view.dark, self.map_zoom }) });
         const cw = view.worlds[self.map_cursor];
         const geom = mapGeom(view, inner, self.map_zoom, .{ cw.x, cw.y });
         var offscreen: u32 = 0;
@@ -949,18 +951,43 @@ pub const App = struct {
             const c = geom.cell(w.x, w.y);
             if (!geom.inside(c)) continue;
             const is_cursor = i == self.map_cursor;
-            const mark: u21 = if (w.hq_here != .none) '@' else if (is_cursor) '*' else 'o';
-            const mst: Style = if (is_cursor) .sel else if (w.hq_here != .none) .amber else if (w.band == .dark) .dim else .normal;
+            const marked = w.hq_here != .none or w.offers_here > 0 or w.companies_here > 0 or w.worked > 0;
+            const mark: u21 = if (w.hq_here != .none) '@' else if (is_cursor) '*' else if (self.map_zoom > 1 or marked) 'o' else '·';
+            // Colour by the chosen political/economic lens (12B.9).
+            const lens: Style = switch (self.map_color) {
+                .faction => factionStyle(w.faction),
+                .industry => if (w.industry >= 4) .good else if (w.industry >= 2) .normal else .dim,
+                .standing => blk: {
+                    const st = g.standing(w.faction);
+                    break :blk if (st >= 25) .good else if (st > 0) .green else if (st <= -40) .crit else if (st < 0) .amber else .dim;
+                },
+                .activity => if (w.hq_here != .none) .amber else if (w.companies_here > 0) .good else if (w.offers_here > 0) .yellow else if (w.worked > 0) .purple else .dim,
+            };
+            const mst: Style = if (is_cursor) .sel else if (w.hq_here != .none and self.map_color != .activity) .amber else lens;
             s.put(c[0], c[1], mark, mst);
-            const nst: Style = if (is_cursor) .sel else if (w.band == .dark) .dim else .normal;
-            const nw: u16 = @intCast(@max(0, @min(@as(i32, @intCast(w.name.len)), inner.x + inner.w - c[0] - 2)));
-            _ = s.text(c[0] + 2, c[1], nw, w.name, nst);
+            // Names: every world when zoomed in, otherwise only the ones that matter.
+            if (self.map_zoom > 1 or marked or is_cursor) {
+                const nst: Style = if (is_cursor) .sel else if (w.band == .dark) .dim else lens;
+                const nw: u16 = @intCast(@max(0, @min(@as(i32, @intCast(w.name.len)), inner.x + inner.w - c[0] - 2)));
+                _ = s.text(c[0] + 2, c[1], nw, w.name, nst);
+                if (w.worked > 0 and w.hq_here == .none) s.put(c[0] + 3 + @as(i32, nw), c[1], '=', .purple);
+                if (w.offers_here > 0) s.put(c[0] + 3 + @as(i32, nw), c[1], '^', .amber);
+                if (w.companies_here > 0 and w.hq_here == .none) s.put(c[0] + 3 + @as(i32, nw), c[1], '+', .good);
+                continue;
+            }
+            const nw: u16 = 0;
             if (w.worked > 0 and w.hq_here == .none) s.put(c[0] + 3 + @as(i32, nw), c[1], '=', .purple);
             if (w.offers_here > 0) s.put(c[0] + 3 + @as(i32, nw), c[1], '^', .amber);
             if (w.companies_here > 0 and w.hq_here == .none) s.put(c[0] + 3 + @as(i32, nw), c[1], '+', .good);
         }
         if (mw < b.w) {
-            s.textPad(inner.x, inner.y + inner.h - 1, inner.w, if (offscreen > 0) try std.fmt.allocPrint(al, "{{d}}@ HQ   * cursor   ^ offers   + company   = worked   . ring   , band   dim = out of reach   ·   +/- zoom, h j k l pan by world   ·{{/}} {{a}}{d} off screen{{/}}", .{offscreen}) else "{d}@ HQ   * cursor   ^ offers   + company   = worked (HQ can be founded)   . influence ring   , beachhead band   dim = out of reach   ·   +/- zoom{/}", .normal);
+            const legend: []const u8 = switch (self.map_color) {
+                .faction => try factionLegend(al),
+                .industry => "{g}bright = industry 4–5{/}   normal = 2–3   {d}dim = backwater{/}",
+                .standing => "{g}green = favoured{/}   {a}amber = below zero{/}   {c}red = shunned{/}   {d}dim = neutral{/}",
+                .activity => "{a}@ HQ{/}   {g}+ company{/}   {a}^ offers{/}   {p}= worked{/}   {d}dim = nothing yet{/}",
+            };
+            s.textPad(inner.x, inner.y + inner.h - 1, inner.w, if (offscreen > 0) try std.fmt.allocPrint(al, "{s}   {{d}}· c colour · +/- zoom · h j k l pan · names show at zoom ×2 ·{{/}} {{a}}{d} off screen{{/}}", .{ legend, offscreen }) else try std.fmt.allocPrint(al, "{s}   {{d}}· c colour · +/- zoom · h j k l pan · names show at zoom ×2{{/}}", .{legend}), .normal);
         } else {
             const w = view.worlds[self.map_cursor];
             s.textPad(inner.x, inner.y + inner.h - 1, inner.w, try std.fmt.allocPrint(al, "{{a}}{s}{{/}} {s} · ind {d} · {d} LY · {s} · {d} offers  {{d}}[f] found [o] board{{/}}", .{
@@ -977,7 +1004,13 @@ pub const App = struct {
         if (mw < b.w) {
             const w = view.worlds[self.map_cursor];
             var rows: std.ArrayListUnmanaged([]const u8) = .empty;
-            try rows.append(al, try std.fmt.allocPrint(al, "{{a}}{s}{{/}}   {s} · industry {d}", .{ w.name, w.faction, w.industry }));
+            const fr = game.faction.get(w.faction);
+            try rows.append(al, try std.fmt.allocPrint(al, "{{a}}{s}{{/}}   {s} ({s}) · industry {d}", .{ w.name, fr.name, w.faction, w.industry }));
+            if (game.planet.find(fr.capital)) |cap| {
+                const wp0 = game.planet.find(w.key).?;
+                if (cap == wp0) try rows.append(al, "capital      {a}this is the capital{/}") else try rows.append(al, try std.fmt.allocPrint(al, "capital      {s}, {d} LY away", .{ cap.name, game.planet.distanceLy(wp0, cap) }));
+            }
+            if (fr.hires) try rows.append(al, try std.fmt.allocPrint(al, "standing     {d} with the {s} · pay ×{d}.{d:0>2}", .{ g.standing(w.faction), fr.name, @as(u32, @intCast(@divTrunc(game.contract_market.standingPayBp(g.standing(w.faction)), 10_000))), @as(u32, @intCast(@divTrunc(@mod(game.contract_market.standingPayBp(g.standing(w.faction)), 10_000), 100))) })) else try rows.append(al, "standing     {d}posts no contracts{/}");
             try rows.append(al, "");
             for (view.hqs) |h| {
                 const hp = game.planet.find(g.hqs.getPtr(h.id).?.planet_key).?;
@@ -1014,6 +1047,40 @@ pub const App = struct {
             try reach.append(al, "{d}rings grow with comms and spaceport levels{/}");
             self.listPane(.{ .x = b.x + mw, .y = b.y + side_h, .w = b.w - mw, .h = b.h - side_h }, "REACH", reach.items, 2, false, false);
         }
+    }
+
+    fn factionStyle(key: []const u8) Style {
+        return switch (game.faction.get(key).color) {
+            .blue => .blue,
+            .red => .red,
+            .yellow => .yellow,
+            .green => .green,
+            .magenta => .magenta,
+            .cyan => .cyan,
+            .white => .white,
+            .grey => .grey,
+        };
+    }
+
+    fn factionLegend(al: std.mem.Allocator) ![]const u8 {
+        var out: std.ArrayListUnmanaged(u8) = .empty;
+        for (game.faction.table) |f| {
+            if (!f.hires or std.mem.eql(u8, f.key, "PER")) continue;
+            const mark: []const u8 = switch (f.color) {
+                .blue => "{s}",
+                .red => "{c}",
+                .yellow => "{a}",
+                .green => "{g}",
+                .magenta => "{p}",
+                .cyan, .white => "",
+                .grey => "{d}",
+            };
+            _ = mark;
+            if (out.items.len > 0) try out.appendSlice(al, "  ");
+            try out.appendSlice(al, try std.fmt.allocPrint(al, "{s} {s}", .{ f.key, @tagName(f.color) }));
+        }
+        try out.appendSlice(al, "  PER grey");
+        return out.items;
     }
 
     /// Move the map cursor to the nearest world in a direction.
@@ -2944,6 +3011,12 @@ pub const App = struct {
                 'l' => try self.mapMove(1, 0),
                 '+', '=' => self.map_zoom = @min(8, self.map_zoom * 2),
                 '-' => self.map_zoom = @max(1, self.map_zoom / 2),
+                'c' => self.map_color = switch (self.map_color) {
+                    .faction => .industry,
+                    .industry => .standing,
+                    .standing => .activity,
+                    .activity => .faction,
+                },
                 'f' => {
                     const view = try q.map(al, g);
                     if (view.worlds.len == 0) return;
