@@ -91,6 +91,17 @@ pub const Tuning = struct {
         fatigue_decay_base: u8,
         fatigue_decay_per_mess: u8,
         monthly_service_xp: u32,
+        /// Turnover (Stage 12.20, AtB retirement/defection abstracted):
+        /// after `turnover_min_tenure_months`, anyone whose morale is under
+        /// `restless_morale` or fatigue over `exhausted_fatigue` rolls 2d6
+        /// each payday; under `turnover_target` (+1 per restless flag) they
+        /// hand in their notice. Long service (`retire_tenure_months`)
+        /// retires instead of resigning.
+        turnover_min_tenure_months: u32,
+        restless_morale: u8,
+        exhausted_fatigue: u8,
+        turnover_target: u8,
+        retire_tenure_months: u32,
     },
     unit: struct {
         carry: struct { mek: types.CBills, vehicle: types.CBills, aerospace: types.CBills, battle_armor: types.CBills, infantry: types.CBills, mash: types.CBills, cargo: types.CBills, dropship: types.CBills, jumpship: types.CBills },

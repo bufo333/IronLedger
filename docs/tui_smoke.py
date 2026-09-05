@@ -98,6 +98,9 @@ send("]", 0.6)                 # forces: page to the first company
 assert "(2/" in plain()[-30000:], plain()[-3000:]
 send("[", 0.6)
 assert "all forces" in plain()[-30000:], plain()[-3000:]
+send("[", 0.6)                 # wraps to the last view: the hangar ranking
+assert "hangar: cost vs contribution" in plain()[-30000:] and "cost index" in plain()[-30000:], plain()[-3000:]
+send("]", 0.6)
 send("7")
 assert "back office" in plain() and "HIRING HALL" in plain()
 send("u", 0.8)                 # cursor on the header row → picker

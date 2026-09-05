@@ -168,6 +168,20 @@ pub const Person = struct {
         return n;
     }
 
+    /// Months on the payroll.
+    pub fn tenureMonths(self: *const Person, day: u32) u32 {
+        return (day -| self.recruited_day) / 30;
+    }
+
+    /// Restless (Stage 12.20): low morale or deep fatigue — the flags the
+    /// turnover roll counts. 0 = content.
+    pub fn restlessness(self: *const Person) u8 {
+        var n: u8 = 0;
+        if (self.morale < tuning.person.restless_morale) n += 1;
+        if (self.fatigue > tuning.person.exhausted_fatigue) n += 1;
+        return n;
+    }
+
     /// Fit for duty today: active, not on leave.
     pub fn isAvailable(self: *const Person, day: u32) bool {
         if (self.status != .active) return false;

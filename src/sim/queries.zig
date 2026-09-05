@@ -187,7 +187,7 @@ fn jumpFor(kind: checklist.WarningKind) u8 {
         .overdrawn, .insolvent => 4,
         .hungry, .dry_ammo => 5,
         .understaffed_hq, .depot_backlog => 6,
-        .untreated_wounded => 8,
+        .untreated_wounded, .restless_crew => 8,
     };
 }
 
@@ -656,7 +656,7 @@ pub fn toe(alloc: Alloc, gs: *GameState) ![]ToeRow {
 
 /// What the Forces screen shows: everything, one company, or the hulls
 /// that belong to no force.
-pub const ToeFilter = union(enum) { all, company: types.ForceId, unassigned };
+pub const ToeFilter = union(enum) { all, company: types.ForceId, unassigned, hangar };
 
 pub const ToeView = struct { filter: ToeFilter, label: []const u8 };
 
@@ -671,12 +671,85 @@ pub fn toeViews(alloc: Alloc, gs: *GameState) ![]ToeView {
         try out.append(alloc, .{ .filter = .{ .company = f.id }, .label = f.name });
     }
     try out.append(alloc, .{ .filter = .unassigned, .label = "unassigned hulls" });
+    try out.append(alloc, .{ .filter = .hangar, .label = "hangar: cost vs contribution" });
+    return out.toOwnedSlice(alloc);
+}
+
+pub const HangarRow = struct {
+    unit: types.UnitId,
+    bill: types.CBills,
+    /// BV the hull brings to a fight today: chassis BV × condition, zero
+    /// without a fit pilot or in cold storage.
+    contribution: u32,
+    /// Monthly C-bills per point of contribution (×100); higher = worse.
+    cost_index: u64,
+    text: []const u8,
+};
+
+pub const hangar_header = "     hull                     bill/mo   contributes   cost index   why";
+
+/// The hangar as a portfolio (GAMEPLAY "the roster ranks meks by what
+/// they cost against what they contribute"): every owned hull, worst
+/// value first. A mothballed hull bills a fifth and contributes nothing; a
+/// pilotless or wrecked one bills in full for nothing.
+pub fn hangar(alloc: Alloc, gs: *GameState) ![]HangarRow {
+    var out: std.ArrayListUnmanaged(HangarRow) = .empty;
+    const day = gs.clock.day_index;
+    var uit = gs.units.iterator();
+    while (uit.next()) |e| {
+        const u = e.value_ptr;
+        const ch = chassis_mod.find(u.chassis_key);
+        const bv: u32 = if (ch) |c| c.bv else 0;
+        const pilot = gs.person(u.pilot);
+        const fit = pilot != null and pilot.?.isAvailable(day);
+        var why: []const u8 = "";
+        var contribution: u32 = 0;
+        if (u.status == .destroyed) {
+            why = "{c}wreck — sell or rebuild{/}";
+        } else if (u.status == .mothballed) {
+            why = "{d}cold storage{/}";
+        } else if (u.kind.isTransport()) {
+            why = "transport (lifts the company)";
+            contribution = 1;
+        } else if (!u.kind.isCombat()) {
+            why = "support train";
+            contribution = 1;
+        } else if (!fit) {
+            why = "{a}no fit pilot — hire or assign{/}";
+        } else {
+            contribution = bv * @as(u32, u.conditionPct()) / 100;
+            if (u.needsDepot()) why = "{a}structural damage — depot{/}" else if (u.conditionPct() < 70) why = "{a}shot up — repairs{/}";
+        }
+        const bill = u.monthlyBill();
+        // Support and transport hulls are judged by what they enable, not
+        // BV: they sit at the bottom unless wrecked.
+        const exempt = u.status != .destroyed and (u.kind.isTransport() or !u.kind.isCombat());
+        const cost_index: u64 = if (exempt) 0 else if (contribution == 0) std.math.maxInt(u32) else @as(u64, @intCast(bill)) * 100 / contribution;
+        try out.append(alloc, .{ .unit = u.id, .bill = bill, .contribution = contribution, .cost_index = cost_index, .text = "" });
+    }
+    std.mem.sort(HangarRow, out.items, {}, struct {
+        fn lt(_: void, a: HangarRow, b: HangarRow) bool {
+            if (a.cost_index != b.cost_index) return a.cost_index > b.cost_index;
+            return a.bill > b.bill;
+        }
+    }.lt);
+    for (out.items) |*row| {
+        const u = gs.unit(row.unit).?;
+        const ch = chassis_mod.find(u.chassis_key);
+        const pilot = gs.person(u.pilot);
+        const fit = pilot != null and pilot.?.isAvailable(day);
+        const why: []const u8 = if (u.status == .destroyed) "{c}wreck — sell or rebuild{/}" else if (u.status == .mothballed) "{d}cold storage{/}" else if (u.kind.isTransport()) "transport (lifts the company)" else if (!u.kind.isCombat()) "support train" else if (!fit) "{a}no fit pilot — hire or assign{/}" else if (u.needsDepot()) "{a}structural damage — depot{/}" else if (u.conditionPct() < 70) "{a}shot up — repairs{/}" else "{g}earning its keep{/}";
+        const idx_text: []const u8 = if (row.cost_index == 0) "       —" else if (row.contribution == 0) "{c}       ∞{/}" else try std.fmt.allocPrint(alloc, "{d: >8}", .{row.cost_index});
+        row.text = try std.fmt.allocPrint(alloc, "#{d: <3} {s: <8} {s} {s: >9}  {d: >8} BV  {s}   {s} · {s}", .{
+            @intFromEnum(u.id), u.chassis_key, try padCells(alloc, "", if (ch) |c| c.name else "?", 16), try money(alloc, row.bill), row.contribution, idx_text, forceName(gs, gs.companyOf(u.force)), why,
+        });
+    }
     return out.toOwnedSlice(alloc);
 }
 
 pub fn toeFiltered(alloc: Alloc, gs: *GameState, filter: ToeFilter) ![]ToeRow {
     var out: std.ArrayListUnmanaged(ToeRow) = .empty;
-    if (filter != .unassigned) {
+    if (filter == .all or filter == .company) {
         var fit = gs.forces.iterator();
         while (fit.next()) |e| {
             const f = e.value_ptr;
@@ -686,6 +759,12 @@ pub fn toeFiltered(alloc: Alloc, gs: *GameState, filter: ToeFilter) ![]ToeRow {
         }
     }
     if (filter == .company) return out.toOwnedSlice(alloc);
+    if (filter == .hangar) {
+        try out.append(alloc, .{ .force = .none, .unit = .none, .text = "{a}[—] Hangar · worst value first{/}  bill per point of contribution (BV × condition; nothing without a fit pilot)" });
+        try out.append(alloc, .{ .force = .none, .unit = .none, .text = try std.fmt.allocPrint(alloc, "{{d}}{s}{{/}}", .{hangar_header}) });
+        for (try hangar(alloc, gs)) |row| try out.append(alloc, .{ .force = .none, .unit = row.unit, .text = row.text });
+        return out.toOwnedSlice(alloc);
+    }
     var loose: u32 = 0;
     var upkeep: types.CBills = 0;
     var uit = gs.units.iterator();
@@ -2722,4 +2801,38 @@ test "12.16: readiness counts wounded, permanent injuries, banked XP and depot h
     const lines = try readinessLines(a, &gs, co);
     try std.testing.expect(lines.len >= 5);
     try std.testing.expectEqualStrings("abc def", try stripMarks(a, "{a}abc{/} {c}def{/}"));
+}
+
+test "12.20: the hangar ranks a pilotless hull above one earning its keep, mothballs cheap but idle" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1220 });
+    defer gs.deinit();
+    _ = try gs.createCommander("T", .LC, .paymaster);
+    _ = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const first_mek = blk: {
+        var it = gs.units.iterator();
+        while (it.next()) |e| if (e.value_ptr.kind == .mek) break :blk e.value_ptr.id;
+        unreachable;
+    };
+    gs.unit(first_mek).?.pilot = .none;
+    const rows = try hangar(a, &gs);
+    try std.testing.expectEqual(gs.units.count(), rows.len);
+    try std.testing.expectEqual(@as(u32, 0), rows[0].contribution); // the worst value leads
+    var seen_pilotless = false;
+    for (rows) |r| if (r.unit == first_mek) {
+        seen_pilotless = true;
+        try std.testing.expectEqual(@as(u32, 0), r.contribution);
+    };
+    try std.testing.expect(seen_pilotless);
+    // The support train is exempt and sits at the bottom; the best-value mek sits just above it.
+    try std.testing.expectEqual(@as(u64, 0), rows[rows.len - 1].cost_index);
+    var best: ?HangarRow = null;
+    for (rows) |r| if (r.cost_index > 0 and r.contribution > 0) {
+        best = r;
+    };
+    try std.testing.expect(best != null and best.?.cost_index < std.math.maxInt(u32));
+    const view = try toeFiltered(a, &gs, .hangar);
+    try std.testing.expect(view.len == rows.len + 2);
 }

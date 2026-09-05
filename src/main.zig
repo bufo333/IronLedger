@@ -819,26 +819,11 @@ fn printInbox(gs: *game.state.GameState) void {
 }
 
 fn printHangar(gs: *game.state.GameState) void {
-    std.debug.print("hangar ({d} hulls):\n", .{gs.units.count()});
-    var it = gs.units.iterator();
-    while (it.next()) |entry| {
-        const u = entry.value_ptr;
-        var broken: u32 = 0;
-        for (u.slots.items) |s| {
-            if (s.condition != .ok) broken += 1;
-        }
-        std.debug.print("  #{d:<3} {s:<8} {s:<10} quality {s} armor {d:>3}% {s}{d} slots broken{s} bill {d}/mo\n", .{
-            @intFromEnum(u.id),
-            u.chassis_key,
-            @tagName(u.status),
-            @tagName(u.quality),
-            u.armor_pct,
-            if (u.needsDepot()) "DEPOT! " else "",
-            broken,
-            if (u.reactivation_done_day != null) " (waking)" else "",
-            u.monthlyBill(),
-        });
-    }
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const rows = game.queries.hangar(arena.allocator(), gs) catch return;
+    std.debug.print("hangar ({d} hulls, worst value first — bill per point of contribution):\n{s}\n", .{ rows.len, game.queries.hangar_header });
+    for (rows) |r| std.debug.print("  {s}\n", .{game.queries.stripMarks(arena.allocator(), r.text) catch r.text});
 }
 
 fn totalHullUpkeep(gs: *game.state.GameState) i64 {

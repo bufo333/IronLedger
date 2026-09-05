@@ -29,6 +29,9 @@ pub const WarningKind = enum {
     /// The outfit treasury is negative: the turn cannot advance until a
     /// loan or a sale covers it; past the credit limit, the outfit folds.
     insolvent,
+    /// People with a year in and morale or fatigue past the line: they
+    /// roll to leave on payday (Stage 12.20).
+    restless_crew,
 };
 
 /// Does any working weapon in the company draw on this munition family?
@@ -104,6 +107,16 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
             n += 1;
         };
         if (n > 0 and !gs.auto_admit) try out.append(alloc, .{ .kind = .untreated_wounded, .text = try std.fmt.allocPrint(alloc, "{d} wounded await{s} medbay admission (they don't heal until admitted)", .{ n, if (n == 1) "s" else "" }) });
+    }
+    {
+        const t = @import("../domain/tuning.zig").t.person;
+        var restless: u32 = 0;
+        var pit = gs.people.iterator();
+        while (pit.next()) |e| {
+            const p = e.value_ptr;
+            if (p.status == .active and p.tenureMonths(day) >= t.turnover_min_tenure_months and p.restlessness() > 0) restless += 1;
+        }
+        if (restless > 0) try out.append(alloc, .{ .kind = .restless_crew, .text = try std.fmt.allocPrint(alloc, "{d} restless (morale < {d} or fatigue > {d}, a year in) — they roll to quit on payday: rotate home, grant leave, feed and rest them", .{ restless, t.restless_morale, t.exhausted_fatigue }) });
     }
 
     // Decisions about to default.
