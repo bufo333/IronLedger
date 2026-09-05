@@ -3027,6 +3027,18 @@ pub const App = struct {
                         try self.exec(.{ .autostaff = @enumFromInt(self.hqSelId(g)) });
                         self.say(.good, "back office staffed to requirement", .{});
                     },
+                    'T' => {
+                        // Field HQ → regional (the footer and the tier line promised this key).
+                        const hid: types.HqId = @enumFromInt(self.hqSelId(g));
+                        const h = g.hqs.getPtr(hid) orelse return;
+                        if (h.tier != .field) {
+                            self.say(.dim, "{s} is already a {s} HQ — T raises a field HQ (firebase) to regional", .{ h.name, @tagName(h.tier) });
+                            return;
+                        }
+                        const name = try al.dupe(u8, h.name);
+                        try self.exec(.{ .upgrade_tier = hid });
+                        if (self.msg_style != .crit) self.say(.good, "{s} → regional HQ: paperwork first, then construction — watch PROJECTS; S autostaff when it lands", .{name});
+                    },
                     'h' => {
                         self.focus = 1;
                         self.say(.dim, "hiring hall: j/k pick, Enter hires, f/F changes the filter", .{});

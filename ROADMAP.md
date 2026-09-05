@@ -877,6 +877,12 @@ item: tests green, both smokes, ROADMAP tick, one commit.
   for Inner Sphere parts rated D or worse, and `comms_bonus_per_two_levels`
   from the HQ's comms. The failed-order log line and the inbound view's
   "not found" say why ("availability d −1, periphery market −2").
+- ✅ Fix (play feedback 2026-09-05): the HQ screen's `T` key was never
+  bound, though the footer and the tier line advertised it; a field HQ
+  could only be raised with `:tier hq:N`. Bound now, with a plain message
+  on an HQ that is already regional. The `tier` command also debited the
+  HQ before checking it could start (a refusal kept the money); it now
+  checks tier, project and funds first and pays once.
 - ⬜ 12C.15 **Tech target numbers**: the flat hours-per-tonne maintenance
   model gets a target-number layer — tech skill, astech coverage, hull
   quality, era of the design — so the same tech is slower on an exotic

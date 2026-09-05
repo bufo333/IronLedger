@@ -333,6 +333,8 @@ pub fn parseCommand(verb: []const u8, tokens: *std.mem.TokenIterator(u8, .scalar
 pub fn errorText(err: anyerror) []const u8 {
     return switch (err) {
         error.InsufficientTreasury => "not enough money in that treasury — transfer funds first",
+        error.MaxLevel => "already at the top: this HQ is regional (or the facility is maxed)",
+        error.ProjectInProgress => "a project is already running here — watch PROJECTS",
         error.BadPercent => "a percentage between 0 and 100",
         error.KeepStocked => "that would drop the line under its keep-stocked minimum — lower the policy first (K)",
         error.StorageFull => "the destination cannot hold that tonnage",

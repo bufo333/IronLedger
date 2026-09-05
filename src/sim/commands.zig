@@ -376,20 +376,25 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             return .{};
         },
         .upgrade_tier => |hq_id| {
-            if (gs.hqs.getPtr(hq_id) == null) return Error.UnknownHq;
-            try debitPurchase(gs, .{ .hq = hq_id }, .{
-                .day = gs.clock.day_index,
-                .amount = -hq_ops.tier_upgrade_cost,
-                .category = .hq_construction,
-                .hq = hq_id,
-                .note = "regional upgrade",
-            });
+            // Check everything before a c-bill moves: a refused upgrade used
+            // to keep the money.
+            const h = gs.hqs.getPtr(hq_id) orelse return Error.UnknownHq;
+            if (h.tier != .field) return Error.MaxLevel;
+            for (h.projects.items) |p| if (p.kind == .tier_upgrade) return Error.ProjectInProgress;
+            if (gs.treasuryBalance(.{ .hq = hq_id }) < hq_ops.tier_upgrade_cost) return Error.InsufficientTreasury;
             hq_ops.startTierUpgrade(gs, hq_id) catch |err| switch (err) {
                 error.ProjectInProgress => return Error.ProjectInProgress,
                 error.MaxLevel => return Error.MaxLevel,
                 error.UnknownHq => return Error.UnknownHq,
                 error.OutOfMemory => return Error.OutOfMemory,
             };
+            try gs.postTreasury(.{ .hq = hq_id }, .{
+                .day = gs.clock.day_index,
+                .amount = -hq_ops.tier_upgrade_cost,
+                .category = .hq_construction,
+                .hq = hq_id,
+                .note = "regional upgrade",
+            });
             return .{};
         },
         .assign_company => |a| {
@@ -2104,6 +2109,34 @@ test "12: a raised company is an empty skeleton; hulls bought for it land in a l
     try std.testing.expect(c.hired_count > 2);
     try std.testing.expect(c.still_open > 0);
     for (gs.candidates.items) |cand| try std.testing.expect(cand.spec.role != .mekwarrior and cand.spec.role != .tech_mek);
+}
+
+test "tier upgrade: refusals keep the money; a funded field HQ starts the project and pays once" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1230 });
+    defer gs.deinit();
+    _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    const home = gs.hqs.keys()[0];
+    const home_funds = gs.hqs.getPtr(home).?.funds;
+    try std.testing.expectError(Error.MaxLevel, execute(&gs, .{ .upgrade_tier = home })); // already regional
+    try std.testing.expectEqual(home_funds, gs.hqs.getPtr(home).?.funds);
+    // A firebase with an empty till: refused, nothing debited, no project.
+    const home_world = planet_mod.find(gs.hqs.getPtr(home).?.planet_key).?;
+    var key: []const u8 = "";
+    for (planet_mod.catalog) |*p| if (p != home_world and planet_mod.distanceLy(p, home_world) <= gs.hqs.getPtr(home).?.influenceLy() and key.len == 0) {
+        key = p.key;
+    };
+    _ = try execute(&gs, .{ .found_hq = .{ .name = "Firebase", .planet_key = key } });
+    const fb = gs.hqs.keys()[1];
+    gs.hqs.getPtr(fb).?.funds = 0;
+    try std.testing.expectError(Error.InsufficientTreasury, execute(&gs, .{ .upgrade_tier = fb }));
+    try std.testing.expectEqual(@as(usize, 0), gs.hqs.getPtr(fb).?.projects.items.len);
+    // Funded: the project starts and the cost is paid exactly once.
+    gs.hqs.getPtr(fb).?.funds = hq_ops.tier_upgrade_cost + 1;
+    _ = try execute(&gs, .{ .upgrade_tier = fb });
+    try std.testing.expectEqual(@as(types.CBills, 1), gs.hqs.getPtr(fb).?.funds);
+    try std.testing.expectEqual(@as(usize, 1), gs.hqs.getPtr(fb).?.projects.items.len);
+    try std.testing.expectError(Error.ProjectInProgress, execute(&gs, .{ .upgrade_tier = fb }));
+    try std.testing.expectEqual(@as(types.CBills, 1), gs.hqs.getPtr(fb).?.funds);
 }
 
 test "golden master: same seed + same script = same state hash" {
