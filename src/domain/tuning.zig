@@ -224,6 +224,16 @@ pub const Tuning = struct {
         tier_upgrade_cost: types.CBills,
         tier_upgrade_build_days: u32,
         refit_labor_per_hour: types.CBills,
+        /// Repair outcomes (12C.12, MekHQ repair roll): a depot repair or
+        /// refit rolls 2d6 + (5 − tech skill) against `repair_target_base`
+        /// + the hull's quality modifier (A worst … F best). Margin of
+        /// `repair_fault_margin` or more is clean; under it the job lands
+        /// with a lingering fault (quality one step worse); a miss redoes
+        /// `repair_redo_bp` of the bay time; a natural 2 botches (a piece
+        /// of gear destroyed).
+        repair_target_base: i32,
+        repair_fault_margin: i32,
+        repair_redo_bp: types.Bp,
     },
     /// Dragoons rating (12C.6, CamOps "Mercenary Rating", MekHQ
     /// `UnitRating`): the letter thresholds on the summed score and the

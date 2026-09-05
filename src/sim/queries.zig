@@ -1367,7 +1367,8 @@ pub fn hqDetail(alloc: Alloc, gs: *GameState, id: types.HqId) ![]const []const u
     for (gs.bay_jobs.items) |j| {
         if (j.hq != id) continue;
         any = true;
-        try out.append(alloc, try std.fmt.allocPrint(alloc, "  {s: <13} {s}{s}  {s}", .{ @tagName(j.kind), if (j.unit != .none) try std.fmt.allocPrint(alloc, "#{d} ", .{@intFromEnum(j.unit)}) else "", j.item_key, if (j.started_day != null) try std.fmt.allocPrint(alloc, "done day {d}", .{j.done_day orelse 0}) else "queued" }));
+        const odds = if (j.kind == .depot_repair or j.kind == .refit) try std.fmt.allocPrint(alloc, "  {{d}}{s}{{/}}", .{try @import("hq_ops.zig").repairOddsText(alloc, gs, id, j.unit)}) else "";
+        try out.append(alloc, try std.fmt.allocPrint(alloc, "  {s: <13} {s}{s}  {s}{s}", .{ @tagName(j.kind), if (j.unit != .none) try std.fmt.allocPrint(alloc, "#{d} ", .{@intFromEnum(j.unit)}) else "", j.item_key, if (j.started_day != null) try std.fmt.allocPrint(alloc, "done day {d}", .{j.done_day orelse 0}) else "queued", odds }));
     }
     if (!any) try out.append(alloc, "  idle");
     try out.append(alloc, "");

@@ -850,12 +850,16 @@ item: tests green, both smokes, ROADMAP tick, one commit.
 
 ### Block D — Maintenance & repair depth (the section left out of 12B)
 
-- ⬜ 12C.12 **Repair outcomes** (MekHQ repair roll): every bay job rolls
-  tech skill vs. target (part difficulty + condition modifiers + rush):
-  success, success with a lingering fault (part marked `.worn`, −1 to
-  next maintenance roll until replaced), failure (hours lost, retry), or
-  botch on a natural 2 (part destroyed, ordered again). Lab and bay queue
-  show the odds before commit.
+- ✅ 12C.12 **Repair outcomes** (MekHQ repair roll). Depot repairs and
+  refits roll at the end of the bay time: 2d6 + (5 − tech skill) against
+  `repair_target_base` (6) + the hull's quality modifier (A worst … F
+  best). Margin ≥ `repair_fault_margin` (2) is clean; 0–1 lands with a
+  lingering fault (quality one step worse); a miss redoes half the bay
+  time (`repair_redo_bp`) and the job stays on the bench; a natural 2
+  botches (a piece of gear destroyed on the bench, order another). The
+  tech is the hull's own, else the sharpest one at home. The refit
+  commit log and the HQ bay queue rows show "tech skill 4 vs target 7 ·
+  72% clean / 17% fault / 11% redo" before the work starts.
 - ⬜ 12C.13 **Quality drift** (MekHQ maintenance quality): the weekly
   maintenance roll moves a hull's quality letter one step on margins of
   ±4, so neglected machines slide to F and a well-staffed bay lifts them

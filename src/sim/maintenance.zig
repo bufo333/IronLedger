@@ -316,7 +316,13 @@ test "repairs consume spares; depot work needs the HQ" {
     try std.testing.expect(hq_ops.hasJobForUnit(&gs, uid));
     try hq_ops.runDaily(&gs);
     gs.clock.day_index += 30;
-    try hq_ops.runDaily(&gs);
+    // A failed repair check keeps the job on the bench (12C.12): walk it off.
+    var days: u32 = 0;
+    while (hq_ops.hasJobForUnit(&gs, uid) and days < 200) : (days += 1) {
+        try hq_ops.runDaily(&gs);
+        gs.clock.day_index += 1;
+    }
     try std.testing.expect(!u.needsDepot());
-    for (u.slots.items) |slot| try std.testing.expectEqual(unit_mod.PartCondition.ok, slot.condition);
+    // Structure is whole; a botched check may have cost a piece of gear.
+    for (u.slots.items) |slot| if (slot.class == .structure) try std.testing.expectEqual(unit_mod.PartCondition.ok, slot.condition);
 }

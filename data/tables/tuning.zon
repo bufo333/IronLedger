@@ -165,6 +165,9 @@
         .tier_upgrade_cost = 3_000_000,
         .tier_upgrade_build_days = 60,
         .refit_labor_per_hour = 500,
+        .repair_target_base = 6,
+        .repair_fault_margin = 2,
+        .repair_redo_bp = 5_000,
     },
     .rating = .{
         // CamOps p.? Dragoons rating bands, rescaled to this sim's 0–150 score.
