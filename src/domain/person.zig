@@ -136,6 +136,10 @@ pub const Person = struct {
     tours: u32 = 0,
     outstanding_tours: u32 = 0,
     awards: std.ArrayListUnmanaged([]const u8) = .empty,
+    /// Special abilities (12B.6), keys into data/tables/abilities.zon; Edge
+    /// is spent once per contract.
+    abilities: std.ArrayListUnmanaged([]const u8) = .empty,
+    edge_spent: bool = false,
     /// Per-location injuries (Stage 12.16); open ones keep the person in
     /// the medbay, permanent ones stay on the record.
     injuries: std.ArrayListUnmanaged(Injury) = .empty,
@@ -149,6 +153,12 @@ pub const Person = struct {
         self.skills.deinit(alloc);
         self.injuries.deinit(alloc);
         self.awards.deinit(alloc);
+        self.abilities.deinit(alloc);
+    }
+
+    pub fn has(self: *const Person, ability_key: []const u8) bool {
+        for (self.abilities.items) |a| if (std.mem.eql(u8, a, ability_key)) return true;
+        return false;
     }
 
     pub fn hasAward(self: *const Person, key: []const u8) bool {

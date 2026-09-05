@@ -660,7 +660,7 @@ map. Each item ends green with a ROADMAP tick, as before.
   wounded in action, a tour with an outstanding verdict, long service)
   with a small morale bump and a log line; shown on the record and the
   roster. Store bump (`kill`/`award` tables).
-- ⬜ 12B.6 **Special pilot abilities and Edge** (AtB SPAs, abridged).
+- ✅ 12B.6 **Special pilot abilities and Edge** (AtB SPAs, abridged).
   `data/tables/abilities.zon`: eight SPAs a pilot can buy with XP at a
   training ground (Gunnery/Piloting specialist, Dodge, Tactical Genius,
   Toughness, Iron Man, Cool Under Fire, Lucky Edge). Each is one modifier

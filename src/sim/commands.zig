@@ -57,6 +57,8 @@ pub const Command = union(enum) {
     },
     /// Accept an offer off the current board and send a company.
     accept_contract: struct { offer_index: usize, company: types.ForceId },
+    /// Buy a special ability with XP at a training ground (12B.6).
+    train_ability: struct { person: types.PersonId, key: []const u8 },
     /// Pin a rank on a person (12B.4); `.private` unpinned lets seats decide again.
     promote: struct { person: types.PersonId, rank: @import("../domain/rank.zig").Rank, pin: bool = true },
     /// One negotiation round on an offer (12B.3): improve a term, harden
@@ -284,6 +286,9 @@ pub const Error = error{
     PersonAway,
     /// This offer has had its negotiation round.
     AlreadyNegotiated,
+    /// No such special ability, or already learned.
+    UnknownAbility,
+    AlreadyLearned,
     /// That term is already at the best the employer will give.
     TermAtCap,
 } || std.mem.Allocator.Error;
@@ -519,6 +524,24 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
         },
         .accept_contract => |a| return acceptContract(gs, a.offer_index, a.company),
         .negotiate => |n| return negotiate(gs, n.offer_index, n.term),
+        .train_ability => |ta| {
+            var has_ground = false;
+            var hqit = gs.hqs.iterator();
+            while (hqit.next()) |entry| {
+                if (entry.value_ptr.supportsTraining()) has_ground = true;
+            }
+            if (!has_ground) return Error.NoTrainingGround;
+            const p = gs.person(ta.person) orelse return Error.UnknownPerson;
+            if (p.status != .active) return Error.PersonUnavailable;
+            if (gs.deploymentContract(gs.companyOf(p.assigned_force)) != null) return Error.PersonDeployed;
+            const a = @import("../domain/ability.zig").find(ta.key) orelse return Error.UnknownAbility;
+            if (p.has(a.key)) return Error.AlreadyLearned;
+            if (p.xp < a.xp_cost) return Error.InsufficientXp;
+            p.xp -= a.xp_cost;
+            try p.abilities.append(gs.allocator(), a.key);
+            try gs.log(.training, .{ .company = gs.companyOf(p.assigned_force) }, "[training] {s} learns {s} ({d} XP) — {s}", .{ try p.rankedName(gs.allocator()), a.name, a.xp_cost, a.text });
+            return .{};
+        },
         .promote => |pr| {
             const p = gs.person(pr.person) orelse return Error.UnknownPerson;
             const was = p.rank;
@@ -3009,4 +3032,27 @@ test "12B.3: one negotiation round per offer — improved, hardened, or withdraw
     try @import("../econ/contract_market.zig").refresh(&gs);
     gs.contract_offers.items[0].terms.advance_pct = 50;
     try std.testing.expectError(Error.TermAtCap, execute(&gs, .{ .negotiate = .{ .offer_index = 0, .term = .advance } }));
+}
+
+test "12B.6: abilities are bought with XP at a training ground and change the battle math" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1236 });
+    defer gs.deinit();
+    _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    const co = (try execute(&gs, .{ .new_company = "Alpha" })).created_force;
+    const mek = blk: {
+        var it = gs.units.iterator();
+        while (it.next()) |e| if (e.value_ptr.kind == .mek) break :blk e.value_ptr;
+        unreachable;
+    };
+    const pilot = gs.person(mek.pilot).?;
+    try std.testing.expectError(Error.InsufficientXp, execute(&gs, .{ .train_ability = .{ .person = pilot.id, .key = "edge" } }));
+    try std.testing.expectError(Error.UnknownAbility, execute(&gs, .{ .train_ability = .{ .person = pilot.id, .key = "flying" } }));
+    pilot.xp = 100;
+    _ = try execute(&gs, .{ .train_ability = .{ .person = pilot.id, .key = "gunnery_specialist" } });
+    try std.testing.expect(pilot.has("gunnery_specialist"));
+    try std.testing.expectEqual(@as(u32, 76), pilot.xp);
+    try std.testing.expectError(Error.AlreadyLearned, execute(&gs, .{ .train_ability = .{ .person = pilot.id, .key = "gunnery_specialist" } }));
+    // Deployed: no school.
+    _ = try execute(&gs, .{ .accept_contract = .{ .offer_index = 0, .company = co } });
+    try std.testing.expectError(Error.PersonDeployed, execute(&gs, .{ .train_ability = .{ .person = pilot.id, .key = "edge" } }));
 }

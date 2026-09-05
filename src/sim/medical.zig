@@ -202,6 +202,7 @@ pub fn runDailyHealing(gs: *GameState) !void {
             const deployed = isDeployed(gs, p);
             var days = healDays(gs, deployed);
             if (!gs.takeStock(gs.siteForForce(p.assigned_force), "medical_supplies", 1)) days = @intCast(types.applyBp(days, tuning.medical.no_supplies_bp));
+            if (p.has("iron_man")) days = @max(3, days * 3 / 4); // 12B.6
             // A wound with no record behind it (older saves, event
             // effects): one light internal injury stands in for it.
             if (p.openInjuries() == 0) try p.injuries.append(gs.allocator(), .{ .location = .internal, .severity = 1, .incurred_day = gs.clock.day_index });
@@ -316,8 +317,9 @@ pub fn runWeeklyRest(gs: *GameState) !void {
                 if (p.morale < 45 and p.fatigue <= 60) p.morale += 1;
             }
             // Exhaustion grinds morale down, and an empty mess tent grinds
-            // it faster (Stage 9B); combat tours get no rest at all.
-            if (p.fatigue > 60 and p.morale > 0) p.morale -= 1;
+            // it faster (Stage 9B); combat tours get no rest at all. Cool
+            // Under Fire (12B.6) shrugs the grind off.
+            if (p.fatigue > 60 and p.morale > 0 and !p.has("cool_under_fire")) p.morale -= 1;
             if (gs.force(company)) |co| {
                 if (co.supply_shortage_days > 0) p.morale -|= 2;
             }

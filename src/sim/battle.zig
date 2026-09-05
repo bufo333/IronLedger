@@ -146,8 +146,9 @@ fn playerSide(gs: *GameState, c: *const contract_mod.Contract) !SideState {
             quality_sum += @intFromEnum(u.quality);
             // Old wounds ride along: a permanent head injury is a point of
             // skill lost for good (Stage 12.16).
-            gunnery_sum += (pilot.skill(.gunnery_mek) orelse 4) + pilot.permanentPenalty();
-            piloting_sum += (pilot.skill(.piloting_mek) orelse 5) + pilot.permanentPenalty();
+            // Specialists (12B.6) count a point better; old wounds a point worse.
+            gunnery_sum += ((pilot.skill(.gunnery_mek) orelse 4) + pilot.permanentPenalty()) -| @intFromBool(pilot.has("gunnery_specialist"));
+            piloting_sum += ((pilot.skill(.piloting_mek) orelse 5) + pilot.permanentPenalty()) -| @intFromBool(pilot.has("piloting_specialist"));
             try side.engaged.append(gs.allocator(), uid);
             n += 1;
         }
@@ -165,6 +166,10 @@ fn playerSide(gs: *GameState, c: *const contract_mod.Contract) !SideState {
         var lance_power = elem.effectivePower(side.mods);
         // Defense lances dig in: +10% on garrison-class work.
         if (lance.role == .defense and c.kind.isGarrisonClass()) lance_power = types.applyBp(lance_power, tuning.battle.defense_bonus_bp);
+        // A tactical genius leading the lance (12B.6): +5%.
+        if (gs.person(lance.commander)) |leader| if (leader.has("tactical_genius")) {
+            lance_power = types.applyBp(lance_power, 10_500);
+        };
         side.power += lance_power;
     }
     return side;
@@ -278,7 +283,21 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
 
     // One opposed roll decides the engagement (rounds within are abstracted;
     // ARCH §7 steps 3–4 collapse into the margin).
-    const roll = @as(i32, gs.rng.roll2d6(.battle)) + ratioBonus(player.power, enemy_power);
+    var roll = @as(i32, gs.rng.roll2d6(.battle)) + ratioBonus(player.power, enemy_power);
+    // Edge (12B.6): a pilot with Edge to spend re-rolls a lost engagement once per contract.
+    var edge_used_by: ?*person_mod.Person = null;
+    if (roll < 6) {
+        for (player.engaged.items) |uid| {
+            const u = gs.unit(uid) orelse continue;
+            const p = gs.person(u.pilot) orelse continue;
+            if (p.has("edge") and !p.edge_spent) {
+                p.edge_spent = true;
+                edge_used_by = p;
+                roll = @as(i32, gs.rng.roll2d6(.battle)) + ratioBonus(player.power, enemy_power);
+                break;
+            }
+        }
+    }
     const outcome: autoresolve.Outcome = if (roll >= 11) .decisive_victory //
         else if (roll >= 8) .victory //
         else if (roll >= 6) .draw //
@@ -319,6 +338,8 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
         const uid = engaged[gs.rng.random(.battle).uintLessThan(usize, engaged.len)];
         const u = gs.unit(uid) orelse continue;
         if (u.status == .destroyed) continue;
+        // Dodge (12B.6): one hit in three aimed at this hull misses.
+        if (gs.person(u.pilot)) |dp| if (dp.has("dodge") and gs.rng.random(.battle).uintLessThan(u8, 3) == 0) continue;
 
         const severity = gs.rng.roll2d6(.battle);
         var rec: Hit = .{ .unit = uid, .armor_before = u.armor_pct, .armor_after = 0, .slot = null, .slot_part = "", .slot_result = "", .destroyed = false, .crew = "" };
@@ -348,8 +369,11 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
             if (p.status == .active) {
                 // Wound severity follows the hit (Stage 12.16): 8–9 light,
                 // 10–11 serious, 12 crippling (survivable only with MASH).
-                const wound_severity: u8 = if (severity >= 12) 3 else if (severity >= 10) 2 else 1;
-                if (severity == 12 and !player.mods.has_mash_lance) {
+                // Toughness (12B.6): a step lighter, and a killing hit is survived.
+                const tough = p.has("toughness");
+                const raw_severity: u8 = if (severity >= 12) 3 else if (severity >= 10) 2 else 1;
+                const wound_severity: u8 = @max(1, raw_severity -| @as(u8, @intFromBool(tough)));
+                if (severity == 12 and !player.mods.has_mash_lance and !tough) {
                     p.status = .kia;
                     kia += 1;
                     rec.crew = try std.fmt.allocPrint(gs.allocator(), "{s} KIA", .{try p.rankedName(gs.allocator())});
@@ -475,10 +499,10 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     };
 
     const ctx: @import("state.zig").LogCtx = .{ .company = c.assigned_company, .contract = c.id };
-    try gs.log(.battle, ctx, "[AAR] {s} vs {s}: {s} — power {d} vs {d} (recon {d}, fatigue {d}, morale {d})", .{
+    try gs.log(.battle, ctx, "[AAR] {s} vs {s}: {s} — power {d} vs {d} (recon {d}, fatigue {d}, morale {d}){s}", .{
         @tagName(c.kind),        c.enemy_key,            @tagName(outcome),
         player.power,            enemy_power,            player.mods.recon_quality,
-        player.mods.avg_fatigue, player.mods.avg_morale,
+        player.mods.avg_fatigue, player.mods.avg_morale, if (edge_used_by) |p| try std.fmt.allocPrint(gs.allocator(), " · {s} spent Edge to re-roll a lost engagement", .{try p.rankedName(gs.allocator())}) else "",
     });
     try gs.log(.battle, ctx, "[AAR]   losses: {d} hit / {d} destroyed, {d} wounded, {d} KIA | enemy losses {d} BV ≈ {d} kill{s} credited | salvage {d} BV claimed | comp {d} | score {d}", .{
         hits, destroyed, wounded, kia, enemy_destroyed_bv, kills_credited, if (kills_credited == 1) "" else "s", salvage, comp, c.score,
@@ -618,7 +642,9 @@ fn applyCompanyAftermath(gs: *GameState, company: types.ForceId, morale_delta: i
             f = (gs.forces.getPtr(f) orelse break false).parent;
         } else false;
         if (!in_company) continue;
-        p.morale = @intCast(std.math.clamp(@as(i32, p.morale) + morale_delta, 0, 100));
+        // Cool Under Fire (12B.6): half the morale loss after a bad day.
+        const delta = if (morale_delta < 0 and p.has("cool_under_fire")) @divTrunc(morale_delta, 2) else morale_delta;
+        p.morale = @intCast(std.math.clamp(@as(i32, p.morale) + delta, 0, 100));
         p.fatigue = @min(100, p.fatigue + fatigue_add);
     }
 }

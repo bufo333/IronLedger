@@ -104,6 +104,7 @@ pub fn complete(gs: *GameState, c: *contract_mod.Contract, objectives_broken: bo
             if (gs.companyOf(p.assigned_force) != c.assigned_company) continue;
             p.tours += 1;
             if (outstanding) p.outstanding_tours += 1;
+            p.edge_spent = false; // Edge (12B.6) is per contract
             try ids.append(gs.allocator(), p.id);
         }
         for (ids.items) |id| _ = try @import("personnel.zig").checkAwards(gs, id);

@@ -25,7 +25,7 @@ const contract_events = @import("../sim/contract_events.zig");
 const network = @import("../sim/network.zig");
 const clock_mod = @import("../sim/clock.zig");
 
-pub const schema_version = 12;
+pub const schema_version = 13;
 
 const ddl =
     \\CREATE TABLE IF NOT EXISTS player (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_seq INTEGER NOT NULL);
@@ -35,8 +35,9 @@ const ddl =
     \\CREATE TABLE IF NOT EXISTS meta_text (cid INTEGER NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (cid, key));
     \\CREATE TABLE IF NOT EXISTS rng (cid INTEGER PRIMARY KEY, state BLOB NOT NULL);
     \\CREATE TABLE IF NOT EXISTS commander (cid INTEGER PRIMARY KEY, name TEXT NOT NULL, origin TEXT NOT NULL, profession TEXT NOT NULL);
-    \\CREATE TABLE IF NOT EXISTS person (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, first TEXT, last TEXT, callsign TEXT, role TEXT, xp INTEGER, status TEXT, fatigue INTEGER, morale INTEGER, recruited_day INTEGER, salary_override INTEGER, assigned_force INTEGER, posted_hq INTEGER, weekly_hours INTEGER, medbay_priority INTEGER, leave_until INTEGER, wound_heal_day INTEGER, training_skill TEXT, training_done INTEGER, admitted INTEGER NOT NULL DEFAULT 0, rank TEXT NOT NULL DEFAULT 'private', rank_pinned INTEGER NOT NULL DEFAULT 0, kills INTEGER NOT NULL DEFAULT 0, kill_bv INTEGER NOT NULL DEFAULT 0, battles INTEGER NOT NULL DEFAULT 0, tours INTEGER NOT NULL DEFAULT 0, outstanding_tours INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (cid, id));
+    \\CREATE TABLE IF NOT EXISTS person (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, first TEXT, last TEXT, callsign TEXT, role TEXT, xp INTEGER, status TEXT, fatigue INTEGER, morale INTEGER, recruited_day INTEGER, salary_override INTEGER, assigned_force INTEGER, posted_hq INTEGER, weekly_hours INTEGER, medbay_priority INTEGER, leave_until INTEGER, wound_heal_day INTEGER, training_skill TEXT, training_done INTEGER, admitted INTEGER NOT NULL DEFAULT 0, rank TEXT NOT NULL DEFAULT 'private', rank_pinned INTEGER NOT NULL DEFAULT 0, kills INTEGER NOT NULL DEFAULT 0, kill_bv INTEGER NOT NULL DEFAULT 0, battles INTEGER NOT NULL DEFAULT 0, tours INTEGER NOT NULL DEFAULT 0, outstanding_tours INTEGER NOT NULL DEFAULT 0, edge_spent INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (cid, id));
     \\CREATE TABLE IF NOT EXISTS award (cid INTEGER NOT NULL, person_id INTEGER NOT NULL, key TEXT NOT NULL);
+    \\CREATE TABLE IF NOT EXISTS ability (cid INTEGER NOT NULL, person_id INTEGER NOT NULL, key TEXT NOT NULL);
     \\CREATE TABLE IF NOT EXISTS person_skill (cid INTEGER NOT NULL, person_id INTEGER NOT NULL, skill TEXT NOT NULL, level INTEGER NOT NULL);
     \\CREATE TABLE IF NOT EXISTS injury (cid INTEGER NOT NULL, person_id INTEGER NOT NULL, ord INTEGER NOT NULL, location TEXT NOT NULL, severity INTEGER NOT NULL, incurred INTEGER NOT NULL, heal_done INTEGER, doctor INTEGER NOT NULL DEFAULT 0, permanent INTEGER NOT NULL DEFAULT 0, healed INTEGER NOT NULL DEFAULT 0);
     \\CREATE TABLE IF NOT EXISTS unit (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, chassis_key TEXT, name TEXT, kind TEXT, force INTEGER, pilot INTEGER, tech INTEGER, armor_pct INTEGER, quality TEXT, status TEXT, last_maint INTEGER, acquired_day INTEGER, price INTEGER, reactivation_done INTEGER, berth_hq INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (cid, id));
@@ -70,7 +71,7 @@ const ddl =
 ;
 
 const tables = [_][]const u8{
-    "meta",       "meta_text",   "rng",          "commander",       "person",       "person_skill", "injury", "award",
+    "meta",       "meta_text",   "rng",          "commander",       "person",       "person_skill", "injury", "award", "ability",
     "unit",       "unit_slot",   "force",        "force_unit",      "force_child",  "stock",
     "hq",         "hq_facility", "hq_project",   "contract",        "txn",          "loan",
     "courier",    "policy",      "bay_job",      "candidate",       "hq_link",      "unit_transfer",
@@ -109,6 +110,8 @@ pub const Store = struct {
         .{ .version = 12, .table = "person", .column = "tours", .sql = "ALTER TABLE person ADD COLUMN tours INTEGER NOT NULL DEFAULT 0" },
         .{ .version = 12, .table = "person", .column = "outstanding_tours", .sql = "ALTER TABLE person ADD COLUMN outstanding_tours INTEGER NOT NULL DEFAULT 0" },
         // v12 also adds the `award` table (created by ddl).
+        .{ .version = 13, .table = "person", .column = "edge_spent", .sql = "ALTER TABLE person ADD COLUMN edge_spent INTEGER NOT NULL DEFAULT 0" },
+        // v13 also adds the `ability` table (created by ddl).
     };
 
     pub fn open(path: [*:0]const u8) !Store {
@@ -349,9 +352,11 @@ pub const Store = struct {
 
         // People.
         {
-            const st = try self.db.prepare("INSERT INTO person VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29)");
+            const st = try self.db.prepare("INSERT INTO person VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30)");
             const aw = try self.db.prepare("INSERT INTO award VALUES (?1,?2,?3)");
             defer aw.finalize();
+            const ab = try self.db.prepare("INSERT INTO ability VALUES (?1,?2,?3)");
+            defer ab.finalize();
             defer st.finalize();
             const sk = try self.db.prepare("INSERT INTO person_skill VALUES (?1, ?2, ?3, ?4)");
             defer sk.finalize();
@@ -373,11 +378,15 @@ pub const Store = struct {
                     @as(i64, @intFromBool(p.medbay_admitted)),
                     p.rank,                         @as(i64, @intFromBool(p.rank_pinned)),
                     @as(i64, p.kills),              @as(i64, p.kill_bv),            @as(i64, p.battles),
-                    @as(i64, p.tours),              @as(i64, p.outstanding_tours),
+                    @as(i64, p.tours),              @as(i64, p.outstanding_tours), @as(i64, @intFromBool(p.edge_spent)),
                 });
                 for (p.awards.items) |key| {
                     try aw.bindAll(.{ cid, @intFromEnum(p.id), key });
                     try aw.run();
+                }
+                for (p.abilities.items) |key| {
+                    try ab.bindAll(.{ cid, @intFromEnum(p.id), key });
+                    try ab.run();
                 }
                 try st.run();
                 var skit = p.skills.iterator();
@@ -757,7 +766,7 @@ pub const Store = struct {
 
         // People.
         {
-            const st = try self.db.prepare("SELECT id, first, last, callsign, role, xp, status, fatigue, morale, recruited_day, salary_override, assigned_force, posted_hq, weekly_hours, medbay_priority, leave_until, wound_heal_day, training_skill, training_done, admitted, rank, rank_pinned, kills, kill_bv, battles, tours, outstanding_tours FROM person WHERE cid = ?1 ORDER BY ord");
+            const st = try self.db.prepare("SELECT id, first, last, callsign, role, xp, status, fatigue, morale, recruited_day, salary_override, assigned_force, posted_hq, weekly_hours, medbay_priority, leave_until, wound_heal_day, training_skill, training_done, admitted, rank, rank_pinned, kills, kill_bv, battles, tours, outstanding_tours, edge_spent FROM person WHERE cid = ?1 ORDER BY ord");
             defer st.finalize();
             try st.bindAll(.{cid});
             while (try st.next()) {
@@ -787,6 +796,7 @@ pub const Store = struct {
                     .battles = @intCast(st.int(24)),
                     .tours = @intCast(st.int(25)),
                     .outstanding_tours = @intCast(st.int(26)),
+                    .edge_spent = st.int(27) != 0,
                 };
                 if (st.enumValue(types.SkillType, 17)) |skill| {
                     if (st.optInt(18)) |done| p.training = .{ .skill = skill, .done_day = @intCast(done) };
@@ -807,6 +817,13 @@ pub const Store = struct {
             while (try aw.next()) {
                 const p = gs.people.getPtr(toId(types.PersonId, aw.int(0))) orelse continue;
                 try p.awards.append(alloc, try aw.text(1, alloc));
+            }
+            const ab = try self.db.prepare("SELECT person_id, key FROM ability WHERE cid = ?1");
+            defer ab.finalize();
+            try ab.bindAll(.{cid});
+            while (try ab.next()) {
+                const p = gs.people.getPtr(toId(types.PersonId, ab.int(0))) orelse continue;
+                try p.abilities.append(alloc, try ab.text(1, alloc));
             }
             const inj = try self.db.prepare("SELECT person_id, location, severity, incurred, heal_done, doctor, permanent, healed FROM injury WHERE cid = ?1 ORDER BY person_id, ord");
             defer inj.finalize();

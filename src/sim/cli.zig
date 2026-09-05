@@ -247,8 +247,11 @@ pub fn parseCommand(verb: []const u8, tokens: *std.mem.TokenIterator(u8, .scalar
         return .{ .post_person = .{ .person = pid, .hq = site.hq } };
     }
     if (eq(u8, verb, "train")) {
+        // train <person> <skill> | train <person> ability <key>
         const pid: types.PersonId = @enumFromInt(try num(u32, tokens.next()));
-        const skill = std.meta.stringToEnum(types.SkillType, try need(tokens.next())) orelse return error.BadArguments;
+        const what = try need(tokens.next());
+        if (eq(u8, what, "ability")) return .{ .train_ability = .{ .person = pid, .key = try need(tokens.next()) } };
+        const skill = std.meta.stringToEnum(types.SkillType, what) orelse return error.BadArguments;
         return .{ .train = .{ .person = pid, .skill = skill } };
     }
     if (eq(u8, verb, "triage")) return .{ .triage = .{ .person = @enumFromInt(try num(u32, tokens.next())), .priority = try num(u8, tokens.next()) } };
@@ -362,6 +365,8 @@ pub fn errorText(err: anyerror) []const u8 {
         error.PersonDeployed => "that person is deployed with their company",
         error.PersonAway => "pool hulls sit at the outfit's seat — that person's company is not home there",
         error.AlreadyNegotiated => "that offer has had its negotiation round — take it or leave it",
+        error.UnknownAbility => "no such ability — gunnery_specialist, piloting_specialist, dodge, toughness, iron_man, cool_under_fire, tactical_genius, edge",
+        error.AlreadyLearned => "they already have that ability",
         error.TermAtCap => "that term is already the best the employer will give",
         error.NoAirSlot => "no air wing slot: the home HQ needs a spaceport at level 3 (brigade HQs host one from the start), and a company has one wing",
         error.NoSupportSlot => "the support company is full for this HQ, or its facilities can't stand up that lance (mess needs a mess hall ≥ 2, MASH a hospital, logistics a warehouse)",
@@ -469,7 +474,7 @@ pub fn usage(verb: []const u8) ?[]const u8 {
         .{ "recruit", "recruit <role>" },
         .{ "fire", "fire <person>" },
         .{ "post", "post <person> hq:N" },
-        .{ "train", "train <person> <skill>" },
+        .{ "train", "train <person> <skill> | train <person> ability gunnery_specialist|piloting_specialist|dodge|toughness|iron_man|cool_under_fire|tactical_genius|edge" },
         .{ "triage", "triage <person> <priority>" },
         .{ "leave", "leave <person> [days]" },
         .{ "mothball", "mothball <unit>" },

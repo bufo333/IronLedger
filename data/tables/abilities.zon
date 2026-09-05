@@ -1,0 +1,13 @@
+// Special pilot abilities (Stage 12B.6; AtB SPAs, abridged to what the
+// autoresolve model can honour). Typed against domain/ability.zig
+// `AbilityRow`. Bought with XP at a training ground.
+.{
+    .{ .key = "gunnery_specialist", .name = "Gunnery Specialist", .xp_cost = 24, .text = "counts one point better at gunnery in the battle math" },
+    .{ .key = "piloting_specialist", .name = "Piloting Specialist", .xp_cost = 16, .text = "counts one point better at piloting in the battle math" },
+    .{ .key = "dodge", .name = "Dodge", .xp_cost = 20, .text = "one hit in three aimed at this hull misses" },
+    .{ .key = "toughness", .name = "Toughness", .xp_cost = 20, .text = "wounds land one step lighter; a killing hit is survived as a crippling wound" },
+    .{ .key = "iron_man", .name = "Iron Man", .xp_cost = 16, .text = "heals in three quarters of the time" },
+    .{ .key = "cool_under_fire", .name = "Cool Under Fire", .xp_cost = 16, .text = "loses half the morale after a bad day and none to exhaustion" },
+    .{ .key = "tactical_genius", .name = "Tactical Genius", .xp_cost = 30, .text = "as lance leader, the lance fights 5% harder" },
+    .{ .key = "edge", .name = "Edge", .xp_cost = 30, .text = "once per contract, a lost engagement is re-rolled" },
+}
