@@ -11,6 +11,57 @@ const chassis_mod = @import("../domain/chassis.zig");
 const GameState = @import("state.zig").GameState;
 const company_gen = @import("../gen/company_gen.zig");
 
+/// Payday (12C.3): everyone's stake brought up to date. Returns how many
+/// people gained shares.
+pub fn refreshShares(gs: *GameState) u32 {
+    var gained: u32 = 0;
+    var it = gs.people.iterator();
+    while (it.next()) |e| {
+        const p = e.value_ptr;
+        const due = p.sharesDue(gs.clock.day_index);
+        if (due > p.shares) gained += 1;
+        p.shares = due;
+    }
+    return gained;
+}
+
+/// Contract completed (12C.3): `gs.share_profit_bp` of what the contract
+/// brought in, split pro rata across every shareholder on the books and
+/// paid as payroll "profit shares". Returns the pool paid.
+pub fn payShares(gs: *GameState, contract_id: types.ContractId, company: types.ForceId) !types.CBills {
+    var income: types.CBills = 0;
+    for (gs.ledger.transactions.items) |t| if (t.contract == contract_id) {
+        income += t.amount;
+    };
+    if (income <= 0 or gs.share_profit_bp == 0) return 0;
+    var total_shares: u32 = 0;
+    var it = gs.people.iterator();
+    while (it.next()) |e| {
+        const p = e.value_ptr;
+        if (p.status != .active and p.status != .wounded) continue;
+        total_shares += p.shares;
+    }
+    if (total_shares == 0) return 0;
+    const pool = types.applyBp(income, gs.share_profit_bp);
+    const per_share = @divTrunc(pool, @as(types.CBills, total_shares));
+    if (per_share <= 0) return 0;
+    var paid: types.CBills = 0;
+    var holders: u32 = 0;
+    var it2 = gs.people.iterator();
+    while (it2.next()) |e| {
+        const p = e.value_ptr;
+        if ((p.status != .active and p.status != .wounded) or p.shares == 0) continue;
+        paid += per_share * p.shares;
+        holders += 1;
+        p.morale = @intCast(@min(100, @as(u32, p.morale) + 3));
+    }
+    try gs.postTransaction(.{ .day = gs.clock.day_index, .amount = -paid, .category = .payroll, .company = company, .contract = contract_id, .note = "profit shares" });
+    try gs.log(.contract, .{ .company = company, .contract = contract_id }, "[shares] {d} c-bills of {d} contract income ({d}%) paid to {d} shareholders — {d} shares at {d} each (morale +3)", .{
+        paid, income, @divTrunc(gs.share_profit_bp, 100), holders, total_shares, per_share,
+    });
+    return paid;
+}
+
 /// Someone leaves the outfit (12C.2): status set, every seat vacated, and
 /// the departure payout posted to the outfit as payroll ("severance") —
 /// `share_bp` of the full amount (a firing pays half, a notice or a
@@ -316,4 +367,25 @@ test "12C.2: severance is a month per year served, capped; a firing pays half; u
     try std.testing.expectEqual(pay, paid); // half of two months
     try std.testing.expectEqual(funds - pay, gs.funds);
     try std.testing.expectEqual(person_mod.Status.resigned, gs.person(vet).?.status);
+}
+
+test "12C.3: shares are paid pro rata from contract income at the configured share" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 123 });
+    defer gs.deinit();
+    const a = try gs.hirePerson("Two", "Shares", .mekwarrior);
+    const b = try gs.hirePerson("One", "Share", .tech_mek);
+    _ = try gs.hirePerson("No", "Stake", .admin_hr);
+    gs.person(a).?.shares = 2;
+    gs.person(b).?.shares = 1;
+    const cid: types.ContractId = @enumFromInt(7);
+    try gs.postTransaction(.{ .day = 0, .amount = 1_000_000, .category = .contract_payment, .contract = cid });
+    try gs.postTransaction(.{ .day = 0, .amount = -100_000, .category = .breach_clawback, .contract = cid });
+    gs.share_profit_bp = 3_000; // 30% of 900_000 = 270_000 → 90_000 a share
+    const funds = gs.funds;
+    const paid = try payShares(&gs, cid, .none);
+    try std.testing.expectEqual(@as(types.CBills, 270_000), paid);
+    try std.testing.expectEqual(funds - 270_000, gs.funds);
+    // Nothing owed with the share at zero or no shareholders.
+    gs.share_profit_bp = 0;
+    try std.testing.expectEqual(@as(types.CBills, 0), try payShares(&gs, cid, .none));
 }

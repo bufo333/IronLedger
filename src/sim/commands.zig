@@ -181,6 +181,9 @@ pub const Command = union(enum) {
     set_stock_policy: struct { hq: types.HqId, part_key: []const u8, min: u32, target: u32 },
     /// Let the medbay admit the wounded on its own each morning.
     set_auto_admit: bool,
+    /// Share of contract income paid to shareholders at completion (12C.3),
+    /// in percent 0–100.
+    set_shares_pct: u8,
     /// Sell part of a warehouse line for its resale value (into the HQ's
     /// treasury). Refused below a keep-stocked line's minimum.
     sell_stock: struct { hq: types.HqId, part_key: []const u8, quantity: u32 },
@@ -230,6 +233,7 @@ pub const Error = error{
     NotTrained,
     InsufficientXp,
     AlreadyMastered,
+    BadPercent,
     InsufficientTreasury,
     UnknownTreasury,
     StorageFull,
@@ -819,6 +823,12 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
                 try gs.log(.delivery, .{ .company = company }, "[supply] {s} returns {d} {s} to the home HQ ({s})", .{ f.name, excess, key, if (target != null) "over the plan's target" else "no line in the plan" });
             }
             return .{ .tons_moved = moved };
+        },
+        .set_shares_pct => |pct| {
+            if (pct > 100) return Error.BadPercent;
+            gs.share_profit_bp = @as(types.Bp, pct) * 100;
+            try gs.log(.decision, .{}, "[shares] profit share set to {d}% of contract income", .{pct});
+            return .{};
         },
         .set_auto_admit => |on| {
             gs.auto_admit = on;

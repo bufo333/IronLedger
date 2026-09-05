@@ -130,6 +130,9 @@ pub fn parseCommand(verb: []const u8, tokens: *std.mem.TokenIterator(u8, .scalar
         const target = std.fmt.parseInt(u32, tokens.next() orelse "0", 10) catch return error.BadNumber;
         return .{ .set_stock_policy = .{ .hq = site.hq, .part_key = part, .min = min, .target = if (target == 0 and min > 0) min * 2 else target } };
     }
+    if (eq(u8, verb, "shares")) {
+        return .{ .set_shares_pct = try num(u8, tokens.next()) };
+    }
     if (eq(u8, verb, "autoadmit")) {
         const arg = tokens.next() orelse "on";
         return .{ .set_auto_admit = eq(u8, arg, "on") or eq(u8, arg, "1") or eq(u8, arg, "yes") };
@@ -330,6 +333,7 @@ pub fn parseCommand(verb: []const u8, tokens: *std.mem.TokenIterator(u8, .scalar
 pub fn errorText(err: anyerror) []const u8 {
     return switch (err) {
         error.InsufficientTreasury => "not enough money in that treasury — transfer funds first",
+        error.BadPercent => "a percentage between 0 and 100",
         error.KeepStocked => "that would drop the line under its keep-stocked minimum — lower the policy first (K)",
         error.StorageFull => "the destination cannot hold that tonnage",
         error.CompanyDeployed => "that company is deployed",
@@ -390,6 +394,7 @@ pub const verbs = [_][]const u8{
     "newlance",
     "stockpolicy",
     "autoadmit",
+    "shares",
     "sellstock",
     "trim",
     "raise",
@@ -449,6 +454,7 @@ pub fn usage(verb: []const u8) ?[]const u8 {
         .{ "newlance", "newlance co:N [line|air|mash|mess|salvage|security|transport] <name>" },
         .{ "stockpolicy", "stockpolicy hq:N <part> <min> [target]  (0 target removes)" },
         .{ "autoadmit", "autoadmit on|off" },
+        .{ "shares", "shares <pct>  (share of contract income paid to shareholders at completion)" },
         .{ "sellstock", "sellstock hq:N <part> [qty]" },
         .{ "trim", "trim co:N" },
         .{ "raise", "raise hq:N <name>" },

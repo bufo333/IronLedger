@@ -762,13 +762,13 @@ item: tests green, both smokes, ROADMAP tick, one commit.
   plain `fire` pays `fire_severance_bp` (half) and now vacates the seat;
   disbanding a company pays everyone out. One `personnel.depart` does
   every exit. The notice inbox line and the fire modal both price it.
-- ⬜ 12C.3 **Shares** (AtB shares system). `Person.shares: u8` — a
-  founder (on the books day 0) gets 2, every combat/tech role gets 1 after
-  a year, +1 per rank above sergeant; owners can set `shares_pct` of net
-  contract profit (default 30%, `share_profit_bp`) paid out at contract
-  completion pro rata. Holding shares is −1 restless per 3 shares and
-  halves the departure payout. Contracts screen shows the share pool on
-  completion; Finance shows the payout line.
+- ✅ 12C.3 **Shares** (AtB shares system). `Person.shares` refreshed each
+  payday: a founder (on the books day 0) holds 2, every combat/tech hand 1
+  after a year, +1 per rank above sergeant. `shares <pct>` (Settings shows
+  it; default 30%) is the share of a contract's income paid out pro rata
+  to every shareholder at completion as payroll "profit shares" (+3
+  morale, log line with the split). Three shares cancel a restless flag;
+  shareholders take half severance. Record shows the stake. Schema v15.
 - ⬜ 12C.4 **Ages and career arcs** (MekHQ `birthday`, AtB age-based
   retirement). `Person.born_day: i32` (days relative to campaign start;
   generator: mekwarriors 22–38 by experience, techs 20–50, admins 25–55,

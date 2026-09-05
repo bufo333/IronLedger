@@ -202,6 +202,9 @@ pub const GameState = struct {
     /// of waiting for the commander's signature (an untreated-wounded
     /// warning never blocks the turn while this is on).
     auto_admit: bool = false,
+    /// Share of contract income paid out to shareholders at completion
+    /// (12C.3, AtB shares); the owner sets it with `shares <pct>`.
+    share_profit_bp: types.Bp = @import("../domain/tuning.zig").t.person.share_profit_default_bp,
     ledger: finance_mod.Ledger = .{},
     event_queue: events_mod.EventQueue = .{},
 
@@ -1620,6 +1623,7 @@ pub const GameState = struct {
         h.update(std.mem.asBytes(&self.clock.day_index));
         h.update(std.mem.asBytes(&self.funds));
         h.update(std.mem.asBytes(&self.reputation));
+        h.update(std.mem.asBytes(&self.share_profit_bp));
         const txn_count: u64 = self.ledger.transactions.items.len;
         h.update(std.mem.asBytes(&txn_count));
 

@@ -25,7 +25,7 @@ const contract_events = @import("../sim/contract_events.zig");
 const network = @import("../sim/network.zig");
 const clock_mod = @import("../sim/clock.zig");
 
-pub const schema_version = 14;
+pub const schema_version = 15;
 
 const ddl =
     \\CREATE TABLE IF NOT EXISTS player (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_seq INTEGER NOT NULL);
@@ -35,7 +35,7 @@ const ddl =
     \\CREATE TABLE IF NOT EXISTS meta_text (cid INTEGER NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (cid, key));
     \\CREATE TABLE IF NOT EXISTS rng (cid INTEGER PRIMARY KEY, state BLOB NOT NULL);
     \\CREATE TABLE IF NOT EXISTS commander (cid INTEGER PRIMARY KEY, name TEXT NOT NULL, origin TEXT NOT NULL, profession TEXT NOT NULL);
-    \\CREATE TABLE IF NOT EXISTS person (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, first TEXT, last TEXT, callsign TEXT, role TEXT, xp INTEGER, status TEXT, fatigue INTEGER, morale INTEGER, recruited_day INTEGER, salary_override INTEGER, assigned_force INTEGER, posted_hq INTEGER, weekly_hours INTEGER, medbay_priority INTEGER, leave_until INTEGER, wound_heal_day INTEGER, training_skill TEXT, training_done INTEGER, admitted INTEGER NOT NULL DEFAULT 0, rank TEXT NOT NULL DEFAULT 'private', rank_pinned INTEGER NOT NULL DEFAULT 0, kills INTEGER NOT NULL DEFAULT 0, kill_bv INTEGER NOT NULL DEFAULT 0, battles INTEGER NOT NULL DEFAULT 0, tours INTEGER NOT NULL DEFAULT 0, outstanding_tours INTEGER NOT NULL DEFAULT 0, edge_spent INTEGER NOT NULL DEFAULT 0, faction TEXT NOT NULL DEFAULT '', PRIMARY KEY (cid, id));
+    \\CREATE TABLE IF NOT EXISTS person (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, first TEXT, last TEXT, callsign TEXT, role TEXT, xp INTEGER, status TEXT, fatigue INTEGER, morale INTEGER, recruited_day INTEGER, salary_override INTEGER, assigned_force INTEGER, posted_hq INTEGER, weekly_hours INTEGER, medbay_priority INTEGER, leave_until INTEGER, wound_heal_day INTEGER, training_skill TEXT, training_done INTEGER, admitted INTEGER NOT NULL DEFAULT 0, rank TEXT NOT NULL DEFAULT 'private', rank_pinned INTEGER NOT NULL DEFAULT 0, kills INTEGER NOT NULL DEFAULT 0, kill_bv INTEGER NOT NULL DEFAULT 0, battles INTEGER NOT NULL DEFAULT 0, tours INTEGER NOT NULL DEFAULT 0, outstanding_tours INTEGER NOT NULL DEFAULT 0, edge_spent INTEGER NOT NULL DEFAULT 0, faction TEXT NOT NULL DEFAULT '', shares INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (cid, id));
     \\CREATE TABLE IF NOT EXISTS award (cid INTEGER NOT NULL, person_id INTEGER NOT NULL, key TEXT NOT NULL);
     \\CREATE TABLE IF NOT EXISTS ability (cid INTEGER NOT NULL, person_id INTEGER NOT NULL, key TEXT NOT NULL);
     \\CREATE TABLE IF NOT EXISTS person_skill (cid INTEGER NOT NULL, person_id INTEGER NOT NULL, skill TEXT NOT NULL, level INTEGER NOT NULL);
@@ -113,6 +113,7 @@ pub const Store = struct {
         .{ .version = 13, .table = "person", .column = "edge_spent", .sql = "ALTER TABLE person ADD COLUMN edge_spent INTEGER NOT NULL DEFAULT 0" },
         // v13 also adds the `ability` table (created by ddl).
         .{ .version = 14, .table = "person", .column = "faction", .sql = "ALTER TABLE person ADD COLUMN faction TEXT NOT NULL DEFAULT ''" },
+        .{ .version = 15, .table = "person", .column = "shares", .sql = "ALTER TABLE person ADD COLUMN shares INTEGER NOT NULL DEFAULT 0" },
     };
 
     pub fn open(path: [*:0]const u8) !Store {
@@ -324,6 +325,7 @@ pub const Store = struct {
                 .{ "funds", gs.funds },                    .{ "reputation", gs.reputation },
                 .{ "bankrupt", @as(i64, @intFromBool(gs.bankrupt)) },
                 .{ "auto_admit", @as(i64, @intFromBool(gs.auto_admit)) },
+                .{ "share_profit_bp", @as(i64, gs.share_profit_bp) },
                 .{ "next_person_id", gs.next_person_id },  .{ "next_unit_id", gs.next_unit_id },
                 .{ "next_force_id", gs.next_force_id },    .{ "next_hq_id", gs.next_hq_id },
                 .{ "next_contract_id", gs.next_contract_id },
@@ -353,7 +355,7 @@ pub const Store = struct {
 
         // People.
         {
-            const st = try self.db.prepare("INSERT INTO person VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31)");
+            const st = try self.db.prepare("INSERT INTO person VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32)");
             const aw = try self.db.prepare("INSERT INTO award VALUES (?1,?2,?3)");
             defer aw.finalize();
             const ab = try self.db.prepare("INSERT INTO ability VALUES (?1,?2,?3)");
@@ -380,7 +382,7 @@ pub const Store = struct {
                     p.rank,                         @as(i64, @intFromBool(p.rank_pinned)),
                     @as(i64, p.kills),              @as(i64, p.kill_bv),            @as(i64, p.battles),
                     @as(i64, p.tours),              @as(i64, p.outstanding_tours), @as(i64, @intFromBool(p.edge_spent)),
-                    p.faction,
+                    p.faction,                      @as(i64, p.shares),
                 });
                 for (p.awards.items) |key| {
                     try aw.bindAll(.{ cid, @intFromEnum(p.id), key });
@@ -730,6 +732,7 @@ pub const Store = struct {
                 if (std.mem.eql(u8, key, "reputation")) gs.reputation = @intCast(v);
                 if (std.mem.eql(u8, key, "bankrupt")) gs.bankrupt = v != 0;
                 if (std.mem.eql(u8, key, "auto_admit")) gs.auto_admit = v != 0;
+                if (std.mem.eql(u8, key, "share_profit_bp")) gs.share_profit_bp = @intCast(v);
                 if (std.mem.eql(u8, key, "next_person_id")) gs.next_person_id = @intCast(v);
                 if (std.mem.eql(u8, key, "next_unit_id")) gs.next_unit_id = @intCast(v);
                 if (std.mem.eql(u8, key, "next_force_id")) gs.next_force_id = @intCast(v);
@@ -768,7 +771,7 @@ pub const Store = struct {
 
         // People.
         {
-            const st = try self.db.prepare("SELECT id, first, last, callsign, role, xp, status, fatigue, morale, recruited_day, salary_override, assigned_force, posted_hq, weekly_hours, medbay_priority, leave_until, wound_heal_day, training_skill, training_done, admitted, rank, rank_pinned, kills, kill_bv, battles, tours, outstanding_tours, edge_spent, faction FROM person WHERE cid = ?1 ORDER BY ord");
+            const st = try self.db.prepare("SELECT id, first, last, callsign, role, xp, status, fatigue, morale, recruited_day, salary_override, assigned_force, posted_hq, weekly_hours, medbay_priority, leave_until, wound_heal_day, training_skill, training_done, admitted, rank, rank_pinned, kills, kill_bv, battles, tours, outstanding_tours, edge_spent, faction, shares FROM person WHERE cid = ?1 ORDER BY ord");
             defer st.finalize();
             try st.bindAll(.{cid});
             while (try st.next()) {
@@ -800,6 +803,7 @@ pub const Store = struct {
                     .outstanding_tours = @intCast(st.int(26)),
                     .edge_spent = st.int(27) != 0,
                     .faction = try st.text(28, alloc),
+                    .shares = @intCast(st.int(29)),
                 };
                 if (st.enumValue(types.SkillType, 17)) |skill| {
                     if (st.optInt(18)) |done| p.training = .{ .skill = skill, .done_day = @intCast(done) };
@@ -1336,6 +1340,8 @@ test "save → load → identical hash, and the loaded campaign keeps playing" {
     _ = try commands.execute(&gs, .{ .set_supply_policy = .{ .company = co, .min_days = 30, .tons = 60 } }); // re-setting replaces
     _ = try commands.execute(&gs, .{ .set_stock_policy = .{ .hq = gs.hqs.keys()[0], .part_key = "ammo_lrm", .min = 10, .target = 30 } });
     _ = try commands.execute(&gs, .{ .set_auto_admit = true });
+    _ = try commands.execute(&gs, .{ .set_shares_pct = 45 }); // 12C.3
+    gs.people.getPtr(gs.people.keys()[2]).?.shares = 4;
     _ = try commands.execute(&gs, .{ .advance_days = 40 }); // battles, events, deliveries, couriers
     _ = try gs.adjustStanding("LC", 12); // faction standing (12.21) rides along
     // A permanent injury on someone's record (Stage 12.16) rides along.
@@ -1374,6 +1380,8 @@ test "save → load → identical hash, and the loaded campaign keeps playing" {
     try std.testing.expectEqualStrings("ammo_lrm", loaded.stock_policies.items[1].part_key);
     try std.testing.expectEqual(@as(u32, 30), loaded.stock_policies.items[1].target);
     try std.testing.expect(loaded.auto_admit);
+    try std.testing.expectEqual(@as(types.Bp, 4_500), loaded.share_profit_bp);
+    try std.testing.expectEqual(gs.people.getPtr(gs.people.keys()[2]).?.shares, loaded.people.getPtr(gs.people.keys()[2]).?.shares);
 
     // Determinism survives the round trip: both worlds evolve identically.
     _ = try commands.execute(&gs, .{ .advance_days = 30 });

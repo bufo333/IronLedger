@@ -109,6 +109,8 @@ pub fn complete(gs: *GameState, c: *contract_mod.Contract, objectives_broken: bo
         }
         for (ids.items) |id| _ = try @import("personnel.zig").checkAwards(gs, id);
     }
+    // Shares (12C.3): the stakeholders take their cut of what the tour earned.
+    _ = try @import("personnel.zig").payShares(gs, c.id, c.assigned_company);
     try gs.log(.contract, .{ .company = c.assigned_company, .contract = c.id }, "[{s}] contract COMPLETE — {s} ({s}, {d} VP, score {d}) — reputation {s} ({s}{d}); the employer pays in full{s}", .{
         @tagName(c.kind), c.grade(), if (objectives_broken) "objectives broken" else "closed out", c.victory_points, c.score, if (vp_bonus > 0) "soars" else if (gain > 0) "rises" else if (gain == 0) "unchanged" else "slips", if (gain >= 0) "+" else "", gain, if (objectives_broken) " plus the early-completion bonus" else "",
     });

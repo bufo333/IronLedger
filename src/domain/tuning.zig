@@ -130,6 +130,18 @@ pub const Tuning = struct {
         severance_months_per_year: u32,
         severance_cap_months: u32,
         fire_severance_bp: types.Bp,
+        /// Shares (12C.3, AtB shares system): a combat or tech hand holds
+        /// `shares_base` after `shares_tenure_months`, a founder (on the
+        /// books day 0) `shares_founder`, plus one per rank above sergeant;
+        /// `share_profit_default_bp` of contract income is paid out pro rata
+        /// at completion (the owner sets the live figure with `shares`).
+        /// Every `shares_per_restless` shares cancel one restless flag, and
+        /// shareholders take half severance.
+        shares_base: u8,
+        shares_founder: u8,
+        shares_tenure_months: u32,
+        shares_per_restless: u8,
+        share_profit_default_bp: types.Bp,
     },
     unit: struct {
         carry: struct { mek: types.CBills, vehicle: types.CBills, aerospace: types.CBills, battle_armor: types.CBills, infantry: types.CBills, mash: types.CBills, cargo: types.CBills, dropship: types.CBills, jumpship: types.CBills },

@@ -1745,6 +1745,7 @@ pub const App = struct {
                 try rows.append(al, "");
                 if (self.gs) |*gs| {
                     try rows.append(al, try std.fmt.allocPrint(al, "  medbay       auto-admit the wounded {s}     {{d}}[a] toggle — off: you admit each casualty (m on People) and the turn waits{{/}}", .{if (gs.auto_admit) "{g}on{/} " else "{c}off{/}"}));
+                    try rows.append(al, try std.fmt.allocPrint(al, "  shares       {{a}}{d}%{{/}} of contract income to shareholders at completion     {{d}}`:shares <pct>` — founders, veterans and officers hold shares; a stake calms restlessness{{/}}", .{@divTrunc(gs.share_profit_bp, 100)}));
                     try rows.append(al, "");
                 }
                 try rows.append(al, try std.fmt.allocPrint(al, "  graphics     {s} · colour {s} · glyphs {s}", .{ if (self.graphics == .kitty) "kitty protocol" else "half-block", if (self.screen.truecolor) "24-bit" else "256", if (self.screen.ascii) "ascii" else "box-drawing" }));

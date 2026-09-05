@@ -76,6 +76,13 @@ pub const Role = enum {
             else => false,
         };
     }
+
+    pub fn isTech(self: Role) bool {
+        return switch (self) {
+            .tech_mek, .tech_mechanic, .tech_aero, .tech_ba => true,
+            else => false,
+        };
+    }
 };
 
 pub const Status = enum { active, wounded, mia, kia, retired, resigned, pow, released };
@@ -142,6 +149,9 @@ pub const Person = struct {
     edge_spent: bool = false,
     /// House of origin (12B.7): set for prisoners of war, empty for your own.
     faction: []const u8 = "",
+    /// Shares in contract profit (12C.3, AtB shares): refreshed each payday
+    /// from tenure, founding and rank; paid out pro rata at completion.
+    shares: u8 = 0,
     /// Per-location injuries (Stage 12.16); open ones keep the person in
     /// the medbay, permanent ones stay on the record.
     injuries: std.ArrayListUnmanaged(Injury) = .empty,
@@ -223,6 +233,28 @@ pub const Person = struct {
         var n: u8 = 0;
         if (self.morale < tuning.person.restless_morale) n += 1;
         if (self.fatigue > tuning.person.exhausted_fatigue) n += 1;
+        // A stake in the outfit (12C.3) keeps people at the table.
+        return n -| (self.shares / tuning.person.shares_per_restless);
+    }
+
+    /// On the books from day one (12C.3): founders hold more shares and
+    /// (12C.5) stand by the outfit.
+    pub fn isFounder(self: *const Person) bool {
+        return self.recruited_day == 0;
+    }
+
+    /// What this person's stake should be today (12C.3).
+    pub fn sharesDue(self: *const Person, day: u32) u8 {
+        const t = tuning.person;
+        if (self.status != .active and self.status != .wounded) return 0;
+        const eligible = self.role.isCombat() or self.role.isTech();
+        if (!eligible) return 0;
+        var n: u8 = 0;
+        if (self.isFounder()) n = t.shares_founder else if (self.tenureMonths(day) >= t.shares_tenure_months) n = t.shares_base;
+        if (n == 0) return 0;
+        const rank_v = @intFromEnum(self.rank);
+        const sgt = @intFromEnum(@import("rank.zig").Rank.sergeant);
+        if (rank_v > sgt) n += rank_v - sgt;
         return n;
     }
 
@@ -293,7 +325,9 @@ pub const Person = struct {
         const t = tuning.person;
         const years = self.tenureMonths(day) / 12;
         const months = @min(years * t.severance_months_per_year, t.severance_cap_months);
-        return self.monthlySalary() * @as(types.CBills, months);
+        const full = self.monthlySalary() * @as(types.CBills, months);
+        // Shareholders (12C.3) already hold a stake: half the payout.
+        return if (self.shares > 0) @divTrunc(full, 2) else full;
     }
 
     /// "Sgt. Lori Kalmar" for rosters and AARs.
@@ -384,6 +418,30 @@ pub const FatigueBand = enum {
         };
     }
 };
+
+test "12C.3: shares from tenure, founding and rank; they calm restlessness and halve severance" {
+    const t = tuning.person;
+    var p: Person = .{ .id = @enumFromInt(1), .first_name = "A", .last_name = "B", .role = .mekwarrior, .recruited_day = 100 };
+    try std.testing.expectEqual(@as(u8, 0), p.sharesDue(200)); // under a year, no stake
+    try std.testing.expectEqual(t.shares_base, p.sharesDue(100 + t.shares_tenure_months * 30));
+    p.rank = .lieutenant; // two above sergeant
+    try std.testing.expectEqual(t.shares_base + 2, p.sharesDue(100 + t.shares_tenure_months * 30));
+    var f: Person = .{ .id = @enumFromInt(2), .first_name = "F", .last_name = "O", .role = .tech_mek, .recruited_day = 0 };
+    try std.testing.expectEqual(t.shares_founder, f.sharesDue(10));
+    var clerk: Person = .{ .id = @enumFromInt(3), .first_name = "C", .last_name = "K", .role = .admin_hr, .recruited_day = 0 };
+    try std.testing.expectEqual(@as(u8, 0), clerk.sharesDue(1000));
+    // Three shares cancel one restless flag; a stake halves severance.
+    f.morale = 0;
+    f.fatigue = 100;
+    try std.testing.expectEqual(@as(u8, 2), f.restlessness());
+    f.shares = t.shares_per_restless;
+    try std.testing.expectEqual(@as(u8, 1), f.restlessness());
+    const day = 24 * 30;
+    const without = f.monthlySalary() * 2;
+    try std.testing.expectEqual(@divTrunc(without, 2), f.severance(day));
+    f.shares = 0;
+    try std.testing.expectEqual(without, f.severance(day));
+}
 
 test "12C.1: fatigue bands and their penalties" {
     var p: Person = .{ .id = @enumFromInt(1), .first_name = "A", .last_name = "B", .role = .mekwarrior };
