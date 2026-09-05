@@ -1298,6 +1298,10 @@ pub const Store = struct {
 
         gs.refreshHqStaffing();
         try upgradeCampaign(&gs, saved_version);
+        // Counters that arrived after the campaign started (12C.8): if the
+        // book is empty but the log has battles, count them up.
+        const empty = gs.stats.battles_won + gs.stats.battles_drawn + gs.stats.battles_lost + gs.stats.hulls_salvaged == 0;
+        if (empty) gs.rebuildStatsFromLog();
         return gs;
     }
 

@@ -912,6 +912,13 @@ item: tests green, both smokes, ROADMAP tick, one commit.
   demand; `<` `>` step, `M` toggles with a message naming the track; the
   wide status strip shows "♪ track — soundtrack" and a new track is
   announced once in the status line.
+- ✅ Fix (play feedback 2026-09-05): the summary's battle and salvage
+  counters (12C.8) only began counting when they were added, so an older
+  campaign showed a blank BATTLES section and zero wrecks despite a log
+  full of AARs. On load, a campaign whose counters are all zero rebuilds
+  them from the AAR lines the log kept (outcome from the header, hulls
+  lost / KIA / enemy BV from the losses line, wrecks from the salvage
+  line); the next save writes them down for good.
 - ✅ 12C.15 **Tech target numbers**: `GameState.hullHours` scales the
   class table by quality (`hours_quality_bp`: an A-grade wreck wants ×1.5,
   an F-grade machine ×0.8) and by an exotic design (`hours_exotic_bp`,
