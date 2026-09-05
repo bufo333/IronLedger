@@ -358,6 +358,7 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
         if (severity == 12 or (u.armor_pct == 0 and severity >= 10)) {
             u.status = .destroyed;
             destroyed += 1;
+            gs.stats.hulls_lost += 1;
             rec.destroyed = true;
             damage_value += @divTrunc(u.purchase_price, 2);
         }
@@ -377,6 +378,7 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
                 if (severity == 12 and !player.mods.has_mash_lance and !tough) {
                     p.status = .kia;
                     kia += 1;
+                    gs.stats.people_kia += 1;
                     rec.crew = try std.fmt.allocPrint(gs.allocator(), "{s} KIA", .{try p.rankedName(gs.allocator())});
                 } else if (severity >= 11) {
                     try medical.inflict(gs, u.pilot, .combat, wound_severity, "battle");
@@ -475,6 +477,12 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     // Score, morale, fatigue, experience.
     c.battles_fought +|= 1;
     c.casualties +|= wounded + kia;
+    switch (outcome) {
+        .decisive_victory, .victory => gs.stats.battles_won += 1,
+        .draw => gs.stats.battles_drawn += 1,
+        .defeat, .rout => gs.stats.battles_lost += 1,
+    }
+    gs.stats.enemy_bv_destroyed += @intCast(@max(0, enemy_destroyed_bv));
 
     const score_delta: i32 = switch (outcome) {
         .decisive_victory => 2,
@@ -603,6 +611,7 @@ fn claimSalvage(gs: *GameState, c: *contract_mod.Contract, claim_bv: i64) ![]con
         u.status = .in_transit;
         try gs.unit_transfers.append(gs.allocator(), .{ .unit = uid, .to_company = .none, .eta_day = gs.clock.day_index + days });
         wrecks += 1;
+        gs.stats.hulls_salvaged += 1;
         try text.appendSlice(gs.allocator(), try std.fmt.allocPrint(gs.allocator(), "wreck #{d} {s} {s} (armor {d}%, {d} destroyed, {d} missing) → home depot in {d} days; ", .{
             @intFromEnum(uid), design.key, design.name, cond.armor_pct, cond.destroyed_slots, cond.missing_components, days,
         }));

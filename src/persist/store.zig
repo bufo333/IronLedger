@@ -25,7 +25,7 @@ const contract_events = @import("../sim/contract_events.zig");
 const network = @import("../sim/network.zig");
 const clock_mod = @import("../sim/clock.zig");
 
-pub const schema_version = 17;
+pub const schema_version = 18;
 
 const ddl =
     \\CREATE TABLE IF NOT EXISTS player (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_seq INTEGER NOT NULL);
@@ -62,6 +62,7 @@ const ddl =
     \\CREATE TABLE IF NOT EXISTS unit_transfer (cid INTEGER NOT NULL, ord INTEGER NOT NULL, unit INTEGER, to_company INTEGER, eta INTEGER);
     \\CREATE TABLE IF NOT EXISTS faction_cooling (cid INTEGER NOT NULL, ord INTEGER NOT NULL, faction TEXT, until_day INTEGER);
     \\CREATE TABLE IF NOT EXISTS faction_standing (cid INTEGER NOT NULL, faction TEXT NOT NULL, value INTEGER NOT NULL);
+    \\CREATE TABLE IF NOT EXISTS rating_snapshot (cid INTEGER NOT NULL, year INTEGER NOT NULL, score INTEGER NOT NULL);
     \\CREATE TABLE IF NOT EXISTS listing (cid INTEGER NOT NULL, ord INTEGER NOT NULL, kind TEXT, item_key TEXT, rarity TEXT, price INTEGER, qty INTEGER, staple INTEGER, listed INTEGER, expires INTEGER, hq INTEGER, c_armor INTEGER, c_quality TEXT, c_damaged INTEGER, c_destroyed INTEGER, c_missing INTEGER);
     \\CREATE TABLE IF NOT EXISTS part_order (cid INTEGER NOT NULL, ord INTEGER NOT NULL, part_key TEXT, qty INTEGER, dest_kind TEXT, dest_id INTEGER, ordered INTEGER, eta INTEGER, cost INTEGER, status TEXT);
     \\CREATE TABLE IF NOT EXISTS event_log (cid INTEGER NOT NULL, ord INTEGER NOT NULL, day INTEGER, category TEXT, company INTEGER, hq INTEGER, contract INTEGER, text TEXT);
@@ -75,7 +76,7 @@ const tables = [_][]const u8{
     "unit",          "unit_slot",    "force",           "force_unit",       "force_child", "stock",        "hq",        "hq_facility",   "hq_project",
     "contract",      "txn",          "loan",            "courier",          "policy",      "bay_job",      "candidate", "hq_link",       "unit_transfer",
     "supply_policy", "stock_policy", "faction_cooling", "faction_standing", "listing",     "part_order",   "event_log", "pending_event", "refit_plan",
-    "refit_op",
+    "refit_op",      "rating_snapshot",
 };
 
 pub const Store = struct {
@@ -115,6 +116,7 @@ pub const Store = struct {
         .{ .version = 16, .table = "person", .column = "born_day", .sql = "ALTER TABLE person ADD COLUMN born_day INTEGER" },
         .{ .version = 17, .table = "person", .column = "last_raise_day", .sql = "ALTER TABLE person ADD COLUMN last_raise_day INTEGER" },
         .{ .version = 17, .table = "person", .column = "last_award_day", .sql = "ALTER TABLE person ADD COLUMN last_award_day INTEGER" },
+        // v18 adds the `rating_snapshot` table (created by ddl) and the stats meta ints.
     };
 
     pub fn open(path: [*:0]const u8) !Store {
@@ -325,7 +327,11 @@ pub const Store = struct {
                 .{ "month", gs.clock.date.month },                    .{ "day", gs.clock.date.day },
                 .{ "funds", gs.funds },                               .{ "reputation", gs.reputation },
                 .{ "bankrupt", @as(i64, @intFromBool(gs.bankrupt)) }, .{ "auto_admit", @as(i64, @intFromBool(gs.auto_admit)) },
-                .{ "share_profit_bp", @as(i64, gs.share_profit_bp) }, .{ "next_person_id", gs.next_person_id },
+                .{ "share_profit_bp", @as(i64, gs.share_profit_bp) },
+                .{ "stat_battles_won", gs.stats.battles_won },       .{ "stat_battles_drawn", gs.stats.battles_drawn },
+                .{ "stat_battles_lost", gs.stats.battles_lost },     .{ "stat_hulls_lost", gs.stats.hulls_lost },
+                .{ "stat_hulls_salvaged", gs.stats.hulls_salvaged }, .{ "stat_people_kia", gs.stats.people_kia },
+                .{ "stat_enemy_bv", @as(i64, @intCast(gs.stats.enemy_bv_destroyed)) }, .{ "next_person_id", gs.next_person_id },
                 .{ "next_unit_id", gs.next_unit_id },                 .{ "next_force_id", gs.next_force_id },
                 .{ "next_hq_id", gs.next_hq_id },                     .{ "next_contract_id", gs.next_contract_id },
             };
@@ -608,6 +614,14 @@ pub const Store = struct {
             }
         }
         {
+            const st = try self.db.prepare("INSERT INTO rating_snapshot VALUES (?1,?2,?3)");
+            defer st.finalize();
+            for (gs.rating_history.items) |snap| {
+                try st.bindAll(.{ cid, @as(i64, snap.year), @as(i64, snap.score) });
+                try st.run();
+            }
+        }
+        {
             const st = try self.db.prepare("INSERT INTO listing VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)");
             defer st.finalize();
             for (gs.market_listings.items, 0..) |l, i| {
@@ -727,6 +741,13 @@ pub const Store = struct {
                 if (std.mem.eql(u8, key, "bankrupt")) gs.bankrupt = v != 0;
                 if (std.mem.eql(u8, key, "auto_admit")) gs.auto_admit = v != 0;
                 if (std.mem.eql(u8, key, "share_profit_bp")) gs.share_profit_bp = @intCast(v);
+                if (std.mem.eql(u8, key, "stat_battles_won")) gs.stats.battles_won = @intCast(v);
+                if (std.mem.eql(u8, key, "stat_battles_drawn")) gs.stats.battles_drawn = @intCast(v);
+                if (std.mem.eql(u8, key, "stat_battles_lost")) gs.stats.battles_lost = @intCast(v);
+                if (std.mem.eql(u8, key, "stat_hulls_lost")) gs.stats.hulls_lost = @intCast(v);
+                if (std.mem.eql(u8, key, "stat_hulls_salvaged")) gs.stats.hulls_salvaged = @intCast(v);
+                if (std.mem.eql(u8, key, "stat_people_kia")) gs.stats.people_kia = @intCast(v);
+                if (std.mem.eql(u8, key, "stat_enemy_bv")) gs.stats.enemy_bv_destroyed = @intCast(v);
                 if (std.mem.eql(u8, key, "next_person_id")) gs.next_person_id = @intCast(v);
                 if (std.mem.eql(u8, key, "next_unit_id")) gs.next_unit_id = @intCast(v);
                 if (std.mem.eql(u8, key, "next_force_id")) gs.next_force_id = @intCast(v);
@@ -1160,6 +1181,14 @@ pub const Store = struct {
             }
         }
         {
+            const st = try self.db.prepare("SELECT year, score FROM rating_snapshot WHERE cid = ?1 ORDER BY year");
+            defer st.finalize();
+            try st.bindAll(.{cid});
+            while (try st.next()) {
+                try gs.rating_history.append(alloc, .{ .year = @intCast(st.int(0)), .score = @intCast(st.int(1)) });
+            }
+        }
+        {
             const st = try self.db.prepare("SELECT kind, item_key, rarity, price, qty, staple, listed, expires, hq, c_armor, c_quality, c_damaged, c_destroyed, c_missing FROM listing WHERE cid = ?1 ORDER BY ord");
             defer st.finalize();
             try st.bindAll(.{cid});
@@ -1350,6 +1379,8 @@ test "save → load → identical hash, and the loaded campaign keeps playing" {
     _ = try commands.execute(&gs, .{ .set_shares_pct = 45 }); // 12C.3
     gs.people.getPtr(gs.people.keys()[2]).?.shares = 4;
     gs.people.getPtr(gs.people.keys()[2]).?.last_raise_day = 3; // 12C.5
+    gs.stats.battles_won = 7; // 12C.8
+    try gs.rating_history.append(gs.allocator(), .{ .year = 3025, .score = 40 });
     _ = try commands.execute(&gs, .{ .advance_days = 40 }); // battles, events, deliveries, couriers
     _ = try gs.adjustStanding("LC", 12); // faction standing (12.21) rides along
     // A permanent injury on someone's record (Stage 12.16) rides along.
@@ -1391,6 +1422,9 @@ test "save → load → identical hash, and the loaded campaign keeps playing" {
     try std.testing.expectEqual(@as(types.Bp, 4_500), loaded.share_profit_bp);
     try std.testing.expectEqual(gs.people.getPtr(gs.people.keys()[2]).?.shares, loaded.people.getPtr(gs.people.keys()[2]).?.shares);
     try std.testing.expectEqual(@as(?u32, 3), loaded.people.getPtr(gs.people.keys()[2]).?.last_raise_day);
+    try std.testing.expectEqual(@as(u32, 7), loaded.stats.battles_won);
+    try std.testing.expectEqual(@as(usize, 1), loaded.rating_history.items.len);
+    try std.testing.expectEqual(@as(i32, 40), loaded.rating_history.items[0].score);
 
     // Determinism survives the round trip: both worlds evolve identically.
     _ = try commands.execute(&gs, .{ .advance_days = 30 });

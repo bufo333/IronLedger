@@ -380,6 +380,11 @@ fn runFinances(gs: *GameState) !void {
     // awards come due (12B.5).
     _ = try @import("personnel.zig").refreshRanks(gs);
     _ = @import("personnel.zig").refreshShares(gs);
+    // New Year's Day (12C.8): the rating goes in the book.
+    if (gs.clock.date.month == 1) {
+        const queries = @import("queries.zig");
+        try gs.rating_history.append(gs.allocator(), .{ .year = gs.clock.date.year, .score = queries.ratingScore(gs) });
+    }
     _ = try @import("personnel.zig").checkAllAwards(gs);
     // Notice is handed in on payday (Stage 12.20); grudges fade (12.21).
     _ = try @import("medical.zig").runMonthlyTurnover(gs);

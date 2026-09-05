@@ -808,11 +808,14 @@ item: tests green, both smokes, ROADMAP tick, one commit.
   the hall's recruit roll. A fresh outfit starts C: the combat record
   carries `record_unproven` (−15) until the first contract closes, and
   the letter thresholds are D 0 / C 30 / B 60 / A 90 / A* 120.
-- ⬜ 12C.8 **Campaign summary screen** (`F0`/`:summary`): contracts by
-  grade, battles won/lost/drawn, kills and losses by weight class,
-  C-bills earned and spent by category, people hired/lost/KIA, hulls
-  bought/salvaged/destroyed, rating history per year. All from the log
-  and ledgers — no new state beyond a yearly rating snapshot table.
+- ✅ 12C.8 **Campaign summary** (`:summary` modal, REPL `summary`):
+  contracts by grade and outcome with C-bills earned from employers,
+  battles won/drawn/lost, kills credited and enemy BV destroyed, hulls
+  lost and salvaged, people KIA, money in/out with the five biggest
+  expense categories, people on the books/hired/KIA/resigned/retired,
+  hulls bought/salvaged/lost, and the Dragoons rating every New Year's
+  Day. `GameState.stats` counters (battle outcomes, losses, wrecks, KIA,
+  enemy BV) ride in the meta ints; `rating_snapshot` table. Schema v18.
 
 ### Block C — Combat variety (AtB scenario types)
 

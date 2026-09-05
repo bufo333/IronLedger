@@ -14,6 +14,7 @@ out=$(printf '%s\n' \
   'manning co:1' \
   'readiness' \
   'rating' \
+  'summary' \
   'sellstock hq:1 ammo_lrm 1' \
   'stockpolicy hq:1 ammo_lrm 4 8' \
   'autoadmit off' \
@@ -31,6 +32,7 @@ check 'CapacityFull'
 check 'role              have  need'
 check 'banked XP'
 check 'Dragoons rating'
+check 'RATING BY YEAR'
 check 'done.'
 check 'hired #'
 check 'fabricate'

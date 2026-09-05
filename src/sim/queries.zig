@@ -1867,6 +1867,151 @@ pub fn assignmentText(alloc: Alloc, gs: *GameState, p: *const person_mod.Person)
     return "{a}unassigned{/}";
 }
 
+// ------------------------------------------------------------------ summary (12C.8)
+
+/// The campaign in aggregate: contracts by grade, battles, kills and
+/// losses, money by category, people and hulls, the rating year by year.
+pub fn summary(alloc: Alloc, gs: *GameState) ![]const []const u8 {
+    var out: std.ArrayListUnmanaged([]const u8) = .empty;
+    const day = gs.clock.day_index;
+    const d = gs.clock.date;
+    try out.append(alloc, try std.fmt.allocPrint(alloc, "{{a}}{s}{{/}} · {d}-{d:0>2}-{d:0>2} · day {d} · year {d} of the campaign", .{ gs.outfit_name, d.year, d.month, d.day, day, day / 365 + 1 }));
+    try out.append(alloc, (try rating(alloc, gs)).line);
+    try out.append(alloc, "");
+
+    // Contracts.
+    {
+        var outstanding: u32 = 0;
+        var strong: u32 = 0;
+        var satisfactory: u32 = 0;
+        var poor: u32 = 0;
+        var failed: u32 = 0;
+        var breached: u32 = 0;
+        var active: u32 = 0;
+        var earned: types.CBills = 0;
+        for (gs.contracts.values()) |c| {
+            switch (c.status) {
+                .completed => {
+                    if (c.victory_points >= 50) outstanding += 1 else if (c.victory_points >= 25) strong += 1 else if (c.victory_points >= 0) satisfactory += 1 else poor += 1;
+                },
+                .failed => failed += 1,
+                .breached => breached += 1,
+                .active, .transit, .accepted => active += 1,
+                .offer => {},
+            }
+        }
+        for (gs.ledger.transactions.items) |t| if (t.contract != .none and t.amount > 0) {
+            earned += t.amount;
+        };
+        try out.append(alloc, "{a}CONTRACTS{/}");
+        try out.append(alloc, try std.fmt.allocPrint(alloc, "  {d} outstanding · {d} strong · {d} satisfactory · {d} poor · {{c}}{d} failed · {d} breached{{/}} · {d} under way", .{ outstanding, strong, satisfactory, poor, failed, breached, active }));
+        try out.append(alloc, try std.fmt.allocPrint(alloc, "  {s} c-bills earned from employers over the campaign", .{try money(alloc, earned)}));
+    }
+    try out.append(alloc, "");
+
+    // Battles.
+    {
+        const st = gs.stats;
+        var kills: u32 = 0;
+        var kill_bv: u64 = 0;
+        var it = gs.people.iterator();
+        while (it.next()) |e| {
+            kills += e.value_ptr.kills;
+            kill_bv += e.value_ptr.kill_bv;
+        }
+        try out.append(alloc, "{a}BATTLES{/}");
+        try out.append(alloc, try std.fmt.allocPrint(alloc, "  {d} fought: {{g}}{d} won{{/}} · {d} drawn · {{c}}{d} lost{{/}}", .{ st.battles_won + st.battles_drawn + st.battles_lost, st.battles_won, st.battles_drawn, st.battles_lost }));
+        try out.append(alloc, try std.fmt.allocPrint(alloc, "  {d} kills credited ({d} BV) · {d} BV of enemy destroyed in all · {{c}}{d} hulls lost · {d} people KIA{{/}} · {{g}}{d} wrecks salvaged{{/}}", .{ kills, kill_bv, st.enemy_bv_destroyed, st.hulls_lost, st.people_kia, st.hulls_salvaged }));
+    }
+    try out.append(alloc, "");
+
+    // Money by category.
+    {
+        var income: types.CBills = 0;
+        var spent: types.CBills = 0;
+        const Cat = finance.Category;
+        var by_cat: [@typeInfo(Cat).@"enum".fields.len]types.CBills = @splat(0);
+        for (gs.ledger.transactions.items) |t| {
+            if (t.category == .fund_transfer) continue; // moves between our own pockets
+            if (t.amount > 0) income += t.amount else spent -= t.amount;
+            by_cat[@intFromEnum(t.category)] += t.amount;
+        }
+        try out.append(alloc, "{a}MONEY{/}");
+        try out.append(alloc, try std.fmt.allocPrint(alloc, "  {s} in · {s} out · {s}{s} net{{/}} · treasury now {s}", .{ try money(alloc, income), try money(alloc, spent), if (income >= spent) "{g}" else "{c}", try money(alloc, income - spent), try money(alloc, gs.funds) }));
+        var line: std.ArrayListUnmanaged(u8) = .empty;
+        try line.appendSlice(alloc, "  spent on: ");
+        var shown: u32 = 0;
+        // The five biggest expense categories.
+        var used: [by_cat.len]bool = @splat(false);
+        while (shown < 5) : (shown += 1) {
+            var best: ?usize = null;
+            for (by_cat, 0..) |v, i| if (!used[i] and v < 0 and (best == null or v < by_cat[best.?])) {
+                best = i;
+            };
+            const i = best orelse break;
+            used[i] = true;
+            if (shown > 0) try line.appendSlice(alloc, " · ");
+            try line.appendSlice(alloc, try std.fmt.allocPrint(alloc, "{s} {s}", .{ @tagName(@as(Cat, @enumFromInt(i))), try money(alloc, -by_cat[i]) }));
+        }
+        if (shown == 0) try line.appendSlice(alloc, "nothing yet");
+        try out.append(alloc, line.items);
+    }
+    try out.append(alloc, "");
+
+    // People and hulls.
+    {
+        var active: u32 = 0;
+        var wounded: u32 = 0;
+        var kia: u32 = 0;
+        var resigned: u32 = 0;
+        var retired: u32 = 0;
+        var pow: u32 = 0;
+        var it = gs.people.iterator();
+        while (it.next()) |e| switch (e.value_ptr.status) {
+            .active => active += 1,
+            .wounded => wounded += 1,
+            .kia => kia += 1,
+            .resigned => resigned += 1,
+            .retired => retired += 1,
+            .pow => pow += 1,
+            .mia, .released => {},
+        };
+        var hulls: u32 = 0;
+        var mothballed: u32 = 0;
+        var bought: u32 = 0;
+        var uit = gs.units.iterator();
+        while (uit.next()) |e| {
+            if (e.value_ptr.status == .destroyed) continue;
+            hulls += 1;
+            if (e.value_ptr.status == .mothballed) mothballed += 1;
+        }
+        for (gs.ledger.transactions.items) |t| if (t.category == .unit_purchase) {
+            bought += 1;
+        };
+        try out.append(alloc, "{a}PEOPLE & HULLS{/}");
+        try out.append(alloc, try std.fmt.allocPrint(alloc, "  {d} on the books ({d} wounded) · {d} ever hired · {{c}}{d} KIA{{/}} · {d} resigned · {d} retired{s}", .{ active + wounded, wounded, gs.next_person_id -| 1, kia, resigned, retired, if (pow > 0) try std.fmt.allocPrint(alloc, " · {d} prisoners held", .{pow}) else "" }));
+        try out.append(alloc, try std.fmt.allocPrint(alloc, "  {d} hulls ({d} mothballed) · {d} bought · {d} salvaged · {{c}}{d} lost{{/}}", .{ hulls, mothballed, bought, gs.stats.hulls_salvaged, gs.stats.hulls_lost }));
+    }
+    try out.append(alloc, "");
+
+    // Rating by year.
+    {
+        try out.append(alloc, "{a}RATING BY YEAR{/}");
+        if (gs.rating_history.items.len == 0) {
+            try out.append(alloc, "  {d}first entry on New Year's Day{/}");
+        } else {
+            var line: std.ArrayListUnmanaged(u8) = .empty;
+            try line.appendSlice(alloc, "  ");
+            for (gs.rating_history.items, 0..) |snap, i| {
+                if (i > 0) try line.appendSlice(alloc, " · ");
+                try line.appendSlice(alloc, try std.fmt.allocPrint(alloc, "{d}: {s} ({d})", .{ snap.year, ratingLetter(snap.score), snap.score }));
+            }
+            try out.append(alloc, line.items);
+        }
+    }
+    return out.toOwnedSlice(alloc);
+}
+
 // ------------------------------------------------------------------ rating (12C.6)
 
 pub const RatingPart = struct { name: []const u8, score: i32, note: []const u8 };
@@ -3076,6 +3221,29 @@ test "12C.6: the rating scores six parts and a fresh outfit lands in the low let
     gs.reputation -= 30;
     try std.testing.expect((try rating(a, &gs)).score < before);
     try std.testing.expect(std.mem.indexOf(u8, (try desk(a, &gs, 5)).rating_line, "rating") != null);
+}
+
+test "12C.8: the campaign summary reads counters, ledger and history" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 128 });
+    defer gs.deinit();
+    const commands = @import("commands.zig");
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "Test", .origin = .LC, .profession = .quartermaster } });
+    _ = try commands.execute(&gs, .{ .new_company = "Alpha Company" });
+    gs.stats.battles_won = 3;
+    gs.stats.hulls_salvaged = 2;
+    try gs.rating_history.append(gs.allocator(), .{ .year = 3025, .score = 44 });
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const lines = try summary(arena.allocator(), &gs);
+    var joined: std.ArrayListUnmanaged(u8) = .empty;
+    for (lines) |l| {
+        try joined.appendSlice(arena.allocator(), l);
+        try joined.append(arena.allocator(), '\n');
+    }
+    try std.testing.expect(std.mem.indexOf(u8, joined.items, "3 won") != null);
+    try std.testing.expect(std.mem.indexOf(u8, joined.items, "2 wrecks salvaged") != null);
+    try std.testing.expect(std.mem.indexOf(u8, joined.items, "3025: C (44)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, joined.items, "CONTRACTS") != null);
 }
 
 test "desk and ledger queries build on a fresh campaign" {

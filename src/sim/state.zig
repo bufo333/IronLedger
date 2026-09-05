@@ -84,6 +84,19 @@ pub const StockPolicy = struct {
 
 /// Structured campaign log (Stage 9A): every entry tagged so any entity's
 /// history is a filter, not an archaeology dig.
+/// Campaign counters (12C.8).
+pub const Stats = struct {
+    battles_won: u32 = 0,
+    battles_drawn: u32 = 0,
+    battles_lost: u32 = 0,
+    hulls_lost: u32 = 0,
+    hulls_salvaged: u32 = 0,
+    people_kia: u32 = 0,
+    enemy_bv_destroyed: u64 = 0,
+};
+
+pub const RatingSnapshot = struct { year: i32, score: i32 };
+
 pub const LogCategory = enum {
     battle,
     decision,
@@ -244,6 +257,11 @@ pub const GameState = struct {
     faction_cooling: std.ArrayListUnmanaged(FactionCooling) = .empty,
     /// Standing with each house (Stage 12.21), −100…100; absent = 0.
     faction_standing: std.StringArrayHashMapUnmanaged(i32) = .empty,
+    /// Campaign counters for the summary screen (12C.8): what the log
+    /// remembers in aggregate. Persisted as meta ints.
+    stats: Stats = .{},
+    /// The Dragoons rating on every New Year's Day (12C.8).
+    rating_history: std.ArrayListUnmanaged(RatingSnapshot) = .empty,
     /// MekLab refit plans, staged and committed (Stage 10).
     refit_plans: std.ArrayListUnmanaged(RefitPlan) = .empty,
 

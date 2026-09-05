@@ -84,6 +84,8 @@ const Modal = union(enum) {
     negotiate: usize,
     /// Every company's readiness report (fatigue, morale, wounded, banked XP, depot).
     readiness,
+    /// The campaign in aggregate (12C.8).
+    summary,
 };
 
 /// Size tiers (docs/tui.md): the largest that fits decides how many panes
@@ -101,7 +103,7 @@ fn tierFor(cols: u16, rows: u16) Tier {
 const office_roles = [_]game.person.Role{ .admin_command, .admin_logistics, .admin_transport, .admin_hr, .admin_finance };
 
 /// Frontend-only verbs; the command verbs come from `game.cli.verbs`.
-const tui_verbs = [_][]const u8{ "day", "save", "quit", "help", "settings", "emblem", "manning", "readiness" };
+const tui_verbs = [_][]const u8{ "day", "save", "quit", "help", "settings", "emblem", "manning", "readiness", "summary" };
 const verbs = tui_verbs ++ game.cli.verbs;
 
 const Emblem = struct { name: []const u8, art: [3][]const u8 };
@@ -1662,6 +1664,13 @@ pub const App = struct {
                 const inner = self.screen.pane(r, .{ .title = try std.fmt.allocPrint(al, "RAISE {s} · SUPPORT TRAIN · Enter/b buy one · n crews · Esc leave", .{q.forceName(g, self.raise.company)}), .double = true });
                 self.screen.lines(inner, rows.items, 0, self.modal_cursor + 1);
             },
+            .summary => {
+                const g = &self.gs.?;
+                const rows = try q.summary(al, g);
+                const r = self.modalRect(@min(self.screen.cols -| 2, 150), @intCast(rows.len + 3));
+                const inner = self.screen.pane(r, .{ .title = "CAMPAIGN SUMMARY", .double = true, .right_title = "any key closes · also :summary" });
+                self.screen.lines(inner, rows, 0, null);
+            },
             .readiness => {
                 const g = &self.gs.?;
                 var rows: std.ArrayListUnmanaged([]const u8) = .empty;
@@ -3189,7 +3198,7 @@ pub const App = struct {
     fn handleModalKey(self: *App, key: Key) !void {
         switch (self.modal) {
             .none => {},
-            .help, .hull, .record, .readiness => self.modal = .none,
+            .help, .hull, .record, .readiness, .summary => self.modal = .none,
             .raise_hulls => switch (key) {
                 .escape => {
                     self.modal = .none;
@@ -3730,6 +3739,10 @@ pub const App = struct {
         }
         if (eq(u8, verb, "settings")) {
             self.modal = .settings;
+            return;
+        }
+        if (eq(u8, verb, "summary")) {
+            self.modal = .summary;
             return;
         }
         if (eq(u8, verb, "readiness")) {
