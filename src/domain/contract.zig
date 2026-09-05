@@ -134,6 +134,20 @@ pub const Contract = struct {
     }
 
     /// Attrition objective substantially met: eligible for `complete`.
+    /// The verdict the employer writes on a completed tour (Stage 12.29):
+    /// by victory points — outstanding ≥ 50 (+3 rep), strong ≥ 25 (+2),
+    /// satisfactory ≥ 0 (+1), poor < 0 (0 rep). Failure is separate: a
+    /// score of −5 or worse at end of term is a breach on performance.
+    pub fn grade(self: *const Contract) []const u8 {
+        if (self.victory_points >= 50) return "outstanding";
+        if (self.victory_points >= 25) return "strong";
+        if (self.victory_points >= 0) return "satisfactory";
+        return "poor";
+    }
+
+    /// Score at which the employer declares performance failure at term.
+    pub const fail_score: i32 = -5;
+
     pub fn objectivesMet(self: *const Contract) bool {
         return self.objective == .attrition and self.poolDestroyedPct() >= 75;
     }

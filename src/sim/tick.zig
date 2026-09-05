@@ -6,6 +6,7 @@
 
 const std = @import("std");
 const tuning = @import("../domain/tuning.zig").t;
+const contract_mod = @import("../domain/contract.zig");
 const GameState = @import("state.zig").GameState;
 const types = @import("../domain/types.zig");
 const contract_market = @import("../econ/contract_market.zig");
@@ -303,7 +304,7 @@ fn runContracts(gs: *GameState) !void {
             .active => if (c.end_day != null and gs.clock.day_index >= c.end_day.?) {
                 // End of term (Stage 9E): a performance failure is a breach;
                 // otherwise the tour completes, reputation by VP + score.
-                if (c.score <= -5) {
+                if (c.score <= contract_mod.Contract.fail_score) {
                     try contract_control.breach(gs, c, "failed on performance");
                 } else {
                     c.victory_points += c.score * 5;

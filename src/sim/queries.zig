@@ -449,6 +449,9 @@ pub fn contracts(alloc: Alloc, gs: *GameState) !Contracts {
             const done: i64 = @as(i64, day) - @as(i64, start);
             try lines.append(alloc, try std.fmt.allocPrint(alloc, "    duration    {{d}}{s}{{/}}  day {d} of {d} · {d} days left", .{ barText(&bar_buf, done, total), @max(0, done), @max(0, total), @max(0, total - done) }));
         }
+        try lines.append(alloc, try std.fmt.allocPrint(alloc, "    verdict     {s}{s}{{/}} so far · {s}score {d}{{/}} (breach on performance at {d}) · outstanding ≥ 50 VP, strong ≥ 25, satisfactory ≥ 0", .{
+            if (c.victory_points < 0) "{a}" else "{g}", c.grade(), if (c.score <= contract_mod.Contract.fail_score + 2) "{c}" else "", c.score, contract_mod.Contract.fail_score,
+        }));
         try lines.append(alloc, try std.fmt.allocPrint(alloc, "    victory pts {{g}}{d}{{/}} · score {d} · battles {d} · casualties {d} · next engagement {s}", .{
             c.victory_points, c.score, c.battles_fought, c.casualties,
             if (c.next_battle_day) |nb| try std.fmt.allocPrint(alloc, "~day {d}", .{nb}) else "—",
@@ -2338,7 +2341,7 @@ pub fn contractHistory(alloc: Alloc, gs: *GameState) ![]HistoryRow {
             .breached => "{c}",
             else => "{a}",
         };
-        try out.append(alloc, .{ .id = c.id, .planet_key = c.planet_key, .text = try std.fmt.allocPrint(alloc, "[{d: <3}] {s: <14} {s: <4} {s: <16} {s}{s: <9}{{/}} {s: >5}  {d: >3} VP  {s: >13}  co:{d} {s}", .{
+        try out.append(alloc, .{ .id = c.id, .planet_key = c.planet_key, .text = try std.fmt.allocPrint(alloc, "[{d: <3}] {s: <14} {s: <4} {s: <16} {s}{s: <9}{{/}} {s: >5}  {d: >3} VP {s: <13} {s: >13}  co:{d} {s}", .{
             @intFromEnum(c.id),
             @tagName(c.kind),
             c.employer_key,
@@ -2347,6 +2350,7 @@ pub fn contractHistory(alloc: Alloc, gs: *GameState) ![]HistoryRow {
             @tagName(c.status),
             if (served) |d| try std.fmt.allocPrint(alloc, "{d}d", .{d}) else "—",
             c.victory_points,
+            if (c.status == .completed) c.grade() else if (c.status == .breached) "breached" else "failed",
             try money(alloc, received),
             @intFromEnum(c.assigned_company),
             clip(forceName(gs, c.assigned_company), 14),
@@ -2355,7 +2359,7 @@ pub fn contractHistory(alloc: Alloc, gs: *GameState) ![]HistoryRow {
     return out.toOwnedSlice(alloc);
 }
 
-pub const history_header = "id    kind           emp  world            outcome    served   VP        received  company";
+pub const history_header = "id    kind           emp  world            outcome    served   VP  verdict            received  company";
 
 /// Contracts the outfit has worked on a world (any outcome): the founding
 /// rule counts them as reach.

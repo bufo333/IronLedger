@@ -92,8 +92,8 @@ pub fn complete(gs: *GameState, c: *contract_mod.Contract, objectives_broken: bo
     const enemy_now = if (!std.mem.eql(u8, c.enemy_key, "PER")) try gs.adjustStanding(c.enemy_key, -t.standing_enemy_loss) else 0;
     try gs.log(.contract, .{ .company = c.assigned_company, .contract = c.id }, "[standing] {s} +{d} → {d}{s}", .{ c.employer_key, @max(2, t.standing_complete_gain + @divTrunc(c.victory_points, 10)), employer_now, if (!std.mem.eql(u8, c.enemy_key, "PER")) try std.fmt.allocPrint(gs.allocator(), " · {s} −{d} → {d}", .{ c.enemy_key, t.standing_enemy_loss, enemy_now }) else "" });
     try finishTour(gs, c);
-    try gs.log(.contract, .{ .company = c.assigned_company, .contract = c.id }, "[{s}] contract COMPLETE ({s}, {d} VP, score {d}) — reputation {s}", .{
-        @tagName(c.kind), if (objectives_broken) "objectives broken" else "closed out", c.victory_points, c.score, if (vp_bonus > 0) "soars" else if (gain > 0) "rises" else if (gain == 0) "unchanged" else "slips",
+    try gs.log(.contract, .{ .company = c.assigned_company, .contract = c.id }, "[{s}] contract COMPLETE — {s} ({s}, {d} VP, score {d}) — reputation {s} ({s}{d}); the employer pays in full{s}", .{
+        @tagName(c.kind), c.grade(), if (objectives_broken) "objectives broken" else "closed out", c.victory_points, c.score, if (vp_bonus > 0) "soars" else if (gain > 0) "rises" else if (gain == 0) "unchanged" else "slips", if (gain >= 0) "+" else "", gain, if (objectives_broken) " plus the early-completion bonus" else "",
     });
 }
 
@@ -378,4 +378,15 @@ test "12.21: standing rises with the employer and falls with the enemy on comple
     });
     try breach(&gs, gs.contracts.getPtr(@enumFromInt(2)).?, "test");
     try std.testing.expect(gs.standing("DC") <= -20);
+}
+
+test "12.29: the verdict grades by victory points; failure is the score at term" {
+    var c: contract_mod.Contract = .{ .id = @enumFromInt(1), .kind = .planetary_assault, .employer_key = "LC", .enemy_key = "DC", .planet_key = "galatea", .terms = .{ .length_months = 6, .base_pay_month = 400_000 }, .status = .active, .assigned_company = @enumFromInt(1), .monthly_net = 300_000 };
+    c.victory_points = 20;
+    try std.testing.expectEqualStrings("satisfactory", c.grade());
+    c.victory_points = 25;
+    try std.testing.expectEqualStrings("strong", c.grade());
+    c.victory_points = -3;
+    try std.testing.expectEqualStrings("poor", c.grade());
+    try std.testing.expectEqual(@as(i32, -5), contract_mod.Contract.fail_score);
 }
