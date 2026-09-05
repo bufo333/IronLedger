@@ -1190,6 +1190,9 @@ pub const App = struct {
         try hist.append(al, q.history_header);
         for (history) |h| try hist.append(al, h.text);
         if (history.len == 0) try hist.append(al, "{d}no closed contracts yet — completed, breached and failed contracts land here, and an HQ can be founded on any world worked{/}");
+        try hist.append(al, "");
+        try hist.append(al, "{a}STANDING{/}  tours served earn it, tours served against a house cost it, a breach costs a lot; it drifts home monthly");
+        for (view.standings) |line| try hist.append(al, line);
         const hist_rect: screen_mod.Rect = if (wide)
             .{ .x = b.x + act_w, .y = b.y + board_h, .w = b.w - act_w, .h = (b.h - board_h) / 2 }
         else

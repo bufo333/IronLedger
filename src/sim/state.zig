@@ -237,6 +237,8 @@ pub const GameState = struct {
     /// Employer factions that remember a breach (Stage 9E): thinner,
     /// cheaper offers from them until the day passes.
     faction_cooling: std.ArrayListUnmanaged(FactionCooling) = .empty,
+    /// Standing with each house (Stage 12.21), −100…100; absent = 0.
+    faction_standing: std.StringArrayHashMapUnmanaged(i32) = .empty,
     /// MekLab refit plans, staged and committed (Stage 10).
     refit_plans: std.ArrayListUnmanaged(RefitPlan) = .empty,
 
@@ -852,6 +854,19 @@ pub const GameState = struct {
     }
 
     /// Is this employer faction still cooling after a breach?
+    pub fn standing(self: *GameState, faction: []const u8) i32 {
+        return self.faction_standing.get(faction) orelse 0;
+    }
+
+    /// Move a house's standing by `delta`, clamped to ±100; logged by the caller.
+    pub fn adjustStanding(self: *GameState, faction: []const u8, delta: i32) !i32 {
+        const now = std.math.clamp(self.standing(faction) + delta, -100, 100);
+        const g = try self.faction_standing.getOrPut(self.allocator(), faction);
+        if (!g.found_existing) g.key_ptr.* = try self.allocator().dupe(u8, faction);
+        g.value_ptr.* = now;
+        return now;
+    }
+
     pub fn factionCooling(self: *GameState, faction: []const u8) bool {
         for (self.faction_cooling.items) |fc| {
             if (std.mem.eql(u8, fc.faction, faction) and self.clock.day_index < fc.until_day) return true;
@@ -1627,6 +1642,11 @@ pub const GameState = struct {
             h.update(c.name);
             h.update(std.mem.asBytes(&c.origin));
             h.update(std.mem.asBytes(&c.profession));
+        }
+        var sit = self.faction_standing.iterator();
+        while (sit.next()) |entry| {
+            h.update(entry.key_ptr.*);
+            h.update(std.mem.asBytes(entry.value_ptr));
         }
         const loan_count: u64 = self.loans.items.len;
         h.update(std.mem.asBytes(&loan_count));

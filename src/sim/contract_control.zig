@@ -85,6 +85,12 @@ pub fn complete(gs: *GameState, c: *contract_mod.Contract, objectives_broken: bo
     const vp_bonus = std.math.clamp(@divTrunc(c.victory_points, 25), -1, 3);
     const gain: i32 = if (c.victory_points < 0) vp_bonus else 1 + vp_bonus; // −8 VP → 0, −25 VP → −1
     gs.reputation += gain;
+    // Standing (12.21): the employer remembers a tour served, and so does
+    // whoever you served it against.
+    const t = tuning.contract;
+    const employer_now = try gs.adjustStanding(c.employer_key, @max(2, t.standing_complete_gain + @divTrunc(c.victory_points, 10)) + @as(i32, @intFromBool(c.beachhead)) * 2);
+    const enemy_now = if (!std.mem.eql(u8, c.enemy_key, "PER")) try gs.adjustStanding(c.enemy_key, -t.standing_enemy_loss) else 0;
+    try gs.log(.contract, .{ .company = c.assigned_company, .contract = c.id }, "[standing] {s} +{d} → {d}{s}", .{ c.employer_key, @max(2, t.standing_complete_gain + @divTrunc(c.victory_points, 10)), employer_now, if (!std.mem.eql(u8, c.enemy_key, "PER")) try std.fmt.allocPrint(gs.allocator(), " · {s} −{d} → {d}", .{ c.enemy_key, t.standing_enemy_loss, enemy_now }) else "" });
     try finishTour(gs, c);
     try gs.log(.contract, .{ .company = c.assigned_company, .contract = c.id }, "[{s}] contract COMPLETE ({s}, {d} VP, score {d}) — reputation {s}", .{
         @tagName(c.kind), if (objectives_broken) "objectives broken" else "closed out", c.victory_points, c.score, if (vp_bonus > 0) "soars" else if (gain > 0) "rises" else if (gain == 0) "unchanged" else "slips",
@@ -114,6 +120,8 @@ pub fn breach(gs: *GameState, c: *contract_mod.Contract, reason: []const u8) !vo
     c.breach_day = gs.clock.day_index;
     gs.reputation -= 2;
     try gs.faction_cooling.append(gs.allocator(), .{ .faction = c.employer_key, .until_day = gs.clock.day_index + cooling_days });
+    const standing_now = try gs.adjustStanding(c.employer_key, -tuning.contract.standing_breach_loss);
+    try gs.log(.contract, .{ .company = c.assigned_company, .contract = c.id }, "[standing] {s} −{d} → {d}", .{ c.employer_key, tuning.contract.standing_breach_loss, standing_now });
     try finishTour(gs, c);
     try gs.log(.contract, .{ .company = c.assigned_company, .contract = c.id }, "[{s}] CONTRACT BREACHED ({s}) — {d} clawed back, remainder forfeited, {s} employers cool for a year", .{
         @tagName(c.kind), reason, clawback, c.employer_key,
@@ -200,6 +208,17 @@ pub fn releaseCarriers(gs: *GameState, company: types.ForceId) !u32 {
         n += 1;
     }
     return n;
+}
+
+/// Payday: standing drifts back toward neutral — grudges and gratitude
+/// both fade (Stage 12.21).
+pub fn driftStanding(gs: *GameState) void {
+    const step = tuning.contract.standing_drift_per_month;
+    var it = gs.faction_standing.iterator();
+    while (it.next()) |entry| {
+        const v = entry.value_ptr;
+        if (v.* > 0) v.* -= @min(step, v.*) else if (v.* < 0) v.* += @min(step, -v.*);
+    }
 }
 
 /// Daily: companies travelling home arrive.
@@ -320,4 +339,43 @@ test "combat-ineffective past the grace window is breach" {
     gs.clock.day_index += grace_days + 1;
     try checkEffectiveness(&gs);
     try std.testing.expectEqual(contract_mod.ContractStatus.breached, c.status);
+}
+
+test "12.21: standing rises with the employer and falls with the enemy on completion, drops on breach, drifts home" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1221 });
+    defer gs.deinit();
+    _ = try gs.createCommander("T", .LC, .line_officer);
+    const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
+        .id = @enumFromInt(1),
+        .kind = .objective_raid,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 3, .base_pay_month = 400_000 },
+        .status = .active,
+        .assigned_company = co,
+        .monthly_net = 300_000,
+        .victory_points = 30,
+    });
+    try complete(&gs, gs.contracts.getPtr(@enumFromInt(1)).?, true);
+    try std.testing.expect(gs.standing("LC") >= 5);
+    try std.testing.expect(gs.standing("DC") < 0);
+    const lc_after = gs.standing("LC");
+    driftStanding(&gs);
+    try std.testing.expectEqual(lc_after - 1, gs.standing("LC"));
+    // A breach with the Combine drops them well below the shun line over a couple of tours.
+    try gs.contracts.put(gs.allocator(), @enumFromInt(2), .{
+        .id = @enumFromInt(2),
+        .kind = .garrison_duty,
+        .employer_key = "DC",
+        .enemy_key = "PER",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 6, .base_pay_month = 400_000 },
+        .status = .active,
+        .assigned_company = co,
+        .monthly_net = 300_000,
+    });
+    try breach(&gs, gs.contracts.getPtr(@enumFromInt(2)).?, "test");
+    try std.testing.expect(gs.standing("DC") <= -20);
 }

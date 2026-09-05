@@ -351,8 +351,9 @@ fn runFinances(gs: *GameState) !void {
         const p = entry.value_ptr;
         if (p.status == .active) p.xp += monthly_service_xp;
     }
-    // Notice is handed in on payday (Stage 12.20).
+    // Notice is handed in on payday (Stage 12.20); grudges fade (12.21).
     _ = try @import("medical.zig").runMonthlyTurnover(gs);
+    @import("contract_control.zig").driftStanding(gs);
 
     const payroll = gs.monthlyPayroll();
     if (payroll != 0) {

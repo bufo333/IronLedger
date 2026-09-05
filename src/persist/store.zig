@@ -25,7 +25,7 @@ const contract_events = @import("../sim/contract_events.zig");
 const network = @import("../sim/network.zig");
 const clock_mod = @import("../sim/clock.zig");
 
-pub const schema_version = 7;
+pub const schema_version = 8;
 
 const ddl =
     \\CREATE TABLE IF NOT EXISTS player (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_seq INTEGER NOT NULL);
@@ -59,6 +59,7 @@ const ddl =
     \\CREATE TABLE IF NOT EXISTS hq_link (cid INTEGER NOT NULL, ord INTEGER NOT NULL, a INTEGER, b INTEGER, level INTEGER, tons INTEGER, established INTEGER);
     \\CREATE TABLE IF NOT EXISTS unit_transfer (cid INTEGER NOT NULL, ord INTEGER NOT NULL, unit INTEGER, to_company INTEGER, eta INTEGER);
     \\CREATE TABLE IF NOT EXISTS faction_cooling (cid INTEGER NOT NULL, ord INTEGER NOT NULL, faction TEXT, until_day INTEGER);
+    \\CREATE TABLE IF NOT EXISTS faction_standing (cid INTEGER NOT NULL, faction TEXT NOT NULL, value INTEGER NOT NULL);
     \\CREATE TABLE IF NOT EXISTS listing (cid INTEGER NOT NULL, ord INTEGER NOT NULL, kind TEXT, item_key TEXT, rarity TEXT, price INTEGER, qty INTEGER, staple INTEGER, listed INTEGER, expires INTEGER, hq INTEGER, c_armor INTEGER, c_quality TEXT, c_damaged INTEGER, c_destroyed INTEGER, c_missing INTEGER);
     \\CREATE TABLE IF NOT EXISTS part_order (cid INTEGER NOT NULL, ord INTEGER NOT NULL, part_key TEXT, qty INTEGER, dest_kind TEXT, dest_id INTEGER, ordered INTEGER, eta INTEGER, cost INTEGER, status TEXT);
     \\CREATE TABLE IF NOT EXISTS event_log (cid INTEGER NOT NULL, ord INTEGER NOT NULL, day INTEGER, category TEXT, company INTEGER, hq INTEGER, contract INTEGER, text TEXT);
@@ -73,7 +74,7 @@ const tables = [_][]const u8{
     "hq",         "hq_facility", "hq_project",   "contract",        "txn",          "loan",
     "courier",    "policy",      "bay_job",      "candidate",       "hq_link",      "unit_transfer",
     "supply_policy", "stock_policy",
-    "faction_cooling", "listing", "part_order",  "event_log",       "pending_event", "refit_plan",
+    "faction_cooling", "faction_standing", "listing", "part_order",  "event_log",       "pending_event", "refit_plan",
     "refit_op",
 };
 
@@ -95,7 +96,8 @@ pub const Store = struct {
         .{ .version = 5, .table = "supply_policy", .column = "ammo_battles", .sql = "ALTER TABLE supply_policy ADD COLUMN ammo_battles INTEGER NOT NULL DEFAULT 0" },
         .{ .version = 6, .table = "unit", .column = "berth_hq", .sql = "ALTER TABLE unit ADD COLUMN berth_hq INTEGER NOT NULL DEFAULT 0" },
         // v7: the `injury` table (created by ddl); campaign data is
-        // upgraded on load (`upgradeCampaign`).
+        // upgraded on load (`upgradeCampaign`). v8: `faction_standing`
+        // (created by ddl; absent rows read as 0).
     };
 
     pub fn open(path: [*:0]const u8) !Store {
@@ -562,6 +564,15 @@ pub const Store = struct {
             defer st.finalize();
             for (gs.faction_cooling.items, 0..) |f, i| {
                 try st.bindAll(.{ cid, @as(i64, @intCast(i)), f.faction, @as(i64, f.until_day) });
+                try st.run();
+            }
+        }
+        {
+            const st = try self.db.prepare("INSERT INTO faction_standing VALUES (?1,?2,?3)");
+            defer st.finalize();
+            var it = gs.faction_standing.iterator();
+            while (it.next()) |e| {
+                try st.bindAll(.{ cid, e.key_ptr.*, @as(i64, e.value_ptr.*) });
                 try st.run();
             }
         }
@@ -1085,6 +1096,14 @@ pub const Store = struct {
             }
         }
         {
+            const st = try self.db.prepare("SELECT faction, value FROM faction_standing WHERE cid = ?1");
+            defer st.finalize();
+            try st.bindAll(.{cid});
+            while (try st.next()) {
+                try gs.faction_standing.put(alloc, try st.text(0, alloc), @intCast(st.int(1)));
+            }
+        }
+        {
             const st = try self.db.prepare("SELECT kind, item_key, rarity, price, qty, staple, listed, expires, hq, c_armor, c_quality, c_damaged, c_destroyed, c_missing FROM listing WHERE cid = ?1 ORDER BY ord");
             defer st.finalize();
             try st.bindAll(.{cid});
@@ -1262,6 +1281,7 @@ test "save → load → identical hash, and the loaded campaign keeps playing" {
     _ = try commands.execute(&gs, .{ .set_stock_policy = .{ .hq = gs.hqs.keys()[0], .part_key = "ammo_lrm", .min = 10, .target = 30 } });
     _ = try commands.execute(&gs, .{ .set_auto_admit = true });
     _ = try commands.execute(&gs, .{ .advance_days = 40 }); // battles, events, deliveries, couriers
+    _ = try gs.adjustStanding("LC", 12); // faction standing (12.21) rides along
     // A permanent injury on someone's record (Stage 12.16) rides along.
     const scarred = gs.people.keys()[3];
     try gs.people.getPtr(scarred).?.injuries.append(gs.allocator(), .{ .location = .head, .severity = 3, .incurred_day = 5, .heal_done_day = 40, .permanent = true, .healed = true });
@@ -1279,6 +1299,7 @@ test "save → load → identical hash, and the loaded campaign keeps playing" {
     defer loaded.deinit();
     try std.testing.expectEqual(before, loaded.hash());
     try std.testing.expectEqual(gs.hqs.keys()[0], loaded.unit(ship).?.berth_hq);
+    try std.testing.expectEqual(@as(i32, 12), loaded.standing("LC"));
     try std.testing.expectEqual(@as(usize, 1), loaded.person(scarred).?.injuries.items.len);
     try std.testing.expect(loaded.person(scarred).?.injuries.items[0].permanent);
     try std.testing.expectEqual(person_mod.InjuryLocation.head, loaded.person(scarred).?.injuries.items[0].location);

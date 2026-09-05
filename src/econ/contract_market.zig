@@ -31,6 +31,12 @@ pub fn employerMultBp(faction_key: []const u8) types.Bp {
     return 10_000;
 }
 
+/// Standing payment multiplier (Stage 12.21): ±25 bp per point of a
+/// house's standing, so ±25% at the extremes.
+pub fn standingPayBp(standing: i32) types.Bp {
+    return 10_000 + @as(types.Bp, standing) * tuning.contract.standing_pay_bp_per_point;
+}
+
 /// Reputation payment multiplier: ±0.5% per point, clamped. // TUNE
 pub fn reputationMultBp(reputation: i32) types.Bp {
     return std.math.clamp(10_000 + @as(types.Bp, reputation) * 50, 8_000, 13_000);
@@ -137,6 +143,11 @@ pub fn refresh(gs: *GameState) !void {
             if (gs.rng.random(.market).boolean()) continue;
             pay = types.applyBp(pay, tuning.market.cooling_pay_bp);
         }
+        // Standing (12.21): a house that thinks well of you pays more and
+        // one that doesn't shuns you like a cooling employer.
+        const standing = gs.standing(world.faction);
+        if (standing <= -tuning.contract.standing_shun_depth and gs.rng.random(.market).boolean()) continue;
+        pay = types.applyBp(pay, standingPayBp(standing));
 
         try gs.contract_offers.append(gs.allocator(), .{
             .id = .none, // assigned on acceptance

@@ -140,6 +140,12 @@
         .grace_days = 14,
         .cooling_days = 365,
         .decision_window_days = 7,
+        .standing_complete_gain = 5,
+        .standing_enemy_loss = 3,
+        .standing_breach_loss = 20,
+        .standing_pay_bp_per_point = 25, // ±25% pay at ±100
+        .standing_shun_depth = 40,
+        .standing_drift_per_month = 1,
     },
     .generation = .{
         .scout_max_tonnage = 40,

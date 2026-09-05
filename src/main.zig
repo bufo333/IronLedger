@@ -1105,6 +1105,10 @@ fn runRepl(gs: *game.state.GameState, io: std.Io, gpa: std.mem.Allocator, store_
             printLab(gs, @enumFromInt(uid));
         } else if (std.mem.eql(u8, verb, "contracts")) {
             printContracts(gs);
+            var arena = std.heap.ArenaAllocator.init(gpa);
+            defer arena.deinit();
+            std.debug.print("standing:\n", .{});
+            for (game.queries.standings(arena.allocator(), gs) catch &.{}) |row| std.debug.print("{s}\n", .{game.queries.stripMarks(arena.allocator(), row) catch row});
         } else if (std.mem.eql(u8, verb, "bays")) {
             printBays(gs);
         } else if (std.mem.eql(u8, verb, "projects")) {

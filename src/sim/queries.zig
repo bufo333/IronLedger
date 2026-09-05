@@ -382,7 +382,29 @@ pub const Contracts = struct {
     board: []OfferRow,
     active: []ActiveRow,
     notes: []const u8,
+    /// Standing with every house (Stage 12.21), one line each.
+    standings: []const []const u8,
 };
+
+/// Standing with each house: the number, what it does to pay, and whether
+/// the house is cooling or shunning you.
+pub fn standings(alloc: Alloc, gs: *GameState) ![]const []const u8 {
+    var out: std.ArrayListUnmanaged([]const u8) = .empty;
+    const cm = @import("../econ/contract_market.zig");
+    const t = @import("../domain/tuning.zig").t.contract;
+    inline for (@typeInfo(@import("../domain/commander.zig").Faction).@"enum".fields) |f| {
+        const s = gs.standing(f.name);
+        const bp = cm.standingPayBp(s);
+        const mk: []const u8 = if (s <= -t.standing_shun_depth) "{c}" else if (s < 0) "{a}" else if (s >= 25) "{g}" else "";
+        const note: []const u8 = if (gs.factionCooling(f.name)) " · {c}cooling after a breach{/}" else if (s <= -t.standing_shun_depth) " · {c}shunned: half their offers{/}" else if (s >= 25) " · {g}favoured{/}" else "";
+        const whole: u32 = @intCast(@divTrunc(bp, 10_000));
+        const frac: u32 = @intCast(@divTrunc(@mod(bp, 10_000), 100));
+        const mag: u32 = @intCast(@abs(s));
+        const num = try std.fmt.allocPrint(alloc, "{c}{d}", .{ @as(u8, if (s < 0) '-' else if (s > 0) '+' else ' '), mag });
+        try out.append(alloc, try std.fmt.allocPrint(alloc, "  {s: <4} {s}{s: >5}{{/}}  pay ×{d}.{d:0>2}{s}", .{ f.name, mk, num, whole, frac, note }));
+    }
+    return out.toOwnedSlice(alloc);
+}
 
 pub fn contracts(alloc: Alloc, gs: *GameState) !Contracts {
     const day = gs.clock.day_index;
@@ -484,7 +506,7 @@ pub fn contracts(alloc: Alloc, gs: *GameState) !Contracts {
         .board = try board.toOwnedSlice(alloc),
         .active = try active.toOwnedSlice(alloc),
         .notes = "{d}beachhead: ×1.3 pay · +15% hardship · local supplies ×2.5 · resupply via link only  ·  board refreshes on the 1st{/}",
-    };
+    .standings = try standings(alloc, gs), };
 }
 
 fn barText(buf: []u8, num: i64, den: i64) []const u8 {

@@ -157,6 +157,18 @@ pub const Tuning = struct {
         grace_days: u32,
         cooling_days: u32,
         decision_window_days: u32,
+        /// Faction standing (Stage 12.21), −100…100 per house: what a
+        /// completed tour earns the employer, what fighting a house costs
+        /// with them, what a breach costs, the pay swing per point (bp),
+        /// the line under which a house shuns you (half its offers, like
+        /// cooling), and the monthly drift back toward neutral.
+        standing_complete_gain: i32,
+        standing_enemy_loss: i32,
+        standing_breach_loss: i32,
+        standing_pay_bp_per_point: types.Bp,
+        /// Shunned when standing is at or under −this.
+        standing_shun_depth: i32,
+        standing_drift_per_month: i32,
     },
     generation: struct {
         scout_max_tonnage: u8,
