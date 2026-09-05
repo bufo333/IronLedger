@@ -53,6 +53,12 @@ if "loaded" in p:
     assert "half-block colour" in p or "graphics protocol" in p, p[-3000:]
 send("\r", 3.0)                # outfit → company (generates)
 assert "GENERATED COMPANY" in plain()
+assert "BACK OFFICE" in plain(), plain()[-3000:]   # sizing pane, wide or narrow
+send("\t", 0.4); send("+", 0.8)  # one more command admin …
+assert "hired one admin_command" in plain()[-1200:], plain()[-1500:]
+send("-", 0.8)                     # … and back
+assert "released one admin_command" in plain()[-1200:], plain()[-1500:]
+send("\t", 0.4)
 send("\r")                     # → review
 assert "REVIEW" in plain()
 send("\r", 2.0)                # begin

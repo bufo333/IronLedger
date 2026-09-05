@@ -653,9 +653,14 @@ pub const App = struct {
                     const rows = try q.toe(al, g);
                     var texts: std.ArrayListUnmanaged([]const u8) = .empty;
                     for (rows) |r| try texts.append(al, r.text);
-                    const lw: u16 = if (b.w > 120) b.w * 3 / 5 else b.w;
-                    self.listPane(.{ .x = 0, .y = b.y, .w = lw, .h = b.h }, "GENERATED COMPANY", texts.items, 0, self.w_field == 0, true);
-                    if (lw < b.w) {
+                    // Wide: the office sits beside the TO&E. Narrow: it takes
+                    // the bottom band, so +/- are never blind (12.7 leftover).
+                    const wide = b.w > 120;
+                    const lw: u16 = if (wide) b.w * 3 / 5 else b.w;
+                    const oh: u16 = @min(b.h, 12);
+                    const toe_h: u16 = if (wide) b.h else b.h -| oh;
+                    self.listPane(.{ .x = 0, .y = b.y, .w = lw, .h = toe_h }, "GENERATED COMPANY", texts.items, 0, self.w_field == 0, true);
+                    {
                         const hq_id = self.firstHq(g);
                         const h = g.hqs.getPtr(hq_id);
                         const req = if (h) |hh| hh.staffRequired() else null;
@@ -693,9 +698,9 @@ pub const App = struct {
                         try office.append(al, try std.fmt.allocPrint(al, "staff {d} / {d} required · payroll {s}/mo · treasury {{a}}{s}{{/}} C", .{ if (h) |hh| hh.staff_assigned else 0, if (req) |r| r.total() else 0, try q.money(al, g.monthlyPayroll()), st.funds }));
                         try office.append(al, "{d}under-hiring is allowed: facilities run a level lower and paperwork slows{/}");
                         try office.append(al, "{d}[Tab] focus · [j/k] role · [-] fewer · [+] more{/}");
-                        const oh: u16 = @min(b.h, 12);
-                        self.listPane(.{ .x = lw + 1, .y = b.y, .w = b.w - lw - 1, .h = oh }, "BACK OFFICE", office.items, 1, self.w_field == 1, false);
-                        if (b.h > oh + 3) {
+                        const office_rect: Rect = if (wide) .{ .x = lw + 1, .y = b.y, .w = b.w - lw - 1, .h = oh } else .{ .x = 0, .y = b.y + toe_h, .w = b.w, .h = oh };
+                        self.listPane(office_rect, "BACK OFFICE", office.items, 1, self.w_field == 1, false);
+                        if (wide and b.h > oh + 3) {
                             const detail = try q.hqDetail(al, g, hq_id);
                             self.listPane(.{ .x = lw + 1, .y = b.y + oh, .w = b.w - lw - 1, .h = b.h - oh }, try std.fmt.allocPrint(al, "starter HQ · {s}", .{q.hqName(g, hq_id)}), detail, 2, false, false);
                         }
@@ -720,6 +725,21 @@ pub const App = struct {
                         try rows.append(al, try std.fmt.allocPrint(al, "starter HQ    {{a}}{s}{{/}} on {s} · {s} · ring {d} LY · staff {d}/{d}", .{ h.name, q.planetName(h.planet_key), @tagName(h.tier), h.influenceLy(), h.staff_assigned, h.staffRequired().total() }));
                     }
                     try rows.append(al, try std.fmt.allocPrint(al, "company       {s} · {d} hulls · {d} people", .{ self.w_company.slice(), st.hulls, st.people }));
+                    {
+                        // The back office as sized in step 3 (12.7 leftover).
+                        const hq_id = self.firstHq(g);
+                        var line: std.ArrayListUnmanaged(u8) = .empty;
+                        var pay: types.CBills = 0;
+                        try line.appendSlice(al, "back office   ");
+                        for (office_roles, 0..) |role, i| {
+                            const have = g.hqStaff(hq_id, role).count;
+                            pay += role.baseSalary() * have;
+                            if (i > 0) try line.appendSlice(al, " · ");
+                            try line.appendSlice(al, try std.fmt.allocPrint(al, "{d} {s}", .{ have, @tagName(role)[6..] }));
+                        }
+                        try line.appendSlice(al, try std.fmt.allocPrint(al, " · {s}/mo", .{try q.money(al, pay)}));
+                        try rows.append(al, line.items);
+                    }
                     try rows.append(al, try std.fmt.allocPrint(al, "treasury      outfit {{a}}{s}{{/}} C", .{st.funds}));
                     try rows.append(al, try std.fmt.allocPrint(al, "first board   {d} offers within the ring on day 1", .{g.contract_offers.items.len}));
                     try rows.append(al, "");

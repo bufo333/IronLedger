@@ -203,7 +203,9 @@ view model each frame from an arena.
    colour cells in the grid (`Screen.blit`, `Cell.px`), kitty protocol
    probe at startup (`Term.probe`), transmit once per campaign, delete-all
    + place every frame, placements hidden while a modal is open.
-   ⬜ iTerm2 inline images, the cell editor, wizard back-office sizing.
+   ✅ iTerm2 inline images, the cell editor, wizard back-office sizing
+   (the BACK OFFICE pane takes the bottom band on narrow terminals; the
+   review step lists the headcount and payroll).
 7. ✅ Command-line Tab completion; size tiers as inline rules (`narrow()`
    = under 120 columns drops side panes, Enter opens hull/record modals;
    the status strip shortens); `--ascii`; wizard back-office sizing.
