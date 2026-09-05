@@ -2168,6 +2168,16 @@ pub fn personRecord(alloc: Alloc, gs: *GameState, id: types.PersonId) ![]const [
         try out.append(alloc, "training    none");
         try out.append(alloc, "            {d}[t] starts a program on the primary skill (training ground at home){/}");
     }
+    try out.append(alloc, try std.fmt.allocPrint(alloc, "record      {d} kill{s} ({d} BV) · {d} battle{s} · {d} tour{s}{s}", .{ p.kills, if (p.kills == 1) "" else "s", p.kill_bv, p.battles, if (p.battles == 1) "" else "s", p.tours, if (p.tours == 1) "" else "s", if (p.outstanding_tours > 0) try std.fmt.allocPrint(alloc, " ({d} outstanding)", .{p.outstanding_tours}) else "" }));
+    if (p.awards.items.len > 0) {
+        var line: std.ArrayListUnmanaged(u8) = .empty;
+        try line.appendSlice(alloc, "awards      ");
+        for (p.awards.items, 0..) |key, i| {
+            if (i > 0) try line.appendSlice(alloc, " · ");
+            try line.appendSlice(alloc, if (@import("../domain/award.zig").find(key)) |a| a.name else key);
+        }
+        try out.append(alloc, line.items);
+    }
     for (p.injuries.items, 0..) |inj, i| {
         try out.append(alloc, try std.fmt.allocPrint(alloc, "{s}{s} {s} {s}{s}{s}", .{
             if (i == 0) "injuries    " else "            ",

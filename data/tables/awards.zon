@@ -1,0 +1,16 @@
+// Awards (Stage 12B.5; MekHQ `personnel/Award`). Typed against
+// domain/award.zig `AwardRow`. `kind` names the counter on the person the
+// threshold is checked against; `morale` is the bump on receipt.
+.{
+    .{ .key = "first_blood", .name = "First Blood", .kind = .kills, .threshold = 1, .morale = 3 },
+    .{ .key = "ace", .name = "Ace", .kind = .kills, .threshold = 5, .morale = 5 },
+    .{ .key = "double_ace", .name = "Double Ace", .kind = .kills, .threshold = 10, .morale = 6 },
+    .{ .key = "mek_killer", .name = "MechKiller Ribbon", .kind = .kill_bv, .threshold = 10_000, .morale = 4 },
+    .{ .key = "combat_veteran", .name = "Combat Veteran", .kind = .battles, .threshold = 10, .morale = 3 },
+    .{ .key = "old_hand", .name = "Old Hand", .kind = .battles, .threshold = 25, .morale = 4 },
+    .{ .key = "wound_badge", .name = "Wound Badge", .kind = .wounded, .threshold = 1, .morale = 2 },
+    .{ .key = "campaign_star", .name = "Campaign Star", .kind = .tours, .threshold = 3, .morale = 3 },
+    .{ .key = "commendation", .name = "Employer's Commendation", .kind = .outstanding_tours, .threshold = 1, .morale = 5 },
+    .{ .key = "long_service", .name = "Long Service Medal", .kind = .service_years, .threshold = 3, .morale = 3 },
+    .{ .key = "decade", .name = "Ten-Year Medal", .kind = .service_years, .threshold = 10, .morale = 5 },
+}

@@ -10,6 +10,7 @@ pub const unit = @import("domain/unit.zig");
 pub const chassis = @import("domain/chassis.zig");
 pub const tuning = @import("domain/tuning.zig");
 pub const rank = @import("domain/rank.zig");
+pub const award = @import("domain/award.zig");
 pub const personnel = @import("sim/personnel.zig");
 pub const planet = @import("domain/planet.zig");
 pub const meklab = @import("domain/meklab.zig");

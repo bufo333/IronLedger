@@ -611,7 +611,8 @@ fn printDemand(gs: *game.state.GameState) void {
 }
 
 fn personName(gs: *game.state.GameState, id: game.types.PersonId) []const u8 {
-    return if (gs.person(id)) |p| p.last_name else "—";
+    const p = gs.person(id) orelse return "—";
+    return std.fmt.allocPrint(std.heap.page_allocator, "{s} {s}", .{ p.rank.abbrev(), p.last_name }) catch p.last_name;
 }
 
 /// Company roster as assignments (Stage 9C.2): every hull with pilot and

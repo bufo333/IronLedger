@@ -65,6 +65,7 @@ pub fn inflict(gs: *GameState, person_id: types.PersonId, cause: WoundCause, sev
     p.status = .wounded;
     p.wound_heal_day = null; // triage again with the new wound
     if (!gs.auto_admit) p.medbay_admitted = false;
+    _ = try @import("personnel.zig").checkAwards(gs, person_id); // 12B.5: the Wound Badge
     try gs.log(.medical, .{ .company = gs.companyOf(p.assigned_force) }, "[medbay] {s} {s} wounded ({s}): {s} {s}{s}", .{
         p.first_name, p.last_name, why, severityLabel(severity), @tagName(location), if (permanent) " — permanent" else "",
     });

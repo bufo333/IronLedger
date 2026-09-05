@@ -362,8 +362,10 @@ fn runFinances(gs: *GameState) !void {
         const p = entry.value_ptr;
         if (p.status == .active) p.xp += monthly_service_xp;
     }
-    // Seats and experience set ranks before pay is counted (12B.4).
+    // Seats and experience set ranks before pay is counted (12B.4); service
+    // awards come due (12B.5).
     _ = try @import("personnel.zig").refreshRanks(gs);
+    _ = try @import("personnel.zig").checkAllAwards(gs);
     // Notice is handed in on payday (Stage 12.20); grudges fade (12.21).
     _ = try @import("medical.zig").runMonthlyTurnover(gs);
     @import("contract_control.zig").driftStanding(gs);

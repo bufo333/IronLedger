@@ -467,6 +467,12 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
                 p.xp += if (score_delta > 0) 3 else 2;
         }
     }
+    // Kill credits and the awards they earn (12B.5).
+    const personnel = @import("personnel.zig");
+    const kills_credited = try personnel.creditKills(gs, engaged, enemy_destroyed_bv);
+    for (engaged) |uid| if (gs.unit(uid)) |u| {
+        _ = try personnel.checkAwards(gs, u.pilot);
+    };
 
     const ctx: @import("state.zig").LogCtx = .{ .company = c.assigned_company, .contract = c.id };
     try gs.log(.battle, ctx, "[AAR] {s} vs {s}: {s} — power {d} vs {d} (recon {d}, fatigue {d}, morale {d})", .{
@@ -474,8 +480,8 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
         player.power,            enemy_power,            player.mods.recon_quality,
         player.mods.avg_fatigue, player.mods.avg_morale,
     });
-    try gs.log(.battle, ctx, "[AAR]   losses: {d} hit / {d} destroyed, {d} wounded, {d} KIA | salvage {d} BV claimed | comp {d} | score {d}", .{
-        hits, destroyed, wounded, kia, salvage, comp, c.score,
+    try gs.log(.battle, ctx, "[AAR]   losses: {d} hit / {d} destroyed, {d} wounded, {d} KIA | enemy losses {d} BV ≈ {d} kill{s} credited | salvage {d} BV claimed | comp {d} | score {d}", .{
+        hits, destroyed, wounded, kia, enemy_destroyed_bv, kills_credited, if (kills_credited == 1) "" else "s", salvage, comp, c.score,
     });
     // Every hit on record.
     for (hit_log.items) |h| {

@@ -92,6 +92,22 @@ pub fn complete(gs: *GameState, c: *contract_mod.Contract, objectives_broken: bo
     const enemy_now = if (!std.mem.eql(u8, c.enemy_key, "PER")) try gs.adjustStanding(c.enemy_key, -t.standing_enemy_loss) else 0;
     try gs.log(.contract, .{ .company = c.assigned_company, .contract = c.id }, "[standing] {s} +{d} → {d}{s}", .{ c.employer_key, @max(2, t.standing_complete_gain + @divTrunc(c.victory_points, 10)), employer_now, if (!std.mem.eql(u8, c.enemy_key, "PER")) try std.fmt.allocPrint(gs.allocator(), " · {s} −{d} → {d}", .{ c.enemy_key, t.standing_enemy_loss, enemy_now }) else "" });
     try finishTour(gs, c);
+    // Service records (12B.5): a tour served, and an outstanding one noted.
+    {
+        const outstanding = c.victory_points >= 50;
+        var ids: std.ArrayListUnmanaged(types.PersonId) = .empty;
+        defer ids.deinit(gs.allocator());
+        var pit = gs.people.iterator();
+        while (pit.next()) |e| {
+            const p = e.value_ptr;
+            if (p.status != .active and p.status != .wounded) continue;
+            if (gs.companyOf(p.assigned_force) != c.assigned_company) continue;
+            p.tours += 1;
+            if (outstanding) p.outstanding_tours += 1;
+            try ids.append(gs.allocator(), p.id);
+        }
+        for (ids.items) |id| _ = try @import("personnel.zig").checkAwards(gs, id);
+    }
     try gs.log(.contract, .{ .company = c.assigned_company, .contract = c.id }, "[{s}] contract COMPLETE — {s} ({s}, {d} VP, score {d}) — reputation {s} ({s}{d}); the employer pays in full{s}", .{
         @tagName(c.kind), c.grade(), if (objectives_broken) "objectives broken" else "closed out", c.victory_points, c.score, if (vp_bonus > 0) "soars" else if (gain > 0) "rises" else if (gain == 0) "unchanged" else "slips", if (gain >= 0) "+" else "", gain, if (objectives_broken) " plus the early-completion bonus" else "",
     });

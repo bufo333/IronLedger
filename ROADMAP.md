@@ -652,7 +652,7 @@ map. Each item ends green with a ROADMAP tick, as before.
   Master Sergeant). `Person.rank`, `promote <person> <rank>` (and an
   automatic promotion when a seat opens), rank shown on rosters, AARs and
   the record. Store bump (`person.rank`).
-- ⬜ 12B.5 **Kill records and awards** (MekHQ kills + awards). Each
+- ✅ 12B.5 **Kill records and awards** (MekHQ kills + awards). Each
   engagement credits the enemy BV destroyed to engaged pilots weighted by
   their hull's BV and skill; a pilot's record keeps kills (BV and count),
   battles, and a per-contract line. Awards from `data/tables/awards.zon`

@@ -6,7 +6,80 @@ const std = @import("std");
 const types = @import("../domain/types.zig");
 const person_mod = @import("../domain/person.zig");
 const rank_mod = @import("../domain/rank.zig");
+const award_mod = @import("../domain/award.zig");
+const chassis_mod = @import("../domain/chassis.zig");
 const GameState = @import("state.zig").GameState;
+
+/// Kill credits (12B.5): the enemy BV destroyed in an engagement becomes
+/// whole kills (one per ~1000 BV, the average 3025 mek), each handed to
+/// an engaged pilot at random weighted by their hull's BV and gunnery; the
+/// BV itself is split by the same weights. Every engaged pilot logs a
+/// battle. Returns kills credited.
+pub fn creditKills(gs: *GameState, engaged: []const types.UnitId, destroyed_bv: i64) !u32 {
+    var weights: std.ArrayListUnmanaged(u32) = .empty;
+    defer weights.deinit(gs.allocator());
+    var pilots: std.ArrayListUnmanaged(types.PersonId) = .empty;
+    defer pilots.deinit(gs.allocator());
+    var total_w: u64 = 0;
+    for (engaged) |uid| {
+        const u = gs.unit(uid) orelse continue;
+        const p = gs.person(u.pilot) orelse continue;
+        if (p.status != .active and p.status != .wounded) continue;
+        p.battles += 1;
+        const bv: u32 = if (chassis_mod.find(u.chassis_key)) |c| c.bv else 500;
+        const gunnery: u32 = p.skill(p.role.primarySkill()) orelse 4;
+        const w: u32 = @max(1, bv * (9 - @min(8, gunnery)) / 100);
+        try weights.append(gs.allocator(), w);
+        try pilots.append(gs.allocator(), p.id);
+        total_w += w;
+    }
+    if (pilots.items.len == 0 or destroyed_bv <= 0) return 0;
+    // BV shares.
+    for (pilots.items, weights.items) |pid, w| {
+        if (gs.person(pid)) |p| p.kill_bv += @intCast(@divTrunc(destroyed_bv * @as(i64, w), @as(i64, @intCast(total_w))));
+    }
+    // Whole kills, weighted draws.
+    const kills: u32 = @intCast(@divTrunc(destroyed_bv + 500, 1000));
+    for (0..kills) |_| {
+        var pick = gs.rng.random(.battle).uintLessThan(u64, total_w);
+        for (pilots.items, weights.items) |pid, w| {
+            if (pick < w) {
+                if (gs.person(pid)) |p| p.kills += 1;
+                break;
+            }
+            pick -= w;
+        }
+    }
+    return kills;
+}
+
+/// Hand out every award whose threshold a person has crossed (12B.5).
+/// Returns how many were pinned on.
+pub fn checkAwards(gs: *GameState, person_id: types.PersonId) !u32 {
+    const p = gs.person(person_id) orelse return 0;
+    if (p.status != .active and p.status != .wounded) return 0;
+    var n: u32 = 0;
+    for (award_mod.table) |a| {
+        if (p.hasAward(a.key)) continue;
+        if (p.counter(a.kind, gs.clock.day_index) < a.threshold) continue;
+        try p.awards.append(gs.allocator(), a.key);
+        p.morale = @intCast(@min(100, @as(u32, p.morale) + a.morale));
+        n += 1;
+        try gs.log(.rotation, .{ .company = gs.companyOf(p.assigned_force), .hq = p.posted_hq }, "[award] {s} receives the {s} ({s} {d})", .{ try p.rankedName(gs.allocator()), a.name, @tagName(a.kind), p.counter(a.kind, gs.clock.day_index) });
+    }
+    return n;
+}
+
+/// Payday sweep: service awards for everyone.
+pub fn checkAllAwards(gs: *GameState) !u32 {
+    var n: u32 = 0;
+    var ids: std.ArrayListUnmanaged(types.PersonId) = .empty;
+    defer ids.deinit(gs.allocator());
+    var it = gs.people.iterator();
+    while (it.next()) |e| try ids.append(gs.allocator(), e.value_ptr.id);
+    for (ids.items) |id| n += try checkAwards(gs, id);
+    return n;
+}
 
 /// Recompute every unpinned rank: the best fit combat crew in a company is
 /// its commander (Captain), the best in each line or air lance its leader
@@ -98,4 +171,36 @@ test "ranks follow seats: a lance leader is a lieutenant, the company commander 
     _ = try refreshRanks(&gs);
     try std.testing.expectEqual(rank_mod.Rank.major, tech.rank);
     try std.testing.expect(tech.monthlySalary() > before);
+}
+
+test "12B.5: kills are credited to engaged pilots and awards follow the counters" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1235 });
+    defer gs.deinit();
+    _ = try gs.createCommander("T", .LC, .paymaster);
+    const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    var engaged: std.ArrayListUnmanaged(types.UnitId) = .empty;
+    defer engaged.deinit(gs.allocator());
+    var uit = gs.units.iterator();
+    while (uit.next()) |e| if (e.value_ptr.kind == .mek and gs.companyOf(e.value_ptr.force) == co) try engaged.append(gs.allocator(), e.value_ptr.id);
+    const kills = try creditKills(&gs, engaged.items, 5_400);
+    try std.testing.expectEqual(@as(u32, 5), kills);
+    var total_kills: u32 = 0;
+    var total_bv: u32 = 0;
+    var battles: u32 = 0;
+    var pit = gs.people.iterator();
+    while (pit.next()) |e| {
+        total_kills += e.value_ptr.kills;
+        total_bv += e.value_ptr.kill_bv;
+        if (e.value_ptr.battles == 1) battles += 1;
+    }
+    try std.testing.expectEqual(@as(u32, 5), total_kills);
+    try std.testing.expect(total_bv > 5_000 and total_bv <= 5_400);
+    try std.testing.expectEqual(@as(u32, @intCast(engaged.items.len)), battles);
+    // Awards: whoever has a kill gets First Blood; five kills makes an Ace.
+    var ace = gs.person(gs.unit(engaged.items[0]).?.pilot).?;
+    ace.kills = 5;
+    _ = try checkAwards(&gs, ace.id);
+    try std.testing.expect(ace.hasAward("first_blood") and ace.hasAward("ace") and !ace.hasAward("double_ace"));
+    const again = try checkAwards(&gs, ace.id);
+    try std.testing.expectEqual(@as(u32, 0), again); // no duplicates
 }

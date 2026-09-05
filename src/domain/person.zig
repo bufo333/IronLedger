@@ -127,6 +127,15 @@ pub const Person = struct {
     /// by `promote`. Scales pay through `monthlySalary`.
     rank: @import("rank.zig").Rank = .private,
     rank_pinned: bool = false,
+    /// Service record (12B.5): kill credits, battles fought, tours served,
+    /// tours graded outstanding, and the awards earned (keys into
+    /// data/tables/awards.zon).
+    kills: u32 = 0,
+    kill_bv: u32 = 0,
+    battles: u32 = 0,
+    tours: u32 = 0,
+    outstanding_tours: u32 = 0,
+    awards: std.ArrayListUnmanaged([]const u8) = .empty,
     /// Per-location injuries (Stage 12.16); open ones keep the person in
     /// the medbay, permanent ones stay on the record.
     injuries: std.ArrayListUnmanaged(Injury) = .empty,
@@ -139,6 +148,25 @@ pub const Person = struct {
     pub fn deinit(self: *Person, alloc: std.mem.Allocator) void {
         self.skills.deinit(alloc);
         self.injuries.deinit(alloc);
+        self.awards.deinit(alloc);
+    }
+
+    pub fn hasAward(self: *const Person, key: []const u8) bool {
+        for (self.awards.items) |a| if (std.mem.eql(u8, a, key)) return true;
+        return false;
+    }
+
+    /// The counter an award checks (12B.5).
+    pub fn counter(self: *const Person, kind: @import("award.zig").Counter, day: u32) u32 {
+        return switch (kind) {
+            .kills => self.kills,
+            .kill_bv => self.kill_bv,
+            .battles => self.battles,
+            .wounded => @intCast(self.injuries.items.len + @as(usize, @intFromBool(self.status == .wounded))),
+            .tours => self.tours,
+            .outstanding_tours => self.outstanding_tours,
+            .service_years => self.tenureMonths(day) / 12,
+        };
     }
 
     /// Injuries still healing.
