@@ -2372,7 +2372,7 @@ pub const App = struct {
             .lab => {
                 const uid = (try self.labUnit()) orelse return;
                 try self.exec(.{ .refit_commit = uid });
-                self.say(.good, "refit committed to the bay queue", .{});
+                if (self.msg.len == 0 or self.msg_style != .crit) self.say(.good, "refit committed — it is a bay job at the home HQ: HQ screen (F7) lists the bays, queued and running, with days left", .{});
             },
             .people => {
                 const id = (try self.selectedPerson()) orelse return;
