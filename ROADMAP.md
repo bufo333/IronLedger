@@ -735,10 +735,149 @@ map. Each item ends green with a ROADMAP tick, as before.
   foe tables; company generation's RAT uses the home faction. Star-map
   performance: a spatial grid for the 400-world neighbour queries.
 
+## Stage 12C — Careers, rating & depth (planned 2026-09-05)
+
+Everything left on the table after 12B, ordered so each block builds on
+the one before: the personnel economy first (it settles the turnover
+question for good), then the rating that drives the contract board, then
+the campaign's memory, then combat variety, then the maintenance section
+we skipped, then era/data plumbing, then the terminal cosmetics. Every
+item: tests green, both smokes, ROADMAP tick, one commit.
+
+### Block A — Personnel economy (CamOps fatigue, AtB shares & retention)
+
+- ⬜ 12C.1 **Fatigue penalties** (CamOps Fatigue rules, MekHQ `Fatigue` option).
+  Bands on `Person.fatigue`: fresh <30, tired 30–59 (+1 to gunnery and
+  piloting in `battle.playerSide`), exhausted 60–79 (+2, readiness flags),
+  spent 80+ (+3, unfit: the auto-assigner benches them and the checklist
+  says so). The MANNING and READINESS panes show the band; a person's
+  record says what it costs them. Knobs `tuning.person.fatigue_bands`.
+- ⬜ 12C.2 **Departure payout** (MekHQ retirement bonus / AtB "retirement
+  payment"). Leaving on notice, retirement or being let go owes one
+  month's salary per full year of service (capped at 12, `// data`),
+  debited from the outfit as `.payroll` "severance"; a plain `fire` pays
+  half, a notice answered with "let go" pays it in full.
+  The notice inbox entry prices each option; the Finance ledger shows it.
+- ⬜ 12C.3 **Shares** (AtB shares system). `Person.shares: u8` — a
+  founder (on the books day 0) gets 2, every combat/tech role gets 1 after
+  a year, +1 per rank above sergeant; owners can set `shares_pct` of net
+  contract profit (default 30%, `share_profit_bp`) paid out at contract
+  completion pro rata. Holding shares is −1 restless per 3 shares and
+  halves the departure payout. Contracts screen shows the share pool on
+  completion; Finance shows the payout line.
+- ⬜ 12C.4 **Ages and career arcs** (MekHQ `birthday`, AtB age-based
+  retirement). `Person.born_day: i32` (days relative to campaign start;
+  generator: mekwarriors 22–38 by experience, techs 20–50, admins 25–55,
+  doctors 30–60). Yearly birthday tick; ≥ 50 adds a restless point on the
+  turnover roll and ≥ 65 forces retirement; a fresh green hire under 25
+  learns 20% faster (`xp_young_bp`). Ages on the roster and record. Schema
+  v15: `person.born_day`, `person.shares`.
+- ⬜ 12C.5 **Loyalty** (AtB founder/loyalty modifiers). Founders never roll
+  turnover while morale ≥ 20; five or more tours grants `veteran_loyalty`
+  (−1 restless); a raise or bonus accepted in the last 12 months is −1 for
+  that year; an award in the last 6 months −1. The notice inbox entry names
+  the modifiers in play.
+
+### Block B — Unit rating & the board (AtB/CamOps Dragoons rating)
+
+- ⬜ 12C.6 **Dragoons rating** (CamOps "Mercenary Rating", MekHQ
+  `UnitRating`). `queries.rating`: experience (average combat skill),
+  command (commander skills + admins), combat record (contract grades and
+  breaches, replaces the bare `reputation` int), transport (lift owned vs
+  needed, 12.15), support (tech/astech/medic manning vs need), finances
+  (debt, unpaid payroll). Letter F–A* with the score breakdown; shown on
+  the Desk and Contracts screens; `rating` REPL verb.
+- ⬜ 12C.7 **Rating drives the board**: offer count and employer tier by
+  rating letter (F: pirates and periphery only; C+: Great Houses; A:
+  ComStar/major-house planetary assaults), pay multiplier by letter
+  replacing `reputationMultBp`, salvage/command rights negotiation
+  modifiers by letter (12B.3 hooks). Recruits at the hall skew better for
+  higher-rated outfits (`recruitBonus` uses the rating).
+- ⬜ 12C.8 **Campaign summary screen** (`F0`/`:summary`): contracts by
+  grade, battles won/lost/drawn, kills and losses by weight class,
+  C-bills earned and spent by category, people hired/lost/KIA, hulls
+  bought/salvaged/destroyed, rating history per year. All from the log
+  and ledgers — no new state beyond a yearly rating snapshot table.
+
+### Block C — Combat variety (AtB scenario types)
+
+- ⬜ 12C.9 **Scenario types** (AtB scenario table): standup, hold the line,
+  breakthrough, ambush (defender surprised: initiative penalty and no
+  retreat), convoy escort (support train exposed, ties to 12.29 convoy
+  events), base defence (fixed objective, attrition weighted), recon raid
+  (scouting lance role matters), extraction. Rolled per engagement by
+  contract kind and lance role; each has its own force-ratio, objective
+  weight and salvage access. AAR names the scenario.
+- ⬜ 12C.10 **Terrain and weather**: per-world terrain class from
+  `planets.zon` (plains, hills, forest, urban, badlands, jungle, tundra),
+  weather rolled per battle (clear, rain, snow, storm, night, dust); each
+  a small modifier to hit chances, movement-heavy scenarios and
+  aerospace cover, and a fatigue point for the hard ones. Battle log and
+  AAR carry the line.
+- ⬜ 12C.11 **Morale from the field**: a won battle +2 company morale,
+  a rout −5, a scenario objective met +1; a contract completed at grade
+  A/B +5 outfit-wide, breach −10. Ties into 12C.1 bands and turnover.
+
+### Block D — Maintenance & repair depth (the section left out of 12B)
+
+- ⬜ 12C.12 **Repair outcomes** (MekHQ repair roll): every bay job rolls
+  tech skill vs. target (part difficulty + condition modifiers + rush):
+  success, success with a lingering fault (part marked `.worn`, −1 to
+  next maintenance roll until replaced), failure (hours lost, retry), or
+  botch on a natural 2 (part destroyed, ordered again). Lab and bay queue
+  show the odds before commit.
+- ⬜ 12C.13 **Quality drift** (MekHQ maintenance quality): the weekly
+  maintenance roll moves a hull's quality letter one step on margins of
+  ±4, so neglected machines slide to F and a well-staffed bay lifts them
+  toward A; quality feeds breakdown chance, resale, reactivation days
+  (already) and the rating's support score.
+- ⬜ 12C.14 **Part availability** (MekHQ acquisition target by tech base
+  and rarity): `parts.zon` gains `tech_base` (inner sphere / periphery)
+  and `availability` (A–F); order sourcing target uses it plus the HQ's
+  comms and the world's faction; failed orders say why ("rare at this
+  world").
+- ⬜ 12C.15 **Tech target numbers**: the flat hours-per-tonne maintenance
+  model gets a target-number layer — tech skill, astech coverage, hull
+  quality, era of the design — so the same tech is slower on an exotic
+  hull; MANNING's "six per tech" becomes "hours covered vs. hours needed".
+
+### Block E — Era & data plumbing
+
+- ⬜ 12C.16 **Era progression** (MekHQ `introYear`/`extinctYear`):
+  `chassis.zon` and `parts.zon` gain `intro_year`; campaign start year is
+  a setting (3025 default); the market, RAT and salvage tables only list
+  what exists that year; a yearly "tech news" log line as designs appear.
+  Start-year picker on the new-campaign screen.
+- ⬜ 12C.17 **Black market** (AtB black market): an occasional listing at
+  a hiring-hall world with comms ≥ 2 — rare designs or parts at 2–4×,
+  with a 2d6 chance the seller is a fraud (money gone, log line, standing
+  hit with the local faction) and a small pirate-standing effect for
+  buying; the Market screen marks it.
+- ⬜ 12C.18 **Mod support**: `--data <dir>` overlays any `data/*.zon` and
+  `data/tables/*.zon` from a directory at startup (ZON parsed at runtime
+  for the overlay, comptime tables stay the default); the settings screen
+  says which files are overridden; `docs/modding.md`.
+
+### Block F — Terminal cosmetics
+
+- ⬜ 12.14 **iTerm2 inline images and the emblem cell editor** (carried
+  from Stage 12): inline-image protocol detection for the splash and
+  emblem where the terminal supports it, and a cell editor on the emblem
+  screen (cursor, palette, undo, save to the campaign).
+
+### Order & schema
+
+A → B → C → D → E → F. Schema bumps: v15 (12C.4: `born_day`, `shares`),
+v16 (12C.8: `rating_snapshot` table), v17 (12C.13: `unit.quality` history
+not needed — letter already stored; 12C.14 part fields are data-only),
+v18 (12C.16: campaign `start_year`). Every knob lands in
+`data/tables/tuning.zon` from the start; rule tables cite the AtB /
+CamOps / MekHQ source next to the table.
+
 ## Stage 13 — Graphical client
 Architected after the TUI ships, reusing the same command/query boundary.
 
 ## Later / icebox
-SPAs & edge, era progression + tech intro dates, black market, faction
-standing beyond breach cooling, retirement/turnover rolls (AtB),
-audio, mod support (all data already external in `data/`).
+Edge points in play, audio beyond the music player, Stage 13 graphics.
+(Era progression, black market, mod support and turnover moved into
+Stage 12C.)
