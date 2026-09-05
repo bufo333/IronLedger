@@ -299,10 +299,25 @@ pub fn runWeeklyRest(gs: *GameState) !void {
         if (p.status != .active and p.status != .wounded) continue;
 
         if (isDeployed(gs, p)) {
-            // No rest in the field; exhaustion grinds morale down, and an
-            // empty mess tent grinds it faster (Stage 9B).
+            const company = gs.companyOf(p.assigned_force);
+            const contract = gs.deploymentContract(company);
+            const garrison = if (contract) |c| c.kind.isGarrisonClass() else false;
+            if (garrison) {
+                // Garrison duty is nearly home (12.30): barracks and a town.
+                // Fatigue recovers at a share of the home rate — the mess
+                // lance stands in for the mess hall — and spirits hold.
+                var mess_lance = false;
+                if (gs.force(company)) |co| for (co.children.items) |cid| if (gs.force(cid)) |ch| if (ch.echelon == .support_company) for (ch.children.items) |sl| if (gs.force(sl)) |l| if (l.support_kind == .mess and l.units.items.len > 0) {
+                    mess_lance = true;
+                };
+                const field_decay: u32 = @intCast(types.applyBp(person_mod.fatigueDecayPerWeek(if (mess_lance) 1 else 0), tuning.person.garrison_rest_bp));
+                p.fatigue -|= @intCast(@min(field_decay, 255));
+                if (p.morale < 45 and p.fatigue <= 60) p.morale += 1;
+            }
+            // Exhaustion grinds morale down, and an empty mess tent grinds
+            // it faster (Stage 9B); combat tours get no rest at all.
             if (p.fatigue > 60 and p.morale > 0) p.morale -= 1;
-            if (gs.force(gs.companyOf(p.assigned_force))) |co| {
+            if (gs.force(company)) |co| {
                 if (co.supply_shortage_days > 0) p.morale -|= 2;
             }
         } else {
@@ -490,4 +505,32 @@ test "12.20/12.25: the restless hand in notice after a year (an inbox decision),
     while (fit.next()) |e| e.value_ptr.morale = 0;
     fresh.clock.day_index = 100;
     try std.testing.expectEqual(@as(u32, 0), try runMonthlyTurnover(&fresh));
+}
+
+test "12.30: garrison duty recovers fatigue in the field; a combat tour does not" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1230 });
+    defer gs.deinit();
+    _ = try gs.createCommander("T", .LC, .paymaster);
+    const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
+        .id = @enumFromInt(1),
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "PER",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 24, .base_pay_month = 400_000 },
+        .status = .active,
+        .assigned_company = co,
+        .monthly_net = 300_000,
+    });
+    var pit = gs.people.iterator();
+    while (pit.next()) |e| e.value_ptr.fatigue = 40;
+    try runWeeklyRest(&gs);
+    const pilot = gs.unit(gs.units.keys()[0]).?.pilot;
+    try std.testing.expect(gs.person(pilot).?.fatigue < 40);
+    // The same company on a raid: no recovery.
+    gs.contracts.getPtr(@enumFromInt(1)).?.kind = .objective_raid;
+    const before = gs.person(pilot).?.fatigue;
+    try runWeeklyRest(&gs);
+    try std.testing.expectEqual(before, gs.person(pilot).?.fatigue);
 }

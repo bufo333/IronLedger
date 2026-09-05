@@ -97,6 +97,11 @@ pub const Tuning = struct {
         /// each payday; under `turnover_target` (+1 per restless flag) they
         /// hand in their notice. Long service (`retire_tenure_months`)
         /// retires instead of resigning.
+        /// Garrison duty is nearly home (12.30): weekly fatigue recovery in
+        /// the field on garrison-class work as a share of the home rate,
+        /// and the tour's fatigue bill counts months divided by this.
+        garrison_rest_bp: types.Bp,
+        garrison_tour_months_divisor: u32,
         turnover_min_tenure_months: u32,
         restless_morale: u8,
         exhausted_fatigue: u8,

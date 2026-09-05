@@ -285,7 +285,14 @@ pub const max_fatigue = tuning.person.max_fatigue;
 /// how hard it fought: a quiet garrison wears lightly, a bloody raid
 /// campaign wears hard.
 pub fn contractFatigueGain(length_months: u8, battles_fought: u8, casualties_pct: u8) u8 {
-    const gain: u32 = @as(u32, length_months) +
+    return contractFatigueGainFor(length_months, battles_fought, casualties_pct, false);
+}
+
+/// Garrison-class tours (12.30) wear a third as much per month: barracks,
+/// hot food and a town, not a laager.
+pub fn contractFatigueGainFor(length_months: u8, battles_fought: u8, casualties_pct: u8, garrison: bool) u8 {
+    const months: u32 = if (garrison) @as(u32, length_months) / tuning.person.garrison_tour_months_divisor else length_months;
+    const gain: u32 = months +
         @as(u32, battles_fought) * tuning.person.fatigue_per_battle +
         @as(u32, casualties_pct) / tuning.person.fatigue_casualty_divisor;
     return @intCast(@min(gain, tuning.person.fatigue_contract_cap));
@@ -307,6 +314,11 @@ test "quiet garrisons wear lightly, bloody campaigns wear hard" {
     try std.testing.expect(raid > garrison);
     try std.testing.expectEqual(@as(u8, 50), contractFatigueGain(24, 20, 100)); // capped per contract
     try std.testing.expectEqual(@as(u8, max_fatigue), applyFatigue(90, 40)); // capped overall
+}
+
+test "12.30: a long quiet garrison banks a third of a combat tour's fatigue" {
+    try std.testing.expect(contractFatigueGainFor(24, 0, 0, true) < contractFatigueGainFor(24, 0, 0, false));
+    try std.testing.expectEqual(@as(u8, 8), contractFatigueGainFor(24, 0, 0, true));
 }
 
 test "the mess hall earns its keep at home" {

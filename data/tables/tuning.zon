@@ -85,6 +85,8 @@
         .fatigue_decay_base = 5,
         .fatigue_decay_per_mess = 2,
         .monthly_service_xp = 1,
+        .garrison_rest_bp = 6_000,
+        .garrison_tour_months_divisor = 3,
         .turnover_min_tenure_months = 12,
         .restless_morale = 30,
         .exhausted_fatigue = 70,

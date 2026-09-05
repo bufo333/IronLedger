@@ -317,7 +317,7 @@ fn runContracts(gs: *GameState) !void {
                 // since the company last rested at a regional HQ.
                 const heads = gs.companyHeadcount(c.assigned_company);
                 const casualties_pct: u8 = if (heads == 0) 0 else @intCast(@min(100, @as(u32, c.casualties) * 100 / heads));
-                var gain = person_mod.contractFatigueGain(c.terms.length_months, c.battles_fought, casualties_pct);
+                var gain = person_mod.contractFatigueGainFor(c.terms.length_months, c.battles_fought, casualties_pct, c.kind.isGarrisonClass());
                 if (gs.force(c.assigned_company)) |f| {
                     gain +|= 5 * @as(u8, @intCast(@min(10, f.contracts_since_rotation -| 1)));
                 }
