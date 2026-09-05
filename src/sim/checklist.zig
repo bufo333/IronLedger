@@ -92,10 +92,10 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
     const day = gs.clock.day_index;
 
     // Money first: nothing else matters if the outfit cannot pay.
-    if (gs.funds < 0) {
+    if (gs.funds + gs.inboundToOutfit() < 0) {
         const cover = gs.funds + gs.liquidationValue() + gs.creditRemaining();
-        try out.append(alloc, .{ .kind = .insolvent, .text = try std.fmt.allocPrint(alloc, "outfit treasury overdrawn ({d}) — take a loan (credit {d}) or sell assets (worth {d}){s}", .{
-            gs.funds, gs.creditRemaining(), gs.liquidationValue(), if (cover < 0) "; nothing left covers it: the outfit folds" else "",
+        try out.append(alloc, .{ .kind = .insolvent, .text = try std.fmt.allocPrint(alloc, "outfit treasury overdrawn ({d}{s}) — take a loan (credit {d}), transfer funds back from an HQ or company, or sell assets (worth {d}){s}", .{
+            gs.funds, if (gs.inboundToOutfit() > 0) try std.fmt.allocPrint(alloc, ", {d} on the road", .{gs.inboundToOutfit()}) else "", gs.creditRemaining(), gs.liquidationValue(), if (cover < 0) "; nothing left covers it: the outfit folds" else "",
         }) });
     }
 
@@ -205,6 +205,9 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
             // Only hulls that are actually home count: a deployed, idle-afield
             // or returning company cannot use the bay, so its structural damage
             // is not a backlog yet (it shows in the Lab instead).
+            // Cold storage and the unassigned pool are parked on purpose:
+            // their damage is the player's to schedule, not a backlog.
+            if (u.status == .mothballed or u.force == .none) continue;
             if (u.needsDepot() and u.status != .repairing and gs.isCompanyHome(gs.companyOf(u.force)) and !hq_ops.hasJobForUnit(gs, u.id)) waiting += 1;
         }
         if (waiting > 0 and idle > 0) {

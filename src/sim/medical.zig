@@ -245,6 +245,8 @@ pub fn runMonthlyTurnover(gs: *GameState) !u32 {
         const p = entry.value_ptr;
         if (p.status != .active) continue;
         if (p.tenureMonths(day) < t.turnover_min_tenure_months) continue;
+        // Nobody walks out mid-contract: notice waits for the tour to end.
+        if (isDeployed(gs, p)) continue;
         const restless = p.restlessness();
         if (restless == 0) continue;
         const roll = gs.rng.roll2d6(.medical);

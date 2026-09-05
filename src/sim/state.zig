@@ -867,6 +867,17 @@ pub const GameState = struct {
         return now;
     }
 
+    /// Money already on its way to the outfit's treasury (couriers in
+    /// transit): it counts toward solvency at turn end (12.24 bug fix —
+    /// pulling funds back could not unblock the turn until they landed).
+    pub fn inboundToOutfit(self: *GameState) types.CBills {
+        var sum: types.CBills = 0;
+        for (self.fund_couriers.items) |c| if (c.to == .outfit) {
+            sum += c.amount;
+        };
+        return sum;
+    }
+
     pub fn factionCooling(self: *GameState, faction: []const u8) bool {
         for (self.faction_cooling.items) |fc| {
             if (std.mem.eql(u8, fc.faction, faction) and self.clock.day_index < fc.until_day) return true;

@@ -1611,7 +1611,9 @@ fn advance(gs: *GameState, days: u32) Error!Result {
     var result: Result = .{};
     for (0..days) |_| {
         if (gs.bankrupt) return Error.Bankrupt;
-        if (gs.funds < 0) {
+        // Couriers already bound for the outfit count: the turn can end
+        // while the money is on the road.
+        if (gs.funds + gs.inboundToOutfit() < 0) {
             if (gs.funds + gs.liquidationValue() + gs.creditRemaining() < 0) {
                 gs.bankrupt = true;
                 try gs.log(.finance, .{}, "[bankrupt] the outfit cannot cover {d}: creditors seize what is left", .{gs.funds});
@@ -1631,6 +1633,15 @@ test "insolvency holds the turn; bankruptcy ends the campaign" {
     _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .FS, .profession = .paymaster } });
     _ = try execute(&gs, .{ .new_company = "Alpha" });
     gs.funds = -1;
+    try std.testing.expectError(Error.Insolvent, execute(&gs, .advance_day));
+    // Money couriered back from an HQ covers the hole before it lands (12.24 bug fix).
+    const hq0 = gs.hqs.keys()[0];
+    gs.hqs.getPtr(hq0).?.funds = 100_000;
+    _ = try execute(&gs, .{ .transfer = .{ .from = .{ .hq = hq0 }, .to = .outfit, .amount = 50_000 } });
+    try std.testing.expect(gs.funds < 0 and gs.inboundToOutfit() >= 50_000);
+    _ = try execute(&gs, .advance_day);
+    gs.funds = -1;
+    gs.fund_couriers.clearRetainingCapacity();
     try std.testing.expectError(Error.Insolvent, execute(&gs, .advance_day));
     // A loan within the credit limit unblocks the turn.
     _ = try execute(&gs, .{ .take_loan = .{ .principal = 100_000, .term_months = 6 } });

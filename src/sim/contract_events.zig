@@ -17,9 +17,11 @@ pub const decision_window_days = tuning.contract.decision_window_days;
 // ------------------------------------------------------------------ decks
 // Static decks; dynamic magnitudes go through relative effects.
 
-// The inbox rule (12.24, play feedback): an event that only moves
-// fatigue or morale happens on its own and goes to the log; anything that
-// spends XP, breaks hulls, or costs supplies is a decision the player sees.
+// The inbox rule (12.24, play feedback): an event is a dice roll logged
+// with its result unless it meaningfully moves money or breaks hulls —
+// cash in or out, supply losses, salvage and stock windfalls, damage — and
+// those are decisions the player sees. Fatigue, morale, XP, score,
+// reputation and standing swings resolve on their own.
 
 pub const Entry = struct {
     kind: events.EventKind,
@@ -51,9 +53,10 @@ fn garrisonDeck(roll: u8) Entry {
         9 => .{ .kind = .sports_riot, .log = "Company wins the garrison games", .auto_effects = &.{
             .{ .morale = 4 },
         } },
-        10 => .{ .kind = .bonus_payment, .log = "Employer pays a performance bonus", .auto_effects = &.{
-            .{ .cash_monthly_pct = 50 },
-        } },
+        10 => .{ .kind = .bonus_payment, .log = "Employer pays a performance bonus", .options = &.{
+            .{ .label = "Bank it", .effects = &.{.{ .cash_monthly_pct = 50 }} },
+            .{ .label = "Share half with the troops", .effects = &.{ .{ .cash_monthly_pct = 25 }, .{ .morale = 5 } } },
+        }, .default_choice = 0 },
         11 => .{ .kind = .equipment_cache, .log = "Scouts find a sealed supply cache", .options = &.{
             .{ .label = "Crack it open quietly", .effects = &.{ .{ .parts_windfall = 3 }, .{ .reputation = -1 } } },
             .{ .label = "Report it to the employer", .effects = &.{.{ .reputation = 2 }} },
@@ -83,13 +86,13 @@ fn combatDeck(roll: u8) Entry {
         4 => .{ .kind = .enemy_reinforcements, .log = "Enemy reinforcements land", .auto_effects = &.{
             .{ .score = -1 },
         } },
-        9 => .{ .kind = .intel_windfall, .log = "Recon delivers an intel windfall", .options = &.{
-            .{ .label = "Act on it tonight", .effects = &.{ .{ .score = 2 }, .{ .xp_all = 1 }, .{ .fatigue = 4 } } },
-            .{ .label = "Pass it to the employer", .effects = &.{ .{ .score = 1 }, .{ .employer_standing = 1 } } },
-        }, .default_choice = 1 },
-        10 => .{ .kind = .captured_salvage, .log = "Battlefield salvage recovered: parts and armor crated home", .auto_effects = &.{
-            .{ .parts_windfall = 2 }, .{ .field_stock = .{ .key = "armor", .qty = 4 } },
+        9 => .{ .kind = .intel_windfall, .log = "Recon delivers an intel windfall; the lances act on it overnight", .auto_effects = &.{
+            .{ .score = 2 }, .{ .xp_all = 1 }, .{ .fatigue = 3 },
         } },
+        10 => .{ .kind = .captured_salvage, .log = "Battlefield salvage recovered", .options = &.{
+            .{ .label = "Crate it home for the depot", .effects = &.{.{ .parts_windfall = 2 }} },
+            .{ .label = "Strip it for the trucks now", .effects = &.{ .{ .field_stock = .{ .key = "armor", .qty = 4 } }, .{ .field_stock = .{ .key = "mlas", .qty = 1 } }, .{ .fatigue = 3 } } },
+        }, .default_choice = 0 },
         11 => .{ .kind = .local_support_offer, .log = "Local militia offers support — for a price", .options = &.{
             .{ .label = "Pay them 100k", .effects = &.{ .{ .cash = -100_000 }, .{ .score = 2 } } },
             .{ .label = "Refuse", .effects = &.{} },
@@ -132,11 +135,9 @@ fn weeklyDeck(garrison: bool, roll: u8) Entry {
         10 => .{ .kind = .local_festival, .log = "The town's harvest festival — the company gets the day", .auto_effects = &.{
             .{ .morale = 3 },
         } },
-        11 => .{ .kind = .training_exercise, .log = "Quiet week — time for a live-fire exercise?", .options = &.{
-            .{ .label = "Run it hard", .effects = &.{ .{ .xp_all = 2 }, .{ .fatigue = 6 } } },
-            .{ .label = "Light drills", .effects = &.{.{ .xp_all = 1 }} },
-            .{ .label = "Stand down", .effects = &.{.{ .morale = 2 }} },
-        }, .default_choice = 1 },
+        11 => .{ .kind = .training_exercise, .log = "A quiet week spent on live-fire drills", .auto_effects = &.{
+            .{ .xp_all = 1 }, .{ .fatigue = 3 },
+        } },
         12 => .{ .kind = .press_visit, .log = "A news crew embeds with the company for a week; the troops enjoy the attention", .auto_effects = &.{
             .{ .morale = 2 }, .{ .fatigue = 1 },
         } },
@@ -206,7 +207,7 @@ pub fn rollWeekly(gs: *GameState) !void {
         const ctx: @import("state.zig").LogCtx = .{ .company = c.assigned_company, .contract = c.id };
         if (deck.options.len == 0) {
             try applyEffects(gs, deck.auto_effects, c);
-            try gs.log(.contract, ctx, "[{s}] {s}", .{ @tagName(c.kind), deck.log });
+            try gs.log(.contract, ctx, "[{s}] (2d6 = {d}) {s}{s}", .{ @tagName(c.kind), roll, deck.log, try effectsPlain(gs, deck.auto_effects) });
         } else {
             try gs.event_queue.push(gs.allocator(), .{
                 .day = gs.clock.day_index,
@@ -220,6 +221,27 @@ pub fn rollWeekly(gs: *GameState) !void {
             try gs.log(.decision, ctx, "[{s}] DECISION: {s} (inbox, {d} days to answer)", .{ @tagName(c.kind), deck.log, decision_window_days });
         }
     }
+}
+
+/// " — fatigue +3, morale −2" for an automatic event's log line.
+fn effectsPlain(gs: *GameState, effects: []const events.Effect) ![]const u8 {
+    if (effects.len == 0) return "";
+    var out: std.ArrayListUnmanaged(u8) = .empty;
+    try out.appendSlice(gs.allocator(), " — ");
+    for (effects, 0..) |e, i| {
+        if (i > 0) try out.appendSlice(gs.allocator(), ", ");
+        const piece: []const u8 = switch (e) {
+            .fatigue => |f| try std.fmt.allocPrint(gs.allocator(), "fatigue +{d}", .{f}),
+            .morale => |m| try std.fmt.allocPrint(gs.allocator(), "morale {s}{d}", .{ if (m < 0) "−" else "+", @abs(m) }),
+            .xp_all => |x| try std.fmt.allocPrint(gs.allocator(), "XP +{d} all", .{x}),
+            .score => |s| try std.fmt.allocPrint(gs.allocator(), "score {s}{d}", .{ if (s < 0) "−" else "+", @abs(s) }),
+            .reputation => |r| try std.fmt.allocPrint(gs.allocator(), "reputation {s}{d}", .{ if (r < 0) "−" else "+", @abs(r) }),
+            .employer_standing => |d| try std.fmt.allocPrint(gs.allocator(), "employer standing {s}{d}", .{ if (d < 0) "−" else "+", @abs(d) }),
+            else => @tagName(e),
+        };
+        try out.appendSlice(gs.allocator(), piece);
+    }
+    return out.items;
 }
 
 test "weekly deck: every non-quiet kind resolves through entryForKind" {
@@ -249,7 +271,7 @@ pub fn rollMonthly(gs: *GameState) !void {
         const ctx: @import("state.zig").LogCtx = .{ .company = c.assigned_company, .contract = c.id };
         if (deck.options.len == 0) {
             try applyEffects(gs, deck.auto_effects, c);
-            try gs.log(.contract, ctx, "[{s}] {s}", .{ @tagName(c.kind), deck.log });
+            try gs.log(.contract, ctx, "[{s}] (2d6 = {d}) {s}{s}", .{ @tagName(c.kind), roll, deck.log, try effectsPlain(gs, deck.auto_effects) });
         } else {
             try gs.event_queue.push(gs.allocator(), .{
                 .day = gs.clock.day_index,
@@ -554,15 +576,15 @@ test "12.22: the black market and a salvage dispute move standing and field stoc
     try std.testing.expect(weeklyDeck(false, 9).kind == .black_market_contact);
 }
 
-test "12.24: automatic events touch only fatigue and morale; XP, hull damage and supply costs are decisions" {
+test "12.24: automatic events never move money, stock or hulls — those are decisions" {
     var roll: u8 = 2;
     while (roll <= 12) : (roll += 1) {
         const decks = [_]Entry{ garrisonDeck(roll), combatDeck(roll), weeklyDeck(true, roll), weeklyDeck(false, roll) };
         for (decks) |e| {
             if (e.options.len > 0) continue;
             for (e.auto_effects) |fx| switch (fx) {
-                .fatigue, .morale, .score, .reputation, .cash, .cash_monthly_pct, .parts_windfall, .field_stock, .employer_standing => {},
-                .xp_all, .damage_random_units, .damage_convoy_units, .supply_loss => {
+                .fatigue, .morale, .xp_all, .score, .reputation, .employer_standing => {},
+                .cash, .cash_monthly_pct, .supply_loss, .parts_windfall, .field_stock, .damage_random_units, .damage_convoy_units => {
                     std.debug.print("auto event {s} carries a player-facing effect\n", .{@tagName(e.kind)});
                     return error.TestUnexpectedResult;
                 },
