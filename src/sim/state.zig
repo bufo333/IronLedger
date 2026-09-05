@@ -589,7 +589,10 @@ pub const GameState = struct {
         const hq = &self.hqs.values()[0];
         var bonus: i32 = hq.effectiveFacilityLevel(.hiring_hall);
         if (self.hqStaff(hq.id, .admin_hr).count >= 2) bonus += 1;
-        return @min(bonus, 3);
+        // A famous outfit (12C.7) draws a better class of walk-in.
+        const queries = @import("queries.zig");
+        if (queries.ratingIndex(queries.ratingScore(self)) >= @import("../domain/tuning.zig").t.rating.recruit_bonus_index) bonus += 1;
+        return @min(bonus, 4);
     }
 
     // ------------------------------------- the HQ network (Stage 9D)

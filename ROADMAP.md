@@ -799,12 +799,15 @@ item: tests green, both smokes, ROADMAP tick, one commit.
   against payroll, overdrawn −20). Letters F/D/C/B/A/A* at
   `tuning.rating` thresholds. Desk checklist title and the Contracts
   notes line carry it; `rating` REPL verb prints the parts.
-- ⬜ 12C.7 **Rating drives the board**: offer count and employer tier by
-  rating letter (F: pirates and periphery only; C+: Great Houses; A:
-  ComStar/major-house planetary assaults), pay multiplier by letter
-  replacing `reputationMultBp`, salvage/command rights negotiation
-  modifiers by letter (12B.3 hooks). Recruits at the hall skew better for
-  higher-rated outfits (`recruitBonus` uses the rating).
+- ✅ 12C.7 **Rating drives the board**: offers on the board = letter index
+  (F 0 … A* 5) + comms, never under one; an F-rated outfit hears only
+  from periphery and pirate employers and is never handed a planetary
+  assault; pay multiplier by letter (`pay_bp_f` 0.8 … `pay_bp_a_star`
+  1.3) replaces the old reputation multiplier; the negotiation edge is
+  the letter index − 2 (F −2 … A* +3); an A-rated outfit adds one to
+  the hall's recruit roll. A fresh outfit starts C: the combat record
+  carries `record_unproven` (−15) until the first contract closes, and
+  the letter thresholds are D 0 / C 30 / B 60 / A 90 / A* 120.
 - ⬜ 12C.8 **Campaign summary screen** (`F0`/`:summary`): contracts by
   grade, battles won/lost/drawn, kills and losses by weight class,
   C-bills earned and spent by category, people hired/lost/KIA, hulls

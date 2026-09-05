@@ -27,8 +27,12 @@ pub fn standingPayBp(standing: i32) types.Bp {
 }
 
 /// Reputation payment multiplier: ±0.5% per point, clamped. // TUNE
-pub fn reputationMultBp(reputation: i32) types.Bp {
-    return std.math.clamp(10_000 + @as(types.Bp, reputation) * 50, 8_000, 13_000);
+/// The five Successor States (12C.7): the employers an F-rated outfit
+/// cannot get in front of.
+pub fn isGreatHouse(faction_key: []const u8) bool {
+    const houses = [_][]const u8{ "LC", "DC", "FS", "CC", "FWL" };
+    for (houses) |h| if (std.mem.eql(u8, h, faction_key)) return true;
+    return false;
 }
 
 /// Employers price contracts off your operating costs with a market margin
@@ -100,7 +104,11 @@ pub fn refresh(gs: *GameState) !void {
     const ops_cost = gs.monthlyPayroll() + hullUpkeep(gs) + maintenanceEstimate(gs);
     const base = types.applyBp(@max(ops_cost, tuning.market.min_ops_cost), market_margin_bp);
 
-    const offer_count = market.contractOfferCount(gs.reputation, best_comms);
+    // The Dragoons rating (12C.7) sets how many come calling, who, and at what pay.
+    const queries = @import("../sim/queries.zig");
+    const rt = tuning.rating;
+    const rating_idx = queries.ratingIndex(queries.ratingScore(gs));
+    const offer_count = market.contractOfferCount(rating_idx, best_comms);
     var attempts: u32 = 0;
     while (gs.contract_offers.items.len < offer_count and attempts < 400) : (attempts += 1) {
         const world = &planet.catalog[gs.rng.random(.market).uintLessThan(usize, planet.catalog.len)];
@@ -108,7 +116,11 @@ pub fn refresh(gs: *GameState) !void {
         const vis = bestVisibility(gs, world);
         if (vis[0] == .hidden) continue;
 
-        const kind = rollKind(gs);
+        // Great Houses do not hire an F-rated outfit, and nobody hands
+        // one a planetary assault.
+        if (rating_idx < rt.house_min_index and isGreatHouse(world.faction)) continue;
+        var kind = rollKind(gs);
+        if (kind == .planetary_assault and rating_idx < rt.assault_min_index) kind = .garrison_duty;
         const length_variance: i32 = @as(i32, gs.rng.roll2d6(.market)) - 7;
         const length: u8 = @intCast(std.math.clamp(
             @as(i32, kind.baseLengthMonths()) + length_variance,
@@ -117,7 +129,7 @@ pub fn refresh(gs: *GameState) !void {
         ));
 
         // Beachhead employers pay a premium — nobody else will go.
-        var pay = contract.monthlyPayment(base, kind, employerMultBp(world.faction), reputationMultBp(gs.reputation));
+        var pay = contract.monthlyPayment(base, kind, employerMultBp(world.faction), queries.ratingPayBp(rating_idx));
         if (vis[0] == .beachhead) pay = types.applyBp(pay, tuning.market.beachhead_pay_bp);
         // A cooling employer (Stage 9E breach): half the offers, 70% pay.
         if (gs.factionCooling(world.faction)) {
@@ -630,6 +642,29 @@ test "12: every admin desk walks into the hall, short desks first" {
     }
     try std.testing.expect(seen_finance);
     try std.testing.expect(seen_command);
+}
+
+test "12C.7: an F-rated outfit hears only from the periphery and never gets a planetary assault" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 127 });
+    defer gs.deinit();
+    _ = try gs.createCommander("T", .LC, .paymaster);
+    _ = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    gs.funds = -1;
+    gs.reputation = -100; // record −40, treasury −20 …
+    var pit = gs.people.iterator();
+    while (pit.next()) |e| if (e.value_ptr.role.isCombat()) {
+        try e.value_ptr.skills.put(gs.allocator(), e.value_ptr.role.primarySkill(), 7); // … and green as grass: firmly F
+    };
+    const queries = @import("../sim/queries.zig");
+    try std.testing.expectEqual(@as(u8, 0), queries.ratingIndex(queries.ratingScore(&gs)));
+    gs.contract_offers.clearRetainingCapacity();
+    try refresh(&gs);
+    for (gs.contract_offers.items) |o| {
+        try std.testing.expect(!isGreatHouse(o.employer_key));
+        try std.testing.expect(o.kind != .planetary_assault);
+    }
+    try std.testing.expectEqual(@as(types.Bp, 8_000), queries.ratingPayBp(0));
+    try std.testing.expectEqual(@as(types.Bp, 13_000), queries.ratingPayBp(5));
 }
 
 test "no HQ, no reputation, no offers" {

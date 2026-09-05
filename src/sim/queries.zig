@@ -1881,6 +1881,38 @@ pub const Rating = struct {
     line: []const u8,
 };
 
+/// Letter index 0…5 (F, D, C, B, A, A*) — what the board reads (12C.7).
+pub fn ratingIndex(score: i32) u8 {
+    const t = @import("../domain/tuning.zig").t.rating;
+    if (score >= t.letter_a_star) return 5;
+    if (score >= t.letter_a) return 4;
+    if (score >= t.letter_b) return 3;
+    if (score >= t.letter_c) return 2;
+    if (score >= t.letter_d) return 1;
+    return 0;
+}
+
+/// The score alone, for callers without an arena (the market, negotiation).
+pub fn ratingScore(gs: *GameState) i32 {
+    var arena = std.heap.ArenaAllocator.init(gs.allocator());
+    defer arena.deinit();
+    const r = rating(arena.allocator(), gs) catch return 0;
+    return r.score;
+}
+
+/// Pay multiplier the letter earns (12C.7).
+pub fn ratingPayBp(index: u8) types.Bp {
+    const t = @import("../domain/tuning.zig").t.rating;
+    return switch (index) {
+        0 => t.pay_bp_f,
+        1 => t.pay_bp_d,
+        2 => t.pay_bp_c,
+        3 => t.pay_bp_b,
+        4 => t.pay_bp_a,
+        else => t.pay_bp_a_star,
+    };
+}
+
 pub fn ratingLetter(score: i32) []const u8 {
     const t = @import("../domain/tuning.zig").t.rating;
     if (score >= t.letter_a_star) return "A*";
@@ -1910,7 +1942,7 @@ pub fn rating(alloc: Alloc, gs: *GameState) !Rating {
             n += 1;
         }
         const avg_x10: u32 = if (n > 0) sum * 10 / n else 70;
-        const score: i32 = if (avg_x10 <= 30) 40 else if (avg_x10 <= 40) 30 else if (avg_x10 <= 50) 20 else if (avg_x10 <= 60) 10 else 0;
+        const score: i32 = if (avg_x10 <= 30) 40 else if (avg_x10 <= 35) 30 else if (avg_x10 <= 40) 20 else if (avg_x10 <= 50) 10 else 0;
         try parts.append(alloc, .{ .name = "experience", .score = score, .note = try std.fmt.allocPrint(alloc, "{d} combat crew, average skill {d}.{d}", .{ n, avg_x10 / 10, avg_x10 % 10 }) });
     }
     // Command: desks staffed at every HQ, officers on the books.
@@ -1958,8 +1990,9 @@ pub fn rating(alloc: Alloc, gs: *GameState) !Rating {
             }
         }
         pts += gs.reputation;
+        if (done == 0) pts += t.record_unproven; // nobody has seen you fight
         const score = std.math.clamp(pts, -t.record_cap, t.record_cap);
-        try parts.append(alloc, .{ .name = "combat record", .score = score, .note = try std.fmt.allocPrint(alloc, "{d} contract{s} closed, reputation {d}", .{ done, if (done == 1) "" else "s", gs.reputation }) });
+        try parts.append(alloc, .{ .name = "combat record", .score = score, .note = try std.fmt.allocPrint(alloc, "{d} contract{s} closed{s}, reputation {d}", .{ done, if (done == 1) "" else "s", if (done == 0) " (unproven)" else "", gs.reputation }) });
     }
     // Transport: own lift for the companies at home, own jumpship.
     {
@@ -3034,7 +3067,9 @@ test "12C.6: the rating scores six parts and a fresh outfit lands in the low let
     try std.testing.expectEqual(sum, r.score);
     try std.testing.expectEqualStrings(ratingLetter(r.score), r.letter);
     try std.testing.expectEqualStrings("F", ratingLetter(-1));
-    try std.testing.expectEqualStrings("A*", ratingLetter(100));
+    try std.testing.expectEqualStrings("A*", ratingLetter(120));
+    // A fresh, fully manned regular company is a C or a low B: unproven, no ships.
+    try std.testing.expect(r.score >= 30 and r.score < 90);
     // An overdrawn treasury and a breach drag the letter down.
     const before = r.score;
     gs.funds = -1;

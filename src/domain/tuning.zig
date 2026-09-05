@@ -227,6 +227,8 @@ pub const Tuning = struct {
         letter_b: i32,
         letter_a: i32,
         letter_a_star: i32,
+        /// The combat record of an outfit that has never closed a contract.
+        record_unproven: i32,
         record_outstanding: i32,
         record_strong: i32,
         record_satisfactory: i32,
@@ -234,6 +236,20 @@ pub const Tuning = struct {
         record_failed: i32,
         record_breached: i32,
         record_cap: i32,
+        /// 12C.7 — what the letter buys on the board: pay multiplier per
+        /// letter (F…A*), the letter index from which the Great Houses hire
+        /// (0 = F, 1 = D, …), the index from which planetary assaults are
+        /// offered, and the negotiation edge (index − `negotiation_offset`).
+        pay_bp_f: types.Bp,
+        pay_bp_d: types.Bp,
+        pay_bp_c: types.Bp,
+        pay_bp_b: types.Bp,
+        pay_bp_a: types.Bp,
+        pay_bp_a_star: types.Bp,
+        house_min_index: u8,
+        assault_min_index: u8,
+        negotiation_offset: i32,
+        recruit_bonus_index: u8,
     },
     contract: struct {
         grace_days: u32,
@@ -272,12 +288,11 @@ pub const Tuning = struct {
         salvage_exchange_bp: types.Bp,
         salvage_cbills_per_bv: types.CBills,
         salvage_exchange_in: u32,
-        /// Negotiation (12B.3, CamOps): 2d6 + reputation/`negotiation_rep_per`
+        /// Negotiation (12B.3, CamOps): 2d6 + the rating edge (12C.7)
         /// + the command office's skill edge vs `negotiation_target` −
         /// standing/`negotiation_standing_per`; a miss hardens the pay by
         /// `negotiation_fail_pay_bp`; a natural 2 withdraws the offer.
         negotiation_target: i32,
-        negotiation_rep_per: i32,
         negotiation_standing_per: i32,
         negotiation_fail_pay_bp: types.Bp,
         negotiation_pay_step_bp: types.Bp,

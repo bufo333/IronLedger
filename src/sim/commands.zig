@@ -1595,7 +1595,9 @@ fn negotiate(gs: *GameState, offer_index: usize, term: contract_mod.NegotiableTe
     const seat: types.HqId = if (gs.hqs.count() > 0) gs.hqs.keys()[0] else .none;
     const office = if (seat != .none) gs.hqStaff(seat, .admin_command) else state_mod.StaffSummary{};
     const office_edge: i32 = if (office.count == 0) -1 else 5 - @as(i32, office.best_skill);
-    const rep_edge: i32 = std.math.clamp(@divTrunc(gs.reputation, t.negotiation_rep_per), -3, 3);
+    // The letter at the table (12C.7): F −2 … A* +3.
+    const queries = @import("queries.zig");
+    const rep_edge: i32 = @as(i32, queries.ratingIndex(queries.ratingScore(gs))) - tuning.rating.negotiation_offset;
     const target: i32 = t.negotiation_target - @divTrunc(gs.standing(c.employer_key), t.negotiation_standing_per);
     const raw = gs.rng.roll2d6(.market);
     const total: i32 = @as(i32, raw) + office_edge + rep_edge;
@@ -2879,7 +2881,12 @@ test "12: the resupply plan keeps a deployed company fed and armed on a long lin
     try gs.addStock(.{ .hq = hq }, "provisions", 400);
     try gs.addStock(.{ .hq = hq }, "medical_supplies", 30);
     try gs.addStock(.{ .hq = hq }, "armor", 60);
-    _ = try execute(&gs, .{ .accept_contract = .{ .offer_index = 0, .company = co } });
+    // The nearest offer: the plan is judged on supply, not on a long transit.
+    var nearest: usize = 0;
+    for (gs.contract_offers.items, 0..) |o, i| if (o.dist_ly < gs.contract_offers.items[nearest].dist_ly) {
+        nearest = i;
+    };
+    _ = try execute(&gs, .{ .accept_contract = .{ .offer_index = nearest, .company = co } });
     // The load-out follows the plan: within capacity, no munitions the company cannot fire.
     const cap = gs.siteCapacityTons(site).?;
     try std.testing.expect(gs.siteTons(site) <= cap);
@@ -2989,7 +2996,11 @@ test "12.15: ships need berths, lift the company for less charter, and come home
 
     // Uncrewed, the ship lifts nothing: full charter. (The employer pays no
     // transport share here so the charter is a real number to compare.)
-    const offer = 0;
+    // An offer off-world, so there is a charter to compare.
+    var offer: usize = 0;
+    for (gs.contract_offers.items, 0..) |o, i| if (o.dist_ly > gs.contract_offers.items[offer].dist_ly) {
+        offer = i;
+    };
     gs.contract_offers.items[offer].terms.transport_pct = 0;
     const charter_full = blk: {
         const c = gs.contract_offers.items[offer];

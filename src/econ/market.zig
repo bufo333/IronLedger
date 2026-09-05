@@ -18,8 +18,10 @@ pub const RefreshCadence = struct {
 };
 
 /// Number of contract offers scales with reputation and comms facilities.
-pub fn contractOfferCount(reputation: i32, comms_level: u8) u8 {
-    const base: i32 = 2 + @divTrunc(reputation, 20) + comms_level;
+/// Offers on the board (12C.7): the rating letter index (F 0 … A* 5)
+/// plus the comms level, never fewer than one.
+pub fn contractOfferCount(rating_index: u8, comms_level: u8) u8 {
+    const base: i32 = @as(i32, rating_index) + comms_level;
     return @intCast(std.math.clamp(base, 1, 8));
 }
 
@@ -194,10 +196,10 @@ pub const ContractOffer = struct {
     expires_day: u32,
 };
 
-test "offer count clamps and grows with reputation" {
-    try std.testing.expectEqual(@as(u8, 2), contractOfferCount(0, 0));
-    try std.testing.expectEqual(@as(u8, 5), contractOfferCount(40, 1));
-    try std.testing.expectEqual(@as(u8, 8), contractOfferCount(200, 5));
+test "offer count clamps and grows with the rating letter" {
+    try std.testing.expectEqual(@as(u8, 1), contractOfferCount(0, 0)); // F, no comms: one offer regardless
+    try std.testing.expectEqual(@as(u8, 3), contractOfferCount(2, 1)); // C
+    try std.testing.expectEqual(@as(u8, 8), contractOfferCount(5, 5)); // A*, clamped
 }
 
 test "rarity works: common floods the boards, very rare is an event" {
