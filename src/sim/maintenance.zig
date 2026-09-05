@@ -78,17 +78,31 @@ pub fn runWeeklyMaintenance(gs: *GameState) !void {
 
         if (total <= tn - 2) {
             // Clear miss: quality drifts toward A; a snake-eyes week also
-            // breaks something (field-fixable or worse).
+            // breaks a piece of gear (weapon, equipment, ammo feed, armor —
+            // field-fixable). Neglect never cores a torso: structure is
+            // battle damage (12.19: a quiet garrison was filling the depot).
             const q = @intFromEnum(u.quality);
             if (q > 0) u.quality = @enumFromInt(q - 1);
             if (raw == 2 and u.slots.items.len > 0) {
-                const idx = gs.rng.random(.maintenance).uintLessThan(usize, u.slots.items.len);
-                const slot = &u.slots.items[idx];
-                slot.condition = switch (slot.condition) {
-                    .ok => .damaged,
-                    .damaged => .destroyed,
-                    else => slot.condition,
+                var gear: u32 = 0;
+                for (u.slots.items) |s| if (s.class != .structure) {
+                    gear += 1;
                 };
+                if (gear > 0) {
+                    var pick = gs.rng.random(.maintenance).uintLessThan(u32, gear);
+                    for (u.slots.items) |*slot| {
+                        if (slot.class == .structure) continue;
+                        if (pick == 0) {
+                            slot.condition = switch (slot.condition) {
+                                .ok => .damaged,
+                                .damaged => .destroyed,
+                                else => slot.condition,
+                            };
+                            break;
+                        }
+                        pick -= 1;
+                    }
+                }
             }
         } else if (total >= tn + 8) {
             // Exceptional work slowly restores a machine (rare by design).

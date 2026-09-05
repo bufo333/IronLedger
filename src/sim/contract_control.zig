@@ -80,12 +80,14 @@ pub fn complete(gs: *GameState, c: *contract_mod.Contract, objectives_broken: bo
         });
     }
     c.status = .completed;
-    // Reputation by victory points and score. // TUNE
+    // Reputation by victory points: a tour in the red earns none (12.19:
+    // a raid closed at −8 VP was still "reputation rises"). // TUNE
     const vp_bonus = std.math.clamp(@divTrunc(c.victory_points, 25), -1, 3);
-    gs.reputation += 1 + vp_bonus;
+    const gain: i32 = if (c.victory_points < 0) vp_bonus else 1 + vp_bonus; // −8 VP → 0, −25 VP → −1
+    gs.reputation += gain;
     try finishTour(gs, c);
     try gs.log(.contract, .{ .company = c.assigned_company, .contract = c.id }, "[{s}] contract COMPLETE ({s}, {d} VP, score {d}) — reputation {s}", .{
-        @tagName(c.kind), if (objectives_broken) "objectives broken" else "closed out", c.victory_points, c.score, if (vp_bonus > 0) "soars" else "rises",
+        @tagName(c.kind), if (objectives_broken) "objectives broken" else "closed out", c.victory_points, c.score, if (vp_bonus > 0) "soars" else if (gain > 0) "rises" else if (gain == 0) "unchanged" else "slips",
     });
 }
 
