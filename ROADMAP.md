@@ -640,7 +640,7 @@ map. Each item ends green with a ROADMAP tick, as before.
   (favoured houses bargain easier): success improves the chosen term one
   step (advance 25→50%, salvage +10, transport +20, support +25, or
   command rights one step toward independent); failure hardens the offer
-  (pay −5%) or, on a 2, withdraws it. Contracts screen `N` opens a term
+  (pay −5%) or, on a 2, withdraws it. Contracts screen `b` (bargain) opens a term
   picker; the offer row shows "negotiated" and what changed. Persisted
   (`negotiated` flag on the offer, store bump).
 - ⬜ 12B.4 **Ranks** (MekHQ `personnel/ranks`; CamOps mercenary table).

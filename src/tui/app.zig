@@ -1447,7 +1447,7 @@ pub const App = struct {
                     "  {a}screens{/}     F1-F8 or 1-8 · Tab / Shift-Tab cycles panes · j/k or arrows move the cursor",
                     "  {a}turn{/}        n ends the turn (the checklist opens first) · N ends 7 turns",
                     "  {a}desk{/}        Enter on an inbox row opens the decision · Enter on a checklist row jumps to its screen",
-                    "  {a}contracts{/}   Enter accepts the offer under the cursor · n negotiates one term (one round per offer) · c completes · R recalls",
+                    "  {a}contracts{/}   Enter accepts the offer under the cursor · b bargains one term (one round per offer) · c completes · R recalls",
                     "  {a}ledger{/}      j/k picks the treasury · t transfer · p policy · L loan",
                     "  {a}forces{/}      [ ] page through all forces, each company, the unassigned pool · a assign · u unassign · A auto-assign the company · t train · cursor on a company = DAMAGE pane (struct = depot, gear = field), r swaps it for READINESS · w air wing · b fabricates the shortest comp_*",
                     "  {a}hq{/}          [ ] switch HQ · u upgrade · S autostaff · h hire · f/F hall filter",
@@ -2545,7 +2545,7 @@ pub const App = struct {
                 if (self.focus == 2) return; // history is read-only: the log pane follows the cursor
                 const view = try q.contracts(al, g);
                 if (self.focus == 0) {
-                    if (ch == 'n' and view.board.len > 0) {
+                    if (ch == 'b' and view.board.len > 0) { // bargain: n is end-turn everywhere
                         const idx = view.board[@min(self.cur(0).*, view.board.len - 1)].index;
                         if (idx < g.contract_offers.items.len and g.contract_offers.items[idx].negotiated) {
                             self.say(.dim, "that offer has had its negotiation round — take it or leave it", .{});

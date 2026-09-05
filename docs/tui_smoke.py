@@ -66,7 +66,7 @@ send("+", 0.6); send("-", 0.6); send("-", 0.6)
 assert "zoom ×1" in plain()[-30000:], plain()[-3000:]
 send("4")                      # contracts tab
 assert "CONTRACT BOARD" in plain() and "HISTORY" in plain(), plain()[-3000:]
-send("n", 0.8)                 # negotiation term picker on the offer under the cursor
+send("b", 0.8)                 # bargain: negotiation term picker on the offer under the cursor
 assert "NEGOTIATE" in plain()[-30000:] and "salvage" in plain()[-30000:], plain()[-3000:]
 send("\x1b", 0.6)
 send("\t"); send("\t", 0.6)    # focus the history pane; read-only
