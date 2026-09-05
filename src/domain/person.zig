@@ -152,6 +152,9 @@ pub const Person = struct {
     /// Shares in contract profit (12C.3, AtB shares): refreshed each payday
     /// from tenure, founding and rank; paid out pro rata at completion.
     shares: u8 = 0,
+    /// Birthday as a day index relative to campaign start (negative for
+    /// everyone born before it); null = unknown (legacy saves, bare hires).
+    born_day: ?i32 = null,
     /// Per-location injuries (Stage 12.16); open ones keep the person in
     /// the medbay, permanent ones stay on the record.
     injuries: std.ArrayListUnmanaged(Injury) = .empty,
@@ -235,6 +238,21 @@ pub const Person = struct {
         if (self.fatigue > tuning.person.exhausted_fatigue) n += 1;
         // A stake in the outfit (12C.3) keeps people at the table.
         return n -| (self.shares / tuning.person.shares_per_restless);
+    }
+
+    /// Age in years on `day` (12C.4), if the birthday is known.
+    pub fn ageYears(self: *const Person, day: u32) ?u32 {
+        const born = self.born_day orelse return null;
+        const days = @as(i64, day) - @as(i64, born);
+        return if (days < 0) 0 else @intCast(@divTrunc(days, 365));
+    }
+
+    /// XP award scaled for youth (12C.4): the young learn faster.
+    pub fn xpGain(self: *const Person, day: u32, base: u32) u32 {
+        const t = tuning.person;
+        const age = self.ageYears(day) orelse return base;
+        if (age >= t.age_young) return base;
+        return @intCast(@divTrunc(@as(u64, base) * t.xp_young_bp + 9_999, 10_000));
     }
 
     /// On the books from day one (12C.3): founders hold more shares and
@@ -441,6 +459,18 @@ test "12C.3: shares from tenure, founding and rank; they calm restlessness and h
     try std.testing.expectEqual(@divTrunc(without, 2), f.severance(day));
     f.shares = 0;
     try std.testing.expectEqual(without, f.severance(day));
+}
+
+test "12C.4: age from the birthday; the young learn faster" {
+    var p: Person = .{ .id = @enumFromInt(1), .first_name = "A", .last_name = "B", .role = .mekwarrior };
+    try std.testing.expect(p.ageYears(100) == null);
+    try std.testing.expectEqual(@as(u32, 3), p.xpGain(100, 3)); // unknown age: unchanged
+    p.born_day = -20 * 365;
+    try std.testing.expectEqual(@as(u32, 20), p.ageYears(0).?);
+    try std.testing.expectEqual(@as(u32, 21), p.ageYears(365).?);
+    try std.testing.expectEqual(@as(u32, 4), p.xpGain(0, 3)); // 3 × 1.2 rounded up
+    p.born_day = -40 * 365;
+    try std.testing.expectEqual(@as(u32, 3), p.xpGain(0, 3));
 }
 
 test "12C.1: fatigue bands and their penalties" {

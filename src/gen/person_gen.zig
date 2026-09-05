@@ -24,7 +24,30 @@ pub const GeneratedPerson = struct {
     /// combat crews; primary tech/medical/admin skill twice for support).
     primary_skill: u8,
     secondary_skill: u8,
+    /// Age in years at generation (12C.4).
+    age: u8 = 30,
 };
+
+/// Age band by trade and experience (12C.4, MekHQ `RandomAge`-style):
+/// cockpits skew young and the elite have been at it a while; techs span
+/// a career; doctors and desk staff have had one already.
+pub fn rollAge(rng: *rng_mod.Rng, role: person.Role, xp: types.ExperienceLevel) u8 {
+    const r = rng.random(.generation);
+    const band: struct { u8, u8 } = if (role.isCombat())
+        switch (xp) {
+            .green => .{ 19, 25 },
+            .regular => .{ 23, 32 },
+            .veteran => .{ 28, 40 },
+            .elite => .{ 33, 48 },
+        }
+    else switch (role) {
+        .doctor => .{ 30, 60 },
+        .admin_command, .admin_logistics, .admin_transport, .admin_hr, .admin_finance => .{ 25, 55 },
+        .astech, .medic => .{ 18, 40 },
+        else => .{ 20, 50 }, // techs and ship crews
+    };
+    return band[0] + r.uintLessThan(u8, band[1] - band[0] + 1);
+}
 
 /// Skill levels per experience band (combat convention: gunnery/piloting;
 /// support roles use `primary` only).
@@ -59,7 +82,18 @@ pub fn generateWithBonus(rng: *rng_mod.Rng, role: person.Role, bonus: i32) Gener
         .experience = xp,
         .primary_skill = skills[0],
         .secondary_skill = if (combat) skills[1] else skills[0],
+        .age = rollAge(rng, role, xp),
     };
+}
+
+test "12C.4: ages sit in the trade's band" {
+    var rng = rng_mod.Rng.init(4);
+    for (0..40) |_| {
+        const pilot = generate(&rng, .mekwarrior);
+        try std.testing.expect(pilot.age >= 19 and pilot.age <= 48);
+        const doc = generate(&rng, .doctor);
+        try std.testing.expect(doc.age >= 30 and doc.age <= 60);
+    }
 }
 
 test "generation is deterministic per seed and skills match the band" {

@@ -413,6 +413,7 @@ pub const GameState = struct {
         const id = try self.hirePerson(spec.first, spec.last, role);
         const p = self.person(id).?;
         if (spec.callsign) |c| p.callsign = try self.allocator().dupe(u8, c);
+        p.born_day = @as(i32, @intCast(self.clock.day_index)) - @as(i32, spec.age) * 365;
 
         // Overwrite the hire defaults with the generated experience band.
         const alloc = self.allocator();

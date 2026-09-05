@@ -186,7 +186,7 @@ fn runTrainingLances(gs: *GameState) void {
         const lance = gs.forces.getPtr(p.assigned_force) orelse continue;
         if (lance.role != .training) continue;
         if (!gs.isCompanyHome(gs.companyOf(lance.id))) continue;
-        p.xp += 1;
+        p.xp += p.xpGain(gs.clock.day_index, 1);
     }
 }
 

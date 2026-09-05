@@ -1459,12 +1459,12 @@ pub fn hall(alloc: Alloc, gs: *GameState, hq_id: types.HqId, filter: HallFilter)
             }
         }
         const name = try std.fmt.allocPrint(alloc, "{s} {s}", .{ c.spec.first, c.spec.last });
-        try rows.append(alloc, .{ .index = i, .text = try std.fmt.allocPrint(alloc, "[{d: <3}] {s: <22} {s: <15} {s: <8} {d: >2} {s: >9}  d{d: <4} {s}", .{
-            i, clip(name, 22), @tagName(c.spec.role), @tagName(c.spec.experience), c.spec.primary_skill, try money(alloc, c.asking_bonus), c.expires_day, note,
+        try rows.append(alloc, .{ .index = i, .text = try std.fmt.allocPrint(alloc, "[{d: <3}] {s: <22} {s: <15} {s: <8} {d: >2} {d: >3} {s: >9}  d{d: <4} {s}", .{
+            i, clip(name, 22), @tagName(c.spec.role), @tagName(c.spec.experience), c.spec.primary_skill, c.spec.age, try money(alloc, c.asking_bonus), c.expires_day, note,
         }) });
     }
     return .{
-        .header = "idx   name                   role            exp      sk     bonus  leaves note",
+        .header = "idx   name                   role            exp      sk age     bonus  leaves note",
         .rows = try rows.toOwnedSlice(alloc),
         .total_at_hq = total,
     };
@@ -2173,6 +2173,10 @@ pub fn personRecord(alloc: Alloc, gs: *GameState, id: types.PersonId) ![]const [
             if (std.mem.eql(u8, key, "edge")) try line.appendSlice(alloc, if (p.edge_spent) " (spent this contract)" else " (ready)");
         }
         try out.append(alloc, line.items);
+    }
+    if (p.ageYears(day)) |age| {
+        const tp = @import("../domain/tuning.zig").t.person;
+        try out.append(alloc, try std.fmt.allocPrint(alloc, "age         {d}{s}", .{ age, if (age >= tp.age_retire) " · {c}retiring on the next payday home{/}" else if (age >= tp.age_old) " · {a}getting on — an extra restless flag on payday{/}" else if (age < tp.age_young) " · {g}young — learns 20% faster{/}" else "" }));
     }
     if (p.shares > 0 or p.isFounder()) try out.append(alloc, try std.fmt.allocPrint(alloc, "shares      {d} share{s}{s} · {d}% of contract income is split among shareholders at completion", .{ p.shares, if (p.shares == 1) "" else "s", if (p.isFounder()) " · founder" else "", @divTrunc(gs.share_profit_bp, 100) }));
     try out.append(alloc, try std.fmt.allocPrint(alloc, "record      {d} kill{s} ({d} BV) · {d} battle{s} · {d} tour{s}{s}", .{ p.kills, if (p.kills == 1) "" else "s", p.kill_bv, p.battles, if (p.battles == 1) "" else "s", p.tours, if (p.tours == 1) "" else "s", if (p.outstanding_tours > 0) try std.fmt.allocPrint(alloc, " ({d} outstanding)", .{p.outstanding_tours}) else "" }));

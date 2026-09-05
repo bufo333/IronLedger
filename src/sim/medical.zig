@@ -257,10 +257,20 @@ pub fn runMonthlyTurnover(gs: *GameState) !u32 {
     while (it.next()) |entry| {
         const p = entry.value_ptr;
         if (p.status != .active) continue;
-        if (p.tenureMonths(day) < t.turnover_min_tenure_months) continue;
         // Nobody walks out mid-contract: notice waits for the tour to end.
         if (isDeployed(gs, p)) continue;
-        const restless = p.restlessness();
+        // Age (12C.4): past the line they hang up the neurohelmet.
+        const age = p.ageYears(day);
+        if (age != null and age.? >= t.age_retire) {
+            const company = gs.companyOf(p.assigned_force);
+            const paid = try @import("personnel.zig").depart(gs, p.id, .retired, 10_000, "retirement payout");
+            try gs.log(.rotation, .{ .company = company, .hq = p.posted_hq }, "[turnover] {s} {s} ({s}) retires at {d}{s}", .{ p.first_name, p.last_name, @tagName(p.role), age.?, if (paid > 0) try std.fmt.allocPrint(gs.allocator(), " — {d} c-bills paid out", .{paid}) else "" });
+            notices += 1;
+            continue;
+        }
+        if (p.tenureMonths(day) < t.turnover_min_tenure_months) continue;
+        var restless = p.restlessness();
+        if (age != null and age.? >= t.age_old) restless += 1;
         if (restless == 0) continue;
         const roll = gs.rng.roll2d6(.medical);
         if (roll >= t.turnover_target + restless) continue;
@@ -489,8 +499,11 @@ test "12.20/12.25: the restless hand in notice after a year (an inbox decision),
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .paymaster);
     _ = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
-    // Content and fresh: nobody stirs however low the dice.
+    // Content and fresh (and all thirty — age rolls are 12C.4's business):
+    // nobody stirs however low the dice.
     gs.clock.day_index = 400;
+    var ait = gs.people.iterator();
+    while (ait.next()) |e| e.value_ptr.born_day = -30 * 365;
     try std.testing.expectEqual(@as(u32, 0), try runMonthlyTurnover(&gs));
     // Everyone miserable with a year in: notices land in the inbox, nobody has left yet.
     var pit = gs.people.iterator();
@@ -522,6 +535,37 @@ test "12.20/12.25: the restless hand in notice after a year (an inbox decision),
     while (fit.next()) |e| e.value_ptr.morale = 0;
     fresh.clock.day_index = 100;
     try std.testing.expectEqual(@as(u32, 0), try runMonthlyTurnover(&fresh));
+}
+
+test "12C.4: the old retire on payday with their payout; the merely older roll to leave" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 124 });
+    defer gs.deinit();
+    _ = try gs.createCommander("T", .LC, .paymaster);
+    const old = try gs.hirePerson("Grey", "Beard", .tech_mek);
+    gs.clock.day_index = 400;
+    gs.person(old).?.born_day = -66 * 365;
+    const young = try gs.hirePerson("Young", "Gun", .mekwarrior);
+    gs.person(young).?.born_day = -22 * 365;
+    gs.person(young).?.morale = 100;
+    const funds = gs.funds;
+    _ = try runMonthlyTurnover(&gs);
+    try std.testing.expectEqual(person_mod.Status.retired, gs.person(old).?.status);
+    try std.testing.expect(gs.funds < funds); // a year in: one month's severance
+    try std.testing.expectEqual(person_mod.Status.active, gs.person(young).?.status);
+    // Fifty and content: one restless flag from age alone, so they roll (some seeds notice).
+    const older = try gs.hirePerson("Mid", "Career", .mekwarrior);
+    gs.person(older).?.born_day = -55 * 365;
+    gs.person(older).?.recruited_day = 0;
+    gs.person(older).?.morale = 100;
+    var noticed = false;
+    for (0..40) |_| {
+        _ = try runMonthlyTurnover(&gs);
+        for (gs.event_queue.pending.items) |ev| if (ev.person == older) {
+            noticed = true;
+        };
+        if (noticed) break;
+    }
+    try std.testing.expect(noticed);
 }
 
 test "12.30: garrison duty recovers fatigue in the field; a combat tour does not" {

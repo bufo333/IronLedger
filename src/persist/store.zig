@@ -25,7 +25,7 @@ const contract_events = @import("../sim/contract_events.zig");
 const network = @import("../sim/network.zig");
 const clock_mod = @import("../sim/clock.zig");
 
-pub const schema_version = 15;
+pub const schema_version = 16;
 
 const ddl =
     \\CREATE TABLE IF NOT EXISTS player (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_seq INTEGER NOT NULL);
@@ -35,7 +35,7 @@ const ddl =
     \\CREATE TABLE IF NOT EXISTS meta_text (cid INTEGER NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (cid, key));
     \\CREATE TABLE IF NOT EXISTS rng (cid INTEGER PRIMARY KEY, state BLOB NOT NULL);
     \\CREATE TABLE IF NOT EXISTS commander (cid INTEGER PRIMARY KEY, name TEXT NOT NULL, origin TEXT NOT NULL, profession TEXT NOT NULL);
-    \\CREATE TABLE IF NOT EXISTS person (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, first TEXT, last TEXT, callsign TEXT, role TEXT, xp INTEGER, status TEXT, fatigue INTEGER, morale INTEGER, recruited_day INTEGER, salary_override INTEGER, assigned_force INTEGER, posted_hq INTEGER, weekly_hours INTEGER, medbay_priority INTEGER, leave_until INTEGER, wound_heal_day INTEGER, training_skill TEXT, training_done INTEGER, admitted INTEGER NOT NULL DEFAULT 0, rank TEXT NOT NULL DEFAULT 'private', rank_pinned INTEGER NOT NULL DEFAULT 0, kills INTEGER NOT NULL DEFAULT 0, kill_bv INTEGER NOT NULL DEFAULT 0, battles INTEGER NOT NULL DEFAULT 0, tours INTEGER NOT NULL DEFAULT 0, outstanding_tours INTEGER NOT NULL DEFAULT 0, edge_spent INTEGER NOT NULL DEFAULT 0, faction TEXT NOT NULL DEFAULT '', shares INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (cid, id));
+    \\CREATE TABLE IF NOT EXISTS person (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, first TEXT, last TEXT, callsign TEXT, role TEXT, xp INTEGER, status TEXT, fatigue INTEGER, morale INTEGER, recruited_day INTEGER, salary_override INTEGER, assigned_force INTEGER, posted_hq INTEGER, weekly_hours INTEGER, medbay_priority INTEGER, leave_until INTEGER, wound_heal_day INTEGER, training_skill TEXT, training_done INTEGER, admitted INTEGER NOT NULL DEFAULT 0, rank TEXT NOT NULL DEFAULT 'private', rank_pinned INTEGER NOT NULL DEFAULT 0, kills INTEGER NOT NULL DEFAULT 0, kill_bv INTEGER NOT NULL DEFAULT 0, battles INTEGER NOT NULL DEFAULT 0, tours INTEGER NOT NULL DEFAULT 0, outstanding_tours INTEGER NOT NULL DEFAULT 0, edge_spent INTEGER NOT NULL DEFAULT 0, faction TEXT NOT NULL DEFAULT '', shares INTEGER NOT NULL DEFAULT 0, born_day INTEGER, PRIMARY KEY (cid, id));
     \\CREATE TABLE IF NOT EXISTS award (cid INTEGER NOT NULL, person_id INTEGER NOT NULL, key TEXT NOT NULL);
     \\CREATE TABLE IF NOT EXISTS ability (cid INTEGER NOT NULL, person_id INTEGER NOT NULL, key TEXT NOT NULL);
     \\CREATE TABLE IF NOT EXISTS person_skill (cid INTEGER NOT NULL, person_id INTEGER NOT NULL, skill TEXT NOT NULL, level INTEGER NOT NULL);
@@ -71,12 +71,10 @@ const ddl =
 ;
 
 const tables = [_][]const u8{
-    "meta",       "meta_text",   "rng",          "commander",       "person",       "person_skill", "injury", "award", "ability",
-    "unit",       "unit_slot",   "force",        "force_unit",      "force_child",  "stock",
-    "hq",         "hq_facility", "hq_project",   "contract",        "txn",          "loan",
-    "courier",    "policy",      "bay_job",      "candidate",       "hq_link",      "unit_transfer",
-    "supply_policy", "stock_policy",
-    "faction_cooling", "faction_standing", "listing", "part_order",  "event_log",       "pending_event", "refit_plan",
+    "meta",          "meta_text",    "rng",             "commander",        "person",      "person_skill", "injury",    "award",         "ability",
+    "unit",          "unit_slot",    "force",           "force_unit",       "force_child", "stock",        "hq",        "hq_facility",   "hq_project",
+    "contract",      "txn",          "loan",            "courier",          "policy",      "bay_job",      "candidate", "hq_link",       "unit_transfer",
+    "supply_policy", "stock_policy", "faction_cooling", "faction_standing", "listing",     "part_order",   "event_log", "pending_event", "refit_plan",
     "refit_op",
 };
 
@@ -114,6 +112,7 @@ pub const Store = struct {
         // v13 also adds the `ability` table (created by ddl).
         .{ .version = 14, .table = "person", .column = "faction", .sql = "ALTER TABLE person ADD COLUMN faction TEXT NOT NULL DEFAULT ''" },
         .{ .version = 15, .table = "person", .column = "shares", .sql = "ALTER TABLE person ADD COLUMN shares INTEGER NOT NULL DEFAULT 0" },
+        .{ .version = 16, .table = "person", .column = "born_day", .sql = "ALTER TABLE person ADD COLUMN born_day INTEGER" },
     };
 
     pub fn open(path: [*:0]const u8) !Store {
@@ -320,15 +319,13 @@ pub const Store = struct {
             const st = try self.db.prepare("INSERT INTO meta VALUES (?1, ?2, ?3)");
             defer st.finalize();
             const ints = [_]struct { []const u8, i64 }{
-                .{ "day_index", gs.clock.day_index },      .{ "year", gs.clock.date.year },
-                .{ "month", gs.clock.date.month },         .{ "day", gs.clock.date.day },
-                .{ "funds", gs.funds },                    .{ "reputation", gs.reputation },
-                .{ "bankrupt", @as(i64, @intFromBool(gs.bankrupt)) },
-                .{ "auto_admit", @as(i64, @intFromBool(gs.auto_admit)) },
-                .{ "share_profit_bp", @as(i64, gs.share_profit_bp) },
-                .{ "next_person_id", gs.next_person_id },  .{ "next_unit_id", gs.next_unit_id },
-                .{ "next_force_id", gs.next_force_id },    .{ "next_hq_id", gs.next_hq_id },
-                .{ "next_contract_id", gs.next_contract_id },
+                .{ "day_index", gs.clock.day_index },                 .{ "year", gs.clock.date.year },
+                .{ "month", gs.clock.date.month },                    .{ "day", gs.clock.date.day },
+                .{ "funds", gs.funds },                               .{ "reputation", gs.reputation },
+                .{ "bankrupt", @as(i64, @intFromBool(gs.bankrupt)) }, .{ "auto_admit", @as(i64, @intFromBool(gs.auto_admit)) },
+                .{ "share_profit_bp", @as(i64, gs.share_profit_bp) }, .{ "next_person_id", gs.next_person_id },
+                .{ "next_unit_id", gs.next_unit_id },                 .{ "next_force_id", gs.next_force_id },
+                .{ "next_hq_id", gs.next_hq_id },                     .{ "next_contract_id", gs.next_contract_id },
             };
             for (ints) |kv| {
                 try st.bindAll(.{ cid, kv[0], kv[1] });
@@ -355,7 +352,7 @@ pub const Store = struct {
 
         // People.
         {
-            const st = try self.db.prepare("INSERT INTO person VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32)");
+            const st = try self.db.prepare("INSERT INTO person VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33)");
             const aw = try self.db.prepare("INSERT INTO award VALUES (?1,?2,?3)");
             defer aw.finalize();
             const ab = try self.db.prepare("INSERT INTO ability VALUES (?1,?2,?3)");
@@ -370,19 +367,17 @@ pub const Store = struct {
             while (it.next()) |entry| : (ord += 1) {
                 const p = entry.value_ptr;
                 try st.bindAll(.{
-                    cid,                            ord,                            @intFromEnum(p.id),
-                    p.first_name,                   p.last_name,                    p.callsign,
-                    p.role,                         @as(i64, p.xp),                 p.status,
-                    @as(i64, p.fatigue),            @as(i64, p.morale),             @as(i64, p.recruited_day),
-                    p.salary_override,              @intFromEnum(p.assigned_force), @intFromEnum(p.posted_hq),
-                    @as(i64, p.weekly_hours),       @as(i64, p.medbay_priority),    p.leave_until_day,
-                    p.wound_heal_day,               if (p.training) |t| @as(?[]const u8, @tagName(t.skill)) else null,
-                    if (p.training) |t| @as(?u32, t.done_day) else null,
-                    @as(i64, @intFromBool(p.medbay_admitted)),
-                    p.rank,                         @as(i64, @intFromBool(p.rank_pinned)),
-                    @as(i64, p.kills),              @as(i64, p.kill_bv),            @as(i64, p.battles),
-                    @as(i64, p.tours),              @as(i64, p.outstanding_tours), @as(i64, @intFromBool(p.edge_spent)),
-                    p.faction,                      @as(i64, p.shares),
+                    cid,                                       ord,                                                               @intFromEnum(p.id),
+                    p.first_name,                              p.last_name,                                                       p.callsign,
+                    p.role,                                    @as(i64, p.xp),                                                    p.status,
+                    @as(i64, p.fatigue),                       @as(i64, p.morale),                                                @as(i64, p.recruited_day),
+                    p.salary_override,                         @intFromEnum(p.assigned_force),                                    @intFromEnum(p.posted_hq),
+                    @as(i64, p.weekly_hours),                  @as(i64, p.medbay_priority),                                       p.leave_until_day,
+                    p.wound_heal_day,                          if (p.training) |t| @as(?[]const u8, @tagName(t.skill)) else null, if (p.training) |t| @as(?u32, t.done_day) else null,
+                    @as(i64, @intFromBool(p.medbay_admitted)), p.rank,                                                            @as(i64, @intFromBool(p.rank_pinned)),
+                    @as(i64, p.kills),                         @as(i64, p.kill_bv),                                               @as(i64, p.battles),
+                    @as(i64, p.tours),                         @as(i64, p.outstanding_tours),                                     @as(i64, @intFromBool(p.edge_spent)),
+                    p.faction,                                 @as(i64, p.shares),
                 });
                 for (p.awards.items) |key| {
                     try aw.bindAll(.{ cid, @intFromEnum(p.id), key });
@@ -416,10 +411,10 @@ pub const Store = struct {
             while (it.next()) |entry| : (ord += 1) {
                 const u = entry.value_ptr;
                 try st.bindAll(.{
-                    cid,                     ord,                      @intFromEnum(u.id),        u.chassis_key,
-                    u.name,                  u.kind,                   @intFromEnum(u.force),     @intFromEnum(u.pilot),
-                    @intFromEnum(u.tech),    @as(i64, u.armor_pct),    u.quality,                 u.status,
-                    u.last_maintenance_day,  @as(i64, u.acquired_day), u.purchase_price,          u.reactivation_done_day,
+                    cid,                      ord,                      @intFromEnum(u.id),    u.chassis_key,
+                    u.name,                   u.kind,                   @intFromEnum(u.force), @intFromEnum(u.pilot),
+                    @intFromEnum(u.tech),     @as(i64, u.armor_pct),    u.quality,             u.status,
+                    u.last_maintenance_day,   @as(i64, u.acquired_day), u.purchase_price,      u.reactivation_done_day,
                     @intFromEnum(u.berth_hq),
                 });
                 try st.run();
@@ -614,14 +609,10 @@ pub const Store = struct {
             defer st.finalize();
             for (gs.market_listings.items, 0..) |l, i| {
                 try st.bindAll(.{
-                    cid,                     @as(i64, @intCast(i)),       l.kind,                 l.item_key,
-                    l.rarity,                l.price,                     @as(i64, l.quantity),   l.staple,
-                    @as(i64, l.listed_day),  @as(i64, l.expires_day),     @intFromEnum(l.hq),
-                    if (l.condition) |c| @as(?i64, c.armor_pct) else null,
-                    if (l.condition) |c| @as(?[]const u8, @tagName(c.quality)) else null,
-                    if (l.condition) |c| @as(?i64, c.damaged_slots) else null,
-                    if (l.condition) |c| @as(?i64, c.destroyed_slots) else null,
-                    if (l.condition) |c| @as(?i64, c.missing_components) else null,
+                    cid,                                                                  @as(i64, @intCast(i)),                                     l.kind,                                                      l.item_key,
+                    l.rarity,                                                             l.price,                                                   @as(i64, l.quantity),                                        l.staple,
+                    @as(i64, l.listed_day),                                               @as(i64, l.expires_day),                                   @intFromEnum(l.hq),                                          if (l.condition) |c| @as(?i64, c.armor_pct) else null,
+                    if (l.condition) |c| @as(?[]const u8, @tagName(c.quality)) else null, if (l.condition) |c| @as(?i64, c.damaged_slots) else null, if (l.condition) |c| @as(?i64, c.destroyed_slots) else null, if (l.condition) |c| @as(?i64, c.missing_components) else null,
                 });
                 try st.run();
             }
@@ -686,16 +677,16 @@ pub const Store = struct {
 
     fn saveContract(st: sqlite.Stmt, cid: i64, is_offer: bool, ord: i64, c: *const contract_mod.Contract) !void {
         try st.bindAll(.{
-            cid,                          is_offer,                       ord,                          @intFromEnum(c.id),
-            c.kind,                       c.employer_key,                 c.enemy_key,                  c.planet_key,
-            c.status,                     @intFromEnum(c.assigned_company), c.start_day,               @as(i64, c.score),
-            @as(i64, c.dist_ly),          c.beachhead,                    @as(i64, c.transit_days),     c.arrive_day,
-            c.end_day,                    c.monthly_net,                  c.next_battle_day,            @as(i64, c.battles_fought),
-            @as(i64, c.casualties),       c.objective,                    c.committed_bv,               c.enemy_pool_bv,
-            c.enemy_pool_remaining,       @as(i64, c.victory_points),     c.ineffective_since,          c.breach_day,
-            @as(i64, c.terms.length_months), c.terms.base_pay_month,      @as(i64, c.terms.advance_pct), c.terms.signing_bonus,
-            @as(i64, c.terms.transport_pct), @as(i64, c.terms.overhead_pct), @as(i64, c.terms.battle_loss_pct), @as(i64, c.terms.salvage_pct),
-            c.terms.salvage_exchange,     c.terms.command_rights,         c.negotiated,
+            cid,                             is_offer,                         ord,                               @intFromEnum(c.id),
+            c.kind,                          c.employer_key,                   c.enemy_key,                       c.planet_key,
+            c.status,                        @intFromEnum(c.assigned_company), c.start_day,                       @as(i64, c.score),
+            @as(i64, c.dist_ly),             c.beachhead,                      @as(i64, c.transit_days),          c.arrive_day,
+            c.end_day,                       c.monthly_net,                    c.next_battle_day,                 @as(i64, c.battles_fought),
+            @as(i64, c.casualties),          c.objective,                      c.committed_bv,                    c.enemy_pool_bv,
+            c.enemy_pool_remaining,          @as(i64, c.victory_points),       c.ineffective_since,               c.breach_day,
+            @as(i64, c.terms.length_months), c.terms.base_pay_month,           @as(i64, c.terms.advance_pct),     c.terms.signing_bonus,
+            @as(i64, c.terms.transport_pct), @as(i64, c.terms.overhead_pct),   @as(i64, c.terms.battle_loss_pct), @as(i64, c.terms.salvage_pct),
+            c.terms.salvage_exchange,        c.terms.command_rights,           c.negotiated,
         });
         try st.run();
     }
@@ -771,7 +762,7 @@ pub const Store = struct {
 
         // People.
         {
-            const st = try self.db.prepare("SELECT id, first, last, callsign, role, xp, status, fatigue, morale, recruited_day, salary_override, assigned_force, posted_hq, weekly_hours, medbay_priority, leave_until, wound_heal_day, training_skill, training_done, admitted, rank, rank_pinned, kills, kill_bv, battles, tours, outstanding_tours, edge_spent, faction, shares FROM person WHERE cid = ?1 ORDER BY ord");
+            const st = try self.db.prepare("SELECT id, first, last, callsign, role, xp, status, fatigue, morale, recruited_day, salary_override, assigned_force, posted_hq, weekly_hours, medbay_priority, leave_until, wound_heal_day, training_skill, training_done, admitted, rank, rank_pinned, kills, kill_bv, battles, tours, outstanding_tours, edge_spent, faction, shares, born_day FROM person WHERE cid = ?1 ORDER BY ord");
             defer st.finalize();
             try st.bindAll(.{cid});
             while (try st.next()) {
@@ -804,6 +795,7 @@ pub const Store = struct {
                     .edge_spent = st.int(27) != 0,
                     .faction = try st.text(28, alloc),
                     .shares = @intCast(st.int(29)),
+                    .born_day = if (st.optInt(30)) |b| @as(?i32, @intCast(b)) else null,
                 };
                 if (st.enumValue(types.SkillType, 17)) |skill| {
                     if (st.optInt(18)) |done| p.training = .{ .skill = skill, .done_day = @intCast(done) };
@@ -1276,6 +1268,17 @@ pub const Store = struct {
     /// 12.17). v7: wounds gained located injuries — a wounded person with no
     /// record gets one so the medbay has something to heal.
     pub fn upgradeCampaign(gs: *GameState, from_version: u32) !void {
+        // 12C.4: everyone gets a birthday; older saves roll one by trade.
+        if (from_version < 16) {
+            const person_gen = @import("../gen/person_gen.zig");
+            var it = gs.people.iterator();
+            while (it.next()) |e| {
+                const p = e.value_ptr;
+                if (p.born_day != null) continue;
+                const age = person_gen.rollAge(&gs.rng, p.role, p.experience());
+                p.born_day = @as(i32, @intCast(p.recruited_day)) - @as(i32, age) * 365;
+            }
+        }
         if (from_version < 7) {
             var it = gs.people.iterator();
             while (it.next()) |e| {
@@ -1286,7 +1289,6 @@ pub const Store = struct {
             }
         }
     }
-
 };
 
 fn toId(comptime T: type, v: i64) T {

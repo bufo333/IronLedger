@@ -769,13 +769,16 @@ item: tests green, both smokes, ROADMAP tick, one commit.
   to every shareholder at completion as payroll "profit shares" (+3
   morale, log line with the split). Three shares cancel a restless flag;
   shareholders take half severance. Record shows the stake. Schema v15.
-- ⬜ 12C.4 **Ages and career arcs** (MekHQ `birthday`, AtB age-based
-  retirement). `Person.born_day: i32` (days relative to campaign start;
-  generator: mekwarriors 22–38 by experience, techs 20–50, admins 25–55,
-  doctors 30–60). Yearly birthday tick; ≥ 50 adds a restless point on the
-  turnover roll and ≥ 65 forces retirement; a fresh green hire under 25
-  learns 20% faster (`xp_young_bp`). Ages on the roster and record. Schema
-  v15: `person.born_day`, `person.shares`.
+- ✅ 12C.4 **Ages and career arcs** (MekHQ `birthday`, AtB age-based
+  retirement). `Person.born_day` (days relative to campaign start, null
+  for bare test hires); the generator rolls an age by trade and
+  experience (cockpits 19–48 by band, techs 20–50, desks 25–55, doctors
+  30–60, astechs/medics 18–40). From `age_old` (50) the payday turnover
+  roll carries an extra restless flag; at `age_retire` (65) they retire
+  on the next payday at home with their payout; under `age_young` (25)
+  XP awards are ×`xp_young_bp` (1.2, rounded up). Hall rows show age; the
+  record names the age and what it means. Schema v16 with a birthday
+  backfill for older saves.
 - ⬜ 12C.5 **Loyalty** (AtB founder/loyalty modifiers). Founders never roll
   turnover while morale ≥ 20; five or more tours grants `veteran_loyalty`
   (−1 restless); a raise or bonus accepted in the last 12 months is −1 for

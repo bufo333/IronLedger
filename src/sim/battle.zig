@@ -497,7 +497,7 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
         const u = gs.unit(uid) orelse continue;
         if (gs.person(u.pilot)) |p| {
             if (p.status == .active or p.status == .wounded)
-                p.xp += if (score_delta > 0) 3 else 2;
+                p.xp += p.xpGain(gs.clock.day_index, if (score_delta > 0) 3 else 2);
         }
     }
     // Kill credits and the awards they earn (12B.5).

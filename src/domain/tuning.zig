@@ -142,6 +142,14 @@ pub const Tuning = struct {
         shares_tenure_months: u32,
         shares_per_restless: u8,
         share_profit_default_bp: types.Bp,
+        /// Ages (12C.4, MekHQ birthdays / AtB age-based retirement): from
+        /// `age_old` a person adds a restless flag on the turnover roll, at
+        /// `age_retire` they retire on the next payday at home; under
+        /// `age_young` XP awards are scaled by `xp_young_bp`.
+        age_old: u32,
+        age_retire: u32,
+        age_young: u32,
+        xp_young_bp: types.Bp,
     },
     unit: struct {
         carry: struct { mek: types.CBills, vehicle: types.CBills, aerospace: types.CBills, battle_armor: types.CBills, infantry: types.CBills, mash: types.CBills, cargo: types.CBills, dropship: types.CBills, jumpship: types.CBills },
