@@ -265,10 +265,10 @@ fn refreshBoard(gs: *GameState, hq_id: types.HqId) !void {
         // from anywhere; fighters and ships have their own slot below.
         const design = if (r.uintLessThan(u8, 4) == 0) blk: {
             var vbuf: [32]*const chassis_mod.Chassis = undefined;
-            const vehicles = chassis_mod.ofKind(.vehicle, &vbuf);
+            const vehicles = chassis_mod.ofKind(.vehicle, gs.clock.date.year, &vbuf);
             if (vehicles.len == 0) continue;
             break :blk vehicles[r.uintLessThan(usize, vehicles.len)];
-        } else @import("../domain/rat.zig").roll(&gs.rng, .market, world.faction, @import("../gen/company_gen.zig").rollWeightClass(&gs.rng));
+        } else @import("../domain/rat.zig").roll(&gs.rng, .market, world.faction, @import("../gen/company_gen.zig").rollWeightClass(&gs.rng), gs.clock.date.year);
         if (!market.listingAppears(&gs.rng, design.rarity, world.industry, warehouse, 0)) continue;
         const cond = market.rollHullCondition(&gs.rng);
         const price_roll: types.Bp = 10_000 + (@as(types.Bp, gs.rng.roll2d6(.market)) - 7) * 500;
@@ -311,7 +311,7 @@ fn refreshBoard(gs: *GameState, hq_id: types.HqId) !void {
             const comms = hq.effectiveFacilityLevel(.comms);
             const kind: unit_mod.UnitKind = if (port >= 4 and comms >= 3 and r.uintLessThan(u8, 3) == 0) .jumpship else if (port >= 3 and r.boolean()) .dropship else .aerospace;
             var buf: [16]*const chassis_mod.Chassis = undefined;
-            const pool = chassis_mod.ofKind(kind, &buf);
+            const pool = chassis_mod.ofKind(kind, gs.clock.date.year, &buf);
             if (pool.len > 0) {
                 const design = pool[r.uintLessThan(usize, pool.len)];
                 if (market.listingAppears(&gs.rng, design.rarity, world.industry, port, 0)) {

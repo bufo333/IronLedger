@@ -341,7 +341,7 @@
         .{ .slot = "rt.ammo_ac10.1", .part = "ammo_ac10", .class = .ammo },
         .{ .slot = "lt.ammo_lrm.1", .part = "ammo_lrm", .class = .ammo },
     } },
-    .{ .key = "ENF-4R", .name = "Enforcer", .tonnage = 50, .bv = 944, .cost = 3_250_000, .rarity = .common, .walk_mp = 4, .jump_mp = 4, .heat_sinks = 12, .armor_half_tons = 16, .loadout = .{
+    .{ .key = "ENF-4R", .name = "Enforcer", .tonnage = 50, .bv = 944, .cost = 3_250_000, .rarity = .common, .intro_year = 2777, .walk_mp = 4, .jump_mp = 4, .heat_sinks = 12, .armor_half_tons = 16, .loadout = .{
         .{ .slot = "ra.ac10.1", .part = "ac10", .class = .weapon },
         .{ .slot = "la.llas.1", .part = "llas", .class = .weapon },
         .{ .slot = "lt.slas.1", .part = "slas", .class = .weapon },
@@ -372,7 +372,7 @@
         .{ .slot = "lt.ammo_lrm.1", .part = "ammo_lrm", .class = .ammo },
         .{ .slot = "rt.ammo_srm.1", .part = "ammo_srm", .class = .ammo },
     } },
-    .{ .key = "SHD-2D", .name = "Shadow Hawk SHD-2D", .tonnage = 55, .bv = 948, .cost = 3_655_000, .rarity = .uncommon, .walk_mp = 5, .jump_mp = 3, .heat_sinks = 15, .armor_half_tons = 9, .loadout = .{
+    .{ .key = "SHD-2D", .name = "Shadow Hawk SHD-2D", .tonnage = 55, .bv = 948, .cost = 3_655_000, .rarity = .uncommon, .intro_year = 3020, .walk_mp = 5, .jump_mp = 3, .heat_sinks = 15, .armor_half_tons = 9, .loadout = .{
         .{ .slot = "lt.ac5.1", .part = "ac5", .class = .weapon },
         .{ .slot = "rt.lrm5.1", .part = "lrm5", .class = .weapon },
         .{ .slot = "ra.mlas.1", .part = "mlas", .class = .weapon },
@@ -382,7 +382,7 @@
         .{ .slot = "rt.ammo_lrm.1", .part = "ammo_lrm", .class = .ammo },
         .{ .slot = "ct.ammo_srm.1", .part = "ammo_srm", .class = .ammo },
     } },
-    .{ .key = "GRF-1S", .name = "Griffin GRF-1S", .tonnage = 55, .bv = 964, .cost = 3_655_000, .rarity = .uncommon, .walk_mp = 5, .jump_mp = 5, .heat_sinks = 13, .armor_half_tons = 13, .loadout = .{
+    .{ .key = "GRF-1S", .name = "Griffin GRF-1S", .tonnage = 55, .bv = 964, .cost = 3_655_000, .rarity = .uncommon, .intro_year = 3018, .walk_mp = 5, .jump_mp = 5, .heat_sinks = 13, .armor_half_tons = 13, .loadout = .{
         .{ .slot = "ra.llas.1", .part = "llas", .class = .weapon },
         .{ .slot = "rt.lrm5.1", .part = "lrm5", .class = .weapon },
         .{ .slot = "rt.lrm5.2", .part = "lrm5", .class = .weapon },
@@ -391,7 +391,7 @@
         .{ .slot = "rt.ammo_lrm.1", .part = "ammo_lrm", .class = .ammo },
         .{ .slot = "lt.ammo_lrm.1", .part = "ammo_lrm", .class = .ammo },
     } },
-    .{ .key = "OSR-2C", .name = "Ostroc", .tonnage = 60, .bv = 1104, .cost = 4_250_000, .rarity = .uncommon, .walk_mp = 5, .heat_sinks = 15, .armor_half_tons = 16, .loadout = .{
+    .{ .key = "OSR-2C", .name = "Ostroc", .tonnage = 60, .bv = 1104, .cost = 4_250_000, .rarity = .uncommon, .intro_year = 3012, .walk_mp = 5, .heat_sinks = 15, .armor_half_tons = 16, .loadout = .{
         .{ .slot = "lt.llas.1", .part = "llas", .class = .weapon },
         .{ .slot = "rt.llas.1", .part = "llas", .class = .weapon },
         .{ .slot = "lt.mlas.1", .part = "mlas", .class = .weapon },
@@ -435,7 +435,7 @@
         .{ .slot = "rt.ammo_ac5.1", .part = "ammo_ac5", .class = .ammo },
         .{ .slot = "lt.ammo_ac2.1", .part = "ammo_ac2", .class = .ammo },
     } },
-    .{ .key = "CPLT-K2", .name = "Catapult CPLT-K2", .tonnage = 65, .bv = 1288, .cost = 4_872_500, .rarity = .rare, .walk_mp = 4, .heat_sinks = 20, .armor_half_tons = 20, .loadout = .{
+    .{ .key = "CPLT-K2", .name = "Catapult CPLT-K2", .tonnage = 65, .bv = 1288, .cost = 4_872_500, .rarity = .rare, .intro_year = 3010, .walk_mp = 4, .heat_sinks = 20, .armor_half_tons = 20, .loadout = .{
         .{ .slot = "ra.ppc.1", .part = "ppc", .class = .weapon },
         .{ .slot = "la.ppc.1", .part = "ppc", .class = .weapon },
         .{ .slot = "rt.mlas.1", .part = "mlas", .class = .weapon },
@@ -469,7 +469,7 @@
         .{ .slot = "lt.mlas.2", .part = "mlas", .class = .weapon },
         .{ .slot = "rt.ammo_lrm.1", .part = "ammo_lrm", .class = .ammo },
     } },
-    .{ .key = "WHM-6D", .name = "Warhammer WHM-6D", .tonnage = 70, .bv = 1440, .cost = 5_550_000, .rarity = .uncommon, .walk_mp = 4, .heat_sinks = 20, .armor_half_tons = 22, .loadout = .{
+    .{ .key = "WHM-6D", .name = "Warhammer WHM-6D", .tonnage = 70, .bv = 1440, .cost = 5_550_000, .rarity = .uncommon, .intro_year = 3022, .walk_mp = 4, .heat_sinks = 20, .armor_half_tons = 22, .loadout = .{
         .{ .slot = "ra.ppc.1", .part = "ppc", .class = .weapon },
         .{ .slot = "la.ppc.1", .part = "ppc", .class = .weapon },
         .{ .slot = "rt.mlas.1", .part = "mlas", .class = .weapon },
@@ -511,7 +511,7 @@
         .{ .slot = "lt.mlas.2", .part = "mlas", .class = .weapon },
         .{ .slot = "lt.flamer.1", .part = "flamer", .class = .weapon },
     } },
-    .{ .key = "MAD-3D", .name = "Marauder MAD-3D", .tonnage = 75, .bv = 1648, .cost = 6_352_500, .rarity = .rare, .walk_mp = 4, .heat_sinks = 16, .armor_half_tons = 28, .loadout = .{
+    .{ .key = "MAD-3D", .name = "Marauder MAD-3D", .tonnage = 75, .bv = 1648, .cost = 6_352_500, .rarity = .rare, .intro_year = 3025, .walk_mp = 4, .heat_sinks = 16, .armor_half_tons = 28, .loadout = .{
         .{ .slot = "ra.ppc.1", .part = "ppc", .class = .weapon },
         .{ .slot = "la.ppc.1", .part = "ppc", .class = .weapon },
         .{ .slot = "ra.mlas.1", .part = "mlas", .class = .weapon },

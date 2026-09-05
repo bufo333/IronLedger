@@ -235,8 +235,19 @@ pub fn parseCommand(verb: []const u8, tokens: *std.mem.TokenIterator(u8, .scalar
         // start <LC|DC|FS|CC|FWL> <profession> <name>
         const origin = std.meta.stringToEnum(game.commander.Faction, try need(tokens.next())) orelse return error.BadArguments;
         const profession = std.meta.stringToEnum(game.commander.Profession, try need(tokens.next())) orelse return error.BadArguments;
-        const name = std.mem.trim(u8, tokens.rest(), " ");
-        return .{ .create_commander = .{ .name = if (name.len > 0) name else "Commander", .origin = origin, .profession = profession } };
+        // start <LC|DC|FS|CC|FWL> <profession> <name> [year]  (12C.16: a trailing 4-digit year)
+        var name = std.mem.trim(u8, tokens.rest(), " ");
+        var year: u16 = 3025;
+        if (std.mem.lastIndexOfScalar(u8, name, ' ')) |sp| {
+            if (std.fmt.parseInt(u16, name[sp + 1 ..], 10)) |y| {
+                year = y;
+                name = std.mem.trim(u8, name[0..sp], " ");
+            } else |_| {}
+        } else if (std.fmt.parseInt(u16, name, 10)) |y| {
+            year = y;
+            name = "";
+        } else |_| {}
+        return .{ .create_commander = .{ .name = if (name.len > 0) name else "Commander", .origin = origin, .profession = profession, .start_year = year } };
     }
     if (eq(u8, verb, "recruit")) {
         const role = std.meta.stringToEnum(game.person.Role, try need(tokens.next())) orelse return error.BadArguments;
@@ -336,6 +347,7 @@ pub fn errorText(err: anyerror) []const u8 {
         error.MaxLevel => "already at the top: this HQ is regional (or the facility is maxed)",
         error.ProjectInProgress => "a project is already running here — watch PROJECTS",
         error.BadPercent => "a percentage between 0 and 100",
+        error.BadYear => "the campaign starts between 3000 and 3060",
         error.KeepStocked => "that would drop the line under its keep-stocked minimum — lower the policy first (K)",
         error.StorageFull => "the destination cannot hold that tonnage",
         error.CompanyDeployed => "that company is deployed",
@@ -498,7 +510,7 @@ pub fn usage(verb: []const u8) ?[]const u8 {
         .{ "rename", "rename outfit|<force id> <name>" },
         .{ "refit", "refit <unit> remove <slot>|install <loc> <part>|clear|commit" },
         .{ "wing", "wing co:N" },
-        .{ "start", "start <LC|DC|FS|CC|FWL> <profession> <name>" },
+        .{ "start", "start <LC|DC|FS|CC|FWL> <profession> <name> [year 3000–3060]" },
     };
     for (table) |row| if (std.mem.eql(u8, row[0], verb)) return row[1];
     return null;

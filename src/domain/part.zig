@@ -70,6 +70,8 @@ pub const PartDef = struct {
     /// Sourcing (12C.14): who builds it and how widely it is stocked.
     tech_base: TechBase = .inner_sphere,
     availability: Availability = .c,
+    /// First year in production (12C.16); the market lists only what exists.
+    intro_year: u16 = 2400,
     // Construction facts for mountable items (Stage 10); `mount == .none`
     // means the lab can't install it.
     mass_half_tons: u16 = 0,

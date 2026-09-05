@@ -31,6 +31,8 @@ const tab_names = [_][]const u8{ "F1 Desk", "F2 Map", "F3 Forces", "F4 Contracts
 
 const Mode = enum { welcome, wizard, game };
 const WizardStep = enum(u8) { commander, outfit, company, review };
+/// Campaign start years on offer (12C.16): the catalogue gates on it.
+const start_years = [_]u16{ 3015, 3020, 3025, 3028, 3030 };
 
 const InputKind = enum { command, new_player, delete_campaign, delete_player, accept_company, raise_name };
 
@@ -199,6 +201,8 @@ pub const App = struct {
     w_field: u8 = 0,
     w_faction: usize = 0,
     w_profession: usize = 0,
+    /// Index into `start_years` (12C.16).
+    w_year: usize = 2,
     w_emblem: usize = 0,
     w_seed: u64 = 0,
     // screens
@@ -541,6 +545,12 @@ pub const App = struct {
                     const sel = self.w_field == 2 and i == self.w_profession;
                     try rows.append(al, try std.fmt.allocPrint(al, "  {s}{s} {s: <16} {s}{{/}}", .{ if (sel) "{s}" else if (i == self.w_profession) "{a}" else "", if (i == self.w_profession) ">" else " ", @tagName(p), p.description() }));
                 }
+                try rows.append(al, "");
+                try rows.append(al, "start year");
+                for (start_years, 0..) |y, i| {
+                    const sel = self.w_field == 3 and i == self.w_year;
+                    try rows.append(al, try std.fmt.allocPrint(al, "  {s}{s} {d}{s}{{/}}", .{ if (sel) "{s}" else if (i == self.w_year) "{a}" else "", if (i == self.w_year) ">" else " ", y, if (y == 3025) "  (the Succession Wars, TRO:3025)" else "" }));
+                }
                 const lw: u16 = @min(70, b.w * 2 / 5);
                 _ = self.listPane(.{ .x = 0, .y = b.y, .w = lw, .h = b.h }, "COMMANDER", rows.items, 0, true, false);
                 var info: std.ArrayListUnmanaged([]const u8) = .empty;
@@ -553,7 +563,11 @@ pub const App = struct {
                 try info.append(al, try std.fmt.allocPrint(al, "{s} — for the life of the campaign.", .{professions[self.w_profession].description()}));
                 try info.append(al, "The edge is small by design: it tilts, it never carries.");
                 try info.append(al, "");
-                try info.append(al, "{d}the faction and profession are permanent; names can change later{/}");
+                try info.append(al, try std.fmt.allocPrint(al, "{{a}}{d}{{/}}", .{start_years[self.w_year]}));
+                try info.append(al, "The market, the house tables and the salvage field only what is in");
+                try info.append(al, "service by this year; new designs are announced on New Year's Day.");
+                try info.append(al, "");
+                try info.append(al, "{d}the faction, profession and start year are permanent; names can change later{/}");
                 _ = self.listPane(.{ .x = lw + 1, .y = b.y, .w = b.w - lw - 1, .h = b.h }, "WHAT THIS MEANS", info.items, 1, false, false);
                 self.footer("[Tab] next field  [j/k] choose  [Enter] next step  [Esc] back to welcome");
             },
@@ -2039,8 +2053,8 @@ pub const App = struct {
         switch (self.step) {
             .commander => switch (key) {
                 .escape => self.mode = .welcome,
-                .tab => self.w_field = (self.w_field + 1) % 3,
-                .backtab => self.w_field = (self.w_field + 2) % 3,
+                .tab => self.w_field = (self.w_field + 1) % 4,
+                .backtab => self.w_field = (self.w_field + 3) % 4,
                 .enter => {
                     if (self.w_name.len == 0) {
                         self.say(.amber, "the commander needs a name", .{});
@@ -2242,6 +2256,7 @@ pub const App = struct {
         switch (self.w_field) {
             1 => self.w_faction = @intCast(@max(0, @min(@as(i32, factions.len - 1), @as(i32, @intCast(self.w_faction)) + delta))),
             2 => self.w_profession = @intCast(@max(0, @min(@as(i32, professions.len - 1), @as(i32, @intCast(self.w_profession)) + delta))),
+            3 => self.w_year = @intCast(@max(0, @min(@as(i32, start_years.len - 1), @as(i32, @intCast(self.w_year)) + delta))),
             else => {},
         }
     }
@@ -2251,7 +2266,7 @@ pub const App = struct {
         self.gs = null;
         var gs = GameState.init(self.gpa, .{ .seed = 3025 + self.w_seed * 7919 + @as(u64, @intCast(self.w_faction)) * 13 });
         errdefer gs.deinit();
-        _ = try game.commands.execute(&gs, .{ .create_commander = .{ .name = self.w_name.slice(), .origin = factions[self.w_faction], .profession = professions[self.w_profession] } });
+        _ = try game.commands.execute(&gs, .{ .create_commander = .{ .name = self.w_name.slice(), .origin = factions[self.w_faction], .profession = professions[self.w_profession], .start_year = start_years[self.w_year] } });
         _ = try game.commands.execute(&gs, .{ .rename_outfit = self.w_outfit.slice() });
         const res = try game.commands.execute(&gs, .{ .new_company = self.w_company.slice() });
         if (res.created_force != .none) {

@@ -89,7 +89,7 @@ pub fn generateInto(gs: *GameState, name: []const u8) !types.ForceId {
             const class = rollWeightClass(&gs.rng);
             // The house you come from fields what it fields (12B.8 RAT).
             const home: []const u8 = if (gs.commander) |c| c.origin.key() else "PER";
-            const design = @import("../domain/rat.zig").roll(&gs.rng, .generation, home, class);
+            const design = @import("../domain/rat.zig").roll(&gs.rng, .generation, home, class, gs.clock.date.year);
 
             const unit_id = try gs.addUnit(design.key);
             const pilot_id = try gs.recruitGenerated(.mekwarrior);
@@ -100,7 +100,7 @@ pub fn generateInto(gs: *GameState, name: []const u8) !types.ForceId {
     // Recon lance: light scouts only — feeds recon_quality in autoresolve.
     const recon_id = try gs.createForce("Recon Lance", .lance, company_id);
     gs.force(recon_id).?.role = .scouting;
-    const scouts = chassis.scoutPool(scout_max_tonnage, &scratch);
+    const scouts = chassis.scoutPool(scout_max_tonnage, gs.clock.date.year, &scratch);
     for (0..force.lance_size) |_| {
         const design = scouts[gs.rng.random(.generation).uintLessThan(usize, scouts.len)];
         const unit_id = try gs.addUnit(design.key);

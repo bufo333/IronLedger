@@ -384,6 +384,13 @@ fn runFinances(gs: *GameState) !void {
     if (gs.clock.date.month == 1) {
         const queries = @import("queries.zig");
         try gs.rating_history.append(gs.allocator(), .{ .year = gs.clock.date.year, .score = queries.ratingScore(gs) });
+        // Tech news (12C.16): the designs entering service this year.
+        var news: std.ArrayListUnmanaged(u8) = .empty;
+        for (@import("../domain/chassis.zig").catalog) |*c| if (c.intro_year == gs.clock.date.year) {
+            if (news.items.len > 0) try news.appendSlice(gs.allocator(), ", ");
+            try news.appendSlice(gs.allocator(), try std.fmt.allocPrint(gs.allocator(), "{s} {s}", .{ c.name, c.key }));
+        };
+        if (news.items.len > 0) try gs.log(.market, .{}, "[tech] new in {d}: {s} — on the house tables and the boards from this year", .{ gs.clock.date.year, news.items });
     }
     _ = try @import("personnel.zig").checkAllAwards(gs);
     // Notice is handed in on payday (Stage 12.20); grudges fade (12.21).

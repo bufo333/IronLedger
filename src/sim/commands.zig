@@ -54,6 +54,9 @@ pub const Command = union(enum) {
         name: []const u8,
         origin: commander_mod.Faction,
         profession: commander_mod.Profession,
+        /// Campaign start year (12C.16): the market, RATs and salvage field
+        /// only what exists by then.
+        start_year: u16 = 3025,
     },
     /// Accept an offer off the current board and send a company.
     accept_contract: struct { offer_index: usize, company: types.ForceId },
@@ -234,6 +237,7 @@ pub const Error = error{
     InsufficientXp,
     AlreadyMastered,
     BadPercent,
+    BadYear,
     InsufficientTreasury,
     UnknownTreasury,
     StorageFull,
@@ -525,6 +529,8 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             return .{};
         },
         .create_commander => |c| {
+            if (c.start_year < 3000 or c.start_year > 3060) return Error.BadYear;
+            gs.clock.date.year = c.start_year;
             _ = try gs.createCommander(c.name, c.origin, c.profession);
             // Until renamed, the outfit carries the commander's name — it
             // reads far better in the campaign registry (Stage 11).
@@ -2137,6 +2143,23 @@ test "tier upgrade: refusals keep the money; a funded field HQ starts the projec
     try std.testing.expectEqual(@as(usize, 1), gs.hqs.getPtr(fb).?.projects.items.len);
     try std.testing.expectError(Error.ProjectInProgress, execute(&gs, .{ .upgrade_tier = fb }));
     try std.testing.expectEqual(@as(types.CBills, 1), gs.hqs.getPtr(fb).?.funds);
+}
+
+test "12C.16: the start year sets the calendar and gates the catalogue" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1216 });
+    defer gs.deinit();
+    try std.testing.expectError(Error.BadYear, execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster, .start_year = 2800 } }));
+    _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster, .start_year = 3010 } });
+    try std.testing.expectEqual(@as(u16, 3010), gs.clock.date.year);
+    _ = try execute(&gs, .{ .new_company = "Alpha" });
+    var it = gs.units.iterator();
+    while (it.next()) |e| {
+        const c = chassis_mod.find(e.value_ptr.chassis_key).?;
+        try std.testing.expect(c.intro_year <= 3010);
+    }
+    for (gs.market_listings.items) |l| if (l.kind == .unit) {
+        try std.testing.expect(chassis_mod.find(l.item_key).?.intro_year <= 3010);
+    };
 }
 
 test "golden master: same seed + same script = same state hash" {

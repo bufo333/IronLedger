@@ -35,14 +35,21 @@ pub fn forFaction(key: []const u8) *const RatRow {
 
 /// One design off a house's table for a weight class; falls back to the
 /// whole catalogue class if the row is empty or names a missing design.
-pub fn roll(rng: *rng_mod.Rng, stream: rng_mod.Stream, faction: []const u8, class: chassis.WeightClass) *const chassis.Chassis {
+pub fn roll(rng: *rng_mod.Rng, stream: rng_mod.Stream, faction: []const u8, class: chassis.WeightClass, year: u16) *const chassis.Chassis {
     const pool = forFaction(faction).pool(class);
-    if (pool.len > 0) {
-        const key = pool[rng.random(stream).uintLessThan(usize, pool.len)];
+    // Only what is in service this year (12C.16).
+    var avail: [64][]const u8 = undefined;
+    var n: usize = 0;
+    for (pool) |key| if (chassis.find(key)) |c| if (chassis.availableIn(c, year) and n < avail.len) {
+        avail[n] = key;
+        n += 1;
+    };
+    if (n > 0) {
+        const key = avail[rng.random(stream).uintLessThan(usize, n)];
         if (chassis.find(key)) |c| return c;
     }
     var buf: [64]*const chassis.Chassis = undefined;
-    const all = chassis.ofWeightClass(class, &buf);
+    const all = chassis.ofWeightClass(class, year, &buf);
     return all[rng.random(stream).uintLessThan(usize, all.len)];
 }
 

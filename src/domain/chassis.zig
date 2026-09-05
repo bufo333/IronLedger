@@ -22,6 +22,9 @@ pub const Chassis = struct {
     bv: u16, // BV2 — autoresolve base strength (ARCH §7)
     cost: types.CBills,
     rarity: types.Rarity, // market appearance tier (ARCH §9.8)
+    /// First year the design is in service (12C.16, MekHQ `introYear`);
+    /// the market, RATs and salvage only field what exists in the campaign year.
+    intro_year: u16 = 2400,
     kind: unit.UnitKind = .mek,
     // Construction facts (Stage 10 MekLab; meks only, defaults for others).
     walk_mp: u8 = 0,
@@ -63,10 +66,15 @@ pub fn find(key: []const u8) ?*const Chassis {
 
 /// All *mek* entries of one weight class — the company generator's RAT
 /// (random assignment table) pool.
-pub fn ofWeightClass(class: WeightClass, buf: []*const Chassis) []*const Chassis {
+/// In service by `year` (12C.16).
+pub fn availableIn(c: *const Chassis, year: u16) bool {
+    return c.intro_year <= year;
+}
+
+pub fn ofWeightClass(class: WeightClass, year: u16, buf: []*const Chassis) []*const Chassis {
     var n: usize = 0;
     for (catalog) |*c| {
-        if (c.kind == .mek and c.weightClass() == class and n < buf.len) {
+        if (c.kind == .mek and c.weightClass() == class and availableIn(c, year) and n < buf.len) {
             buf[n] = c;
             n += 1;
         }
@@ -75,10 +83,10 @@ pub fn ofWeightClass(class: WeightClass, buf: []*const Chassis) []*const Chassis
 }
 
 /// Every catalog entry of one unit kind (transports, fighters, ...).
-pub fn ofKind(kind: unit.UnitKind, buf: []*const Chassis) []*const Chassis {
+pub fn ofKind(kind: unit.UnitKind, year: u16, buf: []*const Chassis) []*const Chassis {
     var n: usize = 0;
     for (catalog) |*c| {
-        if (c.kind == kind and n < buf.len) {
+        if (c.kind == kind and availableIn(c, year) and n < buf.len) {
             buf[n] = c;
             n += 1;
         }
@@ -87,10 +95,10 @@ pub fn ofKind(kind: unit.UnitKind, buf: []*const Chassis) []*const Chassis {
 }
 
 /// Meks suitable for a scout lance: at or under `max_tonnage`.
-pub fn scoutPool(max_tonnage: u8, buf: []*const Chassis) []*const Chassis {
+pub fn scoutPool(max_tonnage: u8, year: u16, buf: []*const Chassis) []*const Chassis {
     var n: usize = 0;
     for (catalog) |*c| {
-        if (c.kind == .mek and c.tonnage <= max_tonnage and n < buf.len) {
+        if (c.kind == .mek and c.tonnage <= max_tonnage and availableIn(c, year) and n < buf.len) {
             buf[n] = c;
             n += 1;
         }
@@ -136,19 +144,19 @@ test "12B.8: the catalogue is broad — TRO:3025 meks, 3026 vehicles, fighters" 
 
 test "transports and fighters are in the catalog with lift facts" {
     var buf: [16]*const Chassis = undefined;
-    const ships = ofKind(.dropship, &buf);
+    const ships = ofKind(.dropship, 3025, &buf);
     try std.testing.expect(ships.len >= 3);
     for (ships) |s| try std.testing.expect(s.mek_bays > 0);
-    const jumpers = ofKind(.jumpship, &buf);
+    const jumpers = ofKind(.jumpship, 3025, &buf);
     try std.testing.expect(jumpers.len >= 3);
     for (jumpers) |j| try std.testing.expect(j.collars > 0);
-    try std.testing.expect(ofKind(.aerospace, &buf).len >= 5);
+    try std.testing.expect(ofKind(.aerospace, 3025, &buf).len >= 5);
     try std.testing.expectEqual(@as(u8, 4), find("LEOPARD").?.mek_bays);
 }
 
 test "scout pool excludes heavies and support vehicles" {
     var buf: [32]*const Chassis = undefined;
-    const scouts = scoutPool(40, &buf);
+    const scouts = scoutPool(40, 3025, &buf);
     try std.testing.expect(scouts.len >= 3);
     for (scouts) |c| {
         try std.testing.expect(c.tonnage <= 40);
@@ -164,6 +172,15 @@ test "find and weight classes" {
     try std.testing.expect(find("MAD-CAT") == null); // wrong era, chummer
 
     var buf: [32]*const Chassis = undefined;
-    const lights = ofWeightClass(.light, &buf);
+    const lights = ofWeightClass(.light, 3025, &buf);
     try std.testing.expect(lights.len >= 3);
+}
+
+test "12C.16: designs appear with their year" {
+    var buf: [64]*const Chassis = undefined;
+    const now = ofWeightClass(.medium, 3025, &buf).len;
+    const early = ofWeightClass(.medium, 3000, &buf).len;
+    try std.testing.expect(early < now); // the house refits of the 3020s are not there yet
+    try std.testing.expect(find("SHD-2D").?.intro_year > 3000);
+    try std.testing.expect(availableIn(find("SHD-2H").?, 2900));
 }

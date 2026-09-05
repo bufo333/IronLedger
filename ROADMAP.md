@@ -895,11 +895,14 @@ item: tests green, both smokes, ROADMAP tick, one commit.
 
 ### Block E — Era & data plumbing
 
-- ⬜ 12C.16 **Era progression** (MekHQ `introYear`/`extinctYear`):
-  `chassis.zon` and `parts.zon` gain `intro_year`; campaign start year is
-  a setting (3025 default); the market, RAT and salvage tables only list
-  what exists that year; a yearly "tech news" log line as designs appear.
-  Start-year picker on the new-campaign screen.
+- ✅ 12C.16 **Era progression** (MekHQ `introYear`): `chassis.zon` and
+  `parts.zon` carry `intro_year` (default 2400; the 3020s house refits —
+  SHD-2D, GRF-1S, WHM-6D, MAD-3D, CPLT-K2, OSR-2C — are dated). The
+  market pools, the house RATs, the starter generator and battle salvage
+  only field what is in service in the campaign year. The new-campaign
+  wizard has a start-year field (3015–3030; `start … <name> [year]` in
+  the REPL, 3000–3060), and New Year's Day logs "[tech] new in 3020: …"
+  for the designs entering service. Nothing is extinct yet.
 - ⬜ 12C.17 **Black market** (AtB black market): an occasional listing at
   a hiring-hall world with comms ≥ 2 — rare designs or parts at 2–4×,
   with a 2d6 chance the seller is a fraud (money gone, log line, standing

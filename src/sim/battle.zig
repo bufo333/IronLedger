@@ -631,7 +631,7 @@ fn claimSalvage(gs: *GameState, c: *contract_mod.Contract, claim_bv: i64) ![]con
     var tries: u8 = 0;
     while (wrecks < 2 and tries < 4) : (tries += 1) {
         // Off the enemy house's table (12B.8): Combine wrecks are Dragons.
-        const design = @import("../domain/rat.zig").roll(&gs.rng, .battle, c.enemy_key, company_gen.rollWeightClass(&gs.rng));
+        const design = @import("../domain/rat.zig").roll(&gs.rng, .battle, c.enemy_key, company_gen.rollWeightClass(&gs.rng), gs.clock.date.year);
         if (design.bv > remaining) continue;
         remaining -= design.bv;
         const uid = try gs.addUnit(design.key);
