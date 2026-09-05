@@ -443,58 +443,39 @@
 <text y="199" fill="#c8d3c5" x="58.4 65.6 72.8 80.0">Sgt.</text>
 <text y="199" fill="#c8d3c5" x="94.4 101.6 108.8 116.0">Ulla</text>
 <text y="199" fill="#c8d3c5" x="130.4 137.6 144.8 152.0 159.2 166.4 173.6 180.8 188.0">Jankowski</text>
-<text y="199" fill="#c8d3c5" x="209.6 216.8 224.0 231.2 238.4 245.6 252.8 260.0 267.2 274.4 281.6 288.8 296.0 303.2 310.4">admin_logistics</text>
-<text y="199" fill="#c8d3c5" x="324.8 332.0 339.2 346.4 353.6 360.8 368.0">veteran</text>
-<text y="199" fill="#c8d3c5" x="382.4">3</text>
-<text y="199" fill="#c8d3c5" x="440.0">1</text>
-<text y="199" fill="#c8d3c5" x="454.4 461.6 468.8 476.0 483.2 490.4">active</text>
-<text y="199" fill="#c8d3c5" x="591.2 598.4">HQ</text>
-<text y="199" fill="#c8d3c5" x="612.8">·</text>
-<text y="199" fill="#c8d3c5" x="627.2 634.4 641.6 648.8">Skye</text>
-<text y="199" fill="#c8d3c5" x="663.2 670.4 677.6 684.8 692.0 699.2 706.4 713.6">Regional</text>
-<text y="199" fill="#c8d3c5" x="728.0 735.2">HQ</text>
-<text y="199" fill="#c8d3c5" x="749.6 756.8 764.0 771.2">Skye</text>
-<text y="199" fill="#c8d3c5" x="792.8 800.0">││</text>
+<text y="199" fill="#c8d3c5" x="209.6 216.8 224.0 231.2 238.4 245.6 252.8 260.0">admin_l╔</text>
+<text y="199" fill="#c8d3c5" x="274.4 281.6 288.8 296.0 303.2 310.4">RECORD</text>
+<text y="199" fill="#c8d3c5" x="324.8">·</text>
+<text y="199" fill="#c8d3c5" x="339.2 346.4 353.6 360.8 368.0">[Esc]</text>
+<text y="199" fill="#c8d3c5" x="382.4 389.6 396.8 404.0 411.2">close</text>
+<text y="199" fill="#c8d3c5" x="425.6 432.8 440.0 447.2 454.4 461.6 468.8 476.0 483.2 490.4 497.6 504.8 512.0 519.2 526.4 533.6 540.8 548.0 555.2 562.4 569.6 576.8 584.0 591.2 598.4 605.6 612.8 620.0 627.2 634.4 641.6 648.8 656.0 663.2 670.4 677.6 684.8 692.0 699.2 706.4 713.6 720.8 728.0 735.2 742.4 749.6 756.8 764.0 771.2 778.4 785.6 792.8 800.0 807.2 814.4 821.6 828.8 836.0 843.2 850.4 857.6 864.8 872.0 879.2 886.4 893.6 900.8 908.0 915.2 922.4 929.6 936.8 944.0 951.2 958.4 965.6 972.8">════════════════════════════════════════════════════════════════════════════╗</text>
 <text y="199" fill="#c8d3c5" x="1224.8">│</text>
 <text y="214" fill="#c8d3c5" x="8.0">│</text>
 <text y="214" fill="#c8d3c5" x="22.4 29.6">10</text>
 <text y="214" fill="#c8d3c5" x="58.4 65.6 72.8 80.0">Cpl.</text>
 <text y="214" fill="#c8d3c5" x="94.4 101.6 108.8 116.0">Hiro</text>
 <text y="214" fill="#c8d3c5" x="130.4 137.6 144.8 152.0 159.2 166.4">Larsen</text>
-<text y="214" fill="#c8d3c5" x="209.6 216.8 224.0 231.2 238.4 245.6 252.8 260.0 267.2 274.4 281.6 288.8 296.0 303.2 310.4">admin_transport</text>
-<text y="214" fill="#c8d3c5" x="324.8 332.0 339.2 346.4 353.6 360.8 368.0">regular</text>
-<text y="214" fill="#c8d3c5" x="382.4">4</text>
-<text y="214" fill="#c8d3c5" x="440.0">1</text>
-<text y="214" fill="#c8d3c5" x="454.4 461.6 468.8 476.0 483.2 490.4">active</text>
-<text y="214" fill="#c8d3c5" x="591.2 598.4">HQ</text>
-<text y="214" fill="#c8d3c5" x="612.8">·</text>
-<text y="214" fill="#c8d3c5" x="627.2 634.4 641.6 648.8">Skye</text>
-<text y="214" fill="#c8d3c5" x="663.2 670.4 677.6 684.8 692.0 699.2 706.4 713.6">Regional</text>
-<text y="214" fill="#c8d3c5" x="728.0 735.2">HQ</text>
-<text y="214" fill="#c8d3c5" x="749.6 756.8 764.0 771.2">Skye</text>
-<text y="214" fill="#c8d3c5" x="792.8 800.0">││</text>
-<text y="214" fill="#c8d3c5" x="814.4 821.6 828.8 836.0 843.2 850.4 857.6 864.8">training</text>
-<text y="214" fill="#c8d3c5" x="900.8 908.0 915.2 922.4">none</text>
+<text y="214" fill="#c8d3c5" x="209.6 216.8 224.0 231.2 238.4 245.6 252.8 260.0 267.2">admin_t║a</text>
+<text y="214" fill="#e0a33a" x="274.4 281.6 288.8 296.0">Cpl.</text>
+<text y="214" fill="#e0a33a" x="310.4 317.6 324.8 332.0 339.2 346.4">Viktor</text>
+<text y="214" fill="#e0a33a" x="360.8 368.0 375.2 382.4 389.6">Novak</text>
+<text y="214" fill="#c8d3c5" x="411.2">·</text>
+<text y="214" fill="#c8d3c5" x="432.8 440.0 447.2 454.4 461.6 468.8 476.0 483.2 490.4 497.6 504.8 512.0 519.2">admin_command</text>
+<text y="214" fill="#c8d3c5" x="533.6">·</text>
+<text y="214" fill="#c8d3c5" x="548.0 555.2 562.4 569.6 576.8 584.0 591.2">regular</text>
+<text y="214" fill="#c8d3c5" x="605.6">·</text>
+<text y="214" fill="#c8d3c5" x="620.0 627.2 634.4 641.6 648.8 656.0 663.2 670.4">Corporal</text>
+<text y="214" fill="#c8d3c5" x="972.8">║</text>
 <text y="214" fill="#c8d3c5" x="1224.8">│</text>
 <text y="229" fill="#c8d3c5" x="8.0">│</text>
 <text y="229" fill="#c8d3c5" x="22.4 29.6">11</text>
 <text y="229" fill="#c8d3c5" x="58.4 65.6 72.8 80.0">Cpl.</text>
 <text y="229" fill="#c8d3c5" x="94.4 101.6 108.8 116.0 123.2">Xenia</text>
 <text y="229" fill="#c8d3c5" x="137.6 144.8 152.0 159.2 166.4 173.6">Gruber</text>
-<text y="229" fill="#c8d3c5" x="209.6 216.8 224.0 231.2 238.4 245.6 252.8 260.0 267.2 274.4 281.6 288.8 296.0 303.2 310.4">admin_transport</text>
-<text y="229" fill="#c8d3c5" x="324.8 332.0 339.2 346.4 353.6 360.8 368.0">regular</text>
-<text y="229" fill="#c8d3c5" x="382.4">4</text>
-<text y="229" fill="#c8d3c5" x="440.0">1</text>
-<text y="229" fill="#c8d3c5" x="454.4 461.6 468.8 476.0 483.2 490.4">active</text>
-<text y="229" fill="#c8d3c5" x="591.2 598.4">HQ</text>
-<text y="229" fill="#c8d3c5" x="612.8">·</text>
-<text y="229" fill="#c8d3c5" x="627.2 634.4 641.6 648.8">Skye</text>
-<text y="229" fill="#c8d3c5" x="663.2 670.4 677.6 684.8 692.0 699.2 706.4 713.6">Regional</text>
-<text y="229" fill="#c8d3c5" x="728.0 735.2">HQ</text>
-<text y="229" fill="#c8d3c5" x="749.6 756.8 764.0 771.2">Skye</text>
-<text y="229" fill="#c8d3c5" x="792.8 800.0">││</text>
-<text y="229" fill="#6f7d73" x="900.8 908.0 915.2">[t]</text>
-<text y="229" fill="#6f7d73" x="929.6 936.8 944.0 951.2 958.4 965.6">starts</text>
+<text y="229" fill="#c8d3c5" x="209.6 216.8 224.0 231.2 238.4 245.6 252.8 260.0 267.2 274.4 281.6 288.8 296.0 303.2 310.4">admin_t║astatus</text>
+<text y="229" fill="#7fc97f" x="360.8 368.0 375.2 382.4 389.6 396.8">active</text>
+<text y="229" fill="#6f7d73" x="965.6">s</text>
+<text y="229" fill="#c8d3c5" x="972.8">║</text>
 <text y="229" fill="#6f7d73" x="980.0">a</text>
 <text y="229" fill="#6f7d73" x="994.4 1001.6 1008.8 1016.0 1023.2 1030.4 1037.6">program</text>
 <text y="229" fill="#6f7d73" x="1052.0 1059.2">on</text>
@@ -508,42 +489,25 @@
 <text y="244" fill="#c8d3c5" x="58.4 65.6 72.8 80.0">Pvt.</text>
 <text y="244" fill="#c8d3c5" x="94.4 101.6 108.8 116.0">Hiro</text>
 <text y="244" fill="#c8d3c5" x="130.4 137.6 144.8 152.0 159.2 166.4 173.6 180.8">Calderon</text>
-<text y="244" fill="#c8d3c5" x="209.6 216.8 224.0 231.2 238.4 245.6 252.8 260.0 267.2 274.4 281.6 288.8 296.0 303.2 310.4">admin_transport</text>
-<text y="244" fill="#c8d3c5" x="324.8 332.0 339.2 346.4 353.6">green</text>
-<text y="244" fill="#c8d3c5" x="382.4">5</text>
-<text y="244" fill="#c8d3c5" x="440.0">1</text>
-<text y="244" fill="#c8d3c5" x="454.4 461.6 468.8 476.0 483.2 490.4">active</text>
-<text y="244" fill="#c8d3c5" x="591.2 598.4">HQ</text>
-<text y="244" fill="#c8d3c5" x="612.8">·</text>
-<text y="244" fill="#c8d3c5" x="627.2 634.4 641.6 648.8">Skye</text>
-<text y="244" fill="#c8d3c5" x="663.2 670.4 677.6 684.8 692.0 699.2 706.4 713.6">Regional</text>
-<text y="244" fill="#c8d3c5" x="728.0 735.2">HQ</text>
-<text y="244" fill="#c8d3c5" x="749.6 756.8 764.0 771.2">Skye</text>
-<text y="244" fill="#c8d3c5" x="792.8 800.0">││</text>
-<text y="244" fill="#c8d3c5" x="814.4 821.6 828.8">age</text>
-<text y="244" fill="#c8d3c5" x="900.8 908.0">46</text>
+<text y="244" fill="#c8d3c5" x="209.6 216.8 224.0 231.2 238.4 245.6 252.8 260.0 267.2 274.4 281.6 288.8 296.0 303.2 310.4 317.6 324.8 332.0 339.2">admin_t║aassignment</text>
+<text y="244" fill="#c8d3c5" x="360.8 368.0">HQ</text>
+<text y="244" fill="#c8d3c5" x="382.4">·</text>
+<text y="244" fill="#c8d3c5" x="396.8 404.0 411.2 418.4">Skye</text>
+<text y="244" fill="#c8d3c5" x="432.8 440.0 447.2 454.4 461.6 468.8 476.0 483.2">Regional</text>
+<text y="244" fill="#c8d3c5" x="497.6 504.8">HQ</text>
+<text y="244" fill="#c8d3c5" x="972.8">║</text>
 <text y="244" fill="#c8d3c5" x="1224.8">│</text>
 <text y="259" fill="#c8d3c5" x="8.0">│</text>
 <text y="259" fill="#c8d3c5" x="22.4 29.6">13</text>
 <text y="259" fill="#c8d3c5" x="58.4 65.6 72.8 80.0">Cpl.</text>
 <text y="259" fill="#c8d3c5" x="94.4 101.6 108.8 116.0">Dana</text>
 <text y="259" fill="#c8d3c5" x="130.4 137.6 144.8 152.0 159.2 166.4">Zhukov</text>
-<text y="259" fill="#c8d3c5" x="209.6 216.8 224.0 231.2 238.4 245.6 252.8 260.0 267.2 274.4 281.6 288.8 296.0 303.2 310.4">admin_transport</text>
-<text y="259" fill="#c8d3c5" x="324.8 332.0 339.2 346.4 353.6 360.8 368.0">regular</text>
-<text y="259" fill="#c8d3c5" x="382.4">4</text>
-<text y="259" fill="#c8d3c5" x="440.0">1</text>
-<text y="259" fill="#c8d3c5" x="454.4 461.6 468.8 476.0 483.2 490.4">active</text>
-<text y="259" fill="#c8d3c5" x="591.2 598.4">HQ</text>
-<text y="259" fill="#c8d3c5" x="612.8">·</text>
-<text y="259" fill="#c8d3c5" x="627.2 634.4 641.6 648.8">Skye</text>
-<text y="259" fill="#c8d3c5" x="663.2 670.4 677.6 684.8 692.0 699.2 706.4 713.6">Regional</text>
-<text y="259" fill="#c8d3c5" x="728.0 735.2">HQ</text>
-<text y="259" fill="#c8d3c5" x="749.6 756.8 764.0 771.2">Skye</text>
-<text y="259" fill="#c8d3c5" x="792.8 800.0">││</text>
-<text y="259" fill="#c8d3c5" x="814.4 821.6 828.8 836.0 843.2 850.4 857.6">loyalty</text>
-<text y="259" fill="#c8d3c5" x="900.8 908.0 915.2 922.4 929.6 936.8 944.0">founder</text>
-<text y="259" fill="#c8d3c5" x="958.4">—</text>
-<text y="259" fill="#c8d3c5" x="972.8 980.0 987.2 994.4 1001.6 1008.8 1016.0">cancels</text>
+<text y="259" fill="#c8d3c5" x="209.6 216.8 224.0 231.2 238.4 245.6 252.8 260.0 267.2 274.4 281.6 288.8 296.0">admin_t║aunit</text>
+<text y="259" fill="#c8d3c5" x="360.8">—</text>
+<text y="259" fill="#c8d3c5" x="375.2">·</text>
+<text y="259" fill="#c8d3c5" x="389.6 396.8">at</text>
+<text y="259" fill="#c8d3c5" x="411.2 418.4 425.6 432.8">Skye</text>
+<text y="259" fill="#c8d3c5" x="972.8 980.0 987.2 994.4 1001.6 1008.8 1016.0">║ancels</text>
 <text y="259" fill="#c8d3c5" x="1030.4">1</text>
 <text y="259" fill="#c8d3c5" x="1044.8 1052.0 1059.2 1066.4 1073.6 1080.8 1088.0 1095.2">restless</text>
 <text y="259" fill="#c8d3c5" x="1109.6 1116.8 1124.0 1131.2">flag</text>
@@ -555,23 +519,8 @@
 <text y="274" fill="#c8d3c5" x="58.4 65.6 72.8 80.0">Sgt.</text>
 <text y="274" fill="#c8d3c5" x="94.4 101.6 108.8 116.0">Ivan</text>
 <text y="274" fill="#c8d3c5" x="130.4 137.6 144.8 152.0 159.2 166.4 173.6 180.8">O&#x27;Reilly</text>
-<text y="274" fill="#c8d3c5" x="209.6 216.8 224.0 231.2 238.4 245.6 252.8 260.0">admin_hr</text>
-<text y="274" fill="#c8d3c5" x="324.8 332.0 339.2 346.4 353.6 360.8 368.0">veteran</text>
-<text y="274" fill="#c8d3c5" x="382.4">3</text>
-<text y="274" fill="#c8d3c5" x="440.0">1</text>
-<text y="274" fill="#c8d3c5" x="454.4 461.6 468.8 476.0 483.2 490.4">active</text>
-<text y="274" fill="#c8d3c5" x="591.2 598.4">HQ</text>
-<text y="274" fill="#c8d3c5" x="612.8">·</text>
-<text y="274" fill="#c8d3c5" x="627.2 634.4 641.6 648.8">Skye</text>
-<text y="274" fill="#c8d3c5" x="663.2 670.4 677.6 684.8 692.0 699.2 706.4 713.6">Regional</text>
-<text y="274" fill="#c8d3c5" x="728.0 735.2">HQ</text>
-<text y="274" fill="#c8d3c5" x="749.6 756.8 764.0 771.2">Skye</text>
-<text y="274" fill="#c8d3c5" x="792.8 800.0">││</text>
-<text y="274" fill="#c8d3c5" x="814.4 821.6 828.8 836.0 843.2 850.4">shares</text>
-<text y="274" fill="#c8d3c5" x="900.8">0</text>
-<text y="274" fill="#c8d3c5" x="915.2 922.4 929.6 936.8 944.0 951.2">shares</text>
-<text y="274" fill="#c8d3c5" x="965.6">·</text>
-<text y="274" fill="#c8d3c5" x="980.0 987.2 994.4 1001.6 1008.8 1016.0 1023.2">founder</text>
+<text y="274" fill="#c8d3c5" x="209.6 216.8 224.0 231.2 238.4 245.6 252.8 260.0">admin_h║</text>
+<text y="274" fill="#c8d3c5" x="965.6 972.8 980.0 987.2 994.4 1001.6 1008.8 1016.0 1023.2">·║founder</text>
 <text y="274" fill="#c8d3c5" x="1037.6">·</text>
 <text y="274" fill="#c8d3c5" x="1052.0 1059.2 1066.4">30%</text>
 <text y="274" fill="#c8d3c5" x="1080.8 1088.0">of</text>
@@ -583,23 +532,24 @@
 <text y="289" fill="#c8d3c5" x="58.4 65.6 72.8 80.0">Cpl.</text>
 <text y="289" fill="#c8d3c5" x="94.4 101.6 108.8 116.0 123.2 130.4">Alexei</text>
 <text y="289" fill="#c8d3c5" x="144.8 152.0 159.2 166.4 173.6">Weber</text>
-<text y="289" fill="#c8d3c5" x="209.6 216.8 224.0 231.2 238.4 245.6 252.8 260.0">admin_hr</text>
-<text y="289" fill="#c8d3c5" x="324.8 332.0 339.2 346.4 353.6 360.8 368.0">regular</text>
-<text y="289" fill="#c8d3c5" x="382.4">4</text>
-<text y="289" fill="#c8d3c5" x="440.0">1</text>
-<text y="289" fill="#c8d3c5" x="454.4 461.6 468.8 476.0 483.2 490.4">active</text>
-<text y="289" fill="#c8d3c5" x="591.2 598.4">HQ</text>
-<text y="289" fill="#c8d3c5" x="612.8">·</text>
-<text y="289" fill="#c8d3c5" x="627.2 634.4 641.6 648.8">Skye</text>
-<text y="289" fill="#c8d3c5" x="663.2 670.4 677.6 684.8 692.0 699.2 706.4 713.6">Regional</text>
-<text y="289" fill="#c8d3c5" x="728.0 735.2">HQ</text>
-<text y="289" fill="#c8d3c5" x="749.6 756.8 764.0 771.2">Skye</text>
-<text y="289" fill="#c8d3c5" x="792.8 800.0">││</text>
-<text y="289" fill="#c8d3c5" x="814.4 821.6 828.8 836.0 843.2 850.4">record</text>
-<text y="289" fill="#c8d3c5" x="900.8">0</text>
-<text y="289" fill="#c8d3c5" x="915.2 922.4 929.6 936.8 944.0">kills</text>
-<text y="289" fill="#c8d3c5" x="958.4 965.6">(0</text>
-<text y="289" fill="#c8d3c5" x="980.0 987.2 994.4">BV)</text>
+<text y="289" fill="#c8d3c5" x="209.6 216.8 224.0 231.2 238.4 245.6 252.8 260.0">admin_h║</text>
+<text y="289" fill="#c8d3c5" x="274.4 281.6">XP</text>
+<text y="289" fill="#e0a33a" x="296.0">1</text>
+<text y="289" fill="#c8d3c5" x="310.4">·</text>
+<text y="289" fill="#c8d3c5" x="324.8 332.0 339.2 346.4 353.6 360.8 368.0">fatigue</text>
+<text y="289" fill="#7fc97f" x="382.4">0</text>
+<text y="289" fill="#7fc97f" x="396.8 404.0 411.2 418.4 425.6">fresh</text>
+<text y="289" fill="#c8d3c5" x="440.0">·</text>
+<text y="289" fill="#c8d3c5" x="454.4 461.6 468.8 476.0 483.2 490.4">morale</text>
+<text y="289" fill="#c8d3c5" x="504.8 512.0">55</text>
+<text y="289" fill="#c8d3c5" x="526.4">·</text>
+<text y="289" fill="#c8d3c5" x="540.8 548.0 555.2">pay</text>
+<text y="289" fill="#c8d3c5" x="569.6 576.8 584.0 591.2 598.4 605.6">550/mo</text>
+<text y="289" fill="#c8d3c5" x="620.0">·</text>
+<text y="289" fill="#c8d3c5" x="634.4 641.6 648.8 656.0 663.2 670.4 677.6 684.8 692.0">recruited</text>
+<text y="289" fill="#c8d3c5" x="706.4 713.6 720.8">day</text>
+<text y="289" fill="#c8d3c5" x="735.2">0</text>
+<text y="289" fill="#c8d3c5" x="965.6 972.8 980.0 987.2 994.4">0║BV)</text>
 <text y="289" fill="#c8d3c5" x="1008.8">·</text>
 <text y="289" fill="#c8d3c5" x="1023.2">0</text>
 <text y="289" fill="#c8d3c5" x="1037.6 1044.8 1052.0 1059.2 1066.4 1073.6 1080.8">battles</text>
@@ -612,189 +562,145 @@
 <text y="304" fill="#c8d3c5" x="58.4 65.6 72.8 80.0">Pvt.</text>
 <text y="304" fill="#c8d3c5" x="94.4 101.6 108.8 116.0 123.2">Jamal</text>
 <text y="304" fill="#c8d3c5" x="137.6 144.8 152.0 159.2">Sato</text>
-<text y="304" fill="#c8d3c5" x="209.6 216.8 224.0 231.2 238.4 245.6 252.8 260.0">admin_hr</text>
-<text y="304" fill="#c8d3c5" x="324.8 332.0 339.2 346.4 353.6">green</text>
-<text y="304" fill="#c8d3c5" x="382.4">5</text>
-<text y="304" fill="#c8d3c5" x="440.0">1</text>
-<text y="304" fill="#c8d3c5" x="454.4 461.6 468.8 476.0 483.2 490.4">active</text>
-<text y="304" fill="#c8d3c5" x="591.2 598.4">HQ</text>
-<text y="304" fill="#c8d3c5" x="612.8">·</text>
-<text y="304" fill="#c8d3c5" x="627.2 634.4 641.6 648.8">Skye</text>
-<text y="304" fill="#c8d3c5" x="663.2 670.4 677.6 684.8 692.0 699.2 706.4 713.6">Regional</text>
-<text y="304" fill="#c8d3c5" x="728.0 735.2">HQ</text>
-<text y="304" fill="#c8d3c5" x="749.6 756.8 764.0 771.2">Skye</text>
-<text y="304" fill="#c8d3c5" x="792.8 800.0">││</text>
-<text y="304" fill="#c8d3c5" x="814.4 821.6 828.8 836.0 843.2 850.4 857.6 864.8 872.0">available</text>
-<text y="304" fill="#7fc97f" x="900.8 908.0 915.2">yes</text>
+<text y="304" fill="#c8d3c5" x="209.6 216.8 224.0 231.2 238.4 245.6 252.8 260.0">admin_h║</text>
+<text y="304" fill="#c8d3c5" x="972.8">║</text>
 <text y="304" fill="#c8d3c5" x="1224.8">│</text>
 <text y="319" fill="#c8d3c5" x="8.0">│</text>
 <text y="319" fill="#c8d3c5" x="22.4 29.6">17</text>
 <text y="319" fill="#c8d3c5" x="58.4 65.6 72.8 80.0 87.2">MSgt.</text>
 <text y="319" fill="#c8d3c5" x="101.6 108.8 116.0 123.2">Ines</text>
 <text y="319" fill="#c8d3c5" x="137.6 144.8 152.0 159.2 166.4">Mbeki</text>
-<text y="319" fill="#c8d3c5" x="209.6 216.8 224.0 231.2 238.4 245.6 252.8 260.0">admin_hr</text>
-<text y="319" fill="#c8d3c5" x="324.8 332.0 339.2 346.4 353.6">elite</text>
-<text y="319" fill="#c8d3c5" x="382.4">2</text>
-<text y="319" fill="#c8d3c5" x="440.0">1</text>
-<text y="319" fill="#c8d3c5" x="454.4 461.6 468.8 476.0 483.2 490.4">active</text>
-<text y="319" fill="#c8d3c5" x="591.2 598.4">HQ</text>
-<text y="319" fill="#c8d3c5" x="612.8">·</text>
-<text y="319" fill="#c8d3c5" x="627.2 634.4 641.6 648.8">Skye</text>
-<text y="319" fill="#c8d3c5" x="663.2 670.4 677.6 684.8 692.0 699.2 706.4 713.6">Regional</text>
-<text y="319" fill="#c8d3c5" x="728.0 735.2">HQ</text>
-<text y="319" fill="#c8d3c5" x="749.6 756.8 764.0 771.2">Skye</text>
-<text y="319" fill="#c8d3c5" x="792.8 800.0">││</text>
+<text y="319" fill="#c8d3c5" x="209.6 216.8 224.0 231.2 238.4 245.6 252.8 260.0">admin_h║</text>
+<text y="319" fill="#c8d3c5" x="274.4 281.6 288.8 296.0 303.2">skill</text>
+<text y="319" fill="#c8d3c5" x="418.4 425.6 432.8 440.0 447.2">level</text>
+<text y="319" fill="#c8d3c5" x="476.0 483.2 490.4 497.6">next</text>
+<text y="319" fill="#c8d3c5" x="526.4 533.6">XP</text>
+<text y="319" fill="#c8d3c5" x="548.0 555.2 562.4 569.6">cost</text>
+<text y="319" fill="#c8d3c5" x="972.8">║</text>
 <text y="319" fill="#c8d3c5" x="1224.8">│</text>
 <text y="334" fill="#c8d3c5" x="8.0">│</text>
 <text y="334" fill="#c8d3c5" x="22.4 29.6">18</text>
 <text y="334" fill="#c8d3c5" x="58.4 65.6 72.8 80.0">Cpl.</text>
 <text y="334" fill="#c8d3c5" x="94.4 101.6 108.8 116.0">Adam</text>
 <text y="334" fill="#c8d3c5" x="130.4 137.6">Xu</text>
-<text y="334" fill="#c8d3c5" x="209.6 216.8 224.0 231.2 238.4 245.6 252.8 260.0">admin_hr</text>
-<text y="334" fill="#c8d3c5" x="324.8 332.0 339.2 346.4 353.6 360.8 368.0">regular</text>
-<text y="334" fill="#c8d3c5" x="382.4">4</text>
-<text y="334" fill="#c8d3c5" x="440.0">1</text>
-<text y="334" fill="#c8d3c5" x="454.4 461.6 468.8 476.0 483.2 490.4">active</text>
-<text y="334" fill="#c8d3c5" x="591.2 598.4">HQ</text>
-<text y="334" fill="#c8d3c5" x="612.8">·</text>
-<text y="334" fill="#c8d3c5" x="627.2 634.4 641.6 648.8">Skye</text>
-<text y="334" fill="#c8d3c5" x="663.2 670.4 677.6 684.8 692.0 699.2 706.4 713.6">Regional</text>
-<text y="334" fill="#c8d3c5" x="728.0 735.2">HQ</text>
-<text y="334" fill="#c8d3c5" x="749.6 756.8 764.0 771.2">Skye</text>
-<text y="334" fill="#c8d3c5" x="792.8 800.0">││</text>
+<text y="334" fill="#c8d3c5" x="209.6 216.8 224.0 231.2 238.4 245.6 252.8 260.0">admin_h║</text>
+<text y="334" fill="#e0a33a" x="274.4 281.6 288.8 296.0 303.2">admin</text>
+<text y="334" fill="#e0a33a" x="447.2">4</text>
+<text y="334" fill="#e0a33a" x="497.6">3</text>
+<text y="334" fill="#e0a33a" x="555.2 562.4">16</text>
+<text y="334" fill="#c8d3c5" x="972.8">║</text>
 <text y="334" fill="#c8d3c5" x="1224.8">│</text>
 <text y="349" fill="#c8d3c5" x="8.0">│</text>
 <text y="349" fill="#c8d3c5" x="22.4 29.6">19</text>
 <text y="349" fill="#c8d3c5" x="58.4 65.6 72.8 80.0">Cpl.</text>
 <text y="349" fill="#c8d3c5" x="94.4 101.6 108.8 116.0 123.2 130.4">Rafael</text>
 <text y="349" fill="#c8d3c5" x="144.8 152.0 159.2 166.4 173.6 180.8 188.0 195.2">Calderon</text>
-<text y="349" fill="#c8d3c5" x="209.6 216.8 224.0 231.2 238.4 245.6 252.8 260.0">admin_hr</text>
-<text y="349" fill="#c8d3c5" x="324.8 332.0 339.2 346.4 353.6 360.8 368.0">regular</text>
-<text y="349" fill="#c8d3c5" x="382.4">4</text>
-<text y="349" fill="#c8d3c5" x="440.0">1</text>
-<text y="349" fill="#c8d3c5" x="454.4 461.6 468.8 476.0 483.2 490.4">active</text>
-<text y="349" fill="#c8d3c5" x="591.2 598.4">HQ</text>
-<text y="349" fill="#c8d3c5" x="612.8">·</text>
-<text y="349" fill="#c8d3c5" x="627.2 634.4 641.6 648.8">Skye</text>
-<text y="349" fill="#c8d3c5" x="663.2 670.4 677.6 684.8 692.0 699.2 706.4 713.6">Regional</text>
-<text y="349" fill="#c8d3c5" x="728.0 735.2">HQ</text>
-<text y="349" fill="#c8d3c5" x="749.6 756.8 764.0 771.2">Skye</text>
-<text y="349" fill="#c8d3c5" x="792.8 800.0">││</text>
+<text y="349" fill="#c8d3c5" x="209.6 216.8 224.0 231.2 238.4 245.6 252.8 260.0">admin_h║</text>
+<text y="349" fill="#c8d3c5" x="972.8">║</text>
 <text y="349" fill="#c8d3c5" x="1224.8">│</text>
 <text y="364" fill="#c8d3c5" x="8.0">│</text>
 <text y="364" fill="#c8d3c5" x="22.4 29.6">20</text>
 <text y="364" fill="#c8d3c5" x="58.4 65.6 72.8 80.0">Cpl.</text>
 <text y="364" fill="#c8d3c5" x="94.4 101.6 108.8 116.0">Aiko</text>
 <text y="364" fill="#c8d3c5" x="130.4 137.6 144.8">Kim</text>
-<text y="364" fill="#c8d3c5" x="209.6 216.8 224.0 231.2 238.4 245.6 252.8 260.0">admin_hr</text>
-<text y="364" fill="#c8d3c5" x="324.8 332.0 339.2 346.4 353.6 360.8 368.0">regular</text>
-<text y="364" fill="#c8d3c5" x="382.4">4</text>
-<text y="364" fill="#c8d3c5" x="440.0">1</text>
-<text y="364" fill="#c8d3c5" x="454.4 461.6 468.8 476.0 483.2 490.4">active</text>
-<text y="364" fill="#c8d3c5" x="591.2 598.4">HQ</text>
-<text y="364" fill="#c8d3c5" x="612.8">·</text>
-<text y="364" fill="#c8d3c5" x="627.2 634.4 641.6 648.8">Skye</text>
-<text y="364" fill="#c8d3c5" x="663.2 670.4 677.6 684.8 692.0 699.2 706.4 713.6">Regional</text>
-<text y="364" fill="#c8d3c5" x="728.0 735.2">HQ</text>
-<text y="364" fill="#c8d3c5" x="749.6 756.8 764.0 771.2">Skye</text>
-<text y="364" fill="#c8d3c5" x="792.8 800.0">││</text>
+<text y="364" fill="#c8d3c5" x="209.6 216.8 224.0 231.2 238.4 245.6 252.8 260.0">admin_h║</text>
+<text y="364" fill="#c8d3c5" x="274.4 281.6 288.8 296.0 303.2 310.4 317.6 324.8">training</text>
+<text y="364" fill="#c8d3c5" x="360.8 368.0 375.2 382.4">none</text>
+<text y="364" fill="#c8d3c5" x="972.8">║</text>
 <text y="364" fill="#c8d3c5" x="1224.8">│</text>
 <text y="379" fill="#c8d3c5" x="8.0">│</text>
 <text y="379" fill="#c8d3c5" x="22.4 29.6">21</text>
 <text y="379" fill="#c8d3c5" x="58.4 65.6 72.8 80.0">Sgt.</text>
 <text y="379" fill="#c8d3c5" x="94.4 101.6 108.8 116.0 123.2">Franz</text>
 <text y="379" fill="#c8d3c5" x="137.6 144.8 152.0 159.2 166.4">Ulmer</text>
-<text y="379" fill="#c8d3c5" x="209.6 216.8 224.0 231.2 238.4 245.6 252.8 260.0">admin_hr</text>
-<text y="379" fill="#c8d3c5" x="324.8 332.0 339.2 346.4 353.6 360.8 368.0">veteran</text>
-<text y="379" fill="#c8d3c5" x="382.4">3</text>
-<text y="379" fill="#c8d3c5" x="440.0">1</text>
-<text y="379" fill="#c8d3c5" x="454.4 461.6 468.8 476.0 483.2 490.4">active</text>
-<text y="379" fill="#c8d3c5" x="591.2 598.4">HQ</text>
-<text y="379" fill="#c8d3c5" x="612.8">·</text>
-<text y="379" fill="#c8d3c5" x="627.2 634.4 641.6 648.8">Skye</text>
-<text y="379" fill="#c8d3c5" x="663.2 670.4 677.6 684.8 692.0 699.2 706.4 713.6">Regional</text>
-<text y="379" fill="#c8d3c5" x="728.0 735.2">HQ</text>
-<text y="379" fill="#c8d3c5" x="749.6 756.8 764.0 771.2">Skye</text>
-<text y="379" fill="#c8d3c5" x="792.8 800.0">││</text>
+<text y="379" fill="#c8d3c5" x="209.6 216.8 224.0 231.2 238.4 245.6 252.8 260.0">admin_h║</text>
+<text y="379" fill="#6f7d73" x="360.8 368.0 375.2">[t]</text>
+<text y="379" fill="#6f7d73" x="389.6 396.8 404.0 411.2 418.4 425.6">starts</text>
+<text y="379" fill="#6f7d73" x="440.0">a</text>
+<text y="379" fill="#6f7d73" x="454.4 461.6 468.8 476.0 483.2 490.4 497.6">program</text>
+<text y="379" fill="#6f7d73" x="512.0 519.2">on</text>
+<text y="379" fill="#6f7d73" x="533.6 540.8 548.0">the</text>
+<text y="379" fill="#6f7d73" x="562.4 569.6 576.8 584.0 591.2 598.4 605.6">primary</text>
+<text y="379" fill="#6f7d73" x="620.0 627.2 634.4 641.6 648.8">skill</text>
+<text y="379" fill="#6f7d73" x="663.2 670.4 677.6 684.8 692.0 699.2 706.4 713.6 720.8">(training</text>
+<text y="379" fill="#6f7d73" x="735.2 742.4 749.6 756.8 764.0 771.2">ground</text>
+<text y="379" fill="#6f7d73" x="785.6 792.8">at</text>
+<text y="379" fill="#6f7d73" x="807.2 814.4 821.6 828.8 836.0">home)</text>
+<text y="379" fill="#6f7d73" x="850.4">·</text>
+<text y="379" fill="#6f7d73" x="864.8 872.0 879.2 886.4 893.6 900.8">:train</text>
+<text y="379" fill="#6f7d73" x="915.2 922.4 929.6 936.8">&lt;id&gt;</text>
+<text y="379" fill="#6f7d73" x="951.2 958.4">ab</text>
+<text y="379" fill="#c8d3c5" x="972.8">║</text>
 <text y="379" fill="#c8d3c5" x="1224.8">│</text>
 <text y="394" fill="#c8d3c5" x="8.0">│</text>
 <text y="394" fill="#c8d3c5" x="22.4 29.6">22</text>
 <text y="394" fill="#c8d3c5" x="58.4 65.6 72.8 80.0">Sgt.</text>
 <text y="394" fill="#c8d3c5" x="94.4 101.6 108.8 116.0 123.2">Boris</text>
 <text y="394" fill="#c8d3c5" x="137.6 144.8 152.0 159.2 166.4 173.6">Yamada</text>
-<text y="394" fill="#c8d3c5" x="209.6 216.8 224.0 231.2 238.4 245.6 252.8 260.0 267.2 274.4 281.6 288.8 296.0">admin_finance</text>
-<text y="394" fill="#c8d3c5" x="324.8 332.0 339.2 346.4 353.6 360.8 368.0">veteran</text>
-<text y="394" fill="#c8d3c5" x="382.4">3</text>
-<text y="394" fill="#c8d3c5" x="440.0">1</text>
-<text y="394" fill="#c8d3c5" x="454.4 461.6 468.8 476.0 483.2 490.4">active</text>
-<text y="394" fill="#c8d3c5" x="591.2 598.4">HQ</text>
-<text y="394" fill="#c8d3c5" x="612.8">·</text>
-<text y="394" fill="#c8d3c5" x="627.2 634.4 641.6 648.8">Skye</text>
-<text y="394" fill="#c8d3c5" x="663.2 670.4 677.6 684.8 692.0 699.2 706.4 713.6">Regional</text>
-<text y="394" fill="#c8d3c5" x="728.0 735.2">HQ</text>
-<text y="394" fill="#c8d3c5" x="749.6 756.8 764.0 771.2">Skye</text>
-<text y="394" fill="#c8d3c5" x="792.8 800.0">││</text>
+<text y="394" fill="#c8d3c5" x="209.6 216.8 224.0 231.2 238.4 245.6 252.8 260.0 267.2 274.4 281.6 288.8">admin_f║nage</text>
+<text y="394" fill="#c8d3c5" x="360.8 368.0">46</text>
+<text y="394" fill="#c8d3c5" x="972.8">║</text>
 <text y="394" fill="#c8d3c5" x="1224.8">│</text>
 <text y="409" fill="#c8d3c5" x="8.0">│</text>
 <text y="409" fill="#c8d3c5" x="22.4 29.6">23</text>
 <text y="409" fill="#c8d3c5" x="58.4 65.6 72.8 80.0">Sgt.</text>
 <text y="409" fill="#c8d3c5" x="94.4 101.6 108.8 116.0 123.2">Boris</text>
 <text y="409" fill="#c8d3c5" x="137.6 144.8 152.0 159.2 166.4 173.6">Tanaka</text>
-<text y="409" fill="#c8d3c5" x="209.6 216.8 224.0 231.2 238.4 245.6 252.8 260.0 267.2 274.4 281.6 288.8 296.0">admin_finance</text>
-<text y="409" fill="#c8d3c5" x="324.8 332.0 339.2 346.4 353.6 360.8 368.0">veteran</text>
-<text y="409" fill="#c8d3c5" x="382.4">3</text>
-<text y="409" fill="#c8d3c5" x="440.0">1</text>
-<text y="409" fill="#c8d3c5" x="454.4 461.6 468.8 476.0 483.2 490.4">active</text>
-<text y="409" fill="#c8d3c5" x="591.2 598.4">HQ</text>
-<text y="409" fill="#c8d3c5" x="612.8">·</text>
-<text y="409" fill="#c8d3c5" x="627.2 634.4 641.6 648.8">Skye</text>
-<text y="409" fill="#c8d3c5" x="663.2 670.4 677.6 684.8 692.0 699.2 706.4 713.6">Regional</text>
-<text y="409" fill="#c8d3c5" x="728.0 735.2">HQ</text>
-<text y="409" fill="#c8d3c5" x="749.6 756.8 764.0 771.2">Skye</text>
-<text y="409" fill="#c8d3c5" x="792.8 800.0 807.2 814.4 821.6 828.8 836.0 843.2 850.4 857.6 864.8 872.0 879.2 886.4 893.6 900.8 908.0 915.2 922.4 929.6 936.8 944.0 951.2 958.4 965.6 972.8 980.0 987.2 994.4 1001.6 1008.8 1016.0 1023.2 1030.4 1037.6 1044.8 1052.0 1059.2 1066.4 1073.6 1080.8 1088.0 1095.2 1102.4 1109.6 1116.8 1124.0 1131.2 1138.4 1145.6 1152.8 1160.0 1167.2 1174.4 1181.6 1188.8 1196.0 1203.2 1210.4 1217.6 1224.8">│└──────────────────────────────────────────────────────────┘</text>
+<text y="409" fill="#c8d3c5" x="209.6 216.8 224.0 231.2 238.4 245.6 252.8 260.0 267.2 274.4 281.6 288.8 296.0 303.2 310.4 317.6">admin_f║nloyalty</text>
+<text y="409" fill="#c8d3c5" x="360.8 368.0 375.2 382.4 389.6 396.8 404.0">founder</text>
+<text y="409" fill="#c8d3c5" x="418.4">—</text>
+<text y="409" fill="#c8d3c5" x="432.8 440.0 447.2 454.4 461.6 468.8 476.0">cancels</text>
+<text y="409" fill="#c8d3c5" x="490.4">1</text>
+<text y="409" fill="#c8d3c5" x="504.8 512.0 519.2 526.4 533.6 540.8 548.0 555.2">restless</text>
+<text y="409" fill="#c8d3c5" x="569.6 576.8 584.0 591.2">flag</text>
+<text y="409" fill="#c8d3c5" x="605.6 612.8">on</text>
+<text y="409" fill="#c8d3c5" x="627.2 634.4 641.6 648.8 656.0 663.2 670.4">payday;</text>
+<text y="409" fill="#c8d3c5" x="684.8 692.0 699.2 706.4 713.6 720.8 728.0 735.2">founders</text>
+<text y="409" fill="#c8d3c5" x="749.6 756.8 764.0 771.2 778.4">never</text>
+<text y="409" fill="#c8d3c5" x="792.8 800.0 807.2 814.4">roll</text>
+<text y="409" fill="#c8d3c5" x="828.8 836.0 843.2 850.4 857.6">while</text>
+<text y="409" fill="#c8d3c5" x="872.0 879.2 886.4 893.6 900.8 908.0">morale</text>
+<text y="409" fill="#c8d3c5" x="922.4 929.6 936.8 944.0 951.2">holds</text>
+<text y="409" fill="#c8d3c5" x="965.6 972.8 980.0 987.2 994.4 1001.6 1008.8 1016.0 1023.2 1030.4 1037.6 1044.8 1052.0 1059.2 1066.4 1073.6 1080.8 1088.0 1095.2 1102.4 1109.6 1116.8 1124.0 1131.2 1138.4 1145.6 1152.8 1160.0 1167.2 1174.4 1181.6 1188.8 1196.0 1203.2 1210.4 1217.6 1224.8">─║──────────────────────────────────┘</text>
 <text y="424" fill="#c8d3c5" x="8.0">│</text>
 <text y="424" fill="#c8d3c5" x="22.4 29.6">24</text>
 <text y="424" fill="#c8d3c5" x="58.4 65.6 72.8 80.0">Cpl.</text>
 <text y="424" fill="#c8d3c5" x="94.4 101.6 108.8 116.0">Lars</text>
 <text y="424" fill="#c8d3c5" x="130.4 137.6 144.8 152.0 159.2">Abara</text>
-<text y="424" fill="#c8d3c5" x="209.6 216.8 224.0 231.2 238.4 245.6 252.8 260.0 267.2 274.4 281.6 288.8 296.0">admin_finance</text>
-<text y="424" fill="#c8d3c5" x="324.8 332.0 339.2 346.4 353.6 360.8 368.0">regular</text>
-<text y="424" fill="#c8d3c5" x="382.4">4</text>
-<text y="424" fill="#c8d3c5" x="440.0">1</text>
-<text y="424" fill="#c8d3c5" x="454.4 461.6 468.8 476.0 483.2 490.4">active</text>
-<text y="424" fill="#c8d3c5" x="591.2 598.4">HQ</text>
-<text y="424" fill="#c8d3c5" x="612.8">·</text>
-<text y="424" fill="#c8d3c5" x="627.2 634.4 641.6 648.8">Skye</text>
-<text y="424" fill="#c8d3c5" x="663.2 670.4 677.6 684.8 692.0 699.2 706.4 713.6">Regional</text>
-<text y="424" fill="#c8d3c5" x="728.0 735.2">HQ</text>
-<text y="424" fill="#c8d3c5" x="749.6 756.8 764.0 771.2">Skye</text>
-<text y="424" fill="#c8d3c5" x="792.8 800.0">│┌</text>
-<text y="424" fill="#c8d3c5" x="814.4 821.6 828.8 836.0">OPEN</text>
-<text y="424" fill="#c8d3c5" x="850.4 857.6 864.8 872.0 879.2">SEATS</text>
-<text y="424" fill="#c8d3c5" x="893.6 900.8 908.0 915.2 922.4 929.6 936.8 944.0 951.2 958.4 965.6 972.8 980.0 987.2 994.4 1001.6 1008.8 1016.0 1023.2 1030.4 1037.6 1044.8 1052.0 1059.2 1066.4 1073.6 1080.8 1088.0 1095.2 1102.4 1109.6 1116.8 1124.0 1131.2 1138.4 1145.6 1152.8 1160.0 1167.2 1174.4 1181.6 1188.8 1196.0 1203.2 1210.4 1217.6 1224.8">──────────────────────────────────────────────┐</text>
+<text y="424" fill="#c8d3c5" x="209.6 216.8 224.0 231.2 238.4 245.6 252.8 260.0 267.2 274.4 281.6 288.8 296.0 303.2 310.4">admin_f║nshares</text>
+<text y="424" fill="#c8d3c5" x="360.8">0</text>
+<text y="424" fill="#c8d3c5" x="375.2 382.4 389.6 396.8 404.0 411.2">shares</text>
+<text y="424" fill="#c8d3c5" x="425.6">·</text>
+<text y="424" fill="#c8d3c5" x="440.0 447.2 454.4 461.6 468.8 476.0 483.2">founder</text>
+<text y="424" fill="#c8d3c5" x="497.6">·</text>
+<text y="424" fill="#c8d3c5" x="512.0 519.2 526.4">30%</text>
+<text y="424" fill="#c8d3c5" x="540.8 548.0">of</text>
+<text y="424" fill="#c8d3c5" x="562.4 569.6 576.8 584.0 591.2 598.4 605.6 612.8">contract</text>
+<text y="424" fill="#c8d3c5" x="627.2 634.4 641.6 648.8 656.0 663.2">income</text>
+<text y="424" fill="#c8d3c5" x="677.6 684.8">is</text>
+<text y="424" fill="#c8d3c5" x="699.2 706.4 713.6 720.8 728.0">split</text>
+<text y="424" fill="#c8d3c5" x="742.4 749.6 756.8 764.0 771.2">among</text>
+<text y="424" fill="#c8d3c5" x="785.6 792.8 800.0 807.2 814.4 821.6 828.8 836.0 843.2 850.4 857.6 864.8">shareholders</text>
+<text y="424" fill="#c8d3c5" x="879.2 886.4">at</text>
+<text y="424" fill="#c8d3c5" x="900.8 908.0 915.2 922.4 929.6 936.8 944.0 951.2 958.4 965.6 972.8 980.0 987.2 994.4 1001.6 1008.8 1016.0 1023.2 1030.4 1037.6 1044.8 1052.0 1059.2 1066.4 1073.6 1080.8 1088.0 1095.2 1102.4 1109.6 1116.8 1124.0 1131.2 1138.4 1145.6 1152.8 1160.0 1167.2 1174.4 1181.6 1188.8 1196.0 1203.2 1210.4 1217.6 1224.8">completio─║──────────────────────────────────┐</text>
 <text y="439" fill="#c8d3c5" x="8.0">│</text>
 <text y="439" fill="#c8d3c5" x="22.4 29.6">25</text>
 <text y="439" fill="#c8d3c5" x="58.4 65.6 72.8 80.0">Cpl.</text>
 <text y="439" fill="#c8d3c5" x="94.4 101.6 108.8 116.0 123.2 130.4">Viktor</text>
 <text y="439" fill="#c8d3c5" x="144.8 152.0 159.2 166.4 173.6 180.8 188.0 195.2">Calderon</text>
-<text y="439" fill="#c8d3c5" x="209.6 216.8 224.0 231.2 238.4 245.6 252.8 260.0 267.2 274.4 281.6 288.8 296.0">admin_finance</text>
-<text y="439" fill="#c8d3c5" x="324.8 332.0 339.2 346.4 353.6 360.8 368.0">regular</text>
-<text y="439" fill="#c8d3c5" x="382.4">4</text>
-<text y="439" fill="#c8d3c5" x="440.0">1</text>
-<text y="439" fill="#c8d3c5" x="454.4 461.6 468.8 476.0 483.2 490.4">active</text>
-<text y="439" fill="#c8d3c5" x="591.2 598.4">HQ</text>
-<text y="439" fill="#c8d3c5" x="612.8">·</text>
-<text y="439" fill="#c8d3c5" x="627.2 634.4 641.6 648.8">Skye</text>
-<text y="439" fill="#c8d3c5" x="663.2 670.4 677.6 684.8 692.0 699.2 706.4 713.6">Regional</text>
-<text y="439" fill="#c8d3c5" x="728.0 735.2">HQ</text>
-<text y="439" fill="#c8d3c5" x="749.6 756.8 764.0 771.2">Skye</text>
-<text y="439" fill="#c8d3c5" x="792.8 800.0">││</text>
-<text y="439" fill="#6f7d73" x="814.4 821.6">no</text>
-<text y="439" fill="#6f7d73" x="836.0 843.2 850.4 857.6">open</text>
-<text y="439" fill="#6f7d73" x="872.0 879.2 886.4 893.6">seat</text>
-<text y="439" fill="#6f7d73" x="908.0 915.2 922.4">for</text>
-<text y="439" fill="#6f7d73" x="936.8 944.0 951.2 958.4">this</text>
-<text y="439" fill="#6f7d73" x="972.8 980.0 987.2 994.4">role</text>
+<text y="439" fill="#c8d3c5" x="209.6 216.8 224.0 231.2 238.4 245.6 252.8 260.0 267.2 274.4 281.6 288.8 296.0 303.2 310.4">admin_f║nrecord</text>
+<text y="439" fill="#c8d3c5" x="360.8">0</text>
+<text y="439" fill="#c8d3c5" x="375.2 382.4 389.6 396.8 404.0">kills</text>
+<text y="439" fill="#c8d3c5" x="418.4 425.6">(0</text>
+<text y="439" fill="#c8d3c5" x="440.0 447.2 454.4">BV)</text>
+<text y="439" fill="#c8d3c5" x="468.8">·</text>
+<text y="439" fill="#c8d3c5" x="483.2">0</text>
+<text y="439" fill="#c8d3c5" x="497.6 504.8 512.0 519.2 526.4 533.6 540.8">battles</text>
+<text y="439" fill="#c8d3c5" x="555.2">·</text>
+<text y="439" fill="#c8d3c5" x="569.6">0</text>
+<text y="439" fill="#c8d3c5" x="584.0 591.2 598.4 605.6 612.8">tours</text>
+<text y="439" fill="#c8d3c5" x="972.8">║</text>
+<text y="439" fill="#6f7d73" x="980.0 987.2 994.4">ole</text>
 <text y="439" fill="#6f7d73" x="1008.8 1016.0 1023.2 1030.4 1037.6">right</text>
 <text y="439" fill="#6f7d73" x="1052.0 1059.2 1066.4">now</text>
 <text y="439" fill="#c8d3c5" x="1224.8">│</text>
@@ -803,42 +709,18 @@
 <text y="454" fill="#c8d3c5" x="58.4 65.6 72.8 80.0">Cpl.</text>
 <text y="454" fill="#c8d3c5" x="94.4 101.6 108.8">Mei</text>
 <text y="454" fill="#c8d3c5" x="123.2 130.4 137.6 144.8 152.0 159.2 166.4 173.6">Drummond</text>
-<text y="454" fill="#c8d3c5" x="209.6 216.8 224.0 231.2 238.4 245.6 252.8 260.0 267.2 274.4 281.6 288.8 296.0">admin_finance</text>
-<text y="454" fill="#c8d3c5" x="324.8 332.0 339.2 346.4 353.6 360.8 368.0">regular</text>
-<text y="454" fill="#c8d3c5" x="382.4">4</text>
-<text y="454" fill="#c8d3c5" x="440.0">1</text>
-<text y="454" fill="#c8d3c5" x="454.4 461.6 468.8 476.0 483.2 490.4">active</text>
-<text y="454" fill="#c8d3c5" x="591.2 598.4">HQ</text>
-<text y="454" fill="#c8d3c5" x="612.8">·</text>
-<text y="454" fill="#c8d3c5" x="627.2 634.4 641.6 648.8">Skye</text>
-<text y="454" fill="#c8d3c5" x="663.2 670.4 677.6 684.8 692.0 699.2 706.4 713.6">Regional</text>
-<text y="454" fill="#c8d3c5" x="728.0 735.2">HQ</text>
-<text y="454" fill="#c8d3c5" x="749.6 756.8 764.0 771.2">Skye</text>
-<text y="454" fill="#c8d3c5" x="792.8 800.0">││</text>
+<text y="454" fill="#c8d3c5" x="209.6 216.8 224.0 231.2 238.4 245.6 252.8 260.0 267.2 274.4 281.6 288.8 296.0 303.2 310.4 317.6 324.8 332.0">admin_f║navailable</text>
+<text y="454" fill="#7fc97f" x="360.8 368.0 375.2">yes</text>
+<text y="454" fill="#c8d3c5" x="972.8">║</text>
 <text y="454" fill="#c8d3c5" x="1224.8">│</text>
 <text y="469" fill="#c8d3c5" x="8.0">│</text>
 <text y="469" fill="#c8d3c5" x="22.4 29.6">27</text>
 <text y="469" fill="#c8d3c5" x="58.4 65.6 72.8 80.0">Sgt.</text>
 <text y="469" fill="#c8d3c5" x="94.4 101.6 108.8 116.0 123.2 130.4">Viktor</text>
 <text y="469" fill="#c8d3c5" x="144.8 152.0 159.2 166.4 173.6 180.8">Tanaka</text>
-<text y="469" fill="#c8d3c5" x="209.6 216.8 224.0 231.2 238.4 245.6 252.8 260.0 267.2 274.4 281.6 288.8 296.0">admin_finance</text>
-<text y="469" fill="#c8d3c5" x="324.8 332.0 339.2 346.4 353.6 360.8 368.0">veteran</text>
-<text y="469" fill="#c8d3c5" x="382.4">3</text>
-<text y="469" fill="#c8d3c5" x="440.0">1</text>
-<text y="469" fill="#c8d3c5" x="454.4 461.6 468.8 476.0 483.2 490.4">active</text>
-<text y="469" fill="#c8d3c5" x="591.2 598.4">HQ</text>
-<text y="469" fill="#c8d3c5" x="612.8">·</text>
-<text y="469" fill="#c8d3c5" x="627.2 634.4 641.6 648.8">Skye</text>
-<text y="469" fill="#c8d3c5" x="663.2 670.4 677.6 684.8 692.0 699.2 706.4 713.6">Regional</text>
-<text y="469" fill="#c8d3c5" x="728.0 735.2">HQ</text>
-<text y="469" fill="#c8d3c5" x="749.6 756.8 764.0 771.2">Skye</text>
-<text y="469" fill="#c8d3c5" x="792.8 800.0">││</text>
-<text y="469" fill="#6f7d73" x="814.4 821.6 828.8">[a]</text>
-<text y="469" fill="#6f7d73" x="843.2 850.4 857.6 864.8 872.0 879.2">assign</text>
-<text y="469" fill="#6f7d73" x="893.6 900.8">to</text>
-<text y="469" fill="#6f7d73" x="915.2">a</text>
-<text y="469" fill="#6f7d73" x="929.6 936.8 944.0 951.2">seat</text>
-<text y="469" fill="#6f7d73" x="972.8 980.0 987.2">[t]</text>
+<text y="469" fill="#c8d3c5" x="209.6 216.8 224.0 231.2 238.4 245.6 252.8 260.0 267.2">admin_f║n</text>
+<text y="469" fill="#c8d3c5" x="972.8">║</text>
+<text y="469" fill="#6f7d73" x="980.0 987.2">t]</text>
 <text y="469" fill="#6f7d73" x="1001.6 1008.8 1016.0 1023.2 1030.4">train</text>
 <text y="469" fill="#6f7d73" x="1052.0 1059.2 1066.4">[P]</text>
 <text y="469" fill="#6f7d73" x="1080.8 1088.0 1095.2 1102.4">post</text>
@@ -852,18 +734,7 @@
 <text y="484" fill="#c8d3c5" x="58.4 65.6 72.8 80.0">Sgt.</text>
 <text y="484" fill="#c8d3c5" x="94.4 101.6 108.8 116.0 123.2">Franz</text>
 <text y="484" fill="#c8d3c5" x="137.6 144.8 152.0 159.2 166.4">Ulmer</text>
-<text y="484" fill="#c8d3c5" x="209.6 216.8 224.0 231.2 238.4 245.6 252.8 260.0 267.2 274.4 281.6 288.8 296.0">admin_finance</text>
-<text y="484" fill="#c8d3c5" x="324.8 332.0 339.2 346.4 353.6 360.8 368.0">veteran</text>
-<text y="484" fill="#c8d3c5" x="382.4">3</text>
-<text y="484" fill="#c8d3c5" x="440.0">1</text>
-<text y="484" fill="#c8d3c5" x="454.4 461.6 468.8 476.0 483.2 490.4">active</text>
-<text y="484" fill="#c8d3c5" x="591.2 598.4">HQ</text>
-<text y="484" fill="#c8d3c5" x="612.8">·</text>
-<text y="484" fill="#c8d3c5" x="627.2 634.4 641.6 648.8">Skye</text>
-<text y="484" fill="#c8d3c5" x="663.2 670.4 677.6 684.8 692.0 699.2 706.4 713.6">Regional</text>
-<text y="484" fill="#c8d3c5" x="728.0 735.2">HQ</text>
-<text y="484" fill="#c8d3c5" x="749.6 756.8 764.0 771.2">Skye</text>
-<text y="484" fill="#c8d3c5" x="792.8 800.0">││</text>
+<text y="484" fill="#c8d3c5" x="209.6 216.8 224.0 231.2 238.4 245.6 252.8 260.0 267.2 274.4 281.6 288.8 296.0 303.2 310.4 317.6 324.8 332.0 339.2 346.4 353.6 360.8 368.0 375.2 382.4 389.6 396.8 404.0 411.2 418.4 425.6 432.8 440.0 447.2 454.4 461.6 468.8 476.0 483.2 490.4 497.6 504.8 512.0 519.2 526.4 533.6 540.8 548.0 555.2 562.4 569.6 576.8 584.0 591.2 598.4 605.6 612.8 620.0 627.2 634.4 641.6 648.8 656.0 663.2 670.4 677.6 684.8 692.0 699.2 706.4 713.6 720.8 728.0 735.2 742.4 749.6 756.8 764.0 771.2 778.4 785.6 792.8 800.0 807.2 814.4 821.6 828.8 836.0 843.2 850.4 857.6 864.8 872.0 879.2 886.4 893.6 900.8 908.0 915.2 922.4 929.6 936.8 944.0 951.2 958.4 965.6 972.8">admin_f╚══════════════════════════════════════════════════════════════════════════════════════════════════╝</text>
 <text y="484" fill="#c8d3c5" x="1224.8">│</text>
 <text y="499" fill="#c8d3c5" x="8.0">│</text>
 <text y="499" fill="#c8d3c5" x="22.4 29.6">29</text>

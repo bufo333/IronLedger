@@ -200,16 +200,7 @@
 <text y="199" fill="#c8d3c5" x="22.4 29.6 36.8 44.0 51.2 58.4 65.6 72.8 80.0 87.2">profession</text>
 <text y="199" fill="#c8d3c5" x="490.4">│</text>
 <text y="199" fill="#c8d3c5" x="504.8">│</text>
-<text y="199" fill="#6f7d73" x="519.2 526.4 533.6">the</text>
-<text y="199" fill="#6f7d73" x="548.0 555.2 562.4 569.6 576.8 584.0 591.2">faction</text>
-<text y="199" fill="#6f7d73" x="605.6 612.8 620.0">and</text>
-<text y="199" fill="#6f7d73" x="634.4 641.6 648.8 656.0 663.2 670.4 677.6 684.8 692.0 699.2">profession</text>
-<text y="199" fill="#6f7d73" x="713.6 720.8 728.0">are</text>
-<text y="199" fill="#6f7d73" x="742.4 749.6 756.8 764.0 771.2 778.4 785.6 792.8 800.0 807.2">permanent;</text>
-<text y="199" fill="#6f7d73" x="821.6 828.8 836.0 843.2 850.4">names</text>
-<text y="199" fill="#6f7d73" x="864.8 872.0 879.2">can</text>
-<text y="199" fill="#6f7d73" x="893.6 900.8 908.0 915.2 922.4 929.6">change</text>
-<text y="199" fill="#6f7d73" x="944.0 951.2 958.4 965.6 972.8">later</text>
+<text y="199" fill="#e0a33a" x="519.2 526.4 533.6 540.8">3025</text>
 <text y="199" fill="#c8d3c5" x="1224.8">│</text>
 <text y="214" fill="#c8d3c5" x="8.0">│</text>
 <text y="214" fill="#e0a33a" x="36.8">&gt;</text>
@@ -221,6 +212,19 @@
 <text y="214" fill="#e0a33a" x="339.2 346.4 353.6">-2%</text>
 <text y="214" fill="#c8d3c5" x="490.4">│</text>
 <text y="214" fill="#c8d3c5" x="504.8">│</text>
+<text y="214" fill="#c8d3c5" x="519.2 526.4 533.6">The</text>
+<text y="214" fill="#c8d3c5" x="548.0 555.2 562.4 569.6 576.8 584.0 591.2">market,</text>
+<text y="214" fill="#c8d3c5" x="605.6 612.8 620.0">the</text>
+<text y="214" fill="#c8d3c5" x="634.4 641.6 648.8 656.0 663.2">house</text>
+<text y="214" fill="#c8d3c5" x="677.6 684.8 692.0 699.2 706.4 713.6">tables</text>
+<text y="214" fill="#c8d3c5" x="728.0 735.2 742.4">and</text>
+<text y="214" fill="#c8d3c5" x="756.8 764.0 771.2">the</text>
+<text y="214" fill="#c8d3c5" x="785.6 792.8 800.0 807.2 814.4 821.6 828.8">salvage</text>
+<text y="214" fill="#c8d3c5" x="843.2 850.4 857.6 864.8 872.0">field</text>
+<text y="214" fill="#c8d3c5" x="886.4 893.6 900.8 908.0">only</text>
+<text y="214" fill="#c8d3c5" x="922.4 929.6 936.8 944.0">what</text>
+<text y="214" fill="#c8d3c5" x="958.4 965.6">is</text>
+<text y="214" fill="#c8d3c5" x="980.0 987.2">in</text>
 <text y="214" fill="#c8d3c5" x="1224.8">│</text>
 <text y="229" fill="#c8d3c5" x="8.0">│</text>
 <text y="229" fill="#c8d3c5" x="51.2 58.4 65.6 72.8 80.0 87.2 94.4 101.6 108.8">paymaster</text>
@@ -228,6 +232,18 @@
 <text y="229" fill="#c8d3c5" x="231.2 238.4 245.6">-2%</text>
 <text y="229" fill="#c8d3c5" x="490.4">│</text>
 <text y="229" fill="#c8d3c5" x="504.8">│</text>
+<text y="229" fill="#c8d3c5" x="519.2 526.4 533.6 540.8 548.0 555.2 562.4">service</text>
+<text y="229" fill="#c8d3c5" x="576.8 584.0">by</text>
+<text y="229" fill="#c8d3c5" x="598.4 605.6 612.8 620.0">this</text>
+<text y="229" fill="#c8d3c5" x="634.4 641.6 648.8 656.0 663.2">year;</text>
+<text y="229" fill="#c8d3c5" x="677.6 684.8 692.0">new</text>
+<text y="229" fill="#c8d3c5" x="706.4 713.6 720.8 728.0 735.2 742.4 749.6">designs</text>
+<text y="229" fill="#c8d3c5" x="764.0 771.2 778.4">are</text>
+<text y="229" fill="#c8d3c5" x="792.8 800.0 807.2 814.4 821.6 828.8 836.0 843.2 850.4">announced</text>
+<text y="229" fill="#c8d3c5" x="864.8 872.0">on</text>
+<text y="229" fill="#c8d3c5" x="886.4 893.6 900.8">New</text>
+<text y="229" fill="#c8d3c5" x="915.2 922.4 929.6 936.8 944.0 951.2">Year&#x27;s</text>
+<text y="229" fill="#c8d3c5" x="965.6 972.8 980.0 987.2">Day.</text>
 <text y="229" fill="#c8d3c5" x="1224.8">│</text>
 <text y="244" fill="#c8d3c5" x="8.0">│</text>
 <text y="244" fill="#c8d3c5" x="51.2 58.4 65.6 72.8 80.0 87.2 94.4 101.6 108.8 116.0 123.2 130.4 137.6 144.8">chief_engineer</text>
@@ -246,32 +262,56 @@
 <text y="259" fill="#c8d3c5" x="296.0 303.2 310.4">+2%</text>
 <text y="259" fill="#c8d3c5" x="490.4">│</text>
 <text y="259" fill="#c8d3c5" x="504.8">│</text>
+<text y="259" fill="#6f7d73" x="519.2 526.4 533.6">the</text>
+<text y="259" fill="#6f7d73" x="548.0 555.2 562.4 569.6 576.8 584.0 591.2 598.4">faction,</text>
+<text y="259" fill="#6f7d73" x="612.8 620.0 627.2 634.4 641.6 648.8 656.0 663.2 670.4 677.6">profession</text>
+<text y="259" fill="#6f7d73" x="692.0 699.2 706.4">and</text>
+<text y="259" fill="#6f7d73" x="720.8 728.0 735.2 742.4 749.6">start</text>
+<text y="259" fill="#6f7d73" x="764.0 771.2 778.4 785.6">year</text>
+<text y="259" fill="#6f7d73" x="800.0 807.2 814.4">are</text>
+<text y="259" fill="#6f7d73" x="828.8 836.0 843.2 850.4 857.6 864.8 872.0 879.2 886.4 893.6">permanent;</text>
+<text y="259" fill="#6f7d73" x="908.0 915.2 922.4 929.6 936.8">names</text>
+<text y="259" fill="#6f7d73" x="951.2 958.4 965.6">can</text>
+<text y="259" fill="#6f7d73" x="980.0 987.2 994.4 1001.6 1008.8 1016.0">change</text>
+<text y="259" fill="#6f7d73" x="1030.4 1037.6 1044.8 1052.0 1059.2">later</text>
 <text y="259" fill="#c8d3c5" x="1224.8">│</text>
 <text y="274" fill="#c8d3c5" x="8.0">│</text>
 <text y="274" fill="#c8d3c5" x="490.4">│</text>
 <text y="274" fill="#c8d3c5" x="504.8">│</text>
 <text y="274" fill="#c8d3c5" x="1224.8">│</text>
 <text y="289" fill="#c8d3c5" x="8.0">│</text>
+<text y="289" fill="#c8d3c5" x="22.4 29.6 36.8 44.0 51.2">start</text>
+<text y="289" fill="#c8d3c5" x="65.6 72.8 80.0 87.2">year</text>
 <text y="289" fill="#c8d3c5" x="490.4">│</text>
 <text y="289" fill="#c8d3c5" x="504.8">│</text>
 <text y="289" fill="#c8d3c5" x="1224.8">│</text>
 <text y="304" fill="#c8d3c5" x="8.0">│</text>
+<text y="304" fill="#c8d3c5" x="51.2 58.4 65.6 72.8">3015</text>
 <text y="304" fill="#c8d3c5" x="490.4">│</text>
 <text y="304" fill="#c8d3c5" x="504.8">│</text>
 <text y="304" fill="#c8d3c5" x="1224.8">│</text>
 <text y="319" fill="#c8d3c5" x="8.0">│</text>
+<text y="319" fill="#c8d3c5" x="51.2 58.4 65.6 72.8">3020</text>
 <text y="319" fill="#c8d3c5" x="490.4">│</text>
 <text y="319" fill="#c8d3c5" x="504.8">│</text>
 <text y="319" fill="#c8d3c5" x="1224.8">│</text>
 <text y="334" fill="#c8d3c5" x="8.0">│</text>
+<text y="334" fill="#e0a33a" x="36.8">&gt;</text>
+<text y="334" fill="#e0a33a" x="51.2 58.4 65.6 72.8">3025</text>
+<text y="334" fill="#e0a33a" x="94.4 101.6 108.8 116.0">(the</text>
+<text y="334" fill="#e0a33a" x="130.4 137.6 144.8 152.0 159.2 166.4 173.6 180.8 188.0 195.2">Succession</text>
+<text y="334" fill="#e0a33a" x="209.6 216.8 224.0 231.2 238.4">Wars,</text>
+<text y="334" fill="#e0a33a" x="252.8 260.0 267.2 274.4 281.6 288.8 296.0 303.2 310.4">TRO:3025)</text>
 <text y="334" fill="#c8d3c5" x="490.4">│</text>
 <text y="334" fill="#c8d3c5" x="504.8">│</text>
 <text y="334" fill="#c8d3c5" x="1224.8">│</text>
 <text y="349" fill="#c8d3c5" x="8.0">│</text>
+<text y="349" fill="#c8d3c5" x="51.2 58.4 65.6 72.8">3028</text>
 <text y="349" fill="#c8d3c5" x="490.4">│</text>
 <text y="349" fill="#c8d3c5" x="504.8">│</text>
 <text y="349" fill="#c8d3c5" x="1224.8">│</text>
 <text y="364" fill="#c8d3c5" x="8.0">│</text>
+<text y="364" fill="#c8d3c5" x="51.2 58.4 65.6 72.8">3030</text>
 <text y="364" fill="#c8d3c5" x="490.4">│</text>
 <text y="364" fill="#c8d3c5" x="504.8">│</text>
 <text y="364" fill="#c8d3c5" x="1224.8">│</text>

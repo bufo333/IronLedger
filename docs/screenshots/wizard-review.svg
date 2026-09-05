@@ -94,22 +94,20 @@
 <text y="124" fill="#c8d3c5" x="8.0">│</text>
 <text y="124" fill="#c8d3c5" x="22.4 29.6 36.8 44.0 51.2 58.4 65.6">starter</text>
 <text y="124" fill="#c8d3c5" x="80.0 87.2">HQ</text>
-<text y="124" fill="#e0a33a" x="123.2 130.4 137.6 144.8 152.0 159.2 166.4">Solaris</text>
-<text y="124" fill="#e0a33a" x="180.8 188.0 195.2">VII</text>
-<text y="124" fill="#e0a33a" x="209.6 216.8 224.0 231.2 238.4 245.6 252.8 260.0">Regional</text>
-<text y="124" fill="#e0a33a" x="274.4 281.6">HQ</text>
-<text y="124" fill="#c8d3c5" x="296.0 303.2">on</text>
-<text y="124" fill="#c8d3c5" x="317.6 324.8 332.0 339.2 346.4 353.6 360.8">Solaris</text>
-<text y="124" fill="#c8d3c5" x="375.2 382.4 389.6">VII</text>
-<text y="124" fill="#c8d3c5" x="404.0">·</text>
-<text y="124" fill="#c8d3c5" x="418.4 425.6 432.8 440.0 447.2 454.4 461.6 468.8">regional</text>
-<text y="124" fill="#c8d3c5" x="483.2">·</text>
-<text y="124" fill="#c8d3c5" x="497.6 504.8 512.0 519.2">ring</text>
-<text y="124" fill="#c8d3c5" x="533.6 540.8">75</text>
-<text y="124" fill="#c8d3c5" x="555.2 562.4">LY</text>
-<text y="124" fill="#c8d3c5" x="576.8">·</text>
-<text y="124" fill="#c8d3c5" x="591.2 598.4 605.6 612.8 620.0">staff</text>
-<text y="124" fill="#c8d3c5" x="634.4 641.6 648.8 656.0 663.2">28/28</text>
+<text y="124" fill="#e0a33a" x="123.2 130.4 137.6 144.8">Skye</text>
+<text y="124" fill="#e0a33a" x="159.2 166.4 173.6 180.8 188.0 195.2 202.4 209.6">Regional</text>
+<text y="124" fill="#e0a33a" x="224.0 231.2">HQ</text>
+<text y="124" fill="#c8d3c5" x="245.6 252.8">on</text>
+<text y="124" fill="#c8d3c5" x="267.2 274.4 281.6 288.8">Skye</text>
+<text y="124" fill="#c8d3c5" x="303.2">·</text>
+<text y="124" fill="#c8d3c5" x="317.6 324.8 332.0 339.2 346.4 353.6 360.8 368.0">regional</text>
+<text y="124" fill="#c8d3c5" x="382.4">·</text>
+<text y="124" fill="#c8d3c5" x="396.8 404.0 411.2 418.4">ring</text>
+<text y="124" fill="#c8d3c5" x="432.8 440.0">75</text>
+<text y="124" fill="#c8d3c5" x="454.4 461.6">LY</text>
+<text y="124" fill="#c8d3c5" x="476.0">·</text>
+<text y="124" fill="#c8d3c5" x="490.4 497.6 504.8 512.0 519.2">staff</text>
+<text y="124" fill="#c8d3c5" x="533.6 540.8 548.0 555.2 562.4">28/28</text>
 <text y="124" fill="#c8d3c5" x="814.4 821.6">││</text>
 <text y="124" fill="#c8d3c5" x="1224.8">│</text>
 <text y="139" fill="#c8d3c5" x="8.0">│</text>
@@ -125,10 +123,24 @@
 <text y="139" fill="#c8d3c5" x="814.4 821.6">││</text>
 <text y="139" fill="#c8d3c5" x="1224.8">│</text>
 <text y="154" fill="#c8d3c5" x="8.0">│</text>
-<text y="154" fill="#c8d3c5" x="22.4 29.6 36.8 44.0 51.2 58.4 65.6 72.8">treasury</text>
-<text y="154" fill="#c8d3c5" x="123.2 130.4 137.6 144.8 152.0 159.2">outfit</text>
-<text y="154" fill="#e0a33a" x="173.6 180.8 188.0 195.2 202.4 209.6 216.8 224.0 231.2">9,000,000</text>
-<text y="154" fill="#c8d3c5" x="245.6">C</text>
+<text y="154" fill="#c8d3c5" x="22.4 29.6 36.8 44.0">back</text>
+<text y="154" fill="#c8d3c5" x="58.4 65.6 72.8 80.0 87.2 94.4">office</text>
+<text y="154" fill="#c8d3c5" x="123.2">5</text>
+<text y="154" fill="#c8d3c5" x="137.6 144.8 152.0 159.2 166.4 173.6 180.8">command</text>
+<text y="154" fill="#c8d3c5" x="195.2">·</text>
+<text y="154" fill="#c8d3c5" x="209.6">4</text>
+<text y="154" fill="#c8d3c5" x="224.0 231.2 238.4 245.6 252.8 260.0 267.2 274.4 281.6">logistics</text>
+<text y="154" fill="#c8d3c5" x="296.0">·</text>
+<text y="154" fill="#c8d3c5" x="310.4">4</text>
+<text y="154" fill="#c8d3c5" x="324.8 332.0 339.2 346.4 353.6 360.8 368.0 375.2 382.4">transport</text>
+<text y="154" fill="#c8d3c5" x="396.8">·</text>
+<text y="154" fill="#c8d3c5" x="411.2">8</text>
+<text y="154" fill="#c8d3c5" x="425.6 432.8">hr</text>
+<text y="154" fill="#c8d3c5" x="447.2">·</text>
+<text y="154" fill="#c8d3c5" x="461.6">7</text>
+<text y="154" fill="#c8d3c5" x="476.0 483.2 490.4 497.6 504.8 512.0 519.2">finance</text>
+<text y="154" fill="#c8d3c5" x="533.6">·</text>
+<text y="154" fill="#c8d3c5" x="548.0 555.2 562.4 569.6 576.8 584.0 591.2 598.4 605.6">14,000/mo</text>
 <text y="154" fill="#c8d3c5" x="814.4 821.6">││</text>
 <text y="154" fill="#c8d3c5" x="1224.8">│</text>
 <rect x="836.0" y="158.0" width="7.2" height="7.5" fill="#000000"/>
@@ -238,16 +250,10 @@
 <rect x="1210.4" y="158.0" width="7.2" height="7.5" fill="#000000"/>
 <rect x="1210.4" y="165.5" width="7.2" height="7.5" fill="#000000"/>
 <text y="169" fill="#c8d3c5" x="8.0">│</text>
-<text y="169" fill="#c8d3c5" x="22.4 29.6 36.8 44.0 51.2">first</text>
-<text y="169" fill="#c8d3c5" x="65.6 72.8 80.0 87.2 94.4">board</text>
-<text y="169" fill="#c8d3c5" x="123.2">3</text>
-<text y="169" fill="#c8d3c5" x="137.6 144.8 152.0 159.2 166.4 173.6">offers</text>
-<text y="169" fill="#c8d3c5" x="188.0 195.2 202.4 209.6 216.8 224.0">within</text>
-<text y="169" fill="#c8d3c5" x="238.4 245.6 252.8">the</text>
-<text y="169" fill="#c8d3c5" x="267.2 274.4 281.6 288.8">ring</text>
-<text y="169" fill="#c8d3c5" x="303.2 310.4">on</text>
-<text y="169" fill="#c8d3c5" x="324.8 332.0 339.2">day</text>
-<text y="169" fill="#c8d3c5" x="353.6">1</text>
+<text y="169" fill="#c8d3c5" x="22.4 29.6 36.8 44.0 51.2 58.4 65.6 72.8">treasury</text>
+<text y="169" fill="#c8d3c5" x="123.2 130.4 137.6 144.8 152.0 159.2">outfit</text>
+<text y="169" fill="#e0a33a" x="173.6 180.8 188.0 195.2 202.4 209.6 216.8 224.0 231.2">9,000,000</text>
+<text y="169" fill="#c8d3c5" x="245.6">C</text>
 <text y="169" fill="#c8d3c5" x="814.4 821.6">││</text>
 <text y="169" fill="#c8d3c5" x="1224.8">│</text>
 <rect x="836.0" y="173.0" width="7.2" height="7.5" fill="#000000"/>
@@ -357,32 +363,18 @@
 <rect x="1210.4" y="173.0" width="7.2" height="7.5" fill="#000000"/>
 <rect x="1210.4" y="180.5" width="7.2" height="7.5" fill="#000000"/>
 <text y="184" fill="#c8d3c5" x="8.0">│</text>
+<text y="184" fill="#c8d3c5" x="22.4 29.6 36.8 44.0 51.2">first</text>
+<text y="184" fill="#c8d3c5" x="65.6 72.8 80.0 87.2 94.4">board</text>
+<text y="184" fill="#c8d3c5" x="123.2">3</text>
+<text y="184" fill="#c8d3c5" x="137.6 144.8 152.0 159.2 166.4 173.6">offers</text>
+<text y="184" fill="#c8d3c5" x="188.0 195.2 202.4 209.6 216.8 224.0">within</text>
+<text y="184" fill="#c8d3c5" x="238.4 245.6 252.8">the</text>
+<text y="184" fill="#c8d3c5" x="267.2 274.4 281.6 288.8">ring</text>
+<text y="184" fill="#c8d3c5" x="303.2 310.4">on</text>
+<text y="184" fill="#c8d3c5" x="324.8 332.0 339.2">day</text>
+<text y="184" fill="#c8d3c5" x="353.6">1</text>
 <text y="184" fill="#c8d3c5" x="814.4 821.6">││</text>
 <text y="184" fill="#c8d3c5" x="1224.8">│</text>
-<rect x="22.4" y="188.0" width="7.2" height="15" fill="#0f5c5c"/>
-<rect x="29.6" y="188.0" width="7.2" height="15" fill="#0f5c5c"/>
-<rect x="36.8" y="188.0" width="7.2" height="15" fill="#0f5c5c"/>
-<rect x="44.0" y="188.0" width="7.2" height="15" fill="#0f5c5c"/>
-<rect x="51.2" y="188.0" width="7.2" height="15" fill="#0f5c5c"/>
-<rect x="58.4" y="188.0" width="7.2" height="15" fill="#0f5c5c"/>
-<rect x="65.6" y="188.0" width="7.2" height="15" fill="#0f5c5c"/>
-<rect x="72.8" y="188.0" width="7.2" height="15" fill="#0f5c5c"/>
-<rect x="80.0" y="188.0" width="7.2" height="15" fill="#0f5c5c"/>
-<rect x="87.2" y="188.0" width="7.2" height="15" fill="#0f5c5c"/>
-<rect x="94.4" y="188.0" width="7.2" height="15" fill="#0f5c5c"/>
-<rect x="101.6" y="188.0" width="7.2" height="15" fill="#0f5c5c"/>
-<rect x="108.8" y="188.0" width="7.2" height="15" fill="#0f5c5c"/>
-<rect x="116.0" y="188.0" width="7.2" height="15" fill="#0f5c5c"/>
-<rect x="123.2" y="188.0" width="7.2" height="15" fill="#0f5c5c"/>
-<rect x="130.4" y="188.0" width="7.2" height="15" fill="#0f5c5c"/>
-<rect x="137.6" y="188.0" width="7.2" height="15" fill="#0f5c5c"/>
-<rect x="144.8" y="188.0" width="7.2" height="15" fill="#0f5c5c"/>
-<rect x="152.0" y="188.0" width="7.2" height="15" fill="#0f5c5c"/>
-<rect x="159.2" y="188.0" width="7.2" height="15" fill="#0f5c5c"/>
-<rect x="166.4" y="188.0" width="7.2" height="15" fill="#0f5c5c"/>
-<rect x="173.6" y="188.0" width="7.2" height="15" fill="#0f5c5c"/>
-<rect x="180.8" y="188.0" width="7.2" height="15" fill="#0f5c5c"/>
-<rect x="188.0" y="188.0" width="7.2" height="15" fill="#0f5c5c"/>
 <rect x="836.0" y="188.0" width="7.2" height="7.5" fill="#000000"/>
 <rect x="836.0" y="195.5" width="7.2" height="7.5" fill="#000000"/>
 <rect x="843.2" y="188.0" width="7.2" height="7.5" fill="#000000"/>
@@ -490,23 +482,32 @@
 <rect x="1210.4" y="188.0" width="7.2" height="7.5" fill="#000000"/>
 <rect x="1210.4" y="195.5" width="7.2" height="7.5" fill="#000000"/>
 <text y="199" fill="#c8d3c5" x="8.0">│</text>
-<text y="199" fill="#0b0f0d" x="29.6 36.8 44.0 51.2 58.4 65.6 72.8">[Enter]</text>
-<text y="199" fill="#0b0f0d" x="87.2 94.4 101.6 108.8 116.0">begin</text>
-<text y="199" fill="#0b0f0d" x="130.4 137.6 144.8 152.0 159.2 166.4 173.6 180.8">campaign</text>
-<text y="199" fill="#6f7d73" x="216.8 224.0 231.2 238.4 245.6">saves</text>
-<text y="199" fill="#6f7d73" x="260.0 267.2 274.4 281.6 288.8">under</text>
-<text y="199" fill="#6f7d73" x="303.2 310.4 317.6">the</text>
-<text y="199" fill="#6f7d73" x="332.0 339.2 346.4 353.6 360.8 368.0 375.2">current</text>
-<text y="199" fill="#6f7d73" x="389.6 396.8 404.0 411.2 418.4 425.6">player</text>
-<text y="199" fill="#6f7d73" x="440.0 447.2 454.4">and</text>
-<text y="199" fill="#6f7d73" x="468.8 476.0 483.2 490.4 497.6">opens</text>
-<text y="199" fill="#6f7d73" x="512.0 519.2 526.4">the</text>
-<text y="199" fill="#6f7d73" x="540.8 548.0 555.2 562.4">Desk</text>
-<text y="199" fill="#6f7d73" x="576.8 584.0">on</text>
-<text y="199" fill="#6f7d73" x="598.4 605.6 612.8">day</text>
-<text y="199" fill="#6f7d73" x="627.2">0</text>
 <text y="199" fill="#c8d3c5" x="814.4 821.6">││</text>
 <text y="199" fill="#c8d3c5" x="1224.8">│</text>
+<rect x="22.4" y="203.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="29.6" y="203.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="36.8" y="203.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="44.0" y="203.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="51.2" y="203.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="58.4" y="203.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="65.6" y="203.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="72.8" y="203.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="80.0" y="203.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="87.2" y="203.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="94.4" y="203.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="101.6" y="203.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="108.8" y="203.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="116.0" y="203.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="123.2" y="203.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="130.4" y="203.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="137.6" y="203.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="144.8" y="203.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="152.0" y="203.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="159.2" y="203.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="166.4" y="203.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="173.6" y="203.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="180.8" y="203.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="188.0" y="203.0" width="7.2" height="15" fill="#0f5c5c"/>
 <rect x="836.0" y="203.0" width="7.2" height="7.5" fill="#000000"/>
 <rect x="836.0" y="210.5" width="7.2" height="7.5" fill="#000000"/>
 <rect x="843.2" y="203.0" width="7.2" height="7.5" fill="#000000"/>
@@ -614,6 +615,21 @@
 <rect x="1210.4" y="203.0" width="7.2" height="7.5" fill="#000000"/>
 <rect x="1210.4" y="210.5" width="7.2" height="7.5" fill="#000000"/>
 <text y="214" fill="#c8d3c5" x="8.0">│</text>
+<text y="214" fill="#0b0f0d" x="29.6 36.8 44.0 51.2 58.4 65.6 72.8">[Enter]</text>
+<text y="214" fill="#0b0f0d" x="87.2 94.4 101.6 108.8 116.0">begin</text>
+<text y="214" fill="#0b0f0d" x="130.4 137.6 144.8 152.0 159.2 166.4 173.6 180.8">campaign</text>
+<text y="214" fill="#6f7d73" x="216.8 224.0 231.2 238.4 245.6">saves</text>
+<text y="214" fill="#6f7d73" x="260.0 267.2 274.4 281.6 288.8">under</text>
+<text y="214" fill="#6f7d73" x="303.2 310.4 317.6">the</text>
+<text y="214" fill="#6f7d73" x="332.0 339.2 346.4 353.6 360.8 368.0 375.2">current</text>
+<text y="214" fill="#6f7d73" x="389.6 396.8 404.0 411.2 418.4 425.6">player</text>
+<text y="214" fill="#6f7d73" x="440.0 447.2 454.4">and</text>
+<text y="214" fill="#6f7d73" x="468.8 476.0 483.2 490.4 497.6">opens</text>
+<text y="214" fill="#6f7d73" x="512.0 519.2 526.4">the</text>
+<text y="214" fill="#6f7d73" x="540.8 548.0 555.2 562.4">Desk</text>
+<text y="214" fill="#6f7d73" x="576.8 584.0">on</text>
+<text y="214" fill="#6f7d73" x="598.4 605.6 612.8">day</text>
+<text y="214" fill="#6f7d73" x="627.2">0</text>
 <text y="214" fill="#c8d3c5" x="814.4 821.6">││</text>
 <text y="214" fill="#c8d3c5" x="1224.8">│</text>
 <rect x="836.0" y="218.0" width="7.2" height="7.5" fill="#000000"/>
