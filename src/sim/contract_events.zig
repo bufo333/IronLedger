@@ -82,6 +82,11 @@ fn combatDeck(roll: u8) Entry {
             .{ .label = "Pay them 100k", .effects = &.{ .{ .cash = -100_000 }, .{ .score = 2 } } },
             .{ .label = "Refuse", .effects = &.{} },
         }, .default_choice = 1 },
+        8 => .{ .kind = .salvage_dispute, .log = "The employer's salvage officer disputes your claim on the field", .options = &.{
+            .{ .label = "Hand the disputed hulls over", .effects = &.{ .{ .cash = -100_000 }, .{ .employer_standing = 3 } } },
+            .{ .label = "Split the difference", .effects = &.{ .{ .cash = -50_000 }, .{ .employer_standing = 1 } } },
+            .{ .label = "Stand on the contract terms", .effects = &.{ .{ .employer_standing = -4 }, .{ .score = -1 } } },
+        }, .default_choice = 1 },
         12 => .{ .kind = .daring_opportunity, .log = "A daring strike could break the enemy line", .options = &.{
             .{ .label = "Strike (risk the machines)", .effects = &.{ .{ .score = 3 }, .{ .damage_random_units = 2 }, .{ .fatigue = 10 } } },
             .{ .label = "Hold position", .effects = &.{} },
@@ -140,6 +145,11 @@ fn weeklyDeck(garrison: bool, roll: u8) Entry {
         4 => .{ .kind = .bad_weather, .log = "A week of storms grounds both sides", .auto_effects = &.{
             .{ .morale = 2 },
         } },
+        9 => .{ .kind = .black_market_contact, .log = "A black-market fixer offers munitions off the books", .options = &.{
+            .{ .label = "Buy a load (60k local funds, no paperwork)", .effects = &.{ .{ .cash = -60_000 }, .{ .field_stock = .{ .key = "ammo_lrm", .qty = 4 } }, .{ .field_stock = .{ .key = "ammo_srm", .qty = 4 } }, .{ .employer_standing = -2 }, .{ .reputation = -1 } } },
+            .{ .label = "Tip off the employer's provost", .effects = &.{ .{ .employer_standing = 3 }, .{ .morale = -1 } } },
+            .{ .label = "Decline", .effects = &.{} },
+        }, .default_choice = 2 },
         10 => .{ .kind = .supply_cache, .log = "Patrols overrun an enemy supply cache", .auto_effects = &.{
             .{ .parts_windfall = 1 }, .{ .xp_all = 1 },
         } },
@@ -329,6 +339,17 @@ fn applyEffects(gs: *GameState, effects: []const events.Effect, contract: ?*cont
             },
             .damage_random_units => |n| damageRandomUnits(gs, company, n, .line),
             .damage_convoy_units => |n| damageRandomUnits(gs, company, n, .support),
+            .employer_standing => |delta| if (contract) |c| {
+                const now = try gs.adjustStanding(c.employer_key, delta);
+                try gs.log(.contract, .{ .company = company, .contract = contract_id }, "[standing] {s} {s}{d} → {d}", .{ c.employer_key, if (delta < 0) "−" else "+", @abs(delta), now });
+            },
+            .field_stock => |fs| {
+                const site: types.Site = if (company != .none) .{ .company = company } else gs.defaultSite();
+                // Trucks have finite room: what does not fit is left on the dock.
+                const room: u32 = if (gs.siteCapacityTons(site)) |cap| cap -| gs.siteTons(site) else fs.qty;
+                const qty = @min(@as(u32, fs.qty), room);
+                if (qty > 0) try gs.addStock(site, fs.key, qty);
+            },
         }
     }
 }
@@ -483,4 +504,39 @@ test "effects change real state: cash, reputation, score, spares" {
         crated += o.quantity;
     };
     try std.testing.expectEqual(@as(u32, 2), crated);
+}
+
+test "12.22: the black market and a salvage dispute move standing and field stock" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1222 });
+    defer gs.deinit();
+    _ = try gs.createCommander("T", .LC, .line_officer);
+    const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
+        .id = @enumFromInt(1),
+        .kind = .objective_raid,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 3, .base_pay_month = 400_000 },
+        .status = .active,
+        .assigned_company = co,
+        .monthly_net = 300_000,
+    });
+    const c = gs.contracts.getPtr(@enumFromInt(1)).?;
+    gs.force(co).?.local_funds = 200_000;
+    const bm = entryForKind(.black_market_contact).?;
+    const before = gs.stockCount(.{ .company = co }, "ammo_lrm");
+    try applyEffects(&gs, bm.options[0].effects, c); // buy
+    try std.testing.expect(gs.stockCount(.{ .company = co }, "ammo_lrm") > before);
+    try std.testing.expectEqual(@as(i32, -2), gs.standing("LC"));
+    try std.testing.expectEqual(@as(i64, 140_000), gs.force(co).?.local_funds);
+    const sd = entryForKind(.salvage_dispute).?;
+    try applyEffects(&gs, sd.options[0].effects, c); // hand it over
+    try std.testing.expectEqual(@as(i32, 1), gs.standing("LC"));
+    try applyEffects(&gs, sd.options[2].effects, c); // stand firm
+    try std.testing.expectEqual(@as(i32, -3), gs.standing("LC"));
+    try std.testing.expectEqual(@as(i32, -1), c.score);
+    // Both kinds are in a deck the rollers reach.
+    try std.testing.expect(combatDeck(8).kind == .salvage_dispute);
+    try std.testing.expect(weeklyDeck(false, 9).kind == .black_market_contact);
 }

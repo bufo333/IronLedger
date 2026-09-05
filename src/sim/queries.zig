@@ -290,6 +290,8 @@ pub fn effectsText(alloc: Alloc, effects: []const @import("events.zig").Effect) 
         .damage_convoy_units => |n| try appendTag(alloc, &out, false, try std.fmt.allocPrint(alloc, "{d} support vehicle{s} damaged", .{ n, if (n == 1) "" else "s" })),
         .parts_windfall => |n| try appendTag(alloc, &out, true, try std.fmt.allocPrint(alloc, "parts windfall ×{d}", .{n})),
         .supply_loss => |c| try appendTag(alloc, &out, false, try std.fmt.allocPrint(alloc, "supplies −{s} C", .{try money(alloc, c)})),
+        .employer_standing => |d| try appendTag(alloc, &out, d >= 0, try std.fmt.allocPrint(alloc, "employer standing {s}{d}", .{ if (d >= 0) "+" else "−", @abs(d) })),
+        .field_stock => |fs| try appendTag(alloc, &out, true, try std.fmt.allocPrint(alloc, "+{d} {s} to the trucks", .{ fs.qty, fs.key })),
     };
     return out.toOwnedSlice(alloc);
 }

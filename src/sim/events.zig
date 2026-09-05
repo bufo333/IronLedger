@@ -42,6 +42,9 @@ pub const EventKind = enum {
     supply_cache,
     bad_weather,
     field_promotion,
+    // Stage 12.22, hooked into faction standing:
+    black_market_contact,
+    salvage_dispute,
 };
 
 /// One consequence of an event option. Relative where it must scale
@@ -58,6 +61,10 @@ pub const Effect = union(enum) {
     damage_convoy_units: u8, // N support-echelon vehicles (trucks, ambulances) take wear
     parts_windfall: u8, // salvaged spares into the pool
     supply_loss: types.CBills, // posted as a supplies expense
+    /// Standing with the contract's employer (Stage 12.22).
+    employer_standing: i16,
+    /// Stock landed in the company's field stores (munitions off the books).
+    field_stock: struct { key: []const u8, qty: u16 },
 };
 
 pub const Option = struct {
