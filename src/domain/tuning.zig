@@ -63,6 +63,11 @@ pub const Tuning = struct {
         market_margin_bp: types.Bp,
         min_ops_cost: types.CBills,
         hall_arrival_target: u32,
+        /// The hall never runs dry (12B.10): at least this many candidates
+        /// of every role walk the boards at a hiring hall (combat crews and
+        /// techs get `hall_floor_combat`), topped up daily.
+        hall_floor: u32,
+        hall_floor_combat: u32,
         procurement_markup_bp: types.Bp,
         rarity_target: struct { common: u8, uncommon: u8, rare: u8, very_rare: u8 },
     },

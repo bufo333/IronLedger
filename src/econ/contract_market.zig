@@ -402,7 +402,43 @@ pub fn churnCandidates(gs: *GameState) !void {
                 .expires_day = day + 14,
             });
         }
+        _ = try topUpHall(gs, hq); // 12B.10: the board never runs dry
     }
+}
+
+/// The floor under every board (12B.10, play feedback: "if people leave
+/// there are not always people in the hiring hall"): a hall that dips
+/// under the floor for a role gets a fresh walk-in of that role the same
+/// day — combat crews and techs two deep, everyone else one.
+pub fn topUpHall(gs: *GameState, hq: *const hq_mod.Hq) !u32 {
+    if (hq.effectiveFacilityLevel(.hiring_hall) == 0) return 0;
+    const day = gs.clock.day_index;
+    var added: u32 = 0;
+    inline for (@typeInfo(person_mod.Role).@"enum".fields) |f| {
+        const role: person_mod.Role = @enumFromInt(f.value);
+        const combat = switch (role) {
+            .mekwarrior, .vehicle_crew, .aero_pilot, .tech_mek, .tech_mechanic, .tech_aero, .astech => true,
+            else => false,
+        };
+        const floor: u32 = if (combat) tuning.market.hall_floor_combat else tuning.market.hall_floor;
+        var have: u32 = 0;
+        for (gs.candidates.items) |c| if (c.hq == hq.id and c.spec.role == role) {
+            have += 1;
+        };
+        while (have < floor) : (have += 1) {
+            const spec = person_gen.generateWithBonus(&gs.rng, role, gs.recruitBonus());
+            const salary = types.applyBp(role.baseSalary(), spec.experience.salaryMultBp());
+            try gs.candidates.append(gs.allocator(), .{
+                .hq = hq.id,
+                .spec = spec,
+                .asking_bonus = salary * (1 + @as(types.CBills, @intFromEnum(spec.experience))),
+                .listed_day = day,
+                .expires_day = day + 14,
+            });
+            added += 1;
+        }
+    }
+    return added;
 }
 
 /// Hiring-hall boards (Stage 9C.2): weekly candidates per HQ, count and
@@ -609,4 +645,33 @@ test "12.15: the transport slot opens with the spaceport; ordinary lots are meks
         };
     }
     try std.testing.expect(seen);
+}
+
+test "12B.10: the hiring hall always has a few of every role" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1210 });
+    defer gs.deinit();
+    _ = try gs.createCommander("T", .LC, .quartermaster);
+    gs.candidates.clearRetainingCapacity();
+    try churnCandidates(&gs);
+    const hq = gs.hqs.keys()[0];
+    inline for (@typeInfo(person_mod.Role).@"enum".fields) |f| {
+        const role: person_mod.Role = @enumFromInt(f.value);
+        var have: u32 = 0;
+        for (gs.candidates.items) |c| if (c.hq == hq and c.spec.role == role) {
+            have += 1;
+        };
+        try std.testing.expect(have >= 1);
+        if (role == .mekwarrior or role == .tech_mek) try std.testing.expect(have >= 2);
+    }
+    // Hire every mekwarrior; tomorrow the board has two again.
+    var i: usize = 0;
+    while (i < gs.candidates.items.len) {
+        if (gs.candidates.items[i].spec.role == .mekwarrior) _ = gs.candidates.swapRemove(i) else i += 1;
+    }
+    try churnCandidates(&gs);
+    var mw: u32 = 0;
+    for (gs.candidates.items) |c| if (c.hq == hq and c.spec.role == .mekwarrior) {
+        mw += 1;
+    };
+    try std.testing.expect(mw >= 2);
 }
