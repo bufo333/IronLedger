@@ -176,6 +176,9 @@
         .quality_drop_margin = 2,
         .quality_rise_margin = 7,
         .quality_sale_bp_per_step = 500,
+        .hours_quality_bp = .{ .a = 15_000, .b = 12_500, .c = 10_000, .d = 10_000, .e = 9_000, .f = 8_000 },
+        .hours_exotic_bp = 12_500,
+        .hours_skill_bp = .{ .elite = 7_500, .veteran = 8_500, .regular = 10_000, .green = 11_500, .untrained = 13_000 },
     },
     .rating = .{
         // CamOps p.? Dragoons rating bands, rescaled to this sim's 0–150 score.

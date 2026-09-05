@@ -1004,7 +1004,9 @@ pub fn hull(alloc: Alloc, gs: *GameState, uid: types.UnitId) ![]const []const u8
         try out.append(alloc, try std.fmt.allocPrint(alloc, "{s: <20} {s: <15} {s: <10} {s}{s}{{/}}", .{ s.slot_key, s.part_key, @tagName(s.class), mk, @tagName(s.condition) }));
     }
     try out.append(alloc, "");
-    try out.append(alloc, try std.fmt.allocPrint(alloc, "upkeep {s}/mo · maintenance {d} h/week · depot needed: {s}", .{ try money(alloc, u.monthlyBill()), unit_mod.maintenanceHours(u.kind, if (ch) |c| c.tonnage else 0), if (u.needsDepot()) "{c}yes{/}" else "no" }));
+    try out.append(alloc, try std.fmt.allocPrint(alloc, "upkeep {s}/mo · maintenance {d} h/week ({d} in its tech's hands; quality {s}{s}) · depot needed: {s}", .{
+        try money(alloc, u.monthlyBill()), gs.hullHours(u), if (gs.person(u.tech)) |t| gs.techHoursFor(t, u) else gs.hullHours(u), @tagName(u.quality), if (ch) |c| (if (c.rarity == .very_rare) ", exotic design" else "") else "", if (u.needsDepot()) "{c}yes{/}" else "no",
+    }));
     return out.toOwnedSlice(alloc);
 }
 
@@ -1738,10 +1740,29 @@ pub fn manning(alloc: Alloc, gs: *GameState, company: types.ForceId) ![]ManningR
     const personnel = @import("personnel.zig");
     const needs = personnel.manningNeeds(gs, company);
     var out: std.ArrayListUnmanaged(ManningRow) = .empty;
+    // Hours (12C.15): what the company's hulls want per week against what
+    // its techs, at their skill and with their astech teams, can give.
+    var hours_needed: u32 = 0;
+    var hours_have: u32 = 0;
+    {
+        var uit2 = gs.units.iterator();
+        while (uit2.next()) |e| {
+            const u = e.value_ptr;
+            if (u.status == .destroyed or u.status == .mothballed or u.kind == .infantry or gs.companyOf(u.force) != company) continue;
+            hours_needed += if (gs.person(u.tech)) |t| gs.techHoursFor(t, u) else gs.hullHours(u);
+        }
+        var pit2 = gs.people.iterator();
+        while (pit2.next()) |e| {
+            const p = e.value_ptr;
+            if (!p.role.isTech() or !p.isAvailable(gs.clock.day_index) or gs.companyOf(p.assigned_force) != company) continue;
+            hours_have += gs.techHoursAvailable(p);
+        }
+    }
     for (needs) |n| {
         const have = personnel.manningHave(gs, company, n.role);
         const open = n.need -| have;
-        try out.append(alloc, .{ .role = n.role, .have = have, .need = n.need, .text = try std.fmt.allocPrint(alloc, "{s: <16} {d: >5} {d: >5} {s}{d: >5}{{/}}   {{d}}{s}{{/}}", .{ @tagName(n.role), have, n.need, if (open > 0) "{c}" else "{g}", open, n.why }) });
+        const why = if (n.role == .astech or n.role == .tech_mek) try std.fmt.allocPrint(alloc, "{s} · {s}{d} of {d} tech-hours/week covered{{/}}", .{ n.why, if (hours_have >= hours_needed) "{g}" else "{c}", hours_have, hours_needed }) else n.why;
+        try out.append(alloc, .{ .role = n.role, .have = have, .need = n.need, .text = try std.fmt.allocPrint(alloc, "{s: <16} {d: >5} {d: >5} {s}{d: >5}{{/}}   {{d}}{s}{{/}}", .{ @tagName(n.role), have, n.need, if (open > 0) "{c}" else "{g}", open, why }) });
     }
     return out.toOwnedSlice(alloc);
 }

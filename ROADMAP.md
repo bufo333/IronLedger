@@ -883,10 +883,15 @@ item: tests green, both smokes, ROADMAP tick, one commit.
   on an HQ that is already regional. The `tier` command also debited the
   HQ before checking it could start (a refusal kept the money); it now
   checks tier, project and funds first and pays once.
-- ⬜ 12C.15 **Tech target numbers**: the flat hours-per-tonne maintenance
-  model gets a target-number layer — tech skill, astech coverage, hull
-  quality, era of the design — so the same tech is slower on an exotic
-  hull; MANNING's "six per tech" becomes "hours covered vs. hours needed".
+- ✅ 12C.15 **Tech target numbers**: `GameState.hullHours` scales the
+  class table by quality (`hours_quality_bp`: an A-grade wreck wants ×1.5,
+  an F-grade machine ×0.8) and by an exotic design (`hours_exotic_bp`,
+  very rare on the market: Highlanders, King Crabs, Stukas, the big
+  ships); `techHoursFor` then sets the pace by the tech's skill
+  (`hours_skill_bp`: elite ×0.75 … untrained ×1.3). The weekly pass,
+  the tech load, auto-assign and the hull view all read it, and the
+  MANNING astech and mek-tech rows now say "N of M tech-hours/week
+  covered" for the company (astech teams already scale the budget).
 
 ### Block E — Era & data plumbing
 

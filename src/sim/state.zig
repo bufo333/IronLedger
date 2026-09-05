@@ -1285,14 +1285,47 @@ pub const GameState = struct {
     /// Weekly hours a tech already carries across assigned hulls.
     pub fn techLoadHours(self: *GameState, tech_id: types.PersonId) u32 {
         var hours: u32 = 0;
+        const tech = self.person(tech_id);
         var it = self.units.iterator();
         while (it.next()) |entry| {
             const u = entry.value_ptr;
             if (u.tech != tech_id or u.status == .destroyed or u.status == .mothballed) continue;
-            const tonnage: u8 = if (chassis_mod.find(u.chassis_key)) |d| d.tonnage else 50;
-            hours += unit_mod.maintenanceHours(u.kind, tonnage);
+            hours += if (tech) |t| self.techHoursFor(t, u) else self.hullHours(u);
         }
         return hours;
+    }
+
+    /// Weekly hours a hull wants from a regular tech (12C.15): the class
+    /// table scaled by quality (a neglected machine fights back) and by an
+    /// exotic design (rare on the market, rare in the manuals).
+    pub fn hullHours(self: *GameState, u: *const unit_mod.Unit) u32 {
+        _ = self;
+        const t = tuning.maintenance;
+        const design = chassis_mod.find(u.chassis_key);
+        const tonnage: u8 = if (design) |d| d.tonnage else 50;
+        const base = unit_mod.maintenanceHours(u.kind, tonnage);
+        const q_bp: types.Bp = switch (u.quality) {
+            .a => t.hours_quality_bp.a,
+            .b => t.hours_quality_bp.b,
+            .c => t.hours_quality_bp.c,
+            .d => t.hours_quality_bp.d,
+            .e => t.hours_quality_bp.e,
+            .f => t.hours_quality_bp.f,
+        };
+        var hours = types.applyBp(@as(i64, base), q_bp);
+        if (design) |d| if (d.rarity == .very_rare) {
+            hours = types.applyBp(hours, t.hours_exotic_bp);
+        };
+        return @intCast(@max(1, hours));
+    }
+
+    /// The same hull in this tech's hands (12C.15): skill sets the pace.
+    pub fn techHoursFor(self: *GameState, tech: *const person_mod.Person, u: *const unit_mod.Unit) u32 {
+        const t = tuning.maintenance;
+        const role = unit_mod.techRoleFor(u.kind) orelse tech.role;
+        const skill = tech.skill(role.primarySkill()) orelse 7;
+        const bp: types.Bp = if (skill <= 2) t.hours_skill_bp.elite else if (skill == 3) t.hours_skill_bp.veteran else if (skill == 4) t.hours_skill_bp.regular else if (skill == 5) t.hours_skill_bp.green else t.hours_skill_bp.untrained;
+        return @intCast(@max(1, types.applyBp(@as(i64, self.hullHours(u)), bp)));
     }
 
     /// Effective hours a tech can spend this week: the budget, scaled by the
@@ -1367,8 +1400,7 @@ pub const GameState = struct {
             }
             if (unit_mod.techRoleFor(u.kind)) |role| {
                 if (u.tech == .none or !(self.person(u.tech) orelse continue).isAvailable(self.clock.day_index)) {
-                    const tonnage: u8 = if (chassis_mod.find(u.chassis_key)) |d| d.tonnage else 50;
-                    const hours = unit_mod.maintenanceHours(u.kind, tonnage);
+                    const hours = self.hullHours(u);
                     if (self.findFreeTech(role, company, hours) orelse self.findFreeTech(role, .none, hours)) |tid| {
                         self.assignSlot(u.id, .tech, tid) catch {
                             open += 1;
@@ -1802,4 +1834,27 @@ test "12C.13: quality moves the resale ticket" {
     try std.testing.expect(gs.unitSaleValue(u) > c);
     u.quality = .a;
     try std.testing.expect(gs.unitSaleValue(u) < c);
+}
+
+test "12C.15: a worn or exotic hull wants more hours; a sharper tech needs fewer" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1215 });
+    defer gs.deinit();
+    const uid = try gs.addUnit("AS7-D");
+    const u = gs.unit(uid).?;
+    u.quality = .c;
+    const plain = gs.hullHours(u);
+    try std.testing.expectEqual(@as(u32, 10), plain); // the class table, unchanged at C
+    u.quality = .a;
+    try std.testing.expect(gs.hullHours(u) > plain);
+    u.quality = .f;
+    try std.testing.expect(gs.hullHours(u) < plain);
+    u.quality = .c;
+    const tech = try gs.hirePerson("Ace", "Wrench", .tech_mek);
+    try gs.person(tech).?.skills.put(gs.allocator(), .tech_mek, 4);
+    const regular = gs.techHoursFor(gs.person(tech).?, u);
+    try std.testing.expectEqual(plain, regular);
+    try gs.person(tech).?.skills.put(gs.allocator(), .tech_mek, 2);
+    try std.testing.expect(gs.techHoursFor(gs.person(tech).?, u) < regular);
+    try gs.person(tech).?.skills.put(gs.allocator(), .tech_mek, 6);
+    try std.testing.expect(gs.techHoursFor(gs.person(tech).?, u) > regular);
 }

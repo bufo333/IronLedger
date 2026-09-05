@@ -57,7 +57,8 @@ pub fn runWeeklyMaintenance(gs: *GameState) !void {
         if (u.status == .mothballed or u.status == .destroyed or u.status == .repairing or u.status == .refitting) continue;
         if (u.kind == .infantry) continue; // platoons maintain their own kit
 
-        const need_hours = unit_mod.maintenanceHours(u.kind, unitTonnage(u));
+        // What this hull asks of this tech (12C.15): quality, design and skill.
+        const need_hours = if (activeTech(gs, u)) |t| gs.techHoursFor(t, u) else gs.hullHours(u);
         var covered = false;
         var skill: u8 = 7;
         var tech_id: types.PersonId = .none;
@@ -157,7 +158,7 @@ pub fn injureTech(gs: *GameState, tech_id: types.PersonId, days: u32, cause: []c
         const u = entry.value_ptr;
         if (u.tech != tech_id) continue;
         const role = unit_mod.techRoleFor(u.kind) orelse continue;
-        const hours = unit_mod.maintenanceHours(u.kind, unitTonnage(u));
+        const hours = gs.hullHours(u);
         if (gs.findFreeTech(role, gs.companyOf(u.force), hours)) |replacement| {
             u.tech = replacement;
             swapped += 1;

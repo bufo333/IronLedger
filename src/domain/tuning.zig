@@ -253,6 +253,13 @@ pub const Tuning = struct {
         quality_drop_margin: i32,
         quality_rise_margin: i32,
         quality_sale_bp_per_step: types.Bp,
+        /// Tech target numbers (12C.15): the flat hours-per-class table is
+        /// scaled by the hull's quality (A worst … F best), by an exotic
+        /// design (very rare on the market), and by the tech's own
+        /// skill — a veteran turns a wrench faster than a green hand.
+        hours_quality_bp: struct { a: types.Bp, b: types.Bp, c: types.Bp, d: types.Bp, e: types.Bp, f: types.Bp },
+        hours_exotic_bp: types.Bp,
+        hours_skill_bp: struct { elite: types.Bp, veteran: types.Bp, regular: types.Bp, green: types.Bp, untrained: types.Bp },
     },
     /// Dragoons rating (12C.6, CamOps "Mercenary Rating", MekHQ
     /// `UnitRating`): the letter thresholds on the summed score and the
