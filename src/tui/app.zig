@@ -90,6 +90,8 @@ const Modal = union(enum) {
     readiness,
     /// The campaign in aggregate (12C.8).
     summary,
+    /// Browse the soundtracks and tracks; pick what plays.
+    music,
 };
 
 /// Size tiers (docs/tui.md): the largest that fits decides how many panes
@@ -107,7 +109,7 @@ fn tierFor(cols: u16, rows: u16) Tier {
 const office_roles = [_]game.person.Role{ .admin_command, .admin_logistics, .admin_transport, .admin_hr, .admin_finance };
 
 /// Frontend-only verbs; the command verbs come from `game.cli.verbs`.
-const tui_verbs = [_][]const u8{ "day", "save", "quit", "help", "settings", "emblem", "manning", "readiness", "summary" };
+const tui_verbs = [_][]const u8{ "day", "save", "quit", "help", "settings", "emblem", "manning", "readiness", "summary", "music" };
 const verbs = tui_verbs ++ game.cli.verbs;
 
 const Emblem = struct { name: []const u8, art: [3][]const u8 };
@@ -169,6 +171,8 @@ pub const App = struct {
 
     // soundtrack and title screen
     music: ?music_mod.Player = null,
+    /// The track announced last, so a change is said once.
+    last_track: ?usize = null,
     show_splash: bool = true,
     // emblem display
     graphics: emblem_mod.Graphics = .none,
@@ -278,6 +282,8 @@ pub const App = struct {
         if (self.music) |*m| {
             m.setEnabled(self.store.getSetting("music", 1) != 0);
             m.setVolume(@intCast(std.math.clamp(self.store.getSetting("music_volume", 60), 0, 100)));
+            const set = self.store.getSetting("music_set", -1);
+            if (set >= 0 and set < m.sets.len) m.selectSet(@intCast(set));
             m.poll(); // the soundtrack starts with the title screen
         }
         if (self.show_splash) try self.runSplash();
@@ -288,7 +294,14 @@ pub const App = struct {
             }
             try self.draw();
             const key = self.term.readKey(500);
-            if (self.music) |*m| m.poll();
+            if (self.music) |*m| {
+                m.poll();
+                // A new track is worth a line in the status strip.
+                if (m.enabled and m.current != null and m.current != self.last_track and m.child != null) {
+                    self.last_track = m.current;
+                    if (self.msg.len == 0) self.say(.dim, "♪ {s} — {s}   (M music · :music browse)", .{ m.nowPlaying() orelse "", m.nowPlayingSet() orelse "" });
+                }
+            }
             if (key == .none) continue;
             _ = self.frame.reset(.retain_capacity);
             self.handleKey(key) catch |err| self.say(.crit, "error: {s}", .{@errorName(err)});
@@ -314,6 +327,14 @@ pub const App = struct {
         const m = &(self.music orelse return "");
         if (!m.enabled) return "♪ off";
         return m.nowPlaying() orelse "";
+    }
+
+    /// "♪ Track — soundtrack" for status strips, or "".
+    fn nowPlayingLine(self: *App) ![]const u8 {
+        const m = &(self.music orelse return "");
+        if (!m.enabled) return "♪ off";
+        const name = m.nowPlaying() orelse return "";
+        return std.fmt.allocPrint(self.a(), "♪ {s} — {s}", .{ name, m.nowPlayingSet() orelse "" });
     }
 
     fn say(self: *App, style: Style, comptime fmt: []const u8, args: anytype) void {
@@ -531,7 +552,7 @@ pub const App = struct {
             }
             self.listPane(.{ .x = b.x, .y = b.y + top_h, .w = b.w, .h = b.h - top_h }, "SNAPSHOT", snap.items, 2, false, false);
         }
-        self.footer("[Enter] continue  [n] new campaign  [d] delete campaign  [p] new player  [D] delete player  [s] settings  [M] music  [q] quit");
+        self.footer("[Enter] continue  [n] new campaign  [d] delete campaign  [p] new player  [D] delete player  [s] settings  [M] music on/off  [q] quit");
     }
 
     fn drawWizard(self: *App) !void {
@@ -795,7 +816,8 @@ pub const App = struct {
             st.inbox,      if (st.blocking > 0) "{c}" else if (st.checklist > 0) "{a}" else "{g}",
             st.checklist,  if (st.blocking > 0) "{c}NO{/}" else "{g}YES{/}",
         });
-        s.textPad(0, 1, s.cols, line, .normal);
+        const np = try self.nowPlayingLine();
+        s.textPad(0, 1, s.cols, if (np.len > 0 and s.cols > 150) try std.fmt.allocPrint(al, "{s}  ·  {{d}}{s}{{/}}", .{ line, np }) else line, .normal);
     }
 
     fn drawGame(self: *App) !void {
@@ -1758,6 +1780,36 @@ pub const App = struct {
                 const inner = self.screen.pane(r, .{ .title = try std.fmt.allocPrint(al, "RAISE {s} · SUPPORT TRAIN · Enter/b buy one · n crews · Esc leave", .{q.forceName(g, self.raise.company)}), .double = true });
                 self.screen.lines(inner, rows.items, 0, self.modal_cursor + 1);
             },
+            .music => {
+                var rows: std.ArrayListUnmanaged([]const u8) = .empty;
+                if (self.music) |*m| {
+                    // Row 0: the mix; rows 1..sets: one soundtrack each; then the tracks of the selection.
+                    try rows.append(al, try std.fmt.allocPrint(al, "{s}{s} all soundtracks, mixed and shuffled{{/}}   {{d}}{d} tracks{{/}}", .{ if (m.selected_set == null) "{a}" else "", if (m.selected_set == null) ">" else " ", m.tracks.len }));
+                    for (m.sets, 0..) |name, i| {
+                        const sel = m.selected_set != null and m.selected_set.? == i;
+                        try rows.append(al, try std.fmt.allocPrint(al, "{s}{s} {s: <28}{{/}}   {{d}}{d} tracks · data/music/{s}{{/}}", .{ if (sel) "{a}" else "", if (sel) ">" else " ", name, m.setCount(i), if (std.mem.eql(u8, name, "default")) "" else name }));
+                    }
+                    try rows.append(al, "");
+                    try rows.append(al, try std.fmt.allocPrint(al, "{{d}}playing {s} · {s} · volume {d}{{/}}", .{ m.setName(m.selected_set), if (m.enabled) "on" else "off", m.volume }));
+                    for (m.order) |ti| {
+                        const t = m.tracks[ti];
+                        const now = m.current != null and m.current.? == ti and m.child != null;
+                        try rows.append(al, try std.fmt.allocPrint(al, "  {s}{s} {s: <40} {s}{{/}}", .{ if (now) "{g}" else "", if (now) "♪" else " ", t.name, m.sets[t.set] }));
+                    }
+                    try rows.append(al, "");
+                    try rows.append(al, "  {d}Enter on a soundtrack selects it (the playlist reshuffles) · Enter on a track plays it · m on/off · < > previous/next · - + volume · Esc close{/}");
+                } else {
+                    try rows.append(al, "");
+                    try rows.append(al, "  {d}no soundtrack loaded — start without --no-music, put audio files in data/music/ (one sub-directory per soundtrack) and have afplay, mpv, ffplay or aplay on PATH{/}");
+                    try rows.append(al, "");
+                    try rows.append(al, "  {d}[Esc] close{/}");
+                }
+                const n = rows.items.len;
+                if (self.modal_cursor >= n) self.modal_cursor = n -| 1;
+                const r = self.modalRect(@min(self.screen.cols -| 2, 110), @intCast(@min(n + 3, self.screen.rows -| 2)));
+                const inner = self.screen.pane(r, .{ .title = "SOUNDTRACK", .double = true, .right_title = "[Enter] select / play  [Esc] close" });
+                self.screen.lines(inner, rows.items, firstRow(self.modal_cursor, inner.h), if (self.music != null) self.modal_cursor else null);
+            },
             .summary => {
                 const g = &self.gs.?;
                 const rows = try q.summary(al, g);
@@ -1843,10 +1895,11 @@ pub const App = struct {
                 if (self.music) |*m| {
                     try rows.append(al, try std.fmt.allocPrint(al, "  music        {s}     {{d}}[m] toggle{{/}}", .{if (m.enabled) "{g}on{/}" else "{c}off{/}"}));
                     try rows.append(al, try std.fmt.allocPrint(al, "  volume       {d: >3}      {{d}}[-] [+] (restarts the track){{/}}", .{m.volume}));
-                    try rows.append(al, try std.fmt.allocPrint(al, "  now playing  {s}     {{d}}[>] next track{{/}}", .{m.nowPlaying() orelse "—"}));
-                    try rows.append(al, try std.fmt.allocPrint(al, "  tracks       {d} in data/music · player: {s}", .{ m.tracks.len, m.player_cmd orelse "{c}none found (afplay, mpv, ffplay, aplay){/}" }));
+                    try rows.append(al, try std.fmt.allocPrint(al, "  now playing  {s}{s}     {{d}}[<] previous  [>] next{{/}}", .{ m.nowPlaying() orelse "—", if (m.nowPlayingSet()) |set| try std.fmt.allocPrint(al, " — {s}", .{set}) else "" }));
+                    try rows.append(al, try std.fmt.allocPrint(al, "  soundtrack   {{a}}{s}{{/}}     {{d}}[t] browse soundtracks and tracks (also :music){{/}}", .{m.setName(m.selected_set)}));
+                    try rows.append(al, try std.fmt.allocPrint(al, "  tracks       {d} in {d} soundtrack{s} under data/music · player: {s}", .{ m.tracks.len, m.sets.len, if (m.sets.len == 1) "" else "s", m.player_cmd orelse "{c}none found (afplay, mpv, ffplay, aplay){/}" }));
                 } else {
-                    try rows.append(al, "  {d}no soundtrack loaded — start without --no-music and keep tracks in data/music/{/}");
+                    try rows.append(al, "  {d}no soundtrack loaded — start without --no-music and keep tracks in data/music/ (one sub-directory per soundtrack){/}");
                 }
                 try rows.append(al, "");
                 if (self.gs) |*gs| {
@@ -2127,7 +2180,8 @@ pub const App = struct {
         m.setEnabled(!m.enabled);
         try self.store.setSetting("music", @intFromBool(m.enabled));
         if (m.enabled) m.poll();
-        self.say(.dim, "music {s}", .{if (m.enabled) "on" else "off"});
+        self.last_track = m.current;
+        if (m.enabled) self.say(.dim, "♪ music on — {s} ({s}) · :music browses, F12 has the controls", .{ m.nowPlaying() orelse "starting", m.nowPlayingSet() orelse "" }) else self.say(.dim, "♪ music off (M turns it back on)", .{});
     }
 
     fn adjustVolume(self: *App, delta: i32) !void {
@@ -3344,6 +3398,46 @@ pub const App = struct {
     fn handleModalKey(self: *App, key: Key) !void {
         switch (self.modal) {
             .none => {},
+            .music => switch (key) {
+                .escape => self.modal = .none,
+                .down => self.modal_cursor +|= 1,
+                .up => self.modal_cursor -|= 1,
+                .enter => if (self.music) |*m| {
+                    const c = self.modal_cursor;
+                    if (c == 0) {
+                        m.selectSet(null);
+                        try self.store.setSetting("music_set", -1);
+                        self.say(.dim, "♪ all soundtracks, mixed and reshuffled", .{});
+                    } else if (c <= m.sets.len) {
+                        m.selectSet(c - 1);
+                        try self.store.setSetting("music_set", @intCast(c - 1));
+                        self.say(.dim, "♪ soundtrack {s}", .{m.sets[c - 1]});
+                    } else {
+                        // Header rows: sets + blank + "playing" line, then the tracks in playlist order.
+                        const first_track = m.sets.len + 3;
+                        if (c >= first_track and c - first_track < m.order.len) {
+                            const ti = m.order[c - first_track];
+                            m.play(ti);
+                            try self.store.setSetting("music", 1);
+                            self.say(.dim, "♪ {s} — {s}", .{ m.tracks[ti].name, m.sets[m.tracks[ti].set] });
+                        }
+                    }
+                } else {
+                    self.modal = .none;
+                },
+                .char => |ch| switch (ch) {
+                    'j' => self.modal_cursor +|= 1,
+                    'k' => self.modal_cursor -|= 1,
+                    'm', 'M' => try self.toggleMusic(),
+                    '>' => if (self.music) |*m| m.skip(),
+                    '<' => if (self.music) |*m| m.back(),
+                    '+', '=' => try self.adjustVolume(10),
+                    '-' => try self.adjustVolume(-10),
+                    'q' => self.modal = .none,
+                    else => {},
+                },
+                else => {},
+            },
             .emblem_editor => switch (key) {
                 .escape => self.modal = .none,
                 .left => self.ed_x -|= 1,
@@ -3534,6 +3628,11 @@ pub const App = struct {
                     '+', '=' => try self.adjustVolume(10),
                     '-' => try self.adjustVolume(-10),
                     '>' => if (self.music) |*m| m.skip(),
+                    '<' => if (self.music) |*m| m.back(),
+                    't', 'T' => {
+                        self.modal_cursor = 0;
+                        self.modal = .music;
+                    },
                     'a', 'A' => if (self.gs) |*gs| {
                         const on = !gs.auto_admit;
                         try self.exec(.{ .set_auto_admit = on });
@@ -3924,6 +4023,11 @@ pub const App = struct {
         }
         if (eq(u8, verb, "summary")) {
             self.modal = .summary;
+            return;
+        }
+        if (eq(u8, verb, "music")) {
+            self.modal_cursor = 0;
+            self.modal = .music;
             return;
         }
         if (eq(u8, verb, "readiness")) {

@@ -904,6 +904,14 @@ item: tests green, both smokes, ROADMAP tick, one commit.
   now per HQ (`[ ]` switches), the title names the paying treasury and
   its balance, and a short till is refused with both numbers and where to
   courier funds from.
+- ✅ Soundtracks (play feedback 2026-09-05): `data/music/<name>/` is a
+  soundtrack, loose files are "default"; the playlist mixes every
+  soundtrack and reshuffles each launch (the first track differs every
+  time); `:music` / Settings `t` browses soundtracks and tracks, selects
+  one soundtrack or the mix (persisted as `music_set`), plays a track on
+  demand; `<` `>` step, `M` toggles with a message naming the track; the
+  wide status strip shows "♪ track — soundtrack" and a new track is
+  announced once in the status line.
 - ✅ 12C.15 **Tech target numbers**: `GameState.hullHours` scales the
   class table by quality (`hours_quality_bp`: an A-grade wreck wants ×1.5,
   an F-grade machine ×0.8) and by an exotic design (`hours_exotic_bp`,

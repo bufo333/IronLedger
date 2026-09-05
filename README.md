@@ -189,9 +189,16 @@ the day now.
   hulls, negotiation, the summary and the emblem editor, and a `:` command
   line with Tab completion that takes every console verb.
 - **Layouts that degrade** from a maximised terminal to 80×24, `--ascii`
-  borders, 24-bit or 256 colours, half-block pictures where no graphics
-  protocol exists, and a soundtrack through the system's command-line
-  player.
+  borders, 24-bit or 256 colours, and half-block pictures where no
+  graphics protocol exists.
+- **A soundtrack** through the system's command-line player: every audio
+  file under `data/music/` plays, loose files as the default soundtrack
+  and each sub-directory (`data/music/lyran/`, `data/music/pirates/` …)
+  as a soundtrack of its own. All of them are mixed into one playlist
+  and reshuffled every launch; `:music` browses soundtracks and tracks,
+  picks one soundtrack or the mix (remembered between runs), and plays a
+  track on demand. `M` toggles music anywhere; Settings has previous,
+  next and volume; the status strip names what is playing.
 - **Players own campaigns** in one SQLite file, with schema migrations
   that carry old saves forward.
 
@@ -238,7 +245,7 @@ everything degrades down to 80×24.
 | `j` `k` or arrows, `Enter` | move the cursor, act on the row |
 | `:` | command line with Tab completion (every console verb works here; `:summary`, `:readiness`, `:manning co:N`) |
 | `n` / `N` | end the turn / end seven turns — the checklist opens first |
-| `?` | help · `e` emblem · `F12` settings · `M` music on/off · `q` back to the welcome screen |
+| `?` | help · `e` emblem · `F12` settings · `M` music on/off · `:music` soundtrack browser · `q` back to the welcome screen |
 
 Each screen's own keys are on its bottom line.
 
@@ -248,8 +255,9 @@ Each screen's own keys are on its bottom line.
 
 Players own campaigns. Continue, create or delete a campaign; create or
 delete a player. Deleting asks for the name typed back. Settings hold the
-music switch and volume, medbay auto-admit, the profit share paid to
-shareholders, the graphics path in use and where the data came from.
+music switch, volume, previous and next track, the soundtrack browser
+(`t`), medbay auto-admit, the profit share paid to shareholders, the
+graphics path in use and where the data came from.
 
 ![Welcome](docs/screenshots/welcome.svg)
 

@@ -100,6 +100,9 @@ assert "hired to fill the manning table" in plain()[-1200:], plain()[-1500:]
 send(":"); send("readiness\r", 0.8)
 assert "READINESS · every company" in plain()[-30000:], plain()[-3000:]
 send("\x1b", 0.6)
+send(":"); send("music\r", 0.8)            # soundtrack browser (no music in the smoke: says so)
+assert "SOUNDTRACK" in plain()[-30000:] and "no soundtrack loaded" in plain()[-30000:], plain()[-3000:]
+send("\x1b", 0.6)
 send(":"); send("summary\r", 0.8)          # 12C.8 campaign summary
 assert "CAMPAIGN SUMMARY" in plain()[-30000:] and "BATTLES" in plain()[-30000:], plain()[-3000:]
 send("\x1b", 0.6)
