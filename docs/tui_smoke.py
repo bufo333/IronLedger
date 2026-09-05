@@ -156,7 +156,7 @@ p = plain()[-400:]
 assert "not wounded" in p or "admitted to the medbay" in p, plain()[-800:]
 send("0")                      # market
 p = plain()
-assert "MARKET BOARDS" in p and "ORDER CATALOG" in p and "DEMAND" in p, p[-3000:]
+assert "MARKET BOARD" in p and "pays from its treasury" in p and "ORDER CATALOG" in p and "DEMAND" in p, p[-3000:]
 send("/", 0.8)                 # market filter cycles
 assert "filter mechs" in plain()[-30000:], plain()[-3000:]
 send(",", 0.8)
