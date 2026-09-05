@@ -227,6 +227,52 @@ fn refreshBoard(gs: *GameState, hq_id: types.HqId) !void {
         });
     }
 
+    // The black market (12C.17): where the hall gossips and the comms
+    // reach, a fence sometimes has something off the books.
+    {
+        const bm = tuning.market;
+        if (hq.effectiveFacilityLevel(.hiring_hall) >= 1 and hq.effectiveFacilityLevel(.comms) >= bm.black_market_comms and gs.rng.roll2d6(.market) >= bm.black_market_target) {
+            const rr = gs.rng.random(.market);
+            if (rr.boolean()) {
+                // A rare hull, whatever house built it.
+                var buf: [64]*const chassis_mod.Chassis = undefined;
+                const pool = chassis_mod.ofWeightClass(if (rr.boolean()) .heavy else .assault, gs.clock.date.year, &buf);
+                var pick: ?*const chassis_mod.Chassis = null;
+                for (pool) |c| if (c.rarity == .rare or c.rarity == .very_rare) {
+                    if (pick == null or rr.uintLessThan(u8, 3) == 0) pick = c;
+                };
+                if (pick) |c| try gs.market_listings.append(gs.allocator(), .{
+                    .kind = .unit,
+                    .item_key = c.key,
+                    .rarity = c.rarity,
+                    .price = types.applyBp(c.cost, bm.black_market_price_bp),
+                    .hq = hq_id,
+                    .listed_day = day,
+                    .expires_day = day + bm.black_market_days,
+                    .condition = .{ .armor_pct = @intCast(60 + rr.uintLessThan(u8, 40)), .quality = if (rr.boolean()) .c else .d, .damaged_slots = rr.uintLessThan(u8, 2), .destroyed_slots = 0, .missing_components = 0 },
+                    .black_market = true,
+                });
+            } else {
+                // A scarce part (availability D or worse).
+                var pick: ?*const part_mod.PartDef = null;
+                for (part_mod.catalog) |*def| if (@intFromEnum(def.availability) >= @intFromEnum(part_mod.Availability.d) and def.intro_year <= gs.clock.date.year) {
+                    if (pick == null or rr.uintLessThan(u8, 3) == 0) pick = def;
+                };
+                if (pick) |def| try gs.market_listings.append(gs.allocator(), .{
+                    .kind = .part,
+                    .item_key = def.key,
+                    .rarity = def.rarity,
+                    .price = types.applyBp(def.cost, bm.black_market_price_bp),
+                    .hq = hq_id,
+                    .quantity = 1,
+                    .listed_day = day,
+                    .expires_day = day + bm.black_market_days,
+                    .black_market = true,
+                });
+            }
+        }
+    }
+
     // Rare slots: components, heavy weapons — maybe this month, maybe not.
     const rare_slots: u32 = if (thin) 1 else 2 + warehouse;
     const r = gs.rng.random(.market);
@@ -667,6 +713,33 @@ test "12C.7: an F-rated outfit hears only from the periphery and never gets a pl
     }
     try std.testing.expectEqual(@as(types.Bp, 8_000), queries.ratingPayBp(0));
     try std.testing.expectEqual(@as(types.Bp, 13_000), queries.ratingPayBp(5));
+}
+
+test "12C.17: a wired HQ with a hall eventually hears from a fence; a firebase never does" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1217 });
+    defer gs.deinit();
+    _ = try gs.createCommander("T", .LC, .paymaster);
+    const hq = gs.hqs.keys()[0];
+    // Comms up to the line.
+    const h = gs.hqs.getPtr(hq).?;
+    var has_comms = false;
+    for (h.facilities.items) |*f| if (f.kind == .comms) {
+        f.level = @max(f.level, tuning.market.black_market_comms);
+        has_comms = true;
+    };
+    if (!has_comms) try h.facilities.append(gs.allocator(), .{ .kind = .comms, .level = tuning.market.black_market_comms });
+    h.staff_assigned = 999;
+    var seen = false;
+    for (0..40) |_| {
+        gs.market_listings.clearRetainingCapacity();
+        try refreshBoard(&gs, hq);
+        for (gs.market_listings.items) |l| if (l.black_market) {
+            seen = true;
+            try std.testing.expect(l.expires_day - l.listed_day == tuning.market.black_market_days);
+        };
+        if (seen) break;
+    }
+    try std.testing.expect(seen);
 }
 
 test "no HQ, no reputation, no offers" {

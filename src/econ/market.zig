@@ -127,6 +127,8 @@ pub const Listing = struct {
     listed_day: u32 = 0,
     expires_day: u32 = 0,
     condition: ?HullCondition = null,
+    /// Off the books (12C.17): a fence's offer — rare, dear, maybe a fraud.
+    black_market: bool = false,
 };
 
 /// Parts always on every board (weapons and ammo are readily available;

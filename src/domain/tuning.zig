@@ -78,6 +78,20 @@ pub const Tuning = struct {
         avail_mod: struct { a: i8, b: i8, c: i8, d: i8, e: i8, f: i8 },
         periphery_penalty: i32,
         comms_bonus_per_two_levels: i32,
+        /// Black market (12C.17, AtB black market): at an HQ with a hiring
+        /// hall and comms of `black_market_comms` or more, a monthly 2d6 of
+        /// `black_market_target`+ puts one rare hull or scarce part on the
+        /// board at `black_market_price_bp` of list, gone in
+        /// `black_market_days`. Buying rolls 2d6: `black_market_fraud_target`
+        /// or under and the seller vanishes with the money (standing with
+        /// the world's house −`black_market_standing_loss`); a real sale
+        /// still costs a point with the house and earns one with the pirates.
+        black_market_comms: u8,
+        black_market_target: u8,
+        black_market_price_bp: types.Bp,
+        black_market_days: u32,
+        black_market_fraud_target: u8,
+        black_market_standing_loss: i32,
     },
     medical: struct {
         training_days: u32,

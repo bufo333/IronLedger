@@ -903,11 +903,16 @@ item: tests green, both smokes, ROADMAP tick, one commit.
   wizard has a start-year field (3015–3030; `start … <name> [year]` in
   the REPL, 3000–3060), and New Year's Day logs "[tech] new in 3020: …"
   for the designs entering service. Nothing is extinct yet.
-- ⬜ 12C.17 **Black market** (AtB black market): an occasional listing at
-  a hiring-hall world with comms ≥ 2 — rare designs or parts at 2–4×,
-  with a 2d6 chance the seller is a fraud (money gone, log line, standing
-  hit with the local faction) and a small pirate-standing effect for
-  buying; the Market screen marks it.
+- ✅ 12C.17 **Black market** (AtB black market): at an HQ with a hiring
+  hall and comms ≥ `black_market_comms` (2), a monthly 2d6 of
+  `black_market_target` (8)+ puts a fence's offer on the board — a rare
+  or very rare heavy/assault hull of any house, or a scarce part
+  (availability D+), at `black_market_price_bp` (×3), gone in
+  `black_market_days` (10). Buying rolls 2d6: ≤ `black_market_fraud_target`
+  (4) and the money is gone with the fence (house standing −3); a real
+  sale still costs a point with the world's house and earns one with the
+  pirates. The Market row is marked "fence · black market". Schema v19
+  (`listing.black`).
 - ⬜ 12C.18 **Mod support**: `--data <dir>` overlays any `data/*.zon` and
   `data/tables/*.zon` from a directory at startup (ZON parsed at runtime
   for the overlay, comptime tables stay the default); the settings screen

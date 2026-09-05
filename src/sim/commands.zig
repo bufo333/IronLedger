@@ -594,8 +594,32 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
                 .amount = -listing.price,
                 .category = if (listing.kind == .unit) .unit_purchase else .parts,
                 .hq = hq_id,
-                .note = listing.item_key,
+                .note = if (listing.black_market) "black market" else listing.item_key,
             });
+            // Off the books (12C.17): the fence may vanish with the money, and
+            // the house notices either way; the pirates approve.
+            if (listing.black_market) {
+                const bm = tuning.market;
+                const world_faction: []const u8 = if (gs.hqs.getPtr(hq_id)) |h| (if (planet_mod.find(h.planet_key)) |w| w.faction else "PER") else "PER";
+                const roll = gs.rng.roll2d6(.market);
+                _ = gs.market_listings.orderedRemove(index);
+                if (roll <= bm.black_market_fraud_target) {
+                    const now = if (!std.mem.eql(u8, world_faction, "PER")) try gs.adjustStanding(world_faction, -bm.black_market_standing_loss) else 0;
+                    try gs.log(.market, .{ .hq = hq_id }, "[black market] the fence vanished with {d} c-bills — no {s} (2d6 = {d}); {s} standing −{d} → {d}", .{ listing.price, listing.item_key, roll, world_faction, bm.black_market_standing_loss, now });
+                    return .{};
+                }
+                const house_now = if (!std.mem.eql(u8, world_faction, "PER")) try gs.adjustStanding(world_faction, -1) else 0;
+                const pirate_now = try gs.adjustStanding("PER", 1);
+                try gs.log(.market, .{ .hq = hq_id }, "[black market] {s} changed hands for {d} c-bills, no questions asked — {s} standing −1 → {d}, pirates +1 → {d}", .{ listing.item_key, listing.price, world_faction, house_now, pirate_now });
+                switch (listing.kind) {
+                    .unit => {
+                        const uid = try gs.addUnit(listing.item_key);
+                        if (listing.condition) |cond| gs.applyHullCondition(uid, cond);
+                    },
+                    .part => try gs.addStock(.{ .hq = hq_id }, listing.item_key, listing.quantity),
+                }
+                return .{};
+            }
             switch (listing.kind) {
                 .unit => {
                     // Staple hull lines (support trucks) sell one at a time.
@@ -2160,6 +2184,37 @@ test "12C.16: the start year sets the calendar and gates the catalogue" {
     for (gs.market_listings.items) |l| if (l.kind == .unit) {
         try std.testing.expect(chassis_mod.find(l.item_key).?.intro_year <= 3010);
     };
+}
+
+test "12C.17: a black-market buy is a fraud or a sale, and the house notices either way" {
+    var fraud = false;
+    var sale = false;
+    var seed: u64 = 1;
+    while ((!fraud or !sale) and seed < 60) : (seed += 1) {
+        var gs = GameState.init(std.testing.allocator, .{ .seed = seed });
+        defer gs.deinit();
+        _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+        const hq = gs.hqs.keys()[0];
+        gs.hqs.getPtr(hq).?.funds = 100_000_000;
+        const faction = planet_mod.find(gs.hqs.getPtr(hq).?.planet_key).?.faction;
+        const standing_before = gs.standing(faction);
+        const pirates_before = gs.standing("PER");
+        try gs.market_listings.append(gs.allocator(), .{ .kind = .part, .item_key = "ppc", .rarity = .uncommon, .price = 600_000, .hq = hq, .listed_day = 0, .expires_day = 10, .black_market = true });
+        const idx = gs.market_listings.items.len - 1;
+        const before = gs.stockCount(.{ .hq = hq }, "ppc");
+        const funds = gs.hqs.getPtr(hq).?.funds;
+        _ = try execute(&gs, .{ .buy_listing = idx });
+        try std.testing.expectEqual(funds - 600_000, gs.hqs.getPtr(hq).?.funds); // paid either way
+        try std.testing.expectEqual(idx, gs.market_listings.items.len); // the offer is gone either way
+        if (gs.stockCount(.{ .hq = hq }, "ppc") == before) {
+            fraud = true;
+            try std.testing.expect(gs.standing(faction) < standing_before);
+        } else {
+            sale = true;
+            try std.testing.expect(gs.standing("PER") > pirates_before);
+        }
+    }
+    try std.testing.expect(fraud and sale);
 }
 
 test "golden master: same seed + same script = same state hash" {

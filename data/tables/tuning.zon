@@ -64,6 +64,12 @@
         .avail_mod = .{ .a = 2, .b = 1, .c = 0, .d = -1, .e = -2, .f = -3 },
         .periphery_penalty = 2,
         .comms_bonus_per_two_levels = 1,
+        .black_market_comms = 2,
+        .black_market_target = 8,
+        .black_market_price_bp = 30_000,
+        .black_market_days = 10,
+        .black_market_fraud_target = 4,
+        .black_market_standing_loss = 3,
     },
     .medical = .{
         .training_days = 30,
