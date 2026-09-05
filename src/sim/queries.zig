@@ -425,6 +425,7 @@ pub fn contracts(alloc: Alloc, gs: *GameState) !Contracts {
             c.enemy_key,                                                                                       c.terms.salvage_pct,
             if (c.terms.salvage_exchange) try std.fmt.allocPrint(alloc, "{s}$", .{@tagName(c.terms.command_rights)}) else @tagName(c.terms.command_rights), c.transit_days,
         }) });
+        if (c.negotiated) board.items[board.items.len - 1].text = try std.fmt.allocPrint(alloc, "{s}  {{d}}negotiated{{/}}", .{board.items[board.items.len - 1].text});
     }
 
     var active: std.ArrayListUnmanaged(ActiveRow) = .empty;

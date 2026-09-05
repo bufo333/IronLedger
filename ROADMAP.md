@@ -634,7 +634,7 @@ map. Each item ends green with a ROADMAP tick, as before.
   `salvage_exchange_bp` (60%) of catalogue value — posted to the company's
   local funds with an AAR line. Offers say "salvage exchange" and the
   history verdict notes cash-for-salvage tours. Rolled on ~1 in 6 offers.
-- ⬜ 12B.3 **Contract negotiation** (CamOps negotiation). `negotiate
+- ✅ 12B.3 **Contract negotiation** (CamOps negotiation). `negotiate
   <offer#> <term>` — one round per offer, 2d6 + reputation/10 + the best
   posted admin_command's skill against a target by employer standing
   (favoured houses bargain easier): success improves the chosen term one

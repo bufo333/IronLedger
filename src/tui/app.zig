@@ -80,6 +80,8 @@ const Modal = union(enum) {
     upgrade: types.HqId,
     /// Lance picker for a hull.
     lance_pick: types.UnitId,
+    /// Negotiation term picker for an offer (board index).
+    negotiate: usize,
     /// Every company's readiness report (fatigue, morale, wounded, banked XP, depot).
     readiness,
 };
@@ -1445,7 +1447,7 @@ pub const App = struct {
                     "  {a}screens{/}     F1-F8 or 1-8 · Tab / Shift-Tab cycles panes · j/k or arrows move the cursor",
                     "  {a}turn{/}        n ends the turn (the checklist opens first) · N ends 7 turns",
                     "  {a}desk{/}        Enter on an inbox row opens the decision · Enter on a checklist row jumps to its screen",
-                    "  {a}contracts{/}   Enter accepts the offer under the cursor · c completes · R recalls",
+                    "  {a}contracts{/}   Enter accepts the offer under the cursor · n negotiates one term (one round per offer) · c completes · R recalls",
                     "  {a}ledger{/}      j/k picks the treasury · t transfer · p policy · L loan",
                     "  {a}forces{/}      [ ] page through all forces, each company, the unassigned pool · a assign · u unassign · A auto-assign the company · t train · cursor on a company = DAMAGE pane (struct = depot, gear = field), r swaps it for READINESS · w air wing · b fabricates the shortest comp_*",
                     "  {a}hq{/}          [ ] switch HQ · u upgrade · S autostaff · h hire · f/F hall filter",
@@ -1605,6 +1607,23 @@ pub const App = struct {
                 const r = self.modalRect(@min(self.screen.cols -| 2, 120), @intCast(rows.items.len + 4));
                 const inner = self.screen.pane(r, .{ .title = try std.fmt.allocPrint(al, "RAISE {s} · CREWS", .{q.forceName(g, self.raise.company)}), .double = true });
                 self.screen.lines(inner, rows.items, 0, null);
+            },
+            .negotiate => |idx| {
+                const g = &self.gs.?;
+                var rows: std.ArrayListUnmanaged([]const u8) = .empty;
+                if (idx < g.contract_offers.items.len) {
+                    const c = g.contract_offers.items[idx];
+                    try rows.append(al, try std.fmt.allocPrint(al, "  {{a}}{s}{{/}} for {s} on {s} · {s}/mo · advance {d}% · salvage {d}% · transport {d}% · support {d}% · {s} rights", .{ @tagName(c.kind), c.employer_key, q.planetName(c.planet_key), try q.money(al, c.terms.base_pay_month), c.terms.advance_pct, c.terms.salvage_pct, c.terms.transport_pct, c.terms.overhead_pct, @tagName(c.terms.command_rights) }));
+                    try rows.append(al, "  {d}one round: 2d6 + reputation + your command office vs a target eased by standing with the employer · a miss shaves the pay 5% · a natural 2 and they walk{/}");
+                    try rows.append(al, "");
+                }
+                const terms = [_][]const u8{ "advance     25% → 50% of the total up front", "salvage     +10 points of salvage rights", "transport   +20 points of transport paid", "support     +25 points of straight support (monthly employer convoys)", "rights      one step toward independent command", "pay         +10% monthly pay" };
+                const first = rows.items.len;
+                for (terms) |t| try rows.append(al, t);
+                if (self.modal_cursor >= terms.len) self.modal_cursor = terms.len - 1;
+                const r = self.modalRect(110, @intCast(@min(rows.items.len + 3, self.screen.rows)));
+                const inner = self.screen.pane(r, .{ .title = "NEGOTIATE · [Enter] press the term · [Esc] leave it", .double = true, .right_title = ":negotiate <offer#> <term>" });
+                self.screen.lines(inner, rows.items, 0, first + self.modal_cursor);
             },
             .lance_pick => |uid| {
                 const lances = try self.lanceChoices(uid);
@@ -2525,6 +2544,18 @@ pub const App = struct {
             .contracts => {
                 if (self.focus == 2) return; // history is read-only: the log pane follows the cursor
                 const view = try q.contracts(al, g);
+                if (self.focus == 0) {
+                    if (ch == 'n' and view.board.len > 0) {
+                        const idx = view.board[@min(self.cur(0).*, view.board.len - 1)].index;
+                        if (idx < g.contract_offers.items.len and g.contract_offers.items[idx].negotiated) {
+                            self.say(.dim, "that offer has had its negotiation round — take it or leave it", .{});
+                            return;
+                        }
+                        self.modal_cursor = 0;
+                        self.modal = .{ .negotiate = idx };
+                    }
+                    return;
+                }
                 if (view.active.len == 0) return;
                 const sel = view.active[@min(self.cur(1).*, view.active.len - 1)];
                 switch (ch) {
@@ -3129,6 +3160,32 @@ pub const App = struct {
                         };
                         self.say(if (r.hired_count > 0) .good else .amber, "{d} hired from the halls and seated — open lines above are what the halls could not supply", .{r.hired_count});
                     },
+                    else => {},
+                },
+                else => {},
+            },
+            .negotiate => |idx| switch (key) {
+                .escape => self.modal = .none,
+                .down => self.modal_cursor = @min(self.modal_cursor + 1, 5),
+                .up => self.modal_cursor -|= 1,
+                .enter => {
+                    const term: game.contract.NegotiableTerm = @enumFromInt(@min(self.modal_cursor, 5));
+                    self.modal = .none;
+                    const g = &self.gs.?;
+                    const r = game.commands.execute(g, .{ .negotiate = .{ .offer_index = idx, .term = term } }) catch |err| {
+                        self.say(.crit, "refused: {s}", .{game.cli.errorText(err)});
+                        return;
+                    };
+                    switch (r.negotiation) {
+                        .improved => self.say(.good, "{s} improved — the offer row shows the new terms", .{@tagName(term)}),
+                        .hardened => self.say(.amber, "they hold firm on {s} and shave the pay 5%", .{@tagName(term)}),
+                        .withdrawn => self.say(.crit, "the employer walks away — offer withdrawn", .{}),
+                        .none => {},
+                    }
+                },
+                .char => |ch| switch (ch) {
+                    'j' => self.modal_cursor = @min(self.modal_cursor + 1, 5),
+                    'k' => self.modal_cursor -|= 1,
                     else => {},
                 },
                 else => {},

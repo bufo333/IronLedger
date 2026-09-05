@@ -128,6 +128,16 @@ pub const CommandRights = enum {
     }
 };
 
+/// What a negotiation round can move (12B.3): one step each.
+pub const NegotiableTerm = enum {
+    advance, // 25% → 50%
+    salvage, // +10 points (cap 60)
+    transport, // +20 points (cap 100)
+    support, // overhead/straight support +25 (cap 100)
+    rights, // one step toward independent
+    pay, // +10%
+};
+
 pub const ContractStatus = enum { offer, accepted, transit, active, completed, breached, failed };
 
 /// Financial terms, CamOps-style. Percentages as integers (25 = 25%).
@@ -142,6 +152,34 @@ pub const Terms = struct {
     salvage_pct: u8 = 0,
     salvage_exchange: bool = false,
     command_rights: CommandRights = .independent,
+
+    /// Apply one negotiated step. Returns false when the term is already at its cap.
+    pub fn improve(self: *Terms, term: NegotiableTerm) bool {
+        switch (term) {
+            .advance => {
+                if (self.advance_pct >= 50) return false;
+                self.advance_pct = 50;
+            },
+            .salvage => {
+                if (self.salvage_pct >= 60) return false;
+                self.salvage_pct = @min(60, self.salvage_pct + 10);
+            },
+            .transport => {
+                if (self.transport_pct >= 100) return false;
+                self.transport_pct = @min(100, self.transport_pct + 20);
+            },
+            .support => {
+                if (self.overhead_pct >= 100) return false;
+                self.overhead_pct = @min(100, self.overhead_pct + 25);
+            },
+            .rights => {
+                if (self.command_rights == .independent) return false;
+                self.command_rights = @enumFromInt(@intFromEnum(self.command_rights) + 1);
+            },
+            .pay => self.base_pay_month = types.applyBp(self.base_pay_month, @import("tuning.zig").t.contract.negotiation_pay_step_bp),
+        }
+        return true;
+    }
 
     pub fn totalBasePay(self: Terms) types.CBills {
         return self.base_pay_month * self.length_months;
@@ -189,6 +227,8 @@ pub const Contract = struct {
     /// grace window to buy local replacements runs from here.
     ineffective_since: ?u32 = null,
     breach_day: ?u32 = null,
+    /// One negotiation round per offer (12B.3): spent, whatever the outcome.
+    negotiated: bool = false,
 
     pub fn poolDestroyedPct(self: *const Contract) u32 {
         if (self.enemy_pool_bv <= 0) return 0;
@@ -282,4 +322,19 @@ test "12B.1: command rights trade pay for tempo and salvage" {
     try std.testing.expectEqual(@as(i32, -1), CommandRights.house.defeatScore());
     try std.testing.expect(!CommandRights.integrated.allowsTrainingLances());
     try std.testing.expect(CommandRights.liaison.allowsTrainingLances());
+}
+
+test "12B.3: negotiated steps move one term and stop at the cap" {
+    var t: Terms = .{ .length_months = 6, .base_pay_month = 100_000, .salvage_pct = 50, .command_rights = .liaison };
+    try std.testing.expect(t.improve(.advance));
+    try std.testing.expectEqual(@as(u8, 50), t.advance_pct);
+    try std.testing.expect(!t.improve(.advance));
+    try std.testing.expect(t.improve(.salvage));
+    try std.testing.expectEqual(@as(u8, 60), t.salvage_pct);
+    try std.testing.expect(!t.improve(.salvage));
+    try std.testing.expect(t.improve(.rights));
+    try std.testing.expectEqual(CommandRights.independent, t.command_rights);
+    try std.testing.expect(!t.improve(.rights));
+    try std.testing.expect(t.improve(.pay));
+    try std.testing.expectEqual(@as(types.CBills, 110_000), t.base_pay_month);
 }

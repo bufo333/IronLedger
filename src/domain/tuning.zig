@@ -202,6 +202,15 @@ pub const Tuning = struct {
         salvage_exchange_bp: types.Bp,
         salvage_cbills_per_bv: types.CBills,
         salvage_exchange_in: u32,
+        /// Negotiation (12B.3, CamOps): 2d6 + reputation/`negotiation_rep_per`
+        /// + the command office's skill edge vs `negotiation_target` −
+        /// standing/`negotiation_standing_per`; a miss hardens the pay by
+        /// `negotiation_fail_pay_bp`; a natural 2 withdraws the offer.
+        negotiation_target: i32,
+        negotiation_rep_per: i32,
+        negotiation_standing_per: i32,
+        negotiation_fail_pay_bp: types.Bp,
+        negotiation_pay_step_bp: types.Bp,
     },
     generation: struct {
         scout_max_tonnage: u8,

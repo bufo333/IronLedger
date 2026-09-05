@@ -20,6 +20,7 @@ const contract_events = @import("contract_events.zig");
 const medical_mod = @import("medical.zig");
 const hq_ops = @import("hq_ops.zig");
 const hq_mod = @import("../domain/hq.zig");
+const contract_mod = @import("../domain/contract.zig");
 const network = @import("network.zig");
 const contract_control = @import("contract_control.zig");
 const meklab = @import("../domain/meklab.zig");
@@ -56,6 +57,9 @@ pub const Command = union(enum) {
     },
     /// Accept an offer off the current board and send a company.
     accept_contract: struct { offer_index: usize, company: types.ForceId },
+    /// One negotiation round on an offer (12B.3): improve a term, harden
+    /// the offer, or lose it.
+    negotiate: struct { offer_index: usize, term: contract_mod.NegotiableTerm },
     take_loan: struct { principal: types.CBills, term_months: u16 },
     /// Order parts/munitions/supplies through logistics: an acquisition roll
     /// vs. rarity, then transit to `dest` (home warehouse by default, or a
@@ -276,6 +280,10 @@ pub const Error = error{
     WrongHullKind,
     /// A pool hull sits at the outfit's seat; the person's company is not home there.
     PersonAway,
+    /// This offer has had its negotiation round.
+    AlreadyNegotiated,
+    /// That term is already at the best the employer will give.
+    TermAtCap,
 } || std.mem.Allocator.Error;
 
 pub const Result = struct {
@@ -292,6 +300,8 @@ pub const Result = struct {
     /// `order_part`: false when logistics failed the sourcing roll (the
     /// order is recorded as failed; retry after the refresh or fabricate).
     sourced: bool = true,
+    /// `negotiate`: how the round went.
+    negotiation: enum { none, improved, hardened, withdrawn } = .none,
 };
 
 pub fn execute(gs: *GameState, cmd: Command) Error!Result {
@@ -506,6 +516,7 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             return .{};
         },
         .accept_contract => |a| return acceptContract(gs, a.offer_index, a.company),
+        .negotiate => |n| return negotiate(gs, n.offer_index, n.term),
         .order_part => |o| return orderPart(gs, o.part_key, o.quantity, o.dest),
         .ship_stock => |s| return shipStock(gs, s.part_key, s.quantity, s.from, s.to),
         .buy_listing => |index| {
@@ -1512,6 +1523,43 @@ fn commitLift(gs: *GameState, company_id: types.ForceId) Error!LiftPlan {
         error.OutOfMemory => return error.OutOfMemory,
         else => return .{},
     };
+}
+
+/// CamOps negotiation, one round per offer (12B.3): 2d6 + reputation edge
+/// + the command office's skill edge against a target eased by standing
+/// with the employer. Success moves the chosen term a step; a miss hardens
+/// the pay; a natural 2 and the employer walks away.
+fn negotiate(gs: *GameState, offer_index: usize, term: contract_mod.NegotiableTerm) Error!Result {
+    if (offer_index >= gs.contract_offers.items.len) return Error.NoSuchOffer;
+    const c = &gs.contract_offers.items[offer_index];
+    if (c.negotiated) return Error.AlreadyNegotiated;
+    var probe = c.terms;
+    if (!probe.improve(term)) return Error.TermAtCap;
+    const t = tuning.contract;
+    const seat: types.HqId = if (gs.hqs.count() > 0) gs.hqs.keys()[0] else .none;
+    const office = if (seat != .none) gs.hqStaff(seat, .admin_command) else state_mod.StaffSummary{};
+    const office_edge: i32 = if (office.count == 0) -1 else 5 - @as(i32, office.best_skill);
+    const rep_edge: i32 = std.math.clamp(@divTrunc(gs.reputation, t.negotiation_rep_per), -3, 3);
+    const target: i32 = t.negotiation_target - @divTrunc(gs.standing(c.employer_key), t.negotiation_standing_per);
+    const raw = gs.rng.roll2d6(.market);
+    const total: i32 = @as(i32, raw) + office_edge + rep_edge;
+    c.negotiated = true;
+    const ctx: state_mod.LogCtx = .{};
+    if (raw == 2) {
+        try gs.log(.contract, ctx, "[negotiation] {s} {s} on {s}: the employer walks away from the table (natural 2)", .{ c.employer_key, @tagName(c.kind), c.planet_key });
+        _ = gs.contract_offers.orderedRemove(offer_index);
+        return .{ .negotiation = .withdrawn };
+    }
+    if (total >= target) {
+        _ = c.terms.improve(term);
+        try gs.log(.contract, ctx, "[negotiation] {s} {s} on {s}: {s} improved ({d}+{d}+{d} vs {d}) — advance {d}%, salvage {d}%, transport {d}%, support {d}%, {s} rights, {d}/mo", .{
+            c.employer_key, @tagName(c.kind), c.planet_key, @tagName(term), raw, office_edge, rep_edge, target, c.terms.advance_pct, c.terms.salvage_pct, c.terms.transport_pct, c.terms.overhead_pct, @tagName(c.terms.command_rights), c.terms.base_pay_month,
+        });
+        return .{ .negotiation = .improved };
+    }
+    c.terms.base_pay_month = types.applyBp(c.terms.base_pay_month, t.negotiation_fail_pay_bp);
+    try gs.log(.contract, ctx, "[negotiation] {s} {s} on {s}: they hold firm on {s} and shave the pay 5% ({d}+{d}+{d} vs {d})", .{ c.employer_key, @tagName(c.kind), c.planet_key, @tagName(term), raw, office_edge, rep_edge, target });
+    return .{ .negotiation = .hardened };
 }
 
 fn acceptContract(gs: *GameState, offer_index: usize, company_id: types.ForceId) Error!Result {
@@ -2913,4 +2961,41 @@ test "12.15: ships need berths, lift the company for less charter, and come home
     try std.testing.expectEqual(@as(types.CBills, 0), network.findLink(&gs, hq, far).?.monthlyCost());
     // With a jumpship of its own the company's next lift waives the collar fee too.
     try std.testing.expect((try planLift(&gs, co, false)).own_jumpship);
+}
+
+test "12B.3: one negotiation round per offer — improved, hardened, or withdrawn; never a second" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1233 });
+    defer gs.deinit();
+    _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    try std.testing.expect(gs.contract_offers.items.len > 0);
+    var improved: u32 = 0;
+    var hardened: u32 = 0;
+    var withdrawn: u32 = 0;
+    var rounds: u32 = 0;
+    while (rounds < 60) : (rounds += 1) {
+        if (gs.contract_offers.items.len == 0) try @import("../econ/contract_market.zig").refresh(&gs);
+        const before = gs.contract_offers.items[0].terms;
+        const r = try execute(&gs, .{ .negotiate = .{ .offer_index = 0, .term = .salvage } });
+        switch (r.negotiation) {
+            .improved => {
+                improved += 1;
+                try std.testing.expect(gs.contract_offers.items[0].terms.salvage_pct > before.salvage_pct);
+                try std.testing.expectError(Error.AlreadyNegotiated, execute(&gs, .{ .negotiate = .{ .offer_index = 0, .term = .pay } }));
+            },
+            .hardened => {
+                hardened += 1;
+                try std.testing.expect(gs.contract_offers.items[0].terms.base_pay_month < before.base_pay_month);
+                try std.testing.expectError(Error.AlreadyNegotiated, execute(&gs, .{ .negotiate = .{ .offer_index = 0, .term = .pay } }));
+            },
+            .withdrawn => withdrawn += 1,
+            .none => unreachable,
+        }
+        // Clear the board so the next round sees fresh offers.
+        gs.contract_offers.clearRetainingCapacity();
+    }
+    try std.testing.expect(improved > 0 and hardened > 0);
+    // A term at its cap is refused before any dice are thrown.
+    try @import("../econ/contract_market.zig").refresh(&gs);
+    gs.contract_offers.items[0].terms.advance_pct = 50;
+    try std.testing.expectError(Error.TermAtCap, execute(&gs, .{ .negotiate = .{ .offer_index = 0, .term = .advance } }));
 }

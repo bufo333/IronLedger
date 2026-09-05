@@ -162,6 +162,11 @@
         .salvage_exchange_bp = 6_000,
         .salvage_cbills_per_bv = 2_000,
         .salvage_exchange_in = 6,
+        .negotiation_target = 8,
+        .negotiation_rep_per = 10,
+        .negotiation_standing_per = 25,
+        .negotiation_fail_pay_bp = 9_500,
+        .negotiation_pay_step_bp = 11_000,
     },
     .generation = .{
         .scout_max_tonnage = 40,

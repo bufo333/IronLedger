@@ -137,6 +137,12 @@ pub fn parseCommand(verb: []const u8, tokens: *std.mem.TokenIterator(u8, .scalar
     if (eq(u8, verb, "loan")) {
         return .{ .take_loan = .{ .principal = try num(i64, tokens.next()), .term_months = if (tokens.next()) |t| (std.fmt.parseInt(u16, t, 10) catch return error.BadNumber) else 12 } };
     }
+    if (eq(u8, verb, "negotiate")) {
+        // negotiate <offer#> advance|salvage|transport|support|rights|pay
+        const idx = try num(usize, tokens.next());
+        const term = std.meta.stringToEnum(game.contract.NegotiableTerm, try need(tokens.next())) orelse return error.BadArguments;
+        return .{ .negotiate = .{ .offer_index = idx, .term = term } };
+    }
     if (eq(u8, verb, "accept")) {
         // accept <offer#> <co:N | N>
         const idx = try num(usize, tokens.next());
@@ -348,6 +354,8 @@ pub fn errorText(err: anyerror) []const u8 {
         error.UnitDeployed => "that hull is with a deployed company — bring the company home first (HQ work like fabrication and orders is unaffected)",
         error.PersonDeployed => "that person is deployed with their company",
         error.PersonAway => "pool hulls sit at the outfit's seat — that person's company is not home there",
+        error.AlreadyNegotiated => "that offer has had its negotiation round — take it or leave it",
+        error.TermAtCap => "that term is already the best the employer will give",
         error.NoAirSlot => "no air wing slot: the home HQ needs a spaceport at level 3 (brigade HQs host one from the start), and a company has one wing",
         error.NoSupportSlot => "the support company is full for this HQ, or its facilities can't stand up that lance (mess needs a mess hall ≥ 2, MASH a hospital, logistics a warehouse)",
         error.NoBerth => "no free berth at that HQ — spaceport levels add dropship berths; a jumpship berth needs spaceport 4 and comms 3",
@@ -378,6 +386,7 @@ pub const verbs = [_][]const u8{
     "policy",
     "loan",
     "accept",
+    "negotiate",
     "resolve",
     "order",
     "ship",
@@ -435,6 +444,7 @@ pub fn usage(verb: []const u8) ?[]const u8 {
         .{ "policy", "policy <hq:N|co:N> <floor> <monthly cap>  (0 removes)" },
         .{ "loan", "loan <amount> [months]" },
         .{ "accept", "accept <offer#> <co:N|N>" },
+        .{ "negotiate", "negotiate <offer#> advance|salvage|transport|support|rights|pay  (one round per offer)" },
         .{ "resolve", "resolve <event#> <option#>" },
         .{ "order", "order <part> [qty] [hq:N|co:N]" },
         .{ "ship", "ship <part> <qty> <from site> <to site>" },
