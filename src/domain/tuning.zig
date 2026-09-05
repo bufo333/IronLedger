@@ -196,6 +196,12 @@ pub const Tuning = struct {
             /// Score a defeat costs under integrated command (harder grading).
             integrated_defeat_score: i32,
         },
+        /// Salvage exchange (12B.2, CamOps): the employer keeps the wrecks
+        /// and pays the claim in cash at this share of BV value, at this
+        /// many C-bills per BV. Rolled on one offer in `salvage_exchange_in`.
+        salvage_exchange_bp: types.Bp,
+        salvage_cbills_per_bv: types.CBills,
+        salvage_exchange_in: u32,
     },
     generation: struct {
         scout_max_tonnage: u8,

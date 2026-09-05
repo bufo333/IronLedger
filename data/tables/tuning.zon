@@ -159,6 +159,9 @@
             .pay_bp = .{ .integrated = 11_000, .house = 10_500, .liaison = 10_000, .independent = 9_500 },
             .integrated_defeat_score = -2,
         },
+        .salvage_exchange_bp = 6_000,
+        .salvage_cbills_per_bv = 2_000,
+        .salvage_exchange_in = 6,
     },
     .generation = .{
         .scout_max_tonnage = 40,

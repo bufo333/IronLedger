@@ -181,6 +181,8 @@ pub fn refresh(gs: *GameState) !void {
                 },
                 .battle_loss_pct = if (gs.rng.roll2d6(.market) >= 8) 30 else 0,
                 .salvage_pct = @intCast(@as(u32, gs.rng.roll2d6(.market) -| 2) * 5), // 0–50%
+                // Salvage exchange (12B.2): the employer keeps the wrecks and pays cash.
+                .salvage_exchange = gs.rng.random(.market).uintLessThan(u32, tuning.contract.salvage_exchange_in) == 0,
                 .command_rights = rights,
             },
         });

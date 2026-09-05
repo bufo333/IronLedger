@@ -629,7 +629,7 @@ map. Each item ends green with a ROADMAP tick, as before.
   −2), and pay (integrated +10%, independent −5%, priced at offer time).
   Offer and active rows show the rights and their effects; the AAR names
   the liaison's salvage cut. Knobs in `tuning.contract.rights`.
-- ⬜ 12B.2 **Salvage exchange** (CamOps). When `salvage_exchange` is set the
+- ✅ 12B.2 **Salvage exchange** (CamOps). When `salvage_exchange` is set the
   employer keeps every wreck and part and pays the claim in cash at
   `salvage_exchange_bp` (60%) of catalogue value — posted to the company's
   local funds with an AAR line. Offers say "salvage exchange" and the

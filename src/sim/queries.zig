@@ -423,7 +423,7 @@ pub fn contracts(alloc: Alloc, gs: *GameState) !Contracts {
             try padMk(alloc, if (c.beachhead) "{a}" else "", if (c.beachhead) "beachhead" else "in ring", 10), c.terms.length_months,
             try money(alloc, c.terms.base_pay_month),                                                          try money(alloc, total),
             c.enemy_key,                                                                                       c.terms.salvage_pct,
-            @tagName(c.terms.command_rights),                                                                  c.transit_days,
+            if (c.terms.salvage_exchange) try std.fmt.allocPrint(alloc, "{s}$", .{@tagName(c.terms.command_rights)}) else @tagName(c.terms.command_rights), c.transit_days,
         }) });
     }
 
@@ -464,8 +464,8 @@ pub fn contracts(alloc: Alloc, gs: *GameState) !Contracts {
             c.committed_bv, fieldable, pct_mk, pct,
             if (c.ineffective_since) |since| try std.fmt.allocPrint(alloc, " · {{c}}grace since day {d}{{/}}", .{since}) else "",
         }));
-        try lines.append(alloc, try std.fmt.allocPrint(alloc, "    pay         {s} / month · advance {s} · salvage {d}% · {s} rights", .{
-            try money(alloc, c.terms.base_pay_month), try money(alloc, c.terms.advanceAmount()), c.terms.salvage_pct, @tagName(c.terms.command_rights),
+        try lines.append(alloc, try std.fmt.allocPrint(alloc, "    pay         {s} / month · advance {s} · salvage {d}%{s} · {s} rights", .{
+            try money(alloc, c.terms.base_pay_month), try money(alloc, c.terms.advanceAmount()), c.terms.salvage_pct, if (c.terms.salvage_exchange) " {a}(exchange: employer keeps the wrecks, pays cash){/}" else "", @tagName(c.terms.command_rights),
         }));
         {
             // Salvage capacity (battle.zig): what the trucks can haul off a won field. // TUNE mirrors battle.zig
@@ -516,7 +516,7 @@ pub fn contracts(alloc: Alloc, gs: *GameState) !Contracts {
         .board_header = "kind               world            emp    LY  band        mo     pay/month          total  enemy  salv  rights      transit",
         .board = try board.toOwnedSlice(alloc),
         .active = try active.toOwnedSlice(alloc),
-        .notes = "{d}beachhead: ×1.3 pay · +15% hardship · local supplies ×2.5 · resupply via link only  ·  rights: integrated = more fights, salvage ×0.5, defeats −2, no training lances, pay +10% · house = ×0.75, +5% · liaison = ×0.9 · independent = fewer fights, full salvage, −5%  ·  board refreshes on the 1st{/}",
+        .notes = "{d}beachhead: ×1.3 pay · +15% hardship · local supplies ×2.5 · resupply via link only  ·  rights: integrated = more fights, salvage ×0.5, defeats −2, no training lances, pay +10% · house = ×0.75, +5% · liaison = ×0.9 · independent = fewer fights, full salvage, −5% · $ = salvage exchange (cash, no wrecks)  ·  board refreshes on the 1st{/}",
     .standings = try standings(alloc, gs), };
 }
 

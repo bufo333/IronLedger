@@ -394,7 +394,21 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     const before_cut = salvage_bv;
     salvage_bv = types.applyBp(salvage_bv, c.terms.command_rights.salvageShareBp());
     const liaison_cut = before_cut - salvage_bv;
-    const spoils = try claimSalvage(gs, c, salvage_bv);
+    // Salvage exchange (12B.2): the employer keeps every wreck and part and
+    // pays the claim in cash into the company's local funds.
+    var exchange_cash: types.CBills = 0;
+    const spoils = if (c.terms.salvage_exchange) blk: {
+        exchange_cash = types.applyBp(salvage_bv * tuning.contract.salvage_cbills_per_bv, tuning.contract.salvage_exchange_bp);
+        if (exchange_cash > 0) try gs.postTreasury(.{ .company = c.assigned_company }, .{
+            .day = gs.clock.day_index,
+            .amount = exchange_cash,
+            .category = .salvage,
+            .company = c.assigned_company,
+            .contract = c.id,
+            .note = "salvage exchange",
+        });
+        break :blk if (exchange_cash > 0) try std.fmt.allocPrint(gs.allocator(), "salvage exchange — the employer keeps the wrecks and pays {d} c-bills for your {d} BV claim", .{ exchange_cash, salvage_bv }) else "";
+    } else try claimSalvage(gs, c, salvage_bv);
     const salvage = salvage_bv; // for the AAR
 
     // Expend the reloads this fight consumed (Stage 9B), itemized below.
@@ -864,4 +878,37 @@ test "12B.1: integrated command sends training lances to fight and pulls the sco
     c.terms.command_rights = .independent;
     for (0..20) |_| sum_n += nextBattleGap(&gs, c);
     try std.testing.expect(sum_i < sum_n);
+}
+
+test "12B.2: salvage exchange pays cash into local funds and ships no wreck" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1232 });
+    defer gs.deinit();
+    _ = try gs.createCommander("T", .LC, .line_officer);
+    const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
+        .id = @enumFromInt(1),
+        .kind = .objective_raid,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 3, .base_pay_month = 400_000, .salvage_pct = 50, .salvage_exchange = true, .command_rights = .independent },
+        .status = .active,
+        .assigned_company = co,
+        .monthly_net = 300_000,
+    });
+    const c = gs.contracts.getPtr(@enumFromInt(1)).?;
+    const site: types.Site = .{ .company = co };
+    try gs.addStock(site, "armor", 60);
+    for (part_mod.munition_keys) |key| try gs.addStock(site, key, 40);
+    const units_before = gs.units.count();
+    var held = false;
+    for (0..12) |_| {
+        try resolveEngagement(&gs, c);
+        try @import("maintenance.zig").runWeeklyRepairs(&gs);
+        const s = @import("../econ/finance.zig").summarize(&gs.ledger, 0, gs.clock.day_index, .{ .company = co });
+        if (s.category(.salvage) > 0) held = true;
+    }
+    try std.testing.expect(held); // some field was held and paid in cash
+    try std.testing.expectEqual(units_before, gs.units.count()); // no wrecks
+    for (gs.unit_transfers.items) |t| try std.testing.expect(t.to_company != .none);
 }
