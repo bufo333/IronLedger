@@ -1565,6 +1565,7 @@ fn acceptContract(gs: *GameState, offer_index: usize, company_id: types.ForceId)
     // Kit out from the home warehouse before the dropships lift (Stage 9B);
     // a company redeploying from the field goes with what's in its trucks.
     try gs.loadOutCompany(company_id);
+    try deploymentDefaults(gs, company_id, signing);
     const site: types.Site = .{ .company = company_id };
     try gs.log(.delivery, .{ .company = company_id, .contract = id }, "[loadout] trucks loaded: {d}t of {d}t — {d}t provisions, {d}t LRM, {d}t SRM, {d}t AC/5", .{
         gs.siteTons(site),                 gs.siteCapacityTons(site) orelse 0,
@@ -1572,6 +1573,34 @@ fn acceptContract(gs: *GameState, offer_index: usize, company_id: types.ForceId)
         gs.stockCount(site, "ammo_srm"),   gs.stockCount(site, "ammo_ac5"),
     });
     return .{};
+}
+
+/// Defaults a deployment gets unless the player set their own (Stage 12.19):
+/// a resupply policy on the field plan, a share of the advance as local
+/// operating funds (handed over on the ramp, no courier), and a standing
+/// top-up so the float never runs dry. Every one is clearable.
+fn deploymentDefaults(gs: *GameState, company_id: types.ForceId, signing: types.CBills) Error!void {
+    var has_supply = false;
+    for (gs.supply_policies.items) |sp| if (sp.company == company_id) {
+        has_supply = true;
+    };
+    if (!has_supply) {
+        try gs.supply_policies.append(gs.allocator(), .{ .company = company_id, .min_days = tuning.field_supply.default_min_days, .tons = 0 });
+    }
+    var has_cash = false;
+    for (gs.policies.items) |p| if (std.meta.eql(p.entity, .{ .company = company_id })) {
+        has_cash = true;
+    };
+    if (!has_cash) {
+        try gs.policies.append(gs.allocator(), .{ .entity = .{ .company = company_id }, .floor = tuning.finance.field_policy_floor, .monthly_cap = tuning.finance.field_policy_cap });
+    }
+    const float = types.applyBp(signing, tuning.finance.field_float_bp);
+    if (float > 0 and gs.funds >= float) {
+        gs.transferFunds(.outfit, .{ .company = company_id }, float, 0) catch {};
+    }
+    try gs.log(.finance, .{ .company = company_id }, "[deploy] defaults: resupply every {d} days on the field plan, {d} local operating funds, top-up policy {d}/{d} per month — `supplypolicy`/`policy` with 0 clear them", .{
+        tuning.field_supply.default_min_days, float, tuning.finance.field_policy_floor, tuning.finance.field_policy_cap,
+    });
 }
 
 fn advance(gs: *GameState, days: u32) Error!Result {
@@ -1630,6 +1659,7 @@ test "policies run daily under a monthly cap; resupply ships provisions to a com
     _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
     const co = (try execute(&gs, .{ .new_company = "Alpha" })).created_force;
     const hq = gs.hqs.keys()[0];
+    gs.policies.clearRetainingCapacity(); // drop the starter HQ's default top-up (12.19) — this test counts policies
 
     // Cash: a top-up dispatches on the next day, not on payday, and no second
     // courier leaves while the first is in flight.
@@ -1780,6 +1810,7 @@ test "12: a stock policy reorders a warehouse line to its target, once, and can 
     _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
     const hq = gs.hqs.keys()[0];
     gs.hqs.getPtr(hq).?.funds = 20_000_000;
+    gs.stock_policies.clearRetainingCapacity(); // drop the default provisions line (12.19) — this test counts lines
     try std.testing.expectError(Error.UnknownPart, execute(&gs, .{ .set_stock_policy = .{ .hq = hq, .part_key = "unobtainium", .min = 1, .target = 2 } }));
     _ = try execute(&gs, .{ .set_stock_policy = .{ .hq = hq, .part_key = "ammo_lrm", .min = 10, .target = 30 } });
     try std.testing.expectEqual(@as(usize, 1), gs.stock_policies.items.len);

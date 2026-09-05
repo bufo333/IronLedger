@@ -1286,15 +1286,16 @@ test "save → load → identical hash, and the loaded campaign keeps playing" {
     try std.testing.expectEqual(gs.people.count(), loaded.people.count());
     try std.testing.expectEqual(gs.event_log.items.len, loaded.event_log.items.len);
     try std.testing.expectEqual(gs.event_queue.pending.items.len, loaded.event_queue.pending.items.len);
-    // Policies survive the round trip with their current numbers.
-    try std.testing.expectEqual(@as(usize, 1), loaded.policies.items.len);
-    try std.testing.expectEqual(gs.policies.items[0].sent_this_month, loaded.policies.items[0].sent_this_month);
+    // Policies survive the round trip with their current numbers (the
+    // starter HQ's default top-up and provisions line ride along, 12.19).
+    try std.testing.expectEqual(@as(usize, 2), loaded.policies.items.len);
+    try std.testing.expectEqual(gs.policies.items[1].sent_this_month, loaded.policies.items[1].sent_this_month);
     try std.testing.expectEqual(@as(usize, 1), loaded.supply_policies.items.len);
     try std.testing.expectEqual(@as(u16, 30), loaded.supply_policies.items[0].min_days);
     try std.testing.expectEqual(@as(u32, 60), loaded.supply_policies.items[0].tons);
-    try std.testing.expectEqual(@as(usize, 1), loaded.stock_policies.items.len);
-    try std.testing.expectEqualStrings("ammo_lrm", loaded.stock_policies.items[0].part_key);
-    try std.testing.expectEqual(@as(u32, 30), loaded.stock_policies.items[0].target);
+    try std.testing.expectEqual(@as(usize, 2), loaded.stock_policies.items.len);
+    try std.testing.expectEqualStrings("ammo_lrm", loaded.stock_policies.items[1].part_key);
+    try std.testing.expectEqual(@as(u32, 30), loaded.stock_policies.items[1].target);
     try std.testing.expect(loaded.auto_admit);
 
     // Determinism survives the round trip: both worlds evolve identically.

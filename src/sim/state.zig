@@ -502,6 +502,13 @@ pub const GameState = struct {
         // handed over on-site (no courier).
         self.transferFunds(.outfit, .{ .hq = id }, tuning.hq.founding_funds, 0) catch {};
 
+        // Standing defaults the player can clear (Stage 12.19 play-tuning:
+        // a hands-off year ran the HQ treasury negative on depot repairs and
+        // the warehouse out of food): the outfit tops the HQ up on payday,
+        // and the warehouse keeps provisions stocked.
+        try self.policies.append(self.allocator(), .{ .entity = .{ .hq = id }, .floor = tuning.finance.hq_policy_floor, .monthly_cap = tuning.finance.hq_policy_cap });
+        try self.stock_policies.append(self.allocator(), .{ .hq = id, .part_key = "provisions", .min = tuning.generation.provisions_keep_min, .target = tuning.generation.provisions_keep_target });
+
         // A modestly stocked warehouse to start (Stage 9B).
         const site: types.Site = .{ .hq = id };
         const g = tuning.generation;

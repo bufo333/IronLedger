@@ -114,6 +114,8 @@ pub const Tuning = struct {
         medical_share_pct: u32,
         days_per_battle: u32,
         provisions_cadence_days: u32,
+        /// Safety days for the resupply policy a deployment gets by default.
+        default_min_days: u16,
     },
     finance: struct {
         loan_rate_bp: types.Bp,
@@ -121,6 +123,15 @@ pub const Tuning = struct {
         credit_liquidation_bp: types.Bp,
         hardship_bp: types.Bp,
         field_markup_bp: types.Bp,
+        /// Defaults set at acceptance (Stage 12.19): a share of the advance
+        /// handed to the company as local operating funds, and a standing
+        /// top-up policy for it — both clearable.
+        field_float_bp: types.Bp,
+        field_policy_floor: types.CBills,
+        field_policy_cap: types.CBills,
+        /// Default standing top-up for the starter HQ.
+        hq_policy_floor: types.CBills,
+        hq_policy_cap: types.CBills,
     },
     hq_ops: struct {
         slots_per_bay_level: u32,
@@ -143,6 +154,9 @@ pub const Tuning = struct {
         starter_armor: u32,
         starter_components_each: u32,
         starter_munitions_each: u32,
+        /// Keep-stocked provisions line at the starter HQ (min / target tons).
+        provisions_keep_min: u32,
+        provisions_keep_target: u32,
     },
     commander: struct { bonus_bp: types.Bp },
 };

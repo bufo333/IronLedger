@@ -108,6 +108,7 @@
         .medical_share_pct = 5,
         .days_per_battle = 15,
         .provisions_cadence_days = 14,
+        .default_min_days = 14,
     },
     .finance = .{
         .loan_rate_bp = 1_200, // 12%/yr simple interest
@@ -115,6 +116,11 @@
         .credit_liquidation_bp = 5_000,
         .hardship_bp = 1_500,
         .field_markup_bp = 15_000,
+        .field_float_bp = 1_000, // 10% of the advance rides with the company
+        .field_policy_floor = 250_000,
+        .field_policy_cap = 500_000,
+        .hq_policy_floor = 500_000,
+        .hq_policy_cap = 1_500_000,
     },
     .hq_ops = .{
         .slots_per_bay_level = 2,
@@ -137,6 +143,8 @@
         .starter_armor = 20,
         .starter_components_each = 1,
         .starter_munitions_each = 12,
+        .provisions_keep_min = 30,
+        .provisions_keep_target = 90,
     },
     .commander = .{ .bonus_bp = 200 },
 }
