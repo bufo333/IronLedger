@@ -63,6 +63,8 @@ const Modal = union(enum) {
     seat: types.PersonId,
     /// Change the outfit's emblem: presets, then pictures from the logo dirs.
     emblem,
+    /// Draw a 3 × 8 text crest cell by cell (12.14).
+    emblem_editor,
     /// Hull detail as a modal (narrow terminals have no side pane).
     hull: types.UnitId,
     /// A person's record as a modal.
@@ -173,6 +175,11 @@ pub const App = struct {
     emblem: ?emblem_mod.Emblem = null,
     placements: [8]Placement = undefined,
     n_placements: usize = 0,
+    /// The cell editor's canvas, cursor and undo snapshot (12.14).
+    ed_art: [3][8]u8 = @splat(@splat(' ')),
+    ed_undo: [3][8]u8 = @splat(@splat(' ')),
+    ed_x: u8 = 0,
+    ed_y: u8 = 0,
     // wizard import
     w_src: u8 = 0, // 0 presets · 1 import
     logos: []const []const u8 = &.{},
@@ -258,8 +265,8 @@ pub const App = struct {
     fn probeTerminal(self: *App) void {
         var buf: [256]u8 = undefined;
         const n = self.term.probe(emblem_mod.kitty_query, &buf, 250);
-        if (emblem_mod.kittyReplyOk(buf[0..n])) self.graphics = .kitty;
-        self.screen.truecolor = emblem_mod.detectTruecolor() or self.graphics == .kitty;
+        if (emblem_mod.kittyReplyOk(buf[0..n])) self.graphics = .kitty else if (emblem_mod.detectIterm2()) self.graphics = .iterm2;
+        self.screen.truecolor = emblem_mod.detectTruecolor() or self.graphics != .none;
     }
 
     pub fn run(self: *App) !void {
@@ -353,6 +360,16 @@ pub const App = struct {
                 }
             }
             try self.term.out.flush();
+        } else if (self.graphics == .iterm2) {
+            // iTerm2 (12.14): the frame's text already cleared the cells; the
+            // picture is re-sent with every frame it is visible in.
+            if (!modal_open) {
+                for (self.placements[0..self.n_placements]) |p| {
+                    const e = self.currentEmblem() orelse break;
+                    try emblem_mod.itermPlace(self.term.out, self.gpa, e.bytes, p.x, p.y, p.cols, p.rows);
+                }
+            }
+            try self.term.out.flush();
         }
     }
 
@@ -366,7 +383,7 @@ pub const App = struct {
     fn drawEmblem(self: *App, r: Rect) bool {
         const e = self.currentEmblem() orelse return false;
         if (r.w < 2 or r.h < 1) return false;
-        if (self.graphics == .kitty) {
+        if (self.graphics != .none) {
             // keep the picture's aspect: cells are ~1:2, so cols ≈ 2 × rows for a square
             var rows: u32 = r.h;
             var cols: u32 = @min(@as(u32, r.w), rows * 2 * e.img.width / @max(1, e.img.height));
@@ -587,7 +604,8 @@ pub const App = struct {
                     }
                     try rows.append(al, "");
                     try rows.append(al, try std.fmt.allocPrint(al, "display          {s}", .{switch (self.graphics) {
-                        .kitty => "{g}graphics protocol{/} — the picture itself, placed over cells",
+                        .kitty => "{g}kitty graphics protocol{/} — the picture itself, placed over cells",
+                        .iterm2 => "{g}iTerm2 inline images{/} — the picture itself, re-sent each frame",
                         .none => if (self.screen.truecolor) "{a}half-block colour{/} — two pixels per cell (no graphics protocol detected)" else "{a}256-colour half-blocks{/}",
                     }}));
                     if (self.w_preview) |*e| {
@@ -1221,15 +1239,41 @@ pub const App = struct {
         }
     }
 
+    /// Custom text art travels as force.emblem bytes: "ART1\n" then three
+    /// lines of eight cells (12.14).
+    const art_magic = "ART1\n";
+
+    fn parseArt(bytes: []const u8) ?Emblem {
+        if (!std.mem.startsWith(u8, bytes, art_magic)) return null;
+        var lines = std.mem.splitScalar(u8, bytes[art_magic.len..], '\n');
+        var art: [3][]const u8 = .{ "", "", "" };
+        for (&art) |*row| row.* = lines.next() orelse return null;
+        return .{ .name = "your own", .art = art };
+    }
+
     fn emblemFor(self: *App, g: *GameState) Emblem {
         _ = self;
         var fit = g.forces.iterator();
         while (fit.next()) |e| {
             if (e.value_ptr.emblem) |img| {
+                if (parseArt(img)) |custom| return custom;
                 for (emblems) |em| if (std.mem.eql(u8, em.name, img)) return em;
             }
         }
         return emblems[0];
+    }
+
+    /// Open the cell editor seeded with the current crest (12.14).
+    fn openEmblemEditor(self: *App) void {
+        const g = &(self.gs orelse return);
+        const crest = self.emblemFor(g);
+        for (0..3) |r| for (0..8) |c| {
+            self.ed_art[r][c] = if (c < crest.art[r].len) crest.art[r][c] else ' ';
+        };
+        self.ed_undo = self.ed_art;
+        self.ed_x = 0;
+        self.ed_y = 0;
+        self.modal = .emblem_editor;
     }
 
     fn drawContracts(self: *App) !void {
@@ -1774,7 +1818,11 @@ pub const App = struct {
                     try rows.append(al, try std.fmt.allocPrint(al, "  shares       {{a}}{d}%{{/}} of contract income to shareholders at completion     {{d}}`:shares <pct>` — founders, veterans and officers hold shares; a stake calms restlessness{{/}}", .{@divTrunc(gs.share_profit_bp, 100)}));
                     try rows.append(al, "");
                 }
-                try rows.append(al, try std.fmt.allocPrint(al, "  graphics     {s} · colour {s} · glyphs {s}", .{ if (self.graphics == .kitty) "kitty protocol" else "half-block", if (self.screen.truecolor) "24-bit" else "256", if (self.screen.ascii) "ascii" else "box-drawing" }));
+                try rows.append(al, try std.fmt.allocPrint(al, "  graphics     {s} · colour {s} · glyphs {s}", .{ switch (self.graphics) {
+                    .kitty => "kitty protocol",
+                    .iterm2 => "iTerm2 inline images",
+                    .none => "half-block",
+                }, if (self.screen.truecolor) "24-bit" else "256", if (self.screen.ascii) "ascii" else "box-drawing" }));
                 try rows.append(al, try std.fmt.allocPrint(al, "  data         {s}     {{d}}`zig build -Ddata=<dir>` overlays data/*.zon — docs/modding.md{{/}}", .{try game.dataProvenance(al)}));
                 try rows.append(al, "");
                 try rows.append(al, "  {d}[Esc] close{/}");
@@ -1888,11 +1936,36 @@ pub const App = struct {
                 var rows: std.ArrayListUnmanaged([]const u8) = .empty;
                 for (emblems) |e| try rows.append(al, try std.fmt.allocPrint(al, "preset   {s}", .{e.name}));
                 for (self.logos) |l| try rows.append(al, try std.fmt.allocPrint(al, "picture  {s}", .{l}));
+                try rows.append(al, "editor   {a}draw your own{/} — a 3 × 8 text crest, cell by cell");
                 const n = rows.items.len;
                 if (self.modal_cursor >= n) self.modal_cursor = n - 1;
                 const r = self.modalRect(80, @intCast(@min(n + 4, 30)));
                 const inner = self.screen.pane(r, .{ .title = "EMBLEM · [Enter] use · [Esc] cancel", .double = true, .right_title = "pictures from ., logos/, docs/logos/" });
                 self.screen.lines(inner, rows.items, firstRow(self.modal_cursor, inner.h), self.modal_cursor);
+            },
+            .emblem_editor => {
+                var rows: std.ArrayListUnmanaged([]const u8) = .empty;
+                try rows.append(al, "");
+                for (0..3) |r| {
+                    var line: std.ArrayListUnmanaged(u8) = .empty;
+                    try line.appendSlice(al, "      ");
+                    for (0..8) |c| {
+                        const here = r == self.ed_y and c == self.ed_x;
+                        if (here) try line.appendSlice(al, "{s}");
+                        try line.append(al, self.ed_art[r][c]);
+                        if (here) try line.appendSlice(al, "{/}");
+                    }
+                    try line.appendSlice(al, "      ");
+                    for (0..8) |c| try line.append(al, self.ed_art[r][c]);
+                    try rows.append(al, line.items);
+                }
+                try rows.append(al, "");
+                try rows.append(al, "  type a character to paint the cell and step right · arrows move · Space blanks");
+                try rows.append(al, "  Backspace steps back and blanks · u undoes everything since the editor opened");
+                try rows.append(al, "  {d}[Enter] save as the outfit's crest · [Esc] cancel{/}");
+                const r = self.modalRect(78, @intCast(rows.items.len + 2));
+                const inner = self.screen.pane(r, .{ .title = "EMBLEM EDITOR · cells", .double = true, .right_title = "left: editing · right: as shown" });
+                self.screen.lines(inner, rows.items, 0, null);
             },
             .hull => |uid| {
                 const detail = try q.hull(al, &self.gs.?, uid);
@@ -3226,6 +3299,39 @@ pub const App = struct {
     fn handleModalKey(self: *App, key: Key) !void {
         switch (self.modal) {
             .none => {},
+            .emblem_editor => switch (key) {
+                .escape => self.modal = .none,
+                .left => self.ed_x -|= 1,
+                .right => self.ed_x = @min(7, self.ed_x + 1),
+                .up => self.ed_y -|= 1,
+                .down => self.ed_y = @min(2, self.ed_y + 1),
+                .backspace => {
+                    self.ed_x -|= 1;
+                    self.ed_art[self.ed_y][self.ed_x] = ' ';
+                },
+                .enter => {
+                    var bytes: std.ArrayListUnmanaged(u8) = .empty;
+                    try bytes.appendSlice(self.a(), art_magic);
+                    for (0..3) |r| {
+                        try bytes.appendSlice(self.a(), &self.ed_art[r]);
+                        if (r < 2) try bytes.append(self.a(), '\n');
+                    }
+                    self.modal = .none;
+                    try self.applyEmblem(bytes.items);
+                    self.say(.good, "emblem set to your own crest", .{});
+                },
+                .char => |ch| {
+                    if (ch == 'u') {
+                        self.ed_art = self.ed_undo;
+                        return;
+                    }
+                    if (ch >= 0x20 and ch < 0x7f) {
+                        self.ed_art[self.ed_y][self.ed_x] = @intCast(ch);
+                        self.ed_x = @min(7, self.ed_x + 1);
+                    }
+                },
+                else => {},
+            },
             .help, .hull, .record, .readiness, .summary => self.modal = .none,
             .raise_hulls => switch (key) {
                 .escape => {
@@ -3555,6 +3661,8 @@ pub const App = struct {
                     if (i < emblems.len) {
                         try self.applyEmblem(emblems[i].name);
                         self.say(.good, "emblem set to preset {s}", .{emblems[i].name});
+                    } else if (i == emblems.len + self.logos.len) {
+                        self.openEmblemEditor();
                     } else if (i - emblems.len < self.logos.len) {
                         const path = self.logos[i - emblems.len];
                         const bytes = emblem_mod.readFile(self.io, self.gpa, path) catch |err| {

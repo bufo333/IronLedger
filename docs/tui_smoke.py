@@ -215,6 +215,13 @@ p = plain()
 assert "EMBLEM ·" in p and "preset   Wolf's Head" in p, p[-2000:]
 send("j"); send("\r", 1.0)     # pick the second preset
 assert "emblem set to preset" in plain(), plain()[-2000:]
+send("e", 1.0)                 # 12.14: the cell editor is the last row of the picker
+for _ in range(12): send("j", 0.15)
+send("\r", 1.0)
+assert "EMBLEM EDITOR" in plain()[-30000:], plain()[-3000:]
+send("X"); send("Y", 0.5)      # paint two cells, then save
+send("\r", 1.0)
+assert "emblem set to your own crest" in plain()[-2000:], plain()[-2000:]
 send("8")                      # lab
 p = plain()
 assert "MOUNTS" in p and "RULES: legal fit" in p, p[-3000:]

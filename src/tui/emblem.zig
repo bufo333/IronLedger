@@ -1,13 +1,13 @@
 //! Emblem display (docs/tui.md "Emblems"): the outfit's crest as a real
 //! picture where the terminal speaks the kitty graphics protocol (kitty,
-//! Ghostty, WezTerm, Konsole), and as half-block colour cells everywhere
-//! else. Also the logos-directory listing for the wizard's import step.
+//! Ghostty, WezTerm, Konsole) or iTerm2's inline-image protocol (12.14),
+//! and as half-block colour cells everywhere else. Also the logos-directory listing for the wizard's import step.
 //! I/O lives here and in term.zig only. No MekHQ counterpart.
 
 const std = @import("std");
 const png = @import("png.zig");
 
-pub const Graphics = enum { none, kitty };
+pub const Graphics = enum { none, kitty, iterm2 };
 
 pub const Emblem = struct {
     /// The original file bytes (what the campaign stores and kitty receives).
@@ -50,6 +50,28 @@ pub fn detectTruecolor() bool {
         if (std.mem.indexOf(u8, t, "kitty") != null or std.mem.indexOf(u8, t, "ghostty") != null or std.mem.indexOf(u8, t, "direct") != null) return true;
     }
     return false;
+}
+
+/// iTerm2 (and terminals that borrow its OSC 1337 inline images): named by
+/// environment, since the protocol has no query.
+pub fn detectIterm2() bool {
+    if (env("LC_TERMINAL")) |t| if (std.ascii.indexOfIgnoreCase(t, "iterm") != null) return true;
+    if (env("TERM_PROGRAM")) |p| if (std.ascii.indexOfIgnoreCase(p, "iterm") != null) return true;
+    return false;
+}
+
+// --------------------------------------------------- iTerm2 inline images
+
+/// Place a PNG over a cell rectangle with OSC 1337 (12.14). iTerm2 keeps no
+/// image store, so the bytes travel with every placement; emblems are small.
+pub fn itermPlace(out: *std.Io.Writer, gpa: std.mem.Allocator, bytes: []const u8, x: u16, y: u16, cols: u16, rows: u16) !void {
+    const enc = std.base64.standard.Encoder;
+    const b64 = try gpa.alloc(u8, enc.calcSize(bytes.len));
+    defer gpa.free(b64);
+    _ = enc.encode(b64, bytes);
+    try out.print("\x1b[{d};{d}H\x1b]1337;File=inline=1;size={d};width={d};height={d};preserveAspectRatio=1;doNotMoveCursor=1:", .{ y + 1, x + 1, bytes.len, cols, rows });
+    try out.writeAll(b64);
+    try out.writeAll("\x07");
 }
 
 // ---------------------------------------------------------- kitty protocol
@@ -125,6 +147,17 @@ pub fn listPngs(io: std.Io, alloc: std.mem.Allocator, dir_path: []const u8) ![]c
 
 pub fn readFile(io: std.Io, alloc: std.mem.Allocator, path: []const u8) ![]u8 {
     return std.Io.Dir.cwd().readFileAlloc(io, path, alloc, .limited(32 * 1024 * 1024));
+}
+
+test "12.14: an iTerm2 placement is one OSC 1337 sequence sized in cells" {
+    var buf: [16 * 1024]u8 = undefined;
+    var w = std.Io.Writer.fixed(&buf);
+    const bytes = @embedFile("testdata/rgb4x3.png");
+    try itermPlace(&w, std.testing.allocator, bytes, 4, 2, 10, 5);
+    const written = w.buffered();
+    try std.testing.expect(std.mem.startsWith(u8, written, "\x1b[3;5H\x1b]1337;File=inline=1;size="));
+    try std.testing.expect(std.mem.indexOf(u8, written, "width=10;height=5;preserveAspectRatio=1") != null);
+    try std.testing.expect(std.mem.endsWith(u8, written, "\x07"));
 }
 
 test "kitty reply detection and transmit chunking" {
