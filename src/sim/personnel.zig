@@ -11,6 +11,21 @@ const chassis_mod = @import("../domain/chassis.zig");
 const GameState = @import("state.zig").GameState;
 const company_gen = @import("../gen/company_gen.zig");
 
+/// Morale across the whole outfit (12C.11): a contract's ending is felt
+/// by everyone on the payroll, not only the company that fought it.
+pub fn adjustMoraleAll(gs: *GameState, delta: i32) u32 {
+    var touched: u32 = 0;
+    var it = gs.people.iterator();
+    while (it.next()) |e| {
+        const p = e.value_ptr;
+        if (p.status != .active and p.status != .wounded) continue;
+        const d = if (delta < 0 and p.has("cool_under_fire")) @divTrunc(delta, 2) else delta;
+        p.morale = @intCast(std.math.clamp(@as(i32, p.morale) + d, 0, 100));
+        touched += 1;
+    }
+    return touched;
+}
+
 /// Payday (12C.3): everyone's stake brought up to date. Returns how many
 /// people gained shares.
 pub fn refreshShares(gs: *GameState) u32 {

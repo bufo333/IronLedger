@@ -111,6 +111,11 @@ pub fn complete(gs: *GameState, c: *contract_mod.Contract, objectives_broken: bo
     }
     // Shares (12C.3): the stakeholders take their cut of what the tour earned.
     _ = try @import("personnel.zig").payShares(gs, c.id, c.assigned_company);
+    // Morale (12C.11): a strong finish lifts the whole outfit.
+    if (c.victory_points >= 25) {
+        const n = @import("personnel.zig").adjustMoraleAll(gs, tuning.person.morale_contract_strong);
+        try gs.log(.rotation, .{ .company = c.assigned_company, .contract = c.id }, "[morale] a {s} tour — spirits lift across the outfit (+{d} morale, {d} people)", .{ c.grade(), tuning.person.morale_contract_strong, n });
+    }
     try gs.log(.contract, .{ .company = c.assigned_company, .contract = c.id }, "[{s}] contract COMPLETE — {s} ({s}, {d} VP, score {d}) — reputation {s} ({s}{d}); the employer pays in full{s}", .{
         @tagName(c.kind), c.grade(), if (objectives_broken) "objectives broken" else "closed out", c.victory_points, c.score, if (vp_bonus > 0) "soars" else if (gain > 0) "rises" else if (gain == 0) "unchanged" else "slips", if (gain >= 0) "+" else "", gain, if (objectives_broken) " plus the early-completion bonus" else "",
     });
@@ -137,6 +142,9 @@ pub fn breach(gs: *GameState, c: *contract_mod.Contract, reason: []const u8) !vo
     }
     c.status = .breached;
     c.breach_day = gs.clock.day_index;
+    // Morale (12C.11): a breach shames everyone.
+    _ = @import("personnel.zig").adjustMoraleAll(gs, tuning.person.morale_contract_breached);
+    try gs.log(.rotation, .{ .company = c.assigned_company, .contract = c.id }, "[morale] the breach is felt across the outfit ({d} morale)", .{tuning.person.morale_contract_breached});
     gs.reputation -= 2;
     try gs.faction_cooling.append(gs.allocator(), .{ .faction = c.employer_key, .until_day = gs.clock.day_index + cooling_days });
     const standing_now = try gs.adjustStanding(c.employer_key, -tuning.contract.standing_breach_loss);

@@ -158,6 +158,13 @@ pub const Tuning = struct {
         /// within `award_loyalty_days`.
         founder_morale_floor: u8,
         veteran_tours: u32,
+        /// Morale from the field (12C.11): outfit-wide swings when a
+        /// contract closes strong (outstanding/strong grade) or is breached
+        /// (a performance failure at term is a breach); and the extra point
+        /// a win on a weighted scenario earns the company.
+        morale_contract_strong: i32,
+        morale_contract_breached: i32,
+        morale_objective_bonus: i32,
         raise_loyalty_days: u32,
         award_loyalty_days: u32,
     },

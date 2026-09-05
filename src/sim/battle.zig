@@ -531,6 +531,8 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
         .rout => -10,
     };
     if (morale_delta < 0 and player.mods.has_mess_lance) morale_delta += 2; // hot food after a bad day
+    // A win on a fight that mattered (12C.11): breakthroughs, base defences and extractions carried.
+    if (score_delta > 0 and scenario.score_mult > 1) morale_delta += tuning.person.morale_objective_bonus;
     applyCompanyAftermath(gs, c.assigned_company, morale_delta, 4 + env.fatigue());
     for (engaged) |uid| {
         const u = gs.unit(uid) orelse continue;

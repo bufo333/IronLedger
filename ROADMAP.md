@@ -839,9 +839,14 @@ item: tests green, both smokes, ROADMAP tick, one commit.
   and dust ground the fighters; storms and dust take −1 off the roll;
   harsh ground and weather each cost a fatigue point. The AAR header
   reads "… — ambush on city streets, night action: …".
-- ⬜ 12C.11 **Morale from the field**: a won battle +2 company morale,
-  a rout −5, a scenario objective met +1; a contract completed at grade
-  A/B +5 outfit-wide, breach −10. Ties into 12C.1 bands and turnover.
+- ✅ 12C.11 **Morale from the field**: battle morale stays per outcome
+  (+5/+3/−1/−5/−10, a mess lance softens the bad days); a win on a
+  weighted scenario (breakthrough, base defence, extraction) adds
+  `morale_objective_bonus` (+1); a contract closed outstanding or strong
+  lifts the whole outfit by `morale_contract_strong` (+5); a breach —
+  including a performance failure at term — costs everyone
+  `morale_contract_breached` (−10), halved for Cool Under Fire. Log lines
+  under [morale].
 
 ### Block D — Maintenance & repair depth (the section left out of 12B)
 
