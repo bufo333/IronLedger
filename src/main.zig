@@ -1043,6 +1043,9 @@ fn runRepl(gs: *game.state.GameState, io: std.Io, gpa: std.mem.Allocator, store_
                     n = v;
                 } else |_| if (std.meta.stringToEnum(game.state.LogCategory, tok)) |cat| {
                     filter = .{ .category = cat };
+                } else if (std.mem.startsWith(u8, tok, "contract:")) {
+                    // Every AAR and event of one contract, past or present (12.23).
+                    filter = .{ .contract = @enumFromInt(std.fmt.parseInt(u32, tok[9..], 10) catch 0) };
                 } else if (parseTreasury(tok)) |t| {
                     filter = switch (t) {
                         .company => |id| .{ .company = id },
@@ -1050,7 +1053,7 @@ fn runRepl(gs: *game.state.GameState, io: std.Io, gpa: std.mem.Allocator, store_
                         .outfit => .all,
                     };
                 } else {
-                    std.debug.print("usage: log [n] [battle|decision|delivery|...|co:<id>|hq:<id>]\n", .{});
+                    std.debug.print("usage: log [n] [battle|decision|delivery|...|co:<id>|hq:<id>|contract:<id>]\n", .{});
                 }
             }
             printLog(gs, n, filter);

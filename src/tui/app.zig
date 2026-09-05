@@ -1376,7 +1376,7 @@ pub const App = struct {
 
     const support_lines = [_]struct { key: []const u8, kind: game.force.SupportLanceKind, note: []const u8 }{
         .{ .key = "CGT-3", .kind = .transport, .note = "20t of field stores each — the trucks are the company's supply capacity" },
-        .{ .key = "SVT-1", .kind = .salvage, .note = "5t each and 300 BV of salvage hauled per won battle" },
+        .{ .key = "SVT-1", .kind = .salvage, .note = "5t each and 600 BV of wrecks and parts hauled per won battle, shipped to the home depot" },
         .{ .key = "MASH-27", .kind = .mash, .note = "wounded heal in the field; four medics ride with the lance" },
         .{ .key = "SEC-PLT", .kind = .security, .note = "guards the laager against raids (infantry, no hull crew)" },
     };

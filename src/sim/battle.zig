@@ -15,6 +15,7 @@ const chassis_mod = @import("../domain/chassis.zig");
 const force_mod = @import("../domain/force.zig");
 const part_mod = @import("../domain/part.zig");
 const medical = @import("medical.zig");
+const person_mod = @import("../domain/person.zig");
 const GameState = @import("state.zig").GameState;
 
 /// Days between engagements: ~2/month with variance.
@@ -306,22 +307,33 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     var destroyed: u8 = 0;
     var wounded: u8 = 0;
     var kia: u8 = 0;
+    // The detailed AAR (Stage 12.23): every hit on record — which hull,
+    // what it lost, what happened to the crew.
+    const Hit = struct { unit: types.UnitId, armor_before: u8, armor_after: u8, slot: ?[]const u8, slot_part: []const u8, slot_result: []const u8, destroyed: bool, crew: []const u8 };
+    var hit_log: std.ArrayListUnmanaged(Hit) = .empty;
+    defer hit_log.deinit(gs.allocator());
     for (0..hits) |_| {
         const uid = engaged[gs.rng.random(.battle).uintLessThan(usize, engaged.len)];
         const u = gs.unit(uid) orelse continue;
         if (u.status == .destroyed) continue;
 
         const severity = gs.rng.roll2d6(.battle);
+        var rec: Hit = .{ .unit = uid, .armor_before = u.armor_pct, .armor_after = 0, .slot = null, .slot_part = "", .slot_result = "", .destroyed = false, .crew = "" };
         u.armor_pct -|= @intCast(severity * 4);
+        rec.armor_after = u.armor_pct;
         damage_value += @as(types.CBills, severity) * 20_000;
 
         if (severity >= 8 and u.slots.items.len > 0) {
             const slot = &u.slots.items[gs.rng.random(.battle).uintLessThan(usize, u.slots.items.len)];
             slot.condition = if (slot.condition == .ok) .damaged else .destroyed;
+            rec.slot = slot.slot_key;
+            rec.slot_part = slot.part_key;
+            rec.slot_result = if (slot.condition == .damaged) "damaged" else "destroyed";
         }
         if (severity == 12 or (u.armor_pct == 0 and severity >= 10)) {
             u.status = .destroyed;
             destroyed += 1;
+            rec.destroyed = true;
             damage_value += @divTrunc(u.purchase_price, 2);
         }
 
@@ -337,18 +349,22 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
                 if (severity == 12 and !player.mods.has_mash_lance) {
                     p.status = .kia;
                     kia += 1;
+                    rec.crew = try std.fmt.allocPrint(gs.allocator(), "{s} {s} KIA", .{ p.first_name, p.last_name });
                 } else if (severity >= 11) {
                     try medical.inflict(gs, u.pilot, .combat, wound_severity, "battle");
                     wounded += 1;
+                    rec.crew = try woundText(gs, p);
                 } else if (severity >= 8) {
                     const need: u8 = if (player.mods.has_mash_lance) 9 else 8;
                     if (gs.rng.roll2d6(.battle) >= need) {
                         try medical.inflict(gs, u.pilot, .combat, wound_severity, "battle");
                         wounded += 1;
+                        rec.crew = try woundText(gs, p);
                     }
                 }
             }
         }
+        try hit_log.append(gs.allocator(), rec);
     }
 
     // Spoils: salvage rights over the enemy's wrecks — but only if you held
@@ -365,33 +381,13 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
         if (u.status != .destroyed and std.mem.eql(u8, u.chassis_key, "SVT-1") and gs.companyOf(u.force) == c.assigned_company) trucks += 1;
     }
     const haulable_bv = @min(enemy_destroyed_bv, if (trucks > 0) trucks * tuning.battle.salvage_bv_per_truck else tuning.battle.salvage_bv_by_hand);
-    var salvage: types.CBills = if (held_field)
-        @divTrunc(haulable_bv * 2_000 * c.terms.salvage_pct, 100)
-    else
-        0;
-    if (player.mods.has_salvage_lance) salvage = types.applyBp(salvage, 12_500); // crews strip fast
-    // Field income lands in the company's local funds (Stage 9A): sold
-    // salvage and ransoms are cash-in-hand out there, not a wire home.
-    if (salvage > 0) {
-        try gs.postTreasury(.{ .company = c.assigned_company }, .{
-            .day = gs.clock.day_index,
-            .amount = salvage,
-            .category = .salvage,
-            .company = c.assigned_company,
-            .contract = c.id,
-            .note = "battlefield salvage",
-        });
-        // Stripped limbs ride home in the trucks — if there's room to spare
-        // after the reloads (crews won't bury the ammo under wrecks).
-        const stripped: u32 = @intCast(@min(2, @divTrunc(enemy_destroyed_bv, 500)));
-        // Structural salvage is crated straight home: it is depot stock, and
-        // dead weight on the trucks out here (Stage 12).
-        const salvage_keys = [_][]const u8{ "comp_arm", "comp_leg" };
-        for (0..stripped) |i| {
-            const key = salvage_keys[i % salvage_keys.len];
-            try gs.sendHome(c.assigned_company, key, 1);
-        }
-    }
+    // Salvage is things, not money (Stage 12.23): your share of what the
+    // crews haul off a held field becomes wrecks and parts crated to the
+    // home HQ depot — to store, strip, or rebuild into a working hull.
+    var salvage_bv: i64 = if (held_field) @divTrunc(haulable_bv * c.terms.salvage_pct, 100) else 0;
+    if (player.mods.has_salvage_lance) salvage_bv = types.applyBp(salvage_bv, tuning.battle.salvage_lance_bonus_bp); // crews strip fast
+    const spoils = try claimSalvage(gs, c, salvage_bv);
+    const salvage = salvage_bv; // for the AAR
 
     // Expend the reloads this fight consumed (Stage 9B), itemized below.
     var ammo_it = player.ammo_reserved.iterator();
@@ -456,9 +452,27 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
         player.power,            enemy_power,            player.mods.recon_quality,
         player.mods.avg_fatigue, player.mods.avg_morale,
     });
-    try gs.log(.battle, ctx, "[AAR]   losses: {d} hit / {d} destroyed, {d} wounded, {d} KIA | salvage {d} | comp {d} | score {d}", .{
+    try gs.log(.battle, ctx, "[AAR]   losses: {d} hit / {d} destroyed, {d} wounded, {d} KIA | salvage {d} BV claimed | comp {d} | score {d}", .{
         hits, destroyed, wounded, kia, salvage, comp, c.score,
     });
+    // Every hit on record.
+    for (hit_log.items) |h| {
+        const u = gs.unit(h.unit) orelse continue;
+        const ch = chassis_mod.find(u.chassis_key);
+        try gs.log(.battle, ctx, "[AAR]   #{d} {s} {s}: {s}armor {d}%→{d}%{s}{s}{s}{s}", .{
+            @intFromEnum(h.unit),
+            u.chassis_key,
+            if (ch) |d| d.name else "",
+            if (h.destroyed) "DESTROYED · " else "",
+            h.armor_before,
+            h.armor_after,
+            if (h.slot) |sk| try std.fmt.allocPrint(gs.allocator(), " · {s} ({s}) {s}", .{ sk, h.slot_part, h.slot_result }) else "",
+            if (h.crew.len > 0) " · " else "",
+            h.crew,
+            if (!h.destroyed and h.slot == null and h.crew.len == 0) " · armor only" else "",
+        });
+    }
+    if (spoils.len > 0) try gs.log(.battle, ctx, "[AAR]   salvage: {s}", .{spoils}) else if (held_field) try gs.log(.battle, ctx, "[AAR]   salvage: field held, nothing worth hauling ({d} BV destroyed, {d} haulable, {d}% rights)", .{ enemy_destroyed_bv, haulable_bv, c.terms.salvage_pct }) else try gs.log(.battle, ctx, "[AAR]   salvage: none — the field was not held", .{});
     var expended_ac5: u32 = 0;
     var expended_ac20: u32 = 0;
     var expended_lrm: u32 = 0;
@@ -474,13 +488,95 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
         if (std.mem.eql(u8, k, "ammo_srm")) expended_srm = v;
         if (std.mem.eql(u8, k, "ammo_mg")) expended_mg = v;
     }
-    try gs.log(.battle, ctx, "[AAR]   expended: {d}t AC/5, {d}t AC/20, {d}t LRM, {d}t SRM, {d}t MG | {d} mounts silenced (dry)", .{
-        expended_ac5, expended_ac20, expended_lrm, expended_srm, expended_mg, player.silenced_mounts,
+    try gs.log(.battle, ctx, "[AAR]   expended: {d}t AC/5, {d}t AC/20, {d}t LRM, {d}t SRM, {d}t MG | {d} mounts silenced (dry) | left in the trucks: {d}t AC/5, {d}t AC/20, {d}t LRM, {d}t SRM, {d}t MG, {d}t armor", .{
+        expended_ac5,                                 expended_ac20,                                 expended_lrm,                                 expended_srm,                                 expended_mg,                                 player.silenced_mounts,
+        gs.stockCount(player.site, "ammo_ac5"),      gs.stockCount(player.site, "ammo_ac20"),      gs.stockCount(player.site, "ammo_lrm"),      gs.stockCount(player.site, "ammo_srm"),      gs.stockCount(player.site, "ammo_mg"),      gs.stockCount(player.site, "armor"),
     });
 
     // Objectives (Stage 9E): the pool shrinks, VP accrue, and a broken pool
     // completes the contract.
     try @import("contract_control.zig").recordBattle(gs, c, enemy_destroyed_bv, score_delta);
+}
+
+/// "Lori Kalmar wounded (serious torso)" from the injury just inflicted.
+fn woundText(gs: *GameState, p: *const person_mod.Person) ![]const u8 {
+    if (p.injuries.items.len == 0) return try std.fmt.allocPrint(gs.allocator(), "{s} {s} wounded", .{ p.first_name, p.last_name });
+    const inj = p.injuries.items[p.injuries.items.len - 1];
+    return try std.fmt.allocPrint(gs.allocator(), "{s} {s} wounded ({s} {s}{s})", .{ p.first_name, p.last_name, medical.severityLabel(inj.severity), @tagName(inj.location), if (inj.permanent) ", permanent" else "" });
+}
+
+/// Turn a salvage claim in BV into things (Stage 12.23): whole wrecks
+/// first — an enemy hull rolled off the RAT that fits the claim, created
+/// as a wreck and shipped to the home HQ pool with the map transit — then
+/// parts: structural components, weapons and armor tons, crated home.
+/// Returns the itemized text for the AAR.
+fn claimSalvage(gs: *GameState, c: *contract_mod.Contract, claim_bv: i64) ![]const u8 {
+    if (claim_bv <= 0) return "";
+    var text: std.ArrayListUnmanaged(u8) = .empty;
+    var remaining = claim_bv;
+    const company_gen = @import("../gen/company_gen.zig");
+    const market = @import("../econ/market.zig");
+    const planet_mod = @import("../domain/planet.zig");
+    const logistics = @import("../econ/logistics.zig");
+    const home = gs.hqs.getPtr(gs.homeHqFor(c.assigned_company));
+    const from = planet_mod.find(c.planet_key);
+    const to = if (home) |h| planet_mod.find(h.planet_key) else null;
+    const days: u32 = if (from != null and to != null and from.? != to.?) logistics.transitDays(planet_mod.jumpsBetween(from.?, to.?)) else 3;
+
+    // Wrecks: up to two per battle, each a RAT roll that must fit the claim.
+    var wrecks: u32 = 0;
+    var tries: u8 = 0;
+    while (wrecks < 2 and tries < 4) : (tries += 1) {
+        var buf: [32]*const chassis_mod.Chassis = undefined;
+        const pool = chassis_mod.ofWeightClass(company_gen.rollWeightClass(&gs.rng), &buf);
+        if (pool.len == 0) continue;
+        const design = pool[gs.rng.random(.battle).uintLessThan(usize, pool.len)];
+        if (design.bv > remaining) continue;
+        remaining -= design.bv;
+        const uid = try gs.addUnit(design.key);
+        const u = gs.unit(uid).?;
+        u.purchase_price = 0; // salvage owes nothing
+        // A wreck: shot up, some guns gone, a limb or torso missing.
+        const cond: market.HullCondition = .{
+            .armor_pct = @intCast(@as(u32, gs.rng.roll2d6(.battle)) * 3),
+            .quality = if (gs.rng.random(.battle).boolean()) .c else .d,
+            .damaged_slots = 1,
+            .destroyed_slots = @intCast(gs.rng.random(.battle).intRangeAtMost(u8, 1, 3)),
+            .missing_components = @intCast(gs.rng.random(.battle).intRangeAtMost(u8, 1, 2)),
+        };
+        gs.applyHullCondition(uid, cond);
+        u.status = .in_transit;
+        try gs.unit_transfers.append(gs.allocator(), .{ .unit = uid, .to_company = .none, .eta_day = gs.clock.day_index + days });
+        wrecks += 1;
+        try text.appendSlice(gs.allocator(), try std.fmt.allocPrint(gs.allocator(), "wreck #{d} {s} {s} (armor {d}%, {d} destroyed, {d} missing) → home depot in {d} days; ", .{
+            @intFromEnum(uid), design.key, design.name, cond.armor_pct, cond.destroyed_slots, cond.missing_components, days,
+        }));
+    }
+    // Parts: components, then weapons, then armor, at BV prices.
+    const t = tuning.battle;
+    var components: u32 = 0;
+    const comp_keys = [_][]const u8{ "comp_arm", "comp_leg", "comp_torso" };
+    while (remaining >= t.salvage_bv_per_component and components < 3) : (components += 1) {
+        remaining -= t.salvage_bv_per_component;
+        try gs.sendHome(c.assigned_company, comp_keys[components % comp_keys.len], 1);
+    }
+    var weapons: u32 = 0;
+    const weapon_keys = [_][]const u8{ "mlas", "srm4", "ac5", "lrm5", "llas" };
+    while (remaining >= t.salvage_bv_per_weapon and weapons < 4) : (weapons += 1) {
+        remaining -= t.salvage_bv_per_weapon;
+        try gs.sendHome(c.assigned_company, weapon_keys[gs.rng.random(.battle).uintLessThan(usize, weapon_keys.len)], 1);
+    }
+    var armor: u32 = 0;
+    while (remaining >= t.salvage_bv_per_armor_ton and armor < 10) : (armor += 1) {
+        remaining -= t.salvage_bv_per_armor_ton;
+    }
+    if (armor > 0) try gs.sendHome(c.assigned_company, "armor", armor);
+    if (components + weapons + armor > 0) {
+        try text.appendSlice(gs.allocator(), try std.fmt.allocPrint(gs.allocator(), "crated home: {d} structural component{s}, {d} weapon{s}, {d}t armor", .{
+            components, if (components == 1) "" else "s", weapons, if (weapons == 1) "" else "s", armor,
+        }));
+    }
+    return text.items;
 }
 
 fn applyCompanyAftermath(gs: *GameState, company: types.ForceId, morale_delta: i32, fatigue_add: u8) void {
@@ -537,11 +633,21 @@ test "battles resolve with consequences and stronger forces win more" {
     var pit = gs.people.iterator();
     while (pit.next()) |entry| xp_total += entry.value_ptr.xp;
     try std.testing.expect(xp_total > 0);
-    try std.testing.expect(gs.event_log.items.len >= 24); // 2 lines per AAR
+    try std.testing.expect(gs.event_log.items.len >= 36); // 3+ lines per AAR
 
     // And the ledger saw salvage income at 30% rights.
     const s = @import("../econ/finance.zig").summarize(&gs.ledger, 0, gs.clock.day_index + 1, .all);
-    try std.testing.expect(s.category(.salvage) > 0);
+    // Salvage is things now (12.23): wrecks in transit to the pool and parts crated home, no cash.
+    try std.testing.expectEqual(@as(i64, 0), s.category(.salvage));
+    var wrecks: u32 = 0;
+    for (gs.unit_transfers.items) |t| if (t.to_company == .none) {
+        wrecks += 1;
+    };
+    var crated: u32 = 0;
+    for (gs.part_orders.items) |o| if (o.dest == .hq) {
+        crated += o.quantity;
+    };
+    try std.testing.expect(wrecks + crated > 0);
 }
 
 test "hard hits wound pilots: a season of fighting sends someone to the medbay" {
@@ -661,4 +767,47 @@ test "12.15: air cover is a fighter that can fly, not an empty wing" {
     const pilot = try gs.hirePerson("Ace", "Ito", .aero_pilot);
     try gs.assignSlot(fighter, .pilot, pilot);
     try std.testing.expect(companyMods(&gs, c).has_air_cover);
+}
+
+test "12.23: a salvage claim becomes a wreck in transit to the depot pool and parts crated home; the wreck lands" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1223 });
+    defer gs.deinit();
+    _ = try gs.createCommander("T", .LC, .line_officer);
+    const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
+        .id = @enumFromInt(1),
+        .kind = .objective_raid,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 3, .base_pay_month = 400_000, .salvage_pct = 50 },
+        .status = .active,
+        .assigned_company = co,
+        .monthly_net = 300_000,
+    });
+    const c = gs.contracts.getPtr(@enumFromInt(1)).?;
+    const units_before = gs.units.count();
+    const funds_before = gs.force(co).?.local_funds;
+    const text = try claimSalvage(&gs, c, 2_000);
+    try std.testing.expect(text.len > 0);
+    try std.testing.expect(gs.units.count() > units_before); // at least one wreck
+    try std.testing.expectEqual(funds_before, gs.force(co).?.local_funds); // no cash
+    var wreck: ?types.UnitId = null;
+    for (gs.unit_transfers.items) |t| if (t.to_company == .none) {
+        wreck = t.unit;
+    };
+    try std.testing.expect(wreck != null);
+    const w = gs.unit(wreck.?).?;
+    try std.testing.expectEqual(@import("../domain/unit.zig").UnitStatus.in_transit, w.status);
+    try std.testing.expectEqual(@as(types.CBills, 0), w.purchase_price);
+    try std.testing.expect(w.needsDepot()); // missing components: depot work
+    // Transit runs out: the wreck is in the pool, flagged for the depot.
+    var eta: u32 = 0;
+    for (gs.unit_transfers.items) |t| if (t.unit == wreck.?) {
+        eta = t.eta_day;
+    };
+    gs.clock.day_index = eta;
+    try @import("tick.zig").runTravel(&gs);
+    try std.testing.expectEqual(types.ForceId.none, gs.unit(wreck.?).?.force);
+    try std.testing.expectEqual(@import("../domain/unit.zig").UnitStatus.damaged, gs.unit(wreck.?).?.status);
 }

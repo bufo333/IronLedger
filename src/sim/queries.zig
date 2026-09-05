@@ -474,11 +474,12 @@ pub fn contracts(alloc: Alloc, gs: *GameState) !Contracts {
                 const f = fe.value_ptr;
                 if (f.echelon == .support_lance and f.support_kind == .salvage and f.units.items.len > 0 and gs.companyOf(f.id) == c.assigned_company) salvage_lance = true;
             }
-            const haul_bv: i64 = if (trucks > 0) trucks * 300 else 150;
-            var per_battle: types.CBills = @divTrunc(haul_bv * 2_000 * c.terms.salvage_pct, 100);
-            if (salvage_lance) per_battle = types.applyBp(per_battle, 12_500);
-            try lines.append(alloc, try std.fmt.allocPrint(alloc, "    salvage     {d} SVT-1 truck{s} haul up to {d} BV per won battle → up to {s} at {d}%{s}", .{
-                trucks, if (trucks == 1) "" else "s", haul_bv, try money(alloc, per_battle), c.terms.salvage_pct,
+            const tb = @import("../domain/tuning.zig").t.battle;
+            const haul_bv: i64 = if (trucks > 0) trucks * tb.salvage_bv_per_truck else tb.salvage_bv_by_hand;
+            var claim: i64 = @divTrunc(haul_bv * c.terms.salvage_pct, 100);
+            if (salvage_lance) claim = types.applyBp(claim, tb.salvage_lance_bonus_bp);
+            try lines.append(alloc, try std.fmt.allocPrint(alloc, "    salvage     {d} SVT-1 truck{s} haul up to {d} BV per won battle → your {d}% is ≈{d} BV of wrecks and parts shipped to the home depot{s}", .{
+                trucks, if (trucks == 1) "" else "s", haul_bv, c.terms.salvage_pct, claim,
                 if (salvage_lance) " (+25% crewed salvage lance)" else " (no salvage lance: −25%)",
             }));
         }

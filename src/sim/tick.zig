@@ -177,7 +177,7 @@ fn runTrainingLances(gs: *GameState) void {
 
 /// travel phase: part deliveries land, fund couriers arrive, cold-storage
 /// reactivations finish. Nothing material happens silently.
-fn runTravel(gs: *GameState) !void {
+pub fn runTravel(gs: *GameState) !void {
     for (gs.part_orders.items) |*order| {
         if (order.status != .in_transit) continue;
         if (order.eta_day != null and gs.clock.day_index >= order.eta_day.?) {
@@ -203,7 +203,11 @@ fn runTravel(gs: *GameState) !void {
         if (gs.clock.day_index >= t.eta_day) {
             try gs.placeUnitInCompany(t.unit, t.to_company);
             const name = if (gs.unit(t.unit)) |u| u.chassis_key else "?";
-            try gs.log(.delivery, .{ .company = t.to_company }, "[transfer] {s} arrives and joins the company", .{name});
+            if (t.to_company == .none) {
+                // Salvage (12.23): the wreck lands in the pool at the HQ, status by its damage.
+                if (gs.unit(t.unit)) |u| u.status = if (u.needsDepot()) .damaged else .ready;
+                try gs.log(.delivery, .{ .hq = if (gs.hqs.count() > 0) gs.hqs.keys()[0] else .none }, "[salvage] wreck {s} #{d} lands in the HQ pool — Forces: place it in a company and [D] sends it to the depot, or sell it", .{ name, @intFromEnum(t.unit) });
+            } else try gs.log(.delivery, .{ .company = t.to_company }, "[transfer] {s} arrives and joins the company", .{name});
             _ = gs.unit_transfers.swapRemove(ti);
         } else ti += 1;
     }

@@ -118,6 +118,13 @@ pub const Tuning = struct {
         defense_bonus_bp: types.Bp,
         salvage_bv_per_truck: i64,
         salvage_bv_by_hand: i64,
+        /// Physical salvage (Stage 12.23): a crewed salvage lance strips
+        /// this much more; what is not a whole hull becomes parts at these
+        /// BV prices (armor per ton, a weapon, a structural component).
+        salvage_lance_bonus_bp: types.Bp,
+        salvage_bv_per_armor_ton: i64,
+        salvage_bv_per_weapon: i64,
+        salvage_bv_per_component: i64,
     },
     field_supply: struct {
         ammo_share_pct: u32,

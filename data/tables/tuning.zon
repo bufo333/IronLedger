@@ -104,8 +104,12 @@
         .mounts_per_ammo_ton = 6,
         .silence_penalty_pct = 60,
         .defense_bonus_bp = 11_000,
-        .salvage_bv_per_truck = 300,
-        .salvage_bv_by_hand = 150,
+        .salvage_bv_per_truck = 600, // a light wreck is within reach of a four-truck lance at 25% rights
+        .salvage_bv_by_hand = 200,
+        .salvage_lance_bonus_bp = 12_500,
+        .salvage_bv_per_armor_ton = 60,
+        .salvage_bv_per_weapon = 150,
+        .salvage_bv_per_component = 250,
     },
     .field_supply = .{
         .ammo_share_pct = 40,
