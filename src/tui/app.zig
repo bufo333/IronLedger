@@ -2609,6 +2609,7 @@ pub const App = struct {
                         if (r.unit != .none) {
                             var buf: [64]u8 = undefined;
                             self.openCommand(std.fmt.bufPrint(&buf, "assign {d} ", .{@intFromEnum(r.unit)}) catch "assign ");
+                            self.say(.dim, "type the person id (their role picks pilot seat or tech slot), or pilot|tech <id> — ids are on the People screen", .{});
                         }
                     },
                     'u' => if (row) |r| {

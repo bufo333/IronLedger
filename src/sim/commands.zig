@@ -274,6 +274,8 @@ pub const Error = error{
     NoJumpship,
     /// Fighters fly in air lances, meks walk in line lances.
     WrongHullKind,
+    /// A pool hull sits at the outfit's seat; the person's company is not home there.
+    PersonAway,
 } || std.mem.Allocator.Error;
 
 pub const Result = struct {
@@ -934,6 +936,7 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
                 error.WrongRole => return Error.WrongRole,
                 error.Unavailable => return Error.Unavailable,
                 error.NoTechSlot => return Error.NoTechSlot,
+                error.PersonAway => return Error.PersonAway,
             };
             return .{};
         },
@@ -2379,6 +2382,38 @@ test "9A: the structured log filters by entity and category" {
     try std.testing.expectEqual(@as(usize, 2), battles);
     try std.testing.expectEqual(@as(usize, 2), mine);
     try std.testing.expectEqual(@as(usize, 1), hq_lines);
+}
+
+test "12.26: assign without a slot word picks the seat by role, on pool hulls too" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1226 });
+    defer gs.deinit();
+    _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    const hull = try gs.addUnit("LCT-1V"); // unassigned pool
+    const tech = try gs.hirePerson("Ana", "Ruiz", .tech_mek);
+    const pilot = try gs.hirePerson("Bo", "Lund", .mekwarrior);
+    _ = try execute(&gs, .{ .assign = .{ .unit = hull, .slot = .any, .person = tech } });
+    _ = try execute(&gs, .{ .assign = .{ .unit = hull, .slot = .any, .person = pilot } });
+    try std.testing.expectEqual(tech, gs.unit(hull).?.tech);
+    try std.testing.expectEqual(pilot, gs.unit(hull).?.pilot);
+    const doc = try gs.hirePerson("Cy", "Oda", .doctor);
+    try std.testing.expectError(Error.WrongRole, execute(&gs, .{ .assign = .{ .unit = hull, .slot = .any, .person = doc } }));
+    // The seat picker lists pool hulls.
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const tech2 = try gs.hirePerson("Di", "Vos", .tech_mek);
+    _ = try execute(&gs, .{ .unassign = .{ .unit = hull, .slot = .any } });
+    const seats = try @import("queries.zig").openSeats(arena.allocator(), &gs, tech2);
+    try std.testing.expect(seats.len >= 1);
+    // A tech whose company is away cannot reach the pool (12.26).
+    const co = (try execute(&gs, .{ .new_company = "Alpha" })).created_force;
+    _ = try execute(&gs, .{ .accept_contract = .{ .offer_index = 0, .company = co } });
+    var away: types.PersonId = .none;
+    var pit = gs.people.iterator();
+    while (pit.next()) |e| if (e.value_ptr.role == .tech_mek and gs.companyOf(e.value_ptr.assigned_force) == co and away == .none) {
+        away = e.value_ptr.id;
+    };
+    try std.testing.expectError(Error.PersonAway, execute(&gs, .{ .assign = .{ .unit = hull, .slot = .any, .person = away } }));
+    try std.testing.expectEqual(@as(usize, 0), (try @import("queries.zig").openSeats(arena.allocator(), &gs, away)).len);
 }
 
 test "9C.2: assignments — roles enforced, one seat per pilot, hall hiring" {

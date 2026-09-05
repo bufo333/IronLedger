@@ -2192,9 +2192,10 @@ pub fn openSeats(alloc: Alloc, gs: *GameState, id: types.PersonId) ![]Seat {
     var it = gs.units.iterator();
     while (it.next()) |e| {
         const u = e.value_ptr;
-        if (u.status == .destroyed or u.status == .mothballed or u.force == .none) continue;
+        if (u.status == .destroyed or u.status == .mothballed) continue;
+        if (u.force == .none and !gs.canReachPool(p)) continue; // the pool is at the seat; their company is away
         const ch = chassis_mod.find(u.chassis_key);
-        const label = try std.fmt.allocPrint(alloc, "#{d: <3} {s: <8} {s: <16} {s}", .{ @intFromEnum(u.id), u.chassis_key, if (ch) |c| c.name else "?", clip(forceName(gs, gs.companyOf(u.force)), 20) });
+        const label = try std.fmt.allocPrint(alloc, "#{d: <3} {s: <8} {s: <16} {s}", .{ @intFromEnum(u.id), u.chassis_key, if (ch) |c| c.name else "?", if (u.force == .none) "unassigned pool" else clip(forceName(gs, gs.companyOf(u.force)), 20) });
         if (unit_mod.crewRoleFor(u.kind) == p.role and gs.person(u.pilot) == null) {
             try out.append(alloc, .{ .unit = u.id, .slot = .pilot, .text = try std.fmt.allocPrint(alloc, "{s}  {{a}}pilot seat{{/}}", .{label}) });
         }

@@ -159,7 +159,9 @@ pub const Candidate = struct {
     expires_day: u32,
 };
 
-pub const Slot = enum { pilot, tech };
+/// `any` (12.26): whichever seat the person's role fits — pilot roles
+/// take the crew seat, tech roles the tech slot.
+pub const Slot = enum { pilot, tech, any };
 
 pub const UnitTransfer = struct {
     unit: types.UnitId,
@@ -1199,7 +1201,18 @@ pub const GameState = struct {
 
     // --------------------------------------- assignments (Stage 9C.2)
 
-    pub const AssignSlotError = error{ UnknownUnit, UnknownPerson, WrongRole, Unavailable, NoTechSlot };
+    /// Can this person work a hull in the unassigned pool (12.26)? The
+    /// pool sits at the outfit's seat; their company must be home there
+    /// (or they belong to no company at all).
+    pub fn canReachPool(self: *GameState, p: *const person_mod.Person) bool {
+        const company = self.companyOf(p.assigned_force);
+        if (company == .none) return true;
+        if (!self.isCompanyHome(company)) return false;
+        const seat: types.HqId = if (self.hqs.count() > 0) self.hqs.keys()[0] else .none;
+        return self.homeHqFor(company) == seat;
+    }
+
+    pub const AssignSlotError = error{ UnknownUnit, UnknownPerson, WrongRole, Unavailable, NoTechSlot, PersonAway };
 
     /// Put a person in a hull's pilot or tech slot. A pilot leaves any
     /// previous hull; a tech may cover several hulls (hours permitting —
@@ -1208,7 +1221,10 @@ pub const GameState = struct {
         const u = self.unit(unit_id) orelse return error.UnknownUnit;
         const p = self.person(person_id) orelse return error.UnknownPerson;
         if (!p.isAvailable(self.clock.day_index)) return error.Unavailable;
-        switch (slot) {
+        if (u.force == .none and !self.canReachPool(p)) return error.PersonAway;
+        const resolved: Slot = if (slot != .any) slot else if (p.role == unit_mod.crewRoleFor(u.kind)) .pilot else if (unit_mod.techRoleFor(u.kind) == p.role) .tech else return error.WrongRole;
+        switch (resolved) {
+            .any => unreachable,
             .pilot => {
                 if (p.role != unit_mod.crewRoleFor(u.kind)) return error.WrongRole;
                 // One seat per pilot.
@@ -1233,6 +1249,10 @@ pub const GameState = struct {
         switch (slot) {
             .pilot => u.pilot = .none,
             .tech => u.tech = .none,
+            .any => {
+                u.pilot = .none;
+                u.tech = .none;
+            },
         }
     }
 

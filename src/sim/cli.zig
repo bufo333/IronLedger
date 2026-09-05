@@ -162,10 +162,17 @@ pub fn parseCommand(verb: []const u8, tokens: *std.mem.TokenIterator(u8, .scalar
     }
     if (eq(u8, verb, "buy")) return .{ .buy_listing = try num(usize, tokens.next()) };
     if (eq(u8, verb, "assign") or eq(u8, verb, "unassign")) {
+        // assign <unit> [pilot|tech] <person> — no slot word: the person's
+        // role decides. unassign <unit> [pilot|tech] — no slot word: both.
         const unit: types.UnitId = @enumFromInt(try num(u32, tokens.next()));
-        const slot = std.meta.stringToEnum(game.state.Slot, try need(tokens.next())) orelse return error.BadArguments;
+        var slot: game.state.Slot = .any;
+        var person_tok: ?[]const u8 = null;
+        if (tokens.next()) |second| {
+            if (std.meta.stringToEnum(game.state.Slot, second)) |s| slot = s else person_tok = second;
+        }
         if (verb[0] == 'u') return .{ .unassign = .{ .unit = unit, .slot = slot } };
-        return .{ .assign = .{ .unit = unit, .slot = slot, .person = @enumFromInt(try num(u32, tokens.next())) } };
+        const pid = if (person_tok) |t| (std.fmt.parseInt(u32, t, 10) catch return error.BadNumber) else try num(u32, tokens.next());
+        return .{ .assign = .{ .unit = unit, .slot = slot, .person = @enumFromInt(pid) } };
     }
     if (eq(u8, verb, "autoassign")) {
         const site = try parseSite(try need(tokens.next()));
@@ -339,6 +346,7 @@ pub fn errorText(err: anyerror) []const u8 {
         error.UnitAway => "that hull is away from home — depot work happens at the home HQ",
         error.UnitDeployed => "that hull is with a deployed company — bring the company home first (HQ work like fabrication and orders is unaffected)",
         error.PersonDeployed => "that person is deployed with their company",
+        error.PersonAway => "pool hulls sit at the outfit's seat — that person's company is not home there",
         error.NoAirSlot => "no air wing slot: the home HQ needs a spaceport at level 3 (brigade HQs host one from the start), and a company has one wing",
         error.NoSupportSlot => "the support company is full for this HQ, or its facilities can't stand up that lance (mess needs a mess hall ≥ 2, MASH a hospital, logistics a warehouse)",
         error.NoBerth => "no free berth at that HQ — spaceport levels add dropship berths; a jumpship berth needs spaceport 4 and comms 3",
@@ -430,8 +438,8 @@ pub fn usage(verb: []const u8) ?[]const u8 {
         .{ "order", "order <part> [qty] [hq:N|co:N]" },
         .{ "ship", "ship <part> <qty> <from site> <to site>" },
         .{ "buy", "buy <listing#>" },
-        .{ "assign", "assign <unit> pilot|tech <person>" },
-        .{ "unassign", "unassign <unit> pilot|tech" },
+        .{ "assign", "assign <unit> [pilot|tech] <person>  (no slot word: the role decides)" },
+        .{ "unassign", "unassign <unit> [pilot|tech]  (no slot word: both)" },
         .{ "autoassign", "autoassign co:N" },
         .{ "autostaff", "autostaff hq:N" },
         .{ "upgrade", "upgrade hq:N <mek_bay|warehouse|hospital|mess|training_ground|hiring_hall|comms|spaceport>" },
@@ -471,6 +479,9 @@ test "command line parses the common verbs" {
     var it2 = std.mem.tokenizeScalar(u8, "3 tech 67", ' ');
     const cmd2 = (try parseCommand("assign", &it2)).?;
     try std.testing.expectEqual(@as(u32, 67), @intFromEnum(cmd2.assign.person));
+    var it2b = std.mem.tokenizeScalar(u8, "3 67", ' ');
+    const cmd2b = (try parseCommand("assign", &it2b)).?;
+    try std.testing.expect(cmd2b.assign.slot == .any and @intFromEnum(cmd2b.assign.person) == 67);
     var it3 = std.mem.tokenizeScalar(u8, "galatea Forward Base", ' ');
     const cmd3 = (try parseCommand("found", &it3)).?;
     try std.testing.expectEqualStrings("Forward Base", cmd3.found_hq.name);
