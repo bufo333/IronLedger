@@ -197,7 +197,7 @@ view model each frame from an arena.
    `Store.open`), Welcome, four-step wizard, typed-name delete, quit modal.
 4. ✅ Desk, Contracts, Ledger; end-turn and decision modals; `:` command
    line with the CLI verbs parsed into `commands.Command`.
-5. ✅ first cut: Forces, Supply, HQ. ⬜ Map, Lab.
+5. ✅ Forces, Supply, HQ, Map, Lab.
 6. ✅ Emblem (`tui/png.zig`, `tui/emblem.zig`): PNG decode (8-bit,
    non-interlaced), wizard import from the logo directories, half-block
    colour cells in the grid (`Screen.blit`, `Cell.px`), kitty protocol
