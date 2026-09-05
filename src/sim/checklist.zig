@@ -32,6 +32,10 @@ pub const WarningKind = enum {
     /// People with a year in and morale or fatigue past the line: they
     /// roll to leave on payday (Stage 12.20).
     restless_crew,
+    /// A company's manning table has open seats beyond pilots and techs
+    /// (astechs, doctors, medics, office) — quietly slowing repairs and
+    /// healing (12B.11).
+    manning_short,
 };
 
 /// Does any working weapon in the company draw on this munition family?
@@ -146,6 +150,22 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
         }
         if (no_pilot + no_tech > 0) {
             try out.append(alloc, .{ .kind = .open_slots, .text = try std.fmt.allocPrint(alloc, "{s}: {d} hull(s) without a pilot, {d} without a tech (no repairs/reloads)", .{ f.name, no_pilot, no_tech }) });
+        }
+        // The rest of the manning table (12B.11): who is short and by how much.
+        {
+            var arena = std.heap.ArenaAllocator.init(alloc);
+            defer arena.deinit();
+            var text: std.ArrayListUnmanaged(u8) = .empty;
+            var short_total: u32 = 0;
+            for (@import("queries.zig").manning(arena.allocator(), gs, f.id) catch &.{}) |m| {
+                const open = m.need -| m.have;
+                if (open == 0) continue;
+                if (m.role == .mekwarrior or m.role == .vehicle_crew or m.role == .aero_pilot or m.role == .tech_mek or m.role == .tech_mechanic or m.role == .tech_aero) continue; // the seat warning above covers hulls
+                if (text.items.len > 0) try text.appendSlice(alloc, ", ");
+                try text.appendSlice(alloc, try std.fmt.allocPrint(alloc, "{d} {s}", .{ open, @tagName(m.role) }));
+                short_total += open;
+            }
+            if (short_total > 0) try out.append(alloc, .{ .kind = .manning_short, .text = try std.fmt.allocPrint(alloc, "{s} manning short: {s} (Forces r → MANNING; :crew co:{d} hires from the halls)", .{ f.name, text.items, @intFromEnum(f.id) }) });
         }
         if (f.supply_shortage_days > 0) {
             try out.append(alloc, .{ .kind = .hungry, .text = try std.fmt.allocPrint(alloc, "{s} has been hungry {d} day(s) — send provisions or funds", .{ f.name, f.supply_shortage_days }) });

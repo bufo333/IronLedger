@@ -188,6 +188,7 @@ fn jumpFor(kind: checklist.WarningKind) u8 {
         .hungry, .dry_ammo => 5,
         .understaffed_hq, .depot_backlog => 6,
         .untreated_wounded, .restless_crew => 8,
+        .manning_short => 2,
     };
 }
 
@@ -1752,7 +1753,7 @@ pub fn manning(alloc: Alloc, gs: *GameState, company: types.ForceId) ![]ManningR
         .{ .role = .astech, .need = staff.astechs, .why = "six per mek tech (hours)" },
         .{ .role = .tech_mechanic, .need = vehicles / 2, .why = "one per two vehicles" },
         .{ .role = .doctor, .need = staff.doctors, .why = "one per 25 combat crew" },
-        .{ .role = .medic, .need = staff.medics + (if (mash > 0) @as(u32, 4) else 0), .why = "four per doctor, four with the MASH lance" },
+        .{ .role = .medic, .need = staff.medics + (if (mash > 0) @as(u32, 4) else 0), .why = "each covers 5 patients and staffs a MASH bed; four per doctor, four more with the MASH lance" },
         .{ .role = .admin_command, .need = 1, .why = "company office" },
         .{ .role = .admin_logistics, .need = 1, .why = "company office" },
         .{ .role = .admin_transport, .need = 1, .why = "company office" },

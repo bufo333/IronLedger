@@ -84,6 +84,10 @@ pub const Tuning = struct {
         no_supplies_bp: types.Bp,
         beds_per_hospital_level: u32,
         beds_per_mash: u32,
+        /// Medics (12B.11): each covers this many patients toward the
+        /// doctor ratio, and adds a field bed (two medics per bed without a
+        /// MASH truck to staff).
+        patients_per_medic: u32,
         permanent_target: u8,
     },
     person: struct {

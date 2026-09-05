@@ -89,16 +89,19 @@ pub fn healDays(gs: *GameState, deployed_with_mash: bool) u32 {
     const m = tuning.medical;
     var days: u32 = m.heal_base_days + gs.rng.roll2d6(.medical);
 
-    // Doctor coverage: 1 doctor per 25 patients (MekHQ ratio).
+    // Doctor coverage: 1 doctor per 25 patients (MekHQ ratio); medics
+    // (12B.11) each carry a few patients of their own.
     var doctors: u32 = 0;
+    var medics: u32 = 0;
     var wounded: u32 = 0;
     var it = gs.people.iterator();
     while (it.next()) |entry| {
         const p = entry.value_ptr;
         if (p.status == .active and p.role == .doctor) doctors += 1;
+        if (p.status == .active and p.role == .medic) medics += 1;
         if (p.status == .wounded) wounded += 1;
     }
-    if (wounded > doctors * m.patients_per_doctor) days = @intCast(types.applyBp(days, m.understaffed_bp)); // understaffed infirmary
+    if (wounded > doctors * m.patients_per_doctor + medics * m.patients_per_medic) days = @intCast(types.applyBp(days, m.understaffed_bp)); // understaffed infirmary
 
     if (deployed_with_mash) days = @intCast(types.applyBp(days, m.mash_bp)); // MASH lance forward surgery
     // Home hospital: better facilities, shorter stays.
@@ -122,7 +125,15 @@ pub fn bedCapacity(gs: *GameState, company: types.ForceId, deployed: bool) u32 {
             const u = entry.value_ptr;
             if (u.kind == .mash and u.status != .destroyed and gs.companyOf(u.force) == company) beds += tuning.medical.beds_per_mash;
         }
-        return beds;
+        // Medics (12B.11): staffing the MASH trucks, a bed each up to
+        // doubling the trucks; without trucks, an aid station of one bed
+        // per two medics.
+        var medics: u32 = 0;
+        var pit = gs.people.iterator();
+        while (pit.next()) |e| if (e.value_ptr.status == .active and e.value_ptr.role == .medic and gs.companyOf(e.value_ptr.assigned_force) == company) {
+            medics += 1;
+        };
+        return beds + (if (beds > 0) @min(medics, beds) else medics / 2);
     }
     var best: u32 = 0;
     var hqit = gs.hqs.iterator();
@@ -536,4 +547,22 @@ test "12.30: garrison duty recovers fatigue in the field; a combat tour does not
     const before = gs.person(pilot).?.fatigue;
     try runWeeklyRest(&gs);
     try std.testing.expectEqual(before, gs.person(pilot).?.fatigue);
+}
+
+test "12B.11: medics add field beds and carry patients toward the doctor ratio" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1211 });
+    defer gs.deinit();
+    _ = try gs.createCommander("T", .LC, .paymaster);
+    const co = try gs.createForce("Alpha", .company, .none);
+    // No MASH: two medics make one bed; four make two.
+    try std.testing.expectEqual(@as(u32, 0), bedCapacity(&gs, co, true));
+    for (0..4) |_| {
+        const id = try gs.hirePerson("M", "Edic", .medic);
+        gs.person(id).?.assigned_force = co;
+    }
+    try std.testing.expectEqual(@as(u32, 2), bedCapacity(&gs, co, true));
+    // A MASH truck: 4 beds, plus one per medic up to doubling it.
+    const truck = try gs.addUnit("MASH-27");
+    try gs.moveUnitToForce(truck, co);
+    try std.testing.expectEqual(@as(u32, 8), bedCapacity(&gs, co, true));
 }

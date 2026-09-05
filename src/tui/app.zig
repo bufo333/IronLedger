@@ -208,8 +208,8 @@ pub const App = struct {
     map_cursor: usize = 0,
     /// Forces screen view: index into queries.toeViews (all, each company, unassigned).
     forces_view: usize = 0,
-    /// Forces side pane on a company row: DAMAGE (false) or READINESS (true).
-    forces_readiness: bool = false,
+    /// Forces side pane on a company row: DAMAGE, READINESS or MANNING (r cycles).
+    forces_pane: enum { damage, readiness, manning } = .damage,
     /// The raise-a-company wizard's state.
     raise: RaiseState = .{},
     /// Star map zoom: 1 = every world fitted into the pane; 2/4/8 = that
@@ -764,7 +764,7 @@ pub const App = struct {
             .market => "Tab pane · Enter buy / order / order shortfall · b fabricate component · K keep stocked (pane: Enter edit, x remove) · [ ] HQ board · q welcome",
             .ledger => "j/k treasury · t send cash to it · T pull cash back to the outfit · p top-up policy · x clear its policy · L loan · R repay",
             .supply => "company: t/T cash · p/P cash/resupply policy · s ship · o order · R trim to plan · H parts home · HQ: K keep stocked · $ sell stock",
-            .forces => "[ ] company / pool · + raise a company · w air wing · r readiness · Enter assign · a/u seat · A auto · l lance · o role · d depot · m mothball · x company · b fabricate · R recall · $ sell · X disband",
+            .forces => "[ ] company / pool · + raise a company · w air wing · r damage/readiness/manning · Enter assign · a/u seat · A auto · l lance · o role · d depot · m mothball · x company · b fabricate · R recall · $ sell · X disband",
             .map => "h j k l move between worlds (the view follows) · + / - zoom · f found HQ here · o offers here · q welcome",
             .lab => "[ ] hull · j/k mount · - remove · + install · R order replacement · D send to depot (structure) · c clear · Enter commit",
             .hq => "[ ] switch HQ · u upgrade the highlighted facility (picker elsewhere) · T tier · S autostaff · Tab hall · f/F filter · Enter hire",
@@ -1318,12 +1318,27 @@ pub const App = struct {
                 self.listPane(.{ .x = b.x + lw, .y = b.y, .w = b.w - lw, .h = detail_h }, "HULL", detail, 1, false, false);
             } else if (rows.len > 0 and c < rows.len and rows[c].force != .none and g.companyOf(rows[c].force) != .none) {
                 const co = g.companyOf(rows[c].force);
-                if (self.forces_readiness) {
-                    const lines = try q.readinessLines(al, g, co);
-                    self.listPane(.{ .x = b.x + lw, .y = b.y, .w = b.w - lw, .h = detail_h }, try std.fmt.allocPrint(al, "READINESS · {s} · r = damage", .{q.forceName(g, co)}), lines, 1, false, false);
-                } else {
-                    const dmg = try q.companyDamage(al, g, co);
-                    self.listPane(.{ .x = b.x + lw, .y = b.y, .w = b.w - lw, .h = detail_h }, try std.fmt.allocPrint(al, "DAMAGE · {s} · r = readiness", .{q.forceName(g, co)}), dmg.lines, 1, false, false);
+                switch (self.forces_pane) {
+                    .readiness => {
+                        const lines = try q.readinessLines(al, g, co);
+                        self.listPane(.{ .x = b.x + lw, .y = b.y, .w = b.w - lw, .h = detail_h }, try std.fmt.allocPrint(al, "READINESS · {s} · r = manning", .{q.forceName(g, co)}), lines, 1, false, false);
+                    },
+                    .manning => {
+                        var mrows: std.ArrayListUnmanaged([]const u8) = .empty;
+                        try mrows.append(al, q.manning_header);
+                        var open_total: u32 = 0;
+                        for (try q.manning(al, g, co)) |m| {
+                            try mrows.append(al, m.text);
+                            open_total += m.need -| m.have;
+                        }
+                        try mrows.append(al, "");
+                        try mrows.append(al, if (open_total == 0) "{g}every seat filled{/}" else try std.fmt.allocPrint(al, "{{c}}{d} open{{/}} — HQ screen Tab into the hall (f filters by role) · :crew co:N hires the open seats from the halls", .{open_total}));
+                        self.listPane(.{ .x = b.x + lw, .y = b.y, .w = b.w - lw, .h = detail_h }, try std.fmt.allocPrint(al, "MANNING · {s} · r = damage", .{q.forceName(g, co)}), mrows.items, 1, false, false);
+                    },
+                    .damage => {
+                        const dmg = try q.companyDamage(al, g, co);
+                        self.listPane(.{ .x = b.x + lw, .y = b.y, .w = b.w - lw, .h = detail_h }, try std.fmt.allocPrint(al, "DAMAGE · {s} · r = readiness", .{q.forceName(g, co)}), dmg.lines, 1, false, false);
+                    },
                 }
             } else {
                 const empty = [_][]const u8{"{d}select a hull in the TO&E{/}"};
@@ -2735,8 +2750,12 @@ pub const App = struct {
                     },
                     't' => self.openCommand("train "),
                     'r' => {
-                        self.forces_readiness = !self.forces_readiness;
-                        if (self.narrow()) self.modal = .readiness;
+                        self.forces_pane = switch (self.forces_pane) {
+                            .damage => .readiness,
+                            .readiness => .manning,
+                            .manning => .damage,
+                        };
+                        if (self.narrow() and self.forces_pane == .readiness) self.modal = .readiness;
                     },
                     'w' => if (row) |r| {
                         const co = g.companyOf(r.force);

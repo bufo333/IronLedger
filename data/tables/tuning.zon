@@ -75,6 +75,7 @@
         .no_supplies_bp = 15_000,
         .beds_per_hospital_level = 10,
         .beds_per_mash = 4,
+        .patients_per_medic = 5,
         .permanent_target = 4,
     },
     .person = .{
