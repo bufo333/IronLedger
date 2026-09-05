@@ -1715,60 +1715,11 @@ pub const manning_header = "role              have  need  open   why";
 /// uses (`company_gen.supportStaffFor`), so a raised company can be
 /// crewed by hand to the starter company's standard.
 pub fn manning(alloc: Alloc, gs: *GameState, company: types.ForceId) ![]ManningRow {
-    const company_gen = @import("../gen/company_gen.zig");
-    var meks: u32 = 0;
-    var vehicles: u32 = 0;
-    var platoons: u32 = 0;
-    var mash: u32 = 0;
-    var fighters: u32 = 0;
-    var uit = gs.units.iterator();
-    while (uit.next()) |e| {
-        const u = e.value_ptr;
-        if (u.status == .destroyed) continue;
-        var ours = gs.companyOf(u.force) == company;
-        if (!ours) for (gs.unit_transfers.items) |t| if (t.unit == u.id and t.to_company == company) {
-            ours = true;
-        };
-        if (!ours) continue;
-        switch (u.kind) {
-            .mek => meks += 1,
-            .infantry => platoons += 1,
-            .aerospace => fighters += 1,
-            .dropship, .jumpship => {}, // crewed by ship crews at the berth, not the company
-            .mash => {
-                vehicles += 1;
-                mash += 1;
-            },
-            else => vehicles += 1,
-        }
-    }
-    const combat = meks + vehicles + platoons;
-    const staff = company_gen.supportStaffFor(meks, combat);
-    const needs = [_]struct { role: person_mod.Role, need: u32, why: []const u8 }{
-        .{ .role = .mekwarrior, .need = meks, .why = "one per mek" },
-        .{ .role = .vehicle_crew, .need = vehicles, .why = "one per truck, rig or ambulance" },
-        .{ .role = .infantry, .need = platoons, .why = "one per security platoon" },
-        .{ .role = .aero_pilot, .need = fighters, .why = "one per fighter" },
-        .{ .role = .tech_aero, .need = fighters, .why = "one per fighter" },
-        .{ .role = .tech_mek, .need = staff.techs, .why = "one per mek" },
-        .{ .role = .astech, .need = staff.astechs, .why = "six per mek tech (hours)" },
-        .{ .role = .tech_mechanic, .need = vehicles / 2, .why = "one per two vehicles" },
-        .{ .role = .doctor, .need = staff.doctors, .why = "one per 25 combat crew" },
-        .{ .role = .medic, .need = staff.medics + (if (mash > 0) @as(u32, 4) else 0), .why = "each covers 5 patients and staffs a MASH bed; four per doctor, four more with the MASH lance" },
-        .{ .role = .admin_command, .need = 1, .why = "company office" },
-        .{ .role = .admin_logistics, .need = 1, .why = "company office" },
-        .{ .role = .admin_transport, .need = 1, .why = "company office" },
-        .{ .role = .admin_hr, .need = staff.admins -| 3, .why = "one per 10 combat crew beyond the office" },
-    };
+    const personnel = @import("personnel.zig");
+    const needs = personnel.manningNeeds(gs, company);
     var out: std.ArrayListUnmanaged(ManningRow) = .empty;
     for (needs) |n| {
-        var have: u32 = 0;
-        var pit = gs.people.iterator();
-        while (pit.next()) |e| {
-            const p = e.value_ptr;
-            if (p.role != n.role or (p.status != .active and p.status != .wounded)) continue;
-            if (gs.companyOf(p.assigned_force) == company) have += 1;
-        }
+        const have = personnel.manningHave(gs, company, n.role);
         const open = n.need -| have;
         try out.append(alloc, .{ .role = n.role, .have = have, .need = n.need, .text = try std.fmt.allocPrint(alloc, "{s: <16} {d: >5} {d: >5} {s}{d: >5}{{/}}   {{d}}{s}{{/}}", .{ @tagName(n.role), have, n.need, if (open > 0) "{c}" else "{g}", open, n.why }) });
     }

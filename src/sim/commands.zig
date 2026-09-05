@@ -192,8 +192,9 @@ pub const Command = union(enum) {
     /// its home HQ (placed in `lance`, or the first lance with room),
     /// otherwise shipped with the map transit.
     buy_hull_for: struct { listing: usize, company: types.ForceId, lance: types.ForceId = .none },
-    /// Fill a company's open seats from the hiring halls: a pilot per
-    /// crewless hull, a tech where no posted tech has hours left.
+    /// Fill a company's manning table (12B.13): astechs and medics hired
+    /// to complement on the spot (MekHQ pools), every other short role
+    /// taken from the hiring halls while candidates last.
     crew_company: types.ForceId,
     /// Trim a deployed company's field stores to its field plan: anything
     /// over a line's target, and consumables the plan has no line for
@@ -302,8 +303,11 @@ pub const Result = struct {
     /// The hull a `buy_hull_for` bought, and its delivery time (0 = on hand).
     unit: types.UnitId = .none,
     eta_days: u32 = 0,
-    /// People a `crew_company` hired from the halls.
+    /// People a `crew_company` hired (halls plus the astech/medic pools),
+    /// and the manning lines it could not fill because no candidate of
+    /// that role walked the boards.
     hired_count: u32 = 0,
+    still_open: u32 = 0,
     /// `order_part`: false when logistics failed the sourcing roll (the
     /// order is recorded as failed; retry after the refresh or fabricate).
     sourced: bool = true,
@@ -748,25 +752,31 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
         .crew_company => |company| {
             const f = gs.force(company) orelse return Error.UnknownForce;
             if (f.echelon != .company) return Error.NotACompany;
+            if (gs.deploymentContract(company) != null) return Error.CompanyDeployed;
+            const personnel = @import("personnel.zig");
             var hired: u32 = 0;
-            var uit = gs.units.iterator();
-            while (uit.next()) |e| {
-                const u = e.value_ptr;
-                if (gs.companyOf(u.force) != company or u.status == .destroyed) continue;
-                if (u.pilot == .none and u.kind != .infantry) {
-                    if (try hireRoleFromHall(gs, unit_mod.crewRoleFor(u.kind), company)) hired += 1;
-                }
-                if (u.tech == .none) if (unit_mod.techRoleFor(u.kind)) |role| {
-                    const tonnage: u8 = if (chassis_mod.find(u.chassis_key)) |d| d.tonnage else 50;
-                    const hours = unit_mod.maintenanceHours(u.kind, tonnage);
-                    if (gs.findFreeTech(role, company, hours) == null) {
-                        if (try hireRoleFromHall(gs, role, company)) hired += 1;
+            var still_open: u32 = 0;
+            for (personnel.manningNeeds(gs, company)) |n| {
+                var have = personnel.manningHave(gs, company, n.role);
+                while (have < n.need) : (have += 1) {
+                    if (personnel.isPooledRole(n.role)) {
+                        // MekHQ hires astechs and medics to complement on
+                        // demand: no market, no signing bonus, salary only.
+                        const spec = person_gen.generateWithBonus(&gs.rng, n.role, gs.recruitBonus());
+                        const id = try gs.hireFromSpec(spec);
+                        gs.person(id).?.assigned_force = company;
+                        hired += 1;
+                    } else if (try hireRoleFromHall(gs, n.role, company)) {
+                        hired += 1;
+                    } else {
+                        still_open += n.need - have;
+                        break;
                     }
-                };
+                }
             }
             _ = try gs.autoAssign(company);
-            try gs.log(.decision, .{ .company = company }, "[raise] {s}: {d} hired from the halls to fill open seats", .{ f.name, hired });
-            return .{ .hired_count = hired };
+            try gs.log(.decision, .{ .company = company }, "[raise] {s}: {d} hired to fill the manning table ({d} still open — the halls had nobody)", .{ f.name, hired, still_open });
+            return .{ .hired_count = hired, .still_open = still_open };
         },
         .trim_stock => |company| {
             const f = gs.force(company) orelse return Error.UnknownForce;
@@ -2061,9 +2071,21 @@ test "12: a raised company is an empty skeleton; hulls bought for it land in a l
     try gs.candidates.append(gs.allocator(), .{ .hq = hq, .spec = person_gen.generate(&gs.rng, .mekwarrior), .asking_bonus = 0, .listed_day = 0, .expires_day = 400 });
     try gs.candidates.append(gs.allocator(), .{ .hq = hq, .spec = person_gen.generate(&gs.rng, .tech_mek), .asking_bonus = 0, .listed_day = 0, .expires_day = 400 });
     const c = try execute(&gs, .{ .crew_company = co });
-    try std.testing.expectEqual(@as(u32, 2), c.hired_count);
     try std.testing.expect(gs.unit(r.unit).?.pilot != .none);
     try std.testing.expect(gs.unit(r.unit).?.tech != .none);
+    // 12B.13: astechs and medics come to complement without a market;
+    // the doctor, mechanics and office nobody offered stay open.
+    const personnel = @import("personnel.zig");
+    for (personnel.manningNeeds(&gs, co)) |n| {
+        const have = personnel.manningHave(&gs, co, n.role);
+        // Two meks (one in transit) want two pilots and two techs; the hall
+        // offered one of each, so those lines stay half open.
+        if (personnel.isPooledRole(n.role)) try std.testing.expectEqual(n.need, have);
+        if (n.role == .mekwarrior or n.role == .tech_mek) try std.testing.expectEqual(@as(u32, 1), have);
+    }
+    try std.testing.expect(c.hired_count > 2);
+    try std.testing.expect(c.still_open > 0);
+    for (gs.candidates.items) |cand| try std.testing.expect(cand.spec.role != .mekwarrior and cand.spec.role != .tech_mek);
 }
 
 test "golden master: same seed + same script = same state hash" {

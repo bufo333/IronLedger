@@ -367,6 +367,32 @@ fn shortAdminRole(gs: *GameState, hq: *const hq_mod.Hq) ?person_mod.Role {
     return null;
 }
 
+/// The role the outfit is shortest of at this HQ (12B.13): a short desk
+/// first, then the largest gap in the manning tables of the companies
+/// supplied here (pooled roles excepted — astechs and medics are hired to
+/// complement, not recruited). Word gets round: half the walk-ins are
+/// people who heard the outfit is hiring that trade.
+fn shortRole(gs: *GameState, hq: *const hq_mod.Hq) ?person_mod.Role {
+    if (shortAdminRole(gs, hq)) |r| return r;
+    const personnel = @import("../sim/personnel.zig");
+    var best: ?person_mod.Role = null;
+    var best_gap: u32 = 0;
+    var fit = gs.forces.iterator();
+    while (fit.next()) |e| {
+        const f = e.value_ptr;
+        if (f.echelon != .company or f.supplying_hq != hq.id) continue;
+        for (personnel.manningNeeds(gs, f.id)) |n| {
+            if (personnel.isPooledRole(n.role)) continue;
+            const gap = n.need -| personnel.manningHave(gs, f.id, n.role);
+            if (gap > best_gap) {
+                best_gap = gap;
+                best = n.role;
+            }
+        }
+    }
+    return best;
+}
+
 /// Daily hiring-hall churn (Stage 9C.3): people move fast. Each turn some
 /// candidates walk out and, on a good roll, someone new walks in.
 pub fn churnCandidates(gs: *GameState) !void {
@@ -388,10 +414,12 @@ pub fn churnCandidates(gs: *GameState) !void {
         const hr = gs.hqStaff(hq.id, .admin_hr).count;
         const roll = @as(u32, gs.rng.roll2d6(.market)) + hall + hr / 2;
         if (roll < tuning.market.hall_arrival_target) continue; // quiet day at the hall
-        const arrivals: u32 = if (roll >= 12) 2 else 1;
+        // A bigger hall draws a bigger crowd: one walk-in per hall level, one
+        // more on a boxcars day.
+        const arrivals: u32 = hall + @as(u32, if (roll >= 12) 1 else 0);
         for (0..arrivals) |_| {
-            // A short desk gets every other arrival until it is staffed.
-            const role = if (shortAdminRole(gs, hq)) |short| (if (gs.rng.roll2d6(.market) >= 7) short else hall_roles[gs.rng.random(.market).uintLessThan(usize, hall_roles.len)]) else hall_roles[gs.rng.random(.market).uintLessThan(usize, hall_roles.len)];
+            // A short desk or trade gets every other arrival until it is staffed.
+            const role = if (shortRole(gs, hq)) |short| (if (gs.rng.roll2d6(.market) >= 7) short else hall_roles[gs.rng.random(.market).uintLessThan(usize, hall_roles.len)]) else hall_roles[gs.rng.random(.market).uintLessThan(usize, hall_roles.len)];
             const spec = person_gen.generateWithBonus(&gs.rng, role, gs.recruitBonus());
             const salary = types.applyBp(role.baseSalary(), spec.experience.salaryMultBp());
             try gs.candidates.append(gs.allocator(), .{
@@ -462,8 +490,8 @@ pub fn refreshCandidates(gs: *GameState) !void {
         const hr = gs.hqStaff(hq.id, .admin_hr).count;
         const count: u32 = 2 + hall + hr / 2;
         for (0..count) |_| {
-            // A short desk gets every other arrival until it is staffed.
-            const role = if (shortAdminRole(gs, hq)) |short| (if (gs.rng.roll2d6(.market) >= 7) short else hall_roles[gs.rng.random(.market).uintLessThan(usize, hall_roles.len)]) else hall_roles[gs.rng.random(.market).uintLessThan(usize, hall_roles.len)];
+            // A short desk or trade gets every other arrival until it is staffed.
+            const role = if (shortRole(gs, hq)) |short| (if (gs.rng.roll2d6(.market) >= 7) short else hall_roles[gs.rng.random(.market).uintLessThan(usize, hall_roles.len)]) else hall_roles[gs.rng.random(.market).uintLessThan(usize, hall_roles.len)];
             const spec = person_gen.generateWithBonus(&gs.rng, role, gs.recruitBonus());
             const salary = types.applyBp(role.baseSalary(), spec.experience.salaryMultBp());
             try gs.candidates.append(gs.allocator(), .{

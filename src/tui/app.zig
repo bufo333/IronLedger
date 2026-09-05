@@ -764,7 +764,7 @@ pub const App = struct {
             .market => "Tab pane · Enter buy / order / order shortfall · b fabricate component · K keep stocked (pane: Enter edit, x remove) · [ ] HQ board · q welcome",
             .ledger => "j/k treasury · t send cash to it · T pull cash back to the outfit · p top-up policy · x clear its policy · L loan · R repay",
             .supply => "company: t/T cash · p/P cash/resupply policy · s ship · o order · R trim to plan · H parts home · HQ: K keep stocked · $ sell stock",
-            .forces => "[ ] company / pool · + raise a company · w air wing · r damage/readiness/manning · Enter assign · a/u seat · A auto · l lance · o role · d depot · m mothball · x company · b fabricate · R recall · $ sell · X disband",
+            .forces => "[ ] company / pool · + raise a company · w air wing · r damage/readiness/manning · Enter assign · a/u seat · A auto · c crew from halls · l lance · o role · d depot · m mothball · x company · b fabricate · R recall · $ sell · X disband",
             .map => "h j k l move between worlds (the view follows) · + / - zoom · f found HQ here · o offers here · q welcome",
             .lab => "[ ] hull · j/k mount · - remove · + install · R order replacement · D send to depot (structure) · c clear · Enter commit",
             .hq => "[ ] switch HQ · u upgrade the highlighted facility (picker elsewhere) · T tier · S autostaff · Tab hall · f/F filter · Enter hire",
@@ -2748,6 +2748,16 @@ pub const App = struct {
                             self.say(.good, "auto-assigned {s}", .{q.forceName(g, co)});
                         }
                     },
+                    'c' => if (row) |r| {
+                        const co = g.companyOf(r.force);
+                        if (co != .none) {
+                            const res = game.commands.execute(g, .{ .crew_company = co }) catch |err| {
+                                self.say(.crit, "{s}", .{game.cli.errorText(err)});
+                                return;
+                            };
+                            self.say(if (res.still_open == 0) .good else .amber, "{s}: {d} hired to fill the manning table · {d} lines still open (no candidates on the boards yet)", .{ q.forceName(g, co), res.hired_count, res.still_open });
+                        }
+                    },
                     't' => self.openCommand("train "),
                     'r' => {
                         self.forces_pane = switch (self.forces_pane) {
@@ -3250,7 +3260,7 @@ pub const App = struct {
                             self.say(.crit, "{s}", .{game.cli.errorText(err)});
                             return;
                         };
-                        self.say(if (r.hired_count > 0) .good else .amber, "{d} hired from the halls and seated — open lines above are what the halls could not supply", .{r.hired_count});
+                        self.say(if (r.still_open == 0) .good else .amber, "{d} hired and seated · {d} lines still open — the halls had nobody of that trade yet", .{ r.hired_count, r.still_open });
                     },
                     else => {},
                 },

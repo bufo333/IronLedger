@@ -9,6 +9,80 @@ const rank_mod = @import("../domain/rank.zig");
 const award_mod = @import("../domain/award.zig");
 const chassis_mod = @import("../domain/chassis.zig");
 const GameState = @import("state.zig").GameState;
+const company_gen = @import("../gen/company_gen.zig");
+
+/// One line of a company's manning table (MekHQ: the personnel-count
+/// panel plus the astech/medic pool "full complement" numbers).
+pub const Need = struct { role: person_mod.Role, need: u32, why: []const u8 };
+
+/// Roles MekHQ treats as a pool rather than as individuals on a market:
+/// astechs and medics are unskilled labour, hired to complement on demand.
+pub fn isPooledRole(role: person_mod.Role) bool {
+    return role == .astech or role == .medic;
+}
+
+/// What a company needs in every role, from its hulls on hand and in
+/// transit to it; mirrors the starter generator's ratios
+/// (`company_gen.supportStaffFor`).
+pub fn manningNeeds(gs: *GameState, company: types.ForceId) [14]Need {
+    var meks: u32 = 0;
+    var vehicles: u32 = 0;
+    var platoons: u32 = 0;
+    var mash: u32 = 0;
+    var fighters: u32 = 0;
+    var uit = gs.units.iterator();
+    while (uit.next()) |e| {
+        const u = e.value_ptr;
+        if (u.status == .destroyed) continue;
+        var ours = gs.companyOf(u.force) == company;
+        if (!ours) for (gs.unit_transfers.items) |t| if (t.unit == u.id and t.to_company == company) {
+            ours = true;
+        };
+        if (!ours) continue;
+        switch (u.kind) {
+            .mek => meks += 1,
+            .infantry => platoons += 1,
+            .aerospace => fighters += 1,
+            .dropship, .jumpship => {}, // crewed by ship crews at the berth, not the company
+            .mash => {
+                vehicles += 1;
+                mash += 1;
+            },
+            else => vehicles += 1,
+        }
+    }
+    const combat = meks + vehicles + platoons;
+    const staff = company_gen.supportStaffFor(meks, combat);
+    return .{
+        .{ .role = .mekwarrior, .need = meks, .why = "one per mek" },
+        .{ .role = .vehicle_crew, .need = vehicles, .why = "one per truck, rig or ambulance" },
+        .{ .role = .infantry, .need = platoons, .why = "one per security platoon" },
+        .{ .role = .aero_pilot, .need = fighters, .why = "one per fighter" },
+        .{ .role = .tech_aero, .need = fighters, .why = "one per fighter" },
+        .{ .role = .tech_mek, .need = staff.techs, .why = "one per mek" },
+        .{ .role = .astech, .need = staff.astechs, .why = "six per mek tech (hours)" },
+        .{ .role = .tech_mechanic, .need = vehicles / 2, .why = "one per two vehicles" },
+        .{ .role = .doctor, .need = staff.doctors, .why = "one per 25 combat crew" },
+        .{ .role = .medic, .need = staff.medics + (if (mash > 0) @as(u32, 4) else 0), .why = "each covers 5 patients and staffs a MASH bed; four per doctor, four more with the MASH lance" },
+        .{ .role = .admin_command, .need = 1, .why = "company office" },
+        .{ .role = .admin_logistics, .need = 1, .why = "company office" },
+        .{ .role = .admin_transport, .need = 1, .why = "company office" },
+        .{ .role = .admin_hr, .need = staff.admins -| 3, .why = "one per 10 combat crew beyond the office" },
+    };
+}
+
+/// People of `role` on a company's books (active or wounded).
+pub fn manningHave(gs: *GameState, company: types.ForceId, role: person_mod.Role) u32 {
+    var have: u32 = 0;
+    var pit = gs.people.iterator();
+    while (pit.next()) |e| {
+        const p = e.value_ptr;
+        if (p.role != role or (p.status != .active and p.status != .wounded)) continue;
+        if (gs.companyOf(p.assigned_force) == company) have += 1;
+    }
+    return have;
+}
+
 
 /// Kill credits (12B.5): the enemy BV destroyed in an engagement becomes
 /// whole kills (one per ~1000 BV, the average 3025 mek), each handed to

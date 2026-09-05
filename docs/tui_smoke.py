@@ -89,6 +89,8 @@ assert "READINESS" in plain()[-30000:] and "banked" in plain()[-30000:], plain()
 send("r", 0.8)                 # manning pane: every role's have/need/open
 assert "MANNING" in plain()[-30000:] and "astech" in plain()[-30000:], plain()[-3000:]
 send("r", 0.6)                 # back to damage
+send("c", 1.0)                 # crew from halls: fills the manning table (12B.13)
+assert "hired to fill the manning table" in plain()[-1200:], plain()[-1500:]
 send(":"); send("readiness\r", 0.8)
 assert "READINESS · every company" in plain()[-30000:], plain()[-3000:]
 send("\x1b", 0.6)

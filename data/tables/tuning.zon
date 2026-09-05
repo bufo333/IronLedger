@@ -58,7 +58,7 @@
         .min_ops_cost = 50_000,
         .hall_arrival_target = 8,
         .hall_floor = 1,
-        .hall_floor_combat = 2,
+        .hall_floor_combat = 3,
         .procurement_markup_bp = 11_000,
         .rarity_target = .{ .common = 5, .uncommon = 7, .rare = 9, .very_rare = 11 },
     },

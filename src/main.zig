@@ -1230,7 +1230,7 @@ fn printResult(gs: *game.state.GameState, cmd: Command, r: game.commands.Result)
         .hire, .hire_candidate, .recruit => if (gs.person(r.hired)) |p| std.debug.print("hired #{d}: {s} {s} ({s} {s}, {d} c-bills/mo)\n", .{
             @intFromEnum(r.hired), p.first_name, p.last_name, @tagName(p.experience()), @tagName(p.role), p.monthlySalary(),
         }),
-        .crew_company => std.debug.print("{d} hired from the halls\n", .{r.hired_count}),
+        .crew_company => std.debug.print("{d} hired to fill the manning table, {d} lines still open (no candidates)\n", .{ r.hired_count, r.still_open }),
         .buy_hull_for => std.debug.print("hull #{d}, {d} days out\n", .{ @intFromEnum(r.unit), r.eta_days }),
         .trim_stock => std.debug.print("{d} tons sent home\n", .{r.tons_moved}),
         .refit_install, .refit_remove, .refit_clear, .refit_commit => printLab(gs, refitUnit(cmd).?),
