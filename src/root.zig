@@ -14,6 +14,7 @@ pub const award = @import("domain/award.zig");
 pub const ability = @import("domain/ability.zig");
 pub const rat = @import("domain/rat.zig");
 pub const faction = @import("domain/faction.zig");
+pub const scenario = @import("domain/scenario.zig");
 pub const personnel = @import("sim/personnel.zig");
 pub const planet = @import("domain/planet.zig");
 pub const meklab = @import("domain/meklab.zig");

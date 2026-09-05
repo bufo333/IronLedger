@@ -543,7 +543,7 @@ fn applyToCompany(gs: *GameState, company: types.ForceId, stat: PersonStat, delt
 /// Which echelon an event's wear lands on: the line lances that stand in
 /// the way of raids, or the support train (trucks, ambulances, salvage
 /// rigs) that sits in the rear and only gets hit when the convoy does.
-const Echelon = enum { line, support };
+pub const Echelon = enum { line, support };
 
 fn inEchelon(gs: *GameState, u: *const unit_mod.Unit, which: Echelon) bool {
     const f = gs.force(u.force) orelse return false;
@@ -556,7 +556,7 @@ fn inEchelon(gs: *GameState, u: *const unit_mod.Unit, which: Echelon) bool {
 /// Abstract wear from an event: armor loss, and on a bad roll a broken
 /// slot. Line-lance hulls by default; the support echelon is in reserve
 /// and is only touched by convoy events.
-fn damageRandomUnits(gs: *GameState, company: types.ForceId, n: u8, which: Echelon) void {
+pub fn damageRandomUnits(gs: *GameState, company: types.ForceId, n: u8, which: Echelon) void {
     if (gs.units.count() == 0) return;
     const values = gs.units.values();
     var applied: u8 = 0;

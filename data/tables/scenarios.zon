@@ -1,0 +1,35 @@
+// Scenario types (Stage 12C.9). AtB scenario table, abridged: what kind of
+// fight an engagement turns out to be, by contract kind. Typed against
+// domain/scenario.zig `Table`. `enemy_bp` scales the opposing force,
+// `roll_mod` shifts the engagement roll (negative = the enemy holds the
+// cards), `scout_bonus` is what a scouting lance adds back, `salvage_bp`
+// scales the salvage claim (raids move on; nobody strips a field they are
+// leaving), `score_mult` weights the contract score, and `support_exposed`
+// puts the support train in the line of fire on a defeat.
+.{
+    .scenarios = .{
+        .{ .key = "standup", .name = "stand-up fight", .enemy_bp = 10_000, .roll_mod = 0, .scout_bonus = 0, .salvage_bp = 10_000, .score_mult = 1, .support_exposed = false },
+        .{ .key = "hold_the_line", .name = "hold the line", .enemy_bp = 12_000, .roll_mod = 1, .scout_bonus = 0, .salvage_bp = 10_000, .score_mult = 1, .support_exposed = false },
+        .{ .key = "breakthrough", .name = "breakthrough", .enemy_bp = 11_000, .roll_mod = 0, .scout_bonus = 1, .salvage_bp = 5_000, .score_mult = 2, .support_exposed = false },
+        .{ .key = "ambush", .name = "ambush", .enemy_bp = 9_000, .roll_mod = -2, .scout_bonus = 2, .salvage_bp = 5_000, .score_mult = 1, .support_exposed = false },
+        .{ .key = "convoy_escort", .name = "convoy escort", .enemy_bp = 9_000, .roll_mod = 0, .scout_bonus = 1, .salvage_bp = 5_000, .score_mult = 1, .support_exposed = true },
+        .{ .key = "base_defence", .name = "base defence", .enemy_bp = 12_000, .roll_mod = 1, .scout_bonus = 0, .salvage_bp = 10_000, .score_mult = 2, .support_exposed = false },
+        .{ .key = "recon_in_force", .name = "recon in force", .enemy_bp = 8_000, .roll_mod = 0, .scout_bonus = 1, .salvage_bp = 0, .score_mult = 1, .support_exposed = false },
+        .{ .key = "extraction", .name = "extraction", .enemy_bp = 10_000, .roll_mod = -1, .scout_bonus = 1, .salvage_bp = 0, .score_mult = 2, .support_exposed = false },
+    },
+    // One d6 table per contract kind (AtB: garrison work defends, raids move).
+    .by_kind = .{
+        .{ .kind = "garrison_duty", .table = .{ "standup", "hold_the_line", "convoy_escort", "base_defence", "ambush", "standup" } },
+        .{ .kind = "cadre_duty", .table = .{ "standup", "hold_the_line", "convoy_escort", "base_defence", "standup", "standup" } },
+        .{ .kind = "security_duty", .table = .{ "convoy_escort", "base_defence", "ambush", "hold_the_line", "convoy_escort", "standup" } },
+        .{ .kind = "riot_duty", .table = .{ "hold_the_line", "base_defence", "convoy_escort", "standup", "ambush", "hold_the_line" } },
+        .{ .kind = "planetary_assault", .table = .{ "standup", "breakthrough", "standup", "breakthrough", "hold_the_line", "ambush" } },
+        .{ .kind = "relief_duty", .table = .{ "breakthrough", "hold_the_line", "convoy_escort", "standup", "breakthrough", "base_defence" } },
+        .{ .kind = "guerrilla_warfare", .table = .{ "ambush", "recon_in_force", "convoy_escort", "ambush", "extraction", "standup" } },
+        .{ .kind = "pirate_hunting", .table = .{ "standup", "recon_in_force", "ambush", "convoy_escort", "standup", "breakthrough" } },
+        .{ .kind = "diversionary_raid", .table = .{ "recon_in_force", "breakthrough", "standup", "ambush", "recon_in_force", "extraction" } },
+        .{ .kind = "objective_raid", .table = .{ "breakthrough", "standup", "extraction", "breakthrough", "ambush", "standup" } },
+        .{ .kind = "recon_raid", .table = .{ "recon_in_force", "recon_in_force", "ambush", "extraction", "recon_in_force", "standup" } },
+        .{ .kind = "extraction_raid", .table = .{ "extraction", "extraction", "breakthrough", "ambush", "extraction", "standup" } },
+    },
+}

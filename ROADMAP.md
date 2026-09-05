@@ -819,13 +819,16 @@ item: tests green, both smokes, ROADMAP tick, one commit.
 
 ### Block C — Combat variety (AtB scenario types)
 
-- ⬜ 12C.9 **Scenario types** (AtB scenario table): standup, hold the line,
-  breakthrough, ambush (defender surprised: initiative penalty and no
-  retreat), convoy escort (support train exposed, ties to 12.29 convoy
-  events), base defence (fixed objective, attrition weighted), recon raid
-  (scouting lance role matters), extraction. Rolled per engagement by
-  contract kind and lance role; each has its own force-ratio, objective
-  weight and salvage access. AAR names the scenario.
+- ✅ 12C.9 **Scenario types** (AtB scenario table, `data/tables/scenarios.zon`
+  + `domain/scenario.zig`): stand-up fight, hold the line, breakthrough,
+  ambush, convoy escort, base defence, recon in force, extraction — a d6
+  table per contract kind. Each scales the enemy (`enemy_bp`), tilts the
+  engagement roll (`roll_mod`, an ambush −2) with a scouting lance giving
+  some back (`scout_bonus`), sets the salvage share of a held field
+  (raids strip nothing), weights the contract score (`score_mult` 2 for
+  breakthroughs, base defence and extractions) and, for convoy escorts,
+  puts the support train in the line of fire on a defeat. The AAR header
+  names the scenario and its shift.
 - ⬜ 12C.10 **Terrain and weather**: per-world terrain class from
   `planets.zon` (plains, hills, forest, urban, badlands, jungle, tundra),
   weather rolled per battle (clear, rain, snow, storm, night, dust); each

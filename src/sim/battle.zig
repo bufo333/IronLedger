@@ -267,10 +267,15 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
         return;
     }
 
+    // What kind of fight this is (12C.9, AtB scenario table): it scales
+    // the enemy, tilts the roll, weights the score and decides what a
+    // held field is worth.
+    const scenario = @import("../domain/scenario.zig").roll(&gs.rng, .battle, c.kind);
+
     // Enemy: strength relative to the player's committed BV, pirate rabble
     // to house regulars by employer's foe.
     const variance: types.Bp = (@as(types.Bp, gs.rng.roll2d6(.battle)) - 7) * 500;
-    var enemy_bv = types.applyBp(player.bv, contract_mod.enemyStrengthBp(c.kind) + variance);
+    var enemy_bv = types.applyBp(types.applyBp(player.bv, contract_mod.enemyStrengthBp(c.kind) + variance), scenario.enemy_bp);
     // Attrition contracts (Stage 9E): the enemy can only field what's left
     // of their pool.
     if (c.objective == .attrition and c.enemy_pool_remaining > 0) enemy_bv = @min(enemy_bv, c.enemy_pool_remaining);
@@ -284,7 +289,10 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
 
     // One opposed roll decides the engagement (rounds within are abstracted;
     // ARCH §7 steps 3–4 collapse into the margin).
-    var roll = @as(i32, gs.rng.roll2d6(.battle)) + ratioBonus(player.power, enemy_power);
+    // The scenario's tilt, and what scouts give back (an ambush spotted
+    // is half an ambush).
+    const scenario_mod: i32 = @as(i32, scenario.roll_mod) + (if (player.mods.recon_quality > 0) @as(i32, scenario.scout_bonus) else 0);
+    var roll = @as(i32, gs.rng.roll2d6(.battle)) + ratioBonus(player.power, enemy_power) + scenario_mod;
     // Edge (12B.6): a pilot with Edge to spend re-rolls a lost engagement once per contract.
     var edge_used_by: ?*person_mod.Person = null;
     if (roll < 6) {
@@ -294,7 +302,7 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
             if (p.has("edge") and !p.edge_spent) {
                 p.edge_spent = true;
                 edge_used_by = p;
-                roll = @as(i32, gs.rng.roll2d6(.battle)) + ratioBonus(player.power, enemy_power);
+                roll = @as(i32, gs.rng.roll2d6(.battle)) + ratioBonus(player.power, enemy_power) + scenario_mod;
                 break;
             }
         }
@@ -414,7 +422,7 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     // Salvage is things, not money (Stage 12.23): your share of what the
     // crews haul off a held field becomes wrecks and parts crated to the
     // home HQ depot — to store, strip, or rebuild into a working hull.
-    var salvage_bv: i64 = if (held_field) @divTrunc(haulable_bv * c.terms.salvage_pct, 100) else 0;
+    var salvage_bv: i64 = if (held_field) types.applyBp(@divTrunc(haulable_bv * c.terms.salvage_pct, 100), scenario.salvage_bp) else 0;
     if (player.mods.has_salvage_lance) salvage_bv = types.applyBp(salvage_bv, tuning.battle.salvage_lance_bonus_bp); // crews strip fast
     // The liaison's cut (12B.1): under tighter command rights the employer
     // claims part of what you haul.
@@ -484,14 +492,17 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     }
     gs.stats.enemy_bv_destroyed += @intCast(@max(0, enemy_destroyed_bv));
 
-    const score_delta: i32 = switch (outcome) {
-        .decisive_victory => 2,
+    const score_delta: i32 = @as(i32, scenario.score_mult) * switch (outcome) {
+        .decisive_victory => @as(i32, 2),
         .victory => 1,
         .draw => 0,
         .defeat => c.terms.command_rights.defeatScore(),
         .rout => -2,
     };
     c.score += score_delta;
+    // A convoy escort lost is a convoy hit (12C.9): the support train takes it.
+    const convoy_hit = scenario.support_exposed and (outcome == .defeat or outcome == .rout);
+    if (convoy_hit) @import("contract_events.zig").damageRandomUnits(gs, c.assigned_company, if (outcome == .rout) 2 else 1, .support);
     var morale_delta: i32 = switch (outcome) {
         .decisive_victory => 5,
         .victory => 3,
@@ -516,10 +527,13 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     };
 
     const ctx: @import("state.zig").LogCtx = .{ .company = c.assigned_company, .contract = c.id };
-    try gs.log(.battle, ctx, "[AAR] {s} vs {s}: {s} — power {d} vs {d} (recon {d}, fatigue {d}, morale {d}){s}", .{
-        @tagName(c.kind),        c.enemy_key,            @tagName(outcome),
-        player.power,            enemy_power,            player.mods.recon_quality,
-        player.mods.avg_fatigue, player.mods.avg_morale, if (edge_used_by) |p| try std.fmt.allocPrint(gs.allocator(), " · {s} spent Edge to re-roll a lost engagement", .{try p.rankedName(gs.allocator())}) else "",
+    try gs.log(.battle, ctx, "[AAR] {s} vs {s} — {s}: {s} — power {d} vs {d} (recon {d}, fatigue {d}, morale {d}{s}){s}{s}", .{
+        @tagName(c.kind),        c.enemy_key,            scenario.name,
+        @tagName(outcome),       player.power,           enemy_power,
+        player.mods.recon_quality, player.mods.avg_fatigue, player.mods.avg_morale,
+        if (scenario_mod != 0) try std.fmt.allocPrint(gs.allocator(), ", scenario {s}{d} to the roll", .{ if (scenario_mod > 0) "+" else "", scenario_mod }) else "",
+        if (convoy_hit) " · the convoy was hit — support train damaged" else "",
+        if (edge_used_by) |p| try std.fmt.allocPrint(gs.allocator(), " · {s} spent Edge to re-roll a lost engagement", .{try p.rankedName(gs.allocator())}) else "",
     });
     try gs.log(.battle, ctx, "[AAR]   losses: {d} hit / {d} destroyed, {d} wounded, {d} KIA | enemy losses {d} BV ≈ {d} kill{s} credited{s} | salvage {d} BV claimed | comp {d} | score {d}", .{
         hits, destroyed, wounded, kia, enemy_destroyed_bv, kills_credited, if (kills_credited == 1) "" else "s", if (captured > 0) try std.fmt.allocPrint(gs.allocator(), ", {d} prisoner{s} taken (inbox)", .{ captured, if (captured == 1) "" else "s" }) else "", salvage, comp, c.score,

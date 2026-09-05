@@ -77,6 +77,9 @@ pub fn build(b: *std.Build) void {
     mod.addAnonymousImport("factions_zon", .{
         .root_source_file = b.path("data/tables/factions.zon"),
     });
+    mod.addAnonymousImport("scenarios_zon", .{
+        .root_source_file = b.path("data/tables/scenarios.zon"),
+    });
 
     // Persistence (Stage 11): the system SQLite library, bound by hand in
     // src/persist/sqlite.zig (no translate-c dependency).
