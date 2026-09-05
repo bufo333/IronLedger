@@ -2825,26 +2825,26 @@ test "9D: one HQ, one company — the second needs a second regional HQ" {
     try std.testing.expectEqual(home, gs.force(alpha).?.supplying_hq);
     try std.testing.expectError(Error.CapacityFull, execute(&gs, .{ .new_company = "Bravo" }));
 
-    // Found a field HQ on a reachable world: no combat slots there either.
+    // Found a field HQ on a reachable world: a forward base that hosts one
+    // company as it stands (play feedback), and only one.
     gs.funds = 20_000_000;
     try std.testing.expectError(Error.NotReachable, execute(&gs, .{ .found_hq = .{ .name = "Far", .planet_key = "callison" } }));
     _ = try execute(&gs, .{ .found_hq = .{ .name = "Firebase", .planet_key = "zebebelgenubi" } });
     const fb = gs.hqs.keys()[1];
-    try std.testing.expectError(Error.CapacityFull, execute(&gs, .{ .new_company_at = .{ .name = "Bravo", .hq = fb } }));
+    const bravo = (try execute(&gs, .{ .new_company_at = .{ .name = "Bravo", .hq = fb } })).created_force;
+    try std.testing.expectEqual(fb, gs.force(bravo).?.supplying_hq);
+    try std.testing.expectError(Error.CapacityFull, execute(&gs, .{ .new_company_at = .{ .name = "Charlie", .hq = fb } }));
 
     // Fund it (the courier takes as long as the jumps take), upgrade it to
-    // regional, wait out the build: now it can host.
+    // regional, wait out the build: still one company, now with full service.
     _ = try execute(&gs, .{ .transfer = .{ .from = .outfit, .to = .{ .hq = fb }, .amount = 4_000_000 } });
     while (gs.fund_couriers.items.len > 0) _ = try execute(&gs, .{ .advance_days = 5 });
     _ = try execute(&gs, .{ .upgrade_tier = fb });
     const p = gs.hqs.values()[1].projects.items[0];
     _ = try execute(&gs, .{ .advance_days = p.construction_done_day - gs.clock.day_index + 1 });
     try std.testing.expectEqual(@import("../domain/hq.zig").HqTier.regional, gs.hqs.values()[1].tier);
-    // Unstaffed, its bay runs at level 0 and can't host a 4-lance company.
-    try std.testing.expectError(Error.TooManyLances, execute(&gs, .{ .new_company_at = .{ .name = "Bravo", .hq = fb } }));
     _ = try execute(&gs, .{ .autostaff = fb });
-    const bravo = (try execute(&gs, .{ .new_company_at = .{ .name = "Bravo", .hq = fb } })).created_force;
-    try std.testing.expectEqual(fb, gs.force(bravo).?.supplying_hq);
+    try std.testing.expectError(Error.CapacityFull, execute(&gs, .{ .new_company_at = .{ .name = "Charlie", .hq = fb } }));
 
     // Link the two: shipments between them ride the link and count against it.
     _ = try execute(&gs, .{ .link = .{ .a = home, .b = fb, .level = 1 } });

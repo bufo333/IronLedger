@@ -140,6 +140,64 @@ const Result = commands.Result;
     }
 }
 
+/// The warehouse a deployed company's line should ship from: the HQ
+/// nearest the company that holds the whole shipment, else the nearest
+/// that holds any of it, else home. Distance is by star map.
+pub fn bestSupplyHq(gs: *GameState, company: types.ForceId, key: []const u8, want: u32, home: types.HqId) types.HqId {
+    const here_key: ?[]const u8 = if (gs.deploymentContract(company)) |c| c.planet_key else if (gs.force(company)) |f| f.location_planet else null;
+    const here = planet_mod.find(here_key orelse return home) orelse return home;
+    var best_full: types.HqId = .none;
+    var best_full_d: u32 = std.math.maxInt(u32);
+    var best_some: types.HqId = .none;
+    var best_some_d: u32 = std.math.maxInt(u32);
+    var it = gs.hqs.iterator();
+    while (it.next()) |e| {
+        const hq = e.value_ptr;
+        const on_hand = gs.stockCount(.{ .hq = hq.id }, key);
+        if (on_hand == 0) continue;
+        const w = planet_mod.find(hq.planet_key) orelse continue;
+        const d = planet_mod.distanceLy(w, here);
+        if (on_hand >= want and d < best_full_d) {
+            best_full = hq.id;
+            best_full_d = d;
+        }
+        if (d < best_some_d) {
+            best_some = hq.id;
+            best_some_d = d;
+        }
+    }
+    if (best_full != .none) return best_full;
+    if (best_some != .none) return best_some;
+    return home;
+}
+
+test "forward depot: the nearest HQ holding the line ships it, the home HQ otherwise" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 909 });
+    defer gs.deinit();
+    const commands = @import("commands.zig");
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    const home = gs.hqs.keys()[0];
+    const co = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
+    // A firebase on a world inside the ring; the company idles on that very world.
+    const home_world = planet_mod.find(gs.hqs.getPtr(home).?.planet_key).?;
+    var fb_key: []const u8 = "";
+    for (planet_mod.catalog) |*p| if (p != home_world and planet_mod.distanceLy(p, home_world) <= gs.hqs.getPtr(home).?.influenceLy() and fb_key.len == 0) {
+        fb_key = p.key;
+    };
+    _ = try commands.execute(&gs, .{ .found_hq = .{ .name = "Firebase", .planet_key = fb_key } });
+    const fb = gs.hqs.keys()[1];
+    gs.force(co).?.location_planet = fb_key;
+    // Only home has provisions: home ships. Stock the firebase: it wins on distance.
+    try std.testing.expectEqual(home, bestSupplyHq(&gs, co, "provisions", 10, home));
+    try gs.addStock(.{ .hq = fb }, "provisions", 4);
+    try std.testing.expectEqual(home, bestSupplyHq(&gs, co, "provisions", 10, home)); // home covers the whole shipment
+    try gs.addStock(.{ .hq = fb }, "provisions", 20);
+    try std.testing.expectEqual(fb, bestSupplyHq(&gs, co, "provisions", 10, home));
+    // The firebase can host the company now (field capacity 1).
+    try gs.assignCompanyToHq(co, fb);
+    try std.testing.expectEqual(fb, gs.force(co).?.supplying_hq);
+}
+
 /// Warehouse reorder points (Stage 12): every line an HQ keeps stocked is
 /// checked daily; under `min` the shortfall to `target` is fabricated
 /// (components, when the HQ has a bay) or ordered through the catalogue.

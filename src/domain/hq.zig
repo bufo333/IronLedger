@@ -216,11 +216,18 @@ pub const Hq = struct {
 
         return switch (self.tier) {
             .field => .{
-                // Hosts a deployed company's presence; supports nothing new.
-                .combat_companies = 0,
-                .lances_per_company = 3,
-                .support_companies = 0,
-                .support_lances = 0,
+                // A forward base: one company can rest, resupply and stage
+                // here (play feedback). What it lacks is whatever needs a
+                // facility it has not built — no training without a
+                // training ground, no structural repair without a mek bay,
+                // no hiring without a hall.
+                // It hosts a company as it stands (three line lances and a
+                // recon lance); it builds nothing — the fifth lance needs a
+                // regional bay.
+                .combat_companies = 1,
+                .lances_per_company = 4,
+                .support_companies = 1,
+                .support_lances = 4,
                 .air_companies = 0,
                 .dropship_berths = 0,
                 .jumpship_berths = 0,
@@ -329,7 +336,9 @@ test "capacity: field < regional < brigade; facilities open slots" {
     try std.testing.expectEqual(@as(u8, 1), cap.jumpship_berths);
 
     hq.tier = .field;
-    try std.testing.expectEqual(@as(u8, 0), hq.capacity().combat_companies);
+    try std.testing.expectEqual(@as(u8, 1), hq.capacity().combat_companies); // a forward base hosts one
+    try std.testing.expectEqual(@as(u8, 4), hq.capacity().lances_per_company); // as it stands, never a fifth
+    try std.testing.expectEqual(@as(u8, 0), hq.capacity().air_companies);
     hq.tier = .brigade;
     try std.testing.expect(hq.capacity().combat_companies > 1);
 }

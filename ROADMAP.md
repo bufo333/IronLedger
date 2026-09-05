@@ -919,6 +919,15 @@ item: tests green, both smokes, ROADMAP tick, one commit.
   them from the AAR lines the log kept (outcome from the header, hulls
   lost / KIA / enemy BV from the losses line, wrecks from the salvage
   line); the next save writes them down for good.
+- ✅ Firebases made useful (play feedback 2026-09-05: "what is the point of
+  a firebase if it cannot host a company"). (1) Forward depot: a deployed
+  company's resupply line ships from whichever HQ warehouse is nearest
+  that holds the whole shipment (else the nearest with any of it, else
+  home) — `tick.bestSupplyHq`; the log names the source. (2) Basing: a
+  field HQ hosts one company as it stands (four combat lances, a support
+  company) to rest, resupply and stage; it lacks whatever needs a
+  facility it has not built, and the HQ tier line says which (training
+  ground, mek bay, hiring hall) — `u` builds them there.
 - ✅ 12C.15 **Tech target numbers**: `GameState.hullHours` scales the
   class table by quality (`hours_quality_bp`: an A-grade wreck wants ×1.5,
   an F-grade machine ×0.8) and by an exotic design (`hours_exotic_bp`,

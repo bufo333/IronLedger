@@ -112,8 +112,11 @@ the day now.
 ### Logistics and the HQ network
 
 - **Regional HQs project influence rings**; beachhead contracts let you
-  found field HQs beyond them and raise them to regional through
-  paperwork and construction. Facilities (mek bay, warehouse, hospital,
+  found field HQs beyond them. A field HQ is a forward base: it hosts one
+  company to rest, resupply and stage, its warehouse ships convoys to
+  whichever deployed company it is nearest, and it lacks only what needs
+  a facility it has not built. Raise it to regional through paperwork
+  and construction. Facilities (mek bay, warehouse, hospital,
   mess, training ground, hiring hall, comms, spaceport) upgrade the same
   way and raise the staff you must keep.
 - **The back office is staff**: command admins shorten paperwork,

@@ -1341,7 +1341,18 @@ pub fn hqDetail(alloc: Alloc, gs: *GameState, id: types.HqId) ![]const []const u
                 for (h.projects.items) |p| if (p.kind == .tier_upgrade) {
                     upgrading = p;
                 };
-                try out.append(alloc, "tier       {c}field HQ — hosts no company{/} (a beachhead: staff, funds, a supply link)");
+                try out.append(alloc, try std.fmt.allocPrint(alloc, "tier       {{a}}field HQ{{/}} — a forward base: hosts one company ({d} here{s}) to rest, resupply and stage · convoys ship from whichever HQ warehouse is nearest with the line", .{ hosted, if (hosted == 0) ", {g}slot free{/}" else "" }));
+                {
+                    const tg = h.effectiveFacilityLevel(.training_ground);
+                    const bay = h.effectiveFacilityLevel(.mek_bay);
+                    const hh = h.effectiveFacilityLevel(.hiring_hall);
+                    try out.append(alloc, try std.fmt.allocPrint(alloc, "           lacks: {s}{s}{s}{s}", .{
+                        if (tg == 0) "{c}training ground{/} (no training) · " else "",
+                        if (bay == 0) "{c}mek bay{/} (no structural repair) · " else "",
+                        if (hh == 0) "{c}hiring hall{/} (no walk-ins) · " else "",
+                        if (tg == 0 or bay == 0 or hh == 0) "{d}u builds any of them here{/}" else "{g}nothing — every service a regional HQ has{/}",
+                    }));
+                }
                 if (upgrading) |p| {
                     try out.append(alloc, try std.fmt.allocPrint(alloc, "           {{a}}regional upgrade under way{{/}} · paperwork done d{d} · construction done d{d} (today d{d})", .{ p.paperwork_done_day, p.construction_done_day, gs.clock.day_index }));
                 } else {
@@ -3219,7 +3230,7 @@ test "hq detail says a field HQ hosts no company and how to raise it" {
     var says_none = false;
     var says_how = false;
     for (lines) |l| {
-        if (std.mem.indexOf(u8, l, "hosts no company") != null) says_none = true;
+        if (std.mem.indexOf(u8, l, "hosts one company") != null and std.mem.indexOf(u8, l, "field HQ") != null) says_none = true;
         if (std.mem.indexOf(u8, l, "to regional") != null and std.mem.indexOf(u8, l, "days build") != null) says_how = true;
     }
     try std.testing.expect(says_none and says_how);

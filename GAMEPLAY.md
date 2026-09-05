@@ -64,10 +64,16 @@ A regional HQ supports exactly:
 | Dropship berths | 1 | spaceport levels |
 | Jumpship berths | 0 | spaceport + comms levels |
 
-A brigade HQ (your home base, one only) carries roughly double. Field HQs
-support a deployed company's *presence* but almost nothing else. **Want a
-second company? You need a second regional HQ** — with the staff, upkeep, and
-supply line that implies. Growth is infrastructure-first, always.
+A brigade HQ (your home base, one only) carries roughly double. A field HQ
+is a forward base: one company can be based there to rest, resupply and
+stage, and any deployed company's convoys ship from whichever of your
+warehouses is nearest with the line — so a stocked firebase beside the
+fighting shortens every convoy. What a field HQ lacks is whatever needs a
+facility it has not built: no training without a training ground, no
+structural repair without a mek bay, no hiring without a hall. Build them
+there or raise it to regional. **Want a second company at full service? You
+need a second regional HQ** — with the staff, upkeep, and supply line that
+implies. Growth is infrastructure-first, always.
 
 ## Upgrades: C-bills are the cheap part
 
