@@ -102,9 +102,9 @@ pub const Tuning = struct {
         monthly_service_xp: u32,
         /// Turnover (Stage 12.20, AtB retirement/defection abstracted):
         /// after `turnover_min_tenure_months`, anyone whose morale is under
-        /// `restless_morale` or fatigue over `exhausted_fatigue` rolls 2d6
-        /// each payday; under `turnover_target` (+1 per restless flag) they
-        /// hand in their notice. Long service (`retire_tenure_months`)
+        /// `restless_morale` or fatigue over `exhausted_fatigue` rolls each
+        /// payday against `turnover_chance_bp` per restless flag (both flags
+        /// double it); a hit is a notice in the inbox, not a walkout. Long service (`retire_tenure_months`)
         /// retires instead of resigning.
         /// Garrison duty is nearly home (12.30): weekly fatigue recovery in
         /// the field on garrison-class work as a share of the home rate,
@@ -114,7 +114,7 @@ pub const Tuning = struct {
         turnover_min_tenure_months: u32,
         restless_morale: u8,
         exhausted_fatigue: u8,
-        turnover_target: u8,
+        turnover_chance_bp: types.Bp,
         retire_tenure_months: u32,
     },
     unit: struct {

@@ -93,7 +93,7 @@
         .turnover_min_tenure_months = 12,
         .restless_morale = 30,
         .exhausted_fatigue = 70,
-        .turnover_target = 5,
+        .turnover_chance_bp = 1_000, // 10% a month per restless flag, 20% exhausted and unhappy
         .retire_tenure_months = 60,
     },
     .unit = .{

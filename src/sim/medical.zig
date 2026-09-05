@@ -262,8 +262,8 @@ pub fn runMonthlyTurnover(gs: *GameState) !u32 {
         if (isDeployed(gs, p)) continue;
         const restless = p.restlessness();
         if (restless == 0) continue;
-        const roll = gs.rng.roll2d6(.medical);
-        if (roll >= t.turnover_target + restless) continue;
+        const chance: u32 = @as(u32, restless) * @as(u32, @intCast(t.turnover_chance_bp));
+        if (gs.rng.random(.medical).uintLessThan(u32, 10_000) >= chance) continue;
         // Notice, not a disappearance (12.25): the inbox offers a raise, a
         // bonus, a replacement from the hall, or the door.
         try @import("contract_events.zig").queueNotice(gs, p.id);
@@ -500,6 +500,9 @@ test "12.20/12.25: the restless hand in notice after a year (an inbox decision),
     }
     const notices = try runMonthlyTurnover(&gs);
     try std.testing.expect(notices > 0 and notices < gs.people.count());
+    // Exhausted and unhappy is a one-in-five month, not a stampede.
+    const pct = notices * 100 / @as(u32, @intCast(gs.people.count()));
+    try std.testing.expect(pct >= 8 and pct <= 35);
     try std.testing.expectEqual(@as(usize, notices), gs.event_queue.pending.items.len);
     var gone: u32 = 0;
     var rit = gs.people.iterator();
