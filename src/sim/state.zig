@@ -1319,7 +1319,12 @@ pub const GameState = struct {
             const u = entry.value_ptr;
             if (self.companyOf(u.force) != company or u.status == .destroyed or u.status == .mothballed) continue;
 
-            if (u.pilot == .none or !(self.person(u.pilot) orelse continue).isAvailable(self.clock.day_index)) {
+            // A seat needs filling when empty or its pilot is away; a spent
+            // pilot (12C.1) is benched only when someone fresher is free.
+            const seated = if (u.pilot != .none) self.person(u.pilot) else null;
+            const pilot_missing = seated == null or !seated.?.isAvailable(self.clock.day_index);
+            const pilot_spent = seated != null and seated.?.isUnfit();
+            if (pilot_missing or pilot_spent) {
                 const role = unit_mod.crewRoleFor(u.kind);
                 var pit = self.people.iterator();
                 var found = false;
@@ -1328,11 +1333,12 @@ pub const GameState = struct {
                     if (p.role != role or !p.isAvailable(self.clock.day_index) or p.posted_hq != .none) continue;
                     if (self.companyOf(p.assigned_force) != company and p.assigned_force != .none) continue;
                     if (self.pilotSeat(p.id) != .none) continue;
+                    if (pilot_spent and p.isUnfit()) continue; // no better off
                     self.assignSlot(u.id, .pilot, p.id) catch continue;
                     found = true;
                     break;
                 }
-                if (!found) open += 1;
+                if (!found and pilot_missing) open += 1;
             }
             if (unit_mod.techRoleFor(u.kind)) |role| {
                 if (u.tech == .none or !(self.person(u.tech) orelse continue).isAvailable(self.clock.day_index)) {
@@ -1731,4 +1737,27 @@ test "postTransaction keeps funds and ledger in lockstep" {
     try gs.postTransaction(.{ .day = 0, .amount = -300_000, .category = .unit_purchase });
     try std.testing.expectEqual(@as(types.CBills, 700_000), gs.funds);
     try std.testing.expectEqual(@as(types.CBills, -300_000), gs.ledger.balance());
+}
+
+test "12C.1: auto-assign benches a spent pilot when a fresher one is free, keeps them when nobody is" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 121 });
+    defer gs.deinit();
+    _ = try gs.createCommander("T", .LC, .paymaster);
+    const co = try gs.createForce("Alpha", .company, .none);
+    const lance = try gs.createForce("1st", .lance, co);
+    const mek = try gs.addUnit("LCT-1V");
+    gs.unit(mek).?.force = lance;
+    const worn = try gs.hirePerson("Worn", "Out", .mekwarrior);
+    gs.person(worn).?.assigned_force = co;
+    gs.person(worn).?.fatigue = 100;
+    try gs.assignSlot(mek, .pilot, worn);
+    // Alone, the spent pilot keeps the seat; only the tech slot counts as open.
+    try std.testing.expectEqual(@as(u32, 1), try gs.autoAssign(co));
+    try std.testing.expectEqual(worn, gs.unit(mek).?.pilot);
+    // A fresh pilot on the books takes over.
+    const fresh = try gs.hirePerson("Fresh", "Face", .mekwarrior);
+    gs.person(fresh).?.assigned_force = co;
+    _ = try gs.autoAssign(co);
+    try std.testing.expectEqual(fresh, gs.unit(mek).?.pilot);
+    try std.testing.expect(gs.pilotSeat(worn) == .none);
 }

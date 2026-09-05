@@ -146,9 +146,10 @@ fn playerSide(gs: *GameState, c: *const contract_mod.Contract) !SideState {
             quality_sum += @intFromEnum(u.quality);
             // Old wounds ride along: a permanent head injury is a point of
             // skill lost for good (Stage 12.16).
-            // Specialists (12B.6) count a point better; old wounds a point worse.
-            gunnery_sum += ((pilot.skill(.gunnery_mek) orelse 4) + pilot.permanentPenalty()) -| @intFromBool(pilot.has("gunnery_specialist"));
-            piloting_sum += ((pilot.skill(.piloting_mek) orelse 5) + pilot.permanentPenalty()) -| @intFromBool(pilot.has("piloting_specialist"));
+            // Specialists (12B.6) count a point better; old wounds a point
+            // worse; a tired pilot one to three worse (12C.1 fatigue bands).
+            gunnery_sum += ((pilot.skill(.gunnery_mek) orelse 4) + pilot.permanentPenalty() + pilot.fatiguePenalty()) -| @intFromBool(pilot.has("gunnery_specialist"));
+            piloting_sum += ((pilot.skill(.piloting_mek) orelse 5) + pilot.permanentPenalty() + pilot.fatiguePenalty()) -| @intFromBool(pilot.has("piloting_specialist"));
             try side.engaged.append(gs.allocator(), uid);
             n += 1;
         }

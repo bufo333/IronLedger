@@ -36,6 +36,9 @@ pub const WarningKind = enum {
     /// (astechs, doctors, medics, office) — quietly slowing repairs and
     /// healing (12B.11).
     manning_short,
+    /// Seated pilots in the spent fatigue band (12C.1): +3 to gunnery and
+    /// piloting until they rest; the auto-assigner benches them when it can.
+    unfit_crew,
 };
 
 /// Does any working weapon in the company draw on this munition family?
@@ -121,6 +124,20 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
             if (p.status == .active and p.tenureMonths(day) >= t.turnover_min_tenure_months and p.restlessness() > 0) restless += 1;
         }
         if (restless > 0) try out.append(alloc, .{ .kind = .restless_crew, .text = try std.fmt.allocPrint(alloc, "{d} restless (morale < {d} or fatigue > {d}, a year in) — they roll to quit on payday: rotate home, grant leave, feed and rest them", .{ restless, t.restless_morale, t.exhausted_fatigue }) });
+    }
+
+    // Spent pilots still in a seat (12C.1).
+    {
+        var n: u32 = 0;
+        var uit = gs.units.iterator();
+        while (uit.next()) |e| {
+            const u = e.value_ptr;
+            if (u.status == .destroyed or u.status == .mothballed or u.pilot == .none) continue;
+            if (gs.person(u.pilot)) |p| if (p.status == .active and p.isUnfit()) {
+                n += 1;
+            };
+        }
+        if (n > 0) try out.append(alloc, .{ .kind = .unfit_crew, .text = try std.fmt.allocPrint(alloc, "{d} spent pilot{s} still seated (fatigue {d}+: +3 gunnery and piloting) — Forces A seats fresher crews, leave and rest bring them back", .{ n, if (n == 1) "" else "s", @import("../domain/tuning.zig").t.person.fatigue_spent }) });
     }
 
     // Decisions about to default.
@@ -278,6 +295,26 @@ test "the checklist names open slots and overloaded techs" {
         if (w.kind == .open_slots) saw_open = true;
     }
     try std.testing.expect(saw_open);
+}
+
+test "12C.1: a spent pilot in a seat is a checklist warning" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 62 });
+    defer gs.deinit();
+    const co = try gs.createForce("Alpha", .company, .none);
+    const uid = try gs.addUnit("AS7-D");
+    try gs.assignUnit(uid, co, .none);
+    const pid = try gs.hirePerson("Worn", "Out", .mekwarrior);
+    gs.person(pid).?.assigned_force = co;
+    try gs.assignSlot(uid, .pilot, pid);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    for (try turnWarnings(&gs, arena.allocator())) |w| try std.testing.expect(w.kind != .unfit_crew);
+    gs.person(pid).?.fatigue = 100;
+    var saw = false;
+    for (try turnWarnings(&gs, arena.allocator())) |w| if (w.kind == .unfit_crew) {
+        saw = true;
+    };
+    try std.testing.expect(saw);
 }
 
 test "dry-ammo warning names only the families the company fires" {

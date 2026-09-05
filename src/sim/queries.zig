@@ -188,7 +188,7 @@ fn jumpFor(kind: checklist.WarningKind) u8 {
         .hungry, .dry_ammo => 5,
         .understaffed_hq, .depot_backlog => 6,
         .untreated_wounded, .restless_crew => 8,
-        .manning_short => 2,
+        .manning_short, .unfit_crew => 2,
     };
 }
 
@@ -1960,6 +1960,9 @@ pub const ReadinessRow = struct {
     deployed: bool,
     heads: u32,
     fatigue: u32,
+    /// Heads in the tired-or-worse bands and in the spent band (12C.1).
+    tired: u32 = 0,
+    spent: u32 = 0,
     morale: u32,
     wounded: u32,
     permanent: u32,
@@ -2012,6 +2015,8 @@ pub fn readiness(alloc: Alloc, gs: *GameState) ![]ReadinessRow {
             row.heads += 1;
             fat += p.fatigue;
             mor += p.morale;
+            if (p.fatigueBand() != .fresh) row.tired += 1;
+            if (p.isUnfit()) row.spent += 1;
             if (p.status == .wounded) row.wounded += 1;
             if (p.permanentPenalty() > 0) row.permanent += 1;
             if (p.training != null) row.training += 1;
@@ -2031,7 +2036,8 @@ pub fn readiness(alloc: Alloc, gs: *GameState) ![]ReadinessRow {
             if (u.needsDepot()) row.depot += 1;
         }
         if (row.hulls > 0) row.avg_quality = @enumFromInt(qsum / row.hulls);
-        const fat_mk: []const u8 = if (row.fatigue >= 60) "{c}" else if (row.fatigue >= 30) "{a}" else "{g}";
+        const tpb = @import("../domain/tuning.zig").t.person;
+        const fat_mk: []const u8 = if (row.fatigue >= tpb.exhausted_fatigue) "{c}" else if (row.fatigue >= tpb.fatigue_tired) "{a}" else "{g}";
         const mor_mk: []const u8 = if (row.morale < 30) "{c}" else if (row.morale < 50) "{a}" else "{g}";
         const rot: []const u8 = if (row.days_since_rotation) |d| try std.fmt.allocPrint(alloc, "{d} tours · {d}d", .{ row.contracts_since_rotation, d }) else try std.fmt.allocPrint(alloc, "{d} tours", .{row.contracts_since_rotation});
         row.text = try std.fmt.allocPrint(alloc, "{s} {s} {d: >5}  {s}{d: >7}{{/}}  {s}{d: >6}{{/}}  {s}{d: >7}{{/}}  {d: >4}  {d: >8}  {d: >9}  {d: >5}  {s}{d: >5}{{/}}  {s: >7}  {s}", .{
@@ -2072,10 +2078,14 @@ pub fn readinessLines(alloc: Alloc, gs: *GameState, company: types.ForceId) ![]c
         return out.toOwnedSlice(alloc);
     };
     const day = gs.clock.day_index;
-    try out.append(alloc, try std.fmt.allocPrint(alloc, "{d} personnel · fatigue {s}{d}{{/}} · morale {s}{d}{{/}} · {s} · {d} contracts since rotation{s}", .{
+    const tp = @import("../domain/tuning.zig").t.person;
+    try out.append(alloc, try std.fmt.allocPrint(alloc, "{d} personnel · fatigue {s}{d}{{/}} ({d} tired, {s}{d} spent{{/}}) · morale {s}{d}{{/}} · {s} · {d} contracts since rotation{s}", .{
         r.heads,
-        if (r.fatigue >= 60) "{c}" else if (r.fatigue >= 30) "{a}" else "{g}",
+        if (r.fatigue >= tp.exhausted_fatigue) "{c}" else if (r.fatigue >= tp.fatigue_tired) "{a}" else "{g}",
         r.fatigue,
+        r.tired,
+        if (r.spent > 0) "{c}" else "{g}",
+        r.spent,
         if (r.morale < 30) "{c}" else if (r.morale < 50) "{a}" else "{g}",
         r.morale,
         if (r.deployed) "{a}deployed{/}" else if (gs.isCompanyHome(company)) "at home" else "afield",
@@ -2117,7 +2127,14 @@ pub fn personRecord(alloc: Alloc, gs: *GameState, id: types.PersonId) ![]const [
     try out.append(alloc, try std.fmt.allocPrint(alloc, "assignment  {s}", .{try assignmentText(alloc, gs, p)}));
     try out.append(alloc, try std.fmt.allocPrint(alloc, "unit        {s} · at {s}", .{ if (p.assigned_force != .none) forceName(gs, p.assigned_force) else "—", locationText(gs, p) }));
     try out.append(alloc, "");
-    try out.append(alloc, try std.fmt.allocPrint(alloc, "XP {{a}}{d}{{/}} · fatigue {d} · morale {d} · pay {s}/mo · recruited day {d}", .{ p.xp, p.fatigue, p.morale, try money(alloc, p.monthlySalary()), p.recruited_day }));
+    const band = p.fatigueBand();
+    try out.append(alloc, try std.fmt.allocPrint(alloc, "XP {{a}}{d}{{/}} · fatigue {s}{d} {s}{{/}}{s} · morale {d} · pay {s}/mo · recruited day {d}", .{
+        p.xp,                                                                                                     band.markup(),
+        p.fatigue,                                                                                                @tagName(band),
+        if (band.penalty() > 0) try std.fmt.allocPrint(alloc, " (+{d} gunnery/piloting{s})", .{ band.penalty(), if (band == .spent) ", unfit" else "" }) else "",
+        p.morale,                                                                                                 try money(alloc, p.monthlySalary()),
+        p.recruited_day,
+    }));
     try out.append(alloc, "");
     try out.append(alloc, "skill               level   next   XP cost");
     inline for (@typeInfo(types.SkillType).@"enum".fields) |f| {

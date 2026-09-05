@@ -746,12 +746,15 @@ item: tests green, both smokes, ROADMAP tick, one commit.
 
 ### Block A — Personnel economy (CamOps fatigue, AtB shares & retention)
 
-- ⬜ 12C.1 **Fatigue penalties** (CamOps Fatigue rules, MekHQ `Fatigue` option).
-  Bands on `Person.fatigue`: fresh <30, tired 30–59 (+1 to gunnery and
-  piloting in `battle.playerSide`), exhausted 60–79 (+2, readiness flags),
-  spent 80+ (+3, unfit: the auto-assigner benches them and the checklist
-  says so). The MANNING and READINESS panes show the band; a person's
-  record says what it costs them. Knobs `tuning.person.fatigue_bands`.
+- ✅ 12C.1 **Fatigue penalties** (CamOps Fatigue rules, MekHQ `Fatigue` option).
+  Bands on `Person.fatigue`: fresh, tired from 30 (+1 to gunnery and
+  piloting in `battle.playerSide`), exhausted from 70 (+2, the turnover
+  line), spent from 85 (+3 and unfit: the auto-assigner seats a fresher
+  pilot when one is free and the checklist warns about spent pilots still
+  seated). READINESS shows tired/spent counts; a person's record names
+  the band and its cost. Knobs `fatigue_tired`, `exhausted_fatigue`,
+  `fatigue_spent`. The company-average fatigue power modifier in
+  autoresolve stays as the logistics-level effect.
 - ⬜ 12C.2 **Departure payout** (MekHQ retirement bonus / AtB "retirement
   payment"). Leaving on notice, retirement or being let go owes one
   month's salary per full year of service (capped at 12, `// data`),

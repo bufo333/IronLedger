@@ -226,6 +226,25 @@ pub const Person = struct {
         return n;
     }
 
+    /// CamOps fatigue band (12C.1): what tiredness costs in the cockpit.
+    pub fn fatigueBand(self: *const Person) FatigueBand {
+        const t = tuning.person;
+        if (self.fatigue >= t.fatigue_spent) return .spent;
+        if (self.fatigue >= t.exhausted_fatigue) return .exhausted;
+        if (self.fatigue >= t.fatigue_tired) return .tired;
+        return .fresh;
+    }
+
+    /// Points added to gunnery and piloting targets by fatigue (12C.1).
+    pub fn fatiguePenalty(self: *const Person) u8 {
+        return self.fatigueBand().penalty();
+    }
+
+    /// Spent: unfit for a seat while anyone fresher is free (12C.1).
+    pub fn isUnfit(self: *const Person) bool {
+        return self.fatigueBand() == .spent;
+    }
+
     /// Fit for duty today: active, not on leave.
     pub fn isAvailable(self: *const Person, day: u32) bool {
         if (self.status != .active) return false;
@@ -329,6 +348,46 @@ test "spending xp improves a skill and drains the pool" {
 // deploying company.
 
 pub const max_fatigue = tuning.person.max_fatigue;
+
+/// CamOps fatigue bands (12C.1). MekHQ: `Fatigue` option thresholds.
+pub const FatigueBand = enum {
+    fresh,
+    tired,
+    exhausted,
+    spent,
+
+    pub fn penalty(self: FatigueBand) u8 {
+        return switch (self) {
+            .fresh => 0,
+            .tired => 1,
+            .exhausted => 2,
+            .spent => 3,
+        };
+    }
+
+    /// Markup colour for the TUI: green, amber, amber, red.
+    pub fn markup(self: FatigueBand) []const u8 {
+        return switch (self) {
+            .fresh => "{g}",
+            .tired => "{a}",
+            .exhausted => "{a}",
+            .spent => "{c}",
+        };
+    }
+};
+
+test "12C.1: fatigue bands and their penalties" {
+    var p: Person = .{ .id = @enumFromInt(1), .first_name = "A", .last_name = "B", .role = .mekwarrior };
+    p.fatigue = 0;
+    try std.testing.expectEqual(FatigueBand.fresh, p.fatigueBand());
+    p.fatigue = tuning.person.fatigue_tired;
+    try std.testing.expectEqual(@as(u8, 1), p.fatiguePenalty());
+    p.fatigue = tuning.person.exhausted_fatigue;
+    try std.testing.expectEqual(@as(u8, 2), p.fatiguePenalty());
+    p.fatigue = tuning.person.fatigue_spent;
+    try std.testing.expectEqual(@as(u8, 3), p.fatiguePenalty());
+    try std.testing.expect(p.isUnfit());
+}
 
 /// Fatigue gained at the end of a contract, scaled by how long it ran and
 /// how hard it fought: a quiet garrison wears lightly, a bloody raid

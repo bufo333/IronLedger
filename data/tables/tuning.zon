@@ -93,6 +93,8 @@
         .turnover_min_tenure_months = 12,
         .restless_morale = 30,
         .exhausted_fatigue = 70,
+        .fatigue_tired = 30,
+        .fatigue_spent = 85,
         .turnover_target = 3, // 2d6 < 3 + flags: 8.3% a month restless, 16.7% exhausted and unhappy
         .retire_tenure_months = 60,
     },

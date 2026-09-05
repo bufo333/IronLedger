@@ -115,6 +115,12 @@ pub const Tuning = struct {
         turnover_min_tenure_months: u32,
         restless_morale: u8,
         exhausted_fatigue: u8,
+        /// Fatigue bands (12C.1, CamOps fatigue / MekHQ Fatigue option):
+        /// tired from `fatigue_tired` (+1 gunnery & piloting), exhausted
+        /// from `exhausted_fatigue` (+2), spent from `fatigue_spent` (+3 and
+        /// unfit: the auto-assigner seats someone fresher when it can).
+        fatigue_tired: u8,
+        fatigue_spent: u8,
         turnover_target: u8,
         retire_tenure_months: u32,
     },
