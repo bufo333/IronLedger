@@ -195,10 +195,10 @@ the day now.
   borders, 24-bit or 256 colours, and half-block pictures where no
   graphics protocol exists.
 - **A soundtrack** through the system's command-line player: every audio
-  file under `data/music/` plays, loose files as the default soundtrack
-  and each sub-directory (`data/music/lyran/`, `data/music/pirates/` …)
-  as a soundtrack of its own. All of them are mixed into one playlist
-  and reshuffled every launch; `:music` browses soundtracks and tracks,
+  file under `data/music/` plays, each sub-directory as a soundtrack of
+  its own — the game ships `OST`, the score, and `Supplimental Music`,
+  extra tracks that mix in — and any loose files as a default soundtrack.
+  All of them are mixed into one playlist and reshuffled every launch; `:music` browses soundtracks and tracks,
   picks one soundtrack or the mix (remembered between runs), and plays a
   track on demand. `M` toggles music anywhere; Settings has previous,
   next and volume; the status strip names what is playing.
@@ -432,6 +432,10 @@ ending the turn opens the checklist.
 - `docs/tui.md` — the terminal client's architecture, with the generated
   mockups in `docs/tui-mockup.html`.
 - `docs/modding.md` — the data files and how to overlay them.
+- [`docs/iron-ledger-zig-guide.html`](docs/iron-ledger-zig-guide.html) —
+  a newcomer's guide to Zig taught with this project's code, and a tour
+  of how the program is wired together from the build script to a
+  keypress. Open it in a browser.
 - `docs/mekhq-map.md` — which MekHQ concept each module corresponds to.
 
 The terminal client talks to the simulation only through commands and

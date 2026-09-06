@@ -1,0 +1,1016 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Learning Zig through IRON LEDGER</title>
+<style>
+  :root { --bg:#fbfaf7; --fg:#1d1f1c; --dim:#5d635c; --line:#d9d6cc; --code:#f1efe8; --accent:#8a3b12; --kw:#7a1f5c; --str:#2d5f2d; --cm:#6b6b6b; --num:#1f4e8a; }
+  html { scroll-behavior: smooth; }
+  body { margin:0; background:var(--bg); color:var(--fg); font: 16px/1.55 Georgia, "Times New Roman", serif; }
+  .wrap { display:grid; grid-template-columns: 300px 1fr; min-height:100vh; }
+  nav { position:sticky; top:0; height:100vh; overflow:auto; border-right:1px solid var(--line); padding:20px 18px; font: 13px/1.45 -apple-system, Helvetica, Arial, sans-serif; background:#f6f4ee; }
+  nav h2 { font-size:13px; letter-spacing:.08em; text-transform:uppercase; color:var(--dim); margin:18px 0 6px; }
+  nav a { display:block; color:var(--fg); text-decoration:none; padding:2px 0; }
+  nav a:hover { color:var(--accent); }
+  nav .sub { padding-left:12px; color:var(--dim); }
+  main { padding:36px 56px 120px; max-width:960px; }
+  h1 { font-size:34px; margin:0 0 6px; }
+  h2 { font-size:26px; margin:56px 0 12px; border-bottom:2px solid var(--line); padding-bottom:6px; }
+  h3 { font-size:19px; margin:34px 0 8px; }
+  h4 { font-size:16px; margin:24px 0 6px; color:var(--accent); }
+  p, li { max-width:72ch; }
+  pre { background:var(--code); border:1px solid var(--line); border-radius:6px; padding:12px 14px; overflow-x:auto; font: 13px/1.45 "SF Mono", Menlo, Consolas, monospace; }
+  code { font: 0.92em "SF Mono", Menlo, Consolas, monospace; background:var(--code); padding:1px 4px; border-radius:3px; }
+  pre code { background:none; padding:0; }
+  .file { font: 12px -apple-system, Helvetica, sans-serif; color:var(--dim); margin:14px 0 -8px; }
+  .note { border-left:4px solid var(--accent); background:#fff7f1; padding:10px 14px; margin:16px 0; }
+  .try { border-left:4px solid #2d5f2d; background:#f2f8f2; padding:10px 14px; margin:16px 0; }
+  table { border-collapse:collapse; margin:12px 0; font-size:14px; }
+  td, th { border:1px solid var(--line); padding:5px 10px; text-align:left; vertical-align:top; }
+  th { background:#efece3; }
+  .k { color:var(--kw); } .s { color:var(--str); } .c { color:var(--cm); font-style:italic; } .n { color:var(--num); }
+  .lead { font-size:18px; color:var(--dim); }
+  hr { border:0; border-top:1px solid var(--line); margin:40px 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<nav>
+  <h2>Part I · Zig from zero</h2>
+  <a href="#i1">1. What Zig is and why this project uses it</a>
+  <a href="#i2">2. The toolchain and build.zig</a>
+  <a href="#i3">3. Files, imports, visibility</a>
+  <a href="#i4">4. Values, integers, casts</a>
+  <a href="#i5">5. Structs and methods</a>
+  <a href="#i6">6. Enums and typed IDs</a>
+  <a href="#i7">7. Tagged unions and switch</a>
+  <a href="#i8">8. Optionals</a>
+  <a href="#i9">9. Errors, try, catch, defer</a>
+  <a href="#i10">10. Arrays, slices, strings</a>
+  <a href="#i11">11. Pointers</a>
+  <a href="#i12">12. Loops and labeled blocks</a>
+  <a href="#i13">13. Memory: allocators and lists</a>
+  <a href="#i14">14. comptime and reflection</a>
+  <a href="#i15">15. Tests</a>
+  <a href="#i16">16. Talking to C</a>
+  <a href="#i17">17. Zig 0.16: std.Io</a>
+  <h2>Part II · How IRON LEDGER is built</h2>
+  <a href="#p1">18. The architecture in one picture</a>
+  <a href="#p2">19. Data: ZON files become typed tables</a>
+  <a href="#p3">20. GameState: one arena, one dice bag</a>
+  <a href="#p4">21. Commands: the only way in</a>
+  <a href="#p5">22. The daily tick</a>
+  <a href="#p6">23. Queries: the only way out</a>
+  <a href="#p7">24. Money without floats</a>
+  <a href="#p8">25. Battles and events</a>
+  <a href="#p9">26. Persistence: SQLite by hand</a>
+  <a href="#p10">27. The terminal client</a>
+  <a href="#p11">28. Determinism and the test suite</a>
+  <a href="#p12">29. One keypress, end to end</a>
+  <a href="#p13">30. Where to go next</a>
+</nav>
+<main>
+
+<h1>Learning Zig through IRON LEDGER</h1>
+<p class="lead">A newcomer's guide to the Zig language, taught with the real code of a 29,000-line BattleTech mercenary-company simulator, and a tour of how that program is wired together from the build script to a keypress.</p>
+
+<p>This document has two halves. Part I teaches Zig syntax from nothing, and every example is lifted from the project rather than invented, so you meet the language the way it is actually used. Part II walks through the program's design: how a pure simulation core, a data layer, a save system and a terminal client fit together, and why the boundaries sit where they do. You can read it straight through or jump around with the table of contents. Paths like <code>src/sim/rng.zig</code> are relative to the repository root.</p>
+
+<div class="note">Zig version matters. This project is written for <strong>Zig 0.16</strong>, which changed the I/O model (see section 17). Older tutorials on the web often show <code>std.fs.cwd()</code> or <code>std.time.timestamp()</code>; those calls no longer exist in 0.16 and this guide shows the current forms.</div>
+
+<h2 id="i1">1. What Zig is and why this project uses it</h2>
+<p>Zig is a small systems language in the C tradition: manual memory management, no hidden control flow, no hidden allocations, and a compiler that can also build C. What makes it feel modern is that a lot of what other languages do with macros, generics or a runtime, Zig does with <em>compile-time code execution</em>: ordinary Zig functions that run while the program is being compiled.</p>
+<p>IRON LEDGER leans on four Zig properties in particular:</p>
+<ul>
+  <li><strong>No hidden allocation.</strong> Every function that needs memory takes an allocator as a parameter. That makes it easy to keep the simulation core pure and to give the whole campaign one arena that is freed in a single call.</li>
+  <li><strong>Compile-time data.</strong> The game's tables (designs, planets, tuning knobs) are <code>.zon</code> files imported at compile time straight into typed structs. A wrong field is a build error, not a crash on turn 40.</li>
+  <li><strong>Explicit errors.</strong> A function that can fail says so in its type. You cannot forget to handle a failure; the compiler makes you either propagate it or deal with it.</li>
+  <li><strong>C without bindings generators.</strong> SQLite is called through eleven <code>extern fn</code> declarations written by hand. There is no dependency beyond the system library.</li>
+</ul>
+
+<h2 id="i2">2. The toolchain and build.zig</h2>
+<p>There is one tool, <code>zig</code>. It compiles, tests, formats and runs. A project is described by <code>build.zig</code>, which is itself Zig code: a function that builds a graph of steps, which the build runner then executes. Here is the heart of this project's build script.</p>
+<div class="file">build.zig (trimmed)</div>
+<pre><code><span class="k">const</span> std = <span class="k">@import</span>(<span class="s">"std"</span>);
+
+<span class="k">pub fn</span> build(b: *std.Build) <span class="k">void</span> {
+    <span class="k">const</span> target = b.standardTargetOptions(.{});
+    <span class="k">const</span> optimize = b.standardOptimizeOption(.{});
+
+    <span class="c">// The simulation core as a module other code can import as "game".</span>
+    <span class="k">const</span> mod = b.addModule(<span class="s">"game"</span>, .{
+        .root_source_file = b.path(<span class="s">"src/root.zig"</span>),
+        .target = target,
+    });
+
+    <span class="c">// Static game data: .zon files imported at comptime by the sim core.</span>
+    <span class="k">const</span> data_dir = b.option([]<span class="k">const</span> u8, <span class="s">"data"</span>, <span class="s">"Directory overlaying data/*.zon (mod support)"</span>);
+    <span class="k">const</span> DataFile = <span class="k">struct</span> { import_name: []<span class="k">const</span> u8, rel: []<span class="k">const</span> u8 };
+    <span class="k">const</span> data_files = [_]DataFile{
+        .{ .import_name = <span class="s">"chassis_zon"</span>, .rel = <span class="s">"chassis.zon"</span> },
+        .{ .import_name = <span class="s">"tuning_zon"</span>, .rel = <span class="s">"tables/tuning.zon"</span> },
+        <span class="c">// … eleven more</span>
+    };
+    <span class="k">for</span> (data_files) |f| {
+        <span class="k">var</span> path: std.Build.LazyPath = b.path(b.fmt(<span class="s">"data/{s}"</span>, .{f.rel}));
+        <span class="c">// (if -Ddata=&lt;dir&gt; names a file at the same relative path, use it instead)</span>
+        mod.addAnonymousImport(f.import_name, .{ .root_source_file = path });
+    }
+
+    mod.link_libc = <span class="k">true</span>;
+    mod.linkSystemLibrary(<span class="s">"sqlite3"</span>, .{});
+
+    <span class="k">const</span> exe = b.addExecutable(.{
+        .name = <span class="s">"game"</span>,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path(<span class="s">"src/main.zig"</span>),
+            .target = target,
+            .optimize = optimize,
+            .imports = &amp;.{ .{ .name = <span class="s">"game"</span>, .module = mod } },
+        }),
+    });
+    b.installArtifact(exe);
+
+    <span class="k">const</span> mod_tests = b.addTest(.{ .root_module = mod });
+    <span class="k">const</span> test_step = b.step(<span class="s">"test"</span>, <span class="s">"Run tests"</span>);
+    test_step.dependOn(&amp;b.addRunArtifact(mod_tests).step);
+}</code></pre>
+<p>Read it top to bottom. A <em>module</em> is a tree of source files with one root. This project has two: the library module <code>game</code> rooted at <code>src/root.zig</code>, and the executable rooted at <code>src/main.zig</code> which imports <code>game</code>. The executable is the only place that does I/O; the library is pure. <code>addAnonymousImport</code> makes a file importable under a name, and because the files are <code>.zon</code> (Zig Object Notation, the language's data literal syntax), <code>@import("chassis_zon")</code> yields a value, not code. Section 19 comes back to this.</p>
+<p>The commands you will use:</p>
+<pre><code>zig build                      # compile, install to zig-out/bin/game
+zig build test --summary all   # run every test block in the module tree
+zig build run -- --tui         # build and run with arguments after --
+zig build -Ddata=mymod         # a build option declared with b.option
+zig fmt src/                   # the one true formatter</code></pre>
+<div class="try"><strong>Try it.</strong> Run <code>zig build --help</code> in the repository. The <code>-Ddata</code> option you see listed is the one declared by <code>b.option</code> above; Zig generates the help text from the declaration.</div>
+
+<h2 id="i3">3. Files, imports, visibility</h2>
+<p>Every Zig file is a struct. Its top-level declarations are the struct's fields and methods, and <code>@import("x.zig")</code> returns that struct as a value. So a module root is simply a struct that re-exports other structs:</p>
+<div class="file">src/root.zig</div>
+<pre><code><span class="c">//! Module root for the simulation core. See ARCHITECTURE.md.
+//! The core is pure and deterministic: no I/O, no wall clock, no globals.</span>
+
+<span class="k">const</span> std = <span class="k">@import</span>(<span class="s">"std"</span>);
+
+<span class="k">pub const</span> types = <span class="k">@import</span>(<span class="s">"domain/types.zig"</span>);
+<span class="k">pub const</span> person = <span class="k">@import</span>(<span class="s">"domain/person.zig"</span>);
+<span class="k">pub const</span> state = <span class="k">@import</span>(<span class="s">"sim/state.zig"</span>);
+<span class="k">pub const</span> commands = <span class="k">@import</span>(<span class="s">"sim/commands.zig"</span>);
+<span class="k">pub const</span> queries = <span class="k">@import</span>(<span class="s">"sim/queries.zig"</span>);
+<span class="c">// …</span></code></pre>
+<p>Three things to notice:</p>
+<ul>
+  <li><code>pub</code> makes a declaration visible to importers. Without it, a function is private to its file. This is the whole visibility system; there are no classes, packages or friends.</li>
+  <li><code>//!</code> is a doc comment for the file itself; <code>///</code> documents the next declaration; <code>//</code> is an ordinary comment. Every module in this project opens with a <code>//!</code> block naming its MekHQ counterpart, a house rule from <code>CLAUDE.md</code>.</li>
+  <li>Imports are lazy and cyclic imports are allowed. <code>queries.zig</code> imports <code>commands.zig</code> in a test and <code>commands.zig</code> imports <code>queries.zig</code> for the rating; Zig only compiles what is referenced.</li>
+</ul>
+<p>Inside the executable, the library is reached by the name given in <code>build.zig</code>:</p>
+<div class="file">src/main.zig</div>
+<pre><code><span class="k">const</span> game = <span class="k">@import</span>(<span class="s">"game"</span>);
+<span class="c">// game.state.GameState, game.commands.execute, game.queries.people …</span></code></pre>
+
+<h2 id="i4">4. Values, integers, casts</h2>
+<p><code>const</code> is a value that never changes; <code>var</code> can be reassigned. Types come after the name, and are usually inferred. Integers have explicit widths: <code>u8</code>, <code>u32</code>, <code>i64</code> and so on, plus <code>usize</code> for indexes and lengths. The project's money type is one of these:</p>
+<div class="file">src/domain/types.zig</div>
+<pre><code><span class="c">/// Integer C-bills. Never floats in financial or rules math.</span>
+<span class="k">pub const</span> CBills = i64;
+<span class="c">/// Basis points: 10_000 = ×1.</span>
+<span class="k">pub const</span> Bp = i64;
+
+<span class="k">pub fn</span> applyBp(amount: CBills, bp: Bp) CBills {
+    <span class="k">return</span> <span class="k">@divTrunc</span>(amount * bp, <span class="n">10_000</span>);
+}</code></pre>
+<p>Two Zig habits appear here. Underscores in number literals are allowed anywhere for readability. And integer division is not the <code>/</code> operator when the operands are signed: Zig makes you say which rounding you want, <code>@divTrunc</code> (toward zero) or <code>@divFloor</code>, because the two differ on negatives and a silent choice is a bug waiting to happen.</p>
+<p>Functions whose names start with <code>@</code> are <em>builtins</em>, part of the language rather than the standard library. The ones you will see most:</p>
+<table>
+<tr><th>Builtin</th><th>What it does</th><th>In this project</th></tr>
+<tr><td><code>@intCast(x)</code></td><td>Convert between integer widths; panics in debug if the value does not fit. The target type comes from context.</td><td><code>const rows: u32 = @intCast(fat / row.heads);</code></td></tr>
+<tr><td><code>@as(T, x)</code></td><td>Give an expression an explicit type, often to satisfy inference.</td><td><code>@as(u32, p.morale) + 3</code></td></tr>
+<tr><td><code>@intFromEnum</code>, <code>@enumFromInt</code></td><td>Enum ↔ integer.</td><td>Typed IDs, section 6.</td></tr>
+<tr><td><code>@intFromBool</code></td><td><code>true</code> → 1.</td><td><code>4 + @as(u8, @intFromBool(mess &gt;= 2))</code></td></tr>
+<tr><td><code>@min</code>, <code>@max</code></td><td>Clamp helpers that work on any numeric type.</td><td><code>@min(100, p.fatigue + add)</code></td></tr>
+<tr><td><code>@tagName(e)</code></td><td>An enum value's name as a string.</td><td>Log lines: <code>@tagName(c.kind)</code></td></tr>
+<tr><td><code>@import</code>, <code>@embedFile</code></td><td>Bring in code or a file's bytes at compile time.</td><td>ZON tables; the test PNG.</td></tr>
+</table>
+<p>Arithmetic has three flavours. Plain <code>+</code> is checked in debug builds and undefined on overflow in release. <code>+%</code> wraps. <code>+|</code> saturates. The RNG seeds streams with wrapping multiplication because the product is meant to overflow:</p>
+<pre><code>prng.* = std.Random.DefaultPrng.init(seed ^ (<span class="n">0x9E3779B97F4A7C15</span> *% (i + <span class="n">1</span>)));</code></pre>
+<p>And saturating subtraction is everywhere a count must not go below zero:</p>
+<pre><code><span class="k">const</span> open = n.need -| have;   <span class="c">// 0 when have &gt;= need, never negative</span></code></pre>
+
+<h2 id="i5">5. Structs and methods</h2>
+<p>A struct lists fields, optionally with defaults, and may contain functions. A function whose first parameter is the struct (by value or pointer) can be called with dot syntax. The campaign calendar is a small, complete example:</p>
+<div class="file">src/sim/clock.zig</div>
+<pre><code><span class="k">pub const</span> Date = <span class="k">struct</span> {
+    year: u16,
+    month: u8, <span class="c">// 1–12</span>
+    day: u8, <span class="c">// 1–31</span>
+
+    <span class="k">pub const</span> campaign_default: Date = .{ .year = <span class="n">3025</span>, .month = <span class="n">1</span>, .day = <span class="n">1</span> };
+
+    <span class="k">pub fn</span> isLeapYear(year: u16) <span class="k">bool</span> {
+        <span class="k">return</span> (year % <span class="n">4</span> == <span class="n">0</span> <span class="k">and</span> year % <span class="n">100</span> != <span class="n">0</span>) <span class="k">or</span> year % <span class="n">400</span> == <span class="n">0</span>;
+    }
+
+    <span class="k">pub fn</span> daysInMonth(year: u16, month: u8) u8 {
+        <span class="k">return switch</span> (month) {
+            <span class="n">1</span>, <span class="n">3</span>, <span class="n">5</span>, <span class="n">7</span>, <span class="n">8</span>, <span class="n">10</span>, <span class="n">12</span> =&gt; <span class="n">31</span>,
+            <span class="n">4</span>, <span class="n">6</span>, <span class="n">9</span>, <span class="n">11</span> =&gt; <span class="n">30</span>,
+            <span class="n">2</span> =&gt; <span class="k">if</span> (isLeapYear(year)) <span class="k">@as</span>(u8, <span class="n">29</span>) <span class="k">else</span> <span class="n">28</span>,
+            <span class="k">else</span> =&gt; <span class="k">unreachable</span>,
+        };
+    }
+
+    <span class="k">pub fn</span> next(self: Date) Date {
+        <span class="k">var</span> d = self;
+        d.day += <span class="n">1</span>;
+        <span class="k">if</span> (d.day &gt; daysInMonth(d.year, d.month)) {
+            d.day = <span class="n">1</span>;
+            d.month += <span class="n">1</span>;
+            <span class="k">if</span> (d.month &gt; <span class="n">12</span>) {
+                d.month = <span class="n">1</span>;
+                d.year += <span class="n">1</span>;
+            }
+        }
+        <span class="k">return</span> d;
+    }
+
+    <span class="k">pub fn</span> isPayday(self: Date) <span class="k">bool</span> {
+        <span class="k">return</span> self.day == <span class="n">1</span>;
+    }
+};</code></pre>
+<p>Points to absorb:</p>
+<ul>
+  <li><code>.{ .year = 3025, … }</code> is an <em>anonymous struct literal</em>. The type is inferred from where it is used. You will see <code>.{}</code> constantly: for struct values, for function-argument tuples in <code>print</code>, for default-initialised structs.</li>
+  <li><code>next(self: Date)</code> takes the struct by value, copies it into <code>d</code>, mutates the copy and returns it. Nothing is mutated in place; that is a choice, not a rule.</li>
+  <li>A function without <code>self</code>, like <code>isLeapYear</code>, is just a function namespaced inside the struct. Call it as <code>Date.isLeapYear(3025)</code>.</li>
+  <li><code>switch</code> is an expression. Every case must be covered or you write <code>else</code>. <code>unreachable</code> tells the compiler and the reader that a month outside 1–12 cannot happen here.</li>
+</ul>
+<p>Structs with pointer receivers mutate in place. <code>GameState</code> methods take <code>self: *GameState</code>:</p>
+<div class="file">src/sim/state.zig</div>
+<pre><code><span class="k">pub const</span> GameState = <span class="k">struct</span> {
+    arena: std.heap.ArenaAllocator,
+    rng: rng_mod.Rng,
+    stats: Stats = .{},
+    next_person_id: u32 = <span class="n">1</span>,
+    <span class="c">// … roughly forty more fields</span>
+
+    <span class="k">pub fn</span> init(gpa: std.mem.Allocator, config: Config) GameState {
+        <span class="k">return</span> .{
+            .arena = std.heap.ArenaAllocator.init(gpa),
+            .rng = rng_mod.Rng.init(config.seed),
+            .clock = .{ .date = config.start_date },
+            .funds = config.start_funds,
+        };
+    }
+
+    <span class="k">pub fn</span> deinit(self: *GameState) <span class="k">void</span> {
+        self.arena.deinit();
+    }
+
+    <span class="k">pub fn</span> allocator(self: *GameState) std.mem.Allocator {
+        <span class="k">return</span> self.arena.allocator();
+    }
+};</code></pre>
+<p>Fields without a default (<code>arena</code>, <code>rng</code>) must be set by whoever constructs the value; fields with a default may be omitted. <code>init</code>/<code>deinit</code> pairs are a convention, not a language feature. Nothing runs automatically when a value goes out of scope.</p>
+
+<h2 id="i6">6. Enums and typed IDs</h2>
+<p>An enum is a closed set of names. It can have methods, and it can carry an integer representation. The project's roles:</p>
+<div class="file">src/domain/person.zig</div>
+<pre><code><span class="k">pub const</span> Role = <span class="k">enum</span> {
+    mekwarrior, vehicle_crew, aero_pilot, ba_trooper, infantry,
+    tech_mek, tech_mechanic, tech_aero, tech_ba, astech,
+    doctor, medic,
+    admin_command, admin_logistics, admin_transport, admin_hr, admin_finance,
+    dropship_crew, jumpship_crew,
+
+    <span class="c">/// CamOps base monthly salary in C-bills (MekHQ defaults).</span>
+    <span class="k">pub fn</span> baseSalary(self: Role) types.CBills {
+        <span class="k">return switch</span> (self) {
+            .mekwarrior, .aero_pilot =&gt; <span class="n">1_500</span>,
+            .vehicle_crew =&gt; <span class="n">900</span>,
+            .tech_mek, .tech_aero, .tech_ba =&gt; <span class="n">800</span>,
+            .astech =&gt; <span class="n">400</span>,
+            .doctor =&gt; <span class="n">1_500</span>,
+            .medic =&gt; <span class="n">400</span>,
+            .admin_command, .admin_logistics, .admin_transport, .admin_hr, .admin_finance =&gt; <span class="n">500</span>,
+            .dropship_crew, .jumpship_crew =&gt; <span class="n">750</span>,
+            <span class="c">// …</span>
+        };
+    }
+};</code></pre>
+<p>Enum values are written with a leading dot when the type is known from context: <code>.mekwarrior</code>. The switch above must name every variant; add a role and the compiler lists every switch you forgot. That is the main reason the project reaches for enums over strings.</p>
+<p>The most important enum trick in the codebase is the <strong>non-exhaustive enum</strong>, used for every entity ID:</p>
+<div class="file">src/domain/types.zig</div>
+<pre><code><span class="c">// Typed IDs: non-exhaustive enums over u32 — copyable, comparable, and
+// impossible to pass a PersonId where a UnitId is expected.</span>
+<span class="k">pub const</span> PersonId = <span class="k">enum</span>(u32) { none = <span class="n">0</span>, _ };
+<span class="k">pub const</span> UnitId = <span class="k">enum</span>(u32) { none = <span class="n">0</span>, _ };
+<span class="k">pub const</span> ForceId = <span class="k">enum</span>(u32) { none = <span class="n">0</span>, _ };
+<span class="k">pub const</span> ContractId = <span class="k">enum</span>(u32) { none = <span class="n">0</span>, _ };</code></pre>
+<p>The trailing <code>_</code> means "any other u32 is also a valid value". So a <code>PersonId</code> is a 32-bit integer at runtime, costs nothing, has one named value <code>.none</code> for "no one", and is a distinct type from <code>UnitId</code>. A function declared <code>fn fire(id: PersonId)</code> will not accept a unit's ID. Converting is explicit and rare: <code>@enumFromInt(7)</code> and <code>@intFromEnum(id)</code>, mostly at the edges where a user typed a number.</p>
+
+<h2 id="i7">7. Tagged unions and switch</h2>
+<p>A tagged union is a value that is exactly one of several alternatives, each with its own payload, and always knows which. The whole game is driven by one:</p>
+<div class="file">src/sim/commands.zig</div>
+<pre><code><span class="k">pub const</span> Command = <span class="k">union</span>(<span class="k">enum</span>) {
+    advance_day,
+    advance_days: u32,
+    hire: <span class="k">struct</span> { first: []<span class="k">const</span> u8, last: []<span class="k">const</span> u8, role: person_mod.Role },
+    recruit: person_mod.Role,
+    fire: types.PersonId,
+    new_company: []<span class="k">const</span> u8,
+    create_commander: <span class="k">struct</span> {
+        name: []<span class="k">const</span> u8,
+        origin: commander_mod.Faction,
+        profession: commander_mod.Profession,
+        start_year: u16 = <span class="n">3025</span>,
+    },
+    crew_company: types.ForceId,
+    set_shares_pct: u8,
+    <span class="c">// … about ninety variants</span>
+};</code></pre>
+<p>Variants can carry nothing (<code>advance_day</code>), a plain value (<code>fire: PersonId</code>), or an inline struct. A value is built with the same dot syntax as a struct literal: <code>.{ .fire = id }</code> or <code>.{ .hire = .{ .first = "Grayson", .last = "Carlyle", .role = .mekwarrior } }</code>. Consuming one is a <code>switch</code> that <em>captures</em> the payload between vertical bars:</p>
+<pre><code><span class="k">pub fn</span> execute(gs: *GameState, cmd: Command) Error!Result {
+    <span class="k">switch</span> (cmd) {
+        .advance_day =&gt; <span class="k">return</span> advance(gs, <span class="n">1</span>),
+        .advance_days =&gt; |n| <span class="k">return</span> advance(gs, n),
+        .hire =&gt; |h| {
+            <span class="k">const</span> id = <span class="k">try</span> gs.hirePerson(h.first, h.last, h.role);
+            <span class="k">return</span> .{ .hired = id };
+        },
+        .recruit =&gt; |role| {
+            <span class="k">const</span> id = <span class="k">try</span> gs.recruitGenerated(role);
+            <span class="k">return</span> .{ .hired = id };
+        },
+        <span class="c">// …</span>
+    }
+}</code></pre>
+<p><code>|n|</code> binds the payload of <code>advance_days</code>; <code>|h|</code> binds the inline struct so <code>h.first</code> works. Add a variant to <code>Command</code> and this switch fails to compile until you handle it. The terminal's key type is the same idea at a smaller scale:</p>
+<div class="file">src/tui/term.zig</div>
+<pre><code><span class="k">pub const</span> Key = <span class="k">union</span>(<span class="k">enum</span>) {
+    char: u21,
+    enter, escape, tab, backtab, backspace, delete,
+    up, down, left, right, home, end, pgup, pgdn,
+    f: u8,    <span class="c">// F1..F12</span>
+    ctrl: u8, <span class="c">// 'a'..'z'</span>
+    none,
+};</code></pre>
+<p>You will also see <code>switch</code> used on integers with ranges and lists, as in the byte-to-key decoder:</p>
+<pre><code><span class="k">return switch</span> (b) {
+    <span class="n">0x1b</span> =&gt; self.readEscape(),
+    <span class="s">'\r'</span>, <span class="s">'\n'</span> =&gt; .enter,
+    <span class="s">'\t'</span> =&gt; .tab,
+    <span class="n">0x7f</span>, <span class="n">0x08</span> =&gt; .backspace,
+    <span class="n">1</span>...<span class="n">7</span>, <span class="n">11</span>, <span class="n">12</span>, <span class="n">14</span>...<span class="n">26</span> =&gt; .{ .ctrl = <span class="s">'a'</span> + b - <span class="n">1</span> },
+    <span class="k">else</span> =&gt; self.readUtf8(b),
+};</code></pre>
+
+<h2 id="i8">8. Optionals</h2>
+<p>Zig has no null pointers by default. A value that may be absent has an optional type, written <code>?T</code>, and you must unwrap it before use. The three unwrapping forms, all from the project:</p>
+<pre><code><span class="c">// 1. `orelse`: a fallback, or an early return.</span>
+<span class="k">const</span> p = gs.person(id) <span class="k">orelse return</span> Error.UnknownPerson;
+<span class="k">const</span> tonnage: u8 = <span class="k">if</span> (chassis_mod.find(u.chassis_key)) |d| d.tonnage <span class="k">else</span> <span class="n">50</span>;
+
+<span class="c">// 2. `if (x) |v|`: run a block only when present.</span>
+<span class="k">if</span> (p.born_day) |born| {
+    <span class="k">const</span> days = <span class="k">@as</span>(i64, day) - <span class="k">@as</span>(i64, born);
+    <span class="c">// …</span>
+}
+
+<span class="c">// 3. `.?`: assert it is present (panics in debug if not).</span>
+<span class="k">const</span> u = gs.unit(seat).?;</code></pre>
+<p>Optional fields are how the domain expresses "not yet": <code>leave_until_day: ?u32 = null</code>, <code>wound_heal_day: ?u32 = null</code>, <code>born_day: ?i32 = null</code> for people hired by tests without a birthday. Lookups return optionals: <code>chassis.find(key)</code> returns <code>?*const Chassis</code>, a maybe-pointer to a catalog entry.</p>
+<pre><code><span class="k">pub fn</span> find(key: []<span class="k">const</span> u8) ?*<span class="k">const</span> Chassis {
+    <span class="k">for</span> (catalog) |*c| {
+        <span class="k">if</span> (std.mem.eql(u8, c.key, key)) <span class="k">return</span> c;
+    }
+    <span class="k">return null</span>;
+}</code></pre>
+<p>A common pattern chains the two: <code>if (gs.person(u.pilot)) |pilot| if (pilot.isAvailable(day)) …</code>. Reading it, remember that <code>|x|</code> after an <code>if</code> or <code>while</code> always means "the unwrapped value".</p>
+
+<h2 id="i9">9. Errors, try, catch, defer</h2>
+<p>An error is a value from an <em>error set</em>, which is an enum of failure names. A function that can fail returns <code>E!T</code>: either an error from set <code>E</code> or a <code>T</code>. Writing <code>!T</code> lets the compiler infer the set.</p>
+<div class="file">src/sim/commands.zig</div>
+<pre><code><span class="k">pub const</span> Error = <span class="k">error</span>{
+    UnknownPerson,
+    UnknownForce,
+    UnknownUnit,
+    InsufficientTreasury,
+    CompanyDeployed,
+    NoBerth,
+    BadPercent,
+    BadYear,
+    <span class="c">// … about sixty</span>
+} || std.mem.Allocator.Error;   <span class="c">// merged with OutOfMemory</span>
+
+<span class="k">pub fn</span> execute(gs: *GameState, cmd: Command) Error!Result { <span class="c">// …</span> }</code></pre>
+<p>The four verbs:</p>
+<ul>
+  <li><code>try f()</code> — if <code>f</code> fails, return that error from the current function immediately. Nine out of ten error sites use this.</li>
+  <li><code>f() catch value</code> — if it fails, use <code>value</code> instead. <code>catch |err| { … }</code> captures the error. <code>catch unreachable</code> asserts it cannot fail. <code>catch {}</code> swallows it (used deliberately, and rarely).</li>
+  <li><code>defer</code> — run a statement when the enclosing block exits, however it exits. Used for every cleanup.</li>
+  <li><code>errdefer</code> — like <code>defer</code>, but only when the block exits with an error.</li>
+</ul>
+<p>The save store's opener shows all of them cooperating around a database transaction:</p>
+<div class="file">src/persist/store.zig</div>
+<pre><code><span class="k">pub fn</span> fromDb(db: sqlite.Db) !Store {
+    <span class="k">try</span> db.exec(ddl);
+    <span class="k">const</span> store: Store = .{ .db = db };
+    <span class="k">const</span> stored: u32 = <span class="k">@intCast</span>(<span class="k">@max</span>(<span class="n">1</span>, store.getSetting(<span class="s">"schema_version"</span>, <span class="n">1</span>)));
+    <span class="k">if</span> (stored &gt; schema_version) <span class="k">return error</span>.StoreNewerThanGame;
+    <span class="k">try</span> db.exec(<span class="s">"BEGIN"</span>);
+    <span class="k">errdefer</span> db.exec(<span class="s">"ROLLBACK"</span>) <span class="k">catch</span> {};
+    <span class="k">for</span> (migrations) |m| {
+        <span class="k">if</span> (m.version &lt;= stored) <span class="k">continue</span>;
+        <span class="k">if</span> (!<span class="k">try</span> hasColumnRt(db, m.table, m.column)) <span class="k">try</span> db.exec(m.sql);
+    }
+    <span class="k">try</span> store.setSetting(<span class="s">"schema_version"</span>, schema_version);
+    <span class="k">try</span> db.exec(<span class="s">"COMMIT"</span>);
+    <span class="k">return</span> store;
+}</code></pre>
+<p>If any <code>try</code> after <code>BEGIN</code> fails, the <code>errdefer</code> rolls the transaction back on the way out; the <code>catch {}</code> on it says that if even the rollback fails there is nothing more to do. On success, <code>errdefer</code> does nothing and <code>COMMIT</code> stands. Compare this with a language that throws: here the failure path is visible in the text, line by line.</p>
+<p>Errors travel up to the user interface, where a shared table turns them into sentences:</p>
+<div class="file">src/sim/cli.zig</div>
+<pre><code><span class="k">pub fn</span> errorText(err: <span class="k">anyerror</span>) []<span class="k">const</span> u8 {
+    <span class="k">return switch</span> (err) {
+        <span class="k">error</span>.InsufficientTreasury =&gt; <span class="s">"not enough money in that treasury — transfer funds first"</span>,
+        <span class="k">error</span>.BadPercent =&gt; <span class="s">"a percentage between 0 and 100"</span>,
+        <span class="k">error</span>.BadYear =&gt; <span class="s">"the campaign starts between 3000 and 3060"</span>,
+        <span class="k">error</span>.MaxLevel =&gt; <span class="s">"already at the top: this HQ is regional (or the facility is maxed)"</span>,
+        <span class="c">// …</span>
+        <span class="k">else</span> =&gt; <span class="k">@errorName</span>(err),
+    };
+}</code></pre>
+
+<h2 id="i10">10. Arrays, slices, strings</h2>
+<p>An array has a compile-time length: <code>[3]u8</code>. A <em>slice</em> is a pointer plus a runtime length: <code>[]u8</code>, or <code>[]const u8</code> when it must not be written through. Strings are just <code>[]const u8</code>; a literal like <code>"Alpha"</code> is a pointer to a constant array with a zero terminator, which coerces to a slice.</p>
+<pre><code><span class="k">const</span> lance_names = [_][]<span class="k">const</span> u8{ <span class="s">"1st Lance"</span>, <span class="s">"2nd Lance"</span>, <span class="s">"3rd Lance"</span> };   <span class="c">// [3][]const u8, length inferred by _</span>
+<span class="k">var</span> buf: [<span class="n">96</span>]u8 = <span class="k">undefined</span>;                                            <span class="c">// stack scratch, uninitialised</span>
+<span class="k">const</span> s = <span class="k">try</span> std.fmt.bufPrint(&amp;buf, <span class="s">"order {s} 1 hq:{d}"</span>, .{ key, id }); <span class="c">// a slice into buf</span>
+<span class="k">const</span> base = <span class="k">if</span> (std.mem.lastIndexOfScalar(u8, path, <span class="s">'/'</span>)) |k| path[k + <span class="n">1</span> ..] <span class="k">else</span> path;  <span class="c">// slicing: path[a..b]</span></code></pre>
+<p>There is no string type and no <code>==</code> on strings. Compare with <code>std.mem.eql(u8, a, b)</code>, search with <code>std.mem.indexOf</code>, split with <code>std.mem.tokenizeScalar</code>. The REPL parser is built from these:</p>
+<div class="file">src/sim/cli.zig</div>
+<pre><code><span class="k">pub fn</span> parseCommand(verb: []<span class="k">const</span> u8, tokens: *std.mem.TokenIterator(u8, .scalar)) ParseError!?Command {
+    <span class="k">const</span> eq = std.mem.eql;
+    <span class="k">if</span> (eq(u8, verb, <span class="s">"admit"</span>)) <span class="k">return</span> .{ .admit = <span class="k">@enumFromInt</span>(<span class="k">try</span> num(u32, tokens.next())) };
+    <span class="k">if</span> (eq(u8, verb, <span class="s">"shares"</span>)) <span class="k">return</span> .{ .set_shares_pct = <span class="k">try</span> num(u8, tokens.next()) };
+    <span class="k">if</span> (eq(u8, verb, <span class="s">"newlance"</span>)) {
+        <span class="k">const</span> site = <span class="k">try</span> parseSite(<span class="k">try</span> need(tokens.next()));
+        <span class="k">var</span> name = std.mem.trim(u8, tokens.rest(), <span class="s">" "</span>);
+        <span class="c">// …</span>
+    }
+    <span class="k">return null</span>; <span class="c">// not a verb we know</span>
+}</code></pre>
+<p>Note the return type <code>ParseError!?Command</code>: it can fail, and on success may still be "no command" (<code>null</code>). Nesting error and optional like this is common and reads inside-out: an optional command, wrapped in a possible error.</p>
+<p>The C-string form <code>[*:0]const u8</code> (a many-item pointer with a zero sentinel) appears only where C needs it, such as <code>sqlite3_open(filename: [*:0]const u8, …)</code>. The <code>Z</code>-suffixed formatters like <code>bufPrintZ</code> produce them.</p>
+
+<h2 id="i11">11. Pointers</h2>
+<p><code>*T</code> is a pointer to one <code>T</code>; <code>*const T</code> cannot write through. <code>&amp;x</code> takes an address; <code>p.*</code> dereferences. Field access through a pointer needs no arrow: <code>p.morale</code> works whether <code>p</code> is a struct or a pointer to one.</p>
+<pre><code><span class="k">var</span> gs = GameState.init(alloc, .{ .seed = <span class="n">42</span> });
+<span class="k">defer</span> gs.deinit();                       <span class="c">// method on *GameState; &amp; is implicit for method calls</span>
+_ = <span class="k">try</span> execute(&amp;gs, .{ .new_company = <span class="s">"Alpha"</span> });   <span class="c">// explicit &amp; when passing as an argument</span>
+
+<span class="k">for</span> (&amp;self.prngs, <span class="n">0</span>..) |*prng, i| {      <span class="c">// iterate an array by pointer so we can assign</span>
+    prng.* = std.Random.DefaultPrng.init(seed ^ (<span class="n">0x9E3779B97F4A7C15</span> *% (i + <span class="n">1</span>)));
+}</code></pre>
+<p>Two gotchas the project ran into during development, worth knowing early:</p>
+<ul>
+  <li><strong>Pointers into growable containers go stale.</strong> If you hold <code>*Force</code> from a hash map and then insert into that map, the map may reallocate and your pointer now points at freed memory. The fix is to re-fetch after any insert. You will see <code>gs.force(id)</code> called again rather than a pointer kept across a <code>createForce</code>.</li>
+  <li><strong>Shadowing is an error.</strong> A local named <code>rows</code> inside a function that already has <code>rows</code> in scope does not compile. Zig forbids shadowing entirely, which is why locals in this codebase have slightly fussy names like <code>tpb</code> or <code>uit2</code>.</li>
+</ul>
+<p>Leading-underscore assignment, <code>_ = try execute(…)</code>, discards a value on purpose. Zig refuses to compile an unused result or an unused local, so discarding is explicit.</p>
+
+<h2 id="i12">12. Loops and labeled blocks</h2>
+<p><code>for</code> iterates slices and arrays, optionally with an index from <code>0..</code>. <code>while</code> takes a condition and an optional continue expression after a colon.</p>
+<pre><code><span class="k">for</span> (p.awards.items, <span class="n">0</span>..) |key, i| { <span class="c">// value and index</span>
+    <span class="k">if</span> (i &gt; <span class="n">0</span>) <span class="k">try</span> line.appendSlice(alloc, <span class="s">" · "</span>);
+    <span class="k">try</span> line.appendSlice(alloc, key);
+}
+
+<span class="k">var</span> i: usize = <span class="n">0</span>;
+<span class="k">while</span> (i &lt; gs.bay_jobs.items.len) {  <span class="c">// index loop when the body removes items</span>
+    <span class="k">const</span> job = &amp;gs.bay_jobs.items[i];
+    <span class="k">if</span> (job.done_day == <span class="k">null</span> <span class="k">or</span> today &lt; job.done_day.?) {
+        i += <span class="n">1</span>;
+        <span class="k">continue</span>;
+    }
+    <span class="k">if</span> (!<span class="k">try</span> completeJob(gs, job)) { i += <span class="n">1</span>; <span class="k">continue</span>; }
+    _ = gs.bay_jobs.orderedRemove(i);    <span class="c">// no i += 1: the next item slid into slot i</span>
+}
+
+<span class="k">var</span> days: u32 = <span class="n">0</span>;
+<span class="k">while</span> (hasJobForUnit(&amp;gs, uid) <span class="k">and</span> days &lt; <span class="n">200</span>) : (days += <span class="n">1</span>) {  <span class="c">// continue expression</span>
+    <span class="k">try</span> runDaily(&amp;gs);
+    gs.clock.day_index += <span class="n">1</span>;
+}</code></pre>
+<p>Hash maps are walked with an iterator and <code>while</code> capturing entries:</p>
+<pre><code><span class="k">var</span> it = gs.people.iterator();
+<span class="k">while</span> (it.next()) |entry| {
+    <span class="k">const</span> p = entry.value_ptr;            <span class="c">// a pointer, so changes stick</span>
+    <span class="k">if</span> (p.status != .active) <span class="k">continue</span>;
+    p.xp += monthly_service_xp;
+}</code></pre>
+<p>Blocks can be labeled and can yield a value with <code>break :label value</code>. The project uses this for "compute a value with several steps, inline":</p>
+<pre><code><span class="k">const</span> env: terrain_mod.Environment = blk: {
+    <span class="k">const</span> world = planet_mod.find(c.planet_key) <span class="k">orelse break</span> :blk .{};
+    <span class="k">const</span> t = terrain_mod.terrainOf(world);
+    <span class="k">break</span> :blk .{ .terrain = t, .weather = terrain_mod.rollWeather(&amp;gs.rng, .battle, t) };
+};</code></pre>
+<p>A <code>while</code> can also be an expression with an <code>else</code> that runs when the condition ends the loop without a <code>break</code>. That is how "is this person in this company" walks up the force tree:</p>
+<pre><code><span class="k">var</span> f = p.assigned_force;
+<span class="k">const</span> in_company = <span class="k">while</span> (f != .none) {
+    <span class="k">if</span> (f == company) <span class="k">break true</span>;
+    f = (gs.forces.getPtr(f) <span class="k">orelse break false</span>).parent;
+} <span class="k">else false</span>;</code></pre>
+
+<h2 id="i13">13. Memory: allocators and lists</h2>
+<p>This is the part of Zig newcomers find strangest, so take it slowly. Nothing allocates unless you hand it an allocator. An allocator is a small interface value, <code>std.mem.Allocator</code>, passed as an ordinary parameter. Different allocators have different lifetimes and costs, and choosing one is a design decision.</p>
+<p>IRON LEDGER uses three, each for a different lifetime:</p>
+<table>
+<tr><th>Allocator</th><th>Lifetime</th><th>Where</th></tr>
+<tr><td><code>init.gpa</code> (general purpose)</td><td>The process. Tracks leaks in debug.</td><td>Handed to <code>GameState.init</code> and the terminal app in <code>main</code>.</td></tr>
+<tr><td><code>ArenaAllocator</code> owned by <code>GameState</code></td><td>The campaign. Individual frees are no-ops; <code>arena.deinit()</code> frees everything at once.</td><td>Every person, hull, log line and ledger row. <code>gs.allocator()</code> returns it.</td></tr>
+<tr><td>A per-frame arena in the TUI, and per-call arenas in tests</td><td>One frame, or one function call.</td><td>Query results: rows of formatted text that are drawn once and forgotten.</td></tr>
+</table>
+<p>The arena is why the simulation core can be so relaxed about strings. A query builds hundreds of small strings with <code>allocPrint</code> and never frees one; the caller resets the arena after drawing. In a test, the pattern is always the same three lines:</p>
+<pre><code><span class="k">var</span> arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+<span class="k">defer</span> arena.deinit();
+<span class="k">const</span> a = arena.allocator();
+<span class="k">const</span> lines = <span class="k">try</span> summary(a, &amp;gs);</code></pre>
+<p>The standard growable list is <code>std.ArrayListUnmanaged(T)</code>. "Unmanaged" means it does not remember its allocator; you pass it to every call that might grow the list. That keeps the struct one pointer and one length, and makes the allocation visible at the call site:</p>
+<pre><code><span class="k">var</span> out: std.ArrayListUnmanaged([]<span class="k">const</span> u8) = .empty;
+<span class="k">try</span> out.append(alloc, <span class="s">"{a}CONTRACTS{/}"</span>);
+<span class="k">try</span> out.append(alloc, <span class="k">try</span> std.fmt.allocPrint(alloc, <span class="s">"  {s} c-bills earned"</span>, .{<span class="k">try</span> money(alloc, earned)}));
+<span class="k">return</span> out.toOwnedSlice(alloc);    <span class="c">// hand the buffer to the caller as a plain slice</span></code></pre>
+<p>Formatting goes through <code>std.fmt</code>. <code>{s}</code> prints a string, <code>{d}</code> a number, <code>{d: &gt;5}</code> right-aligns in five columns, <code>{s: &lt;18}</code> left-aligns. Because <code>{</code> and <code>}</code> are format syntax, a literal brace is written doubled, which is why the TUI's colour markup appears as <code>{{a}}…{{/}}</code> inside format strings and as <code>{a}…{/}</code> in plain literals.</p>
+<p>Hash maps: <code>std.AutoArrayHashMapUnmanaged(K, V)</code> keeps insertion order, which matters for determinism (iterating a map in a stable order is what makes two runs with the same seed identical). <code>StringArrayHashMapUnmanaged</code> is the string-keyed cousin used for stock and faction standing.</p>
+
+<h2 id="i14">14. comptime and reflection</h2>
+<p>Any expression marked <code>comptime</code>, and any expression the compiler can evaluate before runtime, runs at compile time. Types are values at compile time, which is how Zig does generics: a function takes <code>comptime T: type</code> and returns something built from <code>T</code>. Three uses in this project, in rising order of cleverness.</p>
+<h4>ZON data as compile-time values</h4>
+<pre><code><span class="k">pub const</span> catalog: []<span class="k">const</span> Chassis = <span class="k">@import</span>(<span class="s">"chassis_zon"</span>);
+<span class="k">pub const</span> t: Tuning = <span class="k">@import</span>(<span class="s">"tuning_zon"</span>);</code></pre>
+<p>The <code>.zon</code> file is a struct literal. Importing it with a declared type makes the compiler type-check the literal against the struct: a missing field without a default, a misspelled field or a string where a number belongs is a build error with a line number. The 97 designs, 234 systems and every tuning knob are checked this way on every build.</p>
+<h4>anytype and inline for</h4>
+<p>The SQLite binding takes a tuple of mixed values and binds each by its type:</p>
+<div class="file">src/persist/sqlite.zig</div>
+<pre><code><span class="k">pub fn</span> bindAll(self: Stmt, args: <span class="k">anytype</span>) Error!<span class="k">void</span> {
+    <span class="k">inline for</span> (args, <span class="n">1</span>..) |arg, i| <span class="k">try</span> self.bind(<span class="k">@intCast</span>(i), arg);
+}
+
+<span class="k">pub fn</span> bind(self: Stmt, idx: c_int, value: <span class="k">anytype</span>) Error!<span class="k">void</span> {
+    <span class="k">const</span> T = <span class="k">@TypeOf</span>(value);
+    <span class="k">const</span> rc = <span class="k">switch</span> (<span class="k">@typeInfo</span>(T)) {
+        .int, .comptime_int =&gt; sqlite3_bind_int64(self.h, idx, <span class="k">@intCast</span>(value)),
+        .bool =&gt; sqlite3_bind_int64(self.h, idx, <span class="k">@intFromBool</span>(value)),
+        .@<span class="s">"enum"</span> =&gt; blk: {
+            <span class="k">if</span> (<span class="k">@typeInfo</span>(T).@<span class="s">"enum"</span>.is_exhaustive) {
+                <span class="k">const</span> name = <span class="k">@tagName</span>(value);
+                <span class="k">break</span> :blk sqlite3_bind_text(self.h, idx, name.ptr, <span class="k">@intCast</span>(name.len), transient);
+            }
+            <span class="k">break</span> :blk sqlite3_bind_int64(self.h, idx, <span class="k">@intCast</span>(<span class="k">@intFromEnum</span>(value)));
+        },
+        .optional =&gt; <span class="k">if</span> (value) |v| <span class="k">return</span> self.bind(idx, v) <span class="k">else</span> sqlite3_bind_null(self.h, idx),
+        .pointer =&gt; blk: {
+            <span class="k">const</span> s: []<span class="k">const</span> u8 = value;
+            <span class="k">break</span> :blk sqlite3_bind_text(self.h, idx, s.ptr, <span class="k">@intCast</span>(s.len), transient);
+        },
+        <span class="k">else</span> =&gt; <span class="k">@compileError</span>(<span class="s">"unsupported bind type "</span> ++ <span class="k">@typeName</span>(T)),
+    };
+    <span class="c">// …</span>
+}</code></pre>
+<p><code>anytype</code> means "whatever the caller passes; specialise this function per type". <code>inline for</code> unrolls the loop at compile time, so each element of the tuple gets its own <code>bind</code> call with its own concrete type. <code>@typeInfo</code> is reflection: it returns a description of the type as a tagged union, so the code can ask "is this an enum, and is it exhaustive?" Notice the enum rule this encodes: exhaustive enums (roles, statuses) are saved as their names, so a save file stays readable and survives reordering; non-exhaustive typed IDs are saved as integers.</p>
+<h4>Walking a struct's fields</h4>
+<p>The tuning sanity test walks every field of the <code>Tuning</code> struct, however deeply nested, and checks that unsigned integers are positive and basis-point fields are at most ten times unity. It is one recursive function that takes a type as a parameter:</p>
+<div class="file">src/domain/tuning.zig</div>
+<pre><code><span class="k">fn</span> checkPositive(<span class="k">comptime</span> T: <span class="k">type</span>, value: T, <span class="k">comptime</span> name: []<span class="k">const</span> u8) !<span class="k">void</span> {
+    <span class="k">switch</span> (<span class="k">@typeInfo</span>(T)) {
+        .int =&gt; |info| {
+            <span class="c">// Signed knobs (deltas, scores) may be zero or negative by design.</span>
+            <span class="k">if</span> (info.signedness == .signed) <span class="k">return</span>;
+            <span class="k">if</span> (value &lt;= <span class="n">0</span>) {
+                std.debug.print(<span class="s">"tuning field {s} must be positive\n"</span>, .{name});
+                <span class="k">return error</span>.BadTuning;
+            }
+            <span class="k">if</span> (std.mem.endsWith(u8, name, <span class="s">"_bp"</span>) <span class="k">and</span> value &gt; <span class="n">100_000</span>) {
+                std.debug.print(<span class="s">"tuning field {s} is over 100000 basis points\n"</span>, .{name});
+                <span class="k">return error</span>.BadTuning;
+            }
+        },
+        .@<span class="s">"struct"</span> =&gt; |info| <span class="k">inline for</span> (info.fields) |f| <span class="k">try</span> checkPositive(f.type, <span class="k">@field</span>(value, f.name), name ++ <span class="s">"."</span> ++ f.name),
+        <span class="k">else</span> =&gt; {},
+    }
+}
+
+<span class="k">test</span> <span class="s">"every tuning value is positive and every basis-point knob is sane"</span> {
+    <span class="k">try</span> checkPositive(Tuning, t, <span class="s">"t"</span>);
+}</code></pre>
+<p>Read the struct arm carefully: for each field it calls itself with the field's <em>type</em>, the field's <em>value</em> (read by name with <code>@field</code>) and a dotted path built with <code>++</code>, which concatenates strings at compile time. Because <code>T</code> and <code>name</code> are <code>comptime</code>, every level of recursion is resolved while compiling; at runtime only the integer checks remain. Add a knob to the tuning table and it is covered by this test with no change to the test.</p>
+<p>Two smaller comptime devices you will meet: <code>@embedFile("testdata/rgb4x3.png")</code> bakes a file's bytes into the binary (the PNG decoder's test image), and <code>@typeInfo(Stream).@"enum".fields.len</code> sizes an array by the number of enum variants, so adding an RNG stream also grows the array of generators.</p>
+
+<h2 id="i15">15. Tests</h2>
+<p>A test is a <code>test "name" { … }</code> block anywhere in a file. <code>zig build test</code> compiles every test in the module tree and runs them. Tests live next to the code they check; this project has 224 of them, and the rule in <code>CLAUDE.md</code> is that every module carries its own.</p>
+<div class="file">src/sim/rng.zig</div>
+<pre><code><span class="k">test</span> <span class="s">"streams are independent and deterministic"</span> {
+    <span class="k">var</span> a = Rng.init(<span class="n">42</span>);
+    <span class="k">var</span> b = Rng.init(<span class="n">42</span>);
+    <span class="c">// Draw heavily from one stream in `a` only; another stream must still
+    // match the untouched twin exactly.</span>
+    <span class="k">for</span> (<span class="n">0</span>..<span class="n">1000</span>) |_| _ = a.roll2d6(.maintenance);
+    <span class="k">for</span> (<span class="n">0</span>..<span class="n">10</span>) |_| {
+        <span class="k">try</span> std.testing.expectEqual(b.roll2d6(.battle), a.roll2d6(.battle));
+    }
+}</code></pre>
+<p>The assertions you need: <code>expect(bool)</code>, <code>expectEqual(expected, actual)</code>, <code>expectEqualStrings</code>, and <code>expectError(error.X, expr)</code> to assert a call fails a particular way:</p>
+<pre><code><span class="k">try</span> std.testing.expectError(Error.MaxLevel, execute(&amp;gs, .{ .upgrade_tier = home }));
+<span class="k">try</span> std.testing.expectError(Error.InsufficientTreasury, execute(&amp;gs, .{ .upgrade_tier = fb }));</code></pre>
+<p>Tests use <code>std.testing.allocator</code>, which fails the test if anything is leaked. That is why every test that creates a <code>GameState</code> writes <code>defer gs.deinit()</code> on the next line. The root file has one more test that forces every declaration to be compiled, which catches dead code that no longer type-checks:</p>
+<pre><code><span class="k">test</span> {
+    std.testing.refAllDecls(<span class="k">@This</span>());
+}</code></pre>
+<p>Tests that need the filesystem get a scratch directory from <code>std.testing.tmpDir</code> and the test I/O instance <code>std.testing.io</code> (section 17). The soundtrack scanner's test writes a few files into one, scans it, and cleans up with <code>defer tmp.cleanup()</code>.</p>
+
+<h2 id="i16">16. Talking to C</h2>
+<p>Zig can declare C functions directly. The SQLite layer is eleven declarations and two opaque handle types, no header translation involved:</p>
+<div class="file">src/persist/sqlite.zig</div>
+<pre><code><span class="k">pub const</span> Handle = <span class="k">opaque</span> {};
+<span class="k">pub const</span> StmtHandle = <span class="k">opaque</span> {};
+
+<span class="k">extern fn</span> sqlite3_open(filename: [*:0]<span class="k">const</span> u8, db: *?*Handle) c_int;
+<span class="k">extern fn</span> sqlite3_close(db: *Handle) c_int;
+<span class="k">extern fn</span> sqlite3_prepare_v2(db: *Handle, sql: [*]<span class="k">const</span> u8, nbyte: c_int, stmt: *?*StmtHandle, tail: ?*?[*]<span class="k">const</span> u8) c_int;
+<span class="k">extern fn</span> sqlite3_step(stmt: *StmtHandle) c_int;
+<span class="k">extern fn</span> sqlite3_bind_int64(stmt: *StmtHandle, idx: c_int, v: i64) c_int;
+<span class="k">extern fn</span> sqlite3_bind_text(stmt: *StmtHandle, idx: c_int, text: [*]<span class="k">const</span> u8, n: c_int, destructor: ?*<span class="k">const</span> <span class="k">anyopaque</span>) c_int;
+<span class="c">// …</span></code></pre>
+<p><code>opaque {}</code> is a type you can point to but never look inside, which is exactly what a C library's handle is. <code>c_int</code> is C's <code>int</code> on the target. <code>?*Handle</code> is a nullable pointer, the honest type for a C out-parameter. <code>anyopaque</code> is <code>void*</code>. The linker finds these symbols because <code>build.zig</code> said <code>linkSystemLibrary("sqlite3")</code>.</p>
+<p>Above the raw functions sits a small Zig wrapper (<code>Db</code>, <code>Stmt</code>) that turns return codes into errors and pointers into slices, so the rest of the program never sees a <code>c_int</code>. The same pattern holds for the terminal: <code>std.posix.tcsetattr</code> for raw mode, <code>std.c.waitpid</code> to reap the music player process. The rule is to keep the C-shaped code in one file per foreign thing.</p>
+
+<h2 id="i17">17. Zig 0.16: std.Io</h2>
+<p>Zig 0.16 introduced an explicit I/O interface, <code>std.Io</code>, passed as a value in the same spirit as allocators. Anything that touches the outside world takes an <code>io</code>. The program receives one in <code>main</code>:</p>
+<div class="file">src/main.zig</div>
+<pre><code><span class="k">pub fn</span> main(init: std.process.Init) !<span class="k">void</span> {
+    <span class="k">var</span> gs = game.state.GameState.init(init.gpa, .{ .seed = <span class="n">3025</span> });
+    <span class="k">defer</span> gs.deinit();
+
+    <span class="k">var</span> args = std.process.Args.Iterator.init(init.minimal.args);
+    _ = args.next(); <span class="c">// exe name</span>
+    <span class="k">var</span> tui = <span class="k">false</span>;
+    <span class="k">var</span> store_path: [:<span class="n">0</span>]<span class="k">const</span> u8 = <span class="s">"campaigns.db"</span>;
+    <span class="k">while</span> (args.next()) |arg| {
+        <span class="k">if</span> (std.mem.eql(u8, arg, <span class="s">"--tui"</span>)) tui = <span class="k">true</span>;
+        <span class="k">if</span> (std.mem.eql(u8, arg, <span class="s">"--store"</span>)) store_path = args.next() <span class="k">orelse</span> store_path;
+    }
+    <span class="k">if</span> (tui) {
+        <span class="k">try</span> <span class="k">@import</span>(<span class="s">"tui/app.zig"</span>).run(init.io, init.gpa, store_path, .{ <span class="c">/* … */</span> });
+    }
+    <span class="c">// …</span>
+}</code></pre>
+<p><code>init</code> carries the allocator, the I/O instance and the arguments. Old code that called <code>std.fs.cwd()</code> now writes <code>std.Io.Dir.cwd()</code> and passes <code>io</code> to each operation; the wall clock is <code>std.Io.Clock.now(.real, io)</code>; a child process is <code>std.process.spawn(io, …)</code>. Here is a directory walk from the soundtrack scanner in the current style:</p>
+<div class="file">src/tui/music.zig</div>
+<pre><code><span class="k">var</span> dir = std.Io.Dir.cwd().openDir(self.io, dir_path, .{ .iterate = <span class="k">true</span> }) <span class="k">catch return</span>;
+<span class="k">defer</span> dir.close(self.io);
+<span class="k">var</span> it = dir.iterate();
+<span class="k">while</span> (<span class="k">try</span> it.next(self.io)) |e| {
+    <span class="k">if</span> (e.kind == .directory) { <span class="c">/* a soundtrack */</span> <span class="k">continue</span>; }
+    <span class="k">if</span> (e.kind != .file <span class="k">or</span> !isAudio(e.name)) <span class="k">continue</span>;
+    <span class="c">// …</span>
+}</code></pre>
+<p>The practical consequence for this project: the simulation core never receives an <code>io</code>, so it structurally cannot read a file or check the time. Purity is not a promise in a comment; it is a parameter that is not there.</p>
+
+<hr>
+
+<h2 id="p1">18. The architecture in one picture</h2>
+<pre><code>src/
+├── domain/     entities and rule tables: person, unit, chassis, contract, hq, tuning …   (pure)
+├── sim/        state, the daily tick, commands, queries, battle, medical, personnel …    (pure)
+├── econ/       finance, markets, logistics                                               (pure)
+├── gen/        company and person generators                                             (pure)
+├── persist/    sqlite.zig (C binding) and store.zig (save/load, migrations)              (I/O)
+├── tui/        term.zig, screen.zig, app.zig, emblem.zig, png.zig, music.zig, splash.zig  (I/O)
+├── root.zig    the `game` module: re-exports everything above except tui/
+└── main.zig    the executable: flags, the REPL, the demo, and the hand-off to tui/app.zig
+data/
+├── chassis.zon  planets.zon  parts.zon
+└── tables/      tuning.zon meklab.zon names.zon ranks.zon awards.zon abilities.zon rat.zon factions.zon scenarios.zon terrain.zon</code></pre>
+<p>Everything reduces to one rule, stated in <code>ARCHITECTURE.md</code> and enforced by the module layout: <strong>the simulation is a pure function of its inputs</strong>. Given the same seed and the same sequence of commands, two processes produce byte-identical state. The consequences ripple outward:</p>
+<ul>
+  <li>Randomness is a struct inside the state, not a global (section 20).</li>
+  <li>Time is an integer day counter; the calendar is rendered only at the edges.</li>
+  <li>Money is integers; there is not a single float in the rules.</li>
+  <li>The two frontends, terminal and console, talk to the core through exactly two doors: <code>commands.execute</code> to change things and <code>queries.*</code> to read things (sections 21 and 23). A third door, <code>cli.parseCommand</code>, turns typed text into commands and is shared by both.</li>
+</ul>
+<p>The payoff is the golden-master test in section 28, and the practical fact that any bug can be reproduced from a seed and a script.</p>
+
+<h2 id="p2">19. Data: ZON files become typed tables</h2>
+<p>A ZON file is a Zig struct literal with nothing else in it. Here is the top of the tuning table:</p>
+<div class="file">data/tables/tuning.zon</div>
+<pre><code><span class="c">// Tuning knobs. Typed against domain/tuning.zig `Tuning` at comptime.</span>
+.{
+    .hq = .{
+        .influence_ly = .{ .field = <span class="n">15</span>, .regional = <span class="n">60</span>, .brigade = <span class="n">90</span> },
+        .paperwork_base_days = <span class="n">21</span>,
+        .upgrade_cost_per_level = .{ .mek_bay = <span class="n">800_000</span>, .warehouse = <span class="n">400_000</span>, <span class="c">/* … */</span> },
+    },
+    .person = .{
+        .fatigue_tired = <span class="n">30</span>,
+        .exhausted_fatigue = <span class="n">70</span>,
+        .turnover_target = <span class="n">3</span>, <span class="c">// 2d6 &lt; 3 + flags</span>
+        <span class="c">// …</span>
+    },
+    <span class="c">// … market, medical, battle, rating, contract …</span>
+}</code></pre>
+<p>And the Zig side that gives it a shape:</p>
+<div class="file">src/domain/tuning.zig</div>
+<pre><code><span class="k">pub const</span> Tuning = <span class="k">struct</span> {
+    hq: <span class="k">struct</span> {
+        influence_ly: <span class="k">struct</span> { field: u32, regional: u32, brigade: u32 },
+        paperwork_base_days: u32,
+        <span class="c">// …</span>
+    },
+    person: <span class="k">struct</span> {
+        fatigue_tired: u8,
+        exhausted_fatigue: u8,
+        turnover_target: u8,
+        <span class="c">// …</span>
+    },
+    <span class="c">// …</span>
+};
+
+<span class="c">/// The live table.</span>
+<span class="k">pub const</span> t: Tuning = <span class="k">@import</span>(<span class="s">"tuning_zon"</span>);</code></pre>
+<p>Rules code reads <code>tuning.person.turnover_target</code> as a plain constant. The compiler has already checked the file matches the struct. Adding a knob is a three-line change: a field in the struct, a value in the file, a use in the formula. The same mechanism carries the design catalogue, where each row is a struct with defaults so a vehicle need not state mek-only fields:</p>
+<div class="file">data/chassis.zon (one row)</div>
+<pre><code>.{ .key = <span class="s">"SHD-2H"</span>, .name = <span class="s">"Shadow Hawk"</span>, .tonnage = <span class="n">55</span>, .bv = <span class="n">1064</span>, .cost = <span class="n">4_701_800</span>, .rarity = .common,
+   .walk_mp = <span class="n">5</span>, .jump_mp = <span class="n">3</span>, .heat_sinks = <span class="n">12</span>, .armor_half_tons = <span class="n">19</span>, .loadout = .{
+    .{ .slot = <span class="s">"lt.ac5.1"</span>, .part = <span class="s">"ac5"</span>, .class = .weapon },
+    .{ .slot = <span class="s">"ct.mlas.1"</span>, .part = <span class="s">"mlas"</span>, .class = .weapon },
+    <span class="c">// …</span>
+} },</code></pre>
+<p>What the type system cannot check, tests do: every loadout part key must exist in the parts catalogue, every RAT entry must name a real design of the right class, every mek must pass the MekLab's construction rules. Those tests run against the data, which is why the modding doc tells you to run <code>zig build test -Ddata=mymod</code>.</p>
+<p>The mod overlay in <code>build.zig</code> (section 2) is the last piece: because the import is by name, swapping which file backs the name is a build-script decision, and the sim code does not know or care.</p>
+
+<h2 id="p3">20. GameState: one arena, one dice bag</h2>
+<p><code>GameState</code> is a large struct holding everything about a campaign: ordered hash maps of people, units, forces, HQs and contracts keyed by their typed IDs; lists for the ledger, the log, the event queue, orders, couriers and market listings; the clock; the treasury; and two special members.</p>
+<p>The <strong>arena</strong> owns every allocation the campaign makes. Names, log text, lists, maps: all of it comes from <code>gs.allocator()</code> and all of it is released by <code>gs.deinit()</code>. There is no per-object destructor anywhere in the domain. This is a deliberate trade: memory grows monotonically over a campaign (a long game holds every log line it ever wrote), in exchange for never having a use-after-free and never forgetting a free.</p>
+<p>The <strong>RNG</strong> is a bag of independent generators, one per subsystem:</p>
+<div class="file">src/sim/rng.zig</div>
+<pre><code><span class="k">pub const</span> Stream = <span class="k">enum</span>(u8) { generation, market, maintenance, acquisition, battle, events, medical, travel };
+
+<span class="k">pub const</span> Rng = <span class="k">struct</span> {
+    prngs: [Stream.count]std.Random.DefaultPrng,
+
+    <span class="k">pub fn</span> roll2d6(self: *Rng, stream: Stream) u8 {
+        <span class="k">const</span> r = self.random(stream);
+        <span class="k">return</span> r.intRangeAtMost(u8, <span class="n">1</span>, <span class="n">6</span>) + r.intRangeAtMost(u8, <span class="n">1</span>, <span class="n">6</span>);
+    }
+};</code></pre>
+<p>Why streams? Suppose you add a weather roll to battles. If all randomness shared one generator, every market roll after the first battle would shift, and a saved game would replay differently after an update. With named streams, adding a draw to <code>.battle</code> leaves <code>.market</code> untouched. Sections of the code name the stream they draw from: <code>gs.rng.roll2d6(.medical)</code> in turnover, <code>.acquisition</code> in part orders. A house rule forbids creating a PRNG anywhere else.</p>
+<p>Finally, <code>gs.hash()</code> folds the important state (day, funds, every person's fatigue and morale, every unit's condition, counts of everything) into a 64-bit number. It exists for one test, in section 28.</p>
+
+<h2 id="p4">21. Commands: the only way in</h2>
+<p>Nothing outside the core mutates <code>GameState</code> except through <code>commands.execute(gs, cmd)</code>. The function is a single switch over the <code>Command</code> union, and every arm follows the same shape: validate, then mutate, then return a <code>Result</code>.</p>
+<div class="file">src/sim/commands.zig (the tier-upgrade arm)</div>
+<pre><code>.upgrade_tier =&gt; |hq_id| {
+    <span class="c">// Check everything before a c-bill moves: a refused upgrade used
+    // to keep the money.</span>
+    <span class="k">const</span> h = gs.hqs.getPtr(hq_id) <span class="k">orelse return</span> Error.UnknownHq;
+    <span class="k">if</span> (h.tier != .field) <span class="k">return</span> Error.MaxLevel;
+    <span class="k">for</span> (h.projects.items) |p| <span class="k">if</span> (p.kind == .tier_upgrade) <span class="k">return</span> Error.ProjectInProgress;
+    <span class="k">if</span> (gs.treasuryBalance(.{ .hq = hq_id }) &lt; hq_ops.tier_upgrade_cost) <span class="k">return</span> Error.InsufficientTreasury;
+    hq_ops.startTierUpgrade(gs, hq_id) <span class="k">catch</span> |err| <span class="k">switch</span> (err) {
+        <span class="k">error</span>.ProjectInProgress =&gt; <span class="k">return</span> Error.ProjectInProgress,
+        <span class="k">error</span>.MaxLevel =&gt; <span class="k">return</span> Error.MaxLevel,
+        <span class="k">error</span>.UnknownHq =&gt; <span class="k">return</span> Error.UnknownHq,
+        <span class="k">error</span>.OutOfMemory =&gt; <span class="k">return</span> Error.OutOfMemory,
+    };
+    <span class="k">try</span> gs.postTreasury(.{ .hq = hq_id }, .{
+        .day = gs.clock.day_index,
+        .amount = -hq_ops.tier_upgrade_cost,
+        .category = .hq_construction,
+        .hq = hq_id,
+        .note = <span class="s">"regional upgrade"</span>,
+    });
+    <span class="k">return</span> .{};
+},</code></pre>
+<p>The comment records a real bug: an earlier version debited first and checked second, so a refused upgrade kept the money. The shape "all checks, then all effects" is the discipline that prevents it. Notice also that <code>hq_ops.startTierUpgrade</code> has its own smaller error set, and the arm translates each case into the command layer's set explicitly; Zig's <code>switch</code> on an error is exhaustive too, so a new failure mode in <code>hq_ops</code> shows up here as a compile error.</p>
+<p>The <code>Result</code> struct is all defaults, so most arms return <code>.{}</code> and only the ones with something to report fill a field:</p>
+<pre><code><span class="k">pub const</span> Result = <span class="k">struct</span> {
+    days_advanced: u32 = <span class="n">0</span>,
+    hired: types.PersonId = .none,
+    created_force: types.ForceId = .none,
+    unit: types.UnitId = .none,
+    eta_days: u32 = <span class="n">0</span>,
+    hired_count: u32 = <span class="n">0</span>,
+    still_open: u32 = <span class="n">0</span>,
+    <span class="c">// …</span>
+};</code></pre>
+<p>Both frontends produce commands the same way. The console parses a typed line with <code>cli.parseCommand</code>; the terminal client's <code>:</code> line uses the same parser, and its keys build command values directly (<code>try self.exec(.{ .crew_company = co })</code>). That single parser is why a verb added for one frontend works in the other for free.</p>
+
+<h2 id="p5">22. The daily tick</h2>
+<p>Ending a turn calls <code>tick.advanceDay</code> once per day. It is a fixed list of phases, each a function that takes the state and returns an error union:</p>
+<div class="file">src/sim/tick.zig</div>
+<pre><code><span class="k">pub fn</span> advanceDay(gs: *GameState) !<span class="k">void</span> {
+    gs.clock.advance();
+    gs.refreshHqStaffing();
+    <span class="k">if</span> (gs.clock.day_index % <span class="n">7</span> == <span class="n">0</span>) network.resetWeeklyThroughput(gs);
+    <span class="k">try</span> runTravel(gs);               <span class="c">// deliveries, couriers, transfers land</span>
+    <span class="k">try</span> runPolicies(gs);             <span class="c">// standing cash top-ups and resupply</span>
+    <span class="k">try</span> runStockPolicies(gs);        <span class="c">// warehouse reorder points</span>
+    <span class="k">try</span> hq_ops.runDaily(gs);         <span class="c">// bays, fabrication, construction</span>
+    <span class="k">try</span> runSupplyConsumption(gs);
+    <span class="k">try</span> medical.runDailyHealing(gs);
+    <span class="k">try</span> runMarkets(gs);
+    <span class="k">if</span> (gs.clock.day_index % <span class="n">7</span> == <span class="n">0</span> <span class="k">and</span> gs.clock.day_index &gt; <span class="n">0</span>) {
+        <span class="k">try</span> maintenance.runWeeklyMaintenance(gs);
+        <span class="k">try</span> maintenance.runWeeklyRepairs(gs);
+    }
+    <span class="k">try</span> medical.runDailyTraining(gs);
+    <span class="k">try</span> runContracts(gs);
+    <span class="k">try</span> contract_control.runReturns(gs);
+    <span class="k">if</span> (gs.clock.date.day == <span class="n">1</span>) <span class="k">try</span> contract_events.rollMonthly(gs);
+    <span class="k">if</span> (gs.clock.day_index % <span class="n">7</span> == <span class="n">3</span>) <span class="k">try</span> contract_events.rollWeekly(gs);
+    <span class="k">try</span> battle.runDaily(gs);         <span class="c">// due engagements resolve</span>
+    <span class="k">try</span> contract_control.checkEffectiveness(gs);
+    <span class="k">if</span> (gs.clock.day_index % <span class="n">7</span> == <span class="n">0</span> <span class="k">and</span> gs.clock.day_index &gt; <span class="n">0</span>) {
+        <span class="k">try</span> medical.runWeeklyRest(gs);
+        runTrainingLances(gs);
+    }
+    <span class="k">try</span> runFinances(gs);             <span class="c">// payday on the 1st: payroll, ranks, shares, turnover</span>
+    <span class="k">try</span> contract_events.expireDue(gs);
+}</code></pre>
+<p>Order is meaning. Deliveries land before consumption so a convoy that arrives today feeds today. Maintenance runs before battles on the same day, so a hull that broke down this week does not fight. Finance runs last so the day's costs are on the books when payroll is counted. When you add a mechanic, the first question is which phase it belongs in and what must already have happened.</p>
+<p>Each phase is small and testable on its own. <code>medical.runMonthlyTurnover</code> is called from <code>runFinances</code> on payday, but its tests call it directly on a hand-built state, set morale to zero, and count notices in the inbox. That is the general testing style: build the smallest state that exercises the rule, call the phase, assert on state.</p>
+
+<h2 id="p6">23. Queries: the only way out</h2>
+<p>Frontends never walk <code>GameState</code> themselves to draw a screen. They call a query, which returns plain data: strings already formatted, plus the IDs a key handler will need. The People screen's query:</p>
+<div class="file">src/sim/queries.zig</div>
+<pre><code><span class="k">pub const</span> PersonRow = <span class="k">struct</span> { id: types.PersonId, text: []<span class="k">const</span> u8 };
+<span class="k">pub const</span> People = <span class="k">struct</span> { header: []<span class="k">const</span> u8, rows: []PersonRow, total: usize };
+
+<span class="k">pub fn</span> people(alloc: Alloc, gs: *GameState, filter: HallFilter) !People {
+    <span class="k">var</span> rows: std.ArrayListUnmanaged(PersonRow) = .empty;
+    <span class="k">var</span> total: usize = <span class="n">0</span>;
+    <span class="k">var</span> it = gs.people.iterator();
+    <span class="k">while</span> (it.next()) |e| {
+        <span class="k">const</span> p = e.value_ptr;
+        <span class="k">if</span> (p.status == .kia <span class="k">or</span> p.status == .retired <span class="k">or</span> p.status == .resigned <span class="k">or</span> p.status == .released) <span class="k">continue</span>;
+        total += <span class="n">1</span>;
+        <span class="k">if</span> (!filter.matches(p.role)) <span class="k">continue</span>;
+        <span class="k">if</span> (filter == .wounded <span class="k">and</span> p.status != .wounded) <span class="k">continue</span>;
+        <span class="k">if</span> (filter == .unassigned <span class="k">and</span> !isUnassigned(gs, p)) <span class="k">continue</span>;
+        <span class="k">const</span> name = <span class="k">try</span> p.rankedName(alloc);
+        <span class="k">try</span> rows.append(alloc, .{ .id = p.id, .text = <span class="k">try</span> std.fmt.allocPrint(alloc,
+            <span class="s">"{d: &lt;4} {s: &lt;20} {s: &lt;15} {s: &lt;7} {s: &lt;5} {d: &gt;3} {s} {s} {s: &lt;11} {d: &gt;3} {d: &gt;3} {s: &gt;7}"</span>,
+            .{ <span class="k">@intFromEnum</span>(p.id), clip(name, <span class="n">20</span>), <span class="k">@tagName</span>(p.role), <span class="c">/* … */</span> }) });
+    }
+    <span class="k">return</span> .{ .header = <span class="s">"id   name                 role …"</span>, .rows = <span class="k">try</span> rows.toOwnedSlice(alloc), .total = total };
+}</code></pre>
+<p>Three design points. The query takes an allocator, and callers pass a per-frame arena, so the rows cost nothing to free. It returns the <code>id</code> beside the text so the screen can act on the highlighted row without re-deriving which person it was. And the text carries lightweight colour markup (<code>{g}active{/}</code>) that the console strips and the terminal renders, so one query serves both frontends.</p>
+<p>This is also where a class of bugs lives. The HQ screen once mapped the cursor row to a facility by position, assuming the table started on row one; when the tier section above it grew, every row shifted. The fix was a query, <code>hqFacilityAtRow</code>, that reads the rendered rows back and says which facility each one is. Rule of thumb: if a key handler needs to know what a row means, ask a query, never count.</p>
+
+<h2 id="p7">24. Money without floats</h2>
+<p>Every amount is <code>CBills = i64</code>, and every multiplier is basis points through <code>applyBp</code>. A 10 percent markup is <code>applyBp(cost, 11_000)</code>. A rating letter's pay multiplier, a periphery world's local-supply price, a profession's 2 percent edge: all basis points, all integer arithmetic, all reproducible to the C-bill on any machine.</p>
+<p>Money moves in exactly one way. The ledger records a transaction and the named treasury's balance changes in the same call:</p>
+<div class="file">src/econ/finance.zig · src/sim/state.zig</div>
+<pre><code><span class="k">pub const</span> Transaction = <span class="k">struct</span> {
+    day: u32,
+    amount: types.CBills, <span class="c">// signed: income +, expense −</span>
+    category: Category,
+    company: types.ForceId = .none,
+    hq: types.HqId = .none,
+    contract: types.ContractId = .none,
+    note: []<span class="k">const</span> u8 = <span class="s">""</span>,
+};
+
+<span class="c">/// The only way money moves: ledger entry + the named treasury's balance, in lockstep.</span>
+<span class="k">pub fn</span> postTreasury(self: *GameState, treasury: Treasury, txn: Transaction) !<span class="k">void</span> {
+    <span class="k">try</span> self.ledger.post(self.allocator(), txn);
+    <span class="k">switch</span> (treasury) {
+        .outfit =&gt; self.funds += txn.amount,
+        .hq =&gt; |id| <span class="k">if</span> (self.hqs.getPtr(id)) |h| { h.funds += txn.amount; },
+        .company =&gt; |id| <span class="k">if</span> (self.forces.getPtr(id)) |f| { f.local_funds += txn.amount; },
+    }
+}</code></pre>
+<p>Because every transaction is tagged with a company, HQ and contract, the P&amp;L per entity, the contract history's "pay received", the profit-share pool and the campaign summary are all sums over the same list with different filters. There is no second copy of the numbers to drift out of sync. <code>Treasury</code> is itself a small tagged union, so "which till" is a typed value rather than a convention.</p>
+
+<h2 id="p8">25. Battles and events</h2>
+<p>A battle is resolved by one function, <code>battle.resolveEngagement</code>, that reads the campaign state and rolls dice. There is no map and no turns. The player's side is built by walking the company's lances, summing each hull's battle value adjusted for damage, ammunition on hand and the pilot's skill with fatigue and injury penalties; the campaign-level modifiers (supplies, morale, recon, air cover, support lances) scale it. The enemy is a fraction of that, set by contract kind, scenario and a variance roll. Then:</p>
+<div class="file">src/sim/battle.zig (trimmed)</div>
+<pre><code><span class="k">const</span> scenario = scenario_mod.roll(&amp;gs.rng, .battle, c.kind);
+<span class="k">const</span> scenario_mod: i32 = <span class="k">@as</span>(i32, scenario.roll_mod)
+    + (<span class="k">if</span> (player.mods.recon_quality &gt; <span class="n">0</span>) <span class="k">@as</span>(i32, scenario.scout_bonus) <span class="k">else</span> <span class="n">0</span>)
+    + env.rollMod();
+<span class="k">const</span> ratio_bonus: i32 = <span class="k">if</span> (env.close()) <span class="k">@min</span>(ratioBonus(player.power, enemy_power), <span class="n">2</span>) <span class="k">else</span> ratioBonus(player.power, enemy_power);
+<span class="k">var</span> roll = <span class="k">@as</span>(i32, gs.rng.roll2d6(.battle)) + ratio_bonus + scenario_mod;
+
+<span class="k">const</span> outcome: autoresolve.Outcome = <span class="k">if</span> (roll &gt;= <span class="n">11</span>) .decisive_victory
+    <span class="k">else if</span> (roll &gt;= <span class="n">8</span>) .victory
+    <span class="k">else if</span> (roll &gt;= <span class="n">6</span>) .draw
+    <span class="k">else if</span> (roll &gt;= <span class="n">4</span>) .defeat
+    <span class="k">else</span> .rout;</code></pre>
+<p>Everything after that is bookkeeping driven by the outcome: how many hulls are hit and where, who is wounded or killed, what ammunition was spent, what salvage the trucks can haul, what the contract's score and the pilots' records gain, and a multi-line after-action report written to the log. The function is long because the report is detailed, but it is straight-line code with no state of its own.</p>
+<p>Events use the same tagged-union idea as commands. An event deck entry has options, each a list of effects:</p>
+<pre><code><span class="k">pub const</span> Effect = <span class="k">union</span>(<span class="k">enum</span>) {
+    cash: types.CBills,
+    reputation: i16,
+    morale: i8,
+    fatigue: u8,
+    score: i16,
+    damage_random_units: u8,
+    damage_convoy_units: u8,
+    raise_pct: u8,
+    retention_bonus_months: u8,
+    let_go,
+    replace_from_hall,
+    <span class="c">// …</span>
+};</code></pre>
+<p>An inbox rule decides whether an event is a decision or a dice roll: if none of its effects touch money, stock or damage, the sim rolls the default and logs it; otherwise it waits in the inbox with a deadline. That rule is a function over the union tags, and a test asserts it for every deck.</p>
+
+<h2 id="p9">26. Persistence: SQLite by hand</h2>
+<p>The save file is one SQLite database holding every player and campaign. Each campaign's state is spread over about forty tables keyed by campaign ID, one row per entity, with list-valued fields (skills, injuries, awards, force children) in child tables. Saving is a transaction that deletes the campaign's rows and inserts them afresh; loading rebuilds the maps in insertion order so the state hashes the same as before it was saved. A round-trip test checks exactly that.</p>
+<p>Schema changes are a list of migrations, each guarded by "does the column exist yet":</p>
+<div class="file">src/persist/store.zig</div>
+<pre><code><span class="k">pub const</span> schema_version = <span class="n">19</span>;
+
+<span class="k">pub const</span> migrations = [_]Migration{
+    .{ .version = <span class="n">15</span>, .table = <span class="s">"person"</span>, .column = <span class="s">"shares"</span>, .sql = <span class="s">"ALTER TABLE person ADD COLUMN shares INTEGER NOT NULL DEFAULT 0"</span> },
+    .{ .version = <span class="n">16</span>, .table = <span class="s">"person"</span>, .column = <span class="s">"born_day"</span>, .sql = <span class="s">"ALTER TABLE person ADD COLUMN born_day INTEGER"</span> },
+    .{ .version = <span class="n">17</span>, .table = <span class="s">"person"</span>, .column = <span class="s">"last_raise_day"</span>, .sql = <span class="s">"ALTER TABLE person ADD COLUMN last_raise_day INTEGER"</span> },
+    .{ .version = <span class="n">19</span>, .table = <span class="s">"listing"</span>, .column = <span class="s">"black"</span>, .sql = <span class="s">"ALTER TABLE listing ADD COLUMN black INTEGER NOT NULL DEFAULT 0"</span> },
+    <span class="c">// …</span>
+};</code></pre>
+<p>New tables need no migration because the DDL uses <code>CREATE TABLE IF NOT EXISTS</code>. Data fixes that need Zig logic (giving everyone in an old save a birthday, for instance) run in <code>upgradeCampaign(gs, from_version)</code> after load. A store newer than the game is refused with a clear error rather than misread.</p>
+<p>One trap worth remembering from this project's history: the binding of a new column to the <code>INSERT</code> was once lost when the formatter reflowed a long argument list and an edit missed the new shape. The symptom was a value that saved as NULL. The round-trip test caught it. Persistence code is where "add a field" has four places to touch (struct, DDL, insert, select), and a test that checks the fourth is worth more than care at the first three.</p>
+
+<h2 id="p10">27. The terminal client</h2>
+<p>The client is the one part of the program that is not pure, and it is layered so the impure parts stay small.</p>
+<p><strong><code>term.zig</code></strong> puts the terminal in raw mode with <code>tcsetattr</code>, restores it with a <code>defer</code>, reads bytes with a timeout, and decodes them into the <code>Key</code> union (section 7). Escape sequences are ambiguous, so a lone <code>ESC</code> is recognised by waiting a few milliseconds for nothing to follow. It also sends a graphics-protocol probe at startup and reads the reply, which is how the app learns whether pictures are possible.</p>
+<p><strong><code>screen.zig</code></strong> is a grid of cells, each a character, a semantic style (amber, good, crit, dim, selected, purple) and optionally two pixel colours for half-block pictures. Drawing writes into the grid; <code>flush</code> diffs nothing and simply emits the whole frame as ANSI, which is fast enough at terminal sizes. Panes, titled boxes, padded text and the <code>{a}…{/}</code> markup parser live here.</p>
+<p><strong><code>app.zig</code></strong> is the state machine: a mode (welcome, wizard, game), a tab, per-pane cursors, an optional modal, and the campaign. Its loop is four lines:</p>
+<pre><code><span class="k">while</span> (self.running) {
+    <span class="k">try</span> self.draw();                         <span class="c">// queries → cells → ANSI</span>
+    <span class="k">const</span> key = self.term.readKey(<span class="n">500</span>);      <span class="c">// half a second, then redraw anyway (music, resize)</span>
+    <span class="k">if</span> (self.music) |*m| m.poll();
+    <span class="k">if</span> (key == .none) <span class="k">continue</span>;
+    self.handleKey(key) <span class="k">catch</span> |err| self.say(.crit, <span class="s">"error: {s}"</span>, .{<span class="k">@errorName</span>(err)});
+}</code></pre>
+<p><code>draw</code> resets the frame arena, then each screen's <code>drawX</code> calls queries and paints. <code>handleKey</code> dispatches by modal, then mode, then tab, down to a <code>switch</code> on the character. A key that changes the game builds a <code>Command</code> and calls <code>self.exec</code>, which runs <code>commands.execute</code> and turns any error into a status-line sentence via <code>cli.errorText</code>. The client never touches <code>GameState</code> fields to change them; the module boundary in <code>docs/tui.md</code> says it may only call <code>execute</code>, <code>parseCommand</code> and queries, and a reviewer can grep for violations.</p>
+<p>The smaller modules do one foreign thing each: <code>png.zig</code> decodes 8-bit PNGs (inflate included, no library); <code>emblem.zig</code> speaks the kitty and iTerm2 image protocols; <code>music.zig</code> runs the system's audio player as a child process and reaps it with <code>waitpid</code>; <code>splash.zig</code> draws the title.</p>
+<p>Because the client is driven by bytes on a file descriptor, it can be tested without a human. <code>docs/tui_smoke.py</code> forks it under a pseudo-terminal, sends keystrokes, and asserts on the text that comes back, twice: once at a large size and once at 80 by 24 with <code>--ascii</code>. Every screen and most modals are visited in about two minutes. When the market pane was retitled, that script failed on the old title within seconds, which is the point.</p>
+
+<h2 id="p11">28. Determinism and the test suite</h2>
+<p>The whole architecture is summed up by one test:</p>
+<div class="file">src/sim/commands.zig</div>
+<pre><code><span class="k">test</span> <span class="s">"golden master: same seed + same script = same state hash"</span> {
+    <span class="k">const</span> script = [_]Command{
+        .{ .hire = .{ .first = <span class="s">"Grayson"</span>, .last = <span class="s">"Carlyle"</span>, .role = .mekwarrior } },
+        .{ .hire = .{ .first = <span class="s">"Lori"</span>, .last = <span class="s">"Kalmar"</span>, .role = .mekwarrior } },
+        .{ .hire = .{ .first = <span class="s">"Clay"</span>, .last = <span class="s">"Cluny"</span>, .role = .tech_mek } },
+        .{ .advance_days = <span class="n">45</span> },
+        .{ .fire = <span class="k">@enumFromInt</span>(<span class="n">2</span>) },
+        .{ .advance_days = <span class="n">45</span> },
+    };
+    <span class="k">var</span> hashes: [<span class="n">2</span>]u64 = <span class="k">undefined</span>;
+    <span class="k">for</span> (&amp;hashes) |*out| {
+        <span class="k">var</span> gs = GameState.init(std.testing.allocator, .{ .seed = <span class="n">42</span> });
+        <span class="k">defer</span> gs.deinit();
+        <span class="k">for</span> (script) |cmd| _ = <span class="k">try</span> execute(&amp;gs, cmd);
+        out.* = gs.hash();
+    }
+    <span class="k">try</span> std.testing.expectEqual(hashes[<span class="n">0</span>], hashes[<span class="n">1</span>]);
+}</code></pre>
+<p>Two campaigns, same seed, same script, ninety days each, identical hash. If anyone introduces a wall-clock read, a global counter, an unordered map iteration or a stray PRNG, this test breaks. It is cheap, it runs on every build, and it guards the property everything else depends on.</p>
+<p>The rest of the suite is organised by module. Domain tests check rule tables and formulas against known values (an Atlas wants ten maintenance hours, a 300-rated engine weighs 19 tons). Sim tests build a small state, run one phase or command, and assert. Persistence tests round-trip a campaign and load a hand-written old-schema fixture. Data tests cross-check the ZON files. The two smoke scripts cover the frontends. A change is done when <code>zig build test --summary all</code> is green and both smokes pass; that sequence appears in every commit of the project's history.</p>
+
+<h2 id="p12">29. One keypress, end to end</h2>
+<p>Take the Forces screen with the cursor on a company, and press <code>c</code> to crew it from the hiring halls. Here is everything that happens, layer by layer.</p>
+<ol>
+  <li><strong>Bytes.</strong> <code>term.readKey</code> reads <code>0x63</code>, not an escape, not a control byte, so it returns <code>.{ .char = 'c' }</code>.</li>
+  <li><strong>Dispatch.</strong> <code>App.handleKey</code>: no modal, mode is <code>.game</code>, tab is <code>.forces</code>. The Forces branch switches on the character and finds <code>'c'</code>. It reads the highlighted row from the last query result to get a <code>ForceId</code>, resolves it to a company, and calls <code>game.commands.execute(g, .{ .crew_company = co })</code>.</li>
+  <li><strong>Validate.</strong> The <code>.crew_company</code> arm looks up the force, refuses if it is not a company (<code>Error.NotACompany</code>) or is deployed (<code>Error.CompanyDeployed</code>).</li>
+  <li><strong>Mutate.</strong> It asks <code>personnel.manningNeeds</code> for the company's table, fourteen rows of role, need and reason. For every row where <code>have &lt; need</code>: astechs and medics are generated on the spot with <code>gs.hireFromSpec</code>; every other role is filled from the hall candidates with <code>hire_candidate</code>, which itself debits the signing bonus through <code>postTreasury</code>. Whatever the halls could not supply is counted in <code>still_open</code>. Then <code>gs.autoAssign</code> seats pilots and techs. A log line is written with <code>gs.log</code>.</li>
+  <li><strong>Report.</strong> The arm returns <code>.{ .hired_count = hired, .still_open = still_open }</code>. The key handler formats one sentence from those two numbers into the status line with <code>self.say</code>.</li>
+  <li><strong>Redraw.</strong> The loop comes round, <code>draw</code> resets the frame arena and calls <code>queries.toe</code> and <code>queries.manning</code> again. The manning pane's rows now show the new counts and the tech-hours line, because the query recomputes from state every frame. Nothing was cached.</li>
+  <li><strong>Persist.</strong> Nothing yet. Saving is its own command; when it runs, the new people are rows in the <code>person</code> table like any other.</li>
+</ol>
+<p>Every layer is visible in the text, and each one can be exercised alone: the command has a test with a seeded hall, the query has a test on a generated company, and the smoke script presses <code>c</code> and looks for "hired to fill the manning table" in the output.</p>
+
+<h2 id="p13">30. Where to go next</h2>
+<p>Suggested exercises, in rising order of reach, each touching one layer you have now seen:</p>
+<ol>
+  <li><strong>A tuning knob.</strong> Pick a constant in <code>data/tables/tuning.zon</code>, change it, and find the test that notices. Then make the change in a mod directory instead and build with <code>-Ddata</code>.</li>
+  <li><strong>A query.</strong> Add a line to <code>queries.personRecord</code> (the People screen's <code>r</code> modal) showing something the record does not yet: the person's monthly salary in the outfit's payroll as a percentage, say. Only one file changes.</li>
+  <li><strong>A command.</strong> Add <code>set_leave_days</code> or similar: a variant in <code>Command</code>, an arm in <code>execute</code>, a verb in <code>cli.parseCommand</code> and its <code>usage</code> row, an error text if it can refuse, a test. The compiler will list every switch you must extend.</li>
+  <li><strong>A tick phase.</strong> Add a small weekly effect (a morale point for a company that has eaten well all week, perhaps). Decide its place in <code>advanceDay</code>, write it as a function that takes <code>*GameState</code>, test it on a hand-built state, and confirm the golden-master hash still matches itself.</li>
+  <li><strong>A field that persists.</strong> Add a field to <code>Person</code> and carry it through the four places in <code>store.zig</code> plus a migration. The round-trip test is your safety net.</li>
+</ol>
+<p>Reading order for the source if you want to go deeper: <code>ARCHITECTURE.md</code>, then <code>src/root.zig</code>, <code>src/domain/types.zig</code>, <code>src/sim/rng.zig</code>, <code>src/sim/clock.zig</code>, <code>src/sim/state.zig</code> (skim the fields, read the money and lookup helpers), <code>src/sim/commands.zig</code> (the union and a few arms), <code>src/sim/tick.zig</code>, one query in <code>src/sim/queries.zig</code>, <code>src/persist/sqlite.zig</code>, and finally <code>src/tui/app.zig</code>'s <code>run</code>, <code>draw</code> and <code>handleKey</code>. That path is a couple of hours and after it nothing in the repository will look unfamiliar.</p>
+
+<p class="lead" style="margin-top:60px">Written from the project as it stood at commit d77f9de, Zig 0.16, 224 tests.</p>
+
+</main>
+</div>
+</body>
+</html>
