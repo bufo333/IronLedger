@@ -105,10 +105,12 @@ pub fn refresh(gs: *GameState) !void {
         best_comms = @max(best_comms, entry.value_ptr.effectiveFacilityLevel(.comms));
     }
 
-    // Employers price off what fielding your outfit costs per month:
-    // payroll, hulls, and expected maintenance consumables.
-    const ops_cost = gs.monthlyPayroll() + hullUpkeep(gs) + maintenanceEstimate(gs);
-    const base = types.applyBp(@max(ops_cost, tuning.market.min_ops_cost), market_margin_bp);
+    // Employers price off what fielding ONE company costs per month —
+    // payroll, hulls and expected maintenance consumables, spread over the
+    // combat companies on the books. A contract hires one company; pricing
+    // it off the whole outfit paid every company for all of them at once
+    // (play feedback: 98 M in the bank after twenty years).
+    const base = types.applyBp(@max(perCompanyOpsCost(gs), tuning.market.min_ops_cost), market_margin_bp);
 
     // The Dragoons rating (12C.7) sets how many come calling, who, and at what pay.
     const queries = @import("../sim/queries.zig");
@@ -585,6 +587,18 @@ pub fn refreshCandidates(gs: *GameState) !void {
     }
 }
 
+/// The outfit's monthly running cost divided by its combat companies: what
+/// an employer reckons one company costs to keep in the field.
+pub fn perCompanyOpsCost(gs: *GameState) types.CBills {
+    const ops_cost = gs.monthlyPayroll() + hullUpkeep(gs) + maintenanceEstimate(gs);
+    var companies: i64 = 0;
+    var it = gs.forces.iterator();
+    while (it.next()) |e| if (e.value_ptr.echelon == .company) {
+        companies += 1;
+    };
+    return @divTrunc(ops_cost, @max(1, companies));
+}
+
 fn hullUpkeep(gs: *GameState) types.CBills {
     var total: types.CBills = 0;
     var it = gs.units.iterator();
@@ -857,4 +871,20 @@ test "the board is a mix: at least offers_min offers, no kind over a third of th
         garrison_class += 1;
     };
     try std.testing.expect(garrison_class <= @max(2, n / 2));
+}
+
+test "play feedback: offers are priced per company — a second company does not double every contract's pay" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 96 });
+    defer gs.deinit();
+    _ = try gs.createCommander("T", .LC, .quartermaster);
+    _ = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    const one = perCompanyOpsCost(&gs);
+    _ = try @import("../gen/company_gen.zig").generateInto(&gs, "Bravo");
+    const two = perCompanyOpsCost(&gs);
+    // Two like companies: the per-company figure barely moves (HQ overhead is now shared).
+    try std.testing.expect(two < one);
+    try std.testing.expect(two * 10 > one * 6);
+    // And the whole-outfit figure, which the price used to be built on, roughly doubled.
+    const whole = gs.monthlyPayroll() + hullUpkeep(&gs) + maintenanceEstimate(&gs);
+    try std.testing.expect(whole > @divTrunc(two * 18, 10));
 }
