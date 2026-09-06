@@ -15,18 +15,6 @@
 <rect x="288.8" y="8.0" width="7.2" height="15" fill="#e0a33a"/>
 <rect x="296.0" y="8.0" width="7.2" height="15" fill="#e0a33a"/>
 <rect x="303.2" y="8.0" width="7.2" height="15" fill="#e0a33a"/>
-<rect x="1181.6" y="8.0" width="7.2" height="7.5" fill="#000000"/>
-<rect x="1181.6" y="15.5" width="7.2" height="7.5" fill="#0e0b0f"/>
-<rect x="1188.8" y="8.0" width="7.2" height="7.5" fill="#131012"/>
-<rect x="1188.8" y="15.5" width="7.2" height="7.5" fill="#211f1e"/>
-<rect x="1196.0" y="8.0" width="7.2" height="7.5" fill="#2f2c2a"/>
-<rect x="1196.0" y="15.5" width="7.2" height="7.5" fill="#282628"/>
-<rect x="1203.2" y="8.0" width="7.2" height="7.5" fill="#312e2b"/>
-<rect x="1203.2" y="15.5" width="7.2" height="7.5" fill="#3f3a35"/>
-<rect x="1210.4" y="8.0" width="7.2" height="7.5" fill="#191716"/>
-<rect x="1210.4" y="15.5" width="7.2" height="7.5" fill="#232120"/>
-<rect x="1217.6" y="8.0" width="7.2" height="7.5" fill="#000000"/>
-<rect x="1217.6" y="15.5" width="7.2" height="7.5" fill="#100e11"/>
 <text y="19" fill="#6f7d73" x="15.2 22.4">F1</text>
 <text y="19" fill="#6f7d73" x="36.8 44.0 51.2 58.4">Desk</text>
 <text y="19" fill="#6f7d73" x="80.0 87.2">F2</text>
@@ -850,4 +838,5 @@
 <text y="679" fill="#6f7d73" x="1152.8">·</text>
 <text y="679" fill="#6f7d73" x="1167.2">q</text>
 <text y="679" fill="#6f7d73" x="1181.6 1188.8 1196.0 1203.2 1210.4 1217.6 1224.8">welcome</text>
-</g></svg>
+</g>
+</svg>

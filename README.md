@@ -439,7 +439,9 @@ queries (`src/sim/commands.zig`, `src/sim/queries.zig`); the console
 (`--repl`) uses the same boundary and the same parser (`src/sim/cli.zig`).
 `docs/tui_smoke.py` drives the client through a pseudo-terminal and
 `docs/repl_smoke.sh` scripts the console; `docs/screenshots.py` produced
-the pictures above.
+the pictures above, answering the client's graphics probe so the crest
+appears as the placed picture a kitty-protocol terminal shows rather than
+as half-block cells.
 
 ## Attribution
 
