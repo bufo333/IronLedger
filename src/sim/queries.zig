@@ -787,7 +787,14 @@ pub fn hangar(alloc: Alloc, gs: *GameState) ![]HangarRow {
             contribution = bv * @as(u32, u.conditionPct()) / 100;
             if (u.needsDepot()) {
                 why = if (@import("hq_ops.zig").hasJobForUnit(gs, u.id)) "{d}in the depot — HQ screen bays{/}" else "{a}structural damage — d sends it to the depot{/}";
-            } else if (u.conditionPct() < 70) why = "{a}shot up — repairs{/}";
+            } else {
+                var gear_bad: u32 = 0;
+                var gear_gone: u32 = 0;
+                for (u.slots.items) |s| if (s.class != .structure and s.condition != .ok) {
+                    if (s.condition == .damaged) gear_bad += 1 else gear_gone += 1;
+                };
+                if (gear_bad + gear_gone > 0) why = try std.fmt.allocPrint(alloc, "{{a}}gear: {d} destroyed, {d} damaged — its tech fixes it weekly (R orders spares){{/}}", .{ gear_gone, gear_bad }) else if (u.conditionPct() < 70) why = "{a}shot up — repairs{/}";
+            }
         }
         const bill = u.monthlyBill();
         // Support and transport hulls are judged by what they enable, not

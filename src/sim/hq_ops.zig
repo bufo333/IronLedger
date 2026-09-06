@@ -53,6 +53,16 @@ pub fn queueDepotRepair(gs: *GameState, unit_id: types.UnitId) QueueError!bool {
     const hq = gs.hqs.getPtr(hq_id) orelse return error.NoHq;
     if (!hq.supportsStructuralRepair()) return error.NoBay;
     if (hasJobForUnit(gs, unit_id)) return true;
+    // A wreck from before kills wrecked structure (saves predating 12.31)
+    // carries no structural damage: give it the wreck it is, so the rebuild
+    // needs its component like any other.
+    if (u.status == .destroyed) {
+        var any = false;
+        for (u.slots.items) |s| if (s.class == .structure and s.condition != .ok) {
+            any = true;
+        };
+        if (!any) u.markWrecked();
+    }
 
     // Count what's needed; verify all present before consuming any.
     var needed: u32 = 0;

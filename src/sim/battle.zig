@@ -384,7 +384,7 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
             rec.slot_result = if (slot.condition == .damaged) "damaged" else "destroyed";
         }
         if (severity == 12 or (u.armor_pct == 0 and severity >= 10)) {
-            u.status = .destroyed;
+            u.markWrecked(); // destroyed, with the structure to show for it
             destroyed += 1;
             gs.stats.hulls_lost += 1;
             rec.destroyed = true;

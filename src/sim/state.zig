@@ -1634,7 +1634,8 @@ pub const GameState = struct {
             }
         }
         u.force = dest;
-        u.status = if (u.status == .in_transit) .ready else u.status;
+        // A bought wreck lands as damaged, not ready (play feedback).
+        if (u.status == .in_transit) u.status = if (u.needsDepot()) .damaged else .ready;
         u.tech = .none;
         if (self.forces.getPtr(dest)) |d| try d.units.append(self.allocator(), unit_id);
         if (self.person(u.pilot)) |p| p.assigned_force = dest;

@@ -207,7 +207,26 @@ pub const Unit = struct {
     /// bay: it's destroyed, or carries structural damage (ARCH §9.7). Such a
     /// unit keeps fighting at reduced condition (or not at all) until it
     /// ships home.
+    /// A killed hull is a wreck: the centre torso (else the first structure
+    /// slot) is destroyed, so the rebuild is real depot work — a component
+    /// and bay time — not a free pass (play feedback: wrecks with a damaged
+    /// ammo bin and nothing else were stuck between the field and the depot).
+    pub fn markWrecked(self: *Unit) void {
+        self.status = .destroyed;
+        var first: ?*PartSlot = null;
+        for (self.slots.items) |*s| {
+            if (s.class != .structure) continue;
+            if (first == null) first = s;
+            if (std.mem.startsWith(u8, s.slot_key, "ct.")) {
+                s.condition = .destroyed;
+                return;
+            }
+        }
+        if (first) |s| s.condition = .destroyed;
+    }
+
     pub fn needsDepot(self: *const Unit) bool {
+        if (self.status == .destroyed) return true; // a wreck is rebuilt in the depot
         if (self.status == .destroyed) return true;
         for (self.slots.items) |s| {
             if (repairTier(s.class, s.condition) == .depot) return true;

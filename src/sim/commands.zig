@@ -3503,3 +3503,57 @@ test "play feedback: train co:N enrols the whole home company at their trades, a
     try gs.contracts.put(gs.allocator(), cid, .{ .id = cid, .kind = .garrison_duty, .employer_key = "LC", .enemy_key = "PER", .planet_key = gs.hqs.values()[0].planet_key, .status = .active, .assigned_company = co, .terms = .{ .length_months = 12, .base_pay_month = 100_000 } });
     try std.testing.expectError(Error.CompanyDeployed, execute(&gs, .{ .train_company = .{ .company = co } }));
 }
+
+test "12.31: a wreck is rebuilt in the depot — a component and bay time — and comes back ready" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 95 });
+    defer gs.deinit();
+    _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
+    const co = (try execute(&gs, .{ .new_company = "Alpha" })).created_force;
+    const home = gs.hqs.keys()[0];
+    gs.hqs.getPtr(home).?.staff_assigned = 999;
+    var uid: types.UnitId = .none;
+    var uit = gs.units.iterator();
+    while (uit.next()) |e| if (e.value_ptr.kind == .mek and gs.companyOf(e.value_ptr.force) == co) {
+        uid = e.value_ptr.id;
+        break;
+    };
+    const u = gs.unit(uid).?;
+    // Killed in action: destroyed, centre torso gone; a damaged ammo bin on top.
+    u.markWrecked();
+    for (u.slots.items) |*s| if (s.class == .ammo) {
+        s.condition = .damaged;
+        break;
+    };
+    try std.testing.expect(u.needsDepot());
+    var ct_destroyed = false;
+    for (u.slots.items) |s| if (std.mem.startsWith(u8, s.slot_key, "ct.") and s.class == .structure and s.condition == .destroyed) {
+        ct_destroyed = true;
+    };
+    try std.testing.expect(ct_destroyed);
+
+    // No centre torso on the shelf: the depot asks for it; with one, it queues.
+    _ = gs.takeStock(.{ .hq = home }, "comp_ct", gs.stockCount(.{ .hq = home }, "comp_ct"));
+    try std.testing.expectError(Error.MissingComponents, execute(&gs, .{ .depot = uid }));
+    try gs.addStock(.{ .hq = home }, "comp_ct", 1);
+    _ = try execute(&gs, .{ .depot = uid });
+    try std.testing.expect(hq_ops.hasJobForUnit(&gs, uid));
+    try std.testing.expectEqual(@as(u32, 0), gs.stockCount(.{ .hq = home }, "comp_ct"));
+    // Bay time passes (a failed check redoes the work); the wreck is a hull again.
+    var days: u32 = 0;
+    while (hq_ops.hasJobForUnit(&gs, uid) and days < 300) : (days += 1) {
+        try hq_ops.runDaily(&gs);
+        gs.clock.day_index += 1;
+    }
+    try std.testing.expect(!hq_ops.hasJobForUnit(&gs, uid));
+    try std.testing.expectEqual(unit_mod.UnitStatus.ready, gs.unit(uid).?.status);
+    try std.testing.expect(!gs.unit(uid).?.needsDepot());
+
+    // A wreck from an older save — destroyed, structure untouched — gets its wreck on the way in.
+    const legacy = try gs.addUnit("LCT-1V");
+    gs.unit(legacy).?.status = .destroyed;
+    try std.testing.expect(gs.unit(legacy).?.needsDepot());
+    try gs.addStock(.{ .hq = home }, "comp_ct", 1);
+    _ = try execute(&gs, .{ .depot = legacy });
+    try std.testing.expect(hq_ops.hasJobForUnit(&gs, legacy));
+    try std.testing.expectEqual(@as(u32, 0), gs.stockCount(.{ .hq = home }, "comp_ct"));
+}
