@@ -195,6 +195,10 @@ pub const RefitPlan = struct {
     committed: bool = false,
 };
 
+/// One decision kind's history: last day it fired, the last answer, and
+/// how many times running that same answer was given.
+pub const EventMemory = struct { last_day: u32 = 0, last_choice: u8 = 0, streak: u8 = 0 };
+
 pub const GameState = struct {
     arena: std.heap.ArenaAllocator,
     rng: rng_mod.Rng,
@@ -257,6 +261,10 @@ pub const GameState = struct {
     faction_cooling: std.ArrayListUnmanaged(FactionCooling) = .empty,
     /// Standing with each house (Stage 12.21), −100…100; absent = 0.
     faction_standing: std.StringArrayHashMapUnmanaged(i32) = .empty,
+    /// Event memory (play feedback): when each decision kind last fired and
+    /// how the player has been answering it — cooldowns and standing orders
+    /// (sim/contract_events.zig).
+    event_memory: std.AutoArrayHashMapUnmanaged(events_mod.EventKind, EventMemory) = .empty,
     /// Campaign counters for the summary screen (12C.8): what the log
     /// remembers in aggregate. Persisted as meta ints.
     stats: Stats = .{},

@@ -3458,3 +3458,28 @@ test "12.20: the hangar ranks a pilotless hull above one earning its keep, mothb
     const view = try toeFiltered(a, &gs, .hangar);
     try std.testing.expect(view.len == rows.len + 2);
 }
+
+/// Standing orders (play feedback): every decision kind the inbox has
+/// asked about, the last answer, and whether the game now applies that
+/// answer without asking.
+pub fn standingOrders(alloc: Alloc, gs: *GameState) ![][]const u8 {
+    const after = @import("../domain/tuning.zig").t.contract.standing_order_after;
+    var out: std.ArrayListUnmanaged([]const u8) = .empty;
+    var it = gs.event_memory.iterator();
+    while (it.next()) |e| {
+        const m = e.value_ptr.*;
+        const entry = contract_events.entryForKind(e.key_ptr.*) orelse continue;
+        if (entry.options.len == 0 or m.last_choice >= entry.options.len) continue;
+        const standing = m.streak >= after;
+        if (m.streak == 0) {
+            try out.append(alloc, try std.fmt.allocPrint(alloc, "{s: <22} last day {d: <6} asked, not yet answered", .{ @tagName(e.key_ptr.*), m.last_day }));
+            continue;
+        }
+        try out.append(alloc, try std.fmt.allocPrint(alloc, "{s: <22} last day {d: <6} {s}\"{s}\" ×{d}{s}", .{
+            @tagName(e.key_ptr.*), m.last_day, if (standing) "{a}STANDING ORDER{/} " else "", entry.options[m.last_choice].label, m.streak,
+            if (standing) "  — `sop clear <event>` to be asked again" else "",
+        }));
+    }
+    if (out.items.len == 0) try out.append(alloc, try std.fmt.allocPrint(alloc, "no standing orders — answer a decision the same way {d} times running and the game stops asking", .{after}));
+    return out.toOwnedSlice(alloc);
+}

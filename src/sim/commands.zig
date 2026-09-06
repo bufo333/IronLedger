@@ -17,6 +17,7 @@ const part_mod = @import("../domain/part.zig");
 const planet_mod = @import("../domain/planet.zig");
 const market_mod = @import("../econ/market.zig");
 const contract_events = @import("contract_events.zig");
+const events_mod = @import("events.zig");
 const medical_mod = @import("medical.zig");
 const hq_ops = @import("hq_ops.zig");
 const hq_mod = @import("../domain/hq.zig");
@@ -167,6 +168,9 @@ pub const Command = union(enum) {
     /// work on any hull; the Lab is only the mek way in). The spare lands
     /// at the hull's site and its own tech fits it on the weekly pass.
     replace_gear: types.UnitId,
+    /// Forget a standing order (play feedback): the inbox asks about that
+    /// event kind again. `sop` lists them.
+    clear_standing_order: []const u8,
     /// Lance role, MekHQ-style: fighting (default), defense (+power on
     /// garrison contracts), scouting (recon), training (held out of
     /// battles, gains XP at home).
@@ -892,6 +896,12 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             return .{};
         },
         .replace_gear => |unit_id| return replaceGear(gs, unit_id),
+        .clear_standing_order => |name| {
+            const kind = std.meta.stringToEnum(events_mod.EventKind, name) orelse return Error.NoSuchEvent;
+            if (gs.event_memory.getPtr(kind)) |m| m.streak = 0;
+            try gs.log(.decision, .{}, "[sop] {s}: standing order cleared — the inbox asks again", .{name});
+            return .{};
+        },
         .depot => |unit_id| {
             const u = gs.unit(unit_id) orelse return Error.UnknownUnit;
             if (!u.needsDepot()) return Error.NothingToRepair;

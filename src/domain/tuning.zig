@@ -332,6 +332,12 @@ pub const Tuning = struct {
         /// Chance a contract rolls on the weekly deck at all (bp). Play
         /// feedback (12.24): too many small happenings.
         weekly_event_chance_bp: types.Bp,
+        /// A weekly decision of one kind waits this many days before it can
+        /// come up again (play feedback: the same smuggler every month).
+        weekly_decision_cooldown_days: u32,
+        /// After this many identical answers in a row the answer becomes a
+        /// standing order, applied without asking (`sop clear <event>` resets).
+        standing_order_after: u8,
         /// Command rights (12B.1, AtB/CamOps): what the employer's grip on
         /// your company costs and buys, from integrated to independent.
         rights: struct {

@@ -62,6 +62,7 @@ const ddl =
     \\CREATE TABLE IF NOT EXISTS unit_transfer (cid INTEGER NOT NULL, ord INTEGER NOT NULL, unit INTEGER, to_company INTEGER, eta INTEGER);
     \\CREATE TABLE IF NOT EXISTS faction_cooling (cid INTEGER NOT NULL, ord INTEGER NOT NULL, faction TEXT, until_day INTEGER);
     \\CREATE TABLE IF NOT EXISTS faction_standing (cid INTEGER NOT NULL, faction TEXT NOT NULL, value INTEGER NOT NULL);
+    \\CREATE TABLE IF NOT EXISTS event_memory (cid INTEGER NOT NULL, kind TEXT NOT NULL, last_day INTEGER NOT NULL, last_choice INTEGER NOT NULL, streak INTEGER NOT NULL);
     \\CREATE TABLE IF NOT EXISTS rating_snapshot (cid INTEGER NOT NULL, year INTEGER NOT NULL, score INTEGER NOT NULL);
     \\CREATE TABLE IF NOT EXISTS listing (cid INTEGER NOT NULL, ord INTEGER NOT NULL, kind TEXT, item_key TEXT, rarity TEXT, price INTEGER, qty INTEGER, staple INTEGER, listed INTEGER, expires INTEGER, hq INTEGER, c_armor INTEGER, c_quality TEXT, c_damaged INTEGER, c_destroyed INTEGER, c_missing INTEGER, black INTEGER NOT NULL DEFAULT 0);
     \\CREATE TABLE IF NOT EXISTS part_order (cid INTEGER NOT NULL, ord INTEGER NOT NULL, part_key TEXT, qty INTEGER, dest_kind TEXT, dest_id INTEGER, ordered INTEGER, eta INTEGER, cost INTEGER, status TEXT);
@@ -72,11 +73,11 @@ const ddl =
 ;
 
 const tables = [_][]const u8{
-    "meta",          "meta_text",    "rng",             "commander",        "person",      "person_skill", "injury",    "award",         "ability",
-    "unit",          "unit_slot",    "force",           "force_unit",       "force_child", "stock",        "hq",        "hq_facility",   "hq_project",
-    "contract",      "txn",          "loan",            "courier",          "policy",      "bay_job",      "candidate", "hq_link",       "unit_transfer",
-    "supply_policy", "stock_policy", "faction_cooling", "faction_standing", "listing",     "part_order",   "event_log", "pending_event", "refit_plan",
-    "refit_op",      "rating_snapshot",
+    "meta",          "meta_text",    "rng",             "commander",        "person",       "person_skill", "injury",     "award",       "ability",
+    "unit",          "unit_slot",    "force",           "force_unit",       "force_child",  "stock",        "hq",         "hq_facility", "hq_project",
+    "contract",      "txn",          "loan",            "courier",          "policy",       "bay_job",      "candidate",  "hq_link",     "unit_transfer",
+    "supply_policy", "stock_policy", "faction_cooling", "faction_standing", "event_memory", "listing",      "part_order", "event_log",   "pending_event",
+    "refit_plan",    "refit_op",     "rating_snapshot",
 };
 
 pub const Store = struct {
@@ -611,6 +612,15 @@ pub const Store = struct {
             var it = gs.faction_standing.iterator();
             while (it.next()) |e| {
                 try st.bindAll(.{ cid, e.key_ptr.*, @as(i64, e.value_ptr.*) });
+                try st.run();
+            }
+        }
+        {
+            const st = try self.db.prepare("INSERT INTO event_memory VALUES (?1,?2,?3,?4,?5)");
+            defer st.finalize();
+            var it = gs.event_memory.iterator();
+            while (it.next()) |e| {
+                try st.bindAll(.{ cid, e.key_ptr.*, @as(i64, e.value_ptr.last_day), @as(i64, e.value_ptr.last_choice), @as(i64, e.value_ptr.streak) });
                 try st.run();
             }
         }
@@ -1180,6 +1190,15 @@ pub const Store = struct {
             try st.bindAll(.{cid});
             while (try st.next()) {
                 try gs.faction_standing.put(alloc, try st.text(0, alloc), @intCast(st.int(1)));
+            }
+        }
+        {
+            const st = try self.db.prepare("SELECT kind, last_day, last_choice, streak FROM event_memory WHERE cid = ?1");
+            defer st.finalize();
+            try st.bindAll(.{cid});
+            while (try st.next()) {
+                const kind = st.enumValue(events_mod.EventKind, 0) orelse continue;
+                try gs.event_memory.put(alloc, kind, .{ .last_day = @intCast(st.int(1)), .last_choice = @intCast(st.int(2)), .streak = @intCast(st.int(3)) });
             }
         }
         {

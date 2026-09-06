@@ -206,23 +206,42 @@ pub fn rollWeekly(gs: *GameState) !void {
         const roll = gs.rng.roll2d6(.events);
         const deck = weeklyDeck(c.kind.isGarrisonClass(), roll);
         if (deck.kind == .quiet_week) continue;
+        // A decision of this kind waits out its cooldown: a quiet week instead.
+        if (deck.options.len > 0) if (gs.event_memory.get(deck.kind)) |m| {
+            if (gs.clock.day_index < m.last_day + tuning.contract.weekly_decision_cooldown_days) continue;
+        };
         const ctx: @import("state.zig").LogCtx = .{ .company = c.assigned_company, .contract = c.id };
         if (deck.options.len == 0) {
             try applyEffects(gs, deck.auto_effects, c);
             try gs.log(.contract, ctx, "[{s}] (2d6 = {d}) {s}{s}", .{ @tagName(c.kind), roll, deck.log, try effectsPlain(gs, deck.auto_effects) });
-        } else {
-            try gs.event_queue.push(gs.allocator(), .{
-                .day = gs.clock.day_index,
-                .kind = deck.kind,
-                .contract = c.id,
-                .company = c.assigned_company,
-                .options = deck.options,
-                .default_choice = deck.default_choice,
-                .deadline_day = gs.clock.day_index + decision_window_days,
-            });
-            try gs.log(.decision, ctx, "[{s}] DECISION: {s} (inbox, {d} days to answer)", .{ @tagName(c.kind), deck.log, decision_window_days });
-        }
+        } else try queueDecision(gs, deck, c, roll);
     }
+}
+
+/// Queue a decision — or, once the player has answered this kind the same
+/// way `standing_order_after` times running, apply that answer on the spot
+/// (play feedback: the same smuggler, the same answer, every month).
+fn queueDecision(gs: *GameState, deck: Entry, c: *contract_mod.Contract, roll: u8) !void {
+    const ctx: @import("state.zig").LogCtx = .{ .company = c.assigned_company, .contract = c.id };
+    const mem = try gs.event_memory.getOrPut(gs.allocator(), deck.kind);
+    if (!mem.found_existing) mem.value_ptr.* = .{};
+    mem.value_ptr.last_day = gs.clock.day_index;
+    if (mem.value_ptr.streak >= tuning.contract.standing_order_after and mem.value_ptr.last_choice < deck.options.len) {
+        const opt = deck.options[mem.value_ptr.last_choice];
+        try applyEffects(gs, opt.effects, c);
+        try gs.log(.contract, ctx, "[{s}] (2d6 = {d}) {s} — standing order: \"{s}\"{s} (`sop clear {s}` to be asked again)", .{ @tagName(c.kind), roll, deck.log, opt.label, try effectsPlain(gs, opt.effects), @tagName(deck.kind) });
+        return;
+    }
+    try gs.event_queue.push(gs.allocator(), .{
+        .day = gs.clock.day_index,
+        .kind = deck.kind,
+        .contract = c.id,
+        .company = c.assigned_company,
+        .options = deck.options,
+        .default_choice = deck.default_choice,
+        .deadline_day = gs.clock.day_index + decision_window_days,
+    });
+    try gs.log(.decision, ctx, "[{s}] DECISION: {s} (inbox, {d} days to answer)", .{ @tagName(c.kind), deck.log, decision_window_days });
 }
 
 /// " — fatigue +3, morale −2" for an automatic event's log line.
@@ -274,18 +293,7 @@ pub fn rollMonthly(gs: *GameState) !void {
         if (deck.options.len == 0) {
             try applyEffects(gs, deck.auto_effects, c);
             try gs.log(.contract, ctx, "[{s}] (2d6 = {d}) {s}{s}", .{ @tagName(c.kind), roll, deck.log, try effectsPlain(gs, deck.auto_effects) });
-        } else {
-            try gs.event_queue.push(gs.allocator(), .{
-                .day = gs.clock.day_index,
-                .kind = deck.kind,
-                .contract = c.id,
-                .company = c.assigned_company,
-                .options = deck.options,
-                .default_choice = deck.default_choice,
-                .deadline_day = gs.clock.day_index + decision_window_days,
-            });
-            try gs.log(.decision, ctx, "[{s}] DECISION: {s} (inbox, {d} days to answer)", .{ @tagName(c.kind), deck.log, decision_window_days });
-        }
+        } else try queueDecision(gs, deck, c, roll);
     }
 }
 
@@ -298,6 +306,13 @@ pub fn resolveChoice(gs: *GameState, event_index: usize, choice: usize) !void {
     if (choice >= ev.options.len) return error.NoSuchChoice;
 
     ev.chosen = choice;
+    // Remember the answer: the same one enough times running becomes a standing order.
+    if (ev.contract != .none) {
+        const mem = try gs.event_memory.getOrPut(gs.allocator(), ev.kind);
+        if (!mem.found_existing) mem.value_ptr.* = .{};
+        mem.value_ptr.streak = if (mem.found_existing and mem.value_ptr.last_choice == choice) mem.value_ptr.streak +| 1 else 1;
+        mem.value_ptr.last_choice = @intCast(choice);
+    }
     const c = if (ev.contract != .none) gs.contracts.getPtr(ev.contract) else null;
     try applyEffectsFor(gs, ev.options[choice].effects, c, ev.person);
     try gs.log(.decision, .{ .company = ev.company, .contract = ev.contract }, "[decision] {s}: chose \"{s}\"", .{ @tagName(ev.kind), ev.options[choice].label });
@@ -805,4 +820,64 @@ test "12B.7: a prisoner can be ransomed, released for standing, or recruited on 
     _ = try mk.captive(&gs, co);
     try std.testing.expectEqual(heads_before + 1, gs.companyHeadcount(co));
     try std.testing.expectEqual(payroll_before, gs.monthlyPayroll());
+}
+
+test "play feedback: a weekly decision cools down, and the same answer three times becomes a standing order" {
+    const commands = @import("commands.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 303 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    const co = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
+    // A garrison contract on the books, active, so the weekly deck rolls.
+    const cid: types.ContractId = @enumFromInt(900);
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "PER",
+        .planet_key = gs.hqs.values()[0].planet_key,
+        .status = .active,
+        .assigned_company = co,
+        .terms = .{ .length_months = 12, .base_pay_month = 100_000 },
+    });
+    const smuggler = weeklyDeck(true, 3);
+    try std.testing.expectEqual(events.EventKind.smuggler_offer, smuggler.kind);
+
+    // Answer "Send them away" (option 2) three times running: the fourth
+    // offer resolves itself; the inbox stays empty.
+    var seen: u32 = 0;
+    var answered: u32 = 0;
+    var day: u32 = 0;
+    while (day < 5000 and answered < 3) : (day += 1) {
+        gs.clock.day_index = day;
+        try rollWeekly(&gs);
+        for (gs.event_queue.pending.items, 0..) |ev, i| if (ev.kind == .smuggler_offer and ev.needsDecision()) {
+            seen += 1;
+            try resolveChoice(&gs, i, 2);
+            answered += 1;
+            break;
+        };
+    }
+    try std.testing.expectEqual(@as(u32, 3), answered);
+    try std.testing.expectEqual(@as(u8, 3), gs.event_memory.get(.smuggler_offer).?.streak);
+    // Cooldown held between the three: they were at least a quarter apart.
+    try std.testing.expect(day >= 2 * tuning.contract.weekly_decision_cooldown_days);
+
+    // From here the smuggler never reaches the inbox again …
+    const log_before = gs.event_log.items.len;
+    while (day < 20000) : (day += 1) {
+        gs.clock.day_index = day;
+        try rollWeekly(&gs);
+        for (gs.event_queue.pending.items) |ev| try std.testing.expect(ev.kind != .smuggler_offer);
+    }
+    var standing_lines: u32 = 0;
+    for (gs.event_log.items[log_before..]) |e| if (std.mem.indexOf(u8, e.text, "standing order") != null) {
+        standing_lines += 1;
+    };
+    try std.testing.expect(standing_lines > 0);
+
+    // … until the standing order is cleared.
+    _ = try commands.execute(&gs, .{ .clear_standing_order = "smuggler_offer" });
+    try std.testing.expectEqual(@as(u8, 0), gs.event_memory.get(.smuggler_offer).?.streak);
+    try std.testing.expectError(commands.Error.NoSuchEvent, commands.execute(&gs, .{ .clear_standing_order = "no_such_thing" }));
 }

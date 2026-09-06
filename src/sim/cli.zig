@@ -44,6 +44,11 @@ pub fn parseCommand(verb: []const u8, tokens: *std.mem.TokenIterator(u8, .scalar
     if (eq(u8, verb, "admit")) return .{ .admit = @enumFromInt(try num(u32, tokens.next())) };
     if (eq(u8, verb, "depot")) return .{ .depot = @enumFromInt(try num(u32, tokens.next())) };
     if (eq(u8, verb, "replace")) return .{ .replace_gear = @enumFromInt(try num(u32, tokens.next())) };
+    if (eq(u8, verb, "sop")) {
+        // sop clear <event> — bare `sop` is the REPL's listing view.
+        if (!eq(u8, try need(tokens.next()), "clear")) return error.BadArguments;
+        return .{ .clear_standing_order = try need(tokens.next()) };
+    }
     if (eq(u8, verb, "move")) return .{ .move_unit = .{ .unit = @enumFromInt(try num(u32, tokens.next())), .force = @enumFromInt(try num(u32, tokens.next())) } };
     if (eq(u8, verb, "newlance")) {
         // newlance co:N [line|air|mash|mess|salvage|security|transport] <name>
@@ -373,6 +378,7 @@ pub fn errorText(err: anyerror) []const u8 {
         error.HqInUse => "reassign the companies at that HQ first (:assignco co:N hq:M)",
         error.NotWounded => "that person is not wounded",
         error.NoSuchLoan => "no such loan (or nothing to repay)",
+        error.NoSuchEvent => "no such event — kinds read as the log names them, e.g. smuggler_offer (`sop` lists the ones with a history)",
         error.NoSuchListing => "that listing is gone",
         error.TooManyLances => "that lance is full (4 hulls), or the HQ allows no more lances — :newlance co:N <name> raises one",
         error.SameForce => "that hull belongs to another company — x moves it between companies",
@@ -405,6 +411,7 @@ pub const verbs = [_][]const u8{
     "disband",
     "depot",
     "replace",
+    "sop",
     "role",
     "supplypolicy",
     "move",
@@ -466,6 +473,7 @@ pub fn usage(verb: []const u8) ?[]const u8 {
         .{ "disband", "disband co:N" },
         .{ "depot", "depot <unit>" },
         .{ "replace", "replace <unit>" },
+        .{ "sop", "sop clear <event>   (standing orders; `sop` lists them)" },
         .{ "role", "role <lance id> fighting|defense|scouting|training|unassigned" },
         .{ "supplypolicy", "supplypolicy co:N <days> <max tons> [battles]  (0 days removes)" },
         .{ "move", "move <unit> <lance id>" },

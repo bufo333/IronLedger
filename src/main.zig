@@ -964,7 +964,7 @@ fn runRepl(gs: *game.state.GameState, io: std.Io, gpa: std.mem.Allocator, store_
         \\=== IRON LEDGER — command console ===
         \\          save | campaigns | load <id> | delete <id> | new (fresh campaign) | quit
         \\views:    status | toe | hqs | offers | contracts | roster [co:<id>|hq:<id>] | medbay | hall [filter]
-        \\          checklist | inbox | log [n] [filter] | pnl | ledger | treasuries | units | parts | orders
+        \\          checklist | inbox | log [n] [filter] | pnl | ledger | treasuries | units | parts | orders | sop
         \\          shop | supplies | demand | bays | projects | staff | lab <unit> | readiness | rating | summary | manning co:<id>
         \\turn:     day [n] [force]   (the checklist gates it)
         \\commands: `help` lists every verb with its usage — the same verbs the TUI's `:` line takes
@@ -1085,6 +1085,10 @@ fn runRepl(gs: *game.state.GameState, io: std.Io, gpa: std.mem.Allocator, store_
                 }
             }
             printLog(gs, n, filter);
+        } else if (std.mem.eql(u8, verb, "sop") and tokens.peek() == null) {
+            var arena = std.heap.ArenaAllocator.init(gpa);
+            defer arena.deinit();
+            for (try game.queries.standingOrders(arena.allocator(), gs)) |row| std.debug.print("{s}\n", .{row});
         } else if (std.mem.eql(u8, verb, "treasuries")) {
             printTreasuries(gs);
         } else if (std.mem.eql(u8, verb, "ledger")) {

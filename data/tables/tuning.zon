@@ -225,6 +225,8 @@
         .standing_shun_depth = 40,
         .standing_drift_per_month = 1,
         .weekly_event_chance_bp = 10_000, // every week rolls; the decks decide what is a decision
+        .weekly_decision_cooldown_days = 84, // a quarter between repeats of one weekly decision
+        .standing_order_after = 3, // the same answer three times running stops the asking
         .rights = .{
             .gap_delta = .{ .integrated = -2, .house = -1, .liaison = 0, .independent = 2 },
             .salvage_share_bp = .{ .integrated = 5_000, .house = 7_500, .liaison = 9_000, .independent = 10_000 },
