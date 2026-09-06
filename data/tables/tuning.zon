@@ -218,6 +218,7 @@
         .grace_days = 14,
         .cooling_days = 365,
         .decision_window_days = 7,
+        .notice_window_days = 14, // two weeks to answer a resignation notice
         .standing_complete_gain = 5,
         .standing_enemy_loss = 3,
         .standing_breach_loss = 20,

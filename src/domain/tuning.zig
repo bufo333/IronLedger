@@ -317,6 +317,10 @@ pub const Tuning = struct {
         grace_days: u32,
         cooling_days: u32,
         decision_window_days: u32,
+        /// Personnel notices (raise, bonus, replace, let go) get a longer
+        /// window than contract events (play feedback: a week's skip ate the
+        /// whole 7 days and the person was gone before the inbox was read).
+        notice_window_days: u32,
         /// Faction standing (Stage 12.21), −100…100 per house: what a
         /// completed tour earns the employer, what fighting a house costs
         /// with them, what a breach costs, the pay swing per point (bp),

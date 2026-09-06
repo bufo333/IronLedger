@@ -3627,3 +3627,28 @@ test "12.32: difficulty scales pay, fabrication and purchases — regular is the
     };
     try std.testing.expect(seen);
 }
+
+test "play feedback: a resignation notice waits two weeks — a week's skip cannot walk past it" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 99 });
+    defer gs.deinit();
+    _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    _ = try execute(&gs, .{ .new_company = "Alpha" });
+    gs.funds = 50_000_000;
+    const someone = gs.people.values()[0].id;
+    const ce = @import("contract_events.zig");
+    try ce.queueNotice(&gs, someone);
+    var deadline: u32 = 0;
+    for (gs.event_queue.pending.items) |ev| if (ev.kind == .notice_given and ev.person == someone) {
+        deadline = ev.deadline_day;
+    };
+    try std.testing.expectEqual(gs.clock.day_index + ce.notice_window_days, deadline);
+    try std.testing.expect(ce.notice_window_days >= 14);
+    try std.testing.expect(ce.notice_window_days > ce.decision_window_days);
+    // Seven days on: still in the inbox, still unanswered.
+    _ = try execute(&gs, .{ .advance_days = 7 });
+    var still_open = false;
+    for (gs.event_queue.pending.items) |ev| if (ev.kind == .notice_given and ev.person == someone and ev.needsDecision()) {
+        still_open = true;
+    };
+    try std.testing.expect(still_open);
+}

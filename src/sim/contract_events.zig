@@ -13,6 +13,7 @@ const GameState = @import("state.zig").GameState;
 const unit_mod = @import("../domain/unit.zig");
 
 pub const decision_window_days = tuning.contract.decision_window_days;
+pub const notice_window_days = tuning.contract.notice_window_days;
 
 // ------------------------------------------------------------------ decks
 // Static decks; dynamic magnitudes go through relative effects.
@@ -526,11 +527,11 @@ pub fn queueNotice(gs: *GameState, person_id: types.PersonId) !void {
         .person = person_id,
         .options = e.options,
         .default_choice = e.default_choice,
-        .deadline_day = gs.clock.day_index + decision_window_days,
+        .deadline_day = gs.clock.day_index + notice_window_days,
     });
     const loyal = try p.loyalty(gs.clock.day_index).text(gs.allocator());
     try gs.log(.decision, .{ .company = gs.companyOf(p.assigned_force), .hq = p.posted_hq }, "[turnover] DECISION: {s} {s} ({s}, {d} c-bills/mo, morale {d}, fatigue {d}{s}{s}) hands in notice — raise, bonus, replace, or let go (inbox, {d} days)", .{
-        p.first_name, p.last_name, @tagName(p.role), p.monthlySalary(), p.morale, p.fatigue, if (loyal.len > 0) ", despite: " else "", loyal, decision_window_days,
+        p.first_name, p.last_name, @tagName(p.role), p.monthlySalary(), p.morale, p.fatigue, if (loyal.len > 0) ", despite: " else "", loyal, notice_window_days,
     });
 }
 
