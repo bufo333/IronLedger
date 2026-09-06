@@ -87,6 +87,11 @@ const Modal = union(enum) {
     lance_pick: types.UnitId,
     /// Company picker for an offer (board index): readiest first.
     accept_pick: usize,
+    /// Generic pickers (12.30): one look for every "choose one of these".
+    pick_company: struct { what: enum { unit, person }, id: u32 },
+    pick_hq: types.PersonId,
+    pick_crew: types.UnitId,
+    pick_unassign: types.UnitId,
     /// Negotiation term picker for an offer (board index).
     negotiate: usize,
     /// Every company's readiness report (fatigue, morale, wounded, banked XP, depot).
@@ -1876,6 +1881,7 @@ pub const App = struct {
                 const inner = self.screen.pane(r, .{ .title = "NEGOTIATE · [Enter] press the term · [Esc] leave it", .double = true, .right_title = ":negotiate <offer#> <term>" });
                 self.screen.lines(inner, rows.items, 0, first + self.modal_cursor);
             },
+            .pick_company, .pick_hq, .pick_crew, .pick_unassign => try self.drawPick(al),
             .accept_pick => |oi| {
                 const g = &self.gs.?;
                 const cands = try q.offerCandidates(al, g, oi);
@@ -2769,8 +2775,14 @@ pub const App = struct {
                         self.modal_cursor = 0;
                         self.modal = .{ .seat = id };
                     },
-                    'P' => self.openCommand(std.fmt.bufPrint(&buf, "post {d} hq:", .{@intFromEnum(id)}) catch "post "),
-                    'x' => self.openCommand(std.fmt.bufPrint(&buf, "xfer person {d} co:", .{@intFromEnum(id)}) catch "xfer person "),
+                    'P' => {
+                        self.modal_cursor = 0;
+                        self.modal = .{ .pick_hq = id };
+                    },
+                    'x' => {
+                        self.modal_cursor = 0;
+                        self.modal = .{ .pick_company = .{ .what = .person, .id = @intFromEnum(id) } };
+                    },
                     'L' => self.openCommand(std.fmt.bufPrint(&buf, "leave {d} 7", .{@intFromEnum(id)}) catch "leave "),
                     'T' => self.openCommand(std.fmt.bufPrint(&buf, "triage {d} 1", .{@intFromEnum(id)}) catch "triage "),
                     'D' => self.modal = .{ .fire = id },
@@ -2939,17 +2951,20 @@ pub const App = struct {
                 const row: ?q.ToeRow = if (c < rows.len) rows[c] else null;
                 switch (ch) {
                     'a' => if (row) |r| {
-                        if (r.unit != .none) {
-                            var buf: [64]u8 = undefined;
-                            self.openCommand(std.fmt.bufPrint(&buf, "assign {d} ", .{@intFromEnum(r.unit)}) catch "assign ");
-                            self.say(.dim, "type the person id (their role picks pilot seat or tech slot), or pilot|tech <id> — ids are on the People screen", .{});
+                        if (r.unit == .none) {
+                            self.say(.dim, "put the cursor on a hull to crew it", .{});
+                            return;
                         }
+                        self.modal_cursor = 0;
+                        self.modal = .{ .pick_crew = r.unit };
                     },
                     'u' => if (row) |r| {
-                        if (r.unit != .none) {
-                            var buf: [64]u8 = undefined;
-                            self.openCommand(std.fmt.bufPrint(&buf, "unassign {d} ", .{@intFromEnum(r.unit)}) catch "unassign ");
+                        if (r.unit == .none) {
+                            self.say(.dim, "put the cursor on a hull to clear its seat or tech", .{});
+                            return;
                         }
+                        self.modal_cursor = 0;
+                        self.modal = .{ .pick_unassign = r.unit };
                     },
                     'A' => if (row) |r| {
                         const co = g.companyOf(r.force);
@@ -3001,8 +3016,12 @@ pub const App = struct {
                         if (self.msg.len == 0 or self.msg_style != .crit) self.say(.good, "{s} has an air wing — fighters go in its air lances (Market: aero filter; :newlance co:N air <name> adds a lance)", .{q.forceName(g, co)});
                     },
                     'x' => if (row) |r| {
-                        var buf: [64]u8 = undefined;
-                        self.openCommand(if (r.unit != .none) std.fmt.bufPrint(&buf, "xfer unit {d} co:", .{@intFromEnum(r.unit)}) catch "xfer unit " else "xfer unit ");
+                        if (r.unit == .none) {
+                            self.say(.dim, "put the cursor on a hull to send it to another company", .{});
+                            return;
+                        }
+                        self.modal_cursor = 0;
+                        self.modal = .{ .pick_company = .{ .what = .unit, .id = @intFromEnum(r.unit) } };
                     },
                     'l' => if (row) |r| {
                         if (r.unit == .none) {
@@ -3351,6 +3370,93 @@ pub const App = struct {
     const LanceChoice = struct { force: types.ForceId, name: []const u8, text: []const u8 };
 
     /// The lances (line and support) of the hull's company, with room noted.
+    /// The generic picker's rows, title and header for whichever pick modal is up.
+    const PickView = struct { title: []const u8, header: []const u8, rows: []q.PickRow, empty: []const u8 };
+
+    fn pickView(self: *App, al: std.mem.Allocator) !PickView {
+        const g = &self.gs.?;
+        return switch (self.modal) {
+            .pick_company => |pc| .{
+                .title = try std.fmt.allocPrint(al, "SEND {s} TO · [Enter] choose · [Esc] cancel", .{if (pc.what == .unit) try std.fmt.allocPrint(al, "#{d}", .{pc.id}) else try q.personName(al, g, @enumFromInt(pc.id))}),
+                .header = q.company_pick_header,
+                .rows = try q.companyChoices(al, g, if (pc.what == .unit) .unit else .person, pc.id),
+                .empty = "no other company to send to — raise one (Forces +)",
+            },
+            .pick_hq => |pid| .{
+                .title = try std.fmt.allocPrint(al, "POST {s} AT · [Enter] choose · [Esc] cancel", .{try q.personName(al, g, pid)}),
+                .header = q.hq_pick_header,
+                .rows = try q.hqChoices(al, g, pid),
+                .empty = "no HQ",
+            },
+            .pick_crew => |uid| .{
+                .title = try std.fmt.allocPrint(al, "CREW #{d} · [Enter] assign · [Esc] cancel", .{@intFromEnum(uid)}),
+                .header = q.crew_pick_header,
+                .rows = try q.crewChoices(al, g, uid),
+                .empty = "nobody of the right role on the books — hire from a hall (HQ screen)",
+            },
+            .pick_unassign => |uid| .{
+                .title = try std.fmt.allocPrint(al, "UNASSIGN FROM #{d} · [Enter] clear · [Esc] cancel", .{@intFromEnum(uid)}),
+                .header = "",
+                .rows = try q.unassignChoices(al, g, uid),
+                .empty = "nobody is assigned to this hull",
+            },
+            else => unreachable,
+        };
+    }
+
+    fn drawPick(self: *App, al: std.mem.Allocator) !void {
+        const v = try self.pickView(al);
+        var rows: std.ArrayListUnmanaged([]const u8) = .empty;
+        const has_header = v.header.len > 0;
+        if (has_header) try rows.append(al, v.header);
+        for (v.rows) |r| try rows.append(al, r.text);
+        if (v.rows.len == 0) try rows.append(al, try std.fmt.allocPrint(al, "{{d}}{s}{{/}}", .{v.empty}));
+        if (self.modal_cursor >= v.rows.len and v.rows.len > 0) self.modal_cursor = v.rows.len - 1;
+        const r = self.modalRect(@min(self.screen.cols, 100), @intCast(@min(rows.items.len + 3, self.screen.rows)));
+        const inner = self.screen.pane(r, .{ .title = v.title, .double = true, .right_title = "best first · dimmed rows say why not" });
+        const off: usize = if (has_header) 1 else 0;
+        self.screen.lines(inner, rows.items, if (rows.items.len > inner.h) firstRow(self.modal_cursor + off, inner.h) else 0, if (v.rows.len > 0) self.modal_cursor + off else null);
+    }
+
+    fn pickEnter(self: *App) !void {
+        const al = self.a();
+        const g = &self.gs.?;
+        const v = try self.pickView(al);
+        if (v.rows.len == 0) return;
+        const row = v.rows[@min(self.modal_cursor, v.rows.len - 1)];
+        if (!row.eligible) {
+            self.say(.amber, "{s}", .{row.why});
+            return;
+        }
+        const modal = self.modal;
+        self.modal = .none;
+        switch (modal) {
+            .pick_company => |pc| {
+                const co: types.ForceId = @enumFromInt(row.id);
+                if (pc.what == .unit) {
+                    try self.exec(.{ .transfer_unit = .{ .unit = @enumFromInt(pc.id), .to_company = co } });
+                    if (self.msg_style != .crit) self.say(.good, "#{d} sent to {s}{s}", .{ pc.id, q.forceName(g, co), if (g.unit(@enumFromInt(pc.id))) |u| (if (u.status == .in_transit) " — in transit" else " — placed") else "" });
+                } else {
+                    try self.exec(.{ .transfer_person = .{ .person = @enumFromInt(pc.id), .to_force = co } });
+                    if (self.msg_style != .crit) self.say(.good, "{s} transferred to {s}", .{ try q.personName(al, g, @enumFromInt(pc.id)), q.forceName(g, co) });
+                }
+            },
+            .pick_hq => |pid| {
+                try self.exec(.{ .post_person = .{ .person = pid, .hq = @enumFromInt(row.id) } });
+                if (self.msg_style != .crit) self.say(.good, "{s} posted to {s}", .{ try q.personName(al, g, pid), q.hqName(g, @enumFromInt(row.id)) });
+            },
+            .pick_crew => |uid| {
+                try self.exec(.{ .assign = .{ .unit = uid, .slot = row.slot, .person = @enumFromInt(row.id) } });
+                if (self.msg_style != .crit) self.say(.good, "{s} assigned as {s} of #{d}", .{ try q.personName(al, g, @enumFromInt(row.id)), @tagName(row.slot), @intFromEnum(uid) });
+            },
+            .pick_unassign => |uid| {
+                try self.exec(.{ .unassign = .{ .unit = uid, .slot = row.slot } });
+                if (self.msg_style != .crit) self.say(.good, "#{d}: {s} cleared", .{ @intFromEnum(uid), if (row.slot == .any) "pilot and tech" else @tagName(row.slot) });
+            },
+            else => unreachable,
+        }
+    }
+
     fn lanceChoices(self: *App, uid: types.UnitId) ![]LanceChoice {
         const al = self.a();
         const g = &self.gs.?;
@@ -3612,6 +3718,18 @@ pub const App = struct {
                 },
                 .char => |ch| switch (ch) {
                     'j' => self.modal_cursor = @min(self.modal_cursor + 1, 5),
+                    'k' => self.modal_cursor -|= 1,
+                    else => {},
+                },
+                else => {},
+            },
+            .pick_company, .pick_hq, .pick_crew, .pick_unassign => switch (key) {
+                .escape => self.modal = .none,
+                .down => self.modal_cursor +|= 1,
+                .up => self.modal_cursor -|= 1,
+                .enter => try self.pickEnter(),
+                .char => |ch| switch (ch) {
+                    'j' => self.modal_cursor +|= 1,
                     'k' => self.modal_cursor -|= 1,
                     else => {},
                 },

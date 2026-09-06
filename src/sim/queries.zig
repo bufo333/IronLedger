@@ -3606,3 +3606,257 @@ test "play feedback: offer candidates rank the ready company first and name why 
     try std.testing.expectEqualStrings("under contract", cands[2].why);
     try std.testing.expectEqual(@as(u32, 3), cands[0].transit_days); // same world: three days to muster
 }
+
+// ------------------------------------------------ pickers (12.30, play feedback)
+// One row shape for every "choose one of these" list the client shows, so
+// the screens look alike: what can be chosen is ranked best first, what
+// cannot is still listed, dimmed, with the reason.
+
+pub const PickRow = struct {
+    id: u32,
+    eligible: bool,
+    why: []const u8 = "",
+    slot: @import("state.zig").Slot = .any,
+    text: []const u8,
+};
+
+/// The world a company stands on, as transfers reckon it: its contract
+/// world, the world it idles on, else its home HQ (the pool: the seat).
+fn companyPlanetKey(gs: *GameState, company: types.ForceId) ?[]const u8 {
+    if (gs.deploymentContract(company)) |c| return c.planet_key;
+    if (gs.force(company)) |f| if (f.location_planet) |p| return p;
+    return if (gs.hqs.getPtr(gs.homeHqFor(company))) |h| h.planet_key else null;
+}
+
+fn companyStands(alloc: Alloc, gs: *GameState, company: types.ForceId) ![]const u8 {
+    if (gs.deploymentContract(company)) |c| return std.fmt.allocPrint(alloc, "on contract, {s}", .{planetName(c.planet_key)});
+    const f = gs.force(company) orelse return "";
+    if (f.return_eta_day != null) return "in transit home";
+    if (f.location_planet) |p| return std.fmt.allocPrint(alloc, "afield on {s}", .{planetName(p)});
+    return if (gs.hqs.getPtr(gs.homeHqFor(company))) |h| std.fmt.allocPrint(alloc, "home, {s}", .{h.name}) else "home";
+}
+
+fn daysBetweenCompanies(gs: *GameState, from: types.ForceId, to: types.ForceId) u32 {
+    const a = planet_mod.find(companyPlanetKey(gs, from) orelse "") orelse return 0;
+    const b = planet_mod.find(companyPlanetKey(gs, to) orelse "") orelse return 0;
+    if (a == b) return 0;
+    return logistics_mod.transitDays(planet_mod.jumpsBetween(a, b));
+}
+
+pub const company_pick_header = "company               stands                     days   room / need";
+
+/// Companies a hull or a person could transfer to: where each stands,
+/// how many days away, and what room or need it has for them. Ranked by
+/// days; the subject's own company is left out; a subject that cannot
+/// move at all (deployed, in transit, in the depot) dims every row.
+pub fn companyChoices(alloc: Alloc, gs: *GameState, what: enum { unit, person }, subject: u32) ![]PickRow {
+    var out: std.ArrayListUnmanaged(PickRow) = .empty;
+    const personnel = @import("personnel.zig");
+    const unit_dom = @import("../domain/unit.zig");
+    const force_dom = @import("../domain/force.zig");
+    var from: types.ForceId = .none;
+    var blocked: []const u8 = "";
+    var u: ?*unit_dom.Unit = null;
+    var p: ?*@import("../domain/person.zig").Person = null;
+    switch (what) {
+        .unit => {
+            u = gs.unit(@enumFromInt(subject)) orelse return out.toOwnedSlice(alloc);
+            from = gs.companyOf(u.?.force);
+            if (gs.deploymentContract(from) != null) blocked = "its company is deployed";
+            if (u.?.status == .in_transit) blocked = "it is in transit";
+            if (u.?.status == .repairing) blocked = "it is in the depot";
+        },
+        .person => {
+            p = gs.person(@enumFromInt(subject)) orelse return out.toOwnedSlice(alloc);
+            from = gs.companyOf(p.?.assigned_force);
+            if (gs.deploymentContract(from) != null) blocked = "their company is deployed";
+        },
+    }
+    var fit = gs.forces.iterator();
+    while (fit.next()) |e| {
+        const co = e.value_ptr;
+        if (co.echelon != .company or co.id == from) continue;
+        const days = daysBetweenCompanies(gs, from, co.id);
+        var room: []const u8 = "";
+        if (u) |subject_hull| {
+            if (subject_hull.kind == .mek or subject_hull.kind == .vehicle) {
+                var free: u32 = 0;
+                for (co.children.items) |cid| if (gs.force(cid)) |l| if (l.echelon == .lance) {
+                    free += @intCast(force_dom.lance_size -| l.units.items.len);
+                };
+                room = try std.fmt.allocPrint(alloc, "{s}{d} lance slot{s} free{{/}}", .{ if (free == 0) "{a}" else "", free, if (free == 1) "" else "s" });
+            } else if (gs.supportLanceFor(co.id, subject_hull)) |sid| {
+                room = try std.fmt.allocPrint(alloc, "→ {s}", .{forceName(gs, sid)});
+            } else room = "{a}no lance of its trade{/}";
+        } else if (p) |person| {
+            var need: u32 = 0;
+            for (personnel.manningNeeds(gs, co.id)) |n| if (n.role == person.role) {
+                need = n.need;
+            };
+            const have = personnel.manningHave(gs, co.id, person.role);
+            room = try std.fmt.allocPrint(alloc, "{s}{s} {d}/{d}{{/}}", .{ if (have < need) "{c}" else if (have > need) "{d}" else "", @tagName(person.role), have, need });
+        }
+        const eligible = blocked.len == 0;
+        const text = if (eligible)
+            try std.fmt.allocPrint(alloc, "{s} {s} {d: >4}   {s}", .{ try padCells(alloc, "{a}", co.name, 21), try padCells(alloc, "", clip(try companyStands(alloc, gs, co.id), 26), 26), days, room })
+        else
+            try std.fmt.allocPrint(alloc, "{{d}}{s: <21} {s: <26} cannot move: {s}{{/}}", .{ co.name, clip(try companyStands(alloc, gs, co.id), 26), blocked });
+        try out.append(alloc, .{ .id = @intFromEnum(co.id), .eligible = eligible, .why = blocked, .text = text });
+    }
+    // Nearest first.
+    const Ctx = struct { gs: *GameState, from: types.ForceId };
+    std.mem.sort(PickRow, out.items, Ctx{ .gs = gs, .from = from }, struct {
+        fn lt(c: Ctx, a: PickRow, b: PickRow) bool {
+            return daysBetweenCompanies(c.gs, c.from, @enumFromInt(a.id)) < daysBetweenCompanies(c.gs, c.from, @enumFromInt(b.id));
+        }
+    }.lt);
+    return out.toOwnedSlice(alloc);
+}
+
+pub const hq_pick_header = "hq                        tier       world              staff";
+
+/// HQs a person could be posted to: the short-handed ones first.
+pub fn hqChoices(alloc: Alloc, gs: *GameState, person_id: types.PersonId) ![]PickRow {
+    var out: std.ArrayListUnmanaged(PickRow) = .empty;
+    const p = gs.person(person_id) orelse return out.toOwnedSlice(alloc);
+    var it = gs.hqs.iterator();
+    while (it.next()) |e| {
+        const h = e.value_ptr;
+        const req = h.staffRequired().total();
+        const here = p.posted_hq == h.id;
+        try out.append(alloc, .{ .id = @intFromEnum(h.id), .eligible = !here, .why = if (here) "already posted here" else "", .text = if (here)
+            try std.fmt.allocPrint(alloc, "{{d}}{s: <25} {s: <10} {s: <18} {d}/{d}  posted here{{/}}", .{ h.name, @tagName(h.tier), clip(planetName(h.planet_key), 18), h.staff_assigned, req })
+        else
+            try std.fmt.allocPrint(alloc, "{s} {s: <10} {s: <18} {s}{d}/{d}{{/}}{s}", .{ try padCells(alloc, "{a}", h.name, 25), @tagName(h.tier), clip(planetName(h.planet_key), 18), if (h.staff_assigned < req) "{c}" else "{g}", h.staff_assigned, req, if (h.staff_assigned < req) "  short-handed" else "" }) });
+    }
+    const Ctx = struct { gs: *GameState };
+    std.mem.sort(PickRow, out.items, Ctx{ .gs = gs }, struct {
+        fn shortfall(c: Ctx, id: u32) i64 {
+            const h = c.gs.hqs.getPtr(@enumFromInt(id)) orelse return 0;
+            return @as(i64, h.staffRequired().total()) - @as(i64, h.staff_assigned);
+        }
+        fn lt(c: Ctx, a: PickRow, b: PickRow) bool {
+            if (a.eligible != b.eligible) return a.eligible;
+            return shortfall(c, a.id) > shortfall(c, b.id);
+        }
+    }.lt);
+    return out.toOwnedSlice(alloc);
+}
+
+pub const crew_pick_header = "person                  role            skill  now";
+
+/// People who could take a hull's seat or tech slot: the right roles
+/// only, the hull's own company first, the free and the sharper first
+/// within it; the unavailable and the unreachable dimmed with why.
+pub fn crewChoices(alloc: Alloc, gs: *GameState, unit_id: types.UnitId) ![]PickRow {
+    var out: std.ArrayListUnmanaged(PickRow) = .empty;
+    const unit_dom = @import("../domain/unit.zig");
+    const u = gs.unit(unit_id) orelse return out.toOwnedSlice(alloc);
+    const day = gs.clock.day_index;
+    const own = gs.companyOf(u.force);
+    const pilot_role = unit_dom.crewRoleFor(u.kind);
+    const tech_role = unit_dom.techRoleFor(u.kind);
+    const Rank = struct { same: bool, busy: u32, skill: u8 };
+    var ranks: std.ArrayListUnmanaged(Rank) = .empty;
+    var pit = gs.people.iterator();
+    while (pit.next()) |e| {
+        const p = e.value_ptr;
+        const slot: @import("state.zig").Slot = if (p.role == pilot_role) .pilot else if (tech_role != null and p.role == tech_role.?) .tech else continue;
+        if (p.status != .active and p.status != .wounded) continue;
+        var why: []const u8 = "";
+        if (!p.isAvailable(day)) why = if (p.status == .wounded) "wounded" else "unavailable";
+        if (why.len == 0 and u.force == .none and !gs.canReachPool(p)) why = "away with their company";
+        const seat = gs.pilotSeat(p.id);
+        const load = if (slot == .tech) gs.techLoadHours(p.id) else 0;
+        const now: []const u8 = if (slot == .pilot)
+            (if (seat == unit_id) "this seat" else if (seat != .none) try std.fmt.allocPrint(alloc, "pilot of #{d}", .{@intFromEnum(seat)}) else "{g}free{/}")
+        else
+            (if (u.tech == p.id) "this hull's tech" else try std.fmt.allocPrint(alloc, "{s}{d}h of {d}h{{/}}", .{ if (load == 0) "{g}" else "", load, gs.techHoursAvailable(p) }));
+        const skill = p.skill(p.role.primarySkill()) orelse 9;
+        const same = gs.companyOf(p.assigned_force) == own and own != .none;
+        const name = try std.fmt.allocPrint(alloc, "{s} {s}", .{ p.first_name, p.last_name });
+        const eligible = why.len == 0;
+        const text = if (eligible)
+            try std.fmt.allocPrint(alloc, "{s} {s: <15} {d: >5}  {s}{s}", .{ try padCells(alloc, "{a}", clip(name, 23), 23), @tagName(p.role), skill, now, if (!same) (if (gs.companyOf(p.assigned_force) == .none) "  {d}(pool){/}" else "  {d}(another company){/}") else "" })
+        else
+            try std.fmt.allocPrint(alloc, "{{d}}{s: <23} {s: <15} {d: >5}  {s}{{/}}", .{ clip(name, 23), @tagName(p.role), skill, why });
+        try out.append(alloc, .{ .id = @intFromEnum(p.id), .eligible = eligible, .why = why, .slot = slot, .text = text });
+        try ranks.append(alloc, .{ .same = same, .busy = if (slot == .pilot) @intFromBool(seat != .none and seat != unit_id) else load, .skill = skill });
+    }
+    // Sort an index permutation, then rebuild: eligible, own company, free, sharper.
+    const order = try alloc.alloc(usize, out.items.len);
+    for (order, 0..) |*o, i| o.* = i;
+    const Ctx = struct { rows: []PickRow, ranks: []Rank };
+    std.mem.sort(usize, order, Ctx{ .rows = out.items, .ranks = ranks.items }, struct {
+        fn lt(c: Ctx, a: usize, b: usize) bool {
+            const ra = c.rows[a];
+            const rb = c.rows[b];
+            if (ra.eligible != rb.eligible) return ra.eligible;
+            const ka = c.ranks[a];
+            const kb = c.ranks[b];
+            if (ka.same != kb.same) return ka.same;
+            if (ka.busy != kb.busy) return ka.busy < kb.busy;
+            return ka.skill < kb.skill;
+        }
+    }.lt);
+    var sorted = try alloc.alloc(PickRow, out.items.len);
+    for (order, 0..) |src, i| sorted[i] = out.items[src];
+    return sorted;
+}
+
+/// What can be cleared from a hull: its pilot, its tech, or both.
+pub fn unassignChoices(alloc: Alloc, gs: *GameState, unit_id: types.UnitId) ![]PickRow {
+    var out: std.ArrayListUnmanaged(PickRow) = .empty;
+    const u = gs.unit(unit_id) orelse return out.toOwnedSlice(alloc);
+    if (gs.person(u.pilot)) |p| try out.append(alloc, .{ .id = 0, .eligible = true, .slot = .pilot, .text = try std.fmt.allocPrint(alloc, "{{a}}pilot{{/}}   {s} {s}", .{ p.first_name, p.last_name }) });
+    if (gs.person(u.tech)) |t| try out.append(alloc, .{ .id = 1, .eligible = true, .slot = .tech, .text = try std.fmt.allocPrint(alloc, "{{a}}tech{{/}}    {s} {s}", .{ t.first_name, t.last_name }) });
+    if (out.items.len == 2) try out.append(alloc, .{ .id = 2, .eligible = true, .slot = .any, .text = "{a}both{/}" });
+    return out.toOwnedSlice(alloc);
+}
+
+test "pickers: crew rows are the right roles, own company and free first; company rows leave out the subject's own" {
+    const commands = @import("commands.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 90 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    const co = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
+    const other = try @import("../gen/company_gen.zig").generateInto(&gs, "Bravo");
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const al = arena.allocator();
+
+    // A mek of Alpha's: only mekwarriors and mek techs are offered, Alpha's own first.
+    var mek: types.UnitId = .none;
+    var uit = gs.units.iterator();
+    while (uit.next()) |e| if (e.value_ptr.kind == .mek and gs.companyOf(e.value_ptr.force) == co) {
+        mek = e.value_ptr.id;
+        break;
+    };
+    const crew = try crewChoices(al, &gs, mek);
+    try std.testing.expect(crew.len > 0);
+    for (crew) |r| {
+        const p = gs.person(@enumFromInt(r.id)).?;
+        try std.testing.expect(p.role == .mekwarrior or p.role == .tech_mek);
+        try std.testing.expect((r.slot == .pilot) == (p.role == .mekwarrior));
+    }
+    try std.testing.expect(crew[0].eligible);
+    try std.testing.expectEqual(co, gs.companyOf(gs.person(@enumFromInt(crew[0].id)).?.assigned_force));
+
+    // Sending that mek elsewhere: Bravo is offered, Alpha is not.
+    const cos = try companyChoices(al, &gs, .unit, @intFromEnum(mek));
+    try std.testing.expectEqual(@as(usize, 1), cos.len);
+    try std.testing.expectEqual(@intFromEnum(other), cos[0].id);
+    try std.testing.expect(cos[0].eligible);
+
+    // Posting: the one HQ is offered; once posted there it is dimmed.
+    const pilot = gs.unit(mek).?.pilot;
+    const hqs = try hqChoices(al, &gs, pilot);
+    try std.testing.expectEqual(gs.hqs.count(), hqs.len);
+    try std.testing.expect(hqs[0].eligible);
+    _ = try commands.execute(&gs, .{ .post_person = .{ .person = pilot, .hq = @enumFromInt(hqs[0].id) } });
+    try std.testing.expect(!(try hqChoices(al, &gs, pilot))[0].eligible);
+
+    // Unassign offers what is filled.
+    const un = try unassignChoices(al, &gs, mek);
+    try std.testing.expect(un.len >= 1);
+}
