@@ -47,8 +47,10 @@ pub const QueueError = error{ UnknownUnit, NoHq, NoBay, MissingComponents } || s
 pub fn queueDepotRepair(gs: *GameState, unit_id: types.UnitId) QueueError!bool {
     const u = gs.unit(unit_id) orelse return error.UnknownUnit;
     if (gs.hqs.count() == 0) return error.NoHq;
-    const hq_id = gs.hqs.keys()[0];
-    const hq = &gs.hqs.values()[0];
+    // The hull's own home HQ (its company's supplying HQ, Stage 9D) does
+    // the work and supplies the components — not the outfit's first HQ.
+    const hq_id = gs.homeHqFor(u.force);
+    const hq = gs.hqs.getPtr(hq_id) orelse return error.NoHq;
     if (!hq.supportsStructuralRepair()) return error.NoBay;
     if (hasJobForUnit(gs, unit_id)) return true;
 
@@ -83,7 +85,7 @@ pub fn queueDepotRepair(gs: *GameState, unit_id: types.UnitId) QueueError!bool {
 pub fn queueReactivation(gs: *GameState, unit_id: types.UnitId) QueueError!void {
     const u = gs.unit(unit_id) orelse return error.UnknownUnit;
     if (gs.hqs.count() == 0) return error.NoHq;
-    const hq_id = gs.hqs.keys()[0];
+    const hq_id = gs.homeHqFor(u.force); // its own home HQ's bay, as for depot work
     if (baySlots(gs, hq_id) == 0) return error.NoBay;
     try gs.bay_jobs.append(gs.allocator(), .{
         .hq = hq_id,

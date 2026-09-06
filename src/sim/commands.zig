@@ -3226,3 +3226,47 @@ test "12B.6: abilities are bought with XP at a training ground and change the ba
     _ = try execute(&gs, .{ .accept_contract = .{ .offer_index = 0, .company = co } });
     try std.testing.expectError(Error.PersonDeployed, execute(&gs, .{ .train_ability = .{ .person = pilot.id, .key = "edge" } }));
 }
+test "9D: depot work happens at the hull's home HQ — its components, its bay — not the outfit's first one" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 97 });
+    defer gs.deinit();
+    _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
+    const home = gs.hqs.keys()[0];
+    // A second HQ in the home ring, raised to regional with a staffed bay.
+    const home_world = planet_mod.find(gs.hqs.getPtr(home).?.planet_key).?;
+    var key: []const u8 = "";
+    for (planet_mod.catalog) |*p| if (p != home_world and planet_mod.distanceLy(p, home_world) <= gs.hqs.getPtr(home).?.influenceLy() and key.len == 0) {
+        key = p.key;
+    };
+    _ = try execute(&gs, .{ .found_hq = .{ .name = "Firebase", .planet_key = key } });
+    const fb = gs.hqs.keys()[1];
+    {
+        const h = gs.hqs.getPtr(fb).?;
+        h.tier = .regional;
+        try h.facilities.append(gs.allocator(), .{ .kind = .mek_bay, .level = 1 });
+        h.staff_assigned = 999; // fully staffed, so the bay counts (and hosts four lances)
+    }
+    const co = (try execute(&gs, .{ .new_company_at = .{ .name = "Bravo", .hq = fb } })).created_force;
+    try std.testing.expectEqual(fb, gs.homeHqFor(co));
+
+    // One of Bravo's meks loses a side torso.
+    var uid: types.UnitId = .none;
+    var it = gs.units.iterator();
+    while (it.next()) |e| if (e.value_ptr.kind == .mek and gs.companyOf(e.value_ptr.force) == co) {
+        for (e.value_ptr.slots.items) |*s| if (s.class == .structure and std.mem.startsWith(u8, s.slot_key, "lt.")) {
+            s.condition = .destroyed;
+            uid = e.value_ptr.id;
+            break;
+        };
+        if (uid != .none) break;
+    };
+    try std.testing.expect(uid != .none);
+
+    // The torso assembly sits in Bravo's own depot; the first HQ has none.
+    _ = gs.takeStock(.{ .hq = home }, "comp_torso", gs.stockCount(.{ .hq = home }, "comp_torso"));
+    try gs.addStock(.{ .hq = fb }, "comp_torso", 1);
+    _ = try execute(&gs, .{ .depot = uid });
+    try std.testing.expect(hq_ops.hasJobForUnit(&gs, uid));
+    for (gs.bay_jobs.items) |j| if (j.unit == uid) try std.testing.expectEqual(fb, j.hq);
+    try std.testing.expectEqual(@as(u32, 0), gs.stockCount(.{ .hq = fb }, "comp_torso"));
+}
+
