@@ -142,6 +142,32 @@ pub fn build(b: *std.Build) void {
     // by passing `--prefix` or `-p`.
     b.installArtifact(exe);
 
+    // Packaging: the loose runtime files the binary reads at run time (the
+    // .zon tables above are compiled in, these are not). The installed
+    // layout is what src/tui/paths.zig looks for second:
+    //
+    //   zig build -Doptimize=ReleaseFast -Dbundle-music --prefix dist
+    //     dist/bin/game
+    //     dist/share/iron-ledger/music/<soundtrack>/…
+    //     dist/share/iron-ledger/logos/*.png
+    //
+    // The soundtrack is opt-in: it is a few hundred megabytes, so copying it
+    // on every build would make the edit/build loop crawl. Ship it as a
+    // separate archive that unpacks into share/iron-ledger/music, or pass
+    // -Dbundle-music for a single self-contained tree.
+    const bundle_music = b.option(bool, "bundle-music", "Copy data/music into the install prefix (large)") orelse false;
+    if (bundle_music) b.installDirectory(.{
+        .source_dir = b.path("data/music"),
+        .install_dir = .prefix,
+        .install_subdir = "share/iron-ledger/music",
+    });
+    b.installDirectory(.{
+        .source_dir = b.path("docs/logos"),
+        .install_dir = .prefix,
+        .install_subdir = "share/iron-ledger/logos",
+        .include_extensions = &.{".png"},
+    });
+
     // This creates a top level step. Top level steps have a name and can be
     // invoked by name when running `zig build` (e.g. `zig build run`).
     // This will evaluate the `run` step rather than the default step.

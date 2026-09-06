@@ -13,6 +13,7 @@ const screen_mod = @import("screen.zig");
 const emblem_mod = @import("emblem.zig");
 const png = @import("png.zig");
 const music_mod = @import("music.zig");
+const paths = @import("paths.zig");
 const splash = @import("splash.zig");
 
 const Term = term_mod.Term;
@@ -155,9 +156,6 @@ const TextBuf = struct {
 
 const Placement = struct { x: u16, y: u16, cols: u16, rows: u16 };
 
-/// Where the wizard looks for pictures to import.
-const logo_dirs = [_][]const u8{ ".", "logos", "docs/logos" };
-
 pub const App = struct {
     gpa: std.mem.Allocator,
     io: std.Io,
@@ -168,6 +166,10 @@ pub const App = struct {
     lobby: std.heap.ArenaAllocator,
     gs: ?GameState = null,
     running: bool = true,
+
+    /// Where the loose runtime files were found (paths.zig); the wizard
+    /// imports pictures from `asset_roots.logos`.
+    asset_roots: paths.Roots = .{},
 
     // soundtrack and title screen
     music: ?music_mod.Player = null,
@@ -617,7 +619,7 @@ pub const App = struct {
                 try rows.append(al, try std.fmt.allocPrint(al, "emblem source    {s}[h] presets{{/}}   {s}[l] import a picture{{/}}", .{ if (self.w_src == 0) (if (self.w_field == 2) "{s}" else "{a}") else "{d}", if (self.w_src == 1) (if (self.w_field == 2) "{s}" else "{a}") else "{d}" }));
                 try rows.append(al, "");
                 if (self.w_src == 1) {
-                    try rows.append(al, try std.fmt.allocPrint(al, "PNG files in {s}", .{try std.mem.join(al, ", ", &logo_dirs)}));
+                    try rows.append(al, try std.fmt.allocPrint(al, "PNG files in {s}", .{try std.mem.join(al, ", ", self.asset_roots.logos)}));
                     if (self.logos.len == 0) try rows.append(al, "  {d}none found — drop a .png in the project root or a logos/ directory{/}");
                     for (self.logos, 0..) |name, i| {
                         const sel = i == self.w_logo;
@@ -1787,7 +1789,7 @@ pub const App = struct {
                     try rows.append(al, try std.fmt.allocPrint(al, "{s}{s} all soundtracks, mixed and shuffled{{/}}   {{d}}{d} tracks{{/}}", .{ if (m.selected_set == null) "{a}" else "", if (m.selected_set == null) ">" else " ", m.tracks.len }));
                     for (m.sets, 0..) |name, i| {
                         const sel = m.selected_set != null and m.selected_set.? == i;
-                        try rows.append(al, try std.fmt.allocPrint(al, "{s}{s} {s: <28}{{/}}   {{d}}{d} tracks · data/music/{s}{{/}}", .{ if (sel) "{a}" else "", if (sel) ">" else " ", name, m.setCount(i), if (std.mem.eql(u8, name, "default")) "" else name }));
+                        try rows.append(al, try std.fmt.allocPrint(al, "{s}{s} {s: <28}{{/}}   {{d}}{d} tracks · {s}/{s}{{/}}", .{ if (sel) "{a}" else "", if (sel) ">" else " ", name, m.setCount(i), m.root, if (std.mem.eql(u8, name, "default")) "" else name }));
                     }
                     try rows.append(al, "");
                     try rows.append(al, try std.fmt.allocPrint(al, "{{d}}playing {s} · {s} · volume {d}{{/}}", .{ m.setName(m.selected_set), if (m.enabled) "on" else "off", m.volume }));
@@ -1800,7 +1802,7 @@ pub const App = struct {
                     try rows.append(al, "  {d}Enter on a soundtrack selects it (the playlist reshuffles) · Enter on a track plays it · m on/off · < > previous/next · - + volume · Esc close{/}");
                 } else {
                     try rows.append(al, "");
-                    try rows.append(al, "  {d}no soundtrack loaded — start without --no-music, put audio files in data/music/ (one sub-directory per soundtrack) and have afplay, mpv, ffplay or aplay on PATH{/}");
+                    try rows.append(al, "  {d}no soundtrack loaded — start without --no-music, put audio files in data/music/ (or $IRON_LEDGER_DATA/music, one sub-directory per soundtrack) and have afplay, mpv, ffplay or aplay on PATH{/}");
                     try rows.append(al, "");
                     try rows.append(al, "  {d}[Esc] close{/}");
                 }
@@ -1897,9 +1899,9 @@ pub const App = struct {
                     try rows.append(al, try std.fmt.allocPrint(al, "  volume       {d: >3}      {{d}}[-] [+] (restarts the track){{/}}", .{m.volume}));
                     try rows.append(al, try std.fmt.allocPrint(al, "  now playing  {s}{s}     {{d}}[<] previous  [>] next{{/}}", .{ m.nowPlaying() orelse "—", if (m.nowPlayingSet()) |set| try std.fmt.allocPrint(al, " — {s}", .{set}) else "" }));
                     try rows.append(al, try std.fmt.allocPrint(al, "  soundtrack   {{a}}{s}{{/}}     {{d}}[t] browse soundtracks and tracks (also :music){{/}}", .{m.setName(m.selected_set)}));
-                    try rows.append(al, try std.fmt.allocPrint(al, "  tracks       {d} in {d} soundtrack{s} under data/music · player: {s}", .{ m.tracks.len, m.sets.len, if (m.sets.len == 1) "" else "s", m.player_cmd orelse "{c}none found (afplay, mpv, ffplay, aplay){/}" }));
+                    try rows.append(al, try std.fmt.allocPrint(al, "  tracks       {d} in {d} soundtrack{s} under {s} · player: {s}", .{ m.tracks.len, m.sets.len, if (m.sets.len == 1) "" else "s", m.root, m.player_cmd orelse "{c}none found (afplay, mpv, ffplay, aplay){/}" }));
                 } else {
-                    try rows.append(al, "  {d}no soundtrack loaded — start without --no-music and keep tracks in data/music/ (one sub-directory per soundtrack){/}");
+                    try rows.append(al, "  {d}no soundtrack loaded — start without --no-music and keep tracks in data/music/ or $IRON_LEDGER_DATA/music (one sub-directory per soundtrack){/}");
                 }
                 try rows.append(al, "");
                 if (self.gs) |*gs| {
@@ -2029,7 +2031,7 @@ pub const App = struct {
                 const n = rows.items.len;
                 if (self.modal_cursor >= n) self.modal_cursor = n - 1;
                 const r = self.modalRect(80, @intCast(@min(n + 4, 30)));
-                const inner = self.screen.pane(r, .{ .title = "EMBLEM · [Enter] use · [Esc] cancel", .double = true, .right_title = "pictures from ., logos/, docs/logos/" });
+                const inner = self.screen.pane(r, .{ .title = "EMBLEM · [Enter] use · [Esc] cancel", .double = true, .right_title = try std.fmt.allocPrint(al, "pictures from {s}", .{try std.mem.join(al, ", ", self.asset_roots.logos)}) });
                 self.screen.lines(inner, rows.items, firstRow(self.modal_cursor, inner.h), self.modal_cursor);
             },
             .emblem_editor => {
@@ -2174,7 +2176,7 @@ pub const App = struct {
 
     fn toggleMusic(self: *App) !void {
         const m = &(self.music orelse {
-            self.say(.dim, "no soundtrack: put tracks in data/music/ and have afplay, mpv, ffplay or aplay on PATH", .{});
+            self.say(.dim, "no soundtrack: put tracks in data/music/ (or $IRON_LEDGER_DATA/music) and have afplay, mpv, ffplay or aplay on PATH", .{});
             return;
         });
         m.setEnabled(!m.enabled);
@@ -2362,7 +2364,7 @@ pub const App = struct {
         _ = self.lobby.reset(.retain_capacity);
         var all: std.ArrayListUnmanaged([]const u8) = .empty;
         const la = self.lobby.allocator();
-        for (logo_dirs) |d| {
+        for (self.asset_roots.logos) |d| {
             const names = try emblem_mod.listPngs(self.io, la, d);
             for (names) |n| try all.append(la, try std.fmt.allocPrint(la, "{s}/{s}", .{ d, n }));
         }
@@ -4070,15 +4072,22 @@ pub const Options = struct {
     no_splash: bool = false,
     /// Don't start the soundtrack at all.
     no_music: bool = false,
+    /// Asset root overriding the search in paths.zig (`--data`).
+    data_dir: ?[]const u8 = null,
 };
 
 /// Entry point from main: open the store, take the terminal, run the app.
-pub fn run(io: std.Io, gpa: std.mem.Allocator, store_path: [:0]const u8, options: Options) !void {
+pub fn run(io: std.Io, gpa: std.mem.Allocator, env: *const std.process.Environ.Map, store_path: [:0]const u8, options: Options) !void {
     const store = game.store.Store.open(store_path) catch |err| {
         std.debug.print("could not open save store '{s}': {s}\n", .{ store_path, @errorName(err) });
         return err;
     };
     defer store.close();
+
+    // Outlives `app`: the asset paths are borrowed, not copied.
+    var roots_arena = std.heap.ArenaAllocator.init(gpa);
+    defer roots_arena.deinit();
+    const roots = paths.resolve(io, roots_arena.allocator(), env, options.data_dir);
 
     var out_buf: [1 << 16]u8 = undefined;
     var stdout = std.Io.File.stdout().writerStreaming(io, &out_buf);
@@ -4089,13 +4098,14 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, store_path: [:0]const u8, options
     defer app.deinit();
     app.screen.ascii = options.ascii;
     app.show_splash = !options.no_splash;
-    if (!options.no_music) {
-        const player = music_mod.Player.init(io, gpa, "data/music");
+    app.asset_roots = roots;
+    if (!options.no_music) if (roots.music) |dir| {
+        const player = music_mod.Player.init(io, gpa, dir);
         if (player.available()) app.music = player else {
             var p = player;
             p.deinit();
         }
-    }
+    };
     try app.run();
 }
 

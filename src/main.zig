@@ -10,10 +10,12 @@ test {
     _ = @import("tui/emblem.zig");
     _ = @import("tui/splash.zig");
     _ = @import("tui/music.zig");
+    _ = @import("tui/paths.zig");
 }
 
 const std = @import("std");
 const game = @import("game");
+const paths = @import("tui/paths.zig");
 
 const Command = game.commands.Command;
 
@@ -28,18 +30,25 @@ pub fn main(init: std.process.Init) !void {
     var ascii = false;
     var no_splash = false;
     var no_music = false;
-    var store_path: [:0]const u8 = "campaigns.db";
+    var data_dir: ?[]const u8 = null;
+    var store_arg: ?[:0]const u8 = null;
     while (args.next()) |arg| {
         if (std.mem.eql(u8, arg, "--repl")) repl = true;
         if (std.mem.eql(u8, arg, "--tui")) tui = true;
         if (std.mem.eql(u8, arg, "--ascii")) ascii = true;
         if (std.mem.eql(u8, arg, "--no-splash")) no_splash = true;
         if (std.mem.eql(u8, arg, "--no-music")) no_music = true;
-        if (std.mem.eql(u8, arg, "--store")) store_path = args.next() orelse store_path;
+        if (std.mem.eql(u8, arg, "--store")) store_arg = args.next() orelse store_arg;
+        if (std.mem.eql(u8, arg, "--data")) data_dir = args.next() orelse data_dir;
     }
 
+    // Without --store the save lives beside the binary in a source tree and
+    // in the per-user data directory for an installed copy (tui/paths.zig).
+    const store_path = store_arg orelse
+        try paths.defaultStore(init.io, init.arena.allocator(), init.environ_map);
+
     if (tui) {
-        try @import("tui/app.zig").run(init.io, init.gpa, store_path, .{ .ascii = ascii, .no_splash = no_splash, .no_music = no_music });
+        try @import("tui/app.zig").run(init.io, init.gpa, init.environ_map, store_path, .{ .ascii = ascii, .no_splash = no_splash, .no_music = no_music, .data_dir = data_dir });
     } else if (repl) {
         try runRepl(&gs, init.io, init.gpa, store_path);
     } else {

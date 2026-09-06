@@ -234,10 +234,42 @@ zig build run                     # a scripted demo campaign
 zig build -Ddata=mymod            # build with a mod directory overlaying data/
 ```
 
-Flags: `--store <file>` picks the save file (default `campaigns.db`, one
-file holds every player and campaign); `--no-splash` and `--no-music` for
-scripts. A maximised terminal at a 14–16 px font gives the full layout;
-everything degrades down to 80×24.
+Flags: `--store <file>` picks the save file (one file holds every player
+and campaign); `--data <dir>` points at an asset root; `--no-splash` and
+`--no-music` for scripts. A maximised terminal at a 14–16 px font gives the
+full layout; everything degrades down to 80×24.
+
+Without `--store`, a `campaigns.db` in the working directory is used if one
+is there (the source tree keeps its saves in the checkout), otherwise the
+save goes to the per-user data directory — `~/Library/Application Support/
+IRON LEDGER/` on macOS, `$XDG_DATA_HOME/iron-ledger/` (or
+`~/.local/share/iron-ledger/`) elsewhere.
+
+### Packaging a build
+
+Every `data/*.zon` table is compiled into the binary. The soundtrack and
+the emblem pictures are not — they are read at run time from an *asset
+root*, tried in this order (`src/tui/paths.zig`):
+
+1. `--data <dir>` or `$IRON_LEDGER_DATA`
+2. `<exe dir>/../share/iron-ledger` — an install prefix
+3. `<exe dir>/data` — unpacked beside the binary
+4. `./data` — the source tree
+
+A root holds `music/` (one sub-directory per soundtrack) and `logos/`.
+None of it is required: a missing root just means no soundtrack.
+
+```sh
+zig build -Doptimize=ReleaseFast --prefix dist        # binary + logos
+zig build -Doptimize=ReleaseFast -Dbundle-music --prefix dist   # + the soundtrack
+tar -C dist -czf iron-ledger-macos-arm64.tar.gz .
+```
+
+`-Dbundle-music` is opt-in because the score is a few hundred megabytes:
+ship it as a separate archive that unpacks into
+`share/iron-ledger/music/`, and the game picks it up on the next launch.
+The binary still links the system SQLite library, so a package targets the
+platform it was built for.
 
 ### Keys
 

@@ -38,6 +38,8 @@ pub const Player = struct {
     current: ?usize = null,
     child: ?std.process.Child = null,
     player_cmd: ?[]const u8 = null,
+    /// The directory the tracks were found in (shown in the UI).
+    root: []const u8 = "",
     arena: std.heap.ArenaAllocator,
     rng: std.Random.DefaultPrng = std.Random.DefaultPrng.init(0),
 
@@ -48,6 +50,7 @@ pub const Player = struct {
         const now = std.Io.Clock.now(.real, io);
         seed ^= @as(u64, @truncate(@as(u96, @bitCast(now.nanoseconds))));
         p.rng = std.Random.DefaultPrng.init(seed);
+        p.root = p.arena.allocator().dupe(u8, dir_path) catch dir_path;
         p.scan(dir_path) catch {};
         p.player_cmd = detectPlayer();
         p.rebuild();
