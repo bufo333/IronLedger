@@ -3617,6 +3617,8 @@ pub const PickRow = struct {
     eligible: bool,
     why: []const u8 = "",
     slot: @import("state.zig").Slot = .any,
+    /// Part pickers: the catalogue key behind the row.
+    key: []const u8 = "",
     text: []const u8,
 };
 
@@ -3859,4 +3861,62 @@ test "pickers: crew rows are the right roles, own company and free first; compan
     // Unassign offers what is filled.
     const un = try unassignChoices(al, &gs, mek);
     try std.testing.expect(un.len >= 1);
+}
+
+pub const PartPurpose = enum { order, ship, keep, sell, fabricate };
+pub const part_pick_header = "part             name                          cost   tons  on hand  source";
+
+/// Parts a site could order, ship, keep stocked, sell or fabricate: the
+/// catalogue for ordering and keep-stocked lines, what the site holds for
+/// shipping and selling, the structural components for the bay. On hand
+/// is counted at `site`; the emptiest shelves come first for ordering,
+/// the fullest for shipping and selling.
+pub fn partChoices(alloc: Alloc, gs: *GameState, purpose: PartPurpose, site: types.Site) ![]PickRow {
+    var out: std.ArrayListUnmanaged(PickRow) = .empty;
+    const part_mod = @import("../domain/part.zig");
+    for (part_mod.catalog, 0..) |p, i| {
+        const component = part_mod.isComponent(p.key);
+        const on_hand = gs.stockCount(site, p.key);
+        const keep = switch (purpose) {
+            .order, .keep => true,
+            .ship, .sell => on_hand > 0,
+            .fabricate => component,
+        };
+        if (!keep) continue;
+        const source: []const u8 = if (component) "{a}fabricable at a regional HQ{/}" else if (isStaple(p.key)) "{g}staple{/}" else "{d}rolls for availability{/}";
+        try out.append(alloc, .{ .id = @intCast(i), .eligible = true, .key = p.key, .text = try std.fmt.allocPrint(alloc, "{s} {s: <22} {s: >12}  {d: >3}t  {s}{d: >6}{{/}}  {s}", .{
+            try padCells(alloc, "{a}", clip(p.key, 16), 16), clip(p.name, 22), try money(alloc, p.cost), part_mod.tons(p.key), if (on_hand == 0) "{d}" else "", on_hand, source,
+        }) });
+    }
+    const Ctx = struct { gs: *GameState, site: types.Site, fullest_first: bool };
+    std.mem.sort(PickRow, out.items, Ctx{ .gs = gs, .site = site, .fullest_first = purpose == .ship or purpose == .sell }, struct {
+        fn lt(c: Ctx, a: PickRow, b: PickRow) bool {
+            const qa = c.gs.stockCount(c.site, a.key);
+            const qb = c.gs.stockCount(c.site, b.key);
+            if (qa != qb) return if (c.fullest_first) qa > qb else qa < qb;
+            return std.mem.lessThan(u8, a.key, b.key);
+        }
+    }.lt);
+    return out.toOwnedSlice(alloc);
+}
+
+test "pickers: part rows follow the purpose — shipping and selling offer only what the shelf holds, the bay only components" {
+    const commands = @import("commands.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 91 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
+    const hq: types.Site = .{ .hq = gs.hqs.keys()[0] };
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const al = arena.allocator();
+    const part_mod = @import("../domain/part.zig");
+
+    const to_order = try partChoices(al, &gs, .order, hq);
+    try std.testing.expectEqual(part_mod.catalog.len, to_order.len);
+    for (try partChoices(al, &gs, .fabricate, hq)) |r| try std.testing.expect(part_mod.isComponent(r.key));
+    for (try partChoices(al, &gs, .ship, hq)) |r| try std.testing.expect(gs.stockCount(hq, r.key) > 0);
+    // Shipping lists the fullest shelf first; ordering the emptiest.
+    const ship = try partChoices(al, &gs, .ship, hq);
+    if (ship.len >= 2) try std.testing.expect(gs.stockCount(hq, ship[0].key) >= gs.stockCount(hq, ship[1].key));
+    try std.testing.expectEqual(@as(u32, 0), gs.stockCount(hq, to_order[0].key));
 }

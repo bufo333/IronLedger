@@ -92,6 +92,8 @@ const Modal = union(enum) {
     pick_hq: types.PersonId,
     pick_crew: types.UnitId,
     pick_unassign: types.UnitId,
+    /// Part picker: lands in the prefilled command with only the quantity left to type.
+    pick_part: struct { purpose: q.PartPurpose, site: types.Site },
     /// Negotiation term picker for an offer (board index).
     negotiate: usize,
     /// Every company's readiness report (fatigue, morale, wounded, banked XP, depot).
@@ -1881,7 +1883,7 @@ pub const App = struct {
                 const inner = self.screen.pane(r, .{ .title = "NEGOTIATE · [Enter] press the term · [Esc] leave it", .double = true, .right_title = ":negotiate <offer#> <term>" });
                 self.screen.lines(inner, rows.items, 0, first + self.modal_cursor);
             },
-            .pick_company, .pick_hq, .pick_crew, .pick_unassign => try self.drawPick(al),
+            .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_part => try self.drawPick(al),
             .accept_pick => |oi| {
                 const g = &self.gs.?;
                 const cands = try q.offerCandidates(al, g, oi);
@@ -3151,15 +3153,19 @@ pub const App = struct {
                 const site = try self.supplySite();
                 var buf: [128]u8 = undefined;
                 switch (ch) {
-                    'o' => self.openCommand(if (site) |s| switch (s) {
-                        .company => |id| std.fmt.bufPrint(&buf, "order provisions 10 co:{d}", .{@intFromEnum(id)}) catch "order ",
-                        .hq => |id| std.fmt.bufPrint(&buf, "order provisions 10 hq:{d}", .{@intFromEnum(id)}) catch "order ",
-                        .outfit => "order ",
-                    } else "order "),
-                    's' => self.openCommand(if (site) |s| switch (s) {
-                        .company => |id| std.fmt.bufPrint(&buf, "ship provisions 10 hq:{d} co:{d}", .{ self.homeHqOf(id), @intFromEnum(id) }) catch "ship ",
-                        else => "ship provisions 10 ",
-                    } else "ship provisions 10 "),
+                    'o' => {
+                        self.modal_cursor = 0;
+                        self.modal = .{ .pick_part = .{ .purpose = .order, .site = site orelse g.defaultSite() } };
+                    },
+                    's' => {
+                        // Ship from the home shelf: a company row means its home HQ's stores.
+                        const from: types.Site = if (site) |s| switch (s) {
+                            .company => |id| .{ .hq = @enumFromInt(self.homeHqOf(id)) },
+                            else => s,
+                        } else g.defaultSite();
+                        self.modal_cursor = 0;
+                        self.modal = .{ .pick_part = .{ .purpose = .ship, .site = from } };
+                    },
                     't' => self.openCommand(if (site) |s| switch (s) {
                         .company => |id| std.fmt.bufPrint(&buf, "transfer outfit co:{d} 250000", .{@intFromEnum(id)}) catch "transfer outfit ",
                         .hq => |id| std.fmt.bufPrint(&buf, "transfer outfit hq:{d} 500000", .{@intFromEnum(id)}) catch "transfer outfit ",
@@ -3174,14 +3180,14 @@ pub const App = struct {
                         .company => |id| std.fmt.bufPrint(&buf, "supplypolicy co:{d} 14 0", .{@intFromEnum(id)}) catch "supplypolicy ",
                         else => "supplypolicy co:",
                     } else "supplypolicy co:"),
-                    'K' => self.openCommand(if (site) |s| switch (s) {
-                        .hq => |id| std.fmt.bufPrint(&buf, "stockpolicy hq:{d} ", .{@intFromEnum(id)}) catch "stockpolicy ",
-                        else => "stockpolicy hq:",
-                    } else "stockpolicy hq:"),
-                    '$' => self.openCommand(if (site) |s| switch (s) {
-                        .hq => |id| std.fmt.bufPrint(&buf, "sellstock hq:{d} ", .{@intFromEnum(id)}) catch "sellstock ",
-                        else => "sellstock hq:",
-                    } else "sellstock hq:"),
+                    'K' => {
+                        self.modal_cursor = 0;
+                        self.modal = .{ .pick_part = .{ .purpose = .keep, .site = if (site) |s| (if (s == .hq) s else g.defaultSite()) else g.defaultSite() } };
+                    },
+                    '$' => {
+                        self.modal_cursor = 0;
+                        self.modal = .{ .pick_part = .{ .purpose = .sell, .site = if (site) |s| (if (s == .hq) s else g.defaultSite()) else g.defaultSite() } };
+                    },
                     'R' => {
                         const co: types.ForceId = if (site) |s| (if (s == .company) s.company else .none) else .none;
                         if (co == .none) {
@@ -3299,8 +3305,8 @@ pub const App = struct {
                         self.cur(1).* = 0;
                     },
                     'b' => {
-                        var buf: [64]u8 = undefined;
-                        self.openCommand(std.fmt.bufPrint(&buf, "fabricate hq:{d} ", .{self.hqSelId(g)}) catch "fabricate ");
+                        self.modal_cursor = 0;
+                        self.modal = .{ .pick_part = .{ .purpose = .fabricate, .site = .{ .hq = @enumFromInt(self.hqSelId(g)) } } };
                     },
                     '$' => self.modal = .{ .sell_hq = @enumFromInt(self.hqSelId(g)) },
                     else => {},
@@ -3400,6 +3406,21 @@ pub const App = struct {
                 .rows = try q.unassignChoices(al, g, uid),
                 .empty = "nobody is assigned to this hull",
             },
+            .pick_part => |pp| .{
+                .title = try std.fmt.allocPrint(al, "{s} · [Enter] pick, then the quantity · [Esc] cancel", .{switch (pp.purpose) {
+                    .order => "ORDER WHICH PART",
+                    .ship => "SHIP WHICH PART",
+                    .keep => "KEEP WHICH PART STOCKED",
+                    .sell => "SELL WHICH PART",
+                    .fabricate => "FABRICATE WHICH COMPONENT",
+                }}),
+                .header = q.part_pick_header,
+                .rows = try q.partChoices(al, g, pp.purpose, pp.site),
+                .empty = switch (pp.purpose) {
+                    .ship, .sell => "nothing on this shelf",
+                    else => "nothing in the catalogue",
+                },
+            },
             else => unreachable,
         };
     }
@@ -3452,6 +3473,36 @@ pub const App = struct {
             .pick_unassign => |uid| {
                 try self.exec(.{ .unassign = .{ .unit = uid, .slot = row.slot } });
                 if (self.msg_style != .crit) self.say(.good, "#{d}: {s} cleared", .{ @intFromEnum(uid), if (row.slot == .any) "pilot and tech" else @tagName(row.slot) });
+            },
+            .pick_part => |pp| {
+                // The quantity is the one thing left to type (an amount modal is the next step).
+                var buf: [160]u8 = undefined;
+                const on_hand = g.stockCount(pp.site, row.key);
+                const line: []const u8 = switch (pp.purpose) {
+                    .order => switch (pp.site) {
+                        .company => |id| std.fmt.bufPrint(&buf, "order {s} 10 co:{d}", .{ row.key, @intFromEnum(id) }) catch "order ",
+                        .hq => |id| std.fmt.bufPrint(&buf, "order {s} 10 hq:{d}", .{ row.key, @intFromEnum(id) }) catch "order ",
+                        .outfit => std.fmt.bufPrint(&buf, "order {s} 10", .{row.key}) catch "order ",
+                    },
+                    .ship => switch (pp.site) {
+                        .hq => |id| std.fmt.bufPrint(&buf, "ship {s} {d} hq:{d} co:", .{ row.key, @min(on_hand, 10), @intFromEnum(id) }) catch "ship ",
+                        else => std.fmt.bufPrint(&buf, "ship {s} 10 ", .{row.key}) catch "ship ",
+                    },
+                    .keep => switch (pp.site) {
+                        .hq => |id| std.fmt.bufPrint(&buf, "stockpolicy hq:{d} {s} 5 10", .{ @intFromEnum(id), row.key }) catch "stockpolicy ",
+                        else => std.fmt.bufPrint(&buf, "stockpolicy hq: {s} 5 10", .{row.key}) catch "stockpolicy ",
+                    },
+                    .sell => switch (pp.site) {
+                        .hq => |id| std.fmt.bufPrint(&buf, "sellstock hq:{d} {s} {d}", .{ @intFromEnum(id), row.key, on_hand }) catch "sellstock ",
+                        else => std.fmt.bufPrint(&buf, "sellstock hq: {s} {d}", .{ row.key, on_hand }) catch "sellstock ",
+                    },
+                    .fabricate => switch (pp.site) {
+                        .hq => |id| std.fmt.bufPrint(&buf, "fabricate hq:{d} {s} 1", .{ @intFromEnum(id), row.key }) catch "fabricate ",
+                        else => std.fmt.bufPrint(&buf, "fabricate hq: {s} 1", .{row.key}) catch "fabricate ",
+                    },
+                };
+                self.openCommand(line);
+                self.say(.dim, "edit the quantity, Enter runs it", .{});
             },
             else => unreachable,
         }
@@ -3723,7 +3774,7 @@ pub const App = struct {
                 },
                 else => {},
             },
-            .pick_company, .pick_hq, .pick_crew, .pick_unassign => switch (key) {
+            .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_part => switch (key) {
                 .escape => self.modal = .none,
                 .down => self.modal_cursor +|= 1,
                 .up => self.modal_cursor -|= 1,

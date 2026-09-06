@@ -176,11 +176,15 @@ assert "keep-stocked line for" in plain()[-600:], plain()[-800:]
 send("\t", 0.6); send("K", 0.8); send("\r", 1.0)   # back to the catalogue: set it again for the Supply check
 send("6")
 assert "keep stocked" in plain()[-30000:], plain()[-3000:]
-send("K", 0.8)                  # on the HQ row: policy prefill
+send("K", 0.8)                  # on the HQ row: the part picker, then the policy prefill
+assert "KEEP WHICH PART STOCKED" in plain()[-30000:], plain()[-3000:]
+send("\r", 0.8)
 assert ":stockpolicy hq:" in plain()[-300:], plain()[-600:]
-send("\x1b"); send("$", 0.8)   # on the HQ row: sell stock prefill
+send("\x1b"); send("$", 0.8)   # on the HQ row: the part picker, then the sell prefill (fullest shelf first)
+assert "SELL WHICH PART" in plain()[-30000:], plain()[-3000:]
+send("\r", 0.8)
 assert ":sellstock hq:" in plain()[-300:], plain()[-600:]
-send("ammo_lrm 1\r", 1.0)
+send("\r", 1.0)
 assert "done: sellstock" in plain()[-600:] or "keep-stocked minimum" in plain()[-600:], plain()[-800:]
 send("\x1b")
 send("3"); send("j", 0.6)       # forces: cursor on the company → damage pane
@@ -201,8 +205,10 @@ send("t", 0.8)
 assert ":transfer outfit co:" in plain()[-400:], plain()[-800:]
 send("\x1b"); send("p", 0.8)
 assert ":policy co:" in plain()[-400:], plain()[-800:]
-send("\x1b"); send("s", 0.8)
-assert ":ship provisions 10 hq:" in plain()[-400:], plain()[-800:]
+send("\x1b"); send("s", 0.8)                          # ship: the part picker (home shelf), then the prefill
+assert "SHIP WHICH PART" in plain()[-30000:], plain()[-3000:]
+send("\r", 0.8)
+assert ":ship " in plain()[-400:] and " hq:" in plain()[-400:], plain()[-800:]
 send("\x1b"); send("R", 0.8)                          # trim field stores to the plan (company at home: nothing or something, never an error)
 assert "match the field plan" in plain()[-600:] or "to the home HQ" in plain()[-600:], plain()[-800:]
 send("P", 0.8)
