@@ -432,10 +432,10 @@ ending the turn opens the checklist.
 - `docs/tui.md` — the terminal client's architecture, with the generated
   mockups in `docs/tui-mockup.html`.
 - `docs/modding.md` — the data files and how to overlay them.
-- [`docs/iron-ledger-zig-guide.html`](docs/iron-ledger-zig-guide.html) —
-  a newcomer's guide to Zig taught with this project's code, and a tour
-  of how the program is wired together from the build script to a
-  keypress. Open it in a browser.
+- [`docs/iron-ledger-zig-guide.md`](docs/iron-ledger-zig-guide.md) — a
+  newcomer's guide to Zig taught with this project's code, and a tour of
+  how the program is wired together from the build script to a keypress
+  (also as a single-file page, `docs/iron-ledger-zig-guide.html`).
 - `docs/mekhq-map.md` — which MekHQ concept each module corresponds to.
 
 The terminal client talks to the simulation only through commands and
