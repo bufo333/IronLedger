@@ -1572,6 +1572,28 @@ pub const GameState = struct {
         if (self.person(u.pilot)) |p| p.assigned_force = force_id;
     }
 
+    /// The support lance under a company's Omega that a support hull
+    /// belongs in, by trade: MASH rigs to the MASH lance, salvage trucks to
+    /// salvage, cargo trucks to transport, platoons to security.
+    pub fn supportLanceFor(self: *GameState, company: types.ForceId, u: *const unit_mod.Unit) ?types.ForceId {
+        const want: force_mod.SupportLanceKind = switch (u.kind) {
+            .mash => .mash,
+            .cargo => if (std.mem.eql(u8, u.chassis_key, "SVT-1")) .salvage else .transport,
+            .infantry => .security,
+            else => return null,
+        };
+        const co = self.forces.getPtr(company) orelse return null;
+        for (co.children.items) |cid| {
+            const omega = self.forces.getPtr(cid) orelse continue;
+            if (omega.echelon != .support_company) continue;
+            for (omega.children.items) |sid| {
+                const sl = self.forces.getPtr(sid) orelse continue;
+                if (sl.echelon == .support_lance and sl.support_kind == want) return sid;
+            }
+        }
+        return null;
+    }
+
     pub fn placeUnitInCompany(self: *GameState, unit_id: types.UnitId, company: types.ForceId) !void {
         const u = self.unit(unit_id) orelse return error.UnknownUnit;
         // Leave the old force's roster.
@@ -1605,6 +1627,10 @@ pub const GameState = struct {
                         break;
                     }
                 }
+            } else if (self.supportLanceFor(company, u)) |sid| {
+                // Trucks, ambulances and platoons join the support lance of
+                // their trade (play feedback: they used to sit on the roster).
+                dest = sid;
             }
         }
         u.force = dest;

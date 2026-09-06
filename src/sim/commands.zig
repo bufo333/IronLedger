@@ -667,8 +667,12 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             if (dest.echelon != .lance and dest.echelon != .support_lance and dest.echelon != .company and dest.echelon != .air_lance) return Error.NotACompany;
             const co = gs.companyOf(m.force);
             if (co == .none) return Error.NotACompany;
-            if (gs.deploymentContract(co) != null or !gs.isCompanyHome(co)) return Error.CompanyDeployed;
             const from_co = gs.companyOf(u.force);
+            // A hull already with the company can change lances wherever the
+            // company is (play feedback: trucks transferred to the field sat
+            // on the company roster, unplaceable); joining from outside waits
+            // for the company to be home — `transfer_unit` ships it there.
+            if (from_co != co and (gs.deploymentContract(co) != null or !gs.isCompanyHome(co))) return Error.CompanyDeployed;
             if (from_co != .none and from_co != co) return Error.SameForce; // use transfer_unit between companies
             if ((dest.echelon == .lance or dest.echelon == .air_lance) and dest.units.items.len >= force_mod.lance_size) return Error.TooManyLances;
             if (u.status == .in_transit) return Error.Unavailable;
@@ -3365,3 +3369,42 @@ test "9D: depot work happens at the hull's home HQ — its components, its bay �
     try std.testing.expectEqual(@as(u32, 0), gs.stockCount(.{ .hq = fb }, "comp_torso"));
 }
 
+test "9D: a truck sent to a deployed company lands in its transport lance, and can still change lances out there" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 44 });
+    defer gs.deinit();
+    _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
+    const co = (try execute(&gs, .{ .new_company = "Alpha" })).created_force;
+    // Alpha is away on a garrison contract.
+    const cid: types.ContractId = @enumFromInt(901);
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "PER",
+        .planet_key = gs.hqs.values()[0].planet_key,
+        .status = .active,
+        .assigned_company = co,
+        .terms = .{ .length_months = 12, .base_pay_month = 100_000 },
+    });
+    try std.testing.expect(gs.deploymentContract(co) != null);
+
+    // A cargo truck arrives from the HQ: it joins the transport lance, not the company node.
+    const truck = try gs.addUnit("CGT-3");
+    try gs.placeUnitInCompany(truck, co);
+    const transport = gs.supportLanceFor(co, gs.unit(truck).?).?;
+    try std.testing.expectEqual(transport, gs.unit(truck).?.force);
+    try std.testing.expectEqual(force_mod.SupportLanceKind.transport, gs.force(transport).?.support_kind.?);
+
+    // Reshuffling inside the deployed company works; a salvage truck goes to salvage.
+    var salvage: types.ForceId = .none;
+    var fit = gs.forces.iterator();
+    while (fit.next()) |e| if (e.value_ptr.echelon == .support_lance and e.value_ptr.support_kind == .salvage and gs.companyOf(e.value_ptr.id) == co) {
+        salvage = e.value_ptr.id;
+    };
+    _ = try execute(&gs, .{ .move_unit = .{ .unit = truck, .force = salvage } });
+    try std.testing.expectEqual(salvage, gs.unit(truck).?.force);
+
+    // Joining a deployed company from outside still waits for home.
+    const outsider = try gs.addUnit("CGT-3");
+    try std.testing.expectError(Error.CompanyDeployed, execute(&gs, .{ .move_unit = .{ .unit = outsider, .force = transport } }));
+}
