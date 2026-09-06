@@ -423,6 +423,28 @@ pub fn standings(alloc: Alloc, gs: *GameState) ![]const []const u8 {
     return out.toOwnedSlice(alloc);
 }
 
+/// Days to an offer's world as `accept` will reckon them: from the nearest
+/// company that could go (not under contract, not in transit), else from
+/// the outfit's seat. An offer carries no transit of its own until it is
+/// accepted (play feedback: the board showed 0 for every offer).
+pub fn offerTransitDays(gs: *GameState, offer: *const contract_mod.Contract) u32 {
+    const to = planet_mod.find(offer.planet_key) orelse return 0;
+    var best: ?u32 = null;
+    var fit = gs.forces.iterator();
+    while (fit.next()) |e| {
+        const co = e.value_ptr;
+        if (co.echelon != .company or gs.deploymentContract(co.id) != null or co.return_eta_day != null) continue;
+        const from = planet_mod.find(companyPlanetKey(gs, co.id) orelse continue) orelse continue;
+        const jumps = planet_mod.jumpsBetween(from, to);
+        const days: u32 = if (jumps == 0) 3 else logistics_mod.transitDays(jumps);
+        if (best == null or days < best.?) best = days;
+    }
+    if (best) |b| return b;
+    const seat = if (gs.hqs.count() > 0) planet_mod.find(gs.hqs.values()[0].planet_key) else null;
+    const jumps = if (seat) |s| planet_mod.jumpsBetween(s, to) else std.math.divCeil(u32, offer.dist_ly, 30) catch 0;
+    return if (jumps == 0) 3 else logistics_mod.transitDays(jumps);
+}
+
 pub fn contracts(alloc: Alloc, gs: *GameState) !Contracts {
     const day = gs.clock.day_index;
     var board: std.ArrayListUnmanaged(OfferRow) = .empty;
@@ -434,7 +456,7 @@ pub fn contracts(alloc: Alloc, gs: *GameState) !Contracts {
             try padMk(alloc, if (c.beachhead) "{a}" else "", if (c.beachhead) "beachhead" else "in ring", 10), c.terms.length_months,
             try money(alloc, c.terms.base_pay_month),                                                          try money(alloc, total),
             c.enemy_key,                                                                                       c.terms.salvage_pct,
-            if (c.terms.salvage_exchange) try std.fmt.allocPrint(alloc, "{s}$", .{@tagName(c.terms.command_rights)}) else @tagName(c.terms.command_rights), c.transit_days,
+            if (c.terms.salvage_exchange) try std.fmt.allocPrint(alloc, "{s}$", .{@tagName(c.terms.command_rights)}) else @tagName(c.terms.command_rights), offerTransitDays(gs, &c),
         }) });
         if (c.negotiated) board.items[board.items.len - 1].text = try std.fmt.allocPrint(alloc, "{s}  {{d}}negotiated{{/}}", .{board.items[board.items.len - 1].text});
     }
@@ -3935,4 +3957,20 @@ test "pickers: part rows follow the purpose — shipping and selling offer only 
     const ship = try partChoices(al, &gs, .ship, hq);
     if (ship.len >= 2) try std.testing.expect(gs.stockCount(hq, ship[0].key) >= gs.stockCount(hq, ship[1].key));
     try std.testing.expectEqual(@as(u32, 0), gs.stockCount(hq, to_order[0].key));
+}
+
+test "play feedback: the board's transit column is real — from the nearest company that could go, never 0" {
+    const commands = @import("commands.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 92 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    _ = try commands.execute(&gs, .{ .new_company = "Alpha" });
+    try @import("../econ/contract_market.zig").refresh(&gs);
+    try std.testing.expect(gs.contract_offers.items.len > 0);
+    for (gs.contract_offers.items) |*o| {
+        const d = offerTransitDays(&gs, o);
+        try std.testing.expect(d >= 3);
+        // Same world as the seat: three days to muster; further: at least one jump's transit.
+        if (std.mem.eql(u8, o.planet_key, gs.hqs.values()[0].planet_key)) try std.testing.expectEqual(@as(u32, 3), d);
+    }
 }

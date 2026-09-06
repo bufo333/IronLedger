@@ -127,13 +127,20 @@ pub fn refresh(gs: *GameState) !void {
         if (rating_idx < rt.house_min_index and isGreatHouse(world.faction)) continue;
         var kind = rollKind(gs);
         if (kind == .planetary_assault and rating_idx < rt.assault_min_index) kind = .garrison_duty;
-        // A mix, not a wall of garrison duty: no kind takes more than a third of the board.
+        // A mix, not a wall of garrison duty (play feedback): no kind takes
+        // more than a third of the board, and the garrison class — garrison,
+        // cadre, security, riot: long, quiet, event-driven — no more than half,
+        // so raids and assaults are always on offer.
         const kind_cap: usize = @max(2, @as(usize, offer_count) / 3);
+        const class_cap: usize = @max(2, @as(usize, offer_count) / 2);
         var same: usize = 0;
-        for (gs.contract_offers.items) |o| if (o.kind == kind) {
-            same += 1;
-        };
+        var same_class: usize = 0;
+        for (gs.contract_offers.items) |o| {
+            if (o.kind == kind) same += 1;
+            if (o.kind.isGarrisonClass()) same_class += 1;
+        }
         if (same >= kind_cap) continue;
+        if (kind.isGarrisonClass() and same_class >= class_cap) continue;
         const length_variance: i32 = @as(i32, gs.rng.roll2d6(.market)) - 7;
         const length: u8 = @intCast(std.math.clamp(
             @as(i32, kind.baseLengthMonths()) + length_variance,
@@ -844,4 +851,10 @@ test "the board is a mix: at least offers_min offers, no kind over a third of th
         };
         try std.testing.expect(same <= cap);
     }
+    // … and the garrison class fills at most half of it.
+    var garrison_class: usize = 0;
+    for (gs.contract_offers.items) |o| if (o.kind.isGarrisonClass()) {
+        garrison_class += 1;
+    };
+    try std.testing.expect(garrison_class <= @max(2, n / 2));
 }
