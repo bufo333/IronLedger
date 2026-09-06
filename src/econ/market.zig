@@ -17,12 +17,14 @@ pub const RefreshCadence = struct {
     pub const unit_days = 30;
 };
 
-/// Number of contract offers scales with reputation and comms facilities.
-/// Offers on the board (12C.7): the rating letter index (F 0 … A* 5)
-/// plus the comms level, never fewer than one.
+/// Offers on the board (12C.7, play feedback): a floor so there is always
+/// a choice, the rating letter index (F 0 … A* 5) and the comms level on
+/// top, capped so the board stays readable.
 pub fn contractOfferCount(rating_index: u8, comms_level: u8) u8 {
-    const base: i32 = @as(i32, rating_index) + comms_level;
-    return @intCast(std.math.clamp(base, 1, 8));
+    const lo: i32 = tuning.market.offers_min;
+    const hi: i32 = tuning.market.offers_max;
+    const base: i32 = lo + @as(i32, rating_index) + comms_level;
+    return @intCast(std.math.clamp(base, lo, hi));
 }
 
 /// Contracts only exist where your reputation reaches (ARCH §9.2): inside an
@@ -200,9 +202,9 @@ pub const ContractOffer = struct {
 };
 
 test "offer count clamps and grows with the rating letter" {
-    try std.testing.expectEqual(@as(u8, 1), contractOfferCount(0, 0)); // F, no comms: one offer regardless
-    try std.testing.expectEqual(@as(u8, 3), contractOfferCount(2, 1)); // C
-    try std.testing.expectEqual(@as(u8, 8), contractOfferCount(5, 5)); // A*, clamped
+    try std.testing.expectEqual(@as(u8, 6), contractOfferCount(0, 0)); // F, no comms: still a real board
+    try std.testing.expectEqual(@as(u8, 9), contractOfferCount(2, 1)); // C
+    try std.testing.expectEqual(@as(u8, 10), contractOfferCount(5, 5)); // A*, clamped
 }
 
 test "rarity works: common floods the boards, very rare is an event" {

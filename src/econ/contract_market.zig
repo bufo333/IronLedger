@@ -39,17 +39,23 @@ pub fn isGreatHouse(faction_key: []const u8) bool {
 /// on top (CamOps' negotiation environment, abstracted).
 pub const market_margin_bp: types.Bp = tuning.market.market_margin_bp; // ×1.8
 
-/// AtB-flavored contract-type roll: garrison work dominates the boards.
+/// AtB-flavored contract-type roll, widened (play feedback: boards were a
+/// wall of garrison duty): garrison work is still the most common single
+/// kind, but every kind in the book turns up, and `refresh` caps any one
+/// kind at a third of the board.
 fn rollKind(gs: *GameState) contract.ContractKind {
-    return switch (gs.rng.roll2d6(.market)) {
+    const roll = gs.rng.roll2d6(.market);
+    const coin = gs.rng.random(.market).boolean();
+    return switch (roll) {
         2 => .guerrilla_warfare,
         3 => .recon_raid,
         4 => .pirate_hunting,
         5 => .objective_raid,
-        6, 7, 8 => .garrison_duty,
-        9 => .cadre_duty,
-        10 => .security_duty,
-        11 => .riot_duty,
+        6, 7 => .garrison_duty,
+        8 => if (coin) .cadre_duty else .security_duty,
+        9 => if (coin) .riot_duty else .relief_duty,
+        10 => .extraction_raid,
+        11 => .diversionary_raid,
         else => .planetary_assault,
     };
 }
@@ -110,7 +116,7 @@ pub fn refresh(gs: *GameState) !void {
     const rating_idx = queries.ratingIndex(queries.ratingScore(gs));
     const offer_count = market.contractOfferCount(rating_idx, best_comms);
     var attempts: u32 = 0;
-    while (gs.contract_offers.items.len < offer_count and attempts < 400) : (attempts += 1) {
+    while (gs.contract_offers.items.len < offer_count and attempts < 1000) : (attempts += 1) {
         const world = &planet.catalog[gs.rng.random(.market).uintLessThan(usize, planet.catalog.len)];
         if (!@import("../domain/faction.zig").get(world.faction).hires) continue; // ComStar posts nothing
         const vis = bestVisibility(gs, world);
@@ -121,6 +127,13 @@ pub fn refresh(gs: *GameState) !void {
         if (rating_idx < rt.house_min_index and isGreatHouse(world.faction)) continue;
         var kind = rollKind(gs);
         if (kind == .planetary_assault and rating_idx < rt.assault_min_index) kind = .garrison_duty;
+        // A mix, not a wall of garrison duty: no kind takes more than a third of the board.
+        const kind_cap: usize = @max(2, @as(usize, offer_count) / 3);
+        var same: usize = 0;
+        for (gs.contract_offers.items) |o| if (o.kind == kind) {
+            same += 1;
+        };
+        if (same >= kind_cap) continue;
         const length_variance: i32 = @as(i32, gs.rng.roll2d6(.market)) - 7;
         const length: u8 = @intCast(std.math.clamp(
             @as(i32, kind.baseLengthMonths()) + length_variance,
@@ -812,4 +825,23 @@ test "12B.10: the hiring hall always has a few of every role" {
         mw += 1;
     };
     try std.testing.expect(mw >= 2);
+}
+
+test "the board is a mix: at least offers_min offers, no kind over a third of them" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 610 });
+    defer gs.deinit();
+    _ = try gs.createCommander("Erik Kalmar", .LC, .quartermaster);
+    _ = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha Company");
+    try refresh(&gs);
+    const n = gs.contract_offers.items.len;
+    try std.testing.expect(n >= tuning.market.offers_min and n <= tuning.market.offers_max);
+    const cap = @max(2, n / 3);
+    inline for (@typeInfo(contract.ContractKind).@"enum".fields) |f| {
+        const kind: contract.ContractKind = @enumFromInt(f.value);
+        var same: usize = 0;
+        for (gs.contract_offers.items) |o| if (o.kind == kind) {
+            same += 1;
+        };
+        try std.testing.expect(same <= cap);
+    }
 }

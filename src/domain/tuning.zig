@@ -70,6 +70,11 @@ pub const Tuning = struct {
         hall_floor_combat: u32,
         procurement_markup_bp: types.Bp,
         rarity_target: struct { common: u8, uncommon: u8, rare: u8, very_rare: u8 },
+        /// The contract board (play feedback): never fewer than `offers_min`
+        /// offers, never more than `offers_max`; the rating letter and comms
+        /// reach fill the gap between.
+        offers_min: u8,
+        offers_max: u8,
         /// Part availability (12C.14, MekHQ acquisition target by tech base
         /// and TechManual availability code): the roll modifier per
         /// availability letter, the penalty a periphery world puts on
