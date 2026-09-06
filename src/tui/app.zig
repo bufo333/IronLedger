@@ -137,6 +137,7 @@ pub const AmountAction = union(enum) {
     order: struct { site: types.Site, key: []const u8 },
     ship: struct { from: u32, to: types.ForceId, key: []const u8 },
     sell: struct { hq: u32, key: []const u8 },
+    shares,
 };
 
 pub const AmountForm = struct {
@@ -291,6 +292,8 @@ pub const App = struct {
     map_cursor: usize = 0,
     /// Forces screen view: index into queries.toeViews (all, each company, unassigned).
     forces_view: usize = 0,
+    /// Settings form (12.33): the highlighted row.
+    settings_cursor: usize = 0,
     /// Ship flow (12.30): the company a Supply row named as the destination, if any.
     supply_ship_to: ?types.ForceId = null,
     /// Forces side pane on a company row: DAMAGE, READINESS or MANNING (r cycles).
@@ -1992,44 +1995,13 @@ pub const App = struct {
                 self.screen.lines(inner, rows.items, 0, self.modal_cursor + 1);
             },
             .settings => {
+                const form = try self.settingsRows(al);
+                if (form.selectable > 0 and !form.rows[self.settings_cursor].active) self.settingsMove(1);
                 var rows: std.ArrayListUnmanaged([]const u8) = .empty;
-                try rows.append(al, "");
-                if (self.music) |*m| {
-                    try rows.append(al, try std.fmt.allocPrint(al, "  music        {s}     {{d}}[m] toggle{{/}}", .{if (m.enabled) "{g}on{/}" else "{c}off{/}"}));
-                    try rows.append(al, try std.fmt.allocPrint(al, "  volume       {d: >3}      {{d}}[-] [+] (restarts the track){{/}}", .{m.volume}));
-                    try rows.append(al, try std.fmt.allocPrint(al, "  now playing  {s}{s}     {{d}}[<] previous  [>] next{{/}}", .{ m.nowPlaying() orelse "—", if (m.nowPlayingSet()) |set| try std.fmt.allocPrint(al, " — {s}", .{set}) else "" }));
-                    try rows.append(al, try std.fmt.allocPrint(al, "  soundtrack   {{a}}{s}{{/}}     {{d}}[t] browse soundtracks and tracks (also :music){{/}}", .{m.setName(m.selected_set)}));
-                    try rows.append(al, try std.fmt.allocPrint(al, "  tracks       {d} in {d} soundtrack{s} under {s} · player: {s}", .{ m.tracks.len, m.sets.len, if (m.sets.len == 1) "" else "s", m.root, m.player_cmd orelse "{c}none found (afplay, mpv, ffplay, aplay){/}" }));
-                } else {
-                    try rows.append(al, "  {d}no soundtrack loaded — start without --no-music and keep tracks in data/music/ or $IRON_LEDGER_DATA/music (one sub-directory per soundtrack){/}");
-                }
-                try rows.append(al, "");
-                if (self.gs) |*gs| {
-                    try rows.append(al, try std.fmt.allocPrint(al, "  medbay       auto-admit the wounded {s}     {{d}}[a] toggle — off: you admit each casualty (m on People) and the turn waits{{/}}", .{if (gs.auto_admit) "{g}on{/} " else "{c}off{/}"}));
-                    const row = gs.diff();
-                    try rows.append(al, try std.fmt.allocPrint(al, "  difficulty   {{a}}{s}{{/}} — {s}     {{d}}[d] cycle green → regular → veteran → elite (logged; takes effect at once){{/}}", .{ row.name, row.blurb }));
-                    const dm = game.difficulty.multText;
-                    var b1: [16]u8 = undefined;
-                    var b2: [16]u8 = undefined;
-                    var b3: [16]u8 = undefined;
-                    var b4: [16]u8 = undefined;
-                    try rows.append(al, try std.fmt.allocPrint(al, "               contract pay {s} · fabrication {s} · purchases {s} · opposition {s} · turnover {s}{d}", .{
-                        dm(&b1, row.contract_pay_bp), dm(&b2, row.fab_cost_bp), dm(&b3, row.purchase_bp), dm(&b4, row.enemy_bp), if (row.turnover_delta >= 0) "+" else "", row.turnover_delta,
-                    }));
-                    try rows.append(al, try std.fmt.allocPrint(al, "  shares       {{a}}{d}%{{/}} of contract income to shareholders at completion     {{d}}`:shares <pct>` — founders, veterans and officers hold shares; a stake calms restlessness{{/}}", .{@divTrunc(gs.share_profit_bp, 100)}));
-                    try rows.append(al, "");
-                }
-                try rows.append(al, try std.fmt.allocPrint(al, "  graphics     {s} · colour {s} · glyphs {s}", .{ switch (self.graphics) {
-                    .kitty => "kitty protocol",
-                    .iterm2 => "iTerm2 inline images",
-                    .none => "half-block",
-                }, if (self.screen.truecolor) "24-bit" else "256", if (self.screen.ascii) "ascii" else "box-drawing" }));
-                try rows.append(al, try std.fmt.allocPrint(al, "  data         {s}     {{d}}`zig build -Ddata=<dir>` overlays data/*.zon — docs/modding.md{{/}}", .{try game.dataProvenance(al)}));
-                try rows.append(al, "");
-                try rows.append(al, "  {d}[Esc] close{/}");
-                const r = self.modalRect(84, @intCast(rows.items.len + 2));
-                const inner = self.screen.pane(r, .{ .title = "SETTINGS", .double = true });
-                self.screen.lines(inner, rows.items, 0, null);
+                for (form.rows, 0..) |row, i| try rows.append(al, if (i == self.settings_cursor and row.active) try std.fmt.allocPrint(al, "{{a}}▶{{/}}{s}", .{row.text[1..]}) else row.text);
+                const r = self.modalRect(@min(self.screen.cols, 104), @intCast(@min(rows.items.len + 2, self.screen.rows)));
+                const inner = self.screen.pane(r, .{ .title = "SETTINGS · j/k row · ← → change · [Enter] act · [Esc] close", .double = true });
+                self.screen.lines(inner, rows.items, 0, if (form.selectable > 0) self.settings_cursor else null);
             },
             .install_part => |uid| {
                 const cands = try q.installCandidates(al, &self.gs.?, uid);
@@ -3528,6 +3500,133 @@ pub const App = struct {
     const LanceChoice = struct { force: types.ForceId, name: []const u8, text: []const u8 };
 
     /// The lances (line and support) of the hull's company, with room noted.
+    // ---- settings form (12.33): one look with the pickers and the amount form ----
+
+    const SettingKey = enum { music, volume, track, soundtrack, auto_admit, difficulty, shares, info };
+    const SettingRow = struct { key: SettingKey, active: bool, text: []const u8 };
+    const SettingsForm = struct { rows: []SettingRow, selectable: usize };
+
+    fn settingsRows(self: *App, al: std.mem.Allocator) !SettingsForm {
+        var rows: std.ArrayListUnmanaged(SettingRow) = .empty;
+        var selectable: usize = 0;
+        const info = struct {
+            fn add(list: *std.ArrayListUnmanaged(SettingRow), alloc: std.mem.Allocator, text: []const u8) !void {
+                try list.append(alloc, .{ .key = .info, .active = false, .text = text });
+            }
+        };
+        try info.add(&rows, al, "");
+        if (self.music) |*m| {
+            try rows.append(al, .{ .key = .music, .active = true, .text = try std.fmt.allocPrint(al, "  music        {s}", .{if (m.enabled) "{g}on{/}" else "{c}off{/}"}) });
+            try rows.append(al, .{ .key = .volume, .active = true, .text = try std.fmt.allocPrint(al, "  volume       {d: >3}      {{d}}restarts the track{{/}}", .{m.volume}) });
+            try rows.append(al, .{ .key = .track, .active = true, .text = try std.fmt.allocPrint(al, "  track        {s}{s}", .{ m.nowPlaying() orelse "—", if (m.nowPlayingSet()) |set| try std.fmt.allocPrint(al, "  {{d}}({s}){{/}}", .{set}) else "" }) });
+            try rows.append(al, .{ .key = .soundtrack, .active = true, .text = try std.fmt.allocPrint(al, "  soundtrack   {{a}}{s}{{/}}      {{d}}[Enter] browse soundtracks and tracks (also :music){{/}}", .{m.setName(m.selected_set)}) });
+            try info.add(&rows, al, try std.fmt.allocPrint(al, "  {{d}}tracks       {d} in {d} soundtrack{s} under {s} · player: {s}{{/}}", .{ m.tracks.len, m.sets.len, if (m.sets.len == 1) "" else "s", m.root, m.player_cmd orelse "{c}none found{/}" }));
+            selectable += 4;
+        } else {
+            try info.add(&rows, al, "  {d}no soundtrack loaded — start without --no-music and keep tracks in data/music/ or $IRON_LEDGER_DATA/music (one sub-directory per soundtrack){/}");
+        }
+        try info.add(&rows, al, "");
+        if (self.gs) |*gs| {
+            try rows.append(al, .{ .key = .auto_admit, .active = true, .text = try std.fmt.allocPrint(al, "  medbay       auto-admit the wounded {s}      {{d}}off: you admit each casualty (m on People) and the turn waits{{/}}", .{if (gs.auto_admit) "{g}on{/}" else "{c}off{/}"}) });
+            const row = gs.diff();
+            try rows.append(al, .{ .key = .difficulty, .active = true, .text = try std.fmt.allocPrint(al, "  difficulty   {{a}}{s}{{/}} — {s}", .{ row.name, row.blurb }) });
+            const dm = game.difficulty.multText;
+            var b1: [16]u8 = undefined;
+            var b2: [16]u8 = undefined;
+            var b3: [16]u8 = undefined;
+            var b4: [16]u8 = undefined;
+            try info.add(&rows, al, try std.fmt.allocPrint(al, "  {{d}}             contract pay {s} · fabrication {s} · purchases {s} · opposition {s} · turnover {s}{d} · never the dice{{/}}", .{
+                dm(&b1, row.contract_pay_bp), dm(&b2, row.fab_cost_bp), dm(&b3, row.purchase_bp), dm(&b4, row.enemy_bp), if (row.turnover_delta >= 0) "+" else "", row.turnover_delta,
+            }));
+            try rows.append(al, .{ .key = .shares, .active = true, .text = try std.fmt.allocPrint(al, "  shares       {{a}}{d}%{{/}} of contract income to shareholders at completion      {{d}}← → ±5 · [Enter] type a figure · founders, veterans and officers hold shares{{/}}", .{@divTrunc(gs.share_profit_bp, 100)}) });
+            try info.add(&rows, al, "");
+            selectable += 3;
+        }
+        try info.add(&rows, al, try std.fmt.allocPrint(al, "  {{d}}graphics     {s} · colour {s} · glyphs {s}{{/}}", .{ switch (self.graphics) {
+            .kitty => "kitty protocol",
+            .iterm2 => "iTerm2 inline images",
+            .none => "half-block",
+        }, if (self.screen.truecolor) "24-bit" else "256", if (self.screen.ascii) "ascii" else "box-drawing" }));
+        try info.add(&rows, al, try std.fmt.allocPrint(al, "  {{d}}data         {s} · `zig build -Ddata=<dir>` overlays data/*.zon — docs/modding.md{{/}}", .{try game.dataProvenance(al)}));
+        if (self.settings_cursor >= rows.items.len) self.settings_cursor = 0;
+        return .{ .rows = try rows.toOwnedSlice(al), .selectable = selectable };
+    }
+
+    /// Move the highlight to the next selectable row in `dir`.
+    fn settingsMove(self: *App, dir: i32) void {
+        const form = self.settingsRows(self.a()) catch return;
+        if (form.selectable == 0) return;
+        var i = self.settings_cursor;
+        var steps: usize = 0;
+        while (steps < form.rows.len) : (steps += 1) {
+            i = if (dir > 0) (i + 1) % form.rows.len else (i + form.rows.len - 1) % form.rows.len;
+            if (form.rows[i].active) break;
+        }
+        self.settings_cursor = i;
+    }
+
+    fn settingsAdjust(self: *App, dir: i32) !void {
+        const form = try self.settingsRows(self.a());
+        if (form.selectable == 0) return;
+        switch (form.rows[self.settings_cursor].key) {
+            .music => try self.toggleMusic(),
+            .volume => try self.adjustVolume(if (dir > 0) 10 else -10),
+            .track => if (self.music) |*m| {
+                if (dir > 0) m.skip() else m.back();
+            },
+            .soundtrack => {
+                self.modal_cursor = 0;
+                self.modal = .music;
+            },
+            .auto_admit => try self.toggleAutoAdmit(),
+            .difficulty => if (self.gs) |*gs| {
+                const n = @typeInfo(game.difficulty.Level).@"enum".fields.len;
+                const level_now: usize = @intFromEnum(gs.difficulty);
+                const next: usize = if (dir > 0) (level_now + 1) % n else (level_now + n - 1) % n;
+                try self.exec(.{ .set_difficulty = @enumFromInt(next) });
+                self.say(.good, "difficulty: {s} — {s}", .{ gs.diff().name, gs.diff().blurb });
+            },
+            .shares => if (self.gs) |*gs| {
+                const pct: i64 = @divTrunc(gs.share_profit_bp, 100);
+                const next: i64 = std.math.clamp(pct + (if (dir > 0) @as(i64, 5) else -5), 0, 100);
+                try self.exec(.{ .set_shares_pct = @intCast(next) });
+                self.say(.good, "shareholders take {d}% of contract income at completion", .{next});
+            },
+            .info => {},
+        }
+    }
+
+    fn settingsEnter(self: *App) !void {
+        const form = try self.settingsRows(self.a());
+        if (form.selectable == 0) {
+            self.modal = .none;
+            return;
+        }
+        switch (form.rows[self.settings_cursor].key) {
+            .shares => if (self.gs) |*gs| self.openAmount("SHAREHOLDERS' CUT OF CONTRACT INCOME", .shares, &.{
+                .{ .label = "percent", .value = @divTrunc(gs.share_profit_bp, 100), .min = 0, .max = 100, .step = 5 },
+            }),
+            .volume => try self.adjustVolume(10),
+            .track => if (self.music) |*m| m.skip(),
+            else => try self.settingsAdjust(1),
+        }
+    }
+
+    fn cycleDifficulty(self: *App) !void {
+        if (self.gs) |*gs| {
+            try self.exec(.{ .set_difficulty = gs.difficulty.next() });
+            self.say(.good, "difficulty: {s} — {s}", .{ gs.diff().name, gs.diff().blurb });
+        }
+    }
+
+    fn toggleAutoAdmit(self: *App) !void {
+        if (self.gs) |*gs| {
+            const on = !gs.auto_admit;
+            try self.exec(.{ .set_auto_admit = on });
+            self.say(.good, "medbay auto-admit {s}", .{if (on) "on — casualties are admitted each morning" else "off — admit casualties yourself (m on People); the turn waits for it"});
+        }
+    }
+
     /// Open the amount form: one to three numbers with defaults, ranges and steps.
     fn openAmount(self: *App, title: []const u8, action: AmountAction, fields: []const AmountField) void {
         var form: AmountForm = .{ .action = action, .fields = undefined, .n = @intCast(@min(fields.len, 3)) };
@@ -3588,6 +3687,7 @@ pub const App = struct {
             },
             .ship => |sh| try std.fmt.bufPrint(&buf, "ship {s} {d} hq:{d} co:{d}", .{ form.key(), v[0].value, sh.from, @intFromEnum(sh.to) }),
             .sell => |se| try std.fmt.bufPrint(&buf, "sellstock hq:{d} {s} {d}", .{ se.hq, form.key(), v[0].value }),
+            .shares => try std.fmt.bufPrint(&buf, "shares {d}", .{v[0].value}),
         };
         try self.runCommandLine(line);
     }
@@ -4150,8 +4250,18 @@ pub const App = struct {
                 else => {},
             },
             .settings => switch (key) {
-                .escape, .enter => self.modal = .none,
+                .escape => self.modal = .none,
+                .down => self.settingsMove(1),
+                .up => self.settingsMove(-1),
+                .left => try self.settingsAdjust(-1),
+                .right => try self.settingsAdjust(1),
+                .enter => try self.settingsEnter(),
                 .char => |ch| switch (ch) {
+                    'j' => self.settingsMove(1),
+                    'k' => self.settingsMove(-1),
+                    'h' => try self.settingsAdjust(-1),
+                    'l' => try self.settingsAdjust(1),
+                    // The old hotkeys still work as shortcuts.
                     'm', 'M' => try self.toggleMusic(),
                     '+', '=' => try self.adjustVolume(10),
                     '-' => try self.adjustVolume(-10),
@@ -4161,16 +4271,8 @@ pub const App = struct {
                         self.modal_cursor = 0;
                         self.modal = .music;
                     },
-                    'd', 'D' => if (self.gs) |*gs| {
-                        const level = gs.difficulty.next();
-                        try self.exec(.{ .set_difficulty = level });
-                        self.say(.good, "difficulty: {s} — {s}", .{ gs.diff().name, gs.diff().blurb });
-                    },
-                    'a', 'A' => if (self.gs) |*gs| {
-                        const on = !gs.auto_admit;
-                        try self.exec(.{ .set_auto_admit = on });
-                        self.say(.good, "medbay auto-admit {s}", .{if (on) "on — casualties are admitted each morning" else "off — admit casualties yourself (m on People)"});
-                    },
+                    'd', 'D' => try self.cycleDifficulty(),
+                    'a', 'A' => try self.toggleAutoAdmit(),
                     'q' => self.modal = .none,
                     else => {},
                 },

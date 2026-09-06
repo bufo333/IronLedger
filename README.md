@@ -55,7 +55,16 @@ the day now.
   notice or retirement; half on a firing; all of it when a company is
   disbanded. Shareholders take half.
 - **Shares**: founders, veterans and officers hold shares; a configurable
-  cut of every contract's income is paid out to them at completion.
+  cut of every contract's income is paid out to them at completion (set in
+  Settings, or `:shares <pct>`).
+- **Difficulty** — green, regular, veteran, elite, the BattleTech
+  experience ladder — scales the economy and the opposition, never the
+  dice: the margin employers pay (×2.2 … ×1.1), the fabrication premium
+  (×1.2 … ×2.2), part and hull prices, the opposing force in every
+  engagement, and how readily a restless crew hands in notice. Regular is
+  the game as tuned; a full set of mek structure fabricates for 900 k.
+  Chosen in Settings, changeable any time (logged), saved per campaign;
+  the table is `data/tables/difficulty.zon`.
 - **Hiring halls** at every HQ churn daily with a floor under every role,
   arrivals scaled by hall level and biased toward whatever your companies
   are short of. Astechs and medics are hired to complement on demand,
@@ -289,14 +298,19 @@ Each screen's own keys are on its bottom line.
 ### Welcome and settings
 
 Players own campaigns. Continue, create or delete a campaign; create or
-delete a player. Deleting asks for the name typed back. Settings hold the
-music switch, volume, previous and next track, the soundtrack browser
-(`t`), medbay auto-admit, the profit share paid to shareholders, the
-graphics path in use and where the data came from.
+delete a player. Deleting asks for the name typed back.
+
+Settings (`F12`, or `s` on the welcome screen) is a form like every other
+picker: `j`/`k` highlight a row, `←`/`→` change it in place, `Enter` acts.
+Music on/off, volume, the track, the soundtrack browser; and, inside a
+campaign, medbay auto-admit, the **difficulty** (with every multiplier
+spelled out under it) and the **shareholders' cut** of contract income —
+`←`/`→` steps it by five, `Enter` opens the amount form to type a figure.
+The graphics path in use and where the data came from are shown below.
 
 ![Welcome](docs/screenshots/welcome.svg)
 
-![Settings](docs/screenshots/settings.svg)
+![Settings in a campaign](docs/screenshots/settings-campaign.svg)
 
 ### New campaign
 

@@ -39,7 +39,7 @@
 <text y="34" fill="#c8d3c5" x="123.2 130.4">45</text>
 <text y="34" fill="#c8d3c5" x="152.0">·</text>
 <text y="34" fill="#c8d3c5" x="173.6 180.8 188.0 195.2 202.4 209.6">outfit</text>
-<text y="34" fill="#e0a33a" x="224.0 231.2 238.4 245.6 252.8 260.0 267.2 274.4 281.6 288.8">10,258,333</text>
+<text y="34" fill="#e0a33a" x="224.0 231.2 238.4 245.6 252.8 260.0 267.2 274.4 281.6 288.8">19,239,765</text>
 <text y="34" fill="#c8d3c5" x="303.2">C</text>
 <text y="34" fill="#c8d3c5" x="324.8">·</text>
 <text y="34" fill="#c8d3c5" x="346.4 353.6 360.8">rep</text>
@@ -51,14 +51,14 @@
 <text y="34" fill="#c8d3c5" x="519.2">1</text>
 <text y="34" fill="#c8d3c5" x="533.6 540.8 548.0">HQs</text>
 <text y="34" fill="#c8d3c5" x="562.4">·</text>
-<text y="34" fill="#c8d3c5" x="576.8 584.0">33</text>
+<text y="34" fill="#c8d3c5" x="576.8 584.0">34</text>
 <text y="34" fill="#c8d3c5" x="598.4 605.6 612.8 620.0 627.2">hulls</text>
 <text y="34" fill="#c8d3c5" x="641.6">·</text>
 <text y="34" fill="#c8d3c5" x="656.0 663.2 670.4">196</text>
 <text y="34" fill="#c8d3c5" x="684.8 692.0 699.2 706.4 713.6 720.8">people</text>
 <text y="34" fill="#c8d3c5" x="742.4">·</text>
 <text y="34" fill="#c8d3c5" x="764.0 771.2 778.4 785.6 792.8">inbox</text>
-<text y="34" fill="#e05a4f" x="807.2">1</text>
+<text y="34" fill="#e05a4f" x="807.2">2</text>
 <text y="34" fill="#c8d3c5" x="828.8">·</text>
 <text y="34" fill="#c8d3c5" x="850.4 857.6 864.8 872.0 879.2 886.4 893.6 900.8 908.0">checklist</text>
 <text y="34" fill="#7fc97f" x="922.4">0</text>
@@ -106,9 +106,9 @@
 <text y="49" fill="#0b0f0d" x="108.8 116.0 123.2 130.4 137.6 144.8">filter</text>
 <text y="49" fill="#e0a33a" x="159.2 166.4 173.6">all</text>
 <text y="49" fill="#0b0f0d" x="188.0">·</text>
-<text y="49" fill="#0b0f0d" x="202.4 209.6 216.8">196</text>
+<text y="49" fill="#0b0f0d" x="202.4 209.6 216.8">197</text>
 <text y="49" fill="#0b0f0d" x="231.2 238.4">of</text>
-<text y="49" fill="#0b0f0d" x="252.8 260.0 267.2">196</text>
+<text y="49" fill="#0b0f0d" x="252.8 260.0 267.2">197</text>
 <text y="49" fill="#6fc3c3" x="281.6 288.8 296.0 303.2 310.4 317.6 324.8 332.0 339.2 346.4 353.6 360.8 368.0 375.2 382.4 389.6 396.8 404.0 411.2 418.4 425.6 432.8 440.0 447.2 454.4 461.6 468.8 476.0 483.2 490.4 497.6 504.8 512.0 519.2 526.4 533.6 540.8 548.0 555.2">───────────────────────────────────────</text>
 <text y="49" fill="#6f7d73" x="569.6 576.8 584.0">[/]</text>
 <text y="49" fill="#6f7d73" x="598.4 605.6 612.8 620.0">next</text>
@@ -726,178 +726,178 @@
 <text y="484" fill="#c8d3c5" x="1224.8">│</text>
 <text y="499" fill="#c8d3c5" x="8.0">│</text>
 <text y="499" fill="#c8d3c5" x="22.4 29.6">29</text>
-<text y="499" fill="#c8d3c5" x="58.4 65.6 72.8 80.0">Cpl.</text>
-<text y="499" fill="#c8d3c5" x="94.4 101.6 108.8 116.0">Ivan</text>
-<text y="499" fill="#c8d3c5" x="130.4 137.6 144.8 152.0 159.2 166.4 173.6 180.8">O&#x27;Reilly</text>
+<text y="499" fill="#c8d3c5" x="58.4 65.6 72.8">Lt.</text>
+<text y="499" fill="#c8d3c5" x="87.2 94.4 101.6 108.8 116.0">Grace</text>
+<text y="499" fill="#c8d3c5" x="130.4 137.6 144.8 152.0 159.2 166.4 173.6 180.8 188.0">Jankowski</text>
 <text y="499" fill="#c8d3c5" x="209.6 216.8 224.0 231.2 238.4 245.6 252.8 260.0 267.2 274.4">mekwarrior</text>
-<text y="499" fill="#c8d3c5" x="324.8 332.0 339.2 346.4 353.6 360.8 368.0">regular</text>
-<text y="499" fill="#c8d3c5" x="382.4 389.6 396.8">4/5</text>
-<text y="499" fill="#c8d3c5" x="440.0">3</text>
+<text y="499" fill="#c8d3c5" x="324.8 332.0 339.2 346.4 353.6 360.8 368.0">veteran</text>
+<text y="499" fill="#c8d3c5" x="382.4 389.6 396.8">3/4</text>
+<text y="499" fill="#c8d3c5" x="440.0">5</text>
 <text y="499" fill="#c8d3c5" x="454.4 461.6 468.8 476.0 483.2 490.4">active</text>
 <text y="499" fill="#c8d3c5" x="591.2 598.4 605.6 612.8 620.0">pilot</text>
 <text y="499" fill="#c8d3c5" x="634.4 641.6">#1</text>
-<text y="499" fill="#c8d3c5" x="656.0 663.2 670.4 677.6 684.8 692.0">WHM-6R</text>
-<text y="499" fill="#c8d3c5" x="756.8 764.0 771.2 778.4">Char</text>
+<text y="499" fill="#c8d3c5" x="656.0 663.2 670.4 677.6 684.8">CN9-A</text>
+<text y="499" fill="#c8d3c5" x="756.8 764.0 771.2 778.4">Pand</text>
 <text y="499" fill="#c8d3c5" x="792.8 800.0">││</text>
 <text y="499" fill="#c8d3c5" x="1224.8">│</text>
 <text y="514" fill="#c8d3c5" x="8.0">│</text>
 <text y="514" fill="#c8d3c5" x="22.4 29.6">30</text>
 <text y="514" fill="#c8d3c5" x="58.4 65.6 72.8 80.0">Cpl.</text>
-<text y="514" fill="#c8d3c5" x="94.4 101.6 108.8 116.0">Anna</text>
-<text y="514" fill="#c8d3c5" x="130.4 137.6 144.8">Kim</text>
+<text y="514" fill="#c8d3c5" x="94.4 101.6 108.8 116.0">Hana</text>
+<text y="514" fill="#c8d3c5" x="130.4 137.6 144.8 152.0 159.2 166.4 173.6 180.8">Eriksson</text>
 <text y="514" fill="#c8d3c5" x="209.6 216.8 224.0 231.2 238.4 245.6 252.8 260.0 267.2 274.4">mekwarrior</text>
 <text y="514" fill="#c8d3c5" x="324.8 332.0 339.2 346.4 353.6 360.8 368.0">regular</text>
 <text y="514" fill="#c8d3c5" x="382.4 389.6 396.8">4/5</text>
-<text y="514" fill="#c8d3c5" x="440.0">3</text>
+<text y="514" fill="#c8d3c5" x="440.0">5</text>
 <text y="514" fill="#c8d3c5" x="454.4 461.6 468.8 476.0 483.2 490.4">active</text>
 <text y="514" fill="#c8d3c5" x="591.2 598.4 605.6 612.8 620.0">pilot</text>
 <text y="514" fill="#c8d3c5" x="634.4 641.6">#2</text>
-<text y="514" fill="#c8d3c5" x="656.0 663.2 670.4 677.6 684.8 692.0">HBK-4G</text>
-<text y="514" fill="#c8d3c5" x="756.8 764.0 771.2 778.4">Char</text>
+<text y="514" fill="#c8d3c5" x="656.0 663.2 670.4 677.6 684.8 692.0">WVR-6R</text>
+<text y="514" fill="#c8d3c5" x="756.8 764.0 771.2 778.4">Pand</text>
 <text y="514" fill="#c8d3c5" x="792.8 800.0">││</text>
 <text y="514" fill="#c8d3c5" x="1224.8">│</text>
 <text y="529" fill="#c8d3c5" x="8.0">│</text>
 <text y="529" fill="#c8d3c5" x="22.4 29.6">31</text>
-<text y="529" fill="#c8d3c5" x="58.4 65.6 72.8 80.0">Cpt.</text>
-<text y="529" fill="#c8d3c5" x="94.4 101.6 108.8 116.0">Dana</text>
-<text y="529" fill="#c8d3c5" x="130.4 137.6 144.8 152.0 159.2 166.4 173.6 180.8">Drummond</text>
+<text y="529" fill="#c8d3c5" x="58.4 65.6 72.8 80.0">Sgt.</text>
+<text y="529" fill="#c8d3c5" x="94.4 101.6 108.8 116.0 123.2">Elena</text>
+<text y="529" fill="#c8d3c5" x="137.6 144.8 152.0 159.2 166.4 173.6 180.8 188.0">Quintana</text>
 <text y="529" fill="#c8d3c5" x="209.6 216.8 224.0 231.2 238.4 245.6 252.8 260.0 267.2 274.4">mekwarrior</text>
 <text y="529" fill="#c8d3c5" x="324.8 332.0 339.2 346.4 353.6 360.8 368.0">veteran</text>
 <text y="529" fill="#c8d3c5" x="382.4 389.6 396.8">3/4</text>
-<text y="529" fill="#c8d3c5" x="440.0">3</text>
+<text y="529" fill="#c8d3c5" x="440.0">5</text>
 <text y="529" fill="#c8d3c5" x="454.4 461.6 468.8 476.0 483.2 490.4">active</text>
 <text y="529" fill="#c8d3c5" x="591.2 598.4 605.6 612.8 620.0">pilot</text>
 <text y="529" fill="#c8d3c5" x="634.4 641.6">#3</text>
-<text y="529" fill="#c8d3c5" x="656.0 663.2 670.4 677.6 684.8 692.0">ZEU-6S</text>
-<text y="529" fill="#c8d3c5" x="756.8 764.0 771.2 778.4">Char</text>
+<text y="529" fill="#c8d3c5" x="656.0 663.2 670.4 677.6 684.8 692.0">WVR-6R</text>
+<text y="529" fill="#c8d3c5" x="756.8 764.0 771.2 778.4">Pand</text>
 <text y="529" fill="#c8d3c5" x="792.8 800.0">││</text>
 <text y="529" fill="#c8d3c5" x="1224.8">│</text>
 <text y="544" fill="#c8d3c5" x="8.0">│</text>
 <text y="544" fill="#c8d3c5" x="22.4 29.6">32</text>
 <text y="544" fill="#c8d3c5" x="58.4 65.6 72.8 80.0">Cpl.</text>
-<text y="544" fill="#c8d3c5" x="94.4 101.6 108.8 116.0">Hana</text>
-<text y="544" fill="#c8d3c5" x="130.4 137.6 144.8 152.0 159.2 166.4 173.6">Vasquez</text>
+<text y="544" fill="#c8d3c5" x="94.4 101.6 108.8 116.0 123.2 130.4">Marcus</text>
+<text y="544" fill="#c8d3c5" x="144.8 152.0 159.2 166.4 173.6 180.8">Petrov</text>
 <text y="544" fill="#c8d3c5" x="209.6 216.8 224.0 231.2 238.4 245.6 252.8 260.0 267.2 274.4">mekwarrior</text>
 <text y="544" fill="#c8d3c5" x="324.8 332.0 339.2 346.4 353.6 360.8 368.0">regular</text>
 <text y="544" fill="#c8d3c5" x="382.4 389.6 396.8">4/5</text>
-<text y="544" fill="#c8d3c5" x="440.0">3</text>
+<text y="544" fill="#c8d3c5" x="440.0">5</text>
 <text y="544" fill="#c8d3c5" x="454.4 461.6 468.8 476.0 483.2 490.4">active</text>
 <text y="544" fill="#c8d3c5" x="591.2 598.4 605.6 612.8 620.0">pilot</text>
 <text y="544" fill="#c8d3c5" x="634.4 641.6">#4</text>
-<text y="544" fill="#c8d3c5" x="656.0 663.2 670.4 677.6 684.8">JM6-S</text>
-<text y="544" fill="#c8d3c5" x="756.8 764.0 771.2 778.4">Char</text>
+<text y="544" fill="#c8d3c5" x="656.0 663.2 670.4 677.6 684.8 692.0">WVR-6R</text>
+<text y="544" fill="#c8d3c5" x="756.8 764.0 771.2 778.4">Pand</text>
 <text y="544" fill="#c8d3c5" x="792.8 800.0">││</text>
 <text y="544" fill="#c8d3c5" x="1224.8">│</text>
 <text y="559" fill="#c8d3c5" x="8.0">│</text>
 <text y="559" fill="#c8d3c5" x="22.4 29.6">33</text>
-<text y="559" fill="#c8d3c5" x="58.4 65.6 72.8">Lt.</text>
-<text y="559" fill="#c8d3c5" x="87.2 94.4 101.6 108.8 116.0">Tomas</text>
-<text y="559" fill="#c8d3c5" x="130.4 137.6 144.8 152.0 159.2">Ulmer</text>
+<text y="559" fill="#c8d3c5" x="58.4 65.6 72.8 80.0">Sgt.</text>
+<text y="559" fill="#c8d3c5" x="94.4 101.6 108.8 116.0">Hiro</text>
+<text y="559" fill="#c8d3c5" x="130.4 137.6 144.8 152.0 159.2">Abara</text>
 <text y="559" fill="#c8d3c5" x="209.6 216.8 224.0 231.2 238.4 245.6 252.8 260.0 267.2 274.4">mekwarrior</text>
 <text y="559" fill="#c8d3c5" x="324.8 332.0 339.2 346.4 353.6 360.8 368.0">veteran</text>
 <text y="559" fill="#c8d3c5" x="382.4 389.6 396.8">3/4</text>
-<text y="559" fill="#c8d3c5" x="440.0">3</text>
+<text y="559" fill="#c8d3c5" x="440.0">5</text>
 <text y="559" fill="#c8d3c5" x="454.4 461.6 468.8 476.0 483.2 490.4">active</text>
 <text y="559" fill="#c8d3c5" x="591.2 598.4 605.6 612.8 620.0">pilot</text>
 <text y="559" fill="#c8d3c5" x="634.4 641.6">#5</text>
-<text y="559" fill="#c8d3c5" x="656.0 663.2 670.4 677.6 684.8 692.0">WSP-1A</text>
-<text y="559" fill="#c8d3c5" x="756.8 764.0 771.2 778.4">Char</text>
+<text y="559" fill="#c8d3c5" x="656.0 663.2 670.4 677.6 684.8 692.0">STG-3R</text>
+<text y="559" fill="#c8d3c5" x="756.8 764.0 771.2 778.4">Pand</text>
 <text y="559" fill="#c8d3c5" x="792.8 800.0">││</text>
 <text y="559" fill="#c8d3c5" x="1224.8">│</text>
 <text y="574" fill="#c8d3c5" x="8.0">│</text>
 <text y="574" fill="#c8d3c5" x="22.4 29.6">34</text>
-<text y="574" fill="#c8d3c5" x="58.4 65.6 72.8 80.0">Cpl.</text>
-<text y="574" fill="#c8d3c5" x="94.4 101.6 108.8 116.0">Ulla</text>
-<text y="574" fill="#c8d3c5" x="130.4 137.6 144.8 152.0">Sato</text>
+<text y="574" fill="#c8d3c5" x="58.4 65.6 72.8 80.0">Sgt.</text>
+<text y="574" fill="#c8d3c5" x="94.4 101.6 108.8 116.0">Hana</text>
+<text y="574" fill="#c8d3c5" x="130.4 137.6 144.8 152.0 159.2 166.4 173.6 180.8">Drummond</text>
 <text y="574" fill="#c8d3c5" x="209.6 216.8 224.0 231.2 238.4 245.6 252.8 260.0 267.2 274.4">mekwarrior</text>
-<text y="574" fill="#c8d3c5" x="324.8 332.0 339.2 346.4 353.6 360.8 368.0">regular</text>
-<text y="574" fill="#c8d3c5" x="382.4 389.6 396.8">4/5</text>
-<text y="574" fill="#c8d3c5" x="440.0">3</text>
+<text y="574" fill="#c8d3c5" x="324.8 332.0 339.2 346.4 353.6 360.8 368.0">veteran</text>
+<text y="574" fill="#c8d3c5" x="382.4 389.6 396.8">3/4</text>
+<text y="574" fill="#c8d3c5" x="440.0">5</text>
 <text y="574" fill="#c8d3c5" x="454.4 461.6 468.8 476.0 483.2 490.4">active</text>
 <text y="574" fill="#c8d3c5" x="591.2 598.4 605.6 612.8 620.0">pilot</text>
 <text y="574" fill="#c8d3c5" x="634.4 641.6">#6</text>
-<text y="574" fill="#c8d3c5" x="656.0 663.2 670.4 677.6 684.8 692.0">GRF-1N</text>
-<text y="574" fill="#c8d3c5" x="756.8 764.0 771.2 778.4">Char</text>
+<text y="574" fill="#c8d3c5" x="656.0 663.2 670.4 677.6 684.8 692.0">WVR-6R</text>
+<text y="574" fill="#c8d3c5" x="756.8 764.0 771.2 778.4">Pand</text>
 <text y="574" fill="#c8d3c5" x="792.8 800.0">││</text>
 <text y="574" fill="#c8d3c5" x="1224.8">│</text>
 <text y="589" fill="#c8d3c5" x="8.0">│</text>
 <text y="589" fill="#c8d3c5" x="22.4 29.6">35</text>
-<text y="589" fill="#c8d3c5" x="58.4 65.6 72.8 80.0">Cpl.</text>
-<text y="589" fill="#c8d3c5" x="94.4 101.6 108.8 116.0">Erik</text>
-<text y="589" fill="#c8d3c5" x="130.4 137.6 144.8 152.0 159.2 166.4 173.6 180.8 188.0 195.2">Steiner-Ko</text>
+<text y="589" fill="#c8d3c5" x="58.4 65.6 72.8 80.0">Pvt.</text>
+<text y="589" fill="#c8d3c5" x="94.4 101.6 108.8 116.0">Sana</text>
+<text y="589" fill="#c8d3c5" x="130.4 137.6 144.8 152.0 159.2 166.4 173.6 180.8">Halloran</text>
 <text y="589" fill="#c8d3c5" x="209.6 216.8 224.0 231.2 238.4 245.6 252.8 260.0 267.2 274.4">mekwarrior</text>
-<text y="589" fill="#c8d3c5" x="324.8 332.0 339.2 346.4 353.6 360.8 368.0">regular</text>
-<text y="589" fill="#c8d3c5" x="382.4 389.6 396.8">4/5</text>
-<text y="589" fill="#c8d3c5" x="440.0">3</text>
+<text y="589" fill="#c8d3c5" x="324.8 332.0 339.2 346.4 353.6">green</text>
+<text y="589" fill="#c8d3c5" x="382.4 389.6 396.8">5/6</text>
+<text y="589" fill="#c8d3c5" x="440.0">7</text>
 <text y="589" fill="#c8d3c5" x="454.4 461.6 468.8 476.0 483.2 490.4">active</text>
 <text y="589" fill="#c8d3c5" x="591.2 598.4 605.6 612.8 620.0">pilot</text>
 <text y="589" fill="#c8d3c5" x="634.4 641.6">#7</text>
-<text y="589" fill="#c8d3c5" x="656.0 663.2 670.4 677.6 684.8 692.0">CDA-2A</text>
-<text y="589" fill="#c8d3c5" x="756.8 764.0 771.2 778.4">Char</text>
+<text y="589" fill="#c8d3c5" x="656.0 663.2 670.4 677.6 684.8 692.0">GHR-5H</text>
+<text y="589" fill="#c8d3c5" x="756.8 764.0 771.2 778.4">Pand</text>
 <text y="589" fill="#c8d3c5" x="792.8 800.0">││</text>
 <text y="589" fill="#c8d3c5" x="1224.8">│</text>
 <text y="604" fill="#c8d3c5" x="8.0">│</text>
 <text y="604" fill="#c8d3c5" x="22.4 29.6">36</text>
-<text y="604" fill="#c8d3c5" x="58.4 65.6 72.8 80.0">Sgt.</text>
-<text y="604" fill="#c8d3c5" x="94.4 101.6 108.8 116.0 123.2">Boris</text>
-<text y="604" fill="#c8d3c5" x="137.6 144.8 152.0 159.2 166.4 173.6 180.8 188.0">O&#x27;Reilly</text>
+<text y="604" fill="#c8d3c5" x="58.4 65.6 72.8 80.0">Cpt.</text>
+<text y="604" fill="#c8d3c5" x="94.4 101.6 108.8 116.0">Erik</text>
+<text y="604" fill="#c8d3c5" x="130.4 137.6 144.8 152.0 159.2">Reyes</text>
 <text y="604" fill="#c8d3c5" x="209.6 216.8 224.0 231.2 238.4 245.6 252.8 260.0 267.2 274.4">mekwarrior</text>
-<text y="604" fill="#c8d3c5" x="324.8 332.0 339.2 346.4 353.6 360.8 368.0">veteran</text>
-<text y="604" fill="#c8d3c5" x="382.4 389.6 396.8">3/4</text>
-<text y="604" fill="#c8d3c5" x="440.0">3</text>
+<text y="604" fill="#c8d3c5" x="324.8 332.0 339.2 346.4 353.6">elite</text>
+<text y="604" fill="#c8d3c5" x="382.4 389.6 396.8">2/3</text>
+<text y="604" fill="#c8d3c5" x="440.0">5</text>
 <text y="604" fill="#c8d3c5" x="454.4 461.6 468.8 476.0 483.2 490.4">active</text>
 <text y="604" fill="#c8d3c5" x="591.2 598.4 605.6 612.8 620.0">pilot</text>
 <text y="604" fill="#c8d3c5" x="634.4 641.6">#8</text>
-<text y="604" fill="#c8d3c5" x="656.0 663.2 670.4 677.6 684.8 692.0">GHR-5H</text>
-<text y="604" fill="#c8d3c5" x="756.8 764.0 771.2 778.4">Char</text>
+<text y="604" fill="#c8d3c5" x="656.0 663.2 670.4 677.6 684.8 692.0">WVR-6R</text>
+<text y="604" fill="#c8d3c5" x="756.8 764.0 771.2 778.4">Pand</text>
 <text y="604" fill="#c8d3c5" x="792.8 800.0">││</text>
 <text y="604" fill="#c8d3c5" x="1224.8">│</text>
 <text y="619" fill="#c8d3c5" x="8.0">│</text>
 <text y="619" fill="#c8d3c5" x="22.4 29.6">37</text>
-<text y="619" fill="#c8d3c5" x="58.4 65.6 72.8 80.0">Pvt.</text>
-<text y="619" fill="#c8d3c5" x="94.4 101.6 108.8 116.0">Hana</text>
-<text y="619" fill="#c8d3c5" x="130.4 137.6 144.8 152.0 159.2 166.4">Davion</text>
+<text y="619" fill="#c8d3c5" x="58.4 65.6 72.8">Lt.</text>
+<text y="619" fill="#c8d3c5" x="87.2 94.4 101.6 108.8 116.0 123.2">Fatima</text>
+<text y="619" fill="#c8d3c5" x="137.6 144.8 152.0 159.2 166.4">Reyes</text>
 <text y="619" fill="#c8d3c5" x="209.6 216.8 224.0 231.2 238.4 245.6 252.8 260.0 267.2 274.4">mekwarrior</text>
-<text y="619" fill="#c8d3c5" x="324.8 332.0 339.2 346.4 353.6">green</text>
-<text y="619" fill="#c8d3c5" x="382.4 389.6 396.8">5/6</text>
-<text y="619" fill="#c8d3c5" x="440.0">3</text>
+<text y="619" fill="#c8d3c5" x="324.8 332.0 339.2 346.4 353.6">elite</text>
+<text y="619" fill="#c8d3c5" x="382.4 389.6 396.8">2/3</text>
+<text y="619" fill="#c8d3c5" x="440.0">5</text>
 <text y="619" fill="#c8d3c5" x="454.4 461.6 468.8 476.0 483.2 490.4">active</text>
 <text y="619" fill="#c8d3c5" x="591.2 598.4 605.6 612.8 620.0">pilot</text>
 <text y="619" fill="#c8d3c5" x="634.4 641.6">#9</text>
-<text y="619" fill="#c8d3c5" x="656.0 663.2 670.4 677.6 684.8">CN9-A</text>
-<text y="619" fill="#c8d3c5" x="756.8 764.0 771.2 778.4">Char</text>
+<text y="619" fill="#c8d3c5" x="656.0 663.2 670.4 677.6 684.8 692.0">WHM-6R</text>
+<text y="619" fill="#c8d3c5" x="756.8 764.0 771.2 778.4">Pand</text>
 <text y="619" fill="#c8d3c5" x="792.8 800.0">││</text>
 <text y="619" fill="#c8d3c5" x="1224.8">│</text>
 <text y="634" fill="#c8d3c5" x="8.0">│</text>
 <text y="634" fill="#c8d3c5" x="22.4 29.6">38</text>
-<text y="634" fill="#c8d3c5" x="58.4 65.6 72.8 80.0">Pvt.</text>
-<text y="634" fill="#c8d3c5" x="94.4 101.6 108.8 116.0">Ivan</text>
+<text y="634" fill="#c8d3c5" x="58.4 65.6 72.8 80.0">Cpl.</text>
+<text y="634" fill="#c8d3c5" x="94.4 101.6 108.8 116.0">Lars</text>
 <text y="634" fill="#c8d3c5" x="130.4 137.6 144.8 152.0 159.2">Ulmer</text>
 <text y="634" fill="#c8d3c5" x="209.6 216.8 224.0 231.2 238.4 245.6 252.8 260.0 267.2 274.4">mekwarrior</text>
-<text y="634" fill="#c8d3c5" x="324.8 332.0 339.2 346.4 353.6">green</text>
-<text y="634" fill="#c8d3c5" x="382.4 389.6 396.8">5/6</text>
-<text y="634" fill="#c8d3c5" x="440.0">4</text>
+<text y="634" fill="#c8d3c5" x="324.8 332.0 339.2 346.4 353.6 360.8 368.0">regular</text>
+<text y="634" fill="#c8d3c5" x="382.4 389.6 396.8">4/5</text>
+<text y="634" fill="#c8d3c5" x="440.0">5</text>
 <text y="634" fill="#c8d3c5" x="454.4 461.6 468.8 476.0 483.2 490.4">active</text>
 <text y="634" fill="#c8d3c5" x="591.2 598.4 605.6 612.8 620.0">pilot</text>
 <text y="634" fill="#c8d3c5" x="634.4 641.6 648.8">#10</text>
-<text y="634" fill="#c8d3c5" x="663.2 670.4 677.6 684.8 692.0 699.2">SHD-2H</text>
-<text y="634" fill="#c8d3c5" x="756.8 764.0 771.2 778.4">Char</text>
+<text y="634" fill="#c8d3c5" x="663.2 670.4 677.6 684.8 692.0 699.2">GRF-1N</text>
+<text y="634" fill="#c8d3c5" x="756.8 764.0 771.2 778.4">Pand</text>
 <text y="634" fill="#c8d3c5" x="792.8 800.0">││</text>
 <text y="634" fill="#c8d3c5" x="1224.8">│</text>
 <text y="649" fill="#c8d3c5" x="8.0">│</text>
 <text y="649" fill="#c8d3c5" x="22.4 29.6">39</text>
-<text y="649" fill="#c8d3c5" x="58.4 65.6 72.8">Lt.</text>
-<text y="649" fill="#c8d3c5" x="87.2 94.4 101.6 108.8">Ivan</text>
-<text y="649" fill="#c8d3c5" x="123.2 130.4 137.6 144.8 152.0 159.2 166.4 173.6">Quintana</text>
+<text y="649" fill="#c8d3c5" x="58.4 65.6 72.8 80.0 87.2">MSgt.</text>
+<text y="649" fill="#c8d3c5" x="101.6 108.8 116.0 123.2 130.4 137.6">Sergei</text>
+<text y="649" fill="#c8d3c5" x="152.0 159.2 166.4 173.6 180.8 188.0 195.2">Vasquez</text>
 <text y="649" fill="#c8d3c5" x="209.6 216.8 224.0 231.2 238.4 245.6 252.8 260.0 267.2 274.4">mekwarrior</text>
-<text y="649" fill="#c8d3c5" x="324.8 332.0 339.2 346.4 353.6 360.8 368.0">veteran</text>
-<text y="649" fill="#c8d3c5" x="382.4 389.6 396.8">3/4</text>
-<text y="649" fill="#c8d3c5" x="440.0">3</text>
+<text y="649" fill="#c8d3c5" x="324.8 332.0 339.2 346.4 353.6">elite</text>
+<text y="649" fill="#c8d3c5" x="382.4 389.6 396.8">2/3</text>
+<text y="649" fill="#c8d3c5" x="440.0">5</text>
 <text y="649" fill="#c8d3c5" x="454.4 461.6 468.8 476.0 483.2 490.4">active</text>
 <text y="649" fill="#c8d3c5" x="591.2 598.4 605.6 612.8 620.0">pilot</text>
 <text y="649" fill="#c8d3c5" x="634.4 641.6 648.8">#11</text>
-<text y="649" fill="#c8d3c5" x="663.2 670.4 677.6 684.8 692.0 699.2">BNC-3E</text>
-<text y="649" fill="#c8d3c5" x="756.8 764.0 771.2 778.4">Char</text>
+<text y="649" fill="#c8d3c5" x="663.2 670.4 677.6 684.8 692.0 699.2">OSR-2C</text>
+<text y="649" fill="#c8d3c5" x="756.8 764.0 771.2 778.4">Pand</text>
 <text y="649" fill="#c8d3c5" x="792.8 800.0">││</text>
 <text y="649" fill="#c8d3c5" x="1224.8">│</text>
 <text y="664" fill="#c8d3c5" x="8.0 15.2 22.4 29.6 36.8 44.0 51.2 58.4 65.6 72.8 80.0 87.2 94.4 101.6 108.8 116.0 123.2 130.4 137.6 144.8 152.0 159.2 166.4 173.6 180.8 188.0 195.2 202.4 209.6 216.8 224.0 231.2 238.4 245.6 252.8 260.0 267.2 274.4 281.6 288.8 296.0 303.2 310.4 317.6 324.8 332.0 339.2 346.4 353.6 360.8 368.0 375.2 382.4 389.6 396.8 404.0 411.2 418.4 425.6 432.8 440.0 447.2 454.4 461.6 468.8 476.0 483.2 490.4 497.6 504.8 512.0 519.2 526.4 533.6 540.8 548.0 555.2 562.4 569.6 576.8 584.0 591.2 598.4 605.6 612.8 620.0 627.2 634.4 641.6 648.8 656.0 663.2 670.4 677.6 684.8 692.0 699.2 706.4 713.6 720.8 728.0 735.2 742.4 749.6 756.8 764.0 771.2 778.4 785.6 792.8 800.0 807.2 814.4 821.6 828.8 836.0 843.2 850.4 857.6 864.8 872.0 879.2 886.4 893.6 900.8 908.0 915.2 922.4 929.6 936.8 944.0 951.2 958.4 965.6 972.8 980.0 987.2 994.4 1001.6 1008.8 1016.0 1023.2 1030.4 1037.6 1044.8 1052.0 1059.2 1066.4 1073.6 1080.8 1088.0 1095.2 1102.4 1109.6 1116.8 1124.0 1131.2 1138.4 1145.6 1152.8 1160.0 1167.2 1174.4 1181.6 1188.8 1196.0 1203.2 1210.4 1217.6 1224.8">└────────────────────────────────────────────────────────────────────────────────────────────────────────────┘└──────────────────────────────────────────────────────────┘</text>
@@ -905,36 +905,38 @@
 <text y="679" fill="#7fc97f" x="36.8 44.0">45</text>
 <text y="679" fill="#7fc97f" x="58.4">·</text>
 <text y="679" fill="#7fc97f" x="72.8 80.0 87.2 94.4 101.6 108.8 116.0 123.2 130.4 137.6">3025-02-15</text>
-<text y="679" fill="#6f7d73" x="411.2">/</text>
-<text y="679" fill="#6f7d73" x="425.6">,</text>
-<text y="679" fill="#6f7d73" x="440.0 447.2 454.4 461.6 468.8 476.0">filter</text>
-<text y="679" fill="#6f7d73" x="490.4 497.6 504.8">(…,</text>
-<text y="679" fill="#6f7d73" x="519.2 526.4 533.6 540.8 548.0 555.2 562.4 569.6">wounded)</text>
-<text y="679" fill="#6f7d73" x="584.0">·</text>
-<text y="679" fill="#6f7d73" x="598.4">m</text>
-<text y="679" fill="#6f7d73" x="612.8 620.0 627.2 634.4 641.6">admit</text>
-<text y="679" fill="#6f7d73" x="656.0 663.2">to</text>
-<text y="679" fill="#6f7d73" x="677.6 684.8 692.0 699.2 706.4 713.6">medbay</text>
-<text y="679" fill="#6f7d73" x="728.0">·</text>
-<text y="679" fill="#6f7d73" x="742.4">t</text>
-<text y="679" fill="#6f7d73" x="756.8 764.0 771.2 778.4 785.6">train</text>
+<text y="679" fill="#6f7d73" x="404.0">/</text>
+<text y="679" fill="#6f7d73" x="418.4">,</text>
+<text y="679" fill="#6f7d73" x="432.8 440.0 447.2 454.4 461.6 468.8">filter</text>
+<text y="679" fill="#6f7d73" x="483.2">·</text>
+<text y="679" fill="#6f7d73" x="497.6 504.8 512.0">j/k</text>
+<text y="679" fill="#6f7d73" x="526.4 533.6 540.8 548.0 555.2 562.4">person</text>
+<text y="679" fill="#6f7d73" x="576.8">|</text>
+<text y="679" fill="#6f7d73" x="591.2">a</text>
+<text y="679" fill="#6f7d73" x="605.6 612.8 620.0 627.2">seat</text>
+<text y="679" fill="#6f7d73" x="641.6">·</text>
+<text y="679" fill="#6f7d73" x="656.0">x</text>
+<text y="679" fill="#6f7d73" x="670.4 677.6 684.8 692.0 699.2 706.4 713.6 720.8">transfer</text>
+<text y="679" fill="#6f7d73" x="735.2">·</text>
+<text y="679" fill="#6f7d73" x="749.6">P</text>
+<text y="679" fill="#6f7d73" x="764.0 771.2 778.4 785.6">post</text>
 <text y="679" fill="#6f7d73" x="800.0">·</text>
-<text y="679" fill="#6f7d73" x="814.4">a</text>
-<text y="679" fill="#6f7d73" x="828.8 836.0 843.2 850.4">seat</text>
-<text y="679" fill="#6f7d73" x="864.8">·</text>
-<text y="679" fill="#6f7d73" x="879.2">P</text>
-<text y="679" fill="#6f7d73" x="893.6 900.8 908.0 915.2">post</text>
-<text y="679" fill="#6f7d73" x="929.6">·</text>
-<text y="679" fill="#6f7d73" x="944.0">x</text>
-<text y="679" fill="#6f7d73" x="958.4 965.6 972.8 980.0 987.2 994.4 1001.6 1008.8">transfer</text>
+<text y="679" fill="#6f7d73" x="814.4">t</text>
+<text y="679" fill="#6f7d73" x="828.8 836.0 843.2 850.4 857.6">train</text>
+<text y="679" fill="#6f7d73" x="872.0">·</text>
+<text y="679" fill="#6f7d73" x="886.4">L</text>
+<text y="679" fill="#6f7d73" x="900.8 908.0 915.2 922.4 929.6">leave</text>
+<text y="679" fill="#6f7d73" x="944.0">·</text>
+<text y="679" fill="#6f7d73" x="958.4">T</text>
+<text y="679" fill="#6f7d73" x="972.8 980.0 987.2 994.4 1001.6 1008.8">triage</text>
 <text y="679" fill="#6f7d73" x="1023.2">·</text>
-<text y="679" fill="#6f7d73" x="1037.6">L</text>
-<text y="679" fill="#6f7d73" x="1052.0 1059.2 1066.4 1073.6 1080.8">leave</text>
+<text y="679" fill="#6f7d73" x="1037.6">m</text>
+<text y="679" fill="#6f7d73" x="1052.0 1059.2 1066.4 1073.6 1080.8">admit</text>
 <text y="679" fill="#6f7d73" x="1095.2">·</text>
-<text y="679" fill="#6f7d73" x="1109.6">D</text>
-<text y="679" fill="#6f7d73" x="1124.0 1131.2 1138.4 1145.6">fire</text>
-<text y="679" fill="#6f7d73" x="1160.0">·</text>
-<text y="679" fill="#6f7d73" x="1174.4">r</text>
-<text y="679" fill="#6f7d73" x="1188.8 1196.0 1203.2 1210.4 1217.6 1224.8">record</text>
+<text y="679" fill="#6f7d73" x="1109.6">r</text>
+<text y="679" fill="#6f7d73" x="1124.0 1131.2 1138.4 1145.6 1152.8 1160.0">record</text>
+<text y="679" fill="#6f7d73" x="1174.4">|</text>
+<text y="679" fill="#6f7d73" x="1188.8">D</text>
+<text y="679" fill="#6f7d73" x="1203.2 1210.4 1217.6 1224.8">fire</text>
 </g>
 </svg>
