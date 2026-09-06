@@ -904,7 +904,7 @@ pub const App = struct {
             .desk => "F1-F10 / 1-0 screens · Tab pane · j/k cursor | Enter act · e emblem · n end turn | : command · F12 settings · ? help · q welcome",
             .contracts => "Tab pane · j/k offer | Enter accept (you pick the company) · b bargain · c complete · R recall",
             .ledger => "j/k treasury | L loan · R repay · t send cash · T pull cash back · p top-up policy · x clear policy",
-            .forces => "[ ] company / pool · j/k row · r damage / readiness / manning | a seat · u unassign · l lance · x transfer · c crew · A auto · t / T train one / all · o role · d depot · R spares (hull) / recall (company) · m mothball · w air wing · + raise | $ sell · X disband · b fabricate",
+            .forces => "[ ] company / pool · j/k row · r cycle pane · M manning | a seat · u unassign · l lance · x transfer · c crew · A auto · t / T train one / all · o role · d depot · R spares (hull) / recall (company) · m mothball · w air wing · + raise | $ sell · X disband · b fabricate",
             .supply => "j/k site | o order · s ship · R trim to plan · H parts home · K keep stocked | t / T cash out / back · p / P cash / resupply policy · $ sell stock",
             .hq => "[ ] switch HQ · Tab hall · f / F filter | u upgrade · T tier · S autostaff · Enter hire · b fabricate | $ sell HQ",
             .map => "h j k l move · + / - zoom · c colours | f found HQ here · o offers here | q welcome",
@@ -3083,6 +3083,11 @@ pub const App = struct {
                             .manning => .damage,
                         };
                         if (self.narrow() and self.forces_pane == .readiness) self.modal = .readiness;
+                    },
+                    'M' => {
+                        // Straight to the manning table (play feedback: it hid behind r).
+                        self.forces_pane = .manning;
+                        self.say(.dim, "MANNING: have / need per role for the company under the cursor — :crew co:N hires the gaps at home, xfer sends people out to a deployed one", .{});
                     },
                     'w' => if (row) |r| {
                         const co = g.companyOf(r.force);

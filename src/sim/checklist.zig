@@ -4,6 +4,7 @@
 //! modal. Nothing slips past a turn boundary unannounced.
 
 const std = @import("std");
+const person_mod = @import("../domain/person.zig");
 const types = @import("../domain/types.zig");
 const unit_mod = @import("../domain/unit.zig");
 const part_mod = @import("../domain/part.zig");
@@ -15,6 +16,9 @@ pub const WarningKind = enum {
     decision_due,
     open_slots,
     understaffed_hq,
+    /// Someone reaches retirement age within the quarter (play feedback:
+    /// HQs lost admins "without my knowledge").
+    retiring_soon,
     hungry,
     dry_ammo,
     overdrawn,
@@ -233,7 +237,36 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
         const hq = hentry.value_ptr;
         const req = hq.staffRequired().total();
         if (hq.staff_assigned < req) {
-            try out.append(alloc, .{ .kind = .understaffed_hq, .text = try std.fmt.allocPrint(alloc, "{s} understaffed {d}/{d} — facilities run below level", .{ hq.name, hq.staff_assigned, req }) });
+            // Which desks are short, and who walked lately (play feedback: the
+            // bare count said nothing about why or what to do).
+            const need = hq.staffRequired();
+            var short: std.ArrayListUnmanaged(u8) = .empty;
+            const desks = [_]struct { role: person_mod.Role, need: u32, name: []const u8 }{
+                .{ .role = .admin_command, .need = need.admin, .name = "command" },
+                .{ .role = .admin_logistics, .need = need.logistics, .name = "logistics" },
+                .{ .role = .admin_hr, .need = need.hr, .name = "HR" },
+                .{ .role = .admin_finance, .need = need.finance, .name = "finance" },
+            };
+            for (desks) |d| {
+                const have = gs.hqStaff(hq.id, d.role).count;
+                if (have >= d.need) continue;
+                if (short.items.len > 0) try short.appendSlice(alloc, ", ");
+                try short.appendSlice(alloc, try std.fmt.allocPrint(alloc, "{d} {s}", .{ d.need - have, d.name }));
+            }
+            var left: u32 = 0;
+            var last_name: []const u8 = "";
+            for (gs.event_log.items) |e| {
+                if (e.hq != hq.id or e.day + 90 < day or std.mem.indexOf(u8, e.text, "[turnover]") == null) continue;
+                if (std.mem.indexOf(u8, e.text, " retires") == null and std.mem.indexOf(u8, e.text, " resigns") == null) continue;
+                left += 1;
+                const start = (std.mem.indexOf(u8, e.text, "[turnover] ") orelse continue) + 11;
+                const stop = std.mem.indexOfPos(u8, e.text, start, " (") orelse e.text.len;
+                last_name = e.text[start..stop];
+            }
+            try out.append(alloc, .{ .kind = .understaffed_hq, .text = try std.fmt.allocPrint(alloc, "{s} understaffed {d}/{d} (short {s}) — facilities run a level low{s} · HQ screen: S autostaff from the pool, h hire at the hall; answer notice decisions in the inbox before they expire", .{
+                hq.name, hq.staff_assigned, req, if (short.items.len > 0) short.items else "none by desk: posted staff hold the wrong roles",
+                if (left > 0) try std.fmt.allocPrint(alloc, " · {d} left in the last quarter (last: {s})", .{ left, last_name }) else "",
+            }) });
         }
         if (hq.funds < 0) {
             try out.append(alloc, .{ .kind = .overdrawn, .text = try std.fmt.allocPrint(alloc, "{s} treasury overdrawn ({d})", .{ hq.name, hq.funds }) });
@@ -255,6 +288,24 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
         if (waiting > 0 and idle > 0) {
             try out.append(alloc, .{ .kind = .depot_backlog, .text = try std.fmt.allocPrint(alloc, "{d} hull(s) need depot work and {d} bay slot(s) sit idle — components or techs missing (see `demand`, `roster`)", .{ waiting, idle }) });
         }
+    }
+
+    // Retirements coming (play feedback): the age line is a hard stop at the
+    // monthly turnover, so say who reaches it within the quarter.
+    {
+        const tp = @import("../domain/tuning.zig").t.person;
+        var n: u32 = 0;
+        var first: []const u8 = "";
+        var pit2 = gs.people.iterator();
+        while (pit2.next()) |e| {
+            const p = e.value_ptr;
+            if (p.status != .active) continue;
+            const age = p.ageYears(day + 90) orelse continue;
+            if (age < tp.age_retire) continue;
+            n += 1;
+            if (first.len == 0) first = try std.fmt.allocPrint(alloc, "{s} {s} ({s}{s})", .{ p.first_name, p.last_name, @tagName(p.role), if (p.posted_hq != .none) try std.fmt.allocPrint(alloc, ", {s}", .{if (gs.hqs.getPtr(p.posted_hq)) |h| h.name else "HQ"}) else "" });
+        }
+        if (n > 0) try out.append(alloc, .{ .kind = .retiring_soon, .text = try std.fmt.allocPrint(alloc, "{d} reach{s} retirement age ({d}) within the quarter — {s}{s}; hire the replacement now (halls churn daily)", .{ n, if (n == 1) "es" else "", tp.age_retire, first, if (n > 1) try std.fmt.allocPrint(alloc, " and {d} more", .{n - 1}) else "" }) });
     }
 
     // Medbay over capacity at home.
@@ -358,4 +409,38 @@ test "dry-ammo warning names only the families the company fires" {
     };
     try std.testing.expectEqual(@as(u32, 1), dry_warnings);
     try std.testing.expect(named);
+}
+
+test "play feedback: the understaffed warning names the short desks, and retirements are announced a quarter out" {
+    const commands = @import("commands.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 93 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const al = arena.allocator();
+    const hq = gs.hqs.values()[0];
+    // Strip every finance admin: the warning must say "finance".
+    var pit = gs.people.iterator();
+    while (pit.next()) |e| if (e.value_ptr.posted_hq == hq.id and e.value_ptr.role == .admin_finance) {
+        e.value_ptr.status = .resigned;
+    };
+    gs.refreshHqStaffing();
+    var saw_short = false;
+    for (try turnWarnings(&gs, al)) |w| if (w.kind == .understaffed_hq) {
+        try std.testing.expect(std.mem.indexOf(u8, w.text, "finance") != null);
+        try std.testing.expect(std.mem.indexOf(u8, w.text, "S autostaff") != null);
+        saw_short = true;
+    };
+    try std.testing.expect(saw_short);
+    // Someone two months short of the line: announced.
+    const tp = @import("../domain/tuning.zig").t.person;
+    const someone = gs.people.values()[0].id;
+    gs.person(someone).?.born_day = @as(i32, @intCast(gs.clock.day_index)) - @as(i32, @intCast(tp.age_retire)) * 365 + 60;
+    var saw_retire = false;
+    for (try turnWarnings(&gs, al)) |w| if (w.kind == .retiring_soon) {
+        try std.testing.expect(std.mem.indexOf(u8, w.text, "retirement age") != null);
+        saw_retire = true;
+    };
+    try std.testing.expect(saw_retire);
 }

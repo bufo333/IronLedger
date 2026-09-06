@@ -190,7 +190,7 @@ fn jumpFor(kind: checklist.WarningKind) u8 {
         .overdrawn, .insolvent => 4,
         .hungry, .dry_ammo => 5,
         .understaffed_hq, .depot_backlog => 6,
-        .untreated_wounded, .restless_crew => 8,
+        .untreated_wounded, .restless_crew, .retiring_soon => 8,
         .manning_short, .unfit_crew => 2,
     };
 }
