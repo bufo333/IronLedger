@@ -197,6 +197,8 @@ pub const Command = union(enum) {
     set_stock_policy: struct { hq: types.HqId, part_key: []const u8, min: u32, target: u32 },
     /// Let the medbay admit the wounded on its own each morning.
     set_auto_admit: bool,
+    /// Difficulty (12.32): green | regular | veteran | elite — logged, takes effect at once.
+    set_difficulty: @import("../domain/difficulty.zig").Level,
     /// Share of contract income paid to shareholders at completion (12C.3),
     /// in percent 0–100.
     set_shares_pct: u8,
@@ -601,6 +603,7 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             if (index >= gs.market_listings.items.len) return Error.NoSuchListing;
             if (gs.hqs.count() == 0) return Error.NoHq;
             const listing = gs.market_listings.items[index];
+            const price = types.applyBp(listing.price, gs.diff().purchase_bp); // difficulty (12.32)
             // The board's own HQ pays and receives (Stage 9D).
             const hq_id: types.HqId = if (listing.hq != .none) listing.hq else gs.hqs.keys()[0];
             // Transports need a berth at the board's HQ (Stage 12.15).
@@ -614,7 +617,7 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             };
             try debitPurchase(gs, .{ .hq = hq_id }, .{
                 .day = gs.clock.day_index,
-                .amount = -listing.price,
+                .amount = -price,
                 .category = if (listing.kind == .unit) .unit_purchase else .parts,
                 .hq = hq_id,
                 .note = if (listing.black_market) "black market" else listing.item_key,
@@ -628,12 +631,12 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
                 _ = gs.market_listings.orderedRemove(index);
                 if (roll <= bm.black_market_fraud_target) {
                     const now = if (!std.mem.eql(u8, world_faction, "PER")) try gs.adjustStanding(world_faction, -bm.black_market_standing_loss) else 0;
-                    try gs.log(.market, .{ .hq = hq_id }, "[black market] the fence vanished with {d} c-bills — no {s} (2d6 = {d}); {s} standing −{d} → {d}", .{ listing.price, listing.item_key, roll, world_faction, bm.black_market_standing_loss, now });
+                    try gs.log(.market, .{ .hq = hq_id }, "[black market] the fence vanished with {d} c-bills — no {s} (2d6 = {d}); {s} standing −{d} → {d}", .{ price, listing.item_key, roll, world_faction, bm.black_market_standing_loss, now });
                     return .{};
                 }
                 const house_now = if (!std.mem.eql(u8, world_faction, "PER")) try gs.adjustStanding(world_faction, -1) else 0;
                 const pirate_now = try gs.adjustStanding("PER", 1);
-                try gs.log(.market, .{ .hq = hq_id }, "[black market] {s} changed hands for {d} c-bills, no questions asked — {s} standing −1 → {d}, pirates +1 → {d}", .{ listing.item_key, listing.price, world_faction, house_now, pirate_now });
+                try gs.log(.market, .{ .hq = hq_id }, "[black market] {s} changed hands for {d} c-bills, no questions asked — {s} standing −1 → {d}, pirates +1 → {d}", .{ listing.item_key, price, world_faction, house_now, pirate_now });
                 switch (listing.kind) {
                     .unit => {
                         const uid = try gs.addUnit(listing.item_key);
@@ -652,7 +655,7 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
                     if (listing.condition) |cond| gs.applyHullCondition(uid, cond);
                     if (berth_kind != null) gs.unit(uid).?.berth_hq = hq_id;
                     try gs.log(.market, .{ .hq = hq_id }, "[market] bought {s} ({s}) for {d}{s}", .{
-                        listing.item_key, if (listing.condition) |c| c.label() else "new", listing.price, if (berth_kind != null) " — berthed here" else "",
+                        listing.item_key, if (listing.condition) |c| c.label() else "new", price, if (berth_kind != null) " — berthed here" else "",
                     });
                 },
                 .part => {
@@ -892,6 +895,19 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             try gs.log(.decision, .{}, "[shares] profit share set to {d}% of contract income", .{pct});
             return .{};
         },
+        .set_difficulty => |level| {
+            const was = gs.difficulty;
+            gs.difficulty = level;
+            const row = gs.diff();
+            const dm = @import("../domain/difficulty.zig").multText;
+            var b1: [16]u8 = undefined;
+            var b2: [16]u8 = undefined;
+            var b3: [16]u8 = undefined;
+            try gs.log(.finance, .{}, "[difficulty] {s} → {s} — {s} (contract pay {s}, fabrication {s}, opposition {s})", .{
+                @tagName(was), row.name, row.blurb, dm(&b1, row.contract_pay_bp), dm(&b2, row.fab_cost_bp), dm(&b3, row.enemy_bp),
+            });
+            return .{};
+        },
         .set_auto_admit => |on| {
             gs.auto_admit = on;
             if (on) {
@@ -1037,7 +1053,7 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             const def = part_mod.find(f.part_key) orelse return Error.UnknownPart;
             if (!part_mod.isComponent(def.key)) return Error.NotAComponent;
             if (hq_ops.baySlots(gs, f.hq) == 0) return Error.NoBay;
-            const total = types.applyBp(def.cost * f.quantity, market_mod.structural_fab_cost_mult_bp);
+            const total = types.applyBp(types.applyBp(def.cost * f.quantity, market_mod.structural_fab_cost_mult_bp), gs.diff().fab_cost_bp); // difficulty (12.32)
             try debitPurchase(gs, .{ .hq = f.hq }, .{
                 .day = gs.clock.day_index,
                 .amount = -total,
@@ -1616,7 +1632,7 @@ fn orderPart(gs: *GameState, part_key: []const u8, quantity: u32, dest_opt: ?typ
     const hq = gs.hqs.getPtr(hq_id) orelse return Error.UnknownHq;
     const world = planet_mod.find(hq.planet_key) orelse return Error.UnknownPlanet;
 
-    const cost_mult: types.Bp = tuning.market.procurement_markup_bp; // 10% procurement markup
+    const cost_mult: types.Bp = types.applyBp(tuning.market.procurement_markup_bp, gs.diff().purchase_bp); // 10% procurement markup, scaled by difficulty (12.32)
     var lead_days: u32 = logistics.transitDays(1);
     // Onward shipment to a deployed company: more days, freight on top.
     const onward = try freightBetween(gs, .{ .hq = hq_id }, dest, quantity * def.pallet_tons);
@@ -3556,4 +3572,58 @@ test "12.31: a wreck is rebuilt in the depot — a component and bay time — an
     _ = try execute(&gs, .{ .depot = legacy });
     try std.testing.expect(hq_ops.hasJobForUnit(&gs, legacy));
     try std.testing.expectEqual(@as(u32, 0), gs.stockCount(.{ .hq = home }, "comp_ct"));
+}
+
+test "12.32: difficulty scales pay, fabrication and purchases — regular is the game as tuned, and it persists as a setting" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 98 });
+    defer gs.deinit();
+    _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
+    _ = try execute(&gs, .{ .new_company = "Alpha" });
+    const hq_id = gs.hqs.keys()[0];
+    try std.testing.expectEqual(@import("../domain/difficulty.zig").Level.regular, gs.difficulty);
+
+    // Fabrication: elite charges more than regular for the same job.
+    gs.hqs.getPtr(hq_id).?.funds = 50_000_000;
+    const before_r = gs.hqs.getPtr(hq_id).?.funds;
+    _ = try execute(&gs, .{ .fabricate = .{ .hq = hq_id, .part_key = "comp_leg", .quantity = 1 } });
+    const cost_r = before_r - gs.hqs.getPtr(hq_id).?.funds;
+    _ = try execute(&gs, .{ .set_difficulty = .elite });
+    const before_e = gs.hqs.getPtr(hq_id).?.funds;
+    _ = try execute(&gs, .{ .fabricate = .{ .hq = hq_id, .part_key = "comp_leg", .quantity = 1 } });
+    const cost_e = before_e - gs.hqs.getPtr(hq_id).?.funds;
+    try std.testing.expect(cost_e > cost_r);
+    try std.testing.expectEqual(types.applyBp(cost_r, gs.diff().fab_cost_bp), cost_e);
+    // Regular: exactly the tuned ×1.5 on the catalogue price — a full structure set is 900 k.
+    const part_mod2 = @import("../domain/part.zig");
+    try std.testing.expectEqual(types.applyBp(part_mod2.cost("comp_leg"), tuning.market.fab_cost_bp), cost_r);
+
+    // Contract pay: the same board, rolled under green and under elite, pays in the table's ratio.
+    const cm = @import("../econ/contract_market.zig");
+    _ = try execute(&gs, .{ .set_difficulty = .green });
+    var green = GameState.init(std.testing.allocator, .{ .seed = 98 });
+    defer green.deinit();
+    _ = try execute(&green, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
+    _ = try execute(&green, .{ .new_company = "Alpha" });
+    green.difficulty = .green;
+    var elite = GameState.init(std.testing.allocator, .{ .seed = 98 });
+    defer elite.deinit();
+    _ = try execute(&elite, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
+    _ = try execute(&elite, .{ .new_company = "Alpha" });
+    elite.difficulty = .elite;
+    try cm.refresh(&green);
+    try cm.refresh(&elite);
+    try std.testing.expect(green.contract_offers.items.len > 0);
+    try std.testing.expectEqual(green.contract_offers.items.len, elite.contract_offers.items.len);
+    const g0 = green.contract_offers.items[0].terms.base_pay_month;
+    const e0 = elite.contract_offers.items[0].terms.base_pay_month;
+    try std.testing.expect(e0 < g0);
+    // ×0.61 / ×1.22 = exactly half, give or take rounding.
+    try std.testing.expect(@abs(e0 * 2 - g0) <= @divTrunc(g0, 50));
+
+    // The level is logged and survives a round trip through the store.
+    var seen = false;
+    for (gs.event_log.items) |e| if (std.mem.indexOf(u8, e.text, "[difficulty]") != null) {
+        seen = true;
+    };
+    try std.testing.expect(seen);
 }

@@ -293,7 +293,7 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     // Enemy: strength relative to the player's committed BV, pirate rabble
     // to house regulars by employer's foe.
     const variance: types.Bp = (@as(types.Bp, gs.rng.roll2d6(.battle)) - 7) * 500;
-    var enemy_bv = types.applyBp(types.applyBp(player.bv, contract_mod.enemyStrengthBp(c.kind) + variance), scenario.enemy_bp);
+    var enemy_bv = types.applyBp(types.applyBp(types.applyBp(player.bv, contract_mod.enemyStrengthBp(c.kind) + variance), scenario.enemy_bp), gs.diff().enemy_bp); // difficulty (12.32)
     // Attrition contracts (Stage 9E): the enemy can only field what's left
     // of their pool.
     if (c.objective == .attrition and c.enemy_pool_remaining > 0) enemy_bv = @min(enemy_bv, c.enemy_pool_remaining);

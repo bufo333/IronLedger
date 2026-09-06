@@ -139,6 +139,10 @@ pub fn parseCommand(verb: []const u8, tokens: *std.mem.TokenIterator(u8, .scalar
     if (eq(u8, verb, "shares")) {
         return .{ .set_shares_pct = try num(u8, tokens.next()) };
     }
+    if (eq(u8, verb, "difficulty")) {
+        const level = game.difficulty.parse(try need(tokens.next())) orelse return error.BadArguments;
+        return .{ .set_difficulty = level };
+    }
     if (eq(u8, verb, "autoadmit")) {
         const arg = tokens.next() orelse "on";
         return .{ .set_auto_admit = eq(u8, arg, "on") or eq(u8, arg, "1") or eq(u8, arg, "yes") };
@@ -425,6 +429,7 @@ pub const verbs = [_][]const u8{
     "newlance",
     "stockpolicy",
     "autoadmit",
+    "difficulty",
     "shares",
     "sellstock",
     "trim",
@@ -487,6 +492,7 @@ pub fn usage(verb: []const u8) ?[]const u8 {
         .{ "newlance", "newlance co:N [line|air|mash|mess|salvage|security|transport] <name>" },
         .{ "stockpolicy", "stockpolicy hq:N <part> <min> [target]  (0 target removes)" },
         .{ "autoadmit", "autoadmit on|off" },
+        .{ "difficulty", "difficulty green|regular|veteran|elite  (Settings [d]; economy and opposition, never the dice)" },
         .{ "shares", "shares <pct>  (share of contract income paid to shareholders at completion)" },
         .{ "sellstock", "sellstock hq:N <part> [qty]" },
         .{ "trim", "trim co:N" },

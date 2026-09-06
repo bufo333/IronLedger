@@ -110,7 +110,7 @@ pub fn refresh(gs: *GameState) !void {
     // combat companies on the books. A contract hires one company; pricing
     // it off the whole outfit paid every company for all of them at once
     // (play feedback: 98 M in the bank after twenty years).
-    const base = types.applyBp(@max(perCompanyOpsCost(gs), tuning.market.min_ops_cost), market_margin_bp);
+    const base = types.applyBp(@max(perCompanyOpsCost(gs), tuning.market.min_ops_cost), types.applyBp(market_margin_bp, gs.diff().contract_pay_bp)); // difficulty (12.32)
 
     // The Dragoons rating (12C.7) sets how many come calling, who, and at what pay.
     const queries = @import("../sim/queries.zig");

@@ -278,7 +278,7 @@ pub fn runMonthlyTurnover(gs: *GameState) !u32 {
         restless -|= loyal.count();
         if (restless == 0) continue;
         const roll = gs.rng.roll2d6(.medical);
-        if (roll >= t.turnover_target + restless) continue;
+        if (roll >= t.turnover_target + gs.diff().turnover_delta + restless) continue; // difficulty (12.32)
         // Notice, not a disappearance (12.25): the inbox offers a raise, a
         // bonus, a replacement from the hall, or the door.
         try @import("contract_events.zig").queueNotice(gs, p.id);

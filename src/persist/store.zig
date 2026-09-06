@@ -322,6 +322,7 @@ pub const Store = struct {
 
         // Scalars.
         {
+            const difficulty_int: i64 = @intFromEnum(gs.difficulty);
             const st = try self.db.prepare("INSERT INTO meta VALUES (?1, ?2, ?3)");
             defer st.finalize();
             const ints = [_]struct { []const u8, i64 }{
@@ -329,7 +330,7 @@ pub const Store = struct {
                 .{ "month", gs.clock.date.month },                    .{ "day", gs.clock.date.day },
                 .{ "funds", gs.funds },                               .{ "reputation", gs.reputation },
                 .{ "bankrupt", @as(i64, @intFromBool(gs.bankrupt)) }, .{ "auto_admit", @as(i64, @intFromBool(gs.auto_admit)) },
-                .{ "share_profit_bp", @as(i64, gs.share_profit_bp) },
+                .{ "difficulty", difficulty_int },                    .{ "share_profit_bp", @as(i64, gs.share_profit_bp) },
                 .{ "stat_battles_won", gs.stats.battles_won },       .{ "stat_battles_drawn", gs.stats.battles_drawn },
                 .{ "stat_battles_lost", gs.stats.battles_lost },     .{ "stat_hulls_lost", gs.stats.hulls_lost },
                 .{ "stat_hulls_salvaged", gs.stats.hulls_salvaged }, .{ "stat_people_kia", gs.stats.people_kia },
@@ -752,6 +753,7 @@ pub const Store = struct {
                 if (std.mem.eql(u8, key, "reputation")) gs.reputation = @intCast(v);
                 if (std.mem.eql(u8, key, "bankrupt")) gs.bankrupt = v != 0;
                 if (std.mem.eql(u8, key, "auto_admit")) gs.auto_admit = v != 0;
+                if (std.mem.eql(u8, key, "difficulty")) gs.difficulty = if (v >= 0 and v < @typeInfo(@TypeOf(gs.difficulty)).@"enum".fields.len) @enumFromInt(v) else .regular;
                 if (std.mem.eql(u8, key, "share_profit_bp")) gs.share_profit_bp = @intCast(v);
                 if (std.mem.eql(u8, key, "stat_battles_won")) gs.stats.battles_won = @intCast(v);
                 if (std.mem.eql(u8, key, "stat_battles_drawn")) gs.stats.battles_drawn = @intCast(v);

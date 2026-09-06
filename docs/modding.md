@@ -31,6 +31,7 @@ screen (F12) and the REPL banner say which files are overlaid.
 | `planets.zon` | `domain/planet.zig` `Planet` | the star map: position, faction, industry, optional terrain |
 | `parts.zon` | `domain/part.zig` `PartDef` | weapons, ammo, components, supplies: cost, rarity, availability code, tech base, intro year, mount facts |
 | `tables/tuning.zon` | `domain/tuning.zig` `Tuning` | every balance knob, by subsystem |
+| `tables/difficulty.zon` | `domain/difficulty.zig` `Table` | green / regular / veteran / elite: multipliers on pay, fabrication, purchases, opposition, turnover |
 | `tables/meklab.zon` | `domain/meklab.zig` `Tables` | TechManual engine and internal-structure tables |
 | `tables/names.zon` | `gen/person_gen.zig` | first names, last names, callsigns |
 | `tables/ranks.zon` | `domain/rank.zig` `RankRow` | rank names, abbreviations, pay multipliers |

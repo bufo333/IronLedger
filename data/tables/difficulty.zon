@@ -1,0 +1,19 @@
+// Difficulty levels (12.32, play feedback): the BattleTech experience
+// ladder, applied to the economy and the opposition — never to the dice.
+// Regular is the game as tuned in tables/tuning.zon; the other rows are
+// basis-point multipliers on top of it (10_000 = as tuned). Typed against
+// domain/difficulty.zig `Table`.
+//
+//   contract_pay_bp   scales the market margin employers pay (×2.2 … ×1.1)
+//   fab_cost_bp       scales the fabrication premium (×1.2 … ×2.2)
+//   purchase_bp       scales part orders and hull purchases
+//   enemy_bp          scales the opposing force in every engagement
+//   turnover_delta    added to the turnover target: more notices handed in
+.{
+    .levels = .{
+        .{ .key = "green", .name = "Green", .contract_pay_bp = 12_200, .fab_cost_bp = 8_000, .purchase_bp = 9_000, .enemy_bp = 8_500, .turnover_delta = -1, .blurb = "a forgiving economy: fat contracts, cheap fabrication, timid opposition" },
+        .{ .key = "regular", .name = "Regular", .contract_pay_bp = 10_000, .fab_cost_bp = 10_000, .purchase_bp = 10_000, .enemy_bp = 10_000, .turnover_delta = 0, .blurb = "the game as tuned" },
+        .{ .key = "veteran", .name = "Veteran", .contract_pay_bp = 7_800, .fab_cost_bp = 12_000, .purchase_bp = 11_500, .enemy_bp = 11_500, .turnover_delta = 1, .blurb = "garrison duty barely pays; raids and salvage carry the outfit" },
+        .{ .key = "elite", .name = "Elite", .contract_pay_bp = 6_100, .fab_cost_bp = 14_700, .purchase_bp = 13_000, .enemy_bp = 13_000, .turnover_delta = 2, .blurb = "garrisons barely cover costs; dear parts, hard fights, restless crews" },
+    },
+}

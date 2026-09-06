@@ -15,6 +15,7 @@ const contract_mod = @import("../domain/contract.zig");
 const clock_mod = @import("clock.zig");
 const rng_mod = @import("rng.zig");
 const events_mod = @import("events.zig");
+const difficulty_mod = @import("../domain/difficulty.zig");
 const finance_mod = @import("../econ/finance.zig");
 const person_gen = @import("../gen/person_gen.zig");
 const commander_mod = @import("../domain/commander.zig");
@@ -261,6 +262,9 @@ pub const GameState = struct {
     faction_cooling: std.ArrayListUnmanaged(FactionCooling) = .empty,
     /// Standing with each house (Stage 12.21), −100…100; absent = 0.
     faction_standing: std.StringArrayHashMapUnmanaged(i32) = .empty,
+    /// Difficulty (12.32): scales the economy and the opposition; regular
+    /// is the game as tuned. Chosen in Settings, persisted per campaign.
+    difficulty: difficulty_mod.Level = .regular,
     /// Event memory (play feedback): when each decision kind last fired and
     /// how the player has been answering it — cooldowns and standing orders
     /// (sim/contract_events.zig).
@@ -345,6 +349,11 @@ pub const GameState = struct {
     }
 
     /// All campaign-lifetime allocations come from here.
+    /// The difficulty row in force.
+    pub fn diff(self: *const GameState) *const difficulty_mod.Row {
+        return difficulty_mod.get(self.difficulty);
+    }
+
     pub fn allocator(self: *GameState) std.mem.Allocator {
         return self.arena.allocator();
     }

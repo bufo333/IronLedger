@@ -2003,6 +2003,16 @@ pub const App = struct {
                 try rows.append(al, "");
                 if (self.gs) |*gs| {
                     try rows.append(al, try std.fmt.allocPrint(al, "  medbay       auto-admit the wounded {s}     {{d}}[a] toggle — off: you admit each casualty (m on People) and the turn waits{{/}}", .{if (gs.auto_admit) "{g}on{/} " else "{c}off{/}"}));
+                    const row = gs.diff();
+                    try rows.append(al, try std.fmt.allocPrint(al, "  difficulty   {{a}}{s}{{/}} — {s}     {{d}}[d] cycle green → regular → veteran → elite (logged; takes effect at once){{/}}", .{ row.name, row.blurb }));
+                    const dm = game.difficulty.multText;
+                    var b1: [16]u8 = undefined;
+                    var b2: [16]u8 = undefined;
+                    var b3: [16]u8 = undefined;
+                    var b4: [16]u8 = undefined;
+                    try rows.append(al, try std.fmt.allocPrint(al, "               contract pay {s} · fabrication {s} · purchases {s} · opposition {s} · turnover {s}{d}", .{
+                        dm(&b1, row.contract_pay_bp), dm(&b2, row.fab_cost_bp), dm(&b3, row.purchase_bp), dm(&b4, row.enemy_bp), if (row.turnover_delta >= 0) "+" else "", row.turnover_delta,
+                    }));
                     try rows.append(al, try std.fmt.allocPrint(al, "  shares       {{a}}{d}%{{/}} of contract income to shareholders at completion     {{d}}`:shares <pct>` — founders, veterans and officers hold shares; a stake calms restlessness{{/}}", .{@divTrunc(gs.share_profit_bp, 100)}));
                     try rows.append(al, "");
                 }
@@ -4105,6 +4115,11 @@ pub const App = struct {
                     't', 'T' => {
                         self.modal_cursor = 0;
                         self.modal = .music;
+                    },
+                    'd', 'D' => if (self.gs) |*gs| {
+                        const level = gs.difficulty.next();
+                        try self.exec(.{ .set_difficulty = level });
+                        self.say(.good, "difficulty: {s} — {s}", .{ gs.diff().name, gs.diff().blurb });
                     },
                     'a', 'A' => if (self.gs) |*gs| {
                         const on = !gs.auto_admit;

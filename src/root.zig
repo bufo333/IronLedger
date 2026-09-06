@@ -9,6 +9,7 @@ pub const person = @import("domain/person.zig");
 pub const unit = @import("domain/unit.zig");
 pub const chassis = @import("domain/chassis.zig");
 pub const tuning = @import("domain/tuning.zig");
+pub const difficulty = @import("domain/difficulty.zig");
 pub const rank = @import("domain/rank.zig");
 pub const award = @import("domain/award.zig");
 pub const ability = @import("domain/ability.zig");

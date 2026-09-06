@@ -1759,7 +1759,7 @@ pub fn market(alloc: Alloc, gs: *GameState, filter: MarketFilter, hq: types.HqId
         const cond: []const u8 = if (l.condition) |c| try std.fmt.allocPrint(alloc, "{{a}}{s}{{/}} armor {d}% · {d} dmg · {d} missing", .{ c.label(), c.armor_pct, c.damaged_slots, c.missing_components }) else if (l.kind == .unit) "{g}new{/}" else "";
         const name: []const u8 = if (l.kind == .unit) (if (chassis_mod.find(l.item_key)) |c| c.name else l.item_key) else (if (@import("../domain/part.zig").find(l.item_key)) |p| p.name else l.item_key);
         try board.append(alloc, .{ .index = i, .hq = l.hq, .text = try std.fmt.allocPrint(alloc, "[{d: <3}] {s: <5} {s: <10} {s: <20} {s: >13}  x{d: <3} {s: <8} {s: <6} d{d: <5} {s}", .{
-            i, @tagName(l.kind), clip(l.item_key, 10), clip(name, 20), try money(alloc, l.price), l.quantity, @tagName(l.rarity), if (l.black_market) "{c}fence{/}" else if (l.staple) "staple" else "", l.expires_day, if (l.black_market) try std.fmt.allocPrint(alloc, "{{c}}black market{{/}} — no questions, maybe a fraud (2d6 ≤ {d}); the house frowns, the pirates smile · {s}", .{ @import("../domain/tuning.zig").t.market.black_market_fraud_target, cond }) else cond,
+            i, @tagName(l.kind), clip(l.item_key, 10), clip(name, 20), try money(alloc, types.applyBp(l.price, gs.diff().purchase_bp)), l.quantity, @tagName(l.rarity), if (l.black_market) "{c}fence{/}" else if (l.staple) "staple" else "", l.expires_day, if (l.black_market) try std.fmt.allocPrint(alloc, "{{c}}black market{{/}} — no questions, maybe a fraud (2d6 ≤ {d}); the house frowns, the pirates smile · {s}", .{ @import("../domain/tuning.zig").t.market.black_market_fraud_target, cond }) else cond,
         }) });
     }
     var catalog: std.ArrayListUnmanaged(CatalogRow) = .empty;
@@ -2009,6 +2009,7 @@ pub fn summary(alloc: Alloc, gs: *GameState) ![]const []const u8 {
     const d = gs.clock.date;
     try out.append(alloc, try std.fmt.allocPrint(alloc, "{{a}}{s}{{/}} · {d}-{d:0>2}-{d:0>2} · day {d} · year {d} of the campaign", .{ gs.outfit_name, d.year, d.month, d.day, day, day / 365 + 1 }));
     try out.append(alloc, (try rating(alloc, gs)).line);
+    try out.append(alloc, try std.fmt.allocPrint(alloc, "difficulty {{a}}{s}{{/}} — {s}", .{ gs.diff().name, gs.diff().blurb }));
     try out.append(alloc, "");
 
     // Contracts.

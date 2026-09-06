@@ -66,6 +66,7 @@ pub fn build(b: *std.Build) void {
         .{ .import_name = "factions_zon", .rel = "tables/factions.zon" },
         .{ .import_name = "scenarios_zon", .rel = "tables/scenarios.zon" },
         .{ .import_name = "terrain_zon", .rel = "tables/terrain.zon" },
+        .{ .import_name = "difficulty_zon", .rel = "tables/difficulty.zon" },
     };
     var overlaid = std.ArrayList([]const u8).empty;
     for (data_files) |f| {
