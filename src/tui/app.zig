@@ -85,6 +85,8 @@ const Modal = union(enum) {
     upgrade: types.HqId,
     /// Lance picker for a hull.
     lance_pick: types.UnitId,
+    /// Company picker for an offer (board index): readiest first.
+    accept_pick: usize,
     /// Negotiation term picker for an offer (board index).
     negotiate: usize,
     /// Every company's readiness report (fatigue, morale, wounded, banked XP, depot).
@@ -1348,6 +1350,12 @@ pub const App = struct {
         if (view.board.len == 0) try rows.append(al, "{d}no offers — the board refreshes on the 1st{/}");
         try rows.append(al, "");
         try rows.append(al, view.notes);
+        if (view.board.len > 0) {
+            // Who could take the offer under the cursor, readiest first (play feedback).
+            try rows.append(al, "");
+            try rows.append(al, try std.fmt.allocPrint(al, "{{a}}companies for the selected offer{{/}}   {s}", .{q.candidates_header}));
+            for (try q.offerCandidates(al, g, view.board[@min(self.cur(0).*, view.board.len - 1)].index)) |c| try rows.append(al, try std.fmt.allocPrint(al, "  {s}", .{c.text}));
+        }
         const inner = self.screen.pane(.{ .x = b.x, .y = b.y, .w = b.w, .h = board_h }, .{ .title = "CONTRACT BOARD", .focused = self.focus == 0, .right_title = "[Enter] accept with a company" });
         const c = self.cur(0);
         if (view.board.len > 0 and c.* >= view.board.len) c.* = view.board.len - 1;
@@ -1867,6 +1875,18 @@ pub const App = struct {
                 const r = self.modalRect(110, @intCast(@min(rows.items.len + 3, self.screen.rows)));
                 const inner = self.screen.pane(r, .{ .title = "NEGOTIATE · [Enter] press the term · [Esc] leave it", .double = true, .right_title = ":negotiate <offer#> <term>" });
                 self.screen.lines(inner, rows.items, 0, first + self.modal_cursor);
+            },
+            .accept_pick => |oi| {
+                const g = &self.gs.?;
+                const cands = try q.offerCandidates(al, g, oi);
+                var rows: std.ArrayListUnmanaged([]const u8) = .empty;
+                try rows.append(al, q.candidates_header);
+                for (cands) |c| try rows.append(al, c.text);
+                if (cands.len == 0) try rows.append(al, "{d}no companies to send{/}");
+                if (self.modal_cursor >= cands.len and cands.len > 0) self.modal_cursor = cands.len - 1;
+                const r = self.modalRect(@min(self.screen.cols, 118), @intCast(@min(rows.items.len + 3, self.screen.rows)));
+                const inner = self.screen.pane(r, .{ .title = "SEND WHICH COMPANY · [Enter] choose · [Esc] cancel", .double = true, .right_title = "readiest first · depot, spent, wounded, fatigue and transit count against" });
+                self.screen.lines(inner, rows.items, 0, if (cands.len > 0) self.modal_cursor + 1 else null);
             },
             .lance_pick => |uid| {
                 const lances = try self.lanceChoices(uid);
@@ -2616,25 +2636,10 @@ pub const App = struct {
             .contracts => {
                 const view = try q.contracts(al, g);
                 if (self.focus == 0 and view.board.len > 0) {
-                    // One company at home → send it; otherwise ask.
-                    var home: ?types.ForceId = null;
-                    var count: usize = 0;
-                    var fit = g.forces.iterator();
-                    while (fit.next()) |e| {
-                        const f = e.value_ptr;
-                        if (f.echelon == .company and g.isCompanyHome(f.id)) {
-                            home = f.id;
-                            count += 1;
-                        }
-                    }
-                    if (count == 1) {
-                        const lift = try q.liftText(al, g, home.?);
-                        try self.exec(.{ .accept_contract = .{ .offer_index = view.board[self.cur(0).*].index, .company = home.? } });
-                        if (self.msg.len == 0 or self.msg_style != .crit) self.say(.good, "accepted — {s} is on its way{s}{s}", .{ q.forceName(g, home.?), if (lift.len > 0) " · " else "", lift });
-                    } else {
-                        self.input.len = 0;
-                        self.modal = .{ .input = .accept_company };
-                    }
+                    // Always choose in the open (play feedback): the picker ranks
+                    // the companies readiest first and says who cannot go.
+                    self.modal_cursor = 0;
+                    self.modal = .{ .accept_pick = view.board[@min(self.cur(0).*, view.board.len - 1)].index };
                 }
             },
             .ledger => {
@@ -3593,6 +3598,31 @@ pub const App = struct {
                 },
                 .char => |ch| switch (ch) {
                     'j' => self.modal_cursor = @min(self.modal_cursor + 1, 5),
+                    'k' => self.modal_cursor -|= 1,
+                    else => {},
+                },
+                else => {},
+            },
+            .accept_pick => |oi| switch (key) {
+                .escape => self.modal = .none,
+                .down => self.modal_cursor +|= 1,
+                .up => self.modal_cursor -|= 1,
+                .enter => {
+                    const g = &self.gs.?;
+                    const cands = try q.offerCandidates(self.a(), g, oi);
+                    if (cands.len == 0) return;
+                    const c = cands[@min(self.modal_cursor, cands.len - 1)];
+                    if (!c.eligible) {
+                        self.say(.amber, "{s} cannot go: {s}", .{ q.forceName(g, c.company), c.why });
+                        return;
+                    }
+                    self.modal = .none;
+                    const lift = try q.liftText(self.a(), g, c.company);
+                    try self.exec(.{ .accept_contract = .{ .offer_index = oi, .company = c.company } });
+                    if (self.msg.len == 0 or self.msg_style != .crit) self.say(.good, "accepted — {s} is on its way, {d} days out{s}{s}", .{ q.forceName(g, c.company), c.transit_days, if (lift.len > 0) " · " else "", lift });
+                },
+                .char => |ch| switch (ch) {
+                    'j' => self.modal_cursor +|= 1,
                     'k' => self.modal_cursor -|= 1,
                     else => {},
                 },

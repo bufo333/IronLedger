@@ -8,6 +8,7 @@
 const std = @import("std");
 const types = @import("../domain/types.zig");
 const planet_mod = @import("../domain/planet.zig");
+const logistics_mod = @import("../econ/logistics.zig");
 const person_mod = @import("../domain/person.zig");
 const unit_mod = @import("../domain/unit.zig");
 const contract_mod = @import("../domain/contract.zig");
@@ -3482,4 +3483,126 @@ pub fn standingOrders(alloc: Alloc, gs: *GameState) ![][]const u8 {
     }
     if (out.items.len == 0) try out.append(alloc, try std.fmt.allocPrint(alloc, "no standing orders — answer a decision the same way {d} times running and the game stops asking", .{after}));
     return out.toOwnedSlice(alloc);
+}
+
+/// One company weighed against an offer (play feedback: the board never
+/// said who could go, and the one-company shortcut sent whoever was home).
+pub const Candidate = struct {
+    company: types.ForceId,
+    eligible: bool,
+    /// Why not, when not: under contract, in transit home.
+    why: []const u8,
+    transit_days: u32,
+    /// Lower is readier: depot hulls, spent crews, wounded, fatigue and
+    /// transit count against; morale counts for.
+    penalty: i32,
+    text: []const u8,
+};
+
+pub const candidates_header = "company               stands                    jumps  days   fatigue  morale  depot  spent  wounded";
+
+/// Which companies can take an offer and how ready each is: where the
+/// company stands, the jumps and days to the contract world from there
+/// (as `accept` reckons them), and the readiness that decides whether it
+/// should go. Readiest first; companies that cannot go come last, with why.
+pub fn offerCandidates(alloc: Alloc, gs: *GameState, offer_index: usize) ![]Candidate {
+    var out: std.ArrayListUnmanaged(Candidate) = .empty;
+    if (offer_index >= gs.contract_offers.items.len) return out.toOwnedSlice(alloc);
+    const offer = gs.contract_offers.items[offer_index];
+    const to = planet_mod.find(offer.planet_key);
+    const tpb = @import("../domain/tuning.zig").t.person;
+    for (try readiness(alloc, gs)) |r| {
+        const f = gs.force(r.company) orelse continue;
+        // Where the company stands, as acceptContract reckons it.
+        var why: []const u8 = "";
+        var from_key: ?[]const u8 = null;
+        var stands: []const u8 = "home";
+        if (gs.deploymentContract(r.company)) |c| {
+            why = "under contract";
+            from_key = c.planet_key;
+            stands = try std.fmt.allocPrint(alloc, "on {s}", .{planetName(c.planet_key)});
+        } else if (f.return_eta_day != null) {
+            why = "in transit home";
+        } else if (f.location_planet) |p| {
+            from_key = p;
+            stands = try std.fmt.allocPrint(alloc, "afield on {s}", .{planetName(p)});
+        } else if (gs.hqs.getPtr(gs.homeHqFor(r.company))) |h| {
+            from_key = h.planet_key;
+            stands = try std.fmt.allocPrint(alloc, "home, {s}", .{h.name});
+        }
+        var jumps: u32 = std.math.divCeil(u32, offer.dist_ly, 30) catch unreachable;
+        if (from_key) |fk| if (planet_mod.find(fk)) |from| if (to) |t| {
+            jumps = planet_mod.jumpsBetween(from, t);
+        };
+        const days: u32 = if (jumps == 0) 3 else logistics_mod.transitDays(jumps);
+        const eligible = why.len == 0;
+        const penalty: i32 = @as(i32, @intCast(r.depot)) * 10 + @as(i32, @intCast(r.spent)) * 5 + @as(i32, @intCast(r.wounded)) * 3 +
+            @as(i32, @intCast(r.fatigue / 4)) + @as(i32, @intCast(days / 4)) - @as(i32, @intCast(r.morale / 4));
+        const fat_mk: []const u8 = if (r.fatigue >= tpb.exhausted_fatigue) "{c}" else if (r.fatigue >= tpb.fatigue_tired) "{a}" else "{g}";
+        const mor_mk: []const u8 = if (r.morale < 30) "{c}" else if (r.morale < 50) "{a}" else "{g}";
+        const text = if (eligible)
+            try std.fmt.allocPrint(alloc, "{s} {s} {d: >5}  {d: >4}   {s}{d: >7}{{/}}  {s}{d: >6}{{/}}  {s}{d: >5}{{/}}  {s}{d: >5}{{/}}  {s}{d: >7}{{/}}", .{
+                try padCells(alloc, "{a}", f.name, 21), try padCells(alloc, "", clip(stands, 25), 25), jumps,                          days,
+                fat_mk,                                 r.fatigue,                                     mor_mk,                         r.morale,
+                if (r.depot > 0) "{c}" else "",         r.depot,                                       if (r.spent > 0) "{a}" else "", r.spent,
+                if (r.wounded > 0) "{a}" else "",       r.wounded,
+            })
+        else
+            try std.fmt.allocPrint(alloc, "{{d}}{s: <21} {s: <25} cannot go: {s}{{/}}", .{ f.name, clip(stands, 25), why });
+        try out.append(alloc, .{ .company = r.company, .eligible = eligible, .why = why, .transit_days = days, .penalty = penalty, .text = text });
+    }
+    std.mem.sort(Candidate, out.items, {}, struct {
+        fn lt(_: void, a: Candidate, b: Candidate) bool {
+            if (a.eligible != b.eligible) return a.eligible;
+            return a.penalty < b.penalty;
+        }
+    }.lt);
+    if (out.items.len > 0 and out.items[0].eligible) out.items[0].text = try std.fmt.allocPrint(alloc, "{s}  {{g}}readiest{{/}}", .{out.items[0].text});
+    return out.toOwnedSlice(alloc);
+}
+
+test "play feedback: offer candidates rank the ready company first and name why the others cannot go" {
+    const commands = @import("commands.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 71 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    // One company lives at the HQ; the others are on the books without a slot (the HQ hosts one).
+    const gen = @import("../gen/company_gen.zig");
+    const worn = (try commands.execute(&gs, .{ .new_company = "Worn" })).created_force;
+    const fresh = try gen.generateInto(&gs, "Fresh");
+    const busy = try gen.generateInto(&gs, "Busy");
+    // Worn: two hulls need the depot, everyone is tired.
+    var broken: u32 = 0;
+    var uit = gs.units.iterator();
+    while (uit.next()) |e| if (e.value_ptr.kind == .mek and gs.companyOf(e.value_ptr.force) == worn and broken < 2) {
+        for (e.value_ptr.slots.items) |*sl| if (sl.class == .structure and std.mem.startsWith(u8, sl.slot_key, "lt.")) {
+            sl.condition = .destroyed;
+        };
+        broken += 1;
+    };
+    var pit = gs.people.iterator();
+    while (pit.next()) |e| if (gs.companyOf(e.value_ptr.assigned_force) == worn) {
+        e.value_ptr.fatigue = 80;
+        e.value_ptr.morale = 20;
+    };
+    // Busy: under contract.
+    const cid: types.ContractId = @enumFromInt(902);
+    try gs.contracts.put(gs.allocator(), cid, .{ .id = cid, .kind = .garrison_duty, .employer_key = "LC", .enemy_key = "PER", .planet_key = gs.hqs.values()[0].planet_key, .status = .active, .assigned_company = busy, .terms = .{ .length_months = 12, .base_pay_month = 100_000 } });
+    // An offer on the home world.
+    gs.contract_offers.clearRetainingCapacity();
+    try gs.contract_offers.append(gs.allocator(), .{ .id = .none, .kind = .recon_raid, .employer_key = "LC", .enemy_key = "DC", .planet_key = gs.hqs.values()[0].planet_key, .dist_ly = 0, .beachhead = false, .terms = .{ .length_months = 3, .base_pay_month = 200_000 } });
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const cands = try offerCandidates(arena.allocator(), &gs, 0);
+    try std.testing.expectEqual(@as(usize, 3), cands.len);
+    try std.testing.expectEqual(fresh, cands[0].company);
+    try std.testing.expect(cands[0].eligible);
+    try std.testing.expectEqual(worn, cands[1].company);
+    try std.testing.expect(cands[1].eligible);
+    try std.testing.expect(cands[1].penalty > cands[0].penalty);
+    try std.testing.expectEqual(busy, cands[2].company);
+    try std.testing.expect(!cands[2].eligible);
+    try std.testing.expectEqualStrings("under contract", cands[2].why);
+    try std.testing.expectEqual(@as(u32, 3), cands[0].transit_days); // same world: three days to muster
 }

@@ -457,7 +457,7 @@ fn printOffers(gs: *game.state.GameState) void {
             offer.terms.salvage_pct,
         });
     }
-    std.debug.print("  (* = beachhead: premium pay, hardship costs, slow resupply)\n", .{});
+    std.debug.print("  (* = beachhead: premium pay, hardship costs, slow resupply · `candidates <offer#>` ranks the companies that could go)\n", .{});
 }
 
 fn printToe(gs: *game.state.GameState) void {
@@ -964,7 +964,7 @@ fn runRepl(gs: *game.state.GameState, io: std.Io, gpa: std.mem.Allocator, store_
         \\=== IRON LEDGER — command console ===
         \\          save | campaigns | load <id> | delete <id> | new (fresh campaign) | quit
         \\views:    status | toe | hqs | offers | contracts | roster [co:<id>|hq:<id>] | medbay | hall [filter]
-        \\          checklist | inbox | log [n] [filter] | pnl | ledger | treasuries | units | parts | orders | sop
+        \\          checklist | inbox | log [n] [filter] | pnl | ledger | treasuries | units | parts | orders | sop | candidates <offer#>
         \\          shop | supplies | demand | bays | projects | staff | lab <unit> | readiness | rating | summary | manning co:<id>
         \\turn:     day [n] [force]   (the checklist gates it)
         \\commands: `help` lists every verb with its usage — the same verbs the TUI's `:` line takes
@@ -1049,6 +1049,12 @@ fn runRepl(gs: *game.state.GameState, io: std.Io, gpa: std.mem.Allocator, store_
             printHqs(gs);
         } else if (std.mem.eql(u8, verb, "offers")) {
             printOffers(gs);
+        } else if (std.mem.eql(u8, verb, "candidates")) {
+            const idx = std.fmt.parseInt(usize, tokens.next() orelse "0", 10) catch 0;
+            var arena = std.heap.ArenaAllocator.init(gpa);
+            defer arena.deinit();
+            std.debug.print("{s}\n", .{game.queries.candidates_header});
+            for (try game.queries.offerCandidates(arena.allocator(), gs, idx)) |c| std.debug.print("{s}\n", .{game.queries.stripMarks(arena.allocator(), c.text) catch c.text});
         } else if (std.mem.eql(u8, verb, "readiness")) {
             printReadiness(gs);
         } else if (std.mem.eql(u8, verb, "rating")) {
