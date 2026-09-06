@@ -182,7 +182,11 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
                 try text.appendSlice(alloc, try std.fmt.allocPrint(alloc, "{d} {s}", .{ open, @tagName(m.role) }));
                 short_total += open;
             }
-            if (short_total > 0) try out.append(alloc, .{ .kind = .manning_short, .text = try std.fmt.allocPrint(alloc, "{s} manning short: {s} (Forces r → MANNING; :crew co:{d} hires from the halls)", .{ f.name, text.items, @intFromEnum(f.id) }) });
+            // A deployed company can't hire from the halls; people reach it by transfer.
+            if (short_total > 0) try out.append(alloc, .{ .kind = .manning_short, .text = if (gs.deploymentContract(f.id) != null)
+                try std.fmt.allocPrint(alloc, "{s} manning short: {s} (deployed — hire at an HQ hall, then :xfer person <id> co:{d}; they travel to the company)", .{ f.name, text.items, @intFromEnum(f.id) })
+            else
+                try std.fmt.allocPrint(alloc, "{s} manning short: {s} (Forces r → MANNING; :crew co:{d} hires from the halls)", .{ f.name, text.items, @intFromEnum(f.id) }) });
         }
         if (f.supply_shortage_days > 0) {
             try out.append(alloc, .{ .kind = .hungry, .text = try std.fmt.allocPrint(alloc, "{s} has been hungry {d} day(s) — send provisions or funds", .{ f.name, f.supply_shortage_days }) });
@@ -245,6 +249,7 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
             // Cold storage and the unassigned pool are parked on purpose:
             // their damage is the player's to schedule, not a backlog.
             if (u.status == .mothballed or u.force == .none) continue;
+            if (gs.homeHqFor(u.force) != hq.id) continue; // this HQ's bay, its hulls
             if (u.needsDepot() and u.status != .repairing and gs.isCompanyHome(gs.companyOf(u.force)) and !hq_ops.hasJobForUnit(gs, u.id)) waiting += 1;
         }
         if (waiting > 0 and idle > 0) {
