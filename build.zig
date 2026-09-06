@@ -221,6 +221,10 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_mod_tests.step);
     test_step.dependOn(&run_exe_tests.step);
+    // A green test run must also mean the client builds: the tests compile
+    // the TUI as tests, so an exe-only compile error stayed invisible while
+    // `zig-out/bin/game` went stale under a passing suite (2026-09-06).
+    test_step.dependOn(b.getInstallStep());
 
     // Just like flags, top level steps are also listed in the `--help` menu.
     //

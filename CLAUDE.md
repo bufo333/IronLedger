@@ -8,7 +8,9 @@ order — implement stages in order unless told otherwise.
 
 ## Commands
 
-- `zig build test --summary all` — run all tests (must stay green)
+- `zig build test --summary all` — run all tests (must stay green); it also
+  builds and installs `zig-out/bin/game`, so a green run means the client
+  compiles and the binary is current
 - `zig build -Ddata=<dir>` — build with a mod directory overlaying any
   `data/*.zon` / `data/tables/*.zon` file (docs/modding.md)
 - `zig build -Doptimize=ReleaseFast [-Dbundle-music] --prefix dist` — a
