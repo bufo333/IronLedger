@@ -3645,22 +3645,33 @@ fn daysBetweenCompanies(gs: *GameState, from: types.ForceId, to: types.ForceId) 
     return logistics_mod.transitDays(planet_mod.jumpsBetween(a, b));
 }
 
+fn daysFromWorld(gs: *GameState, from_key: []const u8, to: types.ForceId) u32 {
+    const a = planet_mod.find(from_key) orelse return 0;
+    const b = planet_mod.find(companyPlanetKey(gs, to) orelse "") orelse return 0;
+    if (a == b) return 0;
+    return logistics_mod.transitDays(planet_mod.jumpsBetween(a, b));
+}
+
 pub const company_pick_header = "company               stands                     days   room / need";
 
 /// Companies a hull or a person could transfer to: where each stands,
 /// how many days away, and what room or need it has for them. Ranked by
 /// days; the subject's own company is left out; a subject that cannot
 /// move at all (deployed, in transit, in the depot) dims every row.
-pub fn companyChoices(alloc: Alloc, gs: *GameState, what: enum { unit, person }, subject: u32) ![]PickRow {
+pub fn companyChoices(alloc: Alloc, gs: *GameState, what: enum { unit, person, stock }, subject: u32) ![]PickRow {
     var out: std.ArrayListUnmanaged(PickRow) = .empty;
     const personnel = @import("personnel.zig");
     const unit_dom = @import("../domain/unit.zig");
     const force_dom = @import("../domain/force.zig");
     var from: types.ForceId = .none;
+    var from_key: ?[]const u8 = null; // stock: shipped from an HQ shelf
     var blocked: []const u8 = "";
     var u: ?*unit_dom.Unit = null;
     var p: ?*@import("../domain/person.zig").Person = null;
     switch (what) {
+        .stock => if (gs.hqs.getPtr(@enumFromInt(subject))) |h| {
+            from_key = h.planet_key;
+        },
         .unit => {
             u = gs.unit(@enumFromInt(subject)) orelse return out.toOwnedSlice(alloc);
             from = gs.companyOf(u.?.force);
@@ -3677,8 +3688,9 @@ pub fn companyChoices(alloc: Alloc, gs: *GameState, what: enum { unit, person },
     var fit = gs.forces.iterator();
     while (fit.next()) |e| {
         const co = e.value_ptr;
-        if (co.echelon != .company or co.id == from) continue;
-        const days = daysBetweenCompanies(gs, from, co.id);
+        if (co.echelon != .company or (what != .stock and co.id == from)) continue;
+        const days = if (from_key) |fk| daysFromWorld(gs, fk, co.id) else daysBetweenCompanies(gs, from, co.id);
+        if (what == .stock and co.return_eta_day != null) blocked = "in transit home" else if (what == .stock) blocked = "";
         var room: []const u8 = "";
         if (u) |subject_hull| {
             if (subject_hull.kind == .mek or subject_hull.kind == .vehicle) {
@@ -3706,10 +3718,14 @@ pub fn companyChoices(alloc: Alloc, gs: *GameState, what: enum { unit, person },
         try out.append(alloc, .{ .id = @intFromEnum(co.id), .eligible = eligible, .why = blocked, .text = text });
     }
     // Nearest first.
-    const Ctx = struct { gs: *GameState, from: types.ForceId };
-    std.mem.sort(PickRow, out.items, Ctx{ .gs = gs, .from = from }, struct {
+    const Ctx = struct { gs: *GameState, from: types.ForceId, from_key: ?[]const u8 };
+    std.mem.sort(PickRow, out.items, Ctx{ .gs = gs, .from = from, .from_key = from_key }, struct {
+        fn days(c: Ctx, id: u32) u32 {
+            return if (c.from_key) |fk| daysFromWorld(c.gs, fk, @enumFromInt(id)) else daysBetweenCompanies(c.gs, c.from, @enumFromInt(id));
+        }
         fn lt(c: Ctx, a: PickRow, b: PickRow) bool {
-            return daysBetweenCompanies(c.gs, c.from, @enumFromInt(a.id)) < daysBetweenCompanies(c.gs, c.from, @enumFromInt(b.id));
+            if (a.eligible != b.eligible) return a.eligible;
+            return days(c, a.id) < days(c, b.id);
         }
     }.lt);
     return out.toOwnedSlice(alloc);

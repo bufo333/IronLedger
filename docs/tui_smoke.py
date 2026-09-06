@@ -166,9 +166,9 @@ assert "filter mechs" in plain()[-30000:], plain()[-3000:]
 send(",", 0.8)
 send("\t"); send("\r", 0.8)    # catalog → order prefill
 assert ":order " in plain()[-300:], plain()[-600:]
-send("\x1b"); send("K", 0.8)   # catalog → keep-stocked prefill
-assert ":stockpolicy hq:" in plain()[-300:], plain()[-600:]
-send("\r", 1.0)                 # set it (min 5, target 10)
+send("\x1b"); send("K", 0.8)   # catalog → keep-stocked amount form (min 5, target 10)
+assert " STOCKED" in plain()[-30000:] and "minimum" in plain()[-30000:], plain()[-3000:]
+send("\r", 1.0)                 # set it
 assert "KEEP STOCKED" in plain()[-30000:], plain()[-3000:]
 send("\t"); send("\t", 0.6)    # focus the keep-stocked pane
 send("x", 0.8)
@@ -176,21 +176,21 @@ assert "keep-stocked line for" in plain()[-600:], plain()[-800:]
 send("\t", 0.6); send("K", 0.8); send("\r", 1.0)   # back to the catalogue: set it again for the Supply check
 send("6")
 assert "keep stocked" in plain()[-30000:], plain()[-3000:]
-send("K", 0.8)                  # on the HQ row: the part picker, then the policy prefill
+send("K", 0.8)                  # on the HQ row: the part picker, then the amount form
 assert "KEEP WHICH PART STOCKED" in plain()[-30000:], plain()[-3000:]
 send("\r", 0.8)
-assert ":stockpolicy hq:" in plain()[-300:], plain()[-600:]
-send("\x1b"); send("$", 0.8)   # on the HQ row: the part picker, then the sell prefill (fullest shelf first)
+assert "minimum" in plain()[-30000:] and "target" in plain()[-30000:], plain()[-3000:]
+send("\x1b"); send("$", 0.8)   # on the HQ row: the part picker (fullest shelf first), then the amount form
 assert "SELL WHICH PART" in plain()[-30000:], plain()[-3000:]
 send("\r", 0.8)
-assert ":sellstock hq:" in plain()[-300:], plain()[-600:]
+assert "quantity" in plain()[-30000:], plain()[-3000:]
 send("\r", 1.0)
 assert "done: sellstock" in plain()[-600:] or "keep-stocked minimum" in plain()[-600:], plain()[-800:]
 send("\x1b")
 send("3"); send("j", 0.6)       # forces: cursor on the company → damage pane
 assert "DAMAGE ·" in plain()[-30000:] or "every hull is whole" in plain()[-30000:], plain()[-3000:]
 send("b", 0.8)
-assert "needs no structural components" in plain()[-400:] or ":fabricate hq:" in plain()[-400:], plain()[-800:]
+assert "needs no structural components" in plain()[-400:] or "FABRICATE" in plain()[-30000:], plain()[-800:]
 send("\x1b")
 send(":"); send("settings\r", 0.8)   # settings in-game: medbay auto-admit toggle
 assert "auto-admit the wounded" in plain()[-30000:], plain()[-2000:]
@@ -201,27 +201,27 @@ send("6")                      # supply: cash and provisions to a company
 p = plain()
 assert "STOCK ·" in p and "INBOUND" in p and "capacity" in p, p[-3000:]
 send("j"); send("j"); send("j")                     # onto the company block
-send("t", 0.8)
-assert ":transfer outfit co:" in plain()[-400:], plain()[-800:]
-send("\x1b"); send("p", 0.8)
-assert ":policy co:" in plain()[-400:], plain()[-800:]
-send("\x1b"); send("s", 0.8)                          # ship: the part picker (home shelf), then the prefill
+send("t", 0.8)                                        # cash to the company: amount form
+assert "SEND CASH TO" in plain()[-30000:], plain()[-3000:]
+send("\x1b"); send("p", 0.8)                          # cash policy: amount form (floor, cap)
+assert "CASH POLICY" in plain()[-30000:], plain()[-3000:]
+send("\x1b"); send("s", 0.8)                          # ship: the part picker (home shelf), then the amount form to this company
 assert "SHIP WHICH PART" in plain()[-30000:], plain()[-3000:]
 send("\r", 0.8)
-assert ":ship " in plain()[-400:] and " hq:" in plain()[-400:], plain()[-800:]
+assert "SHIP " in plain()[-30000:] and "quantity" in plain()[-30000:], plain()[-3000:]
 send("\x1b"); send("R", 0.8)                          # trim field stores to the plan (company at home: nothing or something, never an error)
 assert "match the field plan" in plain()[-600:] or "to the home HQ" in plain()[-600:], plain()[-800:]
-send("P", 0.8)
-assert ":supplypolicy co:" in plain()[-400:], plain()[-800:]
+send("P", 0.8)                                        # resupply policy: amount form (days, tons, battles)
+assert "RESUPPLY POLICY" in plain()[-30000:], plain()[-3000:]
 send("\r", 1.0)                                       # set it: 14 safety days
 assert "resupply plan on (14 safety days, ammo auto)" in plain()[-30000:], plain()[-2000:]
 assert "field plan" in plain()[-30000:], plain()[-2000:]
-send("5"); send("j", 0.6); send("j", 0.6); send("p", 0.8)   # ledger: policy for the selected company
-assert ":policy co:" in plain()[-400:], plain()[-800:]
+send("5"); send("j", 0.6); send("j", 0.6); send("p", 0.8)   # ledger: cash policy form for the selected company
+assert "CASH POLICY" in plain()[-30000:], plain()[-3000:]
 send("\x1b"); send("x", 0.8)                          # clears the resupply policy set above (no cash policy yet)
 assert "policy for" in plain()[-600:] and "cleared" in plain()[-600:], plain()[-800:]
-send("5"); send("L", 0.8)      # ledger → loan prefill
-assert ":loan " in plain()[-300:], plain()[-600:]
+send("5"); send("L", 0.8)      # ledger → loan form (principal, months)
+assert "TAKE A LOAN" in plain()[-30000:], plain()[-3000:]
 send("\x1b")
 send("3"); send("j"); send("j"); send("$", 0.8)   # sell hull confirm
 assert "SELL HULL?" in plain()[-30000:], plain()[-3000:]

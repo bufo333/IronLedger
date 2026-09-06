@@ -88,12 +88,15 @@ const Modal = union(enum) {
     /// Company picker for an offer (board index): readiest first.
     accept_pick: usize,
     /// Generic pickers (12.30): one look for every "choose one of these".
-    pick_company: struct { what: enum { unit, person }, id: u32 },
+    pick_company: struct { what: enum { unit, person, stock }, id: u32, key_buf: [32]u8 = undefined, key_len: u8 = 0 },
     pick_hq: types.PersonId,
     pick_crew: types.UnitId,
     pick_unassign: types.UnitId,
-    /// Part picker: lands in the prefilled command with only the quantity left to type.
+    /// Part picker: picks the part, then the amount form asks the quantity.
     pick_part: struct { purpose: q.PartPurpose, site: types.Site },
+    /// Amount form (12.30 phase 2): every number the client asks for goes
+    /// through one modal — fields with a default, a range and a step.
+    amount: AmountForm,
     /// Negotiation term picker for an offer (board index).
     negotiate: usize,
     /// Every company's readiness report (fatigue, morale, wounded, banked XP, depot).
@@ -102,6 +105,55 @@ const Modal = union(enum) {
     summary,
     /// Browse the soundtracks and tracks; pick what plays.
     music,
+};
+
+/// One number the amount form asks for.
+pub const AmountField = struct {
+    label: []const u8,
+    value: i64,
+    min: i64,
+    max: i64,
+    step: i64,
+    /// Digits typed since the field was entered replace the default.
+    typed: bool = false,
+};
+
+/// What an amount form runs when it is confirmed; every case becomes a
+/// command line for the shared parser (sim/cli.zig), like a typed one.
+pub const AmountAction = union(enum) {
+    loan,
+    repay: usize,
+    transfer_to: Treasury,
+    transfer_back: Treasury,
+    policy: Treasury,
+    supply_policy: types.ForceId,
+    leave: types.PersonId,
+    triage: types.PersonId,
+    stock_policy: struct { hq: u32, key: []const u8 },
+    fabricate: struct { hq: u32, key: []const u8 },
+    order: struct { site: types.Site, key: []const u8 },
+    ship: struct { from: u32, to: types.ForceId, key: []const u8 },
+    sell: struct { hq: u32, key: []const u8 },
+};
+
+pub const AmountForm = struct {
+    /// Owned copies: the form outlives the frame arena the strings came from.
+    title_buf: [96]u8 = undefined,
+    title_len: u8 = 0,
+    key_buf: [32]u8 = undefined,
+    key_len: u8 = 0,
+    action: AmountAction,
+    fields: [3]AmountField,
+    n: u8,
+    cur: u8 = 0,
+
+    pub fn title(self: *const AmountForm) []const u8 {
+        return self.title_buf[0..self.title_len];
+    }
+    /// The part key behind order/ship/keep/sell/fabricate, owned here.
+    pub fn key(self: *const AmountForm) []const u8 {
+        return self.key_buf[0..self.key_len];
+    }
 };
 
 /// Size tiers (docs/tui.md): the largest that fits decides how many panes
@@ -236,6 +288,8 @@ pub const App = struct {
     map_cursor: usize = 0,
     /// Forces screen view: index into queries.toeViews (all, each company, unassigned).
     forces_view: usize = 0,
+    /// Ship flow (12.30): the company a Supply row named as the destination, if any.
+    supply_ship_to: ?types.ForceId = null,
     /// Forces side pane on a company row: DAMAGE, READINESS or MANNING (r cycles).
     forces_pane: enum { damage, readiness, manning } = .damage,
     /// The raise-a-company wizard's state.
@@ -1884,6 +1938,19 @@ pub const App = struct {
                 self.screen.lines(inner, rows.items, 0, first + self.modal_cursor);
             },
             .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_part => try self.drawPick(al),
+            .amount => |form| {
+                var rows: std.ArrayListUnmanaged([]const u8) = .empty;
+                try rows.append(al, "");
+                for (form.fields[0..form.n], 0..) |f, i| {
+                    const on = i == form.cur;
+                    try rows.append(al, try std.fmt.allocPrint(al, "  {s} {s: <18} {s}{d}{s}{{/}}", .{ if (on) "{a}▶{/}" else " ", f.label, if (on) "{a}" else "", f.value, if (on) "_" else "" }));
+                }
+                try rows.append(al, "");
+                try rows.append(al, "  {d}digits type · +/- step · Tab next · Enter runs · Esc cancels{/}");
+                const r = self.modalRect(64, @intCast(@min(rows.items.len + 2, self.screen.rows)));
+                const inner = self.screen.pane(r, .{ .title = form.title(), .double = true });
+                self.screen.lines(inner, rows.items, 0, null);
+            },
             .accept_pick => |oi| {
                 const g = &self.gs.?;
                 const cands = try q.offerCandidates(al, g, oi);
@@ -2785,8 +2852,12 @@ pub const App = struct {
                         self.modal_cursor = 0;
                         self.modal = .{ .pick_company = .{ .what = .person, .id = @intFromEnum(id) } };
                     },
-                    'L' => self.openCommand(std.fmt.bufPrint(&buf, "leave {d} 7", .{@intFromEnum(id)}) catch "leave "),
-                    'T' => self.openCommand(std.fmt.bufPrint(&buf, "triage {d} 1", .{@intFromEnum(id)}) catch "triage "),
+                    'L' => self.openAmount(try std.fmt.allocPrint(al, "LEAVE · {s}", .{try q.personName(al, g, id)}), .{ .leave = id }, &.{
+                        .{ .label = "days", .value = 7, .min = 1, .max = 90, .step = 1 },
+                    }),
+                    'T' => self.openAmount(try std.fmt.allocPrint(al, "TRIAGE · {s} (higher heals first)", .{try q.personName(al, g, id)}), .{ .triage = id }, &.{
+                        .{ .label = "priority", .value = 1, .min = 0, .max = 9, .step = 1 },
+                    }),
                     'D' => self.modal = .{ .fire = id },
                     'r' => self.modal = .{ .record = id },
                     'm' => {
@@ -2815,8 +2886,9 @@ pub const App = struct {
                             self.say(.amber, "only structural components (comp_*) are fabricated; order the rest", .{});
                             return;
                         }
-                        var buf: [96]u8 = undefined;
-                        self.openCommand(std.fmt.bufPrint(&buf, "fabricate hq:{d} {s} 1", .{ self.hqSelId(g), r.key }) catch "fabricate ");
+                        self.openAmount(try std.fmt.allocPrint(al, "FABRICATE {s}", .{r.key}), .{ .fabricate = .{ .hq = self.hqSelId(g), .key = r.key } }, &.{
+                            .{ .label = "quantity", .value = 1, .min = 1, .max = 20, .step = 1 },
+                        });
                     } else self.say(.dim, "select a comp_* row in the catalog, then b", .{});
                 },
                 'x' => {
@@ -2835,8 +2907,10 @@ pub const App = struct {
                     const view = try q.market(al, g, self.market_filter, @enumFromInt(self.hqSelId(g)));
                     if (self.focus == 1 and view.catalog.len > 0) {
                         const r = view.catalog[@min(self.cur(1).*, view.catalog.len - 1)];
-                        var buf: [96]u8 = undefined;
-                        self.openCommand(std.fmt.bufPrint(&buf, "stockpolicy hq:{d} {s} 5 10", .{ self.hqSelId(g), r.key }) catch "stockpolicy ");
+                        self.openAmount(try std.fmt.allocPrint(al, "KEEP {s} STOCKED", .{r.key}), .{ .stock_policy = .{ .hq = self.hqSelId(g), .key = r.key } }, &.{
+                            .{ .label = "minimum", .value = 5, .min = 0, .max = 999, .step = 1 },
+                            .{ .label = "target", .value = 10, .min = 0, .max = 999, .step = 1 },
+                        });
                     } else self.say(.dim, "select a catalogue row (Tab), then K to keep it stocked at the HQ", .{});
                 },
                 ']', '[' => {
@@ -2891,24 +2965,25 @@ pub const App = struct {
                     const all = try q.allTreasuries(al, g);
                     const sel: Treasury = if (self.ledger_sel < all.len) all[self.ledger_sel] else .outfit;
                     const label = try q.treasuryLabel(al, g, sel);
-                    const tok = if (std.mem.indexOfScalar(u8, label, ' ')) |i| label[0..i] else label;
-                    var buf: [128]u8 = undefined;
+                    if (sel == .outfit) {
+                        self.say(.dim, "select the HQ or company row first — cash moves between it and the outfit treasury", .{});
+                        return;
+                    }
                     if (ch == 't') {
-                        self.openCommand(if (sel == .outfit) "transfer outfit " else std.fmt.bufPrint(&buf, "transfer outfit {s} 250000", .{tok}) catch "transfer outfit ");
+                        self.openAmount(try std.fmt.allocPrint(al, "SEND CASH TO {s}", .{label}), .{ .transfer_to = sel }, &.{
+                            .{ .label = "c-bills", .value = 250_000, .min = 1, .max = @max(1, g.funds), .step = 50_000 },
+                        });
                     } else if (ch == 'T') {
-                        if (sel == .outfit) {
-                            self.say(.dim, "select the HQ or company row to pull money back from", .{});
-                            return;
-                        }
                         const bal = g.treasuryBalance(sel);
-                        self.openCommand(std.fmt.bufPrint(&buf, "transfer {s} outfit {d}", .{ tok, @max(0, @divTrunc(bal, 2)) }) catch "transfer ");
+                        self.openAmount(try std.fmt.allocPrint(al, "PULL CASH BACK FROM {s}", .{label}), .{ .transfer_back = sel }, &.{
+                            .{ .label = "c-bills", .value = @max(0, @divTrunc(bal, 2)), .min = 1, .max = @max(1, bal), .step = 50_000 },
+                        });
                     } else {
-                        if (sel == .outfit) {
-                            self.say(.dim, "select an HQ or company row first — policies top up from the outfit treasury", .{});
-                            return;
-                        }
                         const existing = q.policyFor(g, sel);
-                        self.openCommand(std.fmt.bufPrint(&buf, "policy {s} {d} {d}", .{ tok, if (existing) |p| p.floor else 250_000, if (existing) |p| p.monthly_cap else 500_000 }) catch "policy ");
+                        self.openAmount(try std.fmt.allocPrint(al, "CASH POLICY · {s}", .{label}), .{ .policy = sel }, &.{
+                            .{ .label = "keep above", .value = if (existing) |p| p.floor else 250_000, .min = 0, .max = 100_000_000, .step = 50_000 },
+                            .{ .label = "cap per month", .value = if (existing) |p| p.monthly_cap else 500_000, .min = 0, .max = 100_000_000, .step = 50_000 },
+                        });
                     }
                 },
                 'x' => {
@@ -2933,17 +3008,19 @@ pub const App = struct {
                     }
                     self.say(.dim, "{s} has no standing policy", .{label});
                 },
-                'L' => {
-                    var buf: [96]u8 = undefined;
-                    self.openCommand(std.fmt.bufPrint(&buf, "loan {d} 12", .{@min(g.creditRemaining(), 1_000_000)}) catch "loan ");
-                },
+                'L' => self.openAmount("TAKE A LOAN (simple interest)", .loan, &.{
+                    .{ .label = "principal", .value = @min(g.creditRemaining(), 1_000_000), .min = 1, .max = @max(1, g.creditRemaining()), .step = 100_000 },
+                    .{ .label = "months", .value = 12, .min = 1, .max = 60, .step = 6 },
+                }),
                 'R' => {
                     if (g.loans.items.len == 0) {
                         self.say(.dim, "no loans to repay", .{});
                         return;
                     }
-                    var buf: [96]u8 = undefined;
-                    self.openCommand(std.fmt.bufPrint(&buf, "repay 0 {d}", .{@min(g.loans.items[0].balance, @max(0, g.funds))}) catch "repay ");
+                    const bal = g.loans.items[0].balance;
+                    self.openAmount("REPAY THE OLDEST LOAN", .{ .repay = 0 }, &.{
+                        .{ .label = "c-bills", .value = @min(bal, @max(0, g.funds)), .min = 1, .max = @max(1, bal), .step = 50_000 },
+                    });
                 },
                 else => {},
             },
@@ -3068,8 +3145,9 @@ pub const App = struct {
                         }
                         const dmg = try q.companyDamage(al, g, co);
                         if (dmg.short_key) |key| {
-                            var buf: [96]u8 = undefined;
-                            self.openCommand(std.fmt.bufPrint(&buf, "fabricate hq:{d} {s} 1", .{ self.homeHqOf(co), key }) catch "fabricate ");
+                            self.openAmount(try std.fmt.allocPrint(al, "FABRICATE {s} for {s}", .{ key, q.forceName(g, co) }), .{ .fabricate = .{ .hq = self.homeHqOf(co), .key = key } }, &.{
+                                .{ .label = "quantity", .value = 1, .min = 1, .max = 20, .step = 1 },
+                            });
                         } else self.say(.good, "{s} needs no structural components the home HQ lacks", .{q.forceName(g, co)});
                     },
                     'm' => if (row) |r| {
@@ -3163,23 +3241,51 @@ pub const App = struct {
                             .company => |id| .{ .hq = @enumFromInt(self.homeHqOf(id)) },
                             else => s,
                         } else g.defaultSite();
+                        self.supply_ship_to = if (site) |s2| (if (s2 == .company) s2.company else null) else null;
                         self.modal_cursor = 0;
                         self.modal = .{ .pick_part = .{ .purpose = .ship, .site = from } };
                     },
-                    't' => self.openCommand(if (site) |s| switch (s) {
-                        .company => |id| std.fmt.bufPrint(&buf, "transfer outfit co:{d} 250000", .{@intFromEnum(id)}) catch "transfer outfit ",
-                        .hq => |id| std.fmt.bufPrint(&buf, "transfer outfit hq:{d} 500000", .{@intFromEnum(id)}) catch "transfer outfit ",
-                        .outfit => "transfer outfit ",
-                    } else "transfer outfit "),
-                    'p' => self.openCommand(if (site) |s| switch (s) {
-                        .company => |id| std.fmt.bufPrint(&buf, "policy co:{d} 250000 500000", .{@intFromEnum(id)}) catch "policy ",
-                        .hq => |id| std.fmt.bufPrint(&buf, "policy hq:{d} 500000 1000000", .{@intFromEnum(id)}) catch "policy ",
-                        .outfit => "policy ",
-                    } else "policy "),
-                    'P' => self.openCommand(if (site) |s| switch (s) {
-                        .company => |id| std.fmt.bufPrint(&buf, "supplypolicy co:{d} 14 0", .{@intFromEnum(id)}) catch "supplypolicy ",
-                        else => "supplypolicy co:",
-                    } else "supplypolicy co:"),
+                    't' => {
+                        const s2 = site orelse return self.say(.dim, "put the cursor on a company or HQ row to send it cash", .{});
+                        const to: Treasury = switch (s2) {
+                            .company => |id| .{ .company = id },
+                            .hq => |id| .{ .hq = id },
+                            .outfit => return self.say(.dim, "put the cursor on a company or HQ row to send it cash", .{}),
+                        };
+                        self.openAmount(try std.fmt.allocPrint(al, "SEND CASH TO {s}", .{try q.treasuryLabel(al, g, to)}), .{ .transfer_to = to }, &.{
+                            .{ .label = "c-bills", .value = if (s2 == .company) 250_000 else 500_000, .min = 1, .max = @max(1, g.funds), .step = 50_000 },
+                        });
+                    },
+                    'p' => {
+                        const s2 = site orelse return self.say(.dim, "put the cursor on a company or HQ row to set its cash policy", .{});
+                        const t: Treasury = switch (s2) {
+                            .company => |id| .{ .company = id },
+                            .hq => |id| .{ .hq = id },
+                            .outfit => return self.say(.dim, "policies top up companies and HQs from the outfit treasury", .{}),
+                        };
+                        const existing = q.policyFor(g, t);
+                        self.openAmount(try std.fmt.allocPrint(al, "CASH POLICY · {s}", .{try q.treasuryLabel(al, g, t)}), .{ .policy = t }, &.{
+                            .{ .label = "keep above", .value = if (existing) |p| p.floor else if (s2 == .company) 250_000 else 500_000, .min = 0, .max = 100_000_000, .step = 50_000 },
+                            .{ .label = "cap per month", .value = if (existing) |p| p.monthly_cap else if (s2 == .company) 500_000 else 1_000_000, .min = 0, .max = 100_000_000, .step = 50_000 },
+                        });
+                    },
+                    'P' => {
+                        const co: types.ForceId = if (site) |s2| (if (s2 == .company) s2.company else .none) else .none;
+                        if (co == .none) return self.say(.dim, "resupply policies belong to a company — put the cursor on its field stores", .{});
+                        var days: i64 = 14;
+                        var tons: i64 = 0;
+                        var battles: i64 = 0;
+                        for (g.supply_policies.items) |sp| if (sp.company == co) {
+                            days = sp.min_days;
+                            tons = sp.tons;
+                            battles = sp.ammo_battles;
+                        };
+                        self.openAmount(try std.fmt.allocPrint(al, "RESUPPLY POLICY · {s}", .{q.forceName(g, co)}), .{ .supply_policy = co }, &.{
+                            .{ .label = "safety days (0 clears)", .value = days, .min = 0, .max = 365, .step = 7 },
+                            .{ .label = "max tons (0 = auto)", .value = tons, .min = 0, .max = 9_999, .step = 10 },
+                            .{ .label = "ammo battles", .value = battles, .min = 0, .max = 20, .step = 1 },
+                        });
+                    },
                     'K' => {
                         self.modal_cursor = 0;
                         self.modal = .{ .pick_part = .{ .purpose = .keep, .site = if (site) |s| (if (s == .hq) s else g.defaultSite()) else g.defaultSite() } };
@@ -3376,6 +3482,68 @@ pub const App = struct {
     const LanceChoice = struct { force: types.ForceId, name: []const u8, text: []const u8 };
 
     /// The lances (line and support) of the hull's company, with room noted.
+    /// Open the amount form: one to three numbers with defaults, ranges and steps.
+    fn openAmount(self: *App, title: []const u8, action: AmountAction, fields: []const AmountField) void {
+        var form: AmountForm = .{ .action = action, .fields = undefined, .n = @intCast(@min(fields.len, 3)) };
+        const tn = @min(title.len, form.title_buf.len);
+        @memcpy(form.title_buf[0..tn], title[0..tn]);
+        form.title_len = @intCast(tn);
+        const k: []const u8 = switch (action) {
+            .stock_policy => |x| x.key,
+            .fabricate => |x| x.key,
+            .order => |x| x.key,
+            .ship => |x| x.key,
+            .sell => |x| x.key,
+            else => "",
+        };
+        const kn = @min(k.len, form.key_buf.len);
+        @memcpy(form.key_buf[0..kn], k[0..kn]);
+        form.key_len = @intCast(kn);
+        for (fields[0..form.n], 0..) |f, i| {
+            form.fields[i] = f;
+            form.fields[i].value = std.math.clamp(f.value, f.min, f.max);
+        }
+        self.modal = .{ .amount = form };
+    }
+
+    fn treasuryTok(buf: []u8, t: Treasury) []const u8 {
+        return switch (t) {
+            .outfit => "outfit",
+            .hq => |id| std.fmt.bufPrint(buf, "hq:{d}", .{@intFromEnum(id)}) catch "outfit",
+            .company => |id| std.fmt.bufPrint(buf, "co:{d}", .{@intFromEnum(id)}) catch "outfit",
+        };
+    }
+
+    /// Confirm the amount form: build the verb line and run it through the
+    /// shared parser, exactly as if it had been typed.
+    fn amountRun(self: *App) !void {
+        const form = self.modal.amount;
+        self.modal = .none;
+        const v = form.fields;
+        var buf: [160]u8 = undefined;
+        var tok_buf: [24]u8 = undefined;
+        const line: []const u8 = switch (form.action) {
+            .loan => try std.fmt.bufPrint(&buf, "loan {d} {d}", .{ v[0].value, v[1].value }),
+            .repay => |idx| try std.fmt.bufPrint(&buf, "repay {d} {d}", .{ idx, v[0].value }),
+            .transfer_to => |t| try std.fmt.bufPrint(&buf, "transfer outfit {s} {d}", .{ treasuryTok(&tok_buf, t), v[0].value }),
+            .transfer_back => |t| try std.fmt.bufPrint(&buf, "transfer {s} outfit {d}", .{ treasuryTok(&tok_buf, t), v[0].value }),
+            .policy => |t| try std.fmt.bufPrint(&buf, "policy {s} {d} {d}", .{ treasuryTok(&tok_buf, t), v[0].value, v[1].value }),
+            .supply_policy => |co| try std.fmt.bufPrint(&buf, "supplypolicy co:{d} {d} {d} {d}", .{ @intFromEnum(co), v[0].value, v[1].value, v[2].value }),
+            .leave => |pid| try std.fmt.bufPrint(&buf, "leave {d} {d}", .{ @intFromEnum(pid), v[0].value }),
+            .triage => |pid| try std.fmt.bufPrint(&buf, "triage {d} {d}", .{ @intFromEnum(pid), v[0].value }),
+            .stock_policy => |sp| try std.fmt.bufPrint(&buf, "stockpolicy hq:{d} {s} {d} {d}", .{ sp.hq, form.key(), v[0].value, v[1].value }),
+            .fabricate => |fb| try std.fmt.bufPrint(&buf, "fabricate hq:{d} {s} {d}", .{ fb.hq, form.key(), v[0].value }),
+            .order => |o| switch (o.site) {
+                .company => |id| try std.fmt.bufPrint(&buf, "order {s} {d} co:{d}", .{ form.key(), v[0].value, @intFromEnum(id) }),
+                .hq => |id| try std.fmt.bufPrint(&buf, "order {s} {d} hq:{d}", .{ form.key(), v[0].value, @intFromEnum(id) }),
+                .outfit => try std.fmt.bufPrint(&buf, "order {s} {d}", .{ form.key(), v[0].value }),
+            },
+            .ship => |sh| try std.fmt.bufPrint(&buf, "ship {s} {d} hq:{d} co:{d}", .{ form.key(), v[0].value, sh.from, @intFromEnum(sh.to) }),
+            .sell => |se| try std.fmt.bufPrint(&buf, "sellstock hq:{d} {s} {d}", .{ se.hq, form.key(), v[0].value }),
+        };
+        try self.runCommandLine(line);
+    }
+
     /// The generic picker's rows, title and header for whichever pick modal is up.
     const PickView = struct { title: []const u8, header: []const u8, rows: []q.PickRow, empty: []const u8 };
 
@@ -3383,10 +3551,18 @@ pub const App = struct {
         const g = &self.gs.?;
         return switch (self.modal) {
             .pick_company => |pc| .{
-                .title = try std.fmt.allocPrint(al, "SEND {s} TO · [Enter] choose · [Esc] cancel", .{if (pc.what == .unit) try std.fmt.allocPrint(al, "#{d}", .{pc.id}) else try q.personName(al, g, @enumFromInt(pc.id))}),
+                .title = try std.fmt.allocPrint(al, "SEND {s} TO · [Enter] choose · [Esc] cancel", .{switch (pc.what) {
+                    .unit => try std.fmt.allocPrint(al, "#{d}", .{pc.id}),
+                    .person => try q.personName(al, g, @enumFromInt(pc.id)),
+                    .stock => pc.key_buf[0..pc.key_len],
+                }}),
                 .header = q.company_pick_header,
-                .rows = try q.companyChoices(al, g, if (pc.what == .unit) .unit else .person, pc.id),
-                .empty = "no other company to send to — raise one (Forces +)",
+                .rows = try q.companyChoices(al, g, switch (pc.what) {
+                    .unit => .unit,
+                    .person => .person,
+                    .stock => .stock,
+                }, pc.id),
+                .empty = "no company to send to — raise one (Forces +)",
             },
             .pick_hq => |pid| .{
                 .title = try std.fmt.allocPrint(al, "POST {s} AT · [Enter] choose · [Esc] cancel", .{try q.personName(al, g, pid)}),
@@ -3454,6 +3630,14 @@ pub const App = struct {
         switch (modal) {
             .pick_company => |pc| {
                 const co: types.ForceId = @enumFromInt(row.id);
+                if (pc.what == .stock) {
+                    const pkey = pc.key_buf[0..pc.key_len];
+                    const on_hand: i64 = g.stockCount(.{ .hq = @enumFromInt(pc.id) }, pkey);
+                    self.openAmount(try std.fmt.allocPrint(al, "SHIP {s} TO {s}", .{ pkey, q.forceName(g, co) }), .{ .ship = .{ .from = pc.id, .to = co, .key = pkey } }, &.{
+                        .{ .label = "quantity", .value = @min(on_hand, 10), .min = 1, .max = on_hand, .step = 5 },
+                    });
+                    return;
+                }
                 if (pc.what == .unit) {
                     try self.exec(.{ .transfer_unit = .{ .unit = @enumFromInt(pc.id), .to_company = co } });
                     if (self.msg_style != .crit) self.say(.good, "#{d} sent to {s}{s}", .{ pc.id, q.forceName(g, co), if (g.unit(@enumFromInt(pc.id))) |u| (if (u.status == .in_transit) " — in transit" else " — placed") else "" });
@@ -3475,34 +3659,51 @@ pub const App = struct {
                 if (self.msg_style != .crit) self.say(.good, "#{d}: {s} cleared", .{ @intFromEnum(uid), if (row.slot == .any) "pilot and tech" else @tagName(row.slot) });
             },
             .pick_part => |pp| {
-                // The quantity is the one thing left to type (an amount modal is the next step).
-                var buf: [160]u8 = undefined;
-                const on_hand = g.stockCount(pp.site, row.key);
-                const line: []const u8 = switch (pp.purpose) {
-                    .order => switch (pp.site) {
-                        .company => |id| std.fmt.bufPrint(&buf, "order {s} 10 co:{d}", .{ row.key, @intFromEnum(id) }) catch "order ",
-                        .hq => |id| std.fmt.bufPrint(&buf, "order {s} 10 hq:{d}", .{ row.key, @intFromEnum(id) }) catch "order ",
-                        .outfit => std.fmt.bufPrint(&buf, "order {s} 10", .{row.key}) catch "order ",
-                    },
+                const on_hand: i64 = g.stockCount(pp.site, row.key);
+                const key = try al.dupe(u8, row.key);
+                switch (pp.purpose) {
+                    .order => self.openAmount(try std.fmt.allocPrint(al, "ORDER {s}", .{key}), .{ .order = .{ .site = pp.site, .key = key } }, &.{
+                        .{ .label = "quantity", .value = 10, .min = 1, .max = 999, .step = 5 },
+                    }),
                     .ship => switch (pp.site) {
-                        .hq => |id| std.fmt.bufPrint(&buf, "ship {s} {d} hq:{d} co:", .{ row.key, @min(on_hand, 10), @intFromEnum(id) }) catch "ship ",
-                        else => std.fmt.bufPrint(&buf, "ship {s} 10 ", .{row.key}) catch "ship ",
+                        .hq => |hid| {
+                            // Where to: a company row already said; an HQ row asks.
+                            if (self.supply_ship_to) |co| {
+                                self.supply_ship_to = null;
+                                self.openAmount(try std.fmt.allocPrint(al, "SHIP {s} TO {s}", .{ key, q.forceName(g, co) }), .{ .ship = .{ .from = @intFromEnum(hid), .to = co, .key = key } }, &.{
+                                    .{ .label = "quantity", .value = @min(on_hand, 10), .min = 1, .max = on_hand, .step = 5 },
+                                });
+                            } else {
+                                self.modal_cursor = 0;
+                                var pc: @TypeOf(self.modal.pick_company) = .{ .what = .stock, .id = @intFromEnum(hid) };
+                                const kn = @min(key.len, pc.key_buf.len);
+                                @memcpy(pc.key_buf[0..kn], key[0..kn]);
+                                pc.key_len = @intCast(kn);
+                                self.modal = .{ .pick_company = pc };
+                            }
+                        },
+                        else => self.say(.amber, "ship from an HQ shelf: put the cursor on an HQ or a company row", .{}),
                     },
                     .keep => switch (pp.site) {
-                        .hq => |id| std.fmt.bufPrint(&buf, "stockpolicy hq:{d} {s} 5 10", .{ @intFromEnum(id), row.key }) catch "stockpolicy ",
-                        else => std.fmt.bufPrint(&buf, "stockpolicy hq: {s} 5 10", .{row.key}) catch "stockpolicy ",
+                        .hq => |hid| self.openAmount(try std.fmt.allocPrint(al, "KEEP {s} STOCKED", .{key}), .{ .stock_policy = .{ .hq = @intFromEnum(hid), .key = key } }, &.{
+                            .{ .label = "minimum", .value = 5, .min = 0, .max = 999, .step = 1 },
+                            .{ .label = "target", .value = 10, .min = 0, .max = 999, .step = 1 },
+                        }),
+                        else => self.say(.amber, "keep-stocked lines belong to an HQ shelf", .{}),
                     },
                     .sell => switch (pp.site) {
-                        .hq => |id| std.fmt.bufPrint(&buf, "sellstock hq:{d} {s} {d}", .{ @intFromEnum(id), row.key, on_hand }) catch "sellstock ",
-                        else => std.fmt.bufPrint(&buf, "sellstock hq: {s} {d}", .{ row.key, on_hand }) catch "sellstock ",
+                        .hq => |hid| self.openAmount(try std.fmt.allocPrint(al, "SELL {s}", .{key}), .{ .sell = .{ .hq = @intFromEnum(hid), .key = key } }, &.{
+                            .{ .label = "quantity", .value = on_hand, .min = 1, .max = on_hand, .step = 1 },
+                        }),
+                        else => self.say(.amber, "stock is sold from an HQ shelf", .{}),
                     },
                     .fabricate => switch (pp.site) {
-                        .hq => |id| std.fmt.bufPrint(&buf, "fabricate hq:{d} {s} 1", .{ @intFromEnum(id), row.key }) catch "fabricate ",
-                        else => std.fmt.bufPrint(&buf, "fabricate hq: {s} 1", .{row.key}) catch "fabricate ",
+                        .hq => |hid| self.openAmount(try std.fmt.allocPrint(al, "FABRICATE {s}", .{key}), .{ .fabricate = .{ .hq = @intFromEnum(hid), .key = key } }, &.{
+                            .{ .label = "quantity", .value = 1, .min = 1, .max = 20, .step = 1 },
+                        }),
+                        else => self.say(.amber, "components are fabricated in an HQ bay", .{}),
                     },
-                };
-                self.openCommand(line);
-                self.say(.dim, "edit the quantity, Enter runs it", .{});
+                }
             },
             else => unreachable,
         }
@@ -3771,6 +3972,33 @@ pub const App = struct {
                     'j' => self.modal_cursor = @min(self.modal_cursor + 1, 5),
                     'k' => self.modal_cursor -|= 1,
                     else => {},
+                },
+                else => {},
+            },
+            .amount => |*form| switch (key) {
+                .escape => self.modal = .none,
+                .tab, .down => form.cur = @intCast((form.cur + 1) % form.n),
+                .backtab, .up => form.cur = @intCast((form.cur + form.n - 1) % form.n),
+                .backspace => {
+                    const f = &form.fields[form.cur];
+                    f.value = @max(f.min, @divTrunc(f.value, 10));
+                    f.typed = true;
+                },
+                .enter => try self.amountRun(),
+                .char => |ch| {
+                    const f = &form.fields[form.cur];
+                    switch (ch) {
+                        '+', '=' => f.value = @min(f.max, f.value + f.step),
+                        '-' => f.value = @max(f.min, f.value - f.step),
+                        'j' => form.cur = @intCast((form.cur + 1) % form.n),
+                        'k' => form.cur = @intCast((form.cur + form.n - 1) % form.n),
+                        '0'...'9' => {
+                            const d: i64 = ch - '0';
+                            f.value = if (f.typed) @min(f.max, f.value *| 10 +| d) else d;
+                            f.typed = true;
+                        },
+                        else => {},
+                    }
                 },
                 else => {},
             },
