@@ -785,7 +785,9 @@ pub fn hangar(alloc: Alloc, gs: *GameState) ![]HangarRow {
             why = "{a}no fit pilot — hire or assign{/}";
         } else {
             contribution = bv * @as(u32, u.conditionPct()) / 100;
-            if (u.needsDepot()) why = "{a}structural damage — depot{/}" else if (u.conditionPct() < 70) why = "{a}shot up — repairs{/}";
+            if (u.needsDepot()) {
+                why = if (@import("hq_ops.zig").hasJobForUnit(gs, u.id)) "{d}in the depot — HQ screen bays{/}" else "{a}structural damage — d sends it to the depot{/}";
+            } else if (u.conditionPct() < 70) why = "{a}shot up — repairs{/}";
         }
         const bill = u.monthlyBill();
         // Support and transport hulls are judged by what they enable, not
@@ -956,12 +958,19 @@ pub fn companyDamage(alloc: Alloc, gs: *GameState, company: types.ForceId) !Comp
         for (u.slots.items) |s| {
             if (s.condition == .ok) continue;
             if (s.class == .structure) {
-                const comp = part_mod.componentForSlot(s.slot_key);
-                const g = try need.getOrPut(alloc, comp);
-                if (!g.found_existing) g.value_ptr.* = 0;
-                g.value_ptr.* += 1;
+                // Damaged structure is bay time alone; only destroyed or
+                // missing structure consumes a component (hq_ops.queueDepotRepair).
+                // Play feedback: the list went red for parts the depot never used.
                 if (structure.items.len > 0) try structure.appendSlice(alloc, ", ");
-                try structure.appendSlice(alloc, try std.fmt.allocPrint(alloc, "{s}→{s}", .{ slotLocation(s.slot_key), comp }));
+                if (s.condition == .damaged) {
+                    try structure.appendSlice(alloc, try std.fmt.allocPrint(alloc, "{s} (bay time only)", .{slotLocation(s.slot_key)}));
+                } else {
+                    const comp = part_mod.componentForSlot(s.slot_key);
+                    const g = try need.getOrPut(alloc, comp);
+                    if (!g.found_existing) g.value_ptr.* = 0;
+                    g.value_ptr.* += 1;
+                    try structure.appendSlice(alloc, try std.fmt.allocPrint(alloc, "{s}→{s}", .{ slotLocation(s.slot_key), comp }));
+                }
             } else if (s.condition == .damaged) gear_damaged += 1 else gear_destroyed += 1;
         }
         if (structure.items.len == 0 and gear_damaged + gear_destroyed == 0) continue;
@@ -3973,4 +3982,33 @@ test "play feedback: the board's transit column is real — from the nearest com
         // Same world as the seat: three days to muster; further: at least one jump's transit.
         if (std.mem.eql(u8, o.planet_key, gs.hqs.values()[0].planet_key)) try std.testing.expectEqual(@as(u32, 3), d);
     }
+}
+
+test "play feedback: the DAMAGE pane asks for components only where structure is destroyed or missing" {
+    const commands = @import("commands.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 94 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    const co = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const al = arena.allocator();
+    // One mek: left torso merely damaged, right leg destroyed.
+    var uit = gs.units.iterator();
+    while (uit.next()) |e| if (e.value_ptr.kind == .mek and gs.companyOf(e.value_ptr.force) == co) {
+        for (e.value_ptr.slots.items) |*sl| if (sl.class == .structure) {
+            if (std.mem.startsWith(u8, sl.slot_key, "lt.")) sl.condition = .damaged;
+            if (std.mem.startsWith(u8, sl.slot_key, "rl.")) sl.condition = .destroyed;
+        };
+        break;
+    };
+    const dmg = try companyDamage(al, &gs, co);
+    var text: std.ArrayListUnmanaged(u8) = .empty;
+    for (dmg.lines) |l| {
+        try text.appendSlice(al, l);
+        try text.append(al, '\n');
+    }
+    try std.testing.expect(std.mem.indexOf(u8, text.items, "bay time only") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text.items, "comp_leg") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text.items, "comp_torso") == null); // damaged: no part asked for
 }

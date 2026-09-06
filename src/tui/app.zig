@@ -3171,7 +3171,8 @@ pub const App = struct {
                     'd' => if (row) |r| {
                         if (r.unit != .none) {
                             try self.exec(.{ .depot = r.unit });
-                            if (self.msg_style != .crit) self.say(.good, "#{d} queued for depot repair", .{@intFromEnum(r.unit)});
+                            const home = g.homeHqFor(if (g.unit(r.unit)) |u| u.force else .none);
+                            if (self.msg_style != .crit) self.say(.good, "#{d} queued for depot repair at {s} — HQ screen, [ ] to that HQ, its bays list the job", .{ @intFromEnum(r.unit), q.hqName(g, home) });
                         }
                     },
                     'o' => if (row) |r| {
