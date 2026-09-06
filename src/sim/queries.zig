@@ -737,7 +737,7 @@ pub fn toeViews(alloc: Alloc, gs: *GameState) ![]ToeView {
         if (f.parent != .none) continue;
         try out.append(alloc, .{ .filter = .{ .company = f.id }, .label = f.name });
     }
-    try out.append(alloc, .{ .filter = .unassigned, .label = "unassigned hulls" });
+    try out.append(alloc, .{ .filter = .unassigned, .label = try std.fmt.allocPrint(alloc, "unassigned hulls — at {s}", .{if (gs.hqs.getPtr(gs.homeHqFor(.none))) |h| h.name else "the seat"}) });
     try out.append(alloc, .{ .filter = .hangar, .label = "hangar: cost vs contribution" });
     return out.toOwnedSlice(alloc);
 }
@@ -850,7 +850,7 @@ pub fn toeFiltered(alloc: Alloc, gs: *GameState, filter: ToeFilter) ![]ToeRow {
     };
     if (loose == 0 and filter == .unassigned) try out.append(alloc, .{ .force = .none, .unit = .none, .text = "{d}no unassigned hulls — everything bought or salvaged is in a company{/}" });
     if (loose > 0) {
-        try out.append(alloc, .{ .force = .none, .unit = .none, .text = try std.fmt.allocPrint(alloc, "{{a}}[—] Unassigned hulls{{/}}  {d} · {s}/mo upkeep · {{d}}no tech: they degrade; [x] place in a company, [m] mothball{{/}}", .{ loose, try money(alloc, upkeep) }) });
+        try out.append(alloc, .{ .force = .none, .unit = .none, .text = try std.fmt.allocPrint(alloc, "{{a}}[—] Unassigned hulls{{/}}  at {s} (their depot and shelf)  {d} · {s}/mo upkeep · {{d}}no tech: they degrade; [x] place in a company, [m] mothball{{/}}", .{ if (gs.hqs.getPtr(gs.homeHqFor(.none))) |h| h.name else "the seat", loose, try money(alloc, upkeep) }) });
         var it2 = gs.units.iterator();
         while (it2.next()) |e| {
             const u = e.value_ptr;
@@ -862,13 +862,30 @@ pub fn toeFiltered(alloc: Alloc, gs: *GameState, filter: ToeFilter) ![]ToeRow {
                 .damaged, .repairing, .refitting => "{a}",
                 else => "{c}",
             };
-            try out.append(alloc, .{ .force = .none, .unit = u.id, .text = try std.fmt.allocPrint(alloc, "    #{d: <3} {s: <8} {s} {d: >3}t  {s} {s} {s} armor {d}%{s} · {s}/mo", .{
+            // What the depot at the seat will want for it (play feedback: the
+            // pool never said where the hulls were or which base to stock).
+            const seat = gs.homeHqFor(.none);
+            var needs: std.ArrayListUnmanaged(u8) = .empty;
+            for (u.slots.items) |sl| {
+                if (sl.class != .structure or (sl.condition != .destroyed and sl.condition != .missing)) continue;
+                const comp = @import("../domain/part.zig").componentForSlot(sl.slot_key);
+                if (std.mem.indexOf(u8, needs.items, comp) != null) continue;
+                var n: u32 = 0;
+                for (u.slots.items) |o| if (o.class == .structure and (o.condition == .destroyed or o.condition == .missing) and std.mem.eql(u8, @import("../domain/part.zig").componentForSlot(o.slot_key), comp)) {
+                    n += 1;
+                };
+                const have = gs.stockCount(.{ .hq = seat }, comp);
+                // "comp_ct×2 (2)": the count wanted, and what the shelf holds.
+                try needs.appendSlice(alloc, try std.fmt.allocPrint(alloc, "{s}{s}{s}×{d}({d}){{/}}", .{ if (needs.items.len == 0) "" else " ", if (have >= n) "{g}" else "{c}", comp, n, have }));
+            }
+            // The pilot/tech columns are always empty in the pool: they carry
+            // the depot's shopping list instead.
+            try out.append(alloc, .{ .force = .none, .unit = u.id, .text = try std.fmt.allocPrint(alloc, "    #{d: <3} {s: <8} {s} {d: >3}t  {s} {s} armor {d}%{s} · {s}/mo", .{
                 @intFromEnum(u.id),
                 u.chassis_key,
                 try padCells(alloc, "", if (ch) |c| c.name else "?", 14),
                 if (ch) |c| c.tonnage else 0,
-                try padCells(alloc, "", "—", 16),
-                try padCells(alloc, "", "—", 16),
+                try padCells(alloc, "", if (needs.items.len > 0) needs.items else "—", 36),
                 try padCells(alloc, st_mk, @tagName(u.status), 9),
                 u.armor_pct,
                 try damageMarks(alloc, u),
@@ -4018,4 +4035,32 @@ test "play feedback: the DAMAGE pane asks for components only where structure is
     try std.testing.expect(std.mem.indexOf(u8, text.items, "bay time only") != null);
     try std.testing.expect(std.mem.indexOf(u8, text.items, "comp_leg") != null);
     try std.testing.expect(std.mem.indexOf(u8, text.items, "comp_torso") == null); // damaged: no part asked for
+}
+
+test "play feedback: the unassigned pool says where it sits and what each wreck's rebuild needs from that shelf" {
+    const commands = @import("commands.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 97 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const al = arena.allocator();
+    const wreck = try gs.addUnit("LCT-1V");
+    for (gs.unit(wreck).?.slots.items) |*s| if (std.mem.startsWith(u8, s.slot_key, "ct.") and s.class == .structure) {
+        s.condition = .missing;
+    };
+    const hq_name = gs.hqs.values()[0].name;
+    var header_ok = false;
+    var row_ok = false;
+    for (try toeFiltered(al, &gs, .unassigned)) |r| {
+        if (std.mem.indexOf(u8, r.text, "Unassigned hulls") != null and std.mem.indexOf(u8, r.text, hq_name) != null) header_ok = true;
+        if (r.unit == wreck and std.mem.indexOf(u8, r.text, "comp_ct×1") != null) row_ok = true;
+    }
+    try std.testing.expect(header_ok);
+    try std.testing.expect(row_ok);
+    var label_ok = false;
+    for (try toeViews(al, &gs)) |v| if (v.filter == .unassigned and std.mem.indexOf(u8, v.label, hq_name) != null) {
+        label_ok = true;
+    };
+    try std.testing.expect(label_ok);
 }
