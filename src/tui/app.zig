@@ -3526,8 +3526,10 @@ pub const App = struct {
     /// Confirm the amount form: build the verb line and run it through the
     /// shared parser, exactly as if it had been typed.
     fn amountRun(self: *App) !void {
-        const form = self.modal.amount;
+        var form = self.modal.amount;
         self.modal = .none;
+        // The range applies now, not while editing.
+        for (form.fields[0..form.n]) |*f| f.value = std.math.clamp(f.value, f.min, f.max);
         const v = form.fields;
         var buf: [160]u8 = undefined;
         var tok_buf: [24]u8 = undefined;
@@ -3989,8 +3991,10 @@ pub const App = struct {
                 .tab, .down => form.cur = @intCast((form.cur + 1) % form.n),
                 .backtab, .up => form.cur = @intCast((form.cur + form.n - 1) % form.n),
                 .backspace => {
+                    // Editing may pass through 0 (play feedback: the floor left a
+                    // "1" nobody could delete); the range applies when it runs.
                     const f = &form.fields[form.cur];
-                    f.value = @max(f.min, @divTrunc(f.value, 10));
+                    f.value = @divTrunc(f.value, 10);
                     f.typed = true;
                 },
                 .enter => try self.amountRun(),
@@ -4003,7 +4007,7 @@ pub const App = struct {
                         'k' => form.cur = @intCast((form.cur + form.n - 1) % form.n),
                         '0'...'9' => {
                             const d: i64 = ch - '0';
-                            f.value = if (f.typed) @min(f.max, f.value *| 10 +| d) else d;
+                            f.value = if (f.typed and f.value != 0) @min(f.max, f.value *| 10 +| d) else d;
                             f.typed = true;
                         },
                         else => {},
