@@ -87,6 +87,9 @@ const Modal = union(enum) {
     lance_pick: types.UnitId,
     /// Company picker for an offer (board index): readiest first.
     accept_pick: usize,
+    /// A contract's whole log, full screen and scrollable (play feedback:
+    /// the side pane showed 40 clipped lines).
+    contract_log: types.ContractId,
     /// Generic pickers (12.30): one look for every "choose one of these".
     pick_company: struct { what: enum { unit, person, stock }, id: u32, key_buf: [32]u8 = undefined, key_len: u8 = 0 },
     pick_hq: types.PersonId,
@@ -902,7 +905,7 @@ pub const App = struct {
         // One order everywhere (12.30): navigate | act | money · misc.
         self.footer(switch (self.tab) {
             .desk => "F1-F10 / 1-0 screens · Tab pane · j/k cursor | Enter act · e emblem · n end turn | : command · F12 settings · ? help · q welcome",
-            .contracts => "Tab pane · j/k offer | Enter accept (you pick the company) · b bargain · c complete · R recall",
+            .contracts => "Tab pane · j/k row | board: Enter accept (you pick the company) · b bargain · active/history: Enter full log · c complete · R recall",
             .ledger => "j/k treasury | L loan · R repay · t send cash · T pull cash back · p top-up policy · x clear policy",
             .forces => "[ ] company / pool · j/k row · r cycle pane · M manning | a seat · u unassign · l lance · x transfer · c crew · A auto · t / T train one / all · o role · d depot · R spares (hull) / recall (company) · m mothball · w air wing · + raise | $ sell · X disband · b fabricate",
             .supply => "j/k site | o order · s ship · R trim to plan · H parts home · K keep stocked | t / T cash out / back · p / P cash / resupply policy · $ sell stock",
@@ -1441,7 +1444,7 @@ pub const App = struct {
         const act_h: u16 = if (wide) b.h - board_h else (b.h - board_h) * 3 / 5;
         const c1 = self.cur(1);
         if (view.active.len > 0 and c1.* >= view.active.len) c1.* = view.active.len - 1;
-        const inner2 = self.screen.pane(.{ .x = b.x, .y = b.y + board_h, .w = act_w, .h = act_h }, .{ .title = "ACTIVE", .focused = self.focus == 1, .right_title = "[c] complete  [R] recall" });
+        const inner2 = self.screen.pane(.{ .x = b.x, .y = b.y + board_h, .w = act_w, .h = act_h }, .{ .title = "ACTIVE", .focused = self.focus == 1, .right_title = "[Enter] full log  [c] complete  [R] recall" });
         var first: usize = 0;
         for (act_index.items, 0..) |ai, li| if (ai == c1.* and first == 0 and li > 0) {
             first = li;
@@ -1459,7 +1462,7 @@ pub const App = struct {
             .{ .x = b.x + act_w, .y = b.y + board_h, .w = b.w - act_w, .h = (b.h - board_h) / 2 }
         else
             .{ .x = b.x, .y = b.y + board_h + act_h, .w = b.w, .h = b.h - board_h - act_h };
-        const hist_inner = self.screen.pane(hist_rect, .{ .title = "HISTORY", .focused = self.focus == 2, .right_title = "Tab here · log follows the cursor" });
+        const hist_inner = self.screen.pane(hist_rect, .{ .title = "HISTORY", .focused = self.focus == 2, .right_title = "Tab here · log follows the cursor · [Enter] full log" });
         self.screen.lines(hist_inner, hist.items, if (c2.* + 2 > hist_inner.h and hist_inner.h > 1) c2.* + 2 - hist_inner.h else 0, if (self.focus == 2 and history.len > 0) c2.* + 1 else null);
 
         if (wide) {
@@ -2171,6 +2174,20 @@ pub const App = struct {
                 const inner = self.screen.pane(r, .{ .title = "HULL · [Esc] close", .double = true });
                 self.screen.lines(inner, detail, 0, null);
             },
+            .contract_log => |cid| {
+                const g = &self.gs.?;
+                const all = try q.battleLog(al, g, cid, std.math.maxInt(usize));
+                // battleLog is newest first; read it top-down like a diary.
+                var rows: std.ArrayListUnmanaged([]const u8) = .empty;
+                var i: usize = all.len;
+                while (i > 0) : (i -= 1) try rows.append(al, all[i - 1]);
+                if (rows.items.len == 0) try rows.append(al, "{d}nothing logged for this contract yet{/}");
+                const r = self.modalRect(self.screen.cols -| 4, self.screen.rows -| 2);
+                const inner = self.screen.pane(r, .{ .title = try std.fmt.allocPrint(al, "CONTRACT [{d}] LOG · j/k PgUp/PgDn scroll · G end · [Esc] close", .{@intFromEnum(cid)}), .double = true, .right_title = try std.fmt.allocPrint(al, "{d} lines · oldest first", .{rows.items.len}) });
+                const max_first = rows.items.len -| inner.h;
+                if (self.modal_cursor > max_first) self.modal_cursor = max_first;
+                self.screen.lines(inner, rows.items, self.modal_cursor, null);
+            },
             .record => |pid| {
                 const rec = try q.personRecord(al, &self.gs.?, pid);
                 const r = self.modalRect(@min(self.screen.cols, 100), @intCast(@min(rec.len + 3, self.screen.rows)));
@@ -2724,6 +2741,16 @@ pub const App = struct {
                     // the companies readiest first and says who cannot go.
                     self.modal_cursor = 0;
                     self.modal = .{ .accept_pick = view.board[@min(self.cur(0).*, view.board.len - 1)].index };
+                } else if (self.focus == 1 and view.active.len > 0) {
+                    // The whole log, full screen (play feedback: the side pane clipped it).
+                    self.modal_cursor = std.math.maxInt(usize) / 2; // open at the latest entry
+                    self.modal = .{ .contract_log = view.active[@min(self.cur(1).*, view.active.len - 1)].id };
+                } else if (self.focus == 2) {
+                    const history = try q.contractHistory(al, g);
+                    if (history.len > 0) {
+                        self.modal_cursor = std.math.maxInt(usize) / 2;
+                        self.modal = .{ .contract_log = history[@min(self.cur(2).*, history.len - 1)].id };
+                    }
                 }
             },
             .ledger => {
@@ -3885,6 +3912,24 @@ pub const App = struct {
                         self.ed_art[self.ed_y][self.ed_x] = @intCast(ch);
                         self.ed_x = @min(7, self.ed_x + 1);
                     }
+                },
+                else => {},
+            },
+            .contract_log => switch (key) {
+                .escape, .enter => self.modal = .none,
+                .down => self.modal_cursor +|= 1,
+                .up => self.modal_cursor -|= 1,
+                .pgdn => self.modal_cursor +|= 10,
+                .pgup => self.modal_cursor -|= 10,
+                .home => self.modal_cursor = 0,
+                .end => self.modal_cursor = std.math.maxInt(usize) / 2,
+                .char => |ch| switch (ch) {
+                    'j' => self.modal_cursor +|= 1,
+                    'k' => self.modal_cursor -|= 1,
+                    'g' => self.modal_cursor = 0,
+                    'G' => self.modal_cursor = std.math.maxInt(usize) / 2,
+                    'q' => self.modal = .none,
+                    else => {},
                 },
                 else => {},
             },

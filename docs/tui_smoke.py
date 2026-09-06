@@ -185,7 +185,7 @@ assert "SELL WHICH PART" in plain()[-30000:], plain()[-3000:]
 send("\r", 0.8)
 assert "quantity" in plain()[-30000:], plain()[-3000:]
 send("\r", 1.0)
-assert "done: sellstock" in plain()[-600:] or "keep-stocked minimum" in plain()[-600:], plain()[-800:]
+assert "done: sellstock" in plain()[-2500:] or "keep-stocked minimum" in plain()[-2500:], plain()[-800:]  # the footer redraw can push the message past a short window
 send("\x1b")
 send("3"); send("j", 0.6)       # forces: cursor on the company → damage pane
 assert "DAMAGE ·" in plain()[-30000:] or "every hull is whole" in plain()[-30000:], plain()[-3000:]
