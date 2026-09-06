@@ -412,6 +412,11 @@ location the rules allow; `R` orders a replacement for damaged gear;
 `D` sends the hull to the depot for structural work; `Enter` commits the
 refit and shows its odds.
 
+The Lab is for BattleMechs only, but destroyed gear is field work on
+every hull kind: on the Forces screen, `R` on a truck, tank, fighter or
+MASH (or `:replace <unit>`) orders spares to the hull's site, and its
+own tech fits them on the weekly repair pass.
+
 ![Lab](docs/screenshots/lab.svg)
 
 ### F9 People

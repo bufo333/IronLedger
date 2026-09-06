@@ -946,7 +946,7 @@ pub fn companyDamage(alloc: Alloc, gs: *GameState, company: types.ForceId) !Comp
         const ch = chassis_mod.find(u.chassis_key);
         try lines.append(alloc, try std.fmt.allocPrint(alloc, "{{a}}#{d} {s} {s}{{/}}  armor {d}% · {s}", .{ @intFromEnum(u.id), u.chassis_key, if (ch) |c| clip(c.name, 14) else "?", u.armor_pct, @tagName(u.status) }));
         if (structure.items.len > 0) try lines.append(alloc, try std.fmt.allocPrint(alloc, "    {{c}}structure{{/}}  {s}  {{d}}depot work at home{{/}}", .{structure.items}));
-        if (gear_damaged + gear_destroyed > 0) try lines.append(alloc, try std.fmt.allocPrint(alloc, "    {{a}}gear{{/}}       {d} damaged, {d} destroyed  {{d}}field work: techs + spares (Lab R orders replacements){{/}}", .{ gear_damaged, gear_destroyed }));
+        if (gear_damaged + gear_destroyed > 0) try lines.append(alloc, try std.fmt.allocPrint(alloc, "    {{a}}gear{{/}}       {d} damaged, {d} destroyed  {{d}}field work: techs + spares (Forces R / :replace orders what's destroyed){{/}}", .{ gear_damaged, gear_destroyed }));
     }
     if (hulls == 0) try lines.append(alloc, "{g}every hull is whole{/}");
     var short_key: ?[]const u8 = null;
@@ -2940,7 +2940,7 @@ pub fn lab(alloc: Alloc, gs: *GameState, uid: types.UnitId) !Lab {
     const design = chassis_mod.find(u.chassis_key) orelse return .{ .title = "unknown chassis", .budget = &.{}, .mounts = &.{}, .plan = &.{}, .legal = true, .meks = meks };
     const title = try std.fmt.allocPrint(alloc, "#{d} {s} {s} · {d}t", .{ @intFromEnum(uid), design.key, design.name, design.tonnage });
     if (u.kind != .mek) {
-        try budget.append(alloc, "{a}not a mek — the lab works on BattleMechs{/}");
+        try budget.append(alloc, "{a}not a mek — the lab works on BattleMechs; this hull's gear is field work: Forces R (or :replace <unit>) orders spares to its site and its tech fits them{/}");
         return .{ .title = title, .budget = try budget.toOwnedSlice(alloc), .mounts = &.{}, .plan = &.{}, .legal = true, .meks = meks };
     }
     const items = try gs.labItems(uid, alloc);

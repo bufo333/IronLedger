@@ -43,6 +43,7 @@ pub fn parseCommand(verb: []const u8, tokens: *std.mem.TokenIterator(u8, .scalar
     }
     if (eq(u8, verb, "admit")) return .{ .admit = @enumFromInt(try num(u32, tokens.next())) };
     if (eq(u8, verb, "depot")) return .{ .depot = @enumFromInt(try num(u32, tokens.next())) };
+    if (eq(u8, verb, "replace")) return .{ .replace_gear = @enumFromInt(try num(u32, tokens.next())) };
     if (eq(u8, verb, "move")) return .{ .move_unit = .{ .unit = @enumFromInt(try num(u32, tokens.next())), .force = @enumFromInt(try num(u32, tokens.next())) } };
     if (eq(u8, verb, "newlance")) {
         // newlance co:N [line|air|mash|mess|salvage|security|transport] <name>
@@ -375,7 +376,8 @@ pub fn errorText(err: anyerror) []const u8 {
         error.NoSuchListing => "that listing is gone",
         error.TooManyLances => "that lance is full (4 hulls), or the HQ allows no more lances — :newlance co:N <name> raises one",
         error.SameForce => "that hull belongs to another company — x moves it between companies",
-        error.NothingToRepair => "that hull has no structural damage — the Lab handles gear, the depot handles structure",
+        error.NothingToRepair => "that hull has no structural damage — gear is field work on any hull: its tech fits spares from the hull's site on the weekly pass; `replace <unit>` (Forces R) orders what's destroyed",
+        error.NothingToReplace => "no destroyed or missing gear on that hull — damaged gear is fixed by its tech's hours alone, and structure goes to the depot (`depot <unit>`)",
         error.MissingComponents => "structural components missing at the home HQ — order or fabricate them on the Market screen first",
         error.NoBay => "no mek bay that can do structural work — a regional HQ with a mek_bay is needed",
         error.UnitAway => "that hull is away from home — depot work happens at the home HQ",
@@ -402,6 +404,7 @@ pub const verbs = [_][]const u8{
     "sellhq",
     "disband",
     "depot",
+    "replace",
     "role",
     "supplypolicy",
     "move",
@@ -462,6 +465,7 @@ pub fn usage(verb: []const u8) ?[]const u8 {
         .{ "sellhq", "sellhq hq:N" },
         .{ "disband", "disband co:N" },
         .{ "depot", "depot <unit>" },
+        .{ "replace", "replace <unit>" },
         .{ "role", "role <lance id> fighting|defense|scouting|training|unassigned" },
         .{ "supplypolicy", "supplypolicy co:N <days> <max tons> [battles]  (0 days removes)" },
         .{ "move", "move <unit> <lance id>" },

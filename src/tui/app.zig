@@ -842,7 +842,7 @@ pub const App = struct {
             .market => "Tab pane · Enter buy / order / order shortfall · b fabricate component · K keep stocked (pane: Enter edit, x remove) · [ ] HQ board · q welcome",
             .ledger => "j/k treasury · t send cash to it · T pull cash back to the outfit · p top-up policy · x clear its policy · L loan · R repay",
             .supply => "company: t/T cash · p/P cash/resupply policy · s ship · o order · R trim to plan · H parts home · HQ: K keep stocked · $ sell stock",
-            .forces => "[ ] company / pool · + raise a company · w air wing · r damage/readiness/manning · Enter assign · a/u seat · A auto · c crew from halls · l lance · o role · d depot · m mothball · x company · b fabricate · R recall · $ sell · X disband",
+            .forces => "[ ] company / pool · + raise a company · w air wing · r damage/readiness/manning · Enter assign · a/u seat · A auto · c crew from halls · l lance · o role · d depot · R spares for a hull's gear / recall a company · m mothball · x company · b fabricate · $ sell · X disband",
             .map => "h j k l move between worlds (the view follows) · + / - zoom · f found HQ here · o offers here · q welcome",
             .lab => "[ ] hull · j/k mount · - remove · + install · R order replacement · D send to depot (structure) · c clear · Enter commit",
             .hq => "[ ] switch HQ · u upgrade the highlighted facility (picker elsewhere) · T tier · S autostaff · Tab hall · f/F filter · Enter hire",
@@ -1660,6 +1660,7 @@ pub const App = struct {
                     "  {a}market{/}      F10/0: / , filter (mechs, vehicles, aero, dropships, jumpships, weapons, ammo, equipment, components, supplies)",
                     "               boards (Enter buys) · catalog (Enter orders, b fabricates comp_*) · demand (Enter orders shortfall)",
                     "  {a}lab{/}         + picks a part then a location (green = rules allow) · R orders a replacement for damaged gear · dim rows = full",
+                    "  {a}gear{/}        destroyed weapons and equipment are field work on every hull kind (trucks, MASH, tanks, fighters too): Forces R on the hull (or `:replace <unit>`) orders spares to its site; its tech fits them on the weekly pass — no Lab needed",
                     "  {a}structure{/}   not fitted in the Lab: D (Lab) or d (Forces) sends the hull to the depot; the bay consumes comp_* parts from the home HQ",
                     "  {a}companies{/}   Forces + (or :raise hq:N <name>) raises an empty company and walks a wizard: pick meks per lance from the pool, mothballs and every board (buy or pass; damaged listings show the repair bill and delivery days), buy the support train, then crews",
                     "               :crew co:N fills open seats from the halls · :manning co:N shows how many of each role a company of that shape needs · :assignco co:N hq:M — each regional HQ hosts one combat company",
@@ -3076,6 +3077,22 @@ pub const App = struct {
                         if (co != .none) self.modal = .{ .disband = co };
                     },
                     'R' => if (row) |r| {
+                        if (r.unit != .none) {
+                            // Gear is field work on every hull kind: order spares for what's destroyed to the hull's site.
+                            const res = game.commands.execute(g, .{ .replace_gear = r.unit }) catch |err| {
+                                self.say(.crit, "{s}", .{game.cli.errorText(err)});
+                                return;
+                            };
+                            if (res.ordered + res.unsourced == 0) {
+                                self.say(.good, "#{d}: spares for its broken gear are already on hand or on order — its tech fits them on the weekly repair pass", .{@intFromEnum(r.unit)});
+                            } else {
+                                self.say(if (res.unsourced == 0) .good else .amber, "#{d}: {d} spare{s} ordered to its site{s} — its tech fits them on the weekly repair pass", .{
+                                    @intFromEnum(r.unit), res.ordered, if (res.ordered == 1) "" else "s",
+                                    if (res.unsourced > 0) " (some could not be sourced this month — retry after the refresh)" else "",
+                                });
+                            }
+                            return;
+                        }
                         const co = g.companyOf(r.force);
                         if (co == .none) return;
                         if (g.isCompanyHome(co)) {

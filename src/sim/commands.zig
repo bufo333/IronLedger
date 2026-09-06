@@ -162,6 +162,11 @@ pub const Command = union(enum) {
     /// Send a hull to the depot now for structural repair (otherwise the
     /// weekly maintenance pass queues it when the components are in stock).
     depot: types.UnitId,
+    /// Order a spare for every destroyed or missing piece of gear on a
+    /// hull, whatever its kind (ARCH §9.7: weapons and equipment are field
+    /// work on any hull; the Lab is only the mek way in). The spare lands
+    /// at the hull's site and its own tech fits it on the weekly pass.
+    replace_gear: types.UnitId,
     /// Lance role, MekHQ-style: fighting (default), defense (+power on
     /// garrison contracts), scouting (recon), training (held out of
     /// battles, gains XP at home).
@@ -280,6 +285,7 @@ pub const Error = error{
     /// Nothing left to sell or borrow: game over.
     Bankrupt,
     NothingToRepair,
+    NothingToReplace,
     KeepStocked,
     /// The home HQ's spaceport hosts no (more) air wings.
     NoAirSlot,
@@ -321,6 +327,9 @@ pub const Result = struct {
     sourced: bool = true,
     /// `negotiate`: how the round went.
     negotiation: enum { none, improved, hardened, withdrawn } = .none,
+    /// `replace_gear`: spares ordered, and those logistics could not source.
+    ordered: u32 = 0,
+    unsourced: u32 = 0,
 };
 
 pub fn execute(gs: *GameState, cmd: Command) Error!Result {
@@ -882,6 +891,7 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             f.role = r.role;
             return .{};
         },
+        .replace_gear => |unit_id| return replaceGear(gs, unit_id),
         .depot => |unit_id| {
             const u = gs.unit(unit_id) orelse return Error.UnknownUnit;
             if (!u.needsDepot()) return Error.NothingToRepair;
@@ -1477,6 +1487,45 @@ fn shipStock(gs: *GameState, part_key: []const u8, quantity: u32, from: types.Si
     });
     try gs.log(.delivery, .{ .company = tags.company, .hq = tags.hq }, "[shipment] {s} x{d} dispatched, eta {d} days, freight {d}", .{ part_key, quantity, freight.days, freight.cost });
     return .{};
+}
+
+/// `replace_gear`: one spare per destroyed or missing weapon/equipment/ammo
+/// slot, ordered to the hull's site so its own tech can fit it on the
+/// weekly repair pass (ARCH §9.7). Spares already on that shelf or already
+/// on order for it are counted first, so calling twice orders nothing new.
+/// Damaged gear needs hours, not parts; structure is `depot` work.
+fn replaceGear(gs: *GameState, unit_id: types.UnitId) Error!Result {
+    const u = gs.unit(unit_id) orelse return Error.UnknownUnit;
+    if (gs.hqs.count() == 0) return Error.NoHq;
+    const site = gs.siteForForce(u.force);
+    var wanted: u32 = 0;
+    var ordered: u32 = 0;
+    var unsourced: u32 = 0;
+    for (u.slots.items, 0..) |s, i| {
+        if (!needsSpare(s)) continue;
+        wanted += 1;
+        // The n-th broken mount of this part on the hull is covered when
+        // that many spares are already on the shelf or on their way.
+        var nth: u32 = 0;
+        for (u.slots.items[0..i]) |t| if (needsSpare(t) and std.mem.eql(u8, t.part_key, s.part_key)) {
+            nth += 1;
+        };
+        var covered: u32 = gs.stockCount(site, s.part_key);
+        for (gs.part_orders.items) |o| {
+            if (std.mem.eql(u8, o.part_key, s.part_key) and (o.status == .sourcing or o.status == .in_transit) and std.meta.eql(o.dest, site)) covered += o.quantity;
+        }
+        if (nth < covered) continue;
+        const r = try orderPart(gs, s.part_key, 1, site);
+        if (r.sourced) ordered += 1 else unsourced += 1;
+    }
+    if (wanted == 0) return Error.NothingToReplace;
+    return .{ .ordered = ordered, .unsourced = unsourced };
+}
+
+/// A slot that wants a spare part: destroyed or missing, and field work.
+fn needsSpare(s: unit_mod.PartSlot) bool {
+    if (s.condition != .destroyed and s.condition != .missing) return false;
+    return unit_mod.repairTier(s.class, s.condition) == .field;
 }
 
 fn orderPart(gs: *GameState, part_key: []const u8, quantity: u32, dest_opt: ?types.Site) Error!Result {
@@ -3226,6 +3275,42 @@ test "12B.6: abilities are bought with XP at a training ground and change the ba
     _ = try execute(&gs, .{ .accept_contract = .{ .offer_index = 0, .company = co } });
     try std.testing.expectError(Error.PersonDeployed, execute(&gs, .{ .train_ability = .{ .person = pilot.id, .key = "edge" } }));
 }
+
+test "9.7: gear on any hull is field work — replace orders the spare to its site, the tech fits it" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 61 });
+    defer gs.deinit();
+    _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
+    const uid = try gs.addUnit("SVT-1"); // a salvage truck: cargo, not a mek
+    const tech = try gs.hirePerson("Wren", "Okafor", .tech_mechanic);
+    try gs.assignSlot(uid, .tech, tech);
+    for (gs.unit(uid).?.slots.items) |*s| if (std.mem.eql(u8, s.slot_key, "bed.winch.1")) {
+        s.condition = .destroyed;
+    };
+
+    // The Lab's door is shut to it, and the depot only does structure.
+    try std.testing.expectError(Error.NotAMek, execute(&gs, .{ .refit_remove = .{ .unit = uid, .slot_key = "bed.winch.1" } }));
+    try std.testing.expectError(Error.NothingToRepair, execute(&gs, .{ .depot = uid }));
+
+    // replace orders exactly one winch to the hull's site; once it is on
+    // order a second call orders nothing more.
+    const site = gs.siteForForce(gs.unit(uid).?.force);
+    const r = try execute(&gs, .{ .replace_gear = uid });
+    try std.testing.expectEqual(@as(u32, 1), r.ordered + r.unsourced);
+    if (r.ordered == 1) {
+        const again = try execute(&gs, .{ .replace_gear = uid });
+        try std.testing.expectEqual(@as(u32, 0), again.ordered + again.unsourced);
+    }
+
+    // Sourcing is a roll: put the spare on the shelf and let the weekly
+    // pass fit it — the mechanic's own hours, no bay involved.
+    try gs.addStock(site, "winch", 1);
+    _ = try execute(&gs, .{ .advance_days = 7 });
+    for (gs.unit(uid).?.slots.items) |s| if (std.mem.eql(u8, s.slot_key, "bed.winch.1")) {
+        try std.testing.expectEqual(unit_mod.PartCondition.ok, s.condition);
+    };
+    try std.testing.expectError(Error.NothingToReplace, execute(&gs, .{ .replace_gear = uid }));
+}
+
 test "9D: depot work happens at the hull's home HQ — its components, its bay — not the outfit's first one" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 97 });
     defer gs.deinit();
