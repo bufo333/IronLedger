@@ -844,7 +844,7 @@ pub const App = struct {
             .market => "Tab pane · Enter buy / order / order shortfall · b fabricate component · K keep stocked (pane: Enter edit, x remove) · [ ] HQ board · q welcome",
             .ledger => "j/k treasury · t send cash to it · T pull cash back to the outfit · p top-up policy · x clear its policy · L loan · R repay",
             .supply => "company: t/T cash · p/P cash/resupply policy · s ship · o order · R trim to plan · H parts home · HQ: K keep stocked · $ sell stock",
-            .forces => "[ ] company / pool · + raise a company · w air wing · r damage/readiness/manning · Enter assign · a/u seat · A auto · c crew from halls · l lance · o role · d depot · R spares for a hull's gear / recall a company · m mothball · x company · b fabricate · $ sell · X disband",
+            .forces => "[ ] company / pool · + raise a company · w air wing · r damage/readiness/manning · Enter assign · a/u seat · A auto · c crew from halls · l lance · o role · t/T train one / the whole company · d depot · R spares for a hull's gear / recall a company · m mothball · x company · b fabricate · $ sell · X disband",
             .map => "h j k l move between worlds (the view follows) · + / - zoom · f found HQ here · o offers here · q welcome",
             .lab => "[ ] hull · j/k mount · - remove · + install · R order replacement · D send to depot (structure) · c clear · Enter commit",
             .hq => "[ ] switch HQ · u upgrade the highlighted facility (picker elsewhere) · T tier · S autostaff · Tab hall · f/F filter · Enter hire",
@@ -1662,7 +1662,7 @@ pub const App = struct {
                     "  {a}desk{/}        Enter on an inbox row opens the decision · Enter on a checklist row jumps to its screen",
                     "  {a}contracts{/}   Enter accepts the offer under the cursor · b bargains one term (one round per offer) · c completes · R recalls",
                     "  {a}ledger{/}      j/k picks the treasury · t transfer · p policy · L loan",
-                    "  {a}forces{/}      [ ] page through all forces, each company, the unassigned pool · a assign · u unassign · A auto-assign the company · t train · cursor on a company = DAMAGE pane (struct = depot, gear = field), r swaps it for READINESS · w air wing · b fabricates the shortest comp_*",
+                    "  {a}forces{/}      [ ] page through all forces, each company, the unassigned pool · a assign · u unassign · A auto-assign the company · t train one · T train the whole company at their trades (home only) · cursor on a company = DAMAGE pane (struct = depot, gear = field), r swaps it for READINESS · w air wing · b fabricates the shortest comp_*",
                     "  {a}hq{/}          [ ] switch HQ · u upgrade · S autostaff · h hire · f/F hall filter",
                     "  {a}people{/}      / filter · m admit wounded · t train · a assign seat · P post · x transfer · L leave · D fire",
                     "  {a}market{/}      F10/0: / , filter (mechs, vehicles, aero, dropships, jumpships, weapons, ammo, equipment, components, supplies)",
@@ -2969,6 +2969,20 @@ pub const App = struct {
                         }
                     },
                     't' => self.openCommand("train "),
+                    'T' => if (row) |r| {
+                        const co = g.companyOf(r.force);
+                        if (co == .none) {
+                            self.say(.dim, "put the cursor on a company (or one of its hulls) to train it", .{});
+                            return;
+                        }
+                        const res = game.commands.execute(g, .{ .train_company = .{ .company = co } }) catch |err| {
+                            self.say(.crit, "{s}", .{game.cli.errorText(err)});
+                            return;
+                        };
+                        self.say(if (res.enrolled > 0) .good else .amber, "{s}: {d} enrolled at their trades · {d} short of XP · {d} busy · {d} nothing to learn  (:train co:{d} <skill> targets one skill)", .{
+                            q.forceName(g, co), res.enrolled, res.short_xp, res.busy, res.nothing_to_learn, @intFromEnum(co),
+                        });
+                    },
                     'r' => {
                         self.forces_pane = switch (self.forces_pane) {
                             .damage => .readiness,

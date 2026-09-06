@@ -267,8 +267,15 @@ pub fn parseCommand(verb: []const u8, tokens: *std.mem.TokenIterator(u8, .scalar
         return .{ .post_person = .{ .person = pid, .hq = site.hq } };
     }
     if (eq(u8, verb, "train")) {
-        // train <person> <skill> | train <person> ability <key>
-        const pid: types.PersonId = @enumFromInt(try num(u32, tokens.next()));
+        // train <person> <skill> | train <person> ability <key> | train co:N [skill]
+        const first = try need(tokens.next());
+        if (std.mem.startsWith(u8, first, "co:")) {
+            const site = try parseSite(first);
+            if (site != .company) return error.BadSite;
+            const skill: ?types.SkillType = if (tokens.next()) |t| (std.meta.stringToEnum(types.SkillType, t) orelse return error.BadArguments) else null;
+            return .{ .train_company = .{ .company = site.company, .skill = skill } };
+        }
+        const pid: types.PersonId = @enumFromInt(std.fmt.parseInt(u32, first, 10) catch return error.BadNumber);
         const what = try need(tokens.next());
         if (eq(u8, what, "ability")) return .{ .train_ability = .{ .person = pid, .key = try need(tokens.next()) } };
         const skill = std.meta.stringToEnum(types.SkillType, what) orelse return error.BadArguments;
@@ -506,7 +513,7 @@ pub fn usage(verb: []const u8) ?[]const u8 {
         .{ "recruit", "recruit <role>" },
         .{ "fire", "fire <person>" },
         .{ "post", "post <person> hq:N" },
-        .{ "train", "train <person> <skill> | train <person> ability gunnery_specialist|piloting_specialist|dodge|toughness|iron_man|cool_under_fire|tactical_genius|edge" },
+        .{ "train", "train <person> <skill> | train <person> ability gunnery_specialist|piloting_specialist|dodge|toughness|iron_man|cool_under_fire|tactical_genius|edge | train co:N [skill]  (the whole company, at their trades)" },
         .{ "triage", "triage <person> <priority>" },
         .{ "leave", "leave <person> [days]" },
         .{ "mothball", "mothball <unit>" },

@@ -85,6 +85,10 @@ pub const Command = union(enum) {
     /// Start a training program: XP → skill, only at a regional/brigade HQ
     /// with a training ground, only for people not deployed (ARCH §9.7).
     train: struct { person: types.PersonId, skill: types.SkillType },
+    /// Bulk training (play feedback): everyone in a company who is home,
+    /// free and can afford the next level starts a program — at their
+    /// role's primary skill unless one is named.
+    train_company: struct { company: types.ForceId, skill: ?types.SkillType = null },
     /// Move money between treasuries by courier (Stage 9A). Source debited
     /// now; credit arrives after map-distance transit (min 3 days).
     transfer: struct { from: state_mod.Treasury, to: state_mod.Treasury, amount: types.CBills },
@@ -334,6 +338,12 @@ pub const Result = struct {
     /// `replace_gear`: spares ordered, and those logistics could not source.
     ordered: u32 = 0,
     unsourced: u32 = 0,
+    /// `train_company`: who started a program, who could not afford one,
+    /// who was busy (training, away, unfit), and who had nothing to learn.
+    enrolled: u32 = 0,
+    short_xp: u32 = 0,
+    busy: u32 = 0,
+    nothing_to_learn: u32 = 0,
 };
 
 pub fn execute(gs: *GameState, cmd: Command) Error!Result {
@@ -1134,6 +1144,7 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             p.training = .{ .skill = t.skill, .done_day = gs.clock.day_index + medical_mod.trainingDaysFor(gs) };
             return .{};
         },
+        .train_company => |t| return trainCompany(gs, t.company, t.skill),
         .transfer => |t| {
             try validateTreasury(gs, t.from);
             try validateTreasury(gs, t.to);
@@ -1501,6 +1512,53 @@ fn shipStock(gs: *GameState, part_key: []const u8, quantity: u32, from: types.Si
     });
     try gs.log(.delivery, .{ .company = tags.company, .hq = tags.hq }, "[shipment] {s} x{d} dispatched, eta {d} days, freight {d}", .{ part_key, quantity, freight.days, freight.cost });
     return .{};
+}
+
+/// `train_company`: the `train` checks, applied to everyone on a home
+/// company's books. Nobody is refused loudly — the result counts who
+/// started, who is short of XP, who is busy, and who has nothing to learn
+/// at that skill — so one command trains a company at what it does.
+fn trainCompany(gs: *GameState, company: types.ForceId, skill_opt: ?types.SkillType) Error!Result {
+    const f = gs.force(company) orelse return Error.UnknownForce;
+    if (f.echelon != .company) return Error.NotACompany;
+    if (gs.deploymentContract(company) != null or !gs.isCompanyHome(company)) return Error.CompanyDeployed;
+    var has_ground = false;
+    var hqit = gs.hqs.iterator();
+    while (hqit.next()) |entry| {
+        if (entry.value_ptr.supportsTraining()) has_ground = true;
+    }
+    if (!has_ground) return Error.NoTrainingGround;
+
+    var r: Result = .{};
+    const days = medical_mod.trainingDaysFor(gs);
+    var pit = gs.people.iterator();
+    while (pit.next()) |e| {
+        const p = e.value_ptr;
+        if (gs.companyOf(p.assigned_force) != company) continue;
+        if (p.status != .active or !p.isAvailable(gs.clock.day_index) or p.training != null) {
+            r.busy += 1;
+            continue;
+        }
+        const skill = skill_opt orelse p.role.primarySkill();
+        const current = p.skill(skill) orelse {
+            r.nothing_to_learn += 1;
+            continue;
+        };
+        if (current == 0) {
+            r.nothing_to_learn += 1;
+            continue;
+        }
+        if (p.xp < person_mod.improveCost(current - 1)) {
+            r.short_xp += 1;
+            continue;
+        }
+        p.training = .{ .skill = skill, .done_day = gs.clock.day_index + days };
+        r.enrolled += 1;
+    }
+    try gs.log(.rotation, .{ .company = company }, "[training] {s}: {d} enrolled{s} for {d} days · {d} short of XP · {d} busy · {d} nothing to learn", .{
+        f.name, r.enrolled, if (skill_opt) |s| try std.fmt.allocPrint(gs.allocator(), " at {s}", .{@tagName(s)}) else " at their trades", days, r.short_xp, r.busy, r.nothing_to_learn,
+    });
+    return r;
 }
 
 /// `replace_gear`: one spare per destroyed or missing weapon/equipment/ammo
@@ -3407,4 +3465,41 @@ test "9D: a truck sent to a deployed company lands in its transport lance, and c
     // Joining a deployed company from outside still waits for home.
     const outsider = try gs.addUnit("CGT-3");
     try std.testing.expectError(Error.CompanyDeployed, execute(&gs, .{ .move_unit = .{ .unit = outsider, .force = transport } }));
+}
+
+test "play feedback: train co:N enrols the whole home company at their trades, and says who it skipped" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 88 });
+    defer gs.deinit();
+    _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .FS, .profession = .line_officer } });
+    const co = (try execute(&gs, .{ .new_company = "Alpha" })).created_force;
+    // Everyone can afford a level; one mekwarrior is already in a program.
+    var busy_one = false;
+    var pit = gs.people.iterator();
+    while (pit.next()) |e| if (gs.companyOf(e.value_ptr.assigned_force) == co) {
+        e.value_ptr.xp = 500;
+        if (!busy_one and e.value_ptr.role == .mekwarrior) {
+            e.value_ptr.training = .{ .skill = .piloting_mek, .done_day = 30 };
+            busy_one = true;
+        }
+    };
+    const r = try execute(&gs, .{ .train_company = .{ .company = co } });
+    try std.testing.expect(r.enrolled > 10);
+    try std.testing.expectEqual(@as(u32, 0), r.short_xp);
+    try std.testing.expect(r.busy >= 1);
+    // Every enrolled person trains their own trade.
+    var checked: u32 = 0;
+    var pit2 = gs.people.iterator();
+    while (pit2.next()) |e| if (gs.companyOf(e.value_ptr.assigned_force) == co and e.value_ptr.training != null and e.value_ptr.training.?.done_day != 30) {
+        try std.testing.expectEqual(e.value_ptr.role.primarySkill(), e.value_ptr.training.?.skill);
+        checked += 1;
+    };
+    try std.testing.expectEqual(r.enrolled, checked);
+    // A second pass finds them all busy; a named skill nobody has is nothing to learn.
+    const again = try execute(&gs, .{ .train_company = .{ .company = co } });
+    try std.testing.expectEqual(@as(u32, 0), again.enrolled);
+    try std.testing.expect(again.busy >= r.enrolled);
+    // Away from home the command refuses.
+    const cid: types.ContractId = @enumFromInt(903);
+    try gs.contracts.put(gs.allocator(), cid, .{ .id = cid, .kind = .garrison_duty, .employer_key = "LC", .enemy_key = "PER", .planet_key = gs.hqs.values()[0].planet_key, .status = .active, .assigned_company = co, .terms = .{ .length_months = 12, .base_pay_month = 100_000 } });
+    try std.testing.expectError(Error.CompanyDeployed, execute(&gs, .{ .train_company = .{ .company = co } }));
 }
