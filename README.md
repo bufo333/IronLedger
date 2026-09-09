@@ -488,6 +488,10 @@ ending the turn opens the checklist.
   how the program is wired together from the build script to a keypress
   (also as a single-file page, `docs/iron-ledger-zig-guide.html`).
 - `docs/mekhq-map.md` — which MekHQ concept each module corresponds to.
+- [bufo333/LeaningZig](https://github.com/bufo333/LeaningZig) — *Zig from
+  Zero to IRON LEDGER*, a 57-chapter, exercise-driven course in Zig 0.16
+  whose final part reads this game's source. Clone it as `../zig-course`
+  next to this repo.
 
 The terminal client talks to the simulation only through commands and
 queries (`src/sim/commands.zig`, `src/sim/queries.zig`); the console
