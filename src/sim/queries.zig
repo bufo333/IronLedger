@@ -464,27 +464,29 @@ pub fn intelLevel(gs: *GameState) u8 {
 
 /// The opposition as the intel reads it (12D.5): exact from comms 3,
 /// the lance range and skill from comms 1, the range alone below that.
+/// The enemy's lance count as the intel reads it (12E.3): exact from comms
+/// 3, within a lance either way from comms 1, the kind's whole range blind.
+pub const LanceIntel = struct { lo: u8, hi: u8, mid: u8, exact: bool };
+
+pub fn lanceIntel(gs: *GameState, c: *const contract_mod.Contract) LanceIntel {
+    const intel = intelLevel(gs);
+    const row = @import("../domain/opfor.zig").rowFor(c.kind);
+    if (intel >= 3) return .{ .lo = c.enemy_lances, .hi = c.enemy_lances, .mid = c.enemy_lances, .exact = true };
+    if (intel >= 1) {
+        const lo = @max(row.lances_min, c.enemy_lances -| 1);
+        const hi = @min(row.lances_max, c.enemy_lances + 1);
+        return .{ .lo = lo, .hi = hi, .mid = (lo + hi + 1) / 2, .exact = lo == hi };
+    }
+    return .{ .lo = row.lances_min, .hi = row.lances_max, .mid = (row.lances_min + row.lances_max + 1) / 2, .exact = row.lances_min == row.lances_max };
+}
+
 pub fn opforText(alloc: Alloc, gs: *GameState, c: *const contract_mod.Contract) ![]const u8 {
     if (!c.hasOpfor()) return "opposition sized to the company";
     const intel = intelLevel(gs);
-    const row = @import("../domain/opfor.zig").rowFor(c.kind);
+    const li = lanceIntel(gs, c);
     if (intel >= 3) return try std.fmt.allocPrint(alloc, "{d} lance{s} of {s} {s} ≈{s} BV a fight", .{ c.enemy_lances, if (c.enemy_lances == 1) "" else "s", @tagName(c.enemy_quality), c.enemy_key, try money(alloc, types.applyBp(c.opforBv(), gs.diff().enemy_bp)) });
-    if (intel >= 1) return try std.fmt.allocPrint(alloc, "{d}–{d} lances of {s} {s}", .{ row.lances_min, row.lances_max, @tagName(c.enemy_quality), c.enemy_key });
-    return try std.fmt.allocPrint(alloc, "{d}–{d} lances of {s}, quality unknown (comms)", .{ row.lances_min, row.lances_max, c.enemy_key });
-}
-
-/// Estimated enemy combat power in a typical engagement (12D.5), as the
-/// intel reads it: exact lances and skill from comms 3, else the kind's
-/// midpoint (and regular skill below comms 1).
-pub fn opforPowerEstimate(gs: *GameState, c: *const contract_mod.Contract) i64 {
-    if (!c.hasOpfor()) return 0;
-    const opfor = @import("../domain/opfor.zig");
-    const intel = intelLevel(gs);
-    const row = opfor.rowFor(c.kind);
-    const lances: i64 = if (intel >= 3) c.enemy_lances else @divTrunc(@as(i64, row.lances_min) + row.lances_max + 1, 2);
-    const sk = opfor.skills(if (intel >= 1) c.enemy_quality else .regular);
-    const elem: @import("autoresolve.zig").Element = .{ .base_strength = types.applyBp(c.enemy_lance_bv * lances, gs.diff().enemy_bp), .avg_gunnery = sk[0], .avg_piloting = sk[1] };
-    return elem.effectivePower(.{});
+    if (intel >= 1) return try std.fmt.allocPrint(alloc, "{d}–{d} lances of {s} {s}", .{ li.lo, li.hi, @tagName(c.enemy_quality), c.enemy_key });
+    return try std.fmt.allocPrint(alloc, "{d}–{d} lances of {s}, quality unknown (comms)", .{ li.lo, li.hi, c.enemy_key });
 }
 
 /// How one company would fare on one contract (12E.3): skulls (a range
@@ -519,13 +521,13 @@ pub fn rateOffer(alloc: Alloc, gs: *GameState, c: *const contract_mod.Contract, 
     const tuning = @import("../domain/tuning.zig").t;
     const own = try battle.estimatePower(gs, alloc, c, company);
     const intel = intelLevel(gs);
-    const row = opfor.rowFor(c.kind);
     // Garrison work meets a probe, not the whole force (12D.6).
     const probe: ?u8 = if (c.kind.isGarrisonClass()) @min(tuning.battle.garrison_probe_lances, c.enemy_lances) else null;
-    const exact = intel >= 3 or probe != null;
-    const lo: i64 = probe orelse if (exact) c.enemy_lances else row.lances_min;
-    const hi: i64 = probe orelse if (exact) c.enemy_lances else row.lances_max;
-    const mid: i64 = probe orelse if (exact) c.enemy_lances else @divTrunc(@as(i64, row.lances_min) + row.lances_max + 1, 2);
+    const li = lanceIntel(gs, c);
+    const exact = li.exact or probe != null;
+    const lo: i64 = probe orelse li.lo;
+    const hi: i64 = probe orelse li.hi;
+    const mid: i64 = probe orelse li.mid;
     const sk = opfor.skills(if (intel >= 1) c.enemy_quality else .regular);
     const faces = scenario.faces(c.kind);
     var mean_bp: i64 = 0;
@@ -573,6 +575,31 @@ pub fn rateOffer(alloc: Alloc, gs: *GameState, c: *const contract_mod.Contract, 
     };
 }
 
+/// The rating for the company best placed to take an offer (12E.5): the
+/// readiest eligible one, as `candidates` ranks them. Null when no company
+/// of that board's HQ can go, or the offer predates rolled opposition.
+pub fn bestRating(alloc: Alloc, gs: *GameState, offer_index: usize) !?OfferRating {
+    if (offer_index >= gs.contract_offers.items.len) return null;
+    for (try offerCandidates(alloc, gs, offer_index)) |cand| {
+        if (!cand.eligible) continue;
+        return try rateOffer(alloc, gs, &gs.contract_offers.items[offer_index], cand.company);
+    }
+    return null;
+}
+
+/// "☠☠☠◐ 3.5 Alpha 610t (L4 M8 H0 A0) vs ~720t" for a board row, coloured
+/// by difficulty (12E.5).
+pub fn boardSkulls(alloc: Alloc, gs: *GameState, offer_index: usize) ![]const u8 {
+    const r = (try bestRating(alloc, gs, offer_index)) orelse return "{d}no company in range{/}";
+    return try ratingLine(alloc, gs, r);
+}
+
+/// One rating on a line: glyphs, the number, whose, and the weights.
+pub fn ratingLine(alloc: Alloc, gs: *GameState, r: OfferRating) ![]const u8 {
+    const mk: []const u8 = if (r.half_hi >= 9) "{c}" else if (r.half_hi >= 7) "{a}" else "{g}";
+    return try std.fmt.allocPrint(alloc, "{s}{s}{{/}} {s} {s} · {s}", .{ mk, try skullGlyphs(alloc, r.half_hi), try skullText(alloc, r), forceName(gs, r.company), try tonnageText(alloc, r) });
+}
+
 /// "☠☠☠◐" (or "XXXx" with ascii) for half skulls; the TUI swaps glyphs.
 pub fn skullGlyphs(alloc: Alloc, half: u8) ![]const u8 {
     var out: std.ArrayListUnmanaged(u8) = .empty;
@@ -615,7 +642,7 @@ pub fn contracts(alloc: Alloc, gs: *GameState, board_hq: types.HqId) !Contracts 
             if (c.terms.salvage_exchange) try std.fmt.allocPrint(alloc, "{s}$", .{@tagName(c.terms.command_rights)}) else @tagName(c.terms.command_rights), offerTransitDays(gs, &c),
         }) });
         if (c.negotiated) board.items[board.items.len - 1].text = try std.fmt.allocPrint(alloc, "{s}  {{d}}negotiated{{/}}", .{board.items[board.items.len - 1].text});
-        board.items[board.items.len - 1].text = try std.fmt.allocPrint(alloc, "{s}  {{d}}opp {s}{{/}}", .{ board.items[board.items.len - 1].text, try opforText(alloc, gs, &c) });
+        board.items[board.items.len - 1].text = try std.fmt.allocPrint(alloc, "{s}  {s}  {{d}}opp {s}{{/}}", .{ board.items[board.items.len - 1].text, try boardSkulls(alloc, gs, i), try opforText(alloc, gs, &c) });
     }
 
     var active: std.ArrayListUnmanaged(ActiveRow) = .empty;
@@ -645,6 +672,13 @@ pub fn contracts(alloc: Alloc, gs: *GameState, board_hq: types.HqId) !Contracts 
             // Rules of engagement (12D.4): the company's order, or the employer's.
             const roe: @import("../domain/force.zig").Roe = if (c.terms.command_rights.overridesRoe()) .hold else if (gs.force(c.assigned_company)) |f| f.roe else .standard;
             try lines.append(alloc, try std.fmt.allocPrint(alloc, "    ROE         {s}{s}", .{ roe.describe(), if (c.terms.command_rights.overridesRoe()) " {d}(set by integrated command){/}" else " {d}(Forces o on the company row){/}" }));
+        }
+        // Live skulls (12E.5): what the company can field today against the
+        // opposition — a mauled company's odds fall as it wears down.
+        if (try rateOffer(alloc, gs, c, c.assigned_company)) |rt| {
+            try lines.append(alloc, try std.fmt.allocPrint(alloc, "    skulls      {s} · wins {d}% of fights, loses the field {d}%{s}", .{
+                try ratingLine(alloc, gs, rt), rt.win_pct, rt.lose_field_pct, if (rt.half_hi >= @import("../domain/skulls.zig").table.warn_half_skulls) " {c}— outmatched: consider cautious ROE or recall{/}" else "",
+            }));
         }
         try lines.append(alloc, try std.fmt.allocPrint(alloc, "    verdict     {s}{s}{{/}} so far · {s}score {d}{{/}} (breach on performance at {d}) · outstanding ≥ 50 VP, strong ≥ 25, satisfactory ≥ 0", .{
             if (c.victory_points < 0) "{a}" else "{g}", c.grade(), if (c.score <= contract_mod.Contract.fail_score + 2) "{c}" else "", c.score, contract_mod.Contract.fail_score,
@@ -3769,7 +3803,7 @@ pub const Candidate = struct {
     text: []const u8,
 };
 
-pub const candidates_header = "company               stands                    jumps  days   fatigue  morale  depot  spent  wounded   odds";
+pub const candidates_header = "company               stands                    jumps  days   fatigue  morale  depot  spent  wounded   skulls · win / lose field · tonnage";
 
 /// Which companies can take an offer and how ready each is: where the
 /// company stands, the jumps and days to the contract world from there
@@ -3813,15 +3847,15 @@ pub fn offerCandidates(alloc: Alloc, gs: *GameState, offer_index: usize) ![]Cand
             @as(i32, @intCast(r.fatigue / 4)) + @as(i32, @intCast(days / 4)) - @as(i32, @intCast(r.morale / 4));
         const fat_mk: []const u8 = if (r.fatigue >= tpb.exhausted_fatigue) "{c}" else if (r.fatigue >= tpb.fatigue_tired) "{a}" else "{g}";
         const mor_mk: []const u8 = if (r.morale < 30) "{c}" else if (r.morale < 50) "{a}" else "{g}";
-        // Odds (12D.5): what the company can field today against what the
+        // Skulls (12E.5): what the company can field today against what the
         // intel says the enemy brings to a fight.
-        const enemy_power = opforPowerEstimate(gs, &offer);
-        const own_bv = @import("contract_control.zig").fieldableBv(gs, r.company);
-        const odds_x10: i64 = if (enemy_power > 0) @divTrunc(own_bv * 10, enemy_power) else 0;
-        const odds_mk: []const u8 = if (enemy_power == 0) "{d}" else if (odds_x10 >= 12) "{g}" else if (odds_x10 >= 9) "{a}" else "{c}";
-        const odds: []const u8 = if (enemy_power == 0) "—" else try std.fmt.allocPrint(alloc, "{d}.{d}:1", .{ @divTrunc(odds_x10, 10), @mod(odds_x10, 10) });
+        const odds_mk: []const u8 = "";
+        const odds: []const u8 = if (try rateOffer(alloc, gs, &offer, r.company)) |rt|
+            try std.fmt.allocPrint(alloc, "{s}{s}{{/}} {s} · {d}% / {d}% · {s}", .{ if (rt.half_hi >= 9) "{c}" else if (rt.half_hi >= 7) "{a}" else "{g}", try skullGlyphs(alloc, rt.half_hi), try skullText(alloc, rt), rt.win_pct, rt.lose_field_pct, try tonnageText(alloc, rt) })
+        else
+            "—";
         const text = if (eligible)
-            try std.fmt.allocPrint(alloc, "{s} {s} {d: >5}  {d: >4}   {s}{d: >7}{{/}}  {s}{d: >6}{{/}}  {s}{d: >5}{{/}}  {s}{d: >5}{{/}}  {s}{d: >7}{{/}}  {s}{s: >5}{{/}}", .{
+            try std.fmt.allocPrint(alloc, "{s} {s} {d: >5}  {d: >4}   {s}{d: >7}{{/}}  {s}{d: >6}{{/}}  {s}{d: >5}{{/}}  {s}{d: >5}{{/}}  {s}{d: >7}{{/}}   {s}{s}", .{
                 try padCells(alloc, "{a}", f.name, 21), try padCells(alloc, "", clip(stands, 25), 25), jumps,                          days,
                 fat_mk,                                 r.fatigue,                                     mor_mk,                         r.morale,
                 if (r.depot > 0) "{c}" else "",         r.depot,                                       if (r.spent > 0) "{a}" else "", r.spent,
@@ -4358,4 +4392,44 @@ test "12E.3: skulls — a weaker company rates harder, a heavier one easier; low
     try std.testing.expect(blind.half_lo <= mauled.half_lo and mauled.half_hi <= blind.half_hi);
     try std.testing.expect(blind.half_lo < blind.half_hi);
     try std.testing.expect(std.mem.indexOf(u8, try skullText(a, blind), "–") != null);
+}
+
+test "12E.5: skulls on the board, the candidates, the active pane — and an outmatched company is warned" {
+    const commands = @import("commands.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1250 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
+    const co = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const view = try contracts(a, &gs, gs.hqs.keys()[0]);
+    try std.testing.expect(view.board.len > 0);
+    for (view.board) |row| try std.testing.expect(std.mem.indexOf(u8, row.text, "skull") != null);
+    var saw = false;
+    for (try offerCandidates(a, &gs, view.board[0].index)) |c| if (c.company == co and std.mem.indexOf(u8, c.text, "skull") != null) {
+        saw = true;
+    };
+    try std.testing.expect(saw);
+
+    // Sent against six veteran lances with half its meks gone: outmatched.
+    const cid: types.ContractId = @enumFromInt(1250);
+    try gs.contracts.put(gs.allocator(), cid, .{ .id = cid, .kind = .planetary_assault, .employer_key = "LC", .enemy_key = "DC", .planet_key = "galatea", .status = .active, .assigned_company = co, .terms = .{ .length_months = 6, .base_pay_month = 100_000 }, .enemy_lances = 6, .enemy_quality = .veteran, .enemy_lance_bv = 5_000, .enemy_lance_tons = 260 });
+    var n: u32 = 0;
+    var it = gs.units.iterator();
+    while (it.next()) |e| if (e.value_ptr.kind == .mek and gs.companyOf(e.value_ptr.force) == co and n < 8) {
+        e.value_ptr.status = .destroyed;
+        n += 1;
+    };
+    var warned = false;
+    for (try @import("checklist.zig").turnWarnings(&gs, a)) |w| if (w.kind == .outmatched) {
+        warned = true;
+    };
+    try std.testing.expect(warned);
+    const again = try contracts(a, &gs, .none);
+    var pane_ok = false;
+    for (again.active) |ar| for (ar.lines) |l| if (std.mem.indexOf(u8, l, "outmatched") != null) {
+        pane_ok = true;
+    };
+    try std.testing.expect(pane_ok);
 }

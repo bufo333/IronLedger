@@ -117,6 +117,22 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
         }) });
     }
 
+    // Outmatched on an active contract (12E.5): the company's skulls today.
+    {
+        const queries = @import("queries.zig");
+        const warn = @import("../domain/skulls.zig").table.warn_half_skulls;
+        var cit = gs.contracts.iterator();
+        while (cit.next()) |ce| {
+            const c = ce.value_ptr;
+            if (c.status != .active) continue;
+            const rt = (try queries.rateOffer(alloc, gs, c, c.assigned_company)) orelse continue;
+            if (rt.half_hi < warn) continue;
+            try out.append(alloc, .{ .kind = .outmatched, .text = try std.fmt.allocPrint(alloc, "{s} is outmatched on {s}: {s} — wins {d}% of fights, loses the field {d}%; consider cautious ROE (Forces o) or recall", .{
+                queries.forceName(gs, c.assigned_company), c.planet_key, try queries.skullText(alloc, rt), rt.win_pct, rt.lose_field_pct,
+            }) });
+        }
+    }
+
     // Wounded waiting for a bed.
     {
         var n: u32 = 0;

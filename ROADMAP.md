@@ -1152,6 +1152,18 @@ that would go; and with several HQs, offers belong to the bases in range.
   screen shows one board at a time (`[ ]` switches, the title names it),
   `candidates` says "based at X, not Y" for the rest, and the REPL `offers`
   names each offer's board.
+- ✅ 12E.5 **Skulls on every screen.** Board rows carry the rating for
+  the readiest company in range (`queries.bestRating` via the `candidates`
+  ranking): "☠☠☠◐ 3–3.5 skulls Alpha · 640t (L7 M9 H0 A0) vs ~660–825t",
+  coloured green/amber/red, or "no company in range". `candidates <offer#>`
+  replaces the 12D.5 odds column with skulls · win % / lose-the-field % ·
+  tonnage per company (the accept picker shows the same). The active
+  contract pane shows live skulls from what the company can field today,
+  and the checklist warns when it reaches `skulls.warn_half_skulls` (4½):
+  "Bravo is outmatched on Talitha … consider cautious ROE or recall".
+  Intel is three-tiered (`queries.lanceIntel`): exact from comms 3, within
+  a lance either way from comms 1, the kind's whole range blind. `--ascii`
+  draws skulls as X / x; the REPL prints them under each offer.
 
 ## Stage 13 — Graphical client
 Architected after the TUI ships, reusing the same command/query boundary.
