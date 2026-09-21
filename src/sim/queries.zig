@@ -192,6 +192,8 @@ fn jumpFor(kind: checklist.WarningKind) u8 {
         .understaffed_hq, .depot_backlog => 6,
         .untreated_wounded, .restless_crew, .retiring_soon => 8,
         .manning_short, .unfit_crew => 2,
+        .unrebuildable_hulls => 6,
+        .outmatched => 3,
     };
 }
 
@@ -1834,7 +1836,13 @@ pub fn market(alloc: Alloc, gs: *GameState, filter: MarketFilter, hq: types.HqId
             .part => filter.matchesPart(l.item_key),
         };
         if (!keep) continue;
-        const cond: []const u8 = if (l.condition) |c| try std.fmt.allocPrint(alloc, "{{a}}{s}{{/}} armor {d}% · {d} dmg · {d} missing", .{ c.label(), c.armor_pct, c.damaged_slots, c.missing_components }) else if (l.kind == .unit) "{g}new{/}" else "";
+        const cond_base: []const u8 = if (l.condition) |c| try std.fmt.allocPrint(alloc, "{{a}}{s}{{/}} armor {d}% · {d} dmg · {d} missing", .{ c.label(), c.armor_pct, c.damaged_slots, c.missing_components }) else if (l.kind == .unit) "{g}new{/}" else "";
+        // A hull this HQ's bay could not rebuild says so (12E.2).
+        const hq_ops = @import("hq_ops.zig");
+        const cond: []const u8 = if (l.kind == .unit and chassis_mod.find(l.item_key) != null and chassis_mod.find(l.item_key).?.kind == .mek and !hq_ops.bayCanRebuild(gs, if (l.hq != .none) l.hq else hq, l.item_key))
+            try std.fmt.allocPrint(alloc, "{s} · {{c}}{s}{{/}}", .{ cond_base, hq_ops.rebuildNeed(l.item_key) })
+        else
+            cond_base;
         const name: []const u8 = if (l.kind == .unit) (if (chassis_mod.find(l.item_key)) |c| c.name else l.item_key) else (if (@import("../domain/part.zig").find(l.item_key)) |p| p.name else l.item_key);
         if (l.company != .none) {
             // A contract world's hull (12D.7).
@@ -1998,7 +2006,9 @@ pub fn raiseCandidates(alloc: Alloc, gs: *GameState, company: types.ForceId, pas
             const mk: []const u8 = if (c.missing_components > 0) "{c}" else if (c.destroyed_slots > 0) "{c}" else if (c.armor_pct < 100 or c.damaged_slots > 0) "{a}" else "{g}";
             cond_text = try std.fmt.allocPrint(alloc, "{s}{s}{{/}} armor {d}% · {d} dmg {d} dest {d} missing · ≈{s} to fix{s}", .{ mk, c.label(), c.armor_pct, c.damaged_slots, c.destroyed_slots, c.missing_components, try money(alloc, repair), if (c.missing_components > 0) " (depot)" else "" });
         }
-        try out.append(alloc, .{ .kind = .listing, .listing = i, .text = try std.fmt.allocPrint(alloc, "{{a}}{s}{{/}} #{d: <3} {s: <8} {s} {d: >3}t  {s}  {s: >10}  {s}", .{ try padCells(alloc, "", if (board) |h| h.name else "board", 12), i, l.item_key, try padCells(alloc, "", ch.name, 16), ch.tonnage, try padCells(alloc, "", cond_text, 52), try money(alloc, l.price), if (days == 0) "now" else try std.fmt.allocPrint(alloc, "{d} days", .{days}) }) });
+        // The company's home bay must be able to rebuild what it buys (12E.2).
+        const need_note: []const u8 = if (@import("hq_ops.zig").bayCanRebuild(gs, home, l.item_key)) "" else try std.fmt.allocPrint(alloc, "  {{c}}{s}{{/}}", .{@import("hq_ops.zig").rebuildNeed(l.item_key)});
+        try out.append(alloc, .{ .kind = .listing, .listing = i, .text = try std.fmt.allocPrint(alloc, "{{a}}{s}{{/}} #{d: <3} {s: <8} {s} {d: >3}t  {s}  {s: >10}  {s}{s}", .{ try padCells(alloc, "", if (board) |h| h.name else "board", 12), i, l.item_key, try padCells(alloc, "", ch.name, 16), ch.tonnage, try padCells(alloc, "", cond_text, 52), try money(alloc, l.price), if (days == 0) "now" else try std.fmt.allocPrint(alloc, "{d} days", .{days}), need_note }) });
     }
     return out.toOwnedSlice(alloc);
 }

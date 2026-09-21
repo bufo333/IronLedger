@@ -1116,6 +1116,13 @@ that would go; and with several HQs, offers belong to the bases in range.
   (5) light, else medium — so the founding level-1 bay rebuilds everything
   the outfit fields (12D.8). Heavies and assaults come later, off the boards
   and the battlefield; `rollWeightClass` still drives markets and salvage.
+- ✅ 12E.2 **Hulls the home bay cannot rebuild are flagged.**
+  `hq_ops.bayCanRebuild` (the design's centre-torso assembly against the
+  bay, 12D.8) drives a checklist line per company ("Alpha fields 1 heavy
+  and 0 assault hull(s) Skye (bay 1) cannot rebuild structure for"), and
+  heavy/assault hulls on a Market board or in the raise wizard say "needs a
+  level-2 bay to rebuild" / "a level-3 bay at a regional HQ" when the
+  buying HQ's bay is short.
 
 ## Stage 13 — Graphical client
 Architected after the TUI ships, reusing the same command/query boundary.

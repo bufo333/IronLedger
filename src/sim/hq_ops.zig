@@ -155,6 +155,22 @@ pub fn canFabricate(gs: *GameState, hq_id: types.HqId, key: []const u8) bool {
     return true;
 }
 
+/// Can this HQ rebuild the structure of this design (12E.2)? Its bay must
+/// be rated for the design's assemblies — the centre torso is the test.
+/// Vehicles and anything without a chassis entry need nothing special.
+pub fn bayCanRebuild(gs: *GameState, hq_id: types.HqId, chassis_key: []const u8) bool {
+    return canFabricate(gs, hq_id, part_mod.componentFor("ct.structure", chassis_key));
+}
+
+/// "needs bay 2" / "needs bay 3 at a regional HQ" for a design's
+/// assemblies, or "" when the lightest bay will do (12E.2).
+pub fn rebuildNeed(chassis_key: []const u8) []const u8 {
+    const def = part_mod.find(part_mod.componentFor("ct.structure", chassis_key)) orelse return "";
+    if (def.fab_regional) return "needs a level-3 bay at a regional HQ to rebuild";
+    if (def.fab_min_bay >= 2) return "needs a level-2 bay to rebuild";
+    return "";
+}
+
 /// Fabricate components in the bay: the §9.8 guarantee — always available,
 /// at a premium, over bay time — for what the bay is rated to build (12D.8).
 /// Cost is paid by the caller up front.
