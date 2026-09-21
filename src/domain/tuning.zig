@@ -402,6 +402,10 @@ pub const Tuning = struct {
         /// Keep-stocked provisions line at the starter HQ (min / target tons).
         provisions_keep_min: u32,
         provisions_keep_target: u32,
+        /// Starter line lances (12E.1): 2d6 at or under this is a light
+        /// mek, anything higher a medium — no heavies or assaults the
+        /// founding level-1 mek bay could not rebuild.
+        starter_light_max: u8,
     },
     /// Real loss (Stage 12D): how hulls die, what a rebuild needs, and when
     /// one is not worth it.

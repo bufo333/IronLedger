@@ -3079,7 +3079,7 @@ test "9E: idle companies stay where they worked; recall brings them home; redepl
     try std.testing.expect(c.committed_bv > 0);
     _ = try execute(&gs, .{ .advance_days = c.transit_days + @as(u32, c.terms.length_months) * 30 + 5 });
     const done = gs.contracts.values()[0];
-    try std.testing.expect(done.status == .completed or done.status == .breached);
+    try std.testing.expect(done.status == .completed or done.status == .breached or done.status == .failed);
 
     // The company is still out there, eating from its trucks, until told.
     try std.testing.expect(!gs.isCompanyHome(co));

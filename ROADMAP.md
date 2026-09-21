@@ -1104,6 +1104,19 @@ CamOps/MekHQ/TechManual rules, scaled by difficulty.
   Deferred: a "recovery raid" decision to win back hulls left on a lost
   field (needs the lost hulls held in limbo rather than struck off).
 
+## Stage 12E — Judging a contract (planned 2026-09-21)
+
+Play feedback after 12D: a company that cannot fix its heavies should not
+start with them; a lights-and-mediums company needs to see that an offer is
+a wall of heavies before it signs; the judgement belongs to the company
+that would go; and with several HQs, offers belong to the bases in range.
+
+- ✅ 12E.1 **Starter company: lights and mediums.** The line lances roll
+  `company_gen.starterWeightClass` — 2d6 ≤ `generation.starter_light_max`
+  (5) light, else medium — so the founding level-1 bay rebuilds everything
+  the outfit fields (12D.8). Heavies and assaults come later, off the boards
+  and the battlefield; `rollWeightClass` still drives markets and salvage.
+
 ## Stage 13 — Graphical client
 Architected after the TUI ships, reusing the same command/query boundary.
 

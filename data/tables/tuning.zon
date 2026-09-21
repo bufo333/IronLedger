@@ -265,6 +265,9 @@
         .starter_munitions_each = 8, // seven families now (12B.8): keeps the founding warehouse under its 200t
         .provisions_keep_min = 30,
         .provisions_keep_target = 90,
+        // Starter line lances (12E.1, HBS BattleTech / AtB starting lances):
+        // lights on 2–5 (28%), mediums otherwise — the founding bay rebuilds both.
+        .starter_light_max = 5,
     },
     // Real loss (Stage 12D). TechManual "Destroying a 'Mech": a cored
     // centre torso, a destroyed engine (three engine criticals) or an
