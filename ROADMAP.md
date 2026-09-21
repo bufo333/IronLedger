@@ -1140,6 +1140,18 @@ that would go; and with several HQs, offers belong to the bases in range.
   scenario faces for the chance to win a fight and to lose the field
   (scouts, close-terrain cap and the company's ROE included). Enemy lance
   tonnage is rolled with the force (`Contract.enemy_lance_tons`, store v24).
+- ✅ 12E.4 **One contract board per HQ.** `contract_market.refresh` posts
+  a board for every HQ: worlds inside *its* ring and beachhead band, the
+  distance from *it*, the count from the rating and *its* comms (a field
+  HQ hears half), the kind caps per board; each offer carries
+  `Contract.offer_hq` (store v24; older offers are open to anyone until the
+  next refresh). `commands.offerEligible`: only a company based at that HQ
+  (its home, `homeHqFor`) may take the offer — from home or redeploying
+  from the field — else `OutOfRange` ("only companies based at the HQ that
+  posted it … `assignco co:N hq:M` rebases a company"). The Contracts
+  screen shows one board at a time (`[ ]` switches, the title names it),
+  `candidates` says "based at X, not Y" for the rest, and the REPL `offers`
+  names each offer's board.
 
 ## Stage 13 — Graphical client
 Architected after the TUI ships, reusing the same command/query boundary.

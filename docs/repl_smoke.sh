@@ -41,6 +41,7 @@ check 'fabricate'
 check 'stripped for parts'
 check 'drew 500000 c-bills over 12 months'
 check 'under contract:'
+check '· board '
 check 'advanced 3 day'
 check 'saved campaign'
 echo "REPL SMOKE OK"

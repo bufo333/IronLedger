@@ -598,10 +598,13 @@ pub fn tonnageText(alloc: Alloc, r: OfferRating) ![]const u8 {
     return try std.fmt.allocPrint(alloc, "{d}t (L{d} M{d} H{d} A{d}) vs {s}", .{ r.own.tons, m[0], m[1], m[2], m[3], theirs });
 }
 
-pub fn contracts(alloc: Alloc, gs: *GameState) !Contracts {
+/// The contract screen. `board_hq` picks one HQ's board (12E.4; `.none`
+/// shows every board).
+pub fn contracts(alloc: Alloc, gs: *GameState, board_hq: types.HqId) !Contracts {
     const day = gs.clock.day_index;
     var board: std.ArrayListUnmanaged(OfferRow) = .empty;
     for (gs.contract_offers.items, 0..) |c, i| {
+        if (board_hq != .none and c.offer_hq != .none and c.offer_hq != board_hq) continue;
         const total = c.terms.totalBasePay();
         try board.append(alloc, .{ .index = i, .text = try std.fmt.allocPrint(alloc, "{s: <18} {s: <16} {s: <4} {d: >4}  {s} {d: >3}  {s: >12}  {s: >13}  {s: <5} {d: >3}%  {s: <11} {d: >4} days", .{
             @tagName(c.kind),                                                                                  clip(planetName(c.planet_key), 16),
@@ -3654,7 +3657,7 @@ test "desk and ledger queries build on a fresh campaign" {
     try std.testing.expectEqual(@as(u32, 1), st.companies);
     const rows = try toe(a, &gs);
     try std.testing.expect(rows.len > 10);
-    const c = try contracts(a, &gs);
+    const c = try contracts(a, &gs, .none);
     try std.testing.expect(c.board.len > 0);
 }
 
@@ -3784,7 +3787,10 @@ pub fn offerCandidates(alloc: Alloc, gs: *GameState, offer_index: usize) ![]Cand
         var why: []const u8 = "";
         var from_key: ?[]const u8 = null;
         var stands: []const u8 = "home";
-        if (gs.deploymentContract(r.company)) |c| {
+        if (!@import("commands.zig").offerEligible(gs, &offer, r.company)) {
+            // Another HQ's board (12E.4).
+            why = try std.fmt.allocPrint(alloc, "based at {s}, not {s}", .{ hqName(gs, gs.homeHqFor(r.company)), hqName(gs, offer.offer_hq) });
+        } else if (gs.deploymentContract(r.company)) |c| {
             why = "under contract";
             from_key = c.planet_key;
             stands = try std.fmt.allocPrint(alloc, "on {s}", .{planetName(c.planet_key)});

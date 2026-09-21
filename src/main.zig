@@ -445,7 +445,7 @@ fn printOffers(gs: *game.state.GameState) void {
     std.debug.print("Contract board ({d} offers):\n", .{gs.contract_offers.items.len});
     for (gs.contract_offers.items, 0..) |offer, i| {
         const world = game.planet.find(offer.planet_key).?;
-        std.debug.print("  [{d}] {s:<18} {s:<16} {d:>3} LY{s}  {d:>2} mo  {d:>9}/mo  vs {s}, salvage {d}% · opp {s}\n", .{
+        std.debug.print("  [{d}] {s:<18} {s:<16} {d:>3} LY{s}  {d:>2} mo  {d:>9}/mo  vs {s}, salvage {d}% · opp {s} · board {s}\n", .{
             i,
             @tagName(offer.kind),
             world.name,
@@ -456,6 +456,7 @@ fn printOffers(gs: *game.state.GameState) void {
             offer.enemy_key,
             offer.terms.salvage_pct,
             game.queries.opforText(gs.allocator(), gs, &offer) catch "",
+            game.queries.hqName(gs, offer.offer_hq),
         });
     }
     std.debug.print("  (* = beachhead: premium pay, hardship costs, slow resupply · `candidates <offer#>` ranks the companies that could go)\n", .{});

@@ -400,6 +400,7 @@ pub fn errorText(err: anyerror) []const u8 {
         error.NoSuchListing => "that listing is gone",
         error.TooManyLances => "that lance is full (4 hulls), or the HQ allows no more lances — :newlance co:N <name> raises one",
         error.SameForce => "that hull belongs to another company — x moves it between companies",
+        error.OutOfRange => "that offer is on another HQ's board — only companies based at the HQ that posted it can take it (Contracts [ ] switches boards; `assignco co:N hq:M` rebases a company)",
         error.BayTooSmall => "this bay cannot build that assembly — heavy (_h) needs a mek bay at level 2, assault (_a) level 3 at a regional or brigade HQ; order it instead (a rarity roll) or watch the boards",
         error.WrittenOff => "that wreck is scrap — nothing left to rebuild; `strip <unit>` (Forces $, then s) crates its surviving parts into the home warehouse",
         error.NothingToRepair => "that hull has no structural damage — gear is field work on any hull: its tech fits spares from the hull's site on the weekly pass; `replace <unit>` (Forces R) orders what's destroyed",

@@ -1410,7 +1410,7 @@ pub const App = struct {
         const al = self.a();
         const g = &self.gs.?;
         const b = self.body();
-        const view = try q.contracts(al, g);
+        const view = try q.contracts(al, g, @enumFromInt(self.hqSelId(g)));
         const board_h: u16 = @max(6, b.h * 2 / 5);
         var rows: std.ArrayListUnmanaged([]const u8) = .empty;
         try rows.append(al, view.board_header);
@@ -1424,7 +1424,8 @@ pub const App = struct {
             try rows.append(al, try std.fmt.allocPrint(al, "{{a}}companies for the selected offer{{/}}   {s}", .{q.candidates_header}));
             for (try q.offerCandidates(al, g, view.board[@min(self.cur(0).*, view.board.len - 1)].index)) |c| try rows.append(al, try std.fmt.allocPrint(al, "  {s}", .{c.text}));
         }
-        const inner = self.screen.pane(.{ .x = b.x, .y = b.y, .w = b.w, .h = board_h }, .{ .title = "CONTRACT BOARD", .focused = self.focus == 0, .right_title = "[Enter] accept with a company" });
+        const board_hq: types.HqId = @enumFromInt(self.hqSelId(g));
+        const inner = self.screen.pane(.{ .x = b.x, .y = b.y, .w = b.w, .h = board_h }, .{ .title = try std.fmt.allocPrint(al, "CONTRACT BOARD · {{a}}{s}{{/}} · for the companies based there", .{q.hqName(g, board_hq)}), .focused = self.focus == 0, .right_title = "[ ] other HQ's board  [Enter] accept with a company" });
         const c = self.cur(0);
         if (view.board.len > 0 and c.* >= view.board.len) c.* = view.board.len - 1;
         self.screen.lines(inner, rows.items, 0, if (self.focus == 0 and view.board.len > 0) c.* + 1 else null);
@@ -2626,7 +2627,7 @@ pub const App = struct {
                 }
             },
             .contracts => {
-                const view = try q.contracts(al, g);
+                const view = try q.contracts(al, g, @enumFromInt(self.hqSelId(g)));
                 if (self.focus == 0) self.moveCursor(0, delta, view.board.len) else if (self.focus == 1) self.moveCursor(1, delta, view.active.len) else self.moveCursor(2, delta, (try q.contractHistory(al, g)).len);
             },
             .ledger => {
@@ -2716,7 +2717,7 @@ pub const App = struct {
                 }
             },
             .contracts => {
-                const view = try q.contracts(al, g);
+                const view = try q.contracts(al, g, @enumFromInt(self.hqSelId(g)));
                 if (self.focus == 0 and view.board.len > 0) {
                     // Always choose in the open (play feedback): the picker ranks
                     // the companies readiest first and says who cannot go.
@@ -2947,8 +2948,15 @@ pub const App = struct {
                 else => {},
             },
             .contracts => {
+                // One board per HQ (12E.4): [ ] steps through them.
+                if (ch == ']' or ch == '[') {
+                    const n = g.hqs.count();
+                    if (n > 0) self.hq_sel = if (ch == ']') (self.hq_sel + 1) % n else (self.hq_sel + n - 1) % n;
+                    self.cur(0).* = 0;
+                    return;
+                }
                 if (self.focus == 2) return; // history is read-only: the log pane follows the cursor
-                const view = try q.contracts(al, g);
+                const view = try q.contracts(al, g, @enumFromInt(self.hqSelId(g)));
                 if (self.focus == 0) {
                     if (ch == 'b' and view.board.len > 0) { // bargain: n is end-turn everywhere
                         const idx = view.board[@min(self.cur(0).*, view.board.len - 1)].index;

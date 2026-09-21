@@ -305,6 +305,8 @@ pub const Error = error{
     WrittenOff,
     /// The bay is not rated for this assembly's weight class (12D.8).
     BayTooSmall,
+    /// The offer is on another HQ's board (12E.4).
+    OutOfRange,
     KeepStocked,
     /// The home HQ's spaceport hosts no (more) air wings.
     NoAirSlot,
@@ -1855,10 +1857,20 @@ fn negotiate(gs: *GameState, offer_index: usize, term: contract_mod.NegotiableTe
     return .{ .negotiation = .hardened };
 }
 
+/// Can this company take this offer (12E.4)? An offer belongs to the board
+/// of the HQ that posted it: only companies based there (their home HQ)
+/// may accept — from home, or redeploying from wherever they stand. Offers
+/// from before 12E.4 carry no board and are open to anyone.
+pub fn offerEligible(gs: *GameState, offer: *const contract_mod.Contract, company: types.ForceId) bool {
+    if (offer.offer_hq == .none) return true;
+    return gs.homeHqFor(company) == offer.offer_hq;
+}
+
 fn acceptContract(gs: *GameState, offer_index: usize, company_id: types.ForceId) Error!Result {
     if (offer_index >= gs.contract_offers.items.len) return Error.NoSuchOffer;
     const company = gs.force(company_id) orelse return Error.UnknownForce;
     if (company.echelon != .company) return Error.NotACompany;
+    if (!offerEligible(gs, &gs.contract_offers.items[offer_index], company_id)) return Error.OutOfRange;
     var cit = gs.contracts.iterator();
     while (cit.next()) |entry| {
         const c = entry.value_ptr;
@@ -3823,4 +3835,57 @@ test "12D.8: heavy assemblies need a level-2 bay, assault ones a level-3 bay at 
     h.tier = .field;
     try std.testing.expect(!hq_ops.canFabricate(&gs, hq_id, "comp_ct_a"));
     try std.testing.expect(hq_ops.canFabricate(&gs, hq_id, "comp_ct_h"));
+}
+
+test "12E.4: one board per HQ — offers inside its reach, taken only by companies based there" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1240 });
+    defer gs.deinit();
+    _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
+    const home = gs.hqs.keys()[0];
+    const alpha = (try execute(&gs, .{ .new_company = "Alpha" })).created_force;
+    // A second base at the edge of the home ring, grown to host a company.
+    const home_world = planet_mod.find(gs.hqs.getPtr(home).?.planet_key).?;
+    var far_key: []const u8 = "";
+    var far_dist: u32 = 0;
+    for (planet_mod.catalog) |*p| {
+        const d = planet_mod.distanceLy(p, home_world);
+        if (d <= gs.hqs.getPtr(home).?.influenceLy() and d > far_dist) {
+            far_dist = d;
+            far_key = p.key;
+        }
+    }
+    _ = try execute(&gs, .{ .found_hq = .{ .name = "Far", .planet_key = far_key } });
+    const far = gs.hqs.keys()[1];
+    {
+        const h = gs.hqs.getPtr(far).?;
+        h.tier = .regional;
+        try h.facilities.append(gs.allocator(), .{ .kind = .mek_bay, .level = 1 });
+        h.staff_assigned = 999;
+    }
+    const bravo = (try execute(&gs, .{ .new_company_at = .{ .name = "Bravo", .hq = far } })).created_force;
+    try @import("../econ/contract_market.zig").refresh(&gs);
+    var on_home: u32 = 0;
+    var on_far: u32 = 0;
+    var far_offer: ?usize = null;
+    var home_offer: ?usize = null;
+    for (gs.contract_offers.items, 0..) |o, i| {
+        const h = gs.hqs.getPtr(o.offer_hq) orelse return error.TestUnexpectedResult;
+        const dist = planet_mod.distanceLy(planet_mod.find(h.planet_key).?, planet_mod.find(o.planet_key).?);
+        try std.testing.expectEqual(dist, o.dist_ly);
+        try std.testing.expect(dist <= h.influenceLy() + market_mod.beachhead_band_ly);
+        if (o.offer_hq == home) {
+            on_home += 1;
+            home_offer = i;
+        } else {
+            on_far += 1;
+            far_offer = i;
+        }
+    }
+    try std.testing.expect(on_home > 0 and on_far > 0);
+    // Alpha cannot take the far board's work; Bravo can.
+    try std.testing.expect(!offerEligible(&gs, &gs.contract_offers.items[far_offer.?], alpha));
+    try std.testing.expectError(Error.OutOfRange, execute(&gs, .{ .accept_contract = .{ .offer_index = far_offer.?, .company = alpha } }));
+    try std.testing.expectError(Error.OutOfRange, execute(&gs, .{ .accept_contract = .{ .offer_index = home_offer.?, .company = bravo } }));
+    _ = try execute(&gs, .{ .accept_contract = .{ .offer_index = far_offer.?, .company = bravo } });
+    try std.testing.expect(gs.deploymentContract(bravo) != null);
 }

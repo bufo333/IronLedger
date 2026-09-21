@@ -1459,6 +1459,8 @@ test "save → load → identical hash, and the loaded campaign keeps playing" {
         try std.testing.expectEqual(gs.contract_offers.items[0].enemy_lances, loaded.contract_offers.items[0].enemy_lances);
         try std.testing.expectEqual(gs.contract_offers.items[0].enemy_quality, loaded.contract_offers.items[0].enemy_quality);
         try std.testing.expectEqual(gs.contract_offers.items[0].enemy_lance_bv, loaded.contract_offers.items[0].enemy_lance_bv);
+        try std.testing.expectEqual(gs.contract_offers.items[0].enemy_lance_tons, loaded.contract_offers.items[0].enemy_lance_tons); // 12E.3
+        try std.testing.expectEqual(gs.contract_offers.items[0].offer_hq, loaded.contract_offers.items[0].offer_hq); // 12E.4
     }
     try std.testing.expectEqual(@as(i32, 12), loaded.standing("LC"));
     try std.testing.expectEqual(@as(usize, 1), loaded.person(scarred).?.injuries.items.len);
