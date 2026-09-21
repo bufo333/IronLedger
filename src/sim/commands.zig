@@ -303,6 +303,8 @@ pub const Error = error{
     NothingToReplace,
     /// Scrap (12D.2): nothing to rebuild — strip it for parts.
     WrittenOff,
+    /// The bay is not rated for this assembly's weight class (12D.8).
+    BayTooSmall,
     KeepStocked,
     /// The home HQ's spaceport hosts no (more) air wings.
     NoAirSlot,
@@ -1109,6 +1111,7 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             const def = part_mod.find(f.part_key) orelse return Error.UnknownPart;
             if (!part_mod.isComponent(def.key)) return Error.NotAComponent;
             if (hq_ops.baySlots(gs, f.hq) == 0) return Error.NoBay;
+            if (!hq_ops.canFabricate(gs, f.hq, def.key)) return Error.BayTooSmall; // heavy/assault assemblies (12D.8)
             const total = types.applyBp(types.applyBp(def.cost * f.quantity, market_mod.structural_fab_cost_mult_bp), gs.diff().fab_cost_bp); // difficulty (12.32)
             try debitPurchase(gs, .{ .hq = f.hq }, .{
                 .day = gs.clock.day_index,
@@ -3492,12 +3495,14 @@ test "9D: depot work happens at the hull's home HQ — its components, its bay �
     try std.testing.expect(uid != .none);
 
     // The torso assembly sits in Bravo's own depot; the first HQ has none.
-    _ = gs.takeStock(.{ .hq = home }, "comp_torso", gs.stockCount(.{ .hq = home }, "comp_torso"));
-    try gs.addStock(.{ .hq = fb }, "comp_torso", 1);
+    const torso = @import("../domain/part.zig").componentFor("lt.structure", gs.unit(uid).?.chassis_key); // by weight class (12D.8)
+    _ = gs.takeStock(.{ .hq = home }, torso, gs.stockCount(.{ .hq = home }, torso));
+    _ = gs.takeStock(.{ .hq = fb }, torso, gs.stockCount(.{ .hq = fb }, torso));
+    try gs.addStock(.{ .hq = fb }, torso, 1);
     _ = try execute(&gs, .{ .depot = uid });
     try std.testing.expect(hq_ops.hasJobForUnit(&gs, uid));
     for (gs.bay_jobs.items) |j| if (j.unit == uid) try std.testing.expectEqual(fb, j.hq);
-    try std.testing.expectEqual(@as(u32, 0), gs.stockCount(.{ .hq = fb }, "comp_torso"));
+    try std.testing.expectEqual(@as(u32, 0), gs.stockCount(.{ .hq = fb }, torso));
 }
 
 test "9D: a truck sent to a deployed company lands in its transport lance, and can still change lances out there" {
@@ -3605,12 +3610,13 @@ test "12.31: a wreck is rebuilt in the depot — a component and bay time — an
     try std.testing.expect(ct_destroyed);
 
     // No centre torso on the shelf: the depot asks for it; with one, it queues.
-    _ = gs.takeStock(.{ .hq = home }, "comp_ct", gs.stockCount(.{ .hq = home }, "comp_ct"));
+    const ct = @import("../domain/part.zig").componentFor("ct.structure", u.chassis_key); // by weight class (12D.8)
+    _ = gs.takeStock(.{ .hq = home }, ct, gs.stockCount(.{ .hq = home }, ct));
     try std.testing.expectError(Error.MissingComponents, execute(&gs, .{ .depot = uid }));
-    try gs.addStock(.{ .hq = home }, "comp_ct", 1);
+    try gs.addStock(.{ .hq = home }, ct, 1);
     _ = try execute(&gs, .{ .depot = uid });
     try std.testing.expect(hq_ops.hasJobForUnit(&gs, uid));
-    try std.testing.expectEqual(@as(u32, 0), gs.stockCount(.{ .hq = home }, "comp_ct"));
+    try std.testing.expectEqual(@as(u32, 0), gs.stockCount(.{ .hq = home }, ct));
     // Bay time passes (a failed check redoes the work); the wreck is a hull again.
     var days: u32 = 0;
     while (hq_ops.hasJobForUnit(&gs, uid) and days < 300) : (days += 1) {
@@ -3625,10 +3631,10 @@ test "12.31: a wreck is rebuilt in the depot — a component and bay time — an
     const legacy = try gs.addUnit("LCT-1V");
     gs.unit(legacy).?.status = .destroyed;
     try std.testing.expect(gs.unit(legacy).?.needsDepot());
-    try gs.addStock(.{ .hq = home }, "comp_ct", 1);
+    try gs.addStock(.{ .hq = home }, "comp_ct_l", 1); // a Locust's centre torso is a light assembly (12D.8)
     _ = try execute(&gs, .{ .depot = legacy });
     try std.testing.expect(hq_ops.hasJobForUnit(&gs, legacy));
-    try std.testing.expectEqual(@as(u32, 0), gs.stockCount(.{ .hq = home }, "comp_ct"));
+    try std.testing.expectEqual(@as(u32, 0), gs.stockCount(.{ .hq = home }, "comp_ct_l"));
 }
 
 test "12.32: difficulty scales pay, fabrication and purchases — regular is the game as tuned, and it persists as a setting" {
@@ -3791,4 +3797,30 @@ test "12D.7: the contract world has a hull board — local funds pay, the hull j
     gs.contracts.getPtr(cid).?.status = .completed;
     try @import("../econ/contract_market.zig").refreshListings(&gs);
     for (gs.market_listings.items) |l| try std.testing.expect(l.company == .none);
+}
+
+test "12D.8: heavy assemblies need a level-2 bay, assault ones a level-3 bay at a regional HQ" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1208 });
+    defer gs.deinit();
+    _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
+    const hq_id = gs.hqs.keys()[0];
+    const h = gs.hqs.getPtr(hq_id).?;
+    h.staff_assigned = 999;
+    h.funds = 50_000_000;
+    const bay = for (h.facilities.items) |*f| {
+        if (f.kind == .mek_bay) break f;
+    } else return error.TestUnexpectedResult;
+    bay.level = 1;
+    _ = try execute(&gs, .{ .fabricate = .{ .hq = hq_id, .part_key = "comp_ct_l", .quantity = 1 } });
+    _ = try execute(&gs, .{ .fabricate = .{ .hq = hq_id, .part_key = "comp_ct", .quantity = 1 } });
+    try std.testing.expectError(Error.BayTooSmall, execute(&gs, .{ .fabricate = .{ .hq = hq_id, .part_key = "comp_ct_h", .quantity = 1 } }));
+    bay.level = 2;
+    _ = try execute(&gs, .{ .fabricate = .{ .hq = hq_id, .part_key = "comp_ct_h", .quantity = 1 } });
+    try std.testing.expectError(Error.BayTooSmall, execute(&gs, .{ .fabricate = .{ .hq = hq_id, .part_key = "comp_ct_a", .quantity = 1 } }));
+    bay.level = 3;
+    _ = try execute(&gs, .{ .fabricate = .{ .hq = hq_id, .part_key = "comp_ct_a", .quantity = 1 } });
+    // A field HQ never builds assault assemblies, whatever its bay.
+    h.tier = .field;
+    try std.testing.expect(!hq_ops.canFabricate(&gs, hq_id, "comp_ct_a"));
+    try std.testing.expect(hq_ops.canFabricate(&gs, hq_id, "comp_ct_h"));
 }

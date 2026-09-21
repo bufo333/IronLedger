@@ -221,7 +221,7 @@ fn runStockPolicies(gs: *GameState) !void {
         };
         if (pending > 0 or failed_recently) continue;
         const want = sp.target - have;
-        const fabricate = part_mod.isComponent(sp.part_key) and hq_ops.baySlots(gs, sp.hq) > 0;
+        const fabricate = hq_ops.canFabricate(gs, sp.hq, sp.part_key); // what this bay is rated for (12D.8), else order it
         const cmd: commands.Command = if (fabricate)
             .{ .fabricate = .{ .hq = sp.hq, .part_key = sp.part_key, .quantity = want } }
         else

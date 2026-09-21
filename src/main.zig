@@ -602,7 +602,7 @@ fn printDemand(gs: *game.state.GameState) void {
         if (u.status == .destroyed) continue;
         for (u.slots.items) |s| {
             if (s.condition != .destroyed and s.condition != .missing) continue;
-            const key = if (s.class == .structure) game.part.componentForSlot(s.slot_key) else s.part_key;
+            const key = if (s.class == .structure) game.part.componentFor(s.slot_key, u.chassis_key) else s.part_key;
             const e = needed.getOrPut(std.heap.page_allocator, key) catch return;
             if (!e.found_existing) e.value_ptr.* = 0;
             e.value_ptr.* += 1;

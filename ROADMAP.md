@@ -1076,6 +1076,21 @@ CamOps/MekHQ/TechManual rules, scaled by difficulty.
   the company's **local funds**; buying debits them and the hull joins the
   company on the spot (seat a pilot and a tech). The combat-ineffective
   grace window now points there — it finally has somewhere to shop.
+- ✅ 12D.8 **Tonnage-rated structure** (MekHQ `MekLocation` per tonnage;
+  TechManual structure cost scales with tonnage). Components carry a
+  weight class: the existing `comp_*` keys are the medium (40–55 t)
+  assemblies — so older saves' stock and keep-stocked lines stay valid —
+  and `comp_*_l` / `_h` / `_a` are light (×0.6 cost), heavy (×1.5, one
+  rarity step scarcer) and assault (×2, two steps) in `parts.zon`.
+  `part.componentFor(slot, chassis)` picks by the hull's tonnage in the
+  depot, the estimate, strip, the damage/demand panes and the REPL; salvage
+  assemblies come in the class of the wreck they were pulled from.
+  Fabrication is facility-locked, not rarity-locked: heavy assemblies need
+  a mek bay at level 2, assault ones level 3 at a regional or brigade HQ
+  (`PartDef.fab_min_bay` / `fab_regional`, `hq_ops.canFabricate`, refused
+  with `BayTooSmall`); keep-stocked lines and the demand pane order what
+  the bay can't build. Fabrication days scale by class (light −2 … assault
+  +6).
 
 ## Stage 13 — Graphical client
 Architected after the TUI ships, reusing the same command/query boundary.

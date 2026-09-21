@@ -2822,7 +2822,7 @@ pub const App = struct {
                         }
                         // Structural components are guaranteed by fabrication at a
                         // regional bay (ARCH §9.8); everything else is an acquisition roll.
-                        if (game.part.isComponent(d.key) and game.hq_ops.baySlots(g, hq_id) > 0) {
+                        if (game.hq_ops.canFabricate(g, hq_id, d.key)) {
                             try self.exec(.{ .fabricate = .{ .hq = hq_id, .part_key = d.key, .quantity = d.short } });
                             if (self.msg.len == 0 or self.msg_style != .crit) self.say(.good, "fabricating {d} × {s} at {s} — a bay job, see the HQ screen", .{ d.short, d.key, q.hqName(g, hq_id) });
                             return;

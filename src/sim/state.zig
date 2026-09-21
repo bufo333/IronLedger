@@ -1699,7 +1699,7 @@ pub const GameState = struct {
             if (s.condition != .ok) continue;
             const key: []const u8 = switch (s.class) {
                 .weapon, .equipment => s.part_key,
-                .structure => part_mod.componentForSlot(s.slot_key),
+                .structure => part_mod.componentFor(s.slot_key, u.chassis_key),
                 .armor, .ammo => continue,
             };
             if (part_mod.find(key) == null) continue;

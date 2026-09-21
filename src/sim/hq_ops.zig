@@ -62,7 +62,7 @@ pub fn rebuildEstimate(gs: *GameState, u: *const unit_mod.Unit) ?types.CBills {
         if (s.class != .structure or s.condition == .ok) continue;
         needed += 1;
         if (s.condition == .damaged) continue;
-        const def = part_mod.find(part_mod.componentForSlot(s.slot_key)) orelse continue;
+        const def = part_mod.find(part_mod.componentFor(s.slot_key, u.chassis_key)) orelse continue;
         total += types.applyBp(types.applyBp(def.cost, market.structural_fab_cost_mult_bp), gs.diff().fab_cost_bp);
     }
     total += @divTrunc(u.purchase_price, 25) * needed;
@@ -106,7 +106,7 @@ pub fn queueDepotRepair(gs: *GameState, unit_id: types.UnitId) QueueError!bool {
         if (s.class != .structure or s.condition == .ok) continue;
         needed += 1;
         if (s.condition == .destroyed or s.condition == .missing) {
-            if (gs.stockCount(.{ .hq = hq_id }, part_mod.componentForSlot(s.slot_key)) == 0) return false;
+            if (gs.stockCount(.{ .hq = hq_id }, part_mod.componentFor(s.slot_key, u.chassis_key)) == 0) return false;
         }
     }
     if (needed == 0) return true;
@@ -114,7 +114,7 @@ pub fn queueDepotRepair(gs: *GameState, unit_id: types.UnitId) QueueError!bool {
     // per slot so two torsos don't share one assembly).
     for (u.slots.items) |s| {
         if (s.class != .structure or s.condition == .damaged or s.condition == .ok) continue;
-        if (!gs.takeStock(.{ .hq = hq_id }, part_mod.componentForSlot(s.slot_key), 1)) return false;
+        if (!gs.takeStock(.{ .hq = hq_id }, part_mod.componentFor(s.slot_key, u.chassis_key), 1)) return false;
     }
 
     try gs.bay_jobs.append(gs.allocator(), .{
@@ -143,8 +143,21 @@ pub fn queueReactivation(gs: *GameState, unit_id: types.UnitId) QueueError!void 
     });
 }
 
+/// Can this HQ's bay fabricate this component (12D.8)? A bay at all, at
+/// the level the assembly's class needs (heavy 2, assault 3), and for
+/// assault assemblies a regional or brigade HQ.
+pub fn canFabricate(gs: *GameState, hq_id: types.HqId, key: []const u8) bool {
+    const def = part_mod.find(key) orelse return false;
+    if (!part_mod.isComponent(key) or baySlots(gs, hq_id) == 0) return false;
+    const hq = gs.hqs.getPtr(hq_id) orelse return false;
+    if (hq.effectiveFacilityLevel(.mek_bay) < def.fab_min_bay) return false;
+    if (def.fab_regional and hq.tier == .field) return false;
+    return true;
+}
+
 /// Fabricate components in the bay: the §9.8 guarantee — always available,
-/// at a premium, over bay time. Cost is paid by the caller up front.
+/// at a premium, over bay time — for what the bay is rated to build (12D.8).
+/// Cost is paid by the caller up front.
 pub fn queueFabrication(gs: *GameState, hq_id: types.HqId, key: []const u8, quantity: u32) QueueError!void {
     if (baySlots(gs, hq_id) == 0) return error.NoBay;
     for (0..quantity) |_| {

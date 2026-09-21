@@ -78,6 +78,10 @@ pub const PartDef = struct {
     crits: u8 = 0,
     heat: u8 = 0,
     mount: MountType = .none,
+    /// Structural components (12D.8): the mek bay level a fabrication job
+    /// needs, and whether only a regional or brigade HQ can run it.
+    fab_min_bay: u8 = 1,
+    fab_regional: bool = false,
 
     pub fn mountable(self: *const PartDef) bool {
         return self.mount != .none;
@@ -135,25 +139,62 @@ pub fn isComponent(key: []const u8) bool {
     return std.mem.startsWith(u8, key, "comp_");
 }
 
+const WeightClass = @import("chassis.zig").WeightClass;
+
 /// The structural component a structure slot needs (Stage 9C), by the
-/// location prefix of its slot key ("lt.structure" → side torso).
+/// location prefix of its slot key ("lt.structure" → side torso), for a
+/// medium hull. Use `componentFor` when the hull is known (12D.8).
 pub fn componentForSlot(slot_key: []const u8) []const u8 {
-    if (std.mem.startsWith(u8, slot_key, "hd.")) return "comp_head";
-    if (std.mem.startsWith(u8, slot_key, "ct.")) return "comp_ct";
-    if (std.mem.startsWith(u8, slot_key, "lt.") or std.mem.startsWith(u8, slot_key, "rt.")) return "comp_torso";
-    if (std.mem.startsWith(u8, slot_key, "la.") or std.mem.startsWith(u8, slot_key, "ra.")) return "comp_arm";
-    if (std.mem.startsWith(u8, slot_key, "ll.") or std.mem.startsWith(u8, slot_key, "rl.")) return "comp_leg";
-    return "comp_chassis";
+    return componentForSlotClass(slot_key, .medium);
 }
 
-/// Bay days to fabricate one component. // TUNE
+/// The component for a slot on a hull of a weight class (12D.8): medium
+/// assemblies keep the plain key, the others carry a class suffix.
+pub fn componentForSlotClass(slot_key: []const u8, class: WeightClass) []const u8 {
+    const loc: usize = if (std.mem.startsWith(u8, slot_key, "hd.")) 0 //
+        else if (std.mem.startsWith(u8, slot_key, "ct.")) 1 //
+        else if (std.mem.startsWith(u8, slot_key, "lt.") or std.mem.startsWith(u8, slot_key, "rt.")) 2 //
+        else if (std.mem.startsWith(u8, slot_key, "la.") or std.mem.startsWith(u8, slot_key, "ra.")) 3 //
+        else if (std.mem.startsWith(u8, slot_key, "ll.") or std.mem.startsWith(u8, slot_key, "rl.")) 4 //
+        else 5;
+    const table = [4][6][]const u8{
+        .{ "comp_head_l", "comp_ct_l", "comp_torso_l", "comp_arm_l", "comp_leg_l", "comp_chassis_l" },
+        .{ "comp_head", "comp_ct", "comp_torso", "comp_arm", "comp_leg", "comp_chassis" },
+        .{ "comp_head_h", "comp_ct_h", "comp_torso_h", "comp_arm_h", "comp_leg_h", "comp_chassis_h" },
+        .{ "comp_head_a", "comp_ct_a", "comp_torso_a", "comp_arm_a", "comp_leg_a", "comp_chassis_a" },
+    };
+    return table[@intFromEnum(class)][loc];
+}
+
+/// The component a slot needs on a given design (12D.8): by its tonnage.
+pub fn componentFor(slot_key: []const u8, chassis_key: []const u8) []const u8 {
+    const class: WeightClass = if (@import("chassis.zig").find(chassis_key)) |c| c.weightClass() else .medium;
+    return componentForSlotClass(slot_key, class);
+}
+
+/// The weight class a component key is rated for (medium when unsuffixed).
+pub fn componentClass(key: []const u8) WeightClass {
+    if (std.mem.endsWith(u8, key, "_l")) return .light;
+    if (std.mem.endsWith(u8, key, "_h")) return .heavy;
+    if (std.mem.endsWith(u8, key, "_a")) return .assault;
+    return .medium;
+}
+
+/// Bay days to fabricate one component: by location, then by class — a
+/// light assembly two days quicker, heavy three and assault six slower. // TUNE
 pub fn fabricationDays(key: []const u8) u32 {
-    if (std.mem.eql(u8, key, "comp_ct")) return 12;
-    if (std.mem.eql(u8, key, "comp_torso")) return 9;
-    if (std.mem.eql(u8, key, "comp_leg")) return 8;
-    if (std.mem.eql(u8, key, "comp_arm")) return 6;
-    if (std.mem.eql(u8, key, "comp_head")) return 5;
-    return 7;
+    const base: u32 = if (std.mem.startsWith(u8, key, "comp_ct")) 12 //
+        else if (std.mem.startsWith(u8, key, "comp_torso")) 9 //
+        else if (std.mem.startsWith(u8, key, "comp_leg")) 8 //
+        else if (std.mem.startsWith(u8, key, "comp_arm")) 6 //
+        else if (std.mem.startsWith(u8, key, "comp_head")) 5 //
+        else 7;
+    return switch (componentClass(key)) {
+        .light => base -| 2,
+        .medium => base,
+        .heavy => base + 3,
+        .assault => base + 6,
+    };
 }
 
 /// Provisions: one ton feeds this many person-days (~5 kg/person/day). // TUNE
@@ -218,4 +259,26 @@ test "acquisition order starts unsourced" {
     const o: AcquisitionOrder = .{ .part_key = "ac5", .quantity = 2, .ordered_day = 10, .cost = 25_000 };
     try std.testing.expectEqual(OrderStatus.sourcing, o.status);
     try std.testing.expect(o.eta_day == null);
+}
+
+test "12D.8: structure is rated by weight class — every classed assembly is in the catalogue" {
+    try std.testing.expectEqualStrings("comp_ct_l", componentFor("ct.structure", "LCT-1V"));
+    try std.testing.expectEqualStrings("comp_ct", componentFor("ct.structure", "SHD-2H"));
+    try std.testing.expectEqualStrings("comp_leg_a", componentFor("ll.structure", "AS7-D"));
+    try std.testing.expectEqualStrings("comp_torso", componentForSlot("rt.structure")); // medium by default
+    for ([_]WeightClass{ .light, .medium, .heavy, .assault }) |class| {
+        for ([_][]const u8{ "hd.", "ct.", "lt.", "la.", "ll.", "chassis." }) |loc| {
+            const key = componentForSlotClass(loc, class);
+            const def = find(key) orelse return error.TestUnexpectedResult;
+            try std.testing.expectEqual(class, componentClass(key));
+            try std.testing.expect(isComponent(key));
+            _ = def;
+        }
+    }
+    try std.testing.expect(find("comp_ct_a").?.cost > find("comp_ct_h").?.cost);
+    try std.testing.expect(find("comp_ct_h").?.cost > find("comp_ct").?.cost);
+    try std.testing.expect(fabricationDays("comp_ct_a") > fabricationDays("comp_ct"));
+    try std.testing.expect(fabricationDays("comp_ct_l") < fabricationDays("comp_ct"));
+    try std.testing.expectEqual(@as(u8, 2), find("comp_arm_h").?.fab_min_bay);
+    try std.testing.expect(find("comp_arm_a").?.fab_regional);
 }

@@ -942,10 +942,10 @@ pub fn toeFiltered(alloc: Alloc, gs: *GameState, filter: ToeFilter) ![]ToeRow {
             var needs: std.ArrayListUnmanaged(u8) = .empty;
             for (u.slots.items) |sl| {
                 if (sl.class != .structure or (sl.condition != .destroyed and sl.condition != .missing)) continue;
-                const comp = @import("../domain/part.zig").componentForSlot(sl.slot_key);
+                const comp = @import("../domain/part.zig").componentFor(sl.slot_key, u.chassis_key);
                 if (std.mem.indexOf(u8, needs.items, comp) != null) continue;
                 var n: u32 = 0;
-                for (u.slots.items) |o| if (o.class == .structure and (o.condition == .destroyed or o.condition == .missing) and std.mem.eql(u8, @import("../domain/part.zig").componentForSlot(o.slot_key), comp)) {
+                for (u.slots.items) |o| if (o.class == .structure and (o.condition == .destroyed or o.condition == .missing) and std.mem.eql(u8, @import("../domain/part.zig").componentFor(o.slot_key, u.chassis_key), comp)) {
                     n += 1;
                 };
                 const have = gs.stockCount(.{ .hq = seat }, comp);
@@ -1063,7 +1063,7 @@ pub fn companyDamage(alloc: Alloc, gs: *GameState, company: types.ForceId) !Comp
                 if (s.condition == .damaged) {
                     try structure.appendSlice(alloc, try std.fmt.allocPrint(alloc, "{s} (bay time only)", .{slotLocation(s.slot_key)}));
                 } else {
-                    const comp = part_mod.componentForSlot(s.slot_key);
+                    const comp = part_mod.componentFor(s.slot_key, u.chassis_key);
                     const g = try need.getOrPut(alloc, comp);
                     if (!g.found_existing) g.value_ptr.* = 0;
                     g.value_ptr.* += 1;
@@ -1852,7 +1852,7 @@ pub fn market(alloc: Alloc, gs: *GameState, filter: MarketFilter, hq: types.HqId
         if (!filter.matchesPart(p.key)) continue;
         const component = part_mod.isComponent(p.key);
         try catalog.append(alloc, .{ .key = p.key, .component = component, .text = try std.fmt.allocPrint(alloc, "{s: <16} {s: <22} {s: >12}  {d: >3}t  {s}", .{
-            clip(p.key, 16), clip(p.name, 22), try money(alloc, p.cost), part_mod.tons(p.key), if (component) "{a}fabricable at a regional HQ{/}" else if (isStaple(p.key)) "{g}staple{/}" else "{d}rolls vs rarity{/}",
+            clip(p.key, 16), clip(p.name, 22), try money(alloc, p.cost), part_mod.tons(p.key), if (component) (if (p.fab_regional) "{a}fabricable: bay 3 at a regional HQ{/}" else if (p.fab_min_bay > 1) try std.fmt.allocPrint(alloc, "{{a}}fabricable: bay {d}{{/}}", .{p.fab_min_bay}) else "{a}fabricable at any bay{/}") else if (isStaple(p.key)) "{g}staple{/}" else "{d}rolls vs rarity{/}",
         }) });
     }
     // Demand: damaged / destroyed / missing slots by part.
@@ -1863,7 +1863,7 @@ pub fn market(alloc: Alloc, gs: *GameState, filter: MarketFilter, hq: types.HqId
         if (u.status == .destroyed) continue;
         for (u.slots.items) |s| {
             if (s.condition == .ok) continue;
-            const key: []const u8 = if (s.class == .structure) part_mod.componentForSlot(s.slot_key) else s.part_key;
+            const key: []const u8 = if (s.class == .structure) part_mod.componentFor(s.slot_key, u.chassis_key) else s.part_key;
             const g = try need.getOrPut(alloc, key);
             if (!g.found_existing) g.value_ptr.* = 0;
             g.value_ptr.* += 1;
@@ -3104,7 +3104,7 @@ pub fn lab(alloc: Alloc, gs: *GameState, uid: types.UnitId) !Lab {
             if (s.class != .structure) continue;
             if (meklab.parseLocation(s.slot_key) != loc) continue;
             if (s.condition != .ok) {
-                const comp = @import("../domain/part.zig").componentForSlot(s.slot_key);
+                const comp = @import("../domain/part.zig").componentFor(s.slot_key, u.chassis_key);
                 const on_hand = gs.stockCount(.{ .hq = home_hq }, comp);
                 const at_home = gs.isCompanyHome(gs.companyOf(u.force));
                 const action: []const u8 = if (!at_home)
@@ -3294,15 +3294,18 @@ test "damage marks and the company damage report name the components a hull need
     try std.testing.expect(std.mem.indexOf(u8, marks, "struct lt") != null);
     try std.testing.expect(std.mem.indexOf(u8, marks, "gear 1") != null);
     const report = try companyDamage(a, &gs, co);
+    // The torso for this hull's weight class (12D.8).
+    const torso = @import("../domain/part.zig").componentFor("lt.structure", u.chassis_key);
+    const want = try std.fmt.allocPrint(a, "lt→{s}", .{torso});
     var saw_torso = false;
-    for (report.lines) |line| if (std.mem.indexOf(u8, line, "lt→comp_torso") != null) {
+    for (report.lines) |line| if (std.mem.indexOf(u8, line, want) != null) {
         saw_torso = true;
     };
     try std.testing.expect(saw_torso);
     // The founding warehouse has no side torsos: that is the line to fabricate.
-    _ = gs.takeStock(.{ .hq = report.home }, "comp_torso", gs.stockCount(.{ .hq = report.home }, "comp_torso"));
+    _ = gs.takeStock(.{ .hq = report.home }, torso, gs.stockCount(.{ .hq = report.home }, torso));
     const again = try companyDamage(a, &gs, co);
-    try std.testing.expectEqualStrings("comp_torso", again.short_key.?);
+    try std.testing.expectEqualStrings(torso, again.short_key.?);
 }
 
 test "contract history lists closed contracts with their world; the map counts worked worlds" {
@@ -4047,7 +4050,7 @@ pub fn partChoices(alloc: Alloc, gs: *GameState, purpose: PartPurpose, site: typ
             .fabricate => component,
         };
         if (!keep) continue;
-        const source: []const u8 = if (component) "{a}fabricable at a regional HQ{/}" else if (isStaple(p.key)) "{g}staple{/}" else "{d}rolls for availability{/}";
+        const source: []const u8 = if (component) (if (p.fab_regional) "{a}fabricable: bay 3 at a regional HQ{/}" else if (p.fab_min_bay > 1) try std.fmt.allocPrint(alloc, "{{a}}fabricable: bay {d}{{/}}", .{p.fab_min_bay}) else "{a}fabricable at any bay{/}") else if (isStaple(p.key)) "{g}staple{/}" else "{d}rolls for availability{/}";
         try out.append(alloc, .{ .id = @intCast(i), .eligible = true, .key = p.key, .text = try std.fmt.allocPrint(alloc, "{s} {s: <22} {s: >12}  {d: >3}t  {s}{d: >6}{{/}}  {s}", .{
             try padCells(alloc, "{a}", clip(p.key, 16), 16), clip(p.name, 22), try money(alloc, p.cost), part_mod.tons(p.key), if (on_hand == 0) "{d}" else "", on_hand, source,
         }) });
@@ -4147,7 +4150,7 @@ test "play feedback: the unassigned pool says where it sits and what each wreck'
     var row_ok = false;
     for (try toeFiltered(al, &gs, .unassigned)) |r| {
         if (std.mem.indexOf(u8, r.text, "Unassigned hulls") != null and std.mem.indexOf(u8, r.text, hq_name) != null) header_ok = true;
-        if (r.unit == wreck and std.mem.indexOf(u8, r.text, "comp_ct×1") != null) row_ok = true;
+        if (r.unit == wreck and std.mem.indexOf(u8, r.text, "comp_ct_l×1") != null) row_ok = true; // a Locust takes a light assembly (12D.8)
     }
     try std.testing.expect(header_ok);
     try std.testing.expect(row_ok);

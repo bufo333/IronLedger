@@ -63,7 +63,8 @@ pub fn qualityFromRoll(r: i32) types.ExperienceLevel {
     return .elite;
 }
 
-fn weightClass(rng: *rng_mod.Rng, stream: rng_mod.Stream) chassis.WeightClass {
+/// AtB weight-class roll (2d6) on a named stream.
+pub fn weightClass(rng: *rng_mod.Rng, stream: rng_mod.Stream) chassis.WeightClass {
     return switch (rng.roll2d6(stream)) {
         2, 3, 4 => .light,
         5, 6, 7, 8 => .medium,

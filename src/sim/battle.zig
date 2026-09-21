@@ -794,10 +794,13 @@ fn claimSalvage(gs: *GameState, c: *contract_mod.Contract, claim_bv: i64) ![]con
     // Parts: components, then weapons, then armor, at BV prices.
     const t = tuning.battle;
     var components: u32 = 0;
-    const comp_keys = [_][]const u8{ "comp_arm", "comp_leg", "comp_torso" };
+    // Assemblies off the enemy's wrecks come in the class of the hull they
+    // were pulled from (12D.8).
+    const comp_slots = [_][]const u8{ "la.", "ll.", "lt." };
     while (remaining >= t.salvage_bv_per_component and components < 3) : (components += 1) {
         remaining -= t.salvage_bv_per_component;
-        try gs.sendHome(c.assigned_company, comp_keys[components % comp_keys.len], 1);
+        const class = @import("../domain/opfor.zig").weightClass(&gs.rng, .battle);
+        try gs.sendHome(c.assigned_company, part_mod.componentForSlotClass(comp_slots[components % comp_slots.len], class), 1);
     }
     var weapons: u32 = 0;
     const weapon_keys = [_][]const u8{ "mlas", "srm4", "ac5", "lrm5", "llas" };
