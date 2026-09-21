@@ -48,7 +48,10 @@ pub fn advanceDay(gs: *GameState) !void {
     try runContracts(gs); // contract lifecycle
     try contract_control.runReturns(gs); // companies travelling home arrive
     if (gs.clock.date.day == 1) try contract_events.rollMonthly(gs); // event decks
-    if (gs.clock.day_index % 7 == 3) try contract_events.rollWeekly(gs); // weekly happenings (Stage 12)
+    if (gs.clock.day_index % 7 == 3) {
+        try contract_events.rollWeekly(gs); // weekly happenings (Stage 12)
+        try contract_events.rollInterdiction(gs); // raiders at the jump point (12D.9)
+    }
     try battle.runDaily(gs); // battle_resolution: due engagements resolve
     try contract_control.checkEffectiveness(gs); // the ineffectiveness clock (Stage 9E)
     if (gs.clock.day_index % 7 == 0 and gs.clock.day_index > 0) {

@@ -339,6 +339,9 @@ pub const Tuning = struct {
         /// the employer and in reputation. No clawback, no cooling.
         standing_failure_loss: i32,
         failure_reputation: i32,
+        /// Jump-point interdiction (12D.9): weekly, a company in transit
+        /// without its own crewed DropShip meets raiders on 2d6 ≥ this.
+        interdiction_target: u8,
         standing_pay_bp_per_point: types.Bp,
         /// Shunned when standing is at or under −this.
         standing_shun_depth: i32,

@@ -179,6 +179,29 @@ brigade treasury can't teleport. And when a company rotates home overweight,
 cold storage turns spare hulls into a cheap strategic reserve that takes
 weeks, not hours, to wake back up.
 
+## Losing a lance
+
+Hulls die in the field, and not every death is a depot job (Stage 12D).
+A mek whose centre torso was cored comes home for a new assembly; one
+whose engine was killed needs a new engine at TechManual prices; an
+ammunition explosion guts the torsos too; some wrecks are scrap, worth
+only what `strip` crates into the warehouse. The hangar prices each rebuild
+against a new hull and says when it is not worth doing.
+
+Losing the field is worse. Whoever holds it keeps the wrecks: without a
+salvage lance, trucks or a DropShip on-world, a rout leaves hulls to the
+enemy — gone — and their pilots may walk out or be taken, a ransom to pay
+or a prisoner to trade. The enemy is a force of its own, posted with the
+offer (the board says what the intel can read, `candidates` gives each
+company's odds), and it does not shrink as your company wears down. A
+company's **rules of engagement** decide how it takes a turning fight:
+hold the ground for a better roll and heavier losses, or pull back early
+and give up the field on a draw. A mauled company can buy a local
+replacement off the contract world's board with its local funds — the
+treasury still cannot teleport. Assault-class structure needs a proper
+regional bay; the rest of the outfit's growth has to catch up with its
+hulls.
+
 ## A worked month (mid-game)
 
 Marik border, 3027. Two regional HQs: **Zenith** (home region, mature) and

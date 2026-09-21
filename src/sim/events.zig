@@ -51,6 +51,8 @@ pub const EventKind = enum {
     prisoner_held,
     /// One of yours left behind on a lost field, held by the enemy (12D.3).
     mia_held,
+    /// Raiders waiting at the jump point for an unescorted company (12D.9).
+    jump_interdiction,
 };
 
 /// One consequence of an event option. Relative where it must scale
@@ -99,6 +101,11 @@ pub const Effect = union(enum) {
     /// Fight it out (12D.6): a real engagement against the contract's
     /// opposition, resolved on the spot.
     engagement,
+    /// The employer takes the company's most battered line hull as
+    /// "collateral" (12D.9) — off the books for good.
+    seize_hull,
+    /// Days added to a company's transit (12D.9: waiting raiders out).
+    delay_arrival: u8,
 };
 
 pub const Option = struct {

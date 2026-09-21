@@ -308,6 +308,8 @@ pub fn effectsText(alloc: Alloc, effects: []const @import("events.zig").Effect) 
         .exchange_mia => try appendTag(alloc, &out, true, "a prisoner of their house goes back; else written off"),
         .write_off_mia => try appendTag(alloc, &out, false, "missing, presumed dead · company morale −5"),
         .engagement => try appendTag(alloc, &out, false, "a real engagement against the contract's opposition"),
+        .seize_hull => try appendTag(alloc, &out, false, "your most battered line hull is taken, for good"),
+        .delay_arrival => |d| try appendTag(alloc, &out, false, try std.fmt.allocPrint(alloc, "+{d} days in transit", .{d})),
     };
     return out.toOwnedSlice(alloc);
 }

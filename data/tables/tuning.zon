@@ -228,6 +228,7 @@
         .standing_breach_loss = 20,
         .standing_failure_loss = 10, // failure at term (12D.1, CamOps): half a breach, no cooling
         .failure_reputation = -1,
+        .interdiction_target = 11, // 1 in 12 a week for an unescorted charter
         .standing_pay_bp_per_point = 25, // ±25% pay at ±100
         .standing_shun_depth = 40,
         .standing_drift_per_month = 1,

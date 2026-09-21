@@ -1091,6 +1091,18 @@ CamOps/MekHQ/TechManual rules, scaled by difficulty.
   with `BayTooSmall`); keep-stocked lines and the demand pane order what
   the bay can't build. Fabrication days scale by class (light −2 … assault
   +6).
+- ✅ 12D.9 **High-stakes decisions** (the 12.24 inbox rule: hulls and money
+  move only by decision). **Betrayal escalates** (combat monthly 2): the
+  liaison who sold your routes demands your most battered line hull as
+  collateral — hand it over (gone for good, `Effect.seize_hull`), refuse
+  and protest (employer standing −6, morale −8, score −2; the default), or
+  pay him off (half a month's pay). **Jump-point interdiction**: a company
+  in transit without its own crewed DropShip meets raiders on 2d6 ≥
+  `contract.interdiction_target` (11) weekly — fight through (a real
+  engagement against the contract's opposition), pay them off (100k), or
+  divert and wait them out (+7 days, the default; `Effect.delay_arrival`).
+  Deferred: a "recovery raid" decision to win back hulls left on a lost
+  field (needs the lost hulls held in limbo rather than struck off).
 
 ## Stage 13 — Graphical client
 Architected after the TUI ships, reusing the same command/query boundary.
