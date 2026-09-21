@@ -202,6 +202,24 @@ treasury still cannot teleport. Assault-class structure needs a proper
 regional bay; the rest of the outfit's growth has to catch up with its
 hulls.
 
+## Reading a contract before you sign it
+
+Every HQ posts its own board — work inside its ring and beachhead band —
+and only the companies based there can take it. Each offer is rated in
+**skulls**, half a skull at a time, for the company that would go: three
+skulls is an even, hard fight; fewer is easier; five is outmatched. The
+rating is the battle model's own arithmetic — your company's power as it
+stands today (machines, pilots, fatigue, supply, recon) against the
+enemy's lances and skill as your comms can read them — so a blurry intel
+picture shows as a range ("2–3½ skulls"), and it sits beside the tonnage
+("640t, L7 M9, vs ~660–825t") and the odds of winning a fight or losing
+the field. `candidates` rates every company in range side by side. The
+enemy does not shrink when you do: a mauled company's skulls climb on the
+active contract, and the checklist says so. Harder jobs pay more — the
+employer prices the opposition. A new outfit starts with lights and
+mediums, which its founding mek bay can rebuild; heavies wait for a bigger
+bay.
+
 ## A worked month (mid-game)
 
 Marik border, 3027. Two regional HQs: **Zenith** (home region, mature) and

@@ -342,6 +342,13 @@ pub const Tuning = struct {
         /// Jump-point interdiction (12D.9): weekly, a company in transit
         /// without its own crewed DropShip meets raiders on 2d6 ≥ this.
         interdiction_target: u8,
+        /// Threat pay (12E.6): an offer's pay scales with its opposition's
+        /// power against the kind's norm (the midpoint lance count of
+        /// `reference_lance_bv` at regular skill) — by `threat_pay_weight_bp`
+        /// of the difference, capped at ±`threat_pay_cap_bp`.
+        reference_lance_bv: i64,
+        threat_pay_weight_bp: types.Bp,
+        threat_pay_cap_bp: types.Bp,
         standing_pay_bp_per_point: types.Bp,
         /// Shunned when standing is at or under −this.
         standing_shun_depth: i32,

@@ -1164,6 +1164,16 @@ that would go; and with several HQs, offers belong to the bases in range.
   Intel is three-tiered (`queries.lanceIntel`): exact from comms 3, within
   a lance either way from comms 1, the kind's whole range blind. `--ascii`
   draws skulls as X / x; the REPL prints them under each offer.
+- ✅ 12E.6 **Harder contracts pay more** (CamOps prices by operation, HBS
+  by difficulty). `contract_market.threatPayBp`: the opposition's power
+  (lances × lance BV at its skill) against the kind's norm (midpoint lances
+  of `contract.reference_lance_bv` 3.9k at regular skill), half the
+  difference (`threat_pay_weight_bp`), capped at ±25%
+  (`threat_pay_cap_bp`) — absolute, so skulls stay relative to a company
+  and pay to the job. Sweep (40 seeds, one offer each, 150 days, comms 3):
+  ½ skull won 47 / lost 2, 3 skulls 26 / 8, 4 skulls 9 / 7, 5 skulls 26 /
+  46 with 8 meks gone — the middle bands read a little harder than they
+  play (the enemy pool shrinks over a contract).
 
 ## Stage 13 — Graphical client
 Architected after the TUI ships, reusing the same command/query boundary.

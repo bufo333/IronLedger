@@ -11,6 +11,7 @@ mymod/
   tables/rat.zon         # house random assignment tables
   tables/scenarios.zon   # scenario table per contract kind
   tables/opfor.zon       # opposing force per contract kind (12D.5)
+  tables/skulls.zon      # contract difficulty bands in half skulls (12E.3)
 ```
 
 Build with the overlay:
@@ -42,6 +43,7 @@ screen (F12) and the REPL banner say which files are overlaid.
 | `tables/factions.zon` | `domain/faction.zig` `FactionRow` | houses, colours, foes, pay, whether they hire |
 | `tables/scenarios.zon` | `domain/scenario.zig` `Table` | scenario types and the d6 table per contract kind (with `recovery_mod` for a lost field) |
 | `tables/opfor.zon` | `domain/opfor.zig` `Table` | the opposing force per contract kind: lances, quality roll, reinforcements |
+| `tables/skulls.zon` | `domain/skulls.zig` `Table` | half-skull bands by power ratio (keep them aligned with `battle.ratioBonus`), the outmatched line, the checklist warning level |
 | `tables/terrain.zon` | `domain/terrain.zig` `Table` | terrain classes, weather, the 2d6 weather table |
 
 ## Rules of the road

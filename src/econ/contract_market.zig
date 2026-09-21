@@ -69,6 +69,24 @@ fn pickEnemy(gs: *GameState, employer: []const u8, kind: contract.ContractKind) 
     return foes[gs.rng.random(.market).uintLessThan(usize, foes.len)];
 }
 
+/// Pay multiplier for an offer's opposition (12E.6): its combat power
+/// against the kind's norm (midpoint lances of `reference_lance_bv` at
+/// regular skill). A veteran five-lance force pays more than a green four.
+pub fn threatPayBp(kind: contract.ContractKind, lances: u8, quality: types.ExperienceLevel, lance_bv: i64) types.Bp {
+    const opfor = @import("../domain/opfor.zig");
+    const Element = @import("../sim/autoresolve.zig").Element;
+    const t = tuning.contract;
+    const row = opfor.rowFor(kind);
+    const sk = opfor.skills(quality);
+    const enemy = (Element{ .base_strength = lance_bv * lances, .avg_gunnery = sk[0], .avg_piloting = sk[1] }).effectivePower(.{});
+    const mid: i64 = @divTrunc(@as(i64, row.lances_min) + row.lances_max, 2);
+    const norm = (Element{ .base_strength = t.reference_lance_bv * @max(1, mid) }).effectivePower(.{});
+    if (norm <= 0) return 10_000;
+    const threat_bp: i64 = @divTrunc(enemy * 10_000, norm);
+    const delta = std.math.clamp(@divTrunc((threat_bp - 10_000) * t.threat_pay_weight_bp, 10_000), -@as(i64, t.threat_pay_cap_bp), @as(i64, t.threat_pay_cap_bp));
+    return @intCast(10_000 + delta);
+}
+
 /// Regenerate the offer board (monthly, and once at campaign start).
 /// Reputation reaches only as far as your rings: hidden worlds offer nothing.
 pub fn refresh(gs: *GameState) !void {
@@ -156,6 +174,8 @@ pub fn refresh(gs: *GameState) !void {
             // board can say what the job is up against.
             const enemy_key = pickEnemy(gs, world.faction, kind);
             const opfor = @import("../domain/opfor.zig").roll(&gs.rng, .market, kind, enemy_key, gs.clock.date.year);
+            // Harder work pays more (12E.6): the employer prices the opposition.
+            pay = types.applyBp(pay, threatPayBp(kind, opfor.lances, opfor.quality, opfor.lance_bv));
             try gs.contract_offers.append(gs.allocator(), .{
                 .id = .none, // assigned on acceptance
                 .kind = kind,
@@ -914,4 +934,16 @@ test "play feedback: offers are priced per company — a second company does not
     // And the whole-outfit figure, which the price used to be built on, roughly doubled.
     const whole = gs.monthlyPayroll() + hullUpkeep(&gs) + maintenanceEstimate(&gs);
     try std.testing.expect(whole > @divTrunc(two * 18, 10));
+}
+
+test "12E.6: a veteran five-lance opposition pays more than a green four-lance one" {
+    const hard = threatPayBp(.planetary_assault, 5, .veteran, 4_500);
+    const soft = threatPayBp(.planetary_assault, 4, .green, 3_500);
+    try std.testing.expect(hard > 10_000);
+    try std.testing.expect(soft < 10_000);
+    try std.testing.expect(hard <= 10_000 + tuning.contract.threat_pay_cap_bp);
+    try std.testing.expect(soft >= 10_000 - tuning.contract.threat_pay_cap_bp);
+    // The norm itself pays as tuned.
+    const norm = threatPayBp(.objective_raid, 3, .regular, tuning.contract.reference_lance_bv);
+    try std.testing.expect(norm >= 9_900 and norm <= 10_100);
 }

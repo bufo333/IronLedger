@@ -22,6 +22,7 @@ re-implemented in Zig. Paths below are under `MekHQ/src/mekhq/campaign/`.
 | `autoresolve/` (ACAR) | Abstract combat auto resolution | `src/sim/autoresolve.zig` — extended with supply/morale/support modifiers (ARCH §7) | 7 |
 | `finances/Finances.java`, `Loan.java` | Ledger, categories, loans | `src/econ/finance.zig` | 2/4 |
 | `rating/*` (FMMR, CamOps reputation) | Unit rating → pay & offer quality | reputation in `GameState`, Dragoons rating in `src/sim/queries.zig` `rating()` | 4/12C |
+| — (HBS BattleTech skulls) | Contract difficulty before signing | `src/domain/skulls.zig` + `data/tables/skulls.zon`; `queries.rateOffer` against a company | 12E |
 | `universe/generators/companyGenerators/*` | **AtB company autogeneration** | `src/gen/company_gen.zig` | 3 |
 | `universe/Planet,Systems` (`planets.xml`) | Star map, jump distances, planet socio-industrial codes | `data/planets.zon` (curated) + `src/econ/logistics.zig` routes | 9 |
 | `universe/RandomNameGenerator` | Names by faction/origin | `src/gen/company_gen.zig` name tables | 2 |
