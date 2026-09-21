@@ -41,7 +41,12 @@ pub fn onAccept(gs: *GameState, c: *contract_mod.Contract) void {
     c.objective = contract_mod.objectiveFor(c.kind);
     c.committed_bv = fieldableBv(gs, c.assigned_company);
     if (c.objective == .attrition) {
-        c.enemy_pool_bv = types.applyBp(c.committed_bv, contract_mod.enemyPoolBp(c.kind, c.terms.length_months));
+        // The enemy's own force and its reinforcements (12D.5); a contract
+        // from before then still sizes off the company.
+        c.enemy_pool_bv = if (c.hasOpfor())
+            @import("../domain/opfor.zig").poolBv(c.opforBv(), c.terms.length_months)
+        else
+            types.applyBp(c.committed_bv, contract_mod.enemyPoolBp(c.kind, c.terms.length_months));
         c.enemy_pool_remaining = c.enemy_pool_bv;
     }
 }
@@ -477,4 +482,25 @@ test "12D.1: a performance failure at term is .failed — no clawback, no coolin
     try std.testing.expect(gs.standing("FS") < 0);
     // No clawback: whatever else the day posted, nothing is filed as one.
     try std.testing.expectEqual(@as(i64, 0), @import("../econ/finance.zig").summarize(&gs.ledger, 0, 1000, .all).category(.breach_clawback));
+}
+
+test "12D.5: an offer carries its opposition, and acceptance sizes the pool from it" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1205 });
+    defer gs.deinit();
+    _ = try gs.createCommander("T", .LC, .line_officer);
+    const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    try @import("../econ/contract_market.zig").refresh(&gs);
+    var saw_combat = false;
+    for (gs.contract_offers.items) |o| {
+        try std.testing.expect(o.hasOpfor());
+        const row = @import("../domain/opfor.zig").rowFor(o.kind);
+        try std.testing.expect(o.enemy_lances >= row.lances_min and o.enemy_lances <= row.lances_max);
+        if (!o.kind.isGarrisonClass()) saw_combat = true;
+    }
+    try std.testing.expect(saw_combat);
+    var c = gs.contract_offers.items[0];
+    c.kind = .planetary_assault;
+    c.assigned_company = co;
+    onAccept(&gs, &c);
+    try std.testing.expectEqual(@import("../domain/opfor.zig").poolBv(c.opforBv(), c.terms.length_months), c.enemy_pool_bv);
 }

@@ -448,6 +448,40 @@ pub fn offerTransitDays(gs: *GameState, offer: *const contract_mod.Contract) u32
     return if (jumps == 0) 3 else logistics_mod.transitDays(jumps);
 }
 
+/// How well the outfit reads an offer's opposition (12D.5): the best HQ
+/// comms level, one more for a B-or-better rating (employers share).
+pub fn intelLevel(gs: *GameState) u8 {
+    var comms: u8 = 0;
+    var it = gs.hqs.iterator();
+    while (it.next()) |e| comms = @max(comms, e.value_ptr.effectiveFacilityLevel(.comms));
+    return comms + @intFromBool(ratingIndex(ratingScore(gs)) >= 3);
+}
+
+/// The opposition as the intel reads it (12D.5): exact from comms 3,
+/// the lance range and skill from comms 1, the range alone below that.
+pub fn opforText(alloc: Alloc, gs: *GameState, c: *const contract_mod.Contract) ![]const u8 {
+    if (!c.hasOpfor()) return "opposition sized to the company";
+    const intel = intelLevel(gs);
+    const row = @import("../domain/opfor.zig").rowFor(c.kind);
+    if (intel >= 3) return try std.fmt.allocPrint(alloc, "{d} lance{s} of {s} {s} ≈{s} BV a fight", .{ c.enemy_lances, if (c.enemy_lances == 1) "" else "s", @tagName(c.enemy_quality), c.enemy_key, try money(alloc, types.applyBp(c.opforBv(), gs.diff().enemy_bp)) });
+    if (intel >= 1) return try std.fmt.allocPrint(alloc, "{d}–{d} lances of {s} {s}", .{ row.lances_min, row.lances_max, @tagName(c.enemy_quality), c.enemy_key });
+    return try std.fmt.allocPrint(alloc, "{d}–{d} lances of {s}, quality unknown (comms)", .{ row.lances_min, row.lances_max, c.enemy_key });
+}
+
+/// Estimated enemy combat power in a typical engagement (12D.5), as the
+/// intel reads it: exact lances and skill from comms 3, else the kind's
+/// midpoint (and regular skill below comms 1).
+pub fn opforPowerEstimate(gs: *GameState, c: *const contract_mod.Contract) i64 {
+    if (!c.hasOpfor()) return 0;
+    const opfor = @import("../domain/opfor.zig");
+    const intel = intelLevel(gs);
+    const row = opfor.rowFor(c.kind);
+    const lances: i64 = if (intel >= 3) c.enemy_lances else @divTrunc(@as(i64, row.lances_min) + row.lances_max + 1, 2);
+    const sk = opfor.skills(if (intel >= 1) c.enemy_quality else .regular);
+    const elem: @import("autoresolve.zig").Element = .{ .base_strength = types.applyBp(c.enemy_lance_bv * lances, gs.diff().enemy_bp), .avg_gunnery = sk[0], .avg_piloting = sk[1] };
+    return elem.effectivePower(.{});
+}
+
 pub fn contracts(alloc: Alloc, gs: *GameState) !Contracts {
     const day = gs.clock.day_index;
     var board: std.ArrayListUnmanaged(OfferRow) = .empty;
@@ -462,6 +496,7 @@ pub fn contracts(alloc: Alloc, gs: *GameState) !Contracts {
             if (c.terms.salvage_exchange) try std.fmt.allocPrint(alloc, "{s}$", .{@tagName(c.terms.command_rights)}) else @tagName(c.terms.command_rights), offerTransitDays(gs, &c),
         }) });
         if (c.negotiated) board.items[board.items.len - 1].text = try std.fmt.allocPrint(alloc, "{s}  {{d}}negotiated{{/}}", .{board.items[board.items.len - 1].text});
+        board.items[board.items.len - 1].text = try std.fmt.allocPrint(alloc, "{s}  {{d}}opp {s}{{/}}", .{ board.items[board.items.len - 1].text, try opforText(alloc, gs, &c) });
     }
 
     var active: std.ArrayListUnmanaged(ActiveRow) = .empty;
@@ -3594,7 +3629,7 @@ pub const Candidate = struct {
     text: []const u8,
 };
 
-pub const candidates_header = "company               stands                    jumps  days   fatigue  morale  depot  spent  wounded";
+pub const candidates_header = "company               stands                    jumps  days   fatigue  morale  depot  spent  wounded   odds";
 
 /// Which companies can take an offer and how ready each is: where the
 /// company stands, the jumps and days to the contract world from there
@@ -3635,12 +3670,19 @@ pub fn offerCandidates(alloc: Alloc, gs: *GameState, offer_index: usize) ![]Cand
             @as(i32, @intCast(r.fatigue / 4)) + @as(i32, @intCast(days / 4)) - @as(i32, @intCast(r.morale / 4));
         const fat_mk: []const u8 = if (r.fatigue >= tpb.exhausted_fatigue) "{c}" else if (r.fatigue >= tpb.fatigue_tired) "{a}" else "{g}";
         const mor_mk: []const u8 = if (r.morale < 30) "{c}" else if (r.morale < 50) "{a}" else "{g}";
+        // Odds (12D.5): what the company can field today against what the
+        // intel says the enemy brings to a fight.
+        const enemy_power = opforPowerEstimate(gs, &offer);
+        const own_bv = @import("contract_control.zig").fieldableBv(gs, r.company);
+        const odds_x10: i64 = if (enemy_power > 0) @divTrunc(own_bv * 10, enemy_power) else 0;
+        const odds_mk: []const u8 = if (enemy_power == 0) "{d}" else if (odds_x10 >= 12) "{g}" else if (odds_x10 >= 9) "{a}" else "{c}";
+        const odds: []const u8 = if (enemy_power == 0) "—" else try std.fmt.allocPrint(alloc, "{d}.{d}:1", .{ @divTrunc(odds_x10, 10), @mod(odds_x10, 10) });
         const text = if (eligible)
-            try std.fmt.allocPrint(alloc, "{s} {s} {d: >5}  {d: >4}   {s}{d: >7}{{/}}  {s}{d: >6}{{/}}  {s}{d: >5}{{/}}  {s}{d: >5}{{/}}  {s}{d: >7}{{/}}", .{
+            try std.fmt.allocPrint(alloc, "{s} {s} {d: >5}  {d: >4}   {s}{d: >7}{{/}}  {s}{d: >6}{{/}}  {s}{d: >5}{{/}}  {s}{d: >5}{{/}}  {s}{d: >7}{{/}}  {s}{s: >5}{{/}}", .{
                 try padCells(alloc, "{a}", f.name, 21), try padCells(alloc, "", clip(stands, 25), 25), jumps,                          days,
                 fat_mk,                                 r.fatigue,                                     mor_mk,                         r.morale,
                 if (r.depot > 0) "{c}" else "",         r.depot,                                       if (r.spent > 0) "{a}" else "", r.spent,
-                if (r.wounded > 0) "{a}" else "",       r.wounded,
+                if (r.wounded > 0) "{a}" else "",       r.wounded,                                     odds_mk,                        odds,
             })
         else
             try std.fmt.allocPrint(alloc, "{{d}}{s: <21} {s: <25} cannot go: {s}{{/}}", .{ f.name, clip(stands, 25), why });

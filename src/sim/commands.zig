@@ -2290,7 +2290,8 @@ test "12: a raised company is an empty skeleton; hulls bought for it land in a l
     try std.testing.expectEqual(unit_mod.UnitStatus.in_transit, gs.unit(r2.unit).?.status);
     try std.testing.expectEqual(@as(usize, 1), gs.unit_transfers.items.len);
 
-    // Crews come from the halls: seed one of each role and fill the seats.
+    // Crews come from the halls: seed one of each role (and only those) and fill the seats.
+    gs.candidates.clearRetainingCapacity();
     try gs.candidates.append(gs.allocator(), .{ .hq = hq, .spec = person_gen.generate(&gs.rng, .mekwarrior), .asking_bonus = 0, .listed_day = 0, .expires_day = 400 });
     try gs.candidates.append(gs.allocator(), .{ .hq = hq, .spec = person_gen.generate(&gs.rng, .tech_mek), .asking_bonus = 0, .listed_day = 0, .expires_day = 400 });
     const c = try execute(&gs, .{ .crew_company = co });

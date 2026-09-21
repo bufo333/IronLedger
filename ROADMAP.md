@@ -1044,6 +1044,22 @@ CamOps/MekHQ/TechManual rules, scaled by difficulty.
   up (no salvage, wrecks roll recovery), score −1. Integrated command
   rights force hold ("ROE hold (integrated command)" in the AAR). Knobs in
   `tuning.loss.roe`. Still one roll per battle: a campaign-level choice.
+- ✅ 12D.5 **The enemy is a force, not a mirror** (AtB OpFor). Offers roll
+  their opposition when posted (`domain/opfor.zig`, `data/tables/opfor.zon`):
+  lances by contract kind (raids 2–3/2–4, relief 3–4, planetary assault
+  4–5, garrison probes 1–2), a skill level on 2d6 (+ kind mod, pirates −2:
+  green 5/6 … elite 2/3), and one lance's BV off the enemy house's RAT in
+  the campaign year (store v22). Each engagement the enemy brings that
+  force ± variance × scenario × difficulty — **whatever you brought**: a
+  gutted company no longer meets a gutted enemy. The attrition pool is the
+  force plus reinforcements (+50% a month, six months cap). Contracts from
+  older saves keep the mirror. **Intel**: the board shows "opp 3 lances of
+  veteran DC ≈13k BV a fight" from comms 3 (B-rated outfits get one level
+  free), the kind's lance range and skill from comms 1, the range alone
+  below; `candidates <offer#>` shows each company's **odds** (fieldable BV
+  against the estimated enemy power). Calibration (8 seeds, first combat
+  offer, 200 days, starter company): Regular wins ~67% of battles (the
+  mirror gave 79%), and damage now compounds.
 
 ## Stage 13 — Graphical client
 Architected after the TUI ships, reusing the same command/query boundary.

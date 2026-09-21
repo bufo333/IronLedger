@@ -172,11 +172,18 @@ pub fn refresh(gs: *GameState) !void {
         };
         pay = types.applyBp(pay, rights.payBp());
 
+        // The opposition is a force of its own (12D.5), rolled now so the
+        // board can say what the job is up against.
+        const enemy_key = pickEnemy(gs, world.faction, kind);
+        const opfor = @import("../domain/opfor.zig").roll(&gs.rng, .market, kind, enemy_key, gs.clock.date.year);
         try gs.contract_offers.append(gs.allocator(), .{
             .id = .none, // assigned on acceptance
             .kind = kind,
             .employer_key = world.faction,
-            .enemy_key = pickEnemy(gs, world.faction, kind),
+            .enemy_key = enemy_key,
+            .enemy_lances = opfor.lances,
+            .enemy_quality = opfor.quality,
+            .enemy_lance_bv = opfor.lance_bv,
             .planet_key = world.key,
             .dist_ly = vis[1],
             .beachhead = vis[0] == .beachhead,

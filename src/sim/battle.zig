@@ -259,6 +259,18 @@ fn companyMods(gs: *GameState, c: *const contract_mod.Contract) autoresolve.Camp
     return mods;
 }
 
+/// The enemy's BV in one engagement. It is a force of its own (12D.5): its
+/// lances, whatever you brought, ± the day's variance, scaled by the
+/// scenario and the difficulty (12.32). Contracts from before 12D.5 still
+/// mirror the company's committed BV.
+pub fn engagementEnemyBv(c: *const contract_mod.Contract, player_bv: i64, variance: types.Bp, scenario_bp: types.Bp, difficulty_bp: types.Bp) i64 {
+    const base = if (c.hasOpfor())
+        types.applyBp(c.opforBv(), 10_000 + variance)
+    else
+        types.applyBp(player_bv, contract_mod.enemyStrengthBp(c.kind) + variance);
+    return types.applyBp(types.applyBp(base, scenario_bp), difficulty_bp);
+}
+
 fn ratioBonus(player_power: i64, enemy_power: i64) i32 {
     if (enemy_power <= 0) return 3;
     const pct = @divTrunc(player_power * 100, enemy_power);
@@ -295,15 +307,17 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     // Enemy: strength relative to the player's committed BV, pirate rabble
     // to house regulars by employer's foe.
     const variance: types.Bp = (@as(types.Bp, gs.rng.roll2d6(.battle)) - 7) * 500;
-    var enemy_bv = types.applyBp(types.applyBp(types.applyBp(player.bv, contract_mod.enemyStrengthBp(c.kind) + variance), scenario.enemy_bp), gs.diff().enemy_bp); // difficulty (12.32)
+    var enemy_bv = engagementEnemyBv(c, player.bv, variance, scenario.enemy_bp, gs.diff().enemy_bp);
     // Attrition contracts (Stage 9E): the enemy can only field what's left
     // of their pool.
     if (c.objective == .attrition and c.enemy_pool_remaining > 0) enemy_bv = @min(enemy_bv, c.enemy_pool_remaining);
     const pirates = std.mem.eql(u8, c.enemy_key, "PER");
+    // Their skill: the rolled level (12D.5), else pirates green, houses regular.
+    const enemy_skills: [2]u8 = if (c.hasOpfor()) @import("../domain/opfor.zig").skills(c.enemy_quality) else if (pirates) .{ 5, 6 } else .{ 4, 5 };
     const enemy_elem: autoresolve.Element = .{
         .base_strength = enemy_bv,
-        .avg_gunnery = if (pirates) 5 else 4,
-        .avg_piloting = if (pirates) 6 else 5,
+        .avg_gunnery = enemy_skills[0],
+        .avg_piloting = enemy_skills[1],
     };
     const enemy_power = enemy_elem.effectivePower(.{});
 
@@ -1234,4 +1248,27 @@ test "12D.4: rules of engagement — cautious withdraws from draws, integrated c
     try std.testing.expect(found);
     // Only companies take an ROE.
     try std.testing.expectError(error.NotACompany, @import("commands.zig").execute(&gs, .{ .set_roe = .{ .company = gs.force(co).?.children.items[0], .roe = .hold } }));
+}
+
+test "12D.5: the enemy is a force of its own — it does not shrink with your company" {
+    var c: contract_mod.Contract = .{
+        .id = @enumFromInt(1),
+        .kind = .objective_raid,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 3, .base_pay_month = 100_000 },
+        .enemy_lances = 3,
+        .enemy_quality = .veteran,
+        .enemy_lance_bv = 4_000,
+    };
+    const full = engagementEnemyBv(&c, 16_000, 0, 10_000, 10_000);
+    const gutted = engagementEnemyBv(&c, 4_000, 0, 10_000, 10_000);
+    try std.testing.expectEqual(full, gutted);
+    try std.testing.expectEqual(@as(i64, 12_000), full);
+    // Scenario and difficulty still scale it.
+    try std.testing.expect(engagementEnemyBv(&c, 16_000, 0, 12_000, 13_000) > full);
+    // A contract from before 12D.5 still mirrors the company.
+    c.enemy_lances = 0;
+    try std.testing.expect(engagementEnemyBv(&c, 16_000, 0, 10_000, 10_000) > engagementEnemyBv(&c, 4_000, 0, 10_000, 10_000));
 }

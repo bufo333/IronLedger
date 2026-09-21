@@ -235,6 +235,22 @@ pub const Contract = struct {
     breach_day: ?u32 = null,
     /// One negotiation round per offer (12B.3): spent, whatever the outcome.
     negotiated: bool = false,
+    /// The opposing force (12D.5), rolled with the offer: lances brought to
+    /// an engagement, their skill level, and one lance's BV off the enemy
+    /// house's RAT. Zero lances = a contract from before 12D.5, whose enemy
+    /// still mirrors the company.
+    enemy_lances: u8 = 0,
+    enemy_quality: types.ExperienceLevel = .regular,
+    enemy_lance_bv: i64 = 0,
+
+    pub fn hasOpfor(self: *const Contract) bool {
+        return self.enemy_lances > 0 and self.enemy_lance_bv > 0;
+    }
+
+    /// The opposition's strength in a typical engagement.
+    pub fn opforBv(self: *const Contract) i64 {
+        return self.enemy_lance_bv * self.enemy_lances;
+    }
 
     pub fn poolDestroyedPct(self: *const Contract) u32 {
         if (self.enemy_pool_bv <= 0) return 0;
