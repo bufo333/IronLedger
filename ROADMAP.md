@@ -1017,6 +1017,23 @@ CamOps/MekHQ/TechManual rules, scaled by difficulty.
   intact weapon, component and the armour still on a hull into its home
   warehouse; a wreck's sale and liquidation value is now its strip value,
   not zero. AARs read "DESTROYED (engine destroyed)".
+- ✅ 12D.3 **Who holds the field keeps the wrecks** (CamOps salvage, both
+  ways). On a defeat or rout every hull wrecked there rolls 2d6 + mods ≥
+  `loss.recovery_target` (7): a crewed salvage lance +2, SVT-1 trucks
+  enough for the wrecks +1, an own DropShip with the company +1, a rout −2,
+  the scenario's new `recovery_mod` (base defence +2, hold the line +1,
+  breakthrough/ambush/extraction −1) and the difficulty's (green +3 …
+  elite −2). A miss leaves the hull to the enemy — gone from the books,
+  and battle-loss compensation now covers its full value at the terms'
+  rate. Its pilot walks out on 2d6 + (5 − piloting) + the same difficulty
+  and rout mods ≥ `escape_target` (6), else is **missing** (`.mia`, held
+  by the enemy house): an inbox decision to pay the ransom (12B.7 table),
+  trade a prisoner of that house you hold (their own decision goes with
+  them), or write them off — missing, presumed dead, company morale −5
+  (the default: spends nothing). AAR lines read "· field lost · recovery 5
+  vs 7 — LEFT TO THE ENEMY" and "field lost: 2 hulls left to DC, 1 pilot
+  missing (inbox)". Calibration (10 hopeless routs, three seeds): Green
+  loses none; Elite loses 2–4 hulls and 1–4 pilots, keeping as many wrecks.
 
 ## Stage 13 — Graphical client
 Architected after the TUI ships, reusing the same command/query boundary.

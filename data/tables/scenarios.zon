@@ -5,17 +5,19 @@
 // cards), `scout_bonus` is what a scouting lance adds back, `salvage_bp`
 // scales the salvage claim (raids move on; nobody strips a field they are
 // leaving), `score_mult` weights the contract score, and `support_exposed`
-// puts the support train in the line of fire on a defeat.
+// puts the support train in the line of fire on a defeat. `recovery_mod`
+// (12D.3) shifts the roll to drag your wrecks off a lost field: your own
+// ground helps, a push into the enemy's lines hurts (default 0).
 .{
     .scenarios = .{
         .{ .key = "standup", .name = "stand-up fight", .enemy_bp = 10_000, .roll_mod = 0, .scout_bonus = 0, .salvage_bp = 10_000, .score_mult = 1, .support_exposed = false },
-        .{ .key = "hold_the_line", .name = "hold the line", .enemy_bp = 12_000, .roll_mod = 1, .scout_bonus = 0, .salvage_bp = 10_000, .score_mult = 1, .support_exposed = false },
-        .{ .key = "breakthrough", .name = "breakthrough", .enemy_bp = 11_000, .roll_mod = 0, .scout_bonus = 1, .salvage_bp = 5_000, .score_mult = 2, .support_exposed = false },
-        .{ .key = "ambush", .name = "ambush", .enemy_bp = 9_000, .roll_mod = -2, .scout_bonus = 2, .salvage_bp = 5_000, .score_mult = 1, .support_exposed = false },
+        .{ .key = "hold_the_line", .name = "hold the line", .enemy_bp = 12_000, .roll_mod = 1, .scout_bonus = 0, .salvage_bp = 10_000, .score_mult = 1, .support_exposed = false, .recovery_mod = 1 },
+        .{ .key = "breakthrough", .name = "breakthrough", .enemy_bp = 11_000, .roll_mod = 0, .scout_bonus = 1, .salvage_bp = 5_000, .score_mult = 2, .support_exposed = false, .recovery_mod = -1 },
+        .{ .key = "ambush", .name = "ambush", .enemy_bp = 9_000, .roll_mod = -2, .scout_bonus = 2, .salvage_bp = 5_000, .score_mult = 1, .support_exposed = false, .recovery_mod = -1 },
         .{ .key = "convoy_escort", .name = "convoy escort", .enemy_bp = 9_000, .roll_mod = 0, .scout_bonus = 1, .salvage_bp = 5_000, .score_mult = 1, .support_exposed = true },
-        .{ .key = "base_defence", .name = "base defence", .enemy_bp = 12_000, .roll_mod = 1, .scout_bonus = 0, .salvage_bp = 10_000, .score_mult = 2, .support_exposed = false },
+        .{ .key = "base_defence", .name = "base defence", .enemy_bp = 12_000, .roll_mod = 1, .scout_bonus = 0, .salvage_bp = 10_000, .score_mult = 2, .support_exposed = false, .recovery_mod = 2 },
         .{ .key = "recon_in_force", .name = "recon in force", .enemy_bp = 8_000, .roll_mod = 0, .scout_bonus = 1, .salvage_bp = 0, .score_mult = 1, .support_exposed = false },
-        .{ .key = "extraction", .name = "extraction", .enemy_bp = 10_000, .roll_mod = -1, .scout_bonus = 1, .salvage_bp = 0, .score_mult = 2, .support_exposed = false },
+        .{ .key = "extraction", .name = "extraction", .enemy_bp = 10_000, .roll_mod = -1, .scout_bonus = 1, .salvage_bp = 0, .score_mult = 2, .support_exposed = false, .recovery_mod = -1 },
     },
     // One d6 table per contract kind (AtB: garrison work defends, raids move).
     .by_kind = .{

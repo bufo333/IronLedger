@@ -23,6 +23,9 @@ pub const Scenario = struct {
     score_mult: u8,
     /// The support train sits in the line of fire on a defeat.
     support_exposed: bool,
+    /// Recovering wrecks off a lost field (12D.3): your own ground helps,
+    /// the enemy's lines hurt.
+    recovery_mod: i8 = 0,
 };
 
 pub const KindTable = struct { kind: []const u8, table: [6][]const u8 };

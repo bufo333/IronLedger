@@ -269,6 +269,13 @@
         .scrap_target = 4, // 2d6 ≤ 4 (1 in 6 at Regular): an engine or ammo kill is scrap
         .engine_rebuild_days = 10,
         .writeoff_bp = 7_500, // rebuild over 75% of a new hull: beyond economical repair
+        .recovery_target = 7, // Regular, no help: 58% of wrecks on a lost field come home
+        .recovery_salvage_lance = 2,
+        .recovery_trucks = 1,
+        .recovery_dropship = 1,
+        .recovery_rout = -2,
+        .escape_target = 6, // a regular pilot (piloting 5) walks out 72% of the time
+        .mia_morale = -5,
     },
     .commander = .{ .bonus_bp = 200 },
 }

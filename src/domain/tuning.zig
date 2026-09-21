@@ -405,6 +405,23 @@ pub const Tuning = struct {
         /// A rebuild costing more than this share of a new hull is flagged
         /// "beyond economical repair" (it can still be done).
         writeoff_bp: types.Bp,
+        /// Who holds the field keeps the wrecks (12D.3, CamOps salvage). On
+        /// a lost field each hull wrecked there is recovered on 2d6 + mods ≥
+        /// this, else the enemy has it. Mods: a crewed salvage lance, enough
+        /// SVT-1 trucks for the wrecks, an own DropShip on-world, a rout,
+        /// the scenario's `recovery_mod` and the difficulty's.
+        recovery_target: i32,
+        recovery_salvage_lance: i32,
+        recovery_trucks: i32,
+        recovery_dropship: i32,
+        recovery_rout: i32,
+        /// The pilot of a hull left behind walks out on 2d6 + (5 − piloting)
+        /// + the difficulty's recovery mod (+ the rout penalty) ≥ this;
+        /// otherwise they are missing, held by the enemy (ransom, trade, or
+        /// written off in the inbox).
+        escape_target: i32,
+        /// Company morale when a missing pilot is written off.
+        mia_morale: i32,
     },
     commander: struct { bonus_bp: types.Bp },
 };

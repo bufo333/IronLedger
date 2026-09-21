@@ -215,7 +215,7 @@ pub fn desk(alloc: Alloc, gs: *GameState, log_rows: usize) !Desk {
             .company = forceName(gs, ev.company),
             .deadline_day = ev.deadline_day,
             .days_left = @as(i64, ev.deadline_day) - @as(i64, day),
-            .description = if (ev.person != .none) (if (gs.person(ev.person)) |p| (if (p.status == .pow) try std.fmt.allocPrint(alloc, "{s} {s} of {s} ({s} {s}, gunnery {d}) {s}", .{ p.first_name, p.last_name, p.faction, @tagName(p.experience()), @tagName(p.role), p.skill(p.role.primarySkill()) orelse 7, if (entry) |e| e.log else "" }) else try std.fmt.allocPrint(alloc, "{s} {s} ({s}, {s}, {s}/mo, morale {d}, fatigue {d}) {s}{s}", .{ p.first_name, p.last_name, @tagName(p.role), @tagName(p.experience()), try money(alloc, p.monthlySalary()), p.morale, p.fatigue, if (entry) |e| e.log else "", if (ev.kind == .notice_given) try std.fmt.allocPrint(alloc, " · letting go owes {s} severance{s}", .{ try money(alloc, severanceOwed(gs, p.id, false)), try loyaltyNote(alloc, p, day) }) else "" })) else "") else if (entry) |e| e.log else "",
+            .description = if (ev.person != .none) (if (gs.person(ev.person)) |p| (if (p.status == .pow) try std.fmt.allocPrint(alloc, "{s} {s} of {s} ({s} {s}, gunnery {d}) {s}", .{ p.first_name, p.last_name, p.faction, @tagName(p.experience()), @tagName(p.role), p.skill(p.role.primarySkill()) orelse 7, if (entry) |e| e.log else "" }) else if (p.status == .mia) try std.fmt.allocPrint(alloc, "{s} {s} ({s} {s}, held by {s}) {s} · ransom {s}{s}", .{ p.first_name, p.last_name, @tagName(p.experience()), @tagName(p.role), p.faction, if (entry) |e| e.log else "", try money(alloc, missingRansom(p)), if (holdsPrisonerOf(gs, p.faction)) " · you hold a prisoner of theirs" else " · you hold no prisoner of theirs" }) else try std.fmt.allocPrint(alloc, "{s} {s} ({s}, {s}, {s}/mo, morale {d}, fatigue {d}) {s}{s}", .{ p.first_name, p.last_name, @tagName(p.role), @tagName(p.experience()), try money(alloc, p.monthlySalary()), p.morale, p.fatigue, if (entry) |e| e.log else "", if (ev.kind == .notice_given) try std.fmt.allocPrint(alloc, " · letting go owes {s} severance{s}", .{ try money(alloc, severanceOwed(gs, p.id, false)), try loyaltyNote(alloc, p, day) }) else "" })) else "") else if (entry) |e| e.log else "",
             .options = try opts.toOwnedSlice(alloc),
             .default_choice = ev.default_choice,
         });
@@ -304,6 +304,9 @@ pub fn effectsText(alloc: Alloc, effects: []const @import("events.zig").Effect) 
         .retention_bonus_months => |m| try appendTag(alloc, &out, false, try std.fmt.allocPrint(alloc, "{d} months' pay once", .{m})),
         .let_go => try appendTag(alloc, &out, false, "they leave, seat opens"),
         .replace_from_hall => try appendTag(alloc, &out, false, "they leave; hall replacement if listed"),
+        .ransom_mia => try appendTag(alloc, &out, false, "ransom by experience from the outfit, they come home"),
+        .exchange_mia => try appendTag(alloc, &out, true, "a prisoner of their house goes back; else written off"),
+        .write_off_mia => try appendTag(alloc, &out, false, "missing, presumed dead · company morale −5"),
     };
     return out.toOwnedSlice(alloc);
 }
@@ -759,6 +762,24 @@ pub const hangar_header = "     hull                     bill/mo   contributes  
 /// they cost against what they contribute"): every owned hull, worst
 /// value first. A mothballed hull bills a fifth and contributes nothing; a
 /// pilotless or wrecked one bills in full for nothing.
+/// What a house asks for one of yours (12D.3; the 12B.7 ransom table).
+pub fn missingRansom(p: *const @import("../domain/person.zig").Person) types.CBills {
+    const t = @import("../domain/tuning.zig").t.contract;
+    return switch (p.experience()) {
+        .green => t.ransom_green,
+        .regular => t.ransom_regular,
+        .veteran => t.ransom_veteran,
+        .elite => t.ransom_elite,
+    };
+}
+
+/// Does the outfit hold a prisoner of this house (a trade is possible)?
+pub fn holdsPrisonerOf(gs: *GameState, faction: []const u8) bool {
+    var it = gs.people.iterator();
+    while (it.next()) |e| if (e.value_ptr.status == .pow and std.mem.eql(u8, e.value_ptr.faction, faction)) return true;
+    return false;
+}
+
 /// A wreck's line (12D.2): how it died, what the rebuild costs against a
 /// new hull, and whether it is worth doing at all.
 pub fn wreckNote(alloc: std.mem.Allocator, gs: *GameState, u: *const @import("../domain/unit.zig").Unit) ![]const u8 {
@@ -2377,6 +2398,7 @@ pub fn statusText(alloc: Alloc, gs: *GameState, p: *const person_mod.Person) ![]
     const day = gs.clock.day_index;
     if (p.status == .wounded) return if (p.medbay_admitted) "{a}medbay{/}" else "{c}wounded{/}";
     if (p.status == .pow) return try std.fmt.allocPrint(alloc, "{{a}}prisoner ({s}){{/}}", .{p.faction});
+    if (p.status == .mia) return try std.fmt.allocPrint(alloc, "{{c}}missing (held by {s}){{/}}", .{p.faction});
     if (p.status != .active) return try std.fmt.allocPrint(alloc, "{{c}}{s}{{/}}", .{@tagName(p.status)});
     if (p.leave_until_day) |until| if (day < until) return std.fmt.allocPrint(alloc, "{{a}}on leave{{/}} until d{d}", .{until});
     if (p.training) |t| return std.fmt.allocPrint(alloc, "{{a}}training{{/}} {s} d{d}", .{ @tagName(t.skill), t.done_day });

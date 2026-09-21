@@ -182,6 +182,7 @@ fn weeklyDeck(garrison: bool, roll: u8) Entry {
 pub fn entryForKind(kind: events.EventKind) ?Entry {
     if (kind == .notice_given) return noticeEntry();
     if (kind == .prisoner_held) return prisonerEntry();
+    if (kind == .mia_held) return miaEntry();
     var roll: u8 = 2;
     while (roll <= 12) : (roll += 1) {
         const g = garrisonDeck(roll);
@@ -447,6 +448,40 @@ fn applyEffectsFor(gs: *GameState, effects: []const events.Effect, contract: ?*c
                     try gs.log(.contract, .{ .company = company }, "[prisoner] {s} {s} refuses your offer (2d6 = {d}) and is released", .{ p.first_name, p.last_name, roll });
                 }
             },
+            .ransom_mia => if (gs.person(person_id)) |p| {
+                if (p.status != .mia) return;
+                const price = ransomPrice(p);
+                try gs.postTransaction(.{ .day = gs.clock.day_index, .amount = -price, .category = .event, .company = company, .note = "ransom for a missing pilot" });
+                try gs.log(.contract, .{ .company = company }, "[missing] {s} {s} ransomed back from {s} for {d} c-bills", .{ p.first_name, p.last_name, p.faction, price });
+                bringHome(p, gs.clock.day_index);
+            },
+            .exchange_mia => if (gs.person(person_id)) |p| {
+                if (p.status != .mia) return;
+                // A prisoner of that house, held anywhere by the outfit.
+                var traded: ?*@import("../domain/person.zig").Person = null;
+                var pit = gs.people.iterator();
+                while (pit.next()) |e| if (e.value_ptr.status == .pow and std.mem.eql(u8, e.value_ptr.faction, p.faction)) {
+                    traded = e.value_ptr;
+                    break;
+                };
+                if (traded) |pow| {
+                    pow.status = .released;
+                    // Their pending prisoner decision goes with them.
+                    var i: usize = 0;
+                    while (i < gs.event_queue.pending.items.len) {
+                        if (gs.event_queue.pending.items[i].person == pow.id) _ = gs.event_queue.pending.orderedRemove(i) else i += 1;
+                    }
+                    try gs.log(.contract, .{ .company = company }, "[missing] {s} {s} traded home for {s} {s}, a prisoner of {s}", .{ p.first_name, p.last_name, pow.first_name, pow.last_name, p.faction });
+                    bringHome(p, gs.clock.day_index);
+                } else {
+                    try gs.log(.contract, .{ .company = company }, "[missing] no prisoner of {s} to trade for {s} {s} — written off", .{ p.faction, p.first_name, p.last_name });
+                    try writeOffMissing(gs, p, company);
+                }
+            },
+            .write_off_mia => if (gs.person(person_id)) |p| {
+                if (p.status != .mia) return;
+                try writeOffMissing(gs, p, company);
+            },
             .field_stock => |fs| {
                 const site: types.Site = if (company != .none) .{ .company = company } else gs.defaultSite();
                 // Trucks have finite room: what does not fit is left on the dock.
@@ -481,6 +516,64 @@ fn letGo(gs: *GameState, person_id: types.PersonId, replace: bool) !void {
         return;
     };
     try gs.log(.rotation, .{ .company = company }, "[turnover] no {s} on the hiring halls to replace them — hire when one walks in", .{@tagName(p.role)});
+}
+
+/// What a house asks, or pays, for a pilot by experience (12B.7 table).
+fn ransomPrice(p: *const @import("../domain/person.zig").Person) types.CBills {
+    const t = @import("../domain/tuning.zig").t.contract;
+    return switch (p.experience()) {
+        .green => t.ransom_green,
+        .regular => t.ransom_regular,
+        .veteran => t.ransom_veteran,
+        .elite => t.ransom_elite,
+    };
+}
+
+/// A missing pilot comes home (12D.3): back on the books, still nursing
+/// whatever wound they walked away with, seat to be reassigned.
+fn bringHome(p: *@import("../domain/person.zig").Person, day: u32) void {
+    _ = day;
+    var open = false;
+    for (p.injuries.items) |inj| if (!inj.healed) {
+        open = true;
+    };
+    p.status = if (open) .wounded else .active;
+    p.faction = "";
+    p.morale = @min(p.morale, 40);
+}
+
+/// Missing, presumed dead (12D.3).
+fn writeOffMissing(gs: *GameState, p: *@import("../domain/person.zig").Person, company: types.ForceId) !void {
+    p.status = .kia;
+    gs.stats.people_kia += 1;
+    const t = @import("../domain/tuning.zig").t.loss;
+    applyToCompany(gs, company, .morale, t.mia_morale);
+    try gs.log(.contract, .{ .company = company }, "[missing] {s} {s}, held by {s}, is written off — missing, presumed dead (company morale {d})", .{ p.first_name, p.last_name, p.faction, t.mia_morale });
+}
+
+/// The missing-pilot decision (12D.3): ransom, trade a prisoner, or write
+/// them off. The default spends nothing.
+pub fn miaEntry() Entry {
+    return .{ .kind = .mia_held, .log = "was left behind on a lost field and is held by the enemy — pay the ransom, trade a prisoner of theirs, or write them off", .options = &.{
+        .{ .label = "Pay the ransom", .effects = &.{.ransom_mia} },
+        .{ .label = "Trade a prisoner of their house (if you hold one)", .effects = &.{.exchange_mia} },
+        .{ .label = "Write them off", .effects = &.{.write_off_mia} },
+    }, .default_choice = 2 };
+}
+
+/// Queue the missing-pilot decision (12D.3). No contract on the event, so
+/// the answer never hardens into a standing order: every pilot is asked for.
+pub fn queueMissing(gs: *GameState, person_id: types.PersonId, company: types.ForceId) !void {
+    const e = miaEntry();
+    try gs.event_queue.push(gs.allocator(), .{
+        .day = gs.clock.day_index,
+        .kind = .mia_held,
+        .company = company,
+        .person = person_id,
+        .options = e.options,
+        .default_choice = e.default_choice,
+        .deadline_day = gs.clock.day_index + decision_window_days * 2,
+    });
 }
 
 /// The prisoner decision (12B.7): ransom, release, or recruit.
@@ -731,7 +824,7 @@ test "12.24: automatic events never move money, stock or hulls — those are dec
             if (e.options.len > 0) continue;
             for (e.auto_effects) |fx| switch (fx) {
                 .fatigue, .morale, .xp_all, .score, .reputation, .employer_standing => {},
-                .cash, .cash_monthly_pct, .supply_loss, .parts_windfall, .field_stock, .damage_random_units, .damage_convoy_units, .raise_pct, .retention_bonus_months, .let_go, .replace_from_hall, .ransom_prisoner, .release_prisoner, .recruit_prisoner => {
+                .cash, .cash_monthly_pct, .supply_loss, .parts_windfall, .field_stock, .damage_random_units, .damage_convoy_units, .raise_pct, .retention_bonus_months, .let_go, .replace_from_hall, .ransom_prisoner, .release_prisoner, .recruit_prisoner, .ransom_mia, .exchange_mia, .write_off_mia => {
                     std.debug.print("auto event {s} carries a player-facing effect\n", .{@tagName(e.kind)});
                     return error.TestUnexpectedResult;
                 },
@@ -882,4 +975,47 @@ test "play feedback: a weekly decision cools down, and the same answer three tim
     _ = try commands.execute(&gs, .{ .clear_standing_order = "smuggler_offer" });
     try std.testing.expectEqual(@as(u8, 0), gs.event_memory.get(.smuggler_offer).?.streak);
     try std.testing.expectError(commands.Error.NoSuchEvent, commands.execute(&gs, .{ .clear_standing_order = "no_such_thing" }));
+}
+
+test "12D.3: a missing pilot is ransomed, traded for a prisoner of their house, or written off" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1203 });
+    defer gs.deinit();
+    _ = try gs.createCommander("T", .LC, .paymaster);
+    const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    var pilots: [3]types.PersonId = undefined;
+    var n: usize = 0;
+    var uit = gs.units.iterator();
+    while (uit.next()) |e| if (e.value_ptr.kind == .mek and n < 3) {
+        pilots[n] = e.value_ptr.pilot;
+        n += 1;
+    };
+    for (pilots) |pid| {
+        _ = try @import("personnel.zig").depart(&gs, pid, .mia, 0, "");
+        gs.person(pid).?.faction = "DC";
+        try queueMissing(&gs, pid, co);
+    }
+    try std.testing.expectEqual(@as(usize, 3), gs.event_queue.pending.items.len);
+
+    // Ransom: the outfit pays, they come home without a seat.
+    const funds = gs.funds;
+    try resolveChoice(&gs, 0, 0);
+    try std.testing.expect(gs.funds < funds);
+    try std.testing.expect(gs.person(pilots[0]).?.status == .active);
+    try std.testing.expectEqualStrings("", gs.person(pilots[0]).?.faction);
+
+    // Trade: a Combine prisoner goes back, their decision with them.
+    const spec = @import("../gen/person_gen.zig").generateWithBonus(&gs.rng, .mekwarrior, 0);
+    const pow = try gs.hireFromSpec(spec);
+    gs.person(pow).?.status = .pow;
+    gs.person(pow).?.faction = "DC";
+    try queuePrisoner(&gs, pow, co);
+    try resolveChoice(&gs, 0, 1);
+    try std.testing.expect(gs.person(pilots[1]).?.status == .active);
+    try std.testing.expect(gs.person(pow).?.status == .released);
+    try std.testing.expectEqual(@as(usize, 1), gs.event_queue.pending.items.len); // the prisoner's own decision went too
+
+    // Unanswered: written off at the deadline.
+    gs.clock.day_index += decision_window_days * 2;
+    try expireDue(&gs);
+    try std.testing.expect(gs.person(pilots[2]).?.status == .kia);
 }

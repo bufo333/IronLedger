@@ -49,6 +49,8 @@ pub const EventKind = enum {
     notice_given,
     /// A prisoner of war held by the company (12B.7).
     prisoner_held,
+    /// One of yours left behind on a lost field, held by the enemy (12D.3).
+    mia_held,
 };
 
 /// One consequence of an event option. Relative where it must scale
@@ -86,6 +88,14 @@ pub const Effect = union(enum) {
     release_prisoner,
     /// A loyalty roll; success puts them on your payroll as a mekwarrior.
     recruit_prisoner,
+    // Missing-in-action effects (12D.3) act on the event's `person`, one of
+    // yours held by the house in their `faction`.
+    /// Pay their captors the ransom table's price; they come home.
+    ransom_mia,
+    /// Hand over a prisoner of that house you hold; they come home.
+    exchange_mia,
+    /// Missing, presumed dead: the company mourns.
+    write_off_mia,
 };
 
 pub const Option = struct {
