@@ -487,6 +487,117 @@ pub fn opforPowerEstimate(gs: *GameState, c: *const contract_mod.Contract) i64 {
     return elem.effectivePower(.{});
 }
 
+/// How one company would fare on one contract (12E.3): skulls (a range
+/// when the intel cannot count the enemy's lances), the tonnage on both
+/// sides, and the chance of winning a fight or losing the field.
+pub const OfferRating = struct {
+    company: types.ForceId,
+    /// Half skulls against the fewest and the most lances the intel allows
+    /// (equal when the count is known).
+    half_lo: u8,
+    half_hi: u8,
+    /// Power ratio (own ÷ enemy, bp) at the intel's best estimate.
+    ratio_bp: types.Bp,
+    outmatched: bool,
+    own: @import("battle.zig").Estimate,
+    enemy_tons_lo: u32,
+    enemy_tons_hi: u32,
+    /// Chance to win a fight (victory or better) and to give up the field
+    /// (defeat or rout; a draw too under cautious ROE), averaged exactly
+    /// over the contract kind's scenario table.
+    win_pct: u32,
+    lose_field_pct: u32,
+    exact: bool,
+};
+
+pub fn rateOffer(alloc: Alloc, gs: *GameState, c: *const contract_mod.Contract, company: types.ForceId) !?OfferRating {
+    if (!c.hasOpfor()) return null;
+    const battle = @import("battle.zig");
+    const opfor = @import("../domain/opfor.zig");
+    const skulls = @import("../domain/skulls.zig");
+    const scenario = @import("../domain/scenario.zig");
+    const tuning = @import("../domain/tuning.zig").t;
+    const own = try battle.estimatePower(gs, alloc, c, company);
+    const intel = intelLevel(gs);
+    const row = opfor.rowFor(c.kind);
+    // Garrison work meets a probe, not the whole force (12D.6).
+    const probe: ?u8 = if (c.kind.isGarrisonClass()) @min(tuning.battle.garrison_probe_lances, c.enemy_lances) else null;
+    const exact = intel >= 3 or probe != null;
+    const lo: i64 = probe orelse if (exact) c.enemy_lances else row.lances_min;
+    const hi: i64 = probe orelse if (exact) c.enemy_lances else row.lances_max;
+    const mid: i64 = probe orelse if (exact) c.enemy_lances else @divTrunc(@as(i64, row.lances_min) + row.lances_max + 1, 2);
+    const sk = opfor.skills(if (intel >= 1) c.enemy_quality else .regular);
+    const faces = scenario.faces(c.kind);
+    var mean_bp: i64 = 0;
+    for (faces) |f| mean_bp += f.enemy_bp;
+    mean_bp = @divTrunc(mean_bp, faces.len);
+    const Power = struct {
+        fn at(gs_: *GameState, lance_bv: i64, lances: i64, scen_bp: i64, g: u8, p: u8) i64 {
+            const elem: @import("autoresolve.zig").Element = .{ .base_strength = types.applyBp(types.applyBp(lance_bv * lances, gs_.diff().enemy_bp), @intCast(scen_bp)), .avg_gunnery = g, .avg_piloting = p };
+            return elem.effectivePower(.{});
+        }
+    };
+    const ratio_lo = skulls.ratioBp(own.power, Power.at(gs, c.enemy_lance_bv, lo, mean_bp, sk[0], sk[1]));
+    const ratio_hi = skulls.ratioBp(own.power, Power.at(gs, c.enemy_lance_bv, hi, mean_bp, sk[0], sk[1]));
+    const ratio_mid = skulls.ratioBp(own.power, Power.at(gs, c.enemy_lance_bv, mid, mean_bp, sk[0], sk[1]));
+    // The dice, face by face: ratio bonus (capped in close terrain),
+    // the scenario's tilt, scouts, and the company's rules of engagement.
+    const close = if (planet_mod.find(c.planet_key)) |w| (@import("../domain/terrain.zig").Environment{ .terrain = @import("../domain/terrain.zig").terrainOf(w) }).close() else false;
+    const roe: @import("../domain/force.zig").Roe = if (c.terms.command_rights.overridesRoe()) .hold else if (gs.force(company)) |f| f.roe else .standard;
+    const roe_roll: i32 = switch (roe) {
+        .hold => tuning.loss.roe.hold_roll,
+        .standard => 0,
+        .cautious => tuning.loss.roe.cautious_roll,
+    };
+    var win: u32 = 0;
+    var lose: u32 = 0;
+    for (faces) |f| {
+        var bonus = battle.ratioBonus(own.power, Power.at(gs, c.enemy_lance_bv, mid, f.enemy_bp, sk[0], sk[1]));
+        if (close) bonus = @min(bonus, 2);
+        const mods: i32 = bonus + f.roll_mod + (if (own.recon) @as(i32, f.scout_bonus) else 0) + roe_roll;
+        win += skulls.chanceAtLeast(8, mods);
+        lose += 100 - skulls.chanceAtLeast(if (roe == .cautious) 8 else 6, mods);
+    }
+    return .{
+        .company = company,
+        .half_lo = skulls.fromRatioBp(ratio_lo),
+        .half_hi = skulls.fromRatioBp(ratio_hi),
+        .ratio_bp = ratio_mid,
+        .outmatched = skulls.outmatched(ratio_mid),
+        .own = own,
+        .enemy_tons_lo = c.enemy_lance_tons * @as(u32, @intCast(lo)),
+        .enemy_tons_hi = c.enemy_lance_tons * @as(u32, @intCast(hi)),
+        .win_pct = win / @as(u32, faces.len),
+        .lose_field_pct = lose / @as(u32, faces.len),
+        .exact = exact,
+    };
+}
+
+/// "☠☠☠◐" (or "XXXx" with ascii) for half skulls; the TUI swaps glyphs.
+pub fn skullGlyphs(alloc: Alloc, half: u8) ![]const u8 {
+    var out: std.ArrayListUnmanaged(u8) = .empty;
+    for (0..half / 2) |_| try out.appendSlice(alloc, "☠");
+    if (half % 2 == 1) try out.appendSlice(alloc, "◐");
+    return out.items;
+}
+
+/// "3.5 skulls" / "2.5–3.5 skulls".
+pub fn skullText(alloc: Alloc, r: OfferRating) ![]const u8 {
+    const skulls = @import("../domain/skulls.zig");
+    var a: [8]u8 = undefined;
+    var b: [8]u8 = undefined;
+    const lo = skulls.number(&a, r.half_lo);
+    if (r.half_lo == r.half_hi) return try std.fmt.allocPrint(alloc, "{s} skull{s}{s}", .{ lo, if (r.half_lo == 2) "" else "s", if (r.outmatched) " (outmatched)" else "" });
+    return try std.fmt.allocPrint(alloc, "{s}–{s} skulls", .{ lo, skulls.number(&b, r.half_hi) });
+}
+
+/// "610t (L4 M8) vs ~720t" — tonnage beside the skulls.
+pub fn tonnageText(alloc: Alloc, r: OfferRating) ![]const u8 {
+    const m = r.own.mix;
+    const theirs = if (r.enemy_tons_lo == r.enemy_tons_hi) try std.fmt.allocPrint(alloc, "~{d}t", .{r.enemy_tons_lo}) else try std.fmt.allocPrint(alloc, "~{d}–{d}t", .{ r.enemy_tons_lo, r.enemy_tons_hi });
+    return try std.fmt.allocPrint(alloc, "{d}t (L{d} M{d} H{d} A{d}) vs {s}", .{ r.own.tons, m[0], m[1], m[2], m[3], theirs });
+}
+
 pub fn contracts(alloc: Alloc, gs: *GameState) !Contracts {
     const day = gs.clock.day_index;
     var board: std.ArrayListUnmanaged(OfferRow) = .empty;
@@ -4171,4 +4282,74 @@ test "play feedback: the unassigned pool says where it sits and what each wreck'
         label_ok = true;
     };
     try std.testing.expect(label_ok);
+}
+
+test "12E.3: skulls — a weaker company rates harder, a heavier one easier; low intel gives a range around the truth" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1231 });
+    defer gs.deinit();
+    _ = try gs.createCommander("T", .LC, .line_officer);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const alpha = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    const bravo = try @import("../gen/company_gen.zig").generateInto(&gs, "Bravo");
+    const site_a: types.Site = .{ .company = alpha };
+    const site_b: types.Site = .{ .company = bravo };
+    for (@import("../domain/part.zig").munition_keys) |k| {
+        try gs.addStock(site_a, k, 50);
+        try gs.addStock(site_b, k, 50);
+    }
+    const hq = gs.hqs.getPtr(gs.hqs.keys()[0]).?;
+    hq.staff_assigned = 999;
+    const comms = for (hq.facilities.items) |*f| {
+        if (f.kind == .comms) break f;
+    } else return error.TestUnexpectedResult;
+    comms.level = 3; // the intel counts their lances
+    const offer: contract_mod.Contract = .{
+        .id = .none,
+        .kind = .objective_raid,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 3, .base_pay_month = 100_000 },
+        .enemy_lances = 3,
+        .enemy_quality = .regular,
+        .enemy_lance_bv = 4_000,
+        .enemy_lance_tons = 220,
+    };
+    const full = (try rateOffer(a, &gs, &offer, alpha)).?;
+    try std.testing.expect(full.exact and full.half_lo == full.half_hi);
+    try std.testing.expect(full.half_lo >= 1 and full.half_lo <= 10);
+    try std.testing.expectEqual(@as(u32, 660), full.enemy_tons_lo);
+    try std.testing.expect(full.own.tons > 0 and full.own.mix[2] == 0 and full.own.mix[3] == 0);
+    try std.testing.expect(full.win_pct + full.lose_field_pct <= 100);
+
+    // Bravo refits into assault hulls on paper: more tons, fewer skulls.
+    var it = gs.units.iterator();
+    while (it.next()) |e| if (e.value_ptr.kind == .mek and gs.companyOf(e.value_ptr.force) == bravo) {
+        e.value_ptr.chassis_key = "AS7-D";
+    };
+    const heavy = (try rateOffer(a, &gs, &offer, bravo)).?;
+    try std.testing.expect(heavy.own.tons > full.own.tons);
+    try std.testing.expect(heavy.half_lo < full.half_lo);
+    try std.testing.expect(heavy.win_pct > full.win_pct);
+
+    // Alpha mauled: half its meks wrecked — more skulls, worse odds.
+    var n: u32 = 0;
+    var it2 = gs.units.iterator();
+    while (it2.next()) |e| if (e.value_ptr.kind == .mek and gs.companyOf(e.value_ptr.force) == alpha and n < 8) {
+        e.value_ptr.status = .destroyed;
+        n += 1;
+    };
+    const mauled = (try rateOffer(a, &gs, &offer, alpha)).?;
+    try std.testing.expect(mauled.half_lo > full.half_lo);
+    try std.testing.expect(mauled.lose_field_pct > full.lose_field_pct);
+
+    // Blind intel: the kind's lance range, bracketing the truth.
+    comms.level = 0;
+    const blind = (try rateOffer(a, &gs, &offer, alpha)).?;
+    try std.testing.expect(!blind.exact);
+    try std.testing.expect(blind.half_lo <= mauled.half_lo and mauled.half_hi <= blind.half_hi);
+    try std.testing.expect(blind.half_lo < blind.half_hi);
+    try std.testing.expect(std.mem.indexOf(u8, try skullText(a, blind), "–") != null);
 }

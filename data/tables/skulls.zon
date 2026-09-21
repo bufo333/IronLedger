@@ -1,0 +1,31 @@
+// Contract difficulty in skulls (Stage 12E.3; the HBS BattleTech skull
+// scale, in half-skull steps). Typed against domain/skulls.zig `Table`.
+//
+// The rating is the ratio of your combat power to the opposition's in a
+// typical engagement (BV × skill × condition × supply on both sides — the
+// same numbers the battle roll uses). The bands line up with the power-ratio
+// bonus in sim/battle.zig `ratioBonus` (≥150% +3, ≥125% +2, ≥110% +1,
+// 91–109% 0, ≥76% −1, ≥60% −2, else −3), half-way points in between, so a
+// skull count never disagrees with the dice: three skulls is an even, hard
+// fight; fewer is easier; five is outmatched.
+//
+//   min_ratio_bp   the lowest power ratio (basis points) that earns the row
+//   half_skulls    difficulty in half skulls (1 = ½ skull … 10 = 5 skulls)
+.{
+    .bands = .{
+        .{ .min_ratio_bp = 15_000, .half_skulls = 1 },
+        .{ .min_ratio_bp = 13_750, .half_skulls = 2 },
+        .{ .min_ratio_bp = 12_500, .half_skulls = 3 },
+        .{ .min_ratio_bp = 11_750, .half_skulls = 4 },
+        .{ .min_ratio_bp = 11_000, .half_skulls = 5 },
+        .{ .min_ratio_bp = 9_100, .half_skulls = 6 },
+        .{ .min_ratio_bp = 8_300, .half_skulls = 7 },
+        .{ .min_ratio_bp = 7_600, .half_skulls = 8 },
+        .{ .min_ratio_bp = 6_800, .half_skulls = 9 },
+        .{ .min_ratio_bp = 0, .half_skulls = 10 },
+    },
+    // Below this ratio a five-skull fight is flagged outmatched (the −3 band).
+    .outmatched_below_bp = 6_000,
+    // An active contract at or past this many half skulls warns on the checklist.
+    .warn_half_skulls = 9,
+}

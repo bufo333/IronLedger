@@ -39,6 +39,18 @@ pub fn find(key: []const u8) ?*const Scenario {
     return null;
 }
 
+/// The six faces of a kind's scenario table (12E.3: the rating averages
+/// over them exactly instead of rolling).
+pub fn faces(kind: contract.ContractKind) [6]*const Scenario {
+    var out: [6]*const Scenario = undefined;
+    const standup = find("standup").?;
+    for (&out) |*f| f.* = standup;
+    for (table.by_kind) |row| if (std.mem.eql(u8, row.kind, @tagName(kind))) {
+        for (row.table, 0..) |key, i| out[i] = find(key) orelse standup;
+    };
+    return out;
+}
+
 /// Roll the scenario for an engagement on `kind`: d6 on the kind's table
 /// (a stand-up fight when a kind has no table).
 pub fn roll(rng: *rng_mod.Rng, stream: rng_mod.Stream, kind: contract.ContractKind) *const Scenario {

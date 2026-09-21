@@ -1123,6 +1123,23 @@ that would go; and with several HQs, offers belong to the bases in range.
   heavy/assault hulls on a Market board or in the raise wizard say "needs a
   level-2 bay to rebuild" / "a level-3 bay at a regional HQ" when the
   buying HQ's bay is short.
+- ✅ 12E.3 **Skulls** (HBS BattleTech's half-skull scale, computed not
+  rolled). `domain/skulls.zig` + `data/tables/skulls.zon`: half-skull bands
+  by the power ratio own ÷ enemy, aligned with `battle.ratioBonus` (≥150%
+  ½ skull … 91–109% three skulls, even and hard … under 68% five,
+  "outmatched" under 60%). `battle.estimatePower` is the battle's own
+  `playerSideIn` run read-only on the caller's allocator (BV × skill ×
+  fatigue/injury × condition × quality × supply, recon and the support
+  echelon, lance roles under the contract's rights, close terrain), with
+  tonnage and the L/M/H/A mix of the hulls that would fight.
+  `queries.rateOffer(offer, company)` sets that against the opposition as
+  the intel reads it — lances exact from comms 3 (a skull *range* over the
+  kind's lance range below that), skill from comms 1, the difficulty's
+  enemy multiplier, the mean scenario strength; garrison work against a
+  one-lance probe — and averages the 2d6 exactly over the kind's six
+  scenario faces for the chance to win a fight and to lose the field
+  (scouts, close-terrain cap and the company's ROE included). Enemy lance
+  tonnage is rolled with the force (`Contract.enemy_lance_tons`, store v24).
 
 ## Stage 13 — Graphical client
 Architected after the TUI ships, reusing the same command/query boundary.

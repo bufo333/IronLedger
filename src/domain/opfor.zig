@@ -39,6 +39,8 @@ pub const Force = struct {
     quality: types.ExperienceLevel,
     /// Summed BV of one representative lance off the house's RAT.
     lance_bv: i64,
+    /// Its tonnage (12E.3): shown beside the skulls.
+    lance_tons: u32 = 0,
 
     pub fn bv(self: Force) i64 {
         return self.lance_bv * self.lances;
@@ -81,8 +83,13 @@ pub fn roll(rng: *rng_mod.Rng, stream: rng_mod.Stream, kind: contract.ContractKi
     const pirates = std.mem.eql(u8, enemy_key, "PER");
     const q = qualityFromRoll(@as(i32, rng.roll2d6(stream)) + row.quality_mod + (if (pirates) table.pirate_quality_mod else 0));
     var lance_bv: i64 = 0;
-    for (0..table.lance_size) |_| lance_bv += rat.roll(rng, stream, enemy_key, weightClass(rng, stream), year).bv;
-    return .{ .lances = lances, .quality = q, .lance_bv = lance_bv };
+    var lance_tons: u32 = 0;
+    for (0..table.lance_size) |_| {
+        const d = rat.roll(rng, stream, enemy_key, weightClass(rng, stream), year);
+        lance_bv += d.bv;
+        lance_tons += d.tonnage;
+    }
+    return .{ .lances = lances, .quality = q, .lance_bv = lance_bv, .lance_tons = lance_tons };
 }
 
 /// The pool an attrition contract grinds down: the force plus its

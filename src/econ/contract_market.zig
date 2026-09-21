@@ -184,6 +184,7 @@ pub fn refresh(gs: *GameState) !void {
             .enemy_lances = opfor.lances,
             .enemy_quality = opfor.quality,
             .enemy_lance_bv = opfor.lance_bv,
+            .enemy_lance_tons = opfor.lance_tons,
             .planet_key = world.key,
             .dist_ly = vis[1],
             .beachhead = vis[0] == .beachhead,

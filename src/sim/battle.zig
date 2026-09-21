@@ -75,12 +75,44 @@ const terrain_mod = @import("../domain/terrain.zig");
 const planet_mod = @import("../domain/planet.zig");
 
 fn playerSide(gs: *GameState, c: *const contract_mod.Contract) !SideState {
-    return playerSideIn(gs, c, .{});
+    return playerSideIn(gs, gs.allocator(), c, .{});
+}
+
+/// What a company would bring to a fight on this contract (12E.3): its
+/// combat power as the battle model reckons it (BV × skill × condition ×
+/// quality × supply, the support echelon and recon, lance roles under the
+/// contract's command rights), what it weighs, and its weight-class mix.
+/// Read-only: nothing is reserved or spent. `alloc` is the caller's
+/// scratch space.
+pub const Estimate = struct {
+    power: i64 = 0,
+    bv: i64 = 0,
+    tons: u32 = 0,
+    /// Hulls by weight class: light, medium, heavy, assault.
+    mix: [4]u32 = .{ 0, 0, 0, 0 },
+    hulls: u32 = 0,
+    recon: bool = false,
+};
+
+pub fn estimatePower(gs: *GameState, alloc: std.mem.Allocator, c: *const contract_mod.Contract, company: types.ForceId) !Estimate {
+    var as_if = c.*;
+    as_if.assigned_company = company;
+    const env: terrain_mod.Environment = if (planet_mod.find(c.planet_key)) |w| .{ .terrain = terrain_mod.terrainOf(w) } else .{};
+    const side = try playerSideIn(gs, alloc, &as_if, env);
+    var out: Estimate = .{ .power = side.power, .bv = side.bv, .recon = side.mods.recon_quality > 0 };
+    for (side.engaged.items) |uid| {
+        const u = gs.unit(uid) orelse continue;
+        const d = chassis_mod.find(u.chassis_key) orelse continue;
+        out.tons += d.tonnage;
+        out.mix[@intFromEnum(d.weightClass())] += 1;
+        out.hulls += 1;
+    }
+    return out;
 }
 
 /// The player's side under given conditions (12C.10): night and storms
 /// ground the fighters, close terrain dents recon.
-fn playerSideIn(gs: *GameState, c: *const contract_mod.Contract, env: terrain_mod.Environment) !SideState {
+fn playerSideIn(gs: *GameState, alloc: std.mem.Allocator, c: *const contract_mod.Contract, env: terrain_mod.Environment) !SideState {
     var mods = companyMods(gs, c);
     if (env.groundsAir()) mods.has_air_cover = false;
     mods.recon_quality = @intCast(@max(0, @as(i32, mods.recon_quality) + env.reconMod()));
@@ -103,7 +135,7 @@ fn playerSideIn(gs: *GameState, c: *const contract_mod.Contract, env: terrain_mo
             for (u.slots.items) |slot| {
                 if (slot.class != .weapon or slot.condition != .ok) continue;
                 const key = part_mod.munitionFor(slot.part_key) orelse continue;
-                const e = try family_mounts.getOrPut(gs.allocator(), key);
+                const e = try family_mounts.getOrPut(alloc, key);
                 if (!e.found_existing) e.value_ptr.* = 0;
                 e.value_ptr.* += 1;
             }
@@ -115,9 +147,9 @@ fn playerSideIn(gs: *GameState, c: *const contract_mod.Contract, env: terrain_mo
         const need = std.math.divCeil(u32, mounts, mounts_per_ammo_ton) catch 1;
         const have = gs.stockCount(side.site, entry.key_ptr.*);
         const use = @min(need, have);
-        try side.ammo_reserved.put(gs.allocator(), entry.key_ptr.*, use);
+        try side.ammo_reserved.put(alloc, entry.key_ptr.*, use);
         const fed = @min(mounts, use * mounts_per_ammo_ton);
-        try family_fire_pct.put(gs.allocator(), entry.key_ptr.*, if (mounts == 0) 100 else fed * 100 / mounts);
+        try family_fire_pct.put(alloc, entry.key_ptr.*, if (mounts == 0) 100 else fed * 100 / mounts);
     }
 
     for (company.children.items) |child_id| {
@@ -168,7 +200,7 @@ fn playerSideIn(gs: *GameState, c: *const contract_mod.Contract, env: terrain_mo
             // worse; a tired pilot one to three worse (12C.1 fatigue bands).
             gunnery_sum += ((pilot.skill(.gunnery_mek) orelse 4) + pilot.permanentPenalty() + pilot.fatiguePenalty()) -| @intFromBool(pilot.has("gunnery_specialist"));
             piloting_sum += ((pilot.skill(.piloting_mek) orelse 5) + pilot.permanentPenalty() + pilot.fatiguePenalty()) -| @intFromBool(pilot.has("piloting_specialist"));
-            try side.engaged.append(gs.allocator(), uid);
+            try side.engaged.append(alloc, uid);
             n += 1;
         }
         if (n == 0) continue;
@@ -276,7 +308,7 @@ pub fn engagementEnemyBv(c: *const contract_mod.Contract, player_bv: i64, varian
     return types.applyBp(types.applyBp(base, scenario_bp), difficulty_bp);
 }
 
-fn ratioBonus(player_power: i64, enemy_power: i64) i32 {
+pub fn ratioBonus(player_power: i64, enemy_power: i64) i32 {
     if (enemy_power <= 0) return 3;
     const pct = @divTrunc(player_power * 100, enemy_power);
     if (pct >= 150) return 3;
@@ -295,7 +327,7 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
         const t = terrain_mod.terrainOf(world);
         break :blk .{ .terrain = t, .weather = terrain_mod.rollWeather(&gs.rng, .battle, t) };
     };
-    var player = try playerSideIn(gs, c, env);
+    var player = try playerSideIn(gs, gs.allocator(), c, env);
     defer player.engaged.deinit(gs.allocator());
     if (player.engaged.items.len == 0) {
         c.score -= 2;
