@@ -372,6 +372,8 @@ fn runContracts(gs: *GameState) !void {
                 c.end_day = gs.clock.day_index + @as(u32, c.terms.length_months) * 30;
                 if (gs.force(c.assigned_company)) |f| f.location_planet = c.planet_key;
                 try gs.log(.contract, .{ .company = c.assigned_company, .contract = c.id }, "[{s}] company on station at {s} — contract active", .{ @tagName(c.kind), c.planet_key });
+                // The contract world's hull board opens on arrival (12D.7).
+                try contract_market.refreshContractWorld(gs, c);
             },
             .active => if (c.end_day != null and gs.clock.day_index >= c.end_day.?) {
                 // End of term (Stage 9E): a performance failure is a failed

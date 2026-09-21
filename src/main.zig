@@ -1165,8 +1165,9 @@ fn runRepl(gs: *game.state.GameState, io: std.Io, gpa: std.mem.Allocator, store_
             std.debug.print("site market ({d} listings):\n", .{gs.market_listings.items.len});
             for (gs.market_listings.items, 0..) |l, i| {
                 if (l.condition) |c| {
-                    std.debug.print("  [{d}] hull  {s:<8} {s:<5} armor {d:>3}% quality {s} | {d} dmg / {d} destroyed / {d} missing comps | {d} c-bills | gone day {d}\n", .{
+                    std.debug.print("  [{d}] hull  {s:<8} {s:<5} armor {d:>3}% quality {s} | {d} dmg / {d} destroyed / {d} missing comps | {d} c-bills | gone day {d}{s}\n", .{
                         i, l.item_key, c.label(), c.armor_pct, @tagName(c.quality), c.damaged_slots, c.destroyed_slots, c.missing_components, l.price, l.expires_day,
+                        if (l.company != .none) (std.fmt.allocPrint(gs.allocator(), " | contract world, co:{d} local funds", .{@intFromEnum(l.company)}) catch "") else "",
                     });
                 } else {
                     std.debug.print("  [{d}] {s:<5} {s:<16} x{d:<3} ({s}{s}) {d} c-bills\n", .{

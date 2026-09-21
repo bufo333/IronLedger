@@ -2781,7 +2781,15 @@ pub const App = struct {
                         const l = view.board[@min(self.cur(0).*, view.board.len - 1)];
                         const ship = if (l.index < g.market_listings.items.len) (if (game.chassis.find(g.market_listings.items[l.index].item_key)) |d| d.kind.isTransport() else false) else false;
                         // Say which till is short before the sim refuses in the abstract.
-                        if (l.index < g.market_listings.items.len) {
+                        if (l.index < g.market_listings.items.len and l.company != .none) {
+                            // A contract world's hull (12D.7): the company's local funds pay.
+                            const price = g.market_listings.items[l.index].price;
+                            const have = g.treasuryBalance(.{ .company = l.company });
+                            if (have < price) {
+                                self.say(.crit, "{s}'s local funds are {s}; this hull costs {s} — Ledger t couriers funds to the company (days in transit)", .{ q.forceName(g, l.company), try q.money(al, have), try q.money(al, price) });
+                                return;
+                            }
+                        } else if (l.index < g.market_listings.items.len) {
                             const price = g.market_listings.items[l.index].price;
                             const have = g.treasuryBalance(.{ .hq = l.hq });
                             if (have < price) {

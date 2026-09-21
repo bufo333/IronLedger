@@ -1067,6 +1067,15 @@ CamOps/MekHQ/TechManual rules, scaled by difficulty.
   field-recovery rules are live on quiet worlds too. The pirate-raid
   decision's sortie is now a real engagement (`Effect.engagement`) instead
   of abstract wear. Older garrison contracts (no rolled force) stay quiet.
+- ✅ 12D.7 **The contract world has a market** (ARCH §9.8 "buy a local
+  replacement"). Each active contract's world gets a thin hull board —
+  `market.contract_planet_slots` (3) rolls off the world's house table at
+  its industry, at the field markup (×1.5), refreshed monthly and on
+  arrival, gone with the contract (`Listing.company`, store v23). The rows
+  sit on the company's home HQ Market board marked `@World`, priced against
+  the company's **local funds**; buying debits them and the hull joins the
+  company on the spot (seat a pilot and a tech). The combat-ineffective
+  grace window now points there — it finally has somewhere to shop.
 
 ## Stage 13 — Graphical client
 Architected after the TUI ships, reusing the same command/query boundary.

@@ -1711,6 +1711,8 @@ pub const ListingRow = struct {
     text: []const u8,
     /// The HQ whose board this is — and whose treasury pays.
     hq: types.HqId,
+    /// A contract world's listing (12D.7): this company's local funds pay.
+    company: types.ForceId = .none,
 };
 
 pub const CatalogRow = struct {
@@ -1832,6 +1834,14 @@ pub fn market(alloc: Alloc, gs: *GameState, filter: MarketFilter, hq: types.HqId
         if (!keep) continue;
         const cond: []const u8 = if (l.condition) |c| try std.fmt.allocPrint(alloc, "{{a}}{s}{{/}} armor {d}% · {d} dmg · {d} missing", .{ c.label(), c.armor_pct, c.damaged_slots, c.missing_components }) else if (l.kind == .unit) "{g}new{/}" else "";
         const name: []const u8 = if (l.kind == .unit) (if (chassis_mod.find(l.item_key)) |c| c.name else l.item_key) else (if (@import("../domain/part.zig").find(l.item_key)) |p| p.name else l.item_key);
+        if (l.company != .none) {
+            // A contract world's hull (12D.7).
+            const world: []const u8 = if (gs.deploymentContract(l.company)) |c| planetName(c.planet_key) else "?";
+            try board.append(alloc, .{ .index = i, .hq = l.hq, .company = l.company, .text = try std.fmt.allocPrint(alloc, "[{d: <3}] {{a}}@{s: <9}{{/}} {s: <10} {s: <20} {s: >13}  {s} local funds {s} · {s}", .{
+                i, clip(world, 9), clip(l.item_key, 10), clip(name, 20), try money(alloc, types.applyBp(l.price, gs.diff().purchase_bp)), forceName(gs, l.company), try money(alloc, gs.treasuryBalance(.{ .company = l.company })), cond,
+            }) });
+            continue;
+        }
         try board.append(alloc, .{ .index = i, .hq = l.hq, .text = try std.fmt.allocPrint(alloc, "[{d: <3}] {s: <5} {s: <10} {s: <20} {s: >13}  x{d: <3} {s: <8} {s: <6} d{d: <5} {s}", .{
             i, @tagName(l.kind), clip(l.item_key, 10), clip(name, 20), try money(alloc, types.applyBp(l.price, gs.diff().purchase_bp)), l.quantity, @tagName(l.rarity), if (l.black_market) "{c}fence{/}" else if (l.staple) "staple" else "", l.expires_day, if (l.black_market) try std.fmt.allocPrint(alloc, "{{c}}black market{{/}} — no questions, maybe a fraud (2d6 ≤ {d}); the house frowns, the pirates smile · {s}", .{ @import("../domain/tuning.zig").t.market.black_market_fraud_target, cond }) else cond,
         }) });
@@ -1969,7 +1979,7 @@ pub fn raiseCandidates(alloc: Alloc, gs: *GameState, company: types.ForceId, pas
     const home = gs.homeHqFor(company);
     const home_world = if (gs.hqs.getPtr(home)) |h| planetMod().find(h.planet_key) else null;
     for (gs.market_listings.items, 0..) |l, i| {
-        if (l.kind != .unit or l.staple) continue;
+        if (l.kind != .unit or l.staple or l.company != .none) continue;
         const ch = chassis_mod.find(l.item_key) orelse continue;
         if (ch.kind != .mek) continue;
         var skip = false;

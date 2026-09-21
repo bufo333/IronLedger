@@ -131,6 +131,11 @@ pub const Listing = struct {
     condition: ?HullCondition = null,
     /// Off the books (12C.17): a fence's offer — rare, dear, maybe a fraud.
     black_market: bool = false,
+    /// The contract world's board (12D.7): a hull for sale where this
+    /// deployed company stands, paid from its local funds and joining it on
+    /// the spot. Shown on the company's home HQ board, gone when the
+    /// contract ends.
+    company: types.ForceId = .none,
 };
 
 /// Parts always on every board (weapons and ammo are readily available;

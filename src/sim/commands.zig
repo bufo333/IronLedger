@@ -611,6 +611,29 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             if (gs.hqs.count() == 0) return Error.NoHq;
             const listing = gs.market_listings.items[index];
             const price = types.applyBp(listing.price, gs.diff().purchase_bp); // difficulty (12.32)
+            // The contract world's board (12D.7): the company buys where it
+            // stands, from its local funds, and the hull joins it there.
+            if (listing.company != .none) {
+                const co = listing.company;
+                const c = gs.deploymentContract(co) orelse return Error.NoSuchListing;
+                if (c.status != .active) return Error.NoSuchListing;
+                try debitPurchase(gs, .{ .company = co }, .{
+                    .day = gs.clock.day_index,
+                    .amount = -price,
+                    .category = .unit_purchase,
+                    .company = co,
+                    .contract = c.id,
+                    .note = listing.item_key,
+                });
+                _ = gs.market_listings.orderedRemove(index);
+                const uid = try gs.addUnit(listing.item_key);
+                if (listing.condition) |cond| gs.applyHullCondition(uid, cond);
+                gs.placeUnitInCompany(uid, co) catch return Error.UnknownForce;
+                try gs.log(.market, .{ .company = co, .contract = c.id }, "[market] {s} bought {s} ({s}) on {s} for {d} from local funds — seat a pilot and a tech", .{
+                    if (gs.force(co)) |f| f.name else "company", listing.item_key, if (listing.condition) |cd| cd.label() else "new", c.planet_key, price,
+                });
+                return .{ .unit = uid };
+            }
             // The board's own HQ pays and receives (Stage 9D).
             const hq_id: types.HqId = if (listing.hq != .none) listing.hq else gs.hqs.keys()[0];
             // Transports need a berth at the board's HQ (Stage 12.15).
@@ -807,7 +830,7 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             if (dest.echelon != .company) return Error.NotACompany;
             if (b.listing >= gs.market_listings.items.len) return Error.NoSuchListing;
             const listing = gs.market_listings.items[b.listing];
-            if (listing.kind != .unit) return Error.NoSuchListing;
+            if (listing.kind != .unit or listing.company != .none) return Error.NoSuchListing;
             const board_hq: types.HqId = if (listing.hq != .none) listing.hq else gs.hqs.keys()[0];
             _ = try execute(gs, .{ .buy_listing = b.listing });
             const uid: types.UnitId = @enumFromInt(gs.next_unit_id - 1);
@@ -3735,4 +3758,37 @@ test "12D.2: how a hull died decides the rebuild — engine kills cost an engine
     try std.testing.expectEqual(ac5_before + 1, gs.stockCount(.{ .hq = home }, "ac5"));
     try std.testing.expect(gs.stockCount(.{ .hq = home }, "armor") > armor_before);
     try std.testing.expectEqual(ct_before, gs.stockCount(.{ .hq = home }, "comp_ct")); // scrap has no structure left
+}
+
+test "12D.7: the contract world has a hull board — local funds pay, the hull joins the company there" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1207 });
+    defer gs.deinit();
+    _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
+    const co = (try execute(&gs, .{ .new_company = "Alpha" })).created_force;
+    const cid: types.ContractId = @enumFromInt(1207);
+    try gs.contracts.put(gs.allocator(), cid, .{ .id = cid, .kind = .objective_raid, .employer_key = "LC", .enemy_key = "DC", .planet_key = "hesperus_ii", .status = .active, .assigned_company = co, .terms = .{ .length_months = 3, .base_pay_month = 100_000 } });
+    gs.force(co).?.location_planet = "hesperus_ii";
+    // Hesperus II builds meks: something turns up within a few tries.
+    var tries: u32 = 0;
+    var idx: ?usize = null;
+    while (idx == null and tries < 20) : (tries += 1) {
+        try @import("../econ/contract_market.zig").refreshContractWorld(&gs, gs.contracts.getPtr(cid).?);
+        for (gs.market_listings.items, 0..) |l, i| if (l.company == co) {
+            idx = i;
+        };
+    }
+    try std.testing.expect(idx != null);
+    // Broke: refused; funded: bought from local funds, on the company's books at once.
+    gs.force(co).?.local_funds = 0;
+    try std.testing.expectError(Error.InsufficientTreasury, execute(&gs, .{ .buy_listing = idx.? }));
+    gs.force(co).?.local_funds = 50_000_000;
+    const hq_funds = gs.hqs.values()[0].funds;
+    const r = try execute(&gs, .{ .buy_listing = idx.? });
+    try std.testing.expectEqual(co, gs.companyOf(gs.unit(r.unit).?.force));
+    try std.testing.expect(gs.force(co).?.local_funds < 50_000_000);
+    try std.testing.expectEqual(hq_funds, gs.hqs.values()[0].funds);
+    // Not a raise candidate, and gone with the contract at the next refresh.
+    gs.contracts.getPtr(cid).?.status = .completed;
+    try @import("../econ/contract_market.zig").refreshListings(&gs);
+    for (gs.market_listings.items) |l| try std.testing.expect(l.company == .none);
 }

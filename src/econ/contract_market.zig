@@ -220,13 +220,50 @@ pub fn refreshListings(gs: *GameState) !void {
     var i: usize = 0;
     while (i < gs.market_listings.items.len) {
         const l = gs.market_listings.items[i];
-        if (l.kind == .part or l.expires_day <= day) {
+        if (l.kind == .part or l.expires_day <= day or l.company != .none) {
             _ = gs.market_listings.orderedRemove(i);
         } else i += 1;
     }
     // Every HQ has a board (Stage 9D); field HQs are thin.
     var hit = gs.hqs.iterator();
     while (hit.next()) |entry| try refreshBoard(gs, entry.value_ptr.id);
+    // Every contract world has a thin board of its own (12D.7).
+    var cit = gs.contracts.iterator();
+    while (cit.next()) |entry| if (entry.value_ptr.status == .active) try refreshContractWorld(gs, entry.value_ptr);
+}
+
+/// The contract world's hull board (12D.7, ARCH §9.8 "buy a local
+/// replacement"): a few hulls off the world's own house table, at the
+/// field markup, for the deployed company's local funds — the grace window
+/// after a mauling has somewhere to shop.
+pub fn refreshContractWorld(gs: *GameState, c: *const contract.Contract) !void {
+    const world = planet.find(c.planet_key) orelse return;
+    const day = gs.clock.day_index;
+    const home = gs.homeHqFor(c.assigned_company);
+    for (0..tuning.market.contract_planet_slots) |_| {
+        const design = @import("../domain/rat.zig").roll(&gs.rng, .market, world.faction, @import("../gen/company_gen.zig").rollWeightClass(&gs.rng), gs.clock.date.year);
+        if (!market.listingAppears(&gs.rng, design.rarity, world.industry, 0, 0)) continue;
+        const cond = market.rollHullCondition(&gs.rng);
+        const price_roll: types.Bp = 10_000 + (@as(types.Bp, gs.rng.roll2d6(.market)) - 7) * 500;
+        var weapon_value: types.CBills = 0;
+        var weapons: types.CBills = 0;
+        for (design.loadout) |slot| if (slot.class == .weapon) {
+            weapon_value += @import("../domain/part.zig").cost(slot.part);
+            weapons += 1;
+        };
+        const avg_weapon = if (weapons > 0) @divTrunc(weapon_value, weapons) else 50_000;
+        try gs.market_listings.append(gs.allocator(), .{
+            .kind = .unit,
+            .item_key = design.key,
+            .rarity = design.rarity,
+            .price = types.applyBp(market.hullPrice(design.cost, avg_weapon, cond, price_roll), tuning.finance.field_markup_bp),
+            .listed_day = day,
+            .expires_day = day + 31,
+            .condition = cond,
+            .hq = home,
+            .company = c.assigned_company,
+        });
+    }
 }
 
 fn refreshBoard(gs: *GameState, hq_id: types.HqId) !void {
@@ -332,7 +369,7 @@ fn refreshBoard(gs: *GameState, hq_id: types.HqId) !void {
     const lot_size: u32 = if (thin) 1 else 2 + warehouse;
     var hulls: u32 = 0;
     for (gs.market_listings.items) |l| {
-        if (l.kind == .unit and l.hq == hq_id and !l.staple) hulls += 1;
+        if (l.kind == .unit and l.hq == hq_id and !l.staple and l.company == .none) hulls += 1;
     }
     var attempts: u32 = 0;
     while (hulls < lot_size and attempts < 12) : (attempts += 1) {

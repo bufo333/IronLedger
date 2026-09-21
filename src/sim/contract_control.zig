@@ -235,7 +235,7 @@ pub fn checkEffectiveness(gs: *GameState) !void {
         }
         if (c.ineffective_since == null) {
             c.ineffective_since = gs.clock.day_index;
-            try gs.log(.contract, .{ .company = c.assigned_company, .contract = c.id }, "[objective] COMBAT-INEFFECTIVE: fieldable {d} BV of {d} committed — {d} days to buy replacements locally or be declared in breach", .{
+            try gs.log(.contract, .{ .company = c.assigned_company, .contract = c.id }, "[objective] COMBAT-INEFFECTIVE: fieldable {d} BV of {d} committed — {d} days to buy replacements locally (the contract world's hulls are on the home HQ's Market board, marked @world) or be declared in breach", .{
                 now, c.committed_bv, grace_days,
             });
         } else if (gs.clock.day_index >= c.ineffective_since.? + grace_days) {
