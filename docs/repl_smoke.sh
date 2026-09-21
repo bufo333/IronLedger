@@ -23,6 +23,7 @@ out=$(printf '%s\n' \
   'strip 3' \
   'roe co:1 cautious' \
   'loan 500000' \
+  'candidates 0' \
   'accept 0 1' \
   'day 3 force' \
   'help' \
