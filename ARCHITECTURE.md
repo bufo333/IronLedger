@@ -245,8 +245,23 @@ has a set of **elements** (lance/flight/platoon). Per round:
 Post-battle flows straight into the existing systems: wounded → medical,
 damage → tech queues + parts demand, salvage → inventory/market, XP → skills.
 
-Garrison-class contracts mostly skip step 3: their risk shows up as §8 events
-(raids, sabotage, riots) that *occasionally* spawn a small engagement.
+As built (Stage 7 → 12D) the rounds collapse into **one opposed roll** per
+engagement; step 4 survives as a company standing order — **rules of
+engagement** (12D.4: hold / standard / cautious), which trade roll odds
+against losses on a lost fight and recovery of wrecks. The opposition is a
+**force of its own** (12D.5): lances off the enemy house's RAT at a rolled
+skill, posted with the offer and shown by intel, not a mirror of the
+player's BV — so a worn-down company meets the same enemy as a fresh one.
+
+**Who holds the field keeps the wrecks** (12D.3, CamOps salvage): on a lost
+field every hull wrecked there must be dragged off (salvage lance, trucks,
+an own DropShip, your own ground) or it is the enemy's, and its pilot walks
+out or goes missing — a ransom/trade/write-off decision. How a hull died
+(12D.2, TechManual: cored CT, engine kill, ammunition explosion) decides
+what its rebuild needs; some wrecks are scrap, only worth stripping.
+
+Garrison-class contracts see §8 events (raids, sabotage, riots) and, since
+12D.6, a one-lance **probe** every six weeks or so.
 
 **Ammunition is physical** (Stage 9B): munition-family pools (AC/5, AC/20,
 LRM, SRM, MG rounds; energy weapons need none) are stocked per site and
@@ -463,7 +478,11 @@ structure, limb/torso assemblies) for any chassis the outfit *owns* is
 always available at a regional HQ by **fabrication** — at a cost multiplier
 and bay time, never subject to rarity rolls. The market's rare slots may
 offer them cheaper and sooner; fabrication is the floor. Rarity gates what's
-*new*; it never soft-locks repairing what you already field.
+*new*; it never soft-locks repairing what you already field. What *does*
+gate it (12D.8) is the facility: assemblies are rated by weight class, and
+a heavy one needs a level-2 mek bay, an assault one a level-3 bay at a
+regional or brigade HQ. A hull the enemy kept, or one reduced to scrap, is
+beyond any guarantee.
 
 **Local operating funds.** A deployed company spends only what it physically
 holds on-planet: an operating fund allotted at deployment and topped up by

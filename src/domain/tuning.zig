@@ -217,6 +217,12 @@ pub const Tuning = struct {
         salvage_bv_per_armor_ton: i64,
         salvage_bv_per_weapon: i64,
         salvage_bv_per_component: i64,
+        /// Garrison probes (12D.6, ARCH §8): garrison-class contracts see a
+        /// probe every `garrison_probe_base_days` + 2d6 × `garrison_probe_die_days`
+        /// days, the enemy committing `garrison_probe_lances` of its lances.
+        garrison_probe_base_days: u32,
+        garrison_probe_die_days: u32,
+        garrison_probe_lances: u8,
     },
     field_supply: struct {
         ammo_share_pct: u32,
@@ -329,6 +335,20 @@ pub const Tuning = struct {
         standing_complete_gain: i32,
         standing_enemy_loss: i32,
         standing_breach_loss: i32,
+        /// A performance failure at term (12D.1, CamOps): what it costs with
+        /// the employer and in reputation. No clawback, no cooling.
+        standing_failure_loss: i32,
+        failure_reputation: i32,
+        /// Jump-point interdiction (12D.9): weekly, a company in transit
+        /// without its own crewed DropShip meets raiders on 2d6 ≥ this.
+        interdiction_target: u8,
+        /// Threat pay (12E.6): an offer's pay scales with its opposition's
+        /// power against the kind's norm (the midpoint lance count of
+        /// `reference_lance_bv` at regular skill) — by `threat_pay_weight_bp`
+        /// of the difference, capped at ±`threat_pay_cap_bp`.
+        reference_lance_bv: i64,
+        threat_pay_weight_bp: types.Bp,
+        threat_pay_cap_bp: types.Bp,
         standing_pay_bp_per_point: types.Bp,
         /// Shunned when standing is at or under −this.
         standing_shun_depth: i32,
@@ -389,6 +409,53 @@ pub const Tuning = struct {
         /// Keep-stocked provisions line at the starter HQ (min / target tons).
         provisions_keep_min: u32,
         provisions_keep_target: u32,
+        /// Starter line lances (12E.1): 2d6 at or under this is a light
+        /// mek, anything higher a medium — no heavies or assaults the
+        /// founding level-1 mek bay could not rebuild.
+        starter_light_max: u8,
+    },
+    /// Real loss (Stage 12D): how hulls die, what a rebuild needs, and when
+    /// one is not worth it.
+    loss: struct {
+        /// An engine kill or an ammunition explosion is scrap on 2d6 at or
+        /// under this (+ the difficulty's `scrap_mod`).
+        scrap_target: i32,
+        /// Bay days a new engine adds to a rebuild.
+        engine_rebuild_days: u32,
+        /// A rebuild costing more than this share of a new hull is flagged
+        /// "beyond economical repair" (it can still be done).
+        writeoff_bp: types.Bp,
+        /// Who holds the field keeps the wrecks (12D.3, CamOps salvage). On
+        /// a lost field each hull wrecked there is recovered on 2d6 + mods ≥
+        /// this, else the enemy has it. Mods: a crewed salvage lance, enough
+        /// SVT-1 trucks for the wrecks, an own DropShip on-world, a rout,
+        /// the scenario's `recovery_mod` and the difficulty's.
+        recovery_target: i32,
+        recovery_salvage_lance: i32,
+        recovery_trucks: i32,
+        recovery_dropship: i32,
+        recovery_rout: i32,
+        /// The pilot of a hull left behind walks out on 2d6 + (5 − piloting)
+        /// + the difficulty's recovery mod (+ the rout penalty) ≥ this;
+        /// otherwise they are missing, held by the enemy (ransom, trade, or
+        /// written off in the inbox).
+        escape_target: i32,
+        /// Company morale when a missing pilot is written off.
+        mia_morale: i32,
+        /// Rules of engagement (12D.4): roll shift, the share of engaged
+        /// hulls hit on a lost fight (percentage points), the recovery
+        /// roll, and the extra morale a lost stand costs.
+        roe: struct {
+            hold_roll: i32,
+            cautious_roll: i32,
+            hold_hits_pct: i32,
+            cautious_hits_pct: i32,
+            hold_recovery: i32,
+            cautious_recovery: i32,
+            hold_morale: i32,
+            /// Score a cautious withdrawal from a draw costs.
+            withdrawal_score: i32,
+        },
     },
     commander: struct { bonus_bp: types.Bp },
 };

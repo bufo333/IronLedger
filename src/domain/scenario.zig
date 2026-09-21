@@ -23,6 +23,9 @@ pub const Scenario = struct {
     score_mult: u8,
     /// The support train sits in the line of fire on a defeat.
     support_exposed: bool,
+    /// Recovering wrecks off a lost field (12D.3): your own ground helps,
+    /// the enemy's lines hurt.
+    recovery_mod: i8 = 0,
 };
 
 pub const KindTable = struct { kind: []const u8, table: [6][]const u8 };
@@ -34,6 +37,18 @@ pub const table: Table = @import("scenarios_zon");
 pub fn find(key: []const u8) ?*const Scenario {
     for (table.scenarios) |*s| if (std.mem.eql(u8, s.key, key)) return s;
     return null;
+}
+
+/// The six faces of a kind's scenario table (12E.3: the rating averages
+/// over them exactly instead of rolling).
+pub fn faces(kind: contract.ContractKind) [6]*const Scenario {
+    var out: [6]*const Scenario = undefined;
+    const standup = find("standup").?;
+    for (&out) |*f| f.* = standup;
+    for (table.by_kind) |row| if (std.mem.eql(u8, row.kind, @tagName(kind))) {
+        for (row.table, 0..) |key, i| out[i] = find(key) orelse standup;
+    };
+    return out;
 }
 
 /// Roll the scenario for an engagement on `kind`: d6 on the kind's table

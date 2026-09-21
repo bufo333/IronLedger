@@ -20,7 +20,10 @@ out=$(printf '%s\n' \
   'autoadmit off' \
   'hire mekwarrior Grayson Carlyle' \
   'fabricate comp_arm 1' \
+  'strip 3' \
+  'roe co:1 cautious' \
   'loan 500000' \
+  'candidates 0' \
   'accept 0 1' \
   'day 3 force' \
   'help' \
@@ -36,8 +39,11 @@ check 'RATING BY YEAR'
 check 'done.'
 check 'hired #'
 check 'fabricate'
+check 'stripped for parts'
 check 'drew 500000 c-bills over 12 months'
 check 'under contract:'
+check '· board '
+check 'skull'
 check 'advanced 3 day'
 check 'saved campaign'
 echo "REPL SMOKE OK"

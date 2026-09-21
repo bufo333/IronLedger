@@ -983,6 +983,198 @@ v18 (12C.16: campaign `start_year`). Every knob lands in
 `data/tables/tuning.zon` from the start; rule tables cite the AtB /
 CamOps / MekHQ source next to the table.
 
+## Stage 12D — Real loss (planned 2026-09-21)
+
+Play feedback: "there is not a lot of ways for the player to lose an entire
+lance". A wreck always came home and always rebuilt for one `comp_ct`; the
+enemy was sized off your own BV; a battle was one roll with no way to pull
+out. 12D makes permanent loss possible, legible and avoidable, on the
+CamOps/MekHQ/TechManual rules, scaled by difficulty.
+
+- ✅ 12D.1 **Loose ends.** A KIA pilot leaves the seat (`personnel.depart`,
+  no payout); a performance failure at term is a **failed** contract, not a
+  breach (CamOps): no clawback, no cooling, reputation
+  `failure_reputation` (−1), employer standing −`standing_failure_loss`
+  (10), the record's −5 and the history's failed column finally live. VP
+  are banked when the score moves (battles and events alike) and never
+  re-added at term, so a broken pool and a served term score the same way.
+  An early close-out's log says the remaining payments are forfeited.
+  `docs/mekhq-map.md` rows for the contract market, scenarios and rating
+  point at the right files.
+- ✅ 12D.2 **Why it died: causes and write-offs** (TechManual "Destroying a
+  'Mech"). A kill rolls its cause: an ammo slot struck (or cooked off at
+  severity 11+, no CASE in the 3025 catalogue) is an **ammunition
+  explosion** that guts both side torsos; a severity-12 hit is an **engine
+  kill**; anything else cores the centre torso. Engine and ammo kills are
+  **scrap** on 2d6 ≤ `loss.scrap_target` (4) + the difficulty's
+  `scrap_mod` (green −2 … elite +2). `Unit.wreck` persists (store v20). The
+  depot adds a new engine to engine/ammo rebuilds at the TechManual price
+  (5,000 × rating × tonnage ÷ 75, rating = walk × tonnage) and
+  `engine_rebuild_days`; scrap is refused (`WrittenOff`). The hangar prices
+  every wreck — "engine destroyed — rebuild ≈1.4M vs new 4.8M" — and flags
+  anything over `writeoff_bp` (75%) as beyond economical repair.
+  **`strip <unit>`** (Forces `$` → `s`, MekHQ "salvage unit") crates every
+  intact weapon, component and the armour still on a hull into its home
+  warehouse; a wreck's sale and liquidation value is now its strip value,
+  not zero. AARs read "DESTROYED (engine destroyed)".
+- ✅ 12D.3 **Who holds the field keeps the wrecks** (CamOps salvage, both
+  ways). On a defeat or rout every hull wrecked there rolls 2d6 + mods ≥
+  `loss.recovery_target` (7): a crewed salvage lance +2, SVT-1 trucks
+  enough for the wrecks +1, an own DropShip with the company +1, a rout −2,
+  the scenario's new `recovery_mod` (base defence +2, hold the line +1,
+  breakthrough/ambush/extraction −1) and the difficulty's (green +3 …
+  elite −2). A miss leaves the hull to the enemy — gone from the books,
+  and battle-loss compensation now covers its full value at the terms'
+  rate. Its pilot walks out on 2d6 + (5 − piloting) + the same difficulty
+  and rout mods ≥ `escape_target` (6), else is **missing** (`.mia`, held
+  by the enemy house): an inbox decision to pay the ransom (12B.7 table),
+  trade a prisoner of that house you hold (their own decision goes with
+  them), or write them off — missing, presumed dead, company morale −5
+  (the default: spends nothing). AAR lines read "· field lost · recovery 5
+  vs 7 — LEFT TO THE ENEMY" and "field lost: 2 hulls left to DC, 1 pilot
+  missing (inbox)". Calibration (10 hopeless routs, three seeds): Green
+  loses none; Elite loses 2–4 hulls and 1–4 pilots, keeping as many wrecks.
+- ✅ 12D.4 **Rules of engagement** (ARCH §7's withdrawal thresholds as a
+  company standing order). `Force.roe` hold / standard / cautious (store
+  v21); `roe co:N <mode>`, Forces `o` on a company row (on a lance it still
+  cycles the role); the active contract pane shows it. **Hold**: +1 to the
+  roll, but a lost fight hits 10 points more of the company, recovery −1
+  and morale −2 more. **Cautious**: −1 to the roll, a lost fight hits 15
+  points fewer, recovery +2 — and a draw becomes a withdrawal: field given
+  up (no salvage, wrecks roll recovery), score −1. Integrated command
+  rights force hold ("ROE hold (integrated command)" in the AAR). Knobs in
+  `tuning.loss.roe`. Still one roll per battle: a campaign-level choice.
+- ✅ 12D.5 **The enemy is a force, not a mirror** (AtB OpFor). Offers roll
+  their opposition when posted (`domain/opfor.zig`, `data/tables/opfor.zon`):
+  lances by contract kind (raids 2–3/2–4, relief 3–4, planetary assault
+  4–5, garrison probes 1–2), a skill level on 2d6 (+ kind mod, pirates −2:
+  green 5/6 … elite 2/3), and one lance's BV off the enemy house's RAT in
+  the campaign year (store v22). Each engagement the enemy brings that
+  force ± variance × scenario × difficulty — **whatever you brought**: a
+  gutted company no longer meets a gutted enemy. The attrition pool is the
+  force plus reinforcements (+50% a month, six months cap). Contracts from
+  older saves keep the mirror. **Intel**: the board shows "opp 3 lances of
+  veteran DC ≈13k BV a fight" from comms 3 (B-rated outfits get one level
+  free), the kind's lance range and skill from comms 1, the range alone
+  below; `candidates <offer#>` shows each company's **odds** (fieldable BV
+  against the estimated enemy power). Calibration (8 seeds, first combat
+  offer, 200 days, starter company): Regular wins ~67% of battles (the
+  mirror gave 79%), and damage now compounds.
+- ✅ 12D.6 **Garrison probes fight** (ARCH §8). Garrison-class contracts
+  with a rolled opposition see a probe every `garrison_probe_base_days` (21)
+  + 2d6 × 3 days, the enemy committing `garrison_probe_lances` (1) of its
+  lances — so the garrison scenario rows, the defence lance's +10% and the
+  field-recovery rules are live on quiet worlds too. The pirate-raid
+  decision's sortie is now a real engagement (`Effect.engagement`) instead
+  of abstract wear. Older garrison contracts (no rolled force) stay quiet.
+- ✅ 12D.7 **The contract world has a market** (ARCH §9.8 "buy a local
+  replacement"). Each active contract's world gets a thin hull board —
+  `market.contract_planet_slots` (3) rolls off the world's house table at
+  its industry, at the field markup (×1.5), refreshed monthly and on
+  arrival, gone with the contract (`Listing.company`, store v23). The rows
+  sit on the company's home HQ Market board marked `@World`, priced against
+  the company's **local funds**; buying debits them and the hull joins the
+  company on the spot (seat a pilot and a tech). The combat-ineffective
+  grace window now points there — it finally has somewhere to shop.
+- ✅ 12D.8 **Tonnage-rated structure** (MekHQ `MekLocation` per tonnage;
+  TechManual structure cost scales with tonnage). Components carry a
+  weight class: the existing `comp_*` keys are the medium (40–55 t)
+  assemblies — so older saves' stock and keep-stocked lines stay valid —
+  and `comp_*_l` / `_h` / `_a` are light (×0.6 cost), heavy (×1.5, one
+  rarity step scarcer) and assault (×2, two steps) in `parts.zon`.
+  `part.componentFor(slot, chassis)` picks by the hull's tonnage in the
+  depot, the estimate, strip, the damage/demand panes and the REPL; salvage
+  assemblies come in the class of the wreck they were pulled from.
+  Fabrication is facility-locked, not rarity-locked: heavy assemblies need
+  a mek bay at level 2, assault ones level 3 at a regional or brigade HQ
+  (`PartDef.fab_min_bay` / `fab_regional`, `hq_ops.canFabricate`, refused
+  with `BayTooSmall`); keep-stocked lines and the demand pane order what
+  the bay can't build. Fabrication days scale by class (light −2 … assault
+  +6).
+- ✅ 12D.9 **High-stakes decisions** (the 12.24 inbox rule: hulls and money
+  move only by decision). **Betrayal escalates** (combat monthly 2): the
+  liaison who sold your routes demands your most battered line hull as
+  collateral — hand it over (gone for good, `Effect.seize_hull`), refuse
+  and protest (employer standing −6, morale −8, score −2; the default), or
+  pay him off (half a month's pay). **Jump-point interdiction**: a company
+  in transit without its own crewed DropShip meets raiders on 2d6 ≥
+  `contract.interdiction_target` (11) weekly — fight through (a real
+  engagement against the contract's opposition), pay them off (100k), or
+  divert and wait them out (+7 days, the default; `Effect.delay_arrival`).
+  Deferred: a "recovery raid" decision to win back hulls left on a lost
+  field (needs the lost hulls held in limbo rather than struck off).
+
+## Stage 12E — Judging a contract (planned 2026-09-21)
+
+Play feedback after 12D: a company that cannot fix its heavies should not
+start with them; a lights-and-mediums company needs to see that an offer is
+a wall of heavies before it signs; the judgement belongs to the company
+that would go; and with several HQs, offers belong to the bases in range.
+
+- ✅ 12E.1 **Starter company: lights and mediums.** The line lances roll
+  `company_gen.starterWeightClass` — 2d6 ≤ `generation.starter_light_max`
+  (5) light, else medium — so the founding level-1 bay rebuilds everything
+  the outfit fields (12D.8). Heavies and assaults come later, off the boards
+  and the battlefield; `rollWeightClass` still drives markets and salvage.
+- ✅ 12E.2 **Hulls the home bay cannot rebuild are flagged.**
+  `hq_ops.bayCanRebuild` (the design's centre-torso assembly against the
+  bay, 12D.8) drives a checklist line per company ("Alpha fields 1 heavy
+  and 0 assault hull(s) Skye (bay 1) cannot rebuild structure for"), and
+  heavy/assault hulls on a Market board or in the raise wizard say "needs a
+  level-2 bay to rebuild" / "a level-3 bay at a regional HQ" when the
+  buying HQ's bay is short.
+- ✅ 12E.3 **Skulls** (HBS BattleTech's half-skull scale, computed not
+  rolled). `domain/skulls.zig` + `data/tables/skulls.zon`: half-skull bands
+  by the power ratio own ÷ enemy, aligned with `battle.ratioBonus` (≥150%
+  ½ skull … 91–109% three skulls, even and hard … under 68% five,
+  "outmatched" under 60%). `battle.estimatePower` is the battle's own
+  `playerSideIn` run read-only on the caller's allocator (BV × skill ×
+  fatigue/injury × condition × quality × supply, recon and the support
+  echelon, lance roles under the contract's rights, close terrain), with
+  tonnage and the L/M/H/A mix of the hulls that would fight.
+  `queries.rateOffer(offer, company)` sets that against the opposition as
+  the intel reads it — lances exact from comms 3 (a skull *range* over the
+  kind's lance range below that), skill from comms 1, the difficulty's
+  enemy multiplier, the mean scenario strength; garrison work against a
+  one-lance probe — and averages the 2d6 exactly over the kind's six
+  scenario faces for the chance to win a fight and to lose the field
+  (scouts, close-terrain cap and the company's ROE included). Enemy lance
+  tonnage is rolled with the force (`Contract.enemy_lance_tons`, store v24).
+- ✅ 12E.4 **One contract board per HQ.** `contract_market.refresh` posts
+  a board for every HQ: worlds inside *its* ring and beachhead band, the
+  distance from *it*, the count from the rating and *its* comms (a field
+  HQ hears half), the kind caps per board; each offer carries
+  `Contract.offer_hq` (store v24; older offers are open to anyone until the
+  next refresh). `commands.offerEligible`: only a company based at that HQ
+  (its home, `homeHqFor`) may take the offer — from home or redeploying
+  from the field — else `OutOfRange` ("only companies based at the HQ that
+  posted it … `assignco co:N hq:M` rebases a company"). The Contracts
+  screen shows one board at a time (`[ ]` switches, the title names it),
+  `candidates` says "based at X, not Y" for the rest, and the REPL `offers`
+  names each offer's board.
+- ✅ 12E.5 **Skulls on every screen.** Board rows carry the rating for
+  the readiest company in range (`queries.bestRating` via the `candidates`
+  ranking): "☠☠☠◐ 3–3.5 skulls Alpha · 640t (L7 M9 H0 A0) vs ~660–825t",
+  coloured green/amber/red, or "no company in range". `candidates <offer#>`
+  replaces the 12D.5 odds column with skulls · win % / lose-the-field % ·
+  tonnage per company (the accept picker shows the same). The active
+  contract pane shows live skulls from what the company can field today,
+  and the checklist warns when it reaches `skulls.warn_half_skulls` (4½):
+  "Bravo is outmatched on Talitha … consider cautious ROE or recall".
+  Intel is three-tiered (`queries.lanceIntel`): exact from comms 3, within
+  a lance either way from comms 1, the kind's whole range blind. `--ascii`
+  draws skulls as X / x; the REPL prints them under each offer.
+- ✅ 12E.6 **Harder contracts pay more** (CamOps prices by operation, HBS
+  by difficulty). `contract_market.threatPayBp`: the opposition's power
+  (lances × lance BV at its skill) against the kind's norm (midpoint lances
+  of `contract.reference_lance_bv` 3.9k at regular skill), half the
+  difference (`threat_pay_weight_bp`), capped at ±25%
+  (`threat_pay_cap_bp`) — absolute, so skulls stay relative to a company
+  and pay to the job. Sweep (40 seeds, one offer each, 150 days, comms 3):
+  ½ skull won 47 / lost 2, 3 skulls 26 / 8, 4 skulls 9 / 7, 5 skulls 26 /
+  46 with 8 meks gone — the middle bands read a little harder than they
+  play (the enemy pool shrinks over a contract).
+
 ## Stage 13 — Graphical client
 Architected after the TUI ships, reusing the same command/query boundary.
 

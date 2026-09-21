@@ -16,6 +16,8 @@ pub const ability = @import("domain/ability.zig");
 pub const rat = @import("domain/rat.zig");
 pub const faction = @import("domain/faction.zig");
 pub const scenario = @import("domain/scenario.zig");
+pub const opfor = @import("domain/opfor.zig");
+pub const skulls = @import("domain/skulls.zig");
 pub const terrain = @import("domain/terrain.zig");
 /// Build-time facts (12C.18): the data directory overlaid with `-Ddata=`,
 /// and which files it replaced. Constants, not state.

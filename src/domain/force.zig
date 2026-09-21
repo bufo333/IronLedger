@@ -38,6 +38,27 @@ pub const NewLanceKind = union(enum) {
 /// scenario generation odds and training XP (Stage 6/7).
 pub const LanceRole = enum { fighting, defense, scouting, training, unassigned };
 
+/// Rules of engagement for a company (12D.4, the withdrawal thresholds of
+/// ARCH §7 as a standing order): how long it stands when a fight turns.
+/// `hold` fights to the last — a harder roll for the enemy, but a lost
+/// fight costs more hulls and fewer come back; `cautious` pulls out at the
+/// first real losses — fewer hits and more wrecks dragged off, but a draw
+/// becomes a withdrawal (no field, no salvage). MekHQ counterpart: none
+/// (StratCon's "retreat" is per scenario); ACAR's withdrawal thresholds.
+pub const Roe = enum {
+    hold,
+    standard,
+    cautious,
+
+    pub fn describe(self: Roe) []const u8 {
+        return switch (self) {
+            .hold => "hold the ground — +1 to the roll; a lost fight costs more hulls and fewer are recovered",
+            .standard => "standard — withdraw when the fight is lost",
+            .cautious => "cautious — withdraw at first losses: −1 to the roll, fewer hits, more wrecks recovered; a draw is a withdrawal",
+        };
+    }
+};
+
 pub const Force = struct {
     id: types.ForceId,
     parent: types.ForceId = .none,
@@ -59,6 +80,8 @@ pub const Force = struct {
     /// For companies: the HQ that supplies it (shipments originate there).
     supplying_hq: types.HqId = .none,
     role: LanceRole = .unassigned,
+    /// Companies: rules of engagement (12D.4).
+    roe: Roe = .standard,
     support_kind: ?SupportLanceKind = null, // set iff echelon == .support_lance
     // Rotation tracking for companies (ARCH §9.7): each contract completed
     // without returning to a regional HQ banks fatigue for everyone attached

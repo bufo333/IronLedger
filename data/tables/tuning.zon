@@ -147,6 +147,10 @@
         .salvage_bv_per_armor_ton = 60,
         .salvage_bv_per_weapon = 150,
         .salvage_bv_per_component = 250,
+        // Garrison probes (12D.6): ~one every six weeks, one lance strong.
+        .garrison_probe_base_days = 21,
+        .garrison_probe_die_days = 3,
+        .garrison_probe_lances = 1,
     },
     .field_supply = .{
         .ammo_share_pct = 40,
@@ -222,6 +226,15 @@
         .standing_complete_gain = 5,
         .standing_enemy_loss = 3,
         .standing_breach_loss = 20,
+        .standing_failure_loss = 10, // failure at term (12D.1, CamOps): half a breach, no cooling
+        .failure_reputation = -1,
+        .interdiction_target = 11, // 1 in 12 a week for an unescorted charter
+        // Threat pay (12E.6; CamOps prices by operation, HBS BattleTech by
+        // difficulty): half the opposition's excess over the kind's norm,
+        // at most ±25%. A 3025 house lance off the RATs averages ~3.9k BV.
+        .reference_lance_bv = 3_900,
+        .threat_pay_weight_bp = 5_000,
+        .threat_pay_cap_bp = 2_500,
         .standing_pay_bp_per_point = 25, // ±25% pay at ±100
         .standing_shun_depth = 40,
         .standing_drift_per_month = 1,
@@ -258,6 +271,36 @@
         .starter_munitions_each = 8, // seven families now (12B.8): keeps the founding warehouse under its 200t
         .provisions_keep_min = 30,
         .provisions_keep_target = 90,
+        // Starter line lances (12E.1, HBS BattleTech / AtB starting lances):
+        // lights on 2–5 (28%), mediums otherwise — the founding bay rebuilds both.
+        .starter_light_max = 5,
+    },
+    // Real loss (Stage 12D). TechManual "Destroying a 'Mech": a cored
+    // centre torso, a destroyed engine (three engine criticals) or an
+    // ammunition explosion; CamOps salvage: whoever holds the field keeps
+    // the wrecks.
+    .loss = .{
+        .scrap_target = 4, // 2d6 ≤ 4 (1 in 6 at Regular): an engine or ammo kill is scrap
+        .engine_rebuild_days = 10,
+        .writeoff_bp = 7_500, // rebuild over 75% of a new hull: beyond economical repair
+        .recovery_target = 7, // Regular, no help: 58% of wrecks on a lost field come home
+        .recovery_salvage_lance = 2,
+        .recovery_trucks = 1,
+        .recovery_dropship = 1,
+        .recovery_rout = -2,
+        .escape_target = 6, // a regular pilot (piloting 5) walks out 72% of the time
+        .mia_morale = -5,
+        // ARCH §7 withdrawal thresholds as a company standing order.
+        .roe = .{
+            .hold_roll = 1,
+            .cautious_roll = -1,
+            .hold_hits_pct = 10, // defeat 40% → 50%, rout 55% → 65%
+            .cautious_hits_pct = -15, // defeat 40% → 25%, rout 55% → 40%
+            .hold_recovery = -1,
+            .cautious_recovery = 2,
+            .hold_morale = -2,
+            .withdrawal_score = -1,
+        },
     },
     .commander = .{ .bonus_bp = 200 },
 }

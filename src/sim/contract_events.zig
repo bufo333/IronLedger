@@ -35,7 +35,7 @@ pub const Entry = struct {
 fn garrisonDeck(roll: u8) Entry {
     return switch (roll) {
         2 => .{ .kind = .pirate_raid, .log = "Pirate raiders hit the perimeter", .options = &.{
-            .{ .label = "Sortie and run them down", .effects = &.{ .{ .damage_random_units = 1 }, .{ .xp_all = 2 }, .{ .fatigue = 6 }, .{ .score = 2 } } },
+            .{ .label = "Sortie and run them down (a real fight)", .effects = &.{ .engagement, .{ .xp_all = 1 }, .{ .score = 1 } } },
             .{ .label = "Hold the perimeter", .effects = &.{ .{ .damage_random_units = 1 }, .{ .morale = -3 }, .{ .score = 1 } } },
             .{ .label = "Leave it to the militia", .effects = &.{ .{ .morale = -3 }, .{ .score = -1 } } },
         }, .default_choice = 1 },
@@ -76,9 +76,13 @@ fn garrisonDeck(roll: u8) Entry {
 
 fn combatDeck(roll: u8) Entry {
     return switch (roll) {
-        2 => .{ .kind = .betrayal, .log = "Liaison feeds the enemy your patrol routes", .auto_effects = &.{
-            .{ .morale = -8 }, .{ .score = -2 },
-        } },
+        // Betrayal escalates (12D.9): the liaison who sold your routes now
+        // wants a hull as "collateral" against your conduct.
+        2 => .{ .kind = .betrayal, .log = "Liaison feeds the enemy your patrol routes — and now demands your most battered hull as collateral", .options = &.{
+            .{ .label = "Hand the hull over", .effects = &.{ .seize_hull, .{ .morale = -4 }, .{ .score = -1 } } },
+            .{ .label = "Refuse and protest to the employer", .effects = &.{ .{ .employer_standing = -6 }, .{ .morale = -8 }, .{ .score = -2 } } },
+            .{ .label = "Pay the liaison off (half a month's pay)", .effects = &.{ .{ .cash_monthly_pct = -50 }, .{ .morale = -4 } } },
+        }, .default_choice = 1 },
         3 => .{ .kind = .supply_interdiction, .log = "Enemy interdiction chokes resupply", .options = &.{
             .{ .label = "Run the blockade in force", .effects = &.{ .{ .fatigue = 6 }, .{ .damage_random_units = 1 }, .{ .score = 1 } } },
             .{ .label = "Pay smugglers to bring it through", .effects = &.{.{ .supply_loss = 60_000 }} },
@@ -182,6 +186,8 @@ fn weeklyDeck(garrison: bool, roll: u8) Entry {
 pub fn entryForKind(kind: events.EventKind) ?Entry {
     if (kind == .notice_given) return noticeEntry();
     if (kind == .prisoner_held) return prisonerEntry();
+    if (kind == .mia_held) return miaEntry();
+    if (kind == .jump_interdiction) return interdictionEntry();
     var roll: u8 = 2;
     while (roll <= 12) : (roll += 1) {
         const g = garrisonDeck(roll);
@@ -217,6 +223,34 @@ pub fn rollWeekly(gs: *GameState) !void {
             try gs.log(.contract, ctx, "[{s}] (2d6 = {d}) {s}{s}", .{ @tagName(c.kind), roll, deck.log, try effectsPlain(gs, deck.auto_effects) });
         } else try queueDecision(gs, deck, c, roll);
     }
+}
+
+/// Jump-point interdiction (12D.9): a company in transit without an owned,
+/// crewed DropShip of its own to escort the charter risks raiders at the
+/// jump point — weekly, on 2d6 ≥ `interdiction_target`.
+pub fn rollInterdiction(gs: *GameState) !void {
+    var it = gs.contracts.iterator();
+    while (it.next()) |entry| {
+        const c = entry.value_ptr;
+        if (c.status != .transit or !c.hasOpfor()) continue;
+        var escorted = false;
+        var uit = gs.units.iterator();
+        while (uit.next()) |ue| if (ue.value_ptr.kind == .dropship and ue.value_ptr.force == c.assigned_company and ue.value_ptr.pilot != .none) {
+            escorted = true;
+        };
+        if (escorted) continue;
+        const roll = gs.rng.roll2d6(.events);
+        if (roll < tuning.contract.interdiction_target) continue;
+        try queueDecision(gs, interdictionEntry(), c, roll);
+    }
+}
+
+pub fn interdictionEntry() Entry {
+    return .{ .kind = .jump_interdiction, .log = "Raiders are waiting at the jump point for your unescorted charter", .options = &.{
+        .{ .label = "Fight through (a real engagement)", .effects = &.{.engagement} },
+        .{ .label = "Pay them off (100k)", .effects = &.{.{ .cash = -100_000 }} },
+        .{ .label = "Divert and wait them out (+7 days in transit)", .effects = &.{.{ .delay_arrival = 7 }} },
+    }, .default_choice = 2 };
 }
 
 /// Queue a decision — or, once the player has answered this kind the same
@@ -379,6 +413,7 @@ fn applyEffectsFor(gs: *GameState, effects: []const events.Effect, contract: ?*c
             .reputation => |delta| gs.reputation += delta,
             .score => |delta| if (contract) |c| {
                 c.score += delta;
+                c.victory_points += delta * 5; // VP when earned, never again at term end (12D.1)
             },
             .morale => |delta| applyToCompany(gs, company, .morale, delta),
             .fatigue => |amount| applyToCompany(gs, company, .fatigue, @intCast(amount)),
@@ -446,6 +481,68 @@ fn applyEffectsFor(gs: *GameState, effects: []const events.Effect, contract: ?*c
                     try gs.log(.contract, .{ .company = company }, "[prisoner] {s} {s} refuses your offer (2d6 = {d}) and is released", .{ p.first_name, p.last_name, roll });
                 }
             },
+            .ransom_mia => if (gs.person(person_id)) |p| {
+                if (p.status != .mia) return;
+                const price = ransomPrice(p);
+                try gs.postTransaction(.{ .day = gs.clock.day_index, .amount = -price, .category = .event, .company = company, .note = "ransom for a missing pilot" });
+                try gs.log(.contract, .{ .company = company }, "[missing] {s} {s} ransomed back from {s} for {d} c-bills", .{ p.first_name, p.last_name, p.faction, price });
+                bringHome(p, gs.clock.day_index);
+            },
+            .exchange_mia => if (gs.person(person_id)) |p| {
+                if (p.status != .mia) return;
+                // A prisoner of that house, held anywhere by the outfit.
+                var traded: ?*@import("../domain/person.zig").Person = null;
+                var pit = gs.people.iterator();
+                while (pit.next()) |e| if (e.value_ptr.status == .pow and std.mem.eql(u8, e.value_ptr.faction, p.faction)) {
+                    traded = e.value_ptr;
+                    break;
+                };
+                if (traded) |pow| {
+                    pow.status = .released;
+                    // Their pending prisoner decision goes with them.
+                    var i: usize = 0;
+                    while (i < gs.event_queue.pending.items.len) {
+                        if (gs.event_queue.pending.items[i].person == pow.id) _ = gs.event_queue.pending.orderedRemove(i) else i += 1;
+                    }
+                    try gs.log(.contract, .{ .company = company }, "[missing] {s} {s} traded home for {s} {s}, a prisoner of {s}", .{ p.first_name, p.last_name, pow.first_name, pow.last_name, p.faction });
+                    bringHome(p, gs.clock.day_index);
+                } else {
+                    try gs.log(.contract, .{ .company = company }, "[missing] no prisoner of {s} to trade for {s} {s} — written off", .{ p.faction, p.first_name, p.last_name });
+                    try writeOffMissing(gs, p, company);
+                }
+            },
+            .engagement => if (contract) |c| {
+                // On station, or caught at the jump point on the way in (12D.9).
+                if (c.status == .active or c.status == .transit) try @import("battle.zig").resolveEngagement(gs, c);
+            },
+            .seize_hull => if (company != .none) {
+                // The most battered line hull the company has (12D.9).
+                var worst: ?*@import("../domain/unit.zig").Unit = null;
+                var uit = gs.units.iterator();
+                while (uit.next()) |e| {
+                    const u = e.value_ptr;
+                    if (gs.companyOf(u.force) != company or !u.kind.isCombat() or u.status == .mothballed) continue;
+                    if (worst == null or u.conditionPct() < worst.?.conditionPct()) worst = u;
+                }
+                if (worst) |u| {
+                    const key = u.chassis_key;
+                    const id = u.id;
+                    if (gs.person(u.pilot)) |p| p.assigned_force = company; // the pilot stays with you
+                    gs.removeUnit(id);
+                    gs.stats.hulls_lost += 1;
+                    try gs.log(.contract, .{ .company = company }, "[betrayal] the employer's liaison takes {s} #{d} as collateral — gone from the books", .{ key, @intFromEnum(id) });
+                }
+            },
+            .delay_arrival => |days| if (contract) |c| {
+                if (c.status == .transit) {
+                    if (c.arrive_day) |d| c.arrive_day = d + days;
+                    try gs.log(.contract, .{ .company = company, .contract = c.id }, "[transit] the company waits the raiders out — arrival {d} days later", .{days});
+                }
+            },
+            .write_off_mia => if (gs.person(person_id)) |p| {
+                if (p.status != .mia) return;
+                try writeOffMissing(gs, p, company);
+            },
             .field_stock => |fs| {
                 const site: types.Site = if (company != .none) .{ .company = company } else gs.defaultSite();
                 // Trucks have finite room: what does not fit is left on the dock.
@@ -480,6 +577,64 @@ fn letGo(gs: *GameState, person_id: types.PersonId, replace: bool) !void {
         return;
     };
     try gs.log(.rotation, .{ .company = company }, "[turnover] no {s} on the hiring halls to replace them — hire when one walks in", .{@tagName(p.role)});
+}
+
+/// What a house asks, or pays, for a pilot by experience (12B.7 table).
+fn ransomPrice(p: *const @import("../domain/person.zig").Person) types.CBills {
+    const t = @import("../domain/tuning.zig").t.contract;
+    return switch (p.experience()) {
+        .green => t.ransom_green,
+        .regular => t.ransom_regular,
+        .veteran => t.ransom_veteran,
+        .elite => t.ransom_elite,
+    };
+}
+
+/// A missing pilot comes home (12D.3): back on the books, still nursing
+/// whatever wound they walked away with, seat to be reassigned.
+fn bringHome(p: *@import("../domain/person.zig").Person, day: u32) void {
+    _ = day;
+    var open = false;
+    for (p.injuries.items) |inj| if (!inj.healed) {
+        open = true;
+    };
+    p.status = if (open) .wounded else .active;
+    p.faction = "";
+    p.morale = @min(p.morale, 40);
+}
+
+/// Missing, presumed dead (12D.3).
+fn writeOffMissing(gs: *GameState, p: *@import("../domain/person.zig").Person, company: types.ForceId) !void {
+    p.status = .kia;
+    gs.stats.people_kia += 1;
+    const t = @import("../domain/tuning.zig").t.loss;
+    applyToCompany(gs, company, .morale, t.mia_morale);
+    try gs.log(.contract, .{ .company = company }, "[missing] {s} {s}, held by {s}, is written off — missing, presumed dead (company morale {d})", .{ p.first_name, p.last_name, p.faction, t.mia_morale });
+}
+
+/// The missing-pilot decision (12D.3): ransom, trade a prisoner, or write
+/// them off. The default spends nothing.
+pub fn miaEntry() Entry {
+    return .{ .kind = .mia_held, .log = "was left behind on a lost field and is held by the enemy — pay the ransom, trade a prisoner of theirs, or write them off", .options = &.{
+        .{ .label = "Pay the ransom", .effects = &.{.ransom_mia} },
+        .{ .label = "Trade a prisoner of their house (if you hold one)", .effects = &.{.exchange_mia} },
+        .{ .label = "Write them off", .effects = &.{.write_off_mia} },
+    }, .default_choice = 2 };
+}
+
+/// Queue the missing-pilot decision (12D.3). No contract on the event, so
+/// the answer never hardens into a standing order: every pilot is asked for.
+pub fn queueMissing(gs: *GameState, person_id: types.PersonId, company: types.ForceId) !void {
+    const e = miaEntry();
+    try gs.event_queue.push(gs.allocator(), .{
+        .day = gs.clock.day_index,
+        .kind = .mia_held,
+        .company = company,
+        .person = person_id,
+        .options = e.options,
+        .default_choice = e.default_choice,
+        .deadline_day = gs.clock.day_index + decision_window_days * 2,
+    });
 }
 
 /// The prisoner decision (12B.7): ransom, release, or recruit.
@@ -730,7 +885,7 @@ test "12.24: automatic events never move money, stock or hulls — those are dec
             if (e.options.len > 0) continue;
             for (e.auto_effects) |fx| switch (fx) {
                 .fatigue, .morale, .xp_all, .score, .reputation, .employer_standing => {},
-                .cash, .cash_monthly_pct, .supply_loss, .parts_windfall, .field_stock, .damage_random_units, .damage_convoy_units, .raise_pct, .retention_bonus_months, .let_go, .replace_from_hall, .ransom_prisoner, .release_prisoner, .recruit_prisoner => {
+                .cash, .cash_monthly_pct, .supply_loss, .parts_windfall, .field_stock, .damage_random_units, .damage_convoy_units, .raise_pct, .retention_bonus_months, .let_go, .replace_from_hall, .ransom_prisoner, .release_prisoner, .recruit_prisoner, .ransom_mia, .exchange_mia, .write_off_mia, .engagement, .seize_hull, .delay_arrival => {
                     std.debug.print("auto event {s} carries a player-facing effect\n", .{@tagName(e.kind)});
                     return error.TestUnexpectedResult;
                 },
@@ -881,4 +1036,88 @@ test "play feedback: a weekly decision cools down, and the same answer three tim
     _ = try commands.execute(&gs, .{ .clear_standing_order = "smuggler_offer" });
     try std.testing.expectEqual(@as(u8, 0), gs.event_memory.get(.smuggler_offer).?.streak);
     try std.testing.expectError(commands.Error.NoSuchEvent, commands.execute(&gs, .{ .clear_standing_order = "no_such_thing" }));
+}
+
+test "12D.3: a missing pilot is ransomed, traded for a prisoner of their house, or written off" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1203 });
+    defer gs.deinit();
+    _ = try gs.createCommander("T", .LC, .paymaster);
+    const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    var pilots: [3]types.PersonId = undefined;
+    var n: usize = 0;
+    var uit = gs.units.iterator();
+    while (uit.next()) |e| if (e.value_ptr.kind == .mek and n < 3) {
+        pilots[n] = e.value_ptr.pilot;
+        n += 1;
+    };
+    for (pilots) |pid| {
+        _ = try @import("personnel.zig").depart(&gs, pid, .mia, 0, "");
+        gs.person(pid).?.faction = "DC";
+        try queueMissing(&gs, pid, co);
+    }
+    try std.testing.expectEqual(@as(usize, 3), gs.event_queue.pending.items.len);
+
+    // Ransom: the outfit pays, they come home without a seat.
+    const funds = gs.funds;
+    try resolveChoice(&gs, 0, 0);
+    try std.testing.expect(gs.funds < funds);
+    try std.testing.expect(gs.person(pilots[0]).?.status == .active);
+    try std.testing.expectEqualStrings("", gs.person(pilots[0]).?.faction);
+
+    // Trade: a Combine prisoner goes back, their decision with them.
+    const spec = @import("../gen/person_gen.zig").generateWithBonus(&gs.rng, .mekwarrior, 0);
+    const pow = try gs.hireFromSpec(spec);
+    gs.person(pow).?.status = .pow;
+    gs.person(pow).?.faction = "DC";
+    try queuePrisoner(&gs, pow, co);
+    try resolveChoice(&gs, 0, 1);
+    try std.testing.expect(gs.person(pilots[1]).?.status == .active);
+    try std.testing.expect(gs.person(pow).?.status == .released);
+    try std.testing.expectEqual(@as(usize, 1), gs.event_queue.pending.items.len); // the prisoner's own decision went too
+
+    // Unanswered: written off at the deadline.
+    gs.clock.day_index += decision_window_days * 2;
+    try expireDue(&gs);
+    try std.testing.expect(gs.person(pilots[2]).?.status == .kia);
+}
+
+test "12D.9: betrayal can cost a hull; raiders at the jump point delay or fight an unescorted company" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1209 });
+    defer gs.deinit();
+    _ = try gs.createCommander("T", .LC, .line_officer);
+    const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
+        .id = @enumFromInt(1),
+        .kind = .objective_raid,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 3, .base_pay_month = 200_000 },
+        .status = .active,
+        .assigned_company = co,
+        .monthly_net = 150_000,
+        .enemy_lances = 2,
+        .enemy_lance_bv = 3_000,
+    });
+    const c = gs.contracts.getPtr(@enumFromInt(1)).?;
+
+    // Betrayal: handing the hull over takes the most battered one off the books.
+    const hulls_before = gs.units.count();
+    try queueDecision(&gs, combatDeck(2), c, 2);
+    try resolveChoice(&gs, gs.event_queue.pending.items.len - 1, 0);
+    try std.testing.expectEqual(hulls_before - 1, gs.units.count());
+
+    // Interdiction: an unescorted company in transit meets raiders sooner or later.
+    c.status = .transit;
+    c.arrive_day = 30;
+    var weeks: u32 = 0;
+    while (gs.event_queue.pending.items.len == 0 and weeks < 200) : (weeks += 1) try rollInterdiction(&gs);
+    try std.testing.expect(gs.event_queue.pending.items.len == 1);
+    try std.testing.expectEqual(events.EventKind.jump_interdiction, gs.event_queue.pending.items[0].kind);
+    try resolveChoice(&gs, 0, 2); // divert
+    try std.testing.expectEqual(@as(?u32, 37), c.arrive_day);
+    try queueDecision(&gs, interdictionEntry(), c, 11);
+    const fought_before = c.battles_fought;
+    try resolveChoice(&gs, 0, 0); // fight through
+    try std.testing.expectEqual(fought_before + 1, c.battles_fought);
 }

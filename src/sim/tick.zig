@@ -48,7 +48,10 @@ pub fn advanceDay(gs: *GameState) !void {
     try runContracts(gs); // contract lifecycle
     try contract_control.runReturns(gs); // companies travelling home arrive
     if (gs.clock.date.day == 1) try contract_events.rollMonthly(gs); // event decks
-    if (gs.clock.day_index % 7 == 3) try contract_events.rollWeekly(gs); // weekly happenings (Stage 12)
+    if (gs.clock.day_index % 7 == 3) {
+        try contract_events.rollWeekly(gs); // weekly happenings (Stage 12)
+        try contract_events.rollInterdiction(gs); // raiders at the jump point (12D.9)
+    }
     try battle.runDaily(gs); // battle_resolution: due engagements resolve
     try contract_control.checkEffectiveness(gs); // the ineffectiveness clock (Stage 9E)
     if (gs.clock.day_index % 7 == 0 and gs.clock.day_index > 0) {
@@ -221,7 +224,7 @@ fn runStockPolicies(gs: *GameState) !void {
         };
         if (pending > 0 or failed_recently) continue;
         const want = sp.target - have;
-        const fabricate = part_mod.isComponent(sp.part_key) and hq_ops.baySlots(gs, sp.hq) > 0;
+        const fabricate = hq_ops.canFabricate(gs, sp.hq, sp.part_key); // what this bay is rated for (12D.8), else order it
         const cmd: commands.Command = if (fabricate)
             .{ .fabricate = .{ .hq = sp.hq, .part_key = sp.part_key, .quantity = want } }
         else
@@ -372,14 +375,17 @@ fn runContracts(gs: *GameState) !void {
                 c.end_day = gs.clock.day_index + @as(u32, c.terms.length_months) * 30;
                 if (gs.force(c.assigned_company)) |f| f.location_planet = c.planet_key;
                 try gs.log(.contract, .{ .company = c.assigned_company, .contract = c.id }, "[{s}] company on station at {s} — contract active", .{ @tagName(c.kind), c.planet_key });
+                // The contract world's hull board opens on arrival (12D.7).
+                try contract_market.refreshContractWorld(gs, c);
             },
             .active => if (c.end_day != null and gs.clock.day_index >= c.end_day.?) {
-                // End of term (Stage 9E): a performance failure is a breach;
-                // otherwise the tour completes, reputation by VP + score.
+                // End of term (Stage 9E): a performance failure is a failed
+                // contract (12D.1, CamOps — not a breach: no clawback, no
+                // cooling); otherwise the tour completes. VP were banked as
+                // the score moved, so nothing is added here.
                 if (c.score <= contract_mod.Contract.fail_score) {
-                    try contract_control.breach(gs, c, "failed on performance");
+                    try contract_control.fail(gs, c, "failed on performance");
                 } else {
-                    c.victory_points += c.score * 5;
                     try contract_control.complete(gs, c, false);
                 }
 

@@ -158,7 +158,13 @@ pub const Screen = struct {
                 }
             }
             if (col >= limit) break;
-            self.put(col, y, cp, style);
+            // Skulls (12E.5) fall back to letters under --ascii.
+            const glyph: u21 = if (self.ascii) switch (cp) {
+                '☠' => 'X',
+                '◐' => 'x',
+                else => cp,
+            } else cp;
+            self.put(col, y, glyph, style);
             col += 1;
         }
         return @intCast(@max(0, col - x));

@@ -66,11 +66,18 @@ pub fn rollWeightClass(rng: *rng_mod.Rng) chassis.WeightClass {
     };
 }
 
+/// The starter company's line lances (12E.1): lights and mediums only, so
+/// the founding level-1 mek bay can rebuild everything the outfit fields;
+/// heavies and assaults come later, off the boards and the battlefield.
+pub fn starterWeightClass(rng: *rng_mod.Rng) chassis.WeightClass {
+    return if (rng.roll2d6(.generation) <= tuning.generation.starter_light_max) .light else .medium;
+}
+
 /// Max tonnage for the recon lance's scout meks.
 pub const scout_max_tonnage = tuning.generation.scout_max_tonnage;
 
 /// Generate a full starter company into the campaign:
-///   - 3 line lances × 4 meks (RAT weight-class rolls) with pilots
+///   - 3 line lances × 4 meks (light/medium RAT rolls, 12E.1) with pilots
 ///   - a 4th Recon Lance of light scouts (≤40t, mostly 20–35t)
 ///   - an attached "Omega Company" support echelon: salvage, MASH (with
 ///     medics), logistics, and security lances (ARCH §9.3)
@@ -86,7 +93,7 @@ pub fn generateInto(gs: *GameState, name: []const u8) !types.ForceId {
     for (lance_names) |lance_name| {
         const lance_id = try gs.createForce(lance_name, .lance, company_id);
         for (0..force.lance_size) |_| {
-            const class = rollWeightClass(&gs.rng);
+            const class = starterWeightClass(&gs.rng);
             // The house you come from fields what it fields (12B.8 RAT).
             const home: []const u8 = if (gs.commander) |c| c.origin.key() else "PER";
             const design = @import("../domain/rat.zig").roll(&gs.rng, .generation, home, class, gs.clock.date.year);
@@ -237,4 +244,20 @@ test "experience roll is 2d6-shaped" {
     try std.testing.expect(counts[1] > counts[0]);
     try std.testing.expect(counts[1] > counts[2]);
     try std.testing.expect(counts[3] > 0 and counts[3] < counts[2]);
+}
+
+test "12E.1: the starter company fields lights and mediums only — the founding bay rebuilds them all" {
+    for ([_]u64{ 1, 2, 3, 4, 5, 6, 7, 8 }) |seed| {
+        var gs = GameState.init(std.testing.allocator, .{ .seed = seed });
+        defer gs.deinit();
+        _ = try gs.createCommander("T", .LC, .line_officer);
+        const co = try generateInto(&gs, "Alpha");
+        var it = gs.units.iterator();
+        while (it.next()) |e| {
+            const u = e.value_ptr;
+            if (u.kind != .mek or gs.companyOf(u.force) != co) continue;
+            const class = chassis.find(u.chassis_key).?.weightClass();
+            try std.testing.expect(class == .light or class == .medium);
+        }
+    }
 }

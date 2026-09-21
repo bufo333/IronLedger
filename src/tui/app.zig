@@ -910,7 +910,7 @@ pub const App = struct {
             .desk => "F1-F10 / 1-0 screens · Tab pane · j/k cursor | Enter act · e emblem · n end turn | : command · F12 settings · ? help · q welcome",
             .contracts => "Tab pane · j/k row | board: Enter accept (you pick the company) · b bargain · active/history: Enter full log · c complete · R recall",
             .ledger => "j/k treasury | L loan · R repay · t send cash · T pull cash back · p top-up policy · x clear policy",
-            .forces => "[ ] company / pool · j/k row · r cycle pane · M manning | a seat · u unassign · l lance · x transfer · c crew · A auto · t / T train one / all · o role · d depot · R spares (hull) / recall (company) · m mothball · w air wing · + raise | $ sell · X disband · b fabricate",
+            .forces => "[ ] company / pool · j/k row · r cycle pane · M manning | a seat · u unassign · l lance · x transfer · c crew · A auto · t / T train one / all · o role (lance) / ROE (company) · d depot · R spares (hull) / recall (company) · m mothball · w air wing · + raise | $ sell · X disband · b fabricate",
             .supply => "j/k site | o order · s ship · R trim to plan · H parts home · K keep stocked | t / T cash out / back · p / P cash / resupply policy · $ sell stock",
             .hq => "[ ] switch HQ · Tab hall · f / F filter | u upgrade · T tier · S autostaff · Enter hire · b fabricate | $ sell HQ",
             .map => "h j k l move · + / - zoom · c colours | f found HQ here · o offers here | q welcome",
@@ -1410,7 +1410,7 @@ pub const App = struct {
         const al = self.a();
         const g = &self.gs.?;
         const b = self.body();
-        const view = try q.contracts(al, g);
+        const view = try q.contracts(al, g, @enumFromInt(self.hqSelId(g)));
         const board_h: u16 = @max(6, b.h * 2 / 5);
         var rows: std.ArrayListUnmanaged([]const u8) = .empty;
         try rows.append(al, view.board_header);
@@ -1424,7 +1424,8 @@ pub const App = struct {
             try rows.append(al, try std.fmt.allocPrint(al, "{{a}}companies for the selected offer{{/}}   {s}", .{q.candidates_header}));
             for (try q.offerCandidates(al, g, view.board[@min(self.cur(0).*, view.board.len - 1)].index)) |c| try rows.append(al, try std.fmt.allocPrint(al, "  {s}", .{c.text}));
         }
-        const inner = self.screen.pane(.{ .x = b.x, .y = b.y, .w = b.w, .h = board_h }, .{ .title = "CONTRACT BOARD", .focused = self.focus == 0, .right_title = "[Enter] accept with a company" });
+        const board_hq: types.HqId = @enumFromInt(self.hqSelId(g));
+        const inner = self.screen.pane(.{ .x = b.x, .y = b.y, .w = b.w, .h = board_h }, .{ .title = try std.fmt.allocPrint(al, "CONTRACT BOARD · {{a}}{s}{{/}} · for the companies based there", .{q.hqName(g, board_hq)}), .focused = self.focus == 0, .right_title = "[ ] other HQ's board  [Enter] accept with a company" });
         const c = self.cur(0);
         if (view.board.len > 0 and c.* >= view.board.len) c.* = view.board.len - 1;
         self.screen.lines(inner, rows.items, 0, if (self.focus == 0 and view.board.len > 0) c.* + 1 else null);
@@ -2026,13 +2027,22 @@ pub const App = struct {
             .sell_unit => |uid| {
                 const g = &self.gs.?;
                 const u = g.unit(uid);
+                // Strip for parts (12D.2): what the warehouse would get.
+                var strip_text: []const u8 = "nothing worth keeping";
+                if (u) |uu| {
+                    const lines = try g.stripParts(al, uu);
+                    var buf: std.ArrayListUnmanaged(u8) = .empty;
+                    for (lines, 0..) |l, i| try buf.appendSlice(al, try std.fmt.allocPrint(al, "{s}{d}× {s}", .{ if (i > 0) ", " else "", l.qty, l.key }));
+                    if (lines.len > 0) strip_text = buf.items;
+                }
                 const rows = [_][]const u8{
                     "",
                     if (u) |uu| try std.fmt.allocPrint(al, "  Sell {{a}}#{d} {s}{{/}} for {{g}}{s}{{/}} C? Half value scaled by condition; the crew goes to the pool.", .{ @intFromEnum(uid), uu.chassis_key, try q.money(al, g.unitSaleValue(uu)) }) else "  no such hull",
+                    try std.fmt.allocPrint(al, "  Or strip it for parts into the home warehouse: {{a}}{s}{{/}}", .{strip_text}),
                     "",
-                    "  {s} [y] sell {/}   {d}[Esc] keep{/}",
+                    "  {s} [y] sell {/}   {s} [s] strip {/}   {d}[Esc] keep{/}",
                 };
-                const inner = self.screen.pane(self.modalRect(96, 7), .{ .title = "SELL HULL? · [y] sell · [Esc] keep", .double = true });
+                const inner = self.screen.pane(self.modalRect(110, 8), .{ .title = "SELL OR STRIP HULL? · [y] sell · [s] strip · [Esc] keep", .double = true });
                 self.screen.lines(inner, &rows, 0, null);
             },
             .sell_hq => |hid| {
@@ -2617,7 +2627,7 @@ pub const App = struct {
                 }
             },
             .contracts => {
-                const view = try q.contracts(al, g);
+                const view = try q.contracts(al, g, @enumFromInt(self.hqSelId(g)));
                 if (self.focus == 0) self.moveCursor(0, delta, view.board.len) else if (self.focus == 1) self.moveCursor(1, delta, view.active.len) else self.moveCursor(2, delta, (try q.contractHistory(al, g)).len);
             },
             .ledger => {
@@ -2707,7 +2717,7 @@ pub const App = struct {
                 }
             },
             .contracts => {
-                const view = try q.contracts(al, g);
+                const view = try q.contracts(al, g, @enumFromInt(self.hqSelId(g)));
                 if (self.focus == 0 and view.board.len > 0) {
                     // Always choose in the open (play feedback): the picker ranks
                     // the companies readiest first and says who cannot go.
@@ -2772,7 +2782,15 @@ pub const App = struct {
                         const l = view.board[@min(self.cur(0).*, view.board.len - 1)];
                         const ship = if (l.index < g.market_listings.items.len) (if (game.chassis.find(g.market_listings.items[l.index].item_key)) |d| d.kind.isTransport() else false) else false;
                         // Say which till is short before the sim refuses in the abstract.
-                        if (l.index < g.market_listings.items.len) {
+                        if (l.index < g.market_listings.items.len and l.company != .none) {
+                            // A contract world's hull (12D.7): the company's local funds pay.
+                            const price = g.market_listings.items[l.index].price;
+                            const have = g.treasuryBalance(.{ .company = l.company });
+                            if (have < price) {
+                                self.say(.crit, "{s}'s local funds are {s}; this hull costs {s} — Ledger t couriers funds to the company (days in transit)", .{ q.forceName(g, l.company), try q.money(al, have), try q.money(al, price) });
+                                return;
+                            }
+                        } else if (l.index < g.market_listings.items.len) {
                             const price = g.market_listings.items[l.index].price;
                             const have = g.treasuryBalance(.{ .hq = l.hq });
                             if (have < price) {
@@ -2805,7 +2823,7 @@ pub const App = struct {
                         }
                         // Structural components are guaranteed by fabrication at a
                         // regional bay (ARCH §9.8); everything else is an acquisition roll.
-                        if (game.part.isComponent(d.key) and game.hq_ops.baySlots(g, hq_id) > 0) {
+                        if (game.hq_ops.canFabricate(g, hq_id, d.key)) {
                             try self.exec(.{ .fabricate = .{ .hq = hq_id, .part_key = d.key, .quantity = d.short } });
                             if (self.msg.len == 0 or self.msg_style != .crit) self.say(.good, "fabricating {d} × {s} at {s} — a bay job, see the HQ screen", .{ d.short, d.key, q.hqName(g, hq_id) });
                             return;
@@ -2930,8 +2948,15 @@ pub const App = struct {
                 else => {},
             },
             .contracts => {
+                // One board per HQ (12E.4): [ ] steps through them.
+                if (ch == ']' or ch == '[') {
+                    const n = g.hqs.count();
+                    if (n > 0) self.hq_sel = if (ch == ']') (self.hq_sel + 1) % n else (self.hq_sel + n - 1) % n;
+                    self.cur(0).* = 0;
+                    return;
+                }
                 if (self.focus == 2) return; // history is read-only: the log pane follows the cursor
-                const view = try q.contracts(al, g);
+                const view = try q.contracts(al, g, @enumFromInt(self.hqSelId(g)));
                 if (self.focus == 0) {
                     if (ch == 'b' and view.board.len > 0) { // bargain: n is end-turn everywhere
                         const idx = view.board[@min(self.cur(0).*, view.board.len - 1)].index;
@@ -3186,8 +3211,19 @@ pub const App = struct {
                     },
                     'o' => if (row) |r| {
                         const f = g.force(r.force) orelse return;
+                        // On a company row: cycle its rules of engagement (12D.4).
+                        if (f.echelon == .company) {
+                            const next: game.force.Roe = switch (f.roe) {
+                                .standard => .cautious,
+                                .cautious => .hold,
+                                .hold => .standard,
+                            };
+                            try self.exec(.{ .set_roe = .{ .company = r.force, .roe = next } });
+                            if (self.msg_style != .crit) self.say(.good, "{s} ROE → {s}", .{ f.name, next.describe() });
+                            return;
+                        }
                         if (f.echelon != .lance and f.echelon != .air_lance) {
-                            self.say(.dim, "roles are set on lances — move the cursor onto a lance row", .{});
+                            self.say(.dim, "roles are set on lances, rules of engagement on companies — move the cursor onto a lance or company row", .{});
                             return;
                         }
                         const roles = [_]game.force.LanceRole{ .fighting, .defense, .scouting, .training };
@@ -4378,6 +4414,10 @@ pub const App = struct {
                     self.modal = .none;
                     try self.exec(.{ .sell_unit = uid });
                     self.say(.amber, "hull #{d} sold", .{@intFromEnum(uid)});
+                } else if (ch == 's') {
+                    self.modal = .none;
+                    try self.exec(.{ .strip_unit = uid });
+                    if (self.msg_style != .crit) self.say(.amber, "hull #{d} stripped for parts — the Supply screen shows the crates", .{@intFromEnum(uid)});
                 },
                 else => {},
             },

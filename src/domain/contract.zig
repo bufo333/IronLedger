@@ -117,6 +117,12 @@ pub const CommandRights = enum {
         return self == .integrated;
     }
 
+    /// Integrated command sets the rules of engagement (12D.4): the
+    /// employer's officers do not let a company pull back early.
+    pub fn overridesRoe(self: CommandRights) bool {
+        return self == .integrated;
+    }
+
     /// One line for the screens.
     pub fn describe(self: CommandRights) []const u8 {
         return switch (self) {
@@ -229,6 +235,27 @@ pub const Contract = struct {
     breach_day: ?u32 = null,
     /// One negotiation round per offer (12B.3): spent, whatever the outcome.
     negotiated: bool = false,
+    /// The opposing force (12D.5), rolled with the offer: lances brought to
+    /// an engagement, their skill level, and one lance's BV off the enemy
+    /// house's RAT. Zero lances = a contract from before 12D.5, whose enemy
+    /// still mirrors the company.
+    enemy_lances: u8 = 0,
+    enemy_quality: types.ExperienceLevel = .regular,
+    enemy_lance_bv: i64 = 0,
+    /// One enemy lance's tonnage (12E.3), for the board's "your 610t vs ~720t".
+    enemy_lance_tons: u32 = 0,
+    /// The HQ whose board posted this offer (12E.4): only companies based
+    /// there may take it. `.none` = an offer from before 12E.4.
+    offer_hq: types.HqId = .none,
+
+    pub fn hasOpfor(self: *const Contract) bool {
+        return self.enemy_lances > 0 and self.enemy_lance_bv > 0;
+    }
+
+    /// The opposition's strength in a typical engagement.
+    pub fn opforBv(self: *const Contract) i64 {
+        return self.enemy_lance_bv * self.enemy_lances;
+    }
 
     pub fn poolDestroyedPct(self: *const Contract) u32 {
         if (self.enemy_pool_bv <= 0) return 0;

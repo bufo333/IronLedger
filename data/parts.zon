@@ -41,6 +41,31 @@
     .{ .key = "comp_arm", .name = "Arm assembly", .cost = 60_000, .rarity = .uncommon, .pallet_tons = 4 },
     .{ .key = "comp_leg", .name = "Leg assembly", .cost = 70_000, .rarity = .uncommon, .pallet_tons = 5 },
     .{ .key = "comp_chassis", .name = "Vehicle chassis frame", .cost = 50_000, .rarity = .common, .pallet_tons = 5 },
+    // Tonnage-rated structure (12D.8, MekHQ `MekLocation` per tonnage;
+    // TechManual structure cost scales with tonnage): the rows above are the
+    // medium (40–55 t) assemblies; light (20–35 t) ×0.6, heavy (60–75 t)
+    // ×1.5 and assault (80–100 t) ×2. Heavy assemblies need a mek bay at
+    // level 2 to fabricate (one upgrade past the founding bay); assault ones
+    // level 3 at a regional or brigade HQ — otherwise buy them, if the
+    // market has them.
+    .{ .key = "comp_head_l", .name = "Head assembly (light)", .cost = 24000, .rarity = .uncommon, .availability = .d, .pallet_tons = 1 },
+    .{ .key = "comp_ct_l", .name = "Center torso assembly (light)", .cost = 72000, .rarity = .rare, .availability = .d, .pallet_tons = 4 },
+    .{ .key = "comp_torso_l", .name = "Side torso assembly (light)", .cost = 54000, .rarity = .uncommon, .availability = .c, .pallet_tons = 3 },
+    .{ .key = "comp_arm_l", .name = "Arm assembly (light)", .cost = 36000, .rarity = .uncommon, .availability = .c, .pallet_tons = 2 },
+    .{ .key = "comp_leg_l", .name = "Leg assembly (light)", .cost = 42000, .rarity = .uncommon, .availability = .c, .pallet_tons = 3 },
+    .{ .key = "comp_chassis_l", .name = "Vehicle chassis frame (light)", .cost = 30000, .rarity = .common, .availability = .c, .pallet_tons = 3 },
+    .{ .key = "comp_head_h", .name = "Head assembly (heavy)", .cost = 60000, .rarity = .rare, .availability = .e, .pallet_tons = 3, .fab_min_bay = 2 },
+    .{ .key = "comp_ct_h", .name = "Center torso assembly (heavy)", .cost = 180000, .rarity = .very_rare, .availability = .e, .pallet_tons = 12, .fab_min_bay = 2 },
+    .{ .key = "comp_torso_h", .name = "Side torso assembly (heavy)", .cost = 135000, .rarity = .rare, .availability = .d, .pallet_tons = 9, .fab_min_bay = 2 },
+    .{ .key = "comp_arm_h", .name = "Arm assembly (heavy)", .cost = 90000, .rarity = .rare, .availability = .d, .pallet_tons = 6, .fab_min_bay = 2 },
+    .{ .key = "comp_leg_h", .name = "Leg assembly (heavy)", .cost = 105000, .rarity = .rare, .availability = .d, .pallet_tons = 7, .fab_min_bay = 2 },
+    .{ .key = "comp_chassis_h", .name = "Vehicle chassis frame (heavy)", .cost = 75000, .rarity = .uncommon, .availability = .d, .pallet_tons = 7, .fab_min_bay = 2 },
+    .{ .key = "comp_head_a", .name = "Head assembly (assault)", .cost = 80000, .rarity = .very_rare, .availability = .e, .pallet_tons = 4, .fab_min_bay = 3, .fab_regional = true },
+    .{ .key = "comp_ct_a", .name = "Center torso assembly (assault)", .cost = 240000, .rarity = .very_rare, .availability = .e, .pallet_tons = 16, .fab_min_bay = 3, .fab_regional = true },
+    .{ .key = "comp_torso_a", .name = "Side torso assembly (assault)", .cost = 180000, .rarity = .very_rare, .availability = .e, .pallet_tons = 12, .fab_min_bay = 3, .fab_regional = true },
+    .{ .key = "comp_arm_a", .name = "Arm assembly (assault)", .cost = 120000, .rarity = .very_rare, .availability = .e, .pallet_tons = 8, .fab_min_bay = 3, .fab_regional = true },
+    .{ .key = "comp_leg_a", .name = "Leg assembly (assault)", .cost = 140000, .rarity = .very_rare, .availability = .e, .pallet_tons = 10, .fab_min_bay = 3, .fab_regional = true },
+    .{ .key = "comp_chassis_a", .name = "Vehicle chassis frame (assault)", .cost = 100000, .rarity = .rare, .availability = .e, .pallet_tons = 10, .fab_min_bay = 3, .fab_regional = true },
     .{ .key = "armor", .name = "Armor (ton)", .cost = 10_000, .rarity = .common, .availability = .b, .pallet_tons = 1 },
     // support equipment
     .{ .key = "crane", .name = "Salvage Crane", .cost = 20_000, .rarity = .common, .pallet_tons = 3 },

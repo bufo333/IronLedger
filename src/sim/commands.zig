@@ -160,6 +160,9 @@ pub const Command = union(enum) {
     repay_loan: struct { index: usize, amount: types.CBills },
     /// Liquidate a hull at half value scaled by condition.
     sell_unit: types.UnitId,
+    /// Strip a hull for parts into its home warehouse (12D.2, MekHQ
+    /// "salvage unit"): the only thing left to do with scrap.
+    strip_unit: types.UnitId,
     /// Sell off an HQ (not the last one; companies must be reassigned first).
     sell_hq: types.HqId,
     /// Close a company: hulls sold, people released, forces struck.
@@ -179,6 +182,8 @@ pub const Command = union(enum) {
     /// garrison contracts), scouting (recon), training (held out of
     /// battles, gains XP at home).
     set_role: struct { force: types.ForceId, role: force_mod.LanceRole },
+    /// Rules of engagement for a company (12D.4).
+    set_roe: struct { company: types.ForceId, roe: force_mod.Roe },
     /// Automatic provisions resupply: ship `tons` from the home warehouse
     /// whenever the deployed company's stores fall under `min_days`.
     /// `tons` caps one shipment (0 = no cap); `min_days` = 0 removes the policy.
@@ -296,6 +301,12 @@ pub const Error = error{
     Bankrupt,
     NothingToRepair,
     NothingToReplace,
+    /// Scrap (12D.2): nothing to rebuild — strip it for parts.
+    WrittenOff,
+    /// The bay is not rated for this assembly's weight class (12D.8).
+    BayTooSmall,
+    /// The offer is on another HQ's board (12E.4).
+    OutOfRange,
     KeepStocked,
     /// The home HQ's spaceport hosts no (more) air wings.
     NoAirSlot,
@@ -604,6 +615,29 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             if (gs.hqs.count() == 0) return Error.NoHq;
             const listing = gs.market_listings.items[index];
             const price = types.applyBp(listing.price, gs.diff().purchase_bp); // difficulty (12.32)
+            // The contract world's board (12D.7): the company buys where it
+            // stands, from its local funds, and the hull joins it there.
+            if (listing.company != .none) {
+                const co = listing.company;
+                const c = gs.deploymentContract(co) orelse return Error.NoSuchListing;
+                if (c.status != .active) return Error.NoSuchListing;
+                try debitPurchase(gs, .{ .company = co }, .{
+                    .day = gs.clock.day_index,
+                    .amount = -price,
+                    .category = .unit_purchase,
+                    .company = co,
+                    .contract = c.id,
+                    .note = listing.item_key,
+                });
+                _ = gs.market_listings.orderedRemove(index);
+                const uid = try gs.addUnit(listing.item_key);
+                if (listing.condition) |cond| gs.applyHullCondition(uid, cond);
+                gs.placeUnitInCompany(uid, co) catch return Error.UnknownForce;
+                try gs.log(.market, .{ .company = co, .contract = c.id }, "[market] {s} bought {s} ({s}) on {s} for {d} from local funds — seat a pilot and a tech", .{
+                    if (gs.force(co)) |f| f.name else "company", listing.item_key, if (listing.condition) |cd| cd.label() else "new", c.planet_key, price,
+                });
+                return .{ .unit = uid };
+            }
             // The board's own HQ pays and receives (Stage 9D).
             const hq_id: types.HqId = if (listing.hq != .none) listing.hq else gs.hqs.keys()[0];
             // Transports need a berth at the board's HQ (Stage 12.15).
@@ -800,7 +834,7 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             if (dest.echelon != .company) return Error.NotACompany;
             if (b.listing >= gs.market_listings.items.len) return Error.NoSuchListing;
             const listing = gs.market_listings.items[b.listing];
-            if (listing.kind != .unit) return Error.NoSuchListing;
+            if (listing.kind != .unit or listing.company != .none) return Error.NoSuchListing;
             const board_hq: types.HqId = if (listing.hq != .none) listing.hq else gs.hqs.keys()[0];
             _ = try execute(gs, .{ .buy_listing = b.listing });
             const uid: types.UnitId = @enumFromInt(gs.next_unit_id - 1);
@@ -919,6 +953,13 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             }
             return .{};
         },
+        .set_roe => |r| {
+            const f = gs.force(r.company) orelse return Error.UnknownForce;
+            if (f.echelon != .company) return Error.NotACompany;
+            f.roe = r.roe;
+            try gs.log(.contract, .{ .company = r.company }, "[roe] {s}: {s}", .{ f.name, r.roe.describe() });
+            return .{};
+        },
         .set_role => |r| {
             const f = gs.force(r.force) orelse return Error.UnknownForce;
             if (f.echelon != .lance and f.echelon != .air_lance) return Error.NotACompany;
@@ -941,6 +982,7 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
                 error.NoHq => Error.NoHq,
                 error.NoBay => Error.NoBay,
                 error.UnknownUnit => Error.UnknownUnit,
+                error.WrittenOff => Error.WrittenOff,
                 else => Error.NoBay,
             };
             if (!queued) return Error.MissingComponents;
@@ -972,6 +1014,24 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             gs.removeUnit(unit_id);
             try gs.postTransaction(.{ .day = gs.clock.day_index, .amount = value, .category = .unit_sale, .note = key });
             try gs.log(.market, .{}, "[sale] {s} #{d} sold for {d}", .{ key, @intFromEnum(unit_id), value });
+            return .{};
+        },
+        .strip_unit => |unit_id| {
+            const u = gs.unit(unit_id) orelse return Error.UnknownUnit;
+            const company = gs.companyOf(u.force);
+            if (gs.deploymentContract(company) != null) return Error.UnitDeployed;
+            if (u.status == .in_transit or (company != .none and !gs.isCompanyHome(company))) return Error.UnitAway;
+            const hq_id = gs.homeHqFor(u.force);
+            if (gs.hqs.getPtr(hq_id) == null) return Error.NoHq;
+            const lines = try gs.stripParts(gs.allocator(), u);
+            var text: std.ArrayListUnmanaged(u8) = .empty;
+            for (lines, 0..) |l, i| {
+                try gs.addStock(.{ .hq = hq_id }, l.key, l.qty);
+                try text.appendSlice(gs.allocator(), try std.fmt.allocPrint(gs.allocator(), "{s}{d}× {s}", .{ if (i > 0) ", " else "", l.qty, l.key }));
+            }
+            const key = u.chassis_key;
+            gs.removeUnit(unit_id);
+            try gs.log(.market, .{ .hq = hq_id }, "[strip] {s} #{d} stripped for parts into the warehouse: {s}", .{ key, @intFromEnum(unit_id), if (lines.len == 0) "nothing worth keeping" else text.items });
             return .{};
         },
         .sell_hq => |hq_id| {
@@ -1053,6 +1113,7 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             const def = part_mod.find(f.part_key) orelse return Error.UnknownPart;
             if (!part_mod.isComponent(def.key)) return Error.NotAComponent;
             if (hq_ops.baySlots(gs, f.hq) == 0) return Error.NoBay;
+            if (!hq_ops.canFabricate(gs, f.hq, def.key)) return Error.BayTooSmall; // heavy/assault assemblies (12D.8)
             const total = types.applyBp(types.applyBp(def.cost * f.quantity, market_mod.structural_fab_cost_mult_bp), gs.diff().fab_cost_bp); // difficulty (12.32)
             try debitPurchase(gs, .{ .hq = f.hq }, .{
                 .day = gs.clock.day_index,
@@ -1796,10 +1857,20 @@ fn negotiate(gs: *GameState, offer_index: usize, term: contract_mod.NegotiableTe
     return .{ .negotiation = .hardened };
 }
 
+/// Can this company take this offer (12E.4)? An offer belongs to the board
+/// of the HQ that posted it: only companies based there (their home HQ)
+/// may accept — from home, or redeploying from wherever they stand. Offers
+/// from before 12E.4 carry no board and are open to anyone.
+pub fn offerEligible(gs: *GameState, offer: *const contract_mod.Contract, company: types.ForceId) bool {
+    if (offer.offer_hq == .none) return true;
+    return gs.homeHqFor(company) == offer.offer_hq;
+}
+
 fn acceptContract(gs: *GameState, offer_index: usize, company_id: types.ForceId) Error!Result {
     if (offer_index >= gs.contract_offers.items.len) return Error.NoSuchOffer;
     const company = gs.force(company_id) orelse return Error.UnknownForce;
     if (company.echelon != .company) return Error.NotACompany;
+    if (!offerEligible(gs, &gs.contract_offers.items[offer_index], company_id)) return Error.OutOfRange;
     var cit = gs.contracts.iterator();
     while (cit.next()) |entry| {
         const c = entry.value_ptr;
@@ -2257,7 +2328,8 @@ test "12: a raised company is an empty skeleton; hulls bought for it land in a l
     try std.testing.expectEqual(unit_mod.UnitStatus.in_transit, gs.unit(r2.unit).?.status);
     try std.testing.expectEqual(@as(usize, 1), gs.unit_transfers.items.len);
 
-    // Crews come from the halls: seed one of each role and fill the seats.
+    // Crews come from the halls: seed one of each role (and only those) and fill the seats.
+    gs.candidates.clearRetainingCapacity();
     try gs.candidates.append(gs.allocator(), .{ .hq = hq, .spec = person_gen.generate(&gs.rng, .mekwarrior), .asking_bonus = 0, .listed_day = 0, .expires_day = 400 });
     try gs.candidates.append(gs.allocator(), .{ .hq = hq, .spec = person_gen.generate(&gs.rng, .tech_mek), .asking_bonus = 0, .listed_day = 0, .expires_day = 400 });
     const c = try execute(&gs, .{ .crew_company = co });
@@ -3019,7 +3091,7 @@ test "9E: idle companies stay where they worked; recall brings them home; redepl
     try std.testing.expect(c.committed_bv > 0);
     _ = try execute(&gs, .{ .advance_days = c.transit_days + @as(u32, c.terms.length_months) * 30 + 5 });
     const done = gs.contracts.values()[0];
-    try std.testing.expect(done.status == .completed or done.status == .breached);
+    try std.testing.expect(done.status == .completed or done.status == .breached or done.status == .failed);
 
     // The company is still out there, eating from its trucks, until told.
     try std.testing.expect(!gs.isCompanyHome(co));
@@ -3435,12 +3507,14 @@ test "9D: depot work happens at the hull's home HQ — its components, its bay �
     try std.testing.expect(uid != .none);
 
     // The torso assembly sits in Bravo's own depot; the first HQ has none.
-    _ = gs.takeStock(.{ .hq = home }, "comp_torso", gs.stockCount(.{ .hq = home }, "comp_torso"));
-    try gs.addStock(.{ .hq = fb }, "comp_torso", 1);
+    const torso = @import("../domain/part.zig").componentFor("lt.structure", gs.unit(uid).?.chassis_key); // by weight class (12D.8)
+    _ = gs.takeStock(.{ .hq = home }, torso, gs.stockCount(.{ .hq = home }, torso));
+    _ = gs.takeStock(.{ .hq = fb }, torso, gs.stockCount(.{ .hq = fb }, torso));
+    try gs.addStock(.{ .hq = fb }, torso, 1);
     _ = try execute(&gs, .{ .depot = uid });
     try std.testing.expect(hq_ops.hasJobForUnit(&gs, uid));
     for (gs.bay_jobs.items) |j| if (j.unit == uid) try std.testing.expectEqual(fb, j.hq);
-    try std.testing.expectEqual(@as(u32, 0), gs.stockCount(.{ .hq = fb }, "comp_torso"));
+    try std.testing.expectEqual(@as(u32, 0), gs.stockCount(.{ .hq = fb }, torso));
 }
 
 test "9D: a truck sent to a deployed company lands in its transport lance, and can still change lances out there" {
@@ -3548,12 +3622,13 @@ test "12.31: a wreck is rebuilt in the depot — a component and bay time — an
     try std.testing.expect(ct_destroyed);
 
     // No centre torso on the shelf: the depot asks for it; with one, it queues.
-    _ = gs.takeStock(.{ .hq = home }, "comp_ct", gs.stockCount(.{ .hq = home }, "comp_ct"));
+    const ct = @import("../domain/part.zig").componentFor("ct.structure", u.chassis_key); // by weight class (12D.8)
+    _ = gs.takeStock(.{ .hq = home }, ct, gs.stockCount(.{ .hq = home }, ct));
     try std.testing.expectError(Error.MissingComponents, execute(&gs, .{ .depot = uid }));
-    try gs.addStock(.{ .hq = home }, "comp_ct", 1);
+    try gs.addStock(.{ .hq = home }, ct, 1);
     _ = try execute(&gs, .{ .depot = uid });
     try std.testing.expect(hq_ops.hasJobForUnit(&gs, uid));
-    try std.testing.expectEqual(@as(u32, 0), gs.stockCount(.{ .hq = home }, "comp_ct"));
+    try std.testing.expectEqual(@as(u32, 0), gs.stockCount(.{ .hq = home }, ct));
     // Bay time passes (a failed check redoes the work); the wreck is a hull again.
     var days: u32 = 0;
     while (hq_ops.hasJobForUnit(&gs, uid) and days < 300) : (days += 1) {
@@ -3568,10 +3643,10 @@ test "12.31: a wreck is rebuilt in the depot — a component and bay time — an
     const legacy = try gs.addUnit("LCT-1V");
     gs.unit(legacy).?.status = .destroyed;
     try std.testing.expect(gs.unit(legacy).?.needsDepot());
-    try gs.addStock(.{ .hq = home }, "comp_ct", 1);
+    try gs.addStock(.{ .hq = home }, "comp_ct_l", 1); // a Locust's centre torso is a light assembly (12D.8)
     _ = try execute(&gs, .{ .depot = legacy });
     try std.testing.expect(hq_ops.hasJobForUnit(&gs, legacy));
-    try std.testing.expectEqual(@as(u32, 0), gs.stockCount(.{ .hq = home }, "comp_ct"));
+    try std.testing.expectEqual(@as(u32, 0), gs.stockCount(.{ .hq = home }, "comp_ct_l"));
 }
 
 test "12.32: difficulty scales pay, fabrication and purchases — regular is the game as tuned, and it persists as a setting" {
@@ -3651,4 +3726,166 @@ test "play feedback: a resignation notice waits two weeks — a week's skip cann
         still_open = true;
     };
     try std.testing.expect(still_open);
+}
+
+test "12D.2: how a hull died decides the rebuild — engine kills cost an engine, scrap only strips" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1202 });
+    defer gs.deinit();
+    _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
+    const home = gs.hqs.keys()[0];
+    gs.hqs.getPtr(home).?.staff_assigned = 999;
+
+    // An ammunition explosion guts both side torsos and needs an engine.
+    const boom = try gs.addUnit("SHD-2H");
+    gs.unit(boom).?.markWreckedBy(.ammo);
+    var torsos: u32 = 0;
+    for (gs.unit(boom).?.slots.items) |s| if (s.class == .structure and s.condition == .destroyed) {
+        torsos += 1;
+    };
+    try std.testing.expectEqual(@as(u32, 3), torsos); // ct + lt + rt
+    // TechManual engine price for the Shadow Hawk (55 t, walk 5 → 275).
+    try std.testing.expectEqual(@as(types.CBills, 5_000 * 275 * 55 / 75), hq_ops.engineCharge(gs.unit(boom).?));
+    try gs.addStock(.{ .hq = home }, "comp_ct", 1);
+    try gs.addStock(.{ .hq = home }, "comp_torso", 2);
+    _ = try execute(&gs, .{ .depot = boom });
+    var job_cost: types.CBills = 0;
+    var job_days: u32 = 0;
+    for (gs.bay_jobs.items) |j| if (j.unit == boom) {
+        job_cost = j.cost;
+        job_days = j.duration_days;
+    };
+    try std.testing.expect(job_cost >= hq_ops.engineCharge(gs.unit(boom).?));
+    try std.testing.expect(job_days >= tuning.loss.engine_rebuild_days);
+    try std.testing.expect(hq_ops.rebuildEstimate(&gs, gs.unit(boom).?) != null);
+
+    // Scrap is refused by the depot and priced as parts.
+    const junk = try gs.addUnit("SHD-2H");
+    gs.unit(junk).?.markWreckedBy(.scrap);
+    gs.unit(junk).?.armor_pct = 50;
+    try std.testing.expectError(Error.WrittenOff, execute(&gs, .{ .depot = junk }));
+    try std.testing.expect(hq_ops.rebuildEstimate(&gs, gs.unit(junk).?) == null);
+    try std.testing.expect(hq_ops.beyondEconomicalRepair(&gs, gs.unit(junk).?));
+    try std.testing.expect(gs.unitSaleValue(gs.unit(junk).?) > 0); // the guns are still worth something
+
+    // Stripping crates the guns and the armour left on it, and the hull is gone.
+    const ac5_before = gs.stockCount(.{ .hq = home }, "ac5");
+    const armor_before = gs.stockCount(.{ .hq = home }, "armor");
+    const ct_before = gs.stockCount(.{ .hq = home }, "comp_ct");
+    _ = try execute(&gs, .{ .strip_unit = junk });
+    try std.testing.expect(gs.unit(junk) == null);
+    try std.testing.expectEqual(ac5_before + 1, gs.stockCount(.{ .hq = home }, "ac5"));
+    try std.testing.expect(gs.stockCount(.{ .hq = home }, "armor") > armor_before);
+    try std.testing.expectEqual(ct_before, gs.stockCount(.{ .hq = home }, "comp_ct")); // scrap has no structure left
+}
+
+test "12D.7: the contract world has a hull board — local funds pay, the hull joins the company there" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1207 });
+    defer gs.deinit();
+    _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
+    const co = (try execute(&gs, .{ .new_company = "Alpha" })).created_force;
+    const cid: types.ContractId = @enumFromInt(1207);
+    try gs.contracts.put(gs.allocator(), cid, .{ .id = cid, .kind = .objective_raid, .employer_key = "LC", .enemy_key = "DC", .planet_key = "hesperus_ii", .status = .active, .assigned_company = co, .terms = .{ .length_months = 3, .base_pay_month = 100_000 } });
+    gs.force(co).?.location_planet = "hesperus_ii";
+    // Hesperus II builds meks: something turns up within a few tries.
+    var tries: u32 = 0;
+    var idx: ?usize = null;
+    while (idx == null and tries < 20) : (tries += 1) {
+        try @import("../econ/contract_market.zig").refreshContractWorld(&gs, gs.contracts.getPtr(cid).?);
+        for (gs.market_listings.items, 0..) |l, i| if (l.company == co) {
+            idx = i;
+        };
+    }
+    try std.testing.expect(idx != null);
+    // Broke: refused; funded: bought from local funds, on the company's books at once.
+    gs.force(co).?.local_funds = 0;
+    try std.testing.expectError(Error.InsufficientTreasury, execute(&gs, .{ .buy_listing = idx.? }));
+    gs.force(co).?.local_funds = 50_000_000;
+    const hq_funds = gs.hqs.values()[0].funds;
+    const r = try execute(&gs, .{ .buy_listing = idx.? });
+    try std.testing.expectEqual(co, gs.companyOf(gs.unit(r.unit).?.force));
+    try std.testing.expect(gs.force(co).?.local_funds < 50_000_000);
+    try std.testing.expectEqual(hq_funds, gs.hqs.values()[0].funds);
+    // Not a raise candidate, and gone with the contract at the next refresh.
+    gs.contracts.getPtr(cid).?.status = .completed;
+    try @import("../econ/contract_market.zig").refreshListings(&gs);
+    for (gs.market_listings.items) |l| try std.testing.expect(l.company == .none);
+}
+
+test "12D.8: heavy assemblies need a level-2 bay, assault ones a level-3 bay at a regional HQ" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1208 });
+    defer gs.deinit();
+    _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
+    const hq_id = gs.hqs.keys()[0];
+    const h = gs.hqs.getPtr(hq_id).?;
+    h.staff_assigned = 999;
+    h.funds = 50_000_000;
+    const bay = for (h.facilities.items) |*f| {
+        if (f.kind == .mek_bay) break f;
+    } else return error.TestUnexpectedResult;
+    bay.level = 1;
+    _ = try execute(&gs, .{ .fabricate = .{ .hq = hq_id, .part_key = "comp_ct_l", .quantity = 1 } });
+    _ = try execute(&gs, .{ .fabricate = .{ .hq = hq_id, .part_key = "comp_ct", .quantity = 1 } });
+    try std.testing.expectError(Error.BayTooSmall, execute(&gs, .{ .fabricate = .{ .hq = hq_id, .part_key = "comp_ct_h", .quantity = 1 } }));
+    bay.level = 2;
+    _ = try execute(&gs, .{ .fabricate = .{ .hq = hq_id, .part_key = "comp_ct_h", .quantity = 1 } });
+    try std.testing.expectError(Error.BayTooSmall, execute(&gs, .{ .fabricate = .{ .hq = hq_id, .part_key = "comp_ct_a", .quantity = 1 } }));
+    bay.level = 3;
+    _ = try execute(&gs, .{ .fabricate = .{ .hq = hq_id, .part_key = "comp_ct_a", .quantity = 1 } });
+    // A field HQ never builds assault assemblies, whatever its bay.
+    h.tier = .field;
+    try std.testing.expect(!hq_ops.canFabricate(&gs, hq_id, "comp_ct_a"));
+    try std.testing.expect(hq_ops.canFabricate(&gs, hq_id, "comp_ct_h"));
+}
+
+test "12E.4: one board per HQ — offers inside its reach, taken only by companies based there" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1240 });
+    defer gs.deinit();
+    _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
+    const home = gs.hqs.keys()[0];
+    const alpha = (try execute(&gs, .{ .new_company = "Alpha" })).created_force;
+    // A second base at the edge of the home ring, grown to host a company.
+    const home_world = planet_mod.find(gs.hqs.getPtr(home).?.planet_key).?;
+    var far_key: []const u8 = "";
+    var far_dist: u32 = 0;
+    for (planet_mod.catalog) |*p| {
+        const d = planet_mod.distanceLy(p, home_world);
+        if (d <= gs.hqs.getPtr(home).?.influenceLy() and d > far_dist) {
+            far_dist = d;
+            far_key = p.key;
+        }
+    }
+    _ = try execute(&gs, .{ .found_hq = .{ .name = "Far", .planet_key = far_key } });
+    const far = gs.hqs.keys()[1];
+    {
+        const h = gs.hqs.getPtr(far).?;
+        h.tier = .regional;
+        try h.facilities.append(gs.allocator(), .{ .kind = .mek_bay, .level = 1 });
+        h.staff_assigned = 999;
+    }
+    const bravo = (try execute(&gs, .{ .new_company_at = .{ .name = "Bravo", .hq = far } })).created_force;
+    try @import("../econ/contract_market.zig").refresh(&gs);
+    var on_home: u32 = 0;
+    var on_far: u32 = 0;
+    var far_offer: ?usize = null;
+    var home_offer: ?usize = null;
+    for (gs.contract_offers.items, 0..) |o, i| {
+        const h = gs.hqs.getPtr(o.offer_hq) orelse return error.TestUnexpectedResult;
+        const dist = planet_mod.distanceLy(planet_mod.find(h.planet_key).?, planet_mod.find(o.planet_key).?);
+        try std.testing.expectEqual(dist, o.dist_ly);
+        try std.testing.expect(dist <= h.influenceLy() + market_mod.beachhead_band_ly);
+        if (o.offer_hq == home) {
+            on_home += 1;
+            home_offer = i;
+        } else {
+            on_far += 1;
+            far_offer = i;
+        }
+    }
+    try std.testing.expect(on_home > 0 and on_far > 0);
+    // Alpha cannot take the far board's work; Bravo can.
+    try std.testing.expect(!offerEligible(&gs, &gs.contract_offers.items[far_offer.?], alpha));
+    try std.testing.expectError(Error.OutOfRange, execute(&gs, .{ .accept_contract = .{ .offer_index = far_offer.?, .company = alpha } }));
+    try std.testing.expectError(Error.OutOfRange, execute(&gs, .{ .accept_contract = .{ .offer_index = home_offer.?, .company = bravo } }));
+    _ = try execute(&gs, .{ .accept_contract = .{ .offer_index = far_offer.?, .company = bravo } });
+    try std.testing.expect(gs.deploymentContract(bravo) != null);
 }

@@ -445,7 +445,7 @@ fn printOffers(gs: *game.state.GameState) void {
     std.debug.print("Contract board ({d} offers):\n", .{gs.contract_offers.items.len});
     for (gs.contract_offers.items, 0..) |offer, i| {
         const world = game.planet.find(offer.planet_key).?;
-        std.debug.print("  [{d}] {s:<18} {s:<16} {d:>3} LY{s}  {d:>2} mo  {d:>9}/mo  vs {s}, salvage {d}%\n", .{
+        std.debug.print("  [{d}] {s:<18} {s:<16} {d:>3} LY{s}  {d:>2} mo  {d:>9}/mo  vs {s}, salvage {d}% · opp {s} · board {s}\n        {s}\n", .{
             i,
             @tagName(offer.kind),
             world.name,
@@ -455,6 +455,10 @@ fn printOffers(gs: *game.state.GameState) void {
             offer.terms.base_pay_month,
             offer.enemy_key,
             offer.terms.salvage_pct,
+            game.queries.opforText(gs.allocator(), gs, &offer) catch "",
+            game.queries.hqName(gs, offer.offer_hq),
+            // Skulls for the readiest company in range (12E.5), without markup.
+            game.queries.stripMarks(gs.allocator(), game.queries.boardSkulls(gs.allocator(), gs, i) catch "") catch "",
         });
     }
     std.debug.print("  (* = beachhead: premium pay, hardship costs, slow resupply · `candidates <offer#>` ranks the companies that could go)\n", .{});
@@ -601,7 +605,7 @@ fn printDemand(gs: *game.state.GameState) void {
         if (u.status == .destroyed) continue;
         for (u.slots.items) |s| {
             if (s.condition != .destroyed and s.condition != .missing) continue;
-            const key = if (s.class == .structure) game.part.componentForSlot(s.slot_key) else s.part_key;
+            const key = if (s.class == .structure) game.part.componentFor(s.slot_key, u.chassis_key) else s.part_key;
             const e = needed.getOrPut(std.heap.page_allocator, key) catch return;
             if (!e.found_existing) e.value_ptr.* = 0;
             e.value_ptr.* += 1;
@@ -1164,8 +1168,9 @@ fn runRepl(gs: *game.state.GameState, io: std.Io, gpa: std.mem.Allocator, store_
             std.debug.print("site market ({d} listings):\n", .{gs.market_listings.items.len});
             for (gs.market_listings.items, 0..) |l, i| {
                 if (l.condition) |c| {
-                    std.debug.print("  [{d}] hull  {s:<8} {s:<5} armor {d:>3}% quality {s} | {d} dmg / {d} destroyed / {d} missing comps | {d} c-bills | gone day {d}\n", .{
+                    std.debug.print("  [{d}] hull  {s:<8} {s:<5} armor {d:>3}% quality {s} | {d} dmg / {d} destroyed / {d} missing comps | {d} c-bills | gone day {d}{s}\n", .{
                         i, l.item_key, c.label(), c.armor_pct, @tagName(c.quality), c.damaged_slots, c.destroyed_slots, c.missing_components, l.price, l.expires_day,
+                        if (l.company != .none) (std.fmt.allocPrint(gs.allocator(), " | contract world, co:{d} local funds", .{@intFromEnum(l.company)}) catch "") else "",
                     });
                 } else {
                     std.debug.print("  [{d}] {s:<5} {s:<16} x{d:<3} ({s}{s}) {d} c-bills\n", .{
@@ -1280,6 +1285,7 @@ fn printResult(gs: *game.state.GameState, cmd: Command, r: game.commands.Result)
             if (last.status == .failed) std.debug.print("logistics couldn't source {s} this time (retry after refresh)\n", .{o.part_key}) else std.debug.print("ordered {s} x{d}, eta day {d}, {d} c-bills\n", .{ o.part_key, o.quantity, last.eta_day orelse 0, last.cost });
         },
         .take_loan => |l| std.debug.print("drew {d} c-bills over {d} months\n", .{ l.principal, l.term_months }),
+        .strip_unit => if (gs.event_log.items.len > 0) std.debug.print("{s}\n", .{gs.event_log.items[gs.event_log.items.len - 1].text}),
         else => std.debug.print("done.\n", .{}),
     }
 }

@@ -76,6 +76,12 @@ pub fn parseCommand(verb: []const u8, tokens: *std.mem.TokenIterator(u8, .scalar
         if (site != .company) return error.BadSite;
         return .{ .raise_air_company = site.company };
     }
+    if (eq(u8, verb, "roe")) {
+        const site = try parseSite(try need(tokens.next()));
+        if (site != .company) return error.BadSite;
+        const roe = std.meta.stringToEnum(game.force.Roe, try need(tokens.next())) orelse return error.BadArguments;
+        return .{ .set_roe = .{ .company = site.company, .roe = roe } };
+    }
     if (eq(u8, verb, "role")) {
         const fid: types.ForceId = @enumFromInt(try num(u32, tokens.next()));
         const role = std.meta.stringToEnum(game.force.LanceRole, try need(tokens.next())) orelse return error.BadArguments;
@@ -83,6 +89,7 @@ pub fn parseCommand(verb: []const u8, tokens: *std.mem.TokenIterator(u8, .scalar
     }
     if (eq(u8, verb, "repay")) return .{ .repay_loan = .{ .index = try num(usize, tokens.next()), .amount = try num(i64, tokens.next()) } };
     if (eq(u8, verb, "sell")) return .{ .sell_unit = @enumFromInt(try num(u32, tokens.next())) };
+    if (eq(u8, verb, "strip")) return .{ .strip_unit = @enumFromInt(try num(u32, tokens.next())) };
     if (eq(u8, verb, "raise")) {
         const site = try parseSite(try need(tokens.next()));
         if (site != .hq) return error.BadSite;
@@ -393,6 +400,9 @@ pub fn errorText(err: anyerror) []const u8 {
         error.NoSuchListing => "that listing is gone",
         error.TooManyLances => "that lance is full (4 hulls), or the HQ allows no more lances — :newlance co:N <name> raises one",
         error.SameForce => "that hull belongs to another company — x moves it between companies",
+        error.OutOfRange => "that offer is on another HQ's board — only companies based at the HQ that posted it can take it (Contracts [ ] switches boards; `assignco co:N hq:M` rebases a company)",
+        error.BayTooSmall => "this bay cannot build that assembly — heavy (_h) needs a mek bay at level 2, assault (_a) level 3 at a regional or brigade HQ; order it instead (a rarity roll) or watch the boards",
+        error.WrittenOff => "that wreck is scrap — nothing left to rebuild; `strip <unit>` (Forces $, then s) crates its surviving parts into the home warehouse",
         error.NothingToRepair => "that hull has no structural damage — gear is field work on any hull: its tech fits spares from the hull's site on the weekly pass; `replace <unit>` (Forces R) orders what's destroyed",
         error.NothingToReplace => "no destroyed or missing gear on that hull — damaged gear is fixed by its tech's hours alone, and structure goes to the depot (`depot <unit>`)",
         error.MissingComponents => "structural components missing at the home HQ — order or fabricate them on the Market screen first",
@@ -418,12 +428,14 @@ pub const verbs = [_][]const u8{
     "admit",
     "repay",
     "sell",
+    "strip",
     "sellhq",
     "disband",
     "depot",
     "replace",
     "sop",
     "role",
+    "roe",
     "supplypolicy",
     "move",
     "newlance",
@@ -481,12 +493,14 @@ pub fn usage(verb: []const u8) ?[]const u8 {
         .{ "admit", "admit <person>" },
         .{ "repay", "repay <loan#> <amount>" },
         .{ "sell", "sell <unit>" },
+        .{ "strip", "strip <unit>" },
         .{ "sellhq", "sellhq hq:N" },
         .{ "disband", "disband co:N" },
         .{ "depot", "depot <unit>" },
         .{ "replace", "replace <unit>" },
         .{ "sop", "sop clear <event>   (standing orders; `sop` lists them)" },
         .{ "role", "role <lance id> fighting|defense|scouting|training|unassigned" },
+        .{ "roe", "roe co:N hold|standard|cautious" },
         .{ "supplypolicy", "supplypolicy co:N <days> <max tons> [battles]  (0 days removes)" },
         .{ "move", "move <unit> <lance id>" },
         .{ "newlance", "newlance co:N [line|air|mash|mess|salvage|security|transport] <name>" },

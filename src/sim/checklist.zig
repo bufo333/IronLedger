@@ -43,6 +43,13 @@ pub const WarningKind = enum {
     /// Seated pilots in the spent fatigue band (12C.1): +3 to gunnery and
     /// piloting until they rest; the auto-assigner benches them when it can.
     unfit_crew,
+    /// A company fields hulls whose structure its home HQ's bay is not
+    /// rated to rebuild (12E.2): heavy assemblies need bay 2, assault bay 3
+    /// at a regional HQ.
+    unrebuildable_hulls,
+    /// An active contract rates 4½ skulls or worse for the company on it
+    /// today (12E.5): consider cautious ROE or recall.
+    outmatched,
 };
 
 /// Does any working weapon in the company draw on this munition family?
@@ -108,6 +115,22 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
         try out.append(alloc, .{ .kind = .insolvent, .text = try std.fmt.allocPrint(alloc, "outfit treasury overdrawn ({d}{s}) — take a loan (credit {d}), transfer funds back from an HQ or company, or sell assets (worth {d}){s}", .{
             gs.funds, if (gs.inboundToOutfit() > 0) try std.fmt.allocPrint(alloc, ", {d} on the road", .{gs.inboundToOutfit()}) else "", gs.creditRemaining(), gs.liquidationValue(), if (cover < 0) "; nothing left covers it: the outfit folds" else "",
         }) });
+    }
+
+    // Outmatched on an active contract (12E.5): the company's skulls today.
+    {
+        const queries = @import("queries.zig");
+        const warn = @import("../domain/skulls.zig").table.warn_half_skulls;
+        var cit = gs.contracts.iterator();
+        while (cit.next()) |ce| {
+            const c = ce.value_ptr;
+            if (c.status != .active) continue;
+            const rt = (try queries.rateOffer(alloc, gs, c, c.assigned_company)) orelse continue;
+            if (rt.half_hi < warn) continue;
+            try out.append(alloc, .{ .kind = .outmatched, .text = try std.fmt.allocPrint(alloc, "{s} is outmatched on {s}: {s} — wins {d}% of fights, loses the field {d}%; consider cautious ROE (Forces o) or recall", .{
+                queries.forceName(gs, c.assigned_company), c.planet_key, try queries.skullText(alloc, rt), rt.win_pct, rt.lose_field_pct,
+            }) });
+        }
     }
 
     // Wounded waiting for a bed.
@@ -285,6 +308,25 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
             if (gs.homeHqFor(u.force) != hq.id) continue; // this HQ's bay, its hulls
             if (u.needsDepot() and u.status != .repairing and gs.isCompanyHome(gs.companyOf(u.force)) and !hq_ops.hasJobForUnit(gs, u.id)) waiting += 1;
         }
+        // Hulls this HQ's bay could not rebuild (12E.2), per company based here.
+        var rit = gs.forces.iterator();
+        while (rit.next()) |ce| {
+            const co = ce.value_ptr;
+            if (co.echelon != .company or gs.homeHqFor(co.id) != hq.id) continue;
+            var heavy: u32 = 0;
+            var assault: u32 = 0;
+            var rut = gs.units.iterator();
+            while (rut.next()) |he| {
+                const hu = he.value_ptr;
+                if (hu.kind != .mek or gs.companyOf(hu.force) != co.id) continue;
+                if (hq_ops.bayCanRebuild(gs, hq.id, hu.chassis_key)) continue;
+                const class = (@import("../domain/chassis.zig").find(hu.chassis_key) orelse continue).weightClass();
+                if (class == .assault) assault += 1 else heavy += 1;
+            }
+            if (heavy + assault > 0) try out.append(alloc, .{ .kind = .unrebuildable_hulls, .text = try std.fmt.allocPrint(alloc, "{s} fields {d} heavy and {d} assault hull(s) {s} (bay {d}) cannot rebuild structure for — heavy needs bay 2, assault bay 3 at a regional HQ", .{
+                co.name, heavy, assault, hq.name, hq.effectiveFacilityLevel(.mek_bay),
+            }) });
+        }
         if (waiting > 0 and idle > 0) {
             try out.append(alloc, .{ .kind = .depot_backlog, .text = try std.fmt.allocPrint(alloc, "{d} hull(s) need depot work and {d} bay slot(s) sit idle — components or techs missing (see `demand`, `roster`)", .{ waiting, idle }) });
         }
@@ -443,4 +485,25 @@ test "play feedback: the understaffed warning names the short desks, and retirem
         saw_retire = true;
     };
     try std.testing.expect(saw_retire);
+}
+
+test "12E.2: a company with hulls its home bay cannot rebuild is flagged" {
+    const commands = @import("commands.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1222 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    const co = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    for (try turnWarnings(&gs, arena.allocator())) |w| try std.testing.expect(w.kind != .unrebuildable_hulls); // lights and mediums (12E.1)
+    const lance = gs.force(co).?.children.items[0];
+    const big = try gs.addUnit("AS7-D");
+    try gs.moveUnitToForce(big, lance);
+    var found = false;
+    for (try turnWarnings(&gs, arena.allocator())) |w| if (w.kind == .unrebuildable_hulls) {
+        found = true;
+    };
+    try std.testing.expect(found);
+    try std.testing.expect(!hq_ops.bayCanRebuild(&gs, gs.hqs.keys()[0], "AS7-D"));
+    try std.testing.expect(hq_ops.bayCanRebuild(&gs, gs.hqs.keys()[0], "SHD-2H"));
 }

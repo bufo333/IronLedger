@@ -10,6 +10,8 @@ mymod/
   tables/tuning.zon      # every knob: fatigue, turnover, rating, market …
   tables/rat.zon         # house random assignment tables
   tables/scenarios.zon   # scenario table per contract kind
+  tables/opfor.zon       # opposing force per contract kind (12D.5)
+  tables/skulls.zon      # contract difficulty bands in half skulls (12E.3)
 ```
 
 Build with the overlay:
@@ -31,7 +33,7 @@ screen (F12) and the REPL banner say which files are overlaid.
 | `planets.zon` | `domain/planet.zig` `Planet` | the star map: position, faction, industry, optional terrain |
 | `parts.zon` | `domain/part.zig` `PartDef` | weapons, ammo, components, supplies: cost, rarity, availability code, tech base, intro year, mount facts |
 | `tables/tuning.zon` | `domain/tuning.zig` `Tuning` | every balance knob, by subsystem |
-| `tables/difficulty.zon` | `domain/difficulty.zig` `Table` | green / regular / veteran / elite: multipliers on pay, fabrication, purchases, opposition, turnover |
+| `tables/difficulty.zon` | `domain/difficulty.zig` `Table` | green / regular / veteran / elite: multipliers on pay, fabrication, purchases, opposition, turnover; scrap and field-recovery modifiers (12D) |
 | `tables/meklab.zon` | `domain/meklab.zig` `Tables` | TechManual engine and internal-structure tables |
 | `tables/names.zon` | `gen/person_gen.zig` | first names, last names, callsigns |
 | `tables/ranks.zon` | `domain/rank.zig` `RankRow` | rank names, abbreviations, pay multipliers |
@@ -39,7 +41,9 @@ screen (F12) and the REPL banner say which files are overlaid.
 | `tables/abilities.zon` | `domain/ability.zig` `AbilityRow` | special pilot abilities |
 | `tables/rat.zon` | `domain/rat.zig` `RatRow` | per-house design pools by weight class |
 | `tables/factions.zon` | `domain/faction.zig` `FactionRow` | houses, colours, foes, pay, whether they hire |
-| `tables/scenarios.zon` | `domain/scenario.zig` `Table` | scenario types and the d6 table per contract kind |
+| `tables/scenarios.zon` | `domain/scenario.zig` `Table` | scenario types and the d6 table per contract kind (with `recovery_mod` for a lost field) |
+| `tables/opfor.zon` | `domain/opfor.zig` `Table` | the opposing force per contract kind: lances, quality roll, reinforcements |
+| `tables/skulls.zon` | `domain/skulls.zig` `Table` | half-skull bands by power ratio (keep them aligned with `battle.ratioBonus`), the outmatched line, the checklist warning level |
 | `tables/terrain.zon` | `domain/terrain.zig` `Table` | terrain classes, weather, the 2d6 weather table |
 
 ## Rules of the road

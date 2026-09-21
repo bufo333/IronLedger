@@ -69,28 +69,22 @@ fn pickEnemy(gs: *GameState, employer: []const u8, kind: contract.ContractKind) 
     return foes[gs.rng.random(.market).uintLessThan(usize, foes.len)];
 }
 
-/// Best visibility of a world across all owned HQs; returns the distance to
-/// the HQ that grants it.
-fn bestVisibility(gs: *GameState, world: *const planet.Planet) struct { market.OfferVisibility, u32 } {
-    var best: market.OfferVisibility = .hidden;
-    var best_dist: u32 = std.math.maxInt(u32);
-    var it = gs.hqs.iterator();
-    while (it.next()) |entry| {
-        const hq = entry.value_ptr;
-        const hq_world = planet.find(hq.planet_key) orelse continue;
-        const dist = planet.distanceLy(hq_world, world);
-        const vis = market.visibilityFor(dist, hq.influenceLy());
-        const better = switch (vis) {
-            .in_ring => best != .in_ring,
-            .beachhead => best == .hidden,
-            .hidden => false,
-        };
-        if (better or (vis == best and dist < best_dist)) {
-            best = vis;
-            best_dist = dist;
-        }
-    }
-    return .{ best, best_dist };
+/// Pay multiplier for an offer's opposition (12E.6): its combat power
+/// against the kind's norm (midpoint lances of `reference_lance_bv` at
+/// regular skill). A veteran five-lance force pays more than a green four.
+pub fn threatPayBp(kind: contract.ContractKind, lances: u8, quality: types.ExperienceLevel, lance_bv: i64) types.Bp {
+    const opfor = @import("../domain/opfor.zig");
+    const Element = @import("../sim/autoresolve.zig").Element;
+    const t = tuning.contract;
+    const row = opfor.rowFor(kind);
+    const sk = opfor.skills(quality);
+    const enemy = (Element{ .base_strength = lance_bv * lances, .avg_gunnery = sk[0], .avg_piloting = sk[1] }).effectivePower(.{});
+    const mid: i64 = @divTrunc(@as(i64, row.lances_min) + row.lances_max, 2);
+    const norm = (Element{ .base_strength = t.reference_lance_bv * @max(1, mid) }).effectivePower(.{});
+    if (norm <= 0) return 10_000;
+    const threat_bp: i64 = @divTrunc(enemy * 10_000, norm);
+    const delta = std.math.clamp(@divTrunc((threat_bp - 10_000) * t.threat_pay_weight_bp, 10_000), -@as(i64, t.threat_pay_cap_bp), @as(i64, t.threat_pay_cap_bp));
+    return @intCast(10_000 + delta);
 }
 
 /// Regenerate the offer board (monthly, and once at campaign start).
@@ -98,12 +92,6 @@ fn bestVisibility(gs: *GameState, world: *const planet.Planet) struct { market.O
 pub fn refresh(gs: *GameState) !void {
     gs.contract_offers.clearRetainingCapacity();
     if (gs.hqs.count() == 0) return;
-
-    var best_comms: u8 = 0;
-    var hqit = gs.hqs.iterator();
-    while (hqit.next()) |entry| {
-        best_comms = @max(best_comms, entry.value_ptr.effectiveFacilityLevel(.comms));
-    }
 
     // Employers price off what fielding ONE company costs per month —
     // payroll, hulls and expected maintenance consumables, spread over the
@@ -116,91 +104,113 @@ pub fn refresh(gs: *GameState) !void {
     const queries = @import("../sim/queries.zig");
     const rt = tuning.rating;
     const rating_idx = queries.ratingIndex(queries.ratingScore(gs));
-    const offer_count = market.contractOfferCount(rating_idx, best_comms);
-    var attempts: u32 = 0;
-    while (gs.contract_offers.items.len < offer_count and attempts < 1000) : (attempts += 1) {
-        const world = &planet.catalog[gs.rng.random(.market).uintLessThan(usize, planet.catalog.len)];
-        if (!@import("../domain/faction.zig").get(world.faction).hires) continue; // ComStar posts nothing
-        const vis = bestVisibility(gs, world);
-        if (vis[0] == .hidden) continue;
+    // One board per HQ (12E.4): each posts work inside its own ring and
+    // beachhead band, for the companies based there; its comms set how many
+    // come calling, and a field HQ hears half as much.
+    for (gs.hqs.keys()) |hq_id| {
+        const hq = gs.hqs.getPtr(hq_id).?;
+        const hq_world = planet.find(hq.planet_key) orelse continue;
+        const board_start = gs.contract_offers.items.len;
+        var offer_count = market.contractOfferCount(rating_idx, hq.effectiveFacilityLevel(.comms));
+        if (hq.tier == .field) offer_count = @max(1, offer_count / 2);
+        var attempts: u32 = 0;
+        while (gs.contract_offers.items.len - board_start < offer_count and attempts < 1000) : (attempts += 1) {
+            const world = &planet.catalog[gs.rng.random(.market).uintLessThan(usize, planet.catalog.len)];
+            if (!@import("../domain/faction.zig").get(world.faction).hires) continue; // ComStar posts nothing
+            const dist = planet.distanceLy(hq_world, world);
+            const seen = market.visibilityFor(dist, hq.influenceLy());
+            if (seen == .hidden) continue;
+            const vis: struct { market.OfferVisibility, u32 } = .{ seen, dist };
 
-        // Great Houses do not hire an F-rated outfit, and nobody hands
-        // one a planetary assault.
-        if (rating_idx < rt.house_min_index and isGreatHouse(world.faction)) continue;
-        var kind = rollKind(gs);
-        if (kind == .planetary_assault and rating_idx < rt.assault_min_index) kind = .garrison_duty;
-        // A mix, not a wall of garrison duty (play feedback): no kind takes
-        // more than a third of the board, and the garrison class — garrison,
-        // cadre, security, riot: long, quiet, event-driven — no more than half,
-        // so raids and assaults are always on offer.
-        const kind_cap: usize = @max(2, @as(usize, offer_count) / 3);
-        const class_cap: usize = @max(2, @as(usize, offer_count) / 2);
-        var same: usize = 0;
-        var same_class: usize = 0;
-        for (gs.contract_offers.items) |o| {
-            if (o.kind == kind) same += 1;
-            if (o.kind.isGarrisonClass()) same_class += 1;
-        }
-        if (same >= kind_cap) continue;
-        if (kind.isGarrisonClass() and same_class >= class_cap) continue;
-        const length_variance: i32 = @as(i32, gs.rng.roll2d6(.market)) - 7;
-        const length: u8 = @intCast(std.math.clamp(
-            @as(i32, kind.baseLengthMonths()) + length_variance,
-            2,
-            30,
-        ));
+            // Great Houses do not hire an F-rated outfit, and nobody hands
+            // one a planetary assault.
+            if (rating_idx < rt.house_min_index and isGreatHouse(world.faction)) continue;
+            var kind = rollKind(gs);
+            if (kind == .planetary_assault and rating_idx < rt.assault_min_index) kind = .garrison_duty;
+            // A mix, not a wall of garrison duty (play feedback): no kind takes
+            // more than a third of the board, and the garrison class — garrison,
+            // cadre, security, riot: long, quiet, event-driven — no more than half,
+            // so raids and assaults are always on offer.
+            const kind_cap: usize = @max(2, @as(usize, offer_count) / 3);
+            const class_cap: usize = @max(2, @as(usize, offer_count) / 2);
+            var same: usize = 0;
+            var same_class: usize = 0;
+            for (gs.contract_offers.items[board_start..]) |o| {
+                if (o.kind == kind) same += 1;
+                if (o.kind.isGarrisonClass()) same_class += 1;
+            }
+            if (same >= kind_cap) continue;
+            if (kind.isGarrisonClass() and same_class >= class_cap) continue;
+            const length_variance: i32 = @as(i32, gs.rng.roll2d6(.market)) - 7;
+            const length: u8 = @intCast(std.math.clamp(
+                @as(i32, kind.baseLengthMonths()) + length_variance,
+                2,
+                30,
+            ));
 
-        // Beachhead employers pay a premium — nobody else will go.
-        var pay = contract.monthlyPayment(base, kind, employerMultBp(world.faction), queries.ratingPayBp(rating_idx));
-        if (vis[0] == .beachhead) pay = types.applyBp(pay, tuning.market.beachhead_pay_bp);
-        // A cooling employer (Stage 9E breach): half the offers, 70% pay.
-        if (gs.factionCooling(world.faction)) {
-            if (gs.rng.random(.market).boolean()) continue;
-            pay = types.applyBp(pay, tuning.market.cooling_pay_bp);
-        }
-        // Standing (12.21): a house that thinks well of you pays more and
-        // one that doesn't shuns you like a cooling employer.
-        const standing = gs.standing(world.faction);
-        if (standing <= -tuning.contract.standing_shun_depth and gs.rng.random(.market).boolean()) continue;
-        pay = types.applyBp(pay, standingPayBp(standing));
-        // Command rights (12B.1): the employer pays for the reins.
-        const rights: contract.CommandRights = switch (gs.rng.roll2d6(.market)) {
-            2, 3, 4 => .integrated,
-            5, 6, 7 => .house,
-            8, 9, 10 => .liaison,
-            else => .independent,
-        };
-        pay = types.applyBp(pay, rights.payBp());
+            // Beachhead employers pay a premium — nobody else will go.
+            var pay = contract.monthlyPayment(base, kind, employerMultBp(world.faction), queries.ratingPayBp(rating_idx));
+            if (vis[0] == .beachhead) pay = types.applyBp(pay, tuning.market.beachhead_pay_bp);
+            // A cooling employer (Stage 9E breach): half the offers, 70% pay.
+            if (gs.factionCooling(world.faction)) {
+                if (gs.rng.random(.market).boolean()) continue;
+                pay = types.applyBp(pay, tuning.market.cooling_pay_bp);
+            }
+            // Standing (12.21): a house that thinks well of you pays more and
+            // one that doesn't shuns you like a cooling employer.
+            const standing = gs.standing(world.faction);
+            if (standing <= -tuning.contract.standing_shun_depth and gs.rng.random(.market).boolean()) continue;
+            pay = types.applyBp(pay, standingPayBp(standing));
+            // Command rights (12B.1): the employer pays for the reins.
+            const rights: contract.CommandRights = switch (gs.rng.roll2d6(.market)) {
+                2, 3, 4 => .integrated,
+                5, 6, 7 => .house,
+                8, 9, 10 => .liaison,
+                else => .independent,
+            };
+            pay = types.applyBp(pay, rights.payBp());
 
-        try gs.contract_offers.append(gs.allocator(), .{
-            .id = .none, // assigned on acceptance
-            .kind = kind,
-            .employer_key = world.faction,
-            .enemy_key = pickEnemy(gs, world.faction, kind),
-            .planet_key = world.key,
-            .dist_ly = vis[1],
-            .beachhead = vis[0] == .beachhead,
-            .terms = .{
-                .length_months = length,
-                .base_pay_month = pay,
-                .advance_pct = 25,
-                .signing_bonus = if (gs.rng.roll2d6(.market) >= 10) @divTrunc(pay, 2) else 0,
-                .transport_pct = @intCast(@as(u32, gs.rng.roll2d6(.market) -| 2) * 10), // 0–100%
-                // Straight support: the employer ships you supplies monthly
-                // (Stage 9B delivers goods, not cash). // TUNE
-                .overhead_pct = switch (gs.rng.roll2d6(.market)) {
-                    2...7 => 0,
-                    8, 9 => 25,
-                    10, 11 => 50,
-                    else => 100,
+            // The opposition is a force of its own (12D.5), rolled now so the
+            // board can say what the job is up against.
+            const enemy_key = pickEnemy(gs, world.faction, kind);
+            const opfor = @import("../domain/opfor.zig").roll(&gs.rng, .market, kind, enemy_key, gs.clock.date.year);
+            // Harder work pays more (12E.6): the employer prices the opposition.
+            pay = types.applyBp(pay, threatPayBp(kind, opfor.lances, opfor.quality, opfor.lance_bv));
+            try gs.contract_offers.append(gs.allocator(), .{
+                .id = .none, // assigned on acceptance
+                .kind = kind,
+                .employer_key = world.faction,
+                .enemy_key = enemy_key,
+                .enemy_lances = opfor.lances,
+                .enemy_quality = opfor.quality,
+                .enemy_lance_bv = opfor.lance_bv,
+                .enemy_lance_tons = opfor.lance_tons,
+                .offer_hq = hq_id,
+                .planet_key = world.key,
+                .dist_ly = vis[1],
+                .beachhead = vis[0] == .beachhead,
+                .terms = .{
+                    .length_months = length,
+                    .base_pay_month = pay,
+                    .advance_pct = 25,
+                    .signing_bonus = if (gs.rng.roll2d6(.market) >= 10) @divTrunc(pay, 2) else 0,
+                    .transport_pct = @intCast(@as(u32, gs.rng.roll2d6(.market) -| 2) * 10), // 0–100%
+                    // Straight support: the employer ships you supplies monthly
+                    // (Stage 9B delivers goods, not cash). // TUNE
+                    .overhead_pct = switch (gs.rng.roll2d6(.market)) {
+                        2...7 => 0,
+                        8, 9 => 25,
+                        10, 11 => 50,
+                        else => 100,
+                    },
+                    .battle_loss_pct = if (gs.rng.roll2d6(.market) >= 8) 30 else 0,
+                    .salvage_pct = @intCast(@as(u32, gs.rng.roll2d6(.market) -| 2) * 5), // 0–50%
+                    // Salvage exchange (12B.2): the employer keeps the wrecks and pays cash.
+                    .salvage_exchange = gs.rng.random(.market).uintLessThan(u32, tuning.contract.salvage_exchange_in) == 0,
+                    .command_rights = rights,
                 },
-                .battle_loss_pct = if (gs.rng.roll2d6(.market) >= 8) 30 else 0,
-                .salvage_pct = @intCast(@as(u32, gs.rng.roll2d6(.market) -| 2) * 5), // 0–50%
-                // Salvage exchange (12B.2): the employer keeps the wrecks and pays cash.
-                .salvage_exchange = gs.rng.random(.market).uintLessThan(u32, tuning.contract.salvage_exchange_in) == 0,
-                .command_rights = rights,
-            },
-        });
+            });
+        }
     }
 }
 
@@ -213,13 +223,50 @@ pub fn refreshListings(gs: *GameState) !void {
     var i: usize = 0;
     while (i < gs.market_listings.items.len) {
         const l = gs.market_listings.items[i];
-        if (l.kind == .part or l.expires_day <= day) {
+        if (l.kind == .part or l.expires_day <= day or l.company != .none) {
             _ = gs.market_listings.orderedRemove(i);
         } else i += 1;
     }
     // Every HQ has a board (Stage 9D); field HQs are thin.
     var hit = gs.hqs.iterator();
     while (hit.next()) |entry| try refreshBoard(gs, entry.value_ptr.id);
+    // Every contract world has a thin board of its own (12D.7).
+    var cit = gs.contracts.iterator();
+    while (cit.next()) |entry| if (entry.value_ptr.status == .active) try refreshContractWorld(gs, entry.value_ptr);
+}
+
+/// The contract world's hull board (12D.7, ARCH §9.8 "buy a local
+/// replacement"): a few hulls off the world's own house table, at the
+/// field markup, for the deployed company's local funds — the grace window
+/// after a mauling has somewhere to shop.
+pub fn refreshContractWorld(gs: *GameState, c: *const contract.Contract) !void {
+    const world = planet.find(c.planet_key) orelse return;
+    const day = gs.clock.day_index;
+    const home = gs.homeHqFor(c.assigned_company);
+    for (0..tuning.market.contract_planet_slots) |_| {
+        const design = @import("../domain/rat.zig").roll(&gs.rng, .market, world.faction, @import("../gen/company_gen.zig").rollWeightClass(&gs.rng), gs.clock.date.year);
+        if (!market.listingAppears(&gs.rng, design.rarity, world.industry, 0, 0)) continue;
+        const cond = market.rollHullCondition(&gs.rng);
+        const price_roll: types.Bp = 10_000 + (@as(types.Bp, gs.rng.roll2d6(.market)) - 7) * 500;
+        var weapon_value: types.CBills = 0;
+        var weapons: types.CBills = 0;
+        for (design.loadout) |slot| if (slot.class == .weapon) {
+            weapon_value += @import("../domain/part.zig").cost(slot.part);
+            weapons += 1;
+        };
+        const avg_weapon = if (weapons > 0) @divTrunc(weapon_value, weapons) else 50_000;
+        try gs.market_listings.append(gs.allocator(), .{
+            .kind = .unit,
+            .item_key = design.key,
+            .rarity = design.rarity,
+            .price = types.applyBp(market.hullPrice(design.cost, avg_weapon, cond, price_roll), tuning.finance.field_markup_bp),
+            .listed_day = day,
+            .expires_day = day + 31,
+            .condition = cond,
+            .hq = home,
+            .company = c.assigned_company,
+        });
+    }
 }
 
 fn refreshBoard(gs: *GameState, hq_id: types.HqId) !void {
@@ -325,7 +372,7 @@ fn refreshBoard(gs: *GameState, hq_id: types.HqId) !void {
     const lot_size: u32 = if (thin) 1 else 2 + warehouse;
     var hulls: u32 = 0;
     for (gs.market_listings.items) |l| {
-        if (l.kind == .unit and l.hq == hq_id and !l.staple) hulls += 1;
+        if (l.kind == .unit and l.hq == hq_id and !l.staple and l.company == .none) hulls += 1;
     }
     var attempts: u32 = 0;
     while (hulls < lot_size and attempts < 12) : (attempts += 1) {
@@ -887,4 +934,16 @@ test "play feedback: offers are priced per company — a second company does not
     // And the whole-outfit figure, which the price used to be built on, roughly doubled.
     const whole = gs.monthlyPayroll() + hullUpkeep(&gs) + maintenanceEstimate(&gs);
     try std.testing.expect(whole > @divTrunc(two * 18, 10));
+}
+
+test "12E.6: a veteran five-lance opposition pays more than a green four-lance one" {
+    const hard = threatPayBp(.planetary_assault, 5, .veteran, 4_500);
+    const soft = threatPayBp(.planetary_assault, 4, .green, 3_500);
+    try std.testing.expect(hard > 10_000);
+    try std.testing.expect(soft < 10_000);
+    try std.testing.expect(hard <= 10_000 + tuning.contract.threat_pay_cap_bp);
+    try std.testing.expect(soft >= 10_000 - tuning.contract.threat_pay_cap_bp);
+    // The norm itself pays as tuned.
+    const norm = threatPayBp(.objective_raid, 3, .regular, tuning.contract.reference_lance_bv);
+    try std.testing.expect(norm >= 9_900 and norm <= 10_100);
 }

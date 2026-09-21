@@ -25,7 +25,7 @@ const contract_events = @import("../sim/contract_events.zig");
 const network = @import("../sim/network.zig");
 const clock_mod = @import("../sim/clock.zig");
 
-pub const schema_version = 19;
+pub const schema_version = 24;
 
 const ddl =
     \\CREATE TABLE IF NOT EXISTS player (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_seq INTEGER NOT NULL);
@@ -40,16 +40,16 @@ const ddl =
     \\CREATE TABLE IF NOT EXISTS ability (cid INTEGER NOT NULL, person_id INTEGER NOT NULL, key TEXT NOT NULL);
     \\CREATE TABLE IF NOT EXISTS person_skill (cid INTEGER NOT NULL, person_id INTEGER NOT NULL, skill TEXT NOT NULL, level INTEGER NOT NULL);
     \\CREATE TABLE IF NOT EXISTS injury (cid INTEGER NOT NULL, person_id INTEGER NOT NULL, ord INTEGER NOT NULL, location TEXT NOT NULL, severity INTEGER NOT NULL, incurred INTEGER NOT NULL, heal_done INTEGER, doctor INTEGER NOT NULL DEFAULT 0, permanent INTEGER NOT NULL DEFAULT 0, healed INTEGER NOT NULL DEFAULT 0);
-    \\CREATE TABLE IF NOT EXISTS unit (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, chassis_key TEXT, name TEXT, kind TEXT, force INTEGER, pilot INTEGER, tech INTEGER, armor_pct INTEGER, quality TEXT, status TEXT, last_maint INTEGER, acquired_day INTEGER, price INTEGER, reactivation_done INTEGER, berth_hq INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (cid, id));
+    \\CREATE TABLE IF NOT EXISTS unit (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, chassis_key TEXT, name TEXT, kind TEXT, force INTEGER, pilot INTEGER, tech INTEGER, armor_pct INTEGER, quality TEXT, status TEXT, last_maint INTEGER, acquired_day INTEGER, price INTEGER, reactivation_done INTEGER, berth_hq INTEGER NOT NULL DEFAULT 0, wreck TEXT NOT NULL DEFAULT 'none', PRIMARY KEY (cid, id));
     \\CREATE TABLE IF NOT EXISTS unit_slot (cid INTEGER NOT NULL, unit_id INTEGER NOT NULL, ord INTEGER NOT NULL, slot_key TEXT, part_key TEXT, class TEXT, condition TEXT);
-    \\CREATE TABLE IF NOT EXISTS force (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, parent INTEGER, name TEXT, emblem BLOB, local_funds INTEGER, echelon TEXT, commander INTEGER, supplying_hq INTEGER, role TEXT, support_kind TEXT, last_rotation INTEGER, contracts_since_rotation INTEGER, location_planet TEXT, return_eta INTEGER, shortage_days INTEGER, PRIMARY KEY (cid, id));
+    \\CREATE TABLE IF NOT EXISTS force (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, parent INTEGER, name TEXT, emblem BLOB, local_funds INTEGER, echelon TEXT, commander INTEGER, supplying_hq INTEGER, role TEXT, support_kind TEXT, last_rotation INTEGER, contracts_since_rotation INTEGER, location_planet TEXT, return_eta INTEGER, shortage_days INTEGER, roe TEXT NOT NULL DEFAULT 'standard', PRIMARY KEY (cid, id));
     \\CREATE TABLE IF NOT EXISTS force_unit (cid INTEGER NOT NULL, force_id INTEGER NOT NULL, ord INTEGER NOT NULL, unit_id INTEGER NOT NULL);
     \\CREATE TABLE IF NOT EXISTS force_child (cid INTEGER NOT NULL, force_id INTEGER NOT NULL, ord INTEGER NOT NULL, child_id INTEGER NOT NULL);
     \\CREATE TABLE IF NOT EXISTS stock (cid INTEGER NOT NULL, owner_kind TEXT NOT NULL, owner_id INTEGER NOT NULL, ord INTEGER NOT NULL, key TEXT NOT NULL, qty INTEGER NOT NULL);
     \\CREATE TABLE IF NOT EXISTS hq (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, name TEXT, tier TEXT, planet TEXT, staff_assigned INTEGER, upkeep INTEGER, funds INTEGER, PRIMARY KEY (cid, id));
     \\CREATE TABLE IF NOT EXISTS hq_facility (cid INTEGER NOT NULL, hq_id INTEGER NOT NULL, ord INTEGER NOT NULL, kind TEXT, level INTEGER);
     \\CREATE TABLE IF NOT EXISTS hq_project (cid INTEGER NOT NULL, hq_id INTEGER NOT NULL, ord INTEGER NOT NULL, kind TEXT, facility TEXT, target_level INTEGER, started INTEGER, paperwork_done INTEGER, construction_done INTEGER, cost INTEGER);
-    \\CREATE TABLE IF NOT EXISTS contract (cid INTEGER NOT NULL, is_offer INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER, kind TEXT, employer TEXT, enemy TEXT, planet TEXT, status TEXT, company INTEGER, start_day INTEGER, score INTEGER, dist_ly INTEGER, beachhead INTEGER, transit_days INTEGER, arrive_day INTEGER, end_day INTEGER, monthly_net INTEGER, next_battle INTEGER, battles INTEGER, casualties INTEGER, objective TEXT, committed_bv INTEGER, pool INTEGER, pool_remaining INTEGER, vp INTEGER, ineffective_since INTEGER, breach_day INTEGER, length_months INTEGER, base_pay INTEGER, advance_pct INTEGER, signing_bonus INTEGER, transport_pct INTEGER, overhead_pct INTEGER, battle_loss_pct INTEGER, salvage_pct INTEGER, salvage_exchange INTEGER, command_rights TEXT, negotiated INTEGER NOT NULL DEFAULT 0);
+    \\CREATE TABLE IF NOT EXISTS contract (cid INTEGER NOT NULL, is_offer INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER, kind TEXT, employer TEXT, enemy TEXT, planet TEXT, status TEXT, company INTEGER, start_day INTEGER, score INTEGER, dist_ly INTEGER, beachhead INTEGER, transit_days INTEGER, arrive_day INTEGER, end_day INTEGER, monthly_net INTEGER, next_battle INTEGER, battles INTEGER, casualties INTEGER, objective TEXT, committed_bv INTEGER, pool INTEGER, pool_remaining INTEGER, vp INTEGER, ineffective_since INTEGER, breach_day INTEGER, length_months INTEGER, base_pay INTEGER, advance_pct INTEGER, signing_bonus INTEGER, transport_pct INTEGER, overhead_pct INTEGER, battle_loss_pct INTEGER, salvage_pct INTEGER, salvage_exchange INTEGER, command_rights TEXT, negotiated INTEGER NOT NULL DEFAULT 0, enemy_lances INTEGER NOT NULL DEFAULT 0, enemy_quality TEXT NOT NULL DEFAULT 'regular', enemy_lance_bv INTEGER NOT NULL DEFAULT 0, enemy_lance_tons INTEGER NOT NULL DEFAULT 0, offer_hq INTEGER NOT NULL DEFAULT 0);
     \\CREATE TABLE IF NOT EXISTS txn (cid INTEGER NOT NULL, ord INTEGER NOT NULL, day INTEGER, amount INTEGER, category TEXT, company INTEGER, hq INTEGER, contract INTEGER, note TEXT);
     \\CREATE TABLE IF NOT EXISTS loan (cid INTEGER NOT NULL, ord INTEGER NOT NULL, principal INTEGER, balance INTEGER, rate_bp INTEGER, term INTEGER, next_pay INTEGER, payment INTEGER);
     \\CREATE TABLE IF NOT EXISTS courier (cid INTEGER NOT NULL, ord INTEGER NOT NULL, to_kind TEXT, to_id INTEGER, amount INTEGER, sent INTEGER, eta INTEGER);
@@ -64,7 +64,7 @@ const ddl =
     \\CREATE TABLE IF NOT EXISTS faction_standing (cid INTEGER NOT NULL, faction TEXT NOT NULL, value INTEGER NOT NULL);
     \\CREATE TABLE IF NOT EXISTS event_memory (cid INTEGER NOT NULL, kind TEXT NOT NULL, last_day INTEGER NOT NULL, last_choice INTEGER NOT NULL, streak INTEGER NOT NULL);
     \\CREATE TABLE IF NOT EXISTS rating_snapshot (cid INTEGER NOT NULL, year INTEGER NOT NULL, score INTEGER NOT NULL);
-    \\CREATE TABLE IF NOT EXISTS listing (cid INTEGER NOT NULL, ord INTEGER NOT NULL, kind TEXT, item_key TEXT, rarity TEXT, price INTEGER, qty INTEGER, staple INTEGER, listed INTEGER, expires INTEGER, hq INTEGER, c_armor INTEGER, c_quality TEXT, c_damaged INTEGER, c_destroyed INTEGER, c_missing INTEGER, black INTEGER NOT NULL DEFAULT 0);
+    \\CREATE TABLE IF NOT EXISTS listing (cid INTEGER NOT NULL, ord INTEGER NOT NULL, kind TEXT, item_key TEXT, rarity TEXT, price INTEGER, qty INTEGER, staple INTEGER, listed INTEGER, expires INTEGER, hq INTEGER, c_armor INTEGER, c_quality TEXT, c_damaged INTEGER, c_destroyed INTEGER, c_missing INTEGER, black INTEGER NOT NULL DEFAULT 0, company INTEGER NOT NULL DEFAULT 0);
     \\CREATE TABLE IF NOT EXISTS part_order (cid INTEGER NOT NULL, ord INTEGER NOT NULL, part_key TEXT, qty INTEGER, dest_kind TEXT, dest_id INTEGER, ordered INTEGER, eta INTEGER, cost INTEGER, status TEXT);
     \\CREATE TABLE IF NOT EXISTS event_log (cid INTEGER NOT NULL, ord INTEGER NOT NULL, day INTEGER, category TEXT, company INTEGER, hq INTEGER, contract INTEGER, text TEXT);
     \\CREATE TABLE IF NOT EXISTS pending_event (cid INTEGER NOT NULL, ord INTEGER NOT NULL, kind TEXT, day INTEGER, contract INTEGER, company INTEGER, default_choice INTEGER, deadline INTEGER, chosen INTEGER, person INTEGER NOT NULL DEFAULT 0);
@@ -119,6 +119,14 @@ pub const Store = struct {
         .{ .version = 17, .table = "person", .column = "last_award_day", .sql = "ALTER TABLE person ADD COLUMN last_award_day INTEGER" },
         // v18 adds the `rating_snapshot` table (created by ddl) and the stats meta ints.
         .{ .version = 19, .table = "listing", .column = "black", .sql = "ALTER TABLE listing ADD COLUMN black INTEGER NOT NULL DEFAULT 0" },
+        .{ .version = 20, .table = "unit", .column = "wreck", .sql = "ALTER TABLE unit ADD COLUMN wreck TEXT NOT NULL DEFAULT 'none'" },
+        .{ .version = 21, .table = "force", .column = "roe", .sql = "ALTER TABLE force ADD COLUMN roe TEXT NOT NULL DEFAULT 'standard'" },
+        .{ .version = 22, .table = "contract", .column = "enemy_lances", .sql = "ALTER TABLE contract ADD COLUMN enemy_lances INTEGER NOT NULL DEFAULT 0" },
+        .{ .version = 22, .table = "contract", .column = "enemy_quality", .sql = "ALTER TABLE contract ADD COLUMN enemy_quality TEXT NOT NULL DEFAULT 'regular'" },
+        .{ .version = 22, .table = "contract", .column = "enemy_lance_bv", .sql = "ALTER TABLE contract ADD COLUMN enemy_lance_bv INTEGER NOT NULL DEFAULT 0" },
+        .{ .version = 23, .table = "listing", .column = "company", .sql = "ALTER TABLE listing ADD COLUMN company INTEGER NOT NULL DEFAULT 0" },
+        .{ .version = 24, .table = "contract", .column = "enemy_lance_tons", .sql = "ALTER TABLE contract ADD COLUMN enemy_lance_tons INTEGER NOT NULL DEFAULT 0" },
+        .{ .version = 24, .table = "contract", .column = "offer_hq", .sql = "ALTER TABLE contract ADD COLUMN offer_hq INTEGER NOT NULL DEFAULT 0" },
     };
 
     pub fn open(path: [*:0]const u8) !Store {
@@ -414,7 +422,7 @@ pub const Store = struct {
 
         // Units and slots.
         {
-            const st = try self.db.prepare("INSERT INTO unit VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)");
+            const st = try self.db.prepare("INSERT INTO unit VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)");
             defer st.finalize();
             const sl = try self.db.prepare("INSERT INTO unit_slot VALUES (?1,?2,?3,?4,?5,?6,?7)");
             defer sl.finalize();
@@ -427,7 +435,7 @@ pub const Store = struct {
                     u.name,                   u.kind,                   @intFromEnum(u.force), @intFromEnum(u.pilot),
                     @intFromEnum(u.tech),     @as(i64, u.armor_pct),    u.quality,             u.status,
                     u.last_maintenance_day,   @as(i64, u.acquired_day), u.purchase_price,      u.reactivation_done_day,
-                    @intFromEnum(u.berth_hq),
+                    @intFromEnum(u.berth_hq), u.wreck,
                 });
                 try st.run();
                 for (u.slots.items, 0..) |s, i| {
@@ -439,7 +447,7 @@ pub const Store = struct {
 
         // Forces, their unit and child orderings, and field stores.
         {
-            const st = try self.db.prepare("INSERT INTO force VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)");
+            const st = try self.db.prepare("INSERT INTO force VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)");
             defer st.finalize();
             const fu = try self.db.prepare("INSERT INTO force_unit VALUES (?1,?2,?3,?4)");
             defer fu.finalize();
@@ -466,6 +474,7 @@ pub const Store = struct {
                 try st.bind(15, f.location_planet);
                 try st.bind(16, f.return_eta_day);
                 try st.bind(17, @as(i64, f.supply_shortage_days));
+                try st.bind(18, f.roe);
                 try st.run();
                 for (f.units.items, 0..) |uid, i| {
                     try fu.bindAll(.{ cid, @intFromEnum(f.id), @as(i64, @intCast(i)), @intFromEnum(uid) });
@@ -508,7 +517,7 @@ pub const Store = struct {
 
         // Contracts and offers.
         {
-            const st = try self.db.prepare("INSERT INTO contract VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33,?34,?35,?36,?37,?38,?39)");
+            const st = try self.db.prepare("INSERT INTO contract VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33,?34,?35,?36,?37,?38,?39,?40,?41,?42,?43,?44)");
             defer st.finalize();
             var ord: i64 = 0;
             var it = gs.contracts.iterator();
@@ -634,7 +643,7 @@ pub const Store = struct {
             }
         }
         {
-            const st = try self.db.prepare("INSERT INTO listing VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)");
+            const st = try self.db.prepare("INSERT INTO listing VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)");
             defer st.finalize();
             for (gs.market_listings.items, 0..) |l, i| {
                 try st.bindAll(.{
@@ -642,7 +651,7 @@ pub const Store = struct {
                     l.rarity,                                                             l.price,                                                   @as(i64, l.quantity),                                        l.staple,
                     @as(i64, l.listed_day),                                               @as(i64, l.expires_day),                                   @intFromEnum(l.hq),                                          if (l.condition) |c| @as(?i64, c.armor_pct) else null,
                     if (l.condition) |c| @as(?[]const u8, @tagName(c.quality)) else null, if (l.condition) |c| @as(?i64, c.damaged_slots) else null, if (l.condition) |c| @as(?i64, c.destroyed_slots) else null, if (l.condition) |c| @as(?i64, c.missing_components) else null,
-                    @as(i64, @intFromBool(l.black_market)),
+                    @as(i64, @intFromBool(l.black_market)),                           @intFromEnum(l.company),
                 });
                 try st.run();
             }
@@ -717,6 +726,8 @@ pub const Store = struct {
             @as(i64, c.terms.length_months), c.terms.base_pay_month,           @as(i64, c.terms.advance_pct),     c.terms.signing_bonus,
             @as(i64, c.terms.transport_pct), @as(i64, c.terms.overhead_pct),   @as(i64, c.terms.battle_loss_pct), @as(i64, c.terms.salvage_pct),
             c.terms.salvage_exchange,        c.terms.command_rights,           c.negotiated,
+            @as(i64, c.enemy_lances),        c.enemy_quality,                  c.enemy_lance_bv,
+            @as(i64, c.enemy_lance_tons),    @intFromEnum(c.offer_hq),
         });
         try st.run();
     }
@@ -884,7 +895,7 @@ pub const Store = struct {
 
         // Units.
         {
-            const st = try self.db.prepare("SELECT id, chassis_key, name, kind, force, pilot, tech, armor_pct, quality, status, last_maint, acquired_day, price, reactivation_done, berth_hq FROM unit WHERE cid = ?1 ORDER BY ord");
+            const st = try self.db.prepare("SELECT id, chassis_key, name, kind, force, pilot, tech, armor_pct, quality, status, last_maint, acquired_day, price, reactivation_done, berth_hq, wreck FROM unit WHERE cid = ?1 ORDER BY ord");
             defer st.finalize();
             try st.bindAll(.{cid});
             while (try st.next()) {
@@ -904,6 +915,7 @@ pub const Store = struct {
                     .purchase_price = st.int(12),
                     .reactivation_done_day = optU32(st.optInt(13)),
                     .berth_hq = toId(types.HqId, st.int(14)),
+                    .wreck = st.enumValue(unit_mod.WreckCause, 15) orelse .none,
                 };
                 try gs.units.put(alloc, u.id, u);
             }
@@ -923,7 +935,7 @@ pub const Store = struct {
 
         // Forces.
         {
-            const st = try self.db.prepare("SELECT id, parent, name, emblem, local_funds, echelon, commander, supplying_hq, role, support_kind, last_rotation, contracts_since_rotation, location_planet, return_eta, shortage_days FROM force WHERE cid = ?1 ORDER BY ord");
+            const st = try self.db.prepare("SELECT id, parent, name, emblem, local_funds, echelon, commander, supplying_hq, role, support_kind, last_rotation, contracts_since_rotation, location_planet, return_eta, shortage_days, roe FROM force WHERE cid = ?1 ORDER BY ord");
             defer st.finalize();
             try st.bindAll(.{cid});
             while (try st.next()) {
@@ -943,6 +955,7 @@ pub const Store = struct {
                     .location_planet = try st.optText(12, alloc),
                     .return_eta_day = optU32(st.optInt(13)),
                     .supply_shortage_days = @intCast(st.int(14)),
+                    .roe = st.enumValue(force_mod.Roe, 15) orelse .standard,
                 };
                 try gs.forces.put(alloc, f.id, f);
             }
@@ -1017,7 +1030,7 @@ pub const Store = struct {
 
         // Contracts & offers.
         {
-            const st = try self.db.prepare("SELECT is_offer, id, kind, employer, enemy, planet, status, company, start_day, score, dist_ly, beachhead, transit_days, arrive_day, end_day, monthly_net, next_battle, battles, casualties, objective, committed_bv, pool, pool_remaining, vp, ineffective_since, breach_day, length_months, base_pay, advance_pct, signing_bonus, transport_pct, overhead_pct, battle_loss_pct, salvage_pct, salvage_exchange, command_rights, negotiated FROM contract WHERE cid = ?1 ORDER BY is_offer, ord");
+            const st = try self.db.prepare("SELECT is_offer, id, kind, employer, enemy, planet, status, company, start_day, score, dist_ly, beachhead, transit_days, arrive_day, end_day, monthly_net, next_battle, battles, casualties, objective, committed_bv, pool, pool_remaining, vp, ineffective_since, breach_day, length_months, base_pay, advance_pct, signing_bonus, transport_pct, overhead_pct, battle_loss_pct, salvage_pct, salvage_exchange, command_rights, negotiated, enemy_lances, enemy_quality, enemy_lance_bv, enemy_lance_tons, offer_hq FROM contract WHERE cid = ?1 ORDER BY is_offer, ord");
             defer st.finalize();
             try st.bindAll(.{cid});
             while (try st.next()) {
@@ -1048,6 +1061,11 @@ pub const Store = struct {
                     .ineffective_since = optU32(st.optInt(24)),
                     .breach_day = optU32(st.optInt(25)),
                     .negotiated = st.int(36) != 0,
+                    .enemy_lances = @intCast(st.int(37)),
+                    .enemy_quality = st.enumValue(types.ExperienceLevel, 38) orelse .regular,
+                    .enemy_lance_bv = st.int(39),
+                    .enemy_lance_tons = @intCast(st.int(40)),
+                    .offer_hq = toId(types.HqId, st.int(41)),
                     .terms = .{
                         .length_months = @intCast(st.int(26)),
                         .base_pay_month = st.int(27),
@@ -1212,7 +1230,7 @@ pub const Store = struct {
             }
         }
         {
-            const st = try self.db.prepare("SELECT kind, item_key, rarity, price, qty, staple, listed, expires, hq, c_armor, c_quality, c_damaged, c_destroyed, c_missing, black FROM listing WHERE cid = ?1 ORDER BY ord");
+            const st = try self.db.prepare("SELECT kind, item_key, rarity, price, qty, staple, listed, expires, hq, c_armor, c_quality, c_damaged, c_destroyed, c_missing, black, company FROM listing WHERE cid = ?1 ORDER BY ord");
             defer st.finalize();
             try st.bindAll(.{cid});
             while (try st.next()) {
@@ -1227,6 +1245,7 @@ pub const Store = struct {
                     .expires_day = @intCast(st.int(7)),
                     .hq = toId(types.HqId, st.int(8)),
                     .black_market = st.int(14) != 0,
+                    .company = toId(types.ForceId, st.int(15)),
                 };
                 if (st.optInt(9)) |armor| {
                     l.condition = .{
@@ -1417,6 +1436,11 @@ test "save → load → identical hash, and the loaded campaign keeps playing" {
     // A dropship holding a berth (Stage 12.15) rides along.
     const ship = try gs.addUnit("LEOPARD");
     gs.unit(ship).?.berth_hq = gs.hqs.keys()[0];
+    // A company's rules of engagement ride along (12D.4).
+    gs.forces.getPtr(gs.forces.keys()[0]).?.roe = .cautious;
+    // A wreck remembers how it died (12D.2).
+    const wreck = try gs.addUnit("GRF-1N");
+    gs.unit(wreck).?.markWreckedBy(.engine);
     const before = gs.hash();
 
     const store = try Store.open(":memory:");
@@ -1428,6 +1452,16 @@ test "save → load → identical hash, and the loaded campaign keeps playing" {
     defer loaded.deinit();
     try std.testing.expectEqual(before, loaded.hash());
     try std.testing.expectEqual(gs.hqs.keys()[0], loaded.unit(ship).?.berth_hq);
+    try std.testing.expectEqual(@import("../domain/unit.zig").WreckCause.engine, loaded.unit(wreck).?.wreck);
+    try std.testing.expectEqual(@import("../domain/force.zig").Roe.cautious, loaded.forces.getPtr(gs.forces.keys()[0]).?.roe);
+    // Offers keep their opposition (12D.5).
+    if (gs.contract_offers.items.len > 0) {
+        try std.testing.expectEqual(gs.contract_offers.items[0].enemy_lances, loaded.contract_offers.items[0].enemy_lances);
+        try std.testing.expectEqual(gs.contract_offers.items[0].enemy_quality, loaded.contract_offers.items[0].enemy_quality);
+        try std.testing.expectEqual(gs.contract_offers.items[0].enemy_lance_bv, loaded.contract_offers.items[0].enemy_lance_bv);
+        try std.testing.expectEqual(gs.contract_offers.items[0].enemy_lance_tons, loaded.contract_offers.items[0].enemy_lance_tons); // 12E.3
+        try std.testing.expectEqual(gs.contract_offers.items[0].offer_hq, loaded.contract_offers.items[0].offer_hq); // 12E.4
+    }
     try std.testing.expectEqual(@as(i32, 12), loaded.standing("LC"));
     try std.testing.expectEqual(@as(usize, 1), loaded.person(scarred).?.injuries.items.len);
     try std.testing.expect(loaded.person(scarred).?.injuries.items[0].permanent);
@@ -1450,7 +1484,8 @@ test "save → load → identical hash, and the loaded campaign keeps playing" {
     try std.testing.expectEqual(@as(types.Bp, 4_500), loaded.share_profit_bp);
     try std.testing.expectEqual(gs.people.getPtr(gs.people.keys()[2]).?.shares, loaded.people.getPtr(gs.people.keys()[2]).?.shares);
     try std.testing.expectEqual(@as(?u32, 3), loaded.people.getPtr(gs.people.keys()[2]).?.last_raise_day);
-    try std.testing.expectEqual(@as(u32, 7), loaded.stats.battles_won);
+    try std.testing.expectEqual(gs.stats.battles_won, loaded.stats.battles_won);
+    try std.testing.expect(loaded.stats.battles_won >= 7);
     try std.testing.expectEqual(@as(usize, 1), loaded.rating_history.items.len);
     try std.testing.expectEqual(@as(i32, 40), loaded.rating_history.items[0].score);
 
