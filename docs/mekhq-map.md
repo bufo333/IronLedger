@@ -15,13 +15,13 @@ re-implemented in Zig. Paths below are under `MekHQ/src/mekhq/campaign/`.
 | `unit/Unit.java` | Entity wrapper + crew + repair state | `src/domain/unit.zig` | 3 |
 | `parts/*` (Part, Armor, MekLocation, ...) | Part instances, quality A–F, repair TNs | `src/domain/part.zig` + catalog `data/parts/*.zon` | 5 |
 | `Quartermaster.java`, `procurement/*` | Acquisition rolls, shopping list, delivery ETA | `src/econ/logistics.zig` | 5 |
-| `market/ContractMarket` | Monthly offers, CamOps terms | `src/econ/market.zig` | 4 |
+| `market/ContractMarket` | Monthly offers, CamOps terms | `src/econ/contract_market.zig` (offer counts/visibility in `src/econ/market.zig`) | 4 |
 | `market/PersonnelMarket`, `UnitMarket` | Hiring pool, unit purchases | `src/econ/market.zig` | 4/9 |
 | `mission/Mission,Contract,AtBContract` | 12 AtB contract types, payment math, command rights | `src/domain/contract.zig` | 4 |
-| `mission/AtBScenario*`, StratCon (`stratcon/*`) | Scenario generation over a contract's life | `src/sim/events.zig` + `src/sim/autoresolve.zig` | 7 |
+| `mission/AtBScenario*` | Scenario generation over a contract's life | `src/domain/scenario.zig` + `src/sim/battle.zig`; event decks in `src/sim/contract_events.zig` (no StratCon) | 7/12C |
 | `autoresolve/` (ACAR) | Abstract combat auto resolution | `src/sim/autoresolve.zig` — extended with supply/morale/support modifiers (ARCH §7) | 7 |
 | `finances/Finances.java`, `Loan.java` | Ledger, categories, loans | `src/econ/finance.zig` | 2/4 |
-| `rating/*` (FMMR, CamOps reputation) | Unit rating → pay & offer quality | reputation in `GameState`, formulas in `src/domain/contract.zig` | 4 |
+| `rating/*` (FMMR, CamOps reputation) | Unit rating → pay & offer quality | reputation in `GameState`, Dragoons rating in `src/sim/queries.zig` `rating()` | 4/12C |
 | `universe/generators/companyGenerators/*` | **AtB company autogeneration** | `src/gen/company_gen.zig` | 3 |
 | `universe/Planet,Systems` (`planets.xml`) | Star map, jump distances, planet socio-industrial codes | `data/planets.zon` (curated) + `src/econ/logistics.zig` routes | 9 |
 | `universe/RandomNameGenerator` | Names by faction/origin | `src/gen/company_gen.zig` name tables | 2 |

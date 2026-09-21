@@ -329,6 +329,10 @@ pub const Tuning = struct {
         standing_complete_gain: i32,
         standing_enemy_loss: i32,
         standing_breach_loss: i32,
+        /// A performance failure at term (12D.1, CamOps): what it costs with
+        /// the employer and in reputation. No clawback, no cooling.
+        standing_failure_loss: i32,
+        failure_reputation: i32,
         standing_pay_bp_per_point: types.Bp,
         /// Shunned when standing is at or under −this.
         standing_shun_depth: i32,

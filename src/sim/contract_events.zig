@@ -379,6 +379,7 @@ fn applyEffectsFor(gs: *GameState, effects: []const events.Effect, contract: ?*c
             .reputation => |delta| gs.reputation += delta,
             .score => |delta| if (contract) |c| {
                 c.score += delta;
+                c.victory_points += delta * 5; // VP when earned, never again at term end (12D.1)
             },
             .morale => |delta| applyToCompany(gs, company, .morale, delta),
             .fatigue => |amount| applyToCompany(gs, company, .fatigue, @intCast(amount)),

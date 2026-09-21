@@ -222,6 +222,8 @@
         .standing_complete_gain = 5,
         .standing_enemy_loss = 3,
         .standing_breach_loss = 20,
+        .standing_failure_loss = 10, // failure at term (12D.1, CamOps): half a breach, no cooling
+        .failure_reputation = -1,
         .standing_pay_bp_per_point = 25, // ±25% pay at ±100
         .standing_shun_depth = 40,
         .standing_drift_per_month = 1,

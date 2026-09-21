@@ -2845,7 +2845,7 @@ pub fn contractHistory(alloc: Alloc, gs: *GameState) ![]HistoryRow {
         const served: ?u32 = if (start != null and c.end_day != null) c.end_day.? -| start.? else null;
         const st_mk: []const u8 = switch (c.status) {
             .completed => "{g}",
-            .breached => "{c}",
+            .breached, .failed => "{c}",
             else => "{a}",
         };
         try out.append(alloc, .{ .id = c.id, .planet_key = c.planet_key, .text = try std.fmt.allocPrint(alloc, "[{d: <3}] {s: <14} {s: <4} {s: <16} {s}{s: <9}{{/}} {s: >5}  {d: >3} VP {s: <13} {s: >13}  co:{d} {s}", .{

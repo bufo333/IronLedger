@@ -116,8 +116,11 @@ pub fn complete(gs: *GameState, c: *contract_mod.Contract, objectives_broken: bo
         const n = @import("personnel.zig").adjustMoraleAll(gs, tuning.person.morale_contract_strong);
         try gs.log(.rotation, .{ .company = c.assigned_company, .contract = c.id }, "[morale] a {s} tour — spirits lift across the outfit (+{d} morale, {d} people)", .{ c.grade(), tuning.person.morale_contract_strong, n });
     }
-    try gs.log(.contract, .{ .company = c.assigned_company, .contract = c.id }, "[{s}] contract COMPLETE — {s} ({s}, {d} VP, score {d}) — reputation {s} ({s}{d}); the employer pays in full{s}", .{
-        @tagName(c.kind), c.grade(), if (objectives_broken) "objectives broken" else "closed out", c.victory_points, c.score, if (vp_bonus > 0) "soars" else if (gain > 0) "rises" else if (gain == 0) "unchanged" else "slips", if (gain >= 0) "+" else "", gain, if (objectives_broken) " plus the early-completion bonus" else "",
+    // What the employer pays (12D.1): a term served runs its course, a broken
+    // pool earns the bonus, an early close-out forfeits the months left.
+    const pay_note: []const u8 = if (months_left <= 0) "the employer pays in full" else if (objectives_broken) "the employer pays in full plus the early-completion bonus" else "closed out early — the remaining payments are forfeited";
+    try gs.log(.contract, .{ .company = c.assigned_company, .contract = c.id }, "[{s}] contract COMPLETE — {s} ({s}, {d} VP, score {d}) — reputation {s} ({s}{d}); {s}", .{
+        @tagName(c.kind), c.grade(), if (objectives_broken) "objectives broken" else "closed out", c.victory_points, c.score, if (vp_bonus > 0) "soars" else if (gain > 0) "rises" else if (gain == 0) "unchanged" else "slips", if (gain >= 0) "+" else "", gain, pay_note,
     });
 }
 
@@ -152,6 +155,26 @@ pub fn breach(gs: *GameState, c: *contract_mod.Contract, reason: []const u8) !vo
     try finishTour(gs, c);
     try gs.log(.contract, .{ .company = c.assigned_company, .contract = c.id }, "[{s}] CONTRACT BREACHED ({s}) — {d} clawed back, remainder forfeited, {s} employers cool for a year", .{
         @tagName(c.kind), reason, clawback, c.employer_key,
+    });
+}
+
+/// Performance failure at the end of term (12D.1, CamOps: failure is not
+/// breach). The term was served, so nothing is clawed back and the employer
+/// does not cool — but the tour earns no reputation, the employer marks you
+/// down, and the outfit feels it.
+pub fn fail(gs: *GameState, c: *contract_mod.Contract, reason: []const u8) !void {
+    if (c.status != .active) return;
+    const t = tuning.contract;
+    c.status = .failed;
+    c.breach_day = gs.clock.day_index;
+    gs.reputation += t.failure_reputation;
+    _ = @import("personnel.zig").adjustMoraleAll(gs, tuning.person.morale_contract_breached);
+    try gs.log(.rotation, .{ .company = c.assigned_company, .contract = c.id }, "[morale] the failure is felt across the outfit ({d} morale)", .{tuning.person.morale_contract_breached});
+    const standing_now = try gs.adjustStanding(c.employer_key, -t.standing_failure_loss);
+    try gs.log(.contract, .{ .company = c.assigned_company, .contract = c.id }, "[standing] {s} −{d} → {d}", .{ c.employer_key, t.standing_failure_loss, standing_now });
+    try finishTour(gs, c);
+    try gs.log(.contract, .{ .company = c.assigned_company, .contract = c.id }, "[{s}] CONTRACT FAILED ({s}, score {d}, {d} VP) — reputation {d}; the term was served, so no clawback and no cooling", .{
+        @tagName(c.kind), reason, c.score, c.victory_points, t.failure_reputation,
     });
 }
 
@@ -416,4 +439,42 @@ test "12.29: the verdict grades by victory points; failure is the score at term"
     c.victory_points = -3;
     try std.testing.expectEqualStrings("poor", c.grade());
     try std.testing.expectEqual(@as(i32, -5), contract_mod.Contract.fail_score);
+}
+
+test "12D.1: a performance failure at term is .failed — no clawback, no cooling, VP counted once" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1201 });
+    defer gs.deinit();
+    _ = try gs.createCommander("T", .FS, .line_officer);
+    const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
+        .id = @enumFromInt(1),
+        .kind = .objective_raid,
+        .employer_key = "FS",
+        .enemy_key = "CC",
+        .planet_key = "caph",
+        .terms = .{ .length_months = 3, .base_pay_month = 400_000, .advance_pct = 25 },
+        .status = .active,
+        .assigned_company = co,
+        .monthly_net = 300_000,
+        .start_day = 0,
+        .end_day = 90,
+    });
+    const c = gs.contracts.getPtr(@enumFromInt(1)).?;
+    onAccept(&gs, c);
+    // Two lost fights on the books: score −2 each, VP banked as they happen.
+    c.score = -6;
+    try recordBattle(&gs, c, 0, -3);
+    try recordBattle(&gs, c, 0, -3);
+    const vp_before = c.victory_points;
+    try std.testing.expectEqual(@as(i32, -30), vp_before);
+    const rep_before = gs.reputation;
+    gs.clock.day_index = 90;
+    try @import("tick.zig").advanceDay(&gs);
+    try std.testing.expectEqual(contract_mod.ContractStatus.failed, c.status);
+    try std.testing.expectEqual(vp_before, c.victory_points); // not re-added at term
+    try std.testing.expectEqual(rep_before + tuning.contract.failure_reputation, gs.reputation);
+    try std.testing.expect(!gs.factionCooling("FS"));
+    try std.testing.expect(gs.standing("FS") < 0);
+    // No clawback: whatever else the day posted, nothing is filed as one.
+    try std.testing.expectEqual(@as(i64, 0), @import("../econ/finance.zig").summarize(&gs.ledger, 0, 1000, .all).category(.breach_clawback));
 }

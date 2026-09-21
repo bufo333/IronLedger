@@ -281,6 +281,7 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     defer player.engaged.deinit(gs.allocator());
     if (player.engaged.items.len == 0) {
         c.score -= 2;
+        c.victory_points -= 10;
         try gs.log(.battle, .{ .company = c.assigned_company, .contract = c.id }, "[AAR] {s}: no combat-effective units — objective conceded", .{@tagName(c.kind)});
         return;
     }
@@ -404,7 +405,9 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
                 const raw_severity: u8 = if (severity >= 12) 3 else if (severity >= 10) 2 else 1;
                 const wound_severity: u8 = @max(1, raw_severity -| @as(u8, @intFromBool(tough)));
                 if (severity == 12 and !player.mods.has_mash_lance and !tough) {
-                    p.status = .kia;
+                    // The seat empties with the pilot (12D.1): the checklist
+                    // shows an open cockpit, not a dead man in it.
+                    _ = try @import("personnel.zig").depart(gs, p.id, .kia, 0, "");
                     kia += 1;
                     gs.stats.people_kia += 1;
                     rec.crew = try std.fmt.allocPrint(gs.allocator(), "{s} KIA", .{try p.rankedName(gs.allocator())});
@@ -783,6 +786,11 @@ test "hard hits wound pilots: a season of fighting sends someone to the medbay" 
         hurt += 1;
     };
     try std.testing.expect(hurt > 0);
+    // The dead leave their seats (12D.1).
+    var seat_it = gs.units.iterator();
+    while (seat_it.next()) |e| if (gs.person(e.value_ptr.pilot)) |p| {
+        try std.testing.expect(p.status != .kia);
+    };
     // Every wound is a located injury (Stage 12.16).
     var injured_it = gs.people.iterator();
     while (injured_it.next()) |e| if (e.value_ptr.status == .wounded) {

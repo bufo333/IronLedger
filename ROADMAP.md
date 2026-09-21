@@ -983,6 +983,25 @@ v18 (12C.16: campaign `start_year`). Every knob lands in
 `data/tables/tuning.zon` from the start; rule tables cite the AtB /
 CamOps / MekHQ source next to the table.
 
+## Stage 12D — Real loss (planned 2026-09-21)
+
+Play feedback: "there is not a lot of ways for the player to lose an entire
+lance". A wreck always came home and always rebuilt for one `comp_ct`; the
+enemy was sized off your own BV; a battle was one roll with no way to pull
+out. 12D makes permanent loss possible, legible and avoidable, on the
+CamOps/MekHQ/TechManual rules, scaled by difficulty.
+
+- ✅ 12D.1 **Loose ends.** A KIA pilot leaves the seat (`personnel.depart`,
+  no payout); a performance failure at term is a **failed** contract, not a
+  breach (CamOps): no clawback, no cooling, reputation
+  `failure_reputation` (−1), employer standing −`standing_failure_loss`
+  (10), the record's −5 and the history's failed column finally live. VP
+  are banked when the score moves (battles and events alike) and never
+  re-added at term, so a broken pool and a served term score the same way.
+  An early close-out's log says the remaining payments are forfeited.
+  `docs/mekhq-map.md` rows for the contract market, scenarios and rating
+  point at the right files.
+
 ## Stage 13 — Graphical client
 Architected after the TUI ships, reusing the same command/query boundary.
 
