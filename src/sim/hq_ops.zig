@@ -40,7 +40,42 @@ pub fn paperworkDaysFor(gs: *GameState, hq_id: types.HqId) u32 {
     return hq_mod.paperworkDays(@min(cmd.count, 5));
 }
 
-pub const QueueError = error{ UnknownUnit, NoHq, NoBay, MissingComponents } || std.mem.Allocator.Error;
+pub const QueueError = error{ UnknownUnit, NoHq, NoBay, MissingComponents, WrittenOff } || std.mem.Allocator.Error;
+
+/// The new engine a rebuild needs (12D.2): TechManual price for the
+/// design, zero unless the hull died of an engine kill or a cook-off.
+pub fn engineCharge(u: *const unit_mod.Unit) types.CBills {
+    if (!u.wreck.needsEngine()) return 0;
+    const design = @import("../domain/chassis.zig").find(u.chassis_key) orelse return 0;
+    return unit_mod.engineCost(design.tonnage, design.walk_mp);
+}
+
+/// What bringing this hull back would cost at today's prices (12D.2):
+/// every destroyed or missing component fabricated, the depot labour, and
+/// the engine. Null for scrap. The hangar sets it against a new hull.
+pub fn rebuildEstimate(gs: *GameState, u: *const unit_mod.Unit) ?types.CBills {
+    if (u.wreck == .scrap) return null;
+    const market = @import("../econ/market.zig");
+    var total: types.CBills = 0;
+    var needed: i64 = 0;
+    for (u.slots.items) |s| {
+        if (s.class != .structure or s.condition == .ok) continue;
+        needed += 1;
+        if (s.condition == .damaged) continue;
+        const def = part_mod.find(part_mod.componentForSlot(s.slot_key)) orelse continue;
+        total += types.applyBp(types.applyBp(def.cost, market.structural_fab_cost_mult_bp), gs.diff().fab_cost_bp);
+    }
+    total += @divTrunc(u.purchase_price, 25) * needed;
+    return total + engineCharge(u);
+}
+
+/// True when a rebuild costs more than `writeoff_bp` of a new hull.
+pub fn beyondEconomicalRepair(gs: *GameState, u: *const unit_mod.Unit) bool {
+    if (u.status != .destroyed) return false;
+    const est = rebuildEstimate(gs, u) orelse return true;
+    const design = @import("../domain/chassis.zig").find(u.chassis_key) orelse return false;
+    return est > types.applyBp(design.cost, tuning.loss.writeoff_bp);
+}
 
 /// Queue a depot repair: takes the needed structural components from the
 /// HQ's warehouse up front (false = something's missing; see `demand`).
@@ -53,6 +88,7 @@ pub fn queueDepotRepair(gs: *GameState, unit_id: types.UnitId) QueueError!bool {
     const hq = gs.hqs.getPtr(hq_id) orelse return error.NoHq;
     if (!hq.supportsStructuralRepair()) return error.NoBay;
     if (hasJobForUnit(gs, unit_id)) return true;
+    if (u.wreck == .scrap) return error.WrittenOff; // strip it (12D.2)
     // A wreck from before kills wrecked structure (saves predating 12.31)
     // carries no structural damage: give it the wreck it is, so the rebuild
     // needs its component like any other.
@@ -85,9 +121,9 @@ pub fn queueDepotRepair(gs: *GameState, unit_id: types.UnitId) QueueError!bool {
         .hq = hq_id,
         .kind = .depot_repair,
         .unit = unit_id,
-        .duration_days = tuning.hq_ops.depot_base_days + tuning.hq_ops.depot_days_per_component * needed,
+        .duration_days = tuning.hq_ops.depot_base_days + tuning.hq_ops.depot_days_per_component * needed + (if (u.wreck.needsEngine()) tuning.loss.engine_rebuild_days else 0),
         .queued_day = gs.clock.day_index,
-        .cost = @divTrunc(u.purchase_price, 25) * needed,
+        .cost = @divTrunc(u.purchase_price, 25) * needed + engineCharge(u), // a new engine goes in with an engine kill (12D.2)
     });
     return true;
 }
@@ -380,6 +416,7 @@ fn completeJob(gs: *GameState, job: *state_mod.BayJob) !bool {
             for (u.slots.items) |*s| {
                 if (s.class == .structure) s.condition = .ok;
             }
+            u.wreck = .none;
             if (u.status == .repairing) u.status = .ready;
             try gs.log(.construction, .{ .hq = job.hq }, "[bay] {s} structural repair complete", .{u.chassis_key});
             // Big jobs hurt people (Stage 9C.2): snake-eyes on 2d6 (≈3%)

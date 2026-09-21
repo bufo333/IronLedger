@@ -1001,6 +1001,22 @@ CamOps/MekHQ/TechManual rules, scaled by difficulty.
   An early close-out's log says the remaining payments are forfeited.
   `docs/mekhq-map.md` rows for the contract market, scenarios and rating
   point at the right files.
+- ✅ 12D.2 **Why it died: causes and write-offs** (TechManual "Destroying a
+  'Mech"). A kill rolls its cause: an ammo slot struck (or cooked off at
+  severity 11+, no CASE in the 3025 catalogue) is an **ammunition
+  explosion** that guts both side torsos; a severity-12 hit is an **engine
+  kill**; anything else cores the centre torso. Engine and ammo kills are
+  **scrap** on 2d6 ≤ `loss.scrap_target` (4) + the difficulty's
+  `scrap_mod` (green −2 … elite +2). `Unit.wreck` persists (store v20). The
+  depot adds a new engine to engine/ammo rebuilds at the TechManual price
+  (5,000 × rating × tonnage ÷ 75, rating = walk × tonnage) and
+  `engine_rebuild_days`; scrap is refused (`WrittenOff`). The hangar prices
+  every wreck — "engine destroyed — rebuild ≈1.4M vs new 4.8M" — and flags
+  anything over `writeoff_bp` (75%) as beyond economical repair.
+  **`strip <unit>`** (Forces `$` → `s`, MekHQ "salvage unit") crates every
+  intact weapon, component and the armour still on a hull into its home
+  warehouse; a wreck's sale and liquidation value is now its strip value,
+  not zero. AARs read "DESTROYED (engine destroyed)".
 
 ## Stage 13 — Graphical client
 Architected after the TUI ships, reusing the same command/query boundary.

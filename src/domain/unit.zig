@@ -43,6 +43,42 @@ pub const UnitKind = enum {
 
 pub const BayKind = enum { mek, asf, vehicle };
 
+/// How a hull died (12D.2, TechManual "Destroying a 'Mech"): the cause
+/// decides what the rebuild needs. A cored centre torso is a component
+/// and bay time; a destroyed engine (three engine criticals) adds a new
+/// engine at the TechManual price; an ammunition explosion guts both side
+/// torsos as well; scrap is beyond rebuilding — strip it for parts.
+/// MekHQ counterpart: the salvage/"unrepairable" states of `Unit`.
+pub const WreckCause = enum {
+    none,
+    cored,
+    engine,
+    ammo,
+    scrap,
+
+    pub fn label(self: WreckCause) []const u8 {
+        return switch (self) {
+            .none => "",
+            .cored => "centre torso cored",
+            .engine => "engine destroyed",
+            .ammo => "ammunition explosion",
+            .scrap => "scrap — beyond rebuilding",
+        };
+    }
+
+    /// A new engine goes in with the rebuild.
+    pub fn needsEngine(self: WreckCause) bool {
+        return self == .engine or self == .ammo;
+    }
+};
+
+/// TechManual standard fusion engine cost: 5,000 × rating × tonnage ÷ 75,
+/// with the rating from the design's walking MP × tonnage.
+pub fn engineCost(tonnage: u32, walk_mp: u32) types.CBills {
+    const rating: types.CBills = @as(types.CBills, walk_mp) * tonnage;
+    return @divTrunc(5_000 * rating * @as(types.CBills, tonnage), 75);
+}
+
 pub const UnitStatus = enum { ready, damaged, repairing, refitting, mothballed, destroyed, in_transit };
 
 const Role = @import("person.zig").Role;
@@ -172,6 +208,8 @@ pub const Unit = struct {
     reactivation_done_day: ?u32 = null,
     /// Transports only (Stage 12.15): the HQ whose berth this ship holds.
     berth_hq: types.HqId = .none,
+    /// Why a destroyed hull died (12D.2); `.none` while it runs.
+    wreck: WreckCause = .none,
 
     pub fn deinit(self: *Unit, alloc: std.mem.Allocator) void {
         self.slots.deinit(alloc);
@@ -212,6 +250,27 @@ pub const Unit = struct {
     /// and bay time — not a free pass (play feedback: wrecks with a damaged
     /// ammo bin and nothing else were stuck between the field and the depot).
     pub fn markWrecked(self: *Unit) void {
+        self.markWreckedBy(.cored);
+    }
+
+    /// Wreck the hull by a cause (12D.2): the centre torso always goes; an
+    /// ammunition explosion takes both side torsos with it; scrap leaves no
+    /// structure standing.
+    pub fn markWreckedBy(self: *Unit, cause: WreckCause) void {
+        self.wreck = if (cause == .none) .cored else cause;
+        switch (self.wreck) {
+            .ammo => for (self.slots.items) |*s| {
+                if (s.class == .structure and (std.mem.startsWith(u8, s.slot_key, "lt.") or std.mem.startsWith(u8, s.slot_key, "rt."))) s.condition = .destroyed;
+            },
+            .scrap => for (self.slots.items) |*s| {
+                if (s.class == .structure) s.condition = .destroyed;
+            },
+            else => {},
+        }
+        self.coreCentreTorso();
+    }
+
+    fn coreCentreTorso(self: *Unit) void {
         self.status = .destroyed;
         var first: ?*PartSlot = null;
         for (self.slots.items) |*s| {

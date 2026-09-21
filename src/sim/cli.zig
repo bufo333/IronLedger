@@ -83,6 +83,7 @@ pub fn parseCommand(verb: []const u8, tokens: *std.mem.TokenIterator(u8, .scalar
     }
     if (eq(u8, verb, "repay")) return .{ .repay_loan = .{ .index = try num(usize, tokens.next()), .amount = try num(i64, tokens.next()) } };
     if (eq(u8, verb, "sell")) return .{ .sell_unit = @enumFromInt(try num(u32, tokens.next())) };
+    if (eq(u8, verb, "strip")) return .{ .strip_unit = @enumFromInt(try num(u32, tokens.next())) };
     if (eq(u8, verb, "raise")) {
         const site = try parseSite(try need(tokens.next()));
         if (site != .hq) return error.BadSite;
@@ -393,6 +394,7 @@ pub fn errorText(err: anyerror) []const u8 {
         error.NoSuchListing => "that listing is gone",
         error.TooManyLances => "that lance is full (4 hulls), or the HQ allows no more lances — :newlance co:N <name> raises one",
         error.SameForce => "that hull belongs to another company — x moves it between companies",
+        error.WrittenOff => "that wreck is scrap — nothing left to rebuild; `strip <unit>` (Forces $, then s) crates its surviving parts into the home warehouse",
         error.NothingToRepair => "that hull has no structural damage — gear is field work on any hull: its tech fits spares from the hull's site on the weekly pass; `replace <unit>` (Forces R) orders what's destroyed",
         error.NothingToReplace => "no destroyed or missing gear on that hull — damaged gear is fixed by its tech's hours alone, and structure goes to the depot (`depot <unit>`)",
         error.MissingComponents => "structural components missing at the home HQ — order or fabricate them on the Market screen first",
@@ -418,6 +420,7 @@ pub const verbs = [_][]const u8{
     "admit",
     "repay",
     "sell",
+    "strip",
     "sellhq",
     "disband",
     "depot",
@@ -481,6 +484,7 @@ pub fn usage(verb: []const u8) ?[]const u8 {
         .{ "admit", "admit <person>" },
         .{ "repay", "repay <loan#> <amount>" },
         .{ "sell", "sell <unit>" },
+        .{ "strip", "strip <unit>" },
         .{ "sellhq", "sellhq hq:N" },
         .{ "disband", "disband co:N" },
         .{ "depot", "depot <unit>" },

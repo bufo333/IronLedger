@@ -25,7 +25,7 @@ const contract_events = @import("../sim/contract_events.zig");
 const network = @import("../sim/network.zig");
 const clock_mod = @import("../sim/clock.zig");
 
-pub const schema_version = 19;
+pub const schema_version = 20;
 
 const ddl =
     \\CREATE TABLE IF NOT EXISTS player (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_seq INTEGER NOT NULL);
@@ -40,7 +40,7 @@ const ddl =
     \\CREATE TABLE IF NOT EXISTS ability (cid INTEGER NOT NULL, person_id INTEGER NOT NULL, key TEXT NOT NULL);
     \\CREATE TABLE IF NOT EXISTS person_skill (cid INTEGER NOT NULL, person_id INTEGER NOT NULL, skill TEXT NOT NULL, level INTEGER NOT NULL);
     \\CREATE TABLE IF NOT EXISTS injury (cid INTEGER NOT NULL, person_id INTEGER NOT NULL, ord INTEGER NOT NULL, location TEXT NOT NULL, severity INTEGER NOT NULL, incurred INTEGER NOT NULL, heal_done INTEGER, doctor INTEGER NOT NULL DEFAULT 0, permanent INTEGER NOT NULL DEFAULT 0, healed INTEGER NOT NULL DEFAULT 0);
-    \\CREATE TABLE IF NOT EXISTS unit (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, chassis_key TEXT, name TEXT, kind TEXT, force INTEGER, pilot INTEGER, tech INTEGER, armor_pct INTEGER, quality TEXT, status TEXT, last_maint INTEGER, acquired_day INTEGER, price INTEGER, reactivation_done INTEGER, berth_hq INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (cid, id));
+    \\CREATE TABLE IF NOT EXISTS unit (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, chassis_key TEXT, name TEXT, kind TEXT, force INTEGER, pilot INTEGER, tech INTEGER, armor_pct INTEGER, quality TEXT, status TEXT, last_maint INTEGER, acquired_day INTEGER, price INTEGER, reactivation_done INTEGER, berth_hq INTEGER NOT NULL DEFAULT 0, wreck TEXT NOT NULL DEFAULT 'none', PRIMARY KEY (cid, id));
     \\CREATE TABLE IF NOT EXISTS unit_slot (cid INTEGER NOT NULL, unit_id INTEGER NOT NULL, ord INTEGER NOT NULL, slot_key TEXT, part_key TEXT, class TEXT, condition TEXT);
     \\CREATE TABLE IF NOT EXISTS force (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, parent INTEGER, name TEXT, emblem BLOB, local_funds INTEGER, echelon TEXT, commander INTEGER, supplying_hq INTEGER, role TEXT, support_kind TEXT, last_rotation INTEGER, contracts_since_rotation INTEGER, location_planet TEXT, return_eta INTEGER, shortage_days INTEGER, PRIMARY KEY (cid, id));
     \\CREATE TABLE IF NOT EXISTS force_unit (cid INTEGER NOT NULL, force_id INTEGER NOT NULL, ord INTEGER NOT NULL, unit_id INTEGER NOT NULL);
@@ -119,6 +119,7 @@ pub const Store = struct {
         .{ .version = 17, .table = "person", .column = "last_award_day", .sql = "ALTER TABLE person ADD COLUMN last_award_day INTEGER" },
         // v18 adds the `rating_snapshot` table (created by ddl) and the stats meta ints.
         .{ .version = 19, .table = "listing", .column = "black", .sql = "ALTER TABLE listing ADD COLUMN black INTEGER NOT NULL DEFAULT 0" },
+        .{ .version = 20, .table = "unit", .column = "wreck", .sql = "ALTER TABLE unit ADD COLUMN wreck TEXT NOT NULL DEFAULT 'none'" },
     };
 
     pub fn open(path: [*:0]const u8) !Store {
@@ -414,7 +415,7 @@ pub const Store = struct {
 
         // Units and slots.
         {
-            const st = try self.db.prepare("INSERT INTO unit VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)");
+            const st = try self.db.prepare("INSERT INTO unit VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)");
             defer st.finalize();
             const sl = try self.db.prepare("INSERT INTO unit_slot VALUES (?1,?2,?3,?4,?5,?6,?7)");
             defer sl.finalize();
@@ -427,7 +428,7 @@ pub const Store = struct {
                     u.name,                   u.kind,                   @intFromEnum(u.force), @intFromEnum(u.pilot),
                     @intFromEnum(u.tech),     @as(i64, u.armor_pct),    u.quality,             u.status,
                     u.last_maintenance_day,   @as(i64, u.acquired_day), u.purchase_price,      u.reactivation_done_day,
-                    @intFromEnum(u.berth_hq),
+                    @intFromEnum(u.berth_hq), u.wreck,
                 });
                 try st.run();
                 for (u.slots.items, 0..) |s, i| {
@@ -884,7 +885,7 @@ pub const Store = struct {
 
         // Units.
         {
-            const st = try self.db.prepare("SELECT id, chassis_key, name, kind, force, pilot, tech, armor_pct, quality, status, last_maint, acquired_day, price, reactivation_done, berth_hq FROM unit WHERE cid = ?1 ORDER BY ord");
+            const st = try self.db.prepare("SELECT id, chassis_key, name, kind, force, pilot, tech, armor_pct, quality, status, last_maint, acquired_day, price, reactivation_done, berth_hq, wreck FROM unit WHERE cid = ?1 ORDER BY ord");
             defer st.finalize();
             try st.bindAll(.{cid});
             while (try st.next()) {
@@ -904,6 +905,7 @@ pub const Store = struct {
                     .purchase_price = st.int(12),
                     .reactivation_done_day = optU32(st.optInt(13)),
                     .berth_hq = toId(types.HqId, st.int(14)),
+                    .wreck = st.enumValue(unit_mod.WreckCause, 15) orelse .none,
                 };
                 try gs.units.put(alloc, u.id, u);
             }
@@ -1417,6 +1419,9 @@ test "save → load → identical hash, and the loaded campaign keeps playing" {
     // A dropship holding a berth (Stage 12.15) rides along.
     const ship = try gs.addUnit("LEOPARD");
     gs.unit(ship).?.berth_hq = gs.hqs.keys()[0];
+    // A wreck remembers how it died (12D.2).
+    const wreck = try gs.addUnit("GRF-1N");
+    gs.unit(wreck).?.markWreckedBy(.engine);
     const before = gs.hash();
 
     const store = try Store.open(":memory:");
@@ -1428,6 +1433,7 @@ test "save → load → identical hash, and the loaded campaign keeps playing" {
     defer loaded.deinit();
     try std.testing.expectEqual(before, loaded.hash());
     try std.testing.expectEqual(gs.hqs.keys()[0], loaded.unit(ship).?.berth_hq);
+    try std.testing.expectEqual(@import("../domain/unit.zig").WreckCause.engine, loaded.unit(wreck).?.wreck);
     try std.testing.expectEqual(@as(i32, 12), loaded.standing("LC"));
     try std.testing.expectEqual(@as(usize, 1), loaded.person(scarred).?.injuries.items.len);
     try std.testing.expect(loaded.person(scarred).?.injuries.items[0].permanent);

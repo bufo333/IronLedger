@@ -2026,13 +2026,22 @@ pub const App = struct {
             .sell_unit => |uid| {
                 const g = &self.gs.?;
                 const u = g.unit(uid);
+                // Strip for parts (12D.2): what the warehouse would get.
+                var strip_text: []const u8 = "nothing worth keeping";
+                if (u) |uu| {
+                    const lines = try g.stripParts(al, uu);
+                    var buf: std.ArrayListUnmanaged(u8) = .empty;
+                    for (lines, 0..) |l, i| try buf.appendSlice(al, try std.fmt.allocPrint(al, "{s}{d}× {s}", .{ if (i > 0) ", " else "", l.qty, l.key }));
+                    if (lines.len > 0) strip_text = buf.items;
+                }
                 const rows = [_][]const u8{
                     "",
                     if (u) |uu| try std.fmt.allocPrint(al, "  Sell {{a}}#{d} {s}{{/}} for {{g}}{s}{{/}} C? Half value scaled by condition; the crew goes to the pool.", .{ @intFromEnum(uid), uu.chassis_key, try q.money(al, g.unitSaleValue(uu)) }) else "  no such hull",
+                    try std.fmt.allocPrint(al, "  Or strip it for parts into the home warehouse: {{a}}{s}{{/}}", .{strip_text}),
                     "",
-                    "  {s} [y] sell {/}   {d}[Esc] keep{/}",
+                    "  {s} [y] sell {/}   {s} [s] strip {/}   {d}[Esc] keep{/}",
                 };
-                const inner = self.screen.pane(self.modalRect(96, 7), .{ .title = "SELL HULL? · [y] sell · [Esc] keep", .double = true });
+                const inner = self.screen.pane(self.modalRect(110, 8), .{ .title = "SELL OR STRIP HULL? · [y] sell · [s] strip · [Esc] keep", .double = true });
                 self.screen.lines(inner, &rows, 0, null);
             },
             .sell_hq => |hid| {
@@ -4378,6 +4387,10 @@ pub const App = struct {
                     self.modal = .none;
                     try self.exec(.{ .sell_unit = uid });
                     self.say(.amber, "hull #{d} sold", .{@intFromEnum(uid)});
+                } else if (ch == 's') {
+                    self.modal = .none;
+                    try self.exec(.{ .strip_unit = uid });
+                    if (self.msg_style != .crit) self.say(.amber, "hull #{d} stripped for parts — the Supply screen shows the crates", .{@intFromEnum(uid)});
                 },
                 else => {},
             },

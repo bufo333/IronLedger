@@ -394,6 +394,18 @@ pub const Tuning = struct {
         provisions_keep_min: u32,
         provisions_keep_target: u32,
     },
+    /// Real loss (Stage 12D): how hulls die, what a rebuild needs, and when
+    /// one is not worth it.
+    loss: struct {
+        /// An engine kill or an ammunition explosion is scrap on 2d6 at or
+        /// under this (+ the difficulty's `scrap_mod`).
+        scrap_target: i32,
+        /// Bay days a new engine adds to a rebuild.
+        engine_rebuild_days: u32,
+        /// A rebuild costing more than this share of a new hull is flagged
+        /// "beyond economical repair" (it can still be done).
+        writeoff_bp: types.Bp,
+    },
     commander: struct { bonus_bp: types.Bp },
 };
 

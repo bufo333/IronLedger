@@ -759,6 +759,18 @@ pub const hangar_header = "     hull                     bill/mo   contributes  
 /// they cost against what they contribute"): every owned hull, worst
 /// value first. A mothballed hull bills a fifth and contributes nothing; a
 /// pilotless or wrecked one bills in full for nothing.
+/// A wreck's line (12D.2): how it died, what the rebuild costs against a
+/// new hull, and whether it is worth doing at all.
+pub fn wreckNote(alloc: std.mem.Allocator, gs: *GameState, u: *const @import("../domain/unit.zig").Unit) ![]const u8 {
+    const hq_ops = @import("hq_ops.zig");
+    const cause = if (u.wreck == .none) "wreck" else u.wreck.label();
+    const est = hq_ops.rebuildEstimate(gs, u) orelse return try std.fmt.allocPrint(alloc, "{{c}}{s} — strip it (Forces $, s) or sell for {s}{{/}}", .{ cause, try money(alloc, gs.unitSaleValue(u)) });
+    const new_cost: types.CBills = if (chassis_mod.find(u.chassis_key)) |c| c.cost else 0;
+    return try std.fmt.allocPrint(alloc, "{{c}}{s} — rebuild ≈{s} vs new {s}{s}{{/}}", .{
+        cause, try money(alloc, est), try money(alloc, new_cost), if (hq_ops.beyondEconomicalRepair(gs, u)) " · beyond economical repair: strip or sell" else "",
+    });
+}
+
 pub fn hangar(alloc: Alloc, gs: *GameState) ![]HangarRow {
     var out: std.ArrayListUnmanaged(HangarRow) = .empty;
     const day = gs.clock.day_index;
@@ -772,7 +784,7 @@ pub fn hangar(alloc: Alloc, gs: *GameState) ![]HangarRow {
         var why: []const u8 = "";
         var contribution: u32 = 0;
         if (u.status == .destroyed) {
-            why = "{c}wreck — sell or rebuild{/}";
+            why = try wreckNote(alloc, gs, u);
         } else if (u.status == .mothballed) {
             why = "{d}cold storage{/}";
         } else if (u.kind.isTransport()) {
@@ -814,7 +826,7 @@ pub fn hangar(alloc: Alloc, gs: *GameState) ![]HangarRow {
         const ch = chassis_mod.find(u.chassis_key);
         const pilot = gs.person(u.pilot);
         const fit = pilot != null and pilot.?.isAvailable(day);
-        const why: []const u8 = if (u.status == .destroyed) "{c}wreck — sell or rebuild{/}" else if (u.status == .mothballed) "{d}cold storage{/}" else if (u.kind.isTransport()) "transport (lifts the company)" else if (!u.kind.isCombat()) "support train" else if (!fit) "{a}no fit pilot — hire or assign{/}" else if (u.needsDepot()) "{a}structural damage — depot{/}" else if (u.conditionPct() < 70) "{a}shot up — repairs{/}" else "{g}earning its keep{/}";
+        const why: []const u8 = if (u.status == .destroyed) try wreckNote(alloc, gs, u) else if (u.status == .mothballed) "{d}cold storage{/}" else if (u.kind.isTransport()) "transport (lifts the company)" else if (!u.kind.isCombat()) "support train" else if (!fit) "{a}no fit pilot — hire or assign{/}" else if (u.needsDepot()) "{a}structural damage — depot{/}" else if (u.conditionPct() < 70) "{a}shot up — repairs{/}" else "{g}earning its keep{/}";
         const idx_text: []const u8 = if (row.cost_index == 0) "       —" else if (row.contribution == 0) "{c}       ∞{/}" else try std.fmt.allocPrint(alloc, "{d: >8}", .{row.cost_index});
         row.text = try std.fmt.allocPrint(alloc, "#{d: <3} {s: <8} {s} {s: >9}  {d: >8} BV  {s}   {s} · {s}", .{
             @intFromEnum(u.id), u.chassis_key, try padCells(alloc, "", if (ch) |c| c.name else "?", 16), try money(alloc, row.bill), row.contribution, idx_text, forceName(gs, gs.companyOf(u.force)), why,

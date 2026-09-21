@@ -1280,6 +1280,7 @@ fn printResult(gs: *game.state.GameState, cmd: Command, r: game.commands.Result)
             if (last.status == .failed) std.debug.print("logistics couldn't source {s} this time (retry after refresh)\n", .{o.part_key}) else std.debug.print("ordered {s} x{d}, eta day {d}, {d} c-bills\n", .{ o.part_key, o.quantity, last.eta_day orelse 0, last.cost });
         },
         .take_loan => |l| std.debug.print("drew {d} c-bills over {d} months\n", .{ l.principal, l.term_months }),
+        .strip_unit => if (gs.event_log.items.len > 0) std.debug.print("{s}\n", .{gs.event_log.items[gs.event_log.items.len - 1].text}),
         else => std.debug.print("done.\n", .{}),
     }
 }

@@ -160,6 +160,9 @@ pub const Command = union(enum) {
     repay_loan: struct { index: usize, amount: types.CBills },
     /// Liquidate a hull at half value scaled by condition.
     sell_unit: types.UnitId,
+    /// Strip a hull for parts into its home warehouse (12D.2, MekHQ
+    /// "salvage unit"): the only thing left to do with scrap.
+    strip_unit: types.UnitId,
     /// Sell off an HQ (not the last one; companies must be reassigned first).
     sell_hq: types.HqId,
     /// Close a company: hulls sold, people released, forces struck.
@@ -296,6 +299,8 @@ pub const Error = error{
     Bankrupt,
     NothingToRepair,
     NothingToReplace,
+    /// Scrap (12D.2): nothing to rebuild — strip it for parts.
+    WrittenOff,
     KeepStocked,
     /// The home HQ's spaceport hosts no (more) air wings.
     NoAirSlot,
@@ -941,6 +946,7 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
                 error.NoHq => Error.NoHq,
                 error.NoBay => Error.NoBay,
                 error.UnknownUnit => Error.UnknownUnit,
+                error.WrittenOff => Error.WrittenOff,
                 else => Error.NoBay,
             };
             if (!queued) return Error.MissingComponents;
@@ -972,6 +978,24 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             gs.removeUnit(unit_id);
             try gs.postTransaction(.{ .day = gs.clock.day_index, .amount = value, .category = .unit_sale, .note = key });
             try gs.log(.market, .{}, "[sale] {s} #{d} sold for {d}", .{ key, @intFromEnum(unit_id), value });
+            return .{};
+        },
+        .strip_unit => |unit_id| {
+            const u = gs.unit(unit_id) orelse return Error.UnknownUnit;
+            const company = gs.companyOf(u.force);
+            if (gs.deploymentContract(company) != null) return Error.UnitDeployed;
+            if (u.status == .in_transit or (company != .none and !gs.isCompanyHome(company))) return Error.UnitAway;
+            const hq_id = gs.homeHqFor(u.force);
+            if (gs.hqs.getPtr(hq_id) == null) return Error.NoHq;
+            const lines = try gs.stripParts(gs.allocator(), u);
+            var text: std.ArrayListUnmanaged(u8) = .empty;
+            for (lines, 0..) |l, i| {
+                try gs.addStock(.{ .hq = hq_id }, l.key, l.qty);
+                try text.appendSlice(gs.allocator(), try std.fmt.allocPrint(gs.allocator(), "{s}{d}× {s}", .{ if (i > 0) ", " else "", l.qty, l.key }));
+            }
+            const key = u.chassis_key;
+            gs.removeUnit(unit_id);
+            try gs.log(.market, .{ .hq = hq_id }, "[strip] {s} #{d} stripped for parts into the warehouse: {s}", .{ key, @intFromEnum(unit_id), if (lines.len == 0) "nothing worth keeping" else text.items });
             return .{};
         },
         .sell_hq => |hq_id| {
@@ -3651,4 +3675,54 @@ test "play feedback: a resignation notice waits two weeks — a week's skip cann
         still_open = true;
     };
     try std.testing.expect(still_open);
+}
+
+test "12D.2: how a hull died decides the rebuild — engine kills cost an engine, scrap only strips" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1202 });
+    defer gs.deinit();
+    _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
+    const home = gs.hqs.keys()[0];
+    gs.hqs.getPtr(home).?.staff_assigned = 999;
+
+    // An ammunition explosion guts both side torsos and needs an engine.
+    const boom = try gs.addUnit("SHD-2H");
+    gs.unit(boom).?.markWreckedBy(.ammo);
+    var torsos: u32 = 0;
+    for (gs.unit(boom).?.slots.items) |s| if (s.class == .structure and s.condition == .destroyed) {
+        torsos += 1;
+    };
+    try std.testing.expectEqual(@as(u32, 3), torsos); // ct + lt + rt
+    // TechManual engine price for the Shadow Hawk (55 t, walk 5 → 275).
+    try std.testing.expectEqual(@as(types.CBills, 5_000 * 275 * 55 / 75), hq_ops.engineCharge(gs.unit(boom).?));
+    try gs.addStock(.{ .hq = home }, "comp_ct", 1);
+    try gs.addStock(.{ .hq = home }, "comp_torso", 2);
+    _ = try execute(&gs, .{ .depot = boom });
+    var job_cost: types.CBills = 0;
+    var job_days: u32 = 0;
+    for (gs.bay_jobs.items) |j| if (j.unit == boom) {
+        job_cost = j.cost;
+        job_days = j.duration_days;
+    };
+    try std.testing.expect(job_cost >= hq_ops.engineCharge(gs.unit(boom).?));
+    try std.testing.expect(job_days >= tuning.loss.engine_rebuild_days);
+    try std.testing.expect(hq_ops.rebuildEstimate(&gs, gs.unit(boom).?) != null);
+
+    // Scrap is refused by the depot and priced as parts.
+    const junk = try gs.addUnit("SHD-2H");
+    gs.unit(junk).?.markWreckedBy(.scrap);
+    gs.unit(junk).?.armor_pct = 50;
+    try std.testing.expectError(Error.WrittenOff, execute(&gs, .{ .depot = junk }));
+    try std.testing.expect(hq_ops.rebuildEstimate(&gs, gs.unit(junk).?) == null);
+    try std.testing.expect(hq_ops.beyondEconomicalRepair(&gs, gs.unit(junk).?));
+    try std.testing.expect(gs.unitSaleValue(gs.unit(junk).?) > 0); // the guns are still worth something
+
+    // Stripping crates the guns and the armour left on it, and the hull is gone.
+    const ac5_before = gs.stockCount(.{ .hq = home }, "ac5");
+    const armor_before = gs.stockCount(.{ .hq = home }, "armor");
+    const ct_before = gs.stockCount(.{ .hq = home }, "comp_ct");
+    _ = try execute(&gs, .{ .strip_unit = junk });
+    try std.testing.expect(gs.unit(junk) == null);
+    try std.testing.expectEqual(ac5_before + 1, gs.stockCount(.{ .hq = home }, "ac5"));
+    try std.testing.expect(gs.stockCount(.{ .hq = home }, "armor") > armor_before);
+    try std.testing.expectEqual(ct_before, gs.stockCount(.{ .hq = home }, "comp_ct")); // scrap has no structure left
 }

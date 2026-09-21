@@ -16,6 +16,7 @@ const force_mod = @import("../domain/force.zig");
 const part_mod = @import("../domain/part.zig");
 const medical = @import("medical.zig");
 const person_mod = @import("../domain/person.zig");
+const unit_mod = @import("../domain/unit.zig");
 const GameState = @import("state.zig").GameState;
 
 /// Days between engagements: ~2/month with variance.
@@ -361,7 +362,7 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     var kia: u8 = 0;
     // The detailed AAR (Stage 12.23): every hit on record — which hull,
     // what it lost, what happened to the crew.
-    const Hit = struct { unit: types.UnitId, armor_before: u8, armor_after: u8, slot: ?[]const u8, slot_part: []const u8, slot_result: []const u8, destroyed: bool, crew: []const u8 };
+    const Hit = struct { unit: types.UnitId, armor_before: u8, armor_after: u8, slot: ?[]const u8, slot_part: []const u8, slot_result: []const u8, destroyed: bool, cause: unit_mod.WreckCause = .none, crew: []const u8 };
     var hit_log: std.ArrayListUnmanaged(Hit) = .empty;
     defer hit_log.deinit(gs.allocator());
     for (0..hits) |_| {
@@ -377,15 +378,24 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
         rec.armor_after = u.armor_pct;
         damage_value += @as(types.CBills, severity) * 20_000;
 
+        var ammo_hit = false;
         if (severity >= 8 and u.slots.items.len > 0) {
             const slot = &u.slots.items[gs.rng.random(.battle).uintLessThan(usize, u.slots.items.len)];
             slot.condition = if (slot.condition == .ok) .damaged else .destroyed;
+            ammo_hit = slot.class == .ammo;
             rec.slot = slot.slot_key;
             rec.slot_part = slot.part_key;
             rec.slot_result = if (slot.condition == .damaged) "damaged" else "destroyed";
         }
-        if (severity == 12 or (u.armor_pct == 0 and severity >= 10)) {
-            u.markWrecked(); // destroyed, with the structure to show for it
+        // A bin struck hard enough cooks off (TechManual: no CASE in the
+        // 3025 catalogue), and takes the hull with it (12D.2).
+        const cooked_off = ammo_hit and severity >= 11;
+        if (severity == 12 or (u.armor_pct == 0 and severity >= 10) or cooked_off) {
+            // How it died decides what the rebuild needs (12D.2).
+            var cause: unit_mod.WreckCause = if (ammo_hit) .ammo else if (severity == 12) .engine else .cored;
+            if (cause.needsEngine() and @as(i32, gs.rng.roll2d6(.battle)) <= tuning.loss.scrap_target + gs.diff().scrap_mod) cause = .scrap;
+            u.markWreckedBy(cause); // destroyed, with the structure to show for it
+            rec.cause = cause;
             destroyed += 1;
             gs.stats.hulls_lost += 1;
             rec.destroyed = true;
@@ -574,7 +584,7 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
             @intFromEnum(h.unit),
             u.chassis_key,
             if (ch) |d| d.name else "",
-            if (h.destroyed) "DESTROYED · " else "",
+            if (h.destroyed) try std.fmt.allocPrint(gs.allocator(), "DESTROYED ({s}) · ", .{h.cause.label()}) else "",
             h.armor_before,
             h.armor_after,
             if (h.slot) |sk| try std.fmt.allocPrint(gs.allocator(), " · {s} ({s}) {s}", .{ sk, h.slot_part, h.slot_result }) else "",

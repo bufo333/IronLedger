@@ -261,5 +261,14 @@
         .provisions_keep_min = 30,
         .provisions_keep_target = 90,
     },
+    // Real loss (Stage 12D). TechManual "Destroying a 'Mech": a cored
+    // centre torso, a destroyed engine (three engine criticals) or an
+    // ammunition explosion; CamOps salvage: whoever holds the field keeps
+    // the wrecks.
+    .loss = .{
+        .scrap_target = 4, // 2d6 ≤ 4 (1 in 6 at Regular): an engine or ammo kill is scrap
+        .engine_rebuild_days = 10,
+        .writeoff_bp = 7_500, // rebuild over 75% of a new hull: beyond economical repair
+    },
     .commander = .{ .bonus_bp = 200 },
 }
