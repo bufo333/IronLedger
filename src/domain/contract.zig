@@ -117,6 +117,12 @@ pub const CommandRights = enum {
         return self == .integrated;
     }
 
+    /// Integrated command sets the rules of engagement (12D.4): the
+    /// employer's officers do not let a company pull back early.
+    pub fn overridesRoe(self: CommandRights) bool {
+        return self == .integrated;
+    }
+
     /// One line for the screens.
     pub fn describe(self: CommandRights) []const u8 {
         return switch (self) {

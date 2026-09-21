@@ -910,7 +910,7 @@ pub const App = struct {
             .desk => "F1-F10 / 1-0 screens · Tab pane · j/k cursor | Enter act · e emblem · n end turn | : command · F12 settings · ? help · q welcome",
             .contracts => "Tab pane · j/k row | board: Enter accept (you pick the company) · b bargain · active/history: Enter full log · c complete · R recall",
             .ledger => "j/k treasury | L loan · R repay · t send cash · T pull cash back · p top-up policy · x clear policy",
-            .forces => "[ ] company / pool · j/k row · r cycle pane · M manning | a seat · u unassign · l lance · x transfer · c crew · A auto · t / T train one / all · o role · d depot · R spares (hull) / recall (company) · m mothball · w air wing · + raise | $ sell · X disband · b fabricate",
+            .forces => "[ ] company / pool · j/k row · r cycle pane · M manning | a seat · u unassign · l lance · x transfer · c crew · A auto · t / T train one / all · o role (lance) / ROE (company) · d depot · R spares (hull) / recall (company) · m mothball · w air wing · + raise | $ sell · X disband · b fabricate",
             .supply => "j/k site | o order · s ship · R trim to plan · H parts home · K keep stocked | t / T cash out / back · p / P cash / resupply policy · $ sell stock",
             .hq => "[ ] switch HQ · Tab hall · f / F filter | u upgrade · T tier · S autostaff · Enter hire · b fabricate | $ sell HQ",
             .map => "h j k l move · + / - zoom · c colours | f found HQ here · o offers here | q welcome",
@@ -3195,8 +3195,19 @@ pub const App = struct {
                     },
                     'o' => if (row) |r| {
                         const f = g.force(r.force) orelse return;
+                        // On a company row: cycle its rules of engagement (12D.4).
+                        if (f.echelon == .company) {
+                            const next: game.force.Roe = switch (f.roe) {
+                                .standard => .cautious,
+                                .cautious => .hold,
+                                .hold => .standard,
+                            };
+                            try self.exec(.{ .set_roe = .{ .company = r.force, .roe = next } });
+                            if (self.msg_style != .crit) self.say(.good, "{s} ROE → {s}", .{ f.name, next.describe() });
+                            return;
+                        }
                         if (f.echelon != .lance and f.echelon != .air_lance) {
-                            self.say(.dim, "roles are set on lances — move the cursor onto a lance row", .{});
+                            self.say(.dim, "roles are set on lances, rules of engagement on companies — move the cursor onto a lance or company row", .{});
                             return;
                         }
                         const roles = [_]game.force.LanceRole{ .fighting, .defense, .scouting, .training };

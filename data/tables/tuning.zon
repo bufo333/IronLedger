@@ -276,6 +276,17 @@
         .recovery_rout = -2,
         .escape_target = 6, // a regular pilot (piloting 5) walks out 72% of the time
         .mia_morale = -5,
+        // ARCH §7 withdrawal thresholds as a company standing order.
+        .roe = .{
+            .hold_roll = 1,
+            .cautious_roll = -1,
+            .hold_hits_pct = 10, // defeat 40% → 50%, rout 55% → 65%
+            .cautious_hits_pct = -15, // defeat 40% → 25%, rout 55% → 40%
+            .hold_recovery = -1,
+            .cautious_recovery = 2,
+            .hold_morale = -2,
+            .withdrawal_score = -1,
+        },
     },
     .commander = .{ .bonus_bp = 200 },
 }

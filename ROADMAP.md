@@ -1034,6 +1034,16 @@ CamOps/MekHQ/TechManual rules, scaled by difficulty.
   vs 7 — LEFT TO THE ENEMY" and "field lost: 2 hulls left to DC, 1 pilot
   missing (inbox)". Calibration (10 hopeless routs, three seeds): Green
   loses none; Elite loses 2–4 hulls and 1–4 pilots, keeping as many wrecks.
+- ✅ 12D.4 **Rules of engagement** (ARCH §7's withdrawal thresholds as a
+  company standing order). `Force.roe` hold / standard / cautious (store
+  v21); `roe co:N <mode>`, Forces `o` on a company row (on a lance it still
+  cycles the role); the active contract pane shows it. **Hold**: +1 to the
+  roll, but a lost fight hits 10 points more of the company, recovery −1
+  and morale −2 more. **Cautious**: −1 to the roll, a lost fight hits 15
+  points fewer, recovery +2 — and a draw becomes a withdrawal: field given
+  up (no salvage, wrecks roll recovery), score −1. Integrated command
+  rights force hold ("ROE hold (integrated command)" in the AAR). Knobs in
+  `tuning.loss.roe`. Still one roll per battle: a campaign-level choice.
 
 ## Stage 13 — Graphical client
 Architected after the TUI ships, reusing the same command/query boundary.

@@ -182,6 +182,8 @@ pub const Command = union(enum) {
     /// garrison contracts), scouting (recon), training (held out of
     /// battles, gains XP at home).
     set_role: struct { force: types.ForceId, role: force_mod.LanceRole },
+    /// Rules of engagement for a company (12D.4).
+    set_roe: struct { company: types.ForceId, roe: force_mod.Roe },
     /// Automatic provisions resupply: ship `tons` from the home warehouse
     /// whenever the deployed company's stores fall under `min_days`.
     /// `tons` caps one shipment (0 = no cap); `min_days` = 0 removes the policy.
@@ -922,6 +924,13 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
                     e.value_ptr.medbay_admitted = true;
                 };
             }
+            return .{};
+        },
+        .set_roe => |r| {
+            const f = gs.force(r.company) orelse return Error.UnknownForce;
+            if (f.echelon != .company) return Error.NotACompany;
+            f.roe = r.roe;
+            try gs.log(.contract, .{ .company = r.company }, "[roe] {s}: {s}", .{ f.name, r.roe.describe() });
             return .{};
         },
         .set_role => |r| {

@@ -314,7 +314,16 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     const scenario_mod: i32 = @as(i32, scenario.roll_mod) + (if (player.mods.recon_quality > 0) @as(i32, scenario.scout_bonus) else 0) + env.rollMod();
     // Close terrain evens the odds: numbers count for less in the woods and the streets.
     const ratio_bonus: i32 = if (env.close()) @min(ratioBonus(player.power, enemy_power), 2) else ratioBonus(player.power, enemy_power);
-    var roll = @as(i32, gs.rng.roll2d6(.battle)) + ratio_bonus + scenario_mod;
+    // Rules of engagement (12D.4): the company's standing order, unless an
+    // integrated employer's officers set it.
+    const rt = tuning.loss.roe;
+    const roe: force_mod.Roe = if (c.terms.command_rights.overridesRoe()) .hold else if (gs.force(c.assigned_company)) |f| f.roe else .standard;
+    const roe_roll: i32 = switch (roe) {
+        .hold => rt.hold_roll,
+        .standard => 0,
+        .cautious => rt.cautious_roll,
+    };
+    var roll = @as(i32, gs.rng.roll2d6(.battle)) + ratio_bonus + scenario_mod + roe_roll;
     // Edge (12B.6): a pilot with Edge to spend re-rolls a lost engagement once per contract.
     var edge_used_by: ?*person_mod.Person = null;
     if (roll < 6) {
@@ -324,7 +333,7 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
             if (p.has("edge") and !p.edge_spent) {
                 p.edge_spent = true;
                 edge_used_by = p;
-                roll = @as(i32, gs.rng.roll2d6(.battle)) + ratio_bonus + scenario_mod;
+                roll = @as(i32, gs.rng.roll2d6(.battle)) + ratio_bonus + scenario_mod + roe_roll;
                 break;
             }
         }
@@ -336,13 +345,21 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
         else .rout;
 
     // Player losses scale with how badly it went. // TUNE
-    const hit_pct: u32 = switch (outcome) {
+    const base_hit_pct: i32 = switch (outcome) {
         .decisive_victory => 8,
         .victory => 15,
         .draw => 25,
         .defeat => 40,
         .rout => 55,
     };
+    // A lost fight under hold costs more; a cautious company is already
+    // pulling back when it turns (12D.4).
+    const lost_fight = outcome == .defeat or outcome == .rout;
+    const hit_pct: u32 = @intCast(@max(0, base_hit_pct + if (!lost_fight) 0 else switch (roe) {
+        .hold => rt.hold_hits_pct,
+        .standard => 0,
+        .cautious => rt.cautious_hits_pct,
+    }));
     const enemy_loss_pct: u32 = switch (outcome) {
         .decisive_victory => 40,
         .victory => 25,
@@ -455,7 +472,9 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     // Spoils: salvage rights over the enemy's wrecks — but only if you held
     // the field (retreating forces strip nothing) — prisoners if you can
     // hold them, employer compensation for your losses.
-    const held_field = outcome == .decisive_victory or outcome == .victory or outcome == .draw;
+    // A cautious company does not wait out a draw: it withdraws (12D.4).
+    const withdrew = outcome == .draw and roe == .cautious;
+    const held_field = (outcome == .decisive_victory or outcome == .victory or outcome == .draw) and !withdrew;
     const enemy_destroyed_bv = @divTrunc(enemy_bv * enemy_loss_pct, 100);
     // What the crews can actually haul off the field is bounded by the
     // salvage trucks on hand (300 BV-worth each; 150 hand-carried).
@@ -487,7 +506,12 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
         + (if (trucks >= wrecks_here and trucks > 0) t.recovery_trucks else 0) //
         + (if (has_dropship) t.recovery_dropship else 0) //
         + (if (outcome == .rout) t.recovery_rout else 0) //
-        + scenario.recovery_mod + gs.diff().recovery_mod;
+        + scenario.recovery_mod + gs.diff().recovery_mod //
+        + switch (roe) {
+            .hold => rt.hold_recovery,
+            .standard => 0,
+            .cautious => rt.cautious_recovery,
+        };
         for (hit_log.items) |*h| {
             if (!h.destroyed) continue;
             const u = gs.unit(h.unit) orelse continue;
@@ -593,6 +617,10 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
         .rout => -2,
     };
     c.score += score_delta;
+    if (withdrew) {
+        c.score += rt.withdrawal_score;
+        c.victory_points += rt.withdrawal_score * 5;
+    }
     // A convoy escort lost is a convoy hit (12C.9): the support train takes it.
     const convoy_hit = scenario.support_exposed and (outcome == .defeat or outcome == .rout);
     if (convoy_hit) @import("contract_events.zig").damageRandomUnits(gs, c.assigned_company, if (outcome == .rout) 2 else 1, .support);
@@ -604,6 +632,7 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
         .rout => -10,
     };
     if (morale_delta < 0 and player.mods.has_mess_lance) morale_delta += 2; // hot food after a bad day
+    if (lost_fight and roe == .hold) morale_delta += rt.hold_morale; // a stand that failed
     // A win on a fight that mattered (12C.11): breakthroughs, base defences and extractions carried.
     if (score_delta > 0 and scenario.score_mult > 1) morale_delta += tuning.person.morale_objective_bonus;
     applyCompanyAftermath(gs, c.assigned_company, morale_delta, 4 + env.fatigue());
@@ -622,7 +651,7 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     };
 
     const ctx: @import("state.zig").LogCtx = .{ .company = c.assigned_company, .contract = c.id };
-    try gs.log(.battle, ctx, "[AAR] {s} vs {s} — {s} on {s}, {s}: {s} — power {d} vs {d} (recon {d}, fatigue {d}, morale {d}{s}{s}{s}){s}{s}", .{
+    try gs.log(.battle, ctx, "[AAR] {s} vs {s} — {s} on {s}, {s}: {s} — power {d} vs {d} (recon {d}, fatigue {d}, morale {d}{s}{s}{s}){s}{s}{s}", .{
         @tagName(c.kind),        c.enemy_key,            scenario.name,
         terrain_mod.terrainRow(env.terrain).name, terrain_mod.weatherRow(env.weather).name,
         @tagName(outcome),       player.power,           enemy_power,
@@ -631,6 +660,7 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
         if (env.close()) ", close terrain caps the odds" else "",
         if (env.groundsAir()) ", fighters grounded" else "",
         if (convoy_hit) " · the convoy was hit — support train damaged" else "",
+        if (roe == .standard) "" else try std.fmt.allocPrint(gs.allocator(), " · ROE {s}{s}{s}", .{ @tagName(roe), if (c.terms.command_rights.overridesRoe()) " (integrated command)" else "", if (withdrew) " — withdrew from a draw, field given up" else "" }),
         if (edge_used_by) |p| try std.fmt.allocPrint(gs.allocator(), " · {s} spent Edge to re-roll a lost engagement", .{try p.rankedName(gs.allocator())}) else "",
     });
     try gs.log(.battle, ctx, "[AAR]   losses: {d} hit / {d} destroyed, {d} wounded, {d} KIA | enemy losses {d} BV ≈ {d} kill{s} credited{s} | salvage {d} BV claimed | comp {d} | score {d}", .{
@@ -1155,4 +1185,53 @@ test "12D.3: a lost field loses wrecks to the enemy — harder the higher the di
     try std.testing.expect(elite_lost > green_lost);
     try std.testing.expect(elite_kept + elite_lost > 0);
     try std.testing.expect(missing > 0);
+}
+
+test "12D.4: rules of engagement — cautious withdraws from draws, integrated command holds" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1204 });
+    defer gs.deinit();
+    _ = try gs.createCommander("T", .LC, .line_officer);
+    const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
+        .id = @enumFromInt(1),
+        .kind = .objective_raid,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 6, .base_pay_month = 400_000, .salvage_pct = 30, .command_rights = .liaison },
+        .status = .active,
+        .assigned_company = co,
+    });
+    const c = gs.contracts.getPtr(@enumFromInt(1)).?;
+    _ = try @import("commands.zig").execute(&gs, .{ .set_roe = .{ .company = co, .roe = .cautious } });
+    try std.testing.expectEqual(force_mod.Roe.cautious, gs.force(co).?.roe);
+    const site: types.Site = .{ .company = co };
+    for (part_mod.munition_keys) |key| try gs.addStock(site, key, 200);
+    for (0..40) |_| {
+        var it = gs.units.iterator();
+        while (it.next()) |e| {
+            e.value_ptr.armor_pct = 100;
+            if (e.value_ptr.status == .destroyed) e.value_ptr.status = .ready;
+        }
+        try resolveEngagement(&gs, c);
+    }
+    var withdrawals: u32 = 0;
+    var held_draws: u32 = 0;
+    for (gs.event_log.items) |e| {
+        if (std.mem.indexOf(u8, e.text, "withdrew from a draw") != null) withdrawals += 1;
+        if (std.mem.indexOf(u8, e.text, ": draw —") != null and std.mem.indexOf(u8, e.text, "withdrew") == null) held_draws += 1;
+    }
+    try std.testing.expect(withdrawals > 0);
+    try std.testing.expectEqual(@as(u32, 0), held_draws);
+
+    // Integrated command overrides the order: the company holds.
+    c.terms.command_rights = .integrated;
+    try resolveEngagement(&gs, c);
+    var found = false;
+    for (gs.event_log.items) |e| if (std.mem.indexOf(u8, e.text, "ROE hold (integrated command)") != null) {
+        found = true;
+    };
+    try std.testing.expect(found);
+    // Only companies take an ROE.
+    try std.testing.expectError(error.NotACompany, @import("commands.zig").execute(&gs, .{ .set_roe = .{ .company = gs.force(co).?.children.items[0], .roe = .hold } }));
 }

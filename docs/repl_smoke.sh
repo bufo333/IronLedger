@@ -21,6 +21,7 @@ out=$(printf '%s\n' \
   'hire mekwarrior Grayson Carlyle' \
   'fabricate comp_arm 1' \
   'strip 3' \
+  'roe co:1 cautious' \
   'loan 500000' \
   'accept 0 1' \
   'day 3 force' \

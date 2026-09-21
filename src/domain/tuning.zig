@@ -422,6 +422,20 @@ pub const Tuning = struct {
         escape_target: i32,
         /// Company morale when a missing pilot is written off.
         mia_morale: i32,
+        /// Rules of engagement (12D.4): roll shift, the share of engaged
+        /// hulls hit on a lost fight (percentage points), the recovery
+        /// roll, and the extra morale a lost stand costs.
+        roe: struct {
+            hold_roll: i32,
+            cautious_roll: i32,
+            hold_hits_pct: i32,
+            cautious_hits_pct: i32,
+            hold_recovery: i32,
+            cautious_recovery: i32,
+            hold_morale: i32,
+            /// Score a cautious withdrawal from a draw costs.
+            withdrawal_score: i32,
+        },
     },
     commander: struct { bonus_bp: types.Bp },
 };

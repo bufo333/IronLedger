@@ -76,6 +76,12 @@ pub fn parseCommand(verb: []const u8, tokens: *std.mem.TokenIterator(u8, .scalar
         if (site != .company) return error.BadSite;
         return .{ .raise_air_company = site.company };
     }
+    if (eq(u8, verb, "roe")) {
+        const site = try parseSite(try need(tokens.next()));
+        if (site != .company) return error.BadSite;
+        const roe = std.meta.stringToEnum(game.force.Roe, try need(tokens.next())) orelse return error.BadArguments;
+        return .{ .set_roe = .{ .company = site.company, .roe = roe } };
+    }
     if (eq(u8, verb, "role")) {
         const fid: types.ForceId = @enumFromInt(try num(u32, tokens.next()));
         const role = std.meta.stringToEnum(game.force.LanceRole, try need(tokens.next())) orelse return error.BadArguments;
@@ -427,6 +433,7 @@ pub const verbs = [_][]const u8{
     "replace",
     "sop",
     "role",
+    "roe",
     "supplypolicy",
     "move",
     "newlance",
@@ -491,6 +498,7 @@ pub fn usage(verb: []const u8) ?[]const u8 {
         .{ "replace", "replace <unit>" },
         .{ "sop", "sop clear <event>   (standing orders; `sop` lists them)" },
         .{ "role", "role <lance id> fighting|defense|scouting|training|unassigned" },
+        .{ "roe", "roe co:N hold|standard|cautious" },
         .{ "supplypolicy", "supplypolicy co:N <days> <max tons> [battles]  (0 days removes)" },
         .{ "move", "move <unit> <lance id>" },
         .{ "newlance", "newlance co:N [line|air|mash|mess|salvage|security|transport] <name>" },
