@@ -19,8 +19,10 @@ const person_mod = @import("../domain/person.zig");
 const unit_mod = @import("../domain/unit.zig");
 const GameState = @import("state.zig").GameState;
 
-/// Days between engagements: ~2/month with variance.
+/// Days between engagements: ~2/month with variance; garrison work sees
+/// a probe every six weeks or so (12D.6).
 fn nextBattleGap(gs: *GameState, c: *const contract_mod.Contract) u32 {
+    if (c.kind.isGarrisonClass()) return tuning.battle.garrison_probe_base_days + @as(u32, gs.rng.roll2d6(.battle)) * tuning.battle.garrison_probe_die_days;
     // Command rights set the tempo (12B.1): integrated employers pick fights.
     const base: i32 = @as(i32, @intCast(tuning.battle.gap_base_days)) + @as(i32, gs.rng.roll2d6(.battle)) + c.terms.command_rights.gapDelta();
     return @intCast(@max(3, base));
@@ -32,7 +34,10 @@ pub fn runDaily(gs: *GameState) !void {
     var it = gs.contracts.iterator();
     while (it.next()) |entry| {
         const c = entry.value_ptr;
-        if (c.status != .active or c.kind.isGarrisonClass()) continue;
+        if (c.status != .active) continue;
+        // Garrison work fights too (12D.6, ARCH §8): the enemy probes the
+        // perimeter — contracts from before 12D.5 have no force to probe with.
+        if (c.kind.isGarrisonClass() and !c.hasOpfor()) continue;
         if (c.next_battle_day == null) {
             c.next_battle_day = gs.clock.day_index + nextBattleGap(gs, c);
             continue;
@@ -308,6 +313,8 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     // to house regulars by employer's foe.
     const variance: types.Bp = (@as(types.Bp, gs.rng.roll2d6(.battle)) - 7) * 500;
     var enemy_bv = engagementEnemyBv(c, player.bv, variance, scenario.enemy_bp, gs.diff().enemy_bp);
+    // A garrison probe is a lance or so of the enemy's, not the lot (12D.6).
+    if (c.kind.isGarrisonClass() and c.hasOpfor()) enemy_bv = @divTrunc(enemy_bv * @min(tuning.battle.garrison_probe_lances, c.enemy_lances), c.enemy_lances);
     // Attrition contracts (Stage 9E): the enemy can only field what's left
     // of their pool.
     if (c.objective == .attrition and c.enemy_pool_remaining > 0) enemy_bv = @min(enemy_bv, c.enemy_pool_remaining);
@@ -1271,4 +1278,47 @@ test "12D.5: the enemy is a force of its own — it does not shrink with your co
     // A contract from before 12D.5 still mirrors the company.
     c.enemy_lances = 0;
     try std.testing.expect(engagementEnemyBv(&c, 16_000, 0, 10_000, 10_000) > engagementEnemyBv(&c, 4_000, 0, 10_000, 10_000));
+}
+
+test "12D.6: garrison work sees probes — a lance of the enemy's, every few weeks" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1206 });
+    defer gs.deinit();
+    _ = try gs.createCommander("T", .LC, .line_officer);
+    const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    const site: types.Site = .{ .company = co };
+    for (part_mod.munition_keys) |key| try gs.addStock(site, key, 100);
+    try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
+        .id = @enumFromInt(1),
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "PER",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 12, .base_pay_month = 200_000 },
+        .status = .active,
+        .assigned_company = co,
+        .enemy_lances = 2,
+        .enemy_quality = .green,
+        .enemy_lance_bv = 3_000,
+    });
+    // An older garrison contract (no rolled force) stays quiet.
+    try gs.contracts.put(gs.allocator(), @enumFromInt(2), .{
+        .id = @enumFromInt(2),
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "PER",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 12, .base_pay_month = 200_000 },
+        .status = .active,
+        .assigned_company = co,
+    });
+    for (0..180) |_| {
+        try runDaily(&gs);
+        gs.clock.day_index += 1;
+    }
+    const probed = gs.contracts.getPtr(@enumFromInt(1)).?;
+    try std.testing.expect(probed.battles_fought >= 2);
+    try std.testing.expect(probed.battles_fought <= 8);
+    try std.testing.expectEqual(@as(u8, 0), gs.contracts.getPtr(@enumFromInt(2)).?.battles_fought);
+    // One pirate lance against a company: the garrison holds far more often than not.
+    try std.testing.expect(gs.stats.battles_won > gs.stats.battles_lost);
 }

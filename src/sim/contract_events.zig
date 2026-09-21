@@ -35,7 +35,7 @@ pub const Entry = struct {
 fn garrisonDeck(roll: u8) Entry {
     return switch (roll) {
         2 => .{ .kind = .pirate_raid, .log = "Pirate raiders hit the perimeter", .options = &.{
-            .{ .label = "Sortie and run them down", .effects = &.{ .{ .damage_random_units = 1 }, .{ .xp_all = 2 }, .{ .fatigue = 6 }, .{ .score = 2 } } },
+            .{ .label = "Sortie and run them down (a real fight)", .effects = &.{ .engagement, .{ .xp_all = 1 }, .{ .score = 1 } } },
             .{ .label = "Hold the perimeter", .effects = &.{ .{ .damage_random_units = 1 }, .{ .morale = -3 }, .{ .score = 1 } } },
             .{ .label = "Leave it to the militia", .effects = &.{ .{ .morale = -3 }, .{ .score = -1 } } },
         }, .default_choice = 1 },
@@ -478,6 +478,9 @@ fn applyEffectsFor(gs: *GameState, effects: []const events.Effect, contract: ?*c
                     try writeOffMissing(gs, p, company);
                 }
             },
+            .engagement => if (contract) |c| {
+                if (c.status == .active) try @import("battle.zig").resolveEngagement(gs, c);
+            },
             .write_off_mia => if (gs.person(person_id)) |p| {
                 if (p.status != .mia) return;
                 try writeOffMissing(gs, p, company);
@@ -824,7 +827,7 @@ test "12.24: automatic events never move money, stock or hulls — those are dec
             if (e.options.len > 0) continue;
             for (e.auto_effects) |fx| switch (fx) {
                 .fatigue, .morale, .xp_all, .score, .reputation, .employer_standing => {},
-                .cash, .cash_monthly_pct, .supply_loss, .parts_windfall, .field_stock, .damage_random_units, .damage_convoy_units, .raise_pct, .retention_bonus_months, .let_go, .replace_from_hall, .ransom_prisoner, .release_prisoner, .recruit_prisoner, .ransom_mia, .exchange_mia, .write_off_mia => {
+                .cash, .cash_monthly_pct, .supply_loss, .parts_windfall, .field_stock, .damage_random_units, .damage_convoy_units, .raise_pct, .retention_bonus_months, .let_go, .replace_from_hall, .ransom_prisoner, .release_prisoner, .recruit_prisoner, .ransom_mia, .exchange_mia, .write_off_mia, .engagement => {
                     std.debug.print("auto event {s} carries a player-facing effect\n", .{@tagName(e.kind)});
                     return error.TestUnexpectedResult;
                 },

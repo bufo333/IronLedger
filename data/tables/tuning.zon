@@ -147,6 +147,10 @@
         .salvage_bv_per_armor_ton = 60,
         .salvage_bv_per_weapon = 150,
         .salvage_bv_per_component = 250,
+        // Garrison probes (12D.6): ~one every six weeks, one lance strong.
+        .garrison_probe_base_days = 21,
+        .garrison_probe_die_days = 3,
+        .garrison_probe_lances = 1,
     },
     .field_supply = .{
         .ammo_share_pct = 40,

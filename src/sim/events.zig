@@ -96,6 +96,9 @@ pub const Effect = union(enum) {
     exchange_mia,
     /// Missing, presumed dead: the company mourns.
     write_off_mia,
+    /// Fight it out (12D.6): a real engagement against the contract's
+    /// opposition, resolved on the spot.
+    engagement,
 };
 
 pub const Option = struct {

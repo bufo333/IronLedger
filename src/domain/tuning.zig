@@ -217,6 +217,12 @@ pub const Tuning = struct {
         salvage_bv_per_armor_ton: i64,
         salvage_bv_per_weapon: i64,
         salvage_bv_per_component: i64,
+        /// Garrison probes (12D.6, ARCH §8): garrison-class contracts see a
+        /// probe every `garrison_probe_base_days` + 2d6 × `garrison_probe_die_days`
+        /// days, the enemy committing `garrison_probe_lances` of its lances.
+        garrison_probe_base_days: u32,
+        garrison_probe_die_days: u32,
+        garrison_probe_lances: u8,
     },
     field_supply: struct {
         ammo_share_pct: u32,

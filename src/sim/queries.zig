@@ -307,6 +307,7 @@ pub fn effectsText(alloc: Alloc, effects: []const @import("events.zig").Effect) 
         .ransom_mia => try appendTag(alloc, &out, false, "ransom by experience from the outfit, they come home"),
         .exchange_mia => try appendTag(alloc, &out, true, "a prisoner of their house goes back; else written off"),
         .write_off_mia => try appendTag(alloc, &out, false, "missing, presumed dead · company morale −5"),
+        .engagement => try appendTag(alloc, &out, false, "a real engagement against the contract's opposition"),
     };
     return out.toOwnedSlice(alloc);
 }

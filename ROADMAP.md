@@ -1060,6 +1060,13 @@ CamOps/MekHQ/TechManual rules, scaled by difficulty.
   against the estimated enemy power). Calibration (8 seeds, first combat
   offer, 200 days, starter company): Regular wins ~67% of battles (the
   mirror gave 79%), and damage now compounds.
+- ✅ 12D.6 **Garrison probes fight** (ARCH §8). Garrison-class contracts
+  with a rolled opposition see a probe every `garrison_probe_base_days` (21)
+  + 2d6 × 3 days, the enemy committing `garrison_probe_lances` (1) of its
+  lances — so the garrison scenario rows, the defence lance's +10% and the
+  field-recovery rules are live on quiet worlds too. The pirate-raid
+  decision's sortie is now a real engagement (`Effect.engagement`) instead
+  of abstract wear. Older garrison contracts (no rolled force) stay quiet.
 
 ## Stage 13 — Graphical client
 Architected after the TUI ships, reusing the same command/query boundary.
