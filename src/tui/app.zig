@@ -1416,8 +1416,6 @@ pub const App = struct {
         try rows.append(al, view.board_header);
         for (view.board) |o| try rows.append(al, o.text);
         if (view.board.len == 0) try rows.append(al, "{d}no offers — the board refreshes on the 1st{/}");
-        try rows.append(al, "");
-        try rows.append(al, view.notes);
         if (view.board.len > 0) {
             // Who could take the offer under the cursor, readiest first (play feedback).
             try rows.append(al, "");
@@ -1429,6 +1427,19 @@ pub const App = struct {
         const c = self.cur(0);
         if (view.board.len > 0 and c.* >= view.board.len) c.* = view.board.len - 1;
         self.screen.lines(inner, rows.items, 0, if (self.focus == 0 and view.board.len > 0) c.* + 1 else null);
+
+        // The board's notes (rating, band and rights terms), wrapped in a
+        // box of their own under the board; up to three lines, fewer when
+        // the screen is short.
+        const notes = try screen_mod.wrap(al, view.notes, b.w -| 4);
+        const notes_room: usize = if (b.h > board_h + 10) @min(3, b.h - board_h - 10) else 0;
+        const notes_n: u16 = @intCast(@min(notes.len, notes_room));
+        const notes_h: u16 = if (notes_n > 0) notes_n + 2 else 0;
+        if (notes_h > 0) {
+            const notes_inner = self.screen.pane(.{ .x = b.x, .y = b.y + board_h, .w = b.w, .h = notes_h }, .{ .title = "NOTES" });
+            self.screen.lines(notes_inner, notes, 0, null);
+        }
+        const top_h: u16 = board_h + notes_h;
 
         var act: std.ArrayListUnmanaged([]const u8) = .empty;
         var act_index: std.ArrayListUnmanaged(usize) = .empty;
@@ -1445,10 +1456,10 @@ pub const App = struct {
         const c2 = self.cur(2);
         if (history.len > 0 and c2.* >= history.len) c2.* = history.len - 1;
         // Narrow: the active list gives up its lower part to the history.
-        const act_h: u16 = if (wide) b.h - board_h else (b.h - board_h) * 3 / 5;
+        const act_h: u16 = if (wide) b.h - top_h else (b.h - top_h) * 3 / 5;
         const c1 = self.cur(1);
         if (view.active.len > 0 and c1.* >= view.active.len) c1.* = view.active.len - 1;
-        const inner2 = self.screen.pane(.{ .x = b.x, .y = b.y + board_h, .w = act_w, .h = act_h }, .{ .title = "ACTIVE", .focused = self.focus == 1, .right_title = "[Enter] full log  [c] complete  [R] recall" });
+        const inner2 = self.screen.pane(.{ .x = b.x, .y = b.y + top_h, .w = act_w, .h = act_h }, .{ .title = "ACTIVE", .focused = self.focus == 1, .right_title = "[Enter] full log  [c] complete  [R] recall" });
         var first: usize = 0;
         for (act_index.items, 0..) |ai, li| if (ai == c1.* and first == 0 and li > 0) {
             first = li;
@@ -1463,9 +1474,9 @@ pub const App = struct {
         try hist.append(al, "{a}STANDING{/}  tours served earn it, tours served against a house cost it, a breach costs a lot; it drifts home monthly");
         for (view.standings) |line| try hist.append(al, line);
         const hist_rect: screen_mod.Rect = if (wide)
-            .{ .x = b.x + act_w, .y = b.y + board_h, .w = b.w - act_w, .h = (b.h - board_h) / 2 }
+            .{ .x = b.x + act_w, .y = b.y + top_h, .w = b.w - act_w, .h = (b.h - top_h) / 2 }
         else
-            .{ .x = b.x, .y = b.y + board_h + act_h, .w = b.w, .h = b.h - board_h - act_h };
+            .{ .x = b.x, .y = b.y + top_h + act_h, .w = b.w, .h = b.h - top_h - act_h };
         const hist_inner = self.screen.pane(hist_rect, .{ .title = "HISTORY", .focused = self.focus == 2, .right_title = "Tab here · log follows the cursor · [Enter] full log" });
         self.screen.lines(hist_inner, hist.items, if (c2.* + 2 > hist_inner.h and hist_inner.h > 1) c2.* + 2 - hist_inner.h else 0, if (self.focus == 2 and history.len > 0) c2.* + 1 else null);
 
@@ -1473,7 +1484,7 @@ pub const App = struct {
             // The log follows whichever contract the cursor is on: an active one, or a closed one in the history.
             const log_id: types.ContractId = if (self.focus == 2 and history.len > 0) history[c2.*].id else if (view.active.len > 0) view.active[c1.*].id else .none;
             const log = if (log_id != .none) try q.battleLog(al, g, log_id, 40) else &[_][]const u8{"{d}no contract under the cursor{/}"};
-            self.listPane(.{ .x = b.x + act_w, .y = b.y + board_h + hist_rect.h, .w = b.w - act_w, .h = b.h - board_h - hist_rect.h }, "CONTRACT LOG", log, 3, false, false);
+            self.listPane(.{ .x = b.x + act_w, .y = b.y + top_h + hist_rect.h, .w = b.w - act_w, .h = b.h - top_h - hist_rect.h }, "CONTRACT LOG", log, 3, false, false);
         }
     }
 
@@ -1724,7 +1735,7 @@ pub const App = struct {
         switch (self.modal) {
             .none => {},
             .help => {
-                const rows = [_][]const u8{
+                const base = [_][]const u8{
                     "",
                     "  {a}screens{/}     F1-F8 or 1-8 · Tab / Shift-Tab cycles panes · j/k or arrows move the cursor",
                     "  {a}turn{/}        n ends the turn (the checklist opens first) · N ends 7 turns",
@@ -1756,9 +1767,23 @@ pub const App = struct {
                     "",
                     "  {d}[Esc] close{/}",
                 };
-                const r = self.modalRect(134, 28);
+                // The contract board's columns, after the contracts line.
+                const board_legend = [_][]const u8{
+                    "  {a}board cols{/}  emp employer · LY light-years off · band in ring / beachhead (pay ×1.3, hardship, slow resupply) · mo months · salv salvage % (cash = salvage exchange: paid in cash, no wrecks) · rights command rights · transit days out",
+                    "               skulls difficulty for the readiest company: ☠ one, ◐ half, green easy → amber → red; rating the same as a number (0.5–5), a range when intel cannot count the enemy, ! outmatched",
+                    "               tons your company's mek tonnage · weight mix L light M medium H heavy A assault meks · enemy tons ~ estimated opposing tonnage · opposition lances, quality, faction (≈BV a fight at good intel)",
+                };
+                var rows: std.ArrayListUnmanaged([]const u8) = .empty;
+                for (base) |row| {
+                    try rows.append(al, row);
+                    if (std.mem.indexOf(u8, row, "{a}contracts{/}") != null) {
+                        try rows.appendSlice(al, &board_legend);
+                        try rows.append(al, try std.fmt.allocPrint(al, "               factions {s}", .{try q.factionLegend(al)}));
+                    }
+                }
+                const r = self.modalRect(134, 34);
                 const inner = self.screen.pane(r, .{ .title = "HELP", .double = true });
-                self.screen.lines(inner, &rows, 0, null);
+                self.screen.lines(inner, rows.items, 0, null);
             },
             .end_turn => {
                 const g = &self.gs.?;
@@ -1933,7 +1958,7 @@ pub const App = struct {
                 var rows: std.ArrayListUnmanaged([]const u8) = .empty;
                 if (idx < g.contract_offers.items.len) {
                     const c = g.contract_offers.items[idx];
-                    try rows.append(al, try std.fmt.allocPrint(al, "  {{a}}{s}{{/}} for {s} on {s} · {s}/mo · advance {d}% · salvage {d}% · transport {d}% · support {d}% · {s} rights", .{ @tagName(c.kind), c.employer_key, q.planetName(c.planet_key), try q.money(al, c.terms.base_pay_month), c.terms.advance_pct, c.terms.salvage_pct, c.terms.transport_pct, c.terms.overhead_pct, @tagName(c.terms.command_rights) }));
+                    try rows.append(al, try std.fmt.allocPrint(al, "  {{a}}{s}{{/}} for {s} on {s} · {s}/mo · advance {d}% · salvage {d}% · transport {d}% · support {d}% · {s} rights", .{ c.kind.label(), c.employer_key, q.planetName(c.planet_key), try q.money(al, c.terms.base_pay_month), c.terms.advance_pct, c.terms.salvage_pct, c.terms.transport_pct, c.terms.overhead_pct, @tagName(c.terms.command_rights) }));
                     try rows.append(al, "  {d}one round: 2d6 + reputation + your command office vs a target eased by standing with the employer · a miss shaves the pay 5% · a natural 2 and they walk{/}");
                     try rows.append(al, "");
                 }

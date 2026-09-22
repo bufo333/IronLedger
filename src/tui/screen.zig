@@ -361,6 +361,40 @@ pub fn visibleLen(s: []const u8) usize {
     return n;
 }
 
+/// Word-wrap markup text to `width` cells. A colour open at a break is
+/// closed at the line's end and reopened on the next, so each line draws
+/// on its own. A word wider than the line gets a line to itself (clipped).
+pub fn wrap(alloc: std.mem.Allocator, s: []const u8, width: usize) ![]const []const u8 {
+    var out: std.ArrayListUnmanaged([]const u8) = .empty;
+    var line: std.ArrayListUnmanaged(u8) = .empty;
+    var cells: usize = 0;
+    var open: ?u8 = null; // markup letter in force at the end of `line`
+    var words = std.mem.tokenizeScalar(u8, s, ' ');
+    while (words.next()) |word| {
+        const w = visibleLen(word);
+        if (cells > 0 and cells + 1 + w > width) {
+            if (open != null) try line.appendSlice(alloc, "{/}");
+            try out.append(alloc, try line.toOwnedSlice(alloc));
+            cells = 0;
+            if (open) |m| try line.appendSlice(alloc, &.{ '{', m, '}' });
+        }
+        if (cells > 0) {
+            try line.append(alloc, ' ');
+            cells += 1;
+        }
+        try line.appendSlice(alloc, word);
+        cells += w;
+        // Track the colour the word leaves open.
+        var i: usize = 0;
+        while (i + 2 < word.len) : (i += 1) {
+            if (word[i] != '{' or word[i + 2] != '}') continue;
+            if (Style.fromMarkup(word[i + 1])) |st| open = if (st == .normal) null else word[i + 1];
+        }
+    }
+    if (cells > 0 or line.items.len > 0) try out.append(alloc, try line.toOwnedSlice(alloc));
+    return out.toOwnedSlice(alloc);
+}
+
 /// Progress bar text: `#` filled, `-` empty.
 pub fn bar(buf: []u8, num: i64, den: i64) []const u8 {
     const width = buf.len;
@@ -417,4 +451,16 @@ test "bar fills proportionally" {
     var buf: [10]u8 = undefined;
     try std.testing.expectEqualStrings("#####-----", bar(&buf, 50, 100));
     try std.testing.expectEqualStrings("----------", bar(&buf, 0, 0));
+}
+
+test "wrap breaks on spaces and carries an open colour across lines" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const w = try wrap(a, "rating B  ·  {d}beachhead: ×1.3 pay · slow resupply{/} end", 16);
+    for (w) |l| try std.testing.expect(visibleLen(l) <= 16);
+    try std.testing.expectEqualStrings("rating B ·", w[0]);
+    try std.testing.expectEqualStrings("{d}beachhead: ×1.3{/}", w[1]);
+    try std.testing.expectEqualStrings("{d}pay · slow{/}", w[2]);
+    try std.testing.expectEqualStrings("{d}resupply{/} end", w[3]);
 }

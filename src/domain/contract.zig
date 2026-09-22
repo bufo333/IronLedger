@@ -19,6 +19,24 @@ pub const ContractKind = enum {
     recon_raid,
     extraction_raid,
 
+    /// "garrison duty" — the kind as the screens print it.
+    pub fn label(self: ContractKind) []const u8 {
+        return switch (self) {
+            .garrison_duty => "garrison duty",
+            .cadre_duty => "cadre duty",
+            .security_duty => "security duty",
+            .riot_duty => "riot duty",
+            .planetary_assault => "planetary assault",
+            .relief_duty => "relief duty",
+            .guerrilla_warfare => "guerrilla warfare",
+            .pirate_hunting => "pirate hunting",
+            .diversionary_raid => "diversionary raid",
+            .objective_raid => "objective raid",
+            .recon_raid => "recon raid",
+            .extraction_raid => "extraction raid",
+        };
+    }
+
     /// Garrison-class contracts are long, low-combat, and event-driven
     /// (ARCH §5/§8); the rest are battle-heavy.
     pub fn isGarrisonClass(self: ContractKind) bool {

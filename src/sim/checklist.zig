@@ -241,10 +241,10 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
         if (c.status != .active) continue;
         if (c.ineffective_since) |since| {
             const left = (since + @import("contract_control.zig").grace_days) -| day;
-            try out.append(alloc, .{ .kind = .combat_ineffective, .text = try std.fmt.allocPrint(alloc, "{s}: COMBAT-INEFFECTIVE — {d} day(s) to buy local replacements or the employer declares breach", .{ @tagName(c.kind), left }) });
+            try out.append(alloc, .{ .kind = .combat_ineffective, .text = try std.fmt.allocPrint(alloc, "{s}: COMBAT-INEFFECTIVE — {d} day(s) to buy local replacements or the employer declares breach", .{ c.kind.label(), left }) });
         }
         if (c.objectivesMet()) {
-            try out.append(alloc, .{ .kind = .objectives_met, .text = try std.fmt.allocPrint(alloc, "{s}: objectives substantially met ({d}% of opposition destroyed) — `complete {d}` to close out", .{ @tagName(c.kind), c.poolDestroyedPct(), @intFromEnum(c.id) }) });
+            try out.append(alloc, .{ .kind = .objectives_met, .text = try std.fmt.allocPrint(alloc, "{s}: objectives substantially met ({d}% of opposition destroyed) — `complete {d}` to close out", .{ c.kind.label(), c.poolDestroyedPct(), @intFromEnum(c.id) }) });
         }
     }
     var idle_it = gs.forces.iterator();

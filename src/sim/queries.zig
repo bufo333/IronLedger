@@ -56,19 +56,23 @@ pub fn padCells(alloc: Alloc, mk: []const u8, text: []const u8, width: usize) ![
 }
 
 pub fn padMk(alloc: Alloc, mk: []const u8, text: []const u8, width: usize) ![]const u8 {
-    const shown = if (text.len > width) text[0..width] else text;
+    const shown = clip(text, width);
     var out: std.ArrayListUnmanaged(u8) = .empty;
     try out.appendSlice(alloc, mk);
     try out.appendSlice(alloc, shown);
-    var i: usize = shown.len;
+    var i: usize = std.unicode.utf8CountCodepoints(shown) catch shown.len;
     while (i < width) : (i += 1) try out.append(alloc, ' ');
     if (mk.len > 0) try out.appendSlice(alloc, "{/}");
     return out.toOwnedSlice(alloc);
 }
 
-/// Clip plain text to `width` cells (no padding).
+/// Clip plain text to `width` cells (no padding), never inside a
+/// multi-byte character.
 pub fn clip(text: []const u8, width: usize) []const u8 {
-    return if (text.len > width) text[0..width] else text;
+    var it = std.unicode.Utf8View.initUnchecked(text).iterator();
+    var cells: usize = 0;
+    while (cells < width) : (cells += 1) _ = it.nextCodepointSlice() orelse return text;
+    return text[0..it.i];
 }
 
 pub fn planetName(key: ?[]const u8) []const u8 {
@@ -361,14 +365,14 @@ fn companyRow(alloc: Alloc, gs: *GameState, id: types.ForceId) ![]const u8 {
     if (n == 0) n = 1;
     const contract = gs.deploymentContract(id);
     const posture: []const u8 = if (contract) |c|
-        (if (c.status == .transit) try padMk(alloc, "{a}", try std.fmt.allocPrint(alloc, "IN TRANSIT · arrive d{d}", .{c.arrive_day orelse day}), 26) else try padMk(alloc, "{a}", try std.fmt.allocPrint(alloc, "DEPLOYED · {s}", .{@tagName(c.kind)}), 26))
+        (if (c.status == .transit) try padMk(alloc, "{a}", try std.fmt.allocPrint(alloc, "IN TRANSIT · arrive d{d}", .{c.arrive_day orelse day}), 26) else try padMk(alloc, "{a}", try std.fmt.allocPrint(alloc, "DEPLOYED · {s}", .{c.kind.label()}), 26))
     else if (f.return_eta_day) |eta|
         try padMk(alloc, "{a}", try std.fmt.allocPrint(alloc, "RETURNING · home d{d}", .{eta}), 26)
     else if (f.location_planet != null)
         try padMk(alloc, "{a}", "afield, idle", 26)
     else
         try padMk(alloc, "{g}", "at home", 26);
-    const contract_s: []const u8 = if (contract) |c| try std.fmt.allocPrint(alloc, "[{d}] {s}", .{ @intFromEnum(c.id), @tagName(c.kind) }) else "—";
+    const contract_s: []const u8 = if (contract) |c| try std.fmt.allocPrint(alloc, "[{d}] {s}", .{ @intFromEnum(c.id), c.kind.label() }) else "—";
     const location: []const u8 = if (f.location_planet) |p| planetName(p) else if (gs.hqs.getPtr(f.supplying_hq)) |h| planetName(h.planet_key) else "—";
     const site: types.Site = .{ .company = id };
     const tons = gs.siteTons(site);
@@ -600,12 +604,54 @@ pub fn ratingLine(alloc: Alloc, gs: *GameState, r: OfferRating) ![]const u8 {
     return try std.fmt.allocPrint(alloc, "{s}{s}{{/}} {s} {s} · {s}", .{ mk, try skullGlyphs(alloc, r.half_hi), try skullText(alloc, r), forceName(gs, r.company), try tonnageText(alloc, r) });
 }
 
-/// "☠☠☠◐" (or "XXXx" with ascii) for half skulls; the TUI swaps glyphs.
+/// "☠ ☠ ☠ ◐" (or "X X X x" with ascii) for half skulls; the TUI swaps
+/// glyphs. Spaced so a terminal like kitty can draw each symbol two cells
+/// wide.
 pub fn skullGlyphs(alloc: Alloc, half: u8) ![]const u8 {
     var out: std.ArrayListUnmanaged(u8) = .empty;
-    for (0..half / 2) |_| try out.appendSlice(alloc, "☠");
-    if (half % 2 == 1) try out.appendSlice(alloc, "◐");
+    for (0..half / 2) |i| {
+        if (i > 0) try out.append(alloc, ' ');
+        try out.appendSlice(alloc, "☠");
+    }
+    if (half % 2 == 1) {
+        if (half > 1) try out.append(alloc, ' ');
+        try out.appendSlice(alloc, "◐");
+    }
     return out.items;
+}
+
+/// "LC Lyran Commonwealth · DC Draconis Combine · …" — the faction codes
+/// the boards print, for the help legend (from data/tables/factions.zon).
+pub fn factionLegend(alloc: Alloc) ![]const u8 {
+    var out: std.ArrayListUnmanaged(u8) = .empty;
+    for (@import("../domain/faction.zig").table, 0..) |f, i| {
+        if (i > 0) try out.appendSlice(alloc, " · ");
+        try out.print(alloc, "{s} {s}", .{ f.key, f.name });
+    }
+    return out.toOwnedSlice(alloc);
+}
+
+/// The board's rating columns (12E.5), lined up under `board_header`:
+/// skulls · rating · company · own tons · mix · enemy tons.
+fn boardRatingCols(alloc: Alloc, gs: *GameState, offer_index: usize) ![]const u8 {
+    const r = (try bestRating(alloc, gs, offer_index)) orelse
+        return try std.fmt.allocPrint(alloc, "{s}  {s}  {s}", .{ try padCells(alloc, "{d}", "—", 9), try padCells(alloc, "{d}", "—", 7), try padCells(alloc, "{d}", "no company in range", 55) });
+    const skulls = @import("../domain/skulls.zig");
+    const mk: []const u8 = if (r.half_hi >= 9) "{c}" else if (r.half_hi >= 7) "{a}" else "{g}";
+    var a: [8]u8 = undefined;
+    var b: [8]u8 = undefined;
+    const lo = skulls.number(&a, r.half_lo);
+    const num = if (r.half_lo == r.half_hi) lo else try std.fmt.allocPrint(alloc, "{s}–{s}", .{ lo, skulls.number(&b, r.half_hi) });
+    const m = r.own.mix;
+    const theirs = if (r.enemy_tons_lo == r.enemy_tons_hi) try std.fmt.allocPrint(alloc, "~{d}t", .{r.enemy_tons_lo}) else try std.fmt.allocPrint(alloc, "~{d}–{d}t", .{ r.enemy_tons_lo, r.enemy_tons_hi });
+    return try std.fmt.allocPrint(alloc, "{s}  {s}  {s} {d: >5}t  {s}  {s}", .{
+        try padCells(alloc, mk, try skullGlyphs(alloc, r.half_hi), 9),
+        try padCells(alloc, mk, try std.fmt.allocPrint(alloc, "{s}{s}", .{ num, if (r.outmatched) "!" else "" }), 7),
+        try padCells(alloc, "", forceName(gs, r.company), 16),
+        r.own.tons,
+        try padCells(alloc, "", try std.fmt.allocPrint(alloc, "L{d} M{d} H{d} A{d}", .{ m[0], m[1], m[2], m[3] }), 15),
+        try padCells(alloc, "", theirs, 11),
+    });
 }
 
 /// "3.5 skulls" / "2.5–3.5 skulls".
@@ -633,16 +679,16 @@ pub fn contracts(alloc: Alloc, gs: *GameState, board_hq: types.HqId) !Contracts 
     for (gs.contract_offers.items, 0..) |c, i| {
         if (board_hq != .none and c.offer_hq != .none and c.offer_hq != board_hq) continue;
         const total = c.terms.totalBasePay();
-        try board.append(alloc, .{ .index = i, .text = try std.fmt.allocPrint(alloc, "{s: <18} {s: <16} {s: <4} {d: >4}  {s} {d: >3}  {s: >12}  {s: >13}  {s: <5} {d: >3}%  {s: <11} {d: >4} days", .{
-            @tagName(c.kind),                                                                                  clip(planetName(c.planet_key), 16),
+        try board.append(alloc, .{ .index = i, .text = try std.fmt.allocPrint(alloc, "{s: <18} {s: <16} {s: <4} {d: >4}  {s} {d: >3}  {s: >12}  {s: >13}  {s: <5} {d: >3}%{s: <5}  {s: <11} {d: >4} days", .{
+            c.kind.label(),                                                                                  clip(planetName(c.planet_key), 16),
             c.employer_key,                                                                                    c.dist_ly,
             try padMk(alloc, if (c.beachhead) "{a}" else "", if (c.beachhead) "beachhead" else "in ring", 10), c.terms.length_months,
             try money(alloc, c.terms.base_pay_month),                                                          try money(alloc, total),
             c.enemy_key,                                                                                       c.terms.salvage_pct,
-            if (c.terms.salvage_exchange) try std.fmt.allocPrint(alloc, "{s}$", .{@tagName(c.terms.command_rights)}) else @tagName(c.terms.command_rights), offerTransitDays(gs, &c),
+            if (c.terms.salvage_exchange) " cash" else "",                                                     @tagName(c.terms.command_rights),
+            offerTransitDays(gs, &c),
         }) });
-        if (c.negotiated) board.items[board.items.len - 1].text = try std.fmt.allocPrint(alloc, "{s}  {{d}}negotiated{{/}}", .{board.items[board.items.len - 1].text});
-        board.items[board.items.len - 1].text = try std.fmt.allocPrint(alloc, "{s}  {s}  {{d}}opp {s}{{/}}", .{ board.items[board.items.len - 1].text, try boardSkulls(alloc, gs, i), try opforText(alloc, gs, &c) });
+        board.items[board.items.len - 1].text = try std.fmt.allocPrint(alloc, "{s}  {s}  {{d}}{s}{s}{{/}}", .{ board.items[board.items.len - 1].text, try boardRatingCols(alloc, gs, i), try opforText(alloc, gs, &c), if (c.negotiated) " · negotiated" else "" });
     }
 
     var active: std.ArrayListUnmanaged(ActiveRow) = .empty;
@@ -652,7 +698,7 @@ pub fn contracts(alloc: Alloc, gs: *GameState, board_hq: types.HqId) !Contracts 
         if (c.status != .transit and c.status != .active) continue;
         var lines: std.ArrayListUnmanaged([]const u8) = .empty;
         try lines.append(alloc, try std.fmt.allocPrint(alloc, "[{d}] {{a}}{s}{{/}}  {s}  co:{d} {s} on {s}  ·  employer {s} · vs {s}  ·  {s} objective", .{
-            @intFromEnum(c.id),               @tagName(c.kind),                  @tagName(c.status),
+            @intFromEnum(c.id),               c.kind.label(),                  @tagName(c.status),
             @intFromEnum(c.assigned_company), forceName(gs, c.assigned_company), planetName(c.planet_key),
             c.employer_key,                   c.enemy_key,                       @tagName(c.objective),
         }));
@@ -743,10 +789,10 @@ pub fn contracts(alloc: Alloc, gs: *GameState, board_hq: types.HqId) !Contracts 
     }
 
     return .{
-        .board_header = "kind               world            emp    LY  band        mo     pay/month          total  enemy  salv  rights      transit",
+        .board_header = "kind               world            emp    LY  band        mo     pay/month          total  enemy  salv       rights      transit   skulls     rating   readiest co.       tons  weight mix       enemy tons   opposition",
         .board = try board.toOwnedSlice(alloc),
         .active = try active.toOwnedSlice(alloc),
-        .notes = try std.fmt.allocPrint(alloc, "{s}  ·  {{d}}beachhead: ×1.3 pay · +15% hardship · local supplies ×2.5 · resupply via link only  ·  rights: integrated = more fights, salvage ×0.5, defeats −2, no training lances, pay +10% · house = ×0.75, +5% · liaison = ×0.9 · independent = fewer fights, full salvage, −5% · $ = salvage exchange (cash, no wrecks)  ·  board refreshes on the 1st{{/}}", .{(try rating(alloc, gs)).line}),
+        .notes = try std.fmt.allocPrint(alloc, "{s}  ·  {{d}}beachhead: ×1.3 pay · +15% hardship · local supplies ×2.5 · resupply via link only  ·  rights: integrated = more fights, salvage ×0.5, defeats −2, no training lances, pay +10% · house = ×0.75, +5% · liaison = ×0.9 · independent = fewer fights, full salvage, −5% · salv cash = salvage exchange (paid in cash, no wrecks)  ·  board refreshes on the 1st{{/}}", .{(try rating(alloc, gs)).line}),
     .standings = try standings(alloc, gs), };
 }
 
@@ -3095,7 +3141,7 @@ pub fn contractHistory(alloc: Alloc, gs: *GameState) ![]HistoryRow {
         };
         try out.append(alloc, .{ .id = c.id, .planet_key = c.planet_key, .text = try std.fmt.allocPrint(alloc, "[{d: <3}] {s: <14} {s: <4} {s: <16} {s}{s: <9}{{/}} {s: >5}  {d: >3} VP {s: <13} {s: >13}  co:{d} {s}", .{
             @intFromEnum(c.id),
-            @tagName(c.kind),
+            c.kind.label(),
             c.employer_key,
             clip(planetName(c.planet_key), 16),
             st_mk,
@@ -3129,7 +3175,7 @@ pub fn offersAt(alloc: Alloc, gs: *GameState, planet_key: []const u8) ![]const [
     for (gs.contract_offers.items, 0..) |c, i| {
         if (!std.mem.eql(u8, c.planet_key, planet_key)) continue;
         try out.append(alloc, try std.fmt.allocPrint(alloc, "[{d}] {{a}}{s}{{/}} {d} mo · {s}/mo · {s} vs {s} · salvage {d}%{s}", .{
-            i, @tagName(c.kind), c.terms.length_months, try money(alloc, c.terms.base_pay_month), c.employer_key, c.enemy_key, c.terms.salvage_pct,
+            i, c.kind.label(), c.terms.length_months, try money(alloc, c.terms.base_pay_month), c.employer_key, c.enemy_key, c.terms.salvage_pct,
             if (c.beachhead) " · {a}beachhead{/}" else "",
         }));
     }
@@ -4394,6 +4440,12 @@ test "12E.3: skulls — a weaker company rates harder, a heavier one easier; low
     try std.testing.expect(std.mem.indexOf(u8, try skullText(a, blind), "–") != null);
 }
 
+test "clip counts cells and never splits a character" {
+    try std.testing.expectEqualStrings("a·b", clip("a·bc", 3));
+    try std.testing.expectEqualStrings("a·", clip("a·bc", 2));
+    try std.testing.expectEqualStrings("ab", clip("ab", 5));
+}
+
 test "12E.5: skulls on the board, the candidates, the active pane — and an outmatched company is warned" {
     const commands = @import("commands.zig");
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1250 });
@@ -4405,7 +4457,20 @@ test "12E.5: skulls on the board, the candidates, the active pane — and an out
     const a = arena.allocator();
     const view = try contracts(a, &gs, gs.hqs.keys()[0]);
     try std.testing.expect(view.board.len > 0);
-    for (view.board) |row| try std.testing.expect(std.mem.indexOf(u8, row.text, "skull") != null);
+    for (view.board) |row| {
+        try std.testing.expect(std.mem.indexOf(u8, row.text, "☠") != null or std.mem.indexOf(u8, row.text, "◐") != null);
+        // Each rating column starts under its header (cells, not bytes).
+        const plain = try stripMarks(a, row.text);
+        const hdr = view.board_header;
+        const at = struct {
+            fn cells(t: []const u8, i: usize) usize {
+                return std.unicode.utf8CountCodepoints(t[0..i]) catch i;
+            }
+        }.cells;
+        try std.testing.expectEqual(at(hdr, std.mem.indexOf(u8, hdr, "skulls").?), at(plain, std.mem.indexOfAny(u8, plain, "\xe2").?));
+        try std.testing.expectEqual(at(hdr, std.mem.indexOf(u8, hdr, "readiest").?), at(plain, std.mem.indexOf(u8, plain, "Alpha").?));
+        try std.testing.expectEqual(at(hdr, std.mem.indexOf(u8, hdr, "weight").?), at(plain, std.mem.indexOf(u8, plain, "t  L").? + 3));
+    }
     var saw = false;
     for (try offerCandidates(a, &gs, view.board[0].index)) |c| if (c.company == co and std.mem.indexOf(u8, c.text, "skull") != null) {
         saw = true;
