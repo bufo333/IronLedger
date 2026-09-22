@@ -270,6 +270,10 @@ pub const App = struct {
     colscroll: [10][4]usize = [_][4]usize{[_]usize{0} ** 4} ** 10,
     /// The same for a modal's table.
     modal_colscroll: usize = 0,
+    /// The column scroll of the table drawn focused this frame, if any —
+    /// what ←/→ move (a pane's cursor index and its focus index differ on
+    /// some screens).
+    focus_scroll: ?*usize = null,
     msg: TextBuf = .{},
     msg_style: Style = .dim,
     input: TextBuf = .{},
@@ -448,6 +452,7 @@ pub const App = struct {
         _ = self.frame.reset(.retain_capacity);
         self.screen.clear();
         self.n_placements = 0;
+        self.focus_scroll = null;
         switch (self.mode) {
             .welcome => try self.drawWelcome(),
             .wizard => try self.drawWizard(),
@@ -984,7 +989,9 @@ pub const App = struct {
         if (inner.h == 0) return;
         const c = self.cur(pane_idx);
         if (t.rows.len > 0 and c.* >= t.rows.len) c.* = t.rows.len - 1;
-        _ = try self.screen.table(self.a(), inner, t, firstRow(c.*, inner.h -| 1), if (focused and t.rows.len > 0) c.* else null, self.colScroll(pane_idx));
+        const scroll = self.colScroll(pane_idx);
+        if (focused) self.focus_scroll = scroll;
+        _ = try self.screen.table(self.a(), inner, t, firstRow(c.*, inner.h -| 1), if (focused and t.rows.len > 0) c.* else null, scroll);
     }
 
     // ---- people ----
@@ -1377,10 +1384,10 @@ pub const App = struct {
         self.listPane(.{ .x = x, .y = b.y, .w = ib_w, .h = top_h }, "INBOX", ib.items, 1, self.focus == 1, true);
 
         const co_h: u16 = @min(b.h - top_h, @as(u16, @intCast(view.companies.len + 3)));
-        var co: std.ArrayListUnmanaged([]const u8) = .empty;
-        try co.append(al, view.company_header);
-        for (view.companies) |c| try co.append(al, c);
-        self.listPane(.{ .x = b.x, .y = b.y + top_h, .w = b.w, .h = co_h }, "COMPANIES", co.items, 2, false, false);
+        const co_inner = self.screen.pane(.{ .x = b.x, .y = b.y + top_h, .w = b.w, .h = co_h }, .{ .title = "COMPANIES" });
+        // Shares the LOG pane's scroll slot: ←/→ while the log is focused scroll these columns.
+        try self.tableOrNote(co_inner, .{ .cols = q.company_cols, .rows = view.companies }, 2, false, "{d}no companies{/}");
+        if (self.focus == 2) self.focus_scroll = self.colScroll(2);
 
         const rest_h: u16 = b.h - top_h - co_h;
         if (rest_h >= 3) {
@@ -1532,10 +1539,8 @@ pub const App = struct {
         const inner = self.screen.pane(.{ .x = b.x, .y = b.y, .w = tw, .h = b.h }, .{ .title = "TREASURIES", .focused = self.focus == 0, .right_title = "[t] transfer [p] policy" });
         self.screen.lines(inner, rows.items, 0, if (self.focus == 0) self.ledger_sel else null);
         if (pw > 0) self.listPane(.{ .x = b.x + tw, .y = b.y, .w = pw, .h = b.h }, view.pnl_title, view.pnl, 1, false, false);
-        var led: std.ArrayListUnmanaged([]const u8) = .empty;
-        try led.append(al, view.ledger_header);
-        for (view.ledger) |l| try led.append(al, l);
-        self.listPane(.{ .x = b.x + tw + pw, .y = b.y, .w = b.w - tw - pw, .h = b.h }, "LEDGER", led.items, 2, self.focus == 1, true);
+        const led_inner = self.screen.pane(.{ .x = b.x + tw + pw, .y = b.y, .w = b.w - tw - pw, .h = b.h }, .{ .title = "LEDGER", .focused = self.focus == 1 });
+        try self.tableOrNote(led_inner, .{ .cols = q.ledger_cols, .rows = view.ledger }, 2, self.focus == 1, "{d}no transactions yet{/}");
     }
 
     fn drawForces(self: *App) !void {
@@ -1952,16 +1957,12 @@ pub const App = struct {
             },
             .readiness => {
                 const g = &self.gs.?;
-                var rows: std.ArrayListUnmanaged([]const u8) = .empty;
-                try rows.append(al, q.readiness_header);
                 const rr = try q.readiness(al, g);
-                for (rr) |r| try rows.append(al, r.text);
-                if (rr.len == 0) try rows.append(al, "{d}no companies{/}");
-                try rows.append(al, "");
-                try rows.append(al, "{d}fatigue falls only at a regional HQ; banked XP becomes skill at a training ground; depot hulls wait on a mek bay · Forces r shows one company in detail{/}");
-                const r = self.modalRect(@min(self.screen.cols -| 2, 150), @intCast(rows.items.len + 3));
-                const inner = self.screen.pane(r, .{ .title = "READINESS · every company", .double = true, .right_title = "any key closes" });
-                self.screen.lines(inner, rows.items, 0, null);
+                const r = self.modalRect(@min(self.screen.cols -| 2, 150), @intCast(@min(rr.len + 6, self.screen.rows)));
+                const inner = self.screen.pane(r, .{ .title = "READINESS · every company", .double = true, .right_title = "[←/→] columns · any other key closes" });
+                const th: u16 = @intCast(@min(@max(rr.len, 1) + 1, inner.h));
+                if (rr.len == 0) self.screen.lines(inner, &.{"{d}no companies{/}"}, 0, null) else _ = try self.screen.table(al, .{ .x = inner.x, .y = inner.y, .w = inner.w, .h = th }, try q.tableOf(al, q.readiness_cols, rr), 0, null, &self.modal_colscroll);
+                if (inner.h > th + 1) self.screen.lines(.{ .x = inner.x, .y = inner.y + th + 1, .w = inner.w, .h = inner.h - th - 1 }, &.{"{d}fatigue falls only at a regional HQ; banked XP becomes skill at a training ground; depot hulls wait on a mek bay · Forces r shows one company in detail{/}"}, 0, null);
             },
             .raise_crews => {
                 const g = &self.gs.?;
@@ -2619,11 +2620,11 @@ pub const App = struct {
             .backtab => self.focus = (self.focus + self.paneCount() - 1) % self.paneCount(),
             .down => try self.screenMove(1),
             .up => try self.screenMove(-1),
-            .left => if (self.tab == .map) try self.mapMove(-1, 0) else {
-                self.colScroll(self.focus).* -|= 1;
+            .left => if (self.tab == .map) try self.mapMove(-1, 0) else if (self.focus_scroll) |sc| {
+                sc.* -|= 1;
             },
-            .right => if (self.tab == .map) try self.mapMove(1, 0) else {
-                self.colScroll(self.focus).* += 1;
+            .right => if (self.tab == .map) try self.mapMove(1, 0) else if (self.focus_scroll) |sc| {
+                sc.* += 1;
             },
             .pgdn => try self.screenMove(10),
             .pgup => try self.screenMove(-10),
@@ -4122,7 +4123,12 @@ pub const App = struct {
                 },
                 else => {},
             },
-            .help, .hull, .record, .readiness, .summary => self.modal = .none,
+            .readiness => switch (key) {
+                .left => self.modal_colscroll -|= 1,
+                .right => self.modal_colscroll += 1,
+                else => self.modal = .none,
+            },
+            .help, .hull, .record, .summary => self.modal = .none,
             .raise_hulls => switch (key) {
                 .escape => {
                     self.modal = .none;
