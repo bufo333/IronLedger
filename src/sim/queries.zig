@@ -4053,15 +4053,27 @@ pub fn offerCandidates(alloc: Alloc, gs: *GameState, offer_index: usize) ![]Cand
         var why: []const u8 = "";
         var from_key: ?[]const u8 = null;
         var stands: []const u8 = "home";
+        var busy = false;
         if (!@import("commands.zig").offerEligible(gs, &offer, r.company)) {
             // Another HQ's board (12E.4).
             why = try std.fmt.allocPrint(alloc, "based at {s}, not {s}", .{ hqName(gs, gs.homeHqFor(r.company)), hqName(gs, offer.offer_hq) });
         } else if (gs.deploymentContract(r.company)) |c| {
+            // Say so in the stands column, bright, not only in the reason
+            // at the far right (play feedback: a busy company read as a
+            // grey row with no word of the contract it was on).
             why = "under contract";
+            busy = true;
             from_key = c.planet_key;
-            stands = try std.fmt.allocPrint(alloc, "on {s}", .{planetName(c.planet_key)});
-        } else if (f.return_eta_day != null) {
+            stands = if (c.status == .transit)
+                try std.fmt.allocPrint(alloc, "EN ROUTE [{d}] → {s} · arrives Day {d}", .{ @intFromEnum(c.id), planetName(c.planet_key), c.arrive_day orelse gs.clock.day_index })
+            else if (c.end_day) |end|
+                try std.fmt.allocPrint(alloc, "ON CONTRACT [{d}] {s} · to Day {d}", .{ @intFromEnum(c.id), planetName(c.planet_key), end })
+            else
+                try std.fmt.allocPrint(alloc, "ON CONTRACT [{d}] {s}", .{ @intFromEnum(c.id), planetName(c.planet_key) });
+        } else if (f.return_eta_day) |eta| {
             why = "in transit home";
+            busy = true;
+            stands = try std.fmt.allocPrint(alloc, "RETURNING HOME · Day {d}", .{eta});
         } else if (f.location_planet) |p| {
             from_key = p;
             stands = try std.fmt.allocPrint(alloc, "afield on {s}", .{planetName(p)});
@@ -4088,7 +4100,7 @@ pub fn offerCandidates(alloc: Alloc, gs: *GameState, offer_index: usize) ![]Cand
         else
             "—";
         const cells: table.Row = if (!eligible)
-            try table.row(alloc, &.{ try std.fmt.allocPrint(alloc, "{{d}}{s}{{/}}", .{f.name}), try std.fmt.allocPrint(alloc, "{{d}}{s}{{/}}", .{stands}), "", "", "", "", "", "", "", "", "", "", "", try std.fmt.allocPrint(alloc, "{{d}}cannot go: {s}{{/}}", .{why}) })
+            try table.row(alloc, &.{ try std.fmt.allocPrint(alloc, "{{d}}{s}{{/}}", .{f.name}), try std.fmt.allocPrint(alloc, "{s}{s}{{/}}", .{ if (busy) "{a}" else "{d}", stands }), "", "", "", "", "", "", "", "", "", "", "", try std.fmt.allocPrint(alloc, "{{d}}cannot go: {s}{{/}}", .{why}) })
         else
             try table.row(alloc, &.{
                 try std.fmt.allocPrint(alloc, "{{a}}{s}{{/}}", .{f.name}),
@@ -4114,7 +4126,7 @@ pub fn offerCandidates(alloc: Alloc, gs: *GameState, offer_index: usize) ![]Cand
                 if (r.wounded > 0) "{a}" else "",       r.wounded,                                     odds_mk,                        odds,
             })
         else
-            try std.fmt.allocPrint(alloc, "{{d}}{s: <21} {s: <25} cannot go: {s}{{/}}", .{ f.name, clip(stands, 25), why });
+            try std.fmt.allocPrint(alloc, "{{d}}{s: <21}{{/}} {s} {{d}}cannot go: {s}{{/}}", .{ f.name, try padCells(alloc, if (busy) "{a}" else "{d}", stands, if (busy) 48 else 25), why });
         try out.append(alloc, .{ .company = r.company, .eligible = eligible, .why = why, .transit_days = days, .penalty = penalty, .text = text, .cells = cells });
     }
     std.mem.sort(Candidate, out.items, {}, struct {
@@ -4175,6 +4187,8 @@ test "play feedback: offer candidates rank the ready company first and name why 
     try std.testing.expectEqual(busy, cands[2].company);
     try std.testing.expect(!cands[2].eligible);
     try std.testing.expectEqualStrings("under contract", cands[2].why);
+    // The stands cell names the contract, not just the world.
+    try std.testing.expect(std.mem.indexOf(u8, cands[2].cells[1], "ON CONTRACT [902]") != null);
     try std.testing.expectEqual(@as(u32, 3), cands[0].transit_days); // same world: three days to muster
 }
 
