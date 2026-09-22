@@ -50,7 +50,9 @@ send("l", 3.0)                 # import: lists PNGs and previews the first
 p = plain()
 assert "PNG files in" in p, p[-3000:]
 if "loaded" in p:
-    assert "half-block colour" in p or "graphics protocol" in p, p[-3000:]
+    # The display line names the render path: half-blocks (truecolor or 256-colour
+    # under a bare pty), the kitty protocol or iTerm2 images.
+    assert "half-block" in p or "graphics protocol" in p or "inline images" in p, p[-3000:]
 send("\r", 3.0)                # outfit → company (generates)
 assert "GENERATED COMPANY" in plain()
 assert "BACK OFFICE" in plain(), plain()[-3000:]   # sizing pane, wide or narrow
@@ -224,7 +226,7 @@ send("5"); send("L", 0.8)      # ledger → loan form (principal, months)
 assert "TAKE A LOAN" in plain()[-30000:], plain()[-3000:]
 send("\x1b")
 send("3"); send("j"); send("j"); send("$", 0.8)   # sell hull confirm
-assert "SELL HULL?" in plain()[-30000:], plain()[-3000:]
+assert "SELL OR STRIP HULL?" in plain()[-30000:], plain()[-3000:]
 send("\x1b")
 send("1"); send("e", 1.5)      # emblem picker on the Desk
 p = plain()
