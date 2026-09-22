@@ -1219,9 +1219,10 @@ fn runRepl(gs: *game.state.GameState, io: std.Io, gpa: std.mem.Allocator, store_
             }
             var arena = std.heap.ArenaAllocator.init(gpa);
             defer arena.deinit();
-            std.debug.print("{s}\n", .{game.queries.manning_header});
-            for (game.queries.manning(arena.allocator(), gs, site.?.company) catch continue) |row| {
-                std.debug.print("{s}\n", .{game.queries.stripMarks(arena.allocator(), row.text) catch row.text});
+            const al = arena.allocator();
+            const mrows = game.queries.manning(al, gs, site.?.company) catch continue;
+            for ((game.queries.tableOf(al, game.queries.manning_cols, mrows) catch continue).render(al) catch continue) |ln| {
+                std.debug.print("{s}\n", .{game.queries.stripMarks(al, ln) catch ln});
             }
         } else if (std.mem.eql(u8, verb, "help") or std.mem.eql(u8, verb, "?")) {
             for (game.cli.verbs) |v| std.debug.print("  {s}\n", .{game.cli.usage(v) orelse v});

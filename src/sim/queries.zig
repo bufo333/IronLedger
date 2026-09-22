@@ -899,14 +899,18 @@ pub fn battleLog(alloc: Alloc, gs: *GameState, id: types.ContractId, max: usize)
 
 pub const TreasuryRow = struct {
     treasury: state_mod.Treasury,
-    text: []const u8,
+    cells: table.Row,
 };
+
+pub const treasury_cols: []const table.Col = &.{ .{ .name = "treasury" }, .{ .name = "balance", .justify = .right } };
 
 pub const Ledger = struct {
     treasuries: []TreasuryRow,
     extras: []const []const u8, // couriers, policies, loans, forecast
     pnl_title: []const u8,
-    pnl: []const []const u8,
+    /// category · the period · the campaign (the period column is named for its days).
+    pnl_cols: []const table.Col,
+    pnl: []const table.Row,
     ledger: []const table.Row,
 };
 
@@ -938,11 +942,11 @@ pub fn ledger(alloc: Alloc, gs: *GameState, selected: state_mod.Treasury, period
         const bal = gs.treasuryBalance(t);
         total += bal;
         const mk: []const u8 = if (bal < 0) "{c}" else if (t == .outfit) "{a}" else "";
-        try rows.append(alloc, .{ .treasury = t, .text = try std.fmt.allocPrint(alloc, "{s: <20} {s}{s: >14}{{/}}", .{ clip(try treasuryLabel(alloc, gs, t), 20), mk, try money(alloc, bal) }) });
+        try rows.append(alloc, .{ .treasury = t, .cells = try table.row(alloc, &.{ try treasuryLabel(alloc, gs, t), try std.fmt.allocPrint(alloc, "{s}{s}{{/}}", .{ mk, try money(alloc, bal) }) }) });
     }
 
     var extras: std.ArrayListUnmanaged([]const u8) = .empty;
-    try extras.append(alloc, try std.fmt.allocPrint(alloc, "{s: <20} {{a}}{s: >14}{{/}}", .{ "total", try money(alloc, total) }));
+    try extras.append(alloc, try std.fmt.allocPrint(alloc, "total  {{a}}{s}{{/}}", .{try money(alloc, total)}));
     try extras.append(alloc, "");
     try extras.append(alloc, "in transit");
     if (gs.fund_couriers.items.len == 0) try extras.append(alloc, "  none");
@@ -993,18 +997,22 @@ pub fn ledger(alloc: Alloc, gs: *GameState, selected: state_mod.Treasury, period
     const from: u32 = if (day > period_days) day - period_days else 0;
     const sum = finance.summarize(&gs.ledger, from, day, filter);
     const all = finance.summarize(&gs.ledger, 0, day, filter);
-    var pnl: std.ArrayListUnmanaged([]const u8) = .empty;
-    try pnl.append(alloc, try std.fmt.allocPrint(alloc, "{s: <17} {s: >13} {s: >13}", .{ "category", try std.fmt.allocPrint(alloc, "{d} days", .{period_days}), "campaign" }));
+    const pnl_cols = try alloc.dupe(table.Col, &.{ .{ .name = "category" }, .{ .name = try std.fmt.allocPrint(alloc, "{d} days", .{period_days}), .justify = .right }, .{ .name = "campaign", .justify = .right } });
+    var pnl: std.ArrayListUnmanaged(table.Row) = .empty;
     inline for (@typeInfo(finance.Category).@"enum".fields) |f| {
         const cat: finance.Category = @enumFromInt(f.value);
         const a = sum.category(cat);
         const b = all.category(cat);
         if (a != 0 or b != 0) {
-            try pnl.append(alloc, try std.fmt.allocPrint(alloc, "{s: <17} {s: >13} {s: >13}", .{ clip(f.name, 17), try money(alloc, a), try money(alloc, b) }));
+            try pnl.append(alloc, try table.row(alloc, &.{ f.name, try money(alloc, a), try money(alloc, b) }));
         }
     }
-    try pnl.append(alloc, "");
-    try pnl.append(alloc, try std.fmt.allocPrint(alloc, "{s: <17} {s}{s: >13}{{/}} {s}{s: >13}{{/}}", .{ "NET", if (sum.net() < 0) "{c}" else "{g}", try money(alloc, sum.net()), if (all.net() < 0) "{c}" else "{g}", try money(alloc, all.net()) }));
+    try pnl.append(alloc, try table.row(alloc, &.{ "", "", "" }));
+    try pnl.append(alloc, try table.row(alloc, &.{
+        "NET",
+        try std.fmt.allocPrint(alloc, "{s}{s}{{/}}", .{ if (sum.net() < 0) "{c}" else "{g}", try money(alloc, sum.net()) }),
+        try std.fmt.allocPrint(alloc, "{s}{s}{{/}}", .{ if (all.net() < 0) "{c}" else "{g}", try money(alloc, all.net()) }),
+    }));
 
     var led: std.ArrayListUnmanaged(table.Row) = .empty;
     const txns = gs.ledger.transactions.items;
@@ -1021,6 +1029,7 @@ pub fn ledger(alloc: Alloc, gs: *GameState, selected: state_mod.Treasury, period
         .treasuries = try rows.toOwnedSlice(alloc),
         .extras = try extras.toOwnedSlice(alloc),
         .pnl_title = try std.fmt.allocPrint(alloc, "P&L · {s}", .{try treasuryLabel(alloc, gs, selected)}),
+        .pnl_cols = pnl_cols,
         .pnl = try pnl.toOwnedSlice(alloc),
         .ledger = try led.toOwnedSlice(alloc),
     };
@@ -1897,13 +1906,18 @@ pub const HallFilter = enum {
 
 pub const CandidateRow = struct {
     index: usize, // into gs.candidates — the `hire_candidate` argument
-    text: []const u8,
+    cells: table.Row,
 };
 
 pub const Hall = struct {
-    header: []const u8,
     rows: []CandidateRow,
     total_at_hq: usize,
+};
+
+pub const hall_cols: []const table.Col = &.{
+    .{ .name = "idx" },                  .{ .name = "name" },                   .{ .name = "role" },                    .{ .name = "exp" },
+    .{ .name = "sk", .justify = .right }, .{ .name = "age", .justify = .right }, .{ .name = "bonus", .justify = .right }, .{ .name = "leaves" },
+    .{ .name = "note" },
 };
 
 /// Candidates on one HQ's board, filtered; note which requirement each
@@ -1931,12 +1945,19 @@ pub fn hall(alloc: Alloc, gs: *GameState, hq_id: types.HqId, filter: HallFilter)
             }
         }
         const name = try std.fmt.allocPrint(alloc, "{s} {s}", .{ c.spec.first, c.spec.last });
-        try rows.append(alloc, .{ .index = i, .text = try std.fmt.allocPrint(alloc, "[{d: <3}] {s: <22} {s: <15} {s: <8} {d: >2} {d: >3} {s: >9}  d{d: <4} {s}", .{
-            i, clip(name, 22), @tagName(c.spec.role), @tagName(c.spec.experience), c.spec.primary_skill, c.spec.age, try money(alloc, c.asking_bonus), c.expires_day, note,
+        try rows.append(alloc, .{ .index = i, .cells = try table.row(alloc, &.{
+            try std.fmt.allocPrint(alloc, "{d}", .{i}),
+            name,
+            @tagName(c.spec.role),
+            @tagName(c.spec.experience),
+            try std.fmt.allocPrint(alloc, "{d}", .{c.spec.primary_skill}),
+            try std.fmt.allocPrint(alloc, "{d}", .{c.spec.age}),
+            try money(alloc, c.asking_bonus),
+            try std.fmt.allocPrint(alloc, "d{d}", .{c.expires_day}),
+            note,
         }) });
     }
     return .{
-        .header = "idx   name                   role            exp      sk age     bonus  leaves note",
         .rows = try rows.toOwnedSlice(alloc),
         .total_at_hq = total,
     };
@@ -2234,10 +2255,10 @@ pub const ManningRow = struct {
     role: person_mod.Role,
     have: u32,
     need: u32,
-    text: []const u8,
+    cells: table.Row,
 };
 
-pub const manning_header = "role              have  need  open   why";
+pub const manning_cols: []const table.Col = &.{ .{ .name = "role" }, .{ .name = "have", .justify = .right }, .{ .name = "need", .justify = .right }, .{ .name = "open", .justify = .right }, .{ .name = "why" } };
 
 /// What a well-run company of this shape needs on the payroll, by role,
 /// against who is on it now — the same ratios the starter generator
@@ -2269,7 +2290,13 @@ pub fn manning(alloc: Alloc, gs: *GameState, company: types.ForceId) ![]ManningR
         const have = personnel.manningHave(gs, company, n.role);
         const open = n.need -| have;
         const why = if (n.role == .astech or n.role == .tech_mek) try std.fmt.allocPrint(alloc, "{s} · {s}{d} of {d} tech-hours/week covered{{/}}", .{ n.why, if (hours_have >= hours_needed) "{g}" else "{c}", hours_have, hours_needed }) else n.why;
-        try out.append(alloc, .{ .role = n.role, .have = have, .need = n.need, .text = try std.fmt.allocPrint(alloc, "{s: <16} {d: >5} {d: >5} {s}{d: >5}{{/}}   {{d}}{s}{{/}}", .{ @tagName(n.role), have, n.need, if (open > 0) "{c}" else "{g}", open, why }) });
+        try out.append(alloc, .{ .role = n.role, .have = have, .need = n.need, .cells = try table.row(alloc, &.{
+            @tagName(n.role),
+            try std.fmt.allocPrint(alloc, "{d}", .{have}),
+            try std.fmt.allocPrint(alloc, "{d}", .{n.need}),
+            try std.fmt.allocPrint(alloc, "{s}{d}{{/}}", .{ if (open > 0) "{c}" else "{g}", open }),
+            try std.fmt.allocPrint(alloc, "{{d}}{s}{{/}}", .{why}),
+        }) });
     }
     return out.toOwnedSlice(alloc);
 }
@@ -2374,11 +2401,16 @@ fn planetMod() type {
 
 pub const PersonRow = struct {
     id: types.PersonId,
-    text: []const u8,
+    cells: table.Row,
+};
+
+pub const people_cols: []const table.Col = &.{
+    .{ .name = "id", .justify = .right }, .{ .name = "name" },       .{ .name = "role" },                  .{ .name = "exp" },
+    .{ .name = "skill" },                 .{ .name = "XP", .justify = .right }, .{ .name = "status" },       .{ .name = "assignment" },
+    .{ .name = "where" },                 .{ .name = "fat", .justify = .right }, .{ .name = "mor", .justify = .right }, .{ .name = "pay", .justify = .right },
 };
 
 pub const People = struct {
-    header: []const u8,
     rows: []PersonRow,
     total: usize,
 };
@@ -2810,17 +2842,22 @@ pub fn people(alloc: Alloc, gs: *GameState, filter: HallFilter) !People {
         if (filter == .wounded and p.status != .wounded) continue;
         if (filter == .unassigned and !isUnassigned(gs, p)) continue;
         const name = try p.rankedName(alloc);
-        try rows.append(alloc, .{ .id = p.id, .text = try std.fmt.allocPrint(alloc, "{d: <4} {s: <20} {s: <15} {s: <7} {s: <5} {d: >3} {s} {s} {s: <11} {d: >3} {d: >3} {s: >7}", .{
-            @intFromEnum(p.id),                                                             clip(name, 20),
-            @tagName(p.role),                                                               @tagName(p.experience()),
-            try skillsText(alloc, p),                                                       p.xp,
-            try padMk(alloc, "", try stripMarkup(alloc, try statusText(alloc, gs, p)), 18), try padMk(alloc, "", try stripMarkup(alloc, try assignmentText(alloc, gs, p)), 22),
-            clip(locationText(gs, p), 11),                                                  p.fatigue,
-            p.morale,                                                                       try money(alloc, p.monthlySalary()),
+        try rows.append(alloc, .{ .id = p.id, .cells = try table.row(alloc, &.{
+            try std.fmt.allocPrint(alloc, "{d}", .{@intFromEnum(p.id)}),
+            name,
+            @tagName(p.role),
+            @tagName(p.experience()),
+            try skillsText(alloc, p),
+            try std.fmt.allocPrint(alloc, "{d}", .{p.xp}),
+            try statusText(alloc, gs, p),
+            try assignmentText(alloc, gs, p),
+            locationText(gs, p),
+            try std.fmt.allocPrint(alloc, "{d}", .{p.fatigue}),
+            try std.fmt.allocPrint(alloc, "{d}", .{p.morale}),
+            try money(alloc, p.monthlySalary()),
         }) });
     }
     return .{
-        .header = "id   name                 role            exp     skill  XP status             assignment             where       fat mor     pay",
         .rows = try rows.toOwnedSlice(alloc),
         .total = total,
     };
