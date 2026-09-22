@@ -1974,7 +1974,7 @@ pub fn upgrades(alloc: Alloc, gs: *GameState, hq_id: types.HqId) ![]UpgradeRow {
 
 pub const ListingRow = struct {
     index: usize,
-    text: []const u8,
+    cells: table.Row,
     /// The HQ whose board this is — and whose treasury pays.
     hq: types.HqId,
     /// A contract world's listing (12D.7): this company's local funds pay.
@@ -1984,23 +1984,30 @@ pub const ListingRow = struct {
 pub const CatalogRow = struct {
     key: []const u8,
     component: bool,
-    text: []const u8,
+    cells: table.Row,
 };
 
 pub const DemandRow = struct {
     key: []const u8,
     short: u32,
-    text: []const u8,
+    cells: table.Row,
 };
 
 pub const StockPolicyRow = struct {
     key: []const u8,
     min: u32,
     target: u32,
-    text: []const u8,
+    cells: table.Row,
 };
 
-pub const stock_policy_header = "part                  min  target  on hand  state";
+pub const market_cols: []const table.Col = &.{
+    .{ .name = "idx" },                    .{ .name = "kind" },   .{ .name = "key" },                       .{ .name = "name" },
+    .{ .name = "price", .justify = .right }, .{ .name = "qty" },  .{ .name = "rarity" },                    .{ .name = "staple" },
+    .{ .name = "expires" },                .{ .name = "condition" },
+};
+pub const catalog_cols: []const table.Col = &.{ .{ .name = "part" }, .{ .name = "name" }, .{ .name = "cost", .justify = .right }, .{ .name = "tons", .justify = .right }, .{ .name = "source" } };
+pub const demand_cols: []const table.Col = &.{ .{ .name = "part" }, .{ .name = "need", .justify = .right }, .{ .name = "on hand", .justify = .right }, .{ .name = "on order", .justify = .right }, .{ .name = "short", .justify = .right } };
+pub const stock_policy_cols: []const table.Col = &.{ .{ .name = "part" }, .{ .name = "min", .justify = .right }, .{ .name = "target", .justify = .right }, .{ .name = "on hand", .justify = .right }, .{ .name = "state" } };
 
 /// The keep-stocked lines of one HQ (Market screen): reorder point,
 /// target, what is on hand and whether a restock is under way.
@@ -2017,17 +2024,20 @@ pub fn stockPolicies(alloc: Alloc, gs: *GameState, hq: types.HqId) ![]StockPolic
             coming += 1;
         };
         const state: []const u8 = if (coming > 0) try std.fmt.allocPrint(alloc, "{{a}}{d} coming{{/}}", .{coming}) else if (have < sp.min) "{c}short — reorders tomorrow{/}" else "{g}stocked{/}";
-        try out.append(alloc, .{ .key = sp.part_key, .min = sp.min, .target = sp.target, .text = try std.fmt.allocPrint(alloc, "{s: <20} {d: >5} {d: >7} {d: >8}  {s}", .{ clip(sp.part_key, 20), sp.min, sp.target, have, state }) });
+        try out.append(alloc, .{ .key = sp.part_key, .min = sp.min, .target = sp.target, .cells = try table.row(alloc, &.{
+            sp.part_key,
+            try std.fmt.allocPrint(alloc, "{d}", .{sp.min}),
+            try std.fmt.allocPrint(alloc, "{d}", .{sp.target}),
+            try std.fmt.allocPrint(alloc, "{d}", .{have}),
+            state,
+        }) });
     }
     return out.toOwnedSlice(alloc);
 }
 
 pub const Market = struct {
-    board_header: []const u8,
     board: []ListingRow,
-    catalog_header: []const u8,
     catalog: []CatalogRow,
-    demand_header: []const u8,
     demand: []DemandRow,
 };
 
@@ -2109,13 +2119,31 @@ pub fn market(alloc: Alloc, gs: *GameState, filter: MarketFilter, hq: types.HqId
         if (l.company != .none) {
             // A contract world's hull (12D.7).
             const world: []const u8 = if (gs.deploymentContract(l.company)) |c| planetName(c.planet_key) else "?";
-            try board.append(alloc, .{ .index = i, .hq = l.hq, .company = l.company, .text = try std.fmt.allocPrint(alloc, "[{d: <3}] {{a}}@{s: <9}{{/}} {s: <10} {s: <20} {s: >13}  {s} local funds {s} · {s}", .{
-                i, clip(world, 9), clip(l.item_key, 10), clip(name, 20), try money(alloc, types.applyBp(l.price, gs.diff().purchase_bp)), forceName(gs, l.company), try money(alloc, gs.treasuryBalance(.{ .company = l.company })), cond,
+            try board.append(alloc, .{ .index = i, .hq = l.hq, .company = l.company, .cells = try table.row(alloc, &.{
+                try std.fmt.allocPrint(alloc, "{d}", .{i}),
+                try std.fmt.allocPrint(alloc, "{{a}}@{s}{{/}}", .{world}),
+                l.item_key,
+                name,
+                try money(alloc, types.applyBp(l.price, gs.diff().purchase_bp)),
+                "",
+                "",
+                "",
+                "",
+                try std.fmt.allocPrint(alloc, "{s} local funds {s} · {s}", .{ forceName(gs, l.company), try money(alloc, gs.treasuryBalance(.{ .company = l.company })), cond }),
             }) });
             continue;
         }
-        try board.append(alloc, .{ .index = i, .hq = l.hq, .text = try std.fmt.allocPrint(alloc, "[{d: <3}] {s: <5} {s: <10} {s: <20} {s: >13}  x{d: <3} {s: <8} {s: <6} d{d: <5} {s}", .{
-            i, @tagName(l.kind), clip(l.item_key, 10), clip(name, 20), try money(alloc, types.applyBp(l.price, gs.diff().purchase_bp)), l.quantity, @tagName(l.rarity), if (l.black_market) "{c}fence{/}" else if (l.staple) "staple" else "", l.expires_day, if (l.black_market) try std.fmt.allocPrint(alloc, "{{c}}black market{{/}} — no questions, maybe a fraud (2d6 ≤ {d}); the house frowns, the pirates smile · {s}", .{ @import("../domain/tuning.zig").t.market.black_market_fraud_target, cond }) else cond,
+        try board.append(alloc, .{ .index = i, .hq = l.hq, .cells = try table.row(alloc, &.{
+            try std.fmt.allocPrint(alloc, "{d}", .{i}),
+            @tagName(l.kind),
+            l.item_key,
+            name,
+            try money(alloc, types.applyBp(l.price, gs.diff().purchase_bp)),
+            try std.fmt.allocPrint(alloc, "x{d}", .{l.quantity}),
+            @tagName(l.rarity),
+            if (l.black_market) "{c}fence{/}" else if (l.staple) "staple" else "",
+            try std.fmt.allocPrint(alloc, "d{d}", .{l.expires_day}),
+            if (l.black_market) try std.fmt.allocPrint(alloc, "{{c}}black market{{/}} — no questions, maybe a fraud (2d6 ≤ {d}); the house frowns, the pirates smile · {s}", .{ @import("../domain/tuning.zig").t.market.black_market_fraud_target, cond }) else cond,
         }) });
     }
     var catalog: std.ArrayListUnmanaged(CatalogRow) = .empty;
@@ -2123,8 +2151,12 @@ pub fn market(alloc: Alloc, gs: *GameState, filter: MarketFilter, hq: types.HqId
     for (part_mod.catalog) |p| {
         if (!filter.matchesPart(p.key)) continue;
         const component = part_mod.isComponent(p.key);
-        try catalog.append(alloc, .{ .key = p.key, .component = component, .text = try std.fmt.allocPrint(alloc, "{s: <16} {s: <22} {s: >12}  {d: >3}t  {s}", .{
-            clip(p.key, 16), clip(p.name, 22), try money(alloc, p.cost), part_mod.tons(p.key), if (component) (if (p.fab_regional) "{a}fabricable: bay 3 at a regional HQ{/}" else if (p.fab_min_bay > 1) try std.fmt.allocPrint(alloc, "{{a}}fabricable: bay {d}{{/}}", .{p.fab_min_bay}) else "{a}fabricable at any bay{/}") else if (isStaple(p.key)) "{g}staple{/}" else "{d}rolls vs rarity{/}",
+        try catalog.append(alloc, .{ .key = p.key, .component = component, .cells = try table.row(alloc, &.{
+            p.key,
+            p.name,
+            try money(alloc, p.cost),
+            try std.fmt.allocPrint(alloc, "{d}t", .{part_mod.tons(p.key)}),
+            if (component) (if (p.fab_regional) "{a}fabricable: bay 3 at a regional HQ{/}" else if (p.fab_min_bay > 1) try std.fmt.allocPrint(alloc, "{{a}}fabricable: bay {d}{{/}}", .{p.fab_min_bay}) else "{a}fabricable at any bay{/}") else if (isStaple(p.key)) "{g}staple{/}" else "{d}rolls vs rarity{/}",
         }) });
     }
     // Demand: damaged / destroyed / missing slots by part.
@@ -2154,14 +2186,17 @@ pub fn market(alloc: Alloc, gs: *GameState, filter: MarketFilter, hq: types.HqId
             on_order += o.quantity;
         };
         const short: u32 = if (n > on_hand + on_order) n - on_hand - on_order else 0;
-        try demand.append(alloc, .{ .key = key, .short = short, .text = try std.fmt.allocPrint(alloc, "{s: <16} {d: >4} {d: >8} {d: >9} {s}{d: >6}{{/}}", .{ clip(key, 16), n, on_hand, on_order, if (short > 0) "{c}" else "{g}", short }) });
+        try demand.append(alloc, .{ .key = key, .short = short, .cells = try table.row(alloc, &.{
+            key,
+            try std.fmt.allocPrint(alloc, "{d}", .{n}),
+            try std.fmt.allocPrint(alloc, "{d}", .{on_hand}),
+            try std.fmt.allocPrint(alloc, "{d}", .{on_order}),
+            try std.fmt.allocPrint(alloc, "{s}{d}{{/}}", .{ if (short > 0) "{c}" else "{g}", short }),
+        }) });
     }
     return .{
-        .board_header = "idx   kind  key        name                         price  qty  rarity   staple expires  condition",
         .board = try board.toOwnedSlice(alloc),
-        .catalog_header = "part             name                           cost  tons  source",
         .catalog = try catalog.toOwnedSlice(alloc),
-        .demand_header = "part             need  on hand  on order  short",
         .demand = try demand.toOwnedSlice(alloc),
     };
 }

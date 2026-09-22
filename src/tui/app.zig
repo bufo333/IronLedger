@@ -942,32 +942,30 @@ pub const App = struct {
         const b = self.body();
         const view = try q.market(al, g, self.market_filter, @enumFromInt(self.hqSelId(g)));
         const top_h: u16 = @max(6, b.h * 2 / 5);
-        var board: std.ArrayListUnmanaged([]const u8) = .empty;
-        for (view.board) |r| try board.append(al, r.text);
-        if (view.board.len == 0) try board.append(al, "{d}nothing on the boards — they refresh on the 1st, staples restock as they sell{/}");
         const hq_id: types.HqId = @enumFromInt(self.hqSelId(g));
-        const inner = self.screen.pane(.{ .x = b.x, .y = b.y, .w = b.w, .h = top_h }, .{ .title = try std.fmt.allocPrint(al, "MARKET BOARD · {{a}}{s}{{/}} pays from its treasury ({s}) · filter {{a}}{s}{{/}} · {d} listings", .{ q.hqName(g, hq_id), try q.money(al, g.treasuryBalance(.{ .hq = hq_id })), @tagName(self.market_filter), view.board.len }), .focused = self.focus == 0, .right_title = "[ ] other HQ's board  [/] filter  [Enter] buy" });
-        self.stickyList(inner, view.board_header, board.items, 0, self.focus == 0);
+        const inner = self.screen.pane(.{ .x = b.x, .y = b.y, .w = b.w, .h = top_h }, .{ .title = try std.fmt.allocPrint(al, "MARKET BOARD · {{a}}{s}{{/}} pays from its treasury ({s}) · filter {{a}}{s}{{/}} · {d} listings", .{ q.hqName(g, hq_id), try q.money(al, g.treasuryBalance(.{ .hq = hq_id })), @tagName(self.market_filter), view.board.len }), .focused = self.focus == 0, .right_title = "[ ] other HQ  [/] filter  [Enter] buy" });
+        try self.tableOrNote(inner, try q.tableOf(al, q.market_cols, view.board), 0, self.focus == 0, "{d}nothing on the boards — they refresh on the 1st, staples restock as they sell{/}");
 
         const cw: u16 = if (self.narrow()) b.w else b.w * 55 / 100;
-        var cat: std.ArrayListUnmanaged([]const u8) = .empty;
-        for (view.catalog) |r| try cat.append(al, r.text);
         const inner2 = self.screen.pane(.{ .x = b.x, .y = b.y + top_h, .w = cw, .h = b.h - top_h }, .{ .title = try std.fmt.allocPrint(al, "ORDER CATALOG · delivered to {s}", .{q.hqName(g, hq_id)}), .focused = self.focus == 1, .right_title = "[Enter] order  [b] fabricate" });
-        self.stickyList(inner2, view.catalog_header, cat.items, 1, self.focus == 1);
+        try self.tableOrNote(inner2, try q.tableOf(al, q.catalog_cols, view.catalog), 1, self.focus == 1, "{d}nothing in the catalog under this filter{/}");
         if (cw < b.w) {
-            var dem: std.ArrayListUnmanaged([]const u8) = .empty;
-            for (view.demand) |r| try dem.append(al, r.text);
-            if (view.demand.len == 0) try dem.append(al, "{g}nothing damaged{/}");
             const dem_h: u16 = (b.h - top_h) * 55 / 100;
             const inner3 = self.screen.pane(.{ .x = b.x + cw, .y = b.y + top_h, .w = b.w - cw, .h = dem_h }, .{ .title = "DEMAND · damaged slots", .focused = self.focus == 2, .right_title = "[Enter] order shortfall" });
-            self.stickyList(inner3, view.demand_header, dem.items, 2, self.focus == 2);
+            try self.tableOrNote(inner3, try q.tableOf(al, q.demand_cols, view.demand), 2, self.focus == 2, "{g}nothing damaged{/}");
             const pol = try q.stockPolicies(al, g, hq_id);
-            var pol_rows: std.ArrayListUnmanaged([]const u8) = .empty;
-            for (pol) |r| try pol_rows.append(al, r.text);
-            if (pol.len == 0) try pol_rows.append(al, "{d}none — K on a catalogue row keeps that part stocked here{/}");
             const inner4 = self.screen.pane(.{ .x = b.x + cw, .y = b.y + top_h + dem_h, .w = b.w - cw, .h = b.h - top_h - dem_h }, .{ .title = try std.fmt.allocPrint(al, "KEEP STOCKED · {s} · checked daily", .{q.hqName(g, hq_id)}), .focused = self.focus == 3, .right_title = "[Enter] edit  [x] remove" });
-            self.stickyList(inner4, q.stock_policy_header, pol_rows.items, 3, self.focus == 3);
+            try self.tableOrNote(inner4, try q.tableOf(al, q.stock_policy_cols, pol), 3, self.focus == 3, "{d}none — K on a catalogue row keeps that part stocked here{/}");
         }
+    }
+
+    /// A table pane, or a note when it has no rows.
+    fn tableOrNote(self: *App, inner: Rect, t: Table, pane_idx: u8, focused: bool, note: []const u8) !void {
+        if (t.rows.len == 0) {
+            self.screen.lines(inner, &.{note}, 0, null);
+            return;
+        }
+        try self.tablePane(inner, t, pane_idx, focused);
     }
 
     /// A list with its header row pinned above the scrolling rows.
