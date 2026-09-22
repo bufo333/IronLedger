@@ -21,6 +21,7 @@ const Key = term_mod.Key;
 const Screen = screen_mod.Screen;
 const Rect = screen_mod.Rect;
 const Style = screen_mod.Style;
+const Table = screen_mod.Table;
 const q = game.queries;
 const types = game.types;
 const Command = game.commands.Command;
@@ -265,6 +266,10 @@ pub const App = struct {
     focus: u8 = 0,
     /// Cursor per tab per pane (welcome uses tab 0, wizard tab 1).
     cursor: [10][4]usize = [_][4]usize{[_]usize{0} ** 4} ** 10,
+    /// Columns scrolled off a table pane's left (12F), per screen and pane, like `cursor`.
+    colscroll: [10][4]usize = [_][4]usize{[_]usize{0} ** 4} ** 10,
+    /// The same for a modal's table.
+    modal_colscroll: usize = 0,
     msg: TextBuf = .{},
     msg_style: Style = .dim,
     input: TextBuf = .{},
@@ -421,6 +426,15 @@ pub const App = struct {
             .game => @intFromEnum(self.tab),
         };
         return &self.cursor[t][pane];
+    }
+
+    fn colScroll(self: *App, pane: u8) *usize {
+        const t: usize = switch (self.mode) {
+            .welcome => 8,
+            .wizard => 9,
+            .game => @intFromEnum(self.tab),
+        };
+        return &self.colscroll[t][pane];
     }
 
     fn pickDefaultPlayer(self: *App) void {
@@ -966,6 +980,15 @@ pub const App = struct {
         self.screen.lines(body_r, items, firstRow(c.*, body_r.h), if (focused and items.len > 0) c.* else null);
     }
 
+    /// A table (12F) with its header pinned, the cursor row kept in view
+    /// and ←/→ scrolling its columns behind the first.
+    fn tablePane(self: *App, inner: Rect, t: Table, pane_idx: u8, focused: bool) !void {
+        if (inner.h == 0) return;
+        const c = self.cur(pane_idx);
+        if (t.rows.len > 0 and c.* >= t.rows.len) c.* = t.rows.len - 1;
+        _ = try self.screen.table(self.a(), inner, t, firstRow(c.*, inner.h -| 1), if (focused and t.rows.len > 0) c.* else null, self.colScroll(pane_idx));
+    }
+
     // ---- people ----
 
     fn drawPeople(self: *App) !void {
@@ -1411,22 +1434,28 @@ pub const App = struct {
         const g = &self.gs.?;
         const b = self.body();
         const view = try q.contracts(al, g, @enumFromInt(self.hqSelId(g)));
-        const board_h: u16 = @max(6, b.h * 2 / 5);
-        var rows: std.ArrayListUnmanaged([]const u8) = .empty;
-        try rows.append(al, view.board_header);
-        for (view.board) |o| try rows.append(al, o.text);
-        if (view.board.len == 0) try rows.append(al, "{d}no offers — the board refreshes on the 1st{/}");
-        if (view.board.len > 0) {
-            // Who could take the offer under the cursor, readiest first (play feedback).
-            try rows.append(al, "");
-            try rows.append(al, try std.fmt.allocPrint(al, "{{a}}companies for the selected offer{{/}}   {s}", .{q.candidates_header}));
-            for (try q.offerCandidates(al, g, view.board[@min(self.cur(0).*, view.board.len - 1)].index)) |c| try rows.append(al, try std.fmt.allocPrint(al, "  {s}", .{c.text}));
-        }
-        const board_hq: types.HqId = @enumFromInt(self.hqSelId(g));
-        const inner = self.screen.pane(.{ .x = b.x, .y = b.y, .w = b.w, .h = board_h }, .{ .title = try std.fmt.allocPrint(al, "CONTRACT BOARD · {{a}}{s}{{/}} · for the companies based there", .{q.hqName(g, board_hq)}), .focused = self.focus == 0, .right_title = "[ ] other HQ's board  [Enter] accept with a company" });
+        // Room for the offers and the candidates under the cursor's offer,
+        // up to three fifths of the screen.
         const c = self.cur(0);
         if (view.board.len > 0 and c.* >= view.board.len) c.* = view.board.len - 1;
-        self.screen.lines(inner, rows.items, 0, if (self.focus == 0 and view.board.len > 0) c.* + 1 else null);
+        const cands = if (view.board.len > 0) try q.offerCandidates(al, g, view.board[c.*].index) else &[_]q.Candidate{};
+        const board_need: u16 = @intCast(@min(1 + view.board.len + 3 + 1 + cands.len + 2, 200));
+        const board_h: u16 = @max(6, @min(board_need, b.h * 3 / 5));
+        const board_hq: types.HqId = @enumFromInt(self.hqSelId(g));
+        const inner = self.screen.pane(.{ .x = b.x, .y = b.y, .w = b.w, .h = board_h }, .{ .title = try std.fmt.allocPrint(al, "CONTRACT BOARD · {{a}}{s}{{/}} · for the companies based there", .{q.hqName(g, board_hq)}), .focused = self.focus == 0, .right_title = "[ ] other HQ  [←/→] columns  [Enter] accept" });
+        if (view.board.len == 0) {
+            self.screen.lines(inner, &.{"{d}no offers — the board refreshes on the 1st{/}"}, 0, null);
+        } else {
+            // The offers on top; under them, who could take the one under the
+            // cursor, readiest first (play feedback).
+            const board_rows: u16 = @intCast(@min(view.board.len + 1, inner.h));
+            try self.tablePane(.{ .x = inner.x, .y = inner.y, .w = inner.w, .h = board_rows }, try view.boardTable(al), 0, self.focus == 0);
+            if (inner.h > board_rows + 2) {
+                const y = inner.y + board_rows;
+                self.screen.textPad(inner.x, y + 1, inner.w, "{a}companies for the selected offer{/}", .normal);
+                _ = try self.screen.table(al, .{ .x = inner.x, .y = y + 2, .w = inner.w, .h = inner.h - board_rows - 2 }, try q.tableOf(al, q.candidates_cols, cands), 0, null, self.colScroll(3));
+            }
+        }
 
         // The board's notes (rating, band and rights terms), wrapped in a
         // box of their own under the board; up to three lines, fewer when
@@ -1467,8 +1496,6 @@ pub const App = struct {
         self.screen.lines(inner2, act.items, if (first + inner2.h > act.items.len and act.items.len > inner2.h) act.items.len - inner2.h else first, if (self.focus == 1 and view.active.len > 0) first else null);
 
         var hist: std.ArrayListUnmanaged([]const u8) = .empty;
-        try hist.append(al, q.history_header);
-        for (history) |h| try hist.append(al, h.text);
         if (history.len == 0) try hist.append(al, "{d}no closed contracts yet — completed, breached and failed contracts land here, and an HQ can be founded on any world worked{/}");
         try hist.append(al, "");
         try hist.append(al, "{a}STANDING{/}  tours served earn it, tours served against a house cost it, a breach costs a lot; it drifts home monthly");
@@ -1478,7 +1505,10 @@ pub const App = struct {
         else
             .{ .x = b.x, .y = b.y + top_h + act_h, .w = b.w, .h = b.h - top_h - act_h };
         const hist_inner = self.screen.pane(hist_rect, .{ .title = "HISTORY", .focused = self.focus == 2, .right_title = "Tab here · log follows the cursor · [Enter] full log" });
-        self.screen.lines(hist_inner, hist.items, if (c2.* + 2 > hist_inner.h and hist_inner.h > 1) c2.* + 2 - hist_inner.h else 0, if (self.focus == 2 and history.len > 0) c2.* + 1 else null);
+        // The closed contracts as a table, the standings as lines under it.
+        const hist_rows: u16 = @intCast(@min(history.len + 1, hist_inner.h));
+        try self.tablePane(.{ .x = hist_inner.x, .y = hist_inner.y, .w = hist_inner.w, .h = hist_rows }, try q.tableOf(al, q.history_cols, history), 2, self.focus == 2);
+        if (hist_inner.h > hist_rows) self.screen.lines(.{ .x = hist_inner.x, .y = hist_inner.y + hist_rows, .w = hist_inner.w, .h = hist_inner.h - hist_rows }, hist.items, 0, null);
 
         if (wide) {
             // The log follows whichever contract the cursor is on: an active one, or a closed one in the history.
@@ -1987,14 +2017,10 @@ pub const App = struct {
             .accept_pick => |oi| {
                 const g = &self.gs.?;
                 const cands = try q.offerCandidates(al, g, oi);
-                var rows: std.ArrayListUnmanaged([]const u8) = .empty;
-                try rows.append(al, q.candidates_header);
-                for (cands) |c| try rows.append(al, c.text);
-                if (cands.len == 0) try rows.append(al, "{d}no companies to send{/}");
                 if (self.modal_cursor >= cands.len and cands.len > 0) self.modal_cursor = cands.len - 1;
-                const r = self.modalRect(@min(self.screen.cols, 118), @intCast(@min(rows.items.len + 3, self.screen.rows)));
-                const inner = self.screen.pane(r, .{ .title = "SEND WHICH COMPANY · [Enter] choose · [Esc] cancel", .double = true, .right_title = "readiest first · depot, spent, wounded, fatigue and transit count against" });
-                self.screen.lines(inner, rows.items, 0, if (cands.len > 0) self.modal_cursor + 1 else null);
+                const r = self.modalRect(@min(self.screen.cols, 140), @intCast(@min(cands.len + 4, self.screen.rows)));
+                const inner = self.screen.pane(r, .{ .title = "SEND WHICH COMPANY · [Enter] choose · [←/→] columns · [Esc] cancel", .double = true, .right_title = "readiest first" });
+                if (cands.len == 0) self.screen.lines(inner, &.{"{d}no companies to send{/}"}, 0, null) else _ = try self.screen.table(al, inner, try q.tableOf(al, q.candidates_cols, cands), 0, self.modal_cursor, &self.modal_colscroll);
             },
             .lance_pick => |uid| {
                 const lances = try self.lanceChoices(uid);
@@ -2595,8 +2621,12 @@ pub const App = struct {
             .backtab => self.focus = (self.focus + self.paneCount() - 1) % self.paneCount(),
             .down => try self.screenMove(1),
             .up => try self.screenMove(-1),
-            .left => if (self.tab == .map) try self.mapMove(-1, 0),
-            .right => if (self.tab == .map) try self.mapMove(1, 0),
+            .left => if (self.tab == .map) try self.mapMove(-1, 0) else {
+                self.colScroll(self.focus).* -|= 1;
+            },
+            .right => if (self.tab == .map) try self.mapMove(1, 0) else {
+                self.colScroll(self.focus).* += 1;
+            },
             .pgdn => try self.screenMove(10),
             .pgup => try self.screenMove(-10),
             .enter => try self.screenEnter(),
@@ -4247,6 +4277,8 @@ pub const App = struct {
                 .escape => self.modal = .none,
                 .down => self.modal_cursor +|= 1,
                 .up => self.modal_cursor -|= 1,
+                .left => self.modal_colscroll -|= 1,
+                .right => self.modal_colscroll += 1,
                 .enter => {
                     const g = &self.gs.?;
                     const cands = try q.offerCandidates(self.a(), g, oi);

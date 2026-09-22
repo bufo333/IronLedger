@@ -1057,8 +1057,8 @@ fn runRepl(gs: *game.state.GameState, io: std.Io, gpa: std.mem.Allocator, store_
             const idx = std.fmt.parseInt(usize, tokens.next() orelse "0", 10) catch 0;
             var arena = std.heap.ArenaAllocator.init(gpa);
             defer arena.deinit();
-            std.debug.print("{s}\n", .{game.queries.candidates_header});
-            for (try game.queries.offerCandidates(arena.allocator(), gs, idx)) |c| std.debug.print("{s}\n", .{game.queries.stripMarks(arena.allocator(), c.text) catch c.text});
+            const al = arena.allocator();
+            for (try (try game.queries.tableOf(al, game.queries.candidates_cols, try game.queries.offerCandidates(al, gs, idx))).render(al)) |ln| std.debug.print("{s}\n", .{game.queries.stripMarks(al, ln) catch ln});
         } else if (std.mem.eql(u8, verb, "readiness")) {
             printReadiness(gs);
         } else if (std.mem.eql(u8, verb, "rating")) {

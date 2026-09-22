@@ -7,6 +7,8 @@
 //! can carry emphasis. Pure: no I/O except `flush`.
 
 const std = @import("std");
+const table_mod = @import("game").table;
+pub const Table = table_mod.Table;
 
 pub const Style = enum(u8) {
     normal,
@@ -258,6 +260,80 @@ pub const Screen = struct {
         }
     }
 
+    pub const TableView = struct {
+        /// Columns out of view left of the pinned one's neighbour, and right of the edge.
+        hidden_left: usize,
+        hidden_right: usize,
+    };
+
+    /// Lay a table (12F) into `inner`: column names on the first line,
+    /// rows from `first` below, the cursor row selected. The first column
+    /// is pinned; `col_scroll` columns after it are hidden to the left,
+    /// clamped so the view never scrolls past the last column. A column
+    /// at the edge is clipped, not dropped, so a wide cell is never
+    /// silently missing.
+    pub fn table(self: *Screen, alloc: std.mem.Allocator, inner: Rect, t: Table, first: usize, cursor: ?usize, col_scroll: *usize) !TableView {
+        const none: TableView = .{ .hidden_left = 0, .hidden_right = 0 };
+        if (inner.h == 0 or inner.w == 0 or t.cols.len == 0) return none;
+        const w = try t.widths(alloc);
+        const gap: u16 = 2;
+        const pin_w: u16 = @min(w[0], inner.w);
+        const rest_w: usize = if (inner.w > pin_w + gap) inner.w - pin_w - gap else 0;
+        // The smallest scroll at which every remaining column fits.
+        var max_scroll: usize = if (t.cols.len > 1) t.cols.len - 2 else 0;
+        var k: usize = 1;
+        while (k < t.cols.len) : (k += 1) {
+            var need: usize = 0;
+            for (w[k..], 0..) |cw, j| need += cw + (if (j > 0) gap else 0);
+            if (need <= rest_w) {
+                max_scroll = k - 1;
+                break;
+            }
+        }
+        col_scroll.* = @min(col_scroll.*, max_scroll);
+        const start = 1 + col_scroll.*;
+        const edge: i32 = @as(i32, inner.x) + inner.w;
+
+        var hidden_right: usize = 0;
+        var line: usize = 0;
+        while (line < inner.h) : (line += 1) {
+            const y: i32 = inner.y + @as(i32, @intCast(line));
+            const row_idx: ?usize = if (line == 0) null else first + line - 1;
+            const base: Style = if (line == 0) .dim else if (cursor != null and row_idx.? == cursor.?) .sel else .normal;
+            self.textPad(inner.x, y, inner.w, "", base);
+            if (row_idx != null and row_idx.? >= t.rows.len) continue;
+            const r: ?table_mod.Row = if (row_idx) |ri| t.rows[ri] else null;
+            var x: i32 = inner.x;
+            var ci: usize = 0;
+            while (ci < t.cols.len) : (ci += if (ci == 0) start else 1) {
+                if (x >= edge) {
+                    if (line == 0) hidden_right += 1;
+                    continue;
+                }
+                const cell: []const u8 = if (r) |rr| (if (ci < rr.len) rr[ci] else "") else t.cols[ci].name;
+                const avail: u16 = @intCast(@min(@as(i32, w[ci]), edge - x));
+                _ = self.text(x, y, avail, try table_mod.pad(alloc, cell, w[ci], t.cols[ci].justify), base);
+                x += @as(i32, w[ci]) + gap;
+            }
+        }
+        const view: TableView = .{ .hidden_left = col_scroll.*, .hidden_right = hidden_right };
+        if (view.hidden_left > 0 or view.hidden_right > 0) {
+            // Scroll hint over the header's right end.
+            var buf: [48]u8 = undefined;
+            const la: []const u8 = if (self.ascii) "<" else "◀";
+            const ra: []const u8 = if (self.ascii) ">" else "▶";
+            const hint = if (view.hidden_left > 0 and view.hidden_right > 0)
+                std.fmt.bufPrint(&buf, " {s} {d} · {d} {s} ", .{ la, view.hidden_left, view.hidden_right, ra }) catch ""
+            else if (view.hidden_left > 0)
+                std.fmt.bufPrint(&buf, " {s} {d} ", .{ la, view.hidden_left }) catch ""
+            else
+                std.fmt.bufPrint(&buf, " {d} {s} ", .{ view.hidden_right, ra }) catch "";
+            const hl: i32 = @intCast(visibleLen(hint));
+            if (hl < inner.w) _ = self.text(edge - hl, inner.y, @intCast(hl), hint, .amber);
+        }
+        return view;
+    }
+
     /// Draw an image into a rect as half-block colour cells (two vertical
     /// pixels per cell), fitting the whole picture with a 2:1 cell aspect.
     pub fn blit(self: *Screen, r: Rect, img: *const png.Image) void {
@@ -463,4 +539,29 @@ test "wrap breaks on spaces and carries an open colour across lines" {
     try std.testing.expectEqualStrings("{d}beachhead: ×1.3{/}", w[1]);
     try std.testing.expectEqualStrings("{d}pay · slow{/}", w[2]);
     try std.testing.expectEqualStrings("{d}resupply{/} end", w[3]);
+}
+
+test "table pins the first column, clamps the scroll and clips at the edge" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var s = try Screen.init(std.testing.allocator, 20, 3);
+    defer s.deinit();
+    const t: Table = .{
+        .cols = &.{ .{ .name = "kind" }, .{ .name = "world" }, .{ .name = "pay", .justify = .right }, .{ .name = "note" } },
+        .rows = &.{ try table_mod.row(a, &.{ "raid", "Galatea", "1,200", "negotiated" }) },
+    };
+    var scroll: usize = 0;
+    const v = try s.table(a, s.full(), t, 0, 0, &scroll);
+    // kind(4) + gap + world(7) + gap + pay(5) = 20: note is off the edge.
+    try std.testing.expectEqual(@as(usize, 1), v.hidden_right);
+    try std.testing.expectEqual(@as(u21, 'G'), s.get(6, 1).ch);
+    try std.testing.expectEqual(Style.sel, s.get(0, 1).style);
+    // Scrolling hides world; the note now fits, so a further scroll is clamped.
+    scroll = 5;
+    const v2 = try s.table(a, s.full(), t, 0, null, &scroll);
+    try std.testing.expectEqual(@as(usize, 2), scroll);
+    try std.testing.expectEqual(@as(usize, 0), v2.hidden_right);
+    try std.testing.expectEqual(@as(u21, 'n'), s.get(6, 1).ch);
+    try std.testing.expectEqual(@as(u21, 'r'), s.get(0, 1).ch);
 }
