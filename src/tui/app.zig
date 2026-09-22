@@ -453,6 +453,7 @@ pub const App = struct {
         self.screen.clear();
         self.n_placements = 0;
         self.focus_scroll = null;
+        if (self.modal == .none) self.modal_colscroll = 0;
         switch (self.mode) {
             .welcome => try self.drawWelcome(),
             .wizard => try self.drawWizard(),
@@ -1611,7 +1612,8 @@ pub const App = struct {
                 self.listPane(.{ .x = b.x + lw, .y = b.y, .w = b.w - lw, .h = top_h }, "STOCK", &hint, 1, false, false);
             }
             const inb = try q.inbound(al, g);
-            self.listPane(.{ .x = b.x + lw, .y = b.y + top_h, .w = b.w - lw, .h = b.h - top_h }, "INBOUND · soonest first", inb, 2, false, false);
+            const iinner = self.screen.pane(.{ .x = b.x + lw, .y = b.y + top_h, .w = b.w - lw, .h = b.h - top_h }, .{ .title = "INBOUND · soonest first" });
+            try self.tableOrNote(iinner, try q.tableOf(al, q.inbound_cols, inb), 2, false, "{d}nothing on the way{/}");
         }
     }
 
@@ -1877,15 +1879,12 @@ pub const App = struct {
                     try lance_line.appendSlice(al, try std.fmt.allocPrint(al, "{s}{s} {d}/{d}{s}  ", .{ if (i == self.raise.lance_idx) "{a}▶ " else "{d}", l.name, l.units.items.len, game.force.lance_size, "{/}" }));
                 }
                 try rows.append(al, lance_line.items);
-                try rows.append(al, "");
-                try rows.append(al, q.raise_header);
-                for (cands) |c| try rows.append(al, c.text);
-                if (cands.len == 0) try rows.append(al, "{d}nothing left to pick — no loose meks and no mek listings on any board (boards refresh on the 1st){/}");
                 if (self.modal_cursor >= cands.len and cands.len > 0) self.modal_cursor = cands.len - 1;
-                const r = self.modalRect(@min(self.screen.cols -| 2, 160), @intCast(@min(rows.items.len + 4, self.screen.rows -| 2)));
-                const inner = self.screen.pane(r, .{ .title = try std.fmt.allocPrint(al, "RAISE {s} · HULLS · [ ] lance · Enter/b take or buy · p pass · n support train · Esc leave (the company keeps what it has)", .{q.forceName(g, self.raise.company)}), .double = true });
-                const sel: ?usize = if (cands.len > 0) self.modal_cursor + 3 else null;
-                self.screen.lines(inner, rows.items, if (sel != null and sel.? + 1 > inner.h) sel.? + 1 - inner.h else 0, sel);
+                const r = self.modalRect(@min(self.screen.cols -| 2, 160), @intCast(@min(cands.len + 6, self.screen.rows -| 2)));
+                const inner = self.screen.pane(r, .{ .title = try std.fmt.allocPrint(al, "RAISE {s} · HULLS · [ ] lance · Enter/b take or buy · p pass · n support train · ←/→ columns · Esc leave (the company keeps what it has)", .{q.forceName(g, self.raise.company)}), .double = true });
+                self.screen.lines(.{ .x = inner.x, .y = inner.y, .w = inner.w, .h = @min(1, inner.h) }, rows.items, 0, null);
+                const tr: Rect = .{ .x = inner.x, .y = inner.y + 2, .w = inner.w, .h = inner.h -| 2 };
+                if (cands.len == 0) self.screen.lines(tr, &.{"{d}nothing left to pick — no loose meks and no mek listings on any board (boards refresh on the 1st){/}"}, 0, null) else _ = try self.screen.table(al, tr, try q.tableOf(al, q.raise_cols, cands), firstRow(self.modal_cursor, tr.h -| 1), self.modal_cursor, &self.modal_colscroll);
             },
             .raise_support => {
                 const g = &self.gs.?;
@@ -2026,16 +2025,17 @@ pub const App = struct {
             .upgrade => |hid| {
                 const g = &self.gs.?;
                 const rows_v = try q.upgrades(al, g, hid);
-                var rows: std.ArrayListUnmanaged([]const u8) = .empty;
-                try rows.append(al, "facility         level        cost       paperwork + build   next level buys                              status");
-                for (rows_v) |r| try rows.append(al, r.text);
-                try rows.append(al, "");
-                try rows.append(al, try std.fmt.allocPrint(al, "{{d}}paid from the HQ treasury ({s} C) when the project starts · paperwork is admin_command staffing, +2 days per missing finance admin{{/}}", .{try q.money(al, if (g.hqs.getPtr(hid)) |h| h.funds else 0)}));
-                try rows.append(al, "{d}every level raises the staff the HQ must keep on payroll; understaffed HQs run a level lower{/}");
+                const notes = [_][]const u8{
+                    "",
+                    try std.fmt.allocPrint(al, "{{d}}paid from the HQ treasury ({s} C) when the project starts · paperwork is admin_command staffing, +2 days per missing finance admin{{/}}", .{try q.money(al, if (g.hqs.getPtr(hid)) |h| h.funds else 0)}),
+                    "{d}every level raises the staff the HQ must keep on payroll; understaffed HQs run a level lower{/}",
+                };
                 if (self.modal_cursor >= rows_v.len and rows_v.len > 0) self.modal_cursor = rows_v.len - 1;
-                const r = self.modalRect(@min(self.screen.cols, 130), @intCast(@min(rows.items.len + 3, self.screen.rows)));
-                const inner = self.screen.pane(r, .{ .title = try std.fmt.allocPrint(al, "UPGRADE · {s} · [Enter] start · [Esc] cancel", .{q.hqName(g, hid)}), .double = true, .right_title = "one project per facility at a time" });
-                self.screen.lines(inner, rows.items, 0, self.modal_cursor + 1);
+                const r = self.modalRect(@min(self.screen.cols, 140), @intCast(@min(rows_v.len + 1 + notes.len + 2, self.screen.rows)));
+                const inner = self.screen.pane(r, .{ .title = try std.fmt.allocPrint(al, "UPGRADE · {s} · [Enter] start · [←/→] columns · [Esc] cancel", .{q.hqName(g, hid)}), .double = true, .right_title = "one project per facility at a time" });
+                const th: u16 = @intCast(@min(rows_v.len + 1, inner.h));
+                _ = try self.screen.table(al, .{ .x = inner.x, .y = inner.y, .w = inner.w, .h = th }, try q.tableOf(al, q.upgrade_cols, rows_v), 0, if (rows_v.len > 0) self.modal_cursor else null, &self.modal_colscroll);
+                if (inner.h > th) self.screen.lines(.{ .x = inner.x, .y = inner.y + th, .w = inner.w, .h = inner.h - th }, &notes, 0, null);
             },
             .settings => {
                 const form = try self.settingsRows(al);
@@ -3775,7 +3775,7 @@ pub const App = struct {
     }
 
     /// The generic picker's rows, title and header for whichever pick modal is up.
-    const PickView = struct { title: []const u8, header: []const u8, rows: []q.PickRow, empty: []const u8 };
+    const PickView = struct { title: []const u8, cols: []const q.Col, rows: []q.PickRow, empty: []const u8 };
 
     fn pickView(self: *App, al: std.mem.Allocator) !PickView {
         const g = &self.gs.?;
@@ -3786,7 +3786,7 @@ pub const App = struct {
                     .person => try q.personName(al, g, @enumFromInt(pc.id)),
                     .stock => pc.key_buf[0..pc.key_len],
                 }}),
-                .header = q.company_pick_header,
+                .cols = q.company_pick_cols,
                 .rows = try q.companyChoices(al, g, switch (pc.what) {
                     .unit => .unit,
                     .person => .person,
@@ -3796,19 +3796,19 @@ pub const App = struct {
             },
             .pick_hq => |pid| .{
                 .title = try std.fmt.allocPrint(al, "POST {s} AT · [Enter] choose · [Esc] cancel", .{try q.personName(al, g, pid)}),
-                .header = q.hq_pick_header,
+                .cols = q.hq_pick_cols,
                 .rows = try q.hqChoices(al, g, pid),
                 .empty = "no HQ",
             },
             .pick_crew => |uid| .{
                 .title = try std.fmt.allocPrint(al, "CREW #{d} · [Enter] assign · [Esc] cancel", .{@intFromEnum(uid)}),
-                .header = q.crew_pick_header,
+                .cols = q.crew_pick_cols,
                 .rows = try q.crewChoices(al, g, uid),
                 .empty = "nobody of the right role on the books — hire from a hall (HQ screen)",
             },
             .pick_unassign => |uid| .{
                 .title = try std.fmt.allocPrint(al, "UNASSIGN FROM #{d} · [Enter] clear · [Esc] cancel", .{@intFromEnum(uid)}),
-                .header = "",
+                .cols = q.unassign_pick_cols,
                 .rows = try q.unassignChoices(al, g, uid),
                 .empty = "nobody is assigned to this hull",
             },
@@ -3820,7 +3820,7 @@ pub const App = struct {
                     .sell => "SELL WHICH PART",
                     .fabricate => "FABRICATE WHICH COMPONENT",
                 }}),
-                .header = q.part_pick_header,
+                .cols = q.part_pick_cols,
                 .rows = try q.partChoices(al, g, pp.purpose, pp.site),
                 .empty = switch (pp.purpose) {
                     .ship, .sell => "nothing on this shelf",
@@ -3833,16 +3833,14 @@ pub const App = struct {
 
     fn drawPick(self: *App, al: std.mem.Allocator) !void {
         const v = try self.pickView(al);
-        var rows: std.ArrayListUnmanaged([]const u8) = .empty;
-        const has_header = v.header.len > 0;
-        if (has_header) try rows.append(al, v.header);
-        for (v.rows) |r| try rows.append(al, r.text);
-        if (v.rows.len == 0) try rows.append(al, try std.fmt.allocPrint(al, "{{d}}{s}{{/}}", .{v.empty}));
         if (self.modal_cursor >= v.rows.len and v.rows.len > 0) self.modal_cursor = v.rows.len - 1;
-        const r = self.modalRect(@min(self.screen.cols, 100), @intCast(@min(rows.items.len + 3, self.screen.rows)));
-        const inner = self.screen.pane(r, .{ .title = v.title, .double = true, .right_title = "best first · dimmed rows say why not" });
-        const off: usize = if (has_header) 1 else 0;
-        self.screen.lines(inner, rows.items, if (rows.items.len > inner.h) firstRow(self.modal_cursor + off, inner.h) else 0, if (v.rows.len > 0) self.modal_cursor + off else null);
+        const r = self.modalRect(@min(self.screen.cols, 120), @intCast(@min(v.rows.len + 4, self.screen.rows)));
+        const inner = self.screen.pane(r, .{ .title = v.title, .double = true, .right_title = "best first · dimmed rows say why not · [←/→] columns" });
+        if (v.rows.len == 0) {
+            self.screen.lines(inner, &.{try std.fmt.allocPrint(al, "{{d}}{s}{{/}}", .{v.empty})}, 0, null);
+            return;
+        }
+        _ = try self.screen.table(al, inner, try q.tableOf(al, v.cols, v.rows), firstRow(self.modal_cursor, inner.h -| 1), self.modal_cursor, &self.modal_colscroll);
     }
 
     fn pickEnter(self: *App) !void {
@@ -4261,6 +4259,8 @@ pub const App = struct {
                 .escape => self.modal = .none,
                 .down => self.modal_cursor +|= 1,
                 .up => self.modal_cursor -|= 1,
+                .left => self.modal_colscroll -|= 1,
+                .right => self.modal_colscroll += 1,
                 .enter => try self.pickEnter(),
                 .char => |ch| switch (ch) {
                     'j' => self.modal_cursor +|= 1,
@@ -4319,6 +4319,8 @@ pub const App = struct {
                 .escape => self.modal = .none,
                 .down => self.modal_cursor +|= 1,
                 .up => self.modal_cursor -|= 1,
+                .left => self.modal_colscroll -|= 1,
+                .right => self.modal_colscroll += 1,
                 .enter => {
                     const rows = try q.upgrades(self.a(), &self.gs.?, hid);
                     if (rows.len == 0) return;

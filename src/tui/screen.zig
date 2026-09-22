@@ -209,7 +209,9 @@ pub const Screen = struct {
         const y0: i32 = r.y;
         const x1: i32 = r.x + r.w - 1;
         const y1: i32 = r.y + r.h - 1;
-        self.fill(r.inner(), ' ', .normal);
+        // Clear everything inside the border, padding columns included, so a
+        // modal never shows the screen beneath it.
+        self.fill(.{ .x = r.x + 1, .y = r.y + 1, .w = r.w - 2, .h = r.h - 2 }, ' ', .normal);
         const tstyle: Style = if (opts.focused) .sel else .box;
         const line_style: Style = if (opts.focused) .focus else .box;
         var x: i32 = x0 + 1;
