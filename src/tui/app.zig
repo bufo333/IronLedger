@@ -454,13 +454,19 @@ pub const App = struct {
         self.n_placements = 0;
         self.focus_scroll = null;
         if (self.modal == .none) self.modal_colscroll = 0;
-        switch (self.mode) {
+        const too_small = self.screen.cols < 80 or self.screen.rows < 24;
+        if (too_small) {
+            // Too small to lay out: say so instead of drawing fragments.
+            var buf: [96]u8 = undefined;
+            const msg = std.fmt.bufPrint(&buf, "terminal {d}x{d} — IRON LEDGER needs at least 80x24 (100x30 plays well)", .{ self.screen.cols, self.screen.rows }) catch "terminal too small";
+            self.screen.textPad(0, 0, self.screen.cols, msg, .amber);
+        } else switch (self.mode) {
             .welcome => try self.drawWelcome(),
             .wizard => try self.drawWizard(),
             .game => try self.drawGame(),
         }
         const modal_open = self.modal != .none and !(self.modal == .input and self.modal.input == .command);
-        try self.drawModal();
+        if (!too_small) try self.drawModal();
         try self.screen.flush(self.term.out);
         if (self.graphics == .kitty) {
             try emblem_mod.kittyDeleteAll(self.term.out);
@@ -1766,7 +1772,7 @@ pub const App = struct {
             .help => {
                 const base = [_][]const u8{
                     "",
-                    "  {a}screens{/}     F1-F8 or 1-8 · Tab / Shift-Tab cycles panes · j/k or arrows move the cursor",
+                    "  {a}screens{/}     F1-F8 or 1-8 · Tab / Shift-Tab cycles panes · j/k ↑/↓ cursor · ←/→ scroll table columns (◀ 2 · 3 ▶ = hidden)",
                     "  {a}turn{/}        n ends the turn (the checklist opens first) · N ends 7 turns",
                     "  {a}desk{/}        Enter on an inbox row opens the decision · Enter on a checklist row jumps to its screen",
                     "  {a}contracts{/}   Enter accepts the offer under the cursor · b bargains one term (one round per offer) · c completes · R recalls",

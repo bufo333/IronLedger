@@ -1175,6 +1175,29 @@ that would go; and with several HQs, offers belong to the bases in range.
   46 with 8 meks gone — the middle bands read a little harder than they
   play (the enemy pool shrinks over a contract).
 
+## Stage 12F — Size-aware screens (2026-09-21)
+The TUI plays on any terminal from ~100×30 up; a big one just shows more.
+
+- ✅ 12F.1 **Column tables.** `sim/table.zig`: a `Table` is column names
+  plus rows of markup cells; a query never pads a column, so a header
+  cannot disagree with its rows and no screen has a fixed width.
+  `Table.render` prints one at natural width for the CLI and the tests.
+  `screen.table` lays one into a rect: the first column pinned, ←/→
+  scroll the rest (clamped at the last column), an amber hint counts the
+  hidden columns either side, a cell at the edge clips rather than
+  vanishes. The contract board is the first table on it; its cells shrink
+  (913k / 3.65M, 24d, ring / beachhead, "2–3 lances, green").
+- ✅ 12F.2–.5 **Every table on the widget**: the Market's four, Desk
+  companies, Ledger (treasuries, P&L, transactions), readiness, hangar,
+  personnel, hiring hall, manning, the pick modals, the raise wizard,
+  upgrades, inbound, stock. Lists that stay lists (the TO&E tree, the
+  HQ detail, the stock pane) render their tables at natural width or pad
+  hull rows to widths shared across the tree (`finishToe`). The focused
+  table's scroll is recorded per frame (`focus_scroll`) so ←/→ move the
+  right one; a modal's scroll resets when it closes.
+- ☐ 12F.6 **Drop a column before scrolling** when a table names one
+  droppable, for screens that read better without the tail than scrolled.
+
 ## Stage 13 — Graphical client
 Architected after the TUI ships, reusing the same command/query boundary.
 

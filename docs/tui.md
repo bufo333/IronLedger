@@ -163,9 +163,15 @@ view model each frame from an arena.
 - **Cell buffer**: the frame renders into a `[]Cell` (char + fg + attrs)
   double buffer; only changed cells are flushed. No per-frame allocation
   beyond the arena the queries fill.
-- **Widgets**: `Pane` (title, border, focus), `Table` (columns, cursor,
-  scroll), `Tree`, `Bar` (tonnage/pool bars), `Form`, `Modal`, `Log`. Each
-  widget draws from a view model struct, never from `GameState`.
+- **Widgets**: `Pane` (title, border, focus), `Table` (Stage 12F:
+  `sim/table.zig` holds the column names and rows of markup cells, the
+  query never pads; `screen.table` sizes every column to its widest cell,
+  pins the first, scrolls the rest with ←/→ and hints how many columns are
+  hidden either side), `Tree` (the TO&E: lines, with hull rows padded to
+  widths shared across the tree), `Bar` (tonnage/pool bars), `Form`,
+  `Modal`, `Log`. Each widget draws from a view model struct, never from
+  `GameState`. A pane too narrow for a table clips the column at its edge
+  rather than dropping it, so nothing is silently missing.
 - **Colors** are semantic only — amber (attention/active), green (ok),
   red (critical), cyan (cursor/focus), dim (chrome) — on the terminal's own
   background, so the client holds on any theme.
