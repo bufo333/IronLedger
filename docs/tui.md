@@ -73,18 +73,14 @@ command line   `:` prompt (opens on `:`), hints on the right
   screen. Tab / Shift-Tab cycles pane focus; each pane owns a cursor.
 - **Modals** (end-turn checklist, decision, confirmations, order/transfer
   forms) draw over the current screen and take all input until closed.
-- **Size tiers.** The client measures the terminal at startup and on
-  SIGWINCH and picks the largest tier that fits:
-
-  | tier | cells | fits | what changes |
-  |---|---|---|---|
-  | full | 200 × 50 | maximised at 14–16 px on 1080p | three-column screens, 14-row log, emblem 40×20 on the Desk, star map at 1.75 LY/column |
-  | wide | 160 × 45 | large window at 16 px | same layouts, side panes narrower |
-  | compact | 118 × 36 | half-screen window | two columns, 5-row log, emblem 18×9 |
-  | minimum | 80 × 24 | any terminal | one column, side panes hidden, no emblem |
-
-  `docs/tui-mockup.html` shows the full tier; layouts are expressed as
-  pane rectangles per tier in `tui/layout.zig`, not computed ad hoc.
+- **Size.** The client measures the terminal at startup and on SIGWINCH
+  and lays every screen out from the width and height it has: panes split
+  the body by ratio, side panes drop below 120 columns (`narrow()`), the
+  Desk emblem needs 160, and every table sizes its columns to content and
+  scrolls sideways when the pane is narrower (Stage 12F). Below 80 × 24
+  the client shows what it needs instead of fragments. There are no fixed
+  tiers; a bigger terminal simply shows more rows and wider panes.
+  `docs/tui-mockup.html` shows the layout at 200 × 50.
 
 ## Keyboard model
 

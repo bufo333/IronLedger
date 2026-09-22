@@ -36,8 +36,6 @@ pub fn money(alloc: Alloc, v: types.CBills) ![]const u8 {
     return out.toOwnedSlice(alloc);
 }
 
-/// Pad plain `text` to `width` cells, then wrap it in markup — so the
-/// markup never counts toward a column's width.
 /// Pad to `width` terminal cells, counting code points rather than bytes
 const table = @import("table.zig");
 pub const Table = table.Table;
@@ -75,7 +73,9 @@ test "moneyShort rounds to k and M" {
     try std.testing.expectEqualStrings("-45k", try moneyShort(a, -45_000));
 }
 
-/// (an em dash is one cell, three bytes), so columns line up.
+/// Pad plain `text` to `width` cells inside `mk` markup, counting code
+/// points rather than bytes (an em dash is one cell, three bytes) — for
+/// the line lists that are not tables (12F).
 pub fn padCells(alloc: Alloc, mk: []const u8, text: []const u8, width: usize) ![]const u8 {
     var out: std.ArrayListUnmanaged(u8) = .empty;
     try out.appendSlice(alloc, mk);
@@ -87,17 +87,6 @@ pub fn padCells(alloc: Alloc, mk: []const u8, text: []const u8, width: usize) ![
         cells += 1;
     }
     while (cells < width) : (cells += 1) try out.append(alloc, ' ');
-    if (mk.len > 0) try out.appendSlice(alloc, "{/}");
-    return out.toOwnedSlice(alloc);
-}
-
-pub fn padMk(alloc: Alloc, mk: []const u8, text: []const u8, width: usize) ![]const u8 {
-    const shown = clip(text, width);
-    var out: std.ArrayListUnmanaged(u8) = .empty;
-    try out.appendSlice(alloc, mk);
-    try out.appendSlice(alloc, shown);
-    var i: usize = std.unicode.utf8CountCodepoints(shown) catch shown.len;
-    while (i < width) : (i += 1) try out.append(alloc, ' ');
     if (mk.len > 0) try out.appendSlice(alloc, "{/}");
     return out.toOwnedSlice(alloc);
 }
@@ -2902,20 +2891,6 @@ pub fn people(alloc: Alloc, gs: *GameState, filter: HallFilter) !People {
     };
 }
 
-/// Remove `{x}` markup tokens (for fixed-width columns).
-pub fn stripMarkup(alloc: Alloc, s: []const u8) ![]const u8 {
-    var out: std.ArrayListUnmanaged(u8) = .empty;
-    var i: usize = 0;
-    while (i < s.len) : (i += 1) {
-        if (s[i] == '{' and i + 2 < s.len and s[i + 2] == '}' and std.mem.indexOfScalar(u8, "agcsdtp/", s[i + 1]) != null) {
-            i += 2;
-            continue;
-        }
-        try out.append(alloc, s[i]);
-    }
-    return out.toOwnedSlice(alloc);
-}
-
 /// One person's full record.
 /// Plain text for the CLI: drop the `{a}…{/}` markup the TUI colours.
 pub fn stripMarks(alloc: Alloc, text: []const u8) ![]const u8 {
@@ -3647,7 +3622,7 @@ test "hall filter groups roles and map classifies worlds" {
     const rec = try personRecord(al, &gs, everyone.rows[0].id);
     try std.testing.expect(rec.len > 6);
     _ = try openSeats(al, &gs, everyone.rows[0].id);
-    try std.testing.expectEqualStrings("active", try stripMarkup(al, "{g}active{/}"));
+    try std.testing.expectEqualStrings("active", try stripMarks(al, "{g}active{/}"));
 }
 
 test "padCells counts cells, not bytes" {

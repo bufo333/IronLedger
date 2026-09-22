@@ -164,15 +164,6 @@ pub const AmountForm = struct {
 /// Size tiers (docs/tui.md): the largest that fits decides how many panes
 /// a screen shows. Narrow (< 120 cols) drops side panes; short (< 30
 /// rows) drops the third band.
-const Tier = enum { minimum, compact, wide, full };
-
-fn tierFor(cols: u16, rows: u16) Tier {
-    if (cols >= 200 and rows >= 50) return .full;
-    if (cols >= 160 and rows >= 45) return .wide;
-    if (cols >= 118 and rows >= 36) return .compact;
-    return .minimum;
-}
-
 const office_roles = [_]game.person.Role{ .admin_command, .admin_logistics, .admin_transport, .admin_hr, .admin_finance };
 
 /// Frontend-only verbs; the command verbs come from `game.cli.verbs`.
@@ -543,10 +534,6 @@ pub const App = struct {
     fn body(self: *App) Rect {
         const s = &self.screen;
         return .{ .x = 0, .y = 2, .w = s.cols, .h = if (s.rows > 3) s.rows - 3 else 0 };
-    }
-
-    fn tier(self: *App) Tier {
-        return tierFor(self.screen.cols, self.screen.rows);
     }
 
     /// Side panes are dropped below this width.
@@ -4830,12 +4817,5 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, env: *const std.process.Environ.M
         }
     };
     try app.run();
-}
-
-test "size tiers follow the documented thresholds" {
-    try std.testing.expectEqual(Tier.full, tierFor(200, 50));
-    try std.testing.expectEqual(Tier.wide, tierFor(170, 45));
-    try std.testing.expectEqual(Tier.compact, tierFor(118, 36));
-    try std.testing.expectEqual(Tier.minimum, tierFor(80, 24));
 }
 
