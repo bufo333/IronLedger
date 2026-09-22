@@ -21,6 +21,7 @@ const Key = term_mod.Key;
 const Screen = screen_mod.Screen;
 const Rect = screen_mod.Rect;
 const Style = screen_mod.Style;
+const Table = screen_mod.Table;
 const q = game.queries;
 const types = game.types;
 const Command = game.commands.Command;
@@ -163,15 +164,6 @@ pub const AmountForm = struct {
 /// Size tiers (docs/tui.md): the largest that fits decides how many panes
 /// a screen shows. Narrow (< 120 cols) drops side panes; short (< 30
 /// rows) drops the third band.
-const Tier = enum { minimum, compact, wide, full };
-
-fn tierFor(cols: u16, rows: u16) Tier {
-    if (cols >= 200 and rows >= 50) return .full;
-    if (cols >= 160 and rows >= 45) return .wide;
-    if (cols >= 118 and rows >= 36) return .compact;
-    return .minimum;
-}
-
 const office_roles = [_]game.person.Role{ .admin_command, .admin_logistics, .admin_transport, .admin_hr, .admin_finance };
 
 /// Frontend-only verbs; the command verbs come from `game.cli.verbs`.
@@ -265,6 +257,14 @@ pub const App = struct {
     focus: u8 = 0,
     /// Cursor per tab per pane (welcome uses tab 0, wizard tab 1).
     cursor: [10][4]usize = [_][4]usize{[_]usize{0} ** 4} ** 10,
+    /// Columns scrolled off a table pane's left (12F), per screen and pane, like `cursor`.
+    colscroll: [10][4]usize = [_][4]usize{[_]usize{0} ** 4} ** 10,
+    /// The same for a modal's table.
+    modal_colscroll: usize = 0,
+    /// The column scroll of the table drawn focused this frame, if any —
+    /// what ←/→ move (a pane's cursor index and its focus index differ on
+    /// some screens).
+    focus_scroll: ?*usize = null,
     msg: TextBuf = .{},
     msg_style: Style = .dim,
     input: TextBuf = .{},
@@ -423,6 +423,15 @@ pub const App = struct {
         return &self.cursor[t][pane];
     }
 
+    fn colScroll(self: *App, pane: u8) *usize {
+        const t: usize = switch (self.mode) {
+            .welcome => 8,
+            .wizard => 9,
+            .game => @intFromEnum(self.tab),
+        };
+        return &self.colscroll[t][pane];
+    }
+
     fn pickDefaultPlayer(self: *App) void {
         const players = self.store.listPlayers(self.a()) catch return;
         if (players.len > 0) self.player_id = players[0].id;
@@ -434,13 +443,21 @@ pub const App = struct {
         _ = self.frame.reset(.retain_capacity);
         self.screen.clear();
         self.n_placements = 0;
-        switch (self.mode) {
+        self.focus_scroll = null;
+        if (self.modal == .none) self.modal_colscroll = 0;
+        const too_small = self.screen.cols < 80 or self.screen.rows < 24;
+        if (too_small) {
+            // Too small to lay out: say so instead of drawing fragments.
+            var buf: [96]u8 = undefined;
+            const msg = std.fmt.bufPrint(&buf, "terminal {d}x{d} — IRON LEDGER needs at least 80x24 (100x30 plays well)", .{ self.screen.cols, self.screen.rows }) catch "terminal too small";
+            self.screen.textPad(0, 0, self.screen.cols, msg, .amber);
+        } else switch (self.mode) {
             .welcome => try self.drawWelcome(),
             .wizard => try self.drawWizard(),
             .game => try self.drawGame(),
         }
         const modal_open = self.modal != .none and !(self.modal == .input and self.modal.input == .command);
-        try self.drawModal();
+        if (!too_small) try self.drawModal();
         try self.screen.flush(self.term.out);
         if (self.graphics == .kitty) {
             try emblem_mod.kittyDeleteAll(self.term.out);
@@ -517,10 +534,6 @@ pub const App = struct {
     fn body(self: *App) Rect {
         const s = &self.screen;
         return .{ .x = 0, .y = 2, .w = s.cols, .h = if (s.rows > 3) s.rows - 3 else 0 };
-    }
-
-    fn tier(self: *App) Tier {
-        return tierFor(self.screen.cols, self.screen.rows);
     }
 
     /// Side panes are dropped below this width.
@@ -928,32 +941,30 @@ pub const App = struct {
         const b = self.body();
         const view = try q.market(al, g, self.market_filter, @enumFromInt(self.hqSelId(g)));
         const top_h: u16 = @max(6, b.h * 2 / 5);
-        var board: std.ArrayListUnmanaged([]const u8) = .empty;
-        for (view.board) |r| try board.append(al, r.text);
-        if (view.board.len == 0) try board.append(al, "{d}nothing on the boards — they refresh on the 1st, staples restock as they sell{/}");
         const hq_id: types.HqId = @enumFromInt(self.hqSelId(g));
-        const inner = self.screen.pane(.{ .x = b.x, .y = b.y, .w = b.w, .h = top_h }, .{ .title = try std.fmt.allocPrint(al, "MARKET BOARD · {{a}}{s}{{/}} pays from its treasury ({s}) · filter {{a}}{s}{{/}} · {d} listings", .{ q.hqName(g, hq_id), try q.money(al, g.treasuryBalance(.{ .hq = hq_id })), @tagName(self.market_filter), view.board.len }), .focused = self.focus == 0, .right_title = "[ ] other HQ's board  [/] filter  [Enter] buy" });
-        self.stickyList(inner, view.board_header, board.items, 0, self.focus == 0);
+        const inner = self.screen.pane(.{ .x = b.x, .y = b.y, .w = b.w, .h = top_h }, .{ .title = try std.fmt.allocPrint(al, "MARKET BOARD · {{a}}{s}{{/}} pays from its treasury ({s}) · filter {{a}}{s}{{/}} · {d} listings", .{ q.hqName(g, hq_id), try q.money(al, g.treasuryBalance(.{ .hq = hq_id })), @tagName(self.market_filter), view.board.len }), .focused = self.focus == 0, .right_title = "[ ] other HQ  [/] filter  [Enter] buy" });
+        try self.tableOrNote(inner, try q.tableOf(al, q.market_cols, view.board), 0, self.focus == 0, "{d}nothing on the boards — they refresh on the 1st, staples restock as they sell{/}");
 
         const cw: u16 = if (self.narrow()) b.w else b.w * 55 / 100;
-        var cat: std.ArrayListUnmanaged([]const u8) = .empty;
-        for (view.catalog) |r| try cat.append(al, r.text);
         const inner2 = self.screen.pane(.{ .x = b.x, .y = b.y + top_h, .w = cw, .h = b.h - top_h }, .{ .title = try std.fmt.allocPrint(al, "ORDER CATALOG · delivered to {s}", .{q.hqName(g, hq_id)}), .focused = self.focus == 1, .right_title = "[Enter] order  [b] fabricate" });
-        self.stickyList(inner2, view.catalog_header, cat.items, 1, self.focus == 1);
+        try self.tableOrNote(inner2, try q.tableOf(al, q.catalog_cols, view.catalog), 1, self.focus == 1, "{d}nothing in the catalog under this filter{/}");
         if (cw < b.w) {
-            var dem: std.ArrayListUnmanaged([]const u8) = .empty;
-            for (view.demand) |r| try dem.append(al, r.text);
-            if (view.demand.len == 0) try dem.append(al, "{g}nothing damaged{/}");
             const dem_h: u16 = (b.h - top_h) * 55 / 100;
             const inner3 = self.screen.pane(.{ .x = b.x + cw, .y = b.y + top_h, .w = b.w - cw, .h = dem_h }, .{ .title = "DEMAND · damaged slots", .focused = self.focus == 2, .right_title = "[Enter] order shortfall" });
-            self.stickyList(inner3, view.demand_header, dem.items, 2, self.focus == 2);
+            try self.tableOrNote(inner3, try q.tableOf(al, q.demand_cols, view.demand), 2, self.focus == 2, "{g}nothing damaged{/}");
             const pol = try q.stockPolicies(al, g, hq_id);
-            var pol_rows: std.ArrayListUnmanaged([]const u8) = .empty;
-            for (pol) |r| try pol_rows.append(al, r.text);
-            if (pol.len == 0) try pol_rows.append(al, "{d}none — K on a catalogue row keeps that part stocked here{/}");
             const inner4 = self.screen.pane(.{ .x = b.x + cw, .y = b.y + top_h + dem_h, .w = b.w - cw, .h = b.h - top_h - dem_h }, .{ .title = try std.fmt.allocPrint(al, "KEEP STOCKED · {s} · checked daily", .{q.hqName(g, hq_id)}), .focused = self.focus == 3, .right_title = "[Enter] edit  [x] remove" });
-            self.stickyList(inner4, q.stock_policy_header, pol_rows.items, 3, self.focus == 3);
+            try self.tableOrNote(inner4, try q.tableOf(al, q.stock_policy_cols, pol), 3, self.focus == 3, "{d}none — K on a catalogue row keeps that part stocked here{/}");
         }
+    }
+
+    /// A table pane, or a note when it has no rows.
+    fn tableOrNote(self: *App, inner: Rect, t: Table, pane_idx: u8, focused: bool, note: []const u8) !void {
+        if (t.rows.len == 0) {
+            self.screen.lines(inner, &.{note}, 0, null);
+            return;
+        }
+        try self.tablePane(inner, t, pane_idx, focused);
     }
 
     /// A list with its header row pinned above the scrolling rows.
@@ -966,6 +977,17 @@ pub const App = struct {
         self.screen.lines(body_r, items, firstRow(c.*, body_r.h), if (focused and items.len > 0) c.* else null);
     }
 
+    /// A table (12F) with its header pinned, the cursor row kept in view
+    /// and ←/→ scrolling its columns behind the first.
+    fn tablePane(self: *App, inner: Rect, t: Table, pane_idx: u8, focused: bool) !void {
+        if (inner.h == 0) return;
+        const c = self.cur(pane_idx);
+        if (t.rows.len > 0 and c.* >= t.rows.len) c.* = t.rows.len - 1;
+        const scroll = self.colScroll(pane_idx);
+        if (focused) self.focus_scroll = scroll;
+        _ = try self.screen.table(self.a(), inner, t, firstRow(c.*, inner.h -| 1), if (focused and t.rows.len > 0) c.* else null, scroll);
+    }
+
     // ---- people ----
 
     fn drawPeople(self: *App) !void {
@@ -973,14 +995,11 @@ pub const App = struct {
         const g = &self.gs.?;
         const b = self.body();
         const view = try q.people(al, g, self.people_filter);
-        var rows: std.ArrayListUnmanaged([]const u8) = .empty;
-        for (view.rows) |r| try rows.append(al, r.text);
-        if (view.rows.len == 0) try rows.append(al, "{d}nobody matches this filter{/}");
         const lw: u16 = if (b.w > 150) @max(b.w * 62 / 100, @min(b.w - 60, 128)) else b.w;
         const title = try std.fmt.allocPrint(al, "PERSONNEL · filter {{a}}{s}{{/}} · {d} of {d}", .{ @tagName(self.people_filter), view.rows.len, view.total });
         const inner = self.screen.pane(.{ .x = b.x, .y = b.y, .w = lw, .h = b.h }, .{ .title = title, .focused = true, .right_title = "[/] next filter  [?] previous" });
         const c = self.cur(0);
-        self.stickyList(inner, view.header, rows.items, 0, view.rows.len > 0);
+        try self.tableOrNote(inner, try q.tableOf(al, q.people_cols, view.rows), 0, view.rows.len > 0, "{d}nobody matches this filter{/}");
         if (lw < b.w and view.rows.len > 0) {
             const id = view.rows[c.*].id;
             const rec = try q.personRecord(al, g, id);
@@ -1356,10 +1375,10 @@ pub const App = struct {
         self.listPane(.{ .x = x, .y = b.y, .w = ib_w, .h = top_h }, "INBOX", ib.items, 1, self.focus == 1, true);
 
         const co_h: u16 = @min(b.h - top_h, @as(u16, @intCast(view.companies.len + 3)));
-        var co: std.ArrayListUnmanaged([]const u8) = .empty;
-        try co.append(al, view.company_header);
-        for (view.companies) |c| try co.append(al, c);
-        self.listPane(.{ .x = b.x, .y = b.y + top_h, .w = b.w, .h = co_h }, "COMPANIES", co.items, 2, false, false);
+        const co_inner = self.screen.pane(.{ .x = b.x, .y = b.y + top_h, .w = b.w, .h = co_h }, .{ .title = "COMPANIES" });
+        // Shares the LOG pane's scroll slot: ←/→ while the log is focused scroll these columns.
+        try self.tableOrNote(co_inner, .{ .cols = q.company_cols, .rows = view.companies }, 2, false, "{d}no companies{/}");
+        if (self.focus == 2) self.focus_scroll = self.colScroll(2);
 
         const rest_h: u16 = b.h - top_h - co_h;
         if (rest_h >= 3) {
@@ -1411,24 +1430,41 @@ pub const App = struct {
         const g = &self.gs.?;
         const b = self.body();
         const view = try q.contracts(al, g, @enumFromInt(self.hqSelId(g)));
-        const board_h: u16 = @max(6, b.h * 2 / 5);
-        var rows: std.ArrayListUnmanaged([]const u8) = .empty;
-        try rows.append(al, view.board_header);
-        for (view.board) |o| try rows.append(al, o.text);
-        if (view.board.len == 0) try rows.append(al, "{d}no offers — the board refreshes on the 1st{/}");
-        try rows.append(al, "");
-        try rows.append(al, view.notes);
-        if (view.board.len > 0) {
-            // Who could take the offer under the cursor, readiest first (play feedback).
-            try rows.append(al, "");
-            try rows.append(al, try std.fmt.allocPrint(al, "{{a}}companies for the selected offer{{/}}   {s}", .{q.candidates_header}));
-            for (try q.offerCandidates(al, g, view.board[@min(self.cur(0).*, view.board.len - 1)].index)) |c| try rows.append(al, try std.fmt.allocPrint(al, "  {s}", .{c.text}));
-        }
-        const board_hq: types.HqId = @enumFromInt(self.hqSelId(g));
-        const inner = self.screen.pane(.{ .x = b.x, .y = b.y, .w = b.w, .h = board_h }, .{ .title = try std.fmt.allocPrint(al, "CONTRACT BOARD · {{a}}{s}{{/}} · for the companies based there", .{q.hqName(g, board_hq)}), .focused = self.focus == 0, .right_title = "[ ] other HQ's board  [Enter] accept with a company" });
+        // Room for the offers and the candidates under the cursor's offer,
+        // up to three fifths of the screen.
         const c = self.cur(0);
         if (view.board.len > 0 and c.* >= view.board.len) c.* = view.board.len - 1;
-        self.screen.lines(inner, rows.items, 0, if (self.focus == 0 and view.board.len > 0) c.* + 1 else null);
+        const cands = if (view.board.len > 0) try q.offerCandidates(al, g, view.board[c.*].index) else &[_]q.Candidate{};
+        const board_need: u16 = @intCast(@min(1 + view.board.len + 3 + 1 + cands.len + 2, 200));
+        const board_h: u16 = @max(6, @min(board_need, b.h * 3 / 5));
+        const board_hq: types.HqId = @enumFromInt(self.hqSelId(g));
+        const inner = self.screen.pane(.{ .x = b.x, .y = b.y, .w = b.w, .h = board_h }, .{ .title = try std.fmt.allocPrint(al, "CONTRACT BOARD · {{a}}{s}{{/}} · for the companies based there", .{q.hqName(g, board_hq)}), .focused = self.focus == 0, .right_title = "[ ] other HQ  [←/→] columns  [Enter] accept" });
+        if (view.board.len == 0) {
+            self.screen.lines(inner, &.{"{d}no offers — the board refreshes on the 1st{/}"}, 0, null);
+        } else {
+            // The offers on top; under them, who could take the one under the
+            // cursor, readiest first (play feedback).
+            const board_rows: u16 = @intCast(@min(view.board.len + 1, inner.h));
+            try self.tablePane(.{ .x = inner.x, .y = inner.y, .w = inner.w, .h = board_rows }, try view.boardTable(al), 0, self.focus == 0);
+            if (inner.h > board_rows + 2) {
+                const y = inner.y + board_rows;
+                self.screen.textPad(inner.x, y + 1, inner.w, "{a}companies for the selected offer{/}", .normal);
+                _ = try self.screen.table(al, .{ .x = inner.x, .y = y + 2, .w = inner.w, .h = inner.h - board_rows - 2 }, try q.tableOf(al, q.candidates_cols, cands), 0, null, self.colScroll(3));
+            }
+        }
+
+        // The board's notes (rating, band and rights terms), wrapped in a
+        // box of their own under the board; up to three lines, fewer when
+        // the screen is short.
+        const notes = try screen_mod.wrap(al, view.notes, b.w -| 4);
+        const notes_room: usize = if (b.h > board_h + 10) @min(3, b.h - board_h - 10) else 0;
+        const notes_n: u16 = @intCast(@min(notes.len, notes_room));
+        const notes_h: u16 = if (notes_n > 0) notes_n + 2 else 0;
+        if (notes_h > 0) {
+            const notes_inner = self.screen.pane(.{ .x = b.x, .y = b.y + board_h, .w = b.w, .h = notes_h }, .{ .title = "NOTES" });
+            self.screen.lines(notes_inner, notes, 0, null);
+        }
+        const top_h: u16 = board_h + notes_h;
 
         var act: std.ArrayListUnmanaged([]const u8) = .empty;
         var act_index: std.ArrayListUnmanaged(usize) = .empty;
@@ -1445,10 +1481,10 @@ pub const App = struct {
         const c2 = self.cur(2);
         if (history.len > 0 and c2.* >= history.len) c2.* = history.len - 1;
         // Narrow: the active list gives up its lower part to the history.
-        const act_h: u16 = if (wide) b.h - board_h else (b.h - board_h) * 3 / 5;
+        const act_h: u16 = if (wide) b.h - top_h else (b.h - top_h) * 3 / 5;
         const c1 = self.cur(1);
         if (view.active.len > 0 and c1.* >= view.active.len) c1.* = view.active.len - 1;
-        const inner2 = self.screen.pane(.{ .x = b.x, .y = b.y + board_h, .w = act_w, .h = act_h }, .{ .title = "ACTIVE", .focused = self.focus == 1, .right_title = "[Enter] full log  [c] complete  [R] recall" });
+        const inner2 = self.screen.pane(.{ .x = b.x, .y = b.y + top_h, .w = act_w, .h = act_h }, .{ .title = "ACTIVE", .focused = self.focus == 1, .right_title = "[Enter] full log  [c] complete  [R] recall" });
         var first: usize = 0;
         for (act_index.items, 0..) |ai, li| if (ai == c1.* and first == 0 and li > 0) {
             first = li;
@@ -1456,24 +1492,25 @@ pub const App = struct {
         self.screen.lines(inner2, act.items, if (first + inner2.h > act.items.len and act.items.len > inner2.h) act.items.len - inner2.h else first, if (self.focus == 1 and view.active.len > 0) first else null);
 
         var hist: std.ArrayListUnmanaged([]const u8) = .empty;
-        try hist.append(al, q.history_header);
-        for (history) |h| try hist.append(al, h.text);
         if (history.len == 0) try hist.append(al, "{d}no closed contracts yet — completed, breached and failed contracts land here, and an HQ can be founded on any world worked{/}");
         try hist.append(al, "");
         try hist.append(al, "{a}STANDING{/}  tours served earn it, tours served against a house cost it, a breach costs a lot; it drifts home monthly");
         for (view.standings) |line| try hist.append(al, line);
         const hist_rect: screen_mod.Rect = if (wide)
-            .{ .x = b.x + act_w, .y = b.y + board_h, .w = b.w - act_w, .h = (b.h - board_h) / 2 }
+            .{ .x = b.x + act_w, .y = b.y + top_h, .w = b.w - act_w, .h = (b.h - top_h) / 2 }
         else
-            .{ .x = b.x, .y = b.y + board_h + act_h, .w = b.w, .h = b.h - board_h - act_h };
+            .{ .x = b.x, .y = b.y + top_h + act_h, .w = b.w, .h = b.h - top_h - act_h };
         const hist_inner = self.screen.pane(hist_rect, .{ .title = "HISTORY", .focused = self.focus == 2, .right_title = "Tab here · log follows the cursor · [Enter] full log" });
-        self.screen.lines(hist_inner, hist.items, if (c2.* + 2 > hist_inner.h and hist_inner.h > 1) c2.* + 2 - hist_inner.h else 0, if (self.focus == 2 and history.len > 0) c2.* + 1 else null);
+        // The closed contracts as a table, the standings as lines under it.
+        const hist_rows: u16 = @intCast(@min(history.len + 1, hist_inner.h));
+        try self.tablePane(.{ .x = hist_inner.x, .y = hist_inner.y, .w = hist_inner.w, .h = hist_rows }, try q.tableOf(al, q.history_cols, history), 2, self.focus == 2);
+        if (hist_inner.h > hist_rows) self.screen.lines(.{ .x = hist_inner.x, .y = hist_inner.y + hist_rows, .w = hist_inner.w, .h = hist_inner.h - hist_rows }, hist.items, 0, null);
 
         if (wide) {
             // The log follows whichever contract the cursor is on: an active one, or a closed one in the history.
             const log_id: types.ContractId = if (self.focus == 2 and history.len > 0) history[c2.*].id else if (view.active.len > 0) view.active[c1.*].id else .none;
             const log = if (log_id != .none) try q.battleLog(al, g, log_id, 40) else &[_][]const u8{"{d}no contract under the cursor{/}"};
-            self.listPane(.{ .x = b.x + act_w, .y = b.y + board_h + hist_rect.h, .w = b.w - act_w, .h = b.h - board_h - hist_rect.h }, "CONTRACT LOG", log, 3, false, false);
+            self.listPane(.{ .x = b.x + act_w, .y = b.y + top_h + hist_rect.h, .w = b.w - act_w, .h = b.h - top_h - hist_rect.h }, "CONTRACT LOG", log, 3, false, false);
         }
     }
 
@@ -1484,19 +1521,21 @@ pub const App = struct {
         const all = try q.allTreasuries(al, g);
         if (self.ledger_sel >= all.len) self.ledger_sel = 0;
         const view = try q.ledger(al, g, all[self.ledger_sel], 31, 200);
-        const tw: u16 = if (self.narrow()) b.w * 2 / 5 else @max(30, b.w / 4);
+        const tw: u16 = if (self.narrow()) b.w * 2 / 5 else @max(34, b.w / 4);
         const pw: u16 = if (self.narrow()) 0 else @max(30, b.w * 3 / 10);
-        var rows: std.ArrayListUnmanaged([]const u8) = .empty;
-        for (view.treasuries) |t| try rows.append(al, t.text);
-        try rows.append(al, "");
-        for (view.extras) |e| try rows.append(al, e);
         const inner = self.screen.pane(.{ .x = b.x, .y = b.y, .w = tw, .h = b.h }, .{ .title = "TREASURIES", .focused = self.focus == 0, .right_title = "[t] transfer [p] policy" });
-        self.screen.lines(inner, rows.items, 0, if (self.focus == 0) self.ledger_sel else null);
-        if (pw > 0) self.listPane(.{ .x = b.x + tw, .y = b.y, .w = pw, .h = b.h }, view.pnl_title, view.pnl, 1, false, false);
-        var led: std.ArrayListUnmanaged([]const u8) = .empty;
-        try led.append(al, view.ledger_header);
-        for (view.ledger) |l| try led.append(al, l);
-        self.listPane(.{ .x = b.x + tw + pw, .y = b.y, .w = b.w - tw - pw, .h = b.h }, "LEDGER", led.items, 2, self.focus == 1, true);
+        // The treasuries as a table (the cursor is ledger_sel, not a pane cursor), the extras as lines under it.
+        const t_h: u16 = @intCast(@min(view.treasuries.len + 1, inner.h));
+        const tsc = self.colScroll(0);
+        if (self.focus == 0) self.focus_scroll = tsc;
+        _ = try self.screen.table(al, .{ .x = inner.x, .y = inner.y, .w = inner.w, .h = t_h }, try q.tableOf(al, q.treasury_cols, view.treasuries), 0, if (self.focus == 0) self.ledger_sel else null, tsc);
+        if (inner.h > t_h + 1) self.screen.lines(.{ .x = inner.x, .y = inner.y + t_h + 1, .w = inner.w, .h = inner.h - t_h - 1 }, view.extras, 0, null);
+        if (pw > 0) {
+            const pinner = self.screen.pane(.{ .x = b.x + tw, .y = b.y, .w = pw, .h = b.h }, .{ .title = view.pnl_title });
+            _ = try self.screen.table(al, pinner, .{ .cols = view.pnl_cols, .rows = view.pnl }, 0, null, self.colScroll(1));
+        }
+        const led_inner = self.screen.pane(.{ .x = b.x + tw + pw, .y = b.y, .w = b.w - tw - pw, .h = b.h }, .{ .title = "LEDGER", .focused = self.focus == 1 });
+        try self.tableOrNote(led_inner, .{ .cols = q.ledger_cols, .rows = view.ledger }, 2, self.focus == 1, "{d}no transactions yet{/}");
     }
 
     fn drawForces(self: *App) !void {
@@ -1525,12 +1564,10 @@ pub const App = struct {
                     },
                     .manning => {
                         var mrows: std.ArrayListUnmanaged([]const u8) = .empty;
-                        try mrows.append(al, q.manning_header);
+                        const mq = try q.manning(al, g, co);
+                        for (try (try q.tableOf(al, q.manning_cols, mq)).render(al), 0..) |ln, i| try mrows.append(al, if (i == 0) try std.fmt.allocPrint(al, "{{d}}{s}{{/}}", .{ln}) else ln);
                         var open_total: u32 = 0;
-                        for (try q.manning(al, g, co)) |m| {
-                            try mrows.append(al, m.text);
-                            open_total += m.need -| m.have;
-                        }
+                        for (mq) |m| open_total += m.need -| m.have;
                         try mrows.append(al, "");
                         try mrows.append(al, if (open_total == 0) "{g}every seat filled{/}" else try std.fmt.allocPrint(al, "{{c}}{d} open{{/}} — HQ screen Tab into the hall (f filters by role) · :crew co:N hires the open seats from the halls", .{open_total}));
                         self.listPane(.{ .x = b.x + lw, .y = b.y, .w = b.w - lw, .h = detail_h }, try std.fmt.allocPrint(al, "MANNING · {s} · r = damage", .{q.forceName(g, co)}), mrows.items, 1, false, false);
@@ -1568,7 +1605,8 @@ pub const App = struct {
                 self.listPane(.{ .x = b.x + lw, .y = b.y, .w = b.w - lw, .h = top_h }, "STOCK", &hint, 1, false, false);
             }
             const inb = try q.inbound(al, g);
-            self.listPane(.{ .x = b.x + lw, .y = b.y + top_h, .w = b.w - lw, .h = b.h - top_h }, "INBOUND · soonest first", inb, 2, false, false);
+            const iinner = self.screen.pane(.{ .x = b.x + lw, .y = b.y + top_h, .w = b.w - lw, .h = b.h - top_h }, .{ .title = "INBOUND · soonest first" });
+            try self.tableOrNote(iinner, try q.tableOf(al, q.inbound_cols, inb), 2, false, "{d}nothing on the way{/}");
         }
     }
 
@@ -1698,16 +1736,11 @@ pub const App = struct {
         self.screen.lines(inner, detail, firstRow(self.cur(0).*, inner.h), if (self.focus == 0) self.cur(0).* else null);
 
         const hallv = try q.hall(al, g, id, self.hall_filter);
-        var rows: std.ArrayListUnmanaged([]const u8) = .empty;
-        try rows.append(al, hallv.header);
-        for (hallv.rows) |r| try rows.append(al, r.text);
-        if (hallv.rows.len == 0) try rows.append(al, if (hallv.total_at_hq == 0) "{d}no candidates today — the hall churns daily{/}" else "{d}no candidates match this filter{/}");
+        const hall_note: []const u8 = if (hallv.total_at_hq == 0) "{d}no candidates today — the hall churns daily{/}" else "{d}no candidates match this filter{/}";
         const hall_title = try std.fmt.allocPrint(al, "HIRING HALL · filter {{a}}{s}{{/}} · {d} of {d}", .{ @tagName(self.hall_filter), hallv.rows.len, hallv.total_at_hq });
         const hr: Rect = if (lw < b.w) .{ .x = b.x + lw, .y = b.y, .w = b.w - lw, .h = b.h } else .{ .x = b.x, .y = b.y + top_h, .w = b.w, .h = b.h - top_h };
         const hinner = self.screen.pane(hr, .{ .title = hall_title, .focused = self.focus == 1, .right_title = "[f] next filter  [F] previous  [Enter] hire" });
-        const c = self.cur(1);
-        if (hallv.rows.len > 0 and c.* >= hallv.rows.len) c.* = hallv.rows.len - 1;
-        self.screen.lines(hinner, rows.items, firstRow(c.* + 1, hinner.h), if (self.focus == 1 and hallv.rows.len > 0) c.* + 1 else null);
+        try self.tableOrNote(hinner, try q.tableOf(al, q.hall_cols, hallv.rows), 1, self.focus == 1, hall_note);
     }
 
     // ---- modals ----
@@ -1724,9 +1757,9 @@ pub const App = struct {
         switch (self.modal) {
             .none => {},
             .help => {
-                const rows = [_][]const u8{
+                const base = [_][]const u8{
                     "",
-                    "  {a}screens{/}     F1-F8 or 1-8 · Tab / Shift-Tab cycles panes · j/k or arrows move the cursor",
+                    "  {a}screens{/}     F1-F8 or 1-8 · Tab / Shift-Tab cycles panes · j/k ↑/↓ cursor · ←/→ scroll table columns (◀ 2 · 3 ▶ = hidden)",
                     "  {a}turn{/}        n ends the turn (the checklist opens first) · N ends 7 turns",
                     "  {a}desk{/}        Enter on an inbox row opens the decision · Enter on a checklist row jumps to its screen",
                     "  {a}contracts{/}   Enter accepts the offer under the cursor · b bargains one term (one round per offer) · c completes · R recalls",
@@ -1756,9 +1789,23 @@ pub const App = struct {
                     "",
                     "  {d}[Esc] close{/}",
                 };
-                const r = self.modalRect(134, 28);
+                // The contract board's columns, after the contracts line.
+                const board_legend = [_][]const u8{
+                    "  {a}board cols{/}  emp employer · LY light-years off · band in ring / beachhead (pay ×1.3, hardship, slow resupply) · mo months · salv salvage % (cash = salvage exchange: paid in cash, no wrecks) · rights command rights · transit days out",
+                    "               skulls difficulty for the readiest company: ☠ one, ◐ half, green easy → amber → red; rating the same as a number (0.5–5), a range when intel cannot count the enemy, ! outmatched",
+                    "               tons your company's mek tonnage · weight mix L light M medium H heavy A assault meks · enemy tons ~ estimated opposing tonnage · opposition lances, quality, faction (≈BV a fight at good intel)",
+                };
+                var rows: std.ArrayListUnmanaged([]const u8) = .empty;
+                for (base) |row| {
+                    try rows.append(al, row);
+                    if (std.mem.indexOf(u8, row, "{a}contracts{/}") != null) {
+                        try rows.appendSlice(al, &board_legend);
+                        try rows.append(al, try std.fmt.allocPrint(al, "               factions {s}", .{try q.factionLegend(al)}));
+                    }
+                }
+                const r = self.modalRect(134, 34);
                 const inner = self.screen.pane(r, .{ .title = "HELP", .double = true });
-                self.screen.lines(inner, &rows, 0, null);
+                self.screen.lines(inner, rows.items, 0, null);
             },
             .end_turn => {
                 const g = &self.gs.?;
@@ -1825,15 +1872,12 @@ pub const App = struct {
                     try lance_line.appendSlice(al, try std.fmt.allocPrint(al, "{s}{s} {d}/{d}{s}  ", .{ if (i == self.raise.lance_idx) "{a}▶ " else "{d}", l.name, l.units.items.len, game.force.lance_size, "{/}" }));
                 }
                 try rows.append(al, lance_line.items);
-                try rows.append(al, "");
-                try rows.append(al, q.raise_header);
-                for (cands) |c| try rows.append(al, c.text);
-                if (cands.len == 0) try rows.append(al, "{d}nothing left to pick — no loose meks and no mek listings on any board (boards refresh on the 1st){/}");
                 if (self.modal_cursor >= cands.len and cands.len > 0) self.modal_cursor = cands.len - 1;
-                const r = self.modalRect(@min(self.screen.cols -| 2, 160), @intCast(@min(rows.items.len + 4, self.screen.rows -| 2)));
-                const inner = self.screen.pane(r, .{ .title = try std.fmt.allocPrint(al, "RAISE {s} · HULLS · [ ] lance · Enter/b take or buy · p pass · n support train · Esc leave (the company keeps what it has)", .{q.forceName(g, self.raise.company)}), .double = true });
-                const sel: ?usize = if (cands.len > 0) self.modal_cursor + 3 else null;
-                self.screen.lines(inner, rows.items, if (sel != null and sel.? + 1 > inner.h) sel.? + 1 - inner.h else 0, sel);
+                const r = self.modalRect(@min(self.screen.cols -| 2, 160), @intCast(@min(cands.len + 6, self.screen.rows -| 2)));
+                const inner = self.screen.pane(r, .{ .title = try std.fmt.allocPrint(al, "RAISE {s} · HULLS · [ ] lance · Enter/b take or buy · p pass · n support train · ←/→ columns · Esc leave (the company keeps what it has)", .{q.forceName(g, self.raise.company)}), .double = true });
+                self.screen.lines(.{ .x = inner.x, .y = inner.y, .w = inner.w, .h = @min(1, inner.h) }, rows.items, 0, null);
+                const tr: Rect = .{ .x = inner.x, .y = inner.y + 2, .w = inner.w, .h = inner.h -| 2 };
+                if (cands.len == 0) self.screen.lines(tr, &.{"{d}nothing left to pick — no loose meks and no mek listings on any board (boards refresh on the 1st){/}"}, 0, null) else _ = try self.screen.table(al, tr, try q.tableOf(al, q.raise_cols, cands), firstRow(self.modal_cursor, tr.h -| 1), self.modal_cursor, &self.modal_colscroll);
             },
             .raise_support => {
                 const g = &self.gs.?;
@@ -1899,26 +1943,20 @@ pub const App = struct {
             },
             .readiness => {
                 const g = &self.gs.?;
-                var rows: std.ArrayListUnmanaged([]const u8) = .empty;
-                try rows.append(al, q.readiness_header);
                 const rr = try q.readiness(al, g);
-                for (rr) |r| try rows.append(al, r.text);
-                if (rr.len == 0) try rows.append(al, "{d}no companies{/}");
-                try rows.append(al, "");
-                try rows.append(al, "{d}fatigue falls only at a regional HQ; banked XP becomes skill at a training ground; depot hulls wait on a mek bay · Forces r shows one company in detail{/}");
-                const r = self.modalRect(@min(self.screen.cols -| 2, 150), @intCast(rows.items.len + 3));
-                const inner = self.screen.pane(r, .{ .title = "READINESS · every company", .double = true, .right_title = "any key closes" });
-                self.screen.lines(inner, rows.items, 0, null);
+                const r = self.modalRect(@min(self.screen.cols -| 2, 150), @intCast(@min(rr.len + 6, self.screen.rows)));
+                const inner = self.screen.pane(r, .{ .title = "READINESS · every company", .double = true, .right_title = "[←/→] columns · any other key closes" });
+                const th: u16 = @intCast(@min(@max(rr.len, 1) + 1, inner.h));
+                if (rr.len == 0) self.screen.lines(inner, &.{"{d}no companies{/}"}, 0, null) else _ = try self.screen.table(al, .{ .x = inner.x, .y = inner.y, .w = inner.w, .h = th }, try q.tableOf(al, q.readiness_cols, rr), 0, null, &self.modal_colscroll);
+                if (inner.h > th + 1) self.screen.lines(.{ .x = inner.x, .y = inner.y + th + 1, .w = inner.w, .h = inner.h - th - 1 }, &.{"{d}fatigue falls only at a regional HQ; banked XP becomes skill at a training ground; depot hulls wait on a mek bay · Forces r shows one company in detail{/}"}, 0, null);
             },
             .raise_crews => {
                 const g = &self.gs.?;
                 var rows: std.ArrayListUnmanaged([]const u8) = .empty;
-                try rows.append(al, q.manning_header);
+                const mq = try q.manning(al, g, self.raise.company);
+                for (try (try q.tableOf(al, q.manning_cols, mq)).render(al), 0..) |ln, i| try rows.append(al, if (i == 0) try std.fmt.allocPrint(al, "{{d}}{s}{{/}}", .{ln}) else ln);
                 var open_total: u32 = 0;
-                for (try q.manning(al, g, self.raise.company)) |m| {
-                    try rows.append(al, m.text);
-                    open_total += m.need -| m.have;
-                }
+                for (mq) |m| open_total += m.need -| m.have;
                 try rows.append(al, "");
                 try rows.append(al, try std.fmt.allocPrint(al, "{d} open · the counts match a generated starter company of this shape", .{open_total}));
                 try rows.append(al, "  {a}[a]{/} hire from the halls now: a pilot per crewless hull and a tech where none has hours (signing bonuses from the outfit)");
@@ -1933,7 +1971,7 @@ pub const App = struct {
                 var rows: std.ArrayListUnmanaged([]const u8) = .empty;
                 if (idx < g.contract_offers.items.len) {
                     const c = g.contract_offers.items[idx];
-                    try rows.append(al, try std.fmt.allocPrint(al, "  {{a}}{s}{{/}} for {s} on {s} · {s}/mo · advance {d}% · salvage {d}% · transport {d}% · support {d}% · {s} rights", .{ @tagName(c.kind), c.employer_key, q.planetName(c.planet_key), try q.money(al, c.terms.base_pay_month), c.terms.advance_pct, c.terms.salvage_pct, c.terms.transport_pct, c.terms.overhead_pct, @tagName(c.terms.command_rights) }));
+                    try rows.append(al, try std.fmt.allocPrint(al, "  {{a}}{s}{{/}} for {s} on {s} · {s}/mo · advance {d}% · salvage {d}% · transport {d}% · support {d}% · {s} rights", .{ c.kind.label(), c.employer_key, q.planetName(c.planet_key), try q.money(al, c.terms.base_pay_month), c.terms.advance_pct, c.terms.salvage_pct, c.terms.transport_pct, c.terms.overhead_pct, @tagName(c.terms.command_rights) }));
                     try rows.append(al, "  {d}one round: 2d6 + reputation + your command office vs a target eased by standing with the employer · a miss shaves the pay 5% · a natural 2 and they walk{/}");
                     try rows.append(al, "");
                 }
@@ -1962,14 +2000,10 @@ pub const App = struct {
             .accept_pick => |oi| {
                 const g = &self.gs.?;
                 const cands = try q.offerCandidates(al, g, oi);
-                var rows: std.ArrayListUnmanaged([]const u8) = .empty;
-                try rows.append(al, q.candidates_header);
-                for (cands) |c| try rows.append(al, c.text);
-                if (cands.len == 0) try rows.append(al, "{d}no companies to send{/}");
                 if (self.modal_cursor >= cands.len and cands.len > 0) self.modal_cursor = cands.len - 1;
-                const r = self.modalRect(@min(self.screen.cols, 118), @intCast(@min(rows.items.len + 3, self.screen.rows)));
-                const inner = self.screen.pane(r, .{ .title = "SEND WHICH COMPANY · [Enter] choose · [Esc] cancel", .double = true, .right_title = "readiest first · depot, spent, wounded, fatigue and transit count against" });
-                self.screen.lines(inner, rows.items, 0, if (cands.len > 0) self.modal_cursor + 1 else null);
+                const r = self.modalRect(@min(self.screen.cols, 140), @intCast(@min(cands.len + 4, self.screen.rows)));
+                const inner = self.screen.pane(r, .{ .title = "SEND WHICH COMPANY · [Enter] choose · [←/→] columns · [Esc] cancel", .double = true, .right_title = "readiest first" });
+                if (cands.len == 0) self.screen.lines(inner, &.{"{d}no companies to send{/}"}, 0, null) else _ = try self.screen.table(al, inner, try q.tableOf(al, q.candidates_cols, cands), 0, self.modal_cursor, &self.modal_colscroll);
             },
             .lance_pick => |uid| {
                 const lances = try self.lanceChoices(uid);
@@ -1984,16 +2018,17 @@ pub const App = struct {
             .upgrade => |hid| {
                 const g = &self.gs.?;
                 const rows_v = try q.upgrades(al, g, hid);
-                var rows: std.ArrayListUnmanaged([]const u8) = .empty;
-                try rows.append(al, "facility         level        cost       paperwork + build   next level buys                              status");
-                for (rows_v) |r| try rows.append(al, r.text);
-                try rows.append(al, "");
-                try rows.append(al, try std.fmt.allocPrint(al, "{{d}}paid from the HQ treasury ({s} C) when the project starts · paperwork is admin_command staffing, +2 days per missing finance admin{{/}}", .{try q.money(al, if (g.hqs.getPtr(hid)) |h| h.funds else 0)}));
-                try rows.append(al, "{d}every level raises the staff the HQ must keep on payroll; understaffed HQs run a level lower{/}");
+                const notes = [_][]const u8{
+                    "",
+                    try std.fmt.allocPrint(al, "{{d}}paid from the HQ treasury ({s} C) when the project starts · paperwork is admin_command staffing, +2 days per missing finance admin{{/}}", .{try q.money(al, if (g.hqs.getPtr(hid)) |h| h.funds else 0)}),
+                    "{d}every level raises the staff the HQ must keep on payroll; understaffed HQs run a level lower{/}",
+                };
                 if (self.modal_cursor >= rows_v.len and rows_v.len > 0) self.modal_cursor = rows_v.len - 1;
-                const r = self.modalRect(@min(self.screen.cols, 130), @intCast(@min(rows.items.len + 3, self.screen.rows)));
-                const inner = self.screen.pane(r, .{ .title = try std.fmt.allocPrint(al, "UPGRADE · {s} · [Enter] start · [Esc] cancel", .{q.hqName(g, hid)}), .double = true, .right_title = "one project per facility at a time" });
-                self.screen.lines(inner, rows.items, 0, self.modal_cursor + 1);
+                const r = self.modalRect(@min(self.screen.cols, 140), @intCast(@min(rows_v.len + 1 + notes.len + 2, self.screen.rows)));
+                const inner = self.screen.pane(r, .{ .title = try std.fmt.allocPrint(al, "UPGRADE · {s} · [Enter] start · [←/→] columns · [Esc] cancel", .{q.hqName(g, hid)}), .double = true, .right_title = "one project per facility at a time" });
+                const th: u16 = @intCast(@min(rows_v.len + 1, inner.h));
+                _ = try self.screen.table(al, .{ .x = inner.x, .y = inner.y, .w = inner.w, .h = th }, try q.tableOf(al, q.upgrade_cols, rows_v), 0, if (rows_v.len > 0) self.modal_cursor else null, &self.modal_colscroll);
+                if (inner.h > th) self.screen.lines(.{ .x = inner.x, .y = inner.y + th, .w = inner.w, .h = inner.h - th }, &notes, 0, null);
             },
             .settings => {
                 const form = try self.settingsRows(al);
@@ -2570,8 +2605,12 @@ pub const App = struct {
             .backtab => self.focus = (self.focus + self.paneCount() - 1) % self.paneCount(),
             .down => try self.screenMove(1),
             .up => try self.screenMove(-1),
-            .left => if (self.tab == .map) try self.mapMove(-1, 0),
-            .right => if (self.tab == .map) try self.mapMove(1, 0),
+            .left => if (self.tab == .map) try self.mapMove(-1, 0) else if (self.focus_scroll) |sc| {
+                sc.* -|= 1;
+            },
+            .right => if (self.tab == .map) try self.mapMove(1, 0) else if (self.focus_scroll) |sc| {
+                sc.* += 1;
+            },
             .pgdn => try self.screenMove(10),
             .pgup => try self.screenMove(-10),
             .enter => try self.screenEnter(),
@@ -3729,7 +3768,7 @@ pub const App = struct {
     }
 
     /// The generic picker's rows, title and header for whichever pick modal is up.
-    const PickView = struct { title: []const u8, header: []const u8, rows: []q.PickRow, empty: []const u8 };
+    const PickView = struct { title: []const u8, cols: []const q.Col, rows: []q.PickRow, empty: []const u8 };
 
     fn pickView(self: *App, al: std.mem.Allocator) !PickView {
         const g = &self.gs.?;
@@ -3740,7 +3779,7 @@ pub const App = struct {
                     .person => try q.personName(al, g, @enumFromInt(pc.id)),
                     .stock => pc.key_buf[0..pc.key_len],
                 }}),
-                .header = q.company_pick_header,
+                .cols = q.company_pick_cols,
                 .rows = try q.companyChoices(al, g, switch (pc.what) {
                     .unit => .unit,
                     .person => .person,
@@ -3750,19 +3789,19 @@ pub const App = struct {
             },
             .pick_hq => |pid| .{
                 .title = try std.fmt.allocPrint(al, "POST {s} AT · [Enter] choose · [Esc] cancel", .{try q.personName(al, g, pid)}),
-                .header = q.hq_pick_header,
+                .cols = q.hq_pick_cols,
                 .rows = try q.hqChoices(al, g, pid),
                 .empty = "no HQ",
             },
             .pick_crew => |uid| .{
                 .title = try std.fmt.allocPrint(al, "CREW #{d} · [Enter] assign · [Esc] cancel", .{@intFromEnum(uid)}),
-                .header = q.crew_pick_header,
+                .cols = q.crew_pick_cols,
                 .rows = try q.crewChoices(al, g, uid),
                 .empty = "nobody of the right role on the books — hire from a hall (HQ screen)",
             },
             .pick_unassign => |uid| .{
                 .title = try std.fmt.allocPrint(al, "UNASSIGN FROM #{d} · [Enter] clear · [Esc] cancel", .{@intFromEnum(uid)}),
-                .header = "",
+                .cols = q.unassign_pick_cols,
                 .rows = try q.unassignChoices(al, g, uid),
                 .empty = "nobody is assigned to this hull",
             },
@@ -3774,7 +3813,7 @@ pub const App = struct {
                     .sell => "SELL WHICH PART",
                     .fabricate => "FABRICATE WHICH COMPONENT",
                 }}),
-                .header = q.part_pick_header,
+                .cols = q.part_pick_cols,
                 .rows = try q.partChoices(al, g, pp.purpose, pp.site),
                 .empty = switch (pp.purpose) {
                     .ship, .sell => "nothing on this shelf",
@@ -3787,16 +3826,14 @@ pub const App = struct {
 
     fn drawPick(self: *App, al: std.mem.Allocator) !void {
         const v = try self.pickView(al);
-        var rows: std.ArrayListUnmanaged([]const u8) = .empty;
-        const has_header = v.header.len > 0;
-        if (has_header) try rows.append(al, v.header);
-        for (v.rows) |r| try rows.append(al, r.text);
-        if (v.rows.len == 0) try rows.append(al, try std.fmt.allocPrint(al, "{{d}}{s}{{/}}", .{v.empty}));
         if (self.modal_cursor >= v.rows.len and v.rows.len > 0) self.modal_cursor = v.rows.len - 1;
-        const r = self.modalRect(@min(self.screen.cols, 100), @intCast(@min(rows.items.len + 3, self.screen.rows)));
-        const inner = self.screen.pane(r, .{ .title = v.title, .double = true, .right_title = "best first · dimmed rows say why not" });
-        const off: usize = if (has_header) 1 else 0;
-        self.screen.lines(inner, rows.items, if (rows.items.len > inner.h) firstRow(self.modal_cursor + off, inner.h) else 0, if (v.rows.len > 0) self.modal_cursor + off else null);
+        const r = self.modalRect(@min(self.screen.cols, 120), @intCast(@min(v.rows.len + 4, self.screen.rows)));
+        const inner = self.screen.pane(r, .{ .title = v.title, .double = true, .right_title = "best first · dimmed rows say why not · [←/→] columns" });
+        if (v.rows.len == 0) {
+            self.screen.lines(inner, &.{try std.fmt.allocPrint(al, "{{d}}{s}{{/}}", .{v.empty})}, 0, null);
+            return;
+        }
+        _ = try self.screen.table(al, inner, try q.tableOf(al, v.cols, v.rows), firstRow(self.modal_cursor, inner.h -| 1), self.modal_cursor, &self.modal_colscroll);
     }
 
     fn pickEnter(self: *App) !void {
@@ -4069,7 +4106,12 @@ pub const App = struct {
                 },
                 else => {},
             },
-            .help, .hull, .record, .readiness, .summary => self.modal = .none,
+            .readiness => switch (key) {
+                .left => self.modal_colscroll -|= 1,
+                .right => self.modal_colscroll += 1,
+                else => self.modal = .none,
+            },
+            .help, .hull, .record, .summary => self.modal = .none,
             .raise_hulls => switch (key) {
                 .escape => {
                     self.modal = .none;
@@ -4210,6 +4252,8 @@ pub const App = struct {
                 .escape => self.modal = .none,
                 .down => self.modal_cursor +|= 1,
                 .up => self.modal_cursor -|= 1,
+                .left => self.modal_colscroll -|= 1,
+                .right => self.modal_colscroll += 1,
                 .enter => try self.pickEnter(),
                 .char => |ch| switch (ch) {
                     'j' => self.modal_cursor +|= 1,
@@ -4222,6 +4266,8 @@ pub const App = struct {
                 .escape => self.modal = .none,
                 .down => self.modal_cursor +|= 1,
                 .up => self.modal_cursor -|= 1,
+                .left => self.modal_colscroll -|= 1,
+                .right => self.modal_colscroll += 1,
                 .enter => {
                     const g = &self.gs.?;
                     const cands = try q.offerCandidates(self.a(), g, oi);
@@ -4266,6 +4312,8 @@ pub const App = struct {
                 .escape => self.modal = .none,
                 .down => self.modal_cursor +|= 1,
                 .up => self.modal_cursor -|= 1,
+                .left => self.modal_colscroll -|= 1,
+                .right => self.modal_colscroll += 1,
                 .enter => {
                     const rows = try q.upgrades(self.a(), &self.gs.?, hid);
                     if (rows.len == 0) return;
@@ -4769,12 +4817,5 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, env: *const std.process.Environ.M
         }
     };
     try app.run();
-}
-
-test "size tiers follow the documented thresholds" {
-    try std.testing.expectEqual(Tier.full, tierFor(200, 50));
-    try std.testing.expectEqual(Tier.wide, tierFor(170, 45));
-    try std.testing.expectEqual(Tier.compact, tierFor(118, 36));
-    try std.testing.expectEqual(Tier.minimum, tierFor(80, 24));
 }
 

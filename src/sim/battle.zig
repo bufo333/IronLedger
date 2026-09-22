@@ -332,7 +332,7 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     if (player.engaged.items.len == 0) {
         c.score -= 2;
         c.victory_points -= 10;
-        try gs.log(.battle, .{ .company = c.assigned_company, .contract = c.id }, "[AAR] {s}: no combat-effective units — objective conceded", .{@tagName(c.kind)});
+        try gs.log(.battle, .{ .company = c.assigned_company, .contract = c.id }, "[AAR] {s}: no combat-effective units — objective conceded", .{c.kind.label()});
         return;
     }
 
@@ -705,7 +705,7 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
 
     const ctx: @import("state.zig").LogCtx = .{ .company = c.assigned_company, .contract = c.id };
     try gs.log(.battle, ctx, "[AAR] {s} vs {s} — {s} on {s}, {s}: {s} — power {d} vs {d} (recon {d}, fatigue {d}, morale {d}{s}{s}{s}){s}{s}{s}", .{
-        @tagName(c.kind),        c.enemy_key,            scenario.name,
+        c.kind.label(),        c.enemy_key,            scenario.name,
         terrain_mod.terrainRow(env.terrain).name, terrain_mod.weatherRow(env.weather).name,
         @tagName(outcome),       player.power,           enemy_power,
         player.mods.recon_quality, player.mods.avg_fatigue, player.mods.avg_morale,

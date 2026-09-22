@@ -527,8 +527,8 @@ fn printReadiness(gs: *game.state.GameState) void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const rows = game.queries.readiness(arena.allocator(), gs) catch return;
-    std.debug.print("{s}\n", .{game.queries.readiness_header});
-    for (rows) |r| std.debug.print("{s}\n", .{game.queries.stripMarks(arena.allocator(), r.text) catch r.text});
+    const al = arena.allocator();
+    for ((game.queries.tableOf(al, game.queries.readiness_cols, rows) catch return).render(al) catch return) |ln| std.debug.print("{s}\n", .{game.queries.stripMarks(al, ln) catch ln});
     for (rows) |r| {
         std.debug.print("\n[{d}] {s}\n", .{ @intFromEnum(r.company), game.queries.forceName(gs, r.company) });
         const lines = game.queries.readinessLines(arena.allocator(), gs, r.company) catch continue;
@@ -845,8 +845,9 @@ fn printHangar(gs: *game.state.GameState) void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const rows = game.queries.hangar(arena.allocator(), gs) catch return;
-    std.debug.print("hangar ({d} hulls, worst value first — bill per point of contribution):\n{s}\n", .{ rows.len, game.queries.hangar_header });
-    for (rows) |r| std.debug.print("  {s}\n", .{game.queries.stripMarks(arena.allocator(), r.text) catch r.text});
+    const al = arena.allocator();
+    std.debug.print("hangar ({d} hulls, worst value first — bill per point of contribution):\n", .{rows.len});
+    for ((game.queries.tableOf(al, game.queries.hangar_cols, rows) catch return).render(al) catch return) |ln| std.debug.print("  {s}\n", .{game.queries.stripMarks(al, ln) catch ln});
 }
 
 fn totalHullUpkeep(gs: *game.state.GameState) i64 {
@@ -1057,8 +1058,8 @@ fn runRepl(gs: *game.state.GameState, io: std.Io, gpa: std.mem.Allocator, store_
             const idx = std.fmt.parseInt(usize, tokens.next() orelse "0", 10) catch 0;
             var arena = std.heap.ArenaAllocator.init(gpa);
             defer arena.deinit();
-            std.debug.print("{s}\n", .{game.queries.candidates_header});
-            for (try game.queries.offerCandidates(arena.allocator(), gs, idx)) |c| std.debug.print("{s}\n", .{game.queries.stripMarks(arena.allocator(), c.text) catch c.text});
+            const al = arena.allocator();
+            for (try (try game.queries.tableOf(al, game.queries.candidates_cols, try game.queries.offerCandidates(al, gs, idx))).render(al)) |ln| std.debug.print("{s}\n", .{game.queries.stripMarks(al, ln) catch ln});
         } else if (std.mem.eql(u8, verb, "readiness")) {
             printReadiness(gs);
         } else if (std.mem.eql(u8, verb, "rating")) {
@@ -1218,9 +1219,10 @@ fn runRepl(gs: *game.state.GameState, io: std.Io, gpa: std.mem.Allocator, store_
             }
             var arena = std.heap.ArenaAllocator.init(gpa);
             defer arena.deinit();
-            std.debug.print("{s}\n", .{game.queries.manning_header});
-            for (game.queries.manning(arena.allocator(), gs, site.?.company) catch continue) |row| {
-                std.debug.print("{s}\n", .{game.queries.stripMarks(arena.allocator(), row.text) catch row.text});
+            const al = arena.allocator();
+            const mrows = game.queries.manning(al, gs, site.?.company) catch continue;
+            for ((game.queries.tableOf(al, game.queries.manning_cols, mrows) catch continue).render(al) catch continue) |ln| {
+                std.debug.print("{s}\n", .{game.queries.stripMarks(al, ln) catch ln});
             }
         } else if (std.mem.eql(u8, verb, "help") or std.mem.eql(u8, verb, "?")) {
             for (game.cli.verbs) |v| std.debug.print("  {s}\n", .{game.cli.usage(v) orelse v});

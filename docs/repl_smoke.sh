@@ -32,7 +32,7 @@ out=$(printf '%s\n' \
 check() { echo "$out" | grep -q -- "$1" || { echo "MISSING: $1"; echo "$out" | tail -40; exit 1; }; }
 check 'no air wing slot'
 check 'CapacityFull'
-check 'role              have  need'
+check 'role .*have  need'
 check 'banked XP'
 check 'Dragoons rating'
 check 'RATING BY YEAR'

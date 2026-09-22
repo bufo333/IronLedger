@@ -55,6 +55,7 @@ pub const checklist = @import("sim/checklist.zig");
 pub const network = @import("sim/network.zig");
 pub const contract_control = @import("sim/contract_control.zig");
 pub const queries = @import("sim/queries.zig");
+pub const table = @import("sim/table.zig");
 
 // persist/ — SQLite save files (Stage 11)
 pub const sqlite = @import("persist/sqlite.zig");

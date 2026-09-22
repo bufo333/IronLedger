@@ -220,7 +220,7 @@ pub fn rollWeekly(gs: *GameState) !void {
         const ctx: @import("state.zig").LogCtx = .{ .company = c.assigned_company, .contract = c.id };
         if (deck.options.len == 0) {
             try applyEffects(gs, deck.auto_effects, c);
-            try gs.log(.contract, ctx, "[{s}] (2d6 = {d}) {s}{s}", .{ @tagName(c.kind), roll, deck.log, try effectsPlain(gs, deck.auto_effects) });
+            try gs.log(.contract, ctx, "[{s}] (2d6 = {d}) {s}{s}", .{ c.kind.label(), roll, deck.log, try effectsPlain(gs, deck.auto_effects) });
         } else try queueDecision(gs, deck, c, roll);
     }
 }
@@ -264,7 +264,7 @@ fn queueDecision(gs: *GameState, deck: Entry, c: *contract_mod.Contract, roll: u
     if (mem.value_ptr.streak >= tuning.contract.standing_order_after and mem.value_ptr.last_choice < deck.options.len) {
         const opt = deck.options[mem.value_ptr.last_choice];
         try applyEffects(gs, opt.effects, c);
-        try gs.log(.contract, ctx, "[{s}] (2d6 = {d}) {s} — standing order: \"{s}\"{s} (`sop clear {s}` to be asked again)", .{ @tagName(c.kind), roll, deck.log, opt.label, try effectsPlain(gs, opt.effects), @tagName(deck.kind) });
+        try gs.log(.contract, ctx, "[{s}] (2d6 = {d}) {s} — standing order: \"{s}\"{s} (`sop clear {s}` to be asked again)", .{ c.kind.label(), roll, deck.log, opt.label, try effectsPlain(gs, opt.effects), @tagName(deck.kind) });
         return;
     }
     try gs.event_queue.push(gs.allocator(), .{
@@ -276,7 +276,7 @@ fn queueDecision(gs: *GameState, deck: Entry, c: *contract_mod.Contract, roll: u
         .default_choice = deck.default_choice,
         .deadline_day = gs.clock.day_index + decision_window_days,
     });
-    try gs.log(.decision, ctx, "[{s}] DECISION: {s} (inbox, {d} days to answer)", .{ @tagName(c.kind), deck.log, decision_window_days });
+    try gs.log(.decision, ctx, "[{s}] DECISION: {s} (inbox, {d} days to answer)", .{ c.kind.label(), deck.log, decision_window_days });
 }
 
 /// " — fatigue +3, morale −2" for an automatic event's log line.
@@ -327,7 +327,7 @@ pub fn rollMonthly(gs: *GameState) !void {
         const ctx: @import("state.zig").LogCtx = .{ .company = c.assigned_company, .contract = c.id };
         if (deck.options.len == 0) {
             try applyEffects(gs, deck.auto_effects, c);
-            try gs.log(.contract, ctx, "[{s}] (2d6 = {d}) {s}{s}", .{ @tagName(c.kind), roll, deck.log, try effectsPlain(gs, deck.auto_effects) });
+            try gs.log(.contract, ctx, "[{s}] (2d6 = {d}) {s}{s}", .{ c.kind.label(), roll, deck.log, try effectsPlain(gs, deck.auto_effects) });
         } else try queueDecision(gs, deck, c, roll);
     }
 }
