@@ -40,14 +40,29 @@ pub const SlotResult = enum {
     }
 };
 
-/// What became of the hull's crew. One value, not a sentence, so the
-/// screens can count and colour without reading prose.
-pub const CrewOutcome = union(enum) {
-    unhurt,
-    wounded: struct { severity: u8, location: person_mod.InjuryLocation, permanent: bool },
-    kia,
-    /// Left on a lost field and taken (12D.3): ransom, trade or write-off.
-    missing,
+/// What became of the hull's crew, as fields rather than a sentence, so
+/// the screens can count and colour without reading prose.
+///
+/// A wound and a fate are **independent**: a pilot hit in the fight can
+/// still be left on the field and taken, and the AAR has always said both
+/// ("… wounded (light torso); … MIA (held by DC)"). A tagged union here
+/// would quietly drop one of them.
+pub const CrewOutcome = struct {
+    wound: ?Wound = null,
+    fate: Fate = .unhurt,
+
+    pub const Wound = struct { severity: u8, location: person_mod.InjuryLocation, permanent: bool };
+    pub const Fate = enum {
+        unhurt,
+        kia,
+        /// Left on a lost field and taken (12D.3): ransom, trade or write-off.
+        missing,
+    };
+
+    /// Nothing to report for this seat.
+    pub fn untouched(self: CrewOutcome) bool {
+        return self.wound == null and self.fate == .unhurt;
+    }
 };
 
 /// One recorded hit: which hull, what it lost, what happened to the crew.
@@ -66,7 +81,7 @@ pub const HullHit = struct {
     cause: unit_mod.WreckCause = .none,
     pilot: types.PersonId = .none,
     crew_name: []const u8 = "",
-    crew: CrewOutcome = .unhurt,
+    crew: CrewOutcome = .{},
     /// A lost field (12D.3): the recovery roll and the target it needed.
     recovery: ?struct { roll: i32, target: i32 } = null,
     /// The recovery roll missed: the hull is the enemy's.
@@ -74,7 +89,7 @@ pub const HullHit = struct {
 
     /// Nothing but paint (the AAR says so rather than listing a bare hull).
     pub fn armorOnly(self: *const HullHit) bool {
-        return !self.destroyed and self.slot == null and self.crew == .unhurt;
+        return !self.destroyed and self.slot == null and self.crew.untouched();
     }
 };
 
@@ -207,8 +222,8 @@ pub fn render(alloc: std.mem.Allocator, r: *const BattleReport) ![]const []const
             if (h.destroyed) try std.fmt.allocPrint(alloc, "DESTROYED ({s}) · ", .{h.cause.label()}) else "",
             h.armor_before,       h.armor_after,
             if (h.slot) |sk| try std.fmt.allocPrint(alloc, " · {s} ({s}) {s}{s}", .{ sk, h.slot_part, h.slot_result.label(), try recoveryText(alloc, h) }) else try recoveryText(alloc, h),
-            if (h.crew != .unhurt) " · " else "",
-            if (h.crew != .unhurt) try crewText(alloc, h) else "",
+            if (h.crew.untouched()) "" else " · ",
+            if (h.crew.untouched()) "" else try crewText(alloc, h, r.enemy_key),
             if (h.armorOnly()) " · armor only" else "",
         }));
     }
@@ -255,15 +270,23 @@ fn recoveryText(alloc: std.mem.Allocator, h: *const HullHit) ![]const u8 {
     return try std.fmt.allocPrint(alloc, " · field lost · recovery {d} vs {d} — {s}", .{ rec.roll, rec.target, if (h.lost) "LEFT TO THE ENEMY" else "dragged off" });
 }
 
-/// "Lori Kalmar wounded (serious torso)" / "… KIA" / "… MIA (held by DC)".
-/// The one place a `CrewOutcome` becomes words.
-fn crewText(alloc: std.mem.Allocator, h: *const HullHit) ![]const u8 {
-    return switch (h.crew) {
-        .unhurt => "",
-        .kia => try std.fmt.allocPrint(alloc, "{s} KIA", .{h.crew_name}),
-        .missing => h.crew_name, // already carries the captor (built at capture)
-        .wounded => |w| try std.fmt.allocPrint(alloc, "{s} wounded ({s} {s}{s})", .{ h.crew_name, medical.severityLabel(w.severity), @tagName(w.location), if (w.permanent) ", permanent" else "" }),
-    };
+/// "Lori Kalmar wounded (serious torso)" / "… KIA" / "… MIA (held by DC)",
+/// and the wounded-then-taken pair joined with "; ". The one place a
+/// `CrewOutcome` becomes words.
+fn crewText(alloc: std.mem.Allocator, h: *const HullHit, enemy_key: []const u8) ![]const u8 {
+    var out: std.ArrayListUnmanaged(u8) = .empty;
+    if (h.crew.wound) |w| {
+        try out.appendSlice(alloc, try std.fmt.allocPrint(alloc, "{s} wounded ({s} {s}{s})", .{ h.crew_name, medical.severityLabel(w.severity), @tagName(w.location), if (w.permanent) ", permanent" else "" }));
+    }
+    switch (h.crew.fate) {
+        .unhurt => {},
+        .kia => try out.appendSlice(alloc, try std.fmt.allocPrint(alloc, "{s} KIA", .{h.crew_name})),
+        .missing => {
+            if (out.items.len > 0) try out.appendSlice(alloc, "; ");
+            try out.appendSlice(alloc, try std.fmt.allocPrint(alloc, "{s} MIA (held by {s})", .{ h.crew_name, enemy_key }));
+        },
+    }
+    return out.items;
 }
 
 test "render turns a report into the AAR lines, with no markup" {
@@ -273,7 +296,7 @@ test "render turns a report into the AAR lines, with no markup" {
 
     const hulls = [_]HullHit{
         .{ .unit = @enumFromInt(14), .chassis_key = "SHD-2H", .chassis_name = "Shadow Hawk", .armor_before = 78, .armor_after = 31, .slot = "RT", .slot_part = "actuator", .slot_result = .destroyed },
-        .{ .unit = @enumFromInt(17), .chassis_key = "LCT-1V", .chassis_name = "Locust", .armor_before = 44, .armor_after = 0, .destroyed = true, .cause = .ammo, .crew_name = "Cpl Petrov", .crew = .kia },
+        .{ .unit = @enumFromInt(17), .chassis_key = "LCT-1V", .chassis_name = "Locust", .armor_before = 44, .armor_after = 0, .destroyed = true, .cause = .ammo, .crew_name = "Cpl Petrov", .crew = .{ .fate = .kia } },
     };
     const ammo = [_]AmmoLine{.{ .key = "ammo_lrm", .burned = 9, .left = 2 }};
     const r: BattleReport = .{

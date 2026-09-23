@@ -247,6 +247,9 @@ pub const GameState = struct {
     part_orders: std.ArrayListUnmanaged(part_mod.AcquisitionOrder) = .empty,
     /// Structured campaign log — newest last (Stage 9A).
     event_log: std.ArrayListUnmanaged(LogEntry) = .empty,
+    /// Stamped onto each resolved engagement (12G.3), so an AAR's lines
+    /// can be gathered by battle rather than by reading their prefix.
+    next_battle_id: u32 = 1,
     /// Money in transit between treasuries.
     fund_couriers: std.ArrayListUnmanaged(FundCourier) = .empty,
     /// Standing top-up policies, checked daily under a monthly cap.
@@ -1836,6 +1839,13 @@ pub const GameState = struct {
         var owed: types.CBills = 0;
         for (self.loans.items) |l| owed += l.balance;
         return @max(0, self.creditLimit() - owed);
+    }
+
+    /// The next engagement's id (12G.3); never reused within a campaign.
+    pub fn nextBattleId(self: *GameState) types.BattleId {
+        const id: types.BattleId = @enumFromInt(self.next_battle_id);
+        self.next_battle_id += 1;
+        return id;
     }
 
     /// Strike a hull from the books: seats open, bay work and refit plans
