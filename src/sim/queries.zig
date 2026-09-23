@@ -1044,6 +1044,9 @@ pub const HangarRow = struct {
     cost_index: u64,
     /// Why it earns what it earns, decided once with the contribution.
     why: []const u8,
+    /// The enemy holds this hull (12G.7): it is not in `gs.units`, so the
+    /// row's unit is read from the limbo list instead.
+    held: bool = false,
     cells: table.Row,
 };
 
@@ -1055,7 +1058,8 @@ pub const hangar_cols: []const table.Col = &.{
 /// The hangar as a portfolio (GAMEPLAY "the roster ranks meks by what
 /// they cost against what they contribute"): every owned hull, worst
 /// value first. A mothballed hull bills a fifth and contributes nothing; a
-/// pilotless or wrecked one bills in full for nothing.
+/// pilotless or wrecked one bills in full for nothing. Hulls the enemy
+/// holds (12G.7) are listed last: a standing claim, not an asset.
 /// What a house asks for one of yours (12D.3; the 12B.7 ransom table).
 pub const missingRansom = contract_events.ransomPrice;
 
@@ -1120,6 +1124,20 @@ pub fn hangar(alloc: Alloc, gs: *GameState) ![]HangarRow {
         const cost_index: u64 = if (exempt) 0 else if (contribution == 0) std.math.maxInt(u32) else @as(u64, @intCast(bill)) * 100 / contribution;
         try out.append(alloc, .{ .unit = u.id, .bill = bill, .contribution = contribution, .cost_index = cost_index, .why = why, .cells = &.{} });
     }
+    // Hulls the enemy holds (12G.7) are still the company's claim, so the
+    // portfolio names them — but they cost nothing and contribute nothing,
+    // so they rank nowhere and sit at the bottom.
+    for (gs.held_hulls.items) |*h| {
+        try out.append(alloc, .{
+            .unit = h.unit.id,
+            .bill = 0,
+            .contribution = 0,
+            .cost_index = 0,
+            .why = try std.fmt.allocPrint(alloc, "{{c}}held by {s} — left on a lost field day {d}{{/}}", .{ h.by, h.day }),
+            .held = true,
+            .cells = &.{},
+        });
+    }
     std.mem.sort(HangarRow, out.items, {}, struct {
         fn lt(_: void, a: HangarRow, b: HangarRow) bool {
             if (a.cost_index != b.cost_index) return a.cost_index > b.cost_index;
@@ -1127,7 +1145,7 @@ pub fn hangar(alloc: Alloc, gs: *GameState) ![]HangarRow {
         }
     }.lt);
     for (out.items) |*row| {
-        const u = gs.unit(row.unit).?;
+        const u = if (row.held) &gs.heldHull(row.unit).?.unit else gs.unit(row.unit).?;
         const ch = chassis_mod.find(u.chassis_key);
         const why = row.why;
         const idx_text: []const u8 = if (row.cost_index == 0) "—" else if (row.contribution == 0) "{c}∞{/}" else try std.fmt.allocPrint(alloc, "{d}", .{row.cost_index});
@@ -1138,7 +1156,7 @@ pub fn hangar(alloc: Alloc, gs: *GameState) ![]HangarRow {
             try money(alloc, row.bill),
             try std.fmt.allocPrint(alloc, "{d} BV", .{row.contribution}),
             idx_text,
-            forceName(gs, gs.companyOf(u.force)),
+            if (row.held) "{c}enemy hands{/}" else forceName(gs, gs.companyOf(u.force)),
             why,
         });
     }
@@ -3782,6 +3800,45 @@ test "12.20: the hangar ranks a pilotless hull above one earning its keep, mothb
     try std.testing.expect(best != null and best.?.cost_index < std.math.maxInt(u32));
     const view = try toeFiltered(a, &gs, .hangar);
     try std.testing.expect(view.len == rows.len + 2);
+}
+
+test "12G.7: the hangar names a hull the enemy holds — a claim, not an asset" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 12007 });
+    defer gs.deinit();
+    _ = try gs.createCommander("T", .LC, .paymaster);
+    _ = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const taken = blk: {
+        var it = gs.units.iterator();
+        while (it.next()) |e| if (e.value_ptr.kind == .mek) break :blk e.value_ptr.id;
+        unreachable;
+    };
+    const owned_before = gs.units.count();
+    const billed_before = gs.monthlyHullUpkeep();
+    try gs.holdUnit(taken, "DC", @enumFromInt(7));
+
+    // Off the books: gone from `units`, gone from its lance, billing
+    // nothing — the whole point of holding rather than keeping.
+    try std.testing.expectEqual(owned_before - 1, gs.units.count());
+    try std.testing.expect(gs.unit(taken) == null);
+    try std.testing.expect(gs.monthlyHullUpkeep() < billed_before);
+    try std.testing.expect(gs.heldHull(taken) != null);
+
+    // But the portfolio still names it, ranked nowhere and costing nothing.
+    const rows = try hangar(a, &gs);
+    try std.testing.expectEqual(gs.units.count() + gs.held_hulls.items.len, rows.len);
+    var held_row: ?HangarRow = null;
+    for (rows) |r| if (r.unit == taken) {
+        held_row = r;
+    };
+    try std.testing.expect(held_row != null);
+    try std.testing.expect(held_row.?.held);
+    try std.testing.expectEqual(@as(types.CBills, 0), held_row.?.bill);
+    try std.testing.expectEqual(@as(u64, 0), held_row.?.cost_index);
+    try std.testing.expect(std.mem.indexOf(u8, held_row.?.why, "held by DC") != null);
+    try std.testing.expect(held_row.?.cells.len == hangar_cols.len);
 }
 
 /// Standing orders (play feedback): every decision kind the inbox has

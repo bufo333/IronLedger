@@ -1102,7 +1102,8 @@ CamOps/MekHQ/TechManual rules, scaled by difficulty.
   engagement against the contract's opposition), pay them off (100k), or
   divert and wait them out (+7 days, the default; `Effect.delay_arrival`).
   Deferred: a "recovery raid" decision to win back hulls left on a lost
-  field (needs the lost hulls held in limbo rather than struck off).
+  field. The limbo it needed now exists (12G.7); the decision itself is
+  still open.
 
 ## Stage 12E — Judging a contract (planned 2026-09-21)
 
@@ -1197,6 +1198,59 @@ The TUI plays on any terminal from ~100×30 up; a big one just shows more.
   right one; a modal's scroll resets when it closes.
 - ☐ 12F.6 **Drop a column before scrolling** when a table names one
   droppable, for screens that read better without the tail than scrolled.
+
+## Stage 12G — After-action (2026-09-23)
+Battles resolved invisibly inside the daily tick and left only prose in
+the campaign log: everything that would make a fight legible was computed
+and then thrown away. The fight is now a record the game keeps, a sheet
+the player reads, and a turn that stops until they have.
+
+- ✅ 12G.1 **Engagements and decisions have ids.** `types.BattleId` and
+  `types.EventId`; the inbox answers by id, not by row index, so an
+  `orderedRemove` between the draw and the keypress can no longer resolve
+  the wrong decision.
+- ✅ 12G.2 **One bar helper, and armour that shows.** `screen.bar` and
+  `queries.barText` were byte-identical across the layer boundary; the
+  single helper now lives in `sim/table.zig` (below `queries`, rule 2)
+  and both re-export it. `armorMark`/`armorBar`/`armorPct` band armour
+  once (`tuning.unit.armor_amber_pct` / `armor_red_pct`) — the game's
+  first armour meters.
+- ✅ 12G.3 **The record.** `sim/after_action.zig` owns `BattleReport`,
+  `HullHit`, `CrewOutcome`, `AmmoLine`, `SalvageManifest` and the one
+  place a battle becomes prose (`render`, which emits no markup).
+  `resolveEngagement` shrank 434 → 186 lines behind five named phases
+  (`openingRoll`, `applyHits`, `recoverWrecks`, `takePrisoners`,
+  `aftermath`), and the eight inline `gs.log` calls became one loop over
+  the rendered lines. MekHQ counterpart: `AtBScenario` resolution.
+- ✅ 12G.4 **Reports kept, listed and read.** `after_action.Journal`
+  holds the last `tuning.battle.reports_kept` fights; `battles` lists
+  them and Enter opens a four-pane full-screen sheet — outcome and the
+  roll that decided it, ammunition burned against what is left, every
+  hull's armour before → after with what broke and what became of its
+  pilot, and the salvage. Falls back to a scrollable list below
+  `narrow_cols`.
+- ✅ 12G.5 **An unread after-action holds the turn.** `advance` refuses
+  to start with a report unread (`ReportUnread`) and returns early on the
+  day one lands, so a week-long advance stops at the battle; a blocking
+  `checklist` warning names it; `read <id>` clears it. The first rule
+  besides insolvency that actually stops a turn (ARCH §6: dials never
+  block, battle decisions do).
+- ☐ 12G.6 **The four decisions.** Salvage priority (a candidate set
+  against the haul budget, rather than the RAT rolling two wrecks at
+  claim time), go back for the downed, press the advance or consolidate,
+  and which hull the techs take first.
+- ✅ 12G.7 **Hulls held, not struck off.** A hull left on a lost field
+  passes into enemy hands instead of being deleted: `GameState.holdUnit`
+  moves it out of `units` into `held_hulls` (`unit.HeldHull`), so every
+  walker over `units` is right by construction — no bill, no seat, no
+  lance. The hangar still names it as a standing claim, and the store
+  round-trips it in the `unit` table, told apart by a non-empty
+  `held_by`. Discharges the 12D.9 deferral: the recovery raid now has
+  something to win back.
+- ☐ 12G.8 **The pre-battle contact warning.** `tuning.battle.contact_warning_days`
+  out, showing the skull rating, fieldable strength and ammunition state
+  while the ROE and recall commands can still change the outcome.
+  Non-blocking: a heads-up, not an obligation.
 
 ## Stage 13 — Graphical client
 Architected after the TUI ships, reusing the same command/query boundary.
