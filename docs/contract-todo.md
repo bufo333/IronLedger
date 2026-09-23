@@ -268,10 +268,11 @@ whitelisted imports; the help modal indexes its legend row by number
 - [ ] move each screen's five functions and its private helpers into `src/tui/screens/<tab>.zig` (the App helpers they call become `pub`); `drawWizard` into per-step functions.
 - [ ] **one key table per screen** (rule 22): the footers are in `screen_table`; pane right-titles, modal titles, help rows and in-pane hints still carry their own key text; `docs/tui.md` key table generated or checked by the smoke.
 
-## D13. Tests and CI (rules 37-40)
+## D13. Tests and CI (rules 37-40) — PR #21
 
 - [x] `term.zig` (and `layout.zig`) added to the test block in `src/main.zig` (PR #16).
-- [x] The emblem-editor smoke step (tui_smoke.py ~236-242) was timing-flaky: it now waits for text (`wait_for`) instead of sleeping (PR #8).
-- [ ] Smoke coverage: delete-player and delete-campaign confirms, disband and sell-HQ confirms, game-over path, music modal, resize, the 80-120 column boundary, `←/→` column scrolling on each table screen, every refusal branch of a confirm.
-- [ ] `.github/workflows/ci.yml`: `zig build test --summary all` plus both smokes on push and pull request.
-- [ ] Golden-master hash test (rule 40) if not already present.
+- [x] The emblem-editor smoke step (tui_smoke.py) was timing-flaky: it now waits for text (`wait_for`) instead of sleeping (PR #8).
+- [x] Smoke coverage added: delete-player and delete-campaign name-mismatch refusals, the sell-HQ and disband confirms (open, Esc keeps), ←/→ column scrolling on the contracts board, and a mid-session resize (SIGWINCH to 110 columns, borders fit the new width). The music modal, the 80x24 `--ascii` pass and the fire/sell-hull confirms were already covered.
+- [ ] Still uncovered: the game-over path (needs a bankrupt save), the 120-column boundary exactly, and the refusal branch of each confirm once run (they open and close only).
+- [x] `.github/workflows/ci.yml`: `zig build test --summary all` plus both smokes on push and pull request (Zig 0.16.0 via `mlugg/setup-zig`, `libsqlite3-dev`).
+- [x] Golden-master tests exist (`commands.zig` "same seed + same script = same state hash", `company_gen.zig`, and the store round-trip hash); rule 40 is a stated gate.
