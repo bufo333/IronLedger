@@ -904,9 +904,10 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     // Kept so the screens can show the fight as a picture (12G.4); the
     // AAR lines above are the permanent account and are never pruned.
     try gs.battle_reports.record(gs.allocator(), report);
-    // Hulls left on the field are gone for good (12D.3) — struck off once
-    // the AAR has named them.
-    for (hit_log.items) |h| if (h.lost) gs.removeUnit(h.unit);
+    // Hulls left on the field pass into enemy hands (12D.3/12G.7) — off
+    // our books once the AAR has named them, but held, not struck off:
+    // a recovery raid has something to win back.
+    for (hit_log.items) |h| if (h.lost) try gs.holdUnit(h.unit, c.enemy_key, report.id);
 
     // Objectives (Stage 9E): the pool shrinks, VP accrue, and a broken pool
     // completes the contract.
@@ -1315,7 +1316,7 @@ test "12B.2: salvage exchange pays cash into local funds and ships no wreck" {
 
 /// Hulls of `co` wrecked or lost over `n` hopeless engagements at a
 /// difficulty (12D.3 test helper).
-fn lossRun(seed: u64, level: @import("../domain/difficulty.zig").Level, n: u32) !struct { lost: u32, wrecks_kept: u32, missing: u32 } {
+fn lossRun(seed: u64, level: @import("../domain/difficulty.zig").Level, n: u32) !struct { lost: u32, wrecks_kept: u32, missing: u32, held: u32, all_held_by_enemy: bool } {
     var gs = GameState.init(std.testing.allocator, .{ .seed = seed });
     defer gs.deinit();
     gs.difficulty = level;
@@ -1362,7 +1363,28 @@ fn lossRun(seed: u64, level: @import("../domain/difficulty.zig").Level, n: u32) 
         missing += 1;
         try std.testing.expect(e.value_ptr.faction.len > 0); // held by someone
     };
-    return .{ .lost = lost, .wrecks_kept = kept, .missing = missing };
+    var all_held_by_enemy = true;
+    for (gs.held_hulls.items) |h| {
+        if (!std.mem.eql(u8, h.by, c.enemy_key)) all_held_by_enemy = false;
+        if (h.unit.force != .none or h.unit.pilot != .none) all_held_by_enemy = false;
+    }
+    return .{
+        .lost = lost,
+        .wrecks_kept = kept,
+        .missing = missing,
+        .held = @intCast(gs.held_hulls.items.len),
+        .all_held_by_enemy = all_held_by_enemy,
+    };
+}
+
+test "12G.7: a hull left on a lost field passes into enemy hands, not off the books" {
+    const r = try lossRun(31, .elite, 10);
+    // Every hull that left the books is held by someone, not struck off:
+    // the recovery raid has something to win back (ROADMAP 12D.9).
+    try std.testing.expect(r.lost > 0);
+    try std.testing.expectEqual(r.lost, r.held);
+    // And it is held by the enemy we fought, with our people out of it.
+    try std.testing.expect(r.all_held_by_enemy);
 }
 
 test "12D.3: a lost field loses wrecks to the enemy — harder the higher the difficulty" {

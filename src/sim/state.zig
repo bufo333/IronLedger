@@ -254,6 +254,9 @@ pub const GameState = struct {
     /// Recent engagements as records (12G.4); the journal owns its own
     /// retention, as `event_queue` owns the inbox's.
     battle_reports: after_action_mod.Journal = .{},
+    /// Hulls the enemy dragged off a field we lost (12G.7): off the books
+    /// but not struck off, so a recovery raid has something to win back.
+    held_hulls: std.ArrayListUnmanaged(unit_mod.HeldHull) = .empty,
     /// Money in transit between treasuries.
     fund_couriers: std.ArrayListUnmanaged(FundCourier) = .empty,
     /// Standing top-up policies, checked daily under a monthly cap.
@@ -1855,6 +1858,39 @@ pub const GameState = struct {
     /// Strike a hull from the books: seats open, bay work and refit plans
     /// for it vanish, its force forgets it.
     pub fn removeUnit(self: *GameState, unit_id: types.UnitId) void {
+        self.detachUnit(unit_id);
+        _ = self.units.orderedRemove(unit_id);
+    }
+
+    /// The enemy dragged this hull off a field we lost (12D.3): it leaves
+    /// the books exactly as `removeUnit` would — no bill, no bay, no
+    /// lance, invisible to every walker over `units` — but the hull
+    /// itself is kept in `held_hulls`, because a recovery raid can win it
+    /// back (the ROADMAP 12D.9 deferral). The crew slots are cleared: our
+    /// people are not in it any more, whatever became of them.
+    pub fn holdUnit(self: *GameState, unit_id: types.UnitId, by: []const u8, battle: types.BattleId) !void {
+        self.detachUnit(unit_id);
+        var entry = self.units.fetchOrderedRemove(unit_id) orelse return;
+        entry.value.force = .none;
+        entry.value.pilot = .none;
+        entry.value.tech = .none;
+        try self.held_hulls.append(self.allocator(), .{
+            .unit = entry.value,
+            .by = by,
+            .day = self.clock.day_index,
+            .battle = battle,
+        });
+    }
+
+    /// The hull the enemy holds under this id, if they hold it.
+    pub fn heldHull(self: *const GameState, unit_id: types.UnitId) ?*const unit_mod.HeldHull {
+        for (self.held_hulls.items) |*h| if (h.unit.id == unit_id) return h;
+        return null;
+    }
+
+    /// Everything that points at a hull lets go of it. Shared by striking
+    /// one off and by losing one to the enemy, so the two can never drift.
+    fn detachUnit(self: *GameState, unit_id: types.UnitId) void {
         if (self.forces.getPtr(if (self.unit(unit_id)) |u| u.force else .none)) |f| {
             for (f.units.items, 0..) |id, i| if (id == unit_id) {
                 _ = f.units.orderedRemove(i);
@@ -1873,7 +1909,6 @@ pub const GameState = struct {
         while (i < self.unit_transfers.items.len) {
             if (self.unit_transfers.items[i].unit == unit_id) _ = self.unit_transfers.orderedRemove(i) else i += 1;
         }
-        _ = self.units.orderedRemove(unit_id);
     }
 
     // ------------------------------------------------------- golden master
@@ -1915,6 +1950,11 @@ pub const GameState = struct {
             h.update(std.mem.asBytes(&u.force));
             h.update(std.mem.asBytes(&u.pilot));
             h.update(std.mem.asBytes(&u.berth_hq));
+        }
+        for (self.held_hulls.items) |*h_hull| {
+            h.update(std.mem.asBytes(&h_hull.unit.id));
+            h.update(h_hull.by);
+            h.update(std.mem.asBytes(&h_hull.day));
         }
         var fit = self.forces.iterator();
         while (fit.next()) |entry| {

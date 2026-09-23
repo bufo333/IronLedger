@@ -27,7 +27,7 @@ const contract_events = @import("../sim/contract_events.zig");
 const network = @import("../sim/network.zig");
 const clock_mod = @import("../sim/clock.zig");
 
-pub const schema_version = 28;
+pub const schema_version = 29;
 
 const ddl =
     \\CREATE TABLE IF NOT EXISTS player (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_seq INTEGER NOT NULL);
@@ -42,7 +42,7 @@ const ddl =
     \\CREATE TABLE IF NOT EXISTS ability (cid INTEGER NOT NULL, person_id INTEGER NOT NULL, key TEXT NOT NULL);
     \\CREATE TABLE IF NOT EXISTS person_skill (cid INTEGER NOT NULL, person_id INTEGER NOT NULL, skill TEXT NOT NULL, level INTEGER NOT NULL);
     \\CREATE TABLE IF NOT EXISTS injury (cid INTEGER NOT NULL, person_id INTEGER NOT NULL, ord INTEGER NOT NULL, location TEXT NOT NULL, severity INTEGER NOT NULL, incurred INTEGER NOT NULL, heal_done INTEGER, doctor INTEGER NOT NULL DEFAULT 0, permanent INTEGER NOT NULL DEFAULT 0, healed INTEGER NOT NULL DEFAULT 0);
-    \\CREATE TABLE IF NOT EXISTS unit (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, chassis_key TEXT, name TEXT, kind TEXT, force INTEGER, pilot INTEGER, tech INTEGER, armor_pct INTEGER, quality TEXT, status TEXT, last_maint INTEGER, acquired_day INTEGER, price INTEGER, reactivation_done INTEGER, berth_hq INTEGER NOT NULL DEFAULT 0, wreck TEXT NOT NULL DEFAULT 'none', PRIMARY KEY (cid, id));
+    \\CREATE TABLE IF NOT EXISTS unit (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, chassis_key TEXT, name TEXT, kind TEXT, force INTEGER, pilot INTEGER, tech INTEGER, armor_pct INTEGER, quality TEXT, status TEXT, last_maint INTEGER, acquired_day INTEGER, price INTEGER, reactivation_done INTEGER, berth_hq INTEGER NOT NULL DEFAULT 0, wreck TEXT NOT NULL DEFAULT 'none', held_by TEXT NOT NULL DEFAULT '', held_day INTEGER NOT NULL DEFAULT 0, held_battle INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (cid, id));
     \\CREATE TABLE IF NOT EXISTS unit_slot (cid INTEGER NOT NULL, unit_id INTEGER NOT NULL, ord INTEGER NOT NULL, slot_key TEXT, part_key TEXT, class TEXT, condition TEXT);
     \\CREATE TABLE IF NOT EXISTS force (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, parent INTEGER, name TEXT, emblem BLOB, local_funds INTEGER, echelon TEXT, commander INTEGER, supplying_hq INTEGER, role TEXT, support_kind TEXT, last_rotation INTEGER, contracts_since_rotation INTEGER, location_planet TEXT, return_eta INTEGER, shortage_days INTEGER, roe TEXT NOT NULL DEFAULT 'standard', PRIMARY KEY (cid, id));
     \\CREATE TABLE IF NOT EXISTS force_unit (cid INTEGER NOT NULL, force_id INTEGER NOT NULL, ord INTEGER NOT NULL, unit_id INTEGER NOT NULL);
@@ -102,6 +102,11 @@ pub const Store = struct {
         .{ .version = 4, .table = "policy", .column = "sent", .sql = "ALTER TABLE policy ADD COLUMN sent INTEGER NOT NULL DEFAULT 0" },
         .{ .version = 5, .table = "supply_policy", .column = "ammo_battles", .sql = "ALTER TABLE supply_policy ADD COLUMN ammo_battles INTEGER NOT NULL DEFAULT 0" },
         .{ .version = 6, .table = "unit", .column = "berth_hq", .sql = "ALTER TABLE unit ADD COLUMN berth_hq INTEGER NOT NULL DEFAULT 0" },
+        // v29 (12G.7): a hull the enemy holds rides in the `unit` table with
+        // its own slots, distinguished only by a non-empty `held_by`.
+        .{ .version = 29, .table = "unit", .column = "held_by", .sql = "ALTER TABLE unit ADD COLUMN held_by TEXT NOT NULL DEFAULT ''" },
+        .{ .version = 29, .table = "unit", .column = "held_day", .sql = "ALTER TABLE unit ADD COLUMN held_day INTEGER NOT NULL DEFAULT 0" },
+        .{ .version = 29, .table = "unit", .column = "held_battle", .sql = "ALTER TABLE unit ADD COLUMN held_battle INTEGER NOT NULL DEFAULT 0" },
         // v7: the `injury` table (created by ddl); campaign data is
         // upgraded on load (`upgradeCampaign`). v8: `faction_standing`
         // (created by ddl; absent rows read as 0).
@@ -432,26 +437,35 @@ pub const Store = struct {
 
         // Units and slots.
         {
-            const st = try self.db.prepare("INSERT INTO unit VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)");
+            const st = try self.db.prepare("INSERT INTO unit VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21)");
             defer st.finalize();
             const sl = try self.db.prepare("INSERT INTO unit_slot VALUES (?1,?2,?3,?4,?5,?6,?7)");
             defer sl.finalize();
-            var it = gs.units.iterator();
             var ord: i64 = 0;
-            while (it.next()) |entry| : (ord += 1) {
-                const u = entry.value_ptr;
-                try st.bindAll(.{
-                    cid,                      ord,                      @intFromEnum(u.id),    u.chassis_key,
-                    u.name,                   u.kind,                   @intFromEnum(u.force), @intFromEnum(u.pilot),
-                    @intFromEnum(u.tech),     @as(i64, u.armor_pct),    u.quality,             u.status,
-                    u.last_maintenance_day,   @as(i64, u.acquired_day), u.purchase_price,      u.reactivation_done_day,
-                    @intFromEnum(u.berth_hq), u.wreck,
-                });
-                try st.run();
-                for (u.slots.items, 0..) |s, i| {
-                    try sl.bindAll(.{ cid, @intFromEnum(u.id), @as(i64, @intCast(i)), s.slot_key, s.part_key, s.class, s.condition });
-                    try sl.run();
+            const Writer = struct {
+                // One writer for both, so an owned hull and a held one can
+                // never be saved by two loops that drift apart (12G.7).
+                fn put(unit_st: anytype, slot_st: anytype, c: i64, o: i64, u: *const unit_mod.Unit, held: unit_mod.HeldHull.Mark) !void {
+                    try unit_st.bindAll(.{
+                        c,                        o,                        @intFromEnum(u.id),    u.chassis_key,
+                        u.name,                   u.kind,                   @intFromEnum(u.force), @intFromEnum(u.pilot),
+                        @intFromEnum(u.tech),     @as(i64, u.armor_pct),    u.quality,             u.status,
+                        u.last_maintenance_day,   @as(i64, u.acquired_day), u.purchase_price,      u.reactivation_done_day,
+                        @intFromEnum(u.berth_hq), u.wreck,                  held.by,               @as(i64, held.day),
+                        @as(i64, @intFromEnum(held.battle)),
+                    });
+                    try unit_st.run();
+                    for (u.slots.items, 0..) |s, i| {
+                        try slot_st.bindAll(.{ c, @intFromEnum(u.id), @as(i64, @intCast(i)), s.slot_key, s.part_key, s.class, s.condition });
+                        try slot_st.run();
+                    }
                 }
+            };
+            var it = gs.units.iterator();
+            while (it.next()) |entry| : (ord += 1) try Writer.put(st, sl, cid, ord, entry.value_ptr, .{});
+            for (gs.held_hulls.items) |*h| {
+                try Writer.put(st, sl, cid, ord, &h.unit, h.mark());
+                ord += 1;
             }
         }
 
@@ -964,7 +978,7 @@ pub const Store = struct {
 
         // Units.
         {
-            const st = try self.db.prepare("SELECT id, chassis_key, name, kind, force, pilot, tech, armor_pct, quality, status, last_maint, acquired_day, price, reactivation_done, berth_hq, wreck FROM unit WHERE cid = ?1 ORDER BY ord");
+            const st = try self.db.prepare("SELECT id, chassis_key, name, kind, force, pilot, tech, armor_pct, quality, status, last_maint, acquired_day, price, reactivation_done, berth_hq, wreck, held_by, held_day, held_battle FROM unit WHERE cid = ?1 ORDER BY ord");
             defer st.finalize();
             try st.bindAll(.{cid});
             while (try st.next()) {
@@ -986,13 +1000,29 @@ pub const Store = struct {
                     .berth_hq = toId(types.HqId, st.int(14)),
                     .wreck = st.enumValue(unit_mod.WreckCause, 15) orelse return error.CorruptSave,
                 };
-                try gs.units.put(alloc, u.id, u);
+                // A non-empty `held_by` is what tells the two apart: the
+                // enemy's hulls go to the limbo list, ours to the books.
+                const held_by = try st.text(16, alloc);
+                if (held_by.len == 0) {
+                    try gs.units.put(alloc, u.id, u);
+                } else {
+                    try gs.held_hulls.append(alloc, .{
+                        .unit = u,
+                        .by = held_by,
+                        .day = @intCast(st.int(17)),
+                        .battle = toId(types.BattleId, st.int(18)),
+                    });
+                }
             }
             const sl = try self.db.prepare("SELECT unit_id, slot_key, part_key, class, condition FROM unit_slot WHERE cid = ?1 ORDER BY unit_id, ord");
             defer sl.finalize();
             try sl.bindAll(.{cid});
             while (try sl.next()) {
-                const u = gs.units.getPtr(toId(types.UnitId, sl.int(0))) orelse continue;
+                const uid = toId(types.UnitId, sl.int(0));
+                const u = gs.units.getPtr(uid) orelse held: {
+                    for (gs.held_hulls.items) |*h| if (h.unit.id == uid) break :held &h.unit;
+                    continue;
+                };
                 try u.slots.append(alloc, .{
                     .slot_key = try sl.text(1, alloc),
                     .part_key = try sl.text(2, alloc),
@@ -1956,4 +1986,72 @@ test "12G.4: a battle report round-trips as fields, not as a row count" {
         try std.testing.expectEqual(before_lines.len, after_lines.len);
         for (before_lines, after_lines) |bl, al2| try std.testing.expectEqualStrings(bl, al2);
     }
+}
+
+test "12G.7: a hull the enemy holds round-trips, slots and all — off the books, not struck off" {
+    const battle = @import("../sim/battle.zig");
+    const part_mod = @import("../domain/part.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 12007 });
+    defer gs.deinit();
+    gs.difficulty = .elite; // a lost field is the point of the fixture
+    _ = try gs.createCommander("T", .LC, .line_officer);
+    const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
+        .id = @enumFromInt(1),
+        .kind = .planetary_assault,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 6, .base_pay_month = 400_000, .battle_loss_pct = 30 },
+        .status = .active,
+        .assigned_company = co,
+    });
+    const c = gs.contracts.getPtr(@enumFromInt(1)).?;
+    const site: types.Site = .{ .company = co };
+    try gs.addStock(site, "armor", 60);
+    for (part_mod.munition_keys) |key| try gs.addStock(site, key, 40);
+    // A starving, exhausted company with no armour left: routs are the norm
+    // and hulls stay on the field.
+    for (0..10) |_| {
+        var pit = gs.people.iterator();
+        while (pit.next()) |e| {
+            e.value_ptr.morale = 0;
+            e.value_ptr.fatigue = 60;
+        }
+        var uit = gs.units.iterator();
+        while (uit.next()) |e| if (e.value_ptr.status != .destroyed) {
+            e.value_ptr.armor_pct = 0;
+        };
+        try battle.resolveEngagement(&gs, c);
+    }
+
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+
+    // Vacuous otherwise: if nothing was ever held, everything below passes
+    // while the feature is broken.
+    try std.testing.expect(gs.held_hulls.items.len > 0);
+    try std.testing.expectEqual(gs.held_hulls.items.len, loaded.held_hulls.items.len);
+    // Held hulls are off the books on both sides of the save, and the
+    // owned count is not quietly inflated by them.
+    try std.testing.expectEqual(gs.units.count(), loaded.units.count());
+    var slots_seen: usize = 0;
+    for (gs.held_hulls.items, loaded.held_hulls.items) |saved, got| {
+        try std.testing.expectEqual(saved.unit.id, got.unit.id);
+        try std.testing.expectEqualStrings(saved.unit.chassis_key, got.unit.chassis_key);
+        try std.testing.expectEqual(saved.unit.status, got.unit.status);
+        try std.testing.expectEqual(saved.unit.armor_pct, got.unit.armor_pct);
+        try std.testing.expectEqualStrings(saved.by, got.by);
+        try std.testing.expectEqual(saved.day, got.day);
+        try std.testing.expectEqual(saved.battle, got.battle);
+        try std.testing.expectEqual(saved.unit.slots.items.len, got.unit.slots.items.len);
+        slots_seen += got.unit.slots.items.len;
+        try std.testing.expect(loaded.units.get(got.unit.id) == null);
+        try std.testing.expect(loaded.heldHull(got.unit.id) != null);
+    }
+    // The slot rows really came back — the drop this test exists to catch.
+    try std.testing.expect(slots_seen > 0);
 }

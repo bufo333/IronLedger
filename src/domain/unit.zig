@@ -325,6 +325,35 @@ pub const Unit = struct {
     }
 };
 
+/// A hull the enemy dragged off a field we lost (12D.3): off the books
+/// entirely — it bills nothing, fills no seat and appears in no lance,
+/// because it is not in `GameState.units` at all — but it is not struck
+/// off either. A recovery raid can win it back (ROADMAP 12D.9).
+pub const HeldHull = struct {
+    /// The hull as it stood when they took it, wounds and all.
+    unit: Unit,
+    /// Faction key of the house holding it.
+    by: []const u8,
+    /// The day the field was lost.
+    day: u32,
+    /// The engagement that lost it, so the after-action can be re-read.
+    battle: types.BattleId,
+
+    /// The three facts that mark a hull as held, with "not held" as the
+    /// default. The store writes one hull row for owned and held alike
+    /// and tells them apart by a non-empty `by`.
+    pub const Mark = struct {
+        by: []const u8 = "",
+        day: u32 = 0,
+        battle: types.BattleId = .none,
+    };
+
+    pub fn mark(self: HeldHull) Mark {
+        return .{ .by = self.by, .day = self.day, .battle = self.battle };
+    }
+};
+
+
 test "one line of hull status predicates: parked, in the shop, busy, fighting" {
     var u: Unit = .{ .id = @enumFromInt(1), .chassis_key = "SHD-2H", .kind = .mek };
     defer u.deinit(std.testing.allocator);
