@@ -263,9 +263,10 @@ whitelisted imports; the help modal indexes its legend row by number
 - [x] **markup tag set once** (rule 16): `table.marks` is the declaration, `table.isMark` the test; `screen.visibleLen` is `table.cells`; `Style.fromMarkup` is checked against `table.marks` by a test.
 - [x] **escape sequences in `term.zig`** (rule 24): `term.sgr.*`, `cursorHome`, `cursorTo`, `resetStyle`, `paintPair` (24-bit or the 256 cube); `screen.zig` carries no `\x1b`.
 
-**D12c — pending.**
-- [ ] **screens table** (rule 18): split app.zig into `src/tui/screens/{desk,map,forces,contracts,ledger,supply,hq,lab,people,market}.zig`, each exporting `draw`, `move`, `enter`, `key`, `footer`, `paneCount`; one table indexed by `Tab` replaces the six `switch (self.tab)`; the modal draw/key pair splits per widget; `drawWizard` becomes per-step functions.
-- [ ] **one key table per screen** (rule 22): footer arms, lobby footers, pane right-titles, modal titles, help rows and in-pane hints from one table; `docs/tui.md` key table generated or checked by the smoke.
+**D12c — table done (PR #19); file split pending.**
+- [x] **screens table** (rule 18): `ScreenSpec {tab, draw, move, enter, key, panes, narrow_panes, footer}` and `screen_table` in `Tab` order (checked at comptime). `drawGame`, `paneCount`, `screenMove`, `screenEnter` and `screenKey` read the table; the six `switch (self.tab)` are gone (`grep -c 'switch (self.tab)' src/tui/app.zig` → 0). Each screen's move/enter/key body is its own function (`deskMove`, `deskEnter`, `deskKey`, …); `mapMove(dx, dy)` became `mapPan`.
+- [ ] move each screen's five functions and its private helpers into `src/tui/screens/<tab>.zig` (the App helpers they call become `pub`); `drawWizard` into per-step functions.
+- [ ] **one key table per screen** (rule 22): the footers are in `screen_table`; pane right-titles, modal titles, help rows and in-pane hints still carry their own key text; `docs/tui.md` key table generated or checked by the smoke.
 
 ## D13. Tests and CI (rules 37-40)
 

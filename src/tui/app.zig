@@ -899,31 +899,9 @@ pub const App = struct {
 
     fn drawGame(self: *App) !void {
         try self.drawChrome();
-        switch (self.tab) {
-            .desk => try self.drawDesk(),
-            .contracts => try self.drawContracts(),
-            .ledger => try self.drawLedger(),
-            .forces => try self.drawForces(),
-            .supply => try self.drawSupply(),
-            .hq => try self.drawHq(),
-            .map => try self.drawMap(),
-            .lab => try self.drawLab(),
-            .people => try self.drawPeople(),
-            .market => try self.drawMarket(),
-        }
-        // One order everywhere (12.30): navigate | act | money · misc.
-        self.footer(switch (self.tab) {
-            .desk => "F1-F10 / 1-0 screens · Tab pane · j/k cursor | Enter act · e emblem · n end turn | : command · F12 settings · ? help · q welcome",
-            .contracts => "Tab pane · j/k row | board: Enter accept (you pick the company) · b bargain · active/history: Enter full log · c complete · R recall",
-            .ledger => "j/k treasury | L loan · R repay · t send cash · T pull cash back · p top-up policy · x clear policy",
-            .forces => "[ ] company / pool · j/k row · r cycle pane · M manning | a seat · u unassign · l lance · x transfer · c crew · A auto · t / T train one / all · o role (lance) / ROE (company) · d depot · R spares (hull) / recall (company) · m mothball · w air wing · + raise | $ sell · X disband · b fabricate",
-            .supply => "j/k site | o order · s ship · R trim to plan · H parts home · K keep stocked | t / T cash out / back · p / P cash / resupply policy · $ sell stock",
-            .hq => "[ ] switch HQ · Tab hall · f / F filter | u upgrade · T tier · S autostaff · Enter hire · b fabricate | $ sell HQ",
-            .map => "h j k l move · + / - zoom · c colours | f found HQ here · o offers here | q welcome",
-            .lab => "[ ] hull · j/k mount | + install · - remove · c clear · Enter commit · R order replacement · D depot",
-            .people => "/ , filter · j/k person | a seat · x transfer · P post · t train · L leave · T triage · m admit · r record | D fire",
-            .market => "Tab pane · [ ] HQ board · / , filter | Enter buy / order / order shortfall · b fabricate · K keep stocked · x remove line | q welcome",
-        });
+        const spec = screenSpec(self.tab);
+        try spec.draw(self);
+        self.footer(spec.footer);
     }
 
     // ---- market ----
@@ -1197,7 +1175,7 @@ pub const App = struct {
     }
 
     /// Move the map cursor to the nearest world in a direction.
-    fn mapMove(self: *App, dx: i32, dy: i32) !void {
+    fn mapPan(self: *App, dx: i32, dy: i32) !void {
         const view = try q.map(self.a(), &self.gs.?);
         if (view.worlds.len == 0) return;
         const cur_w = view.worlds[@min(self.map_cursor, view.worlds.len - 1)];
@@ -2132,10 +2110,10 @@ pub const App = struct {
             .backtab => self.focus = (self.focus + self.paneCount() - 1) % self.paneCount(),
             .down => try self.screenMove(1),
             .up => try self.screenMove(-1),
-            .left => if (self.tab == .map) try self.mapMove(-1, 0) else if (self.focus_scroll) |pane| {
+            .left => if (self.tab == .map) try self.mapPan(-1, 0) else if (self.focus_scroll) |pane| {
                 self.colScroll(pane).* -|= 1;
             },
-            .right => if (self.tab == .map) try self.mapMove(1, 0) else if (self.focus_scroll) |pane| {
+            .right => if (self.tab == .map) try self.mapPan(1, 0) else if (self.focus_scroll) |pane| {
                 self.colScroll(pane).* += 1;
             },
             .pgdn => try self.screenMove(10),
@@ -2169,85 +2147,927 @@ pub const App = struct {
     }
 
     fn paneCount(self: *App) u8 {
-        return switch (self.tab) {
-            .desk => 3,
-            .contracts => 3,
-            .ledger => 2,
-            .forces => 2,
-            .hq => 2,
-            .market => if (self.narrow()) 2 else 4,
-            else => 1,
-        };
+        const spec = screenSpec(self.tab);
+        return if (self.narrow()) spec.narrow_panes else spec.panes;
     }
 
     fn screenMove(self: *App, delta: i32) !void {
+        return screenSpec(self.tab).move(self, delta);
+    }
+
+    fn screenEnter(self: *App) !void {
+        return screenSpec(self.tab).enter(self);
+    }
+
+    fn screenKey(self: *App, ch: u21) !void {
+        return screenSpec(self.tab).key(self, ch);
+    }
+
+    /// One screen, one row (rule 18): adding a screen adds a row here and
+    /// the five functions it names — no switch anywhere else grows.
+    const ScreenSpec = struct {
+        tab: Tab,
+        draw: *const fn (*App) anyerror!void,
+        move: *const fn (*App, i32) anyerror!void,
+        enter: *const fn (*App) anyerror!void,
+        key: *const fn (*App, u21) anyerror!void,
+        /// Panes Tab cycles through, and the count on a narrow terminal.
+        panes: u8,
+        narrow_panes: u8,
+        /// One order everywhere (12.30): navigate | act | money · misc.
+        footer: []const u8,
+    };
+
+    const screen_table = [_]ScreenSpec{
+        .{ .tab = .desk, .draw = drawDesk, .move = deskMove, .enter = deskEnter, .key = deskKey, .panes = 3, .narrow_panes = 3, .footer = "F1-F10 / 1-0 screens · Tab pane · j/k cursor | Enter act · e emblem · n end turn | : command · F12 settings · ? help · q welcome" },
+        .{ .tab = .map, .draw = drawMap, .move = mapMove, .enter = mapEnter, .key = mapKey, .panes = 1, .narrow_panes = 1, .footer = "h j k l move · + / - zoom · c colours | f found HQ here · o offers here | q welcome" },
+        .{ .tab = .forces, .draw = drawForces, .move = forcesMove, .enter = forcesEnter, .key = forcesKey, .panes = 2, .narrow_panes = 2, .footer = "[ ] company / pool · j/k row · r cycle pane · M manning | a seat · u unassign · l lance · x transfer · c crew · A auto · t / T train one / all · o role (lance) / ROE (company) · d depot · R spares (hull) / recall (company) · m mothball · w air wing · + raise | $ sell · X disband · b fabricate" },
+        .{ .tab = .contracts, .draw = drawContracts, .move = contractsMove, .enter = contractsEnter, .key = contractsKey, .panes = 3, .narrow_panes = 3, .footer = "Tab pane · j/k row | board: Enter accept (you pick the company) · b bargain · active/history: Enter full log · c complete · R recall" },
+        .{ .tab = .ledger, .draw = drawLedger, .move = ledgerMove, .enter = ledgerEnter, .key = ledgerKey, .panes = 2, .narrow_panes = 2, .footer = "j/k treasury | L loan · R repay · t send cash · T pull cash back · p top-up policy · x clear policy" },
+        .{ .tab = .supply, .draw = drawSupply, .move = supplyMove, .enter = supplyEnter, .key = supplyKey, .panes = 1, .narrow_panes = 1, .footer = "j/k site | o order · s ship · R trim to plan · H parts home · K keep stocked | t / T cash out / back · p / P cash / resupply policy · $ sell stock" },
+        .{ .tab = .hq, .draw = drawHq, .move = hqMove, .enter = hqEnter, .key = hqKey, .panes = 2, .narrow_panes = 2, .footer = "[ ] switch HQ · Tab hall · f / F filter | u upgrade · T tier · S autostaff · Enter hire · b fabricate | $ sell HQ" },
+        .{ .tab = .lab, .draw = drawLab, .move = labMove, .enter = labEnter, .key = labKey, .panes = 1, .narrow_panes = 1, .footer = "[ ] hull · j/k mount | + install · - remove · c clear · Enter commit · R order replacement · D depot" },
+        .{ .tab = .people, .draw = drawPeople, .move = peopleMove, .enter = peopleEnter, .key = peopleKey, .panes = 1, .narrow_panes = 1, .footer = "/ , filter · j/k person | a seat · x transfer · P post · t train · L leave · T triage · m admit · r record | D fire" },
+        .{ .tab = .market, .draw = drawMarket, .move = marketMove, .enter = marketEnter, .key = marketKey, .panes = 4, .narrow_panes = 2, .footer = "Tab pane · [ ] HQ board · / , filter | Enter buy / order / order shortfall · b fabricate · K keep stocked · x remove line | q welcome" },
+    };
+
+    comptime {
+        for (screen_table, 0..) |spec, i| if (spec.tab != @as(Tab, @enumFromInt(i))) @compileError("screen_table is in Tab order");
+    }
+
+    fn screenSpec(tab: Tab) *const ScreenSpec {
+        return &screen_table[@intFromEnum(tab)];
+    }
+
+    fn deskMove(self: *App, delta: i32) anyerror!void {
         const al = self.a();
         const g = &self.gs.?;
-        switch (self.tab) {
-            .desk => {
-                const view = try q.desk(al, g, 40);
-                switch (self.focus) {
-                    0 => self.moveCursor(0, delta, view.checklist.len),
-                    1 => self.moveCursor(1, delta, self.inboxRowCount(view)),
-                    else => self.moveCursor(2, delta, view.log.len),
+            const view = try q.desk(al, g, 40);
+            switch (self.focus) {
+                0 => self.moveCursor(0, delta, view.checklist.len),
+                1 => self.moveCursor(1, delta, self.inboxRowCount(view)),
+                else => self.moveCursor(2, delta, view.log.len),
+            }
+
+    }
+
+    fn mapMove(self: *App, delta: i32) anyerror!void {
+        try self.mapPan(0, if (delta > 0) -1 else 1);
+    }
+
+    fn forcesMove(self: *App, delta: i32) anyerror!void {
+        const al = self.a();
+        const g = &self.gs.?;
+            if (self.focus == 0) {
+                const rows = try self.toeRows();
+                self.moveCursor(0, delta, rows.len);
+            } else {
+                const pool = try q.unassigned(al, g);
+                self.moveCursor(2, delta, pool.len);
+            }
+
+    }
+
+    fn contractsMove(self: *App, delta: i32) anyerror!void {
+        const al = self.a();
+        const g = &self.gs.?;
+            const view = try q.contracts(al, g, @enumFromInt(self.hqSelId(g)));
+            if (self.focus == 0) self.moveCursor(0, delta, view.board.len) else if (self.focus == 1) self.moveCursor(1, delta, view.active.len) else self.moveCursor(2, delta, (try q.contractHistory(al, g)).len);
+
+    }
+
+    fn ledgerMove(self: *App, delta: i32) anyerror!void {
+        const al = self.a();
+        const g = &self.gs.?;
+            if (self.focus == 0) {
+                const all = try q.allTreasuries(al, g);
+                const v: i32 = @as(i32, @intCast(self.ledger_sel)) + delta;
+                self.ledger_sel = @intCast(@max(0, @min(@as(i32, @intCast(all.len)) - 1, v)));
+            } else {
+                const view = try q.ledger(al, g, .outfit, 31, 200);
+                self.moveCursor(2, delta, view.ledger.len + 1);
+            }
+
+    }
+
+    fn supplyMove(self: *App, delta: i32) anyerror!void {
+        const al = self.a();
+        const g = &self.gs.?;
+            const view = try q.supply(al, g);
+            self.moveCursor(0, delta, view.rows.len);
+
+    }
+
+    fn hqMove(self: *App, delta: i32) anyerror!void {
+        const al = self.a();
+        const g = &self.gs.?;
+            const id: types.HqId = @enumFromInt(self.hqSelId(g));
+            if (self.focus == 0) {
+                const detail = try q.hqDetail(al, g, id);
+                self.moveCursor(0, delta, detail.len);
+            } else {
+                const hallv = try q.hall(al, g, id, self.hall_filter);
+                self.moveCursor(1, delta, hallv.rows.len);
+            }
+
+    }
+
+    fn labMove(self: *App, delta: i32) anyerror!void {
+        const al = self.a();
+        const g = &self.gs.?;
+            const uid = (try self.labUnit()) orelse return;
+            const view = try q.lab(al, g, uid);
+            self.moveCursor(0, delta, view.mounts.len);
+
+    }
+
+    fn peopleMove(self: *App, delta: i32) anyerror!void {
+        const al = self.a();
+        const g = &self.gs.?;
+            const view = try q.people(al, g, self.people_filter);
+            self.moveCursor(0, delta, view.rows.len);
+
+    }
+
+    fn marketMove(self: *App, delta: i32) anyerror!void {
+        const al = self.a();
+        const g = &self.gs.?;
+            const view = try q.market(al, g, self.market_filter, @enumFromInt(self.hqSelId(g)));
+            switch (self.focus) {
+                0 => self.moveCursor(0, delta, view.board.len),
+                1 => self.moveCursor(1, delta, view.catalog.len),
+                2 => self.moveCursor(2, delta, view.demand.len),
+                else => self.moveCursor(3, delta, (try q.stockPolicies(al, g, @enumFromInt(self.hqSelId(g)))).len),
+            }
+
+    }
+
+    fn deskEnter(self: *App) anyerror!void {
+        const al = self.a();
+        const g = &self.gs.?;
+            const view = try q.desk(al, g, 40);
+            if (self.focus == 0 and view.checklist.len > 0) {
+                const w = view.checklist[@min(self.cur(0).*, view.checklist.len - 1)];
+                self.switchTab(@enumFromInt(w.jump));
+            } else if (self.focus == 1) {
+                if (self.inboxEventAtCursor(view)) |idx| self.modal = .{ .decision = idx };
+            }
+
+    }
+
+    fn mapEnter(self: *App) anyerror!void {
+        self.switchTab(.contracts);
+    }
+
+    fn forcesEnter(self: *App) anyerror!void {
+            const rows = try self.toeRows();
+            const c = self.cur(0).*;
+            if (self.focus == 0 and c < rows.len and rows[c].unit != .none) {
+                if (self.narrow()) {
+                    self.modal = .{ .hull = rows[c].unit };
+                    return;
                 }
+                var buf: [64]u8 = undefined;
+                self.input.set(std.fmt.bufPrint(&buf, "assign {d} ", .{@intFromEnum(rows[c].unit)}) catch "assign ");
+                self.modal = .{ .input = .command };
+            }
+
+    }
+
+    fn contractsEnter(self: *App) anyerror!void {
+        const al = self.a();
+        const g = &self.gs.?;
+            const view = try q.contracts(al, g, @enumFromInt(self.hqSelId(g)));
+            if (self.focus == 0 and view.board.len > 0) {
+                // Always choose in the open (play feedback): the picker ranks
+                // the companies readiest first and says who cannot go.
+                self.openModal(.{ .accept_pick = view.board[@min(self.cur(0).*, view.board.len - 1)].index });
+            } else if (self.focus == 1 and view.active.len > 0) {
+                // The whole log, full screen (play feedback: the side pane clipped it).
+                self.modal_cursor = std.math.maxInt(usize) / 2; // open at the latest entry
+                self.modal = .{ .contract_log = view.active[@min(self.cur(1).*, view.active.len - 1)].id };
+            } else if (self.focus == 2) {
+                const history = try q.contractHistory(al, g);
+                if (history.len > 0) {
+                    self.modal_cursor = std.math.maxInt(usize) / 2;
+                    self.modal = .{ .contract_log = history[@min(self.cur(2).*, history.len - 1)].id };
+                }
+            }
+
+    }
+
+    fn ledgerEnter(self: *App) anyerror!void {
+            self.cmd_prefill.set("transfer outfit ");
+            self.input.set(self.cmd_prefill.slice());
+            self.cmd_prefill.len = 0;
+            self.modal = .{ .input = .command };
+
+    }
+
+    fn supplyEnter(self: *App) anyerror!void {
+        _ = self; // Supply acts through its letter keys; Enter does nothing here.
+    }
+
+    fn hqEnter(self: *App) anyerror!void {
+        const al = self.a();
+        const g = &self.gs.?;
+            if (self.focus != 1) return;
+            const id: types.HqId = @enumFromInt(self.hqSelId(g));
+            const hallv = try q.hall(al, g, id, self.hall_filter);
+            if (hallv.rows.len == 0) return;
+            const row = hallv.rows[@min(self.cur(1).*, hallv.rows.len - 1)];
+            _ = try self.execSay(.{ .hire_candidate = row.index }, .good, "hired candidate [{d}]", .{row.index});
+
+    }
+
+    fn labEnter(self: *App) anyerror!void {
+            const uid = (try self.labUnit()) orelse return;
+            _ = try self.execSay(.{ .refit_commit = uid }, .good, "refit committed — it is a bay job at the home HQ: HQ screen (F7) lists the bays, queued and running, with days left", .{});
+
+    }
+
+    fn peopleEnter(self: *App) anyerror!void {
+            const id = (try self.selectedPerson()) orelse return;
+            self.openModal(.{ .seat = id });
+
+    }
+
+    fn marketEnter(self: *App) anyerror!void {
+        const al = self.a();
+        const g = &self.gs.?;
+            const view = try q.market(al, g, self.market_filter, @enumFromInt(self.hqSelId(g)));
+            const hq_id: types.HqId = @enumFromInt(self.hqSelId(g));
+            switch (self.focus) {
+                0 => if (view.board.len > 0) {
+                    const l = view.board[@min(self.cur(0).*, view.board.len - 1)];
+                    if (l.transport) {
+                        _ = try self.execSay(.{ .buy_listing = l.index }, .good, "bought listing [{d}] — berthed at {s}; hire a ship crew from the hall and it lifts the next deployment", .{ l.index, q.hqName(g, hq_id) });
+                    } else {
+                        _ = try self.execSay(.{ .buy_listing = l.index }, .good, "bought listing [{d}]", .{l.index});
+                    }
+                },
+                1 => if (view.catalog.len > 0) {
+                    const r = view.catalog[@min(self.cur(1).*, view.catalog.len - 1)];
+                    var buf: [96]u8 = undefined;
+                    self.openCommand(std.fmt.bufPrint(&buf, "order {s} 1 hq:{d}", .{ r.key, @intFromEnum(hq_id) }) catch "order ");
+                },
+                3 => {
+                    const pol = try q.stockPolicies(al, g, hq_id);
+                    if (pol.len == 0) return;
+                    const r = pol[@min(self.cur(3).*, pol.len - 1)];
+                    var buf: [96]u8 = undefined;
+                    self.openCommand(std.fmt.bufPrint(&buf, "stockpolicy hq:{d} {s} {d} {d}", .{ @intFromEnum(hq_id), r.key, r.min, r.target }) catch "stockpolicy ");
+                },
+                else => if (view.demand.len > 0) {
+                    const d = view.demand[@min(self.cur(2).*, view.demand.len - 1)];
+                    if (d.short == 0) {
+                        self.say(.dim, "{s}: nothing short — on hand or already on order", .{d.key});
+                        return;
+                    }
+                    // Structural components are fabricated at a regional bay
+                    // (ARCH §9.8); everything else is an acquisition roll — the
+                    // command picks (`cover_shortfall`).
+                    const r = game.commands.execute(g, .{ .cover_shortfall = .{ .hq = hq_id, .part_key = d.key, .quantity = d.short } }) catch |err| {
+                        self.say(.crit, "refused: {s}", .{game.cli.errorText(err)});
+                        return;
+                    };
+                    if (r.fabricated) {
+                        self.say(.good, "fabricating {d} × {s} at {s} — a bay job, see the HQ screen", .{ d.short, d.key, q.hqName(g, hq_id) });
+                        return;
+                    }
+                    if (r.sourced) self.say(.good, "ordered {d} × {s} to {s}", .{ d.short, d.key, q.hqName(g, hq_id) }) else self.say(.amber, "logistics could not source {s} this time — retry after the monthly market refresh, or buy it off a board", .{d.key});
+                },
+            }
+
+    }
+
+    fn deskKey(self: *App, ch: u21) anyerror!void {
+        switch (ch) {
+            'e' => {
+                self.logos = &.{};
+                try self.loadLogoList();
+                self.openModal(.emblem);
             },
-            .contracts => {
-                const view = try q.contracts(al, g, @enumFromInt(self.hqSelId(g)));
-                if (self.focus == 0) self.moveCursor(0, delta, view.board.len) else if (self.focus == 1) self.moveCursor(1, delta, view.active.len) else self.moveCursor(2, delta, (try q.contractHistory(al, g)).len);
+            else => {},
+        }
+    }
+
+    fn mapKey(self: *App, ch: u21) anyerror!void {
+        const al = self.a();
+        const g = &self.gs.?;
+        switch (ch) {
+            'h' => try self.mapPan(-1, 0),
+            'l' => try self.mapPan(1, 0),
+            '+', '=' => self.map_zoom = @min(8, self.map_zoom * 2),
+            '-' => self.map_zoom = @max(1, self.map_zoom / 2),
+            'c' => self.map_color = switch (self.map_color) {
+                .faction => .industry,
+                .industry => .standing,
+                .standing => .activity,
+                .activity => .faction,
             },
-            .ledger => {
-                if (self.focus == 0) {
-                    const all = try q.allTreasuries(al, g);
-                    const v: i32 = @as(i32, @intCast(self.ledger_sel)) + delta;
-                    self.ledger_sel = @intCast(@max(0, @min(@as(i32, @intCast(all.len)) - 1, v)));
+            'f' => {
+                const view = try q.map(al, g);
+                if (view.worlds.len == 0) return;
+                var buf: [96]u8 = undefined;
+                self.openCommand(std.fmt.bufPrint(&buf, "found {s} ", .{view.worlds[@min(self.map_cursor, view.worlds.len - 1)].key}) catch "found ");
+            },
+            'o' => self.switchTab(.contracts),
+            else => {},
+        }
+    }
+
+    fn forcesKey(self: *App, ch: u21) anyerror!void {
+        const al = self.a();
+        const g = &self.gs.?;
+            const rows = try self.toeRows();
+            const c = self.cur(0).*;
+            const row: ?q.ToeRow = if (c < rows.len) rows[c] else null;
+            switch (ch) {
+                'a' => if (row) |r| {
+                    if (r.unit == .none) {
+                        self.say(.dim, "put the cursor on a hull to crew it", .{});
+                        return;
+                    }
+                    self.openModal(.{ .pick_crew = r.unit });
+                },
+                'u' => if (row) |r| {
+                    if (r.unit == .none) {
+                        self.say(.dim, "put the cursor on a hull to clear its seat or tech", .{});
+                        return;
+                    }
+                    self.openModal(.{ .pick_unassign = r.unit });
+                },
+                'A' => if (row) |r| {
+                    const co = r.company;
+                    if (co != .none) {
+                        _ = try self.execSay(.{ .auto_assign = co }, .good, "auto-assigned {s}", .{q.forceName(g, co)});
+                    }
+                },
+                'c' => if (row) |r| {
+                    const co = r.company;
+                    if (co != .none) {
+                        const res = game.commands.execute(g, .{ .crew_company = co }) catch |err| {
+                            self.say(.crit, "{s}", .{game.cli.errorText(err)});
+                            return;
+                        };
+                        self.say(if (res.still_open == 0) .good else .amber, "{s}: {d} hired to fill the manning table · {d} lines still open (no candidates on the boards yet)", .{ q.forceName(g, co), res.hired_count, res.still_open });
+                    }
+                },
+                't' => self.openCommand("train "),
+                'T' => if (row) |r| {
+                    const co = r.company;
+                    if (co == .none) {
+                        self.say(.dim, "put the cursor on a company (or one of its hulls) to train it", .{});
+                        return;
+                    }
+                    const res = game.commands.execute(g, .{ .train_company = .{ .company = co } }) catch |err| {
+                        self.say(.crit, "{s}", .{game.cli.errorText(err)});
+                        return;
+                    };
+                    self.say(if (res.enrolled > 0) .good else .amber, "{s}: {d} enrolled at their trades · {d} short of XP · {d} busy · {d} nothing to learn  (:train co:{d} <skill> targets one skill)", .{
+                        q.forceName(g, co), res.enrolled, res.short_xp, res.busy, res.nothing_to_learn, @intFromEnum(co),
+                    });
+                },
+                'r' => {
+                    self.forces_pane = switch (self.forces_pane) {
+                        .damage => .readiness,
+                        .readiness => .manning,
+                        .manning => .damage,
+                    };
+                    if (self.narrow() and self.forces_pane == .readiness) self.modal = .readiness;
+                },
+                'M' => {
+                    // Straight to the manning table (play feedback: it hid behind r).
+                    self.forces_pane = .manning;
+                    self.say(.dim, "MANNING: have / need per role for the company under the cursor — :crew co:N hires the gaps at home, xfer sends people out to a deployed one", .{});
+                },
+                'w' => if (row) |r| {
+                    const co = r.company;
+                    if (co == .none) {
+                        self.say(.dim, "put the cursor on a company to raise its air wing", .{});
+                        return;
+                    }
+                    _ = try self.execSay(.{ .raise_air_company = co }, .good, "{s} has an air wing — fighters go in its air lances (Market: aero filter; :newlance co:N air <name> adds a lance)", .{q.forceName(g, co)});
+                },
+                'x' => if (row) |r| {
+                    if (r.unit == .none) {
+                        self.say(.dim, "put the cursor on a hull to send it to another company", .{});
+                        return;
+                    }
+                    self.openModal(.{ .pick_company = .{ .what = .unit, .id = @intFromEnum(r.unit) } });
+                },
+                'l' => if (row) |r| {
+                    if (r.unit == .none) {
+                        self.say(.dim, "put the cursor on a hull to move it into a lance", .{});
+                        return;
+                    }
+                    self.openModal(.{ .lance_pick = r.unit });
+                },
+                '+', '=' => {
+                    // An HQ with a free combat-company slot: the selected one if it has room, else the first that does.
+                    const pick = q.hqWithCompanySlot(g, @enumFromInt(self.hqSelId(g)));
+                    if (pick == .none) {
+                        self.say(.crit, "no HQ has a free company slot — a regional HQ hosts one company; raise a field HQ to regional (HQ screen, T)", .{});
+                        return;
+                    }
+                    self.raise.hq = pick;
+                    self.input.len = 0;
+                    self.modal = .{ .input = .raise_name };
+                },
+                ']', '[' => {
+                    const views = try q.toeViews(al, g);
+                    self.forces_view = if (ch == ']') (self.forces_view + 1) % views.len else (self.forces_view + views.len - 1) % views.len;
+                    self.cur(0).* = 0;
+                },
+                'b' => if (row) |r| {
+                    const co = r.company;
+                    if (co == .none) {
+                        self.say(.dim, "put the cursor on a company or one of its hulls", .{});
+                        return;
+                    }
+                    const dmg = try q.companyDamage(al, g, co);
+                    if (dmg.short_key) |key| {
+                        self.openAmount(try std.fmt.allocPrint(al, "FABRICATE {s} for {s}", .{ key, q.forceName(g, co) }), .{ .fabricate = .{ .hq = self.homeHqOf(co), .key = key } }, &.{
+                            .{ .label = "quantity", .value = 1, .min = 1, .max = 20, .step = 1 },
+                        });
+                    } else self.say(.good, "{s} needs no structural components the home HQ lacks", .{q.forceName(g, co)});
+                },
+                'm' => if (row) |r| {
+                    if (r.unit == .none) return;
+                    const res = game.commands.execute(g, .{ .toggle_mothball = r.unit }) catch |err| {
+                        self.say(.crit, "{s}", .{game.cli.errorText(err)});
+                        return;
+                    };
+                    if (res.mothballed orelse false) self.say(.good, "#{d} mothballed — 20% upkeep, no maintenance wear, no crew needed", .{@intFromEnum(r.unit)}) else self.say(.good, "#{d} reactivating — tech-days before it can fight or move", .{@intFromEnum(r.unit)});
+                },
+                '$' => if (row) |r| {
+                    if (r.unit != .none) self.modal = .{ .confirm = .{ .kind = .sell_unit, .id = @intFromEnum(r.unit) } };
+                },
+                'd' => if (row) |r| {
+                    if (r.unit != .none) {
+                        const res = game.commands.execute(g, .{ .depot = r.unit }) catch |err| {
+                            self.say(.crit, "{s}", .{game.cli.errorText(err)});
+                            return;
+                        };
+                        self.say(.good, "#{d} queued for depot repair at {s} — HQ screen, [ ] to that HQ, its bays list the job", .{ @intFromEnum(r.unit), q.hqName(g, res.hq) });
+                    }
+                },
+                'o' => if (row) |r| {
+                    if (r.force == .none) return;
+                    // On a company row: cycle its rules of engagement (12D.4).
+                    if (r.is_company) {
+                        const res = game.commands.execute(g, .{ .cycle_roe = r.force }) catch |err| {
+                            self.say(.crit, "{s}", .{game.cli.errorText(err)});
+                            return;
+                        };
+                        self.say(.good, "{s} ROE → {s}", .{ r.name, res.roe.?.describe() });
+                        return;
+                    }
+                    if (!r.is_lance) {
+                        self.say(.dim, "roles are set on lances, rules of engagement on companies — move the cursor onto a lance or company row", .{});
+                        return;
+                    }
+                    const res = game.commands.execute(g, .{ .cycle_role = r.force }) catch |err| {
+                        self.say(.crit, "{s}", .{game.cli.errorText(err)});
+                        return;
+                    };
+                    self.say(.good, "{s} → {s}: {s}", .{ r.name, @tagName(res.role.?), res.role.?.describe() });
+                },
+                'X' => if (row) |r| {
+                    const co = r.company;
+                    if (co != .none) self.modal = .{ .confirm = .{ .kind = .disband, .id = @intFromEnum(co) } };
+                },
+                'R' => if (row) |r| {
+                    if (r.unit != .none) {
+                        // Gear is field work on every hull kind: order spares for what's destroyed to the hull's site.
+                        const res = game.commands.execute(g, .{ .replace_gear = r.unit }) catch |err| {
+                            self.say(.crit, "{s}", .{game.cli.errorText(err)});
+                            return;
+                        };
+                        if (res.ordered + res.unsourced == 0) {
+                            self.say(.good, "#{d}: spares for its broken gear are already on hand or on order — its tech fits them on the weekly repair pass", .{@intFromEnum(r.unit)});
+                        } else {
+                            self.say(if (res.unsourced == 0) .good else .amber, "#{d}: {d} spare{s} ordered to its site{s} — its tech fits them on the weekly repair pass", .{
+                                @intFromEnum(r.unit), res.ordered, if (res.ordered == 1) "" else "s",
+                                if (res.unsourced > 0) " (some could not be sourced this month — retry after the refresh)" else "",
+                            });
+                        }
+                        return;
+                    }
+                    const co = r.company;
+                    if (co == .none) return;
+                    _ = try self.execSay(.{ .recall_idle = co }, .good, "{s} is coming home", .{q.forceName(g, co)});
+                },
+                else => {},
+            }
+
+    }
+
+    fn contractsKey(self: *App, ch: u21) anyerror!void {
+        const al = self.a();
+        const g = &self.gs.?;
+            // One board per HQ (12E.4): [ ] steps through them.
+            if (ch == ']' or ch == '[') {
+                const n = (try q.hqList(al, g)).len;
+                if (n > 0) self.hq_sel = if (ch == ']') (self.hq_sel + 1) % n else (self.hq_sel + n - 1) % n;
+                self.cur(0).* = 0;
+                return;
+            }
+            if (self.focus == 2) return; // history is read-only: the log pane follows the cursor
+            const view = try q.contracts(al, g, @enumFromInt(self.hqSelId(g)));
+            if (self.focus == 0) {
+                if (ch == 'b' and view.board.len > 0) { // bargain: n is end-turn everywhere
+                    const offer = view.board[@min(self.cur(0).*, view.board.len - 1)];
+                    const idx = offer.index;
+                    if (offer.negotiated) {
+                        self.say(.dim, "that offer has had its negotiation round — take it or leave it", .{});
+                        return;
+                    }
+                    self.openModal(.{ .negotiate = idx });
+                }
+                return;
+            }
+            if (view.active.len == 0) return;
+            const sel = view.active[@min(self.cur(1).*, view.active.len - 1)];
+            switch (ch) {
+                'c' => {
+                    if (sel.id == .none) {
+                        self.say(.dim, "no contract to complete — [R] recalls the company", .{});
+                        return;
+                    }
+                    _ = try self.execSay(.{ .complete_contract = sel.id }, .good, "contract [{d}] closed out", .{@intFromEnum(sel.id)});
+                },
+                'R' => {
+                    // Under contract the recall is a breach: confirm it first.
+                    if (sel.id != .none) {
+                        self.modal = .{ .confirm = .{ .kind = .recall_breach, .id = @intFromEnum(sel.company) } };
+                        return;
+                    }
+                    _ = try self.execSay(.{ .recall_company = sel.company }, .good, "{s} is coming home", .{q.forceName(g, sel.company)});
+                },
+                else => {},
+            }
+
+    }
+
+    fn ledgerKey(self: *App, ch: u21) anyerror!void {
+        const al = self.a();
+        const g = &self.gs.?;
+        switch (ch) {
+            't', 'T', 'p' => {
+                const all = try q.allTreasuries(al, g);
+                const sel: Treasury = if (self.ledger_sel < all.len) all[self.ledger_sel] else .outfit;
+                const label = try q.treasuryLabel(al, g, sel);
+                if (sel == .outfit) {
+                    self.say(.dim, "select the HQ or company row first — cash moves between it and the outfit treasury", .{});
+                    return;
+                }
+                if (ch == 't') {
+                    self.openAmount(try std.fmt.allocPrint(al, "SEND CASH TO {s}", .{label}), .{ .transfer_to = sel }, &.{
+                        .{ .label = "c-bills", .value = 250_000, .min = 1, .max = @max(1, (try q.status(al, g)).funds_cbills), .step = 50_000 },
+                    });
+                } else if (ch == 'T') {
+                    const bal = q.balance(g, sel);
+                    self.openAmount(try std.fmt.allocPrint(al, "PULL CASH BACK FROM {s}", .{label}), .{ .transfer_back = sel }, &.{
+                        .{ .label = "c-bills", .value = @max(0, @divTrunc(bal, 2)), .min = 1, .max = @max(1, bal), .step = 50_000 },
+                    });
                 } else {
-                    const view = try q.ledger(al, g, .outfit, 31, 200);
-                    self.moveCursor(2, delta, view.ledger.len + 1);
+                    const existing = q.policyFor(g, sel);
+                    self.openAmount(try std.fmt.allocPrint(al, "CASH POLICY · {s}", .{label}), .{ .policy = sel }, &.{
+                        .{ .label = "keep above", .value = if (existing) |p| p.floor else 250_000, .min = 0, .max = 100_000_000, .step = 50_000 },
+                        .{ .label = "cap per month", .value = if (existing) |p| p.monthly_cap else 500_000, .min = 0, .max = 100_000_000, .step = 50_000 },
+                    });
                 }
             },
-            .forces => {
-                if (self.focus == 0) {
-                    const rows = try self.toeRows();
-                    self.moveCursor(0, delta, rows.len);
-                } else {
-                    const pool = try q.unassigned(al, g);
-                    self.moveCursor(2, delta, pool.len);
+            'x' => {
+                const all = try q.allTreasuries(al, g);
+                const sel: Treasury = if (self.ledger_sel < all.len) all[self.ledger_sel] else .outfit;
+                if (sel == .outfit) {
+                    self.say(.dim, "select the HQ or company row whose policy you want cleared", .{});
+                    return;
                 }
-            },
-            .supply => {
-                const view = try q.supply(al, g);
-                self.moveCursor(0, delta, view.rows.len);
-            },
-            .hq => {
-                const id: types.HqId = @enumFromInt(self.hqSelId(g));
-                if (self.focus == 0) {
-                    const detail = try q.hqDetail(al, g, id);
-                    self.moveCursor(0, delta, detail.len);
-                } else {
-                    const hallv = try q.hall(al, g, id, self.hall_filter);
-                    self.moveCursor(1, delta, hallv.rows.len);
+                const label = try q.treasuryLabel(al, g, sel);
+                if (q.policyFor(g, sel) != null) {
+                    _ = try self.execSay(.{ .set_policy = .{ .entity = sel, .floor = 0, .monthly_cap = 0 } }, .good, "cash top-up policy for {s} cleared", .{label});
+                    return;
                 }
+                if (sel == .company and q.supplyPolicyFor(g, sel.company) != null) {
+                    _ = try self.execSay(.{ .set_supply_policy = .{ .company = sel.company, .min_days = 0, .tons = 0 } }, .good, "resupply policy for {s} cleared", .{label});
+                    return;
+                }
+                self.say(.dim, "{s} has no standing policy", .{label});
             },
-            .map => try self.mapMove(0, if (delta > 0) -1 else 1),
-            .lab => {
-                const uid = (try self.labUnit()) orelse return;
-                const view = try q.lab(al, g, uid);
-                self.moveCursor(0, delta, view.mounts.len);
+            'L' => self.openAmount("TAKE A LOAN (simple interest)", .loan, &.{
+                .{ .label = "principal", .value = @min(q.creditRemaining(g), 1_000_000), .min = 1, .max = @max(1, q.creditRemaining(g)), .step = 100_000 },
+                .{ .label = "months", .value = 12, .min = 1, .max = 60, .step = 6 },
+            }),
+            'R' => {
+                const bal = q.oldestLoanBalance(g) orelse {
+                    self.say(.dim, "no loans to repay", .{});
+                    return;
+                };
+                self.openAmount("REPAY THE OLDEST LOAN", .{ .repay = 0 }, &.{
+                    .{ .label = "c-bills", .value = @min(bal, @max(0, (try q.status(al, g)).funds_cbills)), .min = 1, .max = @max(1, bal), .step = 50_000 },
+                });
             },
-            .people => {
-                const view = try q.people(al, g, self.people_filter);
-                self.moveCursor(0, delta, view.rows.len);
+            else => {},
+        }
+    }
+
+    fn supplyKey(self: *App, ch: u21) anyerror!void {
+        const al = self.a();
+        const g = &self.gs.?;
+            const site = try self.supplySite();
+            var buf: [128]u8 = undefined;
+            switch (ch) {
+                'o' => {
+                    self.openModal(.{ .pick_part = .{ .purpose = .order, .site = site orelse q.defaultSite(g) } });
+                },
+                's' => {
+                    // Ship from the home shelf: a company row means its home HQ's stores.
+                    const from: types.Site = if (site) |s| switch (s) {
+                        .company => |id| .{ .hq = @enumFromInt(self.homeHqOf(id)) },
+                        else => s,
+                    } else q.defaultSite(g);
+                    self.openModal(.{ .pick_part = .{ .purpose = .ship, .site = from, .ship_to = if (site) |s2| (if (s2 == .company) s2.company else null) else null } });
+                },
+                't' => {
+                    const s2 = site orelse return self.say(.dim, "put the cursor on a company or HQ row to send it cash", .{});
+                    const to: Treasury = switch (s2) {
+                        .company => |id| .{ .company = id },
+                        .hq => |id| .{ .hq = id },
+                        .outfit => return self.say(.dim, "put the cursor on a company or HQ row to send it cash", .{}),
+                    };
+                    self.openAmount(try std.fmt.allocPrint(al, "SEND CASH TO {s}", .{try q.treasuryLabel(al, g, to)}), .{ .transfer_to = to }, &.{
+                        .{ .label = "c-bills", .value = if (s2 == .company) 250_000 else 500_000, .min = 1, .max = @max(1, (try q.status(al, g)).funds_cbills), .step = 50_000 },
+                    });
+                },
+                'p' => {
+                    const s2 = site orelse return self.say(.dim, "put the cursor on a company or HQ row to set its cash policy", .{});
+                    const t: Treasury = switch (s2) {
+                        .company => |id| .{ .company = id },
+                        .hq => |id| .{ .hq = id },
+                        .outfit => return self.say(.dim, "policies top up companies and HQs from the outfit treasury", .{}),
+                    };
+                    const existing = q.policyFor(g, t);
+                    self.openAmount(try std.fmt.allocPrint(al, "CASH POLICY · {s}", .{try q.treasuryLabel(al, g, t)}), .{ .policy = t }, &.{
+                        .{ .label = "keep above", .value = if (existing) |p| p.floor else if (s2 == .company) 250_000 else 500_000, .min = 0, .max = 100_000_000, .step = 50_000 },
+                        .{ .label = "cap per month", .value = if (existing) |p| p.monthly_cap else if (s2 == .company) 500_000 else 1_000_000, .min = 0, .max = 100_000_000, .step = 50_000 },
+                    });
+                },
+                'P' => {
+                    const co: types.ForceId = if (site) |s2| (if (s2 == .company) s2.company else .none) else .none;
+                    if (co == .none) return self.say(.dim, "resupply policies belong to a company — put the cursor on its field stores", .{});
+                    var days: i64 = 14;
+                    var tons: i64 = 0;
+                    var battles: i64 = 0;
+                    if (q.supplyPolicyFor(g, co)) |sp| {
+                        days = sp.min_days;
+                        tons = sp.tons;
+                        battles = sp.ammo_battles;
+                    }
+                    self.openAmount(try std.fmt.allocPrint(al, "RESUPPLY POLICY · {s}", .{q.forceName(g, co)}), .{ .supply_policy = co }, &.{
+                        .{ .label = "safety days (0 clears)", .value = days, .min = 0, .max = 365, .step = 7 },
+                        .{ .label = "max tons (0 = auto)", .value = tons, .min = 0, .max = 9_999, .step = 10 },
+                        .{ .label = "ammo battles", .value = battles, .min = 0, .max = 20, .step = 1 },
+                    });
+                },
+                'K' => {
+                    self.openModal(.{ .pick_part = .{ .purpose = .keep, .site = if (site) |s| (if (s == .hq) s else q.defaultSite(g)) else q.defaultSite(g) } });
+                },
+                '$' => {
+                    self.openModal(.{ .pick_part = .{ .purpose = .sell, .site = if (site) |s| (if (s == .hq) s else q.defaultSite(g)) else q.defaultSite(g) } });
+                },
+                'R' => {
+                    const co: types.ForceId = if (site) |s| (if (s == .company) s.company else .none) else .none;
+                    if (co == .none) {
+                        self.say(.dim, "move the cursor onto a company's field stores", .{});
+                        return;
+                    }
+                    const r = game.commands.execute(g, .{ .trim_stock = co }) catch |err| {
+                        self.say(.crit, "{s}", .{game.cli.errorText(err)});
+                        return;
+                    };
+                    if (r.tons_moved == 0) {
+                        self.say(.dim, "{s}'s stores already match the field plan", .{q.forceName(g, co)});
+                    } else {
+                        self.say(.good, "{s} returns {d}t over the plan to the home HQ — riding the empty convoys, no freight", .{ q.forceName(g, co), r.tons_moved });
+                    }
+                },
+                'H' => {
+                    // Send every structural component in the field stores home.
+                    const co: types.ForceId = if (site) |s| (if (s == .company) s.company else .none) else .none;
+                    if (co == .none) {
+                        self.say(.dim, "move the cursor onto a company's field stores", .{});
+                        return;
+                    }
+                    const res = game.commands.execute(g, .{ .ship_components_home = co }) catch |err| switch (err) {
+                        error.NothingToShip => return self.say(.dim, "no structural components in {s}'s field stores", .{q.forceName(g, co)}),
+                        else => return self.say(.crit, "{s}", .{game.cli.errorText(err)}),
+                    };
+                    self.say(.good, "{d} component{s} shipped from {s} to {s} (freight from local funds)", .{ res.count, if (res.count == 1) "" else "s", q.forceName(g, co), q.hqName(g, res.hq) });
+                },
+                'T' => self.openCommand(if (site) |s| switch (s) {
+                    .company => |id| std.fmt.bufPrint(&buf, "transfer co:{d} outfit {d}", .{ @intFromEnum(id), @max(0, @divTrunc(q.balance(g, .{ .company = id }), 2)) }) catch "transfer ",
+                    .hq => |id| std.fmt.bufPrint(&buf, "transfer hq:{d} outfit {d}", .{ @intFromEnum(id), @max(0, @divTrunc(q.balance(g, .{ .hq = id }), 2)) }) catch "transfer ",
+                    .outfit => "transfer ",
+                } else "transfer "),
+                else => {},
+            }
+
+    }
+
+    fn hqKey(self: *App, ch: u21) anyerror!void {
+        const al = self.a();
+        const g = &self.gs.?;
+            const n = (try q.hqList(al, g)).len;
+            switch (ch) {
+                ']' => if (n > 0) {
+                    self.hq_sel = (self.hq_sel + 1) % n;
+                },
+                '[' => if (n > 0) {
+                    self.hq_sel = (self.hq_sel + n - 1) % n;
+                },
+                'u' => {
+                    // The facility rows sit right under the header in the
+                    // HQ pane: with the cursor on one, upgrade it directly.
+                    const hid: types.HqId = @enumFromInt(self.hqSelId(g));
+                    const c = self.cur(0).*;
+                    const under_cursor = if (self.focus == 0) try q.hqFacilityAtRow(al, g, hid, c) else null;
+                    if (under_cursor) |kind| {
+                        const rows = try q.upgrades(al, g, hid);
+                        for (rows) |r| if (r.kind == kind) {
+                            if (!r.possible) {
+                                self.say(.amber, "{s}: {s}", .{ @tagName(kind), r.reason });
+                                return;
+                            }
+                        };
+                        _ = try self.execSay(.{ .upgrade_facility = .{ .hq = hid, .kind = kind } }, .good, "{s} upgrade started — paperwork first, then construction; watch PROJECTS", .{@tagName(kind)});
+                        return;
+                    }
+                    self.openModal(.{ .upgrade = hid });
+                },
+                'S' => {
+                    _ = try self.execSay(.{ .autostaff = @enumFromInt(self.hqSelId(g)) }, .good, "back office staffed to requirement", .{});
+                },
+                'T' => {
+                    // Field HQ → regional (the footer and the tier line promised this key).
+                    const hid: types.HqId = @enumFromInt(self.hqSelId(g));
+                    const name = try al.dupe(u8, q.hqName(g, hid));
+                    _ = try self.execSay(.{ .upgrade_tier = hid }, .good, "{s} → regional HQ: paperwork first, then construction — watch PROJECTS; S autostaff when it lands", .{name});
+                },
+                'h' => {
+                    self.focus = 1;
+                    self.say(.dim, "hiring hall: j/k pick, Enter hires, f/F changes the filter", .{});
+                },
+                'f' => {
+                    self.hall_filter = self.hall_filter.next();
+                    self.focus = 1;
+                    self.cur(1).* = 0;
+                },
+                'F' => {
+                    self.hall_filter = self.hall_filter.prev();
+                    self.focus = 1;
+                    self.cur(1).* = 0;
+                },
+                'b' => {
+                    self.openModal(.{ .pick_part = .{ .purpose = .fabricate, .site = .{ .hq = @enumFromInt(self.hqSelId(g)) } } });
+                },
+                '$' => self.modal = .{ .confirm = .{ .kind = .sell_hq, .id = self.hqSelId(g) } },
+                else => {},
+            }
+
+    }
+
+    fn labKey(self: *App, ch: u21) anyerror!void {
+        const al = self.a();
+        const g = &self.gs.?;
+            const uid = (try self.labUnit()) orelse return;
+            const view = try q.lab(al, g, uid);
+            const meks = view.meks;
+            switch (ch) {
+                ']' => self.lab_sel = (self.lab_sel + 1) % meks.len,
+                '[' => self.lab_sel = (self.lab_sel + meks.len - 1) % meks.len,
+                '-' => if (view.mounts.len > 0) {
+                    const m = view.mounts[@min(self.cur(0).*, view.mounts.len - 1)];
+                    _ = try self.execSay(.{ .refit_remove = .{ .unit = uid, .slot_key = m.slot_key } }, .good, "staged: remove {s} — Enter commits the plan to a bay, c clears it", .{m.slot_key});
+                },
+                '+' => {
+                    self.openModal(.{ .install_part = uid });
+                },
+                'R' => if (view.mounts.len > 0) {
+                    const m = view.mounts[@min(self.cur(0).*, view.mounts.len - 1)];
+                    const res = game.commands.execute(g, .{ .replace_mount = .{ .unit = uid, .slot_key = m.slot_key } }) catch |err| switch (err) {
+                        error.MountIsFine => return self.say(.dim, "{s} is fine — [R] orders a replacement for damaged or destroyed gear", .{m.slot_key}),
+                        else => return self.say(.crit, "{s}", .{game.cli.errorText(err)}),
+                    };
+                    self.say(.good, "ordered 1 × {s} to {s}; techs fit it on the next repair pass once it lands", .{ m.part_key, q.hqName(g, res.hq) });
+                },
+                'c' => {
+                    _ = try self.execSay(.{ .refit_clear = uid }, .good, "#{d}: refit plan cleared", .{@intFromEnum(uid)});
+                },
+                'D' => {
+                    _ = try self.execSay(.{ .depot = uid }, .good, "#{d} queued for depot repair — see the HQ screen's bays", .{@intFromEnum(uid)});
+                },
+                else => {},
+            }
+
+    }
+
+    fn peopleKey(self: *App, ch: u21) anyerror!void {
+        const al = self.a();
+        const g = &self.gs.?;
+            if (ch == '/' or ch == ',') {
+                self.people_filter = if (ch == '/') self.people_filter.next() else self.people_filter.prev();
+                self.cur(0).* = 0;
+                return;
+            }
+            const id = (try self.selectedPerson()) orelse return;
+            var buf: [96]u8 = undefined;
+            switch (ch) {
+                't' => {
+                    const row = (try self.selectedPersonRow()) orelse return;
+                    self.openCommand(std.fmt.bufPrint(&buf, "train {d} {s}", .{ @intFromEnum(id), @tagName(row.primary_skill) }) catch "train ");
+                },
+                'a' => {
+                    self.openModal(.{ .seat = id });
+                },
+                'P' => {
+                    self.openModal(.{ .pick_hq = id });
+                },
+                'x' => {
+                    self.openModal(.{ .pick_company = .{ .what = .person, .id = @intFromEnum(id) } });
+                },
+                'L' => self.openAmount(try std.fmt.allocPrint(al, "LEAVE · {s}", .{try q.personName(al, g, id)}), .{ .leave = id }, &.{
+                    .{ .label = "days", .value = 7, .min = 1, .max = 90, .step = 1 },
+                }),
+                'T' => self.openAmount(try std.fmt.allocPrint(al, "TRIAGE · {s} (higher heals first)", .{try q.personName(al, g, id)}), .{ .triage = id }, &.{
+                    .{ .label = "priority", .value = 1, .min = 0, .max = 9, .step = 1 },
+                }),
+                'D' => self.modal = .{ .confirm = .{ .kind = .fire, .id = @intFromEnum(id) } },
+                'r' => self.modal = .{ .record = id },
+                'm' => {
+                    _ = try self.execSay(.{ .admit = id }, .good, "{s} admitted to the medbay — healing starts tomorrow", .{try q.personName(al, g, id)});
+                },
+                else => {},
+            }
+
+    }
+
+    fn marketKey(self: *App, ch: u21) anyerror!void {
+        const al = self.a();
+        const g = &self.gs.?;
+        switch (ch) {
+            '/' => {
+                self.market_filter = self.market_filter.next();
+                self.cur(0).* = 0;
+                self.cur(1).* = 0;
             },
-            .market => {
+            ',' => {
+                self.market_filter = self.market_filter.prev();
+                self.cur(0).* = 0;
+                self.cur(1).* = 0;
+            },
+            'b' => {
                 const view = try q.market(al, g, self.market_filter, @enumFromInt(self.hqSelId(g)));
-                switch (self.focus) {
-                    0 => self.moveCursor(0, delta, view.board.len),
-                    1 => self.moveCursor(1, delta, view.catalog.len),
-                    2 => self.moveCursor(2, delta, view.demand.len),
-                    else => self.moveCursor(3, delta, (try q.stockPolicies(al, g, @enumFromInt(self.hqSelId(g)))).len),
-                }
+                if (self.focus == 1 and view.catalog.len > 0) {
+                    const r = view.catalog[@min(self.cur(1).*, view.catalog.len - 1)];
+                    if (!r.component) {
+                        self.say(.amber, "only structural components (comp_*) are fabricated; order the rest", .{});
+                        return;
+                    }
+                    self.openAmount(try std.fmt.allocPrint(al, "FABRICATE {s}", .{r.key}), .{ .fabricate = .{ .hq = self.hqSelId(g), .key = r.key } }, &.{
+                        .{ .label = "quantity", .value = 1, .min = 1, .max = 20, .step = 1 },
+                    });
+                } else self.say(.dim, "select a comp_* row in the catalog, then b", .{});
             },
+            'x' => {
+                if (self.focus != 3) {
+                    self.say(.dim, "Tab to KEEP STOCKED, then x removes the highlighted line", .{});
+                    return;
+                }
+                const hq_id: types.HqId = @enumFromInt(self.hqSelId(g));
+                const pol = try q.stockPolicies(al, g, hq_id);
+                if (pol.len == 0) return;
+                const r = pol[@min(self.cur(3).*, pol.len - 1)];
+                _ = try self.execSay(.{ .set_stock_policy = .{ .hq = hq_id, .part_key = r.key, .min = 0, .target = 0 } }, .good, "keep-stocked line for {s} removed", .{r.key});
+            },
+            'K' => {
+                const view = try q.market(al, g, self.market_filter, @enumFromInt(self.hqSelId(g)));
+                if (self.focus == 1 and view.catalog.len > 0) {
+                    const r = view.catalog[@min(self.cur(1).*, view.catalog.len - 1)];
+                    self.openAmount(try std.fmt.allocPrint(al, "KEEP {s} STOCKED", .{r.key}), .{ .stock_policy = .{ .hq = self.hqSelId(g), .key = r.key } }, &.{
+                        .{ .label = "minimum", .value = 5, .min = 0, .max = 999, .step = 1 },
+                        .{ .label = "target", .value = 10, .min = 0, .max = 999, .step = 1 },
+                    });
+                } else self.say(.dim, "select a catalogue row (Tab), then K to keep it stocked at the HQ", .{});
+            },
+            ']', '[' => {
+                const n = (try q.hqList(al, g)).len;
+                if (n > 0) self.hq_sel = if (ch == ']') (self.hq_sel + 1) % n else (self.hq_sel + n - 1) % n;
+            },
+            else => {},
         }
     }
 
@@ -2267,717 +3087,6 @@ pub const App = struct {
             n += span;
         }
         return null;
-    }
-
-    fn screenEnter(self: *App) !void {
-        const al = self.a();
-        const g = &self.gs.?;
-        switch (self.tab) {
-            .desk => {
-                const view = try q.desk(al, g, 40);
-                if (self.focus == 0 and view.checklist.len > 0) {
-                    const w = view.checklist[@min(self.cur(0).*, view.checklist.len - 1)];
-                    self.switchTab(@enumFromInt(w.jump));
-                } else if (self.focus == 1) {
-                    if (self.inboxEventAtCursor(view)) |idx| self.modal = .{ .decision = idx };
-                }
-            },
-            .contracts => {
-                const view = try q.contracts(al, g, @enumFromInt(self.hqSelId(g)));
-                if (self.focus == 0 and view.board.len > 0) {
-                    // Always choose in the open (play feedback): the picker ranks
-                    // the companies readiest first and says who cannot go.
-                    self.openModal(.{ .accept_pick = view.board[@min(self.cur(0).*, view.board.len - 1)].index });
-                } else if (self.focus == 1 and view.active.len > 0) {
-                    // The whole log, full screen (play feedback: the side pane clipped it).
-                    self.modal_cursor = std.math.maxInt(usize) / 2; // open at the latest entry
-                    self.modal = .{ .contract_log = view.active[@min(self.cur(1).*, view.active.len - 1)].id };
-                } else if (self.focus == 2) {
-                    const history = try q.contractHistory(al, g);
-                    if (history.len > 0) {
-                        self.modal_cursor = std.math.maxInt(usize) / 2;
-                        self.modal = .{ .contract_log = history[@min(self.cur(2).*, history.len - 1)].id };
-                    }
-                }
-            },
-            .ledger => {
-                self.cmd_prefill.set("transfer outfit ");
-                self.input.set(self.cmd_prefill.slice());
-                self.cmd_prefill.len = 0;
-                self.modal = .{ .input = .command };
-            },
-            .forces => {
-                const rows = try self.toeRows();
-                const c = self.cur(0).*;
-                if (self.focus == 0 and c < rows.len and rows[c].unit != .none) {
-                    if (self.narrow()) {
-                        self.modal = .{ .hull = rows[c].unit };
-                        return;
-                    }
-                    var buf: [64]u8 = undefined;
-                    self.input.set(std.fmt.bufPrint(&buf, "assign {d} ", .{@intFromEnum(rows[c].unit)}) catch "assign ");
-                    self.modal = .{ .input = .command };
-                }
-            },
-            .hq => {
-                if (self.focus != 1) return;
-                const id: types.HqId = @enumFromInt(self.hqSelId(g));
-                const hallv = try q.hall(al, g, id, self.hall_filter);
-                if (hallv.rows.len == 0) return;
-                const row = hallv.rows[@min(self.cur(1).*, hallv.rows.len - 1)];
-                _ = try self.execSay(.{ .hire_candidate = row.index }, .good, "hired candidate [{d}]", .{row.index});
-            },
-            .map => self.switchTab(.contracts),
-            .lab => {
-                const uid = (try self.labUnit()) orelse return;
-                _ = try self.execSay(.{ .refit_commit = uid }, .good, "refit committed — it is a bay job at the home HQ: HQ screen (F7) lists the bays, queued and running, with days left", .{});
-            },
-            .people => {
-                const id = (try self.selectedPerson()) orelse return;
-                self.openModal(.{ .seat = id });
-            },
-            .market => {
-                const view = try q.market(al, g, self.market_filter, @enumFromInt(self.hqSelId(g)));
-                const hq_id: types.HqId = @enumFromInt(self.hqSelId(g));
-                switch (self.focus) {
-                    0 => if (view.board.len > 0) {
-                        const l = view.board[@min(self.cur(0).*, view.board.len - 1)];
-                        if (l.transport) {
-                            _ = try self.execSay(.{ .buy_listing = l.index }, .good, "bought listing [{d}] — berthed at {s}; hire a ship crew from the hall and it lifts the next deployment", .{ l.index, q.hqName(g, hq_id) });
-                        } else {
-                            _ = try self.execSay(.{ .buy_listing = l.index }, .good, "bought listing [{d}]", .{l.index});
-                        }
-                    },
-                    1 => if (view.catalog.len > 0) {
-                        const r = view.catalog[@min(self.cur(1).*, view.catalog.len - 1)];
-                        var buf: [96]u8 = undefined;
-                        self.openCommand(std.fmt.bufPrint(&buf, "order {s} 1 hq:{d}", .{ r.key, @intFromEnum(hq_id) }) catch "order ");
-                    },
-                    3 => {
-                        const pol = try q.stockPolicies(al, g, hq_id);
-                        if (pol.len == 0) return;
-                        const r = pol[@min(self.cur(3).*, pol.len - 1)];
-                        var buf: [96]u8 = undefined;
-                        self.openCommand(std.fmt.bufPrint(&buf, "stockpolicy hq:{d} {s} {d} {d}", .{ @intFromEnum(hq_id), r.key, r.min, r.target }) catch "stockpolicy ");
-                    },
-                    else => if (view.demand.len > 0) {
-                        const d = view.demand[@min(self.cur(2).*, view.demand.len - 1)];
-                        if (d.short == 0) {
-                            self.say(.dim, "{s}: nothing short — on hand or already on order", .{d.key});
-                            return;
-                        }
-                        // Structural components are fabricated at a regional bay
-                        // (ARCH §9.8); everything else is an acquisition roll — the
-                        // command picks (`cover_shortfall`).
-                        const r = game.commands.execute(g, .{ .cover_shortfall = .{ .hq = hq_id, .part_key = d.key, .quantity = d.short } }) catch |err| {
-                            self.say(.crit, "refused: {s}", .{game.cli.errorText(err)});
-                            return;
-                        };
-                        if (r.fabricated) {
-                            self.say(.good, "fabricating {d} × {s} at {s} — a bay job, see the HQ screen", .{ d.short, d.key, q.hqName(g, hq_id) });
-                            return;
-                        }
-                        if (r.sourced) self.say(.good, "ordered {d} × {s} to {s}", .{ d.short, d.key, q.hqName(g, hq_id) }) else self.say(.amber, "logistics could not source {s} this time — retry after the monthly market refresh, or buy it off a board", .{d.key});
-                    },
-                }
-            },
-            else => {},
-        }
-    }
-
-    fn screenKey(self: *App, ch: u21) !void {
-        const al = self.a();
-        const g = &self.gs.?;
-        switch (self.tab) {
-            .desk => switch (ch) {
-                'e' => {
-                    self.logos = &.{};
-                    try self.loadLogoList();
-                    self.openModal(.emblem);
-                },
-                else => {},
-            },
-            .people => {
-                if (ch == '/' or ch == ',') {
-                    self.people_filter = if (ch == '/') self.people_filter.next() else self.people_filter.prev();
-                    self.cur(0).* = 0;
-                    return;
-                }
-                const id = (try self.selectedPerson()) orelse return;
-                var buf: [96]u8 = undefined;
-                switch (ch) {
-                    't' => {
-                        const row = (try self.selectedPersonRow()) orelse return;
-                        self.openCommand(std.fmt.bufPrint(&buf, "train {d} {s}", .{ @intFromEnum(id), @tagName(row.primary_skill) }) catch "train ");
-                    },
-                    'a' => {
-                        self.openModal(.{ .seat = id });
-                    },
-                    'P' => {
-                        self.openModal(.{ .pick_hq = id });
-                    },
-                    'x' => {
-                        self.openModal(.{ .pick_company = .{ .what = .person, .id = @intFromEnum(id) } });
-                    },
-                    'L' => self.openAmount(try std.fmt.allocPrint(al, "LEAVE · {s}", .{try q.personName(al, g, id)}), .{ .leave = id }, &.{
-                        .{ .label = "days", .value = 7, .min = 1, .max = 90, .step = 1 },
-                    }),
-                    'T' => self.openAmount(try std.fmt.allocPrint(al, "TRIAGE · {s} (higher heals first)", .{try q.personName(al, g, id)}), .{ .triage = id }, &.{
-                        .{ .label = "priority", .value = 1, .min = 0, .max = 9, .step = 1 },
-                    }),
-                    'D' => self.modal = .{ .confirm = .{ .kind = .fire, .id = @intFromEnum(id) } },
-                    'r' => self.modal = .{ .record = id },
-                    'm' => {
-                        _ = try self.execSay(.{ .admit = id }, .good, "{s} admitted to the medbay — healing starts tomorrow", .{try q.personName(al, g, id)});
-                    },
-                    else => {},
-                }
-            },
-            .market => switch (ch) {
-                '/' => {
-                    self.market_filter = self.market_filter.next();
-                    self.cur(0).* = 0;
-                    self.cur(1).* = 0;
-                },
-                ',' => {
-                    self.market_filter = self.market_filter.prev();
-                    self.cur(0).* = 0;
-                    self.cur(1).* = 0;
-                },
-                'b' => {
-                    const view = try q.market(al, g, self.market_filter, @enumFromInt(self.hqSelId(g)));
-                    if (self.focus == 1 and view.catalog.len > 0) {
-                        const r = view.catalog[@min(self.cur(1).*, view.catalog.len - 1)];
-                        if (!r.component) {
-                            self.say(.amber, "only structural components (comp_*) are fabricated; order the rest", .{});
-                            return;
-                        }
-                        self.openAmount(try std.fmt.allocPrint(al, "FABRICATE {s}", .{r.key}), .{ .fabricate = .{ .hq = self.hqSelId(g), .key = r.key } }, &.{
-                            .{ .label = "quantity", .value = 1, .min = 1, .max = 20, .step = 1 },
-                        });
-                    } else self.say(.dim, "select a comp_* row in the catalog, then b", .{});
-                },
-                'x' => {
-                    if (self.focus != 3) {
-                        self.say(.dim, "Tab to KEEP STOCKED, then x removes the highlighted line", .{});
-                        return;
-                    }
-                    const hq_id: types.HqId = @enumFromInt(self.hqSelId(g));
-                    const pol = try q.stockPolicies(al, g, hq_id);
-                    if (pol.len == 0) return;
-                    const r = pol[@min(self.cur(3).*, pol.len - 1)];
-                    _ = try self.execSay(.{ .set_stock_policy = .{ .hq = hq_id, .part_key = r.key, .min = 0, .target = 0 } }, .good, "keep-stocked line for {s} removed", .{r.key});
-                },
-                'K' => {
-                    const view = try q.market(al, g, self.market_filter, @enumFromInt(self.hqSelId(g)));
-                    if (self.focus == 1 and view.catalog.len > 0) {
-                        const r = view.catalog[@min(self.cur(1).*, view.catalog.len - 1)];
-                        self.openAmount(try std.fmt.allocPrint(al, "KEEP {s} STOCKED", .{r.key}), .{ .stock_policy = .{ .hq = self.hqSelId(g), .key = r.key } }, &.{
-                            .{ .label = "minimum", .value = 5, .min = 0, .max = 999, .step = 1 },
-                            .{ .label = "target", .value = 10, .min = 0, .max = 999, .step = 1 },
-                        });
-                    } else self.say(.dim, "select a catalogue row (Tab), then K to keep it stocked at the HQ", .{});
-                },
-                ']', '[' => {
-                    const n = (try q.hqList(al, g)).len;
-                    if (n > 0) self.hq_sel = if (ch == ']') (self.hq_sel + 1) % n else (self.hq_sel + n - 1) % n;
-                },
-                else => {},
-            },
-            .contracts => {
-                // One board per HQ (12E.4): [ ] steps through them.
-                if (ch == ']' or ch == '[') {
-                    const n = (try q.hqList(al, g)).len;
-                    if (n > 0) self.hq_sel = if (ch == ']') (self.hq_sel + 1) % n else (self.hq_sel + n - 1) % n;
-                    self.cur(0).* = 0;
-                    return;
-                }
-                if (self.focus == 2) return; // history is read-only: the log pane follows the cursor
-                const view = try q.contracts(al, g, @enumFromInt(self.hqSelId(g)));
-                if (self.focus == 0) {
-                    if (ch == 'b' and view.board.len > 0) { // bargain: n is end-turn everywhere
-                        const offer = view.board[@min(self.cur(0).*, view.board.len - 1)];
-                        const idx = offer.index;
-                        if (offer.negotiated) {
-                            self.say(.dim, "that offer has had its negotiation round — take it or leave it", .{});
-                            return;
-                        }
-                        self.openModal(.{ .negotiate = idx });
-                    }
-                    return;
-                }
-                if (view.active.len == 0) return;
-                const sel = view.active[@min(self.cur(1).*, view.active.len - 1)];
-                switch (ch) {
-                    'c' => {
-                        if (sel.id == .none) {
-                            self.say(.dim, "no contract to complete — [R] recalls the company", .{});
-                            return;
-                        }
-                        _ = try self.execSay(.{ .complete_contract = sel.id }, .good, "contract [{d}] closed out", .{@intFromEnum(sel.id)});
-                    },
-                    'R' => {
-                        // Under contract the recall is a breach: confirm it first.
-                        if (sel.id != .none) {
-                            self.modal = .{ .confirm = .{ .kind = .recall_breach, .id = @intFromEnum(sel.company) } };
-                            return;
-                        }
-                        _ = try self.execSay(.{ .recall_company = sel.company }, .good, "{s} is coming home", .{q.forceName(g, sel.company)});
-                    },
-                    else => {},
-                }
-            },
-            .ledger => switch (ch) {
-                't', 'T', 'p' => {
-                    const all = try q.allTreasuries(al, g);
-                    const sel: Treasury = if (self.ledger_sel < all.len) all[self.ledger_sel] else .outfit;
-                    const label = try q.treasuryLabel(al, g, sel);
-                    if (sel == .outfit) {
-                        self.say(.dim, "select the HQ or company row first — cash moves between it and the outfit treasury", .{});
-                        return;
-                    }
-                    if (ch == 't') {
-                        self.openAmount(try std.fmt.allocPrint(al, "SEND CASH TO {s}", .{label}), .{ .transfer_to = sel }, &.{
-                            .{ .label = "c-bills", .value = 250_000, .min = 1, .max = @max(1, (try q.status(al, g)).funds_cbills), .step = 50_000 },
-                        });
-                    } else if (ch == 'T') {
-                        const bal = q.balance(g, sel);
-                        self.openAmount(try std.fmt.allocPrint(al, "PULL CASH BACK FROM {s}", .{label}), .{ .transfer_back = sel }, &.{
-                            .{ .label = "c-bills", .value = @max(0, @divTrunc(bal, 2)), .min = 1, .max = @max(1, bal), .step = 50_000 },
-                        });
-                    } else {
-                        const existing = q.policyFor(g, sel);
-                        self.openAmount(try std.fmt.allocPrint(al, "CASH POLICY · {s}", .{label}), .{ .policy = sel }, &.{
-                            .{ .label = "keep above", .value = if (existing) |p| p.floor else 250_000, .min = 0, .max = 100_000_000, .step = 50_000 },
-                            .{ .label = "cap per month", .value = if (existing) |p| p.monthly_cap else 500_000, .min = 0, .max = 100_000_000, .step = 50_000 },
-                        });
-                    }
-                },
-                'x' => {
-                    const all = try q.allTreasuries(al, g);
-                    const sel: Treasury = if (self.ledger_sel < all.len) all[self.ledger_sel] else .outfit;
-                    if (sel == .outfit) {
-                        self.say(.dim, "select the HQ or company row whose policy you want cleared", .{});
-                        return;
-                    }
-                    const label = try q.treasuryLabel(al, g, sel);
-                    if (q.policyFor(g, sel) != null) {
-                        _ = try self.execSay(.{ .set_policy = .{ .entity = sel, .floor = 0, .monthly_cap = 0 } }, .good, "cash top-up policy for {s} cleared", .{label});
-                        return;
-                    }
-                    if (sel == .company and q.supplyPolicyFor(g, sel.company) != null) {
-                        _ = try self.execSay(.{ .set_supply_policy = .{ .company = sel.company, .min_days = 0, .tons = 0 } }, .good, "resupply policy for {s} cleared", .{label});
-                        return;
-                    }
-                    self.say(.dim, "{s} has no standing policy", .{label});
-                },
-                'L' => self.openAmount("TAKE A LOAN (simple interest)", .loan, &.{
-                    .{ .label = "principal", .value = @min(q.creditRemaining(g), 1_000_000), .min = 1, .max = @max(1, q.creditRemaining(g)), .step = 100_000 },
-                    .{ .label = "months", .value = 12, .min = 1, .max = 60, .step = 6 },
-                }),
-                'R' => {
-                    const bal = q.oldestLoanBalance(g) orelse {
-                        self.say(.dim, "no loans to repay", .{});
-                        return;
-                    };
-                    self.openAmount("REPAY THE OLDEST LOAN", .{ .repay = 0 }, &.{
-                        .{ .label = "c-bills", .value = @min(bal, @max(0, (try q.status(al, g)).funds_cbills)), .min = 1, .max = @max(1, bal), .step = 50_000 },
-                    });
-                },
-                else => {},
-            },
-            .forces => {
-                const rows = try self.toeRows();
-                const c = self.cur(0).*;
-                const row: ?q.ToeRow = if (c < rows.len) rows[c] else null;
-                switch (ch) {
-                    'a' => if (row) |r| {
-                        if (r.unit == .none) {
-                            self.say(.dim, "put the cursor on a hull to crew it", .{});
-                            return;
-                        }
-                        self.openModal(.{ .pick_crew = r.unit });
-                    },
-                    'u' => if (row) |r| {
-                        if (r.unit == .none) {
-                            self.say(.dim, "put the cursor on a hull to clear its seat or tech", .{});
-                            return;
-                        }
-                        self.openModal(.{ .pick_unassign = r.unit });
-                    },
-                    'A' => if (row) |r| {
-                        const co = r.company;
-                        if (co != .none) {
-                            _ = try self.execSay(.{ .auto_assign = co }, .good, "auto-assigned {s}", .{q.forceName(g, co)});
-                        }
-                    },
-                    'c' => if (row) |r| {
-                        const co = r.company;
-                        if (co != .none) {
-                            const res = game.commands.execute(g, .{ .crew_company = co }) catch |err| {
-                                self.say(.crit, "{s}", .{game.cli.errorText(err)});
-                                return;
-                            };
-                            self.say(if (res.still_open == 0) .good else .amber, "{s}: {d} hired to fill the manning table · {d} lines still open (no candidates on the boards yet)", .{ q.forceName(g, co), res.hired_count, res.still_open });
-                        }
-                    },
-                    't' => self.openCommand("train "),
-                    'T' => if (row) |r| {
-                        const co = r.company;
-                        if (co == .none) {
-                            self.say(.dim, "put the cursor on a company (or one of its hulls) to train it", .{});
-                            return;
-                        }
-                        const res = game.commands.execute(g, .{ .train_company = .{ .company = co } }) catch |err| {
-                            self.say(.crit, "{s}", .{game.cli.errorText(err)});
-                            return;
-                        };
-                        self.say(if (res.enrolled > 0) .good else .amber, "{s}: {d} enrolled at their trades · {d} short of XP · {d} busy · {d} nothing to learn  (:train co:{d} <skill> targets one skill)", .{
-                            q.forceName(g, co), res.enrolled, res.short_xp, res.busy, res.nothing_to_learn, @intFromEnum(co),
-                        });
-                    },
-                    'r' => {
-                        self.forces_pane = switch (self.forces_pane) {
-                            .damage => .readiness,
-                            .readiness => .manning,
-                            .manning => .damage,
-                        };
-                        if (self.narrow() and self.forces_pane == .readiness) self.modal = .readiness;
-                    },
-                    'M' => {
-                        // Straight to the manning table (play feedback: it hid behind r).
-                        self.forces_pane = .manning;
-                        self.say(.dim, "MANNING: have / need per role for the company under the cursor — :crew co:N hires the gaps at home, xfer sends people out to a deployed one", .{});
-                    },
-                    'w' => if (row) |r| {
-                        const co = r.company;
-                        if (co == .none) {
-                            self.say(.dim, "put the cursor on a company to raise its air wing", .{});
-                            return;
-                        }
-                        _ = try self.execSay(.{ .raise_air_company = co }, .good, "{s} has an air wing — fighters go in its air lances (Market: aero filter; :newlance co:N air <name> adds a lance)", .{q.forceName(g, co)});
-                    },
-                    'x' => if (row) |r| {
-                        if (r.unit == .none) {
-                            self.say(.dim, "put the cursor on a hull to send it to another company", .{});
-                            return;
-                        }
-                        self.openModal(.{ .pick_company = .{ .what = .unit, .id = @intFromEnum(r.unit) } });
-                    },
-                    'l' => if (row) |r| {
-                        if (r.unit == .none) {
-                            self.say(.dim, "put the cursor on a hull to move it into a lance", .{});
-                            return;
-                        }
-                        self.openModal(.{ .lance_pick = r.unit });
-                    },
-                    '+', '=' => {
-                        // An HQ with a free combat-company slot: the selected one if it has room, else the first that does.
-                        const pick = q.hqWithCompanySlot(g, @enumFromInt(self.hqSelId(g)));
-                        if (pick == .none) {
-                            self.say(.crit, "no HQ has a free company slot — a regional HQ hosts one company; raise a field HQ to regional (HQ screen, T)", .{});
-                            return;
-                        }
-                        self.raise.hq = pick;
-                        self.input.len = 0;
-                        self.modal = .{ .input = .raise_name };
-                    },
-                    ']', '[' => {
-                        const views = try q.toeViews(al, g);
-                        self.forces_view = if (ch == ']') (self.forces_view + 1) % views.len else (self.forces_view + views.len - 1) % views.len;
-                        self.cur(0).* = 0;
-                    },
-                    'b' => if (row) |r| {
-                        const co = r.company;
-                        if (co == .none) {
-                            self.say(.dim, "put the cursor on a company or one of its hulls", .{});
-                            return;
-                        }
-                        const dmg = try q.companyDamage(al, g, co);
-                        if (dmg.short_key) |key| {
-                            self.openAmount(try std.fmt.allocPrint(al, "FABRICATE {s} for {s}", .{ key, q.forceName(g, co) }), .{ .fabricate = .{ .hq = self.homeHqOf(co), .key = key } }, &.{
-                                .{ .label = "quantity", .value = 1, .min = 1, .max = 20, .step = 1 },
-                            });
-                        } else self.say(.good, "{s} needs no structural components the home HQ lacks", .{q.forceName(g, co)});
-                    },
-                    'm' => if (row) |r| {
-                        if (r.unit == .none) return;
-                        const res = game.commands.execute(g, .{ .toggle_mothball = r.unit }) catch |err| {
-                            self.say(.crit, "{s}", .{game.cli.errorText(err)});
-                            return;
-                        };
-                        if (res.mothballed orelse false) self.say(.good, "#{d} mothballed — 20% upkeep, no maintenance wear, no crew needed", .{@intFromEnum(r.unit)}) else self.say(.good, "#{d} reactivating — tech-days before it can fight or move", .{@intFromEnum(r.unit)});
-                    },
-                    '$' => if (row) |r| {
-                        if (r.unit != .none) self.modal = .{ .confirm = .{ .kind = .sell_unit, .id = @intFromEnum(r.unit) } };
-                    },
-                    'd' => if (row) |r| {
-                        if (r.unit != .none) {
-                            const res = game.commands.execute(g, .{ .depot = r.unit }) catch |err| {
-                                self.say(.crit, "{s}", .{game.cli.errorText(err)});
-                                return;
-                            };
-                            self.say(.good, "#{d} queued for depot repair at {s} — HQ screen, [ ] to that HQ, its bays list the job", .{ @intFromEnum(r.unit), q.hqName(g, res.hq) });
-                        }
-                    },
-                    'o' => if (row) |r| {
-                        if (r.force == .none) return;
-                        // On a company row: cycle its rules of engagement (12D.4).
-                        if (r.is_company) {
-                            const res = game.commands.execute(g, .{ .cycle_roe = r.force }) catch |err| {
-                                self.say(.crit, "{s}", .{game.cli.errorText(err)});
-                                return;
-                            };
-                            self.say(.good, "{s} ROE → {s}", .{ r.name, res.roe.?.describe() });
-                            return;
-                        }
-                        if (!r.is_lance) {
-                            self.say(.dim, "roles are set on lances, rules of engagement on companies — move the cursor onto a lance or company row", .{});
-                            return;
-                        }
-                        const res = game.commands.execute(g, .{ .cycle_role = r.force }) catch |err| {
-                            self.say(.crit, "{s}", .{game.cli.errorText(err)});
-                            return;
-                        };
-                        self.say(.good, "{s} → {s}: {s}", .{ r.name, @tagName(res.role.?), res.role.?.describe() });
-                    },
-                    'X' => if (row) |r| {
-                        const co = r.company;
-                        if (co != .none) self.modal = .{ .confirm = .{ .kind = .disband, .id = @intFromEnum(co) } };
-                    },
-                    'R' => if (row) |r| {
-                        if (r.unit != .none) {
-                            // Gear is field work on every hull kind: order spares for what's destroyed to the hull's site.
-                            const res = game.commands.execute(g, .{ .replace_gear = r.unit }) catch |err| {
-                                self.say(.crit, "{s}", .{game.cli.errorText(err)});
-                                return;
-                            };
-                            if (res.ordered + res.unsourced == 0) {
-                                self.say(.good, "#{d}: spares for its broken gear are already on hand or on order — its tech fits them on the weekly repair pass", .{@intFromEnum(r.unit)});
-                            } else {
-                                self.say(if (res.unsourced == 0) .good else .amber, "#{d}: {d} spare{s} ordered to its site{s} — its tech fits them on the weekly repair pass", .{
-                                    @intFromEnum(r.unit), res.ordered, if (res.ordered == 1) "" else "s",
-                                    if (res.unsourced > 0) " (some could not be sourced this month — retry after the refresh)" else "",
-                                });
-                            }
-                            return;
-                        }
-                        const co = r.company;
-                        if (co == .none) return;
-                        _ = try self.execSay(.{ .recall_idle = co }, .good, "{s} is coming home", .{q.forceName(g, co)});
-                    },
-                    else => {},
-                }
-            },
-            .supply => {
-                const site = try self.supplySite();
-                var buf: [128]u8 = undefined;
-                switch (ch) {
-                    'o' => {
-                        self.openModal(.{ .pick_part = .{ .purpose = .order, .site = site orelse q.defaultSite(g) } });
-                    },
-                    's' => {
-                        // Ship from the home shelf: a company row means its home HQ's stores.
-                        const from: types.Site = if (site) |s| switch (s) {
-                            .company => |id| .{ .hq = @enumFromInt(self.homeHqOf(id)) },
-                            else => s,
-                        } else q.defaultSite(g);
-                        self.openModal(.{ .pick_part = .{ .purpose = .ship, .site = from, .ship_to = if (site) |s2| (if (s2 == .company) s2.company else null) else null } });
-                    },
-                    't' => {
-                        const s2 = site orelse return self.say(.dim, "put the cursor on a company or HQ row to send it cash", .{});
-                        const to: Treasury = switch (s2) {
-                            .company => |id| .{ .company = id },
-                            .hq => |id| .{ .hq = id },
-                            .outfit => return self.say(.dim, "put the cursor on a company or HQ row to send it cash", .{}),
-                        };
-                        self.openAmount(try std.fmt.allocPrint(al, "SEND CASH TO {s}", .{try q.treasuryLabel(al, g, to)}), .{ .transfer_to = to }, &.{
-                            .{ .label = "c-bills", .value = if (s2 == .company) 250_000 else 500_000, .min = 1, .max = @max(1, (try q.status(al, g)).funds_cbills), .step = 50_000 },
-                        });
-                    },
-                    'p' => {
-                        const s2 = site orelse return self.say(.dim, "put the cursor on a company or HQ row to set its cash policy", .{});
-                        const t: Treasury = switch (s2) {
-                            .company => |id| .{ .company = id },
-                            .hq => |id| .{ .hq = id },
-                            .outfit => return self.say(.dim, "policies top up companies and HQs from the outfit treasury", .{}),
-                        };
-                        const existing = q.policyFor(g, t);
-                        self.openAmount(try std.fmt.allocPrint(al, "CASH POLICY · {s}", .{try q.treasuryLabel(al, g, t)}), .{ .policy = t }, &.{
-                            .{ .label = "keep above", .value = if (existing) |p| p.floor else if (s2 == .company) 250_000 else 500_000, .min = 0, .max = 100_000_000, .step = 50_000 },
-                            .{ .label = "cap per month", .value = if (existing) |p| p.monthly_cap else if (s2 == .company) 500_000 else 1_000_000, .min = 0, .max = 100_000_000, .step = 50_000 },
-                        });
-                    },
-                    'P' => {
-                        const co: types.ForceId = if (site) |s2| (if (s2 == .company) s2.company else .none) else .none;
-                        if (co == .none) return self.say(.dim, "resupply policies belong to a company — put the cursor on its field stores", .{});
-                        var days: i64 = 14;
-                        var tons: i64 = 0;
-                        var battles: i64 = 0;
-                        if (q.supplyPolicyFor(g, co)) |sp| {
-                            days = sp.min_days;
-                            tons = sp.tons;
-                            battles = sp.ammo_battles;
-                        }
-                        self.openAmount(try std.fmt.allocPrint(al, "RESUPPLY POLICY · {s}", .{q.forceName(g, co)}), .{ .supply_policy = co }, &.{
-                            .{ .label = "safety days (0 clears)", .value = days, .min = 0, .max = 365, .step = 7 },
-                            .{ .label = "max tons (0 = auto)", .value = tons, .min = 0, .max = 9_999, .step = 10 },
-                            .{ .label = "ammo battles", .value = battles, .min = 0, .max = 20, .step = 1 },
-                        });
-                    },
-                    'K' => {
-                        self.openModal(.{ .pick_part = .{ .purpose = .keep, .site = if (site) |s| (if (s == .hq) s else q.defaultSite(g)) else q.defaultSite(g) } });
-                    },
-                    '$' => {
-                        self.openModal(.{ .pick_part = .{ .purpose = .sell, .site = if (site) |s| (if (s == .hq) s else q.defaultSite(g)) else q.defaultSite(g) } });
-                    },
-                    'R' => {
-                        const co: types.ForceId = if (site) |s| (if (s == .company) s.company else .none) else .none;
-                        if (co == .none) {
-                            self.say(.dim, "move the cursor onto a company's field stores", .{});
-                            return;
-                        }
-                        const r = game.commands.execute(g, .{ .trim_stock = co }) catch |err| {
-                            self.say(.crit, "{s}", .{game.cli.errorText(err)});
-                            return;
-                        };
-                        if (r.tons_moved == 0) {
-                            self.say(.dim, "{s}'s stores already match the field plan", .{q.forceName(g, co)});
-                        } else {
-                            self.say(.good, "{s} returns {d}t over the plan to the home HQ — riding the empty convoys, no freight", .{ q.forceName(g, co), r.tons_moved });
-                        }
-                    },
-                    'H' => {
-                        // Send every structural component in the field stores home.
-                        const co: types.ForceId = if (site) |s| (if (s == .company) s.company else .none) else .none;
-                        if (co == .none) {
-                            self.say(.dim, "move the cursor onto a company's field stores", .{});
-                            return;
-                        }
-                        const res = game.commands.execute(g, .{ .ship_components_home = co }) catch |err| switch (err) {
-                            error.NothingToShip => return self.say(.dim, "no structural components in {s}'s field stores", .{q.forceName(g, co)}),
-                            else => return self.say(.crit, "{s}", .{game.cli.errorText(err)}),
-                        };
-                        self.say(.good, "{d} component{s} shipped from {s} to {s} (freight from local funds)", .{ res.count, if (res.count == 1) "" else "s", q.forceName(g, co), q.hqName(g, res.hq) });
-                    },
-                    'T' => self.openCommand(if (site) |s| switch (s) {
-                        .company => |id| std.fmt.bufPrint(&buf, "transfer co:{d} outfit {d}", .{ @intFromEnum(id), @max(0, @divTrunc(q.balance(g, .{ .company = id }), 2)) }) catch "transfer ",
-                        .hq => |id| std.fmt.bufPrint(&buf, "transfer hq:{d} outfit {d}", .{ @intFromEnum(id), @max(0, @divTrunc(q.balance(g, .{ .hq = id }), 2)) }) catch "transfer ",
-                        .outfit => "transfer ",
-                    } else "transfer "),
-                    else => {},
-                }
-            },
-            .hq => {
-                const n = (try q.hqList(al, g)).len;
-                switch (ch) {
-                    ']' => if (n > 0) {
-                        self.hq_sel = (self.hq_sel + 1) % n;
-                    },
-                    '[' => if (n > 0) {
-                        self.hq_sel = (self.hq_sel + n - 1) % n;
-                    },
-                    'u' => {
-                        // The facility rows sit right under the header in the
-                        // HQ pane: with the cursor on one, upgrade it directly.
-                        const hid: types.HqId = @enumFromInt(self.hqSelId(g));
-                        const c = self.cur(0).*;
-                        const under_cursor = if (self.focus == 0) try q.hqFacilityAtRow(al, g, hid, c) else null;
-                        if (under_cursor) |kind| {
-                            const rows = try q.upgrades(al, g, hid);
-                            for (rows) |r| if (r.kind == kind) {
-                                if (!r.possible) {
-                                    self.say(.amber, "{s}: {s}", .{ @tagName(kind), r.reason });
-                                    return;
-                                }
-                            };
-                            _ = try self.execSay(.{ .upgrade_facility = .{ .hq = hid, .kind = kind } }, .good, "{s} upgrade started — paperwork first, then construction; watch PROJECTS", .{@tagName(kind)});
-                            return;
-                        }
-                        self.openModal(.{ .upgrade = hid });
-                    },
-                    'S' => {
-                        _ = try self.execSay(.{ .autostaff = @enumFromInt(self.hqSelId(g)) }, .good, "back office staffed to requirement", .{});
-                    },
-                    'T' => {
-                        // Field HQ → regional (the footer and the tier line promised this key).
-                        const hid: types.HqId = @enumFromInt(self.hqSelId(g));
-                        const name = try al.dupe(u8, q.hqName(g, hid));
-                        _ = try self.execSay(.{ .upgrade_tier = hid }, .good, "{s} → regional HQ: paperwork first, then construction — watch PROJECTS; S autostaff when it lands", .{name});
-                    },
-                    'h' => {
-                        self.focus = 1;
-                        self.say(.dim, "hiring hall: j/k pick, Enter hires, f/F changes the filter", .{});
-                    },
-                    'f' => {
-                        self.hall_filter = self.hall_filter.next();
-                        self.focus = 1;
-                        self.cur(1).* = 0;
-                    },
-                    'F' => {
-                        self.hall_filter = self.hall_filter.prev();
-                        self.focus = 1;
-                        self.cur(1).* = 0;
-                    },
-                    'b' => {
-                        self.openModal(.{ .pick_part = .{ .purpose = .fabricate, .site = .{ .hq = @enumFromInt(self.hqSelId(g)) } } });
-                    },
-                    '$' => self.modal = .{ .confirm = .{ .kind = .sell_hq, .id = self.hqSelId(g) } },
-                    else => {},
-                }
-            },
-            .map => switch (ch) {
-                'h' => try self.mapMove(-1, 0),
-                'l' => try self.mapMove(1, 0),
-                '+', '=' => self.map_zoom = @min(8, self.map_zoom * 2),
-                '-' => self.map_zoom = @max(1, self.map_zoom / 2),
-                'c' => self.map_color = switch (self.map_color) {
-                    .faction => .industry,
-                    .industry => .standing,
-                    .standing => .activity,
-                    .activity => .faction,
-                },
-                'f' => {
-                    const view = try q.map(al, g);
-                    if (view.worlds.len == 0) return;
-                    var buf: [96]u8 = undefined;
-                    self.openCommand(std.fmt.bufPrint(&buf, "found {s} ", .{view.worlds[@min(self.map_cursor, view.worlds.len - 1)].key}) catch "found ");
-                },
-                'o' => self.switchTab(.contracts),
-                else => {},
-            },
-            .lab => {
-                const uid = (try self.labUnit()) orelse return;
-                const view = try q.lab(al, g, uid);
-                const meks = view.meks;
-                switch (ch) {
-                    ']' => self.lab_sel = (self.lab_sel + 1) % meks.len,
-                    '[' => self.lab_sel = (self.lab_sel + meks.len - 1) % meks.len,
-                    '-' => if (view.mounts.len > 0) {
-                        const m = view.mounts[@min(self.cur(0).*, view.mounts.len - 1)];
-                        _ = try self.execSay(.{ .refit_remove = .{ .unit = uid, .slot_key = m.slot_key } }, .good, "staged: remove {s} — Enter commits the plan to a bay, c clears it", .{m.slot_key});
-                    },
-                    '+' => {
-                        self.openModal(.{ .install_part = uid });
-                    },
-                    'R' => if (view.mounts.len > 0) {
-                        const m = view.mounts[@min(self.cur(0).*, view.mounts.len - 1)];
-                        const res = game.commands.execute(g, .{ .replace_mount = .{ .unit = uid, .slot_key = m.slot_key } }) catch |err| switch (err) {
-                            error.MountIsFine => return self.say(.dim, "{s} is fine — [R] orders a replacement for damaged or destroyed gear", .{m.slot_key}),
-                            else => return self.say(.crit, "{s}", .{game.cli.errorText(err)}),
-                        };
-                        self.say(.good, "ordered 1 × {s} to {s}; techs fit it on the next repair pass once it lands", .{ m.part_key, q.hqName(g, res.hq) });
-                    },
-                    'c' => {
-                        _ = try self.execSay(.{ .refit_clear = uid }, .good, "#{d}: refit plan cleared", .{@intFromEnum(uid)});
-                    },
-                    'D' => {
-                        _ = try self.execSay(.{ .depot = uid }, .good, "#{d} queued for depot repair — see the HQ screen's bays", .{@intFromEnum(uid)});
-                    },
-                    else => {},
-                }
-            },
-        }
     }
 
     // ---- settings form (12.33): one look with the pickers and the amount form ----
