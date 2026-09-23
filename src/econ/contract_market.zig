@@ -101,9 +101,9 @@ pub fn refresh(gs: *GameState) !void {
     const base = types.applyBp(@max(perCompanyOpsCost(gs), tuning.market.min_ops_cost), types.applyBp(market_margin_bp, gs.diff().contract_pay_bp)); // difficulty (12.32)
 
     // The Dragoons rating (12C.7) sets how many come calling, who, and at what pay.
-    const queries = @import("../sim/queries.zig");
+    const rating = @import("../sim/rating.zig");
     const rt = tuning.rating;
-    const rating_idx = queries.ratingIndex(queries.ratingScore(gs));
+    const rating_idx = rating.currentIndex(gs);
     // One board per HQ (12E.4): each posts work inside its own ring and
     // beachhead band, for the companies based there; its comms set how many
     // come calling, and a field HQ hears half as much.
@@ -149,7 +149,7 @@ pub fn refresh(gs: *GameState) !void {
             ));
 
             // Beachhead employers pay a premium — nobody else will go.
-            var pay = contract.monthlyPayment(base, kind, employerMultBp(world.faction), queries.ratingPayBp(rating_idx));
+            var pay = contract.monthlyPayment(base, kind, employerMultBp(world.faction), rating.payBp(rating_idx));
             if (vis[0] == .beachhead) pay = types.applyBp(pay, tuning.market.beachhead_pay_bp);
             // A cooling employer (Stage 9E breach): half the offers, 70% pay.
             if (gs.factionCooling(world.faction)) {
@@ -784,16 +784,16 @@ test "12C.7: an F-rated outfit hears only from the periphery and never gets a pl
     while (pit.next()) |e| if (e.value_ptr.role.isCombat()) {
         try e.value_ptr.skills.put(gs.allocator(), e.value_ptr.role.primarySkill(), 7); // … and green as grass: firmly F
     };
-    const queries = @import("../sim/queries.zig");
-    try std.testing.expectEqual(@as(u8, 0), queries.ratingIndex(queries.ratingScore(&gs)));
+    const rating = @import("../sim/rating.zig");
+    try std.testing.expectEqual(@as(u8, 0), rating.currentIndex(&gs));
     gs.contract_offers.clearRetainingCapacity();
     try refresh(&gs);
     for (gs.contract_offers.items) |o| {
         try std.testing.expect(!isGreatHouse(o.employer_key));
         try std.testing.expect(o.kind != .planetary_assault);
     }
-    try std.testing.expectEqual(@as(types.Bp, 8_000), queries.ratingPayBp(0));
-    try std.testing.expectEqual(@as(types.Bp, 13_000), queries.ratingPayBp(5));
+    try std.testing.expectEqual(@as(types.Bp, 8_000), rating.payBp(0));
+    try std.testing.expectEqual(@as(types.Bp, 13_000), rating.payBp(5));
 }
 
 test "12C.17: a wired HQ with a hall eventually hears from a fence; a firebase never does" {

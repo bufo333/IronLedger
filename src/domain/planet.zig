@@ -25,10 +25,15 @@ pub fn find(key: []const u8) ?*const Planet {
     return null;
 }
 
+/// Straight-line distance, rounded to the nearest light-year, in integer
+/// arithmetic (rules math never floats): the floor square root, rounded
+/// up when the remainder passes the half-way mark.
 pub fn distanceLy(a: *const Planet, b: *const Planet) u32 {
-    const dx: f64 = @floatFromInt(a.x - b.x);
-    const dy: f64 = @floatFromInt(a.y - b.y);
-    return @intFromFloat(@round(@sqrt(dx * dx + dy * dy)));
+    const dx: i64 = a.x - b.x;
+    const dy: i64 = a.y - b.y;
+    const d2: u64 = @intCast(dx * dx + dy * dy);
+    const r: u64 = std.math.sqrt(d2);
+    return @intCast(if (d2 - r * r > r) r + 1 else r);
 }
 
 /// Jump legs for a route between two worlds (standard 30-LY hops).

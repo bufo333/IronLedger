@@ -446,8 +446,7 @@ fn runFinances(gs: *GameState) !void {
     _ = @import("personnel.zig").refreshShares(gs);
     // New Year's Day (12C.8): the rating goes in the book.
     if (gs.clock.date.month == 1) {
-        const queries = @import("queries.zig");
-        try gs.rating_history.append(gs.allocator(), .{ .year = gs.clock.date.year, .score = queries.ratingScore(gs) });
+        try gs.rating_history.append(gs.allocator(), .{ .year = gs.clock.date.year, .score = @import("rating.zig").score(gs) });
         // Tech news (12C.16): the designs entering service this year.
         var news: std.ArrayListUnmanaged(u8) = .empty;
         for (@import("../domain/chassis.zig").catalog) |*c| if (c.intro_year == gs.clock.date.year) {

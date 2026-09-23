@@ -119,16 +119,16 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
 
     // Outmatched on an active contract (12E.5): the company's skulls today.
     {
-        const queries = @import("queries.zig");
+        const offer_rating = @import("offer_rating.zig");
         const warn = @import("../domain/skulls.zig").table.warn_half_skulls;
         var cit = gs.contracts.iterator();
         while (cit.next()) |ce| {
             const c = ce.value_ptr;
             if (c.status != .active) continue;
-            const rt = (try queries.rateOffer(alloc, gs, c, c.assigned_company)) orelse continue;
+            const rt = (try offer_rating.rateOffer(alloc, gs, c, c.assigned_company)) orelse continue;
             if (rt.half_hi < warn) continue;
             try out.append(alloc, .{ .kind = .outmatched, .text = try std.fmt.allocPrint(alloc, "{s} is outmatched on {s}: {s} — wins {d}% of fights, loses the field {d}%; consider cautious ROE (Forces o) or recall", .{
-                queries.forceName(gs, c.assigned_company), c.planet_key, try queries.skullText(alloc, rt), rt.win_pct, rt.lose_field_pct,
+                if (gs.force(c.assigned_company)) |f| f.name else "—", c.planet_key, try offer_rating.skullText(alloc, rt), rt.win_pct, rt.lose_field_pct,
             }) });
         }
     }
@@ -197,12 +197,10 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
         }
         // The rest of the manning table (12B.11): who is short and by how much.
         {
-            var arena = std.heap.ArenaAllocator.init(alloc);
-            defer arena.deinit();
             var text: std.ArrayListUnmanaged(u8) = .empty;
             var short_total: u32 = 0;
-            for (@import("queries.zig").manning(arena.allocator(), gs, f.id) catch &.{}) |m| {
-                const open = m.need -| m.have;
+            for (@import("personnel.zig").manningLines(gs, f.id)) |m| {
+                const open = m.open;
                 if (open == 0) continue;
                 if (m.role == .mekwarrior or m.role == .vehicle_crew or m.role == .aero_pilot or m.role == .tech_mek or m.role == .tech_mechanic or m.role == .tech_aero) continue; // the seat warning above covers hulls
                 if (text.items.len > 0) try text.appendSlice(alloc, ", ");

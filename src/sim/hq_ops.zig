@@ -436,7 +436,7 @@ fn applyRepairResult(gs: *GameState, u: *unit_mod.Unit, result: RepairResult) ![
             // A fault left in: the machine is fussier from here on.
             const q = @intFromEnum(u.quality);
             if (q > 0) u.quality = @enumFromInt(q - 1);
-            return try std.fmt.allocPrint(gs.allocator(), " — {s}with a lingering fault (quality now {s}){s}", .{ "{a}", @tagName(u.quality), "{/}" });
+            return try std.fmt.allocPrint(gs.allocator(), " — with a lingering fault (quality now {s})", .{@tagName(u.quality)});
         },
         .botch => {
             var gear: u32 = 0;
@@ -449,7 +449,7 @@ fn applyRepairResult(gs: *GameState, u: *unit_mod.Unit, result: RepairResult) ![
                 if (sl.class == .structure or sl.condition == .destroyed or sl.condition == .missing) continue;
                 if (pick == 0) {
                     sl.condition = .destroyed;
-                    return try std.fmt.allocPrint(gs.allocator(), " — {s}BOTCHED (natural 2): {s} destroyed on the bench, order another{s}", .{ "{c}", sl.part_key, "{/}" });
+                    return try std.fmt.allocPrint(gs.allocator(), " — BOTCHED (natural 2): {s} destroyed on the bench, order another", .{sl.part_key});
                 }
                 pick -= 1;
             }

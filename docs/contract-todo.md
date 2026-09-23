@@ -21,30 +21,30 @@ so line numbers in later deliverables assume earlier ones are merged.
 
 ## D1. Contract and this list (docs only)
 
-- [ ] `docs/coding-contract.md`, `CLAUDE.md` summary, pointers in `ARCHITECTURE.md`, `docs/tui.md`, `docs/iron-ledger-zig-guide.md`, this file.
+- [x] `docs/coding-contract.md`, `CLAUDE.md` summary, pointers in `ARCHITECTURE.md`, `docs/tui.md`, `docs/iron-ledger-zig-guide.md`, this file (PR #4).
 
 ---
 
-## D2. Layering inversions and core purity (rules 1, 2, 15, 16)
+## D2. Layering inversions and core purity (rules 1, 2, 15, 16) — PR #5
 
 **Sim modules importing the view leaf.** Move the rules down; `queries` calls them.
-- [ ] `ratingScore` / `ratingIndex` / `ratingPayBp` / `ratingLetter` (queries.zig:2642-2683) → new `src/sim/rating.zig`; callers tick.zig:449, state.zig:680, commands.zig:1838, contract_market.zig:104,152,787 import `rating`. `ratingScore` must take an allocator and propagate errors (today: own arena, `catch return 0`, queries.zig:2653).
-- [ ] `rateOffer` (queries.zig:565) and its helpers (`bestRating` 631, `boardSkulls` 642, `skullText`) → `src/sim/offer_rating.zig` (battle odds are combat math); checklist.zig:122-131 imports it; `queries` formats its result.
-- [ ] `manning` (queries.zig:2295) → `personnel.zig` beside `manningNeeds`; checklist.zig:204 imports it.
-- [ ] hq_ops.zig:714 test import of queries → test the rule module.
+- [x] `ratingScore` / `ratingIndex` / `ratingPayBp` / `ratingLetter` (queries.zig:2642-2683) → new `src/sim/rating.zig`; callers tick.zig:449, state.zig:680, commands.zig:1838, contract_market.zig:104,152,787 import `rating`. `ratingScore` must take an allocator and propagate errors (today: own arena, `catch return 0`, queries.zig:2653).
+- [x] `rateOffer` (queries.zig:565) and its helpers (`bestRating` 631, `boardSkulls` 642, `skullText`) → `src/sim/offer_rating.zig` (battle odds are combat math); checklist.zig:122-131 imports it; `queries` formats its result.
+- [x] `manning` (queries.zig:2295) → `personnel.zig` beside `manningNeeds`; checklist.zig:204 imports it.
+- [x] hq_ops.zig:714 test import of queries: kept; a test that asserts the screen and the command agree is the contract's own rule 37, so the grep excepts test blocks.
 
 **Global allocator in the core.** Every site takes `gs.allocator()` or a caller arena.
-- [ ] maintenance.zig:50, :184 (`HourBook.alloc`)
-- [ ] medical.zig:160, :165 (`patients`)
-- [ ] commands.zig:1421 (`commitRefit`), :1536 (`freightBetween`)
+- [x] maintenance.zig:50, :184 (`HourBook.alloc`)
+- [x] medical.zig:160, :165 (`patients`)
+- [x] commands.zig:1421 (`commitRefit`), :1536 (`freightBetween`)
 
 **Markup below the view layer.**
-- [ ] person.zig:486-493 `FatigueBand.markup` → a `queries` helper keyed on the band.
-- [ ] hq_ops.zig:439, :452 repair log strings → plain text; `queries` colours the outcome.
-- [ ] field_supply.zig:128 plan note → plain text; the Supply query colours it.
+- [x] person.zig:486-493 `FatigueBand.markup` → a `queries` helper keyed on the band.
+- [x] hq_ops.zig:439, :452 repair log strings → plain text; `queries` colours the outcome.
+- [x] field_supply.zig:128 plan note → plain text; the Supply query colours it.
 
 **Rules math in floats.**
-- [ ] planet.zig:29-31 `distanceLy` uses `f64`; store coordinates and distances as integer tenths of a light-year, `jumpsBetween` from the integer.
+- [x] planet.zig:29-31 `distanceLy` uses `f64`; store coordinates and distances as integer tenths of a light-year, `jumpsBetween` from the integer.
 
 ---
 

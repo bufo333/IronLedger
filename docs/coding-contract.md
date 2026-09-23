@@ -60,7 +60,7 @@ data          data/*.zon  ·  data/tables/*.zon
 grep -nE '\b(g|gs)\.(units|hqs|forces|people|clock|funds|loans|market_listings|contract_offers|supply_policies|unit_transfers|bankrupt|outfit_name|campaign_id)\b' src/tui/*.zig
 grep -nE '\b(g|gs)\.[a-zA-Z_]+\(' src/tui/*.zig | grep -vE '\.(allocator|diff)\('
 grep -nE 'game\.(store|state|hq_ops|contract_market|contract_control|battle|maintenance|medical|tick|planet|faction|chassis|part|force|hq|person|unit|difficulty|dataProvenance)\b' src/tui/*.zig
-# the sim importing the view layer: must print nothing
+# the sim importing the view layer: must print nothing outside test blocks (a test may cross-check a screen against a command)
 grep -n 'queries.zig' src/sim/{state,tick,commands,checklist,hq_ops,battle,maintenance,medical,contract_control,contract_events,field_supply}.zig src/econ/*.zig src/domain/*.zig
 # impurity in the core: must print nothing outside tests
 grep -nE 'std\.(time|fs|Io|process|posix|os)\b|page_allocator|std\.debug\.print|^var ' src/domain/*.zig src/sim/*.zig src/econ/*.zig src/gen/*.zig

@@ -157,12 +157,12 @@ pub fn runDailyHealing(gs: *GameState) !void {
     // past the bed count wait (their timers slip a day).
     const Patient = struct { id: types.PersonId, priority: u8, heal_day: u32, deployed: bool, company: types.ForceId };
     var patients: std.ArrayListUnmanaged(Patient) = .empty;
-    defer patients.deinit(std.heap.page_allocator);
+    defer patients.deinit(gs.scratch());
     var pit = gs.people.iterator();
     while (pit.next()) |entry| {
         const p = entry.value_ptr;
         if (p.status != .wounded or p.wound_heal_day == null) continue;
-        try patients.append(std.heap.page_allocator, .{
+        try patients.append(gs.scratch(), .{
             .id = p.id,
             .priority = p.medbay_priority,
             .heal_day = p.wound_heal_day.?,

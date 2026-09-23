@@ -354,6 +354,14 @@ pub const GameState = struct {
         return difficulty_mod.get(self.difficulty);
     }
 
+    /// Scratch that is freed before the caller returns (a per-call arena,
+    /// a temporary map): the campaign arena's backing allocator, so the
+    /// memory really comes back. Anything that outlives the call uses
+    /// `allocator()`.
+    pub fn scratch(self: *GameState) std.mem.Allocator {
+        return self.arena.child_allocator;
+    }
+
     pub fn allocator(self: *GameState) std.mem.Allocator {
         return self.arena.allocator();
     }
@@ -677,8 +685,7 @@ pub const GameState = struct {
         var bonus: i32 = hq.effectiveFacilityLevel(.hiring_hall);
         if (self.hqStaff(hq.id, .admin_hr).count >= 2) bonus += 1;
         // A famous outfit (12C.7) draws a better class of walk-in.
-        const queries = @import("queries.zig");
-        if (queries.ratingIndex(queries.ratingScore(self)) >= @import("../domain/tuning.zig").t.rating.recruit_bonus_index) bonus += 1;
+        if (@import("rating.zig").currentIndex(self) >= @import("../domain/tuning.zig").t.rating.recruit_bonus_index) bonus += 1;
         return @min(bonus, 4);
     }
 

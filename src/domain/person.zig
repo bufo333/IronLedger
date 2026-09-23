@@ -481,16 +481,6 @@ pub const FatigueBand = enum {
             .spent => 3,
         };
     }
-
-    /// Markup colour for the TUI: green, amber, amber, red.
-    pub fn markup(self: FatigueBand) []const u8 {
-        return switch (self) {
-            .fresh => "{g}",
-            .tired => "{a}",
-            .exhausted => "{a}",
-            .spent => "{c}",
-        };
-    }
 };
 
 test "12C.3: shares from tenure, founding and rank; they calm restlessness and halve severance" {

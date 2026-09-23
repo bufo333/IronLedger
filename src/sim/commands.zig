@@ -1418,7 +1418,7 @@ fn commitRefit(gs: *GameState, unit_id: types.UnitId) Error!Result {
     const hq = gs.hqs.getPtr(hq_id) orelse return Error.NoHq;
 
     // The rules.
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    var arena = std.heap.ArenaAllocator.init(gs.scratch());
     defer arena.deinit();
     const items = try gs.labItems(unit_id, arena.allocator());
     const report = meklab.validate(design, items, arena.allocator()) catch return Error.OutOfMemory;
@@ -1533,7 +1533,7 @@ fn freightBetween(gs: *GameState, from: types.Site, to: types.Site, tons_moved: 
         .outfit => if (gs.hqs.count() > 0) gs.hqs.keys()[0] else .none,
     };
     if (from_hq != .none and to_hq != .none and from_hq != to_hq) {
-        var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        var arena = std.heap.ArenaAllocator.init(gs.scratch());
         defer arena.deinit();
         const route = network.routeBetween(gs, from_hq, to_hq, arena.allocator()) catch return Error.NoRoute;
         network.reserveThroughput(gs, route, tons_moved) catch return Error.ThroughputExceeded;
@@ -1835,8 +1835,7 @@ fn negotiate(gs: *GameState, offer_index: usize, term: contract_mod.NegotiableTe
     const office = if (seat != .none) gs.hqStaff(seat, .admin_command) else state_mod.StaffSummary{};
     const office_edge: i32 = if (office.count == 0) -1 else 5 - @as(i32, office.best_skill);
     // The letter at the table (12C.7): F −2 … A* +3.
-    const queries = @import("queries.zig");
-    const rep_edge: i32 = @as(i32, queries.ratingIndex(queries.ratingScore(gs))) - tuning.rating.negotiation_offset;
+    const rep_edge: i32 = @as(i32, @import("rating.zig").currentIndex(gs)) - tuning.rating.negotiation_offset;
     const target: i32 = t.negotiation_target - @divTrunc(gs.standing(c.employer_key), t.negotiation_standing_per);
     const raw = gs.rng.roll2d6(.market);
     const total: i32 = @as(i32, raw) + office_edge + rep_edge;

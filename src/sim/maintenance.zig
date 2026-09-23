@@ -47,7 +47,7 @@ fn activeTech(gs: *GameState, u: *const unit_mod.Unit) ?*person_mod.Person {
 /// Weekly maintenance: one check per active hull, worked by its tech from
 /// their hour budget; no tech (or no hours) → rolls uncovered. // TUNE
 pub fn runWeeklyMaintenance(gs: *GameState) !void {
-    var book: HourBook = .{ .alloc = std.heap.page_allocator };
+    var book: HourBook = .{ .alloc = gs.scratch() };
     defer book.map.deinit(book.alloc);
     var upkeep_cost: types.CBills = 0;
 
@@ -181,7 +181,7 @@ pub fn runWeeklyRepairs(gs: *GameState) !void {
     while (hqit.next()) |entry| {
         if (entry.value_ptr.supportsStructuralRepair()) depot_ok = true;
     }
-    var book: HourBook = .{ .alloc = std.heap.page_allocator };
+    var book: HourBook = .{ .alloc = gs.scratch() };
     defer book.map.deinit(book.alloc);
 
     var labor_cost: types.CBills = 0;

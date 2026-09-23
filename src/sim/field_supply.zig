@@ -39,6 +39,8 @@ pub const Line = struct {
     target: u32,
     /// Why (mounts, days, hulls) — for the Supply screen.
     note: []const u8,
+    /// Cut back to fit the ammo share of the hold (the screen flags it).
+    trimmed: bool = false,
 };
 
 pub const Plan = struct {
@@ -125,7 +127,8 @@ pub fn plan(alloc: std.mem.Allocator, gs: *GameState, company: types.ForceId, tr
                 const per_battle = std.math.divCeil(u32, mounts, mounts_per_ammo_ton) catch 1;
                 l.target = @max(per_battle, l.target * budget / sum);
                 l.floor = @min(l.floor, l.target);
-                l.note = try std.fmt.allocPrint(alloc, "{s} · {{a}}trimmed to the {d}% ammo share{{/}}", .{ l.note, ammo_share_pct });
+                l.trimmed = true;
+                l.note = try std.fmt.allocPrint(alloc, "{s} · {d}% ammo share", .{ l.note, ammo_share_pct });
             }
         }
     }

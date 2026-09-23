@@ -155,6 +155,43 @@ pub fn manningNeeds(gs: *GameState, company: types.ForceId) [14]Need {
 }
 
 /// People of `role` on a company's books (active or wounded).
+/// One row of the manning table: the need, who fills it, and the gap.
+pub const ManningLine = struct { role: person_mod.Role, have: u32, need: u32, open: u32, why: []const u8 };
+
+/// The manning table (12B.11): every need against who is on the payroll.
+/// The checklist warns from it, the raise wizard and the Forces pane
+/// print it.
+pub fn manningLines(gs: *GameState, company: types.ForceId) [14]ManningLine {
+    var out: [14]ManningLine = undefined;
+    for (manningNeeds(gs, company), 0..) |n, i| {
+        const have = manningHave(gs, company, n.role);
+        out[i] = .{ .role = n.role, .have = have, .need = n.need, .open = n.need -| have, .why = n.why };
+    }
+    return out;
+}
+
+/// Tech hours (12C.15): what a company's hulls want per week against
+/// what its techs, at their skill and with their astech teams, can give.
+pub const TechHours = struct { needed: u32, have: u32 };
+
+pub fn techHours(gs: *GameState, company: types.ForceId) TechHours {
+    var needed: u32 = 0;
+    var have: u32 = 0;
+    var uit = gs.units.iterator();
+    while (uit.next()) |e| {
+        const u = e.value_ptr;
+        if (u.status == .destroyed or u.status == .mothballed or u.kind == .infantry or gs.companyOf(u.force) != company) continue;
+        needed += if (gs.person(u.tech)) |t| gs.techHoursFor(t, u) else gs.hullHours(u);
+    }
+    var pit = gs.people.iterator();
+    while (pit.next()) |e| {
+        const p = e.value_ptr;
+        if (!p.role.isTech() or !p.isAvailable(gs.clock.day_index) or gs.companyOf(p.assigned_force) != company) continue;
+        have += gs.techHoursAvailable(p);
+    }
+    return .{ .needed = needed, .have = have };
+}
+
 pub fn manningHave(gs: *GameState, company: types.ForceId, role: person_mod.Role) u32 {
     var have: u32 = 0;
     var pit = gs.people.iterator();
