@@ -250,21 +250,27 @@ whitelisted imports; the help modal indexes its legend row by number
 
 ## D12. TUI structure (rules 18-25)
 
-- [ ] **`execSay`** (rule 20): all 51 `exec` sites (app.zig 1030, 1646, 1650, 1652, 2802, 2808, 2840, 2866, 2929, 2968, 3019, 3024, 3070, 3076, 3123, 3171, 3234, 3237, 3246, 3260, 3273, 3313, 3465, 3473, 3485, 3539, 3556, 3562, 3566, 3661, 3667, 3692, 3700, 3863, 3866, 3871, 3875, 3879, 3996, 4282, 4301, 4326, 4449, 4463, 4467, 4476, 4486, 4497, 4511, 4560, 4768). Nineteen are unguarded today, including the four liquidation confirms 4463, 4476, 4486, 4497 that report success after a refusal; two use the guard as control flow (1650, 3024); one compares state (3996). Esc at 2617 must reset `msg_style`.
-- [ ] **shared `confirm(command, verb)`** (rule 19): `fire` 2128/4492, `sell_unit` 2062/4459 (two-verb), `sell_hq` 2083/4472, `disband` 2097/4482, `game_over` 2114/4408, `quit` 1826/4388, `end_turn` 1810/4365; add one for the breach recall (3024).
-- [ ] **shared picker for every list modal**: `raise_hulls` 1863/4115, `raise_support` 1882/4154, `seat` 2142/4502, `emblem` 2153/4521, `install_part` 2042/4415, `install_loc` 2051/4433, `upgrade` 2018/4311, `lance_pick` 2008/4292, `accept_pick` 2000/4265, `negotiate` 1969/4196 (over a new `queries.negotiableTerms`), `music` 1907/4018 (rows carry `{kind, index}`; drop the index arithmetic at 4025-4040), `decision` 1839/4555.
-- [ ] **shared read-only list** for `hull` 2188, `record` 2208, `summary` 1937, `readiness` 1944, `raise_crews` 1953, `contract_log` 2194, `help` 1759.
-- [ ] **shared text form** for `input` 2214/4565; `settings` 2033/4336 folds into the list-with-adjust widget.
-- [ ] **one `clamp` helper and one `resetCursor()`** (rule 23): `modal_cursor` clamps at 1866, 1875, 1902, 1932, 1981, 2003, 2013, 2026, 2046, 2057, 2148, 2159, 2205, 3829, 4198, 4216 and 33 resets; `_sel` fields at 1095, 1304, 1319, 1522, 1728, 3626 (which jump to 0 while the helpers keep the last row); `cursor` clamps at 588, 976, 985, 1436, 1482, 1486, 2255-2263; `focus_scroll` raw pointer (306); `supply_ship_to` (332) and `raise.passed` (45) stale-able state.
-- [ ] **`layout.zig`** (rule 21): every constant in the fix map's table, including `narrow_cols = 120` (today 120 at 6 sites, 150 at 3, 140, 160), the recurring ratios 3/5 (12 sites), 55/100 (4), 2/5 (4), and one `modal_size` table for the 31 per-arm modal sizes at 1817-2230.
-- [ ] **screens table** (rule 18): split app.zig into `src/tui/screens/{desk,map,forces,contracts,ledger,supply,hq,lab,people,market}.zig`, each exporting `draw`, `move`, `enter`, `key`, `footer`, `paneCount`; one table indexed by `Tab` replaces the six `switch (self.tab)` at 922, 2644, 2656, 2745, 2882 (702 lines) and the modal pair 1755 (491 lines) / 4015 (564 lines); `drawWizard` 642 (225 lines) becomes per-step functions.
-- [ ] **one key table per screen** (rule 22): footer switch arms 923-932; lobby footers 639, 694, 754, 814, 859; pane right-titles 945, 949, 953, 956, 1000, 1097, 1441, 1487, 1503, 1526, 1735, 1742 and the modal ones 1934, 1941, 1948, 1983, 2005, 2015, 2028, 2048, 2150, 2161, 2185, 2203, 3831; modal titles 1823, 1860, 2039, 2059, 2080, 2094, 2111, 2139, 2191, 2211, 1876, 1904, 2202, 3777-3809; help rows 1760-1802; in-pane hints (26 sites); `docs/tui.md:85-116` generated or checked by the smoke.
-- [ ] **markup tag set once** (rule 16): `table.zig:64-69` `isMark` is the declaration; `screen.zig:56-68` maps from it; `screen.zig:465-470` reuses `visibleLen`; app.zig:1800 stops matching on `"{a}contracts{/}"`.
-- [ ] **escape sequences in `term.zig`** (rule 24): `screen.zig:36-53` SGR table and `:393-420` cursor and pixel writes move behind `term` functions.
+**D12a — done (PR #16).**
+- [x] **`execSay`** (rule 20): `exec` returns whether the command ran; `execSay(cmd, style, fmt, args)` says the refusal or the success line. Every `exec` site uses one or the other; no caller reads `msg_style`. The `msg.len == 0` at the music "now playing" line is not an exec guard (it yields to whatever the status line already says).
+- [x] **shared confirm** (rule 19): `Modal.confirm = {kind, id}` with `confirmSpec` (title, rows, size, command, past-tense line, optional second verb) and `afterConfirm`; covers fire, sell/strip hull, sell HQ, disband, and the new breach-recall confirm on the Contracts screen. The three flow dialogs (end turn, quit, game over) draw through `dialog(title, rows, w, h)`.
+- [x] **`clampIdx` and `openModal`** (rule 23): every cursor and `_sel` clamp goes through `clampIdx` (past the end lands on the last row, as the helpers always did; the `_sel` fields no longer jump to 0); `openModal` resets the cursor at every modal opening. `supply_ship_to` folded into the `pick_part` payload; `focus_scroll` is a pane index, not a pointer. `raise.passed` stays: it is the player's own "passed on" list, revalidated against `RaiseCand.key` each frame.
+- [x] **`layout.zig`** (rule 21): `narrow_cols`/`wide_cols`/`emblem_cols` with `narrow/wide/extraWide`, rational `Ratio` splits (`major`, `minor`, `list`, `half`, `quarter`, `two_thirds`, `three_quarters`, and the per-screen shares), and `layout.modal.*` sizes for all 30 modals. Contracts' wide threshold moved from 140 to `wide_cols` (150). `modalRect` keeps the 2-column margin once.
+- [x] `term.zig` and `layout.zig` are in the test block (D13 item).
+
+**D12b — pending.**
+- [ ] **shared picker for every list modal**: `raise_hulls`, `raise_support`, `seat`, `emblem`, `install_part`, `install_loc`, `upgrade`, `lance_pick`, `accept_pick`, `negotiate` (over a new `queries.negotiableTerms`), `music` (rows carry `{kind, index}`), `decision`.
+- [ ] **shared read-only list** for `hull`, `record`, `summary`, `readiness`, `raise_crews`, `contract_log`, `help`.
+- [ ] **shared text form** for `input`; `settings` folds into the list-with-adjust widget.
+- [ ] **markup tag set once** (rule 16): `table.zig` `isMark` is the declaration; `screen.zig` maps from it and reuses `visibleLen`.
+- [ ] **escape sequences in `term.zig`** (rule 24): `screen.zig` SGR table and cursor/pixel writes move behind `term` functions.
+
+**D12c — pending.**
+- [ ] **screens table** (rule 18): split app.zig into `src/tui/screens/{desk,map,forces,contracts,ledger,supply,hq,lab,people,market}.zig`, each exporting `draw`, `move`, `enter`, `key`, `footer`, `paneCount`; one table indexed by `Tab` replaces the six `switch (self.tab)`; the modal draw/key pair splits per widget; `drawWizard` becomes per-step functions.
+- [ ] **one key table per screen** (rule 22): footer arms, lobby footers, pane right-titles, modal titles, help rows and in-pane hints from one table; `docs/tui.md` key table generated or checked by the smoke.
 
 ## D13. Tests and CI (rules 37-40)
 
-- [ ] `term.zig` added to the test block in `src/main.zig:6-14`.
+- [x] `term.zig` (and `layout.zig`) added to the test block in `src/main.zig` (PR #16).
 - [x] The emblem-editor smoke step (tui_smoke.py ~236-242) was timing-flaky: it now waits for text (`wait_for`) instead of sleeping (PR #8).
 - [ ] Smoke coverage: delete-player and delete-campaign confirms, disband and sell-HQ confirms, game-over path, music modal, resize, the 80-120 column boundary, `←/→` column scrolling on each table screen, every refusal branch of a confirm.
 - [ ] `.github/workflows/ci.yml`: `zig build test --summary all` plus both smokes on push and pull request.

@@ -15,6 +15,7 @@ const png = @import("png.zig");
 const music_mod = @import("music.zig");
 const paths = @import("paths.zig");
 const splash = @import("splash.zig");
+const layout = @import("layout.zig");
 
 const Term = term_mod.Term;
 const Key = term_mod.Key;
@@ -62,8 +63,9 @@ const Modal = union(enum) {
     decision: usize,
     input: InputKind,
     help,
-    /// Confirm firing a person.
-    fire: types.PersonId,
+    /// One command behind a yes/no (rule 19): the body quotes the stakes,
+    /// y runs it through `execSay`, so the refusal guard lives once.
+    confirm: Confirm,
     /// Pick an open pilot/tech seat for a person.
     seat: types.PersonId,
     /// Change the outfit's emblem: presets, then pictures from the logo dirs.
@@ -74,10 +76,6 @@ const Modal = union(enum) {
     hull: types.UnitId,
     /// A person's record as a modal.
     record: types.PersonId,
-    /// Liquidation confirmations.
-    sell_unit: types.UnitId,
-    sell_hq: types.HqId,
-    disband: types.ForceId,
     /// The outfit folded.
     game_over,
     /// Lab install: pick a part, then a location with the rules' verdict.
@@ -100,7 +98,7 @@ const Modal = union(enum) {
     pick_crew: types.UnitId,
     pick_unassign: types.UnitId,
     /// Part picker: picks the part, then the amount form asks the quantity.
-    pick_part: struct { purpose: q.PartPurpose, site: types.Site },
+    pick_part: struct { purpose: q.PartPurpose, site: types.Site, ship_to: ?types.ForceId = null },
     /// Amount form (12.30 phase 2): every number the client asks for goes
     /// through one modal — fields with a default, a range and a step.
     amount: AmountForm,
@@ -112,6 +110,25 @@ const Modal = union(enum) {
     summary,
     /// Browse the soundtracks and tracks; pick what plays.
     music,
+};
+
+/// A yes/no over one command. `id` is the subject the kind names.
+const Confirm = struct {
+    kind: enum { fire, sell_unit, sell_hq, disband, recall_breach },
+    id: u32,
+};
+
+/// What a confirm shows and runs.
+const ConfirmSpec = struct {
+    title: []const u8,
+    rows: []const []const u8,
+    w: u16,
+    h: u16,
+    /// The command y runs and the past-tense line it earns.
+    cmd: Command,
+    done: []const u8,
+    /// A second verb (s: strip instead of sell), if the dialog has one.
+    alt: ?struct { key: u8, cmd: Command, done: []const u8 } = null,
 };
 
 /// One number the amount form asks for.
@@ -265,7 +282,8 @@ pub const App = struct {
     /// The column scroll of the table drawn focused this frame, if any —
     /// what ←/→ move (a pane's cursor index and its focus index differ on
     /// some screens).
-    focus_scroll: ?*usize = null,
+    /// The pane whose table columns ←/→ scroll this frame (set by the draw).
+    focus_scroll: ?u8 = null,
     msg: TextBuf = .{},
     msg_style: Style = .dim,
     input: TextBuf = .{},
@@ -296,7 +314,6 @@ pub const App = struct {
     /// Settings form (12.33): the highlighted row.
     settings_cursor: usize = 0,
     /// Ship flow (12.30): the company a Supply row named as the destination, if any.
-    supply_ship_to: ?types.ForceId = null,
     /// Forces side pane on a company row: DAMAGE, READINESS or MANNING (r cycles).
     forces_pane: enum { damage, readiness, manning } = .damage,
     /// The raise-a-company wizard's state.
@@ -535,7 +552,7 @@ pub const App = struct {
 
     /// Side panes are dropped below this width.
     fn narrow(self: *App) bool {
-        return self.screen.cols < 120;
+        return layout.narrow(self.screen.cols);
     }
 
     fn titleBar(self: *App, title: []const u8, right: []const u8) void {
@@ -602,7 +619,7 @@ pub const App = struct {
 
         const b = self.body();
         const pw: u16 = @min(30, b.w / 4);
-        const top_h: u16 = if (b.h > 12) b.h * 2 / 3 else b.h;
+        const top_h: u16 = if (b.h > 12) layout.two_thirds.of(b.h) else b.h;
         var prow: std.ArrayListUnmanaged([]const u8) = .empty;
         for (players) |p| {
             const mk: []const u8 = if (p.id == self.player_id) "{a}" else "";
@@ -670,7 +687,7 @@ pub const App = struct {
                     const sel = self.w_field == 3 and i == self.w_year;
                     try rows.append(al, try std.fmt.allocPrint(al, "  {s}{s} {d}{s}{{/}}", .{ if (sel) "{s}" else if (i == self.w_year) "{a}" else "", if (i == self.w_year) ">" else " ", y, if (y == 3025) "  (the Succession Wars, TRO:3025)" else "" }));
                 }
-                const lw: u16 = @min(70, b.w * 2 / 5);
+                const lw: u16 = @min(70, layout.minor.of(b.w));
                 _ = self.listPane(.{ .x = 0, .y = b.y, .w = lw, .h = b.h }, "COMMANDER", rows.items, 0, true, false);
                 var info: std.ArrayListUnmanaged([]const u8) = .empty;
                 try info.append(al, try std.fmt.allocPrint(al, "{{a}}{s}{{/}}", .{factions[self.w_faction].fullName()}));
@@ -739,7 +756,7 @@ pub const App = struct {
                     try rows.append(al, try names.toOwnedSlice(al));
                     try rows.append(al, "  {d}[j/k] choose a preset{/}");
                 }
-                const lw: u16 = if (b.w > 120) b.w / 2 else b.w;
+                const lw: u16 = if (layout.wide(b.w)) layout.half.of(b.w) else b.w;
                 _ = self.listPane(.{ .x = 0, .y = b.y, .w = lw, .h = b.h }, "OUTFIT", rows.items, 0, true, false);
                 if (lw < b.w) {
                     const inner = self.screen.pane(.{ .x = lw, .y = b.y, .w = b.w - lw, .h = b.h }, .{ .title = "PREVIEW" });
@@ -757,8 +774,8 @@ pub const App = struct {
                     for (rows) |r| try texts.append(al, r.text);
                     // Wide: the office sits beside the TO&E. Narrow: it takes
                     // the bottom band, so +/- are never blind (12.7 leftover).
-                    const wide = b.w > 120;
-                    const lw: u16 = if (wide) b.w * 3 / 5 else b.w;
+                    const wide = layout.wide(b.w);
+                    const lw: u16 = if (wide) layout.major.of(b.w) else b.w;
                     const oh: u16 = @min(b.h, 12);
                     const toe_h: u16 = if (wide) b.h else b.h -| oh;
                     self.listPane(.{ .x = 0, .y = b.y, .w = lw, .h = toe_h }, "GENERATED COMPANY", texts.items, 0, self.w_field == 0, true);
@@ -826,7 +843,7 @@ pub const App = struct {
                     try rows.append(al, "");
                     try rows.append(al, "{s} [Enter] begin campaign {/}   {d}saves under the current player and opens the Desk on day 0{/}");
                 }
-                const rw: u16 = if (has_picture and b.w > 120) b.w * 2 / 3 else b.w;
+                const rw: u16 = if (has_picture and layout.wide(b.w)) layout.two_thirds.of(b.w) else b.w;
                 _ = self.listPane(.{ .x = 0, .y = b.y, .w = rw, .h = b.h }, "REVIEW", rows.items, 0, true, false);
                 if (rw < b.w) {
                     const inner = self.screen.pane(.{ .x = rw, .y = b.y, .w = b.w - rw, .h = b.h }, .{ .title = "EMBLEM" });
@@ -855,7 +872,7 @@ pub const App = struct {
         const st = try q.status(al, g);
         const right = st.outfit_name;
         var mark_w: u16 = 0;
-        if (self.emblem != null and s.cols > 120) {
+        if (self.emblem != null and layout.wide(s.cols)) {
             mark_w = 8;
             _ = self.drawEmblem(.{ .x = s.cols - 7, .y = 0, .w = 6, .h = 3 });
         }
@@ -877,7 +894,7 @@ pub const App = struct {
             st.checklist,  if (st.blocking > 0) "{c}NO{/}" else "{g}YES{/}",
         });
         const np = try self.nowPlayingLine();
-        s.textPad(0, 1, s.cols, if (np.len > 0 and s.cols > 150) try std.fmt.allocPrint(al, "{s}  ·  {{d}}{s}{{/}}", .{ line, np }) else line, .normal);
+        s.textPad(0, 1, s.cols, if (np.len > 0 and layout.extraWide(s.cols)) try std.fmt.allocPrint(al, "{s}  ·  {{d}}{s}{{/}}", .{ line, np }) else line, .normal);
     }
 
     fn drawGame(self: *App) !void {
@@ -916,16 +933,16 @@ pub const App = struct {
         const g = &self.gs.?;
         const b = self.body();
         const view = try q.market(al, g, self.market_filter, @enumFromInt(self.hqSelId(g)));
-        const top_h: u16 = @max(6, b.h * 2 / 5);
+        const top_h: u16 = @max(6, layout.minor.of(b.h));
         const hq_id: types.HqId = @enumFromInt(self.hqSelId(g));
         const inner = self.screen.pane(.{ .x = b.x, .y = b.y, .w = b.w, .h = top_h }, .{ .title = try std.fmt.allocPrint(al, "MARKET BOARD · {{a}}{s}{{/}} pays from its treasury ({s}) · filter {{a}}{s}{{/}} · {d} listings", .{ q.hqName(g, hq_id), try q.money(al, q.balance(g, .{ .hq = hq_id })), @tagName(self.market_filter), view.board.len }), .focused = self.focus == 0, .right_title = "[ ] other HQ  [/] filter  [Enter] buy" });
         try self.tableOrNote(inner, try q.tableOf(al, q.market_cols, view.board), 0, self.focus == 0, "{d}nothing on the boards — they refresh on the 1st, staples restock as they sell{/}");
 
-        const cw: u16 = if (self.narrow()) b.w else b.w * 55 / 100;
+        const cw: u16 = if (self.narrow()) b.w else layout.list.of(b.w);
         const inner2 = self.screen.pane(.{ .x = b.x, .y = b.y + top_h, .w = cw, .h = b.h - top_h }, .{ .title = try std.fmt.allocPrint(al, "ORDER CATALOG · delivered to {s}", .{q.hqName(g, hq_id)}), .focused = self.focus == 1, .right_title = "[Enter] order  [b] fabricate" });
         try self.tableOrNote(inner2, try q.tableOf(al, q.catalog_cols, view.catalog), 1, self.focus == 1, "{d}nothing in the catalog under this filter{/}");
         if (cw < b.w) {
-            const dem_h: u16 = (b.h - top_h) * 55 / 100;
+            const dem_h: u16 = layout.list.of(b.h - top_h);
             const inner3 = self.screen.pane(.{ .x = b.x + cw, .y = b.y + top_h, .w = b.w - cw, .h = dem_h }, .{ .title = "DEMAND · damaged slots", .focused = self.focus == 2, .right_title = "[Enter] order shortfall" });
             try self.tableOrNote(inner3, try q.tableOf(al, q.demand_cols, view.demand), 2, self.focus == 2, "{g}nothing damaged{/}");
             const pol = try q.stockPolicies(al, g, hq_id);
@@ -958,9 +975,9 @@ pub const App = struct {
     fn tablePane(self: *App, inner: Rect, t: Table, pane_idx: u8, focused: bool) !void {
         if (inner.h == 0) return;
         const c = self.cur(pane_idx);
-        if (t.rows.len > 0 and c.* >= t.rows.len) c.* = t.rows.len - 1;
+        clampIdx(c, t.rows.len);
         const scroll = self.colScroll(pane_idx);
-        if (focused) self.focus_scroll = scroll;
+        if (focused) self.focus_scroll = pane_idx;
         _ = try self.screen.table(self.a(), inner, t, firstRow(c.*, inner.h -| 1), if (focused and t.rows.len > 0) c.* else null, scroll);
     }
 
@@ -971,7 +988,7 @@ pub const App = struct {
         const g = &self.gs.?;
         const b = self.body();
         const view = try q.people(al, g, self.people_filter);
-        const lw: u16 = if (b.w > 150) @max(b.w * 62 / 100, @min(b.w - 60, 128)) else b.w;
+        const lw: u16 = if (layout.extraWide(b.w)) @max(layout.people_list.of(b.w), @min(b.w - 60, 128)) else b.w;
         const title = try std.fmt.allocPrint(al, "PERSONNEL · filter {{a}}{s}{{/}} · {d} of {d}", .{ @tagName(self.people_filter), view.rows.len, view.total });
         const inner = self.screen.pane(.{ .x = b.x, .y = b.y, .w = lw, .h = b.h }, .{ .title = title, .focused = true, .right_title = "[/] next filter  [?] previous" });
         const c = self.cur(0);
@@ -979,7 +996,7 @@ pub const App = struct {
         if (lw < b.w and view.rows.len > 0) {
             const id = view.rows[c.*].id;
             const rec = try q.personRecord(al, g, id);
-            const rec_h: u16 = b.h * 3 / 5;
+            const rec_h: u16 = layout.major.of(b.h);
             self.listPane(.{ .x = b.x + lw, .y = b.y, .w = b.w - lw, .h = rec_h }, "RECORD", rec, 1, false, false);
             const seats = try q.openSeats(al, g, id);
             var st: std.ArrayListUnmanaged([]const u8) = .empty;
@@ -1003,8 +1020,7 @@ pub const App = struct {
 
     /// Change the emblem on every company (the crest is outfit-wide).
     fn applyEmblem(self: *App, image: []const u8) !void {
-        try self.exec(.{ .set_outfit_emblem = image });
-        self.refreshEmblem();
+        if (try self.exec(.{ .set_outfit_emblem = image })) self.refreshEmblem();
     }
 
     // ---- map ----
@@ -1069,7 +1085,7 @@ pub const App = struct {
         const view = try q.map(al, g);
         if (view.worlds.len == 0) return;
         if (self.map_cursor >= view.worlds.len) self.map_cursor = 0;
-        const mw: u16 = if (b.w > 120) b.w * 3 / 4 else b.w;
+        const mw: u16 = if (layout.wide(b.w)) layout.three_quarters.of(b.w) else b.w;
         const inner = s.pane(.{ .x = b.x, .y = b.y, .w = mw, .h = b.h }, .{ .title = try std.fmt.allocPrint(al, "STAR MAP · colour by {s} [c]", .{@tagName(self.map_color)}), .focused = true, .right_title = try std.fmt.allocPrint(al, "{d} worlds · {d} in ring · {d} beachhead · {d} dark · zoom ×{d} [+] [-]", .{ view.worlds.len, view.in_ring, view.in_band, view.dark, self.map_zoom }) });
         const cw = view.worlds[self.map_cursor];
         const geom = mapGeom(view, inner, self.map_zoom, .{ cw.x, cw.y });
@@ -1147,7 +1163,7 @@ pub const App = struct {
             try rows.appendSlice(al, try q.worldDetail(al, g, &view, &w));
             try rows.append(al, "");
             try rows.append(al, "{d}[f] found HQ here  [o] contract board{/}");
-            const side_h: u16 = b.h * 3 / 5;
+            const side_h: u16 = layout.major.of(b.h);
             self.listPane(.{ .x = b.x + mw, .y = b.y, .w = b.w - mw, .h = side_h }, "WORLD", rows.items, 1, false, false);
             var reach: std.ArrayListUnmanaged([]const u8) = .empty;
             try reach.append(al, try std.fmt.allocPrint(al, "in ring         {d} worlds", .{view.in_ring}));
@@ -1215,10 +1231,10 @@ pub const App = struct {
             self.listPane(b, "LAB", &rows, 0, false, false);
             return;
         }
-        if (self.lab_sel >= meks.len) self.lab_sel = 0;
+        clampIdx(&self.lab_sel, meks.len);
         const view = try q.lab(al, g, meks[self.lab_sel]);
-        const lw: u16 = if (self.narrow()) 0 else @max(30, b.w * 3 / 10);
-        const mw: u16 = if (self.narrow()) b.w * 3 / 5 else @max(40, b.w * 7 / 20);
+        const lw: u16 = if (self.narrow()) 0 else @max(30, layout.lab_hulls.of(b.w));
+        const mw: u16 = if (self.narrow()) layout.major.of(b.w) else @max(40, layout.lab_mounts.of(b.w));
         if (lw > 0) self.listPane(.{ .x = b.x, .y = b.y, .w = lw, .h = b.h }, view.title, view.budget, 1, false, false);
         var mounts: std.ArrayListUnmanaged([]const u8) = .empty;
         for (view.mounts) |m| try mounts.append(al, m.text);
@@ -1230,7 +1246,7 @@ pub const App = struct {
     fn labUnit(self: *App) !?types.UnitId {
         const meks = try q.labMeks(self.a(), &self.gs.?);
         if (meks.len == 0) return null;
-        if (self.lab_sel >= meks.len) self.lab_sel = 0;
+        clampIdx(&self.lab_sel, meks.len);
         return meks[self.lab_sel];
     }
 
@@ -1240,8 +1256,8 @@ pub const App = struct {
         const b = self.body();
         const view = try q.desk(al, g, 40);
 
-        const top_h: u16 = @max(8, b.h * 2 / 5);
-        const emblem_w: u16 = if (b.w >= 160) 44 else 0;
+        const top_h: u16 = @max(8, layout.minor.of(b.h));
+        const emblem_w: u16 = if (b.w >= layout.emblem_cols) 44 else 0;
         const rest_w: u16 = b.w - emblem_w;
         const cl_w: u16 = rest_w / 2;
         const ib_w: u16 = rest_w - cl_w;
@@ -1292,11 +1308,11 @@ pub const App = struct {
         const co_inner = self.screen.pane(.{ .x = b.x, .y = b.y + top_h, .w = b.w, .h = co_h }, .{ .title = "COMPANIES" });
         // Shares the LOG pane's scroll slot: ←/→ while the log is focused scroll these columns.
         try self.tableOrNote(co_inner, .{ .cols = q.company_cols, .rows = view.companies }, 2, false, "{d}no companies{/}");
-        if (self.focus == 2) self.focus_scroll = self.colScroll(2);
+        if (self.focus == 2) self.focus_scroll = 2;
 
         const rest_h: u16 = b.h - top_h - co_h;
         if (rest_h >= 3) {
-            const log_w: u16 = if (self.narrow()) b.w else b.w * 3 / 5;
+            const log_w: u16 = if (self.narrow()) b.w else layout.major.of(b.w);
             self.listPane(.{ .x = b.x, .y = b.y + top_h + co_h, .w = log_w, .h = rest_h }, "LOG", view.log, 2, self.focus == 2, true);
             if (log_w < b.w) self.listPane(.{ .x = b.x + log_w, .y = b.y + top_h + co_h, .w = b.w - log_w, .h = rest_h }, "HQs", view.hqs, 3, false, false);
         }
@@ -1347,7 +1363,7 @@ pub const App = struct {
         if (view.board.len > 0 and c.* >= view.board.len) c.* = view.board.len - 1;
         const cands = if (view.board.len > 0) try q.offerCandidates(al, g, view.board[c.*].index) else &[_]q.Candidate{};
         const board_need: u16 = @intCast(@min(1 + view.board.len + 3 + 1 + cands.len + 2, 200));
-        const board_h: u16 = @max(6, @min(board_need, b.h * 3 / 5));
+        const board_h: u16 = @max(6, @min(board_need, layout.major.of(b.h)));
         const board_hq: types.HqId = @enumFromInt(self.hqSelId(g));
         const inner = self.screen.pane(.{ .x = b.x, .y = b.y, .w = b.w, .h = board_h }, .{ .title = try std.fmt.allocPrint(al, "CONTRACT BOARD · {{a}}{s}{{/}} · for the companies based there", .{q.hqName(g, board_hq)}), .focused = self.focus == 0, .right_title = "[ ] other HQ  [←/→] columns  [Enter] accept" });
         if (view.board.len == 0) {
@@ -1386,13 +1402,13 @@ pub const App = struct {
             }
         }
         if (view.active.len == 0) try act.append(al, "{d}no active contracts{/}");
-        const wide = b.w > 140;
-        const act_w: u16 = if (wide) b.w * 3 / 5 else b.w;
+        const wide = layout.extraWide(b.w);
+        const act_w: u16 = if (wide) layout.major.of(b.w) else b.w;
         const history = try q.contractHistory(al, g);
         const c2 = self.cur(2);
         if (history.len > 0 and c2.* >= history.len) c2.* = history.len - 1;
         // Narrow: the active list gives up its lower part to the history.
-        const act_h: u16 = if (wide) b.h - top_h else (b.h - top_h) * 3 / 5;
+        const act_h: u16 = if (wide) b.h - top_h else layout.major.of(b.h - top_h);
         const c1 = self.cur(1);
         if (view.active.len > 0 and c1.* >= view.active.len) c1.* = view.active.len - 1;
         const inner2 = self.screen.pane(.{ .x = b.x, .y = b.y + top_h, .w = act_w, .h = act_h }, .{ .title = "ACTIVE", .focused = self.focus == 1, .right_title = "[Enter] full log  [c] complete  [R] recall" });
@@ -1430,15 +1446,15 @@ pub const App = struct {
         const g = &self.gs.?;
         const b = self.body();
         const all = try q.allTreasuries(al, g);
-        if (self.ledger_sel >= all.len) self.ledger_sel = 0;
+        clampIdx(&self.ledger_sel, all.len);
         const view = try q.ledger(al, g, all[self.ledger_sel], 31, 200);
-        const tw: u16 = if (self.narrow()) b.w * 2 / 5 else @max(34, b.w / 4);
-        const pw: u16 = if (self.narrow()) 0 else @max(30, b.w * 3 / 10);
+        const tw: u16 = if (self.narrow()) layout.minor.of(b.w) else @max(34, layout.quarter.of(b.w));
+        const pw: u16 = if (self.narrow()) 0 else @max(30, layout.ledger_pnl.of(b.w));
         const inner = self.screen.pane(.{ .x = b.x, .y = b.y, .w = tw, .h = b.h }, .{ .title = "TREASURIES", .focused = self.focus == 0, .right_title = "[t] transfer [p] policy" });
         // The treasuries as a table (the cursor is ledger_sel, not a pane cursor), the extras as lines under it.
         const t_h: u16 = @intCast(@min(view.treasuries.len + 1, inner.h));
         const tsc = self.colScroll(0);
-        if (self.focus == 0) self.focus_scroll = tsc;
+        if (self.focus == 0) self.focus_scroll = 0;
         _ = try self.screen.table(al, .{ .x = inner.x, .y = inner.y, .w = inner.w, .h = t_h }, try q.tableOf(al, q.treasury_cols, view.treasuries), 0, if (self.focus == 0) self.ledger_sel else null, tsc);
         if (inner.h > t_h + 1) self.screen.lines(.{ .x = inner.x, .y = inner.y + t_h + 1, .w = inner.w, .h = inner.h - t_h - 1 }, view.extras, 0, null);
         if (pw > 0) {
@@ -1454,15 +1470,15 @@ pub const App = struct {
         const g = &self.gs.?;
         const b = self.body();
         const views = try q.toeViews(al, g);
-        if (self.forces_view >= views.len) self.forces_view = 0;
+        clampIdx(&self.forces_view, views.len);
         const rows = try q.toeFiltered(al, g, views[self.forces_view].filter);
         var texts: std.ArrayListUnmanaged([]const u8) = .empty;
         for (rows) |r| try texts.append(al, r.text);
-        const lw: u16 = if (b.w > 120) b.w * 55 / 100 else b.w;
+        const lw: u16 = if (layout.wide(b.w)) layout.list.of(b.w) else b.w;
         self.listPane(.{ .x = b.x, .y = b.y, .w = lw, .h = b.h }, try std.fmt.allocPrint(al, "TO&E · {{a}}{s}{{/}} ({d}/{d}) · [ ] switch", .{ views[self.forces_view].label, self.forces_view + 1, views.len }), texts.items, 0, self.focus == 0, true);
         if (lw < b.w) {
             const c = self.cur(0).*;
-            const detail_h: u16 = b.h * 3 / 5;
+            const detail_h: u16 = layout.major.of(b.h);
             if (rows.len > 0 and c < rows.len and rows[c].unit != .none) {
                 const detail = try q.hull(al, g, rows[c].unit);
                 self.listPane(.{ .x = b.x + lw, .y = b.y, .w = b.w - lw, .h = detail_h }, "HULL", detail, 1, false, false);
@@ -1502,7 +1518,7 @@ pub const App = struct {
         const g = &self.gs.?;
         const b = self.body();
         const view = try q.supply(al, g);
-        const lw: u16 = if (self.narrow()) b.w else b.w * 55 / 100;
+        const lw: u16 = if (self.narrow()) b.w else layout.list.of(b.w);
         self.listPane(.{ .x = b.x, .y = b.y, .w = lw, .h = b.h }, "SITES", view.rows, 0, true, true);
         if (lw < b.w) {
             const c = self.cur(0).*;
@@ -1546,14 +1562,11 @@ pub const App = struct {
         const c = cands[@min(self.modal_cursor, cands.len - 1)];
         switch (c.kind) {
             .pool => {
-                try self.exec(.{ .move_unit = .{ .unit = c.unit, .force = lance.id } });
-                if (self.msg_style != .crit) self.say(.good, "#{d} joins {s}", .{ @intFromEnum(c.unit), lance.name });
+                _ = try self.execSay(.{ .move_unit = .{ .unit = c.unit, .force = lance.id } }, .good, "#{d} joins {s}", .{ @intFromEnum(c.unit), lance.name });
             },
             .mothballed => {
-                try self.exec(.{ .reactivate = c.unit });
-                if (self.msg_style == .crit) return;
-                try self.exec(.{ .move_unit = .{ .unit = c.unit, .force = lance.id } });
-                if (self.msg_style != .crit) self.say(.good, "#{d} reactivating and assigned to {s}", .{ @intFromEnum(c.unit), lance.name });
+                if (!try self.exec(.{ .reactivate = c.unit })) return;
+                _ = try self.execSay(.{ .move_unit = .{ .unit = c.unit, .force = lance.id } }, .good, "#{d} reactivating and assigned to {s}", .{ @intFromEnum(c.unit), lance.name });
             },
             .listing => {
                 const r = game.commands.execute(g, .{ .buy_hull_for = .{ .listing = c.listing, .company = self.raise.company, .lance = lance.id } }) catch |err| {
@@ -1586,7 +1599,7 @@ pub const App = struct {
     fn toeRows(self: *App) ![]q.ToeRow {
         const g = &self.gs.?;
         const views = try q.toeViews(self.a(), g);
-        if (self.forces_view >= views.len) self.forces_view = 0;
+        clampIdx(&self.forces_view, views.len);
         return q.toeFiltered(self.a(), g, views[self.forces_view].filter);
     }
 
@@ -1602,13 +1615,13 @@ pub const App = struct {
         const b = self.body();
         const hqs = try q.hqList(al, g);
         if (hqs.len == 0) return;
-        if (self.hq_sel >= hqs.len) self.hq_sel = 0;
+        clampIdx(&self.hq_sel, hqs.len);
         const h = hqs[self.hq_sel];
         const id = h.id;
         const detail = try q.hqDetail(al, g, id);
         const title = try std.fmt.allocPrint(al, "hq:{d} {s} · {s} · ring {d} LY · funds {s} · staff {d}/{d}", .{ @intFromEnum(id), h.name, h.tier, h.ring_ly, try q.money(al, h.funds), h.staff_assigned, h.staff_required });
-        const lw: u16 = if (b.w > 150) b.w * 45 / 100 else b.w;
-        const top_h: u16 = if (lw < b.w) b.h else b.h * 3 / 5;
+        const lw: u16 = if (layout.extraWide(b.w)) layout.hq_detail.of(b.w) else b.w;
+        const top_h: u16 = if (lw < b.w) b.h else layout.major.of(b.h);
         const inner = self.screen.pane(.{ .x = b.x, .y = b.y, .w = lw, .h = top_h }, .{ .title = title, .focused = self.focus == 0, .right_title = "[ ] switch HQ  [u] upgrade  [S] autostaff" });
         self.screen.lines(inner, detail, firstRow(self.cur(0).*, inner.h), if (self.focus == 0) self.cur(0).* else null);
 
@@ -1624,9 +1637,15 @@ pub const App = struct {
 
     fn modalRect(self: *App, w: u16, h: u16) Rect {
         const s = &self.screen;
-        const ww = @min(w, s.cols);
+        const ww = @min(w, s.cols -| 2);
         const hh = @min(h, s.rows);
         return .{ .x = (s.cols - ww) / 2, .y = (s.rows - hh) / 2, .w = ww, .h = hh };
+    }
+
+    /// A titled box of text lines (the flow dialogs: end turn, quit, game over).
+    fn dialog(self: *App, title: []const u8, rows: []const []const u8, w: u16, h: u16) void {
+        const inner = self.screen.pane(self.modalRect(w, h), .{ .title = title, .double = true });
+        self.screen.lines(inner, rows, 0, null);
     }
 
     fn drawModal(self: *App) !void {
@@ -1682,7 +1701,7 @@ pub const App = struct {
                         try rows.append(al, try std.fmt.allocPrint(al, "               factions {s}", .{try q.factionLegend(al)}));
                     }
                 }
-                const r = self.modalRect(134, 34);
+                const r = self.modalRect(layout.modal.help_w, layout.modal.help_h);
                 const inner = self.screen.pane(r, .{ .title = "HELP", .double = true });
                 self.screen.lines(inner, rows.items, 0, null);
             },
@@ -1698,9 +1717,7 @@ pub const App = struct {
                 }
                 try rows.append(al, "");
                 try rows.append(al, "  {s} [n] end the turn anyway {/}    {d}[N] end 7 turns · [Esc] back{/}");
-                const r = self.modalRect(100, @intCast(@min(rows.items.len + 3, 40)));
-                const inner = self.screen.pane(r, .{ .title = "END TURN? · [y] a day · [N] a week · [Esc] not yet", .double = true });
-                self.screen.lines(inner, rows.items, 0, null);
+                self.dialog("END TURN? · [y] a day · [N] a week · [Esc] not yet", rows.items, layout.modal.end_turn_w, @intCast(@min(rows.items.len + 3, layout.modal.end_turn_max_h)));
             },
             .quit => {
                 const g = &self.gs.?;
@@ -1712,9 +1729,7 @@ pub const App = struct {
                 try rows.append(al, "  {s} [s] save and return {/}");
                 try rows.append(al, "    [r] return without saving");
                 try rows.append(al, "    [Esc] stay in the campaign");
-                const r = self.modalRect(60, 9);
-                const inner = self.screen.pane(r, .{ .title = "RETURN TO WELCOME?", .double = true });
-                self.screen.lines(inner, rows.items, 0, null);
+                self.dialog("RETURN TO WELCOME?", rows.items, layout.modal.quit_w, layout.modal.quit_h);
             },
             .decision => |idx| {
                 const g = &self.gs.?;
@@ -1736,7 +1751,7 @@ pub const App = struct {
                     try rows.append(al, "  {d}press the option number · [Esc] decide later{/}");
                 }
                 if (!found) try rows.append(al, "  {d}this decision has been resolved{/}");
-                const r = self.modalRect(90, @intCast(@min(rows.items.len + 2, 30)));
+                const r = self.modalRect(layout.modal.decision_w, @intCast(@min(rows.items.len + 2, layout.modal.decision_max_h)));
                 const inner = self.screen.pane(r, .{ .title = "DECISION · [1-9] choose · [Esc] later", .double = true });
                 self.screen.lines(inner, rows.items, 0, null);
             },
@@ -1751,8 +1766,8 @@ pub const App = struct {
                     try lance_line.appendSlice(al, try std.fmt.allocPrint(al, "{s}{s} {d}/{d}{s}  ", .{ if (i == self.raise.lance_idx) "{a}▶ " else "{d}", l.name, l.used, l.cap, "{/}" }));
                 }
                 try rows.append(al, lance_line.items);
-                if (self.modal_cursor >= cands.len and cands.len > 0) self.modal_cursor = cands.len - 1;
-                const r = self.modalRect(@min(self.screen.cols -| 2, 160), @intCast(@min(cands.len + 6, self.screen.rows -| 2)));
+                clampIdx(&self.modal_cursor, cands.len);
+                const r = self.modalRect(layout.modal.raise_hulls_w, @intCast(@min(cands.len + 6, self.screen.rows -| 2)));
                 const inner = self.screen.pane(r, .{ .title = try std.fmt.allocPrint(al, "RAISE {s} · HULLS · [ ] lance · Enter/b take or buy · p pass · n support train · ←/→ columns · Esc leave (the company keeps what it has)", .{q.forceName(g, self.raise.company)}), .double = true });
                 self.screen.lines(.{ .x = inner.x, .y = inner.y, .w = inner.w, .h = @min(1, inner.h) }, rows.items, 0, null);
                 const tr: Rect = .{ .x = inner.x, .y = inner.y + 2, .w = inner.w, .h = inner.h -| 2 };
@@ -1766,8 +1781,8 @@ pub const App = struct {
                 for (train.lines) |line| try rows.append(al, line.text);
                 try rows.append(al, "");
                 try rows.append(al, try std.fmt.allocPrint(al, "field capacity {d}t  ·  a generated company carries 4 of each", .{train.capacity_tons}));
-                if (self.modal_cursor >= train.lines.len) self.modal_cursor = train.lines.len -| 1;
-                const r = self.modalRect(@min(self.screen.cols -| 2, 150), @intCast(rows.items.len + 4));
+                clampIdx(&self.modal_cursor, train.lines.len);
+                const r = self.modalRect(layout.modal.raise_support_w, @intCast(rows.items.len + 4));
                 const inner = self.screen.pane(r, .{ .title = try std.fmt.allocPrint(al, "RAISE {s} · SUPPORT TRAIN · Enter/b buy one · n crews · Esc leave", .{q.forceName(g, self.raise.company)}), .double = true });
                 self.screen.lines(inner, rows.items, 0, self.modal_cursor + 1);
             },
@@ -1796,22 +1811,22 @@ pub const App = struct {
                     try rows.append(al, "  {d}[Esc] close{/}");
                 }
                 const n = rows.items.len;
-                if (self.modal_cursor >= n) self.modal_cursor = n -| 1;
-                const r = self.modalRect(@min(self.screen.cols -| 2, 110), @intCast(@min(n + 3, self.screen.rows -| 2)));
+                clampIdx(&self.modal_cursor, n);
+                const r = self.modalRect(layout.modal.music_w, @intCast(@min(n + 3, self.screen.rows -| 2)));
                 const inner = self.screen.pane(r, .{ .title = "SOUNDTRACK", .double = true, .right_title = "[Enter] select / play  [Esc] close" });
                 self.screen.lines(inner, rows.items, firstRow(self.modal_cursor, inner.h), if (self.music != null) self.modal_cursor else null);
             },
             .summary => {
                 const g = &self.gs.?;
                 const rows = try q.summary(al, g);
-                const r = self.modalRect(@min(self.screen.cols -| 2, 150), @intCast(rows.len + 3));
+                const r = self.modalRect(layout.modal.summary_w, @intCast(rows.len + 3));
                 const inner = self.screen.pane(r, .{ .title = "CAMPAIGN SUMMARY", .double = true, .right_title = "any key closes · also :summary" });
                 self.screen.lines(inner, rows, 0, null);
             },
             .readiness => {
                 const g = &self.gs.?;
                 const rr = try q.readiness(al, g);
-                const r = self.modalRect(@min(self.screen.cols -| 2, 150), @intCast(@min(rr.len + 6, self.screen.rows)));
+                const r = self.modalRect(layout.modal.readiness_w, @intCast(@min(rr.len + 6, self.screen.rows)));
                 const inner = self.screen.pane(r, .{ .title = "READINESS · every company", .double = true, .right_title = "[←/→] columns · any other key closes" });
                 const th: u16 = @intCast(@min(@max(rr.len, 1) + 1, inner.h));
                 if (rr.len == 0) self.screen.lines(inner, &.{"{d}no companies{/}"}, 0, null) else _ = try self.screen.table(al, .{ .x = inner.x, .y = inner.y, .w = inner.w, .h = th }, try q.tableOf(al, q.readiness_cols, rr), 0, null, &self.modal_colscroll);
@@ -1829,7 +1844,7 @@ pub const App = struct {
                 try rows.append(al, "  {a}[a]{/} hire from the halls now: a pilot per crewless hull and a tech where none has hours (signing bonuses from the outfit)");
                 try rows.append(al, "  {d}or hire by hand later: HQ screen Tab into the hall (f filters by role), People P posts staff · this table is also :manning co:N{/}");
                 try rows.append(al, "  {a}[Enter]{/} finish");
-                const r = self.modalRect(@min(self.screen.cols -| 2, 120), @intCast(rows.items.len + 4));
+                const r = self.modalRect(layout.modal.raise_crews_w, @intCast(rows.items.len + 4));
                 const inner = self.screen.pane(r, .{ .title = try std.fmt.allocPrint(al, "RAISE {s} · CREWS", .{q.forceName(g, self.raise.company)}), .double = true });
                 self.screen.lines(inner, rows.items, 0, null);
             },
@@ -1844,8 +1859,8 @@ pub const App = struct {
                 const terms = [_][]const u8{ "advance     25% → 50% of the total up front", "salvage     +10 points of salvage rights", "transport   +20 points of transport paid", "support     +25 points of straight support (monthly employer convoys)", "rights      one step toward independent command", "pay         +10% monthly pay" };
                 const first = rows.items.len;
                 for (terms) |t| try rows.append(al, t);
-                if (self.modal_cursor >= terms.len) self.modal_cursor = terms.len - 1;
-                const r = self.modalRect(110, @intCast(@min(rows.items.len + 3, self.screen.rows)));
+                clampIdx(&self.modal_cursor, terms.len);
+                const r = self.modalRect(layout.modal.negotiate_w, @intCast(@min(rows.items.len + 3, self.screen.rows)));
                 const inner = self.screen.pane(r, .{ .title = "NEGOTIATE · [Enter] press the term · [Esc] cancel", .double = true, .right_title = ":negotiate <offer#> <term>" });
                 self.screen.lines(inner, rows.items, 0, first + self.modal_cursor);
             },
@@ -1859,15 +1874,15 @@ pub const App = struct {
                 }
                 try rows.append(al, "");
                 try rows.append(al, "  {d}digits type · +/- step · Tab next · Enter runs · Esc cancels{/}");
-                const r = self.modalRect(64, @intCast(@min(rows.items.len + 2, self.screen.rows)));
+                const r = self.modalRect(layout.modal.amount_w, @intCast(@min(rows.items.len + 2, self.screen.rows)));
                 const inner = self.screen.pane(r, .{ .title = form.title(), .double = true });
                 self.screen.lines(inner, rows.items, 0, null);
             },
             .accept_pick => |oi| {
                 const g = &self.gs.?;
                 const cands = try q.offerCandidates(al, g, oi);
-                if (self.modal_cursor >= cands.len and cands.len > 0) self.modal_cursor = cands.len - 1;
-                const r = self.modalRect(@min(self.screen.cols, 140), @intCast(@min(cands.len + 4, self.screen.rows)));
+                clampIdx(&self.modal_cursor, cands.len);
+                const r = self.modalRect(layout.modal.accept_pick_w, @intCast(@min(cands.len + 4, self.screen.rows)));
                 const inner = self.screen.pane(r, .{ .title = "SEND WHICH COMPANY · [Enter] choose · [←/→] columns · [Esc] cancel", .double = true, .right_title = "readiest first" });
                 if (cands.len == 0) self.screen.lines(inner, &.{"{d}no companies to send{/}"}, 0, null) else _ = try self.screen.table(al, inner, try q.tableOf(al, q.candidates_cols, cands), 0, self.modal_cursor, &self.modal_colscroll);
             },
@@ -1876,8 +1891,8 @@ pub const App = struct {
                 var rows: std.ArrayListUnmanaged([]const u8) = .empty;
                 for (lances) |lc| try rows.append(al, lc.text);
                 if (lances.len == 0) try rows.append(al, "{d}no lances — the hull must belong to a company that is home{/}");
-                if (self.modal_cursor >= lances.len and lances.len > 0) self.modal_cursor = lances.len - 1;
-                const r = self.modalRect(84, @intCast(@min(rows.items.len + 3, self.screen.rows)));
+                clampIdx(&self.modal_cursor, lances.len);
+                const r = self.modalRect(layout.modal.lance_pick_w, @intCast(@min(rows.items.len + 3, self.screen.rows)));
                 const inner = self.screen.pane(r, .{ .title = try std.fmt.allocPrint(al, "MOVE #{d} TO · [Enter] choose · [Esc] cancel", .{@intFromEnum(uid)}), .double = true, .right_title = ":newlance co:N <name> adds a lance" });
                 self.screen.lines(inner, rows.items, firstRow(self.modal_cursor, inner.h), if (lances.len > 0) self.modal_cursor else null);
             },
@@ -1889,8 +1904,8 @@ pub const App = struct {
                     try std.fmt.allocPrint(al, "{{d}}paid from the HQ treasury ({s} C) when the project starts · paperwork is admin_command staffing, +2 days per missing finance admin{{/}}", .{try q.money(al, q.balance(g, .{ .hq = hid }))}),
                     "{d}every level raises the staff the HQ must keep on payroll; understaffed HQs run a level lower{/}",
                 };
-                if (self.modal_cursor >= rows_v.len and rows_v.len > 0) self.modal_cursor = rows_v.len - 1;
-                const r = self.modalRect(@min(self.screen.cols, 140), @intCast(@min(rows_v.len + 1 + notes.len + 2, self.screen.rows)));
+                clampIdx(&self.modal_cursor, rows_v.len);
+                const r = self.modalRect(layout.modal.upgrade_w, @intCast(@min(rows_v.len + 1 + notes.len + 2, self.screen.rows)));
                 const inner = self.screen.pane(r, .{ .title = try std.fmt.allocPrint(al, "UPGRADE · {s} · [Enter] start · [←/→] columns · [Esc] cancel", .{q.hqName(g, hid)}), .double = true, .right_title = "one project per facility at a time" });
                 const th: u16 = @intCast(@min(rows_v.len + 1, inner.h));
                 _ = try self.screen.table(al, .{ .x = inner.x, .y = inner.y, .w = inner.w, .h = th }, try q.tableOf(al, q.upgrade_cols, rows_v), 0, if (rows_v.len > 0) self.modal_cursor else null, &self.modal_colscroll);
@@ -1901,7 +1916,7 @@ pub const App = struct {
                 if (form.selectable > 0 and !form.rows[self.settings_cursor].active) self.settingsMove(1);
                 var rows: std.ArrayListUnmanaged([]const u8) = .empty;
                 for (form.rows, 0..) |row, i| try rows.append(al, if (i == self.settings_cursor and row.active) try std.fmt.allocPrint(al, "{{a}}▶{{/}}{s}", .{row.text[1..]}) else row.text);
-                const r = self.modalRect(@min(self.screen.cols, 104), @intCast(@min(rows.items.len + 2, self.screen.rows)));
+                const r = self.modalRect(layout.modal.settings_w, @intCast(@min(rows.items.len + 2, self.screen.rows)));
                 const inner = self.screen.pane(r, .{ .title = "SETTINGS · j/k row · ← → change · [Enter] act · [Esc] close", .double = true });
                 self.screen.lines(inner, rows.items, 0, if (form.selectable > 0) self.settings_cursor else null);
             },
@@ -1909,8 +1924,8 @@ pub const App = struct {
                 const cands = try q.installCandidates(al, &self.gs.?, uid);
                 var rows: std.ArrayListUnmanaged([]const u8) = .empty;
                 for (cands) |c| try rows.append(al, c.text);
-                if (self.modal_cursor >= cands.len and cands.len > 0) self.modal_cursor = cands.len - 1;
-                const r = self.modalRect(100, @intCast(@min(cands.len + 3, self.screen.rows)));
+                clampIdx(&self.modal_cursor, cands.len);
+                const r = self.modalRect(layout.modal.install_part_w, @intCast(@min(cands.len + 3, self.screen.rows)));
                 const inner = self.screen.pane(r, .{ .title = "INSTALL · pick a part · [Enter] choose location · [Esc] cancel", .double = true, .right_title = "stock at the home HQ first" });
                 self.screen.lines(inner, rows.items, firstRow(self.modal_cursor, inner.h), if (cands.len > 0) self.modal_cursor else null);
             },
@@ -1920,50 +1935,10 @@ pub const App = struct {
                 try rows.append(al, try std.fmt.allocPrint(al, "  {{a}}{s}{{/}} — where does it go?", .{il.part}));
                 try rows.append(al, "");
                 for (locs) |l| try rows.append(al, l.text);
-                if (self.modal_cursor >= locs.len and locs.len > 0) self.modal_cursor = locs.len - 1;
-                const r = self.modalRect(90, @intCast(@min(rows.items.len + 3, self.screen.rows)));
+                clampIdx(&self.modal_cursor, locs.len);
+                const r = self.modalRect(layout.modal.install_loc_w, @intCast(@min(rows.items.len + 3, self.screen.rows)));
                 const inner = self.screen.pane(r, .{ .title = "INSTALL · pick a location · [Enter] stage · [Esc] cancel", .double = true });
                 self.screen.lines(inner, rows.items, 0, if (locs.len > 0) self.modal_cursor + 2 else null);
-            },
-            .sell_unit => |uid| {
-                const g = &self.gs.?;
-                // Strip for parts (12D.2): what the warehouse would get.
-                const quote = try q.sellQuote(al, g, uid);
-                const rows = [_][]const u8{
-                    "",
-                    if (quote) |qq| try std.fmt.allocPrint(al, "  Sell {{a}}#{d} {s}{{/}} for {{g}}{s}{{/}} C? Half value scaled by condition; the crew goes to the pool.", .{ @intFromEnum(uid), qq.chassis_key, try q.money(al, qq.value) }) else "  no such hull",
-                    try std.fmt.allocPrint(al, "  Or strip it for parts into the home warehouse: {{a}}{s}{{/}}", .{if (quote) |qq| qq.strip_text else "nothing worth keeping"}),
-                    "",
-                    "  {s} [y] sell {/}   {s} [s] strip {/}   {d}[Esc] keep{/}",
-                };
-                const inner = self.screen.pane(self.modalRect(110, 8), .{ .title = "SELL OR STRIP HULL? · [y] sell · [s] strip · [Esc] keep", .double = true });
-                self.screen.lines(inner, &rows, 0, null);
-            },
-            .sell_hq => |hid| {
-                const g = &self.gs.?;
-                const quote = q.hqSaleQuote(g, hid);
-                const rows = [_][]const u8{
-                    "",
-                    if (quote) |qq| try std.fmt.allocPrint(al, "  Sell off {{a}}{s}{{/}} for {{g}}{s}{{/}} C (40% of build cost + its treasury)?", .{ qq.name, try q.money(al, qq.value) }) else "  no such HQ",
-                    "  Staff posted there become unassigned; its stock, board, bay work and links are lost.",
-                    "  Companies must be assigned elsewhere first (:assignco co:N hq:M).",
-                    "",
-                    "  {s} [y] sell {/}   {d}[Esc] keep{/}",
-                };
-                const inner = self.screen.pane(self.modalRect(96, 9), .{ .title = "SELL HQ? · [y] sell · [Esc] keep", .double = true });
-                self.screen.lines(inner, &rows, 0, null);
-            },
-            .disband => |fid| {
-                const g = &self.gs.?;
-                const rows = [_][]const u8{
-                    "",
-                    try std.fmt.allocPrint(al, "  Disband {{a}}{s}{{/}}? Every hull under it sells for about {{g}}{s}{{/}} C and everyone in it is released.", .{ q.forceName(g, fid), try q.money(al, q.disbandQuote(g, fid)) }),
-                    "  This cannot be undone.",
-                    "",
-                    "  {s} [y] disband {/}   {d}[Esc] keep{/}",
-                };
-                const inner = self.screen.pane(self.modalRect(100, 8), .{ .title = "DISBAND COMPANY? · [y] disband · [Esc] keep", .double = true });
-                self.screen.lines(inner, &rows, 0, null);
             },
             .game_over => {
                 const g = &self.gs.?;
@@ -1976,22 +1951,11 @@ pub const App = struct {
                     "",
                     "  {s} [Enter] return to the welcome screen {/}",
                 };
-                const inner = self.screen.pane(self.modalRect(100, 10), .{ .title = "BANKRUPT — GAME OVER", .double = true });
-                self.screen.lines(inner, &rows, 0, null);
+                self.dialog("BANKRUPT — GAME OVER", &rows, layout.modal.game_over_w, layout.modal.game_over_h);
             },
-            .fire => |id| {
-                const g = &self.gs.?;
-                const name = try q.personName(al, g, id);
-                const rows = [_][]const u8{
-                    "",
-                    try std.fmt.allocPrint(al, "  Fire {{c}}{s}{{/}}? They leave the outfit today; their seat opens.", .{name}),
-                    try std.fmt.allocPrint(al, "  Severance owed: {{a}}{d}{{/}} c-bills (half of a month per year served).", .{q.severanceOwed(g, id, true)}),
-                    "",
-                    "  {s} [y] fire {/}   {d}[Esc] keep{/}",
-                };
-                const r = self.modalRect(74, 8);
-                const inner = self.screen.pane(r, .{ .title = "FIRE? · [y] fire · [Esc] keep", .double = true });
-                self.screen.lines(inner, &rows, 0, null);
+            .confirm => |c| {
+                const spec = try self.confirmSpec(c);
+                self.dialog(spec.title, spec.rows, spec.w, spec.h);
             },
             .seat => |id| {
                 const g = &self.gs.?;
@@ -1999,8 +1963,8 @@ pub const App = struct {
                 var rows: std.ArrayListUnmanaged([]const u8) = .empty;
                 for (seats) |s| try rows.append(al, s.text);
                 if (seats.len == 0) try rows.append(al, "{d}no open seat for this role{/}");
-                if (self.modal_cursor >= seats.len and seats.len > 0) self.modal_cursor = seats.len - 1;
-                const r = self.modalRect(80, @intCast(@min(seats.len + 4, 30)));
+                clampIdx(&self.modal_cursor, seats.len);
+                const r = self.modalRect(layout.modal.seat_w, @intCast(@min(seats.len + 4, layout.modal.seat_max_h)));
                 const inner = self.screen.pane(r, .{ .title = try std.fmt.allocPrint(al, "ASSIGN {s} · [Enter] take seat · [Esc] cancel", .{try q.personName(al, g, id)}), .double = true, .right_title = "open seats for their role" });
                 self.screen.lines(inner, rows.items, firstRow(self.modal_cursor, inner.h), if (seats.len > 0) self.modal_cursor else null);
             },
@@ -2010,8 +1974,8 @@ pub const App = struct {
                 for (self.logos) |l| try rows.append(al, try std.fmt.allocPrint(al, "picture  {s}", .{l}));
                 try rows.append(al, "editor   {a}draw your own{/} — a 3 × 8 text crest, cell by cell");
                 const n = rows.items.len;
-                if (self.modal_cursor >= n) self.modal_cursor = n - 1;
-                const r = self.modalRect(80, @intCast(@min(n + 4, 30)));
+                clampIdx(&self.modal_cursor, n);
+                const r = self.modalRect(layout.modal.emblem_w, @intCast(@min(n + 4, layout.modal.emblem_max_h)));
                 const inner = self.screen.pane(r, .{ .title = "EMBLEM · [Enter] use · [Esc] cancel", .double = true, .right_title = try std.fmt.allocPrint(al, "pictures from {s}", .{try std.mem.join(al, ", ", self.asset_roots.logos)}) });
                 self.screen.lines(inner, rows.items, firstRow(self.modal_cursor, inner.h), self.modal_cursor);
             },
@@ -2035,13 +1999,13 @@ pub const App = struct {
                 try rows.append(al, "  type a character to paint the cell and step right · arrows move · Space blanks");
                 try rows.append(al, "  Backspace steps back and blanks · u undoes everything since the editor opened");
                 try rows.append(al, "  {d}[Enter] save as the outfit's crest · [Esc] cancel{/}");
-                const r = self.modalRect(78, @intCast(rows.items.len + 2));
+                const r = self.modalRect(layout.modal.emblem_editor_w, @intCast(rows.items.len + 2));
                 const inner = self.screen.pane(r, .{ .title = "EMBLEM EDITOR · cells", .double = true, .right_title = "left: editing · right: as shown" });
                 self.screen.lines(inner, rows.items, 0, null);
             },
             .hull => |uid| {
                 const detail = try q.hull(al, &self.gs.?, uid);
-                const r = self.modalRect(@min(self.screen.cols, 100), @intCast(@min(detail.len + 3, self.screen.rows)));
+                const r = self.modalRect(layout.modal.hull_w, @intCast(@min(detail.len + 3, self.screen.rows)));
                 const inner = self.screen.pane(r, .{ .title = "HULL · [Esc] close", .double = true });
                 self.screen.lines(inner, detail, 0, null);
             },
@@ -2053,7 +2017,7 @@ pub const App = struct {
                 var i: usize = all.len;
                 while (i > 0) : (i -= 1) try rows.append(al, all[i - 1]);
                 if (rows.items.len == 0) try rows.append(al, "{d}nothing logged for this contract yet{/}");
-                const r = self.modalRect(self.screen.cols -| 4, self.screen.rows -| 2);
+                const r = self.modalRect(self.screen.cols, self.screen.rows -| 2);
                 const inner = self.screen.pane(r, .{ .title = try std.fmt.allocPrint(al, "CONTRACT [{d}] LOG · j/k PgUp/PgDn scroll · G end · [Esc] close", .{@intFromEnum(cid)}), .double = true, .right_title = try std.fmt.allocPrint(al, "{d} lines · oldest first", .{rows.items.len}) });
                 const max_first = rows.items.len -| inner.h;
                 if (self.modal_cursor > max_first) self.modal_cursor = max_first;
@@ -2061,7 +2025,7 @@ pub const App = struct {
             },
             .record => |pid| {
                 const rec = try q.personRecord(al, &self.gs.?, pid);
-                const r = self.modalRect(@min(self.screen.cols, 100), @intCast(@min(rec.len + 3, self.screen.rows)));
+                const r = self.modalRect(layout.modal.record_w, @intCast(@min(rec.len + 3, self.screen.rows)));
                 const inner = self.screen.pane(r, .{ .title = "RECORD · [Esc] close", .double = true });
                 self.screen.lines(inner, rec, 0, null);
             },
@@ -2082,7 +2046,7 @@ pub const App = struct {
                     "",
                     "  {d}[Enter] confirm · [Esc] cancel{/}",
                 };
-                const r = self.modalRect(80, 8);
+                const r = self.modalRect(layout.modal.input_w, layout.modal.input_h);
                 const inner = self.screen.pane(r, .{ .title = switch (kind) {
                     .new_player => "NEW PLAYER",
                     .delete_campaign => "DELETE CAMPAIGN?",
@@ -2104,6 +2068,18 @@ pub const App = struct {
             .wizard => try self.handleWizardKey(key),
             .game => try self.handleGameKey(key),
         }
+    }
+
+    /// Keep an index inside a list that was rebuilt this frame (rule 23):
+    /// past the end lands on the last row, an empty list on 0.
+    fn clampIdx(i: *usize, len: usize) void {
+        if (len == 0) i.* = 0 else if (i.* >= len) i.* = len - 1;
+    }
+
+    /// Open a modal with its cursor at the top.
+    fn openModal(self: *App, m: Modal) void {
+        self.modal_cursor = 0;
+        self.modal = m;
     }
 
     fn moveCursor(self: *App, pane: u8, delta: i32, len: usize) void {
@@ -2443,11 +2419,11 @@ pub const App = struct {
             .backtab => self.focus = (self.focus + self.paneCount() - 1) % self.paneCount(),
             .down => try self.screenMove(1),
             .up => try self.screenMove(-1),
-            .left => if (self.tab == .map) try self.mapMove(-1, 0) else if (self.focus_scroll) |sc| {
-                sc.* -|= 1;
+            .left => if (self.tab == .map) try self.mapMove(-1, 0) else if (self.focus_scroll) |pane| {
+                self.colScroll(pane).* -|= 1;
             },
-            .right => if (self.tab == .map) try self.mapMove(1, 0) else if (self.focus_scroll) |sc| {
-                sc.* += 1;
+            .right => if (self.tab == .map) try self.mapMove(1, 0) else if (self.focus_scroll) |pane| {
+                self.colScroll(pane).* += 1;
             },
             .pgdn => try self.screenMove(10),
             .pgup => try self.screenMove(-10),
@@ -2598,8 +2574,7 @@ pub const App = struct {
                 if (self.focus == 0 and view.board.len > 0) {
                     // Always choose in the open (play feedback): the picker ranks
                     // the companies readiest first and says who cannot go.
-                    self.modal_cursor = 0;
-                    self.modal = .{ .accept_pick = view.board[@min(self.cur(0).*, view.board.len - 1)].index };
+                    self.openModal(.{ .accept_pick = view.board[@min(self.cur(0).*, view.board.len - 1)].index });
                 } else if (self.focus == 1 and view.active.len > 0) {
                     // The whole log, full screen (play feedback: the side pane clipped it).
                     self.modal_cursor = std.math.maxInt(usize) / 2; // open at the latest entry
@@ -2637,19 +2612,16 @@ pub const App = struct {
                 const hallv = try q.hall(al, g, id, self.hall_filter);
                 if (hallv.rows.len == 0) return;
                 const row = hallv.rows[@min(self.cur(1).*, hallv.rows.len - 1)];
-                try self.exec(.{ .hire_candidate = row.index });
-                self.say(.good, "hired candidate [{d}]", .{row.index});
+                _ = try self.execSay(.{ .hire_candidate = row.index }, .good, "hired candidate [{d}]", .{row.index});
             },
             .map => self.switchTab(.contracts),
             .lab => {
                 const uid = (try self.labUnit()) orelse return;
-                try self.exec(.{ .refit_commit = uid });
-                if (self.msg.len == 0 or self.msg_style != .crit) self.say(.good, "refit committed — it is a bay job at the home HQ: HQ screen (F7) lists the bays, queued and running, with days left", .{});
+                _ = try self.execSay(.{ .refit_commit = uid }, .good, "refit committed — it is a bay job at the home HQ: HQ screen (F7) lists the bays, queued and running, with days left", .{});
             },
             .people => {
                 const id = (try self.selectedPerson()) orelse return;
-                self.modal_cursor = 0;
-                self.modal = .{ .seat = id };
+                self.openModal(.{ .seat = id });
             },
             .market => {
                 const view = try q.market(al, g, self.market_filter, @enumFromInt(self.hqSelId(g)));
@@ -2657,9 +2629,10 @@ pub const App = struct {
                 switch (self.focus) {
                     0 => if (view.board.len > 0) {
                         const l = view.board[@min(self.cur(0).*, view.board.len - 1)];
-                        try self.exec(.{ .buy_listing = l.index });
-                        if (self.msg.len == 0 or self.msg_style != .crit) {
-                            if (l.transport) self.say(.good, "bought listing [{d}] — berthed at {s}; hire a ship crew from the hall and it lifts the next deployment", .{ l.index, q.hqName(g, hq_id) }) else self.say(.good, "bought listing [{d}]", .{l.index});
+                        if (l.transport) {
+                            _ = try self.execSay(.{ .buy_listing = l.index }, .good, "bought listing [{d}] — berthed at {s}; hire a ship crew from the hall and it lifts the next deployment", .{ l.index, q.hqName(g, hq_id) });
+                        } else {
+                            _ = try self.execSay(.{ .buy_listing = l.index }, .good, "bought listing [{d}]", .{l.index});
                         }
                     },
                     1 => if (view.catalog.len > 0) {
@@ -2707,8 +2680,7 @@ pub const App = struct {
                 'e' => {
                     self.logos = &.{};
                     try self.loadLogoList();
-                    self.modal_cursor = 0;
-                    self.modal = .emblem;
+                    self.openModal(.emblem);
                 },
                 else => {},
             },
@@ -2726,16 +2698,13 @@ pub const App = struct {
                         self.openCommand(std.fmt.bufPrint(&buf, "train {d} {s}", .{ @intFromEnum(id), @tagName(row.primary_skill) }) catch "train ");
                     },
                     'a' => {
-                        self.modal_cursor = 0;
-                        self.modal = .{ .seat = id };
+                        self.openModal(.{ .seat = id });
                     },
                     'P' => {
-                        self.modal_cursor = 0;
-                        self.modal = .{ .pick_hq = id };
+                        self.openModal(.{ .pick_hq = id });
                     },
                     'x' => {
-                        self.modal_cursor = 0;
-                        self.modal = .{ .pick_company = .{ .what = .person, .id = @intFromEnum(id) } };
+                        self.openModal(.{ .pick_company = .{ .what = .person, .id = @intFromEnum(id) } });
                     },
                     'L' => self.openAmount(try std.fmt.allocPrint(al, "LEAVE · {s}", .{try q.personName(al, g, id)}), .{ .leave = id }, &.{
                         .{ .label = "days", .value = 7, .min = 1, .max = 90, .step = 1 },
@@ -2743,11 +2712,10 @@ pub const App = struct {
                     'T' => self.openAmount(try std.fmt.allocPrint(al, "TRIAGE · {s} (higher heals first)", .{try q.personName(al, g, id)}), .{ .triage = id }, &.{
                         .{ .label = "priority", .value = 1, .min = 0, .max = 9, .step = 1 },
                     }),
-                    'D' => self.modal = .{ .fire = id },
+                    'D' => self.modal = .{ .confirm = .{ .kind = .fire, .id = @intFromEnum(id) } },
                     'r' => self.modal = .{ .record = id },
                     'm' => {
-                        try self.exec(.{ .admit = id });
-                        self.say(.good, "{s} admitted to the medbay — healing starts tomorrow", .{try q.personName(al, g, id)});
+                        _ = try self.execSay(.{ .admit = id }, .good, "{s} admitted to the medbay — healing starts tomorrow", .{try q.personName(al, g, id)});
                     },
                     else => {},
                 }
@@ -2785,8 +2753,7 @@ pub const App = struct {
                     const pol = try q.stockPolicies(al, g, hq_id);
                     if (pol.len == 0) return;
                     const r = pol[@min(self.cur(3).*, pol.len - 1)];
-                    try self.exec(.{ .set_stock_policy = .{ .hq = hq_id, .part_key = r.key, .min = 0, .target = 0 } });
-                    if (self.msg_style != .crit) self.say(.good, "keep-stocked line for {s} removed", .{r.key});
+                    _ = try self.execSay(.{ .set_stock_policy = .{ .hq = hq_id, .part_key = r.key, .min = 0, .target = 0 } }, .good, "keep-stocked line for {s} removed", .{r.key});
                 },
                 'K' => {
                     const view = try q.market(al, g, self.market_filter, @enumFromInt(self.hqSelId(g)));
@@ -2822,8 +2789,7 @@ pub const App = struct {
                             self.say(.dim, "that offer has had its negotiation round — take it or leave it", .{});
                             return;
                         }
-                        self.modal_cursor = 0;
-                        self.modal = .{ .negotiate = idx };
+                        self.openModal(.{ .negotiate = idx });
                     }
                     return;
                 }
@@ -2835,18 +2801,15 @@ pub const App = struct {
                             self.say(.dim, "no contract to complete — [R] recalls the company", .{});
                             return;
                         }
-                        try self.exec(.{ .complete_contract = sel.id });
-                        self.say(.good, "contract [{d}] closed out", .{@intFromEnum(sel.id)});
+                        _ = try self.execSay(.{ .complete_contract = sel.id }, .good, "contract [{d}] closed out", .{@intFromEnum(sel.id)});
                     },
                     'R' => {
-                        const under_contract = sel.id != .none;
-                        try self.exec(.{ .recall_company = sel.company });
-                        if (self.msg_style == .crit) return;
-                        if (under_contract) {
-                            self.say(.amber, "{s} recalled under the breach clause: advance clawed back, remaining pay forfeited, reputation −2", .{q.forceName(g, sel.company)});
-                        } else {
-                            self.say(.good, "{s} is coming home", .{q.forceName(g, sel.company)});
+                        // Under contract the recall is a breach: confirm it first.
+                        if (sel.id != .none) {
+                            self.modal = .{ .confirm = .{ .kind = .recall_breach, .id = @intFromEnum(sel.company) } };
+                            return;
                         }
+                        _ = try self.execSay(.{ .recall_company = sel.company }, .good, "{s} is coming home", .{q.forceName(g, sel.company)});
                     },
                     else => {},
                 }
@@ -2886,13 +2849,11 @@ pub const App = struct {
                     }
                     const label = try q.treasuryLabel(al, g, sel);
                     if (q.policyFor(g, sel) != null) {
-                        try self.exec(.{ .set_policy = .{ .entity = sel, .floor = 0, .monthly_cap = 0 } });
-                        if (self.msg_style != .crit) self.say(.good, "cash top-up policy for {s} cleared", .{label});
+                        _ = try self.execSay(.{ .set_policy = .{ .entity = sel, .floor = 0, .monthly_cap = 0 } }, .good, "cash top-up policy for {s} cleared", .{label});
                         return;
                     }
                     if (sel == .company and q.supplyPolicyFor(g, sel.company) != null) {
-                        try self.exec(.{ .set_supply_policy = .{ .company = sel.company, .min_days = 0, .tons = 0 } });
-                        if (self.msg_style != .crit) self.say(.good, "resupply policy for {s} cleared", .{label});
+                        _ = try self.execSay(.{ .set_supply_policy = .{ .company = sel.company, .min_days = 0, .tons = 0 } }, .good, "resupply policy for {s} cleared", .{label});
                         return;
                     }
                     self.say(.dim, "{s} has no standing policy", .{label});
@@ -2922,22 +2883,19 @@ pub const App = struct {
                             self.say(.dim, "put the cursor on a hull to crew it", .{});
                             return;
                         }
-                        self.modal_cursor = 0;
-                        self.modal = .{ .pick_crew = r.unit };
+                        self.openModal(.{ .pick_crew = r.unit });
                     },
                     'u' => if (row) |r| {
                         if (r.unit == .none) {
                             self.say(.dim, "put the cursor on a hull to clear its seat or tech", .{});
                             return;
                         }
-                        self.modal_cursor = 0;
-                        self.modal = .{ .pick_unassign = r.unit };
+                        self.openModal(.{ .pick_unassign = r.unit });
                     },
                     'A' => if (row) |r| {
                         const co = r.company;
                         if (co != .none) {
-                            try self.exec(.{ .auto_assign = co });
-                            self.say(.good, "auto-assigned {s}", .{q.forceName(g, co)});
+                            _ = try self.execSay(.{ .auto_assign = co }, .good, "auto-assigned {s}", .{q.forceName(g, co)});
                         }
                     },
                     'c' => if (row) |r| {
@@ -2984,24 +2942,21 @@ pub const App = struct {
                             self.say(.dim, "put the cursor on a company to raise its air wing", .{});
                             return;
                         }
-                        try self.exec(.{ .raise_air_company = co });
-                        if (self.msg.len == 0 or self.msg_style != .crit) self.say(.good, "{s} has an air wing — fighters go in its air lances (Market: aero filter; :newlance co:N air <name> adds a lance)", .{q.forceName(g, co)});
+                        _ = try self.execSay(.{ .raise_air_company = co }, .good, "{s} has an air wing — fighters go in its air lances (Market: aero filter; :newlance co:N air <name> adds a lance)", .{q.forceName(g, co)});
                     },
                     'x' => if (row) |r| {
                         if (r.unit == .none) {
                             self.say(.dim, "put the cursor on a hull to send it to another company", .{});
                             return;
                         }
-                        self.modal_cursor = 0;
-                        self.modal = .{ .pick_company = .{ .what = .unit, .id = @intFromEnum(r.unit) } };
+                        self.openModal(.{ .pick_company = .{ .what = .unit, .id = @intFromEnum(r.unit) } });
                     },
                     'l' => if (row) |r| {
                         if (r.unit == .none) {
                             self.say(.dim, "put the cursor on a hull to move it into a lance", .{});
                             return;
                         }
-                        self.modal_cursor = 0;
-                        self.modal = .{ .lance_pick = r.unit };
+                        self.openModal(.{ .lance_pick = r.unit });
                     },
                     '+', '=' => {
                         // An HQ with a free combat-company slot: the selected one if it has room, else the first that does.
@@ -3041,7 +2996,7 @@ pub const App = struct {
                         if (res.mothballed orelse false) self.say(.good, "#{d} mothballed — 20% upkeep, no maintenance wear, no crew needed", .{@intFromEnum(r.unit)}) else self.say(.good, "#{d} reactivating — tech-days before it can fight or move", .{@intFromEnum(r.unit)});
                     },
                     '$' => if (row) |r| {
-                        if (r.unit != .none) self.modal = .{ .sell_unit = r.unit };
+                        if (r.unit != .none) self.modal = .{ .confirm = .{ .kind = .sell_unit, .id = @intFromEnum(r.unit) } };
                     },
                     'd' => if (row) |r| {
                         if (r.unit != .none) {
@@ -3075,7 +3030,7 @@ pub const App = struct {
                     },
                     'X' => if (row) |r| {
                         const co = r.company;
-                        if (co != .none) self.modal = .{ .disband = co };
+                        if (co != .none) self.modal = .{ .confirm = .{ .kind = .disband, .id = @intFromEnum(co) } };
                     },
                     'R' => if (row) |r| {
                         if (r.unit != .none) {
@@ -3096,8 +3051,7 @@ pub const App = struct {
                         }
                         const co = r.company;
                         if (co == .none) return;
-                        try self.exec(.{ .recall_idle = co });
-                        if (self.msg_style != .crit) self.say(.good, "{s} is coming home", .{q.forceName(g, co)});
+                        _ = try self.execSay(.{ .recall_idle = co }, .good, "{s} is coming home", .{q.forceName(g, co)});
                     },
                     else => {},
                 }
@@ -3107,8 +3061,7 @@ pub const App = struct {
                 var buf: [128]u8 = undefined;
                 switch (ch) {
                     'o' => {
-                        self.modal_cursor = 0;
-                        self.modal = .{ .pick_part = .{ .purpose = .order, .site = site orelse q.defaultSite(g) } };
+                        self.openModal(.{ .pick_part = .{ .purpose = .order, .site = site orelse q.defaultSite(g) } });
                     },
                     's' => {
                         // Ship from the home shelf: a company row means its home HQ's stores.
@@ -3116,9 +3069,7 @@ pub const App = struct {
                             .company => |id| .{ .hq = @enumFromInt(self.homeHqOf(id)) },
                             else => s,
                         } else q.defaultSite(g);
-                        self.supply_ship_to = if (site) |s2| (if (s2 == .company) s2.company else null) else null;
-                        self.modal_cursor = 0;
-                        self.modal = .{ .pick_part = .{ .purpose = .ship, .site = from } };
+                        self.openModal(.{ .pick_part = .{ .purpose = .ship, .site = from, .ship_to = if (site) |s2| (if (s2 == .company) s2.company else null) else null } });
                     },
                     't' => {
                         const s2 = site orelse return self.say(.dim, "put the cursor on a company or HQ row to send it cash", .{});
@@ -3162,12 +3113,10 @@ pub const App = struct {
                         });
                     },
                     'K' => {
-                        self.modal_cursor = 0;
-                        self.modal = .{ .pick_part = .{ .purpose = .keep, .site = if (site) |s| (if (s == .hq) s else q.defaultSite(g)) else q.defaultSite(g) } };
+                        self.openModal(.{ .pick_part = .{ .purpose = .keep, .site = if (site) |s| (if (s == .hq) s else q.defaultSite(g)) else q.defaultSite(g) } });
                     },
                     '$' => {
-                        self.modal_cursor = 0;
-                        self.modal = .{ .pick_part = .{ .purpose = .sell, .site = if (site) |s| (if (s == .hq) s else q.defaultSite(g)) else q.defaultSite(g) } };
+                        self.openModal(.{ .pick_part = .{ .purpose = .sell, .site = if (site) |s| (if (s == .hq) s else q.defaultSite(g)) else q.defaultSite(g) } });
                     },
                     'R' => {
                         const co: types.ForceId = if (site) |s| (if (s == .company) s.company else .none) else .none;
@@ -3229,23 +3178,19 @@ pub const App = struct {
                                     return;
                                 }
                             };
-                            try self.exec(.{ .upgrade_facility = .{ .hq = hid, .kind = kind } });
-                            if (self.msg_style != .crit) self.say(.good, "{s} upgrade started — paperwork first, then construction; watch PROJECTS", .{@tagName(kind)});
+                            _ = try self.execSay(.{ .upgrade_facility = .{ .hq = hid, .kind = kind } }, .good, "{s} upgrade started — paperwork first, then construction; watch PROJECTS", .{@tagName(kind)});
                             return;
                         }
-                        self.modal_cursor = 0;
-                        self.modal = .{ .upgrade = hid };
+                        self.openModal(.{ .upgrade = hid });
                     },
                     'S' => {
-                        try self.exec(.{ .autostaff = @enumFromInt(self.hqSelId(g)) });
-                        self.say(.good, "back office staffed to requirement", .{});
+                        _ = try self.execSay(.{ .autostaff = @enumFromInt(self.hqSelId(g)) }, .good, "back office staffed to requirement", .{});
                     },
                     'T' => {
                         // Field HQ → regional (the footer and the tier line promised this key).
                         const hid: types.HqId = @enumFromInt(self.hqSelId(g));
                         const name = try al.dupe(u8, q.hqName(g, hid));
-                        try self.exec(.{ .upgrade_tier = hid });
-                        if (self.msg_style != .crit) self.say(.good, "{s} → regional HQ: paperwork first, then construction — watch PROJECTS; S autostaff when it lands", .{name});
+                        _ = try self.execSay(.{ .upgrade_tier = hid }, .good, "{s} → regional HQ: paperwork first, then construction — watch PROJECTS; S autostaff when it lands", .{name});
                     },
                     'h' => {
                         self.focus = 1;
@@ -3262,10 +3207,9 @@ pub const App = struct {
                         self.cur(1).* = 0;
                     },
                     'b' => {
-                        self.modal_cursor = 0;
-                        self.modal = .{ .pick_part = .{ .purpose = .fabricate, .site = .{ .hq = @enumFromInt(self.hqSelId(g)) } } };
+                        self.openModal(.{ .pick_part = .{ .purpose = .fabricate, .site = .{ .hq = @enumFromInt(self.hqSelId(g)) } } });
                     },
-                    '$' => self.modal = .{ .sell_hq = @enumFromInt(self.hqSelId(g)) },
+                    '$' => self.modal = .{ .confirm = .{ .kind = .sell_hq, .id = self.hqSelId(g) } },
                     else => {},
                 }
             },
@@ -3298,12 +3242,10 @@ pub const App = struct {
                     '[' => self.lab_sel = (self.lab_sel + meks.len - 1) % meks.len,
                     '-' => if (view.mounts.len > 0) {
                         const m = view.mounts[@min(self.cur(0).*, view.mounts.len - 1)];
-                        try self.exec(.{ .refit_remove = .{ .unit = uid, .slot_key = m.slot_key } });
-                        if (self.msg_style != .crit) self.say(.good, "staged: remove {s} — Enter commits the plan to a bay, c clears it", .{m.slot_key});
+                        _ = try self.execSay(.{ .refit_remove = .{ .unit = uid, .slot_key = m.slot_key } }, .good, "staged: remove {s} — Enter commits the plan to a bay, c clears it", .{m.slot_key});
                     },
                     '+' => {
-                        self.modal_cursor = 0;
-                        self.modal = .{ .install_part = uid };
+                        self.openModal(.{ .install_part = uid });
                     },
                     'R' => if (view.mounts.len > 0) {
                         const m = view.mounts[@min(self.cur(0).*, view.mounts.len - 1)];
@@ -3314,12 +3256,10 @@ pub const App = struct {
                         self.say(.good, "ordered 1 × {s} to {s}; techs fit it on the next repair pass once it lands", .{ m.part_key, q.hqName(g, res.hq) });
                     },
                     'c' => {
-                        try self.exec(.{ .refit_clear = uid });
-                        if (self.msg_style != .crit) self.say(.good, "#{d}: refit plan cleared", .{@intFromEnum(uid)});
+                        _ = try self.execSay(.{ .refit_clear = uid }, .good, "#{d}: refit plan cleared", .{@intFromEnum(uid)});
                     },
                     'D' => {
-                        try self.exec(.{ .depot = uid });
-                        if (self.msg.len == 0 or self.msg_style != .crit) self.say(.good, "#{d} queued for depot repair — see the HQ screen's bays", .{@intFromEnum(uid)});
+                        _ = try self.execSay(.{ .depot = uid }, .good, "#{d} queued for depot repair — see the HQ screen's bays", .{@intFromEnum(uid)});
                     },
                     else => {},
                 }
@@ -3368,7 +3308,7 @@ pub const App = struct {
             .none => "half-block",
         }, if (self.screen.truecolor) "24-bit" else "256", if (self.screen.ascii) "ascii" else "box-drawing" }));
         try info.add(&rows, al, try std.fmt.allocPrint(al, "  {{d}}data         {s} · `zig build -Ddata=<dir>` overlays data/*.zon — docs/modding.md{{/}}", .{try game.lobby.dataProvenance(al)}));
-        if (self.settings_cursor >= rows.items.len) self.settings_cursor = 0;
+        clampIdx(&self.settings_cursor, rows.items.len);
         return .{ .rows = try rows.toOwnedSlice(al), .selectable = selectable };
     }
 
@@ -3395,8 +3335,7 @@ pub const App = struct {
                 if (dir > 0) m.skip() else m.back();
             },
             .soundtrack => {
-                self.modal_cursor = 0;
-                self.modal = .music;
+                self.openModal(.music);
             },
             .auto_admit => try self.toggleAutoAdmit(),
             .difficulty => try self.cycleDifficulty(if (dir > 0) 1 else -1),
@@ -3571,8 +3510,8 @@ pub const App = struct {
 
     fn drawPick(self: *App, al: std.mem.Allocator) !void {
         const v = try self.pickView(al);
-        if (self.modal_cursor >= v.rows.len and v.rows.len > 0) self.modal_cursor = v.rows.len - 1;
-        const r = self.modalRect(@min(self.screen.cols, 120), @intCast(@min(v.rows.len + 4, self.screen.rows)));
+        clampIdx(&self.modal_cursor, v.rows.len);
+        const r = self.modalRect(layout.modal.picker_w, @intCast(@min(v.rows.len + 4, self.screen.rows)));
         const inner = self.screen.pane(r, .{ .title = v.title, .double = true, .right_title = "best first · dimmed rows say why not · [←/→] columns" });
         if (v.rows.len == 0) {
             self.screen.lines(inner, &.{try std.fmt.allocPrint(al, "{{d}}{s}{{/}}", .{v.empty})}, 0, null);
@@ -3611,21 +3550,17 @@ pub const App = struct {
                     };
                     self.say(.good, "#{d} sent to {s}{s}", .{ pc.id, q.forceName(g, co), if (res.in_transit) " — in transit" else " — placed" });
                 } else {
-                    try self.exec(.{ .transfer_person = .{ .person = @enumFromInt(pc.id), .to_force = co } });
-                    if (self.msg_style != .crit) self.say(.good, "{s} transferred to {s}", .{ try q.personName(al, g, @enumFromInt(pc.id)), q.forceName(g, co) });
+                    _ = try self.execSay(.{ .transfer_person = .{ .person = @enumFromInt(pc.id), .to_force = co } }, .good, "{s} transferred to {s}", .{ try q.personName(al, g, @enumFromInt(pc.id)), q.forceName(g, co) });
                 }
             },
             .pick_hq => |pid| {
-                try self.exec(.{ .post_person = .{ .person = pid, .hq = @enumFromInt(row.id) } });
-                if (self.msg_style != .crit) self.say(.good, "{s} posted to {s}", .{ try q.personName(al, g, pid), q.hqName(g, @enumFromInt(row.id)) });
+                _ = try self.execSay(.{ .post_person = .{ .person = pid, .hq = @enumFromInt(row.id) } }, .good, "{s} posted to {s}", .{ try q.personName(al, g, pid), q.hqName(g, @enumFromInt(row.id)) });
             },
             .pick_crew => |uid| {
-                try self.exec(.{ .assign = .{ .unit = uid, .slot = row.slot, .person = @enumFromInt(row.id) } });
-                if (self.msg_style != .crit) self.say(.good, "{s} assigned as {s} of #{d}", .{ try q.personName(al, g, @enumFromInt(row.id)), @tagName(row.slot), @intFromEnum(uid) });
+                _ = try self.execSay(.{ .assign = .{ .unit = uid, .slot = row.slot, .person = @enumFromInt(row.id) } }, .good, "{s} assigned as {s} of #{d}", .{ try q.personName(al, g, @enumFromInt(row.id)), @tagName(row.slot), @intFromEnum(uid) });
             },
             .pick_unassign => |uid| {
-                try self.exec(.{ .unassign = .{ .unit = uid, .slot = row.slot } });
-                if (self.msg_style != .crit) self.say(.good, "#{d}: {s} cleared", .{ @intFromEnum(uid), if (row.slot == .any) "pilot and tech" else @tagName(row.slot) });
+                _ = try self.execSay(.{ .unassign = .{ .unit = uid, .slot = row.slot } }, .good, "#{d}: {s} cleared", .{ @intFromEnum(uid), if (row.slot == .any) "pilot and tech" else @tagName(row.slot) });
             },
             .pick_part => |pp| {
                 const on_hand: i64 = row.on_hand;
@@ -3637,18 +3572,16 @@ pub const App = struct {
                     .ship => switch (pp.site) {
                         .hq => |hid| {
                             // Where to: a company row already said; an HQ row asks.
-                            if (self.supply_ship_to) |co| {
-                                self.supply_ship_to = null;
+                            if (pp.ship_to) |co| {
                                 self.openAmount(try std.fmt.allocPrint(al, "SHIP {s} TO {s}", .{ key, q.forceName(g, co) }), .{ .ship = .{ .from = @intFromEnum(hid), .to = co, .key = key } }, &.{
                                     .{ .label = "quantity", .value = @min(on_hand, 10), .min = 1, .max = on_hand, .step = 5 },
                                 });
                             } else {
-                                self.modal_cursor = 0;
                                 var pc: @TypeOf(self.modal.pick_company) = .{ .what = .stock, .id = @intFromEnum(hid) };
                                 const kn = @min(key.len, pc.key_buf.len);
                                 @memcpy(pc.key_buf[0..kn], key[0..kn]);
                                 pc.key_len = @intCast(kn);
-                                self.modal = .{ .pick_company = pc };
+                                self.openModal(.{ .pick_company = pc });
                             }
                         },
                         else => self.say(.amber, "ship from an HQ shelf: put the cursor on an HQ or a company row", .{}),
@@ -3718,12 +3651,129 @@ pub const App = struct {
         self.say(.good, "day {d} · {s}", .{ st.day, st.date });
     }
 
-    fn exec(self: *App, cmd: Command) !void {
+    /// Run a command; a refusal becomes the status line. Returns whether it ran.
+    fn exec(self: *App, cmd: Command) !bool {
         const g = &self.gs.?;
         _ = game.commands.execute(g, cmd) catch |err| {
             self.say(.crit, "refused: {s}", .{game.cli.errorText(err)});
-            return;
+            return false;
         };
+        return true;
+    }
+
+    /// Run a command and report it: the refusal sentence on failure, `fmt`
+    /// on success (rule 20: the guard lives here, not at the call sites).
+    fn execSay(self: *App, cmd: Command, style: Style, comptime fmt: []const u8, args: anytype) !bool {
+        if (!try self.exec(cmd)) return false;
+        self.say(style, fmt, args);
+        return true;
+    }
+
+    /// The body, size and command of a confirm dialog.
+    fn confirmSpec(self: *App, c: Confirm) !ConfirmSpec {
+        const al = self.a();
+        const g = &self.gs.?;
+        switch (c.kind) {
+            .fire => {
+                const id: types.PersonId = @enumFromInt(c.id);
+                const name = try q.personName(al, g, id);
+                return .{
+                    .title = "FIRE? · [y] fire · [Esc] keep",
+                    .rows = try al.dupe([]const u8, &.{
+                        "",
+                        try std.fmt.allocPrint(al, "  Fire {{c}}{s}{{/}}? They leave the outfit today; their seat opens.", .{name}),
+                        try std.fmt.allocPrint(al, "  Severance owed: {{a}}{d}{{/}} c-bills (half of a month per year served).", .{q.severanceOwed(g, id, true)}),
+                        "",
+                        "  {s} [y] fire {/}   {d}[Esc] keep{/}",
+                    }),
+                    .w = layout.modal.confirm_w,
+                    .h = 8,
+                    .cmd = .{ .fire = id },
+                    .done = try std.fmt.allocPrint(al, "{s} has left the outfit", .{name}),
+                };
+            },
+            .sell_unit => {
+                const uid: types.UnitId = @enumFromInt(c.id);
+                // Strip for parts (12D.2): what the warehouse would get.
+                const quote = try q.sellQuote(al, g, uid);
+                return .{
+                    .title = "SELL OR STRIP HULL? · [y] sell · [s] strip · [Esc] keep",
+                    .rows = try al.dupe([]const u8, &.{
+                        "",
+                        if (quote) |qq| try std.fmt.allocPrint(al, "  Sell {{a}}#{d} {s}{{/}} for {{g}}{s}{{/}} C? Half value scaled by condition; the crew goes to the pool.", .{ c.id, qq.chassis_key, try q.money(al, qq.value) }) else "  no such hull",
+                        try std.fmt.allocPrint(al, "  Or strip it for parts into the home warehouse: {{a}}{s}{{/}}", .{if (quote) |qq| qq.strip_text else "nothing worth keeping"}),
+                        "",
+                        "  {s} [y] sell {/}   {s} [s] strip {/}   {d}[Esc] keep{/}",
+                    }),
+                    .w = layout.modal.confirm_wide_w,
+                    .h = 8,
+                    .cmd = .{ .sell_unit = uid },
+                    .done = try std.fmt.allocPrint(al, "hull #{d} sold", .{c.id}),
+                    .alt = .{ .key = 's', .cmd = .{ .strip_unit = uid }, .done = try std.fmt.allocPrint(al, "hull #{d} stripped for parts — the Supply screen shows the crates", .{c.id}) },
+                };
+            },
+            .sell_hq => {
+                const hid: types.HqId = @enumFromInt(c.id);
+                const quote = q.hqSaleQuote(g, hid);
+                return .{
+                    .title = "SELL HQ? · [y] sell · [Esc] keep",
+                    .rows = try al.dupe([]const u8, &.{
+                        "",
+                        if (quote) |qq| try std.fmt.allocPrint(al, "  Sell off {{a}}{s}{{/}} for {{g}}{s}{{/}} C (40% of build cost + its treasury)?", .{ qq.name, try q.money(al, qq.value) }) else "  no such HQ",
+                        "  Staff posted there become unassigned; its stock, board, bay work and links are lost.",
+                        "  Companies must be assigned elsewhere first (:assignco co:N hq:M).",
+                        "",
+                        "  {s} [y] sell {/}   {d}[Esc] keep{/}",
+                    }),
+                    .w = layout.modal.confirm_w,
+                    .h = 9,
+                    .cmd = .{ .sell_hq = hid },
+                    .done = "HQ sold off",
+                };
+            },
+            .disband => {
+                const fid: types.ForceId = @enumFromInt(c.id);
+                return .{
+                    .title = "DISBAND COMPANY? · [y] disband · [Esc] keep",
+                    .rows = try al.dupe([]const u8, &.{
+                        "",
+                        try std.fmt.allocPrint(al, "  Disband {{a}}{s}{{/}}? Every hull under it sells for about {{g}}{s}{{/}} C and everyone in it is released.", .{ q.forceName(g, fid), try q.money(al, q.disbandQuote(g, fid)) }),
+                        "  This cannot be undone.",
+                        "",
+                        "  {s} [y] disband {/}   {d}[Esc] keep{/}",
+                    }),
+                    .w = layout.modal.confirm_w,
+                    .h = 8,
+                    .cmd = .{ .disband_company = fid },
+                    .done = "company disbanded",
+                };
+            },
+            .recall_breach => {
+                const co: types.ForceId = @enumFromInt(c.id);
+                return .{
+                    .title = "RECALL UNDER CONTRACT? · [y] recall · [Esc] keep",
+                    .rows = try al.dupe([]const u8, &.{
+                        "",
+                        try std.fmt.allocPrint(al, "  Recall {{a}}{s}{{/}} from its contract? That is a breach: the employer keeps the balance and standing falls.", .{q.forceName(g, co)}),
+                        "",
+                        "  {s} [y] recall {/}   {d}[Esc] keep{/}",
+                    }),
+                    .w = layout.modal.confirm_w,
+                    .h = 7,
+                    .cmd = .{ .recall_company = co },
+                    .done = try std.fmt.allocPrint(al, "{s} recalled — breach clause applies", .{q.forceName(g, co)}),
+                };
+            },
+        }
+    }
+
+    /// Client state a confirmed command invalidates.
+    fn afterConfirm(self: *App, c: Confirm) void {
+        switch (c.kind) {
+            .sell_hq => self.hq_sel = 0,
+            .disband => self.cur(0).* = 0,
+            else => {},
+        }
     }
 
     fn handleModalKey(self: *App, key: Key) !void {
@@ -3857,8 +3907,7 @@ pub const App = struct {
                         self.raise.lance_idx = if (ch == ']') (self.raise.lance_idx + 1) % lances.len else (self.raise.lance_idx + lances.len - 1) % lances.len;
                     },
                     'n' => {
-                        self.modal_cursor = 0;
-                        self.modal = .raise_support;
+                        self.openModal(.raise_support);
                     },
                     else => {},
                 },
@@ -3984,8 +4033,7 @@ pub const App = struct {
                     }
                     self.modal = .none;
                     const lift = try q.liftText(self.a(), g, c.company);
-                    try self.exec(.{ .accept_contract = .{ .offer_index = oi, .company = c.company } });
-                    if (self.msg.len == 0 or self.msg_style != .crit) self.say(.good, "accepted — {s} is on its way, {d} days out{s}{s}", .{ q.forceName(g, c.company), c.transit_days, if (lift.len > 0) " · " else "", lift });
+                    _ = try self.execSay(.{ .accept_contract = .{ .offer_index = oi, .company = c.company } }, .good, "accepted — {s} is on its way, {d} days out{s}{s}", .{ q.forceName(g, c.company), c.transit_days, if (lift.len > 0) " · " else "", lift });
                 },
                 .char => |ch| switch (ch) {
                     'j' => self.modal_cursor +|= 1,
@@ -4003,8 +4051,7 @@ pub const App = struct {
                     if (lances.len == 0) return;
                     const lc = lances[@min(self.modal_cursor, lances.len - 1)];
                     self.modal = .none;
-                    try self.exec(.{ .move_unit = .{ .unit = uid, .force = lc.force } });
-                    if (self.msg_style != .crit) self.say(.good, "#{d} moved to {s}", .{ @intFromEnum(uid), lc.name });
+                    _ = try self.execSay(.{ .move_unit = .{ .unit = uid, .force = lc.force } }, .good, "#{d} moved to {s}", .{ @intFromEnum(uid), lc.name });
                 },
                 .char => |ch| switch (ch) {
                     'j' => self.modal_cursor +|= 1,
@@ -4028,8 +4075,7 @@ pub const App = struct {
                         return;
                     }
                     self.modal = .none;
-                    try self.exec(.{ .upgrade_facility = .{ .hq = hid, .kind = r.kind } });
-                    if (self.msg_style != .crit) self.say(.good, "{s} upgrade started — paperwork first, then construction; watch PROJECTS", .{@tagName(r.kind)});
+                    _ = try self.execSay(.{ .upgrade_facility = .{ .hq = hid, .kind = r.kind } }, .good, "{s} upgrade started — paperwork first, then construction; watch PROJECTS", .{@tagName(r.kind)});
                 },
                 .char => |ch| switch (ch) {
                     'j' => self.modal_cursor +|= 1,
@@ -4057,8 +4103,7 @@ pub const App = struct {
                     '>' => if (self.music) |*m| m.skip(),
                     '<' => if (self.music) |*m| m.back(),
                     't', 'T' => {
-                        self.modal_cursor = 0;
-                        self.modal = .music;
+                        self.openModal(.music);
                     },
                     'd', 'D' => try self.cycleDifficulty(1),
                     'a', 'A' => try self.toggleAutoAdmit(),
@@ -4124,8 +4169,7 @@ pub const App = struct {
                     const cands = try q.installCandidates(self.a(), &self.gs.?, uid);
                     if (cands.len == 0) return;
                     const c = cands[@min(self.modal_cursor, cands.len - 1)];
-                    self.modal = .{ .install_loc = .{ .unit = uid, .part = c.key } };
-                    self.modal_cursor = 0;
+                    self.openModal(.{ .install_loc = .{ .unit = uid, .part = c.key } });
                 },
                 .char => |ch| switch (ch) {
                     'j' => self.modal_cursor +|= 1,
@@ -4136,8 +4180,7 @@ pub const App = struct {
             },
             .install_loc => |il| switch (key) {
                 .escape => {
-                    self.modal = .{ .install_part = il.unit };
-                    self.modal_cursor = 0;
+                    self.openModal(.{ .install_part = il.unit });
                 },
                 .down => self.modal_cursor +|= 1,
                 .up => self.modal_cursor -|= 1,
@@ -4150,8 +4193,7 @@ pub const App = struct {
                         return;
                     }
                     self.modal = .none;
-                    try self.exec(.{ .refit_install = .{ .unit = il.unit, .location = l.location, .part_key = il.part } });
-                    self.say(.good, "staged: install {s} in {s} — Enter in the Lab commits it to a bay", .{ il.part, @tagName(l.location) });
+                    _ = try self.execSay(.{ .refit_install = .{ .unit = il.unit, .location = l.location, .part_key = il.part } }, .good, "staged: install {s} in {s} — Enter in the Lab commits it to a bay", .{ il.part, @tagName(l.location) });
                 },
                 .char => |ch| switch (ch) {
                     'j' => self.modal_cursor +|= 1,
@@ -4160,46 +4202,17 @@ pub const App = struct {
                 },
                 else => {},
             },
-            .sell_unit => |uid| switch (key) {
+            .confirm => |c| switch (key) {
                 .escape => self.modal = .none,
-                .char => |ch| if (ch == 'y') {
-                    self.modal = .none;
-                    try self.exec(.{ .sell_unit = uid });
-                    self.say(.amber, "hull #{d} sold", .{@intFromEnum(uid)});
-                } else if (ch == 's') {
-                    self.modal = .none;
-                    try self.exec(.{ .strip_unit = uid });
-                    if (self.msg_style != .crit) self.say(.amber, "hull #{d} stripped for parts — the Supply screen shows the crates", .{@intFromEnum(uid)});
-                },
-                else => {},
-            },
-            .sell_hq => |hid| switch (key) {
-                .escape => self.modal = .none,
-                .char => |ch| if (ch == 'y') {
-                    self.modal = .none;
-                    try self.exec(.{ .sell_hq = hid });
-                    self.hq_sel = 0;
-                    self.say(.amber, "HQ sold off", .{});
-                },
-                else => {},
-            },
-            .disband => |fid| switch (key) {
-                .escape => self.modal = .none,
-                .char => |ch| if (ch == 'y') {
-                    self.modal = .none;
-                    try self.exec(.{ .disband_company = fid });
-                    self.cur(0).* = 0;
-                    self.say(.amber, "company disbanded", .{});
-                },
-                else => {},
-            },
-            .fire => |id| switch (key) {
-                .escape => self.modal = .none,
-                .char => |ch| if (ch == 'y') {
-                    self.modal = .none;
-                    const name = try q.personName(self.a(), &self.gs.?, id);
-                    try self.exec(.{ .fire = id });
-                    self.say(.amber, "{s} has left the outfit", .{name});
+                .char => |ch| {
+                    const spec = try self.confirmSpec(c);
+                    if (ch == 'y') {
+                        self.modal = .none;
+                        if (try self.execSay(spec.cmd, .amber, "{s}", .{spec.done})) self.afterConfirm(c);
+                    } else if (spec.alt) |alt| if (ch == alt.key) {
+                        self.modal = .none;
+                        if (try self.execSay(alt.cmd, .amber, "{s}", .{alt.done})) self.afterConfirm(c);
+                    };
                 },
                 else => {},
             },
@@ -4212,8 +4225,7 @@ pub const App = struct {
                     self.modal = .none;
                     if (seats.len == 0) return;
                     const s = seats[@min(self.modal_cursor, seats.len - 1)];
-                    try self.exec(.{ .assign = .{ .unit = s.unit, .slot = s.slot, .person = id } });
-                    self.say(.good, "assigned as {s} of #{d}", .{ @tagName(s.slot), @intFromEnum(s.unit) });
+                    _ = try self.execSay(.{ .assign = .{ .unit = s.unit, .slot = s.slot, .person = id } }, .good, "assigned as {s} of #{d}", .{ @tagName(s.slot), @intFromEnum(s.unit) });
                 },
                 .char => |ch| switch (ch) {
                     'j' => self.modal_cursor +|= 1,
@@ -4261,8 +4273,7 @@ pub const App = struct {
                 .char => |ch| if (ch >= '1' and ch <= '9') {
                     const choice: usize = ch - '1';
                     self.modal = .none;
-                    try self.exec(.{ .resolve_decision = .{ .event_index = idx, .choice = choice } });
-                    self.say(.good, "decision recorded", .{});
+                    _ = try self.execSay(.{ .resolve_decision = .{ .event_index = idx, .choice = choice } }, .good, "decision recorded", .{});
                 },
                 else => {},
             },
@@ -4341,8 +4352,7 @@ pub const App = struct {
                 self.raise.company = r.created_force;
                 self.raise.lance_idx = 0;
                 self.raise.passed_len = 0;
-                self.modal_cursor = 0;
-                self.modal = .raise_hulls;
+                self.openModal(.raise_hulls);
                 self.say(.good, "{s} raised at {s} — empty lances: pick hulls from the pool and every board", .{ text, q.hqName(g, self.raise.hq) });
             },
             .command => try self.runCommandLine(text),
@@ -4427,8 +4437,7 @@ pub const App = struct {
             return;
         }
         if (eq(u8, verb, "music")) {
-            self.modal_cursor = 0;
-            self.modal = .music;
+            self.openModal(.music);
             return;
         }
         if (eq(u8, verb, "readiness")) {
@@ -4444,8 +4453,7 @@ pub const App = struct {
         }
         if (eq(u8, verb, "emblem")) {
             try self.loadLogoList();
-            self.modal_cursor = 0;
-            self.modal = .emblem;
+            self.openModal(.emblem);
             return;
         }
         const cmd = game.cli.parseCommand(verb, &tokens) catch |err| {
@@ -4453,9 +4461,7 @@ pub const App = struct {
             return;
         };
         if (cmd) |c| {
-            self.msg.len = 0; // a refusal of the same length as the last message is still a refusal
-            try self.exec(c);
-            if (self.msg.len == 0) self.say(.good, "done: {s}", .{verb});
+            _ = try self.execSay(c, .good, "done: {s}", .{verb});
         } else {
             self.say(.amber, "unknown verb '{s}' — see ? for the list, or use the CLI (--repl) for the rest", .{verb});
         }
