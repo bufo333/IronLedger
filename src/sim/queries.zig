@@ -4803,10 +4803,10 @@ pub fn outcomeMark(outcome: @import("autoresolve.zig").Outcome) []const u8 {
 
 pub fn battleList(alloc: Alloc, gs: *GameState) ![]BattleRow {
     var out: std.ArrayListUnmanaged(BattleRow) = .empty;
-    var i: usize = gs.battle_reports.items.len;
+    var i: usize = gs.battle_reports.kept.items.len;
     while (i > 0) {
         i -= 1;
-        const r = &gs.battle_reports.items[i];
+        const r = &gs.battle_reports.kept.items[i];
         const crew = if (r.kia + r.wounded + @as(u8, @intCast(@min(r.missing, 255))) == 0)
             "{g}all in{/}"
         else
@@ -4831,7 +4831,7 @@ pub fn battleList(alloc: Alloc, gs: *GameState) ![]BattleRow {
 /// the source; `after_action.render` is still the only place a battle
 /// becomes prose (rule 5).
 pub fn battleReport(alloc: Alloc, gs: *GameState, id: types.BattleId) !?[]const []const u8 {
-    const r = gs.battleReport(id) orelse return null;
+    const r = gs.battle_reports.find(id) orelse return null;
     const plain = try @import("after_action.zig").render(alloc, r);
     var out: std.ArrayListUnmanaged([]const u8) = .empty;
     for (plain) |line| {
