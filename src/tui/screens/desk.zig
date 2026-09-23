@@ -13,7 +13,7 @@ pub fn draw(self: *App) anyerror!void {
     const al = self.a();
     const g = &self.gs.?;
     const b = self.body();
-    const view = try q.desk(al, g, 40);
+    const view = try q.desk(al, g, q.desk_log_rows);
 
     const top_h: u16 = @max(8, layout.minor.of(b.h));
     const emblem_w: u16 = if (b.w >= layout.emblem_cols) 44 else 0;
@@ -80,7 +80,7 @@ pub fn draw(self: *App) anyerror!void {
 pub fn move(self: *App, delta: i32) anyerror!void {
     const al = self.a();
     const g = &self.gs.?;
-        const view = try q.desk(al, g, 40);
+        const view = try q.desk(al, g, q.desk_log_rows);
         switch (self.focus) {
             0 => self.moveCursor(0, delta, view.checklist.len),
             1 => self.moveCursor(1, delta, self.inboxRowCount(view)),
@@ -92,12 +92,15 @@ pub fn move(self: *App, delta: i32) anyerror!void {
 pub fn enter(self: *App) anyerror!void {
     const al = self.a();
     const g = &self.gs.?;
-        const view = try q.desk(al, g, 40);
+        const view = try q.desk(al, g, q.desk_log_rows);
         if (self.focus == 0 and view.checklist.len > 0) {
             const w = view.checklist[@min(self.cur(0).*, view.checklist.len - 1)];
             self.switchTab(@enumFromInt(w.jump));
         } else if (self.focus == 1) {
             if (self.inboxEventAtCursor(view)) |idx| self.modal = .{ .decision = idx };
+        } else if (view.log.len > 0) {
+            // The LOG pane clips; the modal wraps the whole entry.
+            self.openModal(.{ .log_entry = @min(self.cur(2).*, view.log.len - 1) });
         }
 
 }
