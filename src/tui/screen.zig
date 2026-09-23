@@ -450,14 +450,9 @@ pub fn wrap(alloc: std.mem.Allocator, s: []const u8, width: usize) ![]const []co
     return out.toOwnedSlice(alloc);
 }
 
-/// Progress bar text: `#` filled, `-` empty.
-pub fn bar(buf: []u8, num: i64, den: i64) []const u8 {
-    const width = buf.len;
-    const filled: usize = if (den <= 0) 0 else @intCast(@min(@as(i64, @intCast(width)), @divTrunc(@max(0, num) * @as(i64, @intCast(width)), den)));
-    @memset(buf[0..filled], '#');
-    @memset(buf[filled..], '-');
-    return buf;
-}
+/// Progress bar text (`table.bar` is the one definition, as `visibleLen`
+/// is for cell counting).
+pub const bar = table_mod.bar;
 
 test "text clips to width and honours markup" {
     var s = try Screen.init(std.testing.allocator, 10, 2);
@@ -500,12 +495,6 @@ test "blit fits a square image at a 2:1 cell aspect and emits pixel cells" {
     var w = std.Io.Writer.fixed(&buf);
     try s.flush(&w);
     try std.testing.expect(std.mem.indexOf(u8, w.buffered(), "38;2;255;0;0") != null);
-}
-
-test "bar fills proportionally" {
-    var buf: [10]u8 = undefined;
-    try std.testing.expectEqualStrings("#####-----", bar(&buf, 50, 100));
-    try std.testing.expectEqualStrings("----------", bar(&buf, 0, 0));
 }
 
 test "wrap breaks on spaces and carries an open colour across lines" {
