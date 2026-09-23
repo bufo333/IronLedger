@@ -173,36 +173,37 @@ One predicate each; every listed site calls it.
 
 ---
 
-## D10. REPL printers become query loops (rule 14)
+## D10. REPL printers become query loops (rule 14) — PR #14
 
 Every `print*` in `src/main.zig` that walks `GameState` (59 sites) is a loop over the query named here; the four already on queries stay.
-- [ ] `printLab` :326 → `queries.lab`
-- [ ] `printContracts` :387 → `queries.contracts`; its inline warnings (:398-414) → `checklist.turnWarnings`
-- [ ] `printHqs` :417 → `queries.hqDetail` + `upgrades`
-- [ ] `printOffers` :444 → `queries.contracts` board rows
-- [ ] `printToe` :467, `printForce` :488, `forceBv` :514 → `queries.toe` / `toeFiltered`
-- [ ] `printSupplies` :552, `printStockLines` :588 → `queries.supply` / `stockTable`; provisions math (:565-578) gone
-- [ ] `printDemand` :599 → `componentDemand` + `spareDemand` (D5)
-- [ ] `personName` :649 (leaks) → D7 helper
-- [ ] `printCompanyRoster` :656 → `queries.manning` + `toeFiltered` + `crewChoices`
-- [ ] `printHqRoster` :704, `printBays` :777, `printProjects` :797, `printStaff` :816 → `queries.hqDetail`
-- [ ] `printMedbay` :732 → `queries.people(.wounded)`
-- [ ] `printChecklist` :766 → `queries.desk`
-- [ ] `printInbox` :839 → `queries.desk` inbox rows
-- [ ] `printLog` :874 → `queries.logRow`
-- [ ] `printTreasuries` :888, `treasuryName` :908 → `queries.allTreasuries` / `treasuryLabel`
-- [ ] `printPnl` :930 → `queries.ledger`
-- [ ] `printStatus` :945 → `queries.status`
-- [ ] `printRoster` :953 → `queries.people`
-- [ ] `printCampaigns` :59, `printResult` :1275, `runDemo` :76, `runRepl` :972: keep as application code, but their state reads move to queries or `Result` fields: runDemo :105-126 (offers, contracts), :238 (listings), :301-311 (units, spares); printResult :1281 (contracts), :1288 (person), :1300-1305 (orders, log).
-- [ ] `parseTreasury` (~925) and `parseSite` (~833) are a second token parser → `cli.parseSite` / `cli.parseTreasury` (rule 6).
-- [ ] `page_allocator` in main.zig printers (:60, :337, :527, :541, :602, :651, :859) → one REPL arena.
-- [ ] `totalHullUpkeep` :867 → `state.monthlyHullUpkeep()` surfaced on `queries.status` (D4).
-- [ ] `printMedbay` :742 `doctors * 25` → `medical.doctorCover()`.
-- [ ] New queries the REPL needs and the TUI will share: `hqList`, `bays`, `projects`, `backOffice`, `companyRoster`, `medbay`, `log(n, filter)`, `hqLinks`.
-- [ ] 11 raw `{d} c-bills` prints → `queries.money`.
+- [x] `printLab` :326 → `queries.lab`
+- [x] `printContracts` :387 → `queries.contracts`; its inline warnings (:398-414) → `checklist.turnWarnings`
+- [x] `printHqs` :417 → `queries.hqDetail` + `upgrades`
+- [x] `printOffers` :444 → `queries.contracts` board rows
+- [x] `printToe` :467, `printForce` :488, `forceBv` :514 → `queries.toe` / `toeFiltered`
+- [x] `printSupplies` :552, `printStockLines` :588 → `queries.supply` / `stockTable`; provisions math (:565-578) gone
+- [x] `printDemand` :599 → `componentDemand` + `spareDemand` (D5)
+- [x] `personName` :649 (leaks) → D7 helper
+- [x] `printCompanyRoster` :656 → `queries.manning` + `toeFiltered` + `crewChoices`
+- [x] `printHqRoster` :704, `printBays` :777, `printProjects` :797, `printStaff` :816 → `queries.hqDetail`
+- [x] `printMedbay` :732 → `queries.people(.wounded)`
+- [x] `printChecklist` :766 → `queries.desk`
+- [x] `printInbox` :839 → `queries.desk` inbox rows
+- [x] `printLog` :874 → `queries.logRow`
+- [x] `printTreasuries` :888, `treasuryName` :908 → `queries.allTreasuries` / `treasuryLabel`
+- [x] `printPnl` :930 → `queries.ledger`
+- [x] `printStatus` :945 → `queries.status`
+- [x] `printRoster` :953 → `queries.people`
+- [x] `printCampaigns` :59, `printResult` :1275, `runDemo` :76, `runRepl` :972: keep as application code, but their state reads move to queries or `Result` fields: runDemo :105-126 (offers, contracts), :238 (listings), :301-311 (units, spares); printResult :1281 (contracts), :1288 (person), :1300-1305 (orders, log).
+- [x] `parseTreasury` (~925) and `parseSite` (~833) are a second token parser → `cli.parseSite` / `cli.parseTreasury` (rule 6).
+- [x] `page_allocator` in main.zig printers (:60, :337, :527, :541, :602, :651, :859) → one REPL arena.
+- [x] `totalHullUpkeep` :867 → `state.monthlyHullUpkeep()` surfaced on `queries.status` (D4).
+- [x] `printMedbay` :742 `doctors * 25` → `medical.doctorCover()`.
+- [x] New queries the REPL needs and the TUI will share: `hqList`, `bays`, `projects`, `backOffice`, `companyRoster`, `medbay`, `log(n, filter)`, `hqLinks`.
+- [x] 11 raw `{d} c-bills` prints → `queries.money`.
 
 ---
+- Notes: every console view is a loop over a query (`hqList`, `hqCompanies`, `hqLinks`, `bays`, `projects`, `backOffice`, `companyRoster`, `hqRoster`, `medbay`, `logLines`, `listings`, `spareLines`, `orders`, `ledgerLines`, `pnlLines`, `contractLines`, `demandLines`, `inboxLines`, `hallAll`, plus one-line echoes); the demo script reads offers, decisions, mounts and listings through queries too. `printResult` reads only `Result` fields and echo queries. The only state reads left in `main.zig` are the save/load messages and the fresh-campaign seed. The demo runs to its golden-master hash again (it had been failing on a courier the treasury could not cover; the transfer is now reported, not fatal, and resupply orders only while on station).
 
 ## D11. TUI boundary (rules 3, 4, 5, 26)
 

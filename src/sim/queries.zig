@@ -411,6 +411,9 @@ fn companyRow(alloc: Alloc, gs: *GameState, id: types.ForceId) !table.Row {
 
 pub const OfferRow = struct {
     index: usize,
+    kind: contract_mod.ContractKind,
+    beachhead: bool,
+    planet_key: []const u8,
     cells: table.Row,
 };
 
@@ -425,6 +428,8 @@ pub const board_cols: []const table.Col = &.{
 pub const ActiveRow = struct {
     id: types.ContractId,
     company: types.ForceId,
+    /// Null on the posture rows (a company returning or idle afield has no running contract).
+    status: ?contract_mod.ContractStatus,
     lines: []const []const u8,
     objectives_met: bool,
 };
@@ -603,7 +608,7 @@ pub fn contracts(alloc: Alloc, gs: *GameState, board_hq: types.HqId) !Contracts 
     for (gs.contract_offers.items, 0..) |c, i| {
         if (board_hq != .none and c.offer_hq != .none and c.offer_hq != board_hq) continue;
         const rt = try boardRatingCells(alloc, gs, i);
-        try board.append(alloc, .{ .index = i, .cells = try table.row(alloc, &.{
+        try board.append(alloc, .{ .index = i, .kind = c.kind, .beachhead = c.beachhead, .planet_key = c.planet_key, .cells = try table.row(alloc, &.{
             c.kind.label(),
             planetName(c.planet_key),
             c.employer_key,
@@ -697,7 +702,7 @@ pub fn contracts(alloc: Alloc, gs: *GameState, board_hq: types.HqId) !Contracts 
         }
         if (c.objectivesMet()) try lines.append(alloc, "    {g}objectives met{/} — [c] complete closes out (remainder forfeited)");
         try lines.append(alloc, "");
-        try active.append(alloc, .{ .id = c.id, .company = c.assigned_company, .lines = try lines.toOwnedSlice(alloc), .objectives_met = c.objectivesMet() });
+        try active.append(alloc, .{ .id = c.id, .company = c.assigned_company, .status = c.status, .lines = try lines.toOwnedSlice(alloc), .objectives_met = c.objectivesMet() });
     }
     // Companies whose contract is over but who are still out there: they
     // idle on that world (eating from their trucks) until recalled.
@@ -715,7 +720,7 @@ pub fn contracts(alloc: Alloc, gs: *GameState, board_hq: types.HqId) !Contracts 
             else => continue,
         }
         try lines.append(alloc, "");
-        try active.append(alloc, .{ .id = .none, .company = f.id, .lines = try lines.toOwnedSlice(alloc), .objectives_met = false });
+        try active.append(alloc, .{ .id = .none, .company = f.id, .status = null, .lines = try lines.toOwnedSlice(alloc), .objectives_met = false });
     }
 
     return .{
@@ -2230,6 +2235,9 @@ fn planetMod() type {
 
 pub const PersonRow = struct {
     id: types.PersonId,
+    role: person_mod.Role,
+    xp: u32,
+    active: bool,
     cells: table.Row,
 };
 
@@ -2529,7 +2537,7 @@ pub fn people(alloc: Alloc, gs: *GameState, filter: HallFilter) !People {
         if (filter == .wounded and p.status != .wounded) continue;
         if (filter == .unassigned and !isUnassigned(gs, p)) continue;
         const name = try p.rankedName(alloc);
-        try rows.append(alloc, .{ .id = p.id, .cells = try table.row(alloc, &.{
+        try rows.append(alloc, .{ .id = p.id, .role = p.role, .xp = p.xp, .active = p.status == .active, .cells = try table.row(alloc, &.{
             try std.fmt.allocPrint(alloc, "{d}", .{@intFromEnum(p.id)}),
             name,
             @tagName(p.role),
@@ -3010,6 +3018,8 @@ const meklab = @import("../domain/meklab.zig");
 
 pub const MountRow = struct {
     slot_key: []const u8,
+    /// Where the mount sits (the `refit_install` payload for a like-for-like swap).
+    location: ?meklab.Location,
     text: []const u8,
 };
 
@@ -3201,7 +3211,7 @@ pub fn lab(alloc: Alloc, gs: *GameState, uid: types.UnitId) !Lab {
             if (s.condition == .damaged) on_hand = 1; // hours alone, no part
             repair_note = if (on_hand > 0) "  {g}part in stock — techs fit it on the next repair pass{/}" else if (on_order > 0) try std.fmt.allocPrint(alloc, "  {{a}}{d} on order{{/}}", .{on_order}) else "  {c}no part — [R] orders one{/}";
         }
-        try mounts.append(alloc, .{ .slot_key = s.slot_key, .text = try std.fmt.allocPrint(alloc, "{s}{s: <17} {s: <11} {s: <7} {d: >2}.{d}t {d: >2}c {s}{s}{{/}}{s}", .{
+        try mounts.append(alloc, .{ .slot_key = s.slot_key, .location = meklab.parseLocation(s.slot_key), .text = try std.fmt.allocPrint(alloc, "{s}{s: <17} {s: <11} {s: <7} {d: >2}.{d}t {d: >2}c {s}{s}{{/}}{s}", .{
             mk, clip(s.slot_key, 17), clip(s.part_key, 11), clip(@tagName(s.class), 7), if (part) |pd| pd.mass_half_tons / 2 else 0, if (part) |pd| (pd.mass_half_tons % 2) * 5 else 0, if (part) |pd| pd.crits else 0, @tagName(s.condition), if (removed) " (removing)" else "", repair_note,
         }) });
     }
@@ -4415,4 +4425,504 @@ test "12E.5: skulls on the board, the candidates, the active pane — and an out
         pane_ok = true;
     };
     try std.testing.expect(pane_ok);
+}
+
+
+// ------------------------------------------------------------ REPL views
+//
+// The lines the command console prints for the views the client draws
+// as panes. One query each, so the console and the client never read a
+// different rule (contract rule 14).
+
+pub const HqRow = struct {
+    id: types.HqId,
+    name: []const u8,
+    tier: []const u8,
+    world: []const u8,
+    faction: []const u8,
+    ring_ly: u32,
+    funds: types.CBills,
+    staff_assigned: u32,
+    staff_required: u32,
+    companies: u32,
+    company_cap: u32,
+    lances_cap: u32,
+    /// "hq:1 Galtor III Regional HQ (regional) on Galtor III (LC space) — ring 60 LY | companies 1/1 (≤4 lances) | funds 1,000,000"
+    title_line: []const u8,
+};
+
+/// Every HQ in one row each, in founding order.
+pub fn hqList(alloc: Alloc, gs: *GameState) ![]HqRow {
+    var out: std.ArrayListUnmanaged(HqRow) = .empty;
+    var it = gs.hqs.iterator();
+    while (it.next()) |e| {
+        const hq = e.value_ptr;
+        const world = planet_mod.find(hq.planet_key);
+        const cap = hq.capacity();
+        const row: HqRow = .{
+            .id = hq.id,
+            .name = hq.name,
+            .tier = @tagName(hq.tier),
+            .world = if (world) |w| w.name else hq.planet_key,
+            .faction = if (world) |w| w.faction else "?",
+            .ring_ly = hq.influenceLy(),
+            .funds = hq.funds,
+            .staff_assigned = hq.staff_assigned,
+            .staff_required = hq.staffRequired().total(),
+            .companies = gs.companiesAtHq(hq.id),
+            .company_cap = cap.combat_companies,
+            .lances_cap = cap.lances_per_company,
+            .title_line = "",
+        };
+        try out.append(alloc, row);
+        out.items[out.items.len - 1].title_line = try std.fmt.allocPrint(alloc, "hq:{d} {s} ({s}) on {s} ({s} space) — ring {d} LY | companies {d}/{d} (≤{d} lances) | funds {s}", .{
+            @intFromEnum(row.id), row.name, row.tier, row.world, row.faction, row.ring_ly, row.companies, row.company_cap, row.lances_cap, try money(alloc, row.funds),
+        });
+    }
+    return out.toOwnedSlice(alloc);
+}
+
+/// "co:1 Alpha (deployed)" for every company homed at an HQ.
+pub fn hqCompanies(alloc: Alloc, gs: *GameState, hq_id: types.HqId) ![]const []const u8 {
+    var out: std.ArrayListUnmanaged([]const u8) = .empty;
+    var fit = gs.forces.iterator();
+    while (fit.next()) |fe| {
+        const f = fe.value_ptr;
+        if (f.echelon != .company or f.supplying_hq != hq_id) continue;
+        try out.append(alloc, try std.fmt.allocPrint(alloc, "co:{d} {s}{s}", .{ @intFromEnum(f.id), f.name, if (gs.isCompanyDeployed(f.id)) " (deployed)" else "" }));
+    }
+    return out.toOwnedSlice(alloc);
+}
+
+/// Supply links and hulls on their way between companies, one line each.
+pub fn hqLinks(alloc: Alloc, gs: *GameState) ![]const []const u8 {
+    var out: std.ArrayListUnmanaged([]const u8) = .empty;
+    for (gs.hq_links.items) |l| {
+        try out.append(alloc, try std.fmt.allocPrint(alloc, "link hq:{d} — hq:{d} level {d}: {d}/{d} t this week, {s}/mo", .{
+            @intFromEnum(l.a), @intFromEnum(l.b), l.level, l.tons_this_week, l.capacityPerWeek(), try money(alloc, l.monthlyCost()),
+        }));
+    }
+    for (gs.unit_transfers.items) |t| {
+        try out.append(alloc, try std.fmt.allocPrint(alloc, "in transit: unit #{d} → co:{d}, arrives day {d}", .{ @intFromEnum(t.unit), @intFromEnum(t.to_company), t.eta_day }));
+    }
+    return out.toOwnedSlice(alloc);
+}
+
+/// The bay at one HQ: the occupancy line, then each job.
+pub fn bays(alloc: Alloc, gs: *GameState, hq_id: types.HqId) ![]const []const u8 {
+    const hq_ops = @import("hq_ops.zig");
+    var out: std.ArrayListUnmanaged([]const u8) = .empty;
+    const load = hq_ops.bayLoad(gs, hq_id);
+    try out.append(alloc, try std.fmt.allocPrint(alloc, "hq:{d} {s} — {d}/{d} bay slots busy, {d} queued", .{ @intFromEnum(hq_id), hqName(gs, hq_id), load.busy, hq_ops.baySlots(gs, hq_id), load.queued }));
+    for (gs.bay_jobs.items) |j| {
+        if (j.hq != hq_id) continue;
+        const what = if (j.unit != .none) (if (gs.unit(j.unit)) |u| u.chassis_key else "?") else j.item_key;
+        if (j.done_day) |d| {
+            try out.append(alloc, try std.fmt.allocPrint(alloc, "  {s: <13} {s: <10} done day {d}", .{ @tagName(j.kind), what, d }));
+        } else {
+            try out.append(alloc, try std.fmt.allocPrint(alloc, "  {s: <13} {s: <10} queued ({d} days once a slot frees)", .{ @tagName(j.kind), what, j.duration_days }));
+        }
+    }
+    return out.toOwnedSlice(alloc);
+}
+
+/// One HQ's facilities and construction queue.
+pub fn projects(alloc: Alloc, gs: *GameState, hq_id: types.HqId) ![]const []const u8 {
+    var out: std.ArrayListUnmanaged([]const u8) = .empty;
+    const hq = gs.hqs.getPtr(hq_id) orelse return out.toOwnedSlice(alloc);
+    try out.append(alloc, try std.fmt.allocPrint(alloc, "hq:{d} {s} — staff {d}/{d} | paperwork {d} days", .{
+        @intFromEnum(hq.id), hq.name, hq.staff_assigned, hq.staffRequired().total(), @import("hq_ops.zig").paperworkDaysFor(gs, hq_id),
+    }));
+    for (hq.facilities.items) |f| {
+        try out.append(alloc, try std.fmt.allocPrint(alloc, "  {s: <16} level {d} (effective {d})", .{ @tagName(f.kind), f.level, hq.effectiveFacilityLevel(f.kind) }));
+    }
+    for (hq.projects.items) |p| {
+        try out.append(alloc, try std.fmt.allocPrint(alloc, "  PROJECT {s} → level {d}: {s}, done day {d}, {s}", .{
+            @tagName(p.facility orelse .mek_bay), p.target_level, @tagName(p.phase(gs.clock.day_index)), p.construction_done_day, try money(alloc, p.cost),
+        }));
+    }
+    return out.toOwnedSlice(alloc);
+}
+
+pub const OfficeRow = struct { role: person_mod.Role, have: u32, need: u32, best_skill: u8 };
+
+/// The back office at one HQ: every admin desk, who fills it, and the
+/// requirement (`StaffRequirement.desks` is the table; transport shares
+/// the logistics desk).
+pub fn backOffice(alloc: Alloc, gs: *GameState, hq_id: types.HqId) ![]OfficeRow {
+    var out: std.ArrayListUnmanaged(OfficeRow) = .empty;
+    const hq = gs.hqs.getPtr(hq_id) orelse return out.toOwnedSlice(alloc);
+    const req = hq.staffRequired();
+    const roles = [_]struct { role: person_mod.Role, need: u32 }{
+        .{ .role = .admin_command, .need = req.admin },
+        .{ .role = .admin_logistics, .need = req.logistics / 2 },
+        .{ .role = .admin_transport, .need = req.logistics - req.logistics / 2 },
+        .{ .role = .admin_hr, .need = req.hr },
+        .{ .role = .admin_finance, .need = req.finance },
+    };
+    for (roles) |r| {
+        const s = gs.hqStaff(hq_id, r.role);
+        try out.append(alloc, .{ .role = r.role, .have = s.count, .need = r.need, .best_skill = s.best_skill });
+    }
+    return out.toOwnedSlice(alloc);
+}
+
+/// One company's hulls with their crews and techs, its techs' hours, and
+/// the crews without a seat.
+pub fn companyRoster(alloc: Alloc, gs: *GameState, co: types.ForceId) ![]const []const u8 {
+    var out: std.ArrayListUnmanaged([]const u8) = .empty;
+    const f = gs.force(co) orelse return out.toOwnedSlice(alloc);
+    const day = gs.clock.day_index;
+    try out.append(alloc, try std.fmt.allocPrint(alloc, "[{d}] {s} — hulls and crews:", .{ @intFromEnum(co), f.name }));
+    var uit = gs.units.iterator();
+    while (uit.next()) |entry| {
+        const u = entry.value_ptr;
+        if (gs.companyOf(u.force) != co or u.status == .destroyed) continue;
+        const pilot = gs.person(u.pilot);
+        const tech = gs.person(u.tech);
+        const needs_tech = unit_mod.techRoleFor(u.kind) != null;
+        var pb: [48]u8 = undefined;
+        var tb: [48]u8 = undefined;
+        try out.append(alloc, try std.fmt.allocPrint(alloc, "  #{d: <3} {s: <8} {s: <9} pilot {s: <12}{s} tech {s: <12}{s}", .{
+            @intFromEnum(u.id),                                              u.chassis_key,
+            @tagName(u.status),                                              if (pilot) |p| p.shortName(&pb) else "—",
+            if (pilot != null and pilot.?.isAvailable(day)) " " else "!",    if (!needs_tech) "n/a" else if (tech) |t| t.shortName(&tb) else "—",
+            if (needs_tech and (tech == null or !tech.?.isAvailable(day))) "!" else " ",
+        }));
+    }
+    try out.append(alloc, "  techs (load/available hours this week):");
+    var pit = gs.people.iterator();
+    while (pit.next()) |entry| {
+        const p = entry.value_ptr;
+        if (gs.companyOf(p.assigned_force) != co or !p.role.isTech()) continue;
+        try out.append(alloc, try std.fmt.allocPrint(alloc, "    #{d: <3} {s: <20} {s: <13} {d: >2}/{d: <2}h{s}", .{
+            @intFromEnum(p.id), try p.fullName(alloc), @tagName(p.role), gs.techLoadHours(p.id), gs.techHoursAvailable(p), if (!p.isAvailable(day)) " (unavailable)" else "",
+        }));
+    }
+    var pool: std.ArrayListUnmanaged(u8) = .empty;
+    var pit2 = gs.people.iterator();
+    while (pit2.next()) |entry| {
+        const p = entry.value_ptr;
+        if (gs.companyOf(p.assigned_force) != co or !p.isAvailable(day)) continue;
+        if (!p.role.isCombat() or gs.pilotSeat(p.id) != .none) continue;
+        try pool.appendSlice(alloc, try std.fmt.allocPrint(alloc, " #{d} {s} ({s})", .{ @intFromEnum(p.id), p.last_name, @tagName(p.role) }));
+    }
+    try out.append(alloc, try std.fmt.allocPrint(alloc, "  unassigned pool:{s}", .{if (pool.items.len > 0) pool.items else " none"}));
+    return out.toOwnedSlice(alloc);
+}
+
+/// One HQ's posted staff against its requirement, and the outfit's pool of
+/// people posted nowhere and assigned to no company.
+pub fn hqRoster(alloc: Alloc, gs: *GameState, hq_id: types.HqId) ![]const []const u8 {
+    var out: std.ArrayListUnmanaged([]const u8) = .empty;
+    const hq = gs.hqs.getPtr(hq_id) orelse return out.toOwnedSlice(alloc);
+    const req = hq.staffRequired();
+    try out.append(alloc, try std.fmt.allocPrint(alloc, "{s} — staff {d}/{d} (admin {d}, logistics {d}, hr {d}, finance {d} required)", .{
+        hq.name, hq.staff_assigned, req.total(), req.admin, req.logistics, req.hr, req.finance,
+    }));
+    var pit = gs.people.iterator();
+    while (pit.next()) |entry| {
+        const p = entry.value_ptr;
+        if (p.posted_hq != hq_id or !p.isOnBooks()) continue;
+        try out.append(alloc, try std.fmt.allocPrint(alloc, "  #{d: <3} {s: <20} {s: <16} {s}", .{ @intFromEnum(p.id), try p.fullName(alloc), @tagName(p.role), @tagName(p.experience()) }));
+    }
+    var pool: std.ArrayListUnmanaged(u8) = .empty;
+    var pit2 = gs.people.iterator();
+    while (pit2.next()) |entry| {
+        const p = entry.value_ptr;
+        if (p.status != .active or !gs.isUnassigned(p)) continue;
+        try pool.appendSlice(alloc, try std.fmt.allocPrint(alloc, " #{d} {s} ({s})", .{ @intFromEnum(p.id), p.last_name, @tagName(p.role) }));
+    }
+    try out.append(alloc, try std.fmt.allocPrint(alloc, "  unposted & unassigned:{s}", .{if (pool.items.len > 0) pool.items else " none"}));
+    return out.toOwnedSlice(alloc);
+}
+
+/// The medbay: patients, beds, doctors and their cover, then each patient.
+pub fn medbay(alloc: Alloc, gs: *GameState) ![]const []const u8 {
+    const medical = @import("medical.zig");
+    var out: std.ArrayListUnmanaged([]const u8) = .empty;
+    var doctors: u32 = 0;
+    var wounded: u32 = 0;
+    var pit = gs.people.iterator();
+    while (pit.next()) |entry| {
+        if (entry.value_ptr.status == .active and entry.value_ptr.role == .doctor) doctors += 1;
+        if (entry.value_ptr.status == .wounded) wounded += 1;
+    }
+    try out.append(alloc, try std.fmt.allocPrint(alloc, "medbay: {d} patients | {d} beds at home | {d} doctors (cover {d})", .{
+        wounded, medical.bedCapacity(gs, .none, false), doctors, doctors * @import("../domain/tuning.zig").t.medical.patients_per_doctor,
+    }));
+    var pit2 = gs.people.iterator();
+    while (pit2.next()) |entry| {
+        const p = entry.value_ptr;
+        if (p.status != .wounded) continue;
+        const left = if (p.wound_heal_day) |d| d -| gs.clock.day_index else 0;
+        try out.append(alloc, try std.fmt.allocPrint(alloc, "  #{d: <3} {s: <20} {s: <12} priority {d}  {d} days left{s}", .{
+            @intFromEnum(p.id), try p.fullName(alloc), @tagName(p.role), p.medbay_priority, left, if (p.wound_heal_day == null) " (awaiting triage)" else "",
+        }));
+    }
+    return out.toOwnedSlice(alloc);
+}
+
+/// The last `n` log lines matching a filter, oldest first.
+pub fn logLines(alloc: Alloc, gs: *GameState, n: usize, filter: state_mod.LogFilter) ![]const []const u8 {
+    var out: std.ArrayListUnmanaged([]const u8) = .empty;
+    const items = gs.event_log.items;
+    var start = items.len;
+    var found: usize = 0;
+    while (start > 0 and found < n) {
+        start -= 1;
+        if (items[start].matches(filter)) found += 1;
+    }
+    for (items[start..]) |*entry| {
+        if (entry.matches(filter)) try out.append(alloc, try logRow(alloc, entry));
+    }
+    return out.toOwnedSlice(alloc);
+}
+
+/// The newest log line, for a command's echo.
+pub fn lastLogLine(alloc: Alloc, gs: *GameState) !?[]const u8 {
+    if (gs.event_log.items.len == 0) return null;
+    return try logRow(alloc, &gs.event_log.items[gs.event_log.items.len - 1]);
+}
+
+/// Every listing on every board, with its index (the `buy` argument).
+pub fn listings(alloc: Alloc, gs: *GameState) ![]const []const u8 {
+    var out: std.ArrayListUnmanaged([]const u8) = .empty;
+    for (gs.market_listings.items, 0..) |l, i| {
+        if (l.condition) |c| {
+            try out.append(alloc, try std.fmt.allocPrint(alloc, "[{d}] hull  {s: <8} {s: <5} armor {d: >3}% quality {s} | {d} dmg / {d} destroyed / {d} missing comps | {s} | gone day {d}{s}", .{
+                i, l.item_key, c.label(), c.armor_pct, @tagName(c.quality), c.damaged_slots, c.destroyed_slots, c.missing_components, try money(alloc, l.price), l.expires_day,
+                if (l.company != .none) try std.fmt.allocPrint(alloc, " | contract world, co:{d} local funds", .{@intFromEnum(l.company)}) else "",
+            }));
+        } else {
+            try out.append(alloc, try std.fmt.allocPrint(alloc, "[{d}] {s: <5} {s: <16} x{d: <3} ({s}{s}) {s}", .{
+                i, @tagName(l.kind), l.item_key, l.quantity, @tagName(l.rarity), if (l.staple) ", staple" else ", RARE SLOT", try money(alloc, l.price),
+            }));
+        }
+    }
+    return out.toOwnedSlice(alloc);
+}
+
+/// The outfit's loose spares (the seat's shelf), non-zero lines only.
+pub fn spareLines(alloc: Alloc, gs: *GameState) ![]const []const u8 {
+    var out: std.ArrayListUnmanaged([]const u8) = .empty;
+    var it = gs.spare_parts.iterator();
+    while (it.next()) |entry| {
+        if (entry.value_ptr.* > 0) try out.append(alloc, try std.fmt.allocPrint(alloc, "{s} x{d}", .{ entry.key_ptr.*, entry.value_ptr.* }));
+    }
+    return out.toOwnedSlice(alloc);
+}
+
+/// Every acquisition order on the books, with its state and day.
+pub fn orders(alloc: Alloc, gs: *GameState) ![]const []const u8 {
+    var out: std.ArrayListUnmanaged([]const u8) = .empty;
+    for (gs.part_orders.items) |o| {
+        try out.append(alloc, try std.fmt.allocPrint(alloc, "{s} x{d} — {s}{s}{d}", .{
+            o.part_key, o.quantity, @tagName(o.status), if (o.eta_day != null) ", eta day " else ", day ", o.eta_day orelse o.ordered_day,
+        }));
+    }
+    return out.toOwnedSlice(alloc);
+}
+
+/// The newest order's echo: what was ordered and when it lands, or that
+/// logistics could not source it.
+pub fn lastOrderLine(alloc: Alloc, gs: *GameState) !?[]const u8 {
+    if (gs.part_orders.items.len == 0) return null;
+    const last = gs.part_orders.items[gs.part_orders.items.len - 1];
+    if (last.status == .failed) return try std.fmt.allocPrint(alloc, "logistics couldn't source {s} this time (retry after refresh)", .{last.part_key});
+    return try std.fmt.allocPrint(alloc, "ordered {s} x{d}, eta day {d}, {s}", .{ last.part_key, last.quantity, last.eta_day orelse 0, try money(alloc, last.cost) });
+}
+
+/// The last `n` transactions matching an entity filter, newest first.
+pub fn ledgerLines(alloc: Alloc, gs: *GameState, filter: finance.EntityFilter, n: usize) ![]const []const u8 {
+    var out: std.ArrayListUnmanaged([]const u8) = .empty;
+    const txns = gs.ledger.transactions.items;
+    var i = txns.len;
+    while (i > 0 and out.items.len < n) {
+        i -= 1;
+        const t = &txns[i];
+        if (!filter.matches(t)) continue;
+        try out.append(alloc, try std.fmt.allocPrint(alloc, "day {d: >4}  {s: <18} {s: >12}  {s}", .{ t.day, @tagName(t.category), try money(alloc, t.amount), t.note }));
+    }
+    return out.toOwnedSlice(alloc);
+}
+
+/// A P&L over a day range for an entity, one line per category with movement.
+pub fn pnlLines(alloc: Alloc, gs: *GameState, from_day: u32, to_day: u32, filter: finance.EntityFilter) ![]const []const u8 {
+    var out: std.ArrayListUnmanaged([]const u8) = .empty;
+    const s = finance.summarize(&gs.ledger, from_day, to_day, filter);
+    try out.append(alloc, switch (filter) {
+        .all => try std.fmt.allocPrint(alloc, "P&L (outfit-wide) days {d}-{d}:", .{ from_day, to_day }),
+        .company => |id| try std.fmt.allocPrint(alloc, "P&L company {d} days {d}-{d}:", .{ @intFromEnum(id), from_day, to_day }),
+        .hq => |id| try std.fmt.allocPrint(alloc, "P&L hq {d} days {d}-{d}:", .{ @intFromEnum(id), from_day, to_day }),
+    });
+    inline for (@typeInfo(finance.Category).@"enum".fields) |field| {
+        const cat: finance.Category = @enumFromInt(field.value);
+        const amount = s.category(cat);
+        if (amount != 0) try out.append(alloc, try std.fmt.allocPrint(alloc, "  {s: <20} {s: >14}", .{ field.name, try money(alloc, amount) }));
+    }
+    try out.append(alloc, try std.fmt.allocPrint(alloc, "  {s: <20} {s: >14}", .{ "NET", try money(alloc, s.net()) }));
+    return out.toOwnedSlice(alloc);
+}
+
+/// One person in a line, for a command's echo.
+pub fn personLine(alloc: Alloc, gs: *GameState, id: types.PersonId) !?[]const u8 {
+    const p = gs.person(id) orelse return null;
+    return try std.fmt.allocPrint(alloc, "#{d}: {s} ({s} {s}, {s}/mo)", .{ @intFromEnum(id), try p.fullName(alloc), @tagName(p.experience()), @tagName(p.role), try money(alloc, p.monthlySalary()) });
+}
+
+/// Every contract on the books in a line (offers excepted), then where
+/// each company stands if it is out and unengaged.
+pub fn contractLines(alloc: Alloc, gs: *GameState) ![]const []const u8 {
+    var out: std.ArrayListUnmanaged([]const u8) = .empty;
+    var it = gs.contracts.iterator();
+    while (it.next()) |entry| {
+        const c = entry.value_ptr;
+        const days_left: i64 = if (c.end_day) |e| @as(i64, e) - @as(i64, gs.clock.day_index) else 0;
+        const pool: []const u8 = if (c.objective == .attrition) try std.fmt.allocPrint(alloc, " — opposition {d}% destroyed ({d}/{d} BV)", .{ c.poolDestroyedPct(), c.enemy_pool_bv - c.enemy_pool_remaining, c.enemy_pool_bv }) else "";
+        try out.append(alloc, try std.fmt.allocPrint(alloc, "[{d}] {s: <17} {s: <9} co:{d} on {s} | {s} objective{s} | {d} VP | score {d} | {d} days left{s}{s}", .{
+            @intFromEnum(c.id), @tagName(c.kind), @tagName(c.status), @intFromEnum(c.assigned_company), c.planet_key, @tagName(c.objective), pool,
+            c.victory_points, c.score, @max(0, days_left),
+            if (c.ineffective_since != null) " | COMBAT-INEFFECTIVE" else "",
+            if (c.objectivesMet() and c.status == .active) " | objectives met — `complete`" else "",
+        }));
+    }
+    var fit = gs.forces.iterator();
+    while (fit.next()) |fe| {
+        const f = fe.value_ptr;
+        if (f.echelon != .company) continue;
+        switch (gs.companyPosture(f.id)) {
+            .returning => |eta| try out.append(alloc, try std.fmt.allocPrint(alloc, "  co:{d} {s} returning home, arrives day {d}", .{ @intFromEnum(f.id), f.name, eta })),
+            .idle_afield => |p| try out.append(alloc, try std.fmt.allocPrint(alloc, "  co:{d} {s} idle on {s} — accept work from the field or `recall co:{d}`", .{ @intFromEnum(f.id), f.name, planetName(p), @intFromEnum(f.id) })),
+            else => {},
+        }
+    }
+    return out.toOwnedSlice(alloc);
+}
+
+/// The newest running contract's one-line echo after `accept`.
+pub fn acceptedLine(alloc: Alloc, gs: *GameState) !?[]const u8 {
+    if (gs.contracts.count() == 0) return null;
+    const c = gs.contracts.values()[gs.contracts.count() - 1];
+    return try std.fmt.allocPrint(alloc, "under contract: {s} on {s}, {d} days transit, {s}/mo net", .{ @tagName(c.kind), planetName(c.planet_key), c.transit_days, try money(alloc, c.monthly_net) });
+}
+
+/// The candidates on every board, in one table.
+pub fn hallAll(alloc: Alloc, gs: *GameState, filter: HallFilter) ![]const []const u8 {
+    var out: std.ArrayListUnmanaged([]const u8) = .empty;
+    var it = gs.hqs.iterator();
+    while (it.next()) |e| {
+        const h = try hall(alloc, gs, e.value_ptr.id, filter);
+        if (h.rows.len == 0) continue;
+        try out.append(alloc, try std.fmt.allocPrint(alloc, "hq:{d} {s} ({d} on the board)", .{ @intFromEnum(e.value_ptr.id), e.value_ptr.name, h.total_at_hq }));
+        for (try (try tableOf(alloc, hall_cols, h.rows)).render(alloc)) |ln| try out.append(alloc, try std.fmt.allocPrint(alloc, "  {s}", .{ln}));
+    }
+    return out.toOwnedSlice(alloc);
+}
+
+/// The inbox as the console prints it: every pending decision and its options.
+pub fn inboxLines(alloc: Alloc, gs: *GameState) ![]const []const u8 {
+    var out: std.ArrayListUnmanaged([]const u8) = .empty;
+    const d = try desk(alloc, gs, 0);
+    if (d.inbox.len == 0) {
+        try out.append(alloc, "inbox empty.");
+        return out.toOwnedSlice(alloc);
+    }
+    try out.append(alloc, try std.fmt.allocPrint(alloc, "inbox ({d} pending — unanswered decisions default at their deadline):", .{d.inbox.len}));
+    for (d.inbox) |row| {
+        try out.append(alloc, try std.fmt.allocPrint(alloc, "[{d}] {s} {s} (answer by day {d}, {d} days left)", .{ row.event_index, row.kind, row.company, row.deadline_day, row.days_left }));
+        try out.append(alloc, try std.fmt.allocPrint(alloc, "    {s}", .{row.description}));
+        for (row.options, 0..) |opt, j| try out.append(alloc, try std.fmt.allocPrint(alloc, "    {d}: {s}{s}", .{ j + 1, opt, if (j == row.default_choice) " (default)" else "" }));
+    }
+    return out.toOwnedSlice(alloc);
+}
+
+/// The index of a listing by key (a staple line when `staple`), for a
+/// script that buys off the board.
+pub fn listingIndex(gs: *GameState, item_key: []const u8, staple: bool) ?usize {
+    for (gs.market_listings.items, 0..) |l, i| {
+        if (l.staple == staple and std.mem.eql(u8, l.item_key, item_key)) return i;
+    }
+    return null;
+}
+
+/// The world of the outfit's first contract, if it has taken one.
+pub fn firstContractPlanet(gs: *GameState) ?[]const u8 {
+    if (gs.contracts.count() == 0) return null;
+    return gs.contracts.values()[0].planet_key;
+}
+
+pub fn companyAtHome(gs: *GameState, company: types.ForceId) bool {
+    return gs.isCompanyHome(company);
+}
+
+/// "Commander Erik Kalmar (Capellan Confederation, ex-quartermaster: …)".
+pub fn commanderLine(alloc: Alloc, gs: *GameState) ![]const u8 {
+    const c = gs.commander orelse return "no commander yet";
+    return try std.fmt.allocPrint(alloc, "Commander {s} ({s}, ex-{s}: {s})", .{ c.name, c.origin.fullName(), @tagName(c.profession), c.profession.description() });
+}
+
+/// "Roster 42 | payroll 300,000/mo | hull upkeep 60,000/mo".
+pub fn payrollLine(alloc: Alloc, gs: *GameState) ![]const u8 {
+    return try std.fmt.allocPrint(alloc, "Roster {d} | payroll {s}/mo | hull upkeep {s}/mo", .{ gs.people.count(), try money(alloc, gs.monthlyPayroll()), try money(alloc, gs.monthlyHullUpkeep()) });
+}
+
+/// The hangar in one line: quality spread, broken slots, structure spares.
+pub fn hangarSummaryLine(alloc: Alloc, gs: *GameState) ![]const u8 {
+    var quality_counts = [_]u32{0} ** 6;
+    var broken_slots: u32 = 0;
+    var uit = gs.units.iterator();
+    while (uit.next()) |entry| {
+        quality_counts[@intFromEnum(entry.value_ptr.quality)] += 1;
+        for (entry.value_ptr.slots.items) |s| {
+            if (s.condition != .ok) broken_slots += 1;
+        }
+    }
+    return try std.fmt.allocPrint(alloc, "Hangar quality A-F: {any} | broken slots outstanding: {d} | structure spares: {d}", .{ quality_counts, broken_slots, gs.spareCount("structure") });
+}
+
+/// The next pending decision for a script that answers it: its index, kind and first option.
+pub const PendingDecision = struct { index: usize, kind: []const u8, first_option: []const u8 };
+
+pub fn firstPendingDecision(alloc: Alloc, gs: *GameState) !?PendingDecision {
+    const d = try desk(alloc, gs, 0);
+    if (d.inbox.len == 0) return null;
+    return .{ .index = d.inbox[0].event_index, .kind = d.inbox[0].kind, .first_option = if (d.inbox[0].options.len > 0) d.inbox[0].options[0] else "" };
+}
+
+/// The demand ledgers as the console prints them: each depot's structural
+/// components, then each site's field spares (hq_ops owns both rules).
+pub fn demandLines(alloc: Alloc, gs: *GameState) ![]const []const u8 {
+    const hq_ops = @import("hq_ops.zig");
+    var out: std.ArrayListUnmanaged([]const u8) = .empty;
+    var any = false;
+    for (try hqList(alloc, gs)) |h| {
+        const comps = try hq_ops.componentDemand(alloc, gs, h.id, null);
+        if (comps.len == 0) continue;
+        if (!any) try out.append(alloc, "demand (structural components, per depot):");
+        any = true;
+        try out.append(alloc, try std.fmt.allocPrint(alloc, "  {s}", .{h.name}));
+        for (comps) |l| try out.append(alloc, try std.fmt.allocPrint(alloc, "    {s: <14} need {d: >3} | on hand {d: >3} | coming {d: >3} | shortfall {d: >3}{s}", .{
+            l.key, l.need, l.on_hand, l.coming, l.short, if (l.short > 0) "  ← order or fabricate" else "",
+        }));
+    }
+    var gear_any = false;
+    for (try hqList(alloc, gs)) |h| {
+        for (try hq_ops.spareSitesOf(alloc, gs, h.id)) |site| {
+            const gear = try hq_ops.spareDemand(alloc, gs, site);
+            if (gear.len == 0) continue;
+            if (!gear_any) try out.append(alloc, "demand (gear to fix broken slots, per site):");
+            gear_any = true;
+            try out.append(alloc, switch (site) {
+                .hq => |id| try std.fmt.allocPrint(alloc, "  hq:{d} {s}", .{ @intFromEnum(id), h.name }),
+                .company => |id| try std.fmt.allocPrint(alloc, "  co:{d} {s} (afield)", .{ @intFromEnum(id), forceName(gs, id) }),
+                .outfit => "  outfit",
+            });
+            for (gear) |l| try out.append(alloc, try std.fmt.allocPrint(alloc, "    {s: <14} need {d: >3} | on hand {d: >3} | coming {d: >3} | shortfall {d: >3}{s}", .{
+                l.key, l.need, l.on_hand, l.coming, l.short, if (l.short > 0) "  ← order" else "",
+            }));
+        }
+    }
+    if (!any and !gear_any) try out.append(alloc, "demand: nothing broken needs a part.");
+    return out.toOwnedSlice(alloc);
 }
