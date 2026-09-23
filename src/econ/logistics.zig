@@ -23,8 +23,8 @@ pub fn transitDays(jumps: u32) u32 {
 
 /// Days a company or courier takes between two worlds: the jump route,
 /// or the same-world floor (loading, a short burn, unloading). The one
-/// rule every transit, ETA and board column reads. // TUNE
-pub const same_world_days: u32 = 3;
+/// rule every transit, ETA and board column reads.
+pub const same_world_days: u32 = tuning.logistics.same_world_days;
 
 pub fn daysBetween(a: *const planet_mod.Planet, b: *const planet_mod.Planet) u32 {
     if (a == b) return same_world_days;

@@ -102,7 +102,7 @@ One predicate each; every listed site calls it.
 
 ---
 
-## D6. Numbers appear once (rule 9) — D6a literals PR #9, D6b tables pending
+## D6. Numbers appear once (rule 9) — D6a literals PR #9, D6b tables PR #10, D6c residue pending
 
 **Duplicated literals → one named constant.**
 - [x] `/25` depot labour: hq_ops.zig:182, :237 → `tuning.hq_ops.depot_labour_divisor`.
@@ -122,11 +122,12 @@ One predicate each; every listed site calls it.
 - [x] `2_000`-class market condition curve: market.zig:189,191.
 
 **Tuning tables in code → `data/tables/tuning.zon`.**
-- [ ] autoresolve.zig:56-74 (skill steps, supply penalties, fatigue and morale scales, support bonuses).
-- [ ] battle.zig:401-422 outcome→loss tables, 461-477 severity thresholds, 499 wound cuts, 513 MASH, 665-686 score and morale.
-- [ ] maintenance.zig:19-21 repair hours, 74-76 targets, 203/209 part-cost shares, 226-227 armour and flat cost.
-- [ ] contract_market.zig:195-207 term rolls, :470 expiry.
-- [ ] the 21 `// TUNE` values still in `src/domain/*` (hq.zig ×6, part.zig ×2, unit.zig, person.zig, force.zig, commander.zig, contract.zig ×2, and the rest listed by `grep -rn '// TUNE' src/domain`).
+- [x] autoresolve.zig:56-74 (skill steps, supply penalties, fatigue and morale scales, support bonuses).
+- [x] battle.zig:401-422 outcome→loss tables, 461-477 severity thresholds, 499 wound cuts, 513 MASH, 665-686 score and morale.
+- [x] maintenance.zig:19-21 repair hours, 74-76 targets, 203/209 part-cost shares, 226-227 armour and flat cost.
+- [x] contract_market.zig:195-207 term rolls, :470 expiry.
+- [x] domain values moved: contract enemy strength and pool, person permanent penalty, force air lances, unit maintenance hours, part fabrication days and provisions; commander marker was stale
+- [ ] **D6c, deferred:** `src/domain/hq.zig` tier, capacity, facility-staffing, support-lance-unlock and refit-ceiling tables (six `// TUNE`, a `data/tables/hq.zon` schema of their own), plus the formula constants still marked: autoresolve.zig:29, contract_control.zig:89 (VP/25, /10 standing), maintenance.zig:168 (injury severity days 14/22), medical.zig:53/221/330 (heal scaling, HR morale cap 3), tick.zig:236, hq_ops.zig:650 (bay accident 10 days), company_gen.zig:89 (weight roll bands), market.zig:157/166 (staple list, condition rolls), contract_market.zig asking bonus formula, state.zig:681/1110/1449 (recruit bonus, truck reach, astech halves) (hq.zig ×6, part.zig ×2, unit.zig, person.zig, force.zig, commander.zig, contract.zig ×2, and the rest listed by `grep -rn '// TUNE' src/domain`).
 
 ---
 

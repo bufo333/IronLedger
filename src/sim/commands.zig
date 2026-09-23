@@ -1506,11 +1506,11 @@ fn checkRoom(gs: *GameState, site: types.Site, part_key: []const u8, quantity: u
 /// Freight & transit between two sites (Stage 9D): HQ→HQ legs ride the
 /// supply-link route (multi-hop, throughput-capped; charter if unlinked);
 /// the last leg to a deployed company is a direct charter from its home
-/// HQ. Transport admins negotiate better rates. // TUNE
+/// HQ. Transport admins negotiate better rates.
 fn freightBetween(gs: *GameState, from: types.Site, to: types.Site, tons_moved: u32) Error!struct { cost: types.CBills, days: u32 } {
-    const a = planet_mod.find(sitePlanetKey(gs, from) orelse "") orelse return .{ .cost = 0, .days = 3 };
-    const b = planet_mod.find(sitePlanetKey(gs, to) orelse "") orelse return .{ .cost = 0, .days = 3 };
-    var days: u32 = 3;
+    const a = planet_mod.find(sitePlanetKey(gs, from) orelse "") orelse return .{ .cost = 0, .days = logistics.same_world_days };
+    const b = planet_mod.find(sitePlanetKey(gs, to) orelse "") orelse return .{ .cost = 0, .days = logistics.same_world_days };
+    var days: u32 = logistics.same_world_days;
     var cost: types.CBills = 0;
 
     const from_hq: types.HqId = switch (from) {

@@ -1171,10 +1171,11 @@ pub const GameState = struct {
         return self.stockCount(self.defaultSite(), part_key);
     }
 
-    /// Courier days to reach a treasury from the outfit's seat (first HQ).
-    /// Same-planet handoffs still take a minimum 3 days of paperwork. // TUNE
+    /// Courier days to reach a treasury from the outfit's seat (first HQ):
+    /// `logistics.daysBetween`, same-world floor included.
     pub fn courierEtaDays(self: *GameState, to: Treasury) u32 {
-        const home_key: []const u8 = if (self.hqs.count() > 0) self.hqs.values()[0].planet_key else return 3;
+        const logistics = @import("../econ/logistics.zig");
+        const home_key: []const u8 = if (self.hqs.count() > 0) self.hqs.values()[0].planet_key else return logistics.same_world_days;
         const dest_key: []const u8 = switch (to) {
             .outfit => home_key,
             .hq => |id| if (self.hqs.getPtr(id)) |h| h.planet_key else home_key,
@@ -1184,10 +1185,9 @@ pub const GameState = struct {
                 break :blk home_key;
             },
         };
-        const home = planet_mod.find(home_key) orelse return 3;
-        const dest = planet_mod.find(dest_key) orelse return 3;
-        if (home == dest) return 3;
-        return @import("../econ/logistics.zig").daysBetween(home, dest);
+        const home = planet_mod.find(home_key) orelse return logistics.same_world_days;
+        const dest = planet_mod.find(dest_key) orelse return logistics.same_world_days;
+        return logistics.daysBetween(home, dest);
     }
 
     // ----------------------------------------------------- deployment info

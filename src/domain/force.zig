@@ -114,8 +114,8 @@ pub const lance_size = 4;
 /// (`Hq.capacity().lances_per_company`, ARCH §9.3).
 pub const base_lances_per_company = 3;
 pub const max_lances_per_company = 5;
-/// Air lances per air wing. // TUNE
-pub const max_air_lances = 3;
+/// Air lances per air wing (tuning.force).
+pub const max_air_lances = @import("tuning.zig").t.force.max_air_lances;
 pub const base_meks_per_company = lance_size * base_lances_per_company;
 
 test "company math" {

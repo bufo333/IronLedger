@@ -325,22 +325,20 @@ pub fn objectiveFor(kind: ContractKind) ObjectiveKind {
 }
 
 /// Opposition force pool for an attrition contract, relative to the
-/// committed force and scaled by length (longer campaigns face more). // TUNE
+/// committed force and scaled by length (longer campaigns face more;
+/// tuning.contract.pool_*).
 pub fn enemyPoolBp(kind: ContractKind, length_months: u8) types.Bp {
-    const per_month: types.Bp = @divTrunc(enemyStrengthBp(kind), 2);
-    return enemyStrengthBp(kind) + per_month * @as(types.Bp, @min(6, length_months));
+    const t = @import("tuning.zig").t.contract;
+    const per_month: types.Bp = @divTrunc(enemyStrengthBp(kind), t.pool_per_month_divisor);
+    return enemyStrengthBp(kind) + per_month * @as(types.Bp, @min(t.pool_months_cap, length_months));
 }
 
 /// Enemy strength relative to the player's committed force, by contract
-/// kind, basis points (ARCH §7). // TUNE
+/// kind, basis points (ARCH §7; tuning.contract.enemy_strength_bp).
 pub fn enemyStrengthBp(kind: ContractKind) types.Bp {
+    const e = @import("tuning.zig").t.contract.enemy_strength_bp;
     return switch (kind) {
-        .recon_raid, .pirate_hunting => 8_000,
-        .extraction_raid, .guerrilla_warfare => 9_000,
-        .objective_raid, .diversionary_raid, .security_duty, .riot_duty => 10_000,
-        .relief_duty => 11_000,
-        .planetary_assault => 13_000,
-        .garrison_duty, .cadre_duty => 6_000, // rare pirate probes only
+        inline else => |k| @field(e, @tagName(k)),
     };
 }
 

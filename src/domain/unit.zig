@@ -108,16 +108,18 @@ pub fn techRoleFor(kind: UnitKind) ?Role {
 }
 
 /// Weekly maintenance hours a hull costs its tech, by kind and tonnage
-/// (Stage 9C.2 tech-time budget). // TUNE
+/// (Stage 9C.2 tech-time budget; tuning.unit.maintenance_hours).
 pub fn maintenanceHours(kind: UnitKind, tonnage: u8) u32 {
+    const t = @import("tuning.zig").t.unit;
+    const h = t.maintenance_hours;
     return switch (kind) {
-        .mek => if (tonnage <= 35) @as(u32, 4) else if (tonnage <= 55) 6 else if (tonnage <= 75) 8 else 10,
-        .vehicle, .mash, .mobile_field_base, .cargo => 4,
-        .aerospace => 8,
-        .battle_armor => 2,
-        .infantry => 0,
-        .dropship => 20,
-        .jumpship => 30,
+        .mek => if (tonnage <= t.mek_light_max_tons) h.mek_light else if (tonnage <= t.mek_medium_max_tons) h.mek_medium else if (tonnage <= t.mek_heavy_max_tons) h.mek_heavy else h.mek_assault,
+        .vehicle, .mash, .mobile_field_base, .cargo => h.vehicle,
+        .aerospace => h.aerospace,
+        .battle_armor => h.battle_armor,
+        .infantry => 0, // no hull to maintain
+        .dropship => h.dropship,
+        .jumpship => h.jumpship,
     };
 }
 

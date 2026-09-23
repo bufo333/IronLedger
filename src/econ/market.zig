@@ -198,7 +198,7 @@ pub fn rollHullCondition(rng: *rng_mod.Rng) HullCondition {
 }
 
 /// Price a hull by loadout value and condition: a new, fully loaded hull
-/// at a premium; a wreck missing a leg and its guns for a fraction. // TUNE
+/// at a premium; a wreck missing a leg and its guns for a fraction (tuning.market).
 pub fn hullPrice(base_cost: types.CBills, avg_weapon_cost: types.CBills, cond: HullCondition, price_roll_bp: types.Bp) types.CBills {
     const t = @import("../domain/tuning.zig").t.market;
     const lost = @as(types.CBills, cond.destroyed_slots) * avg_weapon_cost +

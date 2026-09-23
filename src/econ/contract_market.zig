@@ -15,7 +15,7 @@ const hq_mod = @import("../domain/hq.zig");
 const person_mod = @import("../domain/person.zig");
 const person_gen = @import("../gen/person_gen.zig");
 
-/// Employer payment multiplier by faction, basis points. // TUNE
+/// Employer payment multiplier by faction, basis points (data/tables/factions.zon).
 pub fn employerMultBp(faction_key: []const u8) types.Bp {
     return @import("../domain/faction.zig").get(faction_key).pay_bp; // data/tables/factions.zon (12B.9)
 }
@@ -26,7 +26,7 @@ pub fn standingPayBp(standing: i32) types.Bp {
     return 10_000 + @as(types.Bp, standing) * tuning.contract.standing_pay_bp_per_point;
 }
 
-/// Reputation payment multiplier: ±0.5% per point, clamped. // TUNE
+/// Reputation payment multiplier: ±0.5% per point, clamped.
 /// The five Successor States (12C.7): the employers an F-rated outfit
 /// cannot get in front of.
 pub fn isGreatHouse(faction_key: []const u8) bool {
@@ -192,19 +192,17 @@ pub fn refresh(gs: *GameState) !void {
                 .terms = .{
                     .length_months = length,
                     .base_pay_month = pay,
-                    .advance_pct = 25,
-                    .signing_bonus = if (gs.rng.roll2d6(.market) >= 10) @divTrunc(pay, 2) else 0,
-                    .transport_pct = @intCast(@as(u32, gs.rng.roll2d6(.market) -| 2) * 10), // 0–100%
+                    .advance_pct = tuning.contract.advance_pct,
+                    .signing_bonus = if (gs.rng.roll2d6(.market) >= tuning.contract.signing_bonus_target) @divTrunc(pay, tuning.contract.signing_bonus_divisor) else 0,
+                    .transport_pct = @intCast(@as(u32, gs.rng.roll2d6(.market) -| 2) * tuning.contract.transport_pct_per_pip),
                     // Straight support: the employer ships you supplies monthly
-                    // (Stage 9B delivers goods, not cash). // TUNE
-                    .overhead_pct = switch (gs.rng.roll2d6(.market)) {
-                        2...7 => 0,
-                        8, 9 => 25,
-                        10, 11 => 50,
-                        else => 100,
+                    // (Stage 9B delivers goods, not cash).
+                    .overhead_pct = blk: {
+                        const r = gs.rng.roll2d6(.market);
+                        break :blk if (r >= tuning.contract.overhead_full_at) @as(u8, 100) else if (r >= tuning.contract.overhead_half_at) 50 else if (r >= tuning.contract.overhead_quarter_at) 25 else 0;
                     },
-                    .battle_loss_pct = if (gs.rng.roll2d6(.market) >= 8) 30 else 0,
-                    .salvage_pct = @intCast(@as(u32, gs.rng.roll2d6(.market) -| 2) * 5), // 0–50%
+                    .battle_loss_pct = if (gs.rng.roll2d6(.market) >= tuning.contract.battle_loss_target) tuning.contract.battle_loss_pct else 0,
+                    .salvage_pct = @intCast(@as(u32, gs.rng.roll2d6(.market) -| 2) * tuning.contract.salvage_pct_per_pip),
                     // Salvage exchange (12B.2): the employer keeps the wrecks and pays cash.
                     .salvage_exchange = gs.rng.random(.market).uintLessThan(u32, tuning.contract.salvage_exchange_in) == 0,
                     .command_rights = rights,
@@ -467,7 +465,7 @@ fn refreshBoard(gs: *GameState, hq_id: types.HqId) !void {
                 .quantity = 2,
                 .staple = true,
                 .listed_day = day,
-                .expires_day = day + 3650,
+                .expires_day = day + tuning.market.staple_listing_days,
             });
         }
     }
@@ -493,9 +491,9 @@ fn arrivalRole(gs: *GameState, hq: *const hq_mod.Hq) person_mod.Role {
 }
 
 /// Days a walk-in or a floor top-up stays on the board; the weekly
-/// refresh's crowd lingers longer. // TUNE
-const walkin_days: u32 = 14;
-const refresh_days: u32 = 21;
+/// refresh's crowd lingers longer (tuning.market).
+const walkin_days: u32 = tuning.market.hall_walkin_days;
+const refresh_days: u32 = tuning.market.hall_refresh_days;
 
 /// Put one candidate on an HQ's board: rolled to the outfit's recruit
 /// bonus, asking a signing bonus by experience, gone after `ttl_days`.

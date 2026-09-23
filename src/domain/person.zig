@@ -234,12 +234,12 @@ pub const Person = struct {
     }
 
     /// Lasting damage (MekHQ advanced medical modifiers, approximated):
-    /// every permanent head or internal injury costs one skill point in the
-    /// cockpit. // TUNE
+    /// every permanent head or internal injury costs skill points in the
+    /// cockpit (tuning.person.permanent_penalty_per_injury).
     pub fn permanentPenalty(self: *const Person) u8 {
         var n: u8 = 0;
         for (self.injuries.items) |i| {
-            if (i.permanent and (i.location == .head or i.location == .internal)) n += 1;
+            if (i.permanent and (i.location == .head or i.location == .internal)) n += tuning.person.permanent_penalty_per_injury;
         }
         return n;
     }

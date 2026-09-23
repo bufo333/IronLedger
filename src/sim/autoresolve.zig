@@ -48,30 +48,31 @@ pub const Element = struct {
     /// multiplier follows the 2d6 to-hit curve: each point of gunnery below
     /// 4 is worth ~20%, above 4 costs ~15%. Tuned in Stage 7.
     pub fn effectivePower(self: Element, mods: CampaignMods) i64 {
-        var bp: types.Bp = 10_000;
+        const t = @import("../domain/tuning.zig").t.autoresolve;
+        var bp: types.Bp = types.full_bp;
 
         // Crew skill (gunnery dominates, piloting supports).
         const g: i64 = self.avg_gunnery;
         const p: i64 = self.avg_piloting;
-        bp += (4 - g) * if (g < 4) @as(i64, 2_000) else 1_500;
-        bp += (5 - p) * 500;
+        bp += (4 - g) * if (g < 4) t.gunnery_below_bp else t.gunnery_above_bp;
+        bp += (5 - p) * t.piloting_bp;
 
         // Materiel condition & maintenance quality.
         bp = @divTrunc(bp * self.avg_condition_pct, 100);
-        bp += @as(i64, self.avg_quality.maintenanceModifier()) * -500; // A(+3)→−15%, F(−2)→+10%
+        bp += @as(i64, self.avg_quality.maintenanceModifier()) * t.quality_step_bp; // A(+3)→−15%, F(−2)→+10%
 
         // Campaign modifiers — the player's real levers.
-        if (!mods.supply_ammo) bp -= 2_500;
-        if (!mods.supply_parts) bp -= 1_500;
-        if (!mods.supply_provisions) bp -= 1_000;
-        bp -= @divTrunc(@as(i64, mods.avg_fatigue) * 2_000, 100);
-        bp += @divTrunc((@as(i64, mods.avg_morale) - 50) * 1_000, 50);
-        if (mods.has_air_cover) bp += 1_500;
-        if (mods.has_artillery) bp += 1_000;
-        bp += @as(i64, mods.recon_quality) * 500;
-        if (mods.has_mash_lance) bp += 250;
-        if (mods.has_mess_lance) bp += 250;
-        if (mods.has_security_lance) bp += 250;
+        if (!mods.supply_ammo) bp -= t.no_ammo_bp;
+        if (!mods.supply_parts) bp -= t.no_parts_bp;
+        if (!mods.supply_provisions) bp -= t.no_provisions_bp;
+        bp -= @divTrunc(@as(i64, mods.avg_fatigue) * t.fatigue_scale_bp, 100);
+        bp += @divTrunc((@as(i64, mods.avg_morale) - 50) * t.morale_scale_bp, 50);
+        if (mods.has_air_cover) bp += t.air_cover_bp;
+        if (mods.has_artillery) bp += t.artillery_bp;
+        bp += @as(i64, mods.recon_quality) * t.recon_per_level_bp;
+        if (mods.has_mash_lance) bp += t.support_lance_bp;
+        if (mods.has_mess_lance) bp += t.support_lance_bp;
+        if (mods.has_security_lance) bp += t.support_lance_bp;
 
         return @max(0, types.applyBp(self.base_strength, bp));
     }

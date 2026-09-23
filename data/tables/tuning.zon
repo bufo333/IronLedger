@@ -18,6 +18,7 @@
         .sale_pct = 40,
     },
     .logistics = .{
+        .same_world_days = 3,
         .ly_per_jump = 30,
         .recharge_days = 7,
         .burn_days = 5,
@@ -41,6 +42,9 @@
         .link_cost_per_level_sq = 250_000,
     },
     .market = .{
+        .hall_walkin_days = 14,
+        .hall_refresh_days = 21,
+        .staple_listing_days = 3650, // staples never age off; the board restocks them
         .wreck_component_value = 80_000,
         .cond_base_bp = 3_000,
         .cond_quality_bp = 1_000,
@@ -100,6 +104,7 @@
         .permanent_target = 4,
     },
     .person = .{
+        .permanent_penalty_per_injury = 1,
         .morale_content = 50,
         .morale_garrison_lift_below = 45,
         .fatigue_grind = 60,
@@ -143,6 +148,10 @@
         .award_loyalty_days = 180,
     },
     .unit = .{
+        .maintenance_hours = .{ .mek_light = 4, .mek_medium = 6, .mek_heavy = 8, .mek_assault = 10, .vehicle = 4, .aerospace = 8, .battle_armor = 2, .dropship = 20, .jumpship = 30 },
+        .mek_light_max_tons = 35,
+        .mek_medium_max_tons = 55,
+        .mek_heavy_max_tons = 75,
         .shot_up_condition_pct = 70,
         .carry = .{ .mek = 2_000, .vehicle = 1_200, .aerospace = 3_000, .battle_armor = 500, .infantry = 200, .mash = 800, .cargo = 500, .dropship = 15_000, .jumpship = 50_000 },
         .cold_storage_bp = 2_000,
@@ -152,6 +161,24 @@
         .truck_tons = .{ .cargo = 20, .salvage = 5 },
     },
     .battle = .{
+        .outcome_at = .{ .decisive_victory = 11, .victory = 8, .draw = 6, .defeat = 4 },
+        .hit_pct = .{ .decisive_victory = 8, .victory = 15, .draw = 25, .defeat = 40, .rout = 55 },
+        .enemy_loss_pct = .{ .decisive_victory = 40, .victory = 25, .draw = 15, .defeat = 8, .rout = 4 },
+        .armor_per_severity = 4,
+        .damage_value_per_severity = 20_000,
+        .slot_hit_severity = 8,
+        .cookoff_severity = 11, // TechManual: no CASE in the 3025 catalogue
+        .kill_severity = 12,
+        .kill_armorless_severity = 10,
+        .wound_crippling_severity = 12,
+        .wound_serious_severity = 10,
+        .wound_target = 8,
+        .wound_target_mash = 9,
+        .score = .{ .decisive_victory = 2, .victory = 1, .draw = 0, .rout = -2 },
+        .morale = .{ .decisive_victory = 5, .victory = 3, .draw = -1, .defeat = -5, .rout = -10, .mess_relief = 2 },
+        .fatigue_base = 4,
+        .xp_scored = 3,
+        .xp_fought = 2,
         .gap_base_days = 8, // + 2d6
         .mounts_per_ammo_ton = 6,
         .silence_penalty_pct = 60,
@@ -201,6 +228,18 @@
         .repair_redo_bp = 5_000,
     },
     .maintenance = .{
+        .hours_damaged_slot = 3,
+        .hours_destroyed_slot = 5,
+        .hours_armor_patch = 2,
+        .target_base = 4,
+        .target_deployed = 1,
+        .target_uncovered = 3,
+        .labour_damaged_divisor = 20,
+        .labour_destroyed_divisor = 10,
+        .armor_patch_pct = 15,
+        .armor_patch_labour = 5_000,
+        .accident_target = 3, // one bad week in twelve after snake-eyes
+        .accident_days_base = 5,
         .consumables_divisor = 2_500,
         .quality_drop_margin = 2,
         .quality_rise_margin = 7,
@@ -236,6 +275,21 @@
         .recruit_bonus_index = 4,
     },
     .contract = .{
+        .advance_pct = 25,
+        .signing_bonus_target = 10,
+        .signing_bonus_divisor = 2,
+        .transport_pct_per_pip = 10, // (2d6 − 2) × 10: 0–100%
+        .overhead_quarter_at = 8,
+        .overhead_half_at = 10,
+        .overhead_full_at = 12,
+        .battle_loss_target = 8,
+        .battle_loss_pct = 30,
+        .salvage_pct_per_pip = 5, // (2d6 − 2) × 5: 0–50%
+        // Enemy strength relative to the committed force (ARCH §7); garrison
+        // kinds see rare pirate probes only.
+        .enemy_strength_bp = .{ .garrison_duty = 6_000, .cadre_duty = 6_000, .security_duty = 10_000, .riot_duty = 10_000, .planetary_assault = 13_000, .relief_duty = 11_000, .guerrilla_warfare = 9_000, .pirate_hunting = 8_000, .diversionary_raid = 10_000, .objective_raid = 10_000, .recon_raid = 8_000, .extraction_raid = 9_000 },
+        .pool_per_month_divisor = 2,
+        .pool_months_cap = 6,
         .vp_per_score = 5,
         .grade_outstanding_vp = 50,
         .grade_strong_vp = 25,
@@ -329,6 +383,31 @@
             .hold_morale = -2,
             .withdrawal_score = -1,
         },
+    },
+    // Autoresolve (ARCH §7): the crew multiplier follows the 2d6 to-hit
+    // curve; supply, fatigue, morale and support assets are the player's levers.
+    .autoresolve = .{
+        .gunnery_below_bp = 2_000,
+        .gunnery_above_bp = 1_500,
+        .piloting_bp = 500,
+        .quality_step_bp = -500,
+        .no_ammo_bp = 2_500,
+        .no_parts_bp = 1_500,
+        .no_provisions_bp = 1_000,
+        .fatigue_scale_bp = 2_000,
+        .morale_scale_bp = 1_000,
+        .air_cover_bp = 1_500,
+        .artillery_bp = 1_000,
+        .recon_per_level_bp = 500,
+        .support_lance_bp = 250,
+    },
+    .part = .{
+        .fab_days = .{ .ct = 12, .torso = 9, .leg = 8, .arm = 6, .head = 5, .other = 7 },
+        .fab_class_delta = .{ .light = -2, .heavy = 3, .assault = 6 },
+        .provisions_person_days_per_ton = 200, // ~5 kg/person/day
+    },
+    .force = .{
+        .max_air_lances = 3,
     },
     .commander = .{ .bonus_bp = 200 },
 }

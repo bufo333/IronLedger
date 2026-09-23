@@ -382,19 +382,16 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
             }
         }
     }
-    const outcome: autoresolve.Outcome = if (roll >= 11) .decisive_victory //
-        else if (roll >= 8) .victory //
-        else if (roll >= 6) .draw //
-        else if (roll >= 4) .defeat //
+    const tb = tuning.battle;
+    const outcome: autoresolve.Outcome = if (roll >= tb.outcome_at.decisive_victory) .decisive_victory //
+        else if (roll >= tb.outcome_at.victory) .victory //
+        else if (roll >= tb.outcome_at.draw) .draw //
+        else if (roll >= tb.outcome_at.defeat) .defeat //
         else .rout;
 
-    // Player losses scale with how badly it went. // TUNE
+    // Player losses scale with how badly it went (tuning.battle.hit_pct).
     const base_hit_pct: i32 = switch (outcome) {
-        .decisive_victory => 8,
-        .victory => 15,
-        .draw => 25,
-        .defeat => 40,
-        .rout => 55,
+        inline else => |o| @field(tb.hit_pct, @tagName(o)),
     };
     // A lost fight under hold costs more; a cautious company is already
     // pulling back when it turns (12D.4).
@@ -405,11 +402,7 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
         .cautious => rt.cautious_hits_pct,
     }));
     const enemy_loss_pct: u32 = switch (outcome) {
-        .decisive_victory => 40,
-        .victory => 25,
-        .draw => 15,
-        .defeat => 8,
-        .rout => 4,
+        inline else => |o| @field(tb.enemy_loss_pct, @tagName(o)),
     };
 
     const engaged = player.engaged.items;
@@ -449,12 +442,12 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
 
         const severity = gs.rng.roll2d6(.battle);
         var rec: Hit = .{ .unit = uid, .armor_before = u.armor_pct, .armor_after = 0, .slot = null, .slot_part = "", .slot_result = "", .destroyed = false, .crew = "" };
-        u.armor_pct -|= @intCast(severity * 4);
+        u.armor_pct -|= severity * tb.armor_per_severity;
         rec.armor_after = u.armor_pct;
-        damage_value += @as(types.CBills, severity) * 20_000;
+        damage_value += @as(types.CBills, severity) * tb.damage_value_per_severity;
 
         var ammo_hit = false;
-        if (severity >= 8 and u.slots.items.len > 0) {
+        if (severity >= tb.slot_hit_severity and u.slots.items.len > 0) {
             const slot = &u.slots.items[gs.rng.random(.battle).uintLessThan(usize, u.slots.items.len)];
             slot.condition = if (slot.condition == .ok) .damaged else .destroyed;
             ammo_hit = slot.class == .ammo;
@@ -464,10 +457,10 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
         }
         // A bin struck hard enough cooks off (TechManual: no CASE in the
         // 3025 catalogue), and takes the hull with it (12D.2).
-        const cooked_off = ammo_hit and severity >= 11;
-        if (severity == 12 or (u.armor_pct == 0 and severity >= 10) or cooked_off) {
+        const cooked_off = ammo_hit and severity >= tb.cookoff_severity;
+        if (severity >= tb.kill_severity or (u.armor_pct == 0 and severity >= tb.kill_armorless_severity) or cooked_off) {
             // How it died decides what the rebuild needs (12D.2).
-            var cause: unit_mod.WreckCause = if (ammo_hit) .ammo else if (severity == 12) .engine else .cored;
+            var cause: unit_mod.WreckCause = if (ammo_hit) .ammo else if (severity >= tb.kill_severity) .engine else .cored;
             if (cause.needsEngine() and @as(i32, gs.rng.roll2d6(.battle)) <= tuning.loss.scrap_target + gs.diff().scrap_mod) cause = .scrap;
             u.markWreckedBy(cause); // destroyed, with the structure to show for it
             rec.cause = cause;
@@ -480,28 +473,28 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
         // Crew casualties (AtB-style): a hard hit (8+) wounds the pilot on a
         // follow-up 2d6 of 8+, a crippling one (11+) always; the worst roll
         // kills unless a MASH lance is forward. MASH also halves the wound
-        // chance on hard hits. // TUNE
+        // chance on hard hits (tuning.battle.wound_*).
         if (gs.person(u.pilot)) |p| {
             if (p.status == .active) {
                 // Wound severity follows the hit (Stage 12.16): 8–9 light,
                 // 10–11 serious, 12 crippling (survivable only with MASH).
                 // Toughness (12B.6): a step lighter, and a killing hit is survived.
                 const tough = p.has("toughness");
-                const raw_severity: u8 = if (severity >= 12) 3 else if (severity >= 10) 2 else 1;
+                const raw_severity: u8 = if (severity >= tb.wound_crippling_severity) 3 else if (severity >= tb.wound_serious_severity) 2 else 1;
                 const wound_severity: u8 = @max(1, raw_severity -| @as(u8, @intFromBool(tough)));
-                if (severity == 12 and !player.mods.has_mash_lance and !tough) {
+                if (severity >= tb.kill_severity and !player.mods.has_mash_lance and !tough) {
                     // The seat empties with the pilot (12D.1): the checklist
                     // shows an open cockpit, not a dead man in it.
                     _ = try @import("personnel.zig").depart(gs, p.id, .kia, 0, "");
                     kia += 1;
                     gs.stats.people_kia += 1;
                     rec.crew = try std.fmt.allocPrint(gs.allocator(), "{s} KIA", .{try p.rankedName(gs.allocator())});
-                } else if (severity >= 11) {
+                } else if (severity >= tb.cookoff_severity) {
                     try medical.inflict(gs, u.pilot, .combat, wound_severity, "battle");
                     wounded += 1;
                     rec.crew = try woundText(gs, p);
-                } else if (severity >= 8) {
-                    const need: u8 = if (player.mods.has_mash_lance) 9 else 8;
+                } else if (severity >= tb.slot_hit_severity) {
+                    const need: u8 = if (player.mods.has_mash_lance) tb.wound_target_mash else tb.wound_target;
                     if (gs.rng.roll2d6(.battle) >= need) {
                         try medical.inflict(gs, u.pilot, .combat, wound_severity, "battle");
                         wounded += 1;
@@ -644,11 +637,11 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     gs.stats.enemy_bv_destroyed += @intCast(@max(0, enemy_destroyed_bv));
 
     const score_delta: i32 = @as(i32, scenario.score_mult) * switch (outcome) {
-        .decisive_victory => @as(i32, 2),
-        .victory => 1,
-        .draw => 0,
+        .decisive_victory => tb.score.decisive_victory,
+        .victory => tb.score.victory,
+        .draw => tb.score.draw,
         .defeat => c.terms.command_rights.defeatScore(),
-        .rout => -2,
+        .rout => tb.score.rout,
     };
     c.score += score_delta;
     if (withdrew) {
@@ -659,22 +652,18 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     const convoy_hit = scenario.support_exposed and outcome.isLoss();
     if (convoy_hit) @import("contract_events.zig").damageRandomUnits(gs, c.assigned_company, if (outcome == .rout) 2 else 1, .support);
     var morale_delta: i32 = switch (outcome) {
-        .decisive_victory => 5,
-        .victory => 3,
-        .draw => -1,
-        .defeat => -5,
-        .rout => -10,
+        inline else => |o| @field(tb.morale, @tagName(o)),
     };
-    if (morale_delta < 0 and player.mods.has_mess_lance) morale_delta += 2; // hot food after a bad day
+    if (morale_delta < 0 and player.mods.has_mess_lance) morale_delta += tb.morale.mess_relief; // hot food after a bad day
     if (lost_fight and roe == .hold) morale_delta += rt.hold_morale; // a stand that failed
     // A win on a fight that mattered (12C.11): breakthroughs, base defences and extractions carried.
     if (score_delta > 0 and scenario.score_mult > 1) morale_delta += tuning.person.morale_objective_bonus;
-    applyCompanyAftermath(gs, c.assigned_company, morale_delta, 4 + env.fatigue());
+    applyCompanyAftermath(gs, c.assigned_company, morale_delta, tb.fatigue_base + env.fatigue());
     for (engaged) |uid| {
         const u = gs.unit(uid) orelse continue;
         if (gs.person(u.pilot)) |p| {
             if (p.isOnBooks())
-                p.xp += p.xpGain(gs.clock.day_index, if (score_delta > 0) 3 else 2);
+                p.xp += p.xpGain(gs.clock.day_index, if (score_delta > 0) tb.xp_scored else tb.xp_fought);
         }
     }
     // Kill credits and the awards they earn (12B.5).
