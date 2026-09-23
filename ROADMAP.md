@@ -1245,9 +1245,20 @@ the player reads, and a turn that stops until they have.
     and `checklist.turnHold` is the one place that decides whether one
     is held, so `advance`, the checklist and the client cannot disagree.
     Garrison work has no front to press and never asks.
+  - ✅ **Go back for the downed.** A lost field asks whether the company
+    goes back onto ground the enemy now holds. Every hull it left and
+    every pilot the enemy took gets one more roll at
+    `tuning.loss.push_mod` against the target that already failed;
+    `battle.recoveryPush` re-rolls beside `recoverWrecks`, whose roll it
+    re-rolls. A hull won back comes off the limbo list (12G.7) and goes
+    home to the lance it was taken from, still the wreck it was; a pilot
+    who walks out comes home hurt, and the inbox decision about ransoming
+    them goes with them. The night costs fatigue either way, and a sortie
+    that rolls low costs somebody a wound. The report is not rewritten:
+    it is the account of the fight, and at the end of the fight those
+    hulls were on the field.
   - ☐ **Salvage priority** — a candidate set against the haul budget,
     rather than the RAT rolling two wrecks at claim time.
-  - ☐ **Go back for the downed** — re-roll `HullHit.recovery` at a cost.
   - ☐ **Field repair priority** — which hull the techs take first.
 - ✅ 12G.7 **Hulls held, not struck off.** A hull left on a lost field
   passes into enemy hands instead of being deleted: `GameState.holdUnit`

@@ -192,6 +192,7 @@ pub fn entryForKind(kind: events.EventKind) ?Entry {
     // rebuild an event's options from its kind, and a kind with no entry
     // is skipped (12G.6).
     if (kind == .press_or_consolidate) return pressEntry();
+    if (kind == .recovery_push) return pushEntry();
     var roll: u8 = 2;
     while (roll <= 12) : (roll += 1) {
         const g = garrisonDeck(roll);
@@ -347,7 +348,7 @@ pub fn resolveChoice(gs: *GameState, event_id: types.EventId, choice: usize) !vo
         mem.value_ptr.last_choice = @intCast(choice);
     }
     const c = if (ev.contract != .none) gs.contracts.getPtr(ev.contract) else null;
-    try applyEffectsFor(gs, ev.options[choice].effects, c, ev.person);
+    try applyEffectsFor(gs, ev.options[choice].effects, c, .{ .person = ev.person, .battle = ev.battle });
     try gs.log(.decision, .{ .company = ev.company, .contract = ev.contract }, "[decision] {s}: chose \"{s}\"", .{ @tagName(ev.kind), ev.options[choice].label });
     _ = gs.event_queue.pending.orderedRemove(gs.event_queue.indexOf(event_id).?);
 }
@@ -360,7 +361,7 @@ pub fn expireDue(gs: *GameState) !void {
         if (ev.needsDecision() and gs.clock.day_index >= ev.deadline_day) {
             const opt = ev.options[ev.default_choice];
             const c = if (ev.contract != .none) gs.contracts.getPtr(ev.contract) else null;
-            try applyEffectsFor(gs, opt.effects, c, ev.person);
+            try applyEffectsFor(gs, opt.effects, c, .{ .person = ev.person, .battle = ev.battle });
             try gs.log(.decision, .{ .company = ev.company, .contract = ev.contract }, "[deadline] {s}: no answer — defaulted to \"{s}\"", .{ @tagName(ev.kind), opt.label });
             _ = gs.event_queue.pending.orderedRemove(i);
         } else {
@@ -369,11 +370,19 @@ pub fn expireDue(gs: *GameState) !void {
     }
 }
 
+/// What an effect acts on besides the contract: the person a personnel
+/// decision is about, the engagement a battle decision is about.
+const Subject = struct {
+    person: types.PersonId = .none,
+    battle: types.BattleId = .none,
+};
+
 fn applyEffects(gs: *GameState, effects: []const events.Effect, contract: ?*contract_mod.Contract) !void {
-    return applyEffectsFor(gs, effects, contract, .none);
+    return applyEffectsFor(gs, effects, contract, .{});
 }
 
-fn applyEffectsFor(gs: *GameState, effects: []const events.Effect, contract: ?*contract_mod.Contract, person_id: types.PersonId) !void {
+fn applyEffectsFor(gs: *GameState, effects: []const events.Effect, contract: ?*contract_mod.Contract, subject: Subject) !void {
+    const person_id = subject.person;
     const company: types.ForceId = if (contract) |c| c.assigned_company else if (gs.person(person_id)) |p| gs.companyOf(p.assigned_force) else .none;
     const contract_id: types.ContractId = if (contract) |c| c.id else .none;
 
@@ -533,6 +542,16 @@ fn applyEffectsFor(gs: *GameState, effects: []const events.Effect, contract: ?*c
                 c.next_battle_day = gs.clock.day_index + days;
                 try gs.log(.battle, .{ .company = company, .contract = c.id }, "[tempo] the company presses the advance — contact expected in {d} days", .{days});
             },
+            // 12G.6: one more roll for everything left on the field.
+            // Revalidated here — the hulls may have been won back or the
+            // pilots ransomed while the decision sat.
+            .recovery_push => {
+                const battle = @import("battle.zig");
+                const got = try battle.recoveryPush(gs, subject.battle, company);
+                try gs.log(.battle, .{ .company = company, .contract = contract_id }, "[recovery] the company goes back onto the field: {d} hull(s) dragged out, {d} crew walked out{s}", .{
+                    got.hulls, got.people, if (got.mishap) " — and it cost somebody" else "",
+                });
+            },
             .delay_arrival => |days| if (contract) |c| {
                 if (c.status == .transit) {
                     if (c.arrive_day) |d| c.arrive_day = d + days;
@@ -588,6 +607,19 @@ pub fn ransomPrice(p: *const @import("../domain/person.zig").Person) types.CBill
         .veteran => t.ransom_veteran,
         .elite => t.ransom_elite,
     };
+}
+
+/// A missing pilot walks out under their own power (12G.6): home, and
+/// the inbox decision about ransoming them goes with them — it is about
+/// somebody who is no longer missing.
+pub fn walkOut(gs: *GameState, p: *@import("../domain/person.zig").Person, company: types.ForceId) !void {
+    try gs.log(.contract, .{ .company = company }, "[missing] {s} walks out of {s} lines and rejoins the company", .{ try p.fullName(gs.allocator()), p.faction });
+    bringHome(p, gs.clock.day_index);
+    var i: usize = 0;
+    while (i < gs.event_queue.pending.items.len) {
+        const ev = gs.event_queue.pending.items[i];
+        if (ev.kind == .mia_held and ev.person == p.id) _ = gs.event_queue.pending.orderedRemove(i) else i += 1;
+    }
 }
 
 /// A missing pilot comes home (12D.3): back on the books, still nursing
@@ -668,6 +700,34 @@ pub fn queuePress(gs: *GameState, c: *const contract_mod.Contract) !void {
     try gs.log(.decision, .{ .company = c.assigned_company, .contract = c.id }, "[tempo] DECISION: {s}", .{e.log});
 }
 
+/// Go back for the downed (12G.6): the field is lost and hulls and
+/// people are still out there. The numbers live in `tuning.loss`, once;
+/// `battle.recoveryPush` is the rule this option triggers.
+pub fn pushEntry() Entry {
+    return .{ .kind = .recovery_push, .log = "hulls and crew are still out there on ground the enemy now holds — go back for them tonight, or let them go", .options = &.{
+        .{ .label = "Go back for them tonight", .effects = &.{.recovery_push} },
+        .{ .label = "Let them go", .effects = &.{} },
+    }, .default_choice = 1 };
+}
+
+/// Ask whether to go back, after a field that cost hulls or people
+/// (12G.6). Nothing left out there, nothing to ask.
+pub fn queueRecoveryPush(gs: *GameState, c: *const contract_mod.Contract, battle: types.BattleId) !void {
+    if (c.status != .active) return;
+    const e = pushEntry();
+    try gs.event_queue.push(gs.allocator(), .{
+        .day = gs.clock.day_index,
+        .kind = .recovery_push,
+        .contract = c.id,
+        .company = c.assigned_company,
+        .battle = battle,
+        .options = e.options,
+        .default_choice = e.default_choice,
+        .deadline_day = gs.clock.day_index + decision_window_days,
+    });
+    try gs.log(.decision, .{ .company = c.assigned_company, .contract = c.id }, "[recovery] DECISION: {s}", .{e.log});
+}
+
 /// The prisoner decision (12B.7): ransom, release, or recruit.
 pub fn prisonerEntry() Entry {
     return .{ .kind = .prisoner_held, .log = "is held prisoner by the company — ransom to their house, release for goodwill, or offer them a contract", .options = &.{
@@ -723,7 +783,7 @@ pub fn queueNotice(gs: *GameState, person_id: types.PersonId) !void {
 
 const PersonStat = enum { morale, fatigue, xp };
 
-fn applyToCompany(gs: *GameState, company: types.ForceId, stat: PersonStat, delta: i32) void {
+pub fn applyToCompany(gs: *GameState, company: types.ForceId, stat: PersonStat, delta: i32) void {
     var it = gs.people.iterator();
     while (it.next()) |entry| {
         const p = entry.value_ptr;
@@ -910,7 +970,7 @@ test "12.24: automatic events never move money, stock or hulls — those are dec
             if (e.options.len > 0) continue;
             for (e.auto_effects) |fx| switch (fx) {
                 .fatigue, .morale, .xp_all, .score, .reputation, .employer_standing => {},
-                .cash, .cash_monthly_pct, .supply_loss, .parts_windfall, .field_stock, .damage_random_units, .damage_convoy_units, .raise_pct, .retention_bonus_months, .let_go, .replace_from_hall, .ransom_prisoner, .release_prisoner, .recruit_prisoner, .ransom_mia, .exchange_mia, .write_off_mia, .engagement, .seize_hull, .delay_arrival, .next_battle_in => {
+                .cash, .cash_monthly_pct, .supply_loss, .parts_windfall, .field_stock, .damage_random_units, .damage_convoy_units, .raise_pct, .retention_bonus_months, .let_go, .replace_from_hall, .ransom_prisoner, .release_prisoner, .recruit_prisoner, .ransom_mia, .exchange_mia, .write_off_mia, .engagement, .seize_hull, .delay_arrival, .next_battle_in, .recovery_push => {
                     std.debug.print("auto event {s} carries a player-facing effect\n", .{@tagName(e.kind)});
                     return error.TestUnexpectedResult;
                 },

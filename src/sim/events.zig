@@ -56,6 +56,9 @@ pub const EventKind = enum {
     /// The field is held and the enemy is off balance (12G.6): press the
     /// advance, or consolidate and put the company back together.
     press_or_consolidate,
+    /// The field is lost and hulls and people are still out there
+    /// (12G.6): go back for them tonight, or let them go.
+    recovery_push,
 
     /// Does this decision hold the turn (ARCH §6)? The test is what the
     /// decision disposes of, not how big it feels: a battle decision
@@ -65,7 +68,7 @@ pub const EventKind = enum {
     /// because ignoring your inbox is a choice, not an impossibility.
     pub fn blocksTurn(self: EventKind) bool {
         return switch (self) {
-            .press_or_consolidate => true,
+            .press_or_consolidate, .recovery_push => true,
             else => false,
         };
     }
@@ -125,6 +128,9 @@ pub const Effect = union(enum) {
     /// The next engagement on this contract comes in N days rather than
     /// when the usual gap would have put it (12G.6).
     next_battle_in: u8,
+    /// One more recovery roll for every hull and pilot the event's battle
+    /// left on the field (12G.6), at a price in fatigue and risk.
+    recovery_push,
 };
 
 pub const Option = struct {
@@ -141,6 +147,9 @@ pub const Event = struct {
     company: types.ForceId = .none,
     /// Personnel events: who this is about.
     person: types.PersonId = .none,
+    /// Battle decisions (12G.6): the engagement this is about, so the
+    /// answer can be applied against that fight's record.
+    battle: types.BattleId = .none,
     /// Empty = auto event (applied at roll time, never queued).
     options: []const Option = &.{},
     /// Applied automatically at the deadline if the player never answers.

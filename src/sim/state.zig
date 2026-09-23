@@ -1871,6 +1871,7 @@ pub const GameState = struct {
     pub fn holdUnit(self: *GameState, unit_id: types.UnitId, by: []const u8, battle: types.BattleId) !void {
         self.detachUnit(unit_id);
         var entry = self.units.fetchOrderedRemove(unit_id) orelse return;
+        const from_force = entry.value.force;
         entry.value.force = .none;
         entry.value.pilot = .none;
         entry.value.tech = .none;
@@ -1879,7 +1880,26 @@ pub const GameState = struct {
             .by = by,
             .day = self.clock.day_index,
             .battle = battle,
+            .from_force = from_force,
         });
+    }
+
+    /// Won back (12G.6): the hull comes off the limbo list and onto the
+    /// books, back in the lance it was taken from if that lance still
+    /// exists. It comes back as it left — a wreck for the depot, not a
+    /// runner. Returns false if nobody holds that hull.
+    pub fn releaseHull(self: *GameState, unit_id: types.UnitId) !bool {
+        const i = blk: {
+            for (self.held_hulls.items, 0..) |h, n| if (h.unit.id == unit_id) break :blk n;
+            return false;
+        };
+        var held = self.held_hulls.orderedRemove(i);
+        if (self.forces.getPtr(held.from_force)) |f| {
+            held.unit.force = held.from_force;
+            try f.units.append(self.allocator(), unit_id);
+        }
+        try self.units.put(self.allocator(), unit_id, held.unit);
+        return true;
     }
 
     /// The hull the enemy holds under this id, if they hold it.

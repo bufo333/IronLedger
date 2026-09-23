@@ -684,6 +684,16 @@ pub const Tuning = struct {
             /// Score a cautious withdrawal from a draw costs.
             withdrawal_score: i32,
         },
+        /// Go back for the downed (12G.6): a night sortie onto ground the
+        /// enemy now holds. Each hull left and each pilot held gets one
+        /// more roll, at `push_mod` to the target that failed the first
+        /// time. The company pays for the night in fatigue; a sortie that
+        /// rolls at or under `push_mishap_at` costs someone a wound.
+        /// Bringing anyone home is worth `push_morale` to the company.
+        push_mod: i32, // TUNE
+        push_fatigue: u8, // TUNE
+        push_mishap_at: i32, // TUNE
+        push_morale: i8, // TUNE
     },
     /// Autoresolve power modifiers (ARCH §7, basis points on base strength).
     autoresolve: struct {

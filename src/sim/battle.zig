@@ -482,6 +482,83 @@ fn recoverWrecks(
     return loss;
 }
 
+/// What going back bought: hulls won off the field, people walked out,
+/// and whether the sortie cost someone.
+pub const Push = struct {
+    hulls: u32 = 0,
+    people: u32 = 0,
+    mishap: bool = false,
+
+    pub fn anything(self: Push) bool {
+        return self.hulls > 0 or self.people > 0;
+    }
+};
+
+/// Go back for the downed (12G.6). Every hull this fight left on the
+/// field and every pilot the enemy took gets one more roll against the
+/// target that already failed, shifted by `tuning.loss.push_mod` —
+/// the enemy holds that ground now. Winning a hull back takes it off the
+/// limbo list and puts it in the lance it was taken from, still the wreck
+/// it was; a pilot who walks out comes home hurt but alive. The night
+/// costs the company fatigue either way, and a sortie that rolls at or
+/// under `push_mishap_at` costs someone a wound.
+///
+/// The rule lives here beside `recoverWrecks`, whose roll it re-rolls, so
+/// the two cannot drift apart (rule 7). The report is not rewritten: it
+/// is the account of the fight, and at the end of the fight those hulls
+/// were on the field. What the sortie won is a log line of its own.
+pub fn recoveryPush(gs: *GameState, battle: types.BattleId, company: types.ForceId) !Push {
+    const t = tuning.loss;
+    const report = gs.battle_reports.find(battle) orelse return .{};
+    var out: Push = .{};
+    for (report.hulls) |h| {
+        if (h.lost) {
+            const target = if (h.recovery) |r| r.target else t.recovery_target;
+            if (@as(i32, gs.rng.roll2d6(.battle)) + t.push_mod >= target) {
+                if (try gs.releaseHull(h.unit)) out.hulls += 1;
+            }
+        }
+        if (h.crew.fate != .missing) continue;
+        const p = gs.person(h.pilot) orelse continue;
+        if (p.status != .mia) continue; // ransomed, traded or written off already
+        const piloting: i32 = p.skill(.piloting_mek) orelse 5;
+        if (@as(i32, gs.rng.roll2d6(.battle)) + (5 - piloting) + t.push_mod < t.escape_target) continue;
+        try @import("contract_events.zig").walkOut(gs, p, company);
+        out.people += 1;
+    }
+    // The night is paid for whether or not it bought anything.
+    @import("contract_events.zig").applyToCompany(gs, company, .fatigue, t.push_fatigue);
+    if (out.anything()) @import("contract_events.zig").applyToCompany(gs, company, .morale, t.push_morale);
+    if (@as(i32, gs.rng.roll2d6(.battle)) <= t.push_mishap_at) {
+        out.mishap = try mishapOnTheSortie(gs, company);
+    }
+    return out;
+}
+
+/// A sortie onto ground the enemy holds goes wrong: one of the company's
+/// people takes a wound. Returns false if there was nobody to hurt.
+fn mishapOnTheSortie(gs: *GameState, company: types.ForceId) !bool {
+    var candidates: u32 = 0;
+    var pit = gs.people.iterator();
+    while (pit.next()) |e| if (gs.companyOf(e.value_ptr.assigned_force) == company and e.value_ptr.isOnBooks()) {
+        candidates += 1;
+    };
+    if (candidates == 0) return false;
+    var pick = gs.rng.random(.battle).uintLessThan(u32, candidates);
+    pit = gs.people.iterator();
+    while (pit.next()) |e| {
+        const p = e.value_ptr;
+        if (gs.companyOf(p.assigned_force) != company or !p.isOnBooks()) continue;
+        if (pick > 0) {
+            pick -= 1;
+            continue;
+        }
+        try @import("medical.zig").inflict(gs, p.id, .combat, tuning.battle.wound_serious_severity, "hurt on a night sortie to recover the downed");
+        return true;
+    }
+    return false;
+}
+
 /// What a lost field cost: hulls left to the enemy, pilots they hold, and
 /// the rest of those hulls' value for the battle-loss claim.
 const FieldLoss = struct {
@@ -916,6 +993,10 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     // field is held, and only once `recordBattle` has had its say about
     // whether there is a contract left to fight on.
     if (held_field and !outcome.isLoss()) try @import("contract_events.zig").queuePress(gs, c);
+    // And a lost field asks whether the company goes back for what it
+    // left (12G.6). The two are exclusive: wrecks are only left behind on
+    // a field that was lost.
+    if (lost_hulls > 0 or missing > 0) try @import("contract_events.zig").queueRecoveryPush(gs, c, report.id);
 }
 
 /// " · field lost · recovery 6 vs 7 — LEFT TO THE ENEMY" (12D.3).
@@ -1379,6 +1460,105 @@ fn lossRun(seed: u64, level: @import("../domain/difficulty.zig").Level, n: u32) 
         .held = @intCast(gs.held_hulls.items.len),
         .all_held_by_enemy = all_held_by_enemy,
     };
+}
+
+test "12G.6: a lost field asks whether to go back, and going back wins hulls and crew home" {
+    const events_mod = @import("events.zig");
+    var recovered_hulls: u32 = 0;
+    var recovered_people: u32 = 0;
+    var asked: u32 = 0;
+    for ([_]u64{ 61, 62, 63, 64 }) |seed| {
+        var gs = GameState.init(std.testing.allocator, .{ .seed = seed });
+        defer gs.deinit();
+        gs.difficulty = .elite;
+        _ = try gs.createCommander("T", .LC, .line_officer);
+        const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+        try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
+            .id = @enumFromInt(1),
+            .kind = .planetary_assault,
+            .employer_key = "LC",
+            .enemy_key = "DC",
+            .planet_key = "galatea",
+            .terms = .{ .length_months = 6, .base_pay_month = 400_000, .battle_loss_pct = 30 },
+            .status = .active,
+            .assigned_company = co,
+        });
+        const c = gs.contracts.getPtr(@enumFromInt(1)).?;
+        // A broken company on a field it cannot hold.
+        var guard: u32 = 0;
+        while (gs.event_queue.blocking() == null and guard < 12) : (guard += 1) {
+            var pit = gs.people.iterator();
+            while (pit.next()) |e| {
+                e.value_ptr.morale = 0;
+                e.value_ptr.fatigue = 60;
+            }
+            var uit = gs.units.iterator();
+            while (uit.next()) |e| if (e.value_ptr.status != .destroyed) {
+                e.value_ptr.armor_pct = 0;
+            };
+            try resolveEngagement(&gs, c);
+        }
+        const ev = gs.event_queue.blocking() orelse continue;
+        if (ev.kind != .recovery_push) continue;
+        asked += 1;
+        try std.testing.expectEqual(events_mod.EventKind.recovery_push, ev.kind);
+        // The decision names the fight it answers — without that the
+        // push has no idea what was left where.
+        try std.testing.expect(ev.battle != .none);
+
+        const held_before: u32 = @intCast(gs.held_hulls.items.len);
+        var mia_before: u32 = 0;
+        var pit2 = gs.people.iterator();
+        while (pit2.next()) |e| if (e.value_ptr.status == .mia) {
+            mia_before += 1;
+        };
+        const got = try recoveryPush(&gs, ev.battle, co);
+        recovered_hulls += got.hulls;
+        recovered_people += got.people;
+
+        // Whatever the rolls said, the books agree with the tally: a hull
+        // counted as won is a hull off the limbo list and back in `units`.
+        try std.testing.expectEqual(held_before - got.hulls, @as(u32, @intCast(gs.held_hulls.items.len)));
+        var mia_after: u32 = 0;
+        pit2 = gs.people.iterator();
+        while (pit2.next()) |e| if (e.value_ptr.status == .mia) {
+            mia_after += 1;
+        };
+        try std.testing.expectEqual(mia_before - got.people, mia_after);
+        // And nobody who walked out is still waiting in the inbox to be
+        // ransomed from a house that no longer holds them.
+        for (gs.event_queue.pending.items) |pending| {
+            if (pending.kind != .mia_held) continue;
+            try std.testing.expectEqual(person_mod.Status.mia, gs.person(pending.person).?.status);
+        }
+    }
+    // Vacuous otherwise: four broken companies that never lost anything.
+    try std.testing.expect(asked > 0);
+    try std.testing.expect(recovered_hulls + recovered_people > 0);
+}
+
+test "12G.6: a hull won back goes home to the lance it was taken from" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 6006 });
+    defer gs.deinit();
+    _ = try gs.createCommander("T", .LC, .line_officer);
+    _ = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    const taken = blk: {
+        var it = gs.units.iterator();
+        while (it.next()) |e| if (e.value_ptr.kind == .mek and e.value_ptr.force != .none) break :blk e.value_ptr.id;
+        unreachable;
+    };
+    const lance = gs.unit(taken).?.force;
+    const seats_before = gs.forces.getPtr(lance).?.units.items.len;
+    try gs.holdUnit(taken, "DC", @enumFromInt(1));
+    try std.testing.expectEqual(seats_before - 1, gs.forces.getPtr(lance).?.units.items.len);
+
+    try std.testing.expect(try gs.releaseHull(taken));
+    try std.testing.expect(gs.heldHull(taken) == null);
+    try std.testing.expectEqual(lance, gs.unit(taken).?.force);
+    try std.testing.expectEqual(seats_before, gs.forces.getPtr(lance).?.units.items.len);
+
+    // Asking twice is not an error and wins nothing the second time.
+    try std.testing.expect(!try gs.releaseHull(taken));
 }
 
 test "12G.7: a hull left on a lost field passes into enemy hands, not off the books" {

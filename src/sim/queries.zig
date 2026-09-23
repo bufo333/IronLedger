@@ -355,6 +355,7 @@ pub fn effectsText(alloc: Alloc, effects: []const @import("events.zig").Effect) 
         .morale => |m| try appendTag(alloc, &out, m >= 0, try std.fmt.allocPrint(alloc, "morale {s}{d}", .{ if (m >= 0) "+" else "", m })),
         .fatigue => |f| try appendTag(alloc, &out, false, try std.fmt.allocPrint(alloc, "fatigue +{d}", .{f})),
         .next_battle_in => |d| try appendTag(alloc, &out, false, try std.fmt.allocPrint(alloc, "contact in {d}d", .{d})),
+        .recovery_push => try appendTag(alloc, &out, true, "one more roll for every hull and pilot left on the field"),
         .xp_all => |x| try appendTag(alloc, &out, true, try std.fmt.allocPrint(alloc, "XP +{d} all", .{x})),
         .score => |s| try appendTag(alloc, &out, s >= 0, try std.fmt.allocPrint(alloc, "contract score {s}{d}", .{ if (s >= 0) "+" else "", s })),
         .damage_random_units => |n| try appendTag(alloc, &out, false, try std.fmt.allocPrint(alloc, "{d} line hull{s} damaged", .{ n, if (n == 1) "" else "s" })),
