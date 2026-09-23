@@ -189,10 +189,28 @@ event-driven; Raid/Assault classes are short and battle-heavy.
 
 The game is **turn-based**: a turn is one campaign day, and time moves only
 when the player ends a turn (multi-day advance = several turns back to
-back). Nothing ever blocks or interrupts an advance — events that need the
-player land in the **decision inbox** with a deadline, and an unanswered
-decision applies its (safe) default option at that deadline, noted in the
-log. Ignoring the inbox is a choice with consequences, not an impossibility.
+back).
+
+**What may stop a turn.** A decision that only moves the dials — money,
+fatigue, morale, reputation, employer standing, score, the contract bonus
+— never blocks or interrupts an advance. It lands in the **decision
+inbox** with a deadline, and an unanswered one applies its (safe) default
+option at that deadline, noted in the log. Ignoring that inbox is a choice
+with consequences, not an impossibility: every option is a trade the
+campaign can absorb, and the cautious default is always a real answer.
+
+**Battle decisions block.** An engagement disposes of hulls and people
+permanently — which wrecks the trucks lift, whether the company goes back
+for what it left, whether it presses or consolidates — and there is no
+safe default to lapse to, because every option forfeits something that
+does not come back. So an unanswered after-action report holds the turn,
+and a multi-day advance stops on the day it lands rather than resolving
+the rest of the week around it. Solvency is the other stop (§11): a
+negative treasury holds the turn until it is covered.
+
+The test for a new blocking rule is *what it disposes of*, not how big it
+feels. If the worst outcome is a worse bonus, it waits in the inbox.
+
 Each turn runs a fixed pipeline over the whole state — order matters and is
 part of the spec:
 
@@ -298,6 +316,13 @@ sit in the inbox with a deadline days out; the default option — always the
 cautious one — applies automatically if the deadline passes. Decisions are
 the moment-to-moment gameplay of garrison contracts and the profitability
 lever the player pulls.
+
+Not every inbox item is one of these. A **notice** is information with an
+expiry and no options — contact expected in three days — and simply
+lapses. An **after-action report** is answered through its own commands
+rather than by picking an option, never defaults, and holds the turn
+until its calls are made (§6, §7): it disposes of hulls and people, not
+of the contract bonus.
 
 ## 9. HQ network, influence & supply lines (the game's centerpiece)
 
