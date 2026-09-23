@@ -285,7 +285,39 @@ grep -n '@import("tui/' src/main.zig      # one line per src/tui module
 
 ---
 
-## 9. Pull-request checklist
+## 9. Pull requests
+
+### 46. One branch in flight at a time
+
+A change lands on `main` before the next one starts. Branches are
+sequential, never a stack of open PRs, because two branches cut from the
+same `main` cannot see each other: they edit the same line without
+conflict until merge time, and every branch after the first is verified
+against a `main` that does not yet exist. A branch is finished when its
+PR is merged, the branch is deleted both sides, and `main` is pulled.
+
+Corollaries, each of which has bitten:
+
+- **A pushed branch always has a PR.** Pushing work with no PR makes it
+  unreviewable and lets it rot behind `main`.
+- **The gate runs on the branch as it stands.** Never borrow a file from
+  another branch to make a check pass; if the gate needs a fix that lives
+  elsewhere, land that fix on `main` first.
+- **Big changes split into increments that each land**, not into
+  increments that each open a branch.
+
+**Reviewer checks**
+
+```sh
+gh pr list --state open        # more than one open PR is the smell
+git branch -a                  # between changes: `main` alone
+git log --oneline origin/main..HEAD   # a branch should be a short series
+```
+
+- Does this branch touch a line another open branch also touches? If you
+  cannot answer, there is more than one branch open.
+
+### The checklist
 
 Before requesting review, answer each in the description:
 

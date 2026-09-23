@@ -25,15 +25,41 @@ order — implement stages in order unless told otherwise.
 
 ## Git workflow
 
-- Never commit to `main`. Every change starts on a new branch off the
-  latest `origin/main`, named `<area>/<short-name>` (`tui/after-action`,
-  `docs/git-workflow`).
-- Changes reach `main` only through a pull request: never push to `main`,
-  never merge locally.
+**One branch in flight at a time.** Start it, land it, delete it, pull
+`main` — then start the next. Never begin a second change while the first
+is unmerged, however small or unrelated it looks: parallel branches cut
+from `main` cannot see each other, so two of them editing one line is
+invisible until a merge conflict, and every branch after the first is
+verified against a `main` that does not exist yet.
+
+The loop, every time:
+
+```sh
+git checkout main && git pull --ff-only     # never branch from a stale main
+git checkout -b <area>/<short-name>         # tui/after-action, docs/git-workflow
+# …work; the gate in rule 10 must be green…
+git push -u origin <branch> && gh pr create # push and PR in the same step
+gh pr merge <n> --merge --delete-branch     # then: git checkout main && git pull
+```
+
+- Never commit to `main`, never push to `main`, never merge locally.
+- **Never push a branch without opening its PR in the same step.** A
+  pushed branch with no PR is invisible work: nobody can review it, it
+  rots behind `main`, and it is how dead branches happen.
+- **Never verify a change with a file borrowed from another branch.** If
+  the gate needs a fix that lives on a different branch, that fix must
+  land on `main` first — otherwise the gate is not one anybody else can
+  reproduce.
+- Finish the loop. A merged PR is not done until its branch is deleted
+  both sides and `main` is pulled; `git branch -a` should show `main`
+  alone before the next change starts.
 - Use the `gh` CLI for every GitHub interaction — opening pull requests,
   reading review comments, checking CI, listing issues.
-- Push the branch and open the PR once the work is green (the gate in
-  rule 10), with the section 9 checklist answered in the description.
+- Answer the section 9 checklist in the PR description.
+
+If a change is genuinely too big for one PR, split it into increments
+that each land on `main` before the next begins — sequentially, not as a
+stack of open branches.
 
 ## Hard rules
 
