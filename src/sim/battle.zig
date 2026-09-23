@@ -885,7 +885,9 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
         .battle_loss_pct = c.terms.battle_loss_pct,
         .salvage_pct = c.terms.salvage_pct,
         .command_rights = @tagName(c.terms.command_rights),
-        .hulls = hit_log.items,
+        // Owned, not borrowed: `hit_log` is freed when this function
+        // returns, and the report outlives it (12G.4).
+        .hulls = try gs.allocator().dupe(after_action.HullHit, hit_log.items),
         .ammo = ammo_lines.items,
         .silenced_mounts = player.silenced_mounts,
         .armor_left = gs.stockCount(player.site, "armor"),
@@ -899,6 +901,9 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     };
     const ctx: @import("state.zig").LogCtx = .{ .company = c.assigned_company, .contract = c.id };
     for (try after_action.render(gs.allocator(), &report)) |line| try gs.log(.battle, ctx, "{s}", .{line});
+    // Kept so the screens can show the fight as a picture (12G.4); the
+    // AAR lines above are the permanent account and are never pruned.
+    try gs.recordBattleReport(report);
     // Hulls left on the field are gone for good (12D.3) — struck off once
     // the AAR has named them.
     for (hit_log.items) |h| if (h.lost) gs.removeUnit(h.unit);

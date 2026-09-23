@@ -438,7 +438,7 @@ fn runRepl(gs: *game.state.GameState, io: std.Io, gpa: std.mem.Allocator, store_
             \\=== IRON LEDGER — command console ===
             \\          save | campaigns | load <id> | delete <id> | new (fresh campaign) | quit
             \\views:    status | toe | hqs | offers | contracts | roster [co:<id>|hq:<id>] | medbay | hall [filter]
-            \\          checklist | inbox | log [n] [filter] | pnl | ledger | treasuries | units | parts | orders | sop | candidates <offer#>
+            \\          checklist | inbox | battles [id] | log [n] [filter] | pnl | ledger | treasuries | units | parts | orders | sop | candidates <offer#>
             \\          shop | supplies | demand | bays | projects | staff | lab <unit> | readiness | rating | summary | manning co:<id>
             \\turn:     day [n] [force]   (the checklist gates it)
             \\commands: `help` lists every verb with its usage — the same verbs the TUI's `:` line takes
@@ -541,6 +541,25 @@ fn runRepl(gs: *game.state.GameState, io: std.Io, gpa: std.mem.Allocator, store_
             printLines(al, try q.summary(al, gs), "");
         } else if (std.mem.eql(u8, verb, "inbox")) {
             printLines(al, try q.inboxLines(al, gs), "");
+        } else if (std.mem.eql(u8, verb, "battles")) {
+            // battles           — the engagements still on record
+            // battles <id>      — that one's after-action, in full
+            if (tokens.next()) |tok| {
+                const id: game.types.BattleId = @enumFromInt(std.fmt.parseInt(u32, tok, 10) catch 0);
+                if (try q.battleReport(al, gs, id)) |lines| {
+                    printLines(al, lines, "");
+                } else {
+                    std.debug.print("no engagement on record with that id — `battles` lists them\n", .{});
+                }
+            } else {
+                const rows = try q.battleList(al, gs);
+                if (rows.len == 0) {
+                    std.debug.print("no engagements on record yet.\n", .{});
+                } else {
+                    std.debug.print("AFTER-ACTION REPORTS ({d} on record, newest first — `battles <id>` reads one):\n", .{rows.len});
+                    printTable(al, q.battle_cols, rows, "  ");
+                }
+            }
         } else if (std.mem.eql(u8, verb, "log")) {
             // log [n] [filter] — filter: outfit-wide default, a category name,
             // or co:<id> / hq:<id> for one entity's full history.

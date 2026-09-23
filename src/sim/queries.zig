@@ -4773,6 +4773,79 @@ pub fn medbay(alloc: Alloc, gs: *GameState) ![]const []const u8 {
     return out.toOwnedSlice(alloc);
 }
 
+/// One row per kept engagement (12G.4), newest first: the fight named,
+/// its verdict coloured, and what it cost.
+pub const BattleRow = struct {
+    id: types.BattleId,
+    cells: table.Row,
+};
+
+pub const battle_cols: []const table.Col = &.{
+    .{ .name = "id", .justify = .right },
+    .{ .name = "day", .justify = .right },
+    .{ .name = "company" },
+    .{ .name = "where" },
+    .{ .name = "outcome" },
+    .{ .name = "field" },
+    .{ .name = "hit", .justify = .right },
+    .{ .name = "lost", .justify = .right },
+    .{ .name = "crew" },
+};
+
+/// The colour a verdict reads in: a held field is the line between a win
+/// you can salvage and a loss you pay for, so it decides the mark rather
+/// than the outcome's name alone.
+pub fn outcomeMark(outcome: @import("autoresolve.zig").Outcome) []const u8 {
+    if (outcome == .rout) return "{c}";
+    if (outcome.isLoss()) return "{a}";
+    return "{g}";
+}
+
+pub fn battleList(alloc: Alloc, gs: *GameState) ![]BattleRow {
+    var out: std.ArrayListUnmanaged(BattleRow) = .empty;
+    var i: usize = gs.battle_reports.items.len;
+    while (i > 0) {
+        i -= 1;
+        const r = &gs.battle_reports.items[i];
+        const crew = if (r.kia + r.wounded + @as(u8, @intCast(@min(r.missing, 255))) == 0)
+            "{g}all in{/}"
+        else
+            try std.fmt.allocPrint(alloc, "{s}{d} WIA · {d} KIA · {d} MIA{{/}}", .{ if (r.kia + r.missing > 0) "{c}" else "{a}", r.wounded, r.kia, r.missing });
+        try out.append(alloc, .{ .id = r.id, .cells = try table.row(alloc, &.{
+            try std.fmt.allocPrint(alloc, "{d}", .{@intFromEnum(r.id)}),
+            try std.fmt.allocPrint(alloc, "{d}", .{r.day}),
+            forceName(gs, r.company),
+            try std.fmt.allocPrint(alloc, "{s} · {s}", .{ r.scenario, r.terrain }),
+            try std.fmt.allocPrint(alloc, "{s}{s}{{/}}", .{ outcomeMark(r.outcome), @tagName(r.outcome) }),
+            if (r.held_field) "{g}held{/}" else "{c}lost{/}",
+            try std.fmt.allocPrint(alloc, "{d}", .{r.hits_taken}),
+            try std.fmt.allocPrint(alloc, "{s}{d}{{/}}", .{ if (r.lost_hulls > 0) "{c}" else "", r.destroyed }),
+            crew,
+        }) });
+    }
+    return out.toOwnedSlice(alloc);
+}
+
+/// One engagement's after-action, as the screens show it: the same lines
+/// the campaign log kept, with the colour a screen wants. The record is
+/// the source; `after_action.render` is still the only place a battle
+/// becomes prose (rule 5).
+pub fn battleReport(alloc: Alloc, gs: *GameState, id: types.BattleId) !?[]const []const u8 {
+    const r = gs.battleReport(id) orelse return null;
+    const plain = try @import("after_action.zig").render(alloc, r);
+    var out: std.ArrayListUnmanaged([]const u8) = .empty;
+    for (plain) |line| {
+        // The header carries the verdict, so it takes the verdict's mark;
+        // the indented detail lines stay dim chrome around their content.
+        const is_header = std.mem.indexOf(u8, line, "[AAR]   ") == null;
+        try out.append(alloc, if (is_header)
+            try std.fmt.allocPrint(alloc, "{s}{s}{{/}}", .{ outcomeMark(r.outcome), line })
+        else
+            try std.fmt.allocPrint(alloc, "{{d}}{s}{{/}}", .{line}));
+    }
+    return try out.toOwnedSlice(alloc);
+}
+
 /// The last `n` log lines matching a filter, oldest first.
 pub fn logLines(alloc: Alloc, gs: *GameState, n: usize, filter: state_mod.LogFilter) ![]const []const u8 {
     var out: std.ArrayListUnmanaged([]const u8) = .empty;

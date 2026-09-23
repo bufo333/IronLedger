@@ -28,6 +28,8 @@ out=$(printf '%s\n' \
   'day 3 force' \
   'inbox' \
   'resolve 999 1' \
+  'battles' \
+  'battles 999' \
   'help' \
   'save' \
   'quit' | "$exe" --repl --store "$db" 2>&1)
@@ -44,6 +46,10 @@ check 'hired #'
 # is not in the queue is refused instead of hitting whatever sits in row 999.
 check 'inbox'
 check 'no pending decision'
+# 12G.4: engagements are kept as records the screens read; an id that is
+# not on record is refused rather than printing someone else's battle.
+check 'AFTER-ACTION REPORTS\|no engagements on record'
+check 'no engagement on record with that id'
 check 'fabricate'
 check 'stripped for parts'
 check 'drew 500000 c-bills over 12 months'

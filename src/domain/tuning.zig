@@ -325,6 +325,10 @@ pub const Tuning = struct {
         /// per point, the severity that also breaks a slot, cooks an ammo
         /// bin off, kills the hull outright, or kills it with no armour left.
         armor_per_severity: u8,
+        /// Engagements kept as records (12G.4). The permanent account is
+        /// the AAR in the campaign log; these are what the screens read,
+        /// so a few tours' worth is plenty.
+        reports_kept: u32, // TUNE
         damage_value_per_severity: types.CBills,
         slot_hit_severity: u8,
         cookoff_severity: u8,
