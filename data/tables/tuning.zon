@@ -241,6 +241,7 @@
         .garrison_probe_base_days = 21,
         .garrison_probe_die_days = 3,
         .garrison_probe_lances = 1,
+        .salvage_candidates = 5, // TUNE: enough for a real trade, few enough to read
         .press_gap_days = 3, // TUNE: a pressed advance is the next morning-ish
         .press_score = 2, // TUNE: the employer sees initiative
         .press_fatigue = 4, // TUNE: no repair, no rearm, no sleep

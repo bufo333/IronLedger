@@ -2449,6 +2449,12 @@ pub const App = struct {
                     try rows.append(al, "");
                     try rows.append(al, try std.fmt.allocPrint(al, "  {s}", .{it.description}));
                     try rows.append(al, "");
+                    // What the decision is actually about, when one line
+                    // cannot carry it (12G.6: the wrecks on offer).
+                    if (it.detail.len > 0) {
+                        try rows.appendSlice(al, it.detail);
+                        try rows.append(al, "");
+                    }
                     for (it.options, 0..) |o, oi| {
                         try rows.append(al, try std.fmt.allocPrint(al, "    [{d}] {s}{s}", .{ oi + 1, o, if (oi == it.default_choice) "   {d}default{/}" else "" }));
                     }

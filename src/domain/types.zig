@@ -128,6 +128,11 @@ pub const Quality = enum(u8) {
 
 pub const SupplyClass = enum { parts, ammo, medical, provisions, personnel };
 
+/// How a salvage claim is spent (12G.6). The haul is a BV budget and the
+/// wrecks on offer cost BV, so the commander is trading one heavy hull
+/// against several light ones against a crate of spares.
+pub const SalvagePlan = enum { heaviest, most_hulls, parts_only };
+
 /// Where physical stock sits (Stage 9B): the outfit's fallback depot (no HQ
 /// yet), an HQ warehouse, or a deployed company's field stores (which
 /// travel with it, capped by its logistics trucks).

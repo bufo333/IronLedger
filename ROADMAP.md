@@ -1257,8 +1257,19 @@ the player reads, and a turn that stops until they have.
     that rolls low costs somebody a wound. The report is not rewritten:
     it is the account of the fight, and at the end of the fight those
     hulls were on the field.
-  - ☐ **Salvage priority** — a candidate set against the haul budget,
-    rather than the RAT rolling two wrecks at claim time.
+  - ✅ **Salvage priority.** `claimSalvage` used to roll wrecks off the
+    RAT *at claim time* and take the first two that fit — the player saw
+    a fait accompli. The wrecks are now rolled once when the fight ends
+    (`tuning.battle.salvage_candidates`) and kept in the record, and the
+    claim is a BV budget spent three ways: the biggest wreck it reaches,
+    as many wrecks as it reaches (cheapest first, up to
+    `battle.max_salvage_hulls`), or no wrecks at all and the lot in
+    spares and armour. `battle.salvagePlan` is pure and is called twice —
+    once by the inbox row that offers the haul, once by the command that
+    loads the trucks — so the manifest offered and the manifest
+    materialised cannot differ. Asked only when taking the biggest and
+    taking the most are different hauls (`salvageWorthAsking`);
+    otherwise the fight takes the only plan there is.
   - ☐ **Field repair priority** — which hull the techs take first.
 - ✅ 12G.7 **Hulls held, not struck off.** A hull left on a lost field
   passes into enemy hands instead of being deleted: `GameState.holdUnit`
