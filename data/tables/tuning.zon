@@ -104,6 +104,12 @@
         .permanent_target = 4,
     },
     .person = .{
+        .readiness_depot_weight = 10,
+        .readiness_spent_weight = 5,
+        .readiness_wounded_weight = 3,
+        .readiness_fatigue_divisor = 4,
+        .readiness_transit_divisor = 4,
+        .readiness_morale_divisor = 4,
         .permanent_penalty_per_injury = 1,
         .morale_content = 50,
         .morale_garrison_lift_below = 45,

@@ -50,6 +50,15 @@ pub const WarningKind = enum {
     /// An active contract rates 4½ skulls or worse for the company on it
     /// today (12E.5): consider cautious ROE or recall.
     outmatched,
+
+    /// Stops the turn until dealt with (ARCH §9.9): the desk decides which
+    /// warnings gate `advance_day`; the screens only colour them.
+    pub fn blocking(self: WarningKind) bool {
+        return switch (self) {
+            .decision_due, .understaffed_hq, .overdrawn, .combat_ineffective, .dry_ammo, .hungry, .untreated_wounded, .insolvent => true,
+            else => false,
+        };
+    }
 };
 
 /// Does any working weapon in the company draw on this munition family?

@@ -141,6 +141,15 @@ pub const Tuning = struct {
         permanent_target: u8,
     },
     person: struct {
+        /// Readiness ranking for an offer (12E.5): points against a company
+        /// per hull in the depot, per spent crew, per wounded, and the
+        /// divisors that turn fatigue, transit days and morale into points.
+        readiness_depot_weight: i32,
+        readiness_spent_weight: i32,
+        readiness_wounded_weight: i32,
+        readiness_fatigue_divisor: u32,
+        readiness_transit_divisor: u32,
+        readiness_morale_divisor: u32,
         /// Skill points a permanent head or internal injury costs.
         permanent_penalty_per_injury: u8,
         /// Morale bands the boards colour: under `restless_morale` is

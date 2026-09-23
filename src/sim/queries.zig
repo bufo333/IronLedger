@@ -172,11 +172,9 @@ pub fn status(alloc: Alloc, gs: *GameState) !Status {
 }
 
 /// Warnings that should stop a turn until acknowledged (the rest are notices).
+/// `checklist.WarningKind.blocking` is the rule; kept as a name the frontends know.
 pub fn isBlocking(kind: checklist.WarningKind) bool {
-    return switch (kind) {
-        .decision_due, .understaffed_hq, .overdrawn, .combat_ineffective, .dry_ammo, .hungry, .untreated_wounded, .insolvent => true,
-        else => false,
-    };
+    return kind.blocking();
 }
 
 // -------------------------------------------------------------------- desk
@@ -977,9 +975,7 @@ pub const missingRansom = contract_events.ransomPrice;
 
 /// Does the outfit hold a prisoner of this house (a trade is possible)?
 pub fn holdsPrisonerOf(gs: *GameState, faction: []const u8) bool {
-    var it = gs.people.iterator();
-    while (it.next()) |e| if (e.value_ptr.status == .pow and std.mem.eql(u8, e.value_ptr.faction, faction)) return true;
-    return false;
+    return gs.holdsPrisonerOf(faction);
 }
 
 /// A wreck's line (12D.2): how it died, what the rebuild costs against a
@@ -1841,22 +1837,21 @@ pub fn upgrades(alloc: Alloc, gs: *GameState, hq_id: types.HqId) ![]UpgradeRow {
         const kind: hq_mod.FacilityKind = @enumFromInt(f.value);
         const lvl = h.facilityLevel(kind);
         const next: u8 = lvl + 1;
-        var in_progress = false;
-        for (h.projects.items) |p| if (p.facility == kind and p.phase(gs.clock.day_index) != .complete) {
-            in_progress = true;
-        };
-        const maxed = next > hq_mod.max_facility_level;
+        const block = hq_ops.upgradeBlock(gs, hq_id, kind);
+        const in_progress = block == .in_progress;
+        const maxed = block == .maxed;
+        const affordable = block != .funds_short;
         const cost = if (maxed) 0 else hq_mod.upgradeCost(kind, next);
-        const affordable = h.funds >= cost;
+        const tn = @import("../domain/tuning.zig").t;
         const buys: []const u8 = if (maxed) "at maximum" else switch (kind) {
-            .mek_bay => try std.fmt.allocPrint(alloc, "{d} bay slots · refit class ceiling rises", .{2 * @as(u32, next)}),
-            .warehouse => try std.fmt.allocPrint(alloc, "{d}t storage", .{200 * @as(u32, next) * @as(u32, next)}),
-            .hospital => try std.fmt.allocPrint(alloc, "{d} beds · shorter stays", .{10 * @as(u32, next)}),
+            .mek_bay => try std.fmt.allocPrint(alloc, "{d} bay slots · refit class ceiling rises", .{tn.hq_ops.slots_per_bay_level * @as(u32, next)}),
+            .warehouse => try std.fmt.allocPrint(alloc, "{d}t storage", .{tn.hq.warehouse_tons_per_level_sq * @as(u32, next) * @as(u32, next)}),
+            .hospital => try std.fmt.allocPrint(alloc, "{d} beds · shorter stays", .{tn.medical.beds_per_hospital_level * @as(u32, next)}),
             .mess => "faster fatigue recovery, morale",
             .training_ground => "training available · shorter programs",
             .hiring_hall => "more and better candidates",
-            .comms => try std.fmt.allocPrint(alloc, "ring +10 LY → {d} LY · more offers", .{h.influenceLy() + 10}),
-            .spaceport => try std.fmt.allocPrint(alloc, "ring +5 LY · berths · cheaper freight", .{}),
+            .comms => try std.fmt.allocPrint(alloc, "ring +{d} LY → {d} LY · more offers", .{ tn.hq.influence_per_comms_ly, h.influenceLy() + tn.hq.influence_per_comms_ly }),
+            .spaceport => try std.fmt.allocPrint(alloc, "ring +{d} LY · berths · cheaper freight", .{tn.hq.influence_per_spaceport_ly}),
         };
         const state: []const u8 = if (in_progress) "{a}project running{/}" else if (maxed) "{d}max{/}" else if (!affordable) "{c}HQ funds short{/}" else "{g}ready{/}";
         const reason: []const u8 = if (in_progress) "a project is already running" else if (maxed) "already at maximum level" else if (!affordable) try std.fmt.allocPrint(alloc, "HQ funds short: needs {s} C, has {s} C", .{ try money(alloc, cost), try money(alloc, h.funds) }) else "ready";
@@ -1864,7 +1859,7 @@ pub fn upgrades(alloc: Alloc, gs: *GameState, hq_id: types.HqId) ![]UpgradeRow {
             f.name,
             try std.fmt.allocPrint(alloc, "lv {d} → {d}", .{ lvl, if (maxed) lvl else next }),
             if (maxed) "—" else try money(alloc, cost),
-            try std.fmt.allocPrint(alloc, "{d} + {d} days", .{ paperwork, if (maxed) 0 else 14 * @as(u32, next) }),
+            try std.fmt.allocPrint(alloc, "{d} + {d} days", .{ paperwork, if (maxed) 0 else tn.hq_ops.build_days_per_level * @as(u32, next) }),
             buys,
             state,
         }) });
@@ -2094,10 +2089,7 @@ pub fn market(alloc: Alloc, gs: *GameState, filter: MarketFilter, hq: types.HqId
     };
 }
 
-fn isStaple(key: []const u8) bool {
-    for (market_mod.staple_keys) |k| if (std.mem.eql(u8, k, key)) return true;
-    return false;
-}
+const isStaple = market_mod.isStaple;
 
 // ------------------------------------------------------- raising a company
 
@@ -2493,19 +2485,14 @@ fn loyaltyNote(alloc: Alloc, p: *const person_mod.Person, day: u32) ![]const u8 
 
 /// What letting this person go would cost today (12C.2); `fired` halves it.
 pub fn severanceOwed(gs: *GameState, id: types.PersonId, fired: bool) types.CBills {
-    const p = gs.person(id) orelse return 0;
-    const full = p.severance(gs.clock.day_index);
-    return if (fired) types.applyBp(full, @import("../domain/tuning.zig").t.person.fire_severance_bp) else full;
+    const share: types.Bp = if (fired) @import("../domain/tuning.zig").t.person.fire_severance_bp else types.full_bp;
+    return @import("personnel.zig").severanceOwed(gs, id, share);
 }
 
 /// Nobody's pilot, nobody's tech, not posted to an HQ, not on a company's
 /// books: the people the assignment column shows as "unassigned".
 pub fn isUnassigned(gs: *GameState, p: *const person_mod.Person) bool {
-    if (p.posted_hq != .none or p.assigned_force != .none) return false;
-    if (gs.pilotSeat(p.id) != .none) return false;
-    var uit = gs.units.iterator();
-    while (uit.next()) |e| if (e.value_ptr.tech == p.id) return false;
-    return true;
+    return gs.isUnassigned(p);
 }
 
 pub fn statusText(alloc: Alloc, gs: *GameState, p: *const person_mod.Person) ![]const u8 {
@@ -3001,11 +2988,7 @@ pub fn contractHistory(alloc: Alloc, gs: *GameState) ![]HistoryRow {
 /// Contracts the outfit has worked on a world (any outcome): the founding
 /// rule counts them as reach.
 pub fn contractsWorkedAt(gs: *GameState, planet_key: []const u8) u32 {
-    var n: u32 = 0;
-    for (gs.contracts.values()) |c| if (std.mem.eql(u8, c.planet_key, planet_key) and c.status != .offer) {
-        n += 1;
-    };
-    return n;
+    return gs.contractsWorkedAt(planet_key);
 }
 
 /// Offer rows for one world (text only).
@@ -3070,15 +3053,10 @@ pub const InstallLocation = struct {
 /// (a trial validation on top of the current plan).
 pub fn installLocations(alloc: Alloc, gs: *GameState, uid: types.UnitId, part_key: []const u8) ![]InstallLocation {
     var out: std.ArrayListUnmanaged(InstallLocation) = .empty;
-    const u = gs.unit(uid) orelse return out.toOwnedSlice(alloc);
-    const design = chassis_mod.find(u.chassis_key) orelse return out.toOwnedSlice(alloc);
-    const base = try gs.labItems(uid, alloc);
+    if (gs.unit(uid) == null) return out.toOwnedSlice(alloc);
     inline for (@typeInfo(meklab.Location).@"enum".fields) |f| {
         const loc: meklab.Location = @enumFromInt(f.value);
-        var items = try alloc.alloc(meklab.Item, base.len + 1);
-        @memcpy(items[0..base.len], base);
-        items[base.len] = .{ .location = loc, .part_key = part_key };
-        const r = try meklab.validate(design, items, alloc);
+        const r = gs.tryInstall(alloc, uid, loc, part_key) catch return out.toOwnedSlice(alloc);
         var why: []const u8 = "";
         if (!r.legal) {
             for (r.violations) |v| {
@@ -3808,8 +3786,7 @@ pub fn offerCandidates(alloc: Alloc, gs: *GameState, offer_index: usize) ![]Cand
         };
         const days: u32 = if (jumps == 0) logistics_mod.same_world_days else logistics_mod.transitDays(jumps);
         const eligible = why.len == 0;
-        const penalty: i32 = @as(i32, @intCast(r.depot)) * 10 + @as(i32, @intCast(r.spent)) * 5 + @as(i32, @intCast(r.wounded)) * 3 +
-            @as(i32, @intCast(r.fatigue / 4)) + @as(i32, @intCast(days / 4)) - @as(i32, @intCast(r.morale / 4));
+        const penalty: i32 = @import("personnel.zig").readinessPenalty(@import("personnel.zig").companyCrewStats(gs, r.company), r.depot, days);
         const fat_mk = fatigueMarkup(person_mod.Person.fatigueBandOf(r.fatigue));
         const mor_mk = moraleMarkup(r.morale);
         // Skulls (12E.5): what the company can field today against what the
@@ -3987,9 +3964,7 @@ pub fn companyChoices(alloc: Alloc, gs: *GameState, what: enum { unit, person, s
         .unit => {
             u = gs.unit(@enumFromInt(subject)) orelse return out.toOwnedSlice(alloc);
             from = gs.companyOf(u.?.force);
-            if (gs.isCompanyDeployed(from)) blocked = "its company is deployed";
-            if (u.?.status == .in_transit) blocked = "it is in transit";
-            if (u.?.status == .repairing) blocked = "it is in the depot";
+            blocked = @import("commands.zig").transferBlock(gs, u.?) orelse "";
         },
         .person => {
             p = gs.person(@enumFromInt(subject)) orelse return out.toOwnedSlice(alloc);
@@ -4079,7 +4054,6 @@ pub fn crewChoices(alloc: Alloc, gs: *GameState, unit_id: types.UnitId) ![]PickR
     var out: std.ArrayListUnmanaged(PickRow) = .empty;
     const unit_dom = @import("../domain/unit.zig");
     const u = gs.unit(unit_id) orelse return out.toOwnedSlice(alloc);
-    const day = gs.clock.day_index;
     const own = gs.companyOf(u.force);
     const pilot_role = unit_dom.crewRoleFor(u.kind);
     const tech_role = unit_dom.techRoleFor(u.kind);
@@ -4090,9 +4064,7 @@ pub fn crewChoices(alloc: Alloc, gs: *GameState, unit_id: types.UnitId) ![]PickR
         const p = e.value_ptr;
         const slot: @import("state.zig").Slot = if (p.role == pilot_role) .pilot else if (tech_role != null and p.role == tech_role.?) .tech else continue;
         if (!p.isOnBooks()) continue;
-        var why: []const u8 = "";
-        if (!p.isAvailable(day)) why = if (p.status == .wounded) "wounded" else "unavailable";
-        if (why.len == 0 and u.force == .none and !gs.canReachPool(p)) why = "away with their company";
+        const why: []const u8 = gs.assignBlock(u, p) orelse "";
         const seat = gs.pilotSeat(p.id);
         const load = if (slot == .tech) gs.techLoadHours(p.id) else 0;
         const now: []const u8 = if (slot == .pilot)

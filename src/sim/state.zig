@@ -939,6 +939,40 @@ pub const GameState = struct {
         return null;
     }
 
+    /// Nobody's pilot, nobody's tech, not posted to an HQ, not on a
+    /// company's books: what the assignment column calls "unassigned".
+    pub fn isUnassigned(self: *GameState, p: *const person_mod.Person) bool {
+        if (p.posted_hq != .none or p.assigned_force != .none) return false;
+        if (self.pilotSeat(p.id) != .none) return false;
+        var uit = self.units.iterator();
+        while (uit.next()) |e| if (e.value_ptr.tech == p.id) return false;
+        return true;
+    }
+
+    /// Does the outfit hold a prisoner of this house (a trade is possible)?
+    pub fn holdsPrisonerOf(self: *GameState, faction: []const u8) bool {
+        var it = self.people.iterator();
+        while (it.next()) |e| if (e.value_ptr.status == .pow and std.mem.eql(u8, e.value_ptr.faction, faction)) return true;
+        return false;
+    }
+
+    /// Contracts the outfit has taken on a world (offers excepted).
+    pub fn contractsWorkedAt(self: *GameState, planet_key: []const u8) u32 {
+        var n: u32 = 0;
+        for (self.contracts.values()) |c| if (std.mem.eql(u8, c.planet_key, planet_key) and c.status != .offer) {
+            n += 1;
+        };
+        return n;
+    }
+
+    /// Why a person cannot take a seat or tech slot on a hull today, or
+    /// null: the one answer `assignSlot` refuses with and the picker dims with.
+    pub fn assignBlock(self: *GameState, u: *const unit_mod.Unit, p: *const person_mod.Person) ?[]const u8 {
+        if (!p.isAvailable(self.clock.day_index)) return if (p.status == .wounded) "wounded" else "unavailable";
+        if (u.force == .none and !self.canReachPool(p)) return "away with their company";
+        return null;
+    }
+
     /// A crewed dropship in the company's own hangar: it lifts and escorts
     /// the company on the way in (12D.3).
     pub fn hasCrewedDropship(self: *GameState, company: types.ForceId) bool {
@@ -1316,8 +1350,7 @@ pub const GameState = struct {
     pub fn assignSlot(self: *GameState, unit_id: types.UnitId, slot: Slot, person_id: types.PersonId) AssignSlotError!void {
         const u = self.unit(unit_id) orelse return error.UnknownUnit;
         const p = self.person(person_id) orelse return error.UnknownPerson;
-        if (!p.isAvailable(self.clock.day_index)) return error.Unavailable;
-        if (u.force == .none and !self.canReachPool(p)) return error.PersonAway;
+        if (self.assignBlock(u, p)) |why| return if (std.mem.eql(u8, why, "away with their company")) error.PersonAway else error.Unavailable;
         const resolved: Slot = if (slot != .any) slot else if (p.role == unit_mod.crewRoleFor(u.kind)) .pilot else if (unit_mod.techRoleFor(u.kind) == p.role) .tech else return error.WrongRole;
         switch (resolved) {
             .any => unreachable,
@@ -1500,6 +1533,18 @@ pub const GameState = struct {
 
     /// The hull's mounted items with a plan's edits applied (what the lab
     /// validates). `alloc` owns the result.
+    /// The rules' verdict on putting `part_key` at `loc` on top of the
+    /// hull's current plan (the Lab's location picker and the commit share it).
+    pub fn tryInstall(self: *GameState, alloc: std.mem.Allocator, unit_id: types.UnitId, loc: meklab.Location, part_key: []const u8) !meklab.Report {
+        const u = self.unit(unit_id) orelse return error.UnknownUnit;
+        const design = @import("../domain/chassis.zig").find(u.chassis_key) orelse return error.UnknownChassis;
+        const base = try self.labItems(unit_id, alloc);
+        var items = try alloc.alloc(meklab.Item, base.len + 1);
+        @memcpy(items[0..base.len], base);
+        items[base.len] = .{ .location = loc, .part_key = part_key };
+        return meklab.validate(design, items, alloc);
+    }
+
     pub fn labItems(self: *GameState, unit_id: types.UnitId, alloc: std.mem.Allocator) ![]meklab.Item {
         const u = self.unit(unit_id) orelse return &.{};
         var out: std.ArrayListUnmanaged(meklab.Item) = .empty;

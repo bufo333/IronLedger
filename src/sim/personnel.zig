@@ -3,6 +3,7 @@
 //! designations: ranks follow seats and experience unless pinned.
 
 const std = @import("std");
+const tuning = @import("../domain/tuning.zig").t;
 const types = @import("../domain/types.zig");
 const person_mod = @import("../domain/person.zig");
 const rank_mod = @import("../domain/rank.zig");
@@ -93,9 +94,28 @@ pub fn depart(gs: *GameState, person_id: types.PersonId, status: person_mod.Stat
     // staffing count is derived from active people, refreshed here so no
     // caller has to remember.
     gs.refreshHqStaffing();
-    const owed = types.applyBp(p.severance(gs.clock.day_index), share_bp);
+    const owed = severanceOwed(gs, person_id, share_bp);
     if (owed > 0) try gs.postTransaction(.{ .day = gs.clock.day_index, .amount = -owed, .category = .payroll, .company = gs.companyOf(p.assigned_force), .note = note });
     return owed;
+}
+
+/// How far from ready a company is for an offer (12E.5): the points the
+/// candidates table sorts by. Lower is readier.
+pub fn readinessPenalty(crew: CrewStats, depot_hulls: u32, transit_days: u32) i32 {
+    const t = tuning.person;
+    return @as(i32, @intCast(depot_hulls)) * t.readiness_depot_weight +
+        @as(i32, @intCast(crew.spent)) * t.readiness_spent_weight +
+        @as(i32, @intCast(crew.wounded)) * t.readiness_wounded_weight +
+        @as(i32, @intCast(crew.avg_fatigue / t.readiness_fatigue_divisor)) +
+        @as(i32, @intCast(transit_days / t.readiness_transit_divisor)) -
+        @as(i32, @intCast(crew.avg_morale / t.readiness_morale_divisor));
+}
+
+/// What letting someone go costs at a share of the full payout (12C.2):
+/// `depart` pays it and the desk quotes it from the same function.
+pub fn severanceOwed(gs: *GameState, person_id: types.PersonId, share_bp: types.Bp) types.CBills {
+    const p = gs.person(person_id) orelse return 0;
+    return types.applyBp(p.severance(gs.clock.day_index), share_bp);
 }
 
 /// One line of a company's manning table (MekHQ: the personnel-count

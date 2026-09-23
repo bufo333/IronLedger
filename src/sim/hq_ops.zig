@@ -386,6 +386,21 @@ pub fn queueFabrication(gs: *GameState, hq_id: types.HqId, key: []const u8, quan
 }
 
 /// Start (or level up) a facility as a construction project.
+/// Why a facility cannot be upgraded right now, or null when it can:
+/// the command refuses on it before a C-bill moves, the HQ screen dims on it.
+pub const UpgradeBlock = enum { in_progress, maxed, funds_short };
+
+pub fn upgradeBlock(gs: *GameState, hq_id: types.HqId, kind: hq_mod.FacilityKind) ?UpgradeBlock {
+    const hq = gs.hqs.getPtr(hq_id) orelse return .maxed;
+    for (hq.projects.items) |p| {
+        if (p.facility == kind and p.phase(gs.clock.day_index) != .complete) return .in_progress;
+    }
+    const to_level = hq.facilityLevel(kind) + 1;
+    if (to_level > hq_mod.max_facility_level) return .maxed;
+    if (hq.funds < hq_mod.upgradeCost(kind, to_level)) return .funds_short;
+    return null;
+}
+
 pub fn startUpgrade(gs: *GameState, hq_id: types.HqId, kind: hq_mod.FacilityKind) !void {
     const hq = gs.hqs.getPtr(hq_id) orelse return error.UnknownHq;
     for (hq.projects.items) |p| {

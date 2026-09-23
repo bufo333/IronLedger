@@ -197,6 +197,12 @@ pub fn rollHullCondition(rng: *rng_mod.Rng) HullCondition {
     };
 }
 
+/// A staple line: always on the board, restocked as it sells.
+pub fn isStaple(key: []const u8) bool {
+    for (staple_keys) |k| if (std.mem.eql(u8, k, key)) return true;
+    return false;
+}
+
 /// Price a hull by loadout value and condition: a new, fully loaded hull
 /// at a premium; a wreck missing a leg and its guns for a fraction (tuning.market).
 pub fn hullPrice(base_cost: types.CBills, avg_weapon_cost: types.CBills, cond: HullCondition, price_roll_bp: types.Bp) types.CBills {

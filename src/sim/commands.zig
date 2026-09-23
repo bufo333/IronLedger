@@ -1167,8 +1167,13 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
         },
         .upgrade_facility => |u| {
             const hq = gs.hqs.getPtr(u.hq) orelse return Error.UnknownHq;
+            // Refuse before a C-bill moves (hq_ops.upgradeBlock is the one rule).
+            if (hq_ops.upgradeBlock(gs, u.hq, u.kind)) |why| return switch (why) {
+                .in_progress => Error.ProjectInProgress,
+                .maxed => Error.MaxLevel,
+                .funds_short => Error.InsufficientTreasury,
+            };
             const to_level = hq.facilityLevel(u.kind) + 1;
-            if (to_level > hq_mod.max_facility_level) return Error.MaxLevel;
             const cost = hq_mod.upgradeCost(u.kind, to_level);
             try debitPurchase(gs, .{ .hq = u.hq }, .{
                 .day = gs.clock.day_index,
@@ -1407,14 +1412,22 @@ fn travelDays(gs: *GameState, from_company: types.ForceId, to_company: types.For
     return logistics.daysBetween(a, b);
 }
 
+/// Why a hull cannot be moved to another company right now, or null:
+/// the transfer refuses on it and the company picker dims every row on it.
+pub fn transferBlock(gs: *GameState, u: *const unit_mod.Unit) ?[]const u8 {
+    if (gs.isCompanyDeployed(gs.companyOf(u.force))) return "its company is deployed";
+    if (u.status == .in_transit) return "it is in transit";
+    if (u.inShop()) return "it is in the depot";
+    return null;
+}
+
 fn transferUnit(gs: *GameState, unit_id: types.UnitId, to_company: types.ForceId) Error!Result {
     const u = gs.unit(unit_id) orelse return Error.UnknownUnit;
     const dest = gs.force(to_company) orelse return Error.UnknownForce;
     if (dest.echelon != .company) return Error.NotACompany;
     const from_company = gs.companyOf(u.force);
     if (from_company == to_company) return Error.SameForce;
-    if (gs.isCompanyDeployed(from_company)) return Error.UnitDeployed;
-    if (u.isBusy()) return Error.Unavailable;
+    if (transferBlock(gs, u)) |why| return if (std.mem.eql(u8, why, "its company is deployed")) Error.UnitDeployed else Error.Unavailable;
 
     const days = travelDays(gs, from_company, to_company);
     if (days == 0) {
@@ -3960,4 +3973,19 @@ test "a command leaves derived state consistent: firing, disbanding and selling 
     _ = try execute(&gs, .{ .sell_hq = far });
     for (gs.stock_policies.items) |sp| try std.testing.expect(sp.hq != far);
     for (gs.part_orders.items) |o| try std.testing.expect(!(o.inFlight() and std.meta.eql(o.dest, .{ .hq = far })));
+}
+
+test "an upgrade the HQ cannot afford is refused before a C-bill moves, from the same rule the screen dims on" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 909 });
+    defer gs.deinit();
+    _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    const hq = gs.hqs.keys()[0];
+    gs.hqs.getPtr(hq).?.funds = 1;
+    try std.testing.expectEqual(hq_ops.UpgradeBlock.funds_short, hq_ops.upgradeBlock(&gs, hq, .mess).?);
+    try std.testing.expectError(Error.InsufficientTreasury, execute(&gs, .{ .upgrade_facility = .{ .hq = hq, .kind = .mess } }));
+    try std.testing.expectEqual(@as(types.CBills, 1), gs.hqs.getPtr(hq).?.funds);
+    gs.hqs.getPtr(hq).?.funds = 50_000_000;
+    try std.testing.expect(hq_ops.upgradeBlock(&gs, hq, .mess) == null);
+    _ = try execute(&gs, .{ .upgrade_facility = .{ .hq = hq, .kind = .mess } });
+    try std.testing.expectEqual(hq_ops.UpgradeBlock.in_progress, hq_ops.upgradeBlock(&gs, hq, .mess).?);
 }

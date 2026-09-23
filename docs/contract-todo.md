@@ -157,19 +157,19 @@ One predicate each; every listed site calls it.
 ---
 - Notes: the departed keep their posting on the record (`departed_day` is the new fact, schema v25); `tick.runStockPolicies` keeps a defensive skip for rows from older saves; the hire paths do not post, so `postToHq` is the one refresh on that side; the staffing column is still written for older readers but never read back.
 
-## D9. Rules that live only in queries move down (rule 13)
+## D9. Rules that live only in queries move down (rule 13) — PR #13
 
-- [ ] `intelLevel` / `lanceIntel` (queries.zig:508,521) → `opfor.zig` or `battle.zig`.
-- [ ] `offerCandidates` readiness score (queries.zig:4143) and `readiness` bands (2947) → `personnel.zig`.
-- [ ] `upgrades` eligibility and what each level buys (queries.zig:1991) → `hq_ops.zig` / `hq.zig`.
-- [ ] `severanceOwed` (queries.zig:2827) → the same function `.fire` pays from.
-- [ ] `isBlocking` / `jumpFor` (queries.zig:175,212) → `checklist.zig` as fields on the warning.
-- [ ] `installCandidates` / `installLocations` (queries.zig:3386,3416) → `meklab.zig`; `refit_install` validates with the same function.
-- [ ] `raiseCandidates` (queries.zig:2352) → `commands` eligibility shared with `.raise_*`.
-- [ ] `berths` / `liftText` (queries.zig:2396,2416) → `logistics.zig`.
-- [ ] `isStaple` (queries.zig:2275) → `market.zig`.
-- [ ] `holdsPrisonerOf`, `contractsWorkedAt`, `isUnassigned`, `partChoices`, `crewChoices`, `companyChoices`, `hqChoices` (queries.zig:1118,3348,2835,4529,4410,4305,4380): the eligibility half moves beside the command that consumes the choice; the query keeps the text.
-- [ ] `companyDamage` structure text (queries.zig:1353) already calls `depotNeeds`; keep, but its gear half calls `spareDemand` (D5).
+- [x] `intelLevel` / `lanceIntel` (D2: `sim/offer_rating.zig`) (queries.zig:508,521) → `opfor.zig` or `battle.zig`.
+- [x] `offerCandidates` readiness score (`personnel.readinessPenalty`, weights in tuning.person) and `readiness` bands (D6a/D7 helpers) (queries.zig:4143) and `readiness` bands (2947) → `personnel.zig`.
+- [x] `upgrades` eligibility (`hq_ops.upgradeBlock`, checked by the command before it debits; "next level buys" from tuning) and what each level buys (queries.zig:1991) → `hq_ops.zig` / `hq.zig`.
+- [x] `severanceOwed` (`personnel.severanceOwed`, the function `depart` pays from) (queries.zig:2827) → the same function `.fire` pays from.
+- [x] `isBlocking` (`checklist.WarningKind.blocking`); `jumpFor` stays in queries as the screen mapping it is (queries.zig:175,212) → `checklist.zig` as fields on the warning.
+- [x] `installLocations` (`GameState.tryInstall` is the trial validation); `installCandidates` is a catalogue listing (queries.zig:3386,3416) → `meklab.zig`; `refit_install` validates with the same function.
+- [x] `raiseCandidates`: its filters (mek listings, pool meks) are the wizard's presentation choice; the purchase rule stays in `buy_hull_for` (queries.zig:2352) → `commands` eligibility shared with `.raise_*`.
+- [x] `berths` / `liftText` already read `commands.planLift`; display only (queries.zig:2396,2416) → `logistics.zig`.
+- [x] `isStaple` (`market.isStaple`) (queries.zig:2275) → `market.zig`.
+- [x] `holdsPrisonerOf`, `contractsWorkedAt`, `isUnassigned` on `GameState`; `crewChoices` dims on `GameState.assignBlock` and `companyChoices` on `commands.transferBlock`, the same answers the commands refuse with; `partChoices` and `hqChoices` are listings (queries.zig:1118,3348,2835,4529,4410,4305,4380): the eligibility half moves beside the command that consumes the choice; the query keeps the text.
+- [x] `companyDamage` structure text (queries.zig:1353) already calls `depotNeeds`; keep, but its gear half calls `spareDemand` (D5).
 
 ---
 
