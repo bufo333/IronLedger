@@ -54,7 +54,7 @@ pub fn runWeeklyMaintenance(gs: *GameState) !void {
     var it = gs.units.iterator();
     while (it.next()) |entry| {
         const u = entry.value_ptr;
-        if (u.status == .mothballed or u.status == .destroyed or u.status == .repairing or u.status == .refitting) continue;
+        if (!u.takesFieldWork()) continue;
         if (u.kind == .infantry) continue; // platoons maintain their own kit
 
         // What this hull asks of this tech (12C.15): quality, design and skill.
@@ -70,7 +70,7 @@ pub fn runWeeklyMaintenance(gs: *GameState) !void {
             }
         }
 
-        const deployed = gs.deploymentContract(gs.companyOf(u.force)) != null;
+        const deployed = gs.isCompanyDeployed(gs.companyOf(u.force));
         var tn: i32 = 4 + u.quality.maintenanceModifier();
         if (deployed) tn += 1; // field conditions
         if (!covered) tn += 3; // nobody turning wrenches
@@ -188,10 +188,10 @@ pub fn runWeeklyRepairs(gs: *GameState) !void {
     var it = gs.units.iterator();
     while (it.next()) |entry| {
         const u = entry.value_ptr;
-        if (u.status == .mothballed or u.status == .destroyed or u.status == .repairing or u.status == .refitting) continue;
+        if (!u.takesFieldWork()) continue;
         const tech = activeTech(gs, u) orelse continue; // no tech, no repairs
         const base_load = gs.techLoadHours(tech.id);
-        const at_home = gs.deploymentContract(gs.companyOf(u.force)) == null;
+        const at_home = gs.isCompanyHome(gs.companyOf(u.force)); // not merely off contract: a company returning or idling afield is away too
         const site = gs.siteForForce(u.force);
 
         for (u.slots.items) |*slot| {

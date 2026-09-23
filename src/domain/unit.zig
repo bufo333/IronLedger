@@ -219,7 +219,7 @@ pub const Unit = struct {
     /// as a percentage (0–100). Inputs to autoresolve (ARCH §7). Stage 7
     /// replaces this with BV-derived strength from the chassis catalog.
     pub fn conditionPct(self: *const Unit) u8 {
-        if (self.status == .destroyed or self.status == .mothballed) return 0;
+        if (self.isParked()) return 0;
         var pct: u32 = self.armor_pct;
         for (self.slots.items) |s| {
             switch (s.condition) {
@@ -233,6 +233,35 @@ pub const Unit = struct {
 
     pub fn inColdStorage(self: *const Unit) bool {
         return self.status == .mothballed;
+    }
+
+    /// Out of play until the player acts: a wreck or a mothballed hull.
+    /// Nothing counts it, crews it, maintains it or fights with it.
+    pub fn isParked(self: *const Unit) bool {
+        return self.status == .destroyed or self.status == .mothballed;
+    }
+
+    /// On the bench: depot repair or refit in progress.
+    pub fn inShop(self: *const Unit) bool {
+        return self.status == .repairing or self.status == .refitting;
+    }
+
+    /// Cannot be moved or worked on right now: on the bench or on the road.
+    pub fn isBusy(self: *const Unit) bool {
+        return self.inShop() or self.status == .in_transit;
+    }
+
+    /// Stands in the line today (ARCH §7): not parked, not on the bench,
+    /// not in transit. The one definition the battle, the effectiveness
+    /// check and the hangar all use.
+    pub fn canFight(self: *const Unit) bool {
+        return !self.isParked() and !self.isBusy();
+    }
+
+    /// Gets weekly maintenance and field repairs: not parked, not on the
+    /// bench (a hull in transit still rides with its tech).
+    pub fn takesFieldWork(self: *const Unit) bool {
+        return !self.isParked() and !self.inShop();
     }
 
     /// This hull's monthly bill (ARCH §9.8) — owned means billed.
@@ -293,6 +322,19 @@ pub const Unit = struct {
         return false;
     }
 };
+
+test "one line of hull status predicates: parked, in the shop, busy, fighting" {
+    var u: Unit = .{ .id = @enumFromInt(1), .chassis_key = "SHD-2H", .kind = .mek };
+    defer u.deinit(std.testing.allocator);
+    try std.testing.expect(u.canFight() and u.takesFieldWork() and !u.isParked() and !u.isBusy());
+    u.status = .refitting;
+    try std.testing.expect(u.inShop() and u.isBusy() and !u.canFight() and !u.takesFieldWork());
+    u.status = .in_transit;
+    try std.testing.expect(u.isBusy() and !u.canFight() and u.takesFieldWork()); // rides with its tech
+    u.status = .mothballed;
+    try std.testing.expect(u.isParked() and !u.canFight() and !u.takesFieldWork());
+    try std.testing.expectEqual(@as(u8, 0), u.conditionPct());
+}
 
 test "condition degrades with damaged slots" {
     var u: Unit = .{ .id = @enumFromInt(1), .chassis_key = "SHD-2H", .kind = .mek };

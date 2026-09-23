@@ -97,6 +97,11 @@ pub const Force = struct {
     units: std.ArrayListUnmanaged(types.UnitId) = .empty,
     children: std.ArrayListUnmanaged(types.ForceId) = .empty,
 
+    /// A line lance the battle fields: mek or air.
+    pub fn isCombatLance(self: *const Force) bool {
+        return self.echelon == .lance or self.echelon == .air_lance;
+    }
+
     pub fn deinit(self: *Force, alloc: std.mem.Allocator) void {
         self.units.deinit(alloc);
         self.children.deinit(alloc);

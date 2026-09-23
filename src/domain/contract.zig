@@ -266,6 +266,16 @@ pub const Contract = struct {
     /// there may take it. `.none` = an offer from before 12E.4.
     offer_hq: types.HqId = .none,
 
+    /// The company is out on it: in transit to the world or on station.
+    pub fn isRunning(self: *const Contract) bool {
+        return self.status == .transit or self.status == .active;
+    }
+
+    /// Over, one way or another: completed, breached or failed.
+    pub fn isClosed(self: *const Contract) bool {
+        return self.status == .completed or self.status == .breached or self.status == .failed;
+    }
+
     pub fn hasOpfor(self: *const Contract) bool {
         return self.enemy_lances > 0 and self.enemy_lance_bv > 0;
     }

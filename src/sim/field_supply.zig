@@ -89,7 +89,7 @@ pub fn plan(alloc: std.mem.Allocator, gs: *GameState, company: types.ForceId, tr
         var uit = gs.units.iterator();
         while (uit.next()) |e| {
             const u = e.value_ptr;
-            if (u.status == .destroyed or u.status == .mothballed or gs.companyOf(u.force) != company) continue;
+            if (u.isParked() or gs.companyOf(u.force) != company) continue;
             if (u.kind == .mek or u.kind == .vehicle) hulls += 1;
             for (u.slots.items) |s| {
                 if (s.class != .weapon or s.condition != .ok) continue;
@@ -144,7 +144,7 @@ pub fn inboundTons(gs: *GameState, company: types.ForceId) u32 {
     var n: u32 = 0;
     for (gs.part_orders.items) |o| {
         if (o.dest != .company or o.dest.company != company) continue;
-        if (o.status == .sourcing or o.status == .in_transit) n += o.quantity * part_mod.tons(o.part_key);
+        if (o.inFlight()) n += o.quantity * part_mod.tons(o.part_key);
     }
     return n;
 }
@@ -154,7 +154,7 @@ pub fn inboundQty(gs: *GameState, company: types.ForceId, key: []const u8) u32 {
     for (gs.part_orders.items) |o| {
         if (o.dest != .company or o.dest.company != company) continue;
         if (!std.mem.eql(u8, o.part_key, key)) continue;
-        if (o.status == .sourcing or o.status == .in_transit) n += o.quantity;
+        if (o.inFlight()) n += o.quantity;
     }
     return n;
 }

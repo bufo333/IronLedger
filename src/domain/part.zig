@@ -219,6 +219,12 @@ pub const AcquisitionOrder = struct {
     eta_day: ?u32 = null,
     cost: types.CBills,
     status: OrderStatus = .sourcing,
+
+    /// Still coming: being sourced or on the road. Every "on order" count
+    /// and every inbound-tonnage sum uses this, so they agree.
+    pub fn inFlight(self: *const AcquisitionOrder) bool {
+        return self.status == .sourcing or self.status == .in_transit;
+    }
 };
 
 test "12C.14: sourcing modifiers — scarce parts, periphery worlds and comms reach" {

@@ -233,11 +233,7 @@ pub fn rollInterdiction(gs: *GameState) !void {
     while (it.next()) |entry| {
         const c = entry.value_ptr;
         if (c.status != .transit or !c.hasOpfor()) continue;
-        var escorted = false;
-        var uit = gs.units.iterator();
-        while (uit.next()) |ue| if (ue.value_ptr.kind == .dropship and ue.value_ptr.force == c.assigned_company and ue.value_ptr.pilot != .none) {
-            escorted = true;
-        };
+        const escorted = gs.hasCrewedDropship(c.assigned_company);
         if (escorted) continue;
         const roll = gs.rng.roll2d6(.events);
         if (roll < tuning.contract.interdiction_target) continue;
@@ -513,7 +509,7 @@ fn applyEffectsFor(gs: *GameState, effects: []const events.Effect, contract: ?*c
             },
             .engagement => if (contract) |c| {
                 // On station, or caught at the jump point on the way in (12D.9).
-                if (c.status == .active or c.status == .transit) try @import("battle.zig").resolveEngagement(gs, c);
+                if (c.isRunning()) try @import("battle.zig").resolveEngagement(gs, c);
             },
             .seize_hull => if (company != .none) {
                 // The most battered line hull the company has (12D.9).
@@ -521,7 +517,7 @@ fn applyEffectsFor(gs: *GameState, effects: []const events.Effect, contract: ?*c
                 var uit = gs.units.iterator();
                 while (uit.next()) |e| {
                     const u = e.value_ptr;
-                    if (gs.companyOf(u.force) != company or !u.kind.isCombat() or u.status == .mothballed) continue;
+                    if (gs.companyOf(u.force) != company or !u.kind.isCombat() or u.isParked()) continue;
                     if (worst == null or u.conditionPct() < worst.?.conditionPct()) worst = u;
                 }
                 if (worst) |u| {
@@ -696,13 +692,7 @@ fn applyToCompany(gs: *GameState, company: types.ForceId, stat: PersonStat, delt
     var it = gs.people.iterator();
     while (it.next()) |entry| {
         const p = entry.value_ptr;
-        if (p.status != .active) continue;
-        var f = p.assigned_force;
-        const in_company = while (f != .none) {
-            if (f == company) break true;
-            f = (gs.forces.getPtr(f) orelse break false).parent;
-        } else false;
-        if (!in_company) continue;
+        if (p.status != .active or !gs.personInCompany(p, company)) continue;
         switch (stat) {
             .morale => p.morale = @intCast(std.math.clamp(@as(i32, p.morale) + delta, 0, 100)),
             .fatigue => p.fatigue = @intCast(@min(@as(i32, @import("../domain/person.zig").max_fatigue), @as(i32, p.fatigue) + delta)),
@@ -719,7 +709,7 @@ pub const Echelon = enum { line, support };
 fn inEchelon(gs: *GameState, u: *const unit_mod.Unit, which: Echelon) bool {
     const f = gs.force(u.force) orelse return false;
     return switch (which) {
-        .line => f.echelon == .lance or f.echelon == .air_lance,
+        .line => f.isCombatLance(),
         .support => f.echelon == .support_lance and u.kind != .infantry,
     };
 }
@@ -734,7 +724,7 @@ pub fn damageRandomUnits(gs: *GameState, company: types.ForceId, n: u8, which: E
     var attempts: u32 = 0;
     while (applied < n and attempts < 40) : (attempts += 1) {
         const u = &values[gs.rng.random(.events).uintLessThan(usize, values.len)];
-        if (gs.companyOf(u.force) != company or u.status == .destroyed or u.status == .mothballed) continue;
+        if (gs.companyOf(u.force) != company or u.isParked()) continue;
         if (!inEchelon(gs, u, which)) continue;
         const wear = gs.rng.roll2d6(.events);
         u.armor_pct -|= wear * 3;

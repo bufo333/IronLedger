@@ -573,11 +573,7 @@ pub fn topUpHall(gs: *GameState, hq: *const hq_mod.Hq) !u32 {
     var added: u32 = 0;
     inline for (@typeInfo(person_mod.Role).@"enum".fields) |f| {
         const role: person_mod.Role = @enumFromInt(f.value);
-        const combat = switch (role) {
-            .mekwarrior, .vehicle_crew, .aero_pilot, .tech_mek, .tech_mechanic, .tech_aero, .astech => true,
-            else => false,
-        };
-        const floor: u32 = if (combat) tuning.market.hall_floor_combat else tuning.market.hall_floor;
+        const floor: u32 = if (role.hallCombatFloor()) tuning.market.hall_floor_combat else tuning.market.hall_floor;
         var have: u32 = 0;
         for (gs.candidates.items) |c| if (c.hq == hq.id and c.spec.role == role) {
             have += 1;

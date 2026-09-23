@@ -48,26 +48,27 @@ so line numbers in later deliverables assume earlier ones are merged.
 
 ---
 
-## D3. Entity predicates (rule 8)
+## D3. Entity predicates (rule 8) — PR #6
 
 One predicate each; every listed site calls it.
 
-- [ ] `Person.isOnBooks()` (`active or wounded`): personnel.zig:21,56,68,163,184,217; medical.zig:327; battle.zig:580,695; tick.zig:405; contract_control.zig:108; state.zig:882,1669; commands.zig:1090; queries.zig:151,2976,4424; person.zig:282. Decide once whether `.pow` counts (state.zig:1170 says yes, everyone else no).
-- [ ] `Person.isGone()` (`kia|retired|resigned|released`): queries.zig:2871 and every roster filter.
-- [ ] `Role.isTech()` used at state.zig:1412, checklist.zig:371, queries.zig:1897; a `Role.isSeatRole()` for checklist.zig:207; `Role.isHallFloorRole()` for contract_market.zig:576-579 (today a third combat-role set that includes astech).
-- [ ] `Unit.isParked()` (`destroyed or mothballed`): checklist.zig:60,162,187; field_supply.zig:90; battle.zig:133; state.zig:1361,1447; queries.zig:379,2307,3177; contract_events.zig:737; commands.zig:1775; unit.zig:222.
-- [ ] `Unit.inShop()` (`repairing or refitting`) and `Unit.canFight()` (one definition, decided once for `refitting` and `in_transit`): maintenance.zig:57,191; battle.zig:170; contract_control.zig:29; queries.zig:1145-1176 hangar; contract_events.zig:524 (today misses `destroyed`); commands.zig:1379,1414,1775,1789; queries.zig:2358.
-- [ ] `GameState.isCompanyHome` everywhere "home" is meant: maintenance.zig:73,194 (live bug: the weekly pass queues depot work for a company afield); medical.zig:84,331,369; checklist.zig:358; commands.zig:724,1603 (redundant `or`), commands.zig:1075 (ignores `return_eta_day`).
-- [ ] `GameState.companyPosture(force)` returning an enum (`home | deployed | in_transit_out | idle_afield | returning`) with one text helper in queries: queries.zig:395-402, 4279-4298 (`companyStands`, `daysBetweenCompanies`, `daysFromWorld`), 4111-4135, 846-855, 3008, 3050, 1289; main.zig:406-412; app.zig:3305-3310.
-- [ ] `GameState.personInCompany(person, company)`: the parent-chain walk at battle.zig:249-254, 861-866; medical.zig:377-381; tick.zig:406-410; contract_events.zig:700-705 versus `companyOf(p.assigned_force) == company` at queries.zig:2977, personnel.zig:164, medical.zig:133. One answer.
-- [ ] `GameState.supportLance(company, kind)`: battle.zig:282-293; medical.zig:338-340; state.zig:1600; queries.zig:826; commands.zig:2109,3551; app.zig:1694.
-- [ ] `Force.isCombatLance()` (`lance or air_lance`): battle.zig:130,157; personnel.zig:268; state.zig:740; contract_events.zig:722; commands.zig:726,967; app.zig:3264,3958.
-- [ ] `PartOrder.inFlight()` (`sourcing or in_transit`): field_supply.zig:144,154; hq_ops.zig:147; tick.zig:219; commands.zig:1666; queries.zig:2079,2256,3563; and the three sites that count only `in_transit` and so disagree: main.zig:583,639; commands.zig:1503.
-- [ ] `Contract.isRunning()` (`active or transit`): contract_control.zig:136; contract_events.zig:516; state.zig:1157; commands.zig:1879; decide whether `.transit` counts at contract_control.zig:74,171,226; tick.zig:371; battle.zig:37; contract_events.zig:210,322.
-- [ ] `Outcome.isLoss()` / `Outcome.heldField()`: battle.zig:410,530,661,678.
-- [ ] transport-crewed predicate: contract_events.zig:238, battle.zig:554.
+- [x] `Person.isOnBooks()` (`active or wounded`): personnel.zig:21,56,68,163,184,217; medical.zig:327; battle.zig:580,695; tick.zig:405; contract_control.zig:108; state.zig:882,1669; commands.zig:1090; queries.zig:151,2976,4424; person.zig:282. Decide once whether `.pow` counts (state.zig:1170 says yes, everyone else no).
+- [x] `Person.isGone()` (`kia|retired|resigned|released`): queries.zig:2871 and every roster filter.
+- [x] `Role.isTech()` used at state.zig:1412, checklist.zig:371, queries.zig:1897; a `Role.isSeatRole()` for checklist.zig:207; `Role.isHallFloorRole()` for contract_market.zig:576-579 (today a third combat-role set that includes astech).
+- [x] `Unit.isParked()` (`destroyed or mothballed`): checklist.zig:60,162,187; field_supply.zig:90; battle.zig:133; state.zig:1361,1447; queries.zig:379,2307,3177; contract_events.zig:737; commands.zig:1775; unit.zig:222.
+- [x] `Unit.inShop()` (`repairing or refitting`) and `Unit.canFight()` (one definition, decided once for `refitting` and `in_transit`): maintenance.zig:57,191; battle.zig:170; contract_control.zig:29; queries.zig:1145-1176 hangar; contract_events.zig:524 (today misses `destroyed`); commands.zig:1379,1414,1775,1789; queries.zig:2358.
+- [x] `GameState.isCompanyHome` everywhere "home" is meant: maintenance.zig:73,194 (live bug: the weekly pass queues depot work for a company afield); medical.zig:84,331,369; checklist.zig:358; commands.zig:724,1603 (redundant `or`), commands.zig:1075 (ignores `return_eta_day`).
+- [x] `GameState.companyPosture(force)` returning an enum (`home | deployed | in_transit_out | idle_afield | returning`) with one text helper in queries: queries.zig:395-402, 4279-4298 (`companyStands`, `daysBetweenCompanies`, `daysFromWorld`), 4111-4135, 846-855, 3008, 3050, 1289; main.zig:406-412; app.zig:3305-3310.
+- [x] `GameState.personInCompany(person, company)`: the parent-chain walk at battle.zig:249-254, 861-866; medical.zig:377-381; tick.zig:406-410; contract_events.zig:700-705 versus `companyOf(p.assigned_force) == company` at queries.zig:2977, personnel.zig:164, medical.zig:133. One answer.
+- [x] `GameState.supportLance(company, kind)`: battle.zig:282-293; medical.zig:338-340; state.zig:1600; queries.zig:826; commands.zig:2109,3551; app.zig:1694.
+- [x] `Force.isCombatLance()` (`lance or air_lance`): battle.zig:130,157; personnel.zig:268; state.zig:740; contract_events.zig:722; commands.zig:726,967; app.zig:3264,3958.
+- [x] `PartOrder.inFlight()` (`sourcing or in_transit`): field_supply.zig:144,154; hq_ops.zig:147; tick.zig:219; commands.zig:1666; queries.zig:2079,2256,3563; and the three sites that count only `in_transit` and so disagree: main.zig:583,639; commands.zig:1503.
+- [x] `Contract.isRunning()` (`active or transit`): contract_control.zig:136; contract_events.zig:516; state.zig:1157; commands.zig:1879; decide whether `.transit` counts at contract_control.zig:74,171,226; tick.zig:371; battle.zig:37; contract_events.zig:210,322.
+- [x] `Outcome.isLoss()` / `Outcome.heldField()`: battle.zig:410,530,661,678.
+- [x] transport-crewed predicate: contract_events.zig:238, battle.zig:554.
 
 ---
+- Left as deliberate single-site filters: queries.zig raise candidates (`destroyed or in_transit`: mothballed hulls are wanted there) and the AAR casualty count in battle.zig (`wounded or kia`).
 
 ## D4. One computation, one function (rules 7, 10, 12)
 
@@ -249,6 +250,7 @@ Baseline: 61 field reads, 70 method calls, 41 module imports in `src/tui/app.zig
 ## D13. Tests and CI (rules 37-40)
 
 - [ ] `term.zig` added to the test block in `src/main.zig:6-14`.
+- [ ] The emblem-editor smoke step (tui_smoke.py ~236-242) is timing-flaky: wait for text instead of sleeping.
 - [ ] Smoke coverage: delete-player and delete-campaign confirms, disband and sell-HQ confirms, game-over path, music modal, resize, the 80-120 column boundary, `←/→` column scrolling on each table screen, every refusal branch of a confirm.
 - [ ] `.github/workflows/ci.yml`: `zig build test --summary all` plus both smokes on push and pull request.
 - [ ] Golden-master hash test (rule 40) if not already present.

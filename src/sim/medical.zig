@@ -81,7 +81,7 @@ pub fn severityLabel(severity: u8) []const u8 {
 
 /// Is this person's posting currently deployed?
 fn isDeployed(gs: *GameState, p: *const person_mod.Person) bool {
-    return gs.deploymentContract(gs.companyOf(p.assigned_force)) != null;
+    return gs.isCompanyDeployed(gs.companyOf(p.assigned_force));
 }
 
 /// Triage & recovery time for a fresh wound.
@@ -324,7 +324,7 @@ pub fn runWeeklyRest(gs: *GameState) !void {
     var it = gs.people.iterator();
     while (it.next()) |entry| {
         const p = entry.value_ptr;
-        if (p.status != .active and p.status != .wounded) continue;
+        if (!p.isOnBooks()) continue;
 
         if (isDeployed(gs, p)) {
             const company = gs.companyOf(p.assigned_force);
@@ -334,10 +334,7 @@ pub fn runWeeklyRest(gs: *GameState) !void {
                 // Garrison duty is nearly home (12.30): barracks and a town.
                 // Fatigue recovers at a share of the home rate — the mess
                 // lance stands in for the mess hall — and spirits hold.
-                var mess_lance = false;
-                if (gs.force(company)) |co| for (co.children.items) |cid| if (gs.force(cid)) |ch| if (ch.echelon == .support_company) for (ch.children.items) |sl| if (gs.force(sl)) |l| if (l.support_kind == .mess and l.units.items.len > 0) {
-                    mess_lance = true;
-                };
+                const mess_lance = if (gs.supportLance(company, .mess)) |l| l.units.items.len > 0 else false;
                 const field_decay: u32 = @intCast(types.applyBp(person_mod.fatigueDecayPerWeek(if (mess_lance) 1 else 0), tuning.person.garrison_rest_bp));
                 p.fatigue -|= @intCast(@min(field_decay, 255));
                 if (p.morale < 45 and p.fatigue <= 60) p.morale += 1;
@@ -366,23 +363,16 @@ pub fn runWeeklyRest(gs: *GameState) !void {
     while (fit.next()) |entry| {
         const f = entry.value_ptr;
         if (f.echelon != .company or f.contracts_since_rotation == 0) continue;
-        if (gs.deploymentContract(f.id) != null) continue;
+        if (gs.isCompanyDeployed(f.id)) continue;
 
         var fatigue_sum: u32 = 0;
         var n: u32 = 0;
         var pit = gs.people.iterator();
         while (pit.next()) |pentry| {
             const p = pentry.value_ptr;
-            if (p.status != .active) continue;
-            var walk = p.assigned_force;
-            const in_company = while (walk != .none) {
-                if (walk == f.id) break true;
-                walk = (gs.forces.getPtr(walk) orelse break false).parent;
-            } else false;
-            if (in_company) {
-                fatigue_sum += p.fatigue;
-                n += 1;
-            }
+            if (p.status != .active or !gs.personInCompany(p, f.id)) continue;
+            fatigue_sum += p.fatigue;
+            n += 1;
         }
         if (n > 0 and fatigue_sum / n <= 10) {
             f.contracts_since_rotation = 0;

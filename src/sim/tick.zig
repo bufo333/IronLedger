@@ -216,7 +216,7 @@ fn runStockPolicies(gs: *GameState) !void {
         var failed_recently = false;
         for (gs.part_orders.items) |o| {
             if (!std.mem.eql(u8, o.part_key, sp.part_key)) continue;
-            if (o.dest == .hq and o.dest.hq == sp.hq and (o.status == .in_transit or o.status == .sourcing)) pending += o.quantity;
+            if (o.dest == .hq and o.dest.hq == sp.hq and o.inFlight()) pending += o.quantity;
             if (o.status == .failed and o.ordered_day + 7 > today) failed_recently = true;
         }
         for (gs.bay_jobs.items) |j| if (j.hq == sp.hq and j.kind == .fabrication and j.done_day == null and std.mem.eql(u8, j.item_key, sp.part_key)) {
@@ -402,13 +402,8 @@ fn runContracts(gs: *GameState) !void {
                 var pit = gs.people.iterator();
                 while (pit.next()) |pentry| {
                     const p = pentry.value_ptr;
-                    if (p.status != .active and p.status != .wounded) continue;
-                    var walk = p.assigned_force;
-                    const in_company = while (walk != .none) {
-                        if (walk == c.assigned_company) break true;
-                        walk = (gs.forces.getPtr(walk) orelse break false).parent;
-                    } else false;
-                    if (in_company) p.fatigue = person_mod.applyFatigue(p.fatigue, gain);
+                    if (!p.isOnBooks() or !gs.personInCompany(p, c.assigned_company)) continue;
+                    p.fatigue = person_mod.applyFatigue(p.fatigue, gain);
                 }
                 try gs.log(.rotation, .{ .company = c.assigned_company, .contract = c.id }, "[rotation] tour complete: +{d} fatigue banked ({d} battles, {d} casualties)", .{
                     gain, c.battles_fought, c.casualties,

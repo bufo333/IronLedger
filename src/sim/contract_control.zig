@@ -26,7 +26,7 @@ pub fn fieldableBv(gs: *GameState, company: types.ForceId) i64 {
     while (it.next()) |entry| {
         const u = entry.value_ptr;
         if (gs.companyOf(u.force) != company or !u.kind.isCombat()) continue;
-        if (u.status == .destroyed or u.status == .repairing or u.status == .mothballed or u.status == .in_transit) continue;
+        if (!u.canFight()) continue;
         const pilot = gs.person(u.pilot) orelse continue;
         if (!pilot.isAvailable(gs.clock.day_index)) continue;
         const design = chassis_mod.find(u.chassis_key) orelse continue;
@@ -105,8 +105,7 @@ pub fn complete(gs: *GameState, c: *contract_mod.Contract, objectives_broken: bo
         var pit = gs.people.iterator();
         while (pit.next()) |e| {
             const p = e.value_ptr;
-            if (p.status != .active and p.status != .wounded) continue;
-            if (gs.companyOf(p.assigned_force) != c.assigned_company) continue;
+            if (!p.isOnBooks() or !gs.personInCompany(p, c.assigned_company)) continue;
             p.tours += 1;
             if (outstanding) p.outstanding_tours += 1;
             p.edge_spent = false; // Edge (12B.6) is per contract
@@ -133,7 +132,7 @@ pub fn complete(gs: *GameState, c: *contract_mod.Contract, objectives_broken: bo
 /// replacements in time. Pro-rated advance back, remainder forfeited,
 /// reputation −2, and the employer's faction cools for a year.
 pub fn breach(gs: *GameState, c: *contract_mod.Contract, reason: []const u8) !void {
-    if (c.status != .active and c.status != .transit) return;
+    if (!c.isRunning()) return;
     const total_days: i64 = @as(i64, c.terms.length_months) * 30;
     const elapsed: i64 = if (c.start_day) |s| @as(i64, gs.clock.day_index) - @as(i64, s) else 0;
     const remaining_frac_bp: types.Bp = @intCast(std.math.clamp(@divTrunc((total_days - elapsed) * 10_000, @max(1, total_days)), 0, 10_000));

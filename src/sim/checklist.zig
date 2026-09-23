@@ -57,7 +57,7 @@ fn companyFires(gs: *GameState, company: types.ForceId, family: []const u8) bool
     var uit = gs.units.iterator();
     while (uit.next()) |e| {
         const u = e.value_ptr;
-        if (u.status == .destroyed or u.status == .mothballed or gs.companyOf(u.force) != company) continue;
+        if (u.isParked() or gs.companyOf(u.force) != company) continue;
         for (u.slots.items) |slot| {
             if (slot.class != .weapon or slot.condition != .ok) continue;
             const fam = part_mod.munitionFor(slot.part_key) orelse continue;
@@ -159,7 +159,7 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
         var uit = gs.units.iterator();
         while (uit.next()) |e| {
             const u = e.value_ptr;
-            if (u.status == .destroyed or u.status == .mothballed or u.pilot == .none) continue;
+            if (u.isParked() or u.pilot == .none) continue;
             if (gs.person(u.pilot)) |p| if (p.status == .active and p.isUnfit()) {
                 n += 1;
             };
@@ -184,7 +184,7 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
         var uit = gs.units.iterator();
         while (uit.next()) |uentry| {
             const u = uentry.value_ptr;
-            if (gs.companyOf(u.force) != f.id or u.status == .destroyed or u.status == .mothballed) continue;
+            if (gs.companyOf(u.force) != f.id or u.isParked()) continue;
             const pilot_ok = if (gs.person(u.pilot)) |p| p.isAvailable(day) else false;
             if (!pilot_ok) no_pilot += 1;
             if (unit_mod.techRoleFor(u.kind) != null) {
@@ -202,13 +202,13 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
             for (@import("personnel.zig").manningLines(gs, f.id)) |m| {
                 const open = m.open;
                 if (open == 0) continue;
-                if (m.role == .mekwarrior or m.role == .vehicle_crew or m.role == .aero_pilot or m.role == .tech_mek or m.role == .tech_mechanic or m.role == .tech_aero) continue; // the seat warning above covers hulls
+                if (m.role.fillsHullSeat()) continue; // the seat warning above covers hulls
                 if (text.items.len > 0) try text.appendSlice(alloc, ", ");
                 try text.appendSlice(alloc, try std.fmt.allocPrint(alloc, "{d} {s}", .{ open, @tagName(m.role) }));
                 short_total += open;
             }
             // A deployed company can't hire from the halls; people reach it by transfer.
-            if (short_total > 0) try out.append(alloc, .{ .kind = .manning_short, .text = if (gs.deploymentContract(f.id) != null)
+            if (short_total > 0) try out.append(alloc, .{ .kind = .manning_short, .text = if (gs.isCompanyDeployed(f.id))
                 try std.fmt.allocPrint(alloc, "{s} manning short: {s} (deployed — hire at an HQ hall, then :xfer person <id> co:{d}; they travel to the company)", .{ f.name, text.items, @intFromEnum(f.id) })
             else
                 try std.fmt.allocPrint(alloc, "{s} manning short: {s} (Forces r → MANNING; :crew co:{d} hires from the halls)", .{ f.name, text.items, @intFromEnum(f.id) }) });
@@ -216,7 +216,7 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
         if (f.supply_shortage_days > 0) {
             try out.append(alloc, .{ .kind = .hungry, .text = try std.fmt.allocPrint(alloc, "{s} has been hungry {d} day(s) — send provisions or funds", .{ f.name, f.supply_shortage_days }) });
         }
-        if (gs.deploymentContract(f.id) != null) {
+        if (gs.isCompanyDeployed(f.id)) {
             // Only the families the company's working mounts actually fire.
             var dry: u32 = 0;
             var names: std.ArrayListUnmanaged(u8) = .empty;
@@ -248,7 +248,7 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
     var idle_it = gs.forces.iterator();
     while (idle_it.next()) |fentry| {
         const f = fentry.value_ptr;
-        if (f.echelon != .company or f.location_planet == null or gs.deploymentContract(f.id) != null) continue;
+        if (f.echelon != .company or gs.companyPosture(f.id) != .idle_afield) continue;
         try out.append(alloc, .{ .kind = .company_idle_afield, .text = try std.fmt.allocPrint(alloc, "{s} is idling on {s} eating its trucks — accept work from the field or `recall co:{d}`", .{ f.name, f.location_planet.?, @intFromEnum(f.id) }) });
     }
 
@@ -353,7 +353,7 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
     var pit = gs.people.iterator();
     while (pit.next()) |pentry| {
         const p = pentry.value_ptr;
-        if (p.status == .wounded and gs.deploymentContract(gs.companyOf(p.assigned_force)) == null) wounded_home += 1;
+        if (p.status == .wounded and gs.isCompanyHome(gs.companyOf(p.assigned_force))) wounded_home += 1;
     }
     const beds = medical.bedCapacity(gs, .none, false);
     if (wounded_home > beds) {
@@ -366,7 +366,7 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
     while (tit.next()) |tentry| {
         const t = tentry.value_ptr;
         if (!t.isAvailable(day)) continue;
-        if (unit_mod.techRoleFor(.mek) != t.role and t.role != .tech_mechanic and t.role != .tech_aero and t.role != .tech_ba) continue;
+        if (!t.role.isTech()) continue;
         if (gs.techLoadHours(t.id) > gs.techHoursAvailable(t)) overloaded += 1;
     }
     if (overloaded > 0) {

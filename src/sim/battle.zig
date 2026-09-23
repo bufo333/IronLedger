@@ -127,10 +127,10 @@ fn playerSideIn(gs: *GameState, alloc: std.mem.Allocator, c: *const contract_mod
     var family_fire_pct: std.StringArrayHashMapUnmanaged(u32) = .empty;
     for (company.children.items) |child_id| {
         const lance = gs.force(child_id) orelse continue;
-        if (lance.echelon != .lance and lance.echelon != .air_lance) continue;
+        if (!lance.isCombatLance()) continue;
         for (lance.units.items) |uid| {
             const u = gs.unit(uid) orelse continue;
-            if (u.status == .destroyed or u.status == .mothballed) continue;
+            if (u.isParked()) continue;
             if (!hasTech(gs, u)) continue; // nobody to reload it (Stage 9C.2)
             for (u.slots.items) |slot| {
                 if (slot.class != .weapon or slot.condition != .ok) continue;
@@ -154,7 +154,7 @@ fn playerSideIn(gs: *GameState, alloc: std.mem.Allocator, c: *const contract_mod
 
     for (company.children.items) |child_id| {
         const lance = gs.force(child_id) orelse continue;
-        if (lance.echelon != .lance and lance.echelon != .air_lance) continue;
+        if (!lance.isCombatLance()) continue;
         // Lance roles (MekHQ): training lances are held out of the fight —
         // unless the employer commands (12B.1 integrated rights).
         if (lance.role == .training and c.terms.command_rights.allowsTrainingLances()) continue;
@@ -167,7 +167,7 @@ fn playerSideIn(gs: *GameState, alloc: std.mem.Allocator, c: *const contract_mod
         var n: u32 = 0;
         for (lance.units.items) |uid| {
             const u = gs.unit(uid) orelse continue;
-            if (u.status == .destroyed or u.status == .mothballed or u.status == .repairing or u.status == .refitting) continue;
+            if (!u.canFight()) continue;
             const design = chassis_mod.find(u.chassis_key) orelse continue;
             // No pilot fit for duty → the hull stays in the hangar (Stage 9C.2).
             const pilot = gs.person(u.pilot) orelse continue;
@@ -245,13 +245,7 @@ fn companyMods(gs: *GameState, c: *const contract_mod.Contract) autoresolve.Camp
     var pit = gs.people.iterator();
     while (pit.next()) |entry| {
         const p = entry.value_ptr;
-        if (p.status != .active) continue;
-        var f = p.assigned_force;
-        const in_company = while (f != .none) {
-            if (f == c.assigned_company) break true;
-            f = (gs.forces.getPtr(f) orelse break false).parent;
-        } else false;
-        if (!in_company) continue;
+        if (p.status != .active or !gs.personInCompany(p, c.assigned_company)) continue;
         fatigue_sum += p.fatigue;
         morale_sum += p.morale;
         n += 1;
@@ -407,7 +401,7 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     };
     // A lost fight under hold costs more; a cautious company is already
     // pulling back when it turns (12D.4).
-    const lost_fight = outcome == .defeat or outcome == .rout;
+    const lost_fight = outcome.isLoss();
     const hit_pct: u32 = @intCast(@max(0, base_hit_pct + if (!lost_fight) 0 else switch (roe) {
         .hold => rt.hold_hits_pct,
         .standard => 0,
@@ -527,7 +521,7 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     // hold them, employer compensation for your losses.
     // A cautious company does not wait out a draw: it withdraws (12D.4).
     const withdrew = outcome == .draw and roe == .cautious;
-    const held_field = (outcome == .decisive_victory or outcome == .victory or outcome == .draw) and !withdrew;
+    const held_field = outcome.heldField() and !withdrew;
     const enemy_destroyed_bv = @divTrunc(enemy_bv * enemy_loss_pct, 100);
     // What the crews can actually haul off the field is bounded by the
     // salvage trucks on hand (300 BV-worth each; 150 hand-carried).
@@ -547,12 +541,7 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     var missing: u32 = 0;
     if (!held_field) {
         const t = tuning.loss;
-        var has_dropship = false;
-        var dit = gs.units.iterator();
-        while (dit.next()) |entry| {
-            const du = entry.value_ptr;
-            if (du.kind == .dropship and du.force == c.assigned_company and du.pilot != .none) has_dropship = true;
-        }
+        const has_dropship = gs.hasCrewedDropship(c.assigned_company);
         var wrecks_here: i64 = 0;
         for (hit_log.items) |h| wrecks_here += @intFromBool(h.destroyed);
         const situation: i32 = (if (player.mods.has_salvage_lance) t.recovery_salvage_lance else 0) //
@@ -577,7 +566,7 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
             // compensation covers it at the contract's rate (CamOps).
             damage_value += u.purchase_price - @divTrunc(u.purchase_price, 2);
             const p = gs.person(u.pilot) orelse continue;
-            if (p.status != .active and p.status != .wounded) continue;
+            if (!p.isOnBooks()) continue;
             const piloting: i32 = p.skill(.piloting_mek) orelse 5;
             const escape = @as(i32, gs.rng.roll2d6(.battle)) + (5 - piloting) + gs.diff().recovery_mod + (if (outcome == .rout) t.recovery_rout else 0);
             if (escape >= t.escape_target) continue;
@@ -675,7 +664,7 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
         c.victory_points += rt.withdrawal_score * 5;
     }
     // A convoy escort lost is a convoy hit (12C.9): the support train takes it.
-    const convoy_hit = scenario.support_exposed and (outcome == .defeat or outcome == .rout);
+    const convoy_hit = scenario.support_exposed and outcome.isLoss();
     if (convoy_hit) @import("contract_events.zig").damageRandomUnits(gs, c.assigned_company, if (outcome == .rout) 2 else 1, .support);
     var morale_delta: i32 = switch (outcome) {
         .decisive_victory => 5,
@@ -692,7 +681,7 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     for (engaged) |uid| {
         const u = gs.unit(uid) orelse continue;
         if (gs.person(u.pilot)) |p| {
-            if (p.status == .active or p.status == .wounded)
+            if (p.isOnBooks())
                 p.xp += p.xpGain(gs.clock.day_index, if (score_delta > 0) 3 else 2);
         }
     }
@@ -857,13 +846,7 @@ fn applyCompanyAftermath(gs: *GameState, company: types.ForceId, morale_delta: i
     var it = gs.people.iterator();
     while (it.next()) |entry| {
         const p = entry.value_ptr;
-        if (p.status != .active) continue;
-        var f = p.assigned_force;
-        const in_company = while (f != .none) {
-            if (f == company) break true;
-            f = (gs.forces.getPtr(f) orelse break false).parent;
-        } else false;
-        if (!in_company) continue;
+        if (p.status != .active or !gs.personInCompany(p, company)) continue;
         // Cool Under Fire (12B.6): half the morale loss after a bad day.
         const delta = if (morale_delta < 0 and p.has("cool_under_fire")) @divTrunc(morale_delta, 2) else morale_delta;
         p.morale = @intCast(std.math.clamp(@as(i32, p.morale) + delta, 0, 100));

@@ -18,7 +18,7 @@ pub fn adjustMoraleAll(gs: *GameState, delta: i32) u32 {
     var it = gs.people.iterator();
     while (it.next()) |e| {
         const p = e.value_ptr;
-        if (p.status != .active and p.status != .wounded) continue;
+        if (!p.isOnBooks()) continue;
         const d = if (delta < 0 and p.has("cool_under_fire")) @divTrunc(delta, 2) else delta;
         p.morale = @intCast(std.math.clamp(@as(i32, p.morale) + d, 0, 100));
         touched += 1;
@@ -53,7 +53,7 @@ pub fn payShares(gs: *GameState, contract_id: types.ContractId, company: types.F
     var it = gs.people.iterator();
     while (it.next()) |e| {
         const p = e.value_ptr;
-        if (p.status != .active and p.status != .wounded) continue;
+        if (!p.isOnBooks()) continue;
         total_shares += p.shares;
     }
     if (total_shares == 0) return 0;
@@ -65,7 +65,7 @@ pub fn payShares(gs: *GameState, contract_id: types.ContractId, company: types.F
     var it2 = gs.people.iterator();
     while (it2.next()) |e| {
         const p = e.value_ptr;
-        if ((p.status != .active and p.status != .wounded) or p.shares == 0) continue;
+        if (!p.isOnBooks() or p.shares == 0) continue;
         paid += per_share * p.shares;
         holders += 1;
         p.morale = @intCast(@min(100, @as(u32, p.morale) + 3));
@@ -180,7 +180,7 @@ pub fn techHours(gs: *GameState, company: types.ForceId) TechHours {
     var uit = gs.units.iterator();
     while (uit.next()) |e| {
         const u = e.value_ptr;
-        if (u.status == .destroyed or u.status == .mothballed or u.kind == .infantry or gs.companyOf(u.force) != company) continue;
+        if (u.isParked() or u.kind == .infantry or gs.companyOf(u.force) != company) continue;
         needed += if (gs.person(u.tech)) |t| gs.techHoursFor(t, u) else gs.hullHours(u);
     }
     var pit = gs.people.iterator();
@@ -197,7 +197,7 @@ pub fn manningHave(gs: *GameState, company: types.ForceId, role: person_mod.Role
     var pit = gs.people.iterator();
     while (pit.next()) |e| {
         const p = e.value_ptr;
-        if (p.role != role or (p.status != .active and p.status != .wounded)) continue;
+        if (p.role != role or !p.isOnBooks()) continue;
         if (gs.companyOf(p.assigned_force) == company) have += 1;
     }
     return have;
@@ -218,7 +218,7 @@ pub fn creditKills(gs: *GameState, engaged: []const types.UnitId, destroyed_bv: 
     for (engaged) |uid| {
         const u = gs.unit(uid) orelse continue;
         const p = gs.person(u.pilot) orelse continue;
-        if (p.status != .active and p.status != .wounded) continue;
+        if (!p.isOnBooks()) continue;
         p.battles += 1;
         const bv: u32 = if (chassis_mod.find(u.chassis_key)) |c| c.bv else 500;
         const gunnery: u32 = p.skill(p.role.primarySkill()) orelse 4;
@@ -251,7 +251,7 @@ pub fn creditKills(gs: *GameState, engaged: []const types.UnitId, destroyed_bv: 
 /// Returns how many were pinned on.
 pub fn checkAwards(gs: *GameState, person_id: types.PersonId) !u32 {
     const p = gs.person(person_id) orelse return 0;
-    if (p.status != .active and p.status != .wounded) return 0;
+    if (!p.isOnBooks()) return 0;
     var n: u32 = 0;
     for (award_mod.table) |a| {
         if (p.hasAward(a.key)) continue;
@@ -302,7 +302,7 @@ pub fn refreshRanks(gs: *GameState) !u32 {
         var company_best_skill: u8 = 99;
         for (f.children.items) |cid| {
             const lance = gs.force(cid) orelse continue;
-            if (lance.echelon != .lance and lance.echelon != .air_lance) continue;
+            if (!lance.isCombatLance()) continue;
             var best: types.PersonId = .none;
             var best_skill: u8 = 99;
             for (lance.units.items) |uid| {

@@ -83,6 +83,17 @@ pub const Outcome = enum {
     draw,
     defeat,
     rout,
+
+    /// The company lost the fight (defeat or rout).
+    pub fn isLoss(self: Outcome) bool {
+        return self == .defeat or self == .rout;
+    }
+
+    /// The company still holds the ground afterwards (a draw included;
+    /// a cautious withdrawal is the caller's exception).
+    pub fn heldField(self: Outcome) bool {
+        return self == .decisive_victory or self == .victory or self == .draw;
+    }
 };
 
 test "supply and morale move combat power" {

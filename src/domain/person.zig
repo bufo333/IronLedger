@@ -83,6 +83,21 @@ pub const Role = enum {
             else => false,
         };
     }
+
+    /// Fills a hull's seat: its crew or its tech. The open-seat warning
+    /// covers these; the manning warning covers the rest.
+    pub fn fillsHullSeat(self: Role) bool {
+        return switch (self) {
+            .mekwarrior, .vehicle_crew, .aero_pilot, .tech_mek, .tech_mechanic, .tech_aero => true,
+            else => false,
+        };
+    }
+
+    /// The hiring hall keeps the combat floor for these (12B.13): seat
+    /// roles and the astech pool behind them.
+    pub fn hallCombatFloor(self: Role) bool {
+        return self.fillsHullSeat() or self == .astech;
+    }
 };
 
 pub const Status = enum { active, wounded, mia, kia, retired, resigned, pow, released };
@@ -279,7 +294,7 @@ pub const Person = struct {
     /// What this person's stake should be today (12C.3).
     pub fn sharesDue(self: *const Person, day: u32) u8 {
         const t = tuning.person;
-        if (self.status != .active and self.status != .wounded) return 0;
+        if (!self.isOnBooks()) return 0;
         const eligible = self.role.isCombat() or self.role.isTech();
         if (!eligible) return 0;
         var n: u8 = 0;
@@ -311,6 +326,20 @@ pub const Person = struct {
     }
 
     /// Fit for duty today: active, not on leave.
+    /// On the payroll and in the outfit's care: active or wounded. MIA,
+    /// prisoners and everyone who left are off the books.
+    pub fn isOnBooks(self: *const Person) bool {
+        return self.status == .active or self.status == .wounded;
+    }
+
+    /// Left the outfit for good: dead, retired, resigned or released.
+    pub fn isGone(self: *const Person) bool {
+        return switch (self.status) {
+            .kia, .retired, .resigned, .released => true,
+            else => false,
+        };
+    }
+
     pub fn isAvailable(self: *const Person, day: u32) bool {
         if (self.status != .active) return false;
         if (self.leave_until_day) |until| if (day < until) return false;

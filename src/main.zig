@@ -405,11 +405,10 @@ fn printContracts(gs: *game.state.GameState) void {
     while (fit.next()) |fe| {
         const f = fe.value_ptr;
         if (f.echelon != .company) continue;
-        if (f.return_eta_day) |eta| {
-            std.debug.print("  co:{d} {s} returning home, arrives day {d}\n", .{ @intFromEnum(f.id), f.name, eta });
-        } else if (f.location_planet) |p| {
-            if (gs.deploymentContract(f.id) == null)
-                std.debug.print("  co:{d} {s} idle on {s} — accept work from the field or `recall co:{d}`\n", .{ @intFromEnum(f.id), f.name, p, @intFromEnum(f.id) });
+        switch (gs.companyPosture(f.id)) {
+            .returning => |eta| std.debug.print("  co:{d} {s} returning home, arrives day {d}\n", .{ @intFromEnum(f.id), f.name, eta }),
+            .idle_afield => |p| std.debug.print("  co:{d} {s} idle on {s} — accept work from the field or `recall co:{d}`\n", .{ @intFromEnum(f.id), f.name, p, @intFromEnum(f.id) }),
+            else => {},
         }
     }
 }
@@ -428,7 +427,7 @@ fn printHqs(gs: *game.state.GameState) void {
         while (fit.next()) |fe| {
             const f = fe.value_ptr;
             if (f.echelon == .company and f.supplying_hq == hq.id)
-                std.debug.print("    co:{d} {s}{s}\n", .{ @intFromEnum(f.id), f.name, if (gs.deploymentContract(f.id) != null) " (deployed)" else "" });
+                std.debug.print("    co:{d} {s}{s}\n", .{ @intFromEnum(f.id), f.name, if (gs.isCompanyDeployed(f.id)) " (deployed)" else "" });
         }
     }
     for (gs.hq_links.items) |l| {
@@ -564,7 +563,7 @@ fn printSupplies(gs: *game.state.GameState) void {
         const f = entry.value_ptr;
         if (f.echelon != .company or f.stock.count() == 0) continue;
         const site: game.types.Site = .{ .company = f.id };
-        const deployed = gs.deploymentContract(f.id) != null;
+        const deployed = gs.isCompanyDeployed(f.id);
         std.debug.print("co:{d} {s} field stores — {d}t / {d}t truck capacity{s}\n", .{
             @intFromEnum(f.id), f.name, gs.siteTons(site), gs.siteCapacityTons(site) orelse 0,
             if (deployed) " (DEPLOYED)" else "",
@@ -580,7 +579,7 @@ fn printSupplies(gs: *game.state.GameState) void {
         }
     }
     for (gs.part_orders.items) |o| {
-        if (o.status == .in_transit)
+        if (o.inFlight())
             std.debug.print("  inbound: {s} x{d} → {s}, eta day {d}\n", .{ o.part_key, o.quantity, @tagName(o.dest), o.eta_day orelse 0 });
     }
 }
@@ -636,7 +635,7 @@ fn printDemand(gs: *game.state.GameState) void {
         const key = entry.key_ptr.*;
         var on_order: u32 = 0;
         for (gs.part_orders.items) |o| {
-            if (o.status == .in_transit and std.mem.eql(u8, o.part_key, key)) on_order += o.quantity;
+            if (o.inFlight() and std.mem.eql(u8, o.part_key, key)) on_order += o.quantity;
         }
         const on_hand = gs.stockCount(home, key);
         const shortfall = entry.value_ptr.* -| (on_hand + on_order);
@@ -679,7 +678,7 @@ fn printCompanyRoster(gs: *game.state.GameState, co: game.types.ForceId) void {
     while (pit.next()) |entry| {
         const p = entry.value_ptr;
         if (gs.companyOf(p.assigned_force) != co) continue;
-        if (game.unit.techRoleFor(.mek) != p.role and p.role != .tech_mechanic and p.role != .tech_aero) continue;
+        if (!p.role.isTech()) continue;
         std.debug.print("    #{d:<3} {s} {s:<12} {s:<13} {d:>2}/{d:<2}h{s}\n", .{
             @intFromEnum(p.id), p.first_name, p.last_name, @tagName(p.role),
             gs.techLoadHours(p.id), gs.techHoursAvailable(p),

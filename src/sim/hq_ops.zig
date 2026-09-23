@@ -144,7 +144,7 @@ pub fn componentDemand(alloc: std.mem.Allocator, gs: *GameState, hq_id: types.Hq
         const n = e.value_ptr.*;
         const on_hand = gs.stockCount(.{ .hq = hq_id }, key);
         var coming: u32 = 0;
-        for (gs.part_orders.items) |o| if (std.mem.eql(u8, o.part_key, key) and o.dest == .hq and o.dest.hq == hq_id and (o.status == .sourcing or o.status == .in_transit)) {
+        for (gs.part_orders.items) |o| if (std.mem.eql(u8, o.part_key, key) and o.dest == .hq and o.dest.hq == hq_id and o.inFlight()) {
             coming += o.quantity;
         };
         for (gs.bay_jobs.items) |j| if (j.hq == hq_id and j.kind == .fabrication and j.done_day == null and std.mem.eql(u8, j.item_key, key)) {
