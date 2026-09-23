@@ -1017,6 +1017,11 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     // And a haul the claim cannot stretch over asks how to divide it
     // (12G.6). Nothing has been taken yet; the trucks wait on the answer.
     if (salvage_unclaimed > 0) try @import("contract_events.zig").queueSalvage(gs, c, report.id);
+    // And the night after any fight the techs pool their hours on the
+    // damage (12G.6), asking whose hull comes first only when the order
+    // changes the outcome. Last, so a salvage answer's spares and armour
+    // are in the stores before the techs reach for them.
+    try @import("contract_events.zig").queueFieldRepair(gs, c, report.id);
 }
 
 /// " · field lost · recovery 6 vs 7 — LEFT TO THE ENEMY" (12D.3).
@@ -1636,6 +1641,61 @@ test "12G.6: the three salvage plans divide one claim three ways" {
     try std.testing.expect(!salvageWorthAsking(&cands, 300));
     // Nor when it reaches nothing at all.
     try std.testing.expect(!salvageWorthAsking(&cands, 100));
+}
+
+test "12G.6: a real fight on thin stores asks whose hull comes first, and the night does what the inbox said" {
+    for ([_]u64{ 901, 902, 903, 904, 905, 906 }) |seed| {
+        if (try repairOfferRoundTrip(seed)) return;
+    }
+    return error.NoRepairDecisionInSixCampaigns;
+}
+
+fn repairOfferRoundTrip(seed: u64) !bool {
+    const contract_events = @import("contract_events.zig");
+    const maintenance = @import("maintenance.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = seed });
+    defer gs.deinit();
+    _ = try gs.createCommander("T", .LC, .line_officer);
+    const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
+        .id = @enumFromInt(1),
+        .kind = .recon_raid,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 6, .base_pay_month = 400_000 },
+        .status = .active,
+        .assigned_company = co,
+    });
+    const c = gs.contracts.getPtr(@enumFromInt(1)).?;
+    const site = gs.siteForForce(co);
+    // Two tons of plating for a whole company: the order has to matter.
+    _ = gs.takeStock(site, "armor", gs.stockCount(site, "armor"));
+    try gs.addStock(site, "armor", 2);
+    for (part_mod.munition_keys) |key| try gs.addStock(site, key, 200);
+
+    var guard: u32 = 0;
+    while (guard < 20) : (guard += 1) {
+        try resolveEngagement(&gs, c);
+        while (gs.event_queue.blocking()) |ev| {
+            if (ev.kind == .field_repair) break;
+            try contract_events.resolveChoice(&gs, ev.id, ev.default_choice);
+        }
+        if (gs.event_queue.blocking() != null) break;
+        if (c.status != .active) return false;
+    }
+    const pending = gs.event_queue.blocking() orelse return false;
+    const event_id = pending.id;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const offered = try maintenance.planFor(&gs, arena.allocator(), co, .heaviest_first);
+    try std.testing.expect(offered.leftCount() > 0);
+    const tons_before = gs.stockCount(site, "armor");
+    try contract_events.resolveChoice(&gs, event_id, 2);
+    for (offered.hulls) |h| try std.testing.expectEqual(h.armor_after, gs.unit(h.unit).?.armor_pct);
+    try std.testing.expectEqual(tons_before - offered.armor_tons, gs.stockCount(site, "armor"));
+    return true;
 }
 
 test "12G.6: the salvage the screen offers is the salvage the command loads" {

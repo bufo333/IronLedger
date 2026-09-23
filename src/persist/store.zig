@@ -2144,6 +2144,33 @@ test "12G.6: a battle decision round-trips answerable, and still holds the turn"
     try std.testing.expect(ev.holdsTurn());
 }
 
+test "12G.6: a field repair decision comes back from a save with its three orders" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 12069 });
+    defer gs.deinit();
+    const f = try contract_events.damagedCompanyForTest(&gs, 2);
+    try contract_events.queueFieldRepair(&gs, f.c, .none);
+    try std.testing.expect(gs.event_queue.blocking() != null);
+
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+
+    const ev = loaded.event_queue.blocking() orelse return error.DecisionLostOnLoad;
+    try std.testing.expectEqual(@import("../sim/events.zig").EventKind.field_repair, ev.kind);
+    try std.testing.expectEqual(@as(usize, 3), ev.options.len);
+    try std.testing.expect(ev.holdsTurn());
+    // The damage is state, not part of the event: the reloaded plan matches.
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const maintenance = @import("../sim/maintenance.zig");
+    const before = try maintenance.planFor(&gs, arena.allocator(), f.c.assigned_company, .worst_first);
+    const after = try maintenance.planFor(&loaded, arena.allocator(), f.c.assigned_company, .worst_first);
+    try std.testing.expectEqual(before.hulls.len, after.hulls.len);
+    for (before.hulls, after.hulls) |x, y| try std.testing.expectEqual(x.armor_after, y.armor_after);
+}
+
 test "12G.6: a recovery decision remembers its battle, and a held hull its lance" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 12066 });
     defer gs.deinit();

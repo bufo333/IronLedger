@@ -304,15 +304,19 @@ fn runDemo(gs: *game.state.GameState, gpa: std.mem.Allocator) !void {
     if (game.commands.execute(gs, .{ .found_hq = .{ .name = "Firebase Kalmar", .planet_key = worked } })) |_| {
         const hqs = try q.hqList(al, gs);
         const fb = hqs[hqs.len - 1].id;
-        _ = game.commands.execute(gs, .{ .transfer = .{ .from = .outfit, .to = .{ .hq = fb }, .amount = 3_500_000 } }) catch |err| std.debug.print("courier refused: {s}\n", .{@errorName(err)});
-        _ = try game.commands.execute(gs, .{ .link = .{ .a = seat, .b = fb, .level = 1 } });
-        _ = try game.commands.execute(gs, .{ .advance_days = 30 }); // the courier arrives
-        _ = game.commands.execute(gs, .{ .upgrade_tier = fb }) catch |err| std.debug.print("tier upgrade refused: {s}\n", .{@errorName(err)});
-        _ = try game.commands.execute(gs, .{ .advance_days = 95 }); // unstaffed paperwork (21) + 60-day build
-        _ = try game.commands.execute(gs, .{ .autostaff = fb }); // a ring needs a back office
-        if (game.commands.execute(gs, .{ .new_company_at = .{ .name = "Bravo Company", .hq = fb } })) |_| {
-            std.debug.print("Bravo Company stood up at the new regional HQ.\n", .{});
-        } else |err| std.debug.print("second company refused: {s}\n", .{@errorName(err)});
+        // The upgrade is only worth waiting on once its money is on the
+        // road: without the courier the outfit would sit out a quarter's
+        // payroll for a build it cannot pay for.
+        if (game.commands.execute(gs, .{ .transfer = .{ .from = .outfit, .to = .{ .hq = fb }, .amount = 3_500_000 } })) |_| {
+            _ = try game.commands.execute(gs, .{ .link = .{ .a = seat, .b = fb, .level = 1 } });
+            _ = try game.commands.execute(gs, .{ .advance_days = 30 }); // the courier arrives
+            _ = game.commands.execute(gs, .{ .upgrade_tier = fb }) catch |err| std.debug.print("tier upgrade refused: {s}\n", .{@errorName(err)});
+            _ = try game.commands.execute(gs, .{ .advance_days = 95 }); // unstaffed paperwork (21) + 60-day build
+            _ = try game.commands.execute(gs, .{ .autostaff = fb }); // a ring needs a back office
+            if (game.commands.execute(gs, .{ .new_company_at = .{ .name = "Bravo Company", .hq = fb } })) |_| {
+                std.debug.print("Bravo Company stood up at the new regional HQ.\n", .{});
+            } else |err| std.debug.print("second company refused: {s}\n", .{@errorName(err)});
+        } else |err| std.debug.print("courier refused: {s} — the firebase stays a toehold\n", .{@errorName(err)});
         printHqs(gs, al);
         printLines(al, try q.logLines(al, gs, 5, .{ .category = .construction }), "  ");
     } else |err| std.debug.print("founding refused: {s}\n", .{@errorName(err)});

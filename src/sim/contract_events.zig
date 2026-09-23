@@ -11,6 +11,7 @@ const events = @import("events.zig");
 const contract_mod = @import("../domain/contract.zig");
 const GameState = @import("state.zig").GameState;
 const unit_mod = @import("../domain/unit.zig");
+const maintenance = @import("maintenance.zig");
 
 pub const decision_window_days = tuning.contract.decision_window_days;
 pub const notice_window_days = tuning.contract.notice_window_days;
@@ -194,6 +195,7 @@ pub fn entryForKind(kind: events.EventKind) ?Entry {
     if (kind == .press_or_consolidate) return pressEntry();
     if (kind == .recovery_push) return pushEntry();
     if (kind == .salvage_priority) return salvageEntry();
+    if (kind == .field_repair) return repairEntry();
     var roll: u8 = 2;
     while (roll <= 12) : (roll += 1) {
         const g = garrisonDeck(roll);
@@ -567,6 +569,10 @@ fn applyEffectsFor(gs: *GameState, effects: []const events.Effect, contract: ?*c
                 }
                 try gs.log(.battle, .{ .company = company, .contract = contract_id }, "[salvage] the trucks are loaded: {s}", .{if (text.len > 0) text else "nothing the claim could reach"});
             },
+            // 12G.6: the night's repairs, in the order chosen. Planned again
+            // here from the live stores, by the function the inbox row
+            // called — so what was offered is what the techs do.
+            .field_repair => |order| try fieldRepairNight(gs, company, contract_id, order),
             .delay_arrival => |days| if (contract) |c| {
                 if (c.status == .transit) {
                     if (c.arrive_day) |d| c.arrive_day = d + days;
@@ -769,6 +775,57 @@ pub fn queueSalvage(gs: *GameState, c: *const contract_mod.Contract, battle: typ
         .deadline_day = gs.clock.day_index + decision_window_days,
     });
     try gs.log(.decision, .{ .company = c.assigned_company, .contract = c.id }, "[salvage] DECISION: {s}", .{e.log});
+}
+
+/// Field repair priority (12G.6): the pooled hours and the field armour
+/// will not stretch over all the damage. The labels are fixed so the store
+/// can rebuild them from the kind; what each order actually does comes
+/// from `maintenance.repairPlan`, which the inbox row shows alongside.
+pub fn repairEntry() Entry {
+    return .{ .kind = .field_repair, .log = "the hours and the armour will not stretch over all the damage — decide whose hull the techs take first", .options = &.{
+        .{ .label = "Worst-hit first", .effects = &.{.{ .field_repair = .worst_first }} },
+        .{ .label = "Spread the plating", .effects = &.{.{ .field_repair = .spread }} },
+        .{ .label = "Heaviest first", .effects = &.{.{ .field_repair = .heaviest_first }} },
+    }, .default_choice = 1 };
+}
+
+/// The night after a fight (12G.6): ask whose hull comes first when the
+/// orders give different results; otherwise the techs just work the one
+/// way there is. A contract the fight completed asks nothing either — the
+/// company still patches up, spread.
+pub fn queueFieldRepair(gs: *GameState, c: *const contract_mod.Contract, battle: types.BattleId) !void {
+    const company = c.assigned_company;
+    var arena = std.heap.ArenaAllocator.init(gs.scratch());
+    defer arena.deinit();
+    const scratch = arena.allocator();
+    const needs = try maintenance.repairNeeds(gs, scratch, company);
+    if (needs.len == 0) return;
+    const budget = try maintenance.repairBudget(gs, scratch, company, needs);
+    if (c.status == .active and try maintenance.repairWorthAsking(scratch, needs, budget)) {
+        const e = repairEntry();
+        try gs.event_queue.push(gs.allocator(), .{
+            .day = gs.clock.day_index,
+            .kind = .field_repair,
+            .contract = c.id,
+            .company = company,
+            .battle = battle,
+            .options = e.options,
+            .default_choice = e.default_choice,
+            .deadline_day = gs.clock.day_index + decision_window_days,
+        });
+        try gs.log(.decision, .{ .company = company, .contract = c.id }, "[repair] DECISION: {s}", .{e.log});
+        return;
+    }
+    try fieldRepairNight(gs, company, c.id, .spread);
+}
+
+/// Carry out the night's repairs and log what they did (12G.6).
+fn fieldRepairNight(gs: *GameState, company: types.ForceId, contract: types.ContractId, order: types.RepairOrder) !void {
+    var arena = std.heap.ArenaAllocator.init(gs.scratch());
+    defer arena.deinit();
+    const plan = try maintenance.repairPush(gs, arena.allocator(), company, order);
+    if (plan.hours == 0 and plan.armor_tons == 0) return;
+    try gs.log(.construction, .{ .company = company, .contract = contract }, "[repair] the techs work the night through: {s}", .{try maintenance.pushSummary(arena.allocator(), plan)});
 }
 
 /// The prisoner decision (12B.7): ransom, release, or recruit.
@@ -1013,7 +1070,7 @@ test "12.24: automatic events never move money, stock or hulls — those are dec
             if (e.options.len > 0) continue;
             for (e.auto_effects) |fx| switch (fx) {
                 .fatigue, .morale, .xp_all, .score, .reputation, .employer_standing => {},
-                .cash, .cash_monthly_pct, .supply_loss, .parts_windfall, .field_stock, .damage_random_units, .damage_convoy_units, .raise_pct, .retention_bonus_months, .let_go, .replace_from_hall, .ransom_prisoner, .release_prisoner, .recruit_prisoner, .ransom_mia, .exchange_mia, .write_off_mia, .engagement, .seize_hull, .delay_arrival, .next_battle_in, .recovery_push, .take_salvage => {
+                .cash, .cash_monthly_pct, .supply_loss, .parts_windfall, .field_stock, .damage_random_units, .damage_convoy_units, .raise_pct, .retention_bonus_months, .let_go, .replace_from_hall, .ransom_prisoner, .release_prisoner, .recruit_prisoner, .ransom_mia, .exchange_mia, .write_off_mia, .engagement, .seize_hull, .delay_arrival, .next_battle_in, .recovery_push, .take_salvage, .field_repair => {
                     std.debug.print("auto event {s} carries a player-facing effect\n", .{@tagName(e.kind)});
                     return error.TestUnexpectedResult;
                 },
@@ -1248,4 +1305,74 @@ test "12D.9: betrayal can cost a hull; raiders at the jump point delay or fight 
     const fought_before = c.battles_fought;
     try resolveChoice(&gs, gs.event_queue.pending.items[0].id, 0); // fight through
     try std.testing.expectEqual(fought_before + 1, c.battles_fought);
+}
+
+/// A company on an active contract with three hulls shot up and nothing
+/// else to fix, and `armor` tons in its stores (12G.6 tests).
+pub fn damagedCompanyForTest(gs: *GameState, armor: u32) !struct { c: *contract_mod.Contract, hulls: [3]types.UnitId } {
+    _ = try gs.createCommander("T", .LC, .line_officer);
+    const co = try @import("../gen/company_gen.zig").generateInto(gs, "Alpha");
+    try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
+        .id = @enumFromInt(1),
+        .kind = .recon_raid,
+        .employer_key = "LC",
+        .enemy_key = "PER",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 6, .base_pay_month = 400_000 },
+        .status = .active,
+        .assigned_company = co,
+    });
+    var hulls: [3]types.UnitId = undefined;
+    var n: usize = 0;
+    var it = gs.units.iterator();
+    while (it.next()) |entry| {
+        const u = entry.value_ptr;
+        if (gs.companyOf(u.force) != co) continue;
+        u.armor_pct = 100;
+        for (u.slots.items) |*slot| slot.condition = .ok;
+        if (n < hulls.len and u.kind.isCombat()) {
+            u.armor_pct = @intCast(10 + 20 * n);
+            hulls[n] = u.id;
+            n += 1;
+        }
+    }
+    const site = gs.siteForForce(co);
+    _ = gs.takeStock(site, "armor", gs.stockCount(site, "armor"));
+    try gs.addStock(site, "armor", armor);
+    return .{ .c = gs.contracts.getPtr(@enumFromInt(1)).?, .hulls = hulls };
+}
+
+test "12G.6: the repairs the inbox offers are the repairs the techs make" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 12066 });
+    defer gs.deinit();
+    const f = try damagedCompanyForTest(&gs, 2);
+    const co = f.c.assigned_company;
+
+    // Two tons over three shot-up hulls: the order decides who gets them.
+    try queueFieldRepair(&gs, f.c, .none);
+    const ev = gs.event_queue.blocking() orelse return error.NotAsked;
+    try std.testing.expectEqual(events.EventKind.field_repair, ev.kind);
+    try std.testing.expect(ev.holdsTurn());
+    const id = ev.id;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const offered = try maintenance.planFor(&gs, arena.allocator(), co, .worst_first);
+    try std.testing.expectEqual(@as(u32, 2), offered.armor_tons);
+    try resolveChoice(&gs, id, 0);
+
+    for (offered.hulls) |h| try std.testing.expectEqual(h.armor_after, gs.unit(h.unit).?.armor_pct);
+    try std.testing.expectEqual(@as(u32, 0), gs.stockCount(gs.siteForForce(co), "armor"));
+    // Worst-hit first put both tons on the worst hull.
+    try std.testing.expectEqual(10 + 2 * tuning.maintenance.armor_patch_pct, gs.unit(f.hulls[0]).?.armor_pct);
+    try std.testing.expect(gs.event_queue.blocking() == null);
+}
+
+test "12G.6: when the stores cover everything, the techs just do it" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 12067 });
+    defer gs.deinit();
+    const f = try damagedCompanyForTest(&gs, 60);
+    try queueFieldRepair(&gs, f.c, .none);
+    try std.testing.expect(gs.event_queue.blocking() == null);
+    for (f.hulls) |uid| try std.testing.expectEqual(@as(u8, 100), gs.unit(uid).?.armor_pct);
 }

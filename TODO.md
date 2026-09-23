@@ -26,9 +26,7 @@ the rule and the symbol are the stable key.
 
 ## 12G. After-action (ROADMAP Stage 12G)
 
-- [ ] **12G.6 Field repair priority**, the fourth battle decision: which hull the techs take first. Blocking inbox decision (ARCH §6), answered with `resolve <id> <n>`, like the other three. ROADMAP has one line for it, so the design paragraph is written into ROADMAP first. When it lands, 12G.6 goes from ◐ to ✅.
 - [ ] **12G.8 The pre-battle contact warning.** `tuning.battle.contact_warning_days` before contact, show the skull rating, the fieldable strength and the ammunition state while ROE and recall can still change the outcome. Non-blocking.
-- [ ] ROADMAP cleanup, with the next 12G PR: the 12D note at ROADMAP.md:1104-1106 still calls the recovery raid "still open". "Go back for the downed" (eb60f65) delivered it.
 
 ## 12F. Size-aware screens (ROADMAP Stage 12F)
 
@@ -71,6 +69,8 @@ When Part 1 is empty, Stage 12 is marked ✅ in ROADMAP.md and README.md.
 - [ ] Field beds allocated in one pass over the sorted patient list with a used-bed count per company (medical.zig:181-188). Test: five equal-priority patients, four beds, exactly one waits.
 - [ ] One combat-skill selector keyed on unit kind (reuse person.zig:378-380); battle.zig:209-210 calls it. Test: a vehicle crewed by a good `vehicle_crew` pilot fights at their vee skills.
 - [ ] Conceded engagement (battle.zig:808-814) emits a minimal `BattleReport` (defeat, no hits) through the normal aftermath bookkeeping (stats, `battles_fought`); the report holds the turn like any other; the -2 score / -10 VP move into tuning.
+- [ ] `autoresolve.CampaignMods.has_field_repair` is set by a transport support lance (battle.zig:283) and read nowhere; the mobile field base (`UnitKind.mobile_field_base`) has no repair effect. Either wire it (e.g. into the 12G.6 push budget) or delete the flag.
+- [ ] ROADMAP 9C.2 says reloads cost tech hours; `runWeeklyRepairs` charges none. Implement or correct the roadmap.
 - Design backlog (not a defect): per-site hospital and doctor capacity (#7). ARCHITECTURE.md never specified per-site care; decide there first.
 
 ## D17. Logistics accounting (audit #6, #12; rules 5, 6, 27)

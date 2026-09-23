@@ -1104,9 +1104,8 @@ CamOps/MekHQ/TechManual rules, scaled by difficulty.
   `contract.interdiction_target` (11) weekly — fight through (a real
   engagement against the contract's opposition), pay them off (100k), or
   divert and wait them out (+7 days, the default; `Effect.delay_arrival`).
-  Deferred: a "recovery raid" decision to win back hulls left on a lost
-  field. The limbo it needed now exists (12G.7); the decision itself is
-  still open.
+  The "recovery raid" deferred here, a decision to win back hulls left on
+  a lost field, shipped as 12G.6 "Go back for the downed".
 
 ## Stage 12E — Judging a contract (planned 2026-09-21)
 
@@ -1238,7 +1237,7 @@ the player reads, and a turn that stops until they have.
   `checklist` warning names it; `read <id>` clears it. The first rule
   besides insolvency that actually stops a turn (ARCH §6: dials never
   block, battle decisions do).
-- ◐ 12G.6 **The four decisions.** Each is a blocking inbox decision
+- ✅ 12G.6 **The four decisions.** Each is a blocking inbox decision
   (ARCH §6), answered with the existing `resolve <id> <n>`.
   - ✅ **Press the advance or consolidate.** A held field asks for the
     tempo. Pressing puts the next contact `tuning.battle.press_gap_days`
@@ -1273,7 +1272,28 @@ the player reads, and a turn that stops until they have.
     materialised cannot differ. Asked only when taking the biggest and
     taking the most are different hauls (`salvageWorthAsking`);
     otherwise the fight takes the only plan there is.
-  - ☐ **Field repair priority** — which hull the techs take first.
+  - ✅ **Field repair priority.** Repairs used to wait for the weekly
+    pass, one 15% armour patch per hull, each hull worked only by its own
+    tech, so a fight was followed by up to six days of nothing and the
+    order never mattered. Now the night after every fight the company's
+    techs **pool** a share of their spare hours
+    (`tuning.maintenance.push_hours_bp`) and work through the damage with
+    the company's field armour and spares, with as many patches on one
+    hull as the budget reaches. Three orders: **worst-hit first** (pull
+    the near-wrecks back from zero armour, where one hard hit kills),
+    **spread the plating** (one job per hull per round, so the most hulls
+    fight near full condition), **heaviest first** (protect the big BV
+    and keep the company above the combat-ineffective line).
+    `maintenance.repairPlan` is pure and is called twice, once by the
+    inbox row and once by the command, both from live stores, so the plan
+    offered and the plan carried out cannot differ. Asked only when a hull
+    is shot up (`Unit.conditionPct` under `tuning.unit.shot_up_condition_pct`,
+    the hangar's own test) and the three orders give different results
+    (`repairWorthAsking`); otherwise the push runs silently, spread. It is
+    queued last after a fight, so spares and armour from a salvage answer
+    are in the stores before the techs reach for them. Structure is still depot work, and wrecks
+    still go home. The weekly pass is unchanged. MekHQ counterpart: the
+    Repair Bay tab, where the player assigns techs to tasks.
 - ✅ 12G.7 **Hulls held, not struck off.** A hull left on a lost field
   passes into enemy hands instead of being deleted: `GameState.holdUnit`
   moves it out of `units` into `held_hulls` (`unit.HeldHull`), so every
