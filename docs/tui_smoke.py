@@ -17,16 +17,39 @@ if pid == 0:
 fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 50, 200, 0, 0))
 
 out = b""
-def drain(t=0.6):
+
+# How long the client must be silent before we call a frame finished. The
+# TUI paints in single-digit milliseconds, so this is the whole cost of a
+# keystroke on a healthy machine; `t` is only the ceiling for a slow one.
+IDLE = 0.08
+
+def drain(t=0.6, idle=IDLE):
+    """Read until the client goes quiet, or `t` elapses — whichever first.
+
+    `t` is a **ceiling, not a sleep**. The old version burned the full `t`
+    on every call, which cost ~160s of doing nothing across the script's
+    210 keystrokes. Waiting for quiet keeps the same safety margin on a
+    loaded CI runner while returning in ~`idle` when the frame is already
+    painted."""
     global out
     end = time.time() + t
+    last = time.time()
+    saw_any = False
     while time.time() < end:
-        r, _, _ = select.select([fd], [], [], 0.05)
+        r, _, _ = select.select([fd], [], [], 0.02)
         if r:
             try:
-                out += os.read(fd, 65536)
+                chunk = os.read(fd, 65536)
             except OSError:
                 return
+            if chunk:
+                out += chunk
+                last = time.time()
+                saw_any = True
+                continue
+        # Quiet for `idle` after something arrived: the frame is done.
+        if saw_any and time.time() - last >= idle:
+            return
 
 def send(s, wait=0.5):
     os.write(fd, s.encode() if isinstance(s, str) else s)
