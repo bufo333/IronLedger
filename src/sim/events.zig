@@ -53,6 +53,22 @@ pub const EventKind = enum {
     mia_held,
     /// Raiders waiting at the jump point for an unescorted company (12D.9).
     jump_interdiction,
+    /// The field is held and the enemy is off balance (12G.6): press the
+    /// advance, or consolidate and put the company back together.
+    press_or_consolidate,
+
+    /// Does this decision hold the turn (ARCH §6)? The test is what the
+    /// decision disposes of, not how big it feels: a battle decision
+    /// spends hulls, people and the contract's tempo and has no safe
+    /// default to lapse to, so time waits for it. Everything else —
+    /// money, fatigue, standing, a bonus — defaults at its deadline,
+    /// because ignoring your inbox is a choice, not an impossibility.
+    pub fn blocksTurn(self: EventKind) bool {
+        return switch (self) {
+            .press_or_consolidate => true,
+            else => false,
+        };
+    }
 };
 
 /// One consequence of an event option. Relative where it must scale
@@ -106,6 +122,9 @@ pub const Effect = union(enum) {
     seize_hull,
     /// Days added to a company's transit (12D.9: waiting raiders out).
     delay_arrival: u8,
+    /// The next engagement on this contract comes in N days rather than
+    /// when the usual gap would have put it (12G.6).
+    next_battle_in: u8,
 };
 
 pub const Option = struct {
@@ -131,6 +150,11 @@ pub const Event = struct {
 
     pub fn needsDecision(self: *const Event) bool {
         return self.options.len > 0 and self.chosen == null;
+    }
+
+    /// Unanswered and holding the turn (12G.6).
+    pub fn holdsTurn(self: *const Event) bool {
+        return self.needsDecision() and self.kind.blocksTurn();
     }
 };
 
@@ -175,6 +199,13 @@ pub const EventQueue = struct {
         var max: u32 = 0;
         for (self.pending.items) |ev| max = @max(max, @intFromEnum(ev.id));
         self.next_id = max + 1;
+    }
+
+    /// The oldest pending decision that holds the turn, if any (12G.6).
+    /// One place decides; `advance` and the checklist both read it.
+    pub fn blocking(self: *const EventQueue) ?*const Event {
+        for (self.pending.items) |*ev| if (ev.holdsTurn()) return ev;
+        return null;
     }
 
     pub fn unresolvedCount(self: *const EventQueue) usize {

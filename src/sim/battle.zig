@@ -912,6 +912,10 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     // Objectives (Stage 9E): the pool shrinks, VP accrue, and a broken pool
     // completes the contract.
     try @import("contract_control.zig").recordBattle(gs, c, enemy_destroyed_bv, score_delta);
+    // The tempo is the commander's to set (12G.6) — asked only after the
+    // field is held, and only once `recordBattle` has had its say about
+    // whether there is a contract left to fight on.
+    if (held_field and !outcome.isLoss()) try @import("contract_events.zig").queuePress(gs, c);
 }
 
 /// " · field lost · recovery 6 vs 7 — LEFT TO THE ENEMY" (12D.3).

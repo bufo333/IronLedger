@@ -96,6 +96,27 @@ fn printTable(al: std.mem.Allocator, cols: []const game.table.Col, rows: anytype
     printLines(al, t.render(al) catch return, indent);
 }
 
+/// Clear whatever is holding the turn (12G.5/12G.6): read the
+/// after-action, answer the battle decision with its default. The demo
+/// is an unattended run, so it takes the default every time — the point
+/// is that it never advances past a fight without acknowledging it.
+fn clearTurnHolds(gs: *game.state.GameState, al: std.mem.Allocator) !void {
+    while (true) switch (q.turnHold(gs)) {
+        .none => return,
+        .after_action => |id| {
+            if (try q.battleReport(al, gs, id)) |lines| {
+                if (lines.len > 0) std.debug.print("        after-action: {s}\n", .{lines[0]});
+            }
+            _ = try game.commands.execute(gs, .{ .read_report = id });
+        },
+        .decision => |id| {
+            const ev = try q.pendingDecision(al, gs, id) orelse return;
+            std.debug.print("        battle decision: taking the default — \"{s}\"\n", .{ev.default_option});
+            _ = try game.commands.execute(gs, .{ .resolve_decision = .{ .event = id, .choice = ev.default_choice } });
+        },
+    };
+}
+
 fn runDemo(gs: *game.state.GameState, gpa: std.mem.Allocator) !void {
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
@@ -161,10 +182,20 @@ fn runDemo(gs: *game.state.GameState, gpa: std.mem.Allocator) !void {
 
     // Run it month by month until completion (report capped at a year).
     // Turn-based: decisions land in the inbox; the demo answers the first
-    // one by hand and lets later ones default at their deadlines.
+    // one by hand and lets later ones default at their deadlines. A
+    // battle is different (12G.5/12G.6) — the turn stops on the day it
+    // lands and waits, so the demo plays the month out in whatever pieces
+    // the fighting leaves it, reading and answering as it goes.
     var answered_one = false;
     for (0..12) |month| {
-        _ = try game.commands.execute(gs, .{ .advance_days = 30 });
+        var left: u32 = 30;
+        while (left > 0) {
+            try clearTurnHolds(gs, al);
+            const r = try game.commands.execute(gs, .{ .advance_days = left });
+            if (r.days_advanced == 0) break; // refused for a reason of its own
+            left -= @intCast(r.days_advanced);
+        }
+        try clearTurnHolds(gs, al);
         const st = try q.status(al, gs);
         const active = (try q.contracts(al, gs, .none)).active;
         const running = active.len > 0;

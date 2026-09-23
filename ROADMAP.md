@@ -1235,10 +1235,20 @@ the player reads, and a turn that stops until they have.
   `checklist` warning names it; `read <id>` clears it. The first rule
   besides insolvency that actually stops a turn (ARCH §6: dials never
   block, battle decisions do).
-- ☐ 12G.6 **The four decisions.** Salvage priority (a candidate set
-  against the haul budget, rather than the RAT rolling two wrecks at
-  claim time), go back for the downed, press the advance or consolidate,
-  and which hull the techs take first.
+- ◐ 12G.6 **The four decisions.** Each is a blocking inbox decision
+  (ARCH §6), answered with the existing `resolve <id> <n>`.
+  - ✅ **Press the advance or consolidate.** A held field asks for the
+    tempo. Pressing puts the next contact `tuning.battle.press_gap_days`
+    out instead of the usual gap and the employer sees initiative, but
+    the company fights it unrepaired and unslept; consolidating buys a
+    breather. `EventKind.blocksTurn` names which decisions hold the turn
+    and `checklist.turnHold` is the one place that decides whether one
+    is held, so `advance`, the checklist and the client cannot disagree.
+    Garrison work has no front to press and never asks.
+  - ☐ **Salvage priority** — a candidate set against the haul budget,
+    rather than the RAT rolling two wrecks at claim time.
+  - ☐ **Go back for the downed** — re-roll `HullHit.recovery` at a cost.
+  - ☐ **Field repair priority** — which hull the techs take first.
 - ✅ 12G.7 **Hulls held, not struck off.** A hull left on a lost field
   passes into enemy hands instead of being deleted: `GameState.holdUnit`
   moves it out of `units` into `held_hulls` (`unit.HeldHull`), so every

@@ -456,6 +456,7 @@ pub fn errorText(err: anyerror) []const u8 {
         error.NoSuchLoan => "no such loan (or nothing to repay)",
         error.NoSuchBattle => "no engagement on record with that id — `battles` lists them",
         error.ReportUnread => "an after-action report is waiting — read it (`battles` lists them, `read <id>` clears one; the Desk opens the sheet on [b])",
+        error.DecisionPending => "a battle decision is waiting — answer it (`inbox` lists them, `resolve <id> <n>` answers one; the Desk opens it on [i])",
         error.NoSuchDecision => "no pending decision with that id — `inbox` lists them, each with the id to answer it by",
         error.NoSuchEvent => "no such event — kinds read as the log names them, e.g. smuggler_offer (`sop` lists the ones with a history)",
         error.NoSuchListing => "that listing is gone",

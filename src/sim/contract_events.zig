@@ -188,6 +188,10 @@ pub fn entryForKind(kind: events.EventKind) ?Entry {
     if (kind == .prisoner_held) return prisonerEntry();
     if (kind == .mia_held) return miaEntry();
     if (kind == .jump_interdiction) return interdictionEntry();
+    // Without this the store drops the decision on load: `save`/`load`
+    // rebuild an event's options from its kind, and a kind with no entry
+    // is skipped (12G.6).
+    if (kind == .press_or_consolidate) return pressEntry();
     var roll: u8 = 2;
     while (roll <= 12) : (roll += 1) {
         const g = garrisonDeck(roll);
@@ -521,6 +525,14 @@ fn applyEffectsFor(gs: *GameState, effects: []const events.Effect, contract: ?*c
                     try gs.log(.contract, .{ .company = company }, "[betrayal] the employer's liaison takes {s} #{d} as collateral — gone from the books", .{ key, @intFromEnum(id) });
                 }
             },
+            // 12G.6: the contract's tempo. Revalidated here rather than
+            // pre-checked by the screen — the fight that raised this may
+            // have completed the contract before the answer came.
+            .next_battle_in => |days| if (contract) |c| {
+                if (c.status != .active) return;
+                c.next_battle_day = gs.clock.day_index + days;
+                try gs.log(.battle, .{ .company = company, .contract = c.id }, "[tempo] the company presses the advance — contact expected in {d} days", .{days});
+            },
             .delay_arrival => |days| if (contract) |c| {
                 if (c.status == .transit) {
                     if (c.arrive_day) |d| c.arrive_day = d + days;
@@ -623,6 +635,37 @@ pub fn queueMissing(gs: *GameState, person_id: types.PersonId, company: types.Fo
         .default_choice = e.default_choice,
         .deadline_day = gs.clock.day_index + decision_window_days * 2,
     });
+}
+
+/// The tempo decision (12G.6): the field is held and the enemy is off
+/// balance. Press, and the next contact comes in days rather than weeks —
+/// the employer sees initiative, but the company fights it unrepaired,
+/// unrearmed and unslept. Consolidate, and the troops get a night off the
+/// line. The numbers live in `tuning.battle`, once.
+pub fn pressEntry() Entry {
+    const t = tuning.battle;
+    return .{ .kind = .press_or_consolidate, .log = "the field is held and the enemy is falling back — press the advance, or consolidate and put the company back together", .options = &.{
+        .{ .label = "Press the advance", .effects = &.{ .{ .next_battle_in = @intCast(t.press_gap_days) }, .{ .score = t.press_score }, .{ .fatigue = t.press_fatigue } } },
+        .{ .label = "Consolidate — repair, rearm, rest", .effects = &.{.{ .morale = t.consolidate_morale }} },
+    }, .default_choice = 1 };
+}
+
+/// Ask for the tempo after a field held (12G.6). Garrison work has no
+/// front to press, and a contract the fight just completed has no next
+/// engagement to schedule — neither asks.
+pub fn queuePress(gs: *GameState, c: *const contract_mod.Contract) !void {
+    if (c.status != .active or c.kind.isGarrisonClass()) return;
+    const e = pressEntry();
+    try gs.event_queue.push(gs.allocator(), .{
+        .day = gs.clock.day_index,
+        .kind = .press_or_consolidate,
+        .contract = c.id,
+        .company = c.assigned_company,
+        .options = e.options,
+        .default_choice = e.default_choice,
+        .deadline_day = gs.clock.day_index + decision_window_days,
+    });
+    try gs.log(.decision, .{ .company = c.assigned_company, .contract = c.id }, "[tempo] DECISION: {s}", .{e.log});
 }
 
 /// The prisoner decision (12B.7): ransom, release, or recruit.
@@ -867,7 +910,7 @@ test "12.24: automatic events never move money, stock or hulls — those are dec
             if (e.options.len > 0) continue;
             for (e.auto_effects) |fx| switch (fx) {
                 .fatigue, .morale, .xp_all, .score, .reputation, .employer_standing => {},
-                .cash, .cash_monthly_pct, .supply_loss, .parts_windfall, .field_stock, .damage_random_units, .damage_convoy_units, .raise_pct, .retention_bonus_months, .let_go, .replace_from_hall, .ransom_prisoner, .release_prisoner, .recruit_prisoner, .ransom_mia, .exchange_mia, .write_off_mia, .engagement, .seize_hull, .delay_arrival => {
+                .cash, .cash_monthly_pct, .supply_loss, .parts_windfall, .field_stock, .damage_random_units, .damage_convoy_units, .raise_pct, .retention_bonus_months, .let_go, .replace_from_hall, .ransom_prisoner, .release_prisoner, .recruit_prisoner, .ransom_mia, .exchange_mia, .write_off_mia, .engagement, .seize_hull, .delay_arrival, .next_battle_in => {
                     std.debug.print("auto event {s} carries a player-facing effect\n", .{@tagName(e.kind)});
                     return error.TestUnexpectedResult;
                 },

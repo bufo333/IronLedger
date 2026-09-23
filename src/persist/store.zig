@@ -1759,6 +1759,14 @@ test "save → load → identical hash, and the loaded campaign keeps playing" {
     for (gs.event_queue.pending.items, loaded.event_queue.pending.items) |saved_ev, loaded_ev| {
         try std.testing.expectEqual(saved_ev.id, loaded_ev.id);
         try std.testing.expect(loaded_ev.id != .none);
+        // 12G.6: an event's options are rebuilt from its kind on load, and
+        // a kind with no `entryForKind` entry comes back unanswerable —
+        // which a length check or an id check would never notice.
+        try std.testing.expectEqual(saved_ev.kind, loaded_ev.kind);
+        try std.testing.expectEqual(saved_ev.options.len, loaded_ev.options.len);
+        try std.testing.expectEqual(saved_ev.default_choice, loaded_ev.default_choice);
+        try std.testing.expectEqual(saved_ev.needsDecision(), loaded_ev.needsDecision());
+        try std.testing.expectEqual(saved_ev.holdsTurn(), loaded_ev.holdsTurn());
     }
     // And the counter resumes past them, so the next event cannot collide
     // with one already in the inbox.
@@ -2054,4 +2062,40 @@ test "12G.7: a hull the enemy holds round-trips, slots and all — off the books
     }
     // The slot rows really came back — the drop this test exists to catch.
     try std.testing.expect(slots_seen > 0);
+}
+
+test "12G.6: a battle decision round-trips answerable, and still holds the turn" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 12006 });
+    defer gs.deinit();
+    _ = try gs.createCommander("T", .LC, .line_officer);
+    const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
+        .id = @enumFromInt(1),
+        .kind = .recon_raid,
+        .employer_key = "LC",
+        .enemy_key = "PER",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 6, .base_pay_month = 400_000 },
+        .status = .active,
+        .assigned_company = co,
+    });
+    const c = gs.contracts.getPtr(@enumFromInt(1)).?;
+    try @import("../sim/contract_events.zig").queuePress(&gs, c);
+    try std.testing.expect(gs.event_queue.blocking() != null);
+
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+
+    // The store rebuilds an event's options from its kind. Without an
+    // `entryForKind` entry the decision comes back optionless — answered
+    // by nobody, holding nothing, and silently gone.
+    const ev = loaded.event_queue.blocking() orelse return error.DecisionLostOnLoad;
+    try std.testing.expectEqual(@import("../sim/events.zig").EventKind.press_or_consolidate, ev.kind);
+    try std.testing.expectEqual(@as(usize, 2), ev.options.len);
+    try std.testing.expectEqual(gs.event_queue.blocking().?.id, ev.id);
+    try std.testing.expectEqual(@as(usize, 1), ev.default_choice);
+    try std.testing.expect(ev.holdsTurn());
 }

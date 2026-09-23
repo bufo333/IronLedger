@@ -53,12 +53,15 @@ pub const WarningKind = enum {
     /// An active contract rates 4½ skulls or worse for the company on it
     /// today (12E.5): consider cautious ROE or recall.
     outmatched,
+    /// A battle decision nobody has answered (12G.6). Like the unread
+    /// after-action, the turn waits on it rather than defaulting.
+    battle_decision,
 
     /// Stops the turn until dealt with (ARCH §9.9): the desk decides which
     /// warnings gate `advance_day`; the screens only colour them.
     pub fn blocking(self: WarningKind) bool {
         return switch (self) {
-            .unread_after_action, .decision_due, .understaffed_hq, .overdrawn, .combat_ineffective, .dry_ammo, .hungry, .untreated_wounded, .insolvent => true,
+            .unread_after_action, .battle_decision, .decision_due, .understaffed_hq, .overdrawn, .combat_ineffective, .dry_ammo, .hungry, .untreated_wounded, .insolvent => true,
             else => false,
         };
     }
@@ -78,6 +81,19 @@ pub const Warning = struct {
     kind: WarningKind,
     text: []const u8,
 };
+
+/// Why time is not moving (ARCH §6). Two things stop a turn outside
+/// money, and both dispose of something permanent with no safe default to
+/// lapse to: an engagement nobody has read, and a battle decision nobody
+/// has answered. One function decides, so `advance` and the checklist
+/// cannot disagree about whether the turn is held.
+pub const Hold = enum { unread_after_action, battle_decision };
+
+pub fn turnHold(gs: *GameState) ?Hold {
+    if (gs.battle_reports.unread() != null) return .unread_after_action;
+    if (gs.event_queue.blocking() != null) return .battle_decision;
+    return null;
+}
 
 test "depot backlog only counts hulls whose company is home" {
     const commands = @import("commands.zig");
@@ -121,6 +137,15 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
     if (gs.battle_reports.unread()) |r| {
         try out.append(alloc, .{ .kind = .unread_after_action, .text = try std.fmt.allocPrint(alloc, "after-action from day {d} unread: {s} on {s} — {s}, field {s}", .{
             r.day, r.scenario, r.terrain, @tagName(r.outcome), if (r.held_field) "held" else "lost",
+        }) });
+    }
+
+    // A battle decision nobody has answered (12G.6): the turn waits on
+    // it too, so it sits with the report it followed.
+    if (gs.event_queue.blocking()) |ev| {
+        const entry = @import("contract_events.zig").entryForKind(ev.kind);
+        try out.append(alloc, .{ .kind = .battle_decision, .text = try std.fmt.allocPrint(alloc, "decision #{d} from day {d} unanswered: {s}", .{
+            @intFromEnum(ev.id), ev.day, if (entry) |e| e.log else @tagName(ev.kind),
         }) });
     }
 

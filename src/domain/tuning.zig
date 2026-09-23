@@ -368,6 +368,15 @@ pub const Tuning = struct {
         garrison_probe_base_days: u32,
         garrison_probe_die_days: u32,
         garrison_probe_lances: u8,
+        /// Press the advance or consolidate (12G.6): after a field held,
+        /// the commander chooses the tempo. Pressing puts the next
+        /// engagement `press_gap_days` out instead of the usual gap, and
+        /// the employer notices (`press_score`); the company pays for it
+        /// in fatigue. Consolidating buys a breather the troops feel.
+        press_gap_days: u32, // TUNE
+        press_score: i16, // TUNE
+        press_fatigue: u8, // TUNE
+        consolidate_morale: i8, // TUNE
     },
     field_supply: struct {
         ammo_share_pct: u32,
