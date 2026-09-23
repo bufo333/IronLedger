@@ -120,7 +120,9 @@ land in the Desk log pane.
 Money keys: Ledger `L` → `take_loan`, `R` → `repay_loan`; Forces `$` →
 `sell_unit`, `X` → `disband_company`; HQ `$` → `sell_hq`. Turn rules the
 client surfaces: untreated wounded and a negative outfit treasury are
-blocking checklist items; `advance` refuses with `Insolvent` until a loan
+blocking checklist items; an **unread after-action** refuses with
+`ReportUnread` and a multi-day advance stops on the day the battle lands,
+dropping the player into its sheet (12G.5); `advance` refuses with `Insolvent` until a loan
 or sale covers it, and `Bankrupt` (game over modal, campaign saved as it
 ended) once nothing could.
 

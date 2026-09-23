@@ -148,6 +148,9 @@ pub const Command = union(enum) {
     /// Validate the plan against the rules, take the parts, and queue the
     /// bay job (class ≤ the HQ's ceiling).
     refit_commit: types.UnitId,
+    /// Mark an after-action report read (12G.5): the turn is held until
+    /// every engagement has been seen.
+    read_report: types.BattleId,
     resolve_decision: struct {
         /// The event's own id (12G.1) — never its row, which moves when a
         /// neighbour is answered or expires.
@@ -265,6 +268,10 @@ pub const Error = error{
     NoSuchEvent,
     /// No pending inbox decision with that id (12G.1).
     NoSuchDecision,
+    /// No engagement on record with that id (12G.5).
+    NoSuchBattle,
+    /// An engagement has not been read, and the turn waits on it.
+    ReportUnread,
     NoSuchChoice,
     NotADecision,
     CommanderExists,
@@ -1507,6 +1514,10 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             });
             return .{};
         },
+        .read_report => |id| {
+            if (!gs.battle_reports.markRead(id)) return Error.NoSuchBattle;
+            return .{};
+        },
         .resolve_decision => |r| {
             try contract_events.resolveChoice(gs, r.event, r.choice);
             return .{};
@@ -2208,6 +2219,9 @@ fn advance(gs: *GameState, days: u32) Error!Result {
     // money (Stage 12): a negative outfit treasury holds the turn until a
     // loan or a sale covers it, and past all credit the outfit folds.
     var result: Result = .{};
+    // Nothing moves while an engagement is unread (12G.5); `read <id>`
+    // clears it, and the client opens the sheet for you.
+    if (gs.battle_reports.unread() != null) return Error.ReportUnread;
     for (0..days) |_| {
         if (gs.bankrupt) return Error.Bankrupt;
         // Couriers already bound for the outfit count: the turn can end
@@ -2222,6 +2236,11 @@ fn advance(gs: *GameState, days: u32) Error!Result {
         }
         try tick.advanceDay(gs);
         result.days_advanced += 1;
+        // A battle disposes of hulls and people permanently and has no
+        // safe default to lapse to (ARCH §6), so an unread after-action
+        // holds the turn. A multi-day advance stops on the day it lands
+        // rather than resolving the rest of the week around it.
+        if (gs.battle_reports.unread() != null) return result;
     }
     return result;
 }
@@ -2651,6 +2670,80 @@ test "12C.17: a black-market buy is a fraud or a sale, and the house notices eit
     try std.testing.expect(fraud and sale);
 }
 
+/// Advance `days`, reading each after-action as it lands — the loop a
+/// commander walks by hand once 12G.5 holds the turn. Tests that are
+/// about something else use this instead of `advance_days` directly.
+fn advanceReading(gs: *GameState, days: u32) !void {
+    var left = days;
+    while (left > 0) {
+        while (gs.battle_reports.unread()) |u| _ = try execute(gs, .{ .read_report = u.id });
+        const r = try execute(gs, .{ .advance_days = left });
+        if (r.days_advanced == 0) break; // refused for a reason of its own
+        left -= @intCast(r.days_advanced);
+    }
+    while (gs.battle_reports.unread()) |u| _ = try execute(gs, .{ .read_report = u.id });
+}
+
+test "12G.5: an unread after-action holds the turn, and a week stops on the day it lands" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 4242 });
+    defer gs.deinit();
+    _ = try gs.createCommander("T", .LC, .line_officer);
+    const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
+        .id = @enumFromInt(1),
+        .kind = .recon_raid,
+        .employer_key = "LC",
+        .enemy_key = "PER",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 6, .base_pay_month = 400_000, .salvage_pct = 30, .battle_loss_pct = 30 },
+        .status = .active,
+        .assigned_company = co,
+        .monthly_net = 300_000,
+    });
+    _ = gs.contracts.getPtr(@enumFromInt(1)).?;
+    const site: types.Site = .{ .company = co };
+    try gs.addStock(site, "armor", 60);
+    for (@import("../domain/part.zig").munition_keys) |key| try gs.addStock(site, key, 40);
+
+    // Walk a long advance until a battle lands. It must stop short: the
+    // week does not get to resolve around an engagement unseen.
+    var guard: u32 = 0;
+    while (gs.battle_reports.unread() == null and guard < 20) : (guard += 1) {
+        const r = try execute(&gs, .{ .advance_days = 7 });
+        if (gs.battle_reports.unread() != null) {
+            try std.testing.expect(r.days_advanced < 7);
+            break;
+        }
+        try std.testing.expectEqual(@as(u32, 7), r.days_advanced);
+    }
+    const waiting = gs.battle_reports.unread() orelse return error.NoBattleInTwentyWeeks;
+
+    // While it waits, nothing moves — not a week, not a day.
+    try std.testing.expectError(Error.ReportUnread, execute(&gs, .{ .advance_days = 7 }));
+    try std.testing.expectError(Error.ReportUnread, execute(&gs, .advance_day));
+    const held_at = gs.clock.day_index;
+
+    // The checklist says so, and says it blocks.
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const warnings = try @import("checklist.zig").turnWarnings(&gs, arena.allocator());
+    var saw = false;
+    for (warnings) |w| if (w.kind == .unread_after_action) {
+        saw = true;
+        try std.testing.expect(w.kind.blocking());
+    };
+    try std.testing.expect(saw);
+
+    // Reading it lets time move again.
+    _ = try execute(&gs, .{ .read_report = waiting.id });
+    const after = try execute(&gs, .advance_day);
+    try std.testing.expectEqual(@as(u32, 1), after.days_advanced);
+    try std.testing.expect(gs.clock.day_index > held_at);
+
+    // An id that is not on record is refused, not silently ignored.
+    try std.testing.expectError(Error.NoSuchBattle, execute(&gs, .{ .read_report = @enumFromInt(9999) }));
+}
+
 test "golden master: same seed + same script = same state hash" {
     const script = [_]Command{
         .{ .hire = .{ .first = "Grayson", .last = "Carlyle", .role = .mekwarrior } },
@@ -2774,7 +2867,7 @@ test "stage 4 end to end: commander, company, contract to completion" {
     const total_days = c.transit_days + @as(u32, c.terms.length_months) * 30 + 40;
     var advanced: u32 = 0;
     while (advanced < total_days) : (advanced += 7) {
-        _ = try execute(&gs, .{ .advance_days = 7 });
+        try advanceReading(&gs, 7);
         var pit = gs.people.iterator();
         while (pit.next()) |entry| {
             const p = entry.value_ptr;
@@ -2914,13 +3007,13 @@ test "9B: deployment eats field stores, then buys local, then goes hungry" {
 
     // On station, provisions burn daily out of the field stores.
     const c = gs.contracts.values()[0];
-    _ = try execute(&gs, .{ .advance_days = c.transit_days + 10 });
+    try advanceReading(&gs, c.transit_days + 10);
     try std.testing.expect(gs.stockCount(site, "provisions") < loaded);
 
     // Stores run dry: either the valve bought local (salvage money) or the
     // company went hungry (no money) — never a silent third option.
     gs.force(co).?.local_funds = 0;
-    _ = try execute(&gs, .{ .advance_days = 40 });
+    try advanceReading(&gs, 40);
     const mid = @import("../econ/finance.zig").summarize(&gs.ledger, 0, gs.clock.day_index, .{ .company = co });
     try std.testing.expect(gs.force(co).?.supply_shortage_days > 0 or
         mid.category(.supplies) + mid.category(.local_supplies) < 0);
@@ -2928,7 +3021,7 @@ test "9B: deployment eats field stores, then buys local, then goes hungry" {
     // ...until a courier arrives and the local-purchase valve opens (the
     // courier takes the map transit, however far this seed's contract is).
     _ = try execute(&gs, .{ .transfer = .{ .from = .outfit, .to = .{ .company = co }, .amount = 500_000 } });
-    _ = try execute(&gs, .{ .advance_days = gs.courierEtaDays(.{ .company = co }) + 3 });
+    try advanceReading(&gs, gs.courierEtaDays(.{ .company = co }) + 3);
     try std.testing.expectEqual(@as(u16, 0), gs.force(co).?.supply_shortage_days);
     const s = @import("../econ/finance.zig").summarize(&gs.ledger, 0, gs.clock.day_index, .{ .company = co });
     try std.testing.expect(s.category(.supplies) + s.category(.local_supplies) < 0);
@@ -3314,7 +3407,7 @@ test "9E: idle companies stay where they worked; recall brings them home; redepl
     _ = try execute(&gs, .{ .accept_contract = .{ .offer_index = best, .company = co } });
     const c = gs.contracts.values()[0];
     try std.testing.expect(c.committed_bv > 0);
-    _ = try execute(&gs, .{ .advance_days = c.transit_days + @as(u32, c.terms.length_months) * 30 + 5 });
+    try advanceReading(&gs, c.transit_days + @as(u32, c.terms.length_months) * 30 + 5);
     const done = gs.contracts.values()[0];
     try std.testing.expect(done.status == .completed or done.status == .breached or done.status == .failed);
 
@@ -3483,7 +3576,7 @@ test "12: the resupply plan keeps a deployed company fed and armed on a long lin
     var hungry_days: u32 = 0;
     var dry_battles: u32 = 0;
     while (day < 150) : (day += 1) {
-        _ = try execute(&gs, .advance_day);
+        try advanceReading(&gs, 1);
         try std.testing.expect(gs.siteTons(site) <= cap);
         if (gs.stockCount(site, "provisions") == 0) hungry_days += 1;
     }

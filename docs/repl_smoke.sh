@@ -30,6 +30,7 @@ out=$(printf '%s\n' \
   'resolve 999 1' \
   'battles' \
   'battles 999' \
+  'read 999' \
   'help' \
   'save' \
   'quit' | "$exe" --repl --store "$db" 2>&1)
@@ -49,6 +50,8 @@ check 'no pending decision'
 # 12G.4: engagements are kept as records the screens read; an id that is
 # not on record is refused rather than printing someone else's battle.
 check 'AFTER-ACTION REPORTS\|no engagements on record'
+check 'no engagement on record with that id'
+# 12G.5: `read` clears the after-action that holds the turn; a bad id is refused.
 check 'no engagement on record with that id'
 check 'fabricate'
 check 'stripped for parts'

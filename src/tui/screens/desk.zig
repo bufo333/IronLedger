@@ -108,7 +108,10 @@ pub fn enter(self: *App) anyerror!void {
 pub fn key(self: *App, ch: u21) anyerror!void {
     switch (ch) {
         // The engagements still on record (12G.4b): pick one to read.
-        'b' => self.openModal(.battle_list),
+        'b' => {
+            self.battles_from_list = true;
+            self.openModal(.battle_list);
+        },
         'e' => {
             self.logos = &.{};
             try self.loadLogoList();
