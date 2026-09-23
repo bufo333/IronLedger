@@ -388,7 +388,7 @@ pub fn errorText(err: anyerror) []const u8 {
         error.UnknownPerson => "no such person",
         error.NoTechSlot => "that hull takes no tech",
         error.WrongRole => "wrong role for that seat",
-        error.Unavailable => "that person is unavailable",
+        error.Unavailable => "unavailable — that person is busy, or that hull is a wreck / in the bay and takes no refit",
         error.Insolvent => "the outfit treasury is negative — take a loan (Ledger, L) or sell assets (Forces $, X · HQ $) before the day can end",
         error.Bankrupt => "the outfit is bankrupt",
         error.CreditExceeded => "that exceeds the remaining credit line (see the Ledger)",

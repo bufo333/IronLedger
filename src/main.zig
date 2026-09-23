@@ -597,25 +597,39 @@ fn printStockLines(stock: *const std.StringArrayHashMapUnmanaged(u32)) void {
 
 /// Parts needed to fix what's broken: on hand vs. on order vs. shortfall.
 fn printDemand(gs: *game.state.GameState) void {
+    // Structure: each HQ's depot ledger, the rule the depot queue applies.
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    var any = false;
+    var hit = gs.hqs.iterator();
+    while (hit.next()) |h| {
+        const ledger = game.hq_ops.componentDemand(arena.allocator(), gs, h.value_ptr.id, null) catch return;
+        if (ledger.len == 0) continue;
+        if (!any) std.debug.print("demand (structural components, per depot):\n", .{});
+        any = true;
+        std.debug.print("  {s}\n", .{h.value_ptr.name});
+        for (ledger) |l| std.debug.print("    {s:<14} need {d:>3} | on hand {d:>3} | coming {d:>3} | shortfall {d:>3}{s}\n", .{
+            l.key, l.need, l.on_hand, l.coming, l.short, if (l.short > 0) "  ← order or fabricate" else "",
+        });
+    }
+    // Gear: destroyed or missing field-work parts on any hull short of scrap.
     var needed: std.StringArrayHashMapUnmanaged(u32) = .empty;
-    defer needed.deinit(std.heap.page_allocator);
     var uit = gs.units.iterator();
     while (uit.next()) |entry| {
         const u = entry.value_ptr;
-        if (u.status == .destroyed) continue;
+        if (u.wreck == .scrap) continue;
         for (u.slots.items) |s| {
-            if (s.condition != .destroyed and s.condition != .missing) continue;
-            const key = if (s.class == .structure) game.part.componentFor(s.slot_key, u.chassis_key) else s.part_key;
-            const e = needed.getOrPut(std.heap.page_allocator, key) catch return;
+            if (s.class == .structure or (s.condition != .destroyed and s.condition != .missing)) continue;
+            const e = needed.getOrPut(arena.allocator(), s.part_key) catch return;
             if (!e.found_existing) e.value_ptr.* = 0;
             e.value_ptr.* += 1;
         }
     }
     if (needed.count() == 0) {
-        std.debug.print("demand: nothing broken needs a part.\n", .{});
+        if (!any) std.debug.print("demand: nothing broken needs a part.\n", .{});
         return;
     }
-    std.debug.print("demand (parts to fix broken slots):\n", .{});
+    std.debug.print("demand (gear to fix broken slots):\n", .{});
     const home = gs.defaultSite();
     var it = needed.iterator();
     while (it.next()) |entry| {

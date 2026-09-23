@@ -489,6 +489,7 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
         .refit_remove => |r| {
             const u = gs.unit(r.unit) orelse return Error.UnknownUnit;
             if (u.kind != .mek) return Error.NotAMek;
+            if (u.status == .destroyed) return Error.Unavailable; // a wreck is rebuilt (depot) or stripped, not refitted
             var found = false;
             for (u.slots.items) |s| {
                 if (std.mem.eql(u8, s.slot_key, r.slot_key) and s.class != .structure) found = true;
@@ -502,6 +503,7 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
         .refit_install => |r| {
             const u = gs.unit(r.unit) orelse return Error.UnknownUnit;
             if (u.kind != .mek) return Error.NotAMek;
+            if (u.status == .destroyed) return Error.Unavailable;
             const def = part_mod.find(r.part_key) orelse return Error.UnknownPart;
             if (!def.mountable()) return Error.NotAComponent;
             const plan = try gs.refitPlanOrCreate(r.unit);
