@@ -257,12 +257,11 @@ whitelisted imports; the help modal indexes its legend row by number
 - [x] **`layout.zig`** (rule 21): `narrow_cols`/`wide_cols`/`emblem_cols` with `narrow/wide/extraWide`, rational `Ratio` splits (`major`, `minor`, `list`, `half`, `quarter`, `two_thirds`, `three_quarters`, and the per-screen shares), and `layout.modal.*` sizes for all 30 modals. Contracts' wide threshold moved from 140 to `wide_cols` (150). `modalRect` keeps the 2-column margin once.
 - [x] `term.zig` and `layout.zig` are in the test block (D13 item).
 
-**D12b — pending.**
-- [ ] **shared picker for every list modal**: `raise_hulls`, `raise_support`, `seat`, `emblem`, `install_part`, `install_loc`, `upgrade`, `lance_pick`, `accept_pick`, `negotiate` (over a new `queries.negotiableTerms`), `music` (rows carry `{kind, index}`), `decision`.
-- [ ] **shared read-only list** for `hull`, `record`, `summary`, `readiness`, `raise_crews`, `contract_log`, `help`.
-- [ ] **shared text form** for `input`; `settings` folds into the list-with-adjust widget.
-- [ ] **markup tag set once** (rule 16): `table.zig` `isMark` is the declaration; `screen.zig` maps from it and reuses `visibleLen`.
-- [ ] **escape sequences in `term.zig`** (rule 24): `screen.zig` SGR table and cursor/pixel writes move behind `term` functions.
+**D12b — done (PR #17).**
+- [x] **shared list widget** (rule 19): `ListView` (title, head, rows or table, foot, pick count, offset, read-only, scroll, empty text, size) built by `listView` per modal kind; `drawList` draws every one; `listKey` handles the shared keys (cursor, column scroll, Enter, Esc, any-key-closes for sheets) and defers to `listEnter`, `listEscape` and `listExtra` for the kind-specific parts. Twenty draw arms and seventeen key arms became one arm each: `raise_hulls`, `raise_support`, `seat`, `emblem`, `install_part`, `install_loc`, `upgrade`, `lance_pick`, `accept_pick`, `negotiate`, `music`, `decision`, the five generic pickers, and the sheets `hull`, `record`, `summary`, `readiness`, `raise_crews`, `contract_log`, `help`. `drawPick` folded in. The negotiation terms live in one table ordered like `NegotiableTerm`.
+- [x] **text form**: `input` was already one arm for every prompt kind and stays the shared form. `settings` keeps its own list-with-adjust arm (←/→ adjust a row, Enter acts); it is one arm, not a copy.
+- [x] **markup tag set once** (rule 16): `table.marks` is the declaration, `table.isMark` the test; `screen.visibleLen` is `table.cells`; `Style.fromMarkup` is checked against `table.marks` by a test.
+- [x] **escape sequences in `term.zig`** (rule 24): `term.sgr.*`, `cursorHome`, `cursorTo`, `resetStyle`, `paintPair` (24-bit or the 256 cube); `screen.zig` carries no `\x1b`.
 
 **D12c — pending.**
 - [ ] **screens table** (rule 18): split app.zig into `src/tui/screens/{desk,map,forces,contracts,ledger,supply,hq,lab,people,market}.zig`, each exporting `draw`, `move`, `enter`, `key`, `footer`, `paneCount`; one table indexed by `Tab` replaces the six `switch (self.tab)`; the modal draw/key pair splits per widget; `drawWizard` becomes per-step functions.
