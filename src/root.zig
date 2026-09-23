@@ -69,6 +69,7 @@ pub const events = @import("sim/events.zig");
 pub const contract_events = @import("sim/contract_events.zig");
 pub const autoresolve = @import("sim/autoresolve.zig");
 pub const battle = @import("sim/battle.zig");
+pub const after_action = @import("sim/after_action.zig");
 
 // econ/ — money, markets, supply network
 pub const finance = @import("econ/finance.zig");
