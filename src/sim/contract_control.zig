@@ -86,16 +86,16 @@ pub fn complete(gs: *GameState, c: *contract_mod.Contract, objectives_broken: bo
     }
     c.status = .completed;
     // Reputation by victory points: a tour in the red earns none (12.19:
-    // a raid closed at −8 VP was still "reputation rises"). // TUNE
-    const vp_bonus = std.math.clamp(@divTrunc(c.victory_points, 25), -1, 3);
+    // a raid closed at −8 VP was still "reputation rises").
+    const t = tuning.contract;
+    const vp_bonus = std.math.clamp(@divTrunc(c.victory_points, t.rep_vp_per_point), t.rep_vp_bonus_min, t.rep_vp_bonus_max);
     const gain: i32 = if (c.victory_points < 0) vp_bonus else 1 + vp_bonus; // −8 VP → 0, −25 VP → −1
     gs.reputation += gain;
     // Standing (12.21): the employer remembers a tour served, and so does
     // whoever you served it against.
-    const t = tuning.contract;
-    const employer_now = try gs.adjustStanding(c.employer_key, @max(2, t.standing_complete_gain + @divTrunc(c.victory_points, 10)) + @as(i32, @intFromBool(c.beachhead)) * 2);
+    const employer_now = try gs.adjustStanding(c.employer_key, @max(2, t.standing_complete_gain + @divTrunc(c.victory_points, t.standing_vp_divisor)) + @as(i32, @intFromBool(c.beachhead)) * 2);
     const enemy_now = if (!std.mem.eql(u8, c.enemy_key, "PER")) try gs.adjustStanding(c.enemy_key, -t.standing_enemy_loss) else 0;
-    try gs.log(.contract, .{ .company = c.assigned_company, .contract = c.id }, "[standing] {s} +{d} → {d}{s}", .{ c.employer_key, @max(2, t.standing_complete_gain + @divTrunc(c.victory_points, 10)), employer_now, if (!std.mem.eql(u8, c.enemy_key, "PER")) try std.fmt.allocPrint(gs.allocator(), " · {s} −{d} → {d}", .{ c.enemy_key, t.standing_enemy_loss, enemy_now }) else "" });
+    try gs.log(.contract, .{ .company = c.assigned_company, .contract = c.id }, "[standing] {s} +{d} → {d}{s}", .{ c.employer_key, @max(2, t.standing_complete_gain + @divTrunc(c.victory_points, t.standing_vp_divisor)), employer_now, if (!std.mem.eql(u8, c.enemy_key, "PER")) try std.fmt.allocPrint(gs.allocator(), " · {s} −{d} → {d}", .{ c.enemy_key, t.standing_enemy_loss, enemy_now }) else "" });
     try finishTour(gs, c);
     // Service records (12B.5): a tour served, and an outstanding one noted.
     {

@@ -127,7 +127,7 @@ One predicate each; every listed site calls it.
 - [x] maintenance.zig:19-21 repair hours, 74-76 targets, 203/209 part-cost shares, 226-227 armour and flat cost.
 - [x] contract_market.zig:195-207 term rolls, :470 expiry.
 - [x] domain values moved: contract enemy strength and pool, person permanent penalty, force air lances, unit maintenance hours, part fabrication days and provisions; commander marker was stale
-- [ ] **D6c, deferred:** `src/domain/hq.zig` tier, capacity, facility-staffing, support-lance-unlock and refit-ceiling tables (six `// TUNE`, a `data/tables/hq.zon` schema of their own), plus the formula constants still marked: autoresolve.zig:29, contract_control.zig:89 (VP/25, /10 standing), maintenance.zig:168 (injury severity days 14/22), medical.zig:53/221/330 (heal scaling, HR morale cap 3), tick.zig:236, hq_ops.zig:650 (bay accident 10 days), company_gen.zig:89 (weight roll bands), market.zig:157/166 (staple list, condition rolls), contract_market.zig asking bonus formula, state.zig:681/1110/1449 (recruit bonus, truck reach, astech halves) (hq.zig ×6, part.zig ×2, unit.zig, person.zig, force.zig, commander.zig, contract.zig ×2, and the rest listed by `grep -rn '// TUNE' src/domain`).
+- [x] **D6c (PR #20):** the `hq.zig` tables — staff base per tier, staff per facility level, finance share, understaffing steps, lance and support-lance caps, per-tier capacity rows, support-lance facility needs, refit class caps — live in `tuning.hq` (`StaffRow`/`CapacityRow` tables may hold zeros; the positivity check skips `.staff_base.` and `.capacity_` paths). Formula constants moved: bay accident base days and injury severity days (`tuning.maintenance`), HR morale bonus, recruit HR threshold and the astech team rate (`tuning.person`), reputation-by-VP and standing-by-VP (`tuning.contract`), RAT weight bands (`tuning.generation`), staple keys, hull-condition roll bands and the hall asking bonus (`tuning.market`). Markers that named no number (autoresolve flags, training drill, load-out, heal scaling, wound placement) became plain comments. `grep -rn '// TUNE' src` now finds only the tuning.zig doc line.
 
 ---
 
@@ -263,14 +263,17 @@ whitelisted imports; the help modal indexes its legend row by number
 - [x] **markup tag set once** (rule 16): `table.marks` is the declaration, `table.isMark` the test; `screen.visibleLen` is `table.cells`; `Style.fromMarkup` is checked against `table.marks` by a test.
 - [x] **escape sequences in `term.zig`** (rule 24): `term.sgr.*`, `cursorHome`, `cursorTo`, `resetStyle`, `paintPair` (24-bit or the 256 cube); `screen.zig` carries no `\x1b`.
 
-**D12c — pending.**
-- [ ] **screens table** (rule 18): split app.zig into `src/tui/screens/{desk,map,forces,contracts,ledger,supply,hq,lab,people,market}.zig`, each exporting `draw`, `move`, `enter`, `key`, `footer`, `paneCount`; one table indexed by `Tab` replaces the six `switch (self.tab)`; the modal draw/key pair splits per widget; `drawWizard` becomes per-step functions.
-- [ ] **one key table per screen** (rule 22): footer arms, lobby footers, pane right-titles, modal titles, help rows and in-pane hints from one table; `docs/tui.md` key table generated or checked by the smoke.
+**D12c — table (PR #19) and file split (PR #22) done; key tables pending.**
+- [x] **screens table** (rule 18): `ScreenSpec {tab, draw, move, enter, key, panes, narrow_panes, footer}` and `screen_table` in `Tab` order (checked at comptime). `drawGame`, `paneCount`, `screenMove`, `screenEnter` and `screenKey` read the table; the six `switch (self.tab)` are gone (`grep -c 'switch (self.tab)' src/tui/app.zig` → 0). Each screen's move/enter/key body is its own function (`deskMove`, `deskEnter`, `deskKey`, …); `mapMove(dx, dy)` became `mapPan`.
+- [x] each screen's `draw`, `move`, `enter` and `key` live in `src/tui/screens/<tab>.zig` (PR #22), registered by `screen_table` through `screens.<tab>`; the App helpers they call are `pub`. Screen-specific helpers that modals also use (`toeRows`, `mapPan`, `labUnit`, `supplySite`, `selectedPerson*`, `inbox*`) stay on `App`. `app.zig` is 3,249 lines (from 4,822 before D11).
+- [ ] `drawWizard` into per-step functions.
+- [ ] **one key table per screen** (rule 22): the footers are in `screen_table`; pane right-titles, modal titles, help rows and in-pane hints still carry their own key text; `docs/tui.md` key table generated or checked by the smoke.
 
-## D13. Tests and CI (rules 37-40)
+## D13. Tests and CI (rules 37-40) — PR #21
 
 - [x] `term.zig` (and `layout.zig`) added to the test block in `src/main.zig` (PR #16).
-- [x] The emblem-editor smoke step (tui_smoke.py ~236-242) was timing-flaky: it now waits for text (`wait_for`) instead of sleeping (PR #8).
-- [ ] Smoke coverage: delete-player and delete-campaign confirms, disband and sell-HQ confirms, game-over path, music modal, resize, the 80-120 column boundary, `←/→` column scrolling on each table screen, every refusal branch of a confirm.
-- [ ] `.github/workflows/ci.yml`: `zig build test --summary all` plus both smokes on push and pull request.
-- [ ] Golden-master hash test (rule 40) if not already present.
+- [x] The emblem-editor smoke step (tui_smoke.py) was timing-flaky: it now waits for text (`wait_for`) instead of sleeping (PR #8).
+- [x] Smoke coverage added: delete-player and delete-campaign name-mismatch refusals, the sell-HQ and disband confirms (open, Esc keeps), ←/→ column scrolling on the contracts board, and a mid-session resize (SIGWINCH to 110 columns, borders fit the new width). The music modal, the 80x24 `--ascii` pass and the fire/sell-hull confirms were already covered.
+- [ ] Still uncovered: the game-over path (needs a bankrupt save), the 120-column boundary exactly, and the refusal branch of each confirm once run (they open and close only).
+- [x] `.github/workflows/ci.yml`: `zig build test --summary all` plus both smokes on push and pull request (Zig 0.16.0 via `mlugg/setup-zig`, `libsqlite3-dev`).
+- [x] Golden-master tests exist (`commands.zig` "same seed + same script = same state hash", `company_gen.zig`, and the store round-trip hash); rule 40 is a stated gate.

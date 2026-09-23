@@ -8,6 +8,11 @@
 const std = @import("std");
 const types = @import("types.zig");
 
+/// A row of the staff-base table (zeros are legitimate).
+pub const StaffRow = struct { admin: u32, logistics: u32, hr: u32, finance: u32 };
+/// A tier's fixed slots (zeros are legitimate).
+pub const CapacityRow = struct { combat_companies: u8, lances_per_company: u8, support_companies: u8, support_lances: u8, air_companies: u8, dropship_berths: u8, jumpship_berths: u8 };
+
 pub const Tuning = struct {
     hq: struct {
         influence_ly: struct { field: u32, regional: u32, brigade: u32 },
@@ -22,6 +27,39 @@ pub const Tuning = struct {
         founding_funds: types.CBills,
         found_field_hq_cost: types.CBills,
         sale_pct: u32,
+        /// Staff each tier needs before any facility (ARCH §9.4); a table of
+        /// desks, so a zero is a real value.
+        staff_base: struct {
+            field: StaffRow,
+            regional: StaffRow,
+            brigade: StaffRow,
+        },
+        /// Staff per facility level: bays, warehouses and ports want
+        /// logistics; halls and grounds want HR; care facilities want HR;
+        /// comms want admins.
+        staff_per_level: struct { logistics: u32, hr_halls: u32, hr_care: u32, admin_comms: u32 },
+        /// Finance desks: one per this many other staff.
+        finance_share_divisor: u32,
+        /// Understaffing steps: −1 effective level per this fraction (1/n) of shortfall.
+        understaffing_steps: u32,
+        /// Line lances per company: without a bay, with one, and with a bay of `lances_full_bay_level`.
+        lances_no_bay: u8,
+        lances_with_bay: u8,
+        lances_full_bay: u8,
+        lances_full_bay_level: u8,
+        /// Support lances: the staple four, +1 for a mess hall of `support_mess_level`,
+        /// +1 for a hospital or warehouse of `support_deep_level`.
+        support_base: u8,
+        support_mess_level: u8,
+        support_deep_level: u8,
+        /// Slots per tier (ARCH §9.3); facility-driven slots are computed.
+        capacity_field: CapacityRow,
+        capacity_regional: struct { combat_companies: u8, support_companies: u8, air_port_level: u8, dropship_base: u8, dropship_port_levels_each: u8, jumpship_port_level: u8, jumpship_comms_level: u8 },
+        capacity_brigade: struct { combat_companies: u8, support_companies: u8, support_extra: u8, air_base: u8, air_port_level: u8, dropship_base: u8, jumpship_base: u8, jumpship_port_level: u8, jumpship_comms_level: u8 },
+        /// Facility levels a support trade needs at the home HQ (Stage 12.15).
+        support_lance_needs: struct { mess: u8, mash_hospital: u8, transport_warehouse: u8 },
+        /// Highest refit class a tier's bay reaches (Quality index: 1 = B … 5 = F).
+        refit_class_cap: struct { field: u8, regional: u8, brigade: u8 },
     },
     logistics: struct {
         /// Days a same-world move still takes (loading, a short burn, paperwork).
@@ -49,6 +87,14 @@ pub const Tuning = struct {
         link_cost_per_level_sq: types.CBills,
     },
     market: struct {
+        /// Parts always on every board (weapons and ammo are readily available; the rare slots are for everything else).
+        staple_keys: []const []const u8,
+        /// Listed hull condition by 2d6: at or above `new_roll` new, `used_roll` used, `worn_roll` worn, below it a wreck.
+        cond_new_roll: u8,
+        cond_used_roll: u8,
+        cond_worn_roll: u8,
+        /// A hall candidate's signing bonus: this many months' salary plus one per experience step.
+        asking_bonus_base_months: u8,
         /// Days a hall walk-in or floor top-up stays listed; the weekly refresh's crowd.
         hall_walkin_days: u32,
         hall_refresh_days: u32,
@@ -152,6 +198,14 @@ pub const Tuning = struct {
         readiness_morale_divisor: u32,
         /// Skill points a permanent head or internal injury costs.
         permanent_penalty_per_injury: u8,
+        /// Morale at home: +1 per this many HR admins at the seat, capped.
+        hr_morale_admins_per_point: u32,
+        hr_morale_bonus_max: u32,
+        /// HR admins at the seat that add +1 to the recruit-quality roll.
+        recruit_hr_admins: u32,
+        /// Tech hours: half rate with no astechs, full at this many per tech.
+        astechs_per_tech_full_rate: u32,
+        tech_no_team_bp: types.Bp,
         /// Morale bands the boards colour: under `restless_morale` is
         /// critical, under `morale_content` amber; `morale_content` is also
         /// where rested spirits settle at home.
@@ -378,6 +432,11 @@ pub const Tuning = struct {
         /// this, for this many days plus 2d6.
         accident_target: u8,
         accident_days_base: u8,
+        /// Days off a bay accident costs before the 2d6 (Stage 9C.2).
+        bay_accident_days_base: u32,
+        /// An injury's severity from its days off: light up to the first, serious up to the second, crippling past it.
+        injury_days_serious: u32,
+        injury_days_crippling: u32,
         /// Weekly consumables: the hull's price over this (~0.17%/month).
         consumables_divisor: types.CBills,
         quality_drop_margin: i32,
@@ -425,6 +484,12 @@ pub const Tuning = struct {
         recruit_bonus_index: u8,
     },
     contract: struct {
+        /// Reputation on completion: 1 + VP / `rep_vp_per_point`, the VP part clamped to [min, max]; a tour in the red earns only the (negative) VP part.
+        rep_vp_per_point: i32,
+        rep_vp_bonus_min: i32,
+        rep_vp_bonus_max: i32,
+        /// Standing gained with the employer: base + VP / this.
+        standing_vp_divisor: i32,
         /// Offer terms rolled on the board (CamOps contract generation).
         advance_pct: u8,
         signing_bonus_target: u8,
@@ -534,6 +599,10 @@ pub const Tuning = struct {
         recruit_prisoner_target: u8,
     },
     generation: struct {
+        /// RAT weight-class roll (2d6): up to `light_max` light, `medium_max` medium, `heavy_max` heavy, else assault.
+        weight_light_max: u8,
+        weight_medium_max: u8,
+        weight_heavy_max: u8,
         /// Support staff ratios (12B.11): one doctor per this many combat
         /// crew, astechs per tech, medics per doctor, one admin per this
         /// many combat crew, and never fewer admins than the office needs.
@@ -642,6 +711,8 @@ fn checkPositive(comptime T: type, value: T, comptime name: []const u8) !void {
         .int => |info| {
             // Signed knobs (deltas, scores) may be zero or negative by design.
             if (info.signedness == .signed) return;
+            // Slot and desk tables hold real zeros (a field HQ has no air wing).
+            if (std.mem.indexOf(u8, name, ".staff_base.") != null or std.mem.indexOf(u8, name, ".capacity_") != null) return;
             if (value <= 0) {
                 std.debug.print("tuning field {s} must be positive\n", .{name});
                 return error.BadTuning;

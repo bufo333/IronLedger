@@ -632,12 +632,12 @@ pub const GameState = struct {
     }
 
     /// Recruit-quality bonus on the 2d6 experience roll: the hiring hall and
-    /// a staffed HR office find better people. // TUNE
+    /// a staffed HR office find better people.
     pub fn recruitBonus(self: *GameState) i32 {
         if (self.hqs.count() == 0) return 0;
         const hq = &self.hqs.values()[0];
         var bonus: i32 = hq.effectiveFacilityLevel(.hiring_hall);
-        if (self.hqStaff(hq.id, .admin_hr).count >= 2) bonus += 1;
+        if (self.hqStaff(hq.id, .admin_hr).count >= tuning.person.recruit_hr_admins) bonus += 1;
         // A famous outfit (12C.7) draws a better class of walk-in.
         if (@import("rating.zig").currentIndex(self) >= @import("../domain/tuning.zig").t.rating.recruit_bonus_index) bonus += 1;
         return @min(bonus, 4);
@@ -1095,7 +1095,7 @@ pub const GameState = struct {
 
     /// Kit out a company from the home warehouse before it ships: a month
     /// of provisions, medical, ammo for its weapons, armor and structure —
-    /// as far as its trucks can carry. // TUNE
+    /// as far as its trucks can carry (the field plan sizes it).
     pub fn loadOutCompany(self: *GameState, company_id: types.ForceId) !void {
         const field_supply = @import("field_supply.zig");
         const home = self.homeSiteFor(company_id);
@@ -1432,8 +1432,8 @@ pub const GameState = struct {
     }
 
     /// Effective hours a tech can spend this week: the budget, scaled by the
-    /// astech team available in their company (6 per tech = full rate,
-    /// none = half). // TUNE
+    /// astech team available in their company (`astechs_per_tech_full_rate`
+    /// per tech = full rate, none = `tech_no_team_bp`).
     pub fn techHoursAvailable(self: *GameState, tech: *const person_mod.Person) u32 {
         const company = self.companyOf(tech.assigned_force);
         var techs: u32 = 0;
@@ -1445,7 +1445,8 @@ pub const GameState = struct {
             if (p.role == .astech) astechs += 1;
             if (p.role.isTech()) techs += 1;
         }
-        const team_bp: types.Bp = if (techs == 0) 10_000 else 5_000 + @min(5_000, @divTrunc(@as(types.Bp, astechs) * 5_000, 6 * @as(types.Bp, techs)));
+        const tp = tuning.person;
+        const team_bp: types.Bp = if (techs == 0) types.full_bp else tp.tech_no_team_bp + @min(types.full_bp - tp.tech_no_team_bp, @divTrunc(@as(types.Bp, astechs) * (types.full_bp - tp.tech_no_team_bp), @as(types.Bp, tp.astechs_per_tech_full_rate) * @as(types.Bp, techs)));
         return @intCast(types.applyBp(@as(types.CBills, tech.weekly_hours), team_bp));
     }
 

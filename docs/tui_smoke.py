@@ -2,7 +2,7 @@
 """Drive the TUI through a pty: create a player, walk the wizard, begin a
 campaign, end a turn, quit back to the lobby, and exit. Prints the last
 screen and asserts on landmarks."""
-import os, pty, sys, time, select, re, struct, fcntl, termios
+import os, pty, sys, time, select, re, struct, fcntl, termios, signal
 
 exe = sys.argv[1]
 db = sys.argv[2]
@@ -52,6 +52,8 @@ assert "SETTINGS" in plain()[-30000:], plain()[-2000:]
 send("\x1b")
 send("p"); send("John\r")
 assert "player \"John\" created" in plain(), plain()[-3000:]
+send("D", 0.6); send("nobody\r", 0.8)     # delete player: the typed name must match
+assert "name did not match" in plain()[-800:], plain()[-1200:]
 send("n")                      # new campaign
 assert "NEW CAMPAIGN" in plain()
 send("\r")                     # commander → outfit (defaults)
@@ -142,6 +144,9 @@ p = plain()[-600:]
 assert "upgrade started" in p or "HQ funds short" in p or "project running" in p, plain()[-1500:]
 send("T", 0.8)                 # tier: the starter HQ is already regional → says so (the key exists)
 assert "already at the top" in plain()[-800:], plain()[-1200:]
+send("$", 0.8)                 # sell-HQ confirm: opens, Esc keeps it
+assert "SELL HQ?" in plain()[-30000:] and "40% of build cost" in plain()[-30000:], plain()[-2000:]
+send("\x1b", 0.6)
 send("f"); send("f")
 assert "filter techs" in plain(), plain()[-3000:]
 send("2")                      # map
@@ -238,6 +243,12 @@ send("\x1b")
 send("3"); send("j"); send("j"); send("$", 0.8)   # sell hull confirm
 assert "SELL OR STRIP HULL?" in plain()[-30000:], plain()[-3000:]
 send("\x1b")
+send("k"); send("X", 0.8)      # disband confirm on the company row: opens, Esc keeps it
+assert "DISBAND COMPANY?" in plain()[-30000:] and "cannot be undone" in plain()[-30000:], plain()[-2000:]
+send("\x1b", 0.6)
+send("4"); send("\x1b[C", 0.6); send("\x1b[C", 0.6)   # contracts board: → scrolls columns behind the first
+assert "◀" in plain()[-30000:], plain()[-3000:]
+send("\x1b[D", 0.6); send("\x1b[D", 0.6)
 send("1"); send("e", 1.5)      # emblem picker on the Desk
 p = plain()
 assert "EMBLEM ·" in p and "preset   Wolf's Head" in p, p[-2000:]
@@ -272,6 +283,14 @@ assert "day 4" in plain(), plain()[-2000:]
 send("q"); send("s", 1.5)      # save and return
 p = plain()
 assert "back at the welcome screen" in p, p[-3000:]
+send("\t", 0.5); send("d", 0.6); send("wrong name\r", 0.8)   # delete campaign: the typed name must match
+assert "name did not match" in plain()[-800:], plain()[-1200:]
+# Resize mid-session: the client redraws to the new size (SIGWINCH).
+fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 30, 110, 0, 0))
+os.kill(pid, signal.SIGWINCH)
+drain(1.0)
+runs = [len(m) for m in re.findall(r"─+", plain()[-6000:])]   # pane borders fit the new width, not the old 200
+assert "MERCENARY" in plain()[-8000:] and runs and 60 < max(runs) < 112, (max(runs) if runs else None, plain()[-2000:])
 send("q", 0.5)
 drain(0.5)
 print(plain()[-6000:])

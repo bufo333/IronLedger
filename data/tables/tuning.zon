@@ -16,6 +16,27 @@
         .founding_funds = 1_000_000,
         .found_field_hq_cost = 500_000,
         .sale_pct = 40,
+        // Staffing and slots (ARCH §9.3–9.4), placeholder balance.
+        .staff_base = .{
+            .field = .{ .admin = 1, .logistics = 1, .hr = 0, .finance = 1 },
+            .regional = .{ .admin = 4, .logistics = 2, .hr = 2, .finance = 2 },
+            .brigade = .{ .admin = 10, .logistics = 4, .hr = 4, .finance = 4 },
+        },
+        .staff_per_level = .{ .logistics = 2, .hr_halls = 2, .hr_care = 1, .admin_comms = 1 },
+        .finance_share_divisor = 4,
+        .understaffing_steps = 4,
+        .lances_no_bay = 3,
+        .lances_with_bay = 4,
+        .lances_full_bay = 5,
+        .lances_full_bay_level = 3,
+        .support_base = 4,
+        .support_mess_level = 2,
+        .support_deep_level = 3,
+        .capacity_field = .{ .combat_companies = 1, .lances_per_company = 4, .support_companies = 1, .support_lances = 4, .air_companies = 0, .dropship_berths = 0, .jumpship_berths = 0 },
+        .capacity_regional = .{ .combat_companies = 1, .support_companies = 1, .air_port_level = 3, .dropship_base = 1, .dropship_port_levels_each = 2, .jumpship_port_level = 4, .jumpship_comms_level = 3 },
+        .capacity_brigade = .{ .combat_companies = 2, .support_companies = 2, .support_extra = 2, .air_base = 1, .air_port_level = 4, .dropship_base = 2, .jumpship_base = 1, .jumpship_port_level = 4, .jumpship_comms_level = 4 },
+        .support_lance_needs = .{ .mess = 2, .mash_hospital = 1, .transport_warehouse = 1 },
+        .refit_class_cap = .{ .field = 1, .regional = 3, .brigade = 5 }, // classes B, D, F
     },
     .logistics = .{
         .same_world_days = 3,
@@ -42,6 +63,16 @@
         .link_cost_per_level_sq = 250_000,
     },
     .market = .{
+        .staple_keys = .{
+            "ammo_ac2", "ammo_ac5",   "ammo_ac10",        "ammo_ac20", "ammo_lrm", "ammo_srm", "ammo_mg",
+            "armor",    "provisions", "medical_supplies", "mlas",      "slas",     "flamer",
+            "mg",       "srm2",       "srm4",             "srm6",      "lrm5",
+            "lrm10",    "ac2",        "ac5",              "ac10",
+        },
+        .cond_new_roll = 10,
+        .cond_used_roll = 7,
+        .cond_worn_roll = 4,
+        .asking_bonus_base_months = 1,
         .hall_walkin_days = 14,
         .hall_refresh_days = 21,
         .staple_listing_days = 3650, // staples never age off; the board restocks them
@@ -111,6 +142,11 @@
         .readiness_transit_divisor = 4,
         .readiness_morale_divisor = 4,
         .permanent_penalty_per_injury = 1,
+        .hr_morale_admins_per_point = 2,
+        .hr_morale_bonus_max = 3,
+        .recruit_hr_admins = 2,
+        .astechs_per_tech_full_rate = 6,
+        .tech_no_team_bp = 5_000,
         .morale_content = 50,
         .morale_garrison_lift_below = 45,
         .fatigue_grind = 60,
@@ -246,6 +282,9 @@
         .armor_patch_labour = 5_000,
         .accident_target = 3, // one bad week in twelve after snake-eyes
         .accident_days_base = 5,
+        .bay_accident_days_base = 10,
+        .injury_days_serious = 14,
+        .injury_days_crippling = 22,
         .consumables_divisor = 2_500,
         .quality_drop_margin = 2,
         .quality_rise_margin = 7,
@@ -281,6 +320,10 @@
         .recruit_bonus_index = 4,
     },
     .contract = .{
+        .rep_vp_per_point = 25, // 12.19: a raid closed at −8 VP earns nothing
+        .rep_vp_bonus_min = -1,
+        .rep_vp_bonus_max = 3,
+        .standing_vp_divisor = 10,
         .advance_pct = 25,
         .signing_bonus_target = 10,
         .signing_bonus_divisor = 2,
@@ -346,6 +389,9 @@
         .recruit_prisoner_target = 8,
     },
     .generation = .{
+        .weight_light_max = 4, // AtB flavour: mediums dominate a line company, assaults are prizes
+        .weight_medium_max = 8,
+        .weight_heavy_max = 11,
         .crew_per_doctor = 25,
         .astechs_per_tech = 6,
         .medics_per_doctor = 4,

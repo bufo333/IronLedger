@@ -169,24 +169,26 @@ pub const Hq = struct {
         return 0;
     }
 
-    /// Staff the facilities demand (ARCH §9.4). // TUNE
+    /// Staff the facilities demand (ARCH §9.4; tables in tuning.hq).
     pub fn staffRequired(self: *const Hq) StaffRequirement {
-        var req: StaffRequirement = switch (self.tier) {
-            .field => .{ .admin = 1, .logistics = 1, .hr = 0, .finance = 1 },
-            .regional => .{ .admin = 4, .logistics = 2, .hr = 2, .finance = 2 },
-            .brigade => .{ .admin = 10, .logistics = 4, .hr = 4, .finance = 4 },
+        const base = switch (self.tier) {
+            .field => tuning.hq.staff_base.field,
+            .regional => tuning.hq.staff_base.regional,
+            .brigade => tuning.hq.staff_base.brigade,
         };
+        var req: StaffRequirement = .{ .admin = base.admin, .logistics = base.logistics, .hr = base.hr, .finance = base.finance };
+        const per = tuning.hq.staff_per_level;
         for (self.facilities.items) |f| {
             const lvl: u32 = f.level;
             switch (f.kind) {
-                .mek_bay, .warehouse, .spaceport => req.logistics += 2 * lvl,
-                .hiring_hall, .training_ground => req.hr += 2 * lvl,
-                .hospital, .mess => req.hr += lvl,
-                .comms => req.admin += lvl,
+                .mek_bay, .warehouse, .spaceport => req.logistics += per.logistics * lvl,
+                .hiring_hall, .training_ground => req.hr += per.hr_halls * lvl,
+                .hospital, .mess => req.hr += per.hr_care * lvl,
+                .comms => req.admin += per.admin_comms * lvl,
             }
         }
         // Paperwork grows with the whole organization.
-        req.finance += (req.admin + req.logistics + req.hr) / 4;
+        req.finance += (req.admin + req.logistics + req.hr) / tuning.hq.finance_share_divisor;
         return req;
     }
 
@@ -198,7 +200,7 @@ pub const Hq = struct {
         if (built == 0) return 0;
         const required = self.staffRequired().total();
         if (required == 0 or self.staff_assigned >= required) return built;
-        const shortfall_steps: u8 = @intCast(((required - self.staff_assigned) * 4) / required);
+        const shortfall_steps: u8 = @intCast(((required - self.staff_assigned) * tuning.hq.understaffing_steps) / required);
         return built -| shortfall_steps;
     }
 
@@ -210,71 +212,71 @@ pub const Hq = struct {
             tuning.hq.influence_per_spaceport_ly * @as(u32, self.effectiveFacilityLevel(.spaceport));
     }
 
-    /// Capacity slots (ARCH §9.3). // TUNE
+    /// Capacity slots (ARCH §9.3; tables in tuning.hq).
     pub fn capacity(self: *const Hq) Capacity {
+        const th = tuning.hq;
         const bay = self.effectiveFacilityLevel(.mek_bay);
         const port = self.effectiveFacilityLevel(.spaceport);
         const comms = self.effectiveFacilityLevel(.comms);
 
-        // A company's 3 line lances + recon at bay level 1; the fifth lance
-        // needs a level-3 bay. // TUNE
-        const lance_cap: u8 = if (bay == 0) 3 else if (bay >= 3) 5 else 4;
-        // The four staple support lances (salvage, MASH, logistics,
-        // security) come with the slot; a mess needs a real mess hall, and
-        // a deep hospital or warehouse opens one more. // TUNE
+        // A company's line lances + recon at bay level 1; the fifth lance
+        // needs a deeper bay.
+        const lance_cap: u8 = if (bay == 0) th.lances_no_bay else if (bay >= th.lances_full_bay_level) th.lances_full_bay else th.lances_with_bay;
+        // The staple support lances (salvage, MASH, logistics, security)
+        // come with the slot; a mess needs a real mess hall, and a deep
+        // hospital or warehouse opens one more.
         const mess = self.effectiveFacilityLevel(.mess);
         const hospital = self.effectiveFacilityLevel(.hospital);
         const warehouse = self.effectiveFacilityLevel(.warehouse);
-        const support_cap: u8 = 4 + @as(u8, @intFromBool(mess >= 2)) + @as(u8, @intFromBool(hospital >= 3 or warehouse >= 3));
+        const support_cap: u8 = th.support_base + @as(u8, @intFromBool(mess >= th.support_mess_level)) + @as(u8, @intFromBool(hospital >= th.support_deep_level or warehouse >= th.support_deep_level));
 
         return switch (self.tier) {
+            // A forward base: one company can rest, resupply and stage here
+            // (play feedback). What it lacks is whatever needs a facility it
+            // has not built — no training without a training ground, no
+            // structural repair without a mek bay, no hiring without a hall.
+            // It hosts a company as it stands; it builds nothing — the fifth
+            // lance needs a regional bay.
             .field => .{
-                // A forward base: one company can rest, resupply and stage
-                // here (play feedback). What it lacks is whatever needs a
-                // facility it has not built — no training without a
-                // training ground, no structural repair without a mek bay,
-                // no hiring without a hall.
-                // It hosts a company as it stands (three line lances and a
-                // recon lance); it builds nothing — the fifth lance needs a
-                // regional bay.
-                .combat_companies = 1,
-                .lances_per_company = 4,
-                .support_companies = 1,
-                .support_lances = 4,
-                .air_companies = 0,
-                .dropship_berths = 0,
-                .jumpship_berths = 0,
+                .combat_companies = th.capacity_field.combat_companies,
+                .lances_per_company = th.capacity_field.lances_per_company,
+                .support_companies = th.capacity_field.support_companies,
+                .support_lances = th.capacity_field.support_lances,
+                .air_companies = th.capacity_field.air_companies,
+                .dropship_berths = th.capacity_field.dropship_berths,
+                .jumpship_berths = th.capacity_field.jumpship_berths,
             },
             .regional => .{
-                .combat_companies = 1,
+                .combat_companies = th.capacity_regional.combat_companies,
                 .lances_per_company = lance_cap,
-                .support_companies = 1,
+                .support_companies = th.capacity_regional.support_companies,
                 .support_lances = support_cap,
-                .air_companies = if (port >= 3) 1 else 0,
-                .dropship_berths = 1 + port / 2,
-                .jumpship_berths = if (port >= 4 and comms >= 3) 1 else 0,
+                .air_companies = if (port >= th.capacity_regional.air_port_level) 1 else 0,
+                .dropship_berths = th.capacity_regional.dropship_base + port / th.capacity_regional.dropship_port_levels_each,
+                .jumpship_berths = if (port >= th.capacity_regional.jumpship_port_level and comms >= th.capacity_regional.jumpship_comms_level) 1 else 0,
             },
             .brigade => .{
-                .combat_companies = 2,
+                .combat_companies = th.capacity_brigade.combat_companies,
                 .lances_per_company = lance_cap,
-                .support_companies = 2,
-                .support_lances = support_cap + 2,
-                .air_companies = 1 + @as(u8, @intFromBool(port >= 4)),
-                .dropship_berths = 2 + port,
-                .jumpship_berths = 1 + @as(u8, @intFromBool(port >= 4 and comms >= 4)),
+                .support_companies = th.capacity_brigade.support_companies,
+                .support_lances = support_cap + th.capacity_brigade.support_extra,
+                .air_companies = th.capacity_brigade.air_base + @as(u8, @intFromBool(port >= th.capacity_brigade.air_port_level)),
+                .dropship_berths = th.capacity_brigade.dropship_base + port,
+                .jumpship_berths = th.capacity_brigade.jumpship_base + @as(u8, @intFromBool(port >= th.capacity_brigade.jumpship_port_level and comms >= th.capacity_brigade.jumpship_comms_level)),
             },
         };
     }
 
     /// Whether this HQ's facilities can stand up a support lance of `kind`
     /// (Stage 12.15): a mess lance needs a mess hall (≥ 2), MASH a hospital,
-    /// a logistics lance a warehouse; salvage and security always. // TUNE
+    /// a logistics lance a warehouse; salvage and security always (tuning.hq.support_lance_needs).
     pub fn supportLanceAllowed(self: *const Hq, kind: SupportLanceKind) bool {
         if (self.tier == .field) return false;
+        const need = tuning.hq.support_lance_needs;
         return switch (kind) {
-            .mess => self.effectiveFacilityLevel(.mess) >= 2,
-            .mash => self.effectiveFacilityLevel(.hospital) >= 1,
-            .transport => self.effectiveFacilityLevel(.warehouse) >= 1,
+            .mess => self.effectiveFacilityLevel(.mess) >= need.mess,
+            .mash => self.effectiveFacilityLevel(.hospital) >= need.mash_hospital,
+            .transport => self.effectiveFacilityLevel(.warehouse) >= need.transport_warehouse,
             .salvage, .security => true,
         };
     }
@@ -299,12 +301,12 @@ pub const Hq = struct {
         const bay = self.effectiveFacilityLevel(.mek_bay);
         if (bay == 0) return null;
         const tier_cap: u8 = switch (self.tier) {
-            .field => 1, // class B
-            .regional => 3, // class D
-            .brigade => 5, // class F
+            .field => tuning.hq.refit_class_cap.field,
+            .regional => tuning.hq.refit_class_cap.regional,
+            .brigade => tuning.hq.refit_class_cap.brigade,
         };
         // Bay level 1 handles class B (like-for-like swaps); each level
-        // above unlocks the next class, up to the tier's cap. // TUNE
+        // above unlocks the next class, up to the tier's cap (tuning.hq).
         return @enumFromInt(@min(bay, tier_cap));
     }
 };
