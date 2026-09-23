@@ -218,6 +218,9 @@ pub fn recall(gs: *GameState, company: types.ForceId) !u32 {
 /// Daily: the combat-ineffectiveness clock. Below half the committed
 /// force, the grace window opens (buy local replacements with local
 /// funds); expire it unfilled and the employer declares breach.
+/// `committed_bv` is the snapshot taken at acceptance; only battle moves
+/// the live figure against it, because selling, stripping, mothballing
+/// and transferring a hull are refused while its company is deployed.
 pub fn checkEffectiveness(gs: *GameState) !void {
     var it = gs.contracts.iterator();
     while (it.next()) |entry| {

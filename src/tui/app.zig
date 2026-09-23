@@ -2495,7 +2495,6 @@ pub const App = struct {
                 return;
             }
             _ = try game.commands.execute(g, .{ .fire = last });
-            g.refreshHqStaffing();
             self.say(.amber, "released one {s}", .{@tagName(role)});
         }
     }

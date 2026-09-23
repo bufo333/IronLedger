@@ -94,6 +94,11 @@ pub const Stats = struct {
     hulls_salvaged: u32 = 0,
     people_kia: u32 = 0,
     enemy_bv_destroyed: u64 = 0,
+
+    /// Nothing counted yet: a book from before the counters existed.
+    pub fn isEmpty(self: Stats) bool {
+        return self.battles_won + self.battles_drawn + self.battles_lost + self.hulls_salvaged == 0;
+    }
 };
 
 pub const RatingSnapshot = struct { year: i32, score: i32 };
@@ -296,57 +301,6 @@ pub const GameState = struct {
         self.arena.deinit();
     }
 
-    /// The summary's counters (12C.8) only started counting when they were
-    /// added; a campaign saved before that has a log full of battles and
-    /// zeros in the book. Rebuild the counters from the AAR lines the log
-    /// has kept all along: the header names the outcome, the losses line
-    /// counts hulls destroyed and KIA and enemy BV, salvage lines name
-    /// each wreck hauled home.
-    pub fn rebuildStatsFromLog(self: *GameState) void {
-        var st: Stats = .{};
-        for (self.event_log.items) |e| {
-            // Lines carry a date prefix: "3025-02-15 [AAR] …".
-            if (e.category != .battle or std.mem.indexOf(u8, e.text, "[AAR]") == null) continue;
-            if (std.mem.indexOf(u8, e.text, " — power ") != null) {
-                // "[AAR] kind vs enemy …: outcome — power a vs b"
-                const head = e.text[0..std.mem.indexOf(u8, e.text, " — power ").?];
-                const colon = std.mem.lastIndexOfScalar(u8, head, ':') orelse continue;
-                const outcome = std.mem.trim(u8, head[colon + 1 ..], " ");
-                if (std.mem.eql(u8, outcome, "decisive_victory") or std.mem.eql(u8, outcome, "victory")) st.battles_won += 1 //
-                else if (std.mem.eql(u8, outcome, "draw")) st.battles_drawn += 1 //
-                else if (std.mem.eql(u8, outcome, "defeat") or std.mem.eql(u8, outcome, "rout")) st.battles_lost += 1;
-                continue;
-            }
-            if (std.mem.indexOf(u8, e.text, "losses: ")) |i| {
-                // "losses: H hit / D destroyed, W wounded, K KIA | enemy losses B BV"
-                var it = std.mem.tokenizeAny(u8, e.text[i + "losses: ".len ..], " /,|");
-                var nums: [8]u64 = @splat(0);
-                var n: usize = 0;
-                while (it.next()) |tok| {
-                    if (n >= nums.len) break;
-                    if (std.fmt.parseInt(u64, tok, 10)) |v| {
-                        nums[n] = v;
-                        n += 1;
-                    } else |_| {}
-                }
-                // order: hit, destroyed, wounded, KIA, enemy BV
-                if (n >= 5) {
-                    st.hulls_lost += @intCast(nums[1]);
-                    st.people_kia += @intCast(nums[3]);
-                    st.enemy_bv_destroyed += nums[4];
-                }
-                continue;
-            }
-            if (std.mem.indexOf(u8, e.text, "salvage: ") != null) {
-                var rest = e.text;
-                while (std.mem.indexOf(u8, rest, "wreck #")) |k| {
-                    st.hulls_salvaged += 1;
-                    rest = rest[k + "wreck #".len ..];
-                }
-            }
-        }
-        self.stats = st;
-    }
 
     /// All campaign-lifetime allocations come from here.
     /// The difficulty row in force.
@@ -508,7 +462,7 @@ pub const GameState = struct {
         const id = try self.hirePerson(spec.first, spec.last, role);
         const p = self.person(id).?;
         if (spec.callsign) |c| p.callsign = try self.allocator().dupe(u8, c);
-        p.born_day = @as(i32, @intCast(self.clock.day_index)) - @as(i32, spec.age) * @as(i32, types.days_per_year);
+        p.setBirthdayFromAge(self.clock.day_index, spec.age);
 
         // Overwrite the hire defaults with the generated experience band.
         const alloc = self.allocator();
@@ -2049,24 +2003,6 @@ test "12C.15: a worn or exotic hull wants more hours; a sharper tech needs fewer
     try std.testing.expect(gs.techHoursFor(gs.person(tech).?, u) < regular);
     try gs.person(tech).?.skills.put(gs.allocator(), .tech_mek, 6);
     try std.testing.expect(gs.techHoursFor(gs.person(tech).?, u) > regular);
-}
-
-test "12C.8: counters rebuild from the AAR lines of an older save" {
-    var gs = GameState.init(std.testing.allocator, .{ .seed = 1288 });
-    defer gs.deinit();
-    try gs.log(.battle, .{}, "[AAR] garrison_duty vs DC: victory — power 900 vs 700 (recon 0, fatigue 4, morale 50)", .{});
-    try gs.log(.battle, .{}, "[AAR]   losses: 2 hit / 1 destroyed, 1 wounded, 1 KIA | enemy losses 1200 BV ≈ 1 kill credited | salvage 300 BV claimed | comp 0 | score 1", .{});
-    try gs.log(.battle, .{}, "[AAR]   salvage: wreck #40 SHD-2H Shadow Hawk (armor 30%) → home depot in 5 days; wreck #41 LCT-1V Locust → home depot in 5 days; ", .{});
-    try gs.log(.battle, .{}, "[AAR] raid vs CC — ambush on heavy woods, night action: rout — power 500 vs 900 (recon 0, fatigue 9, morale 40)", .{});
-    try gs.log(.battle, .{}, "[AAR]   losses: 4 hit / 2 destroyed, 2 wounded, 0 KIA | enemy losses 100 BV ≈ 0 kills credited | salvage 0 BV claimed | comp 0 | score -2", .{});
-    try gs.log(.battle, .{}, "[AAR]   salvage: none — the field was not held", .{});
-    gs.rebuildStatsFromLog();
-    try std.testing.expectEqual(@as(u32, 1), gs.stats.battles_won);
-    try std.testing.expectEqual(@as(u32, 1), gs.stats.battles_lost);
-    try std.testing.expectEqual(@as(u32, 3), gs.stats.hulls_lost);
-    try std.testing.expectEqual(@as(u32, 1), gs.stats.people_kia);
-    try std.testing.expectEqual(@as(u32, 2), gs.stats.hulls_salvaged);
-    try std.testing.expectEqual(@as(u64, 1300), gs.stats.enemy_bv_destroyed);
 }
 
 test "company posture is one cascade: contract, then the road home, then a world, else home" {

@@ -132,6 +132,9 @@ pub const Person = struct {
     fatigue: u8 = 0,
     morale: u8 = 50,
     recruited_day: u32 = 0,
+    /// The day they left the outfit (retired, resigned, released); the
+    /// posting they held stays on the record so the desk knows who walked.
+    departed_day: ?u32 = null,
     salary_override: ?types.CBills = null,
     assigned_force: types.ForceId = .none,
     /// HQ staff posting (Stage 9C back office): admins here run the HQ.
@@ -412,6 +415,12 @@ pub const Person = struct {
     /// "Sgt. Lori Kalmar" for rosters and AARs.
     pub fn rankedName(self: *const Person, alloc: std.mem.Allocator) ![]const u8 {
         return std.fmt.allocPrint(alloc, "{s} {s} {s}", .{ self.rank.abbrev(), self.first_name, self.last_name });
+    }
+
+    /// Birthday from an age on a given day (12C.4): recruitment and the
+    /// save migration that back-fills older people both use it.
+    pub fn setBirthdayFromAge(self: *Person, day: u32, age: u32) void {
+        self.born_day = @as(i32, @intCast(day)) - @as(i32, @intCast(age)) * @as(i32, types.days_per_year);
     }
 
     /// "Lori Kalmar": the name without the rank, for rosters and log lines.

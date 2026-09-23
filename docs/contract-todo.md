@@ -141,20 +141,21 @@ One predicate each; every listed site calls it.
 ---
 - The REPL printers in `src/main.zig` still spell `first last` in six `debug.print` lines; D10 replaces those printers with query loops.
 
-## D8. Commands leave state consistent; the store stores (rules 27, 3, 13)
+## D8. Commands leave state consistent; the store stores (rules 27, 3, 13) — PR #12
 
-- [ ] `.fire` (commands.zig:374-380) and `.transfer_person` (:538-554): clear `posted_hq`, call `refreshHqStaffing`; drop the TUI patch at app.zig:2497.
-- [ ] `.hire`, `.recruit`, `.hire_candidate` (commands.zig:366-373, 1178-1192): refresh staffing for symmetry with `staffHqToRequirement` (state.zig:667).
-- [ ] `.disband_company` (commands.zig:1072-1103): remove its `supply_policies` and `policies` rows, cancel `part_orders` with `dest = company`, drop `unit_transfers` to it, refresh staffing.
-- [ ] `.sell_hq` (commands.zig:1039-1071): remove `stock_policies` and `policies` for the HQ, cancel or re-home in-flight `part_orders`, re-home units with `berth_hq` and forces with `supplying_hq`; tick.zig:212 stops hiding orphans with `orelse continue`.
-- [ ] `committed_bv` after `.sell_unit`, `.strip_unit`, `.transfer_unit`, `.mothball`: either refuse mid-tour or warn; decide and document at contract_control.zig:222-245.
-- [ ] Stats book maintained at the source, not rebuilt by parsing `[AAR]` log text: state.zig:305-340 `rebuildStatsFromLog`, store.zig:1343-1344.
-- [ ] Turnover tracked in a field, not by scanning log text: checklist.zig:281-288.
-- [ ] Migrations call the sim's rule functions instead of re-encoding them: store.zig:1363-1371 (light wound stand-in, versus medical.zig:219), 1353-1361 (birthday, versus state.zig:503).
-- [ ] Unreadable enum columns fail the load instead of inventing state: store.zig:823,825,837,912,948,1043,1079,1274.
-- [ ] Derived `hq.staff_assigned` not persisted (store.zig:49,504,989; recomputed at 1339 anyway).
+- [x] `.fire` (commands.zig:374-380) and `.transfer_person` (:538-554): clear `posted_hq`, call `refreshHqStaffing`; drop the TUI patch at app.zig:2497.
+- [x] `.hire`, `.recruit`, `.hire_candidate` (commands.zig:366-373, 1178-1192): refresh staffing for symmetry with `staffHqToRequirement` (state.zig:667).
+- [x] `.disband_company` (commands.zig:1072-1103): remove its `supply_policies` and `policies` rows, cancel `part_orders` with `dest = company`, drop `unit_transfers` to it, refresh staffing.
+- [x] `.sell_hq` (commands.zig:1039-1071): remove `stock_policies` and `policies` for the HQ, cancel or re-home in-flight `part_orders`, re-home units with `berth_hq` and forces with `supplying_hq`; tick.zig:212 stops hiding orphans with `orelse continue`.
+- [x] `committed_bv` after `.sell_unit`, `.strip_unit`, `.transfer_unit`, `.mothball`: either refuse mid-tour or warn; decide and document at contract_control.zig:222-245.
+- [x] Stats book maintained at the source, not rebuilt by parsing `[AAR]` log text: state.zig:305-340 `rebuildStatsFromLog`, store.zig:1343-1344.
+- [x] Turnover tracked in a field, not by scanning log text: checklist.zig:281-288.
+- [x] Migrations call the sim's rule functions instead of re-encoding them: store.zig:1363-1371 (light wound stand-in, versus medical.zig:219), 1353-1361 (birthday, versus state.zig:503).
+- [x] Unreadable enum columns fail the load instead of inventing state: store.zig:823,825,837,912,948,1043,1079,1274.
+- [x] Derived `hq.staff_assigned` not read back (store.zig:49,504,989; recomputed at 1339 anyway).
 
 ---
+- Notes: the departed keep their posting on the record (`departed_day` is the new fact, schema v25); `tick.runStockPolicies` keeps a defensive skip for rows from older saves; the hire paths do not post, so `postToHq` is the one refresh on that side; the staffing column is still written for older readers but never read back.
 
 ## D9. Rules that live only in queries move down (rule 13)
 

@@ -549,6 +549,7 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             const days = travelDays(gs, gs.companyOf(p.assigned_force), gs.companyOf(dest.id));
             p.assigned_force = dest.id;
             p.posted_hq = .none;
+            gs.refreshHqStaffing();
             if (days > 0) p.leave_until_day = gs.clock.day_index + days; // in transit
             return .{};
         },
@@ -1063,7 +1064,25 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             while (i < gs.market_listings.items.len) {
                 if (gs.market_listings.items[i].hq == hq_id) _ = gs.market_listings.orderedRemove(i) else i += 1;
             }
+            // Its standing orders, reorder points and the goods on the road
+            // to it go with it; transports berthed there move to the seat.
+            i = 0;
+            while (i < gs.policies.items.len) {
+                if (std.meta.eql(gs.policies.items[i].entity, .{ .hq = hq_id })) _ = gs.policies.orderedRemove(i) else i += 1;
+            }
+            i = 0;
+            while (i < gs.stock_policies.items.len) {
+                if (gs.stock_policies.items[i].hq == hq_id) _ = gs.stock_policies.orderedRemove(i) else i += 1;
+            }
+            for (gs.part_orders.items) |*o| if (o.inFlight() and std.meta.eql(o.dest, .{ .hq = hq_id })) {
+                o.status = .cancelled;
+            };
             _ = gs.hqs.orderedRemove(hq_id);
+            const seat: types.HqId = if (gs.hqs.count() > 0) gs.hqs.keys()[0] else .none;
+            var uit2 = gs.units.iterator();
+            while (uit2.next()) |e| if (e.value_ptr.berth_hq == hq_id) {
+                e.value_ptr.berth_hq = seat;
+            };
             gs.refreshHqStaffing();
             try gs.postTransaction(.{ .day = gs.clock.day_index, .amount = value, .category = .unit_sale, .note = "HQ sold" });
             try gs.log(.market, .{}, "[sale] {s} sold off for {d}", .{ name, value });
@@ -1097,6 +1116,25 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             var fit = gs.forces.iterator();
             while (fit.next()) |e| if (gs.companyOf(e.value_ptr.id) == co) try fids.append(gs.allocator(), e.value_ptr.id);
             for (fids.items) |fid| _ = gs.forces.orderedRemove(fid);
+            // Nothing may keep pointing at a company that no longer exists:
+            // its standing orders, its resupply plan, the goods on the road
+            // to it and the hulls on their way to join it.
+            var pi: usize = 0;
+            while (pi < gs.policies.items.len) {
+                if (std.meta.eql(gs.policies.items[pi].entity, .{ .company = co })) _ = gs.policies.orderedRemove(pi) else pi += 1;
+            }
+            pi = 0;
+            while (pi < gs.supply_policies.items.len) {
+                if (gs.supply_policies.items[pi].company == co) _ = gs.supply_policies.orderedRemove(pi) else pi += 1;
+            }
+            for (gs.part_orders.items) |*o| if (o.inFlight() and std.meta.eql(o.dest, .{ .company = co })) {
+                o.status = .cancelled;
+            };
+            pi = 0;
+            while (pi < gs.unit_transfers.items.len) {
+                if (gs.unit_transfers.items[pi].to_company == co) _ = gs.unit_transfers.orderedRemove(pi) else pi += 1;
+            }
+            gs.refreshHqStaffing();
             try gs.postTransaction(.{ .day = gs.clock.day_index, .amount = total, .category = .unit_sale, .note = "company disbanded" });
             try gs.log(.market, .{}, "[sale] {s} disbanded: {d} hulls sold, people released, {d} raised", .{ name, uids.items.len, total });
             return .{};
@@ -3868,4 +3906,58 @@ test "12E.4: one board per HQ — offers inside its reach, taken only by compani
     try std.testing.expectError(Error.OutOfRange, execute(&gs, .{ .accept_contract = .{ .offer_index = home_offer.?, .company = bravo } }));
     _ = try execute(&gs, .{ .accept_contract = .{ .offer_index = far_offer.?, .company = bravo } });
     try std.testing.expect(gs.deploymentContract(bravo) != null);
+}
+
+test "a command leaves derived state consistent: firing, disbanding and selling an HQ clean up after themselves" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 12 });
+    defer gs.deinit();
+    _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    gs.funds = 50_000_000;
+    const seat = gs.hqs.keys()[0];
+
+    // Firing a posted admin: the desk count drops inside the command, the
+    // departure day is recorded and the posting stays on the record.
+    const r = try execute(&gs, .{ .recruit = .admin_hr });
+    _ = try execute(&gs, .{ .post_person = .{ .person = r.hired, .hq = seat } });
+    const before = gs.hqs.getPtr(seat).?.staff_assigned;
+    _ = try execute(&gs, .{ .fire = r.hired });
+    try std.testing.expectEqual(before - 1, gs.hqs.getPtr(seat).?.staff_assigned);
+    const gone = gs.person(r.hired).?;
+    try std.testing.expectEqual(@as(?u32, gs.clock.day_index), gone.departed_day);
+    try std.testing.expectEqual(seat, gone.posted_hq);
+
+    // Disbanding a company takes its standing orders and resupply plan with it.
+    const co = (try execute(&gs, .{ .new_company = "Alpha" })).created_force;
+    _ = try execute(&gs, .{ .set_policy = .{ .entity = .{ .company = co }, .floor = 100_000, .monthly_cap = 200_000 } });
+    _ = try execute(&gs, .{ .set_supply_policy = .{ .company = co, .min_days = 14, .tons = 40 } });
+    const Count = struct {
+        fn forCompany(g: *GameState, c: types.ForceId) usize {
+            var n: usize = 0;
+            for (g.supply_policies.items) |sp| if (sp.company == c) {
+                n += 1;
+            };
+            for (g.policies.items) |pol| if (std.meta.eql(pol.entity, .{ .company = c })) {
+                n += 1;
+            };
+            return n;
+        }
+    };
+    try std.testing.expectEqual(@as(usize, 2), Count.forCompany(&gs, co));
+    _ = try execute(&gs, .{ .disband_company = co });
+    try std.testing.expectEqual(@as(usize, 0), Count.forCompany(&gs, co));
+
+    // Selling an HQ takes its reorder points and cancels the goods bound for it.
+    _ = try execute(&gs, .{ .found_hq = .{ .name = "Far", .planet_key = "zebebelgenubi" } });
+    const far = gs.hqs.keys()[1];
+    gs.hqs.getPtr(far).?.funds = 5_000_000;
+    _ = try execute(&gs, .{ .set_stock_policy = .{ .hq = far, .part_key = "mlas", .min = 1, .target = 2 } });
+    try gs.part_orders.append(gs.allocator(), .{ .part_key = "mlas", .quantity = 1, .dest = .{ .hq = far }, .ordered_day = gs.clock.day_index, .cost = 1, .status = .in_transit });
+    var bound: usize = 0;
+    for (gs.part_orders.items) |o| if (o.inFlight() and std.meta.eql(o.dest, .{ .hq = far })) {
+        bound += 1;
+    };
+    try std.testing.expectEqual(@as(usize, 1), bound);
+    _ = try execute(&gs, .{ .sell_hq = far });
+    for (gs.stock_policies.items) |sp| try std.testing.expect(sp.hq != far);
+    for (gs.part_orders.items) |o| try std.testing.expect(!(o.inFlight() and std.meta.eql(o.dest, .{ .hq = far })));
 }

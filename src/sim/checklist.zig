@@ -263,15 +263,22 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
                 if (short.items.len > 0) try short.appendSlice(alloc, ", ");
                 try short.appendSlice(alloc, try std.fmt.allocPrint(alloc, "{d} {s}", .{ d.need - have, d.name }));
             }
+            // Who walked from this HQ's desks in the last quarter: the
+            // departed keep their posting on the record (personnel.depart).
             var left: u32 = 0;
             var last_name: []const u8 = "";
-            for (gs.event_log.items) |e| {
-                if (e.hq != hq.id or e.day + 90 < day or std.mem.indexOf(u8, e.text, "[turnover]") == null) continue;
-                if (std.mem.indexOf(u8, e.text, " retires") == null and std.mem.indexOf(u8, e.text, " resigns") == null) continue;
+            var last_day: u32 = 0;
+            var lit = gs.people.iterator();
+            while (lit.next()) |le| {
+                const lp = le.value_ptr;
+                const gone_day = lp.departed_day orelse continue;
+                if (lp.posted_hq != hq.id or gone_day + 90 < day) continue;
+                if (lp.status != .retired and lp.status != .resigned) continue;
                 left += 1;
-                const start = (std.mem.indexOf(u8, e.text, "[turnover] ") orelse continue) + 11;
-                const stop = std.mem.indexOfPos(u8, e.text, start, " (") orelse e.text.len;
-                last_name = e.text[start..stop];
+                if (gone_day >= last_day) {
+                    last_day = gone_day;
+                    last_name = try lp.fullName(alloc);
+                }
             }
             try out.append(alloc, .{ .kind = .understaffed_hq, .text = try std.fmt.allocPrint(alloc, "{s} understaffed {d}/{d} (short {s}) — facilities run a level low{s} · HQ screen: S autostaff from the pool, h hire at the hall; answer notice decisions in the inbox before they expire", .{
                 hq.name, hq.staff_assigned, req, if (short.items.len > 0) short.items else "none by desk: posted staff hold the wrong roles",

@@ -83,11 +83,16 @@ pub fn payShares(gs: *GameState, contract_id: types.ContractId, company: types.F
 pub fn depart(gs: *GameState, person_id: types.PersonId, status: person_mod.Status, share_bp: types.Bp, note: []const u8) !types.CBills {
     const p = gs.person(person_id) orelse return 0;
     p.status = status;
+    p.departed_day = gs.clock.day_index;
     var uit = gs.units.iterator();
     while (uit.next()) |ue| {
         if (ue.value_ptr.pilot == person_id) ue.value_ptr.pilot = .none;
         if (ue.value_ptr.tech == person_id) ue.value_ptr.tech = .none;
     }
+    // The posting stays on the record (who walked from which desk); the
+    // staffing count is derived from active people, refreshed here so no
+    // caller has to remember.
+    gs.refreshHqStaffing();
     const owed = types.applyBp(p.severance(gs.clock.day_index), share_bp);
     if (owed > 0) try gs.postTransaction(.{ .day = gs.clock.day_index, .amount = -owed, .category = .payroll, .company = gs.companyOf(p.assigned_force), .note = note });
     return owed;
