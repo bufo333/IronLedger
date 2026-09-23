@@ -5,6 +5,8 @@
 
 test {
     _ = @import("tui/screen.zig");
+    _ = @import("tui/layout.zig");
+    _ = @import("tui/term.zig");
     _ = @import("tui/app.zig");
     _ = @import("tui/png.zig");
     _ = @import("tui/emblem.zig");
