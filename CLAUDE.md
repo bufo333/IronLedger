@@ -23,6 +23,18 @@ order — implement stages in order unless told otherwise.
   drives it through a pty; `docs/repl_smoke.sh zig-out/bin/game /tmp/r.db`
   scripts the REPL
 
+## Git workflow
+
+- Never commit to `main`. Every change starts on a new branch off the
+  latest `origin/main`, named `<area>/<short-name>` (`tui/after-action`,
+  `docs/git-workflow`).
+- Changes reach `main` only through a pull request: never push to `main`,
+  never merge locally.
+- Use the `gh` CLI for every GitHub interaction — opening pull requests,
+  reading review comments, checking CI, listing issues.
+- Push the branch and open the PR once the work is green (the gate in
+  rule 10), with the section 9 checklist answered in the description.
+
 ## Hard rules
 
 The full contract is `docs/coding-contract.md`; read it before touching
