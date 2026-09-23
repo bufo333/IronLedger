@@ -271,6 +271,10 @@ send("\x1b", 0.6)
 send("4"); send("\x1b[C", 0.6); send("\x1b[C", 0.6)   # contracts board: → scrolls columns behind the first
 assert "◀" in plain()[-30000:], plain()[-3000:]
 send("\x1b[D", 0.6); send("\x1b[D", 0.6)
+send("1"); send("b", 0.8)      # Desk: the after-action reports
+assert "AFTER-ACTION REPORTS" in plain()[-30000:], plain()[-3000:]
+send("\r", 0.8)               # Enter reads one (or does nothing when none are on record)
+send("\x1b", 0.5); send("\x1b", 0.5)
 send("1"); send("\t", 0.4); send("\t", 0.4); send("\r", 1.0)   # Desk LOG pane: Enter opens the whole entry, wrapped
 assert "LOG ENTRY" in plain()[-30000:], plain()[-3000:]
 send("\x1b", 0.6)

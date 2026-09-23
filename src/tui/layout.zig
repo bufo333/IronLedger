@@ -51,6 +51,10 @@ pub const hq_detail: Ratio = .{ .num = 45, .den = 100 };
 pub const lab_hulls: Ratio = .{ .num = 3, .den = 10 };
 pub const lab_mounts: Ratio = .{ .num = 7, .den = 20 };
 pub const ledger_pnl: Ratio = .{ .num = 3, .den = 10 };
+/// The after-action sheet's splits: the fight column beside the field,
+/// and the field above the spoils and the trucks.
+pub const aar_fight: Ratio = .{ .num = 3, .den = 10 };
+pub const aar_field: Ratio = .{ .num = 1, .den = 2 };
 
 /// Modal widths and fixed heights (the row-dependent heights are computed
 /// at the call site from the rows shown).
@@ -92,6 +96,12 @@ pub const modal = struct {
     pub const input_h: u16 = 8;
     pub const picker_w: u16 = 120;
     pub const log_entry_w: u16 = 100;
+    /// The after-action sheet (12G.4b). Full-bleed; `modalRect` clamps it
+    /// to the terminal. Below `after_action_stack_cols` the panes stack
+    /// into one scrolling column instead.
+    pub const after_action_w: u16 = 200;
+    pub const after_action_stack_cols: u16 = 110;
+    pub const battle_list_w: u16 = 150;
 };
 
 test "ratios split exactly and the tiers nest" {
