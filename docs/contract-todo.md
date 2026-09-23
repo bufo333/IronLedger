@@ -274,6 +274,6 @@ whitelisted imports; the help modal indexes its legend row by number
 - [x] `term.zig` (and `layout.zig`) added to the test block in `src/main.zig` (PR #16).
 - [x] The emblem-editor smoke step (tui_smoke.py) was timing-flaky: it now waits for text (`wait_for`) instead of sleeping (PR #8).
 - [x] Smoke coverage added: delete-player and delete-campaign name-mismatch refusals, the sell-HQ and disband confirms (open, Esc keeps), ←/→ column scrolling on the contracts board, and a mid-session resize (SIGWINCH to 110 columns, borders fit the new width). The music modal, the 80x24 `--ascii` pass and the fire/sell-hull confirms were already covered.
-- [ ] Still uncovered: the game-over path (needs a bankrupt save), the 120-column boundary exactly, and the refusal branch of each confirm once run (they open and close only).
+- [ ] Still uncovered by the smoke: the GAME OVER modal (a fresh campaign starts solvent, so reaching it needs a saved campaign already past all credit as a test fixture; bankruptcy itself stays terminal by design), the exact 120-column layout boundary, and the refusal branch of each confirm once run (they open and close only).
 - [x] `.github/workflows/ci.yml`: `zig build test --summary all` plus both smokes on push and pull request (Zig 0.16.0 via `mlugg/setup-zig`, `libsqlite3-dev`).
 - [x] Golden-master tests exist (`commands.zig` "same seed + same script = same state hash", `company_gen.zig`, and the store round-trip hash); rule 40 is a stated gate.
