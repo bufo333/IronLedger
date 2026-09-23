@@ -205,7 +205,9 @@ pub const ChecklistRow = struct {
 };
 
 pub const InboxRow = struct {
-    event_index: usize,
+    /// The event this row is about (12G.1). A frontend answers with this,
+    /// never with the row's position (rule 17).
+    event_id: types.EventId,
     kind: []const u8,
     company: []const u8,
     deadline_day: u32,
@@ -249,13 +251,13 @@ pub fn desk(alloc: Alloc, gs: *GameState, log_rows: usize) !Desk {
     }
 
     var inbox: std.ArrayListUnmanaged(InboxRow) = .empty;
-    for (gs.event_queue.pending.items, 0..) |ev, i| {
+    for (gs.event_queue.pending.items) |ev| {
         if (!ev.needsDecision()) continue;
         var opts: std.ArrayListUnmanaged([]const u8) = .empty;
         for (ev.options) |o| try opts.append(alloc, try std.fmt.allocPrint(alloc, "{s}   {s}", .{ o.label, try effectsText(alloc, o.effects) }));
         const entry = contract_events.entryForKind(ev.kind);
         try inbox.append(alloc, .{
-            .event_index = i,
+            .event_id = ev.id,
             .kind = @tagName(ev.kind),
             .company = forceName(gs, ev.company),
             .deadline_day = ev.deadline_day,
@@ -4888,7 +4890,7 @@ pub fn inboxLines(alloc: Alloc, gs: *GameState) ![]const []const u8 {
     }
     try out.append(alloc, try std.fmt.allocPrint(alloc, "inbox ({d} pending — unanswered decisions default at their deadline):", .{d.inbox.len}));
     for (d.inbox) |row| {
-        try out.append(alloc, try std.fmt.allocPrint(alloc, "[{d}] {s} {s} (answer by day {d}, {d} days left)", .{ row.event_index, row.kind, row.company, row.deadline_day, row.days_left }));
+        try out.append(alloc, try std.fmt.allocPrint(alloc, "[{d}] {s} {s} (answer by day {d}, {d} days left)", .{ @intFromEnum(row.event_id), row.kind, row.company, row.deadline_day, row.days_left }));
         try out.append(alloc, try std.fmt.allocPrint(alloc, "    {s}", .{row.description}));
         for (row.options, 0..) |opt, j| try out.append(alloc, try std.fmt.allocPrint(alloc, "    {d}: {s}{s}", .{ j + 1, opt, if (j == row.default_choice) " (default)" else "" }));
     }
@@ -4940,12 +4942,12 @@ pub fn hangarSummaryLine(alloc: Alloc, gs: *GameState) ![]const u8 {
 }
 
 /// The next pending decision for a script that answers it: its index, kind and first option.
-pub const PendingDecision = struct { index: usize, kind: []const u8, first_option: []const u8 };
+pub const PendingDecision = struct { event: types.EventId, kind: []const u8, first_option: []const u8 };
 
 pub fn firstPendingDecision(alloc: Alloc, gs: *GameState) !?PendingDecision {
     const d = try desk(alloc, gs, 0);
     if (d.inbox.len == 0) return null;
-    return .{ .index = d.inbox[0].event_index, .kind = d.inbox[0].kind, .first_option = if (d.inbox[0].options.len > 0) d.inbox[0].options[0] else "" };
+    return .{ .event = d.inbox[0].event_id, .kind = d.inbox[0].kind, .first_option = if (d.inbox[0].options.len > 0) d.inbox[0].options[0] else "" };
 }
 
 /// The demand ledgers as the console prints them: each depot's structural

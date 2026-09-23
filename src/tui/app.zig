@@ -60,7 +60,7 @@ const Modal = union(enum) {
     raise_crews,
     end_turn,
     quit,
-    decision: usize,
+    decision: types.EventId,
     input: InputKind,
     help,
     /// One command behind a yes/no (rule 19): the body quotes the stakes,
@@ -1768,12 +1768,12 @@ pub const App = struct {
         return n;
     }
 
-    pub fn inboxEventAtCursor(self: *App, view: q.Desk) ?usize {
+    pub fn inboxEventAtCursor(self: *App, view: q.Desk) ?types.EventId {
         var n: usize = 0;
         const c = self.cur(1).*;
         for (view.inbox) |it| {
             const span = 2 + it.options.len;
-            if (c < n + span) return it.event_index;
+            if (c < n + span) return it.event_id;
             n += span;
         }
         return null;
@@ -2365,7 +2365,7 @@ pub const App = struct {
                 var rows: std.ArrayListUnmanaged([]const u8) = .empty;
                 var found = false;
                 for (view.inbox) |it| {
-                    if (it.event_index != idx) continue;
+                    if (it.event_id != idx) continue;
                     found = true;
                     try rows.append(al, "");
                     try rows.append(al, try std.fmt.allocPrint(al, "  {{a}}{s}{{/}} · {s} · defaults on day {d} ({d} days)", .{ it.kind, it.company, it.deadline_day, it.days_left }));
@@ -2842,7 +2842,7 @@ pub const App = struct {
                 '1'...'9' => {
                     const choice: usize = ch - '1';
                     self.modal = .none;
-                    _ = try self.execSay(.{ .resolve_decision = .{ .event_index = idx, .choice = choice } }, .good, "decision recorded", .{});
+                    _ = try self.execSay(.{ .resolve_decision = .{ .event = idx, .choice = choice } }, .good, "decision recorded", .{});
                 },
                 else => return false,
             },

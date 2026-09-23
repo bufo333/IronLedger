@@ -25,7 +25,7 @@ const contract_events = @import("../sim/contract_events.zig");
 const network = @import("../sim/network.zig");
 const clock_mod = @import("../sim/clock.zig");
 
-pub const schema_version = 25;
+pub const schema_version = 26;
 
 const ddl =
     \\CREATE TABLE IF NOT EXISTS player (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_seq INTEGER NOT NULL);
@@ -67,7 +67,7 @@ const ddl =
     \\CREATE TABLE IF NOT EXISTS listing (cid INTEGER NOT NULL, ord INTEGER NOT NULL, kind TEXT, item_key TEXT, rarity TEXT, price INTEGER, qty INTEGER, staple INTEGER, listed INTEGER, expires INTEGER, hq INTEGER, c_armor INTEGER, c_quality TEXT, c_damaged INTEGER, c_destroyed INTEGER, c_missing INTEGER, black INTEGER NOT NULL DEFAULT 0, company INTEGER NOT NULL DEFAULT 0);
     \\CREATE TABLE IF NOT EXISTS part_order (cid INTEGER NOT NULL, ord INTEGER NOT NULL, part_key TEXT, qty INTEGER, dest_kind TEXT, dest_id INTEGER, ordered INTEGER, eta INTEGER, cost INTEGER, status TEXT);
     \\CREATE TABLE IF NOT EXISTS event_log (cid INTEGER NOT NULL, ord INTEGER NOT NULL, day INTEGER, category TEXT, company INTEGER, hq INTEGER, contract INTEGER, text TEXT);
-    \\CREATE TABLE IF NOT EXISTS pending_event (cid INTEGER NOT NULL, ord INTEGER NOT NULL, kind TEXT, day INTEGER, contract INTEGER, company INTEGER, default_choice INTEGER, deadline INTEGER, chosen INTEGER, person INTEGER NOT NULL DEFAULT 0);
+    \\CREATE TABLE IF NOT EXISTS pending_event (cid INTEGER NOT NULL, ord INTEGER NOT NULL, kind TEXT, day INTEGER, contract INTEGER, company INTEGER, default_choice INTEGER, deadline INTEGER, chosen INTEGER, person INTEGER NOT NULL DEFAULT 0, id INTEGER NOT NULL DEFAULT 0);
     \\CREATE TABLE IF NOT EXISTS refit_plan (cid INTEGER NOT NULL, ord INTEGER NOT NULL, unit INTEGER, committed INTEGER);
     \\CREATE TABLE IF NOT EXISTS refit_op (cid INTEGER NOT NULL, plan_ord INTEGER NOT NULL, ord INTEGER NOT NULL, kind TEXT, slot_key TEXT, location TEXT, part_key TEXT);
 ;
@@ -128,6 +128,8 @@ pub const Store = struct {
         .{ .version = 24, .table = "contract", .column = "enemy_lance_tons", .sql = "ALTER TABLE contract ADD COLUMN enemy_lance_tons INTEGER NOT NULL DEFAULT 0" },
         .{ .version = 25, .table = "person", .column = "departed_day", .sql = "ALTER TABLE person ADD COLUMN departed_day INTEGER" },
         .{ .version = 24, .table = "contract", .column = "offer_hq", .sql = "ALTER TABLE contract ADD COLUMN offer_hq INTEGER NOT NULL DEFAULT 0" },
+        // 12G.1: the inbox is answered by event id, not by row.
+        .{ .version = 26, .table = "pending_event", .column = "id", .sql = "ALTER TABLE pending_event ADD COLUMN id INTEGER NOT NULL DEFAULT 0" },
     };
 
     pub fn open(path: [*:0]const u8) !Store {
@@ -674,10 +676,10 @@ pub const Store = struct {
             }
         }
         {
-            const st = try self.db.prepare("INSERT INTO pending_event VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)");
+            const st = try self.db.prepare("INSERT INTO pending_event VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)");
             defer st.finalize();
             for (gs.event_queue.pending.items, 0..) |e, i| {
-                try st.bindAll(.{ cid, @as(i64, @intCast(i)), e.kind, @as(i64, e.day), @intFromEnum(e.contract), @intFromEnum(e.company), @as(i64, @intCast(e.default_choice)), @as(i64, e.deadline_day), if (e.chosen) |c| @as(?i64, @intCast(c)) else null, @intFromEnum(e.person) });
+                try st.bindAll(.{ cid, @as(i64, @intCast(i)), e.kind, @as(i64, e.day), @intFromEnum(e.contract), @intFromEnum(e.company), @as(i64, @intCast(e.default_choice)), @as(i64, e.deadline_day), if (e.chosen) |c| @as(?i64, @intCast(c)) else null, @intFromEnum(e.person), @intFromEnum(e.id) });
                 try st.run();
             }
         }
@@ -1292,7 +1294,7 @@ pub const Store = struct {
             }
         }
         {
-            const st = try self.db.prepare("SELECT kind, day, contract, company, default_choice, deadline, chosen, person FROM pending_event WHERE cid = ?1 ORDER BY ord");
+            const st = try self.db.prepare("SELECT kind, day, contract, company, default_choice, deadline, chosen, person, id FROM pending_event WHERE cid = ?1 ORDER BY ord");
             defer st.finalize();
             try st.bindAll(.{cid});
             while (try st.next()) {
@@ -1308,8 +1310,16 @@ pub const Store = struct {
                     .deadline_day = @intCast(st.int(5)),
                     .chosen = if (st.optInt(6)) |c| @as(?usize, @intCast(c)) else null,
                     .person = toId(types.PersonId, st.int(7)),
+                    .id = toId(types.EventId, st.int(8)),
                 });
             }
+            // A pre-12G.1 save has every id defaulted to 0; stamp them in
+            // load order so the inbox is addressable, then resume past the
+            // highest (the queue owns the numbering, `events.EventQueue`).
+            for (gs.event_queue.pending.items, 0..) |*ev, i| {
+                if (ev.id == .none) ev.id = @enumFromInt(i + 1);
+            }
+            gs.event_queue.resumeIds();
         }
 
         {
@@ -1533,6 +1543,17 @@ test "save → load → identical hash, and the loaded campaign keeps playing" {
     try std.testing.expectEqual(gs.people.count(), loaded.people.count());
     try std.testing.expectEqual(gs.event_log.items.len, loaded.event_log.items.len);
     try std.testing.expectEqual(gs.event_queue.pending.items.len, loaded.event_queue.pending.items.len);
+    // 12G.1: an event is answered by id, so the ids must survive the save —
+    // a length check would pass with every one of them zeroed.
+    for (gs.event_queue.pending.items, loaded.event_queue.pending.items) |saved_ev, loaded_ev| {
+        try std.testing.expectEqual(saved_ev.id, loaded_ev.id);
+        try std.testing.expect(loaded_ev.id != .none);
+    }
+    // And the counter resumes past them, so the next event cannot collide
+    // with one already in the inbox.
+    for (loaded.event_queue.pending.items) |ev| {
+        try std.testing.expect(@intFromEnum(ev.id) < loaded.event_queue.next_id);
+    }
     // Policies survive the round trip with their current numbers (the
     // starter HQ's default top-up and provisions line ride along, 12.19).
     try std.testing.expectEqual(@as(usize, 2), loaded.policies.items.len);

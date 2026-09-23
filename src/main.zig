@@ -192,7 +192,7 @@ fn runDemo(gs: *game.state.GameState, gpa: std.mem.Allocator) !void {
         });
         if (!answered_one) if (try q.firstPendingDecision(al, gs)) |ev| {
             std.debug.print("        answering [{s}] with option 0: \"{s}\"\n", .{ ev.kind, ev.first_option });
-            _ = try game.commands.execute(gs, .{ .resolve_decision = .{ .event_index = ev.index, .choice = 0 } });
+            _ = try game.commands.execute(gs, .{ .resolve_decision = .{ .event = ev.event, .choice = 0 } });
             answered_one = true;
         };
         if (!running) break;
