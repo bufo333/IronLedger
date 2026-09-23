@@ -36,9 +36,14 @@ pub fn distanceLy(a: *const Planet, b: *const Planet) u32 {
     return @intCast(if (d2 - r * r > r) r + 1 else r);
 }
 
-/// Jump legs for a route between two worlds (standard 30-LY hops).
+/// Jump legs to cover a distance (standard hops, `tuning.logistics.ly_per_jump`).
+pub fn jumpsForLy(ly: u32) u32 {
+    return std.math.divCeil(u32, ly, @import("tuning.zig").t.logistics.ly_per_jump) catch unreachable;
+}
+
+/// Jump legs for a route between two worlds.
 pub fn jumpsBetween(a: *const Planet, b: *const Planet) u32 {
-    return std.math.divCeil(u32, distanceLy(a, b), 30) catch unreachable;
+    return jumpsForLy(distanceLy(a, b));
 }
 
 /// Weighted-random world in one faction's space — how the starter HQ lands

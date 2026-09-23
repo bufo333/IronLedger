@@ -91,7 +91,7 @@ fn runDemo(gs: *game.state.GameState) !void {
         cmdr.name, cmdr.origin.fullName(), @tagName(cmdr.profession), cmdr.profession.description(),
     });
     std.debug.print("Roster {d} | payroll {d}/mo | hull upkeep {d}/mo\n\n", .{
-        gs.people.count(), gs.monthlyPayroll(), totalHullUpkeep(gs),
+        gs.people.count(), gs.monthlyPayroll(), gs.monthlyHullUpkeep(),
     });
 
     printOffers(gs);
@@ -480,7 +480,7 @@ fn printToe(gs: *game.state.GameState) void {
         std.debug.print("  company staff: {d} | company BV2: {d}\n", .{ staff_count, forceBv(gs, company.id) });
     }
     std.debug.print("Roster {d} | payroll {d}/mo | hull upkeep {d}/mo\n", .{
-        gs.people.count(), gs.monthlyPayroll(), totalHullUpkeep(gs),
+        gs.people.count(), gs.monthlyPayroll(), gs.monthlyHullUpkeep(),
     });
 }
 
@@ -571,7 +571,7 @@ fn printSupplies(gs: *game.state.GameState) void {
         printStockLines(&f.stock);
         if (deployed) {
             const heads = gs.companyHeadcount(f.id);
-            const burn = std.math.divCeil(u32, heads, game.part.provisions_person_days_per_ton) catch 1;
+            const burn = game.part.provisionsPerDay(heads);
             const days = gs.stockCount(site, "provisions") / @max(1, burn);
             std.debug.print("    provisions burn {d}t/day → {d} days of supply{s}\n", .{
                 burn, days, if (f.supply_shortage_days > 0) " — HUNGRY" else "",
@@ -861,13 +861,6 @@ fn printHangar(gs: *game.state.GameState) void {
     const al = arena.allocator();
     std.debug.print("hangar ({d} hulls, worst value first — bill per point of contribution):\n", .{rows.len});
     for ((game.queries.tableOf(al, game.queries.hangar_cols, rows) catch return).render(al) catch return) |ln| std.debug.print("  {s}\n", .{game.queries.stripMarks(al, ln) catch ln});
-}
-
-fn totalHullUpkeep(gs: *game.state.GameState) i64 {
-    var total: i64 = 0;
-    var it = gs.units.iterator();
-    while (it.next()) |entry| total += entry.value_ptr.monthlyBill();
-    return total;
 }
 
 fn printLog(gs: *game.state.GameState, n: usize, filter: game.state.LogFilter) void {

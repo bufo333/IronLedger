@@ -76,6 +76,19 @@ pub const StaffRequirement = struct {
     pub fn total(self: StaffRequirement) u32 {
         return self.admin + self.logistics + self.hr + self.finance;
     }
+
+    pub const Desk = struct { role: @import("person.zig").Role, need: u32, name: []const u8 };
+
+    /// The four admin desks with what each wants: the one table the
+    /// rating, the checklist and the hiring hall read.
+    pub fn desks(self: StaffRequirement) [4]Desk {
+        return .{
+            .{ .role = .admin_command, .need = self.admin, .name = "command" },
+            .{ .role = .admin_logistics, .need = self.logistics, .name = "logistics" },
+            .{ .role = .admin_hr, .need = self.hr, .name = "HR" },
+            .{ .role = .admin_finance, .need = self.finance, .name = "finance" },
+        };
+    }
 };
 
 pub const ProjectKind = enum { found, tier_upgrade, facility_upgrade };

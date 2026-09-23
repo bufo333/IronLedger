@@ -54,17 +54,10 @@ pub const WarningKind = enum {
 
 /// Does any working weapon in the company draw on this munition family?
 fn companyFires(gs: *GameState, company: types.ForceId, family: []const u8) bool {
-    var uit = gs.units.iterator();
-    while (uit.next()) |e| {
-        const u = e.value_ptr;
-        if (u.isParked() or gs.companyOf(u.force) != company) continue;
-        for (u.slots.items) |slot| {
-            if (slot.class != .weapon or slot.condition != .ok) continue;
-            const fam = part_mod.munitionFor(slot.part_key) orelse continue;
-            if (std.mem.eql(u8, fam, family)) return true;
-        }
-    }
-    return false;
+    var arena = std.heap.ArenaAllocator.init(gs.scratch());
+    defer arena.deinit();
+    const mounts = @import("field_supply.zig").munitionMounts(arena.allocator(), gs, company, false) catch return false;
+    return mounts.contains(family);
 }
 
 pub const Warning = struct {
@@ -111,9 +104,9 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
 
     // Money first: nothing else matters if the outfit cannot pay.
     if (gs.funds + gs.inboundToOutfit() < 0) {
-        const cover = gs.funds + gs.liquidationValue() + gs.creditRemaining();
+        const folds = gs.isInsolvent();
         try out.append(alloc, .{ .kind = .insolvent, .text = try std.fmt.allocPrint(alloc, "outfit treasury overdrawn ({d}{s}) — take a loan (credit {d}), transfer funds back from an HQ or company, or sell assets (worth {d}){s}", .{
-            gs.funds, if (gs.inboundToOutfit() > 0) try std.fmt.allocPrint(alloc, ", {d} on the road", .{gs.inboundToOutfit()}) else "", gs.creditRemaining(), gs.liquidationValue(), if (cover < 0) "; nothing left covers it: the outfit folds" else "",
+            gs.funds, if (gs.inboundToOutfit() > 0) try std.fmt.allocPrint(alloc, ", {d} on the road", .{gs.inboundToOutfit()}) else "", gs.creditRemaining(), gs.liquidationValue(), if (folds) "; nothing left covers it: the outfit folds" else "",
         }) });
     }
 
@@ -148,7 +141,7 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
         var pit = gs.people.iterator();
         while (pit.next()) |e| {
             const p = e.value_ptr;
-            if (p.status == .active and p.tenureMonths(day) >= t.turnover_min_tenure_months and p.restlessness() > 0) restless += 1;
+            if (p.status == .active and !gs.isCompanyDeployed(gs.companyOf(p.assigned_force)) and medical.turnoverRisk(p, day) > 0) restless += 1;
         }
         if (restless > 0) try out.append(alloc, .{ .kind = .restless_crew, .text = try std.fmt.allocPrint(alloc, "{d} restless (morale < {d} or fatigue > {d}, a year in) — they roll to quit on payday: rotate home, grant leave, feed and rest them", .{ restless, t.restless_morale, t.exhausted_fatigue }) });
     }
@@ -260,15 +253,8 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
         if (hq.staff_assigned < req) {
             // Which desks are short, and who walked lately (play feedback: the
             // bare count said nothing about why or what to do).
-            const need = hq.staffRequired();
             var short: std.ArrayListUnmanaged(u8) = .empty;
-            const desks = [_]struct { role: person_mod.Role, need: u32, name: []const u8 }{
-                .{ .role = .admin_command, .need = need.admin, .name = "command" },
-                .{ .role = .admin_logistics, .need = need.logistics, .name = "logistics" },
-                .{ .role = .admin_hr, .need = need.hr, .name = "HR" },
-                .{ .role = .admin_finance, .need = need.finance, .name = "finance" },
-            };
-            for (desks) |d| {
+            for (hq.staffRequired().desks()) |d| {
                 const have = gs.hqStaff(hq.id, d.role).count;
                 if (have >= d.need) continue;
                 if (short.items.len > 0) try short.appendSlice(alloc, ", ");

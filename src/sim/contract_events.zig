@@ -448,13 +448,7 @@ fn applyEffectsFor(gs: *GameState, effects: []const events.Effect, contract: ?*c
             .let_go => try letGo(gs, person_id, false),
             .replace_from_hall => try letGo(gs, person_id, true),
             .ransom_prisoner => if (gs.person(person_id)) |p| {
-                const t = @import("../domain/tuning.zig").t.contract;
-                const price: types.CBills = switch (p.experience()) {
-                    .green => t.ransom_green,
-                    .regular => t.ransom_regular,
-                    .veteran => t.ransom_veteran,
-                    .elite => t.ransom_elite,
-                };
+                const price = ransomPrice(p);
                 try gs.postTreasury(if (company != .none) .{ .company = company } else .outfit, .{ .day = gs.clock.day_index, .amount = price, .category = .event, .company = company, .note = "prisoner ransom" });
                 p.status = .released;
                 try gs.log(.contract, .{ .company = company }, "[prisoner] {s} {s} ({s} {s}) ransomed to {s} for {d} c-bills", .{ p.first_name, p.last_name, @tagName(p.experience()), @tagName(p.role), p.faction, price });
@@ -576,7 +570,7 @@ fn letGo(gs: *GameState, person_id: types.PersonId, replace: bool) !void {
 }
 
 /// What a house asks, or pays, for a pilot by experience (12B.7 table).
-fn ransomPrice(p: *const @import("../domain/person.zig").Person) types.CBills {
+pub fn ransomPrice(p: *const @import("../domain/person.zig").Person) types.CBills {
     const t = @import("../domain/tuning.zig").t.contract;
     return switch (p.experience()) {
         .green => t.ransom_green,
@@ -694,8 +688,8 @@ fn applyToCompany(gs: *GameState, company: types.ForceId, stat: PersonStat, delt
         const p = entry.value_ptr;
         if (p.status != .active or !gs.personInCompany(p, company)) continue;
         switch (stat) {
-            .morale => p.morale = @intCast(std.math.clamp(@as(i32, p.morale) + delta, 0, 100)),
-            .fatigue => p.fatigue = @intCast(@min(@as(i32, @import("../domain/person.zig").max_fatigue), @as(i32, p.fatigue) + delta)),
+            .morale => p.addMorale(delta),
+            .fatigue => p.addFatigue(delta),
             .xp => p.xp += @intCast(delta),
         }
     }

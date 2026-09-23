@@ -58,7 +58,7 @@ pub fn plan(alloc: std.mem.Allocator, gs: *GameState, company: types.ForceId, tr
     var lines: std.ArrayListUnmanaged(Line) = .empty;
     const cap = gs.siteCapacityTons(.{ .company = company }) orelse 0;
     const heads = gs.companyHeadcount(company);
-    const per_day: u32 = @max(1, std.math.divCeil(u32, heads, part_mod.provisions_person_days_per_ton) catch 1);
+    const per_day: u32 = part_mod.provisionsPerDay(heads);
 
     // Provisions: enough on hand or on the way to eat through the transit
     // plus the safety days, topped up a fortnight past that. Uncapped: on a
@@ -84,20 +84,13 @@ pub fn plan(alloc: std.mem.Allocator, gs: *GameState, company: types.ForceId, tr
 
     // Armor: field repairs patch a ton per hull per week of damage.
     var hulls: u32 = 0;
-    var family_mounts: std.StringArrayHashMapUnmanaged(u32) = .empty;
+    var family_mounts = try munitionMounts(alloc, gs, company, false);
     {
         var uit = gs.units.iterator();
         while (uit.next()) |e| {
             const u = e.value_ptr;
             if (u.isParked() or gs.companyOf(u.force) != company) continue;
             if (u.kind == .mek or u.kind == .vehicle) hulls += 1;
-            for (u.slots.items) |s| {
-                if (s.class != .weapon or s.condition != .ok) continue;
-                const fam = part_mod.munitionFor(s.part_key) orelse continue;
-                const g = try family_mounts.getOrPut(alloc, fam);
-                if (!g.found_existing) g.value_ptr.* = 0;
-                g.value_ptr.* += 1;
-            }
         }
         const share = @max(2, cap * armor_share_pct / 100);
         const target = std.math.clamp(hulls / 2, 2, share);
@@ -138,15 +131,47 @@ pub fn plan(alloc: std.mem.Allocator, gs: *GameState, company: types.ForceId, tr
     return .{ .lines = try lines.toOwnedSlice(alloc), .transit_days = transit_days, .provisions_per_day = per_day, .capacity = cap, .total_target = total };
 }
 
-/// Tons of a line already on the way to the company.
-/// Tons already on the road to a company's trucks (every line).
-pub fn inboundTons(gs: *GameState, company: types.ForceId) u32 {
+/// Tons already on the road to a site (every line): the room check and
+/// the resupply plan both read it, so what one sends the other accepts.
+pub fn inboundTonsTo(gs: *GameState, site: types.Site) u32 {
     var n: u32 = 0;
     for (gs.part_orders.items) |o| {
-        if (o.dest != .company or o.dest.company != company) continue;
-        if (o.inFlight()) n += o.quantity * part_mod.tons(o.part_key);
+        if (o.inFlight() and std.meta.eql(o.dest, site)) n += o.quantity * part_mod.tons(o.part_key);
     }
     return n;
+}
+
+/// Tons already on the road to a company's trucks (every line).
+pub fn inboundTons(gs: *GameState, company: types.ForceId) u32 {
+    return inboundTonsTo(gs, .{ .company = company });
+}
+
+/// Working weapon mounts per munition family across a company (12.9):
+/// `fighting` counts only the line lances' hulls with a tech to reload
+/// them (what a battle can feed); otherwise every hull that is not parked
+/// (what the trucks must carry). The one census the fight, the plan, the
+/// checklist and the stock list all read.
+pub fn munitionMounts(alloc: std.mem.Allocator, gs: *GameState, company: types.ForceId, fighting: bool) !std.StringArrayHashMapUnmanaged(u32) {
+    var out: std.StringArrayHashMapUnmanaged(u32) = .empty;
+    var uit = gs.units.iterator();
+    while (uit.next()) |e| {
+        const u = e.value_ptr;
+        if (u.isParked() or gs.companyOf(u.force) != company) continue;
+        if (fighting) {
+            const lance = gs.force(u.force) orelse continue;
+            if (!lance.isCombatLance()) continue;
+            const t = gs.person(u.tech) orelse continue; // nobody to reload it (Stage 9C.2)
+            if (!t.isAvailable(gs.clock.day_index)) continue;
+        }
+        for (u.slots.items) |s| {
+            if (s.class != .weapon or s.condition != .ok) continue;
+            const fam = part_mod.munitionFor(s.part_key) orelse continue;
+            const g = try out.getOrPut(alloc, fam);
+            if (!g.found_existing) g.value_ptr.* = 0;
+            g.value_ptr.* += 1;
+        }
+    }
+    return out;
 }
 
 pub fn inboundQty(gs: *GameState, company: types.ForceId, key: []const u8) u32 {

@@ -42,6 +42,35 @@ pub const SupportStaff = struct {
     }
 };
 
+/// What a company fields, counted for the manning table.
+pub const HullTally = struct { meks: u32 = 0, vehicles: u32 = 0, platoons: u32 = 0, fighters: u32 = 0, mash: u32 = 0 };
+
+pub const StaffNeed = struct { role: person.Role, need: u32, why: []const u8 };
+
+/// The manning table (12B.11): every role a company of this shape wants,
+/// and why. The starter generator hires to it and `personnel.manningNeeds`
+/// reads it back for a raised company, so the two never drift.
+pub fn staffNeeds(t: HullTally) [14]StaffNeed {
+    const combat = t.meks + t.vehicles + t.platoons;
+    const staff = supportStaffFor(t.meks, combat);
+    return .{
+        .{ .role = .mekwarrior, .need = t.meks, .why = "one per mek" },
+        .{ .role = .vehicle_crew, .need = t.vehicles, .why = "one per truck, rig or ambulance" },
+        .{ .role = .infantry, .need = t.platoons, .why = "one per security platoon" },
+        .{ .role = .aero_pilot, .need = t.fighters, .why = "one per fighter" },
+        .{ .role = .tech_aero, .need = t.fighters, .why = "one per fighter" },
+        .{ .role = .tech_mek, .need = staff.techs, .why = "one per mek" },
+        .{ .role = .astech, .need = staff.astechs, .why = "six per mek tech (hours)" },
+        .{ .role = .tech_mechanic, .need = t.vehicles / 2, .why = "one per two vehicles" },
+        .{ .role = .doctor, .need = staff.doctors, .why = "one per 25 combat crew" },
+        .{ .role = .medic, .need = staff.medics + (if (t.mash > 0) @as(u32, 4) else 0), .why = "each covers 5 patients and staffs a MASH bed; four per doctor, four more with the MASH lance" },
+        .{ .role = .admin_command, .need = 1, .why = "company office" },
+        .{ .role = .admin_logistics, .need = 1, .why = "company office" },
+        .{ .role = .admin_transport, .need = 1, .why = "company office" },
+        .{ .role = .admin_hr, .need = staff.admins -| 3, .why = "one per 10 combat crew beyond the office" },
+    };
+}
+
 pub fn supportStaffFor(mek_count: u32, combat_personnel: u32) SupportStaff {
     const techs = mek_count;
     const doctors = std.math.divCeil(u32, combat_personnel, 25) catch unreachable;
@@ -145,20 +174,13 @@ pub fn generateInto(gs: *GameState, name: []const u8) !types.ForceId {
 
     // The tail: staff posted to the company (not a lance). 16 meks now, and
     // mechanics for the truck park (1 per 2 vehicles).
-    const mek_count: u32 = force.lance_size * 4;
-    const vehicle_count: u32 = force.lance_size * 3; // salvage + mash + logistics
-    const combat_personnel: u32 = mek_count + vehicle_count + force.lance_size;
-    const staff = supportStaffFor(mek_count, combat_personnel);
-    const staff_plan = [_]struct { person.Role, u32 }{
-        .{ .tech_mek, staff.techs },          .{ .astech, staff.astechs },
-        .{ .tech_mechanic, vehicle_count / 2 }, .{ .doctor, staff.doctors },
-        .{ .medic, staff.medics },            .{ .admin_command, 1 },
-        .{ .admin_logistics, 1 },             .{ .admin_transport, 1 },
-        .{ .admin_hr, staff.admins -| 3 },
-    };
-    for (staff_plan) |entry| {
-        for (0..entry[1]) |_| {
-            const id = try gs.recruitGenerated(entry[0]);
+    // Hire the manning table's support half; the crews and the MASH
+    // lance's own medics were recruited with their hulls above.
+    const tally: HullTally = .{ .meks = force.lance_size * 4, .vehicles = force.lance_size * 3, .platoons = force.lance_size };
+    for (staffNeeds(tally)) |entry| {
+        if (entry.role.isCombat() or entry.role == .tech_aero) continue;
+        for (0..entry.need) |_| {
+            const id = try gs.recruitGenerated(entry.role);
             gs.person(id).?.assigned_force = company_id;
         }
     }
@@ -260,4 +282,16 @@ test "12E.1: the starter company fields lights and mediums only — the founding
             try std.testing.expect(class == .light or class == .medium);
         }
     }
+}
+
+test "the manning table is one function: a raised company reads the generator's ratios back" {
+    const needs = staffNeeds(.{ .meks = 16, .vehicles = 12, .platoons = 4 });
+    var techs: u32 = 0;
+    var admins: u32 = 0;
+    for (needs) |n| {
+        if (n.role == .tech_mek) techs = n.need;
+        if (n.role.isAdmin()) admins += n.need;
+    }
+    try std.testing.expectEqual(@as(u32, 16), techs);
+    try std.testing.expectEqual(supportStaffFor(16, 32).admins, admins);
 }

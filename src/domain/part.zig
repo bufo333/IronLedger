@@ -200,6 +200,17 @@ pub fn fabricationDays(key: []const u8) u32 {
 /// Provisions: one ton feeds this many person-days (~5 kg/person/day). // TUNE
 pub const provisions_person_days_per_ton = 200;
 
+/// Tons of provisions `heads` eat over `days`: rounded up, never under a
+/// ton (the one rounding every burn, plan and forecast uses).
+pub fn provisionsTons(heads: u32, days: u32) u32 {
+    return @max(1, std.math.divCeil(u32, heads * days, provisions_person_days_per_ton) catch 1);
+}
+
+/// Tons a company eats per day.
+pub fn provisionsPerDay(heads: u32) u32 {
+    return provisionsTons(heads, 1);
+}
+
 /// A quantity of one catalog part sitting in an HQ or company inventory.
 pub const StockLine = struct {
     part_key: []const u8,
@@ -287,4 +298,11 @@ test "12D.8: structure is rated by weight class — every classed assembly is in
     try std.testing.expect(fabricationDays("comp_ct_l") < fabricationDays("comp_ct"));
     try std.testing.expectEqual(@as(u8, 2), find("comp_arm_h").?.fab_min_bay);
     try std.testing.expect(find("comp_arm_a").?.fab_regional);
+}
+
+test "provisions round up and never under a ton" {
+    try std.testing.expectEqual(@as(u32, 1), provisionsPerDay(0));
+    try std.testing.expectEqual(@as(u32, 1), provisionsPerDay(200));
+    try std.testing.expectEqual(@as(u32, 2), provisionsPerDay(201));
+    try std.testing.expectEqual(@as(u32, 38), provisionsTons(250, 30)); // 7500 / 200 = 37.5, up
 }

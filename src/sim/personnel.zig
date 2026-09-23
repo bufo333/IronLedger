@@ -19,8 +19,7 @@ pub fn adjustMoraleAll(gs: *GameState, delta: i32) u32 {
     while (it.next()) |e| {
         const p = e.value_ptr;
         if (!p.isOnBooks()) continue;
-        const d = if (delta < 0 and p.has("cool_under_fire")) @divTrunc(delta, 2) else delta;
-        p.morale = @intCast(std.math.clamp(@as(i32, p.morale) + d, 0, 100));
+        p.addMorale(delta);
         touched += 1;
     }
     return touched;
@@ -68,7 +67,7 @@ pub fn payShares(gs: *GameState, contract_id: types.ContractId, company: types.F
         if (!p.isOnBooks() or p.shares == 0) continue;
         paid += per_share * p.shares;
         holders += 1;
-        p.morale = @intCast(@min(100, @as(u32, p.morale) + 3));
+        p.addMorale(3);
     }
     try gs.postTransaction(.{ .day = gs.clock.day_index, .amount = -paid, .category = .payroll, .company = company, .contract = contract_id, .note = "profit shares" });
     try gs.log(.contract, .{ .company = company, .contract = contract_id }, "[shares] {d} c-bills of {d} contract income ({d}%) paid to {d} shareholders — {d} shares at {d} each (morale +3)", .{
@@ -105,8 +104,8 @@ pub fn isPooledRole(role: person_mod.Role) bool {
 }
 
 /// What a company needs in every role, from its hulls on hand and in
-/// transit to it; mirrors the starter generator's ratios
-/// (`company_gen.supportStaffFor`).
+/// transit to it: `company_gen.staffNeeds` is the table, this counts the
+/// hulls it is read for.
 pub fn manningNeeds(gs: *GameState, company: types.ForceId) [14]Need {
     var meks: u32 = 0;
     var vehicles: u32 = 0;
@@ -134,24 +133,11 @@ pub fn manningNeeds(gs: *GameState, company: types.ForceId) [14]Need {
             else => vehicles += 1,
         }
     }
-    const combat = meks + vehicles + platoons;
-    const staff = company_gen.supportStaffFor(meks, combat);
-    return .{
-        .{ .role = .mekwarrior, .need = meks, .why = "one per mek" },
-        .{ .role = .vehicle_crew, .need = vehicles, .why = "one per truck, rig or ambulance" },
-        .{ .role = .infantry, .need = platoons, .why = "one per security platoon" },
-        .{ .role = .aero_pilot, .need = fighters, .why = "one per fighter" },
-        .{ .role = .tech_aero, .need = fighters, .why = "one per fighter" },
-        .{ .role = .tech_mek, .need = staff.techs, .why = "one per mek" },
-        .{ .role = .astech, .need = staff.astechs, .why = "six per mek tech (hours)" },
-        .{ .role = .tech_mechanic, .need = vehicles / 2, .why = "one per two vehicles" },
-        .{ .role = .doctor, .need = staff.doctors, .why = "one per 25 combat crew" },
-        .{ .role = .medic, .need = staff.medics + (if (mash > 0) @as(u32, 4) else 0), .why = "each covers 5 patients and staffs a MASH bed; four per doctor, four more with the MASH lance" },
-        .{ .role = .admin_command, .need = 1, .why = "company office" },
-        .{ .role = .admin_logistics, .need = 1, .why = "company office" },
-        .{ .role = .admin_transport, .need = 1, .why = "company office" },
-        .{ .role = .admin_hr, .need = staff.admins -| 3, .why = "one per 10 combat crew beyond the office" },
-    };
+    var out: [14]Need = undefined;
+    for (company_gen.staffNeeds(.{ .meks = meks, .vehicles = vehicles, .platoons = platoons, .fighters = fighters, .mash = mash }), 0..) |n, i| {
+        out[i] = .{ .role = n.role, .need = n.need, .why = n.why };
+    }
+    return out;
 }
 
 /// People of `role` on a company's books (active or wounded).
@@ -168,6 +154,47 @@ pub fn manningLines(gs: *GameState, company: types.ForceId) [14]ManningLine {
         out[i] = .{ .role = n.role, .have = have, .need = n.need, .open = n.need -| have, .why = n.why };
     }
     return out;
+}
+
+/// A company's people in one pass: who is on the books under it, how
+/// tired and how happy on average, and the counts the readiness board
+/// prints. The battle's company modifiers, the rotation reset, the
+/// Forces board and the readiness board all read this one census.
+pub const CrewStats = struct {
+    heads: u32 = 0,
+    avg_fatigue: u8 = 0,
+    avg_morale: u8 = 50,
+    tired: u32 = 0,
+    spent: u32 = 0,
+    wounded: u32 = 0,
+    permanent: u32 = 0,
+    training: u32 = 0,
+    banked_xp: u32 = 0,
+};
+
+pub fn companyCrewStats(gs: *GameState, company: types.ForceId) CrewStats {
+    var st: CrewStats = .{};
+    var fat: u64 = 0;
+    var mor: u64 = 0;
+    var pit = gs.people.iterator();
+    while (pit.next()) |e| {
+        const p = e.value_ptr;
+        if (!p.isOnBooks() or !gs.personInCompany(p, company)) continue;
+        st.heads += 1;
+        fat += p.fatigue;
+        mor += p.morale;
+        if (p.fatigueBand() != .fresh) st.tired += 1;
+        if (p.isUnfit()) st.spent += 1;
+        if (p.status == .wounded) st.wounded += 1;
+        if (p.permanentPenalty() > 0) st.permanent += 1;
+        if (p.training != null) st.training += 1;
+        if (p.role.isCombat()) st.banked_xp += p.xp;
+    }
+    if (st.heads > 0) {
+        st.avg_fatigue = @intCast(fat / st.heads);
+        st.avg_morale = @intCast(mor / st.heads);
+    }
+    return st;
 }
 
 /// Tech hours (12C.15): what a company's hulls want per week against
@@ -233,7 +260,7 @@ pub fn creditKills(gs: *GameState, engaged: []const types.UnitId, destroyed_bv: 
         if (gs.person(pid)) |p| p.kill_bv += @intCast(@divTrunc(destroyed_bv * @as(i64, w), @as(i64, @intCast(total_w))));
     }
     // Whole kills, weighted draws.
-    const kills: u32 = @intCast(@divTrunc(destroyed_bv + 500, 1000));
+    const kills: u32 = @import("battle.zig").estimatedKills(destroyed_bv);
     for (0..kills) |_| {
         var pick = gs.rng.random(.battle).uintLessThan(u64, total_w);
         for (pilots.items, weights.items) |pid, w| {

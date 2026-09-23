@@ -70,29 +70,29 @@ One predicate each; every listed site calls it.
 ---
 - Left as deliberate single-site filters: queries.zig raise candidates (`destroyed or in_transit`: mothballed hulls are wanted there) and the AAR casualty count in battle.zig (`wounded or kia`).
 
-## D4. One computation, one function (rules 7, 10, 12)
+## D4. One computation, one function (rules 7, 10, 12) — PR #7
 
-- [ ] `logistics.daysBetween(a, b)` with one same-world floor: today 3 days at contract_control.zig:212, battle.zig:796, commands.zig:1897, queries.zig:497,503,4143; 0 days at commands.zig:846, queries.zig:2380; `@max(3,…)` at state.zig:1135; no floor at queries.zig:4291,4298, commands.zig:1369. `offerTransitDays` (queries.zig:488) becomes a call.
-- [ ] `logistics.ly_per_jump` used instead of literal `30`: planet.zig:36, commands.zig:1893, queries.zig:502,4139.
-- [ ] `companyMunitionFamilies(gs, company)` in field_supply.zig; battle.zig:128-143, field_supply.zig:88-97, checklist.zig:56-68 (`companyFires`), queries.zig:1528-1547 (`neededMunitions`) call it.
-- [ ] `companyCrewStats(gs, company)` (headcount, average fatigue, average morale, one membership test): battle.zig:242-262; medical.zig:371-387; queries.zig:385-392, 2971-2991; state.zig:1164-1180.
-- [ ] `Person.addMorale(delta)` and `Person.applyFatigue` used everywhere: personnel.zig:22,71; battle.zig:639,868,870; contract_events.zig:441,448,476,603,708; medical.zig:342,350,355.
-- [ ] Cool-Under-Fire halving once: personnel.zig:22 and battle.zig:868.
-- [ ] `hullUpkeep(gs)` once: tick.zig:476-477, contract_market.zig:651-655, main.zig:869-874, queries.zig:1231-1233; and the 30-day forecast (queries.zig:966-979) includes it (live omission).
-- [ ] `hq_ops.activeJobs` used by queries.zig:271-274, 1849-1852, 3529-3533 (decide once whether "started but undated" counts).
-- [ ] `field_supply.inboundTons` once: commands.zig:1500-1505 calls it (live bug: resupply sizes a load the room check rejects).
-- [ ] `part.provisionsPerDay(heads)` (divCeil, floor 1) used at field_supply.zig:59, tick.zig:328,553, queries.zig:1491, main.zig:571-573.
-- [ ] Ransom table once: contract_events.zig:456-461 calls `ransomPrice` (583-591); `missingRansom` (queries.zig:1107) calls it.
-- [ ] Kill estimate once: personnel.zig:199 and battle.zig:630.
-- [ ] `finance.isInsolvent(gs)`: checklist.zig:113-114 and commands.zig:1989.
-- [ ] HQ admin-desk table once (`hq.zig`): checklist.zig:267-272, contract_market.zig:489-494, state.zig:651-657.
-- [ ] `company_gen` staffing ratios call `personnel.manningNeeds`: company_gen.zig:152-158 versus personnel.zig:139-154; drop the "mirrors" comments at personnel.zig:107-109 and queries.zig:2293.
-- [ ] Hiring-hall candidate creation once with one expiry: contract_market.zig:551-560, 586-595, 624-632.
-- [ ] `market.HullCondition.label()` is the only cascade: queries.zig:2384.
-- [ ] Hangar "why" cascade once: queries.zig:1145-1172 and 1190-1191.
-- [ ] Checklist restlessness warning calls the medical turnover rule: checklist.zig:149-153 versus medical.zig:272-281.
-- [ ] Stock-policy "restock under way" once: tick.zig:213-224 and queries.zig:2077-2084.
-- [ ] Dead mirrors deleted or wired: market.zig:12-18 `RefreshCadence` (tick.zig:43,51,361 inline instead), logistics.zig:122-128 `daily_consumption`.
+- [x] `logistics.daysBetween(a, b)` with one same-world floor: today 3 days at contract_control.zig:212, battle.zig:796, commands.zig:1897, queries.zig:497,503,4143; 0 days at commands.zig:846, queries.zig:2380; `@max(3,…)` at state.zig:1135; no floor at queries.zig:4291,4298, commands.zig:1369. `offerTransitDays` (queries.zig:488) becomes a call.
+- [x] `logistics.ly_per_jump` used instead of literal `30`: planet.zig:36, commands.zig:1893, queries.zig:502,4139.
+- [x] `companyMunitionFamilies(gs, company)` in field_supply.zig; battle.zig:128-143, field_supply.zig:88-97, checklist.zig:56-68 (`companyFires`), queries.zig:1528-1547 (`neededMunitions`) call it.
+- [x] `companyCrewStats(gs, company)` (headcount, average fatigue, average morale, one membership test): battle.zig:242-262; medical.zig:371-387; queries.zig:385-392, 2971-2991; state.zig:1164-1180.
+- [x] `Person.addMorale(delta)` and `Person.applyFatigue` used everywhere: personnel.zig:22,71; battle.zig:639,868,870; contract_events.zig:441,448,476,603,708; medical.zig:342,350,355.
+- [x] Cool-Under-Fire halving once: personnel.zig:22 and battle.zig:868.
+- [x] `hullUpkeep(gs)` once: tick.zig:476-477, contract_market.zig:651-655, main.zig:869-874, queries.zig:1231-1233; and the 30-day forecast (queries.zig:966-979) includes it (live omission).
+- [x] `hq_ops.activeJobs` used by queries.zig:271-274, 1849-1852, 3529-3533 (decide once whether "started but undated" counts).
+- [x] `field_supply.inboundTons` once: commands.zig:1500-1505 calls it (live bug: resupply sizes a load the room check rejects).
+- [x] `part.provisionsPerDay(heads)` (divCeil, floor 1) used at field_supply.zig:59, tick.zig:328,553, queries.zig:1491, main.zig:571-573.
+- [x] Ransom table once: contract_events.zig:456-461 calls `ransomPrice` (583-591); `missingRansom` (queries.zig:1107) calls it.
+- [x] Kill estimate once: personnel.zig:199 and battle.zig:630.
+- [x] `finance.isInsolvent(gs)`: checklist.zig:113-114 and commands.zig:1989.
+- [x] HQ admin-desk table once (`hq.zig`): checklist.zig:267-272, contract_market.zig:489-494, state.zig:651-657.
+- [x] `company_gen` staffing ratios call `personnel.manningNeeds`: company_gen.zig:152-158 versus personnel.zig:139-154; drop the "mirrors" comments at personnel.zig:107-109 and queries.zig:2293.
+- [x] Hiring-hall candidate creation once with one expiry: contract_market.zig:551-560, 586-595, 624-632.
+- [x] `market.HullCondition.label()` is the only cascade: queries.zig:2384.
+- [x] Hangar "why" cascade once: queries.zig:1145-1172 and 1190-1191.
+- [x] Checklist restlessness warning calls the medical turnover rule: checklist.zig:149-153 versus medical.zig:272-281.
+- [x] Stock-policy "restock under way" once: tick.zig:213-224 and queries.zig:2077-2084.
+- [x] Dead mirrors deleted or wired: market.zig:12-18 `RefreshCadence` (tick.zig:43,51,361 inline instead), logistics.zig:122-128 `daily_consumption`.
 
 ---
 

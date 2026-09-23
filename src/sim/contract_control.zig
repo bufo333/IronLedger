@@ -208,7 +208,7 @@ pub fn recall(gs: *GameState, company: types.ForceId) !u32 {
     const home = gs.hqs.getPtr(gs.homeHqFor(company)) orelse return 0;
     const a = planet_mod.find(from_key) orelse return 0;
     const b = planet_mod.find(home.planet_key) orelse return 0;
-    const days = if (a == b) 3 else logistics.transitDays(planet_mod.jumpsBetween(a, b));
+    const days = logistics.daysBetween(a, b);
     f.return_eta_day = gs.clock.day_index + days;
     f.location_planet = null;
     try gs.log(.contract, .{ .company = company }, "[movement] {s} recalled home — {d} days in transit", .{ f.name, days });

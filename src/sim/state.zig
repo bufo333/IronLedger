@@ -1187,7 +1187,7 @@ pub const GameState = struct {
         const home = planet_mod.find(home_key) orelse return 3;
         const dest = planet_mod.find(dest_key) orelse return 3;
         if (home == dest) return 3;
-        return @max(3, @import("../econ/logistics.zig").transitDays(planet_mod.jumpsBetween(home, dest)));
+        return @import("../econ/logistics.zig").daysBetween(home, dest);
     }
 
     // ----------------------------------------------------- deployment info
@@ -1698,6 +1698,15 @@ pub const GameState = struct {
     }
 
     /// Sum of monthly salaries for everyone on active status, after the
+    /// The hangar ledger (ARCH §9.8): every hull bills, running or not.
+    /// The payday, the employer's cost reckoning and the forecast all read it.
+    pub fn monthlyHullUpkeep(self: *GameState) types.CBills {
+        var total: types.CBills = 0;
+        var it = self.units.iterator();
+        while (it.next()) |entry| total += entry.value_ptr.monthlyBill();
+        return total;
+    }
+
     /// paymaster's discount if the commander has one.
     pub fn monthlyPayroll(self: *GameState) types.CBills {
         var total: types.CBills = 0;
@@ -1786,6 +1795,13 @@ pub const GameState = struct {
         const def = part_mod.find(key) orelse return 0;
         const bp: types.Bp = if (part_mod.isComponent(key)) market.component_resale_bp else market.stock_resale_bp;
         return types.applyBp(def.cost * qty, bp);
+    }
+
+    /// Nothing left covers the hole: funds, everything sellable and every
+    /// credit line together are below zero. The checklist warns on it and
+    /// the payday folds the outfit on it; one expression.
+    pub fn isInsolvent(self: *GameState) bool {
+        return self.funds + self.liquidationValue() + self.creditRemaining() < 0;
     }
 
     pub fn liquidationValue(self: *GameState) types.CBills {

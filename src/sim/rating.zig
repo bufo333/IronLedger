@@ -96,11 +96,9 @@ pub fn report(gs: *GameState) Report {
         var hit = gs.hqs.iterator();
         while (hit.next()) |e| {
             const hq = e.value_ptr;
-            const req = hq.staffRequired();
-            const desks = [_]struct { person_mod.Role, u32 }{ .{ .admin_command, req.admin }, .{ .admin_logistics, req.logistics }, .{ .admin_hr, req.hr }, .{ .admin_finance, req.finance } };
-            for (desks) |d| {
-                need += d[1];
-                have += @min(d[1], gs.hqStaff(hq.id, d[0]).count);
+            for (hq.staffRequired().desks()) |d| {
+                need += d.need;
+                have += @min(d.need, gs.hqStaff(hq.id, d.role).count);
             }
         }
         var officers: u32 = 0;

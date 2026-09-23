@@ -326,6 +326,18 @@ pub const Person = struct {
     }
 
     /// Fit for duty today: active, not on leave.
+    /// Move morale by `delta`, clamped to 0…100. Cool Under Fire (12B.6)
+    /// halves every loss; that rule lives here and nowhere else.
+    pub fn addMorale(self: *Person, delta: i32) void {
+        const d = if (delta < 0 and self.has("cool_under_fire")) @divTrunc(delta, 2) else delta;
+        self.morale = @intCast(std.math.clamp(@as(i32, self.morale) + d, 0, 100));
+    }
+
+    /// Move fatigue by `delta`, clamped to 0…`max_fatigue`.
+    pub fn addFatigue(self: *Person, delta: i32) void {
+        self.fatigue = @intCast(std.math.clamp(@as(i32, self.fatigue) + delta, 0, @as(i32, max_fatigue)));
+    }
+
     /// On the payroll and in the outfit's care: active or wounded. MIA,
     /// prisoners and everyone who left are off the books.
     pub fn isOnBooks(self: *const Person) bool {
@@ -625,4 +637,23 @@ test "injuries: open ones set the discharge day, permanent head wounds cost skil
     p.injuries.items[1].healed = true;
     try std.testing.expectEqual(@as(?u32, 12), p.healDoneDay());
     try std.testing.expectEqual(@as(u8, 1), p.permanentPenalty());
+}
+
+test "morale and fatigue move through one clamp; Cool Under Fire halves a loss" {
+    var p: Person = .{ .id = @enumFromInt(1), .first_name = "A", .last_name = "B", .role = .mekwarrior };
+    defer p.deinit(std.testing.allocator);
+    p.addMorale(-60);
+    try std.testing.expectEqual(@as(u8, 0), p.morale);
+    p.addMorale(150);
+    try std.testing.expectEqual(@as(u8, 100), p.morale);
+    p.addFatigue(-5);
+    try std.testing.expectEqual(@as(u8, 0), p.fatigue);
+    p.addFatigue(500);
+    try std.testing.expectEqual(max_fatigue, p.fatigue);
+    try p.abilities.append(std.testing.allocator, "cool_under_fire");
+    p.morale = 50;
+    p.addMorale(-10);
+    try std.testing.expectEqual(@as(u8, 45), p.morale);
+    p.addMorale(-1); // a one-point grind rounds to nothing
+    try std.testing.expectEqual(@as(u8, 45), p.morale);
 }

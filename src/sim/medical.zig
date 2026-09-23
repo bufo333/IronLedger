@@ -268,14 +268,7 @@ pub fn runMonthlyTurnover(gs: *GameState) !u32 {
             notices += 1;
             continue;
         }
-        if (p.tenureMonths(day) < t.turnover_min_tenure_months) continue;
-        var restless = p.restlessness();
-        if (age != null and age.? >= t.age_old) restless += 1;
-        // Loyalty (12C.5): founders stand by the outfit unless truly
-        // miserable; every other modifier cancels a restless flag.
-        const loyal = p.loyalty(day);
-        if (loyal.founder and p.morale >= t.founder_morale_floor) continue;
-        restless -|= loyal.count();
+        const restless = turnoverRisk(p, day);
         if (restless == 0) continue;
         const roll = gs.rng.roll2d6(.medical);
         if (roll >= t.turnover_target + gs.diff().turnover_delta + restless) continue; // difficulty (12.32)
@@ -285,6 +278,22 @@ pub fn runMonthlyTurnover(gs: *GameState) !u32 {
         notices += 1;
     }
     return notices;
+}
+
+/// How many restless flags a person carries into the payday roll (12C.5):
+/// none under a year's tenure, morale and fatigue flags plus one for age,
+/// founders stand by the outfit unless truly miserable, and every other
+/// loyalty modifier cancels a flag. Zero means they do not roll. The
+/// checklist counts who will roll from the same function.
+pub fn turnoverRisk(p: *const person_mod.Person, day: u32) u8 {
+    const t = tuning.person;
+    if (p.tenureMonths(day) < t.turnover_min_tenure_months) return 0;
+    var restless = p.restlessness();
+    const age = p.ageYears(day);
+    if (age != null and age.? >= t.age_old) restless += 1;
+    const loyal = p.loyalty(day);
+    if (loyal.founder and p.morale >= t.founder_morale_floor) return 0;
+    return restless -| loyal.count();
 }
 
 /// training phase, daily: finish programs that came due.
@@ -336,24 +345,24 @@ pub fn runWeeklyRest(gs: *GameState) !void {
                 // lance stands in for the mess hall — and spirits hold.
                 const mess_lance = if (gs.supportLance(company, .mess)) |l| l.units.items.len > 0 else false;
                 const field_decay: u32 = @intCast(types.applyBp(person_mod.fatigueDecayPerWeek(if (mess_lance) 1 else 0), tuning.person.garrison_rest_bp));
-                p.fatigue -|= @intCast(@min(field_decay, 255));
-                if (p.morale < 45 and p.fatigue <= 60) p.morale += 1;
+                p.addFatigue(-@as(i32, @intCast(@min(field_decay, 255))));
+                if (p.morale < 45 and p.fatigue <= 60) p.addMorale(1);
             }
             // Exhaustion grinds morale down, and an empty mess tent grinds
             // it faster (Stage 9B); combat tours get no rest at all. Cool
             // Under Fire (12B.6) shrugs the grind off.
-            if (p.fatigue > 60 and p.morale > 0 and !p.has("cool_under_fire")) p.morale -= 1;
+            if (p.fatigue > 60) p.addMorale(-1); // Cool Under Fire shrugs a one-point grind off entirely
             if (gs.force(company)) |co| {
-                if (co.supply_shortage_days > 0) p.morale -|= 2;
+                if (co.supply_shortage_days > 0) p.addMorale(-2);
             }
         } else {
             // On leave: double recovery (Stage 9C.2).
             const on_leave = p.leave_until_day != null and gs.clock.day_index < p.leave_until_day.?;
-            p.fatigue -|= @intCast(@min(if (on_leave) decay * 2 else decay, 255));
+            p.addFatigue(-@as(i32, @intCast(@min(if (on_leave) decay * 2 else decay, 255))));
             // Rested spirits drift toward content (50), mess food helps.
             const target: u8 = 50 + 2 * best_mess + hr_bonus;
-            if (p.morale < target) p.morale += 1;
-            if (p.fatigue > 60 and p.morale > 0) p.morale -= 1;
+            if (p.morale < target) p.addMorale(1);
+            if (p.fatigue > 60) p.addMorale(-1);
         }
     }
 
@@ -365,16 +374,8 @@ pub fn runWeeklyRest(gs: *GameState) !void {
         if (f.echelon != .company or f.contracts_since_rotation == 0) continue;
         if (gs.isCompanyDeployed(f.id)) continue;
 
-        var fatigue_sum: u32 = 0;
-        var n: u32 = 0;
-        var pit = gs.people.iterator();
-        while (pit.next()) |pentry| {
-            const p = pentry.value_ptr;
-            if (p.status != .active or !gs.personInCompany(p, f.id)) continue;
-            fatigue_sum += p.fatigue;
-            n += 1;
-        }
-        if (n > 0 and fatigue_sum / n <= 10) {
+        const crew = @import("personnel.zig").companyCrewStats(gs, f.id);
+        if (crew.heads > 0 and crew.avg_fatigue <= 10) {
             f.contracts_since_rotation = 0;
             f.last_rotation_day = gs.clock.day_index;
             try gs.log(.rotation, .{ .company = f.id }, "[rotation] {s} is rested and reset — ready for a fresh deployment", .{f.name});

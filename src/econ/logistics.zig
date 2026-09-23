@@ -4,6 +4,7 @@
 //! over jump routes with real delays.
 
 const std = @import("std");
+const planet_mod = @import("../domain/planet.zig");
 const tuning = @import("../domain/tuning.zig").t;
 const types = @import("../domain/types.zig");
 
@@ -18,6 +19,23 @@ pub const burn_days_default = tuning.logistics.burn_days; // in-system transit, 
 pub fn transitDays(jumps: u32) u32 {
     if (jumps == 0) return burn_days_default; // same system
     return burn_days_default + (jumps - 1) * recharge_days + burn_days_default;
+}
+
+/// Days a company or courier takes between two worlds: the jump route,
+/// or the same-world floor (loading, a short burn, unloading). The one
+/// rule every transit, ETA and board column reads. // TUNE
+pub const same_world_days: u32 = 3;
+
+pub fn daysBetween(a: *const planet_mod.Planet, b: *const planet_mod.Planet) u32 {
+    if (a == b) return same_world_days;
+    return transitDays(planet_mod.jumpsBetween(a, b));
+}
+
+/// Days for a purchase to land: nothing when the board is on the buyer's
+/// own world, else the jump route.
+pub fn deliveryDays(a: *const planet_mod.Planet, b: *const planet_mod.Planet) u32 {
+    if (a == b) return 0;
+    return transitDays(planet_mod.jumpsBetween(a, b));
 }
 
 pub const Shipment = struct {
@@ -117,15 +135,14 @@ pub fn localPurchaseMultBp(ly_beyond_ring: u32, planet_industry: u8) types.Bp {
     return std.math.clamp(eased, l.local_base_bp, l.local_max_bp);
 }
 
-/// Daily consumption per deployed company (Stage 5 tunes per roster size and
-/// contract intensity). Units: abstract supply points.
-pub const daily_consumption = std.enums.EnumFieldStruct(types.SupplyClass, u32, null){
-    .parts = 2,
-    .ammo = 1, // combat multiplies this
-    .medical = 1,
-    .provisions = 4,
-    .personnel = 0,
-};
+test "the same-world floor is one number: transit 3 days, delivery none" {
+    const a = planet_mod.catalog[0];
+    try std.testing.expectEqual(same_world_days, daysBetween(&planet_mod.catalog[0], &planet_mod.catalog[0]));
+    try std.testing.expectEqual(@as(u32, 0), deliveryDays(&planet_mod.catalog[0], &planet_mod.catalog[0]));
+    const b = &planet_mod.catalog[1];
+    try std.testing.expectEqual(transitDays(planet_mod.jumpsBetween(&a, b)), daysBetween(&a, b));
+    try std.testing.expectEqual(daysBetween(&a, b), deliveryDays(&a, b));
+}
 
 test "transit time scales with jumps" {
     try std.testing.expectEqual(@as(u32, 5), transitDays(0));

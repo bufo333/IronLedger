@@ -9,13 +9,6 @@ const contract = @import("../domain/contract.zig");
 const person = @import("../domain/person.zig");
 const rng_mod = @import("../sim/rng.zig");
 
-pub const RefreshCadence = struct {
-    /// MekHQ cadence: contract market refreshes monthly, personnel weekly,
-    /// units monthly.
-    pub const contract_days = 30;
-    pub const personnel_days = 7;
-    pub const unit_days = 30;
-};
 
 /// Offers on the board (12C.7, play feedback): a floor so there is always
 /// a choice, the rating letter index (F 0 … A* 5) and the comms level on
@@ -106,11 +99,23 @@ pub const HullCondition = struct {
     destroyed_slots: u8,
     missing_components: u8,
 
+    pub const Grade = enum { new, used, worn, wreck };
+
+    /// How bad it is, in one cascade the label and the colour both read.
+    pub fn grade(self: HullCondition) Grade {
+        if (self.missing_components > 0) return .wreck;
+        if (self.destroyed_slots > 0) return .worn;
+        if (self.armor_pct < 100 or self.damaged_slots > 0) return .used;
+        return .new;
+    }
+
     pub fn label(self: HullCondition) []const u8 {
-        if (self.missing_components > 0) return "WRECK";
-        if (self.destroyed_slots > 0) return "worn";
-        if (self.armor_pct < 100 or self.damaged_slots > 0) return "used";
-        return "new";
+        return switch (self.grade()) {
+            .wreck => "WRECK",
+            .worn => "worn",
+            .used => "used",
+            .new => "new",
+        };
     }
 };
 

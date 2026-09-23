@@ -843,7 +843,7 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             const home = gs.homeHqFor(b.company);
             const from = if (gs.hqs.getPtr(board_hq)) |h| planet_mod.find(h.planet_key) else null;
             const to = if (gs.hqs.getPtr(home)) |h| planet_mod.find(h.planet_key) else null;
-            const days: u32 = if (from != null and to != null and from.? != to.?) logistics.transitDays(planet_mod.jumpsBetween(from.?, to.?)) else 0;
+            const days: u32 = if (from != null and to != null) logistics.deliveryDays(from.?, to.?) else 0;
             if (days == 0) {
                 const lance_ok = if (gs.force(b.lance)) |l| (gs.companyOf(b.lance) == b.company and (l.echelon != .lance or l.units.items.len < force_mod.lance_size)) else false;
                 if (lance_ok) gs.moveUnitToForce(uid, b.lance) catch return Error.UnknownForce else gs.placeUnitInCompany(uid, b.company) catch return Error.UnknownForce;
@@ -1366,7 +1366,7 @@ fn travelDays(gs: *GameState, from_company: types.ForceId, to_company: types.For
     const a = planet_mod.find(sitePlanetKey(gs, .{ .company = from_company }) orelse "") orelse return 0;
     const b = planet_mod.find(sitePlanetKey(gs, .{ .company = to_company }) orelse "") orelse return 0;
     if (a == b) return 0;
-    return logistics.transitDays(planet_mod.jumpsBetween(a, b));
+    return logistics.daysBetween(a, b);
 }
 
 fn transferUnit(gs: *GameState, unit_id: types.UnitId, to_company: types.ForceId) Error!Result {
@@ -1496,19 +1496,10 @@ fn validateSite(gs: *GameState, site: types.Site) Error!void {
     }
 }
 
-/// Tonnage already bound for a site (in-transit orders/shipments).
-fn inboundTons(gs: *GameState, site: types.Site) u32 {
-    var total: u32 = 0;
-    for (gs.part_orders.items) |o| {
-        if (o.inFlight() and std.meta.eql(o.dest, site)) total += o.quantity * part_mod.tons(o.part_key);
-    }
-    return total;
-}
-
 /// Refuse anything the destination can't hold once inbound goods land.
 fn checkRoom(gs: *GameState, site: types.Site, part_key: []const u8, quantity: u32) Error!void {
     const cap = gs.siteCapacityTons(site) orelse return;
-    const used = gs.siteTons(site) + inboundTons(gs, site);
+    const used = gs.siteTons(site) + @import("field_supply.zig").inboundTonsTo(gs, site);
     if (used + quantity * part_mod.tons(part_key) > cap) return Error.StorageFull;
 }
 
@@ -1888,11 +1879,11 @@ fn acceptContract(gs: *GameState, offer_index: usize, company_id: types.ForceId)
     c.assigned_company = company_id;
     // Transit from wherever the company stands (Stage 9E redeploy): the
     // world it's idling on, else its home HQ.
-    var jumps: u32 = std.math.divCeil(u32, c.dist_ly, 30) catch unreachable;
+    var jumps: u32 = planet_mod.jumpsForLy(c.dist_ly);
     if (planet_mod.find(sitePlanetKey(gs, .{ .company = company_id }) orelse "")) |from| {
         if (planet_mod.find(c.planet_key)) |to| jumps = planet_mod.jumpsBetween(from, to);
     }
-    c.transit_days = if (jumps == 0) 3 else logistics.transitDays(jumps);
+    c.transit_days = if (jumps == 0) logistics.same_world_days else logistics.transitDays(jumps);
     c.arrive_day = gs.clock.day_index + c.transit_days;
     contract_control.onAccept(gs, &c);
     c.monthly_net = @divTrunc(c.terms.base_pay_month * (100 - @as(i64, c.terms.advance_pct)), 100);
@@ -1984,7 +1975,7 @@ fn advance(gs: *GameState, days: u32) Error!Result {
         // Couriers already bound for the outfit count: the turn can end
         // while the money is on the road.
         if (gs.funds + gs.inboundToOutfit() < 0) {
-            if (gs.funds + gs.liquidationValue() + gs.creditRemaining() < 0) {
+            if (gs.isInsolvent()) {
                 gs.bankrupt = true;
                 try gs.log(.finance, .{}, "[bankrupt] the outfit cannot cover {d}: creditors seize what is left", .{gs.funds});
                 return Error.Bankrupt;

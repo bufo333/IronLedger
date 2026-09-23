@@ -19,12 +19,35 @@ pub fn baySlots(gs: *GameState, hq_id: types.HqId) u32 {
     return @as(u32, hq.effectiveFacilityLevel(.mek_bay)) * tuning.hq_ops.slots_per_bay_level;
 }
 
-pub fn activeJobs(gs: *GameState, hq_id: types.HqId) u32 {
-    var n: u32 = 0;
+/// A bay's occupancy: jobs on the bench and jobs waiting for a slot. The
+/// desk, the HQ screen, the Lab and the checklist print this one count.
+pub const BayLoad = struct { busy: u32, queued: u32 };
+
+pub fn bayLoad(gs: *GameState, hq_id: types.HqId) BayLoad {
+    var load: BayLoad = .{ .busy = 0, .queued = 0 };
     for (gs.bay_jobs.items) |j| {
-        if (j.hq == hq_id and j.started_day != null and j.done_day != null) n += 1;
+        if (j.hq != hq_id) continue;
+        if (j.started_day != null) load.busy += 1 else load.queued += 1;
     }
-    return n;
+    return load;
+}
+
+pub fn activeJobs(gs: *GameState, hq_id: types.HqId) u32 {
+    return bayLoad(gs, hq_id).busy;
+}
+
+/// Units of a part already bound for an HQ's shelf: orders in flight to
+/// it plus fabrication jobs in its bay. Reorder points, the demand ledger
+/// and the keep-stocked pane all count "coming" this way.
+pub fn comingToHq(gs: *GameState, hq_id: types.HqId, key: []const u8) u32 {
+    var coming: u32 = 0;
+    for (gs.part_orders.items) |o| if (std.mem.eql(u8, o.part_key, key) and o.dest == .hq and o.dest.hq == hq_id and o.inFlight()) {
+        coming += o.quantity;
+    };
+    for (gs.bay_jobs.items) |j| if (j.hq == hq_id and j.kind == .fabrication and j.done_day == null and std.mem.eql(u8, j.item_key, key)) {
+        coming += 1;
+    };
+    return coming;
 }
 
 pub fn hasJobForUnit(gs: *GameState, unit_id: types.UnitId) bool {
@@ -143,13 +166,7 @@ pub fn componentDemand(alloc: std.mem.Allocator, gs: *GameState, hq_id: types.Hq
         const key = e.key_ptr.*;
         const n = e.value_ptr.*;
         const on_hand = gs.stockCount(.{ .hq = hq_id }, key);
-        var coming: u32 = 0;
-        for (gs.part_orders.items) |o| if (std.mem.eql(u8, o.part_key, key) and o.dest == .hq and o.dest.hq == hq_id and o.inFlight()) {
-            coming += o.quantity;
-        };
-        for (gs.bay_jobs.items) |j| if (j.hq == hq_id and j.kind == .fabrication and j.done_day == null and std.mem.eql(u8, j.item_key, key)) {
-            coming += 1;
-        };
+        const coming = comingToHq(gs, hq_id, key);
         try out.append(alloc, .{ .key = key, .need = n, .on_hand = on_hand, .coming = coming, .short = n -| (on_hand + coming) });
     }
     return out.toOwnedSlice(alloc);

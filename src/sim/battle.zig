@@ -19,6 +19,12 @@ const person_mod = @import("../domain/person.zig");
 const unit_mod = @import("../domain/unit.zig");
 const GameState = @import("state.zig").GameState;
 
+/// Whole hulls a destroyed-BV total amounts to (a thousand BV a kill,
+/// rounded): kill credit and prisoner counts both read it.
+pub fn estimatedKills(destroyed_bv: i64) u32 {
+    return @intCast(@max(0, @divTrunc(destroyed_bv + 500, 1000)));
+}
+
 /// Days between engagements: ~2/month with variance; garrison work sees
 /// a probe every six weeks or so (12D.6).
 fn nextBattleGap(gs: *GameState, c: *const contract_mod.Contract) u32 {
@@ -123,24 +129,8 @@ fn playerSideIn(gs: *GameState, alloc: std.mem.Allocator, c: *const contract_mod
     // Pass 1 (Stage 9B): count working ballistic/missile mounts per munition
     // family across the company, then decide how many each family's stock
     // can feed this fight. Reserved tons are expended after the battle.
-    var family_mounts: std.StringArrayHashMapUnmanaged(u32) = .empty;
+    var family_mounts = try @import("field_supply.zig").munitionMounts(alloc, gs, c.assigned_company, true);
     var family_fire_pct: std.StringArrayHashMapUnmanaged(u32) = .empty;
-    for (company.children.items) |child_id| {
-        const lance = gs.force(child_id) orelse continue;
-        if (!lance.isCombatLance()) continue;
-        for (lance.units.items) |uid| {
-            const u = gs.unit(uid) orelse continue;
-            if (u.isParked()) continue;
-            if (!hasTech(gs, u)) continue; // nobody to reload it (Stage 9C.2)
-            for (u.slots.items) |slot| {
-                if (slot.class != .weapon or slot.condition != .ok) continue;
-                const key = part_mod.munitionFor(slot.part_key) orelse continue;
-                const e = try family_mounts.getOrPut(alloc, key);
-                if (!e.found_existing) e.value_ptr.* = 0;
-                e.value_ptr.* += 1;
-            }
-        }
-    }
     var fit = family_mounts.iterator();
     while (fit.next()) |entry| {
         const mounts = entry.value_ptr.*;
@@ -238,21 +228,11 @@ fn companyMods(gs: *GameState, c: *const contract_mod.Contract) autoresolve.Camp
     const shortage = if (gs.force(c.assigned_company)) |f| f.supply_shortage_days else 0;
     mods.supply_provisions = shortage == 0;
 
-    // People: fatigue & morale across the company.
-    var fatigue_sum: u32 = 0;
-    var morale_sum: u32 = 0;
-    var n: u32 = 0;
-    var pit = gs.people.iterator();
-    while (pit.next()) |entry| {
-        const p = entry.value_ptr;
-        if (p.status != .active or !gs.personInCompany(p, c.assigned_company)) continue;
-        fatigue_sum += p.fatigue;
-        morale_sum += p.morale;
-        n += 1;
-    }
-    if (n > 0) {
-        mods.avg_fatigue = @intCast(fatigue_sum / n);
-        mods.avg_morale = @intCast(morale_sum / n);
+    // People: fatigue & morale across the company (one census: personnel.companyCrewStats).
+    const crew = @import("personnel.zig").companyCrewStats(gs, c.assigned_company);
+    if (crew.heads > 0) {
+        mods.avg_fatigue = crew.avg_fatigue;
+        mods.avg_morale = crew.avg_morale;
     }
 
     // Force structure: recon lance and the support echelon (ARCH §9.3).
@@ -616,7 +596,7 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     var captured: u32 = 0;
     if (held_field and player.mods.has_security_lance and enemy_loss_pct >= 15) {
         const t = tuning.contract;
-        const kills_est: u32 = @intCast(@divTrunc(enemy_destroyed_bv + 500, 1000));
+        const kills_est: u32 = estimatedKills(enemy_destroyed_bv);
         captured = @min(t.prisoners_max_per_battle, kills_est / t.prisoners_per_kills);
         for (0..captured) |_| {
             const spec = @import("../gen/person_gen.zig").generateWithBonus(&gs.rng, .mekwarrior, if (std.mem.eql(u8, c.enemy_key, "PER")) -1 else 0);
@@ -782,7 +762,7 @@ fn claimSalvage(gs: *GameState, c: *contract_mod.Contract, claim_bv: i64) ![]con
     const home = gs.hqs.getPtr(gs.homeHqFor(c.assigned_company));
     const from = planet_mod.find(c.planet_key);
     const to = if (home) |h| planet_mod.find(h.planet_key) else null;
-    const days: u32 = if (from != null and to != null and from.? != to.?) logistics.transitDays(planet_mod.jumpsBetween(from.?, to.?)) else 3;
+    const days: u32 = if (from != null and to != null) logistics.daysBetween(from.?, to.?) else logistics.same_world_days;
 
     // Wrecks: up to two per battle, each a RAT roll that must fit the claim.
     var wrecks: u32 = 0;
@@ -847,10 +827,8 @@ fn applyCompanyAftermath(gs: *GameState, company: types.ForceId, morale_delta: i
     while (it.next()) |entry| {
         const p = entry.value_ptr;
         if (p.status != .active or !gs.personInCompany(p, company)) continue;
-        // Cool Under Fire (12B.6): half the morale loss after a bad day.
-        const delta = if (morale_delta < 0 and p.has("cool_under_fire")) @divTrunc(morale_delta, 2) else morale_delta;
-        p.morale = @intCast(std.math.clamp(@as(i32, p.morale) + delta, 0, 100));
-        p.fatigue = @min(100, p.fatigue + fatigue_add);
+        p.addMorale(morale_delta); // Cool Under Fire halves a loss (Person.addMorale)
+        p.addFatigue(fatigue_add);
     }
 }
 
