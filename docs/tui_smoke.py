@@ -45,8 +45,7 @@ def wait_for(text, timeout=6.0, tail=30000):
         drain(0.2)
     return False
 
-drain(1.0)
-assert "MERCENARY COMMAND CONSOLE" in plain(), "welcome screen missing"
+assert wait_for("MERCENARY COMMAND CONSOLE", timeout=20), "welcome screen missing: " + plain()[-2000:]   # a cold runner takes a while to first paint
 send("s", 0.8)
 assert "SETTINGS" in plain()[-30000:], plain()[-2000:]
 send("\x1b")
@@ -301,11 +300,9 @@ if pid == 0:
     os.execv(exe, [exe, "--tui", "--ascii", "--no-splash", "--no-music", "--store", db])
 fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
 out = b""
-drain(1.0)
-assert "MERCENARY" in plain(), plain()[-2000:]
+assert wait_for("MERCENARY", timeout=20), plain()[-2000:]
 send("\t"); send("\r", 3.0)
-p = plain()
-assert "F1 Desk" in p and "+-" in p, p[-2000:]          # ascii borders
+assert wait_for("F1 Desk", timeout=20) and "+-" in plain(), plain()[-2000:]          # ascii borders
 for k in "234567891":
     send(k, 0.6)
 send("3"); send("j"); send("j"); send("\r", 0.8)            # hull modal at narrow width
