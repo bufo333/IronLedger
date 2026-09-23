@@ -50,7 +50,7 @@ pub fn rollLocation(gs: *GameState, cause: WoundCause) person_mod.InjuryLocation
 /// Wound someone: they leave duty with a new injury of `severity` (1
 /// light, 2 serious, 3 crippling) at a rolled location. A crippling head
 /// or internal wound is permanent on 2d6 ≤ 4 (`.medical` stream). Healing
-/// starts when the medbay admits them. // TUNE
+/// starts when the medbay admits them (tuning.medical.permanent_target).
 pub fn inflict(gs: *GameState, person_id: types.PersonId, cause: WoundCause, severity: u8, why: []const u8) !void {
     const p = gs.person(person_id) orelse return;
     if (p.status == .kia) return;
@@ -218,7 +218,7 @@ pub fn runDailyHealing(gs: *GameState) !void {
             // effects): one light internal injury stands in for it.
             if (p.openInjuries() == 0) try p.injuries.append(gs.allocator(), .{ .location = .internal, .severity = 1, .incurred_day = gs.clock.day_index });
             // Every open injury closes on its own day: serious ones take
-            // half again as long, crippling ones twice as long. // TUNE
+            // half again as long, crippling ones twice as long: days × (severity + 1) / 2.
             for (p.injuries.items) |*inj| {
                 if (inj.healed or inj.heal_done_day != null) continue;
                 inj.heal_done_day = gs.clock.day_index + days * (@as(u32, inj.severity) + 1) / 2;
@@ -327,8 +327,9 @@ pub fn runWeeklyRest(gs: *GameState) !void {
     }
     const base_decay: u32 = person_mod.fatigueDecayPerWeek(best_mess);
     const decay: u32 = @intCast(types.applyBp(base_decay, gs.commanderMultBp(.fatigue_recovery)));
-    // HR staff keep spirits up at home (Stage 9C). // TUNE
-    const hr_bonus: u8 = if (gs.hqs.count() > 0) @intCast(@min(3, gs.hqStaff(gs.hqs.keys()[0], .admin_hr).count / 2)) else 0;
+    // HR staff keep spirits up at home (Stage 9C).
+    const tp = tuning.person;
+    const hr_bonus: u8 = if (gs.hqs.count() > 0) @intCast(@min(tp.hr_morale_bonus_max, gs.hqStaff(gs.hqs.keys()[0], .admin_hr).count / tp.hr_morale_admins_per_point)) else 0;
 
     var it = gs.people.iterator();
     while (it.next()) |entry| {

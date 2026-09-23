@@ -154,34 +154,30 @@ pub const Listing = struct {
 };
 
 /// Parts always on every board (weapons and ammo are readily available;
-/// the rare slots are for everything else). // TUNE
-pub const staple_keys = [_][]const u8{
-    "ammo_ac2", "ammo_ac5",   "ammo_ac10",        "ammo_ac20", "ammo_lrm", "ammo_srm", "ammo_mg",
-    "armor",    "provisions", "medical_supplies", "mlas",      "slas",     "flamer",
-    "mg",       "srm2",       "srm4",             "srm6",      "lrm5",
-    "lrm10",    "ac2",        "ac5",              "ac10",
-};
+/// the rare slots are for everything else): tuning.market.staple_keys.
+pub const staple_keys = tuning.market.staple_keys;
 
 /// Roll a listed hull's condition: most are used, some are new, a few are
-/// burned-out wrecks missing structure — priced accordingly. // TUNE
+/// burned-out wrecks missing structure — priced accordingly (the roll
+/// bands are tuning.market.cond_*_roll).
 pub fn rollHullCondition(rng: *rng_mod.Rng) HullCondition {
     const roll = rng.roll2d6(.market);
     const r = rng.random(.market);
-    if (roll >= 10) return .{
+    if (roll >= tuning.market.cond_new_roll) return .{
         .armor_pct = 100,
         .quality = if (r.boolean()) .f else .e,
         .damaged_slots = 0,
         .destroyed_slots = 0,
         .missing_components = 0,
     };
-    if (roll >= 7) return .{
+    if (roll >= tuning.market.cond_used_roll) return .{
         .armor_pct = @intCast(@min(100, 80 + rng.roll2d6(.market))),
         .quality = if (r.boolean()) .d else .c,
         .damaged_slots = r.intRangeAtMost(u8, 0, 1),
         .destroyed_slots = 0,
         .missing_components = 0,
     };
-    if (roll >= 4) return .{
+    if (roll >= tuning.market.cond_worn_roll) return .{
         .armor_pct = @intCast(30 + @as(u32, rng.roll2d6(.market)) * 4),
         .quality = if (r.boolean()) .c else .b,
         .damaged_slots = r.intRangeAtMost(u8, 1, 2),

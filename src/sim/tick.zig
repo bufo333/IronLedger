@@ -233,7 +233,7 @@ fn runStockPolicies(gs: *GameState) !void {
 }
 
 /// Training lances (MekHQ lance role): held out of engagements, and their
-/// crews drill for XP every week the company is home. // TUNE
+/// crews drill for XP every week the company is home (one day's XP, `Person.xpGain`).
 fn runTrainingLances(gs: *GameState) void {
     var pit = gs.people.iterator();
     while (pit.next()) |entry| {

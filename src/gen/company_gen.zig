@@ -86,14 +86,11 @@ pub fn supportStaffFor(mek_count: u32, combat_personnel: u32) SupportStaff {
 }
 
 /// RAT weight-class roll for one mek, 2d6 (AtB flavor: mediums dominate a
-/// line company, assaults are prizes). // TUNE
+/// line company, assaults are prizes; bands in tuning.generation).
 pub fn rollWeightClass(rng: *rng_mod.Rng) chassis.WeightClass {
-    return switch (rng.roll2d6(.generation)) {
-        2, 3, 4 => .light,
-        5, 6, 7, 8 => .medium,
-        9, 10, 11 => .heavy,
-        else => .assault,
-    };
+    const roll = rng.roll2d6(.generation);
+    const tg = tuning.generation;
+    return if (roll <= tg.weight_light_max) .light else if (roll <= tg.weight_medium_max) .medium else if (roll <= tg.weight_heavy_max) .heavy else .assault;
 }
 
 /// The starter company's line lances (12E.1): lights and mediums only, so

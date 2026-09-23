@@ -26,7 +26,7 @@ pub const CampaignMods = struct {
     recon_quality: u8 = 0, // 0–3, from scouting lances & comms facility
     // Support-company lances (force.SupportLanceKind, ARCH §9.3). Effects
     // here are small and direct; their bigger payoffs are campaign-side
-    // (healing, morale recovery, salvage yield, ransom events). // TUNE
+    // (healing, morale recovery, salvage yield, ransom events); the sizes are tuning.autoresolve.
     has_mash_lance: bool = false, // troops fight harder knowing medevac exists
     has_mess_lance: bool = false, // hot food at the front
     has_security_lance: bool = false, // rear/prisoner security frees combat units

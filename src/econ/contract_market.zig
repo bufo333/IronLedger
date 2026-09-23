@@ -503,7 +503,7 @@ fn listCandidate(gs: *GameState, hq: *const hq_mod.Hq, role: person_mod.Role, tt
     try gs.candidates.append(gs.allocator(), .{
         .hq = hq.id,
         .spec = spec,
-        .asking_bonus = salary * (1 + @as(types.CBills, @intFromEnum(spec.experience))), // TUNE
+        .asking_bonus = salary * (tuning.market.asking_bonus_base_months + @as(types.CBills, @intFromEnum(spec.experience))),
         .listed_day = gs.clock.day_index,
         .expires_day = gs.clock.day_index + ttl_days,
     });
