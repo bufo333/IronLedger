@@ -9,6 +9,66 @@ const posix = std.posix;
 
 pub const Size = struct { cols: u16, rows: u16 };
 
+/// A 24-bit colour for pixel cells.
+pub const Rgb = [3]u8;
+
+/// The SGR sequences the client paints with (rule 24: escapes live here).
+pub const sgr = struct {
+    pub const reset = "\x1b[0m";
+    pub const dim = "\x1b[0;90m";
+    pub const amber = "\x1b[0;33m";
+    pub const good = "\x1b[0;32m";
+    pub const crit = "\x1b[0;31m";
+    pub const sel = "\x1b[0;30;46m";
+    pub const tab = "\x1b[0;1;30;43m";
+    pub const purple = "\x1b[0;35m";
+    pub const box = "\x1b[0;37m";
+    pub const focus = "\x1b[0;36m";
+    pub const blue = "\x1b[0;94m";
+    pub const red = "\x1b[0;91m";
+    pub const yellow = "\x1b[0;93m";
+    pub const green = "\x1b[0;92m";
+    pub const magenta = "\x1b[0;95m";
+    pub const cyan = "\x1b[0;96m";
+    pub const white = "\x1b[0;97m";
+    pub const grey = "\x1b[0;90m";
+};
+
+pub fn cursorHome(out: *std.Io.Writer) !void {
+    try out.writeAll("\x1b[H");
+}
+
+/// Move to a 1-based row and column.
+pub fn cursorTo(out: *std.Io.Writer, row: u16, col: u16) !void {
+    try out.print("\x1b[{d};{d}H", .{ row, col });
+}
+
+pub fn resetStyle(out: *std.Io.Writer) !void {
+    try out.writeAll(sgr.reset);
+}
+
+/// One glyph painted with a foreground and background colour: 24-bit, or
+/// the nearest of the 256-colour cube.
+pub fn paintPair(out: *std.Io.Writer, truecolor: bool, fg: Rgb, bg: Rgb, glyph: []const u8) !void {
+    if (truecolor) {
+        try out.print("\x1b[0;38;2;{d};{d};{d};48;2;{d};{d};{d}m{s}", .{ fg[0], fg[1], fg[2], bg[0], bg[1], bg[2], glyph });
+    } else {
+        try out.print("\x1b[0;38;5;{d};48;5;{d}m{s}", .{ c256(fg), c256(bg), glyph });
+    }
+}
+
+fn c256(c: Rgb) u8 {
+    const r: u8 = @intCast((@as(u16, c[0]) * 5 + 127) / 255);
+    const g: u8 = @intCast((@as(u16, c[1]) * 5 + 127) / 255);
+    const b: u8 = @intCast((@as(u16, c[2]) * 5 + 127) / 255);
+    return 16 + 36 * r + 6 * g + b;
+}
+
+test "paintPair picks the cube index for 256 colours" {
+    try std.testing.expectEqual(@as(u8, 16), c256(.{ 0, 0, 0 }));
+    try std.testing.expectEqual(@as(u8, 231), c256(.{ 255, 255, 255 }));
+}
+
 pub const Key = union(enum) {
     char: u21,
     enter,
