@@ -10,8 +10,13 @@ file when it is empty.
 Line numbers are from the audit day and drift as PRs land; the rule name
 and the symbol are the stable key.
 
-Order matters: each deliverable is a branch stacked on the previous one,
-so line numbers in later deliverables assume earlier ones are merged.
+Order matters: each deliverable lands on `main` before the next branch
+is cut (one branch in flight, CLAUDE.md), so line numbers in later
+deliverables assume earlier ones are merged.
+
+D14–D22 come from the external audit of 2026-09-23 (`docs/audit.md`);
+`docs/audit-response.md` records which parts of each finding we accepted
+and why. Each header names the audit finding numbers it closes.
 
 ---
 
@@ -277,3 +282,74 @@ whitelisted imports; the help modal indexes its legend row by number
 - [ ] Still uncovered by the smoke: the GAME OVER modal (a fresh campaign starts solvent, so reaching it needs a saved campaign already past all credit as a test fixture; bankruptcy itself stays terminal by design), the exact 120-column layout boundary, and the refusal branch of each confirm once run (they open and close only).
 - [x] `.github/workflows/ci.yml`: `zig build test --summary all` plus both smokes on push and pull request (Zig 0.16.0 via `mlugg/setup-zig`, `libsqlite3-dev`).
 - [x] Golden-master tests exist (`commands.zig` "same seed + same script = same state hash", `company_gen.zig`, and the store round-trip hash); rule 40 is a stated gate.
+
+---
+
+## D14. Gameplay corruption (audit #1, #2, #3; rules 3, 27)
+
+- [ ] `buy_listing` returns the created unit in `Result` (null on fraud); `buy_hull_for` (commands.zig:1041-1042) uses it instead of `next_unit_id - 1` and returns early on fraud. Test: black-market hull fraud with an existing hull in another company leaves that hull where it was.
+- [ ] Refit commit (commands.zig:1687-1693): sum demand per part key, check totals against stock, then consume; a failed `takeStock` is an error. Test: two identical installs, one part in stock, refused; `refit_clear` refunds only what was taken.
+- [ ] Persist `next_battle_id` with the counters (store.zig:366-371); on load backfill to `max(saved, max(report.id, held.battle, event.battle) + 1)`; schema bump. Test: save, load, fight: the new report has a fresh ID and `read_report` marks it.
+
+## D15. Save identity and corruption (audit #4, #5, #13, #14, #18; rules 1, 27)
+
+- [ ] First save keeps the inserted campaign ID local and assigns `gs.campaign_id` after COMMIT (store.zig:336-345, 806); the UPDATE path fails when no row changed.
+- [ ] `load` returns `error.NoSuchCampaign` when the campaign row is missing (store.zig:847-853); the REPL `load <n>` prints the refusal.
+- [ ] Checked integer readers (`st.u32(col)` etc. returning `CorruptSave`) replace the 61 `@intCast(st.int(...))` sites and `toId` (store.zig:1700-1702).
+- [ ] Missing parent rows and unknown enum values reject the load instead of `orelse continue` / `orelse .default` (store.zig ~866, ~909, 964-987, 1087-1095, 1120-1128, 1341, 1419-1455).
+- [ ] RNG saved one row per named stream plus the campaign seed; a stream absent from an older save is seeded from the campaign seed; a malformed row is `CorruptSave` (store.zig:385, 893-900). Adding a stream no longer reseeds old saves to 3025.
+- Note (#14): SQL-level foreign keys wait for a schema change that rebuilds tables anyway; the loader is the integrity check.
+
+## D16. Battle and medical rule bugs (audit #7, #8, #9, #10, #11; rules 5, 6)
+
+- [ ] `Force.hasReadyUnit` (one predicate on `Unit.canFight()`); `companyMods` recon and support lances (battle.zig:258-283) and MASH beds (medical.zig:127) call it.
+- [ ] `healDays` gets "company fields a ready MASH lance", not "is deployed" (medical.zig:213-214). Test: deployed patient without MASH heals at the base rate.
+- [ ] Field beds allocated in one pass over the sorted patient list with a used-bed count per company (medical.zig:181-188). Test: five equal-priority patients, four beds, exactly one waits.
+- [ ] One combat-skill selector keyed on unit kind (reuse person.zig:378-380); battle.zig:209-210 calls it. Test: a vehicle crewed by a good `vehicle_crew` pilot fights at their vee skills.
+- [ ] Conceded engagement (battle.zig:808-814) emits a minimal `BattleReport` (defeat, no hits) through the normal aftermath bookkeeping (stats, `battles_fought`); the report holds the turn like any other; the -2 score / -10 VP move into tuning.
+- Design backlog (not a defect): per-site hospital and doctor capacity (#7). ARCHITECTURE.md never specified per-site care; decide there first.
+
+## D17. Logistics accounting (audit #6, #12; rules 5, 6, 27)
+
+- [ ] `freightBetween` split into quote and commit; `shipStock` reserves throughput after `debitPurchase` succeeds (commands.zig:1784, 1816-1825).
+- [ ] Rename `tuning.network.weeks_of_capacity` (tuning.zon:61, network.zig:27-28) to what it measures (e.g. `tons_per_supply_unit`); delete or align `logistics.routeThroughputPerWeek` (logistics.zig:119-123) so one function answers "tons per week on this link".
+- [ ] `ensureUnusedCapacity` before the debit at the audit #6 sites: HQ founding (commands.zig:461-474), facility upgrade (1365-1387), fabrication (1346-1363), unit transfer (1638-1655), refit commit (1694-1705), `resolveChoice` (contract_events.zig:337-348). No transaction framework; these fail only on arena OOM.
+
+## D18. HQ locality (audit #21; rules 5, 8)
+
+- [ ] One `canTrainAt(gs, hq)` against `homeHqFor(company)` replaces the three any-HQ loops (commands.zig:782-787, 1448-1453, 1849-1854).
+- [ ] Weekly rest uses the company's home HQ mess and HR, not the best mess / `hqs.keys()[0]` (medical.zig:320-332).
+- [ ] `recruitBonus` (state.zig:645-647) reads the recruiting HQ, not `hqs.values()[0]`.
+- [ ] `intelLevel(gs, offer_hq)` (offer_rating.zig:22-27): per-board comms, matching 12E.4 per-HQ boards.
+- [ ] Asymmetric two-HQ tests for each: the facility at one HQ does not serve a company homed at the other.
+
+## D19. Terminal safety (audit #15, #16; rule 24)
+
+- [ ] `Screen.text` (screen.zig:151) decodes with a validated view, draws U+FFFD for invalid bytes and `?` for C0/C1 controls; `utf8Encode(...) catch 1` (screen.zig:406) writes a replacement, not an uninitialised byte.
+- [ ] A plain-text draw path that never interprets markup; names, filenames, mod and log strings go through it (a company named `{r}Alpha` draws literally).
+- [ ] `Screen.resize` (screen.zig:120-126) allocates the new buffer before freeing the old (today: double free on OOM through `deinit`).
+- [ ] `Term.init` (term.zig:108-135): `errdefer tcsetattr(orig)` and handler removal right after entering raw mode.
+
+## D20. Determinism (audit #17, #18; rules 1, 40)
+
+- [ ] `stateHash` (state.zig:1939-2040) digests every persisted field in canonical order, RNG bytes and `next_*_id` included; one golden constant pinned for a fixed seed and script.
+- [ ] RNG streams carry explicit stable salts instead of the enum ordinal (rng.zig:7-28).
+- [ ] `person_gen.generateWithBonus` and `company_gen.rollWeightClass` take the caller's stream; hall (contract_market.zig:501), market (245, 384), prisoners (battle.zig:787), salvage (1130) and events (contract_events.zig:1196) pass their own.
+
+## D21. Layering and boundaries (audit #19, #22, #23, #27; rules 1, 4, 6, 17, 26)
+
+- [ ] Contract layer diagram lists `sim/rng.zig` as a leaf below domain (it imports only `std`).
+- [ ] `econ/contract_market.zig` and `gen/company_gen.zig` `generateInto` move into `src/sim/` (they import `GameState` and sim rules).
+- [ ] `hqDetail` rows carry a typed facility identity; `hqFacilityAtRow` stops parsing rendered text (queries.zig:1757-1772).
+- [ ] Inbox rows carry event identity; `inboxRowCount` / `inboxEventAtCursor` (app.zig:1825-1840) stop counting rows.
+- [ ] Forces `+` pre-check on `hqWithCompanySlot` (screens/forces.zig:178-182) deleted; the command refuses.
+- [ ] `cli.zig`: one branch per verb (delete the shadowing `shares`/`autoadmit` at 147-155), strict enum tokens for `xfer` and `office` (345-367), trailing tokens rejected. REPL smoke steps for each refusal.
+- [ ] Reviewer checks use recursive globs (`src/tui/**/*.zig`), add a `commands.execute(` outside `exec`/`execSay` check, and run as a script in CI; the 11 direct calls in screens either go through `execSay` or are listed as result-reading exceptions.
+
+## D22. Build, data and tests (audit #20, #24, #25, #26, #28; rules 6, 9)
+
+- [ ] `build.zig.zon` `.paths` adds `docs/logos` and `LICENSE`.
+- [ ] `tuning.zig:743` validation keyed on field type (`Bp` → 0..100_000, `CBills` ≥ 0) with an explicit allow-list for signed deltas; today the bp bound runs on no field at all.
+- [ ] `validate-data` build step running the cross-file checks; install with `-Ddata` depends on it (an empty `rat.zon` fails the build, not the run).
+- [ ] In-file tests for `app.zig` and each `screens/*.zig`: row identity (after D21), cursor clamp on resize, key handlers against a generated campaign.
+- [ ] `commands.execute` becomes a dispatch switch into per-subsystem functions; `Store.load` becomes per-table decoders. Last, because it moves every cited line.
