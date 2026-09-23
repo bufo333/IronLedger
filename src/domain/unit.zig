@@ -338,6 +338,9 @@ pub const HeldHull = struct {
     day: u32,
     /// The engagement that lost it, so the after-action can be re-read.
     battle: types.BattleId,
+    /// The lance it was in when they took it, so a hull won back goes
+    /// home rather than into the hangar (12G.6).
+    from_force: types.ForceId = .none,
 
     /// The three facts that mark a hull as held, with "not held" as the
     /// default. The store writes one hull row for owned and held alike
@@ -346,10 +349,11 @@ pub const HeldHull = struct {
         by: []const u8 = "",
         day: u32 = 0,
         battle: types.BattleId = .none,
+        from_force: types.ForceId = .none,
     };
 
     pub fn mark(self: HeldHull) Mark {
-        return .{ .by = self.by, .day = self.day, .battle = self.battle };
+        return .{ .by = self.by, .day = self.day, .battle = self.battle, .from_force = self.from_force };
     }
 };
 

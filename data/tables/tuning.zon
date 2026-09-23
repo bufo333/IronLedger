@@ -445,6 +445,10 @@
             .hold_morale = -2,
             .withdrawal_score = -1,
         },
+        .push_mod = -1, // TUNE: they hold that ground now
+        .push_fatigue = 5, // TUNE: nobody sleeps
+        .push_mishap_at = 4, // TUNE: ~1 in 6 sorties costs someone
+        .push_morale = 3, // TUNE: the company notices you went back
     },
     // Autoresolve (ARCH §7): the crew multiplier follows the 2d6 to-hit
     // curve; supply, fatigue, morale and support assets are the player's levers.
