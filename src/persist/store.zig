@@ -701,7 +701,7 @@ pub const Store = struct {
             defer bh.finalize();
             const ba = try self.db.prepare("INSERT INTO battle_report_ammo VALUES (?1,?2,?3,?4,?5,?6)");
             defer ba.finalize();
-            for (gs.battle_reports.items, 0..) |r, i| {
+            for (gs.battle_reports.kept.items, 0..) |r, i| {
                 const ord: i64 = @intCast(i);
                 try br.bindAll(.{
                     cid,                             ord,                            @intFromEnum(r.id),              @as(i64, r.day),
@@ -1440,7 +1440,7 @@ pub const Store = struct {
                         .left = @intCast(ba.int(2)),
                     });
                 }
-                try gs.battle_reports.append(alloc, .{
+                try gs.battle_reports.kept.append(alloc, .{
                     .id = toId(types.BattleId, br.int(1)),
                     .day = @intCast(br.int(2)),
                     .contract = toId(types.ContractId, br.int(3)),
@@ -1906,15 +1906,15 @@ test "12G.4: a battle report round-trips as fields, not as a row count" {
 
     // The fixture must actually have fought, or every assertion below is
     // vacuous — the failure mode this whole test exists to catch.
-    try std.testing.expect(gs.battle_reports.items.len >= 8);
+    try std.testing.expect(gs.battle_reports.kept.items.len >= 8);
     var hulls_seen: usize = 0;
-    for (gs.battle_reports.items) |r| hulls_seen += r.hulls.len;
+    for (gs.battle_reports.kept.items) |r| hulls_seen += r.hulls.len;
     try std.testing.expect(hulls_seen > 0);
     // 12G.4: a battle report round-trips as fields, child rows included.
     // Asserting only the count would pass with every hull and every
     // munition family dropped on the floor.
-    try std.testing.expectEqual(gs.battle_reports.items.len, loaded.battle_reports.items.len);
-    for (gs.battle_reports.items, loaded.battle_reports.items) |saved_r, loaded_r| {
+    try std.testing.expectEqual(gs.battle_reports.kept.items.len, loaded.battle_reports.kept.items.len);
+    for (gs.battle_reports.kept.items, loaded.battle_reports.kept.items) |saved_r, loaded_r| {
         try std.testing.expectEqual(saved_r.id, loaded_r.id);
         try std.testing.expectEqual(saved_r.outcome, loaded_r.outcome);
         try std.testing.expectEqual(saved_r.held_field, loaded_r.held_field);

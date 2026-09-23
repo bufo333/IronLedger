@@ -903,7 +903,7 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     for (try after_action.render(gs.allocator(), &report)) |line| try gs.log(.battle, ctx, "{s}", .{line});
     // Kept so the screens can show the fight as a picture (12G.4); the
     // AAR lines above are the permanent account and are never pruned.
-    try gs.recordBattleReport(report);
+    try gs.battle_reports.record(gs.allocator(), report);
     // Hulls left on the field are gone for good (12D.3) — struck off once
     // the AAR has named them.
     for (hit_log.items) |h| if (h.lost) gs.removeUnit(h.unit);

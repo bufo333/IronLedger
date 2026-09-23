@@ -31,6 +31,7 @@ const part_mod = @import("../domain/part.zig");
 const force_mod = @import("../domain/force.zig");
 const autoresolve = @import("autoresolve.zig");
 const medical = @import("medical.zig");
+const tuning = @import("../domain/tuning.zig").t;
 
 /// What a hit did to a mounted part.
 pub const SlotResult = enum {
@@ -189,6 +190,30 @@ pub const BattleReport = struct {
     pub fn burned(self: *const BattleReport, key: []const u8) u32 {
         for (self.ammo) |a| if (std.mem.eql(u8, a.key, key)) return a.burned;
         return 0;
+    }
+};
+
+/// The engagements still on record, oldest first (12G.4). Owns its own
+/// retention, the way `events.EventQueue` owns the inbox: `GameState`
+/// holds one and nothing else decides how long a report lives.
+///
+/// The permanent account of a battle is its `[AAR]` lines in the campaign
+/// log, which are never pruned. These are what a screen reads to show a
+/// fight as something other than prose, so a few tours' worth is enough.
+pub const Journal = struct {
+    kept: std.ArrayListUnmanaged(BattleReport) = .empty,
+
+    /// Keep a resolved engagement, dropping the oldest past
+    /// `tuning.battle.reports_kept`. The one place retention is decided.
+    pub fn record(self: *Journal, alloc: std.mem.Allocator, report: BattleReport) !void {
+        try self.kept.append(alloc, report);
+        if (self.kept.items.len > tuning.battle.reports_kept) _ = self.kept.orderedRemove(0);
+    }
+
+    /// One kept engagement, or null once it has aged out of the window.
+    pub fn find(self: *const Journal, id: types.BattleId) ?*const BattleReport {
+        for (self.kept.items) |*r| if (r.id == id) return r;
+        return null;
     }
 };
 
@@ -359,4 +384,38 @@ test "armorOnly and hullsLost read the record, not the prose" {
     };
     try std.testing.expectEqual(@as(u32, 1), r.hullsLost());
     try std.testing.expectEqual(@as(u32, 0), r.burned("ammo_lrm"));
+}
+
+test "12G.4: the journal is bounded, and the newest survive" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const al = arena.allocator();
+    const keep = tuning.battle.reports_kept;
+
+    var journal: Journal = .{};
+    // Record two windows' worth: the list stops growing, the oldest go.
+    var i: u32 = 0;
+    while (i < keep * 2) : (i += 1) {
+        try journal.record(al, .{
+            .id = @enumFromInt(i + 1),
+            .day = i,
+            .contract = @enumFromInt(1),
+            .company = @enumFromInt(1),
+            .kind = "raid",
+            .enemy_key = "DC",
+            .scenario = "s",
+            .terrain = "t",
+            .weather = "w",
+            .outcome = .victory,
+        });
+    }
+    try std.testing.expectEqual(@as(usize, keep), journal.kept.items.len);
+
+    // The window holds the most recent engagements, not the first ones.
+    try std.testing.expectEqual(@as(u32, keep * 2 - 1), journal.kept.items[keep - 1].day);
+    try std.testing.expectEqual(@as(u32, keep), journal.kept.items[0].day);
+
+    // A report inside the window is findable; one that aged out is not.
+    try std.testing.expect(journal.find(journal.kept.items[keep - 1].id) != null);
+    try std.testing.expect(journal.find(@enumFromInt(1)) == null);
 }
