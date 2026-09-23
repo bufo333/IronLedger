@@ -272,6 +272,8 @@ pub const Error = error{
     NoSuchBattle,
     /// An engagement has not been read, and the turn waits on it.
     ReportUnread,
+    /// A battle decision is unanswered, and the turn waits on it (12G.6).
+    DecisionPending,
     NoSuchChoice,
     NotADecision,
     CommanderExists,
@@ -2213,15 +2215,26 @@ fn deploymentDefaults(gs: *GameState, company_id: types.ForceId, signing: types.
     });
 }
 
+/// The turn-hold as an error (12G.5/12G.6). The checklist decides what
+/// holds the turn; this only names the refusal, so a new hold cannot be
+/// enforced in one place and reported in another.
+fn holdError(gs: *GameState) ?Error {
+    return switch (@import("checklist.zig").turnHold(gs) orelse return null) {
+        .unread_after_action => Error.ReportUnread,
+        .battle_decision => Error.DecisionPending,
+    };
+}
+
 fn advance(gs: *GameState, days: u32) Error!Result {
     // Turn-based: each day is a turn; nothing interrupts the advance.
     // Decisions wait in the inbox and default at their deadlines — except
     // money (Stage 12): a negative outfit treasury holds the turn until a
     // loan or a sale covers it, and past all credit the outfit folds.
     var result: Result = .{};
-    // Nothing moves while an engagement is unread (12G.5); `read <id>`
-    // clears it, and the client opens the sheet for you.
-    if (gs.battle_reports.unread() != null) return Error.ReportUnread;
+    // Nothing moves while an engagement is unread (12G.5) or a battle
+    // decision is unanswered (12G.6); `read <id>` clears the first,
+    // `decide <id> <n>` the second, and the client opens both for you.
+    if (holdError(gs)) |e| return e;
     for (0..days) |_| {
         if (gs.bankrupt) return Error.Bankrupt;
         // Couriers already bound for the outfit count: the turn can end
@@ -2238,9 +2251,10 @@ fn advance(gs: *GameState, days: u32) Error!Result {
         result.days_advanced += 1;
         // A battle disposes of hulls and people permanently and has no
         // safe default to lapse to (ARCH §6), so an unread after-action
-        // holds the turn. A multi-day advance stops on the day it lands
-        // rather than resolving the rest of the week around it.
-        if (gs.battle_reports.unread() != null) return result;
+        // or an unanswered battle decision holds the turn. A multi-day
+        // advance stops on the day it lands rather than resolving the
+        // rest of the week around it.
+        if (@import("checklist.zig").turnHold(gs) != null) return result;
     }
     return result;
 }
@@ -2673,15 +2687,29 @@ test "12C.17: a black-market buy is a fraud or a sale, and the house notices eit
 /// Advance `days`, reading each after-action as it lands — the loop a
 /// commander walks by hand once 12G.5 holds the turn. Tests that are
 /// about something else use this instead of `advance_days` directly.
+/// Walk `days` the way a commander does (12G.5/12G.6): read every
+/// after-action the advance stops on, answer every battle decision it
+/// raises with that decision's own default, and carry on. Tests that do
+/// not care about the fight use this instead of `advance_days`.
 fn advanceReading(gs: *GameState, days: u32) !void {
     var left = days;
     while (left > 0) {
-        while (gs.battle_reports.unread()) |u| _ = try execute(gs, .{ .read_report = u.id });
+        try clearHolds(gs);
         const r = try execute(gs, .{ .advance_days = left });
         if (r.days_advanced == 0) break; // refused for a reason of its own
         left -= @intCast(r.days_advanced);
     }
-    while (gs.battle_reports.unread()) |u| _ = try execute(gs, .{ .read_report = u.id });
+    try clearHolds(gs);
+}
+
+fn clearHolds(gs: *GameState) !void {
+    while (@import("checklist.zig").turnHold(gs)) |h| switch (h) {
+        .unread_after_action => _ = try execute(gs, .{ .read_report = gs.battle_reports.unread().?.id }),
+        .battle_decision => {
+            const ev = gs.event_queue.blocking().?;
+            _ = try execute(gs, .{ .resolve_decision = .{ .event = ev.id, .choice = ev.default_choice } });
+        },
+    };
 }
 
 test "12G.5: an unread after-action holds the turn, and a week stops on the day it lands" {
@@ -2734,14 +2762,121 @@ test "12G.5: an unread after-action holds the turn, and a week stops on the day 
     };
     try std.testing.expect(saw);
 
-    // Reading it lets time move again.
+    // Reading it lets time move again — once the decision that fight may
+    // have raised is answered too (12G.6).
     _ = try execute(&gs, .{ .read_report = waiting.id });
+    try clearHolds(&gs);
     const after = try execute(&gs, .advance_day);
     try std.testing.expectEqual(@as(u32, 1), after.days_advanced);
     try std.testing.expect(gs.clock.day_index > held_at);
 
     // An id that is not on record is refused, not silently ignored.
     try std.testing.expectError(Error.NoSuchBattle, execute(&gs, .{ .read_report = @enumFromInt(9999) }));
+}
+
+test "12G.6: a field held asks for the tempo, and the turn waits for the answer" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 4242 });
+    defer gs.deinit();
+    _ = try gs.createCommander("T", .LC, .line_officer);
+    const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
+        .id = @enumFromInt(1),
+        .kind = .recon_raid,
+        .employer_key = "LC",
+        .enemy_key = "PER",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 6, .base_pay_month = 400_000, .salvage_pct = 30, .battle_loss_pct = 30 },
+        .status = .active,
+        .assigned_company = co,
+        .monthly_net = 300_000,
+    });
+    const site: types.Site = .{ .company = co };
+    try gs.addStock(site, "armor", 60);
+    for (@import("../domain/part.zig").munition_keys) |key| try gs.addStock(site, key, 40);
+
+    // Fight until a held field raises the tempo decision, reading each
+    // report on the way (the other hold, 12G.5).
+    var guard: u32 = 0;
+    while (gs.event_queue.blocking() == null and guard < 40) : (guard += 1) {
+        while (gs.battle_reports.unread()) |u| _ = try execute(&gs, .{ .read_report = u.id });
+        _ = try execute(&gs, .{ .advance_days = 7 });
+        while (gs.battle_reports.unread()) |u| _ = try execute(&gs, .{ .read_report = u.id });
+    }
+    const pending = gs.event_queue.blocking() orelse return error.NoHeldFieldInFortyWeeks;
+    const event_id = pending.id;
+    try std.testing.expectEqual(events_mod.EventKind.press_or_consolidate, pending.kind);
+
+    // Nothing moves while it waits — not a week, not a day.
+    try std.testing.expectError(Error.DecisionPending, execute(&gs, .{ .advance_days = 7 }));
+    try std.testing.expectError(Error.DecisionPending, execute(&gs, .advance_day));
+    const held_at = gs.clock.day_index;
+
+    // The checklist names it and says it blocks, and the query the client
+    // opens it by agrees with the rule the command enforces (rule 9).
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const warnings = try @import("checklist.zig").turnWarnings(&gs, a);
+    var saw = false;
+    for (warnings) |w| if (w.kind == .battle_decision) {
+        saw = true;
+        try std.testing.expect(w.kind.blocking());
+    };
+    try std.testing.expect(saw);
+    const hold = @import("queries.zig").turnHold(&gs);
+    try std.testing.expectEqual(event_id, hold.decision);
+
+    // Pressing pulls the next contact in to the tuned gap and scores.
+    const c = gs.contracts.getPtr(@enumFromInt(1)).?;
+    const score_before = c.score;
+    _ = try execute(&gs, .{ .resolve_decision = .{ .event = event_id, .choice = 0 } });
+    const t = @import("../domain/tuning.zig").t.battle;
+    try std.testing.expectEqual(gs.clock.day_index + t.press_gap_days, c.next_battle_day.?);
+    try std.testing.expectEqual(score_before + t.press_score, c.score);
+
+    // And time moves again.
+    try std.testing.expect(gs.event_queue.blocking() == null);
+    const after = try execute(&gs, .advance_day);
+    try std.testing.expectEqual(@as(u32, 1), after.days_advanced);
+    try std.testing.expect(gs.clock.day_index > held_at);
+}
+
+test "12G.6: garrison work has no advance to press" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 4243 });
+    defer gs.deinit();
+    _ = try gs.createCommander("T", .LC, .line_officer);
+    const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
+        .id = @enumFromInt(1),
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "PER",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 12, .base_pay_month = 400_000 },
+        .status = .active,
+        .assigned_company = co,
+        .monthly_net = 300_000,
+        // 12D.5: without a force to probe with, garrison work never fights
+        // and the assertions below would be vacuous.
+        .enemy_lances = 2,
+        .enemy_lance_bv = 4_000,
+    });
+    const site: types.Site = .{ .company = co };
+    try gs.addStock(site, "armor", 60);
+    for (@import("../domain/part.zig").munition_keys) |key| try gs.addStock(site, key, 40);
+
+    // A year of probes: they are fights, and some are won, but none of
+    // them is a front to press, so none of them holds the turn.
+    var fought: usize = 0;
+    for (0..52) |_| {
+        try advanceReading(&gs, 7);
+        fought = gs.battle_reports.kept.items.len;
+        try std.testing.expect(gs.event_queue.blocking() == null);
+    }
+    try std.testing.expect(fought > 0); // otherwise the assertion above is vacuous
+    for (gs.event_queue.pending.items) |ev| {
+        try std.testing.expect(ev.kind != .press_or_consolidate);
+    }
 }
 
 test "golden master: same seed + same script = same state hash" {

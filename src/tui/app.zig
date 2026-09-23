@@ -2209,13 +2209,21 @@ pub const App = struct {
         };
         if (res.days_advanced == 0) return; // refused — the message says why
         const st = try q.status(self.a(), g);
-        // A battle stopped the advance short (12G.5): open its sheet
-        // rather than make the player go and find it.
-        if (g.battle_reports.unread()) |r| {
-            self.say(.crit, "day {d} · {s} — contact: the after-action is on your desk", .{ st.day, st.date });
-            self.battles_from_list = false;
-            self.openModal(.{ .after_action = r.id });
-            return;
+        // A battle stopped the advance short (12G.5/12G.6): open what the
+        // turn is waiting on rather than make the player go and find it.
+        switch (q.turnHold(g)) {
+            .after_action => |id| {
+                self.say(.crit, "day {d} · {s} — contact: the after-action is on your desk", .{ st.day, st.date });
+                self.battles_from_list = false;
+                self.openModal(.{ .after_action = id });
+                return;
+            },
+            .decision => |id| {
+                self.say(.crit, "day {d} · {s} — the field is yours: the tempo is your call", .{ st.day, st.date });
+                self.openModal(.{ .decision = id });
+                return;
+            },
+            .none => {},
         }
         self.say(.good, "day {d} · {s}", .{ st.day, st.date });
     }
@@ -2959,7 +2967,13 @@ pub const App = struct {
                 // does the marking, the client never touches the record.
                 .escape, .char => {
                     _ = try self.execSay(.{ .read_report = id }, .good, "after-action read", .{});
-                    self.modal = if (self.battles_from_list) .{ .battle_list = {} } else .none;
+                    // A fight the company won asks for the tempo next
+                    // (12G.6): hand it over rather than drop the player
+                    // on a screen that refuses to advance.
+                    self.modal = switch (q.turnHold(&self.gs.?)) {
+                        .decision => |ev| .{ .decision = ev },
+                        else => if (self.battles_from_list) .{ .battle_list = {} } else .none,
+                    };
                 },
                 else => {},
             },

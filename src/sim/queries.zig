@@ -188,6 +188,23 @@ pub fn status(alloc: Alloc, gs: *GameState) !Status {
     };
 }
 
+/// What the turn is waiting on, named so a client can open it rather
+/// than only print it (12G.5/12G.6). `checklist.turnHold` is the rule;
+/// this carries the id the frontend needs to put the right sheet or
+/// decision on screen, so no screen reads the journal or the queue.
+pub const TurnHold = union(enum) {
+    none,
+    after_action: types.BattleId,
+    decision: types.EventId,
+};
+
+pub fn turnHold(gs: *GameState) TurnHold {
+    return switch (checklist.turnHold(gs) orelse return .none) {
+        .unread_after_action => .{ .after_action = gs.battle_reports.unread().?.id },
+        .battle_decision => .{ .decision = gs.event_queue.blocking().?.id },
+    };
+}
+
 /// Warnings that should stop a turn until acknowledged (the rest are notices).
 /// `checklist.WarningKind.blocking` is the rule; kept as a name the frontends know.
 pub fn isBlocking(kind: checklist.WarningKind) bool {
@@ -233,7 +250,7 @@ pub const Desk = struct {
 
 fn jumpFor(kind: checklist.WarningKind) u8 {
     return switch (kind) {
-        .unread_after_action, .decision_due => 0,
+        .unread_after_action, .battle_decision, .decision_due => 0,
         .open_slots, .tech_overloaded, .medbay_over_capacity => 2,
         .combat_ineffective, .objectives_met, .company_idle_afield => 3,
         .overdrawn, .insolvent => 4,
@@ -337,6 +354,7 @@ pub fn effectsText(alloc: Alloc, effects: []const @import("events.zig").Effect) 
         .cash_monthly_pct => |p| try appendTag(alloc, &out, p >= 0, try std.fmt.allocPrint(alloc, "{s}{d}% of a month's pay", .{ if (p >= 0) "+" else "", p })),
         .morale => |m| try appendTag(alloc, &out, m >= 0, try std.fmt.allocPrint(alloc, "morale {s}{d}", .{ if (m >= 0) "+" else "", m })),
         .fatigue => |f| try appendTag(alloc, &out, false, try std.fmt.allocPrint(alloc, "fatigue +{d}", .{f})),
+        .next_battle_in => |d| try appendTag(alloc, &out, false, try std.fmt.allocPrint(alloc, "contact in {d}d", .{d})),
         .xp_all => |x| try appendTag(alloc, &out, true, try std.fmt.allocPrint(alloc, "XP +{d} all", .{x})),
         .score => |s| try appendTag(alloc, &out, s >= 0, try std.fmt.allocPrint(alloc, "contract score {s}{d}", .{ if (s >= 0) "+" else "", s })),
         .damage_random_units => |n| try appendTag(alloc, &out, false, try std.fmt.allocPrint(alloc, "{d} line hull{s} damaged", .{ n, if (n == 1) "" else "s" })),
@@ -5332,12 +5350,38 @@ pub fn hangarSummaryLine(alloc: Alloc, gs: *GameState) ![]const u8 {
 }
 
 /// The next pending decision for a script that answers it: its index, kind and first option.
-pub const PendingDecision = struct { event: types.EventId, kind: []const u8, first_option: []const u8 };
+pub const PendingDecision = struct {
+    event: types.EventId,
+    kind: []const u8,
+    first_option: []const u8,
+    /// The option that applies if nobody answers, and its label.
+    default_choice: usize = 0,
+    default_option: []const u8 = "",
+};
+
+fn asPending(row: InboxRow) PendingDecision {
+    return .{
+        .event = row.event_id,
+        .kind = row.kind,
+        .first_option = if (row.options.len > 0) row.options[0] else "",
+        .default_choice = row.default_choice,
+        .default_option = if (row.default_choice < row.options.len) row.options[row.default_choice] else "",
+    };
+}
 
 pub fn firstPendingDecision(alloc: Alloc, gs: *GameState) !?PendingDecision {
     const d = try desk(alloc, gs, 0);
     if (d.inbox.len == 0) return null;
-    return .{ .event = d.inbox[0].event_id, .kind = d.inbox[0].kind, .first_option = if (d.inbox[0].options.len > 0) d.inbox[0].options[0] else "" };
+    return asPending(d.inbox[0]);
+}
+
+/// The pending decision with this id (12G.6). A console that answers a
+/// named decision reads the one it is about to answer, never the first
+/// row of the inbox.
+pub fn pendingDecision(alloc: Alloc, gs: *GameState, id: types.EventId) !?PendingDecision {
+    const d = try desk(alloc, gs, 0);
+    for (d.inbox) |row| if (row.event_id == id) return asPending(row);
+    return null;
 }
 
 /// The demand ledgers as the console prints them: each depot's structural

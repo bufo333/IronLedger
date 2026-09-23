@@ -204,9 +204,16 @@ permanently — which wrecks the trucks lift, whether the company goes back
 for what it left, whether it presses or consolidates — and there is no
 safe default to lapse to, because every option forfeits something that
 does not come back. So an unanswered after-action report holds the turn,
-and a multi-day advance stops on the day it lands rather than resolving
-the rest of the week around it. Solvency is the other stop (§11): a
-negative treasury holds the turn until it is covered.
+and so does an unanswered battle decision, and a multi-day advance stops
+on the day either lands rather than resolving the rest of the week around
+it. Solvency is the other stop (§11): a negative treasury holds the turn
+until it is covered.
+
+`checklist.turnHold` is the one place that decides whether the turn is
+held; `commands.advance` turns its answer into the refusal, the checklist
+turns it into a warning, and `queries.turnHold` carries the id a client
+needs to put the right sheet or decision on screen. `EventKind.blocksTurn`
+names which decisions qualify — the test below, written as a switch.
 
 The test for a new blocking rule is *what it disposes of*, not how big it
 feels. If the worst outcome is a worse bonus, it waits in the inbox.
