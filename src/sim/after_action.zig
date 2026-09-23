@@ -177,6 +177,10 @@ pub const BattleReport = struct {
 
     /// No combat-effective units: the objective was conceded without a shot.
     conceded: bool = false,
+    /// The commander has read it (12G.5). An unread report holds the turn:
+    /// a battle disposes of hulls and people permanently, so it is not
+    /// something a week-long advance may resolve past unseen (ARCH §6).
+    acknowledged: bool = false,
 
     /// Hulls that never came home (12D.3) — the count the inbox and the
     /// checklist both read, so neither counts rows itself (rule 5).
@@ -214,6 +218,24 @@ pub const Journal = struct {
     pub fn find(self: *const Journal, id: types.BattleId) ?*const BattleReport {
         for (self.kept.items) |*r| if (r.id == id) return r;
         return null;
+    }
+
+    /// The oldest engagement the commander has not read, if any. The one
+    /// place "is there something to see" is decided: the turn gate, the
+    /// checklist and the client all ask this.
+    pub fn unread(self: *const Journal) ?*const BattleReport {
+        for (self.kept.items) |*r| if (!r.acknowledged) return r;
+        return null;
+    }
+
+    /// Mark one read. Returns false when it has aged out of the window,
+    /// so the command can refuse rather than silently do nothing.
+    pub fn markRead(self: *Journal, id: types.BattleId) bool {
+        for (self.kept.items) |*r| if (r.id == id) {
+            r.acknowledged = true;
+            return true;
+        };
+        return false;
     }
 };
 

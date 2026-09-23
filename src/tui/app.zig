@@ -290,6 +290,9 @@ pub const App = struct {
     colscroll: [10][4]usize = [_][4]usize{[_]usize{0} ** 4} ** 10,
     /// The same for a modal's table.
     modal_colscroll: usize = 0,
+    /// The after-action sheet returns to the list when it was opened from
+    /// one, and to the screen when the turn dropped the player into it.
+    battles_from_list: bool = false,
     /// The column scroll of the table drawn focused this frame, if any —
     /// what ←/→ move (a pane's cursor index and its focus index differ on
     /// some screens).
@@ -2206,6 +2209,14 @@ pub const App = struct {
         };
         if (res.days_advanced == 0) return; // refused — the message says why
         const st = try q.status(self.a(), g);
+        // A battle stopped the advance short (12G.5): open its sheet
+        // rather than make the player go and find it.
+        if (g.battle_reports.unread()) |r| {
+            self.say(.crit, "day {d} · {s} — contact: the after-action is on your desk", .{ st.day, st.date });
+            self.battles_from_list = false;
+            self.openModal(.{ .after_action = r.id });
+            return;
+        }
         self.say(.good, "day {d} · {s}", .{ st.day, st.date });
     }
 
@@ -2744,6 +2755,7 @@ pub const App = struct {
             .battle_list => {
                 const rows = try q.battleList(al, &self.gs.?);
                 if (rows.len == 0) return;
+                self.battles_from_list = true;
                 self.openModal(.{ .after_action = rows[@min(self.modal_cursor, rows.len - 1)].id });
             },
             .raise_hulls => try self.raiseTake(),
@@ -2942,8 +2954,13 @@ pub const App = struct {
         switch (self.modal) {
             .none => {},
             .help, .decision, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .seat, .emblem, .hull, .contract_log, .log_entry, .battle_list, .record => try self.listKey(key),
-            .after_action => switch (key) {
-                .escape, .char => self.modal = .{ .battle_list = {} },
+            .after_action => |id| switch (key) {
+                // Closing the sheet is reading it (12G.5) — the command
+                // does the marking, the client never touches the record.
+                .escape, .char => {
+                    _ = try self.execSay(.{ .read_report = id }, .good, "after-action read", .{});
+                    self.modal = if (self.battles_from_list) .{ .battle_list = {} } else .none;
+                },
                 else => {},
             },
             .emblem_editor => switch (key) {

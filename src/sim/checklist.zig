@@ -47,6 +47,9 @@ pub const WarningKind = enum {
     /// rated to rebuild (12E.2): heavy assemblies need bay 2, assault bay 3
     /// at a regional HQ.
     unrebuildable_hulls,
+    /// An engagement resolved that nobody has read (12G.5). The only
+    /// non-financial warning the turn actually waits on.
+    unread_after_action,
     /// An active contract rates 4½ skulls or worse for the company on it
     /// today (12E.5): consider cautious ROE or recall.
     outmatched,
@@ -55,7 +58,7 @@ pub const WarningKind = enum {
     /// warnings gate `advance_day`; the screens only colour them.
     pub fn blocking(self: WarningKind) bool {
         return switch (self) {
-            .decision_due, .understaffed_hq, .overdrawn, .combat_ineffective, .dry_ammo, .hungry, .untreated_wounded, .insolvent => true,
+            .unread_after_action, .decision_due, .understaffed_hq, .overdrawn, .combat_ineffective, .dry_ammo, .hungry, .untreated_wounded, .insolvent => true,
             else => false,
         };
     }
@@ -112,6 +115,14 @@ test "depot backlog only counts hulls whose company is home" {
 pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
     var out: std.ArrayListUnmanaged(Warning) = .empty;
     const day = gs.clock.day_index;
+
+    // An engagement nobody has read (12G.5): the turn waits on it, so it
+    // leads — there is nothing to decide until the commander has seen it.
+    if (gs.battle_reports.unread()) |r| {
+        try out.append(alloc, .{ .kind = .unread_after_action, .text = try std.fmt.allocPrint(alloc, "after-action from day {d} unread: {s} on {s} — {s}, field {s}", .{
+            r.day, r.scenario, r.terrain, @tagName(r.outcome), if (r.held_field) "held" else "lost",
+        }) });
+    }
 
     // Money first: nothing else matters if the outfit cannot pay.
     if (gs.funds + gs.inboundToOutfit() < 0) {

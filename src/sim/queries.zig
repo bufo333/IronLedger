@@ -233,7 +233,7 @@ pub const Desk = struct {
 
 fn jumpFor(kind: checklist.WarningKind) u8 {
     return switch (kind) {
-        .decision_due => 0,
+        .unread_after_action, .decision_due => 0,
         .open_slots, .tech_overloaded, .medbay_over_capacity => 2,
         .combat_ineffective, .objectives_met, .company_idle_afield => 3,
         .overdrawn, .insolvent => 4,

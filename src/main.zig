@@ -666,7 +666,8 @@ fn runRepl(gs: *game.state.GameState, io: std.Io, gpa: std.mem.Allocator, store_
                 continue;
             }
             const r = game.commands.execute(gs, .{ .advance_days = n }) catch |err| {
-                std.debug.print("blocked: {s}\n", .{@errorName(err)});
+                // The one error→sentence table (rule 6), not the enum name.
+                std.debug.print("blocked: {s}\n", .{game.cli.errorText(err)});
                 continue;
             };
             std.debug.print("advanced {d} day(s)\n", .{r.days_advanced});
