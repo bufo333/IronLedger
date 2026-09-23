@@ -5,6 +5,9 @@ capability, and updated docs. Stages are ordered so something is *playable*
 early (a single company on a garrison contract) and the extensions (multi-
 company, HQ network) land on a proven core.
 
+Open work (the unshipped ☐/◐ items below and the code-quality deliverables)
+is tracked, in order, in `TODO.md`; this file keeps the design of each stage.
+
 ## Stage 0 — Scaffolding ✅
 Project skeleton, module layout, typed IDs, money/date/RNG primitives,
 architecture docs, SQLite schema draft.

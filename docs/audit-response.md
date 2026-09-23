@@ -20,7 +20,7 @@ We also found two defects the audit missed:
   whose company fields a MASH lance (#7).
 - Adding any RNG stream silently reseeds every existing save (#18).
 
-Each accepted item is filed as a checkbox in `docs/contract-todo.md` under
+Each accepted item is filed as a checkbox in `TODO.md` (Part 2) under
 deliverables **D14–D22**. The deliverable is named below against each finding.
 
 Verdicts: **Accepted**: the finding stands as written. **Accepted with
@@ -260,7 +260,7 @@ destination's own home HQ and never reserves link capacity.
 
 ### 13. Persistence silently accepts corruption: Accepted → D15
 
-**Confirmed.** Our own earlier fix (contract-todo D8) covered only the enum
+**Confirmed.** Our own earlier fix (contract deliverable D8) covered only the enum
 columns it listed. The rest is as described:
 
 - A missing or wrong-length RNG blob silently keeps the default seed
@@ -523,6 +523,10 @@ We agree, and we keep them as invariants. The explicit architecture is what
 made most of these findings cheap to confirm or refute.
 
 ## Revised priority order
+
+**Scheduling (decided 2026-09-23):** this work starts only after Stage 12
+is finished (`TODO.md` Part 1), so deep changes to how the code works do
+not land mid-implementation. Within the audit work, the order is:
 
 1. **D14** gameplay corruption (#1, #2, #3)
 2. **D15** save identity, corruption and per-stream RNG persistence (#4, #5, #13, #14, #18)

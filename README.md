@@ -480,6 +480,7 @@ ending the turn opens the checklist.
 - `GAMEPLAY.md` — the intended feel and the loops.
 - `ROADMAP.md` — the stages, built in order; every stage through 12C is
   complete.
+- `TODO.md` — the one list of open work, in the order it is done.
 - `docs/tui.md` — the terminal client's architecture, with the generated
   mockups in `docs/tui-mockup.html`.
 - `docs/modding.md` — the data files and how to overlay them.
