@@ -248,6 +248,8 @@ pub const App = struct {
 
     // soundtrack and title screen
     music: ?music_mod.Player = null,
+    /// Why there is no soundtrack when `music` is null (the files, or the player program).
+    music_note: []const u8 = "no soundtrack loaded — start without --no-music and keep tracks in data/music/ or $IRON_LEDGER_DATA/music (one sub-directory per soundtrack)",
     /// The track announced last, so a change is said once.
     last_track: ?usize = null,
     show_splash: bool = true,
@@ -1800,7 +1802,7 @@ pub const App = struct {
             try info.add(&rows, al, try std.fmt.allocPrint(al, "  {{d}}tracks       {d} in {d} soundtrack{s} under {s} · player: {s}{{/}}", .{ m.tracks.len, m.sets.len, if (m.sets.len == 1) "" else "s", m.root, m.player_cmd orelse "{c}none found{/}" }));
             selectable += 4;
         } else {
-            try info.add(&rows, al, "  {d}no soundtrack loaded — start without --no-music and keep tracks in data/music/ or $IRON_LEDGER_DATA/music (one sub-directory per soundtrack){/}");
+            try info.add(&rows, al, try std.fmt.allocPrint(al, "  {{d}}{s}{{/}}", .{self.music_note}));
         }
         try info.add(&rows, al, "");
         if (self.gs) |*gs| {
@@ -2432,7 +2434,7 @@ pub const App = struct {
                     try rows.append(al, "  {d}Enter on a soundtrack selects it (the playlist reshuffles) · Enter on a track plays it · m on/off · < > previous/next · - + volume · Esc close{/}");
                 } else {
                     try rows.append(al, "");
-                    try rows.append(al, "  {d}no soundtrack loaded — start without --no-music, put audio files in data/music/ (or $IRON_LEDGER_DATA/music, one sub-directory per soundtrack) and have afplay, mpv, ffplay or aplay on PATH{/}");
+                    try rows.append(al, try std.fmt.allocPrint(al, "  {{d}}{s}{{/}}", .{self.music_note}));
                     try rows.append(al, "");
                     try rows.append(al, "  {d}[Esc] close{/}");
                 }
@@ -3237,13 +3239,23 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, env: *const std.process.Environ.M
     app.screen.ascii = options.ascii;
     app.show_splash = !options.no_splash;
     app.asset_roots = roots;
-    if (!options.no_music) if (roots.music) |dir| {
-        const player = music_mod.Player.init(io, gpa, dir);
-        if (player.available()) app.music = player else {
-            var p = player;
-            p.deinit();
+    if (options.no_music) {
+        app.music_note = "music off (--no-music)";
+    } else if (roots.music) |dir| {
+        var player = music_mod.Player.init(io, gpa, dir);
+        if (player.available()) {
+            app.music = player;
+        } else {
+            // Say which half is missing: the files, or the program that plays them.
+            app.music_note = if (player.tracks.len == 0)
+                try std.fmt.allocPrint(roots_arena.allocator(), "no audio files under {s} — one sub-directory per soundtrack (.aac .m4a .mp3 .wav .flac .ogg)", .{dir})
+            else
+                try std.fmt.allocPrint(roots_arena.allocator(), "{d} tracks found under {s}, but no audio player on PATH — install mpv, ffplay (ffmpeg) or aplay (alsa-utils); afplay on macOS", .{ player.tracks.len, dir });
+            player.deinit();
         }
-    };
+    } else {
+        app.music_note = "no music directory found — keep tracks in data/music/ or $IRON_LEDGER_DATA/music, or pass --data <dir>";
+    }
     try app.run();
 }
 
