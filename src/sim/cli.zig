@@ -6,6 +6,8 @@
 //! No MekHQ counterpart — MekHQ has no scripting console.
 
 const std = @import("std");
+const person_mod = @import("../domain/person.zig");
+const force_mod = @import("../domain/force.zig");
 const game = @import("../root.zig");
 const types = game.types;
 const Command = game.commands.Command;
@@ -349,6 +351,55 @@ pub fn parseCommand(verb: []const u8, tokens: *std.mem.TokenIterator(u8, .scalar
         const fid = std.fmt.parseInt(u32, what, 10) catch return error.BadNumber;
         return .{ .rename_force = .{ .force = @enumFromInt(fid), .name = name } };
     }
+    if (eq(u8, verb, "buysupport")) {
+        const site = try parseSite(try need(tokens.next()));
+        if (site != .company) return error.BadSite;
+        const kind = std.meta.stringToEnum(force_mod.SupportLanceKind, try need(tokens.next())) orelse return error.BadArguments;
+        return .{ .buy_support_hull = .{ .company = site.company, .kind = kind } };
+    }
+    if (eq(u8, verb, "crest")) return .{ .set_outfit_emblem = try need(tokens.next()) };
+    if (eq(u8, verb, "office")) {
+        const site = try parseSite(try need(tokens.next()));
+        if (site != .hq) return error.BadSite;
+        const role = std.meta.stringToEnum(person_mod.Role, try need(tokens.next())) orelse return error.BadArguments;
+        const dir = try need(tokens.next());
+        return .{ .set_office_staff = .{ .hq = site.hq, .role = role, .delta = if (eq(u8, dir, "-")) -1 else 1 } };
+    }
+    if (eq(u8, verb, "shiphome")) {
+        const site = try parseSite(try need(tokens.next()));
+        if (site != .company) return error.BadSite;
+        return .{ .ship_components_home = site.company };
+    }
+    if (eq(u8, verb, "replacemount")) {
+        const unit: types.UnitId = @enumFromInt(try num(u32, tokens.next()));
+        return .{ .replace_mount = .{ .unit = unit, .slot_key = try need(tokens.next()) } };
+    }
+    if (eq(u8, verb, "cover")) {
+        const site = try parseSite(try need(tokens.next()));
+        if (site != .hq) return error.BadSite;
+        const key = try need(tokens.next());
+        return .{ .cover_shortfall = .{ .hq = site.hq, .part_key = key, .quantity = try num(u32, tokens.next() orelse "1") } };
+    }
+    if (eq(u8, verb, "togglemothball")) return .{ .toggle_mothball = @enumFromInt(try num(u32, tokens.next())) };
+    if (eq(u8, verb, "cycleroe")) {
+        const site = try parseSite(try need(tokens.next()));
+        if (site != .company) return error.BadSite;
+        return .{ .cycle_roe = site.company };
+    }
+    if (eq(u8, verb, "cyclerole")) return .{ .cycle_role = @enumFromInt(try num(u32, tokens.next())) };
+    if (eq(u8, verb, "cycledifficulty")) return .{ .cycle_difficulty = if (tokens.next()) |t| (if (eq(u8, t, "-")) @as(i8, -1) else 1) else 1 };
+    if (eq(u8, verb, "shares")) {
+        const t = try need(tokens.next());
+        if (eq(u8, t, "+")) return .{ .adjust_shares_pct = 5 };
+        if (eq(u8, t, "-")) return .{ .adjust_shares_pct = -5 };
+        return .{ .set_shares_pct = try num(u8, t) };
+    }
+    if (eq(u8, verb, "autoadmit") and tokens.peek() == null) return .{ .toggle_auto_admit = {} };
+    if (eq(u8, verb, "recallidle")) {
+        const site = try parseSite(try need(tokens.next()));
+        if (site != .company) return error.BadSite;
+        return .{ .recall_idle = site.company };
+    }
     if (eq(u8, verb, "refit")) {
         const unit: types.UnitId = @enumFromInt(try num(u32, tokens.next()));
         const op = try need(tokens.next());
@@ -368,6 +419,12 @@ pub fn parseCommand(verb: []const u8, tokens: *std.mem.TokenIterator(u8, .scalar
 pub fn errorText(err: anyerror) []const u8 {
     return switch (err) {
         error.InsufficientTreasury => "not enough money in that treasury — transfer funds first",
+        error.AlreadyHome => "that company is already home",
+        error.UnderContract => "that company is under contract — recall from the Contracts screen (R there) to accept the breach clause",
+        error.HqTreasuryShort => "the board's HQ treasury cannot cover that listing — Ledger t couriers funds there",
+        error.CompanyFundsShort => "the company's local funds cannot cover that hull — Ledger t couriers funds to the company (days in transit)",
+        error.NothingToShip => "no structural components in those field stores",
+        error.MountIsFine => "that mount is fine — a replacement is for damaged or destroyed gear",
         error.MaxLevel => "already at the top: this HQ is regional (or the facility is maxed)",
         error.ProjectInProgress => "a project is already running here — watch PROJECTS",
         error.BadPercent => "a percentage between 0 and 100",
@@ -424,7 +481,38 @@ pub fn errorText(err: anyerror) []const u8 {
     };
 }
 
+/// The words the `:` line completes after a verb: sites, roles, skills,
+/// facilities, part and world keys.
+pub fn completionPool(alloc: std.mem.Allocator, gs: *game.state.GameState) ![]const []const u8 {
+    var pool: std.ArrayListUnmanaged([]const u8) = .empty;
+    try pool.append(alloc, "outfit");
+    try pool.append(alloc, "pilot");
+    try pool.append(alloc, "tech");
+    var hit = gs.hqs.iterator();
+    while (hit.next()) |e| try pool.append(alloc, try std.fmt.allocPrint(alloc, "hq:{d}", .{@intFromEnum(e.value_ptr.id)}));
+    var fit = gs.forces.iterator();
+    while (fit.next()) |e| if (e.value_ptr.echelon == .company) try pool.append(alloc, try std.fmt.allocPrint(alloc, "co:{d}", .{@intFromEnum(e.value_ptr.id)}));
+    inline for (@typeInfo(game.hq.FacilityKind).@"enum".fields) |f| try pool.append(alloc, f.name);
+    inline for (@typeInfo(person_mod.Role).@"enum".fields) |f| try pool.append(alloc, f.name);
+    inline for (@typeInfo(types.SkillType).@"enum".fields) |f| try pool.append(alloc, f.name);
+    for (game.part.catalog) |p| try pool.append(alloc, p.key);
+    for (game.planet.catalog) |p| try pool.append(alloc, p.key);
+    return pool.toOwnedSlice(alloc);
+}
+
 pub const verbs = [_][]const u8{
+    "buysupport",
+    "crest",
+    "office",
+    "shiphome",
+    "replacemount",
+    "cover",
+    "togglemothball",
+    "cycleroe",
+    "cyclerole",
+    "cycledifficulty",
+    "shares",
+    "recallidle",
     "admit",
     "repay",
     "sell",
@@ -490,6 +578,18 @@ pub const verbs = [_][]const u8{
 /// One-line usage for a verb (null: not a command verb).
 pub fn usage(verb: []const u8) ?[]const u8 {
     const table = [_]struct { []const u8, []const u8 }{
+        .{ "buysupport", "buysupport co:N <mash|security|mess|salvage|transport>" },
+        .{ "crest", "crest <preset name or 3x8 art>" },
+        .{ "office", "office hq:N <admin role> +|-" },
+        .{ "shiphome", "shiphome co:N" },
+        .{ "replacemount", "replacemount <unit> <slot key>" },
+        .{ "cover", "cover hq:N <comp_key> [qty]" },
+        .{ "togglemothball", "togglemothball <unit>" },
+        .{ "cycleroe", "cycleroe co:N" },
+        .{ "cyclerole", "cyclerole <lance id>" },
+        .{ "cycledifficulty", "cycledifficulty [+|-]" },
+        .{ "shares", "shares <percent>|+|-" },
+        .{ "recallidle", "recallidle co:N" },
         .{ "admit", "admit <person>" },
         .{ "repay", "repay <loan#> <amount>" },
         .{ "sell", "sell <unit>" },

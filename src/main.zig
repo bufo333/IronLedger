@@ -56,8 +56,8 @@ pub fn main(init: std.process.Init) !void {
     }
 }
 
-fn printCampaigns(store: game.store.Store, al: std.mem.Allocator) void {
-    const list = store.listCampaigns(al) catch {
+fn printCampaigns(lobby: game.lobby.Lobby, al: std.mem.Allocator) void {
+    const list = lobby.allCampaigns(al) catch {
         std.debug.print("could not read the campaign registry\n", .{});
         return;
     };
@@ -412,16 +412,16 @@ fn printStatus(gs: *game.state.GameState, al: std.mem.Allocator) void {
 
 fn runRepl(gs: *game.state.GameState, io: std.Io, gpa: std.mem.Allocator, store_path: [:0]const u8) !void {
     // The save store (Stage 11): one file, many campaigns.
-    const store = game.store.Store.open(store_path) catch |err| {
+    var lobby = game.lobby.Lobby.open(store_path) catch |err| {
         std.debug.print("could not open save store '{s}': {s}\n", .{ store_path, @errorName(err) });
         return err;
     };
-    defer store.close();
+    defer lobby.close();
     std.debug.print("save store: {s}\n", .{store_path});
     {
         var arena = std.heap.ArenaAllocator.init(gpa);
         defer arena.deinit();
-        printCampaigns(store, arena.allocator());
+        printCampaigns(lobby, arena.allocator());
         std.debug.print(
             \\=== IRON LEDGER — command console ===
             \\          save | campaigns | load <id> | delete <id> | new (fresh campaign) | quit
@@ -455,38 +455,38 @@ fn runRepl(gs: *game.state.GameState, io: std.Io, gpa: std.mem.Allocator, store_
         const al = arena.allocator();
 
         if (std.mem.eql(u8, verb, "save")) {
-            store.save(gs) catch |err| {
+            lobby.save(gs, 0) catch |err| {
                 std.debug.print("save failed: {s}\n", .{@errorName(err)});
                 continue;
             };
-            std.debug.print("saved campaign [{d}] \"{s}\" at day {d}\n", .{ gs.campaign_id, gs.outfit_name, gs.clock.day_index });
+            const st = try q.status(al, gs);
+            std.debug.print("saved campaign \"{s}\" at day {d}\n", .{ st.outfit_name, st.day });
         } else if (std.mem.eql(u8, verb, "campaigns")) {
-            printCampaigns(store, al);
+            printCampaigns(lobby, al);
         } else if (std.mem.eql(u8, verb, "load")) {
             const id = std.fmt.parseInt(i64, tokens.next() orelse "", 10) catch {
                 std.debug.print("usage: load <campaign id>  (see `campaigns`)\n", .{});
                 continue;
             };
-            const loaded = store.load(gpa, id) catch |err| {
+            const loaded = lobby.load(gpa, id) catch |err| {
                 std.debug.print("load failed: {s}\n", .{@errorName(err)});
                 continue;
             };
-            gs.deinit();
+            game.lobby.discard(gs);
             gs.* = loaded;
-            std.debug.print("loaded campaign [{d}] \"{s}\"\n", .{ gs.campaign_id, gs.outfit_name });
+            std.debug.print("loaded campaign [{d}] \"{s}\"\n", .{ id, (try q.status(al, gs)).outfit_name });
             printStatus(gs, al);
         } else if (std.mem.eql(u8, verb, "delete")) {
             const id = std.fmt.parseInt(i64, tokens.next() orelse "", 10) catch {
                 std.debug.print("usage: delete <campaign id>\n", .{});
                 continue;
             };
-            store.deleteCampaign(id) catch |err| {
+            lobby.deleteCampaign(id, gs) catch |err| {
                 std.debug.print("delete failed: {s}\n", .{@errorName(err)});
                 continue;
             };
-            if (gs.campaign_id == id) gs.campaign_id = 0; // the live game is now unsaved
             std.debug.print("deleted campaign [{d}]\n", .{id});
-            printCampaigns(store, al);
+            printCampaigns(lobby, al);
         } else if (std.mem.eql(u8, verb, "new")) {
             const seed: u64 = @intCast(gs.clock.day_index + gs.people.count() + 1);
             gs.deinit();

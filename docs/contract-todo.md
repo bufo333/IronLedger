@@ -205,37 +205,48 @@ Every `print*` in `src/main.zig` that walks `GameState` (59 sites) is a loop ove
 ---
 - Notes: every console view is a loop over a query (`hqList`, `hqCompanies`, `hqLinks`, `bays`, `projects`, `backOffice`, `companyRoster`, `hqRoster`, `medbay`, `logLines`, `listings`, `spareLines`, `orders`, `ledgerLines`, `pnlLines`, `contractLines`, `demandLines`, `inboxLines`, `hallAll`, plus one-line echoes); the demo script reads offers, decisions, mounts and listings through queries too. `printResult` reads only `Result` fields and echo queries. The only state reads left in `main.zig` are the save/load messages and the fresh-campaign seed. The demo runs to its golden-master hash again (it had been failing on a courier the treasury could not cover; the transfer is now reported, not fatal, and resupply orders only while on station).
 
-## D11. TUI boundary (rules 3, 4, 5, 26)
+## D11. TUI boundary (rules 3, 4, 5, 26) — done (PR #15)
 
-Baseline: 61 field reads, 70 method calls, 41 module imports in `src/tui/app.zig`. Every site below is replaced by a query field, a command, or the persistence facade. Whitelisted type imports (command payloads): `game.types`, `game.state.Treasury` (:29), `game.commander.Faction`/`Profession` (:181-182), `game.force.SupportLanceKind` (:1689,1699), `game.force.Roe` (:3255), `game.force.LanceRole` (:3268-3269), `game.contract.NegotiableTerm` (:4201).
+Baseline was 61 field reads, 70 method calls, 41 module imports in
+`src/tui/app.zig`. After D11 the Section 1 greps print nothing: the client
+reads through `queries`, parses through `cli`, mutates through
+`commands.execute`, and reaches persistence through `persist/lobby.zig`.
+Whitelisted type imports (command payloads and the session handle):
+`game.types`, `game.state.GameState` (opaque handle), `game.state.Treasury`,
+`game.commander.Faction`/`Profession`, `game.force.SupportLanceKind`,
+`game.force.Roe`, `game.force.LanceRole`, `game.contract.NegotiableTerm`.
 
 **D11a. Display reads → query fields.**
-- [ ] `queries.status` gains `outfit_name`, `funds_cbills`, `payroll`, `bankrupt`, `next_day`, `offers`, `hull_upkeep`: app.zig:879, 1336, 1830, 2118, 1815, 849, 3046, 3345, 3997, 4004, 803.
-- [ ] new `queries.backOffice(hq)` rows `{role, have, need, pay, effect, short}`: app.zig:770, 775, 803, 827, 840; delete the `office_roles` list at app.zig:167 (duplicate of main.zig:823).
-- [ ] new `queries.hqList()` rows `{id, name, tier, world, ring_ly, funds, staff, required, companies, cap, title_line}`: app.zig:1725, 1730, 1735, 2461, 2983, 2992, 3442, 3972.
-- [ ] `queries.World` gains `standing`, `standing_band`, `pay_mult_text`, `faction_name`, `capital_line`; new `worldReach(key)` and `factionTable()`; `factionColour(key)`: app.zig:1128, 1174, 1176-1187, 1219, 1236; delete `App.factionLegend` 1248-1260 (duplicate of queries.zig:671).
-- [ ] new `queries.supportTrain(company)` rows `{key, name, owned, price, note, capacity_tons}`; the `support_lines` table (app.zig:1699) moves to data: app.zig:1884, 1888, 1890, 1891, 1895, 1901.
-- [ ] new `queries.raiseLances(company)` rows `{id, name, used, cap, full}`: app.zig:1625-1626, 1871, 1872, 1647, 1653, 1661.
-- [ ] new `queries.lanceChoices(unit)` as picker rows; delete `App.lanceChoices`/`lancesOf` 3937-3970 and the `game.unit.Unit` parameter at 3952.
-- [ ] `queries.ToeRow` gains `company`, `home_hq`, `echelon`, `roe`, `role`, `mothballed`: app.zig:1558-1559, 3121, 3128, 3139, 3166, 3218, 3283, 3303, 1716, 3247, 3252.
-- [ ] `queries.ListingRow.transport`: app.zig:2822. `queries.OfferRow.negotiated`: 3002. `queries.PickRow.on_hand`: 3856, 3883. `queries.PersonRow.primary_skill`: 2905. `queries.RaiseCand` carries hq/item/day/price: 4137.
-- [ ] new `sellQuote(unit)`, `hqSaleQuote(hq)`, `disbandQuote(company)` for confirm bodies: app.zig:2064, 2068, 2075, 2085, 2088, 2100-2102.
-- [ ] `queries.TreasuryRow.balance`, new `credit()`, `loans()`, `supplyPolicyFor(company)`, `Supply` row `balance`: app.zig:3049, 3084, 3088, 3092, 3094, 3075, 3367, 3433-3434.
-- [ ] new `queries.settings()` `{auto_admit, difficulty_name, blurb, mult_line, shares_pct}`: app.zig:3605, 3606, 3608, 3616, 3662, 3682, 3693.
-- [ ] new `queries.completionPool()` (or move into `cli.zig`): app.zig:4666, 4668, 4670, 4671, 4673, 4674.
-- [ ] one-offs: `outfitEmblem()` (524, 1405); `offerTerms(offer)` (1972-1973); `Upgrades.hq_funds` (2023); `defaultSite()` (3325, 3332, 3380, 3384); `companyStanding(co)` (4174-4178).
+- [x] `Status` gains `outfit_name`, `funds_cbills`, `payroll`, `bankrupt`, `saved`, `offers`.
+- [x] `backOffice` rows gain `pay` and `effect`; the wizard's office pane and review line read them; `office_roles` deleted.
+- [x] `hqList` drives the HQ screen title, `[ ]` counts and `hqSelId`; `firstHq` for the wizard.
+- [x] `World.standing`; `worldDetail(view, world)` renders the WORLD pane; `factionRows`, `factionKeyLine`, `factionColour`; `App.factionLegend` deleted.
+- [x] `supportTrain(company)` (rows carry `kind`, `key`, `name`, `owned`, `price`, `note`, `text`, plus `capacity_tons`); the note text lives on `SupportLanceKind.describe()`, the hull key on `SupportLanceKind.hullKey()`.
+- [x] `raiseLances(company)` rows `{id, name, used, cap, full}`.
+- [x] `lanceChoices(unit)`; `App.lanceChoices`/`lancesOf` deleted.
+- [x] `ToeRow` gains `company`, `name`, `is_company`, `is_lance`, `mothballed`.
+- [x] `ListingRow.transport`, `OfferRow.negotiated`, `PickRow.on_hand`, `PersonRow.primary_skill`, `RaiseCand.key`, `MountRow.part_key`.
+- [x] `sellQuote`, `hqSaleQuote`, `disbandQuote` for the confirm bodies.
+- [x] `TreasuryRow.balance`, `balance(treasury)`, `creditRemaining`, `oldestLoanBalance`, `supplyPolicyFor`.
+- [x] `settings()` `{auto_admit, difficulty_name, difficulty_blurb, multipliers, shares_pct}`.
+- [x] `cli.completionPool(gs)` replaces the TUI's own pool.
+- [x] one-offs: `outfitEmblem`, `offerTerms`, `defaultSite`, `homeHq`, `stockCount`, `companyStanding`, `hqWithCompanySlot`.
 
 **D11b. Rule decisions → commands (the TUI stops pre-checking).**
-- [ ] delete the lance-full pre-check at 1637-1638; `move_unit`/`buy_hull_for` return `Error.LanceFull`.
-- [ ] delete the recall pre-checks at 3305, 3309; `recall_company` returns `Error.AlreadyHome` / `Error.UnderContract`; the breach recall (3024) gets a confirm.
-- [ ] delete the market till pre-check 2824-2836; `buy_listing` returns `Error.HqTreasuryShort` / `Error.CompanyFundsShort` with the sentence in `cli.errorText`.
-- [ ] delete the tier pre-check 3479; `upgrade_tier` returns `Error.NotAFieldHq`.
-- [ ] new commands: `buy_support_hull{company, kind}` (1673, 1675, 1689, 1694); `set_outfit_emblem{image}` (1028-1030); `set_office_staff{hq, role, delta}` (2487-2497, removes the direct `refreshHqStaffing` call); `raise_company{name, hq}` with `Error.NoCompanySlot` plus `queries.raiseHqChoices` (3190-3205); `ship_components_home{company}` (3409-3414); `replace_mount{unit, slot_key}` (3548-3555); `cover_shortfall{hq, part, qty}` (2865); `toggle_mothball{unit}` (3232); `cycle_roe{company}` (3255); `cycle_role{force}` (3268-3269); `cycle_difficulty{dir}` (3659, 3692); `adjust_shares_pct{delta}` (3665); `toggle_auto_admit` (3699).
-- [ ] `advance_day` returns `days_advanced` and `bankrupt` in its `Result`; delete the state compare at 3995-4003. `transfer_unit` returns `in_transit` (3864). `depot` returns the HQ (3247).
-- [ ] every new command gets its `cli.zig` verb, help line and error sentences (rule 28).
+- [x] lance-full pre-check deleted (`move_unit`/`buy_hull_for` refuse).
+- [x] recall pre-checks deleted: `recall_idle` returns `AlreadyHome` / `UnderContract`.
+- [x] market till pre-check deleted: `buy_listing` returns `HqTreasuryShort` / `CompanyFundsShort` before debiting.
+- [x] tier pre-check deleted: `upgrade_tier` returns `MaxLevel` for a regional HQ (no separate `NotAFieldHq`).
+- [x] new commands: `buy_support_hull`, `set_outfit_emblem`, `set_office_staff`, `ship_components_home`, `replace_mount`, `cover_shortfall` (returns `fabricated`), `toggle_mothball`, `cycle_roe`, `cycle_role`, `cycle_difficulty`, `adjust_shares_pct`, `toggle_auto_admit`, `recall_idle`. The "which HQ hosts a new company" rule is `hq_ops.hqWithCompanySlot`, shared by `new_company` and the Forces `+` key (no `raise_company` change needed).
+- [x] `advance` reports through `Result.days_advanced`; bankruptcy through `Status.bankrupt`. `transfer_unit` returns `in_transit`; `depot` and `replace_mount` return the HQ.
+- [x] every new command has its `cli.zig` verb, help line and error sentence.
 
 **D11c. Persistence facade.**
-- [ ] new `src/persist/lobby.zig` (`Players`, `Campaigns`, `open`, `save`, `load`, `createPlayer`, `deletePlayer`, `deleteCampaign`, `setSetting`, `schemaVersion`, `isSaved`, `SaveInfo`): app.zig:221, 314, 601, 2336, 4791, 4721, 1830; `GameState` handle at :28 becomes a session type; `deinit` calls at 329, 2348, 2443, 2570, 2573, 4580 become `session.close()`; `game.dataProvenance` (3625) via an `app_info` facade.
+- [x] `src/persist/lobby.zig` (`Lobby`: `open/close/players/campaigns/allCampaigns/createPlayer/deletePlayer/deleteCampaign/getSetting/setSetting/save/load`; `newSession`, `discard`, `schema_version`, `dataProvenance`); `app.zig` and the REPL use it; `game.store` is gone from both frontends.
+
+Leftover for D12: `game.state.Treasury` and the `GameState` handle stay as
+whitelisted imports; the help modal indexes its legend row by number
+(`contracts_row`) instead of sniffing markup.
 
 ## D12. TUI structure (rules 18-25)
 

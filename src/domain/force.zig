@@ -24,6 +24,29 @@ pub const SupportLanceKind = enum {
     mess, // fatigue/morale recovery, provisions buffer
     salvage, // post-battle salvage yield
     transport, // supply buffer, shipment handling at the deployed end
+
+    /// What the trade does for the company (the raise wizard's support table).
+    pub fn describe(self: SupportLanceKind) []const u8 {
+        return switch (self) {
+            .transport => "20t of field stores each — the trucks are the company's supply capacity",
+            .salvage => "5t each and 600 BV of wrecks and parts hauled per won battle, shipped to the home depot",
+            .mash => "wounded heal in the field; four medics ride with the lance",
+            .security => "guards the laager against raids (infantry, no hull crew)",
+            .mess => "fatigue and morale recover faster in the field; a provisions buffer",
+        };
+    }
+
+    /// The staple hull each support trade fields (the raise wizard buys
+    /// them off the home board): salvage trucks, MASH rigs, cargo trucks,
+    /// a security platoon; mess lances take cargo trucks too.
+    pub fn hullKey(kind: SupportLanceKind) []const u8 {
+        return switch (kind) {
+            .salvage => "SVT-1",
+            .mash => "MASH-27",
+            .transport, .mess => "CGT-3",
+            .security => "SEC-PLT",
+        };
+    }
 };
 
 /// What `new_lance` raises (Stage 12.15): a line lance, an air lance under
@@ -36,7 +59,24 @@ pub const NewLanceKind = union(enum) {
 
 /// AtB lance roles: what a lance is tasked with while on contract; drives
 /// scenario generation odds and training XP (Stage 6/7).
-pub const LanceRole = enum { fighting, defense, scouting, training, unassigned };
+pub const LanceRole = enum {
+    fighting,
+    defense,
+    scouting,
+    training,
+    unassigned,
+
+    /// What the role does to the lance (the Forces screen says it when o cycles).
+    pub fn describe(self: LanceRole) []const u8 {
+        return switch (self) {
+            .fighting => "fights in every engagement",
+            .defense => "+10% power on garrison-class contracts",
+            .scouting => "recon: better intel before battles",
+            .training => "held out of battles; crews gain XP weekly at home",
+            .unassigned => "",
+        };
+    }
+};
 
 /// Rules of engagement for a company (12D.4, the withdrawal thresholds of
 /// ARCH §7 as a standing order): how long it stands when a fight turns.

@@ -107,6 +107,16 @@ pub fn slotNeedsComponent(s: unit_mod.PartSlot) bool {
     return s.class == .structure and (s.condition == .destroyed or s.condition == .missing);
 }
 
+/// The HQ that hosts a new company (Stage 9D capacity): `preferred` when
+/// it has a free combat-company slot, else the first HQ that has one,
+/// else `.none`. `new_company` and the Forces screen's + share it.
+pub fn hqWithCompanySlot(gs: *GameState, preferred: types.HqId) types.HqId {
+    if (gs.hqs.getPtr(preferred)) |h| if (gs.companiesAtHq(preferred) < h.capacity().combat_companies) return preferred;
+    var hit = gs.hqs.iterator();
+    while (hit.next()) |e| if (gs.companiesAtHq(e.value_ptr.id) < e.value_ptr.capacity().combat_companies) return e.value_ptr.id;
+    return .none;
+}
+
 /// Where a hull's components must sit for the depot to use them: its own
 /// home HQ (Stage 9D), the seat for the unassigned pool.
 pub fn depotHqFor(gs: *GameState, u: *const unit_mod.Unit) types.HqId {

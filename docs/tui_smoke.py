@@ -141,7 +141,7 @@ send("j"); send("j"); send("j"); send("u", 0.8)   # cursor on the first facility
 p = plain()[-600:]
 assert "upgrade started" in p or "HQ funds short" in p or "project running" in p, plain()[-1500:]
 send("T", 0.8)                 # tier: the starter HQ is already regional → says so (the key exists)
-assert "already a regional HQ" in plain()[-800:], plain()[-1200:]
+assert "already at the top" in plain()[-800:], plain()[-1200:]
 send("f"); send("f")
 assert "filter techs" in plain(), plain()[-3000:]
 send("2")                      # map
