@@ -665,13 +665,13 @@ pub fn contracts(alloc: Alloc, gs: *GameState, board_hq: types.HqId) !Contracts 
         var bar_buf: [30]u8 = undefined;
         if (c.objective == .attrition) {
             const destroyed = c.enemy_pool_bv - c.enemy_pool_remaining;
-            try lines.append(alloc, try std.fmt.allocPrint(alloc, "    opposition  {{a}}{s}{{/}}  {d}% destroyed  {d} / {d} BV", .{ barText(&bar_buf, destroyed, c.enemy_pool_bv), c.poolDestroyedPct(), destroyed, c.enemy_pool_bv }));
+            try lines.append(alloc, try std.fmt.allocPrint(alloc, "    opposition  {{a}}{s}{{/}}  {d}% destroyed  {d} / {d} BV", .{ table.bar(&bar_buf, destroyed, c.enemy_pool_bv), c.poolDestroyedPct(), destroyed, c.enemy_pool_bv }));
         }
         if (c.end_day) |end| {
             const start = c.arrive_day orelse c.start_day orelse day;
             const total: i64 = @as(i64, end) - @as(i64, start);
             const done: i64 = @as(i64, day) - @as(i64, start);
-            try lines.append(alloc, try std.fmt.allocPrint(alloc, "    duration    {{d}}{s}{{/}}  day {d} of {d} · {d} days left", .{ barText(&bar_buf, done, total), @max(0, done), @max(0, total), @max(0, total - done) }));
+            try lines.append(alloc, try std.fmt.allocPrint(alloc, "    duration    {{d}}{s}{{/}}  day {d} of {d} · {d} days left", .{ table.bar(&bar_buf, done, total), @max(0, done), @max(0, total), @max(0, total - done) }));
         }
         try lines.append(alloc, try std.fmt.allocPrint(alloc, "    rights      {s}", .{c.terms.command_rights.describe()}));
         {
@@ -749,12 +749,58 @@ pub fn contracts(alloc: Alloc, gs: *GameState, board_hq: types.HqId) !Contracts 
     .standings = try standings(alloc, gs), };
 }
 
-fn barText(buf: []u8, num: i64, den: i64) []const u8 {
-    const width = buf.len;
-    const filled: usize = if (den <= 0) 0 else @intCast(@min(@as(i64, @intCast(width)), @divTrunc(@max(0, num) * @as(i64, @intCast(width)), den)));
-    @memset(buf[0..filled], '#');
-    @memset(buf[filled..], '-');
-    return buf;
+/// How healthy a hull's armour reads (12G.2). The one band rule: every
+/// armour figure on every screen colours through this, so a meter and a
+/// bare percentage can never disagree about what "hurt" means. Bands are
+/// `tuning.unit.armor_amber_pct` / `armor_red_pct`; nothing *decides*
+/// anything on them — the rules read `armor_pct` itself.
+pub fn armorMark(pct: u8) []const u8 {
+    const t = @import("../domain/tuning.zig").t.unit;
+    if (pct <= t.armor_red_pct) return "{c}";
+    if (pct <= t.armor_amber_pct) return "{a}";
+    return "{g}";
+}
+
+/// "██████---- 62%" — armour as a meter, for the panes with room for one
+/// (hull sheet, damage pane, detail). `armorPct` is the same rule without
+/// the bar, for table cells.
+pub fn armorBar(alloc: Alloc, pct: u8) ![]const u8 {
+    var buf: [armor_bar_cells]u8 = undefined;
+    return std.fmt.allocPrint(alloc, "{s}{s} {d: >3}%{{/}}", .{ armorMark(pct), table.bar(&buf, pct, 100), pct });
+}
+
+/// "62%", coloured by the same band as the meter.
+pub fn armorPct(alloc: Alloc, pct: u8) ![]const u8 {
+    return std.fmt.allocPrint(alloc, "{s}{d}%{{/}}", .{ armorMark(pct), pct });
+}
+
+/// Cells the armour meter occupies; wide enough to read a tenth.
+const armor_bar_cells = 10;
+
+test "one armour band rule: the meter and the bare percentage agree" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const al = arena.allocator();
+    const t = @import("../domain/tuning.zig").t.unit;
+
+    // The bands, at their edges. Whatever the tuning says, the meter and
+    // the cell text colour a hull the same way — a second copy of the
+    // thresholds anywhere would drift these apart.
+    for ([_]u8{ 0, t.armor_red_pct, t.armor_red_pct + 1, t.armor_amber_pct, t.armor_amber_pct + 1, 100 }) |pct| {
+        const mark = armorMark(pct);
+        try std.testing.expect(std.mem.startsWith(u8, try armorBar(al, pct), mark));
+        try std.testing.expect(std.mem.startsWith(u8, try armorPct(al, pct), mark));
+    }
+    try std.testing.expectEqualStrings("{c}", armorMark(t.armor_red_pct));
+    try std.testing.expectEqualStrings("{a}", armorMark(t.armor_amber_pct));
+    try std.testing.expectEqualStrings("{g}", armorMark(100));
+
+    // The meter is the shared bar helper, so a full hull fills it and a
+    // wreck empties it.
+    try std.testing.expect(std.mem.indexOf(u8, try armorBar(al, 100), "##########") != null);
+    try std.testing.expect(std.mem.indexOf(u8, try armorBar(al, 0), "----------") != null);
+    // ...and it still reads as a number, for anyone counting on the text.
+    try std.testing.expect(std.mem.indexOf(u8, try armorBar(al, 62), "62%") != null);
 }
 
 /// Battle log lines for a contract, newest first.
@@ -1155,14 +1201,14 @@ pub fn toeFiltered(alloc: Alloc, gs: *GameState, filter: ToeFilter) ![]ToeRow {
             }
             // The pilot/tech columns are always empty in the pool: they carry
             // the depot's shopping list instead.
-            try out.append(alloc, .{ .force = .none, .unit = u.id, .mothballed = u.status == .mothballed, .text = try std.fmt.allocPrint(alloc, "    #{d: <3} {s: <8} {s} {d: >3}t  {s} {s} armor {d}%{s} · {s}/mo", .{
+            try out.append(alloc, .{ .force = .none, .unit = u.id, .mothballed = u.status == .mothballed, .text = try std.fmt.allocPrint(alloc, "    #{d: <3} {s: <8} {s} {d: >3}t  {s} {s} armor {s}{s} · {s}/mo", .{
                 @intFromEnum(u.id),
                 u.chassis_key,
                 try padCells(alloc, "", if (ch) |c| c.name else "?", 14),
                 if (ch) |c| c.tonnage else 0,
                 try padCells(alloc, "", if (needs.items.len > 0) needs.items else "—", 36),
                 try padCells(alloc, st_mk, @tagName(u.status), 9),
-                u.armor_pct,
+                try armorPct(alloc, u.armor_pct),
                 try damageMarks(alloc, u),
                 try money(alloc, u.monthlyBill()),
             }) });
@@ -1197,7 +1243,7 @@ fn toeInto(alloc: Alloc, gs: *GameState, out: *std.ArrayListUnmanaged(ToeRow), i
             if (pilot) |p| try std.fmt.allocPrint(alloc, "{s}", .{ try p.fullName(alloc) }) else "{c}— no pilot{/}",
             if (tech) |t| try std.fmt.allocPrint(alloc, "{s}", .{ try t.fullName(alloc) }) else if (needs_tech) "{c}— no tech{/}" else "—",
             try std.fmt.allocPrint(alloc, "{s}{s}{{/}}", .{ st_mk, @tagName(u.status) }),
-            try std.fmt.allocPrint(alloc, "armor {d}%{s}", .{ u.armor_pct, try damageMarks(alloc, u) }),
+            try std.fmt.allocPrint(alloc, "armor {s}{s}", .{ try armorBar(alloc, u.armor_pct), try damageMarks(alloc, u) }),
         }) });
     }
     for (f.children.items) |cid| try toeInto(alloc, gs, out, cid, depth + 1);
@@ -1275,7 +1321,7 @@ pub fn companyDamage(alloc: Alloc, gs: *GameState, company: types.ForceId) !Comp
         if (structure.items.len == 0 and gear_damaged + gear_destroyed == 0) continue;
         hulls += 1;
         const ch = chassis_mod.find(u.chassis_key);
-        try lines.append(alloc, try std.fmt.allocPrint(alloc, "{{a}}#{d} {s} {s}{{/}}  armor {d}% · {s}{s}", .{ @intFromEnum(u.id), u.chassis_key, if (ch) |c| clip(c.name, 14) else "?", u.armor_pct, @tagName(u.status), if (u.status == .destroyed) try std.fmt.allocPrint(alloc, " · {s}", .{try wreckNote(alloc, gs, u)}) else "" }));
+        try lines.append(alloc, try std.fmt.allocPrint(alloc, "{{a}}#{d} {s} {s}{{/}}  {s} · {s}{s}", .{ @intFromEnum(u.id), u.chassis_key, if (ch) |c| clip(c.name, 14) else "?", try armorBar(alloc, u.armor_pct), @tagName(u.status), if (u.status == .destroyed) try std.fmt.allocPrint(alloc, " · {s}", .{try wreckNote(alloc, gs, u)}) else "" }));
         if (structure.items.len > 0) try lines.append(alloc, try std.fmt.allocPrint(alloc, "    {{c}}structure{{/}}  {s}  {{d}}depot work at home{{/}}", .{structure.items}));
         if (gear_damaged + gear_destroyed > 0) try lines.append(alloc, try std.fmt.allocPrint(alloc, "    {{a}}gear{{/}}       {d} damaged, {d} destroyed  {{d}}field work: techs + spares (Forces R / :replace orders what's destroyed){{/}}", .{ gear_damaged, gear_destroyed }));
     }
@@ -1304,8 +1350,8 @@ pub fn hull(alloc: Alloc, gs: *GameState, uid: types.UnitId) ![]const []const u8
     var out: std.ArrayListUnmanaged([]const u8) = .empty;
     const u = gs.unit(uid) orelse return out.toOwnedSlice(alloc);
     const ch = chassis_mod.find(u.chassis_key);
-    try out.append(alloc, try std.fmt.allocPrint(alloc, "{{a}}#{d} {s} {s}{{/}}  {d}t · quality {s} · armor {d}% · status {s} · value {s}", .{
-        @intFromEnum(uid), u.chassis_key, if (ch) |c| c.name else "?", if (ch) |c| c.tonnage else 0, @tagName(u.quality), u.armor_pct, @tagName(u.status), try money(alloc, u.purchase_price),
+    try out.append(alloc, try std.fmt.allocPrint(alloc, "{{a}}#{d} {s} {s}{{/}}  {d}t · quality {s} · armor {s} · status {s} · value {s}", .{
+        @intFromEnum(uid), u.chassis_key, if (ch) |c| c.name else "?", if (ch) |c| c.tonnage else 0, @tagName(u.quality), try armorBar(alloc, u.armor_pct), @tagName(u.status), try money(alloc, u.purchase_price),
     }));
     if (gs.person(u.pilot)) |p| {
         try out.append(alloc, try std.fmt.allocPrint(alloc, "pilot   {{g}}{s}{{/}}  {s}  {s}  fatigue {d} · morale {d}", .{ try p.fullName(alloc), @tagName(p.role), @tagName(p.experience()), p.fatigue, p.morale }));
@@ -1593,7 +1639,7 @@ fn siteLines(alloc: Alloc, gs: *GameState, out: *std.ArrayListUnmanaged([]const 
     const cap = gs.siteCapacityTons(site) orelse 0;
     var bar_buf: [20]u8 = undefined;
     const mk: []const u8 = if (cap > 0 and tons * 4 < cap) "{a}" else "{g}";
-    try out.append(alloc, try std.fmt.allocPrint(alloc, "{s}  {s}{s}{{/}} {d}t / {d}t", .{ title, mk, barText(&bar_buf, tons, cap), tons, cap }));
+    try out.append(alloc, try std.fmt.allocPrint(alloc, "{s}  {s}{s}{{/}} {d}t / {d}t", .{ title, mk, table.bar(&bar_buf, tons, cap), tons, cap }));
     var line: std.ArrayListUnmanaged(u8) = .empty;
     try line.appendSlice(alloc, "   ");
     const stock: ?*const std.StringArrayHashMapUnmanaged(u32) = switch (site) {
@@ -2036,7 +2082,7 @@ pub fn market(alloc: Alloc, gs: *GameState, filter: MarketFilter, hq: types.HqId
             .part => filter.matchesPart(l.item_key),
         };
         if (!keep) continue;
-        const cond_base: []const u8 = if (l.condition) |c| try std.fmt.allocPrint(alloc, "{{a}}{s}{{/}} armor {d}% · {d} dmg · {d} missing", .{ c.label(), c.armor_pct, c.damaged_slots, c.missing_components }) else if (l.kind == .unit) "{g}new{/}" else "";
+        const cond_base: []const u8 = if (l.condition) |c| try std.fmt.allocPrint(alloc, "{{a}}{s}{{/}} armor {s} · {d} dmg · {d} missing", .{ c.label(), try armorPct(alloc, c.armor_pct), c.damaged_slots, c.missing_components }) else if (l.kind == .unit) "{g}new{/}" else "";
         // A hull this HQ's bay could not rebuild says so (12E.2).
         const hq_ops = @import("hq_ops.zig");
         const cond: []const u8 = if (l.kind == .unit and chassis_mod.find(l.item_key) != null and chassis_mod.find(l.item_key).?.kind == .mek and !hq_ops.bayCanRebuild(gs, if (l.hq != .none) l.hq else hq, l.item_key))
@@ -2191,9 +2237,9 @@ pub fn raiseCandidates(alloc: Alloc, gs: *GameState, company: types.ForceId, pas
         const ch = chassis_mod.find(u.chassis_key);
         const marks = try damageMarks(alloc, u);
         if (u.status == .mothballed) {
-            try out.append(alloc, .{ .kind = .mothballed, .unit = u.id, .cells = try table.row(alloc, &.{ "{d}mothballed{/}", try std.fmt.allocPrint(alloc, "#{d}", .{@intFromEnum(u.id)}), u.chassis_key, if (ch) |c| c.name else "?", try std.fmt.allocPrint(alloc, "{d}t", .{if (ch) |c| c.tonnage else 0}), try std.fmt.allocPrint(alloc, "quality {s} · armor {d}%{s}", .{ @tagName(u.quality), u.armor_pct, marks }), "{g}free{/}", try std.fmt.allocPrint(alloc, "{d} days to reactivate", .{unit_mod.reactivationDays(u.quality)}), "" }) });
+            try out.append(alloc, .{ .kind = .mothballed, .unit = u.id, .cells = try table.row(alloc, &.{ "{d}mothballed{/}", try std.fmt.allocPrint(alloc, "#{d}", .{@intFromEnum(u.id)}), u.chassis_key, if (ch) |c| c.name else "?", try std.fmt.allocPrint(alloc, "{d}t", .{if (ch) |c| c.tonnage else 0}), try std.fmt.allocPrint(alloc, "quality {s} · armor {s}{s}", .{ @tagName(u.quality), try armorPct(alloc, u.armor_pct), marks }), "{g}free{/}", try std.fmt.allocPrint(alloc, "{d} days to reactivate", .{unit_mod.reactivationDays(u.quality)}), "" }) });
         } else {
-            try out.append(alloc, .{ .kind = .pool, .unit = u.id, .cells = try table.row(alloc, &.{ "{g}on hand{/}", try std.fmt.allocPrint(alloc, "#{d}", .{@intFromEnum(u.id)}), u.chassis_key, if (ch) |c| c.name else "?", try std.fmt.allocPrint(alloc, "{d}t", .{if (ch) |c| c.tonnage else 0}), try std.fmt.allocPrint(alloc, "quality {s} · armor {d}%{s}", .{ @tagName(u.quality), u.armor_pct, marks }), "{g}free{/}", "now", "" }) });
+            try out.append(alloc, .{ .kind = .pool, .unit = u.id, .cells = try table.row(alloc, &.{ "{g}on hand{/}", try std.fmt.allocPrint(alloc, "#{d}", .{@intFromEnum(u.id)}), u.chassis_key, if (ch) |c| c.name else "?", try std.fmt.allocPrint(alloc, "{d}t", .{if (ch) |c| c.tonnage else 0}), try std.fmt.allocPrint(alloc, "quality {s} · armor {s}{s}", .{ @tagName(u.quality), try armorPct(alloc, u.armor_pct), marks }), "{g}free{/}", "now", "" }) });
         }
     }
     const home = gs.homeHqFor(company);
@@ -2218,7 +2264,7 @@ pub fn raiseCandidates(alloc: Alloc, gs: *GameState, company: types.ForceId, pas
                 .used => "{a}",
                 .new => "{g}",
             };
-            cond_text = try std.fmt.allocPrint(alloc, "{s}{s}{{/}} armor {d}% · {d} dmg {d} dest {d} missing · ≈{s} to fix{s}", .{ mk, c.label(), c.armor_pct, c.damaged_slots, c.destroyed_slots, c.missing_components, try money(alloc, repair), if (c.missing_components > 0) " (depot)" else "" });
+            cond_text = try std.fmt.allocPrint(alloc, "{s}{s}{{/}} armor {s} · {d} dmg {d} dest {d} missing · ≈{s} to fix{s}", .{ mk, c.label(), try armorPct(alloc, c.armor_pct), c.damaged_slots, c.destroyed_slots, c.missing_components, try money(alloc, repair), if (c.missing_components > 0) " (depot)" else "" });
         }
         // The company's home bay must be able to rebuild what it buys (12E.2).
         const need_note: []const u8 = if (@import("hq_ops.zig").bayCanRebuild(gs, home, l.item_key)) "" else try std.fmt.allocPrint(alloc, "  {{c}}{s}{{/}}", .{@import("hq_ops.zig").rebuildNeed(l.item_key)});

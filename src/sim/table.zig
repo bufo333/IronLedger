@@ -61,6 +61,21 @@ pub fn row(alloc: std.mem.Allocator, r: []const []const u8) !Row {
     return alloc.dupe([]const u8, r);
 }
 
+/// A progress bar of `buf.len` cells: `#` filled, `-` empty, clamped at
+/// both ends and empty for a zero or negative denominator. The one bar in
+/// the game (rule 12) — `queries` writes them into row text, `tui/screen`
+/// draws them as meters, and both read this. Lives here beside `marks`
+/// for the same reason the tag set does: it is a presentation primitive
+/// the sim and the frontends must agree on, and nothing below `queries`
+/// may import a frontend (rule 2).
+pub fn bar(buf: []u8, num: i64, den: i64) []const u8 {
+    const width = buf.len;
+    const filled: usize = if (den <= 0) 0 else @intCast(@min(@as(i64, @intCast(width)), @divTrunc(@max(0, num) * @as(i64, @intCast(width)), den)));
+    @memset(buf[0..filled], '#');
+    @memset(buf[filled..], '-');
+    return buf;
+}
+
 /// The inline markup tags (docs/coding-contract.md rule 16): amber, good,
 /// critical, selected, dim, tab, purple, and the close. Declared here
 /// once; `screen.Style.fromMarkup` maps them to styles.
@@ -146,4 +161,13 @@ test "render sizes every column to its widest cell" {
     try std.testing.expectEqualStrings("kind             pay", lines[0]);
     try std.testing.expectEqualStrings("garrison duty  1,200", lines[1]);
     try std.testing.expectEqualStrings("raid             {g}900{/}", lines[2]);
+}
+
+test "bar fills proportionally and clamps at both ends" {
+    var buf: [10]u8 = undefined;
+    try std.testing.expectEqualStrings("#####-----", bar(&buf, 50, 100));
+    try std.testing.expectEqualStrings("----------", bar(&buf, 0, 0));
+    try std.testing.expectEqualStrings("----------", bar(&buf, 50, -1)); // no denominator
+    try std.testing.expectEqualStrings("----------", bar(&buf, -5, 100)); // no negative fill
+    try std.testing.expectEqualStrings("##########", bar(&buf, 500, 100)); // never past full
 }

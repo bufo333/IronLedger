@@ -302,6 +302,10 @@ pub const Tuning = struct {
         mek_heavy_max_tons: u8,
         /// Below this condition the hangar calls a hull "shot up".
         shot_up_condition_pct: u8,
+        /// Where the armour meter turns amber, then red (12G.2). Bands, not
+        /// thresholds anything decides on: the rules read `armor_pct`.
+        armor_amber_pct: u8, // TUNE
+        armor_red_pct: u8, // TUNE
         carry: struct { mek: types.CBills, vehicle: types.CBills, aerospace: types.CBills, battle_armor: types.CBills, infantry: types.CBills, mash: types.CBills, cargo: types.CBills, dropship: types.CBills, jumpship: types.CBills },
         cold_storage_bp: types.Bp,
         reactivation_base_days: u32,
