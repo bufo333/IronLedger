@@ -149,8 +149,9 @@ pub const Command = union(enum) {
     /// bay job (class ≤ the HQ's ceiling).
     refit_commit: types.UnitId,
     resolve_decision: struct {
-        /// Index into the pending event queue.
-        event_index: usize,
+        /// The event's own id (12G.1) — never its row, which moves when a
+        /// neighbour is answered or expires.
+        event: types.EventId,
         choice: usize,
     },
     // ---- Stage 12: the player's hand on the money and the medbay ----
@@ -262,6 +263,8 @@ pub const Error = error{
     UnknownUnit,
     UnknownChassis,
     NoSuchEvent,
+    /// No pending inbox decision with that id (12G.1).
+    NoSuchDecision,
     NoSuchChoice,
     NotADecision,
     CommanderExists,
@@ -1505,7 +1508,7 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             return .{};
         },
         .resolve_decision => |r| {
-            try contract_events.resolveChoice(gs, r.event_index, r.choice);
+            try contract_events.resolveChoice(gs, r.event, r.choice);
             return .{};
         },
     }
@@ -2712,7 +2715,7 @@ test "turn-based decisions: time never blocks, deadlines default" {
     try std.testing.expectEqual(@as(usize, 1), gs.event_queue.pending.items.len);
 
     // Answering it applies the chosen option's effects.
-    _ = try execute(&gs, .{ .resolve_decision = .{ .event_index = 0, .choice = 0 } });
+    _ = try execute(&gs, .{ .resolve_decision = .{ .event = gs.event_queue.pending.items[0].id, .choice = 0 } });
     try std.testing.expectEqual(@as(i64, 12_000_000), gs.funds);
     try std.testing.expectEqual(@as(i32, -1), gs.reputation);
     try std.testing.expectEqual(@as(usize, 0), gs.event_queue.pending.items.len);
@@ -3392,11 +3395,49 @@ test "10: the lab refuses illegal fits, gates by bay class, and refits through t
     try std.testing.expect(gs.refitPlanFor(uid) == null);
 }
 
+test "answering one decision does not shift the answer to another (12G.1)" {
+    // Regression: `resolve_decision` took an index into the pending queue,
+    // and `resolveChoice` orderedRemove'd, sliding every later event down
+    // one. A frontend holding the second row's index then answered the
+    // third event. The inbox is addressed by id for exactly this reason.
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    const al = gs.allocator();
+    const opts: []const events_mod.Option = &.{
+        .{ .label = "yes", .effects = &.{.{ .reputation = 1 }} },
+        .{ .label = "no", .effects = &.{} },
+    };
+    for (0..3) |i| try gs.event_queue.push(al, .{
+        .day = 0,
+        .kind = if (i == 0) .quiet_month else if (i == 1) .bonus_payment else .sports_riot,
+        .options = opts,
+        .deadline_day = 30,
+    });
+    const second = gs.event_queue.pending.items[1].id;
+    const third = gs.event_queue.pending.items[2].id;
+
+    // Answer the first: the queue now holds two, and the survivors keep
+    // the ids they were queued with even though their rows moved up.
+    _ = try execute(&gs, .{ .resolve_decision = .{ .event = gs.event_queue.pending.items[0].id, .choice = 0 } });
+    try std.testing.expectEqual(@as(usize, 2), gs.event_queue.pending.items.len);
+    try std.testing.expectEqual(second, gs.event_queue.pending.items[0].id);
+
+    // Answering the third by id reaches the third, not whatever slid into
+    // its old row.
+    _ = try execute(&gs, .{ .resolve_decision = .{ .event = third, .choice = 0 } });
+    try std.testing.expectEqual(@as(usize, 1), gs.event_queue.pending.items.len);
+    try std.testing.expectEqual(second, gs.event_queue.pending.items[0].id);
+
+    // An id that has already been answered is refused, not silently
+    // applied to its former neighbour.
+    try std.testing.expectError(Error.NoSuchDecision, execute(&gs, .{ .resolve_decision = .{ .event = third, .choice = 0 } }));
+}
+
 test "command validation errors" {
     var gs = GameState.init(std.testing.allocator, .{});
     defer gs.deinit();
     try std.testing.expectError(Error.UnknownPerson, execute(&gs, .{ .fire = @enumFromInt(99) }));
-    try std.testing.expectError(Error.NoSuchEvent, execute(&gs, .{ .resolve_decision = .{ .event_index = 0, .choice = 0 } }));
+    try std.testing.expectError(Error.NoSuchDecision, execute(&gs, .{ .resolve_decision = .{ .event = @enumFromInt(99), .choice = 0 } }));
     try std.testing.expectError(Error.UnknownForce, execute(&gs, .{ .rename_force = .{ .force = @enumFromInt(7), .name = "x" } }));
 }
 

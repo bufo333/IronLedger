@@ -114,6 +114,8 @@ pub const Option = struct {
 };
 
 pub const Event = struct {
+    /// Stamped by `EventQueue.push`; `.none` until then.
+    id: types.EventId = .none,
     day: u32,
     kind: EventKind,
     contract: types.ContractId = .none,
@@ -135,13 +137,44 @@ pub const Event = struct {
 /// The decision inbox: pending events awaiting the player, oldest first.
 pub const EventQueue = struct {
     pending: std.ArrayListUnmanaged(Event) = .empty,
+    /// Stamped onto each event as it is queued, so an answer names an
+    /// event rather than a row (12G.1). Never reused within a campaign.
+    next_id: u32 = 1,
 
     pub fn deinit(self: *EventQueue, alloc: std.mem.Allocator) void {
         self.pending.deinit(alloc);
     }
 
+    /// Queue an event, stamping it with the next id. Callers leave
+    /// `ev.id` unset; the queue owns the numbering.
     pub fn push(self: *EventQueue, alloc: std.mem.Allocator, ev: Event) !void {
-        try self.pending.append(alloc, ev);
+        var stamped = ev;
+        stamped.id = @enumFromInt(self.next_id);
+        self.next_id += 1;
+        try self.pending.append(alloc, stamped);
+    }
+
+    /// The pending event with this id, or null once it has been answered
+    /// or has expired. Every consumer looks an event up this way — a row
+    /// index is only ever a cursor position (rule 17).
+    pub fn find(self: *EventQueue, id: types.EventId) ?*Event {
+        if (id == .none) return null;
+        for (self.pending.items) |*ev| if (ev.id == id) return ev;
+        return null;
+    }
+
+    /// Where that event sits today, for the one caller that must remove it.
+    pub fn indexOf(self: *const EventQueue, id: types.EventId) ?usize {
+        if (id == .none) return null;
+        for (self.pending.items, 0..) |ev, i| if (ev.id == id) return i;
+        return null;
+    }
+
+    /// After a load, resume numbering past everything restored.
+    pub fn resumeIds(self: *EventQueue) void {
+        var max: u32 = 0;
+        for (self.pending.items) |ev| max = @max(max, @intFromEnum(ev.id));
+        self.next_id = max + 1;
     }
 
     pub fn unresolvedCount(self: *const EventQueue) usize {

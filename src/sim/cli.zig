@@ -184,7 +184,7 @@ pub fn parseCommand(verb: []const u8, tokens: *std.mem.TokenIterator(u8, .scalar
         return .{ .accept_contract = .{ .offer_index = idx, .company = company } };
     }
     if (eq(u8, verb, "resolve")) {
-        return .{ .resolve_decision = .{ .event_index = try num(usize, tokens.next()), .choice = (try num(usize, tokens.next())) -| 1 } };
+        return .{ .resolve_decision = .{ .event = @enumFromInt(try num(u32, tokens.next())), .choice = (try num(usize, tokens.next())) -| 1 } };
     }
     if (eq(u8, verb, "order")) {
         // A failed sourcing roll is reported by the frontends via Result.sourced.
@@ -453,6 +453,7 @@ pub fn errorText(err: anyerror) []const u8 {
         error.HqInUse => "reassign the companies at that HQ first (:assignco co:N hq:M)",
         error.NotWounded => "that person is not wounded",
         error.NoSuchLoan => "no such loan (or nothing to repay)",
+        error.NoSuchDecision => "no pending decision with that id — `inbox` lists them, each with the id to answer it by",
         error.NoSuchEvent => "no such event — kinds read as the log names them, e.g. smuggler_offer (`sop` lists the ones with a history)",
         error.NoSuchListing => "that listing is gone",
         error.TooManyLances => "that lance is full (4 hulls), or the HQ allows no more lances — :newlance co:N <name> raises one",
@@ -618,7 +619,7 @@ pub fn usage(verb: []const u8) ?[]const u8 {
         .{ "accept", "accept <offer#> <co:N|N>" },
         .{ "negotiate", "negotiate <offer#> advance|salvage|transport|support|rights|pay  (one round per offer)" },
         .{ "promote", "promote <person> recruit|private|corporal|sergeant|master_sergeant|lieutenant|captain|major|colonel [unpin]" },
-        .{ "resolve", "resolve <event#> <option#>" },
+        .{ "resolve", "resolve <event-id> <option#> (the id the inbox prints, not the row)" },
         .{ "order", "order <part> [qty] [hq:N|co:N]" },
         .{ "ship", "ship <part> <qty> <from site> <to site>" },
         .{ "buy", "buy <listing#>" },

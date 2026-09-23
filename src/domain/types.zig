@@ -42,7 +42,9 @@ pub const UnitId = enum(u32) { none = 0, _ };
 pub const ForceId = enum(u32) { none = 0, _ };
 pub const ContractId = enum(u32) { none = 0, _ };
 pub const HqId = enum(u32) { none = 0, _ };
-pub const ScenarioId = enum(u32) { none = 0, _ };
+/// One queued inbox event (Stage 12G.1). The inbox is answered by id, not
+/// by row: resolving one event shifts every index after it.
+pub const EventId = enum(u32) { none = 0, _ };
 
 /// Skill catalog, following MekHQ's SkillType. Lower level = better
 /// (target-number convention: a 3/4 mekwarrior has gunnery 3, piloting 4).

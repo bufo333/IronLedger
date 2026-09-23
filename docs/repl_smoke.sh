@@ -26,6 +26,8 @@ out=$(printf '%s\n' \
   'candidates 0' \
   'accept 0 1' \
   'day 3 force' \
+  'inbox' \
+  'resolve 999 1' \
   'help' \
   'save' \
   'quit' | "$exe" --repl --store "$db" 2>&1)
@@ -38,6 +40,10 @@ check 'Dragoons rating'
 check 'RATING BY YEAR'
 check 'done.'
 check 'hired #'
+# 12G.1: the inbox prints event ids and `resolve` takes one, so an id that
+# is not in the queue is refused instead of hitting whatever sits in row 999.
+check 'inbox'
+check 'no pending decision'
 check 'fabricate'
 check 'stripped for parts'
 check 'drew 500000 c-bills over 12 months'

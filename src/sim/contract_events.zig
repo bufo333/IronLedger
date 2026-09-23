@@ -329,10 +329,8 @@ pub fn rollMonthly(gs: *GameState) !void {
 }
 
 /// Resolve one inbox decision by index. Player-initiated, between turns.
-pub fn resolveChoice(gs: *GameState, event_index: usize, choice: usize) !void {
-    const pending = gs.event_queue.pending.items;
-    if (event_index >= pending.len) return error.NoSuchEvent;
-    const ev = &pending[event_index];
+pub fn resolveChoice(gs: *GameState, event_id: types.EventId, choice: usize) !void {
+    const ev = gs.event_queue.find(event_id) orelse return error.NoSuchDecision;
     if (!ev.needsDecision()) return error.NotADecision;
     if (choice >= ev.options.len) return error.NoSuchChoice;
 
@@ -347,7 +345,7 @@ pub fn resolveChoice(gs: *GameState, event_index: usize, choice: usize) !void {
     const c = if (ev.contract != .none) gs.contracts.getPtr(ev.contract) else null;
     try applyEffectsFor(gs, ev.options[choice].effects, c, ev.person);
     try gs.log(.decision, .{ .company = ev.company, .contract = ev.contract }, "[decision] {s}: chose \"{s}\"", .{ @tagName(ev.kind), ev.options[choice].label });
-    _ = gs.event_queue.pending.orderedRemove(event_index);
+    _ = gs.event_queue.pending.orderedRemove(gs.event_queue.indexOf(event_id).?);
 }
 
 /// Turn upkeep (decisions phase, daily): deadlines pass, defaults apply.
@@ -782,7 +780,7 @@ test "auto events apply, decisions queue with deadlines, defaults fire" {
     if (gs.event_queue.pending.items.len > 0) {
         const before = gs.event_queue.pending.items.len;
         // Answer one by hand...
-        try resolveChoice(&gs, 0, 0);
+        try resolveChoice(&gs, gs.event_queue.pending.items[0].id, 0);
         try std.testing.expectEqual(before - 1, gs.event_queue.pending.items.len);
         // ...and let the rest hit their deadlines: inbox drains, log notes it.
         gs.clock.day_index += decision_window_days + 1;
@@ -894,12 +892,12 @@ test "12.25: notice is a decision — a raise keeps them, letting go vacates the
     try queueNotice(&gs, pilot); // no duplicate
     try std.testing.expectEqual(@as(usize, 1), gs.event_queue.pending.items.len);
     const before = gs.person(pilot).?.monthlySalary();
-    try resolveChoice(&gs, 0, 0); // raise
+    try resolveChoice(&gs, gs.event_queue.pending.items[0].id, 0); // raise
     try std.testing.expect(gs.person(pilot).?.monthlySalary() > before);
     try std.testing.expectEqual(@import("../domain/person.zig").Status.active, gs.person(pilot).?.status);
     // Let go: the seat opens.
     try queueNotice(&gs, pilot);
-    try resolveChoice(&gs, 0, 3);
+    try resolveChoice(&gs, gs.event_queue.pending.items[0].id, 3);
     try std.testing.expectEqual(@import("../domain/person.zig").Status.resigned, gs.person(pilot).?.status);
     try std.testing.expectEqual(types.PersonId.none, gs.unit(mek).?.pilot);
     // Replace: a mekwarrior on the hall is hired into the company.
@@ -907,7 +905,7 @@ test "12.25: notice is a decision — a raise keeps them, letting go vacates the
     try gs.candidates.append(gs.allocator(), .{ .hq = gs.hqs.keys()[0], .spec = @import("../gen/person_gen.zig").generate(&gs.rng, .mekwarrior), .asking_bonus = 0, .listed_day = 0, .expires_day = 400 });
     const people_before = gs.people.count();
     try queueNotice(&gs, other);
-    try resolveChoice(&gs, 0, 2);
+    try resolveChoice(&gs, gs.event_queue.pending.items[0].id, 2);
     try std.testing.expectEqual(people_before + 1, gs.people.count());
     try std.testing.expectEqual(co, gs.person(gs.people.keys()[gs.people.count() - 1]).?.assigned_force);
 }
@@ -932,12 +930,12 @@ test "12B.7: a prisoner can be ransomed, released for standing, or recruited on 
     // Ransom pays the company by experience.
     const a = try mk.captive(&gs, co);
     const funds_before = gs.force(co).?.local_funds;
-    try resolveChoice(&gs, 0, 0);
+    try resolveChoice(&gs, gs.event_queue.pending.items[0].id, 0);
     try std.testing.expectEqual(@import("../domain/person.zig").Status.released, gs.person(a).?.status);
     try std.testing.expect(gs.force(co).?.local_funds > funds_before);
     // Release earns standing with their house.
     const b = try mk.captive(&gs, co);
-    try resolveChoice(&gs, 0, 1);
+    try resolveChoice(&gs, gs.event_queue.pending.items[0].id, 1);
     try std.testing.expectEqual(@import("../domain/person.zig").Status.released, gs.person(b).?.status);
     try std.testing.expectEqual(@as(i32, 2), gs.standing("DC"));
     // Recruitment: over enough tries, someone joins and someone refuses.
@@ -946,7 +944,7 @@ test "12B.7: a prisoner can be ransomed, released for standing, or recruited on 
     var tries: u32 = 0;
     while ((!joined or !refused) and tries < 40) : (tries += 1) {
         const c = try mk.captive(&gs, co);
-        try resolveChoice(&gs, 0, 2);
+        try resolveChoice(&gs, gs.event_queue.pending.items[0].id, 2);
         switch (gs.person(c).?.status) {
             .active => joined = true,
             .released => refused = true,
@@ -991,9 +989,9 @@ test "play feedback: a weekly decision cools down, and the same answer three tim
     while (day < 5000 and answered < 3) : (day += 1) {
         gs.clock.day_index = day;
         try rollWeekly(&gs);
-        for (gs.event_queue.pending.items, 0..) |ev, i| if (ev.kind == .smuggler_offer and ev.needsDecision()) {
+        for (gs.event_queue.pending.items) |ev| if (ev.kind == .smuggler_offer and ev.needsDecision()) {
             seen += 1;
-            try resolveChoice(&gs, i, 2);
+            try resolveChoice(&gs, ev.id, 2);
             answered += 1;
             break;
         };
@@ -1043,7 +1041,7 @@ test "12D.3: a missing pilot is ransomed, traded for a prisoner of their house, 
 
     // Ransom: the outfit pays, they come home without a seat.
     const funds = gs.funds;
-    try resolveChoice(&gs, 0, 0);
+    try resolveChoice(&gs, gs.event_queue.pending.items[0].id, 0);
     try std.testing.expect(gs.funds < funds);
     try std.testing.expect(gs.person(pilots[0]).?.status == .active);
     try std.testing.expectEqualStrings("", gs.person(pilots[0]).?.faction);
@@ -1054,7 +1052,7 @@ test "12D.3: a missing pilot is ransomed, traded for a prisoner of their house, 
     gs.person(pow).?.status = .pow;
     gs.person(pow).?.faction = "DC";
     try queuePrisoner(&gs, pow, co);
-    try resolveChoice(&gs, 0, 1);
+    try resolveChoice(&gs, gs.event_queue.pending.items[0].id, 1);
     try std.testing.expect(gs.person(pilots[1]).?.status == .active);
     try std.testing.expect(gs.person(pow).?.status == .released);
     try std.testing.expectEqual(@as(usize, 1), gs.event_queue.pending.items.len); // the prisoner's own decision went too
@@ -1088,7 +1086,7 @@ test "12D.9: betrayal can cost a hull; raiders at the jump point delay or fight 
     // Betrayal: handing the hull over takes the most battered one off the books.
     const hulls_before = gs.units.count();
     try queueDecision(&gs, combatDeck(2), c, 2);
-    try resolveChoice(&gs, gs.event_queue.pending.items.len - 1, 0);
+    try resolveChoice(&gs, gs.event_queue.pending.items[gs.event_queue.pending.items.len - 1].id, 0);
     try std.testing.expectEqual(hulls_before - 1, gs.units.count());
 
     // Interdiction: an unescorted company in transit meets raiders sooner or later.
@@ -1098,10 +1096,10 @@ test "12D.9: betrayal can cost a hull; raiders at the jump point delay or fight 
     while (gs.event_queue.pending.items.len == 0 and weeks < 200) : (weeks += 1) try rollInterdiction(&gs);
     try std.testing.expect(gs.event_queue.pending.items.len == 1);
     try std.testing.expectEqual(events.EventKind.jump_interdiction, gs.event_queue.pending.items[0].kind);
-    try resolveChoice(&gs, 0, 2); // divert
+    try resolveChoice(&gs, gs.event_queue.pending.items[0].id, 2); // divert
     try std.testing.expectEqual(@as(?u32, 37), c.arrive_day);
     try queueDecision(&gs, interdictionEntry(), c, 11);
     const fought_before = c.battles_fought;
-    try resolveChoice(&gs, 0, 0); // fight through
+    try resolveChoice(&gs, gs.event_queue.pending.items[0].id, 0); // fight through
     try std.testing.expectEqual(fought_before + 1, c.battles_fought);
 }
