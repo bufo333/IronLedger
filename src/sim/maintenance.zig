@@ -38,6 +38,25 @@ fn unitTonnage(u: *const unit_mod.Unit) u8 {
     return if (chassis_mod.find(u.chassis_key)) |d| d.tonnage else 50;
 }
 
+/// Weekly consumables a hull eats in maintenance: its price over the
+/// tuned divisor. The employer's cost reckoning sums it by the month.
+pub fn weeklyConsumables(u: *const unit_mod.Unit) types.CBills {
+    return @divTrunc(u.purchase_price, tuning.maintenance.consumables_divisor);
+}
+
+/// Expected monthly maintenance consumables across the outfit (52 weeks
+/// over 12 months), for the employer's per-company cost.
+pub fn monthlyConsumablesEstimate(gs: *GameState) types.CBills {
+    var total: types.CBills = 0;
+    var it = gs.units.iterator();
+    while (it.next()) |entry| {
+        const u = entry.value_ptr;
+        if (u.status == .mothballed or u.kind == .infantry) continue;
+        total += weeklyConsumables(u);
+    }
+    return @divTrunc(total * 52, 12);
+}
+
 /// The hull's tech if assigned and fit for duty today.
 fn activeTech(gs: *GameState, u: *const unit_mod.Unit) ?*person_mod.Person {
     const t = gs.person(u.tech) orelse return null;
@@ -125,7 +144,7 @@ pub fn runWeeklyMaintenance(gs: *GameState) !void {
 
         if (covered) {
             u.last_maintenance_day = gs.clock.day_index;
-            upkeep_cost += @divTrunc(u.purchase_price, 2_500); // ~0.17%/month in consumables
+            upkeep_cost += weeklyConsumables(u);
         }
     }
 

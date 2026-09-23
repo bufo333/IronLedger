@@ -19,6 +19,23 @@ const person_mod = @import("../domain/person.zig");
 const unit_mod = @import("../domain/unit.zig");
 const GameState = @import("state.zig").GameState;
 
+/// Salvage trucks (SVT-1) a company fields, wrecks excepted.
+pub fn salvageTrucks(gs: *GameState, company: types.ForceId) i64 {
+    var trucks: i64 = 0;
+    var it = gs.units.iterator();
+    while (it.next()) |entry| {
+        const u = entry.value_ptr;
+        if (u.status != .destroyed and std.mem.eql(u8, u.chassis_key, "SVT-1") and gs.companyOf(u.force) == company) trucks += 1;
+    }
+    return trucks;
+}
+
+/// BV of wrecks and parts the crews can haul off a won field: what the
+/// trucks carry, else what hands can drag.
+pub fn haulCapacityBv(trucks: i64) i64 {
+    return if (trucks > 0) trucks * tuning.battle.salvage_bv_per_truck else tuning.battle.salvage_bv_by_hand;
+}
+
 /// Whole hulls a destroyed-BV total amounts to (a thousand BV a kill,
 /// rounded): kill credit and prisoner counts both read it.
 pub fn estimatedKills(destroyed_bv: i64) u32 {
@@ -505,13 +522,8 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     const enemy_destroyed_bv = @divTrunc(enemy_bv * enemy_loss_pct, 100);
     // What the crews can actually haul off the field is bounded by the
     // salvage trucks on hand (300 BV-worth each; 150 hand-carried).
-    var trucks: i64 = 0;
-    var tit = gs.units.iterator();
-    while (tit.next()) |entry| {
-        const u = entry.value_ptr;
-        if (u.status != .destroyed and std.mem.eql(u8, u.chassis_key, "SVT-1") and gs.companyOf(u.force) == c.assigned_company) trucks += 1;
-    }
-    const haulable_bv = @min(enemy_destroyed_bv, if (trucks > 0) trucks * tuning.battle.salvage_bv_per_truck else tuning.battle.salvage_bv_by_hand);
+    const trucks = salvageTrucks(gs, c.assigned_company);
+    const haulable_bv = @min(enemy_destroyed_bv, haulCapacityBv(trucks));
 
     // Who holds the field keeps the wrecks (12D.3, CamOps salvage): on a
     // lost field each hull wrecked there is dragged off only if the crews
@@ -641,7 +653,7 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     c.score += score_delta;
     if (withdrew) {
         c.score += rt.withdrawal_score;
-        c.victory_points += rt.withdrawal_score * 5;
+        c.victory_points += rt.withdrawal_score * tuning.contract.vp_per_score;
     }
     // A convoy escort lost is a convoy hit (12C.9): the support train takes it.
     const convoy_hit = scenario.support_exposed and outcome.isLoss();

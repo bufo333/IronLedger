@@ -367,7 +367,7 @@ fn runContracts(gs: *GameState) !void {
             .transit => if (c.arrive_day != null and gs.clock.day_index >= c.arrive_day.?) {
                 c.status = .active;
                 c.start_day = gs.clock.day_index;
-                c.end_day = gs.clock.day_index + @as(u32, c.terms.length_months) * 30;
+                c.end_day = gs.clock.day_index + @as(u32, c.terms.length_months) * types.days_per_month;
                 if (gs.force(c.assigned_company)) |f| f.location_planet = c.planet_key;
                 try gs.log(.contract, .{ .company = c.assigned_company, .contract = c.id }, "[{s}] company on station at {s} — contract active", .{ c.kind.label(), c.planet_key });
                 // The contract world's hull board opens on arrival (12D.7).
@@ -537,7 +537,7 @@ fn runFinances(gs: *GameState) !void {
         if (c.terms.overhead_pct > 0) {
             const site: types.Site = .{ .company = c.assigned_company };
             const heads = gs.companyHeadcount(c.assigned_company);
-            const month_food: u32 = part_mod.provisionsTons(heads, 30);
+            const month_food: u32 = part_mod.provisionsTons(heads, types.days_per_month);
             const food = month_food * c.terms.overhead_pct / 100;
             const ammo_each: u32 = if (c.terms.overhead_pct >= 50) 2 else 1;
             var landed_food: u32 = 0;

@@ -47,6 +47,19 @@ pub const Tuning = struct {
         link_cost_per_level_sq: types.CBills,
     },
     market: struct {
+        /// Hull pricing by condition (ARCH §9.8): what a missing component
+        /// knocks off, and the condition multiplier's base, per quality
+        /// step and per armour point (basis points).
+        wreck_component_value: types.CBills,
+        cond_base_bp: types.Bp,
+        cond_quality_bp: types.Bp,
+        cond_armor_bp_per_pct: types.Bp,
+        /// The board's rough repair bill for a listed hull (per destroyed
+        /// slot, per damaged slot, per missing component, per 15% armour).
+        repair_guess_destroyed: types.CBills,
+        repair_guess_damaged: types.CBills,
+        repair_guess_component: types.CBills,
+        repair_guess_armor_step: types.CBills,
         beachhead_band_ly: u32,
         regional_slots_base: u8,
         field_slots: u8,
@@ -99,6 +112,9 @@ pub const Tuning = struct {
         black_market_standing_loss: i32,
     },
     medical: struct {
+        /// Iron Man (12B.6): heals in this share of the days, never under the floor.
+        iron_man_heal_bp: types.Bp,
+        iron_man_min_days: u32,
         training_days: u32,
         training_min_days: u32,
         training_days_per_hr_staff: u32,
@@ -118,6 +134,16 @@ pub const Tuning = struct {
         permanent_target: u8,
     },
     person: struct {
+        /// Morale bands the boards colour: under `restless_morale` is
+        /// critical, under `morale_content` amber; `morale_content` is also
+        /// where rested spirits settle at home.
+        morale_content: u8,
+        /// Garrison duty lifts spirits below this while fatigue stays under
+        /// the grind line; fatigue over `fatigue_grind` grinds morale down.
+        morale_garrison_lift_below: u8,
+        fatigue_grind: u8,
+        /// Average fatigue at or under this counts a company as rested.
+        fatigue_rested: u8,
         weekly_hours: u16,
         improve_cost_base: u32,
         max_fatigue: u8,
@@ -196,6 +222,8 @@ pub const Tuning = struct {
         award_loyalty_days: u32,
     },
     unit: struct {
+        /// Below this condition the hangar calls a hull "shot up".
+        shot_up_condition_pct: u8,
         carry: struct { mek: types.CBills, vehicle: types.CBills, aerospace: types.CBills, battle_armor: types.CBills, infantry: types.CBills, mash: types.CBills, cargo: types.CBills, dropship: types.CBills, jumpship: types.CBills },
         cold_storage_bp: types.Bp,
         reactivation_base_days: u32,
@@ -250,6 +278,8 @@ pub const Tuning = struct {
         hq_policy_cap: types.CBills,
     },
     hq_ops: struct {
+        /// Depot labour per structure hit: the hull's price over this.
+        depot_labour_divisor: types.CBills,
         slots_per_bay_level: u32,
         depot_base_days: u32,
         depot_days_per_component: u32,
@@ -275,6 +305,8 @@ pub const Tuning = struct {
     /// F (best) on a success by `quality_rise_margin` or more; resale moves
     /// `quality_sale_bp_per_step` per step from C.
     maintenance: struct {
+        /// Weekly consumables: the hull's price over this (~0.17%/month).
+        consumables_divisor: types.CBills,
         quality_drop_margin: i32,
         quality_rise_margin: i32,
         quality_sale_bp_per_step: types.Bp,
@@ -320,6 +352,18 @@ pub const Tuning = struct {
         recruit_bonus_index: u8,
     },
     contract: struct {
+        /// Victory points per point of contract score (12D.1).
+        vp_per_score: i32,
+        /// Grade thresholds on victory points (12.29): outstanding, strong.
+        grade_outstanding_vp: i32,
+        grade_strong_vp: i32,
+        /// Attrition objective met at this share of the enemy pool destroyed.
+        attrition_met_pct: u32,
+        /// Combat effectiveness (ARCH §7): below `effective_min_pct` of the
+        /// committed BV the company is ineffective; below `effective_warn_pct`
+        /// the screens go amber.
+        effective_min_pct: u32,
+        effective_warn_pct: u32,
         grace_days: u32,
         cooling_days: u32,
         decision_window_days: u32,
@@ -400,6 +444,14 @@ pub const Tuning = struct {
         recruit_prisoner_target: u8,
     },
     generation: struct {
+        /// Support staff ratios (12B.11): one doctor per this many combat
+        /// crew, astechs per tech, medics per doctor, one admin per this
+        /// many combat crew, and never fewer admins than the office needs.
+        crew_per_doctor: u32,
+        astechs_per_tech: u32,
+        medics_per_doctor: u32,
+        crew_per_admin: u32,
+        admins_min: u32,
         scout_max_tonnage: u8,
         starter_provisions: u32,
         starter_medical: u32,

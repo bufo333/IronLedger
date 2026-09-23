@@ -109,6 +109,16 @@ pub const HullCondition = struct {
         return .new;
     }
 
+    /// The board's rough repair bill (ARCH §9.8): per slot, per component,
+    /// per 15% of armour. A guess for the buyer, not the depot's price.
+    pub fn repairGuess(self: HullCondition) types.CBills {
+        const t = @import("../domain/tuning.zig").t.market;
+        return @as(types.CBills, self.destroyed_slots) * t.repair_guess_destroyed +
+            @as(types.CBills, self.damaged_slots) * t.repair_guess_damaged +
+            @as(types.CBills, self.missing_components) * t.repair_guess_component +
+            @as(types.CBills, (100 - @as(u32, self.armor_pct)) / 15) * t.repair_guess_armor_step;
+    }
+
     pub fn label(self: HullCondition) []const u8 {
         return switch (self.grade()) {
             .wreck => "WRECK",
@@ -190,10 +200,11 @@ pub fn rollHullCondition(rng: *rng_mod.Rng) HullCondition {
 /// Price a hull by loadout value and condition: a new, fully loaded hull
 /// at a premium; a wreck missing a leg and its guns for a fraction. // TUNE
 pub fn hullPrice(base_cost: types.CBills, avg_weapon_cost: types.CBills, cond: HullCondition, price_roll_bp: types.Bp) types.CBills {
+    const t = @import("../domain/tuning.zig").t.market;
     const lost = @as(types.CBills, cond.destroyed_slots) * avg_weapon_cost +
-        @as(types.CBills, cond.missing_components) * 80_000;
+        @as(types.CBills, cond.missing_components) * t.wreck_component_value;
     const intact = @max(@divTrunc(base_cost, 5), base_cost - lost);
-    const cond_bp: types.Bp = 3_000 + @as(types.Bp, @intFromEnum(cond.quality)) * 1_000 + @as(types.Bp, cond.armor_pct) * 40;
+    const cond_bp: types.Bp = t.cond_base_bp + @as(types.Bp, @intFromEnum(cond.quality)) * t.cond_quality_bp + @as(types.Bp, cond.armor_pct) * t.cond_armor_bp_per_pct;
     return types.applyBp(types.applyBp(intact, cond_bp), price_roll_bp);
 }
 

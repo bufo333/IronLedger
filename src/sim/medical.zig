@@ -213,7 +213,7 @@ pub fn runDailyHealing(gs: *GameState) !void {
             const deployed = isDeployed(gs, p);
             var days = healDays(gs, deployed);
             if (!gs.takeStock(gs.siteForForce(p.assigned_force), "medical_supplies", 1)) days = @intCast(types.applyBp(days, tuning.medical.no_supplies_bp));
-            if (p.has("iron_man")) days = @max(3, days * 3 / 4); // 12B.6
+            if (p.has("iron_man")) days = @max(tuning.medical.iron_man_min_days, @as(u32, @intCast(types.applyBp(days, tuning.medical.iron_man_heal_bp)))); // 12B.6
             // A wound with no record behind it (older saves, event
             // effects): one light internal injury stands in for it.
             if (p.openInjuries() == 0) try p.injuries.append(gs.allocator(), .{ .location = .internal, .severity = 1, .incurred_day = gs.clock.day_index });
@@ -263,7 +263,7 @@ pub fn runMonthlyTurnover(gs: *GameState) !u32 {
         const age = p.ageYears(day);
         if (age != null and age.? >= t.age_retire) {
             const company = gs.companyOf(p.assigned_force);
-            const paid = try @import("personnel.zig").depart(gs, p.id, .retired, 10_000, "retirement payout");
+            const paid = try @import("personnel.zig").depart(gs, p.id, .retired, types.full_bp, "retirement payout");
             try gs.log(.rotation, .{ .company = company, .hq = p.posted_hq }, "[turnover] {s} {s} ({s}) retires at {d}{s}", .{ p.first_name, p.last_name, @tagName(p.role), age.?, if (paid > 0) try std.fmt.allocPrint(gs.allocator(), " — {d} c-bills paid out", .{paid}) else "" });
             notices += 1;
             continue;
@@ -346,12 +346,12 @@ pub fn runWeeklyRest(gs: *GameState) !void {
                 const mess_lance = if (gs.supportLance(company, .mess)) |l| l.units.items.len > 0 else false;
                 const field_decay: u32 = @intCast(types.applyBp(person_mod.fatigueDecayPerWeek(if (mess_lance) 1 else 0), tuning.person.garrison_rest_bp));
                 p.addFatigue(-@as(i32, @intCast(@min(field_decay, 255))));
-                if (p.morale < 45 and p.fatigue <= 60) p.addMorale(1);
+                if (p.morale < tuning.person.morale_garrison_lift_below and p.fatigue <= tuning.person.fatigue_grind) p.addMorale(1);
             }
             // Exhaustion grinds morale down, and an empty mess tent grinds
             // it faster (Stage 9B); combat tours get no rest at all. Cool
             // Under Fire (12B.6) shrugs the grind off.
-            if (p.fatigue > 60) p.addMorale(-1); // Cool Under Fire shrugs a one-point grind off entirely
+            if (p.fatigue > tuning.person.fatigue_grind) p.addMorale(-1); // Cool Under Fire shrugs a one-point grind off entirely
             if (gs.force(company)) |co| {
                 if (co.supply_shortage_days > 0) p.addMorale(-2);
             }
@@ -360,9 +360,9 @@ pub fn runWeeklyRest(gs: *GameState) !void {
             const on_leave = p.leave_until_day != null and gs.clock.day_index < p.leave_until_day.?;
             p.addFatigue(-@as(i32, @intCast(@min(if (on_leave) decay * 2 else decay, 255))));
             // Rested spirits drift toward content (50), mess food helps.
-            const target: u8 = 50 + 2 * best_mess + hr_bonus;
+            const target: u8 = tuning.person.morale_content + 2 * best_mess + hr_bonus;
             if (p.morale < target) p.addMorale(1);
-            if (p.fatigue > 60) p.addMorale(-1);
+            if (p.fatigue > tuning.person.fatigue_grind) p.addMorale(-1);
         }
     }
 
@@ -375,7 +375,7 @@ pub fn runWeeklyRest(gs: *GameState) !void {
         if (gs.isCompanyDeployed(f.id)) continue;
 
         const crew = @import("personnel.zig").companyCrewStats(gs, f.id);
-        if (crew.heads > 0 and crew.avg_fatigue <= 10) {
+        if (crew.heads > 0 and crew.avg_fatigue <= tuning.person.fatigue_rested) {
             f.contracts_since_rotation = 0;
             f.last_rotation_day = gs.clock.day_index;
             try gs.log(.rotation, .{ .company = f.id }, "[rotation] {s} is rested and reset — ready for a fresh deployment", .{f.name});

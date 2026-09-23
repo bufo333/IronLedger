@@ -630,16 +630,9 @@ pub fn perCompanyOpsCost(gs: *GameState) types.CBills {
     return @divTrunc(ops_cost, @max(1, companies));
 }
 
-/// Expected monthly maintenance consumables (~4.33 weeks × price/2500).
+/// Expected monthly maintenance consumables: `maintenance.monthlyConsumablesEstimate`.
 fn maintenanceEstimate(gs: *GameState) types.CBills {
-    var total: types.CBills = 0;
-    var it = gs.units.iterator();
-    while (it.next()) |entry| {
-        const u = entry.value_ptr;
-        if (u.status == .mothballed or u.kind == .infantry) continue;
-        total += @divTrunc(u.purchase_price, 600);
-    }
-    return total;
+    return @import("../sim/maintenance.zig").monthlyConsumablesEstimate(gs);
 }
 
 test "refresh only offers work inside rings or the beachhead band" {

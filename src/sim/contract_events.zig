@@ -409,7 +409,7 @@ fn applyEffectsFor(gs: *GameState, effects: []const events.Effect, contract: ?*c
             .reputation => |delta| gs.reputation += delta,
             .score => |delta| if (contract) |c| {
                 c.score += delta;
-                c.victory_points += delta * 5; // VP when earned, never again at term end (12D.1)
+                c.victory_points += delta * @import("../domain/tuning.zig").t.contract.vp_per_score; // VP when earned, never again at term end (12D.1)
             },
             .morale => |delta| applyToCompany(gs, company, .morale, delta),
             .fatigue => |amount| applyToCompany(gs, company, .fatigue, @intCast(amount)),
@@ -552,7 +552,7 @@ fn letGo(gs: *GameState, person_id: types.PersonId, replace: bool) !void {
     const t = @import("../domain/tuning.zig").t.person;
     const retiring = p.tenureMonths(gs.clock.day_index) >= t.retire_tenure_months;
     const company = gs.companyOf(p.assigned_force);
-    const paid = try @import("personnel.zig").depart(gs, person_id, if (retiring) .retired else .resigned, 10_000, if (retiring) "retirement payout" else "severance");
+    const paid = try @import("personnel.zig").depart(gs, person_id, if (retiring) .retired else .resigned, types.full_bp, if (retiring) "retirement payout" else "severance");
     try gs.log(.rotation, .{ .company = company, .hq = p.posted_hq }, "[turnover] {s} {s} ({s}) {s}{s}", .{ p.first_name, p.last_name, @tagName(p.role), if (retiring) "retires" else "resigns", if (paid > 0) try std.fmt.allocPrint(gs.allocator(), " — {d} c-bills paid out for {d} years' service", .{ paid, p.tenureMonths(gs.clock.day_index) / 12 }) else "" });
     if (!replace) return;
     for (gs.candidates.items, 0..) |cand, i| if (cand.spec.role == p.role) {

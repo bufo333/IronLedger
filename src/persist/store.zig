@@ -1357,7 +1357,7 @@ pub const Store = struct {
                 const p = e.value_ptr;
                 if (p.born_day != null) continue;
                 const age = person_gen.rollAge(&gs.rng, p.role, p.experience());
-                p.born_day = @as(i32, @intCast(p.recruited_day)) - @as(i32, age) * 365;
+                p.born_day = @as(i32, @intCast(p.recruited_day)) - @as(i32, age) * @as(i32, types.days_per_year);
             }
         }
         if (from_version < 7) {

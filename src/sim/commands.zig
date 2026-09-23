@@ -1088,7 +1088,7 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             while (pit.next()) |e| {
                 const p = e.value_ptr;
                 if (gs.personInCompany(p, co) and p.isOnBooks()) {
-                    _ = try @import("personnel.zig").depart(gs, p.id, .resigned, 10_000, "severance (disbanded)");
+                    _ = try @import("personnel.zig").depart(gs, p.id, .resigned, types.full_bp, "severance (disbanded)");
                     p.assigned_force = .none;
                 }
             }

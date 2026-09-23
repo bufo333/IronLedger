@@ -10,6 +10,15 @@ pub const CBills = i64;
 /// formulas stay in integer arithmetic. 10_000 bp == ×1.0.
 pub const Bp = i64;
 
+/// ×1.0 in basis points: the whole of something (full severance, no
+/// multiplier).
+pub const full_bp: Bp = 10_000;
+
+/// The campaign calendar's arithmetic months and years (the rendered date
+/// follows the real calendar; tenure, terms and ages count in these).
+pub const days_per_month: u32 = 30;
+pub const days_per_year: u32 = 365;
+
 pub fn applyBp(amount: CBills, bp: Bp) CBills {
     return @divTrunc(amount * bp, 10_000);
 }

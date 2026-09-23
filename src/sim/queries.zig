@@ -674,32 +674,28 @@ pub fn contracts(alloc: Alloc, gs: *GameState, board_hq: types.HqId) !Contracts 
         }));
         const fieldable = contract_control.fieldableBv(gs, c.assigned_company);
         const pct: i64 = if (c.committed_bv > 0) @divTrunc(fieldable * 100, c.committed_bv) else 0;
-        const pct_mk: []const u8 = if (pct < 50) "{c}" else if (pct < 75) "{a}" else "{g}";
-        try lines.append(alloc, try std.fmt.allocPrint(alloc, "    committed   {d} BV · fieldable {d} BV {s}({d}%){{/}} · ineffective below 50%{s}", .{
-            c.committed_bv, fieldable, pct_mk, pct,
+        const tc = @import("../domain/tuning.zig").t.contract;
+        const pct_mk: []const u8 = if (pct < tc.effective_min_pct) "{c}" else if (pct < tc.effective_warn_pct) "{a}" else "{g}";
+        try lines.append(alloc, try std.fmt.allocPrint(alloc, "    committed   {d} BV · fieldable {d} BV {s}({d}%){{/}} · ineffective below {d}%{s}", .{
+            c.committed_bv, fieldable, pct_mk, pct, tc.effective_min_pct,
             if (c.ineffective_since) |since| try std.fmt.allocPrint(alloc, " · {{c}}grace since day {d}{{/}}", .{since}) else "",
         }));
         try lines.append(alloc, try std.fmt.allocPrint(alloc, "    pay         {s} / month · advance {s} · salvage {d}%{s} · {s} rights", .{
             try money(alloc, c.terms.base_pay_month), try money(alloc, c.terms.advanceAmount()), c.terms.salvage_pct, if (c.terms.salvage_exchange) " {a}(exchange: employer keeps the wrecks, pays cash){/}" else "", @tagName(c.terms.command_rights),
         }));
         {
-            // Salvage capacity (battle.zig): what the trucks can haul off a won field. // TUNE mirrors battle.zig
-            var trucks: i64 = 0;
+            // Salvage capacity: what the trucks can haul off a won field (battle.haulCapacityBv).
+            const battle = @import("battle.zig");
+            const trucks = battle.salvageTrucks(gs, c.assigned_company);
             var salvage_lance = false;
-            var uit = gs.units.iterator();
-            while (uit.next()) |ue| {
-                const u = ue.value_ptr;
-                if (u.status == .destroyed or gs.companyOf(u.force) != c.assigned_company) continue;
-                if (std.mem.eql(u8, u.chassis_key, "SVT-1")) trucks += 1;
-            }
             if (gs.supportLance(c.assigned_company, .salvage)) |l| salvage_lance = l.units.items.len > 0;
             const tb = @import("../domain/tuning.zig").t.battle;
-            const haul_bv: i64 = if (trucks > 0) trucks * tb.salvage_bv_per_truck else tb.salvage_bv_by_hand;
+            const haul_bv: i64 = battle.haulCapacityBv(trucks);
             var claim: i64 = @divTrunc(haul_bv * c.terms.salvage_pct, 100);
             if (salvage_lance) claim = types.applyBp(claim, tb.salvage_lance_bonus_bp);
             try lines.append(alloc, try std.fmt.allocPrint(alloc, "    salvage     {d} SVT-1 truck{s} haul up to {d} BV per won battle → your {d}% is ≈{d} BV of wrecks and parts shipped to the home depot{s}", .{
                 trucks, if (trucks == 1) "" else "s", haul_bv, c.terms.salvage_pct, claim,
-                if (salvage_lance) " (+25% crewed salvage lance)" else " (no salvage lance: −25%)",
+                if (salvage_lance) try std.fmt.allocPrint(alloc, " (+{d}% crewed salvage lance)", .{@divTrunc(tb.salvage_lance_bonus_bp - 10_000, 100)}) else try std.fmt.allocPrint(alloc, " (no salvage lance: −{d}%)", .{@divTrunc(tb.salvage_lance_bonus_bp - 10_000, 100)}),
             }));
         }
         if (c.objectivesMet()) try lines.append(alloc, "    {g}objectives met{/} — [c] complete closes out (remainder forfeited)");
@@ -1033,7 +1029,7 @@ pub fn hangar(alloc: Alloc, gs: *GameState) ![]HangarRow {
                 for (u.slots.items) |s| if (s.class != .structure and s.condition != .ok) {
                     if (s.condition == .damaged) gear_bad += 1 else gear_gone += 1;
                 };
-                if (gear_bad + gear_gone > 0) why = try std.fmt.allocPrint(alloc, "{{a}}gear: {d} destroyed, {d} damaged — its tech fixes it weekly (R orders spares){{/}}", .{ gear_gone, gear_bad }) else if (u.conditionPct() < 70) why = "{a}shot up — repairs{/}";
+                if (gear_bad + gear_gone > 0) why = try std.fmt.allocPrint(alloc, "{{a}}gear: {d} destroyed, {d} damaged — its tech fixes it weekly (R orders spares){{/}}", .{ gear_gone, gear_bad }) else if (u.conditionPct() < @import("../domain/tuning.zig").t.unit.shot_up_condition_pct) why = "{a}shot up — repairs{/}";
             }
         }
         const bill = u.monthlyBill();
@@ -2185,7 +2181,7 @@ pub fn raiseCandidates(alloc: Alloc, gs: *GameState, company: types.ForceId, pas
         const days: u32 = if (home_world != null and board_world != null) logistics.deliveryDays(board_world.?, home_world.?) else 0;
         var cond_text: []const u8 = "{g}new{/}";
         if (l.condition) |c| {
-            const repair: types.CBills = @as(types.CBills, c.destroyed_slots) * 40_000 + @as(types.CBills, c.damaged_slots) * 5_000 + @as(types.CBills, c.missing_components) * 150_000 + @as(types.CBills, (100 - @as(u32, c.armor_pct)) / 15) * 10_000; // TUNE rough repair bill
+            const repair: types.CBills = c.repairGuess();
             const mk: []const u8 = switch (c.grade()) {
                 .wreck, .worn => "{c}",
                 .used => "{a}",
@@ -2295,7 +2291,7 @@ pub fn summary(alloc: Alloc, gs: *GameState) ![]const []const u8 {
     var out: std.ArrayListUnmanaged([]const u8) = .empty;
     const day = gs.clock.day_index;
     const d = gs.clock.date;
-    try out.append(alloc, try std.fmt.allocPrint(alloc, "{{a}}{s}{{/}} · {d}-{d:0>2}-{d:0>2} · day {d} · year {d} of the campaign", .{ gs.outfit_name, d.year, d.month, d.day, day, day / 365 + 1 }));
+    try out.append(alloc, try std.fmt.allocPrint(alloc, "{{a}}{s}{{/}} · {d}-{d:0>2}-{d:0>2} · day {d} · year {d} of the campaign", .{ gs.outfit_name, d.year, d.month, d.day, day, day / types.days_per_year + 1 }));
     try out.append(alloc, (try rating(alloc, gs)).line);
     try out.append(alloc, try std.fmt.allocPrint(alloc, "difficulty {{a}}{s}{{/}} — {s}", .{ gs.diff().name, gs.diff().blurb }));
     try out.append(alloc, "");
@@ -2471,6 +2467,12 @@ pub fn rating(alloc: Alloc, gs: *GameState) !Rating {
     try line.appendSlice(alloc, try std.fmt.allocPrint(alloc, "rating {{a}}{s}{{/}} ({d})", .{ ratingLetter(r.score), r.score }));
     for (parts.items) |pt| try line.appendSlice(alloc, try std.fmt.allocPrint(alloc, " · {s} {d}", .{ pt.name, pt.score }));
     return .{ .score = r.score, .letter = ratingLetter(r.score), .parts = try parts.toOwnedSlice(alloc), .line = try line.toOwnedSlice(alloc) };
+}
+
+/// Colour for a morale value: red under the restless line, amber under content.
+pub fn moraleMarkup(morale: u32) []const u8 {
+    const t = @import("../domain/tuning.zig").t.person;
+    return if (morale < t.restless_morale) "{c}" else if (morale < t.morale_content) "{a}" else "{g}";
 }
 
 /// Colour for a fatigue band: green, amber, amber, red.
@@ -2656,7 +2658,7 @@ pub fn readiness(alloc: Alloc, gs: *GameState) ![]ReadinessRow {
         if (row.hulls > 0) row.avg_quality = @enumFromInt(qsum / row.hulls);
         const tpb = @import("../domain/tuning.zig").t.person;
         const fat_mk: []const u8 = if (row.fatigue >= tpb.exhausted_fatigue) "{c}" else if (row.fatigue >= tpb.fatigue_tired) "{a}" else "{g}";
-        const mor_mk: []const u8 = if (row.morale < 30) "{c}" else if (row.morale < 50) "{a}" else "{g}";
+        const mor_mk = moraleMarkup(row.morale);
         const rot: []const u8 = if (row.days_since_rotation) |d| try std.fmt.allocPrint(alloc, "{d} tours · {d}d", .{ row.contracts_since_rotation, d }) else try std.fmt.allocPrint(alloc, "{d} tours", .{row.contracts_since_rotation});
         row.cells = try table.row(alloc, &.{
             try std.fmt.allocPrint(alloc, "{{a}}{s}{{/}}", .{co.name}),
@@ -2700,7 +2702,7 @@ pub fn readinessLines(alloc: Alloc, gs: *GameState, company: types.ForceId) ![]c
         r.tired,
         if (r.spent > 0) "{c}" else "{g}",
         r.spent,
-        if (r.morale < 30) "{c}" else if (r.morale < 50) "{a}" else "{g}",
+        moraleMarkup(r.morale),
         r.morale,
         if (r.deployed) "{a}deployed{/}" else if (gs.isCompanyHome(company)) "at home" else "afield",
         r.contracts_since_rotation,
@@ -3812,7 +3814,7 @@ pub fn offerCandidates(alloc: Alloc, gs: *GameState, offer_index: usize) ![]Cand
         const penalty: i32 = @as(i32, @intCast(r.depot)) * 10 + @as(i32, @intCast(r.spent)) * 5 + @as(i32, @intCast(r.wounded)) * 3 +
             @as(i32, @intCast(r.fatigue / 4)) + @as(i32, @intCast(days / 4)) - @as(i32, @intCast(r.morale / 4));
         const fat_mk: []const u8 = if (r.fatigue >= tpb.exhausted_fatigue) "{c}" else if (r.fatigue >= tpb.fatigue_tired) "{a}" else "{g}";
-        const mor_mk: []const u8 = if (r.morale < 30) "{c}" else if (r.morale < 50) "{a}" else "{g}";
+        const mor_mk = moraleMarkup(r.morale);
         // Skulls (12E.5): what the company can field today against what the
         // intel says the enemy brings to a fight.
         const odds_mk: []const u8 = "";

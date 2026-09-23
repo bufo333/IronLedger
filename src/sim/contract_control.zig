@@ -54,7 +54,7 @@ pub fn onAccept(gs: *GameState, c: *contract_mod.Contract) void {
 /// After a battle: the pool shrinks, victory points accrue, and a broken
 /// pool completes the objective outright.
 pub fn recordBattle(gs: *GameState, c: *contract_mod.Contract, enemy_destroyed_bv: i64, score_delta: i32) !void {
-    c.victory_points += score_delta * 5;
+    c.victory_points += score_delta * tuning.contract.vp_per_score;
     if (c.objective != .attrition) return;
     c.enemy_pool_remaining = @max(0, c.enemy_pool_remaining - enemy_destroyed_bv);
     c.victory_points += @intCast(@divTrunc(enemy_destroyed_bv * 20, @max(1, c.enemy_pool_bv)));
@@ -72,7 +72,7 @@ pub fn recordBattle(gs: *GameState, c: *contract_mod.Contract, enemy_destroyed_b
 /// substantially-met objective forfeits the remainder without breach.
 pub fn complete(gs: *GameState, c: *contract_mod.Contract, objectives_broken: bool) !void {
     if (c.status != .active) return;
-    const months_left: i64 = if (c.end_day) |end| @divTrunc(@as(i64, end) - @as(i64, gs.clock.day_index), 30) else 0;
+    const months_left: i64 = if (c.end_day) |end| @divTrunc(@as(i64, end) - @as(i64, gs.clock.day_index), types.days_per_month) else 0;
     if (objectives_broken and months_left > 0) {
         const bonus = @divTrunc(c.monthly_net * @max(0, months_left), 2);
         try gs.postTransaction(.{
@@ -99,7 +99,7 @@ pub fn complete(gs: *GameState, c: *contract_mod.Contract, objectives_broken: bo
     try finishTour(gs, c);
     // Service records (12B.5): a tour served, and an outstanding one noted.
     {
-        const outstanding = c.victory_points >= 50;
+        const outstanding = c.gradeOf() == .outstanding;
         var ids: std.ArrayListUnmanaged(types.PersonId) = .empty;
         defer ids.deinit(gs.allocator());
         var pit = gs.people.iterator();
@@ -116,7 +116,7 @@ pub fn complete(gs: *GameState, c: *contract_mod.Contract, objectives_broken: bo
     // Shares (12C.3): the stakeholders take their cut of what the tour earned.
     _ = try @import("personnel.zig").payShares(gs, c.id, c.assigned_company);
     // Morale (12C.11): a strong finish lifts the whole outfit.
-    if (c.victory_points >= 25) {
+    if (@intFromEnum(c.gradeOf()) >= @intFromEnum(contract_mod.Contract.Grade.strong)) {
         const n = @import("personnel.zig").adjustMoraleAll(gs, tuning.person.morale_contract_strong);
         try gs.log(.rotation, .{ .company = c.assigned_company, .contract = c.id }, "[morale] a {s} tour — spirits lift across the outfit (+{d} morale, {d} people)", .{ c.grade(), tuning.person.morale_contract_strong, n });
     }
@@ -133,7 +133,7 @@ pub fn complete(gs: *GameState, c: *contract_mod.Contract, objectives_broken: bo
 /// reputation −2, and the employer's faction cools for a year.
 pub fn breach(gs: *GameState, c: *contract_mod.Contract, reason: []const u8) !void {
     if (!c.isRunning()) return;
-    const total_days: i64 = @as(i64, c.terms.length_months) * 30;
+    const total_days: i64 = @as(i64, c.terms.length_months) * types.days_per_month;
     const elapsed: i64 = if (c.start_day) |s| @as(i64, gs.clock.day_index) - @as(i64, s) else 0;
     const remaining_frac_bp: types.Bp = @intCast(std.math.clamp(@divTrunc((total_days - elapsed) * 10_000, @max(1, total_days)), 0, 10_000));
     const clawback = types.applyBp(c.terms.advanceAmount(), remaining_frac_bp);
@@ -224,7 +224,7 @@ pub fn checkEffectiveness(gs: *GameState) !void {
         const c = entry.value_ptr;
         if (c.status != .active or c.committed_bv <= 0) continue;
         const now = fieldableBv(gs, c.assigned_company);
-        const effective = now * 2 >= c.committed_bv;
+        const effective = now * 100 >= c.committed_bv * tuning.contract.effective_min_pct;
         if (effective) {
             if (c.ineffective_since != null) {
                 c.ineffective_since = null;

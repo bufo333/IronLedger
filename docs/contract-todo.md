@@ -102,24 +102,24 @@ One predicate each; every listed site calls it.
 
 ---
 
-## D6. Numbers appear once (rule 9)
+## D6. Numbers appear once (rule 9) — D6a literals PR #9, D6b tables pending
 
 **Duplicated literals → one named constant.**
-- [ ] `/25` depot labour: hq_ops.zig:182, :237 → `tuning.hq_ops.depot_labour_divisor`.
-- [ ] `70` "shot up" condition: queries.zig:1170, :1191.
-- [ ] morale bands `30`/`50`: queries.zig:3004, 3048, 4148 → `tuning.person`.
-- [ ] effectiveness `50`/`75`: contract_control.zig:228 versus queries.zig:805-806; grade thresholds `50`/`25`: contract.zig:290-292 versus contract_control.zig:102,120.
-- [ ] score→VP `× 5`: contract_control.zig:57, battle.zig:675, contract_events.zig:416.
-- [ ] salvage haul: queries.zig:813-836 calls the battle.zig:534-540 function; drop the `// TUNE mirrors battle.zig` comment.
-- [ ] repair-bill guess queries.zig:2383 → `hq_ops.rebuildEstimate` on the listing's condition.
-- [ ] `/600` (contract_market.zig:657,663) and `/2_500` (maintenance.zig:128) → one maintenance-estimate function.
-- [ ] `30` days per month: contract_control.zig:75,137; tick.zig:375; person.zig:234; commands.zig:2551 → `clock.days_per_month`.
-- [ ] `365`: person.zig:251, state.zig:503, store.zig:1360, queries.zig:2489 → `clock.days_per_year`.
-- [ ] full severance `10_000`: medical.zig:266, contract_events.zig:565, commands.zig:1091 → `tuning.person.fire_severance_bp` or a named "full".
-- [ ] fatigue `60`, morale `45`, `50`, rested `10`: medical.zig:343,348,357,359,387 → `tuning.person`.
-- [ ] `25` crew per doctor, `× 6` astechs, `× 4` medics, `/10` admins: company_gen.zig:47-54 → `tuning.staffing` shared with `manningNeeds`.
-- [ ] iron_man `@max(3, days*3/4)`: medical.zig:216 → `tuning`.
-- [ ] `2_000`-class market condition curve: market.zig:189,191.
+- [x] `/25` depot labour: hq_ops.zig:182, :237 → `tuning.hq_ops.depot_labour_divisor`.
+- [x] `70` "shot up" condition: queries.zig:1170, :1191.
+- [x] morale bands `30`/`50`: queries.zig:3004, 3048, 4148 → `tuning.person`.
+- [x] effectiveness `50`/`75`: contract_control.zig:228 versus queries.zig:805-806; grade thresholds `50`/`25`: contract.zig:290-292 versus contract_control.zig:102,120.
+- [x] score→VP `× 5`: contract_control.zig:57, battle.zig:675, contract_events.zig:416.
+- [x] salvage haul: queries.zig:813-836 calls the battle.zig:534-540 function; drop the `// TUNE mirrors battle.zig` comment.
+- [x] repair-bill guess queries.zig:2383 → `hq_ops.rebuildEstimate` on the listing's condition.
+- [x] `/600` (contract_market.zig:657,663) and `/2_500` (maintenance.zig:128) → one maintenance-estimate function.
+- [x] `30` days per month: contract_control.zig:75,137; tick.zig:375; person.zig:234; commands.zig:2551 → `clock.days_per_month`.
+- [x] `365`: person.zig:251, state.zig:503, store.zig:1360, queries.zig:2489 → `clock.days_per_year`.
+- [x] full severance `10_000`: medical.zig:266, contract_events.zig:565, commands.zig:1091 → `tuning.person.fire_severance_bp` or a named "full".
+- [x] fatigue `60`, morale `45`, `50`, rested `10`: medical.zig:343,348,357,359,387 → `tuning.person`.
+- [x] `25` crew per doctor, `× 6` astechs, `× 4` medics, `/10` admins: company_gen.zig:47-54 → `tuning.staffing` shared with `manningNeeds`.
+- [x] iron_man `@max(3, days*3/4)`: medical.zig:216 → `tuning`.
+- [x] `2_000`-class market condition curve: market.zig:189,191.
 
 **Tuning tables in code → `data/tables/tuning.zon`.**
 - [ ] autoresolve.zig:56-74 (skill steps, supply penalties, fatigue and morale scales, support bonuses).

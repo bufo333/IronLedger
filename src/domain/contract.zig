@@ -296,18 +296,25 @@ pub const Contract = struct {
     /// by victory points — outstanding ≥ 50 (+3 rep), strong ≥ 25 (+2),
     /// satisfactory ≥ 0 (+1), poor < 0 (0 rep). Failure is separate: a
     /// score of −5 or worse at end of term is a breach on performance.
+    pub const Grade = enum { poor, satisfactory, strong, outstanding };
+
+    pub fn gradeOf(self: *const Contract) Grade {
+        const t = @import("tuning.zig").t.contract;
+        if (self.victory_points >= t.grade_outstanding_vp) return .outstanding;
+        if (self.victory_points >= t.grade_strong_vp) return .strong;
+        if (self.victory_points >= 0) return .satisfactory;
+        return .poor;
+    }
+
     pub fn grade(self: *const Contract) []const u8 {
-        if (self.victory_points >= 50) return "outstanding";
-        if (self.victory_points >= 25) return "strong";
-        if (self.victory_points >= 0) return "satisfactory";
-        return "poor";
+        return @tagName(self.gradeOf());
     }
 
     /// Score at which the employer declares performance failure at term.
     pub const fail_score: i32 = -5;
 
     pub fn objectivesMet(self: *const Contract) bool {
-        return self.objective == .attrition and self.poolDestroyedPct() >= 75;
+        return self.objective == .attrition and self.poolDestroyedPct() >= @import("tuning.zig").t.contract.attrition_met_pct;
     }
 };
 

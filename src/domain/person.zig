@@ -246,7 +246,7 @@ pub const Person = struct {
 
     /// Months on the payroll.
     pub fn tenureMonths(self: *const Person, day: u32) u32 {
-        return (day -| self.recruited_day) / 30;
+        return (day -| self.recruited_day) / types.days_per_month;
     }
 
     /// Restless (Stage 12.20): low morale or deep fatigue — the flags the
@@ -263,7 +263,7 @@ pub const Person = struct {
     pub fn ageYears(self: *const Person, day: u32) ?u32 {
         const born = self.born_day orelse return null;
         const days = @as(i64, day) - @as(i64, born);
-        return if (days < 0) 0 else @intCast(@divTrunc(days, 365));
+        return if (days < 0) 0 else @intCast(@divTrunc(days, @as(i64, types.days_per_year)));
     }
 
     /// XP award scaled for youth (12C.4): the young learn faster.

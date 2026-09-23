@@ -72,15 +72,16 @@ pub fn staffNeeds(t: HullTally) [14]StaffNeed {
 }
 
 pub fn supportStaffFor(mek_count: u32, combat_personnel: u32) SupportStaff {
+    const t = @import("../domain/tuning.zig").t.generation;
     const techs = mek_count;
-    const doctors = std.math.divCeil(u32, combat_personnel, 25) catch unreachable;
+    const doctors = std.math.divCeil(u32, combat_personnel, t.crew_per_doctor) catch unreachable;
     return .{
         .techs = techs,
-        .astechs = techs * 6,
+        .astechs = techs * t.astechs_per_tech,
         .doctors = doctors,
-        .medics = doctors * 4,
+        .medics = doctors * t.medics_per_doctor,
         // Command, logistics, transport, HR — one each per company minimum.
-        .admins = @max(4, combat_personnel / 10),
+        .admins = @max(t.admins_min, combat_personnel / t.crew_per_admin),
     };
 }
 

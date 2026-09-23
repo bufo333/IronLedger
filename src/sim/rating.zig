@@ -119,7 +119,12 @@ pub fn report(gs: *GameState) Report {
             switch (c.status) {
                 .completed => {
                     done += 1;
-                    pts += if (c.victory_points >= 50) t.record_outstanding else if (c.victory_points >= 25) t.record_strong else if (c.victory_points >= 0) t.record_satisfactory else t.record_poor;
+                    pts += switch (c.gradeOf()) {
+                        .outstanding => t.record_outstanding,
+                        .strong => t.record_strong,
+                        .satisfactory => t.record_satisfactory,
+                        .poor => t.record_poor,
+                    };
                 },
                 .failed => {
                     done += 1;

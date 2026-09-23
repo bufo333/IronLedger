@@ -266,7 +266,7 @@ pub fn rebuildEstimate(gs: *GameState, u: *const unit_mod.Unit) ?types.CBills {
         const def = part_mod.find(n.component) orelse continue;
         total += types.applyBp(types.applyBp(def.cost, market.structural_fab_cost_mult_bp), gs.diff().fab_cost_bp);
     }
-    total += @divTrunc(u.purchase_price, 25) * needed;
+    total += @divTrunc(u.purchase_price, tuning.hq_ops.depot_labour_divisor) * needed;
     return total + engineCharge(u);
 }
 
@@ -321,7 +321,7 @@ pub fn queueDepotRepair(gs: *GameState, unit_id: types.UnitId) QueueError!bool {
         .unit = unit_id,
         .duration_days = tuning.hq_ops.depot_base_days + tuning.hq_ops.depot_days_per_component * needed + (if (u.wreck.needsEngine()) tuning.loss.engine_rebuild_days else 0),
         .queued_day = gs.clock.day_index,
-        .cost = @divTrunc(u.purchase_price, 25) * needed + engineCharge(u), // a new engine goes in with an engine kill (12D.2)
+        .cost = @divTrunc(u.purchase_price, tuning.hq_ops.depot_labour_divisor) * needed + engineCharge(u), // a new engine goes in with an engine kill (12D.2)
     });
     return true;
 }

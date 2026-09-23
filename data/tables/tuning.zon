@@ -41,6 +41,14 @@
         .link_cost_per_level_sq = 250_000,
     },
     .market = .{
+        .wreck_component_value = 80_000,
+        .cond_base_bp = 3_000,
+        .cond_quality_bp = 1_000,
+        .cond_armor_bp_per_pct = 40,
+        .repair_guess_destroyed = 40_000,
+        .repair_guess_damaged = 5_000,
+        .repair_guess_component = 150_000,
+        .repair_guess_armor_step = 10_000,
         .beachhead_band_ly = 30,
         .regional_slots_base = 4,
         .field_slots = 2,
@@ -74,6 +82,8 @@
         .black_market_standing_loss = 3,
     },
     .medical = .{
+        .iron_man_heal_bp = 7_500,
+        .iron_man_min_days = 3,
         .training_days = 30,
         .training_min_days = 15,
         .training_days_per_hr_staff = 3,
@@ -90,6 +100,10 @@
         .permanent_target = 4,
     },
     .person = .{
+        .morale_content = 50,
+        .morale_garrison_lift_below = 45,
+        .fatigue_grind = 60,
+        .fatigue_rested = 10,
         .weekly_hours = 40,
         .improve_cost_base = 8,
         .max_fatigue = 100,
@@ -129,6 +143,7 @@
         .award_loyalty_days = 180,
     },
     .unit = .{
+        .shot_up_condition_pct = 70,
         .carry = .{ .mek = 2_000, .vehicle = 1_200, .aerospace = 3_000, .battle_armor = 500, .infantry = 200, .mash = 800, .cargo = 500, .dropship = 15_000, .jumpship = 50_000 },
         .cold_storage_bp = 2_000,
         .reactivation_base_days = 7,
@@ -173,6 +188,7 @@
         .hq_policy_cap = 1_500_000,
     },
     .hq_ops = .{
+        .depot_labour_divisor = 25,
         .slots_per_bay_level = 2,
         .depot_base_days = 7,
         .depot_days_per_component = 5,
@@ -185,6 +201,7 @@
         .repair_redo_bp = 5_000,
     },
     .maintenance = .{
+        .consumables_divisor = 2_500,
         .quality_drop_margin = 2,
         .quality_rise_margin = 7,
         .quality_sale_bp_per_step = 500,
@@ -219,6 +236,12 @@
         .recruit_bonus_index = 4,
     },
     .contract = .{
+        .vp_per_score = 5,
+        .grade_outstanding_vp = 50,
+        .grade_strong_vp = 25,
+        .attrition_met_pct = 75,
+        .effective_min_pct = 50,
+        .effective_warn_pct = 75,
         .grace_days = 14,
         .cooling_days = 365,
         .decision_window_days = 7,
@@ -263,6 +286,11 @@
         .recruit_prisoner_target = 8,
     },
     .generation = .{
+        .crew_per_doctor = 25,
+        .astechs_per_tech = 6,
+        .medics_per_doctor = 4,
+        .crew_per_admin = 10,
+        .admins_min = 4,
         .scout_max_tonnage = 40,
         .starter_provisions = 60,
         .starter_medical = 10,
