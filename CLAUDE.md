@@ -5,6 +5,8 @@ No external deps (SQLite via the system library; music via the system
 command-line player as a child process).
 Read ARCHITECTURE.md before changing sim behavior; ROADMAP.md defines stage
 order — implement stages in order unless told otherwise.
+`TODO.md` is the one list of open work, in order: finish Stage 12
+features first, then code quality (contract and audit deliverables).
 
 ## Commands
 
