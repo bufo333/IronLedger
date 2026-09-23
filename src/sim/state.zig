@@ -250,6 +250,11 @@ pub const GameState = struct {
     /// Stamped onto each resolved engagement (12G.3), so an AAR's lines
     /// can be gathered by battle rather than by reading their prefix.
     next_battle_id: u32 = 1,
+    /// Recent engagements as records (12G.4), newest last. Bounded by
+    /// `tuning.battle.reports_kept`: the permanent account of a battle is
+    /// its `[AAR]` lines in `event_log`, which are never pruned — these
+    /// are what the screens read to show it as a picture.
+    battle_reports: std.ArrayListUnmanaged(@import("after_action.zig").BattleReport) = .empty,
     /// Money in transit between treasuries.
     fund_couriers: std.ArrayListUnmanaged(FundCourier) = .empty,
     /// Standing top-up policies, checked daily under a monthly cap.
@@ -1841,6 +1846,23 @@ pub const GameState = struct {
         return @max(0, self.creditLimit() - owed);
     }
 
+    /// Keep a resolved engagement's record (12G.4), oldest dropped past
+    /// `tuning.battle.reports_kept`. The one place retention is decided:
+    /// the tick records, the screens read, and neither trims by hand.
+    pub fn recordBattleReport(self: *GameState, report: @import("after_action.zig").BattleReport) !void {
+        try self.battle_reports.append(self.allocator(), report);
+        const keep = @import("../domain/tuning.zig").t.battle.reports_kept;
+        if (self.battle_reports.items.len > keep) {
+            _ = self.battle_reports.orderedRemove(0);
+        }
+    }
+
+    /// One kept engagement, or null once it has aged out of the window.
+    pub fn battleReport(self: *GameState, id: types.BattleId) ?*const @import("after_action.zig").BattleReport {
+        for (self.battle_reports.items) |*r| if (r.id == id) return r;
+        return null;
+    }
+
     /// The next engagement's id (12G.3); never reused within a campaign.
     pub fn nextBattleId(self: *GameState) types.BattleId {
         const id: types.BattleId = @enumFromInt(self.next_battle_id);
@@ -2088,4 +2110,39 @@ test "company posture is one cascade: contract, then the road home, then a world
     };
     try std.testing.expect(in_co > 0 and in_co == gs.companyHeadcount(co));
     try std.testing.expect(gs.supportLance(co, .mash) != null);
+}
+
+test "12G.4: kept reports are bounded, and the newest survive" {
+    const after_action = @import("after_action.zig");
+    const keep = @import("../domain/tuning.zig").t.battle.reports_kept;
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+
+    // Record two windows' worth: the list stops growing, the oldest go.
+    var i: u32 = 0;
+    while (i < keep * 2) : (i += 1) {
+        try gs.recordBattleReport(.{
+            .id = gs.nextBattleId(),
+            .day = i,
+            .contract = @enumFromInt(1),
+            .company = @enumFromInt(1),
+            .kind = "raid",
+            .enemy_key = "DC",
+            .scenario = "s",
+            .terrain = "t",
+            .weather = "w",
+            .outcome = .victory,
+        });
+    }
+    try std.testing.expectEqual(@as(usize, keep), gs.battle_reports.items.len);
+
+    // The window holds the most recent engagements, not the first ones.
+    try std.testing.expectEqual(@as(u32, keep * 2 - 1), gs.battle_reports.items[keep - 1].day);
+    try std.testing.expectEqual(@as(u32, keep), gs.battle_reports.items[0].day);
+
+    // A report inside the window is findable; one that aged out is not.
+    const newest = gs.battle_reports.items[keep - 1].id;
+    try std.testing.expect(gs.battleReport(newest) != null);
+    try std.testing.expect(gs.battleReport(@enumFromInt(1)) == null);
+    _ = after_action;
 }

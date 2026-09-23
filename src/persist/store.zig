@@ -15,6 +15,8 @@ const GameState = state_mod.GameState;
 const person_mod = @import("../domain/person.zig");
 const unit_mod = @import("../domain/unit.zig");
 const force_mod = @import("../domain/force.zig");
+const after_action_mod = @import("../sim/after_action.zig");
+const autoresolve_mod = @import("../sim/autoresolve.zig");
 const hq_mod = @import("../domain/hq.zig");
 const contract_mod = @import("../domain/contract.zig");
 const commander_mod = @import("../domain/commander.zig");
@@ -25,7 +27,7 @@ const contract_events = @import("../sim/contract_events.zig");
 const network = @import("../sim/network.zig");
 const clock_mod = @import("../sim/clock.zig");
 
-pub const schema_version = 26;
+pub const schema_version = 27;
 
 const ddl =
     \\CREATE TABLE IF NOT EXISTS player (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_seq INTEGER NOT NULL);
@@ -70,6 +72,9 @@ const ddl =
     \\CREATE TABLE IF NOT EXISTS pending_event (cid INTEGER NOT NULL, ord INTEGER NOT NULL, kind TEXT, day INTEGER, contract INTEGER, company INTEGER, default_choice INTEGER, deadline INTEGER, chosen INTEGER, person INTEGER NOT NULL DEFAULT 0, id INTEGER NOT NULL DEFAULT 0);
     \\CREATE TABLE IF NOT EXISTS refit_plan (cid INTEGER NOT NULL, ord INTEGER NOT NULL, unit INTEGER, committed INTEGER);
     \\CREATE TABLE IF NOT EXISTS refit_op (cid INTEGER NOT NULL, plan_ord INTEGER NOT NULL, ord INTEGER NOT NULL, kind TEXT, slot_key TEXT, location TEXT, part_key TEXT);
+    \\CREATE TABLE IF NOT EXISTS battle_report (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER, day INTEGER, contract INTEGER, company INTEGER, kind TEXT, enemy_key TEXT, scenario TEXT, terrain TEXT, weather TEXT, outcome TEXT, held_field INTEGER, withdrew INTEGER, roe TEXT, roe_overridden INTEGER, player_power INTEGER, enemy_power INTEGER, conditions_mod INTEGER, close_terrain INTEGER, air_grounded INTEGER, convoy_hit INTEGER, edge_spent_by TEXT, recon_quality INTEGER, avg_fatigue INTEGER, avg_morale INTEGER, hits_taken INTEGER, destroyed INTEGER, wounded INTEGER, kia INTEGER, lost_hulls INTEGER, missing INTEGER, enemy_destroyed_bv INTEGER, kills_credited INTEGER, prisoners INTEGER, battle_loss_comp INTEGER, score_after INTEGER, score_delta INTEGER, morale_delta INTEGER, fatigue_add INTEGER, battle_loss_pct INTEGER, salvage_pct INTEGER, command_rights TEXT, silenced_mounts INTEGER, armor_left INTEGER, salvage_claimed INTEGER, salvage_haulable INTEGER, salvage_cut INTEGER, salvage_cash INTEGER, salvage_items TEXT, conceded INTEGER);
+    \\CREATE TABLE IF NOT EXISTS battle_report_hit (cid INTEGER NOT NULL, report_ord INTEGER NOT NULL, ord INTEGER NOT NULL, unit INTEGER, chassis_key TEXT, chassis_name TEXT, armor_before INTEGER, armor_after INTEGER, slot TEXT, slot_part TEXT, slot_result TEXT, destroyed INTEGER, cause TEXT, pilot INTEGER, crew_name TEXT, wound_severity INTEGER, wound_location TEXT, wound_permanent INTEGER, fate TEXT, recovery_roll INTEGER, recovery_target INTEGER, lost INTEGER);
+    \\CREATE TABLE IF NOT EXISTS battle_report_ammo (cid INTEGER NOT NULL, report_ord INTEGER NOT NULL, ord INTEGER NOT NULL, family TEXT, burned INTEGER, reserve INTEGER);
 ;
 
 const tables = [_][]const u8{
@@ -77,7 +82,7 @@ const tables = [_][]const u8{
     "unit",          "unit_slot",    "force",           "force_unit",       "force_child",  "stock",        "hq",         "hq_facility", "hq_project",
     "contract",      "txn",          "loan",            "courier",          "policy",       "bay_job",      "candidate",  "hq_link",     "unit_transfer",
     "supply_policy", "stock_policy", "faction_cooling", "faction_standing", "event_memory", "listing",      "part_order", "event_log",   "pending_event",
-    "refit_plan",    "refit_op",     "rating_snapshot",
+    "refit_plan",    "refit_op",     "rating_snapshot", "battle_report",   "battle_report_hit", "battle_report_ammo",
 };
 
 pub const Store = struct {
@@ -681,6 +686,63 @@ pub const Store = struct {
             for (gs.event_queue.pending.items, 0..) |e, i| {
                 try st.bindAll(.{ cid, @as(i64, @intCast(i)), e.kind, @as(i64, e.day), @intFromEnum(e.contract), @intFromEnum(e.company), @as(i64, @intCast(e.default_choice)), @as(i64, e.deadline_day), if (e.chosen) |c| @as(?i64, @intCast(c)) else null, @intFromEnum(e.person), @intFromEnum(e.id) });
                 try st.run();
+            }
+        }
+
+        {
+            // Battle reports (12G.4): the record a screen reads. Hits and
+            // ammunition are child rows; the ammunition family is stored
+            // by name, not by position, because `part.munition_keys` has
+            // grown before and a positional encoding would re-label old
+            // saves silently.
+            const br = try self.db.prepare("INSERT INTO battle_report VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33,?34,?35,?36,?37,?38,?39,?40,?41,?42,?43,?44,?45,?46,?47,?48,?49,?50,?51)");
+            defer br.finalize();
+            const bh = try self.db.prepare("INSERT INTO battle_report_hit VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22)");
+            defer bh.finalize();
+            const ba = try self.db.prepare("INSERT INTO battle_report_ammo VALUES (?1,?2,?3,?4,?5,?6)");
+            defer ba.finalize();
+            for (gs.battle_reports.items, 0..) |r, i| {
+                const ord: i64 = @intCast(i);
+                try br.bindAll(.{
+                    cid,                             ord,                            @intFromEnum(r.id),              @as(i64, r.day),
+                    @intFromEnum(r.contract),        @intFromEnum(r.company),        r.kind,                          r.enemy_key,
+                    r.scenario,                      r.terrain,                      r.weather,                       @tagName(r.outcome),
+                    @as(i64, @intFromBool(r.held_field)), @as(i64, @intFromBool(r.withdrew)), @tagName(r.roe),        @as(i64, @intFromBool(r.roe_overridden)),
+                    r.player_power,                  r.enemy_power,                  @as(i64, r.conditions_mod),      @as(i64, @intFromBool(r.close_terrain)),
+                    @as(i64, @intFromBool(r.air_grounded)), @as(i64, @intFromBool(r.convoy_hit)), r.edge_spent_by,    @as(i64, r.recon_quality),
+                    @as(i64, r.avg_fatigue),         @as(i64, r.avg_morale),         @as(i64, r.hits_taken),          @as(i64, r.destroyed),
+                    @as(i64, r.wounded),             @as(i64, r.kia),                @as(i64, r.lost_hulls),          @as(i64, r.missing),
+                    r.enemy_destroyed_bv,            @as(i64, r.kills_credited),     @as(i64, r.prisoners),           r.battle_loss_comp,
+                    @as(i64, r.score_after),         @as(i64, r.score_delta),        @as(i64, r.morale_delta),        @as(i64, r.fatigue_add),
+                    @as(i64, r.battle_loss_pct),     @as(i64, r.salvage_pct),        r.command_rights,                @as(i64, r.silenced_mounts),
+                    @as(i64, r.armor_left),          r.salvage.claimed_bv,           r.salvage.haulable_bv,           r.salvage.liaison_cut,
+                    r.salvage.exchange_cash,         r.salvage.items,                @as(i64, @intFromBool(r.conceded)),
+                });
+                try br.run();
+                for (r.hulls, 0..) |h, hi| {
+                    // Each value in its own local: a mixed if/else inside
+                    // the tuple lets peer resolution pick a type the
+                    // binder then reads as the wrong kind of column.
+                    const slot_key: []const u8 = h.slot orelse "";
+                    const wound_severity: ?i64 = if (h.crew.wound) |w| @intCast(w.severity) else null;
+                    const wound_location: []const u8 = if (h.crew.wound) |w| @tagName(w.location) else "";
+                    const wound_permanent: i64 = if (h.crew.wound) |w| @intFromBool(w.permanent) else 0;
+                    const recovery_roll: ?i64 = if (h.recovery) |rec| @intCast(rec.roll) else null;
+                    const recovery_target: ?i64 = if (h.recovery) |rec| @intCast(rec.target) else null;
+                    try bh.bindAll(.{
+                        cid,                              ord,                              @as(i64, @intCast(hi)),           @as(i64, @intFromEnum(h.unit)),
+                        h.chassis_key,                    h.chassis_name,                   @as(i64, h.armor_before),         @as(i64, h.armor_after),
+                        slot_key,                         h.slot_part,                      @tagName(h.slot_result),          @as(i64, @intFromBool(h.destroyed)),
+                        @tagName(h.cause),                @as(i64, @intFromEnum(h.pilot)),  h.crew_name,
+                        wound_severity,                   wound_location,                   wound_permanent,                  @tagName(h.crew.fate),
+                        recovery_roll,                    recovery_target,                  @as(i64, @intFromBool(h.lost)),
+                    });
+                    try bh.run();
+                }
+                for (r.ammo, 0..) |a, ai| {
+                    try ba.bindAll(.{ cid, ord, @as(i64, @intCast(ai)), a.key, @as(i64, a.burned), @as(i64, a.left) });
+                    try ba.run();
+                }
             }
         }
 
@@ -1323,6 +1385,120 @@ pub const Store = struct {
         }
 
         {
+            // Battle reports (12G.4). Child rows are read per report; a
+            // report whose outcome or ROE no longer parses is skipped
+            // rather than half-built — the AAR in the log still has it.
+            const br = try self.db.prepare("SELECT ord, id, day, contract, company, kind, enemy_key, scenario, terrain, weather, outcome, held_field, withdrew, roe, roe_overridden, player_power, enemy_power, conditions_mod, close_terrain, air_grounded, convoy_hit, edge_spent_by, recon_quality, avg_fatigue, avg_morale, hits_taken, destroyed, wounded, kia, lost_hulls, missing, enemy_destroyed_bv, kills_credited, prisoners, battle_loss_comp, score_after, score_delta, morale_delta, fatigue_add, battle_loss_pct, salvage_pct, command_rights, silenced_mounts, armor_left, salvage_claimed, salvage_haulable, salvage_cut, salvage_cash, salvage_items, conceded FROM battle_report WHERE cid = ?1 ORDER BY ord");
+            defer br.finalize();
+            try br.bindAll(.{cid});
+            while (try br.next()) {
+                const ord = br.int(0);
+                const outcome = br.enumValue(autoresolve_mod.Outcome, 10) orelse continue;
+                const roe = br.enumValue(force_mod.Roe, 13) orelse continue;
+
+                var hulls: std.ArrayListUnmanaged(after_action_mod.HullHit) = .empty;
+                {
+                    const bh = try self.db.prepare("SELECT unit, chassis_key, chassis_name, armor_before, armor_after, slot, slot_part, slot_result, destroyed, cause, pilot, crew_name, wound_severity, wound_location, wound_permanent, fate, recovery_roll, recovery_target, lost FROM battle_report_hit WHERE cid = ?1 AND report_ord = ?2 ORDER BY ord");
+                    defer bh.finalize();
+                    try bh.bindAll(.{ cid, ord });
+                    while (try bh.next()) {
+                        const slot_text = try bh.text(5, alloc);
+                        try hulls.append(alloc, .{
+                            .unit = toId(types.UnitId, bh.int(0)),
+                            .chassis_key = try bh.text(1, alloc),
+                            .chassis_name = try bh.text(2, alloc),
+                            .armor_before = @intCast(bh.int(3)),
+                            .armor_after = @intCast(bh.int(4)),
+                            .slot = if (slot_text.len > 0) slot_text else null,
+                            .slot_part = try bh.text(6, alloc),
+                            .slot_result = bh.enumValue(after_action_mod.SlotResult, 7) orelse .none,
+                            .destroyed = bh.int(8) != 0,
+                            .cause = bh.enumValue(unit_mod.WreckCause, 9) orelse .none,
+                            .pilot = toId(types.PersonId, bh.int(10)),
+                            .crew_name = try bh.text(11, alloc),
+                            .crew = .{
+                                .wound = if (bh.optInt(12)) |sev| .{
+                                    .severity = @intCast(sev),
+                                    .location = bh.enumValue(person_mod.InjuryLocation, 13) orelse .torso,
+                                    .permanent = bh.int(14) != 0,
+                                } else null,
+                                .fate = bh.enumValue(after_action_mod.CrewOutcome.Fate, 15) orelse .unhurt,
+                            },
+                            .recovery = if (bh.optInt(16)) |roll| .{ .roll = @intCast(roll), .target = @intCast(bh.int(17)) } else null,
+                            .lost = bh.int(18) != 0,
+                        });
+                    }
+                }
+                var ammo: std.ArrayListUnmanaged(after_action_mod.AmmoLine) = .empty;
+                {
+                    const ba = try self.db.prepare("SELECT family, burned, reserve FROM battle_report_ammo WHERE cid = ?1 AND report_ord = ?2 ORDER BY ord");
+                    defer ba.finalize();
+                    try ba.bindAll(.{ cid, ord });
+                    while (try ba.next()) try ammo.append(alloc, .{
+                        .key = try ba.text(0, alloc),
+                        .burned = @intCast(ba.int(1)),
+                        .left = @intCast(ba.int(2)),
+                    });
+                }
+                try gs.battle_reports.append(alloc, .{
+                    .id = toId(types.BattleId, br.int(1)),
+                    .day = @intCast(br.int(2)),
+                    .contract = toId(types.ContractId, br.int(3)),
+                    .company = toId(types.ForceId, br.int(4)),
+                    .kind = try br.text(5, alloc),
+                    .enemy_key = try br.text(6, alloc),
+                    .scenario = try br.text(7, alloc),
+                    .terrain = try br.text(8, alloc),
+                    .weather = try br.text(9, alloc),
+                    .outcome = outcome,
+                    .held_field = br.int(11) != 0,
+                    .withdrew = br.int(12) != 0,
+                    .roe = roe,
+                    .roe_overridden = br.int(14) != 0,
+                    .player_power = br.int(15),
+                    .enemy_power = br.int(16),
+                    .conditions_mod = @intCast(br.int(17)),
+                    .close_terrain = br.int(18) != 0,
+                    .air_grounded = br.int(19) != 0,
+                    .convoy_hit = br.int(20) != 0,
+                    .edge_spent_by = try br.text(21, alloc),
+                    .recon_quality = @intCast(br.int(22)),
+                    .avg_fatigue = @intCast(br.int(23)),
+                    .avg_morale = @intCast(br.int(24)),
+                    .hits_taken = @intCast(br.int(25)),
+                    .destroyed = @intCast(br.int(26)),
+                    .wounded = @intCast(br.int(27)),
+                    .kia = @intCast(br.int(28)),
+                    .lost_hulls = @intCast(br.int(29)),
+                    .missing = @intCast(br.int(30)),
+                    .enemy_destroyed_bv = br.int(31),
+                    .kills_credited = @intCast(br.int(32)),
+                    .prisoners = @intCast(br.int(33)),
+                    .battle_loss_comp = br.int(34),
+                    .score_after = @intCast(br.int(35)),
+                    .score_delta = @intCast(br.int(36)),
+                    .morale_delta = @intCast(br.int(37)),
+                    .fatigue_add = @intCast(br.int(38)),
+                    .battle_loss_pct = @intCast(br.int(39)),
+                    .salvage_pct = @intCast(br.int(40)),
+                    .command_rights = try br.text(41, alloc),
+                    .hulls = hulls.items,
+                    .ammo = ammo.items,
+                    .silenced_mounts = @intCast(br.int(42)),
+                    .armor_left = @intCast(br.int(43)),
+                    .salvage = .{
+                        .claimed_bv = br.int(44),
+                        .haulable_bv = br.int(45),
+                        .liaison_cut = br.int(46),
+                        .exchange_cash = br.int(47),
+                        .items = try br.text(48, alloc),
+                    },
+                    .conceded = br.int(49) != 0,
+                });
+            }
+        }
+
+        {
             const pl = try self.db.prepare("SELECT ord, unit, committed FROM refit_plan WHERE cid = ?1 ORDER BY ord");
             defer pl.finalize();
             try pl.bindAll(.{cid});
@@ -1691,4 +1867,88 @@ test "12.17: a v5 store upgrades in place — columns added, version stamped, wo
     // A save from a newer game is refused rather than misread.
     try store.db.exec("UPDATE campaign SET schema_version = 99 WHERE id = 1");
     try std.testing.expectError(error.SaveNewerThanGame, store.load(std.testing.allocator, 1));
+}
+
+test "12G.4: a battle report round-trips as fields, not as a row count" {
+    const battle = @import("../sim/battle.zig");
+    const part_mod = @import("../domain/part.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 90210 });
+    defer gs.deinit();
+    _ = try gs.createCommander("T", .LC, .line_officer);
+    const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
+        .id = @enumFromInt(1),
+        .kind = .recon_raid,
+        .employer_key = "LC",
+        .enemy_key = "PER",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 6, .base_pay_month = 400_000, .salvage_pct = 30, .battle_loss_pct = 30 },
+        .status = .active,
+        .assigned_company = co,
+        .monthly_net = 300_000,
+    });
+    const c = gs.contracts.getPtr(@enumFromInt(1)).?;
+    const site: types.Site = .{ .company = co };
+    try gs.addStock(site, "armor", 60);
+    for (part_mod.munition_keys) |key| try gs.addStock(site, key, 40);
+    // Enough engagements that some hull takes a slot hit and some crew is
+    // hurt — an all-clean fixture would not exercise the child rows.
+    for (0..8) |_| {
+        try battle.resolveEngagement(&gs, c);
+        try @import("../sim/maintenance.zig").runWeeklyRepairs(&gs);
+    }
+
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+
+    // The fixture must actually have fought, or every assertion below is
+    // vacuous — the failure mode this whole test exists to catch.
+    try std.testing.expect(gs.battle_reports.items.len >= 8);
+    var hulls_seen: usize = 0;
+    for (gs.battle_reports.items) |r| hulls_seen += r.hulls.len;
+    try std.testing.expect(hulls_seen > 0);
+    // 12G.4: a battle report round-trips as fields, child rows included.
+    // Asserting only the count would pass with every hull and every
+    // munition family dropped on the floor.
+    try std.testing.expectEqual(gs.battle_reports.items.len, loaded.battle_reports.items.len);
+    for (gs.battle_reports.items, loaded.battle_reports.items) |saved_r, loaded_r| {
+        try std.testing.expectEqual(saved_r.id, loaded_r.id);
+        try std.testing.expectEqual(saved_r.outcome, loaded_r.outcome);
+        try std.testing.expectEqual(saved_r.held_field, loaded_r.held_field);
+        try std.testing.expectEqual(saved_r.player_power, loaded_r.player_power);
+        try std.testing.expectEqual(saved_r.morale_delta, loaded_r.morale_delta);
+        try std.testing.expectEqualStrings(saved_r.enemy_key, loaded_r.enemy_key);
+        try std.testing.expectEqual(saved_r.hulls.len, loaded_r.hulls.len);
+        try std.testing.expectEqual(saved_r.ammo.len, loaded_r.ammo.len);
+        for (saved_r.hulls, loaded_r.hulls) |saved_h, loaded_h| {
+            try std.testing.expectEqual(saved_h.unit, loaded_h.unit);
+            try std.testing.expectEqual(saved_h.armor_before, loaded_h.armor_before);
+            try std.testing.expectEqual(saved_h.armor_after, loaded_h.armor_after);
+            try std.testing.expectEqual(saved_h.destroyed, loaded_h.destroyed);
+            try std.testing.expectEqual(saved_h.cause, loaded_h.cause);
+            try std.testing.expectEqual(saved_h.crew.fate, loaded_h.crew.fate);
+            try std.testing.expectEqual(saved_h.crew.wound == null, loaded_h.crew.wound == null);
+            if (saved_h.crew.wound) |w| {
+                try std.testing.expectEqual(w.severity, loaded_h.crew.wound.?.severity);
+                try std.testing.expectEqual(w.location, loaded_h.crew.wound.?.location);
+            }
+            try std.testing.expectEqual(saved_h.recovery == null, loaded_h.recovery == null);
+            try std.testing.expectEqualStrings(saved_h.chassis_key, loaded_h.chassis_key);
+        }
+        for (saved_r.ammo, loaded_r.ammo) |saved_a, loaded_a| {
+            try std.testing.expectEqualStrings(saved_a.key, loaded_a.key);
+            try std.testing.expectEqual(saved_a.burned, loaded_a.burned);
+            try std.testing.expectEqual(saved_a.left, loaded_a.left);
+        }
+        // The AAR a reloaded report renders is the AAR it always rendered.
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena.deinit();
+        const before_lines = try after_action_mod.render(arena.allocator(), &saved_r);
+        const after_lines = try after_action_mod.render(arena.allocator(), &loaded_r);
+        try std.testing.expectEqual(before_lines.len, after_lines.len);
+        for (before_lines, after_lines) |bl, al2| try std.testing.expectEqualStrings(bl, al2);
+    }
 }

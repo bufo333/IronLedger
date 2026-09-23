@@ -212,6 +212,7 @@
         .hit_pct = .{ .decisive_victory = 8, .victory = 15, .draw = 25, .defeat = 40, .rout = 55 },
         .enemy_loss_pct = .{ .decisive_victory = 40, .victory = 25, .draw = 15, .defeat = 8, .rout = 4 },
         .armor_per_severity = 4,
+        .reports_kept = 40, // TUNE: ~4 contracts' worth of engagements
         .damage_value_per_severity = 20_000,
         .slot_hit_severity = 8,
         .cookoff_severity = 11, // TechManual: no CASE in the 3025 catalogue

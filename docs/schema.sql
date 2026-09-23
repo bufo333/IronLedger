@@ -477,6 +477,59 @@ CREATE TABLE loan (
     payment         INTEGER NOT NULL
 );
 
+---------------------------------------------------------------- battles
+
+-- Resolved engagements as records (Stage 12G.4): what the after-action
+-- screens read. The *permanent* account of a battle is its [AAR] lines in
+-- event_log, which are never pruned; these are bounded by
+-- tuning.battle.reports_kept and age out oldest-first.
+CREATE TABLE battle_report (
+    id              INTEGER PRIMARY KEY,
+    battle_id       INTEGER NOT NULL,                -- types.BattleId, campaign-unique
+    day             INTEGER NOT NULL,
+    contract_id     INTEGER REFERENCES contract(id),
+    company_id      INTEGER REFERENCES force(id),
+    kind            TEXT, scenario TEXT, terrain TEXT, weather TEXT,
+    outcome         TEXT    NOT NULL,                -- 'decisive_victory'..'rout'
+    held_field      INTEGER NOT NULL,                -- who kept the wrecks (12D.3)
+    roe             TEXT,                            -- hold | standard | cautious
+    player_power    INTEGER, enemy_power INTEGER,
+    -- losses, spoils and the aftermath the AAR reports
+    hits_taken      INTEGER, destroyed INTEGER, wounded INTEGER, kia INTEGER,
+    lost_hulls      INTEGER, missing INTEGER,
+    morale_delta    INTEGER, fatigue_add INTEGER,    -- applied since 12C.1, reported since 12G
+    salvage_items   TEXT
+);
+
+-- One row per hit: the armour before and after, the slot that broke, how
+-- the hull died, and the crew's wound and fate as fields rather than
+-- prose (a pilot can be wounded *and* taken).
+CREATE TABLE battle_report_hit (
+    id              INTEGER PRIMARY KEY,
+    report_id       INTEGER NOT NULL REFERENCES battle_report(id),
+    unit_id         INTEGER,                         -- may name a hull since struck off
+    chassis_key     TEXT, chassis_name TEXT,         -- copied: the report outlives the hull
+    armor_before    INTEGER, armor_after INTEGER,
+    slot            TEXT, slot_part TEXT, slot_result TEXT,
+    destroyed       INTEGER, cause TEXT,             -- cored | engine | ammo | scrap
+    crew_name       TEXT,
+    wound_severity  INTEGER, wound_location TEXT, wound_permanent INTEGER,
+    fate            TEXT,                            -- unhurt | kia | missing
+    recovery_roll   INTEGER, recovery_target INTEGER,
+    lost            INTEGER                          -- left to the enemy
+);
+
+-- Munitions burned and what the trucks still hold. Keyed by family name,
+-- not position: part.munition_keys has grown before, and a positional
+-- encoding would silently re-label old saves.
+CREATE TABLE battle_report_ammo (
+    id              INTEGER PRIMARY KEY,
+    report_id       INTEGER NOT NULL REFERENCES battle_report(id),
+    family          TEXT    NOT NULL,
+    burned          INTEGER NOT NULL,
+    reserve         INTEGER NOT NULL
+);
+
 ---------------------------------------------------------------- log
 
 -- Structured campaign log (Stage 9A): every entry tagged so any entity's

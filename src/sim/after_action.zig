@@ -4,11 +4,18 @@
 //! log has always carried, so the record and the narrative cannot drift
 //! (docs/coding-contract.md rule 5 — one rule, one place).
 //!
-//! The record is **self-contained by design**. A report outlives the hulls
-//! and the people it names: a wreck left on the field is removed from the
-//! books the same day (12D.3) and a KIA pilot is off the roster, so every
-//! display string is copied in at resolution time rather than looked up
-//! later. A rank earned next year must not rewrite last year's AAR.
+//! A report **outlives the hulls and the people it names**: a wreck left
+//! on the field is struck off the books the same day (12D.3) and a KIA
+//! pilot leaves the roster. So the names it shows are captured at
+//! resolution time rather than looked up later — a rank earned next year
+//! must not rewrite last year's AAR.
+//!
+//! Lifetime rule: everything a report holds must live in the campaign
+//! arena, which outlives every entity in it. Borrowing from a catalogue
+//! row or from arena-held entity memory is fine; borrowing from anything
+//! with an explicit `deinit` is not, because the arena will not keep a
+//! freed backing array alive. `battle.zig` duplicates the hit list for
+//! exactly that reason.
 //!
 //! Rule 16: nothing here emits markup. `gs.log` text is domain data; the
 //! screens colour it in `queries`.
