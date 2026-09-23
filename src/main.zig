@@ -8,6 +8,16 @@ test {
     _ = @import("tui/layout.zig");
     _ = @import("tui/term.zig");
     _ = @import("tui/app.zig");
+    _ = @import("tui/screens/desk.zig");
+    _ = @import("tui/screens/map.zig");
+    _ = @import("tui/screens/forces.zig");
+    _ = @import("tui/screens/contracts.zig");
+    _ = @import("tui/screens/ledger.zig");
+    _ = @import("tui/screens/supply.zig");
+    _ = @import("tui/screens/hq.zig");
+    _ = @import("tui/screens/lab.zig");
+    _ = @import("tui/screens/people.zig");
+    _ = @import("tui/screens/market.zig");
     _ = @import("tui/png.zig");
     _ = @import("tui/emblem.zig");
     _ = @import("tui/splash.zig");
