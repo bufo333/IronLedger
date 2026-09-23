@@ -215,6 +215,10 @@ pub const InboxRow = struct {
     default_choice: usize,
 };
 
+/// Campaign-log rows the Desk asks for (12C): enough to scroll a season
+/// without walking the whole log every frame.
+pub const desk_log_rows: usize = 40;
+
 pub const Desk = struct {
     /// The outfit's Dragoons rating in a line (12C.6).
     rating_line: []const u8,

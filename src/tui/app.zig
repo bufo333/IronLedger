@@ -92,6 +92,10 @@ const Modal = union(enum) {
     /// A contract's whole log, full screen and scrollable (play feedback:
     /// the side pane showed 40 clipped lines).
     contract_log: types.ContractId,
+    /// One campaign-log entry, word-wrapped (play feedback: the Desk's LOG
+    /// pane clips the long lines). The index is into `queries.desk().log`,
+    /// revalidated against the query every frame (rule 23).
+    log_entry: usize,
     /// Generic pickers (12.30): one look for every "choose one of these".
     pick_company: struct { what: enum { unit, person, stock }, id: u32, key_buf: [32]u8 = undefined, key_len: u8 = 0 },
     pick_hq: types.PersonId,
@@ -1169,6 +1173,12 @@ pub const App = struct {
         return .{ .x = (s.cols - ww) / 2, .y = (s.rows - hh) / 2, .w = ww, .h = hh };
     }
 
+    /// The text columns inside a modal of this width: the one place the
+    /// border padding comes off, so wrapped text matches what is drawn.
+    fn modalTextWidth(self: *App, w: u16) u16 {
+        return self.modalRect(w, self.screen.rows).inner().w;
+    }
+
     /// A titled box of text lines (the flow dialogs: end turn, quit, game over).
     fn dialog(self: *App, title: []const u8, rows: []const []const u8, w: u16, h: u16) void {
         const inner = self.screen.pane(self.modalRect(w, h), .{ .title = title, .double = true });
@@ -1179,7 +1189,7 @@ pub const App = struct {
         const al = self.a();
         switch (self.modal) {
             .none => {},
-            .help, .decision, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .seat, .emblem, .hull, .contract_log, .record => try self.drawList(al),
+            .help, .decision, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .seat, .emblem, .hull, .contract_log, .log_entry, .record => try self.drawList(al),
             .end_turn => {
                 const g = &self.gs.?;
                 const view = try q.desk(al, g, 0);
@@ -2316,7 +2326,7 @@ pub const App = struct {
                     "",
                     "  {a}screens{/}     F1-F8 or 1-8 · Tab / Shift-Tab cycles panes · j/k ↑/↓ cursor · ←/→ scroll table columns (◀ 2 · 3 ▶ = hidden)",
                     "  {a}turn{/}        n ends the turn (the checklist opens first) · N ends 7 turns",
-                    "  {a}desk{/}        Enter on an inbox row opens the decision · Enter on a checklist row jumps to its screen",
+                    "  {a}desk{/}        Enter on an inbox row opens the decision · Enter on a checklist row jumps to its screen · Enter on a log row opens the whole entry, wrapped",
                     "  {a}contracts{/}   Enter accepts the offer under the cursor · b bargains one term (one round per offer) · c completes · R recalls",
                     "  {a}ledger{/}      j/k picks the treasury · t transfer · p policy · L loan",
                     "  {a}forces{/}      [ ] page through all forces, each company, the unassigned pool · a assign · u unassign · A auto-assign the company · t train one · T train the whole company at their trades (home only) · cursor on a company = DAMAGE pane (struct = depot, gear = field), r swaps it for READINESS · w air wing · b fabricates the shortest comp_*",
@@ -2545,6 +2555,12 @@ pub const App = struct {
             },
             .hull => |uid| return .{ .title = "HULL · [Esc] close", .rows = try q.hull(al, &self.gs.?, uid), .read_only = true, .w = layout.modal.hull_w, .max_h = full_h },
             .record => |pid| return .{ .title = "RECORD · [Esc] close", .rows = try q.personRecord(al, &self.gs.?, pid), .read_only = true, .w = layout.modal.record_w, .max_h = full_h },
+            .log_entry => |idx| {
+                const view = try q.desk(al, &self.gs.?, q.desk_log_rows);
+                const w = layout.modal.log_entry_w;
+                const rows = if (view.log.len == 0) &[_][]const u8{"{d}nothing logged yet{/}"} else try screen_mod.wrap(al, view.log[@min(idx, view.log.len - 1)], self.modalTextWidth(w));
+                return .{ .title = "LOG ENTRY · any key closes", .rows = rows, .read_only = true, .w = w, .max_h = full_h };
+            },
             .contract_log => |cid| {
                 const all = try q.battleLog(al, &self.gs.?, cid, std.math.maxInt(usize));
                 // battleLog is newest first; read it top-down like a diary.
@@ -2860,7 +2876,7 @@ pub const App = struct {
     fn handleModalKey(self: *App, key: Key) !void {
         switch (self.modal) {
             .none => {},
-            .help, .decision, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .seat, .emblem, .hull, .contract_log, .record => try self.listKey(key),
+            .help, .decision, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .seat, .emblem, .hull, .contract_log, .log_entry, .record => try self.listKey(key),
             .emblem_editor => switch (key) {
                 .escape => self.modal = .none,
                 .left => self.ed_x -|= 1,

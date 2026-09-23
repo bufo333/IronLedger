@@ -248,7 +248,10 @@ send("\x1b", 0.6)
 send("4"); send("\x1b[C", 0.6); send("\x1b[C", 0.6)   # contracts board: → scrolls columns behind the first
 assert "◀" in plain()[-30000:], plain()[-3000:]
 send("\x1b[D", 0.6); send("\x1b[D", 0.6)
-send("1"); send("e", 1.5)      # emblem picker on the Desk
+send("1"); send("\t", 0.4); send("\t", 0.4); send("\r", 1.0)   # Desk LOG pane: Enter opens the whole entry, wrapped
+assert "LOG ENTRY" in plain()[-30000:], plain()[-3000:]
+send("\x1b", 0.6)
+send("e", 1.5)                 # emblem picker on the Desk
 p = plain()
 assert "EMBLEM ·" in p and "preset   Wolf's Head" in p, p[-2000:]
 send("j"); send("\r", 1.0)     # pick the second preset
@@ -285,10 +288,19 @@ assert "back at the welcome screen" in p, p[-3000:]
 send("\t", 0.5); send("d", 0.6); send("wrong name\r", 0.8)   # delete campaign: the typed name must match
 assert "name did not match" in plain()[-800:], plain()[-1200:]
 # Resize mid-session: the client redraws to the new size (SIGWINCH).
+# Measure only the bytes the resize produced — a fixed tail of `out` reaches
+# back into the 200-wide frames whenever an earlier step shifts the offsets.
+mark = len(out)
 fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 30, 110, 0, 0))
 os.kill(pid, signal.SIGWINCH)
-drain(1.0)
-runs = [len(m) for m in re.findall(r"─+", plain()[-6000:])]   # pane borders fit the new width, not the old 200
+runs = []
+end = time.time() + 8
+while time.time() < end:
+    drain(0.3)
+    redraw = re.sub(rb"\x1b\[[0-9;?]*[A-Za-z]", b"", out[mark:]).decode("utf-8", "replace")
+    runs = [len(m) for m in re.findall(r"─+", redraw)]   # pane borders fit the new width, not the old 200
+    if runs and max(runs) < 112:
+        break
 assert "MERCENARY" in plain()[-8000:] and runs and 60 < max(runs) < 112, (max(runs) if runs else None, plain()[-2000:])
 send("q", 0.5)
 drain(0.5)

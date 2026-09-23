@@ -91,6 +91,7 @@ pub const modal = struct {
     pub const input_w: u16 = 80;
     pub const input_h: u16 = 8;
     pub const picker_w: u16 = 120;
+    pub const log_entry_w: u16 = 100;
 };
 
 test "ratios split exactly and the tiers nest" {

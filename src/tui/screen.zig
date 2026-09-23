@@ -520,6 +520,28 @@ test "wrap breaks on spaces and carries an open colour across lines" {
     try std.testing.expectEqualStrings("{d}resupply{/} end", w[3]);
 }
 
+// The Desk's LOG modal wraps an entry to `Rect.inner().w` and draws it in
+// the pane that same rect makes; if the two ever disagreed the last word
+// of a full line would be clipped away.
+test "text wrapped to a pane's inner width draws without clipping" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const box: Rect = .{ .x = 0, .y = 0, .w = 20, .h = 6 };
+    const rows = try wrap(a, "{d}d1234{/} {a}alpha bravo charlie delta echo{/}", box.inner().w);
+    var s = try Screen.init(std.testing.allocator, box.w, box.h);
+    defer s.deinit();
+    const inner = s.pane(box, .{ .title = "LOG ENTRY", .double = true });
+    try std.testing.expectEqual(inner.w, box.inner().w);
+    s.lines(inner, rows, 0, null);
+    try std.testing.expect(rows.len > 1); // it really did wrap
+    for (rows, 0..) |l, i| {
+        try std.testing.expect(visibleLen(l) <= inner.w);
+        // The border still owns the last column: nothing was clipped onto it.
+        try std.testing.expectEqual(@as(u21, '\u{2551}'), s.get(box.x + box.w - 1, inner.y + @as(u16, @intCast(i))).ch);
+    }
+}
+
 test "table pins the first column, clamps the scroll and clips at the edge" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
