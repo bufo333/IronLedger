@@ -373,6 +373,9 @@ pub const Tuning = struct {
         /// engagement `press_gap_days` out instead of the usual gap, and
         /// the employer notices (`press_score`); the company pays for it
         /// in fatigue. Consolidating buys a breather the troops feel.
+        /// Wrecks rolled off the enemy's table after a field held (12G.6),
+        /// from which the salvage claim buys what it can reach.
+        salvage_candidates: u32, // TUNE
         press_gap_days: u32, // TUNE
         press_score: i16, // TUNE
         press_fatigue: u8, // TUNE

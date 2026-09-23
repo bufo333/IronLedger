@@ -110,12 +110,34 @@ pub const AmmoLine = struct {
 
 /// What the claim became: things crated home, or cash under a salvage
 /// exchange (12B.2). `items` is the itemised manifest text.
+/// A wreck the crews could get a chain around (12G.6), rolled once off
+/// the enemy's RAT when the fight ends and then left alone. The roll
+/// lives in the record rather than happening again at claim time,
+/// because the manifest the player is offered and the manifest the
+/// command materialises have to be the same wrecks.
+pub const SalvageCandidate = struct {
+    key: []const u8,
+    name: []const u8,
+    bv: i64,
+    armor_pct: u8,
+    quality: types.Quality,
+    damaged_slots: u8,
+    destroyed_slots: u8,
+    missing_components: u8,
+};
+
 pub const SalvageManifest = struct {
     claimed_bv: i64 = 0,
     haulable_bv: i64 = 0,
     liaison_cut: i64 = 0,
     exchange_cash: types.CBills = 0,
     items: []const u8 = "",
+    /// What was on offer, and whether the commander has yet chosen from
+    /// it. Empty when the haul was too small to be worth a choice — then
+    /// `items` already describes what was taken.
+    candidates: []const SalvageCandidate = &.{},
+    /// The haul still to be divided, in BV. Zero once taken.
+    unclaimed_bv: i64 = 0,
 };
 
 /// One engagement, whole.
@@ -216,6 +238,13 @@ pub const Journal = struct {
 
     /// One kept engagement, or null once it has aged out of the window.
     pub fn find(self: *const Journal, id: types.BattleId) ?*const BattleReport {
+        for (self.kept.items) |*r| if (r.id == id) return r;
+        return null;
+    }
+
+    /// The same record, writable. Only the salvage decision uses this —
+    /// the account of a fight is otherwise written once (12G.6).
+    pub fn findMut(self: *Journal, id: types.BattleId) ?*BattleReport {
         for (self.kept.items) |*r| if (r.id == id) return r;
         return null;
     }

@@ -232,7 +232,44 @@ pub const InboxRow = struct {
     description: []const u8,
     options: []const []const u8,
     default_choice: usize,
+    /// Extra lines a decision needs to be answerable — the wrecks a
+    /// salvage claim is being divided over (12G.6). Empty for decisions
+    /// the one-line description already covers.
+    detail: []const []const u8 = &.{},
 };
+
+/// What a salvage claim is being divided over (12G.6): the wrecks on
+/// offer, then what each plan would actually take. Both the list and the
+/// plans come from `battle.salvagePlan`, the same function the command
+/// materialises with — the screen never works out the haul itself.
+fn salvageDetail(alloc: Alloc, gs: *GameState, ev: *const @import("events.zig").Event) ![]const []const u8 {
+    const battle = @import("battle.zig");
+    const r = gs.battle_reports.find(ev.battle) orelse return &.{};
+    const claim = r.salvage.unclaimed_bv;
+    if (claim <= 0 or r.salvage.candidates.len == 0) return &.{};
+    var out: std.ArrayListUnmanaged([]const u8) = .empty;
+    try out.append(alloc, try std.fmt.allocPrint(alloc, "  claim {d} BV over {d} wreck{s} the crews could reach:", .{
+        claim, r.salvage.candidates.len, if (r.salvage.candidates.len == 1) "" else "s",
+    }));
+    for (r.salvage.candidates) |cand| {
+        try out.append(alloc, try std.fmt.allocPrint(alloc, "    {s}{s} {s}{s}  {d} BV · armor {d}% · {d} destroyed, {d} missing", .{
+            if (cand.bv > claim) "{d}" else "", cand.key, cand.name, if (cand.bv > claim) " (out of reach){/}" else "",
+            cand.bv, cand.armor_pct, cand.destroyed_slots, cand.missing_components,
+        }));
+    }
+    for ([_]types.SalvagePlan{ .heaviest, .most_hulls, .parts_only }, 1..) |kind, n| {
+        const plan = battle.salvagePlan(r.salvage.candidates, claim, kind);
+        var names: std.ArrayListUnmanaged(u8) = .empty;
+        for (plan.take[0..plan.hulls], 0..) |i, j| {
+            if (j > 0) try names.appendSlice(alloc, " + ");
+            try names.appendSlice(alloc, r.salvage.candidates[i].name);
+        }
+        try out.append(alloc, try std.fmt.allocPrint(alloc, "  [{d}] {s} — {d} BV in spares and armour", .{
+            n, if (plan.hulls == 0) "nothing on the flatbeds" else names.items, plan.parts_bv,
+        }));
+    }
+    return out.toOwnedSlice(alloc);
+}
 
 /// Campaign-log rows the Desk asks for (12C): enough to scroll a season
 /// without walking the whole log every frame.
@@ -286,6 +323,7 @@ pub fn desk(alloc: Alloc, gs: *GameState, log_rows: usize) !Desk {
             .description = if (ev.person != .none) (if (gs.person(ev.person)) |p| (if (p.status == .pow) try std.fmt.allocPrint(alloc, "{s} of {s} ({s} {s}, gunnery {d}) {s}", .{ try p.fullName(alloc), p.faction, @tagName(p.experience()), @tagName(p.role), p.skill(p.role.primarySkill()) orelse 7, if (entry) |e| e.log else "" }) else if (p.status == .mia) try std.fmt.allocPrint(alloc, "{s} ({s} {s}, held by {s}) {s} · ransom {s}{s}", .{ try p.fullName(alloc), @tagName(p.experience()), @tagName(p.role), p.faction, if (entry) |e| e.log else "", try money(alloc, missingRansom(p)), if (holdsPrisonerOf(gs, p.faction)) " · you hold a prisoner of theirs" else " · you hold no prisoner of theirs" }) else try std.fmt.allocPrint(alloc, "{s} ({s}, {s}, {s}/mo, morale {d}, fatigue {d}) {s}{s}", .{ try p.fullName(alloc), @tagName(p.role), @tagName(p.experience()), try money(alloc, p.monthlySalary()), p.morale, p.fatigue, if (entry) |e| e.log else "", if (ev.kind == .notice_given) try std.fmt.allocPrint(alloc, " · letting go owes {s} severance{s}", .{ try money(alloc, severanceOwed(gs, p.id, false)), try loyaltyNote(alloc, p, day) }) else "" })) else "") else if (entry) |e| e.log else "",
             .options = try opts.toOwnedSlice(alloc),
             .default_choice = ev.default_choice,
+            .detail = if (ev.kind == .salvage_priority) try salvageDetail(alloc, gs, &ev) else &.{},
         });
     }
 
@@ -356,6 +394,11 @@ pub fn effectsText(alloc: Alloc, effects: []const @import("events.zig").Effect) 
         .fatigue => |f| try appendTag(alloc, &out, false, try std.fmt.allocPrint(alloc, "fatigue +{d}", .{f})),
         .next_battle_in => |d| try appendTag(alloc, &out, false, try std.fmt.allocPrint(alloc, "contact in {d}d", .{d})),
         .recovery_push => try appendTag(alloc, &out, true, "one more roll for every hull and pilot left on the field"),
+        .take_salvage => |plan| try appendTag(alloc, &out, true, switch (plan) {
+            .heaviest => "the biggest wreck the claim reaches, rest in spares",
+            .most_hulls => "as many wrecks as the claim reaches, rest in spares",
+            .parts_only => "no wrecks — the whole claim in spares and armour",
+        }),
         .xp_all => |x| try appendTag(alloc, &out, true, try std.fmt.allocPrint(alloc, "XP +{d} all", .{x})),
         .score => |s| try appendTag(alloc, &out, s >= 0, try std.fmt.allocPrint(alloc, "contract score {s}{d}", .{ if (s >= 0) "+" else "", s })),
         .damage_random_units => |n| try appendTag(alloc, &out, false, try std.fmt.allocPrint(alloc, "{d} line hull{s} damaged", .{ n, if (n == 1) "" else "s" })),
@@ -3821,6 +3864,67 @@ test "12.20: the hangar ranks a pilotless hull above one earning its keep, mothb
     try std.testing.expect(view.len == rows.len + 2);
 }
 
+test "12G.6: the inbox shows the wrecks a salvage claim is being divided over" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1266 });
+    defer gs.deinit();
+    _ = try gs.createCommander("T", .LC, .line_officer);
+    const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    const after_action = @import("after_action.zig");
+    const candidates = [_]after_action.SalvageCandidate{
+        .{ .key = "DRG-1N", .name = "Dragon", .bv = 1_144, .armor_pct = 30, .quality = .c, .damaged_slots = 1, .destroyed_slots = 2, .missing_components = 1 },
+        .{ .key = "LCT-1V", .name = "Locust", .bv = 432, .armor_pct = 24, .quality = .d, .damaged_slots = 1, .destroyed_slots = 1, .missing_components = 1 },
+        .{ .key = "STG-3R", .name = "Stinger", .bv = 192, .armor_pct = 18, .quality = .c, .damaged_slots = 1, .destroyed_slots = 1, .missing_components = 1 },
+    };
+    const battle_id = gs.nextBattleId();
+    try gs.battle_reports.record(gs.allocator(), .{
+        .id = battle_id,
+        .day = 3,
+        .contract = @enumFromInt(1),
+        .company = co,
+        .kind = "recon_raid",
+        .enemy_key = "DC",
+        .scenario = "breakthrough",
+        .terrain = "badlands",
+        .weather = "clear skies",
+        .outcome = .victory,
+        .held_field = true,
+        .acknowledged = true,
+        .salvage = .{ .claimed_bv = 1_500, .candidates = &candidates, .unclaimed_bv = 1_500 },
+    });
+    try gs.event_queue.push(gs.allocator(), .{
+        .day = 3,
+        .kind = .salvage_priority,
+        .company = co,
+        .battle = battle_id,
+        .options = contract_events.salvageEntry().options,
+        .default_choice = 1,
+        .deadline_day = 10,
+    });
+
+    const view = try desk(a, &gs, 0);
+    try std.testing.expectEqual(@as(usize, 1), view.inbox.len);
+    const row = view.inbox[0];
+    // The decision is unanswerable without seeing what is on offer, so
+    // the row carries it rather than making the player go and look.
+    try std.testing.expect(row.detail.len > 0);
+    const joined = try std.mem.join(a, "\n", row.detail);
+    for ([_][]const u8{ "Dragon", "Locust", "Stinger", "1144", "claim 1500 BV" }) |needle| {
+        if (std.mem.indexOf(u8, joined, needle) == null) {
+            std.debug.print("missing {s} in:\n{s}\n", .{ needle, joined });
+            return error.TestUnexpectedResult;
+        }
+    }
+    // And the plan lines name what each choice would actually take —
+    // from the same function the command materialises with.
+    try std.testing.expect(std.mem.indexOf(u8, joined, "[1] Dragon") != null);
+    try std.testing.expect(std.mem.indexOf(u8, joined, "Stinger + Locust") != null);
+    try std.testing.expect(std.mem.indexOf(u8, joined, "nothing on the flatbeds") != null);
+}
+
 test "12G.7: the hangar names a hull the enemy holds — a claim, not an asset" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 12007 });
     defer gs.deinit();
@@ -5301,6 +5405,7 @@ pub fn inboxLines(alloc: Alloc, gs: *GameState) ![]const []const u8 {
     for (d.inbox) |row| {
         try out.append(alloc, try std.fmt.allocPrint(alloc, "[{d}] {s} {s} (answer by day {d}, {d} days left)", .{ @intFromEnum(row.event_id), row.kind, row.company, row.deadline_day, row.days_left }));
         try out.append(alloc, try std.fmt.allocPrint(alloc, "    {s}", .{row.description}));
+        try out.appendSlice(alloc, row.detail);
         for (row.options, 0..) |opt, j| try out.append(alloc, try std.fmt.allocPrint(alloc, "    {d}: {s}{s}", .{ j + 1, opt, if (j == row.default_choice) " (default)" else "" }));
     }
     return out.toOwnedSlice(alloc);

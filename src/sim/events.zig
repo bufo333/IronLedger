@@ -59,6 +59,9 @@ pub const EventKind = enum {
     /// The field is lost and hulls and people are still out there
     /// (12G.6): go back for them tonight, or let them go.
     recovery_push,
+    /// The field is held and the salvage claim will not stretch to
+    /// everything worth dragging home (12G.6).
+    salvage_priority,
 
     /// Does this decision hold the turn (ARCH §6)? The test is what the
     /// decision disposes of, not how big it feels: a battle decision
@@ -68,7 +71,7 @@ pub const EventKind = enum {
     /// because ignoring your inbox is a choice, not an impossibility.
     pub fn blocksTurn(self: EventKind) bool {
         return switch (self) {
-            .press_or_consolidate, .recovery_push => true,
+            .press_or_consolidate, .recovery_push, .salvage_priority => true,
             else => false,
         };
     }
@@ -131,6 +134,8 @@ pub const Effect = union(enum) {
     /// One more recovery roll for every hull and pilot the event's battle
     /// left on the field (12G.6), at a price in fatigue and risk.
     recovery_push,
+    /// Spend the event's battle's salvage claim this way (12G.6).
+    take_salvage: types.SalvagePlan,
 };
 
 pub const Option = struct {
@@ -211,7 +216,9 @@ pub const EventQueue = struct {
     }
 
     /// The oldest pending decision that holds the turn, if any (12G.6).
-    /// One place decides; `advance` and the checklist both read it.
+    /// One place decides; `advance` and the checklist both read it. The
+    /// pointer is into the queue's backing array: read what you need from
+    /// it before answering anything, because answering can move it.
     pub fn blocking(self: *const EventQueue) ?*const Event {
         for (self.pending.items) |*ev| if (ev.holdsTurn()) return ev;
         return null;

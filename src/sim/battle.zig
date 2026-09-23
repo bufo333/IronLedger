@@ -860,6 +860,10 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
         missing = loss.missing;
         damage_value += loss.damage_value;
     }
+    // 12G.6: the wrecks on offer and the part of the claim still to be
+    // divided. Both stay empty unless the haul is worth a decision.
+    var salvage_candidates: []const after_action.SalvageCandidate = &.{};
+    var salvage_unclaimed: i64 = 0;
     // Salvage is things, not money (Stage 12.23): your share of what the
     // crews haul off a held field becomes wrecks and parts crated to the
     // home HQ depot — to store, strip, or rebuild into a working hull.
@@ -884,7 +888,18 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
             .note = "salvage exchange",
         });
         break :blk if (exchange_cash > 0) try std.fmt.allocPrint(gs.allocator(), "salvage exchange — the employer keeps the wrecks and pays {d} c-bills for your {d} BV claim", .{ exchange_cash, salvage_bv }) else "";
-    } else try claimSalvage(gs, c, salvage_bv);
+    } else blk: {
+        // 12G.6: roll what is out there once, then see whether the claim
+        // buys a real choice. If it does, nothing is taken yet — the
+        // commander divides the haul from the inbox.
+        if (salvage_bv <= 0) break :blk ""; // nothing to divide, nothing to roll
+        salvage_candidates = try rollSalvageCandidates(gs, c);
+        if (salvageWorthAsking(salvage_candidates, salvage_bv)) {
+            salvage_unclaimed = salvage_bv;
+            break :blk "";
+        }
+        break :blk try takeSalvage(gs, c, salvage_candidates, salvage_bv, .most_hulls);
+    };
     const salvage = salvage_bv; // for the AAR
 
     // Expend the reloads this fight consumed (Stage 9B), itemized below.
@@ -974,6 +989,8 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
             .liaison_cut = liaison_cut,
             .exchange_cash = exchange_cash,
             .items = spoils,
+            .candidates = salvage_candidates,
+            .unclaimed_bv = salvage_unclaimed,
         },
     };
     const ctx: @import("state.zig").LogCtx = .{ .company = c.assigned_company, .contract = c.id };
@@ -997,6 +1014,9 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     // left (12G.6). The two are exclusive: wrecks are only left behind on
     // a field that was lost.
     if (lost_hulls > 0 or missing > 0) try @import("contract_events.zig").queueRecoveryPush(gs, c, report.id);
+    // And a haul the claim cannot stretch over asks how to divide it
+    // (12G.6). Nothing has been taken yet; the trucks wait on the answer.
+    if (salvage_unclaimed > 0) try @import("contract_events.zig").queueSalvage(gs, c, report.id);
 }
 
 /// " · field lost · recovery 6 vs 7 — LEFT TO THE ENEMY" (12D.3).
@@ -1018,11 +1038,125 @@ fn lastWound(p: *const person_mod.Person) ?after_action.CrewOutcome.Wound {
 /// as a wreck and shipped to the home HQ pool with the map transit — then
 /// parts: structural components, weapons and armor tons, crated home.
 /// Returns the itemized text for the AAR.
-fn claimSalvage(gs: *GameState, c: *contract_mod.Contract, claim_bv: i64) ![]const u8 {
-    if (claim_bv <= 0) return "";
-    var text: std.ArrayListUnmanaged(u8) = .empty;
-    var remaining = claim_bv;
+/// At most this many wrecks come home from one fight, however the claim
+/// is spent — the trucks only hold so much (12.23 kept this at 2; a
+/// lights-only haul can now stretch to three).
+pub const max_salvage_hulls = 3;
+
+/// What one way of spending the claim actually takes.
+pub const SalvageChoice = struct {
+    kind: types.SalvagePlan,
+    /// Positions in the candidate list, in take order.
+    take: [max_salvage_hulls]u8 = @splat(0),
+    hulls: u8 = 0,
+    hull_bv: i64 = 0,
+    /// BV left over, which becomes components, weapons and armour.
+    parts_bv: i64 = 0,
+
+    fn sameHullsAs(self: SalvageChoice, other: SalvageChoice) bool {
+        if (self.hulls != other.hulls) return false;
+        for (self.take[0..self.hulls], other.take[0..other.hulls]) |a, b| {
+            if (a != b) return false;
+        }
+        return true;
+    }
+};
+
+/// How a claim of `claim_bv` is spent under one plan (12G.6). Pure: the
+/// wrecks were rolled once when the fight ended and live in the record,
+/// so the manifest the screen offers and the manifest the command
+/// materialises come from this one function called twice.
+pub fn salvagePlan(candidates: []const after_action.SalvageCandidate, claim_bv: i64, kind: types.SalvagePlan) SalvageChoice {
+    var out: SalvageChoice = .{ .kind = kind, .parts_bv = @max(0, claim_bv) };
+    switch (kind) {
+        .parts_only => return out,
+        .heaviest => {
+            var best: ?usize = null;
+            for (candidates, 0..) |cand, i| {
+                if (cand.bv > claim_bv) continue;
+                if (best == null or cand.bv > candidates[best.?].bv) best = i;
+            }
+            const i = best orelse return out;
+            out.take[0] = @intCast(i);
+            out.hulls = 1;
+            out.hull_bv = candidates[i].bv;
+        },
+        .most_hulls => {
+            // Cheapest first, so the claim stretches over as many hulls
+            // as it will reach. Insertion sort over a handful of rolls.
+            var order: [16]u8 = @splat(0);
+            const n = @min(candidates.len, order.len);
+            for (0..n) |i| order[i] = @intCast(i);
+            for (1..n) |i| {
+                var j = i;
+                while (j > 0 and candidates[order[j]].bv < candidates[order[j - 1]].bv) : (j -= 1) {
+                    std.mem.swap(u8, &order[j], &order[j - 1]);
+                }
+            }
+            var left = claim_bv;
+            for (order[0..n]) |i| {
+                if (out.hulls == max_salvage_hulls) break;
+                const cand = candidates[i];
+                if (cand.bv > left) continue;
+                left -= cand.bv;
+                out.take[out.hulls] = i;
+                out.hulls += 1;
+                out.hull_bv += cand.bv;
+            }
+        },
+    }
+    out.parts_bv = @max(0, claim_bv - out.hull_bv);
+    return out;
+}
+
+/// Is there a real choice here (12G.6)? Only ask when taking the biggest
+/// wreck and taking the most wrecks are different hauls — otherwise the
+/// "decision" is one option wearing three labels, and the fight takes the
+/// only plan there is without troubling the commander.
+pub fn salvageWorthAsking(candidates: []const after_action.SalvageCandidate, claim_bv: i64) bool {
+    const heavy = salvagePlan(candidates, claim_bv, .heaviest);
+    if (heavy.hulls == 0) return false;
+    return !heavy.sameHullsAs(salvagePlan(candidates, claim_bv, .most_hulls));
+}
+
+/// Roll the wrecks this fight left worth dragging home (12G.6), off the
+/// enemy house's table (12B.8) with a condition each. Rolled once, when
+/// the fight ends, and then kept in the record: rolling again at claim
+/// time would offer the player one set of wrecks and deliver another.
+fn rollSalvageCandidates(gs: *GameState, c: *const contract_mod.Contract) ![]after_action.SalvageCandidate {
     const company_gen = @import("../gen/company_gen.zig");
+    var out: std.ArrayListUnmanaged(after_action.SalvageCandidate) = .empty;
+    for (0..tuning.battle.salvage_candidates) |_| {
+        const design = @import("../domain/rat.zig").roll(&gs.rng, .battle, c.enemy_key, company_gen.rollWeightClass(&gs.rng), gs.clock.date.year);
+        try out.append(gs.allocator(), .{
+            .key = design.key,
+            .name = design.name,
+            .bv = design.bv,
+            .armor_pct = @intCast(@as(u32, gs.rng.roll2d6(.battle)) * 3),
+            .quality = if (gs.rng.random(.battle).boolean()) .c else .d,
+            .damaged_slots = 1,
+            .destroyed_slots = gs.rng.random(.battle).intRangeAtMost(u8, 1, 3),
+            .missing_components = gs.rng.random(.battle).intRangeAtMost(u8, 1, 2),
+        });
+    }
+    return out.toOwnedSlice(gs.allocator());
+}
+
+/// Turn a salvage claim into things (Stage 12.23, 12G.6): the wrecks the
+/// chosen plan names, then components, weapons and armour with what the
+/// claim has left. The wrecks come from `candidates` — rolled once when
+/// the fight ended — so this materialises exactly what the player was
+/// offered.
+pub fn takeSalvage(
+    gs: *GameState,
+    c: *const contract_mod.Contract,
+    candidates: []const after_action.SalvageCandidate,
+    claim_bv: i64,
+    kind: types.SalvagePlan,
+) ![]const u8 {
+    if (claim_bv <= 0) return "";
+    const plan = salvagePlan(candidates, claim_bv, kind);
+    var text: std.ArrayListUnmanaged(u8) = .empty;
     const market = @import("../econ/market.zig");
     const logistics = @import("../econ/logistics.zig");
     const home = gs.hqs.getPtr(gs.homeHqFor(c.assigned_company));
@@ -1030,36 +1164,30 @@ fn claimSalvage(gs: *GameState, c: *contract_mod.Contract, claim_bv: i64) ![]con
     const to = if (home) |h| planet_mod.find(h.planet_key) else null;
     const days: u32 = if (from != null and to != null) logistics.daysBetween(from.?, to.?) else logistics.same_world_days;
 
-    // Wrecks: up to two per battle, each a RAT roll that must fit the claim.
-    var wrecks: u32 = 0;
-    var tries: u8 = 0;
-    while (wrecks < 2 and tries < 4) : (tries += 1) {
-        // Off the enemy house's table (12B.8): Combine wrecks are Dragons.
-        const design = @import("../domain/rat.zig").roll(&gs.rng, .battle, c.enemy_key, company_gen.rollWeightClass(&gs.rng), gs.clock.date.year);
-        if (design.bv > remaining) continue;
-        remaining -= design.bv;
-        const uid = try gs.addUnit(design.key);
+    for (plan.take[0..plan.hulls]) |i| {
+        const cand = candidates[i];
+        const uid = try gs.addUnit(cand.key);
         const u = gs.unit(uid).?;
         u.purchase_price = 0; // salvage owes nothing
-        // A wreck: shot up, some guns gone, a limb or torso missing.
         const cond: market.HullCondition = .{
-            .armor_pct = @intCast(@as(u32, gs.rng.roll2d6(.battle)) * 3),
-            .quality = if (gs.rng.random(.battle).boolean()) .c else .d,
-            .damaged_slots = 1,
-            .destroyed_slots = @intCast(gs.rng.random(.battle).intRangeAtMost(u8, 1, 3)),
-            .missing_components = @intCast(gs.rng.random(.battle).intRangeAtMost(u8, 1, 2)),
+            .armor_pct = cand.armor_pct,
+            .quality = cand.quality,
+            .damaged_slots = cand.damaged_slots,
+            .destroyed_slots = cand.destroyed_slots,
+            .missing_components = cand.missing_components,
         };
         gs.applyHullCondition(uid, cond);
         u.status = .in_transit;
         try gs.unit_transfers.append(gs.allocator(), .{ .unit = uid, .to_company = .none, .eta_day = gs.clock.day_index + days });
-        wrecks += 1;
         gs.stats.hulls_salvaged += 1;
         try text.appendSlice(gs.allocator(), try std.fmt.allocPrint(gs.allocator(), "wreck #{d} {s} {s} (armor {d}%, {d} destroyed, {d} missing) → home depot in {d} days; ", .{
-            @intFromEnum(uid), design.key, design.name, cond.armor_pct, cond.destroyed_slots, cond.missing_components, days,
+            @intFromEnum(uid), cand.key, cand.name, cond.armor_pct, cond.destroyed_slots, cond.missing_components, days,
         }));
     }
+
     // Parts: components, then weapons, then armor, at BV prices.
     const t = tuning.battle;
+    var remaining = plan.parts_bv;
     var components: u32 = 0;
     // Assemblies off the enemy's wrecks come in the class of the hull they
     // were pulled from (12D.8).
@@ -1126,6 +1254,9 @@ test "battles resolve with consequences and stronger forces win more" {
     for (part_mod.munition_keys) |key| try gs.addStock(site, key, 40);
     for (0..12) |_| {
         try resolveEngagement(&gs, c);
+        // A haul worth dividing waits on the commander (12G.6); nothing
+        // is on the flatbeds until it is answered, so answer it.
+        try answerBattleDecisions(&gs);
         try @import("maintenance.zig").runWeeklyRepairs(&gs);
         try @import("maintenance.zig").runWeeklyRepairs(&gs);
     }
@@ -1296,7 +1427,8 @@ test "12.23: a salvage claim becomes a wreck in transit to the depot pool and pa
     const c = gs.contracts.getPtr(@enumFromInt(1)).?;
     const units_before = gs.units.count();
     const funds_before = gs.force(co).?.local_funds;
-    const text = try claimSalvage(&gs, c, 2_000);
+    const candidates = try rollSalvageCandidates(&gs, c);
+    const text = try takeSalvage(&gs, c, candidates, 2_000, .most_hulls);
     try std.testing.expect(text.len > 0);
     try std.testing.expect(gs.units.count() > units_before); // at least one wreck
     try std.testing.expectEqual(funds_before, gs.force(co).?.local_funds); // no cash
@@ -1399,6 +1531,14 @@ test "12B.2: salvage exchange pays cash into local funds and ships no wreck" {
     for (gs.unit_transfers.items) |t| try std.testing.expect(t.to_company != .none);
 }
 
+/// Answer every battle decision waiting, each with its own default — the
+/// walk a commander does between fights, for tests about something else.
+fn answerBattleDecisions(gs: *GameState) !void {
+    while (gs.event_queue.blocking()) |ev| {
+        try @import("contract_events.zig").resolveChoice(gs, ev.id, ev.default_choice);
+    }
+}
+
 /// Hulls of `co` wrecked or lost over `n` hopeless engagements at a
 /// difficulty (12D.3 test helper).
 fn lossRun(seed: u64, level: @import("../domain/difficulty.zig").Level, n: u32) !struct { lost: u32, wrecks_kept: u32, missing: u32, held: u32, all_held_by_enemy: bool } {
@@ -1460,6 +1600,120 @@ fn lossRun(seed: u64, level: @import("../domain/difficulty.zig").Level, n: u32) 
         .held = @intCast(gs.held_hulls.items.len),
         .all_held_by_enemy = all_held_by_enemy,
     };
+}
+
+test "12G.6: the three salvage plans divide one claim three ways" {
+    const cands = [_]after_action.SalvageCandidate{
+        .{ .key = "DRG-1N", .name = "Dragon", .bv = 1_144, .armor_pct = 30, .quality = .c, .damaged_slots = 1, .destroyed_slots = 2, .missing_components = 1 },
+        .{ .key = "LCT-1V", .name = "Locust", .bv = 432, .armor_pct = 24, .quality = .d, .damaged_slots = 1, .destroyed_slots = 1, .missing_components = 1 },
+        .{ .key = "STG-3R", .name = "Stinger", .bv = 192, .armor_pct = 18, .quality = .c, .damaged_slots = 1, .destroyed_slots = 1, .missing_components = 1 },
+        .{ .key = "STK-3F", .name = "Stalker", .bv = 2_068, .armor_pct = 40, .quality = .d, .damaged_slots = 1, .destroyed_slots = 3, .missing_components = 2 },
+    };
+    const claim: i64 = 1_500;
+
+    // The biggest one the claim reaches is the Dragon, not the Stalker.
+    const heavy = salvagePlan(&cands, claim, .heaviest);
+    try std.testing.expectEqual(@as(u8, 1), heavy.hulls);
+    try std.testing.expectEqualStrings("Dragon", cands[heavy.take[0]].name);
+    try std.testing.expectEqual(@as(i64, 1_500 - 1_144), heavy.parts_bv);
+
+    // Cheapest first reaches two lights and leaves more for spares.
+    const most = salvagePlan(&cands, claim, .most_hulls);
+    try std.testing.expectEqual(@as(u8, 2), most.hulls);
+    try std.testing.expectEqualStrings("Stinger", cands[most.take[0]].name);
+    try std.testing.expectEqualStrings("Locust", cands[most.take[1]].name);
+    try std.testing.expect(most.parts_bv > heavy.parts_bv);
+
+    // And taking nothing puts the whole claim into spares.
+    const parts = salvagePlan(&cands, claim, .parts_only);
+    try std.testing.expectEqual(@as(u8, 0), parts.hulls);
+    try std.testing.expectEqual(claim, parts.parts_bv);
+
+    // Worth asking, because the first two are different hauls.
+    try std.testing.expect(salvageWorthAsking(&cands, claim));
+    // But not when the claim reaches exactly one wreck, whichever way
+    // you look at it — then the three labels name one outcome.
+    try std.testing.expect(!salvageWorthAsking(&cands, 300));
+    // Nor when it reaches nothing at all.
+    try std.testing.expect(!salvageWorthAsking(&cands, 100));
+}
+
+test "12G.6: the salvage the screen offers is the salvage the command loads" {
+    // Whether any one campaign throws up a haul worth dividing is a
+    // chain of die rolls, so walk seeds until one does.
+    for ([_]u64{ 777, 778, 779, 780, 781, 782 }) |seed| {
+        if (try salvageOfferRoundTrip(seed)) return;
+    }
+    return error.NoSalvageDecisionInSixCampaigns;
+}
+
+fn salvageOfferRoundTrip(seed: u64) !bool {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = seed });
+    defer gs.deinit();
+    _ = try gs.createCommander("T", .LC, .line_officer);
+    const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
+        .id = @enumFromInt(1),
+        .kind = .recon_raid,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 6, .base_pay_month = 400_000, .salvage_pct = 50 },
+        .status = .active,
+        .assigned_company = co,
+    });
+    const c = gs.contracts.getPtr(@enumFromInt(1)).?;
+    const site: types.Site = .{ .company = co };
+    try gs.addStock(site, "armor", 200);
+    for (part_mod.munition_keys) |key| try gs.addStock(site, key, 200);
+
+    var guard: u32 = 0;
+    while (guard < 40) : (guard += 1) {
+        try resolveEngagement(&gs, c);
+        while (gs.event_queue.blocking()) |ev| {
+            if (ev.kind == .salvage_priority) break;
+            try @import("contract_events.zig").resolveChoice(&gs, ev.id, ev.default_choice);
+        }
+        if (gs.event_queue.blocking()) |ev| {
+            if (ev.kind == .salvage_priority) break;
+        }
+    }
+    const pending = gs.event_queue.blocking() orelse return false;
+    if (pending.kind != .salvage_priority) return false;
+    // Copy what we need: the pointer is into the queue, and answering
+    // the decision may move the queue out from under it.
+    const event_id = pending.id;
+    const battle_id = pending.battle;
+
+    const report = gs.battle_reports.find(battle_id).?;
+    const claim = report.salvage.unclaimed_bv;
+    try std.testing.expect(claim > 0);
+    try std.testing.expect(report.salvage.candidates.len > 0);
+
+    // Nothing is on the flatbeds until the commander says so.
+    try std.testing.expectEqual(@as(usize, 0), report.salvage.items.len);
+    const units_before = gs.units.count();
+
+    // What the screen would offer under "the biggest one it reaches".
+    const offered = salvagePlan(report.salvage.candidates, claim, .heaviest);
+    try std.testing.expect(offered.hulls > 0);
+    const offered_key = report.salvage.candidates[offered.take[0]].key;
+
+    try @import("contract_events.zig").resolveChoice(&gs, event_id, 0); // option 0 = heaviest
+
+    // Exactly that wreck came home — not a fresh roll off the table,
+    // which is what happened before the candidates were kept.
+    try std.testing.expectEqual(units_before + offered.hulls, gs.units.count());
+    var found = false;
+    for (gs.unit_transfers.items) |t| {
+        const u = gs.unit(t.unit) orelse continue;
+        if (std.mem.eql(u8, u.chassis_key, offered_key) and u.purchase_price == 0) found = true;
+    }
+    try std.testing.expect(found);
+    // And the haul is spent: answering twice cannot load the trucks again.
+    try std.testing.expectEqual(@as(i64, 0), gs.battle_reports.find(battle_id).?.salvage.unclaimed_bv);
+    try std.testing.expect(gs.battle_reports.find(battle_id).?.salvage.items.len > 0);
+    return true;
 }
 
 test "12G.6: a lost field asks whether to go back, and going back wins hulls and crew home" {
@@ -1562,13 +1816,23 @@ test "12G.6: a hull won back goes home to the lance it was taken from" {
 }
 
 test "12G.7: a hull left on a lost field passes into enemy hands, not off the books" {
-    const r = try lossRun(31, .elite, 10);
-    // Every hull that left the books is held by someone, not struck off:
-    // the recovery raid has something to win back (ROADMAP 12D.9).
-    try std.testing.expect(r.lost > 0);
-    try std.testing.expectEqual(r.lost, r.held);
-    // And it is held by the enemy we fought, with our people out of it.
-    try std.testing.expect(r.all_held_by_enemy);
+    // Several seeds: whether any one hopeless campaign loses a hull is a
+    // die roll, and a single-seed assertion breaks whenever anything
+    // upstream consumes the stream differently.
+    var lost: u32 = 0;
+    var held: u32 = 0;
+    for ([_]u64{ 31, 32, 33, 34 }) |seed| {
+        const r = try lossRun(seed, .elite, 10);
+        // Every hull that left the books is held by someone, not struck
+        // off: the recovery raid has something to win back (12D.9).
+        try std.testing.expectEqual(r.lost, r.held);
+        // And it is held by the enemy we fought, with our people out of it.
+        try std.testing.expect(r.all_held_by_enemy);
+        lost += r.lost;
+        held += r.held;
+    }
+    try std.testing.expect(lost > 0); // otherwise the equalities are vacuous
+    try std.testing.expectEqual(lost, held);
 }
 
 test "12D.3: a lost field loses wrecks to the enemy — harder the higher the difficulty" {

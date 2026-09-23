@@ -193,6 +193,7 @@ pub fn entryForKind(kind: events.EventKind) ?Entry {
     // is skipped (12G.6).
     if (kind == .press_or_consolidate) return pressEntry();
     if (kind == .recovery_push) return pushEntry();
+    if (kind == .salvage_priority) return salvageEntry();
     var roll: u8 = 2;
     while (roll <= 12) : (roll += 1) {
         const g = garrisonDeck(roll);
@@ -552,6 +553,20 @@ fn applyEffectsFor(gs: *GameState, effects: []const events.Effect, contract: ?*c
                     got.hulls, got.people, if (got.mishap) " — and it cost somebody" else "",
                 });
             },
+            // 12G.6: divide the haul the way the commander chose. The
+            // wrecks were rolled when the fight ended and live in the
+            // record, so this takes exactly what was offered.
+            .take_salvage => |plan| if (contract) |c| {
+                const battle = @import("battle.zig");
+                const report = gs.battle_reports.find(subject.battle) orelse return;
+                if (report.salvage.unclaimed_bv <= 0) return; // already divided
+                const text = try battle.takeSalvage(gs, c, report.salvage.candidates, report.salvage.unclaimed_bv, plan);
+                if (gs.battle_reports.findMut(subject.battle)) |r| {
+                    r.salvage.items = text;
+                    r.salvage.unclaimed_bv = 0;
+                }
+                try gs.log(.battle, .{ .company = company, .contract = contract_id }, "[salvage] the trucks are loaded: {s}", .{if (text.len > 0) text else "nothing the claim could reach"});
+            },
             .delay_arrival => |days| if (contract) |c| {
                 if (c.status == .transit) {
                     if (c.arrive_day) |d| c.arrive_day = d + days;
@@ -726,6 +741,34 @@ pub fn queueRecoveryPush(gs: *GameState, c: *const contract_mod.Contract, battle
         .deadline_day = gs.clock.day_index + decision_window_days,
     });
     try gs.log(.decision, .{ .company = c.assigned_company, .contract = c.id }, "[recovery] DECISION: {s}", .{e.log});
+}
+
+/// How the salvage claim is spent (12G.6). The labels are fixed so the
+/// store can rebuild them from the kind; what is actually on offer comes
+/// from the battle's record, which the inbox row shows alongside.
+pub fn salvageEntry() Entry {
+    return .{ .kind = .salvage_priority, .log = "the claim will not stretch to everything worth dragging home — decide what the trucks take", .options = &.{
+        .{ .label = "The biggest wreck it reaches", .effects = &.{.{ .take_salvage = .heaviest }} },
+        .{ .label = "As many wrecks as it reaches", .effects = &.{.{ .take_salvage = .most_hulls }} },
+        .{ .label = "No wrecks — spares and armour", .effects = &.{.{ .take_salvage = .parts_only }} },
+    }, .default_choice = 1 };
+}
+
+/// Ask how to divide a haul, after a field held (12G.6).
+pub fn queueSalvage(gs: *GameState, c: *const contract_mod.Contract, battle: types.BattleId) !void {
+    if (c.status != .active) return;
+    const e = salvageEntry();
+    try gs.event_queue.push(gs.allocator(), .{
+        .day = gs.clock.day_index,
+        .kind = .salvage_priority,
+        .contract = c.id,
+        .company = c.assigned_company,
+        .battle = battle,
+        .options = e.options,
+        .default_choice = e.default_choice,
+        .deadline_day = gs.clock.day_index + decision_window_days,
+    });
+    try gs.log(.decision, .{ .company = c.assigned_company, .contract = c.id }, "[salvage] DECISION: {s}", .{e.log});
 }
 
 /// The prisoner decision (12B.7): ransom, release, or recruit.
@@ -970,7 +1013,7 @@ test "12.24: automatic events never move money, stock or hulls — those are dec
             if (e.options.len > 0) continue;
             for (e.auto_effects) |fx| switch (fx) {
                 .fatigue, .morale, .xp_all, .score, .reputation, .employer_standing => {},
-                .cash, .cash_monthly_pct, .supply_loss, .parts_windfall, .field_stock, .damage_random_units, .damage_convoy_units, .raise_pct, .retention_bonus_months, .let_go, .replace_from_hall, .ransom_prisoner, .release_prisoner, .recruit_prisoner, .ransom_mia, .exchange_mia, .write_off_mia, .engagement, .seize_hull, .delay_arrival, .next_battle_in, .recovery_push => {
+                .cash, .cash_monthly_pct, .supply_loss, .parts_windfall, .field_stock, .damage_random_units, .damage_convoy_units, .raise_pct, .retention_bonus_months, .let_go, .replace_from_hall, .ransom_prisoner, .release_prisoner, .recruit_prisoner, .ransom_mia, .exchange_mia, .write_off_mia, .engagement, .seize_hull, .delay_arrival, .next_battle_in, .recovery_push, .take_salvage => {
                     std.debug.print("auto event {s} carries a player-facing effect\n", .{@tagName(e.kind)});
                     return error.TestUnexpectedResult;
                 },
