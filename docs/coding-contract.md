@@ -273,9 +273,16 @@ grep -n '@import("tui/' src/main.zig      # one line per src/tui module
 42. **Functions stay short.** Around a hundred lines is the ceiling; a
     `switch` with more than about ten arms of case-specific code becomes
     a table or a module split.
-43. **Doc comments state the rule.** Every `pub fn` says what it decides
-    and where the rule comes from. Play-feedback notes are welcome and
-    name the rule's home, not the screen that surfaced the bug.
+43. **Doc comments state the rule, as it is now.** Every `pub fn` says
+    what it decides and where the rule comes from, in one sentence plus at
+    most two or three lines of rationale the code cannot show. Comments
+    never narrate history, changes, requests or conversations ("used to",
+    "no longer", "previously", play-feedback anecdotes, names); that lives
+    in git and `ROADMAP.md`. Citations are sources (sourcebook page,
+    `ARCHITECTURE.md` section, `data/tables` row); a roadmap stage tag
+    appears only in a module's `//!` header, and test names state
+    behaviour without one. Applies to new and edited comments; existing
+    ones are swept by a `TODO.md` deliverable.
 44. **No dead mirrors.** A comment such as "mirrors X", "keep in sync
     with Y" or "same as Z" is a defect report; replace the copy with a
     call to X.

@@ -152,6 +152,11 @@ ID counters, RNG state, logs, ledgers, reports, and derived fields.
 `OutOfMemory` is an error and is not exempt. Arena allocation does not make
 partial mutation acceptable.
 
+Failure atomicity does not require a universal transaction framework or
+command journal. It is achieved by preparation (rule 12), with shared atomic
+helpers owned by each subsystem (rule 14). Rollback is the fallback where
+preparation cannot remove every failure.
+
 ### 12. Mutations follow validate, prepare, commit
 
 Every compound command follows this order:
@@ -166,7 +171,9 @@ Every compound command follows this order:
 
 After the first irreversible mutation, no allocation, formatting, lookup,
 container growth, log construction, or other fallible operation is permitted
-unless an explicit rollback guard restores every prior mutation.
+unless an explicit rollback guard restores every prior mutation. A rollback
+guard is the fallback, not the design: prefer moving the fallible work into
+preparation.
 
 ### 13. Expected refusals consume nothing
 
@@ -367,8 +374,15 @@ pre-check never suppresses a command or invents refusal text.
 ```sh
 rg -n 'gs\.(units|hqs|forces|people)\.' src/main.zig src/tui
 rg -n 'indexOf\([^\n]*"\{|tokenize[^\n]*(line|text)|parse[^\n]*(row|text)' src/tui src/sim/queries.zig
-rg -n '\{[acgr]\}|\{/\}' src/domain src/econ src/gen src/sim --glob '!queries.zig' --glob '!table.zig'
 ```
+
+Markup tags are declared once, in `table.marks` (`{a} {g} {c} {s} {d} {t} {p}
+{/}`); the renderer mapping and the contract-verification script derive their
+set from it, never from a separate hard-coded list. The script checks the
+unambiguous tags (`{a}`, `{g}`, `{t}`, `{p}`, `{/}`) directly. `{c}`, `{s}`
+and `{d}` are also Zig format specifiers, so they are checked contextually or
+through an explicit allowlist, never by a plain grep. A test built on
+`table.marks` fails when a tag is added without updating the check.
 
 - Does the highlighted row carry the exact ID used by Enter?
 - Would adding a wrapped description line change which entity is activated?
@@ -658,9 +672,11 @@ the format supplies them and require exact expected output sizes.
 
 ### 65. Platform support is explicit
 
-The build rejects unsupported targets or provides target-gated implementations.
-POSIX process, signal, path, and terminal assumptions are not compiled
-unconditionally for targets that do not provide them.
+The supported platforms are macOS, Linux and Windows. Terminal, resize
+signalling, child-process, path and audio code has a target-gated
+implementation for each; the build rejects any other target. POSIX process,
+signal, path, and terminal assumptions are not compiled unconditionally for
+targets that do not provide them.
 
 ### 66. Package contents are build truth
 
@@ -702,8 +718,17 @@ or injected-failure test. The test captures the complete gameplay digest,
 forces failure after preparation or during the formerly unsafe boundary, and
 asserts exact state equality.
 
-Tests may cover a shared atomic helper instead of every caller only when every
-caller delegates the full mutation to that helper.
+The requirement is one test per distinct pattern, not one per command.
+Patterns include:
+
+- debit plus asset creation;
+- batch stock consumption plus queue insertion;
+- removal from a roster plus transfer creation;
+- event selection plus its effects;
+- database transaction plus in-memory ID assignment.
+
+A caller shares a helper's test only when it delegates the entire mutation to
+that helper.
 
 ### 70. Persistence tests are adversarial
 
@@ -737,8 +762,9 @@ bash docs/repl_smoke.sh zig-out/bin/game /tmp/r.db
 ```
 
 Changes under `src/tui`, `src/sim/cli.zig`, `src/sim/queries.zig`, or
-`src/main.zig` require both smoke scripts. CI additionally performs a clean
-package build and supported-target compile matrix.
+`src/main.zig` require both smoke scripts. CI installs ripgrep explicitly
+rather than assuming it, and additionally performs a clean package build and
+a compile for every supported platform (rule 65).
 
 ### 73. Contract checks are recursive and executable
 
@@ -816,18 +842,51 @@ Modules and functions are named for the entity or rule, not the screen that
 first needed them. Quantities include units and accounting windows when
 ambiguity is possible.
 
+### 82. Comments state what is true now
+
+A comment names the rule, the invariant, the unit, or why a non-obvious choice
+holds. It never describes earlier code, what changed, who asked for it, or what
+was discussed: no "used to", "no longer", "now", "previously", "was changed",
+before/after comparisons, play-feedback anecdotes, names, or quoted
+conversation. History lives in commit messages, pull request descriptions, and
+`ROADMAP.md`.
+
+A doc comment is one sentence saying what the function decides or what the
+field holds. Rationale adds at most two or three lines, and only when the code
+cannot show it. Comments do not restate the code or a type's name. Code is
+never left commented out, and a `TODO` in code requires a `TODO.md` item.
+
+### 83. Citations are sources, not provenance
+
+A rule cites where its numbers come from: sourcebook edition and page, an
+`ARCHITECTURE.md` section, or the owning `data/tables` row. Roadmap stage tags
+are provenance: a module's top-of-file `//!` doc comment may name the
+`ROADMAP.md` stage that designs it, and nothing else carries one. Test names
+state the behaviour they prove, without a stage tag.
+
+A tuning knob states what it measures, with units and period. A placeholder is
+`// TUNE` plus the data that would settle it, never an anecdote.
+
 **Reviewer checks**
+
+```sh
+rg -n '//.*\b(used to|no longer|previously|play feedback|we decided|was changed)\b' src
+rg -n '^\s*//[/ ].*\((Stage [0-9]|[0-9]+[A-G]?\.[0-9]+)' src   # stage tags outside //! headers
+rg -n '^test "[0-9]' src                                         # stage-tagged test names
+```
 
 - Did a facade grow new subsystem logic instead of one dispatch arm?
 - Does temporary work allocate from the campaign arena?
 - Does a catch collapse a system failure into plausible gameplay output?
 - Does a name hide units, time window, or locality?
+- Does a comment narrate history, quote a conversation, or run past what the
+  code cannot show?
 
 ---
 
 ## 11. Pull requests and delivery
 
-### 82. One branch in flight at a time
+### 84. One branch in flight at a time
 
 A change lands on `main` before the next starts. Branches are sequential,
 never stacked. A branch is complete only when its PR is merged, the branch is
@@ -838,7 +897,7 @@ deleted locally and remotely, and local `main` is pulled.
 - No file is borrowed from another branch to make verification pass.
 - Large work is split into independently correct increments that each land.
 
-### 83. Deliverables are cohesive
+### 85. Deliverables are cohesive
 
 A deliverable has one primary invariant or subsystem outcome. Package fixes,
 schema migrations, frontend tests, and major module decompositions do not
@@ -846,7 +905,7 @@ share a PR merely because they came from the same audit. Structural moves land
 after behavior fixes that rely on existing line ownership, unless the move is
 required to make the behavior fix safe.
 
-### 84. Exceptions are explicit debt
+### 86. Exceptions are explicit debt
 
 An exception to this contract names:
 
@@ -856,8 +915,10 @@ An exception to this contract names:
 - the owner and removal deliverable;
 - the test or check preventing the exception from expanding.
 
-“Existing pattern”, “arena-backed”, “only the REPL”, and “unlikely OOM” are not
-exceptions.
+“Existing pattern”, “arena-backed”, and “unlikely OOM” are not exceptions.
+Limited reach, such as a path only the REPL exercises, may lower remediation
+priority, but it does not waive an invariant; a temporary exception is still
+documented and bounded as above.
 
 ### Pull request checklist
 
@@ -881,9 +942,11 @@ Every PR answers:
 10. Is every new number declared once with units, accounting window, and
     source?
 11. Can every new external string reach only validated plain-text rendering?
-12. Which regression test fails on the old behavior?
-13. Which test proves refusal or injected failure leaves state unchanged?
-14. Are the full gate, both smokes when required, contract script, clean
+12. Do new and edited comments state only what is true now, citing sources
+    rather than history (rules 82 and 83)?
+13. Which regression test fails on the old behavior?
+14. Which test proves refusal or injected failure leaves state unchanged?
+15. Are the full gate, both smokes when required, contract script, clean
     package build, and relevant target builds green?
 
 ### Reviewer checks
@@ -896,5 +959,5 @@ git log --oneline origin/main..HEAD
 
 - Is more than one branch in flight?
 - Does this change combine unrelated audit deliverables?
-- Does a claimed exception satisfy rule 84?
+- Does a claimed exception satisfy rule 86?
 - Is the reviewed commit exactly the commit that passed the gate?

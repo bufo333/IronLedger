@@ -16,6 +16,8 @@ the code works wait until nothing is mid-implementation.
   external audit of 2026-09-23 (D14–D22; `docs/audit.md`, and
   `docs/audit-response.md` for what we accepted and why). Each item names
   its contract rule; each audit deliverable names its finding numbers.
+- **Part 3, adopting the revised contract.** The infrastructure the
+  proposed contract's gate needs, then the adoption itself.
 
 Line numbers are as of the day an item was filed and drift as PRs land;
 the rule and the symbol are the stable key.
@@ -110,6 +112,10 @@ When Part 1 is empty, Stage 12 is marked ✅ in ROADMAP.md and README.md.
 - [ ] `cli.zig`: one branch per verb (delete the shadowing `shares`/`autoadmit` at 147-155), strict enum tokens for `xfer` and `office` (345-367), trailing tokens rejected. REPL smoke steps for each refusal.
 - [ ] Reviewer checks use recursive globs (`src/tui/**/*.zig`), add a `commands.execute(` outside `exec`/`execSay` check, and run as a script in CI; the 11 direct calls in screens either go through `execSay` or are listed as result-reading exceptions.
 
+## D22a. Comments and citations (contract rule 43)
+
+- [ ] Rewrite existing comments to rule 43: remove history and anecdote (47 lines match `rg -n '//.*\b(used to|no longer|previously|play feedback|we decided|was changed)\b' src` as of 2026-09-23), strip roadmap stage tags outside `//!` module headers (633), drop stage prefixes from test names (133), and trim narrative doc comments to what the code cannot show. Mechanical, one PR per layer (domain/econ/gen, sim, persist, tui).
+
 ## D22. Build, data and tests (audit #20, #24, #25, #26, #28; rules 6, 9)
 
 - [ ] `build.zig.zon` `.paths` adds `docs/logos` and `LICENSE`.
@@ -125,3 +131,21 @@ When Part 1 is empty, Stage 12 is marked ✅ in ROADMAP.md and README.md.
 Contract deliverables closed before this list merged, all from the 2026-09-22 contract audit. The full item lists are in git history (`docs/contract-todo.md` at `7441a14`).
 
 - D0 one rule for structural needs (PR #3) · D1 the contract itself (PR #4) · D2 layering and core purity (PR #5) · D3 entity predicates (PR #6) · D4 one computation, one function (PR #7) · D5 ledgers (PR #8) · D6 numbers appear once (PRs #9, #10, #20) · D7 formatting helpers (PR #11) · D8 commands leave state consistent (PR #12) · D9 rules move out of queries (PR #13) · D10 REPL printers as query loops (PR #14) · D11 TUI boundary (PR #15) · D12a–c TUI structure (PRs #16, #17, #19, #22) · D13 tests and CI (PR #21, one item left above)
+
+---
+
+# Part 3 — Adopting the revised contract
+
+`docs/coding-contract-proposed-updated.md` becomes normative only when its
+full gate runs and passes. Until then `docs/coding-contract.md` and its gate
+govern. Order (decided 2026-09-23): after Part 1 and after the D14–D20 fixes.
+
+- [ ] `docs/verify-contract.sh`: recursive layer, impurity, frontend-boundary, direct `commands.execute`, escape-sequence, markup, comment and module-registry checks, narrow documented allowlists. The markup check derives its tag set from `table.marks`.
+- [ ] CI installs ripgrep explicitly and runs the script.
+- [ ] One mechanical PR makes `zig fmt --check build.zig src` clean repo-wide.
+- [ ] CI clean-package build: a tree holding only the `build.zig.zon` paths builds (overlaps D22 `.paths`).
+- [ ] Windows support: target-gated terminal (console API and raw mode), resize without SIGWINCH, child-process music player (no `afplay`), paths. Then CI compiles macOS, Linux and Windows (proposal rule 65).
+- [ ] Every rule citation updated to the new numbering in one PR: `src/` (33), docs (14), CLAUDE.md (hard rules, "section 9 checklist" becomes section 11), TODO.md, test names. Optionally switch to stable IDs (`ATOMIC-01`, `VIEW-04`).
+- [ ] `docs/audit-response.md` gets a policy addendum, and the historical analysis stays as written: the contract review adopted failure atomicity as a forward requirement; D17 uses prepare/commit atomic helpers and one failure-injection test per shared mutation pattern, not a transaction framework. D17 expands to match.
+- [ ] Adoption PR: title becomes "Coding contract", replaces `docs/coding-contract.md`, every gate command passes on that commit, and remaining violations are listed as bounded exceptions (proposal rule 86) tied to D21/D22. The new PR checklist applies from that commit on.
+
