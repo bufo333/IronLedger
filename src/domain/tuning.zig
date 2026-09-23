@@ -448,6 +448,9 @@ pub const Tuning = struct {
         /// Armour patched per week and its labour.
         armor_patch_pct: u8,
         armor_patch_labour: types.CBills,
+        /// The night after a fight (12G.6): the share of the company's
+        /// pooled spare tech-hours the field repair push spends.
+        push_hours_bp: types.Bp, // TUNE
         /// A snake-eyes week hurts the tech on a follow-up 2d6 at or under
         /// this, for this many days plus 2d6.
         accident_target: u8,

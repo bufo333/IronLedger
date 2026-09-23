@@ -133,6 +133,11 @@ pub const SupplyClass = enum { parts, ammo, medical, provisions, personnel };
 /// against several light ones against a crate of spares.
 pub const SalvagePlan = enum { heaviest, most_hulls, parts_only };
 
+/// The order the techs take the damage in, the night after a fight
+/// (12G.6). The pooled hours and the field armour run out before the
+/// damage does, so the commander chooses who fights shot up.
+pub const RepairOrder = enum { worst_first, spread, heaviest_first };
+
 /// Where physical stock sits (Stage 9B): the outfit's fallback depot (no HQ
 /// yet), an HQ warehouse, or a deployed company's field stores (which
 /// travel with it, capped by its logistics trucks).

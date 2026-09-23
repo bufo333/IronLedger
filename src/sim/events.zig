@@ -62,6 +62,9 @@ pub const EventKind = enum {
     /// The field is held and the salvage claim will not stretch to
     /// everything worth dragging home (12G.6).
     salvage_priority,
+    /// The night after a fight, and the hours and armour will not stretch
+    /// over all the damage (12G.6): whose hull the techs take first.
+    field_repair,
 
     /// Does this decision hold the turn (ARCH §6)? The test is what the
     /// decision disposes of, not how big it feels: a battle decision
@@ -71,7 +74,7 @@ pub const EventKind = enum {
     /// because ignoring your inbox is a choice, not an impossibility.
     pub fn blocksTurn(self: EventKind) bool {
         return switch (self) {
-            .press_or_consolidate, .recovery_push, .salvage_priority => true,
+            .press_or_consolidate, .recovery_push, .salvage_priority, .field_repair => true,
             else => false,
         };
     }
@@ -136,6 +139,8 @@ pub const Effect = union(enum) {
     recovery_push,
     /// Spend the event's battle's salvage claim this way (12G.6).
     take_salvage: types.SalvagePlan,
+    /// Work the company's damage in this order tonight (12G.6).
+    field_repair: types.RepairOrder,
 };
 
 pub const Option = struct {

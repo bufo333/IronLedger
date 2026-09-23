@@ -291,6 +291,7 @@
         .labour_destroyed_divisor = 10,
         .armor_patch_pct = 15,
         .armor_patch_labour = 5_000,
+        .push_hours_bp = 5_000, // TUNE: half a week of spare hours in one night's hard work
         .accident_target = 3, // one bad week in twelve after snake-eyes
         .accident_days_base = 5,
         .bay_accident_days_base = 10,

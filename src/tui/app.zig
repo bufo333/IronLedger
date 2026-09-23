@@ -2219,7 +2219,7 @@ pub const App = struct {
                 return;
             },
             .decision => |id| {
-                self.say(.crit, "day {d} · {s} — the field is yours: the tempo is your call", .{ st.day, st.date });
+                self.say(.crit, "day {d} · {s} — a battle decision is waiting on your desk", .{ st.day, st.date });
                 self.openModal(.{ .decision = id });
                 return;
             },

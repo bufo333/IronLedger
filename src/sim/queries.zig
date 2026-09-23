@@ -271,6 +271,26 @@ fn salvageDetail(alloc: Alloc, gs: *GameState, ev: *const @import("events.zig").
     return out.toOwnedSlice(alloc);
 }
 
+/// What the night's repairs have to work with and what each order would
+/// do (12G.6). Every line comes from `maintenance.repairPlan` on the live
+/// stores — the function the command carries out with — so the screen
+/// never works out the repairs itself.
+fn repairDetail(alloc: Alloc, gs: *GameState, ev: *const @import("events.zig").Event) ![]const []const u8 {
+    const maintenance = @import("maintenance.zig");
+    const needs = try maintenance.repairNeeds(gs, alloc, ev.company);
+    if (needs.len == 0) return &.{};
+    const budget = try maintenance.repairBudget(gs, alloc, ev.company, needs);
+    var out: std.ArrayListUnmanaged([]const u8) = .empty;
+    try out.append(alloc, try std.fmt.allocPrint(alloc, "  {d} damaged hull{s} · {d} tech-hours tonight · {d} t armour in the field stores", .{
+        needs.len, if (needs.len == 1) "" else "s", budget.hours, budget.armor_tons,
+    }));
+    for ([_]types.RepairOrder{ .worst_first, .spread, .heaviest_first }, 1..) |order, n| {
+        const plan = try maintenance.repairPlan(alloc, needs, budget, order);
+        try out.append(alloc, try std.fmt.allocPrint(alloc, "  [{d}] {s}", .{ n, try maintenance.pushSummary(alloc, plan) }));
+    }
+    return out.toOwnedSlice(alloc);
+}
+
 /// Campaign-log rows the Desk asks for (12C): enough to scroll a season
 /// without walking the whole log every frame.
 pub const desk_log_rows: usize = 40;
@@ -323,7 +343,11 @@ pub fn desk(alloc: Alloc, gs: *GameState, log_rows: usize) !Desk {
             .description = if (ev.person != .none) (if (gs.person(ev.person)) |p| (if (p.status == .pow) try std.fmt.allocPrint(alloc, "{s} of {s} ({s} {s}, gunnery {d}) {s}", .{ try p.fullName(alloc), p.faction, @tagName(p.experience()), @tagName(p.role), p.skill(p.role.primarySkill()) orelse 7, if (entry) |e| e.log else "" }) else if (p.status == .mia) try std.fmt.allocPrint(alloc, "{s} ({s} {s}, held by {s}) {s} · ransom {s}{s}", .{ try p.fullName(alloc), @tagName(p.experience()), @tagName(p.role), p.faction, if (entry) |e| e.log else "", try money(alloc, missingRansom(p)), if (holdsPrisonerOf(gs, p.faction)) " · you hold a prisoner of theirs" else " · you hold no prisoner of theirs" }) else try std.fmt.allocPrint(alloc, "{s} ({s}, {s}, {s}/mo, morale {d}, fatigue {d}) {s}{s}", .{ try p.fullName(alloc), @tagName(p.role), @tagName(p.experience()), try money(alloc, p.monthlySalary()), p.morale, p.fatigue, if (entry) |e| e.log else "", if (ev.kind == .notice_given) try std.fmt.allocPrint(alloc, " · letting go owes {s} severance{s}", .{ try money(alloc, severanceOwed(gs, p.id, false)), try loyaltyNote(alloc, p, day) }) else "" })) else "") else if (entry) |e| e.log else "",
             .options = try opts.toOwnedSlice(alloc),
             .default_choice = ev.default_choice,
-            .detail = if (ev.kind == .salvage_priority) try salvageDetail(alloc, gs, &ev) else &.{},
+            .detail = switch (ev.kind) {
+                .salvage_priority => try salvageDetail(alloc, gs, &ev),
+                .field_repair => try repairDetail(alloc, gs, &ev),
+                else => &.{},
+            },
         });
     }
 
@@ -398,6 +422,11 @@ pub fn effectsText(alloc: Alloc, effects: []const @import("events.zig").Effect) 
             .heaviest => "the biggest wreck the claim reaches, rest in spares",
             .most_hulls => "as many wrecks as the claim reaches, rest in spares",
             .parts_only => "no wrecks — the whole claim in spares and armour",
+        }),
+        .field_repair => |order| try appendTag(alloc, &out, true, switch (order) {
+            .worst_first => "the near-wrecks first, each as far as the night reaches",
+            .spread => "one job a hull a round, so the most hulls get plating",
+            .heaviest_first => "the heaviest hulls first, to keep the big BV in the line",
         }),
         .xp_all => |x| try appendTag(alloc, &out, true, try std.fmt.allocPrint(alloc, "XP +{d} all", .{x})),
         .score => |s| try appendTag(alloc, &out, s >= 0, try std.fmt.allocPrint(alloc, "contract score {s}{d}", .{ if (s >= 0) "+" else "", s })),
@@ -3862,6 +3891,31 @@ test "12.20: the hangar ranks a pilotless hull above one earning its keep, mothb
     try std.testing.expect(best != null and best.?.cost_index < std.math.maxInt(u32));
     const view = try toeFiltered(a, &gs, .hangar);
     try std.testing.expect(view.len == rows.len + 2);
+}
+
+test "12G.6: the inbox shows what each repair order would do, as the techs would do it" {
+    const maintenance = @import("maintenance.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 12068 });
+    defer gs.deinit();
+    const f = try contract_events.damagedCompanyForTest(&gs, 2);
+    try contract_events.queueFieldRepair(&gs, f.c, .none);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    const view = try desk(a, &gs, 0);
+    try std.testing.expectEqual(@as(usize, 1), view.inbox.len);
+    const row = view.inbox[0];
+    try std.testing.expectEqual(@as(usize, 3), row.options.len);
+    try std.testing.expectEqual(@as(usize, 4), row.detail.len);
+    try std.testing.expect(std.mem.indexOf(u8, row.detail[0], "3 damaged hulls") != null);
+    try std.testing.expect(std.mem.indexOf(u8, row.detail[0], "2 t armour") != null);
+    // Each order's line is the plan the command would carry out.
+    for ([_]types.RepairOrder{ .worst_first, .spread, .heaviest_first }, 1..) |order, n| {
+        const plan = try maintenance.planFor(&gs, a, f.c.assigned_company, order);
+        const want = try std.fmt.allocPrint(a, "  [{d}] {s}", .{ n, try maintenance.pushSummary(a, plan) });
+        try std.testing.expectEqualStrings(want, row.detail[n]);
+    }
 }
 
 test "12G.6: the inbox shows the wrecks a salvage claim is being divided over" {
