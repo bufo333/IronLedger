@@ -1639,35 +1639,32 @@ fn trainCompany(gs: *GameState, company: types.ForceId, skill_opt: ?types.SkillT
 fn replaceGear(gs: *GameState, unit_id: types.UnitId) Error!Result {
     const u = gs.unit(unit_id) orelse return Error.UnknownUnit;
     if (gs.hqs.count() == 0) return Error.NoHq;
-    const site = gs.siteForForce(u.force);
+    const site = hq_ops.spareSiteFor(gs, u);
     var wanted: u32 = 0;
     var ordered: u32 = 0;
     var unsourced: u32 = 0;
+    // The site's ledger (hq_ops.spareDemand) says what is short across every
+    // hull there; this hull's broken mounts of a part get up to that many.
+    var arena = std.heap.ArenaAllocator.init(gs.scratch());
+    defer arena.deinit();
+    const ledger = hq_ops.spareDemand(arena.allocator(), gs, site) catch return Error.OutOfMemory;
     for (u.slots.items, 0..) |s, i| {
-        if (!needsSpare(s)) continue;
+        if (!hq_ops.slotNeedsSpare(s)) continue;
         wanted += 1;
-        // The n-th broken mount of this part on the hull is covered when
-        // that many spares are already on the shelf or on their way.
         var nth: u32 = 0;
-        for (u.slots.items[0..i]) |t| if (needsSpare(t) and std.mem.eql(u8, t.part_key, s.part_key)) {
+        for (u.slots.items[0..i]) |t| if (hq_ops.slotNeedsSpare(t) and std.mem.eql(u8, t.part_key, s.part_key)) {
             nth += 1;
         };
-        var covered: u32 = gs.stockCount(site, s.part_key);
-        for (gs.part_orders.items) |o| {
-            if (std.mem.eql(u8, o.part_key, s.part_key) and o.inFlight() and std.meta.eql(o.dest, site)) covered += o.quantity;
-        }
-        if (nth < covered) continue;
+        var short: u32 = 0;
+        for (ledger) |l| if (std.mem.eql(u8, l.key, s.part_key)) {
+            short = l.short;
+        };
+        if (nth >= short) continue;
         const r = try orderPart(gs, s.part_key, 1, site);
         if (r.sourced) ordered += 1 else unsourced += 1;
     }
     if (wanted == 0) return Error.NothingToReplace;
     return .{ .ordered = ordered, .unsourced = unsourced };
-}
-
-/// A slot that wants a spare part: destroyed or missing, and field work.
-fn needsSpare(s: unit_mod.PartSlot) bool {
-    if (s.condition != .destroyed and s.condition != .missing) return false;
-    return unit_mod.repairTier(s.class, s.condition) == .field;
 }
 
 fn orderPart(gs: *GameState, part_key: []const u8, quantity: u32, dest_opt: ?types.Site) Error!Result {

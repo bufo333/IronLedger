@@ -53,6 +53,8 @@ pub const WarningKind = enum {
 };
 
 /// Does any working weapon in the company draw on this munition family?
+/// (`field_supply.munitionMounts` is the census; callers with several
+/// families to ask about take the map once.)
 fn companyFires(gs: *GameState, company: types.ForceId, family: []const u8) bool {
     var arena = std.heap.ArenaAllocator.init(gs.scratch());
     defer arena.deinit();
@@ -213,8 +215,9 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
             // Only the families the company's working mounts actually fire.
             var dry: u32 = 0;
             var names: std.ArrayListUnmanaged(u8) = .empty;
+            const fires = try @import("field_supply.zig").munitionMounts(alloc, gs, f.id, false);
             for (part_mod.munition_keys) |key| {
-                if (!companyFires(gs, f.id, key)) continue;
+                if (!fires.contains(key)) continue;
                 if (gs.stockCount(.{ .company = f.id }, key) > 0) continue;
                 dry += 1;
                 if (names.items.len > 0) try names.appendSlice(alloc, ", ");

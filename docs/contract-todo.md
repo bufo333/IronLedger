@@ -96,9 +96,9 @@ One predicate each; every listed site calls it.
 
 ---
 
-## D5. Ledgers (rule 11)
+## D5. Ledgers (rule 11) — PR #8
 
-- [ ] `hq_ops.spareDemand(gs, site)` mirroring `componentDemand` for field spares: one need definition (destroyed or missing, field tier), one stock scope (the hull's site), `PartOrder.inFlight()` for coming. Callers: Market DEMAND gear rows (queries.zig:2236-2266, today counts damaged and sums every HQ), Lab mount notes (queries.zig:3556-3568), `replaceGear` (commands.zig:1657-1670), maintenance.zig:205, REPL `demand` (main.zig:611-650).
+- [x] `hq_ops.spareDemand(gs, site)` mirroring `componentDemand` for field spares: one need definition (destroyed or missing, field tier), one stock scope (the hull's site), `PartOrder.inFlight()` for coming. Callers: Market DEMAND gear rows (queries.zig:2236-2266, today counts damaged and sums every HQ), Lab mount notes (queries.zig:3556-3568), `replaceGear` (commands.zig:1657-1670), maintenance.zig:205, REPL `demand` (main.zig:611-650).
 
 ---
 
@@ -250,7 +250,7 @@ Baseline: 61 field reads, 70 method calls, 41 module imports in `src/tui/app.zig
 ## D13. Tests and CI (rules 37-40)
 
 - [ ] `term.zig` added to the test block in `src/main.zig:6-14`.
-- [ ] The emblem-editor smoke step (tui_smoke.py ~236-242) is timing-flaky: wait for text instead of sleeping.
+- [x] The emblem-editor smoke step (tui_smoke.py ~236-242) was timing-flaky: it now waits for text (`wait_for`) instead of sleeping (PR #8).
 - [ ] Smoke coverage: delete-player and delete-campaign confirms, disband and sell-HQ confirms, game-over path, music modal, resize, the 80-120 column boundary, `←/→` column scrolling on each table screen, every refusal branch of a confirm.
 - [ ] `.github/workflows/ci.yml`: `zig build test --summary all` plus both smokes on push and pull request.
 - [ ] Golden-master hash test (rule 40) if not already present.

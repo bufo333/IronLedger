@@ -611,38 +611,27 @@ fn printDemand(gs: *game.state.GameState) void {
             l.key, l.need, l.on_hand, l.coming, l.short, if (l.short > 0) "  ← order or fabricate" else "",
         });
     }
-    // Gear: destroyed or missing field-work parts on any hull short of scrap.
-    var needed: std.StringArrayHashMapUnmanaged(u32) = .empty;
-    var uit = gs.units.iterator();
-    while (uit.next()) |entry| {
-        const u = entry.value_ptr;
-        if (u.wreck == .scrap) continue;
-        for (u.slots.items) |s| {
-            if (s.class == .structure or (s.condition != .destroyed and s.condition != .missing)) continue;
-            const e = needed.getOrPut(arena.allocator(), s.part_key) catch return;
-            if (!e.found_existing) e.value_ptr.* = 0;
-            e.value_ptr.* += 1;
+    // Gear: the spares ledger per site (hq_ops.spareDemand), the same one
+    // the Lab, the Market and `replace` read.
+    var gear_any = false;
+    var hit2 = gs.hqs.iterator();
+    while (hit2.next()) |h| {
+        for (game.hq_ops.spareSitesOf(arena.allocator(), gs, h.value_ptr.id) catch return) |site| {
+            const ledger = game.hq_ops.spareDemand(arena.allocator(), gs, site) catch return;
+            if (ledger.len == 0) continue;
+            if (!gear_any) std.debug.print("demand (gear to fix broken slots, per site):\n", .{});
+            gear_any = true;
+            switch (site) {
+                .hq => |id| std.debug.print("  hq:{d} {s}\n", .{ @intFromEnum(id), h.value_ptr.name }),
+                .company => |id| std.debug.print("  co:{d} (afield)\n", .{@intFromEnum(id)}),
+                .outfit => std.debug.print("  outfit\n", .{}),
+            }
+            for (ledger) |l| std.debug.print("    {s:<14} need {d:>3} | on hand {d:>3} | coming {d:>3} | shortfall {d:>3}{s}\n", .{
+                l.key, l.need, l.on_hand, l.coming, l.short, if (l.short > 0) "  ← order" else "",
+            });
         }
     }
-    if (needed.count() == 0) {
-        if (!any) std.debug.print("demand: nothing broken needs a part.\n", .{});
-        return;
-    }
-    std.debug.print("demand (gear to fix broken slots):\n", .{});
-    const home = gs.defaultSite();
-    var it = needed.iterator();
-    while (it.next()) |entry| {
-        const key = entry.key_ptr.*;
-        var on_order: u32 = 0;
-        for (gs.part_orders.items) |o| {
-            if (o.inFlight() and std.mem.eql(u8, o.part_key, key)) on_order += o.quantity;
-        }
-        const on_hand = gs.stockCount(home, key);
-        const shortfall = entry.value_ptr.* -| (on_hand + on_order);
-        std.debug.print("  {s:<14} need {d:>3} | on hand {d:>3} | on order {d:>3} | shortfall {d:>3}{s}\n", .{
-            key, entry.value_ptr.*, on_hand, on_order, shortfall, if (shortfall > 0) "  ← order" else "",
-        });
-    }
+    if (!any and !gear_any) std.debug.print("demand: nothing broken needs a part.\n", .{});
 }
 
 fn personName(gs: *game.state.GameState, id: game.types.PersonId) []const u8 {

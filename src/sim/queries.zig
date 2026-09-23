@@ -2062,9 +2062,10 @@ pub fn market(alloc: Alloc, gs: *GameState, filter: MarketFilter, hq: types.HqId
     }
     // Demand. Structure first: this HQ's depot ledger, the same rule the
     // depot queue applies (hq_ops.componentDemand), so a wreck the depot
-    // refuses for want of a torso shows that torso here. Then gear: damaged
-    // or destroyed field-work parts on any hull short of scrap, which techs
-    // fit from spares wherever the hull sits.
+    // refuses for want of a torso shows that torso here. Then gear: the
+    // spares ledger (hq_ops.spareDemand) for the HQ's shelf and for the
+    // field stores of its companies that are away, since field work is
+    // done where the hull sits.
     var demand: std.ArrayListUnmanaged(DemandRow) = .empty;
     for (try @import("hq_ops.zig").componentDemand(alloc, gs, hq, null)) |l| {
         try demand.append(alloc, .{ .key = l.key, .short = l.short, .cells = try table.row(alloc, &.{
@@ -2075,37 +2076,21 @@ pub fn market(alloc: Alloc, gs: *GameState, filter: MarketFilter, hq: types.HqId
             try std.fmt.allocPrint(alloc, "{s}{d}{{/}}", .{ if (l.short > 0) "{c}" else "{g}", l.short }),
         }) });
     }
-    var need: std.StringArrayHashMapUnmanaged(u32) = .empty;
-    var uit = gs.units.iterator();
-    while (uit.next()) |e| {
-        const u = e.value_ptr;
-        if (u.wreck == .scrap) continue;
-        for (u.slots.items) |s| {
-            if (s.condition == .ok or s.class == .structure) continue;
-            const g = try need.getOrPut(alloc, s.part_key);
-            if (!g.found_existing) g.value_ptr.* = 0;
-            g.value_ptr.* += 1;
-        }
-    }
-    var dit = need.iterator();
-    while (dit.next()) |e| {
-        const key = e.key_ptr.*;
-        const n = e.value_ptr.*;
-        var on_hand: u32 = gs.spareCount(key);
-        var hit = gs.hqs.iterator();
-        while (hit.next()) |h| on_hand += gs.stockCount(.{ .hq = h.value_ptr.id }, key);
-        var on_order: u32 = 0;
-        for (gs.part_orders.items) |o| if (std.mem.eql(u8, o.part_key, key) and o.inFlight()) {
-            on_order += o.quantity;
+    const hq_ops = @import("hq_ops.zig");
+    for (try hq_ops.spareSitesOf(alloc, gs, hq)) |site| {
+        const where: []const u8 = switch (site) {
+            .company => |co| try std.fmt.allocPrint(alloc, " {{d}}({s}, afield){{/}}", .{forceName(gs, co)}),
+            else => "",
         };
-        const short: u32 = if (n > on_hand + on_order) n - on_hand - on_order else 0;
-        try demand.append(alloc, .{ .key = key, .short = short, .cells = try table.row(alloc, &.{
-            key,
-            try std.fmt.allocPrint(alloc, "{d}", .{n}),
-            try std.fmt.allocPrint(alloc, "{d}", .{on_hand}),
-            try std.fmt.allocPrint(alloc, "{d}", .{on_order}),
-            try std.fmt.allocPrint(alloc, "{s}{d}{{/}}", .{ if (short > 0) "{c}" else "{g}", short }),
-        }) });
+        for (try hq_ops.spareDemand(alloc, gs, site)) |l| {
+            try demand.append(alloc, .{ .key = l.key, .short = l.short, .cells = try table.row(alloc, &.{
+                try std.fmt.allocPrint(alloc, "{s}{s}", .{ l.key, where }),
+                try std.fmt.allocPrint(alloc, "{d}", .{l.need}),
+                try std.fmt.allocPrint(alloc, "{d}", .{l.on_hand}),
+                try std.fmt.allocPrint(alloc, "{d}", .{l.coming}),
+                try std.fmt.allocPrint(alloc, "{s}{d}{{/}}", .{ if (l.short > 0) "{c}" else "{g}", l.short }),
+            }) });
+        }
     }
     return .{
         .board = try board.toOwnedSlice(alloc),
@@ -3210,6 +3195,7 @@ pub fn lab(alloc: Alloc, gs: *GameState, uid: types.UnitId) !Lab {
     try budget.append(alloc, "{d}ammo bins go where free crits are; the head takes 1 crit{/}");
 
     var removed_count: usize = 0;
+    const spares = try @import("hq_ops.zig").spareDemand(alloc, gs, @import("hq_ops.zig").spareSiteFor(gs, u));
     const p = gs.refitPlanFor(uid);
     for (u.slots.items) |s| {
         if (s.class == .structure) continue;
@@ -3226,11 +3212,15 @@ pub fn lab(alloc: Alloc, gs: *GameState, uid: types.UnitId) !Lab {
         const part = @import("../domain/part.zig").find(s.part_key);
         var repair_note: []const u8 = "";
         if (!removed and s.condition != .ok) {
-            const on_hand = gs.stockCount(.{ .hq = home_hq }, s.part_key) + gs.spareCount(s.part_key);
+            // The hull's own site's ledger (hq_ops.spareDemand): the shelf its
+            // tech draws from, the orders bound for it.
+            var on_hand: u32 = 0;
             var on_order: u32 = 0;
-            for (gs.part_orders.items) |o| if (std.mem.eql(u8, o.part_key, s.part_key) and o.inFlight()) {
-                on_order += o.quantity;
+            for (spares) |l| if (std.mem.eql(u8, l.key, s.part_key)) {
+                on_hand = l.on_hand;
+                on_order = l.coming;
             };
+            if (s.condition == .damaged) on_hand = 1; // hours alone, no part
             repair_note = if (on_hand > 0) "  {g}part in stock — techs fit it on the next repair pass{/}" else if (on_order > 0) try std.fmt.allocPrint(alloc, "  {{a}}{d} on order{{/}}", .{on_order}) else "  {c}no part — [R] orders one{/}";
         }
         try mounts.append(alloc, .{ .slot_key = s.slot_key, .text = try std.fmt.allocPrint(alloc, "{s}{s: <17} {s: <11} {s: <7} {d: >2}.{d}t {d: >2}c {s}{s}{{/}}{s}", .{
