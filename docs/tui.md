@@ -73,6 +73,10 @@ command line   `:` prompt (opens on `:`), hints on the right
   screen. Tab / Shift-Tab cycles pane focus; each pane owns a cursor.
 - **Modals** (end-turn checklist, decision, confirmations, order/transfer
   forms) draw over the current screen and take all input until closed.
+  The **after-action sheet** (Desk `b`, then Enter) is the one that carves
+  its own layout: the fight, the field, the spoils and the trucks in four
+  panes, falling back to the wrapped AAR text below
+  `layout.modal.after_action_stack_cols`.
 - **Size.** The client measures the terminal at startup and on SIGWINCH
   and lays every screen out from the width and height it has: panes split
   the body by ratio, side panes drop below 120 columns (`narrow()`), the
@@ -102,7 +106,7 @@ land in the Desk log pane.
 
 | Tab | Screen | Panes | Local keys → commands |
 |---|---|---|---|
-| F1 | Desk | Emblem · Checklist · Inbox · Companies · Log · HQs | Enter on inbox → `resolve_decision`; Enter on checklist → jump to fixing screen; Enter on log → the whole entry, word-wrapped |
+| F1 | Desk | Emblem · Checklist · Inbox · Companies · Log · HQs | Enter on inbox → `resolve_decision`; Enter on checklist → jump to fixing screen; Enter on log → the whole entry, word-wrapped; `b` → the after-action reports, Enter reads one |
 | F2 | Map | Star map · World | `h j k l` move by world (view follows) · `+`/`-` zoom ×1–×8 centred on the cursor · `o` offers here · `f` → `found_hq` |
 | F3 | Forces | TO&E tree · Hull/Person detail · Unassigned pool | `a` → `assign`, `u` → `unassign`, `A` → `auto_assign`, `t` → `train`, `x` → `transfer_unit`/`transfer_person`, `m` medbay modal (`triage`, `leave`), `[ ]` page all forces / each company / unassigned pool, `+` → `raise_company` wizard (`buy_hull_for`, `crew_company`, `manning`) |
 | F4 | Contracts | Board · Active · History (closed contracts: outcome, world, days served, VP, pay received) · Contract log | Enter → `accept_contract` (company picker), `c` → `complete_contract`, `R` → `recall_company`; Tab to History, the log follows the cursor |

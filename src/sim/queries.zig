@@ -4826,6 +4826,216 @@ pub fn battleList(alloc: Alloc, gs: *GameState) ![]BattleRow {
     return out.toOwnedSlice(alloc);
 }
 
+/// One engagement broken into the panes the after-action screen draws.
+/// Every string is finished markup: the client positions rects, it never
+/// decides what a number means (rule 13).
+pub const AfterAction = struct {
+    title: []const u8,
+    right_title: []const u8,
+    /// How the fight was decided — the roll, the odds, what it cost.
+    fight: []const []const u8,
+    /// One row per hull hit, with its armour meter.
+    field: table.Table,
+    /// What was claimed, and what the employer's liaison took.
+    spoils: []const []const u8,
+    /// Munitions burned against what is left in the trucks.
+    trucks: []const []const u8,
+    /// The whole thing as flat lines, for a terminal too narrow to split.
+    flat: []const []const u8,
+};
+
+pub const after_action_cols: []const table.Col = &.{
+    .{ .name = "hull" },
+    .{ .name = "armour" },
+    .{ .name = "damage" },
+    .{ .name = "crew" },
+};
+
+pub fn afterAction(alloc: Alloc, gs: *GameState, id: types.BattleId) !?AfterAction {
+    const r = gs.battle_reports.find(id) orelse return null;
+    const mk = outcomeMark(r.outcome);
+
+    var fight: std.ArrayListUnmanaged([]const u8) = .empty;
+    try fight.append(alloc, try std.fmt.allocPrint(alloc, "{s} · {s}", .{ r.scenario, r.terrain }));
+    try fight.append(alloc, try std.fmt.allocPrint(alloc, "{s}{s}{{/}} · {s}", .{
+        mk, @tagName(r.outcome), if (r.held_field) "{g}field held{/}" else "{c}field lost{/}",
+    }));
+    try fight.append(alloc, "");
+    try fight.append(alloc, try std.fmt.allocPrint(alloc, "power {d} vs {d}", .{ r.player_power, r.enemy_power }));
+    try fight.append(alloc, try std.fmt.allocPrint(alloc, "ROE {s}{s}{s}", .{
+        @tagName(r.roe),
+        if (r.roe_overridden) " {d}(integrated command){/}" else "",
+        if (r.withdrew) " {a}· withdrew{/}" else "",
+    }));
+    try fight.append(alloc, try std.fmt.allocPrint(alloc, "{{d}}recon {d} · fatigue {d} · morale {d}{{/}}", .{ r.recon_quality, r.avg_fatigue, r.avg_morale }));
+    try fight.append(alloc, "");
+    try fight.append(alloc, try std.fmt.allocPrint(alloc, "{d} hit · {s}{d} destroyed{{/}} · {s}{d} WIA{{/}} · {s}{d} KIA{{/}}", .{
+        r.hits_taken,
+        if (r.destroyed > 0) "{c}" else "{g}", r.destroyed,
+        if (r.wounded > 0) "{a}" else "{g}", r.wounded,
+        if (r.kia > 0) "{c}" else "{g}", r.kia,
+    }));
+    if (r.lost_hulls > 0) try fight.append(alloc, try std.fmt.allocPrint(alloc, "{{c}}{d} hull(s) left to {s}{{/}}{s}", .{
+        r.lost_hulls, r.enemy_key,
+        if (r.missing > 0) try std.fmt.allocPrint(alloc, " {{c}}· {d} pilot(s) missing{{/}}", .{r.missing}) else "",
+    }));
+    // Applied to every active hand since 12C.1, reported since 12G.
+    try fight.append(alloc, try std.fmt.allocPrint(alloc, "morale {s}{s}{d}{{/}} · fatigue {{a}}+{d}{{/}}", .{
+        if (r.morale_delta < 0) "{c}" else "{g}", if (r.morale_delta > 0) "+" else "", r.morale_delta, r.fatigue_add,
+    }));
+    try fight.append(alloc, try std.fmt.allocPrint(alloc, "score {s}{s}{d}{{/}} (now {d}) · comp {s}", .{
+        if (r.score_delta < 0) "{c}" else "{g}", if (r.score_delta > 0) "+" else "", r.score_delta, r.score_after, try money(alloc, r.battle_loss_comp),
+    }));
+
+    var field: std.ArrayListUnmanaged(table.Row) = .empty;
+    for (r.hulls) |h| {
+        const damage = if (h.destroyed)
+            try std.fmt.allocPrint(alloc, "{{c}}DESTROYED{{/}} {{d}}({s}){{/}}{s}", .{
+                h.cause.label(),
+                if (h.lost) " {c}· left to the enemy{/}" else if (h.recovery != null) " {g}· dragged off{/}" else "",
+            })
+        else if (h.slot) |sk|
+            try std.fmt.allocPrint(alloc, "{s} {{d}}({s}){{/}} {s}{s}{{/}}", .{ sk, h.slot_part, if (h.slot_result == .destroyed) "{c}" else "{a}", h.slot_result.label() })
+        else
+            "{d}armour only{/}";
+        const crew = switch (h.crew.fate) {
+            .kia => try std.fmt.allocPrint(alloc, "{{c}}{s} KIA{{/}}", .{h.crew_name}),
+            .missing => try std.fmt.allocPrint(alloc, "{{c}}{s} MIA{{/}}", .{h.crew_name}),
+            .unhurt => if (h.crew.wound) |w|
+                try std.fmt.allocPrint(alloc, "{{a}}{s} ({s} {s}){{/}}", .{ h.crew_name, @import("medical.zig").severityLabel(w.severity), @tagName(w.location) })
+            else
+                "{d}—{/}",
+        };
+        try field.append(alloc, try table.row(alloc, &.{
+            try std.fmt.allocPrint(alloc, "#{d} {s} {s}", .{ @intFromEnum(h.unit), h.chassis_key, h.chassis_name }),
+            try std.fmt.allocPrint(alloc, "{d}% → {s}", .{ h.armor_before, try armorBar(alloc, h.armor_after) }),
+            damage,
+            crew,
+        }));
+    }
+
+    var spoils: std.ArrayListUnmanaged([]const u8) = .empty;
+    try spoils.append(alloc, try std.fmt.allocPrint(alloc, "{d} BV destroyed · {d} haulable · {d}% rights", .{ r.enemy_destroyed_bv, r.salvage.haulable_bv, r.salvage_pct }));
+    try spoils.append(alloc, try std.fmt.allocPrint(alloc, "{d} kill(s) credited{s}", .{
+        r.kills_credited,
+        if (r.prisoners > 0) try std.fmt.allocPrint(alloc, " · {{a}}{d} prisoner(s) taken{{/}}", .{r.prisoners}) else "",
+    }));
+    try spoils.append(alloc, "");
+    if (r.salvage.items.len > 0) {
+        for (try wrapPlain(alloc, r.salvage.items)) |line| try spoils.append(alloc, line);
+        if (r.salvage.liaison_cut > 0) try spoils.append(alloc, try std.fmt.allocPrint(alloc, "{{a}}the liaison claimed {d} BV under {s} rights{{/}}", .{ r.salvage.liaison_cut, r.command_rights }));
+    } else if (r.held_field) {
+        try spoils.append(alloc, "{d}field held, nothing worth hauling{/}");
+    } else {
+        try spoils.append(alloc, "{c}nothing — the field was not held{/}");
+    }
+
+    var trucks: std.ArrayListUnmanaged([]const u8) = .empty;
+    for (r.ammo) |a| {
+        // Burned against what the family started with, so the bar reads
+        // as "how much of this fight's supply went".
+        const had = a.burned + a.left;
+        var buf: [10]u8 = undefined;
+        const low = a.left == 0 or (had > 0 and a.left * 4 < had);
+        try trucks.append(alloc, try std.fmt.allocPrint(alloc, "{s: <6} {s}{s}{{/}} {d: >2}t burned · {s}{d: >2}t left{{/}}", .{
+            @import("../domain/part.zig").munitionLabel(a.key), if (low) "{a}" else "{g}", table.bar(&buf, a.burned, @max(1, had)),
+            a.burned, if (low) "{c}" else "", a.left,
+        }));
+    }
+    try trucks.append(alloc, "");
+    try trucks.append(alloc, try std.fmt.allocPrint(alloc, "{s}{d} mount(s) silenced (dry){{/}} · {d}t armour", .{
+        if (r.silenced_mounts > 0) "{c}" else "{d}", r.silenced_mounts, r.armor_left,
+    }));
+
+    return .{
+        .title = try std.fmt.allocPrint(alloc, "AFTER ACTION · {s} · {s} vs {s}, day {d}", .{ forceName(gs, r.company), r.kind, r.enemy_key, r.day }),
+        .right_title = "[Tab] pane · [Esc] close",
+        .fight = fight.items,
+        .field = .{ .cols = after_action_cols, .rows = field.items },
+        .spoils = spoils.items,
+        .trucks = trucks.items,
+        .flat = (try battleReport(alloc, gs, id)) orelse &.{},
+    };
+}
+
+test "12G.4b: the after-action panes read from the record" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const al = arena.allocator();
+    const battle = @import("battle.zig");
+    const part = @import("../domain/part.zig");
+
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 31337 });
+    defer gs.deinit();
+    _ = try gs.createCommander("T", .LC, .line_officer);
+    const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
+        .id = @enumFromInt(1),
+        .kind = .recon_raid,
+        .employer_key = "LC",
+        .enemy_key = "PER",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 6, .base_pay_month = 400_000, .salvage_pct = 30, .battle_loss_pct = 30 },
+        .status = .active,
+        .assigned_company = co,
+        .monthly_net = 300_000,
+    });
+    const c = gs.contracts.getPtr(@enumFromInt(1)).?;
+    const site: types.Site = .{ .company = co };
+    try gs.addStock(site, "armor", 60);
+    for (part.munition_keys) |key| try gs.addStock(site, key, 40);
+    for (0..6) |_| {
+        try battle.resolveEngagement(&gs, c);
+        try @import("maintenance.zig").runWeeklyRepairs(&gs);
+    }
+
+    const rows = try battleList(al, &gs);
+    try std.testing.expect(rows.len > 0);
+    const view = (try afterAction(al, &gs, rows[0].id)).?;
+
+    // The header names the fight; the panes carry its parts.
+    try std.testing.expect(std.mem.indexOf(u8, view.title, "AFTER ACTION") != null);
+    try std.testing.expect(std.mem.indexOf(u8, view.title, "Alpha") != null);
+    try std.testing.expect(view.fight.len > 0);
+    try std.testing.expect(view.spoils.len > 0);
+    // One truck row per munition family, plus a blank and the dry-mount line.
+    try std.testing.expectEqual(part.munition_keys.len + 2, view.trucks.len);
+    try std.testing.expectEqual(after_action_cols.len, view.field.cols.len);
+    for (view.field.rows) |row| try std.testing.expectEqual(after_action_cols.len, row.len);
+
+    // Morale and fatigue reach a screen for the first time (12G).
+    var saw_morale = false;
+    for (view.fight) |line| if (std.mem.indexOf(u8, line, "morale") != null and std.mem.indexOf(u8, line, "fatigue") != null) {
+        saw_morale = true;
+    };
+    try std.testing.expect(saw_morale);
+
+    // The trucks pane draws a real meter, not a bare number.
+    var saw_bar = false;
+    for (view.trucks) |line| if (std.mem.indexOf(u8, line, "----") != null or std.mem.indexOf(u8, line, "####") != null) {
+        saw_bar = true;
+    };
+    try std.testing.expect(saw_bar);
+
+    // The flat fallback is the same AAR the log kept, so a narrow
+    // terminal loses the layout and nothing else.
+    try std.testing.expect(view.flat.len >= 4);
+
+    // An id that aged out (or never was) is a miss, not a wrong report.
+    try std.testing.expect((try afterAction(al, &gs, @enumFromInt(9999))) == null);
+}
+
+/// Break a long comma-joined manifest into lines a narrow pane can show.
+fn wrapPlain(alloc: Alloc, text: []const u8) ![]const []const u8 {
+    var out: std.ArrayListUnmanaged([]const u8) = .empty;
+    var it = std.mem.splitSequence(u8, text, "; ");
+    while (it.next()) |part| {
+        const trimmed = std.mem.trim(u8, part, " ;");
+        if (trimmed.len > 0) try out.append(alloc, trimmed);
+    }
+    return out.toOwnedSlice(alloc);
+}
+
 /// One engagement's after-action, as the screens show it: the same lines
 /// the campaign log kept, with the colour a screen wants. The record is
 /// the source; `after_action.render` is still the only place a battle

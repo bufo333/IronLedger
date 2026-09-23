@@ -89,6 +89,11 @@ const Modal = union(enum) {
     lance_pick: types.UnitId,
     /// Company picker for an offer (board index): readiest first.
     accept_pick: usize,
+    /// The engagements still on record: pick one to read (12G.4b).
+    battle_list,
+    /// One engagement as a sheet — the fight, the field, the spoils, the
+    /// trucks — rather than forty columns of log prose.
+    after_action: types.BattleId,
     /// A contract's whole log, full screen and scrollable (play feedback:
     /// the side pane showed 40 clipped lines).
     contract_log: types.ContractId,
@@ -1179,6 +1184,48 @@ pub const App = struct {
         return self.modalRect(w, self.screen.rows).inner().w;
     }
 
+    /// The after-action sheet (12G.4b): four panes over one engagement.
+    /// The only modal that carves its own layout — `market.zig`'s split is
+    /// the template, with `modalRect` standing in for the screen body.
+    /// Too narrow to split, it falls back to the scrolling flat form, the
+    /// way the Forces detail pane degrades to a modal.
+    fn drawAfterAction(self: *App, al: std.mem.Allocator, id: types.BattleId) !void {
+        const view = (try q.afterAction(al, &self.gs.?, id)) orelse {
+            self.dialog("AFTER ACTION", &.{ "", "  {d}that engagement is no longer on record{/}", "", "  {d}any key closes{/}" }, layout.modal.log_entry_w, 6);
+            return;
+        };
+        const r = self.modalRect(layout.modal.after_action_w, self.screen.rows -| 1);
+        const b = self.screen.pane(r, .{ .title = view.title, .double = true, .right_title = view.right_title });
+        if (b.w < layout.modal.after_action_stack_cols) {
+            // One column: the AAR as it reads in the log, wrapped to the
+            // width there is and scrollable. Clipping it would hide the
+            // losses line's tail, which is the part worth reading.
+            var flat: std.ArrayListUnmanaged([]const u8) = .empty;
+            for (view.flat) |line| for (try screen_mod.wrap(al, line, b.w)) |w| try flat.append(al, w);
+            const max_first = flat.items.len -| b.h;
+            if (self.modal_cursor > max_first) self.modal_cursor = max_first;
+            self.screen.lines(b, flat.items, self.modal_cursor, null);
+            return;
+        }
+
+        const left_w: u16 = @max(30, layout.aar_fight.of(b.w));
+        const right_w: u16 = b.w - left_w;
+        const field_h: u16 = layout.aar_field.of(b.h);
+
+        const fight = self.screen.pane(.{ .x = b.x, .y = b.y, .w = left_w, .h = b.h }, .{ .title = "THE FIGHT" });
+        self.screen.lines(fight, view.fight, 0, null);
+
+        const field = self.screen.pane(.{ .x = b.x + left_w, .y = b.y, .w = right_w, .h = field_h }, .{ .title = "THE FIELD", .right_title = "[←/→] columns" });
+        try self.tableOrNote(field, view.field, 2, true, "{d}not a scratch{/}");
+
+        const rest_h: u16 = b.h - field_h;
+        const spoils_w: u16 = right_w / 2;
+        const spoils = self.screen.pane(.{ .x = b.x + left_w, .y = b.y + field_h, .w = spoils_w, .h = rest_h }, .{ .title = "THE SPOILS" });
+        self.screen.lines(spoils, view.spoils, 0, null);
+        const trucks = self.screen.pane(.{ .x = b.x + left_w + spoils_w, .y = b.y + field_h, .w = right_w - spoils_w, .h = rest_h }, .{ .title = "THE TRUCKS" });
+        self.screen.lines(trucks, view.trucks, 0, null);
+    }
+
     /// A titled box of text lines (the flow dialogs: end turn, quit, game over).
     fn dialog(self: *App, title: []const u8, rows: []const []const u8, w: u16, h: u16) void {
         const inner = self.screen.pane(self.modalRect(w, h), .{ .title = title, .double = true });
@@ -1189,7 +1236,8 @@ pub const App = struct {
         const al = self.a();
         switch (self.modal) {
             .none => {},
-            .help, .decision, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .seat, .emblem, .hull, .contract_log, .log_entry, .record => try self.drawList(al),
+            .help, .decision, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .seat, .emblem, .hull, .contract_log, .log_entry, .battle_list, .record => try self.drawList(al),
+            .after_action => |id| try self.drawAfterAction(al, id),
             .end_turn => {
                 const g = &self.gs.?;
                 const view = try q.desk(al, g, 0);
@@ -1751,7 +1799,7 @@ pub const App = struct {
     };
 
     const screen_table = [_]ScreenSpec{
-        .{ .tab = .desk, .draw = screens.desk.draw, .move = screens.desk.move, .enter = screens.desk.enter, .key = screens.desk.key, .panes = 3, .narrow_panes = 3, .footer = "F1-F10 / 1-0 screens · Tab pane · j/k cursor | Enter act · e emblem · n end turn | : command · F12 settings · ? help · q welcome" },
+        .{ .tab = .desk, .draw = screens.desk.draw, .move = screens.desk.move, .enter = screens.desk.enter, .key = screens.desk.key, .panes = 3, .narrow_panes = 3, .footer = "F1-F10 / 1-0 screens · Tab pane · j/k cursor | Enter act · b battles · e emblem · n end turn | : command · F12 settings · ? help · q welcome" },
         .{ .tab = .map, .draw = screens.map.draw, .move = screens.map.move, .enter = screens.map.enter, .key = screens.map.key, .panes = 1, .narrow_panes = 1, .footer = "h j k l move · + / - zoom · c colours | f found HQ here · o offers here | q welcome" },
         .{ .tab = .forces, .draw = screens.forces.draw, .move = screens.forces.move, .enter = screens.forces.enter, .key = screens.forces.key, .panes = 2, .narrow_panes = 2, .footer = "[ ] company / pool · j/k row · r cycle pane · M manning | a seat · u unassign · l lance · x transfer · c crew · A auto · t / T train one / all · o role (lance) / ROE (company) · d depot · R spares (hull) / recall (company) · m mothball · w air wing · + raise | $ sell · X disband · b fabricate" },
         .{ .tab = .contracts, .draw = screens.contracts.draw, .move = screens.contracts.move, .enter = screens.contracts.enter, .key = screens.contracts.key, .panes = 3, .narrow_panes = 3, .footer = "Tab pane · j/k row | board: Enter accept (you pick the company) · b bargain · active/history: Enter full log · c complete · R recall" },
@@ -2326,7 +2374,7 @@ pub const App = struct {
                     "",
                     "  {a}screens{/}     F1-F8 or 1-8 · Tab / Shift-Tab cycles panes · j/k ↑/↓ cursor · ←/→ scroll table columns (◀ 2 · 3 ▶ = hidden)",
                     "  {a}turn{/}        n ends the turn (the checklist opens first) · N ends 7 turns",
-                    "  {a}desk{/}        Enter on an inbox row opens the decision · Enter on a checklist row jumps to its screen · Enter on a log row opens the whole entry, wrapped",
+                    "  {a}desk{/}        Enter on an inbox row opens the decision · Enter on a checklist row jumps to its screen · Enter on a log row opens the whole entry, wrapped · b reads the after-action reports",
                     "  {a}contracts{/}   Enter accepts the offer under the cursor · b bargains one term (one round per offer) · c completes · R recalls",
                     "  {a}ledger{/}      j/k picks the treasury · t transfer · p policy · L loan",
                     "  {a}forces{/}      [ ] page through all forces, each company, the unassigned pool · a assign · u unassign · A auto-assign the company · t train one · T train the whole company at their trades (home only) · cursor on a company = DAMAGE pane (struct = depot, gear = field), r swaps it for READINESS · w air wing · b fabricates the shortest comp_*",
@@ -2555,6 +2603,18 @@ pub const App = struct {
             },
             .hull => |uid| return .{ .title = "HULL · [Esc] close", .rows = try q.hull(al, &self.gs.?, uid), .read_only = true, .w = layout.modal.hull_w, .max_h = full_h },
             .record => |pid| return .{ .title = "RECORD · [Esc] close", .rows = try q.personRecord(al, &self.gs.?, pid), .read_only = true, .w = layout.modal.record_w, .max_h = full_h },
+            .battle_list => {
+                const rows = try q.battleList(al, &self.gs.?);
+                return .{
+                    .title = "AFTER-ACTION REPORTS · [Enter] read · [Esc] close",
+                    .right_title = "newest first",
+                    .table = try q.tableOf(al, q.battle_cols, rows),
+                    .n = rows.len,
+                    .empty = "{d}no engagements on record yet — take a combat contract{/}",
+                    .w = layout.modal.battle_list_w,
+                    .max_h = full_h,
+                };
+            },
             .log_entry => |idx| {
                 const view = try q.desk(al, &self.gs.?, q.desk_log_rows);
                 const w = layout.modal.log_entry_w;
@@ -2681,6 +2741,11 @@ pub const App = struct {
     fn listEnter(self: *App) !void {
         const al = self.a();
         switch (self.modal) {
+            .battle_list => {
+                const rows = try q.battleList(al, &self.gs.?);
+                if (rows.len == 0) return;
+                self.openModal(.{ .after_action = rows[@min(self.modal_cursor, rows.len - 1)].id });
+            },
             .raise_hulls => try self.raiseTake(),
             .raise_support => try self.raiseBuySupport(),
             .music => if (self.music) |*m| {
@@ -2876,7 +2941,11 @@ pub const App = struct {
     fn handleModalKey(self: *App, key: Key) !void {
         switch (self.modal) {
             .none => {},
-            .help, .decision, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .seat, .emblem, .hull, .contract_log, .log_entry, .record => try self.listKey(key),
+            .help, .decision, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .seat, .emblem, .hull, .contract_log, .log_entry, .battle_list, .record => try self.listKey(key),
+            .after_action => switch (key) {
+                .escape, .char => self.modal = .{ .battle_list = {} },
+                else => {},
+            },
             .emblem_editor => switch (key) {
                 .escape => self.modal = .none,
                 .left => self.ed_x -|= 1,
