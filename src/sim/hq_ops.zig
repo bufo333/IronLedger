@@ -42,6 +42,119 @@ pub fn paperworkDaysFor(gs: *GameState, hq_id: types.HqId) u32 {
 
 pub const QueueError = error{ UnknownUnit, NoHq, NoBay, MissingComponents, WrittenOff } || std.mem.Allocator.Error;
 
+// ---- the one rule for structural needs ----
+//
+// Play feedback: the depot queue, the Market DEMAND pane, the Forces DAMAGE
+// pane, the unassigned pool and the REPL `demand` verb each re-derived "which
+// components does this hull need, and where" with their own filters, and a
+// wreck could be refused by the depot while every screen said nothing was
+// missing. Everything below reads the same slots and the same shelves; the
+// rule lives here once and every reader calls it.
+
+/// One structural component the depot consumes rebuilding a hull: the slot
+/// it restores and the comp_* key for the hull's weight class (12D.8).
+pub const DepotNeed = struct { slot_key: []const u8, component: []const u8 };
+
+/// What the depot takes from the hull's home warehouse when its job is
+/// queued: one component per destroyed or missing structure slot. Damaged
+/// structure is bay time alone; a scrap wreck cannot be rebuilt and needs
+/// nothing; every other wreck is counted like any hull. Empty for whole hulls.
+pub fn depotNeeds(alloc: std.mem.Allocator, u: *const unit_mod.Unit) ![]DepotNeed {
+    var buf: [max_depot_needs]DepotNeed = undefined;
+    return alloc.dupe(DepotNeed, depotNeedsBuf(u, &buf));
+}
+
+/// A hull has at most eight structure locations (head, three torsos, four limbs).
+pub const max_depot_needs = 8;
+
+/// `depotNeeds` without an allocator: the needs land in `buf`.
+pub fn depotNeedsBuf(u: *const unit_mod.Unit, buf: []DepotNeed) []DepotNeed {
+    var n: usize = 0;
+    if (u.wreck == .scrap) return buf[0..0];
+    for (u.slots.items) |s| {
+        if (!slotNeedsComponent(s) or n == buf.len) continue;
+        buf[n] = .{ .slot_key = s.slot_key, .component = part_mod.componentFor(s.slot_key, u.chassis_key) };
+        n += 1;
+    }
+    return buf[0..n];
+}
+
+/// The slot-level half of `depotNeeds`, for callers walking a hull's slots.
+pub fn slotNeedsComponent(s: unit_mod.PartSlot) bool {
+    return s.class == .structure and (s.condition == .destroyed or s.condition == .missing);
+}
+
+/// Where a hull's components must sit for the depot to use them: its own
+/// home HQ (Stage 9D), the seat for the unassigned pool.
+pub fn depotHqFor(gs: *GameState, u: *const unit_mod.Unit) types.HqId {
+    return gs.homeHqFor(u.force);
+}
+
+/// The first component `depotNeeds` lists that the hull's home warehouse
+/// lacks, or null when the depot could start today. Counts per key, so two
+/// torsos want two assemblies.
+pub fn depotShortfall(gs: *GameState, u: *const unit_mod.Unit) ?[]const u8 {
+    const hq_id = depotHqFor(gs, u);
+    var buf: [max_depot_needs]DepotNeed = undefined;
+    const needs = depotNeedsBuf(u, &buf);
+    for (needs, 0..) |n, i| {
+        var wanted: u32 = 0;
+        for (needs[0 .. i + 1]) |m| if (std.mem.eql(u8, m.component, n.component)) {
+            wanted += 1;
+        };
+        if (gs.stockCount(.{ .hq = hq_id }, n.component) < wanted) return n.component;
+    }
+    return null;
+}
+
+/// One line of the components ledger: what the hulls homed at an HQ need,
+/// what its shelf holds, what is ordered or being fabricated for it, and
+/// the gap the player has to close.
+pub const ComponentLine = struct {
+    key: []const u8,
+    need: u32,
+    on_hand: u32,
+    coming: u32,
+    short: u32,
+};
+
+/// The components ledger for one HQ's depot: every hull whose home HQ it is
+/// (one company when `company` is given), aggregated by component key in
+/// first-seen order. A hull already in the bay has had its parts taken, so
+/// it is not demand. `coming` counts part orders bound for the HQ and
+/// fabrication jobs in its bay. Every screen that prints a structural
+/// shortfall prints these lines.
+pub fn componentDemand(alloc: std.mem.Allocator, gs: *GameState, hq_id: types.HqId, company: ?types.ForceId) ![]ComponentLine {
+    var need: std.StringArrayHashMapUnmanaged(u32) = .empty;
+    var uit = gs.units.iterator();
+    while (uit.next()) |e| {
+        const u = e.value_ptr;
+        if (depotHqFor(gs, u) != hq_id or hasJobForUnit(gs, u.id)) continue;
+        if (company) |c| if (gs.companyOf(u.force) != c) continue;
+        for (try depotNeeds(alloc, u)) |n| {
+            const g = try need.getOrPut(alloc, n.component);
+            if (!g.found_existing) g.value_ptr.* = 0;
+            g.value_ptr.* += 1;
+        }
+    }
+    var out: std.ArrayListUnmanaged(ComponentLine) = .empty;
+    var it = need.iterator();
+    while (it.next()) |e| {
+        const key = e.key_ptr.*;
+        const n = e.value_ptr.*;
+        const on_hand = gs.stockCount(.{ .hq = hq_id }, key);
+        var coming: u32 = 0;
+        for (gs.part_orders.items) |o| if (std.mem.eql(u8, o.part_key, key) and o.dest == .hq and o.dest.hq == hq_id and (o.status == .sourcing or o.status == .in_transit)) {
+            coming += o.quantity;
+        };
+        for (gs.bay_jobs.items) |j| if (j.hq == hq_id and j.kind == .fabrication and j.done_day == null and std.mem.eql(u8, j.item_key, key)) {
+            coming += 1;
+        };
+        try out.append(alloc, .{ .key = key, .need = n, .on_hand = on_hand, .coming = coming, .short = n -| (on_hand + coming) });
+    }
+    return out.toOwnedSlice(alloc);
+}
+
 /// The new engine a rebuild needs (12D.2): TechManual price for the
 /// design, zero unless the hull died of an engine kill or a cook-off.
 pub fn engineCharge(u: *const unit_mod.Unit) types.CBills {
@@ -57,12 +170,13 @@ pub fn rebuildEstimate(gs: *GameState, u: *const unit_mod.Unit) ?types.CBills {
     if (u.wreck == .scrap) return null;
     const market = @import("../econ/market.zig");
     var total: types.CBills = 0;
-    var needed: i64 = 0;
+    var needed: i64 = 0; // every structure hit is bay labour, damaged ones included
     for (u.slots.items) |s| {
-        if (s.class != .structure or s.condition == .ok) continue;
-        needed += 1;
-        if (s.condition == .damaged) continue;
-        const def = part_mod.find(part_mod.componentFor(s.slot_key, u.chassis_key)) orelse continue;
+        if (s.class == .structure and s.condition != .ok) needed += 1;
+    }
+    var buf: [max_depot_needs]DepotNeed = undefined;
+    for (depotNeedsBuf(u, &buf)) |n| {
+        const def = part_mod.find(n.component) orelse continue;
         total += types.applyBp(types.applyBp(def.cost, market.structural_fab_cost_mult_bp), gs.diff().fab_cost_bp);
     }
     total += @divTrunc(u.purchase_price, 25) * needed;
@@ -100,21 +214,18 @@ pub fn queueDepotRepair(gs: *GameState, unit_id: types.UnitId) QueueError!bool {
         if (!any) u.markWrecked();
     }
 
-    // Count what's needed; verify all present before consuming any.
+    if (!u.needsDepot()) return true; // whole: nothing to queue
+    // Bay time scales with every structure hit, damaged ones included.
     var needed: u32 = 0;
     for (u.slots.items) |s| {
-        if (s.class != .structure or s.condition == .ok) continue;
-        needed += 1;
-        if (s.condition == .destroyed or s.condition == .missing) {
-            if (gs.stockCount(.{ .hq = hq_id }, part_mod.componentFor(s.slot_key, u.chassis_key)) == 0) return false;
-        }
+        if (s.class == .structure and s.condition != .ok) needed += 1;
     }
-    if (needed == 0) return true;
-    // Consume (each destroyed slot's component is distinct stock; re-check
-    // per slot so two torsos don't share one assembly).
-    for (u.slots.items) |s| {
-        if (s.class != .structure or s.condition == .damaged or s.condition == .ok) continue;
-        if (!gs.takeStock(.{ .hq = hq_id }, part_mod.componentFor(s.slot_key, u.chassis_key), 1)) return false;
+    // Every component present before any is consumed (`depotShortfall` is
+    // the same check the screens print).
+    if (depotShortfall(gs, u) != null) return false;
+    var buf: [max_depot_needs]DepotNeed = undefined;
+    for (depotNeedsBuf(u, &buf)) |n| {
+        if (!gs.takeStock(.{ .hq = hq_id }, n.component, 1)) return false;
     }
 
     try gs.bay_jobs.append(gs.allocator(), .{
@@ -565,6 +676,67 @@ test "depot repair needs the right components, then holds a bay" {
     const uid2 = try gs.addUnit("SHD-2H");
     gs.unit(uid2).?.slots.items[1].condition = .destroyed;
     try std.testing.expect(!(try queueDepotRepair(&gs, uid2)));
+}
+
+test "one rule for structural needs: the depot, the demand ledger and the screens read the same list" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 34 });
+    defer gs.deinit();
+    _ = try gs.createCommander("T", .LC, .chief_engineer);
+    const hq_id = gs.hqs.keys()[0];
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const al = arena.allocator();
+
+    // Clear the seeded shelf so the shortfall is real.
+    while (gs.takeStock(.{ .hq = hq_id }, "comp_ct", 1)) {}
+    while (gs.takeStock(.{ .hq = hq_id }, "comp_torso", 1)) {}
+
+    // An ammo wreck (the play report): centre torso and both sides gone,
+    // one leg damaged. Damaged structure wants bay time, not a part.
+    const uid = try gs.addUnit("SHD-2H");
+    const u = gs.unit(uid).?;
+    u.markWreckedBy(.ammo);
+    u.slots.items[6].condition = .damaged; // ll.structure
+    const needs = try depotNeeds(al, u);
+    try std.testing.expectEqual(@as(usize, 3), needs.len);
+    try std.testing.expectEqualStrings("comp_ct", needs[0].component);
+    try std.testing.expectEqualStrings("comp_torso", needs[1].component);
+    try std.testing.expectEqualStrings("comp_torso", needs[2].component);
+
+    // The depot refuses for exactly what the ledger shows short.
+    try std.testing.expectEqualStrings("comp_ct", depotShortfall(&gs, u).?);
+    try std.testing.expect(!(try queueDepotRepair(&gs, uid)));
+    var ledger = try componentDemand(al, &gs, hq_id, null);
+    try std.testing.expectEqual(@as(usize, 2), ledger.len);
+    try std.testing.expectEqual(@as(u32, 1), ledger[0].short); // comp_ct
+    try std.testing.expectEqual(@as(u32, 2), ledger[1].short); // comp_torso ×2
+    // …and both screens print that ledger: the Market pane and the Forces pane.
+    const q = @import("queries.zig");
+    const m = try q.market(al, &gs, .all, hq_id);
+    try std.testing.expectEqual(@as(usize, 2), m.demand.len);
+    try std.testing.expectEqualStrings("comp_ct", m.demand[0].key);
+    try std.testing.expectEqual(@as(u32, 2), m.demand[1].short);
+    const cd = try q.companyDamage(al, &gs, gs.companyOf(u.force));
+    try std.testing.expectEqualStrings("comp_torso", cd.short_key.?);
+
+    // One torso is not enough: the rule counts per key, so two torsos want two.
+    try gs.addStock(.{ .hq = hq_id }, "comp_ct", 1);
+    try gs.addStock(.{ .hq = hq_id }, "comp_torso", 1);
+    try std.testing.expectEqualStrings("comp_torso", depotShortfall(&gs, u).?);
+    try std.testing.expect(!(try queueDepotRepair(&gs, uid)));
+    try std.testing.expectEqual(@as(u32, 1), gs.stockCount(.{ .hq = hq_id }, "comp_ct")); // nothing consumed on refusal
+    try gs.addStock(.{ .hq = hq_id }, "comp_torso", 1);
+    try std.testing.expect(depotShortfall(&gs, u) == null);
+    ledger = try componentDemand(al, &gs, hq_id, null);
+    try std.testing.expectEqual(@as(u32, 0), ledger[0].short + ledger[1].short);
+    try std.testing.expect(try queueDepotRepair(&gs, uid));
+    try std.testing.expectEqual(@as(u32, 0), gs.stockCount(.{ .hq = hq_id }, "comp_torso"));
+
+    // Scrap wants nothing: no needs, no ledger line, no refusal by parts.
+    const junk = try gs.addUnit("SHD-2H");
+    gs.unit(junk).?.markWreckedBy(.scrap);
+    try std.testing.expectEqual(@as(usize, 0), (try depotNeeds(al, gs.unit(junk).?)).len);
+    try std.testing.expectEqual(@as(usize, 0), (try componentDemand(al, &gs, hq_id, null)).len);
 }
 
 test "construction projects: paperwork then build, staffing bill rises" {

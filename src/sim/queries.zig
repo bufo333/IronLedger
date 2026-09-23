@@ -1248,19 +1248,21 @@ pub fn toeFiltered(alloc: Alloc, gs: *GameState, filter: ToeFilter) ![]ToeRow {
             };
             // What the depot at the seat will want for it (play feedback: the
             // pool never said where the hulls were or which base to stock).
-            const seat = gs.homeHqFor(.none);
+            const hq_ops = @import("hq_ops.zig");
+            const seat = hq_ops.depotHqFor(gs, u);
+            const wants = try hq_ops.depotNeeds(alloc, u);
             var needs: std.ArrayListUnmanaged(u8) = .empty;
-            for (u.slots.items) |sl| {
-                if (sl.class != .structure or (sl.condition != .destroyed and sl.condition != .missing)) continue;
-                const comp = @import("../domain/part.zig").componentFor(sl.slot_key, u.chassis_key);
-                if (std.mem.indexOf(u8, needs.items, comp) != null) continue;
+            for (wants, 0..) |w, i| {
                 var n: u32 = 0;
-                for (u.slots.items) |o| if (o.class == .structure and (o.condition == .destroyed or o.condition == .missing) and std.mem.eql(u8, @import("../domain/part.zig").componentFor(o.slot_key, u.chassis_key), comp)) {
+                var first = true;
+                for (wants, 0..) |o, j| if (std.mem.eql(u8, o.component, w.component)) {
                     n += 1;
+                    if (j < i) first = false;
                 };
-                const have = gs.stockCount(.{ .hq = seat }, comp);
+                if (!first) continue;
+                const have = gs.stockCount(.{ .hq = seat }, w.component);
                 // "comp_ct×2 (2)": the count wanted, and what the shelf holds.
-                try needs.appendSlice(alloc, try std.fmt.allocPrint(alloc, "{s}{s}{s}×{d}({d}){{/}}", .{ if (needs.items.len == 0) "" else " ", if (have >= n) "{g}" else "{c}", comp, n, have }));
+                try needs.appendSlice(alloc, try std.fmt.allocPrint(alloc, "{s}{s}{s}×{d}({d}){{/}}", .{ if (needs.items.len == 0) "" else " ", if (have >= n) "{g}" else "{c}", w.component, n, have }));
             }
             // The pilot/tech columns are always empty in the pool: they carry
             // the depot's shopping list instead.
@@ -1349,68 +1351,58 @@ pub const CompanyDamage = struct {
 /// damage, what each location needs, and the structural components the
 /// home warehouse must have ready before the company comes back.
 pub fn companyDamage(alloc: Alloc, gs: *GameState, company: types.ForceId) !CompanyDamage {
-    const part_mod = @import("../domain/part.zig");
+    const hq_ops = @import("hq_ops.zig");
     var lines: std.ArrayListUnmanaged([]const u8) = .empty;
     const home = gs.homeHqFor(company);
-    var need: std.StringArrayHashMapUnmanaged(u32) = .empty;
     var hulls: u32 = 0;
     var uit = gs.units.iterator();
     while (uit.next()) |e| {
         const u = e.value_ptr;
-        if (u.status == .destroyed or gs.companyOf(u.force) != company) continue;
+        if (gs.companyOf(u.force) != company) continue;
         var structure: std.ArrayListUnmanaged(u8) = .empty;
         var gear_damaged: u32 = 0;
         var gear_destroyed: u32 = 0;
+        // Structure: what the depot will consume comes from the one rule
+        // (hq_ops.depotNeeds); damaged structure is bay time alone. Play
+        // feedback: the list once went red for parts the depot never used.
+        const wants = try hq_ops.depotNeeds(alloc, u);
         for (u.slots.items) |s| {
             if (s.condition == .ok) continue;
             if (s.class == .structure) {
-                // Damaged structure is bay time alone; only destroyed or
-                // missing structure consumes a component (hq_ops.queueDepotRepair).
-                // Play feedback: the list went red for parts the depot never used.
+                var comp: ?[]const u8 = null;
+                for (wants) |w| if (std.mem.eql(u8, w.slot_key, s.slot_key)) {
+                    comp = w.component;
+                };
+                if (comp == null and s.condition != .damaged) continue; // scrap: nothing to rebuild
                 if (structure.items.len > 0) try structure.appendSlice(alloc, ", ");
-                if (s.condition == .damaged) {
-                    try structure.appendSlice(alloc, try std.fmt.allocPrint(alloc, "{s} (bay time only)", .{slotLocation(s.slot_key)}));
+                if (comp) |c| {
+                    try structure.appendSlice(alloc, try std.fmt.allocPrint(alloc, "{s}→{s}", .{ slotLocation(s.slot_key), c }));
                 } else {
-                    const comp = part_mod.componentFor(s.slot_key, u.chassis_key);
-                    const g = try need.getOrPut(alloc, comp);
-                    if (!g.found_existing) g.value_ptr.* = 0;
-                    g.value_ptr.* += 1;
-                    try structure.appendSlice(alloc, try std.fmt.allocPrint(alloc, "{s}→{s}", .{ slotLocation(s.slot_key), comp }));
+                    try structure.appendSlice(alloc, try std.fmt.allocPrint(alloc, "{s} (bay time only)", .{slotLocation(s.slot_key)}));
                 }
             } else if (s.condition == .damaged) gear_damaged += 1 else gear_destroyed += 1;
         }
         if (structure.items.len == 0 and gear_damaged + gear_destroyed == 0) continue;
         hulls += 1;
         const ch = chassis_mod.find(u.chassis_key);
-        try lines.append(alloc, try std.fmt.allocPrint(alloc, "{{a}}#{d} {s} {s}{{/}}  armor {d}% · {s}", .{ @intFromEnum(u.id), u.chassis_key, if (ch) |c| clip(c.name, 14) else "?", u.armor_pct, @tagName(u.status) }));
+        try lines.append(alloc, try std.fmt.allocPrint(alloc, "{{a}}#{d} {s} {s}{{/}}  armor {d}% · {s}{s}", .{ @intFromEnum(u.id), u.chassis_key, if (ch) |c| clip(c.name, 14) else "?", u.armor_pct, @tagName(u.status), if (u.status == .destroyed) try std.fmt.allocPrint(alloc, " · {s}", .{try wreckNote(alloc, gs, u)}) else "" }));
         if (structure.items.len > 0) try lines.append(alloc, try std.fmt.allocPrint(alloc, "    {{c}}structure{{/}}  {s}  {{d}}depot work at home{{/}}", .{structure.items}));
         if (gear_damaged + gear_destroyed > 0) try lines.append(alloc, try std.fmt.allocPrint(alloc, "    {{a}}gear{{/}}       {d} damaged, {d} destroyed  {{d}}field work: techs + spares (Forces R / :replace orders what's destroyed){{/}}", .{ gear_damaged, gear_destroyed }));
     }
     if (hulls == 0) try lines.append(alloc, "{g}every hull is whole{/}");
     var short_key: ?[]const u8 = null;
     var short_most: u32 = 0;
-    if (need.count() > 0) {
+    const comps = try hq_ops.componentDemand(alloc, gs, home, company);
+    if (comps.len > 0) {
         try lines.append(alloc, "");
         try lines.append(alloc, try std.fmt.allocPrint(alloc, "components to have ready at {s}", .{if (gs.hqs.getPtr(home)) |h| h.name else "the home HQ"}));
         try lines.append(alloc, "  part          need  at home  coming  short");
-        var it = need.iterator();
-        while (it.next()) |e| {
-            const key = e.key_ptr.*;
-            const n = e.value_ptr.*;
-            const on_hand: u32 = if (home != .none) gs.stockCount(.{ .hq = home }, key) else 0;
-            var coming: u32 = 0;
-            for (gs.part_orders.items) |o| if (std.mem.eql(u8, o.part_key, key) and o.dest == .hq and o.dest.hq == home and (o.status == .sourcing or o.status == .in_transit)) {
-                coming += o.quantity;
-            };
-            for (gs.bay_jobs.items) |j| if (j.hq == home and j.kind == .fabrication and j.done_day == null and std.mem.eql(u8, j.item_key, key)) {
-                coming += 1;
-            };
-            const short: u32 = n -| (on_hand + coming);
-            if (short > short_most) {
-                short_most = short;
-                short_key = key;
+        for (comps) |l| {
+            if (l.short > short_most) {
+                short_most = l.short;
+                short_key = l.key;
             }
-            try lines.append(alloc, try std.fmt.allocPrint(alloc, "  {s: <12} {d: >5} {d: >8} {d: >7}  {s}{d: >5}{{/}}", .{ clip(key, 12), n, on_hand, coming, if (short > 0) "{c}" else "{g}", short }));
+            try lines.append(alloc, try std.fmt.allocPrint(alloc, "  {s: <12} {d: >5} {d: >8} {d: >7}  {s}{d: >5}{{/}}", .{ clip(l.key, 12), l.need, l.on_hand, l.coming, if (l.short > 0) "{c}" else "{g}", l.short }));
         }
         try lines.append(alloc, if (short_key != null) "  {d}[b] fabricates the shortest line at the home HQ · :stockpolicy keeps it stocked{/}" else "  {d}covered — the depot can start the day they land{/}");
     }
@@ -2226,21 +2218,33 @@ pub fn market(alloc: Alloc, gs: *GameState, filter: MarketFilter, hq: types.HqId
             if (component) (if (p.fab_regional) "{a}fabricable: bay 3 at a regional HQ{/}" else if (p.fab_min_bay > 1) try std.fmt.allocPrint(alloc, "{{a}}fabricable: bay {d}{{/}}", .{p.fab_min_bay}) else "{a}fabricable at any bay{/}") else if (isStaple(p.key)) "{g}staple{/}" else "{d}rolls vs rarity{/}",
         }) });
     }
-    // Demand: damaged / destroyed / missing slots by part.
+    // Demand. Structure first: this HQ's depot ledger, the same rule the
+    // depot queue applies (hq_ops.componentDemand), so a wreck the depot
+    // refuses for want of a torso shows that torso here. Then gear: damaged
+    // or destroyed field-work parts on any hull short of scrap, which techs
+    // fit from spares wherever the hull sits.
+    var demand: std.ArrayListUnmanaged(DemandRow) = .empty;
+    for (try @import("hq_ops.zig").componentDemand(alloc, gs, hq, null)) |l| {
+        try demand.append(alloc, .{ .key = l.key, .short = l.short, .cells = try table.row(alloc, &.{
+            l.key,
+            try std.fmt.allocPrint(alloc, "{d}", .{l.need}),
+            try std.fmt.allocPrint(alloc, "{d}", .{l.on_hand}),
+            try std.fmt.allocPrint(alloc, "{d}", .{l.coming}),
+            try std.fmt.allocPrint(alloc, "{s}{d}{{/}}", .{ if (l.short > 0) "{c}" else "{g}", l.short }),
+        }) });
+    }
     var need: std.StringArrayHashMapUnmanaged(u32) = .empty;
     var uit = gs.units.iterator();
     while (uit.next()) |e| {
         const u = e.value_ptr;
-        if (u.status == .destroyed) continue;
+        if (u.wreck == .scrap) continue;
         for (u.slots.items) |s| {
-            if (s.condition == .ok) continue;
-            const key: []const u8 = if (s.class == .structure) part_mod.componentFor(s.slot_key, u.chassis_key) else s.part_key;
-            const g = try need.getOrPut(alloc, key);
+            if (s.condition == .ok or s.class == .structure) continue;
+            const g = try need.getOrPut(alloc, s.part_key);
             if (!g.found_existing) g.value_ptr.* = 0;
             g.value_ptr.* += 1;
         }
     }
-    var demand: std.ArrayListUnmanaged(DemandRow) = .empty;
     var dit = need.iterator();
     while (dit.next()) |e| {
         const key = e.key_ptr.*;
@@ -3447,10 +3451,14 @@ pub const Lab = struct {
     meks: []types.UnitId,
 };
 
+/// Every mek hull, wrecks included: a wreck's structural state and its
+/// rebuild path belong in the Lab like any other structure hit (play
+/// feedback: the Lab skipped wrecks silently, so its "hull 1" was a different
+/// mek from the first row on Forces and the two screens disagreed).
 pub fn labMeks(alloc: Alloc, gs: *GameState) ![]types.UnitId {
     var out: std.ArrayListUnmanaged(types.UnitId) = .empty;
     var it = gs.units.iterator();
-    while (it.next()) |e| if (e.value_ptr.kind == .mek and e.value_ptr.status != .destroyed) try out.append(alloc, e.value_ptr.id);
+    while (it.next()) |e| if (e.value_ptr.kind == .mek) try out.append(alloc, e.value_ptr.id);
     return out.toOwnedSlice(alloc);
 }
 
@@ -3471,6 +3479,7 @@ pub fn lab(alloc: Alloc, gs: *GameState, uid: types.UnitId) !Lab {
         try budget.append(alloc, "{a}not a mek — the lab works on BattleMechs; this hull's gear is field work: Forces R (or :replace <unit>) orders spares to its site and its tech fits them{/}");
         return .{ .title = title, .budget = try budget.toOwnedSlice(alloc), .mounts = &.{}, .plan = &.{}, .legal = true, .meks = meks };
     }
+    if (u.status == .destroyed) try budget.append(alloc, try std.fmt.allocPrint(alloc, "{s} · {{d}}no refits on a wreck{{/}}", .{try wreckNote(alloc, gs, u)}));
     const items = try gs.labItems(uid, alloc);
     const r = try meklab.validate(design, items, alloc);
     try budget.append(alloc, try std.fmt.allocPrint(alloc, "chassis   {s}   mounts   {s}", .{ try halfTons(alloc, r.fixed_half_tons), try halfTons(alloc, r.loadout_half_tons) }));
@@ -3479,7 +3488,8 @@ pub fn lab(alloc: Alloc, gs: *GameState, uid: types.UnitId) !Lab {
     try budget.append(alloc, try std.fmt.allocPrint(alloc, "movement  walk {d}{s} · engine {d}", .{ design.walk_mp, if (design.jump_mp > 0) " · jump" else "", design.engineRating() }));
     try budget.append(alloc, "");
     try budget.append(alloc, "location   used  free   {d}(dim = no free crits){/}");
-    const home_hq = gs.homeHqFor(u.force);
+    const home_hq = @import("hq_ops.zig").depotHqFor(gs, u);
+    const wants = try @import("hq_ops.zig").depotNeeds(alloc, u);
     inline for (@typeInfo(meklab.Location).@"enum".fields) |f| {
         const loc: meklab.Location = @enumFromInt(f.value);
         const full = r.crits_free[f.value] == 0;
@@ -3490,16 +3500,25 @@ pub fn lab(alloc: Alloc, gs: *GameState, uid: types.UnitId) !Lab {
             if (s.class != .structure) continue;
             if (meklab.parseLocation(s.slot_key) != loc) continue;
             if (s.condition != .ok) {
-                const comp = @import("../domain/part.zig").componentFor(s.slot_key, u.chassis_key);
-                const on_hand = gs.stockCount(.{ .hq = home_hq }, comp);
+                var comp: ?[]const u8 = null;
+                for (wants) |w| if (std.mem.eql(u8, w.slot_key, s.slot_key)) {
+                    comp = w.component;
+                };
                 const at_home = gs.isCompanyHome(gs.companyOf(u.force));
-                const action: []const u8 = if (!at_home)
-                    "{a}hull is away — depot work waits for it to come home; fabricate the part meanwhile (Market, b){/}"
-                else if (on_hand > 0 or s.condition == .damaged)
-                    "{g}[D] send to depot{/}"
-                else
-                    "{a}order or fabricate it (Market){/}";
-                struct_note = try std.fmt.allocPrint(alloc, "  {{c}}structure {s}{{/}} · needs {s} ({d} on hand) · {s}", .{ @tagName(s.condition), comp, on_hand, action });
+                if (@import("hq_ops.zig").hasJobForUnit(gs, uid)) {
+                    struct_note = try std.fmt.allocPrint(alloc, "  {{c}}structure {s}{{/}} · {{d}}in the depot — its parts are taken; HQ screen bays{{/}}", .{@tagName(s.condition)});
+                } else if (comp) |c| {
+                    const on_hand = gs.stockCount(.{ .hq = home_hq }, c);
+                    const action: []const u8 = if (!at_home)
+                        "{a}hull is away — depot work waits for it to come home; fabricate the part meanwhile (Market, b){/}"
+                    else if (on_hand > 0)
+                        "{g}[D] send to depot{/}"
+                    else
+                        "{a}order or fabricate it (Market){/}";
+                    struct_note = try std.fmt.allocPrint(alloc, "  {{c}}structure {s}{{/}} · needs {s} ({d} on hand) · {s}", .{ @tagName(s.condition), c, on_hand, action });
+                } else if (s.condition == .damaged) {
+                    struct_note = try std.fmt.allocPrint(alloc, "  {{c}}structure damaged{{/}} · bay time only · {s}", .{if (at_home) "{g}[D] send to depot{/}" else "{a}hull is away — depot work waits for it to come home{/}"});
+                } else struct_note = "  {c}structure destroyed{/} · {d}scrap: not rebuilt{/}";
             }
         }
         try budget.append(alloc, try std.fmt.allocPrint(alloc, "{s}{s: <10} {d: >4}  {d: >4}{s}{{/}}{s}", .{ if (full) "{d}" else "", f.name, r.crits_used[f.value], r.crits_free[f.value], if (full) "  full" else "", struct_note }));
@@ -3515,7 +3534,9 @@ pub fn lab(alloc: Alloc, gs: *GameState, uid: types.UnitId) !Lab {
         try budget.append(alloc, try std.fmt.allocPrint(alloc, "bays at {s}", .{clip(h.name, 28)}));
         try budget.append(alloc, try std.fmt.allocPrint(alloc, "  {s}{d} of {d} slots busy{{/}} · {d} queued · refit ceiling class {{a}}{s}{{/}}", .{ if (busy >= slots) "{c}" else "{g}", busy, slots, queued, if (h.refitClassCeiling()) |c| @tagName(c) else "none" }));
     }
-    if (u.needsDepot()) try budget.append(alloc, if (gs.isCompanyHome(gs.companyOf(u.force))) "{a}structure damaged: [D] sends this hull to the depot (bay job); the weekly pass also queues it when parts are in stock{/}" else "{a}structure damaged: the hull is away with its company — HQ can fabricate or order the component now; the bay job runs once it is home{/}");
+    if (u.status == .destroyed) {
+        try budget.append(alloc, if (u.wreck == .scrap) "{c}scrap: nothing to rebuild — Forces $ sells it, s strips its surviving parts{/}" else if (gs.isCompanyHome(gs.companyOf(u.force))) "{a}wreck: [D] rebuilds it in the depot (bay job) once every destroyed location's component is in stock{/}" else "{a}wreck: it is away with its company — HQ can fabricate or order the components now; the rebuild runs once it is home{/}");
+    } else if (u.needsDepot()) try budget.append(alloc, if (gs.isCompanyHome(gs.companyOf(u.force))) "{a}structure damaged: [D] sends this hull to the depot (bay job); the weekly pass also queues it when parts are in stock{/}" else "{a}structure damaged: the hull is away with its company — HQ can fabricate or order the component now; the bay job runs once it is home{/}");
     try budget.append(alloc, "{d}A ammo/armor · B like-for-like · C new weapons · D structure{/}");
     try budget.append(alloc, "{d}any weapon or gear fits any location with free crits;{/}");
     try budget.append(alloc, "{d}ammo bins go where free crits are; the head takes 1 crit{/}");
@@ -3623,6 +3644,40 @@ test "hall filter groups roles and map classifies worlds" {
     try std.testing.expect(rec.len > 6);
     _ = try openSeats(al, &gs, everyone.rows[0].id);
     try std.testing.expectEqualStrings("active", try stripMarks(al, "{g}active{/}"));
+}
+
+test "the Lab lists a wreck and names its rebuild, so it agrees with Forces" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 11 });
+    defer gs.deinit();
+    const commands = @import("commands.zig");
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "Test", .origin = .CC, .profession = .paymaster } });
+    _ = try commands.execute(&gs, .{ .new_company = "Alpha" });
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const al = arena.allocator();
+    const before = try labMeks(al, &gs);
+    const wreck_id = before[0];
+    gs.unit(wreck_id).?.markWreckedBy(.ammo);
+
+    // Still in the Lab's hull list, at the same place, so [ ] numbering
+    // matches the hangar; Forces' damage marks and the Lab's budget agree.
+    const after = try labMeks(al, &gs);
+    try std.testing.expectEqual(before.len, after.len);
+    try std.testing.expectEqual(wreck_id, after[0]);
+    const marks = try damageMarks(al, gs.unit(wreck_id).?);
+    try std.testing.expect(std.mem.indexOf(u8, marks, "struct ct") != null);
+    const l = try lab(al, &gs, wreck_id);
+    var saw_wreck = false;
+    var saw_ct = false;
+    for (l.budget) |line| {
+        if (std.mem.indexOf(u8, line, "ammunition explosion") != null) saw_wreck = true;
+        if (std.mem.indexOf(u8, line, "structure destroyed") != null and std.mem.indexOf(u8, line, "comp_ct") != null) saw_ct = true;
+    }
+    try std.testing.expect(saw_wreck);
+    try std.testing.expect(saw_ct);
+    // No refits on a wreck: the depot rebuilds it, or it gets stripped.
+    const slot = l.mounts[0].slot_key;
+    try std.testing.expectError(commands.Error.Unavailable, commands.execute(&gs, .{ .refit_remove = .{ .unit = wreck_id, .slot_key = slot } }));
 }
 
 test "padCells counts cells, not bytes" {
