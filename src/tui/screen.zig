@@ -8,6 +8,7 @@
 
 const std = @import("std");
 const table_mod = @import("game").table;
+const term = @import("term.zig");
 pub const Table = table_mod.Table;
 
 pub const Style = enum(u8) {
@@ -33,27 +34,28 @@ pub const Style = enum(u8) {
 
     fn sgr(self: Style) []const u8 {
         return switch (self) {
-            .normal => "\x1b[0m",
-            .dim => "\x1b[0;90m",
-            .amber => "\x1b[0;33m",
-            .good => "\x1b[0;32m",
-            .crit => "\x1b[0;31m",
-            .sel => "\x1b[0;30;46m",
-            .tab => "\x1b[0;1;30;43m",
-            .purple => "\x1b[0;35m",
-            .box => "\x1b[0;37m",
-            .focus => "\x1b[0;36m",
-            .blue => "\x1b[0;94m",
-            .red => "\x1b[0;91m",
-            .yellow => "\x1b[0;93m",
-            .green => "\x1b[0;92m",
-            .magenta => "\x1b[0;95m",
-            .cyan => "\x1b[0;96m",
-            .white => "\x1b[0;97m",
-            .grey => "\x1b[0;90m",
+            .normal => term.sgr.reset,
+            .dim => term.sgr.dim,
+            .amber => term.sgr.amber,
+            .good => term.sgr.good,
+            .crit => term.sgr.crit,
+            .sel => term.sgr.sel,
+            .tab => term.sgr.tab,
+            .purple => term.sgr.purple,
+            .box => term.sgr.box,
+            .focus => term.sgr.focus,
+            .blue => term.sgr.blue,
+            .red => term.sgr.red,
+            .yellow => term.sgr.yellow,
+            .green => term.sgr.green,
+            .magenta => term.sgr.magenta,
+            .cyan => term.sgr.cyan,
+            .white => term.sgr.white,
+            .grey => term.sgr.grey,
         };
     }
 
+    /// The style behind a `{x}` tag; the tag set is `table.marks`.
     fn fromMarkup(c: u8) ?Style {
         return switch (c) {
             'a' => .amber,
@@ -69,7 +71,7 @@ pub const Style = enum(u8) {
     }
 };
 
-pub const Rgb = [3]u8;
+pub const Rgb = term.Rgb;
 
 /// Two vertical pixels per cell: drawn as `▀` with fg = top, bg = bottom.
 pub const Pixels = struct { top: Rgb, bottom: Rgb };
@@ -380,31 +382,19 @@ pub const Screen = struct {
         return .{ @intCast(sum[0] / n), @intCast(sum[1] / n), @intCast(sum[2] / n) };
     }
 
-    fn c256(c: Rgb) u8 {
-        const r: u8 = @intCast((@as(u16, c[0]) * 5 + 127) / 255);
-        const g: u8 = @intCast((@as(u16, c[1]) * 5 + 127) / 255);
-        const b: u8 = @intCast((@as(u16, c[2]) * 5 + 127) / 255);
-        return 16 + 36 * r + 6 * g + b;
-    }
-
     /// Emit the whole frame (turn-based UI: a full repaint per event is
     /// cheap and never leaves artifacts).
     pub fn flush(self: *Screen, out: *std.Io.Writer) !void {
-        try out.writeAll("\x1b[H");
+        try term.cursorHome(out);
         var y: u16 = 0;
         while (y < self.rows) : (y += 1) {
-            try out.print("\x1b[{d};1H", .{y + 1});
+            try term.cursorTo(out, y + 1, 1);
             var cur: ?Style = null;
             var x: u16 = 0;
             while (x < self.cols) : (x += 1) {
                 const c = self.get(x, y);
                 if (c.px) |p| {
-                    const glyph: []const u8 = if (self.ascii) "#" else "▀";
-                    if (self.truecolor) {
-                        try out.print("\x1b[0;38;2;{d};{d};{d};48;2;{d};{d};{d}m{s}", .{ p.top[0], p.top[1], p.top[2], p.bottom[0], p.bottom[1], p.bottom[2], glyph });
-                    } else {
-                        try out.print("\x1b[0;38;5;{d};48;5;{d}m{s}", .{ c256(p.top), c256(p.bottom), glyph });
-                    }
+                    try term.paintPair(out, self.truecolor, p.top, p.bottom, if (self.ascii) "#" else "▀");
                     cur = null;
                     continue;
                 }
@@ -417,27 +407,13 @@ pub const Screen = struct {
                 try out.writeAll(buf[0..n]);
             }
         }
-        try out.writeAll("\x1b[0m");
+        try term.resetStyle(out);
         try out.flush();
     }
 };
 
-/// Cells a markup string occupies.
-pub fn visibleLen(s: []const u8) usize {
-    var n: usize = 0;
-    var it = std.unicode.Utf8View.initUnchecked(s).iterator();
-    while (it.nextCodepoint()) |cp| {
-        if (cp == '{') {
-            const rest = it.bytes[it.i..];
-            if (rest.len >= 2 and rest[1] == '}' and Style.fromMarkup(rest[0]) != null) {
-                it.i += 2;
-                continue;
-            }
-        }
-        n += 1;
-    }
-    return n;
-}
+/// Cells a markup string occupies (`table.cells` is the one counter).
+pub const visibleLen = table_mod.cells;
 
 /// Word-wrap markup text to `width` cells. A colour open at a break is
 /// closed at the line's end and reopened on the next, so each line draws
@@ -466,7 +442,8 @@ pub fn wrap(alloc: std.mem.Allocator, s: []const u8, width: usize) ![]const []co
         var i: usize = 0;
         while (i + 2 < word.len) : (i += 1) {
             if (word[i] != '{' or word[i + 2] != '}') continue;
-            if (Style.fromMarkup(word[i + 1])) |st| open = if (st == .normal) null else word[i + 1];
+            if (!table_mod.isMark(word[i + 1])) continue;
+            open = if (word[i + 1] == '/') null else word[i + 1];
         }
     }
     if (cells > 0 or line.items.len > 0) try out.append(alloc, try line.toOwnedSlice(alloc));
@@ -566,4 +543,9 @@ test "table pins the first column, clamps the scroll and clips at the edge" {
     try std.testing.expectEqual(@as(usize, 0), v2.hidden_right);
     try std.testing.expectEqual(@as(u21, 'n'), s.get(6, 1).ch);
     try std.testing.expectEqual(@as(u21, 'r'), s.get(0, 1).ch);
+}
+
+test "every markup tag has a style" {
+    for (table_mod.marks) |m| try std.testing.expect(Style.fromMarkup(m) != null);
+    try std.testing.expect(Style.fromMarkup('x') == null);
 }

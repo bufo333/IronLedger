@@ -15,7 +15,7 @@ const hq_mod = @import("../domain/hq.zig");
 const person_mod = @import("../domain/person.zig");
 const person_gen = @import("../gen/person_gen.zig");
 
-/// Employer payment multiplier by faction, basis points. // TUNE
+/// Employer payment multiplier by faction, basis points (data/tables/factions.zon).
 pub fn employerMultBp(faction_key: []const u8) types.Bp {
     return @import("../domain/faction.zig").get(faction_key).pay_bp; // data/tables/factions.zon (12B.9)
 }
@@ -26,7 +26,7 @@ pub fn standingPayBp(standing: i32) types.Bp {
     return 10_000 + @as(types.Bp, standing) * tuning.contract.standing_pay_bp_per_point;
 }
 
-/// Reputation payment multiplier: ±0.5% per point, clamped. // TUNE
+/// Reputation payment multiplier: ±0.5% per point, clamped.
 /// The five Successor States (12C.7): the employers an F-rated outfit
 /// cannot get in front of.
 pub fn isGreatHouse(faction_key: []const u8) bool {
@@ -101,9 +101,9 @@ pub fn refresh(gs: *GameState) !void {
     const base = types.applyBp(@max(perCompanyOpsCost(gs), tuning.market.min_ops_cost), types.applyBp(market_margin_bp, gs.diff().contract_pay_bp)); // difficulty (12.32)
 
     // The Dragoons rating (12C.7) sets how many come calling, who, and at what pay.
-    const queries = @import("../sim/queries.zig");
+    const rating = @import("../sim/rating.zig");
     const rt = tuning.rating;
-    const rating_idx = queries.ratingIndex(queries.ratingScore(gs));
+    const rating_idx = rating.currentIndex(gs);
     // One board per HQ (12E.4): each posts work inside its own ring and
     // beachhead band, for the companies based there; its comms set how many
     // come calling, and a field HQ hears half as much.
@@ -149,7 +149,7 @@ pub fn refresh(gs: *GameState) !void {
             ));
 
             // Beachhead employers pay a premium — nobody else will go.
-            var pay = contract.monthlyPayment(base, kind, employerMultBp(world.faction), queries.ratingPayBp(rating_idx));
+            var pay = contract.monthlyPayment(base, kind, employerMultBp(world.faction), rating.payBp(rating_idx));
             if (vis[0] == .beachhead) pay = types.applyBp(pay, tuning.market.beachhead_pay_bp);
             // A cooling employer (Stage 9E breach): half the offers, 70% pay.
             if (gs.factionCooling(world.faction)) {
@@ -192,19 +192,17 @@ pub fn refresh(gs: *GameState) !void {
                 .terms = .{
                     .length_months = length,
                     .base_pay_month = pay,
-                    .advance_pct = 25,
-                    .signing_bonus = if (gs.rng.roll2d6(.market) >= 10) @divTrunc(pay, 2) else 0,
-                    .transport_pct = @intCast(@as(u32, gs.rng.roll2d6(.market) -| 2) * 10), // 0–100%
+                    .advance_pct = tuning.contract.advance_pct,
+                    .signing_bonus = if (gs.rng.roll2d6(.market) >= tuning.contract.signing_bonus_target) @divTrunc(pay, tuning.contract.signing_bonus_divisor) else 0,
+                    .transport_pct = @intCast(@as(u32, gs.rng.roll2d6(.market) -| 2) * tuning.contract.transport_pct_per_pip),
                     // Straight support: the employer ships you supplies monthly
-                    // (Stage 9B delivers goods, not cash). // TUNE
-                    .overhead_pct = switch (gs.rng.roll2d6(.market)) {
-                        2...7 => 0,
-                        8, 9 => 25,
-                        10, 11 => 50,
-                        else => 100,
+                    // (Stage 9B delivers goods, not cash).
+                    .overhead_pct = blk: {
+                        const r = gs.rng.roll2d6(.market);
+                        break :blk if (r >= tuning.contract.overhead_full_at) @as(u8, 100) else if (r >= tuning.contract.overhead_half_at) 50 else if (r >= tuning.contract.overhead_quarter_at) 25 else 0;
                     },
-                    .battle_loss_pct = if (gs.rng.roll2d6(.market) >= 8) 30 else 0,
-                    .salvage_pct = @intCast(@as(u32, gs.rng.roll2d6(.market) -| 2) * 5), // 0–50%
+                    .battle_loss_pct = if (gs.rng.roll2d6(.market) >= tuning.contract.battle_loss_target) tuning.contract.battle_loss_pct else 0,
+                    .salvage_pct = @intCast(@as(u32, gs.rng.roll2d6(.market) -| 2) * tuning.contract.salvage_pct_per_pip),
                     // Salvage exchange (12B.2): the employer keeps the wrecks and pays cash.
                     .salvage_exchange = gs.rng.random(.market).uintLessThan(u32, tuning.contract.salvage_exchange_in) == 0,
                     .command_rights = rights,
@@ -467,7 +465,7 @@ fn refreshBoard(gs: *GameState, hq_id: types.HqId) !void {
                 .quantity = 2,
                 .staple = true,
                 .listed_day = day,
-                .expires_day = day + 3650,
+                .expires_day = day + tuning.market.staple_listing_days,
             });
         }
     }
@@ -483,16 +481,37 @@ const hall_roles = [_]person_mod.Role{
     .jumpship_crew,
 };
 
+/// A walk-in the hall chooses: a short desk or trade gets every other
+/// arrival until it is staffed, else any hall role.
+fn arrivalRole(gs: *GameState, hq: *const hq_mod.Hq) person_mod.Role {
+    // Dice order matters for replays: the short-desk roll first, the
+    // pick from the hall roles only when it is needed.
+    if (shortRole(gs, hq)) |short| if (gs.rng.roll2d6(.market) >= 7) return short;
+    return hall_roles[gs.rng.random(.market).uintLessThan(usize, hall_roles.len)];
+}
+
+/// Days a walk-in or a floor top-up stays on the board; the weekly
+/// refresh's crowd lingers longer (tuning.market).
+const walkin_days: u32 = tuning.market.hall_walkin_days;
+const refresh_days: u32 = tuning.market.hall_refresh_days;
+
+/// Put one candidate on an HQ's board: rolled to the outfit's recruit
+/// bonus, asking a signing bonus by experience, gone after `ttl_days`.
+fn listCandidate(gs: *GameState, hq: *const hq_mod.Hq, role: person_mod.Role, ttl_days: u32) !void {
+    const spec = person_gen.generateWithBonus(&gs.rng, role, gs.recruitBonus());
+    const salary = types.applyBp(role.baseSalary(), spec.experience.salaryMultBp());
+    try gs.candidates.append(gs.allocator(), .{
+        .hq = hq.id,
+        .spec = spec,
+        .asking_bonus = salary * (1 + @as(types.CBills, @intFromEnum(spec.experience))), // TUNE
+        .listed_day = gs.clock.day_index,
+        .expires_day = gs.clock.day_index + ttl_days,
+    });
+}
+
 /// An admin desk this HQ is short on, if any — the hall favours it.
 fn shortAdminRole(gs: *GameState, hq: *const hq_mod.Hq) ?person_mod.Role {
-    const req = hq.staffRequired();
-    const desks = [_]struct { role: person_mod.Role, need: u32 }{
-        .{ .role = .admin_command, .need = req.admin },
-        .{ .role = .admin_logistics, .need = req.logistics },
-        .{ .role = .admin_hr, .need = req.hr },
-        .{ .role = .admin_finance, .need = req.finance },
-    };
-    for (desks) |d| if (gs.hqStaff(hq.id, d.role).count < d.need) return d.role;
+    for (hq.staffRequired().desks()) |d| if (gs.hqStaff(hq.id, d.role).count < d.need) return d.role;
     return null;
 }
 
@@ -546,19 +565,7 @@ pub fn churnCandidates(gs: *GameState) !void {
         // A bigger hall draws a bigger crowd: one walk-in per hall level, one
         // more on a boxcars day.
         const arrivals: u32 = hall + @as(u32, if (roll >= 12) 1 else 0);
-        for (0..arrivals) |_| {
-            // A short desk or trade gets every other arrival until it is staffed.
-            const role = if (shortRole(gs, hq)) |short| (if (gs.rng.roll2d6(.market) >= 7) short else hall_roles[gs.rng.random(.market).uintLessThan(usize, hall_roles.len)]) else hall_roles[gs.rng.random(.market).uintLessThan(usize, hall_roles.len)];
-            const spec = person_gen.generateWithBonus(&gs.rng, role, gs.recruitBonus());
-            const salary = types.applyBp(role.baseSalary(), spec.experience.salaryMultBp());
-            try gs.candidates.append(gs.allocator(), .{
-                .hq = hq.id,
-                .spec = spec,
-                .asking_bonus = salary * (1 + @as(types.CBills, @intFromEnum(spec.experience))),
-                .listed_day = day,
-                .expires_day = day + 14,
-            });
-        }
+        for (0..arrivals) |_| try listCandidate(gs, hq, arrivalRole(gs, hq), walkin_days);
         _ = try topUpHall(gs, hq); // 12B.10: the board never runs dry
     }
 }
@@ -569,29 +576,16 @@ pub fn churnCandidates(gs: *GameState) !void {
 /// day — combat crews and techs two deep, everyone else one.
 pub fn topUpHall(gs: *GameState, hq: *const hq_mod.Hq) !u32 {
     if (hq.effectiveFacilityLevel(.hiring_hall) == 0) return 0;
-    const day = gs.clock.day_index;
     var added: u32 = 0;
     inline for (@typeInfo(person_mod.Role).@"enum".fields) |f| {
         const role: person_mod.Role = @enumFromInt(f.value);
-        const combat = switch (role) {
-            .mekwarrior, .vehicle_crew, .aero_pilot, .tech_mek, .tech_mechanic, .tech_aero, .astech => true,
-            else => false,
-        };
-        const floor: u32 = if (combat) tuning.market.hall_floor_combat else tuning.market.hall_floor;
+        const floor: u32 = if (role.hallCombatFloor()) tuning.market.hall_floor_combat else tuning.market.hall_floor;
         var have: u32 = 0;
         for (gs.candidates.items) |c| if (c.hq == hq.id and c.spec.role == role) {
             have += 1;
         };
         while (have < floor) : (have += 1) {
-            const spec = person_gen.generateWithBonus(&gs.rng, role, gs.recruitBonus());
-            const salary = types.applyBp(role.baseSalary(), spec.experience.salaryMultBp());
-            try gs.candidates.append(gs.allocator(), .{
-                .hq = hq.id,
-                .spec = spec,
-                .asking_bonus = salary * (1 + @as(types.CBills, @intFromEnum(spec.experience))),
-                .listed_day = day,
-                .expires_day = day + 14,
-            });
+            try listCandidate(gs, hq, role, walkin_days);
             added += 1;
         }
     }
@@ -618,26 +612,14 @@ pub fn refreshCandidates(gs: *GameState) !void {
         if (hall == 0) continue;
         const hr = gs.hqStaff(hq.id, .admin_hr).count;
         const count: u32 = 2 + hall + hr / 2;
-        for (0..count) |_| {
-            // A short desk or trade gets every other arrival until it is staffed.
-            const role = if (shortRole(gs, hq)) |short| (if (gs.rng.roll2d6(.market) >= 7) short else hall_roles[gs.rng.random(.market).uintLessThan(usize, hall_roles.len)]) else hall_roles[gs.rng.random(.market).uintLessThan(usize, hall_roles.len)];
-            const spec = person_gen.generateWithBonus(&gs.rng, role, gs.recruitBonus());
-            const salary = types.applyBp(role.baseSalary(), spec.experience.salaryMultBp());
-            try gs.candidates.append(gs.allocator(), .{
-                .hq = hq.id,
-                .spec = spec,
-                .asking_bonus = salary * (1 + @as(types.CBills, @intFromEnum(spec.experience))), // TUNE
-                .listed_day = day,
-                .expires_day = day + 21,
-            });
-        }
+        for (0..count) |_| try listCandidate(gs, hq, arrivalRole(gs, hq), refresh_days);
     }
 }
 
 /// The outfit's monthly running cost divided by its combat companies: what
 /// an employer reckons one company costs to keep in the field.
 pub fn perCompanyOpsCost(gs: *GameState) types.CBills {
-    const ops_cost = gs.monthlyPayroll() + hullUpkeep(gs) + maintenanceEstimate(gs);
+    const ops_cost = gs.monthlyPayroll() + gs.monthlyHullUpkeep() + maintenanceEstimate(gs);
     var companies: i64 = 0;
     var it = gs.forces.iterator();
     while (it.next()) |e| if (e.value_ptr.echelon == .company) {
@@ -646,23 +628,9 @@ pub fn perCompanyOpsCost(gs: *GameState) types.CBills {
     return @divTrunc(ops_cost, @max(1, companies));
 }
 
-fn hullUpkeep(gs: *GameState) types.CBills {
-    var total: types.CBills = 0;
-    var it = gs.units.iterator();
-    while (it.next()) |entry| total += entry.value_ptr.monthlyBill();
-    return total;
-}
-
-/// Expected monthly maintenance consumables (~4.33 weeks × price/2500).
+/// Expected monthly maintenance consumables: `maintenance.monthlyConsumablesEstimate`.
 fn maintenanceEstimate(gs: *GameState) types.CBills {
-    var total: types.CBills = 0;
-    var it = gs.units.iterator();
-    while (it.next()) |entry| {
-        const u = entry.value_ptr;
-        if (u.status == .mothballed or u.kind == .infantry) continue;
-        total += @divTrunc(u.purchase_price, 600);
-    }
-    return total;
+    return @import("../sim/maintenance.zig").monthlyConsumablesEstimate(gs);
 }
 
 test "refresh only offers work inside rings or the beachhead band" {
@@ -784,16 +752,16 @@ test "12C.7: an F-rated outfit hears only from the periphery and never gets a pl
     while (pit.next()) |e| if (e.value_ptr.role.isCombat()) {
         try e.value_ptr.skills.put(gs.allocator(), e.value_ptr.role.primarySkill(), 7); // … and green as grass: firmly F
     };
-    const queries = @import("../sim/queries.zig");
-    try std.testing.expectEqual(@as(u8, 0), queries.ratingIndex(queries.ratingScore(&gs)));
+    const rating = @import("../sim/rating.zig");
+    try std.testing.expectEqual(@as(u8, 0), rating.currentIndex(&gs));
     gs.contract_offers.clearRetainingCapacity();
     try refresh(&gs);
     for (gs.contract_offers.items) |o| {
         try std.testing.expect(!isGreatHouse(o.employer_key));
         try std.testing.expect(o.kind != .planetary_assault);
     }
-    try std.testing.expectEqual(@as(types.Bp, 8_000), queries.ratingPayBp(0));
-    try std.testing.expectEqual(@as(types.Bp, 13_000), queries.ratingPayBp(5));
+    try std.testing.expectEqual(@as(types.Bp, 8_000), rating.payBp(0));
+    try std.testing.expectEqual(@as(types.Bp, 13_000), rating.payBp(5));
 }
 
 test "12C.17: a wired HQ with a hall eventually hears from a fence; a firebase never does" {
@@ -932,7 +900,7 @@ test "play feedback: offers are priced per company — a second company does not
     try std.testing.expect(two < one);
     try std.testing.expect(two * 10 > one * 6);
     // And the whole-outfit figure, which the price used to be built on, roughly doubled.
-    const whole = gs.monthlyPayroll() + hullUpkeep(&gs) + maintenanceEstimate(&gs);
+    const whole = gs.monthlyPayroll() + gs.monthlyHullUpkeep() + maintenanceEstimate(&gs);
     try std.testing.expect(whole > @divTrunc(two * 18, 10));
 }
 

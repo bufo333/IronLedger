@@ -180,25 +180,38 @@ pub fn componentClass(key: []const u8) WeightClass {
     return .medium;
 }
 
-/// Bay days to fabricate one component: by location, then by class — a
-/// light assembly two days quicker, heavy three and assault six slower. // TUNE
+/// Bay days to fabricate one component: by location, then by class
+/// (tuning.part.fab_days / fab_class_delta).
 pub fn fabricationDays(key: []const u8) u32 {
-    const base: u32 = if (std.mem.startsWith(u8, key, "comp_ct")) 12 //
-        else if (std.mem.startsWith(u8, key, "comp_torso")) 9 //
-        else if (std.mem.startsWith(u8, key, "comp_leg")) 8 //
-        else if (std.mem.startsWith(u8, key, "comp_arm")) 6 //
-        else if (std.mem.startsWith(u8, key, "comp_head")) 5 //
-        else 7;
-    return switch (componentClass(key)) {
-        .light => base -| 2,
-        .medium => base,
-        .heavy => base + 3,
-        .assault => base + 6,
+    const t = @import("tuning.zig").t.part;
+    const base: i32 = if (std.mem.startsWith(u8, key, "comp_ct")) @intCast(t.fab_days.ct) //
+        else if (std.mem.startsWith(u8, key, "comp_torso")) @intCast(t.fab_days.torso) //
+        else if (std.mem.startsWith(u8, key, "comp_leg")) @intCast(t.fab_days.leg) //
+        else if (std.mem.startsWith(u8, key, "comp_arm")) @intCast(t.fab_days.arm) //
+        else if (std.mem.startsWith(u8, key, "comp_head")) @intCast(t.fab_days.head) //
+        else @intCast(t.fab_days.other);
+    const delta: i32 = switch (componentClass(key)) {
+        .light => t.fab_class_delta.light,
+        .medium => 0,
+        .heavy => t.fab_class_delta.heavy,
+        .assault => t.fab_class_delta.assault,
     };
+    return @intCast(@max(1, base + delta));
 }
 
-/// Provisions: one ton feeds this many person-days (~5 kg/person/day). // TUNE
-pub const provisions_person_days_per_ton = 200;
+/// Provisions: one ton feeds this many person-days (tuning.part).
+pub const provisions_person_days_per_ton = @import("tuning.zig").t.part.provisions_person_days_per_ton;
+
+/// Tons of provisions `heads` eat over `days`: rounded up, never under a
+/// ton (the one rounding every burn, plan and forecast uses).
+pub fn provisionsTons(heads: u32, days: u32) u32 {
+    return @max(1, std.math.divCeil(u32, heads * days, provisions_person_days_per_ton) catch 1);
+}
+
+/// Tons a company eats per day.
+pub fn provisionsPerDay(heads: u32) u32 {
+    return provisionsTons(heads, 1);
+}
 
 /// A quantity of one catalog part sitting in an HQ or company inventory.
 pub const StockLine = struct {
@@ -219,6 +232,12 @@ pub const AcquisitionOrder = struct {
     eta_day: ?u32 = null,
     cost: types.CBills,
     status: OrderStatus = .sourcing,
+
+    /// Still coming: being sourced or on the road. Every "on order" count
+    /// and every inbound-tonnage sum uses this, so they agree.
+    pub fn inFlight(self: *const AcquisitionOrder) bool {
+        return self.status == .sourcing or self.status == .in_transit;
+    }
 };
 
 test "12C.14: sourcing modifiers — scarce parts, periphery worlds and comms reach" {
@@ -281,4 +300,11 @@ test "12D.8: structure is rated by weight class — every classed assembly is in
     try std.testing.expect(fabricationDays("comp_ct_l") < fabricationDays("comp_ct"));
     try std.testing.expectEqual(@as(u8, 2), find("comp_arm_h").?.fab_min_bay);
     try std.testing.expect(find("comp_arm_a").?.fab_regional);
+}
+
+test "provisions round up and never under a ton" {
+    try std.testing.expectEqual(@as(u32, 1), provisionsPerDay(0));
+    try std.testing.expectEqual(@as(u32, 1), provisionsPerDay(200));
+    try std.testing.expectEqual(@as(u32, 2), provisionsPerDay(201));
+    try std.testing.expectEqual(@as(u32, 38), provisionsTons(250, 30)); // 7500 / 200 = 37.5, up
 }

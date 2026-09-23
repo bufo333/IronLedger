@@ -19,12 +19,35 @@ pub fn baySlots(gs: *GameState, hq_id: types.HqId) u32 {
     return @as(u32, hq.effectiveFacilityLevel(.mek_bay)) * tuning.hq_ops.slots_per_bay_level;
 }
 
-pub fn activeJobs(gs: *GameState, hq_id: types.HqId) u32 {
-    var n: u32 = 0;
+/// A bay's occupancy: jobs on the bench and jobs waiting for a slot. The
+/// desk, the HQ screen, the Lab and the checklist print this one count.
+pub const BayLoad = struct { busy: u32, queued: u32 };
+
+pub fn bayLoad(gs: *GameState, hq_id: types.HqId) BayLoad {
+    var load: BayLoad = .{ .busy = 0, .queued = 0 };
     for (gs.bay_jobs.items) |j| {
-        if (j.hq == hq_id and j.started_day != null and j.done_day != null) n += 1;
+        if (j.hq != hq_id) continue;
+        if (j.started_day != null) load.busy += 1 else load.queued += 1;
     }
-    return n;
+    return load;
+}
+
+pub fn activeJobs(gs: *GameState, hq_id: types.HqId) u32 {
+    return bayLoad(gs, hq_id).busy;
+}
+
+/// Units of a part already bound for an HQ's shelf: orders in flight to
+/// it plus fabrication jobs in its bay. Reorder points, the demand ledger
+/// and the keep-stocked pane all count "coming" this way.
+pub fn comingToHq(gs: *GameState, hq_id: types.HqId, key: []const u8) u32 {
+    var coming: u32 = 0;
+    for (gs.part_orders.items) |o| if (std.mem.eql(u8, o.part_key, key) and o.dest == .hq and o.dest.hq == hq_id and o.inFlight()) {
+        coming += o.quantity;
+    };
+    for (gs.bay_jobs.items) |j| if (j.hq == hq_id and j.kind == .fabrication and j.done_day == null and std.mem.eql(u8, j.item_key, key)) {
+        coming += 1;
+    };
+    return coming;
 }
 
 pub fn hasJobForUnit(gs: *GameState, unit_id: types.UnitId) bool {
@@ -84,6 +107,16 @@ pub fn slotNeedsComponent(s: unit_mod.PartSlot) bool {
     return s.class == .structure and (s.condition == .destroyed or s.condition == .missing);
 }
 
+/// The HQ that hosts a new company (Stage 9D capacity): `preferred` when
+/// it has a free combat-company slot, else the first HQ that has one,
+/// else `.none`. `new_company` and the Forces screen's + share it.
+pub fn hqWithCompanySlot(gs: *GameState, preferred: types.HqId) types.HqId {
+    if (gs.hqs.getPtr(preferred)) |h| if (gs.companiesAtHq(preferred) < h.capacity().combat_companies) return preferred;
+    var hit = gs.hqs.iterator();
+    while (hit.next()) |e| if (gs.companiesAtHq(e.value_ptr.id) < e.value_ptr.capacity().combat_companies) return e.value_ptr.id;
+    return .none;
+}
+
 /// Where a hull's components must sit for the depot to use them: its own
 /// home HQ (Stage 9D), the seat for the unassigned pool.
 pub fn depotHqFor(gs: *GameState, u: *const unit_mod.Unit) types.HqId {
@@ -105,6 +138,76 @@ pub fn depotShortfall(gs: *GameState, u: *const unit_mod.Unit) ?[]const u8 {
         if (gs.stockCount(.{ .hq = hq_id }, n.component) < wanted) return n.component;
     }
     return null;
+}
+
+// ---- the one rule for field spares ----
+//
+// Field work (armor, weapons, equipment, ammo) is done where the hull sits
+// by its own tech from that site's shelf: the weekly repair pass takes
+// the part there, `replace` orders it there, and every screen's "need /
+// on hand / coming / short" for gear reads this ledger for that site.
+
+/// A field-work mount that wants a spare: destroyed or missing (a damaged
+/// one is hours alone).
+pub fn slotNeedsSpare(s: unit_mod.PartSlot) bool {
+    if (s.condition != .destroyed and s.condition != .missing) return false;
+    return unit_mod.repairTier(s.class, s.condition) == .field;
+}
+
+/// Where a hull's field work happens and its spares must sit.
+pub fn spareSiteFor(gs: *GameState, u: *const unit_mod.Unit) types.Site {
+    return gs.siteForForce(u.force);
+}
+
+/// Units of a part already ordered to a site and still on the way.
+pub fn comingToSite(gs: *GameState, site: types.Site, key: []const u8) u32 {
+    var coming: u32 = 0;
+    for (gs.part_orders.items) |o| if (std.mem.eql(u8, o.part_key, key) and o.inFlight() and std.meta.eql(o.dest, site)) {
+        coming += o.quantity;
+    };
+    return coming;
+}
+
+/// The spares ledger for one site: every hull whose field work happens
+/// there (scrap excepted), aggregated by part key in first-seen order,
+/// against the site's shelf and the orders bound for it.
+pub fn spareDemand(alloc: std.mem.Allocator, gs: *GameState, site: types.Site) ![]ComponentLine {
+    var need: std.StringArrayHashMapUnmanaged(u32) = .empty;
+    var uit = gs.units.iterator();
+    while (uit.next()) |e| {
+        const u = e.value_ptr;
+        if (u.wreck == .scrap or !std.meta.eql(spareSiteFor(gs, u), site)) continue;
+        for (u.slots.items) |s| {
+            if (!slotNeedsSpare(s)) continue;
+            const g = try need.getOrPut(alloc, s.part_key);
+            if (!g.found_existing) g.value_ptr.* = 0;
+            g.value_ptr.* += 1;
+        }
+    }
+    var out: std.ArrayListUnmanaged(ComponentLine) = .empty;
+    var it = need.iterator();
+    while (it.next()) |e| {
+        const key = e.key_ptr.*;
+        const n = e.value_ptr.*;
+        const on_hand = gs.stockCount(site, key);
+        const coming = comingToSite(gs, site, key);
+        try out.append(alloc, .{ .key = key, .need = n, .on_hand = on_hand, .coming = coming, .short = n -| (on_hand + coming) });
+    }
+    return out.toOwnedSlice(alloc);
+}
+
+/// The sites whose gear an HQ's Market screen answers for: the HQ's own
+/// shelf, then the field stores of every company homed there that is away.
+pub fn spareSitesOf(alloc: std.mem.Allocator, gs: *GameState, hq_id: types.HqId) ![]types.Site {
+    var out: std.ArrayListUnmanaged(types.Site) = .empty;
+    try out.append(alloc, .{ .hq = hq_id });
+    var fit = gs.forces.iterator();
+    while (fit.next()) |e| {
+        const f = e.value_ptr;
+        if (f.echelon != .company or gs.homeHqFor(f.id) != hq_id or gs.isCompanyHome(f.id)) continue;
+        try out.append(alloc, .{ .company = f.id });
+    }
+    return out.toOwnedSlice(alloc);
 }
 
 /// One line of the components ledger: what the hulls homed at an HQ need,
@@ -143,13 +246,7 @@ pub fn componentDemand(alloc: std.mem.Allocator, gs: *GameState, hq_id: types.Hq
         const key = e.key_ptr.*;
         const n = e.value_ptr.*;
         const on_hand = gs.stockCount(.{ .hq = hq_id }, key);
-        var coming: u32 = 0;
-        for (gs.part_orders.items) |o| if (std.mem.eql(u8, o.part_key, key) and o.dest == .hq and o.dest.hq == hq_id and (o.status == .sourcing or o.status == .in_transit)) {
-            coming += o.quantity;
-        };
-        for (gs.bay_jobs.items) |j| if (j.hq == hq_id and j.kind == .fabrication and j.done_day == null and std.mem.eql(u8, j.item_key, key)) {
-            coming += 1;
-        };
+        const coming = comingToHq(gs, hq_id, key);
         try out.append(alloc, .{ .key = key, .need = n, .on_hand = on_hand, .coming = coming, .short = n -| (on_hand + coming) });
     }
     return out.toOwnedSlice(alloc);
@@ -179,7 +276,7 @@ pub fn rebuildEstimate(gs: *GameState, u: *const unit_mod.Unit) ?types.CBills {
         const def = part_mod.find(n.component) orelse continue;
         total += types.applyBp(types.applyBp(def.cost, market.structural_fab_cost_mult_bp), gs.diff().fab_cost_bp);
     }
-    total += @divTrunc(u.purchase_price, 25) * needed;
+    total += @divTrunc(u.purchase_price, tuning.hq_ops.depot_labour_divisor) * needed;
     return total + engineCharge(u);
 }
 
@@ -234,7 +331,7 @@ pub fn queueDepotRepair(gs: *GameState, unit_id: types.UnitId) QueueError!bool {
         .unit = unit_id,
         .duration_days = tuning.hq_ops.depot_base_days + tuning.hq_ops.depot_days_per_component * needed + (if (u.wreck.needsEngine()) tuning.loss.engine_rebuild_days else 0),
         .queued_day = gs.clock.day_index,
-        .cost = @divTrunc(u.purchase_price, 25) * needed + engineCharge(u), // a new engine goes in with an engine kill (12D.2)
+        .cost = @divTrunc(u.purchase_price, tuning.hq_ops.depot_labour_divisor) * needed + engineCharge(u), // a new engine goes in with an engine kill (12D.2)
     });
     return true;
 }
@@ -299,6 +396,21 @@ pub fn queueFabrication(gs: *GameState, hq_id: types.HqId, key: []const u8, quan
 }
 
 /// Start (or level up) a facility as a construction project.
+/// Why a facility cannot be upgraded right now, or null when it can:
+/// the command refuses on it before a C-bill moves, the HQ screen dims on it.
+pub const UpgradeBlock = enum { in_progress, maxed, funds_short };
+
+pub fn upgradeBlock(gs: *GameState, hq_id: types.HqId, kind: hq_mod.FacilityKind) ?UpgradeBlock {
+    const hq = gs.hqs.getPtr(hq_id) orelse return .maxed;
+    for (hq.projects.items) |p| {
+        if (p.facility == kind and p.phase(gs.clock.day_index) != .complete) return .in_progress;
+    }
+    const to_level = hq.facilityLevel(kind) + 1;
+    if (to_level > hq_mod.max_facility_level) return .maxed;
+    if (hq.funds < hq_mod.upgradeCost(kind, to_level)) return .funds_short;
+    return null;
+}
+
 pub fn startUpgrade(gs: *GameState, hq_id: types.HqId, kind: hq_mod.FacilityKind) !void {
     const hq = gs.hqs.getPtr(hq_id) orelse return error.UnknownHq;
     for (hq.projects.items) |p| {
@@ -436,7 +548,7 @@ fn applyRepairResult(gs: *GameState, u: *unit_mod.Unit, result: RepairResult) ![
             // A fault left in: the machine is fussier from here on.
             const q = @intFromEnum(u.quality);
             if (q > 0) u.quality = @enumFromInt(q - 1);
-            return try std.fmt.allocPrint(gs.allocator(), " — {s}with a lingering fault (quality now {s}){s}", .{ "{a}", @tagName(u.quality), "{/}" });
+            return try std.fmt.allocPrint(gs.allocator(), " — with a lingering fault (quality now {s})", .{@tagName(u.quality)});
         },
         .botch => {
             var gear: u32 = 0;
@@ -449,7 +561,7 @@ fn applyRepairResult(gs: *GameState, u: *unit_mod.Unit, result: RepairResult) ![
                 if (sl.class == .structure or sl.condition == .destroyed or sl.condition == .missing) continue;
                 if (pick == 0) {
                     sl.condition = .destroyed;
-                    return try std.fmt.allocPrint(gs.allocator(), " — {s}BOTCHED (natural 2): {s} destroyed on the bench, order another{s}", .{ "{c}", sl.part_key, "{/}" });
+                    return try std.fmt.allocPrint(gs.allocator(), " — BOTCHED (natural 2): {s} destroyed on the bench, order another", .{sl.part_key});
                 }
                 pick -= 1;
             }
@@ -737,6 +849,53 @@ test "one rule for structural needs: the depot, the demand ledger and the screen
     gs.unit(junk).?.markWreckedBy(.scrap);
     try std.testing.expectEqual(@as(usize, 0), (try depotNeeds(al, gs.unit(junk).?)).len);
     try std.testing.expectEqual(@as(usize, 0), (try componentDemand(al, &gs, hq_id, null)).len);
+}
+
+test "one rule for field spares: replace orders what the site's ledger says is short, and the Market shows the same line" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 35 });
+    defer gs.deinit();
+    _ = try gs.createCommander("T", .LC, .chief_engineer);
+    const hq_id = gs.hqs.keys()[0];
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const al = arena.allocator();
+    const commands = @import("commands.zig");
+    _ = try commands.execute(&gs, .{ .new_company = "Alpha" });
+
+    // A hull at home with one weapon shot away; the shelf is bare of it.
+    const uid = try gs.addUnit("SHD-2H");
+    const u = gs.unit(uid).?;
+    var key: []const u8 = "";
+    for (u.slots.items) |*s| if (s.class == .weapon) {
+        s.condition = .destroyed;
+        key = s.part_key;
+        break;
+    };
+    while (gs.takeStock(.{ .hq = hq_id }, key, 1)) {}
+    const site = spareSiteFor(&gs, u);
+    try std.testing.expect(site == .hq);
+
+    var ledger = try spareDemand(al, &gs, site);
+    try std.testing.expectEqual(@as(usize, 1), ledger.len);
+    try std.testing.expectEqualStrings(key, ledger[0].key);
+    try std.testing.expectEqual(@as(u32, 1), ledger[0].short);
+    const m = try @import("queries.zig").market(al, &gs, .all, hq_id);
+    var seen = false;
+    for (m.demand) |d| if (std.mem.eql(u8, d.key, key) and d.short == 1) {
+        seen = true;
+    };
+    try std.testing.expect(seen);
+
+    // Ordering covers it: the ledger says one coming, none short; a second
+    // replace has nothing left to order.
+    const r = try commands.execute(&gs, .{ .replace_gear = uid });
+    try std.testing.expectEqual(@as(u32, 1), r.ordered + r.unsourced);
+    ledger = try spareDemand(al, &gs, site);
+    if (ledger[0].coming > 0) {
+        try std.testing.expectEqual(@as(u32, 0), ledger[0].short);
+        const again = try commands.execute(&gs, .{ .replace_gear = uid });
+        try std.testing.expectEqual(@as(u32, 0), again.ordered + again.unsourced);
+    }
 }
 
 test "construction projects: paperwork then build, staffing bill rises" {

@@ -9,13 +9,6 @@ const contract = @import("../domain/contract.zig");
 const person = @import("../domain/person.zig");
 const rng_mod = @import("../sim/rng.zig");
 
-pub const RefreshCadence = struct {
-    /// MekHQ cadence: contract market refreshes monthly, personnel weekly,
-    /// units monthly.
-    pub const contract_days = 30;
-    pub const personnel_days = 7;
-    pub const unit_days = 30;
-};
 
 /// Offers on the board (12C.7, play feedback): a floor so there is always
 /// a choice, the rating letter index (F 0 … A* 5) and the comms level on
@@ -106,11 +99,33 @@ pub const HullCondition = struct {
     destroyed_slots: u8,
     missing_components: u8,
 
+    pub const Grade = enum { new, used, worn, wreck };
+
+    /// How bad it is, in one cascade the label and the colour both read.
+    pub fn grade(self: HullCondition) Grade {
+        if (self.missing_components > 0) return .wreck;
+        if (self.destroyed_slots > 0) return .worn;
+        if (self.armor_pct < 100 or self.damaged_slots > 0) return .used;
+        return .new;
+    }
+
+    /// The board's rough repair bill (ARCH §9.8): per slot, per component,
+    /// per 15% of armour. A guess for the buyer, not the depot's price.
+    pub fn repairGuess(self: HullCondition) types.CBills {
+        const t = @import("../domain/tuning.zig").t.market;
+        return @as(types.CBills, self.destroyed_slots) * t.repair_guess_destroyed +
+            @as(types.CBills, self.damaged_slots) * t.repair_guess_damaged +
+            @as(types.CBills, self.missing_components) * t.repair_guess_component +
+            @as(types.CBills, (100 - @as(u32, self.armor_pct)) / 15) * t.repair_guess_armor_step;
+    }
+
     pub fn label(self: HullCondition) []const u8 {
-        if (self.missing_components > 0) return "WRECK";
-        if (self.destroyed_slots > 0) return "worn";
-        if (self.armor_pct < 100 or self.damaged_slots > 0) return "used";
-        return "new";
+        return switch (self.grade()) {
+            .wreck => "WRECK",
+            .worn => "worn",
+            .used => "used",
+            .new => "new",
+        };
     }
 };
 
@@ -182,13 +197,20 @@ pub fn rollHullCondition(rng: *rng_mod.Rng) HullCondition {
     };
 }
 
+/// A staple line: always on the board, restocked as it sells.
+pub fn isStaple(key: []const u8) bool {
+    for (staple_keys) |k| if (std.mem.eql(u8, k, key)) return true;
+    return false;
+}
+
 /// Price a hull by loadout value and condition: a new, fully loaded hull
-/// at a premium; a wreck missing a leg and its guns for a fraction. // TUNE
+/// at a premium; a wreck missing a leg and its guns for a fraction (tuning.market).
 pub fn hullPrice(base_cost: types.CBills, avg_weapon_cost: types.CBills, cond: HullCondition, price_roll_bp: types.Bp) types.CBills {
+    const t = @import("../domain/tuning.zig").t.market;
     const lost = @as(types.CBills, cond.destroyed_slots) * avg_weapon_cost +
-        @as(types.CBills, cond.missing_components) * 80_000;
+        @as(types.CBills, cond.missing_components) * t.wreck_component_value;
     const intact = @max(@divTrunc(base_cost, 5), base_cost - lost);
-    const cond_bp: types.Bp = 3_000 + @as(types.Bp, @intFromEnum(cond.quality)) * 1_000 + @as(types.Bp, cond.armor_pct) * 40;
+    const cond_bp: types.Bp = t.cond_base_bp + @as(types.Bp, @intFromEnum(cond.quality)) * t.cond_quality_bp + @as(types.Bp, cond.armor_pct) * t.cond_armor_bp_per_pct;
     return types.applyBp(types.applyBp(intact, cond_bp), price_roll_bp);
 }
 

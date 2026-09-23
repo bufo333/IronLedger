@@ -52,9 +52,7 @@ pub fn get(level: Level) *const Row {
 /// "×1.47" for a basis-point multiplier (unsigned on purpose: a padded
 /// signed fraction prints its sign).
 pub fn multText(buf: []u8, bp: types.Bp) []const u8 {
-    const whole: u32 = @intCast(@divTrunc(bp, 10_000));
-    const frac: u32 = @intCast(@divTrunc(@mod(bp, 10_000), 100));
-    return std.fmt.bufPrint(buf, "×{d}.{d:0>2}", .{ whole, frac }) catch "×?";
+    return types.bpText(buf, bp);
 }
 
 pub fn parse(name: []const u8) ?Level {

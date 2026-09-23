@@ -10,6 +10,27 @@ pub const CBills = i64;
 /// formulas stay in integer arithmetic. 10_000 bp == ×1.0.
 pub const Bp = i64;
 
+/// ×1.0 in basis points: the whole of something (full severance, no
+/// multiplier).
+pub const full_bp: Bp = 10_000;
+
+/// "×1.47": a basis-point multiplier as the screens print it.
+pub fn bpText(buf: []u8, bp: Bp) []const u8 {
+    const whole: u32 = @intCast(@divTrunc(bp, full_bp));
+    const frac: u32 = @intCast(@divTrunc(@mod(bp, full_bp), 100));
+    return std.fmt.bufPrint(buf, "×{d}.{d:0>2}", .{ whole, frac }) catch "×?";
+}
+
+/// Basis points as a whole percentage (3_000 → 30).
+pub fn bpPercent(bp: Bp) i64 {
+    return @divTrunc(bp, 100);
+}
+
+/// The campaign calendar's arithmetic months and years (the rendered date
+/// follows the real calendar; tenure, terms and ages count in these).
+pub const days_per_month: u32 = 30;
+pub const days_per_year: u32 = 365;
+
 pub fn applyBp(amount: CBills, bp: Bp) CBills {
     return @divTrunc(amount * bp, 10_000);
 }
@@ -143,4 +164,11 @@ test "experience level derivation" {
     try std.testing.expectEqual(ExperienceLevel.veteran, ExperienceLevel.fromCombatSkills(3, 4));
     try std.testing.expectEqual(ExperienceLevel.regular, ExperienceLevel.fromCombatSkills(4, 5));
     try std.testing.expectEqual(ExperienceLevel.green, ExperienceLevel.fromCombatSkills(5, 6));
+}
+
+test "one multiplier and one percent rendering for basis points" {
+    var buf: [16]u8 = undefined;
+    try std.testing.expectEqualStrings("×1.47", bpText(&buf, 14_700));
+    try std.testing.expectEqualStrings("×0.80", bpText(&buf, 8_000));
+    try std.testing.expectEqual(@as(i64, 30), bpPercent(3_000));
 }

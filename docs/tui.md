@@ -109,7 +109,7 @@ land in the Desk log pane.
 | F5 | Ledger | Treasuries · P&L · Ledger | `t` → `transfer`, `p` → `set_policy`, `x` clears the row's cash or resupply policy, `L` → `take_loan`, `[ ]` period |
 | F6 | Supply | Sites · Demand · Order form · Shop | `o` → `order_part`, `s` → `ship_stock`, `b` → `buy_listing`, Enter on demand → order shortfall, `P` → `set_supply_policy`, `R` → `trim_stock` (return everything over the field plan), `K` → `set_stock_policy` (keep an HQ line stocked), `$` on an HQ row → `sell_stock` |
 | F7 | HQ | Facilities/projects · Bays · Back office · Hiring hall | `u` → `upgrade_facility`, `T` → `upgrade_tier`, `f` → `fabricate`, `P` → `post_person`, `h` → `hire_candidate`, `[ ]` switch HQ |
-| F8 | Lab | Budget/crits · Mounts · Plan & rules | `-` → `refit_remove`, `+` → `refit_install`, `c` → `refit_clear`, Enter → `refit_commit`, `[ ]` switch hull |
+| F8 | Lab | Budget/crits · Mounts · Plan & rules | `-` → `refit_remove`, `+` → `refit_install`, `c` → `refit_clear`, Enter → `refit_commit`, `[ ]` switch hull (wrecks listed too: no refits, `D` rebuilds) |
 | F9 | People | Personnel (pinned header, role filter) · Record · Open seats | `m` → `admit`, `t` → `train`, `a`/Enter seat picker → `assign`, `P` → `post_person`, `x` → `transfer_person`, `L` → `leave`, `D` → `fire`, `r` record |
 | F10 | Market | Boards · Order catalog · Demand | Enter → `buy_listing` / `order_part` / order the shortfall, `b` → `fabricate`, `K` → `set_stock_policy` on a catalogue row, KEEP STOCKED pane (Enter edits, `x` removes), `[ ]` buyer HQ |
 
@@ -174,15 +174,14 @@ view model each frame from an arena.
 
 ## Boundary rules
 
-1. The TUI imports `commands`, `checklist`, `queries`, and read-only domain
-   types — nothing under `sim/` that mutates.
-2. All mutation goes through `commands.execute`; the TUI never touches
-   `GameState` fields.
-3. Every refusal (`Error.*`) is rendered as a sentence next to the control
-   that caused it, using one table mapping error → text.
-4. The CLI remains the scripting/debug interface; both frontends run the
-   same golden-master scripts.
+The TUI's boundary with the core is a contract rule, not a TUI one:
+[`docs/coding-contract.md`](coding-contract.md) sections 1, 3 and 4 state
+what a screen may call, how screens and widgets are structured, and the
+greps a reviewer runs. Two notes that are specific to this client and
+not rules:
 
+- The CLI remains the scripting/debug interface; both frontends run the
+  same golden-master scripts.
 - **Glyph set** is ASCII plus box-drawing and block elements only; `--ascii`
   swaps those for `+ - |` and `# .` on terminals that render them
   double-width. Emblem art is plain ASCII by construction.

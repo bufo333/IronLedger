@@ -266,6 +266,16 @@ pub const Contract = struct {
     /// there may take it. `.none` = an offer from before 12E.4.
     offer_hq: types.HqId = .none,
 
+    /// The company is out on it: in transit to the world or on station.
+    pub fn isRunning(self: *const Contract) bool {
+        return self.status == .transit or self.status == .active;
+    }
+
+    /// Over, one way or another: completed, breached or failed.
+    pub fn isClosed(self: *const Contract) bool {
+        return self.status == .completed or self.status == .breached or self.status == .failed;
+    }
+
     pub fn hasOpfor(self: *const Contract) bool {
         return self.enemy_lances > 0 and self.enemy_lance_bv > 0;
     }
@@ -286,18 +296,25 @@ pub const Contract = struct {
     /// by victory points — outstanding ≥ 50 (+3 rep), strong ≥ 25 (+2),
     /// satisfactory ≥ 0 (+1), poor < 0 (0 rep). Failure is separate: a
     /// score of −5 or worse at end of term is a breach on performance.
+    pub const Grade = enum { poor, satisfactory, strong, outstanding };
+
+    pub fn gradeOf(self: *const Contract) Grade {
+        const t = @import("tuning.zig").t.contract;
+        if (self.victory_points >= t.grade_outstanding_vp) return .outstanding;
+        if (self.victory_points >= t.grade_strong_vp) return .strong;
+        if (self.victory_points >= 0) return .satisfactory;
+        return .poor;
+    }
+
     pub fn grade(self: *const Contract) []const u8 {
-        if (self.victory_points >= 50) return "outstanding";
-        if (self.victory_points >= 25) return "strong";
-        if (self.victory_points >= 0) return "satisfactory";
-        return "poor";
+        return @tagName(self.gradeOf());
     }
 
     /// Score at which the employer declares performance failure at term.
     pub const fail_score: i32 = -5;
 
     pub fn objectivesMet(self: *const Contract) bool {
-        return self.objective == .attrition and self.poolDestroyedPct() >= 75;
+        return self.objective == .attrition and self.poolDestroyedPct() >= @import("tuning.zig").t.contract.attrition_met_pct;
     }
 };
 
@@ -308,22 +325,20 @@ pub fn objectiveFor(kind: ContractKind) ObjectiveKind {
 }
 
 /// Opposition force pool for an attrition contract, relative to the
-/// committed force and scaled by length (longer campaigns face more). // TUNE
+/// committed force and scaled by length (longer campaigns face more;
+/// tuning.contract.pool_*).
 pub fn enemyPoolBp(kind: ContractKind, length_months: u8) types.Bp {
-    const per_month: types.Bp = @divTrunc(enemyStrengthBp(kind), 2);
-    return enemyStrengthBp(kind) + per_month * @as(types.Bp, @min(6, length_months));
+    const t = @import("tuning.zig").t.contract;
+    const per_month: types.Bp = @divTrunc(enemyStrengthBp(kind), t.pool_per_month_divisor);
+    return enemyStrengthBp(kind) + per_month * @as(types.Bp, @min(t.pool_months_cap, length_months));
 }
 
 /// Enemy strength relative to the player's committed force, by contract
-/// kind, basis points (ARCH §7). // TUNE
+/// kind, basis points (ARCH §7; tuning.contract.enemy_strength_bp).
 pub fn enemyStrengthBp(kind: ContractKind) types.Bp {
+    const e = @import("tuning.zig").t.contract.enemy_strength_bp;
     return switch (kind) {
-        .recon_raid, .pirate_hunting => 8_000,
-        .extraction_raid, .guerrilla_warfare => 9_000,
-        .objective_raid, .diversionary_raid, .security_duty, .riot_duty => 10_000,
-        .relief_duty => 11_000,
-        .planetary_assault => 13_000,
-        .garrison_duty, .cadre_duty => 6_000, // rare pirate probes only
+        inline else => |k| @field(e, @tagName(k)),
     };
 }
 

@@ -94,6 +94,11 @@ pub const Stats = struct {
     hulls_salvaged: u32 = 0,
     people_kia: u32 = 0,
     enemy_bv_destroyed: u64 = 0,
+
+    /// Nothing counted yet: a book from before the counters existed.
+    pub fn isEmpty(self: Stats) bool {
+        return self.battles_won + self.battles_drawn + self.battles_lost + self.hulls_salvaged == 0;
+    }
 };
 
 pub const RatingSnapshot = struct { year: i32, score: i32 };
@@ -296,62 +301,19 @@ pub const GameState = struct {
         self.arena.deinit();
     }
 
-    /// The summary's counters (12C.8) only started counting when they were
-    /// added; a campaign saved before that has a log full of battles and
-    /// zeros in the book. Rebuild the counters from the AAR lines the log
-    /// has kept all along: the header names the outcome, the losses line
-    /// counts hulls destroyed and KIA and enemy BV, salvage lines name
-    /// each wreck hauled home.
-    pub fn rebuildStatsFromLog(self: *GameState) void {
-        var st: Stats = .{};
-        for (self.event_log.items) |e| {
-            // Lines carry a date prefix: "3025-02-15 [AAR] …".
-            if (e.category != .battle or std.mem.indexOf(u8, e.text, "[AAR]") == null) continue;
-            if (std.mem.indexOf(u8, e.text, " — power ") != null) {
-                // "[AAR] kind vs enemy …: outcome — power a vs b"
-                const head = e.text[0..std.mem.indexOf(u8, e.text, " — power ").?];
-                const colon = std.mem.lastIndexOfScalar(u8, head, ':') orelse continue;
-                const outcome = std.mem.trim(u8, head[colon + 1 ..], " ");
-                if (std.mem.eql(u8, outcome, "decisive_victory") or std.mem.eql(u8, outcome, "victory")) st.battles_won += 1 //
-                else if (std.mem.eql(u8, outcome, "draw")) st.battles_drawn += 1 //
-                else if (std.mem.eql(u8, outcome, "defeat") or std.mem.eql(u8, outcome, "rout")) st.battles_lost += 1;
-                continue;
-            }
-            if (std.mem.indexOf(u8, e.text, "losses: ")) |i| {
-                // "losses: H hit / D destroyed, W wounded, K KIA | enemy losses B BV"
-                var it = std.mem.tokenizeAny(u8, e.text[i + "losses: ".len ..], " /,|");
-                var nums: [8]u64 = @splat(0);
-                var n: usize = 0;
-                while (it.next()) |tok| {
-                    if (n >= nums.len) break;
-                    if (std.fmt.parseInt(u64, tok, 10)) |v| {
-                        nums[n] = v;
-                        n += 1;
-                    } else |_| {}
-                }
-                // order: hit, destroyed, wounded, KIA, enemy BV
-                if (n >= 5) {
-                    st.hulls_lost += @intCast(nums[1]);
-                    st.people_kia += @intCast(nums[3]);
-                    st.enemy_bv_destroyed += nums[4];
-                }
-                continue;
-            }
-            if (std.mem.indexOf(u8, e.text, "salvage: ") != null) {
-                var rest = e.text;
-                while (std.mem.indexOf(u8, rest, "wreck #")) |k| {
-                    st.hulls_salvaged += 1;
-                    rest = rest[k + "wreck #".len ..];
-                }
-            }
-        }
-        self.stats = st;
-    }
 
     /// All campaign-lifetime allocations come from here.
     /// The difficulty row in force.
     pub fn diff(self: *const GameState) *const difficulty_mod.Row {
         return difficulty_mod.get(self.difficulty);
+    }
+
+    /// Scratch that is freed before the caller returns (a per-call arena,
+    /// a temporary map): the campaign arena's backing allocator, so the
+    /// memory really comes back. Anything that outlives the call uses
+    /// `allocator()`.
+    pub fn scratch(self: *GameState) std.mem.Allocator {
+        return self.arena.child_allocator;
     }
 
     pub fn allocator(self: *GameState) std.mem.Allocator {
@@ -500,7 +462,7 @@ pub const GameState = struct {
         const id = try self.hirePerson(spec.first, spec.last, role);
         const p = self.person(id).?;
         if (spec.callsign) |c| p.callsign = try self.allocator().dupe(u8, c);
-        p.born_day = @as(i32, @intCast(self.clock.day_index)) - @as(i32, spec.age) * 365;
+        p.setBirthdayFromAge(self.clock.day_index, spec.age);
 
         // Overwrite the hire defaults with the generated experience band.
         const alloc = self.allocator();
@@ -677,8 +639,7 @@ pub const GameState = struct {
         var bonus: i32 = hq.effectiveFacilityLevel(.hiring_hall);
         if (self.hqStaff(hq.id, .admin_hr).count >= 2) bonus += 1;
         // A famous outfit (12C.7) draws a better class of walk-in.
-        const queries = @import("queries.zig");
-        if (queries.ratingIndex(queries.ratingScore(self)) >= @import("../domain/tuning.zig").t.rating.recruit_bonus_index) bonus += 1;
+        if (@import("rating.zig").currentIndex(self) >= @import("../domain/tuning.zig").t.rating.recruit_bonus_index) bonus += 1;
         return @min(bonus, 4);
     }
 
@@ -737,7 +698,7 @@ pub const GameState = struct {
         var n: u32 = 0;
         for (f.children.items) |cid| {
             const c = self.forces.getPtr(cid) orelse continue;
-            if (c.echelon == .lance or c.echelon == .air_lance) n += 1;
+            if (c.isCombatLance()) n += 1;
         }
         return n;
     }
@@ -879,26 +840,19 @@ pub const GameState = struct {
         var it = self.people.iterator();
         while (it.next()) |entry| {
             const p = entry.value_ptr;
-            if (p.status != .active and p.status != .wounded) continue;
-            var f = p.assigned_force;
-            while (f != .none) {
-                if (f == company_id) {
-                    total += p.monthlySalary();
-                    break;
-                }
-                f = (self.forces.getPtr(f) orelse break).parent;
-            }
+            if (!p.isOnBooks() or !self.personInCompany(p, company_id)) continue;
+            total += p.monthlySalary();
         }
         return total;
     }
 
     /// Append a tagged, formatted entry (with the campaign date) to the log.
     pub fn log(self: *GameState, category: LogCategory, ctx: LogCtx, comptime fmt: []const u8, args: anytype) !void {
-        const d = self.clock.date;
+        var date_buf: [10]u8 = undefined;
         const line = try std.fmt.allocPrint(
             self.allocator(),
-            "{d}-{d:0>2}-{d:0>2} " ++ fmt,
-            .{ d.year, d.month, d.day } ++ args,
+            "{s} " ++ fmt,
+            .{self.clock.date.text(&date_buf)} ++ args,
         );
         try self.event_log.append(self.allocator(), .{
             .day = self.clock.day_index,
@@ -936,9 +890,98 @@ pub const GameState = struct {
 
     /// Is the company physically at its home HQ (not deployed, not idling
     /// on a contract world, not travelling)?
+    /// Where a company stands (ARCH §9.7): the one cascade every screen,
+    /// warning and refusal reads. Contract first (en route, then on
+    /// station), then the road home, then a world it idles on, else home.
+    pub const CompanyPosture = union(enum) {
+        home,
+        en_route: *contract_mod.Contract,
+        deployed: *contract_mod.Contract,
+        returning: u32, // arrival day
+        idle_afield: []const u8, // planet key
+    };
+
+    pub fn companyPosture(self: *GameState, company: types.ForceId) CompanyPosture {
+        if (self.deploymentContract(company)) |c| return if (c.status == .transit) .{ .en_route = c } else .{ .deployed = c };
+        const f = self.forces.getPtr(company) orelse return .home;
+        if (f.return_eta_day) |eta| return .{ .returning = eta };
+        if (f.location_planet) |p| return .{ .idle_afield = p };
+        return .home;
+    }
+
     pub fn isCompanyHome(self: *GameState, company: types.ForceId) bool {
-        const f = self.forces.getPtr(company) orelse return true;
-        return f.location_planet == null and f.return_eta_day == null and self.deploymentContract(company) == null;
+        return self.companyPosture(company) == .home;
+    }
+
+    /// Out on a contract (en route or on station). Not the opposite of
+    /// home: a company returning or idling afield is neither.
+    pub fn isCompanyDeployed(self: *GameState, company: types.ForceId) bool {
+        return self.deploymentContract(company) != null;
+    }
+
+    /// Does this person serve under this company (any force in its tree)?
+    pub fn personInCompany(self: *GameState, p: *const person_mod.Person, company: types.ForceId) bool {
+        return company != .none and self.companyOf(p.assigned_force) == company;
+    }
+
+    /// The company's support lance of one trade under its Omega, if raised.
+    /// (Posture and membership predicates are tested at the end of this file.)
+    pub fn supportLance(self: *GameState, company: types.ForceId, kind: force_mod.SupportLanceKind) ?*force_mod.Force {
+        const co = self.forces.getPtr(company) orelse return null;
+        for (co.children.items) |cid| {
+            const omega = self.forces.getPtr(cid) orelse continue;
+            if (omega.echelon != .support_company) continue;
+            for (omega.children.items) |sid| {
+                const sl = self.forces.getPtr(sid) orelse continue;
+                if (sl.echelon == .support_lance and sl.support_kind == kind) return sl;
+            }
+        }
+        return null;
+    }
+
+    /// Nobody's pilot, nobody's tech, not posted to an HQ, not on a
+    /// company's books: what the assignment column calls "unassigned".
+    pub fn isUnassigned(self: *GameState, p: *const person_mod.Person) bool {
+        if (p.posted_hq != .none or p.assigned_force != .none) return false;
+        if (self.pilotSeat(p.id) != .none) return false;
+        var uit = self.units.iterator();
+        while (uit.next()) |e| if (e.value_ptr.tech == p.id) return false;
+        return true;
+    }
+
+    /// Does the outfit hold a prisoner of this house (a trade is possible)?
+    pub fn holdsPrisonerOf(self: *GameState, faction: []const u8) bool {
+        var it = self.people.iterator();
+        while (it.next()) |e| if (e.value_ptr.status == .pow and std.mem.eql(u8, e.value_ptr.faction, faction)) return true;
+        return false;
+    }
+
+    /// Contracts the outfit has taken on a world (offers excepted).
+    pub fn contractsWorkedAt(self: *GameState, planet_key: []const u8) u32 {
+        var n: u32 = 0;
+        for (self.contracts.values()) |c| if (std.mem.eql(u8, c.planet_key, planet_key) and c.status != .offer) {
+            n += 1;
+        };
+        return n;
+    }
+
+    /// Why a person cannot take a seat or tech slot on a hull today, or
+    /// null: the one answer `assignSlot` refuses with and the picker dims with.
+    pub fn assignBlock(self: *GameState, u: *const unit_mod.Unit, p: *const person_mod.Person) ?[]const u8 {
+        if (!p.isAvailable(self.clock.day_index)) return if (p.status == .wounded) "wounded" else "unavailable";
+        if (u.force == .none and !self.canReachPool(p)) return "away with their company";
+        return null;
+    }
+
+    /// A crewed dropship in the company's own hangar: it lifts and escorts
+    /// the company on the way in (12D.3).
+    pub fn hasCrewedDropship(self: *GameState, company: types.ForceId) bool {
+        var it = self.units.iterator();
+        while (it.next()) |e| {
+            const u = e.value_ptr;
+            if (u.kind == .dropship and u.force == company and u.pilot != .none) return true;
+        }
+        return false;
     }
 
     /// Where a force draws supplies from: its own field stores while away
@@ -1116,10 +1159,11 @@ pub const GameState = struct {
         return self.stockCount(self.defaultSite(), part_key);
     }
 
-    /// Courier days to reach a treasury from the outfit's seat (first HQ).
-    /// Same-planet handoffs still take a minimum 3 days of paperwork. // TUNE
+    /// Courier days to reach a treasury from the outfit's seat (first HQ):
+    /// `logistics.daysBetween`, same-world floor included.
     pub fn courierEtaDays(self: *GameState, to: Treasury) u32 {
-        const home_key: []const u8 = if (self.hqs.count() > 0) self.hqs.values()[0].planet_key else return 3;
+        const logistics = @import("../econ/logistics.zig");
+        const home_key: []const u8 = if (self.hqs.count() > 0) self.hqs.values()[0].planet_key else return logistics.same_world_days;
         const dest_key: []const u8 = switch (to) {
             .outfit => home_key,
             .hq => |id| if (self.hqs.getPtr(id)) |h| h.planet_key else home_key,
@@ -1129,10 +1173,9 @@ pub const GameState = struct {
                 break :blk home_key;
             },
         };
-        const home = planet_mod.find(home_key) orelse return 3;
-        const dest = planet_mod.find(dest_key) orelse return 3;
-        if (home == dest) return 3;
-        return @max(3, @import("../econ/logistics.zig").transitDays(planet_mod.jumpsBetween(home, dest)));
+        const home = planet_mod.find(home_key) orelse return logistics.same_world_days;
+        const dest = planet_mod.find(dest_key) orelse return logistics.same_world_days;
+        return logistics.daysBetween(home, dest);
     }
 
     // ----------------------------------------------------- deployment info
@@ -1154,8 +1197,7 @@ pub const GameState = struct {
         var it = self.contracts.iterator();
         while (it.next()) |entry| {
             const c = entry.value_ptr;
-            if (c.assigned_company == company_id and (c.status == .transit or c.status == .active))
-                return c;
+            if (c.assigned_company == company_id and c.isRunning()) return c;
         }
         return null;
     }
@@ -1167,15 +1209,8 @@ pub const GameState = struct {
         while (it.next()) |entry| {
             const p = entry.value_ptr;
             // Prisoners eat too (12B.7).
-            if (p.status != .active and p.status != .wounded and p.status != .pow) continue;
-            var f = p.assigned_force;
-            while (f != .none) {
-                if (f == company_id) {
-                    n += 1;
-                    break;
-                }
-                f = (self.forces.getPtr(f) orelse break).parent;
-            }
+            if (!(p.isOnBooks() or p.status == .pow)) continue;
+            if (self.personInCompany(p, company_id)) n += 1;
         }
         return n;
     }
@@ -1315,8 +1350,7 @@ pub const GameState = struct {
     pub fn assignSlot(self: *GameState, unit_id: types.UnitId, slot: Slot, person_id: types.PersonId) AssignSlotError!void {
         const u = self.unit(unit_id) orelse return error.UnknownUnit;
         const p = self.person(person_id) orelse return error.UnknownPerson;
-        if (!p.isAvailable(self.clock.day_index)) return error.Unavailable;
-        if (u.force == .none and !self.canReachPool(p)) return error.PersonAway;
+        if (self.assignBlock(u, p)) |why| return if (std.mem.eql(u8, why, "away with their company")) error.PersonAway else error.Unavailable;
         const resolved: Slot = if (slot != .any) slot else if (p.role == unit_mod.crewRoleFor(u.kind)) .pilot else if (unit_mod.techRoleFor(u.kind) == p.role) .tech else return error.WrongRole;
         switch (resolved) {
             .any => unreachable,
@@ -1358,7 +1392,7 @@ pub const GameState = struct {
         var it = self.units.iterator();
         while (it.next()) |entry| {
             const u = entry.value_ptr;
-            if (u.tech != tech_id or u.status == .destroyed or u.status == .mothballed) continue;
+            if (u.tech != tech_id or u.isParked()) continue;
             hours += if (tech) |t| self.techHoursFor(t, u) else self.hullHours(u);
         }
         return hours;
@@ -1409,7 +1443,7 @@ pub const GameState = struct {
             const p = entry.value_ptr;
             if (!p.isAvailable(self.clock.day_index) or self.companyOf(p.assigned_force) != company) continue;
             if (p.role == .astech) astechs += 1;
-            if (p.role == .tech_mek or p.role == .tech_mechanic or p.role == .tech_aero or p.role == .tech_ba) techs += 1;
+            if (p.role.isTech()) techs += 1;
         }
         const team_bp: types.Bp = if (techs == 0) 10_000 else 5_000 + @min(5_000, @divTrunc(@as(types.Bp, astechs) * 5_000, 6 * @as(types.Bp, techs)));
         return @intCast(types.applyBp(@as(types.CBills, tech.weekly_hours), team_bp));
@@ -1444,7 +1478,7 @@ pub const GameState = struct {
         var uit = self.units.iterator();
         while (uit.next()) |entry| {
             const u = entry.value_ptr;
-            if (self.companyOf(u.force) != company or u.status == .destroyed or u.status == .mothballed) continue;
+            if (self.companyOf(u.force) != company or u.isParked()) continue;
 
             // A seat needs filling when empty or its pilot is away; a spent
             // pilot (12C.1) is benched only when someone fresher is free.
@@ -1499,6 +1533,18 @@ pub const GameState = struct {
 
     /// The hull's mounted items with a plan's edits applied (what the lab
     /// validates). `alloc` owns the result.
+    /// The rules' verdict on putting `part_key` at `loc` on top of the
+    /// hull's current plan (the Lab's location picker and the commit share it).
+    pub fn tryInstall(self: *GameState, alloc: std.mem.Allocator, unit_id: types.UnitId, loc: meklab.Location, part_key: []const u8) !meklab.Report {
+        const u = self.unit(unit_id) orelse return error.UnknownUnit;
+        const design = @import("../domain/chassis.zig").find(u.chassis_key) orelse return error.UnknownChassis;
+        const base = try self.labItems(unit_id, alloc);
+        var items = try alloc.alloc(meklab.Item, base.len + 1);
+        @memcpy(items[0..base.len], base);
+        items[base.len] = .{ .location = loc, .part_key = part_key };
+        return meklab.validate(design, items, alloc);
+    }
+
     pub fn labItems(self: *GameState, unit_id: types.UnitId, alloc: std.mem.Allocator) ![]meklab.Item {
         const u = self.unit(unit_id) orelse return &.{};
         var out: std.ArrayListUnmanaged(meklab.Item) = .empty;
@@ -1591,16 +1637,7 @@ pub const GameState = struct {
             .infantry => .security,
             else => return null,
         };
-        const co = self.forces.getPtr(company) orelse return null;
-        for (co.children.items) |cid| {
-            const omega = self.forces.getPtr(cid) orelse continue;
-            if (omega.echelon != .support_company) continue;
-            for (omega.children.items) |sid| {
-                const sl = self.forces.getPtr(sid) orelse continue;
-                if (sl.echelon == .support_lance and sl.support_kind == want) return sid;
-            }
-        }
-        return null;
+        return if (self.supportLance(company, want)) |sl| sl.id else null;
     }
 
     pub fn placeUnitInCompany(self: *GameState, unit_id: types.UnitId, company: types.ForceId) !void {
@@ -1660,13 +1697,22 @@ pub const GameState = struct {
     }
 
     /// Sum of monthly salaries for everyone on active status, after the
+    /// The hangar ledger (ARCH §9.8): every hull bills, running or not.
+    /// The payday, the employer's cost reckoning and the forecast all read it.
+    pub fn monthlyHullUpkeep(self: *GameState) types.CBills {
+        var total: types.CBills = 0;
+        var it = self.units.iterator();
+        while (it.next()) |entry| total += entry.value_ptr.monthlyBill();
+        return total;
+    }
+
     /// paymaster's discount if the commander has one.
     pub fn monthlyPayroll(self: *GameState) types.CBills {
         var total: types.CBills = 0;
         var it = self.people.iterator();
         while (it.next()) |entry| {
             const p = entry.value_ptr;
-            if (p.status == .active or p.status == .wounded) total += p.monthlySalary();
+            if (p.isOnBooks()) total += p.monthlySalary();
         }
         return types.applyBp(total, self.commanderMultBp(.payroll));
     }
@@ -1748,6 +1794,13 @@ pub const GameState = struct {
         const def = part_mod.find(key) orelse return 0;
         const bp: types.Bp = if (part_mod.isComponent(key)) market.component_resale_bp else market.stock_resale_bp;
         return types.applyBp(def.cost * qty, bp);
+    }
+
+    /// Nothing left covers the hole: funds, everything sellable and every
+    /// credit line together are below zero. The checklist warns on it and
+    /// the payday folds the outfit on it; one expression.
+    pub fn isInsolvent(self: *GameState) bool {
+        return self.funds + self.liquidationValue() + self.creditRemaining() < 0;
     }
 
     pub fn liquidationValue(self: *GameState) types.CBills {
@@ -1997,20 +2050,31 @@ test "12C.15: a worn or exotic hull wants more hours; a sharper tech needs fewer
     try std.testing.expect(gs.techHoursFor(gs.person(tech).?, u) > regular);
 }
 
-test "12C.8: counters rebuild from the AAR lines of an older save" {
-    var gs = GameState.init(std.testing.allocator, .{ .seed = 1288 });
+test "company posture is one cascade: contract, then the road home, then a world, else home" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 5 });
     defer gs.deinit();
-    try gs.log(.battle, .{}, "[AAR] garrison_duty vs DC: victory — power 900 vs 700 (recon 0, fatigue 4, morale 50)", .{});
-    try gs.log(.battle, .{}, "[AAR]   losses: 2 hit / 1 destroyed, 1 wounded, 1 KIA | enemy losses 1200 BV ≈ 1 kill credited | salvage 300 BV claimed | comp 0 | score 1", .{});
-    try gs.log(.battle, .{}, "[AAR]   salvage: wreck #40 SHD-2H Shadow Hawk (armor 30%) → home depot in 5 days; wreck #41 LCT-1V Locust → home depot in 5 days; ", .{});
-    try gs.log(.battle, .{}, "[AAR] raid vs CC — ambush on heavy woods, night action: rout — power 500 vs 900 (recon 0, fatigue 9, morale 40)", .{});
-    try gs.log(.battle, .{}, "[AAR]   losses: 4 hit / 2 destroyed, 2 wounded, 0 KIA | enemy losses 100 BV ≈ 0 kills credited | salvage 0 BV claimed | comp 0 | score -2", .{});
-    try gs.log(.battle, .{}, "[AAR]   salvage: none — the field was not held", .{});
-    gs.rebuildStatsFromLog();
-    try std.testing.expectEqual(@as(u32, 1), gs.stats.battles_won);
-    try std.testing.expectEqual(@as(u32, 1), gs.stats.battles_lost);
-    try std.testing.expectEqual(@as(u32, 3), gs.stats.hulls_lost);
-    try std.testing.expectEqual(@as(u32, 1), gs.stats.people_kia);
-    try std.testing.expectEqual(@as(u32, 2), gs.stats.hulls_salvaged);
-    try std.testing.expectEqual(@as(u64, 1300), gs.stats.enemy_bv_destroyed);
+    _ = try gs.createCommander("T", .LC, .line_officer);
+    _ = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    var co: types.ForceId = .none;
+    var it = gs.forces.iterator();
+    while (it.next()) |e| if (e.value_ptr.echelon == .company) {
+        co = e.value_ptr.id;
+    };
+    try std.testing.expect(gs.companyPosture(co) == .home);
+    try std.testing.expect(gs.isCompanyHome(co) and !gs.isCompanyDeployed(co));
+    const f = gs.forces.getPtr(co).?;
+    f.location_planet = "galatea";
+    try std.testing.expect(gs.companyPosture(co) == .idle_afield);
+    try std.testing.expect(!gs.isCompanyHome(co) and !gs.isCompanyDeployed(co));
+    f.return_eta_day = 40;
+    try std.testing.expect(gs.companyPosture(co) == .returning);
+    try std.testing.expectEqual(@as(u32, 40), gs.companyPosture(co).returning);
+    // Everyone under the company is in it; nobody else is.
+    var pit = gs.people.iterator();
+    var in_co: u32 = 0;
+    while (pit.next()) |e| if (gs.personInCompany(e.value_ptr, co)) {
+        in_co += 1;
+    };
+    try std.testing.expect(in_co > 0 and in_co == gs.companyHeadcount(co));
+    try std.testing.expect(gs.supportLance(co, .mash) != null);
 }

@@ -83,6 +83,21 @@ pub const Role = enum {
             else => false,
         };
     }
+
+    /// Fills a hull's seat: its crew or its tech. The open-seat warning
+    /// covers these; the manning warning covers the rest.
+    pub fn fillsHullSeat(self: Role) bool {
+        return switch (self) {
+            .mekwarrior, .vehicle_crew, .aero_pilot, .tech_mek, .tech_mechanic, .tech_aero => true,
+            else => false,
+        };
+    }
+
+    /// The hiring hall keeps the combat floor for these (12B.13): seat
+    /// roles and the astech pool behind them.
+    pub fn hallCombatFloor(self: Role) bool {
+        return self.fillsHullSeat() or self == .astech;
+    }
 };
 
 pub const Status = enum { active, wounded, mia, kia, retired, resigned, pow, released };
@@ -117,6 +132,9 @@ pub const Person = struct {
     fatigue: u8 = 0,
     morale: u8 = 50,
     recruited_day: u32 = 0,
+    /// The day they left the outfit (retired, resigned, released); the
+    /// posting they held stays on the record so the desk knows who walked.
+    departed_day: ?u32 = null,
     salary_override: ?types.CBills = null,
     assigned_force: types.ForceId = .none,
     /// HQ staff posting (Stage 9C back office): admins here run the HQ.
@@ -219,19 +237,19 @@ pub const Person = struct {
     }
 
     /// Lasting damage (MekHQ advanced medical modifiers, approximated):
-    /// every permanent head or internal injury costs one skill point in the
-    /// cockpit. // TUNE
+    /// every permanent head or internal injury costs skill points in the
+    /// cockpit (tuning.person.permanent_penalty_per_injury).
     pub fn permanentPenalty(self: *const Person) u8 {
         var n: u8 = 0;
         for (self.injuries.items) |i| {
-            if (i.permanent and (i.location == .head or i.location == .internal)) n += 1;
+            if (i.permanent and (i.location == .head or i.location == .internal)) n += tuning.person.permanent_penalty_per_injury;
         }
         return n;
     }
 
     /// Months on the payroll.
     pub fn tenureMonths(self: *const Person, day: u32) u32 {
-        return (day -| self.recruited_day) / 30;
+        return (day -| self.recruited_day) / types.days_per_month;
     }
 
     /// Restless (Stage 12.20): low morale or deep fatigue — the flags the
@@ -248,7 +266,7 @@ pub const Person = struct {
     pub fn ageYears(self: *const Person, day: u32) ?u32 {
         const born = self.born_day orelse return null;
         const days = @as(i64, day) - @as(i64, born);
-        return if (days < 0) 0 else @intCast(@divTrunc(days, 365));
+        return if (days < 0) 0 else @intCast(@divTrunc(days, @as(i64, types.days_per_year)));
     }
 
     /// XP award scaled for youth (12C.4): the young learn faster.
@@ -279,7 +297,7 @@ pub const Person = struct {
     /// What this person's stake should be today (12C.3).
     pub fn sharesDue(self: *const Person, day: u32) u8 {
         const t = tuning.person;
-        if (self.status != .active and self.status != .wounded) return 0;
+        if (!self.isOnBooks()) return 0;
         const eligible = self.role.isCombat() or self.role.isTech();
         if (!eligible) return 0;
         var n: u8 = 0;
@@ -293,10 +311,15 @@ pub const Person = struct {
 
     /// CamOps fatigue band (12C.1): what tiredness costs in the cockpit.
     pub fn fatigueBand(self: *const Person) FatigueBand {
+        return fatigueBandOf(self.fatigue);
+    }
+
+    /// The band a fatigue value falls in (for averages and columns).
+    pub fn fatigueBandOf(fatigue: u32) FatigueBand {
         const t = tuning.person;
-        if (self.fatigue >= t.fatigue_spent) return .spent;
-        if (self.fatigue >= t.exhausted_fatigue) return .exhausted;
-        if (self.fatigue >= t.fatigue_tired) return .tired;
+        if (fatigue >= t.fatigue_spent) return .spent;
+        if (fatigue >= t.exhausted_fatigue) return .exhausted;
+        if (fatigue >= t.fatigue_tired) return .tired;
         return .fresh;
     }
 
@@ -311,6 +334,32 @@ pub const Person = struct {
     }
 
     /// Fit for duty today: active, not on leave.
+    /// Move morale by `delta`, clamped to 0…100. Cool Under Fire (12B.6)
+    /// halves every loss; that rule lives here and nowhere else.
+    pub fn addMorale(self: *Person, delta: i32) void {
+        const d = if (delta < 0 and self.has("cool_under_fire")) @divTrunc(delta, 2) else delta;
+        self.morale = @intCast(std.math.clamp(@as(i32, self.morale) + d, 0, 100));
+    }
+
+    /// Move fatigue by `delta`, clamped to 0…`max_fatigue`.
+    pub fn addFatigue(self: *Person, delta: i32) void {
+        self.fatigue = @intCast(std.math.clamp(@as(i32, self.fatigue) + delta, 0, @as(i32, max_fatigue)));
+    }
+
+    /// On the payroll and in the outfit's care: active or wounded. MIA,
+    /// prisoners and everyone who left are off the books.
+    pub fn isOnBooks(self: *const Person) bool {
+        return self.status == .active or self.status == .wounded;
+    }
+
+    /// Left the outfit for good: dead, retired, resigned or released.
+    pub fn isGone(self: *const Person) bool {
+        return switch (self.status) {
+            .kia, .retired, .resigned, .released => true,
+            else => false,
+        };
+    }
+
     pub fn isAvailable(self: *const Person, day: u32) bool {
         if (self.status != .active) return false;
         if (self.leave_until_day) |until| if (day < until) return false;
@@ -366,6 +415,22 @@ pub const Person = struct {
     /// "Sgt. Lori Kalmar" for rosters and AARs.
     pub fn rankedName(self: *const Person, alloc: std.mem.Allocator) ![]const u8 {
         return std.fmt.allocPrint(alloc, "{s} {s} {s}", .{ self.rank.abbrev(), self.first_name, self.last_name });
+    }
+
+    /// Birthday from an age on a given day (12C.4): recruitment and the
+    /// save migration that back-fills older people both use it.
+    pub fn setBirthdayFromAge(self: *Person, day: u32, age: u32) void {
+        self.born_day = @as(i32, @intCast(day)) - @as(i32, @intCast(age)) * @as(i32, types.days_per_year);
+    }
+
+    /// "Lori Kalmar": the name without the rank, for rosters and log lines.
+    pub fn fullName(self: *const Person, alloc: std.mem.Allocator) ![]const u8 {
+        return std.fmt.allocPrint(alloc, "{s} {s}", .{ self.first_name, self.last_name });
+    }
+
+    /// "Sgt Kalmar": rank and surname, for tight columns.
+    pub fn shortName(self: *const Person, buf: []u8) []const u8 {
+        return std.fmt.bufPrint(buf, "{s} {s}", .{ self.rank.abbrev(), self.last_name }) catch self.last_name;
     }
 };
 
@@ -479,16 +544,6 @@ pub const FatigueBand = enum {
             .tired => 1,
             .exhausted => 2,
             .spent => 3,
-        };
-    }
-
-    /// Markup colour for the TUI: green, amber, amber, red.
-    pub fn markup(self: FatigueBand) []const u8 {
-        return switch (self) {
-            .fresh => "{g}",
-            .tired => "{a}",
-            .exhausted => "{a}",
-            .spent => "{c}",
         };
     }
 };
@@ -606,4 +661,34 @@ test "injuries: open ones set the discharge day, permanent head wounds cost skil
     p.injuries.items[1].healed = true;
     try std.testing.expectEqual(@as(?u32, 12), p.healDoneDay());
     try std.testing.expectEqual(@as(u8, 1), p.permanentPenalty());
+}
+
+test "morale and fatigue move through one clamp; Cool Under Fire halves a loss" {
+    var p: Person = .{ .id = @enumFromInt(1), .first_name = "A", .last_name = "B", .role = .mekwarrior };
+    defer p.deinit(std.testing.allocator);
+    p.addMorale(-60);
+    try std.testing.expectEqual(@as(u8, 0), p.morale);
+    p.addMorale(150);
+    try std.testing.expectEqual(@as(u8, 100), p.morale);
+    p.addFatigue(-5);
+    try std.testing.expectEqual(@as(u8, 0), p.fatigue);
+    p.addFatigue(500);
+    try std.testing.expectEqual(max_fatigue, p.fatigue);
+    try p.abilities.append(std.testing.allocator, "cool_under_fire");
+    p.morale = 50;
+    p.addMorale(-10);
+    try std.testing.expectEqual(@as(u8, 45), p.morale);
+    p.addMorale(-1); // a one-point grind rounds to nothing
+    try std.testing.expectEqual(@as(u8, 45), p.morale);
+}
+
+test "names come from one family of helpers" {
+    var p: Person = .{ .id = @enumFromInt(1), .first_name = "Lori", .last_name = "Kalmar", .role = .mekwarrior };
+    defer p.deinit(std.testing.allocator);
+    const full = try p.fullName(std.testing.allocator);
+    defer std.testing.allocator.free(full);
+    try std.testing.expectEqualStrings("Lori Kalmar", full);
+    var buf: [48]u8 = undefined;
+    const short = p.shortName(&buf);
+    try std.testing.expect(std.mem.endsWith(u8, short, " Kalmar"));
 }

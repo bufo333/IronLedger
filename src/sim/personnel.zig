@@ -3,6 +3,7 @@
 //! designations: ranks follow seats and experience unless pinned.
 
 const std = @import("std");
+const tuning = @import("../domain/tuning.zig").t;
 const types = @import("../domain/types.zig");
 const person_mod = @import("../domain/person.zig");
 const rank_mod = @import("../domain/rank.zig");
@@ -18,9 +19,8 @@ pub fn adjustMoraleAll(gs: *GameState, delta: i32) u32 {
     var it = gs.people.iterator();
     while (it.next()) |e| {
         const p = e.value_ptr;
-        if (p.status != .active and p.status != .wounded) continue;
-        const d = if (delta < 0 and p.has("cool_under_fire")) @divTrunc(delta, 2) else delta;
-        p.morale = @intCast(std.math.clamp(@as(i32, p.morale) + d, 0, 100));
+        if (!p.isOnBooks()) continue;
+        p.addMorale(delta);
         touched += 1;
     }
     return touched;
@@ -53,7 +53,7 @@ pub fn payShares(gs: *GameState, contract_id: types.ContractId, company: types.F
     var it = gs.people.iterator();
     while (it.next()) |e| {
         const p = e.value_ptr;
-        if (p.status != .active and p.status != .wounded) continue;
+        if (!p.isOnBooks()) continue;
         total_shares += p.shares;
     }
     if (total_shares == 0) return 0;
@@ -65,14 +65,14 @@ pub fn payShares(gs: *GameState, contract_id: types.ContractId, company: types.F
     var it2 = gs.people.iterator();
     while (it2.next()) |e| {
         const p = e.value_ptr;
-        if ((p.status != .active and p.status != .wounded) or p.shares == 0) continue;
+        if (!p.isOnBooks() or p.shares == 0) continue;
         paid += per_share * p.shares;
         holders += 1;
-        p.morale = @intCast(@min(100, @as(u32, p.morale) + 3));
+        p.addMorale(3);
     }
     try gs.postTransaction(.{ .day = gs.clock.day_index, .amount = -paid, .category = .payroll, .company = company, .contract = contract_id, .note = "profit shares" });
     try gs.log(.contract, .{ .company = company, .contract = contract_id }, "[shares] {d} c-bills of {d} contract income ({d}%) paid to {d} shareholders — {d} shares at {d} each (morale +3)", .{
-        paid, income, @divTrunc(gs.share_profit_bp, 100), holders, total_shares, per_share,
+        paid, income, types.bpPercent(gs.share_profit_bp), holders, total_shares, per_share,
     });
     return paid;
 }
@@ -84,14 +84,38 @@ pub fn payShares(gs: *GameState, contract_id: types.ContractId, company: types.F
 pub fn depart(gs: *GameState, person_id: types.PersonId, status: person_mod.Status, share_bp: types.Bp, note: []const u8) !types.CBills {
     const p = gs.person(person_id) orelse return 0;
     p.status = status;
+    p.departed_day = gs.clock.day_index;
     var uit = gs.units.iterator();
     while (uit.next()) |ue| {
         if (ue.value_ptr.pilot == person_id) ue.value_ptr.pilot = .none;
         if (ue.value_ptr.tech == person_id) ue.value_ptr.tech = .none;
     }
-    const owed = types.applyBp(p.severance(gs.clock.day_index), share_bp);
+    // The posting stays on the record (who walked from which desk); the
+    // staffing count is derived from active people, refreshed here so no
+    // caller has to remember.
+    gs.refreshHqStaffing();
+    const owed = severanceOwed(gs, person_id, share_bp);
     if (owed > 0) try gs.postTransaction(.{ .day = gs.clock.day_index, .amount = -owed, .category = .payroll, .company = gs.companyOf(p.assigned_force), .note = note });
     return owed;
+}
+
+/// How far from ready a company is for an offer (12E.5): the points the
+/// candidates table sorts by. Lower is readier.
+pub fn readinessPenalty(crew: CrewStats, depot_hulls: u32, transit_days: u32) i32 {
+    const t = tuning.person;
+    return @as(i32, @intCast(depot_hulls)) * t.readiness_depot_weight +
+        @as(i32, @intCast(crew.spent)) * t.readiness_spent_weight +
+        @as(i32, @intCast(crew.wounded)) * t.readiness_wounded_weight +
+        @as(i32, @intCast(crew.avg_fatigue / t.readiness_fatigue_divisor)) +
+        @as(i32, @intCast(transit_days / t.readiness_transit_divisor)) -
+        @as(i32, @intCast(crew.avg_morale / t.readiness_morale_divisor));
+}
+
+/// What letting someone go costs at a share of the full payout (12C.2):
+/// `depart` pays it and the desk quotes it from the same function.
+pub fn severanceOwed(gs: *GameState, person_id: types.PersonId, share_bp: types.Bp) types.CBills {
+    const p = gs.person(person_id) orelse return 0;
+    return types.applyBp(p.severance(gs.clock.day_index), share_bp);
 }
 
 /// One line of a company's manning table (MekHQ: the personnel-count
@@ -105,8 +129,8 @@ pub fn isPooledRole(role: person_mod.Role) bool {
 }
 
 /// What a company needs in every role, from its hulls on hand and in
-/// transit to it; mirrors the starter generator's ratios
-/// (`company_gen.supportStaffFor`).
+/// transit to it: `company_gen.staffNeeds` is the table, this counts the
+/// hulls it is read for.
 pub fn manningNeeds(gs: *GameState, company: types.ForceId) [14]Need {
     var meks: u32 = 0;
     var vehicles: u32 = 0;
@@ -134,33 +158,98 @@ pub fn manningNeeds(gs: *GameState, company: types.ForceId) [14]Need {
             else => vehicles += 1,
         }
     }
-    const combat = meks + vehicles + platoons;
-    const staff = company_gen.supportStaffFor(meks, combat);
-    return .{
-        .{ .role = .mekwarrior, .need = meks, .why = "one per mek" },
-        .{ .role = .vehicle_crew, .need = vehicles, .why = "one per truck, rig or ambulance" },
-        .{ .role = .infantry, .need = platoons, .why = "one per security platoon" },
-        .{ .role = .aero_pilot, .need = fighters, .why = "one per fighter" },
-        .{ .role = .tech_aero, .need = fighters, .why = "one per fighter" },
-        .{ .role = .tech_mek, .need = staff.techs, .why = "one per mek" },
-        .{ .role = .astech, .need = staff.astechs, .why = "six per mek tech (hours)" },
-        .{ .role = .tech_mechanic, .need = vehicles / 2, .why = "one per two vehicles" },
-        .{ .role = .doctor, .need = staff.doctors, .why = "one per 25 combat crew" },
-        .{ .role = .medic, .need = staff.medics + (if (mash > 0) @as(u32, 4) else 0), .why = "each covers 5 patients and staffs a MASH bed; four per doctor, four more with the MASH lance" },
-        .{ .role = .admin_command, .need = 1, .why = "company office" },
-        .{ .role = .admin_logistics, .need = 1, .why = "company office" },
-        .{ .role = .admin_transport, .need = 1, .why = "company office" },
-        .{ .role = .admin_hr, .need = staff.admins -| 3, .why = "one per 10 combat crew beyond the office" },
-    };
+    var out: [14]Need = undefined;
+    for (company_gen.staffNeeds(.{ .meks = meks, .vehicles = vehicles, .platoons = platoons, .fighters = fighters, .mash = mash }), 0..) |n, i| {
+        out[i] = .{ .role = n.role, .need = n.need, .why = n.why };
+    }
+    return out;
 }
 
 /// People of `role` on a company's books (active or wounded).
+/// One row of the manning table: the need, who fills it, and the gap.
+pub const ManningLine = struct { role: person_mod.Role, have: u32, need: u32, open: u32, why: []const u8 };
+
+/// The manning table (12B.11): every need against who is on the payroll.
+/// The checklist warns from it, the raise wizard and the Forces pane
+/// print it.
+pub fn manningLines(gs: *GameState, company: types.ForceId) [14]ManningLine {
+    var out: [14]ManningLine = undefined;
+    for (manningNeeds(gs, company), 0..) |n, i| {
+        const have = manningHave(gs, company, n.role);
+        out[i] = .{ .role = n.role, .have = have, .need = n.need, .open = n.need -| have, .why = n.why };
+    }
+    return out;
+}
+
+/// A company's people in one pass: who is on the books under it, how
+/// tired and how happy on average, and the counts the readiness board
+/// prints. The battle's company modifiers, the rotation reset, the
+/// Forces board and the readiness board all read this one census.
+pub const CrewStats = struct {
+    heads: u32 = 0,
+    avg_fatigue: u8 = 0,
+    avg_morale: u8 = 50,
+    tired: u32 = 0,
+    spent: u32 = 0,
+    wounded: u32 = 0,
+    permanent: u32 = 0,
+    training: u32 = 0,
+    banked_xp: u32 = 0,
+};
+
+pub fn companyCrewStats(gs: *GameState, company: types.ForceId) CrewStats {
+    var st: CrewStats = .{};
+    var fat: u64 = 0;
+    var mor: u64 = 0;
+    var pit = gs.people.iterator();
+    while (pit.next()) |e| {
+        const p = e.value_ptr;
+        if (!p.isOnBooks() or !gs.personInCompany(p, company)) continue;
+        st.heads += 1;
+        fat += p.fatigue;
+        mor += p.morale;
+        if (p.fatigueBand() != .fresh) st.tired += 1;
+        if (p.isUnfit()) st.spent += 1;
+        if (p.status == .wounded) st.wounded += 1;
+        if (p.permanentPenalty() > 0) st.permanent += 1;
+        if (p.training != null) st.training += 1;
+        if (p.role.isCombat()) st.banked_xp += p.xp;
+    }
+    if (st.heads > 0) {
+        st.avg_fatigue = @intCast(fat / st.heads);
+        st.avg_morale = @intCast(mor / st.heads);
+    }
+    return st;
+}
+
+/// Tech hours (12C.15): what a company's hulls want per week against
+/// what its techs, at their skill and with their astech teams, can give.
+pub const TechHours = struct { needed: u32, have: u32 };
+
+pub fn techHours(gs: *GameState, company: types.ForceId) TechHours {
+    var needed: u32 = 0;
+    var have: u32 = 0;
+    var uit = gs.units.iterator();
+    while (uit.next()) |e| {
+        const u = e.value_ptr;
+        if (u.isParked() or u.kind == .infantry or gs.companyOf(u.force) != company) continue;
+        needed += if (gs.person(u.tech)) |t| gs.techHoursFor(t, u) else gs.hullHours(u);
+    }
+    var pit = gs.people.iterator();
+    while (pit.next()) |e| {
+        const p = e.value_ptr;
+        if (!p.role.isTech() or !p.isAvailable(gs.clock.day_index) or gs.companyOf(p.assigned_force) != company) continue;
+        have += gs.techHoursAvailable(p);
+    }
+    return .{ .needed = needed, .have = have };
+}
+
 pub fn manningHave(gs: *GameState, company: types.ForceId, role: person_mod.Role) u32 {
     var have: u32 = 0;
     var pit = gs.people.iterator();
     while (pit.next()) |e| {
         const p = e.value_ptr;
-        if (p.role != role or (p.status != .active and p.status != .wounded)) continue;
+        if (p.role != role or !p.isOnBooks()) continue;
         if (gs.companyOf(p.assigned_force) == company) have += 1;
     }
     return have;
@@ -181,7 +270,7 @@ pub fn creditKills(gs: *GameState, engaged: []const types.UnitId, destroyed_bv: 
     for (engaged) |uid| {
         const u = gs.unit(uid) orelse continue;
         const p = gs.person(u.pilot) orelse continue;
-        if (p.status != .active and p.status != .wounded) continue;
+        if (!p.isOnBooks()) continue;
         p.battles += 1;
         const bv: u32 = if (chassis_mod.find(u.chassis_key)) |c| c.bv else 500;
         const gunnery: u32 = p.skill(p.role.primarySkill()) orelse 4;
@@ -196,7 +285,7 @@ pub fn creditKills(gs: *GameState, engaged: []const types.UnitId, destroyed_bv: 
         if (gs.person(pid)) |p| p.kill_bv += @intCast(@divTrunc(destroyed_bv * @as(i64, w), @as(i64, @intCast(total_w))));
     }
     // Whole kills, weighted draws.
-    const kills: u32 = @intCast(@divTrunc(destroyed_bv + 500, 1000));
+    const kills: u32 = @import("battle.zig").estimatedKills(destroyed_bv);
     for (0..kills) |_| {
         var pick = gs.rng.random(.battle).uintLessThan(u64, total_w);
         for (pilots.items, weights.items) |pid, w| {
@@ -214,7 +303,7 @@ pub fn creditKills(gs: *GameState, engaged: []const types.UnitId, destroyed_bv: 
 /// Returns how many were pinned on.
 pub fn checkAwards(gs: *GameState, person_id: types.PersonId) !u32 {
     const p = gs.person(person_id) orelse return 0;
-    if (p.status != .active and p.status != .wounded) return 0;
+    if (!p.isOnBooks()) return 0;
     var n: u32 = 0;
     for (award_mod.table) |a| {
         if (p.hasAward(a.key)) continue;
@@ -265,7 +354,7 @@ pub fn refreshRanks(gs: *GameState) !u32 {
         var company_best_skill: u8 = 99;
         for (f.children.items) |cid| {
             const lance = gs.force(cid) orelse continue;
-            if (lance.echelon != .lance and lance.echelon != .air_lance) continue;
+            if (!lance.isCombatLance()) continue;
             var best: types.PersonId = .none;
             var best_skill: u8 = 99;
             for (lance.units.items) |uid| {

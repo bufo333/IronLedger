@@ -66,8 +66,8 @@ pub fn inflict(gs: *GameState, person_id: types.PersonId, cause: WoundCause, sev
     p.wound_heal_day = null; // triage again with the new wound
     if (!gs.auto_admit) p.medbay_admitted = false;
     _ = try @import("personnel.zig").checkAwards(gs, person_id); // 12B.5: the Wound Badge
-    try gs.log(.medical, .{ .company = gs.companyOf(p.assigned_force) }, "[medbay] {s} {s} wounded ({s}): {s} {s}{s}", .{
-        p.first_name, p.last_name, why, severityLabel(severity), @tagName(location), if (permanent) " — permanent" else "",
+    try gs.log(.medical, .{ .company = gs.companyOf(p.assigned_force) }, "[medbay] {s} wounded ({s}): {s} {s}{s}", .{
+        try p.fullName(gs.allocator()), why, severityLabel(severity), @tagName(location), if (permanent) " — permanent" else "",
     });
 }
 
@@ -81,7 +81,7 @@ pub fn severityLabel(severity: u8) []const u8 {
 
 /// Is this person's posting currently deployed?
 fn isDeployed(gs: *GameState, p: *const person_mod.Person) bool {
-    return gs.deploymentContract(gs.companyOf(p.assigned_force)) != null;
+    return gs.isCompanyDeployed(gs.companyOf(p.assigned_force));
 }
 
 /// Triage & recovery time for a fresh wound.
@@ -157,12 +157,12 @@ pub fn runDailyHealing(gs: *GameState) !void {
     // past the bed count wait (their timers slip a day).
     const Patient = struct { id: types.PersonId, priority: u8, heal_day: u32, deployed: bool, company: types.ForceId };
     var patients: std.ArrayListUnmanaged(Patient) = .empty;
-    defer patients.deinit(std.heap.page_allocator);
+    defer patients.deinit(gs.scratch());
     var pit = gs.people.iterator();
     while (pit.next()) |entry| {
         const p = entry.value_ptr;
         if (p.status != .wounded or p.wound_heal_day == null) continue;
-        try patients.append(std.heap.page_allocator, .{
+        try patients.append(gs.scratch(), .{
             .id = p.id,
             .priority = p.medbay_priority,
             .heal_day = p.wound_heal_day.?,
@@ -204,7 +204,7 @@ pub fn runDailyHealing(gs: *GameState) !void {
             if (!p.medbay_admitted) {
                 if (!gs.auto_admit) continue;
                 p.medbay_admitted = true;
-                try gs.log(.medical, .{ .company = gs.companyOf(p.assigned_force) }, "[medbay] {s} {s} admitted (auto)", .{ p.first_name, p.last_name });
+                try gs.log(.medical, .{ .company = gs.companyOf(p.assigned_force) }, "[medbay] {s} admitted (auto)", .{ try p.fullName(gs.allocator()) });
             }
             // MASH coverage only helps if their company fields a MASH lance
             // in the field; at home the hospital takes over. Triage consumes
@@ -213,7 +213,7 @@ pub fn runDailyHealing(gs: *GameState) !void {
             const deployed = isDeployed(gs, p);
             var days = healDays(gs, deployed);
             if (!gs.takeStock(gs.siteForForce(p.assigned_force), "medical_supplies", 1)) days = @intCast(types.applyBp(days, tuning.medical.no_supplies_bp));
-            if (p.has("iron_man")) days = @max(3, days * 3 / 4); // 12B.6
+            if (p.has("iron_man")) days = @max(tuning.medical.iron_man_min_days, @as(u32, @intCast(types.applyBp(days, tuning.medical.iron_man_heal_bp)))); // 12B.6
             // A wound with no record behind it (older saves, event
             // effects): one light internal injury stands in for it.
             if (p.openInjuries() == 0) try p.injuries.append(gs.allocator(), .{ .location = .internal, .severity = 1, .incurred_day = gs.clock.day_index });
@@ -238,7 +238,7 @@ pub fn runDailyHealing(gs: *GameState) !void {
                     i += 1;
                 } else _ = p.injuries.orderedRemove(i);
             }
-            try gs.log(.medical, .{ .company = gs.companyOf(p.assigned_force) }, "[medical] {s} {s} returns to duty{s}", .{ p.first_name, p.last_name, if (lasting > 0) " — with a permanent injury on the record" else "" });
+            try gs.log(.medical, .{ .company = gs.companyOf(p.assigned_force) }, "[medical] {s} returns to duty{s}", .{ try p.fullName(gs.allocator()), if (lasting > 0) " — with a permanent injury on the record" else "" });
         }
     }
 }
@@ -263,19 +263,12 @@ pub fn runMonthlyTurnover(gs: *GameState) !u32 {
         const age = p.ageYears(day);
         if (age != null and age.? >= t.age_retire) {
             const company = gs.companyOf(p.assigned_force);
-            const paid = try @import("personnel.zig").depart(gs, p.id, .retired, 10_000, "retirement payout");
-            try gs.log(.rotation, .{ .company = company, .hq = p.posted_hq }, "[turnover] {s} {s} ({s}) retires at {d}{s}", .{ p.first_name, p.last_name, @tagName(p.role), age.?, if (paid > 0) try std.fmt.allocPrint(gs.allocator(), " — {d} c-bills paid out", .{paid}) else "" });
+            const paid = try @import("personnel.zig").depart(gs, p.id, .retired, types.full_bp, "retirement payout");
+            try gs.log(.rotation, .{ .company = company, .hq = p.posted_hq }, "[turnover] {s} ({s}) retires at {d}{s}", .{ try p.fullName(gs.allocator()), @tagName(p.role), age.?, if (paid > 0) try std.fmt.allocPrint(gs.allocator(), " — {d} c-bills paid out", .{paid}) else "" });
             notices += 1;
             continue;
         }
-        if (p.tenureMonths(day) < t.turnover_min_tenure_months) continue;
-        var restless = p.restlessness();
-        if (age != null and age.? >= t.age_old) restless += 1;
-        // Loyalty (12C.5): founders stand by the outfit unless truly
-        // miserable; every other modifier cancels a restless flag.
-        const loyal = p.loyalty(day);
-        if (loyal.founder and p.morale >= t.founder_morale_floor) continue;
-        restless -|= loyal.count();
+        const restless = turnoverRisk(p, day);
         if (restless == 0) continue;
         const roll = gs.rng.roll2d6(.medical);
         if (roll >= t.turnover_target + gs.diff().turnover_delta + restless) continue; // difficulty (12.32)
@@ -287,6 +280,22 @@ pub fn runMonthlyTurnover(gs: *GameState) !u32 {
     return notices;
 }
 
+/// How many restless flags a person carries into the payday roll (12C.5):
+/// none under a year's tenure, morale and fatigue flags plus one for age,
+/// founders stand by the outfit unless truly miserable, and every other
+/// loyalty modifier cancels a flag. Zero means they do not roll. The
+/// checklist counts who will roll from the same function.
+pub fn turnoverRisk(p: *const person_mod.Person, day: u32) u8 {
+    const t = tuning.person;
+    if (p.tenureMonths(day) < t.turnover_min_tenure_months) return 0;
+    var restless = p.restlessness();
+    const age = p.ageYears(day);
+    if (age != null and age.? >= t.age_old) restless += 1;
+    const loyal = p.loyalty(day);
+    if (loyal.founder and p.morale >= t.founder_morale_floor) return 0;
+    return restless -| loyal.count();
+}
+
 /// training phase, daily: finish programs that came due.
 pub fn runDailyTraining(gs: *GameState) !void {
     var it = gs.people.iterator();
@@ -296,13 +305,13 @@ pub fn runDailyTraining(gs: *GameState) !void {
         if (gs.clock.day_index < t.done_day) continue;
         p.training = null;
         person_mod.spendXpToImprove(p, t.skill) catch |err| {
-            try gs.log(.training, .{ .company = gs.companyOf(p.assigned_force) }, "[training] {s} {s} washed out of {s} training ({s})", .{
-                p.first_name, p.last_name, @tagName(t.skill), @errorName(err),
+            try gs.log(.training, .{ .company = gs.companyOf(p.assigned_force) }, "[training] {s} washed out of {s} training ({s})", .{
+                try p.fullName(gs.allocator()), @tagName(t.skill), @errorName(err),
             });
             continue;
         };
-        try gs.log(.training, .{ .company = gs.companyOf(p.assigned_force) }, "[training] {s} {s} completes {s} training (now {d})", .{
-            p.first_name, p.last_name, @tagName(t.skill), p.skill(t.skill).?,
+        try gs.log(.training, .{ .company = gs.companyOf(p.assigned_force) }, "[training] {s} completes {s} training (now {d})", .{
+            try p.fullName(gs.allocator()), @tagName(t.skill), p.skill(t.skill).?,
         });
     }
 }
@@ -324,7 +333,7 @@ pub fn runWeeklyRest(gs: *GameState) !void {
     var it = gs.people.iterator();
     while (it.next()) |entry| {
         const p = entry.value_ptr;
-        if (p.status != .active and p.status != .wounded) continue;
+        if (!p.isOnBooks()) continue;
 
         if (isDeployed(gs, p)) {
             const company = gs.companyOf(p.assigned_force);
@@ -334,29 +343,26 @@ pub fn runWeeklyRest(gs: *GameState) !void {
                 // Garrison duty is nearly home (12.30): barracks and a town.
                 // Fatigue recovers at a share of the home rate — the mess
                 // lance stands in for the mess hall — and spirits hold.
-                var mess_lance = false;
-                if (gs.force(company)) |co| for (co.children.items) |cid| if (gs.force(cid)) |ch| if (ch.echelon == .support_company) for (ch.children.items) |sl| if (gs.force(sl)) |l| if (l.support_kind == .mess and l.units.items.len > 0) {
-                    mess_lance = true;
-                };
+                const mess_lance = if (gs.supportLance(company, .mess)) |l| l.units.items.len > 0 else false;
                 const field_decay: u32 = @intCast(types.applyBp(person_mod.fatigueDecayPerWeek(if (mess_lance) 1 else 0), tuning.person.garrison_rest_bp));
-                p.fatigue -|= @intCast(@min(field_decay, 255));
-                if (p.morale < 45 and p.fatigue <= 60) p.morale += 1;
+                p.addFatigue(-@as(i32, @intCast(@min(field_decay, 255))));
+                if (p.morale < tuning.person.morale_garrison_lift_below and p.fatigue <= tuning.person.fatigue_grind) p.addMorale(1);
             }
             // Exhaustion grinds morale down, and an empty mess tent grinds
             // it faster (Stage 9B); combat tours get no rest at all. Cool
             // Under Fire (12B.6) shrugs the grind off.
-            if (p.fatigue > 60 and p.morale > 0 and !p.has("cool_under_fire")) p.morale -= 1;
+            if (p.fatigue > tuning.person.fatigue_grind) p.addMorale(-1); // Cool Under Fire shrugs a one-point grind off entirely
             if (gs.force(company)) |co| {
-                if (co.supply_shortage_days > 0) p.morale -|= 2;
+                if (co.supply_shortage_days > 0) p.addMorale(-2);
             }
         } else {
             // On leave: double recovery (Stage 9C.2).
             const on_leave = p.leave_until_day != null and gs.clock.day_index < p.leave_until_day.?;
-            p.fatigue -|= @intCast(@min(if (on_leave) decay * 2 else decay, 255));
+            p.addFatigue(-@as(i32, @intCast(@min(if (on_leave) decay * 2 else decay, 255))));
             // Rested spirits drift toward content (50), mess food helps.
-            const target: u8 = 50 + 2 * best_mess + hr_bonus;
-            if (p.morale < target) p.morale += 1;
-            if (p.fatigue > 60 and p.morale > 0) p.morale -= 1;
+            const target: u8 = tuning.person.morale_content + 2 * best_mess + hr_bonus;
+            if (p.morale < target) p.addMorale(1);
+            if (p.fatigue > tuning.person.fatigue_grind) p.addMorale(-1);
         }
     }
 
@@ -366,25 +372,10 @@ pub fn runWeeklyRest(gs: *GameState) !void {
     while (fit.next()) |entry| {
         const f = entry.value_ptr;
         if (f.echelon != .company or f.contracts_since_rotation == 0) continue;
-        if (gs.deploymentContract(f.id) != null) continue;
+        if (gs.isCompanyDeployed(f.id)) continue;
 
-        var fatigue_sum: u32 = 0;
-        var n: u32 = 0;
-        var pit = gs.people.iterator();
-        while (pit.next()) |pentry| {
-            const p = pentry.value_ptr;
-            if (p.status != .active) continue;
-            var walk = p.assigned_force;
-            const in_company = while (walk != .none) {
-                if (walk == f.id) break true;
-                walk = (gs.forces.getPtr(walk) orelse break false).parent;
-            } else false;
-            if (in_company) {
-                fatigue_sum += p.fatigue;
-                n += 1;
-            }
-        }
-        if (n > 0 and fatigue_sum / n <= 10) {
+        const crew = @import("personnel.zig").companyCrewStats(gs, f.id);
+        if (crew.heads > 0 and crew.avg_fatigue <= tuning.person.fatigue_rested) {
             f.contracts_since_rotation = 0;
             f.last_rotation_day = gs.clock.day_index;
             try gs.log(.rotation, .{ .company = f.id }, "[rotation] {s} is rested and reset — ready for a fresh deployment", .{f.name});

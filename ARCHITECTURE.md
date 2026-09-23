@@ -95,6 +95,9 @@ config, GUI scenario editing, multiplayer.
 
 Layered, with a strict rule: **the simulation core is pure and deterministic**
 — no I/O, no wall clock, no global state. UI and persistence sit outside.
+The layer rules, the command/query boundary and the reviewer's greps are
+normative in [`docs/coding-contract.md`](docs/coding-contract.md); this
+section explains the shape, the contract states the rules.
 
 ```
 ┌─────────────────────────────────────────────────────┐
@@ -424,6 +427,12 @@ rebuilds**, and refits. A shot-up mek keeps fighting at reduced condition;
 a structurally wrecked one is deadweight until it ships home. Battle damage
 therefore lands on part slots *classed* (armor / structure / weapon /
 equipment / ammo) so every hit is unambiguously field-fixable or depot work.
+What depot work *consumes* — one `comp_*` per destroyed or missing structure
+slot, at the hull's home HQ, nothing for damaged structure or scrap — is one
+rule in `sim/hq_ops.zig` (`depotNeeds`, `depotShortfall`, `componentDemand`);
+the depot queue, the Market demand pane, the Forces damage pane, the pool
+row, the Lab and the REPL `demand` verb all call it rather than re-deriving
+it, so no screen can disagree with the bay about what is missing.
 
 **Fatigue accrues on contract, decays only at home.** Each contract completed
 without rotating through a regional HQ adds fatigue to every person attached
@@ -628,8 +637,7 @@ bulk-copy MegaMek data files into the repo without deciding on licensing.
 - Testing: every module carries unit tests (`zig build test`); golden-master
   sim tests: fixed seed + scripted commands → hashed state snapshot. The
   determinism pillar makes regression testing nearly free.
-- Style: typed-ID enums, tagged unions for commands/events, no global mutable
-  state, `std.Random` streams as described in §4.
+- Style and every other coding rule: [`docs/coding-contract.md`](docs/coding-contract.md).
 
 ## 14. Directory layout
 

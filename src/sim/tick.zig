@@ -212,16 +212,11 @@ fn runStockPolicies(gs: *GameState) !void {
         const hq = gs.hqs.getPtr(sp.hq) orelse continue;
         const have = gs.stockCount(.{ .hq = sp.hq }, sp.part_key);
         if (have >= sp.min) continue;
-        var pending: u32 = 0;
+        const pending = hq_ops.comingToHq(gs, sp.hq, sp.part_key);
         var failed_recently = false;
         for (gs.part_orders.items) |o| {
-            if (!std.mem.eql(u8, o.part_key, sp.part_key)) continue;
-            if (o.dest == .hq and o.dest.hq == sp.hq and (o.status == .in_transit or o.status == .sourcing)) pending += o.quantity;
-            if (o.status == .failed and o.ordered_day + 7 > today) failed_recently = true;
+            if (std.mem.eql(u8, o.part_key, sp.part_key) and o.status == .failed and o.ordered_day + 7 > today) failed_recently = true;
         }
-        for (gs.bay_jobs.items) |j| if (j.hq == sp.hq and j.kind == .fabrication and j.done_day == null and std.mem.eql(u8, j.item_key, sp.part_key)) {
-            pending += 1;
-        };
         if (pending > 0 or failed_recently) continue;
         const want = sp.target - have;
         const fabricate = hq_ops.canFabricate(gs, sp.hq, sp.part_key); // what this bay is rated for (12D.8), else order it
@@ -325,7 +320,7 @@ fn runSupplyConsumption(gs: *GameState) !void {
         const site: types.Site = .{ .company = f.id };
 
         const heads = gs.companyHeadcount(f.id);
-        const need: u32 = @intCast(std.math.divCeil(u32, heads, part_mod.provisions_person_days_per_ton) catch 1);
+        const need: u32 = part_mod.provisionsPerDay(heads);
         if (gs.takeStock(site, "provisions", need)) {
             f.supply_shortage_days = 0;
             continue;
@@ -372,7 +367,7 @@ fn runContracts(gs: *GameState) !void {
             .transit => if (c.arrive_day != null and gs.clock.day_index >= c.arrive_day.?) {
                 c.status = .active;
                 c.start_day = gs.clock.day_index;
-                c.end_day = gs.clock.day_index + @as(u32, c.terms.length_months) * 30;
+                c.end_day = gs.clock.day_index + @as(u32, c.terms.length_months) * types.days_per_month;
                 if (gs.force(c.assigned_company)) |f| f.location_planet = c.planet_key;
                 try gs.log(.contract, .{ .company = c.assigned_company, .contract = c.id }, "[{s}] company on station at {s} — contract active", .{ c.kind.label(), c.planet_key });
                 // The contract world's hull board opens on arrival (12D.7).
@@ -402,13 +397,8 @@ fn runContracts(gs: *GameState) !void {
                 var pit = gs.people.iterator();
                 while (pit.next()) |pentry| {
                     const p = pentry.value_ptr;
-                    if (p.status != .active and p.status != .wounded) continue;
-                    var walk = p.assigned_force;
-                    const in_company = while (walk != .none) {
-                        if (walk == c.assigned_company) break true;
-                        walk = (gs.forces.getPtr(walk) orelse break false).parent;
-                    } else false;
-                    if (in_company) p.fatigue = person_mod.applyFatigue(p.fatigue, gain);
+                    if (!p.isOnBooks() or !gs.personInCompany(p, c.assigned_company)) continue;
+                    p.fatigue = person_mod.applyFatigue(p.fatigue, gain);
                 }
                 try gs.log(.rotation, .{ .company = c.assigned_company, .contract = c.id }, "[rotation] tour complete: +{d} fatigue banked ({d} battles, {d} casualties)", .{
                     gain, c.battles_fought, c.casualties,
@@ -446,8 +436,7 @@ fn runFinances(gs: *GameState) !void {
     _ = @import("personnel.zig").refreshShares(gs);
     // New Year's Day (12C.8): the rating goes in the book.
     if (gs.clock.date.month == 1) {
-        const queries = @import("queries.zig");
-        try gs.rating_history.append(gs.allocator(), .{ .year = gs.clock.date.year, .score = queries.ratingScore(gs) });
+        try gs.rating_history.append(gs.allocator(), .{ .year = gs.clock.date.year, .score = @import("rating.zig").score(gs) });
         // Tech news (12C.16): the designs entering service this year.
         var news: std.ArrayListUnmanaged(u8) = .empty;
         for (@import("../domain/chassis.zig").catalog) |*c| if (c.intro_year == gs.clock.date.year) {
@@ -472,9 +461,7 @@ fn runFinances(gs: *GameState) !void {
     }
 
     // The hangar ledger (ARCH §9.8): every hull bills, running or not.
-    var hull_bill: i64 = 0;
-    var uit = gs.units.iterator();
-    while (uit.next()) |entry| hull_bill += entry.value_ptr.monthlyBill();
+    const hull_bill = gs.monthlyHullUpkeep();
     if (hull_bill != 0) {
         try gs.postTransaction(.{
             .day = gs.clock.day_index,
@@ -550,7 +537,7 @@ fn runFinances(gs: *GameState) !void {
         if (c.terms.overhead_pct > 0) {
             const site: types.Site = .{ .company = c.assigned_company };
             const heads = gs.companyHeadcount(c.assigned_company);
-            const month_food: u32 = @intCast(std.math.divCeil(u32, heads * 30, part_mod.provisions_person_days_per_ton) catch 1);
+            const month_food: u32 = part_mod.provisionsTons(heads, types.days_per_month);
             const food = month_food * c.terms.overhead_pct / 100;
             const ammo_each: u32 = if (c.terms.overhead_pct >= 50) 2 else 1;
             var landed_food: u32 = 0;

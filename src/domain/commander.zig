@@ -2,7 +2,7 @@
 //! (character creation, chosen alongside company creation). Origin decides
 //! where the outfit stands up — the starter HQ lands on a weighted-random
 //! world in the commander's faction space. Profession grants one small
-//! permanent edge (2%, // TUNE): enough to feel, never enough to replace
+//! permanent edge (tuning.commander.bonus_bp): enough to feel, never enough to replace
 //! good logistics.
 
 const std = @import("std");

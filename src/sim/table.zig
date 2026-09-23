@@ -61,11 +61,13 @@ pub fn row(alloc: std.mem.Allocator, r: []const []const u8) !Row {
     return alloc.dupe([]const u8, r);
 }
 
-fn isMark(c: u8) bool {
-    return switch (c) {
-        'a', 'g', 'c', 's', 'd', 't', 'p', '/' => true,
-        else => false,
-    };
+/// The inline markup tags (docs/coding-contract.md rule 16): amber, good,
+/// critical, selected, dim, tab, purple, and the close. Declared here
+/// once; `screen.Style.fromMarkup` maps them to styles.
+pub const marks = "agcsdtp/";
+
+pub fn isMark(c: u8) bool {
+    return std.mem.indexOfScalar(u8, marks, c) != null;
 }
 
 /// Visible cells of markup text: code points, less the `{x}` tokens.

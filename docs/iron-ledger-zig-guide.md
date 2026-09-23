@@ -978,7 +978,7 @@ Finally, `gs.hash()` folds the important state (day, funds, every person's fatig
 
 ## 21. Commands: the only way in
 
-Nothing outside the core mutates `GameState` except through `commands.execute(gs, cmd)`. The function is a single switch over the `Command` union, and every arm follows the same shape: validate, then mutate, then return a `Result`.
+Nothing outside the core mutates `GameState` except through `commands.execute(gs, cmd)` (contract section 1 and 5 in `docs/coding-contract.md`). The function is a single switch over the `Command` union, and every arm follows the same shape: validate, then mutate, then return a `Result`.
 
 *src/sim/commands.zig (the tier-upgrade arm)*
 
@@ -1070,7 +1070,7 @@ Each phase is small and testable on its own. `medical.runMonthlyTurnover` is cal
 
 ## 23. Queries: the only way out
 
-Frontends never walk `GameState` themselves to draw a screen. They call a query, which returns plain data: strings already formatted, plus the IDs a key handler will need. The People screen's query:
+Frontends never walk `GameState` themselves to draw a screen (contract section 3). They call a query, which returns plain data: strings already formatted, plus the IDs a key handler will need. The People screen's query:
 
 *src/sim/queries.zig*
 
@@ -1222,7 +1222,7 @@ while (self.running) {
 }
 ```
 
-`draw` resets the frame arena, then each screen's `drawX` calls queries and paints. `handleKey` dispatches by modal, then mode, then tab, down to a `switch` on the character. A key that changes the game builds a `Command` and calls `self.exec`, which runs `commands.execute` and turns any error into a status-line sentence via `cli.errorText`. The client never touches `GameState` fields to change them; the module boundary in `docs/tui.md` says it may only call `execute`, `parseCommand` and queries, and a reviewer can grep for violations.
+`draw` resets the frame arena, then each screen's `drawX` calls queries and paints. `handleKey` dispatches by modal, then mode, then tab, down to a `switch` on the character. A key that changes the game builds a `Command` and calls `self.exec`, which runs `commands.execute` and turns any error into a status-line sentence via `cli.errorText`. The client never touches `GameState` fields to change them; the boundary is contract section 1 in `docs/coding-contract.md`, which also lists the greps a reviewer runs for violations.
 
 The smaller modules do one foreign thing each: `png.zig` decodes 8-bit PNGs (inflate included, no library); `emblem.zig` speaks the kitty and iTerm2 image protocols; `music.zig` runs the system's audio player as a child process and reaps it with `waitpid`; `splash.zig` draws the title.
 

@@ -35,6 +35,16 @@ def send(s, wait=0.5):
 def plain():
     return re.sub(rb"\x1b\[[0-9;?]*[A-Za-z]", b"", out).decode("utf-8", "replace")
 
+def wait_for(text, timeout=6.0, tail=30000):
+    """Drain until `text` shows in the recent screen text (fixed sleeps race
+    the client under load; the emblem editor was the usual victim)."""
+    end = time.time() + timeout
+    while time.time() < end:
+        if text in plain()[-tail:]:
+            return True
+        drain(0.2)
+    return False
+
 drain(1.0)
 assert "MERCENARY COMMAND CONSOLE" in plain(), "welcome screen missing"
 send("s", 0.8)
@@ -131,7 +141,7 @@ send("j"); send("j"); send("j"); send("u", 0.8)   # cursor on the first facility
 p = plain()[-600:]
 assert "upgrade started" in p or "HQ funds short" in p or "project running" in p, plain()[-1500:]
 send("T", 0.8)                 # tier: the starter HQ is already regional → says so (the key exists)
-assert "already a regional HQ" in plain()[-800:], plain()[-1200:]
+assert "already at the top" in plain()[-800:], plain()[-1200:]
 send("f"); send("f")
 assert "filter techs" in plain(), plain()[-3000:]
 send("2")                      # map
@@ -187,7 +197,7 @@ assert "SELL WHICH PART" in plain()[-30000:], plain()[-3000:]
 send("\r", 0.8)
 assert "quantity" in plain()[-30000:], plain()[-3000:]
 send("\r", 1.0)
-assert "done: sellstock" in plain()[-2500:] or "keep-stocked minimum" in plain()[-2500:], plain()[-800:]  # the footer redraw can push the message past a short window
+assert wait_for("done: sellstock", tail=2500) or "keep-stocked minimum" in plain()[-2500:], plain()[-800:]  # the footer redraw can push the message past a short window
 send("\x1b")
 send("3"); send("j", 0.6)       # forces: cursor on the company → damage pane
 assert "DAMAGE ·" in plain()[-30000:] or "every hull is whole" in plain()[-30000:], plain()[-3000:]
@@ -236,10 +246,10 @@ assert "emblem set to preset" in plain(), plain()[-2000:]
 send("e", 1.0)                 # 12.14: the cell editor is the last row of the picker
 for _ in range(12): send("j", 0.15)
 send("\r", 1.0)
-assert "EMBLEM EDITOR" in plain()[-30000:], plain()[-3000:]
+assert wait_for("EMBLEM EDITOR"), plain()[-3000:]
 send("X"); send("Y", 0.5)      # paint two cells, then save
 send("\r", 1.0)
-assert "emblem set to your own crest" in plain()[-2000:], plain()[-2000:]
+assert wait_for("emblem set to your own crest", tail=2000), plain()[-2000:]
 send("8")                      # lab
 p = plain()
 assert "MOUNTS" in p and "RULES: legal fit" in p, p[-3000:]

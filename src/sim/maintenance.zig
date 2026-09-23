@@ -15,10 +15,10 @@ const chassis_mod = @import("../domain/chassis.zig");
 const hq_ops = @import("hq_ops.zig");
 const GameState = @import("state.zig").GameState;
 
-/// Hours a field repair costs the hull's tech. // TUNE
-const hours_damaged_slot = 3;
-const hours_destroyed_slot = 5;
-const hours_armor_patch = 2;
+/// Hours a field repair costs the hull's tech (tuning.maintenance).
+const hours_damaged_slot = tuning.maintenance.hours_damaged_slot;
+const hours_destroyed_slot = tuning.maintenance.hours_destroyed_slot;
+const hours_armor_patch = tuning.maintenance.hours_armor_patch;
 
 /// Remaining weekly hours per tech, built lazily as hulls come up.
 const HourBook = struct {
@@ -38,6 +38,25 @@ fn unitTonnage(u: *const unit_mod.Unit) u8 {
     return if (chassis_mod.find(u.chassis_key)) |d| d.tonnage else 50;
 }
 
+/// Weekly consumables a hull eats in maintenance: its price over the
+/// tuned divisor. The employer's cost reckoning sums it by the month.
+pub fn weeklyConsumables(u: *const unit_mod.Unit) types.CBills {
+    return @divTrunc(u.purchase_price, tuning.maintenance.consumables_divisor);
+}
+
+/// Expected monthly maintenance consumables across the outfit (52 weeks
+/// over 12 months), for the employer's per-company cost.
+pub fn monthlyConsumablesEstimate(gs: *GameState) types.CBills {
+    var total: types.CBills = 0;
+    var it = gs.units.iterator();
+    while (it.next()) |entry| {
+        const u = entry.value_ptr;
+        if (u.status == .mothballed or u.kind == .infantry) continue;
+        total += weeklyConsumables(u);
+    }
+    return @divTrunc(total * 52, 12);
+}
+
 /// The hull's tech if assigned and fit for duty today.
 fn activeTech(gs: *GameState, u: *const unit_mod.Unit) ?*person_mod.Person {
     const t = gs.person(u.tech) orelse return null;
@@ -45,16 +64,16 @@ fn activeTech(gs: *GameState, u: *const unit_mod.Unit) ?*person_mod.Person {
 }
 
 /// Weekly maintenance: one check per active hull, worked by its tech from
-/// their hour budget; no tech (or no hours) → rolls uncovered. // TUNE
+/// their hour budget; no tech (or no hours) → rolls uncovered (tuning.maintenance).
 pub fn runWeeklyMaintenance(gs: *GameState) !void {
-    var book: HourBook = .{ .alloc = std.heap.page_allocator };
+    var book: HourBook = .{ .alloc = gs.scratch() };
     defer book.map.deinit(book.alloc);
     var upkeep_cost: types.CBills = 0;
 
     var it = gs.units.iterator();
     while (it.next()) |entry| {
         const u = entry.value_ptr;
-        if (u.status == .mothballed or u.status == .destroyed or u.status == .repairing or u.status == .refitting) continue;
+        if (!u.takesFieldWork()) continue;
         if (u.kind == .infantry) continue; // platoons maintain their own kit
 
         // What this hull asks of this tech (12C.15): quality, design and skill.
@@ -70,10 +89,10 @@ pub fn runWeeklyMaintenance(gs: *GameState) !void {
             }
         }
 
-        const deployed = gs.deploymentContract(gs.companyOf(u.force)) != null;
-        var tn: i32 = 4 + u.quality.maintenanceModifier();
-        if (deployed) tn += 1; // field conditions
-        if (!covered) tn += 3; // nobody turning wrenches
+        const deployed = gs.isCompanyDeployed(gs.companyOf(u.force));
+        var tn: i32 = tuning.maintenance.target_base + u.quality.maintenanceModifier();
+        if (deployed) tn += tuning.maintenance.target_deployed; // field conditions
+        if (!covered) tn += tuning.maintenance.target_uncovered; // nobody turning wrenches
 
         const raw = gs.rng.roll2d6(.maintenance);
         const total: i32 = @as(i32, raw) + (5 - @as(i32, skill));
@@ -120,12 +139,12 @@ pub fn runWeeklyMaintenance(gs: *GameState) !void {
         // Accidents happen in the hangar (Stage 9C.2): snake-eyes while
         // working a hull, and then only one bad week in twelve hurts the
         // tech (≈0.23% per hull-week; a 32-hull company sees one every
-        // three months or so). // TUNE
-        if (covered and raw == 2 and gs.rng.roll2d6(.maintenance) <= 3) try injureTech(gs, tech_id, 5 + gs.rng.roll2d6(.medical), "maintenance accident");
+        // three months or so; tuning.maintenance.accident_*).
+        if (covered and raw == 2 and gs.rng.roll2d6(.maintenance) <= tuning.maintenance.accident_target) try injureTech(gs, tech_id, tuning.maintenance.accident_days_base + gs.rng.roll2d6(.medical), "maintenance accident");
 
         if (covered) {
             u.last_maintenance_day = gs.clock.day_index;
-            upkeep_cost += @divTrunc(u.purchase_price, 2_500); // ~0.17%/month in consumables
+            upkeep_cost += weeklyConsumables(u);
         }
     }
 
@@ -181,17 +200,17 @@ pub fn runWeeklyRepairs(gs: *GameState) !void {
     while (hqit.next()) |entry| {
         if (entry.value_ptr.supportsStructuralRepair()) depot_ok = true;
     }
-    var book: HourBook = .{ .alloc = std.heap.page_allocator };
+    var book: HourBook = .{ .alloc = gs.scratch() };
     defer book.map.deinit(book.alloc);
 
     var labor_cost: types.CBills = 0;
     var it = gs.units.iterator();
     while (it.next()) |entry| {
         const u = entry.value_ptr;
-        if (u.status == .mothballed or u.status == .destroyed or u.status == .repairing or u.status == .refitting) continue;
+        if (!u.takesFieldWork()) continue;
         const tech = activeTech(gs, u) orelse continue; // no tech, no repairs
         const base_load = gs.techLoadHours(tech.id);
-        const at_home = gs.deploymentContract(gs.companyOf(u.force)) == null;
+        const at_home = gs.isCompanyHome(gs.companyOf(u.force)); // not merely off contract: a company returning or idling afield is away too
         const site = gs.siteForForce(u.force);
 
         for (u.slots.items) |*slot| {
@@ -200,13 +219,13 @@ pub fn runWeeklyRepairs(gs: *GameState) !void {
                 .field => switch (slot.condition) {
                     .damaged => if (try book.spend(gs, tech, hours_damaged_slot, base_load)) {
                         slot.condition = .ok;
-                        labor_cost += @divTrunc(part_mod.cost(slot.part_key), 20);
+                        labor_cost += @divTrunc(part_mod.cost(slot.part_key), tuning.maintenance.labour_damaged_divisor);
                     },
                     .destroyed, .missing => if (gs.stockCount(site, slot.part_key) > 0) {
                         if (try book.spend(gs, tech, hours_destroyed_slot, base_load)) {
                             _ = gs.takeStock(site, slot.part_key, 1);
                             slot.condition = .ok;
-                            labor_cost += @divTrunc(part_mod.cost(slot.part_key), 10);
+                            labor_cost += @divTrunc(part_mod.cost(slot.part_key), tuning.maintenance.labour_destroyed_divisor);
                         }
                     },
                     .ok => {},
@@ -223,8 +242,8 @@ pub fn runWeeklyRepairs(gs: *GameState) !void {
         if (u.armor_pct < 100 and gs.stockCount(site, "armor") > 0) {
             if (try book.spend(gs, tech, hours_armor_patch, base_load)) {
                 _ = gs.takeStock(site, "armor", 1);
-                u.armor_pct = @min(100, u.armor_pct + 15);
-                labor_cost += 5_000;
+                u.armor_pct = @min(100, u.armor_pct + tuning.maintenance.armor_patch_pct);
+                labor_cost += tuning.maintenance.armor_patch_labour;
             }
         }
     }
