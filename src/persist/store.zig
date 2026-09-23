@@ -305,9 +305,8 @@ pub const Store = struct {
         try self.db.exec("BEGIN");
         errdefer self.db.exec("ROLLBACK") catch {};
 
-        var date_buf: [16]u8 = undefined;
-        const d = gs.clock.date;
-        const date = try std.fmt.bufPrint(&date_buf, "{d}-{d:0>2}-{d:0>2}", .{ d.year, d.month, d.day });
+        var date_buf: [10]u8 = undefined;
+        const date = gs.clock.date.text(&date_buf);
         const cmdr_name: []const u8 = if (gs.commander) |c| c.name else "";
 
         if (gs.campaign_id == 0) {

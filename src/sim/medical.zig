@@ -66,8 +66,8 @@ pub fn inflict(gs: *GameState, person_id: types.PersonId, cause: WoundCause, sev
     p.wound_heal_day = null; // triage again with the new wound
     if (!gs.auto_admit) p.medbay_admitted = false;
     _ = try @import("personnel.zig").checkAwards(gs, person_id); // 12B.5: the Wound Badge
-    try gs.log(.medical, .{ .company = gs.companyOf(p.assigned_force) }, "[medbay] {s} {s} wounded ({s}): {s} {s}{s}", .{
-        p.first_name, p.last_name, why, severityLabel(severity), @tagName(location), if (permanent) " — permanent" else "",
+    try gs.log(.medical, .{ .company = gs.companyOf(p.assigned_force) }, "[medbay] {s} wounded ({s}): {s} {s}{s}", .{
+        try p.fullName(gs.allocator()), why, severityLabel(severity), @tagName(location), if (permanent) " — permanent" else "",
     });
 }
 
@@ -204,7 +204,7 @@ pub fn runDailyHealing(gs: *GameState) !void {
             if (!p.medbay_admitted) {
                 if (!gs.auto_admit) continue;
                 p.medbay_admitted = true;
-                try gs.log(.medical, .{ .company = gs.companyOf(p.assigned_force) }, "[medbay] {s} {s} admitted (auto)", .{ p.first_name, p.last_name });
+                try gs.log(.medical, .{ .company = gs.companyOf(p.assigned_force) }, "[medbay] {s} admitted (auto)", .{ try p.fullName(gs.allocator()) });
             }
             // MASH coverage only helps if their company fields a MASH lance
             // in the field; at home the hospital takes over. Triage consumes
@@ -238,7 +238,7 @@ pub fn runDailyHealing(gs: *GameState) !void {
                     i += 1;
                 } else _ = p.injuries.orderedRemove(i);
             }
-            try gs.log(.medical, .{ .company = gs.companyOf(p.assigned_force) }, "[medical] {s} {s} returns to duty{s}", .{ p.first_name, p.last_name, if (lasting > 0) " — with a permanent injury on the record" else "" });
+            try gs.log(.medical, .{ .company = gs.companyOf(p.assigned_force) }, "[medical] {s} returns to duty{s}", .{ try p.fullName(gs.allocator()), if (lasting > 0) " — with a permanent injury on the record" else "" });
         }
     }
 }
@@ -264,7 +264,7 @@ pub fn runMonthlyTurnover(gs: *GameState) !u32 {
         if (age != null and age.? >= t.age_retire) {
             const company = gs.companyOf(p.assigned_force);
             const paid = try @import("personnel.zig").depart(gs, p.id, .retired, types.full_bp, "retirement payout");
-            try gs.log(.rotation, .{ .company = company, .hq = p.posted_hq }, "[turnover] {s} {s} ({s}) retires at {d}{s}", .{ p.first_name, p.last_name, @tagName(p.role), age.?, if (paid > 0) try std.fmt.allocPrint(gs.allocator(), " — {d} c-bills paid out", .{paid}) else "" });
+            try gs.log(.rotation, .{ .company = company, .hq = p.posted_hq }, "[turnover] {s} ({s}) retires at {d}{s}", .{ try p.fullName(gs.allocator()), @tagName(p.role), age.?, if (paid > 0) try std.fmt.allocPrint(gs.allocator(), " — {d} c-bills paid out", .{paid}) else "" });
             notices += 1;
             continue;
         }
@@ -305,13 +305,13 @@ pub fn runDailyTraining(gs: *GameState) !void {
         if (gs.clock.day_index < t.done_day) continue;
         p.training = null;
         person_mod.spendXpToImprove(p, t.skill) catch |err| {
-            try gs.log(.training, .{ .company = gs.companyOf(p.assigned_force) }, "[training] {s} {s} washed out of {s} training ({s})", .{
-                p.first_name, p.last_name, @tagName(t.skill), @errorName(err),
+            try gs.log(.training, .{ .company = gs.companyOf(p.assigned_force) }, "[training] {s} washed out of {s} training ({s})", .{
+                try p.fullName(gs.allocator()), @tagName(t.skill), @errorName(err),
             });
             continue;
         };
-        try gs.log(.training, .{ .company = gs.companyOf(p.assigned_force) }, "[training] {s} {s} completes {s} training (now {d})", .{
-            p.first_name, p.last_name, @tagName(t.skill), p.skill(t.skill).?,
+        try gs.log(.training, .{ .company = gs.companyOf(p.assigned_force) }, "[training] {s} completes {s} training (now {d})", .{
+            try p.fullName(gs.allocator()), @tagName(t.skill), p.skill(t.skill).?,
         });
     }
 }

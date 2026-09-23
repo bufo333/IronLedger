@@ -131,14 +131,15 @@ One predicate each; every listed site calls it.
 
 ---
 
-## D7. Formatting helpers (rule 12)
+## D7. Formatting helpers (rule 12) — PR #11
 
-- [ ] `clock.dateText(alloc, date)`: main.zig:948, state.zig:900, queries.zig:160,2489, store.zig:310, app.zig:4004.
-- [ ] One person-name helper family (`rankedName`, `shortName`), used by every log line: three helpers (person.zig:367, queries.zig:108, main.zig:649) plus inline `first last` at medical.zig:70,207,241,267,300,305; contract_events.zig:443,450,464,469,478,481,488,507,510,566,575,612,689; checklist.zig:348; queries.zig:248,3061,3063,3065.
-- [ ] `types.bpText` (×1.47) and `types.bpPercent`: difficulty.zig:53-58 is the home; queries.zig:475-479, 2422-2426; app.zig:1180; `@divTrunc(bp,100)` at personnel.zig:75, queries.zig:2772,3137, app.zig:3616,3665,3682.
-- [ ] fatigue/morale colour bands once in queries: queries.zig:3003-3004, 3043-3048, 4147-4148.
+- [x] `clock.dateText(alloc, date)`: main.zig:948, state.zig:900, queries.zig:160,2489, store.zig:310, app.zig:4004.
+- [x] One person-name helper family (`rankedName`, `shortName`), used by every log line: three helpers (person.zig:367, queries.zig:108, main.zig:649) plus inline `first last` at medical.zig:70,207,241,267,300,305; contract_events.zig:443,450,464,469,478,481,488,507,510,566,575,612,689; checklist.zig:348; queries.zig:248,3061,3063,3065.
+- [x] `types.bpText` (×1.47) and `types.bpPercent`: difficulty.zig:53-58 is the home; queries.zig:475-479, 2422-2426; app.zig:1180; `@divTrunc(bp,100)` at personnel.zig:75, queries.zig:2772,3137, app.zig:3616,3665,3682.
+- [x] fatigue/morale colour bands once in queries: queries.zig:3003-3004, 3043-3048, 4147-4148.
 
 ---
+- The REPL printers in `src/main.zig` still spell `first last` in six `debug.print` lines; D10 replaces those printers with query loops.
 
 ## D8. Commands leave state consistent; the store stores (rules 27, 3, 13)
 

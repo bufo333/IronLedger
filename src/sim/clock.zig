@@ -11,6 +11,16 @@ pub const Date = struct {
 
     pub const campaign_default: Date = .{ .year = 3025, .month = 1, .day = 1 };
 
+    /// "3025-01-01": the one rendering of a date, for logs, saves and screens.
+    pub fn text(self: Date, buf: *[10]u8) []const u8 {
+        return std.fmt.bufPrint(buf, "{d}-{d:0>2}-{d:0>2}", .{ self.year, self.month, self.day }) catch "????-??-??";
+    }
+
+    pub fn textAlloc(self: Date, alloc: std.mem.Allocator) ![]const u8 {
+        var buf: [10]u8 = undefined;
+        return alloc.dupe(u8, self.text(&buf));
+    }
+
     pub fn isLeapYear(year: u16) bool {
         return (year % 4 == 0 and year % 100 != 0) or year % 400 == 0;
     }
@@ -82,4 +92,11 @@ test "phases are in spec order" {
     try std.testing.expect(@intFromEnum(DayPhase.travel) < @intFromEnum(DayPhase.supply_consumption));
     try std.testing.expect(@intFromEnum(DayPhase.contract_events) < @intFromEnum(DayPhase.battle_resolution));
     try std.testing.expect(@intFromEnum(DayPhase.finances) < @intFromEnum(DayPhase.decisions));
+}
+
+test "one date rendering, zero-padded" {
+    var buf: [10]u8 = undefined;
+    try std.testing.expectEqualStrings("3025-01-01", Date.campaign_default.text(&buf));
+    const d: Date = .{ .year = 3026, .month = 12, .day = 9 };
+    try std.testing.expectEqualStrings("3026-12-09", d.text(&buf));
 }

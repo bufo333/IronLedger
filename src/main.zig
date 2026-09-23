@@ -634,9 +634,9 @@ fn printDemand(gs: *game.state.GameState) void {
     if (!any and !gear_any) std.debug.print("demand: nothing broken needs a part.\n", .{});
 }
 
-fn personName(gs: *game.state.GameState, id: game.types.PersonId) []const u8 {
+fn personName(gs: *game.state.GameState, id: game.types.PersonId, buf: []u8) []const u8 {
     const p = gs.person(id) orelse return "—";
-    return std.fmt.allocPrint(std.heap.page_allocator, "{s} {s}", .{ p.rank.abbrev(), p.last_name }) catch p.last_name;
+    return p.shortName(buf);
 }
 
 /// Company roster as assignments (Stage 9C.2): every hull with pilot and
@@ -655,10 +655,12 @@ fn printCompanyRoster(gs: *game.state.GameState, co: game.types.ForceId) void {
         const pilot_ok = if (gs.person(u.pilot)) |p| p.isAvailable(day) else false;
         const needs_tech = game.unit.techRoleFor(u.kind) != null;
         const tech_ok = if (gs.person(u.tech)) |t| t.isAvailable(day) else false;
+        var pilot_buf: [48]u8 = undefined;
+        var tech_buf: [48]u8 = undefined;
         std.debug.print("  #{d:<3} {s:<8} {s:<9} pilot {s:<12}{s} tech {s:<12}{s}\n", .{
             @intFromEnum(u.id),                                    u.chassis_key,
-            @tagName(u.status),                                    personName(gs, u.pilot),
-            if (pilot_ok) " " else "!",                            if (needs_tech) personName(gs, u.tech) else "n/a",
+            @tagName(u.status),                                    personName(gs, u.pilot, &pilot_buf),
+            if (pilot_ok) " " else "!",                            if (needs_tech) personName(gs, u.tech, &tech_buf) else "n/a",
             if (needs_tech and !tech_ok) "!" else " ",
         });
     }
@@ -924,10 +926,10 @@ fn printPnl(gs: *game.state.GameState, from_day: u32, to_day: u32, filter: game.
 }
 
 fn printStatus(gs: *game.state.GameState) void {
-    const d = gs.clock.date;
+    var date_buf: [10]u8 = undefined;
     std.debug.print(
-        "{d}-{d:0>2}-{d:0>2} (day {d}) | funds {d} c-bills | rep {d} | roster {d} | payroll {d}/mo\n",
-        .{ d.year, d.month, d.day, gs.clock.day_index, gs.funds, gs.reputation, gs.people.count(), gs.monthlyPayroll() },
+        "{s} (day {d}) | funds {d} c-bills | rep {d} | roster {d} | payroll {d}/mo\n",
+        .{ gs.clock.date.text(&date_buf), gs.clock.day_index, gs.funds, gs.reputation, gs.people.count(), gs.monthlyPayroll() },
     );
 }
 

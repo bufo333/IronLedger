@@ -332,7 +332,7 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
             const age = p.ageYears(day + 90) orelse continue;
             if (age < tp.age_retire) continue;
             n += 1;
-            if (first.len == 0) first = try std.fmt.allocPrint(alloc, "{s} {s} ({s}{s})", .{ p.first_name, p.last_name, @tagName(p.role), if (p.posted_hq != .none) try std.fmt.allocPrint(alloc, ", {s}", .{if (gs.hqs.getPtr(p.posted_hq)) |h| h.name else "HQ"}) else "" });
+            if (first.len == 0) first = try std.fmt.allocPrint(alloc, "{s} ({s}{s})", .{ try p.fullName(alloc), @tagName(p.role), if (p.posted_hq != .none) try std.fmt.allocPrint(alloc, ", {s}", .{if (gs.hqs.getPtr(p.posted_hq)) |h| h.name else "HQ"}) else "" });
         }
         if (n > 0) try out.append(alloc, .{ .kind = .retiring_soon, .text = try std.fmt.allocPrint(alloc, "{d} reach{s} retirement age ({d}) within the quarter — {s}{s}; hire the replacement now (halls churn daily)", .{ n, if (n == 1) "es" else "", tp.age_retire, first, if (n > 1) try std.fmt.allocPrint(alloc, " and {d} more", .{n - 1}) else "" }) });
     }

@@ -308,10 +308,15 @@ pub const Person = struct {
 
     /// CamOps fatigue band (12C.1): what tiredness costs in the cockpit.
     pub fn fatigueBand(self: *const Person) FatigueBand {
+        return fatigueBandOf(self.fatigue);
+    }
+
+    /// The band a fatigue value falls in (for averages and columns).
+    pub fn fatigueBandOf(fatigue: u32) FatigueBand {
         const t = tuning.person;
-        if (self.fatigue >= t.fatigue_spent) return .spent;
-        if (self.fatigue >= t.exhausted_fatigue) return .exhausted;
-        if (self.fatigue >= t.fatigue_tired) return .tired;
+        if (fatigue >= t.fatigue_spent) return .spent;
+        if (fatigue >= t.exhausted_fatigue) return .exhausted;
+        if (fatigue >= t.fatigue_tired) return .tired;
         return .fresh;
     }
 
@@ -407,6 +412,16 @@ pub const Person = struct {
     /// "Sgt. Lori Kalmar" for rosters and AARs.
     pub fn rankedName(self: *const Person, alloc: std.mem.Allocator) ![]const u8 {
         return std.fmt.allocPrint(alloc, "{s} {s} {s}", .{ self.rank.abbrev(), self.first_name, self.last_name });
+    }
+
+    /// "Lori Kalmar": the name without the rank, for rosters and log lines.
+    pub fn fullName(self: *const Person, alloc: std.mem.Allocator) ![]const u8 {
+        return std.fmt.allocPrint(alloc, "{s} {s}", .{ self.first_name, self.last_name });
+    }
+
+    /// "Sgt Kalmar": rank and surname, for tight columns.
+    pub fn shortName(self: *const Person, buf: []u8) []const u8 {
+        return std.fmt.bufPrint(buf, "{s} {s}", .{ self.rank.abbrev(), self.last_name }) catch self.last_name;
     }
 };
 
@@ -656,4 +671,15 @@ test "morale and fatigue move through one clamp; Cool Under Fire halves a loss" 
     try std.testing.expectEqual(@as(u8, 45), p.morale);
     p.addMorale(-1); // a one-point grind rounds to nothing
     try std.testing.expectEqual(@as(u8, 45), p.morale);
+}
+
+test "names come from one family of helpers" {
+    var p: Person = .{ .id = @enumFromInt(1), .first_name = "Lori", .last_name = "Kalmar", .role = .mekwarrior };
+    defer p.deinit(std.testing.allocator);
+    const full = try p.fullName(std.testing.allocator);
+    defer std.testing.allocator.free(full);
+    try std.testing.expectEqualStrings("Lori Kalmar", full);
+    var buf: [48]u8 = undefined;
+    const short = p.shortName(&buf);
+    try std.testing.expect(std.mem.endsWith(u8, short, " Kalmar"));
 }

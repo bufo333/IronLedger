@@ -894,11 +894,11 @@ pub const GameState = struct {
 
     /// Append a tagged, formatted entry (with the campaign date) to the log.
     pub fn log(self: *GameState, category: LogCategory, ctx: LogCtx, comptime fmt: []const u8, args: anytype) !void {
-        const d = self.clock.date;
+        var date_buf: [10]u8 = undefined;
         const line = try std.fmt.allocPrint(
             self.allocator(),
-            "{d}-{d:0>2}-{d:0>2} " ++ fmt,
-            .{ d.year, d.month, d.day } ++ args,
+            "{s} " ++ fmt,
+            .{self.clock.date.text(&date_buf)} ++ args,
         );
         try self.event_log.append(self.allocator(), .{
             .day = self.clock.day_index,

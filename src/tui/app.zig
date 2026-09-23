@@ -1177,7 +1177,8 @@ pub const App = struct {
                 const wp0 = game.planet.find(w.key).?;
                 if (cap == wp0) try rows.append(al, "capital      {a}this is the capital{/}") else try rows.append(al, try std.fmt.allocPrint(al, "capital      {s}, {d} LY away", .{ cap.name, game.planet.distanceLy(wp0, cap) }));
             }
-            if (fr.hires) try rows.append(al, try std.fmt.allocPrint(al, "standing     {d} with the {s} · pay ×{d}.{d:0>2}", .{ g.standing(w.faction), fr.name, @as(u32, @intCast(@divTrunc(game.contract_market.standingPayBp(g.standing(w.faction)), 10_000))), @as(u32, @intCast(@divTrunc(@mod(game.contract_market.standingPayBp(g.standing(w.faction)), 10_000), 100))) })) else try rows.append(al, "standing     {d}posts no contracts{/}");
+            var mult_buf: [16]u8 = undefined;
+            if (fr.hires) try rows.append(al, try std.fmt.allocPrint(al, "standing     {d} with the {s} · pay {s}", .{ g.standing(w.faction), fr.name, types.bpText(&mult_buf, game.contract_market.standingPayBp(g.standing(w.faction))) })) else try rows.append(al, "standing     {d}posts no contracts{/}");
             try rows.append(al, "");
             for (view.hqs) |h| {
                 const hp = game.planet.find(g.hqs.getPtr(h.id).?.planet_key).?;
@@ -3613,7 +3614,7 @@ pub const App = struct {
             try info.add(&rows, al, try std.fmt.allocPrint(al, "  {{d}}             contract pay {s} · fabrication {s} · purchases {s} · opposition {s} · turnover {s}{d} · never the dice{{/}}", .{
                 dm(&b1, row.contract_pay_bp), dm(&b2, row.fab_cost_bp), dm(&b3, row.purchase_bp), dm(&b4, row.enemy_bp), if (row.turnover_delta >= 0) "+" else "", row.turnover_delta,
             }));
-            try rows.append(al, .{ .key = .shares, .active = true, .text = try std.fmt.allocPrint(al, "  shares       {{a}}{d}%{{/}} of contract income to shareholders at completion      {{d}}← → ±5 · [Enter] type a figure · founders, veterans and officers hold shares{{/}}", .{@divTrunc(gs.share_profit_bp, 100)}) });
+            try rows.append(al, .{ .key = .shares, .active = true, .text = try std.fmt.allocPrint(al, "  shares       {{a}}{d}%{{/}} of contract income to shareholders at completion      {{d}}← → ±5 · [Enter] type a figure · founders, veterans and officers hold shares{{/}}", .{types.bpPercent(gs.share_profit_bp)}) });
             try info.add(&rows, al, "");
             selectable += 3;
         }
@@ -3662,7 +3663,7 @@ pub const App = struct {
                 self.say(.good, "difficulty: {s} — {s}", .{ gs.diff().name, gs.diff().blurb });
             },
             .shares => if (self.gs) |*gs| {
-                const pct: i64 = @divTrunc(gs.share_profit_bp, 100);
+                const pct: i64 = types.bpPercent(gs.share_profit_bp);
                 const next: i64 = std.math.clamp(pct + (if (dir > 0) @as(i64, 5) else -5), 0, 100);
                 try self.exec(.{ .set_shares_pct = @intCast(next) });
                 self.say(.good, "shareholders take {d}% of contract income at completion", .{next});
@@ -3679,7 +3680,7 @@ pub const App = struct {
         }
         switch (form.rows[self.settings_cursor].key) {
             .shares => if (self.gs) |*gs| self.openAmount("SHAREHOLDERS' CUT OF CONTRACT INCOME", .shares, &.{
-                .{ .label = "percent", .value = @divTrunc(gs.share_profit_bp, 100), .min = 0, .max = 100, .step = 5 },
+                .{ .label = "percent", .value = types.bpPercent(gs.share_profit_bp), .min = 0, .max = 100, .step = 5 },
             }),
             .volume => try self.adjustVolume(10),
             .track => if (self.music) |*m| m.skip(),
@@ -4001,7 +4002,8 @@ pub const App = struct {
             return;
         }
         if (g.clock.day_index == before) return; // refused — the message says why
-        self.say(.good, "day {d} · {d}-{d:0>2}-{d:0>2}", .{ g.clock.day_index, g.clock.date.year, g.clock.date.month, g.clock.date.day });
+        var date_buf: [10]u8 = undefined;
+        self.say(.good, "day {d} · {s}", .{ g.clock.day_index, g.clock.date.text(&date_buf) });
     }
 
     fn exec(self: *App, cmd: Command) !void {

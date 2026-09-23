@@ -71,7 +71,7 @@ pub fn payShares(gs: *GameState, contract_id: types.ContractId, company: types.F
     }
     try gs.postTransaction(.{ .day = gs.clock.day_index, .amount = -paid, .category = .payroll, .company = company, .contract = contract_id, .note = "profit shares" });
     try gs.log(.contract, .{ .company = company, .contract = contract_id }, "[shares] {d} c-bills of {d} contract income ({d}%) paid to {d} shareholders — {d} shares at {d} each (morale +3)", .{
-        paid, income, @divTrunc(gs.share_profit_bp, 100), holders, total_shares, per_share,
+        paid, income, types.bpPercent(gs.share_profit_bp), holders, total_shares, per_share,
     });
     return paid;
 }

@@ -436,14 +436,14 @@ fn applyEffectsFor(gs: *GameState, effects: []const events.Effect, contract: ?*c
                 p.salary_override = types.applyBp(was, 10_000 + @as(types.Bp, pct) * 100);
                 p.morale = @intCast(@min(100, @as(u32, p.morale) + 10));
                 p.last_raise_day = gs.clock.day_index; // 12C.5
-                try gs.log(.rotation, .{ .company = company }, "[turnover] {s} {s} stays on a raise: {d} → {d} c-bills/mo", .{ p.first_name, p.last_name, was, p.monthlySalary() });
+                try gs.log(.rotation, .{ .company = company }, "[turnover] {s} stays on a raise: {d} → {d} c-bills/mo", .{ try p.fullName(gs.allocator()), was, p.monthlySalary() });
             },
             .retention_bonus_months => |months| if (gs.person(person_id)) |p| {
                 const bonus = p.monthlySalary() * months;
                 try gs.postTransaction(.{ .day = gs.clock.day_index, .amount = -bonus, .category = .payroll, .company = company, .note = "retention bonus" });
                 p.morale = @intCast(@min(100, @as(u32, p.morale) + 5));
                 p.last_raise_day = gs.clock.day_index; // 12C.5
-                try gs.log(.rotation, .{ .company = company }, "[turnover] {s} {s} stays for a {d} c-bill retention bonus", .{ p.first_name, p.last_name, bonus });
+                try gs.log(.rotation, .{ .company = company }, "[turnover] {s} stays for a {d} c-bill retention bonus", .{ try p.fullName(gs.allocator()), bonus });
             },
             .let_go => try letGo(gs, person_id, false),
             .replace_from_hall => try letGo(gs, person_id, true),
@@ -451,12 +451,12 @@ fn applyEffectsFor(gs: *GameState, effects: []const events.Effect, contract: ?*c
                 const price = ransomPrice(p);
                 try gs.postTreasury(if (company != .none) .{ .company = company } else .outfit, .{ .day = gs.clock.day_index, .amount = price, .category = .event, .company = company, .note = "prisoner ransom" });
                 p.status = .released;
-                try gs.log(.contract, .{ .company = company }, "[prisoner] {s} {s} ({s} {s}) ransomed to {s} for {d} c-bills", .{ p.first_name, p.last_name, @tagName(p.experience()), @tagName(p.role), p.faction, price });
+                try gs.log(.contract, .{ .company = company }, "[prisoner] {s} ({s} {s}) ransomed to {s} for {d} c-bills", .{ try p.fullName(gs.allocator()), @tagName(p.experience()), @tagName(p.role), p.faction, price });
             },
             .release_prisoner => if (gs.person(person_id)) |p| {
                 p.status = .released;
                 const now = if (p.faction.len > 0 and !std.mem.eql(u8, p.faction, "PER")) try gs.adjustStanding(p.faction, 2) else 0;
-                try gs.log(.contract, .{ .company = company }, "[prisoner] {s} {s} released to {s}{s}", .{ p.first_name, p.last_name, p.faction, if (p.faction.len > 0 and !std.mem.eql(u8, p.faction, "PER")) try std.fmt.allocPrint(gs.allocator(), " — standing +2 → {d}", .{now}) else "" });
+                try gs.log(.contract, .{ .company = company }, "[prisoner] {s} released to {s}{s}", .{ try p.fullName(gs.allocator()), p.faction, if (p.faction.len > 0 and !std.mem.eql(u8, p.faction, "PER")) try std.fmt.allocPrint(gs.allocator(), " — standing +2 → {d}", .{now}) else "" });
             },
             .recruit_prisoner => if (gs.person(person_id)) |p| {
                 const roll = gs.rng.roll2d6(.events);
@@ -465,17 +465,17 @@ fn applyEffectsFor(gs: *GameState, effects: []const events.Effect, contract: ?*c
                     p.recruited_day = gs.clock.day_index;
                     p.morale = 40;
                     applyToCompany(gs, company, .morale, -2);
-                    try gs.log(.contract, .{ .company = company }, "[prisoner] {s} {s} ({s} {s} of {s}) takes your coin (2d6 = {d}) — assign a seat; the company mutters (morale −2)", .{ p.first_name, p.last_name, @tagName(p.experience()), @tagName(p.role), p.faction, roll });
+                    try gs.log(.contract, .{ .company = company }, "[prisoner] {s} ({s} {s} of {s}) takes your coin (2d6 = {d}) — assign a seat; the company mutters (morale −2)", .{ try p.fullName(gs.allocator()), @tagName(p.experience()), @tagName(p.role), p.faction, roll });
                 } else {
                     p.status = .released;
-                    try gs.log(.contract, .{ .company = company }, "[prisoner] {s} {s} refuses your offer (2d6 = {d}) and is released", .{ p.first_name, p.last_name, roll });
+                    try gs.log(.contract, .{ .company = company }, "[prisoner] {s} refuses your offer (2d6 = {d}) and is released", .{ try p.fullName(gs.allocator()), roll });
                 }
             },
             .ransom_mia => if (gs.person(person_id)) |p| {
                 if (p.status != .mia) return;
                 const price = ransomPrice(p);
                 try gs.postTransaction(.{ .day = gs.clock.day_index, .amount = -price, .category = .event, .company = company, .note = "ransom for a missing pilot" });
-                try gs.log(.contract, .{ .company = company }, "[missing] {s} {s} ransomed back from {s} for {d} c-bills", .{ p.first_name, p.last_name, p.faction, price });
+                try gs.log(.contract, .{ .company = company }, "[missing] {s} ransomed back from {s} for {d} c-bills", .{ try p.fullName(gs.allocator()), p.faction, price });
                 bringHome(p, gs.clock.day_index);
             },
             .exchange_mia => if (gs.person(person_id)) |p| {
@@ -494,10 +494,10 @@ fn applyEffectsFor(gs: *GameState, effects: []const events.Effect, contract: ?*c
                     while (i < gs.event_queue.pending.items.len) {
                         if (gs.event_queue.pending.items[i].person == pow.id) _ = gs.event_queue.pending.orderedRemove(i) else i += 1;
                     }
-                    try gs.log(.contract, .{ .company = company }, "[missing] {s} {s} traded home for {s} {s}, a prisoner of {s}", .{ p.first_name, p.last_name, pow.first_name, pow.last_name, p.faction });
+                    try gs.log(.contract, .{ .company = company }, "[missing] {s} traded home for {s}, a prisoner of {s}", .{ try p.fullName(gs.allocator()), try pow.fullName(gs.allocator()), p.faction });
                     bringHome(p, gs.clock.day_index);
                 } else {
-                    try gs.log(.contract, .{ .company = company }, "[missing] no prisoner of {s} to trade for {s} {s} — written off", .{ p.faction, p.first_name, p.last_name });
+                    try gs.log(.contract, .{ .company = company }, "[missing] no prisoner of {s} to trade for {s} — written off", .{ p.faction, try p.fullName(gs.allocator()) });
                     try writeOffMissing(gs, p, company);
                 }
             },
@@ -553,7 +553,7 @@ fn letGo(gs: *GameState, person_id: types.PersonId, replace: bool) !void {
     const retiring = p.tenureMonths(gs.clock.day_index) >= t.retire_tenure_months;
     const company = gs.companyOf(p.assigned_force);
     const paid = try @import("personnel.zig").depart(gs, person_id, if (retiring) .retired else .resigned, types.full_bp, if (retiring) "retirement payout" else "severance");
-    try gs.log(.rotation, .{ .company = company, .hq = p.posted_hq }, "[turnover] {s} {s} ({s}) {s}{s}", .{ p.first_name, p.last_name, @tagName(p.role), if (retiring) "retires" else "resigns", if (paid > 0) try std.fmt.allocPrint(gs.allocator(), " — {d} c-bills paid out for {d} years' service", .{ paid, p.tenureMonths(gs.clock.day_index) / 12 }) else "" });
+    try gs.log(.rotation, .{ .company = company, .hq = p.posted_hq }, "[turnover] {s} ({s}) {s}{s}", .{ try p.fullName(gs.allocator()), @tagName(p.role), if (retiring) "retires" else "resigns", if (paid > 0) try std.fmt.allocPrint(gs.allocator(), " — {d} c-bills paid out for {d} years' service", .{ paid, p.tenureMonths(gs.clock.day_index) / 12 }) else "" });
     if (!replace) return;
     for (gs.candidates.items, 0..) |cand, i| if (cand.spec.role == p.role) {
         const r = @import("commands.zig").execute(gs, .{ .hire_candidate = i }) catch |err| {
@@ -562,7 +562,7 @@ fn letGo(gs: *GameState, person_id: types.PersonId, replace: bool) !void {
         };
         if (gs.person(r.hired)) |np| {
             np.assigned_force = company;
-            try gs.log(.rotation, .{ .company = company }, "[turnover] {s} {s} hired from the hall to replace them — assign a seat", .{ np.first_name, np.last_name });
+            try gs.log(.rotation, .{ .company = company }, "[turnover] {s} hired from the hall to replace them — assign a seat", .{ try np.fullName(gs.allocator()) });
         }
         return;
     };
@@ -599,7 +599,7 @@ fn writeOffMissing(gs: *GameState, p: *@import("../domain/person.zig").Person, c
     gs.stats.people_kia += 1;
     const t = @import("../domain/tuning.zig").t.loss;
     applyToCompany(gs, company, .morale, t.mia_morale);
-    try gs.log(.contract, .{ .company = company }, "[missing] {s} {s}, held by {s}, is written off — missing, presumed dead (company morale {d})", .{ p.first_name, p.last_name, p.faction, t.mia_morale });
+    try gs.log(.contract, .{ .company = company }, "[missing] {s}, held by {s}, is written off — missing, presumed dead (company morale {d})", .{ try p.fullName(gs.allocator()), p.faction, t.mia_morale });
 }
 
 /// The missing-pilot decision (12D.3): ransom, trade a prisoner, or write
@@ -675,8 +675,8 @@ pub fn queueNotice(gs: *GameState, person_id: types.PersonId) !void {
         .deadline_day = gs.clock.day_index + notice_window_days,
     });
     const loyal = try p.loyalty(gs.clock.day_index).text(gs.allocator());
-    try gs.log(.decision, .{ .company = gs.companyOf(p.assigned_force), .hq = p.posted_hq }, "[turnover] DECISION: {s} {s} ({s}, {d} c-bills/mo, morale {d}, fatigue {d}{s}{s}) hands in notice — raise, bonus, replace, or let go (inbox, {d} days)", .{
-        p.first_name, p.last_name, @tagName(p.role), p.monthlySalary(), p.morale, p.fatigue, if (loyal.len > 0) ", despite: " else "", loyal, notice_window_days,
+    try gs.log(.decision, .{ .company = gs.companyOf(p.assigned_force), .hq = p.posted_hq }, "[turnover] DECISION: {s} ({s}, {d} c-bills/mo, morale {d}, fatigue {d}{s}{s}) hands in notice — raise, bonus, replace, or let go (inbox, {d} days)", .{
+        try p.fullName(gs.allocator()), @tagName(p.role), p.monthlySalary(), p.morale, p.fatigue, if (loyal.len > 0) ", despite: " else "", loyal, notice_window_days,
     });
 }
 

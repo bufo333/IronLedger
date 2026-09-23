@@ -375,7 +375,7 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             const p = gs.person(id) orelse return Error.UnknownPerson;
             // 12C.2: a firing pays half the departure payout; seats open.
             const paid = try @import("personnel.zig").depart(gs, id, .resigned, tuning.person.fire_severance_bp, "severance (fired)");
-            if (paid > 0) try gs.log(.rotation, .{ .company = gs.companyOf(p.assigned_force) }, "[personnel] {s} {s} fired — {d} c-bills severance", .{ p.first_name, p.last_name, paid });
+            if (paid > 0) try gs.log(.rotation, .{ .company = gs.companyOf(p.assigned_force) }, "[personnel] {s} fired — {d} c-bills severance", .{ try p.fullName(gs.allocator()), paid });
             return .{};
         },
         .new_company => |name| {
@@ -607,7 +607,7 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             p.rank = pr.rank;
             p.rank_pinned = pr.pin;
             if (!pr.pin) _ = try @import("personnel.zig").refreshRanks(gs);
-            try gs.log(.rotation, .{ .company = gs.companyOf(p.assigned_force), .hq = p.posted_hq }, "[rank] {s} {s}: {s} → {s}{s} · {d} c-bills/mo", .{ p.first_name, p.last_name, was.name(), p.rank.name(), if (pr.pin) " (pinned)" else "", p.monthlySalary() });
+            try gs.log(.rotation, .{ .company = gs.companyOf(p.assigned_force), .hq = p.posted_hq }, "[rank] {s}: {s} → {s}{s} · {d} c-bills/mo", .{ try p.fullName(gs.allocator()), was.name(), p.rank.name(), if (pr.pin) " (pinned)" else "", p.monthlySalary() });
             return .{};
         },
         .order_part => |o| return orderPart(gs, o.part_key, o.quantity, o.dest),
@@ -994,7 +994,7 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             const p = gs.person(pid) orelse return Error.UnknownPerson;
             if (p.status != .wounded) return Error.NotWounded;
             p.medbay_admitted = true;
-            try gs.log(.medical, .{ .company = gs.companyOf(p.assigned_force) }, "[medbay] {s} {s} admitted", .{ p.first_name, p.last_name });
+            try gs.log(.medical, .{ .company = gs.companyOf(p.assigned_force) }, "[medbay] {s} admitted", .{ try p.fullName(gs.allocator()) });
             return .{};
         },
         .repay_loan => |r| {
