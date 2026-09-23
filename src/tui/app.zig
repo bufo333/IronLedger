@@ -2307,7 +2307,6 @@ pub const App = struct {
 
     /// What the open list modal shows.
     fn listView(self: *App, al: std.mem.Allocator) !ListView {
-        const g = &self.gs.?;
         const full_h = self.screen.rows -| 2;
         switch (self.modal) {
             .help => {
@@ -2362,7 +2361,7 @@ pub const App = struct {
                 return .{ .title = "HELP", .rows = rows.items, .read_only = true, .w = layout.modal.help_w, .max_h = layout.modal.help_h };
             },
             .decision => |idx| {
-                const view = try q.desk(al, g, 0);
+                const view = try q.desk(al, &self.gs.?, 0);
                 var rows: std.ArrayListUnmanaged([]const u8) = .empty;
                 var found = false;
                 for (view.inbox) |it| {
@@ -2383,6 +2382,7 @@ pub const App = struct {
                 return .{ .title = "DECISION · [1-9] choose · [Esc] later", .rows = rows.items, .read_only = true, .w = layout.modal.decision_w, .max_h = layout.modal.decision_max_h };
             },
             .raise_hulls => {
+                const g = &self.gs.?;
                 const lances = try self.raiseLances();
                 clampIdx(&self.raise.lance_idx, lances.len);
                 const cands = try q.raiseCandidates(al, g, self.raise.company, self.raise.passed[0..self.raise.passed_len]);
@@ -2401,6 +2401,7 @@ pub const App = struct {
                 };
             },
             .raise_support => {
+                const g = &self.gs.?;
                 const train = try q.supportTrain(al, g, self.raise.company);
                 var rows: std.ArrayListUnmanaged([]const u8) = .empty;
                 for (train.lines) |line| try rows.append(al, line.text);
@@ -2440,8 +2441,9 @@ pub const App = struct {
                 }
                 return .{ .title = "SOUNDTRACK", .right_title = "[Enter] select / play  [Esc] close", .rows = rows.items, .n = if (self.music != null) rows.items.len else 0, .w = layout.modal.music_w, .max_h = full_h };
             },
-            .summary => return .{ .title = "CAMPAIGN SUMMARY", .right_title = "any key closes · also :summary", .rows = try q.summary(al, g), .read_only = true, .w = layout.modal.summary_w, .max_h = full_h },
+            .summary => return .{ .title = "CAMPAIGN SUMMARY", .right_title = "any key closes · also :summary", .rows = try q.summary(al, &self.gs.?), .read_only = true, .w = layout.modal.summary_w, .max_h = full_h },
             .readiness => {
+                const g = &self.gs.?;
                 const rr = try q.readiness(al, g);
                 return .{
                     .title = "READINESS · every company",
@@ -2455,6 +2457,7 @@ pub const App = struct {
                 };
             },
             .raise_crews => {
+                const g = &self.gs.?;
                 var rows: std.ArrayListUnmanaged([]const u8) = .empty;
                 const mq = try q.manning(al, g, self.raise.company);
                 for (try (try q.tableOf(al, q.manning_cols, mq)).render(al), 0..) |ln, i| try rows.append(al, if (i == 0) try std.fmt.allocPrint(al, "{{d}}{s}{{/}}", .{ln}) else ln);
@@ -2469,7 +2472,7 @@ pub const App = struct {
             },
             .negotiate => |idx| {
                 var head: std.ArrayListUnmanaged([]const u8) = .empty;
-                if (try q.offerTerms(al, g, idx)) |terms_line| {
+                if (try q.offerTerms(al, &self.gs.?, idx)) |terms_line| {
                     try head.append(al, try std.fmt.allocPrint(al, "  {s}", .{terms_line}));
                     try head.append(al, "  {d}one round: 2d6 + reputation + your command office vs a target eased by standing with the employer · a miss shaves the pay 5% · a natural 2 and they walk{/}");
                     try head.append(al, "");
@@ -2489,7 +2492,7 @@ pub const App = struct {
                 return .{ .title = v.title, .right_title = "best first · dimmed rows say why not · [←/→] columns", .table = try q.tableOf(al, v.cols, v.rows), .n = v.rows.len, .empty = try std.fmt.allocPrint(al, "{{d}}{s}{{/}}", .{v.empty}), .w = layout.modal.picker_w, .max_h = full_h };
             },
             .accept_pick => |oi| {
-                const cands = try q.offerCandidates(al, g, oi);
+                const cands = try q.offerCandidates(al, &self.gs.?, oi);
                 return .{ .title = "SEND WHICH COMPANY · [Enter] choose · [←/→] columns · [Esc] cancel", .right_title = "readiest first", .table = try q.tableOf(al, q.candidates_cols, cands), .n = cands.len, .empty = "{d}no companies to send{/}", .w = layout.modal.accept_pick_w, .max_h = full_h };
             },
             .lance_pick => |uid| {
@@ -2499,16 +2502,16 @@ pub const App = struct {
                 return .{ .title = try std.fmt.allocPrint(al, "MOVE #{d} TO · [Enter] choose · [Esc] cancel", .{@intFromEnum(uid)}), .right_title = ":newlance co:N <name> adds a lance", .rows = rows.items, .n = lances.len, .empty = "{d}no lances — the hull must belong to a company that is home{/}", .w = layout.modal.lance_pick_w, .max_h = full_h };
             },
             .upgrade => |hid| {
-                const rows_v = try q.upgrades(al, g, hid);
+                const rows_v = try q.upgrades(al, &self.gs.?, hid);
                 return .{
-                    .title = try std.fmt.allocPrint(al, "UPGRADE · {s} · [Enter] start · [←/→] columns · [Esc] cancel", .{q.hqName(g, hid)}),
+                    .title = try std.fmt.allocPrint(al, "UPGRADE · {s} · [Enter] start · [←/→] columns · [Esc] cancel", .{q.hqName(&self.gs.?, hid)}),
                     .right_title = "one project per facility at a time",
                     .table = try q.tableOf(al, q.upgrade_cols, rows_v),
                     .n = rows_v.len,
                     .empty = "{d}nothing to upgrade{/}",
                     .foot = try al.dupe([]const u8, &.{
                         "",
-                        try std.fmt.allocPrint(al, "{{d}}paid from the HQ treasury ({s} C) when the project starts · paperwork is admin_command staffing, +2 days per missing finance admin{{/}}", .{try q.money(al, q.balance(g, .{ .hq = hid }))}),
+                        try std.fmt.allocPrint(al, "{{d}}paid from the HQ treasury ({s} C) when the project starts · paperwork is admin_command staffing, +2 days per missing finance admin{{/}}", .{try q.money(al, q.balance(&self.gs.?, .{ .hq = hid }))}),
                         "{d}every level raises the staff the HQ must keep on payroll; understaffed HQs run a level lower{/}",
                     }),
                     .w = layout.modal.upgrade_w,
@@ -2516,22 +2519,22 @@ pub const App = struct {
                 };
             },
             .install_part => |uid| {
-                const cands = try q.installCandidates(al, g, uid);
+                const cands = try q.installCandidates(al, &self.gs.?, uid);
                 var rows: std.ArrayListUnmanaged([]const u8) = .empty;
                 for (cands) |c| try rows.append(al, c.text);
                 return .{ .title = "INSTALL · pick a part · [Enter] choose location · [Esc] cancel", .right_title = "stock at the home HQ first", .rows = rows.items, .n = cands.len, .empty = "{d}nothing in stock to install{/}", .w = layout.modal.install_part_w, .max_h = full_h };
             },
             .install_loc => |il| {
-                const locs = try q.installLocations(al, g, il.unit, il.part);
+                const locs = try q.installLocations(al, &self.gs.?, il.unit, il.part);
                 var rows: std.ArrayListUnmanaged([]const u8) = .empty;
                 for (locs) |l| try rows.append(al, l.text);
                 return .{ .title = "INSTALL · pick a location · [Enter] stage · [Esc] cancel", .head = try al.dupe([]const u8, &.{ try std.fmt.allocPrint(al, "  {{a}}{s}{{/}} — where does it go?", .{il.part}), "" }), .rows = rows.items, .n = locs.len, .empty = "{d}no location takes it{/}", .w = layout.modal.install_loc_w, .max_h = full_h };
             },
             .seat => |id| {
-                const seats = try q.openSeats(al, g, id);
+                const seats = try q.openSeats(al, &self.gs.?, id);
                 var rows: std.ArrayListUnmanaged([]const u8) = .empty;
                 for (seats) |st| try rows.append(al, st.text);
-                return .{ .title = try std.fmt.allocPrint(al, "ASSIGN {s} · [Enter] take seat · [Esc] cancel", .{try q.personName(al, g, id)}), .right_title = "open seats for their role", .rows = rows.items, .n = seats.len, .empty = "{d}no open seat for this role{/}", .w = layout.modal.seat_w, .max_h = layout.modal.seat_max_h };
+                return .{ .title = try std.fmt.allocPrint(al, "ASSIGN {s} · [Enter] take seat · [Esc] cancel", .{try q.personName(al, &self.gs.?, id)}), .right_title = "open seats for their role", .rows = rows.items, .n = seats.len, .empty = "{d}no open seat for this role{/}", .w = layout.modal.seat_w, .max_h = layout.modal.seat_max_h };
             },
             .emblem => {
                 var rows: std.ArrayListUnmanaged([]const u8) = .empty;
@@ -2540,10 +2543,10 @@ pub const App = struct {
                 try rows.append(al, "editor   {a}draw your own{/} — a 3 × 8 text crest, cell by cell");
                 return .{ .title = "EMBLEM · [Enter] use · [Esc] cancel", .right_title = try std.fmt.allocPrint(al, "pictures from {s}", .{try std.mem.join(al, ", ", self.asset_roots.logos)}), .rows = rows.items, .n = rows.items.len, .w = layout.modal.emblem_w, .max_h = layout.modal.emblem_max_h };
             },
-            .hull => |uid| return .{ .title = "HULL · [Esc] close", .rows = try q.hull(al, g, uid), .read_only = true, .w = layout.modal.hull_w, .max_h = full_h },
-            .record => |pid| return .{ .title = "RECORD · [Esc] close", .rows = try q.personRecord(al, g, pid), .read_only = true, .w = layout.modal.record_w, .max_h = full_h },
+            .hull => |uid| return .{ .title = "HULL · [Esc] close", .rows = try q.hull(al, &self.gs.?, uid), .read_only = true, .w = layout.modal.hull_w, .max_h = full_h },
+            .record => |pid| return .{ .title = "RECORD · [Esc] close", .rows = try q.personRecord(al, &self.gs.?, pid), .read_only = true, .w = layout.modal.record_w, .max_h = full_h },
             .contract_log => |cid| {
-                const all = try q.battleLog(al, g, cid, std.math.maxInt(usize));
+                const all = try q.battleLog(al, &self.gs.?, cid, std.math.maxInt(usize));
                 // battleLog is newest first; read it top-down like a diary.
                 var rows: std.ArrayListUnmanaged([]const u8) = .empty;
                 var i: usize = all.len;
@@ -2661,7 +2664,6 @@ pub const App = struct {
     /// Enter on the highlighted row.
     fn listEnter(self: *App) !void {
         const al = self.a();
-        const g = &self.gs.?;
         switch (self.modal) {
             .raise_hulls => try self.raiseTake(),
             .raise_support => try self.raiseBuySupport(),
@@ -2691,7 +2693,7 @@ pub const App = struct {
             .negotiate => |idx| {
                 const term: game.contract.NegotiableTerm = @enumFromInt(@min(self.modal_cursor, negotiable_terms.len - 1));
                 self.modal = .none;
-                const r = game.commands.execute(g, .{ .negotiate = .{ .offer_index = idx, .term = term } }) catch |err| {
+                const r = game.commands.execute(&self.gs.?, .{ .negotiate = .{ .offer_index = idx, .term = term } }) catch |err| {
                     self.say(.crit, "refused: {s}", .{game.cli.errorText(err)});
                     return;
                 };
@@ -2704,16 +2706,16 @@ pub const App = struct {
             },
             .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_part => try self.pickEnter(),
             .accept_pick => |oi| {
-                const cands = try q.offerCandidates(al, g, oi);
+                const cands = try q.offerCandidates(al, &self.gs.?, oi);
                 if (cands.len == 0) return;
                 const c = cands[@min(self.modal_cursor, cands.len - 1)];
                 if (!c.eligible) {
-                    self.say(.amber, "{s} cannot go: {s}", .{ q.forceName(g, c.company), c.why });
+                    self.say(.amber, "{s} cannot go: {s}", .{ q.forceName(&self.gs.?, c.company), c.why });
                     return;
                 }
                 self.modal = .none;
-                const lift = try q.liftText(al, g, c.company);
-                _ = try self.execSay(.{ .accept_contract = .{ .offer_index = oi, .company = c.company } }, .good, "accepted — {s} is on its way, {d} days out{s}{s}", .{ q.forceName(g, c.company), c.transit_days, if (lift.len > 0) " · " else "", lift });
+                const lift = try q.liftText(al, &self.gs.?, c.company);
+                _ = try self.execSay(.{ .accept_contract = .{ .offer_index = oi, .company = c.company } }, .good, "accepted — {s} is on its way, {d} days out{s}{s}", .{ q.forceName(&self.gs.?, c.company), c.transit_days, if (lift.len > 0) " · " else "", lift });
             },
             .lance_pick => |uid| {
                 const lances = try self.lanceChoices(uid);
@@ -2723,7 +2725,7 @@ pub const App = struct {
                 _ = try self.execSay(.{ .move_unit = .{ .unit = uid, .force = lc.force } }, .good, "#{d} moved to {s}", .{ @intFromEnum(uid), lc.name });
             },
             .upgrade => |hid| {
-                const rows = try q.upgrades(al, g, hid);
+                const rows = try q.upgrades(al, &self.gs.?, hid);
                 if (rows.len == 0) return;
                 const r = rows[@min(self.modal_cursor, rows.len - 1)];
                 if (!r.possible) {
@@ -2734,13 +2736,13 @@ pub const App = struct {
                 _ = try self.execSay(.{ .upgrade_facility = .{ .hq = hid, .kind = r.kind } }, .good, "{s} upgrade started — paperwork first, then construction; watch PROJECTS", .{@tagName(r.kind)});
             },
             .install_part => |uid| {
-                const cands = try q.installCandidates(al, g, uid);
+                const cands = try q.installCandidates(al, &self.gs.?, uid);
                 if (cands.len == 0) return;
                 const c = cands[@min(self.modal_cursor, cands.len - 1)];
                 self.openModal(.{ .install_loc = .{ .unit = uid, .part = c.key } });
             },
             .install_loc => |il| {
-                const locs = try q.installLocations(al, g, il.unit, il.part);
+                const locs = try q.installLocations(al, &self.gs.?, il.unit, il.part);
                 if (locs.len == 0) return;
                 const l = locs[@min(self.modal_cursor, locs.len - 1)];
                 if (!l.legal) {
@@ -2751,7 +2753,7 @@ pub const App = struct {
                 _ = try self.execSay(.{ .refit_install = .{ .unit = il.unit, .location = l.location, .part_key = il.part } }, .good, "staged: install {s} in {s} — Enter in the Lab commits it to a bay", .{ il.part, @tagName(l.location) });
             },
             .seat => |id| {
-                const seats = try q.openSeats(al, g, id);
+                const seats = try q.openSeats(al, &self.gs.?, id);
                 self.modal = .none;
                 if (seats.len == 0) return;
                 const st = seats[@min(self.modal_cursor, seats.len - 1)];
