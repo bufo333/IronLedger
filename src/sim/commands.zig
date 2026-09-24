@@ -1852,23 +1852,23 @@ fn freightQuote(gs: *GameState, alloc: std.mem.Allocator, from: types.Site, to: 
         days = network.routeDays(route);
         var jumps_total: u32 = 0;
         for (route) |h| jumps_total += h.hop.jumps;
-        cost = types.applyBp(@as(types.CBills, tons_moved) * 2_000 * @as(types.CBills, @max(1, jumps_total)), network.routeCostMultBp(route));
+        cost = types.applyBp(@as(types.CBills, tons_moved) * tuning.logistics.freight_per_ton_jump * @as(types.CBills, @max(1, jumps_total)), network.routeCostMultBp(route));
     }
     // Final leg: home HQ → the company's contract planet (or same world).
     const last_from = if (to_hq != .none) planet_mod.find(gs.hqs.getPtr(to_hq).?.planet_key) orelse a else a;
     if (last_from != b) {
         const jumps = planet_mod.jumpsBetween(last_from, b);
         days += logistics.transitDays(jumps);
-        cost += @as(types.CBills, tons_moved) * 2_000 * @as(types.CBills, @max(1, jumps));
+        cost += @as(types.CBills, tons_moved) * tuning.logistics.freight_per_ton_jump * @as(types.CBills, @max(1, jumps));
     } else if (from_hq == to_hq) {
-        days = 3;
+        days = tuning.logistics.freight_min_days;
     }
     cost = types.applyBp(cost, gs.commanderMultBp(.freight));
     if (gs.hqs.count() > 0) {
         const transport = gs.hqStaff(gs.hqs.keys()[0], .admin_transport);
-        cost = types.applyBp(cost, 10_000 - 500 * @as(types.Bp, @min(4, transport.count)));
+        cost = types.applyBp(cost, 10_000 - tuning.logistics.transport_admin_discount_bp * @as(types.Bp, @min(tuning.logistics.transport_admin_max, transport.count)));
     }
-    return .{ .cost = cost, .days = @max(3, days), .route = route, .tons = tons_moved };
+    return .{ .cost = cost, .days = @max(tuning.logistics.freight_min_days, days), .route = route, .tons = tons_moved };
 }
 
 /// Book a quoted shipment's tonnage on its route. Cannot fail: the quote

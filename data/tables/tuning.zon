@@ -57,6 +57,10 @@
         .collar_charter_bp = 5_000,
         .dedicated_line_cost_bp = 8_000,
         .freight_per_ly = 2_000,
+        .freight_per_ton_jump = 2_000, // TUNE
+        .transport_admin_discount_bp = 500, // TUNE
+        .transport_admin_max = 4,
+        .freight_min_days = 3,
     },
     .network = .{
         .upkeep_per_level = 60_000,

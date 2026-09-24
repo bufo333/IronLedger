@@ -121,7 +121,7 @@ fn runDemo(gs: *game.state.GameState, gpa: std.mem.Allocator) !void {
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
     const al = arena.allocator();
-    std.debug.print("=== BattleTech Mercenary Command — Stage 4 demo ===\n\n", .{});
+    std.debug.print("=== IRON LEDGER — scripted demo ===\n\n", .{});
 
     // Character creation: a Capellan ex-quartermaster stands up shop at home.
     _ = try game.commands.execute(gs, .{ .create_commander = .{
@@ -161,7 +161,7 @@ fn runDemo(gs: *game.state.GameState, gpa: std.mem.Allocator) !void {
     _ = try game.commands.execute(gs, .{ .transfer = .{ .from = .outfit, .to = .{ .company = co }, .amount = 300_000 } });
     _ = try game.commands.execute(gs, .{ .set_policy = .{ .entity = .{ .company = co }, .floor = 200_000, .monthly_cap = 400_000 } });
     std.debug.print("Dispatched 300k operating funds by courier; standing policy: top up to 200k monthly.\n", .{});
-    std.debug.print("\nStores at departure (Stage 9B):\n", .{});
+    std.debug.print("\nStores at departure:\n", .{});
     printSupplies(gs, al);
 
     // The HQ works while the company is away — capital by
