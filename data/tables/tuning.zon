@@ -246,6 +246,7 @@
         .press_score = 2, // TUNE: the employer sees initiative
         .press_fatigue = 4, // TUNE: no repair, no rearm, no sleep
         .consolidate_morale = 2, // TUNE: a night off the line
+        .contact_warning_days = 3, // TUNE: long enough to change ROE or recall before the fight
     },
     .field_supply = .{
         .ammo_share_pct = 40,

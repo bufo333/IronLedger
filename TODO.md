@@ -26,10 +26,6 @@ the rule and the symbol are the stable key.
 
 # Part 1 — Finish Stage 12
 
-## 12G. After-action (ROADMAP Stage 12G)
-
-- [ ] **12G.8 The pre-battle contact warning.** `tuning.battle.contact_warning_days` before contact, show the skull rating, the fieldable strength and the ammunition state while ROE and recall can still change the outcome. Non-blocking.
-
 ## 12F. Size-aware screens (ROADMAP Stage 12F)
 
 - [ ] **12F.6 Drop a column before scrolling** when a table names one droppable, for screens that read better without the tail than scrolled.

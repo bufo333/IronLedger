@@ -1201,7 +1201,7 @@ The TUI plays on any terminal from ~100×30 up; a big one just shows more.
 - ☐ 12F.6 **Drop a column before scrolling** when a table names one
   droppable, for screens that read better without the tail than scrolled.
 
-## Stage 12G — After-action (2026-09-23)
+## Stage 12G — After-action (2026-09-23) ✅
 Battles resolved invisibly inside the daily tick and left only prose in
 the campaign log: everything that would make a fight legible was computed
 and then thrown away. The fight is now a record the game keeps, a sheet
@@ -1302,10 +1302,17 @@ the player reads, and a turn that stops until they have.
   round-trips it in the `unit` table, told apart by a non-empty
   `held_by`. Discharges the 12D.9 deferral: the recovery raid now has
   something to win back.
-- ☐ 12G.8 **The pre-battle contact warning.** `tuning.battle.contact_warning_days`
-  out, showing the skull rating, fieldable strength and ammunition state
-  while the ROE and recall commands can still change the outcome.
-  Non-blocking: a heads-up, not an obligation.
+- ✅ 12G.8 **The pre-battle contact warning.** From
+  `tuning.battle.contact_warning_days` before a scheduled engagement, a
+  non-blocking checklist warning shows the skulls and odds under the ROE in
+  force, fieldable BV against what was committed, and whole engagements of
+  each munition family the company fires (`field_supply.ammoFights`, on the
+  same tons-per-battle rule the fight uses). It names the levers: change ROE
+  or recall, or only recall when integrated command holds the ROE. Inside the
+  window it replaces the outmatched warning for that contract. A multi-day
+  advance stops once, on the day the window opens (`Result.contact`), and the
+  next advance goes ahead: a heads-up, not an obligation. The window is at
+  most the shortest gap between engagements, so an advance never skips it.
 
 ## Stage 13 — Graphical client
 Architected after the TUI ships, reusing the same command/query boundary.

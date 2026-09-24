@@ -384,6 +384,9 @@ pub const Error = error{
 
 pub const Result = struct {
     days_advanced: u32 = 0,
+    /// advance: the contract whose contact warning stopped a multi-day
+    /// advance early.
+    contact: types.ContractId = .none,
     /// transfer_unit: the hull travels (else it was placed at once).
     in_transit: bool = false,
     /// depot: the HQ whose bay took the job.
@@ -2255,6 +2258,12 @@ fn advance(gs: *GameState, days: u32) Error!Result {
         // advance stops on the day it lands rather than resolving the
         // rest of the week around it.
         if (@import("checklist.zig").turnHold(gs) != null) return result;
+        // The contact warning is a heads-up, not a hold: the advance stops
+        // on the day it appears and the next advance goes ahead.
+        if (@import("checklist.zig").contactOpenedToday(gs)) |c| {
+            result.contact = c.id;
+            return result;
+        }
     }
     return result;
 }
@@ -2742,7 +2751,8 @@ test "12G.5: an unread after-action holds the turn, and a week stops on the day 
             try std.testing.expect(r.days_advanced < 7);
             break;
         }
-        try std.testing.expectEqual(@as(u32, 7), r.days_advanced);
+        // A week also stops, once, when the contact warning comes into view.
+        if (r.contact == .none) try std.testing.expectEqual(@as(u32, 7), r.days_advanced);
     }
     const waiting = gs.battle_reports.unread() orelse return error.NoBattleInTwentyWeeks;
 
