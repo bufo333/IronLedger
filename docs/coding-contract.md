@@ -2,9 +2,9 @@
 
 The rules every change to IRON LEDGER must follow. This document is
 normative: it says what the code must do, not what it does today. Where the
-code falls short, the code is wrong, not the rule. `ARCHITECTURE.md`,
-`docs/tui.md`, and the Zig guide explain the design; this document defines the
-enforceable engineering contract.
+code falls short, the code is wrong, not the rule. `ARCHITECTURE.md` and
+`docs/tui.md` explain the design; this document defines the enforceable
+engineering contract.
 
 Do not restate these rules elsewhere. Link to the owning rule. Every section
 ends with reviewer checks. The repository's contract-verification script
