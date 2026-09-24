@@ -1,17 +1,82 @@
 #!/usr/bin/env python3
 """Drive the TUI through a pty: create a player, walk the wizard, begin a
 campaign, end a turn, quit back to the lobby, and exit. Prints the last
-screen and asserts on landmarks."""
-import os, pty, sys, time, select, re, struct, fcntl, termios, signal
+screen and asserts on landmarks.
+
+    python3 docs/tui_smoke.py zig-out/bin/game [store.db]
+
+With no store path the script uses a private temporary directory. A given
+path must end in `.db` and, if it exists, be a regular file: it is
+replaced. Every client is reaped: a failed assertion or the overall
+timeout kills whatever is still running, and a clean pass requires each
+client to exit with status 0."""
+import atexit, os, pty, shutil, sys, tempfile, time, select, re, struct, fcntl, termios, signal
+
+# The whole script; a hung client fails instead of blocking CI.
+TIMEOUT_S = int(os.environ.get("SMOKE_TIMEOUT_S", "600"))
 
 exe = sys.argv[1]
-db = sys.argv[2]
-if os.path.exists(db):
-    os.remove(db)
+if len(sys.argv) > 2:
+    db = sys.argv[2]
+    if not db.endswith(".db"):
+        sys.exit(f"refusing store path {db!r}: it must end in .db")
+    if os.path.lexists(db) and (os.path.islink(db) or not os.path.isfile(db)):
+        sys.exit(f"refusing store path {db!r}: it exists and is not a regular file")
+    if os.path.exists(db):
+        os.remove(db)
+else:
+    tmp = tempfile.mkdtemp(prefix="iron-ledger-tui-smoke-")
+    atexit.register(shutil.rmtree, tmp, ignore_errors=True)
+    db = os.path.join(tmp, "smoke.db")
 
-pid, fd = pty.fork()
-if pid == 0:
-    os.execv(exe, [exe, "--tui", "--no-splash", "--no-music", "--store", db])
+children = []  # every client pid, reaped at exit whatever happened
+
+
+def reap_all():
+    for child in children:
+        try:
+            os.kill(child, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        try:
+            os.waitpid(child, 0)
+        except ChildProcessError:
+            pass
+
+
+atexit.register(reap_all)
+
+
+def on_timeout(signum, frame):
+    raise TimeoutError(f"TUI smoke exceeded {TIMEOUT_S}s")
+
+
+signal.signal(signal.SIGALRM, on_timeout)
+signal.alarm(TIMEOUT_S)
+
+
+def spawn(args):
+    child, master = pty.fork()
+    if child == 0:
+        os.execv(exe, [exe, *args])
+    children.append(child)
+    return child, master
+
+
+def finish(child, timeout=10.0):
+    """Wait for a client that was told to quit; it must exit with status 0."""
+    end = time.time() + timeout
+    while time.time() < end:
+        drain(0.2)
+        done, status = os.waitpid(child, os.WNOHANG)
+        if done:
+            children.remove(child)
+            assert os.WIFEXITED(status) and os.WEXITSTATUS(status) == 0, f"client exited abnormally: status {status}"
+            return
+    raise AssertionError(f"client {child} did not exit within {timeout}s of quitting")
+
+
+pid, fd = spawn(["--tui", "--no-splash", "--no-music", "--store", db])
 
 # 200x50 terminal
 fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 50, 200, 0, 0))
@@ -357,12 +422,11 @@ while time.time() < end:
 assert "MERCENARY" in plain()[-8000:] and runs and 60 < max(runs) < 112, (max(runs) if runs else None, plain()[-2000:])
 send("q", 0.5)
 drain(0.5)
+finish(pid)
 print(plain()[-6000:])
 
 # ---- second pass: the minimum tier (80x24) and --ascii, every screen ----
-pid, fd = pty.fork()
-if pid == 0:
-    os.execv(exe, [exe, "--tui", "--ascii", "--no-splash", "--no-music", "--store", db])
+pid, fd = spawn(["--tui", "--ascii", "--no-splash", "--no-music", "--store", db])
 fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
 out = b""
 assert wait_for("MERCENARY", timeout=20), plain()[-2000:]
@@ -387,5 +451,6 @@ send("n", 2.0)
 if "END TURN?" in plain(): send("n", 2.0)
 send("q"); send("r"); send("q")
 drain(0.5)
+finish(pid)
 print("80x24 + --ascii pass OK")
 print("SMOKE OK")

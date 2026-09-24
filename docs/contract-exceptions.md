@@ -21,7 +21,6 @@ Owner of every entry: the project owner.
 - **Why not yet:** Each part needs its own verified pull request.
 - **Scope:**
   - **`docs/verify-contract.sh`.** It has no switch-arm check (rule 76) and no duplicated-pattern check.
-  - **Smoke scripts.** They delete the path they are given, don't reap children, and the REPL smoke has no timeout.
 - **Removal:** C1.
 - **Guard:** the gate runs on every pull request on Linux and macOS, with a clean ReleaseFast package build (`docs/clean-package.sh`) and the invalid-overlay fixtures (`docs/data-fixtures.py`). Nothing mechanical stops CI shrinking; review checklist question 15 covers it.
 
