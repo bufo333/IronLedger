@@ -13,10 +13,9 @@ sites; the pull request that closes an item deletes its ledger entry and any
 ratchet or baseline lines, and a large item lands as the increments listed,
 each on `main` before the next. Regression test first, then the change. The
 audit deliverables in `docs/audit-response.md` are folded in: D26 into C10,
-D27 and D30 into C12, D28 into C7, D29 into C15, D31 into C8, D32 into C1,
-D33 into C18.
+D27 and D30 into C12, D28 into C7, D29 into C15, D31 into C8, D33 into
+C18 (D32 closed with C1, the gate).
 
-- [ ] C1 the gate is complete (rules 72, 73): C1d `verify-contract.sh` gains the switch-arm check (rule 76) and a duplicated-pattern check.
 - [ ] C4 decomposition (rules 5, 14, 76, 77) — first, because the ratchet holds every oversized module at its size and the fixes after it add code. Behaviour-preserving, golden hash unchanged, one increment per PR:
   - [ ] C4a `GameState` keeps storage and primitives; hashing to `digest.zig`, treasury and pricing/liquidation to econ, hiring to personnel, staffing and founding to `hq_ops`, posture to a posture module, TO&E and crew, tech time to maintenance, lift, supply, refit, aftermath and readiness to their owners (the grouping is in the ledger); `state.zig` stops importing `rating.zig` and `field_supply.zig`.
   - [ ] C4b `commands.zig` keeps the union, dispatch and error set; handlers move to subsystem command modules; the named atomic operations of rule 14 exist.
