@@ -1,8 +1,9 @@
 //! The command line shared by both frontends (Stage 12.18): one parser
 //! from verb + tokens to `commands.Command`, the verb list the TUI
 //! completes and the REPL prints, one-line usage strings, and the
-//! human-readable refusal text for every `commands.Error`. Frontend-only
-//! verbs (day, save, quit, screens, print views) stay in their frontends.
+//! human-readable refusal text for every `commands.Error`. The terminal
+//! client's own verbs (day, save, screens) parse here too, as a
+//! `ClientVerb`; the REPL's print views stay in the REPL.
 //! No MekHQ counterpart — MekHQ has no scripting console.
 
 const std = @import("std");
@@ -14,6 +15,68 @@ const Command = game.commands.Command;
 const Treasury = game.state.Treasury;
 
 pub const ParseError = error{ BadArguments, BadSite, BadNumber };
+
+/// The longest advance one `day` asks for: a year. An advance still stops
+/// on every hold and contact inside it.
+pub const max_advance_days: u32 = 365;
+
+/// `day [n] [force]`: how many days, and whether to skip the end-turn
+/// checklist.
+pub const Day = struct { days: u32 = 1, force: bool = false };
+
+/// Both frontends' `day`. Every word is used: a count from 1 to
+/// `max_advance_days` at most once, `force` (or `!`) at most once;
+/// anything else refuses rather than advancing a default.
+pub fn parseDay(tokens: *std.mem.TokenIterator(u8, .scalar)) ParseError!Day {
+    var d: Day = .{};
+    var counted = false;
+    while (tokens.next()) |t| {
+        if (std.mem.eql(u8, t, "force") or std.mem.eql(u8, t, "!")) {
+            if (d.force) return error.BadArguments;
+            d.force = true;
+        } else {
+            if (counted) return error.BadArguments;
+            d.days = std.fmt.parseInt(u32, t, 10) catch return error.BadNumber;
+            if (d.days == 0 or d.days > max_advance_days) return error.BadNumber;
+            counted = true;
+        }
+    }
+    return d;
+}
+
+/// The terminal client's own verbs: time, saving and the screens a
+/// command opens. Parsed as strictly as a command.
+pub const ClientVerb = union(enum) {
+    day: Day,
+    save,
+    quit,
+    help,
+    settings,
+    emblem,
+    manning: types.ForceId,
+    readiness,
+    summary,
+    music,
+};
+
+pub const client_verbs = std.meta.fieldNames(ClientVerb);
+
+/// A client verb and its tokens → the verb, or null when `verb` is not
+/// one. Nothing may follow a verb that takes no arguments.
+pub fn parseClientVerb(verb: []const u8, tokens: *std.mem.TokenIterator(u8, .scalar)) ParseError!?ClientVerb {
+    const tag = std.meta.stringToEnum(std.meta.Tag(ClientVerb), verb) orelse return null;
+    const cv: ClientVerb = switch (tag) {
+        .day => .{ .day = try parseDay(tokens) },
+        .manning => blk: {
+            const site = try parseSite(try need(tokens.next()));
+            if (site != .company) return error.BadSite;
+            break :blk .{ .manning = site.company };
+        },
+        inline else => |t| @unionInit(ClientVerb, @tagName(t), {}),
+    };
+    if (tokens.next() != null) return error.BadArguments;
+    return cv;
+}
 
 pub fn parseSite(tok: []const u8) ParseError!types.Site {
     if (std.mem.eql(u8, tok, "outfit")) return .outfit;
@@ -159,8 +222,9 @@ fn parseVerb(verb: []const u8, tokens: *std.mem.TokenIterator(u8, .scalar)) Pars
         if (site != .hq) return error.BadSite;
         const part = try need(tokens.next());
         const min = try num(u32, tokens.next());
-        const target = std.fmt.parseInt(u32, tokens.next() orelse "0", 10) catch return error.BadNumber;
-        return .{ .set_stock_policy = .{ .hq = site.hq, .part_key = part, .min = min, .target = if (target == 0 and min > 0) min * 2 else target } };
+        // No target: twice the minimum. An explicit 0 removes the line.
+        const target = if (tokens.next()) |t| std.fmt.parseInt(u32, t, 10) catch return error.BadNumber else min * 2;
+        return .{ .set_stock_policy = .{ .hq = site.hq, .part_key = part, .min = min, .target = target } };
     }
     if (eq(u8, verb, "difficulty")) {
         const level = game.difficulty.parse(try need(tokens.next())) orelse return error.BadArguments;
@@ -668,6 +732,8 @@ pub fn usage(verb: []const u8) ?[]const u8 {
         .{ "cyclerole", "cyclerole <lance id>" },
         .{ "cycledifficulty", "cycledifficulty [+|-]" },
         .{ "shares", "shares <percent>|+|-  (share of contract income paid to shareholders at completion)" },
+        .{ "day", "day [n] [force]  (1-365 days; force skips the end-turn checklist)" },
+        .{ "manning", "manning co:N" },
         .{ "recallidle", "recallidle co:N" },
         .{ "admit", "admit <person>" },
         .{ "repay", "repay <loan#> <amount>" },
@@ -799,6 +865,59 @@ test "a token left over after a complete command is refused, not dropped" {
     try std.testing.expectEqualStrings("Bravo Company", (try parseLine("raise hq:1 Bravo Company")).?.raise_company.name);
     try std.testing.expectEqualStrings("Sky Lance", (try parseLine("newlance co:1 air Sky Lance")).?.new_lance.name);
     try std.testing.expectEqualStrings("Forward Base", (try parseLine("found galatea Forward Base")).?.found_hq.name);
+}
+
+test "day parses strictly: a count once, force once, nothing else" {
+    const t = std.testing;
+    const parse = struct {
+        fn f(line: []const u8) ParseError!Day {
+            var it = std.mem.tokenizeScalar(u8, line, ' ');
+            return parseDay(&it);
+        }
+    }.f;
+    try t.expectEqual(Day{}, try parse(""));
+    try t.expectEqual(Day{ .days = 3 }, try parse("3"));
+    try t.expectEqual(Day{ .days = 7, .force = true }, try parse("7 force"));
+    try t.expectEqual(Day{ .days = 2, .force = true }, try parse("! 2"));
+    try t.expectError(error.BadNumber, parse("nonsense"));
+    try t.expectError(error.BadNumber, parse("-1"));
+    try t.expectError(error.BadNumber, parse("0"));
+    try t.expectError(error.BadNumber, parse("366"));
+    try t.expectError(error.BadArguments, parse("1 2"));
+    try t.expectError(error.BadArguments, parse("force force"));
+}
+
+test "client verbs refuse trailing words; manning takes a company" {
+    const t = std.testing;
+    const parse = struct {
+        fn f(line: []const u8) ParseError!?ClientVerb {
+            var it = std.mem.tokenizeScalar(u8, line, ' ');
+            return parseClientVerb(it.next().?, &it);
+        }
+    }.f;
+    try t.expect((try parse("save")).? == .save);
+    try t.expectError(error.BadArguments, parse("save now"));
+    try t.expectError(error.BadArguments, parse("quit please"));
+    try t.expectError(error.BadNumber, parse("day junk"));
+    try t.expectEqual(@as(u32, 3), (try parse("day 3")).?.day.days);
+    try t.expectEqual(@as(types.ForceId, @enumFromInt(2)), (try parse("manning co:2")).?.manning);
+    try t.expectError(error.BadArguments, parse("manning co:2 x"));
+    try t.expectError(error.BadSite, parse("manning hq:1"));
+    try t.expect((try parse("accept")) == null);
+    try t.expect(usage("day") != null and usage("manning") != null);
+}
+
+test "stockpolicy: no target is twice the minimum, an explicit 0 removes" {
+    const t = std.testing;
+    const parse = struct {
+        fn f(line: []const u8) !Command {
+            var it = std.mem.tokenizeScalar(u8, line, ' ');
+            return (try parseCommand(it.next().?, &it)).?;
+        }
+    }.f;
+    try t.expectEqual(@as(u32, 10), (try parse("stockpolicy hq:1 armor 5")).set_stock_policy.target);
+    try t.expectEqual(@as(u32, 0), (try parse("stockpolicy hq:1 armor 5 0")).set_stock_policy.target);
+    try t.expectEqual(@as(u32, 8), (try parse("stockpolicy hq:1 armor 5 8")).set_stock_policy.target);
 }
 
 test "shares and autoadmit each parse in one place, every form they document" {

@@ -178,7 +178,11 @@ you own reports to you (Stages 9A–9C):
 - **The turn ends with a checklist**: before the day advances you see what
   you left undone — decisions near deadline, open slots, hungry companies,
   overdrawn treasuries, idle bays with demand — and choose to fix it or
-  proceed anyway. Nothing you should have known slips past a turn boundary.
+  proceed anyway; a week's advance asks the same as a day's. Red marks
+  what costs you if left, but nothing is forced: most of it is a bounded
+  tax, and the one hard deadline is a contract left combat-ineffective,
+  which breaches after two weeks. Nothing you should have known slips
+  past a turn boundary.
   What you cannot act on stays on the Desk without stopping the turn: a
   mek whose pilot is in the medbay keeps the seat for them, and the TO&E
   shows it sitting out until the day they are back.

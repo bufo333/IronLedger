@@ -14,7 +14,6 @@ const types = @import("../domain/types.zig");
 /// Every field is a lever the player controls without touching a battle.
 pub const CampaignMods = struct {
     supply_parts: bool = true, // false = shortage
-    supply_ammo: bool = true,
     supply_medical: bool = true,
     supply_provisions: bool = true,
     avg_fatigue: u8 = 0, // 0–100
@@ -61,7 +60,6 @@ pub const Element = struct {
         bp += @as(i64, self.avg_quality.maintenanceModifier()) * t.quality_step_bp; // A(+3)→−15%, F(−2)→+10%
 
         // Campaign modifiers — the player's real levers.
-        if (!mods.supply_ammo) bp -= t.no_ammo_bp;
         if (!mods.supply_parts) bp -= t.no_parts_bp;
         if (!mods.supply_provisions) bp -= t.no_provisions_bp;
         bp -= @divTrunc(@as(i64, mods.avg_fatigue) * t.fatigue_scale_bp, 100);
@@ -101,7 +99,6 @@ test "supply and morale move combat power" {
 
     const well_supplied = elem.effectivePower(.{});
     const starved = elem.effectivePower(.{
-        .supply_ammo = false,
         .supply_parts = false,
         .supply_provisions = false,
         .avg_fatigue = 60,

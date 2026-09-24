@@ -727,7 +727,6 @@ pub const Tuning = struct {
         piloting_bp: types.Bp,
         /// Per step of maintenance quality modifier (A is +3, F −2).
         quality_step_bp: types.Bp,
-        no_ammo_bp: types.Bp,
         no_parts_bp: types.Bp,
         no_provisions_bp: types.Bp,
         /// Scaled by average fatigue over 100, and by (morale − 50) over 50.

@@ -329,7 +329,7 @@ hand, and a review.
 
 ### F1 Desk
 
-Where a turn starts and ends: the end-turn checklist (blocking items in
+Where a turn starts and ends: the end-turn checklist (urgent items in
 red) under the outfit's Dragoons rating, the inbox with decisions and
 their deadlines, every company's posture, the log since last turn, and
 the HQ network.
