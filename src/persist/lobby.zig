@@ -131,5 +131,6 @@ test "lobby: a generated session saves and lists under its player" {
     try std.testing.expect(session.state().campaign_id != 0);
     var again = try Session.load(lobby, std.testing.allocator, session.state().campaign_id);
     defer again.close();
-    try std.testing.expectEqual(session.state().hash(), again.state().hash());
+    const digest = @import("../sim/digest.zig");
+    try std.testing.expectEqual(digest.stateHash(session.state()), digest.stateHash(again.state()));
 }

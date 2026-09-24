@@ -67,7 +67,7 @@ re-implemented in Zig. Paths below are under `MekHQ/src/mekhq/campaign/`.
 | Persistent, condition-priced hull listings; staple vs. rare-slot parts; daily hiring churn (MekHQ UnitMarket/PersonnelMarket regenerate wholesale) | Stage 9C.3: `market_listing` condition columns, `staple` | 9C.3 |
 | MegaMekLab construction rules: per-location crits, tonnage, heat sinks, location rules; engines/gyros/actuators as parts | Stage 10: chassis + parts data growth, loadout validator | 10 |
 | Per-company field plan for deployed trucks (no MekHQ analog; AtB resupply drops are the nearest) | Stage 12: `src/sim/field_supply.zig` — floors/targets per line from consumption, transit and truck shares | 12 |
-| Golden-master state digest (MekHQ has no determinism harness) | `src/sim/digest.zig`: a canonical digest of any plain value, maps order-independent; `GameState.hash` feeds every persisted field through it | 12 |
+| Golden-master state digest (MekHQ has no determinism harness) | `src/sim/digest.zig`: a canonical digest of any plain value, maps order-independent; `stateHash` feeds every persisted field of a campaign through it | 12 |
 | Key-binding tables (MekHQ's Swing menus carry their own accelerators) | `src/tui/keys.zig`: one table per screen maps keys to actions and holds every word shown about them; footer, help and the `docs/tui.md` key reference are generated from it | 12 |
 
 ## Useful MekHQ rule references while implementing

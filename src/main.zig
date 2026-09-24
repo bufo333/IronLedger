@@ -352,7 +352,7 @@ fn runDemo(gs: *game.state.GameState, gpa: std.mem.Allocator) !void {
 
     std.debug.print("\n", .{});
     printLines(al, try q.pnlLines(al, gs, 0, st.day, .all), "") catch |err| showError(err);
-    std.debug.print("State hash (golden master): {x}\n", .{gs.hash()});
+    std.debug.print("State hash (golden master): {x}\n", .{game.digest.stateHash(gs)});
     std.debug.print("Run with `zig build run -- --repl` for the interactive loop.\n", .{});
 }
 

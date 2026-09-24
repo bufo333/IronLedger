@@ -4,7 +4,6 @@
 //! lives in the system modules (tick.zig, commands.zig, ...).
 
 const std = @import("std");
-const digest = @import("digest.zig");
 const tuning = @import("../domain/tuning.zig").t;
 const types = @import("../domain/types.zig");
 const person_mod = @import("../domain/person.zig");
@@ -2069,54 +2068,17 @@ pub const GameState = struct {
         for (@typeInfo(GameState).@"struct".fields) |f| _ = persistenceOf(f.name);
         for (field_persistence) |entry| if (!@hasField(GameState, entry[0])) @compileError("field_persistence names no field: " ++ entry[0]);
     }
-
-    fn hashed(comptime name: []const u8) bool {
-        @setEvalBranchQuota(20_000);
-        return switch (persistenceOf(name)) {
-            .persisted, .derived => true,
-            .session, .scratch => false,
-        };
-    }
-
-    /// The golden master: a digest of every persisted and derived field
-    /// (`field_persistence`, `digest.zig`),
-    /// RNG words and `next_*_id` counters included. Two runs with the same
-    /// seed and command script produce the same hash, and a save loads back
-    /// to the hash it was saved at (ARCH §13).
-    pub fn hash(self: *const GameState) u64 {
-        var h = std.hash.Wyhash.init(0x42544d43); // "BTMC"
-        inline for (@typeInfo(GameState).@"struct".fields) |f| {
-            if (comptime hashed(f.name)) {
-                digest.update(&h, f.name);
-                digest.update(&h, @field(self, f.name));
-            }
-        }
-        return h.final();
-    }
-
-    /// The path to the first hashed value that differs between two states
-    /// ("candidates[2].skills"), for a round-trip test to name what did not
-    /// survive; null when nothing does.
-    pub fn firstHashDifference(self: *const GameState, other: *const GameState, buf: []u8) ?[]const u8 {
-        inline for (@typeInfo(GameState).@"struct".fields) |f| {
-            if (comptime hashed(f.name)) {
-                const name_len = @min(f.name.len, buf.len);
-                @memcpy(buf[0..name_len], f.name[0..name_len]);
-                if (digest.firstDifference(buf[name_len..], @field(self, f.name), @field(other, f.name))) |rest| return buf[0 .. name_len + rest.len];
-            }
-        }
-        return null;
-    }
 };
 
 test "a session field cannot move the golden master; a persisted one does" {
+    const digest = @import("digest.zig");
     var gs = GameState.init(std.testing.allocator, .{ .seed = 45 });
     defer gs.deinit();
-    const before = gs.hash();
+    const before = digest.stateHash(&gs);
     gs.campaign_id = 99; // session: the store's row
-    try std.testing.expectEqual(before, gs.hash());
+    try std.testing.expectEqual(before, digest.stateHash(&gs));
     gs.reputation += 1; // persisted
-    try std.testing.expect(gs.hash() != before);
+    try std.testing.expect(digest.stateHash(&gs) != before);
     try std.testing.expectEqual(GameState.Persistence.session, comptime GameState.persistenceOf("campaign_id"));
 }
 

@@ -1,7 +1,7 @@
 //! A canonical digest of any plain value: every field, every element, every
-//! map entry. `GameState.hash` feeds each persisted field through it, so a
-//! change to any saved number moves the golden master. MekHQ has no
-//! counterpart (it has no determinism harness).
+//! map entry. `stateHash` feeds each persisted field of a campaign through
+//! it, so a change to any saved number moves the golden master. MekHQ has
+//! no counterpart (it has no determinism harness).
 //!
 //! Canonical means independent of how the value was built: a slice or list
 //! digests its length and then each element in order; a map (array hash
@@ -11,8 +11,48 @@
 //! refused at compile time: none of them has a canonical value.
 
 const std = @import("std");
+const GameState = @import("state.zig").GameState;
 
 const Hasher = std.hash.Wyhash;
+
+/// A field the golden master covers: persisted or derived
+/// (`GameState.field_persistence`); session and scratch fields cannot move it.
+fn hashed(comptime name: []const u8) bool {
+    @setEvalBranchQuota(20_000);
+    return switch (GameState.persistenceOf(name)) {
+        .persisted, .derived => true,
+        .session, .scratch => false,
+    };
+}
+
+/// The golden master: a digest of every persisted and derived field of a
+/// campaign, RNG words and `next_*_id` counters included. Two runs with the
+/// same seed and command script produce the same hash, and a save loads
+/// back to the hash it was saved at (ARCH §13).
+pub fn stateHash(gs: *const GameState) u64 {
+    var h = Hasher.init(0x42544d43); // "BTMC"
+    inline for (@typeInfo(GameState).@"struct".fields) |f| {
+        if (comptime hashed(f.name)) {
+            update(&h, f.name);
+            update(&h, @field(gs, f.name));
+        }
+    }
+    return h.final();
+}
+
+/// The path to the first hashed value that differs between two campaigns
+/// ("candidates[2].skills"), for a round-trip test to name what did not
+/// survive; null when nothing does.
+pub fn firstStateDifference(a: *const GameState, b: *const GameState, buf: []u8) ?[]const u8 {
+    inline for (@typeInfo(GameState).@"struct".fields) |f| {
+        if (comptime hashed(f.name)) {
+            const name_len = @min(f.name.len, buf.len);
+            @memcpy(buf[0..name_len], f.name[0..name_len]);
+            if (firstDifference(buf[name_len..], @field(a, f.name), @field(b, f.name))) |rest| return buf[0 .. name_len + rest.len];
+        }
+    }
+    return null;
+}
 
 pub fn update(h: *Hasher, value: anytype) void {
     const T = @TypeOf(value);
