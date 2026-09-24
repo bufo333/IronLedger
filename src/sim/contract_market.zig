@@ -10,6 +10,7 @@ const planet = @import("../domain/planet.zig");
 const market = @import("../econ/market.zig");
 const logistics = @import("../econ/logistics.zig");
 const GameState = @import("state.zig").GameState;
+const treasury = @import("treasury.zig");
 const unit_mod = @import("../domain/unit.zig");
 const hq_mod = @import("../domain/hq.zig");
 const person_mod = @import("../domain/person.zig");
@@ -614,7 +615,7 @@ pub fn refreshCandidates(gs: *GameState) !void {
 /// The outfit's monthly running cost divided by its combat companies: what
 /// an employer reckons one company costs to keep in the field.
 pub fn perCompanyOpsCost(gs: *GameState) types.CBills {
-    const ops_cost = gs.monthlyPayroll() + gs.monthlyHullUpkeep() + maintenanceEstimate(gs);
+    const ops_cost = treasury.monthlyPayroll(gs) + treasury.monthlyHullUpkeep(gs) + maintenanceEstimate(gs);
     var companies: i64 = 0;
     var it = gs.forces.iterator();
     while (it.next()) |e| if (e.value_ptr.echelon == .company) {
@@ -895,7 +896,7 @@ test "offers are priced per company — a second company does not double every c
     try std.testing.expect(two < one);
     try std.testing.expect(two * 10 > one * 6);
     // The whole-outfit figure roughly doubles.
-    const whole = gs.monthlyPayroll() + gs.monthlyHullUpkeep() + maintenanceEstimate(&gs);
+    const whole = treasury.monthlyPayroll(&gs) + treasury.monthlyHullUpkeep(&gs) + maintenanceEstimate(&gs);
     try std.testing.expect(whole > @divTrunc(two * 18, 10));
 }
 

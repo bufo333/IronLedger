@@ -849,18 +849,6 @@ pub const GameState = struct {
         return c.costMultBp(kind);
     }
 
-    /// Monthly payroll for everyone assigned under one company's subtree.
-    pub fn companyMonthlyPayroll(self: *GameState, company_id: types.ForceId) types.CBills {
-        var total: types.CBills = 0;
-        var it = self.people.iterator();
-        while (it.next()) |entry| {
-            const p = entry.value_ptr;
-            if (!p.isOnBooks() or !self.personInCompany(p, company_id)) continue;
-            total += p.monthlySalary();
-        }
-        return total;
-    }
-
     /// Append a tagged, formatted entry (with the campaign date) to the log.
     pub fn log(self: *GameState, category: LogCategory, ctx: LogCtx, comptime fmt: []const u8, args: anytype) !void {
         var date_buf: [10]u8 = undefined;
@@ -1690,147 +1678,6 @@ pub const GameState = struct {
         return .none;
     }
 
-    /// The hangar ledger (ARCH §9.8): every hull bills, running or not.
-    /// The payday, the employer's cost reckoning and the forecast all read it.
-    pub fn monthlyHullUpkeep(self: *GameState) types.CBills {
-        var total: types.CBills = 0;
-        var it = self.units.iterator();
-        while (it.next()) |entry| total += entry.value_ptr.monthlyBill();
-        return total;
-    }
-
-    /// Sum of monthly salaries for everyone on the books (active or
-    /// wounded), after the paymaster's discount if the commander has one.
-    pub fn monthlyPayroll(self: *GameState) types.CBills {
-        var total: types.CBills = 0;
-        var it = self.people.iterator();
-        while (it.next()) |entry| {
-            const p = entry.value_ptr;
-            if (p.isOnBooks()) total += p.monthlySalary();
-        }
-        return types.applyBp(total, self.commanderMultBp(.payroll));
-    }
-
-    // ------------------------------------------------------- liquidation
-
-    /// What a hull fetches on a forced sale: half its value, scaled by
-    /// condition.
-    pub fn unitSaleValue(self: *GameState, u: *const unit_mod.Unit) types.CBills {
-        // A wreck is worth what can be stripped off it.
-        if (u.status == .destroyed) return self.stripValue(u);
-        const base: types.CBills = if (u.purchase_price > 0) u.purchase_price else if (chassis_mod.find(u.chassis_key)) |c| c.cost else 0;
-        const by_condition = @divTrunc(base * @as(types.CBills, u.conditionPct()) * tuning.unit.sale_bp, 10_000 * 100);
-        // Quality on the ticket: ± per step from C (A worst, F best).
-        const steps: i64 = @as(i64, @intFromEnum(u.quality)) - @intFromEnum(types.Quality.c);
-        return types.applyBp(by_condition, @intCast(10_000 + steps * tuning.maintenance.quality_sale_bp_per_step));
-    }
-
-    /// One line of what stripping a hull recovers.
-    pub const StripLine = struct { key: []const u8, qty: u32 };
-
-    /// What a hull yields stripped for parts (MekHQ "salvage unit"):
-    /// every intact weapon and piece of equipment, every intact structural
-    /// component, and the armour still on it. Ammunition bins and damaged
-    /// gear go with the scrap.
-    pub fn stripParts(self: *GameState, alloc: std.mem.Allocator, u: *const unit_mod.Unit) ![]StripLine {
-        _ = self;
-        var out: std.ArrayListUnmanaged(StripLine) = .empty;
-        for (u.slots.items) |s| {
-            if (s.condition != .ok) continue;
-            const key: []const u8 = switch (s.class) {
-                .weapon, .equipment => s.part_key,
-                .structure => part_mod.componentFor(s.slot_key, u.chassis_key),
-                .armor, .ammo => continue,
-            };
-            if (part_mod.find(key) == null) continue;
-            for (out.items) |*l| {
-                if (std.mem.eql(u8, l.key, key)) {
-                    l.qty += 1;
-                    break;
-                }
-            } else try out.append(alloc, .{ .key = key, .qty = 1 });
-        }
-        if (chassis_mod.find(u.chassis_key)) |design| {
-            const armor_tons: u32 = @as(u32, design.armor_half_tons) * u.armor_pct / 200;
-            if (armor_tons > 0) try out.append(alloc, .{ .key = "armor", .qty = armor_tons });
-        }
-        return out.toOwnedSlice(alloc);
-    }
-
-    /// Resale value of everything `stripParts` would recover.
-    pub fn stripValue(self: *GameState, u: *const unit_mod.Unit) types.CBills {
-        var buf: [4096]u8 = undefined;
-        var fba = std.heap.FixedBufferAllocator.init(&buf);
-        const lines = self.stripParts(fba.allocator(), u) catch return 0;
-        var total: types.CBills = 0;
-        for (lines) |l| total += self.stockSaleValue(l.key, l.qty);
-        return total;
-    }
-
-    /// What an HQ's facilities fetch: 40% of what they cost to build.
-    pub fn hqSaleValue(self: *GameState, h: *const hq_mod.Hq) types.CBills {
-        _ = self;
-        var total: types.CBills = 0;
-        for (h.facilities.items) |f| {
-            var lvl: u8 = 1;
-            while (lvl <= f.level) : (lvl += 1) total += hq_mod.upgradeCost(f.kind, lvl);
-        }
-        return @divTrunc(total * @as(types.CBills, tuning.hq.sale_pct), 100);
-    }
-
-    /// Resale value of `qty` of a stock line: market.stock_resale_bp
-    /// of catalogue cost, component_resale_bp for comp_* parts.
-    pub fn stockSaleValue(self: *GameState, key: []const u8, qty: u32) types.CBills {
-        _ = self;
-        const market = @import("../econ/market.zig");
-        const def = part_mod.find(key) orelse return 0;
-        const bp: types.Bp = if (part_mod.isComponent(key)) market.component_resale_bp else market.stock_resale_bp;
-        return types.applyBp(def.cost * qty, bp);
-    }
-
-    /// Nothing left covers the hole: funds, everything sellable and every
-    /// credit line together are below zero. The checklist warns on it and
-    /// the payday folds the outfit on it; one expression.
-    pub fn isInsolvent(self: *GameState) bool {
-        return self.funds + self.liquidationValue() + self.creditRemaining() < 0;
-    }
-
-    /// Everything the outfit could raise by selling hulls, stock and all
-    /// HQs but the first.
-    pub fn liquidationValue(self: *GameState) types.CBills {
-        var total: types.CBills = 0;
-        var uit = self.units.iterator();
-        while (uit.next()) |e| total += self.unitSaleValue(e.value_ptr);
-        var sit = self.spare_parts.iterator();
-        while (sit.next()) |e| total += self.stockSaleValue(e.key_ptr.*, e.value_ptr.*);
-        var hqs_it = self.hqs.iterator();
-        while (hqs_it.next()) |e| {
-            var st = e.value_ptr.stock.iterator();
-            while (st.next()) |line| total += self.stockSaleValue(line.key_ptr.*, line.value_ptr.*);
-        }
-        var first = true;
-        var hit = self.hqs.iterator();
-        while (hit.next()) |e| {
-            if (first) {
-                first = false;
-                continue;
-            }
-            total += self.hqSaleValue(e.value_ptr);
-        }
-        return total;
-    }
-
-    /// Lenders extend half the liquidation value plus a floor.
-    pub fn creditLimit(self: *GameState) types.CBills {
-        return types.applyBp(self.liquidationValue(), tuning.finance.credit_liquidation_bp) + tuning.finance.credit_floor;
-    }
-
-    pub fn creditRemaining(self: *GameState) types.CBills {
-        var owed: types.CBills = 0;
-        for (self.loans.items) |l| owed += l.balance;
-        return @max(0, self.creditLimit() - owed);
-    }
-
     /// The next engagement's id; never reused within a campaign.
     pub fn nextBattleId(self: *GameState) types.BattleId {
         const id: types.BattleId = @enumFromInt(self.next_battle_id);
@@ -2053,19 +1900,6 @@ test "auto-assign benches a spent pilot when a fresher one is free, keeps them w
     _ = try gs.autoAssign(co);
     try std.testing.expectEqual(fresh, gs.unit(mek).?.pilot);
     try std.testing.expect(gs.pilotSeat(worn) == .none);
-}
-
-test "quality moves the resale ticket" {
-    var gs = GameState.init(std.testing.allocator, .{ .seed = 1213 });
-    defer gs.deinit();
-    const uid = try gs.addUnit("SHD-2H");
-    const u = gs.unit(uid).?;
-    u.quality = .c;
-    const c = gs.unitSaleValue(u);
-    u.quality = .f;
-    try std.testing.expect(gs.unitSaleValue(u) > c);
-    u.quality = .a;
-    try std.testing.expect(gs.unitSaleValue(u) < c);
 }
 
 test "a worn or exotic hull wants more hours; a sharper tech needs fewer" {

@@ -31,7 +31,7 @@ src/sim/field_supply.zig: return std.math.divCeil(u32, mounts, mounts_per_ammo_t
 src/sim/queries.zig: const plan = commands.planLift(gs, company, false) catch return "";
 src/sim/rating.zig: const plan = commands.planLift(gs, f.id, false) catch continue;
 src/sim/state.zig: self.assignSlot(u.id, .pilot, p.id) catch continue;
-src/sim/state.zig: const lines = self.stripParts(fba.allocator(), u) catch return 0;
+src/sim/treasury.zig: const lines = stripParts(fba.allocator(), u) catch return 0;
 src/sim/tick.zig: const moved = (commands.execute(gs, .{ .trim_stock = sp.company }) catch Result{}).tons_moved;
 src/tui/app.zig: const hqs = q.hqList(self.a(), g) catch return 0;
 src/tui/music.zig: var sd = std.Io.Dir.cwd().openDir(self.io, sub_path, .{ .iterate = true }) catch continue;

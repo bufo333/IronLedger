@@ -22,7 +22,7 @@ Owner of every entry: the project owner.
 - **Scope:** every entry in `docs/verify-contract.baseline`. The ones that already change outcomes:
   - Rating and liquidation:
     - `rating.zig:157` (`planLift catch continue`)
-    - `state.zig:1835` (`stripParts catch return 0`)
+    - `treasury.stripValue` (`stripParts catch return 0`)
   - Hidden warnings and results:
     - `checklist.zig:95`
     - `tick.zig:127` (`trim_stock catch Result{}`)
@@ -63,7 +63,7 @@ Owner of every entry: the project owner.
 - **Scope:**
   - Every module and function listed in the ratchet below.
   - Three switches with more than ten substantive arms (an arm body past three lines), measured by the check that guards them: `contract_events.applyEffectsFor` (21), `app.listView` (19), `forces.handle` (19). Five more sit at the threshold without crossing it: `app.listEnter` and `app.handleModalKey` (10 each), `market.handle` (10), `app.drawModal` (9), `supply.handle` (7).
-  - About 90 `GameState` methods with subsystem behaviour: pricing, liquidation, staffing, hiring, founding, posture, TO&E, crew, tech time, lift, supply, refit, aftermath. (Hashing has moved to `digest.zig`; transfers, couriers and purchase debits to `treasury.zig`.)
+  - `GameState` methods with subsystem behaviour: staffing, hiring, founding, posture, TO&E, crew, tech time, lift, supply, refit, aftermath, and `commanderMultBp`. (Hashing has moved to `digest.zig`; transfers, couriers, purchase debits, payroll, upkeep, sale values, liquidation and credit to `treasury.zig`.)
   - Two layering violations: `state.zig:653` imports `rating.zig`, which imports `commands.zig`; `state.zig:1165` imports `field_supply.zig`.
   - The named atomic operations that rule 14 cites do not exist.
 - **Removal:** C4.
@@ -471,7 +471,7 @@ src/sim/contract_events.zig:applyEffectsFor 210
 src/sim/contract_events.zig:applyEffectsFor#switch 21
 src/sim/contract_market.zig:refresh 121
 src/sim/contract_market.zig:refreshBoard 203
-src/sim/queries.zig 6253
+src/sim/queries.zig 6252
 src/sim/queries.zig:afterAction 116
 src/sim/queries.zig:contracts 129
 src/sim/queries.zig:hqDetailView 113
@@ -481,7 +481,7 @@ src/sim/queries.zig:offerCandidates 108
 src/sim/queries.zig:stockTable 102
 src/sim/queries.zig:summary 141
 src/sim/rating.zig:report 133
-src/sim/state.zig 2137
+src/sim/state.zig 1971
 src/sim/tick.zig:runFinances 147
 src/tui/app.zig 4060
 src/tui/app.zig:drawModal 136
