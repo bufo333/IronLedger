@@ -34,7 +34,6 @@ Every Stage 12 feature (12, 12B–12G) has shipped.
 
 ## D12. TUI structure (contract rules 18-25)
 
-- [ ] `drawWizard` into per-step functions.
 - [ ] **One key table per screen** (rule 22): the footers are in `screen_table`; pane right-titles, modal titles, help rows and in-pane hints still carry their own key text; `docs/tui.md` key table generated or checked by the smoke.
 
 ## D13. Tests and CI (contract rules 37-40)
@@ -107,6 +106,7 @@ Contract deliverables closed before this list merged, all from the 2026-09-22 co
 - D22-4 `execute` is a dispatch, audit #20: the 1,099-line switch is one line per command; each of the 76 multi-line arms is a named `exec…` function taking that command's payload (`@FieldType(Command, …)`), in the switch's order; the longest function in commands.zig is 94 lines; a mechanical move, so the golden master holds
 - D22-5 `Store.load` is a sequence of decoders, audit #20: the 772-line function is 47 lines calling one `load<Table>` method per table (29 of them: `loadVersion` returns the saved schema version, `loadMeta` whether the seed is stored, the rest fill `GameState`), in the order it ran; a mechanical move: every round-trip test and the golden master hold, and a real v34 save loads, plays and reloads
 - D22-6 `Store.save` is a sequence of encoders, audit #20: the 484-line function is 39 lines (the transaction, `saveCampaignRow`, one `save<Table>` per table, COMMIT, then `campaign_id`); `loadBattleReport` reads its hit, ammo and salvage rows through `loadReportHits`, `loadReportAmmo` and `loadReportSalvage`; no function in store.zig passes 83 lines; round trips, the golden master and a real save hold. D22 is done
+- D12 wizard steps: `drawWizard` draws the title bar and dispatches to `drawWizardCommander`, `drawWizardOutfit`, `drawWizardCompany` and `drawWizardReview`, one per step
 
 ---
 

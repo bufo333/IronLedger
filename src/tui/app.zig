@@ -670,8 +670,6 @@ pub const App = struct {
     }
 
     fn drawWizard(self: *App) !void {
-        const al = self.a();
-        const s = &self.screen;
         var tbuf: [96]u8 = undefined;
         const title = std.fmt.bufPrint(&tbuf, "NEW CAMPAIGN · step {d} of 4 · {s}", .{ @intFromEnum(self.step) + 1, switch (self.step) {
             .commander => "Commander",
@@ -680,196 +678,211 @@ pub const App = struct {
             .review => "Review",
         } }) catch "NEW CAMPAIGN";
         self.titleBar(title, "");
-        const b = self.body();
         switch (self.step) {
-            .commander => {
-                var rows: std.ArrayListUnmanaged([]const u8) = .empty;
-                try rows.append(al, try std.fmt.allocPrint(al, "name        {s}{s}{s}{{/}}", .{ if (self.w_field == 0) "{s}" else "", self.w_name.slice(), if (self.w_field == 0) "_" else "" }));
-                try rows.append(al, "");
-                try rows.append(al, "faction of origin");
-                for (factions, 0..) |f, i| {
-                    const sel = self.w_field == 1 and i == self.w_faction;
-                    try rows.append(al, try std.fmt.allocPrint(al, "  {s}{s} {s: <24} {s}{{/}}", .{ if (sel) "{s}" else if (i == self.w_faction) "{a}" else "", if (i == self.w_faction) ">" else " ", f.fullName(), f.key() }));
-                }
-                try rows.append(al, "");
-                try rows.append(al, "profession");
-                for (professions, 0..) |p, i| {
-                    const sel = self.w_field == 2 and i == self.w_profession;
-                    try rows.append(al, try std.fmt.allocPrint(al, "  {s}{s} {s: <16} {s}{{/}}", .{ if (sel) "{s}" else if (i == self.w_profession) "{a}" else "", if (i == self.w_profession) ">" else " ", @tagName(p), p.description() }));
-                }
-                try rows.append(al, "");
-                try rows.append(al, "start year");
-                for (start_years, 0..) |y, i| {
-                    const sel = self.w_field == 3 and i == self.w_year;
-                    try rows.append(al, try std.fmt.allocPrint(al, "  {s}{s} {d}{s}{{/}}", .{ if (sel) "{s}" else if (i == self.w_year) "{a}" else "", if (i == self.w_year) ">" else " ", y, if (y == 3025) "  (the Succession Wars, TRO:3025)" else "" }));
-                }
-                const lw: u16 = @min(70, layout.minor.of(b.w));
-                _ = self.listPane(.{ .x = 0, .y = b.y, .w = lw, .h = b.h }, "COMMANDER", rows.items, 0, true, false);
-                var info: std.ArrayListUnmanaged([]const u8) = .empty;
-                try info.append(al, try std.fmt.allocPrint(al, "{{a}}{s}{{/}}", .{factions[self.w_faction].fullName()}));
-                try info.append(al, "Your starter HQ is placed on a world in this faction's space,");
-                try info.append(al, "weighted toward the marches where the work is. The first contract");
-                try info.append(al, "board leans to this faction's employers.");
-                try info.append(al, "");
-                try info.append(al, try std.fmt.allocPrint(al, "{{a}}{s}{{/}}", .{@tagName(professions[self.w_profession])}));
-                try info.append(al, try std.fmt.allocPrint(al, "{s} — for the life of the campaign.", .{professions[self.w_profession].description()}));
-                try info.append(al, "The edge is small by design: it tilts, it never carries.");
-                try info.append(al, "");
-                try info.append(al, try std.fmt.allocPrint(al, "{{a}}{d}{{/}}", .{start_years[self.w_year]}));
-                try info.append(al, "The market, the house tables and the salvage field only what is in");
-                try info.append(al, "service by this year; new designs are announced on New Year's Day.");
-                try info.append(al, "");
-                try info.append(al, "{d}the faction, profession and start year are permanent; names can change later{/}");
-                _ = self.listPane(.{ .x = lw + 1, .y = b.y, .w = b.w - lw - 1, .h = b.h }, "WHAT THIS MEANS", info.items, 1, false, false);
-                self.footer("[Tab] next field  [j/k] choose  [Enter] next step  [Esc] back to welcome");
-            },
-            .outfit => {
-                var rows: std.ArrayListUnmanaged([]const u8) = .empty;
-                try rows.append(al, try std.fmt.allocPrint(al, "outfit name      {s}{s}{s}{{/}}", .{ if (self.w_field == 0) "{s}" else "", self.w_outfit.slice(), if (self.w_field == 0) "_" else "" }));
-                try rows.append(al, try std.fmt.allocPrint(al, "first company    {s}{s}{s}{{/}}", .{ if (self.w_field == 1) "{s}" else "", self.w_company.slice(), if (self.w_field == 1) "_" else "" }));
-                try rows.append(al, "");
-                try rows.append(al, try std.fmt.allocPrint(al, "emblem source    {s}[h] presets{{/}}   {s}[l] import a picture{{/}}", .{ if (self.w_src == 0) (if (self.w_field == 2) "{s}" else "{a}") else "{d}", if (self.w_src == 1) (if (self.w_field == 2) "{s}" else "{a}") else "{d}" }));
-                try rows.append(al, "");
-                if (self.w_src == 1) {
-                    try rows.append(al, try std.fmt.allocPrint(al, "PNG files in {s}", .{try std.mem.join(al, ", ", self.asset_roots.logos)}));
-                    if (self.logos.len == 0) try rows.append(al, "  {d}none found — drop a .png in the project root or a logos/ directory{/}");
-                    for (self.logos, 0..) |name, i| {
-                        const sel = i == self.w_logo;
-                        try rows.append(al, try std.fmt.allocPrint(al, "  {s}{s} {s}{{/}}", .{ if (sel and self.w_field == 2) "{s}" else if (sel) "{a}" else "", if (sel) ">" else " ", name }));
-                    }
-                    try rows.append(al, "");
-                    try rows.append(al, try std.fmt.allocPrint(al, "display          {s}", .{switch (self.graphics) {
-                        .kitty => "{g}kitty graphics protocol{/} — the picture itself, placed over cells",
-                        .iterm2 => "{g}iTerm2 inline images{/} — the picture itself, re-sent each frame",
-                        .none => if (self.screen.truecolor) "{a}half-block colour{/} — two pixels per cell (no graphics protocol detected)" else "{a}256-colour half-blocks{/}",
-                    }}));
-                    if (self.w_preview) |*e| {
-                        try rows.append(al, try std.fmt.allocPrint(al, "loaded           {d} × {d} px · {d} KB", .{ e.img.width, e.img.height, e.bytes.len / 1024 }));
-                    } else if (self.logos.len > 0) {
-                        try rows.append(al, "{d}[j/k] pick a file · it previews on the right and is stored with the campaign{/}");
-                    }
-                }
-                for (0..3) |r| {
-                    if (self.w_src == 1) break;
-                    var line: std.ArrayListUnmanaged(u8) = .empty;
-                    try line.appendSlice(al, "  ");
-                    for (emblems, 0..) |e, i| {
-                        if (i == self.w_emblem) try line.appendSlice(al, "{a}");
-                        try line.appendSlice(al, e.art[r]);
-                        if (i == self.w_emblem) try line.appendSlice(al, "{/}");
-                        try line.appendSlice(al, "   ");
-                    }
-                    try rows.append(al, try line.toOwnedSlice(al));
-                }
-                if (self.w_src == 0) {
-                    var names: std.ArrayListUnmanaged(u8) = .empty;
-                    try names.appendSlice(al, "  ");
-                    for (emblems, 0..) |e, i| {
-                        try names.appendSlice(al, if (i == self.w_emblem) "{a}" else "{d}");
-                        try names.appendSlice(al, try std.fmt.allocPrint(al, "{s: <11}", .{e.name}));
-                        try names.appendSlice(al, "{/}");
-                    }
-                    try rows.append(al, try names.toOwnedSlice(al));
-                    try rows.append(al, "  {d}[j/k] choose a preset{/}");
-                }
-                const lw: u16 = if (layout.wide(b.w)) layout.half.of(b.w) else b.w;
-                _ = self.listPane(.{ .x = 0, .y = b.y, .w = lw, .h = b.h }, "OUTFIT", rows.items, 0, true, false);
-                if (lw < b.w) {
-                    const inner = self.screen.pane(.{ .x = lw, .y = b.y, .w = b.w - lw, .h = b.h }, .{ .title = "PREVIEW" });
-                    if (!self.drawEmblem(inner)) {
-                        const hint = [_][]const u8{ "", "  {d}pick a picture to preview it here{/}" };
-                        self.screen.lines(inner, &hint, 0, null);
-                    }
-                }
-                self.footer("[Tab] next field  [h/l] source  [j/k] choose  [Enter] next step  [Esc] back");
-            },
-            .company => {
-                if (self.gs) |*g| {
-                    const rows = try q.toe(al, g);
-                    var texts: std.ArrayListUnmanaged([]const u8) = .empty;
-                    for (rows) |r| try texts.append(al, r.text);
-                    // Wide: the office sits beside the TO&E. Narrow: it takes
-                    // the bottom band, so +/- are never blind.
-                    const wide = layout.wide(b.w);
-                    const lw: u16 = if (wide) layout.major.of(b.w) else b.w;
-                    const oh: u16 = @min(b.h, 12);
-                    const toe_h: u16 = if (wide) b.h else b.h -| oh;
-                    self.listPane(.{ .x = 0, .y = b.y, .w = lw, .h = toe_h }, "GENERATED COMPANY", texts.items, 0, self.w_field == 0, true);
-                    {
-                        const hq_id = q.firstHq(g);
-                        var office: std.ArrayListUnmanaged([]const u8) = .empty;
-                        try office.append(al, "role               have   need   payroll/mo   effect");
-                        for (try q.backOffice(al, g, hq_id), 0..) |desk, i| {
-                            const short = desk.have < desk.need;
-                            try office.append(al, try std.fmt.allocPrint(al, "{s}{s: <18} {d: >4}   {d: >4}   {s: >10}   {s}{{/}}", .{
-                                if (self.w_field == 1 and i == self.w_office) "{s}" else if (short) "{c}" else "",
-                                @tagName(desk.role),
-                                desk.have,
-                                desk.need,
-                                try q.money(al, desk.pay),
-                                desk.effect,
-                            }));
-                        }
-                        const st = try q.status(al, g);
-                        const hqs = try q.hqList(al, g);
-                        try office.append(al, "");
-                        try office.append(al, try std.fmt.allocPrint(al, "staff {d} / {d} required · payroll {s}/mo · treasury {{a}}{s}{{/}} C", .{ if (hqs.len > 0) hqs[0].staff_assigned else 0, if (hqs.len > 0) hqs[0].staff_required else 0, st.payroll, st.funds }));
-                        try office.append(al, "{d}under-hiring is allowed: facilities run a level lower and paperwork slows{/}");
-                        try office.append(al, "{d}[Tab] focus · [j/k] role · [-] fewer · [+] more{/}");
-                        const office_rect: Rect = if (wide) .{ .x = lw + 1, .y = b.y, .w = b.w - lw - 1, .h = oh } else .{ .x = 0, .y = b.y + toe_h, .w = b.w, .h = oh };
-                        self.listPane(office_rect, "BACK OFFICE", office.items, 1, self.w_field == 1, false);
-                        if (wide and b.h > oh + 3) {
-                            const detail = try q.hqDetail(al, g, hq_id);
-                            self.listPane(.{ .x = lw + 1, .y = b.y + oh, .w = b.w - lw - 1, .h = b.h - oh }, try std.fmt.allocPrint(al, "starter HQ · {s}", .{try q.hqName(self.a(), g, hq_id)}), detail, 2, false, false);
-                        }
-                    }
-                }
-                self.footer("[r] reroll (new seed)  [Tab] company / back office  [-/+] adjust headcount  [Enter] next step  [Esc] back");
-            },
-            .review => {
-                var rows: std.ArrayListUnmanaged([]const u8) = .empty;
-                const has_picture = self.w_src == 1 and self.w_preview != null;
-                if (self.gs) |*g| {
-                    const st = try q.status(al, g);
-                    const e = emblems[self.w_emblem];
-                    const pad_art = "        ";
-                    try rows.append(al, try std.fmt.allocPrint(al, "{s}   {{a}}{s}{{/}}", .{ if (has_picture) pad_art else e.art[0], self.w_outfit.slice() }));
-                    try rows.append(al, try std.fmt.allocPrint(al, "{s}   {s} · {s} · {s} ({s})", .{ if (has_picture) pad_art else e.art[1], self.w_name.slice(), factions[self.w_faction].fullName(), @tagName(professions[self.w_profession]), professions[self.w_profession].description() }));
-                    try rows.append(al, try std.fmt.allocPrint(al, "{s}   {{d}}{s} · day 0{{/}}", .{ if (has_picture) pad_art else e.art[2], st.date }));
-                    try rows.append(al, "");
-                    for (try q.hqList(al, g)) |h| {
-                        try rows.append(al, try std.fmt.allocPrint(al, "starter HQ    {{a}}{s}{{/}} on {s} · {s} · ring {d} LY · staff {d}/{d}", .{ h.name, h.world, h.tier, h.ring_ly, h.staff_assigned, h.staff_required }));
-                    }
-                    try rows.append(al, try std.fmt.allocPrint(al, "company       {s} · {d} hulls · {d} people", .{ self.w_company.slice(), st.hulls, st.people }));
-                    {
-                        // The back office as sized in step 3.
-                        var line: std.ArrayListUnmanaged(u8) = .empty;
-                        var pay: types.CBills = 0;
-                        try line.appendSlice(al, "back office   ");
-                        for (try q.backOffice(al, g, q.firstHq(g)), 0..) |desk, i| {
-                            pay += desk.pay;
-                            if (i > 0) try line.appendSlice(al, " · ");
-                            try line.appendSlice(al, try std.fmt.allocPrint(al, "{d} {s}", .{ desk.have, @tagName(desk.role)[6..] }));
-                        }
-                        try line.appendSlice(al, try std.fmt.allocPrint(al, " · {s}/mo", .{try q.money(al, pay)}));
-                        try rows.append(al, line.items);
-                    }
-                    try rows.append(al, try std.fmt.allocPrint(al, "treasury      outfit {{a}}{s}{{/}} C", .{st.funds}));
-                    try rows.append(al, try std.fmt.allocPrint(al, "first board   {d} offers within the ring on day 1", .{st.offers}));
-                    try rows.append(al, "");
-                    try rows.append(al, "{s} [Enter] begin campaign {/}   {d}saves under the current player and opens the Desk on day 0{/}");
-                }
-                const rw: u16 = if (has_picture and layout.wide(b.w)) layout.two_thirds.of(b.w) else b.w;
-                _ = self.listPane(.{ .x = 0, .y = b.y, .w = rw, .h = b.h }, "REVIEW", rows.items, 0, true, false);
-                if (rw < b.w) {
-                    const inner = self.screen.pane(.{ .x = rw, .y = b.y, .w = b.w - rw, .h = b.h }, .{ .title = "EMBLEM" });
-                    _ = self.drawEmblem(inner);
-                }
-                self.footer("[Enter] begin campaign  [1-3] back to a step  [Esc] discard");
-            },
+            .commander => try self.drawWizardCommander(),
+            .outfit => try self.drawWizardOutfit(),
+            .company => try self.drawWizardCompany(),
+            .review => try self.drawWizardReview(),
         }
-        _ = s;
     }
+
+    fn drawWizardCommander(self: *App) !void {
+        const al = self.a();
+        const b = self.body();
+        var rows: std.ArrayListUnmanaged([]const u8) = .empty;
+        try rows.append(al, try std.fmt.allocPrint(al, "name        {s}{s}{s}{{/}}", .{ if (self.w_field == 0) "{s}" else "", self.w_name.slice(), if (self.w_field == 0) "_" else "" }));
+        try rows.append(al, "");
+        try rows.append(al, "faction of origin");
+        for (factions, 0..) |f, i| {
+            const sel = self.w_field == 1 and i == self.w_faction;
+            try rows.append(al, try std.fmt.allocPrint(al, "  {s}{s} {s: <24} {s}{{/}}", .{ if (sel) "{s}" else if (i == self.w_faction) "{a}" else "", if (i == self.w_faction) ">" else " ", f.fullName(), f.key() }));
+        }
+        try rows.append(al, "");
+        try rows.append(al, "profession");
+        for (professions, 0..) |p, i| {
+            const sel = self.w_field == 2 and i == self.w_profession;
+            try rows.append(al, try std.fmt.allocPrint(al, "  {s}{s} {s: <16} {s}{{/}}", .{ if (sel) "{s}" else if (i == self.w_profession) "{a}" else "", if (i == self.w_profession) ">" else " ", @tagName(p), p.description() }));
+        }
+        try rows.append(al, "");
+        try rows.append(al, "start year");
+        for (start_years, 0..) |y, i| {
+            const sel = self.w_field == 3 and i == self.w_year;
+            try rows.append(al, try std.fmt.allocPrint(al, "  {s}{s} {d}{s}{{/}}", .{ if (sel) "{s}" else if (i == self.w_year) "{a}" else "", if (i == self.w_year) ">" else " ", y, if (y == 3025) "  (the Succession Wars, TRO:3025)" else "" }));
+        }
+        const lw: u16 = @min(70, layout.minor.of(b.w));
+        _ = self.listPane(.{ .x = 0, .y = b.y, .w = lw, .h = b.h }, "COMMANDER", rows.items, 0, true, false);
+        var info: std.ArrayListUnmanaged([]const u8) = .empty;
+        try info.append(al, try std.fmt.allocPrint(al, "{{a}}{s}{{/}}", .{factions[self.w_faction].fullName()}));
+        try info.append(al, "Your starter HQ is placed on a world in this faction's space,");
+        try info.append(al, "weighted toward the marches where the work is. The first contract");
+        try info.append(al, "board leans to this faction's employers.");
+        try info.append(al, "");
+        try info.append(al, try std.fmt.allocPrint(al, "{{a}}{s}{{/}}", .{@tagName(professions[self.w_profession])}));
+        try info.append(al, try std.fmt.allocPrint(al, "{s} — for the life of the campaign.", .{professions[self.w_profession].description()}));
+        try info.append(al, "The edge is small by design: it tilts, it never carries.");
+        try info.append(al, "");
+        try info.append(al, try std.fmt.allocPrint(al, "{{a}}{d}{{/}}", .{start_years[self.w_year]}));
+        try info.append(al, "The market, the house tables and the salvage field only what is in");
+        try info.append(al, "service by this year; new designs are announced on New Year's Day.");
+        try info.append(al, "");
+        try info.append(al, "{d}the faction, profession and start year are permanent; names can change later{/}");
+        _ = self.listPane(.{ .x = lw + 1, .y = b.y, .w = b.w - lw - 1, .h = b.h }, "WHAT THIS MEANS", info.items, 1, false, false);
+        self.footer("[Tab] next field  [j/k] choose  [Enter] next step  [Esc] back to welcome");
+    }
+
+    fn drawWizardOutfit(self: *App) !void {
+        const al = self.a();
+        const b = self.body();
+        var rows: std.ArrayListUnmanaged([]const u8) = .empty;
+        try rows.append(al, try std.fmt.allocPrint(al, "outfit name      {s}{s}{s}{{/}}", .{ if (self.w_field == 0) "{s}" else "", self.w_outfit.slice(), if (self.w_field == 0) "_" else "" }));
+        try rows.append(al, try std.fmt.allocPrint(al, "first company    {s}{s}{s}{{/}}", .{ if (self.w_field == 1) "{s}" else "", self.w_company.slice(), if (self.w_field == 1) "_" else "" }));
+        try rows.append(al, "");
+        try rows.append(al, try std.fmt.allocPrint(al, "emblem source    {s}[h] presets{{/}}   {s}[l] import a picture{{/}}", .{ if (self.w_src == 0) (if (self.w_field == 2) "{s}" else "{a}") else "{d}", if (self.w_src == 1) (if (self.w_field == 2) "{s}" else "{a}") else "{d}" }));
+        try rows.append(al, "");
+        if (self.w_src == 1) {
+            try rows.append(al, try std.fmt.allocPrint(al, "PNG files in {s}", .{try std.mem.join(al, ", ", self.asset_roots.logos)}));
+            if (self.logos.len == 0) try rows.append(al, "  {d}none found — drop a .png in the project root or a logos/ directory{/}");
+            for (self.logos, 0..) |name, i| {
+                const sel = i == self.w_logo;
+                try rows.append(al, try std.fmt.allocPrint(al, "  {s}{s} {s}{{/}}", .{ if (sel and self.w_field == 2) "{s}" else if (sel) "{a}" else "", if (sel) ">" else " ", name }));
+            }
+            try rows.append(al, "");
+            try rows.append(al, try std.fmt.allocPrint(al, "display          {s}", .{switch (self.graphics) {
+                .kitty => "{g}kitty graphics protocol{/} — the picture itself, placed over cells",
+                .iterm2 => "{g}iTerm2 inline images{/} — the picture itself, re-sent each frame",
+                .none => if (self.screen.truecolor) "{a}half-block colour{/} — two pixels per cell (no graphics protocol detected)" else "{a}256-colour half-blocks{/}",
+            }}));
+            if (self.w_preview) |*e| {
+                try rows.append(al, try std.fmt.allocPrint(al, "loaded           {d} × {d} px · {d} KB", .{ e.img.width, e.img.height, e.bytes.len / 1024 }));
+            } else if (self.logos.len > 0) {
+                try rows.append(al, "{d}[j/k] pick a file · it previews on the right and is stored with the campaign{/}");
+            }
+        }
+        for (0..3) |r| {
+            if (self.w_src == 1) break;
+            var line: std.ArrayListUnmanaged(u8) = .empty;
+            try line.appendSlice(al, "  ");
+            for (emblems, 0..) |e, i| {
+                if (i == self.w_emblem) try line.appendSlice(al, "{a}");
+                try line.appendSlice(al, e.art[r]);
+                if (i == self.w_emblem) try line.appendSlice(al, "{/}");
+                try line.appendSlice(al, "   ");
+            }
+            try rows.append(al, try line.toOwnedSlice(al));
+        }
+        if (self.w_src == 0) {
+            var names: std.ArrayListUnmanaged(u8) = .empty;
+            try names.appendSlice(al, "  ");
+            for (emblems, 0..) |e, i| {
+                try names.appendSlice(al, if (i == self.w_emblem) "{a}" else "{d}");
+                try names.appendSlice(al, try std.fmt.allocPrint(al, "{s: <11}", .{e.name}));
+                try names.appendSlice(al, "{/}");
+            }
+            try rows.append(al, try names.toOwnedSlice(al));
+            try rows.append(al, "  {d}[j/k] choose a preset{/}");
+        }
+        const lw: u16 = if (layout.wide(b.w)) layout.half.of(b.w) else b.w;
+        _ = self.listPane(.{ .x = 0, .y = b.y, .w = lw, .h = b.h }, "OUTFIT", rows.items, 0, true, false);
+        if (lw < b.w) {
+            const inner = self.screen.pane(.{ .x = lw, .y = b.y, .w = b.w - lw, .h = b.h }, .{ .title = "PREVIEW" });
+            if (!self.drawEmblem(inner)) {
+                const hint = [_][]const u8{ "", "  {d}pick a picture to preview it here{/}" };
+                self.screen.lines(inner, &hint, 0, null);
+            }
+        }
+        self.footer("[Tab] next field  [h/l] source  [j/k] choose  [Enter] next step  [Esc] back");
+    }
+
+    fn drawWizardCompany(self: *App) !void {
+        const al = self.a();
+        const b = self.body();
+        if (self.gs) |*g| {
+            const rows = try q.toe(al, g);
+            var texts: std.ArrayListUnmanaged([]const u8) = .empty;
+            for (rows) |r| try texts.append(al, r.text);
+            // Wide: the office sits beside the TO&E. Narrow: it takes
+            // the bottom band, so +/- are never blind.
+            const wide = layout.wide(b.w);
+            const lw: u16 = if (wide) layout.major.of(b.w) else b.w;
+            const oh: u16 = @min(b.h, 12);
+            const toe_h: u16 = if (wide) b.h else b.h -| oh;
+            self.listPane(.{ .x = 0, .y = b.y, .w = lw, .h = toe_h }, "GENERATED COMPANY", texts.items, 0, self.w_field == 0, true);
+            {
+                const hq_id = q.firstHq(g);
+                var office: std.ArrayListUnmanaged([]const u8) = .empty;
+                try office.append(al, "role               have   need   payroll/mo   effect");
+                for (try q.backOffice(al, g, hq_id), 0..) |desk, i| {
+                    const short = desk.have < desk.need;
+                    try office.append(al, try std.fmt.allocPrint(al, "{s}{s: <18} {d: >4}   {d: >4}   {s: >10}   {s}{{/}}", .{
+                        if (self.w_field == 1 and i == self.w_office) "{s}" else if (short) "{c}" else "",
+                        @tagName(desk.role),
+                        desk.have,
+                        desk.need,
+                        try q.money(al, desk.pay),
+                        desk.effect,
+                    }));
+                }
+                const st = try q.status(al, g);
+                const hqs = try q.hqList(al, g);
+                try office.append(al, "");
+                try office.append(al, try std.fmt.allocPrint(al, "staff {d} / {d} required · payroll {s}/mo · treasury {{a}}{s}{{/}} C", .{ if (hqs.len > 0) hqs[0].staff_assigned else 0, if (hqs.len > 0) hqs[0].staff_required else 0, st.payroll, st.funds }));
+                try office.append(al, "{d}under-hiring is allowed: facilities run a level lower and paperwork slows{/}");
+                try office.append(al, "{d}[Tab] focus · [j/k] role · [-] fewer · [+] more{/}");
+                const office_rect: Rect = if (wide) .{ .x = lw + 1, .y = b.y, .w = b.w - lw - 1, .h = oh } else .{ .x = 0, .y = b.y + toe_h, .w = b.w, .h = oh };
+                self.listPane(office_rect, "BACK OFFICE", office.items, 1, self.w_field == 1, false);
+                if (wide and b.h > oh + 3) {
+                    const detail = try q.hqDetail(al, g, hq_id);
+                    self.listPane(.{ .x = lw + 1, .y = b.y + oh, .w = b.w - lw - 1, .h = b.h - oh }, try std.fmt.allocPrint(al, "starter HQ · {s}", .{try q.hqName(self.a(), g, hq_id)}), detail, 2, false, false);
+                }
+            }
+        }
+        self.footer("[r] reroll (new seed)  [Tab] company / back office  [-/+] adjust headcount  [Enter] next step  [Esc] back");
+    }
+
+    fn drawWizardReview(self: *App) !void {
+        const al = self.a();
+        const b = self.body();
+        var rows: std.ArrayListUnmanaged([]const u8) = .empty;
+        const has_picture = self.w_src == 1 and self.w_preview != null;
+        if (self.gs) |*g| {
+            const st = try q.status(al, g);
+            const e = emblems[self.w_emblem];
+            const pad_art = "        ";
+            try rows.append(al, try std.fmt.allocPrint(al, "{s}   {{a}}{s}{{/}}", .{ if (has_picture) pad_art else e.art[0], self.w_outfit.slice() }));
+            try rows.append(al, try std.fmt.allocPrint(al, "{s}   {s} · {s} · {s} ({s})", .{ if (has_picture) pad_art else e.art[1], self.w_name.slice(), factions[self.w_faction].fullName(), @tagName(professions[self.w_profession]), professions[self.w_profession].description() }));
+            try rows.append(al, try std.fmt.allocPrint(al, "{s}   {{d}}{s} · day 0{{/}}", .{ if (has_picture) pad_art else e.art[2], st.date }));
+            try rows.append(al, "");
+            for (try q.hqList(al, g)) |h| {
+                try rows.append(al, try std.fmt.allocPrint(al, "starter HQ    {{a}}{s}{{/}} on {s} · {s} · ring {d} LY · staff {d}/{d}", .{ h.name, h.world, h.tier, h.ring_ly, h.staff_assigned, h.staff_required }));
+            }
+            try rows.append(al, try std.fmt.allocPrint(al, "company       {s} · {d} hulls · {d} people", .{ self.w_company.slice(), st.hulls, st.people }));
+            {
+                // The back office as sized in step 3.
+                var line: std.ArrayListUnmanaged(u8) = .empty;
+                var pay: types.CBills = 0;
+                try line.appendSlice(al, "back office   ");
+                for (try q.backOffice(al, g, q.firstHq(g)), 0..) |desk, i| {
+                    pay += desk.pay;
+                    if (i > 0) try line.appendSlice(al, " · ");
+                    try line.appendSlice(al, try std.fmt.allocPrint(al, "{d} {s}", .{ desk.have, @tagName(desk.role)[6..] }));
+                }
+                try line.appendSlice(al, try std.fmt.allocPrint(al, " · {s}/mo", .{try q.money(al, pay)}));
+                try rows.append(al, line.items);
+            }
+            try rows.append(al, try std.fmt.allocPrint(al, "treasury      outfit {{a}}{s}{{/}} C", .{st.funds}));
+            try rows.append(al, try std.fmt.allocPrint(al, "first board   {d} offers within the ring on day 1", .{st.offers}));
+            try rows.append(al, "");
+            try rows.append(al, "{s} [Enter] begin campaign {/}   {d}saves under the current player and opens the Desk on day 0{/}");
+        }
+        const rw: u16 = if (has_picture and layout.wide(b.w)) layout.two_thirds.of(b.w) else b.w;
+        _ = self.listPane(.{ .x = 0, .y = b.y, .w = rw, .h = b.h }, "REVIEW", rows.items, 0, true, false);
+        if (rw < b.w) {
+            const inner = self.screen.pane(.{ .x = rw, .y = b.y, .w = b.w - rw, .h = b.h }, .{ .title = "EMBLEM" });
+            _ = self.drawEmblem(inner);
+        }
+        self.footer("[Enter] begin campaign  [1-3] back to a step  [Esc] discard");
+    }
+
 
     // ---- game ----
 
