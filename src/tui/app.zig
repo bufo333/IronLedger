@@ -1477,7 +1477,13 @@ pub const App = struct {
     }
 
     fn loadCampaign(self: *App, id: i64) !void {
-        const loaded = try self.store.load(self.gpa, id);
+        const loaded = self.store.load(self.gpa, id) catch |err| switch (err) {
+            error.OutOfMemory => return err,
+            else => {
+                self.say(.crit, "load failed: {s}", .{game.cli.errorText(err)});
+                return;
+            },
+        };
         if (self.gs) |*g| game.lobby.discard(g);
         self.gs = loaded;
         self.mode = .game;

@@ -41,13 +41,17 @@ Done: every Stage 12 feature (12, 12B–12G) has shipped. Part 2 is next.
 
 - [ ] Still uncovered by the smoke: the GAME OVER modal (a fresh campaign starts solvent, so reaching it needs a saved campaign already past all credit as a test fixture; bankruptcy itself stays terminal by design), the exact 120-column layout boundary, and the refusal branch of each confirm once run (they open and close only).
 
-## D15. Save identity and corruption (audit #4, #5, #13, #14, #18; rules 1, 27)
+## D15. Save integrity (audit #4, #5, #13, #14, #18; rules 1, 27)
 
-- [ ] First save keeps the inserted campaign ID local and assigns `gs.campaign_id` after COMMIT (store.zig:336-345, 806); the UPDATE path fails when no row changed.
-- [ ] `load` returns `error.NoSuchCampaign` when the campaign row is missing (store.zig:847-853); the REPL `load <n>` prints the refusal.
+Landing as three increments; D15a is done (see Done).
+
+**D15b. Loading fails closed (#13).**
 - [ ] Checked integer readers (`st.u32(col)` etc. returning `CorruptSave`) replace the 61 `@intCast(st.int(...))` sites and `toId` (store.zig:1700-1702).
 - [ ] Missing parent rows and unknown enum values reject the load instead of `orelse continue` / `orelse .default` (store.zig ~866, ~909, 964-987, 1087-1095, 1120-1128, 1341, 1419-1455).
+
+**D15c. RNG persisted per stream (#18).**
 - [ ] RNG saved one row per named stream plus the campaign seed; a stream absent from an older save is seeded from the campaign seed; a malformed row is `CorruptSave` (store.zig:385, 893-900). Adding a stream no longer reseeds old saves to 3025.
+
 - Note (#14): SQL-level foreign keys wait for a schema change that rebuilds tables anyway; the loader is the integrity check.
 
 ## D16. Battle and medical rule bugs (audit #7, #8, #9, #10, #11; rules 5, 6)
@@ -118,6 +122,7 @@ Contract deliverables closed before this list merged, all from the 2026-09-22 co
 
 - D0 one rule for structural needs (PR #3) · D1 the contract itself (PR #4) · D2 layering and core purity (PR #5) · D3 entity predicates (PR #6) · D4 one computation, one function (PR #7) · D5 ledgers (PR #8) · D6 numbers appear once (PRs #9, #10, #20) · D7 formatting helpers (PR #11) · D8 commands leave state consistent (PR #12) · D9 rules move out of queries (PR #13) · D10 REPL printers as query loops (PR #14) · D11 TUI boundary (PR #15) · D12a–c TUI structure (PRs #16, #17, #19, #22) · D13 tests and CI (PR #21, one item left above)
 - D14 gameplay corruption, audit #1–#3 (PR #53): black-market fraud returns no hull instead of `next_unit_id - 1`; refit demand is counted per part before any is taken; `next_battle_id` is saved and resumed past every referenced battle
+- D15a save identity, audit #4–#5 (PR #54): a first save sets `campaign_id` only after COMMIT; saving over a missing campaign row and loading an unknown id both return `NoSuchCampaign`; the TUI and REPL print `cli.errorText` for save errors
 
 ---
 

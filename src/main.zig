@@ -503,7 +503,7 @@ fn runRepl(gs: *game.state.GameState, io: std.Io, gpa: std.mem.Allocator, store_
 
         if (std.mem.eql(u8, verb, "save")) {
             lobby.save(gs, 0) catch |err| {
-                std.debug.print("save failed: {s}\n", .{@errorName(err)});
+                std.debug.print("save failed: {s}\n", .{game.cli.errorText(err)});
                 continue;
             };
             const st = try q.status(al, gs);
@@ -516,7 +516,7 @@ fn runRepl(gs: *game.state.GameState, io: std.Io, gpa: std.mem.Allocator, store_
                 continue;
             };
             const loaded = lobby.load(gpa, id) catch |err| {
-                std.debug.print("load failed: {s}\n", .{@errorName(err)});
+                std.debug.print("load failed: {s}\n", .{game.cli.errorText(err)});
                 continue;
             };
             game.lobby.discard(gs);

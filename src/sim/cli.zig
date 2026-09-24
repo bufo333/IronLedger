@@ -423,6 +423,9 @@ pub const hull_fraud_text = "the black-market fence vanished with the money — 
 
 pub fn errorText(err: anyerror) []const u8 {
     return switch (err) {
+        error.NoSuchCampaign => "no saved campaign has that id — `campaigns` lists them",
+        error.SaveNewerThanGame, error.StoreNewerThanGame => "that save was written by a newer version of the game",
+        error.CorruptSave => "that save is damaged and cannot be loaded",
         error.InsufficientTreasury => "not enough money in that treasury — transfer funds first",
         error.AlreadyHome => "that company is already home",
         error.UnderContract => "that company is under contract — recall from the Contracts screen (R there) to accept the breach clause",
