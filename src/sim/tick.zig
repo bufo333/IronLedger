@@ -30,7 +30,7 @@ const field_supply = @import("field_supply.zig");
 /// several turns.
 pub fn advanceDay(gs: *GameState) !void {
     gs.clock.advance();
-    gs.refreshHqStaffing(); // the back office is people
+    hq_ops.refreshHqStaffing(gs); // the back office is people
 
     // Phase order per clock.DayPhase.
     if (gs.clock.day_index % 7 == 0) network.resetWeeklyThroughput(gs); // links' week

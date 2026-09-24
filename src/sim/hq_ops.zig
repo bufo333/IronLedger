@@ -15,6 +15,64 @@ const person_mod = @import("../domain/person.zig");
 const state_mod = @import("state.zig");
 const GameState = state_mod.GameState;
 
+// ----------------------------------------------------- the back office
+
+/// Posted admins of one role at an HQ: how many, and the best skill.
+pub const StaffSummary = struct { count: u32 = 0, best_skill: u8 = 7 };
+
+/// Posted admins of one role at an HQ: how many, and the best of them.
+pub fn hqStaff(gs: *GameState, hq_id: types.HqId, role: person_mod.Role) StaffSummary {
+    var s: StaffSummary = .{};
+    var it = gs.people.iterator();
+    while (it.next()) |entry| {
+        const p = entry.value_ptr;
+        if (p.status != .active or p.posted_hq != hq_id or p.role != role) continue;
+        s.count += 1;
+        s.best_skill = @min(s.best_skill, p.skill(.admin) orelse 7);
+    }
+    return s;
+}
+
+/// Recompute every HQ's `staff_assigned` from real postings (derived
+/// state, rebuilt after every posting change and on load).
+pub fn refreshHqStaffing(gs: *GameState) void {
+    var hit = gs.hqs.iterator();
+    while (hit.next()) |entry| entry.value_ptr.staff_assigned = 0;
+    var it = gs.people.iterator();
+    while (it.next()) |entry| {
+        const p = entry.value_ptr;
+        if (p.status != .active or p.posted_hq == .none) continue;
+        if (gs.hqs.getPtr(p.posted_hq)) |h| h.staff_assigned += 1;
+    }
+}
+
+/// Recruit and post admins until an HQ meets its staffing requirement (the
+/// convenience path; the hiring hall is the considered one). Returns how
+/// many were hired.
+pub fn staffHqToRequirement(gs: *GameState, hq_id: types.HqId) !u32 {
+    const hq = gs.hqs.getPtr(hq_id) orelse return error.UnknownHq;
+    const req = hq.staffRequired();
+    var hired: u32 = 0;
+    const plan = [_]struct { person_mod.Role, u32 }{
+        .{ .admin_command, req.admin },
+        .{ .admin_logistics, req.logistics / 2 },
+        .{ .admin_transport, req.logistics - req.logistics / 2 },
+        .{ .admin_hr, req.hr },
+        .{ .admin_finance, req.finance },
+    };
+    for (plan) |entry| {
+        const have = hqStaff(gs, hq_id, entry[0]).count;
+        var n: u32 = entry[1] -| have;
+        while (n > 0) : (n -= 1) {
+            const pid = try @import("personnel.zig").recruitGenerated(gs, entry[0], hq_id, .market);
+            gs.person(pid).?.posted_hq = hq_id;
+            hired += 1;
+        }
+    }
+    refreshHqStaffing(gs);
+    return hired;
+}
+
 /// Work slots a mek bay grants.
 pub fn baySlots(gs: *GameState, hq_id: types.HqId) u32 {
     const hq = gs.hqs.getPtr(hq_id) orelse return 0;
@@ -61,7 +119,7 @@ pub fn hasJobForUnit(gs: *GameState, unit_id: types.UnitId) bool {
 
 /// Paperwork lead time at this HQ: command admins push permits through.
 pub fn paperworkDaysFor(gs: *GameState, hq_id: types.HqId) u32 {
-    const cmd = gs.hqStaff(hq_id, .admin_command);
+    const cmd = hqStaff(gs, hq_id, .admin_command);
     return hq_mod.paperworkDays(@min(cmd.count, 5));
 }
 

@@ -11,6 +11,7 @@ const tuning = @import("../domain/tuning.zig").t;
 const types = @import("../domain/types.zig");
 const person_mod = @import("../domain/person.zig");
 const GameState = @import("state.zig").GameState;
+const hq_ops = @import("hq_ops.zig");
 
 /// Days of training to improve a skill one step.
 pub const training_days = tuning.medical.training_days;
@@ -19,7 +20,7 @@ pub const training_days = tuning.medical.training_days;
 /// down to `training_min_days`.
 pub fn trainingDaysFor(gs: *GameState, hq_id: types.HqId) u32 {
     if (gs.hqs.getPtr(hq_id) == null) return training_days;
-    const hr = gs.hqStaff(hq_id, .admin_hr);
+    const hr = hq_ops.hqStaff(gs, hq_id, .admin_hr);
     return @max(tuning.medical.training_min_days, training_days -| tuning.medical.training_days_per_hr_staff * hr.count);
 }
 
@@ -375,7 +376,7 @@ pub fn runWeeklyRest(gs: *GameState) !void {
             const home = gs.homeHqOf(p);
             const mess: u8 = if (gs.hqs.getPtr(home)) |h| h.effectiveFacilityLevel(.mess) else 0;
             const decay: u32 = @intCast(types.applyBp(person_mod.fatigueDecayPerWeek(mess), gs.commanderMultBp(.fatigue_recovery)));
-            const hr_bonus: u8 = if (gs.hqs.getPtr(home) != null) @intCast(@min(tp.hr_morale_bonus_max, gs.hqStaff(home, .admin_hr).count / tp.hr_morale_admins_per_point)) else 0;
+            const hr_bonus: u8 = if (gs.hqs.getPtr(home) != null) @intCast(@min(tp.hr_morale_bonus_max, hq_ops.hqStaff(gs, home, .admin_hr).count / tp.hr_morale_admins_per_point)) else 0;
             // On leave: double recovery.
             const on_leave = p.leave_until_day != null and gs.clock.day_index < p.leave_until_day.?;
             p.addFatigue(-@as(i32, @intCast(@min(if (on_leave) decay * 2 else decay, 255))));

@@ -12,6 +12,7 @@ const rank_mod = @import("../domain/rank.zig");
 const award_mod = @import("../domain/award.zig");
 const chassis_mod = @import("../domain/chassis.zig");
 const GameState = @import("state.zig").GameState;
+const hq_ops = @import("hq_ops.zig");
 const company_gen = @import("../gen/company_gen.zig");
 const person_gen = @import("../gen/person_gen.zig");
 const rng_mod = @import("rng.zig");
@@ -67,7 +68,7 @@ pub fn postToHq(gs: *GameState, person_id: types.PersonId, hq_id: types.HqId) !v
     if (gs.hqs.getPtr(hq_id) == null) return error.UnknownHq;
     p.posted_hq = hq_id;
     p.assigned_force = .none;
-    gs.refreshHqStaffing();
+    hq_ops.refreshHqStaffing(gs);
 }
 
 /// Recruit-quality bonus on the 2d6 experience roll at one HQ: its hiring
@@ -75,7 +76,7 @@ pub fn postToHq(gs: *GameState, person_id: types.PersonId, hq_id: types.HqId) !v
 pub fn recruitBonus(gs: *GameState, hq_id: types.HqId) i32 {
     const hq = gs.hqs.getPtr(hq_id) orelse return 0;
     var bonus: i32 = hq.effectiveFacilityLevel(.hiring_hall);
-    if (gs.hqStaff(hq.id, .admin_hr).count >= tuning.person.recruit_hr_admins) bonus += 1;
+    if (hq_ops.hqStaff(gs, hq.id, .admin_hr).count >= tuning.person.recruit_hr_admins) bonus += 1;
     // A famous outfit draws a better class of walk-in.
     if (@import("rating.zig").currentIndex(gs) >= tuning.rating.recruit_bonus_index) bonus += 1;
     return @min(bonus, 4);
@@ -162,7 +163,7 @@ pub fn depart(gs: *GameState, person_id: types.PersonId, status: person_mod.Stat
     // The posting stays on the record (who walked from which desk); the
     // staffing count is derived from active people, refreshed here so no
     // caller has to remember.
-    gs.refreshHqStaffing();
+    hq_ops.refreshHqStaffing(gs);
     const owed = severanceOwed(gs, person_id, share_bp);
     if (owed > 0) try gs.postTransaction(.{ .day = gs.clock.day_index, .amount = -owed, .category = .payroll, .company = gs.companyOf(p.assigned_force), .note = note });
     return owed;

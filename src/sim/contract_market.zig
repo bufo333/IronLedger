@@ -10,6 +10,7 @@ const planet = @import("../domain/planet.zig");
 const market = @import("../econ/market.zig");
 const logistics = @import("../econ/logistics.zig");
 const GameState = @import("state.zig").GameState;
+const hq_ops = @import("hq_ops.zig");
 const treasury = @import("treasury.zig");
 const unit_mod = @import("../domain/unit.zig");
 const hq_mod = @import("../domain/hq.zig");
@@ -508,7 +509,7 @@ fn listCandidate(gs: *GameState, hq: *const hq_mod.Hq, role: person_mod.Role, tt
 
 /// An admin desk this HQ is short on, if any — the hall favours it.
 fn shortAdminRole(gs: *GameState, hq: *const hq_mod.Hq) ?person_mod.Role {
-    for (hq.staffRequired().desks()) |d| if (gs.hqStaff(hq.id, d.role).count < d.need) return d.role;
+    for (hq.staffRequired().desks()) |d| if (hq_ops.hqStaff(gs, hq.id, d.role).count < d.need) return d.role;
     return null;
 }
 
@@ -556,7 +557,7 @@ pub fn churnCandidates(gs: *GameState) !void {
         const hq = entry.value_ptr;
         const hall = hq.effectiveFacilityLevel(.hiring_hall);
         if (hall == 0) continue;
-        const hr = gs.hqStaff(hq.id, .admin_hr).count;
+        const hr = hq_ops.hqStaff(gs, hq.id, .admin_hr).count;
         const roll = @as(u32, gs.rng.roll2d6(.market)) + hall + hr / 2;
         if (roll < tuning.market.hall_arrival_target) continue; // quiet day at the hall
         // A bigger hall draws a bigger crowd: one walk-in per hall level, one
@@ -606,7 +607,7 @@ pub fn refreshCandidates(gs: *GameState) !void {
         const hq = entry.value_ptr;
         const hall = hq.effectiveFacilityLevel(.hiring_hall);
         if (hall == 0) continue;
-        const hr = gs.hqStaff(hq.id, .admin_hr).count;
+        const hr = hq_ops.hqStaff(gs, hq.id, .admin_hr).count;
         const count: u32 = 2 + hall + hr / 2;
         for (0..count) |_| try listCandidate(gs, hq, arrivalRole(gs, hq), refresh_days);
     }

@@ -186,8 +186,6 @@ pub const BayJob = struct {
     cost: types.CBills = 0, // labor posted to the HQ at completion
 };
 
-pub const StaffSummary = struct { count: u32 = 0, best_skill: u8 = 7 };
-
 /// A hiring-hall candidate: the generated person, held for
 /// the player to hire (with a signing bonus) before they move on.
 pub const Candidate = struct {
@@ -475,7 +473,7 @@ pub const GameState = struct {
                 self.person(pid).?.posted_hq = id;
             }
         }
-        self.refreshHqStaffing();
+        @import("hq_ops.zig").refreshHqStaffing(self);
 
         // Founding capital: the HQ opens with its own operating treasury,
         // handed over on-site (no courier).
@@ -501,60 +499,6 @@ pub const GameState = struct {
         for (part_mod.component_keys) |key| try self.addStock(site, key, g.starter_components_each);
         for (part_mod.munition_keys) |key| try self.addStock(site, key, g.starter_munitions_each);
         return id;
-    }
-
-    // ----------------------------------------- the back office
-
-    /// Posted admins of one role at an HQ: how many, and the best of them.
-    pub fn hqStaff(self: *GameState, hq_id: types.HqId, role: person_mod.Role) StaffSummary {
-        var s: StaffSummary = .{};
-        var it = self.people.iterator();
-        while (it.next()) |entry| {
-            const p = entry.value_ptr;
-            if (p.status != .active or p.posted_hq != hq_id or p.role != role) continue;
-            s.count += 1;
-            s.best_skill = @min(s.best_skill, p.skill(.admin) orelse 7);
-        }
-        return s;
-    }
-
-    /// Recompute every HQ's `staff_assigned` from real postings.
-    pub fn refreshHqStaffing(self: *GameState) void {
-        var hit = self.hqs.iterator();
-        while (hit.next()) |entry| entry.value_ptr.staff_assigned = 0;
-        var it = self.people.iterator();
-        while (it.next()) |entry| {
-            const p = entry.value_ptr;
-            if (p.status != .active or p.posted_hq == .none) continue;
-            if (self.hqs.getPtr(p.posted_hq)) |h| h.staff_assigned += 1;
-        }
-    }
-
-    /// Recruit and post admins until an HQ meets its staffing requirement
-    /// (the convenience path; the hiring hall is the considered one).
-    /// Returns how many were hired.
-    pub fn staffHqToRequirement(self: *GameState, hq_id: types.HqId) !u32 {
-        const hq = self.hqs.getPtr(hq_id) orelse return error.UnknownHq;
-        const req = hq.staffRequired();
-        var hired: u32 = 0;
-        const plan = [_]struct { person_mod.Role, u32 }{
-            .{ .admin_command, req.admin },
-            .{ .admin_logistics, req.logistics / 2 },
-            .{ .admin_transport, req.logistics - req.logistics / 2 },
-            .{ .admin_hr, req.hr },
-            .{ .admin_finance, req.finance },
-        };
-        for (plan) |entry| {
-            const have = self.hqStaff(hq_id, entry[0]).count;
-            var n: u32 = entry[1] -| have;
-            while (n > 0) : (n -= 1) {
-                const pid = try @import("personnel.zig").recruitGenerated(self, entry[0], hq_id, .market);
-                self.person(pid).?.posted_hq = hq_id;
-                hired += 1;
-            }
-        }
-        self.refreshHqStaffing();
-        return hired;
     }
 
     // ------------------------------------- the HQ network

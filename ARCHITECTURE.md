@@ -457,7 +457,7 @@ An upgrade is a **project** in the HQ's construction queue (Stage 9C):
 a paperwork phase (duration shrinks with admin capacity), then
 construction. Each level costs C-bills *and permanently raises the HQ's
 staffing requirement* (admins, HR, finance, quartermasters — the
-`hqStaffFor` formula). An HQ staffed below requirement runs facilities at
+`Hq.staffRequired`). An HQ staffed below requirement runs facilities at
 reduced effective level. C-bills are the cheap part; the payroll tail is
 the real price.
 

@@ -998,7 +998,7 @@ pub const Store = struct {
         try self.loadBattleReport(&gs, cid);
         try self.loadRefitPlan(&gs, cid);
 
-        gs.refreshHqStaffing();
+        @import("../sim/hq_ops.zig").refreshHqStaffing(&gs);
         try upgradeCampaign(&gs, saved_version);
         // Saves before schema v18 have no stats counters: if the book is
         // empty but the log has battles, count them up.

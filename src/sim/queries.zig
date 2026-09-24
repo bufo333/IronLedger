@@ -2019,7 +2019,7 @@ pub fn hqDetailView(alloc: Alloc, gs: *GameState, id: types.HqId) !HqDetail {
     const office_cols: []const table.Col = &.{ .{ .name = "back office" }, .{ .name = "have", .justify = .right }, .{ .name = "need", .justify = .right } };
     var orows: std.ArrayListUnmanaged(table.Row) = .empty;
     for (rows) |r| {
-        const s = gs.hqStaff(id, r.role);
+        const s = @import("hq_ops.zig").hqStaff(gs, id, r.role);
         const mk: []const u8 = if (s.count < r.need) "{c}" else "";
         try orows.append(alloc, try table.row(alloc, &.{ @tagName(r.role), try std.fmt.allocPrint(alloc, "{s}{d}{{/}}", .{ mk, s.count }), try std.fmt.allocPrint(alloc, "{s}{d}{{/}}", .{ mk, r.need }) }));
     }
@@ -2134,7 +2134,7 @@ pub fn hall(alloc: Alloc, gs: *GameState, hq_id: types.HqId, filter: HallFilter)
                 else => null,
             };
             if (need) |n| {
-                const have = gs.hqStaff(hq_id, c.spec.role).count;
+                const have = @import("hq_ops.zig").hqStaff(gs, hq_id, c.spec.role).count;
                 note = if (have < n) try std.fmt.allocPrint(alloc, "{{g}}fills {s} {d}→{d} of {d}{{/}}", .{ @tagName(c.spec.role), have, have + 1, n }) else "{d}desk already staffed{/}";
             }
         }
@@ -5210,7 +5210,7 @@ pub fn backOffice(alloc: Alloc, gs: *GameState, hq_id: types.HqId) ![]OfficeRow 
         .{ .role = .admin_finance, .need = req.finance },
     };
     for (roles) |r| {
-        const s = gs.hqStaff(hq_id, r.role);
+        const s = @import("hq_ops.zig").hqStaff(gs, hq_id, r.role);
         try out.append(alloc, .{ .role = r.role, .have = s.count, .need = r.need, .best_skill = s.best_skill, .pay = r.role.baseSalary() * s.count, .effect = switch (r.role) {
             .admin_command => "orders, morale",
             .admin_logistics => "order rolls",
