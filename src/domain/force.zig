@@ -66,6 +66,27 @@ pub const LanceRole = enum {
     training,
     unassigned,
 
+    /// The role a lance steps to: fighting → defense → scouting → training
+    /// → fighting; an unassigned lance steps to fighting.
+    pub fn next(self: LanceRole) LanceRole {
+        return switch (self) {
+            .fighting => .defense,
+            .defense => .scouting,
+            .scouting => .training,
+            .training, .unassigned => .fighting,
+        };
+    }
+
+    /// The step back through the same order.
+    pub fn prev(self: LanceRole) LanceRole {
+        return switch (self) {
+            .fighting, .unassigned => .training,
+            .defense => .fighting,
+            .scouting => .defense,
+            .training => .scouting,
+        };
+    }
+
     /// What the role does to the lance (the Forces screen says it when o cycles).
     pub fn describe(self: LanceRole) []const u8 {
         return switch (self) {
@@ -89,6 +110,24 @@ pub const Roe = enum {
     hold,
     standard,
     cautious,
+
+    /// The ROE a company steps to: standard → cautious → hold → standard.
+    pub fn next(self: Roe) Roe {
+        return switch (self) {
+            .standard => .cautious,
+            .cautious => .hold,
+            .hold => .standard,
+        };
+    }
+
+    /// The step back through the same order.
+    pub fn prev(self: Roe) Roe {
+        return switch (self) {
+            .standard => .hold,
+            .cautious => .standard,
+            .hold => .cautious,
+        };
+    }
 
     pub fn describe(self: Roe) []const u8 {
         return switch (self) {
@@ -161,4 +200,16 @@ pub const base_meks_per_company = lance_size * base_lances_per_company;
 test "company math" {
     try std.testing.expectEqual(@as(usize, 12), base_meks_per_company);
     try std.testing.expectEqual(@as(usize, 20), lance_size * max_lances_per_company);
+}
+
+test "stepping a lance role or an ROE back undoes stepping it forward" {
+    for (std.enums.values(LanceRole)) |r| {
+        if (r == .unassigned) continue; // steps into the cycle, never back to itself
+        try std.testing.expectEqual(r, r.next().prev());
+        try std.testing.expectEqual(r, r.prev().next());
+    }
+    for (std.enums.values(Roe)) |r| {
+        try std.testing.expectEqual(r, r.next().prev());
+        try std.testing.expectEqual(r, r.prev().next());
+    }
 }

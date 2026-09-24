@@ -314,6 +314,26 @@ if "END TURN?" in p:
 assert "day 1" in plain(), plain()[-2000:]
 send(":"); send("day 3\r", 2.0)
 assert "day 4" in plain(), plain()[-2000:]
+# Battle orders: the advance stops short of contact and opens the box;
+# → changes the ROE, confirm clears the warning, and the next advance
+# runs on to the fight instead of stopping again.
+send(":"); send("accept 0 1\r", 1.5)
+for _ in range(8):
+    send(":"); send("day 30\r", 2.5)
+    if "BATTLE ORDERS" in plain()[-20000:]:
+        break
+    send("\x1b", 0.5)
+assert "contact ahead: battle orders" in plain()[-2000:], plain()[-3000:]
+send("\x1b[C", 1.0)
+assert "ROE → cautious" in plain()[-2000:], plain()[-3000:]
+send("k", 0.5)                 # the cursor wraps: up from the ROE is confirm
+send("\r", 1.0)
+assert wait_for("battle orders given", tail=2000), plain()[-3000:]
+mark = len(out)
+send(":"); send("day 30\r", 2.5)
+after = re.sub(rb"\x1b\[[0-9;?]*[A-Za-z]", b"", out[mark:]).decode("utf-8", "replace")
+assert "contact ahead" not in after and "BATTLE ORDERS" not in after, after[-3000:]
+send("\x1b", 0.5); send("\x1b", 0.5)
 send("q"); send("s", 1.5)      # save and return
 p = plain()
 assert "back at the welcome screen" in p, p[-3000:]

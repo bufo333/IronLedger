@@ -106,7 +106,7 @@ land in the Desk log pane.
 
 | Tab | Screen | Panes | Local keys → commands |
 |---|---|---|---|
-| F1 | Desk | Emblem · Checklist · Inbox · Companies · Log · HQs | Enter on inbox → `resolve_decision`; Enter on checklist → jump to fixing screen; Enter on log → the whole entry, word-wrapped; `b` → the after-action reports, Enter reads one |
+| F1 | Desk | Emblem · Checklist · Inbox · Companies · Log · HQs | Enter on inbox → `resolve_decision`; Enter on checklist → jump to fixing screen (the contact warning opens the battle orders instead); Enter on log → the whole entry, word-wrapped; `b` → the after-action reports, Enter reads one |
 | F2 | Map | Star map · World | `h j k l` move by world (view follows) · `+`/`-` zoom ×1–×8 centred on the cursor · `o` offers here · `f` → `found_hq` |
 | F3 | Forces | TO&E tree · Hull/Person detail · Unassigned pool | `a` → `assign`, `u` → `unassign`, `A` → `auto_assign`, `t` → `train`, `x` → `transfer_unit`/`transfer_person`, `m` medbay modal (`triage`, `leave`), `[ ]` page all forces / each company / unassigned pool, `+` → `raise_company` wizard (`buy_hull_for`, `crew_company`, `manning`) |
 | F4 | Contracts | Board · Active · History (closed contracts: outcome, world, days served, VP, pay received) · Contract log | Enter → `accept_contract` (company picker), `c` → `complete_contract`, `R` → `recall_company`; Tab to History, the log follows the cursor |
@@ -127,7 +127,11 @@ or sale covers it, and `Bankrupt` (game over modal, campaign saved as it
 ended) once nothing could.
 
 Modals: **End turn** (checklist rows with jump targets, `n` proceed) ·
-**Decision** (options with effects, default marked) · **Order / Transfer /
+**Decision** (options with effects, default marked) ·
+**Battle orders** (the situation and odds; ←/→ step the ROE and each
+lance's role with the odds recomputed, Enter buys the emergency resupply,
+recalls behind a confirm, or confirms the orders; the advance that stops
+short of contact opens it too) · **Order / Transfer /
 Assign / Upgrade forms** (field-by-field, validated before the command is
 issued so refusals show as inline text, not error codes).
 

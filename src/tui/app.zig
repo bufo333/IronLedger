@@ -61,6 +61,9 @@ const Modal = union(enum) {
     end_turn,
     quit,
     decision: types.EventId,
+    /// Battle orders for the engagement in view: the levers that can still
+    /// change the fight, and confirming them.
+    battle_orders: types.ContractId,
     input: InputKind,
     help,
     /// One command behind a yes/no (rule 19): the body quotes the stakes,
@@ -1282,6 +1285,18 @@ pub const App = struct {
                 const inner = self.screen.pane(r, .{ .title = form.title(), .double = true });
                 self.screen.lines(inner, rows.items, 0, null);
             },
+            .battle_orders => |id| {
+                const form = (try self.ordersRows(al, id)) orelse {
+                    self.modal = .none;
+                    return;
+                };
+                self.ordersSnap(form, 1);
+                var rows: std.ArrayListUnmanaged([]const u8) = .empty;
+                for (form.rows, 0..) |row, i| try rows.append(al, if (i == self.modal_cursor and row.active) try std.fmt.allocPrint(al, "{{a}}▶{{/}}{s}", .{row.text[1..]}) else row.text);
+                const r = self.modalRect(layout.modal.settings_w, @intCast(@min(rows.items.len + 2, self.screen.rows)));
+                const inner = self.screen.pane(r, .{ .title = try std.fmt.allocPrint(al, "{s} · j/k row · ← → change · [Enter] act · [Esc] later", .{form.title}), .double = true });
+                self.screen.lines(inner, rows.items, 0, self.modal_cursor);
+            },
             .settings => {
                 const form = try self.settingsRows(al);
                 if (form.selectable > 0 and !form.rows[self.settings_cursor].active) self.settingsMove(1);
@@ -1848,6 +1863,94 @@ pub const App = struct {
         return null;
     }
 
+    // ---- battle orders: the levers that can still change the fight ----
+
+    const OrdersRow = struct {
+        kind: enum { info, roe, lance, rush, recall, confirm },
+        force: types.ForceId = .none,
+        active: bool = false,
+        text: []const u8,
+    };
+    const OrdersForm = struct { title: []const u8, rows: []OrdersRow, company: types.ForceId };
+
+    /// The box's rows from `queries.battleOrders`; null once the engagement
+    /// is no longer in view.
+    fn ordersRows(self: *App, al: std.mem.Allocator, id: types.ContractId) !?OrdersForm {
+        const v = (try q.battleOrders(al, &self.gs.?, id)) orelse return null;
+        var rows: std.ArrayListUnmanaged(OrdersRow) = .empty;
+        try rows.append(al, .{ .kind = .info, .text = "" });
+        for (v.situation) |line| try rows.append(al, .{ .kind = .info, .text = try std.fmt.allocPrint(al, "  {s}", .{line}) });
+        try rows.append(al, .{ .kind = .info, .text = "" });
+        try rows.append(al, .{ .kind = .roe, .active = !v.roe_locked, .text = try std.fmt.allocPrint(al, "  rules of engagement  {{a}}{s}{{/}}  {s}", .{
+            @tagName(v.roe), if (v.roe_locked) "{d}(set by the employer's integrated command){/}" else try std.fmt.allocPrint(al, "{{d}}{s}{{/}}", .{v.roe.describe()}),
+        }) });
+        for (v.lances) |l| try rows.append(al, .{ .kind = .lance, .force = l.force, .active = true, .text = try std.fmt.allocPrint(al, "  lance  {s}  {{d}}{s}{{/}}", .{ l.text, l.role.describe() }) });
+        try rows.append(al, .{ .kind = .info, .text = "" });
+        try rows.append(al, .{ .kind = .rush, .active = v.rush.len > 0, .text = if (v.rush.len > 0)
+            try std.fmt.allocPrint(al, "  emergency resupply  {s}  {{d}}[Enter] buy{{/}}", .{v.rush})
+        else
+            "  emergency resupply  {d}the stores cover the next fight{/}" });
+        try rows.append(al, .{ .kind = .recall, .active = true, .text = "  recall the company  {c}breaches the contract{/}  {d}[Enter] asks first{/}" });
+        try rows.append(al, .{ .kind = .confirm, .active = true, .text = if (v.confirmed) "  {g}orders given{/}  {d}[Enter] or [Esc] close{/}" else "  {g}confirm these orders{/}  {d}[Enter] — the contact warning clears{/}" });
+        return .{ .title = v.title, .rows = try rows.toOwnedSlice(al), .company = v.company };
+    }
+
+    /// Keep the cursor on an active row, stepping in `dir` from where it is.
+    fn ordersSnap(self: *App, form: OrdersForm, dir: i32) void {
+        clampIdx(&self.modal_cursor, form.rows.len);
+        var steps: usize = 0;
+        while (!form.rows[self.modal_cursor].active and steps < form.rows.len) : (steps += 1) {
+            const n: i32 = @intCast(form.rows.len);
+            self.modal_cursor = @intCast(@mod(@as(i32, @intCast(self.modal_cursor)) + dir, n));
+        }
+    }
+
+    fn ordersMove(self: *App, id: types.ContractId, dir: i32) !void {
+        const form = (try self.ordersRows(self.a(), id)) orelse return;
+        const n: i32 = @intCast(form.rows.len);
+        self.modal_cursor = @intCast(@mod(@as(i32, @intCast(self.modal_cursor)) + dir, n));
+        self.ordersSnap(form, dir);
+    }
+
+    fn ordersAdjust(self: *App, id: types.ContractId, dir: i32) !void {
+        const form = (try self.ordersRows(self.a(), id)) orelse return;
+        const row = form.rows[@min(self.modal_cursor, form.rows.len - 1)];
+        switch (row.kind) {
+            .roe => {
+                const view = (try q.battleOrders(self.a(), &self.gs.?, id)) orelse return;
+                const next = if (dir > 0) view.roe.next() else view.roe.prev();
+                _ = try self.execSay(.{ .set_roe = .{ .company = form.company, .roe = next } }, .good, "ROE → {s}: {s}", .{ @tagName(next), next.describe() });
+            },
+            .lance => {
+                const view = (try q.battleOrders(self.a(), &self.gs.?, id)) orelse return;
+                for (view.lances) |l| if (l.force == row.force) {
+                    const next = if (dir > 0) l.role.next() else l.role.prev();
+                    _ = try self.execSay(.{ .set_role = .{ .force = l.force, .role = next } }, .good, "lance → {s}: {s}", .{ @tagName(next), next.describe() });
+                };
+            },
+            else => {},
+        }
+    }
+
+    fn ordersEnter(self: *App, id: types.ContractId) !void {
+        const form = (try self.ordersRows(self.a(), id)) orelse return;
+        const row = form.rows[@min(self.modal_cursor, form.rows.len - 1)];
+        switch (row.kind) {
+            .roe, .lance => try self.ordersAdjust(id, 1),
+            .rush => _ = try self.execSay(.{ .emergency_resupply = id }, .good, "emergency resupply bought on the contract world — in the field stores now", .{}),
+            .recall => self.modal = .{ .confirm = .{ .kind = .recall_breach, .id = @intFromEnum(form.company) } },
+            .confirm => {
+                if (try self.execSay(.{ .confirm_orders = id }, .good, "battle orders given — the contact warning is cleared", .{})) self.modal = .none;
+            },
+            .info => {},
+        }
+    }
+
+    /// Open the battle orders for a contract, cursor on the first lever.
+    pub fn openOrders(self: *App, id: types.ContractId) void {
+        self.openModal(.{ .battle_orders = id });
+    }
+
     // ---- settings form (12.33): one look with the pickers and the amount form ----
 
     pub const SettingKey = enum { music, volume, track, soundtrack, auto_admit, difficulty, shares, info };
@@ -2234,7 +2337,8 @@ pub const App = struct {
             .none => {},
         }
         if (res.contact != .none) {
-            self.say(.amber, "day {d} · {s} — {s}", .{ st.day, st.date, try q.contactWarning(self.a(), g, res.contact) });
+            self.say(.amber, "day {d} · {s} — contact ahead: battle orders", .{ st.day, st.date });
+            self.openOrders(res.contact);
             return;
         }
         self.say(.good, "day {d} · {s}", .{ st.day, st.date });
@@ -3054,6 +3158,23 @@ pub const App = struct {
                         },
                         else => {},
                     }
+                },
+                else => {},
+            },
+            .battle_orders => |id| switch (key) {
+                .escape => self.modal = .none,
+                .down => try self.ordersMove(id, 1),
+                .up => try self.ordersMove(id, -1),
+                .left => try self.ordersAdjust(id, -1),
+                .right => try self.ordersAdjust(id, 1),
+                .enter => try self.ordersEnter(id),
+                .char => |ch| switch (ch) {
+                    'j' => try self.ordersMove(id, 1),
+                    'k' => try self.ordersMove(id, -1),
+                    'h' => try self.ordersAdjust(id, -1),
+                    'l' => try self.ordersAdjust(id, 1),
+                    'q' => self.modal = .none,
+                    else => {},
                 },
                 else => {},
             },
