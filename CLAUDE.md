@@ -34,6 +34,9 @@ open exceptions (`docs/contract-exceptions.md`) comes first.
   scripts the REPL
 - `docs/verify-contract.sh` — the coding contract's mechanical checks;
   prints `CONTRACT CHECKS OK` or the violations (CI runs it)
+- `docs/clean-package.sh` — builds a ReleaseFast release from a tree
+  holding only the `build.zig.zon` paths; prints `CLEAN PACKAGE OK`
+  (CI runs it)
 
 ## Git workflow
 
