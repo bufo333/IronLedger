@@ -660,7 +660,7 @@ pub fn usage(verb: []const u8) ?[]const u8 {
         .{ "mothball", "mothball <unit>" },
         .{ "activate", "activate <unit>" },
         .{ "complete", "complete <contract id>" },
-        .{ "confirm", "confirm <contract id>   (battle orders given; see `orders <contract id>`)" },
+        .{ "confirm", "confirm <contract id>   (battle orders given; see `briefing <contract id>`)" },
         .{ "rush", "rush <contract id>   (emergency resupply on the contract world before contact)" },
         .{ "recall", "recall co:N" },
         .{ "found", "found <planet key> <name>" },

@@ -82,10 +82,11 @@ config, GUI scenario editing, multiplayer.
    dropship/jumpship legs with real transit times (jump routes on a star map).
    A company in the field consumes supply daily; shortages degrade combat
    power, morale, healing, and maintenance rolls.
-4. **Support echelon matters.** Mess halls, MASH trucks, mobile field bases,
-   repair depots, and cargo assets are units the player buys and attaches;
-   each contributes a concrete modifier (fatigue recovery, wounded survival,
-   field repair capacity, supply buffer).
+4. **Support echelon matters.** Support lances — MASH, mess, security,
+   salvage, logistics transport — are raised and attached per company;
+   each contributes a concrete modifier (wounded survival, fatigue
+   recovery, prisoner handling, salvage yield, supply buffer and the field
+   workshop's repair hours), and only while it is operational (§9.3).
 5. **Attached combat support.** Tank lances, aerospace flights, battle armor,
    artillery — purchasable, attachable per company, and factored into battle
    resolution as force multipliers.
@@ -101,7 +102,7 @@ section explains the shape, the contract states the rules.
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│  Frontends: CLI (stage 1) → TUI → graphical (later) │
+│  Frontends: REPL/CLI → TUI → graphical (later)      │
 └──────────────────────┬──────────────────────────────┘
                        │ Commands in / Reports+Queries out
 ┌──────────────────────▼──────────────────────────────┐
@@ -125,6 +126,10 @@ section explains the shape, the contract states the rules.
   `AssignLance`, `OrderParts`, `BeginRefit`, `UpgradeHq`, `ResolveEventChoice`,
   `AdvanceDay`) — a tagged union. This gives us one choke point for
   validation, an audit log, replayability, and trivially scriptable tests.
+  A command reserves every ledger and list slot it needs
+  (`GameState.reserveLedger`, `ensureUnusedCapacity`, `prepareHq` before
+  `commitHq`) ahead of its first mutation, so no allocation can fail after
+  money or stock has moved.
 - **The campaign log is structured** (Stage 9A): every entry carries day,
   category, and company/HQ/contract tags, so any entity's complete history —
   battles, decisions and their outcomes, deliveries, construction, medical —
@@ -137,9 +142,27 @@ section explains the shape, the contract states the rules.
   allocator; systems are free functions `fn tick(state, rng) !Reports`.
   No ECS — this is a management sim; plain structs + ArrayLists +
   AutoHashMaps keyed by typed integer IDs are simpler and faster to iterate on.
-- **RNG discipline:** one seeded root PRNG; every subsystem draws from a
-  named child stream (`rng.stream(.maintenance)`) so that adding a roll in one
-  system never perturbs another. All dice are 2d6 unless CamOps says otherwise.
+- **RNG discipline:** one campaign seed; every subsystem draws from a
+  named stream (`gs.rng.roll2d6(.maintenance)`) so that adding a roll in one
+  system never perturbs another. A stream's identity is its permanent
+  literal salt (`rng.Stream.salt`), not its place in the enum, so adding or
+  reordering streams changes no existing draw. Shared generators
+  (`person_gen`, `company_gen`, `recruitGenerated`,
+  `planet.weightedPickByFaction`) take the caller's stream: hall, market and
+  hiring draw on `.market`, prisoners and salvage on `.battle`, event
+  recruits on `.events`, the starter company on `.generation`. All dice are
+  2d6 unless CamOps says otherwise.
+- **Presentation markup is escaped at the source.** Screen text carries
+  inline tags (`{a}` … `{/}`); `table.Tokenizer` is the one reader of it
+  (drawing, width, padding, wrapping, plain CLI text) and `{{` is a literal
+  brace. Untrusted text — player, company and HQ names, callsigns, log
+  lines, filenames — enters markup only through `MarkupBuilder.appendPlain`
+  or `table.plain`, which sanitize and escape it; `appendMarkup` is for
+  literals in the code. Query text and cells are escaped markup; a query's
+  raw `name` field stays raw, and a frontend composing it into markup calls
+  `queries.plain` (the REPL prints raw names through `terminalText`).
+  Data-file strings and a save's display copies must be
+  `table.markupSafe`.
 
 ## 5. Domain model (core entities)
 
@@ -154,8 +177,9 @@ cheap, copyable, and impossible to mix up.
 - **Unit** — reference to static **Chassis** (variant), per-unit state: armor
   %, internal damage, destroyed/damaged part slots, quality grade A–F,
   maintenance state, crew assignment, ammo state, customization delta (refits).
-  Covers meks, vehicles, aerospace, battle armor, infantry, and support
-  vehicles (MASH, mobile field base, cargo trucks) with one struct + kind enum.
+  Covers meks, vehicles, aerospace, battle armor, infantry, support
+  vehicles (MASH and cargo trucks) and DropShips/JumpShips with one struct +
+  kind enum.
 - **Part** — static part type (catalog) + instances in inventories with
   condition; acquisition orders with ETA (transit from wherever sourced).
 - **Force** — TO&E tree node (outfit/battalion/company/lance), commander,
@@ -225,7 +249,10 @@ checklist carries a contact warning and the client opens the **battle
 orders**: the odds, fieldable strength and ammunition, and every lever
 that can still change the fight (rules of engagement, lance roles,
 emergency resupply through the local supplies valve of §9.6, recall).
-Confirming the orders (`Contract.orders_day`) clears the warning;
+The resupply (`emergency_resupply`, quoted by `field_supply.rushQuote`)
+is priced by the same `localPriceMultBp` as the provisions purchase.
+Confirming the orders (`confirm_orders`, which sets `Contract.orders_day`
+to the engagement's day; `battle.ordersConfirmed`) clears the warning;
 skipping them leaves the settings as they are. Nothing is disposed of
 that the commander has not already chosen, so time may move without an
 answer.
@@ -292,6 +319,23 @@ against losses on a lost fight and recovery of wrecks. The opposition is a
 **force of its own** (12D.5): lances off the enemy house's RAT at a rolled
 skill, posted with the offer and shown by intel, not a mirror of the
 player's BV — so a worn-down company meets the same enemy as a fresh one.
+Intel is one HQ's reading (`offer_rating.intelLevel`: its comms level,
+plus one for a B-or-better rating); `intelHq` picks the HQ whose board
+offered the contract, else the company's home HQ.
+
+Crew skill is the role's pair — `Role.primarySkill` (gunnery) beside
+`Role.pilotingSkill` — read for the crew of each hull kind: a mek fights
+on gunnery/piloting, a vehicle on gunnery_vee/driving_vee. Escape,
+recovery, `experience()` and the roster text use the same pair. Only
+operational hulls (`GameState.unitOperational`, §9.3) stand in the line or
+count toward fieldable BV.
+
+An engagement with nobody fit to put in the line is **conceded**
+(`battle.concede`): a defeat `BattleReport` that holds the turn like any
+other, a lost battle and a battle fought in the stats, and
+`tuning.battle.score.concede` scored through `recordBattle` (victory
+points at the usual rate). The after-action sheet shows what was given
+up.
 
 **Who holds the field keeps the wrecks** (12D.3, CamOps salvage): on a lost
 field every hull wrecked there must be dragged off (salvage lance, trucks,
@@ -385,7 +429,15 @@ HQ tier + facilities cap the fielded force; growth is infrastructure-first:
 Support company lance kinds: **MASH, security/prisoner, mess, salvage,
 logistics transport** — each feeds a concrete autoresolve/campaign modifier
 (§7): wounded survival, prisoner handling & ransom events, fatigue/morale
-recovery, post-battle salvage yield, supply buffer.
+recovery, post-battle salvage yield, supply buffer and the field workshop
+(§9.7).
+
+**Readiness is one test.** A hull is operational when it can take the
+field and its crew is fit for duty (`GameState.unitOperational`); a force
+is operational when one of its own hulls is (`forceOperational`). Support
+modifiers, recon, air cover, MASH care and beds, the battle line and
+fieldable BV all count by it, so a MASH truck with no driver, or one in
+the shop, helps nobody.
 
 ### 9.4 Facility upgrade paths, bays & the back office
 
@@ -414,12 +466,22 @@ speed training programs, and slow morale decay; command admins shorten
 project paperwork; finance staff keep per-entity books timely. Company
 generation already recruits this tail; hiring halls restock it.
 
+**The back office works where it sits.** A person's home HQ is the HQ
+they are posted to, else their company's home HQ (`GameState.homeHqOf`).
+Weekly rest at home reads that HQ's mess and HR; training days read the
+training HQ's HR (§9.7). A recruit's quality reads the recruiting HQ's
+hiring hall and HR (`recruitBonus(hq)`, `recruitGenerated(role, hq)`):
+hall boards and office staffing at their own HQ, company crews at the
+company's home HQ, and the bare `recruit` verb at the outfit's seat.
+
 ### 9.5 Supply-line graph
 
 HQs are nodes; **links** are player-established edges (to each other or to
 the brigade HQ): charter (1) → scheduled service (2) → dedicated jumpship
-(3+, requires owning one). Each link has a **throughput cap** (supply
-units/week) and per-hop multipliers; a route's totals multiply across hops:
+(3+, requires owning one). Each link has a **throughput cap** in tons/week
+(`logistics.linkTonsPerWeek`: level × `throughput_per_level` supply units ×
+`tons_per_supply_unit`, the one answer for every link and route) and
+per-hop multipliers; a route's totals multiply across hops:
 
     hop_delay_mult = 1.5 − 0.1 × link_level        (min 1.0)
     hop_cost_mult  = 1.4 − 0.05 × (warehouse + spaceport level of pass-through HQ)
@@ -439,6 +501,10 @@ policies** ("top this company up to 500k monthly") execute automatically on
 payday through the same delayed couriers. Route throughput is measured in
 **tons/week** (Stage 9B): munition pallets and spare parts have real
 weight, so heavy resupply competes with everything else on the line.
+Freight is quoted, then committed: `freightQuote` is pure — it refuses a
+full route (`network.fitsThroughput`) but books nothing — and
+`commitFreight` books the tonnage on the route once the payment has
+cleared, so a refused payment never eats capacity.
 
 ### 9.6 Out-of-influence operation (expensive but viable)
 
@@ -478,20 +544,32 @@ the depot queue, the Market demand pane, the Forces damage pane, the pool
 row, the Lab and the REPL `demand` verb all call it rather than re-deriving
 it, so no screen can disagree with the bay about what is missing.
 
-**Fatigue accrues on contract, decays only at home.** Each contract completed
-without rotating through a regional HQ adds fatigue to every person attached
-to the company — scaled by contract length, battles fought, and casualties
-taken (a quiet garrison wears lightly; a bloody raid campaign wears hard).
-Fatigue never decays in the field; at a regional HQ it decays weekly, faster
-with a better mess. Effects: morale decay, the autoresolve fatigue penalty
+The night after a fight the company's techs make a **repair push** on the
+field-fixable damage. Its budget (`maintenance.repairBudget`) is
+`push_hours_bp` of the spare weekly hours of every fit tech on the
+company's hulls, plus `tuning.maintenance.push_workshop_hours` when an
+operational Logistics lance brings its workshop, against the field armour
+and spares on hand.
+
+**Fatigue accrues on contract, decays only at home.** Each completed contract
+adds fatigue to every person attached to the company — scaled by contract
+length, battles fought, and casualties taken (a quiet garrison wears
+lightly; a bloody raid campaign wears hard), and compounding for every
+contract since the company last rotated: sat undeployed until its people
+were rested.
+Fatigue never decays on a combat tour; garrison duty recovers at a share
+of the home rate, the mess lance standing in for the hall. Off contract it
+decays weekly at the person's home HQ (§9.4), faster with a better mess. Effects: morale decay, the autoresolve fatigue penalty
 (§7), slower maintenance and healing. Capped at 100 — degraded, never
 spiraling (§9.6 philosophy).
 
 **Training happens at home.** XP is *earned* anywhere (combat, garrison
 duty, tech work), but *converting* XP into skill levels — mekwarrior
-gunnery/piloting, mek tech, mechanic — requires a training program at a
-regional/brigade HQ with a training ground. A green company that never
-rotates stays green, no matter how many battles it survives.
+gunnery/piloting, mek tech, mechanic — requires a training program at the
+person's home HQ (§9.4), which must be a regional or brigade HQ with a
+training ground (`GameState.trainingHqFor`); that HQ's HR sets the
+training days. A green company that never rotates stays green, no matter
+how many battles it survives.
 
 Net effect: contract profit far from a ring is real, but every month out
 there quietly spends readiness — repairs deferred, fatigue banked, skills
@@ -584,17 +662,23 @@ training, leave, or a transfer leaves a visible hole.
 
 **Tech time is a budget, not a flag.** Each tech has weekly hours; each
 assigned hull consumes maintenance hours by weight class; field repairs,
-armor patching, reloading and bay jobs consume more. A full astech team
-multiplies a tech's throughput; a short team halves it. Over-budget work
-queues, and a hull whose maintenance didn't happen rolls with the uncovered
-penalty. This is the lever behind "hire better techs or rotate home."
+armor patching and bay jobs consume more, and reloading needs an assigned
+tech but no hours. A full astech team multiplies a tech's throughput; a
+short team halves it. Work the week's hours cannot cover waits for the
+next weekly pass, and a hull whose maintenance didn't happen rolls with
+the uncovered penalty. This is the lever behind "hire better techs or rotate home."
 
 **Techs get hurt.** Weekly maintenance and large repairs roll for accidents,
 scaled by job size; a wounded tech is swapped for a free one automatically
 and the swap is logged and surfaced in the checklist. The **medbay** has
-beds (hospital level, plus MASH trucks in the field) and doctor coverage;
-over capacity, low-priority patients wait while triage priorities decide
-who heals first. Leave sends the exhausted to R&R at double recovery.
+beds (hospital level, plus operational MASH trucks and medics in the
+field) and doctor coverage. Where a wound is treated is one
+`medical.Care`: home, field with an operational MASH truck (the MASH
+healing multiplier), or field without. Beds go out in one pass over the
+wounded sorted by triage priority, then soonest discharge, with one count
+for home beds and one per deployed company's field beds; a patient past
+the count waits a day. Leave sends the exhausted to R&R at double
+recovery.
 
 **The end-turn checklist.** Ending a turn first runs `turnWarnings`:
 decisions near deadline, open pilot/tech slots, understaffed HQs, hungry or
@@ -657,12 +741,30 @@ campaign id and a `campaign` registry lists playthroughs (name, commander,
 in-game date, save sequence); the player saves, lists, loads, and deletes
 campaigns from one place. The sim core never touches SQL: `src/persist/`
 maps `GameState` ↔ rows (the executable DDL lives in `persist/store.zig`;
-`docs/schema.sql` is the design document it tracks). Static data (chassis,
+`docs/schema.sql` is a commented mirror of it; its header names the
+schema version it matches). Static data (chassis,
 weapons, planets, name tables, salary/price tables) ships as `.zon` files in
 `data/` — versioned separately from saves; saves reference static data by
 stable string keys. Each campaign records its `schema_version`; migrations
 are forward-only. The golden-master hash proves round trips: save → load →
 identical hash, and identical evolution thereafter.
+
+**Loading fails closed.** The loader is the integrity check (SQL foreign
+keys wait for a schema change that rebuilds tables): every stored integer
+and id is range-checked, and a missing parent row, an unknown enum value,
+treasury or site kind, a bad difficulty, an unresolved chassis, part,
+planet or faction key, or a battle-report display copy that is not
+markup-safe (`validateStoredStrings`) returns `CorruptSave` — nothing is
+skipped or defaulted. Loading an unknown campaign id, or saving over a
+deleted one, is `NoSuchCampaign`; a first save takes its `campaign_id`
+only after COMMIT.
+
+**RNG state is saved per stream**: the campaign seed plus one
+`rng_stream` row per named stream (format 1: the generator's words,
+little-endian). A stream with no row starts fresh from the seed, so a
+stream added later never reseeds an old save; a malformed row or an
+unknown stream is `CorruptSave`. Saves from before per-stream rows hold
+one legacy blob, which still loads.
 
 **Licensing note:** MekHQ/MegaMek code is GPLv2+ and their data files carry
 their own terms; BattleTech IP belongs to Topps/CGL, with Microsoft rights over
@@ -671,8 +773,9 @@ bulk-copy MegaMek data files into the repo without deciding on licensing.
 
 ## 13. Zig specifics
 
-- **Zig 0.16**, no external dependencies for the core (SQLite via C import
-  when we get there; TUI/graphics deps only in frontend layer).
+- **Zig 0.16**, no external dependencies for the core (SQLite is the system
+  library through `@cImport` in `persist/sqlite.zig`; music is the system
+  player as a child process; the TUI is hand-rolled ANSI).
 - Allocators: `GameState` lives in an arena per campaign; per-tick scratch
   arena reset daily; frontends own their own.
 - Errors: sim-core functions return typed error sets; player-command
@@ -688,17 +791,22 @@ bulk-copy MegaMek data files into the repo without deciding on licensing.
 ```
 build.zig, build.zig.zon
 ARCHITECTURE.md, ROADMAP.md
-docs/            schema.sql, mekhq-map.md, design notes
-data/            static game data (.zon): chassis, weapons, planets, tables
+ARCHITECTURE.md, GAMEPLAY.md, ROADMAP.md, TODO.md
+docs/            schema.sql, coding-contract.md, tui.md, modding.md, smoke scripts
+data/            static game data (.zon): chassis, parts, planets, factions,
+                 tuning; data/tables/ for rule tables
 src/
-  main.zig       CLI entry (application layer)
+  main.zig       demo CLI and REPL entry (application layer)
   root.zig       module root, re-exports
-  domain/        types.zig person.zig unit.zig part.zig force.zig
-                 contract.zig hq.zig
-  sim/           clock.zig rng.zig events.zig autoresolve.zig
-  econ/          finance.zig logistics.zig market.zig
-  gen/           company_gen.zig (+ name_gen, person_gen later)
-  persist/       (stage 9) sqlite mapping
+  domain/        entities and rule tables: types person unit part chassis
+                 force contract hq planet faction tuning skulls scenario …
+  sim/           state tick commands battle autoresolve medical maintenance
+                 field_supply network rng …; queries.zig (read-only views),
+                 cli.zig (verbs), table.zig (markup)
+  econ/          finance logistics market contract_market
+  gen/           company_gen person_gen
+  persist/       sqlite.zig (C wrapper), store.zig (campaign saves), lobby.zig
+  tui/           terminal client: app.zig, screens/, term, screen, emblem, music
 ```
 
 ## 15. Open questions (decide during the relevant stage)
@@ -707,6 +815,5 @@ src/
   makes logistics shine). Late-era tech (Clan invasion) later.
 - Star-map scope: full Inner Sphere (~2000 systems) vs. curated ~200-system
   map. Leaning curated for v1.
-- TUI library vs. hand-rolled ANSI for stage-10 frontend.
 - How much of MegaMek's unit catalog to re-encode vs. a curated ~150-variant
   starter set. Leaning curated.

@@ -76,7 +76,8 @@ command line   `:` prompt (opens on `:`), hints on the right
   The **after-action sheet** (Desk `b`, then Enter) is the one that carves
   its own layout: the fight, the field, the spoils and the trucks in four
   panes, falling back to the wrapped AAR text below
-  `layout.modal.after_action_stack_cols`.
+  `layout.modal.after_action_stack_cols`. A conceded engagement's sheet
+  says the objective was given up with nothing to field.
 - **Size.** The client measures the terminal at startup and on SIGWINCH
   and lays every screen out from the width and height it has: panes split
   the body by ratio, side panes drop below 120 columns (`narrow()`), the
@@ -97,9 +98,11 @@ they are shortcuts for commands the command line can also run.
 The command line and the REPL share one parser, `src/sim/cli.zig`
 (`game.cli.parseCommand`, `verbs`, `usage`, `errorText`): every command
 verb (`accept`, `order`, `transfer`, `assign`, `refit`, `found`, `link`,
-`raise`, `sellstock`, …) works in both, with tab completion over verbs and
-entity ids here. Frontend-only verbs (`day`, `save`, `quit`, `help`,
-`settings`, `emblem`, `manning`, `readiness`) stay in `app.zig`. Results
+`raise`, `sellstock`, `roe`, `role`, `rush`, `confirm`, …) works in both,
+with tab completion over verbs and entity ids here. Frontend-only verbs
+(`day`, `save`, `quit`, `help`, `settings`, `emblem`, `manning`,
+`readiness`, `summary`, `music`) stay in `app.zig`; the REPL's
+`briefing <contract id>` prints what the battle-orders box shows. Results
 land in the Desk log pane.
 
 ## Screens
@@ -122,17 +125,19 @@ Money keys: Ledger `L` → `take_loan`, `R` → `repay_loan`; Forces `$` →
 client surfaces: untreated wounded and a negative outfit treasury are
 blocking checklist items; an **unread after-action** refuses with
 `ReportUnread` and a multi-day advance stops on the day the battle lands,
-dropping the player into its sheet (12G.5); `advance` refuses with `Insolvent` until a loan
-or sale covers it, and `Bankrupt` (game over modal, campaign saved as it
-ended) once nothing could.
+dropping the player into its sheet; it also stops once on the day an
+engagement's contact window opens, dropping the player into its battle
+orders, and the next advance goes ahead; `advance` refuses with
+`Insolvent` until a loan or sale covers it, and `Bankrupt` (game over
+modal, campaign saved as it ended) once nothing could.
 
 Modals: **End turn** (checklist rows with jump targets, `n` proceed) ·
 **Decision** (options with effects, default marked) ·
 **Battle orders** (the situation and odds; ←/→ step the ROE and each
 lance's role with the odds recomputed, Enter buys the emergency resupply,
-recalls behind a confirm, or confirms the orders; the advance that stops
-short of contact opens it too) · **Order / Transfer /
-Assign / Upgrade forms** (field-by-field, validated before the command is
+recalls behind a confirm, or confirms the orders, which clears the
+contact warning; `Esc` closes it with the current settings standing) ·
+**Order / Transfer / Assign / Upgrade forms** (field-by-field, validated before the command is
 issued so refusals show as inline text, not error codes).
 
 ## Queries the core must expose
@@ -178,6 +183,11 @@ view model each frame from an arena.
   `Modal`, `Log`. Each widget draws from a view model struct, never from
   `GameState`. A pane too narrow for a table clips the column at its edge
   rather than dropping it, so nothing is silently missing.
+- **Markup**: `table.Tokenizer` (`src/sim/table.zig`) is the one reader
+  of `{x}…{/}` tags for drawing, measuring and wrapping; `{{` is a literal
+  brace. Free text — names, callsigns, log lines, filenames — enters
+  markup escaped (`MarkupBuilder.appendPlain`), and controls and invalid
+  UTF-8 draw as `?` and U+FFFD.
 - **Colors** are semantic only — amber (attention/active), green (ok),
   red (critical), cyan (cursor/focus), dim (chrome) — on the terminal's own
   background, so the client holds on any theme.
