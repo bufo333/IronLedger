@@ -113,16 +113,115 @@ pub fn isMark(c: u8) bool {
 /// Visible cells of markup text: code points, less the `{x}` tokens.
 pub fn cells(s: []const u8) usize {
     var n: usize = 0;
-    var i: usize = 0;
-    while (i < s.len) {
-        if (s[i] == '{' and i + 2 < s.len and s[i + 2] == '}' and isMark(s[i + 1])) {
-            i += 3;
-            continue;
-        }
-        i += nextGlyph(s, i).len;
-        n += 1;
-    }
+    var t: Tokenizer = .{ .s = s };
+    while (t.next()) |tok| n += @intFromBool(tok == .glyph);
     return n;
+}
+
+/// One unit of screen markup: a drawable character or a tag.
+pub const Token = union(enum) {
+    /// A character to draw: sanitized by `nextGlyph`, or `{` from `{{`.
+    glyph: u21,
+    /// A tag letter from `marks`: `{a}` … `{/}`.
+    mark: u8,
+};
+
+/// The one reader of screen markup. `{{` is a literal `{`; `{x}` with `x`
+/// in `marks` is a tag; anything else is text, sanitized by `nextGlyph`.
+/// Drawing, measuring, padding, wrapping and plain CLI text all read
+/// markup through this, so they cannot disagree about what a string says.
+pub const Tokenizer = struct {
+    s: []const u8,
+    i: usize = 0,
+
+    pub fn next(self: *Tokenizer) ?Token {
+        const s = self.s;
+        const i = self.i;
+        if (i >= s.len) return null;
+        if (s[i] == '{') {
+            if (i + 1 < s.len and s[i + 1] == '{') {
+                self.i += 2;
+                return .{ .glyph = '{' };
+            }
+            if (i + 2 < s.len and s[i + 2] == '}' and isMark(s[i + 1])) {
+                self.i += 3;
+                return .{ .mark = s[i + 1] };
+            }
+        }
+        const g = nextGlyph(s, i);
+        self.i += g.len;
+        return .{ .glyph = g.cp };
+    }
+};
+
+/// Builds screen markup from trusted tags and untrusted text. Names, save
+/// and mod strings, filenames and log text go through `appendPlain`,
+/// which sanitizes them and escapes every `{`, so they draw exactly as
+/// written and can never open, close or forge a tag. `appendMarkup` is for
+/// literals written in the code.
+pub const MarkupBuilder = struct {
+    alloc: std.mem.Allocator,
+    buf: std.ArrayListUnmanaged(u8) = .empty,
+
+    pub fn init(alloc: std.mem.Allocator) MarkupBuilder {
+        return .{ .alloc = alloc };
+    }
+
+    /// Trusted presentation markup: a literal from the code, never data.
+    pub fn appendMarkup(self: *MarkupBuilder, trusted: []const u8) !void {
+        try self.buf.appendSlice(self.alloc, trusted);
+    }
+
+    /// Untrusted text, sanitized and escaped.
+    pub fn appendPlain(self: *MarkupBuilder, text: []const u8) !void {
+        var i: usize = 0;
+        while (i < text.len) {
+            const g = nextGlyph(text, i);
+            i += g.len;
+            if (g.cp == '{') {
+                try self.buf.appendSlice(self.alloc, "{{");
+                continue;
+            }
+            var enc: [4]u8 = undefined;
+            const n = std.unicode.utf8Encode(g.cp, &enc) catch unreachable; // nextGlyph yields scalar values only
+            try self.buf.appendSlice(self.alloc, enc[0..n]);
+        }
+    }
+
+    /// Formatted untrusted text: `fmt` and `args` are treated as plain.
+    pub fn appendPlainFmt(self: *MarkupBuilder, comptime fmt: []const u8, args: anytype) !void {
+        const text = try std.fmt.allocPrint(self.alloc, fmt, args);
+        defer self.alloc.free(text);
+        try self.appendPlain(text);
+    }
+
+    pub fn finish(self: *MarkupBuilder) ![]const u8 {
+        return self.buf.toOwnedSlice(self.alloc);
+    }
+};
+
+/// Untrusted text as markup that draws exactly as written: the one-shot
+/// form of `MarkupBuilder.appendPlain`.
+pub fn plain(alloc: std.mem.Allocator, text: []const u8) ![]const u8 {
+    var b = MarkupBuilder.init(alloc);
+    try b.appendPlain(text);
+    return b.finish();
+}
+
+/// Markup as plain terminal text for the CLI: tags dropped, `{{` read as
+/// `{`, and every glyph sanitized, so no control reaches the terminal.
+pub fn plainText(alloc: std.mem.Allocator, markup: []const u8) ![]const u8 {
+    var out: std.ArrayListUnmanaged(u8) = .empty;
+    var t: Tokenizer = .{ .s = markup };
+    while (t.next()) |tok| switch (tok) {
+        .mark => {},
+        .glyph => |cp| {
+            var enc: [4]u8 = undefined;
+            const n = std.unicode.utf8Encode(cp, &enc) catch unreachable; // tokens carry scalar values only
+            try out.appendSlice(alloc, enc[0..n]);
+        },
+    };
+    return out.toOwnedSlice(alloc);
 }
 
 /// One drawable character of screen text and the bytes it takes.
@@ -153,20 +252,20 @@ pub fn pad(alloc: std.mem.Allocator, text: []const u8, width: usize, al: Align) 
         return out.toOwnedSlice(alloc);
     }
     var shown: usize = 0;
-    var i: usize = 0;
     var open = false;
-    while (i < text.len) {
-        if (text[i] == '{' and i + 2 < text.len and text[i + 2] == '}' and isMark(text[i + 1])) {
-            try out.appendSlice(alloc, text[i .. i + 3]);
-            open = text[i + 1] != '/';
-            i += 3;
-            continue;
+    var t: Tokenizer = .{ .s = text };
+    while (true) {
+        const start = t.i;
+        const tok = t.next() orelse break;
+        switch (tok) {
+            .mark => |m| open = m != '/',
+            .glyph => {
+                if (shown == width) break;
+                shown += 1;
+            },
         }
-        if (shown == width) break;
-        const len = nextGlyph(text, i).len;
-        try out.appendSlice(alloc, text[i .. i + len]);
-        i += len;
-        shown += 1;
+        // The token's own bytes: an escaped `{{` is never split.
+        try out.appendSlice(alloc, text[start..t.i]);
     }
     if (open) try out.appendSlice(alloc, "{/}");
     return out.toOwnedSlice(alloc);
@@ -229,4 +328,58 @@ test "droppable columns leave highest rank first, rightmost among equals, before
     try std.testing.expectEqualSlices(usize, &.{ 0, 2, 4 }, try visibleColumns(a, t, &w, 16, 2));
     try std.testing.expectEqualSlices(usize, &.{ 0, 2 }, try visibleColumns(a, t, &w, 11, 2));
     try std.testing.expectEqualSlices(usize, &.{ 0, 2 }, try visibleColumns(a, t, &w, 5, 2));
+}
+
+test "every real tag in untrusted text is escaped and reads back literally" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    for (marks) |m| {
+        const raw = [_]u8{ '{', m, '}', 'x' };
+        const safe = try plain(a, &raw);
+        try std.testing.expectEqual(@as(usize, 4), cells(safe));
+        try std.testing.expectEqualStrings(&raw, try plainText(a, safe));
+        var t: Tokenizer = .{ .s = safe };
+        while (t.next()) |tok| try std.testing.expect(tok == .glyph);
+    }
+    // A tag letter that does not exist yet stays literal too.
+    try std.testing.expectEqualStrings("{{z}", try plain(a, "{z}"));
+}
+
+test "{{ is one literal brace: one cell, never split, read back as {" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    try std.testing.expectEqual(@as(usize, 1), cells("{{"));
+    try std.testing.expectEqualStrings("{{", try pad(a, "{{{{", 1, .left));
+    try std.testing.expectEqualStrings("{{a ", try pad(a, "{{a", 3, .left));
+    try std.testing.expectEqualStrings("{x", try plainText(a, "{a}{{x{/}"));
+}
+
+test "untrusted text cannot carry invalid UTF-8 or a control into markup or the CLI" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const hostile = "a\x1bb\n\t\x7f\xc2\x9b\xff";
+    const safe = try plain(a, hostile);
+    try std.testing.expectEqualStrings("a?b????\u{FFFD}", safe);
+    try std.testing.expectEqualStrings("a?b????\u{FFFD}", try plainText(a, hostile));
+}
+
+test "a closing tag in untrusted text cannot end the surrounding colour" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var b = MarkupBuilder.init(a);
+    try b.appendMarkup("{c}");
+    try b.appendPlain("x{/}y");
+    try b.appendMarkup("{/}");
+    const markup = try b.finish();
+    var tags: u32 = 0;
+    var t: Tokenizer = .{ .s = markup };
+    while (t.next()) |tok| tags += @intFromBool(tok == .mark);
+    try std.testing.expectEqual(@as(u32, 2), tags); // only the trusted pair
+    try std.testing.expectEqual(@as(usize, 5), cells(markup));
+    // Padded into a coloured cell, the escape survives intact.
+    try std.testing.expectEqualStrings("{c}x{{/}y{/} ", try pad(a, markup, 6, .left));
 }

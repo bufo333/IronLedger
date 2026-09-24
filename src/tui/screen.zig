@@ -151,27 +151,25 @@ pub const Screen = struct {
         var style = base;
         var col: i32 = x;
         const limit: i32 = x + @as(i32, width);
-        var i: usize = 0;
-        while (i < s.len) {
-            // markup token: `{a}` … `{/}`
-            if (s[i] == '{' and i + 2 < s.len and s[i + 2] == '}') {
-                if (Style.fromMarkup(s[i + 1])) |st| {
+        var t: table_mod.Tokenizer = .{ .s = s };
+        while (t.next()) |tok| {
+            const cp = switch (tok) {
+                .mark => |m| {
+                    const st = Style.fromMarkup(m).?; // every tag in `marks` has a style (tested)
                     style = if (st == .normal) base else st;
-                    i += 3;
                     continue;
-                }
-            }
-            const g = table_mod.nextGlyph(s, i);
-            i += g.len;
+                },
+                .glyph => |g| g,
+            };
             if (col >= limit) break;
             // Skulls fall back to letters under --ascii, and a replaced
             // byte to a question mark.
-            const glyph: u21 = if (self.ascii) switch (g.cp) {
+            const glyph: u21 = if (self.ascii) switch (cp) {
                 '☠' => 'X',
                 '◐' => 'x',
                 0xFFFD => '?',
-                else => g.cp,
-            } else g.cp;
+                else => cp,
+            } else cp;
             self.put(col, y, glyph, style);
             col += 1;
         }
@@ -447,12 +445,11 @@ pub fn wrap(alloc: std.mem.Allocator, s: []const u8, width: usize) ![]const []co
         try line.appendSlice(alloc, word);
         cells += w;
         // Track the colour the word leaves open.
-        var i: usize = 0;
-        while (i + 2 < word.len) : (i += 1) {
-            if (word[i] != '{' or word[i + 2] != '}') continue;
-            if (!table_mod.isMark(word[i + 1])) continue;
-            open = if (word[i + 1] == '/') null else word[i + 1];
-        }
+        var t: table_mod.Tokenizer = .{ .s = word };
+        while (t.next()) |tok| switch (tok) {
+            .mark => |m| open = if (m == '/') null else m,
+            .glyph => {},
+        };
     }
     if (cells > 0 or line.items.len > 0) try out.append(alloc, try line.toOwnedSlice(alloc));
     return out.toOwnedSlice(alloc);
@@ -614,6 +611,22 @@ test "a resize that cannot allocate keeps the old buffer" {
     try std.testing.expectEqual(@as(u16, 10), s.cols);
     s.put(9, 2, 'x', .normal);
     try std.testing.expectEqual(@as(u21, 'x'), s.get(9, 2).ch);
+}
+
+test "an escaped name draws literally inside a coloured span" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var s = try Screen.init(std.testing.allocator, 12, 1);
+    defer s.deinit();
+    var b = table_mod.MarkupBuilder.init(arena.allocator());
+    try b.appendMarkup("{c}");
+    try b.appendPlain("{/}A");
+    try b.appendMarkup("{/}");
+    _ = s.text(0, 0, 12, try b.finish(), .normal);
+    try std.testing.expectEqual(@as(u21, '{'), s.get(0, 0).ch);
+    try std.testing.expectEqual(@as(u21, '/'), s.get(1, 0).ch);
+    try std.testing.expectEqual(@as(u21, 'A'), s.get(3, 0).ch);
+    for (0..4) |x| try std.testing.expectEqual(Style.crit, s.get(@intCast(x), 0).style);
 }
 
 test "every markup tag has a style" {
