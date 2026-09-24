@@ -95,7 +95,10 @@ pub fn enter(self: *App) anyerror!void {
         const view = try q.desk(al, g, q.desk_log_rows);
         if (self.focus == 0 and view.checklist.len > 0) {
             const w = view.checklist[@min(self.cur(0).*, view.checklist.len - 1)];
-            self.switchTab(@enumFromInt(w.jump));
+            // A contact warning opens that engagement's battle orders.
+            if (w.kind == .contact_imminent and w.contract != .none) {
+                self.openOrders(w.contract);
+            } else self.switchTab(@enumFromInt(w.jump));
         } else if (self.focus == 1) {
             if (self.inboxEventAtCursor(view)) |idx| self.modal = .{ .decision = idx };
         } else if (view.log.len > 0) {

@@ -1322,7 +1322,7 @@ the player reads, and a turn that stops until they have.
   advance stops once, on the day the window opens (`Result.contact`), and the
   next advance goes ahead: a heads-up, not an obligation. The window is at
   most the shortest gap between engagements, so an advance never skips it.
-- ☐ 12G.9 **Battle orders** (decided 2026-09-24, from play: a warning with
+- ✅ 12G.9 **Battle orders** (decided 2026-09-24, from play: a warning with
   nowhere to act on it). The contact warning opens a battle-orders box,
   shaped like the other decision pop-ups: the situation (skulls, odds,
   fieldable strength, fights of each munition) and every lever that can

@@ -706,23 +706,14 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
         .cycle_roe => |co| {
             const f = gs.force(co) orelse return Error.UnknownForce;
             if (f.echelon != .company) return Error.NotACompany;
-            const next: force_mod.Roe = switch (f.roe) {
-                .standard => .cautious,
-                .cautious => .hold,
-                .hold => .standard,
-            };
+            const next = f.roe.next();
             _ = try execute(gs, .{ .set_roe = .{ .company = co, .roe = next } });
             return .{ .roe = next };
         },
         .cycle_role => |fid| {
             const f = gs.force(fid) orelse return Error.UnknownForce;
             if (!f.isCombatLance()) return Error.NotACompany;
-            const next: force_mod.LanceRole = switch (f.role) {
-                .fighting => .defense,
-                .defense => .scouting,
-                .scouting => .training,
-                .training, .unassigned => .fighting,
-            };
+            const next = f.role.next();
             _ = try execute(gs, .{ .set_role = .{ .force = fid, .role = next } });
             return .{ .role = next };
         },
