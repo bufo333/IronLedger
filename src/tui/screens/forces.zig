@@ -116,10 +116,7 @@ pub fn key(self: *App, ch: u21) anyerror!void {
             'c' => if (row) |r| {
                 const co = r.company;
                 if (co != .none) {
-                    const res = game.commands.execute(g, .{ .crew_company = co }) catch |err| {
-                        self.say(.crit, "{s}", .{game.cli.errorText(err)});
-                        return;
-                    };
+                    const res = self.execResult(.{ .crew_company = co }) orelse return;
                     self.say(if (res.still_open == 0) .good else .amber, "{s}: {d} hired to fill the manning table · {d} lines still open (no candidates on the boards yet)", .{ try q.forceName(self.a(), g, co), res.hired_count, res.still_open });
                 }
             },
@@ -130,10 +127,7 @@ pub fn key(self: *App, ch: u21) anyerror!void {
                     self.say(.dim, "put the cursor on a company (or one of its hulls) to train it", .{});
                     return;
                 }
-                const res = game.commands.execute(g, .{ .train_company = .{ .company = co } }) catch |err| {
-                    self.say(.crit, "{s}", .{game.cli.errorText(err)});
-                    return;
-                };
+                const res = self.execResult(.{ .train_company = .{ .company = co } }) orelse return;
                 self.say(if (res.enrolled > 0) .good else .amber, "{s}: {d} enrolled at their trades · {d} short of XP · {d} busy · {d} nothing to learn  (:train co:{d} <skill> targets one skill)", .{
                     try q.forceName(self.a(), g, co), res.enrolled, res.short_xp, res.busy, res.nothing_to_learn, @intFromEnum(co),
                 });
@@ -203,10 +197,7 @@ pub fn key(self: *App, ch: u21) anyerror!void {
             },
             'm' => if (row) |r| {
                 if (r.unit == .none) return;
-                const res = game.commands.execute(g, .{ .toggle_mothball = r.unit }) catch |err| {
-                    self.say(.crit, "{s}", .{game.cli.errorText(err)});
-                    return;
-                };
+                const res = self.execResult(.{ .toggle_mothball = r.unit }) orelse return;
                 if (res.mothballed orelse false) self.say(.good, "#{d} mothballed — 20% upkeep, no maintenance wear, no crew needed", .{@intFromEnum(r.unit)}) else self.say(.good, "#{d} reactivating — tech-days before it can fight or move", .{@intFromEnum(r.unit)});
             },
             '$' => if (row) |r| {
@@ -214,10 +205,7 @@ pub fn key(self: *App, ch: u21) anyerror!void {
             },
             'd' => if (row) |r| {
                 if (r.unit != .none) {
-                    const res = game.commands.execute(g, .{ .depot = r.unit }) catch |err| {
-                        self.say(.crit, "{s}", .{game.cli.errorText(err)});
-                        return;
-                    };
+                    const res = self.execResult(.{ .depot = r.unit }) orelse return;
                     self.say(.good, "#{d} queued for depot repair at {s} — HQ screen, [ ] to that HQ, its bays list the job", .{ @intFromEnum(r.unit), try q.hqName(self.a(), g, res.hq) });
                 }
             },
@@ -225,10 +213,7 @@ pub fn key(self: *App, ch: u21) anyerror!void {
                 if (r.force == .none) return;
                 // On a company row: cycle its rules of engagement (12D.4).
                 if (r.is_company) {
-                    const res = game.commands.execute(g, .{ .cycle_roe = r.force }) catch |err| {
-                        self.say(.crit, "{s}", .{game.cli.errorText(err)});
-                        return;
-                    };
+                    const res = self.execResult(.{ .cycle_roe = r.force }) orelse return;
                     self.say(.good, "{s} ROE → {s}", .{ try q.plain(self.a(), r.name), res.roe.?.describe() });
                     return;
                 }
@@ -236,10 +221,7 @@ pub fn key(self: *App, ch: u21) anyerror!void {
                     self.say(.dim, "roles are set on lances, rules of engagement on companies — move the cursor onto a lance or company row", .{});
                     return;
                 }
-                const res = game.commands.execute(g, .{ .cycle_role = r.force }) catch |err| {
-                    self.say(.crit, "{s}", .{game.cli.errorText(err)});
-                    return;
-                };
+                const res = self.execResult(.{ .cycle_role = r.force }) orelse return;
                 self.say(.good, "{s} → {s}: {s}", .{ try q.plain(self.a(), r.name), @tagName(res.role.?), res.role.?.describe() });
             },
             'X' => if (row) |r| {
@@ -249,10 +231,7 @@ pub fn key(self: *App, ch: u21) anyerror!void {
             'R' => if (row) |r| {
                 if (r.unit != .none) {
                     // Gear is field work on every hull kind: order spares for what's destroyed to the hull's site.
-                    const res = game.commands.execute(g, .{ .replace_gear = r.unit }) catch |err| {
-                        self.say(.crit, "{s}", .{game.cli.errorText(err)});
-                        return;
-                    };
+                    const res = self.execResult(.{ .replace_gear = r.unit }) orelse return;
                     if (res.ordered + res.unsourced == 0) {
                         self.say(.good, "#{d}: spares for its broken gear are already on hand or on order — its tech fits them on the weekly repair pass", .{@intFromEnum(r.unit)});
                     } else {

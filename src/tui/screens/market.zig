@@ -82,10 +82,7 @@ pub fn enter(self: *App) anyerror!void {
                 // Structural components are fabricated at a regional bay
                 // (ARCH §9.8); everything else is an acquisition roll — the
                 // command picks (`cover_shortfall`).
-                const r = game.commands.execute(g, .{ .cover_shortfall = .{ .hq = hq_id, .part_key = d.key, .quantity = d.short } }) catch |err| {
-                    self.say(.crit, "refused: {s}", .{game.cli.errorText(err)});
-                    return;
-                };
+                const r = self.execResult(.{ .cover_shortfall = .{ .hq = hq_id, .part_key = d.key, .quantity = d.short } }) orelse return;
                 if (r.fabricated) {
                     self.say(.good, "fabricating {d} × {s} at {s} — a bay job, see the HQ screen", .{ d.short, d.key, try q.hqName(self.a(), g, hq_id) });
                     return;

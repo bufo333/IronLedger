@@ -8,7 +8,10 @@ explain the *why* and point here for the *what*. Do not restate a rule
 from this file elsewhere: link to it.
 
 Every section ends with **Reviewer checks**: the grep or question that
-finds a violation. Run them before opening a pull request.
+finds a violation. `docs/reviewer_checks.sh` runs every mechanical one
+(frontend checks over `src/tui` recursively, core checks outside test
+code) and fails on any output; CI runs it beside the tests and smokes.
+The questions are answered in the pull request.
 
 ---
 
@@ -62,9 +65,9 @@ data          data/*.zon  ·  data/tables/*.zon
 
 ```sh
 # frontends touching the core directly: must print nothing
-grep -nE '\b(g|gs)\.(units|hqs|forces|people|clock|funds|loans|market_listings|contract_offers|supply_policies|unit_transfers|bankrupt|outfit_name|campaign_id)\b' src/tui/*.zig
-grep -nE '\b(g|gs)\.[a-zA-Z_]+\(' src/tui/*.zig | grep -vE '\.(allocator|diff)\('
-grep -nE 'game\.(store|state|hq_ops|contract_market|contract_control|battle|maintenance|medical|tick|planet|faction|chassis|part|force|hq|person|unit|difficulty|dataProvenance)\b' src/tui/*.zig
+grep -nE '\b(g|gs)\.(units|hqs|forces|people|clock|funds|loans|market_listings|contract_offers|supply_policies|unit_transfers|bankrupt|outfit_name|campaign_id)\b' -r --include='*.zig' src/tui
+grep -nE '\b(g|gs)\.[a-zA-Z_]+\(' -r --include='*.zig' src/tui | grep -vE '\.(allocator|diff)\('
+grep -nE 'game\.(store|state|hq_ops|contract_market|contract_control|battle|maintenance|medical|tick|planet|faction|chassis|part|force|hq|person|unit|difficulty|dataProvenance)\b' -r --include='*.zig' src/tui
 # the sim importing the view layer: must print nothing outside test blocks (a test may cross-check a screen against a command)
 grep -n 'queries.zig' src/sim/{state,tick,commands,checklist,hq_ops,battle,maintenance,medical,contract_control,contract_events,field_supply}.zig src/econ/*.zig src/domain/*.zig
 # domain/econ/gen reaching up into the sim: must print nothing (rng.zig is the one leaf)
@@ -149,7 +152,7 @@ grep -nE 'std\.(time|fs|Io|process|posix|os)\b|page_allocator|std\.debug\.print|
 ```sh
 grep -nE '\{[acg]\}|\{/\}' src/domain/*.zig src/sim/*.zig | grep -v -e queries.zig -e table.zig   # must be empty ({d}/{s} are also std.fmt specifiers, so they are not grepped)
 grep -nE 'gs\.(units|hqs|forces|people)\.' src/main.zig                                    # must be empty
-grep -n 'std.mem.indexOf(u8, .*"{' src/tui/*.zig                                           # must be empty
+grep -n 'std.mem.indexOf(u8, .*"{' -r --include='*.zig' src/tui                                           # must be empty
 ```
 
 ---
@@ -188,9 +191,10 @@ grep -n 'std.mem.indexOf(u8, .*"{' src/tui/*.zig                                
 **Reviewer checks**
 
 ```sh
-grep -c 'switch (self.tab)' src/tui/*.zig          # one
-grep -n 'msg_style != .crit\|msg.len == 0' src/tui/*.zig   # only inside execSay
-grep -n '\\x1b' src/tui/*.zig | grep -v -e term.zig -e emblem.zig   # empty
+grep -c 'switch (self.tab)' -r --include='*.zig' src/tui          # one
+grep -n 'msg_style != .crit\|msg.len == 0' -r --include='*.zig' src/tui   # only inside execSay
+grep -rn 'commands.execute(' --include='*.zig' src/tui   # only in App.execResult, or with a `// direct:` reason
+grep -n '\\x1b' -r --include='*.zig' src/tui | grep -v -e term.zig -e emblem.zig   # empty
 grep -nE 'b\.w \* [0-9]+ / 100|b\.w > 1[0-9]0' src/tui/app.zig       # only in layout
 ```
 
@@ -256,7 +260,7 @@ grep -nE 'b\.w \* [0-9]+ / 100|b\.w > 1[0-9]0' src/tui/app.zig       # only in l
 39. **The gate is `zig build test --summary all`,** green, plus both smoke
     scripts (`docs/tui_smoke.py`, `docs/repl_smoke.sh`) for any change
     under `src/tui`, `src/sim/cli.zig`, `src/sim/queries.zig` or
-    `src/main.zig`. Every `src/tui/*.zig` module is listed in the test
+    `src/main.zig`. Every `-r --include='*.zig' src/tui` module is listed in the test
     block at the top of `src/main.zig` so it compile-checks.
 40. **Determinism is a test.** Golden-master runs (fixed seed, scripted
     commands, hashed state) stay green; a change that moves the hash

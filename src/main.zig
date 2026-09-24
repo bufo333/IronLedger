@@ -537,7 +537,8 @@ fn runRepl(gs: *game.state.GameState, io: std.Io, gpa: std.mem.Allocator, store_
             std.debug.print("deleted campaign [{d}]\n", .{id});
             printCampaigns(lobby, al);
         } else if (std.mem.eql(u8, verb, "new")) {
-            const seed: u64 = @intCast(gs.clock.day_index + gs.people.count() + 1);
+            const st = try q.status(al, gs);
+            const seed: u64 = @as(u64, st.day) + st.people + 1;
             gs.deinit();
             gs.* = game.state.GameState.init(gpa, .{ .seed = 3025 + seed });
             std.debug.print("fresh campaign — `start <faction> <profession> <name>` to begin\n", .{});
