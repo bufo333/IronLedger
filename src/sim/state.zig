@@ -1998,25 +1998,95 @@ pub const GameState = struct {
 
     // ------------------------------------------------------- golden master
 
-    /// Fields the golden master leaves out, each for a reason: the arena
-    /// is memory, not state, and `campaign_id` is the save store's row, not
-    /// the campaign.
-    pub const unhashed_fields = [_][]const u8{ "arena", "campaign_id" };
+    /// What happens to a field across a save (rule 45). Persisted: saved and
+    /// restored exactly. Derived: rebuilt on load from persisted owners.
+    /// Session: lives only while the campaign is open and cannot change an
+    /// outcome. Scratch: never outlives the operation that fills it.
+    pub const Persistence = enum { persisted, derived, session, scratch };
 
-    /// The golden master: a digest of every persisted field (`digest.zig`),
+    /// Every `GameState` field and its persistence class: a field missing
+    /// here, or a name that is no field, is a compile error. The golden
+    /// master hashes the persisted and derived ones. Values derived inside a
+    /// persisted owner (an HQ's staffing counts) are rebuilt by the loader,
+    /// and the round-trip digest proves they come back the same.
+    pub const field_persistence = [_]struct { []const u8, Persistence }{
+        .{ "arena", .session }, // the memory the campaign lives in
+        .{ "campaign_id", .session }, // the save store's row, not the campaign
+        .{ "rng", .persisted },
+        .{ "clock", .persisted },
+        .{ "funds", .persisted },
+        .{ "reputation", .persisted },
+        .{ "outfit_name", .persisted },
+        .{ "commander", .persisted },
+        .{ "bankrupt", .persisted },
+        .{ "auto_admit", .persisted },
+        .{ "share_profit_bp", .persisted },
+        .{ "ledger", .persisted },
+        .{ "event_queue", .persisted },
+        .{ "people", .persisted },
+        .{ "units", .persisted },
+        .{ "forces", .persisted },
+        .{ "hqs", .persisted },
+        .{ "contracts", .persisted },
+        .{ "contract_offers", .persisted },
+        .{ "market_listings", .persisted },
+        .{ "loans", .persisted },
+        .{ "spare_parts", .persisted },
+        .{ "part_orders", .persisted },
+        .{ "event_log", .persisted },
+        .{ "next_battle_id", .persisted },
+        .{ "battle_reports", .persisted },
+        .{ "held_hulls", .persisted },
+        .{ "fund_couriers", .persisted },
+        .{ "policies", .persisted },
+        .{ "supply_policies", .persisted },
+        .{ "stock_policies", .persisted },
+        .{ "bay_jobs", .persisted },
+        .{ "candidates", .persisted },
+        .{ "hq_links", .persisted },
+        .{ "unit_transfers", .persisted },
+        .{ "faction_cooling", .persisted },
+        .{ "faction_standing", .persisted },
+        .{ "difficulty", .persisted },
+        .{ "event_memory", .persisted },
+        .{ "stats", .persisted },
+        .{ "rating_history", .persisted },
+        .{ "refit_plans", .persisted },
+        .{ "next_person_id", .persisted },
+        .{ "next_unit_id", .persisted },
+        .{ "next_force_id", .persisted },
+        .{ "next_hq_id", .persisted },
+        .{ "next_contract_id", .persisted },
+    };
+
+    pub fn persistenceOf(comptime name: []const u8) Persistence {
+        inline for (field_persistence) |entry| if (comptime std.mem.eql(u8, entry[0], name)) return entry[1];
+        @compileError("GameState." ++ name ++ " has no persistence class in field_persistence");
+    }
+
+    comptime {
+        @setEvalBranchQuota(20_000);
+        for (@typeInfo(GameState).@"struct".fields) |f| _ = persistenceOf(f.name);
+        for (field_persistence) |entry| if (!@hasField(GameState, entry[0])) @compileError("field_persistence names no field: " ++ entry[0]);
+    }
+
+    fn hashed(comptime name: []const u8) bool {
+        @setEvalBranchQuota(20_000);
+        return switch (persistenceOf(name)) {
+            .persisted, .derived => true,
+            .session, .scratch => false,
+        };
+    }
+
+    /// The golden master: a digest of every persisted and derived field
+    /// (`field_persistence`, `digest.zig`),
     /// RNG words and `next_*_id` counters included. Two runs with the same
     /// seed and command script produce the same hash, and a save loads back
     /// to the hash it was saved at (ARCH §13).
     pub fn hash(self: *const GameState) u64 {
-        comptime for (unhashed_fields) |name| {
-            if (!@hasField(GameState, name)) @compileError("unhashed_fields names no field: " ++ name);
-        };
         var h = std.hash.Wyhash.init(0x42544d43); // "BTMC"
         inline for (@typeInfo(GameState).@"struct".fields) |f| {
-            const skip = comptime for (unhashed_fields) |name| {
-                if (std.mem.eql(u8, name, f.name)) break true;
-            } else false;
-            if (!skip) {
+            if (comptime hashed(f.name)) {
                 digest.update(&h, f.name);
                 digest.update(&h, @field(self, f.name));
             }
@@ -2029,10 +2099,7 @@ pub const GameState = struct {
     /// survive; null when nothing does.
     pub fn firstHashDifference(self: *const GameState, other: *const GameState, buf: []u8) ?[]const u8 {
         inline for (@typeInfo(GameState).@"struct".fields) |f| {
-            const skip = comptime for (unhashed_fields) |name| {
-                if (std.mem.eql(u8, name, f.name)) break true;
-            } else false;
-            if (!skip) {
+            if (comptime hashed(f.name)) {
                 const name_len = @min(f.name.len, buf.len);
                 @memcpy(buf[0..name_len], f.name[0..name_len]);
                 if (digest.firstDifference(buf[name_len..], @field(self, f.name), @field(other, f.name))) |rest| return buf[0 .. name_len + rest.len];
@@ -2041,6 +2108,17 @@ pub const GameState = struct {
         return null;
     }
 };
+
+test "a session field cannot move the golden master; a persisted one does" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 45 });
+    defer gs.deinit();
+    const before = gs.hash();
+    gs.campaign_id = 99; // session: the store's row
+    try std.testing.expectEqual(before, gs.hash());
+    gs.reputation += 1; // persisted
+    try std.testing.expect(gs.hash() != before);
+    try std.testing.expectEqual(GameState.Persistence.session, comptime GameState.persistenceOf("campaign_id"));
+}
 
 test "hiring assigns role-appropriate regular skills" {
     var gs = GameState.init(std.testing.allocator, .{});

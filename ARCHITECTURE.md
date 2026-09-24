@@ -788,8 +788,10 @@ bulk-copy MegaMek data files into the repo without deciding on licensing.
   sim tests: fixed seed + scripted commands → hashed state snapshot.
   `GameState.hash` digests every persisted field (`sim/digest.zig`: each
   element in order, each map order-independently, RNG words and ID
-  counters included; the unhashed fields are listed and checked at
-  compile time), and a played year is pinned to one constant. The
+  counters included). Every field carries a persistence class in
+  `GameState.field_persistence` (persisted, derived, session, scratch),
+  checked at compile time both ways, and the digest hashes the persisted and
+  derived ones. A played year is pinned to one constant. The
   determinism pillar makes regression testing nearly free.
 - Style and every other coding rule: [`docs/coding-contract.md`](docs/coding-contract.md).
 
