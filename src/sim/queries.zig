@@ -481,8 +481,8 @@ pub fn logRow(alloc: Alloc, e: *const state_mod.LogEntry) ![]const u8 {
 }
 
 pub const company_cols: []const table.Col = &.{
-    .{ .name = "co", .justify = .right }, .{ .name = "name" },                   .{ .name = "hq" },                        .{ .name = "posture" },
-    .{ .name = "contract" },              .{ .name = "location" },               .{ .name = "fat", .justify = .right },    .{ .name = "mor", .justify = .right },
+    .{ .name = "co", .justify = .right }, .{ .name = "name" },                   .{ .name = "hq", .drop = 1 },                        .{ .name = "posture" },
+    .{ .name = "contract" },              .{ .name = "location", .drop = 2 },               .{ .name = "fat", .justify = .right },    .{ .name = "mor", .justify = .right },
     .{ .name = "hulls", .justify = .right }, .{ .name = "ready", .justify = .right }, .{ .name = "supply" },               .{ .name = "local funds", .justify = .right },
 };
 
@@ -542,11 +542,11 @@ pub const OfferRow = struct {
 };
 
 pub const board_cols: []const table.Col = &.{
-    .{ .name = "kind" },       .{ .name = "world" },                    .{ .name = "emp" },                     .{ .name = "LY", .justify = .right },
-    .{ .name = "band" },       .{ .name = "mo", .justify = .right },      .{ .name = "pay/mo", .justify = .right }, .{ .name = "total", .justify = .right },
+    .{ .name = "kind" },       .{ .name = "world" },                    .{ .name = "emp" },                     .{ .name = "LY", .justify = .right, .drop = 3 },
+    .{ .name = "band" },       .{ .name = "mo", .justify = .right },      .{ .name = "pay/mo", .justify = .right }, .{ .name = "total", .justify = .right, .drop = 3 },
     .{ .name = "enemy" },      .{ .name = "salv", .justify = .right },    .{ .name = "rights" },                  .{ .name = "transit", .justify = .right },
-    .{ .name = "skulls" },     .{ .name = "rating" },                   .{ .name = "readiest co." },            .{ .name = "tons", .justify = .right },
-    .{ .name = "weight mix" }, .{ .name = "enemy tons" },               .{ .name = "opposition" },              .{ .name = "" },
+    .{ .name = "skulls" },     .{ .name = "rating" },                   .{ .name = "readiest co." },            .{ .name = "tons", .justify = .right, .drop = 1 },
+    .{ .name = "weight mix", .drop = 2 }, .{ .name = "enemy tons", .drop = 2 },               .{ .name = "opposition" },              .{ .name = "" },
 };
 
 pub const ActiveRow = struct {

@@ -478,7 +478,7 @@ ending the turn opens the checklist.
   wall clock, integer C-bills, named RNG streams, commands as a tagged
   union, a golden-master hash for regression.
 - `GAMEPLAY.md` — the intended feel and the loops.
-- `ROADMAP.md` — the stages, built in order; every stage through 12C is
+- `ROADMAP.md` — the stages, built in order; every stage through 12G is
   complete.
 - `TODO.md` — the one list of open work, in the order it is done.
 - `docs/tui.md` — the terminal client's architecture, with the generated

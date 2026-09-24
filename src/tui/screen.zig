@@ -281,14 +281,17 @@ pub const Screen = struct {
         if (inner.h == 0 or inner.w == 0 or t.cols.len == 0) return none;
         const w = try t.widths(alloc);
         const gap: u16 = 2;
+        // Droppable columns leave before anything scrolls; `vis` is what
+        // remains, and the scroll below runs over it.
+        const vis = try table_mod.visibleColumns(alloc, t, w, inner.w, gap);
         const pin_w: u16 = @min(w[0], inner.w);
         const rest_w: usize = if (inner.w > pin_w + gap) inner.w - pin_w - gap else 0;
         // The smallest scroll at which every remaining column fits.
-        var max_scroll: usize = if (t.cols.len > 1) t.cols.len - 2 else 0;
+        var max_scroll: usize = if (vis.len > 1) vis.len - 2 else 0;
         var k: usize = 1;
-        while (k < t.cols.len) : (k += 1) {
+        while (k < vis.len) : (k += 1) {
             var need: usize = 0;
-            for (w[k..], 0..) |cw, j| need += cw + (if (j > 0) gap else 0);
+            for (vis[k..], 0..) |ci, j| need += w[ci] + (if (j > 0) gap else 0);
             if (need <= rest_w) {
                 max_scroll = k - 1;
                 break;
@@ -308,8 +311,9 @@ pub const Screen = struct {
             if (row_idx != null and row_idx.? >= t.rows.len) continue;
             const r: ?table_mod.Row = if (row_idx) |ri| t.rows[ri] else null;
             var x: i32 = inner.x;
-            var ci: usize = 0;
-            while (ci < t.cols.len) : (ci += if (ci == 0) start else 1) {
+            var vi: usize = 0;
+            while (vi < vis.len) : (vi += if (vi == 0) start else 1) {
+                const ci = vis[vi];
                 if (x >= edge) {
                     if (line == 0) hidden_right += 1;
                     continue;
@@ -554,6 +558,24 @@ test "table pins the first column, clamps the scroll and clips at the edge" {
     try std.testing.expectEqual(@as(usize, 0), v2.hidden_right);
     try std.testing.expectEqual(@as(u21, 'n'), s.get(6, 1).ch);
     try std.testing.expectEqual(@as(u21, 'r'), s.get(0, 1).ch);
+}
+
+test "table drops a droppable column instead of scrolling to it" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var s = try Screen.init(std.testing.allocator, 20, 3);
+    defer s.deinit();
+    const t: Table = .{
+        .cols = &.{ .{ .name = "kind" }, .{ .name = "total", .justify = .right, .drop = 1 }, .{ .name = "world" }, .{ .name = "pay", .justify = .right } },
+        .rows = &.{try table_mod.row(a, &.{ "raid", "9,999", "Galatea", "1,200" })},
+    };
+    var scroll: usize = 0;
+    const v = try s.table(a, s.full(), t, 0, null, &scroll);
+    // Without "total", kind(4) + gap + world(7) + gap + pay(5) = 20 fits.
+    try std.testing.expectEqual(@as(usize, 0), v.hidden_left + v.hidden_right);
+    try std.testing.expectEqual(@as(u21, 'G'), s.get(6, 1).ch);
+    try std.testing.expectEqual(@as(u21, '1'), s.get(15, 1).ch);
 }
 
 test "every markup tag has a style" {

@@ -12,6 +12,9 @@ pub const Align = enum { left, right };
 pub const Col = struct {
     name: []const u8,
     justify: Align = .left,
+    /// Drop rank when the table is wider than its rect: 0 never drops;
+    /// higher ranks drop before lower ones, before any column scrolls.
+    drop: u8 = 0,
 };
 
 /// One cell per column, markup allowed (`{a}…{/}`).
@@ -54,6 +57,28 @@ pub const Table = struct {
         return out.toOwnedSlice(alloc);
     }
 };
+
+/// Columns shown in `avail` cells, in order: droppable columns leave,
+/// highest `drop` rank first and the rightmost among equals, until the
+/// rest fit side by side with `gap` between them or none is left to drop.
+/// Whatever still does not fit scrolls. The first column is pinned and
+/// never drops.
+pub fn visibleColumns(alloc: std.mem.Allocator, t: Table, w: []const u16, avail: u16, gap: u16) ![]usize {
+    var vis: std.ArrayListUnmanaged(usize) = .empty;
+    for (0..t.cols.len) |i| try vis.append(alloc, i);
+    while (true) {
+        var need: usize = 0;
+        for (vis.items, 0..) |ci, j| need += w[ci] + (if (j > 0) gap else 0);
+        if (need <= avail) break;
+        var victim: ?usize = null;
+        for (vis.items, 0..) |ci, j| {
+            if (ci == 0 or t.cols[ci].drop == 0) continue;
+            if (victim == null or t.cols[ci].drop >= t.cols[vis.items[victim.?]].drop) victim = j;
+        }
+        _ = vis.orderedRemove(victim orelse break);
+    }
+    return vis.toOwnedSlice(alloc);
+}
 
 /// A row from a cell list literal (which would otherwise die with the
 /// statement that made it).
@@ -170,4 +195,24 @@ test "bar fills proportionally and clamps at both ends" {
     try std.testing.expectEqualStrings("----------", bar(&buf, 50, -1)); // no denominator
     try std.testing.expectEqualStrings("----------", bar(&buf, -5, 100)); // no negative fill
     try std.testing.expectEqualStrings("##########", bar(&buf, 500, 100)); // never past full
+}
+
+test "droppable columns leave highest rank first, rightmost among equals, before anything scrolls" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const t: Table = .{
+        .cols = &.{ .{ .name = "kind", .drop = 9 }, .{ .name = "total", .drop = 3 }, .{ .name = "world" }, .{ .name = "LY", .drop = 3 }, .{ .name = "mix", .drop = 1 } },
+        .rows = &.{},
+    };
+    const w = [_]u16{ 4, 5, 5, 2, 3 };
+    // Everything fits: 4+5+5+2+3 plus four gaps of 2 = 27.
+    try std.testing.expectEqualSlices(usize, &.{ 0, 1, 2, 3, 4 }, try visibleColumns(a, t, &w, 27, 2));
+    // One short: the rightmost rank-3 column goes first.
+    try std.testing.expectEqualSlices(usize, &.{ 0, 1, 2, 4 }, try visibleColumns(a, t, &w, 26, 2));
+    // Then the other rank 3, then the rank 1; the pinned column and the
+    // undroppable one stay even when they still do not fit, and scroll.
+    try std.testing.expectEqualSlices(usize, &.{ 0, 2, 4 }, try visibleColumns(a, t, &w, 16, 2));
+    try std.testing.expectEqualSlices(usize, &.{ 0, 2 }, try visibleColumns(a, t, &w, 11, 2));
+    try std.testing.expectEqualSlices(usize, &.{ 0, 2 }, try visibleColumns(a, t, &w, 5, 2));
 }
