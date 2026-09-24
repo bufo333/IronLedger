@@ -78,7 +78,12 @@ fn runPolicies(gs: *GameState) !void {
         const amount = @min(policy.floor - balance, policy.monthly_cap - policy.sent_this_month);
         if (amount <= 0) continue;
         const eta = gs.courierEtaDays(policy.entity);
-        gs.transferFunds(.outfit, policy.entity, amount, eta) catch continue;
+        // An outfit short of the amount skips this policy until it isn't;
+        // any other failure followed the debit and is not swallowed.
+        gs.transferFunds(.outfit, policy.entity, amount, eta) catch |err| switch (err) {
+            error.InsufficientTreasury => continue,
+            error.OutOfMemory => return error.OutOfMemory,
+        };
         policy.sent_this_month += amount;
         const tags = GameState.treasuryTags(policy.entity);
         try gs.log(.finance, .{ .company = tags.company, .hq = tags.hq }, "[finance] standing policy dispatches {d} c-bills (eta {d} days, {d} of {d} this month)", .{ amount, eta, policy.sent_this_month, policy.monthly_cap });
