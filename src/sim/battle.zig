@@ -205,11 +205,10 @@ fn playerSideIn(gs: *GameState, alloc: std.mem.Allocator, c: *const contract_mod
         var n: u32 = 0;
         for (lance.units.items) |uid| {
             const u = gs.unit(uid) orelse continue;
-            if (!u.canFight()) continue;
+            // A hull that is not operational stays in the hangar.
+            if (!gs.unitOperational(u)) continue;
             const design = chassis_mod.find(u.chassis_key) orelse continue;
-            // No pilot fit for duty → the hull stays in the hangar (Stage 9C.2).
-            const pilot = gs.person(u.pilot) orelse continue;
-            if (!pilot.isAvailable(gs.clock.day_index)) continue;
+            const pilot = gs.person(u.pilot).?;
             const reloaded = hasTech(gs, u);
 
             // Pass 2: mounts whose family stock can't feed them are silenced,
@@ -287,24 +286,22 @@ fn companyMods(gs: *GameState, c: *const contract_mod.Contract) autoresolve.Camp
     const company = gs.force(c.assigned_company) orelse return mods;
     for (company.children.items) |child_id| {
         const child = gs.force(child_id) orelse continue;
-        if (child.echelon == .lance and child.role == .scouting and child.units.items.len > 0 and !c.terms.command_rights.overridesScouting())
+        if (child.echelon == .lance and child.role == .scouting and gs.forceOperational(child) and !c.terms.command_rights.overridesScouting())
             mods.recon_quality = 2;
         if (child.echelon == .air_company) {
-            // Air cover is a fighter that can fly: ready, with a pilot.
+            // Air cover is an operational fighter.
             for (child.children.items) |al_id| {
                 const al = gs.force(al_id) orelse continue;
                 for (al.units.items) |uid| {
                     const u = gs.unit(uid) orelse continue;
-                    if (u.kind != .aerospace or u.status != .ready) continue;
-                    const pilot = gs.person(u.pilot) orelse continue;
-                    if (pilot.isAvailable(gs.clock.day_index)) mods.has_air_cover = true;
+                    if (u.kind == .aerospace and gs.unitOperational(u)) mods.has_air_cover = true;
                 }
             }
         }
         if (child.echelon == .support_company) {
             for (child.children.items) |sl_id| {
                 const sl = gs.force(sl_id) orelse continue;
-                if (sl.units.items.len == 0) continue;
+                if (!gs.forceOperational(sl)) continue;
                 switch (sl.support_kind orelse continue) {
                     .mash => mods.has_mash_lance = true,
                     .mess => mods.has_mess_lance = true,
@@ -2113,4 +2110,24 @@ test "every scheduled engagement opens its contact window on an advance" {
     // rolled, never on an advance, and a multi-day advance would skip it.
     try std.testing.expect(tuning.battle.contact_warning_days <= min_gap_days);
     try std.testing.expect(tuning.battle.contact_warning_days <= tuning.battle.press_gap_days);
+}
+
+test "support lances grant their modifiers only while a hull is ready and crewed" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 7003 });
+    defer gs.deinit();
+    const f = try @import("contract_events.zig").damagedCompanyForTest(&gs, 0);
+    const before = companyMods(&gs, f.c);
+    try std.testing.expect(before.has_mash_lance and before.has_salvage_lance);
+    var it = gs.units.iterator();
+    while (it.next()) |e| {
+        const u = e.value_ptr;
+        if (u.kind == .mash) u.status = .mothballed; // parked
+        if (gs.force(u.force)) |lance| if (lance.support_kind == .salvage) {
+            if (gs.person(u.pilot)) |crew| crew.status = .wounded; // nobody to drive it
+        };
+    }
+    const after = companyMods(&gs, f.c);
+    try std.testing.expect(!after.has_mash_lance);
+    try std.testing.expect(!after.has_salvage_lance);
+    try std.testing.expect(after.has_security_lance == before.has_security_lance);
 }

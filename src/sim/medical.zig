@@ -84,8 +84,30 @@ fn isDeployed(gs: *GameState, p: *const person_mod.Person) bool {
     return gs.isCompanyDeployed(gs.companyOf(p.assigned_force));
 }
 
+/// Where a fresh wound is treated: a home HQ's hospital, a MASH lance in
+/// the field, or the field with no MASH.
+pub const Care = enum { home, field_mash, field };
+
+/// A company in the field has MASH care when one of its MASH trucks is
+/// operational.
+pub fn companyFieldsMash(gs: *GameState, company: types.ForceId) bool {
+    var it = gs.units.iterator();
+    while (it.next()) |entry| {
+        const u = entry.value_ptr;
+        if (u.kind == .mash and gs.companyOf(u.force) == company and gs.unitOperational(u)) return true;
+    }
+    return false;
+}
+
+/// The care a person's wound gets today.
+pub fn careFor(gs: *GameState, p: *const person_mod.Person) Care {
+    const company = gs.companyOf(p.assigned_force);
+    if (!gs.isCompanyDeployed(company)) return .home;
+    return if (companyFieldsMash(gs, company)) .field_mash else .field;
+}
+
 /// Triage & recovery time for a fresh wound.
-pub fn healDays(gs: *GameState, deployed_with_mash: bool) u32 {
+pub fn healDays(gs: *GameState, care: Care) u32 {
     const m = tuning.medical;
     var days: u32 = m.heal_base_days + gs.rng.roll2d6(.medical);
 
@@ -103,14 +125,14 @@ pub fn healDays(gs: *GameState, deployed_with_mash: bool) u32 {
     }
     if (wounded > doctors * m.patients_per_doctor + medics * m.patients_per_medic) days = @intCast(types.applyBp(days, m.understaffed_bp)); // understaffed infirmary
 
-    if (deployed_with_mash) days = @intCast(types.applyBp(days, m.mash_bp)); // MASH lance forward surgery
+    if (care == .field_mash) days = @intCast(types.applyBp(days, m.mash_bp)); // MASH lance forward surgery
     // Home hospital: better facilities, shorter stays.
     var hqit = gs.hqs.iterator();
     var best_hospital: u8 = 0;
     while (hqit.next()) |entry| {
         best_hospital = @max(best_hospital, entry.value_ptr.effectiveFacilityLevel(.hospital));
     }
-    if (!deployed_with_mash and best_hospital > 0) days = @intCast(types.applyBp(days, m.hospital_bp));
+    if (care == .home and best_hospital > 0) days = @intCast(types.applyBp(days, m.hospital_bp));
 
     return @max(days, m.heal_min_days);
 }
@@ -123,7 +145,7 @@ pub fn bedCapacity(gs: *GameState, company: types.ForceId, deployed: bool) u32 {
         var it = gs.units.iterator();
         while (it.next()) |entry| {
             const u = entry.value_ptr;
-            if (u.kind == .mash and u.status != .destroyed and gs.companyOf(u.force) == company) beds += tuning.medical.beds_per_mash;
+            if (u.kind == .mash and gs.companyOf(u.force) == company and gs.unitOperational(u)) beds += tuning.medical.beds_per_mash;
         }
         // Medics (12B.11): staffing the MASH trucks, a bed each up to
         // doubling the trucks; without trucks, an aid station of one bed
@@ -206,12 +228,9 @@ pub fn runDailyHealing(gs: *GameState) !void {
                 p.medbay_admitted = true;
                 try gs.log(.medical, .{ .company = gs.companyOf(p.assigned_force) }, "[medbay] {s} admitted (auto)", .{ try p.fullName(gs.allocator()) });
             }
-            // MASH coverage only helps if their company fields a MASH lance
-            // in the field; at home the hospital takes over. Triage consumes
-            // a ton of medical supplies from wherever they lie (Stage 9B);
-            // an empty dispensary heals half again as slowly.
-            const deployed = isDeployed(gs, p);
-            var days = healDays(gs, deployed);
+            // Triage consumes a ton of medical supplies from wherever they
+            // lie; an empty dispensary heals half again as slowly.
+            var days = healDays(gs, careFor(gs, p));
             if (!gs.takeStock(gs.siteForForce(p.assigned_force), "medical_supplies", 1)) days = @intCast(types.applyBp(days, tuning.medical.no_supplies_bp));
             if (p.has("iron_man")) days = @max(tuning.medical.iron_man_min_days, @as(u32, @intCast(types.applyBp(days, tuning.medical.iron_man_heal_bp)))); // 12B.6
             // A wound with no record behind it (older saves, event
@@ -636,8 +655,54 @@ test "12B.11: medics add field beds and carry patients toward the doctor ratio" 
         gs.person(id).?.assigned_force = co;
     }
     try std.testing.expectEqual(@as(u32, 2), bedCapacity(&gs, co, true));
-    // A MASH truck: 4 beds, plus one per medic up to doubling it.
+    // A crewed MASH truck: 4 beds, plus one per medic up to doubling it.
     const truck = try gs.addUnit("MASH-27");
     try gs.moveUnitToForce(truck, co);
+    try std.testing.expectEqual(@as(u32, 2), bedCapacity(&gs, co, true)); // no crew, no truck beds
+    gs.unit(truck).?.pilot = try gs.hirePerson("D", "River", .vehicle_crew);
     try std.testing.expectEqual(@as(u32, 8), bedCapacity(&gs, co, true));
+}
+
+/// Every MASH truck in the company mothballed: on the books, not rolling.
+fn mothballMash(gs: *GameState, company: types.ForceId) void {
+    var it = gs.units.iterator();
+    while (it.next()) |e| {
+        const u = e.value_ptr;
+        if (u.kind == .mash and gs.companyOf(u.force) == company) u.status = .mothballed;
+    }
+}
+
+test "a MASH truck that cannot roll gives no field beds" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 7001 });
+    defer gs.deinit();
+    const f = try @import("contract_events.zig").damagedCompanyForTest(&gs, 0);
+    const co = f.c.assigned_company;
+    const rolling = bedCapacity(&gs, co, true);
+    mothballMash(&gs, co);
+    const parked = bedCapacity(&gs, co, true);
+    try std.testing.expect(parked < rolling);
+}
+
+test "a deployed patient without a ready MASH lance heals slower than one with it" {
+    var days: [2]u32 = undefined;
+    for (&days, 0..) |*d, with_mash| {
+        var gs = GameState.init(std.testing.allocator, .{ .seed = 7002 });
+        defer gs.deinit();
+        const f = try @import("contract_events.zig").damagedCompanyForTest(&gs, 0);
+        const co = f.c.assigned_company;
+        try std.testing.expect(gs.isCompanyDeployed(co));
+        if (with_mash == 0) mothballMash(&gs, co);
+        var patient: types.PersonId = .none;
+        var it = gs.people.iterator();
+        while (it.next()) |e| if (e.value_ptr.role == .mekwarrior and gs.companyOf(e.value_ptr.assigned_force) == co) {
+            patient = e.key_ptr.*;
+            break;
+        };
+        const p = gs.person(patient).?;
+        p.status = .wounded;
+        p.medbay_admitted = true;
+        try runDailyHealing(&gs);
+        d.* = p.wound_heal_day.? - gs.clock.day_index;
+    }
+    try std.testing.expect(days[0] > days[1]);
 }
