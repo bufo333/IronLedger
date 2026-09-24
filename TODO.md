@@ -50,7 +50,6 @@ D19a, D19b-1, D19b-2a and D19b-2b are done (see Done); the typed endpoint is lef
 
 ## D21. Layering and boundaries (audit #19, #22, #23, #27; rules 1, 4, 6, 17, 26)
 
-- [ ] `cli.zig`: one branch per verb (delete the shadowing `shares`/`autoadmit` at 147-155), strict enum tokens for `xfer` and `office` (345-367), trailing tokens rejected. REPL smoke steps for each refusal.
 - [ ] Reviewer checks use recursive globs (`src/tui/**/*.zig`), add a `commands.execute(` outside `exec`/`execSay` check, and run as a script in CI; the 11 direct calls in screens either go through `execSay` or are listed as result-reading exceptions.
 
 ## D22a. Comments and citations (contract rule 43)
@@ -106,6 +105,7 @@ Contract deliverables closed before this list merged, all from the 2026-09-22 co
 - D20b full-state digest, audit #17: `GameState.hash` digests every persisted field through `sim/digest.zig` (elements in order, maps order-independently, RNG words and ID counters included; `unhashed_fields` checked at compile time); `firstHashDifference` names the first value a round trip lost; a played year is pinned to one golden constant and plays on identically after a save. It found two round-trip losses, both fixed: the decision queue's `next_id` (meta `next_event_id`) and a hall candidate's age (schema v34)
 - D21a layering, audit #19: the contract diagram lists `sim/rng.zig` as a leaf below the domain, with a reviewer grep for any other upward import; `contract_market.zig` moves to `src/sim/`, and the starter company (`generateInto`) to `sim/starter_company.zig`, leaving `gen/company_gen.zig` pure rolls and the manning table
 - D21b row identity, audit #22: `queries.hqDetailView` returns each row's facility beside its text (the HQ screen's `u` reads it; the text-parsing `hqFacilityAtRow` is gone); the Desk's `inboxPane` builds the inbox lines with the decision each belongs to, used by drawing, the cursor range and Enter (the row-counting app helpers are gone); the Forces `+` no longer pre-checks company slots: `raise_company` refuses and `cli.errorText` says why
+- D21c strict command parsing, audit #23: `parseCommand` refuses any token left after a complete command (name verbs consume the rest through `takeRest`); `shares` and `autoadmit` each parse in one branch (bare `autoadmit` toggles); `xfer unit|person`, `office +|-`, `promote … [unpin]` and `cycledifficulty [+|-]` refuse any other word; duplicate verb and usage entries gone; the TUI `:` line prints the usage on a parse error like the REPL; REPL smoke steps for each kind of refusal
 
 ---
 
