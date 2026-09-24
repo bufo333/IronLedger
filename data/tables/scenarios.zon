@@ -1,4 +1,4 @@
-// Scenario types (Stage 12C.9). AtB scenario table, abridged: what kind of
+// Scenario types. AtB scenario table, abridged: what kind of
 // fight an engagement turns out to be, by contract kind. Typed against
 // domain/scenario.zig `Table`. `enemy_bp` scales the opposing force,
 // `roll_mod` shifts the engagement roll (negative = the enemy holds the
@@ -6,7 +6,7 @@
 // scales the salvage claim (raids move on; nobody strips a field they are
 // leaving), `score_mult` weights the contract score, and `support_exposed`
 // puts the support train in the line of fire on a defeat. `recovery_mod`
-// (12D.3) shifts the roll to drag your wrecks off a lost field: your own
+// shifts the roll to drag your wrecks off a lost field: your own
 // ground helps, a push into the enemy's lines hurts (default 0).
 .{
     .scenarios = .{

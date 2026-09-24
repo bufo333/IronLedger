@@ -48,12 +48,9 @@ D19a, D19b-1, D19b-2a and D19b-2b are done (see Done); the typed endpoint is lef
 
 - [ ] Endpoint for untrusted text (decided in review): a type that makes unsafe composition fail to compile (e.g. an `Untrusted` wrapper on stored names, or `MarkupBuilder` as the only way a query composes markup), plus the Part 3 verify-script check. Until then the convention holds: query `text`/`cells`/`lines`/titles are escaped markup, query `name` fields are raw values, and whoever composes a raw name into markup calls `table.plain`.
 
-## D22a. Comments and citations (contract rule 43)
-
-- [ ] Rewrite existing comments to rule 43 (proposal rules 82–84), using the reviewer greps in proposal rule 84. As of 2026-09-23: 42 history or attribution lines, 708 stage tags outside `//!` headers, 133 stage-prefixed test names, one `TODO(stage-4)` (domain/contract.zig). Also trim narrative doc comments to the caller-visible contract, and replace "mirrors" with precise counterpart or adaptation labels. One PR per layer (domain/econ/gen, sim, persist, tui). Until the sweep lands, `verify-contract.sh` checks against a recorded baseline so only new violations fail. Done: domain/econ/gen and all of `src/sim`. Left: `src/persist`, `src/tui` + `main.zig`, and the comments in `data/*.zon` / `data/tables/*.zon` (stage tags such as `// 12.19:` in tuning.zon).
-
 ## D22. Build, data and tests (audit #20, #24, #25, #26, #28; rules 6, 9)
 
+- [ ] The demo CLI prints "Stores at departure (Stage 9B):" (`src/main.zig`): drop the stage tag from the string.
 - [ ] `build.zig.zon` `.paths` adds `docs/logos` and `LICENSE`.
 - [ ] `commands.freightQuote` literals into `tuning.logistics`: 2,000 C-bills per ton per jump (both legs), 500 bp off per transport admin up to 4, the 3-day floor (rule 6).
 - [ ] `tuning.zig:743` validation keyed on field type (`Bp` → 0..100_000, `CBills` ≥ 0) with an explicit allow-list for signed deltas; today the bp bound runs on no field at all.
@@ -66,6 +63,7 @@ D19a, D19b-1, D19b-2a and D19b-2b are done (see Done); the typed endpoint is lef
 ## Data verification
 
 - [ ] `contract.operationsMultBp`: check each contract kind's multiplier against the CamOps contract payment table and cite the page (rule 6).
+- [ ] Dragoons rating bands (`tuning.zon` `rating`): confirm the source (FM: Mercenaries rather than CamOps?) and cite the page.
 
 ---
 
@@ -113,6 +111,7 @@ Contract deliverables closed before this list merged, all from the 2026-09-22 co
 - D22a-2 comments in sim: commands, battle and state (rule 43): about 195 stage tags and every play-feedback or history note out, 64 test names made behavioural, nine doc comments moved onto the declarations they describe, and comments that disagreed with the code corrected (the MASH wound target, truck salvage capacity, payroll counting the wounded, liquidation selling stock); no code changed
 - D22a-3 comments in sim: contract events and market, tick, events, after-action, contract control, medical, HQ ops, checklist, maintenance and personnel (rule 43): about 280 stage tags and the play-feedback notes out, 38 test names behavioural, seven doc comments moved onto their declarations, two wrong rule citations fixed (one rule, one place is rule 7), and comments that disagreed with the code corrected (vehicle bay ratings, hall floors and refresh cadence, turnover counts, what holds the turn); no code changed
 - D22a-4 comments in the rest of sim: queries and the small modules (rule 43): about 55 stage tags and the play-feedback notes out, 16 test names behavioural, two rule citations fixed, two doc comments moved and one duplicate dropped, and comments that disagreed with the code corrected (`tonnageText`'s output, a wreck's upkeep at the cold-storage rate, autoresolve's strength source); `src/sim` is swept; no code changed
+- D22a-5 comments in persist, the terminal client, `main.zig`, `root.zig`, `build.zig` and every `data/*.zon` (rule 43): about 110 stage tags and the history notes out; migration comments keep their schema versions (one split so v26 and v28 each describe their own column); nine test names behavioural; the stock `zig init` tutorial comments in build.zig replaced by short ones; comments that disagreed with the code corrected (a bad battle-report row is `CorruptSave`, not skipped; enum binding; where music is found; root.zig's scope); the D22a sweep is complete, and the repo-wide greps for stage tags, history words, stage-prefixed tests, TODO and "mirrors" return nothing; no code or data value changed
 
 ---
 

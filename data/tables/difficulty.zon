@@ -1,4 +1,4 @@
-// Difficulty levels (12.32, play feedback): the BattleTech experience
+// Difficulty levels: the BattleTech experience
 // ladder, applied to the economy and the opposition — never to the dice.
 // Regular is the game as tuned in tables/tuning.zon; the other rows are
 // basis-point multipliers on top of it (10_000 = as tuned). Typed against
@@ -9,8 +9,8 @@
 //   purchase_bp       scales part orders and hull purchases
 //   enemy_bp          scales the opposing force in every engagement
 //   turnover_delta    added to the turnover target: more notices handed in
-//   scrap_mod         added to the scrap target (12D.2): engine/ammo kills beyond rebuilding
-//   recovery_mod      added to the recovery roll on a lost field (12D.3)
+//   scrap_mod         added to the scrap target: engine/ammo kills beyond rebuilding
+//   recovery_mod      added to the recovery roll on a lost field
 .{
     .levels = .{
         .{ .key = "green", .name = "Green", .contract_pay_bp = 12_200, .fab_cost_bp = 8_000, .purchase_bp = 9_000, .enemy_bp = 8_500, .turnover_delta = -1, .scrap_mod = -2, .recovery_mod = 3, .blurb = "a forgiving economy: fat contracts, cheap fabrication, timid opposition" },

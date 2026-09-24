@@ -1,12 +1,12 @@
-// Opposing forces (Stage 12D.5). AtB/MekHQ generate the enemy as a force
+// Opposing forces. AtB/MekHQ generate the enemy as a force
 // of its own — lances off the enemy house's RAT at a rolled skill level —
 // not as a mirror of yours. Typed against domain/opfor.zig `Table`.
 //
 //   lances_min/max  lances the enemy brings to a typical engagement,
 //                   balanced against a starter company (~14k BV, three
 //                   line lances and a recon lance): a raid meets a bit
-//                   less than you bring, an assault more. Unlike the old
-//                   mirror, it does not shrink as your company wears down.
+//                   less than you bring, an assault more. It does not
+//                   shrink as your company wears down.
 //   quality_mod     added to the 2d6 enemy-quality roll: front-line
 //                   formations on assaults, second-line on garrison worlds
 //

@@ -95,11 +95,11 @@ const legacy_rng_order = [_]rng_mod.Stream{ .generation, .market, .maintenance, 
 
 pub const Store = struct {
     db: sqlite.Db,
-    /// The player new campaigns are filed under (Stage 12 lobby); 0 = none.
+    /// The player new campaigns are filed under; 0 = none.
     player_id: i64 = 0,
 
-    /// One schema step (Stage 12.17): the version it brings the store to,
-    /// and the column it adds. `CREATE TABLE IF NOT EXISTS` in `ddl` covers
+    /// One schema step: the version it brings the store to, and the column
+    /// it adds. `CREATE TABLE IF NOT EXISTS` in `ddl` covers
     /// new tables; columns on existing tables are the only thing SQLite
     /// makes us migrate by hand. Steps are idempotent (column-guarded) so a
     /// store that predates the version key still upgrades cleanly.
@@ -110,16 +110,16 @@ pub const Store = struct {
         .{ .version = 4, .table = "policy", .column = "sent", .sql = "ALTER TABLE policy ADD COLUMN sent INTEGER NOT NULL DEFAULT 0" },
         .{ .version = 5, .table = "supply_policy", .column = "ammo_battles", .sql = "ALTER TABLE supply_policy ADD COLUMN ammo_battles INTEGER NOT NULL DEFAULT 0" },
         .{ .version = 6, .table = "unit", .column = "berth_hq", .sql = "ALTER TABLE unit ADD COLUMN berth_hq INTEGER NOT NULL DEFAULT 0" },
-        // v29 (12G.7): a hull the enemy holds rides in the `unit` table with
+        // v29: a hull the enemy holds rides in the `unit` table with
         // its own slots, distinguished only by a non-empty `held_by`.
         .{ .version = 29, .table = "unit", .column = "held_by", .sql = "ALTER TABLE unit ADD COLUMN held_by TEXT NOT NULL DEFAULT ''" },
         .{ .version = 29, .table = "unit", .column = "held_day", .sql = "ALTER TABLE unit ADD COLUMN held_day INTEGER NOT NULL DEFAULT 0" },
         .{ .version = 29, .table = "unit", .column = "held_battle", .sql = "ALTER TABLE unit ADD COLUMN held_battle INTEGER NOT NULL DEFAULT 0" },
-        // v30 (12G.6): a battle decision names the engagement it answers,
+        // v30: a battle decision names the engagement it answers,
         // and a hull won back goes home to the lance it was taken from.
         .{ .version = 30, .table = "pending_event", .column = "battle", .sql = "ALTER TABLE pending_event ADD COLUMN battle INTEGER NOT NULL DEFAULT 0" },
         .{ .version = 30, .table = "unit", .column = "held_force", .sql = "ALTER TABLE unit ADD COLUMN held_force INTEGER NOT NULL DEFAULT 0" },
-        // v31 (12G.6): the part of a haul still to be divided. Older saves
+        // v31: the part of a haul still to be divided. Older saves
         // have no undivided hauls — their salvage was taken at claim time.
         .{ .version = 31, .table = "battle_report", .column = "salvage_unclaimed", .sql = "ALTER TABLE battle_report ADD COLUMN salvage_unclaimed INTEGER NOT NULL DEFAULT 0" },
         .{ .version = 33, .table = "contract", .column = "orders_day", .sql = "ALTER TABLE contract ADD COLUMN orders_day INTEGER" },
@@ -156,10 +156,11 @@ pub const Store = struct {
         .{ .version = 24, .table = "contract", .column = "enemy_lance_tons", .sql = "ALTER TABLE contract ADD COLUMN enemy_lance_tons INTEGER NOT NULL DEFAULT 0" },
         .{ .version = 25, .table = "person", .column = "departed_day", .sql = "ALTER TABLE person ADD COLUMN departed_day INTEGER" },
         .{ .version = 24, .table = "contract", .column = "offer_hq", .sql = "ALTER TABLE contract ADD COLUMN offer_hq INTEGER NOT NULL DEFAULT 0" },
-        // 12G.1: the inbox is answered by event id, not by row.
-        // 12G.5: reports already in a save count as read — upgrading must
-        // not hold the turn on battles the player has long since moved past.
+        // v28: reports already in a save count as read (default 1), so an
+        // upgrade does not hold the turn on battles long since fought.
         .{ .version = 28, .table = "battle_report", .column = "acknowledged", .sql = "ALTER TABLE battle_report ADD COLUMN acknowledged INTEGER NOT NULL DEFAULT 1" },
+        // v26: the inbox is answered by event id, not by row; `load` stamps
+        // ids on rows that default to 0.
         .{ .version = 26, .table = "pending_event", .column = "id", .sql = "ALTER TABLE pending_event ADD COLUMN id INTEGER NOT NULL DEFAULT 0" },
     };
 
@@ -471,7 +472,7 @@ pub const Store = struct {
             var ord: i64 = 0;
             const Writer = struct {
                 // One writer for both, so an owned hull and a held one can
-                // never be saved by two loops that drift apart (12G.7).
+                // never be saved by two loops that drift apart.
                 fn put(unit_st: anytype, slot_st: anytype, c: i64, o: i64, u: *const unit_mod.Unit, held: unit_mod.HeldHull.Mark) !void {
                     try unit_st.bindAll(.{
                         c,                        o,                        @intFromEnum(u.id),    u.chassis_key,
@@ -734,11 +735,10 @@ pub const Store = struct {
         }
 
         {
-            // Battle reports (12G.4): the record a screen reads. Hits and
-            // ammunition are child rows; the ammunition family is stored
-            // by name, not by position, because `part.munition_keys` has
-            // grown before and a positional encoding would re-label old
-            // saves silently.
+            // Battle reports: the record a screen reads. Hits and ammunition
+            // are child rows; the ammunition family is stored by name, not
+            // by position, because `part.munition_keys` can grow and a
+            // positional encoding would silently re-label saved rows.
             const br = try self.db.prepare("INSERT INTO battle_report VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33,?34,?35,?36,?37,?38,?39,?40,?41,?42,?43,?44,?45,?46,?47,?48,?49,?50,?51,?52,?53)");
             defer br.finalize();
             const bh = try self.db.prepare("INSERT INTO battle_report_hit VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22)");
@@ -790,8 +790,7 @@ pub const Store = struct {
                     try ba.bindAll(.{ cid, ord, @as(i64, @intCast(ai)), a.key, @as(i64, a.burned), @as(i64, a.left) });
                     try ba.run();
                 }
-                // 12G.6: the wrecks on offer. Rolled once when the fight
-                // ended, so a reload must offer the same ones — rolling
+                // The wrecks on offer. Rolled once when the fight ended, so a reload must offer the same ones — rolling
                 // again would hand the player a different battlefield.
                 for (r.salvage.candidates, 0..) |sc, si| {
                     try bs.bindAll(.{
@@ -1495,8 +1494,8 @@ pub const Store = struct {
                     .battle = try toId(types.BattleId, st.int(9)),
                 });
             }
-            // A pre-12G.1 save has every id defaulted to 0; stamp them in
-            // load order so the inbox is addressable, then resume past the
+            // A save before schema v26 has every id defaulted to 0; stamp them
+            // in load order so the inbox is addressable, then resume past the
             // highest (the queue owns the numbering, `events.EventQueue`).
             for (gs.event_queue.pending.items, 0..) |*ev, i| {
                 if (ev.id == .none) ev.id = @enumFromInt(i + 1);
@@ -1505,9 +1504,8 @@ pub const Store = struct {
         }
 
         {
-            // Battle reports (12G.4). Child rows are read per report; a
-            // report whose outcome or ROE no longer parses is skipped
-            // rather than half-built — the AAR in the log still has it.
+            // Battle reports. Child rows are read per report; an outcome or
+            // ROE that does not parse is `error.CorruptSave`.
             const br = try self.db.prepare("SELECT ord, id, day, contract, company, kind, enemy_key, scenario, terrain, weather, outcome, held_field, withdrew, roe, roe_overridden, player_power, enemy_power, conditions_mod, close_terrain, air_grounded, convoy_hit, edge_spent_by, recon_quality, avg_fatigue, avg_morale, hits_taken, destroyed, wounded, kia, lost_hulls, missing, enemy_destroyed_bv, kills_credited, prisoners, battle_loss_comp, score_after, score_delta, morale_delta, fatigue_add, battle_loss_pct, salvage_pct, command_rights, silenced_mounts, armor_left, salvage_claimed, salvage_haulable, salvage_cut, salvage_cash, salvage_items, conceded, acknowledged, salvage_unclaimed FROM battle_report WHERE cid = ?1 ORDER BY ord");
             defer br.finalize();
             try br.bindAll(.{cid});
@@ -1664,8 +1662,8 @@ pub const Store = struct {
 
         gs.refreshHqStaffing();
         try upgradeCampaign(&gs, saved_version);
-        // Counters that arrived after the campaign started (12C.8): if the
-        // book is empty but the log has battles, count them up.
+        // Saves before schema v18 have no stats counters: if the book is
+        // empty but the log has battles, count them up.
         if (gs.stats.isEmpty()) recoverStatsFromLog(&gs);
         // Saves without a `next_battle_id` row still hold reports, held hulls
         // and decisions that name battles; numbering resumes past all of them.
@@ -1674,11 +1672,11 @@ pub const Store = struct {
         return gs;
     }
 
-    /// Data-level fixes for campaigns saved by an older schema (Stage
-    /// 12.17). v7: wounds gained located injuries — a wounded person with no
-    /// record gets one so the medbay has something to heal.
+    /// Data-level upgrades for campaigns saved under an older schema.
+    /// Draws from the `generation` stream only when a step needs a roll.
     pub fn upgradeCampaign(gs: *GameState, from_version: u32) !void {
-        // 12C.4: everyone gets a birthday; older saves roll one by trade.
+        // Saves before v16 have no birthdays; each person rolls an age by
+        // role and experience.
         if (from_version < 16) {
             const person_gen = @import("../gen/person_gen.zig");
             var it = gs.people.iterator();
@@ -1689,17 +1687,16 @@ pub const Store = struct {
                 p.setBirthdayFromAge(p.recruited_day, age);
             }
         }
-        // v7 gave wounds located injuries; a wounded person with no record
-        // gets a stand-in at triage (medical.runDailyHealing), so the store
-        // no longer encodes that rule.
+        // Saves before v7 hold wounds with no located injury; triage
+        // (medical.runDailyHealing) gives such a person a stand-in record,
+        // so nothing is upgraded here.
     }
 };
 
-/// Save-file recovery (12C.8), not a rule: the summary's counters only
-/// started counting when they were added, so a campaign saved before that
-/// has a log full of battles and zeros in the book. This reads the AAR
-/// lines the log has kept all along, once, at load. New campaigns count
-/// at the source (battle.zig) and never come through here.
+/// Save-file recovery, not a rule: a campaign saved before schema v18 has
+/// no stats counters, so its log holds battles and its book holds zeros.
+/// This reads the log's AAR lines once, at load. Campaigns with counters
+/// count at the source (battle.zig) and never come through here.
 pub fn recoverStatsFromLog(gs: *GameState) void {
     var st: state_mod.Stats = .{};
     for (gs.event_log.items) |e| {
@@ -1746,7 +1743,7 @@ pub fn recoverStatsFromLog(gs: *GameState) void {
     gs.stats = st;
 }
 
-test "12C.8: counters rebuild from the AAR lines of an older save" {
+test "counters rebuild from the AAR lines of an older save" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1288 });
     defer gs.deinit();
     try gs.log(.battle, .{}, "[AAR] garrison_duty vs DC: victory — power 900 vs 700 (recon 0, fatigue 4, morale 50)", .{});
@@ -1911,22 +1908,22 @@ test "save → load → identical hash, and the loaded campaign keeps playing" {
     _ = try commands.execute(&gs, .{ .set_supply_policy = .{ .company = co, .min_days = 30, .tons = 60 } }); // re-setting replaces
     _ = try commands.execute(&gs, .{ .set_stock_policy = .{ .hq = gs.hqs.keys()[0], .part_key = "ammo_lrm", .min = 10, .target = 30 } });
     _ = try commands.execute(&gs, .{ .set_auto_admit = true });
-    _ = try commands.execute(&gs, .{ .set_shares_pct = 45 }); // 12C.3
+    _ = try commands.execute(&gs, .{ .set_shares_pct = 45 }); // profit shares
     gs.people.getPtr(gs.people.keys()[2]).?.shares = 4;
-    gs.people.getPtr(gs.people.keys()[2]).?.last_raise_day = 3; // 12C.5
-    gs.stats.battles_won = 7; // 12C.8
+    gs.people.getPtr(gs.people.keys()[2]).?.last_raise_day = 3; // raise cooldown
+    gs.stats.battles_won = 7; // campaign stats
     try gs.rating_history.append(gs.allocator(), .{ .year = 3025, .score = 40 });
     _ = try commands.execute(&gs, .{ .advance_days = 40 }); // battles, events, deliveries, couriers
-    _ = try gs.adjustStanding("LC", 12); // faction standing (12.21) rides along
-    // A permanent injury on someone's record (Stage 12.16) rides along.
+    _ = try gs.adjustStanding("LC", 12); // faction standing rides along
+    // A permanent injury on someone's record rides along.
     const scarred = gs.people.keys()[3];
     try gs.people.getPtr(scarred).?.injuries.append(gs.allocator(), .{ .location = .head, .severity = 3, .incurred_day = 5, .heal_done_day = 40, .permanent = true, .healed = true });
-    // A dropship holding a berth (Stage 12.15) rides along.
+    // A dropship holding a berth rides along.
     const ship = try gs.addUnit("LEOPARD");
     gs.unit(ship).?.berth_hq = gs.hqs.keys()[0];
-    // A company's rules of engagement ride along (12D.4).
+    // A company's rules of engagement ride along.
     gs.forces.getPtr(gs.forces.keys()[0]).?.roe = .cautious;
-    // A wreck remembers how it died (12D.2).
+    // A wreck remembers how it died.
     const wreck = try gs.addUnit("GRF-1N");
     gs.unit(wreck).?.markWreckedBy(.engine);
     const before = gs.hash();
@@ -1944,13 +1941,13 @@ test "save → load → identical hash, and the loaded campaign keeps playing" {
     try std.testing.expectEqual(gs.hqs.keys()[0], loaded.unit(ship).?.berth_hq);
     try std.testing.expectEqual(@import("../domain/unit.zig").WreckCause.engine, loaded.unit(wreck).?.wreck);
     try std.testing.expectEqual(@import("../domain/force.zig").Roe.cautious, loaded.forces.getPtr(gs.forces.keys()[0]).?.roe);
-    // Offers keep their opposition (12D.5).
+    // Offers keep their opposition.
     if (gs.contract_offers.items.len > 0) {
         try std.testing.expectEqual(gs.contract_offers.items[0].enemy_lances, loaded.contract_offers.items[0].enemy_lances);
         try std.testing.expectEqual(gs.contract_offers.items[0].enemy_quality, loaded.contract_offers.items[0].enemy_quality);
         try std.testing.expectEqual(gs.contract_offers.items[0].enemy_lance_bv, loaded.contract_offers.items[0].enemy_lance_bv);
-        try std.testing.expectEqual(gs.contract_offers.items[0].enemy_lance_tons, loaded.contract_offers.items[0].enemy_lance_tons); // 12E.3
-        try std.testing.expectEqual(gs.contract_offers.items[0].offer_hq, loaded.contract_offers.items[0].offer_hq); // 12E.4
+        try std.testing.expectEqual(gs.contract_offers.items[0].enemy_lance_tons, loaded.contract_offers.items[0].enemy_lance_tons);
+        try std.testing.expectEqual(gs.contract_offers.items[0].offer_hq, loaded.contract_offers.items[0].offer_hq);
     }
     try std.testing.expectEqual(@as(i32, 12), loaded.standing("LC"));
     try std.testing.expectEqual(@as(usize, 1), loaded.person(scarred).?.injuries.items.len);
@@ -1960,12 +1957,12 @@ test "save → load → identical hash, and the loaded campaign keeps playing" {
     try std.testing.expectEqual(gs.people.count(), loaded.people.count());
     try std.testing.expectEqual(gs.event_log.items.len, loaded.event_log.items.len);
     try std.testing.expectEqual(gs.event_queue.pending.items.len, loaded.event_queue.pending.items.len);
-    // 12G.1: an event is answered by id, so the ids must survive the save —
+    // An event is answered by id, so the ids must survive the save —
     // a length check would pass with every one of them zeroed.
     for (gs.event_queue.pending.items, loaded.event_queue.pending.items) |saved_ev, loaded_ev| {
         try std.testing.expectEqual(saved_ev.id, loaded_ev.id);
         try std.testing.expect(loaded_ev.id != .none);
-        // 12G.6: an event's options are rebuilt from its kind on load, and
+        // An event's options are rebuilt from its kind on load, and
         // a kind with no `entryForKind` entry comes back unanswerable —
         // which a length check or an id check would never notice.
         try std.testing.expectEqual(saved_ev.kind, loaded_ev.kind);
@@ -1973,7 +1970,7 @@ test "save → load → identical hash, and the loaded campaign keeps playing" {
         try std.testing.expectEqual(saved_ev.default_choice, loaded_ev.default_choice);
         try std.testing.expectEqual(saved_ev.needsDecision(), loaded_ev.needsDecision());
         try std.testing.expectEqual(saved_ev.holdsTurn(), loaded_ev.holdsTurn());
-        // 12G.6: a battle decision that forgets which fight it answers
+        // A battle decision that forgets which fight it answers
         // comes back applying to nothing.
         try std.testing.expectEqual(saved_ev.battle, loaded_ev.battle);
     }
@@ -1983,7 +1980,7 @@ test "save → load → identical hash, and the loaded campaign keeps playing" {
         try std.testing.expect(@intFromEnum(ev.id) < loaded.event_queue.next_id);
     }
     // Policies survive the round trip with their current numbers (the
-    // starter HQ's default top-up and provisions line ride along, 12.19).
+    // starter HQ's default top-up and provisions line ride along).
     try std.testing.expectEqual(@as(usize, 2), loaded.policies.items.len);
     try std.testing.expectEqual(gs.policies.items[1].sent_this_month, loaded.policies.items[1].sent_this_month);
     try std.testing.expectEqual(@as(usize, 1), loaded.supply_policies.items.len);
@@ -2082,7 +2079,7 @@ test "one store, many playthroughs: list, overwrite, delete" {
     try std.testing.expectEqual(b.hash(), still.hash());
 }
 
-test "12.17: a v5 store upgrades in place — columns added, version stamped, wounds left to triage" {
+test "a v5 store upgrades in place — columns added, version stamped, wounds left to triage" {
     // A store as the game wrote it at schema 5: no berth_hq on unit, no
     // injury table, no schema_version setting. Only the tables the fixture
     // touches are created by hand; `fromDb` creates the rest.
@@ -2123,7 +2120,7 @@ test "12.17: a v5 store upgrades in place — columns added, version stamped, wo
     try std.testing.expectError(error.SaveNewerThanGame, store.load(std.testing.allocator, 1));
 }
 
-test "12G.4: a battle report round-trips as fields, not as a row count" {
+test "a battle report round-trips as fields, not as a row count" {
     const battle = @import("../sim/battle.zig");
     const part_mod = @import("../domain/part.zig");
     var gs = GameState.init(std.testing.allocator, .{ .seed = 90210 });
@@ -2164,7 +2161,7 @@ test "12G.4: a battle report round-trips as fields, not as a row count" {
     var hulls_seen: usize = 0;
     for (gs.battle_reports.kept.items) |r| hulls_seen += r.hulls.len;
     try std.testing.expect(hulls_seen > 0);
-    // 12G.4: a battle report round-trips as fields, child rows included.
+    // A battle report round-trips as fields, child rows included.
     // Asserting only the count would pass with every hull and every
     // munition family dropped on the floor.
     try std.testing.expectEqual(gs.battle_reports.kept.items.len, loaded.battle_reports.kept.items.len);
@@ -2207,7 +2204,7 @@ test "12G.4: a battle report round-trips as fields, not as a row count" {
     }
 }
 
-test "12G.7: a hull the enemy holds round-trips, slots and all — off the books, not struck off" {
+test "a hull the enemy holds round-trips, slots and all — off the books, not struck off" {
     const battle = @import("../sim/battle.zig");
     const part_mod = @import("../domain/part.zig");
     var gs = GameState.init(std.testing.allocator, .{ .seed = 12007 });
@@ -2521,7 +2518,7 @@ test "a save without the battle counter resumes numbering past every battle it r
     try std.testing.expect(loaded.next_battle_id > max);
 }
 
-test "12G.6: a battle decision round-trips answerable, and still holds the turn" {
+test "a battle decision round-trips answerable, and still holds the turn" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 12006 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .line_officer);
@@ -2557,7 +2554,7 @@ test "12G.6: a battle decision round-trips answerable, and still holds the turn"
     try std.testing.expect(ev.holdsTurn());
 }
 
-test "12G.6: a field repair decision comes back from a save with its three orders" {
+test "a field repair decision comes back from a save with its three orders" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 12069 });
     defer gs.deinit();
     const f = try contract_events.damagedCompanyForTest(&gs, 2);
@@ -2584,7 +2581,7 @@ test "12G.6: a field repair decision comes back from a save with its three order
     for (before.hulls, after.hulls) |x, y| try std.testing.expectEqual(x.armor_after, y.armor_after);
 }
 
-test "12G.6: a recovery decision remembers its battle, and a held hull its lance" {
+test "a recovery decision remembers its battle, and a held hull its lance" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 12066 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .line_officer);
@@ -2625,7 +2622,7 @@ test "12G.6: a recovery decision remembers its battle, and a held hull its lance
     try std.testing.expectEqual(lance, loaded.unit(taken).?.force);
 }
 
-test "12G.6: the wrecks on offer survive a save — the same battlefield after a reload" {
+test "the wrecks on offer survive a save — the same battlefield after a reload" {
     const battle = @import("../sim/battle.zig");
     var gs = GameState.init(std.testing.allocator, .{ .seed = 12060 });
     defer gs.deinit();

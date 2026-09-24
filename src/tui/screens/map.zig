@@ -45,7 +45,7 @@ pub fn draw(self: *App) anyerror!void {
         const is_cursor = i == self.map_cursor;
         const marked = w.hq_here != .none or w.offers_here > 0 or w.companies_here > 0 or w.worked > 0;
         const mark: u21 = if (w.hq_here != .none) '@' else if (is_cursor) '*' else if (self.map_zoom > 1 or marked) 'o' else '·';
-        // Colour by the chosen political/economic lens (12B.9).
+        // Colour by the chosen political/economic lens.
         const lens: Style = switch (self.map_color) {
             .faction => App.factionStyle(w.faction),
             .industry => if (w.industry >= 4) .good else if (w.industry >= 2) .normal else .dim,
@@ -107,7 +107,7 @@ pub fn draw(self: *App) anyerror!void {
         try reach.append(al, "");
         try reach.append(al, "{d}rings grow with comms and spaceport levels{/}");
         if (self.map_color == .faction) {
-            // The legend in full (play feedback): every key on the map with its name.
+            // The legend in full: every key on the map with its name.
             try reach.append(al, "");
             try reach.append(al, "factions   {d}key · colour · name{/}");
             try reach.appendSlice(al, try q.factionRows(al));

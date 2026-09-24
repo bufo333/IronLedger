@@ -1,4 +1,4 @@
-// Awards (Stage 12B.5; MekHQ `personnel/Award`). Typed against
+// Awards (MekHQ `personnel/Award`). Typed against
 // domain/award.zig `AwardRow`. `kind` names the counter on the person the
 // threshold is checked against; `morale` is the bump on receipt.
 .{

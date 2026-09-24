@@ -1,7 +1,7 @@
-// Tuning knobs (Stage 12.17). Typed against domain/tuning.zig `Tuning` at
+// Tuning knobs. Typed against domain/tuning.zig `Tuning` at
 // comptime. Money in C-bills, multipliers in basis points (10_000 = ×1).
-// The formulas live beside their subsystems; this file only holds the
-// numbers they were built on, so play-testing edits land here.
+// The formulas live beside their subsystems; this file holds only their
+// numbers, so balance edits land here.
 .{
     .hq = .{
         .influence_ly = .{ .field = 15, .regional = 60, .brigade = 90 }, // ARCH §9.2
@@ -104,7 +104,7 @@
         .hall_floor_combat = 3,
         .procurement_markup_bp = 11_000,
         .rarity_target = .{ .common = 5, .uncommon = 7, .rare = 9, .very_rare = 11 },
-        .offers_min = 6, // the board always gives a choice (play feedback)
+        .offers_min = 6, // the board always gives a choice
         .offers_max = 10,
         .avail_mod = .{ .a = 2, .b = 1, .c = 0, .d = -1, .e = -2, .f = -3 },
         .periphery_penalty = 2,
@@ -195,7 +195,7 @@
         .mek_medium_max_tons = 55,
         .mek_heavy_max_tons = 75,
         .shot_up_condition_pct = 70,
-        // 12G.2: the armour meter's colour bands. Amber is roughly a hull
+        // The armour meter's colour bands. Amber is roughly a hull
         // that has lost a full exchange; red is one an opposed roll can
         // core (tuning.battle.kill_armorless_severity).
         .armor_amber_pct = 60,
@@ -237,7 +237,7 @@
         .salvage_bv_per_armor_ton = 60,
         .salvage_bv_per_weapon = 150,
         .salvage_bv_per_component = 250,
-        // Garrison probes (12D.6): ~one every six weeks, one lance strong.
+        // Garrison probes: ~one every six weeks, one lance strong.
         .garrison_probe_base_days = 21,
         .garrison_probe_die_days = 3,
         .garrison_probe_lances = 1,
@@ -308,7 +308,7 @@
         .hours_skill_bp = .{ .elite = 7_500, .veteran = 8_500, .regular = 10_000, .green = 11_500, .untrained = 13_000 },
     },
     .rating = .{
-        // CamOps p.? Dragoons rating bands, rescaled to this sim's 0–150 score.
+        // CamOps Dragoons rating bands, rescaled to this sim's 0–150 score.
         .letter_d = 0,
         .letter_c = 30,
         .letter_b = 60,
@@ -334,7 +334,7 @@
         .recruit_bonus_index = 4,
     },
     .contract = .{
-        .rep_vp_per_point = 25, // 12.19: a raid closed at −8 VP earns nothing
+        .rep_vp_per_point = 25, // a raid closed at −8 VP earns nothing
         .rep_vp_bonus_min = -1,
         .rep_vp_bonus_max = 3,
         .standing_vp_divisor = 10,
@@ -366,10 +366,10 @@
         .standing_complete_gain = 5,
         .standing_enemy_loss = 3,
         .standing_breach_loss = 20,
-        .standing_failure_loss = 10, // failure at term (12D.1, CamOps): half a breach, no cooling
+        .standing_failure_loss = 10, // failure at term (CamOps): half a breach, no cooling
         .failure_reputation = -1,
         .interdiction_target = 11, // 1 in 12 a week for an unescorted charter
-        // Threat pay (12E.6; CamOps prices by operation, HBS BattleTech by
+        // Threat pay (CamOps prices by operation, HBS BattleTech by
         // difficulty): half the opposition's excess over the kind's norm,
         // at most ±25%. A 3025 house lance off the RATs averages ~3.9k BV.
         .reference_lance_bv = 3_900,
@@ -416,14 +416,14 @@
         .starter_medical = 10,
         .starter_armor = 20,
         .starter_components_each = 1,
-        .starter_munitions_each = 8, // seven families now (12B.8): keeps the founding warehouse under its 200t
+        .starter_munitions_each = 8, // seven families: keeps the founding warehouse under its 200t
         .provisions_keep_min = 30,
         .provisions_keep_target = 90,
-        // Starter line lances (12E.1, HBS BattleTech / AtB starting lances):
+        // Starter line lances (HBS BattleTech / AtB starting lances):
         // lights on 2–5 (28%), mediums otherwise — the founding bay rebuilds both.
         .starter_light_max = 5,
     },
-    // Real loss (Stage 12D). TechManual "Destroying a 'Mech": a cored
+    // Real loss. TechManual "Destroying a 'Mech": a cored
     // centre torso, a destroyed engine (three engine criticals) or an
     // ammunition explosion; CamOps salvage: whoever holds the field keeps
     // the wrecks.
@@ -449,7 +449,7 @@
             .hold_morale = -2,
             .withdrawal_score = -1,
         },
-        .push_mod = -1, // TUNE: they hold that ground now
+        .push_mod = -1, // TUNE: the enemy holds that ground
         .push_fatigue = 5, // TUNE: nobody sleeps
         .push_mishap_at = 4, // TUNE: ~1 in 6 sorties costs someone
         .push_morale = 3, // TUNE: the company notices you went back

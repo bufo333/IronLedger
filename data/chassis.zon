@@ -1,7 +1,7 @@
 // Curated 3025 chassis catalog (Succession Wars classics). Typed against
 // domain/chassis.zig `[]const Chassis` at comptime.
 //
-// Construction facts (Stage 10 MekLab, TechManual standard IS tech):
+// Construction facts (MekLab, TechManual standard IS tech):
 //   walk_mp → engine rating = tonnage × walk_mp (weight from the engine
 //   table); jump_mp jump jets (0.5/1/2 t by weight class); heat_sinks total
 //   (10 come free with a fusion engine); armor_half_tons of standard armor.
@@ -229,7 +229,7 @@
         .{ .slot = "hull.collars.1", .part = "ship_bays", .class = .equipment },
     } },
 
-    // ------- 12B.8 catalogue breadth: TRO:3025 BattleMechs and variants -------
+    // ------- TRO:3025 BattleMechs and variants -------
     // Re-encoded by hand: walk/jump/sinks canon; loadouts abridged to the
     // parts catalogue; armor sized to fill the frame within the lab's rules;
     // BV and cost approximate // TUNE.
@@ -625,7 +625,7 @@
         .{ .slot = "ra.ammo_lrm.1", .part = "ammo_lrm", .class = .ammo },
     } },
 
-    // ------- 12B.8 combat vehicles (TRO:3026; line-lance hulls, vehicle_crew + tech_mechanic) -------
+    // ------- combat vehicles (TRO:3026; line-lance hulls, vehicle_crew + tech_mechanic) -------
     .{ .key = "SCP-1N", .name = "Scorpion", .tonnage = 25, .bv = 350, .cost = 400_000, .rarity = .common, .kind = .vehicle, .loadout = .{
         .{ .slot = "turret.ac5.1", .part = "ac5", .class = .weapon },
         .{ .slot = "front.mg.1", .part = "mg", .class = .weapon },
@@ -711,7 +711,7 @@
         .{ .slot = "front.slas.2", .part = "slas", .class = .weapon },
     } },
 
-    // ------- 12B.8 more aerospace fighters (TRO:3025) -------
+    // ------- more aerospace fighters (TRO:3025) -------
     .{ .key = "TR-7", .name = "Thrush", .tonnage = 25, .bv = 420, .cost = 980_000, .rarity = .common, .kind = .aerospace, .loadout = .{
         .{ .slot = "nose.mlas.1", .part = "mlas", .class = .weapon },
         .{ .slot = "lw.slas.1", .part = "slas", .class = .weapon },

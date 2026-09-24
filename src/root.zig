@@ -1,5 +1,6 @@
-//! Module root for the simulation core. See ARCHITECTURE.md.
-//! The core is pure and deterministic: no I/O, no wall clock, no globals.
+//! Module root for the simulation core and its SQLite persistence. See
+//! ARCHITECTURE.md. The core (domain, sim, econ, gen) is pure and
+//! deterministic: no I/O, no wall clock, no globals.
 
 const std = @import("std");
 
@@ -19,7 +20,7 @@ pub const scenario = @import("domain/scenario.zig");
 pub const opfor = @import("domain/opfor.zig");
 pub const skulls = @import("domain/skulls.zig");
 pub const terrain = @import("domain/terrain.zig");
-/// Build-time facts (12C.18): the data directory overlaid with `-Ddata=`,
+/// Build-time facts: the data directory overlaid with `-Ddata=`,
 /// and which files it replaced. Constants, not state.
 pub const build_info = @import("build_options");
 
@@ -57,7 +58,7 @@ pub const contract_control = @import("sim/contract_control.zig");
 pub const queries = @import("sim/queries.zig");
 pub const table = @import("sim/table.zig");
 
-// persist/ — SQLite save files (Stage 11)
+// persist/ — SQLite save files
 pub const sqlite = @import("persist/sqlite.zig");
 pub const store = @import("persist/store.zig");
 pub const lobby = @import("persist/lobby.zig");

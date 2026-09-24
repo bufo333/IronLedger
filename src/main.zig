@@ -96,7 +96,7 @@ fn printTable(al: std.mem.Allocator, cols: []const game.table.Col, rows: anytype
     printLines(al, t.render(al) catch return, indent);
 }
 
-/// Clear whatever is holding the turn (12G.5/12G.6): read the
+/// Clear whatever is holding the turn: read the
 /// after-action, answer the battle decision with its default. The demo
 /// is an unattended run, so it takes the default every time — the point
 /// is that it never advances past a fight without acknowledging it.
@@ -136,8 +136,8 @@ fn runDemo(gs: *game.state.GameState, gpa: std.mem.Allocator) !void {
     std.debug.print("{s}\n{s}\n\n", .{ try q.commanderLine(al, gs), try q.payrollLine(al, gs) });
     printOffers(gs, al);
 
-    // Hunt the monthly boards for combat-class work (the Stage 7 demo:
-    // a raid start-to-finish, battles resolved hands-off).
+    // Hunt the monthly boards for combat-class work: a raid
+    // start-to-finish, battles resolved hands-off.
     var pick: ?usize = null;
     var hunts: u32 = 0;
     while (pick == null and hunts < 8) : (hunts += 1) {
@@ -156,7 +156,7 @@ fn runDemo(gs: *game.state.GameState, gpa: std.mem.Allocator) !void {
     _ = try game.commands.execute(gs, .{ .accept_contract = .{ .offer_index = pick orelse 0, .company = co } });
     std.debug.print("\nAccepted — {s}\n", .{(try q.acceptedLine(al, gs)) orelse ""});
 
-    // Stage 9A: fund the deployment — an initial courier plus a standing
+    // Fund the deployment — an initial courier plus a standing
     // top-up policy so the company can pay its suppliers in the field.
     _ = try game.commands.execute(gs, .{ .transfer = .{ .from = .outfit, .to = .{ .company = co }, .amount = 300_000 } });
     _ = try game.commands.execute(gs, .{ .set_policy = .{ .entity = .{ .company = co }, .floor = 200_000, .monthly_cap = 400_000 } });
@@ -164,7 +164,7 @@ fn runDemo(gs: *game.state.GameState, gpa: std.mem.Allocator) !void {
     std.debug.print("\nStores at departure (Stage 9B):\n", .{});
     printSupplies(gs, al);
 
-    // Stage 9C: the HQ works while the company is away — capital by
+    // The HQ works while the company is away — capital by
     // courier for a warehouse expansion, and two side torsos fabricated for
     // the inevitable.
     const seat = (try q.hqList(al, gs))[0].id;
@@ -183,7 +183,7 @@ fn runDemo(gs: *game.state.GameState, gpa: std.mem.Allocator) !void {
     // Run it month by month until completion (report capped at a year).
     // Turn-based: decisions land in the inbox; the demo answers the first
     // one by hand and lets later ones default at their deadlines. A
-    // battle is different (12G.5/12G.6) — the turn stops on the day it
+    // battle is different — the turn stops on the day it
     // lands and waits, so the demo plays the month out in whatever pieces
     // the fighting leaves it, reading and answering as it goes.
     var answered_one = false;
@@ -204,7 +204,7 @@ fn runDemo(gs: *game.state.GameState, gpa: std.mem.Allocator) !void {
             on_station = true;
         };
 
-        // Stage 9B: keep the field stores fed — monthly reload orders shipped
+        // Keep the field stores fed — monthly reload orders shipped
         // to the company (paid by the HQ, freight included), refused if the
         // trucks are already full.
         if (on_station) {
@@ -229,17 +229,17 @@ fn runDemo(gs: *game.state.GameState, gpa: std.mem.Allocator) !void {
         if (!running) break;
     }
 
-    // Stage 9E: the tour ended, but the company is still out there. Bring
+    // The tour ended, but the company is still out there. Bring
     // it home (an idle recall is free; a mid-contract recall is a breach).
     std.debug.print("\n--- contract control ---\n", .{});
     printContracts(gs, al);
     _ = game.commands.execute(gs, .{ .recall_company = co }) catch |err| std.debug.print("recall refused: {s}\n", .{@errorName(err)});
     while (!q.companyAtHome(gs, co)) _ = try game.commands.execute(gs, .{ .advance_days = 5 });
 
-    // Stage 8: the rotation arc — come home worn, rest, heal, train.
+    // The rotation arc — come home worn, rest, heal, train.
     std.debug.print("\n--- tour over: readiness on return ---\n", .{});
     printReadiness(gs, al);
-    // Stage 9C.2: the desk on return — assignments, the medbay, and what
+    // The desk on return — assignments, the medbay, and what
     // the checklist would stop you on before the next turn.
     printLines(al, try q.companyRoster(al, gs, co), "");
     printLines(al, try q.medbay(al, gs), "");
@@ -265,7 +265,7 @@ fn runDemo(gs: *game.state.GameState, gpa: std.mem.Allocator) !void {
     std.debug.print("\n--- after two months of rest and refit ---\n", .{});
     printReadiness(gs, al);
 
-    // Stage 10: into the lab. Swap the first mek's first weapon for a small
+    // Into the lab. Swap the first mek's first weapon for a small
     // laser off the staples shelf — a class-B, like-for-like refit the
     // level-1 bay can do.
     std.debug.print("\n--- the MekLab ---\n", .{});
@@ -296,8 +296,8 @@ fn runDemo(gs: *game.state.GameState, gpa: std.mem.Allocator) !void {
         } else |err| std.debug.print("refit refused: {s}\n", .{@errorName(err)});
     }
 
-    // Stage 9D: the beachhead loop. The contract planet is now a place
-    // we've worked — found a field HQ there, fund it, link it home, and
+    // The beachhead loop. The contract planet is a place the
+    // outfit has worked — found a field HQ there, fund it, link it home, and
     // start the long project that turns a toehold into a ring.
     std.debug.print("\n--- the network: beachhead → field HQ → regional ---\n", .{});
     const worked = q.firstContractPlanet(gs) orelse "";
@@ -324,7 +324,7 @@ fn runDemo(gs: *game.state.GameState, gpa: std.mem.Allocator) !void {
     std.debug.print("\nCampaign log (last 12):\n", .{});
     printLines(al, try q.logLines(al, gs, 12, .all), "  ");
 
-    // Stage 9A: money lives in places. Books per entity.
+    // Money lives in places. Books per entity.
     std.debug.print("\n--- treasuries & per-entity books ---\n", .{});
     printTreasuries(gs, al);
     const st = try q.status(al, gs);
@@ -340,7 +340,7 @@ fn runDemo(gs: *game.state.GameState, gpa: std.mem.Allocator) !void {
     printBays(gs, al);
     printStaff(gs, al);
 
-    // Stage 5: the hangar after months in the field — quality drift, broken
+    // The hangar after months in the field — quality drift, broken
     // slots, and the spares pipeline.
     std.debug.print("\n{s}\n", .{try q.hangarSummaryLine(al, gs)});
 
@@ -350,7 +350,7 @@ fn runDemo(gs: *game.state.GameState, gpa: std.mem.Allocator) !void {
     std.debug.print("Run with `zig build run -- --repl` for the interactive loop.\n", .{});
 }
 
-/// The MekLab view (Stage 10): the same query the client's Lab screen draws.
+/// The MekLab view: the same query the client's Lab screen draws.
 fn printLab(gs: *game.state.GameState, al: std.mem.Allocator, uid: game.types.UnitId) void {
     const view = q.lab(al, gs, uid) catch return;
     std.debug.print("LAB {s}\n", .{q.stripMarks(al, view.title) catch view.title});
@@ -361,7 +361,7 @@ fn printLab(gs: *game.state.GameState, al: std.mem.Allocator, uid: game.types.Un
     std.debug.print("  RULES: {s}\n", .{if (view.legal) "legal fit." else "ILLEGAL"});
 }
 
-/// Contracts with their win condition (Stage 9E) and where the companies stand.
+/// Contracts with their win condition and where the companies stand.
 fn printContracts(gs: *game.state.GameState, al: std.mem.Allocator) void {
     printLines(al, q.contractLines(al, gs) catch return, "");
 }
@@ -400,7 +400,7 @@ fn printReadiness(gs: *game.state.GameState, al: std.mem.Allocator) void {
     }
 }
 
-/// The Dragoons rating (12C.6) with its parts.
+/// The Dragoons rating with its parts.
 fn printRating(gs: *game.state.GameState, al: std.mem.Allocator) void {
     const r = q.rating(al, gs) catch return;
     std.debug.print("Dragoons rating {s} ({d})\n", .{ r.letter, r.score });
@@ -408,7 +408,7 @@ fn printRating(gs: *game.state.GameState, al: std.mem.Allocator) void {
 }
 
 /// Stocks at every site with tonnage vs. capacity; burn & days-of-supply
-/// for deployed companies (Stage 9B): the Supply screen's rows.
+/// for deployed companies: the Supply screen's rows.
 fn printSupplies(gs: *game.state.GameState, al: std.mem.Allocator) void {
     printLines(al, (q.supply(al, gs) catch return).rows, "");
 }
@@ -418,7 +418,7 @@ fn printDemand(gs: *game.state.GameState, al: std.mem.Allocator) void {
     printLines(al, q.demandLines(al, gs) catch return, "");
 }
 
-/// The end-turn checklist (Stage 9C.2). Returns how many warnings printed.
+/// The end-turn checklist. Returns how many warnings printed.
 fn printChecklist(gs: *game.state.GameState, al: std.mem.Allocator) usize {
     const d = q.desk(al, gs, 0) catch return 0;
     if (d.checklist.len == 0) return 0;
@@ -435,7 +435,7 @@ fn printProjects(gs: *game.state.GameState, al: std.mem.Allocator) void {
     for (q.hqList(al, gs) catch return) |h| printLines(al, q.projects(al, gs, h.id) catch continue, "");
 }
 
-/// The back office: posted admins by role (Stage 9C).
+/// The back office: posted admins by role.
 fn printStaff(gs: *game.state.GameState, al: std.mem.Allocator) void {
     for (q.hqList(al, gs) catch return) |h| {
         std.debug.print("hq:{d} {s} back office:\n", .{ @intFromEnum(h.id), q.terminalText(al, h.name) catch h.name });
@@ -459,7 +459,7 @@ fn printStatus(gs: *game.state.GameState, al: std.mem.Allocator) void {
 }
 
 fn runRepl(gs: *game.state.GameState, io: std.Io, gpa: std.mem.Allocator, store_path: [:0]const u8) !void {
-    // The save store (Stage 11): one file, many campaigns.
+    // The save store: one file, many campaigns.
     var lobby = game.lobby.Lobby.open(store_path) catch |err| {
         std.debug.print("could not open save store '{s}': {s}\n", .{ store_path, @errorName(err) });
         return err;
@@ -609,7 +609,7 @@ fn runRepl(gs: *game.state.GameState, io: std.Io, gpa: std.mem.Allocator, store_
                 } else |_| if (std.meta.stringToEnum(game.state.LogCategory, tok)) |cat| {
                     filter = .{ .category = cat };
                 } else if (std.mem.startsWith(u8, tok, "contract:")) {
-                    // Every AAR and event of one contract, past or present (12.23).
+                    // Every AAR and event of one contract, past or present.
                     filter = .{ .contract = @enumFromInt(std.fmt.parseInt(u32, tok[9..], 10) catch 0) };
                 } else if (game.cli.parseTreasury(tok)) |t| {
                     filter = switch (t) {
@@ -690,8 +690,8 @@ fn runRepl(gs: *game.state.GameState, io: std.Io, gpa: std.mem.Allocator, store_
             }
             printLines(al, try q.pnlLines(al, gs, from, st.day, filter), "");
         } else if (std.mem.eql(u8, verb, "day")) {
-            // day [n] [force] — the end-turn checklist gates the advance
-            // (Stage 9C.2): fix it, or `day force` to proceed regardless.
+            // day [n] [force] — the end-turn checklist gates the advance:
+            // fix it, or `day force` to proceed regardless.
             var n: u32 = 1;
             var force = false;
             while (tokens.next()) |t| {
@@ -731,7 +731,7 @@ fn runRepl(gs: *game.state.GameState, io: std.Io, gpa: std.mem.Allocator, store_
         } else if (std.mem.eql(u8, verb, "help") or std.mem.eql(u8, verb, "?")) {
             for (game.cli.verbs) |v| std.debug.print("  {s}\n", .{game.cli.usage(v) orelse v});
         } else {
-            // Every command verb goes through the parser both frontends share (Stage 12.18).
+            // Every command verb goes through the parser both frontends share.
             const parsed = game.cli.parseCommand(verb, &tokens) catch |err| {
                 std.debug.print("{s} — usage: {s}\n", .{ @errorName(err), game.cli.usage(verb) orelse verb });
                 continue;

@@ -1,4 +1,4 @@
-// Special pilot abilities (Stage 12B.6; AtB SPAs, abridged to what the
+// Special pilot abilities (AtB SPAs, abridged to what the
 // autoresolve model can honour). Typed against domain/ability.zig
 // `AbilityRow`. Bought with XP at a training ground.
 .{

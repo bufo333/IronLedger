@@ -27,8 +27,7 @@ pub const store_name = "campaigns.db";
 const music_sub = "music";
 const logos_sub = "logos";
 
-/// Pictures the source tree keeps outside `data/`; the wizard has always
-/// offered them, so they stay in the list after the roots.
+/// Pictures the source tree keeps outside `data/`, scanned after the roots.
 const source_logo_dirs = [_][]const u8{ ".", "logos", "docs/logos" };
 
 pub const Roots = struct {

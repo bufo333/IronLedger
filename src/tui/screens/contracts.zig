@@ -29,7 +29,7 @@ pub fn draw(self: *App) anyerror!void {
         self.screen.lines(inner, &.{"{d}no offers — the board refreshes on the 1st{/}"}, 0, null);
     } else {
         // The offers on top; under them, who could take the one under the
-        // cursor, readiest first (play feedback).
+        // cursor, readiest first.
         const board_rows: u16 = @intCast(@min(view.board.len + 1, inner.h));
         try self.tablePane(.{ .x = inner.x, .y = inner.y, .w = inner.w, .h = board_rows }, try view.boardTable(al), 0, self.focus == 0);
         if (inner.h > board_rows + 2) {
@@ -113,11 +113,11 @@ pub fn enter(self: *App) anyerror!void {
     const g = &self.gs.?;
         const view = try q.contracts(al, g, @enumFromInt(self.hqSelId(g)));
         if (self.focus == 0 and view.board.len > 0) {
-            // Always choose in the open (play feedback): the picker ranks
+            // Always choose in the open: the picker ranks
             // the companies readiest first and says who cannot go.
             self.openModal(.{ .accept_pick = view.board[@min(self.cur(0).*, view.board.len - 1)].index });
         } else if (self.focus == 1 and view.active.len > 0) {
-            // The whole log, full screen (play feedback: the side pane clipped it).
+            // The whole log, full screen: the side pane clips it.
             self.modal_cursor = std.math.maxInt(usize) / 2; // open at the latest entry
             self.modal = .{ .contract_log = view.active[@min(self.cur(1).*, view.active.len - 1)].id };
         } else if (self.focus == 2) {
@@ -133,7 +133,7 @@ pub fn enter(self: *App) anyerror!void {
 pub fn key(self: *App, ch: u21) anyerror!void {
     const al = self.a();
     const g = &self.gs.?;
-        // One board per HQ (12E.4): [ ] steps through them.
+        // One board per HQ: [ ] steps through them.
         if (ch == ']' or ch == '[') {
             const n = (try q.hqList(al, g)).len;
             if (n > 0) self.hq_sel = if (ch == ']') (self.hq_sel + 1) % n else (self.hq_sel + n - 1) % n;

@@ -1,4 +1,4 @@
-// Contract difficulty in skulls (Stage 12E.3; the HBS BattleTech skull
+// Contract difficulty in skulls (the HBS BattleTech skull
 // scale, in half-skull steps). Typed against domain/skulls.zig `Table`.
 //
 // The rating is the ratio of your combat power to the opposition's in a
