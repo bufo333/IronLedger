@@ -152,6 +152,11 @@ ID counters, RNG state, logs, ledgers, reports, and derived fields.
 `OutOfMemory` is an error and is not exempt. Arena allocation does not make
 partial mutation acceptable.
 
+Failure atomicity does not require a universal transaction framework or
+command journal. It is achieved by preparation (rule 12), with shared atomic
+helpers owned by each subsystem (rule 14). Rollback is the fallback where
+preparation cannot remove every failure.
+
 ### 12. Mutations follow validate, prepare, commit
 
 Every compound command follows this order:
@@ -166,7 +171,9 @@ Every compound command follows this order:
 
 After the first irreversible mutation, no allocation, formatting, lookup,
 container growth, log construction, or other fallible operation is permitted
-unless an explicit rollback guard restores every prior mutation.
+unless an explicit rollback guard restores every prior mutation. A rollback
+guard is the fallback, not the design: prefer moving the fallible work into
+preparation.
 
 ### 13. Expected refusals consume nothing
 
@@ -367,8 +374,15 @@ pre-check never suppresses a command or invents refusal text.
 ```sh
 rg -n 'gs\.(units|hqs|forces|people)\.' src/main.zig src/tui
 rg -n 'indexOf\([^\n]*"\{|tokenize[^\n]*(line|text)|parse[^\n]*(row|text)' src/tui src/sim/queries.zig
-rg -n '\{[acgr]\}|\{/\}' src/domain src/econ src/gen src/sim --glob '!queries.zig' --glob '!table.zig'
 ```
+
+Markup tags are declared once, in `table.marks` (`{a} {g} {c} {s} {d} {t} {p}
+{/}`); the renderer mapping and the contract-verification script derive their
+set from it, never from a separate hard-coded list. The script checks the
+unambiguous tags (`{a}`, `{g}`, `{t}`, `{p}`, `{/}`) directly. `{c}`, `{s}`
+and `{d}` are also Zig format specifiers, so they are checked contextually or
+through an explicit allowlist, never by a plain grep. A test built on
+`table.marks` fails when a tag is added without updating the check.
 
 - Does the highlighted row carry the exact ID used by Enter?
 - Would adding a wrapped description line change which entity is activated?
@@ -658,9 +672,11 @@ the format supplies them and require exact expected output sizes.
 
 ### 65. Platform support is explicit
 
-The build rejects unsupported targets or provides target-gated implementations.
-POSIX process, signal, path, and terminal assumptions are not compiled
-unconditionally for targets that do not provide them.
+The supported platforms are macOS, Linux and Windows. Terminal, resize
+signalling, child-process, path and audio code has a target-gated
+implementation for each; the build rejects any other target. POSIX process,
+signal, path, and terminal assumptions are not compiled unconditionally for
+targets that do not provide them.
 
 ### 66. Package contents are build truth
 
@@ -702,8 +718,17 @@ or injected-failure test. The test captures the complete gameplay digest,
 forces failure after preparation or during the formerly unsafe boundary, and
 asserts exact state equality.
 
-Tests may cover a shared atomic helper instead of every caller only when every
-caller delegates the full mutation to that helper.
+The requirement is one test per distinct pattern, not one per command.
+Patterns include:
+
+- debit plus asset creation;
+- batch stock consumption plus queue insertion;
+- removal from a roster plus transfer creation;
+- event selection plus its effects;
+- database transaction plus in-memory ID assignment.
+
+A caller shares a helper's test only when it delegates the entire mutation to
+that helper.
 
 ### 70. Persistence tests are adversarial
 
@@ -737,8 +762,9 @@ bash docs/repl_smoke.sh zig-out/bin/game /tmp/r.db
 ```
 
 Changes under `src/tui`, `src/sim/cli.zig`, `src/sim/queries.zig`, or
-`src/main.zig` require both smoke scripts. CI additionally performs a clean
-package build and supported-target compile matrix.
+`src/main.zig` require both smoke scripts. CI installs ripgrep explicitly
+rather than assuming it, and additionally performs a clean package build and
+a compile for every supported platform (rule 65).
 
 ### 73. Contract checks are recursive and executable
 
@@ -816,8 +842,141 @@ Modules and functions are named for the entity or rule, not the screen that
 first needed them. Quantities include units and accounting windows when
 ambiguity is possible.
 
+### 82. Comments explain present truth
+
+Code comments explain present invariants, hazards, interfaces, or durable
+compatibility facts. They never record conversations, authorship, development
+history, roadmap chronology, review findings, or work status. Git and planning
+documents remember how the code arrived; comments explain why the code must
+remain correct.
+
+A comment answers at least one of:
+
+- What invariant must remain true?
+- Why is this implementation non-obvious?
+- What external rule, protocol, or sourcebook requirement governs it?
+- What ownership, lifetime, concurrency, or failure constraint is easy to
+  violate?
+- What compatibility behavior must remain for persisted or external data?
+
+Comments are written in the present tense about the current code. If deleting
+a comment would not make the current implementation harder to understand
+safely, it is omitted.
+
+- **Doc comments state contracts.** A public declaration's doc comment states
+  what callers can rely on: inputs and units, returned meaning, mutation and
+  ownership, failure behavior, determinism and RNG use, relevant invariants,
+  and the governing source. It does not narrate implementation steps.
+- **Inline comments explain hazards, not syntax.** `// Loop over the units.`
+  is rejected; `// Iterate in stable ID order because RNG consumption is part
+  of replay state.` is accepted.
+- **Tests follow the same rules.** A test comment explains the invariant or
+  the fixture's shape. A test name describes behavior, such as `"battle report
+  IDs remain unique after save and load"`, never a roadmap stage or a fix.
+- **Comments change with the code.** A change that invalidates a nearby
+  comment updates or removes it in the same PR; a stale comment is a
+  correctness defect. When a refactor makes code self-explanatory, the comment
+  is deleted rather than rewritten.
+
+```zig
+// Rejected:
+// 12G.6: This used to lose the battle ID, so now we save it here.
+// Play feedback said a week was too short.
+
+// Accepted:
+// A pending recovery decision must retain its battle ID across save/load.
+// The cooldown prevents the same weekly decision from recurring back-to-back.
+```
+
+### 83. Comments hold no history, conversation, or work status
+
+Source comments, test comments, and test names do not contain:
+
+- conversation summaries or quotations, or references to prompts, users,
+  developers, reviewers, agents, or language models;
+- attribution such as "we decided", "the user asked", or "feedback said";
+- previous behavior or change language: "used to", "now", "formerly",
+  "changed from", "after the fix", or when a field, case, or column was added;
+- audit findings, review discussions, PR narratives, commit history, or dates
+  describing when a decision was made;
+- rejected alternatives, unless the alternative remains an immediate and
+  plausible maintenance hazard;
+- work status: "not implemented yet", "will be fixed later", or "temporary"
+  without a tracked removal condition;
+- operational metadata: names, assignments, review status, priority,
+  deadlines, branch names, commit IDs, test-run status, or drifting
+  measurements such as line counts;
+- credentials, tokens, keys, internal URLs, personal information, proprietary
+  conversation content, machine-specific paths, local environment details, or
+  diagnostic output.
+
+**Compatibility boundaries are the only place for history.** Database
+migrations, save-format upgrades, protocol versions, legacy data import,
+platform or ABI compatibility, and workarounds for a specific external
+implementation may describe old representations. Such a comment states the
+exact version boundary, the old representation that can still arrive, the
+deterministic transformation, and, when applicable, the condition for removing
+the path. Schema versions are durable data facts; roadmap stages and
+development dates are not.
+
+```zig
+// Allowed: Saves before schema v31 have no salvage remainder. Reconstruct it
+// from the unresolved report so loading preserves the original allocation total.
+```
+
+**TODO, FIXME, HACK, and XXX are prohibited.** Open work lives in `TODO.md`. A
+comment may carry a stable tracker reference only when the current
+implementation is intentionally incomplete but still correct, for example
+`// Tracked by TODO.md D22: split table decoding without changing row
+semantics.` Removing the tracker item removes the comment in the same change. A
+TODO comment never excuses incorrect behavior. `// TUNE` (rule 24) is not a
+TODO; it marks a placeholder value and names the data that would settle it.
+
+### 84. Citations name durable authorities
+
+Comments cite durable authorities: `ARCHITECTURE.md` headings, coding-contract
+rules, sourcebook edition with page or chapter, protocol and technical
+specifications (SQLite, POSIX, PNG), the MekHQ counterpart (rule 61), or a
+durable decision record. A named rule or heading is preferred over a line
+number. Comments never cite chat transcripts, private messages, prompt text,
+branch names, a commit hash as the only explanation, or issue or PR discussion
+as the only source of a permanent rule. A discussion that produced a lasting
+decision is recorded in the owning document, and code cites that document.
+
+Relationships are named precisely. "Mirrors" is ambiguous (rule 80); use
+`//! MekHQ counterpart: personnel/Person.java.`, `//! Adaptation: companies
+are independently deployable.`, or `/// CamOps, p. 42: lower gunnery is
+better.` A source citation never excuses duplicated code.
+
+Roadmap stage identifiers (`Stage 12`, `12G.6`) belong in `ROADMAP.md`, the
+work tracker, and release notes. A module's top-of-file `//!` doc comment may
+name the stage whose design it implements; no other comment or test name
+carries one.
+
 **Reviewer checks**
 
+```sh
+# Canonical versions live in docs/verify-contract.sh, which fails on new
+# occurrences against a recorded baseline. Allowlists: migration comments
+# naming schema versions, //! MekHQ counterpart and stage headers, and literal
+# test data.
+rg -n -i '//.*\b(play feedback|user asked|we decided|previously|used to|formerly|after the audit|after review|conversation|LLM|Claude|ChatGPT)\b' src
+rg -n '^\s*//[/ ].*\b(Stage [0-9]|1[0-9][A-G]?\.[0-9])' src
+rg -n '\b(TODO|FIXME|HACK|XXX)\b' src
+rg -n '^test "[0-9]' src
+```
+
+- Does every new comment describe present behavior or a durable compatibility
+  boundary?
+- Does any comment reference a conversation, developer, language model, audit,
+  PR narrative, roadmap stage, or previous implementation?
+- Could the explanation move to `ARCHITECTURE.md`, the contract, or the work
+  tracker?
+- Does a migration comment name a real schema or version boundary rather than a
+  development milestone?
+- Does every public doc comment describe caller-visible behavior?
+- Did changed code make a nearby comment stale, or can a comment be deleted
+  because naming now makes the code self-explanatory?
 - Did a facade grow new subsystem logic instead of one dispatch arm?
 - Does temporary work allocate from the campaign arena?
 - Does a catch collapse a system failure into plausible gameplay output?
@@ -827,7 +986,7 @@ ambiguity is possible.
 
 ## 11. Pull requests and delivery
 
-### 82. One branch in flight at a time
+### 85. One branch in flight at a time
 
 A change lands on `main` before the next starts. Branches are sequential,
 never stacked. A branch is complete only when its PR is merged, the branch is
@@ -838,7 +997,7 @@ deleted locally and remotely, and local `main` is pulled.
 - No file is borrowed from another branch to make verification pass.
 - Large work is split into independently correct increments that each land.
 
-### 83. Deliverables are cohesive
+### 86. Deliverables are cohesive
 
 A deliverable has one primary invariant or subsystem outcome. Package fixes,
 schema migrations, frontend tests, and major module decompositions do not
@@ -846,7 +1005,7 @@ share a PR merely because they came from the same audit. Structural moves land
 after behavior fixes that rely on existing line ownership, unless the move is
 required to make the behavior fix safe.
 
-### 84. Exceptions are explicit debt
+### 87. Exceptions are explicit debt
 
 An exception to this contract names:
 
@@ -856,8 +1015,10 @@ An exception to this contract names:
 - the owner and removal deliverable;
 - the test or check preventing the exception from expanding.
 
-“Existing pattern”, “arena-backed”, “only the REPL”, and “unlikely OOM” are not
-exceptions.
+“Existing pattern”, “arena-backed”, and “unlikely OOM” are not exceptions.
+Limited reach, such as a path only the REPL exercises, may lower remediation
+priority, but it does not waive an invariant; a temporary exception is still
+documented and bounded as above.
 
 ### Pull request checklist
 
@@ -881,9 +1042,12 @@ Every PR answers:
 10. Is every new number declared once with units, accounting window, and
     source?
 11. Can every new external string reach only validated plain-text rendering?
-12. Which regression test fails on the old behavior?
-13. Which test proves refusal or injected failure leaves state unchanged?
-14. Are the full gate, both smokes when required, contract script, clean
+12. Do new and edited comments state present truth only, with no history,
+    conversation, work status, or roadmap chronology, and cite durable
+    authorities (rules 82–84)?
+13. Which regression test fails on the old behavior?
+14. Which test proves refusal or injected failure leaves state unchanged?
+15. Are the full gate, both smokes when required, contract script, clean
     package build, and relevant target builds green?
 
 ### Reviewer checks
@@ -896,5 +1060,5 @@ git log --oneline origin/main..HEAD
 
 - Is more than one branch in flight?
 - Does this change combine unrelated audit deliverables?
-- Does a claimed exception satisfy rule 84?
+- Does a claimed exception satisfy rule 87?
 - Is the reviewed commit exactly the commit that passed the gate?

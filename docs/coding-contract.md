@@ -273,9 +273,21 @@ grep -n '@import("tui/' src/main.zig      # one line per src/tui module
 42. **Functions stay short.** Around a hundred lines is the ceiling; a
     `switch` with more than about ten arms of case-specific code becomes
     a table or a module split.
-43. **Doc comments state the rule.** Every `pub fn` says what it decides
-    and where the rule comes from. Play-feedback notes are welcome and
-    name the rule's home, not the screen that surfaced the bug.
+43. **Comments explain present truth.** Code comments explain present
+    invariants, hazards, interfaces, or durable compatibility facts; a
+    `pub` doc comment states the caller-visible contract. They never
+    record conversations, authorship, development history, roadmap
+    chronology, review findings, or work status: no "used to", "now",
+    "previously", feedback anecdotes, names, or references to agents or
+    language models. History is allowed only at compatibility boundaries
+    (migrations, save-format upgrades), naming the version boundary and
+    the transformation. TODO, FIXME, HACK and XXX are prohibited; open
+    work lives in `TODO.md`. Citations name durable authorities
+    (sourcebook page, `ARCHITECTURE.md` heading, contract rule, MekHQ
+    counterpart); a roadmap stage tag appears only in a module's `//!`
+    header, and test names describe behavior. The full text is rules
+    82–84 of `docs/coding-contract-proposed-updated.md`. Applies to new and
+    edited comments; existing ones are swept by `TODO.md` D22a.
 44. **No dead mirrors.** A comment such as "mirrors X", "keep in sync
     with Y" or "same as Z" is a defect report; replace the copy with a
     call to X.
