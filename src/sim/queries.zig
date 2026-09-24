@@ -2168,7 +2168,7 @@ pub const MarketFilter = enum {
         return switch (self) {
             .all => true,
             .mechs => kind == .mek,
-            .vehicles => kind == .vehicle or kind == .mash or kind == .cargo or kind == .mobile_field_base,
+            .vehicles => kind == .vehicle or kind == .mash or kind == .cargo,
             .aerofighters => kind == .aerospace,
             .dropships => kind == .dropship,
             .jumpships => kind == .jumpship,

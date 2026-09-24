@@ -1284,7 +1284,9 @@ the player reads, and a turn that stops until they have.
     tech, so a fight was followed by up to six days of nothing and the
     order never mattered. Now the night after every fight the company's
     techs **pool** a share of their spare hours
-    (`tuning.maintenance.push_hours_bp`) and work through the damage with
+    (`tuning.maintenance.push_hours_bp`), plus a shift from the Logistics
+    lance's field workshop when that lance is ready
+    (`push_workshop_hours`), and work through the damage with
     the company's field armour and spares, with as many patches on one
     hull as the budget reaches. Three orders: **worst-hit first** (pull
     the near-wrecks back from zero armour, where one hard hit kills),

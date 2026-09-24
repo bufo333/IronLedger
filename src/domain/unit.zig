@@ -14,7 +14,6 @@ pub const UnitKind = enum {
     infantry,
     // Support echelon — these fight nobody but win battles (ARCH §3.4):
     mash,
-    mobile_field_base,
     cargo,
     dropship,
     jumpship,
@@ -28,7 +27,7 @@ pub const UnitKind = enum {
         return switch (self) {
             .mek => .mek,
             .aerospace => .asf,
-            .vehicle, .mash, .mobile_field_base, .cargo => .vehicle,
+            .vehicle, .mash, .cargo => .vehicle,
             else => null,
         };
     }
@@ -87,7 +86,7 @@ const Role = @import("person.zig").Role;
 pub fn crewRoleFor(kind: UnitKind) Role {
     return switch (kind) {
         .mek => .mekwarrior,
-        .vehicle, .mash, .mobile_field_base, .cargo => .vehicle_crew,
+        .vehicle, .mash, .cargo => .vehicle_crew,
         .aerospace => .aero_pilot,
         .battle_armor => .ba_trooper,
         .infantry => .infantry,
@@ -100,7 +99,7 @@ pub fn crewRoleFor(kind: UnitKind) Role {
 pub fn techRoleFor(kind: UnitKind) ?Role {
     return switch (kind) {
         .mek => .tech_mek,
-        .vehicle, .mash, .mobile_field_base, .cargo => .tech_mechanic,
+        .vehicle, .mash, .cargo => .tech_mechanic,
         .aerospace, .dropship, .jumpship => .tech_aero,
         .battle_armor => .tech_ba,
         .infantry => null,
@@ -114,7 +113,7 @@ pub fn maintenanceHours(kind: UnitKind, tonnage: u8) u32 {
     const h = t.maintenance_hours;
     return switch (kind) {
         .mek => if (tonnage <= t.mek_light_max_tons) h.mek_light else if (tonnage <= t.mek_medium_max_tons) h.mek_medium else if (tonnage <= t.mek_heavy_max_tons) h.mek_heavy else h.mek_assault,
-        .vehicle, .mash, .mobile_field_base, .cargo => h.vehicle,
+        .vehicle, .mash, .cargo => h.vehicle,
         .aerospace => h.aerospace,
         .battle_armor => h.battle_armor,
         .infantry => 0, // no hull to maintain
@@ -137,7 +136,7 @@ pub fn monthlyCarryCost(kind: UnitKind) types.CBills {
         .aerospace => c.aerospace,
         .battle_armor => c.battle_armor,
         .infantry => c.infantry,
-        .mash, .mobile_field_base => c.mash,
+        .mash => c.mash,
         .cargo => c.cargo,
         .dropship => c.dropship,
         .jumpship => c.jumpship,

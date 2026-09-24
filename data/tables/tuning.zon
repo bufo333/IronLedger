@@ -293,6 +293,7 @@
         .armor_patch_pct = 15,
         .armor_patch_labour = 5_000,
         .push_hours_bp = 5_000, // TUNE: half a week of spare hours in one night's hard work
+        .push_workshop_hours = 20, // TUNE: one shift of the trucks' workshop crews
         .accident_target = 3, // one bad week in twelve after snake-eyes
         .accident_days_base = 5,
         .bay_accident_days_base = 10,

@@ -41,13 +41,6 @@ Done: every Stage 12 feature (12, 12B–12G) has shipped. Part 2 is next.
 
 - [ ] Still uncovered by the smoke: the GAME OVER modal (a fresh campaign starts solvent, so reaching it needs a saved campaign already past all credit as a test fixture; bankruptcy itself stays terminal by design), the exact 120-column layout boundary, and the refusal branch of each confirm once run (they open and close only).
 
-## D16. Battle and medical rule bugs (audit #7, #8, #9, #10, #11; rules 5, 6)
-
-Landing as increments; D16a–D16d are done (see Done); D16e is left.
-
-- [ ] **D16e (decided 2026-09-23: wire it).** A ready mobile field base (`UnitKind.mobile_field_base`, `unitOperational`) adds tech-hours to the night-after-battle repair push budget (`maintenance.repairBudget`), with its own tuning value and test. The unread `autoresolve.CampaignMods.has_field_repair` flag, set by the transport lance, is deleted.
-- Design backlog (not a defect): per-site hospital and doctor capacity (#7). ARCHITECTURE.md never specified per-site care; decide there first.
-
 ## D17. Logistics accounting (audit #6, #12; rules 5, 6, 27)
 
 - [ ] `freightBetween` split into quote and commit; `shipStock` reserves throughput after `debitPurchase` succeeds (commands.zig:1784, 1816-1825).
@@ -99,6 +92,15 @@ Landing as increments; D16a–D16d are done (see Done); D16e is left.
 
 ---
 
+## Design backlog (not defects, not scheduled)
+
+Ideas that would change the game rather than fix it; each needs its design written in ROADMAP.md before it is scheduled.
+
+- Per-site hospital and doctor capacity (audit #7): ARCHITECTURE.md never specified per-site care.
+- A mobile field base as a buyable support asset (ARCHITECTURE §3.4 "field repair capacity"): a Repair support lance with a chassis cited to its sourcebook, sold through the support train, adding to the repair push beyond the Logistics lance's workshop.
+
+---
+
 # Done
 
 Contract deliverables closed before this list merged, all from the 2026-09-22 contract audit. The full item lists are in git history (`docs/contract-todo.md` at `7441a14`).
@@ -112,6 +114,7 @@ Contract deliverables closed before this list merged, all from the 2026-09-22 co
 - D16b field bed ties, audit #8 (PR #58): field beds are handed out in one pass over the priority-sorted patients with a beds-left count per company; ROADMAP 9C.2 corrected (decided 2026-09-23): reloads need a tech but no hours, and uncovered work waits for the next weekly pass
 - D16c vehicle skills, audit #9 (PR #59): `Role.pilotingSkill` beside `Role.primarySkill` is the one role-to-skill pair; the battle reads the hull kind's crew skills (a vehicle fights on gunnery_vee/driving_vee), and escape, recovery, `experience()` and the roster text use the same pair
 - D16d conceded engagements, audit #11 (PR #60): `battle.concede` records a conceded `BattleReport` (defeat) that holds the turn, counts a lost battle and a battle fought, and scores `tuning.battle.score.concede` through `recordBattle` (VP at the usual rate); the after-action sheet shows what was given up instead of an empty fight
+- D16e the field workshop (PR #61, decided 2026-09-23): a ready Logistics lance adds `tuning.maintenance.push_workshop_hours` to the repair push budget; the unread `CampaignMods.has_field_repair` flag and the orphan `mobile_field_base` unit kind (no chassis could field one) are gone
 
 ---
 
