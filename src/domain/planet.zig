@@ -64,7 +64,7 @@ pub fn weightedPickByFaction(rng: *rng_mod.Rng, stream: rng_mod.Stream, faction_
     unreachable;
 }
 
-test "every world's faction is in the factions table and every capital is on the map" {
+test "data: every world's faction is in the factions table and every capital is on the map" {
     const faction = @import("faction.zig");
     try std.testing.expect(catalog.len >= 150);
     for (catalog) |p| try std.testing.expect(faction.find(p.faction) != null);
@@ -78,7 +78,7 @@ test "every world's faction is in the factions table and every capital is on the
     for ([_][]const u8{ "galatea", "solaris7", "skye", "new_home", "outreach", "zebebelgenubi" }) |k| try std.testing.expect(find(k) != null);
 }
 
-test "map loads with unique keys and all five houses present" {
+test "data: map loads with unique keys and all five houses present" {
     try std.testing.expect(catalog.len >= 20);
     for (catalog, 0..) |p, i| {
         for (catalog[i + 1 ..]) |other| {

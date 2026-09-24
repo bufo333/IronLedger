@@ -20,7 +20,7 @@ pub fn find(key: []const u8) ?*const AbilityRow {
     return null;
 }
 
-test "abilities load with unique keys and XP costs" {
+test "data: abilities load with unique keys and XP costs" {
     try std.testing.expectEqual(@as(usize, 8), table.len);
     for (table, 0..) |a, i| {
         try std.testing.expect(a.xp_cost > 0);

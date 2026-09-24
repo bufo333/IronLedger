@@ -105,7 +105,7 @@ pub fn scoutPool(max_tonnage: u8, year: u16, buf: []*const Chassis) []*const Cha
     return buf[0..n];
 }
 
-test "catalog loads from zon with sane values and unique keys" {
+test "data: catalog loads from zon with sane values and unique keys" {
     try std.testing.expect(catalog.len >= 12);
     for (catalog, 0..) |c, i| {
         try std.testing.expect(c.bv > 0);

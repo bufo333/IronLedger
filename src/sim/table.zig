@@ -429,7 +429,7 @@ test "a closing tag in untrusted text cannot end the surrounding colour" {
     try std.testing.expectEqualStrings("{c}x{{/}y{/} ", try pad(a, markup, 6, .left));
 }
 
-test "every data-file string can go into screen markup as it is" {
+test "data: every data-file string can go into screen markup as it is" {
     const catalogues = .{
         @import("../domain/chassis.zig").catalog,  @import("../domain/part.zig").catalog,
         @import("../domain/planet.zig").catalog,   @import("../domain/faction.zig").table,

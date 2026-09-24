@@ -59,7 +59,7 @@ pub fn parse(name: []const u8) ?Level {
     return std.meta.stringToEnum(Level, name);
 }
 
-test "the table lists every level in enum order, and regular is the game as tuned" {
+test "data: the table lists every level in enum order, and regular is the game as tuned" {
     try std.testing.expectEqual(@as(usize, 4), table.levels.len);
     inline for (@typeInfo(Level).@"enum".fields) |f| {
         try std.testing.expectEqualStrings(f.name, table.levels[f.value].key);

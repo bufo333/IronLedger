@@ -99,7 +99,7 @@ pub fn poolBv(force_bv: i64, length_months: u8) i64 {
     return types.applyBp(force_bv, 10_000 + table.reinforcement_bp_per_month * months);
 }
 
-test "every contract kind has an opfor row and rolls within it" {
+test "data: every contract kind has an opfor row and rolls within it" {
     inline for (@typeInfo(contract.ContractKind).@"enum".fields) |f| {
         var found = false;
         for (table.by_kind) |r| if (std.mem.eql(u8, r.kind, f.name)) {

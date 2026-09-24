@@ -305,7 +305,7 @@ fn effectsPlain(gs: *GameState, effects: []const events.Effect) ![]const u8 {
     return out.items;
 }
 
-test "weekly deck: every non-quiet kind resolves through entryForKind" {
+test "data: weekly deck: every non-quiet kind resolves through entryForKind" {
     var roll: u8 = 2;
     while (roll <= 12) : (roll += 1) {
         for ([_]bool{ true, false }) |g| {

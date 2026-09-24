@@ -53,7 +53,7 @@ pub fn roll(rng: *rng_mod.Rng, stream: rng_mod.Stream, faction: []const u8, clas
     return all[rng.random(stream).uintLessThan(usize, all.len)];
 }
 
-test "every RAT entry names a catalogue mek of the right class; every house has all four classes" {
+test "data: every RAT entry names a catalogue mek of the right class; every house has all four classes" {
     try std.testing.expect(table.len >= 6);
     for (table) |row| {
         inline for (.{ chassis.WeightClass.light, .medium, .heavy, .assault }) |class| {
