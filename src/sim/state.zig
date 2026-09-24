@@ -460,8 +460,8 @@ pub const GameState = struct {
     /// Recruit a randomly generated person (AtB-style: experience on 2d6,
     /// skills from the band, names from the tables). Stage 4+: candidates
     /// come through the personnel market with signing bonuses instead.
-    pub fn recruitGenerated(self: *GameState, role: person_mod.Role, hq_id: types.HqId) !types.PersonId {
-        const spec = person_gen.generateWithBonus(&self.rng, role, self.recruitBonus(hq_id));
+    pub fn recruitGenerated(self: *GameState, role: person_mod.Role, hq_id: types.HqId, stream: rng_mod.Stream) !types.PersonId {
+        const spec = person_gen.generateWithBonus(&self.rng, stream, role, self.recruitBonus(hq_id));
         return self.hireFromSpec(spec);
     }
 
@@ -526,7 +526,7 @@ pub const GameState = struct {
         profession: commander_mod.Profession,
     ) CreateCommanderError!types.HqId {
         if (self.commander != null) return error.CommanderExists;
-        const world = planet_mod.weightedPickByFaction(&self.rng, origin.key()) orelse return error.NoHomeWorld;
+        const world = planet_mod.weightedPickByFaction(&self.rng, .generation, origin.key()) orelse return error.NoHomeWorld;
 
         self.commander = .{
             .name = try self.allocator().dupe(u8, name),
@@ -559,7 +559,7 @@ pub const GameState = struct {
         };
         for (staff_plan) |entry| {
             for (0..entry[1]) |_| {
-                const pid = try self.recruitGenerated(entry[0], id);
+                const pid = try self.recruitGenerated(entry[0], id, .generation);
                 self.person(pid).?.posted_hq = id;
             }
         }
@@ -632,7 +632,7 @@ pub const GameState = struct {
             const have = self.hqStaff(hq_id, entry[0]).count;
             var n: u32 = entry[1] -| have;
             while (n > 0) : (n -= 1) {
-                const pid = try self.recruitGenerated(entry[0], hq_id);
+                const pid = try self.recruitGenerated(entry[0], hq_id, .market);
                 self.person(pid).?.posted_hq = hq_id;
                 hired += 1;
             }

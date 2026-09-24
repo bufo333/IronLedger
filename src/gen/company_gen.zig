@@ -15,12 +15,12 @@ const GameState = @import("../sim/state.zig").GameState;
 
 /// Experience distribution for generated pilots (AtB-style weighted roll on
 /// 2d6: most crews Regular, tails Green/Veteran, Elite rare).
-pub fn rollExperience(rng: *rng_mod.Rng) types.ExperienceLevel {
-    return rollExperienceWithBonus(rng, 0);
+pub fn rollExperience(rng: *rng_mod.Rng, stream: rng_mod.Stream) types.ExperienceLevel {
+    return rollExperienceWithBonus(rng, stream, 0);
 }
 
-pub fn rollExperienceWithBonus(rng: *rng_mod.Rng, bonus: i32) types.ExperienceLevel {
-    const roll = @as(i32, rng.roll2d6(.generation)) + bonus;
+pub fn rollExperienceWithBonus(rng: *rng_mod.Rng, stream: rng_mod.Stream, bonus: i32) types.ExperienceLevel {
+    const roll = @as(i32, rng.roll2d6(stream)) + bonus;
     if (roll <= 5) return .green;
     if (roll <= 9) return .regular;
     if (roll <= 11) return .veteran;
@@ -87,8 +87,8 @@ pub fn supportStaffFor(mek_count: u32, combat_personnel: u32) SupportStaff {
 
 /// RAT weight-class roll for one mek, 2d6 (AtB flavor: mediums dominate a
 /// line company, assaults are prizes; bands in tuning.generation).
-pub fn rollWeightClass(rng: *rng_mod.Rng) chassis.WeightClass {
-    const roll = rng.roll2d6(.generation);
+pub fn rollWeightClass(rng: *rng_mod.Rng, stream: rng_mod.Stream) chassis.WeightClass {
+    const roll = rng.roll2d6(stream);
     const tg = tuning.generation;
     return if (roll <= tg.weight_light_max) .light else if (roll <= tg.weight_medium_max) .medium else if (roll <= tg.weight_heavy_max) .heavy else .assault;
 }
@@ -126,7 +126,7 @@ pub fn generateInto(gs: *GameState, name: []const u8) !types.ForceId {
             const design = @import("../domain/rat.zig").roll(&gs.rng, .generation, home, class, gs.clock.date.year);
 
             const unit_id = try gs.addUnit(design.key);
-            const pilot_id = try gs.recruitGenerated(.mekwarrior, gs.homeHqFor(company_id));
+            const pilot_id = try gs.recruitGenerated(.mekwarrior, gs.homeHqFor(company_id), .generation);
             try gs.assignUnit(unit_id, lance_id, pilot_id);
         }
     }
@@ -138,7 +138,7 @@ pub fn generateInto(gs: *GameState, name: []const u8) !types.ForceId {
     for (0..force.lance_size) |_| {
         const design = scouts[gs.rng.random(.generation).uintLessThan(usize, scouts.len)];
         const unit_id = try gs.addUnit(design.key);
-        const pilot_id = try gs.recruitGenerated(.mekwarrior, gs.homeHqFor(company_id));
+        const pilot_id = try gs.recruitGenerated(.mekwarrior, gs.homeHqFor(company_id), .generation);
         try gs.assignUnit(unit_id, recon_id, pilot_id);
     }
 
@@ -161,11 +161,11 @@ pub fn generateInto(gs: *GameState, name: []const u8) !types.ForceId {
         gs.force(lance_id).?.support_kind = plan.kind;
         for (0..force.lance_size) |_| {
             const unit_id = try gs.addUnit(plan.chassis_key);
-            const crew_id = try gs.recruitGenerated(plan.crew_role, gs.homeHqFor(company_id));
+            const crew_id = try gs.recruitGenerated(plan.crew_role, gs.homeHqFor(company_id), .generation);
             try gs.assignUnit(unit_id, lance_id, crew_id);
         }
         for (0..plan.attached_medics) |_| {
-            const id = try gs.recruitGenerated(.medic, gs.homeHqFor(company_id));
+            const id = try gs.recruitGenerated(.medic, gs.homeHqFor(company_id), .generation);
             gs.person(id).?.assigned_force = lance_id;
         }
     }
@@ -178,7 +178,7 @@ pub fn generateInto(gs: *GameState, name: []const u8) !types.ForceId {
     for (staffNeeds(tally)) |entry| {
         if (entry.role.isCombat() or entry.role == .tech_aero) continue;
         for (0..entry.need) |_| {
-            const id = try gs.recruitGenerated(entry.role, gs.homeHqFor(company_id));
+            const id = try gs.recruitGenerated(entry.role, gs.homeHqFor(company_id), .generation);
             gs.person(id).?.assigned_force = company_id;
         }
     }
@@ -259,7 +259,7 @@ test "generateInto builds the full starter force and is deterministic" {
 test "experience roll is 2d6-shaped" {
     var rng = rng_mod.Rng.init(1234);
     var counts = [_]u32{0} ** 4;
-    for (0..10_000) |_| counts[@intFromEnum(rollExperience(&rng))] += 1;
+    for (0..10_000) |_| counts[@intFromEnum(rollExperience(&rng, .generation))] += 1;
     // Regular (6–9 on 2d6) must dominate; Elite (12) must be rare but present.
     try std.testing.expect(counts[1] > counts[0]);
     try std.testing.expect(counts[1] > counts[2]);

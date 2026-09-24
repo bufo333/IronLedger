@@ -441,7 +441,7 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
         },
         .recruit => |role| {
             // The verb names no HQ: a recruit signs on at the outfit's seat.
-            const id = try gs.recruitGenerated(role, gs.homeHqFor(.none));
+            const id = try gs.recruitGenerated(role, gs.homeHqFor(.none), .market);
             return .{ .hired = id };
         },
         .fire => |id| {
@@ -622,7 +622,7 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
         .set_office_staff => |o| {
             if (gs.hqs.getPtr(o.hq) == null) return Error.UnknownHq;
             if (o.delta > 0) {
-                const id = try gs.recruitGenerated(o.role, o.hq);
+                const id = try gs.recruitGenerated(o.role, o.hq, .market);
                 gs.postToHq(id, o.hq) catch return Error.UnknownHq;
                 return .{ .hired = id };
             }
@@ -1077,7 +1077,7 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
                     if (personnel.isPooledRole(n.role)) {
                         // MekHQ hires astechs and medics to complement on
                         // demand: no market, no signing bonus, salary only.
-                        const spec = person_gen.generateWithBonus(&gs.rng, n.role, gs.recruitBonus(gs.homeHqFor(company)));
+                        const spec = person_gen.generateWithBonus(&gs.rng, .market, n.role, gs.recruitBonus(gs.homeHqFor(company)));
                         const id = try gs.hireFromSpec(spec);
                         gs.person(id).?.assigned_force = company;
                         hired += 1;
@@ -2631,8 +2631,8 @@ test "12: a raised company is an empty skeleton; hulls bought for it land in a l
 
     // Crews come from the halls: seed one of each role (and only those) and fill the seats.
     gs.candidates.clearRetainingCapacity();
-    try gs.candidates.append(gs.allocator(), .{ .hq = hq, .spec = person_gen.generate(&gs.rng, .mekwarrior), .asking_bonus = 0, .listed_day = 0, .expires_day = 400 });
-    try gs.candidates.append(gs.allocator(), .{ .hq = hq, .spec = person_gen.generate(&gs.rng, .tech_mek), .asking_bonus = 0, .listed_day = 0, .expires_day = 400 });
+    try gs.candidates.append(gs.allocator(), .{ .hq = hq, .spec = person_gen.generate(&gs.rng, .market, .mekwarrior), .asking_bonus = 0, .listed_day = 0, .expires_day = 400 });
+    try gs.candidates.append(gs.allocator(), .{ .hq = hq, .spec = person_gen.generate(&gs.rng, .market, .tech_mek), .asking_bonus = 0, .listed_day = 0, .expires_day = 400 });
     const c = try execute(&gs, .{ .crew_company = co });
     try std.testing.expect(gs.unit(r.unit).?.pilot != .none);
     try std.testing.expect(gs.unit(r.unit).?.tech != .none);
@@ -3265,7 +3265,7 @@ test "9C: construction is paid by the HQ and the back office sets the pace" {
     const unstaffed = hq_ops.paperworkDaysFor(&gs, hq_id);
     try std.testing.expect(unstaffed > staffed);
     for (0..2) |_| {
-        const id = try gs.recruitGenerated(.admin_command, gs.homeHqFor(.none));
+        const id = try gs.recruitGenerated(.admin_command, gs.homeHqFor(.none), .market);
         _ = try execute(&gs, .{ .post_person = .{ .person = id, .hq = hq_id } });
     }
     try std.testing.expect(hq_ops.paperworkDaysFor(&gs, hq_id) < unstaffed);

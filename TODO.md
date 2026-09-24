@@ -50,9 +50,10 @@ D19a, D19b-1, D19b-2a and D19b-2b are done (see Done); the typed endpoint is lef
 
 ## D20. Determinism (audit #17, #18; rules 1, 40)
 
+D20a is done (see Done); D20b is left.
+
+
 - [ ] `stateHash` (state.zig:1939-2040) digests every persisted field in canonical order, RNG bytes and `next_*_id` included; one golden constant pinned for a fixed seed and script.
-- [ ] RNG streams carry explicit stable salts instead of the enum ordinal (rng.zig:7-28).
-- [ ] `person_gen.generateWithBonus` and `company_gen.rollWeightClass` take the caller's stream; hall (contract_market.zig:501), market (245, 384), prisoners (battle.zig:787), salvage (1130) and events (contract_events.zig:1196) pass their own.
 
 ## D21. Layering and boundaries (audit #19, #22, #23, #27; rules 1, 4, 6, 17, 26)
 
@@ -110,6 +111,7 @@ Contract deliverables closed before this list merged, all from the 2026-09-22 co
 - D19b-1 one markup tokenizer, audit #15 (PR #67): `table.Tokenizer` is the one reader of screen markup (drawing, width, padding, wrapping, plain CLI text); `{{` is a literal brace; `MarkupBuilder` (`appendPlain` sanitizes and escapes, `appendMarkup` for trusted literals) and `table.plain`; `queries.stripMarks` is `table.plainText`, which knows every tag and sanitizes controls
 - D19b-2a free-text names escaped, audit #15 (PR #68): the name helpers (`forceName`, `hqName`, `personName`, `personText`) return escaped markup; every query and client site that composes a person, company, HQ, outfit, commander, player or campaign name, a callsign, a log line, battle-report prose, a filename or a music track into markup escapes it; `clip` reads whole tokens; the REPL prints raw names through `terminalText`. Tests: the hostile-name view test across desk, forces, people, contracts, HQ, roster, log, summary and commander views, and a lobby smoke step with a player named `{c}Evil`
 - D19b-2b strings trusted by construction, audit #15 (PR #69): `table.markupSafe` and a generic `unsafeString` walker; a test that every data-file string (all catalogues, tuning, name tables) is markup-safe; the loader's `validateStoredStrings` requires every stored chassis, part, planet and faction key to resolve and every battle-report display copy to be markup-safe (`CorruptSave` otherwise); `part.structure_key`/`isKnownKey` name the structure placeholder once; hall candidate names escaped
+- D20a stream identity and ownership, audit #18 (PR #70): `rng.Stream.salt` gives each stream a permanent literal salt (equal to the old ordinal values, so no existing draw changed); `person_gen`, `company_gen.rollExperience*`/`rollWeightClass`, `recruitGenerated` and `planet.weightedPickByFaction` take the caller's stream: hall, market and hiring on `.market`, prisoners and salvage on `.battle`, event recruits on `.events`, the starter company on `.generation`
 
 ---
 

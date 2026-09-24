@@ -242,7 +242,7 @@ pub fn refreshContractWorld(gs: *GameState, c: *const contract.Contract) !void {
     const day = gs.clock.day_index;
     const home = gs.homeHqFor(c.assigned_company);
     for (0..tuning.market.contract_planet_slots) |_| {
-        const design = @import("../domain/rat.zig").roll(&gs.rng, .market, world.faction, @import("../gen/company_gen.zig").rollWeightClass(&gs.rng), gs.clock.date.year);
+        const design = @import("../domain/rat.zig").roll(&gs.rng, .market, world.faction, @import("../gen/company_gen.zig").rollWeightClass(&gs.rng, .market), gs.clock.date.year);
         if (!market.listingAppears(&gs.rng, design.rarity, world.industry, 0, 0)) continue;
         const cond = market.rollHullCondition(&gs.rng);
         const price_roll: types.Bp = 10_000 + (@as(types.Bp, gs.rng.roll2d6(.market)) - 7) * 500;
@@ -381,7 +381,7 @@ fn refreshBoard(gs: *GameState, hq_id: types.HqId) !void {
             const vehicles = chassis_mod.ofKind(.vehicle, gs.clock.date.year, &vbuf);
             if (vehicles.len == 0) continue;
             break :blk vehicles[r.uintLessThan(usize, vehicles.len)];
-        } else @import("../domain/rat.zig").roll(&gs.rng, .market, world.faction, @import("../gen/company_gen.zig").rollWeightClass(&gs.rng), gs.clock.date.year);
+        } else @import("../domain/rat.zig").roll(&gs.rng, .market, world.faction, @import("../gen/company_gen.zig").rollWeightClass(&gs.rng, .market), gs.clock.date.year);
         if (!market.listingAppears(&gs.rng, design.rarity, world.industry, warehouse, 0)) continue;
         const cond = market.rollHullCondition(&gs.rng);
         const price_roll: types.Bp = 10_000 + (@as(types.Bp, gs.rng.roll2d6(.market)) - 7) * 500;
@@ -498,7 +498,7 @@ const refresh_days: u32 = tuning.market.hall_refresh_days;
 /// Put one candidate on an HQ's board: rolled to the outfit's recruit
 /// bonus, asking a signing bonus by experience, gone after `ttl_days`.
 fn listCandidate(gs: *GameState, hq: *const hq_mod.Hq, role: person_mod.Role, ttl_days: u32) !void {
-    const spec = person_gen.generateWithBonus(&gs.rng, role, gs.recruitBonus(hq.id));
+    const spec = person_gen.generateWithBonus(&gs.rng, .market, role, gs.recruitBonus(hq.id));
     const salary = types.applyBp(role.baseSalary(), spec.experience.salaryMultBp());
     try gs.candidates.append(gs.allocator(), .{
         .hq = hq.id,

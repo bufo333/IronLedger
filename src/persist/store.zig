@@ -1678,7 +1678,7 @@ pub const Store = struct {
             while (it.next()) |e| {
                 const p = e.value_ptr;
                 if (p.born_day != null) continue;
-                const age = person_gen.rollAge(&gs.rng, p.role, p.experience());
+                const age = person_gen.rollAge(&gs.rng, .generation, p.role, p.experience());
                 p.setBirthdayFromAge(p.recruited_day, age);
             }
         }

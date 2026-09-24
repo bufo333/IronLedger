@@ -1106,7 +1106,7 @@ test "12.25: notice is a decision — a raise keeps them, letting go vacates the
     try std.testing.expectEqual(types.PersonId.none, gs.unit(mek).?.pilot);
     // Replace: a mekwarrior on the hall is hired into the company.
     const other = gs.unit(gs.units.keys()[1]).?.pilot;
-    try gs.candidates.append(gs.allocator(), .{ .hq = gs.hqs.keys()[0], .spec = @import("../gen/person_gen.zig").generate(&gs.rng, .mekwarrior), .asking_bonus = 0, .listed_day = 0, .expires_day = 400 });
+    try gs.candidates.append(gs.allocator(), .{ .hq = gs.hqs.keys()[0], .spec = @import("../gen/person_gen.zig").generate(&gs.rng, .market, .mekwarrior), .asking_bonus = 0, .listed_day = 0, .expires_day = 400 });
     const people_before = gs.people.count();
     try queueNotice(&gs, other);
     try resolveChoice(&gs, gs.event_queue.pending.items[0].id, 2);
@@ -1121,7 +1121,7 @@ test "12B.7: a prisoner can be ransomed, released for standing, or recruited on 
     const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
     const mk = struct {
         fn captive(g: *GameState, company: types.ForceId) !types.PersonId {
-            const spec = @import("../gen/person_gen.zig").generate(&g.rng, .mekwarrior);
+            const spec = @import("../gen/person_gen.zig").generate(&g.rng, .market, .mekwarrior);
             const pid = try g.hireFromSpec(spec);
             const p = g.person(pid).?;
             p.status = .pow;
@@ -1251,7 +1251,7 @@ test "12D.3: a missing pilot is ransomed, traded for a prisoner of their house, 
     try std.testing.expectEqualStrings("", gs.person(pilots[0]).?.faction);
 
     // Trade: a Combine prisoner goes back, their decision with them.
-    const spec = @import("../gen/person_gen.zig").generateWithBonus(&gs.rng, .mekwarrior, 0);
+    const spec = @import("../gen/person_gen.zig").generateWithBonus(&gs.rng, .events, .mekwarrior, 0);
     const pow = try gs.hireFromSpec(spec);
     gs.person(pow).?.status = .pow;
     gs.person(pow).?.faction = "DC";
