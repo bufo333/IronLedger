@@ -36,6 +36,9 @@ out=$(printf '%s\n' \
   'briefing 999' \
   'confirm 999' \
   'rush 999' \
+  'sell 3 4' \
+  'xfer hull 3 co:1' \
+  'autoadmit maybe' \
   'save' \
   'quit' | "$exe" --repl --store "$db" 2>&1)
 check() { echo "$out" | grep -q -- "$1" || { echo "MISSING: $1"; echo "$out" | tail -40; exit 1; }; }
@@ -63,6 +66,10 @@ check 'load failed: no saved campaign has that id'
 # Battle orders need an engagement in view; an unknown contract is refused.
 check 'no engagement on that contract is close enough to give orders for'
 check 'no contract has that id'
+# A leftover token or a word outside the choices is refused with the usage.
+check 'BadArguments — usage: sell <unit>'
+check 'BadArguments — usage: xfer unit|person'
+check 'BadArguments — usage: autoadmit'
 check 'stripped for parts'
 check 'drew 500000 c-bills over 12 months'
 check 'under contract:'

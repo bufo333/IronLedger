@@ -38,7 +38,24 @@ pub fn need(tok: ?[]const u8) ParseError![]const u8 {
     return tok orelse error.BadArguments;
 }
 
+/// The rest of the line as one argument (a name), consumed, so the
+/// trailing-token check sees nothing left.
+fn takeRest(tokens: *std.mem.TokenIterator(u8, .scalar)) []const u8 {
+    const rest = std.mem.trim(u8, tokens.rest(), " ");
+    tokens.index = tokens.buffer.len;
+    return rest;
+}
+
+/// A verb and its tokens → a command, or null when the verb is not a
+/// command verb. Every token must be used: anything left over after a
+/// complete command is `BadArguments`, never silently dropped.
 pub fn parseCommand(verb: []const u8, tokens: *std.mem.TokenIterator(u8, .scalar)) ParseError!?Command {
+    const cmd = try parseVerb(verb, tokens) orelse return null;
+    if (tokens.next() != null) return error.BadArguments;
+    return cmd;
+}
+
+fn parseVerb(verb: []const u8, tokens: *std.mem.TokenIterator(u8, .scalar)) ParseError!?Command {
     const eq = std.mem.eql;
     if (eq(u8, verb, "transfer")) {
         return .{ .transfer = .{ .from = try parseTreasury(try need(tokens.next())), .to = try parseTreasury(try need(tokens.next())), .amount = try num(i64, tokens.next()) } };
@@ -57,7 +74,7 @@ pub fn parseCommand(verb: []const u8, tokens: *std.mem.TokenIterator(u8, .scalar
         const site = try parseSite(try need(tokens.next()));
         if (site != .company) return error.BadSite;
         var kind: game.force.NewLanceKind = .line;
-        var name = std.mem.trim(u8, tokens.rest(), " ");
+        var name = takeRest(tokens);
         var words = std.mem.tokenizeScalar(u8, name, ' ');
         if (words.next()) |first| {
             if (eq(u8, first, "line")) {
@@ -95,7 +112,7 @@ pub fn parseCommand(verb: []const u8, tokens: *std.mem.TokenIterator(u8, .scalar
     if (eq(u8, verb, "raise")) {
         const site = try parseSite(try need(tokens.next()));
         if (site != .hq) return error.BadSite;
-        const name = std.mem.trim(u8, tokens.rest(), " ");
+        const name = takeRest(tokens);
         if (name.len == 0) return error.BadArguments;
         return .{ .raise_company = .{ .name = name, .hq = site.hq } };
     }
@@ -145,16 +162,9 @@ pub fn parseCommand(verb: []const u8, tokens: *std.mem.TokenIterator(u8, .scalar
         const target = std.fmt.parseInt(u32, tokens.next() orelse "0", 10) catch return error.BadNumber;
         return .{ .set_stock_policy = .{ .hq = site.hq, .part_key = part, .min = min, .target = if (target == 0 and min > 0) min * 2 else target } };
     }
-    if (eq(u8, verb, "shares")) {
-        return .{ .set_shares_pct = try num(u8, tokens.next()) };
-    }
     if (eq(u8, verb, "difficulty")) {
         const level = game.difficulty.parse(try need(tokens.next())) orelse return error.BadArguments;
         return .{ .set_difficulty = level };
-    }
-    if (eq(u8, verb, "autoadmit")) {
-        const arg = tokens.next() orelse "on";
-        return .{ .set_auto_admit = eq(u8, arg, "on") or eq(u8, arg, "1") or eq(u8, arg, "yes") };
     }
     if (eq(u8, verb, "loan")) {
         return .{ .take_loan = .{ .principal = try num(i64, tokens.next()), .term_months = if (tokens.next()) |t| (std.fmt.parseInt(u16, t, 10) catch return error.BadNumber) else 12 } };
@@ -163,7 +173,7 @@ pub fn parseCommand(verb: []const u8, tokens: *std.mem.TokenIterator(u8, .scalar
         // promote <person> <rank> [unpin]
         const pid: types.PersonId = @enumFromInt(try num(u32, tokens.next()));
         const r = std.meta.stringToEnum(game.rank.Rank, try need(tokens.next())) orelse return error.BadArguments;
-        const pin = if (tokens.next()) |t| !eq(u8, t, "unpin") else true;
+        const pin = if (tokens.next()) |t| (if (eq(u8, t, "unpin")) false else return error.BadArguments) else true;
         return .{ .promote = .{ .person = pid, .rank = r, .pin = pin } };
     }
     if (eq(u8, verb, "negotiate")) {
@@ -256,7 +266,7 @@ pub fn parseCommand(verb: []const u8, tokens: *std.mem.TokenIterator(u8, .scalar
         const origin = std.meta.stringToEnum(game.commander.Faction, try need(tokens.next())) orelse return error.BadArguments;
         const profession = std.meta.stringToEnum(game.commander.Profession, try need(tokens.next())) orelse return error.BadArguments;
         // start <LC|DC|FS|CC|FWL> <profession> <name> [year]  (12C.16: a trailing 4-digit year)
-        var name = std.mem.trim(u8, tokens.rest(), " ");
+        var name = takeRest(tokens);
         var year: u16 = 3025;
         if (std.mem.lastIndexOfScalar(u8, name, ' ')) |sp| {
             if (std.fmt.parseInt(u16, name[sp + 1 ..], 10)) |y| {
@@ -309,7 +319,7 @@ pub fn parseCommand(verb: []const u8, tokens: *std.mem.TokenIterator(u8, .scalar
     }
     if (eq(u8, verb, "found")) {
         const planet = try need(tokens.next());
-        const name = tokens.rest();
+        const name = takeRest(tokens);
         if (name.len == 0) return error.BadArguments;
         return .{ .found_hq = .{ .name = name, .planet_key = planet } };
     }
@@ -327,14 +337,14 @@ pub fn parseCommand(verb: []const u8, tokens: *std.mem.TokenIterator(u8, .scalar
         return .{ .assign_company = .{ .company = co.company, .hq = hq_site.hq } };
     }
     if (eq(u8, verb, "newco")) {
-        const name = tokens.rest();
+        const name = takeRest(tokens);
         if (name.len == 0) return error.BadArguments;
         return .{ .new_company = name };
     }
     if (eq(u8, verb, "newco@")) {
         const site = try parseSite(try need(tokens.next()));
         if (site != .hq) return error.BadSite;
-        const name = tokens.rest();
+        const name = takeRest(tokens);
         if (name.len == 0) return error.BadArguments;
         return .{ .new_company_at = .{ .name = name, .hq = site.hq } };
     }
@@ -344,11 +354,12 @@ pub fn parseCommand(verb: []const u8, tokens: *std.mem.TokenIterator(u8, .scalar
         const site = try parseSite(try need(tokens.next()));
         if (site != .company) return error.BadSite;
         if (eq(u8, what, "unit")) return .{ .transfer_unit = .{ .unit = @enumFromInt(id), .to_company = site.company } };
-        return .{ .transfer_person = .{ .person = @enumFromInt(id), .to_force = site.company } };
+        if (eq(u8, what, "person")) return .{ .transfer_person = .{ .person = @enumFromInt(id), .to_force = site.company } };
+        return error.BadArguments;
     }
     if (eq(u8, verb, "rename")) {
         const what = try need(tokens.next());
-        const name = tokens.rest();
+        const name = takeRest(tokens);
         if (name.len == 0) return error.BadArguments;
         if (eq(u8, what, "outfit")) return .{ .rename_outfit = name };
         const fid = std.fmt.parseInt(u32, what, 10) catch return error.BadNumber;
@@ -366,7 +377,8 @@ pub fn parseCommand(verb: []const u8, tokens: *std.mem.TokenIterator(u8, .scalar
         if (site != .hq) return error.BadSite;
         const role = std.meta.stringToEnum(person_mod.Role, try need(tokens.next())) orelse return error.BadArguments;
         const dir = try need(tokens.next());
-        return .{ .set_office_staff = .{ .hq = site.hq, .role = role, .delta = if (eq(u8, dir, "-")) -1 else 1 } };
+        const delta: i8 = if (eq(u8, dir, "+")) 1 else if (eq(u8, dir, "-")) -1 else return error.BadArguments;
+        return .{ .set_office_staff = .{ .hq = site.hq, .role = role, .delta = delta } };
     }
     if (eq(u8, verb, "shiphome")) {
         const site = try parseSite(try need(tokens.next()));
@@ -390,14 +402,24 @@ pub fn parseCommand(verb: []const u8, tokens: *std.mem.TokenIterator(u8, .scalar
         return .{ .cycle_roe = site.company };
     }
     if (eq(u8, verb, "cyclerole")) return .{ .cycle_role = @enumFromInt(try num(u32, tokens.next())) };
-    if (eq(u8, verb, "cycledifficulty")) return .{ .cycle_difficulty = if (tokens.next()) |t| (if (eq(u8, t, "-")) @as(i8, -1) else 1) else 1 };
+    if (eq(u8, verb, "cycledifficulty")) {
+        const t = tokens.next() orelse "+";
+        if (eq(u8, t, "+")) return .{ .cycle_difficulty = 1 };
+        if (eq(u8, t, "-")) return .{ .cycle_difficulty = -1 };
+        return error.BadArguments;
+    }
     if (eq(u8, verb, "shares")) {
         const t = try need(tokens.next());
         if (eq(u8, t, "+")) return .{ .adjust_shares_pct = 5 };
         if (eq(u8, t, "-")) return .{ .adjust_shares_pct = -5 };
         return .{ .set_shares_pct = try num(u8, t) };
     }
-    if (eq(u8, verb, "autoadmit") and tokens.peek() == null) return .{ .toggle_auto_admit = {} };
+    if (eq(u8, verb, "autoadmit")) {
+        const arg = tokens.next() orelse return .{ .toggle_auto_admit = {} };
+        if (eq(u8, arg, "on") or eq(u8, arg, "yes") or eq(u8, arg, "1")) return .{ .set_auto_admit = true };
+        if (eq(u8, arg, "off") or eq(u8, arg, "no") or eq(u8, arg, "0")) return .{ .set_auto_admit = false };
+        return error.BadArguments;
+    }
     if (eq(u8, verb, "recallidle")) {
         const site = try parseSite(try need(tokens.next()));
         if (site != .company) return error.BadSite;
@@ -547,7 +569,6 @@ pub const verbs = [_][]const u8{
     "stockpolicy",
     "autoadmit",
     "difficulty",
-    "shares",
     "sellstock",
     "trim",
     "raise",
@@ -608,7 +629,7 @@ pub fn usage(verb: []const u8) ?[]const u8 {
         .{ "cycleroe", "cycleroe co:N" },
         .{ "cyclerole", "cyclerole <lance id>" },
         .{ "cycledifficulty", "cycledifficulty [+|-]" },
-        .{ "shares", "shares <percent>|+|-" },
+        .{ "shares", "shares <percent>|+|-  (share of contract income paid to shareholders at completion)" },
         .{ "recallidle", "recallidle co:N" },
         .{ "admit", "admit <person>" },
         .{ "repay", "repay <loan#> <amount>" },
@@ -625,9 +646,8 @@ pub fn usage(verb: []const u8) ?[]const u8 {
         .{ "move", "move <unit> <lance id>" },
         .{ "newlance", "newlance co:N [line|air|mash|mess|salvage|security|transport] <name>" },
         .{ "stockpolicy", "stockpolicy hq:N <part> <min> [target]  (0 target removes)" },
-        .{ "autoadmit", "autoadmit on|off" },
+        .{ "autoadmit", "autoadmit [on|off]  (bare: toggle)" },
         .{ "difficulty", "difficulty green|regular|veteran|elite  (Settings [d]; economy and opposition, never the dice)" },
-        .{ "shares", "shares <pct>  (share of contract income paid to shareholders at completion)" },
         .{ "sellstock", "sellstock hq:N <part> [qty]" },
         .{ "trim", "trim co:N" },
         .{ "raise", "raise hq:N <name>" },
@@ -725,4 +745,47 @@ test "every listed verb parses or fails on arguments — never falls through as 
         }
     }
     try std.testing.expect(usage("frobnicate") == null);
+}
+
+fn parseLine(line: []const u8) ParseError!?Command {
+    var it = std.mem.tokenizeScalar(u8, line, ' ');
+    const verb = it.next() orelse return null;
+    return parseCommand(verb, &it);
+}
+
+test "a token left over after a complete command is refused, not dropped" {
+    try std.testing.expectError(error.BadArguments, parseLine("sell 3 4"));
+    try std.testing.expectError(error.BadArguments, parseLine("roe co:1 cautious now"));
+    try std.testing.expectError(error.BadArguments, parseLine("confirm 1 2"));
+    // A name takes the rest of the line, spaces and all.
+    try std.testing.expectEqualStrings("Bravo Company", (try parseLine("raise hq:1 Bravo Company")).?.raise_company.name);
+    try std.testing.expectEqualStrings("Sky Lance", (try parseLine("newlance co:1 air Sky Lance")).?.new_lance.name);
+    try std.testing.expectEqualStrings("Forward Base", (try parseLine("found galatea Forward Base")).?.found_hq.name);
+}
+
+test "shares and autoadmit each parse in one place, every form they document" {
+    try std.testing.expectEqual(@as(i8, 5), (try parseLine("shares +")).?.adjust_shares_pct);
+    try std.testing.expectEqual(@as(i8, -5), (try parseLine("shares -")).?.adjust_shares_pct);
+    try std.testing.expectEqual(@as(u8, 20), (try parseLine("shares 20")).?.set_shares_pct);
+    try std.testing.expect((try parseLine("autoadmit")).? == .toggle_auto_admit);
+    try std.testing.expect((try parseLine("autoadmit on")).?.set_auto_admit);
+    try std.testing.expect(!(try parseLine("autoadmit off")).?.set_auto_admit);
+    try std.testing.expectError(error.BadArguments, parseLine("autoadmit maybe"));
+}
+
+test "a word that names a choice must be one of the choices" {
+    try std.testing.expectError(error.BadArguments, parseLine("xfer hull 3 co:1"));
+    try std.testing.expect((try parseLine("xfer person 3 co:1")).? == .transfer_person);
+    try std.testing.expect((try parseLine("xfer unit 3 co:1")).? == .transfer_unit);
+    try std.testing.expectError(error.BadArguments, parseLine("office hq:1 admin_command up"));
+    try std.testing.expectEqual(@as(i8, -1), (try parseLine("office hq:1 admin_command -")).?.set_office_staff.delta);
+    try std.testing.expectError(error.BadArguments, parseLine("promote 3 captain pinned"));
+    try std.testing.expect(!(try parseLine("promote 3 captain unpin")).?.promote.pin);
+    try std.testing.expectError(error.BadArguments, parseLine("cycledifficulty down"));
+}
+
+test "every verb is listed once" {
+    for (verbs, 0..) |v, i| {
+        for (verbs[i + 1 ..]) |w| try std.testing.expect(!std.mem.eql(u8, v, w));
+    }
 }

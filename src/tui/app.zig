@@ -3431,7 +3431,7 @@ pub const App = struct {
             return;
         }
         const cmd = game.cli.parseCommand(verb, &tokens) catch |err| {
-            self.say(.amber, "{s}", .{@errorName(err)});
+            self.say(.amber, "{s} — usage: {s}", .{ @errorName(err), game.cli.usage(verb) orelse verb });
             return;
         };
         if (cmd) |c| {
