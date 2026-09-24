@@ -120,10 +120,9 @@ pub fn tons(key: []const u8) u32 {
 pub fn munitionFor(weapon_key: []const u8) ?[]const u8 {
     const table = [_]struct { []const u8, []const u8 }{
         .{ "ac5", "ammo_ac5" },   .{ "ac20", "ammo_ac20" }, .{ "mg", "ammo_mg" },
-        .{ "ac2", "ammo_ac2" },   .{ "ac10", "ammo_ac10" },
-        .{ "lrm5", "ammo_lrm" },  .{ "lrm10", "ammo_lrm" }, .{ "lrm15", "ammo_lrm" },
-        .{ "lrm20", "ammo_lrm" }, .{ "srm2", "ammo_srm" },  .{ "srm4", "ammo_srm" },
-        .{ "srm6", "ammo_srm" },
+        .{ "ac2", "ammo_ac2" },   .{ "ac10", "ammo_ac10" }, .{ "lrm5", "ammo_lrm" },
+        .{ "lrm10", "ammo_lrm" }, .{ "lrm15", "ammo_lrm" }, .{ "lrm20", "ammo_lrm" },
+        .{ "srm2", "ammo_srm" },  .{ "srm4", "ammo_srm" },  .{ "srm6", "ammo_srm" },
     };
     for (table) |row| {
         if (std.mem.eql(u8, row[0], weapon_key)) return row[1];

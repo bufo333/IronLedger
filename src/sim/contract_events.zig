@@ -554,7 +554,8 @@ fn applyEffectsFor(gs: *GameState, effects: []const events.Effect, contract: ?*c
                 const battle = @import("battle.zig");
                 const got = try battle.recoveryPush(gs, subject.battle, company);
                 try gs.log(.battle, .{ .company = company, .contract = contract_id }, "[recovery] the company goes back onto the field: {d} hull(s) dragged out, {d} crew walked out{s}", .{
-                    got.hulls, got.people, if (got.mishap) " — and it cost somebody" else "",
+                    got.hulls, got.people,
+                    if (got.mishap) " — and it cost somebody" else "",
                 });
             },
             // Divide the haul the way the commander chose. The
@@ -614,7 +615,7 @@ fn letGo(gs: *GameState, person_id: types.PersonId, replace: bool) !void {
         };
         if (gs.person(r.hired)) |np| {
             np.assigned_force = company;
-            try gs.log(.rotation, .{ .company = company }, "[turnover] {s} hired from the hall to replace them — assign a seat", .{ try np.fullName(gs.allocator()) });
+            try gs.log(.rotation, .{ .company = company }, "[turnover] {s} hired from the hall to replace them — assign a seat", .{try np.fullName(gs.allocator())});
         }
         return;
     };

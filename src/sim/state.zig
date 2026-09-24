@@ -312,7 +312,6 @@ pub const GameState = struct {
         self.arena.deinit();
     }
 
-
     /// All campaign-lifetime allocations come from here.
     /// The difficulty row in force.
     pub fn diff(self: *const GameState) *const difficulty_mod.Row {

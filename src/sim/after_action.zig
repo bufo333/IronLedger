@@ -279,31 +279,27 @@ pub fn render(alloc: std.mem.Allocator, r: *const BattleReport) ![]const []const
     }
 
     try out.append(alloc, try std.fmt.allocPrint(alloc, "[AAR] {s} vs {s} — {s} on {s}, {s}: {s} — power {d} vs {d} (recon {d}, fatigue {d}, morale {d}{s}{s}{s}){s}{s}{s}", .{
-        r.kind,                 r.enemy_key,   r.scenario,
-        r.terrain,              r.weather,     @tagName(r.outcome),
-        r.player_power,         r.enemy_power, r.recon_quality,
-        r.avg_fatigue,          r.avg_morale,
-        if (r.conditions_mod != 0) try std.fmt.allocPrint(alloc, ", conditions {s}{d} to the roll", .{ if (r.conditions_mod > 0) "+" else "", r.conditions_mod }) else "",
-        if (r.close_terrain) ", close terrain caps the odds" else "",
-        if (r.air_grounded) ", fighters grounded" else "",
+        r.kind,                                                       r.enemy_key,                                       r.scenario,
+        r.terrain,                                                    r.weather,                                         @tagName(r.outcome),
+        r.player_power,                                               r.enemy_power,                                     r.recon_quality,
+        r.avg_fatigue,                                                r.avg_morale,                                      if (r.conditions_mod != 0) try std.fmt.allocPrint(alloc, ", conditions {s}{d} to the roll", .{ if (r.conditions_mod > 0) "+" else "", r.conditions_mod }) else "",
+        if (r.close_terrain) ", close terrain caps the odds" else "", if (r.air_grounded) ", fighters grounded" else "",
         if (r.convoy_hit) " · the convoy was hit — support train damaged" else "",
         if (r.roe == .standard) "" else try std.fmt.allocPrint(alloc, " · ROE {s}{s}{s}", .{ @tagName(r.roe), if (r.roe_overridden) " (integrated command)" else "", if (r.withdrew) " — withdrew from a draw, field given up" else "" }),
         if (r.edge_spent_by.len > 0) try std.fmt.allocPrint(alloc, " · {s} spent Edge to re-roll a lost engagement", .{r.edge_spent_by}) else "",
     }));
 
     try out.append(alloc, try std.fmt.allocPrint(alloc, "[AAR]   losses: {d} hit / {d} destroyed, {d} wounded, {d} KIA | enemy losses {d} BV ≈ {d} kill{s} credited{s} | salvage {d} BV claimed | comp {d} | score {d}", .{
-        r.hits_taken,   r.destroyed, r.wounded,           r.kia,
-        r.enemy_destroyed_bv,        r.kills_credited,
-        if (r.kills_credited == 1) "" else "s",
-        if (r.prisoners > 0) try std.fmt.allocPrint(alloc, ", {d} prisoner{s} taken (inbox)", .{ r.prisoners, if (r.prisoners == 1) "" else "s" }) else "",
-        r.salvage.claimed_bv,        r.battle_loss_comp, r.score_after,
+        r.hits_taken,         r.destroyed,        r.wounded,                              r.kia,
+        r.enemy_destroyed_bv, r.kills_credited,   if (r.kills_credited == 1) "" else "s", if (r.prisoners > 0) try std.fmt.allocPrint(alloc, ", {d} prisoner{s} taken (inbox)", .{ r.prisoners, if (r.prisoners == 1) "" else "s" }) else "",
+        r.salvage.claimed_bv, r.battle_loss_comp, r.score_after,
     }));
 
     for (r.hulls) |*h| {
         try out.append(alloc, try std.fmt.allocPrint(alloc, "[AAR]   #{d} {s} {s}: {s}armor {d}%→{d}%{s}{s}{s}{s}", .{
-            @intFromEnum(h.unit), h.chassis_key, h.chassis_name,
+            @intFromEnum(h.unit),                                                h.chassis_key, h.chassis_name,
             if (h.destroyed) try std.fmt.allocPrint(alloc, "DESTROYED ({s}) · ", .{h.cause.label()}) else "",
-            h.armor_before,       h.armor_after,
+            h.armor_before,                                                      h.armor_after,
             if (h.slot) |sk| try std.fmt.allocPrint(alloc, " · {s} ({s}) {s}{s}", .{ sk, h.slot_part, h.slot_result.label(), try recoveryText(alloc, h) }) else try recoveryText(alloc, h),
             if (h.crew.untouched()) "" else " · ",
             if (h.crew.untouched()) "" else try crewText(alloc, h, r.enemy_key),
@@ -324,9 +320,8 @@ pub fn render(alloc: std.mem.Allocator, r: *const BattleReport) ![]const []const
 
     if (r.lost_hulls > 0) {
         try out.append(alloc, try std.fmt.allocPrint(alloc, "[AAR]   field lost: {d} hull{s} left to {s}{s} — battle-loss comp covers {d}% under the terms", .{
-            r.lost_hulls, if (r.lost_hulls == 1) "" else "s", r.enemy_key,
-            if (r.missing > 0) try std.fmt.allocPrint(alloc, ", {d} pilot{s} missing (inbox)", .{ r.missing, if (r.missing == 1) "" else "s" }) else "",
-            r.battle_loss_pct,
+            r.lost_hulls,                                                                                                                                if (r.lost_hulls == 1) "" else "s", r.enemy_key,
+            if (r.missing > 0) try std.fmt.allocPrint(alloc, ", {d} pilot{s} missing (inbox)", .{ r.missing, if (r.missing == 1) "" else "s" }) else "", r.battle_loss_pct,
         }));
     }
 
@@ -383,14 +378,29 @@ test "render turns a report into the AAR lines, with no markup" {
     };
     const ammo = [_]AmmoLine{.{ .key = "ammo_lrm", .burned = 9, .left = 2 }};
     const r: BattleReport = .{
-        .id = @enumFromInt(1),        .day = 412,             .contract = @enumFromInt(3),
-        .company = @enumFromInt(1),   .kind = "objective raid", .enemy_key = "DC",
-        .scenario = "breakthrough",   .terrain = "urban",      .weather = "clear",
-        .outcome = .victory,          .held_field = true,      .player_power = 1840,
-        .enemy_power = 1610,          .hits_taken = 2,         .destroyed = 1,
-        .kia = 1,                     .enemy_destroyed_bv = 900, .kills_credited = 1,
-        .hulls = &hulls,              .ammo = &ammo,           .silenced_mounts = 2,
-        .armor_left = 7,              .salvage = .{ .claimed_bv = 450, .items = "wreck #31 CN9-A Centurion" },
+        .id = @enumFromInt(1),
+        .day = 412,
+        .contract = @enumFromInt(3),
+        .company = @enumFromInt(1),
+        .kind = "objective raid",
+        .enemy_key = "DC",
+        .scenario = "breakthrough",
+        .terrain = "urban",
+        .weather = "clear",
+        .outcome = .victory,
+        .held_field = true,
+        .player_power = 1840,
+        .enemy_power = 1610,
+        .hits_taken = 2,
+        .destroyed = 1,
+        .kia = 1,
+        .enemy_destroyed_bv = 900,
+        .kills_credited = 1,
+        .hulls = &hulls,
+        .ammo = &ammo,
+        .silenced_mounts = 2,
+        .armor_left = 7,
+        .salvage = .{ .claimed_bv = 450, .items = "wreck #31 CN9-A Centurion" },
     };
     const lines = try render(al, &r);
 
@@ -413,9 +423,17 @@ test "a conceded objective renders one line" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const r: BattleReport = .{
-        .id = @enumFromInt(1), .day = 1, .contract = @enumFromInt(1), .company = @enumFromInt(1),
-        .kind = "garrison duty", .enemy_key = "DC", .scenario = "", .terrain = "", .weather = "",
-        .outcome = .defeat, .conceded = true,
+        .id = @enumFromInt(1),
+        .day = 1,
+        .contract = @enumFromInt(1),
+        .company = @enumFromInt(1),
+        .kind = "garrison duty",
+        .enemy_key = "DC",
+        .scenario = "",
+        .terrain = "",
+        .weather = "",
+        .outcome = .defeat,
+        .conceded = true,
     };
     const lines = try render(arena.allocator(), &r);
     try std.testing.expectEqual(@as(usize, 1), lines.len);
@@ -429,9 +447,17 @@ test "armorOnly and hullsLost read the record, not the prose" {
     try std.testing.expect(!gone.armorOnly());
     const hulls = [_]HullHit{ paint, gone };
     const r: BattleReport = .{
-        .id = @enumFromInt(1), .day = 1, .contract = @enumFromInt(1), .company = @enumFromInt(1),
-        .kind = "k", .enemy_key = "DC", .scenario = "s", .terrain = "t", .weather = "w",
-        .outcome = .defeat, .hulls = &hulls,
+        .id = @enumFromInt(1),
+        .day = 1,
+        .contract = @enumFromInt(1),
+        .company = @enumFromInt(1),
+        .kind = "k",
+        .enemy_key = "DC",
+        .scenario = "s",
+        .terrain = "t",
+        .weather = "w",
+        .outcome = .defeat,
+        .hulls = &hulls,
     };
     try std.testing.expectEqual(@as(u32, 1), r.hullsLost());
     try std.testing.expectEqual(@as(u32, 0), r.burned("ammo_lrm"));

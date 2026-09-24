@@ -1025,7 +1025,8 @@ fn execBuyListing(gs: *GameState, index: @FieldType(Command, "buy_listing")) Err
             if (listing.condition) |cond| gs.applyHullCondition(uid, cond);
             if (berth_kind != null) gs.unit(uid).?.berth_hq = hq_id;
             try gs.log(.market, .{ .hq = hq_id }, "[market] bought {s} ({s}) for {d}{s}", .{
-                listing.item_key, if (listing.condition) |c| c.label() else "new", price, if (berth_kind != null) " — berthed here" else "",
+                listing.item_key, if (listing.condition) |c| c.label() else "new", price,
+                if (berth_kind != null) " — berthed here" else "",
             });
             return .{ .unit = uid };
         },
@@ -1347,7 +1348,7 @@ fn execAdmit(gs: *GameState, pid: @FieldType(Command, "admit")) Error!Result {
     const p = gs.person(pid) orelse return Error.UnknownPerson;
     if (p.status != .wounded) return Error.NotWounded;
     p.medbay_admitted = true;
-    try gs.log(.medical, .{ .company = gs.companyOf(p.assigned_force) }, "[medbay] {s} admitted", .{ try p.fullName(gs.allocator()) });
+    try gs.log(.medical, .{ .company = gs.companyOf(p.assigned_force) }, "[medbay] {s} admitted", .{try p.fullName(gs.allocator())});
     return .{};
 }
 
@@ -1695,7 +1696,6 @@ fn execResolveDecision(gs: *GameState, r: @FieldType(Command, "resolve_decision"
     try contract_events.resolveChoice(gs, r.event, r.choice);
     return .{};
 }
-
 
 /// Hire the first hall candidate with `role` (any HQ's hall) into `company`.
 fn hireRoleFromHall(gs: *GameState, role: person_mod.Role, company: types.ForceId) Error!bool {

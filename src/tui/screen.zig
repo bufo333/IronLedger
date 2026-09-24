@@ -547,7 +547,7 @@ test "table pins the first column, clamps the scroll and clips at the edge" {
     defer s.deinit();
     const t: Table = .{
         .cols = &.{ .{ .name = "kind" }, .{ .name = "world" }, .{ .name = "pay", .justify = .right }, .{ .name = "note" } },
-        .rows = &.{ try table_mod.row(a, &.{ "raid", "Galatea", "1,200", "negotiated" }) },
+        .rows = &.{try table_mod.row(a, &.{ "raid", "Galatea", "1,200", "negotiated" })},
     };
     var scroll: usize = 0;
     const v = try s.table(a, s.full(), t, 0, 0, &scroll);

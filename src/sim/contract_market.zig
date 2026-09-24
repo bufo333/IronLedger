@@ -471,9 +471,9 @@ fn refreshBoard(gs: *GameState, hq_id: types.HqId) !void {
 /// Who walks into a hiring hall: combat crews and techs most often, then
 /// medical and every back-office desk, so every desk can be filled.
 const hall_roles = [_]person_mod.Role{
-    .mekwarrior,    .mekwarrior,    .tech_mek,        .tech_mek,      .tech_mechanic, .vehicle_crew,
-    .astech,        .astech,        .medic,           .doctor,        .admin_logistics, .admin_hr,
-    .admin_finance, .admin_command, .admin_transport, .aero_pilot,    .tech_aero,     .dropship_crew,
+    .mekwarrior,    .mekwarrior,    .tech_mek,        .tech_mek,   .tech_mechanic,   .vehicle_crew,
+    .astech,        .astech,        .medic,           .doctor,     .admin_logistics, .admin_hr,
+    .admin_finance, .admin_command, .admin_transport, .aero_pilot, .tech_aero,       .dropship_crew,
     .jumpship_crew,
 };
 

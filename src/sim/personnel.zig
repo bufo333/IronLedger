@@ -255,7 +255,6 @@ pub fn manningHave(gs: *GameState, company: types.ForceId, role: person_mod.Role
     return have;
 }
 
-
 /// Kill credits: the enemy BV destroyed in an engagement becomes
 /// whole kills (one per ~1000 BV, the average 3025 mek), each handed to
 /// an engaged pilot at random weighted by their hull's BV and gunnery; the

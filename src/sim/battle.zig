@@ -478,11 +478,11 @@ fn recoverWrecks(
 ) !FieldLoss {
     const rt = tuning.loss.roe;
     var loss: FieldLoss = .{};
-        const t = tuning.loss;
-        const has_dropship = gs.hasCrewedDropship(c.assigned_company);
-        var wrecks_here: i64 = 0;
-        for (hit_log.items) |h| wrecks_here += @intFromBool(h.destroyed);
-        const situation: i32 = (if (player.mods.has_salvage_lance) t.recovery_salvage_lance else 0) //
+    const t = tuning.loss;
+    const has_dropship = gs.hasCrewedDropship(c.assigned_company);
+    var wrecks_here: i64 = 0;
+    for (hit_log.items) |h| wrecks_here += @intFromBool(h.destroyed);
+    const situation: i32 = (if (player.mods.has_salvage_lance) t.recovery_salvage_lance else 0) //
         + (if (trucks >= wrecks_here and trucks > 0) t.recovery_trucks else 0) //
         + (if (has_dropship) t.recovery_dropship else 0) //
         + (if (outcome == .rout) t.recovery_rout else 0) //
@@ -492,31 +492,31 @@ fn recoverWrecks(
             .standard => 0,
             .cautious => rt.cautious_recovery,
         };
-        for (hit_log.items) |*h| {
-            if (!h.destroyed) continue;
-            const u = gs.unit(h.unit) orelse continue;
-            const roll_r = @as(i32, gs.rng.roll2d6(.battle)) + situation;
-            h.recovery = .{ .roll = roll_r, .target = t.recovery_target };
-            if (roll_r >= t.recovery_target) continue;
-            h.lost = true;
-            loss.hulls += 1;
-            // The rest of the hull's value is gone too: battle-loss
-            // compensation covers it at the contract's rate (CamOps).
-            loss.damage_value += u.purchase_price - @divTrunc(u.purchase_price, 2);
-            const p = gs.person(u.pilot) orelse continue;
-            if (!p.isOnBooks()) continue;
-            const piloting: i32 = (if (p.role.pilotingSkill()) |s| p.skill(s) else null) orelse 5;
-            const escape = @as(i32, gs.rng.roll2d6(.battle)) + (5 - piloting) + gs.diff().recovery_mod + (if (outcome == .rout) t.recovery_rout else 0);
-            if (escape >= t.escape_target) continue;
-            const pid = p.id;
-            _ = try @import("personnel.zig").depart(gs, pid, .mia, 0, "");
-            p.faction = c.enemy_key; // held by them
-            loss.missing += 1;
-            // The name is already on record if this pilot was also hit.
-            if (h.crew_name.len == 0) h.crew_name = try p.rankedName(gs.allocator());
-            h.crew.fate = .missing;
-            try @import("contract_events.zig").queueMissing(gs, pid, c.assigned_company);
-        }
+    for (hit_log.items) |*h| {
+        if (!h.destroyed) continue;
+        const u = gs.unit(h.unit) orelse continue;
+        const roll_r = @as(i32, gs.rng.roll2d6(.battle)) + situation;
+        h.recovery = .{ .roll = roll_r, .target = t.recovery_target };
+        if (roll_r >= t.recovery_target) continue;
+        h.lost = true;
+        loss.hulls += 1;
+        // The rest of the hull's value is gone too: battle-loss
+        // compensation covers it at the contract's rate (CamOps).
+        loss.damage_value += u.purchase_price - @divTrunc(u.purchase_price, 2);
+        const p = gs.person(u.pilot) orelse continue;
+        if (!p.isOnBooks()) continue;
+        const piloting: i32 = (if (p.role.pilotingSkill()) |s| p.skill(s) else null) orelse 5;
+        const escape = @as(i32, gs.rng.roll2d6(.battle)) + (5 - piloting) + gs.diff().recovery_mod + (if (outcome == .rout) t.recovery_rout else 0);
+        if (escape >= t.escape_target) continue;
+        const pid = p.id;
+        _ = try @import("personnel.zig").depart(gs, pid, .mia, 0, "");
+        p.faction = c.enemy_key; // held by them
+        loss.missing += 1;
+        // The name is already on record if this pilot was also hit.
+        if (h.crew_name.len == 0) h.crew_name = try p.rankedName(gs.allocator());
+        h.crew.fate = .missing;
+        try @import("contract_events.zig").queueMissing(gs, pid, c.assigned_company);
+    }
     return loss;
 }
 

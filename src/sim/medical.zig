@@ -67,7 +67,8 @@ pub fn inflict(gs: *GameState, person_id: types.PersonId, cause: WoundCause, sev
     if (!gs.auto_admit) p.medbay_admitted = false;
     _ = try @import("personnel.zig").checkAwards(gs, person_id); // the Wound Badge
     try gs.log(.medical, .{ .company = gs.companyOf(p.assigned_force) }, "[medbay] {s} wounded ({s}): {s} {s}{s}", .{
-        try p.fullName(gs.allocator()), why, severityLabel(severity), @tagName(location), if (permanent) " — permanent" else "",
+        try p.fullName(gs.allocator()), why, severityLabel(severity), @tagName(location),
+        if (permanent) " — permanent" else "",
     });
 }
 
@@ -228,7 +229,7 @@ pub fn runDailyHealing(gs: *GameState) !void {
             if (!p.medbay_admitted) {
                 if (!gs.auto_admit) continue;
                 p.medbay_admitted = true;
-                try gs.log(.medical, .{ .company = gs.companyOf(p.assigned_force) }, "[medbay] {s} admitted (auto)", .{ try p.fullName(gs.allocator()) });
+                try gs.log(.medical, .{ .company = gs.companyOf(p.assigned_force) }, "[medbay] {s} admitted (auto)", .{try p.fullName(gs.allocator())});
             }
             // Triage consumes a ton of medical supplies from wherever they
             // lie; an empty dispensary heals half again as slowly.
