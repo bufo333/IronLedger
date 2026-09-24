@@ -81,12 +81,11 @@ const ddl =
 ;
 
 const tables = [_][]const u8{
-    "meta",          "meta_text",    "rng",             "commander",        "person",       "person_skill", "injury",     "award",       "ability",
-    "unit",          "unit_slot",    "force",           "force_unit",       "force_child",  "stock",        "hq",         "hq_facility", "hq_project",
-    "contract",      "txn",          "loan",            "courier",          "policy",       "bay_job",      "candidate",  "hq_link",     "unit_transfer",
-    "supply_policy", "stock_policy", "faction_cooling", "faction_standing", "event_memory", "listing",      "part_order", "event_log",   "pending_event",
-    "refit_plan",    "refit_op",     "rating_snapshot", "battle_report",   "battle_report_hit", "battle_report_ammo", "battle_report_salvage",
-    "rng_stream",
+    "meta",          "meta_text",    "rng",             "commander",        "person",            "person_skill",       "injury",                "award",       "ability",
+    "unit",          "unit_slot",    "force",           "force_unit",       "force_child",       "stock",              "hq",                    "hq_facility", "hq_project",
+    "contract",      "txn",          "loan",            "courier",          "policy",            "bay_job",            "candidate",             "hq_link",     "unit_transfer",
+    "supply_policy", "stock_policy", "faction_cooling", "faction_standing", "event_memory",      "listing",            "part_order",            "event_log",   "pending_event",
+    "refit_plan",    "refit_op",     "rating_snapshot", "battle_report",    "battle_report_hit", "battle_report_ammo", "battle_report_salvage", "rng_stream",
 };
 
 /// The stream order of the single `rng` blob that saves before schema v32
@@ -418,18 +417,18 @@ pub const Store = struct {
         const st = try self.db.prepare("INSERT INTO meta VALUES (?1, ?2, ?3)");
         defer st.finalize();
         const ints = [_]struct { []const u8, i64 }{
-            .{ "day_index", gs.clock.day_index },                 .{ "year", gs.clock.date.year },
-            .{ "month", gs.clock.date.month },                    .{ "day", gs.clock.date.day },
-            .{ "funds", gs.funds },                               .{ "reputation", gs.reputation },
-            .{ "bankrupt", @as(i64, @intFromBool(gs.bankrupt)) }, .{ "auto_admit", @as(i64, @intFromBool(gs.auto_admit)) },
-            .{ "difficulty", difficulty_int },                    .{ "share_profit_bp", @as(i64, gs.share_profit_bp) },
-            .{ "stat_battles_won", gs.stats.battles_won },       .{ "stat_battles_drawn", gs.stats.battles_drawn },
-            .{ "stat_battles_lost", gs.stats.battles_lost },     .{ "stat_hulls_lost", gs.stats.hulls_lost },
-            .{ "stat_hulls_salvaged", gs.stats.hulls_salvaged }, .{ "stat_people_kia", gs.stats.people_kia },
+            .{ "day_index", gs.clock.day_index },                                  .{ "year", gs.clock.date.year },
+            .{ "month", gs.clock.date.month },                                     .{ "day", gs.clock.date.day },
+            .{ "funds", gs.funds },                                                .{ "reputation", gs.reputation },
+            .{ "bankrupt", @as(i64, @intFromBool(gs.bankrupt)) },                  .{ "auto_admit", @as(i64, @intFromBool(gs.auto_admit)) },
+            .{ "difficulty", difficulty_int },                                     .{ "share_profit_bp", @as(i64, gs.share_profit_bp) },
+            .{ "stat_battles_won", gs.stats.battles_won },                         .{ "stat_battles_drawn", gs.stats.battles_drawn },
+            .{ "stat_battles_lost", gs.stats.battles_lost },                       .{ "stat_hulls_lost", gs.stats.hulls_lost },
+            .{ "stat_hulls_salvaged", gs.stats.hulls_salvaged },                   .{ "stat_people_kia", gs.stats.people_kia },
             .{ "stat_enemy_bv", @as(i64, @intCast(gs.stats.enemy_bv_destroyed)) }, .{ "next_person_id", gs.next_person_id },
-            .{ "next_unit_id", gs.next_unit_id },                 .{ "next_force_id", gs.next_force_id },
-            .{ "next_hq_id", gs.next_hq_id },                     .{ "next_contract_id", gs.next_contract_id },
-            .{ "next_battle_id", gs.next_battle_id },           .{ "rng_seed", @as(i64, @bitCast(gs.rng.seed)) },
+            .{ "next_unit_id", gs.next_unit_id },                                  .{ "next_force_id", gs.next_force_id },
+            .{ "next_hq_id", gs.next_hq_id },                                      .{ "next_contract_id", gs.next_contract_id },
+            .{ "next_battle_id", gs.next_battle_id },                              .{ "rng_seed", @as(i64, @bitCast(gs.rng.seed)) },
             .{ "next_event_id", gs.event_queue.next_id },
         };
         for (ints) |kv| {
@@ -525,11 +524,11 @@ pub const Store = struct {
             // never be saved by two loops that drift apart.
             fn put(unit_st: anytype, slot_st: anytype, c: i64, o: i64, u: *const unit_mod.Unit, held: unit_mod.HeldHull.Mark) !void {
                 try unit_st.bindAll(.{
-                    c,                        o,                        @intFromEnum(u.id),    u.chassis_key,
-                    u.name,                   u.kind,                   @intFromEnum(u.force), @intFromEnum(u.pilot),
-                    @intFromEnum(u.tech),     @as(i64, u.armor_pct),    u.quality,             u.status,
-                    u.last_maintenance_day,   @as(i64, u.acquired_day), u.purchase_price,      u.reactivation_done_day,
-                    @intFromEnum(u.berth_hq), u.wreck,                  held.by,               @as(i64, held.day),
+                    c,                                   o,                                       @intFromEnum(u.id),    u.chassis_key,
+                    u.name,                              u.kind,                                  @intFromEnum(u.force), @intFromEnum(u.pilot),
+                    @intFromEnum(u.tech),                @as(i64, u.armor_pct),                   u.quality,             u.status,
+                    u.last_maintenance_day,              @as(i64, u.acquired_day),                u.purchase_price,      u.reactivation_done_day,
+                    @intFromEnum(u.berth_hq),            u.wreck,                                 held.by,               @as(i64, held.day),
                     @as(i64, @intFromEnum(held.battle)), @as(i64, @intFromEnum(held.from_force)),
                 });
                 try unit_st.run();
@@ -766,7 +765,7 @@ pub const Store = struct {
                 l.rarity,                                                             l.price,                                                   @as(i64, l.quantity),                                        l.staple,
                 @as(i64, l.listed_day),                                               @as(i64, l.expires_day),                                   @intFromEnum(l.hq),                                          if (l.condition) |c| @as(?i64, c.armor_pct) else null,
                 if (l.condition) |c| @as(?[]const u8, @tagName(c.quality)) else null, if (l.condition) |c| @as(?i64, c.damaged_slots) else null, if (l.condition) |c| @as(?i64, c.destroyed_slots) else null, if (l.condition) |c| @as(?i64, c.missing_components) else null,
-                @as(i64, @intFromBool(l.black_market)),                           @intFromEnum(l.company),
+                @as(i64, @intFromBool(l.black_market)),                               @intFromEnum(l.company),
             });
             try st.run();
         }
@@ -816,20 +815,20 @@ pub const Store = struct {
         for (gs.battle_reports.kept.items, 0..) |r, i| {
             const ord: i64 = @intCast(i);
             try br.bindAll(.{
-                cid,                             ord,                            @intFromEnum(r.id),              @as(i64, r.day),
-                @intFromEnum(r.contract),        @intFromEnum(r.company),        r.kind,                          r.enemy_key,
-                r.scenario,                      r.terrain,                      r.weather,                       @tagName(r.outcome),
-                @as(i64, @intFromBool(r.held_field)), @as(i64, @intFromBool(r.withdrew)), @tagName(r.roe),        @as(i64, @intFromBool(r.roe_overridden)),
-                r.player_power,                  r.enemy_power,                  @as(i64, r.conditions_mod),      @as(i64, @intFromBool(r.close_terrain)),
-                @as(i64, @intFromBool(r.air_grounded)), @as(i64, @intFromBool(r.convoy_hit)), r.edge_spent_by,    @as(i64, r.recon_quality),
-                @as(i64, r.avg_fatigue),         @as(i64, r.avg_morale),         @as(i64, r.hits_taken),          @as(i64, r.destroyed),
-                @as(i64, r.wounded),             @as(i64, r.kia),                @as(i64, r.lost_hulls),          @as(i64, r.missing),
-                r.enemy_destroyed_bv,            @as(i64, r.kills_credited),     @as(i64, r.prisoners),           r.battle_loss_comp,
-                @as(i64, r.score_after),         @as(i64, r.score_delta),        @as(i64, r.morale_delta),        @as(i64, r.fatigue_add),
-                @as(i64, r.battle_loss_pct),     @as(i64, r.salvage_pct),        r.command_rights,                @as(i64, r.silenced_mounts),
-                @as(i64, r.armor_left),          r.salvage.claimed_bv,           r.salvage.haulable_bv,           r.salvage.liaison_cut,
-                r.salvage.exchange_cash,         r.salvage.items,                @as(i64, @intFromBool(r.conceded)),
-                @as(i64, @intFromBool(r.acknowledged)), r.salvage.unclaimed_bv,
+                cid,                                    ord,                                  @intFromEnum(r.id),                 @as(i64, r.day),
+                @intFromEnum(r.contract),               @intFromEnum(r.company),              r.kind,                             r.enemy_key,
+                r.scenario,                             r.terrain,                            r.weather,                          @tagName(r.outcome),
+                @as(i64, @intFromBool(r.held_field)),   @as(i64, @intFromBool(r.withdrew)),   @tagName(r.roe),                    @as(i64, @intFromBool(r.roe_overridden)),
+                r.player_power,                         r.enemy_power,                        @as(i64, r.conditions_mod),         @as(i64, @intFromBool(r.close_terrain)),
+                @as(i64, @intFromBool(r.air_grounded)), @as(i64, @intFromBool(r.convoy_hit)), r.edge_spent_by,                    @as(i64, r.recon_quality),
+                @as(i64, r.avg_fatigue),                @as(i64, r.avg_morale),               @as(i64, r.hits_taken),             @as(i64, r.destroyed),
+                @as(i64, r.wounded),                    @as(i64, r.kia),                      @as(i64, r.lost_hulls),             @as(i64, r.missing),
+                r.enemy_destroyed_bv,                   @as(i64, r.kills_credited),           @as(i64, r.prisoners),              r.battle_loss_comp,
+                @as(i64, r.score_after),                @as(i64, r.score_delta),              @as(i64, r.morale_delta),           @as(i64, r.fatigue_add),
+                @as(i64, r.battle_loss_pct),            @as(i64, r.salvage_pct),              r.command_rights,                   @as(i64, r.silenced_mounts),
+                @as(i64, r.armor_left),                 r.salvage.claimed_bv,                 r.salvage.haulable_bv,              r.salvage.liaison_cut,
+                r.salvage.exchange_cash,                r.salvage.items,                      @as(i64, @intFromBool(r.conceded)), @as(i64, @intFromBool(r.acknowledged)),
+                r.salvage.unclaimed_bv,
             });
             try br.run();
             for (r.hulls, 0..) |h, hi| {
@@ -843,12 +842,12 @@ pub const Store = struct {
                 const recovery_roll: ?i64 = if (h.recovery) |rec| @intCast(rec.roll) else null;
                 const recovery_target: ?i64 = if (h.recovery) |rec| @intCast(rec.target) else null;
                 try bh.bindAll(.{
-                    cid,                              ord,                              @as(i64, @intCast(hi)),           @as(i64, @intFromEnum(h.unit)),
-                    h.chassis_key,                    h.chassis_name,                   @as(i64, h.armor_before),         @as(i64, h.armor_after),
-                    slot_key,                         h.slot_part,                      @tagName(h.slot_result),          @as(i64, @intFromBool(h.destroyed)),
-                    @tagName(h.cause),                @as(i64, @intFromEnum(h.pilot)),  h.crew_name,
-                    wound_severity,                   wound_location,                   wound_permanent,                  @tagName(h.crew.fate),
-                    recovery_roll,                    recovery_target,                  @as(i64, @intFromBool(h.lost)),
+                    cid,               ord,                             @as(i64, @intCast(hi)),   @as(i64, @intFromEnum(h.unit)),
+                    h.chassis_key,     h.chassis_name,                  @as(i64, h.armor_before), @as(i64, h.armor_after),
+                    slot_key,          h.slot_part,                     @tagName(h.slot_result),  @as(i64, @intFromBool(h.destroyed)),
+                    @tagName(h.cause), @as(i64, @intFromEnum(h.pilot)), h.crew_name,              wound_severity,
+                    wound_location,    wound_permanent,                 @tagName(h.crew.fate),    recovery_roll,
+                    recovery_target,   @as(i64, @intFromBool(h.lost)),
                 });
                 try bh.run();
             }
@@ -860,8 +859,8 @@ pub const Store = struct {
             // again would hand the player a different battlefield.
             for (r.salvage.candidates, 0..) |sc, si| {
                 try bs.bindAll(.{
-                    cid,                     ord,                    @as(i64, @intCast(si)), sc.key,
-                    sc.name,                 sc.bv,                  @as(i64, sc.armor_pct), @tagName(sc.quality),
+                    cid,                        ord,                          @as(i64, @intCast(si)),          sc.key,
+                    sc.name,                    sc.bv,                        @as(i64, sc.armor_pct),          @tagName(sc.quality),
                     @as(i64, sc.damaged_slots), @as(i64, sc.destroyed_slots), @as(i64, sc.missing_components),
                 });
                 try bs.run();
@@ -909,9 +908,9 @@ pub const Store = struct {
             c.enemy_pool_remaining,          @as(i64, c.victory_points),       c.ineffective_since,               c.breach_day,
             @as(i64, c.terms.length_months), c.terms.base_pay_month,           @as(i64, c.terms.advance_pct),     c.terms.signing_bonus,
             @as(i64, c.terms.transport_pct), @as(i64, c.terms.overhead_pct),   @as(i64, c.terms.battle_loss_pct), @as(i64, c.terms.salvage_pct),
-            c.terms.salvage_exchange,        c.terms.command_rights,           c.negotiated,
-            @as(i64, c.enemy_lances),        c.enemy_quality,                  c.enemy_lance_bv,
-            @as(i64, c.enemy_lance_tons),    @intFromEnum(c.offer_hq),         c.orders_day,
+            c.terms.salvage_exchange,        c.terms.command_rights,           c.negotiated,                      @as(i64, c.enemy_lances),
+            c.enemy_quality,                 c.enemy_lance_bv,                 @as(i64, c.enemy_lance_tons),      @intFromEnum(c.offer_hq),
+            c.orders_day,
         });
         try st.run();
     }

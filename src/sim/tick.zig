@@ -91,7 +91,7 @@ fn runPolicies(gs: *GameState) !void {
     // inbound drops under its floor, at most once a week per line, never
     // past what the trucks can hold.
     const commands = @import("commands.zig");
-const Result = commands.Result;
+    const Result = commands.Result;
     for (gs.supply_policies.items) |sp| {
         const f = gs.forces.getPtr(sp.company) orelse continue;
         if (gs.isCompanyHome(sp.company) or f.return_eta_day != null) continue;

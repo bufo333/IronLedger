@@ -227,7 +227,11 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
             const rt = (try offer_rating.rateOffer(alloc, gs, c, c.assigned_company)) orelse continue;
             if (!rt.warrantsWarning()) continue;
             try out.append(alloc, .{ .kind = .outmatched, .text = try std.fmt.allocPrint(alloc, "{s} is outmatched on {s}: {s} — wins {d}% of fights, loses the field {d}%; consider cautious ROE (Forces o) or recall", .{
-                if (gs.force(c.assigned_company)) |f| try table.plain(alloc, f.name) else "—", c.planet_key, try offer_rating.skullText(alloc, rt), rt.win_pct, rt.lose_field_pct,
+                if (gs.force(c.assigned_company)) |f| try table.plain(alloc, f.name) else "—",
+                c.planet_key,
+                try offer_rating.skullText(alloc, rt),
+                rt.win_pct,
+                rt.lose_field_pct,
             }) });
         }
     }

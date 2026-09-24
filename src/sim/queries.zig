@@ -280,8 +280,8 @@ fn salvageDetail(alloc: Alloc, gs: *GameState, ev: *const @import("events.zig").
     }));
     for (r.salvage.candidates) |cand| {
         try out.append(alloc, try std.fmt.allocPrint(alloc, "    {s}{s} {s}{s}  {d} BV · armor {d}% · {d} destroyed, {d} missing", .{
-            if (cand.bv > claim) "{d}" else "", cand.key, cand.name, if (cand.bv > claim) " (out of reach){/}" else "",
-            cand.bv, cand.armor_pct, cand.destroyed_slots, cand.missing_components,
+            if (cand.bv > claim) "{d}" else "", cand.key,       cand.name,            if (cand.bv > claim) " (out of reach){/}" else "",
+            cand.bv,                            cand.armor_pct, cand.destroyed_slots, cand.missing_components,
         }));
     }
     for ([_]types.SalvagePlan{ .heaviest, .most_hulls, .parts_only }, 1..) |kind, n| {
@@ -357,7 +357,8 @@ pub fn battleOrders(alloc: Alloc, gs: *GameState, id: types.ContractId) !?Battle
     }));
     if (try rateOffer(alloc, gs, c, company)) |rt| {
         try situation.append(alloc, try std.fmt.allocPrint(alloc, "{s} · wins {d}% of fights, loses the field {d}%{s}", .{
-            try ratingLine(alloc, gs, rt), rt.win_pct, rt.lose_field_pct, if (rt.warrantsWarning()) " {c}— outmatched{/}" else "",
+            try ratingLine(alloc, gs, rt), rt.win_pct, rt.lose_field_pct,
+            if (rt.warrantsWarning()) " {c}— outmatched{/}" else "",
         }));
     }
     const fieldable = contract_control.fieldableBv(gs, company);
@@ -391,7 +392,7 @@ pub fn battleOrders(alloc: Alloc, gs: *GameState, id: types.ContractId) !?Battle
         }
         const funds = gs.treasuryBalance(.{ .company = company });
         rush_text = try std.fmt.allocPrint(alloc, "{s} — {s} C at the local price ×{s}{s}", .{
-            what.items, try money(alloc, rush.price), try bpMultText(alloc, rush.mult_bp),
+            what.items,                                                   try money(alloc, rush.price), try bpMultText(alloc, rush.mult_bp),
             if (funds < rush.price) " {c}(local funds short){/}" else "",
         });
     }
@@ -603,9 +604,9 @@ pub fn logRow(alloc: Alloc, e: *const state_mod.LogEntry) ![]const u8 {
 }
 
 pub const company_cols: []const table.Col = &.{
-    .{ .name = "co", .justify = .right }, .{ .name = "name" },                   .{ .name = "hq", .drop = 1 },                        .{ .name = "posture" },
-    .{ .name = "contract" },              .{ .name = "location", .drop = 2 },               .{ .name = "fat", .justify = .right },    .{ .name = "mor", .justify = .right },
-    .{ .name = "hulls", .justify = .right }, .{ .name = "ready", .justify = .right }, .{ .name = "supply" },               .{ .name = "local funds", .justify = .right },
+    .{ .name = "co", .justify = .right },    .{ .name = "name" },                     .{ .name = "hq", .drop = 1 },          .{ .name = "posture" },
+    .{ .name = "contract" },                 .{ .name = "location", .drop = 2 },      .{ .name = "fat", .justify = .right }, .{ .name = "mor", .justify = .right },
+    .{ .name = "hulls", .justify = .right }, .{ .name = "ready", .justify = .right }, .{ .name = "supply" },                 .{ .name = "local funds", .justify = .right },
 };
 
 fn companyRow(alloc: Alloc, gs: *GameState, id: types.ForceId) !table.Row {
@@ -664,11 +665,11 @@ pub const OfferRow = struct {
 };
 
 pub const board_cols: []const table.Col = &.{
-    .{ .name = "kind" },       .{ .name = "world" },                    .{ .name = "emp" },                     .{ .name = "LY", .justify = .right, .drop = 3 },
-    .{ .name = "band" },       .{ .name = "mo", .justify = .right },      .{ .name = "pay/mo", .justify = .right }, .{ .name = "total", .justify = .right, .drop = 3 },
-    .{ .name = "enemy" },      .{ .name = "salv", .justify = .right },    .{ .name = "rights" },                  .{ .name = "transit", .justify = .right },
-    .{ .name = "skulls" },     .{ .name = "rating" },                   .{ .name = "readiest co." },            .{ .name = "tons", .justify = .right, .drop = 1 },
-    .{ .name = "weight mix", .drop = 2 }, .{ .name = "enemy tons", .drop = 2 },               .{ .name = "opposition" },              .{ .name = "" },
+    .{ .name = "kind" },                  .{ .name = "world" },                   .{ .name = "emp" },                       .{ .name = "LY", .justify = .right, .drop = 3 },
+    .{ .name = "band" },                  .{ .name = "mo", .justify = .right },   .{ .name = "pay/mo", .justify = .right }, .{ .name = "total", .justify = .right, .drop = 3 },
+    .{ .name = "enemy" },                 .{ .name = "salv", .justify = .right }, .{ .name = "rights" },                    .{ .name = "transit", .justify = .right },
+    .{ .name = "skulls" },                .{ .name = "rating" },                  .{ .name = "readiest co." },              .{ .name = "tons", .justify = .right, .drop = 1 },
+    .{ .name = "weight mix", .drop = 2 }, .{ .name = "enemy tons", .drop = 2 },   .{ .name = "opposition" },                .{ .name = "" },
 };
 
 pub const ActiveRow = struct {
@@ -885,9 +886,9 @@ pub fn contracts(alloc: Alloc, gs: *GameState, board_hq: types.HqId) !Contracts 
         if (!c.isRunning()) continue;
         var lines: std.ArrayListUnmanaged([]const u8) = .empty;
         try lines.append(alloc, try std.fmt.allocPrint(alloc, "[{d}] {{a}}{s}{{/}}  {s}  co:{d} {s} on {s}  ·  employer {s} · vs {s}  ·  {s} objective", .{
-            @intFromEnum(c.id),               c.kind.label(),                  @tagName(c.status),
+            @intFromEnum(c.id),               c.kind.label(),                               @tagName(c.status),
             @intFromEnum(c.assigned_company), try forceName(alloc, gs, c.assigned_company), planetName(c.planet_key),
-            c.employer_key,                   c.enemy_key,                       @tagName(c.objective),
+            c.employer_key,                   c.enemy_key,                                  @tagName(c.objective),
         }));
         var bar_buf: [30]u8 = undefined;
         if (c.objective == .attrition) {
@@ -910,7 +911,8 @@ pub fn contracts(alloc: Alloc, gs: *GameState, board_hq: types.HqId) !Contracts 
         // opposition — a mauled company's odds fall as it wears down.
         if (try rateOffer(alloc, gs, c, c.assigned_company)) |rt| {
             try lines.append(alloc, try std.fmt.allocPrint(alloc, "    skulls      {s} · wins {d}% of fights, loses the field {d}%{s}", .{
-                try ratingLine(alloc, gs, rt), rt.win_pct, rt.lose_field_pct, if (rt.warrantsWarning()) " {c}— outmatched: consider cautious ROE or recall{/}" else "",
+                try ratingLine(alloc, gs, rt), rt.win_pct, rt.lose_field_pct,
+                if (rt.warrantsWarning()) " {c}— outmatched: consider cautious ROE or recall{/}" else "",
             }));
         }
         try lines.append(alloc, try std.fmt.allocPrint(alloc, "    verdict     {s}{s}{{/}} so far · {s}score {d}{{/}} (breach on performance at {d}) · outstanding ≥ 50 VP, strong ≥ 25, satisfactory ≥ 0", .{
@@ -973,7 +975,8 @@ pub fn contracts(alloc: Alloc, gs: *GameState, board_hq: types.HqId) !Contracts 
         .board = try board.toOwnedSlice(alloc),
         .active = try active.toOwnedSlice(alloc),
         .notes = try std.fmt.allocPrint(alloc, "{s}  ·  {{d}}beachhead: ×1.3 pay · +15% hardship · local supplies ×2.5 · resupply via link only  ·  rights: integrated = more fights, salvage ×0.5, defeats −2, no training lances, pay +10% · house = ×0.75, +5% · liaison = ×0.9 · independent = fewer fights, full salvage, −5% · salv cash = salvage exchange (paid in cash, no wrecks)  ·  board refreshes on the 1st{{/}}", .{(try rating(alloc, gs)).line}),
-    .standings = try standings(alloc, gs), };
+        .standings = try standings(alloc, gs),
+    };
 }
 
 /// How healthy a hull's armour reads. The one band rule: every
@@ -1272,7 +1275,7 @@ pub const HangarRow = struct {
 };
 
 pub const hangar_cols: []const table.Col = &.{
-    .{ .name = "#" },                             .{ .name = "hull" },                        .{ .name = "name" },   .{ .name = "bill/mo", .justify = .right },
+    .{ .name = "#" },                              .{ .name = "hull" },                          .{ .name = "name" },    .{ .name = "bill/mo", .justify = .right },
     .{ .name = "contributes", .justify = .right }, .{ .name = "cost index", .justify = .right }, .{ .name = "company" }, .{ .name = "why" },
 };
 
@@ -1292,7 +1295,8 @@ pub fn wreckNote(alloc: std.mem.Allocator, gs: *GameState, u: *const @import("..
     const est = hq_ops.rebuildEstimate(gs, u) orelse return try std.fmt.allocPrint(alloc, "{{c}}{s} — strip it (Forces $, s) or sell for {s}{{/}}", .{ cause, try money(alloc, gs.unitSaleValue(u)) });
     const new_cost: types.CBills = if (chassis_mod.find(u.chassis_key)) |c| c.cost else 0;
     return try std.fmt.allocPrint(alloc, "{{c}}{s} — rebuild ≈{s} vs new {s}{s}{{/}}", .{
-        cause, try money(alloc, est), try money(alloc, new_cost), if (hq_ops.beyondEconomicalRepair(gs, u)) " · beyond economical repair: strip or sell" else "",
+        cause, try money(alloc, est), try money(alloc, new_cost),
+        if (hq_ops.beyondEconomicalRepair(gs, u)) " · beyond economical repair: strip or sell" else "",
     });
 }
 
@@ -1485,8 +1489,8 @@ fn toeInto(alloc: Alloc, gs: *GameState, out: *std.ArrayListUnmanaged(ToeRow), i
             u.chassis_key,
             if (ch) |c| c.name else "?",
             try std.fmt.allocPrint(alloc, "{d}t", .{if (ch) |c| c.tonnage else 0}),
-            if (pilot) |p| try std.fmt.allocPrint(alloc, "{s}", .{ try personText(alloc, p) }) else "{c}— no pilot{/}",
-            if (tech) |t| try std.fmt.allocPrint(alloc, "{s}", .{ try personText(alloc, t) }) else if (needs_tech) "{c}— no tech{/}" else "—",
+            if (pilot) |p| try std.fmt.allocPrint(alloc, "{s}", .{try personText(alloc, p)}) else "{c}— no pilot{/}",
+            if (tech) |t| try std.fmt.allocPrint(alloc, "{s}", .{try personText(alloc, t)}) else if (needs_tech) "{c}— no tech{/}" else "—",
             try std.fmt.allocPrint(alloc, "{s}{s}{{/}}", .{ st_mk, @tagName(u.status) }),
             try std.fmt.allocPrint(alloc, "armor {s}{s}", .{ try armorBar(alloc, u.armor_pct), try damageMarks(alloc, u) }),
         }) });
@@ -1638,7 +1642,7 @@ pub fn unassigned(alloc: Alloc, gs: *GameState) ![]const []const u8 {
             seated = true;
         };
         if (seated) continue;
-        try out.append(alloc, try std.fmt.allocPrint(alloc, "{d: <6} {s: <23} {s: <14} {s: <10} {s}", .{ @intFromEnum(p.id), try std.fmt.allocPrint(alloc, "{s}", .{ try personText(alloc, p) }), @tagName(p.role), @tagName(p.experience()), if (p.isAvailable(day)) "" else "{a}unavailable{/}" }));
+        try out.append(alloc, try std.fmt.allocPrint(alloc, "{d: <6} {s: <23} {s: <14} {s: <10} {s}", .{ @intFromEnum(p.id), try std.fmt.allocPrint(alloc, "{s}", .{try personText(alloc, p)}), @tagName(p.role), @tagName(p.experience()), if (p.isAvailable(day)) "" else "{a}unavailable{/}" }));
     }
     return out.toOwnedSlice(alloc);
 }
@@ -2089,7 +2093,7 @@ pub const Hall = struct {
 };
 
 pub const hall_cols: []const table.Col = &.{
-    .{ .name = "idx" },                  .{ .name = "name" },                   .{ .name = "role" },                    .{ .name = "exp" },
+    .{ .name = "idx" },                   .{ .name = "name" },                   .{ .name = "role" },                     .{ .name = "exp" },
     .{ .name = "sk", .justify = .right }, .{ .name = "age", .justify = .right }, .{ .name = "bonus", .justify = .right }, .{ .name = "leaves" },
     .{ .name = "note" },
 };
@@ -2223,9 +2227,9 @@ pub const StockPolicyRow = struct {
 };
 
 pub const market_cols: []const table.Col = &.{
-    .{ .name = "idx" },                    .{ .name = "kind" },   .{ .name = "key" },                       .{ .name = "name" },
-    .{ .name = "price", .justify = .right }, .{ .name = "qty" },  .{ .name = "rarity" },                    .{ .name = "staple" },
-    .{ .name = "expires" },                .{ .name = "condition" },
+    .{ .name = "idx" },                      .{ .name = "kind" },      .{ .name = "key" },    .{ .name = "name" },
+    .{ .name = "price", .justify = .right }, .{ .name = "qty" },       .{ .name = "rarity" }, .{ .name = "staple" },
+    .{ .name = "expires" },                  .{ .name = "condition" },
 };
 pub const catalog_cols: []const table.Col = &.{ .{ .name = "part" }, .{ .name = "name" }, .{ .name = "cost", .justify = .right }, .{ .name = "tons", .justify = .right }, .{ .name = "source" } };
 pub const demand_cols: []const table.Col = &.{ .{ .name = "part" }, .{ .name = "need", .justify = .right }, .{ .name = "on hand", .justify = .right }, .{ .name = "on order", .justify = .right }, .{ .name = "short", .justify = .right } };
@@ -2461,7 +2465,7 @@ pub const RaiseCand = struct {
 };
 
 pub const raise_cols: []const table.Col = &.{
-    .{ .name = "source" },    .{ .name = "#" },                        .{ .name = "hull" },     .{ .name = "name" },
+    .{ .name = "source" },                  .{ .name = "#" },         .{ .name = "hull" },                     .{ .name = "name" },
     .{ .name = "tons", .justify = .right }, .{ .name = "condition" }, .{ .name = "price", .justify = .right }, .{ .name = "delivery" },
     .{ .name = "" },
 };
@@ -2529,7 +2533,7 @@ pub fn berths(alloc: Alloc, gs: *GameState, hq_id: types.HqId) ![][]const u8 {
         const where: []const u8 = if (u.force != .none) try std.fmt.allocPrint(alloc, "{{a}}away with {s}{{/}}", .{try forceName(alloc, gs, u.force)}) else if (u.status != .ready) try std.fmt.allocPrint(alloc, "{{c}}{s}{{/}}", .{@tagName(u.status)}) else "{g}at berth{/}";
         try out.append(alloc, try std.fmt.allocPrint(alloc, "  #{d: <3} {s: <9} {s: <9} {s}  {s}  {s}", .{
             @intFromEnum(u.id), u.chassis_key, if (ch) |c| c.name else "?", try padCells(alloc, "", lift_text, 30),
-            if (crew) |c| try padCells(alloc, "", try std.fmt.allocPrint(alloc, "{s}", .{ try personText(alloc, c) }), 18) else try padCells(alloc, "{c}", "— no crew", 18),
+            if (crew) |c| try padCells(alloc, "", try std.fmt.allocPrint(alloc, "{s}", .{try personText(alloc, c)}), 18) else try padCells(alloc, "{c}", "— no crew", 18),
             where,
         }));
     }
@@ -2545,7 +2549,7 @@ pub fn liftText(alloc: Alloc, gs: *GameState, company: types.ForceId) ![]const u
     const bp = @import("../econ/logistics.zig").transitFreightBp(plan.covered_bp, plan.own_jumpship);
     var mult_buf: [16]u8 = undefined;
     return try std.fmt.allocPrint(alloc, "lift: {d} of {d} hulls on {d} own dropship{s}{s} — charter {s}", .{
-        plan.carried, plan.needed, plan.ships, if (plan.ships == 1) "" else "s", if (plan.own_jumpship) " + own jumpship" else "",
+        plan.carried,                plan.needed, plan.ships, if (plan.ships == 1) "" else "s", if (plan.own_jumpship) " + own jumpship" else "",
         types.bpText(&mult_buf, bp),
     });
 }
@@ -2566,8 +2570,8 @@ pub const PersonRow = struct {
 };
 
 pub const people_cols: []const table.Col = &.{
-    .{ .name = "id", .justify = .right }, .{ .name = "name" },       .{ .name = "role" },                  .{ .name = "exp" },
-    .{ .name = "skill" },                 .{ .name = "XP", .justify = .right }, .{ .name = "status" },       .{ .name = "assignment" },
+    .{ .name = "id", .justify = .right }, .{ .name = "name" },                   .{ .name = "role" },                   .{ .name = "exp" },
+    .{ .name = "skill" },                 .{ .name = "XP", .justify = .right },  .{ .name = "status" },                 .{ .name = "assignment" },
     .{ .name = "where" },                 .{ .name = "fat", .justify = .right }, .{ .name = "mor", .justify = .right }, .{ .name = "pay", .justify = .right },
 };
 
@@ -2906,9 +2910,9 @@ pub const ReadinessRow = struct {
 };
 
 pub const readiness_cols: []const table.Col = &.{
-    .{ .name = "company" },                    .{ .name = "posture" },                  .{ .name = "heads", .justify = .right },   .{ .name = "fatigue", .justify = .right },
-    .{ .name = "morale", .justify = .right },  .{ .name = "wounded", .justify = .right }, .{ .name = "perm", .justify = .right },  .{ .name = "training", .justify = .right },
-    .{ .name = "banked XP", .justify = .right }, .{ .name = "hulls", .justify = .right }, .{ .name = "depot", .justify = .right }, .{ .name = "quality" },
+    .{ .name = "company" },                      .{ .name = "posture" },                    .{ .name = "heads", .justify = .right }, .{ .name = "fatigue", .justify = .right },
+    .{ .name = "morale", .justify = .right },    .{ .name = "wounded", .justify = .right }, .{ .name = "perm", .justify = .right },  .{ .name = "training", .justify = .right },
+    .{ .name = "banked XP", .justify = .right }, .{ .name = "hulls", .justify = .right },   .{ .name = "depot", .justify = .right }, .{ .name = "quality" },
     .{ .name = "rotation" },
 };
 
@@ -3010,7 +3014,8 @@ pub fn readinessLines(alloc: Alloc, gs: *GameState, company: types.ForceId) ![]c
         if (r.days_since_rotation) |d| try std.fmt.allocPrint(alloc, " · {d} days since", .{d}) else "",
     }));
     try out.append(alloc, try std.fmt.allocPrint(alloc, "{d} hulls · avg quality {s} · {s}{d} need depot time{{/}} · {d} XP banked in the cockpits{s}", .{
-        r.hulls, @tagName(r.avg_quality), if (r.depot > 0) "{c}" else "", r.depot, r.banked_xp, if (r.banked_xp > 0 and !r.deployed) " — a training ground turns it into skill" else "",
+        r.hulls, @tagName(r.avg_quality), if (r.depot > 0) "{c}" else "", r.depot, r.banked_xp,
+        if (r.banked_xp > 0 and !r.deployed) " — a training ground turns it into skill" else "",
     }));
     try out.append(alloc, "");
     try out.append(alloc, try std.fmt.allocPrint(alloc, "wounded {d} · permanent injuries {d} · in training {d}", .{ r.wounded, r.permanent, r.training }));
@@ -3046,11 +3051,10 @@ pub fn personRecord(alloc: Alloc, gs: *GameState, id: types.PersonId) ![]const [
     try out.append(alloc, "");
     const band = p.fatigueBand();
     try out.append(alloc, try std.fmt.allocPrint(alloc, "XP {{a}}{d}{{/}} · fatigue {s}{d} {s}{{/}}{s} · morale {d} · pay {s}/mo · recruited day {d}", .{
-        p.xp,                                                                                                     fatigueMarkup(band),
-        p.fatigue,                                                                                                @tagName(band),
-        if (band.penalty() > 0) try std.fmt.allocPrint(alloc, " (+{d} gunnery/piloting{s})", .{ band.penalty(), if (band == .spent) ", unfit" else "" }) else "",
-        p.morale,                                                                                                 try money(alloc, p.monthlySalary()),
-        p.recruited_day,
+        p.xp,                                                                                                                                                     fatigueMarkup(band),
+        p.fatigue,                                                                                                                                                @tagName(band),
+        if (band.penalty() > 0) try std.fmt.allocPrint(alloc, " (+{d} gunnery/piloting{s})", .{ band.penalty(), if (band == .spent) ", unfit" else "" }) else "", p.morale,
+        try money(alloc, p.monthlySalary()),                                                                                                                      p.recruited_day,
     }));
     try out.append(alloc, "");
     try out.append(alloc, "skill               level   next   XP cost");
@@ -3260,8 +3264,8 @@ pub const HistoryRow = struct {
 };
 
 pub const history_cols: []const table.Col = &.{
-    .{ .name = "id" },      .{ .name = "kind" },                  .{ .name = "emp" },     .{ .name = "world" },
-    .{ .name = "outcome" }, .{ .name = "served", .justify = .right }, .{ .name = "VP", .justify = .right }, .{ .name = "verdict" },
+    .{ .name = "id" },                          .{ .name = "kind" },                      .{ .name = "emp" },                   .{ .name = "world" },
+    .{ .name = "outcome" },                     .{ .name = "served", .justify = .right }, .{ .name = "VP", .justify = .right }, .{ .name = "verdict" },
     .{ .name = "received", .justify = .right }, .{ .name = "company" },
 };
 
@@ -3302,7 +3306,6 @@ pub fn contractHistory(alloc: Alloc, gs: *GameState) ![]HistoryRow {
     }
     return out.toOwnedSlice(alloc);
 }
-
 
 /// Contracts the outfit has worked on a world (any outcome): the founding
 /// rule counts them as reach.
@@ -4318,10 +4321,10 @@ pub const Candidate = struct {
 };
 
 pub const candidates_cols: []const table.Col = &.{
-    .{ .name = "company" },                .{ .name = "stands" },                .{ .name = "jumps", .justify = .right },   .{ .name = "days", .justify = .right },
+    .{ .name = "company" },                    .{ .name = "stands" },                    .{ .name = "jumps", .justify = .right }, .{ .name = "days", .justify = .right },
     .{ .name = "fatigue", .justify = .right }, .{ .name = "morale", .justify = .right }, .{ .name = "depot", .justify = .right }, .{ .name = "spent", .justify = .right },
-    .{ .name = "wounded", .justify = .right }, .{ .name = "skulls" },                .{ .name = "rating" },                   .{ .name = "win / lose field" },
-    .{ .name = "tonnage" },                .{ .name = "" },
+    .{ .name = "wounded", .justify = .right }, .{ .name = "skulls" },                    .{ .name = "rating" },                   .{ .name = "win / lose field" },
+    .{ .name = "tonnage" },                    .{ .name = "" },
 };
 
 /// Which companies can take an offer and how ready each is: where the
@@ -4414,9 +4417,9 @@ pub fn offerCandidates(alloc: Alloc, gs: *GameState, offer_index: usize) ![]Cand
         const text = if (eligible)
             try std.fmt.allocPrint(alloc, "{s} {s} {d: >5}  {d: >4}   {s}{d: >7}{{/}}  {s}{d: >6}{{/}}  {s}{d: >5}{{/}}  {s}{d: >5}{{/}}  {s}{d: >7}{{/}}   {s}{s}", .{
                 try padCells(alloc, "{a}", try table.plain(alloc, f.name), 21), try padCells(alloc, "", clip(stands, 25), 25), jumps,                          days,
-                fat_mk,                                 r.fatigue,                                     mor_mk,                         r.morale,
-                if (r.depot > 0) "{c}" else "",         r.depot,                                       if (r.spent > 0) "{a}" else "", r.spent,
-                if (r.wounded > 0) "{a}" else "",       r.wounded,                                     odds_mk,                        odds,
+                fat_mk,                                                         r.fatigue,                                     mor_mk,                         r.morale,
+                if (r.depot > 0) "{c}" else "",                                 r.depot,                                       if (r.spent > 0) "{a}" else "", r.spent,
+                if (r.wounded > 0) "{a}" else "",                               r.wounded,                                     odds_mk,                        odds,
             })
         else
             try std.fmt.allocPrint(alloc, "{{d}}{s: <21}{{/}} {s} {{d}}cannot go: {s}{{/}}", .{ try table.plain(alloc, f.name), try padCells(alloc, if (busy) "{a}" else "{d}", stands, if (busy) 48 else 25), why });
@@ -4669,7 +4672,7 @@ pub fn crewChoices(alloc: Alloc, gs: *GameState, unit_id: types.UnitId) ![]PickR
             (if (u.tech == p.id) "this hull's tech" else try std.fmt.allocPrint(alloc, "{s}{d}h of {d}h{{/}}", .{ if (load == 0) "{g}" else "", load, gs.techHoursAvailable(p) }));
         const skill = p.skill(p.role.primarySkill()) orelse 9;
         const same = gs.companyOf(p.assigned_force) == own and own != .none;
-        const name = try std.fmt.allocPrint(alloc, "{s}", .{ try personText(alloc, p) });
+        const name = try std.fmt.allocPrint(alloc, "{s}", .{try personText(alloc, p)});
         const eligible = why.len == 0;
         const cells: table.Row = if (eligible)
             try table.row(alloc, &.{ try std.fmt.allocPrint(alloc, "{{a}}{s}{{/}}", .{name}), @tagName(p.role), try std.fmt.allocPrint(alloc, "{d}", .{skill}), now, if (!same) (if (gs.companyOf(p.assigned_force) == .none) "{d}(pool){/}" else "{d}(another company){/}") else "" })
@@ -4703,8 +4706,8 @@ pub fn crewChoices(alloc: Alloc, gs: *GameState, unit_id: types.UnitId) ![]PickR
 pub fn unassignChoices(alloc: Alloc, gs: *GameState, unit_id: types.UnitId) ![]PickRow {
     var out: std.ArrayListUnmanaged(PickRow) = .empty;
     const u = gs.unit(unit_id) orelse return out.toOwnedSlice(alloc);
-    if (gs.person(u.pilot)) |p| try out.append(alloc, .{ .id = 0, .eligible = true, .slot = .pilot, .cells = try table.row(alloc, &.{ "{a}pilot{/}", try std.fmt.allocPrint(alloc, "{s}", .{ try personText(alloc, p) }) }) });
-    if (gs.person(u.tech)) |t| try out.append(alloc, .{ .id = 1, .eligible = true, .slot = .tech, .cells = try table.row(alloc, &.{ "{a}tech{/}", try std.fmt.allocPrint(alloc, "{s}", .{ try personText(alloc, t) }) }) });
+    if (gs.person(u.pilot)) |p| try out.append(alloc, .{ .id = 0, .eligible = true, .slot = .pilot, .cells = try table.row(alloc, &.{ "{a}pilot{/}", try std.fmt.allocPrint(alloc, "{s}", .{try personText(alloc, p)}) }) });
+    if (gs.person(u.tech)) |t| try out.append(alloc, .{ .id = 1, .eligible = true, .slot = .tech, .cells = try table.row(alloc, &.{ "{a}tech{/}", try std.fmt.allocPrint(alloc, "{s}", .{try personText(alloc, t)}) }) });
     if (out.items.len == 2) try out.append(alloc, .{ .id = 2, .eligible = true, .slot = .any, .cells = try table.row(alloc, &.{ "{a}both{/}", "" }) });
     return out.toOwnedSlice(alloc);
 }
@@ -5013,7 +5016,6 @@ test "skulls on the board, the candidates, the active pane — and an outmatched
     try std.testing.expect(pane_ok);
 }
 
-
 // ------------------------------------------------------------ REPL views
 //
 // The lines the command console prints for the views the client draws
@@ -5186,9 +5188,11 @@ pub fn companyRoster(alloc: Alloc, gs: *GameState, co: types.ForceId) ![]const [
         var pb: [48]u8 = undefined;
         var tb: [48]u8 = undefined;
         try out.append(alloc, try std.fmt.allocPrint(alloc, "  #{d: <3} {s: <8} {s: <9} pilot {s: <12}{s} tech {s: <12}{s}", .{
-            @intFromEnum(u.id),                                              u.chassis_key,
-            @tagName(u.status),                                              if (pilot) |p| try table.plain(alloc, p.shortName(&pb)) else "—",
-            if (pilot != null and pilot.?.isAvailable(day)) " " else "!",    if (!needs_tech) "n/a" else if (tech) |t| try table.plain(alloc, t.shortName(&tb)) else "—",
+            @intFromEnum(u.id),                                                          u.chassis_key,
+            @tagName(u.status),
+            if (pilot) |p| try table.plain(alloc, p.shortName(&pb)) else "—",
+            if (pilot != null and pilot.?.isAvailable(day)) " " else "!",
+            if (!needs_tech) "n/a" else if (tech) |t| try table.plain(alloc, t.shortName(&tb)) else "—",
             if (needs_tech and (tech == null or !tech.?.isAvailable(day))) "!" else " ",
         }));
     }
@@ -5369,9 +5373,12 @@ pub fn afterAction(alloc: Alloc, gs: *GameState, id: types.BattleId) !?AfterActi
         try fight.append(alloc, "");
         try fight.append(alloc, try std.fmt.allocPrint(alloc, "{d} hit · {s}{d} destroyed{{/}} · {s}{d} WIA{{/}} · {s}{d} KIA{{/}}", .{
             r.hits_taken,
-            if (r.destroyed > 0) "{c}" else "{g}", r.destroyed,
-            if (r.wounded > 0) "{a}" else "{g}", r.wounded,
-            if (r.kia > 0) "{c}" else "{g}", r.kia,
+            if (r.destroyed > 0) "{c}" else "{g}",
+            r.destroyed,
+            if (r.wounded > 0) "{a}" else "{g}",
+            r.wounded,
+            if (r.kia > 0) "{c}" else "{g}",
+            r.kia,
         }));
         if (r.lost_hulls > 0) try fight.append(alloc, try std.fmt.allocPrint(alloc, "{{c}}{d} hull(s) left to {s}{{/}}{s}", .{
             r.lost_hulls, r.enemy_key,
@@ -5438,7 +5445,7 @@ pub fn afterAction(alloc: Alloc, gs: *GameState, id: types.BattleId) !?AfterActi
         const low = a.left == 0 or (had > 0 and a.left * 4 < had);
         try trucks.append(alloc, try std.fmt.allocPrint(alloc, "{s: <6} {s}{s}{{/}} {d: >2}t burned · {s}{d: >2}t left{{/}}", .{
             @import("../domain/part.zig").munitionLabel(a.key), if (low) "{a}" else "{g}", table.bar(&buf, a.burned, @max(1, had)),
-            a.burned, if (low) "{c}" else "", a.left,
+            a.burned,                                           if (low) "{c}" else "",    a.left,
         }));
     }
     try trucks.append(alloc, "");
@@ -5585,7 +5592,7 @@ pub fn listings(alloc: Alloc, gs: *GameState) ![]const []const u8 {
     for (gs.market_listings.items, 0..) |l, i| {
         if (l.condition) |c| {
             try out.append(alloc, try std.fmt.allocPrint(alloc, "[{d}] hull  {s: <8} {s: <5} armor {d: >3}% quality {s} | {d} dmg / {d} destroyed / {d} missing comps | {s} | gone day {d}{s}", .{
-                i, l.item_key, c.label(), c.armor_pct, @tagName(c.quality), c.damaged_slots, c.destroyed_slots, c.missing_components, try money(alloc, l.price), l.expires_day,
+                i,                                                                                                                                  l.item_key, c.label(), c.armor_pct, @tagName(c.quality), c.damaged_slots, c.destroyed_slots, c.missing_components, try money(alloc, l.price), l.expires_day,
                 if (l.company != .none) try std.fmt.allocPrint(alloc, " | contract world, co:{d} local funds", .{@intFromEnum(l.company)}) else "",
             }));
         } else {
@@ -5675,9 +5682,8 @@ pub fn contractLines(alloc: Alloc, gs: *GameState) ![]const []const u8 {
         const days_left: i64 = if (c.end_day) |e| @as(i64, e) - @as(i64, gs.clock.day_index) else 0;
         const pool: []const u8 = if (c.objective == .attrition) try std.fmt.allocPrint(alloc, " — opposition {d}% destroyed ({d}/{d} BV)", .{ c.poolDestroyedPct(), c.enemy_pool_bv - c.enemy_pool_remaining, c.enemy_pool_bv }) else "";
         try out.append(alloc, try std.fmt.allocPrint(alloc, "[{d}] {s: <17} {s: <9} co:{d} on {s} | {s} objective{s} | {d} VP | score {d} | {d} days left{s}{s}", .{
-            @intFromEnum(c.id), @tagName(c.kind), @tagName(c.status), @intFromEnum(c.assigned_company), c.planet_key, @tagName(c.objective), pool,
-            c.victory_points, c.score, @max(0, days_left),
-            if (c.ineffective_since != null) " | COMBAT-INEFFECTIVE" else "",
+            @intFromEnum(c.id), @tagName(c.kind), @tagName(c.status), @intFromEnum(c.assigned_company),                                 c.planet_key, @tagName(c.objective), pool,
+            c.victory_points,   c.score,          @max(0, days_left), if (c.ineffective_since != null) " | COMBAT-INEFFECTIVE" else "",
             if (c.objectivesMet() and c.status == .active) " | objectives met — `complete`" else "",
         }));
     }
@@ -5824,7 +5830,8 @@ pub fn demandLines(alloc: Alloc, gs: *GameState) ![]const []const u8 {
         any = true;
         try out.append(alloc, try std.fmt.allocPrint(alloc, "  {s}", .{try h.name.markup(alloc)}));
         for (comps) |l| try out.append(alloc, try std.fmt.allocPrint(alloc, "    {s: <14} need {d: >3} | on hand {d: >3} | coming {d: >3} | shortfall {d: >3}{s}", .{
-            l.key, l.need, l.on_hand, l.coming, l.short, if (l.short > 0) "  ← order or fabricate" else "",
+            l.key, l.need, l.on_hand, l.coming, l.short,
+            if (l.short > 0) "  ← order or fabricate" else "",
         }));
     }
     var gear_any = false;
@@ -5840,7 +5847,8 @@ pub fn demandLines(alloc: Alloc, gs: *GameState) ![]const []const u8 {
                 .outfit => "  outfit",
             });
             for (gear) |l| try out.append(alloc, try std.fmt.allocPrint(alloc, "    {s: <14} need {d: >3} | on hand {d: >3} | coming {d: >3} | shortfall {d: >3}{s}", .{
-                l.key, l.need, l.on_hand, l.coming, l.short, if (l.short > 0) "  ← order" else "",
+                l.key, l.need, l.on_hand, l.coming, l.short,
+                if (l.short > 0) "  ← order" else "",
             }));
         }
     }

@@ -9,7 +9,6 @@ const contract = @import("../domain/contract.zig");
 const person = @import("../domain/person.zig");
 const rng_mod = @import("../sim/rng.zig");
 
-
 /// Offers on the board: a floor so there is always
 /// a choice, the rating letter index (F 0 … A* 5) and the comms level on
 /// top, capped so the board stays readable.

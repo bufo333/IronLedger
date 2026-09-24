@@ -685,7 +685,8 @@ fn completeJob(gs: *GameState, job: *state_mod.BayJob) !bool {
             const room = gs.siteFreeTons(site) / @max(1, part_mod.tons(job.item_key));
             if (room > 0) try gs.addStock(site, job.item_key, 1);
             try gs.log(.construction, .{ .hq = job.hq }, "[bay] fabricated {s}{s}", .{
-                job.item_key, if (room == 0) " — no warehouse room, scrapped" else "",
+                job.item_key,
+                if (room == 0) " — no warehouse room, scrapped" else "",
             });
         },
         .refit => if (gs.unit(job.unit)) |u| {

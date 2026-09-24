@@ -356,7 +356,6 @@ pub const HeldHull = struct {
     }
 };
 
-
 test "one line of hull status predicates: parked, in the shop, busy, fighting" {
     var u: Unit = .{ .id = @enumFromInt(1), .chassis_key = "SHD-2H", .kind = .mek };
     defer u.deinit(std.testing.allocator);
