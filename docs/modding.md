@@ -17,10 +17,16 @@ mymod/
 Build with the overlay:
 
 ```
-zig build -Ddata=mymod
-zig build test -Ddata=mymod     # the catalogue tests run against your data
+zig build -Ddata=mymod                  # validates the data first; a broken table fails the build
+zig build validate-data -Ddata=mymod    # just the data checks
+zig build test -Ddata=mymod             # every test, against your data
 zig build run -Ddata=mymod -- --tui
 ```
+
+The data checks are the tests named `data: …`: every table against the
+others (RAT entries are catalogue meks, loadout parts exist, factions and
+capitals line up), every string markup-safe, every tuning knob in range.
+With `-Ddata`, installing waits on them.
 
 Files you leave out fall back to the stock ones in `data/`. The settings
 screen (F12) and the REPL banner say which files are overlaid.

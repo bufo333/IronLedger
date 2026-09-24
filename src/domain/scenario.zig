@@ -61,7 +61,7 @@ pub fn roll(rng: *rng_mod.Rng, stream: rng_mod.Stream, kind: contract.ContractKi
     return find("standup").?;
 }
 
-test "every contract kind has a table and every entry resolves" {
+test "data: every contract kind has a table and every entry resolves" {
     inline for (@typeInfo(contract.ContractKind).@"enum".fields) |f| {
         var found = false;
         for (table.by_kind) |row| if (std.mem.eql(u8, row.kind, f.name)) {

@@ -65,7 +65,7 @@ pub const Environment = struct {
     }
 };
 
-test "terrain is stable per world, weather follows the ground, the tables cover every kind" {
+test "data: terrain is stable per world, weather follows the ground, the tables cover every kind" {
     inline for (@typeInfo(Terrain).@"enum".fields) |f| try std.testing.expectEqual(@as(Terrain, @enumFromInt(f.value)), terrainRow(@enumFromInt(f.value)).kind);
     inline for (@typeInfo(Weather).@"enum".fields) |f| try std.testing.expectEqual(@as(Weather, @enumFromInt(f.value)), weatherRow(@enumFromInt(f.value)).kind);
     const terra = planet_mod.find("terra").?;

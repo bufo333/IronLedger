@@ -266,7 +266,7 @@ test "sourcing modifiers — scarce parts, periphery worlds and comms reach" {
     try std.testing.expect(std.mem.indexOf(u8, txt, "periphery market") != null);
 }
 
-test "every chassis loadout part resolves in the part catalog" {
+test "data: every chassis loadout part resolves in the part catalog" {
     const chassis = @import("chassis.zig");
     for (chassis.catalog) |c| {
         for (c.loadout) |slot| {
@@ -290,7 +290,7 @@ test "acquisition order starts unsourced" {
     try std.testing.expect(o.eta_day == null);
 }
 
-test "structure is rated by weight class — every classed assembly is in the catalogue" {
+test "data: structure is rated by weight class — every classed assembly is in the catalogue" {
     try std.testing.expectEqualStrings("comp_ct_l", componentFor("ct.structure", "LCT-1V"));
     try std.testing.expectEqualStrings("comp_ct", componentFor("ct.structure", "SHD-2H"));
     try std.testing.expectEqualStrings("comp_leg_a", componentFor("ll.structure", "AS7-D"));

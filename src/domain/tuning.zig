@@ -824,7 +824,7 @@ fn expectTuningSane(comptime T: type, value: T, comptime name: []const u8, bad: 
     }
 }
 
-test "every tuning value is positive and every basis-point knob is sane" {
+test "data: every tuning value is positive and every basis-point knob is sane" {
     var bad: u32 = 0;
     expectTuningSane(Tuning, t, "t", &bad);
     try std.testing.expectEqual(@as(u32, 0), bad);
@@ -850,7 +850,7 @@ fn fieldExists(comptime T: type, comptime path: []const u8) bool {
     return if (dot) |d| (@typeInfo(F) == .@"struct" and fieldExists(F, path[d + 1 ..])) else true;
 }
 
-test "every listed signed knob names a real tuning field" {
+test "data: every listed signed knob names a real tuning field" {
     inline for (signed_knobs) |k| try std.testing.expect(comptime fieldExists(Tuning, k));
 }
 

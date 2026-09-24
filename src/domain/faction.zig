@@ -43,7 +43,7 @@ pub fn name(key: []const u8) []const u8 {
     return get(key).name;
 }
 
-test "factions load; every foe is a faction; the houses hire and ComStar does not" {
+test "data: factions load; every foe is a faction; the houses hire and ComStar does not" {
     try std.testing.expect(table.len >= 12);
     for (table) |f| for (f.foes) |foe| try std.testing.expect(find(foe) != null);
     try std.testing.expect(get("LC").hires and !get("CS").hires);

@@ -21,7 +21,7 @@ pub fn find(key: []const u8) ?*const AwardRow {
     return null;
 }
 
-test "the awards table loads with unique keys and positive thresholds" {
+test "data: the awards table loads with unique keys and positive thresholds" {
     try std.testing.expect(table.len >= 8);
     for (table, 0..) |a, i| {
         try std.testing.expect(a.threshold > 0);
