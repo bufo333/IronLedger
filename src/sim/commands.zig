@@ -3185,7 +3185,7 @@ test "a field held asks for the tempo, and the turn waits for the answer" {
     const held_at = gs.clock.day_index;
 
     // The checklist names it and says it blocks, and the query the client
-    // opens it by agrees with the rule the command enforces (rule 9).
+    // opens it by agrees with the rule the command enforces (rule 67).
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();

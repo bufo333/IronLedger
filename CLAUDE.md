@@ -5,8 +5,16 @@ No external deps (SQLite via the system library; music via the system
 command-line player as a child process).
 Read ARCHITECTURE.md before changing sim behavior; ROADMAP.md defines stage
 order — implement stages in order unless told otherwise.
-`TODO.md` is the one list of open work, in order: finish Stage 12
-features first, then code quality (contract and audit deliverables).
+`TODO.md` is the one list of open work, in order: closing the contract's
+open exceptions (`docs/contract-exceptions.md`) comes first.
+
+## System constraints
+
+- NEVER guess or assume file contents from memory.
+- ALWAYS use the `Read` tool to inspect a file fresh if it is the target
+  of a modification or analysis.
+- Do not optimize by relying on previous turn details if files are
+  subject to external changes.
 
 ## Commands
 
@@ -41,7 +49,7 @@ The loop, every time:
 ```sh
 git checkout main && git pull --ff-only     # never branch from a stale main
 git checkout -b <area>/<short-name>         # tui/after-action, docs/git-workflow
-# …work; the gate in rule 10 must be green…
+# …work; the gate (contract rule 72) must be green…
 git push -u origin <branch> && gh pr create # push and PR in the same step
 gh pr merge <n> --merge --delete-branch     # then: git checkout main && git pull
 ```
@@ -59,7 +67,8 @@ gh pr merge <n> --merge --delete-branch     # then: git checkout main && git pul
   alone before the next change starts.
 - Use the `gh` CLI for every GitHub interaction — opening pull requests,
   reading review comments, checking CI, listing issues.
-- Answer the section 9 checklist in the PR description.
+- Answer the contract's pull request checklist (section 11) in the PR
+  description.
 
 If a change is genuinely too big for one PR, split it into increments
 that each land on `main` before the next begins — sequentially, not as a
@@ -67,32 +76,38 @@ stack of open branches.
 
 ## Hard rules
 
-The full contract is `docs/coding-contract.md`; read it before touching
-the sim, the queries or a screen. The ten rules that matter most:
+The contract is `docs/coding-contract.md`; read it before touching the
+sim, the queries, the store or a screen. Where the code falls short, the
+code is wrong, not the rule. Known violations are listed, one entry each,
+in `docs/contract-exceptions.md` (rule 87): new code never adds to one,
+and the deliverable that fixes an entry deletes it. The rules that matter
+most:
 
-1. Sim core (`src/domain`, `src/sim`, `src/econ`, `src/gen`) is pure and
-   deterministic: no I/O, no wall clock, no global mutable state, no
-   global allocator, all randomness through `sim/rng.zig` named streams.
-2. Imports point down only; `sim/queries.zig` is a leaf that nothing in
-   the sim, econ or domain layers imports.
-3. Every mutation from outside the sim goes through `commands.execute`;
-   a missing effect becomes a new command, never a patch from a screen.
-4. Frontends (`src/tui`, `src/main.zig`) read only through `queries`,
-   parse verbs through `cli.zig`, and never touch `GameState` fields,
-   methods or domain lookups. Verbs and error sentences live once, in
-   `cli.zig`.
-5. One rule, one place: eligibility, cost, capacity, shortfall, ranking,
-   posture and every entity predicate is one named function every
-   consumer calls. Two loops computing the same thing is a defect.
-6. A number appears once: a named constant or a `data/tables/*.zon` row,
-   cited to its sourcebook; `// TUNE` marks a placeholder awaiting data.
-7. Queries format, they do not decide; a rule the tick or a command also
-   needs lives below the queries. Markup tags are presentation and never
-   appear in domain enums or log text.
-8. Money is integer C-bills with basis-point multipliers; time is
-   `day_index: u32`; IDs are typed; skills follow MekHQ (lower is better).
-9. Every module carries in-file tests and names its MekHQ counterpart; a
-   rule function's test asserts that screen and command agree.
-10. `zig build test --summary all` green is the gate; both smoke scripts
-    run for any change under `src/tui`, `cli.zig`, `queries.zig` or
-    `src/main.zig`.
+1. No partial truth (1): a failed command changes nothing; a campaign
+   loads whole or is rejected; nothing is skipped, defaulted or inferred.
+2. The sim core (`src/domain`, `src/sim`, `src/econ`, `src/gen`) is pure
+   and deterministic (2, 6): no I/O, no wall clock, no global state or
+   allocator, all randomness through `sim/rng.zig` named streams.
+3. Imports point down only; `sim/queries.zig` is a leaf nothing below it
+   imports (5).
+4. Commands are the only mutation boundary and are failure-atomic
+   (7, 11-13): validate, prepare every allocation and log line, then
+   commit; an expected refusal consumes nothing.
+5. Frontends read only through queries, parse through `cli.zig`, and own
+   no `GameState` (8-10); verbs and refusal sentences live once, in
+   `cli.zig`; view eligibility informs, the command decides (34).
+6. One rule, one owner, one result (3, 20-22): every eligibility,
+   predicate, cost, capacity, quote and shortfall is one named function
+   every consumer calls; location-sensitive rules take a location.
+7. A number appears once, named, cited to its source (24, 59); money is
+   integer C-bills with basis points, time is `day_index`, IDs are typed
+   and never inferred, skills follow MekHQ (54-56, 60).
+8. Persistence: every field has a class, loading fails closed, saves are
+   atomic, migrations are explicit (45-51).
+9. Tests: every rule module has focused tests asserting rule and consumer
+   agree; a bug fix starts with its regression test; atomicity is tested
+   with injected failure (67-69).
+10. The gate (72): `zig fmt --check build.zig src`,
+    `zig build test --summary all`, `docs/verify-contract.sh`, and both
+    smoke scripts for any change under `src/tui`, `cli.zig`,
+    `queries.zig` or `src/main.zig`.

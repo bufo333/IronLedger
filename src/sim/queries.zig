@@ -249,7 +249,7 @@ pub const ChecklistRow = struct {
 
 pub const InboxRow = struct {
     /// The event this row is about. A frontend answers with this,
-    /// never with the row's position (rule 17).
+    /// never with the row's position (rule 32).
     event_id: types.EventId,
     kind: []const u8,
     company: []const u8,
@@ -5071,7 +5071,7 @@ test "skulls on the board, the candidates, the active pane — and an outmatched
 //
 // The lines the command console prints for the views the client draws
 // as panes. One query each, so the console and the client never read a
-// different rule (contract rule 14).
+// different rule (contract rule 30).
 
 pub const HqRow = struct {
     id: types.HqId,
@@ -5375,7 +5375,7 @@ pub fn battleList(alloc: Alloc, gs: *GameState) ![]BattleRow {
 
 /// One engagement broken into the panes the after-action screen draws.
 /// Every string is finished markup: the client positions rects, it never
-/// decides what a number means (rule 13).
+/// decides what a number means (rule 29).
 pub const AfterAction = struct {
     title: []const u8,
     right_title: []const u8,
@@ -5596,7 +5596,7 @@ fn wrapPlain(alloc: Alloc, text: []const u8) ![]const []const u8 {
 /// One engagement's after-action, as the screens show it: the same lines
 /// the campaign log kept, with the colour a screen wants. The record is
 /// the source; `after_action.render` is the only place a battle becomes
-/// prose (rule 12).
+/// prose (rule 28).
 pub fn battleReport(alloc: Alloc, gs: *GameState, id: types.BattleId) !?[]const []const u8 {
     const r = gs.battle_reports.find(id) orelse return null;
     const prose = try @import("after_action.zig").render(alloc, r);

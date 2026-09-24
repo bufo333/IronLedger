@@ -602,7 +602,7 @@ view model each frame from an arena.
 ## Boundary rules
 
 The TUI's boundary with the core is a contract rule, not a TUI one:
-[`docs/coding-contract.md`](coding-contract.md) sections 1, 3 and 4 state
+[`docs/coding-contract.md`](coding-contract.md) sections 1, 4 and 5 state
 what a screen may call, how screens and widgets are structured, and the
 greps a reviewer runs. Two notes that are specific to this client and
 not rules:

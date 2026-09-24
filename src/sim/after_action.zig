@@ -2,7 +2,7 @@
 //! fields instead of prose. `battle.resolveEngagement` fills a
 //! `BattleReport`; `render` turns it into the `[AAR]` lines the campaign
 //! log carries, so the record and the narrative cannot drift
-//! (docs/coding-contract.md rule 7 — a game rule is one named function).
+//! (docs/coding-contract.md rule 20 — a game rule is one named function).
 //!
 //! A report **outlives the hulls and the people it names**: a wreck left
 //! on the field is struck off the books the same day and a KIA
@@ -17,7 +17,7 @@
 //! freed backing array alive. `battle.zig` duplicates the hit list for
 //! exactly that reason.
 //!
-//! Rule 16: nothing here emits markup. `gs.log` text is domain data; the
+//! Rule 33: nothing here emits markup. `gs.log` text is domain data; the
 //! screens colour it in `queries`.
 //!
 //! MekHQ counterpart: `AtBScenario` + the campaign-report entries it
@@ -207,7 +207,7 @@ pub const BattleReport = struct {
     acknowledged: bool = false,
 
     /// Hulls that never came home — the count the inbox and the
-    /// checklist both read, so neither counts rows itself (rule 7).
+    /// checklist both read, so neither counts rows itself (rule 20).
     pub fn hullsLost(self: *const BattleReport) u32 {
         var n: u32 = 0;
         for (self.hulls) |h| n += @intFromBool(h.lost);
@@ -417,7 +417,7 @@ test "render turns a report into the AAR lines, with no markup" {
     try std.testing.expect(std.mem.indexOf(u8, lines[4], "salvage: wreck #31") != null);
     try std.testing.expect(std.mem.indexOf(u8, lines[5], "9t LRM") != null);
 
-    // Rule 16: the sim never emits markup — the screens colour the line.
+    // Rule 33: the sim never emits markup — the screens colour the line.
     for (lines) |l| try std.testing.expect(std.mem.indexOfScalar(u8, l, '{') == null);
 }
 

@@ -1,4 +1,4 @@
-//! The Forces screen (docs/coding-contract.md rule 18): its draw, cursor
+//! The Forces screen (docs/coding-contract.md rule 35): its draw, cursor
 //! move, Enter and letter keys, registered once in `app.screen_table`.
 //! Reads through queries, mutates through commands, like every screen.
 //! MekHQ counterpart: the TO&E tab (docs/mekhq-map.md).

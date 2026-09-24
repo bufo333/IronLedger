@@ -72,7 +72,7 @@ pub const QueueError = error{ UnknownUnit, NoHq, NoBay, MissingComponents, Writt
 // "Which components does this hull need, and where" is answered once,
 // here: the depot queue, the Market DEMAND pane, the Forces DAMAGE pane,
 // the unassigned pool and the REPL `demand` verb all call it, so the depot
-// never refuses a wreck for a part the screens say is on hand (rule 5).
+// never refuses a wreck for a part the screens say is on hand (rule 20).
 
 /// One structural component the depot consumes rebuilding a hull: the slot
 /// it restores and the comp_* key for the hull's weight class.

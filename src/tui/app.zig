@@ -67,7 +67,7 @@ const Modal = union(enum) {
     battle_orders: types.ContractId,
     input: InputKind,
     help,
-    /// One command behind a yes/no (rule 19): the body quotes the stakes,
+    /// One command behind a yes/no (rule 36): the body quotes the stakes,
     /// y runs it through `execSay`, so the refusal guard lives once.
     confirm: Confirm,
     /// Pick an open pilot/tech seat for a person.
@@ -103,7 +103,7 @@ const Modal = union(enum) {
     contract_log: types.ContractId,
     /// One campaign-log entry, word-wrapped; the Desk's LOG pane clips
     /// long lines. The index is into `queries.desk().log`,
-    /// revalidated against the query every frame (rule 23).
+    /// revalidated against the query every frame (rule 40).
     log_entry: usize,
     /// Generic pickers: one look for every "choose one of these".
     pick_company: struct { what: enum { unit, person, stock }, id: u32, key_buf: [32]u8 = undefined, key_len: u8 = 0 },
@@ -1414,7 +1414,7 @@ pub const App = struct {
         }
     }
 
-    /// Keep an index inside a list that was rebuilt this frame (rule 23):
+    /// Keep an index inside a list that was rebuilt this frame (rule 40):
     /// past the end lands on the last row, an empty list on 0.
     pub fn clampIdx(i: *usize, len: usize) void {
         if (len == 0) i.* = 0 else if (i.* >= len) i.* = len - 1;
@@ -1968,7 +1968,7 @@ pub const App = struct {
         return screenSpec(self.tab).move(self, delta);
     }
 
-    /// One screen, one row (rule 18): adding a screen adds a row here and
+    /// One screen, one row (rule 35): adding a screen adds a row here and
     /// the five functions it names — no switch anywhere else grows.
     const ScreenSpec = struct {
         tab: Tab,
@@ -2521,7 +2521,7 @@ pub const App = struct {
     }
 
     /// Run a command and report it: the refusal sentence on failure, `fmt`
-    /// on success (rule 20: the guard lives here, not at the call sites).
+    /// on success (rule 37: the guard lives here, not at the call sites).
     pub fn execSay(self: *App, cmd: Command, style: Style, comptime fmt: []const u8, args: anytype) !bool {
         if (!try self.exec(cmd)) return false;
         self.say(style, fmt, args);
@@ -2635,7 +2635,7 @@ pub const App = struct {
         }
     }
 
-    // ---- the list widget (rule 19): every "pick one of these" and every
+    // ---- the list widget (rule 36): every "pick one of these" and every
     // read-only sheet is one ListView, drawn by drawList and driven by listKey ----
 
     const ListView = struct {

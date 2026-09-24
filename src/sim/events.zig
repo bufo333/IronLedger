@@ -201,7 +201,7 @@ pub const EventQueue = struct {
 
     /// The pending event with this id, or null once it has been answered
     /// or has expired. Every consumer looks an event up this way — a row
-    /// index is only ever a cursor position (rule 17).
+    /// index is only ever a cursor position (rule 32).
     pub fn find(self: *EventQueue, id: types.EventId) ?*Event {
         if (id == .none) return null;
         for (self.pending.items) |*ev| if (ev.id == id) return ev;

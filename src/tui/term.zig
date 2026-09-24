@@ -12,7 +12,7 @@ pub const Size = struct { cols: u16, rows: u16 };
 /// A 24-bit colour for pixel cells.
 pub const Rgb = [3]u8;
 
-/// The SGR sequences the client paints with (rule 24: escapes live here).
+/// The SGR sequences the client paints with (rule 42: escapes live here).
 pub const sgr = struct {
     pub const reset = "\x1b[0m";
     pub const dim = "\x1b[0;90m";

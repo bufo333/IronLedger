@@ -1220,7 +1220,7 @@ the player reads, and a turn that stops until they have.
   the wrong decision.
 - ✅ 12G.2 **One bar helper, and armour that shows.** `screen.bar` and
   `queries.barText` were byte-identical across the layer boundary; the
-  single helper now lives in `sim/table.zig` (below `queries`, rule 2)
+  single helper now lives in `sim/table.zig` (below `queries`, rule 5)
   and both re-export it. `armorMark`/`armorBar`/`armorPct` band armour
   once (`tuning.unit.armor_amber_pct` / `armor_red_pct`) — the game's
   first armour meters.

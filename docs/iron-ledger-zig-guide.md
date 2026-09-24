@@ -978,7 +978,7 @@ Finally, `gs.hash()` folds the important state (day, funds, every person's fatig
 
 ## 21. Commands: the only way in
 
-Nothing outside the core mutates `GameState` except through `commands.execute(gs, cmd)` (contract section 1 and 5 in `docs/coding-contract.md`). The function is a single switch over the `Command` union, and every arm follows the same shape: validate, then mutate, then return a `Result`.
+Nothing outside the core mutates `GameState` except through `commands.execute(gs, cmd)` (contract sections 1 and 2 in `docs/coding-contract.md`). The function is a single switch over the `Command` union, and every arm follows the same shape: validate, then mutate, then return a `Result`.
 
 *src/sim/commands.zig (the tier-upgrade arm)*
 
