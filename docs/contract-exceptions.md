@@ -17,18 +17,15 @@ Owner of every entry: the project owner.
 
 ### C1. The gate is incomplete
 
-- **Rules:** 58, 66, 72, 73.
-- **Why not yet:** CI and packaging changes, each needing its own verified pull request.
+- **Rules:** 58, 72, 73.
+- **Why not yet:** Each part needs its own verified pull request.
 - **Scope:**
-  - **CI jobs (`.github/workflows/ci.yml`).** CI does not do a clean package build, a ReleaseFast build or a macOS build.
-  - **CI configuration.** Actions are not pinned. There is no `permissions` block, and credentials are persisted. There are no timeouts or concurrency limits.
   - **Data validation.** The step only runs tests named `data: `. It misses the rank ladder (`domain/rank.zig:58`), name pools, Mek legality (`domain/meklab.zig:324`) and skull bands (`domain/skulls.zig:52`). Tuning thresholds are never checked for ordering or ranges.
   - **Data overlays.** `-Ddata` silently accepts a missing directory (`build.zig:45-54`).
-  - **Package paths.** `build.zig.zon` `.paths` includes the whole of `data/`, so `data/music` goes into the package.
   - **`docs/verify-contract.sh`.** It has no switch-arm check (rule 76) and no duplicated-pattern check.
   - **Smoke scripts.** They delete the path they are given, don't reap children, and the REPL smoke has no timeout.
 - **Removal:** C1.
-- **Guard:** the existing gate still runs on every pull request. Nothing mechanical stops CI shrinking; review checklist question 15 covers it.
+- **Guard:** the gate runs on every pull request on Linux and macOS, with a clean ReleaseFast package build (`docs/clean-package.sh`). Nothing mechanical stops CI shrinking; review checklist question 15 covers it.
 
 ### C2. Errors lose their meaning or are swallowed
 

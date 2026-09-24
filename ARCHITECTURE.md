@@ -814,8 +814,10 @@ bulk-copy MegaMek data files into the repo without deciding on licensing.
 - The gate: `zig build test --summary all`, `zig fmt --check`, and
   `docs/verify-contract.sh`, which runs the contract's mechanical checks
   (layering, frontend boundary, core purity, broad catches, module
-  headers) and prints `CONTRACT CHECKS OK` or each violation; CI runs all
-  three.
+  headers, the size ratchet) and prints `CONTRACT CHECKS OK` or each
+  violation. CI runs the gate and both smokes on Linux and macOS, and
+  builds a ReleaseFast release from a tree holding only the package's
+  declared paths (`docs/clean-package.sh`).
 - Style and every other coding rule: [`docs/coding-contract.md`](docs/coding-contract.md).
 
 ## 14. Directory layout
