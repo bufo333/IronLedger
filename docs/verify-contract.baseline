@@ -1,0 +1,12 @@
+# Broad catches (rule 79) awaiting their fix: the "small gaps" deliverable in
+# TODO.md Part 3 removes or justifies each and deletes its line here. One
+# entry per line: <path>: <the line's code, trimmed>.
+src/main.zig: _ = game.commands.execute(gs, .{ .order_part = .{ .part_key = "provisions", .quantity = 15, .dest = .{ .company = co } } }) catch {};
+src/main.zig: _ = game.commands.execute(gs, .{ .transfer = .{ .from = .outfit, .to = .{ .hq = seat }, .amount = 3_000_000 } }) catch {};
+src/main.zig: _ = game.commands.execute(gs, .{ .refit_remove = .{ .unit = lab_uid, .slot_key = m.slot_key } }) catch {};
+src/main.zig: _ = game.commands.execute(gs, .{ .refit_install = .{ .unit = lab_uid, .location = m.location orelse .ra, .part_key = "slas" } }) catch {};
+src/main.zig: std.debug.print("{s}\n", .{q.payrollLine(al, gs) catch ""});
+src/sim/commands.zig: gs.transferFunds(.outfit, .{ .company = company_id }, float, 0) catch {};
+src/sim/maintenance.zig: _ = hq_ops.queueDepotRepair(gs, u.id) catch false;
+src/sim/state.zig: self.transferFunds(.outfit, .{ .hq = id }, tuning.hq.founding_funds, 0) catch {};
+src/tui/app.zig: self.store.save(g, self.player_id) catch {};

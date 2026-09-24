@@ -1,4 +1,4 @@
-# The gate (docs/coding-contract.md rule 39): the reviewer checks, unit
+# The gate (docs/coding-contract.md rule 39): the contract checks, unit
 # tests and both smoke scripts, on every push and pull request.
 name: ci
 on:
@@ -14,8 +14,8 @@ jobs:
           version: 0.16.0
       - name: system libraries
         run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev python3
-      - name: reviewer checks (docs/coding-contract.md)
-        run: bash docs/reviewer_checks.sh
+      - name: contract checks (docs/verify-contract.sh)
+        run: bash docs/verify-contract.sh
       - name: unit tests (builds zig-out/bin/game)
         run: zig build test --summary all
       - name: TUI smoke (pty)

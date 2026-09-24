@@ -8,7 +8,7 @@ explain the *why* and point here for the *what*. Do not restate a rule
 from this file elsewhere: link to it.
 
 Every section ends with **Reviewer checks**: the grep or question that
-finds a violation. `docs/reviewer_checks.sh` runs every mechanical one
+finds a violation. `docs/verify-contract.sh` runs every mechanical one
 (frontend checks over `src/tui` recursively, core checks outside test
 code) and fails on any output; CI runs it beside the tests and smokes.
 The questions are answered in the pull request.

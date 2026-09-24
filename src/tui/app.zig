@@ -551,6 +551,7 @@ pub const App = struct {
     /// Load the campaign's emblem (a PNG stored on one of its forces).
     fn refreshEmblem(self: *App) void {
         if (self.emblem) |*e| {
+            // best-effort: freeing an optional graphics image.
             if (self.graphics == .kitty) emblem_mod.kittyForget(self.term.out, e.kitty_id) catch {};
             e.deinit(self.gpa);
             self.emblem = null;
@@ -559,6 +560,7 @@ pub const App = struct {
         const bytes = q.outfitEmblem(g) orelse return;
         if (!png.isPng(bytes)) return;
         self.emblem = emblem_mod.Emblem.load(self.gpa, bytes, 1) catch return;
+        // best-effort: an optional graphics image; the half-block emblem still draws.
         if (self.graphics == .kitty) emblem_mod.kittyTransmit(self.term.out, self.gpa, 1, bytes) catch {};
     }
 
@@ -629,6 +631,7 @@ pub const App = struct {
         const players = try self.store.players(al);
         const campaigns = try self.store.campaigns(al, self.player_id);
         const np = self.nowPlaying();
+        // best-effort: a status label in a fixed buffer; too long leaves it blank.
         const right = std.fmt.bufPrint(&right_buf, "{s}{s}{d} players · {d} campaigns · schema v{d}", .{ if (np.len > 0) "♪ " else "", if (np.len > 0) np else "", players.len, campaigns.len, game.lobby.schema_version }) catch "";
         // (the separator between track and counts)
         var title_buf: [64]u8 = undefined;
@@ -1734,6 +1737,7 @@ pub const App = struct {
     /// Read and decode the selected picture; keep the bytes for the campaign.
     fn loadPreview(self: *App) !void {
         if (self.w_preview) |*e| {
+            // best-effort: freeing an optional graphics image.
             if (self.graphics == .kitty) emblem_mod.kittyForget(self.term.out, e.kitty_id) catch {};
             e.deinit(self.gpa);
             self.w_preview = null;
@@ -1755,6 +1759,7 @@ pub const App = struct {
         };
         self.w_png = bytes;
         self.w_preview = e;
+        // best-effort: an optional graphics image; the half-block emblem still draws.
         if (self.graphics == .kitty) emblem_mod.kittyTransmit(self.term.out, self.gpa, 2, bytes) catch {};
         self.say(.good, "{s}: {d}×{d}", .{ try q.plain(self.a(), path), e.img.width, e.img.height });
     }
