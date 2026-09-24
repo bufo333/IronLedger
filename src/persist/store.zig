@@ -161,7 +161,7 @@ pub const Store = struct {
     pub fn fromDb(db: sqlite.Db) !Store {
         try db.exec(ddl);
         const store: Store = .{ .db = db };
-        const stored: u32 = @intCast(@max(1, store.getSetting("schema_version", 1)));
+        const stored = try fit(u32, @max(1, store.getSetting("schema_version", 1)));
         if (stored > schema_version) return error.StoreNewerThanGame;
         try db.exec("BEGIN");
         errdefer db.exec("ROLLBACK") catch {};
@@ -855,7 +855,7 @@ pub const Store = struct {
             defer st.finalize();
             try st.bindAll(.{cid});
             if (!try st.next()) return error.NoSuchCampaign;
-            saved_version = @intCast(@max(1, st.int(0)));
+            saved_version = try fit(u32, @max(1, st.int(0)));
         }
         if (saved_version > schema_version) return error.SaveNewerThanGame;
 
@@ -866,29 +866,29 @@ pub const Store = struct {
             while (try st.next()) {
                 const key = try st.text(0, alloc);
                 const v = st.int(1);
-                if (std.mem.eql(u8, key, "day_index")) gs.clock.day_index = @intCast(v);
-                if (std.mem.eql(u8, key, "year")) gs.clock.date.year = @intCast(v);
-                if (std.mem.eql(u8, key, "month")) gs.clock.date.month = @intCast(v);
-                if (std.mem.eql(u8, key, "day")) gs.clock.date.day = @intCast(v);
+                if (std.mem.eql(u8, key, "day_index")) gs.clock.day_index = try fit(@TypeOf(gs.clock.day_index), v);
+                if (std.mem.eql(u8, key, "year")) gs.clock.date.year = try fit(@TypeOf(gs.clock.date.year), v);
+                if (std.mem.eql(u8, key, "month")) gs.clock.date.month = try fit(@TypeOf(gs.clock.date.month), v);
+                if (std.mem.eql(u8, key, "day")) gs.clock.date.day = try fit(@TypeOf(gs.clock.date.day), v);
                 if (std.mem.eql(u8, key, "funds")) gs.funds = v;
-                if (std.mem.eql(u8, key, "reputation")) gs.reputation = @intCast(v);
+                if (std.mem.eql(u8, key, "reputation")) gs.reputation = try fit(@TypeOf(gs.reputation), v);
                 if (std.mem.eql(u8, key, "bankrupt")) gs.bankrupt = v != 0;
                 if (std.mem.eql(u8, key, "auto_admit")) gs.auto_admit = v != 0;
-                if (std.mem.eql(u8, key, "difficulty")) gs.difficulty = if (v >= 0 and v < @typeInfo(@TypeOf(gs.difficulty)).@"enum".fields.len) @enumFromInt(v) else .regular;
-                if (std.mem.eql(u8, key, "share_profit_bp")) gs.share_profit_bp = @intCast(v);
-                if (std.mem.eql(u8, key, "stat_battles_won")) gs.stats.battles_won = @intCast(v);
-                if (std.mem.eql(u8, key, "stat_battles_drawn")) gs.stats.battles_drawn = @intCast(v);
-                if (std.mem.eql(u8, key, "stat_battles_lost")) gs.stats.battles_lost = @intCast(v);
-                if (std.mem.eql(u8, key, "stat_hulls_lost")) gs.stats.hulls_lost = @intCast(v);
-                if (std.mem.eql(u8, key, "stat_hulls_salvaged")) gs.stats.hulls_salvaged = @intCast(v);
-                if (std.mem.eql(u8, key, "stat_people_kia")) gs.stats.people_kia = @intCast(v);
-                if (std.mem.eql(u8, key, "stat_enemy_bv")) gs.stats.enemy_bv_destroyed = @intCast(v);
-                if (std.mem.eql(u8, key, "next_person_id")) gs.next_person_id = @intCast(v);
-                if (std.mem.eql(u8, key, "next_unit_id")) gs.next_unit_id = @intCast(v);
-                if (std.mem.eql(u8, key, "next_force_id")) gs.next_force_id = @intCast(v);
-                if (std.mem.eql(u8, key, "next_hq_id")) gs.next_hq_id = @intCast(v);
-                if (std.mem.eql(u8, key, "next_contract_id")) gs.next_contract_id = @intCast(v);
-                if (std.mem.eql(u8, key, "next_battle_id")) gs.next_battle_id = @intCast(v);
+                if (std.mem.eql(u8, key, "difficulty")) gs.difficulty = std.enums.fromInt(@TypeOf(gs.difficulty), v) orelse return error.CorruptSave;
+                if (std.mem.eql(u8, key, "share_profit_bp")) gs.share_profit_bp = try fit(@TypeOf(gs.share_profit_bp), v);
+                if (std.mem.eql(u8, key, "stat_battles_won")) gs.stats.battles_won = try fit(@TypeOf(gs.stats.battles_won), v);
+                if (std.mem.eql(u8, key, "stat_battles_drawn")) gs.stats.battles_drawn = try fit(@TypeOf(gs.stats.battles_drawn), v);
+                if (std.mem.eql(u8, key, "stat_battles_lost")) gs.stats.battles_lost = try fit(@TypeOf(gs.stats.battles_lost), v);
+                if (std.mem.eql(u8, key, "stat_hulls_lost")) gs.stats.hulls_lost = try fit(@TypeOf(gs.stats.hulls_lost), v);
+                if (std.mem.eql(u8, key, "stat_hulls_salvaged")) gs.stats.hulls_salvaged = try fit(@TypeOf(gs.stats.hulls_salvaged), v);
+                if (std.mem.eql(u8, key, "stat_people_kia")) gs.stats.people_kia = try fit(@TypeOf(gs.stats.people_kia), v);
+                if (std.mem.eql(u8, key, "stat_enemy_bv")) gs.stats.enemy_bv_destroyed = try fit(@TypeOf(gs.stats.enemy_bv_destroyed), v);
+                if (std.mem.eql(u8, key, "next_person_id")) gs.next_person_id = try fit(@TypeOf(gs.next_person_id), v);
+                if (std.mem.eql(u8, key, "next_unit_id")) gs.next_unit_id = try fit(@TypeOf(gs.next_unit_id), v);
+                if (std.mem.eql(u8, key, "next_force_id")) gs.next_force_id = try fit(@TypeOf(gs.next_force_id), v);
+                if (std.mem.eql(u8, key, "next_hq_id")) gs.next_hq_id = try fit(@TypeOf(gs.next_hq_id), v);
+                if (std.mem.eql(u8, key, "next_contract_id")) gs.next_contract_id = try fit(@TypeOf(gs.next_contract_id), v);
+                if (std.mem.eql(u8, key, "next_battle_id")) gs.next_battle_id = try fit(@TypeOf(gs.next_battle_id), v);
             }
             const tx = try self.db.prepare("SELECT key, value FROM meta_text WHERE cid = ?1");
             defer tx.finalize();
@@ -914,7 +914,7 @@ pub const Store = struct {
             if (try st.next()) {
                 gs.commander = .{
                     .name = try st.text(0, alloc),
-                    .origin = st.enumValue(commander_mod.Faction, 1) orelse .LC,
+                    .origin = st.enumValue(commander_mod.Faction, 1) orelse return error.CorruptSave,
                     .profession = st.enumValue(commander_mod.Profession, 2) orelse return error.CorruptSave,
                 };
             }
@@ -927,41 +927,41 @@ pub const Store = struct {
             try st.bindAll(.{cid});
             while (try st.next()) {
                 var p: person_mod.Person = .{
-                    .id = toId(types.PersonId, st.int(0)),
+                    .id = try toId(types.PersonId, st.int(0)),
                     .first_name = try st.text(1, alloc),
                     .last_name = try st.text(2, alloc),
                     .callsign = try st.optText(3, alloc),
                     .role = st.enumValue(person_mod.Role, 4) orelse return error.CorruptSave,
-                    .xp = @intCast(st.int(5)),
+                    .xp = try st.intAs(u32, 5),
                     .status = st.enumValue(person_mod.Status, 6) orelse return error.CorruptSave,
-                    .fatigue = @intCast(st.int(7)),
-                    .morale = @intCast(st.int(8)),
-                    .recruited_day = @intCast(st.int(9)),
+                    .fatigue = try st.intAs(u8, 7),
+                    .morale = try st.intAs(u8, 8),
+                    .recruited_day = try st.intAs(u32, 9),
                     .salary_override = st.optInt(10),
-                    .assigned_force = toId(types.ForceId, st.int(11)),
-                    .posted_hq = toId(types.HqId, st.int(12)),
-                    .weekly_hours = @intCast(st.int(13)),
-                    .medbay_priority = @intCast(st.int(14)),
-                    .leave_until_day = optU32(st.optInt(15)),
-                    .wound_heal_day = optU32(st.optInt(16)),
+                    .assigned_force = try toId(types.ForceId, st.int(11)),
+                    .posted_hq = try toId(types.HqId, st.int(12)),
+                    .weekly_hours = try st.intAs(u16, 13),
+                    .medbay_priority = try st.intAs(u8, 14),
+                    .leave_until_day = try optU32(st.optInt(15)),
+                    .wound_heal_day = try optU32(st.optInt(16)),
                     .medbay_admitted = st.int(19) != 0,
                     .rank = st.enumValue(@import("../domain/rank.zig").Rank, 20) orelse return error.CorruptSave,
                     .rank_pinned = st.int(21) != 0,
-                    .kills = @intCast(st.int(22)),
-                    .kill_bv = @intCast(st.int(23)),
-                    .battles = @intCast(st.int(24)),
-                    .tours = @intCast(st.int(25)),
-                    .outstanding_tours = @intCast(st.int(26)),
+                    .kills = try st.intAs(u32, 22),
+                    .kill_bv = try st.intAs(u32, 23),
+                    .battles = try st.intAs(u32, 24),
+                    .tours = try st.intAs(u32, 25),
+                    .outstanding_tours = try st.intAs(u32, 26),
                     .edge_spent = st.int(27) != 0,
                     .faction = try st.text(28, alloc),
-                    .shares = @intCast(st.int(29)),
-                    .born_day = if (st.optInt(30)) |b| @as(?i32, @intCast(b)) else null,
-                    .last_raise_day = optU32(st.optInt(31)),
-                    .last_award_day = optU32(st.optInt(32)),
-                    .departed_day = optU32(st.optInt(33)),
+                    .shares = try st.intAs(u8, 29),
+                    .born_day = if (st.optInt(30)) |b| try fit(i32, b) else null,
+                    .last_raise_day = try optU32(st.optInt(31)),
+                    .last_award_day = try optU32(st.optInt(32)),
+                    .departed_day = try optU32(st.optInt(33)),
                 };
                 if (st.enumValue(types.SkillType, 17)) |skill| {
-                    if (st.optInt(18)) |done| p.training = .{ .skill = skill, .done_day = @intCast(done) };
+                    if (st.optInt(18)) |done| p.training = .{ .skill = skill, .done_day = try fit(u32, done) };
                 }
                 try gs.people.put(alloc, p.id, p);
             }
@@ -969,36 +969,36 @@ pub const Store = struct {
             defer sk.finalize();
             try sk.bindAll(.{cid});
             while (try sk.next()) {
-                const p = gs.people.getPtr(toId(types.PersonId, sk.int(0))) orelse continue;
-                const skill = sk.enumValue(types.SkillType, 1) orelse continue;
-                try p.skills.put(alloc, skill, @intCast(sk.int(2)));
+                const p = gs.people.getPtr(try toId(types.PersonId, sk.int(0))) orelse return error.CorruptSave;
+                const skill = sk.enumValue(types.SkillType, 1) orelse return error.CorruptSave;
+                try p.skills.put(alloc, skill, try sk.intAs(u8, 2));
             }
             const aw = try self.db.prepare("SELECT person_id, key FROM award WHERE cid = ?1");
             defer aw.finalize();
             try aw.bindAll(.{cid});
             while (try aw.next()) {
-                const p = gs.people.getPtr(toId(types.PersonId, aw.int(0))) orelse continue;
+                const p = gs.people.getPtr(try toId(types.PersonId, aw.int(0))) orelse return error.CorruptSave;
                 try p.awards.append(alloc, try aw.text(1, alloc));
             }
             const ab = try self.db.prepare("SELECT person_id, key FROM ability WHERE cid = ?1");
             defer ab.finalize();
             try ab.bindAll(.{cid});
             while (try ab.next()) {
-                const p = gs.people.getPtr(toId(types.PersonId, ab.int(0))) orelse continue;
+                const p = gs.people.getPtr(try toId(types.PersonId, ab.int(0))) orelse return error.CorruptSave;
                 try p.abilities.append(alloc, try ab.text(1, alloc));
             }
             const inj = try self.db.prepare("SELECT person_id, location, severity, incurred, heal_done, doctor, permanent, healed FROM injury WHERE cid = ?1 ORDER BY person_id, ord");
             defer inj.finalize();
             try inj.bindAll(.{cid});
             while (try inj.next()) {
-                const p = gs.people.getPtr(toId(types.PersonId, inj.int(0))) orelse continue;
-                const location = inj.enumValue(person_mod.InjuryLocation, 1) orelse continue;
+                const p = gs.people.getPtr(try toId(types.PersonId, inj.int(0))) orelse return error.CorruptSave;
+                const location = inj.enumValue(person_mod.InjuryLocation, 1) orelse return error.CorruptSave;
                 try p.injuries.append(alloc, .{
                     .location = location,
-                    .severity = @intCast(inj.int(2)),
-                    .incurred_day = @intCast(inj.int(3)),
-                    .heal_done_day = optU32(inj.optInt(4)),
-                    .doctor = toId(types.PersonId, inj.int(5)),
+                    .severity = try inj.intAs(u8, 2),
+                    .incurred_day = try inj.intAs(u32, 3),
+                    .heal_done_day = try optU32(inj.optInt(4)),
+                    .doctor = try toId(types.PersonId, inj.int(5)),
                     .permanent = inj.int(6) != 0,
                     .healed = inj.int(7) != 0,
                 });
@@ -1012,21 +1012,21 @@ pub const Store = struct {
             try st.bindAll(.{cid});
             while (try st.next()) {
                 const u: unit_mod.Unit = .{
-                    .id = toId(types.UnitId, st.int(0)),
+                    .id = try toId(types.UnitId, st.int(0)),
                     .chassis_key = try st.text(1, alloc),
                     .name = try st.optText(2, alloc),
                     .kind = st.enumValue(unit_mod.UnitKind, 3) orelse return error.CorruptSave,
-                    .force = toId(types.ForceId, st.int(4)),
-                    .pilot = toId(types.PersonId, st.int(5)),
-                    .tech = toId(types.PersonId, st.int(6)),
-                    .armor_pct = @intCast(st.int(7)),
+                    .force = try toId(types.ForceId, st.int(4)),
+                    .pilot = try toId(types.PersonId, st.int(5)),
+                    .tech = try toId(types.PersonId, st.int(6)),
+                    .armor_pct = try st.intAs(u8, 7),
                     .quality = st.enumValue(types.Quality, 8) orelse return error.CorruptSave,
                     .status = st.enumValue(unit_mod.UnitStatus, 9) orelse return error.CorruptSave,
-                    .last_maintenance_day = optU32(st.optInt(10)),
-                    .acquired_day = @intCast(st.int(11)),
+                    .last_maintenance_day = try optU32(st.optInt(10)),
+                    .acquired_day = try st.intAs(u32, 11),
                     .purchase_price = st.int(12),
-                    .reactivation_done_day = optU32(st.optInt(13)),
-                    .berth_hq = toId(types.HqId, st.int(14)),
+                    .reactivation_done_day = try optU32(st.optInt(13)),
+                    .berth_hq = try toId(types.HqId, st.int(14)),
                     .wreck = st.enumValue(unit_mod.WreckCause, 15) orelse return error.CorruptSave,
                 };
                 // A non-empty `held_by` is what tells the two apart: the
@@ -1038,9 +1038,9 @@ pub const Store = struct {
                     try gs.held_hulls.append(alloc, .{
                         .unit = u,
                         .by = held_by,
-                        .day = @intCast(st.int(17)),
-                        .battle = toId(types.BattleId, st.int(18)),
-                        .from_force = toId(types.ForceId, st.int(19)),
+                        .day = try st.intAs(u32, 17),
+                        .battle = try toId(types.BattleId, st.int(18)),
+                        .from_force = try toId(types.ForceId, st.int(19)),
                     });
                 }
             }
@@ -1048,7 +1048,7 @@ pub const Store = struct {
             defer sl.finalize();
             try sl.bindAll(.{cid});
             while (try sl.next()) {
-                const uid = toId(types.UnitId, sl.int(0));
+                const uid = try toId(types.UnitId, sl.int(0));
                 const u = gs.units.getPtr(uid) orelse held: {
                     for (gs.held_hulls.items) |*h| if (h.unit.id == uid) break :held &h.unit;
                     continue;
@@ -1069,21 +1069,21 @@ pub const Store = struct {
             try st.bindAll(.{cid});
             while (try st.next()) {
                 const f: force_mod.Force = .{
-                    .id = toId(types.ForceId, st.int(0)),
-                    .parent = toId(types.ForceId, st.int(1)),
+                    .id = try toId(types.ForceId, st.int(0)),
+                    .parent = try toId(types.ForceId, st.int(1)),
                     .name = try st.text(2, alloc),
                     .emblem = if (st.isNull(3)) null else try st.blob(3, alloc),
                     .local_funds = st.int(4),
                     .echelon = st.enumValue(force_mod.Echelon, 5) orelse return error.CorruptSave,
-                    .commander = toId(types.PersonId, st.int(6)),
-                    .supplying_hq = toId(types.HqId, st.int(7)),
+                    .commander = try toId(types.PersonId, st.int(6)),
+                    .supplying_hq = try toId(types.HqId, st.int(7)),
                     .role = st.enumValue(force_mod.LanceRole, 8) orelse return error.CorruptSave,
                     .support_kind = st.enumValue(force_mod.SupportLanceKind, 9),
-                    .last_rotation_day = optU32(st.optInt(10)),
-                    .contracts_since_rotation = @intCast(st.int(11)),
+                    .last_rotation_day = try optU32(st.optInt(10)),
+                    .contracts_since_rotation = try st.intAs(u16, 11),
                     .location_planet = try st.optText(12, alloc),
-                    .return_eta_day = optU32(st.optInt(13)),
-                    .supply_shortage_days = @intCast(st.int(14)),
+                    .return_eta_day = try optU32(st.optInt(13)),
+                    .supply_shortage_days = try st.intAs(u16, 14),
                     .roe = st.enumValue(force_mod.Roe, 15) orelse return error.CorruptSave,
                 };
                 try gs.forces.put(alloc, f.id, f);
@@ -1092,15 +1092,15 @@ pub const Store = struct {
             defer fu.finalize();
             try fu.bindAll(.{cid});
             while (try fu.next()) {
-                const f = gs.forces.getPtr(toId(types.ForceId, fu.int(0))) orelse continue;
-                try f.units.append(alloc, toId(types.UnitId, fu.int(1)));
+                const f = gs.forces.getPtr(try toId(types.ForceId, fu.int(0))) orelse return error.CorruptSave;
+                try f.units.append(alloc, try toId(types.UnitId, fu.int(1)));
             }
             const fc = try self.db.prepare("SELECT force_id, child_id FROM force_child WHERE cid = ?1 ORDER BY force_id, ord");
             defer fc.finalize();
             try fc.bindAll(.{cid});
             while (try fc.next()) {
-                const f = gs.forces.getPtr(toId(types.ForceId, fc.int(0))) orelse continue;
-                try f.children.append(alloc, toId(types.ForceId, fc.int(1)));
+                const f = gs.forces.getPtr(try toId(types.ForceId, fc.int(0))) orelse return error.CorruptSave;
+                try f.children.append(alloc, try toId(types.ForceId, fc.int(1)));
             }
         }
 
@@ -1111,7 +1111,7 @@ pub const Store = struct {
             try st.bindAll(.{cid});
             while (try st.next()) {
                 const h: hq_mod.Hq = .{
-                    .id = toId(types.HqId, st.int(0)),
+                    .id = try toId(types.HqId, st.int(0)),
                     .name = try st.text(1, alloc),
                     .tier = st.enumValue(hq_mod.HqTier, 2) orelse return error.CorruptSave,
                     .planet_key = try st.text(3, alloc),
@@ -1125,21 +1125,21 @@ pub const Store = struct {
             defer fa.finalize();
             try fa.bindAll(.{cid});
             while (try fa.next()) {
-                const h = gs.hqs.getPtr(toId(types.HqId, fa.int(0))) orelse continue;
-                try h.facilities.append(alloc, .{ .kind = fa.enumValue(hq_mod.FacilityKind, 1) orelse continue, .level = @intCast(fa.int(2)) });
+                const h = gs.hqs.getPtr(try toId(types.HqId, fa.int(0))) orelse return error.CorruptSave;
+                try h.facilities.append(alloc, .{ .kind = fa.enumValue(hq_mod.FacilityKind, 1) orelse return error.CorruptSave, .level = try fa.intAs(u8, 2) });
             }
             const pr = try self.db.prepare("SELECT hq_id, kind, facility, target_level, started, paperwork_done, construction_done, cost FROM hq_project WHERE cid = ?1 ORDER BY hq_id, ord");
             defer pr.finalize();
             try pr.bindAll(.{cid});
             while (try pr.next()) {
-                const h = gs.hqs.getPtr(toId(types.HqId, pr.int(0))) orelse continue;
+                const h = gs.hqs.getPtr(try toId(types.HqId, pr.int(0))) orelse return error.CorruptSave;
                 try h.projects.append(alloc, .{
                     .kind = pr.enumValue(hq_mod.ProjectKind, 1) orelse return error.CorruptSave,
                     .facility = pr.enumValue(hq_mod.FacilityKind, 2),
-                    .target_level = @intCast(pr.int(3)),
-                    .started_day = @intCast(pr.int(4)),
-                    .paperwork_done_day = @intCast(pr.int(5)),
-                    .construction_done_day = @intCast(pr.int(6)),
+                    .target_level = try pr.intAs(u8, 3),
+                    .started_day = try pr.intAs(u32, 4),
+                    .paperwork_done_day = try pr.intAs(u32, 5),
+                    .construction_done_day = try pr.intAs(u32, 6),
                     .cost = pr.int(7),
                 });
             }
@@ -1152,8 +1152,8 @@ pub const Store = struct {
             try st.bindAll(.{cid});
             while (try st.next()) {
                 const kind = try st.text(0, alloc);
-                const site = siteFromCols(kind, st.int(1));
-                try gs.addStock(site, try st.text(2, alloc), @intCast(st.int(3)));
+                const site = try siteFromCols(kind, st.int(1));
+                try gs.addStock(site, try st.text(2, alloc), try st.intAs(u32, 3));
             }
         }
 
@@ -1164,46 +1164,46 @@ pub const Store = struct {
             try st.bindAll(.{cid});
             while (try st.next()) {
                 const c: contract_mod.Contract = .{
-                    .id = toId(types.ContractId, st.int(1)),
+                    .id = try toId(types.ContractId, st.int(1)),
                     .kind = st.enumValue(contract_mod.ContractKind, 2) orelse return error.CorruptSave,
                     .employer_key = try st.text(3, alloc),
                     .enemy_key = try st.text(4, alloc),
                     .planet_key = try st.text(5, alloc),
                     .status = st.enumValue(contract_mod.ContractStatus, 6) orelse return error.CorruptSave,
-                    .assigned_company = toId(types.ForceId, st.int(7)),
-                    .start_day = optU32(st.optInt(8)),
-                    .score = @intCast(st.int(9)),
-                    .dist_ly = @intCast(st.int(10)),
+                    .assigned_company = try toId(types.ForceId, st.int(7)),
+                    .start_day = try optU32(st.optInt(8)),
+                    .score = try st.intAs(i32, 9),
+                    .dist_ly = try st.intAs(u32, 10),
                     .beachhead = st.int(11) != 0,
-                    .transit_days = @intCast(st.int(12)),
-                    .arrive_day = optU32(st.optInt(13)),
-                    .end_day = optU32(st.optInt(14)),
+                    .transit_days = try st.intAs(u32, 12),
+                    .arrive_day = try optU32(st.optInt(13)),
+                    .end_day = try optU32(st.optInt(14)),
                     .monthly_net = st.int(15),
-                    .next_battle_day = optU32(st.optInt(16)),
-                    .battles_fought = @intCast(st.int(17)),
-                    .casualties = @intCast(st.int(18)),
+                    .next_battle_day = try optU32(st.optInt(16)),
+                    .battles_fought = try st.intAs(u8, 17),
+                    .casualties = try st.intAs(u8, 18),
                     .objective = st.enumValue(contract_mod.ObjectiveKind, 19) orelse return error.CorruptSave,
                     .committed_bv = st.int(20),
                     .enemy_pool_bv = st.int(21),
                     .enemy_pool_remaining = st.int(22),
-                    .victory_points = @intCast(st.int(23)),
-                    .ineffective_since = optU32(st.optInt(24)),
-                    .breach_day = optU32(st.optInt(25)),
+                    .victory_points = try st.intAs(i32, 23),
+                    .ineffective_since = try optU32(st.optInt(24)),
+                    .breach_day = try optU32(st.optInt(25)),
                     .negotiated = st.int(36) != 0,
-                    .enemy_lances = @intCast(st.int(37)),
+                    .enemy_lances = try st.intAs(u8, 37),
                     .enemy_quality = st.enumValue(types.ExperienceLevel, 38) orelse return error.CorruptSave,
                     .enemy_lance_bv = st.int(39),
-                    .enemy_lance_tons = @intCast(st.int(40)),
-                    .offer_hq = toId(types.HqId, st.int(41)),
+                    .enemy_lance_tons = try st.intAs(u32, 40),
+                    .offer_hq = try toId(types.HqId, st.int(41)),
                     .terms = .{
-                        .length_months = @intCast(st.int(26)),
+                        .length_months = try st.intAs(u8, 26),
                         .base_pay_month = st.int(27),
-                        .advance_pct = @intCast(st.int(28)),
+                        .advance_pct = try st.intAs(u8, 28),
                         .signing_bonus = st.int(29),
-                        .transport_pct = @intCast(st.int(30)),
-                        .overhead_pct = @intCast(st.int(31)),
-                        .battle_loss_pct = @intCast(st.int(32)),
-                        .salvage_pct = @intCast(st.int(33)),
+                        .transport_pct = try st.intAs(u8, 30),
+                        .overhead_pct = try st.intAs(u8, 31),
+                        .battle_loss_pct = try st.intAs(u8, 32),
+                        .salvage_pct = try st.intAs(u8, 33),
                         .salvage_exchange = st.int(34) != 0,
                         .command_rights = st.enumValue(contract_mod.CommandRights, 35) orelse return error.CorruptSave,
                     },
@@ -1219,12 +1219,12 @@ pub const Store = struct {
             try st.bindAll(.{cid});
             while (try st.next()) {
                 try gs.ledger.transactions.append(alloc, .{
-                    .day = @intCast(st.int(0)),
+                    .day = try st.intAs(u32, 0),
                     .amount = st.int(1),
                     .category = st.enumValue(finance_mod.Category, 2) orelse return error.CorruptSave,
-                    .company = toId(types.ForceId, st.int(3)),
-                    .hq = toId(types.HqId, st.int(4)),
-                    .contract = toId(types.ContractId, st.int(5)),
+                    .company = try toId(types.ForceId, st.int(3)),
+                    .hq = try toId(types.HqId, st.int(4)),
+                    .contract = try toId(types.ContractId, st.int(5)),
                     .note = try st.text(6, alloc),
                 });
             }
@@ -1234,7 +1234,7 @@ pub const Store = struct {
             defer st.finalize();
             try st.bindAll(.{cid});
             while (try st.next()) {
-                try gs.loans.append(alloc, .{ .principal = st.int(0), .balance = st.int(1), .rate_bp = st.int(2), .term_months = @intCast(st.int(3)), .next_pay_day = @intCast(st.int(4)), .payment = st.int(5) });
+                try gs.loans.append(alloc, .{ .principal = st.int(0), .balance = st.int(1), .rate_bp = st.int(2), .term_months = try st.intAs(u16, 3), .next_pay_day = try st.intAs(u32, 4), .payment = st.int(5) });
             }
         }
         {
@@ -1242,7 +1242,7 @@ pub const Store = struct {
             defer st.finalize();
             try st.bindAll(.{cid});
             while (try st.next()) {
-                try gs.fund_couriers.append(alloc, .{ .to = treasuryFromCols(try st.text(0, alloc), st.int(1)), .amount = st.int(2), .sent_day = @intCast(st.int(3)), .eta_day = @intCast(st.int(4)) });
+                try gs.fund_couriers.append(alloc, .{ .to = try treasuryFromCols(try st.text(0, alloc), st.int(1)), .amount = st.int(2), .sent_day = try st.intAs(u32, 3), .eta_day = try st.intAs(u32, 4) });
             }
         }
         {
@@ -1250,7 +1250,7 @@ pub const Store = struct {
             defer st.finalize();
             try st.bindAll(.{cid});
             while (try st.next()) {
-                try gs.policies.append(alloc, .{ .entity = treasuryFromCols(try st.text(0, alloc), st.int(1)), .floor = st.int(2), .monthly_cap = st.int(3), .sent_this_month = st.int(4) });
+                try gs.policies.append(alloc, .{ .entity = try treasuryFromCols(try st.text(0, alloc), st.int(1)), .floor = st.int(2), .monthly_cap = st.int(3), .sent_this_month = st.int(4) });
             }
         }
         {
@@ -1258,7 +1258,7 @@ pub const Store = struct {
             defer st.finalize();
             try st.bindAll(.{cid});
             while (try st.next()) {
-                try gs.supply_policies.append(alloc, .{ .company = toId(types.ForceId, st.int(0)), .min_days = @intCast(st.int(1)), .tons = @intCast(st.int(2)), .ammo_battles = @intCast(st.int(3)) });
+                try gs.supply_policies.append(alloc, .{ .company = try toId(types.ForceId, st.int(0)), .min_days = try st.intAs(u16, 1), .tons = try st.intAs(u32, 2), .ammo_battles = try st.intAs(u8, 3) });
             }
         }
         {
@@ -1266,7 +1266,7 @@ pub const Store = struct {
             defer st.finalize();
             try st.bindAll(.{cid});
             while (try st.next()) {
-                try gs.stock_policies.append(alloc, .{ .hq = toId(types.HqId, st.int(0)), .part_key = try st.text(1, alloc), .min = @intCast(st.int(2)), .target = @intCast(st.int(3)) });
+                try gs.stock_policies.append(alloc, .{ .hq = try toId(types.HqId, st.int(0)), .part_key = try st.text(1, alloc), .min = try st.intAs(u32, 2), .target = try st.intAs(u32, 3) });
             }
         }
         {
@@ -1275,14 +1275,14 @@ pub const Store = struct {
             try st.bindAll(.{cid});
             while (try st.next()) {
                 try gs.bay_jobs.append(alloc, .{
-                    .hq = toId(types.HqId, st.int(0)),
+                    .hq = try toId(types.HqId, st.int(0)),
                     .kind = st.enumValue(state_mod.BayJobKind, 1) orelse return error.CorruptSave,
-                    .unit = toId(types.UnitId, st.int(2)),
+                    .unit = try toId(types.UnitId, st.int(2)),
                     .item_key = try st.text(3, alloc),
-                    .duration_days = @intCast(st.int(4)),
-                    .queued_day = @intCast(st.int(5)),
-                    .started_day = optU32(st.optInt(6)),
-                    .done_day = optU32(st.optInt(7)),
+                    .duration_days = try st.intAs(u32, 4),
+                    .queued_day = try st.intAs(u32, 5),
+                    .started_day = try optU32(st.optInt(6)),
+                    .done_day = try optU32(st.optInt(7)),
                     .cost = st.int(8),
                 });
             }
@@ -1293,19 +1293,19 @@ pub const Store = struct {
             try st.bindAll(.{cid});
             while (try st.next()) {
                 try gs.candidates.append(alloc, .{
-                    .hq = toId(types.HqId, st.int(0)),
+                    .hq = try toId(types.HqId, st.int(0)),
                     .spec = .{
                         .first = try st.text(1, alloc),
                         .last = try st.text(2, alloc),
                         .callsign = try st.optText(3, alloc),
                         .role = st.enumValue(person_mod.Role, 4) orelse return error.CorruptSave,
                         .experience = st.enumValue(types.ExperienceLevel, 5) orelse return error.CorruptSave,
-                        .primary_skill = @intCast(st.int(6)),
-                        .secondary_skill = @intCast(st.int(7)),
+                        .primary_skill = try st.intAs(u8, 6),
+                        .secondary_skill = try st.intAs(u8, 7),
                     },
                     .asking_bonus = st.int(8),
-                    .listed_day = @intCast(st.int(9)),
-                    .expires_day = @intCast(st.int(10)),
+                    .listed_day = try st.intAs(u32, 9),
+                    .expires_day = try st.intAs(u32, 10),
                 });
             }
         }
@@ -1314,7 +1314,7 @@ pub const Store = struct {
             defer st.finalize();
             try st.bindAll(.{cid});
             while (try st.next()) {
-                try gs.hq_links.append(alloc, .{ .a = toId(types.HqId, st.int(0)), .b = toId(types.HqId, st.int(1)), .level = @intCast(st.int(2)), .tons_this_week = @intCast(st.int(3)), .established_day = @intCast(st.int(4)) });
+                try gs.hq_links.append(alloc, .{ .a = try toId(types.HqId, st.int(0)), .b = try toId(types.HqId, st.int(1)), .level = try st.intAs(u8, 2), .tons_this_week = try st.intAs(u32, 3), .established_day = try st.intAs(u32, 4) });
             }
         }
         {
@@ -1322,7 +1322,7 @@ pub const Store = struct {
             defer st.finalize();
             try st.bindAll(.{cid});
             while (try st.next()) {
-                try gs.unit_transfers.append(alloc, .{ .unit = toId(types.UnitId, st.int(0)), .to_company = toId(types.ForceId, st.int(1)), .eta_day = @intCast(st.int(2)) });
+                try gs.unit_transfers.append(alloc, .{ .unit = try toId(types.UnitId, st.int(0)), .to_company = try toId(types.ForceId, st.int(1)), .eta_day = try st.intAs(u32, 2) });
             }
         }
         {
@@ -1330,7 +1330,7 @@ pub const Store = struct {
             defer st.finalize();
             try st.bindAll(.{cid});
             while (try st.next()) {
-                try gs.faction_cooling.append(alloc, .{ .faction = try st.text(0, alloc), .until_day = @intCast(st.int(1)) });
+                try gs.faction_cooling.append(alloc, .{ .faction = try st.text(0, alloc), .until_day = try st.intAs(u32, 1) });
             }
         }
         {
@@ -1338,7 +1338,7 @@ pub const Store = struct {
             defer st.finalize();
             try st.bindAll(.{cid});
             while (try st.next()) {
-                try gs.faction_standing.put(alloc, try st.text(0, alloc), @intCast(st.int(1)));
+                try gs.faction_standing.put(alloc, try st.text(0, alloc), try st.intAs(i32, 1));
             }
         }
         {
@@ -1346,8 +1346,8 @@ pub const Store = struct {
             defer st.finalize();
             try st.bindAll(.{cid});
             while (try st.next()) {
-                const kind = st.enumValue(events_mod.EventKind, 0) orelse continue;
-                try gs.event_memory.put(alloc, kind, .{ .last_day = @intCast(st.int(1)), .last_choice = @intCast(st.int(2)), .streak = @intCast(st.int(3)) });
+                const kind = st.enumValue(events_mod.EventKind, 0) orelse return error.CorruptSave;
+                try gs.event_memory.put(alloc, kind, .{ .last_day = try st.intAs(u32, 1), .last_choice = try st.intAs(u8, 2), .streak = try st.intAs(u8, 3) });
             }
         }
         {
@@ -1355,7 +1355,7 @@ pub const Store = struct {
             defer st.finalize();
             try st.bindAll(.{cid});
             while (try st.next()) {
-                try gs.rating_history.append(alloc, .{ .year = @intCast(st.int(0)), .score = @intCast(st.int(1)) });
+                try gs.rating_history.append(alloc, .{ .year = try st.intAs(i32, 0), .score = try st.intAs(i32, 1) });
             }
         }
         {
@@ -1368,21 +1368,21 @@ pub const Store = struct {
                     .item_key = try st.text(1, alloc),
                     .rarity = st.enumValue(types.Rarity, 2) orelse return error.CorruptSave,
                     .price = st.int(3),
-                    .quantity = @intCast(st.int(4)),
+                    .quantity = try st.intAs(u32, 4),
                     .staple = st.int(5) != 0,
-                    .listed_day = @intCast(st.int(6)),
-                    .expires_day = @intCast(st.int(7)),
-                    .hq = toId(types.HqId, st.int(8)),
+                    .listed_day = try st.intAs(u32, 6),
+                    .expires_day = try st.intAs(u32, 7),
+                    .hq = try toId(types.HqId, st.int(8)),
                     .black_market = st.int(14) != 0,
-                    .company = toId(types.ForceId, st.int(15)),
+                    .company = try toId(types.ForceId, st.int(15)),
                 };
                 if (st.optInt(9)) |armor| {
                     l.condition = .{
-                        .armor_pct = @intCast(armor),
+                        .armor_pct = try fit(u8, armor),
                         .quality = st.enumValue(types.Quality, 10) orelse return error.CorruptSave,
-                        .damaged_slots = @intCast(st.int(11)),
-                        .destroyed_slots = @intCast(st.int(12)),
-                        .missing_components = @intCast(st.int(13)),
+                        .damaged_slots = try st.intAs(u8, 11),
+                        .destroyed_slots = try st.intAs(u8, 12),
+                        .missing_components = try st.intAs(u8, 13),
                     };
                 }
                 try gs.market_listings.append(alloc, l);
@@ -1395,10 +1395,10 @@ pub const Store = struct {
             while (try st.next()) {
                 try gs.part_orders.append(alloc, .{
                     .part_key = try st.text(0, alloc),
-                    .quantity = @intCast(st.int(1)),
-                    .dest = siteFromCols(try st.text(2, alloc), st.int(3)),
-                    .ordered_day = @intCast(st.int(4)),
-                    .eta_day = optU32(st.optInt(5)),
+                    .quantity = try st.intAs(u32, 1),
+                    .dest = try siteFromCols(try st.text(2, alloc), st.int(3)),
+                    .ordered_day = try st.intAs(u32, 4),
+                    .eta_day = try optU32(st.optInt(5)),
                     .cost = st.int(6),
                     .status = st.enumValue(@import("../domain/part.zig").OrderStatus, 7) orelse return error.CorruptSave,
                 });
@@ -1410,11 +1410,11 @@ pub const Store = struct {
             try st.bindAll(.{cid});
             while (try st.next()) {
                 try gs.event_log.append(alloc, .{
-                    .day = @intCast(st.int(0)),
+                    .day = try st.intAs(u32, 0),
                     .category = st.enumValue(state_mod.LogCategory, 1) orelse return error.CorruptSave,
-                    .company = toId(types.ForceId, st.int(2)),
-                    .hq = toId(types.HqId, st.int(3)),
-                    .contract = toId(types.ContractId, st.int(4)),
+                    .company = try toId(types.ForceId, st.int(2)),
+                    .hq = try toId(types.HqId, st.int(3)),
+                    .contract = try toId(types.ContractId, st.int(4)),
                     .text = try st.text(5, alloc),
                 });
             }
@@ -1424,20 +1424,20 @@ pub const Store = struct {
             defer st.finalize();
             try st.bindAll(.{cid});
             while (try st.next()) {
-                const kind = st.enumValue(events_mod.EventKind, 0) orelse continue;
-                const entry = contract_events.entryForKind(kind) orelse continue;
+                const kind = st.enumValue(events_mod.EventKind, 0) orelse return error.CorruptSave;
+                const entry = contract_events.entryForKind(kind) orelse return error.CorruptSave;
                 try gs.event_queue.pending.append(alloc, .{
-                    .day = @intCast(st.int(1)),
+                    .day = try st.intAs(u32, 1),
                     .kind = kind,
-                    .contract = toId(types.ContractId, st.int(2)),
-                    .company = toId(types.ForceId, st.int(3)),
+                    .contract = try toId(types.ContractId, st.int(2)),
+                    .company = try toId(types.ForceId, st.int(3)),
                     .options = entry.options,
-                    .default_choice = @intCast(st.int(4)),
-                    .deadline_day = @intCast(st.int(5)),
-                    .chosen = if (st.optInt(6)) |c| @as(?usize, @intCast(c)) else null,
-                    .person = toId(types.PersonId, st.int(7)),
-                    .id = toId(types.EventId, st.int(8)),
-                    .battle = toId(types.BattleId, st.int(9)),
+                    .default_choice = try st.intAs(usize, 4),
+                    .deadline_day = try st.intAs(u32, 5),
+                    .chosen = if (st.optInt(6)) |c| try fit(usize, c) else null,
+                    .person = try toId(types.PersonId, st.int(7)),
+                    .id = try toId(types.EventId, st.int(8)),
+                    .battle = try toId(types.BattleId, st.int(9)),
                 });
             }
             // A pre-12G.1 save has every id defaulted to 0; stamp them in
@@ -1458,8 +1458,8 @@ pub const Store = struct {
             try br.bindAll(.{cid});
             while (try br.next()) {
                 const ord = br.int(0);
-                const outcome = br.enumValue(autoresolve_mod.Outcome, 10) orelse continue;
-                const roe = br.enumValue(force_mod.Roe, 13) orelse continue;
+                const outcome = br.enumValue(autoresolve_mod.Outcome, 10) orelse return error.CorruptSave;
+                const roe = br.enumValue(force_mod.Roe, 13) orelse return error.CorruptSave;
 
                 var hulls: std.ArrayListUnmanaged(after_action_mod.HullHit) = .empty;
                 {
@@ -1469,27 +1469,27 @@ pub const Store = struct {
                     while (try bh.next()) {
                         const slot_text = try bh.text(5, alloc);
                         try hulls.append(alloc, .{
-                            .unit = toId(types.UnitId, bh.int(0)),
+                            .unit = try toId(types.UnitId, bh.int(0)),
                             .chassis_key = try bh.text(1, alloc),
                             .chassis_name = try bh.text(2, alloc),
-                            .armor_before = @intCast(bh.int(3)),
-                            .armor_after = @intCast(bh.int(4)),
+                            .armor_before = try bh.intAs(u8, 3),
+                            .armor_after = try bh.intAs(u8, 4),
                             .slot = if (slot_text.len > 0) slot_text else null,
                             .slot_part = try bh.text(6, alloc),
-                            .slot_result = bh.enumValue(after_action_mod.SlotResult, 7) orelse .none,
+                            .slot_result = bh.enumValue(after_action_mod.SlotResult, 7) orelse return error.CorruptSave,
                             .destroyed = bh.int(8) != 0,
-                            .cause = bh.enumValue(unit_mod.WreckCause, 9) orelse .none,
-                            .pilot = toId(types.PersonId, bh.int(10)),
+                            .cause = bh.enumValue(unit_mod.WreckCause, 9) orelse return error.CorruptSave,
+                            .pilot = try toId(types.PersonId, bh.int(10)),
                             .crew_name = try bh.text(11, alloc),
                             .crew = .{
                                 .wound = if (bh.optInt(12)) |sev| .{
-                                    .severity = @intCast(sev),
-                                    .location = bh.enumValue(person_mod.InjuryLocation, 13) orelse .torso,
+                                    .severity = try fit(u8, sev),
+                                    .location = bh.enumValue(person_mod.InjuryLocation, 13) orelse return error.CorruptSave,
                                     .permanent = bh.int(14) != 0,
                                 } else null,
-                                .fate = bh.enumValue(after_action_mod.CrewOutcome.Fate, 15) orelse .unhurt,
+                                .fate = bh.enumValue(after_action_mod.CrewOutcome.Fate, 15) orelse return error.CorruptSave,
                             },
-                            .recovery = if (bh.optInt(16)) |roll| .{ .roll = @intCast(roll), .target = @intCast(bh.int(17)) } else null,
+                            .recovery = if (bh.optInt(16)) |roll| .{ .roll = try fit(i32, roll), .target = try bh.intAs(i32, 17) } else null,
                             .lost = bh.int(18) != 0,
                         });
                     }
@@ -1501,8 +1501,8 @@ pub const Store = struct {
                     try ba.bindAll(.{ cid, ord });
                     while (try ba.next()) try ammo.append(alloc, .{
                         .key = try ba.text(0, alloc),
-                        .burned = @intCast(ba.int(1)),
-                        .left = @intCast(ba.int(2)),
+                        .burned = try ba.intAs(u32, 1),
+                        .left = try ba.intAs(u32, 2),
                     });
                 }
                 var candidates: std.ArrayListUnmanaged(after_action_mod.SalvageCandidate) = .empty;
@@ -1514,18 +1514,18 @@ pub const Store = struct {
                         .key = try bs.text(0, alloc),
                         .name = try bs.text(1, alloc),
                         .bv = bs.int(2),
-                        .armor_pct = @intCast(bs.int(3)),
+                        .armor_pct = try bs.intAs(u8, 3),
                         .quality = bs.enumValue(types.Quality, 4) orelse return error.CorruptSave,
-                        .damaged_slots = @intCast(bs.int(5)),
-                        .destroyed_slots = @intCast(bs.int(6)),
-                        .missing_components = @intCast(bs.int(7)),
+                        .damaged_slots = try bs.intAs(u8, 5),
+                        .destroyed_slots = try bs.intAs(u8, 6),
+                        .missing_components = try bs.intAs(u8, 7),
                     });
                 }
                 try gs.battle_reports.kept.append(alloc, .{
-                    .id = toId(types.BattleId, br.int(1)),
-                    .day = @intCast(br.int(2)),
-                    .contract = toId(types.ContractId, br.int(3)),
-                    .company = toId(types.ForceId, br.int(4)),
+                    .id = try toId(types.BattleId, br.int(1)),
+                    .day = try br.intAs(u32, 2),
+                    .contract = try toId(types.ContractId, br.int(3)),
+                    .company = try toId(types.ForceId, br.int(4)),
                     .kind = try br.text(5, alloc),
                     .enemy_key = try br.text(6, alloc),
                     .scenario = try br.text(7, alloc),
@@ -1538,35 +1538,35 @@ pub const Store = struct {
                     .roe_overridden = br.int(14) != 0,
                     .player_power = br.int(15),
                     .enemy_power = br.int(16),
-                    .conditions_mod = @intCast(br.int(17)),
+                    .conditions_mod = try br.intAs(i32, 17),
                     .close_terrain = br.int(18) != 0,
                     .air_grounded = br.int(19) != 0,
                     .convoy_hit = br.int(20) != 0,
                     .edge_spent_by = try br.text(21, alloc),
-                    .recon_quality = @intCast(br.int(22)),
-                    .avg_fatigue = @intCast(br.int(23)),
-                    .avg_morale = @intCast(br.int(24)),
-                    .hits_taken = @intCast(br.int(25)),
-                    .destroyed = @intCast(br.int(26)),
-                    .wounded = @intCast(br.int(27)),
-                    .kia = @intCast(br.int(28)),
-                    .lost_hulls = @intCast(br.int(29)),
-                    .missing = @intCast(br.int(30)),
+                    .recon_quality = try br.intAs(u8, 22),
+                    .avg_fatigue = try br.intAs(u8, 23),
+                    .avg_morale = try br.intAs(u8, 24),
+                    .hits_taken = try br.intAs(u32, 25),
+                    .destroyed = try br.intAs(u8, 26),
+                    .wounded = try br.intAs(u8, 27),
+                    .kia = try br.intAs(u8, 28),
+                    .lost_hulls = try br.intAs(u32, 29),
+                    .missing = try br.intAs(u32, 30),
                     .enemy_destroyed_bv = br.int(31),
-                    .kills_credited = @intCast(br.int(32)),
-                    .prisoners = @intCast(br.int(33)),
+                    .kills_credited = try br.intAs(u32, 32),
+                    .prisoners = try br.intAs(u32, 33),
                     .battle_loss_comp = br.int(34),
-                    .score_after = @intCast(br.int(35)),
-                    .score_delta = @intCast(br.int(36)),
-                    .morale_delta = @intCast(br.int(37)),
-                    .fatigue_add = @intCast(br.int(38)),
-                    .battle_loss_pct = @intCast(br.int(39)),
-                    .salvage_pct = @intCast(br.int(40)),
+                    .score_after = try br.intAs(i32, 35),
+                    .score_delta = try br.intAs(i32, 36),
+                    .morale_delta = try br.intAs(i32, 37),
+                    .fatigue_add = try br.intAs(u8, 38),
+                    .battle_loss_pct = try br.intAs(u8, 39),
+                    .salvage_pct = try br.intAs(u8, 40),
                     .command_rights = try br.text(41, alloc),
                     .hulls = hulls.items,
                     .ammo = ammo.items,
-                    .silenced_mounts = @intCast(br.int(42)),
-                    .armor_left = @intCast(br.int(43)),
+                    .silenced_mounts = try br.intAs(u32, 42),
+                    .armor_left = try br.intAs(u32, 43),
                     .salvage = .{
                         .claimed_bv = br.int(44),
                         .haulable_bv = br.int(45),
@@ -1587,13 +1587,13 @@ pub const Store = struct {
             defer pl.finalize();
             try pl.bindAll(.{cid});
             while (try pl.next()) {
-                try gs.refit_plans.append(alloc, .{ .unit = toId(types.UnitId, pl.int(1)), .committed = pl.int(2) != 0 });
+                try gs.refit_plans.append(alloc, .{ .unit = try toId(types.UnitId, pl.int(1)), .committed = pl.int(2) != 0 });
             }
             const op = try self.db.prepare("SELECT plan_ord, kind, slot_key, location, part_key FROM refit_op WHERE cid = ?1 ORDER BY plan_ord, ord");
             defer op.finalize();
             try op.bindAll(.{cid});
             while (try op.next()) {
-                const idx: usize = @intCast(op.int(0));
+                const idx: usize = try op.intAs(usize, 0);
                 if (idx >= gs.refit_plans.items.len) continue;
                 const kind = try op.text(1, alloc);
                 if (std.mem.eql(u8, kind, "remove")) {
@@ -1708,12 +1708,18 @@ test "12C.8: counters rebuild from the AAR lines of an older save" {
     try std.testing.expectEqual(@as(u64, 1300), gs.stats.enemy_bv_destroyed);
 }
 
-fn toId(comptime T: type, v: i64) T {
-    return @enumFromInt(@as(u32, @intCast(v)));
+/// A stored integer as `T`; `error.CorruptSave` when it does not fit.
+fn fit(comptime T: type, v: i64) error{CorruptSave}!T {
+    return std.math.cast(T, v) orelse error.CorruptSave;
 }
 
-fn optU32(v: ?i64) ?u32 {
-    return if (v) |x| @as(u32, @intCast(x)) else null;
+/// A typed id from a stored integer; `error.CorruptSave` outside `u32`.
+fn toId(comptime T: type, v: i64) error{CorruptSave}!T {
+    return @enumFromInt(std.math.cast(u32, v) orelse return error.CorruptSave);
+}
+
+fn optU32(v: ?i64) error{CorruptSave}!?u32 {
+    return if (v) |x| try fit(u32, x) else null;
 }
 
 const Cols = struct { kind: []const u8, id: i64 };
@@ -1726,10 +1732,11 @@ fn treasuryCols(t: state_mod.Treasury) Cols {
     };
 }
 
-fn treasuryFromCols(kind: []const u8, id: i64) state_mod.Treasury {
-    if (std.mem.eql(u8, kind, "hq")) return .{ .hq = toId(types.HqId, id) };
-    if (std.mem.eql(u8, kind, "company")) return .{ .company = toId(types.ForceId, id) };
-    return .outfit;
+fn treasuryFromCols(kind: []const u8, id: i64) error{CorruptSave}!state_mod.Treasury {
+    if (std.mem.eql(u8, kind, "hq")) return .{ .hq = try toId(types.HqId, id) };
+    if (std.mem.eql(u8, kind, "company")) return .{ .company = try toId(types.ForceId, id) };
+    if (std.mem.eql(u8, kind, "outfit")) return .outfit;
+    return error.CorruptSave;
 }
 
 fn siteCols(s: types.Site) Cols {
@@ -1740,10 +1747,11 @@ fn siteCols(s: types.Site) Cols {
     };
 }
 
-fn siteFromCols(kind: []const u8, id: i64) types.Site {
-    if (std.mem.eql(u8, kind, "hq")) return .{ .hq = toId(types.HqId, id) };
-    if (std.mem.eql(u8, kind, "company")) return .{ .company = toId(types.ForceId, id) };
-    return .outfit;
+fn siteFromCols(kind: []const u8, id: i64) error{CorruptSave}!types.Site {
+    if (std.mem.eql(u8, kind, "hq")) return .{ .hq = try toId(types.HqId, id) };
+    if (std.mem.eql(u8, kind, "company")) return .{ .company = try toId(types.ForceId, id) };
+    if (std.mem.eql(u8, kind, "outfit")) return .outfit;
+    return error.CorruptSave;
 }
 
 test "save → load → identical hash, and the loaded campaign keeps playing" {
@@ -2162,6 +2170,37 @@ test "saving over a campaign row that no longer exists is refused" {
     try store.db.exec("DELETE FROM campaign");
     try std.testing.expectError(error.NoSuchCampaign, store.save(&gs));
     try std.testing.expectEqual(@as(i64, 0), try countCampaignRows(store));
+}
+
+/// Save a generated campaign, corrupt one column with `sql`, and load it
+/// back.
+fn loadAfterTampering(sql: [*:0]const u8) !void {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 5005 });
+    defer gs.deinit();
+    _ = try gs.createCommander("T", .LC, .line_officer);
+    _ = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    try store.db.exec(sql);
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    loaded.deinit();
+}
+
+test "an integer column out of its field's range rejects the load as corrupt" {
+    try std.testing.expectError(error.CorruptSave, loadAfterTampering("UPDATE person SET fatigue = 100000"));
+}
+
+test "a negative id rejects the load as corrupt" {
+    try std.testing.expectError(error.CorruptSave, loadAfterTampering("UPDATE unit SET force = -5"));
+}
+
+test "a child row whose parent is missing rejects the load as corrupt" {
+    try std.testing.expectError(error.CorruptSave, loadAfterTampering("UPDATE person_skill SET person_id = 99999"));
+}
+
+test "an unknown enum value rejects the load as corrupt" {
+    try std.testing.expectError(error.CorruptSave, loadAfterTampering("UPDATE commander SET origin = 'XX'"));
 }
 
 /// A campaign that has fought `fights` engagements, every battle decision
