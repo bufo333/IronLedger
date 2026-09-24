@@ -105,15 +105,20 @@ Contract deliverables closed before this list merged, all from the 2026-09-22 co
 
 `docs/coding-contract-proposed-updated.md` becomes normative only when its
 full gate runs and passes. Until then `docs/coding-contract.md` and its gate
-govern. Order (decided 2026-09-23): after Part 1 and after the D14–D20 fixes.
+govern. Order decided 2026-09-24, after the proposal was reviewed against the
+code; each item is one PR, in this order.
 
-- [ ] `docs/verify-contract.sh`: recursive layer, impurity, frontend-boundary, direct `commands.execute`, escape-sequence, markup, comment and module-registry checks, narrow documented allowlists. The markup check derives its tag set from `table.marks`.
-- [ ] CI installs ripgrep explicitly and runs the script.
-- [ ] One mechanical PR makes `zig fmt --check build.zig src` clean repo-wide.
-- [ ] CI clean-package build: a tree holding only the `build.zig.zon` paths builds (overlaps D22 `.paths`).
-- [ ] Windows support: target-gated terminal (console API and raw mode), resize without SIGWINCH, child-process music player (no `afplay`), paths. Then CI compiles macOS, Linux and Windows (proposal rule 65).
-- [ ] Every rule citation updated to the new numbering in one PR: `src/` (33), docs (14), CLAUDE.md (hard rules, "section 9 checklist" becomes section 11), TODO.md, test names. Optionally switch to stable IDs (`ATOMIC-01`, `VIEW-04`).
-- [ ] Full failure atomicity (proposal rules 11-14, 69), beyond D17b's slot reservations: log lines formatted before the first mutation, `resolveChoice` effects prepared as a unit, `placeUnitInCompany` reserving the target lance slot before it removes the hull, and a failure-injection strategy that works under the campaign arena (it allocates in chunks, so a failing child allocator fires unpredictably).
-- [ ] `docs/audit-response.md` gets a policy addendum, and the historical analysis stays as written: the contract review adopted failure atomicity as a forward requirement; D17 uses prepare/commit atomic helpers and one failure-injection test per shared mutation pattern, not a transaction framework. D17 expands to match.
-- [ ] Adoption PR: title becomes "Coding contract", replaces `docs/coding-contract.md`, every gate command passes on that commit, and remaining violations are listed as bounded exceptions (proposal rule 86) tied to D21/D22. The new PR checklist applies from that commit on.
-
+- [ ] `docs/verify-contract.sh`, grown from `docs/reviewer_checks.sh` (rules 72-74): add the markup check derived from `table.marks`, the comment checks (rules 82-84), a broad-`catch` check with a documented allowlist (rule 79), and module reachability against `root.zig` and `main.zig` (rule 74); CI runs it.
+- [ ] One mechanical PR makes `zig fmt --check build.zig src` clean repo-wide; the gate runs it.
+- [ ] Small gaps: the bankruptcy save's `catch {}` reports a failed save (rule 44); the TUI command line and the REPL show `cli.errorText`, never an error name (rule 10); the 11 broad catches in the core and persist are justified or removed (rule 79); `validate-data` runs on every build, not only `-Ddata` (rule 58); every module names its MekHQ counterpart and links `docs/mekhq-map.md` (rule 61); a test compares the runtime table registry with the executable DDL (rule 50).
+- [ ] `execResult` takes a per-error message map, so the five `// direct:` calls that only customise refusal text go through it (rule 37); the wizard's pre-session campaign is the one remaining, listed exception.
+- [ ] Every `GameState` field classified as persisted, derived, session-only or scratch in one manifest the digest and a test read (rule 45).
+- [ ] A lobby-owned session handle that the TUI and REPL hold instead of a `GameState` value (rule 9).
+- [ ] Subsystem behaviour off `GameState` (rule 77): the hash into `digest.zig`, pricing, staffing and the rest into their owning modules.
+- [ ] Full failure atomicity (rules 11-14, 69): validate / prepare / commit in every compound command, log lines and effects prepared before the first mutation, staged RNG, and one failure-injection test per mutation pattern with a strategy that works under the campaign arena.
+- [ ] SQL foreign keys, unique keys and checks through a table-rebuild migration, with `PRAGMA foreign_keys` on every connection (rule 50).
+- [ ] CI clean-package build: a tree holding only the `build.zig.zon` paths builds (rule 66).
+- [ ] Windows support: target-gated terminal (console API and raw mode), resize without SIGWINCH, a child-process music player without `afplay`, paths; CI compiles macOS, Linux and Windows (rule 65).
+- [ ] `docs/audit-response.md` addendum: failure atomicity is a forward requirement met by prepare/commit helpers and one failure-injection test per pattern, not a transaction framework.
+- [ ] Every rule citation renumbered to the new contract in one PR: `src/`, docs, CLAUDE.md (hard rules; "section 9 checklist" becomes section 11), TODO.md, test names.
+- [ ] Adoption PR: the proposal replaces `docs/coding-contract.md` under the title "Coding contract", every gate command passes on that commit, and the remaining violations are listed as rule-87 exceptions: the seven modules over 1,000 lines (queries, commands, app, store, battle, state, contract_events), each tied to a split deliverable scheduled after adoption, and the wizard's pre-session `commands.execute`.
