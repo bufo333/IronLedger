@@ -45,6 +45,11 @@ pub fn main(init: std.process.Init) !void {
     var data_dir: ?[]const u8 = null;
     var store_arg: ?[:0]const u8 = null;
     while (args.next()) |arg| {
+        if (std.mem.eql(u8, arg, "--keys-markdown")) {
+            // The key reference block for docs/tui.md, from the binding tables.
+            std.debug.print("{s}\n", .{try @import("tui/app.zig").App.keysMarkdown(init.arena.allocator())});
+            return;
+        }
         if (std.mem.eql(u8, arg, "--repl")) repl = true;
         if (std.mem.eql(u8, arg, "--tui")) tui = true;
         if (std.mem.eql(u8, arg, "--ascii")) ascii = true;

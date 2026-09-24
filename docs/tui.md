@@ -89,11 +89,12 @@ command line   `:` prompt (opens on `:`), hints on the right
 
 ## Keyboard model
 
-Global: `F1–F8` / `1–8` tabs · `Tab`/`S-Tab` panes · `j k h l` / arrows
-cursor · `Enter` act on cursor row · `Esc` close/back · `:` command line ·
-`n` end turn (runs the checklist modal first; `N` = 7 turns) · `?` help ·
-`q` return to welcome (save / discard / stay). Screen-local keys are listed per screen below;
-they are shortcuts for commands the command line can also run.
+Keys map to actions through binding tables (`src/tui/keys.zig`): one
+table for the keys every screen shares, one per screen. The screen's
+handler switches on the action, so a key works only if it is listed, and
+the footer, pane titles, help modal and the reference under **Keys** below
+are all generated from the same tables. Screen keys are shortcuts for
+commands the command line can also run.
 
 The command line and the REPL share one parser, `src/sim/cli.zig`
 (`game.cli.parseCommand`, `verbs`, `usage`, `errorText`): every command
@@ -107,18 +108,182 @@ land in the Desk log pane.
 
 ## Screens
 
-| Tab | Screen | Panes | Local keys → commands |
-|---|---|---|---|
-| F1 | Desk | Emblem · Checklist · Inbox · Companies · Log · HQs | Enter on inbox → `resolve_decision`; Enter on checklist → jump to fixing screen (the contact warning opens the battle orders instead); Enter on log → the whole entry, word-wrapped; `b` → the after-action reports, Enter reads one |
-| F2 | Map | Star map · World | `h j k l` move by world (view follows) · `+`/`-` zoom ×1–×8 centred on the cursor · `o` offers here · `f` → `found_hq` |
-| F3 | Forces | TO&E tree · Hull/Person detail · Unassigned pool | `a` → `assign`, `u` → `unassign`, `A` → `auto_assign`, `t` → `train`, `x` → `transfer_unit`/`transfer_person`, `m` medbay modal (`triage`, `leave`), `[ ]` page all forces / each company / unassigned pool, `+` → `raise_company` wizard (`buy_hull_for`, `crew_company`, `manning`) |
-| F4 | Contracts | Board · Active · History (closed contracts: outcome, world, days served, VP, pay received) · Contract log | Enter → `accept_contract` (company picker), `c` → `complete_contract`, `R` → `recall_company`; Tab to History, the log follows the cursor |
-| F5 | Ledger | Treasuries · P&L · Ledger | `t` → `transfer`, `p` → `set_policy`, `x` clears the row's cash or resupply policy, `L` → `take_loan`, `[ ]` period |
-| F6 | Supply | Sites · Demand · Order form · Shop | `o` → `order_part`, `s` → `ship_stock`, `b` → `buy_listing`, Enter on demand → order shortfall, `P` → `set_supply_policy`, `R` → `trim_stock` (return everything over the field plan), `K` → `set_stock_policy` (keep an HQ line stocked), `$` on an HQ row → `sell_stock` |
-| F7 | HQ | Facilities/projects · Bays · Back office · Hiring hall | `u` → `upgrade_facility`, `T` → `upgrade_tier`, `f` → `fabricate`, `P` → `post_person`, `h` → `hire_candidate`, `[ ]` switch HQ |
-| F8 | Lab | Budget/crits · Mounts · Plan & rules | `-` → `refit_remove`, `+` → `refit_install`, `c` → `refit_clear`, Enter → `refit_commit`, `[ ]` switch hull (wrecks listed too: no refits, `D` rebuilds) |
-| F9 | People | Personnel (pinned header, role filter) · Record · Open seats | `m` → `admit`, `t` → `train`, `a`/Enter seat picker → `assign`, `P` → `post_person`, `x` → `transfer_person`, `L` → `leave`, `D` → `fire`, `r` record |
-| F10 | Market | Boards · Order catalog · Demand | Enter → `buy_listing` / `order_part` / order the shortfall, `b` → `fabricate`, `K` → `set_stock_policy` on a catalogue row, KEEP STOCKED pane (Enter edits, `x` removes), `[ ]` buyer HQ |
+| Tab | Screen | Panes |
+|---|---|---|
+| F1 | Desk | Emblem · Checklist · Inbox · Companies · Log · HQs |
+| F2 | Map | Star map · World |
+| F3 | Forces | TO&E tree · Hull/Person detail · Unassigned pool |
+| F4 | Contracts | Board · Active · History (closed contracts: outcome, world, days served, VP, pay received) · Contract log |
+| F5 | Ledger | Treasuries · P&L · Ledger |
+| F6 | Supply | Sites · Demand · Order form · Shop |
+| F7 | HQ | Facilities/projects · Bays · Back office · Hiring hall |
+| F8 | Lab | Budget/crits · Mounts · Plan & rules |
+| F9 | People | Personnel (pinned header, role filter) · Record · Open seats |
+| F10 | Market | Boards · Order catalog · Demand |
+
+## Keys
+
+Every key the client answers, from the binding tables that dispatch them
+(`src/tui/keys.zig`, each screen's `bindings`). The footer, the pane
+titles and the help modal come from the same tables.
+
+<!-- keys: generated from the binding tables by `game --keys-markdown`; a test compares this block -->
+
+### Every screen
+
+| Key | Does |
+|---|---|
+| `F1-F10 / 1-0` | switch screens: Desk, Map, Forces, Contracts, Ledger, Supply, HQ, Lab, People, Market |
+| `F12` | settings |
+| `Tab` | next pane (Shift-Tab: previous) |
+| `j/k ↑/↓` | move the cursor (PgUp/PgDn ten rows) |
+| `← →` | scroll a wide table's columns (◀ 2 · 3 ▶ = hidden); pan the star map |
+| `:` | the command line: every CLI verb works (day, transfer, order, accept, …) |
+| `n` | end the turn (the checklist opens first) |
+| `N` | end 7 turns |
+| `M` | music on/off |
+| `?` | help |
+| `q` | back to the welcome screen (save / discard / stay) |
+
+### F1 Desk
+
+| Key | Pane | Does |
+|---|---|---|
+| `Enter` | checklist | go where the warning points (a contact warning opens its battle orders) |
+| `Enter` | inbox | open the decision under the cursor |
+| `Enter` | log | read the whole log entry under the cursor |
+| `b` | any | the engagements still on record: pick one to read |
+| `e` | any | choose the outfit's emblem |
+
+### F2 Map
+
+| Key | Pane | Does |
+|---|---|---|
+| `h l` | any | pan the map west / east (j k and the arrows pan too) |
+| `+ -` | any | zoom in / out (names show at zoom ×2) |
+| `c` | any | colour the map by faction, industry, standing or activity |
+| `f` | any | found an HQ on the world under the cursor (fills the command line) |
+| `o` | any | open the contract board |
+
+### F3 Forces
+
+| Key | Pane | Does |
+|---|---|---|
+| `[ ]` | any | previous / next TO&E view: all forces, each company, unassigned hulls, the hangar |
+| `r` | any | cycle the side pane: readiness, manning, damage |
+| `Enter` | TO&E | assign people to the hull under the cursor (narrow: its detail) |
+| `a` | any | seat a pilot, crew or tech on the hull under the cursor |
+| `u` | any | clear a seat or the tech on the hull under the cursor |
+| `l` | any | move the hull under the cursor into a lance |
+| `x` | any | send the hull under the cursor to another company |
+| `c` | any | hire from the halls to fill the company's manning table |
+| `A` | any | auto-assign the company's people to its hulls |
+| `t / T` | any | train one person (the command line); T enrolls the whole company |
+| `o` | any | cycle a lance's role, or a company's rules of engagement |
+| `d` | any | queue the hull under the cursor for depot repair |
+| `R` | any | on a hull: order spares for its broken gear; on a company: recall it home |
+| `m` | any | mothball or reactivate the hull under the cursor |
+| `w` | any | raise an air wing for the company under the cursor |
+| `+` | any | raise a new combat company |
+| `$` | any | sell the hull under the cursor |
+| `X` | any | disband the company under the cursor |
+| `b` | any | fabricate the structural parts the company's home HQ lacks |
+
+### F4 Contracts
+
+| Key | Pane | Does |
+|---|---|---|
+| `[ ]` | any | previous / next HQ's board |
+| `Enter` | board | accept the offer under the cursor (you pick the company) |
+| `b` | board | negotiate the offer under the cursor (one round per offer) |
+| `Enter` | active | the active contract's whole log, full screen |
+| `c` | active | close out the contract under the cursor |
+| `R` | active | recall the company (under contract: a breach, confirmed first) |
+| `Enter` | history | the closed contract's whole log, full screen |
+
+### F5 Ledger
+
+| Key | Pane | Does |
+|---|---|---|
+| `Enter` | any | open the command line with a transfer from the outfit treasury started |
+| `L` | any | take a loan (simple interest) |
+| `R` | any | repay the oldest loan |
+| `t` | any | send cash from the outfit to the HQ or company row selected |
+| `T` | any | pull cash back from the selected HQ or company to the outfit |
+| `p` | any | set the selected row's cash top-up policy (floor and monthly cap) |
+| `x` | any | clear the selected row's standing cash or resupply policy |
+
+### F6 Supply
+
+| Key | Pane | Does |
+|---|---|---|
+| `o` | any | order a part delivered to the site under the cursor |
+| `s` | any | ship parts from the home shelf (to the company under the cursor) |
+| `R` | any | return a company's stock over its field plan to the home HQ |
+| `H` | any | send every structural component in a company's field stores home |
+| `K` | any | keep a part stocked at the HQ under the cursor |
+| `t` | any | send outfit cash to the company or HQ under the cursor |
+| `T` | any | transfer the site's cash back to the outfit |
+| `p` | any | keep a company or HQ topped up from the outfit treasury |
+| `P` | any | set a company's automatic resupply policy |
+| `$` | any | sell stock |
+
+### F7 HQ
+
+| Key | Pane | Does |
+|---|---|---|
+| `[ ]` | any | previous / next HQ |
+| `u` | any | upgrade the facility under the cursor (elsewhere: pick one) |
+| `T` | any | raise a field HQ to regional |
+| `S` | any | staff the back office to requirement |
+| `h` | any | hiring hall |
+| `f` | any | hall filter forward (F: back) |
+| `Enter` | hiring hall | hire the candidate under the cursor |
+| `b` | any | fabricate a component at this HQ's bay |
+| `$` | any | sell HQ |
+
+### F8 Lab
+
+| Key | Pane | Does |
+|---|---|---|
+| `[ ]` | any | previous / next mek in the hangar |
+| `+` | any | stage installing a part from the home HQ's stock |
+| `-` | any | stage removing the mount under the cursor |
+| `c` | any | clear the staged refit plan |
+| `Enter` | any | commit the plan as a bay job at the home HQ |
+| `R` | any | order a replacement for the damaged or destroyed mount under the cursor |
+| `D` | any | queue the hull for depot repair |
+
+### F9 People
+
+| Key | Pane | Does |
+|---|---|---|
+| `/ ,` | any | next / previous roster filter |
+| `a` | any | assign the person under the cursor to an open seat |
+| `x` | any | transfer to another company |
+| `P` | any | post to an HQ |
+| `t` | any | train the person's primary skill |
+| `L` | any | send on leave for some days |
+| `T` | any | set medical triage priority (higher heals first) |
+| `m` | any | admit to the medbay |
+| `r` | any | open the full service record |
+| `D` | any | dismiss the person (asks first) |
+
+### F10 Market
+
+| Key | Pane | Does |
+|---|---|---|
+| `[ ]` | any | previous / next HQ's board and treasury |
+| `/ ,` | any | next / previous market filter |
+| `Enter` | board | buy the board listing under the cursor |
+| `Enter` | catalog | order the catalogue part under the cursor |
+| `Enter` | demand | order (or fabricate) what a damaged slot is short |
+| `Enter` | keep stocked | edit the keep-stocked line under the cursor |
+| `b` | catalog | fabricate the structural component under the cursor at this HQ's bay |
+| `K` | catalog | keep the catalogue part under the cursor stocked at this HQ |
+| `x` | keep stocked | remove the keep-stocked line under the cursor |
+
+<!-- /keys -->
 
 Money keys: Ledger `L` → `take_loan`, `R` → `repay_loan`; Forces `$` →
 `sell_unit`, `X` → `disband_company`; HQ `$` → `sell_hq`. Turn rules the

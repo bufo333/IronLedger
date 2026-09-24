@@ -24,7 +24,7 @@ pub fn draw(self: *App) anyerror!void {
     const board_need: u16 = @intCast(@min(1 + view.board.len + 3 + 1 + cands.len + 2, 200));
     const board_h: u16 = @max(6, @min(board_need, layout.major.of(b.h)));
     const board_hq: types.HqId = @enumFromInt(self.hqSelId(g));
-    const inner = self.screen.pane(.{ .x = b.x, .y = b.y, .w = b.w, .h = board_h }, .{ .title = try std.fmt.allocPrint(al, "CONTRACT BOARD · {{a}}{s}{{/}} · for the companies based there", .{try q.hqName(self.a(), g, board_hq)}), .focused = self.focus == 0, .right_title = "[ ] other HQ  [←/→] columns  [Enter] accept" });
+    const inner = self.screen.pane(.{ .x = b.x, .y = b.y, .w = b.w, .h = board_h }, .{ .title = try std.fmt.allocPrint(al, "CONTRACT BOARD · {{a}}{s}{{/}} · for the companies based there", .{try q.hqName(self.a(), g, board_hq)}), .focused = self.focus == 0, .right_title = try app.keys.paneTitle(al, &legend, 0) });
     if (view.board.len == 0) {
         self.screen.lines(inner, &.{"{d}no offers — the board refreshes on the 1st{/}"}, 0, null);
     } else {
@@ -70,7 +70,7 @@ pub fn draw(self: *App) anyerror!void {
     const act_h: u16 = if (wide) b.h - top_h else layout.major.of(b.h - top_h);
     const c1 = self.cur(1);
     if (view.active.len > 0 and c1.* >= view.active.len) c1.* = view.active.len - 1;
-    const inner2 = self.screen.pane(.{ .x = b.x, .y = b.y + top_h, .w = act_w, .h = act_h }, .{ .title = "ACTIVE", .focused = self.focus == 1, .right_title = "[Enter] full log  [c] complete  [R] recall" });
+    const inner2 = self.screen.pane(.{ .x = b.x, .y = b.y + top_h, .w = act_w, .h = act_h }, .{ .title = "ACTIVE", .focused = self.focus == 1, .right_title = try app.keys.paneTitle(al, &legend, 1) });
     var first: usize = 0;
     for (act_index.items, 0..) |ai, li| if (ai == c1.* and first == 0 and li > 0) {
         first = li;
@@ -86,7 +86,7 @@ pub fn draw(self: *App) anyerror!void {
         .{ .x = b.x + act_w, .y = b.y + top_h, .w = b.w - act_w, .h = (b.h - top_h) / 2 }
     else
         .{ .x = b.x, .y = b.y + top_h + act_h, .w = b.w, .h = b.h - top_h - act_h };
-    const hist_inner = self.screen.pane(hist_rect, .{ .title = "HISTORY", .focused = self.focus == 2, .right_title = "Tab here · log follows the cursor · [Enter] full log" });
+    const hist_inner = self.screen.pane(hist_rect, .{ .title = "HISTORY", .focused = self.focus == 2, .right_title = try app.keys.paneTitle(al, &legend, 2) });
     // The closed contracts as a table, the standings as lines under it.
     const hist_rows: u16 = @intCast(@min(history.len + 1, hist_inner.h));
     try self.tablePane(.{ .x = hist_inner.x, .y = hist_inner.y, .w = hist_inner.w, .h = hist_rows }, try q.tableOf(al, q.history_cols, history), 2, self.focus == 2);
@@ -103,82 +103,89 @@ pub fn draw(self: *App) anyerror!void {
 pub fn move(self: *App, delta: i32) anyerror!void {
     const al = self.a();
     const g = &self.gs.?;
-        const view = try q.contracts(al, g, @enumFromInt(self.hqSelId(g)));
-        if (self.focus == 0) self.moveCursor(0, delta, view.board.len) else if (self.focus == 1) self.moveCursor(1, delta, view.active.len) else self.moveCursor(2, delta, (try q.contractHistory(al, g)).len);
-
+    const view = try q.contracts(al, g, @enumFromInt(self.hqSelId(g)));
+    if (self.focus == 0) self.moveCursor(0, delta, view.board.len) else if (self.focus == 1) self.moveCursor(1, delta, view.active.len) else self.moveCursor(2, delta, (try q.contractHistory(al, g)).len);
 }
 
-pub fn enter(self: *App) anyerror!void {
+const Action = enum { prev_hq, next_hq, accept, bargain, active_log, history_log, complete, recall };
+
+pub const bindings = [_]app.keys.Binding(Action){
+    .{ .match = app.keys.Match.char('['), .action = .prev_hq, .label = "other HQ", .group = .navigate, .shown = "[ ]", .title = 0, .help = "previous / next HQ's board" },
+    .{ .match = app.keys.Match.char(']'), .action = .next_hq, .label = "next HQ", .group = .navigate, .show_footer = false, .show_help = false },
+    .{ .match = .{ .key = .enter }, .action = .accept, .label = "accept", .group = .act, .pane = 0, .help = "accept the offer under the cursor (you pick the company)" },
+    .{ .match = app.keys.Match.char('b'), .action = .bargain, .label = "bargain", .group = .act, .pane = 0, .help = "negotiate the offer under the cursor (one round per offer)" },
+    .{ .match = .{ .key = .enter }, .action = .active_log, .label = "full log", .group = .act, .pane = 1, .help = "the active contract's whole log, full screen" },
+    .{ .match = app.keys.Match.char('c'), .action = .complete, .label = "complete", .group = .act, .pane = 1, .help = "close out the contract under the cursor" },
+    .{ .match = app.keys.Match.char('R'), .action = .recall, .label = "recall", .group = .act, .pane = 1, .help = "recall the company (under contract: a breach, confirmed first)" },
+    .{ .match = .{ .key = .enter }, .action = .history_log, .label = "closed log", .group = .act, .pane = 2, .help = "the closed contract's whole log, full screen" },
+};
+pub const legend = app.keys.entries(Action, &bindings);
+
+pub fn handle(self: *App, k: app.Key) anyerror!bool {
+    const hit = app.keys.lookup(Action, &bindings, self.focus, k) orelse return false;
     const al = self.a();
     const g = &self.gs.?;
-        const view = try q.contracts(al, g, @enumFromInt(self.hqSelId(g)));
-        if (self.focus == 0 and view.board.len > 0) {
+    const view = try q.contracts(al, g, @enumFromInt(self.hqSelId(g)));
+    switch (hit.action) {
+        // One board per HQ: [ ] steps through them.
+        .next_hq, .prev_hq => {
+            const n = (try q.hqList(al, g)).len;
+            if (n > 0) self.hq_sel = if (hit.action == .next_hq) (self.hq_sel + 1) % n else (self.hq_sel + n - 1) % n;
+            self.cur(0).* = 0;
+        },
+        .accept => if (view.board.len > 0) {
             // Always choose in the open: the picker ranks
             // the companies readiest first and says who cannot go.
             self.openModal(.{ .accept_pick = view.board[@min(self.cur(0).*, view.board.len - 1)].index });
-        } else if (self.focus == 1 and view.active.len > 0) {
+        },
+        .bargain => if (view.board.len > 0) { // bargain: n is end-turn everywhere
+            const offer = view.board[@min(self.cur(0).*, view.board.len - 1)];
+            const idx = offer.index;
+            if (offer.negotiated) {
+                self.say(.dim, "that offer has had its negotiation round — take it or leave it", .{});
+                return true;
+            }
+            self.openModal(.{ .negotiate = idx });
+        },
+        .active_log => if (view.active.len > 0) {
             // The whole log, full screen: the side pane clips it.
             self.modal_cursor = std.math.maxInt(usize) / 2; // open at the latest entry
             self.modal = .{ .contract_log = view.active[@min(self.cur(1).*, view.active.len - 1)].id };
-        } else if (self.focus == 2) {
+        },
+        .history_log => {
             const history = try q.contractHistory(al, g);
             if (history.len > 0) {
                 self.modal_cursor = std.math.maxInt(usize) / 2;
                 self.modal = .{ .contract_log = history[@min(self.cur(2).*, history.len - 1)].id };
             }
-        }
-
-}
-
-pub fn key(self: *App, ch: u21) anyerror!void {
-    const al = self.a();
-    const g = &self.gs.?;
-        // One board per HQ: [ ] steps through them.
-        if (ch == ']' or ch == '[') {
-            const n = (try q.hqList(al, g)).len;
-            if (n > 0) self.hq_sel = if (ch == ']') (self.hq_sel + 1) % n else (self.hq_sel + n - 1) % n;
-            self.cur(0).* = 0;
-            return;
-        }
-        if (self.focus == 2) return; // history is read-only: the log pane follows the cursor
-        const view = try q.contracts(al, g, @enumFromInt(self.hqSelId(g)));
-        if (self.focus == 0) {
-            if (ch == 'b' and view.board.len > 0) { // bargain: n is end-turn everywhere
-                const offer = view.board[@min(self.cur(0).*, view.board.len - 1)];
-                const idx = offer.index;
-                if (offer.negotiated) {
-                    self.say(.dim, "that offer has had its negotiation round — take it or leave it", .{});
-                    return;
-                }
-                self.openModal(.{ .negotiate = idx });
+        },
+        .complete => if (view.active.len > 0) {
+            const sel = view.active[@min(self.cur(1).*, view.active.len - 1)];
+            if (sel.id == .none) {
+                self.say(.dim, "no contract to complete — recall the company instead", .{});
+                return true;
             }
-            return;
-        }
-        if (view.active.len == 0) return;
-        const sel = view.active[@min(self.cur(1).*, view.active.len - 1)];
-        switch (ch) {
-            'c' => {
-                if (sel.id == .none) {
-                    self.say(.dim, "no contract to complete — [R] recalls the company", .{});
-                    return;
-                }
-                _ = try self.execSay(.{ .complete_contract = sel.id }, .good, "contract [{d}] closed out", .{@intFromEnum(sel.id)});
-            },
-            'R' => {
-                // Under contract the recall is a breach: confirm it first.
-                if (sel.id != .none) {
-                    self.modal = .{ .confirm = .{ .kind = .recall_breach, .id = @intFromEnum(sel.company) } };
-                    return;
-                }
-                _ = try self.execSay(.{ .recall_company = sel.company }, .good, "{s} is coming home", .{try q.forceName(self.a(), g, sel.company)});
-            },
-            else => {},
-        }
-
+            _ = try self.execSay(.{ .complete_contract = sel.id }, .good, "contract [{d}] closed out", .{@intFromEnum(sel.id)});
+        },
+        .recall => if (view.active.len > 0) {
+            const sel = view.active[@min(self.cur(1).*, view.active.len - 1)];
+            // Under contract the recall is a breach: confirm it first.
+            if (sel.id != .none) {
+                self.modal = .{ .confirm = .{ .kind = .recall_breach, .id = @intFromEnum(sel.company) } };
+                return true;
+            }
+            _ = try self.execSay(.{ .recall_company = sel.company }, .good, "{s} is coming home", .{try q.forceName(self.a(), g, sel.company)});
+        },
+    }
+    return true;
 }
 
 fn toTab(c: *app.ClientForTest, tab: app.Tab) !void {
     try app.pressForTest(c, .{ .f = @intFromEnum(tab) + 1 });
+}
+
+test "the contracts bindings are well formed" {
+    try app.keys.expectWellFormed(Action, &bindings);
 }
 
 test "b on an offer opens its negotiation for that offer" {

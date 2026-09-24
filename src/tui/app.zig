@@ -9,6 +9,7 @@
 const std = @import("std");
 pub const game = @import("game");
 const term_mod = @import("term.zig");
+pub const keys = @import("keys.zig");
 pub const screen_mod = @import("screen.zig");
 pub const emblem_mod = @import("emblem.zig");
 pub const png = @import("png.zig");
@@ -883,7 +884,6 @@ pub const App = struct {
         self.footer("[Enter] begin campaign  [1-3] back to a step  [Esc] discard");
     }
 
-
     // ---- game ----
 
     fn drawChrome(self: *App) !void {
@@ -930,7 +930,7 @@ pub const App = struct {
         try self.drawChrome();
         const spec = screenSpec(self.tab);
         try spec.draw(self);
-        self.footer(spec.footer);
+        self.footer(try keys.footer(self.a(), &.{ spec.legend, &global_legend }));
     }
 
     // ---- market ----
@@ -1745,42 +1745,105 @@ pub const App = struct {
     }
 
     fn handleGameKey(self: *App, key: Key) !void {
-        switch (key) {
-            .f => |n| if (n >= 1 and n <= 10) self.switchTab(@enumFromInt(n - 1)) else if (n == 12) {
-                self.modal = .settings;
-            },
-            .tab => self.focus = (self.focus + 1) % self.paneCount(),
-            .backtab => self.focus = (self.focus + self.paneCount() - 1) % self.paneCount(),
-            .down => try self.screenMove(1),
-            .up => try self.screenMove(-1),
-            .left => if (self.tab == .map) try self.mapPan(-1, 0) else if (self.focus_scroll) |pane| {
+        if (keys.lookup(GlobalAction, &global_bindings, self.focus, key)) |hit| return self.runGlobal(hit);
+        _ = try screenSpec(self.tab).handle(self, key);
+    }
+
+    /// Keys every game screen shares. No screen binds one of these (a test
+    /// checks), so the order `handleGameKey` asks in never matters.
+    pub const GlobalAction = enum { screen, screen_digit, screen_market, settings, next_pane, prev_pane, cursor_down, cursor_up, page_down, page_up, scroll_left, scroll_right, clear_message, command, end_turn, end_week, quit, music, help };
+
+    pub const global_bindings = [_]keys.Binding(GlobalAction){
+        .{ .match = .{ .fkeys = .{ 1, 10 } }, .action = .screen, .label = "screens", .group = .navigate, .shown = "F1-F10 / 1-0", .show_footer = false, .help = "switch screens: Desk, Map, Forces, Contracts, Ledger, Supply, HQ, Lab, People, Market" },
+        .{ .match = .{ .chars = .{ '1', '9' } }, .action = .screen_digit, .label = "screens 1-9", .group = .navigate, .show_footer = false, .show_help = false },
+        .{ .match = keys.Match.char('0'), .action = .screen_market, .label = "market", .group = .navigate, .show_footer = false, .show_help = false },
+        .{ .match = .{ .key = .{ .f = 12 } }, .action = .settings, .label = "settings", .group = .misc, .show_footer = false },
+        .{ .match = .{ .key = .tab }, .action = .next_pane, .label = "pane", .group = .navigate, .show_footer = false, .help = "next pane (Shift-Tab: previous)" },
+        .{ .match = .{ .key = .backtab }, .action = .prev_pane, .label = "previous pane", .group = .navigate, .show_footer = false, .show_help = false },
+        .{ .match = keys.Match.char('j'), .action = .cursor_down, .label = "cursor", .group = .navigate, .shown = "j/k ↑/↓", .show_footer = false, .help = "move the cursor (PgUp/PgDn ten rows)" },
+        .{ .match = .{ .key = .down }, .action = .cursor_down, .label = "down", .group = .navigate, .show_footer = false, .show_help = false },
+        .{ .match = keys.Match.char('k'), .action = .cursor_up, .label = "up", .group = .navigate, .show_footer = false, .show_help = false },
+        .{ .match = .{ .key = .up }, .action = .cursor_up, .label = "up", .group = .navigate, .show_footer = false, .show_help = false },
+        .{ .match = .{ .key = .pgdn }, .action = .page_down, .label = "page down", .group = .navigate, .show_footer = false, .show_help = false },
+        .{ .match = .{ .key = .pgup }, .action = .page_up, .label = "page up", .group = .navigate, .show_footer = false, .show_help = false },
+        .{ .match = .{ .key = .left }, .action = .scroll_left, .label = "columns", .group = .navigate, .shown = "← →", .show_footer = false, .help = "scroll a wide table's columns (◀ 2 · 3 ▶ = hidden); pan the star map" },
+        .{ .match = .{ .key = .right }, .action = .scroll_right, .label = "columns", .group = .navigate, .show_footer = false, .show_help = false },
+        .{ .match = .{ .key = .escape }, .action = .clear_message, .label = "clear the status line", .group = .misc, .show_footer = false, .show_help = false },
+        .{ .match = keys.Match.char(':'), .action = .command, .label = "command", .group = .misc, .help = "the command line: every CLI verb works (day, transfer, order, accept, …)" },
+        .{ .match = keys.Match.char('n'), .action = .end_turn, .label = "end turn", .group = .misc, .help = "end the turn (the checklist opens first)" },
+        .{ .match = keys.Match.char('N'), .action = .end_week, .label = "end 7 turns", .group = .misc, .show_footer = false },
+        .{ .match = keys.Match.char('M'), .action = .music, .label = "music on/off", .group = .misc, .show_footer = false },
+        .{ .match = keys.Match.char('?'), .action = .help, .label = "help", .group = .misc },
+        .{ .match = keys.Match.char('q'), .action = .quit, .label = "welcome", .group = .misc, .help = "back to the welcome screen (save / discard / stay)" },
+    };
+    pub const global_legend = keys.entries(GlobalAction, &global_bindings);
+
+    /// The help modal's key reference: the keys every screen shares, then
+    /// each screen's, from the same tables that dispatch them.
+    fn keyHelpRows(al: std.mem.Allocator) ![]const []const u8 {
+        var rows: std.ArrayListUnmanaged([]const u8) = .empty;
+        try rows.append(al, "  {a}everywhere{/}");
+        for (try keys.helpLines(al, &global_legend)) |l| try rows.append(al, try std.fmt.allocPrint(al, "    {s}", .{l}));
+        for (screen_table, 0..) |spec, i| {
+            try rows.append(al, try std.fmt.allocPrint(al, "  {{a}}{s}{{/}}", .{tab_names[i]}));
+            for (try keys.helpLines(al, spec.legend)) |l| try rows.append(al, try std.fmt.allocPrint(al, "    {s}", .{l}));
+        }
+        return rows.toOwnedSlice(al);
+    }
+
+    /// The key reference block in docs/tui.md, generated from the tables;
+    /// `game --keys-markdown` prints it and a test compares the doc to it.
+    pub fn keysMarkdown(al: std.mem.Allocator) ![]const u8 {
+        var out: std.ArrayListUnmanaged(u8) = .empty;
+        try out.appendSlice(al, keys_begin ++ "\n\n### Every screen\n\n| Key | Does |\n|---|---|\n");
+        for (global_legend) |e| if (e.show_help) {
+            var buf: [16]u8 = undefined;
+            try out.print(al, "| `{s}` | {s} |\n", .{ keys.keyText(&buf, e), e.help orelse e.label });
+        };
+        for (screen_table, 0..) |spec, i| {
+            try out.print(al, "\n### {s}\n\n| Key | Pane | Does |\n|---|---|---|\n", .{tab_names[i]});
+            for (spec.legend) |e| if (e.show_help) {
+                var buf: [16]u8 = undefined;
+                const pane = if (e.pane) |p| spec.pane_names[p] else "any";
+                try out.print(al, "| `{s}` | {s} | {s} |\n", .{ keys.keyText(&buf, e), pane, e.help orelse e.label });
+            };
+        }
+        try out.appendSlice(al, "\n" ++ keys_end);
+        return out.toOwnedSlice(al);
+    }
+
+    pub const keys_begin = "<!-- keys: generated from the binding tables by `game --keys-markdown`; a test compares this block -->";
+    pub const keys_end = "<!-- /keys -->";
+
+    fn runGlobal(self: *App, hit: keys.Hit(GlobalAction)) !void {
+        switch (hit.action) {
+            .screen => self.switchTab(@enumFromInt(hit.offset)),
+            .screen_digit => self.switchTab(@enumFromInt(hit.offset)),
+            .screen_market => self.switchTab(.market),
+            .settings => self.modal = .settings,
+            .next_pane => self.focus = (self.focus + 1) % self.paneCount(),
+            .prev_pane => self.focus = (self.focus + self.paneCount() - 1) % self.paneCount(),
+            .cursor_down => try self.screenMove(1),
+            .cursor_up => try self.screenMove(-1),
+            .page_down => try self.screenMove(10),
+            .page_up => try self.screenMove(-10),
+            .scroll_left => if (self.tab == .map) try self.mapPan(-1, 0) else if (self.focus_scroll) |pane| {
                 self.colScroll(pane).* -|= 1;
             },
-            .right => if (self.tab == .map) try self.mapPan(1, 0) else if (self.focus_scroll) |pane| {
+            .scroll_right => if (self.tab == .map) try self.mapPan(1, 0) else if (self.focus_scroll) |pane| {
                 self.colScroll(pane).* += 1;
             },
-            .pgdn => try self.screenMove(10),
-            .pgup => try self.screenMove(-10),
-            .enter => try self.screenEnter(),
-            .escape => self.msg.len = 0,
-            .char => |ch| switch (ch) {
-                '1'...'9' => self.switchTab(@enumFromInt(ch - '1')),
-                '0' => self.switchTab(.market),
-                'j' => try self.screenMove(1),
-                'k' => try self.screenMove(-1),
-                ':' => {
-                    self.input.set(self.cmd_prefill.slice());
-                    self.cmd_prefill.len = 0;
-                    self.modal = .{ .input = .command };
-                },
-                'n' => try self.endTurnRequest(1),
-                'N' => try self.endTurnRequest(7),
-                'q' => self.modal = .quit,
-                'M' => try self.toggleMusic(),
-                '?' => self.modal = .help,
-                else => try self.screenKey(ch),
+            .clear_message => self.msg.len = 0,
+            .command => {
+                self.input.set(self.cmd_prefill.slice());
+                self.cmd_prefill.len = 0;
+                self.modal = .{ .input = .command };
             },
-            else => {},
+            .end_turn => try self.endTurnRequest(1),
+            .end_week => try self.endTurnRequest(7),
+            .quit => self.modal = .quit,
+            .music => try self.toggleMusic(),
+            .help => self.modal = .help,
         }
     }
 
@@ -1798,27 +1861,22 @@ pub const App = struct {
         return screenSpec(self.tab).move(self, delta);
     }
 
-    fn screenEnter(self: *App) !void {
-        return screenSpec(self.tab).enter(self);
-    }
-
-    fn screenKey(self: *App, ch: u21) !void {
-        return screenSpec(self.tab).key(self, ch);
-    }
-
     /// One screen, one row (rule 18): adding a screen adds a row here and
     /// the five functions it names — no switch anywhere else grows.
     const ScreenSpec = struct {
         tab: Tab,
         draw: *const fn (*App) anyerror!void,
         move: *const fn (*App, i32) anyerror!void,
-        enter: *const fn (*App) anyerror!void,
-        key: *const fn (*App, u21) anyerror!void,
+        /// Resolve a key through the screen's bindings and run its action;
+        /// false when the screen has no binding for it.
+        handle: *const fn (*App, Key) anyerror!bool,
+        /// The screen's bindings, for the footer, pane titles and help.
+        legend: []const keys.Entry,
+        /// What each pane (focus index) is called in the key reference.
+        pane_names: []const []const u8,
         /// Panes Tab cycles through, and the count on a narrow terminal.
         panes: u8,
         narrow_panes: u8,
-        /// One order everywhere: navigate | act | money · misc.
-        footer: []const u8,
     };
 
     const screens = struct {
@@ -1835,16 +1893,16 @@ pub const App = struct {
     };
 
     const screen_table = [_]ScreenSpec{
-        .{ .tab = .desk, .draw = screens.desk.draw, .move = screens.desk.move, .enter = screens.desk.enter, .key = screens.desk.key, .panes = 3, .narrow_panes = 3, .footer = "F1-F10 / 1-0 screens · Tab pane · j/k cursor | Enter act · b battles · e emblem · n end turn | : command · F12 settings · ? help · q welcome" },
-        .{ .tab = .map, .draw = screens.map.draw, .move = screens.map.move, .enter = screens.map.enter, .key = screens.map.key, .panes = 1, .narrow_panes = 1, .footer = "h j k l move · + / - zoom · c colours | f found HQ here · o offers here | q welcome" },
-        .{ .tab = .forces, .draw = screens.forces.draw, .move = screens.forces.move, .enter = screens.forces.enter, .key = screens.forces.key, .panes = 2, .narrow_panes = 2, .footer = "[ ] company / pool · j/k row · r cycle pane · M manning | a seat · u unassign · l lance · x transfer · c crew · A auto · t / T train one / all · o role (lance) / ROE (company) · d depot · R spares (hull) / recall (company) · m mothball · w air wing · + raise | $ sell · X disband · b fabricate" },
-        .{ .tab = .contracts, .draw = screens.contracts.draw, .move = screens.contracts.move, .enter = screens.contracts.enter, .key = screens.contracts.key, .panes = 3, .narrow_panes = 3, .footer = "Tab pane · j/k row | board: Enter accept (you pick the company) · b bargain · active/history: Enter full log · c complete · R recall" },
-        .{ .tab = .ledger, .draw = screens.ledger.draw, .move = screens.ledger.move, .enter = screens.ledger.enter, .key = screens.ledger.key, .panes = 2, .narrow_panes = 2, .footer = "j/k treasury | L loan · R repay · t send cash · T pull cash back · p top-up policy · x clear policy" },
-        .{ .tab = .supply, .draw = screens.supply.draw, .move = screens.supply.move, .enter = screens.supply.enter, .key = screens.supply.key, .panes = 1, .narrow_panes = 1, .footer = "j/k site | o order · s ship · R trim to plan · H parts home · K keep stocked | t / T cash out / back · p / P cash / resupply policy · $ sell stock" },
-        .{ .tab = .hq, .draw = screens.hq.draw, .move = screens.hq.move, .enter = screens.hq.enter, .key = screens.hq.key, .panes = 2, .narrow_panes = 2, .footer = "[ ] switch HQ · Tab hall · f / F filter | u upgrade · T tier · S autostaff · Enter hire · b fabricate | $ sell HQ" },
-        .{ .tab = .lab, .draw = screens.lab.draw, .move = screens.lab.move, .enter = screens.lab.enter, .key = screens.lab.key, .panes = 1, .narrow_panes = 1, .footer = "[ ] hull · j/k mount | + install · - remove · c clear · Enter commit · R order replacement · D depot" },
-        .{ .tab = .people, .draw = screens.people.draw, .move = screens.people.move, .enter = screens.people.enter, .key = screens.people.key, .panes = 1, .narrow_panes = 1, .footer = "/ , filter · j/k person | a seat · x transfer · P post · t train · L leave · T triage · m admit · r record | D fire" },
-        .{ .tab = .market, .draw = screens.market.draw, .move = screens.market.move, .enter = screens.market.enter, .key = screens.market.key, .panes = 4, .narrow_panes = 2, .footer = "Tab pane · [ ] HQ board · / , filter | Enter buy / order / order shortfall · b fabricate · K keep stocked · x remove line | q welcome" },
+        .{ .tab = .desk, .draw = screens.desk.draw, .move = screens.desk.move, .handle = screens.desk.handle, .legend = &screens.desk.legend, .pane_names = &.{ "checklist", "inbox", "log" }, .panes = 3, .narrow_panes = 3 },
+        .{ .tab = .map, .draw = screens.map.draw, .move = screens.map.move, .handle = screens.map.handle, .legend = &screens.map.legend, .pane_names = &.{"star map"}, .panes = 1, .narrow_panes = 1 },
+        .{ .tab = .forces, .draw = screens.forces.draw, .move = screens.forces.move, .handle = screens.forces.handle, .legend = &screens.forces.legend, .pane_names = &.{ "TO&E", "side pane" }, .panes = 2, .narrow_panes = 2 },
+        .{ .tab = .contracts, .draw = screens.contracts.draw, .move = screens.contracts.move, .handle = screens.contracts.handle, .legend = &screens.contracts.legend, .pane_names = &.{ "board", "active", "history" }, .panes = 3, .narrow_panes = 3 },
+        .{ .tab = .ledger, .draw = screens.ledger.draw, .move = screens.ledger.move, .handle = screens.ledger.handle, .legend = &screens.ledger.legend, .pane_names = &.{ "treasuries", "ledger" }, .panes = 2, .narrow_panes = 2 },
+        .{ .tab = .supply, .draw = screens.supply.draw, .move = screens.supply.move, .handle = screens.supply.handle, .legend = &screens.supply.legend, .pane_names = &.{"sites"}, .panes = 1, .narrow_panes = 1 },
+        .{ .tab = .hq, .draw = screens.hq.draw, .move = screens.hq.move, .handle = screens.hq.handle, .legend = &screens.hq.legend, .pane_names = &.{ "HQ", "hiring hall" }, .panes = 2, .narrow_panes = 2 },
+        .{ .tab = .lab, .draw = screens.lab.draw, .move = screens.lab.move, .handle = screens.lab.handle, .legend = &screens.lab.legend, .pane_names = &.{"mounts"}, .panes = 1, .narrow_panes = 1 },
+        .{ .tab = .people, .draw = screens.people.draw, .move = screens.people.move, .handle = screens.people.handle, .legend = &screens.people.legend, .pane_names = &.{"roster"}, .panes = 1, .narrow_panes = 1 },
+        .{ .tab = .market, .draw = screens.market.draw, .move = screens.market.move, .handle = screens.market.handle, .legend = &screens.market.legend, .pane_names = &.{ "board", "catalog", "demand", "keep stocked" }, .panes = 4, .narrow_panes = 2 },
     };
 
     comptime {
@@ -2454,7 +2512,6 @@ pub const App = struct {
         }
     }
 
-
     // ---- the list widget (rule 19): every "pick one of these" and every
     // read-only sheet is one ListView, drawn by drawList and driven by listKey ----
 
@@ -2488,54 +2545,33 @@ pub const App = struct {
         const full_h = self.screen.rows -| 2;
         switch (self.modal) {
             .help => {
-                // The board legend slots in after the contracts row.
-                const contracts_row = 4;
-                const base = [_][]const u8{
-                    "",
-                    "  {a}screens{/}     F1-F8 or 1-8 · Tab / Shift-Tab cycles panes · j/k ↑/↓ cursor · ←/→ scroll table columns (◀ 2 · 3 ▶ = hidden)",
-                    "  {a}turn{/}        n ends the turn (the checklist opens first) · N ends 7 turns",
-                    "  {a}desk{/}        Enter on an inbox row opens the decision · Enter on a checklist row jumps to its screen · Enter on a log row opens the whole entry, wrapped · b reads the after-action reports",
-                    "  {a}contracts{/}   Enter accepts the offer under the cursor · b bargains one term (one round per offer) · c completes · R recalls",
-                    "  {a}ledger{/}      j/k picks the treasury · t transfer · p policy · L loan",
-                    "  {a}forces{/}      [ ] page through all forces, each company, the unassigned pool · a assign · u unassign · A auto-assign the company · t train one · T train the whole company at their trades (home only) · cursor on a company = DAMAGE pane (struct = depot, gear = field), r swaps it for READINESS · w air wing · b fabricates the shortest comp_*",
-                    "  {a}hq{/}          [ ] switch HQ · u upgrade · S autostaff · h hire · f/F hall filter",
-                    "  {a}people{/}      / filter · m admit wounded · t train · a assign seat · P post · x transfer · L leave · D fire",
-                    "  {a}market{/}      F10/0: / , filter (mechs, vehicles, aero, dropships, jumpships, weapons, ammo, equipment, components, supplies)",
-                    "               boards (Enter buys) · catalog (Enter orders, b fabricates comp_*) · demand (Enter orders shortfall)",
-                    "  {a}lab{/}         + picks a part then a location (green = rules allow) · R orders a replacement for damaged gear · dim rows = full",
-                    "  {a}gear{/}        destroyed weapons and equipment are field work on every hull kind (trucks, MASH, tanks, fighters too): Forces R on the hull (or `:replace <unit>`) orders spares to its site; its tech fits them on the weekly pass — no Lab needed",
-                    "  {a}structure{/}   not fitted in the Lab: D (Lab) or d (Forces) sends the hull to the depot; the bay consumes comp_* parts from the home HQ",
-                    "  {a}companies{/}   Forces + (or :raise hq:N <name>) raises an empty company and walks a wizard: pick meks per lance from the pool, mothballs and every board (buy or pass; damaged listings show the repair bill and delivery days), buy the support train, then crews",
+                // The keys come from the binding tables; these rows explain
+                // what the keys are for.
+                const concepts = [_][]const u8{
+                    "  {a}gear{/}        destroyed weapons and equipment are field work on every hull kind (trucks, MASH, tanks, fighters too): spares ordered to the hull's site are fitted by its tech on the weekly pass — no Lab needed",
+                    "  {a}structure{/}   not fitted in the Lab: the hull goes to a depot, and the bay consumes comp_* parts from the home HQ",
+                    "  {a}companies{/}   a raised company starts empty and walks a wizard: meks per lance from the pool, mothballs and every board (buy or pass; damaged listings show the repair bill and delivery days), the support train, then crews",
                     "               :crew co:N fills open seats from the halls · :manning co:N shows how many of each role a company of that shape needs · :assignco co:N hq:M — each regional HQ hosts one combat company",
-                    "  {a}money{/}       Ledger: L loan (simple interest) · R repay · Forces: $ sell hull · X disband company · HQ: $ sell HQ",
-                    "  {a}field cash{/}  t courier cash out · T courier cash back to the outfit · p policy = keep above a floor, checked daily, cap per month · Ledger x clears one (or `:policy co:N 0 0`)",
-                    "  {a}resupply{/}    P policy `supplypolicy co:N days [max_tons] [battles]` — every line (provisions, medical, armor, each ammo family) kept to a field plan sized to the transit and the trucks; days = safety days past the transit; 0 days removes",
-                    "  {a}trim{/}        R on a Supply company row (or `:trim co:N`) returns everything over the field plan — and consumables it has no line for — to the home HQ, free",
-                    "  {a}sell stock{/}  $ on a Supply HQ row → `sellstock hq:N part qty` — half catalogue value (40% for comp_*) into the HQ treasury; never under a keep-stocked minimum",
-                    "  {a}warehouse{/}   K `stockpolicy hq:N part min [target]` (Supply on an HQ, Market on a catalogue row) — under min → order/fabricate to target, daily · Market KEEP STOCKED pane: Enter edits, x removes",
-                    "  {a}medbay{/}      Settings (F12 or :settings) → a: auto-admit the wounded every morning, or `:autoadmit on|off`",
-                    "  {a}turn rules{/}  wounded must be admitted (m) and a negative treasury covered before the day can end; bankruptcy ends the game",
+                    "  {a}field cash{/}  couriers carry cash out to a company and back; a policy keeps a treasury above a floor, checked daily, capped per month (`:policy co:N 0 0` clears one)",
+                    "  {a}resupply{/}    `supplypolicy co:N days [max_tons] [battles]` — every line (provisions, medical, armor, each ammo family) kept to a field plan sized to the transit and the trucks; days = safety days past the transit; 0 days removes",
+                    "  {a}trim{/}        trimming a company's stores (`:trim co:N`) returns everything over the field plan — and consumables it has no line for — to the home HQ, free",
+                    "  {a}sell stock{/}  `sellstock hq:N part qty` — half catalogue value (40% for comp_*) into the HQ treasury; never under a keep-stocked minimum",
+                    "  {a}warehouse{/}   `stockpolicy hq:N part min [target]` — under min → order/fabricate to target, daily",
+                    "  {a}medbay{/}      Settings: auto-admit the wounded every morning, or `:autoadmit on|off`",
+                    "  {a}turn rules{/}  wounded must be admitted and a negative treasury covered before the day can end; bankruptcy ends the game",
                     "  {a}reputation{/}  every offer's pay × (1 + rep × 0.5%), clamped 0.8–1.3, and more offers per board · complete +1 (+VP) · breach −2 · decisions show their rep effect",
-                    "  {a}emblem{/}      e on the Desk (or :emblem) changes the crest: presets or a PNG from ./, logos/, docs/logos/",
-                    "  {a}command{/}     : opens the command line — every CLI verb works: day, transfer, order, accept, …",
-                    "  {a}leave{/}       q returns to the welcome screen (save / discard / stay)",
-                    "",
-                    "  {d}[Esc] close{/}",
-                };
-                // The contract board's columns, after the contracts line.
-                const board_legend = [_][]const u8{
                     "  {a}board cols{/}  emp employer · LY light-years off · band in ring / beachhead (pay ×1.3, hardship, slow resupply) · mo months · salv salvage % (cash = salvage exchange: paid in cash, no wrecks) · rights command rights · transit days out",
                     "               skulls difficulty for the readiest company: ☠ one, ◐ half, green easy → amber → red; rating the same as a number (0.5–5), a range when intel cannot count the enemy, ! outmatched",
                     "               tons your company's mek tonnage · weight mix L light M medium H heavy A assault meks · enemy tons ~ estimated opposing tonnage · opposition lances, quality, faction (≈BV a fight at good intel)",
                 };
                 var rows: std.ArrayListUnmanaged([]const u8) = .empty;
-                for (base, 0..) |row, i| {
-                    try rows.append(al, row);
-                    if (i == contracts_row) {
-                        try rows.appendSlice(al, &board_legend);
-                        try rows.append(al, try std.fmt.allocPrint(al, "               factions {s}", .{try q.factionLegend(al)}));
-                    }
-                }
+                try rows.append(al, "");
+                try rows.appendSlice(al, try keyHelpRows(al));
+                try rows.append(al, "");
+                try rows.appendSlice(al, &concepts);
+                try rows.append(al, try std.fmt.allocPrint(al, "               factions {s}", .{try q.factionLegend(al)}));
+                try rows.append(al, "");
+                try rows.append(al, "  {d}[Esc] close{/}");
                 return .{ .title = "HELP", .rows = rows.items, .read_only = true, .w = layout.modal.help_w, .max_h = layout.modal.help_h };
             },
             .decision => |idx| {
@@ -3433,7 +3469,6 @@ pub const App = struct {
             self.say(.amber, "unknown verb '{s}' — see ? for the list, or use the CLI (--repl) for the rest", .{verb});
         }
     }
-
 };
 
 pub const Options = struct {
@@ -3490,7 +3525,6 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, env: *const std.process.Environ.M
     }
     try app.run();
 }
-
 
 /// A headless client over a generated campaign, for the screen tests: the
 /// frames go to a discarding writer, saves to an in-memory store, and the
@@ -3564,4 +3598,26 @@ test "the end-turn key moves the calendar, and Esc closes whatever modal it open
     try std.testing.expect(c.app.modal != .none);
     try pressForTest(c, .escape);
     try std.testing.expect(c.app.modal == .none);
+}
+
+test "no screen binds a key the whole client already answers" {
+    for (App.screen_table, 0..) |spec, i| for (spec.legend) |e| for (App.global_legend) |g| {
+        if (e.match.overlaps(g.match)) {
+            std.debug.print("{s}: \"{s}\" shadows the global \"{s}\"\n", .{ tab_names[i], e.label, g.label });
+            return error.TestUnexpectedResult;
+        }
+    };
+    try keys.expectWellFormed(App.GlobalAction, &App.global_bindings);
+}
+
+test "docs/tui.md carries the generated key reference, exactly" {
+    const al = std.testing.allocator;
+    const doc = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "docs/tui.md", al, .limited(1 << 20));
+    defer al.free(doc);
+    const want = try App.keysMarkdown(al);
+    defer al.free(want);
+    const b = std.mem.indexOf(u8, doc, App.keys_begin) orelse return error.KeyBlockMissing;
+    const e = std.mem.indexOf(u8, doc, App.keys_end) orelse return error.KeyBlockMissing;
+    // Regenerate with `zig-out/bin/game --keys-markdown` and paste between the markers.
+    try std.testing.expectEqualStrings(want, doc[b .. e + App.keys_end.len]);
 }

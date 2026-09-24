@@ -34,55 +34,73 @@ pub fn draw(self: *App) anyerror!void {
 pub fn move(self: *App, delta: i32) anyerror!void {
     const al = self.a();
     const g = &self.gs.?;
-        const uid = (try self.labUnit()) orelse return;
-        const view = try q.lab(al, g, uid);
-        self.moveCursor(0, delta, view.mounts.len);
-
+    const uid = (try self.labUnit()) orelse return;
+    const view = try q.lab(al, g, uid);
+    self.moveCursor(0, delta, view.mounts.len);
 }
 
-pub fn enter(self: *App) anyerror!void {
-        const uid = (try self.labUnit()) orelse return;
-        _ = try self.execSay(.{ .refit_commit = uid }, .good, "refit committed — it is a bay job at the home HQ: HQ screen (F7) lists the bays, queued and running, with days left", .{});
+const Action = enum { prev_hull, next_hull, install, remove, clear, commit, replace, depot };
 
-}
+pub const bindings = [_]app.keys.Binding(Action){
+    .{ .match = app.keys.Match.char('['), .action = .prev_hull, .label = "hull", .group = .navigate, .shown = "[ ]", .help = "previous / next mek in the hangar" },
+    .{ .match = app.keys.Match.char(']'), .action = .next_hull, .label = "next hull", .group = .navigate, .show_footer = false, .show_help = false },
+    .{ .match = app.keys.Match.char('+'), .action = .install, .label = "install", .group = .act, .help = "stage installing a part from the home HQ's stock" },
+    .{ .match = app.keys.Match.char('-'), .action = .remove, .label = "remove", .group = .act, .help = "stage removing the mount under the cursor" },
+    .{ .match = app.keys.Match.char('c'), .action = .clear, .label = "clear", .group = .act, .help = "clear the staged refit plan" },
+    .{ .match = .{ .key = .enter }, .action = .commit, .label = "commit", .group = .act, .help = "commit the plan as a bay job at the home HQ" },
+    .{ .match = app.keys.Match.char('R'), .action = .replace, .label = "order replacement", .group = .act, .help = "order a replacement for the damaged or destroyed mount under the cursor" },
+    .{ .match = app.keys.Match.char('D'), .action = .depot, .label = "depot", .group = .act, .help = "queue the hull for depot repair" },
+};
+pub const legend = app.keys.entries(Action, &bindings);
 
-pub fn key(self: *App, ch: u21) anyerror!void {
+pub fn handle(self: *App, k: app.Key) anyerror!bool {
+    const hit = app.keys.lookup(Action, &bindings, self.focus, k) orelse return false;
     const al = self.a();
     const g = &self.gs.?;
-        const uid = (try self.labUnit()) orelse return;
-        const view = try q.lab(al, g, uid);
-        const meks = view.meks;
-        switch (ch) {
-            ']' => self.lab_sel = (self.lab_sel + 1) % meks.len,
-            '[' => self.lab_sel = (self.lab_sel + meks.len - 1) % meks.len,
-            '-' => if (view.mounts.len > 0) {
-                const m = view.mounts[@min(self.cur(0).*, view.mounts.len - 1)];
-                _ = try self.execSay(.{ .refit_remove = .{ .unit = uid, .slot_key = m.slot_key } }, .good, "staged: remove {s} — Enter commits the plan to a bay, c clears it", .{m.slot_key});
-            },
-            '+' => {
-                self.openModal(.{ .install_part = uid });
-            },
-            'R' => if (view.mounts.len > 0) {
-                const m = view.mounts[@min(self.cur(0).*, view.mounts.len - 1)];
-                const res = game.commands.execute(g, .{ .replace_mount = .{ .unit = uid, .slot_key = m.slot_key } }) catch |err| switch (err) { // direct: a sound mount says how to order one
-                    error.MountIsFine => return self.say(.dim, "{s} is fine — [R] orders a replacement for damaged or destroyed gear", .{m.slot_key}),
-                    else => return self.say(.crit, "{s}", .{game.cli.errorText(err)}),
-                };
-                self.say(.good, "ordered 1 × {s} to {s}; techs fit it on the next repair pass once it lands", .{ m.part_key, try q.hqName(self.a(), g, res.hq) });
-            },
-            'c' => {
-                _ = try self.execSay(.{ .refit_clear = uid }, .good, "#{d}: refit plan cleared", .{@intFromEnum(uid)});
-            },
-            'D' => {
-                _ = try self.execSay(.{ .depot = uid }, .good, "#{d} queued for depot repair — see the HQ screen's bays", .{@intFromEnum(uid)});
-            },
-            else => {},
-        }
-
+    const uid = (try self.labUnit()) orelse return true;
+    const view = try q.lab(al, g, uid);
+    const meks = view.meks;
+    switch (hit.action) {
+        .next_hull => self.lab_sel = (self.lab_sel + 1) % meks.len,
+        .prev_hull => self.lab_sel = (self.lab_sel + meks.len - 1) % meks.len,
+        .remove => if (view.mounts.len > 0) {
+            const m = view.mounts[@min(self.cur(0).*, view.mounts.len - 1)];
+            _ = try self.execSay(.{ .refit_remove = .{ .unit = uid, .slot_key = m.slot_key } }, .good, "staged: remove {s}", .{m.slot_key});
+        },
+        .install => {
+            self.openModal(.{ .install_part = uid });
+        },
+        .replace => if (view.mounts.len > 0) {
+            const m = view.mounts[@min(self.cur(0).*, view.mounts.len - 1)];
+            // direct: a sound mount says what a replacement is for.
+            const res = game.commands.execute(g, .{ .replace_mount = .{ .unit = uid, .slot_key = m.slot_key } }) catch |err| {
+                switch (err) {
+                    error.MountIsFine => self.say(.dim, "{s} is fine — replacements are for damaged or destroyed gear", .{m.slot_key}),
+                    else => self.say(.crit, "{s}", .{game.cli.errorText(err)}),
+                }
+                return true;
+            };
+            self.say(.good, "ordered 1 × {s} to {s}; techs fit it on the next repair pass once it lands", .{ m.part_key, try q.hqName(self.a(), g, res.hq) });
+        },
+        .clear => {
+            _ = try self.execSay(.{ .refit_clear = uid }, .good, "#{d}: refit plan cleared", .{@intFromEnum(uid)});
+        },
+        .commit => {
+            _ = try self.execSay(.{ .refit_commit = uid }, .good, "refit committed — it is a bay job at the home HQ: the HQ screen lists the bays, queued and running, with days left", .{});
+        },
+        .depot => {
+            _ = try self.execSay(.{ .depot = uid }, .good, "#{d} queued for depot repair — see the HQ screen's bays", .{@intFromEnum(uid)});
+        },
+    }
+    return true;
 }
 
 fn toTab(c: *app.ClientForTest, tab: app.Tab) !void {
     try app.pressForTest(c, .{ .f = @intFromEnum(tab) + 1 });
+}
+
+test "the lab bindings are well formed" {
+    try app.keys.expectWellFormed(Action, &bindings);
 }
 
 test "] and [ step through the hangar's meks" {
