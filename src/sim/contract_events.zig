@@ -310,7 +310,6 @@ fn effectsPlain(gs: *GameState, effects: []const events.Effect) ![]const u8 {
     return out.items;
 }
 
-
 /// Queue a decision straight from its deck, for the tests below.
 fn pushDeckForTest(gs: *GameState, entry: Entry, company: types.ForceId, person: types.PersonId, deadline: u32) !types.EventId {
     const id: types.EventId = @enumFromInt(gs.event_queue.next_id);
