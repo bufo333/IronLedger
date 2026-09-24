@@ -109,7 +109,7 @@ pub fn plan(alloc: std.mem.Allocator, gs: *GameState, company: types.ForceId, tr
         for (part_mod.munition_keys) |key| {
             const mounts = family_mounts.get(key) orelse continue;
             if (mounts == 0) continue;
-            const per_battle = std.math.divCeil(u32, mounts, mounts_per_ammo_ton) catch 1;
+            const per_battle = tonsPerBattle(mounts);
             const target = per_battle * target_battles;
             sum += target;
             try lines.append(alloc, .{ .key = key, .floor = per_battle * floor_battles, .target = target, .note = try std.fmt.allocPrint(alloc, "{d} mounts · {d}t per battle · {d} battles floor, {d} target", .{ mounts, per_battle, floor_battles, target_battles }) });
@@ -117,7 +117,7 @@ pub fn plan(alloc: std.mem.Allocator, gs: *GameState, company: types.ForceId, tr
         if (sum > budget and budget > 0) {
             for (lines.items[first_ammo..]) |*l| {
                 const mounts = family_mounts.get(l.key) orelse 1;
-                const per_battle = std.math.divCeil(u32, mounts, mounts_per_ammo_ton) catch 1;
+                const per_battle = tonsPerBattle(mounts);
                 l.target = @max(per_battle, l.target * budget / sum);
                 l.floor = @min(l.floor, l.target);
                 l.trimmed = true;
@@ -129,6 +129,30 @@ pub fn plan(alloc: std.mem.Allocator, gs: *GameState, company: types.ForceId, tr
     var total: u32 = 0;
     for (lines.items) |l| total += l.target * part_mod.tons(l.key);
     return .{ .lines = try lines.toOwnedSlice(alloc), .transit_days = transit_days, .provisions_per_day = per_day, .capacity = cap, .total_target = total };
+}
+
+/// Tons of one munition family an engagement burns: a ton feeds
+/// `mounts_per_ammo_ton` mounts.
+pub fn tonsPerBattle(mounts: u32) u32 {
+    return std.math.divCeil(u32, mounts, mounts_per_ammo_ton) catch 0;
+}
+
+/// Engagements of one munition family the company's stores can feed.
+pub const AmmoFights = struct { key: []const u8, fights: u32 };
+
+/// Per family the company's fighting mounts fire, in `part.munition_keys`
+/// order: whole engagements the stock at its site feeds.
+pub fn ammoFights(alloc: std.mem.Allocator, gs: *GameState, company: types.ForceId) ![]AmmoFights {
+    const mounts = try munitionMounts(alloc, gs, company, true);
+    const site = gs.siteForForce(company);
+    var out: std.ArrayListUnmanaged(AmmoFights) = .empty;
+    for (part_mod.munition_keys) |key| {
+        const n = mounts.get(key) orelse continue;
+        const per_battle = tonsPerBattle(n);
+        if (per_battle == 0) continue;
+        try out.append(alloc, .{ .key = key, .fights = gs.stockCount(site, key) / per_battle });
+    }
+    return out.toOwnedSlice(alloc);
 }
 
 /// Tons already on the road to a site (every line): the room check and

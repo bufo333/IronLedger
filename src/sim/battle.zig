@@ -49,7 +49,37 @@ fn nextBattleGap(gs: *GameState, c: *const contract_mod.Contract) u32 {
     if (c.kind.isGarrisonClass()) return tuning.battle.garrison_probe_base_days + @as(u32, gs.rng.roll2d6(.battle)) * tuning.battle.garrison_probe_die_days;
     // Command rights set the tempo (12B.1): integrated employers pick fights.
     const base: i32 = @as(i32, @intCast(tuning.battle.gap_base_days)) + @as(i32, gs.rng.roll2d6(.battle)) + c.terms.command_rights.gapDelta();
-    return @intCast(@max(3, base));
+    return @intCast(@max(min_gap_days, base));
+}
+
+/// The shortest gap between engagements on a non-garrison contract.
+pub const min_gap_days: u32 = 3;
+
+/// Days until the contract's next engagement; null when none is scheduled.
+pub fn daysToContact(gs: *const GameState, c: *const contract_mod.Contract) ?u32 {
+    if (c.status != .active) return null;
+    const day = c.next_battle_day orelse return null;
+    return day -| gs.clock.day_index;
+}
+
+/// Inside the contact warning window: ROE and recall can still change the
+/// engagement (`tuning.battle.contact_warning_days`).
+pub fn inContactWindow(gs: *const GameState, c: *const contract_mod.Contract) bool {
+    const days = daysToContact(gs, c) orelse return false;
+    return days <= tuning.battle.contact_warning_days;
+}
+
+/// The window opened with today's tick: the one day a multi-day advance
+/// stops so the warning is seen.
+pub fn contactWindowOpensToday(gs: *const GameState, c: *const contract_mod.Contract) bool {
+    return daysToContact(gs, c) == tuning.battle.contact_warning_days;
+}
+
+/// The ROE a company fights under on a contract: integrated command rights
+/// override the company's own setting.
+pub fn effectiveRoe(gs: *GameState, c: *const contract_mod.Contract, company: types.ForceId) force_mod.Roe {
+    if (c.terms.command_rights.overridesRoe()) return .hold;
+    return if (gs.force(company)) |f| f.roe else .standard;
 }
 
 /// battle_resolution phase, daily: schedule and resolve engagements for
@@ -152,7 +182,7 @@ fn playerSideIn(gs: *GameState, alloc: std.mem.Allocator, c: *const contract_mod
     var fit = family_mounts.iterator();
     while (fit.next()) |entry| {
         const mounts = entry.value_ptr.*;
-        const need = std.math.divCeil(u32, mounts, mounts_per_ammo_ton) catch 1;
+        const need = @import("field_supply.zig").tonsPerBattle(mounts);
         const have = gs.stockCount(side.site, entry.key_ptr.*);
         const use = @min(need, have);
         try side.ammo_reserved.put(alloc, entry.key_ptr.*, use);
@@ -608,7 +638,7 @@ fn openingRoll(gs: *GameState, c: *const contract_mod.Contract, player: *const S
     // Rules of engagement (12D.4): the company's standing order, unless an
     // integrated employer's officers set it.
     const rt = tuning.loss.roe;
-    const roe: force_mod.Roe = if (c.terms.command_rights.overridesRoe()) .hold else if (gs.force(c.assigned_company)) |f| f.roe else .standard;
+    const roe = effectiveRoe(gs, c, c.assigned_company);
     const roe_roll: i32 = switch (roe) {
         .hold => rt.hold_roll,
         .standard => 0,
@@ -2076,4 +2106,11 @@ test "12G.3: the AAR is rendered from the record, and the record outlives the fi
     // gathered by battle instead of by reading their prose (12G.3).
     try std.testing.expectEqual(@as(u32, 11), gs.next_battle_id);
     try std.testing.expect(gs.nextBattleId() == @as(types.BattleId, @enumFromInt(11)));
+}
+
+test "every scheduled engagement opens its contact window on an advance" {
+    // A window wider than the shortest gap would open on the day the gap is
+    // rolled, never on an advance, and a multi-day advance would skip it.
+    try std.testing.expect(tuning.battle.contact_warning_days <= min_gap_days);
+    try std.testing.expect(tuning.battle.contact_warning_days <= tuning.battle.press_gap_days);
 }

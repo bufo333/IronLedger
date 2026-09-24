@@ -380,6 +380,10 @@ pub const Tuning = struct {
         press_score: i16, // TUNE
         press_fatigue: u8, // TUNE
         consolidate_morale: i8, // TUNE
+        /// Days before a scheduled engagement that the contact warning
+        /// shows. At most `battle.min_gap_days`, so every scheduled
+        /// engagement opens its window on an advance.
+        contact_warning_days: u32, // TUNE
     },
     field_supply: struct {
         ammo_share_pct: u32,

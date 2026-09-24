@@ -706,6 +706,7 @@ fn runRepl(gs: *game.state.GameState, io: std.Io, gpa: std.mem.Allocator, store_
                 continue;
             };
             std.debug.print("advanced {d} day(s)\n", .{r.days_advanced});
+            if (r.contact != .none) std.debug.print("stopped for the contact warning: {s}\n", .{try q.contactWarning(al, gs, r.contact)});
             printStatus(gs, al);
         } else if (std.mem.eql(u8, verb, "manning")) {
             const site = game.cli.parseSite(tokens.next() orelse "") catch null;

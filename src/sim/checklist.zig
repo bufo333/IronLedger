@@ -56,6 +56,9 @@ pub const WarningKind = enum {
     /// A battle decision nobody has answered (12G.6). Like the unread
     /// after-action, the turn waits on it rather than defaulting.
     battle_decision,
+    /// An engagement is inside the contact warning window: the odds, the
+    /// strength and the ammunition while ROE and recall can still act.
+    contact_imminent,
 
     /// Stops the turn until dealt with (ARCH §9.9): the desk decides which
     /// warnings gate `advance_day`; the screens only colour them.
@@ -81,6 +84,53 @@ pub const Warning = struct {
     kind: WarningKind,
     text: []const u8,
 };
+
+/// The contact warning for one contract: days to contact, the skulls and
+/// odds under the ROE in force, fieldable strength against what was
+/// committed, whole engagements of each munition family, and what the
+/// commander can still do.
+pub fn contactText(alloc: std.mem.Allocator, gs: *GameState, c: *const @import("../domain/contract.zig").Contract) ![]const u8 {
+    const battle = @import("battle.zig");
+    const offer_rating = @import("offer_rating.zig");
+    const company = c.assigned_company;
+    const days = battle.daysToContact(gs, c) orelse 0;
+    var out: std.ArrayListUnmanaged(u8) = .empty;
+    const world = if (@import("../domain/planet.zig").find(c.planet_key)) |p| p.name else c.planet_key;
+    try out.print(alloc, "{s}: contact on {s} in {d} day{s}", .{ if (gs.force(company)) |f| f.name else "—", world, days, if (days == 1) "" else "s" });
+    if (try offer_rating.rateOffer(alloc, gs, c, company)) |rt| {
+        try out.print(alloc, " — {s}{s}, wins {d}% of fights, loses the field {d}%", .{
+            if (rt.warrantsWarning()) "OUTMATCHED at " else "", try offer_rating.skullText(alloc, rt), rt.win_pct, rt.lose_field_pct,
+        });
+    }
+    const fieldable = @import("contract_control.zig").fieldableBv(gs, company);
+    if (c.committed_bv > 0) {
+        try out.print(alloc, " · fieldable {d} BV ({d}% of committed)", .{ fieldable, @divTrunc(fieldable * 100, c.committed_bv) });
+    } else try out.print(alloc, " · fieldable {d} BV", .{fieldable});
+    const ammo = try @import("field_supply.zig").ammoFights(alloc, gs, company);
+    for (ammo, 0..) |a, i| {
+        try out.appendSlice(alloc, if (i == 0) " · ammo " else ", ");
+        if (a.fights == 0) {
+            try out.print(alloc, "{s} dry", .{part_mod.munitionLabel(a.key)});
+        } else try out.print(alloc, "{s} {d} fight{s}", .{ part_mod.munitionLabel(a.key), a.fights, if (a.fights == 1) "" else "s" });
+    }
+    if (c.terms.command_rights.overridesRoe()) {
+        try out.appendSlice(alloc, " · ROE held by the employer's command; recall (Contracts R) is the lever left");
+    } else {
+        try out.print(alloc, " · ROE {s}: change it (Forces o) or recall (Contracts R)", .{@tagName(battle.effectiveRoe(gs, c, company))});
+    }
+    return out.toOwnedSlice(alloc);
+}
+
+/// The first contract whose contact window opened with today's tick; a
+/// multi-day advance stops on that day and does not refuse the next.
+pub fn contactOpenedToday(gs: *GameState) ?*const @import("../domain/contract.zig").Contract {
+    const battle = @import("battle.zig");
+    var it = gs.contracts.iterator();
+    while (it.next()) |e| {
+        if (battle.contactWindowOpensToday(gs, e.value_ptr)) return e.value_ptr;
+    }
+    return null;
+}
 
 /// Why time is not moving (ARCH §6). Two things stop a turn outside
 /// money, and both dispose of something permanent with no safe default to
@@ -157,16 +207,21 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
         }) });
     }
 
-    // Outmatched on an active contract (12E.5): the company's skulls today.
+    // Contact inside the warning window replaces the outmatched warning for
+    // that contract; outside it, an outmatched company is still warned.
     {
         const offer_rating = @import("offer_rating.zig");
-        const warn = @import("../domain/skulls.zig").table.warn_half_skulls;
+        const battle = @import("battle.zig");
         var cit = gs.contracts.iterator();
         while (cit.next()) |ce| {
             const c = ce.value_ptr;
             if (c.status != .active) continue;
+            if (battle.inContactWindow(gs, c)) {
+                try out.append(alloc, .{ .kind = .contact_imminent, .text = try contactText(alloc, gs, c) });
+                continue;
+            }
             const rt = (try offer_rating.rateOffer(alloc, gs, c, c.assigned_company)) orelse continue;
-            if (rt.half_hi < warn) continue;
+            if (!rt.warrantsWarning()) continue;
             try out.append(alloc, .{ .kind = .outmatched, .text = try std.fmt.allocPrint(alloc, "{s} is outmatched on {s}: {s} — wins {d}% of fights, loses the field {d}%; consider cautious ROE (Forces o) or recall", .{
                 if (gs.force(c.assigned_company)) |f| f.name else "—", c.planet_key, try offer_rating.skullText(alloc, rt), rt.win_pct, rt.lose_field_pct,
             }) });
@@ -545,4 +600,74 @@ test "12E.2: a company with hulls its home bay cannot rebuild is flagged" {
     try std.testing.expect(found);
     try std.testing.expect(!hq_ops.bayCanRebuild(&gs, gs.hqs.keys()[0], "AS7-D"));
     try std.testing.expect(hq_ops.bayCanRebuild(&gs, gs.hqs.keys()[0], "SHD-2H"));
+}
+
+/// A company on an active raid contract with ammunition in its stores.
+fn contactFixture(gs: *GameState) !*@import("../domain/contract.zig").Contract {
+    _ = try gs.createCommander("T", .LC, .line_officer);
+    const co = try @import("../gen/company_gen.zig").generateInto(gs, "Alpha");
+    try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
+        .id = @enumFromInt(1),
+        .kind = .recon_raid,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 6, .base_pay_month = 400_000 },
+        .status = .active,
+        .assigned_company = co,
+        .committed_bv = @import("contract_control.zig").fieldableBv(gs, co),
+        .enemy_lances = 2,
+        .enemy_lance_bv = 3_000,
+    });
+    for (part_mod.munition_keys) |key| try gs.addStock(gs.siteForForce(co), key, 20);
+    return gs.contracts.getPtr(@enumFromInt(1)).?;
+}
+
+test "an engagement inside the window warns with odds, strength, ammunition and the levers" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1208 });
+    defer gs.deinit();
+    const c = try contactFixture(&gs);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    c.next_battle_day = gs.clock.day_index + @import("../domain/tuning.zig").t.battle.contact_warning_days + 1;
+    for (try turnWarnings(&gs, a)) |w| try std.testing.expect(w.kind != .contact_imminent);
+
+    c.next_battle_day = gs.clock.day_index + 2;
+    var found: ?[]const u8 = null;
+    for (try turnWarnings(&gs, a)) |w| {
+        try std.testing.expect(w.kind != .outmatched); // the contact warning carries the rating
+        if (w.kind == .contact_imminent) found = w.text;
+    }
+    const text = found orelse return error.NoContactWarning;
+    try std.testing.expect(!WarningKind.contact_imminent.blocking());
+    for ([_][]const u8{ "contact on Galatea in 2 days", "skull", "fieldable", "100% of committed", "ammo ", "ROE standard", "recall" }) |want| {
+        if (std.mem.indexOf(u8, text, want) == null) {
+            std.debug.print("missing \"{s}\" in: {s}\n", .{ want, text });
+            return error.TestUnexpectedResult;
+        }
+    }
+    // Integrated command holds the ROE, so recall is the lever named.
+    c.terms.command_rights = .integrated;
+    const held = try contactText(a, &gs, c);
+    try std.testing.expect(std.mem.indexOf(u8, held, "held by the employer") != null);
+}
+
+test "a multi-day advance stops once when contact comes into view, and the next goes on" {
+    const commands = @import("commands.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1209 });
+    defer gs.deinit();
+    const c = try contactFixture(&gs);
+    const window = @import("../domain/tuning.zig").t.battle.contact_warning_days;
+    c.next_battle_day = gs.clock.day_index + window + 2;
+
+    const first = try commands.execute(&gs, .{ .advance_days = 7 });
+    try std.testing.expectEqual(@as(u32, 2), first.days_advanced);
+    try std.testing.expectEqual(c.id, first.contact);
+
+    // Not refused, and not stopped again before the fight.
+    const second = try commands.execute(&gs, .{ .advance_days = 1 });
+    try std.testing.expectEqual(@as(u32, 1), second.days_advanced);
+    try std.testing.expectEqual(types.ContractId.none, second.contact);
 }

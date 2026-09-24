@@ -66,6 +66,12 @@ pub const OfferRating = struct {
     win_pct: u32,
     lose_field_pct: u32,
     exact: bool,
+
+    /// The rating the screens warn about: the upper skull estimate at or
+    /// past `skulls.table.warn_half_skulls`.
+    pub fn warrantsWarning(self: OfferRating) bool {
+        return self.half_hi >= skulls.table.warn_half_skulls;
+    }
 };
 
 pub fn rateOffer(alloc: std.mem.Allocator, gs: *GameState, c: *const contract_mod.Contract, company: types.ForceId) !?OfferRating {
@@ -96,7 +102,7 @@ pub fn rateOffer(alloc: std.mem.Allocator, gs: *GameState, c: *const contract_mo
     // The dice, face by face: ratio bonus (capped in close terrain),
     // the scenario's tilt, scouts, and the company's rules of engagement.
     const close = if (planet_mod.find(c.planet_key)) |w| (terrain.Environment{ .terrain = terrain.terrainOf(w) }).close() else false;
-    const roe: force_mod.Roe = if (c.terms.command_rights.overridesRoe()) .hold else if (gs.force(company)) |f| f.roe else .standard;
+    const roe = battle.effectiveRoe(gs, c, company);
     const roe_roll: i32 = switch (roe) {
         .hold => tuning.loss.roe.hold_roll,
         .standard => 0,

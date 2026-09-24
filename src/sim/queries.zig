@@ -291,6 +291,14 @@ fn repairDetail(alloc: Alloc, gs: *GameState, ev: *const @import("events.zig").E
     return out.toOwnedSlice(alloc);
 }
 
+/// The contact warning for one contract: the line a multi-day advance
+/// stopped to show. Empty when the contract is gone or not in its window.
+pub fn contactWarning(alloc: Alloc, gs: *GameState, id: types.ContractId) ![]const u8 {
+    const c = gs.contracts.getPtr(id) orelse return "";
+    if (!@import("battle.zig").inContactWindow(gs, c)) return "";
+    return checklist.contactText(alloc, gs, c);
+}
+
 /// Campaign-log rows the Desk asks for (12C): enough to scroll a season
 /// without walking the whole log every frame.
 pub const desk_log_rows: usize = 40;
@@ -316,7 +324,7 @@ fn jumpFor(kind: checklist.WarningKind) u8 {
         .untreated_wounded, .restless_crew, .retiring_soon => 8,
         .manning_short, .unfit_crew => 2,
         .unrebuildable_hulls => 6,
-        .outmatched => 3,
+        .outmatched, .contact_imminent => 3,
     };
 }
 
@@ -773,14 +781,14 @@ pub fn contracts(alloc: Alloc, gs: *GameState, board_hq: types.HqId) !Contracts 
         try lines.append(alloc, try std.fmt.allocPrint(alloc, "    rights      {s}", .{c.terms.command_rights.describe()}));
         {
             // Rules of engagement (12D.4): the company's order, or the employer's.
-            const roe: @import("../domain/force.zig").Roe = if (c.terms.command_rights.overridesRoe()) .hold else if (gs.force(c.assigned_company)) |f| f.roe else .standard;
+            const roe = @import("battle.zig").effectiveRoe(gs, c, c.assigned_company);
             try lines.append(alloc, try std.fmt.allocPrint(alloc, "    ROE         {s}{s}", .{ roe.describe(), if (c.terms.command_rights.overridesRoe()) " {d}(set by integrated command){/}" else " {d}(Forces o on the company row){/}" }));
         }
         // Live skulls (12E.5): what the company can field today against the
         // opposition — a mauled company's odds fall as it wears down.
         if (try rateOffer(alloc, gs, c, c.assigned_company)) |rt| {
             try lines.append(alloc, try std.fmt.allocPrint(alloc, "    skulls      {s} · wins {d}% of fights, loses the field {d}%{s}", .{
-                try ratingLine(alloc, gs, rt), rt.win_pct, rt.lose_field_pct, if (rt.half_hi >= @import("../domain/skulls.zig").table.warn_half_skulls) " {c}— outmatched: consider cautious ROE or recall{/}" else "",
+                try ratingLine(alloc, gs, rt), rt.win_pct, rt.lose_field_pct, if (rt.warrantsWarning()) " {c}— outmatched: consider cautious ROE or recall{/}" else "",
             }));
         }
         try lines.append(alloc, try std.fmt.allocPrint(alloc, "    verdict     {s}{s}{{/}} so far · {s}score {d}{{/}} (breach on performance at {d}) · outstanding ≥ 50 VP, strong ≥ 25, satisfactory ≥ 0", .{
@@ -3891,6 +3899,37 @@ test "12.20: the hangar ranks a pilotless hull above one earning its keep, mothb
     try std.testing.expect(best != null and best.?.cost_index < std.math.maxInt(u32));
     const view = try toeFiltered(a, &gs, .hangar);
     try std.testing.expect(view.len == rows.len + 2);
+}
+
+test "the contact line an advance stops for is the checklist's contact warning" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1210 });
+    defer gs.deinit();
+    _ = try gs.createCommander("T", .LC, .line_officer);
+    const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
+        .id = @enumFromInt(1),
+        .kind = .recon_raid,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 6, .base_pay_month = 400_000 },
+        .status = .active,
+        .assigned_company = co,
+        .next_battle_day = gs.clock.day_index + 1,
+    });
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const line = try contactWarning(a, &gs, @enumFromInt(1));
+    try std.testing.expect(line.len > 0);
+    var matched = false;
+    for (try checklist.turnWarnings(&gs, a)) |w| {
+        if (w.kind == .contact_imminent) matched = std.mem.eql(u8, w.text, line);
+    }
+    try std.testing.expect(matched);
+    // Outside the window there is nothing to show.
+    gs.contracts.getPtr(@enumFromInt(1)).?.next_battle_day = gs.clock.day_index + 30;
+    try std.testing.expectEqualStrings("", try contactWarning(a, &gs, @enumFromInt(1)));
 }
 
 test "12G.6: the inbox shows what each repair order would do, as the techs would do it" {

@@ -2225,6 +2225,10 @@ pub const App = struct {
             },
             .none => {},
         }
+        if (res.contact != .none) {
+            self.say(.amber, "day {d} · {s} — {s}", .{ st.day, st.date, try q.contactWarning(self.a(), g, res.contact) });
+            return;
+        }
         self.say(.good, "day {d} · {s}", .{ st.day, st.date });
     }
 
