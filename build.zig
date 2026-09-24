@@ -39,6 +39,30 @@ pub fn build(b: *std.Build) void {
         .{ .import_name = "opfor_zon", .rel = "tables/opfor.zon" },
         .{ .import_name = "skulls_zon", .rel = "tables/skulls.zon" },
     };
+    // A mod directory that is missing, or that overlays nothing, is a
+    // mistake, not a request for stock data: it fails here. A .zon file in
+    // it that the build does not read (a misspelled name) is a warning.
+    if (data_dir) |dir| {
+        var root = (if (std.fs.path.isAbsolute(dir))
+            std.Io.Dir.openDirAbsolute(b.graph.io, dir, .{ .iterate = true })
+        else
+            b.build_root.handle.openDir(b.graph.io, dir, .{ .iterate = true })) catch |err|
+            std.process.fatal("-Ddata={s}: not a readable directory ({s}); see docs/modding.md", .{ dir, @errorName(err) });
+        defer root.close(b.graph.io);
+        for ([_][]const u8{ "", "tables" }) |sub| {
+            var d = if (sub.len == 0) root else root.openDir(b.graph.io, sub, .{ .iterate = true }) catch continue;
+            defer if (sub.len != 0) d.close(b.graph.io);
+            var it = d.iterate();
+            while (it.next(b.graph.io) catch null) |e| {
+                if (e.kind != .file or !std.mem.endsWith(u8, e.name, ".zon")) continue;
+                const rel = if (sub.len == 0) e.name else b.fmt("{s}/{s}", .{ sub, e.name });
+                const known = for (data_files) |f| {
+                    if (std.mem.eql(u8, f.rel, rel)) break true;
+                } else false;
+                if (!known) std.log.warn("-Ddata={s}: {s} is not a data file the build reads; it is ignored", .{ dir, rel });
+            }
+        }
+    }
     var overlaid = std.ArrayList([]const u8).empty;
     for (data_files) |f| {
         var path: std.Build.LazyPath = b.path(b.fmt("data/{s}", .{f.rel}));
@@ -55,6 +79,8 @@ pub fn build(b: *std.Build) void {
         }
         mod.addAnonymousImport(f.import_name, .{ .root_source_file = path });
     }
+    if (data_dir) |dir| if (overlaid.items.len == 0)
+        std.process.fatal("-Ddata={s}: overlays no data file (expected chassis.zon, parts.zon, planets.zon or tables/<name>.zon); see docs/modding.md", .{dir});
     // What the binary can say about its data (settings screen, REPL banner).
     const build_options = b.addOptions();
     build_options.addOption(?[]const u8, "data_dir", data_dir);

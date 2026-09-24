@@ -55,13 +55,27 @@ pub const RankRow = struct {
 
 pub const table: []const RankRow = @import("ranks_zon");
 
-test "the ladder matches the enum, climbs in pay, and officers start at lieutenant" {
+// `Rank.row` indexes the table by the enum: a ladder of the wrong length
+// fails the build with the table's name (a mod's ranks.zon too).
+comptime {
+    const ranks = @typeInfo(Rank).@"enum".fields.len;
+    if (table.len != ranks) @compileError(std.fmt.comptimePrint("data/tables/ranks.zon: {d} rows for {d} ranks; one row per rank, in order", .{ table.len, ranks }));
+}
+
+test "data: the ladder has one row per rank in enum order, climbs in pay, and officers start at lieutenant" {
+    // `Rank.row` indexes the table by the enum: a short or reordered ladder
+    // is out of bounds or mispays, so it fails the build here.
     try std.testing.expectEqual(@typeInfo(Rank).@"enum".fields.len, table.len);
     inline for (@typeInfo(Rank).@"enum".fields) |f| {
-        const r: Rank = @enumFromInt(f.value);
-        try std.testing.expectEqualStrings(f.name, r.row().key);
+        try std.testing.expectEqualStrings(f.name, table[f.value].key);
     }
-    try std.testing.expect(Rank.colonel.payBp() > Rank.private.payBp());
+    for (table[1..], table[0 .. table.len - 1]) |row, below| {
+        try std.testing.expect(row.pay_bp >= below.pay_bp);
+        try std.testing.expect(row.officer or !below.officer);
+    }
     try std.testing.expect(!Rank.master_sergeant.isOfficer() and Rank.lieutenant.isOfficer());
+}
+
+test "experience earns the enlisted rank" {
     try std.testing.expectEqual(Rank.sergeant, Rank.forExperience(.veteran));
 }

@@ -25,11 +25,20 @@ zig build run -Ddata=mymod -- --tui
 
 The data checks are the tests named `data: …`: every table against the
 others (RAT entries are catalogue meks, loadout parts exist, factions and
-capitals line up), every string markup-safe, every tuning knob in range.
-Every build's install waits on them, a mod's or not.
+capitals line up), every string markup-safe, every tuning knob in range,
+every 2d6 threshold reachable and in order, the rank ladder one row per
+rank in order, skull bands descending to a catch-all, and every catalogue
+mek's own loadout legal under the MekLab rules. A table a generator draws
+from (the name pools, the rank ladder, the skull bands) that is empty or
+the wrong length fails the compile with the file's name. Every build's
+install waits on the checks, a mod's or not.
 
 Files you leave out fall back to the stock ones in `data/`. The settings
-screen (F12) and the REPL banner say which files are overlaid.
+screen (F12) and the REPL banner say which files are overlaid. A `-Ddata`
+directory that does not exist, or that overlays no data file, fails the
+build; a `.zon` file in it the build does not read (a misspelled name) is
+named in a warning and ignored. `docs/data-fixtures.py` builds a broken
+overlay of each family and checks that every one fails; CI runs it.
 
 ## What the files are
 
@@ -67,8 +76,9 @@ screen (F12) and the REPL banner say which files are overlaid.
   newlines or escape codes. `zig build test -Ddata=<dir>` walks every
   string in every data file and names the first one that breaks this.
 - Money is integer C-bills; multipliers are basis points (`10_000` = ×1).
-- `zig build test` checks every tuning knob: a `_bp` share stays within
-  0..100000, an unsigned count is above zero (desk and slot tables may hold
+- The build checks every tuning knob: a `_bp` share stays within
+  0..100000, a `_pct` knob within 0..100 (−100..100 for a listed signed
+  delta), an unsigned count is above zero (desk and slot tables may hold
   zeros), and a signed knob is never negative unless `domain/tuning.zig`
   lists it in `signed_knobs` (roll modifiers and penalties).
 - Knobs are named by subsystem in `tuning.zon`. For example, an HQ supply

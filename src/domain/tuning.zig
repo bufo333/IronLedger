@@ -803,6 +803,15 @@ fn expectTuningSane(comptime T: type, value: T, comptime name: []const u8, bad: 
                 std.debug.print("tuning field {s} = {d} is outside 0..100000 basis points\n", .{ name, value });
                 bad.* += 1;
             }
+            // A `_pct` knob (or a row of a `_pct` table) is a percentage:
+            // 0..100, or −100..100 for a listed signed delta. A rate such
+            // as `_bp_per_pct` is not one.
+            const pct = comptime (std.mem.endsWith(u8, name, "_pct") or std.mem.indexOf(u8, name, "_pct.") != null) and std.mem.indexOf(u8, name, "_per_pct") == null;
+            const pct_low: i128 = comptime if (signedAllowed(name)) -100 else 0;
+            if (pct and (@as(i128, value) > 100 or @as(i128, value) < pct_low)) {
+                std.debug.print("tuning field {s} = {d} is outside the percentage range\n", .{ name, value });
+                bad.* += 1;
+            }
             if (info.signedness == .signed) {
                 // Money, scores and deltas: never negative unless named in `signed_knobs`.
                 if (value < 0 and !signedAllowed(name)) {
@@ -839,6 +848,25 @@ test "an out-of-range share or an unlisted negative knob fails the check" {
     bad = 0;
     expectTuningSane(struct { share_bp: i64, cost: i64 }, .{ .share_bp = 2_500, .cost = 0 }, "t.x", &bad);
     try std.testing.expectEqual(@as(u32, 0), bad);
+    bad = 0;
+    expectTuningSane(struct { advance_pct: u8, rate_bp_per_pct: u8 }, .{ .advance_pct = 120, .rate_bp_per_pct = 200 }, "t.x", &bad);
+    try std.testing.expectEqual(@as(u32, 1), bad);
+}
+
+/// A 2d6 threshold: a value the dice can land on.
+fn on2d6(v: u8) bool {
+    return v >= 2 and v <= 12;
+}
+
+test "data: 2d6 roll thresholds are reachable and in order" {
+    // Hull condition: rolls at or above each band, new above used above worn.
+    const m = t.market;
+    try std.testing.expect(on2d6(m.cond_worn_roll) and on2d6(m.cond_used_roll) and on2d6(m.cond_new_roll));
+    try std.testing.expect(m.cond_worn_roll < m.cond_used_roll and m.cond_used_roll < m.cond_new_roll);
+    // Weight class: rolls at or below each band, light below medium below heavy.
+    const g = t.generation;
+    try std.testing.expect(on2d6(g.weight_light_max) and on2d6(g.weight_medium_max) and on2d6(g.weight_heavy_max));
+    try std.testing.expect(g.weight_light_max < g.weight_medium_max and g.weight_medium_max < g.weight_heavy_max);
 }
 
 fn fieldExists(comptime T: type, comptime path: []const u8) bool {

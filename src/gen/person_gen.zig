@@ -14,6 +14,14 @@ const first_names = names.first;
 const last_names = names.last;
 const callsigns = names.callsigns;
 
+// Generation draws one of each: an empty pool fails the build with the
+// table's name, not a panic in the first campaign (a mod's names.zon too).
+comptime {
+    for (.{ .{ "first", first_names }, .{ "last", last_names }, .{ "callsigns", callsigns } }) |pool| {
+        if (pool[1].len == 0) @compileError("data/tables/names.zon: `" ++ pool[0] ++ "` is empty; generation draws from it");
+    }
+}
+
 pub const GeneratedPerson = struct {
     first: []const u8,
     last: []const u8,
