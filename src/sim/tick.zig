@@ -7,6 +7,8 @@ const std = @import("std");
 const tuning = @import("../domain/tuning.zig").t;
 const contract_mod = @import("../domain/contract.zig");
 const GameState = @import("state.zig").GameState;
+const Treasury = @import("state.zig").Treasury;
+const treasury = @import("treasury.zig");
 const types = @import("../domain/types.zig");
 const contract_market = @import("contract_market.zig");
 const maintenance = @import("maintenance.zig");
@@ -77,15 +79,15 @@ fn runPolicies(gs: *GameState) !void {
         if (in_flight) continue;
         const amount = @min(policy.floor - balance, policy.monthly_cap - policy.sent_this_month);
         if (amount <= 0) continue;
-        const eta = gs.courierEtaDays(policy.entity);
+        const eta = treasury.courierEtaDays(gs, policy.entity);
         // An outfit short of the amount skips this policy until it isn't;
         // any other failure followed the debit and is not swallowed.
-        gs.transferFunds(.outfit, policy.entity, amount, eta) catch |err| switch (err) {
+        treasury.transferFunds(gs, .outfit, policy.entity, amount, eta) catch |err| switch (err) {
             error.InsufficientTreasury => continue,
             error.OutOfMemory => return error.OutOfMemory,
         };
         policy.sent_this_month += amount;
-        const tags = GameState.treasuryTags(policy.entity);
+        const tags = policy.entity.tags();
         try gs.log(.finance, .{ .company = tags.company, .hq = tags.hq }, "[finance] standing policy dispatches {d} c-bills (eta {d} days, {d} of {d} this month)", .{ amount, eta, policy.sent_this_month, policy.monthly_cap });
     }
 
@@ -103,7 +105,7 @@ fn runPolicies(gs: *GameState) !void {
         const home = gs.homeHqFor(sp.company);
         if (home == .none) continue;
         const site: types.Site = .{ .company = sp.company };
-        const transit = gs.courierEtaDays(.{ .company = sp.company });
+        const transit = treasury.courierEtaDays(gs, .{ .company = sp.company });
         var arena = std.heap.ArenaAllocator.init(gs.allocator());
         defer arena.deinit();
         const p = try field_supply.plan(arena.allocator(), gs, sp.company, transit, sp.min_days, sp.ammo_battles);
@@ -267,7 +269,7 @@ pub fn runTravel(gs: *GameState) !void {
             const room = gs.siteFreeTons(dest) / @max(1, part_mod.tons(order.part_key));
             const landed = @min(order.quantity, room);
             try gs.addStock(dest, order.part_key, landed);
-            const tags = GameState.treasuryTags(GameState.siteTreasury(dest));
+            const tags = Treasury.ofSite(dest).tags();
             try gs.log(.delivery, .{ .company = tags.company, .hq = tags.hq }, "[delivery] {s} x{d} received{s}", .{
                 order.part_key, landed,
                 if (landed < order.quantity) " — NO ROOM for the rest, written off" else "",
@@ -295,8 +297,8 @@ pub fn runTravel(gs: *GameState) !void {
     while (i < gs.fund_couriers.items.len) {
         const courier = gs.fund_couriers.items[i];
         if (gs.clock.day_index >= courier.eta_day) {
-            try gs.creditTreasury(courier.to, courier.amount);
-            const tags = GameState.treasuryTags(courier.to);
+            try treasury.creditTreasury(gs, courier.to, courier.amount);
+            const tags = courier.to.tags();
             try gs.log(.delivery, .{ .company = tags.company, .hq = tags.hq }, "[delivery] courier delivers {d} c-bills", .{courier.amount});
             _ = gs.fund_couriers.swapRemove(i);
         } else {

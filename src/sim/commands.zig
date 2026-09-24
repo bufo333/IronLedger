@@ -10,6 +10,7 @@ const types = @import("../domain/types.zig");
 const person_mod = @import("../domain/person.zig");
 const state_mod = @import("state.zig");
 const GameState = state_mod.GameState;
+const treasury = @import("treasury.zig");
 const tick = @import("tick.zig");
 const starter_company = @import("starter_company.zig");
 const commander_mod = @import("../domain/commander.zig");
@@ -583,7 +584,7 @@ fn execFoundHq(gs: *GameState, f: @FieldType(Command, "found_hq")) Error!Result 
     };
     try gs.hqs.ensureUnusedCapacity(gs.allocator(), 1);
     try gs.reserveLedger(1);
-    try debitPurchase(gs, .outfit, .{
+    try treasury.debit(gs, .outfit, .{
         .day = gs.clock.day_index,
         .amount = -cost,
         .category = .hq_construction,
@@ -638,7 +639,7 @@ fn execLink(gs: *GameState, l: @FieldType(Command, "link")) Error!Result {
     // A dedicated line is your own jumpship on the run.
     if (l.level >= 3 and !gs.ownsCrewedJumpshipAt(l.a, l.b)) return Error.NoJumpship;
     const cost = network.linkCost(l.level) - network.linkCost(from_level);
-    try debitPurchase(gs, .outfit, .{
+    try treasury.debit(gs, .outfit, .{
         .day = gs.clock.day_index,
         .amount = -cost,
         .category = .transport_charter,
@@ -963,7 +964,7 @@ fn execBuyListing(gs: *GameState, index: @FieldType(Command, "buy_listing")) Err
         const c = gs.deploymentContract(co) orelse return Error.NoSuchListing;
         if (c.status != .active) return Error.NoSuchListing;
         if (gs.treasuryBalance(.{ .company = co }) < price) return Error.CompanyFundsShort;
-        try debitPurchase(gs, .{ .company = co }, .{
+        try treasury.debit(gs, .{ .company = co }, .{
             .day = gs.clock.day_index,
             .amount = -price,
             .category = .unit_purchase,
@@ -992,7 +993,7 @@ fn execBuyListing(gs: *GameState, index: @FieldType(Command, "buy_listing")) Err
         berth_kind = design.kind;
     };
     if (gs.treasuryBalance(.{ .hq = hq_id }) < price) return Error.HqTreasuryShort;
-    try debitPurchase(gs, .{ .hq = hq_id }, .{
+    try treasury.debit(gs, .{ .hq = hq_id }, .{
         .day = gs.clock.day_index,
         .amount = -price,
         .category = if (listing.kind == .unit) .unit_purchase else .parts,
@@ -1252,7 +1253,7 @@ fn execTrimStock(gs: *GameState, company: @FieldType(Command, "trim_stock")) Err
         min_days = sp.min_days;
         battles = sp.ammo_battles;
     };
-    const transit = gs.courierEtaDays(.{ .company = company });
+    const transit = treasury.courierEtaDays(gs, .{ .company = company });
     const p = try field_supply.plan(arena.allocator(), gs, company, transit, min_days, battles);
     const site: types.Site = .{ .company = company };
     var moved: u32 = 0;
@@ -1525,7 +1526,7 @@ fn execFabricate(gs: *GameState, f0: @FieldType(Command, "fabricate")) Error!Res
     const total = types.applyBp(types.applyBp(def.cost * f.quantity, market_mod.structural_fab_cost_mult_bp), gs.diff().fab_cost_bp); // difficulty
     try gs.bay_jobs.ensureUnusedCapacity(gs.allocator(), f.quantity);
     try gs.reserveLedger(1);
-    try debitPurchase(gs, .{ .hq = f.hq }, .{
+    try treasury.debit(gs, .{ .hq = f.hq }, .{
         .day = gs.clock.day_index,
         .amount = -total,
         .category = .fabrication,
@@ -1548,7 +1549,7 @@ fn execUpgradeFacility(gs: *GameState, u: @FieldType(Command, "upgrade_facility"
     const cost = hq_mod.upgradeCost(u.kind, to_level);
     try hq.projects.ensureUnusedCapacity(gs.allocator(), 1);
     try gs.reserveLedger(1);
-    try debitPurchase(gs, .{ .hq = u.hq }, .{
+    try treasury.debit(gs, .{ .hq = u.hq }, .{
         .day = gs.clock.day_index,
         .amount = -cost,
         .category = .hq_construction,
@@ -1600,7 +1601,7 @@ fn execHireCandidate(gs: *GameState, index: @FieldType(Command, "hire_candidate"
     if (index >= gs.candidates.items.len) return Error.NoSuchCandidate;
     const cand = gs.candidates.items[index];
     if (cand.asking_bonus > 0) {
-        try debitPurchase(gs, .outfit, .{
+        try treasury.debit(gs, .outfit, .{
             .day = gs.clock.day_index,
             .amount = -cand.asking_bonus,
             .category = .payroll,
@@ -1645,9 +1646,9 @@ fn execTrain(gs: *GameState, t: @FieldType(Command, "train")) Error!Result {
 fn execTransfer(gs: *GameState, t: @FieldType(Command, "transfer")) Error!Result {
     try validateTreasury(gs, t.from);
     try validateTreasury(gs, t.to);
-    const eta = gs.courierEtaDays(t.to);
-    try gs.transferFunds(t.from, t.to, t.amount, eta);
-    const tags = GameState.treasuryTags(t.to);
+    const eta = treasury.courierEtaDays(gs, t.to);
+    try treasury.transferFunds(gs, t.from, t.to, t.amount, eta);
+    const tags = t.to.tags();
     try gs.log(.finance, .{ .company = tags.company, .hq = tags.hq }, "[finance] {d} c-bills dispatched by courier (eta {d} days)", .{ t.amount, eta });
     return .{};
 }
@@ -1908,13 +1909,6 @@ fn validateTreasury(gs: *GameState, t: state_mod.Treasury) Error!void {
     }
 }
 
-/// Debit a purchase from a treasury, refusing (not overdrawing) if short —
-/// the "treasury cannot teleport" rule for discretionary spending.
-fn debitPurchase(gs: *GameState, treasury: state_mod.Treasury, txn: @import("../econ/finance.zig").Transaction) Error!void {
-    if (gs.treasuryBalance(treasury) < -txn.amount) return Error.InsufficientTreasury;
-    try gs.postTreasury(treasury, txn);
-}
-
 /// The planet a site physically sits on.
 fn sitePlanetKey(gs: *GameState, site: types.Site) ?[]const u8 {
     return switch (site) {
@@ -1963,7 +1957,7 @@ fn emergencyResupply(gs: *GameState, id: types.ContractId) Error!Result {
     if (gs.treasuryBalance(.{ .company = c.assigned_company }) < rush.price) return Error.CompanyFundsShort;
     for (rush.lines) |l| try gs.addStock(site, l.key, 0); // every stock slot exists before money moves
     try gs.reserveLedger(1);
-    try debitPurchase(gs, .{ .company = c.assigned_company }, .{
+    try treasury.debit(gs, .{ .company = c.assigned_company }, .{
         .day = gs.clock.day_index,
         .amount = -rush.price,
         .category = if (c.beachhead) .local_supplies else .supplies,
@@ -2050,10 +2044,10 @@ fn shipStock(gs: *GameState, part_key: []const u8, quantity: u32, from: types.Si
     var arena = std.heap.ArenaAllocator.init(gs.scratch());
     defer arena.deinit();
     const freight = try freightQuote(gs, arena.allocator(), from, to, quantity * part_mod.tons(part_key));
-    const payer = GameState.siteTreasury(from);
-    const tags = GameState.treasuryTags(payer);
+    const payer = state_mod.Treasury.ofSite(from);
+    const tags = payer.tags();
     if (freight.cost > 0) {
-        try debitPurchase(gs, payer, .{
+        try treasury.debit(gs, payer, .{
             .day = gs.clock.day_index,
             .amount = -freight.cost,
             .category = .freight,
@@ -2215,7 +2209,7 @@ fn orderPart(gs: *GameState, part_key: []const u8, quantity: u32, dest_opt: ?typ
     var total = types.applyBp(def.cost * quantity, cost_mult);
     total = types.applyBp(total, gs.commanderMultBp(.freight));
     if (dest == .company) total += onward.cost;
-    try debitPurchase(gs, .{ .hq = hq_id }, .{
+    try treasury.debit(gs, .{ .hq = hq_id }, .{
         .day = gs.clock.day_index,
         .amount = -total,
         .category = .parts,
@@ -2447,7 +2441,7 @@ fn deploymentDefaults(gs: *GameState, company_id: types.ForceId, signing: types.
     }
     const float = types.applyBp(signing, tuning.finance.field_float_bp);
     if (float > 0 and gs.funds >= float) {
-        try gs.transferFunds(.outfit, .{ .company = company_id }, float, 0);
+        try treasury.transferFunds(gs, .outfit, .{ .company = company_id }, float, 0);
     }
     try gs.log(.finance, .{ .company = company_id }, "[deploy] defaults: resupply every {d} days on the field plan, {d} local operating funds, top-up policy {d}/{d} per month — `supplypolicy`/`policy` with 0 clear them", .{
         tuning.field_supply.default_min_days, float, tuning.finance.field_policy_floor, tuning.finance.field_policy_cap,
@@ -2478,7 +2472,7 @@ fn advance(gs: *GameState, days: u32) Error!Result {
         if (gs.bankrupt) return Error.Bankrupt;
         // Couriers already bound for the outfit count: the turn can end
         // while the money is on the road.
-        if (gs.funds + gs.inboundToOutfit() < 0) {
+        if (gs.funds + treasury.inboundToOutfit(gs) < 0) {
             if (gs.isInsolvent()) {
                 gs.bankrupt = true;
                 try gs.log(.finance, .{}, "[bankrupt] the outfit cannot cover {d}: creditors seize what is left", .{gs.funds});
@@ -2515,7 +2509,7 @@ test "insolvency holds the turn; bankruptcy ends the campaign" {
     const hq0 = gs.hqs.keys()[0];
     gs.hqs.getPtr(hq0).?.funds = 100_000;
     _ = try execute(&gs, .{ .transfer = .{ .from = .{ .hq = hq0 }, .to = .outfit, .amount = 50_000 } });
-    try std.testing.expect(gs.funds < 0 and gs.inboundToOutfit() >= 50_000);
+    try std.testing.expect(gs.funds < 0 and treasury.inboundToOutfit(&gs) >= 50_000);
     _ = try execute(&gs, .advance_day);
     gs.funds = -1;
     gs.fund_couriers.clearRetainingCapacity();
@@ -2786,7 +2780,7 @@ test "trim_stock returns excess and unplanned consumables home, keeps spares" {
     const fs = @import("field_supply.zig");
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
-    const p = try fs.plan(arena.allocator(), &gs, co, gs.courierEtaDays(.{ .company = co }), 14, 0);
+    const p = try fs.plan(arena.allocator(), &gs, co, treasury.courierEtaDays(&gs, .{ .company = co }), 14, 0);
     for (p.lines) |l| {
         if (std.mem.eql(u8, l.key, "ammo_lrm")) lrm_target = l.target;
         if (std.mem.eql(u8, l.key, "ammo_ac20")) ac20_planned = true;
@@ -3529,7 +3523,7 @@ test "deployment eats field stores, then buys local, then goes hungry" {
     // ...until a courier arrives and the local-purchase valve opens (the
     // courier takes the map transit, however far this seed's contract is).
     _ = try execute(&gs, .{ .transfer = .{ .from = .outfit, .to = .{ .company = co }, .amount = 500_000 } });
-    try advanceReading(&gs, gs.courierEtaDays(.{ .company = co }) + 3);
+    try advanceReading(&gs, treasury.courierEtaDays(&gs, .{ .company = co }) + 3);
     try std.testing.expectEqual(@as(u16, 0), gs.force(co).?.supply_shortage_days);
     const s = @import("../econ/finance.zig").summarize(&gs.ledger, 0, gs.clock.day_index, .{ .company = co });
     try std.testing.expect(s.category(.supplies) + s.category(.local_supplies) < 0);

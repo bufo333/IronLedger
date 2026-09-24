@@ -220,10 +220,10 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
     }
 
     // Money first: nothing else matters if the outfit cannot pay.
-    if (gs.funds + gs.inboundToOutfit() < 0) {
+    if (gs.funds + @import("treasury.zig").inboundToOutfit(gs) < 0) {
         const folds = gs.isInsolvent();
         try out.append(alloc, .{ .kind = .insolvent, .text = try std.fmt.allocPrint(alloc, "outfit treasury overdrawn ({d}{s}) — take a loan (credit {d}), transfer funds back from an HQ or company, or sell assets (worth {d}){s}", .{
-            gs.funds, if (gs.inboundToOutfit() > 0) try std.fmt.allocPrint(alloc, ", {d} on the road", .{gs.inboundToOutfit()}) else "", gs.creditRemaining(), gs.liquidationValue(), if (folds) "; nothing left covers it: the outfit folds" else "",
+            gs.funds, if (@import("treasury.zig").inboundToOutfit(gs) > 0) try std.fmt.allocPrint(alloc, ", {d} on the road", .{@import("treasury.zig").inboundToOutfit(gs)}) else "", gs.creditRemaining(), gs.liquidationValue(), if (folds) "; nothing left covers it: the outfit folds" else "",
         }) });
     }
 

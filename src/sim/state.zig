@@ -38,6 +38,24 @@ pub const Treasury = union(enum) {
     outfit,
     hq: types.HqId,
     company: types.ForceId,
+
+    /// Ledger/log tags, so per-entity books stay filterable.
+    pub fn tags(self: Treasury) LogCtx {
+        return switch (self) {
+            .outfit => .{},
+            .hq => |id| .{ .hq = id },
+            .company => |id| .{ .company = id },
+        };
+    }
+
+    /// The treasury that pays for a site's logistics.
+    pub fn ofSite(site: types.Site) Treasury {
+        return switch (site) {
+            .outfit => .outfit,
+            .hq => |id| .{ .hq = id },
+            .company => |id| .{ .company = id },
+        };
+    }
 };
 
 /// Money in transit between treasuries (courier aboard scheduled transport).
@@ -338,7 +356,7 @@ pub const GameState = struct {
 
     /// The only way money moves: ledger entry + the named treasury's balance,
     /// in lockstep. Balances MAY go negative (obligations don't wait);
-    /// purchases that should refuse instead call `debitOrRefuse` first.
+    /// purchases that should refuse instead go through `treasury.debit`.
     pub fn postTreasury(self: *GameState, treasury: Treasury, txn: finance_mod.Transaction) !void {
         try self.ledger.post(self.allocator(), txn);
         switch (treasury) {
@@ -358,55 +376,6 @@ pub const GameState = struct {
             .hq => |id| if (self.hqs.getPtr(id)) |h| h.funds else 0,
             .company => |id| if (self.forces.getPtr(id)) |f| f.local_funds else 0,
         };
-    }
-
-    /// Ledger/log tags for a treasury, so per-entity books stay filterable.
-    pub fn treasuryTags(treasury: Treasury) LogCtx {
-        return switch (treasury) {
-            .outfit => .{},
-            .hq => |id| .{ .hq = id },
-            .company => |id| .{ .company = id },
-        };
-    }
-
-    pub const TransferError = error{InsufficientTreasury} || std.mem.Allocator.Error;
-
-    /// Move money between treasuries. Source is debited immediately (refused
-    /// if short); the credit travels by courier for `eta_days` (0 = instant,
-    /// e.g. founding capital handed over on-site).
-    pub fn transferFunds(self: *GameState, from: Treasury, to: Treasury, amount: types.CBills, eta_days: u32) TransferError!void {
-        if (amount <= 0 or self.treasuryBalance(from) < amount) return error.InsufficientTreasury;
-        const from_tags = treasuryTags(from);
-        try self.postTreasury(from, .{
-            .day = self.clock.day_index,
-            .amount = -amount,
-            .category = .fund_transfer,
-            .company = from_tags.company,
-            .hq = from_tags.hq,
-            .note = "funds dispatched",
-        });
-        if (eta_days == 0) {
-            try self.creditTreasury(to, amount);
-        } else {
-            try self.fund_couriers.append(self.allocator(), .{
-                .to = to,
-                .amount = amount,
-                .sent_day = self.clock.day_index,
-                .eta_day = self.clock.day_index + eta_days,
-            });
-        }
-    }
-
-    pub fn creditTreasury(self: *GameState, to: Treasury, amount: types.CBills) !void {
-        const tags = treasuryTags(to);
-        try self.postTreasury(to, .{
-            .day = self.clock.day_index,
-            .amount = amount,
-            .category = .fund_transfer,
-            .company = tags.company,
-            .hq = tags.hq,
-            .note = "funds received",
-        });
     }
 
     // ---------------------------------------------------------------- people
@@ -564,7 +533,7 @@ pub const GameState = struct {
 
         // Founding capital: the HQ opens with its own operating treasury,
         // handed over on-site (no courier).
-        self.transferFunds(.outfit, .{ .hq = id }, tuning.hq.founding_funds, 0) catch |err| switch (err) {
+        @import("treasury.zig").transferFunds(self, .outfit, .{ .hq = id }, tuning.hq.founding_funds, 0) catch |err| switch (err) {
             // An outfit that cannot cover the founding capital opens the HQ
             // with an empty treasury.
             error.InsufficientTreasury => {},
@@ -1069,17 +1038,6 @@ pub const GameState = struct {
         return now;
     }
 
-    /// Money already on its way to the outfit's treasury (couriers in
-    /// transit): it counts toward solvency at turn end, so pulling funds
-    /// back unblocks the turn before they land.
-    pub fn inboundToOutfit(self: *GameState) types.CBills {
-        var sum: types.CBills = 0;
-        for (self.fund_couriers.items) |c| if (c.to == .outfit) {
-            sum += c.amount;
-        };
-        return sum;
-    }
-
     /// Is this employer faction still cooling after a breach?
     pub fn factionCooling(self: *GameState, faction: []const u8) bool {
         for (self.faction_cooling.items) |fc| {
@@ -1191,7 +1149,7 @@ pub const GameState = struct {
             try self.addStock(self.defaultSite(), key, qty);
             return;
         }
-        const days = @max(3, self.courierEtaDays(.{ .company = company }));
+        const days = @max(3, @import("treasury.zig").courierEtaDays(self, .{ .company = company }));
         try self.part_orders.append(self.allocator(), .{
             .part_key = key,
             .quantity = qty,
@@ -1203,15 +1161,6 @@ pub const GameState = struct {
         });
     }
 
-    /// The treasury that pays for a site's logistics.
-    pub fn siteTreasury(site: types.Site) Treasury {
-        return switch (site) {
-            .outfit => .outfit,
-            .hq => |id| .{ .hq = id },
-            .company => |id| .{ .company = id },
-        };
-    }
-
     // Convenience wrappers on the seat's stock (`defaultSite`).
     pub fn addSpare(self: *GameState, part_key: []const u8, qty: u32) !void {
         try self.addStock(self.defaultSite(), part_key, qty);
@@ -1221,25 +1170,6 @@ pub const GameState = struct {
     }
     pub fn spareCount(self: *GameState, part_key: []const u8) u32 {
         return self.stockCount(self.defaultSite(), part_key);
-    }
-
-    /// Courier days to reach a treasury from the outfit's seat (first HQ):
-    /// `logistics.daysBetween`, same-world floor included.
-    pub fn courierEtaDays(self: *GameState, to: Treasury) u32 {
-        const logistics = @import("../econ/logistics.zig");
-        const home_key: []const u8 = if (self.hqs.count() > 0) self.hqs.values()[0].planet_key else return logistics.same_world_days;
-        const dest_key: []const u8 = switch (to) {
-            .outfit => home_key,
-            .hq => |id| if (self.hqs.getPtr(id)) |h| h.planet_key else home_key,
-            .company => |id| blk: {
-                if (self.deploymentContract(id)) |c| break :blk c.planet_key;
-                if (self.hqs.getPtr(self.homeHqFor(id))) |h| break :blk h.planet_key;
-                break :blk home_key;
-            },
-        };
-        const home = planet_mod.find(home_key) orelse return logistics.same_world_days;
-        const dest = planet_mod.find(dest_key) orelse return logistics.same_world_days;
-        return logistics.daysBetween(home, dest);
     }
 
     // ----------------------------------------------------- deployment info
