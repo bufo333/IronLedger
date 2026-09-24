@@ -530,7 +530,9 @@ orders, and the next advance goes ahead; `advance` refuses with
 `Insolvent` until a loan or sale covers it, and `Bankrupt` (game over
 modal, campaign saved as it ended) once nothing could.
 
-Modals: **End turn** (checklist rows with jump targets, `n` proceed) ·
+Modals: **End turn** (the checklist rows that prompt, with jump targets,
+`n` proceed; it opens only when one does — Desk notes such as a hull
+waiting on a pilot in the medbay stay on the Desk) ·
 **Decision** (options with effects, default marked) ·
 **Battle orders** (the situation and odds; ←/→ step the ROE and each
 lance's role with the odds recomputed, Enter buys the emergency resupply,

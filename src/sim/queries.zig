@@ -241,6 +241,9 @@ pub fn isBlocking(kind: checklist.WarningKind) bool {
 pub const ChecklistRow = struct {
     kind: checklist.WarningKind,
     blocking: bool,
+    /// The end-turn prompt asks about it (`WarningKind.prompts`); the
+    /// rest are Desk notes.
+    prompts: bool,
     text: []const u8,
     /// Tab that fixes it: 0 desk … 7 lab (docs/tui.md screen order).
     jump: u8,
@@ -445,7 +448,7 @@ fn jumpFor(kind: checklist.WarningKind) u8 {
         .hungry, .dry_ammo => 5,
         .understaffed_hq, .depot_backlog => 6,
         .untreated_wounded, .restless_crew, .retiring_soon => 8,
-        .manning_short, .unfit_crew => 2,
+        .manning_short, .unfit_crew, .crew_recovering => 2,
         .unrebuildable_hulls => 6,
         .outmatched, .contact_imminent => 3,
     };
@@ -456,7 +459,7 @@ pub fn desk(alloc: Alloc, gs: *GameState, log_rows: usize) !Desk {
     const warnings = try checklist.turnWarnings(gs, alloc);
     var cl: std.ArrayListUnmanaged(ChecklistRow) = .empty;
     for (warnings) |w| {
-        try cl.append(alloc, .{ .kind = w.kind, .blocking = isBlocking(w.kind), .text = w.text, .jump = jumpFor(w.kind), .contract = w.contract });
+        try cl.append(alloc, .{ .kind = w.kind, .blocking = isBlocking(w.kind), .prompts = w.kind.prompts(), .text = w.text, .jump = jumpFor(w.kind), .contract = w.contract });
     }
 
     var inbox: std.ArrayListUnmanaged(InboxRow) = .empty;
@@ -1489,13 +1492,29 @@ fn toeInto(alloc: Alloc, gs: *GameState, out: *std.ArrayListUnmanaged(ToeRow), i
             u.chassis_key,
             if (ch) |c| c.name else "?",
             try std.fmt.allocPrint(alloc, "{d}t", .{if (ch) |c| c.tonnage else 0}),
-            if (pilot) |p| try std.fmt.allocPrint(alloc, "{s}", .{try personText(alloc, p)}) else "{c}— no pilot{/}",
-            if (tech) |t| try std.fmt.allocPrint(alloc, "{s}", .{try personText(alloc, t)}) else if (needs_tech) "{c}— no tech{/}" else "—",
-            try std.fmt.allocPrint(alloc, "{s}{s}{{/}}", .{ st_mk, @tagName(u.status) }),
+            if (pilot) |p| try seatText(alloc, gs, p, "{c}") else "{c}— no pilot{/}",
+            if (tech) |t| try seatText(alloc, gs, t, "{a}") else if (needs_tech) "{c}— no tech{/}" else "—",
+            try std.fmt.allocPrint(alloc, "{s}{s}{{/}}{s}", .{ st_mk, @tagName(u.status), if (pilot != null and pilot.?.seatState(gs.clock.day_index) == .fit) "" else " · {c}sits out{/}" }),
             try std.fmt.allocPrint(alloc, "armor {s}{s}", .{ try armorBar(alloc, u.armor_pct), try damageMarks(alloc, u) }),
         }) });
     }
     for (f.children.items) |cid| try toeInto(alloc, gs, out, cid, depth + 1);
+}
+
+/// A seat's occupant on the TO&E: the name, and while they are not fit to
+/// take the seat, why and until when, in `mark` (red for a pilot: the
+/// hull sits out; amber for a tech: repairs wait).
+fn seatText(alloc: Alloc, gs: *GameState, p: *const person_mod.Person, mark: []const u8) ![]const u8 {
+    const day = gs.clock.day_index;
+    const name = try personText(alloc, p);
+    return switch (p.seatState(day)) {
+        .fit => name,
+        .recovering => if (p.backDay(day)) |back|
+            try std.fmt.allocPrint(alloc, "{s}{s} · {s} → day {d}{{/}}", .{ mark, name, if (p.status == .wounded) "medbay" else "leave", back })
+        else
+            try std.fmt.allocPrint(alloc, "{s}{s} · wounded, not admitted{{/}}", .{ mark, name }),
+        .away => try std.fmt.allocPrint(alloc, "{s}{s} · {s}{{/}}", .{ mark, name, @tagName(p.status) }),
+    };
 }
 
 /// Location tag of a slot key ("lt.structure" → "lt").
@@ -3935,6 +3954,42 @@ test "desk and ledger queries build on a fresh campaign" {
     try std.testing.expect(rows.len > 10);
     const c = try contracts(a, &gs, .none);
     try std.testing.expect(c.board.len > 0);
+}
+
+test "a wounded pilot: the TO&E marks the hull sitting out, the Desk notes it, the end-turn prompt does not ask" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1217 });
+    defer gs.deinit();
+    _ = try gs.createCommander("T", .LC, .paymaster);
+    _ = try @import("starter_company.zig").generateInto(&gs, "Alpha");
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var mek: types.UnitId = .none;
+    var uit = gs.units.iterator();
+    while (uit.next()) |e| if (e.value_ptr.kind == .mek and mek == .none) {
+        mek = e.value_ptr.id;
+    };
+    const p = gs.person(gs.unit(mek).?.pilot).?;
+    p.status = .wounded;
+    p.wound_heal_day = gs.clock.day_index + 9;
+
+    const back = try std.fmt.allocPrint(a, "medbay → day {d}", .{gs.clock.day_index + 9});
+    var marked = false;
+    for (try toe(a, &gs)) |r| if (r.unit == mek) {
+        const line = try std.mem.join(a, " ", r.cells.?);
+        marked = std.mem.indexOf(u8, line, back) != null and std.mem.indexOf(u8, line, "sits out") != null;
+    };
+    try std.testing.expect(marked);
+
+    var noted = false;
+    for ((try desk(a, &gs, 0)).checklist) |w| {
+        try std.testing.expect(w.kind != .open_slots);
+        if (w.kind == .crew_recovering) {
+            noted = true;
+            try std.testing.expect(!w.prompts);
+        }
+    }
+    try std.testing.expect(noted);
 }
 
 test "readiness counts wounded, permanent injuries, banked XP and depot hulls; marks strip for the CLI" {

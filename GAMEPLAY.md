@@ -179,6 +179,9 @@ you own reports to you (Stages 9A–9C):
   you left undone — decisions near deadline, open slots, hungry companies,
   overdrawn treasuries, idle bays with demand — and choose to fix it or
   proceed anyway. Nothing you should have known slips past a turn boundary.
+  What you cannot act on stays on the Desk without stopping the turn: a
+  mek whose pilot is in the medbay keeps the seat for them, and the TO&E
+  shows it sitting out until the day they are back.
 - **Contact is announced**: a few days before a scheduled engagement the
   checklist warns — skulls and odds under the ROE in force, fieldable
   strength against what was committed, fights of each munition on the

@@ -1272,12 +1272,12 @@ pub const App = struct {
             .after_action => |id| try self.drawAfterAction(al, id),
             .end_turn => {
                 const g = self.state();
-                const view = try q.desk(al, g, 0);
+                const asks = try endTurnRows(al, (try q.desk(al, g, 0)).checklist);
                 var rows: std.ArrayListUnmanaged([]const u8) = .empty;
                 try rows.append(al, "");
-                try rows.append(al, try std.fmt.allocPrint(al, "  {d} things on your desk before day {d}:", .{ view.checklist.len, (try q.status(al, g)).day + 1 }));
+                try rows.append(al, try std.fmt.allocPrint(al, "  {d} things on your desk before day {d}:", .{ asks.len, (try q.status(al, g)).day + 1 }));
                 try rows.append(al, "");
-                for (view.checklist, 0..) |w, i| {
+                for (asks, 0..) |w, i| {
                     try rows.append(al, try std.fmt.allocPrint(al, "  {s} {s}   {{d}}→ [{d}] {s}{{/}}", .{ if (w.blocking) "{c}!{/}" else "{a}·{/}", w.text, i + 1, tab_names[w.jump] }));
                 }
                 try rows.append(al, "");
@@ -2444,7 +2444,7 @@ pub const App = struct {
         const al = self.a();
         const g = self.state();
         const view = try q.desk(al, g, 0);
-        if (view.checklist.len > 0 and days == 1) {
+        if ((try endTurnRows(al, view.checklist)).len > 0 and days == 1) {
             self.modal = .end_turn;
             return;
         }
@@ -3384,6 +3384,13 @@ pub const App = struct {
         .{ .match = keys.Match.char('a'), .action = .auto_admit, .label = "auto-admit", .group = .act },
         .{ .match = keys.Match.char('A'), .action = .auto_admit, .label = "auto-admit", .group = .act, .show_footer = false, .show_help = false },
     };
+    /// The warnings the end-turn prompt asks about, in Desk order; the
+    /// modal's rows, its number keys and whether it opens all read this.
+    fn endTurnRows(al: std.mem.Allocator, checklist: []const q.ChecklistRow) ![]const q.ChecklistRow {
+        var asks: std.ArrayListUnmanaged(q.ChecklistRow) = .empty;
+        for (checklist) |w| if (w.prompts) try asks.append(al, w);
+        return asks.toOwnedSlice(al);
+    }
     const EndTurnAction = enum { day, week, jump, cancel };
     pub const end_turn_bindings = [_]keys.Binding(EndTurnAction){
         .{ .match = keys.Match.char('n'), .action = .day, .label = "end the turn anyway", .group = .act },
@@ -3599,10 +3606,10 @@ pub const App = struct {
                         try self.advance(7);
                     },
                     .jump => {
-                        const view = try q.desk(self.a(), self.state(), 0);
-                        if (hit.offset < view.checklist.len) {
+                        const asks = try endTurnRows(self.a(), (try q.desk(self.a(), self.state(), 0)).checklist);
+                        if (hit.offset < asks.len) {
                             self.modal = .none;
-                            self.switchTab(@enumFromInt(view.checklist[hit.offset].jump));
+                            self.switchTab(@enumFromInt(asks[hit.offset].jump));
                         }
                     },
                 }
@@ -3968,6 +3975,20 @@ test "the end-turn key moves the calendar, and Esc closes whatever modal it open
     try std.testing.expect(c.app.modal != .none);
     try pressForTest(c, .escape);
     try std.testing.expect(c.app.modal == .none);
+}
+
+test "the end-turn prompt asks only about warnings that prompt; Desk notes stay out" {
+    const rows = [_]q.ChecklistRow{
+        .{ .kind = .crew_recovering, .blocking = false, .prompts = false, .text = "heals", .jump = 2 },
+        .{ .kind = .open_slots, .blocking = false, .prompts = true, .text = "empty seat", .jump = 2 },
+    };
+    const asks = try App.endTurnRows(std.testing.allocator, &rows);
+    defer std.testing.allocator.free(asks);
+    try std.testing.expectEqual(@as(usize, 1), asks.len);
+    try std.testing.expectEqual(game.checklist.WarningKind.open_slots, asks[0].kind);
+    const none = try App.endTurnRows(std.testing.allocator, rows[0..1]);
+    defer std.testing.allocator.free(none);
+    try std.testing.expectEqual(@as(usize, 0), none.len);
 }
 
 test "no screen binds a key the whole client already answers" {

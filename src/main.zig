@@ -249,7 +249,7 @@ fn runDemo(gs: *game.state.GameState, gpa: std.mem.Allocator) !void {
     // the checklist would stop you on before the next turn.
     printLines(al, try q.companyRoster(al, gs, co), "") catch |err| showError(err);
     printLines(al, try q.medbay(al, gs), "") catch |err| showError(err);
-    if (printChecklist(gs, al) == 0) std.debug.print("END-TURN CHECKLIST: all clear.\n", .{});
+    _ = printChecklist(gs, al);
 
     // Send the highest-XP healthy mekwarrior to gunnery school, then rest
     // the company for two months at home.
@@ -425,12 +425,17 @@ fn printDemand(gs: *game.state.GameState, al: std.mem.Allocator) !void {
 }
 
 /// The end-turn checklist. Returns how many warnings printed.
+/// Print the checklist; returns how many rows the end-turn prompt asks
+/// about (Desk notes print with a space and never gate `day`).
 fn printChecklist(gs: *game.state.GameState, al: std.mem.Allocator) usize {
     const d = q.desk(al, gs, 0) catch return 0;
-    if (d.checklist.len == 0) return 0;
-    std.debug.print("END-TURN CHECKLIST ({d}):\n", .{d.checklist.len});
-    for (d.checklist) |w| std.debug.print("  {s} {s}\n", .{ if (w.blocking) "!" else "·", q.stripMarks(al, w.text) catch w.text });
-    return d.checklist.len;
+    var asks: usize = 0;
+    for (d.checklist) |w| {
+        if (w.prompts) asks += 1;
+    }
+    if (asks == 0) std.debug.print("END-TURN CHECKLIST: all clear.\n", .{}) else std.debug.print("END-TURN CHECKLIST ({d}):\n", .{asks});
+    for (d.checklist) |w| std.debug.print("  {s} {s}\n", .{ if (w.blocking) "!" else if (w.prompts) "·" else " ", q.stripMarks(al, w.text) catch w.text });
+    return asks;
 }
 
 fn printBays(gs: *game.state.GameState, al: std.mem.Allocator) !void {
@@ -572,7 +577,7 @@ fn runRepl(session: *game.lobby.Session, io: std.Io, gpa: std.mem.Allocator, sto
             const lines = try q.hallAll(al, gs, filter);
             if (lines.len == 0) std.debug.print("no candidates on any board.\n", .{}) else printLines(al, lines, "") catch |err| showError(err);
         } else if (std.mem.eql(u8, verb, "checklist")) {
-            if (printChecklist(gs, al) == 0) std.debug.print("all clear.\n", .{});
+            _ = printChecklist(gs, al);
         } else if (std.mem.eql(u8, verb, "toe")) {
             printToe(gs, al) catch |err| showError(err);
         } else if (std.mem.eql(u8, verb, "hqs")) {
