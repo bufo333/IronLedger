@@ -67,6 +67,11 @@ tabs=$(grep -c 'switch (self.tab)' $tui | awk -F: '{ n += $2 } END { print n + 0
 # awk -v unescapes once, so four backslashes reach the regex as a literal `\x1b`.
 check "escape sequences outside term.zig and emblem.zig" \
     "$(outside_tests '\\\\x1b' $(echo "$tui" | grep -v -e 'src/tui/term.zig' -e 'src/tui/emblem.zig'))"
+# Screens never call the command facade: execResult / execResultWith own
+# refusal text (rule 37). Only app.zig holds the wrapper and the wizard's
+# pre-session call, the one listed exception.
+check "commands.execute( in a screen module" \
+    "$(grep -n 'commands\.execute(' $(echo "$tui" | grep '/screens/'))"
 # A command runs through App.execResult / exec / execSay, which report a
 # refusal the one way. A direct call says why: `// direct: …` on its line,
 # or on a comment line covering the block below it up to a blank line.
