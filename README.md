@@ -484,10 +484,6 @@ ending the turn opens the checklist.
 - `docs/tui.md` — the terminal client's architecture, with the generated
   mockups in `docs/tui-mockup.html`.
 - `docs/modding.md` — the data files and how to overlay them.
-- [`docs/iron-ledger-zig-guide.md`](docs/iron-ledger-zig-guide.md) — a
-  newcomer's guide to Zig taught with this project's code, and a tour of
-  how the program is wired together from the build script to a keypress
-  (also as a single-file page, `docs/iron-ledger-zig-guide.html`).
 - `docs/mekhq-map.md` — which MekHQ concept each module corresponds to.
 - [bufo333/LeaningZig](https://github.com/bufo333/LeaningZig) — *Zig from
   Zero to IRON LEDGER*, a 57-chapter, exercise-driven course in Zig 0.16
