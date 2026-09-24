@@ -36,14 +36,6 @@ Every Stage 12 feature (12, 12B–12G) has shipped.
 
 - [ ] Still uncovered by the smoke: the GAME OVER modal (a fresh campaign starts solvent, so reaching it needs a saved campaign already past all credit as a test fixture; bankruptcy itself stays terminal by design), the exact 120-column layout boundary, and the refusal branch of each confirm once run (they open and close only).
 
-## D19. Terminal safety (audit #15, #16; rule 24)
-
-D19a, D19b-1, D19b-2a and D19b-2b are done (see Done); the typed endpoint is left.
-
-
-- [ ] Endpoint for untrusted text (decided in review): a type that makes unsafe composition fail to compile (e.g. an `Untrusted` wrapper on stored names, or `MarkupBuilder` as the only way a query composes markup), plus the Part 3 verify-script check. Until then the convention holds: query `text`/`cells`/`lines`/titles are escaped markup, query `name` fields are raw values, and whoever composes a raw name into markup calls `table.plain`.
-
-
 ## Data verification
 
 - [ ] `contract.operationsMultBp`: check each contract kind's multiplier against the CamOps contract payment table and cite the page (rule 6).
@@ -105,6 +97,7 @@ Contract deliverables closed before this list merged, all from the 2026-09-22 co
 - D12 wizard steps: `drawWizard` draws the title bar and dispatches to `drawWizardCommander`, `drawWizardOutfit`, `drawWizardCompany` and `drawWizardReview`, one per step
 - D12 key tables for the game screens (rule 22): `src/tui/keys.zig` maps keys to semantic actions with every word shown about them (label, group, pane scope, title pane, help); one global table (screens, panes, cursor, command line, end turn, music, help, welcome) and one per screen, whose `handle` switches on the action; the footer, pane titles, help modal key section and the `docs/tui.md` key block (`game --keys-markdown`, compared exactly by a test) are generated from them; tests reject an unbound action, a key bound twice in one pane, and a screen binding that shadows a global key. Drift fixed on the way: help said F1-F8 for ten screens, HQ help said `h hire`, the People title offered `?` (global help) for the previous filter, and Forces `M` (manning) never fired under global `M` (music) and is gone (`r` cycles to MANNING)
 - D12 key tables for the modals, welcome and wizard (rule 22): every modal (lists, sheets, the raise flow, soundtrack, decision, contract log, after-action, emblem editor, number form, battle orders and settings, end turn, leave, game over, confirm, text prompts), the welcome screen and each wizard step resolve keys through a table and switch on actions; `keys.Match.text` declares typed text as a fallback (a focused text field takes every character); confirm dialogs share one table (y / s / Esc) and name their verbs; every title, footer, button row and hint is generated (`keys.title`, `keyHint`, `listTitle`, `formTitle`), and the docs key reference lists all 23 tables. Found on the way: the after-action sheet's "[←/→] columns" hint was false (now it scrolls), and a raise-crews hint named other screens' keys
+- D19 typed endpoint for untrusted text, audit #15: `table.Raw` carries a player-chosen name across the query boundary (campaign, player and commander names in the lobby; the outfit, force, HQ and lance names in the queries) and cannot be formatted with `{s}`; frontends draw it with `markup`, print it on the REPL with `terminal`, and read `.raw` only with a `// raw:` reason (a reviewer check, proven to fire). The type found four live gaps: the REPL's HQ title line printed an HQ name unsanitized, the wizard's review put the starter HQ's name and the typed outfit, commander and company names into markup unescaped, and the campaign-begins message did the same with the outfit name
 
 ---
 

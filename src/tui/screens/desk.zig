@@ -22,7 +22,7 @@ pub fn draw(self: *App) anyerror!void {
     const ib_w: u16 = rest_w - cl_w;
     var x: u16 = b.x;
     if (emblem_w > 0) {
-        const inner = self.screen.pane(.{ .x = x, .y = b.y, .w = emblem_w, .h = top_h }, .{ .title = try q.plain(al, q.clip((try q.status(al, g)).outfit_name, 36)) });
+        const inner = self.screen.pane(.{ .x = x, .y = b.y, .w = emblem_w, .h = top_h }, .{ .title = q.clip(try (try q.status(al, g)).outfit_name.markup(al), 36) });
         if (!self.drawEmblem(inner)) {
             var art: std.ArrayListUnmanaged([]const u8) = .empty;
             try art.append(al, "");

@@ -20,7 +20,7 @@ pub fn draw(self: *App) anyerror!void {
     const h = hqs[self.hq_sel];
     const id = h.id;
     const detail = try q.hqDetail(al, g, id);
-    const title = try std.fmt.allocPrint(al, "hq:{d} {s} · {s} · ring {d} LY · funds {s} · staff {d}/{d}", .{ @intFromEnum(id), try q.plain(al, h.name), h.tier, h.ring_ly, try q.money(al, h.funds), h.staff_assigned, h.staff_required });
+    const title = try std.fmt.allocPrint(al, "hq:{d} {s} · {s} · ring {d} LY · funds {s} · staff {d}/{d}", .{ @intFromEnum(id), try h.name.markup(al), h.tier, h.ring_ly, try q.money(al, h.funds), h.staff_assigned, h.staff_required });
     const lw: u16 = if (layout.extraWide(b.w)) layout.hq_detail.of(b.w) else b.w;
     const top_h: u16 = if (lw < b.w) b.h else layout.major.of(b.h);
     const inner = self.screen.pane(.{ .x = b.x, .y = b.y, .w = lw, .h = top_h }, .{ .title = title, .focused = self.focus == 0, .right_title = try app.keys.paneTitle(al, &legend, 0) });

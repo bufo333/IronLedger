@@ -245,6 +245,24 @@ pub fn unsafeString(value: anytype) ?[]const u8 {
     }
 }
 
+/// Untrusted text (a player-chosen name) handed across the query
+/// boundary. It cannot be formatted with `{s}`, so nothing composes it into
+/// screen markup by accident: a frontend draws it through `markup`, and
+/// reads `raw` only for a command payload, a comparison or a plain
+/// terminal.
+pub const Raw = struct {
+    raw: []const u8,
+
+    pub fn markup(self: Raw, alloc: std.mem.Allocator) ![]const u8 {
+        return plain(alloc, self.raw);
+    }
+    /// The text for a plain terminal (the REPL): invalid UTF-8 and controls
+    /// replaced, no markup involved.
+    pub fn terminal(self: Raw, alloc: std.mem.Allocator) ![]const u8 {
+        return plainText(alloc, try plain(alloc, self.raw));
+    }
+};
+
 /// Untrusted text as markup that draws exactly as written: the one-shot
 /// form of `MarkupBuilder.appendPlain`.
 pub fn plain(alloc: std.mem.Allocator, text: []const u8) ![]const u8 {
@@ -458,4 +476,13 @@ test "the data walker finds an unsafe string however deep it sits" {
     try std.testing.expect(unsafeString(&good) == null);
     const bad = [_]Entry{ .{ .key = "a", .tags = &.{"b"}, .alt = null }, .{ .key = "d", .tags = &.{"e"}, .alt = .{ .name = "{c}f" } } };
     try std.testing.expectEqualStrings("{c}f", unsafeString(&bad).?);
+}
+
+test "a raw name draws exactly as written and prints clean on a plain terminal" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const al = arena.allocator();
+    const evil: Raw = .{ .raw = "{c}Evil\x1b[2J" };
+    try std.testing.expectEqualStrings("{c}Evil?[2J", try plainText(al, try evil.markup(al)));
+    try std.testing.expectEqualStrings("{c}Evil?[2J", try evil.terminal(al));
 }

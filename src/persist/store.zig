@@ -217,8 +217,8 @@ pub const Store = struct {
 
     pub const CampaignInfo = struct {
         id: i64,
-        name: []const u8,
-        commander: []const u8,
+        name: @import("../sim/table.zig").Raw,
+        commander: @import("../sim/table.zig").Raw,
         day: i64,
         date: []const u8,
         /// Monotonic save counter across the store (the sim core keeps no
@@ -229,7 +229,7 @@ pub const Store = struct {
 
     pub const PlayerInfo = struct {
         id: i64,
-        name: []const u8,
+        name: @import("../sim/table.zig").Raw,
         campaigns: i64,
     };
 
@@ -247,8 +247,8 @@ pub const Store = struct {
         while (try st.next()) {
             try out.append(alloc, .{
                 .id = st.int(0),
-                .name = try st.text(1, alloc),
-                .commander = try st.text(2, alloc),
+                .name = .{ .raw = try st.text(1, alloc) },
+                .commander = .{ .raw = try st.text(2, alloc) },
                 .day = st.int(3),
                 .date = try st.text(4, alloc),
                 .save_seq = st.int(5),
@@ -284,7 +284,7 @@ pub const Store = struct {
         const st = try self.db.prepare("SELECT p.id, p.name, (SELECT COUNT(*) FROM campaign c WHERE c.player_id = p.id) FROM player p ORDER BY p.created_seq, p.id");
         defer st.finalize();
         while (try st.next()) {
-            try out.append(alloc, .{ .id = st.int(0), .name = try st.text(1, alloc), .campaigns = st.int(2) });
+            try out.append(alloc, .{ .id = st.int(0), .name = .{ .raw = try st.text(1, alloc) }, .campaigns = st.int(2) });
         }
         return out.toOwnedSlice(alloc);
     }
@@ -2224,7 +2224,7 @@ test "one store, many playthroughs: list, overwrite, delete" {
     try store.deleteCampaign(a.campaign_id);
     const after = try store.listCampaigns(arena.allocator());
     try std.testing.expectEqual(@as(usize, 1), after.len);
-    try std.testing.expectEqualStrings("Bravo Outfit", after[0].name);
+    try std.testing.expectEqualStrings("Bravo Outfit", after[0].name.raw);
     var still = try store.load(std.testing.allocator, b.campaign_id);
     defer still.deinit();
     try std.testing.expectEqual(b.hash(), still.hash());
