@@ -1,11 +1,11 @@
 //! The after-action record (Stage 12G): what one engagement did, kept as
 //! fields instead of prose. `battle.resolveEngagement` fills a
 //! `BattleReport`; `render` turns it into the `[AAR]` lines the campaign
-//! log has always carried, so the record and the narrative cannot drift
-//! (docs/coding-contract.md rule 5 — one rule, one place).
+//! log carries, so the record and the narrative cannot drift
+//! (docs/coding-contract.md rule 7 — a game rule is one named function).
 //!
 //! A report **outlives the hulls and the people it names**: a wreck left
-//! on the field is struck off the books the same day (12D.3) and a KIA
+//! on the field is struck off the books the same day and a KIA
 //! pilot leaves the roster. So the names it shows are captured at
 //! resolution time rather than looked up later — a rank earned next year
 //! must not rewrite last year's AAR.
@@ -52,7 +52,7 @@ pub const SlotResult = enum {
 /// the screens can count and colour without reading prose.
 ///
 /// A wound and a fate are **independent**: a pilot hit in the fight can
-/// still be left on the field and taken, and the AAR has always said both
+/// still be left on the field and taken, and the AAR says both
 /// ("… wounded (light torso); … MIA (held by DC)"). A tagged union here
 /// would quietly drop one of them.
 pub const CrewOutcome = struct {
@@ -63,7 +63,7 @@ pub const CrewOutcome = struct {
     pub const Fate = enum {
         unhurt,
         kia,
-        /// Left on a lost field and taken (12D.3): ransom, trade or write-off.
+        /// Left on a lost field and taken: ransom, trade or write-off.
         missing,
     };
 
@@ -90,7 +90,7 @@ pub const HullHit = struct {
     pilot: types.PersonId = .none,
     crew_name: []const u8 = "",
     crew: CrewOutcome = .{},
-    /// A lost field (12D.3): the recovery roll and the target it needed.
+    /// A lost field: the recovery roll and the target it needed.
     recovery: ?struct { roll: i32, target: i32 } = null,
     /// The recovery roll missed: the hull is the enemy's.
     lost: bool = false,
@@ -108,9 +108,7 @@ pub const AmmoLine = struct {
     left: u32 = 0,
 };
 
-/// What the claim became: things crated home, or cash under a salvage
-/// exchange (12B.2). `items` is the itemised manifest text.
-/// A wreck the crews could get a chain around (12G.6), rolled once off
+/// A wreck the crews could get a chain around, rolled once off
 /// the enemy's RAT when the fight ends and then left alone. The roll
 /// lives in the record rather than happening again at claim time,
 /// because the manifest the player is offered and the manifest the
@@ -126,6 +124,8 @@ pub const SalvageCandidate = struct {
     missing_components: u8,
 };
 
+/// What the claim became: things crated home, or cash under a salvage
+/// exchange. `items` is the itemised manifest text.
 pub const SalvageManifest = struct {
     claimed_bv: i64 = 0,
     haulable_bv: i64 = 0,
@@ -184,7 +184,7 @@ pub const BattleReport = struct {
     battle_loss_comp: types.CBills = 0,
     score_after: i32 = 0,
     score_delta: i32 = 0,
-    /// Applied to every active hand (12C.1) and, before 12G, never reported.
+    /// Applied to every active hand in the company.
     morale_delta: i32 = 0,
     fatigue_add: u8 = 0,
     battle_loss_pct: u8 = 0,
@@ -199,13 +199,13 @@ pub const BattleReport = struct {
 
     /// No combat-effective units: the objective was conceded without a shot.
     conceded: bool = false,
-    /// The commander has read it (12G.5). An unread report holds the turn:
+    /// The commander has read it. An unread report holds the turn:
     /// a battle disposes of hulls and people permanently, so it is not
     /// something a week-long advance may resolve past unseen (ARCH §6).
     acknowledged: bool = false,
 
-    /// Hulls that never came home (12D.3) — the count the inbox and the
-    /// checklist both read, so neither counts rows itself (rule 5).
+    /// Hulls that never came home — the count the inbox and the
+    /// checklist both read, so neither counts rows itself (rule 7).
     pub fn hullsLost(self: *const BattleReport) u32 {
         var n: u32 = 0;
         for (self.hulls) |h| n += @intFromBool(h.lost);
@@ -219,7 +219,7 @@ pub const BattleReport = struct {
     }
 };
 
-/// The engagements still on record, oldest first (12G.4). Owns its own
+/// The engagements still on record, oldest first. Owns its own
 /// retention, the way `events.EventQueue` owns the inbox: `GameState`
 /// holds one and nothing else decides how long a report lives.
 ///
@@ -243,7 +243,7 @@ pub const Journal = struct {
     }
 
     /// The same record, writable. Only the salvage decision uses this —
-    /// the account of a fight is otherwise written once (12G.6).
+    /// the account of a fight is otherwise written once.
     pub fn findMut(self: *Journal, id: types.BattleId) ?*BattleReport {
         for (self.kept.items) |*r| if (r.id == id) return r;
         return null;
@@ -347,7 +347,7 @@ pub fn render(alloc: std.mem.Allocator, r: *const BattleReport) ![]const []const
     return out.toOwnedSlice(alloc);
 }
 
-/// " · field lost · recovery 6 vs 7 — LEFT TO THE ENEMY" (12D.3).
+/// " · field lost · recovery 6 vs 7 — LEFT TO THE ENEMY".
 fn recoveryText(alloc: std.mem.Allocator, h: *const HullHit) ![]const u8 {
     const rec = h.recovery orelse return "";
     return try std.fmt.allocPrint(alloc, " · field lost · recovery {d} vs {d} — {s}", .{ rec.roll, rec.target, if (h.lost) "LEFT TO THE ENEMY" else "dragged off" });
@@ -437,7 +437,7 @@ test "armorOnly and hullsLost read the record, not the prose" {
     try std.testing.expectEqual(@as(u32, 0), r.burned("ammo_lrm"));
 }
 
-test "12G.4: the journal is bounded, and the newest survive" {
+test "the journal is bounded, and the newest survive" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const al = arena.allocator();

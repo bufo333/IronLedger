@@ -67,15 +67,13 @@ pub const QueueError = error{ UnknownUnit, NoHq, NoBay, MissingComponents, Writt
 
 // ---- the one rule for structural needs ----
 //
-// Play feedback: the depot queue, the Market DEMAND pane, the Forces DAMAGE
-// pane, the unassigned pool and the REPL `demand` verb each re-derived "which
-// components does this hull need, and where" with their own filters, and a
-// wreck could be refused by the depot while every screen said nothing was
-// missing. Everything below reads the same slots and the same shelves; the
-// rule lives here once and every reader calls it.
+// "Which components does this hull need, and where" is answered once,
+// here: the depot queue, the Market DEMAND pane, the Forces DAMAGE pane,
+// the unassigned pool and the REPL `demand` verb all call it, so the depot
+// never refuses a wreck for a part the screens say is on hand (rule 5).
 
 /// One structural component the depot consumes rebuilding a hull: the slot
-/// it restores and the comp_* key for the hull's weight class (12D.8).
+/// it restores and the comp_* key for the hull's weight class.
 pub const DepotNeed = struct { slot_key: []const u8, component: []const u8 };
 
 /// What the depot takes from the hull's home warehouse when its job is
@@ -107,7 +105,7 @@ pub fn slotNeedsComponent(s: unit_mod.PartSlot) bool {
     return s.class == .structure and (s.condition == .destroyed or s.condition == .missing);
 }
 
-/// The HQ that hosts a new company (Stage 9D capacity): `preferred` when
+/// The HQ that hosts a new company: `preferred` when
 /// it has a free combat-company slot, else the first HQ that has one,
 /// else `.none`. `new_company` and the Forces screen's + share it.
 pub fn hqWithCompanySlot(gs: *GameState, preferred: types.HqId) types.HqId {
@@ -118,7 +116,7 @@ pub fn hqWithCompanySlot(gs: *GameState, preferred: types.HqId) types.HqId {
 }
 
 /// Where a hull's components must sit for the depot to use them: its own
-/// home HQ (Stage 9D), the seat for the unassigned pool.
+/// home HQ, the seat for the unassigned pool.
 pub fn depotHqFor(gs: *GameState, u: *const unit_mod.Unit) types.HqId {
     return gs.homeHqFor(u.force);
 }
@@ -252,7 +250,7 @@ pub fn componentDemand(alloc: std.mem.Allocator, gs: *GameState, hq_id: types.Hq
     return out.toOwnedSlice(alloc);
 }
 
-/// The new engine a rebuild needs (12D.2): TechManual price for the
+/// The new engine a rebuild needs: TechManual price for the
 /// design, zero unless the hull died of an engine kill or a cook-off.
 pub fn engineCharge(u: *const unit_mod.Unit) types.CBills {
     if (!u.wreck.needsEngine()) return 0;
@@ -260,7 +258,7 @@ pub fn engineCharge(u: *const unit_mod.Unit) types.CBills {
     return unit_mod.engineCost(design.tonnage, design.walk_mp);
 }
 
-/// What bringing this hull back would cost at today's prices (12D.2):
+/// What bringing this hull back would cost at today's prices:
 /// every destroyed or missing component fabricated, the depot labour, and
 /// the engine. Null for scrap. The hangar sets it against a new hull.
 pub fn rebuildEstimate(gs: *GameState, u: *const unit_mod.Unit) ?types.CBills {
@@ -293,16 +291,15 @@ pub fn beyondEconomicalRepair(gs: *GameState, u: *const unit_mod.Unit) bool {
 pub fn queueDepotRepair(gs: *GameState, unit_id: types.UnitId) QueueError!bool {
     const u = gs.unit(unit_id) orelse return error.UnknownUnit;
     if (gs.hqs.count() == 0) return error.NoHq;
-    // The hull's own home HQ (its company's supplying HQ, Stage 9D) does
+    // The hull's own home HQ (its company's supplying HQ) does
     // the work and supplies the components — not the outfit's first HQ.
     const hq_id = gs.homeHqFor(u.force);
     const hq = gs.hqs.getPtr(hq_id) orelse return error.NoHq;
     if (!hq.supportsStructuralRepair()) return error.NoBay;
     if (hasJobForUnit(gs, unit_id)) return true;
-    if (u.wreck == .scrap) return error.WrittenOff; // strip it (12D.2)
-    // A wreck from before kills wrecked structure (saves predating 12.31)
-    // carries no structural damage: give it the wreck it is, so the rebuild
-    // needs its component like any other.
+    if (u.wreck == .scrap) return error.WrittenOff; // strip it
+    // A destroyed hull with every structure slot intact is cored here, so
+    // the rebuild needs its component like any other wreck.
     if (u.status == .destroyed) {
         var any = false;
         for (u.slots.items) |s| if (s.class == .structure and s.condition != .ok) {
@@ -331,7 +328,7 @@ pub fn queueDepotRepair(gs: *GameState, unit_id: types.UnitId) QueueError!bool {
         .unit = unit_id,
         .duration_days = tuning.hq_ops.depot_base_days + tuning.hq_ops.depot_days_per_component * needed + (if (u.wreck.needsEngine()) tuning.loss.engine_rebuild_days else 0),
         .queued_day = gs.clock.day_index,
-        .cost = @divTrunc(u.purchase_price, tuning.hq_ops.depot_labour_divisor) * needed + engineCharge(u), // a new engine goes in with an engine kill (12D.2)
+        .cost = @divTrunc(u.purchase_price, tuning.hq_ops.depot_labour_divisor) * needed + engineCharge(u), // a new engine goes in with an engine kill
     });
     return true;
 }
@@ -351,7 +348,7 @@ pub fn queueReactivation(gs: *GameState, unit_id: types.UnitId) QueueError!void 
     });
 }
 
-/// Can this HQ's bay fabricate this component (12D.8)? A bay at all, at
+/// Can this HQ's bay fabricate this component? A bay at all, at
 /// the level the assembly's class needs (heavy 2, assault 3), and for
 /// assault assemblies a regional or brigade HQ.
 pub fn canFabricate(gs: *GameState, hq_id: types.HqId, key: []const u8) bool {
@@ -363,15 +360,16 @@ pub fn canFabricate(gs: *GameState, hq_id: types.HqId, key: []const u8) bool {
     return true;
 }
 
-/// Can this HQ rebuild the structure of this design (12E.2)? Its bay must
-/// be rated for the design's assemblies — the centre torso is the test.
-/// Vehicles and anything without a chassis entry need nothing special.
+/// Can this HQ rebuild the structure of this design? Its bay must be rated
+/// for the design's weight-class assemblies — the centre torso is the
+/// test, vehicles included. A design with no chassis entry rates medium.
 pub fn bayCanRebuild(gs: *GameState, hq_id: types.HqId, chassis_key: []const u8) bool {
     return canFabricate(gs, hq_id, part_mod.componentFor("ct.structure", chassis_key));
 }
 
-/// "needs bay 2" / "needs bay 3 at a regional HQ" for a design's
-/// assemblies, or "" when the lightest bay will do (12E.2).
+/// "needs a level-2 bay to rebuild" / "needs a level-3 bay at a regional
+/// HQ to rebuild" for a design's assemblies, or "" when the lightest bay
+/// will do.
 pub fn rebuildNeed(chassis_key: []const u8) []const u8 {
     const def = part_mod.find(part_mod.componentFor("ct.structure", chassis_key)) orelse return "";
     if (def.fab_regional) return "needs a level-3 bay at a regional HQ to rebuild";
@@ -380,7 +378,7 @@ pub fn rebuildNeed(chassis_key: []const u8) []const u8 {
 }
 
 /// Fabricate components in the bay: the §9.8 guarantee — always available,
-/// at a premium, over bay time — for what the bay is rated to build (12D.8).
+/// at a premium, over bay time — for what the bay is rated to build.
 /// Cost is paid by the caller up front.
 pub fn queueFabrication(gs: *GameState, hq_id: types.HqId, key: []const u8, quantity: u32) QueueError!void {
     if (baySlots(gs, hq_id) == 0) return error.NoBay;
@@ -395,9 +393,8 @@ pub fn queueFabrication(gs: *GameState, hq_id: types.HqId, key: []const u8, quan
     }
 }
 
-/// Start (or level up) a facility as a construction project.
-/// Why a facility cannot be upgraded right now, or null when it can:
-/// the command refuses on it before a C-bill moves, the HQ screen dims on it.
+/// Why a facility cannot be upgraded right now: the command refuses on it
+/// before a C-bill moves, the HQ screen dims on it.
 pub const UpgradeBlock = enum { in_progress, maxed, funds_short };
 
 pub fn upgradeBlock(gs: *GameState, hq_id: types.HqId, kind: hq_mod.FacilityKind) ?UpgradeBlock {
@@ -411,6 +408,7 @@ pub fn upgradeBlock(gs: *GameState, hq_id: types.HqId, kind: hq_mod.FacilityKind
     return null;
 }
 
+/// Start (or level up) a facility as a construction project.
 pub fn startUpgrade(gs: *GameState, hq_id: types.HqId, kind: hq_mod.FacilityKind) !void {
     const hq = gs.hqs.getPtr(hq_id) orelse return error.UnknownHq;
     for (hq.projects.items) |p| {
@@ -434,12 +432,12 @@ pub fn startUpgrade(gs: *GameState, hq_id: types.HqId, kind: hq_mod.FacilityKind
     });
 }
 
-/// Field → regional (Stage 9D): the beachhead becomes a ring. A project
-/// with paperwork then a long build; on completion the HQ gains the
-/// regional facility set and starts projecting influence.
 pub const tier_upgrade_cost: types.CBills = tuning.hq_ops.tier_upgrade_cost;
 pub const tier_upgrade_build_days: u32 = tuning.hq_ops.tier_upgrade_build_days;
 
+/// Field → regional: the beachhead becomes a ring. A project with
+/// paperwork then a long build; on completion the HQ gains the regional
+/// facility set and starts projecting influence.
 pub fn startTierUpgrade(gs: *GameState, hq_id: types.HqId) !void {
     const hq = gs.hqs.getPtr(hq_id) orelse return error.UnknownHq;
     if (hq.tier != .field) return error.MaxLevel;
@@ -457,9 +455,7 @@ pub fn startTierUpgrade(gs: *GameState, hq_id: types.HqId) !void {
     try gs.log(.construction, .{ .hq = hq_id }, "[construction] {s} → regional HQ: {d} days paperwork, {d} days build", .{ hq.name, paperwork, tier_upgrade_build_days });
 }
 
-/// Daily: start queued jobs as slots free up, finish due jobs, and land
-/// completed construction.
-// ------------------------------------------------- repair outcomes (12C.12)
+// ------------------------------------------------- repair outcomes
 
 pub const RepairOdds = struct {
     skill: u8,
@@ -570,6 +566,8 @@ fn applyRepairResult(gs: *GameState, u: *unit_mod.Unit, result: RepairResult) ![
     }
 }
 
+/// Daily: finish due jobs, start queued jobs as slots free up, and land
+/// completed construction.
 pub fn runDaily(gs: *GameState) !void {
     const today = gs.clock.day_index;
 
@@ -649,7 +647,7 @@ pub fn runDaily(gs: *GameState) !void {
 /// Returns false when the job stays on the bench (a failed repair roll).
 fn completeJob(gs: *GameState, job: *state_mod.BayJob) !bool {
     const today = gs.clock.day_index;
-    // The repair check (12C.12): depot work and refits can go wrong.
+    // The repair check: depot work and refits can go wrong.
     if (job.kind == .depot_repair or job.kind == .refit) {
         const result = rollRepair(gs, job.hq, job.unit);
         if (result == .redo) {
@@ -671,7 +669,7 @@ fn completeJob(gs: *GameState, job: *state_mod.BayJob) !bool {
             u.wreck = .none;
             if (u.status == .repairing) u.status = .ready;
             try gs.log(.construction, .{ .hq = job.hq }, "[bay] {s} structural repair complete", .{u.chassis_key});
-            // Big jobs hurt people (Stage 9C.2): snake-eyes on 2d6 (≈3%)
+            // Big jobs hurt people: snake-eyes on 2d6 (≈3%)
             // injures the hull's tech on the last day of the rebuild.
             if (gs.rng.roll2d6(.medical) == 2 and u.tech != .none) {
                 try @import("maintenance.zig").injureTech(gs, u.tech, tuning.maintenance.bay_accident_days_base + gs.rng.roll2d6(.medical), "bay accident");
@@ -691,7 +689,7 @@ fn completeJob(gs: *GameState, job: *state_mod.BayJob) !bool {
             });
         },
         .refit => if (gs.unit(job.unit)) |u| {
-            // Stage 10: the committed plan lands on the hull; removed mounts
+            // The committed plan lands on the hull; removed mounts
             // go back on the shelf.
             var pi: usize = 0;
             while (pi < gs.refit_plans.items.len) : (pi += 1) {
@@ -717,7 +715,7 @@ fn completeJob(gs: *GameState, job: *state_mod.BayJob) !bool {
     return true;
 }
 
-test "12C.12: repair odds favour the sharper tech and the better hull; the parts sum to 100" {
+test "repair odds favour the sharper tech and the better hull; the parts sum to 100" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1212 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .chief_engineer);
@@ -773,7 +771,7 @@ test "depot repair needs the right components, then holds a bay" {
     try runDaily(&gs);
     try std.testing.expectEqual(unit_mod.UnitStatus.repairing, u.status);
 
-    // The bench keeps a job that fails its repair check (12C.12), so walk
+    // The bench keeps a job that fails its repair check, so walk
     // the days until it is off the bench.
     gs.clock.day_index += 7 + 5 * 2;
     var days: u32 = 0;
@@ -803,7 +801,7 @@ test "one rule for structural needs: the depot, the demand ledger and the screen
     while (gs.takeStock(.{ .hq = hq_id }, "comp_ct", 1)) {}
     while (gs.takeStock(.{ .hq = hq_id }, "comp_torso", 1)) {}
 
-    // An ammo wreck (the play report): centre torso and both sides gone,
+    // An ammo wreck: centre torso and both sides gone,
     // one leg damaged. Damaged structure wants bay time, not a part.
     const uid = try gs.addUnit("SHD-2H");
     const u = gs.unit(uid).?;

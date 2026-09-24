@@ -29,7 +29,7 @@ pub const EventKind = enum {
     captured_salvage,
     local_support_offer,
     daring_opportunity,
-    // Weekly deck (Stage 12): smaller happenings between the monthly ones.
+    // Weekly deck: smaller happenings between the monthly ones.
     quiet_week,
     local_festival,
     press_visit,
@@ -42,28 +42,28 @@ pub const EventKind = enum {
     supply_cache,
     bad_weather,
     field_promotion,
-    // Stage 12.22, hooked into faction standing:
+    // Hooked into faction standing:
     black_market_contact,
     salvage_dispute,
-    /// Personnel (Stage 12.25): someone restless hands in notice.
+    /// Personnel: someone restless hands in notice.
     notice_given,
-    /// A prisoner of war held by the company (12B.7).
+    /// A prisoner of war held by the company.
     prisoner_held,
-    /// One of yours left behind on a lost field, held by the enemy (12D.3).
+    /// One of yours left behind on a lost field, held by the enemy.
     mia_held,
-    /// Raiders waiting at the jump point for an unescorted company (12D.9).
+    /// Raiders waiting at the jump point for an unescorted company.
     jump_interdiction,
-    /// The field is held and the enemy is off balance (12G.6): press the
-    /// advance, or consolidate and put the company back together.
+    /// The field is held and the enemy is off balance: press the advance,
+    /// or consolidate and put the company back together.
     press_or_consolidate,
-    /// The field is lost and hulls and people are still out there
-    /// (12G.6): go back for them tonight, or let them go.
+    /// The field is lost and hulls and people are still out there: go
+    /// back for them tonight, or let them go.
     recovery_push,
     /// The field is held and the salvage claim will not stretch to
-    /// everything worth dragging home (12G.6).
+    /// everything worth dragging home.
     salvage_priority,
     /// The night after a fight, and the hours and armour will not stretch
-    /// over all the damage (12G.6): whose hull the techs take first.
+    /// over all the damage: whose hull the techs take first.
     field_repair,
 
     /// Does this decision hold the turn (ARCH §6)? The test is what the
@@ -89,16 +89,16 @@ pub const Effect = union(enum) {
     morale: i8, // applied to everyone in the company
     fatigue: u8,
     xp_all: u16,
-    score: i16, // contract success score (drives Stage 7 outcomes)
+    score: i16, // contract success score (drives the contract outcome)
     damage_random_units: u8, // N line-lance hulls take abstract battle wear
     damage_convoy_units: u8, // N support-echelon vehicles (trucks, ambulances) take wear
     parts_windfall: u8, // salvaged spares into the pool
     supply_loss: types.CBills, // posted as a supplies expense
-    /// Standing with the contract's employer (Stage 12.22).
+    /// Standing with the contract's employer.
     employer_standing: i16,
     /// Stock landed in the company's field stores (munitions off the books).
     field_stock: struct { key: []const u8, qty: u16 },
-    // Personnel effects (Stage 12.25) act on the event's `person`.
+    // Personnel effects act on the event's `person`.
     /// Permanent raise, percent of the current salary; they stay.
     raise_pct: u8,
     /// One-off bonus of N months' salary from the outfit; they stay.
@@ -108,14 +108,14 @@ pub const Effect = union(enum) {
     /// They leave, and the halls are asked for a replacement in the same
     /// role (hired into the same company if one is listed).
     replace_from_hall,
-    // Prisoner effects (12B.7) act on the event's `person`, a POW.
+    // Prisoner effects act on the event's `person`, a POW.
     /// Their house pays by experience; they go home.
     ransom_prisoner,
     /// Released unpaid: +2 standing with their house.
     release_prisoner,
     /// A loyalty roll; success puts them on your payroll as a mekwarrior.
     recruit_prisoner,
-    // Missing-in-action effects (12D.3) act on the event's `person`, one of
+    // Missing-in-action effects act on the event's `person`, one of
     // yours held by the house in their `faction`.
     /// Pay their captors the ransom table's price; they come home.
     ransom_mia,
@@ -123,23 +123,23 @@ pub const Effect = union(enum) {
     exchange_mia,
     /// Missing, presumed dead: the company mourns.
     write_off_mia,
-    /// Fight it out (12D.6): a real engagement against the contract's
+    /// Fight it out: a real engagement against the contract's
     /// opposition, resolved on the spot.
     engagement,
     /// The employer takes the company's most battered line hull as
-    /// "collateral" (12D.9) — off the books for good.
+    /// "collateral" — off the books for good.
     seize_hull,
-    /// Days added to a company's transit (12D.9: waiting raiders out).
+    /// Days added to a company's transit (waiting raiders out).
     delay_arrival: u8,
     /// The next engagement on this contract comes in N days rather than
-    /// when the usual gap would have put it (12G.6).
+    /// when the usual gap would have put it.
     next_battle_in: u8,
     /// One more recovery roll for every hull and pilot the event's battle
-    /// left on the field (12G.6), at a price in fatigue and risk.
+    /// left on the field, at a price in fatigue and risk.
     recovery_push,
-    /// Spend the event's battle's salvage claim this way (12G.6).
+    /// Spend the event's battle's salvage claim this way.
     take_salvage: types.SalvagePlan,
-    /// Work the company's damage in this order tonight (12G.6).
+    /// Work the company's damage in this order tonight.
     field_repair: types.RepairOrder,
 };
 
@@ -157,7 +157,7 @@ pub const Event = struct {
     company: types.ForceId = .none,
     /// Personnel events: who this is about.
     person: types.PersonId = .none,
-    /// Battle decisions (12G.6): the engagement this is about, so the
+    /// Battle decisions: the engagement this is about, so the
     /// answer can be applied against that fight's record.
     battle: types.BattleId = .none,
     /// Empty = auto event (applied at roll time, never queued).
@@ -171,7 +171,7 @@ pub const Event = struct {
         return self.options.len > 0 and self.chosen == null;
     }
 
-    /// Unanswered and holding the turn (12G.6).
+    /// Unanswered and holding the turn.
     pub fn holdsTurn(self: *const Event) bool {
         return self.needsDecision() and self.kind.blocksTurn();
     }
@@ -181,7 +181,7 @@ pub const Event = struct {
 pub const EventQueue = struct {
     pending: std.ArrayListUnmanaged(Event) = .empty,
     /// Stamped onto each event as it is queued, so an answer names an
-    /// event rather than a row (12G.1). Never reused within a campaign.
+    /// event rather than a row. Never reused within a campaign.
     next_id: u32 = 1,
 
     pub fn deinit(self: *EventQueue, alloc: std.mem.Allocator) void {
@@ -221,7 +221,7 @@ pub const EventQueue = struct {
         self.next_id = @max(self.next_id, max + 1);
     }
 
-    /// The oldest pending decision that holds the turn, if any (12G.6).
+    /// The oldest pending decision that holds the turn, if any.
     /// One place decides; `advance` and the checklist both read it. The
     /// pointer is into the queue's backing array: read what you need from
     /// it before answering anything, because answering can move it.

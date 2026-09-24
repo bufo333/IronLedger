@@ -1,6 +1,6 @@
 //! Personnel bookkeeping that spans people and forces (Stage 12B.4).
-//! Mirrors MekHQ `personnel/ranks` + the AtB "commander/lance leader"
-//! designations: ranks follow seats and experience unless pinned.
+//! Adaptation of MekHQ `personnel/ranks` and the AtB "commander/lance
+//! leader" designations: ranks follow seats and experience unless pinned.
 
 const std = @import("std");
 const tuning = @import("../domain/tuning.zig").t;
@@ -12,7 +12,7 @@ const chassis_mod = @import("../domain/chassis.zig");
 const GameState = @import("state.zig").GameState;
 const company_gen = @import("../gen/company_gen.zig");
 
-/// Morale across the whole outfit (12C.11): a contract's ending is felt
+/// Morale across the whole outfit: a contract's ending is felt
 /// by everyone on the payroll, not only the company that fought it.
 pub fn adjustMoraleAll(gs: *GameState, delta: i32) u32 {
     var touched: u32 = 0;
@@ -26,7 +26,7 @@ pub fn adjustMoraleAll(gs: *GameState, delta: i32) u32 {
     return touched;
 }
 
-/// Payday (12C.3): everyone's stake brought up to date. Returns how many
+/// Payday: everyone's stake brought up to date. Returns how many
 /// people gained shares.
 pub fn refreshShares(gs: *GameState) u32 {
     var gained: u32 = 0;
@@ -40,7 +40,7 @@ pub fn refreshShares(gs: *GameState) u32 {
     return gained;
 }
 
-/// Contract completed (12C.3): `gs.share_profit_bp` of what the contract
+/// Contract completed: `gs.share_profit_bp` of what the contract
 /// brought in, split pro rata across every shareholder on the books and
 /// paid as payroll "profit shares". Returns the pool paid.
 pub fn payShares(gs: *GameState, contract_id: types.ContractId, company: types.ForceId) !types.CBills {
@@ -77,7 +77,7 @@ pub fn payShares(gs: *GameState, contract_id: types.ContractId, company: types.F
     return paid;
 }
 
-/// Someone leaves the outfit (12C.2): status set, every seat vacated, and
+/// Someone leaves the outfit: status set, every seat vacated, and
 /// the departure payout posted to the outfit as payroll ("severance") —
 /// `share_bp` of the full amount (a firing pays half, a notice or a
 /// retirement all of it). Returns what was paid.
@@ -99,7 +99,7 @@ pub fn depart(gs: *GameState, person_id: types.PersonId, status: person_mod.Stat
     return owed;
 }
 
-/// How far from ready a company is for an offer (12E.5): the points the
+/// How far from ready a company is for an offer: the points the
 /// candidates table sorts by. Lower is readier.
 pub fn readinessPenalty(crew: CrewStats, depot_hulls: u32, transit_days: u32) i32 {
     const t = tuning.person;
@@ -111,7 +111,7 @@ pub fn readinessPenalty(crew: CrewStats, depot_hulls: u32, transit_days: u32) i3
         @as(i32, @intCast(crew.avg_morale / t.readiness_morale_divisor));
 }
 
-/// What letting someone go costs at a share of the full payout (12C.2):
+/// What letting someone go costs at a share of the full payout:
 /// `depart` pays it and the desk quotes it from the same function.
 pub fn severanceOwed(gs: *GameState, person_id: types.PersonId, share_bp: types.Bp) types.CBills {
     const p = gs.person(person_id) orelse return 0;
@@ -165,11 +165,10 @@ pub fn manningNeeds(gs: *GameState, company: types.ForceId) [14]Need {
     return out;
 }
 
-/// People of `role` on a company's books (active or wounded).
 /// One row of the manning table: the need, who fills it, and the gap.
 pub const ManningLine = struct { role: person_mod.Role, have: u32, need: u32, open: u32, why: []const u8 };
 
-/// The manning table (12B.11): every need against who is on the payroll.
+/// The manning table: every need against who is on the payroll.
 /// The checklist warns from it, the raise wizard and the Forces pane
 /// print it.
 pub fn manningLines(gs: *GameState, company: types.ForceId) [14]ManningLine {
@@ -222,7 +221,7 @@ pub fn companyCrewStats(gs: *GameState, company: types.ForceId) CrewStats {
     return st;
 }
 
-/// Tech hours (12C.15): what a company's hulls want per week against
+/// Tech hours: what a company's hulls want per week against
 /// what its techs, at their skill and with their astech teams, can give.
 pub const TechHours = struct { needed: u32, have: u32 };
 
@@ -244,6 +243,7 @@ pub fn techHours(gs: *GameState, company: types.ForceId) TechHours {
     return .{ .needed = needed, .have = have };
 }
 
+/// People of `role` on a company's books (active or wounded).
 pub fn manningHave(gs: *GameState, company: types.ForceId, role: person_mod.Role) u32 {
     var have: u32 = 0;
     var pit = gs.people.iterator();
@@ -256,7 +256,7 @@ pub fn manningHave(gs: *GameState, company: types.ForceId, role: person_mod.Role
 }
 
 
-/// Kill credits (12B.5): the enemy BV destroyed in an engagement becomes
+/// Kill credits: the enemy BV destroyed in an engagement becomes
 /// whole kills (one per ~1000 BV, the average 3025 mek), each handed to
 /// an engaged pilot at random weighted by their hull's BV and gunnery; the
 /// BV itself is split by the same weights. Every engaged pilot logs a
@@ -299,7 +299,7 @@ pub fn creditKills(gs: *GameState, engaged: []const types.UnitId, destroyed_bv: 
     return kills;
 }
 
-/// Hand out every award whose threshold a person has crossed (12B.5).
+/// Hand out every award whose threshold a person has crossed.
 /// Returns how many were pinned on.
 pub fn checkAwards(gs: *GameState, person_id: types.PersonId) !u32 {
     const p = gs.person(person_id) orelse return 0;
@@ -309,7 +309,7 @@ pub fn checkAwards(gs: *GameState, person_id: types.PersonId) !u32 {
         if (p.hasAward(a.key)) continue;
         if (p.counter(a.kind, gs.clock.day_index) < a.threshold) continue;
         try p.awards.append(gs.allocator(), a.key);
-        p.last_award_day = gs.clock.day_index; // 12C.5
+        p.last_award_day = gs.clock.day_index; // a recent award is a loyalty modifier
         p.morale = @intCast(@min(100, @as(u32, p.morale) + a.morale));
         n += 1;
         try gs.log(.rotation, .{ .company = gs.companyOf(p.assigned_force), .hq = p.posted_hq }, "[award] {s} receives the {s} ({s} {d})", .{ try p.rankedName(gs.allocator()), a.name, @tagName(a.kind), p.counter(a.kind, gs.clock.day_index) });
@@ -420,7 +420,7 @@ test "ranks follow seats: a lance leader is a lieutenant, the company commander 
     try std.testing.expect(tech.monthlySalary() > before);
 }
 
-test "12B.5: kills are credited to engaged pilots and awards follow the counters" {
+test "kills are credited to engaged pilots and awards follow the counters" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1235 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .paymaster);
@@ -452,7 +452,7 @@ test "12B.5: kills are credited to engaged pilots and awards follow the counters
     try std.testing.expectEqual(@as(u32, 0), again); // no duplicates
 }
 
-test "12C.2: severance is a month per year served, capped; a firing pays half; under a year nothing" {
+test "severance is a month per year served, capped; a firing pays half; under a year nothing" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 122 });
     defer gs.deinit();
     const t = @import("../domain/tuning.zig").t.person;
@@ -474,7 +474,7 @@ test "12C.2: severance is a month per year served, capped; a firing pays half; u
     try std.testing.expectEqual(person_mod.Status.resigned, gs.person(vet).?.status);
 }
 
-test "12C.3: shares are paid pro rata from contract income at the configured share" {
+test "shares are paid pro rata from contract income at the configured share" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 123 });
     defer gs.deinit();
     const a = try gs.hirePerson("Two", "Shares", .mekwarrior);

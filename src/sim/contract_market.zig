@@ -1,6 +1,6 @@
 //! Contract market: monthly offer generation filtered by influence rings
-//! (ARCH §9.2). Mirrors MekHQ `market/ContractMarket` with CamOps payment
-//! terms; extended with per-place visibility and beachhead flagging.
+//! (ARCH §9.2). MekHQ counterpart: `market/ContractMarket`, with CamOps
+//! payment terms; adds per-place visibility and beachhead flagging.
 
 const std = @import("std");
 const tuning = @import("../domain/tuning.zig").t;
@@ -17,17 +17,16 @@ const person_gen = @import("../gen/person_gen.zig");
 
 /// Employer payment multiplier by faction, basis points (data/tables/factions.zon).
 pub fn employerMultBp(faction_key: []const u8) types.Bp {
-    return @import("../domain/faction.zig").get(faction_key).pay_bp; // data/tables/factions.zon (12B.9)
+    return @import("../domain/faction.zig").get(faction_key).pay_bp;
 }
 
-/// Standing payment multiplier (Stage 12.21): ±25 bp per point of a
+/// Standing payment multiplier: ±25 bp per point of a
 /// house's standing, so ±25% at the extremes.
 pub fn standingPayBp(standing: i32) types.Bp {
     return 10_000 + @as(types.Bp, standing) * tuning.contract.standing_pay_bp_per_point;
 }
 
-/// Reputation payment multiplier: ±0.5% per point, clamped.
-/// The five Successor States (12C.7): the employers an F-rated outfit
+/// The five Successor States: the employers an F-rated outfit
 /// cannot get in front of.
 pub fn isGreatHouse(faction_key: []const u8) bool {
     const houses = [_][]const u8{ "LC", "DC", "FS", "CC", "FWL" };
@@ -39,10 +38,9 @@ pub fn isGreatHouse(faction_key: []const u8) bool {
 /// on top (CamOps' negotiation environment, abstracted).
 pub const market_margin_bp: types.Bp = tuning.market.market_margin_bp; // ×1.8
 
-/// AtB-flavored contract-type roll, widened (play feedback: boards were a
-/// wall of garrison duty): garrison work is still the most common single
-/// kind, but every kind in the book turns up, and `refresh` caps any one
-/// kind at a third of the board.
+/// AtB-flavored contract-type roll, widened: garrison work is the most
+/// common single kind, but every kind in the book turns up, and `refresh`
+/// caps any one kind at a third of the board.
 fn rollKind(gs: *GameState) contract.ContractKind {
     const roll = gs.rng.roll2d6(.market);
     const coin = gs.rng.random(.market).boolean();
@@ -63,13 +61,13 @@ fn rollKind(gs: *GameState) contract.ContractKind {
 fn pickEnemy(gs: *GameState, employer: []const u8, kind: contract.ContractKind) []const u8 {
     // Garrison-class work is as often about pirates as neighbors.
     if (kind.isGarrisonClass() and gs.rng.random(.market).boolean()) return "PER";
-    // The faction table's foes (12B.9): a house fights its neighbours.
+    // The faction table's foes: a house fights its neighbours.
     const foes = @import("../domain/faction.zig").get(employer).foes;
     if (foes.len == 0) return "PER";
     return foes[gs.rng.random(.market).uintLessThan(usize, foes.len)];
 }
 
-/// Pay multiplier for an offer's opposition (12E.6): its combat power
+/// Pay multiplier for an offer's opposition: its combat power
 /// against the kind's norm (midpoint lances of `reference_lance_bv` at
 /// regular skill). A veteran five-lance force pays more than a green four.
 pub fn threatPayBp(kind: contract.ContractKind, lances: u8, quality: types.ExperienceLevel, lance_bv: i64) types.Bp {
@@ -96,15 +94,14 @@ pub fn refresh(gs: *GameState) !void {
     // Employers price off what fielding ONE company costs per month —
     // payroll, hulls and expected maintenance consumables, spread over the
     // combat companies on the books. A contract hires one company; pricing
-    // it off the whole outfit paid every company for all of them at once
-    // (play feedback: 98 M in the bank after twenty years).
-    const base = types.applyBp(@max(perCompanyOpsCost(gs), tuning.market.min_ops_cost), types.applyBp(market_margin_bp, gs.diff().contract_pay_bp)); // difficulty (12.32)
+    // it off the whole outfit would pay every company for all of them at once.
+    const base = types.applyBp(@max(perCompanyOpsCost(gs), tuning.market.min_ops_cost), types.applyBp(market_margin_bp, gs.diff().contract_pay_bp)); // difficulty
 
-    // The Dragoons rating (12C.7) sets how many come calling, who, and at what pay.
+    // The Dragoons rating sets how many come calling, who, and at what pay.
     const rating = @import("rating.zig");
     const rt = tuning.rating;
     const rating_idx = rating.currentIndex(gs);
-    // One board per HQ (12E.4): each posts work inside its own ring and
+    // One board per HQ: each posts work inside its own ring and
     // beachhead band, for the companies based there; its comms set how many
     // come calling, and a field HQ hears half as much.
     for (gs.hqs.keys()) |hq_id| {
@@ -127,7 +124,7 @@ pub fn refresh(gs: *GameState) !void {
             if (rating_idx < rt.house_min_index and isGreatHouse(world.faction)) continue;
             var kind = rollKind(gs);
             if (kind == .planetary_assault and rating_idx < rt.assault_min_index) kind = .garrison_duty;
-            // A mix, not a wall of garrison duty (play feedback): no kind takes
+            // A mix, not a wall of garrison duty: no kind takes
             // more than a third of the board, and the garrison class — garrison,
             // cadre, security, riot: long, quiet, event-driven — no more than half,
             // so raids and assaults are always on offer.
@@ -151,17 +148,17 @@ pub fn refresh(gs: *GameState) !void {
             // Beachhead employers pay a premium — nobody else will go.
             var pay = contract.monthlyPayment(base, kind, employerMultBp(world.faction), rating.payBp(rating_idx));
             if (vis[0] == .beachhead) pay = types.applyBp(pay, tuning.market.beachhead_pay_bp);
-            // A cooling employer (Stage 9E breach): half the offers, 70% pay.
+            // A cooling employer (after a breach): half the offers, 70% pay.
             if (gs.factionCooling(world.faction)) {
                 if (gs.rng.random(.market).boolean()) continue;
                 pay = types.applyBp(pay, tuning.market.cooling_pay_bp);
             }
-            // Standing (12.21): a house that thinks well of you pays more and
+            // Standing: a house that thinks well of you pays more and
             // one that doesn't shuns you like a cooling employer.
             const standing = gs.standing(world.faction);
             if (standing <= -tuning.contract.standing_shun_depth and gs.rng.random(.market).boolean()) continue;
             pay = types.applyBp(pay, standingPayBp(standing));
-            // Command rights (12B.1): the employer pays for the reins.
+            // Command rights: the employer pays for the reins.
             const rights: contract.CommandRights = switch (gs.rng.roll2d6(.market)) {
                 2, 3, 4 => .integrated,
                 5, 6, 7 => .house,
@@ -170,11 +167,11 @@ pub fn refresh(gs: *GameState) !void {
             };
             pay = types.applyBp(pay, rights.payBp());
 
-            // The opposition is a force of its own (12D.5), rolled now so the
+            // The opposition is a force of its own, rolled now so the
             // board can say what the job is up against.
             const enemy_key = pickEnemy(gs, world.faction, kind);
             const opfor = @import("../domain/opfor.zig").roll(&gs.rng, .market, kind, enemy_key, gs.clock.date.year);
-            // Harder work pays more (12E.6): the employer prices the opposition.
+            // Harder work pays more: the employer prices the opposition.
             pay = types.applyBp(pay, threatPayBp(kind, opfor.lances, opfor.quality, opfor.lance_bv));
             try gs.contract_offers.append(gs.allocator(), .{
                 .id = .none, // assigned on acceptance
@@ -196,14 +193,14 @@ pub fn refresh(gs: *GameState) !void {
                     .signing_bonus = if (gs.rng.roll2d6(.market) >= tuning.contract.signing_bonus_target) @divTrunc(pay, tuning.contract.signing_bonus_divisor) else 0,
                     .transport_pct = @intCast(@as(u32, gs.rng.roll2d6(.market) -| 2) * tuning.contract.transport_pct_per_pip),
                     // Straight support: the employer ships you supplies monthly
-                    // (Stage 9B delivers goods, not cash).
+                    // (goods, not cash).
                     .overhead_pct = blk: {
                         const r = gs.rng.roll2d6(.market);
                         break :blk if (r >= tuning.contract.overhead_full_at) @as(u8, 100) else if (r >= tuning.contract.overhead_half_at) 50 else if (r >= tuning.contract.overhead_quarter_at) 25 else 0;
                     },
                     .battle_loss_pct = if (gs.rng.roll2d6(.market) >= tuning.contract.battle_loss_target) tuning.contract.battle_loss_pct else 0,
                     .salvage_pct = @intCast(@as(u32, gs.rng.roll2d6(.market) -| 2) * tuning.contract.salvage_pct_per_pip),
-                    // Salvage exchange (12B.2): the employer keeps the wrecks and pays cash.
+                    // Salvage exchange: the employer keeps the wrecks and pays cash.
                     .salvage_exchange = gs.rng.random(.market).uintLessThan(u32, tuning.contract.salvage_exchange_in) == 0,
                     .command_rights = rights,
                 },
@@ -212,7 +209,7 @@ pub fn refresh(gs: *GameState) !void {
     }
 }
 
-/// Monthly board refresh at the HQ (ARCH §9.8, Stage 9C.3): hull listings
+/// Monthly board refresh at the HQ (ARCH §9.8): hull listings
 /// persist until bought or aged out (other buyers exist) and new hulls
 /// arrive to fill the lot; staples are restocked; rare slots re-roll.
 pub fn refreshListings(gs: *GameState) !void {
@@ -225,15 +222,15 @@ pub fn refreshListings(gs: *GameState) !void {
             _ = gs.market_listings.orderedRemove(i);
         } else i += 1;
     }
-    // Every HQ has a board (Stage 9D); field HQs are thin.
+    // Every HQ has a board; field HQs are thin.
     var hit = gs.hqs.iterator();
     while (hit.next()) |entry| try refreshBoard(gs, entry.value_ptr.id);
-    // Every contract world has a thin board of its own (12D.7).
+    // Every contract world has a thin board of its own.
     var cit = gs.contracts.iterator();
     while (cit.next()) |entry| if (entry.value_ptr.status == .active) try refreshContractWorld(gs, entry.value_ptr);
 }
 
-/// The contract world's hull board (12D.7, ARCH §9.8 "buy a local
+/// The contract world's hull board (ARCH §9.8 "buy a local
 /// replacement"): a few hulls off the world's own house table, at the
 /// field markup, for the deployed company's local funds — the grace window
 /// after a mauling has somewhere to shop.
@@ -294,7 +291,7 @@ fn refreshBoard(gs: *GameState, hq_id: types.HqId) !void {
         });
     }
 
-    // The black market (12C.17): where the hall gossips and the comms
+    // The black market: where the hall gossips and the comms
     // reach, a fence sometimes has something off the books.
     {
         const bm = tuning.market;
@@ -349,7 +346,7 @@ fn refreshBoard(gs: *GameState, hq_id: types.HqId) !void {
         while (def.rarity == .common and tries < 6) : (tries += 1) {
             def = &part_mod.catalog[r.uintLessThan(usize, part_mod.catalog.len)];
         }
-        // Sourcing (12C.14): scarce parts, periphery shelves, comms reach.
+        // Sourcing: scarce parts, periphery shelves, comms reach.
         const src = part_mod.sourcing(def, @import("../domain/faction.zig").isPeriphery(world.faction), hq.effectiveFacilityLevel(.comms));
         if (!market.listingAppears(&gs.rng, def.rarity, world.industry, warehouse, src.total())) continue;
         const price_roll: types.Bp = 10_000 + (@as(types.Bp, gs.rng.roll2d6(.market)) - 7) * 500;
@@ -374,7 +371,7 @@ fn refreshBoard(gs: *GameState, hq_id: types.HqId) !void {
     }
     var attempts: u32 = 0;
     while (hulls < lot_size and attempts < 12) : (attempts += 1) {
-        // Meks off the local house's table (12B.8), the odd combat vehicle
+        // Meks off the local house's table, the odd combat vehicle
         // from anywhere; fighters and ships have their own slot below.
         const design = if (r.uintLessThan(u8, 4) == 0) blk: {
             var vbuf: [32]*const chassis_mod.Chassis = undefined;
@@ -407,9 +404,9 @@ fn refreshBoard(gs: *GameState, hq_id: types.HqId) !void {
         hulls += 1;
     }
 
-    // The transport slot (Stage 12.15): a spaceport of some size sees a
-    // fighter, a dropship or a jumpship for sale now and then — one
-    // attempt per refresh, at the design's rarity, priced by
+    // The transport slot: a spaceport of some size sees a fighter, a
+    // dropship or a jumpship for sale now and then — one attempt per
+    // refresh, at the design's rarity; fighters at list, ships scaled by
     // transport_price_bp. New hulls; ships need a berth to buy.
     const port = hq.effectiveFacilityLevel(.spaceport);
     if (!thin and port >= 2) {
@@ -444,8 +441,8 @@ fn refreshBoard(gs: *GameState, hq_id: types.HqId) !void {
         }
     }
 
-    // Support vehicles are always on offer at a regional or brigade board
-    // (Stage 12): trucks are how a company's field capacity grows, so they
+    // Support vehicles are always on offer at a regional or brigade board:
+    // trucks are how a company's field capacity grows, so they
     // are a staple line, new, at list price, two at a time.
     if (!thin) {
         const support_keys = [_][]const u8{ "CGT-3", "SVT-1", "MASH-27", "SEC-PLT" };
@@ -472,8 +469,7 @@ fn refreshBoard(gs: *GameState, hq_id: types.HqId) !void {
 }
 
 /// Who walks into a hiring hall: combat crews and techs most often, then
-/// medical and every back-office desk (Stage 12: finance, command and
-/// transport admins were missing, so those desks could never be filled).
+/// medical and every back-office desk, so every desk can be filled.
 const hall_roles = [_]person_mod.Role{
     .mekwarrior,    .mekwarrior,    .tech_mek,        .tech_mek,      .tech_mechanic, .vehicle_crew,
     .astech,        .astech,        .medic,           .doctor,        .admin_logistics, .admin_hr,
@@ -490,8 +486,8 @@ fn arrivalRole(gs: *GameState, hq: *const hq_mod.Hq) person_mod.Role {
     return hall_roles[gs.rng.random(.market).uintLessThan(usize, hall_roles.len)];
 }
 
-/// Days a walk-in or a floor top-up stays on the board; the weekly
-/// refresh's crowd lingers longer (tuning.market).
+/// Days a walk-in or a floor top-up stays on the board; the crowd
+/// `refreshCandidates` lists lingers longer (tuning.market).
 const walkin_days: u32 = tuning.market.hall_walkin_days;
 const refresh_days: u32 = tuning.market.hall_refresh_days;
 
@@ -515,7 +511,7 @@ fn shortAdminRole(gs: *GameState, hq: *const hq_mod.Hq) ?person_mod.Role {
     return null;
 }
 
-/// The role the outfit is shortest of at this HQ (12B.13): a short desk
+/// The role the outfit is shortest of at this HQ: a short desk
 /// first, then the largest gap in the manning tables of the companies
 /// supplied here (pooled roles excepted — astechs and medics are hired to
 /// complement, not recruited). Word gets round: half the walk-ins are
@@ -541,7 +537,7 @@ fn shortRole(gs: *GameState, hq: *const hq_mod.Hq) ?person_mod.Role {
     return best;
 }
 
-/// Daily hiring-hall churn (Stage 9C.3): people move fast. Each turn some
+/// Daily hiring-hall churn: people move fast. Each turn some
 /// candidates walk out and, on a good roll, someone new walks in.
 pub fn churnCandidates(gs: *GameState) !void {
     const day = gs.clock.day_index;
@@ -566,14 +562,13 @@ pub fn churnCandidates(gs: *GameState) !void {
         // more on a boxcars day.
         const arrivals: u32 = hall + @as(u32, if (roll >= 12) 1 else 0);
         for (0..arrivals) |_| try listCandidate(gs, hq, arrivalRole(gs, hq), walkin_days);
-        _ = try topUpHall(gs, hq); // 12B.10: the board never runs dry
+        _ = try topUpHall(gs, hq); // the board never runs dry
     }
 }
 
-/// The floor under every board (12B.10, play feedback: "if people leave
-/// there are not always people in the hiring hall"): a hall that dips
-/// under the floor for a role gets a fresh walk-in of that role the same
-/// day — combat crews and techs two deep, everyone else one.
+/// The floor under every board: a hall that dips under the floor for a
+/// role gets a fresh walk-in of that role the same day — hull-seat crews
+/// and astechs `hall_floor_combat` deep, everyone else `hall_floor`.
 pub fn topUpHall(gs: *GameState, hq: *const hq_mod.Hq) !u32 {
     if (hq.effectiveFacilityLevel(.hiring_hall) == 0) return 0;
     var added: u32 = 0;
@@ -592,8 +587,8 @@ pub fn topUpHall(gs: *GameState, hq: *const hq_mod.Hq) !u32 {
     return added;
 }
 
-/// Hiring-hall boards (Stage 9C.2): weekly candidates per HQ, count and
-/// quality by hiring-hall level + HR staff; they move on after three weeks.
+/// Fill every HQ's hiring hall (the day the campaign opens): count by
+/// hiring-hall level + HR staff; they move on after `hall_refresh_days`.
 pub fn refreshCandidates(gs: *GameState) !void {
     const day = gs.clock.day_index;
 
@@ -654,7 +649,7 @@ test "refresh only offers work inside rings or the beachhead band" {
     }
 }
 
-test "9C.3: hulls persist across refreshes, staples are always stocked" {
+test "hulls persist across refreshes, staples are always stocked" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 19 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .quartermaster);
@@ -703,7 +698,7 @@ test "9C.3: hulls persist across refreshes, staples are always stocked" {
     }
 }
 
-test "9C.3: hiring halls churn daily" {
+test "hiring halls churn daily" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 20 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .DC, .paymaster);
@@ -722,7 +717,7 @@ test "9C.3: hiring halls churn daily" {
     try std.testing.expect(departures > 5);
 }
 
-test "12: every admin desk walks into the hall, short desks first" {
+test "every admin desk walks into the hall, short desks first" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 21 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .DC, .paymaster);
@@ -741,7 +736,7 @@ test "12: every admin desk walks into the hall, short desks first" {
     try std.testing.expect(seen_command);
 }
 
-test "12C.7: an F-rated outfit hears only from the periphery and never gets a planetary assault" {
+test "an F-rated outfit hears only from the periphery and never gets a planetary assault" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 127 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .paymaster);
@@ -764,7 +759,7 @@ test "12C.7: an F-rated outfit hears only from the periphery and never gets a pl
     try std.testing.expectEqual(@as(types.Bp, 13_000), rating.payBp(5));
 }
 
-test "12C.17: a wired HQ with a hall eventually hears from a fence; a firebase never does" {
+test "a wired HQ with a hall eventually hears from a fence; a firebase never does" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1217 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .paymaster);
@@ -798,7 +793,7 @@ test "no HQ, no reputation, no offers" {
     try std.testing.expectEqual(@as(usize, 0), gs.contract_offers.items.len);
 }
 
-test "12.15: the transport slot opens with the spaceport; ordinary lots are meks only" {
+test "the transport slot opens with the spaceport; ordinary lots are meks only" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 21 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .quartermaster);
@@ -834,7 +829,7 @@ test "12.15: the transport slot opens with the spaceport; ordinary lots are meks
     try std.testing.expect(seen);
 }
 
-test "12B.10: the hiring hall always has a few of every role" {
+test "the hiring hall always has a few of every role" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1210 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .quartermaster);
@@ -850,7 +845,7 @@ test "12B.10: the hiring hall always has a few of every role" {
         try std.testing.expect(have >= 1);
         if (role == .mekwarrior or role == .tech_mek) try std.testing.expect(have >= 2);
     }
-    // Hire every mekwarrior; tomorrow the board has two again.
+    // Hire every mekwarrior; tomorrow the board has at least two again.
     var i: usize = 0;
     while (i < gs.candidates.items.len) {
         if (gs.candidates.items[i].spec.role == .mekwarrior) _ = gs.candidates.swapRemove(i) else i += 1;
@@ -888,7 +883,7 @@ test "the board is a mix: at least offers_min offers, no kind over a third of th
     try std.testing.expect(garrison_class <= @max(2, n / 2));
 }
 
-test "play feedback: offers are priced per company — a second company does not double every contract's pay" {
+test "offers are priced per company — a second company does not double every contract's pay" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 96 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .quartermaster);
@@ -896,15 +891,15 @@ test "play feedback: offers are priced per company — a second company does not
     const one = perCompanyOpsCost(&gs);
     _ = try @import("starter_company.zig").generateInto(&gs, "Bravo");
     const two = perCompanyOpsCost(&gs);
-    // Two like companies: the per-company figure barely moves (HQ overhead is now shared).
+    // Two like companies: the per-company figure barely moves (HQ overhead is shared).
     try std.testing.expect(two < one);
     try std.testing.expect(two * 10 > one * 6);
-    // And the whole-outfit figure, which the price used to be built on, roughly doubled.
+    // The whole-outfit figure roughly doubles.
     const whole = gs.monthlyPayroll() + gs.monthlyHullUpkeep() + maintenanceEstimate(&gs);
     try std.testing.expect(whole > @divTrunc(two * 18, 10));
 }
 
-test "12E.6: a veteran five-lance opposition pays more than a green four-lance one" {
+test "a veteran five-lance opposition pays more than a green four-lance one" {
     const hard = threatPayBp(.planetary_assault, 5, .veteran, 4_500);
     const soft = threatPayBp(.planetary_assault, 4, .green, 3_500);
     try std.testing.expect(hard > 10_000);
