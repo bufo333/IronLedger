@@ -712,6 +712,21 @@ pub const GameState = struct {
         return if (self.hqs.count() > 0) self.hqs.keys()[0] else .none;
     }
 
+    /// The HQ a person lives at: the one they are posted to, else their
+    /// company's home HQ. Training and weekly rest read this.
+    pub fn homeHqOf(self: *GameState, p: *const person_mod.Person) types.HqId {
+        if (p.posted_hq != .none and self.hqs.getPtr(p.posted_hq) != null) return p.posted_hq;
+        return self.homeHqFor(p.assigned_force);
+    }
+
+    /// The HQ whose training ground a person trains at: their home HQ,
+    /// when it has one (`Hq.supportsTraining`).
+    pub fn trainingHqFor(self: *GameState, p: *const person_mod.Person) ?types.HqId {
+        const id = self.homeHqOf(p);
+        const hq = self.hqs.getPtr(id) orelse return null;
+        return if (hq.supportsTraining()) id else null;
+    }
+
     /// Combat companies currently assigned to an HQ.
     pub fn companiesAtHq(self: *GameState, hq_id: types.HqId) u32 {
         var n: u32 = 0;

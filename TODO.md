@@ -43,8 +43,9 @@ Done: every Stage 12 feature (12, 12B–12G) has shipped. Part 2 is next.
 
 ## D18. HQ locality (audit #21; rules 5, 8)
 
-- [ ] One `canTrainAt(gs, hq)` against `homeHqFor(company)` replaces the three any-HQ loops (commands.zig:782-787, 1448-1453, 1849-1854).
-- [ ] Weekly rest uses the company's home HQ mess and HR, not the best mess / `hqs.keys()[0]` (medical.zig:320-332).
+D18a is done (see Done); D18b is left.
+
+
 - [ ] `recruitBonus` (state.zig:645-647) reads the recruiting HQ, not `hqs.values()[0]`.
 - [ ] `intelLevel(gs, offer_hq)` (offer_rating.zig:22-27): per-board comms, matching 12E.4 per-HQ boards.
 - [ ] Asymmetric two-HQ tests for each: the facility at one HQ does not serve a company homed at the other.
@@ -112,6 +113,7 @@ Contract deliverables closed before this list merged, all from the 2026-09-22 co
 - D16e the field workshop (PR #61, decided 2026-09-23): a ready Logistics lance adds `tuning.maintenance.push_workshop_hours` to the repair push budget; the unread `CampaignMods.has_field_repair` flag and the orphan `mobile_field_base` unit kind (no chassis could field one) are gone
 - D17a freight accounting, audit #12 (PR #62): `freightQuote` is pure (checks `network.fitsThroughput`, books nothing) and `commitFreight` books the tonnage after the payment clears, in `shipStock` and `orderPart`; one `logistics.linkTonsPerWeek` (`throughput_per_level` × `tons_per_supply_unit`, the renamed `weeks_of_capacity`) answers every link and route
 - D17b slots before money, audit #6 (PR #63): HQ founding (`prepareHq`/`commitHq`), fabrication, facility upgrade, unit transfer, refit commit and `resolveChoice` reserve their ledger and list slots (`GameState.reserveLedger`, `ensureUnusedCapacity`) before the first mutation, so no list growth fails after money or stock moves
+- D18a home-HQ training and rest, audit #21 (PR #64): `GameState.homeHqOf` (posting, else company home) and `trainingHqFor` replace the three any-HQ training loops; training days use that HQ's HR; weekly rest uses the home HQ's mess and HR per person
 
 ---
 
