@@ -2759,20 +2759,9 @@ pub fn people(alloc: Alloc, gs: *GameState, filter: HallFilter) !People {
 }
 
 /// One person's full record.
-/// Plain text for the CLI: drop the `{a}…{/}` markup the TUI colours.
-pub fn stripMarks(alloc: Alloc, text: []const u8) ![]const u8 {
-    var out: std.ArrayListUnmanaged(u8) = .empty;
-    var i: usize = 0;
-    while (i < text.len) {
-        if (text[i] == '{' and i + 2 < text.len and text[i + 2] == '}' and (text[i + 1] == 'a' or text[i + 1] == 'g' or text[i + 1] == 'c' or text[i + 1] == 'd' or text[i + 1] == '/')) {
-            i += 3;
-            continue;
-        }
-        try out.append(alloc, text[i]);
-        i += 1;
-    }
-    return out.toOwnedSlice(alloc);
-}
+/// Plain text for the CLI: `table.plainText` drops the markup the TUI
+/// colours and sanitizes what is left.
+pub const stripMarks = table.plainText;
 
 // --------------------------------------------------------------- readiness
 
@@ -3921,6 +3910,13 @@ test "the after-action sheet for a concession says what was given up and what it
     try std.testing.expect(std.mem.indexOf(u8, text, "objective conceded") != null);
     try std.testing.expect(std.mem.indexOf(u8, text, "power 0 vs 0") == null);
     try std.testing.expect(std.mem.indexOf(u8, text, try std.fmt.allocPrint(a, "{d}", .{r.score_delta})) != null);
+}
+
+test "plain CLI text drops every markup tag and cannot carry a terminal control" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    try std.testing.expectEqualStrings("selected tab purple?x", try stripMarks(a, "{s}selected{/} {t}tab{/} {p}purple{/}\x1bx"));
 }
 
 test "the contact line an advance stops for is the checklist's contact warning" {
