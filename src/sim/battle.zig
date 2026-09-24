@@ -235,8 +235,13 @@ fn playerSideIn(gs: *GameState, alloc: std.mem.Allocator, c: *const contract_mod
             // skill lost for good (Stage 12.16).
             // Specialists (12B.6) count a point better; old wounds a point
             // worse; a tired pilot one to three worse (12C.1 fatigue bands).
-            gunnery_sum += ((pilot.skill(.gunnery_mek) orelse 4) + pilot.permanentPenalty() + pilot.fatiguePenalty()) -| @intFromBool(pilot.has("gunnery_specialist"));
-            piloting_sum += ((pilot.skill(.piloting_mek) orelse 5) + pilot.permanentPenalty() + pilot.fatiguePenalty()) -| @intFromBool(pilot.has("piloting_specialist"));
+            // The skills are the hull kind's: a vehicle fights on gunnery_vee
+            // and driving_vee, a mek on gunnery_mek and piloting_mek.
+            const crew_role = unit_mod.crewRoleFor(u.kind);
+            const gunnery_skill = pilot.skill(crew_role.primarySkill()) orelse 4;
+            const piloting_skill = (if (crew_role.pilotingSkill()) |s| pilot.skill(s) else null) orelse 5;
+            gunnery_sum += (gunnery_skill + pilot.permanentPenalty() + pilot.fatiguePenalty()) -| @intFromBool(pilot.has("gunnery_specialist"));
+            piloting_sum += (piloting_skill + pilot.permanentPenalty() + pilot.fatiguePenalty()) -| @intFromBool(pilot.has("piloting_specialist"));
             try side.engaged.append(alloc, uid);
             n += 1;
         }
@@ -494,7 +499,7 @@ fn recoverWrecks(
             loss.damage_value += u.purchase_price - @divTrunc(u.purchase_price, 2);
             const p = gs.person(u.pilot) orelse continue;
             if (!p.isOnBooks()) continue;
-            const piloting: i32 = p.skill(.piloting_mek) orelse 5;
+            const piloting: i32 = (if (p.role.pilotingSkill()) |s| p.skill(s) else null) orelse 5;
             const escape = @as(i32, gs.rng.roll2d6(.battle)) + (5 - piloting) + gs.diff().recovery_mod + (if (outcome == .rout) t.recovery_rout else 0);
             if (escape >= t.escape_target) continue;
             const pid = p.id;
@@ -548,7 +553,7 @@ pub fn recoveryPush(gs: *GameState, battle: types.BattleId, company: types.Force
         if (h.crew.fate != .missing) continue;
         const p = gs.person(h.pilot) orelse continue;
         if (p.status != .mia) continue; // ransomed, traded or written off already
-        const piloting: i32 = p.skill(.piloting_mek) orelse 5;
+        const piloting: i32 = (if (p.role.pilotingSkill()) |s| p.skill(s) else null) orelse 5;
         if (@as(i32, gs.rng.roll2d6(.battle)) + (5 - piloting) + t.push_mod < t.escape_target) continue;
         try @import("contract_events.zig").walkOut(gs, p, company);
         out.people += 1;
@@ -2130,4 +2135,41 @@ test "support lances grant their modifiers only while a hull is ready and crewed
     try std.testing.expect(!after.has_mash_lance);
     try std.testing.expect(!after.has_salvage_lance);
     try std.testing.expect(after.has_security_lance == before.has_security_lance);
+}
+
+/// A company of one vehicle lance whose crews have `gunnery` and `driving`
+/// vehicle skills, on an active contract; returns its estimated power.
+fn vehiclePowerForTest(gunnery: u8, driving: u8) !i64 {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 7201 });
+    defer gs.deinit();
+    _ = try gs.createCommander("T", .LC, .line_officer);
+    const co = try gs.createForce("Alpha", .company, .none);
+    const lance = try gs.createForce("Armor", .lance, co);
+    for (0..4) |_| {
+        const uid = try gs.addUnit("VDT");
+        const crew = try gs.hirePerson("V", "Crew", .vehicle_crew);
+        try gs.person(crew).?.skills.put(gs.allocator(), .gunnery_vee, gunnery);
+        try gs.person(crew).?.skills.put(gs.allocator(), .driving_vee, driving);
+        try gs.assignUnit(uid, lance, crew);
+    }
+    try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
+        .id = @enumFromInt(1),
+        .kind = .recon_raid,
+        .employer_key = "LC",
+        .enemy_key = "PER",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 6, .base_pay_month = 400_000 },
+        .status = .active,
+        .assigned_company = co,
+    });
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    return (try estimatePower(&gs, arena.allocator(), gs.contracts.getPtr(@enumFromInt(1)).?, co)).power;
+}
+
+test "vehicle crews fight with their vehicle skills" {
+    const elite = try vehiclePowerForTest(1, 2);
+    const green = try vehiclePowerForTest(6, 7);
+    try std.testing.expect(elite > 0);
+    try std.testing.expect(elite > green);
 }
