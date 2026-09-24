@@ -496,8 +496,9 @@ pub fn repairNeeds(gs: *GameState, alloc: std.mem.Allocator, company: types.Forc
 }
 
 /// The night's budget: `push_hours_bp` of the spare weekly hours of every
-/// fit tech on the company's hulls, pooled; the field armour; the spares
-/// on hand for the parts the damage wants.
+/// fit tech on the company's hulls, pooled, plus `push_workshop_hours`
+/// when a ready Logistics lance brings its workshop; the field armour; the
+/// spares on hand for the parts the damage wants.
 pub fn repairBudget(gs: *GameState, alloc: std.mem.Allocator, company: types.ForceId, needs: []const RepairNeed) !RepairBudget {
     var seen: std.AutoHashMapUnmanaged(types.PersonId, void) = .empty;
     var spare_hours: u32 = 0;
@@ -517,8 +518,10 @@ pub fn repairBudget(gs: *GameState, alloc: std.mem.Allocator, company: types.For
             if (std.mem.eql(u8, sp.key, job.part_key)) break;
         } else try spares.append(alloc, .{ .key = job.part_key, .count = gs.stockCount(site, job.part_key) });
     };
+    // A ready Logistics lance carries the company's field workshop.
+    const workshop: u32 = if (gs.supportLance(company, .transport)) |lance| (if (gs.forceOperational(lance)) tuning.maintenance.push_workshop_hours else 0) else 0;
     return .{
-        .hours = @intCast(types.applyBp(spare_hours, tuning.maintenance.push_hours_bp)),
+        .hours = @as(u32, @intCast(types.applyBp(spare_hours, tuning.maintenance.push_hours_bp))) + workshop,
         .armor_tons = gs.stockCount(site, "armor"),
         .spares = try spares.toOwnedSlice(alloc),
     };
@@ -729,4 +732,21 @@ test "12G.6: a wrecked slot takes a spare as well as hours, and waits without on
     try std.testing.expectEqual(@as(u32, 1), h.parts);
     try std.testing.expect(h.left);
     try std.testing.expectEqual(slotHours(true) + slotHours(false), plan.hours);
+}
+
+test "a ready Logistics lance adds its workshop hours to the repair push" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 7401 });
+    defer gs.deinit();
+    const f = try @import("contract_events.zig").damagedCompanyForTest(&gs, 2);
+    const co = f.c.assigned_company;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const needs = try repairNeeds(&gs, a, co);
+    const with_workshop = try repairBudget(&gs, a, co, needs);
+    // Nobody fit to drive the trucks: the workshop stays behind.
+    const lance = gs.supportLance(co, .transport).?;
+    for (lance.units.items) |uid| gs.person(gs.unit(uid).?.pilot).?.status = .wounded;
+    const without = try repairBudget(&gs, a, co, needs);
+    try std.testing.expectEqual(tuning.maintenance.push_workshop_hours, with_workshop.hours - without.hours);
 }

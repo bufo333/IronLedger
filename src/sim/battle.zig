@@ -312,7 +312,7 @@ fn companyMods(gs: *GameState, c: *const contract_mod.Contract) autoresolve.Camp
                     .mess => mods.has_mess_lance = true,
                     .security => mods.has_security_lance = true,
                     .salvage => mods.has_salvage_lance = true,
-                    .transport => mods.has_field_repair = true,
+                    .transport => {}, // its workshop counts in the repair push (maintenance.repairBudget)
                 }
             }
         }

@@ -22,7 +22,6 @@ pub const CampaignMods = struct {
     commander_tactics: u8 = 7, // skill target number, lower = better
     has_air_cover: bool = false,
     has_artillery: bool = false,
-    has_field_repair: bool = false, // mobile field base / repair depot in range
     recon_quality: u8 = 0, // 0–3, from scouting lances & comms facility
     // Support-company lances (force.SupportLanceKind, ARCH §9.3). Effects
     // here are small and direct; their bigger payoffs are campaign-side

@@ -456,6 +456,9 @@ pub const Tuning = struct {
         /// The night after a fight (12G.6): the share of the company's
         /// pooled spare tech-hours the field repair push spends.
         push_hours_bp: types.Bp, // TUNE
+        /// Tech-hours a ready Logistics lance's field workshop adds to the
+        /// night's repair push.
+        push_workshop_hours: u32, // TUNE
         /// A snake-eyes week hurts the tech on a follow-up 2d6 at or under
         /// this, for this many days plus 2d6.
         accident_target: u8,
