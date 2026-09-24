@@ -1,4 +1,4 @@
-//! Scenario types (Stage 12C.9). Mirrors MekHQ/AtB `AtBScenario` types
+//! Scenario types (Stage 12C.9). Adaptation of MekHQ/AtB `AtBScenario` types
 //! (stand-up, hold the line, breakthrough, ambush, convoy, base attack,
 //! recon, extraction) abridged to the autoresolver's levers. Data in
 //! data/tables/scenarios.zon.
@@ -23,7 +23,7 @@ pub const Scenario = struct {
     score_mult: u8,
     /// The support train sits in the line of fire on a defeat.
     support_exposed: bool,
-    /// Recovering wrecks off a lost field (12D.3): your own ground helps,
+    /// Recovering wrecks off a lost field: your own ground helps,
     /// the enemy's lines hurt.
     recovery_mod: i8 = 0,
 };
@@ -39,7 +39,7 @@ pub fn find(key: []const u8) ?*const Scenario {
     return null;
 }
 
-/// The six faces of a kind's scenario table (12E.3: the rating averages
+/// The six faces of a kind's scenario table (the rating averages
 /// over them exactly instead of rolling).
 pub fn faces(kind: contract.ContractKind) [6]*const Scenario {
     var out: [6]*const Scenario = undefined;
@@ -61,7 +61,7 @@ pub fn roll(rng: *rng_mod.Rng, stream: rng_mod.Stream, kind: contract.ContractKi
     return find("standup").?;
 }
 
-test "12C.9: every contract kind has a table and every entry resolves" {
+test "every contract kind has a table and every entry resolves" {
     inline for (@typeInfo(contract.ContractKind).@"enum".fields) |f| {
         var found = false;
         for (table.by_kind) |row| if (std.mem.eql(u8, row.kind, f.name)) {

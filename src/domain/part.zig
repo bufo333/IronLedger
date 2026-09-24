@@ -1,20 +1,20 @@
 //! Parts: catalog references, inventory, acquisition orders.
-//! Mirrors MekHQ `parts/*` + `Quartermaster` acquisition flow. Stage 5.
+//! MekHQ counterpart: `parts/*` + the `Quartermaster` acquisition flow. Stage 5.
 
 const std = @import("std");
 const types = @import("types.zig");
 
-/// How a mountable item attaches (Stage 10 MekLab).
+/// How a mountable item attaches (MekLab).
 pub const MountType = enum { none, energy, ballistic, missile, equipment, ammo };
 
-/// Who builds it (12C.14): periphery worlds source Inner Sphere parts
+/// Who builds it: periphery worlds source Inner Sphere parts
 /// rated D or worse with a penalty.
 pub const TechBase = enum { inner_sphere, periphery };
 
 /// TechManual availability code for 3025 (A everywhere … F almost nowhere).
 pub const Availability = enum { a, b, c, d, e, f };
 
-/// The sourcing modifiers on an acquisition roll (12C.14).
+/// The sourcing modifiers on an acquisition roll.
 pub const Sourcing = struct {
     avail: i32,
     periphery: i32,
@@ -65,20 +65,20 @@ pub const PartDef = struct {
     name: []const u8,
     cost: types.CBills,
     rarity: types.Rarity,
-    /// Storage/shipping weight per stock unit (Stage 9B).
+    /// Storage/shipping weight per stock unit.
     pallet_tons: u16 = 1,
-    /// Sourcing (12C.14): who builds it and how widely it is stocked.
+    /// Sourcing: who builds it and how widely it is stocked.
     tech_base: TechBase = .inner_sphere,
     availability: Availability = .c,
-    /// First year in production (12C.16); the market lists only what exists.
+    /// First year in production; the market lists only what exists.
     intro_year: u16 = 2400,
-    // Construction facts for mountable items (Stage 10); `mount == .none`
+    // Construction facts for mountable items; `mount == .none`
     // means the lab can't install it.
     mass_half_tons: u16 = 0,
     crits: u8 = 0,
     heat: u8 = 0,
     mount: MountType = .none,
-    /// Structural components (12D.8): the mek bay level a fabrication job
+    /// Structural components: the mek bay level a fabrication job
     /// needs, and whether only a regional or brigade HQ can run it.
     fab_min_bay: u8 = 1,
     fab_regional: bool = false,
@@ -151,14 +151,14 @@ pub fn isComponent(key: []const u8) bool {
 
 const WeightClass = @import("chassis.zig").WeightClass;
 
-/// The structural component a structure slot needs (Stage 9C), by the
+/// The structural component a structure slot needs, by the
 /// location prefix of its slot key ("lt.structure" → side torso), for a
-/// medium hull. Use `componentFor` when the hull is known (12D.8).
+/// medium hull. Use `componentFor` when the hull is known.
 pub fn componentForSlot(slot_key: []const u8) []const u8 {
     return componentForSlotClass(slot_key, .medium);
 }
 
-/// The component for a slot on a hull of a weight class (12D.8): medium
+/// The component for a slot on a hull of a weight class: medium
 /// assemblies keep the plain key, the others carry a class suffix.
 pub fn componentForSlotClass(slot_key: []const u8, class: WeightClass) []const u8 {
     const loc: usize = if (std.mem.startsWith(u8, slot_key, "hd.")) 0 //
@@ -176,7 +176,7 @@ pub fn componentForSlotClass(slot_key: []const u8, class: WeightClass) []const u
     return table[@intFromEnum(class)][loc];
 }
 
-/// The component a slot needs on a given design (12D.8): by its tonnage.
+/// The component a slot needs on a given design: by its tonnage.
 pub fn componentFor(slot_key: []const u8, chassis_key: []const u8) []const u8 {
     const class: WeightClass = if (@import("chassis.zig").find(chassis_key)) |c| c.weightClass() else .medium;
     return componentForSlotClass(slot_key, class);
@@ -236,7 +236,7 @@ pub const OrderStatus = enum { sourcing, in_transit, delivered, failed, cancelle
 pub const AcquisitionOrder = struct {
     part_key: []const u8,
     quantity: u32,
-    /// Where the goods land (Stage 9B): HQ warehouse or a deployed company.
+    /// Where the goods land: HQ warehouse or a deployed company.
     dest: types.Site = .outfit,
     ordered_day: u32,
     eta_day: ?u32 = null,
@@ -250,7 +250,7 @@ pub const AcquisitionOrder = struct {
     }
 };
 
-test "12C.14: sourcing modifiers — scarce parts, periphery worlds and comms reach" {
+test "sourcing modifiers — scarce parts, periphery worlds and comms reach" {
     const ppc = find("ppc").?;
     try std.testing.expect(@intFromEnum(ppc.availability) >= @intFromEnum(Availability.d));
     const home = sourcing(ppc, false, 0);
@@ -290,7 +290,7 @@ test "acquisition order starts unsourced" {
     try std.testing.expect(o.eta_day == null);
 }
 
-test "12D.8: structure is rated by weight class — every classed assembly is in the catalogue" {
+test "structure is rated by weight class — every classed assembly is in the catalogue" {
     try std.testing.expectEqualStrings("comp_ct_l", componentFor("ct.structure", "LCT-1V"));
     try std.testing.expectEqualStrings("comp_ct", componentFor("ct.structure", "SHD-2H"));
     try std.testing.expectEqualStrings("comp_leg_a", componentFor("ll.structure", "AS7-D"));

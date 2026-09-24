@@ -143,10 +143,10 @@ pub const Hq = struct {
     projects: std.ArrayListUnmanaged(Project) = .empty,
     staff_assigned: u32 = 0,
     monthly_upkeep: types.CBills = 0,
-    /// The HQ's own treasury (Stage 9A): construction, market buys, and
+    /// The HQ's own treasury: construction, market buys, and
     /// upkeep draw from here; refilled by courier from the outfit.
     funds: types.CBills = 0,
-    /// Warehouse stock by catalog key (Stage 9B), bounded by
+    /// Warehouse stock by catalog key, bounded by
     /// `warehouseCapacityTons` of the effective warehouse level.
     stock: std.StringArrayHashMapUnmanaged(u32) = .empty,
 
@@ -231,8 +231,8 @@ pub const Hq = struct {
         const support_cap: u8 = th.support_base + @as(u8, @intFromBool(mess >= th.support_mess_level)) + @as(u8, @intFromBool(hospital >= th.support_deep_level or warehouse >= th.support_deep_level));
 
         return switch (self.tier) {
-            // A forward base: one company can rest, resupply and stage here
-            // (play feedback). What it lacks is whatever needs a facility it
+            // A forward base: one company can rest, resupply and stage here.
+            // What it lacks is whatever needs a facility it
             // has not built — no training without a training ground, no
             // structural repair without a mek bay, no hiring without a hall.
             // It hosts a company as it stands; it builds nothing — the fifth
@@ -267,8 +267,8 @@ pub const Hq = struct {
         };
     }
 
-    /// Whether this HQ's facilities can stand up a support lance of `kind`
-    /// (Stage 12.15): a mess lance needs a mess hall (≥ 2), MASH a hospital,
+    /// Whether this HQ's facilities can stand up a support lance of `kind`:
+    /// a mess lance needs a mess hall (≥ 2), MASH a hospital,
     /// a logistics lance a warehouse; salvage and security always (tuning.hq.support_lance_needs).
     pub fn supportLanceAllowed(self: *const Hq, kind: SupportLanceKind) bool {
         if (self.tier == .field) return false;

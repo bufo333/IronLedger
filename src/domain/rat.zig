@@ -1,4 +1,4 @@
-//! Random assignment tables (Stage 12B.8). Mirrors AtB's RATs (MekHQ
+//! Random assignment tables (Stage 12B.8). Adaptation of AtB's RATs (MekHQ
 //! `universe/RATManager`, abridged): per house, per weight class, the
 //! designs that turn up — in company generation, on the boards, and as the
 //! wrecks salvaged off a house's regiment. Data in data/tables/rat.zon.
@@ -37,7 +37,7 @@ pub fn forFaction(key: []const u8) *const RatRow {
 /// whole catalogue class if the row is empty or names a missing design.
 pub fn roll(rng: *rng_mod.Rng, stream: rng_mod.Stream, faction: []const u8, class: chassis.WeightClass, year: u16) *const chassis.Chassis {
     const pool = forFaction(faction).pool(class);
-    // Only what is in service this year (12C.16).
+    // Only what is in service this year.
     var avail: [64][]const u8 = undefined;
     var n: usize = 0;
     for (pool) |key| if (chassis.find(key)) |c| if (chassis.availableIn(c, year) and n < avail.len) {

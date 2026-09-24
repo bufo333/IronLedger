@@ -1,5 +1,5 @@
 //! Finances: transaction ledger, per-company P&L, loans.
-//! Mirrors MekHQ `finances/Finances.java`; extended with company-level
+//! MekHQ counterpart: `finances/Finances.java`, extended with company-level
 //! cost/profit centers (ARCH §11). All amounts are integer C-bills.
 
 const std = @import("std");
@@ -38,13 +38,13 @@ pub const Transaction = struct {
     category: Category,
     /// Cost/profit center; .none = outfit-level overhead.
     company: types.ForceId = .none,
-    /// HQ cost center (Stage 9A).
+    /// HQ cost center.
     hq: types.HqId = .none,
     contract: types.ContractId = .none,
     note: []const u8 = "",
 };
 
-/// Which entity's books to read (Stage 9A).
+/// Which entity's books to read.
 pub const EntityFilter = union(enum) {
     all,
     company: types.ForceId,

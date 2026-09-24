@@ -10,12 +10,11 @@ const types = @import("../domain/types.zig");
 
 /// Standard JumpShip hop: ~30 LY, then recharge at the jump point.
 pub const ly_per_jump = tuning.logistics.ly_per_jump;
-pub const recharge_days = tuning.logistics.recharge_days; // solar sail recharge (varies by star; Stage 9)
+pub const recharge_days = tuning.logistics.recharge_days; // solar sail recharge
 pub const burn_days_default = tuning.logistics.burn_days; // in-system transit, jump point ↔ planet
 
-/// Transit time in days for a route of `jumps` hops. First-cut model:
+/// Transit time in days for a route of `jumps` hops:
 /// burn out + (jumps × recharge, pipelining the first) + burn in.
-/// Owned command-circuit or lithium-fusion batteries reduce this (Stage 9).
 pub fn transitDays(jumps: u32) u32 {
     if (jumps == 0) return burn_days_default; // same system
     return burn_days_default + (jumps - 1) * recharge_days + burn_days_default;
@@ -76,7 +75,7 @@ pub fn hopCostMultBp(via_warehouse: u8, via_spaceport: u8) types.Bp {
 }
 
 /// Transit charter multiplier when the outfit's own ships lift part of a
-/// company (Stage 12.15): the carried share still pays the jumpship collar
+/// company: the carried share still pays the jumpship collar
 /// (half the charter) unless an owned jumpship makes the run too.
 pub fn transitFreightBp(covered_bp: types.Bp, own_jumpship: bool) types.Bp {
     const covered = @min(covered_bp, 10_000);

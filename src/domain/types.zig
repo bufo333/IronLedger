@@ -42,12 +42,11 @@ pub const UnitId = enum(u32) { none = 0, _ };
 pub const ForceId = enum(u32) { none = 0, _ };
 pub const ContractId = enum(u32) { none = 0, _ };
 pub const HqId = enum(u32) { none = 0, _ };
-/// One queued inbox event (Stage 12G.1). The inbox is answered by id, not
+/// One queued inbox event. The inbox is answered by id, not
 /// by row: resolving one event shifts every index after it.
 pub const EventId = enum(u32) { none = 0, _ };
-/// One resolved engagement (Stage 12G.3): the grouping key the campaign
-/// log never had, so an AAR's lines can be gathered without reading its
-/// prose.
+/// One resolved engagement: the grouping key that gathers an AAR's log
+/// lines without reading its prose.
 pub const BattleId = enum(u32) { none = 0, _ };
 
 /// Skill catalog, following MekHQ's SkillType. Lower level = better
@@ -83,7 +82,7 @@ pub const ExperienceLevel = enum(u8) {
     elite = 3,
 
     /// Derive from combined gunnery+piloting (or the tech/support analog).
-    /// Approximation of MekHQ's mapping; refine in Stage 2.
+    /// Approximation of MekHQ's mapping.
     pub fn fromCombatSkills(gunnery: u8, piloting: u8) ExperienceLevel {
         const total: u16 = @as(u16, gunnery) + piloting;
         if (total <= 5) return .elite;
@@ -128,17 +127,17 @@ pub const Quality = enum(u8) {
 
 pub const SupplyClass = enum { parts, ammo, medical, provisions, personnel };
 
-/// How a salvage claim is spent (12G.6). The haul is a BV budget and the
+/// How a salvage claim is spent. The haul is a BV budget and the
 /// wrecks on offer cost BV, so the commander is trading one heavy hull
 /// against several light ones against a crate of spares.
 pub const SalvagePlan = enum { heaviest, most_hulls, parts_only };
 
-/// The order the techs take the damage in, the night after a fight
-/// (12G.6). The pooled hours and the field armour run out before the
+/// The order the techs take the damage in, the night after a fight.
+/// The pooled hours and the field armour run out before the
 /// damage does, so the commander chooses who fights shot up.
 pub const RepairOrder = enum { worst_first, spread, heaviest_first };
 
-/// Where physical stock sits (Stage 9B): the outfit's fallback depot (no HQ
+/// Where physical stock sits: the outfit's fallback depot (no HQ
 /// yet), an HQ warehouse, or a deployed company's field stores (which
 /// travel with it, capped by its logistics trucks).
 pub const Site = union(enum) {

@@ -49,7 +49,7 @@ pub fn chanceAtLeast(target: i32, mod: i32) u32 {
     return hits * 100 / 36;
 }
 
-test "12E.3: skull bands run from half a skull to five, and line up with the battle's ratio bonus" {
+test "skull bands run from half a skull to five, and line up with the battle's ratio bonus" {
     // Monotone: more power, fewer skulls.
     var last: u8 = 0;
     var r: types.Bp = 20_000;

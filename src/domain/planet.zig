@@ -1,6 +1,6 @@
 //! Star map: curated planet catalog (data/planets.zon), distances, and
-//! faction-weighted world selection. Mirrors MekHQ `universe/Planet` /
-//! `planets.xml`, drastically curated (ARCH §9.1).
+//! faction-weighted world selection. Adaptation of MekHQ `universe/Planet` /
+//! `planets.xml`: drastically curated (ARCH §9.1).
 
 const std = @import("std");
 const rng_mod = @import("../sim/rng.zig");
@@ -12,7 +12,7 @@ pub const Planet = struct {
     x: i32, // LY offset on the map plane
     y: i32,
     industry: u8, // 0–5: local markets, acquisition, local-purchase easing
-    /// Terrain class (12C.10); null = derived from the key (`terrain.terrainOf`).
+    /// Terrain class; null = derived from the key (`terrain.terrainOf`).
     terrain: ?@import("terrain.zig").Terrain = null,
 };
 
@@ -64,7 +64,7 @@ pub fn weightedPickByFaction(rng: *rng_mod.Rng, stream: rng_mod.Stream, faction_
     unreachable;
 }
 
-test "12B.9: every world's faction is in the factions table and every capital is on the map" {
+test "every world's faction is in the factions table and every capital is on the map" {
     const faction = @import("faction.zig");
     try std.testing.expect(catalog.len >= 150);
     for (catalog) |p| try std.testing.expect(faction.find(p.faction) != null);

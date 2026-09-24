@@ -1,4 +1,4 @@
-//! Factions (Stage 12B.9). Mirrors MekHQ `universe/Faction` (factions.xml)
+//! Factions (Stage 12B.9). Adaptation of MekHQ `universe/Faction` (factions.xml)
 //! abridged to 3025: the five Great Houses, the near Periphery states,
 //! ComStar and the pirate/periphery bucket. Data in data/tables/factions.zon:
 //! name, Map colour, capital system, foes for the contract market, employer
@@ -31,7 +31,7 @@ pub fn get(key: []const u8) *const FactionRow {
     return find(key) orelse find("PER").?;
 }
 
-/// Off the Inner Sphere's factory floors (12C.14): anyone but the five
+/// Off the Inner Sphere's factory floors: anyone but the five
 /// Great Houses and ComStar.
 pub fn isPeriphery(key: []const u8) bool {
     const core = [_][]const u8{ "LC", "DC", "FS", "CC", "FWL", "CS" };

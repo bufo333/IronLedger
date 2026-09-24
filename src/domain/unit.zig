@@ -1,5 +1,5 @@
 //! Units: meks, vehicles, aerospace, support assets, transports.
-//! Mirrors MekHQ `unit/Unit.java`. Per-unit state only — the static design
+//! MekHQ counterpart: `unit/Unit.java`. Per-unit state only — the static design
 //! (tonnage, loadout, BV) comes from the chassis catalog in data/ (Stage 3).
 
 const std = @import("std");
@@ -42,7 +42,7 @@ pub const UnitKind = enum {
 
 pub const BayKind = enum { mek, asf, vehicle };
 
-/// How a hull died (12D.2, TechManual "Destroying a 'Mech"): the cause
+/// How a hull died (TechManual "Destroying a 'Mech"): the cause
 /// decides what the rebuild needs. A cored centre torso is a component
 /// and bay time; a destroyed engine (three engine criticals) adds a new
 /// engine at the TechManual price; an ammunition explosion guts both side
@@ -107,7 +107,7 @@ pub fn techRoleFor(kind: UnitKind) ?Role {
 }
 
 /// Weekly maintenance hours a hull costs its tech, by kind and tonnage
-/// (Stage 9C.2 tech-time budget; tuning.unit.maintenance_hours).
+/// (the tech-time budget; tuning.unit.maintenance_hours).
 pub fn maintenanceHours(kind: UnitKind, tonnage: u8) u32 {
     const t = @import("tuning.zig").t.unit;
     const h = t.maintenance_hours;
@@ -178,7 +178,7 @@ pub fn repairTier(class: SlotClass, condition: PartCondition) ?RepairTier {
 }
 
 /// One equipment/structure slot on a unit; battle damage lands here and
-/// repair work + parts demand derive from it (Stage 5/7).
+/// repair work + parts demand derive from it.
 pub const PartSlot = struct {
     slot_key: []const u8, // e.g. "right_torso.medium_laser.1"
     part_key: []const u8, // catalog key in data/parts/
@@ -192,10 +192,10 @@ pub const Unit = struct {
     name: ?[]const u8 = null, // nickname
     kind: UnitKind,
     force: types.ForceId = .none,
-    /// Crew slot (pilot/driver/leader) and the assigned technician (Stage
-    /// 9C.2, MekHQ-style): no tech → no maintenance, repairs or reloads;
-    /// no pilot → the hull doesn't fight. Multi-crew kinds grow a crew list
-    /// later (schema models unit_crew).
+    /// Crew slot (pilot/driver/leader) and the assigned technician
+    /// (MekHQ-style): no tech → no maintenance, repairs or reloads;
+    /// no pilot → the hull doesn't fight. Every kind, multi-crew ones
+    /// included, holds one crew slot.
     pilot: types.PersonId = .none,
     tech: types.PersonId = .none,
     armor_pct: u8 = 100,
@@ -207,9 +207,9 @@ pub const Unit = struct {
     purchase_price: types.CBills = 0,
     /// Non-null while techs wake this hull from cold storage (ARCH §9.8).
     reactivation_done_day: ?u32 = null,
-    /// Transports only (Stage 12.15): the HQ whose berth this ship holds.
+    /// Transports only: the HQ whose berth this ship holds.
     berth_hq: types.HqId = .none,
-    /// Why a destroyed hull died (12D.2); `.none` while it runs.
+    /// Why a destroyed hull died; `.none` while it runs.
     wreck: WreckCause = .none,
 
     pub fn deinit(self: *Unit, alloc: std.mem.Allocator) void {
@@ -217,8 +217,8 @@ pub const Unit = struct {
     }
 
     /// Combat effectiveness of this hull before crew/campaign modifiers,
-    /// as a percentage (0–100). Inputs to autoresolve (ARCH §7). Stage 7
-    /// replaces this with BV-derived strength from the chassis catalog.
+    /// as a percentage (0–100); autoresolve scales the chassis BV by it
+    /// (ARCH §7).
     pub fn conditionPct(self: *const Unit) u8 {
         if (self.isParked()) return 0;
         var pct: u32 = self.armor_pct;
@@ -277,13 +277,13 @@ pub const Unit = struct {
     /// ships home.
     /// A killed hull is a wreck: the centre torso (else the first structure
     /// slot) is destroyed, so the rebuild is real depot work — a component
-    /// and bay time — not a free pass (play feedback: wrecks with a damaged
-    /// ammo bin and nothing else were stuck between the field and the depot).
+    /// and bay time — never a wreck with only field damage, which would sit
+    /// between the field and the depot.
     pub fn markWrecked(self: *Unit) void {
         self.markWreckedBy(.cored);
     }
 
-    /// Wreck the hull by a cause (12D.2): the centre torso always goes; an
+    /// Wreck the hull by a cause: the centre torso always goes; an
     /// ammunition explosion takes both side torsos with it; scrap leaves no
     /// structure standing.
     pub fn markWreckedBy(self: *Unit, cause: WreckCause) void {
@@ -324,10 +324,10 @@ pub const Unit = struct {
     }
 };
 
-/// A hull the enemy dragged off a field we lost (12D.3): off the books
+/// A hull the enemy dragged off a field we lost: off the books
 /// entirely — it bills nothing, fills no seat and appears in no lance,
 /// because it is not in `GameState.units` at all — but it is not struck
-/// off either. A recovery raid can win it back (ROADMAP 12D.9).
+/// off either. A recovery raid can win it back.
 pub const HeldHull = struct {
     /// The hull as it stood when they took it, wounds and all.
     unit: Unit,
@@ -338,7 +338,7 @@ pub const HeldHull = struct {
     /// The engagement that lost it, so the after-action can be re-read.
     battle: types.BattleId,
     /// The lance it was in when they took it, so a hull won back goes
-    /// home rather than into the hangar (12G.6).
+    /// home rather than into the hangar.
     from_force: types.ForceId = .none,
 
     /// The three facts that mark a hull as held, with "not held" as the

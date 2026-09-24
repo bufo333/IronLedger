@@ -1,5 +1,5 @@
 //! TO&E: the force tree. Outfit → battalion → company → lance.
-//! Mirrors MekHQ `force/Force.java`, extended so *companies* are deployable
+//! Adaptation of MekHQ `force/Force.java`: *companies* are deployable
 //! profit centers (ARCH §3.1) with attached support lances.
 
 const std = @import("std");
@@ -49,7 +49,7 @@ pub const SupportLanceKind = enum {
     }
 };
 
-/// What `new_lance` raises (Stage 12.15): a line lance, an air lance under
+/// What `new_lance` raises: a line lance, an air lance under
 /// the company's air wing, or a support lance of one kind under Omega.
 pub const NewLanceKind = union(enum) {
     line,
@@ -58,7 +58,7 @@ pub const NewLanceKind = union(enum) {
 };
 
 /// AtB lance roles: what a lance is tasked with while on contract; drives
-/// scenario generation odds and training XP (Stage 6/7).
+/// scenario generation odds and training XP.
 pub const LanceRole = enum {
     fighting,
     defense,
@@ -99,7 +99,7 @@ pub const LanceRole = enum {
     }
 };
 
-/// Rules of engagement for a company (12D.4, the withdrawal thresholds of
+/// Rules of engagement for a company (the withdrawal thresholds of
 /// ARCH §7 as a standing order): how long it stands when a fight turns.
 /// `hold` fights to the last — a harder roll for the enemy, but a lost
 /// fight costs more hulls and fewer come back; `cautious` pulls out at the
@@ -148,7 +148,7 @@ pub const Force = struct {
     /// Local operating funds for deployed companies: field purchases draw
     /// only from this — the brigade treasury cannot teleport (ARCH §9.8).
     local_funds: types.CBills = 0,
-    /// Field stores (Stage 9B): travel with the company, capped by its
+    /// Field stores: travel with the company, capped by its
     /// logistics trucks' cargo tonnage.
     stock: std.StringArrayHashMapUnmanaged(u32) = .empty,
     /// Consecutive days the company went hungry (no provisions, no local
@@ -159,7 +159,7 @@ pub const Force = struct {
     /// For companies: the HQ that supplies it (shipments originate there).
     supplying_hq: types.HqId = .none,
     role: LanceRole = .unassigned,
-    /// Companies: rules of engagement (12D.4).
+    /// Companies: rules of engagement.
     roe: Roe = .standard,
     support_kind: ?SupportLanceKind = null, // set iff echelon == .support_lance
     // Rotation tracking for companies (ARCH §9.7): each contract completed
@@ -168,7 +168,7 @@ pub const Force = struct {
     // starts fatigue decay & training eligibility.
     last_rotation_day: ?u32 = null,
     contracts_since_rotation: u16 = 0,
-    /// Where the company physically is when not home (Stage 9E): the
+    /// Where the company physically is when not home: the
     /// contract world it last worked, until recalled or redeployed.
     location_planet: ?[]const u8 = null,
     /// Non-null while the company is travelling home.
@@ -187,7 +187,7 @@ pub const Force = struct {
     }
 };
 
-/// Standard lance size in the Inner Sphere. (Clan stars/level IIs: icebox.)
+/// Standard lance size in the Inner Sphere; Clan stars and Level IIs are not modelled.
 pub const lance_size = 4;
 /// A company starts at 3 lances; HQ mek-bay investment raises the cap to 5
 /// (`Hq.capacity().lances_per_company`, ARCH §9.3).

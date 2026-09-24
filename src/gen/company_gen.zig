@@ -45,7 +45,7 @@ pub const HullTally = struct { meks: u32 = 0, vehicles: u32 = 0, platoons: u32 =
 
 pub const StaffNeed = struct { role: person.Role, need: u32, why: []const u8 };
 
-/// The manning table (12B.11): every role a company of this shape wants,
+/// The manning table: every role a company of this shape wants,
 /// and why. The starter generator hires to it and `personnel.manningNeeds`
 /// reads it back for a raised company, so the two never drift.
 pub fn staffNeeds(t: HullTally) [14]StaffNeed {
@@ -91,7 +91,7 @@ pub fn rollWeightClass(rng: *rng_mod.Rng, stream: rng_mod.Stream) chassis.Weight
     return if (roll <= tg.weight_light_max) .light else if (roll <= tg.weight_medium_max) .medium else if (roll <= tg.weight_heavy_max) .heavy else .assault;
 }
 
-/// The starter company's line lances (12E.1): lights and mediums only, so
+/// The starter company's line lances: lights and mediums only, so
 /// the founding level-1 mek bay can rebuild everything the outfit fields;
 /// heavies and assaults come later, off the boards and the battlefield.
 pub fn starterWeightClass(rng: *rng_mod.Rng) chassis.WeightClass {
