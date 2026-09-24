@@ -63,7 +63,7 @@ Owner of every entry: the project owner.
 - **Scope:**
   - Every module and function listed in the ratchet below.
   - Three switches with more than ten substantive arms (an arm body past three lines), measured by the check that guards them: `contract_events.applyEffectsFor` (21), `app.listView` (19), `forces.handle` (19). Five more sit at the threshold without crossing it: `app.listEnter` and `app.handleModalKey` (10 each), `market.handle` (10), `app.drawModal` (9), `supply.handle` (7).
-  - `GameState` methods with subsystem behaviour: staffing, founding, posture, TO&E, crew, tech time, lift, supply, refit, aftermath, `commanderMultBp`, and `hirePerson`'s default skill table (it leaves with C11's single role-to-skill rule; the creation itself is a storage primitive). (Hashing has moved to `digest.zig`; transfers, couriers, purchase debits, payroll, upkeep, sale values, liquidation and credit to `treasury.zig`; recruiting, spec hiring, posting and the recruit bonus to `personnel.zig`.)
+  - `GameState` methods with subsystem behaviour: founding, posture, TO&E, crew, tech time, lift, supply, refit, aftermath, `commanderMultBp`, and `hirePerson`'s default skill table (it leaves with C11's single role-to-skill rule; the creation itself is a storage primitive). (Hashing has moved to `digest.zig`; transfers, couriers, purchase debits, payroll, upkeep, sale values, liquidation and credit to `treasury.zig`; recruiting, spec hiring, posting and the recruit bonus to `personnel.zig`; the back-office counts, staffing refresh and autostaffing to `hq_ops.zig`.)
   - One layering violation: `state.zig` imports `field_supply.zig` (in `loadOutCompany`). The `rating.zig` import left with `recruitBonus`.
   - The named atomic operations that rule 14 cites do not exist.
 - **Removal:** C4.
@@ -481,7 +481,7 @@ src/sim/queries.zig:offerCandidates 108
 src/sim/queries.zig:stockTable 102
 src/sim/queries.zig:summary 141
 src/sim/rating.zig:report 133
-src/sim/state.zig 1890
+src/sim/state.zig 1834
 src/sim/tick.zig:runFinances 147
 src/tui/app.zig 4060
 src/tui/app.zig:drawModal 136

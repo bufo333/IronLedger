@@ -10,6 +10,7 @@ const tuning = @import("../domain/tuning.zig").t;
 const person_mod = @import("../domain/person.zig");
 const personnel = @import("personnel.zig");
 const GameState = @import("state.zig").GameState;
+const hq_ops = @import("hq_ops.zig");
 const treasury = @import("treasury.zig");
 
 /// The six parts with the numbers each was scored from, so a screen can
@@ -99,7 +100,7 @@ pub fn report(gs: *GameState) Report {
             const hq = e.value_ptr;
             for (hq.staffRequired().desks()) |d| {
                 need += d.need;
-                have += @min(d.need, gs.hqStaff(hq.id, d.role).count);
+                have += @min(d.need, hq_ops.hqStaff(gs, hq.id, d.role).count);
             }
         }
         var officers: u32 = 0;

@@ -404,7 +404,7 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
             // Which desks are short, and who walked lately.
             var short: std.ArrayListUnmanaged(u8) = .empty;
             for (hq.staffRequired().desks()) |d| {
-                const have = gs.hqStaff(hq.id, d.role).count;
+                const have = hq_ops.hqStaff(gs, hq.id, d.role).count;
                 if (have >= d.need) continue;
                 if (short.items.len > 0) try short.appendSlice(alloc, ", ");
                 try short.appendSlice(alloc, try std.fmt.allocPrint(alloc, "{d} {s}", .{ d.need - have, d.name }));
@@ -669,7 +669,7 @@ test "the understaffed warning names the short desks, and retirements are announ
     while (pit.next()) |e| if (e.value_ptr.posted_hq == hq.id and e.value_ptr.role == .admin_finance) {
         e.value_ptr.status = .resigned;
     };
-    gs.refreshHqStaffing();
+    hq_ops.refreshHqStaffing(&gs);
     var saw_short = false;
     for (try turnWarnings(&gs, al)) |w| if (w.kind == .understaffed_hq) {
         try std.testing.expect(std.mem.indexOf(u8, w.text, "finance") != null);

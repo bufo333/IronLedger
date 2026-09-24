@@ -869,7 +869,7 @@ fn execRecallIdle(gs: *GameState, company: @FieldType(Command, "recall_idle")) E
 }
 
 fn execAutostaff(gs: *GameState, hq_id: @FieldType(Command, "autostaff")) Error!Result {
-    _ = gs.staffHqToRequirement(hq_id) catch |err| switch (err) {
+    _ = hq_ops.staffHqToRequirement(gs, hq_id) catch |err| switch (err) {
         error.UnknownHq => return Error.UnknownHq,
         error.OutOfMemory => return Error.OutOfMemory,
     };
@@ -890,7 +890,7 @@ fn execTransferPerson(gs: *GameState, t: @FieldType(Command, "transfer_person"))
     const days = travelDays(gs, gs.companyOf(p.assigned_force), gs.companyOf(dest.id));
     p.assigned_force = dest.id;
     p.posted_hq = .none;
-    gs.refreshHqStaffing();
+    hq_ops.refreshHqStaffing(gs);
     if (days > 0) p.leave_until_day = gs.clock.day_index + days; // in transit
     return .{};
 }
@@ -1449,7 +1449,7 @@ fn execSellHq(gs: *GameState, hq_id: @FieldType(Command, "sell_hq")) Error!Resul
     while (uit2.next()) |e| if (e.value_ptr.berth_hq == hq_id) {
         e.value_ptr.berth_hq = seat;
     };
-    gs.refreshHqStaffing();
+    hq_ops.refreshHqStaffing(gs);
     try gs.postTransaction(.{ .day = gs.clock.day_index, .amount = value, .category = .unit_sale, .note = "HQ sold" });
     try gs.log(.market, .{}, "[sale] {s} sold off for {d}", .{ name, value });
     return .{};
@@ -1501,7 +1501,7 @@ fn execDisbandCompany(gs: *GameState, co: @FieldType(Command, "disband_company")
     while (pi < gs.unit_transfers.items.len) {
         if (gs.unit_transfers.items[pi].to_company == co) _ = gs.unit_transfers.orderedRemove(pi) else pi += 1;
     }
-    gs.refreshHqStaffing();
+    hq_ops.refreshHqStaffing(gs);
     try gs.postTransaction(.{ .day = gs.clock.day_index, .amount = total, .category = .unit_sale, .note = "company disbanded" });
     try gs.log(.market, .{}, "[sale] {s} disbanded: {d} hulls sold, people released, {d} raised", .{ name, uids.items.len, total });
     return .{};
@@ -2022,7 +2022,7 @@ fn freightQuote(gs: *GameState, alloc: std.mem.Allocator, from: types.Site, to: 
     }
     cost = types.applyBp(cost, gs.commanderMultBp(.freight));
     if (gs.hqs.count() > 0) {
-        const transport = gs.hqStaff(gs.hqs.keys()[0], .admin_transport);
+        const transport = hq_ops.hqStaff(gs, gs.hqs.keys()[0], .admin_transport);
         cost = types.applyBp(cost, 10_000 - tuning.logistics.transport_admin_discount_bp * @as(types.Bp, @min(tuning.logistics.transport_admin_max, transport.count)));
     }
     return .{ .cost = cost, .days = @max(tuning.logistics.freight_min_days, days), .route = route, .tons = tons_moved };
@@ -2179,7 +2179,7 @@ fn orderPart(gs: *GameState, part_key: []const u8, quantity: u32, dest_opt: ?typ
     // office: the best posted logistics admin works the roll, and
     // a bigger office shaves the lead time. Components can be bought this
     // way when rarity allows — or fabricated (guaranteed) in the bay.
-    const logi = gs.hqStaff(hq_id, .admin_logistics);
+    const logi = hq_ops.hqStaff(gs, hq_id, .admin_logistics);
     const admin_bonus: i32 = if (logi.count == 0) -2 else 5 - @as(i32, logi.best_skill);
     lead_days = @max(3, lead_days -| @min(4, logi.count / 2));
     // Sourcing: the part's availability code, the world's shelves,
@@ -2307,7 +2307,7 @@ fn negotiate(gs: *GameState, offer_index: usize, term: contract_mod.NegotiableTe
     if (!probe.improve(term)) return Error.TermAtCap;
     const t = tuning.contract;
     const seat: types.HqId = if (gs.hqs.count() > 0) gs.hqs.keys()[0] else .none;
-    const office = if (seat != .none) gs.hqStaff(seat, .admin_command) else state_mod.StaffSummary{};
+    const office = if (seat != .none) hq_ops.hqStaff(gs, seat, .admin_command) else hq_ops.StaffSummary{};
     const office_edge: i32 = if (office.count == 0) -1 else 5 - @as(i32, office.best_skill);
     // The letter at the table: F −2 … A* +3.
     const rep_edge: i32 = @as(i32, @import("rating.zig").currentIndex(gs)) - tuning.rating.negotiation_offset;
@@ -2632,7 +2632,7 @@ test "hulls move between lances at home; a new lance respects the HQ's lance cap
     for (hq.facilities.items) |*f| if (f.kind == .mek_bay) {
         f.level = 3;
     };
-    gs.refreshHqStaffing();
+    hq_ops.refreshHqStaffing(&gs);
     if (hq.staff_assigned < hq.staffRequired().total()) _ = try execute(&gs, .{ .autostaff = hq.id });
     _ = try execute(&gs, .{ .new_lance = .{ .company = co, .name = "5th Lance" } });
     try std.testing.expectEqual(@as(u32, 5), gs.combatLancesOf(co));
@@ -3461,7 +3461,7 @@ test "construction is paid by the HQ and the back office sets the pace" {
     gs.hqs.values()[0].funds = 5_000_000;
 
     // Starter HQ staff are real people, posted, and cover the requirement.
-    try std.testing.expect(gs.hqStaff(hq_id, .admin_command).count > 0);
+    try std.testing.expect(hq_ops.hqStaff(&gs, hq_id, .admin_command).count > 0);
     try std.testing.expect(gs.hqs.values()[0].staff_assigned >= gs.hqs.values()[0].staffRequired().total());
 
     // Command admins push permits through: strip the office and paperwork
@@ -3471,7 +3471,7 @@ test "construction is paid by the HQ and the back office sets the pace" {
     while (pit.next()) |entry| {
         if (entry.value_ptr.role == .admin_command) entry.value_ptr.posted_hq = .none;
     }
-    gs.refreshHqStaffing();
+    hq_ops.refreshHqStaffing(&gs);
     const unstaffed = hq_ops.paperworkDaysFor(&gs, hq_id);
     try std.testing.expect(unstaffed > staffed);
     for (0..2) |_| {
