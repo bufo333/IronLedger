@@ -70,6 +70,10 @@ gh pr merge <n> --merge --delete-branch     # then: git checkout main && git pul
   alone before the next change starts.
 - Use the `gh` CLI for every GitHub interaction — opening pull requests,
   reading review comments, checking CI, listing issues.
+- CI skips a change that touches only prose (Markdown other than
+  `docs/tui.md` and `docs/contract-exceptions.md`, the HTML pages, the
+  generated screenshots), so such a PR shows no checks; run the local
+  gate before merging it.
 - Answer the contract's pull request checklist (section 11) in the PR
   description.
 

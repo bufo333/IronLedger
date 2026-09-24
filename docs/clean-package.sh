@@ -6,8 +6,13 @@
 #   docs/clean-package.sh [optimize]     (default ReleaseFast)
 set -euo pipefail
 cd "$(dirname "$0")/.."
+repo="$(pwd)"
 optimize="${1:-ReleaseFast}"
-tree="$(mktemp -d)"
+# A fixed tree path and the repository's own .zig-cache, so the cache CI
+# restores for the workspace serves this build too.
+tree="${TMPDIR:-/tmp}/iron-ledger-clean-package"
+rm -rf "$tree"
+mkdir -p "$tree"
 trap 'rm -rf "$tree"' EXIT
 
 # The .paths list: every quoted string inside `.paths = .{ … }`.
@@ -30,6 +35,6 @@ while IFS= read -r p; do
     cp -R "$p" "$tree/$p"
 done <<< "$paths"
 
-(cd "$tree" && zig build -Doptimize="$optimize" --prefix "$tree/dist")
+(cd "$tree" && zig build -Doptimize="$optimize" --prefix "$tree/dist" --cache-dir "$repo/.zig-cache")
 [ -x "$tree/dist/bin/game" ] || { echo "no dist/bin/game after the build" >&2; exit 1; }
 echo "CLEAN PACKAGE OK ($optimize)"
