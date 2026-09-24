@@ -1,543 +1,1026 @@
-# Engineering response to the codebase audit
+# Engineering response to the structural and architecture audit
 
-Date: 2026-09-23 · Responds to: `docs/audit.md` (same date) · Checked at: `1f02f72`
+Date: 2026-09-24 · Responds to: `docs/audit.md` (same date) · Checked at: `6be5310`
 
-Thank you for the review. We checked every finding against the code as it
-stands, including the callers, the guards, the tests and the design documents
-each one depends on. The audit was written a few commits before this response,
-so the line numbers below are current ones and may differ from the audit's.
+Thank you for the review. We checked every finding against the code at
+`6be5310`, including the callers, the guards, the allocator and the design
+documents each one depends on. Where the audit makes a claim about behaviour,
+we traced the path end to end, and we reproduced the build findings (A14, A29)
+with real builds. Line numbers below are current ones. Most still match the
+audit's.
 
-**Summary.** None of the 28 findings is wrong outright.
+**Summary.** No finding is wrong outright. One is already fixed, and two
+critical findings are overstated.
 
-- **Accepted (16).** Several are worse than the audit states: #3, #4, #16 and
-  #25.
-- **Accepted with corrections (12).** The underlying problem is real, but the
-  mechanism, severity or cited rule is off, and we set out our case below.
+| Verdict | Count | Findings |
+|---|---|---|
+| Accepted | 15 | A5, A10, A12, A18, A19, A20, A23, A24, A25, A26, A27, A29, A30, A32, A33 |
+| Accepted, already scheduled | 1 | A35 |
+| Accepted with correction | 20 | A1, A2, A3, A4, A6, A7, A8, A9, A11, A13, A14, A15, A16, A17, A21, A22, A28, A31, A34, A37 |
+| Already fixed | 1 | A36 (`f1d6887`, PR #101) |
 
-We also found two defects the audit missed:
+Where we disagree, it is mostly about severity or scope, not about whether
+there is a defect:
 
-- The MASH healing bonus is granted to every deployed patient, not only those
-  whose company fields a MASH lance (#7).
-- Adding any RNG stream silently reseeds every existing save (#18).
+- **A1 and A2 are not memory corruption today.** `GameState` lives in an
+  `ArenaAllocator`, which frees only its most recent allocation. A growing
+  list allocates its new buffer before it frees the old one, so the old buffer
+  is never reclaimed, and a stale pointer reads an intact copy from before the
+  change. A1 does have a visible defect, a mislabelled persisted log line, but
+  it comes from a different mechanism than the one the audit names.
+- **A3 is reachable only through `OutOfMemory`**, except for one ordinary-error
+  claim that no production caller can reach.
+- **A4's fix as written would reject valid saves.** Historical records
+  legitimately point at entities that no longer exist.
+- **A17's impact is mostly wrong.** Because of the band width, the fixed
+  30 LY is in effect a rounding rule.
 
-Each accepted item is filed as a checkbox in `TODO.md` (Part 2) under
-deliverables **D14–D22**. The deliverable is named below against each finding.
+The verification also found defects the audit missed, several of them worse
+than the finding they sit next to:
+
+- The TUI `:day` skips the end-turn checklist entirely (A9).
+- The TUI order form tells the player an order succeeded when sourcing failed
+  (A11).
+- A capacity-capped supply link can refuse a shipment that an unlinked,
+  uncapped charter would have carried (A15).
+- A mod with a truncated rank table passes the build and is undefined
+  behaviour in ReleaseFast (A14).
+- Several `catch` sites report `OutOfMemory` as an unrelated error after money
+  has moved (A3).
+- Our own v5 migration fixture loads with a live ID collision (A6).
+
+Each correction is set out below, and the missed defects are listed with the
+finding they belong to.
+
+Our design documents also overstate the code in four places the audit touches.
+These corrections ship with the matching fixes:
+
+- `ARCHITECTURE.md` §4 says every command reserves ledger and list slots
+  before its first mutation. Four do.
+- `ARCHITECTURE.md` §12 says nothing on load is skipped or defaulted. Three
+  loaders skip rows.
+- `docs/tui.md` calls several checklist warnings "blocking". Only insolvency
+  and the battle holds are enforced.
+- `ARCHITECTURE.md` §9.3 counts storage by truck tonnage but does not say
+  which trucks count.
 
 Verdicts: **Accepted**: the finding stands as written. **Accepted with
-correction**: the defect is real but part of the finding is not, and we say
-which part.
+correction**: the defect is real, but part of the finding is not, and we say
+which part. **Already fixed**: the code at `6be5310` no longer has the defect.
+
+Every accepted item is assigned to a deliverable, **D23–D34**, listed in
+[Delivery plan](#delivery-plan) at the end.
 
 ---
 
 ## Critical findings
 
-### 1. Black-market fraud can move an unrelated hull: Accepted → D14
+### A1. Decision resolution retains pointers into the event list: Accepted with correction → D23
 
-**Confirmed.** On a fraud roll, `buy_listing` pays, removes the listing and
-returns success without creating a unit (`src/sim/commands.zig:864-871`).
-`buy_hull_for` then takes `next_unit_id - 1` as the purchased hull
-(`commands.zig:1041-1042`). Black-market hull listings reach this path,
-because `contract_market.zig:311-321` creates `.unit` listings with
-`company = .none`, which passes the only guard.
+**The defect is real. The failure mode is a different one, and the severity
+is High, not Critical.**
 
-The audit understates the consequences. The effect depends on the state at the
-time of the fraud:
+`resolveChoice` holds `ev = event_queue.find(id)`, a pointer into an
+`ArrayListUnmanaged` (`src/sim/contract_events.zig:342`), and dereferences it
+after `applyEffectsFor` for the log line (`:355`). Three effects change the
+list while `ev` is held:
 
-- **Same world.** Whatever hull was created last is moved into the destination
-  company, possibly out of a company that is deployed.
-- **Different world.** That hull is marked `in_transit` instead.
-- **Last hull already sold.** The same-world branch returns `UnknownForce`
-  after the money is gone, and the transit branch panics on `gs.unit(uid).?`.
+- `.engagement` appends events through `battle.resolveEngagement`.
+- `.recovery_push` removes rows through `walkOut` (`:640-648`).
+- `.exchange_mia` removes rows (`:510-511`).
+
+Three corrections:
+
+1. **"`orderedRemove` may delete an unrelated decision" does not hold for
+   `resolveChoice`.** It finds the event again by ID before removing it
+   (`:358`, `indexOf(event_id)`).
+2. **The visible failure is a shift, not a reallocation.** After a lost field,
+   the queue holds `[mia_held…, recovery_push, field_repair]`, because
+   `recoverWrecks` queues the missing pilots before
+   `battle.zig:1049-1057` queues the push. Answer the push with "Go back" and
+   have a pilot walk out: `walkOut` removes an earlier `mia_held` row, and `ev`
+   now points at the next event. The persisted log then records, for example,
+   `[decision] field_repair: chose "Worst-hit first"`, under the wrong
+   event's company and contract. This is reachable in ordinary play.
+3. **The reallocation case is latent.** Under the campaign arena, a dangling
+   `ev` reads an intact old copy (see the summary), and `chosen` is written
+   before the effects run, so that copy is correct. It becomes a
+   use-after-free only if the backing allocator changes. We fix it anyway.
+
+**`expireDue` is hazardous but cannot trigger today.** It removes by the stale
+index `i` (`:371`), which would delete the wrong row. But no `default_choice`
+in any deck currently reaches an effect that changes `pending`. We checked all
+ten decision kinds.
+
+**Atomicity: confirmed, and only `OutOfMemory` can trigger it.** `chosen` and
+the standing-order memory are committed before the effects run
+(`:346-353`). No effect path returns an error other than an allocation
+failure. If one does fail, the event is left in an odd state: it is marked
+answered, it cannot be answered again or expire, and it no longer holds the
+turn.
+
+**Fix (D23):**
+
+- Copy the event's kind, company, contract, option label and effects into
+  locals before any effect runs.
+- `expireDue` keeps the ID and finds the row again after the effects.
+- `chosen` and the standing-order memory are written after the effects.
+  Capacity is already reserved at `:345`.
+- Regression tests: the recovery-push/walk-out case asserts the log line; an
+  effect that appends; an effect that removes an earlier row.
+
+The prepare/commit shape and the failure-injection tests the audit asks for
+belong to the scheduled failure-atomicity item (see A3).
+
+**Missed:** `queueDecision` holds `mem.value_ptr` across `applyEffects`
+(`:266-271`). It is not dereferenced afterwards, so it is safe, but fragile.
+It is fixed in the same pass.
+
+### A2. Battle resolution retains a person pointer across insertion: Accepted with correction → D23
+
+**The rule violation is real. There is no invalid read today, and the severity
+is Medium (latent), not Critical.**
+
+`Opening.edge_used_by` is a `?*Person` (`src/sim/battle.zig:657-665`, `:726`).
+It is held across `takePrisoners`, which inserts into `people` through
+`hireFromSpec` (`:818-835`). It is dereferenced once, at `:992`, for
+`rankedName`. Under the arena, the old entries buffer stays intact. Nothing
+in the engagement changes rank or name after the opening, so the after-action
+report names the right pilot. It would stop doing so under any other
+allocator.
+
+**Fix (D23):** store the `PersonId` and look it up again at `:992`. This is
+the rule the audit states: persistent values hold IDs, not pointers into
+growable collections. We found no other retained pointer of this kind in
+`resolveEngagement`.
+
+---
+
+## High-severity findings
+
+### A3. Compound state mutations are not failure-atomic: Accepted with correction → D24 and the failure-atomicity item
+
+**Every site except one is real, but only on allocation failure.** Under the
+campaign arena, that means the process is out of memory. The ordinary-error
+claim does not hold:
+
+| Site | Verdict |
+|---|---|
+| `transferFunds` (`state.zig:378-398`) | Real on OOM: a failed credit or courier append after the debit loses money. No caller reserves anything. |
+| `runPolicies` swallowing errors (`tick.zig:81`) | Real, narrower than stated. `catch continue` is meant for `InsufficientTreasury`, which fails before any change. It also swallows OOM after the debit. |
+| `createForce` (`state.zig:1363-1374`) | Real on OOM: an orphaned child, and a gap in the ID sequence. |
+| `assignUnit` → `UnknownPerson` (`state.zig:1384-1394`) | The ordering is as described, but the only production caller, `starter_company.generateInto`, always passes a person it has just created. **Not reachable outside tests.** It will validate first anyway. |
+| `moveUnitToForce`, `placeUnitInCompany` (`state.zig:1676-1752`) | Real on OOM. |
+| `holdUnit`, `releaseHull` (`state.zig:1936-1967`) | Real on OOM. `holdUnit` runs in a loop (`battle.zig:1037`), so a failure also leaves the loop partly done. |
+
+**Missed, and not OOM-only in effect:**
+
+- `commands.zig:971` and `:1196` call `placeUnitInCompany(...)` and
+  `moveUnitToForce(...)` with `catch return Error.UnknownForce`, after the
+  purchase has been debited, the listing removed and the unit added. The
+  player is told the company does not exist, and the money is already gone.
+- `commands.zig:772` swallows a `shipStock` failure with `catch continue`,
+  after freight is paid and stock is taken. This is the `runPolicies` pattern
+  again.
+
+**On the recommended design.** We agree with the four mutation patterns the
+audit lists (validate → reserve → commit; quote → reserve → debit → commit;
+prepare log and ledger lines first; stage RNG). We will meet them with
+reserve-first helpers and **one failure-injection test per mutation
+pattern**, using `std.testing.FailingAllocator` behind the campaign arena and
+comparing `GameState.hash()` before and after. We are not building a
+transaction or undo framework: a management sim with an arena-owned state tree
+does not need one, and the reserve-first pattern is sufficient.
 
 **Fix:**
 
-- `buy_listing` returns the created `UnitId` in `Result`, null on fraud.
-- `buy_hull_for` returns early on fraud.
-- Add a test for a black-market hull fraud with an existing hull in another
-  company.
+- **D24** (now, small):
+  - The `runPolicies` catch propagates everything except
+    `InsufficientTreasury`, the pattern already used at `state.zig:568-573`.
+  - The `shipStock` catch does the same.
+  - The three mislabelled catches propagate the real error.
+- **Failure atomicity** (the item already scheduled in `TODO.md`, now ordered
+  earlier):
+  - Reserve-first versions of the eight sites above.
+  - A1's prepare/commit.
+  - The failure-injection tests.
+  - `ARCHITECTURE.md` §4 corrected to describe what is actually reserved.
 
-### 2. Refits can duplicate parts: Accepted → D14
+### A4. The save loader silently drops malformed relational rows: Accepted with correction → D28
 
-**Confirmed.** The refit commit checks each install separately with
-`stockCount(...) == 0`, then discards the result of `takeStock`
-(`commands.zig:1687-1693`). `refit_install` accepts duplicate installs, and
-`applyRefit` installs every one of them. With one part in stock and two
-identical installs, one part is created from nothing.
+**All four cited sites are real, and nothing later in the load catches
+them:**
 
-There is a second leak: `refit_clear` on the orphaned plan then refunds two
-parts for the one that was actually taken.
+- the orphan `unit_slot` (`store.zig:1216-1221`)
+- the unchecked `force_unit` and `force_child` targets (`:1262-1270`)
+- stock for a missing site, through `addStock`'s `orelse return`
+  (`state.zig:1092-1093`)
+- the orphan `refit_op` (`:1817`)
+
+`ARCHITECTURE.md` §12 claims the opposite.
+
+**The correction is to the fix.** "Validate both ends of every nonzero
+reference", applied to transactions, events and battle reports, would reject
+valid saves. Units, HQs and companies really are removed during play
+(`removeUnit`, `commands.zig:1439`, `:1478`), so history can legitimately point
+at entities that no longer exist:
+
+- `txn.company` and `txn.hq`
+- `event_log` tags
+- `battle_report_hit.unit` and `.pilot`
+- the assigned company of a finished contract
+
+The integrity pass must therefore separate the two kinds of reference:
+
+- **Live references must resolve:**
+  - unit force, pilot, tech and berth
+  - person assignment and posting
+  - force parent, children, units, commander and supplying HQ
+  - bay jobs, refit plans, transfers, supply and stock policies, links
+  - courier and policy treasuries, part-order destinations
+  - pending-event contract, person and battle
+- **Historical references may dangle:** everything else.
+
+**Missed (same class):**
+
+- **Duplicate keys overwrite silently:** `contracts.put` (the `contract` table
+  has no primary key), `person_skill`, `faction_standing` and `event_memory`.
+  Duplicate nonzero `pending_event` IDs are accepted, which makes
+  `resolveChoice` ambiguous.
+- **Duplicate stock rows are summed as `u32`**, which panics in safe builds and
+  wraps in ReleaseFast.
+- **`sqlite.int()` reads NULL as 0**, so a NULL `unit.force` loads as `.none`.
+- **`loadMeta` defaults missing** `funds`, `day_index` and date rows.
+
+**Fix (D28):**
+
+- A strict stock loader instead of `addStock`.
+- Both ends checked for every live reference, with duplicate-key and NULL
+  checks.
+- A post-decode graph pass over the live references, as the audit recommends.
+- One corruption test per relationship family.
+
+### A5. Unknown discriminators become valid data: Accepted → D28
+
+**Confirmed:**
+
+- The listing kind (`store.zig:1568`) and the refit-op kind (`:1819-1826`)
+  default to a valid variant.
+- Every boolean is decoded as `!= 0`, at `store.zig:1040-1041`, `1112`,
+  `1114`, `1120`, `1167-1168`, `1347`, `1362`, `1378`, `1573`, `1577`,
+  `1685-1694`, `1729-1730`, `1752`, `1760`, `1765` and `1810`.
+
+**Missed:** optional enums that decode an unknown value as null:
+
+- `force.support_kind` (`:1248`)
+- `hq_project.facility` (`:1306`)
+- `person.training_skill` (`:1128-1129`); an unknown skill silently drops the
+  training.
+- `battle_report.command_rights`, stored as free text.
 
 **Fix:**
 
-- Add up the demand per part key and check each total against stock before
-  consuming anything.
-- A failed take is an error.
+- **D28**: exhaustive discriminator parsers, `bool01`, and bounded decoders
+  for percentages, morale, fatigue and facility levels, as named in the audit.
+- **The foreign-key migration item**: the matching `CHECK` constraints.
 
-### 3. Battle report IDs are reused after loading: Accepted → D14
+### A6. Missing or stale next-ID counters can overwrite entities: Accepted with correction → D28
 
-**Confirmed, and more serious than stated.** `next_battle_id`
-(`src/sim/state.zig:253`) is neither saved (`src/persist/store.zig:366-371`)
-nor rebuilt on load, so after a load it restarts at 1 while the old reports
-keep their IDs.
+**Confirmed, and our own test suite already shows it.** The v5 migration
+fixture (`store.zig:2250-2256`) loads person 1 and unit 1 with no counter
+rows. The loaded state has `next_person_id == 1`, a live collision the test
+never notices.
 
-The IDs are lookup keys throughout: `Journal.find/markRead`, `read_report`,
-salvage-decision events, `HeldHull.battle`, `recoveryPush` and several queries.
-All of them match the first report with that ID. After a load, then:
+**The correction:** the historical-schema branch is not needed for these five
+counters:
 
-- `read_report 1` marks the old, already-read report as read.
-- The new report stays unread for good, so every multi-day advance stops on it.
-- The salvage decision and the after-action screen resolve to the wrong battle.
+- `saveMeta` has always written all seven (`store.zig:430-434`), and so did the
+  first commit.
+- Only `next_battle_id` and `next_event_id` were added later, and both are
+  already rebuilt on load.
 
-**Fix:**
+The fix is therefore just to require every row and to require each counter to
+be greater than the highest ID loaded. The fixture gets its counter rows.
 
-- Save the counter with the others.
-- On load, backfill it to `max(saved, max(report.id, held.battle, event.battle) + 1)`.
-- Bump the schema version and test save → load → fight.
+**Missed:**
 
-### 4. A failed first save corrupts the in-memory save identity: Accepted → D15
+- A stored counter of 0 hands out `.none`.
+- A counter of `maxInt(u32)` overflows on the next `+= 1`.
+- The unit namespace must include held-hull IDs as well as live units.
 
-**Confirmed, and worse.** `gs.campaign_id` is set right after the INSERT
-(`store.zig:336-345`), well before the COMMIT at `store.zig:806`.
+**Fix (D28):** one counter manifest, used by save, load and the tests, as the
+audit recommends.
 
-If the first save fails and is retried, the retry takes the UPDATE branch. That
-branch matches no row, raises no error, and writes every child row under a
-campaign ID with no campaign row. The REPL reports "saved", but the campaign
-never appears in the lobby.
+### A7. Pending-event choice indices are not validated on load: Accepted with correction → D28
 
-The `campaign` key is `INTEGER PRIMARY KEY` without `AUTOINCREMENT`, so the
-rolled-back ID can later be given to a new campaign, and the two sessions then
-overwrite each other's rows.
+**Confirmed:**
 
-**Fix:**
+- `default_choice` and `chosen` are range-checked only against the width of
+  their storage type (`store.zig:1642-1644`).
+- `expireDue` indexes `options[default_choice]` unchecked
+  (`contract_events.zig:367`). That is a panic in safe builds and undefined
+  behaviour in ReleaseFast.
 
-- Keep the new ID in a local variable and assign it after COMMIT.
-- The UPDATE path fails when no row changed.
+Two corrections:
 
-### 5. Loading an unknown campaign returns a blank campaign: Accepted with correction → D15
+- **"Require `options.len > 0`" is too strict.** An event kind with no options
+  is a notice, not a decision (`needsDecision`, `events.zig:173`), and nothing
+  indexes its options.
+- **A non-null `chosen` can never appear in a genuine save.**
+  `resolveChoice` removes the event right after setting it. So any stored
+  `chosen` is corruption. It does not make an answered event apply an invalid
+  choice; the event stays in the queue, unanswerable.
 
-**The defect is real, but it is reachable only from the REPL.** The TUI lobby
-loads only IDs it has just listed (`src/tui/app.zig:1408`). The REPL's
-`load <n>` accepts any integer (`src/main.zig:509-520`). With an unknown ID it
-builds an empty state with no HQs, which then indexes `hqs.keys()[0]` out of
-bounds in several commands.
+**Fix (D28):**
 
-**Fix:** return `error.NoSuchCampaign` when the campaign row is missing.
+- On load: `default_choice < options.len` whenever the kind is a decision, and
+  `chosen` must be null.
+- References are validated as live references under A4.
 
-### 6. Commands are not transactionally atomic: Accepted with correction → D17
+### A8. "Not deployed" is used as "home": Accepted with correction → D26
 
-**Overstated.** We traced every cited site. The only error any of them can
-raise after mutating is `OutOfMemory`, from the campaign arena behind
-`gs.allocator()`:
+**The core claim holds, and it is an exploit that undercuts the rotation
+design.**
 
-- **HQ founding.** `foundHq` re-runs a planet lookup that has already passed.
-- **Facility upgrades.** `startUpgrade` repeats the `upgradeBlock` checks, which
-  already ran before the debit.
-- **Fabrication.** `queueFabrication` repeats the bay check.
-- **Transfers, refit commitment and event resolution.** After the mutation, only
-  appends and log writes can fail.
+`companyPosture` has five states, and `isCompanyDeployed`'s own doc comment
+says it is "not the opposite of home". Both of the in-between states occur
+routinely, with people and hulls aboard:
 
-The rule cited as violated does not exist. Rule 27 of the contract requires
-derived fields to be refreshed inside the command. It says nothing about
-rolling back after a failure.
+- `finishTour` leaves every company `idle_afield` at the end of a tour.
+- `recall` sets `returning`.
 
-The only commands that fail for a reason other than allocation after they have
-mutated state are #1 (`UnknownForce` after payment) and #2 (an ignored failed
-take). Both are fixed under D14.
+Yet the following treat any company without a contract as home:
 
-**Our position:** we will not add a transaction or command-journal framework to
-cover the arena running out of memory. At the cited sites we will reserve list
-capacity (`ensureUnusedCapacity`) before any debit, as a low-cost precaution.
-We will not add failing-allocator tests for every command.
+- `careFor` (`medical.zig:106-110`)
+- weekly rest (`:353-381`)
+- the rotation reset (`:388-401`)
 
-## High severity
+A company idling on a contract world therefore gets:
 
-### 7. Medical rules ignore physical location: Accepted with correction → D16
+- full hospital care, without a MASH truck
+- home rest, **better** than a garrison company receives
+- a free rotation reset, without coming home
 
-**Partly a design question, not a defect, plus a real bug the audit missed.**
+`ARCHITECTURE.md` §9.7 ("decays only at home") and `GAMEPLAY.md` ("pay the
+transit … to rotate home") say otherwise.
 
-ARCHITECTURE.md specifies "beds (hospital level, plus MASH trucks in the field)
-and doctor coverage". It never says care is calculated per site. Counting
-doctors and taking the best hospital outfit-wide is a deliberate
-simplification, so it does not break any written rule. Whether hospitals should
-be per-site is a fair design question, and we have added it to the design
-backlog under D16.
+Three corrections:
 
-The real bug is at `src/sim/medical.zig:213-214`: `healDays(gs, deployed)`
-passes "is deployed" as the `deployed_with_mash` parameter. Every deployed
-patient therefore gets the MASH healing multiplier whether or not their company
-fields a MASH lance, contradicting the comment two lines above it. As a result,
-a field company with no MASH heals faster than a home base with no hospital.
+1. **Transfers from an idle-afield company are designed** to ship with travel
+   time. The **returning** case is the bug: `sitePlanetKey` falls back to the
+   home planet (`commands.zig:1917-1920`), so a person or hull transfers off a
+   DropShip in flight with zero travel days.
+2. **The rotation reset follows the literal wording of `ARCHITECTURE.md:568`**
+   ("sat undeployed"). That sentence is ours to fix. It contradicts §9.7.
+3. **Some commands are already correct.** `sell` and `mothball` are wrong, but
+   `depot`, `strip`, `refit`, `disband` and `move_unit` already require
+   `isCompanyHome`, and they are the pattern the rest will follow.
 
-**Fix:** pass whether the company has a MASH lance that is ready, and add a test.
+**Missed:**
 
-### 8. Equal-priority field patients can all be denied beds: Accepted → D16
+- `train` and `train_ability` check "not deployed" while `trainCompany`
+  requires home: two eligibility rules for one action.
+- `leave` is allowed afield, and doubles the home rest rate.
+- `crew_company` hires from the halls straight into an afield company.
+- Maintenance skips the deployed penalty for afield hulls
+  (`maintenance.zig:113`).
+- The checklist's wounded-at-home count uses `isCompanyHome` while the sim
+  uses "not deployed", so the screen and the sim disagree.
 
-**Confirmed.** For each patient, `medical.zig:181-188` counts the peers with
-equal or higher priority. With five equal-priority patients and four beds, each
-patient counts four others ahead of it, so all five wait. The `heal_day`
-tie-break the list is already sorted by is never consulted.
+**Fix (D26):**
 
-**Fix:** allocate in one pass over the sorted list, keeping a count of used beds
-per company.
+- Named posture predicates owned by their subsystems (`careForPosture`,
+  `restsAtHome`, `canActAtHq`), each switching exhaustively over
+  `CompanyPosture`, as the audit recommends.
+- A posture × rule matrix test.
+- This is a deliberate balance change: idling afield loses its free benefits.
 
-### 9. Unit-type combat skills are ignored: Accepted with correction → D16
+### A9. Malformed TUI `day` input advances the campaign: Accepted with correction → D25
 
-**Correct for vehicles, wrong for aerospace.**
+**Confirmed, and worse than stated.**
 
-- **Vehicles.** Vehicle hulls sit in ordinary lances and are crewed by
-  `vehicle_crew` pilots. Those pilots have no mek skills, so `battle.zig:209-210`
-  gives every vehicle the default 4/5, however good its crew.
-- **Aerospace.** Air lances hang under the company's air wing, and the
-  engagement loop walks only `company.children`. Fighters never reach the skill
-  code. They count only as the air-cover modifier, which already checks
-  readiness correctly.
+- `app.zig:3784-3787` reads `parseInt(...) catch 1` and ignores trailing
+  tokens.
+- It also calls `advance` directly, so **`:day` never opens the end-turn
+  checklist**, even for one day.
+- There is no upper bound: `:day 100000` runs until a hold stops it.
 
-**Fix:** one skill selector keyed on unit kind, reusing the kind-to-skill mapping
-at `src/domain/person.zig:378-380`.
+**The REPL is lenient too, in a different way.** `n = parseInt(...) catch n`
+keeps the last good count (`main.zig:703-723`), so `day 3 junk` advances 3
+days. `day` is parsed by hand in both frontends, and they differ.
 
-### 10. Unavailable support assets still grant modifiers: Accepted → D16
+**Fix (D25):**
+
+- One strict `cli.parseDay`: a count with a range and an optional `force`,
+  with nothing trailing. Both frontends use it.
+- The TUI `:day` goes through `endTurnRequest`.
+- `:save`, `:quit` and `:manning` refuse trailing words.
+- We will take the audit's application-level action union for frontend verbs
+  if it stays small. Otherwise one parser per verb in `cli.zig` meets the same
+  rule.
+
+### A10. The seven-day advance bypasses the checklist: Accepted → D25
 
 **Confirmed.**
 
-- **Battle.** `companyMods` (`battle.zig:258-283`) grants the recon, MASH, mess,
-  security, salvage and transport modifiers whenever the lance is non-empty.
-  Mothballing leaves a hull in its lance, so a mothballed or destroyed MASH truck
-  still grants its modifiers.
-- **Medical.** `medical.zig:127` excludes only destroyed trucks from the bed
-  count.
+- `endTurnRequest` opens the modal only when `days == 1`
+  (`app.zig:2443-2452`).
+- The REPL gates `day 7` unless `force` is given, so the two frontends differ.
 
-Two pieces of the fix already exist and go unused here. The air-cover branch of
-the same function checks readiness correctly. `Unit.canFight()` is documented
-as the one readiness definition.
+**Missed:** "blocking" is not enforced anywhere. `advance` refuses only for:
 
-**Fix:** one `Force.hasReadyUnit` predicate built on `canFight()`, used by
-battle, medical and salvage.
+- an unread after-action
+- a pending battle decision
+- insolvency
+- bankruptcy
 
-### 11. Conceded engagements do not produce blocking AARs: Accepted with correction → D16
+The other seven blocking kinds are display-only: the `!` mark and "turn ready:
+NO". `WarningKind.blocking`'s doc comment and `docs/tui.md` both overstate
+this.
 
-**The rationale is overstated, but we accept the fix.**
+**Fix (D25):**
 
-The architecture blocks the turn on a battle report because a battle "disposes
-of hulls and people permanently". A concession disposes of nothing, so skipping
-the block has a defensible reading.
+- Every advance length opens the checklist; the modal already offers the
+  week.
+- We will decide whether blocking warnings should refuse an unforced advance,
+  or whether the docs should call them advisory, and make the docs and the
+  code agree either way.
 
-Step 8 of the pipeline says "AAR emitted", though, and today a concession
-reaches the player only as a log line, never counts in the stats book, and
-applies hard-coded penalties (`battle.zig:808-814`).
+---
 
-**Fix:**
+## Medium-severity findings
 
-- Emit a minimal conceded `BattleReport`, run the normal bookkeeping and move
-  the penalties into tuning.
-- The report blocks the turn like any other, for consistency.
+### A11. Typed TUI commands discard their results: Accepted with correction → D27
 
-### 12. Freight throughput is both overprovisioned and consumed on failures: Accepted with correction → D17
+**Confirmed, and wider than stated.** `app.zig:3831-3838` always says
+`done: <verb>`.
 
-**There is no overprovisioning.** The ×4 in `src/sim/network.zig:27-28` is
-`tuning.network.weeks_of_capacity` (`data/tables/tuning.zon:61`). It is
-deliberate, and a test pins it ("the charter link moves 40t/week"). The reset in
-`tick.zig:35` is weekly, so the multiplier and the reset interval agree.
+The TUI **amount forms** (order, ship, sell, loan, transfer, policies) also
+build a command line and run it through the same path (`app.zig:2261-2281`).
+So the main order form says "done: order" when `order_part` returned
+`.sourced = false` (`commands.zig:2191-2204`). This is a keyed path, not only a
+typed one.
 
-What is wrong:
+**The correction:** the hull-fraud example does not reach typed input.
 
-- **The knob name.** It misreads as a time multiplier.
-- **Two functions disagree.** `logistics.routeThroughputPerWeek` returns the
-  unscaled figure. Only a test uses it, but the two functions give contradictory
-  answers.
-- **Capacity reserved too early.** `shipStock` reserves throughput in
-  `freightBetween` before `debitPurchase`, so an order refused for lack of funds
-  still uses capacity.
+- `buy_hull_for` has no verb in `cli.zig`.
+- A black-market fraud through `buy_listing` returns `{}`, and the REPL prints
+  a generic "done." for it. So the REPL hides the fraud too.
 
-The claim about sourcing does not apply. `orderPart` always ships from the
-destination's own home HQ and never reserves link capacity.
+**Missed:** the Market screen's buy key says "bought listing [n]" on a fraud
+(`screens/market.zig:79-81`).
 
-**Fix:**
+**Fix (D27):**
 
-- Split `freightBetween` into a quote step and a commit step, and reserve after
-  the debit.
-- Rename the knob to what it measures.
-- Delete `routeThroughputPerWeek` or make it agree.
+- One result presenter, `Command` + `Result` → sentence, below the frontends.
+  Both frontends and the amount forms use it.
+- `buy_listing`'s `Result` reports fraud.
 
-### 13. Persistence silently accepts corruption: Accepted → D15
-
-**Confirmed.** Our own earlier fix (contract deliverable D8) covered only the enum
-columns it listed. The rest is as described:
-
-- A missing or wrong-length RNG blob silently keeps the default seed
-  (`store.zig:893-900`).
-- There are 61 unchecked `@intCast` reads. These panic in safe builds and are
-  undefined behaviour in the ReleaseFast builds we ship.
-- Several enum columns, and every missing parent row, are skipped with
-  `orelse continue`.
-
-**Fix:**
-
-- Checked integer readers that return `CorruptSave`.
-- A missing or wrong-size RNG blob is `CorruptSave`.
-- A missing parent row or an unknown enum rejects the load.
-
-### 14. Runtime SQLite schema lacks integrity enforcement: Accepted with correction → D15
-
-**The remedy as stated would do nothing.**
-
-- **The FK pragma.** `docs/schema.sql` says in its own header that it is a
-  design document and that the executable DDL lives in the store. The runtime
-  DDL (`store.zig:32-79`) declares no foreign keys, so enabling
-  `PRAGMA foreign_keys` would enforce nothing.
-- **The table list.** We compared `tables` (`store.zig:81-87`) against the DDL
-  and they match exactly, so no table is currently missed.
-
-The point underneath stands: the database enforces no relationships, and the
-loader skips orphaned rows instead of rejecting them. We enforce integrity in
-the loader, under #13. Declaring constraints in SQL needs table-rebuild
-migrations and is deferred until a schema change calls for a rebuild anyway.
-
-### 15. Terminal text is not safely escaped: Accepted → D19
+### A12. `stockpolicy` explicit zero becomes a positive target: Accepted → D25
 
 **Confirmed.**
 
-- **Invalid UTF-8.** `Screen.text` decodes with `Utf8View.initUnchecked`, so
-  invalid UTF-8 panics in safe builds and is undefined behaviour in ReleaseFast.
-- **Untrusted text.** TUI text input always produces valid UTF-8, but the
-  following reach the renderer unfiltered:
-  - C1 control bytes that the key reader passes through
-  - raw lines from REPL stdin
-  - anything loaded from a save
-- **Markup.** Literal markup in a name restyles it, for example a company named
-  `{r}Alpha`, and there is no escape for it.
+- `cli.zig:162-163` turns an omitted target and an explicit `0` into the same
+  value, then doubles `min`.
+- The TUI "KEEP … STOCKED" form builds exactly this command line, so a target
+  of 0 with any minimum above 0 gives min×2, the opposite of what the usage
+  line promises.
+
+**Fix (D25):**
+
+- Keep track of whether the target was given.
+- Parser tests for an omitted target, an explicit zero and a positive target.
+
+### A13. Frontend prevalidation duplicates command rules: Accepted with correction → D30
+
+**Confirmed for prevalidation.** Six sites suppress the command and show query
+text instead. The audit cites three of them. The other three:
+
+- the HQ upgrade (`app.zig:3180-3183`)
+- the Lab install location (`:3196-3199`)
+- fabricate (`screens/market.zig:127-130`)
+
+Two of the six carry hand-written rule sentences.
+
+**The correction:** `execResultWith` is not prevalidation. It always runs the
+command, and rewords only named errors after a refusal. It is still a second
+source of refusal sentences, which proposed rule 10 forbids, so we accept that
+half. The "already scheduled" note is out of date: the `execResult` item
+landed as `execResultWith` in PR #99.
+
+**Fix (D30):**
+
+- Eligibility only dims or annotates a row; activation always submits the
+  command.
+- The four caller-worded sentences move into `cli.errorText`. We add error
+  variants where a sentence needs context.
+
+### A14. Data-overlay validation omits runtime preconditions: Accepted with correction → D32
+
+**The rank half is confirmed by experiment.**
+
+- A `ranks.zon` with 7 rows passes `zig build validate-data -Ddata=…` and a
+  full `zig build -Ddata=…`.
+- `promote <id> major` then indexes out of bounds: a panic in Debug, and
+  **undefined behaviour in the documented ReleaseFast build**.
+- A reordered ladder builds and silently mispays ranks.
+- The Mek legality test and the skulls band test also lack the `data:` prefix.
+
+**The empty-pool half is wrong for a full build.** An empty `first`, `last` or
+`callsigns` list fails `zig build -Ddata=` at compile time, because Zig refuses
+to index a comptime-known empty slice (`person_gen.zig:76:29`). It passes only
+the standalone `validate-data` step, which never compiles the executable, and
+then fails with a raw compiler message rather than a data diagnostic.
+
+**Fix (D32):**
+
+- Named validation functions for rank cardinality and order, non-empty pools,
+  positive weights and canonical legality, run by the validation step.
+- One invalid-overlay fixture per family in CI.
+
+### A15. Route selection ignores capacity and quality: Accepted with correction → D29
+
+**Confirmed that capacity and quality play no part in choosing the path.**
+`routeBetween` is a breadth-first search on hop count (`network.zig:63-144`).
+A saturated hop refuses the shipment (`freightQuote`, `commands.zig:2006-2008`)
+without trying another path, and players can link any pair of HQs, so
+alternative paths exist.
+
+**The correction:** equal-hop ties are fully deterministic. `hq_links` is saved
+and loaded `ORDER BY ord` (`store.zig:706-708`, `:1502-1506`). What is missing
+is a documented policy, not determinism.
+
+**Missed, and sharper:** with no link at all, the fallback charter hop has no
+cap (`network.zig:104-109`, `:154-161`). So buying a link can make a shipment
+fail that an unlinked charter would have carried.
+
+**Fix (D29):**
+
+- A quote that takes the tonnage, skips hops without room, and minimises
+  days, then cost, then HQ ID.
+- The command commits exactly the quoted path, as the audit recommends.
+- The charter becomes an explicit, capped fallback.
+- `ARCHITECTURE.md` §9.5 gains the routing policy.
+
+### A16. Support capacity bypasses the operational rule: Accepted with correction → D29
+
+**Salvage is confirmed.** `salvageTrucks` (`battle.zig:24-33`) counts every
+non-destroyed truck. `ARCHITECTURE.md` §9.3 names post-battle salvage yield as
+a support modifier, and support modifiers count by `unitOperational`.
+
+**Storage is the correction.**
+
+- The design never makes field storage depend on crew fitness. A wounded
+  driver should not push stock over the cap.
+- "Damaged" in the failure mode is wrong: `unitOperational` counts damaged
+  hulls.
+- The right storage rule is "physically present": not destroyed, not
+  mothballed and not in transit.
+
+**Missed:**
+
+- `queries.zig:1808-1820` recounts the trucks itself, with hard-coded "× 20t"
+  and "× 5t" (rules 5 and 6).
+- The salvage-lance bonus on screen uses `units.len > 0`, while the sim uses
+  `forceOperational`.
+- The mess-lance rest bonus uses `units.len > 0`.
+- Both rules match chassis-key strings instead of a unit role.
+
+**Fix (D29):**
+
+- One truck-capacity function per purpose (salvage: operational; storage:
+  present), which every query calls.
+- A test that toggles each truck state and asserts that every consumer agrees.
+
+### A17. Local beachhead pricing uses a fixed distance: Accepted with correction → D29
+
+**The literal 30 is real** (`field_supply.zig:161-165`), uncommented, and
+should at least be the `beachhead_band_ly` knob.
+
+**The impact is mostly wrong.**
+
+- Beachhead offers exist only inside a band 30 LY wide
+  (`market.visibilityFor`; `beachhead_band_ly = 30`). So the distance beyond
+  the ring is always 1–30 LY.
+- `localPurchaseMultBp` rounds down.
+- The fixed 30 therefore gives 2.5× everywhere, while the real distance would
+  give 2.0× almost everywhere.
+- The 4.0× cap can never be reached, so the proposed test ("two distances …
+  distinct, correctly capped") would mostly see identical values.
+- "Use the same quote for local purchases and emergency resupply" is already
+  true: both call `localPriceMultBp`.
+
+§9.6 does not say whether a partial 30 LY rounds up or down. Rounding up makes
+today's value correct.
+
+**Missed:**
+
+- The Map screen hard-codes "×1.0 (in ring)" and "×4.0 (out of reach)"
+  (`queries.zig:6162-6166`). The real in-ring value is 1.5×, and 4.0× is
+  unreachable.
+- §9.6 promises that the penalty ends once a field HQ is planted. Nothing
+  implements that.
+
+**Fix (D29):**
+
+- The distance beyond the ring is computed from the contract's stored
+  distance and offering HQ, in one rule.
+- The rounding is an explicit, documented decision.
+- The Map text comes from that rule.
+- The field-HQ recovery is implemented.
+
+### A18. User text enters markup unescaped: Accepted → D30
+
+**Confirmed:**
+
+- The wizard's name, outfit and company (`app.zig:710`, `:750-751`).
+- Ledger notes (`queries.zig:1180`), fed by HQ names (`tick.zig:481`).
+
+Terminal escapes are already neutralised, so this is presentation injection
+only.
+
+**Missed:**
+
+- Logo filenames (`app.zig:757-763`).
+- The typed verb echoed in "unknown verb '…'" and in the usage fallback.
+- `ledgerLines` (`queries.zig:5646`).
+
+**Fix (D30):** escape at each site, and extend the hostile-name test to the
+wizard and the ledger. A distinct markup type is the proposed contract's
+`table.Raw` direction, and we will extend it there.
+
+### A19. Narrow Forces focus can move to an undrawn pane: Accepted → D30
+
+**Confirmed.** It also covers exactly 120 columns: `narrow` is `< 120` and
+`wide` is `> 120` (`layout.zig:16-22`), so at 120 the spec counts two panes
+while the screen draws one.
+
+**Fix (D30):**
+
+- One narrow pane.
+- A structural test that every focus index maps to a drawn pane at every
+  tier.
+
+### A20. Width assumes one cell per code point: Accepted → D33
+
+**Confirmed.** Input accepts any printable code point, so wide characters can
+be typed into names.
+
+**Missed:** `queries.padCells` is a second width counter
+(`queries.zig:76-91`), and it uses `Utf8View.initUnchecked` on text that may
+be invalid UTF-8.
+
+Severity is low: all game data is ASCII plus single-width symbols.
+
+**Fix (D33):**
+
+- One `wcwidth`-equivalent width function, used by drawing, measuring,
+  clipping, padding and wrapping.
+- `padCells` is deleted.
+
+### A21. Music shutdown can block: Accepted with correction → D33
+
+**The blocking `waitpid` is confirmed** (`music.zig:256-266`).
+
+Two corrections:
+
+- **Volume changes do not stop the player.** `setVolume` does not call
+  `stop()`.
+- **The playlist growth is about 8 bytes per track per rebuild**, a few
+  kilobytes an hour.
+
+Every supported player honours SIGTERM, so a hang needs a wedged child.
+
+**Fix (D33):** poll with `WNOHANG`, escalate to SIGKILL after a bound, and
+reuse one order buffer.
+
+### A22. PNG validation: Accepted with correction → D33
+
+**Confirmed:**
+
+- CRCs are skipped.
+- IHDR ordering is unchecked.
+- The 64M-pixel limit allows about 450 MB of working memory.
+
+**The correction on alpha:** kitty and iTerm2 receive the original file
+bytes (`emblem.zig:14-26`), so transparency renders correctly on the primary
+terminals. Alpha is lost only in the half-block fallback.
+
+**Missed:** emblem bytes are stored in the save and decoded again on load, so
+save content is an input path as well as the logos folder.
+
+**Fix (D33):**
+
+- CRC and chunk-order checks, and an exact inflated length.
+- A practical emblem pixel limit.
+- Alpha blended against the background in the fallback.
+- Fixtures for malformed, oversized and transparent images.
+
+---
+
+## Persistence and lifecycle findings
+
+### A23. Store initialisation mutates before rejecting a future schema: Accepted → D31
+
+**Confirmed:**
+
+- `fromDb` runs the DDL outside any transaction and before the version check
+  (`store.zig:173-188`).
+- `getSetting` turns prepare, bind and step errors into the caller's default
+  (`:267-273`).
+- `@max(1, …)` clamps a zero or negative version to 1, per store and per
+  campaign.
+
+The practical impact is small, because the DDL is `IF NOT EXISTS`. It still
+breaks "refuse without mutating".
+
+**Fix (D31):**
+
+- Read the version strictly first.
+- Distinguish a new store from missing or corrupt metadata.
+- Run the DDL and the migrations in one transaction.
+- Reject a version below 1.
+
+### A24. SQLite handles leak on open failure: Accepted → D31
+
+**Confirmed** (`sqlite.zig:44-47`; `Store.open` has no `errdefer`).
+
+Both production callers exit when opening fails, so the leak cannot repeat
+today.
+
+**Fix (D31):** close the handle on failure, add `errdefer` in `open`, and
+document that `fromDb` takes ownership only on success.
+
+### A25. Player deletion is not atomic: Accepted → D31
+
+**Confirmed.** Each campaign deletion commits separately, and the final
+`DELETE FROM player` runs outside any transaction. SQLite rejects a nested
+`BEGIN`, so the audit's shape is the right one: a non-transactional
+`clearCampaignRows` inside one transaction.
+
+**Missed, and reachable in normal play:**
+
+- `Lobby.deletePlayer` does not reset the open session's campaign ID.
+- The TUI can delete the current player while a campaign is open.
+- The next save then fails with a sentence that sends the player to the REPL's
+  `campaigns` command.
+
+**Fix (D31):** one transaction for the whole deletion, the session reset, and
+a test for each.
+
+### A26. SQLite errors are too coarse: Accepted → D31
+
+**Confirmed.** Every result code collapses into `SqliteError`, and the
+fallback sentence says "nothing was changed". That is untrue after a partial
+`deletePlayer` (A25) or a committed DDL (A23).
+
+**Missed:**
+
+- There is no busy timeout, so a second game instance on the same store fails
+  at once with a generic error.
+- `Stmt.run` treats `SQLITE_ROW` as success.
+
+**Fix (D31):**
+
+- Bind the extended error code.
+- Add `StoreBusy`, `StoreReadOnly`, `StoreFull`, `CorruptStore` and
+  `ConstraintViolation`, each with its `errorText` sentence.
+- Set a busy timeout.
+
+### A27. Migration tests miss most historical ALTER paths: Accepted → the foreign-key migration item
+
+**Confirmed.** The one v5 fixture runs about 20 of the 40 migration steps. The
+steps it never runs include:
+
+- contract ×7
+- `battle_report` ×2
+- `pending_event` ×3
+- listing, force, candidate and policy
+
+The migration array is also out of version order (v34 comes before v9), which
+is harmless only because each step filters on its own version.
+
+**Fix:** fixtures at four schema boundaries, checking the resulting schema,
+idempotence, rollback and the refusal of a newer store without mutating it.
+They land **before** the table-rebuild migration, which needs them.
+
+### A28. Campaign tables lack indexes: Accepted with correction (severity) → D31
+
+**Confirmed:** there is no `CREATE INDEX` anywhere, and about 35 tables are
+scanned in full on each save, delete and load.
+
+**The severity is lower than implied.** Stores are single-user, and a campaign
+keeps at most 40 battle reports (`tuning.zon:219`).
 
 **Fix:**
 
-- Validated decoding with U+FFFD for invalid bytes, and control characters shown
-  as `?`, at the `Screen.text` boundary.
-- A plain-text path that never reads markup, for user text.
-- Fix the `utf8Encode(...) catch 1` fallback, which writes one uninitialised byte.
+- **D31**: the non-unique `(cid)` and `(cid, parent, ord)` indexes, as
+  `CREATE INDEX IF NOT EXISTS`, since they need no table rebuild.
+- **The foreign-key item**: the unique `(cid, ord)` indexes the foreign keys
+  depend on.
 
-### 16. Terminal and screen initialization have unsafe failure paths: Accepted → D19
+---
 
-**Confirmed, and worse.**
+## Build, packaging and CI findings
 
-- **Resize.** `Screen.resize` frees the cell buffer before allocating the new
-  one. On OOM, the error travels up to `run`, whose `defer app.deinit()` frees
-  the stale slice a second time. That is a double free, not merely a dangling
-  pointer.
-- **Terminal init.** `Term.init` switches to raw mode before two fallible writes.
-  The caller registers its `defer term.deinit()` only after `init` succeeds, so
-  a failed write leaves the terminal raw.
+### A29. Overlay path mistakes silently compile stock data: Accepted → D32
 
-**Fix:**
+**Reproduced:** `zig build validate-data -Ddata=/nonexistent/mod` exits 0
+(`build.zig:45-54`). A misspelled file name is ignored as well.
 
-- In `Screen.resize`, allocate the new buffer, then free the old one and swap.
-- In `Term.init`, add `errdefer tcsetattr(orig)` right after entering raw mode.
+The runtime banner ("mod X: 0 files overlaid", `root.zig:31-35`) shows it only
+after the build.
 
-### 17. The deterministic state hash is incomplete: Accepted → D20
+**Fix (D32):**
 
-**Confirmed, with one mitigation the audit missed.** `stateHash` hashes
-counts and totals for many collections. It omits these entirely:
+- Fail when the directory is missing, or when zero files are overlaid.
+- Warn on `.zon` files that match no known name.
 
-- RNG state
-- skills and unit slots
-- battle reports
-- the event queue
-- `next_*_id` counters
-- stats
-- contract score and victory points
+### A30. The package manifest includes the whole soundtrack: Accepted → D32
 
-The store round-trip test partly compensates. It checks fields by hand and runs
-both worlds 30 days forward before comparing hashes, which catches most
-divergence that surfaces within a month. #3 slipped through that gap all the
-same.
+**Confirmed, and larger than the audit's "hundreds of megabytes" implies.**
+`data/music` is 46 tracked files, 258 MB, all included through the recursive
+`"data"` entry in `build.zig.zon`.
 
-**Fix:**
+**Fix (D32):** list the `.zon` inputs and `data/tables` explicitly, and leave
+`data/music` out of `.paths`. It stays an opt-in install for
+`-Dbundle-music` release trees. This is the second half of proposed rule 66,
+which had no TODO line.
 
-- A digest over every saved field, RNG bytes included.
-- Pin one golden constant for a fixed seed and script.
+### A31. CI builds neither the release configuration nor the platforms: Accepted with correction → D32
 
-### 18. Named RNG streams remain cross-coupled: Accepted with correction → D15, D20
+**Confirmed:** there is one Debug job on Ubuntu, and no ReleaseFast build.
+Given A14's ReleaseFast undefined behaviour, this matters.
 
-**The coupling is real. The compatibility argument is wrong, and the real
-problem is worse.**
+**The correction:** the README does not claim Windows. It names macOS and
+Debian/Ubuntu. The concrete gap is macOS, our primary platform, which CI never
+compiles. Windows is already scheduled.
 
-- **The coupling.** `person_gen` and `company_gen.rollWeightClass` always draw
-  from `.generation`. Hiring-hall candidates, market hulls, battle prisoners,
-  salvage weight classes and contract events all feed through them, so one
-  extra prisoner changes the next recruit. Battle never touches `.market`, as
-  the audit says it does.
-- **The ordinal derivation.** It matters only when a campaign is seeded, because
-  the whole stream array is saved as one blob. That array is also the real
-  problem: adding any stream changes the blob's size, the load's length check
-  fails, and (per #13) every old save is silently reseeded to the same default,
-  3025.
+**Fix (D32):**
 
-**Fix:**
+- A ReleaseFast package build.
+- A `macos-latest` job.
+- Windows stays in its own scheduled item.
 
-- Explicit, stable salt per stream.
-- Save one row per named stream, plus the campaign seed, so a new stream is
-  seeded from the campaign seed (D15).
-- Callers pass their own stream into the generators (D20).
+### A32. CI actions and permissions are not hardened: Accepted → D32
 
-## Architecture and structure
+**Confirmed.** The repository's default workflow token is already read-only,
+which mitigates it, but, as the audit says, that depends on a setting outside
+the repo.
 
-### 19. Dependency direction is already inverted: Accepted with correction → D21
+**Fix (D32):**
 
-**Half right.**
+- Actions pinned to SHAs.
+- `permissions: contents: read`.
+- `persist-credentials: false`.
+- Job timeouts.
+- Concurrency cancellation. Every PR currently runs CI twice (push and
+  pull_request), so this saves real time.
 
-- **The RNG imports.** `src/sim/rng.zig` imports only `std`. It is a leaf, and
-  the contract makes it the one allowed PRNG. The domain modules take a `*Rng`
-  as a narrow input, which is what the audit recommends. The contract's layer
-  diagram simply never placed `rng.zig`, and we will list it below domain.
-- **`econ/market.zig`** imports only the RNG, not simulation state.
-- **The real inversions.** `econ/contract_market.zig` imports `GameState`,
-  `autoresolve`, `rating`, `personnel` and `maintenance`. `gen/company_gen.zig`
-  imports `GameState` and `personnel`. Both are simulation orchestration in the
-  wrong directory.
+### A33. Bundled media has no rights manifest: Accepted → D34
 
-**Fix:** move `contract_market` and `company_gen.generateInto` into `src/sim/`.
+**Confirmed.** There is no ASSETS or NOTICE file, and with no statement
+otherwise, the soundtrack and the crest fall under the repository's GPLv3,
+which may not be what the owner intends.
 
-### 20. Central modules have become subsystem aggregators: Accepted → D22
+**Fix (D34):** an `ASSETS.md` giving the source, owner, licence and
+redistribution terms for each asset set:
 
-**Confirmed, and larger than stated.**
+- `data/music/OST`, `OST Part 2` and `Supplimental Music`
+- `docs/logos`
+- `unforgiven.png`, which nothing references and which will be removed or
+  used
+- the test fixtures
+- the generated screenshots
 
-| File | Lines | Longest function |
-|---|---|---|
-| `src/sim/queries.zig` | 5,873 | |
-| `src/sim/commands.zig` | 4,447 | `execute`, 1,097 lines |
-| `src/tui/app.zig` | 3,385 | |
-| `src/persist/store.zig` | 2,242 | `load`, 767 lines |
-| `src/sim/state.zig` | 2,155 | |
+Any asset whose rights are unresolved stays out of packages and releases until
+they are resolved.
 
-We keep the single facades. `execute` becomes a dispatch switch into
-per-subsystem functions, and `load` becomes per-table decoders. This work comes
-last, because it moves every line number the other deliverables cite.
+### A34. Smoke scripts delete caller paths and leak children: Accepted with correction → D32
 
-### 21. HQ locality is repeatedly bypassed: Accepted with correction → D18
+**Confirmed:**
 
-**Mostly confirmed, and one item is a design gap rather than a bypass.**
+- Both scripts delete the path they are given, without checking it.
+- The REPL smoke has no timeout.
 
-- **Training.** "Training happens at home … at a regional/brigade HQ with a
-  training ground" (ARCHITECTURE.md), but three separate loops
-  (`commands.zig:782`, `1448`, `1849`) accept any HQ with a ground. The copies
-  also break rule 5.
-- **Mess and HR.** Weekly fatigue recovery uses the best mess across all HQs,
-  and HR uses the first HQ. The design says both are local.
-- **Recruiting.** The recruit bonus reads `hqs.values()[0]`, which is arbitrary
-  rather than a rule.
-- **Comms.** Global intel was an explicit design decision (12D.5, "how well the
-  outfit reads"). It became inconsistent when 12E.4 made contract boards
-  per-HQ. We resolve it per-board: `intelLevel(gs, offer_hq)`.
+**The leak is overstated.** `pty.fork` makes the child a session leader. When
+the Python process dies, the pty master closes, and the child receives SIGHUP
+and exits (the TUI does not handle SIGHUP, and music is off in the smoke). The
+practical residue is a brief zombie, and an exit status nobody checks.
 
-**Fix:** one site-aware rule function each, plus asymmetric two-HQ tests.
+**Fix (D32):**
 
-### 22. Query and frontend boundaries have concrete violations: Accepted with correction → D21
+- Default to a temporary path, and refuse an existing file that is not a
+  `.db`.
+- `try/finally` with kill, and `waitpid` with the exit status checked.
+- A timeout on the REPL run. macOS has no `timeout` binary by default, so it
+  will be done in the script.
 
-**One of the four examples is already fixed.** The TUI no longer reads
-`battle_reports` directly. It goes through `queries.turnHold` (`app.zig:2214`).
+---
 
-The rest are confirmed:
+## Structural findings
 
-- `hqFacilityAtRow` recovers a facility by parsing rendered text
-  (`queries.zig:1757-1772`).
-- Inbox selection counts rows (`app.zig:1825-1840`).
-- The Forces screen checks company-slot availability itself instead of letting
-  the command refuse.
+### A35. Large central modules: Accepted, already scheduled
 
-**Fix:**
+**Confirmed.** The same seven modules are the only ones over 1,000 lines:
 
-- Typed row identities on `hqDetail` and the inbox rows.
-- Remove the Forces pre-check.
+| Module | Lines |
+|---|---|
+| `queries` | 6,202 |
+| `commands` | 4,796 |
+| `app` | 4,030 |
+| `store` | 2,909 |
+| `battle` | 2,259 |
+| `state` | 2,245 |
+| `contract_events` | 1,382 |
 
-### 23. CLI parser has unreachable and permissive branches: Accepted → D21
+`TODO.md` already lists them as rule-87 exceptions in the adoption PR, each
+tied to a split after adoption, with state behaviour moving first (rule 77).
+We agree with the audit's constraints: one subsystem at a time, behind an
+unchanged facade, the golden hash preserved, and no split combined with a
+correctness change.
 
-**Confirmed.**
+### A36. REPL session ownership bypasses the facade: Already fixed
 
-- **Shadowed branches.** The early `shares` and `autoadmit` branches
-  (`src/sim/cli.zig:147-155`) shadow the later ones, so `shares +/-` and the
-  bare toggle can never be reached.
-- **Permissive tokens.** `xfer` treats any token other than `unit` as a person,
-  and `office` treats any token other than `-` as `+`.
+**Fixed in `f1d6887` (PR #101).** Both frontends hold a `lobby.Session`, and
+the REPL runs new, load, save and delete through it (`main.zig:515-556`).
+`docs/verify-contract.sh` now rejects a frontend that owns a `GameState`.
 
-This affects only the REPL and the TUI `:` line. The TUI keys issue the
-commands directly.
+**One leftover:** the demo run (not the REPL) calls `gs.hash()` at
+`main.zig:355`. It moves behind a query in D30.
 
-**Fix:**
+### A37. Completion is a second read boundary: Accepted with correction → D30
 
-- One branch per verb.
-- Strict enum parsing.
-- Reject trailing tokens.
+**Confirmed:** `cli.completionPool` walks `gs.hqs`, `gs.forces` and the
+catalogues directly, and offers every planet and every ID regardless of
+relevance.
 
-## Build, data and tests
+**The correction:** both contracts place `cli.zig` in the application layer,
+not the frontend layer, so this is not a literal breach of the query-only
+rule. It is a second read path that a frontend consumes, and we agree it
+should not exist.
 
-### 24. Published package omits an unconditional build input: Accepted → D22
-
-**Confirmed.** It matters only when the project is fetched as a Zig package,
-which is rare for an executable, but it is a one-line fix: add `docs/logos` and
-`LICENSE` to `.paths`.
-
-### 25. Tuning validation skips signed economic fields: Accepted → D22
-
-**Confirmed, and worse.** The early return for signed types
-(`src/domain/tuning.zig:743`) runs before the basis-point bound. All 115
-`Bp`/`CBills` knobs are signed, and no unsigned `_bp` field exists, so the check
-has never run on a single field.
-
-**Fix:** validation keyed on the field's type (`Bp`, `CBills`), with an explicit
-allow-list for knobs that are genuinely signed deltas.
-
-### 26. Mod semantic validation is not part of ordinary mod builds: Accepted → D22
-
-**Confirmed.** `docs/modding.md` does tell modders to run
-`zig build test -Ddata=…`, so the gap is documented rather than hidden. The
-default is still wrong: a mod with an empty `rat.zon` builds cleanly and then
-indexes out of bounds at runtime.
-
-**Fix:** a `validate-data` build step that overlay installs depend on.
-
-### 27. Reviewer checks do not recursively inspect screens: Accepted with correction → D21
-
-**The glob gap is real, but it hides nothing the greps look for.** We ran every
-`src/tui/*.zig` check against `src/tui/screens/*.zig` and none prints anything.
-
-The command-feedback issue the audit points at is real, but it is a pattern no
-grep checks for: 11 direct `commands.execute(` calls in screens bypass
-`execSay`. Some of them legitimately need the command's result.
-
-**Fix:**
-
-- Recursive globs.
-- A new check for `commands.execute(` outside `exec`/`execSay`.
-- Move the checks into a script that CI runs.
-
-### 28. TUI modules mostly lack focused tests: Accepted → D22
-
-**Confirmed.** `app.zig` and all ten screen modules have no in-file tests,
-contrary to rule 9. The other TUI modules do have them.
-
-**Fix:** pure tests for row identity (#22), cursor clamping on resize, and each
-screen's key handler against a generated campaign.
+**Fix (D30):** `queries.completionCandidates`; `cli.zig` keeps token context
+and prefix matching only.
 
 ---
 
 ## Positive observations
 
-We agree, and we keep them as invariants. The explicit architecture is what
-made most of these findings cheap to confirm or refute.
+We agree with them, and we keep them as invariants. The deterministic core,
+the arena-owned state and the golden digest are what let us confirm or
+correct each finding here by tracing a single path.
 
-## Revised priority order
+---
 
-**Scheduling (decided 2026-09-23):** this work starts only after Stage 12
-is finished (`TODO.md` Part 1), so deep changes to how the code works do
-not land mid-implementation. Within the audit work, the order is:
+## Delivery plan
 
-1. **D14** gameplay corruption (#1, #2, #3)
-2. **D15** save identity, corruption and per-stream RNG persistence (#4, #5, #13, #14, #18)
-3. **D16** battle and medical rule bugs (#7 MASH, #8, #9, #10, #11)
-4. **D17** logistics accounting and pre-debit capacity reservation (#6, #12)
-5. **D18** HQ locality (#21)
-6. **D19** terminal safety (#15, #16)
-7. **D20** complete state digest and RNG stream ownership (#17, #18)
-8. **D21** layering, boundaries, CLI and reviewer checks (#19, #22, #23, #27)
-9. **D22** build, data validation, TUI tests and the module split (#20, #24, #25, #26, #28)
+Each deliverable is one pull request. Each lands on `main` before the next
+begins, and each adds its regression test before it changes behaviour, as the
+audit asks. Deliverables D23–D34 are new. Work already in `TODO.md` is shown
+where the audit's items join it.
 
-The terminal fixes (D19) are small and independent of the save format, so if
-the ReleaseFast undefined behaviour is judged more urgent than the rule bugs,
-they may move ahead of D16.
+| # | Deliverable | Findings | Size |
+|---|---|---|---|
+| D23 | Pointer lifetimes in decisions and battle | A1 (pointer and log), A2 | small |
+| D24 | Errors that follow a mutation propagate | A3 (catch sites) | small |
+| D25 | Turn-advance safety and strict frontend verbs | A9, A10, A12 | small |
+| D26 | Posture-owned location rules | A8 | medium |
+| D27 | One result presenter for both frontends | A11 | medium |
+| — | **Failure atomicity** (scheduled; moved earlier) | A1 (prepare/commit), A3 (reserve-first), `ARCHITECTURE.md` §4 | medium |
+| D28 | Save loading fails closed | A4, A5, A6, A7 | medium |
+| D29 | Freight routing, truck capacity, beachhead pricing | A15, A16, A17 | medium |
+| D30 | Frontend boundary hardening | A13, A18, A19, A37, A36 leftover | medium |
+| D31 | Store lifecycle | A23, A24, A25, A26, A28 (non-unique) | medium |
+| D32 | Build, data validation and CI | A14, A29, A30, A31, A32, A34 | medium |
+| — | **Foreign keys and table rebuild** (scheduled) | A27 fixtures first; A5 `CHECK`s; A28 unique indexes; A25 cascade | large |
+| — | **Behaviour off `GameState`**, then the adoption PR and module splits (scheduled) | A35 | large |
+| D33 | Terminal text and media inputs | A20, A21, A22 | medium |
+| D34 | Asset rights manifest | A33 | small; waits on the owner's rights statement |
+
+
+**Why this order:**
+
+- **The integrity fixes come first**, as the audit asks. D23 and D24 remove
+  the pointer and swallowed-error defects. D25–D27 are the ones a player can
+  hit today, each with one keystroke: a malformed `:day`, the week advance, a
+  mis-parsed policy, and an order reported as successful when it failed.
+- **The scheduled failure-atomicity work moves ahead of** the behaviour move
+  off `GameState`, because A3's sites are in `state.zig` methods that the move
+  would otherwise relocate before fixing them.
+- **Loader hardening (D28) comes before the foreign-key migration**, because
+  the loader stays the integrity check for old and damaged stores after
+  constraints land, as the audit notes. The migration fixtures (A27) must
+  exist before any table is rebuilt.
+- **The terminal and media items come last.** They are low severity, and their
+  inputs are the player's own.
+
+We would welcome the auditors' view on four points:
+
+1. Whether the live/historical split of references in A4 matches their intent.
+2. Whether a reserve-first discipline with one failure-injection test per
+   pattern meets A3's requirement, rather than a general transaction
+   mechanism.
+3. The A17 rounding question.
+4. Whether they agree that A1 and A2 are High and Medium, given the arena
+   allocator.
