@@ -749,7 +749,7 @@ pub const Tuning = struct {
 /// The live table.
 pub const t: Tuning = @import("tuning_zon");
 
-fn checkPositive(comptime T: type, value: T, comptime name: []const u8) !void {
+fn expectTuningSane(comptime T: type, value: T, comptime name: []const u8) !void {
     switch (@typeInfo(T)) {
         .int => |info| {
             // Signed knobs (deltas, scores) may be zero or negative by design.
@@ -765,13 +765,13 @@ fn checkPositive(comptime T: type, value: T, comptime name: []const u8) !void {
                 return error.BadTuning;
             }
         },
-        .@"struct" => |info| inline for (info.fields) |f| try checkPositive(f.type, @field(value, f.name), name ++ "." ++ f.name),
+        .@"struct" => |info| inline for (info.fields) |f| try expectTuningSane(f.type, @field(value, f.name), name ++ "." ++ f.name),
         else => {},
     }
 }
 
 test "every tuning value is positive and every basis-point knob is sane" {
-    try checkPositive(Tuning, t, "t");
+    try expectTuningSane(Tuning, t, "t");
 }
 
 test "spot checks against the values the formulas were built on" {

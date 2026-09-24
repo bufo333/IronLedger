@@ -117,10 +117,7 @@ pub fn key(self: *App, ch: u21) anyerror!void {
                     self.say(.dim, "move the cursor onto a company's field stores", .{});
                     return;
                 }
-                const r = game.commands.execute(g, .{ .trim_stock = co }) catch |err| {
-                    self.say(.crit, "{s}", .{game.cli.errorText(err)});
-                    return;
-                };
+                const r = self.execResult(.{ .trim_stock = co }) orelse return;
                 if (r.tons_moved == 0) {
                     self.say(.dim, "{s}'s stores already match the field plan", .{try q.forceName(self.a(), g, co)});
                 } else {
@@ -134,7 +131,7 @@ pub fn key(self: *App, ch: u21) anyerror!void {
                     self.say(.dim, "move the cursor onto a company's field stores", .{});
                     return;
                 }
-                const res = game.commands.execute(g, .{ .ship_components_home = co }) catch |err| switch (err) {
+                const res = game.commands.execute(g, .{ .ship_components_home = co }) catch |err| switch (err) { // direct: an empty store is not a refusal
                     error.NothingToShip => return self.say(.dim, "no structural components in {s}'s field stores", .{try q.forceName(self.a(), g, co)}),
                     else => return self.say(.crit, "{s}", .{game.cli.errorText(err)}),
                 };

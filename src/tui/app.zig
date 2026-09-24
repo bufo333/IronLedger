@@ -1135,10 +1135,7 @@ pub const App = struct {
                 _ = try self.execSay(.{ .move_unit = .{ .unit = c.unit, .force = lance.id } }, .good, "#{d} reactivating and assigned to {s}", .{ @intFromEnum(c.unit), try q.plain(self.a(), lance.name) });
             },
             .listing => {
-                const r = game.commands.execute(g, .{ .buy_hull_for = .{ .listing = c.listing, .company = self.raise.company, .lance = lance.id } }) catch |err| {
-                    self.say(.crit, "{s}", .{game.cli.errorText(err)});
-                    return;
-                };
+                const r = self.execResult(.{ .buy_hull_for = .{ .listing = c.listing, .company = self.raise.company, .lance = lance.id } }) orelse return;
                 if (r.unit == .none) {
                     self.say(.crit, "{s}", .{game.cli.hull_fraud_text});
                 } else if (r.eta_days == 0) {
@@ -1156,7 +1153,7 @@ pub const App = struct {
         const train = try q.supportTrain(self.a(), g, self.raise.company);
         if (train.lines.len == 0) return;
         const line = train.lines[@min(self.modal_cursor, train.lines.len - 1)];
-        const r = game.commands.execute(g, .{ .buy_support_hull = .{ .company = self.raise.company, .kind = line.kind } }) catch |err| switch (err) {
+        const r = game.commands.execute(g, .{ .buy_support_hull = .{ .company = self.raise.company, .kind = line.kind } }) catch |err| switch (err) { // direct: names the missing line
             error.NoSuchListing => return self.say(.amber, "{s} is not on the home board right now — staple lines restock as the board refreshes", .{line.key}),
             else => return self.say(.crit, "{s}", .{game.cli.errorText(err)}),
         };
@@ -1631,7 +1628,7 @@ pub const App = struct {
         const desks = try q.backOffice(self.a(), g, hq_id);
         if (desks.len == 0) return;
         const role = desks[@min(self.w_office, desks.len - 1)].role;
-        _ = game.commands.execute(g, .{ .set_office_staff = .{ .hq = hq_id, .role = role, .delta = if (delta > 0) 1 else -1 } }) catch |err| switch (err) {
+        _ = game.commands.execute(g, .{ .set_office_staff = .{ .hq = hq_id, .role = role, .delta = if (delta > 0) 1 else -1 } }) catch |err| switch (err) { // direct: names the role with nobody to release
             error.UnknownPerson => return self.say(.amber, "no {s} to release", .{@tagName(role)}),
             else => return self.say(.crit, "{s}", .{game.cli.errorText(err)}),
         };
@@ -1710,6 +1707,7 @@ pub const App = struct {
         self.gs = null;
         var gs = game.lobby.newSession(self.gpa, 3025 + self.w_seed * 7919 + @as(u64, @intCast(self.w_faction)) * 13);
         errdefer game.lobby.discard(&gs);
+        // direct: the wizard builds a campaign that is not `self.gs` yet.
         _ = try game.commands.execute(&gs, .{ .create_commander = .{ .name = self.w_name.slice(), .origin = factions[self.w_faction], .profession = professions[self.w_profession], .start_year = start_years[self.w_year] } });
         _ = try game.commands.execute(&gs, .{ .rename_outfit = self.w_outfit.slice() });
         const res = try game.commands.execute(&gs, .{ .new_company = self.w_company.slice() });
@@ -2005,11 +2003,8 @@ pub const App = struct {
             },
             .auto_admit => try self.toggleAutoAdmit(),
             .difficulty => try self.cycleDifficulty(if (dir > 0) 1 else -1),
-            .shares => if (self.gs) |*gs| {
-                const res = game.commands.execute(gs, .{ .adjust_shares_pct = if (dir > 0) 5 else -5 }) catch |err| {
-                    self.say(.crit, "{s}", .{game.cli.errorText(err)});
-                    return;
-                };
+            .shares => if (self.gs != null) {
+                const res = self.execResult(.{ .adjust_shares_pct = if (dir > 0) 5 else -5 }) orelse return;
                 self.say(.good, "shareholders take {d}% of contract income at completion", .{res.shares_pct});
             },
             .info => {},
@@ -2033,21 +2028,15 @@ pub const App = struct {
     }
 
     fn cycleDifficulty(self: *App, dir: i8) !void {
-        if (self.gs) |*gs| {
-            const res = game.commands.execute(gs, .{ .cycle_difficulty = dir }) catch |err| {
-                self.say(.crit, "{s}", .{game.cli.errorText(err)});
-                return;
-            };
+        if (self.gs != null) {
+            const res = self.execResult(.{ .cycle_difficulty = dir }) orelse return;
             self.say(.good, "difficulty: {s} — {s}", .{ res.difficulty_name, res.difficulty_blurb });
         }
     }
 
     fn toggleAutoAdmit(self: *App) !void {
-        if (self.gs) |*gs| {
-            const res = game.commands.execute(gs, .toggle_auto_admit) catch |err| {
-                self.say(.crit, "{s}", .{game.cli.errorText(err)});
-                return;
-            };
+        if (self.gs != null) {
+            const res = self.execResult(.toggle_auto_admit) orelse return;
             self.say(.good, "medbay auto-admit {s}", .{if (res.auto_admit orelse false) "on — casualties are admitted each morning" else "off — admit casualties yourself (m on People); the turn waits for it"});
         }
     }
@@ -2198,10 +2187,7 @@ pub const App = struct {
                     return;
                 }
                 if (pc.what == .unit) {
-                    const res = game.commands.execute(g, .{ .transfer_unit = .{ .unit = @enumFromInt(pc.id), .to_company = co } }) catch |err| {
-                        self.say(.crit, "{s}", .{game.cli.errorText(err)});
-                        return;
-                    };
+                    const res = self.execResult(.{ .transfer_unit = .{ .unit = @enumFromInt(pc.id), .to_company = co } }) orelse return;
                     self.say(.good, "#{d} sent to {s}{s}", .{ pc.id, try q.forceName(self.a(), g, co), if (res.in_transit) " — in transit" else " — placed" });
                 } else {
                     _ = try self.execSay(.{ .transfer_person = .{ .person = @enumFromInt(pc.id), .to_force = co } }, .good, "{s} transferred to {s}", .{ try q.personName(al, g, @enumFromInt(pc.id)), try q.forceName(self.a(), g, co) });
@@ -2292,7 +2278,7 @@ pub const App = struct {
 
     fn advance(self: *App, days: u32) !void {
         const g = &self.gs.?;
-        const res = game.commands.execute(g, if (days == 1) .advance_day else .{ .advance_days = days }) catch |err| {
+        const res = game.commands.execute(g, if (days == 1) .advance_day else .{ .advance_days = days }) catch |err| { // direct: a refusal can be bankruptcy
             self.say(.crit, "{s}", .{game.cli.errorText(err)});
             if ((try q.status(self.a(), g)).bankrupt) {
                 self.store.save(g, self.player_id) catch {};
@@ -2327,13 +2313,18 @@ pub const App = struct {
     }
 
     /// Run a command; a refusal becomes the status line. Returns whether it ran.
-    pub fn exec(self: *App, cmd: Command) !bool {
+    /// Run a command and hand back its result, or report the refusal
+    /// (`cli.errorText`, the one sentence per error) and return null.
+    pub fn execResult(self: *App, cmd: Command) ?game.commands.Result {
         const g = &self.gs.?;
-        _ = game.commands.execute(g, cmd) catch |err| {
+        return game.commands.execute(g, cmd) catch |err| { // direct: the one wrapper
             self.say(.crit, "refused: {s}", .{game.cli.errorText(err)});
-            return false;
+            return null;
         };
-        return true;
+    }
+
+    pub fn exec(self: *App, cmd: Command) !bool {
+        return self.execResult(cmd) != null;
     }
 
     /// Run a command and report it: the refusal sentence on failure, `fmt`
@@ -2898,10 +2889,7 @@ pub const App = struct {
             .negotiate => |idx| {
                 const term: game.contract.NegotiableTerm = @enumFromInt(@min(self.modal_cursor, negotiable_terms.len - 1));
                 self.modal = .none;
-                const r = game.commands.execute(&self.gs.?, .{ .negotiate = .{ .offer_index = idx, .term = term } }) catch |err| {
-                    self.say(.crit, "refused: {s}", .{game.cli.errorText(err)});
-                    return;
-                };
+                const r = self.execResult(.{ .negotiate = .{ .offer_index = idx, .term = term } }) orelse return;
                 switch (r.negotiation) {
                     .improved => self.say(.good, "{s} improved — the offer row shows the new terms", .{@tagName(term)}),
                     .hardened => self.say(.amber, "they hold firm on {s} and shave the pay 5%", .{@tagName(term)}),
@@ -3025,11 +3013,7 @@ pub const App = struct {
             },
             .raise_crews => switch (ch) {
                 'a', 'A' => {
-                    const g = &self.gs.?;
-                    const r = game.commands.execute(g, .{ .crew_company = self.raise.company }) catch |err| {
-                        self.say(.crit, "{s}", .{game.cli.errorText(err)});
-                        return true;
-                    };
+                    const r = self.execResult(.{ .crew_company = self.raise.company }) orelse return true;
                     self.say(if (r.still_open == 0) .good else .amber, "{d} hired and seated · {d} lines still open — the halls had nobody of that trade yet", .{ r.hired_count, r.still_open });
                 },
                 else => return false,
@@ -3319,10 +3303,7 @@ pub const App = struct {
             .raise_name => {
                 if (text.len == 0) return;
                 const g = &self.gs.?;
-                const r = game.commands.execute(g, .{ .raise_company = .{ .name = text, .hq = self.raise.hq } }) catch |err| {
-                    self.say(.crit, "{s}", .{game.cli.errorText(err)});
-                    return;
-                };
+                const r = self.execResult(.{ .raise_company = .{ .name = text, .hq = self.raise.hq } }) orelse return;
                 self.raise.company = r.created_force;
                 self.raise.lance_idx = 0;
                 self.raise.passed_len = 0;

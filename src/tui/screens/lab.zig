@@ -64,7 +64,7 @@ pub fn key(self: *App, ch: u21) anyerror!void {
             },
             'R' => if (view.mounts.len > 0) {
                 const m = view.mounts[@min(self.cur(0).*, view.mounts.len - 1)];
-                const res = game.commands.execute(g, .{ .replace_mount = .{ .unit = uid, .slot_key = m.slot_key } }) catch |err| switch (err) {
+                const res = game.commands.execute(g, .{ .replace_mount = .{ .unit = uid, .slot_key = m.slot_key } }) catch |err| switch (err) { // direct: a sound mount says how to order one
                     error.MountIsFine => return self.say(.dim, "{s} is fine — [R] orders a replacement for damaged or destroyed gear", .{m.slot_key}),
                     else => return self.say(.crit, "{s}", .{game.cli.errorText(err)}),
                 };
