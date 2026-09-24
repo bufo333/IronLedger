@@ -1,4 +1,4 @@
-# TUI architecture (Stage 12)
+# TUI architecture
 
 Companion to `docs/tui-mockup.html` (rendered mockups of every screen).
 The terminal client is a **view over the existing command/query boundary**
@@ -82,7 +82,7 @@ command line   `:` prompt (opens on `:`), hints on the right
   and lays every screen out from the width and height it has: panes split
   the body by ratio, side panes drop below 120 columns (`narrow()`), the
   Desk emblem needs 160, and every table sizes its columns to content and
-  scrolls sideways when the pane is narrower (Stage 12F). Below 80 × 24
+  scrolls sideways when the pane is narrower. Below 80 × 24
   the client shows what it needs instead of fragments. There are no fixed
   tiers; a bigger terminal simply shows more rows and wider panes.
   `docs/tui-mockup.html` shows the layout at 200 × 50.
@@ -105,6 +105,24 @@ with tab completion over verbs and entity ids here. Frontend-only verbs
 `readiness`, `summary`, `music`) stay in `app.zig`; the REPL's
 `briefing <contract id>` prints what the battle-orders box shows. Results
 land in the Desk log pane.
+
+Parsing is strict. Every word must be used: anything left over after a
+complete command is refused, and a verb that takes a name (`raise`,
+`rename`, …) takes the rest of the line as that name. A choice word
+outside its list (`xfer`, `office`, `promote`, `cycledifficulty`) is
+refused, never read as the default; bare `autoadmit` toggles, and
+`autoadmit on|off` sets it. A parse error shows the verb's usage line.
+
+A command the sim refuses shows as `refused: <sentence>` in the status
+line (the REPL prints the same line), the sentence coming from
+`cli.errorText`, which words every command and parse error and says "an
+unexpected failure" for anything else; no error name reaches the screen.
+A screen may word an expected refusal its own way (the part a repair
+lacks, the role nobody fills) through `execResultWith`. Screen keys do
+not pre-check what the command decides: the Forces `+` asks for the new
+company's name, aims at an HQ with a free combat-company slot (else the
+selected one), and `raise_company` refuses after the name when there is
+no room.
 
 ## Screens
 
@@ -518,27 +536,27 @@ Modals: **End turn** (checklist rows with jump targets, `n` proceed) ·
 lance's role with the odds recomputed, Enter buys the emergency resupply,
 recalls behind a confirm, or confirms the orders, which clears the
 contact warning; `Esc` closes it with the current settings standing) ·
-**Order / Transfer / Assign / Upgrade forms** (field-by-field, validated before the command is
-issued so refusals show as inline text, not error codes).
+**Amount forms** (order, ship, sell, transfer, loan, policies: one to
+three numbers held to their ranges; Enter builds a command line for the
+shared parser, and a refusal shows as its sentence, never an error code).
 
-## Queries the core must expose
+## Queries the core exposes
 
-Most screen data already exists as `print*` functions in `src/main.zig`.
-Stage 12 lifts each into a **query** returning structured data (no
-formatting) in a new `src/sim/queries.zig`, shared by CLI and TUI:
+Every screen reads a **query** in `src/sim/queries.zig`, shared by the REPL
+and the TUI:
 
-- `desk` (checklist warnings — exists: `checklist.turnWarnings`; inbox;
+- `desk` (checklist warnings from `checklist.turnWarnings`; inbox;
   company postures; HQ summaries; log tail with filter)
 - `map` (worlds with ring/beachhead/dark classification per HQ, offers per
   world, HQ and company markers)
 - `toe` (tree with slot states), `hull`, `person`, `unassignedPool`
 - `contracts` (board + active with objective/pool/VP/clock/exposure)
-- `treasuries`, `pnl(entity, period)` (exists: `finance.summarize`),
+- `treasuries`, `pnl(entity, period)` (from `finance.summarize`),
   `ledger(entity, n)`
 - `supplies` (sites with tons/capacity/burn/days, inbound), `demand`
 - `hq` (facilities built/effective, projects, capacity/ceilings, bays,
   staff vs requirement, candidates)
-- `lab(unit)` (exists: `meklab.validate` + `state.labItems`)
+- `lab(unit)` (from `meklab.validate` + `state.labItems`)
 
 Every query is pure and allocator-parameterized so the TUI can rebuild its
 view model each frame from an arena.
@@ -555,8 +573,8 @@ view model each frame from an arena.
 - **Cell buffer**: the frame renders into a `[]Cell` (char + fg + attrs)
   double buffer; only changed cells are flushed. No per-frame allocation
   beyond the arena the queries fill.
-- **Widgets**: `Pane` (title, border, focus), `Table` (Stage 12F:
-  `sim/table.zig` holds the column names and rows of markup cells, the
+- **Widgets**: `Pane` (title, border, focus), `Table`
+  (`sim/table.zig` holds the column names and rows of markup cells, the
   query never pads; `screen.table` sizes every column to its widest cell,
   pins the first, scrolls the rest with ←/→ and hints how many columns are
   hidden either side), `Tree` (the TO&E: lines, with hull rows padded to
@@ -587,34 +605,12 @@ not rules:
   swaps those for `+ - |` and `# .` on terminals that render them
   double-width. Emblem art is plain ASCII by construction.
 
-## Build order (status in ROADMAP.md Stage 12)
+## Smoke tests
 
-1. ✅ `sim/queries.zig` — display-ready views (status, desk, contracts,
-   ledger, toe/hull/unassigned, supply, hqDetail) with `{a}…{/}` markup;
-   the CLI printers remain for now and migrate onto queries as screens land.
-2. ✅ `tui/term.zig` (raw mode, alt screen, keys, SIGWINCH, size) and
-   `tui/screen.zig` (cell grid, markup text, panes, list panes, full-frame
-   flush). Widgets are functions on `Screen`, not objects.
-3. ✅ Lobby in `tui/app.zig`: `player` table (schema v2, migrated in
-   `Store.open`), Welcome, four-step wizard, typed-name delete, quit modal.
-4. ✅ Desk, Contracts, Ledger; end-turn and decision modals; `:` command
-   line with the CLI verbs parsed into `commands.Command`.
-5. ✅ Forces, Supply, HQ, Map, Lab.
-6. ✅ Emblem (`tui/png.zig`, `tui/emblem.zig`): PNG decode (8-bit,
-   non-interlaced), wizard import from the logo directories, half-block
-   colour cells in the grid (`Screen.blit`, `Cell.px`), kitty protocol
-   probe at startup (`Term.probe`), transmit once per campaign, delete-all
-   + place every frame, placements hidden while a modal is open.
-   ✅ iTerm2 inline images, the cell editor, wizard back-office sizing
-   (the BACK OFFICE pane takes the bottom band on narrow terminals; the
-   review step lists the headcount and payroll).
-7. ✅ Command-line Tab completion; size tiers as inline rules (`narrow()`
-   = under 120 columns drops side panes, Enter opens hull/record modals;
-   the status strip shortens); `--ascii`; wizard back-office sizing.
-   The pty smoke test runs a second pass at 80×24 with `--ascii`.
-
-Smoke test: `python3 docs/tui_smoke.py zig-out/bin/game /tmp/smoke.db`;
-the REPL has its own: `docs/repl_smoke.sh zig-out/bin/game /tmp/repl.db`.
-drives the binary through a pty (create player → wizard → begin → every
-screen → end turn → `:day 3` → save & return) and asserts on landmarks.
-Run it after any change under `src/tui/`, alongside `zig build test`.
+`python3 docs/tui_smoke.py zig-out/bin/game /tmp/smoke.db` drives the
+binary through a pty (create player → wizard → begin → every screen → end
+turn → `:day 3` → save & return), asserts on landmarks, and runs a second
+pass at 80 × 24 with `--ascii`. The REPL has its own:
+`docs/repl_smoke.sh zig-out/bin/game /tmp/repl.db`. Both run after any
+change under `src/tui/`, `cli.zig`, `queries.zig` or `src/main.zig`,
+alongside `zig build test`.

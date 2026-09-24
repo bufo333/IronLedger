@@ -5,10 +5,6 @@ before the next starts (CLAUDE.md). The PR that finishes an item deletes
 its line and says in its description which docs it updated. Finished work
 lives in git history and the merged PRs, not here.
 
-## Next
-
-- [ ] Docs catch-up: `docs/mekhq-map.md` rows for `keys.zig` and `digest.zig`; `docs/tui.md` and `GAMEPLAY.md` describe strict command parsing (leftover words refused, bare `autoadmit` toggles), `refused: <sentence>` messages, and the Forces `+` refusing after the name; `docs/tui.md` loses its "Build order" section and "(Stage 12F)" tags; ARCHITECTURE describes the key-binding tables and `docs/verify-contract.sh`; CLAUDE.md names `docs/verify-contract.sh`.
-
 ## Adopting the revised contract
 
 `docs/coding-contract-proposed-updated.md` becomes the contract when its full
