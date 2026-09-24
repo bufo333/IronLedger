@@ -200,6 +200,51 @@ pub const MarkupBuilder = struct {
     }
 };
 
+/// A string that can go into screen markup as it is: valid UTF-8, no
+/// control characters, and no `{`. Data-file strings and the display
+/// copies a save keeps must pass this; player text is escaped instead.
+pub fn markupSafe(s: []const u8) bool {
+    if (!std.unicode.utf8ValidateSlice(s)) return false;
+    var it = std.unicode.Utf8View.initUnchecked(s).iterator(); // validated above
+    while (it.nextCodepoint()) |cp| {
+        if (cp == '{' or cp < 0x20 or cp == 0x7f or (cp >= 0x80 and cp < 0xa0)) return false;
+    }
+    return true;
+}
+
+/// The first string anywhere inside `value` (slices, arrays, structs,
+/// optionals, tagged unions) that is not `markupSafe`, or null.
+pub fn unsafeString(value: anytype) ?[]const u8 {
+    const T = @TypeOf(value);
+    switch (@typeInfo(T)) {
+        .pointer => |ptr| switch (ptr.size) {
+            .slice => {
+                if (ptr.child == u8) return if (markupSafe(value)) null else value;
+                for (value) |item| if (unsafeString(item)) |bad| return bad;
+                return null;
+            },
+            .one => return unsafeString(value.*),
+            else => return null,
+        },
+        .array => {
+            for (value) |item| if (unsafeString(item)) |bad| return bad;
+            return null;
+        },
+        .@"struct" => |st| {
+            inline for (st.fields) |f| if (unsafeString(@field(value, f.name))) |bad| return bad;
+            return null;
+        },
+        .optional => return if (value) |v| unsafeString(v) else null,
+        .@"union" => |un| {
+            if (un.tag_type == null) return null;
+            switch (value) {
+                inline else => |v| return unsafeString(v),
+            }
+        },
+        else => return null,
+    }
+}
+
 /// Untrusted text as markup that draws exactly as written: the one-shot
 /// form of `MarkupBuilder.appendPlain`.
 pub fn plain(alloc: std.mem.Allocator, text: []const u8) ![]const u8 {
@@ -382,4 +427,35 @@ test "a closing tag in untrusted text cannot end the surrounding colour" {
     try std.testing.expectEqual(@as(usize, 5), cells(markup));
     // Padded into a coloured cell, the escape survives intact.
     try std.testing.expectEqualStrings("{c}x{{/}y{/} ", try pad(a, markup, 6, .left));
+}
+
+test "every data-file string can go into screen markup as it is" {
+    const catalogues = .{
+        @import("../domain/chassis.zig").catalog,  @import("../domain/part.zig").catalog,
+        @import("../domain/planet.zig").catalog,   @import("../domain/faction.zig").table,
+        @import("../domain/ability.zig").table,    @import("../domain/award.zig").table,
+        @import("../domain/rank.zig").table,       @import("../domain/rat.zig").table,
+        @import("../domain/scenario.zig").table,   @import("../domain/terrain.zig").table,
+        @import("../domain/opfor.zig").table,      @import("../domain/skulls.zig").table,
+        @import("../domain/difficulty.zig").table, @import("../domain/meklab.zig").tables,
+        @import("../domain/tuning.zig").t,         @import("../gen/person_gen.zig").names,
+    };
+    inline for (catalogues) |c| {
+        if (unsafeString(c)) |bad| {
+            std.debug.print("data string not markup-safe: \"{s}\"\n", .{bad});
+            return error.TestUnexpectedResult;
+        }
+    }
+    try std.testing.expect(!markupSafe("{c}x"));
+    try std.testing.expect(!markupSafe("a\x1bb"));
+    try std.testing.expect(!markupSafe("\xff"));
+    try std.testing.expect(markupSafe("Kell Hounds — Arc-Royal"));
+}
+
+test "the data walker finds an unsafe string however deep it sits" {
+    const Entry = struct { key: []const u8, tags: []const []const u8, alt: ?struct { name: []const u8 } };
+    const good = [_]Entry{.{ .key = "a", .tags = &.{"b"}, .alt = .{ .name = "c" } }};
+    try std.testing.expect(unsafeString(&good) == null);
+    const bad = [_]Entry{ .{ .key = "a", .tags = &.{"b"}, .alt = null }, .{ .key = "d", .tags = &.{"e"}, .alt = .{ .name = "{c}f" } } };
+    try std.testing.expectEqualStrings("{c}f", unsafeString(&bad).?);
 }

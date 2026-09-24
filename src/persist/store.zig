@@ -1663,6 +1663,7 @@ pub const Store = struct {
         // Saves without a `next_battle_id` row still hold reports, held hulls
         // and decisions that name battles; numbering resumes past all of them.
         gs.resumeBattleIds();
+        try validateStoredStrings(&gs);
         return gs;
     }
 
@@ -1754,6 +1755,94 @@ test "12C.8: counters rebuild from the AAR lines of an older save" {
     try std.testing.expectEqual(@as(u32, 1), gs.stats.people_kia);
     try std.testing.expectEqual(@as(u32, 2), gs.stats.hulls_salvaged);
     try std.testing.expectEqual(@as(u64, 1300), gs.stats.enemy_bv_destroyed);
+}
+
+/// Every stored key names something in the catalogues, and every display
+/// copy a save keeps is markup-safe; `error.CorruptSave` otherwise. The
+/// screens then show these strings as they are. Free text a player chose
+/// (names, log lines, crew names) is not checked here: the queries escape
+/// it on the way to a screen.
+fn validateStoredStrings(gs: *GameState) error{CorruptSave}!void {
+    const chassis = @import("../domain/chassis.zig");
+    const part = @import("../domain/part.zig");
+    const planet = @import("../domain/planet.zig");
+    const faction = @import("../domain/faction.zig");
+    const table = @import("../sim/table.zig");
+    const Check = struct {
+        fn hull(key: []const u8) error{CorruptSave}!void {
+            if (chassis.find(key) == null) return error.CorruptSave;
+        }
+        fn item(key: []const u8) error{CorruptSave}!void {
+            if (!part.isKnownKey(key)) return error.CorruptSave;
+        }
+        fn world(key: []const u8) error{CorruptSave}!void {
+            if (planet.find(key) == null) return error.CorruptSave;
+        }
+        fn house(key: []const u8) error{CorruptSave}!void {
+            if (faction.find(key) == null) return error.CorruptSave;
+        }
+        fn shown(text: []const u8) error{CorruptSave}!void {
+            if (!table.markupSafe(text)) return error.CorruptSave;
+        }
+        fn slots(u: *const @import("../domain/unit.zig").Unit) error{CorruptSave}!void {
+            try hull(u.chassis_key);
+            for (u.slots.items) |s| {
+                try item(s.part_key);
+                try shown(s.slot_key);
+            }
+        }
+        fn stock(map: *const std.StringArrayHashMapUnmanaged(u32)) error{CorruptSave}!void {
+            for (map.keys()) |k| try item(k);
+        }
+    };
+    var uit = gs.units.iterator();
+    while (uit.next()) |e| try Check.slots(e.value_ptr);
+    for (gs.held_hulls.items) |*h| try Check.slots(&h.unit);
+    try Check.stock(&gs.spare_parts);
+    var hit = gs.hqs.iterator();
+    while (hit.next()) |e| {
+        try Check.world(e.value_ptr.planet_key);
+        try Check.stock(&e.value_ptr.stock);
+    }
+    var force_it = gs.forces.iterator();
+    while (force_it.next()) |e| {
+        try Check.stock(&e.value_ptr.stock);
+        if (e.value_ptr.location_planet) |p| try Check.world(p);
+    }
+    for ([_][]const @import("../domain/contract.zig").Contract{ gs.contracts.values(), gs.contract_offers.items }) |list| for (list) |c| {
+        try Check.world(c.planet_key);
+        try Check.house(c.employer_key);
+        try Check.house(c.enemy_key);
+    };
+    var pit = gs.people.iterator();
+    while (pit.next()) |e| if (e.value_ptr.faction.len > 0) try Check.house(e.value_ptr.faction);
+    for (gs.faction_standing.keys()) |k| try Check.house(k);
+    for (gs.faction_cooling.items) |f| try Check.house(f.faction);
+    for (gs.market_listings.items) |l| switch (l.kind) {
+        .unit => try Check.hull(l.item_key),
+        .part => try Check.item(l.item_key),
+    };
+    for (gs.part_orders.items) |o| try Check.item(o.part_key);
+    for (gs.stock_policies.items) |sp| try Check.item(sp.part_key);
+    for (gs.bay_jobs.items) |j| if (j.item_key.len > 0) try Check.item(j.item_key);
+    for (gs.refit_plans.items) |plan| for (plan.ops.items) |op| switch (op) {
+        .install => |it| try Check.item(it.part_key),
+        .remove => |slot_key| try Check.shown(slot_key),
+    };
+    for (gs.battle_reports.kept.items) |r| {
+        inline for (.{ r.kind, r.enemy_key, r.scenario, r.terrain, r.weather, r.command_rights, r.salvage.items }) |text| try Check.shown(text);
+        for (r.hulls) |h| {
+            try Check.hull(h.chassis_key);
+            try Check.shown(h.chassis_name);
+            try Check.shown(h.slot_part);
+            if (h.slot) |s| try Check.shown(s);
+        }
+        for (r.ammo) |a| try Check.item(a.key);
+        for (r.salvage.candidates) |c| {
+            try Check.hull(c.key);
+            try Check.shown(c.name);
+        }
+    }
 }
 
 /// A stored integer as `T`; `error.CorruptSave` when it does not fit.
@@ -2251,6 +2340,24 @@ test "a child row whose parent is missing rejects the load as corrupt" {
 
 test "an unknown enum value rejects the load as corrupt" {
     try std.testing.expectError(error.CorruptSave, loadAfterTampering("UPDATE commander SET origin = 'XX'"));
+}
+
+test "a stored key that names nothing in the catalogues rejects the load as corrupt" {
+    try std.testing.expectError(error.CorruptSave, loadAfterTampering("UPDATE hq SET planet = '{c}nowhere'"));
+    try std.testing.expectError(error.CorruptSave, loadAfterTampering("UPDATE unit SET chassis_key = 'NOPE-1'"));
+    try std.testing.expectError(error.CorruptSave, loadAfterTampering("UPDATE unit_slot SET part_key = 'nope' WHERE ord = 0"));
+    try std.testing.expectError(error.CorruptSave, loadAfterTampering("UPDATE stock SET key = '{g}x' WHERE ord = 0"));
+}
+
+test "a battle report's display copies must be markup-safe to load" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 8101 });
+    defer gs.deinit();
+    try foughtCampaignForTest(&gs, 1);
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    try store.db.exec("UPDATE battle_report SET scenario = '{c}ambush'");
+    try std.testing.expectError(error.CorruptSave, store.load(std.testing.allocator, gs.campaign_id));
 }
 
 test "a malformed RNG stream row rejects the load as corrupt" {

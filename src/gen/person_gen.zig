@@ -9,7 +9,7 @@ const rng_mod = @import("../sim/rng.zig");
 const company_gen = @import("company_gen.zig");
 
 /// Name tables from data/tables/names.zon (Stage 12.17).
-const names: struct { first: []const []const u8, last: []const []const u8, callsigns: []const []const u8 } = @import("names_zon");
+pub const names: struct { first: []const []const u8, last: []const []const u8, callsigns: []const []const u8 } = @import("names_zon");
 const first_names = names.first;
 const last_names = names.last;
 const callsigns = names.callsigns;

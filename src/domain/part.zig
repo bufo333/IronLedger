@@ -90,6 +90,16 @@ pub const PartDef = struct {
 
 pub const catalog: []const PartDef = @import("parts_zon");
 
+/// The part key a structure slot carries: structure is not a catalogue
+/// part, and a structural repair consumes components instead.
+pub const structure_key = "structure";
+
+/// A key a slot, stock line or order may hold: a catalogue part or the
+/// structure placeholder.
+pub fn isKnownKey(key: []const u8) bool {
+    return find(key) != null or std.mem.eql(u8, key, structure_key);
+}
+
 pub fn find(key: []const u8) ?*const PartDef {
     for (catalog) |*p| {
         if (std.mem.eql(u8, p.key, key)) return p;
