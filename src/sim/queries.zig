@@ -1910,30 +1910,22 @@ fn siteLines(alloc: Alloc, gs: *GameState, out: *std.ArrayListUnmanaged([]const 
 
 // ---------------------------------------------------------------------- hq
 
-/// Which facility a row of `hqDetail` names, or null. The tier section
-/// above the facility table varies in length (field HQs explain how to
-/// become regional), so the HQ screen's `u` reads the cursor through this
-/// rather than by position.
-pub fn hqFacilityAtRow(alloc: Alloc, gs: *GameState, id: types.HqId, row: usize) !?@import("../domain/hq.zig").FacilityKind {
-    const lines = try hqDetail(alloc, gs, id);
-    if (row >= lines.len) return null;
-    // The table runs from the "facility" header to the next blank line.
-    var header: ?usize = null;
-    for (lines, 0..) |l, i| if (std.mem.startsWith(u8, try stripMarks(alloc, l), "facility ")) {
-        header = i;
-        break;
-    };
-    const start = (header orelse return null) + 1;
-    if (row < start) return null;
-    for (lines[start..row + 1]) |l| if (l.len == 0) return null;
-    var it = std.mem.tokenizeScalar(u8, lines[row], ' ');
-    const tag = it.next() orelse return null;
-    return std.meta.stringToEnum(@import("../domain/hq.zig").FacilityKind, tag);
-}
+/// One HQ's detail pane: its lines, and beside each the facility that row
+/// shows (null for every other row), so the HQ screen's `u` upgrades the
+/// facility under the cursor by identity, whatever sits above the table.
+pub const HqDetail = struct {
+    lines: []const []const u8,
+    facility: []const ?@import("../domain/hq.zig").FacilityKind,
+};
 
 pub fn hqDetail(alloc: Alloc, gs: *GameState, id: types.HqId) ![]const []const u8 {
+    return (try hqDetailView(alloc, gs, id)).lines;
+}
+
+pub fn hqDetailView(alloc: Alloc, gs: *GameState, id: types.HqId) !HqDetail {
+    var facility_rows: std.ArrayListUnmanaged(struct { row: usize, kind: @import("../domain/hq.zig").FacilityKind }) = .empty;
     var out: std.ArrayListUnmanaged([]const u8) = .empty;
-    const h = gs.hqs.getPtr(id) orelse return out.toOwnedSlice(alloc);
+    const h = gs.hqs.getPtr(id) orelse return .{ .lines = &.{}, .facility = &.{} };
     // Tier first: what this HQ can host, and how to raise it.
     {
         const hq_ops_mod = @import("hq_ops.zig");
@@ -1981,7 +1973,10 @@ pub fn hqDetail(alloc: Alloc, gs: *GameState, id: types.HqId) ![]const []const u
         const mk: []const u8 = if (eff < f.level) "{c}" else "";
         try frows.append(alloc, try table.row(alloc, &.{ @tagName(f.kind), try std.fmt.allocPrint(alloc, "{d}", .{f.level}), try std.fmt.allocPrint(alloc, "{s}{d}{{/}}", .{ mk, eff }), if (f.level < 5) try money(alloc, @import("../domain/hq.zig").upgradeCost(f.kind, f.level + 1)) else "max" }));
     }
-    for (try (table.Table{ .cols = fac_cols, .rows = frows.items }).render(alloc), 0..) |ln, i| try out.append(alloc, if (i == 0) try std.fmt.allocPrint(alloc, "{{d}}{s}{{/}}", .{ln}) else ln);
+    for (try (table.Table{ .cols = fac_cols, .rows = frows.items }).render(alloc), 0..) |ln, i| {
+        if (i > 0) try facility_rows.append(alloc, .{ .row = out.items.len, .kind = h.facilities.items[i - 1].kind });
+        try out.append(alloc, if (i == 0) try std.fmt.allocPrint(alloc, "{{d}}{s}{{/}}", .{ln}) else ln);
+    }
     try out.append(alloc, "");
     const cap = h.capacity();
     try out.append(alloc, try std.fmt.allocPrint(alloc, "capacity   {d} companies · ≤{d} lances each · {d} support lances · {d} air wing{s} ({d} here) · {d}t storage", .{ cap.combat_companies, cap.lances_per_company, cap.support_lances, cap.air_companies, if (cap.air_companies == 1) "" else "s", gs.airCompaniesAtHq(id), h.warehouseCapacityTons() }));
@@ -2035,7 +2030,10 @@ pub fn hqDetail(alloc: Alloc, gs: *GameState, id: types.HqId) ![]const []const u
         try out.append(alloc, try std.fmt.allocPrint(alloc, "  [{d}] {s} {s}  {s} {s}  bonus {s}  expires day {d}", .{ i, try table.plain(alloc, c.spec.first), try table.plain(alloc, c.spec.last), @tagName(c.spec.role), @tagName(c.spec.experience), try money(alloc, c.asking_bonus), c.expires_day }));
     }
     if (!any) try out.append(alloc, "  no candidates");
-    return out.toOwnedSlice(alloc);
+    const facility = try alloc.alloc(?@import("../domain/hq.zig").FacilityKind, out.items.len);
+    @memset(facility, null);
+    for (facility_rows.items) |fr| facility[fr.row] = fr.kind;
+    return .{ .lines = try out.toOwnedSlice(alloc), .facility = facility };
 }
 
 // ------------------------------------------------------------- hiring hall
@@ -3751,11 +3749,11 @@ test "the HQ screen's facility rows map back to facilities whatever sits above t
     defer arena.deinit();
     const a = arena.allocator();
     const hq = gs.hqs.keys()[0];
-    const lines = try hqDetail(a, &gs, hq);
+    const view = try hqDetailView(a, &gs, hq);
+    try std.testing.expectEqual(view.lines.len, view.facility.len);
     const h = gs.hqs.getPtr(hq).?;
     var seen: usize = 0;
-    for (lines, 0..) |l, i| {
-        const kind = try hqFacilityAtRow(a, &gs, hq, i);
+    for (view.lines, view.facility) |l, kind| {
         if (kind) |k| {
             try std.testing.expect(std.mem.startsWith(u8, l, @tagName(k)));
             try std.testing.expectEqual(h.facilities.items[seen].kind, k);
@@ -3763,7 +3761,7 @@ test "the HQ screen's facility rows map back to facilities whatever sits above t
         }
     }
     try std.testing.expectEqual(h.facilities.items.len, seen);
-    try std.testing.expect((try hqFacilityAtRow(a, &gs, hq, 0)) == null); // the header
+    try std.testing.expect(view.facility[0] == null); // the tier line
 }
 
 test "hq detail says a field HQ hosts no company and how to raise it" {

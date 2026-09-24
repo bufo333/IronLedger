@@ -174,13 +174,12 @@ pub fn key(self: *App, ch: u21) anyerror!void {
                 self.openModal(.{ .lance_pick = r.unit });
             },
             '+', '=' => {
-                // An HQ with a free combat-company slot: the selected one if it has room, else the first that does.
-                const pick = q.hqWithCompanySlot(g, @enumFromInt(self.hqSelId(g)));
-                if (pick == .none) {
-                    self.say(.crit, "no HQ has a free company slot — a regional HQ hosts one company; raise a field HQ to regional (HQ screen, T)", .{});
-                    return;
-                }
-                self.raise.hq = pick;
+                // Aim at an HQ with a free combat-company slot (the selected
+                // one if it has room); with none free, at the selected HQ,
+                // and `raise_company` says why it refuses.
+                const selected: app.types.HqId = @enumFromInt(self.hqSelId(g));
+                const pick = q.hqWithCompanySlot(g, selected);
+                self.raise.hq = if (pick == .none) selected else pick;
                 self.input.len = 0;
                 self.modal = .{ .input = .raise_name };
             },

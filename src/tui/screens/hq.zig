@@ -76,7 +76,8 @@ pub fn key(self: *App, ch: u21) anyerror!void {
                 // HQ pane: with the cursor on one, upgrade it directly.
                 const hid: types.HqId = @enumFromInt(self.hqSelId(g));
                 const c = self.cur(0).*;
-                const under_cursor = if (self.focus == 0) try q.hqFacilityAtRow(al, g, hid, c) else null;
+                const detail = try q.hqDetailView(al, g, hid);
+                const under_cursor = if (self.focus == 0 and c < detail.facility.len) detail.facility[c] else null;
                 if (under_cursor) |kind| {
                     const rows = try q.upgrades(al, g, hid);
                     for (rows) |r| if (r.kind == kind) {
