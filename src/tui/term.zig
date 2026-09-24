@@ -1,7 +1,7 @@
 //! Terminal layer for the TUI (Stage 12, docs/tui.md "Rendering"): raw
 //! mode, the alternate screen, window size, key decoding and the resize
-//! signal. Hand-rolled ANSI on purpose — no dependency, ~300 lines, and
-//! swappable behind this interface if libvaxis tracks Zig 0.16 later.
+//! signal. Hand-rolled ANSI so the client has no dependency; a library
+//! can replace it behind this interface.
 //! No MekHQ counterpart (MekHQ is Swing).
 
 const std = @import("std");

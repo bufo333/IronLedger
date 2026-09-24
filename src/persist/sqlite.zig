@@ -89,8 +89,9 @@ pub const Stmt = struct {
         _ = sqlite3_reset(self.h);
     }
 
-    /// Bind a tuple of values to ?1..?N. Ints, bools, enums (as their tag
-    /// name), strings, and optionals of those (null → NULL).
+    /// Bind a tuple of values to ?1..?N. Ints, bools, exhaustive enums (as
+    /// their tag name), non-exhaustive enums (as their integer), strings,
+    /// and optionals of those (null → NULL).
     pub fn bindAll(self: Stmt, args: anytype) Error!void {
         inline for (args, 1..) |arg, i| try self.bind(@intCast(i), arg);
     }

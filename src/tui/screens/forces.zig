@@ -141,7 +141,7 @@ pub fn key(self: *App, ch: u21) anyerror!void {
                 if (self.narrow() and self.forces_pane == .readiness) self.modal = .readiness;
             },
             'M' => {
-                // Straight to the manning table (play feedback: it hid behind r).
+                // Straight to the manning table, without cycling through r.
                 self.forces_pane = .manning;
                 self.say(.dim, "MANNING: have / need per role for the company under the cursor — :crew co:N hires the gaps at home, xfer sends people out to a deployed one", .{});
             },
@@ -211,7 +211,7 @@ pub fn key(self: *App, ch: u21) anyerror!void {
             },
             'o' => if (row) |r| {
                 if (r.force == .none) return;
-                // On a company row: cycle its rules of engagement (12D.4).
+                // On a company row: cycle its rules of engagement.
                 if (r.is_company) {
                     const res = self.execResult(.{ .cycle_roe = r.force }) orelse return;
                     self.say(.good, "{s} ROE → {s}", .{ try q.plain(self.a(), r.name), res.roe.?.describe() });

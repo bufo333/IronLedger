@@ -37,7 +37,7 @@ pub const tab_names = [_][]const u8{ "F1 Desk", "F2 Map", "F3 Forces", "F4 Contr
 
 const Mode = enum { welcome, wizard, game };
 const WizardStep = enum(u8) { commander, outfit, company, review };
-/// Campaign start years on offer (12C.16): the catalogue gates on it.
+/// Campaign start years on offer: the catalogue gates on it.
 const start_years = [_]u16{ 3015, 3020, 3025, 3028, 3030 };
 
 const InputKind = enum { command, new_player, delete_campaign, delete_player, raise_name };
@@ -54,7 +54,7 @@ const RaiseState = struct {
 
 const Modal = union(enum) {
     none,
-    /// Raise-a-company wizard (Stage 12): hulls per lance, support train, crews.
+    /// Raise-a-company wizard: hulls per lance, support train, crews.
     raise_hulls,
     raise_support,
     raise_crews,
@@ -73,7 +73,7 @@ const Modal = union(enum) {
     seat: types.PersonId,
     /// Change the outfit's emblem: presets, then pictures from the logo dirs.
     emblem,
-    /// Draw a 3 × 8 text crest cell by cell (12.14).
+    /// Draw a 3 × 8 text crest cell by cell.
     emblem_editor,
     /// Hull detail as a modal (narrow terminals have no side pane).
     hull: types.UnitId,
@@ -92,33 +92,33 @@ const Modal = union(enum) {
     lance_pick: types.UnitId,
     /// Company picker for an offer (board index): readiest first.
     accept_pick: usize,
-    /// The engagements still on record: pick one to read (12G.4b).
+    /// The engagements still on record: pick one to read.
     battle_list,
     /// One engagement as a sheet — the fight, the field, the spoils, the
     /// trucks — rather than forty columns of log prose.
     after_action: types.BattleId,
-    /// A contract's whole log, full screen and scrollable (play feedback:
-    /// the side pane showed 40 clipped lines).
+    /// A contract's whole log, full screen and scrollable; the side pane
+    /// clips it.
     contract_log: types.ContractId,
-    /// One campaign-log entry, word-wrapped (play feedback: the Desk's LOG
-    /// pane clips the long lines). The index is into `queries.desk().log`,
+    /// One campaign-log entry, word-wrapped; the Desk's LOG pane clips
+    /// long lines. The index is into `queries.desk().log`,
     /// revalidated against the query every frame (rule 23).
     log_entry: usize,
-    /// Generic pickers (12.30): one look for every "choose one of these".
+    /// Generic pickers: one look for every "choose one of these".
     pick_company: struct { what: enum { unit, person, stock }, id: u32, key_buf: [32]u8 = undefined, key_len: u8 = 0 },
     pick_hq: types.PersonId,
     pick_crew: types.UnitId,
     pick_unassign: types.UnitId,
     /// Part picker: picks the part, then the amount form asks the quantity.
     pick_part: struct { purpose: q.PartPurpose, site: types.Site, ship_to: ?types.ForceId = null },
-    /// Amount form (12.30 phase 2): every number the client asks for goes
+    /// Amount form: every number the client asks for goes
     /// through one modal — fields with a default, a range and a step.
     amount: AmountForm,
     /// Negotiation term picker for an offer (board index).
     negotiate: usize,
     /// Every company's readiness report (fatigue, morale, wounded, banked XP, depot).
     readiness,
-    /// The campaign in aggregate (12C.8).
+    /// The campaign in aggregate.
     summary,
     /// Browse the soundtracks and tracks; pick what plays.
     music,
@@ -270,7 +270,7 @@ pub const App = struct {
     emblem: ?emblem_mod.Emblem = null,
     placements: [8]Placement = undefined,
     n_placements: usize = 0,
-    /// The cell editor's canvas, cursor and undo snapshot (12.14).
+    /// The cell editor's canvas, cursor and undo snapshot.
     ed_art: [3][8]u8 = @splat(@splat(' ')),
     ed_undo: [3][8]u8 = @splat(@splat(' ')),
     ed_x: u8 = 0,
@@ -289,7 +289,7 @@ pub const App = struct {
     focus: u8 = 0,
     /// Cursor per tab per pane (welcome uses tab 0, wizard tab 1).
     cursor: [10][4]usize = [_][4]usize{[_]usize{0} ** 4} ** 10,
-    /// Columns scrolled off a table pane's left (12F), per screen and pane, like `cursor`.
+    /// Columns scrolled off a table pane's left, per screen and pane, like `cursor`.
     colscroll: [10][4]usize = [_][4]usize{[_]usize{0} ** 4} ** 10,
     /// The same for a modal's table.
     modal_colscroll: usize = 0,
@@ -315,7 +315,7 @@ pub const App = struct {
     w_field: u8 = 0,
     w_faction: usize = 0,
     w_profession: usize = 0,
-    /// Index into `start_years` (12C.16).
+    /// Index into `start_years`.
     w_year: usize = 2,
     w_emblem: usize = 0,
     w_seed: u64 = 0,
@@ -328,9 +328,8 @@ pub const App = struct {
     map_cursor: usize = 0,
     /// Forces screen view: index into queries.toeViews (all, each company, unassigned).
     forces_view: usize = 0,
-    /// Settings form (12.33): the highlighted row.
+    /// Settings form: the highlighted row.
     settings_cursor: usize = 0,
-    /// Ship flow (12.30): the company a Supply row named as the destination, if any.
     /// Forces side pane on a company row: DAMAGE, READINESS or MANNING (r cycles).
     forces_pane: enum { damage, readiness, manning } = .damage,
     /// The raise-a-company wizard's state.
@@ -338,7 +337,7 @@ pub const App = struct {
     /// Star map zoom: 1 = every world fitted into the pane; 2/4/8 = that
     /// many times closer, centred on the cursor world.
     map_zoom: u8 = 1,
-    /// Star-map colouring (12B.9): by faction, industry, standing, or activity.
+    /// Star-map colouring: by faction, industry, standing, or activity.
     map_color: enum { faction, industry, standing, activity } = .faction,
     lab_sel: usize = 0,
     modal_cursor: usize = 0,
@@ -505,7 +504,7 @@ pub const App = struct {
             }
             try self.term.out.flush();
         } else if (self.graphics == .iterm2) {
-            // iTerm2 (12.14): the frame's text already cleared the cells; the
+            // iTerm2: the frame's text already cleared the cells; the
             // picture is re-sent with every frame it is visible in.
             if (!modal_open) {
                 for (self.placements[0..self.n_placements]) |p| {
@@ -790,7 +789,7 @@ pub const App = struct {
                     var texts: std.ArrayListUnmanaged([]const u8) = .empty;
                     for (rows) |r| try texts.append(al, r.text);
                     // Wide: the office sits beside the TO&E. Narrow: it takes
-                    // the bottom band, so +/- are never blind (12.7 leftover).
+                    // the bottom band, so +/- are never blind.
                     const wide = layout.wide(b.w);
                     const lw: u16 = if (wide) layout.major.of(b.w) else b.w;
                     const oh: u16 = @min(b.h, 12);
@@ -843,7 +842,7 @@ pub const App = struct {
                     }
                     try rows.append(al, try std.fmt.allocPrint(al, "company       {s} · {d} hulls · {d} people", .{ self.w_company.slice(), st.hulls, st.people }));
                     {
-                        // The back office as sized in step 3 (12.7 leftover).
+                        // The back office as sized in step 3.
                         var line: std.ArrayListUnmanaged(u8) = .empty;
                         var pay: types.CBills = 0;
                         try line.appendSlice(al, "back office   ");
@@ -942,7 +941,7 @@ pub const App = struct {
         self.screen.lines(body_r, items, firstRow(c.*, body_r.h), if (focused and items.len > 0) c.* else null);
     }
 
-    /// A table (12F) with its header pinned, the cursor row kept in view
+    /// A table with its header pinned, the cursor row kept in view
     /// and ←/→ scrolling its columns behind the first.
     pub fn tablePane(self: *App, inner: Rect, t: Table, pane_idx: u8, focused: bool) !void {
         if (inner.h == 0) return;
@@ -1070,7 +1069,7 @@ pub const App = struct {
     }
 
     /// Custom text art travels as force.emblem bytes: "ART1\n" then three
-    /// lines of eight cells (12.14).
+    /// lines of eight cells.
     const art_magic = "ART1\n";
 
     fn parseArt(bytes: []const u8) ?Emblem {
@@ -1090,7 +1089,7 @@ pub const App = struct {
         return emblems[0];
     }
 
-    /// Open the cell editor seeded with the current crest (12.14).
+    /// Open the cell editor seeded with the current crest.
     fn openEmblemEditor(self: *App) void {
         const g = &(self.gs orelse return);
         const crest = self.emblemFor(g);
@@ -1189,7 +1188,7 @@ pub const App = struct {
         return self.modalRect(w, self.screen.rows).inner().w;
     }
 
-    /// The after-action sheet (12G.4b): four panes over one engagement.
+    /// The after-action sheet: four panes over one engagement.
     /// The only modal that carves its own layout — `market.zig`'s split is
     /// the template, with `modalRect` standing in for the screen body.
     /// Too narrow to split, it falls back to the scrolling flat form, the
@@ -1805,7 +1804,7 @@ pub const App = struct {
         /// Panes Tab cycles through, and the count on a narrow terminal.
         panes: u8,
         narrow_panes: u8,
-        /// One order everywhere (12.30): navigate | act | money · misc.
+        /// One order everywhere: navigate | act | money · misc.
         footer: []const u8,
     };
 
@@ -1931,7 +1930,7 @@ pub const App = struct {
         self.openModal(.{ .battle_orders = id });
     }
 
-    // ---- settings form (12.33): one look with the pickers and the amount form ----
+    // ---- settings form: one look with the pickers and the amount form ----
 
     pub const SettingKey = enum { music, volume, track, soundtrack, auto_admit, difficulty, shares, info };
     const SettingRow = struct { key: SettingKey, active: bool, text: []const u8 };
@@ -2078,7 +2077,7 @@ pub const App = struct {
     fn amountRun(self: *App) !void {
         var form = self.modal.amount;
         self.modal = .none;
-        // The range applies now, not while editing.
+        // The range applies on submit, not while editing.
         for (form.fields[0..form.n]) |*f| f.value = std.math.clamp(f.value, f.min, f.max);
         const v = form.fields;
         var buf: [160]u8 = undefined;
@@ -2288,7 +2287,7 @@ pub const App = struct {
         };
         if (res.days_advanced == 0) return; // refused — the message says why
         const st = try q.status(self.a(), g);
-        // A battle stopped the advance short (12G.5/12G.6): open what the
+        // A battle stopped the advance short: open what the
         // turn is waiting on rather than make the player go and find it.
         switch (q.turnHold(g)) {
             .after_action => |id| {
@@ -2360,7 +2359,7 @@ pub const App = struct {
             },
             .sell_unit => {
                 const uid: types.UnitId = @enumFromInt(c.id);
-                // Strip for parts (12D.2): what the warehouse would get.
+                // Strip for parts: what the warehouse would get.
                 const quote = try q.sellQuote(al, g, uid);
                 return .{
                     .title = "SELL OR STRIP HULL? · [y] sell · [s] strip · [Esc] keep",
@@ -2539,7 +2538,7 @@ pub const App = struct {
                     try rows.append(al, try std.fmt.allocPrint(al, "  {s}", .{it.description}));
                     try rows.append(al, "");
                     // What the decision is actually about, when one line
-                    // cannot carry it (12G.6: the wrecks on offer).
+                    // cannot carry it (the wrecks on offer).
                     if (it.detail.len > 0) {
                         try rows.appendSlice(al, it.detail);
                         try rows.append(al, "");
@@ -3051,12 +3050,12 @@ pub const App = struct {
             .none => {},
             .help, .decision, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .seat, .emblem, .hull, .contract_log, .log_entry, .battle_list, .record => try self.listKey(key),
             .after_action => |id| switch (key) {
-                // Closing the sheet is reading it (12G.5) — the command
+                // Closing the sheet is reading it — the command
                 // does the marking, the client never touches the record.
                 .escape, .char => {
                     _ = try self.execSay(.{ .read_report = id }, .good, "after-action read", .{});
-                    // A fight the company won asks for the tempo next
-                    // (12G.6): hand it over rather than drop the player
+                    // A fight the company won asks for the tempo next:
+                    // hand it over rather than drop the player
                     // on a screen that refuses to advance.
                     self.modal = switch (q.turnHold(&self.gs.?)) {
                         .decision => |ev| .{ .decision = ev },
@@ -3103,8 +3102,8 @@ pub const App = struct {
                 .tab, .down => form.cur = @intCast((form.cur + 1) % form.n),
                 .backtab, .up => form.cur = @intCast((form.cur + form.n - 1) % form.n),
                 .backspace => {
-                    // Editing may pass through 0 (play feedback: the floor left a
-                    // "1" nobody could delete); the range applies when it runs.
+                    // Editing may pass through 0 so a last digit can always be
+                    // deleted; the range applies when the form runs.
                     const f = &form.fields[form.cur];
                     f.value = @divTrunc(f.value, 10);
                     f.typed = true;

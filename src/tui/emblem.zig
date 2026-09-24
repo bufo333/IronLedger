@@ -1,7 +1,8 @@
 //! Emblem display (docs/tui.md "Emblems"): the outfit's crest as a real
 //! picture where the terminal speaks the kitty graphics protocol (kitty,
-//! Ghostty, WezTerm, Konsole) or iTerm2's inline-image protocol (12.14),
-//! and as half-block colour cells everywhere else. Also the logos-directory listing for the wizard's import step.
+//! Ghostty, WezTerm, Konsole) or iTerm2's inline-image protocol (OSC
+//! 1337), and as half-block colour cells everywhere else. Also the
+//! logos-directory listing for the wizard's import step.
 //! I/O lives here and in term.zig only. No MekHQ counterpart.
 
 const std = @import("std");
@@ -62,7 +63,7 @@ pub fn detectIterm2() bool {
 
 // --------------------------------------------------- iTerm2 inline images
 
-/// Place a PNG over a cell rectangle with OSC 1337 (12.14). iTerm2 keeps no
+/// Place a PNG over a cell rectangle with OSC 1337. iTerm2 keeps no
 /// image store, so the bytes travel with every placement; emblems are small.
 pub fn itermPlace(out: *std.Io.Writer, gpa: std.mem.Allocator, bytes: []const u8, x: u16, y: u16, cols: u16, rows: u16) !void {
     const enc = std.base64.standard.Encoder;
@@ -149,7 +150,7 @@ pub fn readFile(io: std.Io, alloc: std.mem.Allocator, path: []const u8) ![]u8 {
     return std.Io.Dir.cwd().readFileAlloc(io, path, alloc, .limited(32 * 1024 * 1024));
 }
 
-test "12.14: an iTerm2 placement is one OSC 1337 sequence sized in cells" {
+test "an iTerm2 placement is one OSC 1337 sequence sized in cells" {
     var buf: [16 * 1024]u8 = undefined;
     var w = std.Io.Writer.fixed(&buf);
     const bytes = @embedFile("testdata/rgb4x3.png");

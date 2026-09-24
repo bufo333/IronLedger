@@ -2,11 +2,11 @@
 // structural, munition and supply stock items. Costs approximate 3025
 // c-bill values (// TUNE — verify against TechManual when tuning).
 //
-// pallet_tons: storage/shipping weight per unit of stock (Stage 9B).
-// Construction facts for mountable items (Stage 10 MekLab, TechManual):
+// pallet_tons: storage/shipping weight per unit of stock.
+// Construction facts for mountable items (MekLab, TechManual):
 //   mass_half_tons (installed mass in half-tons), crits (critical slots),
 //   heat (per firing), mount (energy/ballistic/missile/equipment).
-// Sourcing (Stage 12C.14): availability = TechManual code for 3025 (A
+// Sourcing: availability = TechManual code for 3025 (A
 //   staple … F almost nowhere; default C), tech_base defaults inner_sphere.
 .{
     // energy weapons (no ammunition)
@@ -32,7 +32,7 @@
     // mek internals the lab can add or remove
     .{ .key = "heat_sink", .name = "Heat Sink", .cost = 2_000, .rarity = .common, .pallet_tons = 1, .mass_half_tons = 2, .crits = 1, .heat = 0, .mount = .equipment },
     .{ .key = "jump_jet", .name = "Jump Jet", .cost = 20_000, .rarity = .uncommon, .availability = .d, .pallet_tons = 1, .mass_half_tons = 1, .crits = 1, .heat = 0, .mount = .equipment },
-    // structural components (Stage 9C): per-location assemblies. Bought on
+    // structural components: per-location assemblies. Bought on
     // the market when rarity allows, or fabricated at a regional HQ mek bay
     // — guaranteed, at a premium, over bay time.
     .{ .key = "comp_head", .name = "Head assembly", .cost = 40_000, .rarity = .uncommon, .availability = .d, .pallet_tons = 2 },
@@ -41,7 +41,7 @@
     .{ .key = "comp_arm", .name = "Arm assembly", .cost = 60_000, .rarity = .uncommon, .pallet_tons = 4 },
     .{ .key = "comp_leg", .name = "Leg assembly", .cost = 70_000, .rarity = .uncommon, .pallet_tons = 5 },
     .{ .key = "comp_chassis", .name = "Vehicle chassis frame", .cost = 50_000, .rarity = .common, .pallet_tons = 5 },
-    // Tonnage-rated structure (12D.8, MekHQ `MekLocation` per tonnage;
+    // Tonnage-rated structure (MekHQ `MekLocation` per tonnage;
     // TechManual structure cost scales with tonnage): the rows above are the
     // medium (40–55 t) assemblies; light (20–35 t) ×0.6, heavy (60–75 t)
     // ×1.5 and assault (80–100 t) ×2. Heavy assemblies need a mek bay at

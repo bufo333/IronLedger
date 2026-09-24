@@ -42,7 +42,7 @@ pub fn draw(self: *App) anyerror!void {
         try cl.append(al, try std.fmt.allocPrint(al, "{s} {s}   {{d}}→ {s}{{/}}", .{ if (w.blocking) "{c}!{/}" else "{a}·{/}", w.text, tab_names[w.jump] }));
     }
     if (view.checklist.len == 0) try cl.append(al, "{g}all clear{/} — nothing blocks the turn");
-    // The Dragoons rating (12C.6) rides in the title so the cursor still maps onto the warnings.
+    // The Dragoons rating rides in the title so the cursor still maps onto the warnings.
     const rating_plain = try q.stripMarks(al, view.rating_line);
     const cl_title = try std.fmt.allocPrint(al, "END-TURN CHECKLIST · {s}", .{q.clip(rating_plain, if (cl_w > 30) cl_w - 26 else 0)});
     self.listPane(.{ .x = x, .y = b.y, .w = cl_w, .h = top_h }, cl_title, cl.items, 0, self.focus == 0, true);
@@ -119,7 +119,7 @@ pub fn enter(self: *App) anyerror!void {
 
 pub fn key(self: *App, ch: u21) anyerror!void {
     switch (ch) {
-        // The engagements still on record (12G.4b): pick one to read.
+        // The engagements still on record: pick one to read.
         'b' => {
             self.battles_from_list = true;
             self.openModal(.battle_list);

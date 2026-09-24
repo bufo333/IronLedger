@@ -1,4 +1,4 @@
-// The 3025 Inner Sphere and near Periphery (Stage 12B.9): ~200 named
+// The 3025 Inner Sphere and near Periphery: ~200 named
 // systems — the house capitals, regional capitals, mercenary hubs, border
 // worlds of the sourcebooks, and the Periphery states. Typed against
 // domain/planet.zig `[]const Planet`.
@@ -8,8 +8,8 @@
 // they are re-encoded by hand and APPROXIMATE (// TUNE — replace with
 // surveyed coordinates as they are checked). Faction keys are rows of
 // data/tables/factions.zon. industry: 0–5, drives local markets and
-// acquisition (ARCH §9.1/§9.8). The original 27 keys are unchanged so
-// saved campaigns keep their worlds.
+// acquisition (ARCH §9.1/§9.8). Saved campaigns store planets by key,
+// so a key is never renamed.
 .{
     .{ .key = "terra", .name = "Terra", .faction = "CS", .x = 0, .y = 0, .industry = 5, .terrain = .plains },
     .{ .key = "new_earth", .name = "New Earth", .faction = "LC", .x = -12, .y = 4, .industry = 4 },

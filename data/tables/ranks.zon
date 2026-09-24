@@ -1,4 +1,4 @@
-// Mercenary rank ladder (Stage 12B.4; MekHQ `personnel/ranks`, CamOps
+// Mercenary rank ladder (MekHQ `personnel/ranks`, CamOps
 // officer pay). Typed against domain/rank.zig `RankRow` at comptime, one
 // row per `Rank` enum value in order. pay_bp scales the CamOps salary.
 .{

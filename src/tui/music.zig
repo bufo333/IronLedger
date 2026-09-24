@@ -1,7 +1,7 @@
-//! Soundtrack (Stage 12, reworked on play feedback): every audio file
-//! under `data/music/` — loose files form the "default" soundtrack, each
-//! sub-directory (`data/music/lyran/`, `data/music/pirates/` …) is a
-//! soundtrack of its own — played through the system's command-line
+//! Soundtrack (Stage 12): every audio file under the asset root's
+//! `music/` (paths.zig; `data/music/` in the source tree) — loose files
+//! form the "default" soundtrack, each sub-directory (`music/lyran/`,
+//! `music/pirates/` …) is a soundtrack of its own — played through the system's command-line
 //! player as a child process (`afplay` on macOS, `ffplay`/`mpv`/`aplay`
 //! elsewhere), so the client needs no audio library. The playlist is
 //! every selected soundtrack mixed together and shuffled, reshuffled each

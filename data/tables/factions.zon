@@ -1,4 +1,4 @@
-// Factions of 3025 (Stage 12B.9). Typed against domain/faction.zig
+// Factions of 3025. Typed against domain/faction.zig
 // `FactionRow`. `foes` feeds the contract market's enemy picks; `pay_bp`
 // the employer multiplier; `hires` whether the faction posts contracts;
 // `color` is the Map screen's political colouring.

@@ -3,8 +3,8 @@
 //! arithmetic — panes at computed rectangles, text padded or clipped to
 //! its pane — then flushed as ANSI. Styles are semantic (amber, good,
 //! critical, selected, dim) so the client holds on any terminal theme.
-//! Inline markup `{a}…{/}` matches the mockup generator's so query text
-//! can carry emphasis. Pure: no I/O except `flush`.
+//! Inline markup `{a}…{/}` uses the tag set of docs/tui_mockup_gen.py so
+//! query text can carry emphasis. Pure: no I/O except `flush`.
 
 const std = @import("std");
 const table_mod = @import("game").table;
@@ -22,7 +22,7 @@ pub const Style = enum(u8) {
     purple,
     box, // borders
     focus, // the focused pane's border line
-    // Political colours for the star map (12B.9).
+    // Political colours for the star map.
     blue,
     red,
     yellow,
@@ -272,7 +272,7 @@ pub const Screen = struct {
         hidden_right: usize,
     };
 
-    /// Lay a table (12F) into `inner`: column names on the first line,
+    /// Lay a table into `inner`: column names on the first line,
     /// rows from `first` below, the cursor row selected. The first column
     /// is pinned; `col_scroll` columns after it are hidden to the left,
     /// clamped so the view never scrolls past the last column. A column
@@ -552,7 +552,7 @@ test "table pins the first column, clamps the scroll and clips at the edge" {
     try std.testing.expectEqual(@as(usize, 1), v.hidden_right);
     try std.testing.expectEqual(@as(u21, 'G'), s.get(6, 1).ch);
     try std.testing.expectEqual(Style.sel, s.get(0, 1).style);
-    // Scrolling hides world; the note now fits, so a further scroll is clamped.
+    // Scrolling hides world; the note then fits, so a further scroll is clamped.
     scroll = 5;
     const v2 = try s.table(a, s.full(), t, 0, null, &scroll);
     try std.testing.expectEqual(@as(usize, 2), scroll);

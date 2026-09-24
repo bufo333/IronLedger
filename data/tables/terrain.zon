@@ -1,4 +1,4 @@
-// Terrain and weather (Stage 12C.10). AtB/BattleTech planetary conditions,
+// Terrain and weather. AtB/BattleTech planetary conditions,
 // abridged to the autoresolver's levers. Typed against domain/terrain.zig
 // `Table`. Terrain: `close` (forest, urban, jungle) evens the odds — the
 // power ratio bonus is capped — and dents recon; `harsh` costs a fatigue

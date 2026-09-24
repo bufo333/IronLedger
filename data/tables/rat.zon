@@ -1,4 +1,4 @@
-// Random assignment tables (Stage 12B.8; AtB RATs abridged): which designs
+// Random assignment tables (AtB RATs abridged): which designs
 // a house fields, by weight class. Repetition weights a design. Typed
 // against domain/rat.zig `RatRow`. PER stands for pirates and the near
 // Periphery: old, cheap and everywhere.

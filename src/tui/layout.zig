@@ -96,7 +96,7 @@ pub const modal = struct {
     pub const input_h: u16 = 8;
     pub const picker_w: u16 = 120;
     pub const log_entry_w: u16 = 100;
-    /// The after-action sheet (12G.4b). Full-bleed; `modalRect` clamps it
+    /// The after-action sheet. Full-bleed; `modalRect` clamps it
     /// to the terminal. Below `after_action_stack_cols` the panes stack
     /// into one scrolling column instead.
     pub const after_action_w: u16 = 200;
