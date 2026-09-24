@@ -640,14 +640,14 @@ pub const App = struct {
         var prow: std.ArrayListUnmanaged([]const u8) = .empty;
         for (players) |p| {
             const mk: []const u8 = if (p.id == self.player_id) "{a}" else "";
-            try prow.append(al, try std.fmt.allocPrint(al, "{s}{s}{{/}}  {d} campaign{s}", .{ mk, try q.plain(al, p.name), p.campaigns, if (p.campaigns == 1) "" else "s" }));
+            try prow.append(al, try std.fmt.allocPrint(al, "{s}{s}{{/}}  {d} campaign{s}", .{ mk, try p.name.markup(al), p.campaigns, if (p.campaigns == 1) "" else "s" }));
         }
         if (players.len == 0) try prow.append(al, try std.fmt.allocPrint(al, "{{d}}no players yet — {s}{{/}}", .{try keyHint(WelcomeAction, al, &welcome_bindings, .new_player, "creates one")}));
         self.listPane(.{ .x = b.x, .y = b.y, .w = pw, .h = top_h }, "PLAYERS", prow.items, 0, self.focus == 0, true);
 
         var crow: std.ArrayListUnmanaged([]const u8) = .empty;
         for (campaigns) |c| {
-            try crow.append(al, try std.fmt.allocPrint(al, "{{a}}{s}{{/}}  ·  {s}  ·  day {d} ({s})  ·  save #{d}", .{ try q.plain(al, c.name), try q.plain(al, c.commander), c.day, c.date, c.save_seq }));
+            try crow.append(al, try std.fmt.allocPrint(al, "{{a}}{s}{{/}}  ·  {s}  ·  day {d} ({s})  ·  save #{d}", .{ try c.name.markup(al), try c.commander.markup(al), c.day, c.date, c.save_seq }));
         }
         if (campaigns.len == 0) try crow.append(al, try std.fmt.allocPrint(al, "{{d}}no campaigns for this player — {s}{{/}}", .{try keyHint(WelcomeAction, al, &welcome_bindings, .new_campaign, "starts one")}));
         const cw: u16 = b.w - pw - 1;
@@ -658,7 +658,7 @@ pub const App = struct {
             const ci = self.cur(1).*;
             if (campaigns.len > 0 and ci < campaigns.len) {
                 const c = campaigns[ci];
-                try snap.append(al, try std.fmt.allocPrint(al, "{{a}}{s}{{/}} — commander {s}", .{ try q.plain(al, c.name), try q.plain(al, c.commander) }));
+                try snap.append(al, try std.fmt.allocPrint(al, "{{a}}{s}{{/}} — commander {s}", .{ try c.name.markup(al), try c.commander.markup(al) }));
                 try snap.append(al, try std.fmt.allocPrint(al, "saved at day {d} · {s} · registry id {d}", .{ c.day, c.date, c.id }));
                 try snap.append(al, "");
                 try snap.append(al, try std.fmt.allocPrint(al, "{{d}}{s}{{/}}", .{try keyHint(WelcomeAction, al, &welcome_bindings, .open, "continue this campaign")}));
@@ -849,14 +849,14 @@ pub const App = struct {
             const st = try q.status(al, g);
             const e = emblems[self.w_emblem];
             const pad_art = "        ";
-            try rows.append(al, try std.fmt.allocPrint(al, "{s}   {{a}}{s}{{/}}", .{ if (has_picture) pad_art else e.art[0], self.w_outfit.slice() }));
-            try rows.append(al, try std.fmt.allocPrint(al, "{s}   {s} · {s} · {s} ({s})", .{ if (has_picture) pad_art else e.art[1], self.w_name.slice(), factions[self.w_faction].fullName(), @tagName(professions[self.w_profession]), professions[self.w_profession].description() }));
+            try rows.append(al, try std.fmt.allocPrint(al, "{s}   {{a}}{s}{{/}}", .{ if (has_picture) pad_art else e.art[0], try q.plain(al, self.w_outfit.slice()) }));
+            try rows.append(al, try std.fmt.allocPrint(al, "{s}   {s} · {s} · {s} ({s})", .{ if (has_picture) pad_art else e.art[1], try q.plain(al, self.w_name.slice()), factions[self.w_faction].fullName(), @tagName(professions[self.w_profession]), professions[self.w_profession].description() }));
             try rows.append(al, try std.fmt.allocPrint(al, "{s}   {{d}}{s} · day 0{{/}}", .{ if (has_picture) pad_art else e.art[2], st.date }));
             try rows.append(al, "");
             for (try q.hqList(al, g)) |h| {
-                try rows.append(al, try std.fmt.allocPrint(al, "starter HQ    {{a}}{s}{{/}} on {s} · {s} · ring {d} LY · staff {d}/{d}", .{ h.name, h.world, h.tier, h.ring_ly, h.staff_assigned, h.staff_required }));
+                try rows.append(al, try std.fmt.allocPrint(al, "starter HQ    {{a}}{s}{{/}} on {s} · {s} · ring {d} LY · staff {d}/{d}", .{ try h.name.markup(al), h.world, h.tier, h.ring_ly, h.staff_assigned, h.staff_required }));
             }
-            try rows.append(al, try std.fmt.allocPrint(al, "company       {s} · {d} hulls · {d} people", .{ self.w_company.slice(), st.hulls, st.people }));
+            try rows.append(al, try std.fmt.allocPrint(al, "company       {s} · {d} hulls · {d} people", .{ try q.plain(al, self.w_company.slice()), st.hulls, st.people }));
             {
                 // The back office as sized in step 3.
                 var line: std.ArrayListUnmanaged(u8) = .empty;
@@ -899,7 +899,7 @@ pub const App = struct {
             x += s.text(x, 0, @intCast(t.len), t, st);
         }
         const st = try q.status(al, g);
-        const right = try q.plain(al, st.outfit_name);
+        const right = try st.outfit_name.markup(al);
         var mark_w: u16 = 0;
         if (self.emblem != null and layout.wide(s.cols)) {
             mark_w = 8;
@@ -1140,18 +1140,18 @@ pub const App = struct {
         const c = cands[@min(self.modal_cursor, cands.len - 1)];
         switch (c.kind) {
             .pool => {
-                _ = try self.execSay(.{ .move_unit = .{ .unit = c.unit, .force = lance.id } }, .good, "#{d} joins {s}", .{ @intFromEnum(c.unit), try q.plain(self.a(), lance.name) });
+                _ = try self.execSay(.{ .move_unit = .{ .unit = c.unit, .force = lance.id } }, .good, "#{d} joins {s}", .{ @intFromEnum(c.unit), try lance.name.markup(self.a()) });
             },
             .mothballed => {
                 if (!try self.exec(.{ .reactivate = c.unit })) return;
-                _ = try self.execSay(.{ .move_unit = .{ .unit = c.unit, .force = lance.id } }, .good, "#{d} reactivating and assigned to {s}", .{ @intFromEnum(c.unit), try q.plain(self.a(), lance.name) });
+                _ = try self.execSay(.{ .move_unit = .{ .unit = c.unit, .force = lance.id } }, .good, "#{d} reactivating and assigned to {s}", .{ @intFromEnum(c.unit), try lance.name.markup(self.a()) });
             },
             .listing => {
                 const r = self.execResult(.{ .buy_hull_for = .{ .listing = c.listing, .company = self.raise.company, .lance = lance.id } }) orelse return;
                 if (r.unit == .none) {
                     self.say(.crit, "{s}", .{game.cli.hull_fraud_text});
                 } else if (r.eta_days == 0) {
-                    self.say(.good, "#{d} bought and placed in {s}", .{ @intFromEnum(r.unit), try q.plain(self.a(), lance.name) });
+                    self.say(.good, "#{d} bought and placed in {s}", .{ @intFromEnum(r.unit), try lance.name.markup(self.a()) });
                 } else {
                     self.say(.good, "#{d} bought — {d} days in transit, it joins the first lance with room on arrival", .{ @intFromEnum(r.unit), r.eta_days });
                 }
@@ -1274,7 +1274,7 @@ pub const App = struct {
                 var rows: std.ArrayListUnmanaged([]const u8) = .empty;
                 try rows.append(al, "");
                 const st = try q.status(al, g);
-                try rows.append(al, try std.fmt.allocPrint(al, "  campaign {{a}}{s}{{/}} · day {d}{s}", .{ try q.plain(al, st.outfit_name), st.day, if (!st.saved) " · {c}never saved{/}" else "" }));
+                try rows.append(al, try std.fmt.allocPrint(al, "  campaign {{a}}{s}{{/}} · day {d}{s}", .{ try st.outfit_name.markup(al), st.day, if (!st.saved) " · {c}never saved{/}" else "" }));
                 try rows.append(al, "");
                 try rows.append(al, try std.fmt.allocPrint(al, "  {{s}} {s} {{/}}", .{try keyHint(QuitAction, al, &quit_bindings, .save, "save and return")}));
                 try rows.append(al, try std.fmt.allocPrint(al, "    {s}", .{try keyHint(QuitAction, al, &quit_bindings, .discard, "return without saving")}));
@@ -1319,7 +1319,7 @@ pub const App = struct {
                 const g = &self.gs.?;
                 const rows = [_][]const u8{
                     "",
-                    try std.fmt.allocPrint(al, "  {{c}}{s}{{/}} could not cover its debts on day {d}.", .{ try q.plain(al, (try q.status(al, g)).outfit_name), (try q.status(al, g)).day }),
+                    try std.fmt.allocPrint(al, "  {{c}}{s}{{/}} could not cover its debts on day {d}.", .{ try (try q.status(al, g)).outfit_name.markup(al), (try q.status(al, g)).day }),
                     "  Loans are exhausted and nothing left to sell would close the gap. The creditors take the rest.",
                     "",
                     "  The campaign is saved as it ended; delete it from the welcome screen, or keep it as a record.",
@@ -1533,7 +1533,7 @@ pub const App = struct {
         self.focus = 0;
         self.refreshEmblem();
         const st = try q.status(self.a(), &self.gs.?);
-        self.say(.good, "loaded \"{s}\" at day {d}", .{ try q.plain(self.a(), st.outfit_name), st.day });
+        self.say(.good, "loaded \"{s}\" at day {d}", .{ try st.outfit_name.markup(self.a()), st.day });
     }
 
     /// The wizard's steps: the field index is the focus, so a text field
@@ -1795,7 +1795,7 @@ pub const App = struct {
         self.tab = .desk;
         self.focus = 0;
         self.refreshEmblem();
-        self.say(.good, "campaign \"{s}\" begins — day 0. Press ? for help.", .{(try q.status(self.a(), &self.gs.?)).outfit_name});
+        self.say(.good, "campaign \"{s}\" begins — day 0. Press ? for help.", .{try (try q.status(self.a(), &self.gs.?)).outfit_name.markup(self.a())});
     }
 
     fn handleGameKey(self: *App, key: Key) !void {
@@ -2696,7 +2696,7 @@ pub const App = struct {
                 const cands = try q.raiseCandidates(al, g, self.raise.company, self.raise.passed[0..self.raise.passed_len]);
                 var lance_line: std.ArrayListUnmanaged(u8) = .empty;
                 for (lances, 0..) |l, i| {
-                    try lance_line.appendSlice(al, try std.fmt.allocPrint(al, "{s}{s} {d}/{d}{s}  ", .{ if (i == self.raise.lance_idx) "{a}▶ " else "{d}", try q.plain(al, l.name), l.used, l.cap, "{/}" }));
+                    try lance_line.appendSlice(al, try std.fmt.allocPrint(al, "{s}{s} {d}/{d}{s}  ", .{ if (i == self.raise.lance_idx) "{a}▶ " else "{d}", try l.name.markup(al), l.used, l.cap, "{/}" }));
                 }
                 return .{
                     .title = try listTitleWith(al, try std.fmt.allocPrint(al, "RAISE {s} · HULLS", .{try q.forceName(self.a(), g, self.raise.company)}), &raise_hulls_legend, "take or buy", "leave (the company keeps what it has)", true),
@@ -3661,23 +3661,25 @@ pub const App = struct {
                 const campaigns = try self.store.campaigns(al, self.player_id);
                 if (campaigns.len == 0) return;
                 const c = campaigns[@min(self.cur(1).*, campaigns.len - 1)];
-                if (!std.mem.eql(u8, text, c.name)) {
+                // raw: the typed name must match the stored one exactly.
+                if (!std.mem.eql(u8, text, c.name.raw)) {
                     self.say(.amber, "name did not match — nothing deleted", .{});
                     return;
                 }
                 try self.store.deleteCampaign(c.id, if (self.gs) |*g| g else null);
-                self.say(.good, "deleted \"{s}\"", .{try q.plain(self.a(), c.name)});
+                self.say(.good, "deleted \"{s}\"", .{try c.name.markup(self.a())});
             },
             .delete_player => {
                 const players = try self.store.players(al);
                 for (players) |p| {
                     if (p.id == self.player_id) {
-                        if (!std.mem.eql(u8, text, p.name)) {
+                        // raw: the typed name must match the stored one exactly.
+                        if (!std.mem.eql(u8, text, p.name.raw)) {
                             self.say(.amber, "name did not match — nothing deleted", .{});
                             return;
                         }
                         try self.store.deletePlayer(p.id);
-                        self.say(.good, "deleted player \"{s}\" and their campaigns", .{try q.plain(self.a(), p.name)});
+                        self.say(.good, "deleted player \"{s}\" and their campaigns", .{try p.name.markup(self.a())});
                         self.player_id = 0;
                         self.cur(0).* = 0;
                         self.pickDefaultPlayer();

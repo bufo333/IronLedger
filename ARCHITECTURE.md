@@ -159,8 +159,10 @@ section explains the shape, the contract states the rules.
   lines, filenames — enters markup only through `MarkupBuilder.appendPlain`
   or `table.plain`, which sanitize and escape it; `appendMarkup` is for
   literals in the code. Query text and cells are escaped markup; a query's
-  raw `name` field stays raw, and a frontend composing it into markup calls
-  `queries.plain` (the REPL prints raw names through `terminalText`).
+  player-chosen names cross the boundary as `table.Raw`, which cannot be
+  formatted with `{s}`: a frontend draws one through `markup` or prints it
+  on a plain terminal through `terminal`, and reads `.raw` only for a
+  command payload or an exact comparison, with a `// raw:` reason.
   Data-file strings and a save's display copies must be
   `table.markupSafe`.
 

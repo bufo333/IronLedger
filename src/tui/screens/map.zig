@@ -101,7 +101,7 @@ pub fn draw(self: *App) anyerror!void {
         try reach.append(al, try std.fmt.allocPrint(al, "beachhead band  {d} worlds  {{a}}×1.3 pay{{/}}", .{view.in_band}));
         try reach.append(al, try std.fmt.allocPrint(al, "out of reach    {d} worlds", .{view.dark}));
         try reach.append(al, "");
-        for (view.hqs) |h| try reach.append(al, try std.fmt.allocPrint(al, "{s}  ring {d} LY (+{d} band)", .{ try q.plain(al, q.clip(h.name, 24)), h.ring_ly, view.band_ly }));
+        for (view.hqs) |h| try reach.append(al, try std.fmt.allocPrint(al, "{s}  ring {d} LY (+{d} band)", .{ q.clip(try h.name.markup(al), 24), h.ring_ly, view.band_ly }));
         try reach.append(al, "");
         try reach.append(al, "{d}rings grow with comms and spaceport levels{/}");
         if (self.map_color == .faction) {

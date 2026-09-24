@@ -71,4 +71,9 @@ check "commands.execute( in the client without a // direct: reason" \
         /commands\.execute\(/ && !cover && $0 !~ /\/\/ direct:/ { print FILENAME ":" FNR ":" $0 }
     ' "$f"; done)"
 
+# A raw player-chosen name leaves its table.Raw only for a command payload or
+# an exact comparison, and says so: `// raw: …` on the line or the one above.
+check ".raw on a player-chosen name in a frontend without a // raw: reason" \
+    "$(for f in $tui src/main.zig; do awk '/\.(name|outfit_name|commander)\.raw([^A-Za-z_]|$)/ && prev !~ /\/\/ raw:/ && $0 !~ /\/\/ raw:/ { print FILENAME ":" FNR ":" $0 } { prev = $0 }' "$f"; done)"
+
 if [ "$failed" = 0 ]; then echo "REVIEWER CHECKS OK"; else exit 1; fi

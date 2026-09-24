@@ -237,7 +237,7 @@ pub fn handle(self: *App, k: app.Key) anyerror!bool {
             // On a company row: cycle its rules of engagement.
             if (r.is_company) {
                 const res = self.execResult(.{ .cycle_roe = r.force }) orelse return true;
-                self.say(.good, "{s} ROE → {s}", .{ try q.plain(self.a(), r.name), res.roe.?.describe() });
+                self.say(.good, "{s} ROE → {s}", .{ try r.name.markup(self.a()), res.roe.?.describe() });
                 return true;
             }
             if (!r.is_lance) {
@@ -245,7 +245,7 @@ pub fn handle(self: *App, k: app.Key) anyerror!bool {
                 return true;
             }
             const res = self.execResult(.{ .cycle_role = r.force }) orelse return true;
-            self.say(.good, "{s} → {s}: {s}", .{ try q.plain(self.a(), r.name), @tagName(res.role.?), res.role.?.describe() });
+            self.say(.good, "{s} → {s}: {s}", .{ try r.name.markup(self.a()), @tagName(res.role.?), res.role.?.describe() });
         },
         .disband => if (row) |r| {
             const co = r.company;
