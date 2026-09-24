@@ -26,9 +26,7 @@ pub fn fieldableBv(gs: *GameState, company: types.ForceId) i64 {
     while (it.next()) |entry| {
         const u = entry.value_ptr;
         if (gs.companyOf(u.force) != company or !u.kind.isCombat()) continue;
-        if (!u.canFight()) continue;
-        const pilot = gs.person(u.pilot) orelse continue;
-        if (!pilot.isAvailable(gs.clock.day_index)) continue;
+        if (!gs.unitOperational(u)) continue;
         const design = chassis_mod.find(u.chassis_key) orelse continue;
         total += design.bv;
     }
