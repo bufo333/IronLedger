@@ -1,4 +1,4 @@
-# The gate (docs/coding-contract.md rule 39): formatting, the contract checks, unit
+# The gate (docs/coding-contract.md rule 72): formatting, the contract checks, unit
 # tests and both smoke scripts, on every push and pull request.
 name: ci
 on:

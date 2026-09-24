@@ -3,7 +3,7 @@
 //! footer, pane titles, help rows and the key block in docs/tui.md are
 //! generated from the tables, and a screen's handler switches on actions,
 //! so a key cannot work without being listed or be listed without working
-//! (docs/coding-contract.md rule 22). MekHQ has no counterpart: its Swing
+//! (docs/coding-contract.md rule 39). MekHQ has no counterpart: its Swing
 //! menus carry their own accelerators.
 
 const std = @import("std");

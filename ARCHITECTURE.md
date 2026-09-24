@@ -823,8 +823,8 @@ bulk-copy MegaMek data files into the repo without deciding on licensing.
 ```
 build.zig, build.zig.zon
 ARCHITECTURE.md, GAMEPLAY.md, ROADMAP.md, TODO.md
-docs/            schema.sql, coding-contract.md, tui.md, modding.md,
-                 verify-contract.sh, smoke scripts
+docs/            schema.sql, coding-contract.md, contract-exceptions.md,
+                 tui.md, modding.md, verify-contract.sh, smoke scripts
 data/            static game data (.zon): chassis, parts, planets, factions,
                  tuning; data/tables/ for rule tables
 src/

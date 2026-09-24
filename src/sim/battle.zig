@@ -542,7 +542,7 @@ pub const Push = struct {
 /// under `push_mishap_at` costs someone a wound.
 ///
 /// The rule lives here beside `recoverWrecks`, whose roll it re-rolls, so
-/// the two cannot drift apart (rule 7). The report is not rewritten: it
+/// the two cannot drift apart (rule 20). The report is not rewritten: it
 /// is the account of the fight, and at the end of the fight those hulls
 /// were on the field. What the sortie won is a log line of its own.
 pub fn recoveryPush(gs: *GameState, battle: types.BattleId, company: types.ForceId) !Push {
@@ -2123,7 +2123,7 @@ test "the AAR is rendered from the record, and the record outlives the fight" {
     for (gs.event_log.items) |e| {
         if (e.category != .battle) continue;
         aars += 1;
-        // Rule 16: AAR text persists in the log as domain data. The sim
+        // Rule 33: AAR text persists in the log as domain data. The sim
         // never colours it — `queries` does, when a screen shows it.
         try std.testing.expect(std.mem.indexOfScalar(u8, e.text, '{') == null);
         // Every line came out of `after_action.render`, which is the only

@@ -719,7 +719,7 @@ fn runRepl(session: *game.lobby.Session, io: std.Io, gpa: std.mem.Allocator, sto
                 continue;
             }
             const r = game.commands.execute(gs, .{ .advance_days = n }) catch |err| {
-                // The one error→sentence table (rule 6), not the enum name.
+                // The one error→sentence table (rule 10), not the enum name.
                 std.debug.print("blocked: {s}\n", .{game.cli.errorText(err)});
                 continue;
             };
