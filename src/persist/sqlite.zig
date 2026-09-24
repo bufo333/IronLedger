@@ -172,6 +172,12 @@ pub const Stmt = struct {
         return try alloc.dupe(u8, bytes[0..n]);
     }
 
+    /// The column as `T`; `error.CorruptSave` when the stored value does
+    /// not fit.
+    pub fn intAs(self: Stmt, comptime T: type, col: c_int) error{CorruptSave}!T {
+        return std.math.cast(T, self.int(col)) orelse error.CorruptSave;
+    }
+
     pub fn enumValue(self: Stmt, comptime E: type, col: c_int) ?E {
         const p = sqlite3_column_text(self.h, col) orelse return null;
         return std.meta.stringToEnum(E, std.mem.span(p));
