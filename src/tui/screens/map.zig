@@ -13,7 +13,7 @@ const q = app.q;
 
 pub fn draw(self: *App) anyerror!void {
     const al = self.a();
-    const g = &self.gs.?;
+    const g = self.state();
     const s = &self.screen;
     const b = self.body();
     const view = try q.map(al, g);
@@ -137,7 +137,7 @@ pub const legend = app.keys.entries(Action, &bindings);
 pub fn handle(self: *App, k: app.Key) anyerror!bool {
     const hit = app.keys.lookup(Action, &bindings, self.focus, k) orelse return false;
     const al = self.a();
-    const g = &self.gs.?;
+    const g = self.state();
     switch (hit.action) {
         .pan_left => try self.mapPan(-1, 0),
         .pan_right => try self.mapPan(1, 0),

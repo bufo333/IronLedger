@@ -11,7 +11,7 @@ const q = app.q;
 
 pub fn draw(self: *App) anyerror!void {
     const al = self.a();
-    const g = &self.gs.?;
+    const g = self.state();
     const b = self.body();
     const view = try q.people(al, g, self.people_filter);
     const lw: u16 = if (layout.extraWide(b.w)) @max(layout.people_list.of(b.w), @min(b.w - 60, 128)) else b.w;
@@ -34,7 +34,7 @@ pub fn draw(self: *App) anyerror!void {
 
 pub fn move(self: *App, delta: i32) anyerror!void {
     const al = self.a();
-    const g = &self.gs.?;
+    const g = self.state();
     const view = try q.people(al, g, self.people_filter);
     self.moveCursor(0, delta, view.rows.len);
 }
@@ -60,7 +60,7 @@ pub const legend = app.keys.entries(Action, &bindings);
 pub fn handle(self: *App, k: app.Key) anyerror!bool {
     const hit = app.keys.lookup(Action, &bindings, self.focus, k) orelse return false;
     const al = self.a();
-    const g = &self.gs.?;
+    const g = self.state();
     switch (hit.action) {
         .filter_next, .filter_prev => {
             self.people_filter = if (hit.action == .filter_next) self.people_filter.next() else self.people_filter.prev();

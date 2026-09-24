@@ -13,7 +13,7 @@ const q = app.q;
 
 pub fn draw(self: *App) anyerror!void {
     const al = self.a();
-    const g = &self.gs.?;
+    const g = self.state();
     const b = self.body();
     const views = try q.toeViews(al, g);
     App.clampIdx(&self.forces_view, views.len);
@@ -62,7 +62,7 @@ pub fn draw(self: *App) anyerror!void {
 
 pub fn move(self: *App, delta: i32) anyerror!void {
     const al = self.a();
-    const g = &self.gs.?;
+    const g = self.state();
     if (self.focus == 0) {
         const rows = try self.toeRows();
         self.moveCursor(0, delta, rows.len);
@@ -103,7 +103,7 @@ pub const legend = app.keys.entries(Action, &bindings);
 pub fn handle(self: *App, k: app.Key) anyerror!bool {
     const hit = app.keys.lookup(Action, &bindings, self.focus, k) orelse return false;
     const al = self.a();
-    const g = &self.gs.?;
+    const g = self.state();
     const rows = try self.toeRows();
     const c = self.cur(0).*;
     const row: ?q.ToeRow = if (c < rows.len) rows[c] else null;

@@ -741,7 +741,10 @@ run thinner and cheaper for about a year).
 SQLite: **one store file, many campaigns** (Stage 11). Every table carries a
 campaign id and a `campaign` registry lists playthroughs (name, commander,
 in-game date, save sequence); the player saves, lists, loads, and deletes
-campaigns from one place. The sim core never touches SQL: `src/persist/`
+campaigns from one place. The open campaign is a `lobby.Session`: the
+lobby creates, loads, saves and closes it, and the TUI and REPL hold the
+session and reach the campaign only through `state()` for queries and
+commands. The sim core never touches SQL: `src/persist/`
 maps `GameState` ↔ rows (the executable DDL lives in `persist/store.zig`;
 `docs/schema.sql` is a commented mirror of it; its header names the
 schema version it matches). Static data (chassis,

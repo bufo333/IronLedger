@@ -12,7 +12,7 @@ const tab_names = app.tab_names;
 
 pub fn draw(self: *App) anyerror!void {
     const al = self.a();
-    const g = &self.gs.?;
+    const g = self.state();
     const b = self.body();
     const view = try q.desk(al, g, q.desk_log_rows);
 
@@ -87,7 +87,7 @@ fn inboxPane(al: std.mem.Allocator, view: q.Desk) !InboxPane {
 
 pub fn move(self: *App, delta: i32) anyerror!void {
     const al = self.a();
-    const g = &self.gs.?;
+    const g = self.state();
     const view = try q.desk(al, g, q.desk_log_rows);
     switch (self.focus) {
         0 => self.moveCursor(0, delta, view.checklist.len),
@@ -110,7 +110,7 @@ pub const legend = app.keys.entries(Action, &bindings);
 pub fn handle(self: *App, k: app.Key) anyerror!bool {
     const hit = app.keys.lookup(Action, &bindings, self.focus, k) orelse return false;
     const al = self.a();
-    const g = &self.gs.?;
+    const g = self.state();
     switch (hit.action) {
         .go_to => {
             const view = try q.desk(al, g, q.desk_log_rows);
@@ -176,7 +176,7 @@ test "Enter on a checklist warning goes where the warning says; e opens the embl
     const c = try app.clientForTest(std.testing.allocator);
     defer app.deinitForTest(c, std.testing.allocator);
     try toTab(c, .desk);
-    const view = try q.desk(c.app.a(), &c.app.gs.?, q.desk_log_rows);
+    const view = try q.desk(c.app.a(), c.app.state(), q.desk_log_rows);
     if (view.checklist.len > 0) {
         const w = view.checklist[0];
         try app.pressForTest(c, .enter);

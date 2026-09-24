@@ -33,8 +33,8 @@ const paths = @import("tui/paths.zig");
 const Command = game.commands.Command;
 
 pub fn main(init: std.process.Init) !void {
-    var gs = game.state.GameState.init(init.gpa, .{ .seed = 3025 });
-    defer gs.deinit();
+    var session = try game.lobby.Session.fresh(init.gpa, 3025);
+    defer session.close();
 
     var args = std.process.Args.Iterator.init(init.minimal.args);
     _ = args.next(); // exe name
@@ -68,9 +68,9 @@ pub fn main(init: std.process.Init) !void {
     if (tui) {
         try @import("tui/app.zig").run(init.io, init.gpa, init.environ_map, store_path, .{ .ascii = ascii, .no_splash = no_splash, .no_music = no_music, .data_dir = data_dir });
     } else if (repl) {
-        try runRepl(&gs, init.io, init.gpa, store_path);
+        try runRepl(&session, init.io, init.gpa, store_path);
     } else {
-        try runDemo(&gs, init.gpa);
+        try runDemo(session.state(), init.gpa);
     }
 }
 
@@ -464,7 +464,9 @@ fn printStatus(gs: *game.state.GameState, al: std.mem.Allocator) !void {
     });
 }
 
-fn runRepl(gs: *game.state.GameState, io: std.Io, gpa: std.mem.Allocator, store_path: [:0]const u8) !void {
+fn runRepl(session: *game.lobby.Session, io: std.Io, gpa: std.mem.Allocator, store_path: [:0]const u8) !void {
+    // The campaign the verbs act on; `load` and `new` replace the session.
+    var gs = session.state();
     // The save store: one file, many campaigns.
     var lobby = game.lobby.Lobby.open(store_path) catch |err| {
         std.debug.print("could not open save store '{s}': {s}\n", .{ store_path, game.cli.errorText(err) });
@@ -510,7 +512,7 @@ fn runRepl(gs: *game.state.GameState, io: std.Io, gpa: std.mem.Allocator, store_
         const al = arena.allocator();
 
         if (std.mem.eql(u8, verb, "save")) {
-            lobby.save(gs, 0) catch |err| {
+            lobby.save(session, 0) catch |err| {
                 std.debug.print("save failed: {s}\n", .{game.cli.errorText(err)});
                 continue;
             };
@@ -523,12 +525,13 @@ fn runRepl(gs: *game.state.GameState, io: std.Io, gpa: std.mem.Allocator, store_
                 std.debug.print("usage: load <campaign id>  (see `campaigns`)\n", .{});
                 continue;
             };
-            const loaded = lobby.load(gpa, id) catch |err| {
+            const loaded = game.lobby.Session.load(lobby, gpa, id) catch |err| {
                 std.debug.print("load failed: {s}\n", .{game.cli.errorText(err)});
                 continue;
             };
-            game.lobby.discard(gs);
-            gs.* = loaded;
+            session.close();
+            session.* = loaded;
+            gs = session.state();
             std.debug.print("loaded campaign [{d}] \"{s}\"\n", .{ id, try (try q.status(al, gs)).outfit_name.terminal(al) });
             printStatus(gs, al) catch |err| showError(err);
         } else if (std.mem.eql(u8, verb, "delete")) {
@@ -536,7 +539,7 @@ fn runRepl(gs: *game.state.GameState, io: std.Io, gpa: std.mem.Allocator, store_
                 std.debug.print("usage: delete <campaign id>\n", .{});
                 continue;
             };
-            lobby.deleteCampaign(id, gs) catch |err| {
+            lobby.deleteCampaign(id, session) catch |err| {
                 std.debug.print("delete failed: {s}\n", .{game.cli.errorText(err)});
                 continue;
             };
@@ -545,8 +548,10 @@ fn runRepl(gs: *game.state.GameState, io: std.Io, gpa: std.mem.Allocator, store_
         } else if (std.mem.eql(u8, verb, "new")) {
             const st = try q.status(al, gs);
             const seed: u64 = @as(u64, st.day) + st.people + 1;
-            gs.deinit();
-            gs.* = game.state.GameState.init(gpa, .{ .seed = 3025 + seed });
+            const fresh = try game.lobby.Session.fresh(gpa, 3025 + seed);
+            session.close();
+            session.* = fresh;
+            gs = session.state();
             std.debug.print("fresh campaign — `start <faction> <profession> <name>` to begin\n", .{});
         } else if (std.mem.eql(u8, verb, "status")) {
             printStatus(gs, al) catch |err| showError(err);

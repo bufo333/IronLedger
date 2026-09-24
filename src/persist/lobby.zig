@@ -57,10 +57,10 @@ pub const Lobby = struct {
     }
 
     /// Delete a saved campaign; a live session that was it becomes unsaved.
-    pub fn deleteCampaign(self: Lobby, id: i64, live: ?*GameState) !void {
+    pub fn deleteCampaign(self: Lobby, id: i64, live: ?*Session) !void {
         try self.store.deleteCampaign(id);
-        if (live) |gs| if (gs.campaign_id == id) {
-            gs.campaign_id = 0;
+        if (live) |session| if (session.gs.campaign_id == id) {
+            session.gs.campaign_id = 0;
         };
     }
 
@@ -73,38 +73,63 @@ pub const Lobby = struct {
     }
 
     /// Save a session under a player (a first save files a new campaign).
-    pub fn save(self: *Lobby, gs: *GameState, player: i64) !void {
+    pub fn save(self: *Lobby, session: *Session, player: i64) !void {
         self.store.player_id = player;
-        return self.store.save(gs);
-    }
-
-    pub fn load(self: Lobby, gpa: std.mem.Allocator, id: i64) !GameState {
-        return self.store.load(gpa, id);
+        return self.store.save(session.gs);
     }
 };
 
-/// A fresh session for the new-campaign wizard.
-pub fn newSession(gpa: std.mem.Allocator, seed: u64) GameState {
-    return GameState.init(gpa, .{ .seed = seed });
-}
+/// One open campaign, owned here rather than by a frontend (rule 9). The
+/// campaign lives on the heap for the session's whole life, so its address
+/// never moves; frontends reach it only through `state`, to hand to
+/// queries and commands, and never create, copy or free one themselves.
+pub const Session = struct {
+    gpa: std.mem.Allocator,
+    gs: *GameState,
 
-/// Release a session (loaded or generated) once the frontend is done with it.
-pub fn discard(gs: *GameState) void {
-    gs.deinit();
-}
+    /// A new campaign from a seed (the new-campaign wizard, the REPL's `new`).
+    pub fn fresh(gpa: std.mem.Allocator, seed: u64) !Session {
+        const gs = try gpa.create(GameState);
+        gs.* = GameState.init(gpa, .{ .seed = seed });
+        return .{ .gpa = gpa, .gs = gs };
+    }
+
+    /// A saved campaign, fully loaded or refused (`NoSuchCampaign`,
+    /// `SaveNewerThanGame`, `CorruptSave`).
+    pub fn load(lobby: Lobby, gpa: std.mem.Allocator, id: i64) !Session {
+        const gs = try gpa.create(GameState);
+        errdefer gpa.destroy(gs);
+        gs.* = try lobby.store.load(gpa, id);
+        return .{ .gpa = gpa, .gs = gs };
+    }
+
+    /// The campaign, for queries and commands.
+    pub fn state(self: Session) *GameState {
+        return self.gs;
+    }
+
+    pub fn close(self: *Session) void {
+        self.gs.deinit();
+        self.gpa.destroy(self.gs);
+        self.* = undefined;
+    }
+};
 
 test "lobby: a generated session saves and lists under its player" {
     const sqlite = @import("sqlite.zig");
     var lobby = Lobby.wrap(try store_mod.Store.fromDb(try sqlite.Db.open(":memory:")));
     defer lobby.close();
     const pid = try lobby.createPlayer("Ada");
-    var gs = newSession(std.testing.allocator, 7);
-    defer discard(&gs);
-    _ = try @import("../sim/commands.zig").execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .FS, .profession = .paymaster } });
-    try lobby.save(&gs, pid);
+    var session = try Session.fresh(std.testing.allocator, 7);
+    defer session.close();
+    _ = try @import("../sim/commands.zig").execute(session.state(), .{ .create_commander = .{ .name = "T", .origin = .FS, .profession = .paymaster } });
+    try lobby.save(&session, pid);
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const list = try lobby.campaigns(arena.allocator(), pid);
     try std.testing.expectEqual(@as(usize, 1), list.len);
-    try std.testing.expect(gs.campaign_id != 0);
+    try std.testing.expect(session.state().campaign_id != 0);
+    var again = try Session.load(lobby, std.testing.allocator, session.state().campaign_id);
+    defer again.close();
+    try std.testing.expectEqual(session.state().hash(), again.state().hash());
 }

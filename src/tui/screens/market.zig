@@ -15,7 +15,7 @@ const types = app.types;
 
 pub fn draw(self: *App) anyerror!void {
     const al = self.a();
-    const g = &self.gs.?;
+    const g = self.state();
     const b = self.body();
     const view = try q.market(al, g, self.market_filter, @enumFromInt(self.hqSelId(g)));
     const top_h: u16 = @max(6, layout.minor.of(b.h));
@@ -38,7 +38,7 @@ pub fn draw(self: *App) anyerror!void {
 
 pub fn move(self: *App, delta: i32) anyerror!void {
     const al = self.a();
-    const g = &self.gs.?;
+    const g = self.state();
     const view = try q.market(al, g, self.market_filter, @enumFromInt(self.hqSelId(g)));
     switch (self.focus) {
         0 => self.moveCursor(0, delta, view.board.len),
@@ -68,7 +68,7 @@ pub const legend = app.keys.entries(Action, &bindings);
 pub fn handle(self: *App, k: app.Key) anyerror!bool {
     const hit = app.keys.lookup(Action, &bindings, self.focus, k) orelse return false;
     const al = self.a();
-    const g = &self.gs.?;
+    const g = self.state();
     const hq_id: types.HqId = @enumFromInt(self.hqSelId(g));
     switch (hit.action) {
         .buy => {
