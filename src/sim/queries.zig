@@ -1791,7 +1791,7 @@ pub fn stockTable(alloc: Alloc, gs: *GameState, site: types.Site) ![]const []con
             policy = sp;
         };
         const field_supply = @import("field_supply.zig");
-        const transit = gs.courierEtaDays(.{ .company = site.company });
+        const transit = @import("treasury.zig").courierEtaDays(gs, .{ .company = site.company });
         const p = try field_supply.plan(alloc, gs, site.company, transit, if (policy) |sp| sp.min_days else 14, if (policy) |sp| sp.ammo_battles else 0);
         try out.append(alloc, "");
         try out.append(alloc, try std.fmt.allocPrint(alloc, "field plan · {d}t trucks · {d}-day line{s}", .{ p.capacity, transit, if (policy != null) "" else " · {c}no resupply policy — P sets one{/}" }));

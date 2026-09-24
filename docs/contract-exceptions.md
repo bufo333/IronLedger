@@ -63,7 +63,7 @@ Owner of every entry: the project owner.
 - **Scope:**
   - Every module and function listed in the ratchet below.
   - Three switches with more than ten substantive arms (an arm body past three lines), measured by the check that guards them: `contract_events.applyEffectsFor` (21), `app.listView` (19), `forces.handle` (19). Five more sit at the threshold without crossing it: `app.listEnter` and `app.handleModalKey` (10 each), `market.handle` (10), `app.drawModal` (9), `supply.handle` (7).
-  - About 90 `GameState` methods with subsystem behaviour: pricing, liquidation, staffing, hiring, founding, posture, TO&E, crew, tech time, lift, supply, refit, aftermath. (Hashing has moved to `digest.zig`.)
+  - About 90 `GameState` methods with subsystem behaviour: pricing, liquidation, staffing, hiring, founding, posture, TO&E, crew, tech time, lift, supply, refit, aftermath. (Hashing has moved to `digest.zig`; transfers, couriers and purchase debits to `treasury.zig`.)
   - Two layering violations: `state.zig:653` imports `rating.zig`, which imports `commands.zig`; `state.zig:1165` imports `field_supply.zig`.
   - The named atomic operations that rule 14 cites do not exist.
 - **Removal:** C4.
@@ -465,7 +465,7 @@ src/sim/battle.zig:resolveEngagement 221
 src/sim/checklist.zig:turnWarnings 320
 src/sim/cli.zig:errorText 113
 src/sim/cli.zig:parseVerb 385
-src/sim/commands.zig 4819
+src/sim/commands.zig 4813
 src/sim/contract_events.zig 1459
 src/sim/contract_events.zig:applyEffectsFor 210
 src/sim/contract_events.zig:applyEffectsFor#switch 21
@@ -481,7 +481,7 @@ src/sim/queries.zig:offerCandidates 108
 src/sim/queries.zig:stockTable 102
 src/sim/queries.zig:summary 141
 src/sim/rating.zig:report 133
-src/sim/state.zig 2207
+src/sim/state.zig 2137
 src/sim/tick.zig:runFinances 147
 src/tui/app.zig 4060
 src/tui/app.zig:drawModal 136
