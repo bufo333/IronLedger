@@ -73,7 +73,7 @@ send("s", 0.8)
 assert "SETTINGS" in plain()[-30000:], plain()[-2000:]
 send("\x1b")
 send("p"); send("John\r")
-assert "player \"John\" created" in plain(), plain()[-3000:]
+assert wait_for("player \"John\" created"), plain()[-3000:]   # the status line can land after the send's pause on a slow runner
 send("D", 0.6); send("nobody\r", 0.8)     # delete player: the typed name must match
 assert "name did not match" in plain()[-800:], plain()[-1200:]
 send("n")                      # new campaign
