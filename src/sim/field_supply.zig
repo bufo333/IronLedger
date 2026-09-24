@@ -155,6 +155,61 @@ pub fn ammoFights(alloc: std.mem.Allocator, gs: *GameState, company: types.Force
     return out.toOwnedSlice(alloc);
 }
 
+/// The local supplies valve's price multiplier (ARCH §9.6) for a company
+/// on a contract: on a beachhead, remoteness beyond the ring eased by the
+/// world's industry; inside the rings, the ordinary field markup.
+pub fn localPriceMultBp(c: *const @import("../domain/contract.zig").Contract) types.Bp {
+    if (!c.beachhead) return tuning.finance.field_markup_bp;
+    const industry = if (@import("../domain/planet.zig").find(c.planet_key)) |w| w.industry else 0;
+    return @import("../econ/logistics.zig").localPurchaseMultBp(30, industry);
+}
+
+/// One line of an emergency resupply.
+pub const RushLine = struct { key: []const u8, qty: u32 };
+
+/// What an emergency resupply would buy: every line, its weight and price.
+pub const Rush = struct {
+    lines: []const RushLine,
+    tons: u32,
+    price: types.CBills,
+    mult_bp: types.Bp,
+};
+
+/// Emergency resupply before a fight: the local supplies valve
+/// extended to munitions and armour. One more fight of each munition
+/// family the company fires and is short on, and a ton of armour for each
+/// hull below full plating less the armour already carried, bought on the
+/// contract world at the valve's price. Pure: `commands` checks room and
+/// funds and carries it out.
+pub fn rushQuote(alloc: std.mem.Allocator, gs: *GameState, c: *const @import("../domain/contract.zig").Contract) !Rush {
+    const company = c.assigned_company;
+    const site = gs.siteForForce(company);
+    var lines: std.ArrayListUnmanaged(RushLine) = .empty;
+    const mounts = try munitionMounts(alloc, gs, company, true);
+    for (part_mod.munition_keys) |key| {
+        const n = mounts.get(key) orelse continue;
+        const per_battle = tonsPerBattle(n);
+        const have = gs.stockCount(site, key);
+        if (have < per_battle) try lines.append(alloc, .{ .key = key, .qty = per_battle - have });
+    }
+    var dented: u32 = 0;
+    var uit = gs.units.iterator();
+    while (uit.next()) |e| {
+        const u = e.value_ptr;
+        if (gs.companyOf(u.force) == company and u.takesFieldWork() and u.armor_pct < 100) dented += 1;
+    }
+    const armor_have = gs.stockCount(site, "armor");
+    if (dented > armor_have) try lines.append(alloc, .{ .key = "armor", .qty = dented - armor_have });
+    const mult = localPriceMultBp(c);
+    var tons: u32 = 0;
+    var price: types.CBills = 0;
+    for (lines.items) |l| {
+        tons += l.qty * part_mod.tons(l.key);
+        price += types.applyBp(part_mod.cost(l.key) * l.qty, mult);
+    }
+    return .{ .lines = try lines.toOwnedSlice(alloc), .tons = tons, .price = price, .mult_bp = mult };
+}
+
 /// Tons already on the road to a site (every line): the room check and
 /// the resupply plan both read it, so what one sends the other accepts.
 pub fn inboundTonsTo(gs: *GameState, site: types.Site) u32 {

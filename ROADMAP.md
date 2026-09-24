@@ -1322,6 +1322,22 @@ the player reads, and a turn that stops until they have.
   advance stops once, on the day the window opens (`Result.contact`), and the
   next advance goes ahead: a heads-up, not an obligation. The window is at
   most the shortest gap between engagements, so an advance never skips it.
+- ☐ 12G.9 **Battle orders** (decided 2026-09-24, from play: a warning with
+  nowhere to act on it). The contact warning opens a battle-orders box,
+  shaped like the other decision pop-ups: the situation (skulls, odds,
+  fieldable strength, fights of each munition) and every lever that can
+  still change the fight, with the odds recomputed as they change. Rules
+  of engagement (locked under integrated command), each lance's role,
+  emergency resupply, and recalling the company (behind a confirm).
+  Confirming the orders (`confirm_orders`, stored as the engagement day in
+  `Contract.orders_day`) clears the checklist warning; skipping them leaves
+  the current settings standing, and time can still move. Emergency
+  resupply is the local supplies valve (ARCH §9.6) extended to munitions
+  and armour: one more fight of each munition family the company is short
+  on and a ton of armour for each hull below full plating, bought on the
+  contract world, delivered the same day, priced by the valve's
+  multiplier, paid from local funds, and limited by truck room. Enter on
+  the warning opens the box, and so does the advance that stops for it.
 
 ## Stage 13 — Graphical client
 Architected after the TUI ships, reusing the same command/query boundary.

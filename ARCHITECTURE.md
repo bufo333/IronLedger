@@ -218,6 +218,18 @@ names which decisions qualify — the test below, written as a switch.
 The test for a new blocking rule is *what it disposes of*, not how big it
 feels. If the worst outcome is a worse bonus, it waits in the inbox.
 
+Before an engagement there is no hold, only a **stop**. When a scheduled
+engagement comes within `tuning.battle.contact_warning_days`, a multi-day
+advance stops once on that day and the next advance goes ahead. The
+checklist carries a contact warning and the client opens the **battle
+orders**: the odds, fieldable strength and ammunition, and every lever
+that can still change the fight (rules of engagement, lance roles,
+emergency resupply through the local supplies valve of §9.6, recall).
+Confirming the orders (`Contract.orders_day`) clears the warning;
+skipping them leaves the settings as they are. Nothing is disposed of
+that the commander has not already chosen, so time may move without an
+answer.
+
 Each turn runs a fixed pipeline over the whole state — order matters and is
 part of the spec:
 

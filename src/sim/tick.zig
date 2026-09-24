@@ -314,7 +314,8 @@ fn runSupplyConsumption(gs: *GameState) !void {
         const f = fentry.value_ptr;
         if (f.echelon != .company or gs.isCompanyHome(f.id) or f.return_eta_day != null) continue;
         const c = gs.deploymentContract(f.id);
-        const planet_key: []const u8 = if (c) |cc| cc.planet_key else (f.location_planet orelse continue);
+        // Idling with no known world: no market to buy from.
+        if (c == null and f.location_planet == null) continue;
         const beachhead = if (c) |cc| cc.beachhead else false;
         const contract_id: types.ContractId = if (c) |cc| cc.id else .none;
         const site: types.Site = .{ .company = f.id };
@@ -327,8 +328,7 @@ fn runSupplyConsumption(gs: *GameState) !void {
         }
 
         // Local purchase valve: price by remoteness, paid from local funds.
-        const industry = if (planet_mod.find(planet_key)) |w| w.industry else 0;
-        const mult = if (beachhead) logistics.localPurchaseMultBp(30, industry) else tuning.finance.field_markup_bp; // field markup
+        const mult = if (c) |cc| @import("field_supply.zig").localPriceMultBp(cc) else tuning.finance.field_markup_bp;
         const price = types.applyBp(part_mod.cost("provisions") * need, mult);
         if (f.local_funds >= price) {
             try gs.postTreasury(.{ .company = f.id }, .{

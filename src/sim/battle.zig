@@ -69,6 +69,12 @@ pub fn inContactWindow(gs: *const GameState, c: *const contract_mod.Contract) bo
     return days <= tuning.battle.contact_warning_days;
 }
 
+/// Battle orders are confirmed for the engagement now scheduled.
+pub fn ordersConfirmed(c: *const contract_mod.Contract) bool {
+    const day = c.next_battle_day orelse return false;
+    return c.orders_day == day;
+}
+
 /// The window opened with today's tick: the one day a multi-day advance
 /// stops so the warning is seen.
 pub fn contactWindowOpensToday(gs: *const GameState, c: *const contract_mod.Contract) bool {

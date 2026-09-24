@@ -26,7 +26,9 @@ the rule and the symbol are the stable key.
 
 # Part 1 — Finish Stage 12
 
-Done: every Stage 12 feature (12, 12B–12G) has shipped. Part 2 is next.
+Every Stage 12 feature (12, 12B–12G) has shipped. Reopened from play:
+
+- [ ] **12G.9 Battle orders, PR 2** (ROADMAP 12G.9): the terminal box. Enter on the contact warning and the advance that stops for it open it; ←/→ change ROE and lance roles; Enter buys the emergency resupply, recalls behind a confirm, or confirms the orders. Smoke steps. (PR 1, the sim, queries and REPL, is done: see Done.)
 
 ---
 
@@ -112,6 +114,7 @@ Contract deliverables closed before this list merged, all from the 2026-09-22 co
 - D19b-2a free-text names escaped, audit #15 (PR #68): the name helpers (`forceName`, `hqName`, `personName`, `personText`) return escaped markup; every query and client site that composes a person, company, HQ, outfit, commander, player or campaign name, a callsign, a log line, battle-report prose, a filename or a music track into markup escapes it; `clip` reads whole tokens; the REPL prints raw names through `terminalText`. Tests: the hostile-name view test across desk, forces, people, contracts, HQ, roster, log, summary and commander views, and a lobby smoke step with a player named `{c}Evil`
 - D19b-2b strings trusted by construction, audit #15 (PR #69): `table.markupSafe` and a generic `unsafeString` walker; a test that every data-file string (all catalogues, tuning, name tables) is markup-safe; the loader's `validateStoredStrings` requires every stored chassis, part, planet and faction key to resolve and every battle-report display copy to be markup-safe (`CorruptSave` otherwise); `part.structure_key`/`isKnownKey` name the structure placeholder once; hall candidate names escaped
 - D20a stream identity and ownership, audit #18 (PR #70): `rng.Stream.salt` gives each stream a permanent literal salt (equal to the old ordinal values, so no existing draw changed); `person_gen`, `company_gen.rollExperience*`/`rollWeightClass`, `recruitGenerated` and `planet.weightedPickByFaction` take the caller's stream: hall, market and hiring on `.market`, prisoners and salvage on `.battle`, event recruits on `.events`, the starter company on `.generation`
+- 12G.9 battle orders, PR 1 (PR #71): `Contract.orders_day` (schema v33), `confirm_orders` and `emergency_resupply` commands, `field_supply.rushQuote` and `localPriceMultBp` (the §9.6 valve, now shared with the provisions purchase), `battle.ordersConfirmed`, the `battleOrders` query, the contact warning carrying its contract and clearing once orders are in; REPL `briefing`, `confirm`, `rush`
 
 ---
 
