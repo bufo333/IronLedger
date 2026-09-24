@@ -95,8 +95,10 @@ multipliers. Shipments route through the network; every intermediate hop
 multiplies delay and freight cost — *unless* the intermediary HQ's warehouse
 and spaceport are upgraded, turning it into a proper hub. Throughput is
 bottlenecked by the weakest hop: stack two deployed companies behind one
-charter link and watch both starve. The fix is always a purchase order away,
-and always costs more than you'd like.
+charter link and watch both starve. A shipment or part order that would
+overfill a hop this week is refused before any money moves; paid freight
+takes its tons out of every hop's week. The fix is always a purchase order
+away, and always costs more than you'd like.
 
 ## Rotation: why companies come home
 
@@ -108,12 +110,16 @@ The field keeps a company *running*; only a regional HQ keeps it *sharp*:
   takes real weeks in it. Deploy long enough and your roster fills with
   three-quarter-strength meks and hangar queens riding the dropship.
 - **Fatigue** climbs with every contract finished without rotation — a
-  little for a quiet garrison, a lot for a long bloody campaign — and only
-  falls at a regional HQ (faster with a good mess). Tired companies fight
-  worse, maintain worse, and grumble.
-- **Training** converts XP into skill levels only at a regional/brigade HQ
-  training ground. Your veterans earn XP in the field; they *become*
-  veterans at home.
+  little for a quiet garrison, a lot for a long bloody campaign — and falls
+  at home, as fast as the home HQ's mess allows, its HR staff keeping
+  spirits up; garrison barracks give back only a share of that. Tired
+  companies fight worse, maintain worse, and grumble.
+- **Training** converts XP into skill levels only at a training ground,
+  and only at a person's home HQ — where they are posted, else their
+  company's home base — at the pace of that HQ's HR office. Your veterans
+  earn XP in the field; they *become* veterans at home.
+- **The field workshop**: each night's repair push pools the techs' spare
+  hours, and a ready Logistics lance adds its workshop crews' shift.
 
 So the deployment rhythm becomes a real decision: take the lucrative
 back-to-back contract, or pay the transit and the idle month to rotate home
@@ -149,7 +155,15 @@ you own reports to you (Stages 9A–9C):
 - **The back office is staff, not UI**: logistics admins speed orders and
   deliveries, HR staff and hiring halls feed recruits, morale, and training
   throughput, command admins shorten paperwork. Their headcount and
-  experience are levers like any other.
+  experience are levers like any other — at the HQ where they sit: a
+  recruit is as good as the hiring HQ's hall and HR office, and a company
+  trains and rests on its home HQ's staff.
+- **Support counts only when it can roll**: a MASH, mess, security,
+  salvage or logistics lance helps only while one of its hulls can take
+  the field with a crew fit for duty, and the same test decides recon (a
+  scouting lance), air cover (a fighter) and the battle line. Field wounds heal at the MASH rate only with a
+  ready MASH truck, and when field beds run short they go to patients by
+  priority, the rest waiting a day.
 - **Rosters are assignments, not lists**: every mek shows its pilot and its
   tech, every truck its driver and mechanic — and every empty slot is a hull
   that won't be repaired, reloaded, or fielded. Techs have hours in the
@@ -159,6 +173,18 @@ you own reports to you (Stages 9A–9C):
   you left undone — decisions near deadline, open slots, hungry companies,
   overdrawn treasuries, idle bays with demand — and choose to fix it or
   proceed anyway. Nothing you should have known slips past a turn boundary.
+- **Contact is announced**: a few days before a scheduled engagement the
+  checklist warns — skulls and odds under the ROE in force, fieldable
+  strength against what was committed, fights of each munition on the
+  trucks — and a multi-day advance stops once, the day that window opens.
+  The warning opens the **battle orders**: rules of engagement (locked
+  under the employer's integrated command), each lance's role, an
+  emergency resupply bought on the contract world at local prices from
+  the company's local funds and truck room (a fight of each short
+  munition, armour for dented hulls, delivered the same day), and a
+  recall that breaches the contract. The odds recompute as you change
+  them. Confirming the orders clears the warning; skipping them leaves the
+  current settings standing, and the next advance goes ahead either way.
 
 ## Your outfit, your hangar
 
@@ -196,11 +222,14 @@ offer (the board says what the intel can read, `candidates` gives each
 company's odds), and it does not shrink as your company wears down. A
 company's **rules of engagement** decide how it takes a turning fight:
 hold the ground for a better roll and heavier losses, or pull back early
-and give up the field on a draw. A mauled company can buy a local
-replacement off the contract world's board with its local funds — the
-treasury still cannot teleport. Assault-class structure needs a proper
-regional bay; the rest of the outfit's growth has to catch up with its
-hulls.
+and give up the field on a draw. Vehicles fight on their crews' vehicle
+gunnery and driving, not on MechWarrior skills. A company with nothing
+fit to field concedes the engagement: a defeat, scored and reported like
+any other, and its after-action report holds the turn until read. A
+mauled company can buy a local replacement off the contract world's board
+with its local funds — the treasury still cannot teleport. Assault-class
+structure needs a proper regional bay; the rest of the outfit's growth has
+to catch up with its hulls.
 
 ## Reading a contract before you sign it
 
@@ -210,10 +239,10 @@ and only the companies based there can take it. Each offer is rated in
 skulls is an even, hard fight; fewer is easier; five is outmatched. The
 rating is the battle model's own arithmetic — your company's power as it
 stands today (machines, pilots, fatigue, supply, recon) against the
-enemy's lances and skill as your comms can read them — so a blurry intel
-picture shows as a range ("2–3½ skulls"), and it sits beside the tonnage
-("640t, L7 M9, vs ~660–825t") and the odds of winning a fight or losing
-the field. `candidates` rates every company in range side by side. The
+enemy's lances and skill as the comms of the HQ that posted the offer can
+read them — so a blurry intel picture shows as a range ("2–3½ skulls"),
+and it sits beside the tonnage ("640t, L7 M9, vs ~660–825t") and the odds
+of winning a fight or losing the field. `candidates` rates every company in range side by side. The
 enemy does not shrink when you do: a mauled company's skulls climb on the
 active contract, and the checklist says so. Harder jobs pay more — the
 employer prices the opposition. A new outfit starts with lights and

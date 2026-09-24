@@ -387,7 +387,7 @@ fn runContracts(gs: *GameState) !void {
                 // The rotation bill (ARCH §9.7): a completed tour banks
                 // fatigue for everyone attached — scaled by how long it ran
                 // and how hard it fought, compounding for every contract
-                // since the company last rested at a regional HQ.
+                // since the company last rotated (medical.zig's rotation reset).
                 const heads = gs.companyHeadcount(c.assigned_company);
                 const casualties_pct: u8 = if (heads == 0) 0 else @intCast(@min(100, @as(u32, c.casualties) * 100 / heads));
                 var gain = person_mod.contractFatigueGainFor(c.terms.length_months, c.battles_fought, casualties_pct, c.kind.isGarrisonClass());

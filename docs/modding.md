@@ -10,8 +10,8 @@ mymod/
   tables/tuning.zon      # every knob: fatigue, turnover, rating, market …
   tables/rat.zon         # house random assignment tables
   tables/scenarios.zon   # scenario table per contract kind
-  tables/opfor.zon       # opposing force per contract kind (12D.5)
-  tables/skulls.zon      # contract difficulty bands in half skulls (12E.3)
+  tables/opfor.zon       # opposing force per contract kind
+  tables/skulls.zon      # contract difficulty bands in half skulls
 ```
 
 Build with the overlay:
@@ -33,7 +33,7 @@ screen (F12) and the REPL banner say which files are overlaid.
 | `planets.zon` | `domain/planet.zig` `Planet` | the star map: position, faction, industry, optional terrain |
 | `parts.zon` | `domain/part.zig` `PartDef` | weapons, ammo, components, supplies: cost, rarity, availability code, tech base, intro year, mount facts |
 | `tables/tuning.zon` | `domain/tuning.zig` `Tuning` | every balance knob, by subsystem |
-| `tables/difficulty.zon` | `domain/difficulty.zig` `Table` | green / regular / veteran / elite: multipliers on pay, fabrication, purchases, opposition, turnover; scrap and field-recovery modifiers (12D) |
+| `tables/difficulty.zon` | `domain/difficulty.zig` `Table` | green / regular / veteran / elite: multipliers on pay, fabrication, purchases, opposition, turnover; scrap and field-recovery modifiers |
 | `tables/meklab.zon` | `domain/meklab.zig` `Tables` | TechManual engine and internal-structure tables |
 | `tables/names.zon` | `gen/person_gen.zig` | first names, last names, callsigns |
 | `tables/ranks.zon` | `domain/rank.zig` `RankRow` | rank names, abbreviations, pay multipliers |
@@ -55,9 +55,18 @@ screen (F12) and the REPL banner say which files are overlaid.
   `parts.zon`, every RAT entry in `chassis.zon`, every faction key in
   `factions.zon`. `zig build test -Ddata=<dir>` runs the catalogue tests
   that check those links, plus the MekLab construction rules on every mek.
+- Every string must be safe to show as it is: valid UTF-8, no `{`
+  anywhere (braces start the screens' colour tags, and there is no escape
+  for a literal one in data), and no control characters — no tabs,
+  newlines or escape codes. `zig build test -Ddata=<dir>` walks every
+  string in every data file and names the first one that breaks this.
 - Money is integer C-bills; multipliers are basis points (`10_000` = ×1).
+- Knobs are named by subsystem in `tuning.zon`. For example, an HQ supply
+  link carries `logistics.throughput_per_level` supply units a week per
+  link level, each `logistics.tons_per_supply_unit` tons.
 - Saves record no data provenance. A campaign saved under one mod and
-  loaded under another keeps its people and hulls but looks designs and
-  parts up by key; a key that no longer exists is treated as unknown.
+  loaded under another looks designs, parts, planets and factions up by
+  key; if any key it holds is missing from the data it is loaded with,
+  the game refuses to load it as a corrupt save.
 - Cite the sourcebook next to any rule table you change, as the stock
   files do.

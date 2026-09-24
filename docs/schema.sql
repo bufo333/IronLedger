@@ -1,557 +1,723 @@
--- BattleTech Mercenary Command — SQLite campaign save schema (design document)
+-- IRON LEDGER — SQLite save store schema (design document)
 --
--- NOTE (Stage 11): the executable DDL lives in src/persist/store.zig. It
--- follows this design with one structural difference: one store file holds
--- MANY campaigns, so every table there carries a `cid` (campaign id) and a
--- `campaign` registry table lists playthroughs. This file remains the
--- readable reference for what each table means.
+-- Matches schema_version 33. The executable DDL and its column migrations
+-- live in src/persist/store.zig; this file is the readable reference for
+-- what each table and column means. Column order here is the runtime order.
+--
+-- One store file holds many campaigns. `player`, `setting` and `campaign`
+-- are store-wide; every other table carries `cid` (the campaign.id it
+-- belongs to). Saving a campaign deletes its rows and rewrites them all in
+-- one transaction.
 --
 -- MekHQ persists campaigns as gzipped XML (.cpnx.gz); this schema is our
 -- relational re-design of its object model plus our extensions (companies as
--- deployable objects, HQ network, shipments). One database file per campaign.
+-- deployable objects, HQ network, shipments).
 --
 -- Conventions:
 --   * All money is INTEGER C-bills. No floats in the ledger.
---   * All dates are INTEGER days since campaign epoch (day 0 = campaign start);
---     the calendar date lives in campaign.start_date.
+--   * All days are INTEGER day_index values (day 0 = campaign start); the
+--     calendar date is kept in meta (year/month/day) and campaign.date.
+--   * IDs are the typed domain IDs (PersonId, UnitId, ForceId, HqId,
+--     ContractId, EventId, BattleId); 0 means none.
+--   * `ord` preserves in-memory order so a load rebuilds the same state.
+--   * Enum columns hold the Zig tag name (e.g. person.Role 'mekwarrior');
+--     the loader rejects an unknown tag as a corrupt save.
 --   * Static game data (chassis, part catalog, planets, tables) ships in data/
 --     .zon files; saves reference it by stable TEXT keys (e.g. chassis_key).
---     Campaign-created custom variants are the exception: they live here.
+--   * No foreign keys are declared. "-> table.id" in a comment names the
+--     relationship; the loader is the integrity check and rejects a save
+--     whose rows do not resolve.
 
-PRAGMA foreign_keys = ON;
+---------------------------------------------------------------- store
 
-CREATE TABLE meta (
-    schema_version  INTEGER NOT NULL,
-    game_version    TEXT    NOT NULL,
-    rng_state       BLOB    NOT NULL,          -- serialized RNG streams
-    saved_at        TEXT    NOT NULL           -- wall-clock, informational only
+CREATE TABLE player (
+    id              INTEGER PRIMARY KEY,
+    name            TEXT    NOT NULL UNIQUE,
+    created_seq     INTEGER NOT NULL                 -- lobby order
 );
 
+-- Store-wide integer settings: schema_version, and the client's music,
+-- music_volume and music_set.
+CREATE TABLE setting (
+    key             TEXT    PRIMARY KEY,
+    value           INTEGER NOT NULL
+);
+
+-- The campaign registry: one row per playthrough.
 CREATE TABLE campaign (
-    id              INTEGER PRIMARY KEY CHECK (id = 1),
+    id              INTEGER PRIMARY KEY,             -- the cid every other table carries
+    name            TEXT    NOT NULL,                -- outfit name
+    commander       TEXT,
+    day             INTEGER NOT NULL,                -- day_index at save
+    date            TEXT    NOT NULL,                -- in-game date at save
+    schema_version  INTEGER NOT NULL,                -- version that wrote it; newer than the game refuses to load
+    save_seq        INTEGER NOT NULL,                -- store-wide save counter, orders "most recent"
+    player_id       INTEGER NOT NULL DEFAULT 0       -- -> player.id; 0 = none
+);
+
+---------------------------------------------------------------- campaign scalars
+
+-- Integer scalars by key: day_index, year, month, day, funds, reputation,
+-- bankrupt, auto_admit, difficulty, share_profit_bp, the stat_* counters
+-- (battles won/drawn/lost, hulls lost/salvaged, people_kia, enemy_bv),
+-- next_person_id, next_unit_id, next_force_id, next_hq_id,
+-- next_contract_id, next_battle_id, rng_seed.
+CREATE TABLE meta (
+    cid             INTEGER NOT NULL,
+    key             TEXT    NOT NULL,
+    value           INTEGER NOT NULL,
+    PRIMARY KEY (cid, key)
+);
+
+-- Text scalars by key: outfit_name.
+CREATE TABLE meta_text (
+    cid             INTEGER NOT NULL,
+    key             TEXT    NOT NULL,
+    value           TEXT    NOT NULL,
+    PRIMARY KEY (cid, key)
+);
+
+-- One row per named RNG stream (sim/rng.zig Stream). A stream with no row
+-- starts fresh from meta rng_seed, so adding a stream never reseeds the
+-- others. A malformed row or unknown stream name is a corrupt save.
+CREATE TABLE rng_stream (
+    cid             INTEGER NOT NULL,
+    stream          TEXT    NOT NULL,                -- 'generation','market','battle',...
+    format          INTEGER NOT NULL,                -- 1: four u64 words, little-endian
+    state           BLOB    NOT NULL,                -- 32 bytes in format 1
+    UNIQUE (cid, stream)
+);
+
+-- Single-blob RNG state of older saves: every stream's native-endian state
+-- in a fixed order. Read only when a campaign has no rng_stream rows;
+-- saving writes none.
+CREATE TABLE rng (
+    cid             INTEGER PRIMARY KEY,
+    state           BLOB    NOT NULL
+);
+
+-- The player character.
+CREATE TABLE commander (
+    cid             INTEGER PRIMARY KEY,
     name            TEXT    NOT NULL,
-    start_date      TEXT    NOT NULL,          -- ISO date, e.g. '3025-01-01'
-    current_day     INTEGER NOT NULL,          -- days since start
-    funds           INTEGER NOT NULL,          -- outfit-level cash, C-bills
-    reputation      INTEGER NOT NULL,          -- CamOps-style reputation score
-    faction_key     TEXT    NOT NULL DEFAULT 'MERC'
-);
-
----------------------------------------------------------------- organization
-
-CREATE TABLE hq (
-    id              INTEGER PRIMARY KEY,
-    name            TEXT    NOT NULL,
-    tier            TEXT    NOT NULL CHECK (tier IN ('brigade','regional','field')),
-    planet_key      TEXT    NOT NULL,
-    monthly_upkeep  INTEGER NOT NULL DEFAULT 0,
-    funds           INTEGER NOT NULL DEFAULT 0,     -- HQ treasury (Stage 9A)
-    -- Derived caches, recomputed on load (source of truth: tier + facilities;
-    -- formulas in src/domain/hq.zig / ARCH §9.2, §9.4):
-    influence_ly    INTEGER NOT NULL DEFAULT 0,
-    staff_required  INTEGER NOT NULL DEFAULT 0
-    -- staff assigned = COUNT(person WHERE hq_id = id AND status = 'active')
-);
-
--- Supply-line edge in the HQ network graph (ARCH §9.5). Undirected; store
--- with hq_a < hq_b.
-CREATE TABLE hq_link (
-    id              INTEGER PRIMARY KEY,
-    hq_a            INTEGER NOT NULL REFERENCES hq(id),
-    hq_b            INTEGER NOT NULL REFERENCES hq(id),
-    level           INTEGER NOT NULL DEFAULT 1,      -- 1 charter, 2 scheduled, 3+ dedicated jumpship
-    throughput_week INTEGER NOT NULL,                -- supply units/week cap
-    established_day INTEGER NOT NULL,
-    monthly_cost    INTEGER NOT NULL DEFAULT 0,
-    UNIQUE (hq_a, hq_b),
-    CHECK (hq_a < hq_b)
-);
-
--- HQ founding / facility upgrade projects: paperwork phase, then
--- construction (ARCH §9.4). Completed rows are kept as history.
-CREATE TABLE hq_project (
-    id                    INTEGER PRIMARY KEY,
-    hq_id                 INTEGER NOT NULL REFERENCES hq(id),
-    kind                  TEXT    NOT NULL CHECK (kind IN ('found','tier_upgrade','facility_upgrade')),
-    facility              TEXT,                      -- null for found/tier_upgrade
-    target_level          INTEGER,
-    started_day           INTEGER NOT NULL,
-    paperwork_done_day    INTEGER NOT NULL,
-    construction_done_day INTEGER NOT NULL,
-    cost                  INTEGER NOT NULL
-);
-
-CREATE TABLE hq_facility (
-    hq_id           INTEGER NOT NULL REFERENCES hq(id),
-    kind            TEXT    NOT NULL CHECK (kind IN
-                     ('mek_bay','warehouse','hospital','mess','training_ground',
-                      'hiring_hall','comms','spaceport')),
-    level           INTEGER NOT NULL DEFAULT 1,      -- 1..5; gates refit class, stock depth, etc.
-    PRIMARY KEY (hq_id, kind)
-);
-
--- TO&E tree: outfit -> battalion -> company -> lance. Companies are the unit
--- of contract assignment; lances are the unit of battle resolution.
-CREATE TABLE force (
-    id              INTEGER PRIMARY KEY,
-    parent_id       INTEGER REFERENCES force(id),
-    name            TEXT    NOT NULL,
-    echelon         TEXT    NOT NULL CHECK (echelon IN
-                     ('outfit','battalion','company','support_company',
-                      'air_company','lance','air_lance','support_lance')),
-    support_kind    TEXT    CHECK (support_kind IN
-                     ('mash','security','mess','salvage','transport')),
-                                                     -- non-null iff echelon = support_lance
-    commander_id    INTEGER,                         -- person id, FK added below via trigger-free convention
-    hq_id           INTEGER REFERENCES hq(id),       -- supplying HQ for companies
-    -- Player-set identity (ARCH §9.8): emblem is an image blob (png/jpg),
-    -- shown on rosters/AARs. Name column above is player-editable.
-    emblem          BLOB,
-    -- Local operating funds for deployed companies (ARCH §9.8): field
-    -- purchases draw only from this; topped up by costed transfers.
-    local_funds     INTEGER NOT NULL DEFAULT 0,
-    -- Rotation tracking for companies (ARCH §9.7): fatigue accrues per
-    -- contract completed without returning to a regional HQ.
-    last_rotation_day        INTEGER,
-    contracts_since_rotation INTEGER NOT NULL DEFAULT 0
-);
-
--- Skill training programs: XP is earned anywhere, but converting it into
--- skill levels happens only at a regional/brigade HQ with a training ground
--- (ARCH §9.7).
-CREATE TABLE training_assignment (
-    id              INTEGER PRIMARY KEY,
-    person_id       INTEGER NOT NULL REFERENCES person(id),
-    hq_id           INTEGER NOT NULL REFERENCES hq(id),
-    skill           TEXT    NOT NULL,                -- person_skill.skill key
-    started_day     INTEGER NOT NULL,
-    done_day        INTEGER NOT NULL,
-    xp_cost         INTEGER NOT NULL
+    origin          TEXT    NOT NULL,                -- commander.Faction
+    profession      TEXT    NOT NULL                 -- commander.Profession
 );
 
 ---------------------------------------------------------------- personnel
 
 CREATE TABLE person (
-    id              INTEGER PRIMARY KEY,
-    first_name      TEXT    NOT NULL,
-    last_name       TEXT    NOT NULL,
+    cid             INTEGER NOT NULL,
+    ord             INTEGER NOT NULL,
+    id              INTEGER NOT NULL,
+    first           TEXT,
+    last            TEXT,
     callsign        TEXT,
-    origin_key      TEXT,                            -- planet/faction of origin
-    birth_day       INTEGER,                         -- negative = before campaign start
-    recruited_day   INTEGER NOT NULL,
-    primary_role    TEXT    NOT NULL CHECK (primary_role IN
-                     ('mekwarrior','vehicle_crew','aero_pilot','ba_trooper','infantry',
-                      'tech_mek','tech_mechanic','tech_aero','tech_ba','astech',
-                      'doctor','medic','admin_command','admin_logistics',
-                      'admin_transport','admin_hr','admin_finance',
-                      'dropship_crew','jumpship_crew')),
-    secondary_role  TEXT,
-    rank_key        TEXT    NOT NULL DEFAULT 'recruit',
-    xp              INTEGER NOT NULL DEFAULT 0,
-    salary_override INTEGER,                         -- null = CamOps table
-    status          TEXT    NOT NULL DEFAULT 'active' CHECK (status IN
-                     ('active','wounded','mia','kia','retired','resigned','pow')),
-    fatigue         INTEGER NOT NULL DEFAULT 0,
-    morale          INTEGER NOT NULL DEFAULT 50,
-    force_id        INTEGER REFERENCES force(id),    -- staff posting (techs/admins/doctors)
-    hq_id           INTEGER REFERENCES hq(id),       -- or HQ posting
-    -- Stage 9C.2: medbay & leave
-    medbay_priority INTEGER NOT NULL DEFAULT 0,      -- higher heals first when beds/doctors are short
-    leave_until_day INTEGER,                         -- R&R: unavailable, double fatigue decay
-    weekly_hours    INTEGER NOT NULL DEFAULT 40      -- tech time budget (techs only)
+    role            TEXT,                            -- person.Role
+    xp              INTEGER,
+    status          TEXT,                            -- person.Status: active | wounded | mia | kia | retired | resigned | pow | released
+    fatigue         INTEGER,
+    morale          INTEGER,
+    recruited_day   INTEGER,
+    salary_override INTEGER,                         -- null = the salary table
+    assigned_force  INTEGER,                         -- -> force.id
+    posted_hq       INTEGER,                         -- -> hq.id
+    weekly_hours    INTEGER,                         -- tech time budget
+    medbay_priority INTEGER,                         -- higher heals first when beds/doctors are short
+    leave_until     INTEGER,                         -- R&R: unavailable until this day
+    wound_heal_day  INTEGER,
+    training_skill  TEXT,                            -- types.SkillType in training; null = none
+    training_done   INTEGER,                         -- day the training completes
+    admitted        INTEGER NOT NULL DEFAULT 0,      -- bool: in the medbay
+    rank            TEXT    NOT NULL DEFAULT 'private', -- rank.Rank
+    rank_pinned     INTEGER NOT NULL DEFAULT 0,      -- bool: rank set by hand, not by merit
+    kills           INTEGER NOT NULL DEFAULT 0,
+    kill_bv         INTEGER NOT NULL DEFAULT 0,
+    battles         INTEGER NOT NULL DEFAULT 0,
+    tours           INTEGER NOT NULL DEFAULT 0,
+    outstanding_tours INTEGER NOT NULL DEFAULT 0,
+    edge_spent      INTEGER NOT NULL DEFAULT 0,      -- bool
+    faction         TEXT    NOT NULL DEFAULT '',     -- faction of origin
+    shares          INTEGER NOT NULL DEFAULT 0,
+    born_day        INTEGER,                         -- negative = before campaign start
+    last_raise_day  INTEGER,
+    last_award_day  INTEGER,
+    departed_day    INTEGER,                         -- set once they leave the outfit
+    PRIMARY KEY (cid, id)
+);
+
+CREATE TABLE award (
+    cid             INTEGER NOT NULL,
+    person_id       INTEGER NOT NULL,                -- -> person.id
+    key             TEXT    NOT NULL                 -- data/tables/awards.zon key
+);
+
+CREATE TABLE ability (
+    cid             INTEGER NOT NULL,
+    person_id       INTEGER NOT NULL,                -- -> person.id
+    key             TEXT    NOT NULL                 -- data/tables/abilities.zon key
 );
 
 CREATE TABLE person_skill (
-    person_id       INTEGER NOT NULL REFERENCES person(id),
-    skill           TEXT    NOT NULL,                -- 'gunnery_mek','piloting_mek','tech_mek',
-                                                     -- 'doctor','admin','tactics','leadership',...
-    level           INTEGER NOT NULL,                -- MekHQ convention: lower target = better
-    bonus           INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (person_id, skill)
+    cid             INTEGER NOT NULL,
+    person_id       INTEGER NOT NULL,                -- -> person.id
+    skill           TEXT    NOT NULL,                -- types.SkillType
+    level           INTEGER NOT NULL                 -- MekHQ convention: lower target = better
 );
 
 CREATE TABLE injury (
-    id              INTEGER PRIMARY KEY,
-    person_id       INTEGER NOT NULL REFERENCES person(id),
-    location        TEXT    NOT NULL,                -- 'head','torso','left_arm',...
+    cid             INTEGER NOT NULL,
+    person_id       INTEGER NOT NULL,                -- -> person.id
+    ord             INTEGER NOT NULL,
+    location        TEXT    NOT NULL,                -- person.InjuryLocation
     severity        INTEGER NOT NULL,
-    incurred_day    INTEGER NOT NULL,
-    heal_done_day   INTEGER,                         -- null until doctor assigned
-    doctor_id       INTEGER REFERENCES person(id),
-    permanent       INTEGER NOT NULL DEFAULT 0
+    incurred        INTEGER NOT NULL,                -- day
+    heal_done       INTEGER,                         -- day; null until a doctor is assigned
+    doctor          INTEGER NOT NULL DEFAULT 0,      -- -> person.id
+    permanent       INTEGER NOT NULL DEFAULT 0,      -- bool
+    healed          INTEGER NOT NULL DEFAULT 0       -- bool
+);
+
+-- Hiring-hall candidates: generated per HQ, hired with a signing bonus or
+-- expire.
+CREATE TABLE candidate (
+    cid             INTEGER NOT NULL,
+    ord             INTEGER NOT NULL,
+    hq              INTEGER,                         -- -> hq.id
+    first           TEXT,
+    last            TEXT,
+    callsign        TEXT,
+    role            TEXT,                            -- person.Role
+    experience      TEXT,                            -- types.ExperienceLevel
+    primary_skill   INTEGER,
+    secondary_skill INTEGER,
+    bonus           INTEGER,                         -- asking signing bonus
+    listed          INTEGER,                         -- day
+    expires         INTEGER                          -- day
 );
 
 ---------------------------------------------------------------- materiel
 
--- Campaign-local chassis rows exist only for custom/refit variants; stock
--- variants resolve from data/ by chassis_key.
-CREATE TABLE custom_chassis (
-    chassis_key     TEXT    PRIMARY KEY,             -- e.g. 'SHD-2H-JohnnyK'
-    base_key        TEXT    NOT NULL,                -- stock variant it derives from
-    spec_zon        TEXT    NOT NULL                 -- full loadout, zon-encoded
-);
-
+-- Owned hulls and hulls the enemy holds share this table; a held hull has a
+-- non-empty held_by.
 CREATE TABLE unit (
-    id              INTEGER PRIMARY KEY,
-    chassis_key     TEXT    NOT NULL,
-    name            TEXT,                            -- nickname, e.g. 'Old Reliable'
-    kind            TEXT    NOT NULL CHECK (kind IN
-                     ('mek','vehicle','aerospace','battle_armor','infantry',
-                      'mash','mobile_field_base','cargo','dropship','jumpship')),
-    force_id        INTEGER REFERENCES force(id),
-    armor_pct       INTEGER NOT NULL DEFAULT 100,
-    quality         TEXT    NOT NULL DEFAULT 'C' CHECK (quality IN ('A','B','C','D','E','F')),
-    status          TEXT    NOT NULL DEFAULT 'ready' CHECK (status IN
-                     ('ready','damaged','repairing','refitting','mothballed','destroyed','in_transit')),
-    last_maint_day  INTEGER,
-    acquired_day    INTEGER NOT NULL,
-    purchase_price  INTEGER NOT NULL DEFAULT 0
-);
-
--- Crew AND tech slots (Stage 9C.2): a hull with no 'tech' slot filled gets
--- no maintenance, repairs, or reloads; no 'pilot'/'driver' → it doesn't
--- fight. One person holds at most one slot; a tech may hold 'tech' on
--- several hulls within their weekly hours.
-CREATE TABLE unit_crew (
-    unit_id         INTEGER NOT NULL REFERENCES unit(id),
-    person_id       INTEGER NOT NULL REFERENCES person(id),
-    slot            TEXT    NOT NULL DEFAULT 'pilot' CHECK (slot IN
-                     ('pilot','driver','gunner','crew','leader','tech')),
-    PRIMARY KEY (unit_id, person_id)
-);
-
--- Hiring hall candidates (Stage 9C.2): generated weekly per HQ by hiring
--- hall level + HR staff; hired by the player or expire.
-CREATE TABLE hiring_candidate (
-    id              INTEGER PRIMARY KEY,
-    hq_id           INTEGER NOT NULL REFERENCES hq(id),
-    role            TEXT    NOT NULL,
-    experience      TEXT    NOT NULL CHECK (experience IN ('green','regular','veteran','elite')),
-    asking_bonus    INTEGER NOT NULL DEFAULT 0,
-    listed_day      INTEGER NOT NULL,
-    expires_day     INTEGER NOT NULL
-);
-
--- Damaged/destroyed/missing slots on a unit; repair work queue derives from
--- this. slot_class decides the repair echelon (ARCH §9.7): armor/weapon/
--- equipment/ammo are field-repairable by company techs given parts;
--- structure requires a regional/brigade HQ mek bay over bay time.
-CREATE TABLE unit_part_state (
-    unit_id         INTEGER NOT NULL REFERENCES unit(id),
-    slot_key        TEXT    NOT NULL,                -- e.g. 'right_torso.medium_laser.1'
-    part_key        TEXT    NOT NULL,                -- catalog key of installed/needed part
-    slot_class      TEXT    NOT NULL DEFAULT 'equipment' CHECK (slot_class IN
-                     ('armor','structure','weapon','equipment','ammo')),
-    condition       TEXT    NOT NULL CHECK (condition IN ('ok','damaged','destroyed','missing')),
-    PRIMARY KEY (unit_id, slot_key)
-);
-
--- Depot work queue: structural repairs & rebuilds occupying a mek bay.
-CREATE TABLE depot_repair_job (
-    id              INTEGER PRIMARY KEY,
-    unit_id         INTEGER NOT NULL REFERENCES unit(id),
-    hq_id           INTEGER NOT NULL REFERENCES hq(id),
-    started_day     INTEGER NOT NULL,
-    done_day        INTEGER NOT NULL,
-    cost            INTEGER NOT NULL
-);
-
--- Physical stocks per site (Stage 9B): spare parts, per-location structural
--- components (comp_arm/leg/torso/head/ct), munition family pools
--- (ammo_ac5/ac20/lrm/srm/mg), provisions, medical supplies. Tonnage derives
--- from the catalog's pallet_tons column (data/parts.zon); HQ storage
--- capacity derives from the warehouse level; a deployed company's cap
--- derives from its logistics lance's truck tonnage.
-CREATE TABLE inventory (
-    owner_kind      TEXT    NOT NULL CHECK (owner_kind IN ('hq','company')),
-    owner_id        INTEGER NOT NULL,                -- hq.id or force.id (company)
-    part_key        TEXT    NOT NULL,                -- catalog key (part/component/munition/supply)
-    quantity        INTEGER NOT NULL,
-    PRIMARY KEY (owner_kind, owner_id, part_key)
-);
-
-CREATE TABLE acquisition_order (
-    id              INTEGER PRIMARY KEY,
-    part_key        TEXT    NOT NULL,
-    quantity        INTEGER NOT NULL,
-    dest_kind       TEXT    NOT NULL,
-    dest_id         INTEGER NOT NULL,
-    ordered_day     INTEGER NOT NULL,
-    eta_day         INTEGER,                         -- null while sourcing roll pending
-    cost            INTEGER NOT NULL,
-    status          TEXT    NOT NULL DEFAULT 'sourcing' CHECK (status IN
-                     ('sourcing','in_transit','delivered','failed','cancelled'))
-);
-
--- Money moves by courier (Stage 9A): outfit <-> HQ <-> deployed company.
--- Entity addressing: kind+id ('outfit' uses id 0).
-CREATE TABLE fund_transfer (
-    id              INTEGER PRIMARY KEY,
-    from_kind       TEXT    NOT NULL CHECK (from_kind IN ('outfit','hq','company')),
-    from_id         INTEGER NOT NULL DEFAULT 0,
-    to_kind         TEXT    NOT NULL CHECK (to_kind IN ('outfit','hq','company')),
-    to_id           INTEGER NOT NULL DEFAULT 0,
-    amount          INTEGER NOT NULL,
-    sent_day        INTEGER NOT NULL,
-    eta_day         INTEGER NOT NULL,                -- courier delay from map distance, min 3
-    delivered       INTEGER NOT NULL DEFAULT 0       -- bool
-);
-
--- Standing money policies (Stage 9A), executed on payday via fund_transfer.
-CREATE TABLE standing_policy (
-    id              INTEGER PRIMARY KEY,
-    entity_kind     TEXT    NOT NULL CHECK (entity_kind IN ('hq','company')),
-    entity_id       INTEGER NOT NULL,
-    floor_amount    INTEGER NOT NULL,                -- top up to this level
-    monthly_cap     INTEGER NOT NULL                 -- max moved per month
-);
-
--- Mek bay work queue (Stage 9C): repairs, reactivations, fabrication,
--- refits occupy bay slots (mek_bay level x 2) for a span of days.
-CREATE TABLE bay_job (
-    id              INTEGER PRIMARY KEY,
-    hq_id           INTEGER NOT NULL REFERENCES hq(id),
-    unit_id         INTEGER REFERENCES unit(id),     -- null for fabrication jobs
-    kind            TEXT    NOT NULL CHECK (kind IN
-                     ('depot_repair','reactivation','fabrication','refit')),
-    item_key        TEXT,                            -- component being fabricated
-    queued_day      INTEGER NOT NULL,
-    started_day     INTEGER,                         -- null while waiting for a slot
-    done_day        INTEGER,
-    cost            INTEGER NOT NULL DEFAULT 0
-);
-
-CREATE TABLE shipment (
-    id              INTEGER PRIMARY KEY,
-    origin_hq_id    INTEGER NOT NULL REFERENCES hq(id),
-    dest_force_id   INTEGER NOT NULL REFERENCES force(id),  -- deployed company
-    supply_class    TEXT    NOT NULL CHECK (supply_class IN ('parts','ammo','medical','provisions','personnel')),
-    quantity        INTEGER NOT NULL,
-    depart_day      INTEGER NOT NULL,
-    eta_day         INTEGER NOT NULL,
-    freight_cost    INTEGER NOT NULL
-);
-
--- Site markets (ARCH §9.8): a market is a place — at an HQ or on a contract
--- planet. Listings appear per rarity roll at each refresh.
-CREATE TABLE market (
-    id              INTEGER PRIMARY KEY,
-    site_kind       TEXT    NOT NULL CHECK (site_kind IN
-                     ('regional_hq','field_hq','contract_planet')),
-    hq_id           INTEGER REFERENCES hq(id),       -- set for HQ markets
-    planet_key      TEXT    NOT NULL,
-    next_refresh_day INTEGER NOT NULL
-);
-
--- Listings persist until bought or aged out (Stage 9C.3): hulls linger for
--- months, people churn daily (see hiring_candidate). Staple parts are
--- always present; rare slots may hold components/heavy gear this month.
-CREATE TABLE market_listing (
-    id              INTEGER PRIMARY KEY,
-    market_id       INTEGER NOT NULL REFERENCES market(id),
-    kind            TEXT    NOT NULL CHECK (kind IN ('unit','part')),
-    item_key        TEXT    NOT NULL,                -- chassis_key or part_key
-    rarity          TEXT    NOT NULL CHECK (rarity IN
-                     ('common','uncommon','rare','very_rare')),
-    staple          INTEGER NOT NULL DEFAULT 0,      -- bool: always-stocked part line
-    quantity        INTEGER NOT NULL DEFAULT 1,
-    price           INTEGER NOT NULL,                -- for units: loadout value x condition
-    listed_day      INTEGER NOT NULL,
-    expires_day     INTEGER NOT NULL,
-    -- Condition of a listed hull (units only): what you'd be buying.
+    cid             INTEGER NOT NULL,
+    ord             INTEGER NOT NULL,
+    id              INTEGER NOT NULL,
+    chassis_key     TEXT,
+    name            TEXT,                            -- nickname
+    kind            TEXT,                            -- unit.UnitKind
+    force           INTEGER,                         -- -> force.id
+    pilot           INTEGER,                         -- -> person.id (crew seat)
+    tech            INTEGER,                         -- -> person.id (tech slot)
     armor_pct       INTEGER,
-    quality         TEXT    CHECK (quality IN ('A','B','C','D','E','F')),
-    damaged_slots   INTEGER NOT NULL DEFAULT 0,
-    destroyed_slots INTEGER NOT NULL DEFAULT 0,
-    missing_components TEXT                          -- comma-separated component keys absent
+    quality         TEXT,                            -- types.Quality: a..f
+    status          TEXT,                            -- unit.UnitStatus: ready | damaged | repairing | refitting | mothballed | destroyed | in_transit
+    last_maint      INTEGER,                         -- day
+    acquired_day    INTEGER,
+    price           INTEGER,                         -- purchase price
+    reactivation_done INTEGER,                       -- day a mothballed hull is awake
+    berth_hq        INTEGER NOT NULL DEFAULT 0,      -- -> hq.id where it is berthed
+    wreck           TEXT    NOT NULL DEFAULT 'none', -- unit.WreckCause: none | cored | engine | ammo | scrap
+    held_by         TEXT    NOT NULL DEFAULT '',     -- faction key holding the hull; '' = ours
+    held_day        INTEGER NOT NULL DEFAULT 0,      -- day the field was lost
+    held_battle     INTEGER NOT NULL DEFAULT 0,      -- BattleId that lost it
+    held_force      INTEGER NOT NULL DEFAULT 0,      -- -> force.id it goes home to if won back
+    PRIMARY KEY (cid, id)
 );
 
--- Cold storage & reactivation (ARCH §9.8): mothballed units live in unit.status;
--- a non-null reactivation row means a tech crew is waking the hull up.
-CREATE TABLE reactivation_job (
-    id              INTEGER PRIMARY KEY,
-    unit_id         INTEGER NOT NULL REFERENCES unit(id),
-    hq_id           INTEGER NOT NULL REFERENCES hq(id),
-    started_day     INTEGER NOT NULL,
-    done_day        INTEGER NOT NULL
+-- Installed equipment per slot. class decides the repair echelon: armor,
+-- weapon, equipment and ammo are field-repairable given parts; structure
+-- needs an HQ mek bay.
+CREATE TABLE unit_slot (
+    cid             INTEGER NOT NULL,
+    unit_id         INTEGER NOT NULL,                -- -> unit.id
+    ord             INTEGER NOT NULL,
+    slot_key        TEXT,                            -- e.g. 'right_torso.medium_laser.1'
+    part_key        TEXT,                            -- catalog key of the installed part
+    class           TEXT,                            -- unit.SlotClass: armor | structure | weapon | equipment | ammo
+    condition       TEXT                             -- unit.PartCondition: ok | damaged | destroyed | missing
 );
 
-CREATE TABLE refit_job (
-    id              INTEGER PRIMARY KEY,
-    unit_id         INTEGER NOT NULL REFERENCES unit(id),
-    target_chassis_key TEXT NOT NULL,
-    refit_class     TEXT    NOT NULL CHECK (refit_class IN ('A','B','C','D','E','F')),
-    started_day     INTEGER NOT NULL,
-    done_day        INTEGER NOT NULL,
-    tech_id         INTEGER REFERENCES person(id)
+-- Physical stocks per site: spare parts, structural components, munition
+-- pools, provisions, medical supplies. Tonnage derives from the catalog's
+-- pallet_tons.
+CREATE TABLE stock (
+    cid             INTEGER NOT NULL,
+    owner_kind      TEXT    NOT NULL,                -- 'outfit' | 'hq' | 'company'
+    owner_id        INTEGER NOT NULL,                -- hq.id or force.id; 0 for outfit
+    ord             INTEGER NOT NULL,
+    key             TEXT    NOT NULL,                -- catalog key
+    qty             INTEGER NOT NULL
+);
+
+-- Parts on order from a market.
+CREATE TABLE part_order (
+    cid             INTEGER NOT NULL,
+    ord             INTEGER NOT NULL,
+    part_key        TEXT,
+    qty             INTEGER,
+    dest_kind       TEXT,                            -- 'outfit' | 'hq' | 'company'
+    dest_id         INTEGER,
+    ordered         INTEGER,                         -- day
+    eta             INTEGER,                         -- day; null while sourcing
+    cost            INTEGER,
+    status          TEXT                             -- part.OrderStatus: sourcing | in_transit | delivered | failed | cancelled
+);
+
+-- Mek bay work: jobs hold a bay slot for a span of days and queue when the
+-- bays are full.
+CREATE TABLE bay_job (
+    cid             INTEGER NOT NULL,
+    ord             INTEGER NOT NULL,
+    hq              INTEGER,                         -- -> hq.id
+    kind            TEXT,                            -- depot_repair | reactivation | fabrication | refit
+    unit            INTEGER,                         -- -> unit.id; 0 for fabrication
+    item_key        TEXT,                            -- component being fabricated
+    duration        INTEGER,                         -- days
+    queued          INTEGER,                         -- day
+    started         INTEGER,                         -- day; null while waiting for a slot
+    done            INTEGER,                         -- day
+    cost            INTEGER                          -- labor posted to the HQ at completion
+);
+
+-- MekLab refit plans: edits staged against a hull, committed into a bay job.
+CREATE TABLE refit_plan (
+    cid             INTEGER NOT NULL,
+    ord             INTEGER NOT NULL,
+    unit            INTEGER,                         -- -> unit.id
+    committed       INTEGER                          -- bool
+);
+
+CREATE TABLE refit_op (
+    cid             INTEGER NOT NULL,
+    plan_ord        INTEGER NOT NULL,                -- -> refit_plan.ord
+    ord             INTEGER NOT NULL,
+    kind            TEXT,                            -- 'remove' | 'install'
+    slot_key        TEXT,                            -- remove: the slot emptied
+    location        TEXT,                            -- install: where
+    part_key        TEXT                             -- install: what
+);
+
+-- A hull on its way to another company.
+CREATE TABLE unit_transfer (
+    cid             INTEGER NOT NULL,
+    ord             INTEGER NOT NULL,
+    unit            INTEGER,                         -- -> unit.id
+    to_company      INTEGER,                         -- -> force.id
+    eta             INTEGER                          -- day
+);
+
+---------------------------------------------------------------- organization
+
+-- TO&E tree: outfit -> battalion -> company -> lance. Companies are the
+-- unit of contract assignment; lances are the unit of battle resolution.
+CREATE TABLE force (
+    cid             INTEGER NOT NULL,
+    ord             INTEGER NOT NULL,
+    id              INTEGER NOT NULL,
+    parent          INTEGER,                         -- -> force.id
+    name            TEXT,
+    emblem          BLOB,                            -- player-set image (png/jpg)
+    local_funds     INTEGER,                         -- a deployed company's operating cash
+    echelon         TEXT,                            -- force.Echelon
+    commander       INTEGER,                         -- -> person.id
+    supplying_hq    INTEGER,                         -- -> hq.id
+    role            TEXT,                            -- force.LanceRole
+    support_kind    TEXT,                            -- force.SupportLanceKind; support lances only
+    last_rotation   INTEGER,                         -- day
+    contracts_since_rotation INTEGER,
+    location_planet TEXT,
+    return_eta      INTEGER,                         -- day
+    shortage_days   INTEGER,                         -- consecutive days short of supply
+    roe             TEXT    NOT NULL DEFAULT 'standard', -- force.Roe: hold | standard | cautious
+    PRIMARY KEY (cid, id)
+);
+
+CREATE TABLE force_unit (
+    cid             INTEGER NOT NULL,
+    force_id        INTEGER NOT NULL,                -- -> force.id
+    ord             INTEGER NOT NULL,
+    unit_id         INTEGER NOT NULL                 -- -> unit.id
+);
+
+CREATE TABLE force_child (
+    cid             INTEGER NOT NULL,
+    force_id        INTEGER NOT NULL,                -- -> force.id
+    ord             INTEGER NOT NULL,
+    child_id        INTEGER NOT NULL                 -- -> force.id
+);
+
+CREATE TABLE hq (
+    cid             INTEGER NOT NULL,
+    ord             INTEGER NOT NULL,
+    id              INTEGER NOT NULL,
+    name            TEXT,
+    tier            TEXT,                            -- hq.HqTier
+    planet          TEXT,                            -- planet key
+    staff_assigned  INTEGER,                         -- recomputed on load from postings
+    upkeep          INTEGER,                         -- monthly
+    funds           INTEGER,                         -- HQ treasury
+    PRIMARY KEY (cid, id)
+);
+
+CREATE TABLE hq_facility (
+    cid             INTEGER NOT NULL,
+    hq_id           INTEGER NOT NULL,                -- -> hq.id
+    ord             INTEGER NOT NULL,
+    kind            TEXT,                            -- hq.FacilityKind
+    level           INTEGER
+);
+
+-- Founding and upgrade projects: paperwork phase, then construction.
+CREATE TABLE hq_project (
+    cid             INTEGER NOT NULL,
+    hq_id           INTEGER NOT NULL,                -- -> hq.id
+    ord             INTEGER NOT NULL,
+    kind            TEXT,                            -- hq.ProjectKind: found | tier_upgrade | facility_upgrade
+    facility        TEXT,                            -- null unless facility_upgrade
+    target_level    INTEGER,
+    started         INTEGER,                         -- day
+    paperwork_done  INTEGER,                         -- day
+    construction_done INTEGER,                       -- day
+    cost            INTEGER
+);
+
+-- Supply-line edge in the HQ network graph.
+CREATE TABLE hq_link (
+    cid             INTEGER NOT NULL,
+    ord             INTEGER NOT NULL,
+    a               INTEGER,                         -- -> hq.id
+    b               INTEGER,                         -- -> hq.id
+    level           INTEGER,
+    tons            INTEGER,                         -- tonnage moved this week
+    established     INTEGER                          -- day
 );
 
 ---------------------------------------------------------------- contracts
 
+-- Contracts and the current offers (is_offer = 1) share this table.
 CREATE TABLE contract (
-    id              INTEGER PRIMARY KEY,
-    kind            TEXT    NOT NULL CHECK (kind IN
-                     ('garrison_duty','cadre_duty','security_duty','riot_duty',
-                      'planetary_assault','relief_duty','guerrilla_warfare',
-                      'pirate_hunting','diversionary_raid','objective_raid',
-                      'recon_raid','extraction_raid')),
-    employer_key    TEXT    NOT NULL,
-    enemy_key       TEXT    NOT NULL,
-    planet_key      TEXT    NOT NULL,
-    company_id      INTEGER REFERENCES force(id),    -- assigned company, null = offer
-    status          TEXT    NOT NULL DEFAULT 'offer' CHECK (status IN
-                     ('offer','accepted','transit','active','completed','breached','failed')),
+    cid             INTEGER NOT NULL,
+    is_offer        INTEGER NOT NULL,                -- bool
+    ord             INTEGER NOT NULL,
+    id              INTEGER,
+    kind            TEXT,                            -- contract.ContractKind
+    employer        TEXT,                            -- faction key
+    enemy           TEXT,                            -- faction key
+    planet          TEXT,                            -- planet key
+    status          TEXT,                            -- contract.ContractStatus: offer | accepted | transit | active | completed | breached | failed
+    company         INTEGER,                         -- -> force.id assigned
     start_day       INTEGER,
-    length_months   INTEGER NOT NULL,
+    score           INTEGER,                         -- running success score
+    dist_ly         INTEGER,                         -- distance from nearest own HQ at offer
+    beachhead       INTEGER,                         -- bool: in the beachhead band when offered
+    transit_days    INTEGER,
+    arrive_day      INTEGER,
+    end_day         INTEGER,
+    monthly_net     INTEGER,
+    next_battle     INTEGER,                         -- day of the next engagement
+    battles         INTEGER,                         -- battles fought
+    casualties      INTEGER,
+    objective       TEXT,                            -- contract.ObjectiveKind: duration | attrition
+    committed_bv    INTEGER,
+    pool            INTEGER,                         -- enemy pool BV
+    pool_remaining  INTEGER,                         -- depleted by battles
+    vp              INTEGER,                         -- victory points
+    ineffective_since INTEGER,                       -- day the company stopped being combat-effective
+    breach_day      INTEGER,
     -- CamOps terms
-    base_pay_month  INTEGER NOT NULL,
-    advance_pct     INTEGER NOT NULL DEFAULT 25,
-    signing_bonus   INTEGER NOT NULL DEFAULT 0,
-    transport_pct   INTEGER NOT NULL DEFAULT 0,
-    overhead_pct    INTEGER NOT NULL DEFAULT 0,      -- straight support / overhead comp
-    battle_loss_pct INTEGER NOT NULL DEFAULT 0,
-    salvage_pct     INTEGER NOT NULL DEFAULT 0,
-    salvage_exchange INTEGER NOT NULL DEFAULT 0,     -- bool
-    command_rights  TEXT    NOT NULL DEFAULT 'independent' CHECK (command_rights IN
-                     ('integrated','house','liaison','independent')),
-    score           INTEGER NOT NULL DEFAULT 0,      -- running success score
-    -- Influence context at offer time (ARCH §9.2/§9.6):
-    dist_ly         INTEGER NOT NULL DEFAULT 0,      -- distance from nearest own HQ
-    beachhead       INTEGER NOT NULL DEFAULT 0,      -- bool: in the beachhead band when offered
-    -- Victory model (Stage 9E, ARCH §7):
-    objective_kind  TEXT    NOT NULL DEFAULT 'duration' CHECK (objective_kind IN
-                     ('duration','attrition')),
-    enemy_pool_bv   INTEGER NOT NULL DEFAULT 0,      -- opposition force, depleted by battles
-    victory_points  INTEGER NOT NULL DEFAULT 0,
-    -- Breach bookkeeping (Stage 9E): clawback owed if breached, cooling
-    -- applied to the employer faction on failure.
-    breach_day      INTEGER
+    length_months   INTEGER,
+    base_pay        INTEGER,                         -- per month
+    advance_pct     INTEGER,
+    signing_bonus   INTEGER,
+    transport_pct   INTEGER,
+    overhead_pct    INTEGER,
+    battle_loss_pct INTEGER,
+    salvage_pct     INTEGER,
+    salvage_exchange INTEGER,                        -- bool
+    command_rights  TEXT,                            -- contract.CommandRights
+    negotiated      INTEGER NOT NULL DEFAULT 0,      -- bool: terms already negotiated
+    -- The opposing force as briefed
+    enemy_lances    INTEGER NOT NULL DEFAULT 0,
+    enemy_quality   TEXT    NOT NULL DEFAULT 'regular', -- types.ExperienceLevel
+    enemy_lance_bv  INTEGER NOT NULL DEFAULT 0,
+    enemy_lance_tons INTEGER NOT NULL DEFAULT 0,
+    offer_hq        INTEGER NOT NULL DEFAULT 0,      -- -> hq.id whose board carries the offer
+    orders_day      INTEGER                          -- engagement day battle orders were confirmed for;
+                                                     -- the contact warning stands until it equals next_battle
 );
 
-CREATE TABLE scenario (
-    id              INTEGER PRIMARY KEY,
-    contract_id     INTEGER NOT NULL REFERENCES contract(id),
-    kind            TEXT    NOT NULL,                -- 'base_defense','ambush','recon','extraction',...
-    due_day         INTEGER NOT NULL,
-    resolved_day    INTEGER,
-    outcome         TEXT,                            -- 'decisive_victory'..'rout', null = pending
-    aar             TEXT                             -- narrated after-action report
+-- Employers cooling on the outfit after a failure.
+CREATE TABLE faction_cooling (
+    cid             INTEGER NOT NULL,
+    ord             INTEGER NOT NULL,
+    faction         TEXT,
+    until_day       INTEGER
 );
 
-CREATE TABLE contract_event (
-    id              INTEGER PRIMARY KEY,
-    contract_id     INTEGER NOT NULL REFERENCES contract(id),
-    day             INTEGER NOT NULL,
-    kind            TEXT    NOT NULL,
-    decision_json   TEXT,                            -- pending decision payload, null = auto
-    resolution      TEXT
+-- Standing with each faction; an absent row reads as 0.
+CREATE TABLE faction_standing (
+    cid             INTEGER NOT NULL,
+    faction         TEXT    NOT NULL,
+    value           INTEGER NOT NULL
 );
 
 ---------------------------------------------------------------- finances
 
 CREATE TABLE txn (
-    id              INTEGER PRIMARY KEY,
-    day             INTEGER NOT NULL,
-    amount          INTEGER NOT NULL,                -- signed C-bills
-    category        TEXT    NOT NULL CHECK (category IN
-                     ('contract_payment','advance','salvage','battle_loss_comp',
-                      'payroll','hardship_pay','maintenance','hull_upkeep',
-                      'parts','supplies','local_supplies','freight',
-                      'unit_purchase','unit_sale','fabrication',
-                      'fund_transfer','hq_construction','hq_upkeep',
-                      'transport_charter','loan_principal','loan_interest',
-                      'breach_clawback','event','misc')),
-    company_id      INTEGER REFERENCES force(id),    -- cost/profit center, null = outfit-level
-    hq_id           INTEGER REFERENCES hq(id),       -- HQ cost center (Stage 9A)
-    contract_id     INTEGER REFERENCES contract(id),
+    cid             INTEGER NOT NULL,
+    ord             INTEGER NOT NULL,
+    day             INTEGER,
+    amount          INTEGER,                         -- signed C-bills
+    category        TEXT,                            -- finance.Category
+    company         INTEGER,                         -- -> force.id cost/profit center; 0 = outfit-level
+    hq              INTEGER,                         -- -> hq.id cost center
+    contract        INTEGER,                         -- -> contract.id
     note            TEXT
 );
 
 CREATE TABLE loan (
-    id              INTEGER PRIMARY KEY,
-    principal       INTEGER NOT NULL,
-    balance         INTEGER NOT NULL,
-    rate_bp         INTEGER NOT NULL,                -- basis points, integer math
-    term_months     INTEGER NOT NULL,
-    next_pay_day    INTEGER NOT NULL,
-    payment         INTEGER NOT NULL
+    cid             INTEGER NOT NULL,
+    ord             INTEGER NOT NULL,
+    principal       INTEGER,
+    balance         INTEGER,
+    rate_bp         INTEGER,                         -- basis points
+    term            INTEGER,                         -- months
+    next_pay        INTEGER,                         -- day
+    payment         INTEGER
+);
+
+-- Money in transit by courier to a treasury.
+CREATE TABLE courier (
+    cid             INTEGER NOT NULL,
+    ord             INTEGER NOT NULL,
+    to_kind         TEXT,                            -- 'outfit' | 'hq' | 'company'
+    to_id           INTEGER,                         -- 0 for outfit
+    amount          INTEGER,
+    sent            INTEGER,                         -- day
+    eta             INTEGER                          -- day
+);
+
+-- Standing money policies, executed on payday by courier.
+CREATE TABLE policy (
+    cid             INTEGER NOT NULL,
+    ord             INTEGER NOT NULL,
+    entity_kind     TEXT,                            -- 'outfit' | 'hq' | 'company'
+    entity_id       INTEGER,
+    floor           INTEGER,                         -- top up to this level
+    cap             INTEGER,                         -- max moved per month
+    sent            INTEGER NOT NULL DEFAULT 0       -- moved so far this month
+);
+
+-- Standing supply orders for a deployed company.
+CREATE TABLE supply_policy (
+    cid             INTEGER NOT NULL,
+    ord             INTEGER NOT NULL,
+    company         INTEGER,                         -- -> force.id
+    min_days        INTEGER,
+    tons            INTEGER,
+    ammo_battles    INTEGER NOT NULL DEFAULT 0
+);
+
+-- Standing restock orders for an HQ warehouse.
+CREATE TABLE stock_policy (
+    cid             INTEGER NOT NULL,
+    ord             INTEGER NOT NULL,
+    hq              INTEGER,                         -- -> hq.id
+    part_key        TEXT,
+    min_qty         INTEGER,
+    target          INTEGER
+);
+
+-- Yearly company rating history.
+CREATE TABLE rating_snapshot (
+    cid             INTEGER NOT NULL,
+    year            INTEGER NOT NULL,
+    score           INTEGER NOT NULL
+);
+
+---------------------------------------------------------------- markets
+
+-- A listing on an HQ's board; persists until bought or aged out.
+CREATE TABLE listing (
+    cid             INTEGER NOT NULL,
+    ord             INTEGER NOT NULL,
+    kind            TEXT,                            -- 'unit' | 'part'
+    item_key        TEXT,                            -- chassis_key or part_key
+    rarity          TEXT,                            -- types.Rarity
+    price           INTEGER,
+    qty             INTEGER,
+    staple          INTEGER,                         -- bool: always-stocked part line
+    listed          INTEGER,                         -- day
+    expires         INTEGER,                         -- day
+    hq              INTEGER,                         -- -> hq.id whose board this is
+    -- Condition of a listed hull (units only; null for parts)
+    c_armor         INTEGER,
+    c_quality       TEXT,                            -- types.Quality
+    c_damaged       INTEGER,                         -- damaged slots
+    c_destroyed     INTEGER,                         -- destroyed slots
+    c_missing       INTEGER,                         -- missing components
+    black           INTEGER NOT NULL DEFAULT 0,      -- bool: black-market offer
+    company         INTEGER NOT NULL DEFAULT 0       -- -> force.id: a contract-world hull for this deployed company
+);
+
+---------------------------------------------------------------- events
+
+-- Structured campaign log: every entry tagged so any entity's history is a
+-- WHERE clause.
+CREATE TABLE event_log (
+    cid             INTEGER NOT NULL,
+    ord             INTEGER NOT NULL,
+    day             INTEGER,
+    category        TEXT,                            -- battle | decision | delivery | contract | medical |
+                                                     -- training | rotation | finance | construction | market | misc
+    company         INTEGER,                         -- -> force.id
+    hq              INTEGER,                         -- -> hq.id
+    contract        INTEGER,                         -- -> contract.id
+    text            TEXT
+);
+
+-- Decisions awaiting the commander.
+CREATE TABLE pending_event (
+    cid             INTEGER NOT NULL,
+    ord             INTEGER NOT NULL,
+    kind            TEXT,                            -- events.EventKind
+    day             INTEGER,
+    contract        INTEGER,                         -- -> contract.id
+    company         INTEGER,                         -- -> force.id
+    default_choice  INTEGER,                         -- taken if the deadline passes
+    deadline        INTEGER,                         -- day
+    chosen          INTEGER,                         -- null until answered
+    person          INTEGER NOT NULL DEFAULT 0,      -- -> person.id
+    id              INTEGER NOT NULL DEFAULT 0,      -- EventId the inbox answers by
+    battle          INTEGER NOT NULL DEFAULT 0       -- BattleId the decision answers
+);
+
+-- One row per decision kind: when it last fired and how it was answered.
+CREATE TABLE event_memory (
+    cid             INTEGER NOT NULL,
+    kind            TEXT    NOT NULL,                -- events.EventKind
+    last_day        INTEGER NOT NULL,
+    last_choice     INTEGER NOT NULL,
+    streak          INTEGER NOT NULL                 -- times running the same answer was given
 );
 
 ---------------------------------------------------------------- battles
 
--- Resolved engagements as records (Stage 12G.4): what the after-action
--- screens read. The *permanent* account of a battle is its [AAR] lines in
--- event_log, which are never pruned; these are bounded by
--- tuning.battle.reports_kept and age out oldest-first.
+-- Resolved engagements as records: what the after-action screens read. The
+-- permanent account of a battle is its [AAR] lines in event_log, which are
+-- never pruned; these are bounded by tuning.battle.reports_kept and age out
+-- oldest-first.
 CREATE TABLE battle_report (
-    id              INTEGER PRIMARY KEY,
-    battle_id       INTEGER NOT NULL,                -- types.BattleId, campaign-unique
-    day             INTEGER NOT NULL,
-    contract_id     INTEGER REFERENCES contract(id),
-    company_id      INTEGER REFERENCES force(id),
-    kind            TEXT, scenario TEXT, terrain TEXT, weather TEXT,
-    outcome         TEXT    NOT NULL,                -- 'decisive_victory'..'rout'
-    held_field      INTEGER NOT NULL,                -- who kept the wrecks (12D.3)
-    roe             TEXT,                            -- hold | standard | cautious
-    player_power    INTEGER, enemy_power INTEGER,
+    cid             INTEGER NOT NULL,
+    ord             INTEGER NOT NULL,
+    id              INTEGER,                         -- BattleId, campaign-unique (meta next_battle_id)
+    day             INTEGER,
+    contract        INTEGER,                         -- -> contract.id
+    company         INTEGER,                         -- -> force.id
+    kind            TEXT,
+    enemy_key       TEXT,
+    scenario        TEXT,
+    terrain         TEXT,
+    weather         TEXT,
+    outcome         TEXT,                            -- decisive_victory | victory | draw | defeat | rout
+    held_field      INTEGER,                         -- bool: who kept the wrecks
+    withdrew        INTEGER,                         -- bool
+    roe             TEXT,                            -- force.Roe
+    roe_overridden  INTEGER,                         -- bool
+    player_power    INTEGER,
+    enemy_power     INTEGER,
+    conditions_mod  INTEGER,
+    close_terrain   INTEGER,                         -- bool
+    air_grounded    INTEGER,                         -- bool
+    convoy_hit      INTEGER,                         -- bool
+    edge_spent_by   TEXT,                            -- ranked name of whoever spent Edge; '' = none
+    recon_quality   INTEGER,
+    avg_fatigue     INTEGER,
+    avg_morale      INTEGER,
     -- losses, spoils and the aftermath the AAR reports
-    hits_taken      INTEGER, destroyed INTEGER, wounded INTEGER, kia INTEGER,
-    lost_hulls      INTEGER, missing INTEGER,
-    morale_delta    INTEGER, fatigue_add INTEGER,    -- applied since 12C.1, reported since 12G
-    salvage_items   TEXT
+    hits_taken      INTEGER,
+    destroyed       INTEGER,
+    wounded         INTEGER,
+    kia             INTEGER,
+    lost_hulls      INTEGER,
+    missing         INTEGER,
+    enemy_destroyed_bv INTEGER,
+    kills_credited  INTEGER,
+    prisoners       INTEGER,
+    battle_loss_comp INTEGER,
+    score_after     INTEGER,
+    score_delta     INTEGER,
+    morale_delta    INTEGER,
+    fatigue_add     INTEGER,
+    battle_loss_pct INTEGER,
+    salvage_pct     INTEGER,
+    command_rights  TEXT,
+    silenced_mounts INTEGER,
+    armor_left      INTEGER,
+    salvage_claimed INTEGER,                         -- BV
+    salvage_haulable INTEGER,                        -- BV
+    salvage_cut     INTEGER,                         -- liaison's cut, BV
+    salvage_cash    INTEGER,                         -- salvage-exchange cash
+    salvage_items   TEXT,                            -- what was taken
+    conceded        INTEGER,                         -- bool: no combat-effective units, objective conceded without a shot
+    acknowledged    INTEGER NOT NULL DEFAULT 1,      -- bool: the player has read it
+    salvage_unclaimed INTEGER NOT NULL DEFAULT 0     -- BV of the haul still to be divided; 0 once taken
 );
 
 -- One row per hit: the armour before and after, the slot that broke, how
 -- the hull died, and the crew's wound and fate as fields rather than
 -- prose (a pilot can be wounded *and* taken).
 CREATE TABLE battle_report_hit (
-    id              INTEGER PRIMARY KEY,
-    report_id       INTEGER NOT NULL REFERENCES battle_report(id),
-    unit_id         INTEGER,                         -- may name a hull since struck off
-    chassis_key     TEXT, chassis_name TEXT,         -- copied: the report outlives the hull
-    armor_before    INTEGER, armor_after INTEGER,
-    slot            TEXT, slot_part TEXT, slot_result TEXT,
-    destroyed       INTEGER, cause TEXT,             -- cored | engine | ammo | scrap
+    cid             INTEGER NOT NULL,
+    report_ord      INTEGER NOT NULL,                -- -> battle_report.ord
+    ord             INTEGER NOT NULL,
+    unit            INTEGER,                         -- may name a hull since struck off
+    chassis_key     TEXT,                            -- copied: the report outlives the hull
+    chassis_name    TEXT,
+    armor_before    INTEGER,
+    armor_after     INTEGER,
+    slot            TEXT,                            -- '' = none
+    slot_part       TEXT,
+    slot_result     TEXT,                            -- none | damaged | destroyed
+    destroyed       INTEGER,                         -- bool
+    cause           TEXT,                            -- unit.WreckCause: none | cored | engine | ammo | scrap
+    pilot           INTEGER,                         -- -> person.id
     crew_name       TEXT,
-    wound_severity  INTEGER, wound_location TEXT, wound_permanent INTEGER,
+    wound_severity  INTEGER,                         -- null = unwounded
+    wound_location  TEXT,                            -- person.InjuryLocation; '' = unwounded
+    wound_permanent INTEGER,                         -- bool
     fate            TEXT,                            -- unhurt | kia | missing
-    recovery_roll   INTEGER, recovery_target INTEGER,
-    lost            INTEGER                          -- left to the enemy
+    recovery_roll   INTEGER,
+    recovery_target INTEGER,
+    lost            INTEGER                          -- bool: left to the enemy
 );
 
 -- Munitions burned and what the trucks still hold. Keyed by family name,
 -- not position: part.munition_keys has grown before, and a positional
 -- encoding would silently re-label old saves.
 CREATE TABLE battle_report_ammo (
-    id              INTEGER PRIMARY KEY,
-    report_id       INTEGER NOT NULL REFERENCES battle_report(id),
-    family          TEXT    NOT NULL,
-    burned          INTEGER NOT NULL,
-    reserve         INTEGER NOT NULL
+    cid             INTEGER NOT NULL,
+    report_ord      INTEGER NOT NULL,                -- -> battle_report.ord
+    ord             INTEGER NOT NULL,
+    family          TEXT,
+    burned          INTEGER,
+    reserve         INTEGER
 );
 
----------------------------------------------------------------- log
-
--- Structured campaign log (Stage 9A): every entry tagged so any entity's
--- full history — battles, decisions & outcomes, deliveries, construction,
--- medical, finance — is a WHERE clause.
-CREATE TABLE event_log (
-    id              INTEGER PRIMARY KEY,
-    day             INTEGER NOT NULL,
-    category        TEXT    NOT NULL CHECK (category IN
-                     ('battle','decision','delivery','contract','medical',
-                      'training','rotation','finance','construction','market','misc')),
-    company_id      INTEGER REFERENCES force(id),
-    hq_id           INTEGER REFERENCES hq(id),
-    contract_id     INTEGER REFERENCES contract(id),
-    message         TEXT    NOT NULL
+-- The wrecks on offer after a battle. Rolled once when the fight ended, so
+-- a reload offers the same ones.
+CREATE TABLE battle_report_salvage (
+    cid             INTEGER NOT NULL,
+    report_ord      INTEGER NOT NULL,                -- -> battle_report.ord
+    ord             INTEGER NOT NULL,
+    key             TEXT,
+    name            TEXT,
+    bv              INTEGER,
+    armor_pct       INTEGER,
+    quality         TEXT,                            -- types.Quality
+    damaged         INTEGER,                         -- damaged slots
+    destroyed       INTEGER,                         -- destroyed slots
+    missing         INTEGER                          -- missing components
 );
-CREATE INDEX idx_log_company   ON event_log(company_id, day);
-CREATE INDEX idx_log_category  ON event_log(category, day);
-
-CREATE INDEX idx_txn_day        ON txn(day);
-CREATE INDEX idx_txn_company    ON txn(company_id, day);
-CREATE INDEX idx_person_force   ON person(force_id);
-CREATE INDEX idx_unit_force     ON unit(force_id);
-CREATE INDEX idx_scenario_due   ON scenario(contract_id, due_day);
-CREATE INDEX idx_log_day        ON event_log(day);
