@@ -8,6 +8,7 @@
 //! truth and stays close to it.
 
 const std = @import("std");
+const rng_mod = @import("../sim/rng.zig");
 const sqlite = @import("sqlite.zig");
 const types = @import("../domain/types.zig");
 const state_mod = @import("../sim/state.zig");
@@ -27,7 +28,7 @@ const contract_events = @import("../sim/contract_events.zig");
 const network = @import("../sim/network.zig");
 const clock_mod = @import("../sim/clock.zig");
 
-pub const schema_version = 31;
+pub const schema_version = 32;
 
 const ddl =
     \\CREATE TABLE IF NOT EXISTS player (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_seq INTEGER NOT NULL);
@@ -36,6 +37,7 @@ const ddl =
     \\CREATE TABLE IF NOT EXISTS meta (cid INTEGER NOT NULL, key TEXT NOT NULL, value INTEGER NOT NULL, PRIMARY KEY (cid, key));
     \\CREATE TABLE IF NOT EXISTS meta_text (cid INTEGER NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (cid, key));
     \\CREATE TABLE IF NOT EXISTS rng (cid INTEGER PRIMARY KEY, state BLOB NOT NULL);
+    \\CREATE TABLE IF NOT EXISTS rng_stream (cid INTEGER NOT NULL, stream TEXT NOT NULL, format INTEGER NOT NULL, state BLOB NOT NULL, UNIQUE (cid, stream));
     \\CREATE TABLE IF NOT EXISTS commander (cid INTEGER PRIMARY KEY, name TEXT NOT NULL, origin TEXT NOT NULL, profession TEXT NOT NULL);
     \\CREATE TABLE IF NOT EXISTS person (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, first TEXT, last TEXT, callsign TEXT, role TEXT, xp INTEGER, status TEXT, fatigue INTEGER, morale INTEGER, recruited_day INTEGER, salary_override INTEGER, assigned_force INTEGER, posted_hq INTEGER, weekly_hours INTEGER, medbay_priority INTEGER, leave_until INTEGER, wound_heal_day INTEGER, training_skill TEXT, training_done INTEGER, admitted INTEGER NOT NULL DEFAULT 0, rank TEXT NOT NULL DEFAULT 'private', rank_pinned INTEGER NOT NULL DEFAULT 0, kills INTEGER NOT NULL DEFAULT 0, kill_bv INTEGER NOT NULL DEFAULT 0, battles INTEGER NOT NULL DEFAULT 0, tours INTEGER NOT NULL DEFAULT 0, outstanding_tours INTEGER NOT NULL DEFAULT 0, edge_spent INTEGER NOT NULL DEFAULT 0, faction TEXT NOT NULL DEFAULT '', shares INTEGER NOT NULL DEFAULT 0, born_day INTEGER, last_raise_day INTEGER, last_award_day INTEGER, departed_day INTEGER, PRIMARY KEY (cid, id));
     \\CREATE TABLE IF NOT EXISTS award (cid INTEGER NOT NULL, person_id INTEGER NOT NULL, key TEXT NOT NULL);
@@ -84,7 +86,12 @@ const tables = [_][]const u8{
     "contract",      "txn",          "loan",            "courier",          "policy",       "bay_job",      "candidate",  "hq_link",     "unit_transfer",
     "supply_policy", "stock_policy", "faction_cooling", "faction_standing", "event_memory", "listing",      "part_order", "event_log",   "pending_event",
     "refit_plan",    "refit_op",     "rating_snapshot", "battle_report",   "battle_report_hit", "battle_report_ammo", "battle_report_salvage",
+    "rng_stream",
 };
+
+/// The stream order of the single `rng` blob that saves before schema v32
+/// hold: the generator states, one after another, in this order.
+const legacy_rng_order = [_]rng_mod.Stream{ .generation, .market, .maintenance, .acquisition, .battle, .events, .medical, .travel };
 
 pub const Store = struct {
     db: sqlite.Db,
@@ -372,7 +379,7 @@ pub const Store = struct {
                 .{ "stat_enemy_bv", @as(i64, @intCast(gs.stats.enemy_bv_destroyed)) }, .{ "next_person_id", gs.next_person_id },
                 .{ "next_unit_id", gs.next_unit_id },                 .{ "next_force_id", gs.next_force_id },
                 .{ "next_hq_id", gs.next_hq_id },                     .{ "next_contract_id", gs.next_contract_id },
-                .{ "next_battle_id", gs.next_battle_id },
+                .{ "next_battle_id", gs.next_battle_id },           .{ "rng_seed", @as(i64, @bitCast(gs.rng.seed)) },
             };
             for (ints) |kv| {
                 try st.bindAll(.{ cid, kv[0], kv[1] });
@@ -384,11 +391,14 @@ pub const Store = struct {
             try tx.run();
         }
         {
-            const st = try self.db.prepare("INSERT INTO rng VALUES (?1, ?2)");
+            const st = try self.db.prepare("INSERT INTO rng_stream VALUES (?1, ?2, ?3, ?4)");
             defer st.finalize();
-            try st.bind(1, cid);
-            try st.bindBlob(2, std.mem.asBytes(&gs.rng.prngs));
-            try st.run();
+            for (std.enums.values(rng_mod.Stream)) |stream| {
+                const bytes = gs.rng.encode(stream);
+                try st.bindAll(.{ cid, @tagName(stream), rng_mod.Rng.state_format });
+                try st.bindBlob(4, &bytes);
+                try st.run();
+            }
         }
         if (gs.commander) |c| {
             const st = try self.db.prepare("INSERT INTO commander VALUES (?1, ?2, ?3, ?4)");
@@ -843,6 +853,47 @@ pub const Store = struct {
 
     // ------------------------------------------------------------------ load
 
+    /// Restore every RNG stream. A row names its stream; a stream with no
+    /// row starts fresh from the campaign seed. A malformed row, an unknown
+    /// stream, or stream rows without a seed are `error.CorruptSave`.
+    ///
+    /// Saves before schema v32 hold one `rng` blob of native-endian
+    /// generator states in `legacy_rng_order` and no seed. Their seed, used
+    /// only for streams added since, is a hash of that blob, so it differs
+    /// per campaign. A save with no RNG state at all is corrupt.
+    fn loadRng(self: Store, gs: *GameState, cid: i64, has_seed: bool) !void {
+        const alloc = gs.allocator();
+        var loaded = std.EnumSet(rng_mod.Stream).initEmpty();
+        {
+            const st = try self.db.prepare("SELECT stream, format, state FROM rng_stream WHERE cid = ?1");
+            defer st.finalize();
+            try st.bindAll(.{cid});
+            while (try st.next()) {
+                const stream = st.enumValue(rng_mod.Stream, 0) orelse return error.CorruptSave;
+                if (!gs.rng.decode(stream, st.int(1), try st.blob(2, alloc))) return error.CorruptSave;
+                loaded.insert(stream);
+            }
+        }
+        if (loaded.count() > 0 and !has_seed) return error.CorruptSave;
+        if (loaded.count() == 0) {
+            const st = try self.db.prepare("SELECT state FROM rng WHERE cid = ?1");
+            defer st.finalize();
+            try st.bindAll(.{cid});
+            if (!try st.next()) return error.CorruptSave;
+            const bytes = try st.blob(0, alloc);
+            const size = @sizeOf(std.Random.DefaultPrng);
+            if (bytes.len != legacy_rng_order.len * size) return error.CorruptSave;
+            for (legacy_rng_order, 0..) |stream, i| {
+                gs.rng.prngs[@intFromEnum(stream)] = std.mem.bytesToValue(std.Random.DefaultPrng, bytes[i * size ..][0..size]);
+                loaded.insert(stream);
+            }
+            if (!has_seed) gs.rng.seed = std.hash.Wyhash.hash(0, bytes);
+        }
+        for (std.enums.values(rng_mod.Stream)) |stream| {
+            if (!loaded.contains(stream)) gs.rng.prngs[@intFromEnum(stream)] = rng_mod.Rng.fresh(gs.rng.seed, stream);
+        }
+    }
+
     /// Rebuild a campaign from the store. `gpa` backs the new GameState.
     pub fn load(self: Store, gpa: std.mem.Allocator, cid: i64) !GameState {
         var gs = GameState.init(gpa, .{});
@@ -850,6 +901,7 @@ pub const Store = struct {
         const alloc = gs.allocator();
         gs.campaign_id = cid;
         var saved_version: u32 = schema_version;
+        var has_seed = false;
         {
             const st = try self.db.prepare("SELECT schema_version FROM campaign WHERE id = ?1");
             defer st.finalize();
@@ -889,6 +941,10 @@ pub const Store = struct {
                 if (std.mem.eql(u8, key, "next_hq_id")) gs.next_hq_id = try fit(@TypeOf(gs.next_hq_id), v);
                 if (std.mem.eql(u8, key, "next_contract_id")) gs.next_contract_id = try fit(@TypeOf(gs.next_contract_id), v);
                 if (std.mem.eql(u8, key, "next_battle_id")) gs.next_battle_id = try fit(@TypeOf(gs.next_battle_id), v);
+                if (std.mem.eql(u8, key, "rng_seed")) {
+                    gs.rng.seed = @bitCast(v);
+                    has_seed = true;
+                }
             }
             const tx = try self.db.prepare("SELECT key, value FROM meta_text WHERE cid = ?1");
             defer tx.finalize();
@@ -898,15 +954,7 @@ pub const Store = struct {
                 if (std.mem.eql(u8, key, "outfit_name")) gs.outfit_name = try tx.text(1, alloc);
             }
         }
-        {
-            const st = try self.db.prepare("SELECT state FROM rng WHERE cid = ?1");
-            defer st.finalize();
-            try st.bindAll(.{cid});
-            if (try st.next()) {
-                const bytes = try st.blob(0, alloc);
-                if (bytes.len == @sizeOf(@TypeOf(gs.rng.prngs))) @memcpy(std.mem.asBytes(&gs.rng.prngs), bytes);
-            }
-        }
+        try self.loadRng(&gs, cid, has_seed);
         {
             const st = try self.db.prepare("SELECT name, origin, profession FROM commander WHERE cid = ?1");
             defer st.finalize();
@@ -1947,6 +1995,8 @@ test "12.17: a v5 store upgrades in place — columns added, version stamped, wo
         \\CREATE TABLE unit (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, chassis_key TEXT, name TEXT, kind TEXT, force INTEGER, pilot INTEGER, tech INTEGER, armor_pct INTEGER, quality TEXT, status TEXT, last_maint INTEGER, acquired_day INTEGER, price INTEGER, reactivation_done INTEGER, PRIMARY KEY (cid, id));
         \\CREATE TABLE person (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, first TEXT, last TEXT, callsign TEXT, role TEXT, xp INTEGER, status TEXT, fatigue INTEGER, morale INTEGER, recruited_day INTEGER, salary_override INTEGER, assigned_force INTEGER, posted_hq INTEGER, weekly_hours INTEGER, medbay_priority INTEGER, leave_until INTEGER, wound_heal_day INTEGER, training_skill TEXT, training_done INTEGER, admitted INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (cid, id));
         \\CREATE TABLE meta (cid INTEGER NOT NULL, key TEXT NOT NULL, value INTEGER NOT NULL);
+        \\CREATE TABLE rng (cid INTEGER PRIMARY KEY, state BLOB NOT NULL);
+        \\INSERT INTO rng VALUES (1, x'000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff');
         \\INSERT INTO campaign VALUES (1, 'Old Outfit', 'K', 12, '3025-01-13', 5, 1, 0);
         \\INSERT INTO meta VALUES (1, 'day_index', 12);
         \\INSERT INTO unit VALUES (1, 0, 1, 'LCT-1V', NULL, 'mek', 0, 0, 0, 100, 'c', 'ready', NULL, 0, 1500000, NULL);
@@ -2201,6 +2251,87 @@ test "a child row whose parent is missing rejects the load as corrupt" {
 
 test "an unknown enum value rejects the load as corrupt" {
     try std.testing.expectError(error.CorruptSave, loadAfterTampering("UPDATE commander SET origin = 'XX'"));
+}
+
+test "a malformed RNG stream row rejects the load as corrupt" {
+    try std.testing.expectError(error.CorruptSave, loadAfterTampering("UPDATE rng_stream SET state = x'00' WHERE stream = 'battle'"));
+}
+
+test "an RNG row naming no known stream rejects the load as corrupt" {
+    try std.testing.expectError(error.CorruptSave, loadAfterTampering("UPDATE rng_stream SET stream = 'weather' WHERE stream = 'travel'"));
+}
+
+test "a malformed legacy RNG blob rejects the load as corrupt" {
+    try std.testing.expectError(error.CorruptSave, loadAfterTampering("DELETE FROM rng_stream; INSERT INTO rng VALUES (1, x'00')"));
+}
+
+/// Draw from every stream so none sits at its starting state.
+fn stirRng(gs: *GameState) void {
+    for (std.enums.values(rng_mod.Stream), 0..) |stream, i| {
+        for (0..i + 3) |_| _ = gs.rng.roll2d6(stream);
+    }
+}
+
+test "every RNG stream and the seed survive a save and load" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 6006 });
+    defer gs.deinit();
+    _ = try gs.createCommander("T", .LC, .line_officer);
+    stirRng(&gs);
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+    try std.testing.expectEqual(gs.rng.seed, loaded.rng.seed);
+    for (std.enums.values(rng_mod.Stream)) |stream| {
+        try std.testing.expectEqual(gs.rng.encode(stream), loaded.rng.encode(stream));
+    }
+}
+
+test "a stream the save lacks starts fresh from the seed, and the others keep their state" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 6007 });
+    defer gs.deinit();
+    _ = try gs.createCommander("T", .LC, .line_officer);
+    stirRng(&gs);
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    // A stream added to the game after this campaign was saved has no row.
+    try store.db.exec("DELETE FROM rng_stream WHERE stream = 'travel'");
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+    var fresh = rng_mod.Rng.init(gs.rng.seed);
+    for (std.enums.values(rng_mod.Stream)) |stream| {
+        const want = if (stream == .travel) fresh.encode(stream) else gs.rng.encode(stream);
+        try std.testing.expectEqual(want, loaded.rng.encode(stream));
+    }
+}
+
+test "a save from before per-stream rows loads every stream from its legacy blob" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 6008 });
+    defer gs.deinit();
+    _ = try gs.createCommander("T", .LC, .line_officer);
+    stirRng(&gs);
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    // Rewrite the save the way schema v31 held it: one blob, no seed.
+    try store.db.exec("DELETE FROM rng_stream; DELETE FROM meta WHERE key = 'rng_seed'");
+    var blob: [legacy_rng_order.len * @sizeOf(std.Random.DefaultPrng)]u8 = undefined;
+    for (legacy_rng_order, 0..) |stream, i| {
+        @memcpy(blob[i * @sizeOf(std.Random.DefaultPrng) ..][0..@sizeOf(std.Random.DefaultPrng)], std.mem.asBytes(&gs.rng.prngs[@intFromEnum(stream)]));
+    }
+    const ins = try store.db.prepare("INSERT INTO rng VALUES (?1, ?2)");
+    defer ins.finalize();
+    try ins.bind(1, gs.campaign_id);
+    try ins.bindBlob(2, &blob);
+    try ins.run();
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+    for (std.enums.values(rng_mod.Stream)) |stream| {
+        try std.testing.expectEqual(gs.rng.encode(stream), loaded.rng.encode(stream));
+    }
+    try std.testing.expectEqual(std.hash.Wyhash.hash(0, &blob), loaded.rng.seed);
 }
 
 /// A campaign that has fought `fights` engagements, every battle decision
