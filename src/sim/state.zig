@@ -661,11 +661,33 @@ pub const GameState = struct {
     /// and a mess; regional ones add comms, a spaceport, a hospital and a
     /// hiring hall. Staffing is the player's problem from day one.
     pub fn foundHq(self: *GameState, name: []const u8, tier: hq_mod.HqTier, planet_key: []const u8) FoundError!types.HqId {
-        const world = planet_mod.find(planet_key) orelse return error.UnknownPlanet;
-        const id: types.HqId = @enumFromInt(self.next_hq_id);
+        const hq = try self.prepareHq(name, tier, planet_key);
+        try self.hqs.ensureUnusedCapacity(self.allocator(), 1);
+        return self.commitHq(hq);
+    }
+
+    /// Room for `n` more ledger entries, so the next `n` postings cannot
+    /// fail.
+    pub fn reserveLedger(self: *GameState, n: usize) !void {
+        try self.ledger.transactions.ensureUnusedCapacity(self.allocator(), n);
+    }
+
+    /// Put a prepared HQ on the books under the next id. Cannot fail once
+    /// `hqs` has room for it.
+    pub fn commitHq(self: *GameState, prepared: hq_mod.Hq) types.HqId {
+        var hq = prepared;
+        hq.id = @enumFromInt(self.next_hq_id);
         self.next_hq_id += 1;
+        self.hqs.putAssumeCapacity(hq.id, hq);
+        return hq.id;
+    }
+
+    /// A new HQ with every allocation done but no id and nothing on the
+    /// books; `commitHq` registers it.
+    pub fn prepareHq(self: *GameState, name: []const u8, tier: hq_mod.HqTier, planet_key: []const u8) FoundError!hq_mod.Hq {
+        const world = planet_mod.find(planet_key) orelse return error.UnknownPlanet;
         var hq: hq_mod.Hq = .{
-            .id = id,
+            .id = .none,
             .name = try self.allocator().dupe(u8, name),
             .tier = tier,
             .planet_key = world.key,
@@ -677,8 +699,7 @@ pub const GameState = struct {
             const more = [_]hq_mod.FacilityKind{ .comms, .spaceport, .hospital, .hiring_hall, .training_ground };
             for (more) |kind| try hq.facilities.append(self.allocator(), .{ .kind = kind, .level = 1 });
         }
-        try self.hqs.put(self.allocator(), id, hq);
-        return id;
+        return hq;
     }
 
     /// The HQ that supplies a force: its company's assignment, else the

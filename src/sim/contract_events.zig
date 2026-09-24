@@ -342,6 +342,7 @@ pub fn resolveChoice(gs: *GameState, event_id: types.EventId, choice: usize) !vo
     if (!ev.needsDecision()) return error.NotADecision;
     if (choice >= ev.options.len) return error.NoSuchChoice;
 
+    if (ev.contract != .none) try gs.event_memory.ensureUnusedCapacity(gs.allocator(), 1);
     ev.chosen = choice;
     // Remember the answer: the same one enough times running becomes a standing order.
     if (ev.contract != .none) {

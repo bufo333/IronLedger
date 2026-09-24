@@ -41,13 +41,6 @@ Done: every Stage 12 feature (12, 12B–12G) has shipped. Part 2 is next.
 
 - [ ] Still uncovered by the smoke: the GAME OVER modal (a fresh campaign starts solvent, so reaching it needs a saved campaign already past all credit as a test fixture; bankruptcy itself stays terminal by design), the exact 120-column layout boundary, and the refusal branch of each confirm once run (they open and close only).
 
-## D17. Logistics accounting (audit #6, #12; rules 5, 6, 27)
-
-D17a is done (see Done); D17b is left.
-
-
-- [ ] `ensureUnusedCapacity` before the debit at the audit #6 sites: HQ founding (commands.zig:461-474), facility upgrade (1365-1387), fabrication (1346-1363), unit transfer (1638-1655), refit commit (1694-1705), `resolveChoice` (contract_events.zig:337-348). No transaction framework; these fail only on arena OOM.
-
 ## D18. HQ locality (audit #21; rules 5, 8)
 
 - [ ] One `canTrainAt(gs, hq)` against `homeHqFor(company)` replaces the three any-HQ loops (commands.zig:782-787, 1448-1453, 1849-1854).
@@ -118,6 +111,7 @@ Contract deliverables closed before this list merged, all from the 2026-09-22 co
 - D16d conceded engagements, audit #11 (PR #60): `battle.concede` records a conceded `BattleReport` (defeat) that holds the turn, counts a lost battle and a battle fought, and scores `tuning.battle.score.concede` through `recordBattle` (VP at the usual rate); the after-action sheet shows what was given up instead of an empty fight
 - D16e the field workshop (PR #61, decided 2026-09-23): a ready Logistics lance adds `tuning.maintenance.push_workshop_hours` to the repair push budget; the unread `CampaignMods.has_field_repair` flag and the orphan `mobile_field_base` unit kind (no chassis could field one) are gone
 - D17a freight accounting, audit #12 (PR #62): `freightQuote` is pure (checks `network.fitsThroughput`, books nothing) and `commitFreight` books the tonnage after the payment clears, in `shipStock` and `orderPart`; one `logistics.linkTonsPerWeek` (`throughput_per_level` × `tons_per_supply_unit`, the renamed `weeks_of_capacity`) answers every link and route
+- D17b slots before money, audit #6 (PR #63): HQ founding (`prepareHq`/`commitHq`), fabrication, facility upgrade, unit transfer, refit commit and `resolveChoice` reserve their ledger and list slots (`GameState.reserveLedger`, `ensureUnusedCapacity`) before the first mutation, so no list growth fails after money or stock moves
 
 ---
 
@@ -133,6 +127,7 @@ govern. Order (decided 2026-09-23): after Part 1 and after the D14–D20 fixes.
 - [ ] CI clean-package build: a tree holding only the `build.zig.zon` paths builds (overlaps D22 `.paths`).
 - [ ] Windows support: target-gated terminal (console API and raw mode), resize without SIGWINCH, child-process music player (no `afplay`), paths. Then CI compiles macOS, Linux and Windows (proposal rule 65).
 - [ ] Every rule citation updated to the new numbering in one PR: `src/` (33), docs (14), CLAUDE.md (hard rules, "section 9 checklist" becomes section 11), TODO.md, test names. Optionally switch to stable IDs (`ATOMIC-01`, `VIEW-04`).
+- [ ] Full failure atomicity (proposal rules 11-14, 69), beyond D17b's slot reservations: log lines formatted before the first mutation, `resolveChoice` effects prepared as a unit, `placeUnitInCompany` reserving the target lance slot before it removes the hull, and a failure-injection strategy that works under the campaign arena (it allocates in chunks, so a failing child allocator fires unpredictably).
 - [ ] `docs/audit-response.md` gets a policy addendum, and the historical analysis stays as written: the contract review adopted failure atomicity as a forward requirement; D17 uses prepare/commit atomic helpers and one failure-injection test per shared mutation pattern, not a transaction framework. D17 expands to match.
 - [ ] Adoption PR: title becomes "Coding contract", replaces `docs/coding-contract.md`, every gate command passes on that commit, and remaining violations are listed as bounded exceptions (proposal rule 86) tied to D21/D22. The new PR checklist applies from that commit on.
 
