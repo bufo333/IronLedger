@@ -1,6 +1,6 @@
 -- IRON LEDGER — SQLite save store schema (design document)
 --
--- Matches schema_version 33. The executable DDL and its column migrations
+-- Matches schema_version 34. The executable DDL and its column migrations
 -- live in src/persist/store.zig; this file is the readable reference for
 -- what each table and column means. Column order here is the runtime order.
 --
@@ -61,7 +61,7 @@ CREATE TABLE campaign (
 -- bankrupt, auto_admit, difficulty, share_profit_bp, the stat_* counters
 -- (battles won/drawn/lost, hulls lost/salvaged, people_kia, enemy_bv),
 -- next_person_id, next_unit_id, next_force_id, next_hq_id,
--- next_contract_id, next_battle_id, rng_seed.
+-- next_contract_id, next_battle_id, next_event_id, rng_seed.
 CREATE TABLE meta (
     cid             INTEGER NOT NULL,
     key             TEXT    NOT NULL,
@@ -193,7 +193,8 @@ CREATE TABLE candidate (
     secondary_skill INTEGER,
     bonus           INTEGER,                         -- asking signing bonus
     listed          INTEGER,                         -- day
-    expires         INTEGER                          -- day
+    expires         INTEGER,                         -- day
+    age             INTEGER NOT NULL DEFAULT 30      -- years, as generated
 );
 
 ---------------------------------------------------------------- materiel

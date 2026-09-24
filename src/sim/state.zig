@@ -4,6 +4,7 @@
 //! lives in the system modules (tick.zig, commands.zig, ...).
 
 const std = @import("std");
+const digest = @import("digest.zig");
 const tuning = @import("../domain/tuning.zig").t;
 const types = @import("../domain/types.zig");
 const person_mod = @import("../domain/person.zig");
@@ -1997,116 +1998,47 @@ pub const GameState = struct {
 
     // ------------------------------------------------------- golden master
 
-    /// Deterministic digest of gameplay-relevant state. Two runs with the
-    /// same seed and command script must produce the same hash — the
-    /// regression harness every stage builds on (ARCH §13).
-    pub fn hash(self: *GameState) u64 {
-        var h = std.hash.Wyhash.init(0x42544d43); // "BTMC"
-        h.update(std.mem.asBytes(&self.clock.day_index));
-        h.update(std.mem.asBytes(&self.funds));
-        h.update(std.mem.asBytes(&self.reputation));
-        h.update(std.mem.asBytes(&self.share_profit_bp));
-        const txn_count: u64 = self.ledger.transactions.items.len;
-        h.update(std.mem.asBytes(&txn_count));
+    /// Fields the golden master leaves out, each for a reason: the arena
+    /// is memory, not state, and `campaign_id` is the save store's row, not
+    /// the campaign.
+    pub const unhashed_fields = [_][]const u8{ "arena", "campaign_id" };
 
-        var it = self.people.iterator();
-        while (it.next()) |entry| {
-            const p = entry.value_ptr;
-            h.update(std.mem.asBytes(&p.id));
-            h.update(p.first_name);
-            h.update(p.last_name);
-            h.update(std.mem.asBytes(&p.role));
-            h.update(std.mem.asBytes(&p.status));
-            h.update(std.mem.asBytes(&p.xp));
-            h.update(std.mem.asBytes(&p.fatigue));
-            h.update(std.mem.asBytes(&p.morale));
-            const injuries: u64 = p.injuries.items.len;
-            h.update(std.mem.asBytes(&injuries));
-        }
-        var uit = self.units.iterator();
-        while (uit.next()) |entry| {
-            const u = entry.value_ptr;
-            h.update(std.mem.asBytes(&u.id));
-            h.update(u.chassis_key);
-            h.update(std.mem.asBytes(&u.status));
-            h.update(std.mem.asBytes(&u.quality));
-            h.update(std.mem.asBytes(&u.armor_pct));
-            h.update(std.mem.asBytes(&u.force));
-            h.update(std.mem.asBytes(&u.pilot));
-            h.update(std.mem.asBytes(&u.berth_hq));
-        }
-        for (self.held_hulls.items) |*h_hull| {
-            h.update(std.mem.asBytes(&h_hull.unit.id));
-            h.update(h_hull.by);
-            h.update(std.mem.asBytes(&h_hull.day));
-        }
-        var fit = self.forces.iterator();
-        while (fit.next()) |entry| {
-            const f = entry.value_ptr;
-            h.update(std.mem.asBytes(&f.id));
-            h.update(f.name);
-            h.update(std.mem.asBytes(&f.echelon));
-            const unit_count: u64 = f.units.items.len;
-            h.update(std.mem.asBytes(&unit_count));
-        }
-        var cit = self.contracts.iterator();
-        while (cit.next()) |entry| {
-            const c = entry.value_ptr;
-            h.update(std.mem.asBytes(&c.id));
-            h.update(std.mem.asBytes(&c.kind));
-            h.update(std.mem.asBytes(&c.status));
-            h.update(c.planet_key);
-        }
-        for (self.contract_offers.items) |offer| {
-            h.update(std.mem.asBytes(&offer.kind));
-            h.update(offer.planet_key);
-            h.update(std.mem.asBytes(&offer.terms.base_pay_month));
-        }
-        var hit = self.hqs.iterator();
-        while (hit.next()) |entry| {
-            h.update(std.mem.asBytes(&entry.value_ptr.id));
-            h.update(entry.value_ptr.planet_key);
-        }
-        if (self.commander) |c| {
-            h.update(c.name);
-            h.update(std.mem.asBytes(&c.origin));
-            h.update(std.mem.asBytes(&c.profession));
-        }
-        var sit = self.faction_standing.iterator();
-        while (sit.next()) |entry| {
-            h.update(entry.key_ptr.*);
-            h.update(std.mem.asBytes(entry.value_ptr));
-        }
-        const loan_count: u64 = self.loans.items.len;
-        h.update(std.mem.asBytes(&loan_count));
-        var hqfit = self.hqs.iterator();
-        while (hqfit.next()) |entry| h.update(std.mem.asBytes(&entry.value_ptr.funds));
-        var lfit = self.forces.iterator();
-        while (lfit.next()) |entry| h.update(std.mem.asBytes(&entry.value_ptr.local_funds));
-        const courier_count: u64 = self.fund_couriers.items.len;
-        h.update(std.mem.asBytes(&courier_count));
-        const job_count: u64 = self.bay_jobs.items.len;
-        h.update(std.mem.asBytes(&job_count));
-        const link_count: u64 = self.hq_links.items.len;
-        h.update(std.mem.asBytes(&link_count));
-        const plan_count: u64 = self.refit_plans.items.len;
-        h.update(std.mem.asBytes(&plan_count));
-        var spare_total: u64 = 0;
-        for (self.spare_parts.values()) |v| spare_total += v;
-        var shit = self.hqs.iterator();
-        while (shit.next()) |entry| for (entry.value_ptr.stock.values()) |v| {
-            spare_total += v;
+    /// The golden master: a digest of every persisted field (`digest.zig`),
+    /// RNG words and `next_*_id` counters included. Two runs with the same
+    /// seed and command script produce the same hash, and a save loads back
+    /// to the hash it was saved at (ARCH §13).
+    pub fn hash(self: *const GameState) u64 {
+        comptime for (unhashed_fields) |name| {
+            if (!@hasField(GameState, name)) @compileError("unhashed_fields names no field: " ++ name);
         };
-        var sfit = self.forces.iterator();
-        while (sfit.next()) |entry| for (entry.value_ptr.stock.values()) |v| {
-            spare_total += v;
-        };
-        h.update(std.mem.asBytes(&spare_total));
-        const order_count: u64 = self.part_orders.items.len;
-        h.update(std.mem.asBytes(&order_count));
-        const listing_count: u64 = self.market_listings.items.len;
-        h.update(std.mem.asBytes(&listing_count));
+        var h = std.hash.Wyhash.init(0x42544d43); // "BTMC"
+        inline for (@typeInfo(GameState).@"struct".fields) |f| {
+            const skip = comptime for (unhashed_fields) |name| {
+                if (std.mem.eql(u8, name, f.name)) break true;
+            } else false;
+            if (!skip) {
+                digest.update(&h, f.name);
+                digest.update(&h, @field(self, f.name));
+            }
+        }
         return h.final();
+    }
+
+    /// The path to the first hashed value that differs between two states
+    /// ("candidates[2].skills"), for a round-trip test to name what did not
+    /// survive; null when nothing does.
+    pub fn firstHashDifference(self: *const GameState, other: *const GameState, buf: []u8) ?[]const u8 {
+        inline for (@typeInfo(GameState).@"struct".fields) |f| {
+            const skip = comptime for (unhashed_fields) |name| {
+                if (std.mem.eql(u8, name, f.name)) break true;
+            } else false;
+            if (!skip) {
+                const name_len = @min(f.name.len, buf.len);
+                @memcpy(buf[0..name_len], f.name[0..name_len]);
+                if (digest.firstDifference(buf[name_len..], @field(self, f.name), @field(other, f.name))) |rest| return buf[0 .. name_len + rest.len];
+            }
+        }
+        return null;
     }
 };
 

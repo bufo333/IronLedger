@@ -64,6 +64,7 @@ pub const lobby = @import("persist/lobby.zig");
 pub const commands = @import("sim/commands.zig");
 pub const cli = @import("sim/cli.zig");
 pub const rng = @import("sim/rng.zig");
+pub const digest = @import("sim/digest.zig");
 pub const clock = @import("sim/clock.zig");
 pub const events = @import("sim/events.zig");
 pub const contract_events = @import("sim/contract_events.zig");

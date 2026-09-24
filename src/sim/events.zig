@@ -213,11 +213,12 @@ pub const EventQueue = struct {
         return null;
     }
 
-    /// After a load, resume numbering past everything restored.
+    /// After a load, resume numbering past everything restored and past
+    /// the saved counter (already in `next_id`), whichever is later.
     pub fn resumeIds(self: *EventQueue) void {
         var max: u32 = 0;
         for (self.pending.items) |ev| max = @max(max, @intFromEnum(ev.id));
-        self.next_id = max + 1;
+        self.next_id = @max(self.next_id, max + 1);
     }
 
     /// The oldest pending decision that holds the turn, if any (12G.6).

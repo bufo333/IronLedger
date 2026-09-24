@@ -48,13 +48,6 @@ D19a, D19b-1, D19b-2a and D19b-2b are done (see Done); the typed endpoint is lef
 
 - [ ] Endpoint for untrusted text (decided in review): a type that makes unsafe composition fail to compile (e.g. an `Untrusted` wrapper on stored names, or `MarkupBuilder` as the only way a query composes markup), plus the Part 3 verify-script check. Until then the convention holds: query `text`/`cells`/`lines`/titles are escaped markup, query `name` fields are raw values, and whoever composes a raw name into markup calls `table.plain`.
 
-## D20. Determinism (audit #17, #18; rules 1, 40)
-
-D20a is done (see Done); D20b is left.
-
-
-- [ ] `stateHash` (state.zig:1939-2040) digests every persisted field in canonical order, RNG bytes and `next_*_id` included; one golden constant pinned for a fixed seed and script.
-
 ## D21. Layering and boundaries (audit #19, #22, #23, #27; rules 1, 4, 6, 17, 26)
 
 - [ ] Contract layer diagram lists `sim/rng.zig` as a leaf below domain (it imports only `std`).
@@ -113,7 +106,9 @@ Contract deliverables closed before this list merged, all from the 2026-09-22 co
 - D19b-2b strings trusted by construction, audit #15 (PR #69): `table.markupSafe` and a generic `unsafeString` walker; a test that every data-file string (all catalogues, tuning, name tables) is markup-safe; the loader's `validateStoredStrings` requires every stored chassis, part, planet and faction key to resolve and every battle-report display copy to be markup-safe (`CorruptSave` otherwise); `part.structure_key`/`isKnownKey` name the structure placeholder once; hall candidate names escaped
 - D20a stream identity and ownership, audit #18 (PR #70): `rng.Stream.salt` gives each stream a permanent literal salt (equal to the old ordinal values, so no existing draw changed); `person_gen`, `company_gen.rollExperience*`/`rollWeightClass`, `recruitGenerated` and `planet.weightedPickByFaction` take the caller's stream: hall, market and hiring on `.market`, prisoners and salvage on `.battle`, event recruits on `.events`, the starter company on `.generation`
 - 12G.9 battle orders, PR 1 (PR #71): `Contract.orders_day` (schema v33), `confirm_orders` and `emergency_resupply` commands, `field_supply.rushQuote` and `localPriceMultBp` (the §9.6 valve, now shared with the provisions purchase), `battle.ordersConfirmed`, the `battleOrders` query, the contact warning carrying its contract and clearing once orders are in; REPL `briefing`, `confirm`, `rush`
-- 12G.9 battle orders, PR 2: the terminal box, opened by Enter on the contact warning and by the advance that stops for it; ←/→ step the ROE and lance roles (`Roe.next/prev`, `LanceRole.next/prev`, shared with the cycle commands), Enter buys the resupply, recalls behind a confirm, or confirms; smoke step
+- 12G.9 battle orders, PR 2 (PR #72): the terminal box, opened by Enter on the contact warning and by the advance that stops for it; ←/→ step the ROE and lance roles (`Roe.next/prev`, `LanceRole.next/prev`, shared with the cycle commands), Enter buys the resupply, recalls behind a confirm, or confirms; smoke step
+- Design docs caught up (PR #73): ARCHITECTURE, GAMEPLAY, tui.md and modding.md describe the post-audit behaviour; schema.sql is a commented mirror of the runtime DDL
+- D20b full-state digest, audit #17: `GameState.hash` digests every persisted field through `sim/digest.zig` (elements in order, maps order-independently, RNG words and ID counters included; `unhashed_fields` checked at compile time); `firstHashDifference` names the first value a round trip lost; a played year is pinned to one golden constant and plays on identically after a save. It found two round-trip losses, both fixed: the decision queue's `next_id` (meta `next_event_id`) and a hall candidate's age (schema v34)
 
 ---
 

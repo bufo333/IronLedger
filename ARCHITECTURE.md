@@ -747,7 +747,8 @@ weapons, planets, name tables, salary/price tables) ships as `.zon` files in
 `data/` — versioned separately from saves; saves reference static data by
 stable string keys. Each campaign records its `schema_version`; migrations
 are forward-only. The golden-master hash proves round trips: save → load →
-identical hash, and identical evolution thereafter.
+identical hash, and identical evolution thereafter; a test that differs
+names the first value that did not survive (`firstHashDifference`).
 
 **Loading fails closed.** The loader is the integrity check (SQL foreign
 keys wait for a schema change that rebuilds tables): every stored integer
@@ -782,7 +783,11 @@ bulk-copy MegaMek data files into the repo without deciding on licensing.
   validation returns `CommandError` values (not exceptions) so the UI can
   explain refusals.
 - Testing: every module carries unit tests (`zig build test`); golden-master
-  sim tests: fixed seed + scripted commands → hashed state snapshot. The
+  sim tests: fixed seed + scripted commands → hashed state snapshot.
+  `GameState.hash` digests every persisted field (`sim/digest.zig`: each
+  element in order, each map order-independently, RNG words and ID
+  counters included; the unhashed fields are listed and checked at
+  compile time), and a played year is pinned to one constant. The
   determinism pillar makes regression testing nearly free.
 - Style and every other coding rule: [`docs/coding-contract.md`](docs/coding-contract.md).
 
