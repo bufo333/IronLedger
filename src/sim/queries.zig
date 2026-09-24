@@ -37,12 +37,11 @@ pub fn money(alloc: Alloc, v: types.CBills) ![]const u8 {
     return out.toOwnedSlice(alloc);
 }
 
-/// Pad to `width` terminal cells, counting code points rather than bytes
 const table = @import("table.zig");
 pub const Table = table.Table;
 pub const Col = table.Col;
 
-/// A table from rows that carry their cells beside their ids (12F).
+/// A table from rows that carry their cells beside their ids.
 pub fn tableOf(alloc: Alloc, cols: []const table.Col, rows: anytype) !table.Table {
     const out = try alloc.alloc(table.Row, rows.len);
     for (rows, 0..) |r, i| out[i] = r.cells;
@@ -76,7 +75,7 @@ test "moneyShort rounds to k and M" {
 
 /// Pad plain `text` to `width` cells inside `mk` markup, counting code
 /// points rather than bytes (an em dash is one cell, three bytes) — for
-/// the line lists that are not tables (12F).
+/// the line lists that are not tables.
 pub fn padCells(alloc: Alloc, mk: []const u8, text: []const u8, width: usize) ![]const u8 {
     var out: std.ArrayListUnmanaged(u8) = .empty;
     try out.appendSlice(alloc, mk);
@@ -215,7 +214,7 @@ pub fn status(alloc: Alloc, gs: *GameState) !Status {
 }
 
 /// What the turn is waiting on, named so a client can open it rather
-/// than only print it (12G.5/12G.6). `checklist.turnHold` is the rule;
+/// than only print it. `checklist.turnHold` is the rule;
 /// this carries the id the frontend needs to put the right sheet or
 /// decision on screen, so no screen reads the journal or the queue.
 pub const TurnHold = union(enum) {
@@ -250,7 +249,7 @@ pub const ChecklistRow = struct {
 };
 
 pub const InboxRow = struct {
-    /// The event this row is about (12G.1). A frontend answers with this,
+    /// The event this row is about. A frontend answers with this,
     /// never with the row's position (rule 17).
     event_id: types.EventId,
     kind: []const u8,
@@ -261,12 +260,12 @@ pub const InboxRow = struct {
     options: []const []const u8,
     default_choice: usize,
     /// Extra lines a decision needs to be answerable — the wrecks a
-    /// salvage claim is being divided over (12G.6). Empty for decisions
+    /// salvage claim is being divided over. Empty for decisions
     /// the one-line description already covers.
     detail: []const []const u8 = &.{},
 };
 
-/// What a salvage claim is being divided over (12G.6): the wrecks on
+/// What a salvage claim is being divided over: the wrecks on
 /// offer, then what each plan would actually take. Both the list and the
 /// plans come from `battle.salvagePlan`, the same function the command
 /// materialises with — the screen never works out the haul itself.
@@ -300,7 +299,7 @@ fn salvageDetail(alloc: Alloc, gs: *GameState, ev: *const @import("events.zig").
 }
 
 /// What the night's repairs have to work with and what each order would
-/// do (12G.6). Every line comes from `maintenance.repairPlan` on the live
+/// do. Every line comes from `maintenance.repairPlan` on the live
 /// stores — the function the command carries out with — so the screen
 /// never works out the repairs itself.
 fn repairDetail(alloc: Alloc, gs: *GameState, ev: *const @import("events.zig").Event) ![]const []const u8 {
@@ -422,12 +421,12 @@ pub fn contactWarning(alloc: Alloc, gs: *GameState, id: types.ContractId) ![]con
     return checklist.contactText(alloc, gs, c);
 }
 
-/// Campaign-log rows the Desk asks for (12C): enough to scroll a season
+/// Campaign-log rows the Desk asks for: enough to scroll a season
 /// without walking the whole log every frame.
 pub const desk_log_rows: usize = 40;
 
 pub const Desk = struct {
-    /// The outfit's Dragoons rating in a line (12C.6).
+    /// The outfit's Dragoons rating in a line.
     rating_line: []const u8,
     checklist: []ChecklistRow,
     inbox: []InboxRow,
@@ -686,7 +685,7 @@ pub const Contracts = struct {
 
     active: []ActiveRow,
     notes: []const u8,
-    /// Standing with every house (Stage 12.21), one line each.
+    /// Standing with every house, one line each.
     standings: []const []const u8,
 
     pub fn boardTable(self: Contracts, alloc: Alloc) !table.Table {
@@ -719,7 +718,7 @@ pub fn standings(alloc: Alloc, gs: *GameState) ![]const []const u8 {
 /// Days to an offer's world as `accept` will reckon them: from the nearest
 /// company that could go (not under contract, not in transit), else from
 /// the outfit's seat. An offer carries no transit of its own until it is
-/// accepted (play feedback: the board showed 0 for every offer).
+/// accepted.
 pub fn offerTransitDays(gs: *GameState, offer: *const contract_mod.Contract) u32 {
     const to = planet_mod.find(offer.planet_key) orelse return 0;
     var best: ?u32 = null;
@@ -756,7 +755,7 @@ pub fn opforText(alloc: Alloc, gs: *GameState, c: *const contract_mod.Contract) 
     return try std.fmt.allocPrint(alloc, "{d}–{d} lances of {s}, quality unknown (comms)", .{ li.lo, li.hi, c.enemy_key });
 }
 
-/// The rating for the company best placed to take an offer (12E.5): the
+/// The rating for the company best placed to take an offer: the
 /// readiest eligible one, as `candidates` ranks them. Null when no company
 /// of that board's HQ can go, or the offer predates rolled opposition.
 pub fn bestRating(alloc: Alloc, gs: *GameState, offer_index: usize) !?OfferRating {
@@ -769,7 +768,7 @@ pub fn bestRating(alloc: Alloc, gs: *GameState, offer_index: usize) !?OfferRatin
 }
 
 /// "☠☠☠◐ 3.5 Alpha 610t (L4 M8 H0 A0) vs ~720t" for a board row, coloured
-/// by difficulty (12E.5).
+/// by difficulty.
 pub fn boardSkulls(alloc: Alloc, gs: *GameState, offer_index: usize) ![]const u8 {
     const r = (try bestRating(alloc, gs, offer_index)) orelse return "{d}no company in range{/}";
     return try ratingLine(alloc, gs, r);
@@ -808,7 +807,7 @@ pub fn factionLegend(alloc: Alloc) ![]const u8 {
     return out.toOwnedSlice(alloc);
 }
 
-/// The board's rating cells (12E.5): skulls · rating · company · own
+/// The board's rating cells: skulls · rating · company · own
 /// tons · weight mix · enemy tons, for the readiest company in range.
 fn boardRatingCells(alloc: Alloc, gs: *GameState, offer_index: usize) ![6][]const u8 {
     const r = (try bestRating(alloc, gs, offer_index)) orelse return .{ "{d}—{/}", "{d}—{/}", "{d}no company in range{/}", "", "", "" };
@@ -840,14 +839,14 @@ pub fn opforShort(alloc: Alloc, gs: *GameState, c: *const contract_mod.Contract)
     return try std.fmt.allocPrint(alloc, "{d}–{d} lances, quality unknown", .{ li.lo, li.hi });
 }
 
-/// "3.5 skulls" / "2.5–3.5 skulls".
+/// "610t (L4 M8 H0 A0) vs ~720t": own tons and weight mix against the enemy's.
 pub fn tonnageText(alloc: Alloc, r: OfferRating) ![]const u8 {
     const m = r.own.mix;
     const theirs = if (r.enemy_tons_lo == r.enemy_tons_hi) try std.fmt.allocPrint(alloc, "~{d}t", .{r.enemy_tons_lo}) else try std.fmt.allocPrint(alloc, "~{d}–{d}t", .{ r.enemy_tons_lo, r.enemy_tons_hi });
     return try std.fmt.allocPrint(alloc, "{d}t (L{d} M{d} H{d} A{d}) vs {s}", .{ r.own.tons, m[0], m[1], m[2], m[3], theirs });
 }
 
-/// The contract screen. `board_hq` picks one HQ's board (12E.4; `.none`
+/// The contract screen. `board_hq` picks one HQ's board (`.none`
 /// shows every board).
 pub fn contracts(alloc: Alloc, gs: *GameState, board_hq: types.HqId) !Contracts {
     const day = gs.clock.day_index;
@@ -903,11 +902,11 @@ pub fn contracts(alloc: Alloc, gs: *GameState, board_hq: types.HqId) !Contracts 
         }
         try lines.append(alloc, try std.fmt.allocPrint(alloc, "    rights      {s}", .{c.terms.command_rights.describe()}));
         {
-            // Rules of engagement (12D.4): the company's order, or the employer's.
+            // Rules of engagement: the company's order, or the employer's.
             const roe = @import("battle.zig").effectiveRoe(gs, c, c.assigned_company);
             try lines.append(alloc, try std.fmt.allocPrint(alloc, "    ROE         {s}{s}", .{ roe.describe(), if (c.terms.command_rights.overridesRoe()) " {d}(set by integrated command){/}" else " {d}(Forces o on the company row){/}" }));
         }
-        // Live skulls (12E.5): what the company can field today against the
+        // Live skulls: what the company can field today against the
         // opposition — a mauled company's odds fall as it wears down.
         if (try rateOffer(alloc, gs, c, c.assigned_company)) |rt| {
             try lines.append(alloc, try std.fmt.allocPrint(alloc, "    skulls      {s} · wins {d}% of fights, loses the field {d}%{s}", .{
@@ -977,7 +976,7 @@ pub fn contracts(alloc: Alloc, gs: *GameState, board_hq: types.HqId) !Contracts 
     .standings = try standings(alloc, gs), };
 }
 
-/// How healthy a hull's armour reads (12G.2). The one band rule: every
+/// How healthy a hull's armour reads. The one band rule: every
 /// armour figure on every screen colours through this, so a meter and a
 /// bare percentage can never disagree about what "hurt" means. Bands are
 /// `tuning.unit.armor_amber_pct` / `armor_red_pct`; nothing *decides*
@@ -1203,7 +1202,7 @@ pub const ToeRow = struct {
     is_lance: bool = false,
     /// Hull rows: mothballed (m reactivates instead of mothballing).
     mothballed: bool = false,
-    /// Hull rows (12F): the indent and the cells; `finishToe` pads them to
+    /// Hull rows: the indent and the cells; `finishToe` pads them to
     /// widths shared by every hull row in the tree, so the tree stays a
     /// list while its columns line up.
     prefix: []const u8 = "",
@@ -1266,7 +1265,7 @@ pub const HangarRow = struct {
     cost_index: u64,
     /// Why it earns what it earns, decided once with the contribution.
     why: []const u8,
-    /// The enemy holds this hull (12G.7): it is not in `gs.units`, so the
+    /// The enemy holds this hull: it is not in `gs.units`, so the
     /// row's unit is read from the limbo list instead.
     held: bool = false,
     cells: table.Row,
@@ -1277,12 +1276,7 @@ pub const hangar_cols: []const table.Col = &.{
     .{ .name = "contributes", .justify = .right }, .{ .name = "cost index", .justify = .right }, .{ .name = "company" }, .{ .name = "why" },
 };
 
-/// The hangar as a portfolio (GAMEPLAY "the roster ranks meks by what
-/// they cost against what they contribute"): every owned hull, worst
-/// value first. A mothballed hull bills a fifth and contributes nothing; a
-/// pilotless or wrecked one bills in full for nothing. Hulls the enemy
-/// holds (12G.7) are listed last: a standing claim, not an asset.
-/// What a house asks for one of yours (12D.3; the 12B.7 ransom table).
+/// What a house asks for one of yours (the ransom table).
 pub const missingRansom = contract_events.ransomPrice;
 
 /// Does the outfit hold a prisoner of this house (a trade is possible)?
@@ -1290,7 +1284,7 @@ pub fn holdsPrisonerOf(gs: *GameState, faction: []const u8) bool {
     return gs.holdsPrisonerOf(faction);
 }
 
-/// A wreck's line (12D.2): how it died, what the rebuild costs against a
+/// A wreck's line: how it died, what the rebuild costs against a
 /// new hull, and whether it is worth doing at all.
 pub fn wreckNote(alloc: std.mem.Allocator, gs: *GameState, u: *const @import("../domain/unit.zig").Unit) ![]const u8 {
     const hq_ops = @import("hq_ops.zig");
@@ -1302,6 +1296,11 @@ pub fn wreckNote(alloc: std.mem.Allocator, gs: *GameState, u: *const @import("..
     });
 }
 
+/// The hangar as a portfolio (GAMEPLAY "the roster ranks meks by what
+/// they cost against what they contribute"): every owned hull, worst
+/// value first. A mothballed hull or a wreck bills a fifth and contributes
+/// nothing; a pilotless one bills in full for nothing. Hulls the enemy
+/// holds are listed last: a standing claim, not an asset.
 pub fn hangar(alloc: Alloc, gs: *GameState) ![]HangarRow {
     var out: std.ArrayListUnmanaged(HangarRow) = .empty;
     const day = gs.clock.day_index;
@@ -1346,7 +1345,7 @@ pub fn hangar(alloc: Alloc, gs: *GameState) ![]HangarRow {
         const cost_index: u64 = if (exempt) 0 else if (contribution == 0) std.math.maxInt(u32) else @as(u64, @intCast(bill)) * 100 / contribution;
         try out.append(alloc, .{ .unit = u.id, .bill = bill, .contribution = contribution, .cost_index = cost_index, .why = why, .cells = &.{} });
     }
-    // Hulls the enemy holds (12G.7) are still the company's claim, so the
+    // Hulls the enemy holds are still the company's claim, so the
     // portfolio names them — but they cost nothing and contribute nothing,
     // so they rank nowhere and sit at the bottom.
     for (gs.held_hulls.items) |*h| {
@@ -1427,8 +1426,8 @@ pub fn toeFiltered(alloc: Alloc, gs: *GameState, filter: ToeFilter) ![]ToeRow {
                 .damaged, .repairing, .refitting => "{a}",
                 else => "{c}",
             };
-            // What the depot at the seat will want for it (play feedback: the
-            // pool never said where the hulls were or which base to stock).
+            // What the depot at the seat will want for it, so the pool says
+            // where each hull sits and which base to stock.
             const hq_ops = @import("hq_ops.zig");
             const seat = hq_ops.depotHqFor(gs, u);
             const wants = try hq_ops.depotNeeds(alloc, u);
@@ -1545,8 +1544,8 @@ pub fn companyDamage(alloc: Alloc, gs: *GameState, company: types.ForceId) !Comp
         var gear_damaged: u32 = 0;
         var gear_destroyed: u32 = 0;
         // Structure: what the depot will consume comes from the one rule
-        // (hq_ops.depotNeeds); damaged structure is bay time alone. Play
-        // feedback: the list once went red for parts the depot never used.
+        // (hq_ops.depotNeeds); damaged structure is bay time alone, so the
+        // list never flags a part the depot will not consume.
         const wants = try hq_ops.depotNeeds(alloc, u);
         for (u.slots.items) |s| {
             if (s.condition == .ok) continue;
@@ -1820,7 +1819,7 @@ pub fn stockTable(alloc: Alloc, gs: *GameState, site: types.Site) ![]const []con
 }
 
 /// " — availability D −1, periphery market −2" for a part at a site's home
-/// HQ (12C.14), or nothing when the world and the part are ordinary.
+/// HQ, or nothing when the world and the part are ordinary.
 fn sourcingNote(alloc: Alloc, gs: *GameState, part_key: []const u8, dest: types.Site) ![]const u8 {
     const def = @import("../domain/part.zig").find(part_key) orelse return "";
     const hq_id: types.HqId = switch (dest) {
@@ -2038,8 +2037,7 @@ pub fn hqDetailView(alloc: Alloc, gs: *GameState, id: types.HqId) !HqDetail {
 
 // ------------------------------------------------------------- hiring hall
 
-/// Hiring-hall filter: a role group or one admin desk (Stage 12 request:
-/// "mechanics vs hr and admin_logistics").
+/// Hiring-hall filter: a role group or one admin desk.
 pub const HallFilter = enum {
     all,
     combat, // mekwarriors, vehicle crews, aero pilots
@@ -2199,7 +2197,7 @@ pub const ListingRow = struct {
     cells: table.Row,
     /// The HQ whose board this is — and whose treasury pays.
     hq: types.HqId,
-    /// A contract world's listing (12D.7): this company's local funds pay.
+    /// A contract world's listing: this company's local funds pay.
     company: types.ForceId = .none,
     /// A dropship or jumpship hull: it berths and wants a ship crew.
     transport: bool = false,
@@ -2261,7 +2259,7 @@ pub const Market = struct {
 
 const market_mod = @import("../econ/market.zig");
 
-/// Market filter (Stage 12): hull kinds and part categories.
+/// Market filter: hull kinds and part categories.
 pub const MarketFilter = enum {
     all,
     mechs,
@@ -2327,7 +2325,7 @@ pub fn market(alloc: Alloc, gs: *GameState, filter: MarketFilter, hq: types.HqId
         };
         if (!keep) continue;
         const cond_base: []const u8 = if (l.condition) |c| try std.fmt.allocPrint(alloc, "{{a}}{s}{{/}} armor {s} · {d} dmg · {d} missing", .{ c.label(), try armorPct(alloc, c.armor_pct), c.damaged_slots, c.missing_components }) else if (l.kind == .unit) "{g}new{/}" else "";
-        // A hull this HQ's bay could not rebuild says so (12E.2).
+        // A hull this HQ's bay could not rebuild says so.
         const hq_ops = @import("hq_ops.zig");
         const cond: []const u8 = if (l.kind == .unit and chassis_mod.find(l.item_key) != null and chassis_mod.find(l.item_key).?.kind == .mek and !hq_ops.bayCanRebuild(gs, if (l.hq != .none) l.hq else hq, l.item_key))
             try std.fmt.allocPrint(alloc, "{s} · {{c}}{s}{{/}}", .{ cond_base, hq_ops.rebuildNeed(l.item_key) })
@@ -2336,7 +2334,7 @@ pub fn market(alloc: Alloc, gs: *GameState, filter: MarketFilter, hq: types.HqId
         const name: []const u8 = if (l.kind == .unit) (if (chassis_mod.find(l.item_key)) |c| c.name else l.item_key) else (if (@import("../domain/part.zig").find(l.item_key)) |p| p.name else l.item_key);
         const transport = l.kind == .unit and chassis_mod.find(l.item_key) != null and chassis_mod.find(l.item_key).?.kind.isTransport();
         if (l.company != .none) {
-            // A contract world's hull (12D.7).
+            // A contract world's hull.
             const world: []const u8 = if (gs.deploymentContract(l.company)) |c| planetName(c.planet_key) else "?";
             try board.append(alloc, .{ .index = i, .hq = l.hq, .company = l.company, .transport = transport, .cells = try table.row(alloc, &.{
                 try std.fmt.allocPrint(alloc, "{d}", .{i}),
@@ -2510,7 +2508,7 @@ pub fn raiseCandidates(alloc: Alloc, gs: *GameState, company: types.ForceId, pas
             };
             cond_text = try std.fmt.allocPrint(alloc, "{s}{s}{{/}} armor {s} · {d} dmg {d} dest {d} missing · ≈{s} to fix{s}", .{ mk, c.label(), try armorPct(alloc, c.armor_pct), c.damaged_slots, c.destroyed_slots, c.missing_components, try money(alloc, repair), if (c.missing_components > 0) " (depot)" else "" });
         }
-        // The company's home bay must be able to rebuild what it buys (12E.2).
+        // The company's home bay must be able to rebuild what it buys.
         const need_note: []const u8 = if (@import("hq_ops.zig").bayCanRebuild(gs, home, l.item_key)) "" else try std.fmt.allocPrint(alloc, "  {{c}}{s}{{/}}", .{@import("hq_ops.zig").rebuildNeed(l.item_key)});
         try out.append(alloc, .{ .kind = .listing, .listing = i, .key = .{ .hq = l.hq, .item_key = l.item_key, .listed_day = l.listed_day, .price = l.price }, .cells = try table.row(alloc, &.{ try std.fmt.allocPrint(alloc, "{{a}}{s}{{/}}", .{if (board) |h| h.name else "board"}), try std.fmt.allocPrint(alloc, "#{d}", .{i}), l.item_key, ch.name, try std.fmt.allocPrint(alloc, "{d}t", .{ch.tonnage}), cond_text, try money(alloc, l.price), if (days == 0) "now" else try std.fmt.allocPrint(alloc, "{d} days", .{days}), std.mem.trimStart(u8, need_note, " ") }) });
     }
@@ -2518,7 +2516,7 @@ pub fn raiseCandidates(alloc: Alloc, gs: *GameState, company: types.ForceId, pas
 }
 
 /// The ships holding berths at an HQ: crew, status, and which company
-/// they are away with (Stage 12.15).
+/// they are away with.
 pub fn berths(alloc: Alloc, gs: *GameState, hq_id: types.HqId) ![][]const u8 {
     var out: std.ArrayListUnmanaged([]const u8) = .empty;
     var it = gs.units.iterator();
@@ -2604,7 +2602,7 @@ pub fn assignmentText(alloc: Alloc, gs: *GameState, p: *const person_mod.Person)
     return "{a}unassigned{/}";
 }
 
-// ------------------------------------------------------------------ summary (12C.8)
+// ------------------------------------------------------------------ summary
 
 /// The campaign in aggregate: contracts by grade, battles, kills and
 /// losses, money by category, people and hulls, the rating year by year.
@@ -2750,7 +2748,7 @@ pub fn summary(alloc: Alloc, gs: *GameState) ![]const []const u8 {
     return out.toOwnedSlice(alloc);
 }
 
-// ------------------------------------------------------------------ rating (12C.6)
+// ------------------------------------------------------------------ rating
 
 pub const RatingPart = struct { name: []const u8, score: i32, note: []const u8 };
 
@@ -2805,14 +2803,14 @@ pub fn fatigueMarkup(band: person_mod.FatigueBand) []const u8 {
     };
 }
 
-/// " · loyal: founder, veteran" or nothing (12C.5).
+/// " · loyal: founder, veteran" or nothing.
 fn loyaltyNote(alloc: Alloc, p: *const person_mod.Person, day: u32) ![]const u8 {
     const l = p.loyalty(day);
     if (l.count() == 0) return "";
     return std.fmt.allocPrint(alloc, " · loyal: {s}", .{try l.text(alloc)});
 }
 
-/// What letting this person go would cost today (12C.2); `fired` halves it.
+/// What letting this person go would cost today; `fired` halves it.
 pub fn severanceOwed(gs: *GameState, id: types.PersonId, fired: bool) types.CBills {
     const share: types.Bp = if (fired) @import("../domain/tuning.zig").t.person.fire_severance_bp else types.full_bp;
     return @import("personnel.zig").severanceOwed(gs, id, share);
@@ -2891,7 +2889,7 @@ pub const ReadinessRow = struct {
     deployed: bool,
     heads: u32,
     fatigue: u32,
-    /// Heads in the tired-or-worse bands and in the spent band (12C.1).
+    /// Heads in the tired-or-worse bands and in the spent band.
     tired: u32 = 0,
     spent: u32 = 0,
     morale: u32,
@@ -2914,7 +2912,7 @@ pub const readiness_cols: []const table.Col = &.{
     .{ .name = "rotation" },
 };
 
-/// The per-company readiness report (ARCH §9.7, Stage 12.16): the P&L's
+/// The per-company readiness report (ARCH §9.7): the P&L's
 /// companion — profit now vs. force quality later. Banked XP is what the
 /// crews could spend at a training ground; depot is hulls waiting on a bay.
 pub fn readiness(alloc: Alloc, gs: *GameState) ![]ReadinessRow {
@@ -3410,9 +3408,8 @@ pub const Lab = struct {
 };
 
 /// Every mek hull, wrecks included: a wreck's structural state and its
-/// rebuild path belong in the Lab like any other structure hit (play
-/// feedback: the Lab skipped wrecks silently, so its "hull 1" was a different
-/// mek from the first row on Forces and the two screens disagreed).
+/// rebuild path belong in the Lab like any other structure hit, so the Lab
+/// and Forces count the same hulls.
 pub fn labMeks(alloc: Alloc, gs: *GameState) ![]types.UnitId {
     var out: std.ArrayListUnmanaged(types.UnitId) = .empty;
     var it = gs.units.iterator();
@@ -3535,7 +3532,7 @@ pub fn lab(alloc: Alloc, gs: *GameState, uid: types.UnitId) !Lab {
         const class = meklab.classify(pl.ops.items, u.slots.items);
         try plan.append(alloc, try std.fmt.allocPrint(alloc, "{s} plan · class {{a}}{s}{{/}} · {d} tech-hours", .{ if (pl.committed) "committed" else "staged", @tagName(class), meklab.refitHours(pl.ops.items, u.slots.items, class) }));
         if (pl.committed) {
-            // Where the work stands (12.27): the bay job this plan became.
+            // Where the work stands: the bay job this plan became.
             var job_line: ?[]const u8 = null;
             var ahead: u32 = 0;
             for (gs.bay_jobs.items) |j| {
@@ -3696,7 +3693,7 @@ test "damage marks and the company damage report name the components a hull need
     try std.testing.expect(std.mem.indexOf(u8, marks, "struct lt") != null);
     try std.testing.expect(std.mem.indexOf(u8, marks, "gear 1") != null);
     const report = try companyDamage(a, &gs, co);
-    // The torso for this hull's weight class (12D.8).
+    // The torso for this hull's weight class.
     const torso = @import("../domain/part.zig").componentFor("lt.structure", u.chassis_key);
     const want = try std.fmt.allocPrint(a, "lt→{s}", .{torso});
     var saw_torso = false;
@@ -3843,7 +3840,7 @@ test "people: the unassigned filter lists only people with no seat, posting or c
     try std.testing.expectEqual(HallFilter.all, HallFilter.wounded.next());
 }
 
-test "12C.6: the rating scores six parts and a fresh outfit lands in the low letters" {
+test "the rating scores six parts and a fresh outfit lands in the low letters" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 126 });
     defer gs.deinit();
     const commands = @import("commands.zig");
@@ -3870,7 +3867,7 @@ test "12C.6: the rating scores six parts and a fresh outfit lands in the low let
     try std.testing.expect(std.mem.indexOf(u8, (try desk(a, &gs, 5)).rating_line, "rating") != null);
 }
 
-test "12C.8: the campaign summary reads counters, ledger and history" {
+test "the campaign summary reads counters, ledger and history" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 128 });
     defer gs.deinit();
     const commands = @import("commands.zig");
@@ -3937,7 +3934,7 @@ test "desk and ledger queries build on a fresh campaign" {
     try std.testing.expect(c.board.len > 0);
 }
 
-test "12.16: readiness counts wounded, permanent injuries, banked XP and depot hulls; marks strip for the CLI" {
+test "readiness counts wounded, permanent injuries, banked XP and depot hulls; marks strip for the CLI" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1216 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .paymaster);
@@ -3972,7 +3969,7 @@ test "12.16: readiness counts wounded, permanent injuries, banked XP and depot h
     try std.testing.expectEqualStrings("abc def", try stripMarks(a, "{a}abc{/} {c}def{/}"));
 }
 
-test "12.20: the hangar ranks a pilotless hull above one earning its keep, mothballs cheap but idle" {
+test "the hangar ranks a pilotless hull above one earning its keep, mothballs cheap but idle" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1220 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .paymaster);
@@ -4157,7 +4154,7 @@ test "the contact line an advance stops for is the checklist's contact warning" 
     try std.testing.expectEqualStrings("", try contactWarning(a, &gs, @enumFromInt(1)));
 }
 
-test "12G.6: the inbox shows what each repair order would do, as the techs would do it" {
+test "the inbox shows what each repair order would do, as the techs would do it" {
     const maintenance = @import("maintenance.zig");
     var gs = GameState.init(std.testing.allocator, .{ .seed = 12068 });
     defer gs.deinit();
@@ -4182,7 +4179,7 @@ test "12G.6: the inbox shows what each repair order would do, as the techs would
     }
 }
 
-test "12G.6: the inbox shows the wrecks a salvage claim is being divided over" {
+test "the inbox shows the wrecks a salvage claim is being divided over" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1266 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .line_officer);
@@ -4243,7 +4240,7 @@ test "12G.6: the inbox shows the wrecks a salvage claim is being divided over" {
     try std.testing.expect(std.mem.indexOf(u8, joined, "nothing on the flatbeds") != null);
 }
 
-test "12G.7: the hangar names a hull the enemy holds — a claim, not an asset" {
+test "the hangar names a hull the enemy holds — a claim, not an asset" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 12007 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .paymaster);
@@ -4282,9 +4279,8 @@ test "12G.7: the hangar names a hull the enemy holds — a claim, not an asset" 
     try std.testing.expect(held_row.?.cells.len == hangar_cols.len);
 }
 
-/// Standing orders (play feedback): every decision kind the inbox has
-/// asked about, the last answer, and whether the game now applies that
-/// answer without asking.
+/// Standing orders: every decision kind the inbox has asked about, the
+/// last answer, and whether the game applies that answer without asking.
 pub fn standingOrders(alloc: Alloc, gs: *GameState) ![][]const u8 {
     const after = @import("../domain/tuning.zig").t.contract.standing_order_after;
     var out: std.ArrayListUnmanaged([]const u8) = .empty;
@@ -4307,8 +4303,7 @@ pub fn standingOrders(alloc: Alloc, gs: *GameState) ![][]const u8 {
     return out.toOwnedSlice(alloc);
 }
 
-/// One company weighed against an offer (play feedback: the board never
-/// said who could go, and the one-company shortcut sent whoever was home).
+/// One company weighed against an offer: whether it can go, and why not.
 pub const Candidate = struct {
     company: types.ForceId,
     eligible: bool,
@@ -4346,12 +4341,11 @@ pub fn offerCandidates(alloc: Alloc, gs: *GameState, offer_index: usize) ![]Cand
         var stands: []const u8 = "home";
         var busy = false;
         if (!@import("commands.zig").offerEligible(gs, &offer, r.company)) {
-            // Another HQ's board (12E.4).
+            // Another HQ's board.
             why = try std.fmt.allocPrint(alloc, "based at {s}, not {s}", .{ try hqName(alloc, gs, gs.homeHqFor(r.company)), try hqName(alloc, gs, offer.offer_hq) });
         } else switch (gs.companyPosture(r.company)) {
             // Say so in the stands column, bright, not only in the reason
-            // at the far right (play feedback: a busy company read as a
-            // grey row with no word of the contract it was on).
+            // at the far right, so a busy company names its contract.
             .en_route => |c| {
                 why = "under contract";
                 busy = true;
@@ -4390,7 +4384,7 @@ pub fn offerCandidates(alloc: Alloc, gs: *GameState, offer_index: usize) ![]Cand
         const penalty: i32 = @import("personnel.zig").readinessPenalty(@import("personnel.zig").companyCrewStats(gs, r.company), r.depot, days);
         const fat_mk = fatigueMarkup(person_mod.Person.fatigueBandOf(r.fatigue));
         const mor_mk = moraleMarkup(r.morale);
-        // Skulls (12E.5): what the company can field today against what the
+        // Skulls: what the company can field today against what the
         // intel says the enemy brings to a fight.
         const odds_mk: []const u8 = "";
         const rated = try rateOffer(alloc, gs, &offer, r.company);
@@ -4443,7 +4437,7 @@ pub fn offerCandidates(alloc: Alloc, gs: *GameState, offer_index: usize) ![]Cand
     return out.toOwnedSlice(alloc);
 }
 
-test "play feedback: offer candidates rank the ready company first and name why the others cannot go" {
+test "offer candidates rank the ready company first and name why the others cannot go" {
     const commands = @import("commands.zig");
     var gs = GameState.init(std.testing.allocator, .{ .seed = 71 });
     defer gs.deinit();
@@ -4491,7 +4485,7 @@ test "play feedback: offer candidates rank the ready company first and name why 
     try std.testing.expectEqual(@as(u32, 3), cands[0].transit_days); // same world: three days to muster
 }
 
-// ------------------------------------------------ pickers (12.30, play feedback)
+// ------------------------------------------------ pickers
 // One row shape for every "choose one of these" list the client shows, so
 // the screens look alike: what can be chosen is ranked best first, what
 // cannot is still listed, dimmed, with the reason.
@@ -4823,7 +4817,7 @@ test "pickers: part rows follow the purpose — shipping and selling offer only 
     try std.testing.expectEqual(@as(u32, 0), gs.stockCount(hq, to_order[0].key));
 }
 
-test "play feedback: the board's transit column is real — from the nearest company that could go, never 0" {
+test "the board's transit column is real — from the nearest company that could go, never 0" {
     const commands = @import("commands.zig");
     var gs = GameState.init(std.testing.allocator, .{ .seed = 92 });
     defer gs.deinit();
@@ -4839,7 +4833,7 @@ test "play feedback: the board's transit column is real — from the nearest com
     }
 }
 
-test "play feedback: the DAMAGE pane asks for components only where structure is destroyed or missing" {
+test "the DAMAGE pane asks for components only where structure is destroyed or missing" {
     const commands = @import("commands.zig");
     var gs = GameState.init(std.testing.allocator, .{ .seed = 94 });
     defer gs.deinit();
@@ -4868,7 +4862,7 @@ test "play feedback: the DAMAGE pane asks for components only where structure is
     try std.testing.expect(std.mem.indexOf(u8, text.items, "comp_torso") == null); // damaged: no part asked for
 }
 
-test "play feedback: the unassigned pool says where it sits and what each wreck's rebuild needs from that shelf" {
+test "the unassigned pool says where it sits and what each wreck's rebuild needs from that shelf" {
     const commands = @import("commands.zig");
     var gs = GameState.init(std.testing.allocator, .{ .seed = 97 });
     defer gs.deinit();
@@ -4885,7 +4879,7 @@ test "play feedback: the unassigned pool says where it sits and what each wreck'
     var row_ok = false;
     for (try toeFiltered(al, &gs, .unassigned)) |r| {
         if (std.mem.indexOf(u8, r.text, "Unassigned hulls") != null and std.mem.indexOf(u8, r.text, hq_name) != null) header_ok = true;
-        if (r.unit == wreck and std.mem.indexOf(u8, r.text, "comp_ct_l×1") != null) row_ok = true; // a Locust takes a light assembly (12D.8)
+        if (r.unit == wreck and std.mem.indexOf(u8, r.text, "comp_ct_l×1") != null) row_ok = true; // a Locust takes a light assembly
     }
     try std.testing.expect(header_ok);
     try std.testing.expect(row_ok);
@@ -4896,7 +4890,7 @@ test "play feedback: the unassigned pool says where it sits and what each wreck'
     try std.testing.expect(label_ok);
 }
 
-test "12E.3: skulls — a weaker company rates harder, a heavier one easier; low intel gives a range around the truth" {
+test "skulls: a weaker company rates harder, a heavier one easier; low intel gives a range around the truth" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1231 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .line_officer);
@@ -4972,7 +4966,7 @@ test "clip counts cells and never splits a character" {
     try std.testing.expectEqualStrings("ab", clip("ab", 5));
 }
 
-test "12E.5: skulls on the board, the candidates, the active pane — and an outmatched company is warned" {
+test "skulls on the board, the candidates, the active pane — and an outmatched company is warned" {
     const commands = @import("commands.zig");
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1250 });
     defer gs.deinit();
@@ -5271,7 +5265,7 @@ pub fn medbay(alloc: Alloc, gs: *GameState) ![]const []const u8 {
     return out.toOwnedSlice(alloc);
 }
 
-/// One row per kept engagement (12G.4), newest first: the fight named,
+/// One row per kept engagement, newest first: the fight named,
 /// its verdict coloured, and what it cost.
 pub const BattleRow = struct {
     id: types.BattleId,
@@ -5383,7 +5377,7 @@ pub fn afterAction(alloc: Alloc, gs: *GameState, id: types.BattleId) !?AfterActi
             r.lost_hulls, r.enemy_key,
             if (r.missing > 0) try std.fmt.allocPrint(alloc, " {{c}}· {d} pilot(s) missing{{/}}", .{r.missing}) else "",
         }));
-        // Applied to every active hand since 12C.1, reported since 12G.
+        // Applied to every active hand.
         try fight.append(alloc, try std.fmt.allocPrint(alloc, "morale {s}{s}{d}{{/}} · fatigue {{a}}+{d}{{/}}", .{
             if (r.morale_delta < 0) "{c}" else "{g}", if (r.morale_delta > 0) "+" else "", r.morale_delta, r.fatigue_add,
         }));
@@ -5463,7 +5457,7 @@ pub fn afterAction(alloc: Alloc, gs: *GameState, id: types.BattleId) !?AfterActi
     };
 }
 
-test "12G.4b: the after-action panes read from the record" {
+test "the after-action panes read from the record" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const al = arena.allocator();
@@ -5508,7 +5502,7 @@ test "12G.4b: the after-action panes read from the record" {
     try std.testing.expectEqual(after_action_cols.len, view.field.cols.len);
     for (view.field.rows) |row| try std.testing.expectEqual(after_action_cols.len, row.len);
 
-    // Morale and fatigue reach a screen for the first time (12G).
+    // The fight pane reports morale and fatigue.
     var saw_morale = false;
     for (view.fight) |line| if (std.mem.indexOf(u8, line, "morale") != null and std.mem.indexOf(u8, line, "fatigue") != null) {
         saw_morale = true;
@@ -5543,8 +5537,8 @@ fn wrapPlain(alloc: Alloc, text: []const u8) ![]const []const u8 {
 
 /// One engagement's after-action, as the screens show it: the same lines
 /// the campaign log kept, with the colour a screen wants. The record is
-/// the source; `after_action.render` is still the only place a battle
-/// becomes prose (rule 5).
+/// the source; `after_action.render` is the only place a battle becomes
+/// prose (rule 12).
 pub fn battleReport(alloc: Alloc, gs: *GameState, id: types.BattleId) !?[]const []const u8 {
     const r = gs.battle_reports.find(id) orelse return null;
     const prose = try @import("after_action.zig").render(alloc, r);
@@ -5808,7 +5802,7 @@ pub fn firstPendingDecision(alloc: Alloc, gs: *GameState) !?PendingDecision {
     return asPending(d.inbox[0]);
 }
 
-/// The pending decision with this id (12G.6). A console that answers a
+/// The pending decision with this id. A console that answers a
 /// named decision reads the one it is about to answer, never the first
 /// row of the inbox.
 pub fn pendingDecision(alloc: Alloc, gs: *GameState, id: types.EventId) !?PendingDecision {
@@ -5854,7 +5848,7 @@ pub fn demandLines(alloc: Alloc, gs: *GameState) ![]const []const u8 {
     return out.toOwnedSlice(alloc);
 }
 
-// ---- D11: the reads the terminal client used to take from GameState ----
+// ---- reads the terminal client makes instead of touching GameState ----
 
 /// The HQ's own funds (the Market title and the upgrade note quote it).
 pub fn balance(gs: *GameState, t: state_mod.Treasury) types.CBills {
@@ -6170,7 +6164,7 @@ pub fn worldDetail(alloc: Alloc, gs: *GameState, view: *const Map, w: *const Wor
     return rows.toOwnedSlice(alloc);
 }
 
-test "D11 queries: raise lances, support train and sell quote read one company" {
+test "raise lances, support train and sell quote read one company" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 12 });
     defer gs.deinit();
     const commands = @import("commands.zig");

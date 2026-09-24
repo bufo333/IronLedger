@@ -149,8 +149,6 @@ fn indexOf(keys: []const types.HqId, id: types.HqId) ?usize {
     return null;
 }
 
-/// Reserve tonnage on every link of a route; refused if any link is at
-/// capacity this week (nothing reserved in that case).
 /// Whether `tons` more fits every linked hop of the route this week.
 /// Pure: books nothing.
 pub fn fitsThroughput(gs: *const GameState, route: []const RouteHop, tons: u32) bool {
@@ -171,8 +169,9 @@ pub fn commitThroughput(gs: *GameState, route: []const RouteHop, tons: u32) void
     }
 }
 
-/// Check and book in one step, for callers with nothing to validate in
-/// between.
+/// Check and book in one step: refused if any link is at capacity this
+/// week, and nothing is reserved then. For callers with nothing to
+/// validate in between.
 pub fn reserveThroughput(gs: *GameState, route: []const RouteHop, tons: u32) error{ThroughputExceeded}!void {
     if (!fitsThroughput(gs, route, tons)) return error.ThroughputExceeded;
     commitThroughput(gs, route, tons);

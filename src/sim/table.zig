@@ -92,7 +92,7 @@ pub fn row(alloc: std.mem.Allocator, r: []const []const u8) !Row {
 /// draws them as meters, and both read this. Lives here beside `marks`
 /// for the same reason the tag set does: it is a presentation primitive
 /// the sim and the frontends must agree on, and nothing below `queries`
-/// may import a frontend (rule 2).
+/// may import a frontend (rule 1).
 pub fn bar(buf: []u8, num: i64, den: i64) []const u8 {
     const width = buf.len;
     const filled: usize = if (den <= 0) 0 else @intCast(@min(@as(i64, @intCast(width)), @divTrunc(@max(0, num) * @as(i64, @intCast(width)), den)));

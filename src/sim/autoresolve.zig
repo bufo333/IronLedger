@@ -1,8 +1,8 @@
 //! Battle autoresolution (ARCH §7) — the heart of the "hands-off" design.
-//! Descended from MekHQ's ACAR (abstract combat auto resolution), extended so
+//! Adaptation of MekHQ's ACAR (abstract combat auto resolution), extended so
 //! campaign-level decisions (supply, maintenance, morale, support echelon)
-//! visibly move the odds. Stage 7 implements rounds/damage/salvage; the
-//! element power model starts here.
+//! visibly move the odds. This module holds the element power model;
+//! `battle.zig` resolves the engagement, damage and salvage (Stage 7).
 //!
 //! Design goal: legible outcomes. The AAR must let the player trace a loss
 //! to "C-grade maintenance and two green lances," not to a die roll.
@@ -35,8 +35,8 @@ pub const CampaignMods = struct {
 /// One resolvable element: a lance/flight/platoon aggregated for battle.
 pub const Element = struct {
     force: types.ForceId = .none,
-    /// Sum of BV2-derived base strengths of the element's units (Stage 7:
-    /// from chassis catalog). Placeholder scale: ~1000/mek.
+    /// Sum of the element's units' catalog BV2, after `battle` docks
+    /// silenced weapons.
     base_strength: i64,
     avg_gunnery: u8 = 4,
     avg_piloting: u8 = 5,
@@ -45,7 +45,7 @@ pub const Element = struct {
 
     /// Effective combat power after crew skill and condition. The crew
     /// multiplier follows the 2d6 to-hit curve: each point of gunnery below
-    /// 4 is worth ~20%, above 4 costs ~15%. Tuned in Stage 7.
+    /// 4 is worth 20%, above 4 costs 15% (`tuning.autoresolve`).
     pub fn effectivePower(self: Element, mods: CampaignMods) i64 {
         const t = @import("../domain/tuning.zig").t.autoresolve;
         var bp: types.Bp = types.full_bp;

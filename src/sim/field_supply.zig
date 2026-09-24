@@ -225,7 +225,7 @@ pub fn inboundTons(gs: *GameState, company: types.ForceId) u32 {
     return inboundTonsTo(gs, .{ .company = company });
 }
 
-/// Working weapon mounts per munition family across a company (12.9):
+/// Working weapon mounts per munition family across a company:
 /// `fighting` counts only the line lances' hulls with a tech to reload
 /// them (what a battle can feed); otherwise every hull that is not parked
 /// (what the trucks must carry). The one census the fight, the plan, the
@@ -239,7 +239,7 @@ pub fn munitionMounts(alloc: std.mem.Allocator, gs: *GameState, company: types.F
         if (fighting) {
             const lance = gs.force(u.force) orelse continue;
             if (!lance.isCombatLance()) continue;
-            const t = gs.person(u.tech) orelse continue; // nobody to reload it (Stage 9C.2)
+            const t = gs.person(u.tech) orelse continue; // nobody to reload it
             if (!t.isAvailable(gs.clock.day_index)) continue;
         }
         for (u.slots.items) |s| {

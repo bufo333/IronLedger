@@ -110,11 +110,11 @@ test "2d6 stays in range" {
     }
 }
 
-test "stream salts are distinct and no longer depend on enum order" {
+test "stream salts are distinct and independent of enum order" {
     for (std.enums.values(Stream), 0..) |a, i| {
         for (std.enums.values(Stream)[i + 1 ..]) |b| try std.testing.expect(a.salt() != b.salt());
     }
-    // Pinned: the salts equal the values the ordinal once produced, so
-    // saves and seeds made before them draw the same numbers.
+    // Pinned: a salt is part of every saved seed's meaning, so changing
+    // one would change what existing saves draw.
     try std.testing.expectEqual(@as(u64, 0x1715609F7C746C69), Stream.battle.salt());
 }

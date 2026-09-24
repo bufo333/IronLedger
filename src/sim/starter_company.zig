@@ -17,12 +17,12 @@ const GameState = @import("state.zig").GameState;
 
 /// Generate a full starter company into the campaign:
 ///   - 3 line lances × 4 meks (light/medium RAT rolls) with pilots
-///   - a 4th Recon Lance of light scouts (≤40t, mostly 20–35t)
+///   - a 4th Recon Lance of scouts (≤ `generation.scout_max_tonnage`)
 ///   - an attached "Omega Company" support echelon: salvage, MASH (with
 ///     medics), logistics, and security lances (ARCH §9.3)
 ///   - the support tail (techs/mechanics/astechs/medical/admin) on staff
 /// Starting forces are granted, not purchased — MekHQ's company generator
-/// likewise hands you the TO&E (financing options later).
+/// likewise hands you the TO&E.
 pub fn generateInto(gs: *GameState, name: []const u8) !types.ForceId {
     const company_id = try gs.createForce(name, .company, .none);
     var scratch: [32]*const chassis.Chassis = undefined;
