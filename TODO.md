@@ -43,10 +43,10 @@ Done: every Stage 12 feature (12, 12B–12G) has shipped. Part 2 is next.
 
 ## D19. Terminal safety (audit #15, #16; rule 24)
 
-- [ ] `Screen.text` (screen.zig:151) decodes with a validated view, draws U+FFFD for invalid bytes and `?` for C0/C1 controls; `utf8Encode(...) catch 1` (screen.zig:406) writes a replacement, not an uninitialised byte.
+D19a is done (see Done); D19b is left.
+
+
 - [ ] A plain-text draw path that never interprets markup; names, filenames, mod and log strings go through it (a company named `{r}Alpha` draws literally).
-- [ ] `Screen.resize` (screen.zig:120-126) allocates the new buffer before freeing the old (today: double free on OOM through `deinit`).
-- [ ] `Term.init` (term.zig:108-135): `errdefer tcsetattr(orig)` and handler removal right after entering raw mode.
 
 ## D20. Determinism (audit #17, #18; rules 1, 40)
 
@@ -106,6 +106,7 @@ Contract deliverables closed before this list merged, all from the 2026-09-22 co
 - D17b slots before money, audit #6 (PR #63): HQ founding (`prepareHq`/`commitHq`), fabrication, facility upgrade, unit transfer, refit commit and `resolveChoice` reserve their ledger and list slots (`GameState.reserveLedger`, `ensureUnusedCapacity`) before the first mutation, so no list growth fails after money or stock moves
 - D18a home-HQ training and rest, audit #21 (PR #64): `GameState.homeHqOf` (posting, else company home) and `trainingHqFor` replace the three any-HQ training loops; training days use that HQ's HR; weekly rest uses the home HQ's mess and HR per person
 - D18b recruiting and intel locality, audit #21 (PR #65): `recruitBonus(hq)` and `recruitGenerated(role, hq)` read the recruiting HQ's hiring hall and HR (hall boards, office staffing, company crews at the company's home HQ; the bare `recruit` verb hires at the seat); `offer_rating.intelLevel(gs, hq)` reads one HQ's comms and `intelHq` picks the board that offered the contract, else the company's home HQ
+- D19a renderer safety, audit #15/#16 (PR #66): `table.nextGlyph` is the one decoder for drawing and measuring (invalid or truncated UTF-8 is U+FFFD, C0/C1 controls and DEL are `?`); the encode fallback writes U+FFFD; `Screen.resize` allocates before it frees; `Term.init` restores raw mode, the resize handler and the main screen if it fails part way
 
 ---
 

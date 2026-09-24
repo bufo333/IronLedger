@@ -119,11 +119,25 @@ pub fn cells(s: []const u8) usize {
             i += 3;
             continue;
         }
-        const len = std.unicode.utf8ByteSequenceLength(s[i]) catch 1;
-        i += len;
+        i += nextGlyph(s, i).len;
         n += 1;
     }
     return n;
+}
+
+/// One drawable character of screen text and the bytes it takes.
+pub const Glyph = struct { cp: u21, len: usize };
+
+/// The glyph starting at `s[i]`. Invalid or truncated UTF-8 is U+FFFD, and
+/// C0 and C1 controls and DEL are `?`, so screen text can never carry a
+/// terminal control. The width `cells` measures and the glyphs the screen
+/// draws both come from here.
+pub fn nextGlyph(s: []const u8, i: usize) Glyph {
+    const len = std.unicode.utf8ByteSequenceLength(s[i]) catch return .{ .cp = 0xFFFD, .len = 1 };
+    if (i + len > s.len) return .{ .cp = 0xFFFD, .len = s.len - i };
+    const cp = std.unicode.utf8Decode(s[i..][0..len]) catch return .{ .cp = 0xFFFD, .len = len };
+    const control = cp < 0x20 or cp == 0x7f or (cp >= 0x80 and cp < 0xa0);
+    return .{ .cp = if (control) '?' else cp, .len = len };
 }
 
 /// Markup-safe pad or clip to `width` cells. A clipped cell keeps its
@@ -149,8 +163,8 @@ pub fn pad(alloc: std.mem.Allocator, text: []const u8, width: usize, al: Align) 
             continue;
         }
         if (shown == width) break;
-        const len = std.unicode.utf8ByteSequenceLength(text[i]) catch 1;
-        try out.appendSlice(alloc, text[i..@min(text.len, i + len)]);
+        const len = nextGlyph(text, i).len;
+        try out.appendSlice(alloc, text[i .. i + len]);
         i += len;
         shown += 1;
     }

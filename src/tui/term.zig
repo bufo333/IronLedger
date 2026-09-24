@@ -121,6 +121,9 @@ pub const Term = struct {
         raw.cc[@intFromEnum(posix.V.MIN)] = 0;
         raw.cc[@intFromEnum(posix.V.TIME)] = 0;
         try posix.tcsetattr(fd, .FLUSH, raw);
+        // Until init returns, nothing else restores the terminal: every
+        // step past raw mode undoes itself on failure.
+        errdefer posix.tcsetattr(fd, .FLUSH, orig) catch {};
 
         var act: posix.Sigaction = .{
             .handler = .{ .handler = onWinch },
@@ -128,8 +131,13 @@ pub const Term = struct {
             .flags = 0,
         };
         posix.sigaction(.WINCH, &act, null);
+        errdefer {
+            var default: posix.Sigaction = .{ .handler = .{ .handler = posix.SIG.DFL }, .mask = posix.sigemptyset(), .flags = 0 };
+            posix.sigaction(.WINCH, &default, null);
+        }
 
         // Alternate screen, hide cursor, clear.
+        errdefer out.writeAll("\x1b[?25h\x1b[?1049l") catch {};
         try out.writeAll("\x1b[?1049h\x1b[?25l\x1b[2J\x1b[H");
         try out.flush();
         return .{ .in_fd = fd, .orig = orig, .out = out };

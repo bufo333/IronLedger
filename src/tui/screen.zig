@@ -117,9 +117,12 @@ pub const Screen = struct {
         self.alloc.free(self.cells);
     }
 
+    /// The new buffer is allocated before the old one is freed: on failure
+    /// the screen keeps its old size and buffer.
     pub fn resize(self: *Screen, cols: u16, rows: u16) !void {
+        const fresh = try self.alloc.alloc(Cell, @as(usize, cols) * rows);
         self.alloc.free(self.cells);
-        self.cells = try self.alloc.alloc(Cell, @as(usize, cols) * rows);
+        self.cells = fresh;
         self.cols = cols;
         self.rows = rows;
         self.clear();
@@ -148,26 +151,27 @@ pub const Screen = struct {
         var style = base;
         var col: i32 = x;
         const limit: i32 = x + @as(i32, width);
-        var it = std.unicode.Utf8View.initUnchecked(s).iterator();
-        while (it.nextCodepoint()) |cp| {
-            if (cp == '{') {
-                // markup token: `{a}` … `{/}`
-                const rest = it.bytes[it.i..];
-                if (rest.len >= 2 and rest[1] == '}') {
-                    if (Style.fromMarkup(rest[0])) |st| {
-                        style = if (st == .normal) base else st;
-                        it.i += 2;
-                        continue;
-                    }
+        var i: usize = 0;
+        while (i < s.len) {
+            // markup token: `{a}` … `{/}`
+            if (s[i] == '{' and i + 2 < s.len and s[i + 2] == '}') {
+                if (Style.fromMarkup(s[i + 1])) |st| {
+                    style = if (st == .normal) base else st;
+                    i += 3;
+                    continue;
                 }
             }
+            const g = table_mod.nextGlyph(s, i);
+            i += g.len;
             if (col >= limit) break;
-            // Skulls (12E.5) fall back to letters under --ascii.
-            const glyph: u21 = if (self.ascii) switch (cp) {
+            // Skulls fall back to letters under --ascii, and a replaced
+            // byte to a question mark.
+            const glyph: u21 = if (self.ascii) switch (g.cp) {
                 '☠' => 'X',
                 '◐' => 'x',
-                else => cp,
-            } else cp;
+                0xFFFD => '?',
+                else => g.cp,
+            } else g.cp;
             self.put(col, y, glyph, style);
             col += 1;
         }
@@ -407,7 +411,7 @@ pub const Screen = struct {
                     cur = c.style;
                 }
                 var buf: [4]u8 = undefined;
-                const n = std.unicode.utf8Encode(c.ch, &buf) catch 1;
+                const n = std.unicode.utf8Encode(c.ch, &buf) catch std.unicode.utf8Encode(0xFFFD, &buf) catch unreachable;
                 try out.writeAll(buf[0..n]);
             }
         }
@@ -576,6 +580,40 @@ test "table drops a droppable column instead of scrolling to it" {
     try std.testing.expectEqual(@as(usize, 0), v.hidden_left + v.hidden_right);
     try std.testing.expectEqual(@as(u21, 'G'), s.get(6, 1).ch);
     try std.testing.expectEqual(@as(u21, '1'), s.get(15, 1).ch);
+}
+
+test "invalid UTF-8 draws a replacement character instead of crashing" {
+    var s = try Screen.init(std.testing.allocator, 10, 1);
+    defer s.deinit();
+    _ = s.text(0, 0, 10, "a\xffb", .normal);
+    try std.testing.expectEqual(@as(u21, 'a'), s.get(0, 0).ch);
+    try std.testing.expectEqual(@as(u21, 0xFFFD), s.get(1, 0).ch);
+    try std.testing.expectEqual(@as(u21, 'b'), s.get(2, 0).ch);
+    // A sequence cut off at the end of the string is one replacement too.
+    _ = s.text(0, 0, 10, "ab\xe2\x82", .normal);
+    try std.testing.expectEqual(@as(u21, 0xFFFD), s.get(2, 0).ch);
+}
+
+test "control characters draw as a question mark, never reach the terminal" {
+    var s = try Screen.init(std.testing.allocator, 10, 1);
+    defer s.deinit();
+    _ = s.text(0, 0, 10, "a\x1b[31mb\x7f\xc2\x9b", .normal);
+    try std.testing.expectEqual(@as(u21, '?'), s.get(1, 0).ch); // ESC
+    try std.testing.expectEqual(@as(u21, '['), s.get(2, 0).ch);
+    try std.testing.expectEqual(@as(u21, '?'), s.get(7, 0).ch); // DEL
+    try std.testing.expectEqual(@as(u21, '?'), s.get(8, 0).ch); // C1 CSI
+    // The width the tables measure is the width the screen draws.
+    try std.testing.expectEqual(@as(usize, 9), table_mod.cells("a\x1b[31mb\x7f\xc2\x9b"));
+}
+
+test "a resize that cannot allocate keeps the old buffer" {
+    var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = 1 });
+    var s = try Screen.init(failing.allocator(), 10, 3);
+    defer s.deinit();
+    try std.testing.expectError(error.OutOfMemory, s.resize(20, 5));
+    try std.testing.expectEqual(@as(u16, 10), s.cols);
+    s.put(9, 2, 'x', .normal);
+    try std.testing.expectEqual(@as(u21, 'x'), s.get(9, 2).ch);
 }
 
 test "every markup tag has a style" {
