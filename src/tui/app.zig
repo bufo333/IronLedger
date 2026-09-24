@@ -141,7 +141,7 @@ const ConfirmSpec = struct {
     cmd: Command,
     done: []const u8,
     /// A second verb (s: strip instead of sell), if the dialog has one.
-    alt: ?struct { key: u8, cmd: Command, done: []const u8 } = null,
+    alt: ?struct { cmd: Command, done: []const u8 } = null,
 };
 
 /// One number the amount form asks for.
@@ -642,14 +642,14 @@ pub const App = struct {
             const mk: []const u8 = if (p.id == self.player_id) "{a}" else "";
             try prow.append(al, try std.fmt.allocPrint(al, "{s}{s}{{/}}  {d} campaign{s}", .{ mk, try q.plain(al, p.name), p.campaigns, if (p.campaigns == 1) "" else "s" }));
         }
-        if (players.len == 0) try prow.append(al, "{d}no players yet — [p] creates one{/}");
+        if (players.len == 0) try prow.append(al, try std.fmt.allocPrint(al, "{{d}}no players yet — {s}{{/}}", .{try keyHint(WelcomeAction, al, &welcome_bindings, .new_player, "creates one")}));
         self.listPane(.{ .x = b.x, .y = b.y, .w = pw, .h = top_h }, "PLAYERS", prow.items, 0, self.focus == 0, true);
 
         var crow: std.ArrayListUnmanaged([]const u8) = .empty;
         for (campaigns) |c| {
             try crow.append(al, try std.fmt.allocPrint(al, "{{a}}{s}{{/}}  ·  {s}  ·  day {d} ({s})  ·  save #{d}", .{ try q.plain(al, c.name), try q.plain(al, c.commander), c.day, c.date, c.save_seq }));
         }
-        if (campaigns.len == 0) try crow.append(al, "{d}no campaigns for this player — [n] starts one{/}");
+        if (campaigns.len == 0) try crow.append(al, try std.fmt.allocPrint(al, "{{d}}no campaigns for this player — {s}{{/}}", .{try keyHint(WelcomeAction, al, &welcome_bindings, .new_campaign, "starts one")}));
         const cw: u16 = b.w - pw - 1;
         self.listPane(.{ .x = b.x + pw + 1, .y = b.y, .w = cw, .h = top_h }, "CAMPAIGNS", crow.items, 1, self.focus == 1, true);
 
@@ -661,13 +661,13 @@ pub const App = struct {
                 try snap.append(al, try std.fmt.allocPrint(al, "{{a}}{s}{{/}} — commander {s}", .{ try q.plain(al, c.name), try q.plain(al, c.commander) }));
                 try snap.append(al, try std.fmt.allocPrint(al, "saved at day {d} · {s} · registry id {d}", .{ c.day, c.date, c.id }));
                 try snap.append(al, "");
-                try snap.append(al, "{d}[Enter] continue this campaign{/}");
+                try snap.append(al, try std.fmt.allocPrint(al, "{{d}}{s}{{/}}", .{try keyHint(WelcomeAction, al, &welcome_bindings, .open, "continue this campaign")}));
             } else {
-                try snap.append(al, "{d}select a campaign, or press [n] to start a new one{/}");
+                try snap.append(al, try std.fmt.allocPrint(al, "{{d}}select a campaign, or {s}{{/}}", .{try keyHint(WelcomeAction, al, &welcome_bindings, .new_campaign, "starts a new one")}));
             }
             self.listPane(.{ .x = b.x, .y = b.y + top_h, .w = b.w, .h = b.h - top_h }, "SNAPSHOT", snap.items, 2, false, false);
         }
-        self.footer("[Enter] continue  [n] new campaign  [d] delete campaign  [p] new player  [D] delete player  [s] settings  [M] music on/off  [q] quit");
+        self.footer(try keys.footer(al, &.{&welcome_legend}));
     }
 
     fn drawWizard(self: *App) !void {
@@ -728,7 +728,7 @@ pub const App = struct {
         try info.append(al, "");
         try info.append(al, "{d}the faction, profession and start year are permanent; names can change later{/}");
         _ = self.listPane(.{ .x = lw + 1, .y = b.y, .w = b.w - lw - 1, .h = b.h }, "WHAT THIS MEANS", info.items, 1, false, false);
-        self.footer("[Tab] next field  [j/k] choose  [Enter] next step  [Esc] back to welcome");
+        self.footer(try keys.footer(al, &.{&commander_legend}));
     }
 
     fn drawWizardOutfit(self: *App) !void {
@@ -738,7 +738,7 @@ pub const App = struct {
         try rows.append(al, try std.fmt.allocPrint(al, "outfit name      {s}{s}{s}{{/}}", .{ if (self.w_field == 0) "{s}" else "", self.w_outfit.slice(), if (self.w_field == 0) "_" else "" }));
         try rows.append(al, try std.fmt.allocPrint(al, "first company    {s}{s}{s}{{/}}", .{ if (self.w_field == 1) "{s}" else "", self.w_company.slice(), if (self.w_field == 1) "_" else "" }));
         try rows.append(al, "");
-        try rows.append(al, try std.fmt.allocPrint(al, "emblem source    {s}[h] presets{{/}}   {s}[l] import a picture{{/}}", .{ if (self.w_src == 0) (if (self.w_field == 2) "{s}" else "{a}") else "{d}", if (self.w_src == 1) (if (self.w_field == 2) "{s}" else "{a}") else "{d}" }));
+        try rows.append(al, try std.fmt.allocPrint(al, "emblem source    {s}{s}{{/}}   {s}{s}{{/}}", .{ if (self.w_src == 0) (if (self.w_field == 2) "{s}" else "{a}") else "{d}", try keyHint(OutfitAction, al, &outfit_bindings, .source_prev, "presets"), if (self.w_src == 1) (if (self.w_field == 2) "{s}" else "{a}") else "{d}", try keyHint(OutfitAction, al, &outfit_bindings, .source_next, "import a picture") }));
         try rows.append(al, "");
         if (self.w_src == 1) {
             try rows.append(al, try std.fmt.allocPrint(al, "PNG files in {s}", .{try std.mem.join(al, ", ", self.asset_roots.logos)}));
@@ -756,7 +756,7 @@ pub const App = struct {
             if (self.w_preview) |*e| {
                 try rows.append(al, try std.fmt.allocPrint(al, "loaded           {d} × {d} px · {d} KB", .{ e.img.width, e.img.height, e.bytes.len / 1024 }));
             } else if (self.logos.len > 0) {
-                try rows.append(al, "{d}[j/k] pick a file · it previews on the right and is stored with the campaign{/}");
+                try rows.append(al, try std.fmt.allocPrint(al, "{{d}}{s} · it previews on the right and is stored with the campaign{{/}}", .{try keyHint(OutfitAction, al, &outfit_bindings, .down, "pick a file")}));
             }
         }
         for (0..3) |r| {
@@ -780,7 +780,7 @@ pub const App = struct {
                 try names.appendSlice(al, "{/}");
             }
             try rows.append(al, try names.toOwnedSlice(al));
-            try rows.append(al, "  {d}[j/k] choose a preset{/}");
+            try rows.append(al, try std.fmt.allocPrint(al, "  {{d}}{s}{{/}}", .{try keyHint(OutfitAction, al, &outfit_bindings, .down, "choose a preset")}));
         }
         const lw: u16 = if (layout.wide(b.w)) layout.half.of(b.w) else b.w;
         _ = self.listPane(.{ .x = 0, .y = b.y, .w = lw, .h = b.h }, "OUTFIT", rows.items, 0, true, false);
@@ -791,7 +791,7 @@ pub const App = struct {
                 self.screen.lines(inner, &hint, 0, null);
             }
         }
-        self.footer("[Tab] next field  [h/l] source  [j/k] choose  [Enter] next step  [Esc] back");
+        self.footer(try keys.footer(al, &.{&outfit_legend}));
     }
 
     fn drawWizardCompany(self: *App) !void {
@@ -828,7 +828,7 @@ pub const App = struct {
                 try office.append(al, "");
                 try office.append(al, try std.fmt.allocPrint(al, "staff {d} / {d} required · payroll {s}/mo · treasury {{a}}{s}{{/}} C", .{ if (hqs.len > 0) hqs[0].staff_assigned else 0, if (hqs.len > 0) hqs[0].staff_required else 0, st.payroll, st.funds }));
                 try office.append(al, "{d}under-hiring is allowed: facilities run a level lower and paperwork slows{/}");
-                try office.append(al, "{d}[Tab] focus · [j/k] role · [-] fewer · [+] more{/}");
+                try office.append(al, try std.fmt.allocPrint(al, "{{d}}{s} · {s} · {s}{{/}}", .{ try keyHint(CompanyAction, al, &company_bindings, .switch_pane, "focus"), try keyHint(CompanyAction, al, &company_bindings, .down, "role"), try keyHint(CompanyAction, al, &company_bindings, .more, "fewer / more") }));
                 const office_rect: Rect = if (wide) .{ .x = lw + 1, .y = b.y, .w = b.w - lw - 1, .h = oh } else .{ .x = 0, .y = b.y + toe_h, .w = b.w, .h = oh };
                 self.listPane(office_rect, "BACK OFFICE", office.items, 1, self.w_field == 1, false);
                 if (wide and b.h > oh + 3) {
@@ -837,7 +837,7 @@ pub const App = struct {
                 }
             }
         }
-        self.footer("[r] reroll (new seed)  [Tab] company / back office  [-/+] adjust headcount  [Enter] next step  [Esc] back");
+        self.footer(try keys.footer(al, &.{&company_legend}));
     }
 
     fn drawWizardReview(self: *App) !void {
@@ -873,7 +873,7 @@ pub const App = struct {
             try rows.append(al, try std.fmt.allocPrint(al, "treasury      outfit {{a}}{s}{{/}} C", .{st.funds}));
             try rows.append(al, try std.fmt.allocPrint(al, "first board   {d} offers within the ring on day 1", .{st.offers}));
             try rows.append(al, "");
-            try rows.append(al, "{s} [Enter] begin campaign {/}   {d}saves under the current player and opens the Desk on day 0{/}");
+            try rows.append(al, try std.fmt.allocPrint(al, "{{s}} {s} {{/}}   {{d}}saves under the current player and opens the Desk on day 0{{/}}", .{try keyHint(ReviewAction, al, &review_bindings, .begin, "begin campaign")}));
         }
         const rw: u16 = if (has_picture and layout.wide(b.w)) layout.two_thirds.of(b.w) else b.w;
         _ = self.listPane(.{ .x = 0, .y = b.y, .w = rw, .h = b.h }, "REVIEW", rows.items, 0, true, false);
@@ -881,7 +881,7 @@ pub const App = struct {
             const inner = self.screen.pane(.{ .x = rw, .y = b.y, .w = b.w - rw, .h = b.h }, .{ .title = "EMBLEM" });
             _ = self.drawEmblem(inner);
         }
-        self.footer("[Enter] begin campaign  [1-3] back to a step  [Esc] discard");
+        self.footer(try keys.footer(al, &.{&review_legend}));
     }
 
     // ---- game ----
@@ -1232,7 +1232,7 @@ pub const App = struct {
         const fight = self.screen.pane(.{ .x = b.x, .y = b.y, .w = left_w, .h = b.h }, .{ .title = "THE FIGHT" });
         self.screen.lines(fight, view.fight, 0, null);
 
-        const field = self.screen.pane(.{ .x = b.x + left_w, .y = b.y, .w = right_w, .h = field_h }, .{ .title = "THE FIELD", .right_title = "[←/→] columns" });
+        const field = self.screen.pane(.{ .x = b.x + left_w, .y = b.y, .w = right_w, .h = field_h }, .{ .title = "THE FIELD", .right_title = try keyHint(AfterActionAction, al, &after_action_bindings, .scroll_left, "columns") });
         try self.tableOrNote(field, view.field, 2, true, "{d}not a scratch{/}");
 
         const rest_h: u16 = b.h - field_h;
@@ -1266,8 +1266,8 @@ pub const App = struct {
                     try rows.append(al, try std.fmt.allocPrint(al, "  {s} {s}   {{d}}→ [{d}] {s}{{/}}", .{ if (w.blocking) "{c}!{/}" else "{a}·{/}", w.text, i + 1, tab_names[w.jump] }));
                 }
                 try rows.append(al, "");
-                try rows.append(al, "  {s} [n] end the turn anyway {/}    {d}[N] end 7 turns · [Esc] back{/}");
-                self.dialog("END TURN? · [y] a day · [N] a week · [Esc] not yet", rows.items, layout.modal.end_turn_w, @intCast(@min(rows.items.len + 3, layout.modal.end_turn_max_h)));
+                try rows.append(al, try std.fmt.allocPrint(al, "  {{s}} {s} {{/}}    {{d}}{s} · {s}{{/}}", .{ try keyHint(EndTurnAction, al, &end_turn_bindings, .day, "end the turn anyway"), try keyHint(EndTurnAction, al, &end_turn_bindings, .week, "end 7 turns"), try keyHint(EndTurnAction, al, &end_turn_bindings, .cancel, "back") }));
+                self.dialog(try std.fmt.allocPrint(al, "END TURN? · {s} · {s} · {s}", .{ try keyHint(EndTurnAction, al, &end_turn_bindings, .day, "a day"), try keyHint(EndTurnAction, al, &end_turn_bindings, .week, "a week"), try keyHint(EndTurnAction, al, &end_turn_bindings, .cancel, "not yet") }), rows.items, layout.modal.end_turn_w, @intCast(@min(rows.items.len + 3, layout.modal.end_turn_max_h)));
             },
             .quit => {
                 const g = &self.gs.?;
@@ -1276,9 +1276,9 @@ pub const App = struct {
                 const st = try q.status(al, g);
                 try rows.append(al, try std.fmt.allocPrint(al, "  campaign {{a}}{s}{{/}} · day {d}{s}", .{ try q.plain(al, st.outfit_name), st.day, if (!st.saved) " · {c}never saved{/}" else "" }));
                 try rows.append(al, "");
-                try rows.append(al, "  {s} [s] save and return {/}");
-                try rows.append(al, "    [r] return without saving");
-                try rows.append(al, "    [Esc] stay in the campaign");
+                try rows.append(al, try std.fmt.allocPrint(al, "  {{s}} {s} {{/}}", .{try keyHint(QuitAction, al, &quit_bindings, .save, "save and return")}));
+                try rows.append(al, try std.fmt.allocPrint(al, "    {s}", .{try keyHint(QuitAction, al, &quit_bindings, .discard, "return without saving")}));
+                try rows.append(al, try std.fmt.allocPrint(al, "    {s}", .{try keyHint(QuitAction, al, &quit_bindings, .stay, "stay in the campaign")}));
                 self.dialog("RETURN TO WELCOME?", rows.items, layout.modal.quit_w, layout.modal.quit_h);
             },
             .amount => |form| {
@@ -1289,7 +1289,7 @@ pub const App = struct {
                     try rows.append(al, try std.fmt.allocPrint(al, "  {s} {s: <18} {s}{d}{s}{{/}}", .{ if (on) "{a}▶{/}" else " ", f.label, if (on) "{a}" else "", f.value, if (on) "_" else "" }));
                 }
                 try rows.append(al, "");
-                try rows.append(al, "  {d}digits type · +/- step · Tab next · Enter runs · Esc cancels{/}");
+                try rows.append(al, try std.fmt.allocPrint(al, "  {{d}}{s}{{/}}", .{try keys.title(al, "", &amount_legend)}));
                 const r = self.modalRect(layout.modal.amount_w, @intCast(@min(rows.items.len + 2, self.screen.rows)));
                 const inner = self.screen.pane(r, .{ .title = form.title(), .double = true });
                 self.screen.lines(inner, rows.items, 0, null);
@@ -1303,7 +1303,7 @@ pub const App = struct {
                 var rows: std.ArrayListUnmanaged([]const u8) = .empty;
                 for (form.rows, 0..) |row, i| try rows.append(al, if (i == self.modal_cursor and row.active) try std.fmt.allocPrint(al, "{{a}}▶{{/}}{s}", .{row.text[1..]}) else row.text);
                 const r = self.modalRect(layout.modal.settings_w, @intCast(@min(rows.items.len + 2, self.screen.rows)));
-                const inner = self.screen.pane(r, .{ .title = try std.fmt.allocPrint(al, "{s} · j/k row · ← → change · [Enter] act · [Esc] later", .{form.title}), .double = true });
+                const inner = self.screen.pane(r, .{ .title = try formTitle(al, form.title, "later"), .double = true });
                 self.screen.lines(inner, rows.items, 0, self.modal_cursor);
             },
             .settings => {
@@ -1312,7 +1312,7 @@ pub const App = struct {
                 var rows: std.ArrayListUnmanaged([]const u8) = .empty;
                 for (form.rows, 0..) |row, i| try rows.append(al, if (i == self.settings_cursor and row.active) try std.fmt.allocPrint(al, "{{a}}▶{{/}}{s}", .{row.text[1..]}) else row.text);
                 const r = self.modalRect(layout.modal.settings_w, @intCast(@min(rows.items.len + 2, self.screen.rows)));
-                const inner = self.screen.pane(r, .{ .title = "SETTINGS · j/k row · ← → change · [Enter] act · [Esc] close", .double = true });
+                const inner = self.screen.pane(r, .{ .title = try formTitle(al, "SETTINGS", "close"), .double = true });
                 self.screen.lines(inner, rows.items, 0, if (form.selectable > 0) self.settings_cursor else null);
             },
             .game_over => {
@@ -1324,7 +1324,7 @@ pub const App = struct {
                     "",
                     "  The campaign is saved as it ended; delete it from the welcome screen, or keep it as a record.",
                     "",
-                    "  {s} [Enter] return to the welcome screen {/}",
+                    try std.fmt.allocPrint(al, "  {{s}} {s} {{/}}", .{try keyHint(GameOverAction, al, &game_over_bindings, .leave, "return to the welcome screen")}),
                 };
                 self.dialog("BANKRUPT — GAME OVER", &rows, layout.modal.game_over_w, layout.modal.game_over_h);
             },
@@ -1351,7 +1351,7 @@ pub const App = struct {
                 try rows.append(al, "");
                 try rows.append(al, "  type a character to paint the cell and step right · arrows move · Space blanks");
                 try rows.append(al, "  Backspace steps back and blanks · u undoes everything since the editor opened");
-                try rows.append(al, "  {d}[Enter] save as the outfit's crest · [Esc] cancel{/}");
+                try rows.append(al, try std.fmt.allocPrint(al, "  {{d}}{s}{{/}}", .{try keys.title(al, "", &editor_legend)}));
                 const r = self.modalRect(layout.modal.emblem_editor_w, @intCast(rows.items.len + 2));
                 const inner = self.screen.pane(r, .{ .title = "EMBLEM EDITOR · cells", .double = true, .right_title = "left: editing · right: as shown" });
                 self.screen.lines(inner, rows.items, 0, null);
@@ -1371,7 +1371,7 @@ pub const App = struct {
                     "",
                     try std.fmt.allocPrint(al, "  > {{s}}{s}_{{/}}", .{self.input.slice()}),
                     "",
-                    "  {d}[Enter] confirm · [Esc] cancel{/}",
+                    try std.fmt.allocPrint(al, "  {{d}}{s}{{/}}", .{try keys.title(al, "", &input_legend)}),
                 };
                 const r = self.modalRect(layout.modal.input_w, layout.modal.input_h);
                 const inner = self.screen.pane(r, .{ .title = switch (kind) {
@@ -1419,54 +1419,72 @@ pub const App = struct {
         c.* = @intCast(@max(0, @min(@as(i32, @intCast(len - 1)), v)));
     }
 
+    // ---- welcome and wizard keys ----
+
+    const WelcomeAction = enum { switch_pane, down, up, open, new_campaign, new_player, delete_campaign, delete_player, settings, music, help, quit };
+    pub const welcome_bindings = [_]keys.Binding(WelcomeAction){
+        .{ .match = .{ .key = .tab }, .action = .switch_pane, .label = "players / campaigns", .group = .navigate, .show_footer = false },
+        .{ .match = .{ .key = .backtab }, .action = .switch_pane, .label = "players / campaigns", .group = .navigate, .show_footer = false, .show_help = false },
+        .{ .match = keys.Match.char('j'), .action = .down, .label = "choose", .group = .navigate, .shown = "j/k", .show_footer = false },
+        .{ .match = .{ .key = .down }, .action = .down, .label = "down", .group = .navigate, .show_footer = false, .show_help = false },
+        .{ .match = keys.Match.char('k'), .action = .up, .label = "up", .group = .navigate, .show_footer = false, .show_help = false },
+        .{ .match = .{ .key = .up }, .action = .up, .label = "up", .group = .navigate, .show_footer = false, .show_help = false },
+        .{ .match = .{ .key = .enter }, .action = .open, .label = "campaigns", .group = .navigate, .pane = 0 },
+        .{ .match = .{ .key = .enter }, .action = .open, .label = "continue", .group = .act, .pane = 1 },
+        .{ .match = keys.Match.char('n'), .action = .new_campaign, .label = "new campaign", .group = .act },
+        .{ .match = keys.Match.char('d'), .action = .delete_campaign, .label = "delete campaign", .group = .act },
+        .{ .match = keys.Match.char('p'), .action = .new_player, .label = "new player", .group = .act },
+        .{ .match = keys.Match.char('D'), .action = .delete_player, .label = "delete player", .group = .act },
+        .{ .match = keys.Match.char('s'), .action = .settings, .label = "settings", .group = .misc },
+        .{ .match = keys.Match.char('M'), .action = .music, .label = "music on/off", .group = .misc },
+        .{ .match = keys.Match.char('?'), .action = .help, .label = "help", .group = .misc, .show_footer = false },
+        .{ .match = keys.Match.char('q'), .action = .quit, .label = "quit", .group = .misc },
+    };
+    pub const welcome_legend = keys.entries(WelcomeAction, &welcome_bindings);
+
     fn handleWelcomeKey(self: *App, key: Key) !void {
         const al = self.a();
         const players = try self.store.players(al);
         const campaigns = try self.store.campaigns(al, self.player_id);
-        switch (key) {
-            .tab, .backtab => self.focus = if (self.focus == 0) 1 else 0,
+        const hit = keys.lookup(WelcomeAction, &welcome_bindings, self.focus, key) orelse return;
+        switch (hit.action) {
+            .switch_pane => self.focus = if (self.focus == 0) 1 else 0,
             .down => self.welcomeMove(1, players, campaigns),
             .up => self.welcomeMove(-1, players, campaigns),
-            .enter => {
+            .open => {
                 if (self.focus == 0) {
                     self.focus = 1;
                 } else if (campaigns.len > 0) {
                     try self.loadCampaign(campaigns[self.cur(1).*].id);
                 }
             },
-            .char => |ch| switch (ch) {
-                'j' => self.welcomeMove(1, players, campaigns),
-                'k' => self.welcomeMove(-1, players, campaigns),
-                'q' => self.running = false,
-                'n' => {
-                    if (self.player_id == 0) {
-                        self.say(.amber, "create a player first ([p])", .{});
-                    } else {
-                        self.mode = .wizard;
-                        self.step = .commander;
-                        self.w_field = 0;
-                    }
-                },
-                'p' => {
-                    self.input.len = 0;
-                    self.modal = .{ .input = .new_player };
-                },
-                'd' => {
-                    if (campaigns.len == 0) return;
-                    self.input.len = 0;
-                    self.modal = .{ .input = .delete_campaign };
-                },
-                'D' => {
-                    if (self.player_id == 0) return;
-                    self.input.len = 0;
-                    self.modal = .{ .input = .delete_player };
-                },
-                's' => self.modal = .settings,
-                'M' => try self.toggleMusic(),
-                '?' => self.modal = .help,
-                else => {},
+            .quit => self.running = false,
+            .new_campaign => {
+                if (self.player_id == 0) {
+                    self.say(.amber, "create a player first", .{});
+                } else {
+                    self.mode = .wizard;
+                    self.step = .commander;
+                    self.w_field = 0;
+                }
             },
-            else => {},
+            .new_player => {
+                self.input.len = 0;
+                self.modal = .{ .input = .new_player };
+            },
+            .delete_campaign => {
+                if (campaigns.len == 0) return;
+                self.input.len = 0;
+                self.modal = .{ .input = .delete_campaign };
+            },
+            .delete_player => {
+                if (self.player_id == 0) return;
+                self.input.len = 0;
+                self.modal = .{ .input = .delete_player };
+            },
+            .settings => self.modal = .settings,
+            .music => try self.toggleMusic(),
+            .help => self.modal = .help,
         }
     }
 
@@ -1518,104 +1536,140 @@ pub const App = struct {
         self.say(.good, "loaded \"{s}\" at day {d}", .{ try q.plain(self.a(), st.outfit_name), st.day });
     }
 
+    /// The wizard's steps: the field index is the focus, so a text field
+    /// takes every character while it has it.
+    const CommanderAction = enum { back, next_field, prev_field, next, erase, down, up, type };
+    pub const commander_bindings = [_]keys.Binding(CommanderAction){
+        .{ .match = .{ .key = .tab }, .action = .next_field, .label = "next field", .group = .navigate },
+        .{ .match = .{ .key = .backtab }, .action = .prev_field, .label = "previous field", .group = .navigate, .show_footer = false, .show_help = false },
+        .{ .match = keys.Match.char('j'), .action = .down, .label = "choose", .group = .navigate, .shown = "j/k" },
+        .{ .match = .{ .key = .down }, .action = .down, .label = "down", .group = .navigate, .show_footer = false, .show_help = false },
+        .{ .match = keys.Match.char('k'), .action = .up, .label = "up", .group = .navigate, .show_footer = false, .show_help = false },
+        .{ .match = .{ .key = .up }, .action = .up, .label = "up", .group = .navigate, .show_footer = false, .show_help = false },
+        .{ .match = .text, .action = .type, .label = "type the name", .group = .act, .pane = 0, .show_footer = false },
+        .{ .match = .{ .key = .backspace }, .action = .erase, .label = "erase", .group = .act, .pane = 0, .show_footer = false },
+        .{ .match = .{ .key = .enter }, .action = .next, .label = "next step", .group = .act },
+        .{ .match = .{ .key = .escape }, .action = .back, .label = "back to welcome", .group = .misc },
+    };
+    const OutfitAction = enum { back, next_field, prev_field, next, erase, source_prev, source_next, down, up, type };
+    pub const outfit_bindings = [_]keys.Binding(OutfitAction){
+        .{ .match = .{ .key = .tab }, .action = .next_field, .label = "next field", .group = .navigate },
+        .{ .match = .{ .key = .backtab }, .action = .prev_field, .label = "previous field", .group = .navigate, .show_footer = false, .show_help = false },
+        .{ .match = keys.Match.char('h'), .action = .source_prev, .label = "presets", .group = .navigate },
+        .{ .match = .{ .key = .left }, .action = .source_prev, .label = "presets", .group = .navigate, .show_footer = false, .show_help = false },
+        .{ .match = keys.Match.char('l'), .action = .source_next, .label = "import a picture", .group = .navigate },
+        .{ .match = .{ .key = .right }, .action = .source_next, .label = "import", .group = .navigate, .show_footer = false, .show_help = false },
+        .{ .match = keys.Match.char('j'), .action = .down, .label = "choose", .group = .navigate, .shown = "j/k" },
+        .{ .match = .{ .key = .down }, .action = .down, .label = "down", .group = .navigate, .show_footer = false, .show_help = false },
+        .{ .match = keys.Match.char('k'), .action = .up, .label = "up", .group = .navigate, .show_footer = false, .show_help = false },
+        .{ .match = .{ .key = .up }, .action = .up, .label = "up", .group = .navigate, .show_footer = false, .show_help = false },
+        .{ .match = .text, .action = .type, .label = "type the outfit's name", .group = .act, .pane = 0, .show_footer = false },
+        .{ .match = .text, .action = .type, .label = "type the company's name", .group = .act, .pane = 1, .show_footer = false },
+        .{ .match = .{ .key = .backspace }, .action = .erase, .label = "erase", .group = .act, .pane = 0, .show_footer = false },
+        .{ .match = .{ .key = .backspace }, .action = .erase, .label = "erase", .group = .act, .pane = 1, .show_footer = false, .show_help = false },
+        .{ .match = .{ .key = .enter }, .action = .next, .label = "next step", .group = .act },
+        .{ .match = .{ .key = .escape }, .action = .back, .label = "back", .group = .misc },
+    };
+    const CompanyAction = enum { back, next, switch_pane, down, up, reroll, more, less };
+    pub const company_bindings = [_]keys.Binding(CompanyAction){
+        .{ .match = keys.Match.char('r'), .action = .reroll, .label = "reroll (new seed)", .group = .act },
+        .{ .match = .{ .key = .tab }, .action = .switch_pane, .label = "company / back office", .group = .navigate },
+        .{ .match = .{ .key = .backtab }, .action = .switch_pane, .label = "company / back office", .group = .navigate, .show_footer = false, .show_help = false },
+        .{ .match = keys.Match.char('j'), .action = .down, .label = "row", .group = .navigate, .shown = "j/k", .show_footer = false },
+        .{ .match = .{ .key = .down }, .action = .down, .label = "down", .group = .navigate, .show_footer = false, .show_help = false },
+        .{ .match = keys.Match.char('k'), .action = .up, .label = "up", .group = .navigate, .show_footer = false, .show_help = false },
+        .{ .match = .{ .key = .up }, .action = .up, .label = "up", .group = .navigate, .show_footer = false, .show_help = false },
+        .{ .match = keys.Match.char('+'), .action = .more, .label = "adjust headcount", .group = .act, .shown = "-/+" },
+        .{ .match = keys.Match.char('='), .action = .more, .label = "more", .group = .act, .show_footer = false, .show_help = false },
+        .{ .match = keys.Match.char('-'), .action = .less, .label = "fewer", .group = .act, .show_footer = false, .show_help = false },
+        .{ .match = .{ .key = .enter }, .action = .next, .label = "next step", .group = .act },
+        .{ .match = .{ .key = .escape }, .action = .back, .label = "back", .group = .misc },
+    };
+    const ReviewAction = enum { begin, step, discard };
+    pub const review_bindings = [_]keys.Binding(ReviewAction){
+        .{ .match = .{ .key = .enter }, .action = .begin, .label = "begin campaign", .group = .act },
+        .{ .match = .{ .chars = .{ '1', '3' } }, .action = .step, .label = "back to a step", .group = .navigate },
+        .{ .match = .{ .key = .escape }, .action = .discard, .label = "discard", .group = .misc },
+    };
+    const commander_legend = keys.entries(CommanderAction, &commander_bindings);
+    const outfit_legend = keys.entries(OutfitAction, &outfit_bindings);
+    const company_legend = keys.entries(CompanyAction, &company_bindings);
+    const review_legend = keys.entries(ReviewAction, &review_bindings);
+
     fn handleWizardKey(self: *App, key: Key) !void {
         switch (self.step) {
-            .commander => switch (key) {
-                .escape => self.mode = .welcome,
-                .tab => self.w_field = (self.w_field + 1) % 4,
-                .backtab => self.w_field = (self.w_field + 3) % 4,
-                .enter => {
-                    if (self.w_name.len == 0) {
-                        self.say(.amber, "the commander needs a name", .{});
-                        return;
-                    }
-                    self.step = .outfit;
-                    self.w_field = 0;
-                },
-                .backspace => if (self.w_field == 0) self.w_name.pop(),
-                .down => self.wizardList(1),
-                .up => self.wizardList(-1),
-                .char => |ch| {
-                    if (self.w_field == 0) {
-                        self.w_name.push(ch);
-                    } else switch (ch) {
-                        'j' => self.wizardList(1),
-                        'k' => self.wizardList(-1),
-                        else => {},
-                    }
-                },
-                else => {},
-            },
-            .outfit => switch (key) {
-                .escape => {
-                    self.step = .commander;
-                    self.w_field = 0;
-                },
-                .tab => self.w_field = (self.w_field + 1) % 3,
-                .backtab => self.w_field = (self.w_field + 2) % 3,
-                .enter => {
-                    if (self.w_outfit.len == 0 or self.w_company.len == 0) {
-                        self.say(.amber, "the outfit and its first company need names", .{});
-                        return;
-                    }
-                    try self.generateCampaign();
-                    self.step = .company;
-                },
-                .backspace => switch (self.w_field) {
-                    0 => self.w_outfit.pop(),
-                    1 => self.w_company.pop(),
-                    else => {},
-                },
-                .left => try self.setEmblemSource(0),
-                .right => try self.setEmblemSource(1),
-                .down => try self.emblemMove(1),
-                .up => try self.emblemMove(-1),
-                .char => |ch| switch (self.w_field) {
-                    0 => self.w_outfit.push(ch),
-                    1 => self.w_company.push(ch),
-                    else => switch (ch) {
-                        'h' => try self.setEmblemSource(0),
-                        'l' => try self.setEmblemSource(1),
-                        'j' => try self.emblemMove(1),
-                        'k' => try self.emblemMove(-1),
-                        else => {},
+            .commander => {
+                const hit = keys.lookup(CommanderAction, &commander_bindings, self.w_field, key) orelse return;
+                switch (hit.action) {
+                    .back => self.mode = .welcome,
+                    .next_field => self.w_field = (self.w_field + 1) % 4,
+                    .prev_field => self.w_field = (self.w_field + 3) % 4,
+                    .next => {
+                        if (self.w_name.len == 0) {
+                            self.say(.amber, "the commander needs a name", .{});
+                            return;
+                        }
+                        self.step = .outfit;
+                        self.w_field = 0;
                     },
-                },
-                else => {},
+                    .erase => self.w_name.pop(),
+                    .down => self.wizardList(1),
+                    .up => self.wizardList(-1),
+                    .type => self.w_name.push(key.char),
+                }
             },
-            .company => switch (key) {
-                .escape => self.step = .outfit,
-                .enter => self.step = .review,
-                .tab, .backtab => self.w_field = if (self.w_field == 0) 1 else 0,
-                .down => self.companyMove(1),
-                .up => self.companyMove(-1),
-                .char => |ch| switch (ch) {
-                    'r' => {
+            .outfit => {
+                const hit = keys.lookup(OutfitAction, &outfit_bindings, self.w_field, key) orelse return;
+                switch (hit.action) {
+                    .back => {
+                        self.step = .commander;
+                        self.w_field = 0;
+                    },
+                    .next_field => self.w_field = (self.w_field + 1) % 3,
+                    .prev_field => self.w_field = (self.w_field + 2) % 3,
+                    .next => {
+                        if (self.w_outfit.len == 0 or self.w_company.len == 0) {
+                            self.say(.amber, "the outfit and its first company need names", .{});
+                            return;
+                        }
+                        try self.generateCampaign();
+                        self.step = .company;
+                    },
+                    .erase => if (self.w_field == 0) self.w_outfit.pop() else self.w_company.pop(),
+                    .source_prev => try self.setEmblemSource(0),
+                    .source_next => try self.setEmblemSource(1),
+                    .down => try self.emblemMove(1),
+                    .up => try self.emblemMove(-1),
+                    .type => if (self.w_field == 0) self.w_outfit.push(key.char) else self.w_company.push(key.char),
+                }
+            },
+            .company => {
+                const hit = keys.lookup(CompanyAction, &company_bindings, self.w_field, key) orelse return;
+                switch (hit.action) {
+                    .back => self.step = .outfit,
+                    .next => self.step = .review,
+                    .switch_pane => self.w_field = if (self.w_field == 0) 1 else 0,
+                    .down => self.companyMove(1),
+                    .up => self.companyMove(-1),
+                    .reroll => {
                         self.w_seed += 1;
                         try self.generateCampaign();
                     },
-                    'j' => self.companyMove(1),
-                    'k' => self.companyMove(-1),
-                    '+', '=' => try self.officeAdjust(1),
-                    '-' => try self.officeAdjust(-1),
-                    else => {},
-                },
-                else => {},
+                    .more => try self.officeAdjust(1),
+                    .less => try self.officeAdjust(-1),
+                }
             },
-            .review => switch (key) {
-                .escape => {
-                    if (self.gs) |*g| game.lobby.discard(g);
-                    self.gs = null;
-                    self.mode = .welcome;
-                },
-                .enter => try self.beginCampaign(),
-                .char => |ch| switch (ch) {
-                    '1' => self.step = .commander,
-                    '2' => self.step = .outfit,
-                    '3' => self.step = .company,
-                    else => {},
-                },
-                else => {},
+            .review => {
+                const hit = keys.lookup(ReviewAction, &review_bindings, 0, key) orelse return;
+                switch (hit.action) {
+                    .discard => {
+                        if (self.gs) |*g| game.lobby.discard(g);
+                        self.gs = null;
+                        self.mode = .welcome;
+                    },
+                    .begin => try self.beginCampaign(),
+                    .step => self.step = @enumFromInt(hit.offset),
+                }
             },
         }
     }
@@ -1808,9 +1862,43 @@ pub const App = struct {
                 try out.print(al, "| `{s}` | {s} | {s} |\n", .{ keys.keyText(&buf, e), pane, e.help orelse e.label });
             };
         }
+        for (other_tables) |t| {
+            try out.print(al, "\n### {s}\n\n| Key | Does |\n|---|---|\n", .{t.name});
+            for (t.legend) |e| if (e.show_help) {
+                var buf: [16]u8 = undefined;
+                try out.print(al, "| `{s}` | {s} |\n", .{ keys.keyText(&buf, e), e.help orelse e.label });
+            };
+        }
         try out.appendSlice(al, "\n" ++ keys_end);
         return out.toOwnedSlice(al);
     }
+
+    /// The tables outside the game screens, as the key reference lists them.
+    const other_tables = [_]struct { name: []const u8, legend: []const keys.Entry }{
+        .{ .name = "Welcome", .legend = &welcome_legend },
+        .{ .name = "New campaign · commander", .legend = &commander_legend },
+        .{ .name = "New campaign · outfit and emblem", .legend = &outfit_legend },
+        .{ .name = "New campaign · company and back office", .legend = &company_legend },
+        .{ .name = "New campaign · review", .legend = &review_legend },
+        .{ .name = "Lists (pick a company, a part, a seat, …)", .legend = &list_legend },
+        .{ .name = "Sheets (hull, record, help, summary, …)", .legend = &sheet_legend },
+        .{ .name = "Raise a company · hulls", .legend = &raise_hulls_legend },
+        .{ .name = "Raise a company · support train", .legend = &raise_support_legend },
+        .{ .name = "Raise a company · crews", .legend = &raise_crews_legend },
+        .{ .name = "Soundtrack", .legend = &music_legend },
+        .{ .name = "Decision", .legend = &decision_legend },
+        .{ .name = "Contract log", .legend = &log_legend },
+        .{ .name = "After-action report", .legend = &after_action_legend },
+        .{ .name = "Emblem editor", .legend = &editor_legend },
+        .{ .name = "Number form", .legend = &amount_legend },
+        .{ .name = "Battle orders and settings", .legend = &form_legend },
+        .{ .name = "Settings shortcuts", .legend = &settings_legend },
+        .{ .name = "End turn", .legend = &end_turn_legend },
+        .{ .name = "Leave the campaign", .legend = &quit_legend },
+        .{ .name = "Game over", .legend = &game_over_legend },
+        .{ .name = "Confirm (fire, sell, disband, recall)", .legend = &confirm_legend },
+        .{ .name = "Text prompts and the command line", .legend = &input_legend },
+    };
 
     pub const keys_begin = "<!-- keys: generated from the binding tables by `game --keys-markdown`; a test compares this block -->";
     pub const keys_end = "<!-- /keys -->";
@@ -1937,11 +2025,11 @@ pub const App = struct {
         for (v.lances) |l| try rows.append(al, .{ .kind = .lance, .force = l.force, .active = true, .text = try std.fmt.allocPrint(al, "  lance  {s}  {{d}}{s}{{/}}", .{ l.text, l.role.describe() }) });
         try rows.append(al, .{ .kind = .info, .text = "" });
         try rows.append(al, .{ .kind = .rush, .active = v.rush.len > 0, .text = if (v.rush.len > 0)
-            try std.fmt.allocPrint(al, "  emergency resupply  {s}  {{d}}[Enter] buy{{/}}", .{v.rush})
+            try std.fmt.allocPrint(al, "  emergency resupply  {s}  {{d}}{s}{{/}}", .{ v.rush, try keyHint(FormAction, al, &form_bindings, .act, "buy") })
         else
             "  emergency resupply  {d}the stores cover the next fight{/}" });
-        try rows.append(al, .{ .kind = .recall, .active = true, .text = "  recall the company  {c}breaches the contract{/}  {d}[Enter] asks first{/}" });
-        try rows.append(al, .{ .kind = .confirm, .active = true, .text = if (v.confirmed) "  {g}orders given{/}  {d}[Enter] or [Esc] close{/}" else "  {g}confirm these orders{/}  {d}[Enter] — the contact warning clears{/}" });
+        try rows.append(al, .{ .kind = .recall, .active = true, .text = try std.fmt.allocPrint(al, "  recall the company  {{c}}breaches the contract{{/}}  {{d}}{s}{{/}}", .{try keyHint(FormAction, al, &form_bindings, .act, "asks first")}) });
+        try rows.append(al, .{ .kind = .confirm, .active = true, .text = if (v.confirmed) try std.fmt.allocPrint(al, "  {{g}}orders given{{/}}  {{d}}{s} · {s}{{/}}", .{ try keyHint(FormAction, al, &form_bindings, .act, "close"), try keyHint(FormAction, al, &form_bindings, .close, "close") }) else try std.fmt.allocPrint(al, "  {{g}}confirm these orders{{/}}  {{d}}{s} — the contact warning clears{{/}}", .{try keyHint(FormAction, al, &form_bindings, .act, "confirm")}) });
         return .{ .title = v.title, .rows = try rows.toOwnedSlice(al), .company = v.company };
     }
 
@@ -2020,7 +2108,7 @@ pub const App = struct {
             try rows.append(al, .{ .key = .music, .active = true, .text = try std.fmt.allocPrint(al, "  music        {s}", .{if (m.enabled) "{g}on{/}" else "{c}off{/}"}) });
             try rows.append(al, .{ .key = .volume, .active = true, .text = try std.fmt.allocPrint(al, "  volume       {d: >3}      {{d}}restarts the track{{/}}", .{m.volume}) });
             try rows.append(al, .{ .key = .track, .active = true, .text = try std.fmt.allocPrint(al, "  track        {s}{s}", .{ m.nowPlaying() orelse "—", if (m.nowPlayingSet()) |set| try std.fmt.allocPrint(al, "  {{d}}({s}){{/}}", .{set}) else "" }) });
-            try rows.append(al, .{ .key = .soundtrack, .active = true, .text = try std.fmt.allocPrint(al, "  soundtrack   {{a}}{s}{{/}}      {{d}}[Enter] browse soundtracks and tracks (also :music){{/}}", .{m.setName(m.selected_set)}) });
+            try rows.append(al, .{ .key = .soundtrack, .active = true, .text = try std.fmt.allocPrint(al, "  soundtrack   {{a}}{s}{{/}}      {{d}}{s} (also :music){{/}}", .{ try keyHint(FormAction, al, &form_bindings, .act, "browse soundtracks and tracks"), m.setName(m.selected_set) }) });
             try info.add(&rows, al, try std.fmt.allocPrint(al, "  {{d}}tracks       {d} in {d} soundtrack{s} under {s} · player: {s}{{/}}", .{ m.tracks.len, m.sets.len, if (m.sets.len == 1) "" else "s", m.root, m.player_cmd orelse "{c}none found{/}" }));
             selectable += 4;
         } else {
@@ -2032,7 +2120,7 @@ pub const App = struct {
             try rows.append(al, .{ .key = .auto_admit, .active = true, .text = try std.fmt.allocPrint(al, "  medbay       auto-admit the wounded {s}      {{d}}off: you admit each casualty (m on People) and the turn waits{{/}}", .{if (cfg.auto_admit) "{g}on{/}" else "{c}off{/}"}) });
             try rows.append(al, .{ .key = .difficulty, .active = true, .text = try std.fmt.allocPrint(al, "  difficulty   {{a}}{s}{{/}} — {s}", .{ cfg.difficulty_name, cfg.difficulty_blurb }) });
             try info.add(&rows, al, try std.fmt.allocPrint(al, "  {{d}}             {s}{{/}}", .{cfg.multipliers}));
-            try rows.append(al, .{ .key = .shares, .active = true, .text = try std.fmt.allocPrint(al, "  shares       {{a}}{d}%{{/}} of contract income to shareholders at completion      {{d}}← → ±5 · [Enter] type a figure · founders, veterans and officers hold shares{{/}}", .{cfg.shares_pct}) });
+            try rows.append(al, .{ .key = .shares, .active = true, .text = try std.fmt.allocPrint(al, "  shares       {{a}}{d}%{{/}} of contract income to shareholders at completion      {{d}}{s} · {s} · founders, veterans and officers hold shares{{/}}", .{ cfg.shares_pct, try keyHint(FormAction, al, &form_bindings, .less, "±5"), try keyHint(FormAction, al, &form_bindings, .act, "type a figure") }) });
             try info.add(&rows, al, "");
             selectable += 3;
         }
@@ -2183,11 +2271,11 @@ pub const App = struct {
         const g = &self.gs.?;
         return switch (self.modal) {
             .pick_company => |pc| .{
-                .title = try std.fmt.allocPrint(al, "SEND {s} TO · [Enter] choose · [Esc] cancel", .{switch (pc.what) {
+                .title = try listTitle(al, try std.fmt.allocPrint(al, "SEND {s} TO", .{switch (pc.what) {
                     .unit => try std.fmt.allocPrint(al, "#{d}", .{pc.id}),
                     .person => try q.personName(al, g, @enumFromInt(pc.id)),
                     .stock => pc.key_buf[0..pc.key_len],
-                }}),
+                }}), "choose", "cancel", false),
                 .cols = q.company_pick_cols,
                 .rows = try q.companyChoices(al, g, switch (pc.what) {
                     .unit => .unit,
@@ -2197,31 +2285,31 @@ pub const App = struct {
                 .empty = "no company to send to — raise one (Forces +)",
             },
             .pick_hq => |pid| .{
-                .title = try std.fmt.allocPrint(al, "POST {s} AT · [Enter] choose · [Esc] cancel", .{try q.personName(al, g, pid)}),
+                .title = try listTitle(al, try std.fmt.allocPrint(al, "POST {s} AT", .{try q.personName(al, g, pid)}), "choose", "cancel", false),
                 .cols = q.hq_pick_cols,
                 .rows = try q.hqChoices(al, g, pid),
                 .empty = "no HQ",
             },
             .pick_crew => |uid| .{
-                .title = try std.fmt.allocPrint(al, "CREW #{d} · [Enter] assign · [Esc] cancel", .{@intFromEnum(uid)}),
+                .title = try listTitle(al, try std.fmt.allocPrint(al, "CREW #{d}", .{@intFromEnum(uid)}), "assign", "cancel", false),
                 .cols = q.crew_pick_cols,
                 .rows = try q.crewChoices(al, g, uid),
                 .empty = "nobody of the right role on the books — hire from a hall (HQ screen)",
             },
             .pick_unassign => |uid| .{
-                .title = try std.fmt.allocPrint(al, "UNASSIGN FROM #{d} · [Enter] clear · [Esc] cancel", .{@intFromEnum(uid)}),
+                .title = try listTitle(al, try std.fmt.allocPrint(al, "UNASSIGN FROM #{d}", .{@intFromEnum(uid)}), "clear", "cancel", false),
                 .cols = q.unassign_pick_cols,
                 .rows = try q.unassignChoices(al, g, uid),
                 .empty = "nobody is assigned to this hull",
             },
             .pick_part => |pp| .{
-                .title = try std.fmt.allocPrint(al, "{s} · [Enter] pick, then the quantity · [Esc] cancel", .{switch (pp.purpose) {
+                .title = try listTitle(al, switch (pp.purpose) {
                     .order => "ORDER WHICH PART",
                     .ship => "SHIP WHICH PART",
                     .keep => "KEEP WHICH PART STOCKED",
                     .sell => "SELL WHICH PART",
                     .fabricate => "FABRICATE WHICH COMPONENT",
-                }}),
+                }, "pick, then the quantity", "cancel", false),
                 .cols = q.part_pick_cols,
                 .rows = try q.partChoices(al, g, pp.purpose, pp.site),
                 .empty = switch (pp.purpose) {
@@ -2414,13 +2502,13 @@ pub const App = struct {
                 const id: types.PersonId = @enumFromInt(c.id);
                 const name = try q.personName(al, g, id);
                 return .{
-                    .title = "FIRE? · [y] fire · [Esc] keep",
+                    .title = try confirmTitle(al, "FIRE?", "fire", null, "keep"),
                     .rows = try al.dupe([]const u8, &.{
                         "",
                         try std.fmt.allocPrint(al, "  Fire {{c}}{s}{{/}}? They leave the outfit today; their seat opens.", .{name}),
                         try std.fmt.allocPrint(al, "  Severance owed: {{a}}{d}{{/}} c-bills (half of a month per year served).", .{q.severanceOwed(g, id, true)}),
                         "",
-                        "  {s} [y] fire {/}   {d}[Esc] keep{/}",
+                        try confirmButtons(al, "fire", null, "keep"),
                     }),
                     .w = layout.modal.confirm_w,
                     .h = 8,
@@ -2433,33 +2521,33 @@ pub const App = struct {
                 // Strip for parts: what the warehouse would get.
                 const quote = try q.sellQuote(al, g, uid);
                 return .{
-                    .title = "SELL OR STRIP HULL? · [y] sell · [s] strip · [Esc] keep",
+                    .title = try confirmTitle(al, "SELL OR STRIP HULL?", "sell", "strip", "keep"),
                     .rows = try al.dupe([]const u8, &.{
                         "",
                         if (quote) |qq| try std.fmt.allocPrint(al, "  Sell {{a}}#{d} {s}{{/}} for {{g}}{s}{{/}} C? Half value scaled by condition; the crew goes to the pool.", .{ c.id, qq.chassis_key, try q.money(al, qq.value) }) else "  no such hull",
                         try std.fmt.allocPrint(al, "  Or strip it for parts into the home warehouse: {{a}}{s}{{/}}", .{if (quote) |qq| qq.strip_text else "nothing worth keeping"}),
                         "",
-                        "  {s} [y] sell {/}   {s} [s] strip {/}   {d}[Esc] keep{/}",
+                        try confirmButtons(al, "sell", "strip", "keep"),
                     }),
                     .w = layout.modal.confirm_wide_w,
                     .h = 8,
                     .cmd = .{ .sell_unit = uid },
                     .done = try std.fmt.allocPrint(al, "hull #{d} sold", .{c.id}),
-                    .alt = .{ .key = 's', .cmd = .{ .strip_unit = uid }, .done = try std.fmt.allocPrint(al, "hull #{d} stripped for parts — the Supply screen shows the crates", .{c.id}) },
+                    .alt = .{ .cmd = .{ .strip_unit = uid }, .done = try std.fmt.allocPrint(al, "hull #{d} stripped for parts — the Supply screen shows the crates", .{c.id}) },
                 };
             },
             .sell_hq => {
                 const hid: types.HqId = @enumFromInt(c.id);
                 const quote = q.hqSaleQuote(g, hid);
                 return .{
-                    .title = "SELL HQ? · [y] sell · [Esc] keep",
+                    .title = try confirmTitle(al, "SELL HQ?", "sell", null, "keep"),
                     .rows = try al.dupe([]const u8, &.{
                         "",
                         if (quote) |qq| try std.fmt.allocPrint(al, "  Sell off {{a}}{s}{{/}} for {{g}}{s}{{/}} C (40% of build cost + its treasury)?", .{ try q.plain(al, qq.name), try q.money(al, qq.value) }) else "  no such HQ",
                         "  Staff posted there become unassigned; its stock, board, bay work and links are lost.",
                         "  Companies must be assigned elsewhere first (:assignco co:N hq:M).",
                         "",
-                        "  {s} [y] sell {/}   {d}[Esc] keep{/}",
+                        try confirmButtons(al, "sell", null, "keep"),
                     }),
                     .w = layout.modal.confirm_w,
                     .h = 9,
@@ -2470,13 +2558,13 @@ pub const App = struct {
             .disband => {
                 const fid: types.ForceId = @enumFromInt(c.id);
                 return .{
-                    .title = "DISBAND COMPANY? · [y] disband · [Esc] keep",
+                    .title = try confirmTitle(al, "DISBAND COMPANY?", "disband", null, "keep"),
                     .rows = try al.dupe([]const u8, &.{
                         "",
                         try std.fmt.allocPrint(al, "  Disband {{a}}{s}{{/}}? Every hull under it sells for about {{g}}{s}{{/}} C and everyone in it is released.", .{ try q.forceName(self.a(), g, fid), try q.money(al, q.disbandQuote(g, fid)) }),
                         "  This cannot be undone.",
                         "",
-                        "  {s} [y] disband {/}   {d}[Esc] keep{/}",
+                        try confirmButtons(al, "disband", null, "keep"),
                     }),
                     .w = layout.modal.confirm_w,
                     .h = 8,
@@ -2487,12 +2575,12 @@ pub const App = struct {
             .recall_breach => {
                 const co: types.ForceId = @enumFromInt(c.id);
                 return .{
-                    .title = "RECALL UNDER CONTRACT? · [y] recall · [Esc] keep",
+                    .title = try confirmTitle(al, "RECALL UNDER CONTRACT?", "recall", null, "keep"),
                     .rows = try al.dupe([]const u8, &.{
                         "",
                         try std.fmt.allocPrint(al, "  Recall {{a}}{s}{{/}} from its contract? That is a breach: the employer keeps the balance and standing falls.", .{try q.forceName(self.a(), g, co)}),
                         "",
-                        "  {s} [y] recall {/}   {d}[Esc] keep{/}",
+                        try confirmButtons(al, "recall", null, "keep"),
                     }),
                     .w = layout.modal.confirm_w,
                     .h = 7,
@@ -2571,7 +2659,7 @@ pub const App = struct {
                 try rows.appendSlice(al, &concepts);
                 try rows.append(al, try std.fmt.allocPrint(al, "               factions {s}", .{try q.factionLegend(al)}));
                 try rows.append(al, "");
-                try rows.append(al, "  {d}[Esc] close{/}");
+                try rows.append(al, try std.fmt.allocPrint(al, "  {{d}}{s}{{/}}", .{try keyHint(SheetAction, al, &sheet_bindings, .close, "close")}));
                 return .{ .title = "HELP", .rows = rows.items, .read_only = true, .w = layout.modal.help_w, .max_h = layout.modal.help_h };
             },
             .decision => |idx| {
@@ -2596,10 +2684,10 @@ pub const App = struct {
                         try rows.append(al, try std.fmt.allocPrint(al, "    [{d}] {s}{s}", .{ oi + 1, o, if (oi == it.default_choice) "   {d}default{/}" else "" }));
                     }
                     try rows.append(al, "");
-                    try rows.append(al, "  {d}press the option number · [Esc] decide later{/}");
+                    try rows.append(al, try std.fmt.allocPrint(al, "  {{d}}{s} · {s}{{/}}", .{ try keyHint(DecisionAction, al, &decision_bindings, .choose, "choose that option"), try keyHint(SheetAction, al, &sheet_bindings, .close, "decide later") }));
                 }
                 if (!found) try rows.append(al, "  {d}this decision has been resolved{/}");
-                return .{ .title = "DECISION · [1-9] choose · [Esc] later", .rows = rows.items, .read_only = true, .w = layout.modal.decision_w, .max_h = layout.modal.decision_max_h };
+                return .{ .title = try keys.title(al, try listTitle(al, "DECISION", null, "later", false), &decision_legend), .rows = rows.items, .read_only = true, .w = layout.modal.decision_w, .max_h = layout.modal.decision_max_h };
             },
             .raise_hulls => {
                 const g = &self.gs.?;
@@ -2611,7 +2699,7 @@ pub const App = struct {
                     try lance_line.appendSlice(al, try std.fmt.allocPrint(al, "{s}{s} {d}/{d}{s}  ", .{ if (i == self.raise.lance_idx) "{a}▶ " else "{d}", try q.plain(al, l.name), l.used, l.cap, "{/}" }));
                 }
                 return .{
-                    .title = try std.fmt.allocPrint(al, "RAISE {s} · HULLS · [ ] lance · Enter/b take or buy · p pass · n support train · ←/→ columns · Esc leave (the company keeps what it has)", .{try q.forceName(self.a(), g, self.raise.company)}),
+                    .title = try listTitleWith(al, try std.fmt.allocPrint(al, "RAISE {s} · HULLS", .{try q.forceName(self.a(), g, self.raise.company)}), &raise_hulls_legend, "take or buy", "leave (the company keeps what it has)", true),
                     .head = try al.dupe([]const u8, &.{ lance_line.items, "" }),
                     .table = try q.tableOf(al, q.raise_cols, cands),
                     .n = cands.len,
@@ -2626,7 +2714,7 @@ pub const App = struct {
                 var rows: std.ArrayListUnmanaged([]const u8) = .empty;
                 for (train.lines) |line| try rows.append(al, line.text);
                 return .{
-                    .title = try std.fmt.allocPrint(al, "RAISE {s} · SUPPORT TRAIN · Enter/b buy one · n crews · Esc leave", .{try q.forceName(self.a(), g, self.raise.company)}),
+                    .title = try listTitleWith(al, try std.fmt.allocPrint(al, "RAISE {s} · SUPPORT TRAIN", .{try q.forceName(self.a(), g, self.raise.company)}), &raise_support_legend, "buy one", "leave", false),
                     .head = &.{"hull      name                  owned   price (staple line at home)   what it does"},
                     .rows = rows.items,
                     .n = train.lines.len,
@@ -2652,14 +2740,14 @@ pub const App = struct {
                         try rows.append(al, try std.fmt.allocPrint(al, "  {s}{s} {s: <40} {s}{{/}}", .{ if (now) "{g}" else "", if (now) "♪" else " ", try q.plain(al, t.name), try q.plain(al, m.sets[t.set]) }));
                     }
                     try rows.append(al, "");
-                    try rows.append(al, "  {d}Enter on a soundtrack selects it (the playlist reshuffles) · Enter on a track plays it · m on/off · < > previous/next · - + volume · Esc close{/}");
+                    try rows.append(al, try std.fmt.allocPrint(al, "  {{d}}{s}: a soundtrack selects it (the playlist reshuffles), a track plays it · {s}{{/}}", .{ try keyHint(ListAction, al, &list_bindings, .pick, "on a row"), try keys.title(al, "", &music_legend) }));
                 } else {
                     try rows.append(al, "");
                     try rows.append(al, try std.fmt.allocPrint(al, "  {{d}}{s}{{/}}", .{self.music_note}));
                     try rows.append(al, "");
-                    try rows.append(al, "  {d}[Esc] close{/}");
+                    try rows.append(al, try std.fmt.allocPrint(al, "  {{d}}{s}{{/}}", .{try keyHint(ListAction, al, &list_bindings, .close, "close")}));
                 }
-                return .{ .title = "SOUNDTRACK", .right_title = "[Enter] select / play  [Esc] close", .rows = rows.items, .n = if (self.music != null) rows.items.len else 0, .w = layout.modal.music_w, .max_h = full_h };
+                return .{ .title = try listTitleWith(al, "SOUNDTRACK", &music_legend, "select / play", "close", false), .rows = rows.items, .n = if (self.music != null) rows.items.len else 0, .w = layout.modal.music_w, .max_h = full_h };
             },
             .summary => return .{ .title = "CAMPAIGN SUMMARY", .right_title = "any key closes · also :summary", .rows = try q.summary(al, &self.gs.?), .read_only = true, .w = layout.modal.summary_w, .max_h = full_h },
             .readiness => {
@@ -2667,7 +2755,7 @@ pub const App = struct {
                 const rr = try q.readiness(al, g);
                 return .{
                     .title = "READINESS · every company",
-                    .right_title = "[←/→] columns · any other key closes",
+                    .right_title = try keys.title(al, "", &sheet_legend),
                     .table = try q.tableOf(al, q.readiness_cols, rr),
                     .empty = "{d}no companies{/}",
                     .foot = &.{ "", "{d}fatigue falls only at a regional HQ; banked XP becomes skill at a training ground; depot hulls wait on a mek bay · Forces r shows one company in detail{/}" },
@@ -2685,9 +2773,9 @@ pub const App = struct {
                 for (mq) |m| open_total += m.need -| m.have;
                 try rows.append(al, "");
                 try rows.append(al, try std.fmt.allocPrint(al, "{d} open · the counts match a generated starter company of this shape", .{open_total}));
-                try rows.append(al, "  {a}[a]{/} hire from the halls now: a pilot per crewless hull and a tech where none has hours (signing bonuses from the outfit)");
-                try rows.append(al, "  {d}or hire by hand later: HQ screen Tab into the hall (f filters by role), People P posts staff · this table is also :manning co:N{/}");
-                try rows.append(al, "  {a}[Enter]{/} finish");
+                try rows.append(al, try std.fmt.allocPrint(al, "  {{a}}{s}{{/}} now: a pilot per crewless hull and a tech where none has hours (signing bonuses from the outfit)", .{try keyHint(RaiseCrewsAction, al, &raise_crews_bindings, .crew, "hire from the halls")}));
+                try rows.append(al, "  {d}or hire by hand later from an HQ's hiring hall or the People screen · this table is also :manning co:N{/}");
+                try rows.append(al, try std.fmt.allocPrint(al, "  {{a}}{s}{{/}}", .{try keyHint(SheetAction, al, &sheet_bindings, .close, "finish")}));
                 return .{ .title = try std.fmt.allocPrint(al, "RAISE {s} · CREWS", .{try q.forceName(self.a(), g, self.raise.company)}), .rows = rows.items, .read_only = true, .w = layout.modal.raise_crews_w, .max_h = full_h };
             },
             .negotiate => |idx| {
@@ -2698,7 +2786,7 @@ pub const App = struct {
                     try head.append(al, "");
                 }
                 return .{
-                    .title = "NEGOTIATE · [Enter] press the term · [Esc] cancel",
+                    .title = try listTitle(al, "NEGOTIATE", "press the term", "cancel", false),
                     .right_title = ":negotiate <offer#> <term>",
                     .head = head.items,
                     .rows = &negotiable_terms,
@@ -2709,22 +2797,22 @@ pub const App = struct {
             },
             .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_part => {
                 const v = try self.pickView(al);
-                return .{ .title = v.title, .right_title = "best first · dimmed rows say why not · [←/→] columns", .table = try q.tableOf(al, v.cols, v.rows), .n = v.rows.len, .empty = try std.fmt.allocPrint(al, "{{d}}{s}{{/}}", .{v.empty}), .w = layout.modal.picker_w, .max_h = full_h };
+                return .{ .title = v.title, .right_title = "best first · dimmed rows say why not", .table = try q.tableOf(al, v.cols, v.rows), .n = v.rows.len, .empty = try std.fmt.allocPrint(al, "{{d}}{s}{{/}}", .{v.empty}), .w = layout.modal.picker_w, .max_h = full_h };
             },
             .accept_pick => |oi| {
                 const cands = try q.offerCandidates(al, &self.gs.?, oi);
-                return .{ .title = "SEND WHICH COMPANY · [Enter] choose · [←/→] columns · [Esc] cancel", .right_title = "readiest first", .table = try q.tableOf(al, q.candidates_cols, cands), .n = cands.len, .empty = "{d}no companies to send{/}", .w = layout.modal.accept_pick_w, .max_h = full_h };
+                return .{ .title = try listTitle(al, "SEND WHICH COMPANY", "choose", "cancel", true), .right_title = "readiest first", .table = try q.tableOf(al, q.candidates_cols, cands), .n = cands.len, .empty = "{d}no companies to send{/}", .w = layout.modal.accept_pick_w, .max_h = full_h };
             },
             .lance_pick => |uid| {
                 const lances = try self.lanceChoices(uid);
                 var rows: std.ArrayListUnmanaged([]const u8) = .empty;
                 for (lances) |lc| try rows.append(al, lc.text);
-                return .{ .title = try std.fmt.allocPrint(al, "MOVE #{d} TO · [Enter] choose · [Esc] cancel", .{@intFromEnum(uid)}), .right_title = ":newlance co:N <name> adds a lance", .rows = rows.items, .n = lances.len, .empty = "{d}no lances — the hull must belong to a company that is home{/}", .w = layout.modal.lance_pick_w, .max_h = full_h };
+                return .{ .title = try listTitle(al, try std.fmt.allocPrint(al, "MOVE #{d} TO", .{@intFromEnum(uid)}), "choose", "cancel", false), .right_title = ":newlance co:N <name> adds a lance", .rows = rows.items, .n = lances.len, .empty = "{d}no lances — the hull must belong to a company that is home{/}", .w = layout.modal.lance_pick_w, .max_h = full_h };
             },
             .upgrade => |hid| {
                 const rows_v = try q.upgrades(al, &self.gs.?, hid);
                 return .{
-                    .title = try std.fmt.allocPrint(al, "UPGRADE · {s} · [Enter] start · [←/→] columns · [Esc] cancel", .{try q.hqName(self.a(), &self.gs.?, hid)}),
+                    .title = try listTitle(al, try std.fmt.allocPrint(al, "UPGRADE · {s}", .{try q.hqName(self.a(), &self.gs.?, hid)}), "start", "cancel", true),
                     .right_title = "one project per facility at a time",
                     .table = try q.tableOf(al, q.upgrade_cols, rows_v),
                     .n = rows_v.len,
@@ -2742,33 +2830,33 @@ pub const App = struct {
                 const cands = try q.installCandidates(al, &self.gs.?, uid);
                 var rows: std.ArrayListUnmanaged([]const u8) = .empty;
                 for (cands) |c| try rows.append(al, c.text);
-                return .{ .title = "INSTALL · pick a part · [Enter] choose location · [Esc] cancel", .right_title = "stock at the home HQ first", .rows = rows.items, .n = cands.len, .empty = "{d}nothing in stock to install{/}", .w = layout.modal.install_part_w, .max_h = full_h };
+                return .{ .title = try listTitle(al, "INSTALL · pick a part", "choose location", "cancel", false), .right_title = "stock at the home HQ first", .rows = rows.items, .n = cands.len, .empty = "{d}nothing in stock to install{/}", .w = layout.modal.install_part_w, .max_h = full_h };
             },
             .install_loc => |il| {
                 const locs = try q.installLocations(al, &self.gs.?, il.unit, il.part);
                 var rows: std.ArrayListUnmanaged([]const u8) = .empty;
                 for (locs) |l| try rows.append(al, l.text);
-                return .{ .title = "INSTALL · pick a location · [Enter] stage · [Esc] cancel", .head = try al.dupe([]const u8, &.{ try std.fmt.allocPrint(al, "  {{a}}{s}{{/}} — where does it go?", .{il.part}), "" }), .rows = rows.items, .n = locs.len, .empty = "{d}no location takes it{/}", .w = layout.modal.install_loc_w, .max_h = full_h };
+                return .{ .title = try listTitle(al, "INSTALL · pick a location", "stage", "cancel", false), .head = try al.dupe([]const u8, &.{ try std.fmt.allocPrint(al, "  {{a}}{s}{{/}} — where does it go?", .{il.part}), "" }), .rows = rows.items, .n = locs.len, .empty = "{d}no location takes it{/}", .w = layout.modal.install_loc_w, .max_h = full_h };
             },
             .seat => |id| {
                 const seats = try q.openSeats(al, &self.gs.?, id);
                 var rows: std.ArrayListUnmanaged([]const u8) = .empty;
                 for (seats) |st| try rows.append(al, st.text);
-                return .{ .title = try std.fmt.allocPrint(al, "ASSIGN {s} · [Enter] take seat · [Esc] cancel", .{try q.personName(al, &self.gs.?, id)}), .right_title = "open seats for their role", .rows = rows.items, .n = seats.len, .empty = "{d}no open seat for this role{/}", .w = layout.modal.seat_w, .max_h = layout.modal.seat_max_h };
+                return .{ .title = try listTitle(al, try std.fmt.allocPrint(al, "ASSIGN {s}", .{try q.personName(al, &self.gs.?, id)}), "take seat", "cancel", false), .right_title = "open seats for their role", .rows = rows.items, .n = seats.len, .empty = "{d}no open seat for this role{/}", .w = layout.modal.seat_w, .max_h = layout.modal.seat_max_h };
             },
             .emblem => {
                 var rows: std.ArrayListUnmanaged([]const u8) = .empty;
                 for (emblems) |e| try rows.append(al, try std.fmt.allocPrint(al, "preset   {s}", .{e.name}));
                 for (self.logos) |l| try rows.append(al, try std.fmt.allocPrint(al, "picture  {s}", .{l}));
                 try rows.append(al, "editor   {a}draw your own{/} — a 3 × 8 text crest, cell by cell");
-                return .{ .title = "EMBLEM · [Enter] use · [Esc] cancel", .right_title = try std.fmt.allocPrint(al, "pictures from {s}", .{try std.mem.join(al, ", ", self.asset_roots.logos)}), .rows = rows.items, .n = rows.items.len, .w = layout.modal.emblem_w, .max_h = layout.modal.emblem_max_h };
+                return .{ .title = try listTitle(al, "EMBLEM", "use", "cancel", false), .right_title = try std.fmt.allocPrint(al, "pictures from {s}", .{try std.mem.join(al, ", ", self.asset_roots.logos)}), .rows = rows.items, .n = rows.items.len, .w = layout.modal.emblem_w, .max_h = layout.modal.emblem_max_h };
             },
-            .hull => |uid| return .{ .title = "HULL · [Esc] close", .rows = try q.hull(al, &self.gs.?, uid), .read_only = true, .w = layout.modal.hull_w, .max_h = full_h },
-            .record => |pid| return .{ .title = "RECORD · [Esc] close", .rows = try q.personRecord(al, &self.gs.?, pid), .read_only = true, .w = layout.modal.record_w, .max_h = full_h },
+            .hull => |uid| return .{ .title = try listTitle(al, "HULL", null, "close", false), .rows = try q.hull(al, &self.gs.?, uid), .read_only = true, .w = layout.modal.hull_w, .max_h = full_h },
+            .record => |pid| return .{ .title = try listTitle(al, "RECORD", null, "close", false), .rows = try q.personRecord(al, &self.gs.?, pid), .read_only = true, .w = layout.modal.record_w, .max_h = full_h },
             .battle_list => {
                 const rows = try q.battleList(al, &self.gs.?);
                 return .{
-                    .title = "AFTER-ACTION REPORTS · [Enter] read · [Esc] close",
+                    .title = try listTitle(al, "AFTER-ACTION REPORTS", "read", "close", false),
                     .right_title = "newest first",
                     .table = try q.tableOf(al, q.battle_cols, rows),
                     .n = rows.len,
@@ -2791,7 +2879,7 @@ pub const App = struct {
                 while (i > 0) : (i -= 1) try rows.append(al, all[i - 1]);
                 if (rows.items.len == 0) try rows.append(al, "{d}nothing logged for this contract yet{/}");
                 return .{
-                    .title = try std.fmt.allocPrint(al, "CONTRACT [{d}] LOG · j/k PgUp/PgDn scroll · G end · [Esc] close", .{@intFromEnum(cid)}),
+                    .title = try listTitleWith(al, try std.fmt.allocPrint(al, "CONTRACT [{d}] LOG", .{@intFromEnum(cid)}), &log_legend, null, "close", false),
                     .right_title = try std.fmt.allocPrint(al, "{d} lines · oldest first", .{rows.items.len}),
                     .rows = rows.items,
                     .scroll = true,
@@ -2842,49 +2930,138 @@ pub const App = struct {
 
     /// Keys every list modal shares; the kind-specific ones go to `listEnter`,
     /// `listEscape` and `listExtra`.
+    // ---- list modals: one table for walking a list, one per modal's own keys ----
+
+    const ListAction = enum { down, up, page_down, page_up, top, bottom, scroll_left, scroll_right, pick, close };
+    pub const list_bindings = [_]keys.Binding(ListAction){
+        .{ .match = keys.Match.char('j'), .action = .down, .label = "row", .group = .navigate, .shown = "j/k ↑/↓" },
+        .{ .match = .{ .key = .down }, .action = .down, .label = "down", .group = .navigate, .show_footer = false, .show_help = false },
+        .{ .match = keys.Match.char('k'), .action = .up, .label = "up", .group = .navigate, .show_footer = false, .show_help = false },
+        .{ .match = .{ .key = .up }, .action = .up, .label = "up", .group = .navigate, .show_footer = false, .show_help = false },
+        .{ .match = .{ .key = .pgdn }, .action = .page_down, .label = "page", .group = .navigate, .shown = "PgUp/PgDn", .show_footer = false },
+        .{ .match = .{ .key = .pgup }, .action = .page_up, .label = "page up", .group = .navigate, .show_footer = false, .show_help = false },
+        .{ .match = .{ .key = .home }, .action = .top, .label = "top", .group = .navigate, .show_footer = false },
+        .{ .match = .{ .key = .end }, .action = .bottom, .label = "end", .group = .navigate, .show_footer = false },
+        .{ .match = .{ .key = .left }, .action = .scroll_left, .label = "columns", .group = .navigate, .shown = "←/→" },
+        .{ .match = .{ .key = .right }, .action = .scroll_right, .label = "columns", .group = .navigate, .show_footer = false, .show_help = false },
+        .{ .match = .{ .key = .enter }, .action = .pick, .label = "choose", .group = .act },
+        .{ .match = .{ .key = .escape }, .action = .close, .label = "cancel", .group = .misc },
+    };
+
+    /// A read-only sheet: ←/→ scroll a table, any other key closes it.
+    const SheetAction = enum { scroll_left, scroll_right, close };
+    pub const sheet_bindings = [_]keys.Binding(SheetAction){
+        .{ .match = .{ .key = .left }, .action = .scroll_left, .label = "columns", .group = .navigate, .shown = "←/→" },
+        .{ .match = .{ .key = .right }, .action = .scroll_right, .label = "columns", .group = .navigate, .show_footer = false, .show_help = false },
+        .{ .match = .{ .key = .escape }, .action = .close, .label = "close", .group = .misc },
+        .{ .match = .{ .key = .enter }, .action = .close, .label = "close", .group = .misc, .show_footer = false, .show_help = false },
+        .{ .match = .text, .action = .close, .label = "any other key closes", .group = .misc, .show_footer = false },
+    };
+
+    const RaiseHullsAction = enum { take, pass, prev_lance, next_lance, support_train };
+    pub const raise_hulls_bindings = [_]keys.Binding(RaiseHullsAction){
+        .{ .match = keys.Match.char('['), .action = .prev_lance, .label = "lance", .group = .navigate, .shown = "[ ]" },
+        .{ .match = keys.Match.char(']'), .action = .next_lance, .label = "next lance", .group = .navigate, .show_footer = false, .show_help = false },
+        .{ .match = keys.Match.char('b'), .action = .take, .label = "take or buy", .group = .act, .help = "take the hull under the cursor (Enter does the same)" },
+        .{ .match = keys.Match.char('p'), .action = .pass, .label = "pass", .group = .act, .help = "pass on a board listing" },
+        .{ .match = keys.Match.char('n'), .action = .support_train, .label = "support train", .group = .act },
+    };
+    const RaiseSupportAction = enum { buy, crews };
+    pub const raise_support_bindings = [_]keys.Binding(RaiseSupportAction){
+        .{ .match = keys.Match.char('b'), .action = .buy, .label = "buy one", .group = .act, .help = "buy a support hull (Enter does the same)" },
+        .{ .match = keys.Match.char('n'), .action = .crews, .label = "crews", .group = .act },
+    };
+    const RaiseCrewsAction = enum { crew };
+    pub const raise_crews_bindings = [_]keys.Binding(RaiseCrewsAction){
+        .{ .match = keys.Match.char('a'), .action = .crew, .label = "crew from the halls", .group = .act },
+        .{ .match = keys.Match.char('A'), .action = .crew, .label = "crew", .group = .act, .show_footer = false, .show_help = false },
+    };
+    const MusicAction = enum { toggle, skip, back, louder, quieter, close };
+    pub const music_bindings = [_]keys.Binding(MusicAction){
+        .{ .match = keys.Match.char('m'), .action = .toggle, .label = "music on/off", .group = .act },
+        .{ .match = keys.Match.char('M'), .action = .toggle, .label = "music", .group = .act, .show_footer = false, .show_help = false },
+        .{ .match = keys.Match.char('>'), .action = .skip, .label = "next track", .group = .act, .shown = "< >", .help = "previous / next track" },
+        .{ .match = keys.Match.char('<'), .action = .back, .label = "previous track", .group = .act, .show_footer = false, .show_help = false },
+        .{ .match = keys.Match.char('+'), .action = .louder, .label = "volume", .group = .act, .shown = "+ -", .help = "louder / quieter" },
+        .{ .match = keys.Match.char('='), .action = .louder, .label = "louder", .group = .act, .show_footer = false, .show_help = false },
+        .{ .match = keys.Match.char('-'), .action = .quieter, .label = "quieter", .group = .act, .show_footer = false, .show_help = false },
+        .{ .match = keys.Match.char('q'), .action = .close, .label = "close", .group = .misc, .show_footer = false },
+    };
+    const DecisionAction = enum { choose };
+    pub const decision_bindings = [_]keys.Binding(DecisionAction){
+        .{ .match = .{ .chars = .{ '1', '9' } }, .action = .choose, .label = "choose", .group = .act },
+    };
+    const LogAction = enum { top, bottom, close };
+    pub const log_bindings = [_]keys.Binding(LogAction){
+        .{ .match = keys.Match.char('g'), .action = .top, .label = "start", .group = .navigate, .show_footer = false },
+        .{ .match = keys.Match.char('G'), .action = .bottom, .label = "end", .group = .navigate },
+        .{ .match = keys.Match.char('q'), .action = .close, .label = "close", .group = .misc, .show_footer = false },
+    };
+
+    const raise_hulls_legend = keys.entries(RaiseHullsAction, &raise_hulls_bindings);
+    const raise_support_legend = keys.entries(RaiseSupportAction, &raise_support_bindings);
+    const music_legend = keys.entries(MusicAction, &music_bindings);
+    const decision_legend = keys.entries(DecisionAction, &decision_bindings);
+    const log_legend = keys.entries(LogAction, &log_bindings);
+    const sheet_legend = keys.entries(SheetAction, &sheet_bindings);
+
+    /// A list modal's title: its name, then the list keys with the verbs
+    /// this modal gives them ("choose", "assign", "cancel").
+    fn listTitle(al: std.mem.Allocator, name: []const u8, pick: ?[]const u8, close: []const u8, columns: bool) ![]const u8 {
+        return listTitleWith(al, name, &.{}, pick, close, columns);
+    }
+
+    /// `listTitle` with a modal's own keys between its name and the list's.
+    fn listTitleWith(al: std.mem.Allocator, name: []const u8, extras: []const keys.Entry, pick: ?[]const u8, close: []const u8, columns: bool) ![]const u8 {
+        var out: std.ArrayListUnmanaged(u8) = .empty;
+        try out.appendSlice(al, try keys.title(al, name, extras));
+        var buf: [16]u8 = undefined;
+        if (pick) |verb| try out.print(al, " · [{s}] {s}", .{ keys.keyFor(ListAction, &buf, &list_bindings, .pick), verb });
+        if (columns) try out.print(al, " · [{s}] columns", .{keys.keyFor(ListAction, &buf, &list_bindings, .scroll_left)});
+        try out.print(al, " · [{s}] {s}", .{ keys.keyFor(ListAction, &buf, &list_bindings, .close), close });
+        return out.toOwnedSlice(al);
+    }
+
     fn listKey(self: *App, key: Key) !void {
+        if (try self.listExtra(key)) return;
         const v = try self.listView(self.a());
         if (v.read_only) {
-            switch (key) {
-                .left => if (v.table != null) {
+            const hit = keys.lookup(SheetAction, &sheet_bindings, 0, key) orelse return;
+            switch (hit.action) {
+                .scroll_left => if (v.table != null) {
                     self.modal_colscroll -|= 1;
-                    return;
+                } else {
+                    self.modal = .none;
                 },
-                .right => if (v.table != null) {
+                .scroll_right => if (v.table != null) {
                     self.modal_colscroll += 1;
-                    return;
+                } else {
+                    self.modal = .none;
                 },
-                .char => |ch| if (try self.listExtra(ch)) return,
-                else => {},
+                .close => self.modal = .none,
             }
-            self.modal = .none;
             return;
         }
-        switch (key) {
-            .escape => try self.listEscape(),
+        const hit = keys.lookup(ListAction, &list_bindings, 0, key) orelse return;
+        switch (hit.action) {
+            .close => try self.listEscape(),
             .down => self.modal_cursor +|= 1,
             .up => self.modal_cursor -|= 1,
-            .pgdn => if (v.scroll) {
+            .page_down => if (v.scroll) {
                 self.modal_cursor +|= 10;
             },
-            .pgup => if (v.scroll) {
+            .page_up => if (v.scroll) {
                 self.modal_cursor -|= 10;
             },
-            .home => if (v.scroll) {
+            .top => if (v.scroll) {
                 self.modal_cursor = 0;
             },
-            .end => if (v.scroll) {
+            .bottom => if (v.scroll) {
                 self.modal_cursor = std.math.maxInt(usize) / 2;
             },
-            .left => self.modal_colscroll -|= 1,
-            .right => self.modal_colscroll += 1,
-            .enter => try self.listEnter(),
-            .char => |ch| switch (ch) {
-                'j' => self.modal_cursor +|= 1,
-                'k' => self.modal_cursor -|= 1,
-                else => _ = try self.listExtra(ch),
-            },
-            else => {},
+            .scroll_left => self.modal_colscroll -|= 1,
+            .scroll_right => self.modal_colscroll += 1,
+            .pick => try self.listEnter(),
         }
     }
 
@@ -3029,224 +3206,381 @@ pub const App = struct {
     }
 
     /// A list modal's own letter keys. Returns whether the key was taken.
-    fn listExtra(self: *App, ch: u21) !bool {
+    /// The keys one list modal adds to walking and picking; true when the
+    /// key was one of them.
+    fn listExtra(self: *App, key: Key) !bool {
         switch (self.modal) {
-            .raise_hulls => switch (ch) {
-                'b' => try self.raiseTake(),
-                'p' => {
-                    const g = &self.gs.?;
-                    const cands = try q.raiseCandidates(self.a(), g, self.raise.company, self.raise.passed[0..self.raise.passed_len]);
-                    if (cands.len == 0) return true;
-                    const c = cands[@min(self.modal_cursor, cands.len - 1)];
-                    if (c.kind != .listing) {
-                        self.say(.dim, "only board listings can be passed — hulls on hand just stay in the pool", .{});
-                        return true;
-                    }
-                    if (self.raise.passed_len >= self.raise.passed.len) return true;
-                    self.raise.passed[self.raise.passed_len] = c.key;
-                    self.raise.passed_len += 1;
-                },
-                ']', '[' => {
-                    const lances = try self.raiseLances();
-                    if (lances.len == 0) return true;
-                    self.raise.lance_idx = if (ch == ']') (self.raise.lance_idx + 1) % lances.len else (self.raise.lance_idx + lances.len - 1) % lances.len;
-                },
-                'n' => self.openModal(.raise_support),
-                else => return false,
+            .raise_hulls => {
+                const hit = keys.lookup(RaiseHullsAction, &raise_hulls_bindings, 0, key) orelse return false;
+                switch (hit.action) {
+                    .take => try self.raiseTake(),
+                    .pass => {
+                        const g = &self.gs.?;
+                        const cands = try q.raiseCandidates(self.a(), g, self.raise.company, self.raise.passed[0..self.raise.passed_len]);
+                        if (cands.len == 0) return true;
+                        const c = cands[@min(self.modal_cursor, cands.len - 1)];
+                        if (c.kind != .listing) {
+                            self.say(.dim, "only board listings can be passed — hulls on hand just stay in the pool", .{});
+                            return true;
+                        }
+                        if (self.raise.passed_len >= self.raise.passed.len) return true;
+                        self.raise.passed[self.raise.passed_len] = c.key;
+                        self.raise.passed_len += 1;
+                    },
+                    .prev_lance, .next_lance => {
+                        const lances = try self.raiseLances();
+                        if (lances.len == 0) return true;
+                        self.raise.lance_idx = if (hit.action == .next_lance) (self.raise.lance_idx + 1) % lances.len else (self.raise.lance_idx + lances.len - 1) % lances.len;
+                    },
+                    .support_train => self.openModal(.raise_support),
+                }
             },
-            .raise_support => switch (ch) {
-                'b' => try self.raiseBuySupport(),
-                'n' => self.modal = .raise_crews,
-                else => return false,
+            .raise_support => {
+                const hit = keys.lookup(RaiseSupportAction, &raise_support_bindings, 0, key) orelse return false;
+                switch (hit.action) {
+                    .buy => try self.raiseBuySupport(),
+                    .crews => self.modal = .raise_crews,
+                }
             },
-            .raise_crews => switch (ch) {
-                'a', 'A' => {
-                    const r = self.execResult(.{ .crew_company = self.raise.company }) orelse return true;
-                    self.say(if (r.still_open == 0) .good else .amber, "{d} hired and seated · {d} lines still open — the halls had nobody of that trade yet", .{ r.hired_count, r.still_open });
-                },
-                else => return false,
+            .raise_crews => {
+                const hit = keys.lookup(RaiseCrewsAction, &raise_crews_bindings, 0, key) orelse return false;
+                switch (hit.action) {
+                    .crew => {
+                        const r = self.execResult(.{ .crew_company = self.raise.company }) orelse return true;
+                        self.say(if (r.still_open == 0) .good else .amber, "{d} hired and seated · {d} lines still open — the halls had nobody of that trade yet", .{ r.hired_count, r.still_open });
+                    },
+                }
             },
-            .music => switch (ch) {
-                'm', 'M' => try self.toggleMusic(),
-                '>' => if (self.music) |*m| m.skip(),
-                '<' => if (self.music) |*m| m.back(),
-                '+', '=' => try self.adjustVolume(10),
-                '-' => try self.adjustVolume(-10),
-                'q' => self.modal = .none,
-                else => return false,
+            .music => {
+                const hit = keys.lookup(MusicAction, &music_bindings, 0, key) orelse return false;
+                switch (hit.action) {
+                    .toggle => try self.toggleMusic(),
+                    .skip => if (self.music) |*m| m.skip(),
+                    .back => if (self.music) |*m| m.back(),
+                    .louder => try self.adjustVolume(10),
+                    .quieter => try self.adjustVolume(-10),
+                    .close => self.modal = .none,
+                }
             },
-            .decision => |idx| switch (ch) {
-                '1'...'9' => {
-                    const choice: usize = ch - '1';
-                    self.modal = .none;
-                    _ = try self.execSay(.{ .resolve_decision = .{ .event = idx, .choice = choice } }, .good, "decision recorded", .{});
-                },
-                else => return false,
+            .decision => |idx| {
+                const hit = keys.lookup(DecisionAction, &decision_bindings, 0, key) orelse return false;
+                switch (hit.action) {
+                    .choose => {
+                        self.modal = .none;
+                        _ = try self.execSay(.{ .resolve_decision = .{ .event = idx, .choice = hit.offset } }, .good, "decision recorded", .{});
+                    },
+                }
             },
-            .contract_log => switch (ch) {
-                'g' => self.modal_cursor = 0,
-                'G' => self.modal_cursor = std.math.maxInt(usize) / 2,
-                'q' => self.modal = .none,
-                else => return false,
+            .contract_log => {
+                const hit = keys.lookup(LogAction, &log_bindings, 0, key) orelse return false;
+                switch (hit.action) {
+                    .top => self.modal_cursor = 0,
+                    .bottom => self.modal_cursor = std.math.maxInt(usize) / 2,
+                    .close => self.modal = .none,
+                }
             },
             else => return false,
         }
         return true;
     }
 
+    // ---- modal keys: one table per modal, the handler switches on the action ----
+
+    const AfterActionAction = enum { scroll_left, scroll_right, close };
+    pub const after_action_bindings = [_]keys.Binding(AfterActionAction){
+        .{ .match = .{ .key = .left }, .action = .scroll_left, .label = "columns", .group = .navigate, .shown = "←/→" },
+        .{ .match = .{ .key = .right }, .action = .scroll_right, .label = "columns", .group = .navigate, .show_footer = false, .show_help = false },
+        .{ .match = .{ .key = .escape }, .action = .close, .label = "read", .group = .misc },
+        .{ .match = .text, .action = .close, .label = "read", .group = .misc, .show_footer = false, .show_help = false },
+    };
+    const EditorAction = enum { left, right, up, down, erase, save, undo, cancel, paint };
+    pub const editor_bindings = [_]keys.Binding(EditorAction){
+        .{ .match = .{ .key = .left }, .action = .left, .label = "move", .group = .navigate, .shown = "arrows" },
+        .{ .match = .{ .key = .right }, .action = .right, .label = "right", .group = .navigate, .show_footer = false, .show_help = false },
+        .{ .match = .{ .key = .up }, .action = .up, .label = "up", .group = .navigate, .show_footer = false, .show_help = false },
+        .{ .match = .{ .key = .down }, .action = .down, .label = "down", .group = .navigate, .show_footer = false, .show_help = false },
+        .{ .match = .{ .key = .backspace }, .action = .erase, .label = "erase", .group = .act },
+        .{ .match = keys.Match.char('u'), .action = .undo, .label = "undo", .group = .act },
+        .{ .match = .text, .action = .paint, .label = "paint", .group = .act, .help = "paint the cell with the character typed" },
+        .{ .match = .{ .key = .enter }, .action = .save, .label = "save as the outfit's crest", .group = .act },
+        .{ .match = .{ .key = .escape }, .action = .cancel, .label = "cancel", .group = .misc },
+    };
+    const AmountKey = enum { next, prev, erase, more, less, digit, run, cancel };
+    pub const amount_bindings = [_]keys.Binding(AmountKey){
+        .{ .match = .{ .key = .tab }, .action = .next, .label = "field", .group = .navigate, .shown = "Tab j/k" },
+        .{ .match = .{ .key = .down }, .action = .next, .label = "next", .group = .navigate, .show_footer = false, .show_help = false },
+        .{ .match = keys.Match.char('j'), .action = .next, .label = "next", .group = .navigate, .show_footer = false, .show_help = false },
+        .{ .match = .{ .key = .backtab }, .action = .prev, .label = "previous", .group = .navigate, .show_footer = false, .show_help = false },
+        .{ .match = .{ .key = .up }, .action = .prev, .label = "previous", .group = .navigate, .show_footer = false, .show_help = false },
+        .{ .match = keys.Match.char('k'), .action = .prev, .label = "previous", .group = .navigate, .show_footer = false, .show_help = false },
+        .{ .match = keys.Match.char('+'), .action = .more, .label = "step", .group = .act, .shown = "+ -" },
+        .{ .match = keys.Match.char('='), .action = .more, .label = "more", .group = .act, .show_footer = false, .show_help = false },
+        .{ .match = keys.Match.char('-'), .action = .less, .label = "less", .group = .act, .show_footer = false, .show_help = false },
+        .{ .match = .{ .chars = .{ '0', '9' } }, .action = .digit, .label = "type", .group = .act },
+        .{ .match = .{ .key = .backspace }, .action = .erase, .label = "erase", .group = .act, .show_footer = false },
+        .{ .match = .{ .key = .enter }, .action = .run, .label = "finish", .group = .act },
+        .{ .match = .{ .key = .escape }, .action = .cancel, .label = "cancel", .group = .misc },
+    };
+    /// Battle orders and settings walk rows and step the one under the cursor.
+    const FormAction = enum { down, up, less, more, act, close };
+    pub const form_bindings = [_]keys.Binding(FormAction){
+        .{ .match = keys.Match.char('j'), .action = .down, .label = "row", .group = .navigate, .shown = "j/k" },
+        .{ .match = .{ .key = .down }, .action = .down, .label = "down", .group = .navigate, .show_footer = false, .show_help = false },
+        .{ .match = keys.Match.char('k'), .action = .up, .label = "up", .group = .navigate, .show_footer = false, .show_help = false },
+        .{ .match = .{ .key = .up }, .action = .up, .label = "up", .group = .navigate, .show_footer = false, .show_help = false },
+        .{ .match = .{ .key = .left }, .action = .less, .label = "change", .group = .act, .shown = "← →" },
+        .{ .match = keys.Match.char('h'), .action = .less, .label = "less", .group = .act, .show_footer = false, .show_help = false },
+        .{ .match = .{ .key = .right }, .action = .more, .label = "more", .group = .act, .show_footer = false, .show_help = false },
+        .{ .match = keys.Match.char('l'), .action = .more, .label = "more", .group = .act, .show_footer = false, .show_help = false },
+        .{ .match = .{ .key = .enter }, .action = .act, .label = "act", .group = .act },
+        .{ .match = .{ .key = .escape }, .action = .close, .label = "close", .group = .misc },
+        .{ .match = keys.Match.char('q'), .action = .close, .label = "close", .group = .misc, .show_footer = false, .show_help = false },
+    };
+    /// The settings form's shortcuts, on top of walking its rows.
+    const SettingsShortcut = enum { music, louder, quieter, skip, back, tracks, difficulty, auto_admit };
+    pub const settings_bindings = [_]keys.Binding(SettingsShortcut){
+        .{ .match = keys.Match.char('m'), .action = .music, .label = "music", .group = .act },
+        .{ .match = keys.Match.char('M'), .action = .music, .label = "music", .group = .act, .show_footer = false, .show_help = false },
+        .{ .match = keys.Match.char('+'), .action = .louder, .label = "volume", .group = .act, .shown = "+ -" },
+        .{ .match = keys.Match.char('='), .action = .louder, .label = "louder", .group = .act, .show_footer = false, .show_help = false },
+        .{ .match = keys.Match.char('-'), .action = .quieter, .label = "quieter", .group = .act, .show_footer = false, .show_help = false },
+        .{ .match = keys.Match.char('>'), .action = .skip, .label = "track", .group = .act, .shown = "< >" },
+        .{ .match = keys.Match.char('<'), .action = .back, .label = "previous track", .group = .act, .show_footer = false, .show_help = false },
+        .{ .match = keys.Match.char('t'), .action = .tracks, .label = "soundtracks", .group = .act },
+        .{ .match = keys.Match.char('T'), .action = .tracks, .label = "soundtracks", .group = .act, .show_footer = false, .show_help = false },
+        .{ .match = keys.Match.char('d'), .action = .difficulty, .label = "difficulty", .group = .act },
+        .{ .match = keys.Match.char('D'), .action = .difficulty, .label = "difficulty", .group = .act, .show_footer = false, .show_help = false },
+        .{ .match = keys.Match.char('a'), .action = .auto_admit, .label = "auto-admit", .group = .act },
+        .{ .match = keys.Match.char('A'), .action = .auto_admit, .label = "auto-admit", .group = .act, .show_footer = false, .show_help = false },
+    };
+    const EndTurnAction = enum { day, week, jump, cancel };
+    pub const end_turn_bindings = [_]keys.Binding(EndTurnAction){
+        .{ .match = keys.Match.char('n'), .action = .day, .label = "end the turn anyway", .group = .act },
+        .{ .match = keys.Match.char('y'), .action = .day, .label = "a day", .group = .act, .show_footer = false, .show_help = false },
+        .{ .match = keys.Match.char('N'), .action = .week, .label = "end 7 turns", .group = .act },
+        .{ .match = .{ .chars = .{ '1', '9' } }, .action = .jump, .label = "go to that warning", .group = .navigate },
+        .{ .match = .{ .key = .escape }, .action = .cancel, .label = "not yet", .group = .misc },
+    };
+    const QuitAction = enum { save, discard, stay };
+    pub const quit_bindings = [_]keys.Binding(QuitAction){
+        .{ .match = keys.Match.char('s'), .action = .save, .label = "save and return", .group = .act },
+        .{ .match = keys.Match.char('r'), .action = .discard, .label = "return without saving", .group = .act },
+        .{ .match = .{ .key = .escape }, .action = .stay, .label = "stay in the campaign", .group = .misc },
+    };
+    const GameOverAction = enum { leave };
+    pub const game_over_bindings = [_]keys.Binding(GameOverAction){
+        .{ .match = .{ .key = .enter }, .action = .leave, .label = "return to the welcome screen", .group = .act },
+        .{ .match = .{ .key = .escape }, .action = .leave, .label = "return to the welcome screen", .group = .act, .show_footer = false, .show_help = false },
+    };
+    /// Every confirm dialog: the dialog names the verbs, the table owns the keys.
+    const ConfirmAction = enum { confirm, alternative, cancel };
+    pub const confirm_bindings = [_]keys.Binding(ConfirmAction){
+        .{ .match = keys.Match.char('y'), .action = .confirm, .label = "confirm", .group = .act },
+        .{ .match = keys.Match.char('s'), .action = .alternative, .label = "the second choice", .group = .act },
+        .{ .match = .{ .key = .escape }, .action = .cancel, .label = "keep", .group = .misc },
+    };
+    const InputAction = enum { submit, erase, complete, cancel, type };
+    pub const input_bindings = [_]keys.Binding(InputAction){
+        .{ .match = .text, .action = .type, .label = "type", .group = .act, .show_footer = false },
+        .{ .match = .{ .key = .backspace }, .action = .erase, .label = "erase", .group = .act, .show_footer = false },
+        .{ .match = .{ .key = .tab }, .action = .complete, .label = "complete", .group = .act, .show_footer = false, .help = "complete a verb or an id (the command line)" },
+        .{ .match = .{ .key = .enter }, .action = .submit, .label = "confirm", .group = .act },
+        .{ .match = .{ .key = .escape }, .action = .cancel, .label = "cancel", .group = .misc },
+    };
+
+    const editor_legend = keys.entries(EditorAction, &editor_bindings);
+    const list_legend = keys.entries(ListAction, &list_bindings);
+    const raise_crews_legend = keys.entries(RaiseCrewsAction, &raise_crews_bindings);
+    const after_action_legend = keys.entries(AfterActionAction, &after_action_bindings);
+    const form_legend = keys.entries(FormAction, &form_bindings);
+    const settings_legend = keys.entries(SettingsShortcut, &settings_bindings);
+    const end_turn_legend = keys.entries(EndTurnAction, &end_turn_bindings);
+    const quit_legend = keys.entries(QuitAction, &quit_bindings);
+    const game_over_legend = keys.entries(GameOverAction, &game_over_bindings);
+    const confirm_legend = keys.entries(ConfirmAction, &confirm_bindings);
+    const amount_legend = keys.entries(AmountKey, &amount_bindings);
+    const input_legend = keys.entries(InputAction, &input_bindings);
+
+    /// A form modal's title: its name, the row and change keys, and its
+    /// act and close verbs.
+    fn formTitle(al: std.mem.Allocator, name: []const u8, close: []const u8) ![]const u8 {
+        return std.fmt.allocPrint(al, "{s} · {s} · {s} · {s} · {s}", .{
+            name,
+            try keyHint(FormAction, al, &form_bindings, .down, "row"),
+            try keyHint(FormAction, al, &form_bindings, .less, "change"),
+            try keyHint(FormAction, al, &form_bindings, .act, "act"),
+            try keyHint(FormAction, al, &form_bindings, .close, close),
+        });
+    }
+
+    /// `[key] verb` for a hint in a modal's text, the key from its table.
+    fn keyHint(comptime A: type, al: std.mem.Allocator, bindings: []const keys.Binding(A), action: A, verb: []const u8) ![]const u8 {
+        var buf: [16]u8 = undefined;
+        return std.fmt.allocPrint(al, "[{s}] {s}", .{ keys.keyFor(A, &buf, bindings, action), verb });
+    }
+
+    /// A confirm dialog's title: the question, then its verbs on the table's keys.
+    fn confirmTitle(al: std.mem.Allocator, question: []const u8, verb: []const u8, alt: ?[]const u8, keep: []const u8) ![]const u8 {
+        return std.fmt.allocPrint(al, "{s} · {s}{s}{s} · {s}", .{
+            question,
+            try keyHint(ConfirmAction, al, &confirm_bindings, .confirm, verb),
+            if (alt != null) " · " else "",
+            if (alt) |alt_verb| try keyHint(ConfirmAction, al, &confirm_bindings, .alternative, alt_verb) else "",
+            try keyHint(ConfirmAction, al, &confirm_bindings, .cancel, keep),
+        });
+    }
+
+    /// A confirm dialog's button row.
+    fn confirmButtons(al: std.mem.Allocator, verb: []const u8, alt: ?[]const u8, keep: []const u8) ![]const u8 {
+        return std.fmt.allocPrint(al, "  {{s}} {s} {{/}}   {s}{s}{s}{{d}}{s}{{/}}", .{
+            try keyHint(ConfirmAction, al, &confirm_bindings, .confirm, verb),
+            if (alt != null) "{s} " else "",
+            if (alt) |alt_verb| try keyHint(ConfirmAction, al, &confirm_bindings, .alternative, alt_verb) else "",
+            if (alt != null) " {/}   " else "",
+            try keyHint(ConfirmAction, al, &confirm_bindings, .cancel, keep),
+        });
+    }
+
     fn handleModalKey(self: *App, key: Key) !void {
         switch (self.modal) {
             .none => {},
             .help, .decision, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .seat, .emblem, .hull, .contract_log, .log_entry, .battle_list, .record => try self.listKey(key),
-            .after_action => |id| switch (key) {
-                // Closing the sheet is reading it — the command
-                // does the marking, the client never touches the record.
-                .escape, .char => {
-                    _ = try self.execSay(.{ .read_report = id }, .good, "after-action read", .{});
-                    // A fight the company won asks for the tempo next:
-                    // hand it over rather than drop the player
-                    // on a screen that refuses to advance.
-                    self.modal = switch (q.turnHold(&self.gs.?)) {
-                        .decision => |ev| .{ .decision = ev },
-                        else => if (self.battles_from_list) .{ .battle_list = {} } else .none,
-                    };
-                },
-                else => {},
-            },
-            .emblem_editor => switch (key) {
-                .escape => self.modal = .none,
-                .left => self.ed_x -|= 1,
-                .right => self.ed_x = @min(7, self.ed_x + 1),
-                .up => self.ed_y -|= 1,
-                .down => self.ed_y = @min(2, self.ed_y + 1),
-                .backspace => {
-                    self.ed_x -|= 1;
-                    self.ed_art[self.ed_y][self.ed_x] = ' ';
-                },
-                .enter => {
-                    var bytes: std.ArrayListUnmanaged(u8) = .empty;
-                    try bytes.appendSlice(self.a(), art_magic);
-                    for (0..3) |r| {
-                        try bytes.appendSlice(self.a(), &self.ed_art[r]);
-                        if (r < 2) try bytes.append(self.a(), '\n');
-                    }
-                    self.modal = .none;
-                    try self.applyEmblem(bytes.items);
-                    self.say(.good, "emblem set to your own crest", .{});
-                },
-                .char => |ch| {
-                    if (ch == 'u') {
-                        self.ed_art = self.ed_undo;
-                        return;
-                    }
-                    if (ch >= 0x20 and ch < 0x7f) {
-                        self.ed_art[self.ed_y][self.ed_x] = @intCast(ch);
-                        self.ed_x = @min(7, self.ed_x + 1);
-                    }
-                },
-                else => {},
-            },
-            .amount => |*form| switch (key) {
-                .escape => self.modal = .none,
-                .tab, .down => form.cur = @intCast((form.cur + 1) % form.n),
-                .backtab, .up => form.cur = @intCast((form.cur + form.n - 1) % form.n),
-                .backspace => {
-                    // Editing may pass through 0 so a last digit can always be
-                    // deleted; the range applies when the form runs.
-                    const f = &form.fields[form.cur];
-                    f.value = @divTrunc(f.value, 10);
-                    f.typed = true;
-                },
-                .enter => try self.amountRun(),
-                .char => |ch| {
-                    const f = &form.fields[form.cur];
-                    switch (ch) {
-                        '+', '=' => f.value = @min(f.max, f.value + f.step),
-                        '-' => f.value = @max(f.min, f.value - f.step),
-                        'j' => form.cur = @intCast((form.cur + 1) % form.n),
-                        'k' => form.cur = @intCast((form.cur + form.n - 1) % form.n),
-                        '0'...'9' => {
-                            const d: i64 = ch - '0';
-                            f.value = if (f.typed and f.value != 0) @min(f.max, f.value *| 10 +| d) else d;
-                            f.typed = true;
-                        },
-                        else => {},
-                    }
-                },
-                else => {},
-            },
-            .battle_orders => |id| switch (key) {
-                .escape => self.modal = .none,
-                .down => try self.ordersMove(id, 1),
-                .up => try self.ordersMove(id, -1),
-                .left => try self.ordersAdjust(id, -1),
-                .right => try self.ordersAdjust(id, 1),
-                .enter => try self.ordersEnter(id),
-                .char => |ch| switch (ch) {
-                    'j' => try self.ordersMove(id, 1),
-                    'k' => try self.ordersMove(id, -1),
-                    'h' => try self.ordersAdjust(id, -1),
-                    'l' => try self.ordersAdjust(id, 1),
-                    'q' => self.modal = .none,
-                    else => {},
-                },
-                else => {},
-            },
-            .settings => switch (key) {
-                .escape => self.modal = .none,
-                .down => self.settingsMove(1),
-                .up => self.settingsMove(-1),
-                .left => try self.settingsAdjust(-1),
-                .right => try self.settingsAdjust(1),
-                .enter => try self.settingsEnter(),
-                .char => |ch| switch (ch) {
-                    'j' => self.settingsMove(1),
-                    'k' => self.settingsMove(-1),
-                    'h' => try self.settingsAdjust(-1),
-                    'l' => try self.settingsAdjust(1),
-                    // The old hotkeys still work as shortcuts.
-                    'm', 'M' => try self.toggleMusic(),
-                    '+', '=' => try self.adjustVolume(10),
-                    '-' => try self.adjustVolume(-10),
-                    '>' => if (self.music) |*m| m.skip(),
-                    '<' => if (self.music) |*m| m.back(),
-                    't', 'T' => {
-                        self.openModal(.music);
+            .after_action => |id| {
+                const hit = keys.lookup(AfterActionAction, &after_action_bindings, 0, key) orelse return;
+                switch (hit.action) {
+                    .scroll_left => self.colScroll(2).* -|= 1,
+                    .scroll_right => self.colScroll(2).* += 1,
+                    .close => {
+                        // Closing the sheet is reading it — the command
+                        // does the marking, the client never touches the record.
+                        _ = try self.execSay(.{ .read_report = id }, .good, "after-action read", .{});
+                        // A fight the company won asks for the tempo next:
+                        // hand it over rather than drop the player
+                        // on a screen that refuses to advance.
+                        self.modal = switch (q.turnHold(&self.gs.?)) {
+                            .decision => |ev| .{ .decision = ev },
+                            else => if (self.battles_from_list) .{ .battle_list = {} } else .none,
+                        };
                     },
-                    'd', 'D' => try self.cycleDifficulty(1),
-                    'a', 'A' => try self.toggleAutoAdmit(),
-                    'q' => self.modal = .none,
-                    else => {},
-                },
-                else => {},
+                }
             },
-            .end_turn => switch (key) {
-                .escape => self.modal = .none,
-                .char => |ch| switch (ch) {
-                    'n', 'y' => {
+            .emblem_editor => {
+                const hit = keys.lookup(EditorAction, &editor_bindings, 0, key) orelse return;
+                switch (hit.action) {
+                    .cancel => self.modal = .none,
+                    .left => self.ed_x -|= 1,
+                    .right => self.ed_x = @min(7, self.ed_x + 1),
+                    .up => self.ed_y -|= 1,
+                    .down => self.ed_y = @min(2, self.ed_y + 1),
+                    .erase => {
+                        self.ed_x -|= 1;
+                        self.ed_art[self.ed_y][self.ed_x] = ' ';
+                    },
+                    .save => {
+                        var bytes: std.ArrayListUnmanaged(u8) = .empty;
+                        try bytes.appendSlice(self.a(), art_magic);
+                        for (0..3) |r| {
+                            try bytes.appendSlice(self.a(), &self.ed_art[r]);
+                            if (r < 2) try bytes.append(self.a(), '\n');
+                        }
+                        self.modal = .none;
+                        try self.applyEmblem(bytes.items);
+                        self.say(.good, "emblem set to your own crest", .{});
+                    },
+                    .undo => self.ed_art = self.ed_undo,
+                    .paint => {
+                        const ch = key.char;
+                        if (ch < 0x7f) {
+                            self.ed_art[self.ed_y][self.ed_x] = @intCast(ch);
+                            self.ed_x = @min(7, self.ed_x + 1);
+                        }
+                    },
+                }
+            },
+            .amount => |*form| {
+                const hit = keys.lookup(AmountKey, &amount_bindings, 0, key) orelse return;
+                const f = &form.fields[form.cur];
+                switch (hit.action) {
+                    .cancel => self.modal = .none,
+                    .next => form.cur = @intCast((form.cur + 1) % form.n),
+                    .prev => form.cur = @intCast((form.cur + form.n - 1) % form.n),
+                    .erase => {
+                        // Editing may pass through 0 so a last digit can always be
+                        // deleted; the range applies when the form runs.
+                        f.value = @divTrunc(f.value, 10);
+                        f.typed = true;
+                    },
+                    .run => try self.amountRun(),
+                    .more => f.value = @min(f.max, f.value + f.step),
+                    .less => f.value = @max(f.min, f.value - f.step),
+                    .digit => {
+                        const d: i64 = hit.offset;
+                        f.value = if (f.typed and f.value != 0) @min(f.max, f.value *| 10 +| d) else d;
+                        f.typed = true;
+                    },
+                }
+            },
+            .battle_orders => |id| {
+                const hit = keys.lookup(FormAction, &form_bindings, 0, key) orelse return;
+                switch (hit.action) {
+                    .close => self.modal = .none,
+                    .down => try self.ordersMove(id, 1),
+                    .up => try self.ordersMove(id, -1),
+                    .less => try self.ordersAdjust(id, -1),
+                    .more => try self.ordersAdjust(id, 1),
+                    .act => try self.ordersEnter(id),
+                }
+            },
+            .settings => {
+                if (keys.lookup(SettingsShortcut, &settings_bindings, 0, key)) |hit| {
+                    switch (hit.action) {
+                        .music => try self.toggleMusic(),
+                        .louder => try self.adjustVolume(10),
+                        .quieter => try self.adjustVolume(-10),
+                        .skip => if (self.music) |*m| m.skip(),
+                        .back => if (self.music) |*m| m.back(),
+                        .tracks => self.openModal(.music),
+                        .difficulty => try self.cycleDifficulty(1),
+                        .auto_admit => try self.toggleAutoAdmit(),
+                    }
+                    return;
+                }
+                const hit = keys.lookup(FormAction, &form_bindings, 0, key) orelse return;
+                switch (hit.action) {
+                    .close => self.modal = .none,
+                    .down => self.settingsMove(1),
+                    .up => self.settingsMove(-1),
+                    .less => try self.settingsAdjust(-1),
+                    .more => try self.settingsAdjust(1),
+                    .act => try self.settingsEnter(),
+                }
+            },
+            .end_turn => {
+                const hit = keys.lookup(EndTurnAction, &end_turn_bindings, 0, key) orelse return;
+                switch (hit.action) {
+                    .cancel => self.modal = .none,
+                    .day => {
                         self.modal = .none;
                         try self.advance(1);
                     },
-                    'N' => {
+                    .week => {
                         self.modal = .none;
                         try self.advance(7);
                     },
-                    '1'...'9' => {
+                    .jump => {
                         const view = try q.desk(self.a(), &self.gs.?, 0);
-                        const i: usize = ch - '1';
-                        if (i < view.checklist.len) {
+                        if (hit.offset < view.checklist.len) {
                             self.modal = .none;
-                            self.switchTab(@enumFromInt(view.checklist[i].jump));
+                            self.switchTab(@enumFromInt(view.checklist[hit.offset].jump));
                         }
                     },
-                    else => {},
-                },
-                else => {},
+                }
             },
-            .quit => switch (key) {
-                .escape => self.modal = .none,
-                .char => |ch| switch (ch) {
-                    's' => {
+            .quit => {
+                const hit = keys.lookup(QuitAction, &quit_bindings, 0, key) orelse return;
+                switch (hit.action) {
+                    .stay => self.modal = .none,
+                    .save => {
                         self.modal = .none;
                         self.store.save(&self.gs.?, self.player_id) catch |err| {
                             self.say(.crit, "save failed: {s}", .{@errorName(err)});
@@ -3254,45 +3588,48 @@ pub const App = struct {
                         };
                         self.leaveGame();
                     },
-                    'r' => {
+                    .discard => {
                         self.modal = .none;
                         self.leaveGame();
                     },
-                    else => {},
-                },
-                else => {},
+                }
             },
-            .game_over => switch (key) {
-                .enter, .escape => {
-                    self.modal = .none;
-                    self.leaveGame();
-                },
-                else => {},
+            .game_over => {
+                const hit = keys.lookup(GameOverAction, &game_over_bindings, 0, key) orelse return;
+                switch (hit.action) {
+                    .leave => {
+                        self.modal = .none;
+                        self.leaveGame();
+                    },
+                }
             },
-            .confirm => |c| switch (key) {
-                .escape => self.modal = .none,
-                .char => |ch| {
-                    const spec = try self.confirmSpec(c);
-                    if (ch == 'y') {
+            .confirm => |c| {
+                const hit = keys.lookup(ConfirmAction, &confirm_bindings, 0, key) orelse return;
+                const spec = try self.confirmSpec(c);
+                switch (hit.action) {
+                    .cancel => self.modal = .none,
+                    .confirm => {
                         self.modal = .none;
                         if (try self.execSay(spec.cmd, .amber, "{s}", .{spec.done})) self.afterConfirm(c);
-                    } else if (spec.alt) |alt| if (ch == alt.key) {
+                    },
+                    .alternative => if (spec.alt) |alt| {
                         self.modal = .none;
                         if (try self.execSay(alt.cmd, .amber, "{s}", .{alt.done})) self.afterConfirm(c);
-                    };
-                },
-                else => {},
+                    },
+                }
             },
-            .input => |kind| switch (key) {
-                .escape => self.modal = .none,
-                .backspace => self.input.pop(),
-                .tab => if (kind == .command) try self.completeCommand(),
-                .enter => {
-                    self.modal = .none;
-                    try self.submitInput(kind);
-                },
-                .char => |ch| self.input.push(ch),
-                else => {},
+            .input => |kind| {
+                const hit = keys.lookup(InputAction, &input_bindings, 0, key) orelse return;
+                switch (hit.action) {
+                    .cancel => self.modal = .none,
+                    .erase => self.input.pop(),
+                    .complete => if (kind == .command) try self.completeCommand(),
+                    .submit => {
+                        self.modal = .none;
+                        try self.submitInput(kind);
+                    },
+                    .type => self.input.push(key.char),
+                }
             },
         }
     }
@@ -3620,4 +3957,41 @@ test "docs/tui.md carries the generated key reference, exactly" {
     const e = std.mem.indexOf(u8, doc, App.keys_end) orelse return error.KeyBlockMissing;
     // Regenerate with `zig-out/bin/game --keys-markdown` and paste between the markers.
     try std.testing.expectEqualStrings(want, doc[b .. e + App.keys_end.len]);
+}
+
+test "every modal, welcome and wizard table is well formed" {
+    const K = keys;
+    try K.expectWellFormed(App.ListAction, &App.list_bindings);
+    try K.expectWellFormed(App.SheetAction, &App.sheet_bindings);
+    try K.expectWellFormed(App.RaiseHullsAction, &App.raise_hulls_bindings);
+    try K.expectWellFormed(App.RaiseSupportAction, &App.raise_support_bindings);
+    try K.expectWellFormed(App.RaiseCrewsAction, &App.raise_crews_bindings);
+    try K.expectWellFormed(App.MusicAction, &App.music_bindings);
+    try K.expectWellFormed(App.DecisionAction, &App.decision_bindings);
+    try K.expectWellFormed(App.LogAction, &App.log_bindings);
+    try K.expectWellFormed(App.AfterActionAction, &App.after_action_bindings);
+    try K.expectWellFormed(App.EditorAction, &App.editor_bindings);
+    try K.expectWellFormed(App.AmountKey, &App.amount_bindings);
+    try K.expectWellFormed(App.FormAction, &App.form_bindings);
+    try K.expectWellFormed(App.SettingsShortcut, &App.settings_bindings);
+    try K.expectWellFormed(App.EndTurnAction, &App.end_turn_bindings);
+    try K.expectWellFormed(App.QuitAction, &App.quit_bindings);
+    try K.expectWellFormed(App.GameOverAction, &App.game_over_bindings);
+    try K.expectWellFormed(App.ConfirmAction, &App.confirm_bindings);
+    try K.expectWellFormed(App.InputAction, &App.input_bindings);
+    try K.expectWellFormed(App.WelcomeAction, &App.welcome_bindings);
+    try K.expectWellFormed(App.CommanderAction, &App.commander_bindings);
+    try K.expectWellFormed(App.OutfitAction, &App.outfit_bindings);
+    try K.expectWellFormed(App.CompanyAction, &App.company_bindings);
+    try K.expectWellFormed(App.ReviewAction, &App.review_bindings);
+    // The settings shortcuts sit on top of the form's own keys.
+    for (App.settings_legend) |a| for (App.form_legend) |b| try std.testing.expect(!a.match.overlaps(b.match));
+}
+
+test "a confirm dialog names its verbs on the table's keys" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const al = arena.allocator();
+    try std.testing.expectEqualStrings("SELL OR STRIP HULL? · [y] sell · [s] strip · [Esc] keep", try App.confirmTitle(al, "SELL OR STRIP HULL?", "sell", "strip", "keep"));
+    try std.testing.expectEqualStrings("FIRE? · [y] fire · [Esc] keep", try App.confirmTitle(al, "FIRE?", "fire", null, "keep"));
 }
