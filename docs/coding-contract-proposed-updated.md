@@ -7,9 +7,11 @@ code falls short, the code is wrong, not the rule. `ARCHITECTURE.md`,
 enforceable engineering contract.
 
 Do not restate these rules elsewhere. Link to the owning rule. Every section
-ends with reviewer checks. The repository's contract-verification script is
-the executable source of truth for mechanical checks; prose snippets are
-examples and must not become a second, drifting implementation.
+ends with reviewer checks. The repository's contract-verification script
+(`docs/verify-contract.sh`, grown from `docs/reviewer_checks.sh`) is the
+executable source of truth for mechanical checks; prose snippets are examples,
+written with `rg` or `grep`, and must not become a second, drifting
+implementation.
 
 ---
 
@@ -247,7 +249,7 @@ after a command.
 Eligibility, cost, capacity, quote, shortfall, ranking, threshold, posture,
 and availability are each a public named function in the subsystem that owns
 the rule. Its doc comment names the rule and its source: sourcebook,
-architecture section, or dated play-feedback decision.
+architecture section, or a durable decision record (rule 84).
 
 Every consumer calls it. A comment saying “mirrors”, “same as”, “keep in sync
 with”, or “equivalent to” identifies a duplicate that must be removed.
@@ -361,7 +363,11 @@ presentation code. Domain enums, command results, log text, player input,
 save data, and mod strings contain no presentation markup.
 
 Interpolated untrusted values are escaped or emitted as typed plain-text
-segments; concatenating them into trusted markup strings is prohibited.
+segments; concatenating them into trusted markup strings is prohibited. A
+player-chosen name crosses the query boundary as `table.Raw`, which cannot be
+formatted with `{s}`: a frontend draws it with `markup`, prints it on a plain
+terminal with `terminal`, and reads `.raw` only for a command payload or an
+exact comparison, with a `// raw:` reason.
 
 ### 34. View eligibility is informative, not authoritative
 
@@ -394,9 +400,9 @@ through an explicit allowlist, never by a plain grep. A test built on
 
 ### 35. One registration table owns screens
 
-A screen module exports `draw`, movement, activation, key handling, and footer
-metadata and is registered once by `Tab`. Adding a screen touches the registry
-and the module, not parallel switches.
+A screen module exports `draw`, `move` (the cursor hook), its key `bindings`
+and `legend`, and `handle`, and is registered once by `Tab`. Adding a screen
+touches the registry and the module, not parallel switches.
 
 ### 36. Shared widgets are singular
 
@@ -418,9 +424,13 @@ rendered at the new size. Hidden panes cannot receive movement or activation.
 
 ### 39. Keys have one structured source
 
-Each screen has one key metadata table. Footer, pane titles, help, and the key
-table in `docs/tui.md` derive from or are verified against it. A smoke or unit
-test rejects documentation drift.
+Each screen, modal and lobby step has one binding table (`src/tui/keys.zig`)
+that maps keys to semantic actions and carries every word shown about them.
+Its handler switches exhaustively on the action, so a key works only if it is
+listed. Footer, pane titles, modal titles, hint lines, help, and the key
+reference in `docs/tui.md` are generated from the tables; a test compares the
+document to the generated text exactly, and tests reject an unbound action, a
+key bound twice in one pane, and a screen key that shadows a global one.
 
 ### 40. The client keeps only client state
 
@@ -432,7 +442,8 @@ it on confirmation.
 ### 41. All external text is untrusted
 
 Player input, save content, mod data, filenames, database strings, child
-process output, and environment values use a plain-text rendering path that:
+process output, and environment values use a plain-text rendering path
+(`table.plain`, `MarkupBuilder.appendPlain`, `table.Raw`) that:
 
 - validates UTF-8 and replaces invalid sequences;
 - replaces C0/C1 controls, ESC, DEL, newlines, and tabs with safe glyphs;
@@ -551,9 +562,9 @@ Adding an unused stream does not invalidate or reseed existing streams.
 ### 53. The integrity digest is canonical and complete
 
 The digest covers every gameplay-relevant field, including fields not yet
-persisted. Maps and unordered collections are hashed in canonical key order.
-Pointer values, allocator layout, and incidental hash-map insertion order are
-excluded.
+persisted. Maps and unordered collections are hashed in canonical key order
+or folded order-independently. Pointer values, allocator layout, and
+incidental hash-map insertion order are excluded.
 
 A fixed seed and command script assert a pinned digest. Save, load, and
 continued evolution preserve it.
@@ -762,9 +773,9 @@ bash docs/repl_smoke.sh zig-out/bin/game /tmp/r.db
 ```
 
 Changes under `src/tui`, `src/sim/cli.zig`, `src/sim/queries.zig`, or
-`src/main.zig` require both smoke scripts. CI installs ripgrep explicitly
-rather than assuming it, and additionally performs a clean package build and
-a compile for every supported platform (rule 65).
+`src/main.zig` require both smoke scripts. CI installs whatever the contract
+script needs explicitly rather than assuming it, and additionally performs a
+clean package build and a compile for every supported platform (rule 65).
 
 ### 73. Contract checks are recursive and executable
 
@@ -807,7 +818,9 @@ substantive arms, or a module over 1,000 lines requires one of:
   deliverable.
 
 Facades may remain centralized, but they dispatch to subsystem-owned functions
-rather than implementing every subsystem inline.
+rather than implementing every subsystem inline. A dispatch switch (one call
+or a few lines per arm, such as `commands.execute` or a binding table's action
+switch) does not count toward the arm threshold.
 
 ### 77. State owns storage, subsystems own behavior
 
