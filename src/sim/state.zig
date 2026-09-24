@@ -1,6 +1,6 @@
 //! GameState: the one big tree the simulation systems operate on (ARCH §4).
 //! Owned by an arena; pure and deterministic — no I/O, no wall clock.
-//! Mirrors MekHQ's `Campaign` object, decomposed: state lives here, behavior
+//! MekHQ counterpart: `Campaign`, decomposed: state lives here, behavior
 //! lives in the system modules (tick.zig, commands.zig, ...).
 
 const std = @import("std");
@@ -32,7 +32,7 @@ pub const Config = struct {
     start_date: clock_mod.Date = clock_mod.Date.campaign_default,
 };
 
-/// Where money lives (Stage 9A, ARCH §11): the outfit's central treasury,
+/// Where money lives (ARCH §11): the outfit's central treasury,
 /// an HQ's funds, or a deployed company's operating fund. Spending resolves
 /// where the spender stands — the treasury cannot teleport.
 pub const Treasury = union(enum) {
@@ -55,14 +55,14 @@ pub const StandingPolicy = struct {
     entity: Treasury,
     floor: types.CBills,
     monthly_cap: types.CBills,
-    /// Dispatched so far this month (Stage 12: policies are checked daily,
-    /// the cap is per month; reset on payday).
+    /// Dispatched so far this month (policies are checked daily, the cap
+    /// is per month; reset on payday).
     sent_this_month: types.CBills = 0,
 };
 
 /// "Keep this company's field stores above `min_days` of provisions":
 /// when they drop under, `tons` are shipped from its home warehouse over
-/// the supply link (Stage 12). One inbound shipment at a time.
+/// the supply link. One inbound shipment at a time.
 pub const SupplyPolicy = struct {
     company: types.ForceId,
     /// Safety days of provisions to hold past the line's transit.
@@ -77,7 +77,7 @@ pub const SupplyPolicy = struct {
 /// "Keep this warehouse stocked": when an HQ's count of `part_key` drops
 /// under `min`, enough is ordered (components: fabricated when the HQ has a
 /// bay) to bring it back to `target`. Checked daily; one order per line in
-/// flight, and a failed sourcing roll is not retried for a week (Stage 12).
+/// flight, and a failed sourcing roll is not retried for a week.
 pub const StockPolicy = struct {
     hq: types.HqId,
     part_key: []const u8,
@@ -85,9 +85,7 @@ pub const StockPolicy = struct {
     target: u32,
 };
 
-/// Structured campaign log (Stage 9A): every entry tagged so any entity's
-/// history is a filter, not an archaeology dig.
-/// Campaign counters (12C.8).
+/// Campaign counters.
 pub const Stats = struct {
     battles_won: u32 = 0,
     battles_drawn: u32 = 0,
@@ -97,7 +95,8 @@ pub const Stats = struct {
     people_kia: u32 = 0,
     enemy_bv_destroyed: u64 = 0,
 
-    /// Nothing counted yet: a book from before the counters existed.
+    /// Nothing counted yet: a new campaign, or a save without counter rows
+    /// (the loader recounts those from the log).
     pub fn isEmpty(self: Stats) bool {
         return self.battles_won + self.battles_drawn + self.battles_lost + self.hulls_salvaged == 0;
     }
@@ -125,6 +124,8 @@ pub const LogCtx = struct {
     contract: types.ContractId = .none,
 };
 
+/// Structured campaign log entry: every entry tagged so any entity's
+/// history is a filter, not an archaeology dig.
 pub const LogEntry = struct {
     day: u32,
     category: LogCategory,
@@ -152,7 +153,7 @@ pub const LogFilter = union(enum) {
     contract: types.ContractId,
 };
 
-/// Mek bay work (Stage 9C): jobs hold a bay slot for a span of days; they
+/// Mek bay work: jobs hold a bay slot for a span of days; they
 /// wait in queue when the bays are full.
 pub const BayJobKind = enum { depot_repair, reactivation, fabrication, refit };
 
@@ -170,7 +171,7 @@ pub const BayJob = struct {
 
 pub const StaffSummary = struct { count: u32 = 0, best_skill: u8 = 7 };
 
-/// A hiring-hall candidate (Stage 9C.2): the generated person, held for
+/// A hiring-hall candidate: the generated person, held for
 /// the player to hire (with a signing bonus) before they move on.
 pub const Candidate = struct {
     hq: types.HqId,
@@ -180,7 +181,7 @@ pub const Candidate = struct {
     expires_day: u32,
 };
 
-/// `any` (12.26): whichever seat the person's role fits — pilot roles
+/// `any`: whichever seat the person's role fits — pilot roles
 /// take the crew seat, tech roles the tech slot.
 pub const Slot = enum { pilot, tech, any };
 
@@ -195,7 +196,7 @@ pub const FactionCooling = struct {
     until_day: u32,
 };
 
-/// A MekLab refit plan (Stage 10): edits staged against a hull, validated
+/// A MekLab refit plan: edits staged against a hull, validated
 /// on demand, committed into a bay job.
 pub const RefitPlan = struct {
     unit: types.UnitId,
@@ -218,17 +219,16 @@ pub const GameState = struct {
     /// The player character (character creation): origin decides where the
     /// outfit stands up; profession grants one 2% edge (commander.zig).
     commander: ?commander_mod.Commander = null,
-    /// Row id in the save store's campaign registry (Stage 11); 0 = never saved.
+    /// Row id in the save store's campaign registry; 0 = never saved.
     campaign_id: i64 = 0,
     /// Set when the treasury went negative beyond what loans and sales
-    /// could cover: game over (Stage 12). Persisted; advancing refuses.
+    /// could cover: game over. Persisted; advancing refuses.
     bankrupt: bool = false,
-    /// Stage 12: the medbay admits the wounded itself each morning instead
-    /// of waiting for the commander's signature (an untreated-wounded
+    /// The medbay admits the wounded itself each morning instead of waiting for the commander's signature (an untreated-wounded
     /// warning never blocks the turn while this is on).
     auto_admit: bool = false,
     /// Share of contract income paid out to shareholders at completion
-    /// (12C.3, AtB shares); the owner sets it with `shares <pct>`.
+    /// (AtB shares); the owner sets it with `shares <pct>`.
     share_profit_bp: types.Bp = @import("../domain/tuning.zig").t.person.share_profit_default_bp,
     ledger: finance_mod.Ledger = .{},
     event_queue: events_mod.EventQueue = .{},
@@ -243,19 +243,19 @@ pub const GameState = struct {
     /// Site market board at the HQ (replaced each monthly refresh).
     market_listings: std.ArrayListUnmanaged(market_mod.Listing) = .empty,
     loans: std.ArrayListUnmanaged(finance_mod.Loan) = .empty,
-    /// Outfit spare-parts pool, keyed by catalog part_key. (Per-HQ/company
-    /// inventories arrive with Stage 9's supply network.)
+    /// The outfit depot's stock (the fallback site before any HQ exists),
+    /// keyed by catalog part_key.
     spare_parts: std.StringArrayHashMapUnmanaged(u32) = .empty,
     part_orders: std.ArrayListUnmanaged(part_mod.AcquisitionOrder) = .empty,
-    /// Structured campaign log — newest last (Stage 9A).
+    /// Structured campaign log — newest last.
     event_log: std.ArrayListUnmanaged(LogEntry) = .empty,
-    /// Stamped onto each resolved engagement (12G.3), so an AAR's lines
+    /// Stamped onto each resolved engagement, so an AAR's lines
     /// can be gathered by battle rather than by reading their prefix.
     next_battle_id: u32 = 1,
-    /// Recent engagements as records (12G.4); the journal owns its own
+    /// Recent engagements as records; the journal owns its own
     /// retention, as `event_queue` owns the inbox's.
     battle_reports: after_action_mod.Journal = .{},
-    /// Hulls the enemy dragged off a field we lost (12G.7): off the books
+    /// Hulls the enemy dragged off a field we lost: off the books
     /// but not struck off, so a recovery raid has something to win back.
     held_hulls: std.ArrayListUnmanaged(unit_mod.HeldHull) = .empty,
     /// Money in transit between treasuries.
@@ -265,32 +265,32 @@ pub const GameState = struct {
     /// Automatic provisions resupply for deployed companies.
     supply_policies: std.ArrayListUnmanaged(SupplyPolicy) = .empty,
     stock_policies: std.ArrayListUnmanaged(StockPolicy) = .empty,
-    /// Mek bay queues across all HQs (Stage 9C).
+    /// Mek bay queues across all HQs.
     bay_jobs: std.ArrayListUnmanaged(BayJob) = .empty,
-    /// Hiring-hall boards (Stage 9C.2), churned daily.
+    /// Hiring-hall boards, churned daily.
     candidates: std.ArrayListUnmanaged(Candidate) = .empty,
-    /// Supply links between HQs (Stage 9D).
+    /// Supply links between HQs.
     hq_links: std.ArrayListUnmanaged(@import("network.zig").HqLink) = .empty,
-    /// Units in transit between companies (Stage 9D transfers).
+    /// Units in transit between companies.
     unit_transfers: std.ArrayListUnmanaged(UnitTransfer) = .empty,
-    /// Employer factions that remember a breach (Stage 9E): thinner,
+    /// Employer factions that remember a breach: thinner,
     /// cheaper offers from them until the day passes.
     faction_cooling: std.ArrayListUnmanaged(FactionCooling) = .empty,
-    /// Standing with each house (Stage 12.21), −100…100; absent = 0.
+    /// Standing with each house, −100…100; absent = 0.
     faction_standing: std.StringArrayHashMapUnmanaged(i32) = .empty,
-    /// Difficulty (12.32): scales the economy and the opposition; regular
+    /// Difficulty: scales the economy and the opposition; regular
     /// is the game as tuned. Chosen in Settings, persisted per campaign.
     difficulty: difficulty_mod.Level = .regular,
-    /// Event memory (play feedback): when each decision kind last fired and
+    /// Event memory: when each decision kind last fired and
     /// how the player has been answering it — cooldowns and standing orders
     /// (sim/contract_events.zig).
     event_memory: std.AutoArrayHashMapUnmanaged(events_mod.EventKind, EventMemory) = .empty,
-    /// Campaign counters for the summary screen (12C.8): what the log
+    /// Campaign counters for the summary screen: what the log
     /// remembers in aggregate. Persisted as meta ints.
     stats: Stats = .{},
-    /// The Dragoons rating on every New Year's Day (12C.8).
+    /// The Dragoons rating on every New Year's Day.
     rating_history: std.ArrayListUnmanaged(RatingSnapshot) = .empty,
-    /// MekLab refit plans, staged and committed (Stage 10).
+    /// MekLab refit plans, staged and committed.
     refit_plans: std.ArrayListUnmanaged(RefitPlan) = .empty,
 
     next_person_id: u32 = 1,
@@ -414,7 +414,6 @@ pub const GameState = struct {
     // ---------------------------------------------------------------- people
 
     /// Hire with default skills for the role at Regular experience.
-    /// (Stage 2: markets offer generated candidates instead.)
     pub fn hirePerson(self: *GameState, first: []const u8, last: []const u8, role: person_mod.Role) !types.PersonId {
         const id: types.PersonId = @enumFromInt(self.next_person_id);
         self.next_person_id += 1;
@@ -459,8 +458,8 @@ pub const GameState = struct {
     }
 
     /// Recruit a randomly generated person (AtB-style: experience on 2d6,
-    /// skills from the band, names from the tables). Stage 4+: candidates
-    /// come through the personnel market with signing bonuses instead.
+    /// skills from the band, names from the tables). No signing bonus:
+    /// that belongs to hiring-hall candidates.
     pub fn recruitGenerated(self: *GameState, role: person_mod.Role, hq_id: types.HqId, stream: rng_mod.Stream) !types.PersonId {
         const spec = person_gen.generateWithBonus(&self.rng, stream, role, self.recruitBonus(hq_id));
         return self.hireFromSpec(spec);
@@ -518,8 +517,7 @@ pub const GameState = struct {
 
     /// Character creation: the commander's origin picks the starter world
     /// (weighted-random in their faction's space) and stands up the starter
-    /// regional HQ there with modest level-1 facilities. Staffing is
-    /// paper-satisfied until Stage 9 posts real people to HQs.
+    /// regional HQ there with modest level-1 facilities.
     pub fn createCommander(
         self: *GameState,
         name: []const u8,
@@ -551,7 +549,7 @@ pub const GameState = struct {
         const req = hq.staffRequired();
         try self.hqs.put(self.allocator(), id, hq);
 
-        // The back office is people (Stage 9C): recruit the starter HQ's
+        // The back office is people: recruit the starter HQ's
         // staff to requirement and post them. Their payroll is the tail.
         const staff_plan = [_]struct { person_mod.Role, u32 }{
             .{ .admin_command, req.admin },                           .{ .admin_logistics, req.logistics / 2 },
@@ -570,14 +568,13 @@ pub const GameState = struct {
         // handed over on-site (no courier).
         self.transferFunds(.outfit, .{ .hq = id }, tuning.hq.founding_funds, 0) catch {};
 
-        // Standing defaults the player can clear (Stage 12.19 play-tuning:
-        // a hands-off year ran the HQ treasury negative on depot repairs and
-        // the warehouse out of food): the outfit tops the HQ up on payday,
-        // and the warehouse keeps provisions stocked.
+        // Standing defaults the player can clear, so a hands-off outfit keeps
+        // its HQ solvent and fed: the outfit tops the HQ up on payday, and
+        // the warehouse keeps provisions stocked.
         try self.policies.append(self.allocator(), .{ .entity = .{ .hq = id }, .floor = tuning.finance.hq_policy_floor, .monthly_cap = tuning.finance.hq_policy_cap });
         try self.stock_policies.append(self.allocator(), .{ .hq = id, .part_key = "provisions", .min = tuning.generation.provisions_keep_min, .target = tuning.generation.provisions_keep_target });
 
-        // A modestly stocked warehouse to start (Stage 9B).
+        // A modestly stocked warehouse to start.
         const site: types.Site = .{ .hq = id };
         const g = tuning.generation;
         try self.addStock(site, "provisions", g.starter_provisions);
@@ -588,7 +585,7 @@ pub const GameState = struct {
         return id;
     }
 
-    // ----------------------------------------- the back office (Stage 9C)
+    // ----------------------------------------- the back office
 
     /// Posted admins of one role at an HQ: how many, and the best of them.
     pub fn hqStaff(self: *GameState, hq_id: types.HqId, role: person_mod.Role) StaffSummary {
@@ -648,12 +645,12 @@ pub const GameState = struct {
         const hq = self.hqs.getPtr(hq_id) orelse return 0;
         var bonus: i32 = hq.effectiveFacilityLevel(.hiring_hall);
         if (self.hqStaff(hq.id, .admin_hr).count >= tuning.person.recruit_hr_admins) bonus += 1;
-        // A famous outfit (12C.7) draws a better class of walk-in.
+        // A famous outfit draws a better class of walk-in.
         if (@import("rating.zig").currentIndex(self) >= @import("../domain/tuning.zig").t.rating.recruit_bonus_index) bonus += 1;
         return @min(bonus, 4);
     }
 
-    // ------------------------------------- the HQ network (Stage 9D)
+    // ------------------------------------- the HQ network
 
     pub const FoundError = error{ UnknownPlanet, NotReachable } || std.mem.Allocator.Error;
 
@@ -749,7 +746,7 @@ pub const GameState = struct {
         return n;
     }
 
-    /// Air wings of the companies assigned to an HQ (Stage 12.15).
+    /// Air wings of the companies assigned to an HQ.
     pub fn airCompaniesAtHq(self: *GameState, hq_id: types.HqId) u32 {
         var n: u32 = 0;
         var it = self.forces.iterator();
@@ -822,7 +819,7 @@ pub const GameState = struct {
         jumpship_collars: u32 = 0,
     };
 
-    /// What the crewed, idle ships berthed at an HQ can lift (Stage 12.15).
+    /// What the crewed, idle ships berthed at an HQ can lift.
     pub fn availableLift(self: *GameState, hq_id: types.HqId) Lift {
         var lift: Lift = .{};
         var it = self.units.iterator();
@@ -910,7 +907,7 @@ pub const GameState = struct {
         });
     }
 
-    // ------------------------------------------- physical stock (Stage 9B)
+    // ------------------------------------------- physical stock
     // Stock lives at sites: the outfit's fallback depot (pre-HQ), each HQ's
     // warehouse (capped by warehouse level), each deployed company's field
     // stores (capped by its logistics trucks). Pallets have tonnage.
@@ -928,14 +925,12 @@ pub const GameState = struct {
         return if (self.hqs.count() > 0) .{ .hq = self.hqs.keys()[0] } else .outfit;
     }
 
-    /// A force's home warehouse: its supplying HQ (Stage 9D), else the seat.
+    /// A force's home warehouse: its supplying HQ, else the seat.
     pub fn homeSiteFor(self: *GameState, force_id: types.ForceId) types.Site {
         const hq = self.homeHqFor(force_id);
         return if (hq != .none) .{ .hq = hq } else .outfit;
     }
 
-    /// Is the company physically at its home HQ (not deployed, not idling
-    /// on a contract world, not travelling)?
     /// Where a company stands (ARCH §9.7): the one cascade every screen,
     /// warning and refusal reads. Contract first (en route, then on
     /// station), then the road home, then a world it idles on, else home.
@@ -955,6 +950,8 @@ pub const GameState = struct {
         return .home;
     }
 
+    /// Is the company physically at its home HQ (not deployed, not idling
+    /// on a contract world, not travelling)?
     pub fn isCompanyHome(self: *GameState, company: types.ForceId) bool {
         return self.companyPosture(company) == .home;
     }
@@ -1038,7 +1035,7 @@ pub const GameState = struct {
     }
 
     /// A crewed dropship in the company's own hangar: it lifts and escorts
-    /// the company on the way in (12D.3).
+    /// the company on the way in.
     pub fn hasCrewedDropship(self: *GameState, company: types.ForceId) bool {
         var it = self.units.iterator();
         while (it.next()) |e| {
@@ -1056,7 +1053,6 @@ pub const GameState = struct {
         return self.homeSiteFor(force_id);
     }
 
-    /// Is this employer faction still cooling after a breach?
     pub fn standing(self: *GameState, faction: []const u8) i32 {
         return self.faction_standing.get(faction) orelse 0;
     }
@@ -1071,8 +1067,8 @@ pub const GameState = struct {
     }
 
     /// Money already on its way to the outfit's treasury (couriers in
-    /// transit): it counts toward solvency at turn end (12.24 bug fix —
-    /// pulling funds back could not unblock the turn until they landed).
+    /// transit): it counts toward solvency at turn end, so pulling funds
+    /// back unblocks the turn before they land.
     pub fn inboundToOutfit(self: *GameState) types.CBills {
         var sum: types.CBills = 0;
         for (self.fund_couriers.items) |c| if (c.to == .outfit) {
@@ -1081,6 +1077,7 @@ pub const GameState = struct {
         return sum;
     }
 
+    /// Is this employer faction still cooling after a breach?
     pub fn factionCooling(self: *GameState, faction: []const u8) bool {
         for (self.faction_cooling.items) |fc| {
             if (std.mem.eql(u8, fc.faction, faction) and self.clock.day_index < fc.until_day) return true;
@@ -1182,7 +1179,7 @@ pub const GameState = struct {
     /// Crate goods a company picked up in the field (salvaged structure,
     /// windfalls it cannot use out there) for the next convoy home: they
     /// arrive at the home warehouse after the map transit, no freight — the
-    /// salvage crews haul them. Structural work is depot work (Stage 12).
+    /// salvage crews haul them. Structural work is depot work.
     pub fn sendHome(self: *GameState, company: types.ForceId, key: []const u8, qty: u32) !void {
         if (qty == 0) return;
         const home = self.homeHqFor(company);
@@ -1212,7 +1209,7 @@ pub const GameState = struct {
         };
     }
 
-    // Convenience wrappers on the home warehouse (tests, Stage 5 callers).
+    // Convenience wrappers on the seat's stock (`defaultSite`).
     pub fn addSpare(self: *GameState, part_key: []const u8, qty: u32) !void {
         try self.addStock(self.defaultSite(), part_key, qty);
     }
@@ -1272,7 +1269,7 @@ pub const GameState = struct {
         var it = self.people.iterator();
         while (it.next()) |entry| {
             const p = entry.value_ptr;
-            // Prisoners eat too (12B.7).
+            // Prisoners eat too.
             if (!(p.isOnBooks() or p.status == .pow)) continue;
             if (self.personInCompany(p, company_id)) n += 1;
         }
@@ -1326,8 +1323,7 @@ pub const GameState = struct {
         return self.units.getPtr(id);
     }
 
-    /// Make a freshly bought hull match its listing's condition (Stage
-    /// 9C.3): armor, quality, broken weapons, and missing structure —
+    /// Make a freshly bought hull match its listing's condition: armor, quality, broken weapons, and missing structure —
     /// the project the player just bought.
     pub fn applyHullCondition(self: *GameState, unit_id: types.UnitId, cond: market_mod.HullCondition) void {
         const u = self.unit(unit_id) orelse return;
@@ -1393,9 +1389,9 @@ pub const GameState = struct {
         }
     }
 
-    // --------------------------------------- assignments (Stage 9C.2)
+    // --------------------------------------- assignments
 
-    /// Can this person work a hull in the unassigned pool (12.26)? The
+    /// Can this person work a hull in the unassigned pool? The
     /// pool sits at the outfit's seat; their company must be home there
     /// (or they belong to no company at all).
     pub fn canReachPool(self: *GameState, p: *const person_mod.Person) bool {
@@ -1462,7 +1458,7 @@ pub const GameState = struct {
         return hours;
     }
 
-    /// Weekly hours a hull wants from a regular tech (12C.15): the class
+    /// Weekly hours a hull wants from a regular tech: the class
     /// table scaled by quality (a neglected machine fights back) and by an
     /// exotic design (rare on the market, rare in the manuals).
     pub fn hullHours(self: *GameState, u: *const unit_mod.Unit) u32 {
@@ -1486,7 +1482,7 @@ pub const GameState = struct {
         return @intCast(@max(1, hours));
     }
 
-    /// The same hull in this tech's hands (12C.15): skill sets the pace.
+    /// The same hull in this tech's hands: skill sets the pace.
     pub fn techHoursFor(self: *GameState, tech: *const person_mod.Person, u: *const unit_mod.Unit) u32 {
         const t = tuning.maintenance;
         const role = unit_mod.techRoleFor(u.kind) orelse tech.role;
@@ -1546,7 +1542,7 @@ pub const GameState = struct {
             if (self.companyOf(u.force) != company or u.isParked()) continue;
 
             // A seat needs filling when empty or its pilot is away; a spent
-            // pilot (12C.1) is benched only when someone fresher is free.
+            // pilot is benched only when someone fresher is free.
             const seated = if (u.pilot != .none) self.person(u.pilot) else null;
             const pilot_missing = seated == null or !seated.?.isAvailable(self.clock.day_index);
             const pilot_spent = seated != null and seated.?.isUnfit();
@@ -1581,7 +1577,7 @@ pub const GameState = struct {
         return open;
     }
 
-    // ------------------------------------------- the MekLab (Stage 10)
+    // ------------------------------------------- the MekLab
 
     pub fn refitPlanFor(self: *GameState, unit_id: types.UnitId) ?*RefitPlan {
         for (self.refit_plans.items) |*p| {
@@ -1596,8 +1592,6 @@ pub const GameState = struct {
         return &self.refit_plans.items[self.refit_plans.items.len - 1];
     }
 
-    /// The hull's mounted items with a plan's edits applied (what the lab
-    /// validates). `alloc` owns the result.
     /// The rules' verdict on putting `part_key` at `loc` on top of the
     /// hull's current plan (the Lab's location picker and the commit share it).
     pub fn tryInstall(self: *GameState, alloc: std.mem.Allocator, unit_id: types.UnitId, loc: meklab.Location, part_key: []const u8) !meklab.Report {
@@ -1610,6 +1604,8 @@ pub const GameState = struct {
         return meklab.validate(design, items, alloc);
     }
 
+    /// The hull's mounted items with a plan's edits applied (what the lab
+    /// validates). `alloc` owns the result.
     pub fn labItems(self: *GameState, unit_id: types.UnitId, alloc: std.mem.Allocator) ![]meklab.Item {
         const u = self.unit(unit_id) orelse return &.{};
         var out: std.ArrayListUnmanaged(meklab.Item) = .empty;
@@ -1670,9 +1666,6 @@ pub const GameState = struct {
         }
     }
 
-    /// Move a hull into a company: the first lance with a seat free, else
-    /// the company's own pool. The pilot rides along; the old tech stays
-    /// behind (transfers cost coverage until reassigned).
     /// Move a hull between forces (lance ↔ lance, into a support lance, or
     /// straight under a company): roster lists and the pilot's posting
     /// follow it; the tech seat is kept.
@@ -1705,6 +1698,9 @@ pub const GameState = struct {
         return if (self.supportLance(company, want)) |sl| sl.id else null;
     }
 
+    /// Move a hull into a company: the first lance with a seat free, else
+    /// the company's own pool. The pilot rides along; the old tech stays
+    /// behind (transfers cost coverage until reassigned).
     pub fn placeUnitInCompany(self: *GameState, unit_id: types.UnitId, company: types.ForceId) !void {
         const u = self.unit(unit_id) orelse return error.UnknownUnit;
         // Leave the old force's roster.
@@ -1740,12 +1736,12 @@ pub const GameState = struct {
                 }
             } else if (self.supportLanceFor(company, u)) |sid| {
                 // Trucks, ambulances and platoons join the support lance of
-                // their trade (play feedback: they used to sit on the roster).
+                // their trade.
                 dest = sid;
             }
         }
         u.force = dest;
-        // A bought wreck lands as damaged, not ready (play feedback).
+        // A bought wreck lands as damaged, not ready.
         if (u.status == .in_transit) u.status = if (u.needsDepot()) .damaged else .ready;
         u.tech = .none;
         if (self.forces.getPtr(dest)) |d| try d.units.append(self.allocator(), unit_id);
@@ -1761,7 +1757,6 @@ pub const GameState = struct {
         return .none;
     }
 
-    /// Sum of monthly salaries for everyone on active status, after the
     /// The hangar ledger (ARCH §9.8): every hull bills, running or not.
     /// The payday, the employer's cost reckoning and the forecast all read it.
     pub fn monthlyHullUpkeep(self: *GameState) types.CBills {
@@ -1771,7 +1766,8 @@ pub const GameState = struct {
         return total;
     }
 
-    /// paymaster's discount if the commander has one.
+    /// Sum of monthly salaries for everyone on the books (active or
+    /// wounded), after the paymaster's discount if the commander has one.
     pub fn monthlyPayroll(self: *GameState) types.CBills {
         var total: types.CBills = 0;
         var it = self.people.iterator();
@@ -1785,21 +1781,21 @@ pub const GameState = struct {
     // ------------------------------------------------------- liquidation
 
     /// What a hull fetches on a forced sale: half its value, scaled by
-    /// condition (Stage 12).
+    /// condition.
     pub fn unitSaleValue(self: *GameState, u: *const unit_mod.Unit) types.CBills {
-        // A wreck is worth what can be stripped off it (12D.2).
+        // A wreck is worth what can be stripped off it.
         if (u.status == .destroyed) return self.stripValue(u);
         const base: types.CBills = if (u.purchase_price > 0) u.purchase_price else if (chassis_mod.find(u.chassis_key)) |c| c.cost else 0;
         const by_condition = @divTrunc(base * @as(types.CBills, u.conditionPct()) * tuning.unit.sale_bp, 10_000 * 100);
-        // Quality on the ticket (12C.13): ± per step from C (A worst, F best).
+        // Quality on the ticket: ± per step from C (A worst, F best).
         const steps: i64 = @as(i64, @intFromEnum(u.quality)) - @intFromEnum(types.Quality.c);
         return types.applyBp(by_condition, @intCast(10_000 + steps * tuning.maintenance.quality_sale_bp_per_step));
     }
 
-    /// One line of what stripping a hull recovers (12D.2).
+    /// One line of what stripping a hull recovers.
     pub const StripLine = struct { key: []const u8, qty: u32 };
 
-    /// What a hull yields stripped for parts (12D.2, MekHQ "salvage unit"):
+    /// What a hull yields stripped for parts (MekHQ "salvage unit"):
     /// every intact weapon and piece of equipment, every intact structural
     /// component, and the armour still on it. Ammunition bins and damaged
     /// gear go with the scrap.
@@ -1849,9 +1845,7 @@ pub const GameState = struct {
         return @divTrunc(total * @as(types.CBills, tuning.hq.sale_pct), 100);
     }
 
-    /// Everything the outfit could raise by selling hulls and all HQs but
-    /// the first.
-    /// Resale value of `qty` of a stock line (Stage 12): market.stock_resale_bp
+    /// Resale value of `qty` of a stock line: market.stock_resale_bp
     /// of catalogue cost, component_resale_bp for comp_* parts.
     pub fn stockSaleValue(self: *GameState, key: []const u8, qty: u32) types.CBills {
         _ = self;
@@ -1868,6 +1862,8 @@ pub const GameState = struct {
         return self.funds + self.liquidationValue() + self.creditRemaining() < 0;
     }
 
+    /// Everything the outfit could raise by selling hulls, stock and all
+    /// HQs but the first.
     pub fn liquidationValue(self: *GameState) types.CBills {
         var total: types.CBills = 0;
         var uit = self.units.iterator();
@@ -1927,11 +1923,11 @@ pub const GameState = struct {
         _ = self.units.orderedRemove(unit_id);
     }
 
-    /// The enemy dragged this hull off a field we lost (12D.3): it leaves
+    /// The enemy dragged this hull off a field we lost: it leaves
     /// the books exactly as `removeUnit` would — no bill, no bay, no
     /// lance, invisible to every walker over `units` — but the hull
     /// itself is kept in `held_hulls`, because a recovery raid can win it
-    /// back (the ROADMAP 12D.9 deferral). The crew slots are cleared: our
+    /// back. The crew slots are cleared: our
     /// people are not in it any more, whatever became of them.
     pub fn holdUnit(self: *GameState, unit_id: types.UnitId, by: []const u8, battle: types.BattleId) !void {
         self.detachUnit(unit_id);
@@ -1949,7 +1945,7 @@ pub const GameState = struct {
         });
     }
 
-    /// Won back (12G.6): the hull comes off the limbo list and onto the
+    /// Won back: the hull comes off the limbo list and onto the
     /// books, back in the lance it was taken from if that lance still
     /// exists. It comes back as it left — a wreck for the depot, not a
     /// runner. Returns false if nobody holds that hull.
@@ -2062,7 +2058,7 @@ test "postTransaction keeps funds and ledger in lockstep" {
     try std.testing.expectEqual(@as(types.CBills, -300_000), gs.ledger.balance());
 }
 
-test "12C.1: auto-assign benches a spent pilot when a fresher one is free, keeps them when nobody is" {
+test "auto-assign benches a spent pilot when a fresher one is free, keeps them when nobody is" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 121 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .paymaster);
@@ -2085,7 +2081,7 @@ test "12C.1: auto-assign benches a spent pilot when a fresher one is free, keeps
     try std.testing.expect(gs.pilotSeat(worn) == .none);
 }
 
-test "12C.13: quality moves the resale ticket" {
+test "quality moves the resale ticket" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1213 });
     defer gs.deinit();
     const uid = try gs.addUnit("SHD-2H");
@@ -2098,7 +2094,7 @@ test "12C.13: quality moves the resale ticket" {
     try std.testing.expect(gs.unitSaleValue(u) < c);
 }
 
-test "12C.15: a worn or exotic hull wants more hours; a sharper tech needs fewer" {
+test "a worn or exotic hull wants more hours; a sharper tech needs fewer" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1215 });
     defer gs.deinit();
     const uid = try gs.addUnit("AS7-D");

@@ -55,17 +55,17 @@ pub const Command = union(enum) {
         name: []const u8,
         origin: commander_mod.Faction,
         profession: commander_mod.Profession,
-        /// Campaign start year (12C.16): the market, RATs and salvage field
+        /// Campaign start year: the market, RATs and salvage field
         /// only what exists by then.
         start_year: u16 = 3025,
     },
     /// Accept an offer off the current board and send a company.
     accept_contract: struct { offer_index: usize, company: types.ForceId },
-    /// Buy a special ability with XP at a training ground (12B.6).
+    /// Buy a special ability with XP at a training ground.
     train_ability: struct { person: types.PersonId, key: []const u8 },
-    /// Pin a rank on a person (12B.4); `.private` unpinned lets seats decide again.
+    /// Pin a rank on a person; `.private` unpinned lets seats decide again.
     promote: struct { person: types.PersonId, rank: @import("../domain/rank.zig").Rank, pin: bool = true },
-    /// One negotiation round on an offer (12B.3): improve a term, harden
+    /// One negotiation round on an offer: improve a term, harden
     /// the offer, or lose it.
     negotiate: struct { offer_index: usize, term: contract_mod.NegotiableTerm },
     take_loan: struct { principal: types.CBills, term_months: u16 },
@@ -85,16 +85,16 @@ pub const Command = union(enum) {
     /// Start a training program: XP → skill, only at a regional/brigade HQ
     /// with a training ground, only for people not deployed (ARCH §9.7).
     train: struct { person: types.PersonId, skill: types.SkillType },
-    /// Bulk training (play feedback): everyone in a company who is home,
+    /// Bulk training: everyone in a company who is home,
     /// free and can afford the next level starts a program — at their
     /// role's primary skill unless one is named.
     train_company: struct { company: types.ForceId, skill: ?types.SkillType = null },
-    /// Move money between treasuries by courier (Stage 9A). Source debited
+    /// Move money between treasuries by courier. Source debited
     /// now; credit arrives after map-distance transit (min 3 days).
     transfer: struct { from: state_mod.Treasury, to: state_mod.Treasury, amount: types.CBills },
     /// Standing top-up policy for an HQ or company, executed on payday.
     set_policy: struct { entity: state_mod.Treasury, floor: types.CBills, monthly_cap: types.CBills },
-    /// Fabricate structural components in the HQ mek bay (Stage 9C): the
+    /// Fabricate structural components in the HQ mek bay: the
     /// §9.8 guarantee — always available, ×1.5 cost, holds a bay slot.
     fabricate: struct { hq: types.HqId, part_key: []const u8, quantity: u32 },
     /// Build (level 0→1) or level up a facility: paperwork then construction,
@@ -102,7 +102,7 @@ pub const Command = union(enum) {
     upgrade_facility: struct { hq: types.HqId, kind: hq_mod.FacilityKind },
     /// Post a person to HQ staff (the back office).
     post_person: struct { person: types.PersonId, hq: types.HqId },
-    /// Crew/tech assignments (Stage 9C.2): no tech → no repairs/reloads;
+    /// Crew/tech assignments: no tech → no repairs/reloads;
     /// no pilot → the hull doesn't fight.
     assign: struct { unit: types.UnitId, slot: state_mod.Slot, person: types.PersonId },
     unassign: struct { unit: types.UnitId, slot: state_mod.Slot },
@@ -114,7 +114,7 @@ pub const Command = union(enum) {
     triage: struct { person: types.PersonId, priority: u8 },
     /// R&R leave: unavailable, double fatigue recovery.
     leave: struct { person: types.PersonId, days: u16 },
-    // ---- Stage 9D: the network & multi-company operations ----
+    // ---- The network & multi-company operations ----
     /// Found a field HQ on a world you've reached: inside a ring or its
     /// beachhead band, or the site of a contract you've worked.
     found_hq: struct { name: []const u8, planet_key: []const u8 },
@@ -133,14 +133,14 @@ pub const Command = union(enum) {
     transfer_person: struct { person: types.PersonId, to_force: types.ForceId },
     /// Recruit and post admins until an HQ meets its staffing requirement.
     autostaff: types.HqId,
-    // ---- Stage 9E: contract control ----
+    // ---- Contract control ----
     /// Close out an attrition contract whose objectives are substantially
     /// met (remainder forfeited, no breach).
     complete_contract: types.ContractId,
     /// Bring a company home: from an idle field posting freely, or off an
     /// active contract under the breach clause.
     recall_company: types.ForceId,
-    // ---- Stage 10: the MekLab ----
+    // ---- The MekLab ----
     /// Stage a mount removal / installation on a hull's refit plan.
     refit_remove: struct { unit: types.UnitId, slot_key: []const u8 },
     refit_install: struct { unit: types.UnitId, location: meklab.Location, part_key: []const u8 },
@@ -148,23 +148,23 @@ pub const Command = union(enum) {
     /// Validate the plan against the rules, take the parts, and queue the
     /// bay job (class ≤ the HQ's ceiling).
     refit_commit: types.UnitId,
-    /// Mark an after-action report read (12G.5): the turn is held until
+    /// Mark an after-action report read: the turn is held until
     /// every engagement has been seen.
     read_report: types.BattleId,
     resolve_decision: struct {
-        /// The event's own id (12G.1) — never its row, which moves when a
+        /// The event's own id — never its row, which moves when a
         /// neighbour is answered or expires.
         event: types.EventId,
         choice: usize,
     },
-    // ---- Stage 12: the player's hand on the money and the medbay ----
+    // ---- The player's hand on the money and the medbay ----
     /// Admit a wounded person to the medbay: healing only starts here.
     admit: types.PersonId,
     /// Pay a loan down early (simple interest: only charged months cost).
     repay_loan: struct { index: usize, amount: types.CBills },
     /// Liquidate a hull at half value scaled by condition.
     sell_unit: types.UnitId,
-    /// Strip a hull for parts into its home warehouse (12D.2, MekHQ
+    /// Strip a hull for parts into its home warehouse (MekHQ
     /// "salvage unit"): the only thing left to do with scrap.
     strip_unit: types.UnitId,
     /// Sell off an HQ (not the last one; companies must be reassigned first).
@@ -179,14 +179,14 @@ pub const Command = union(enum) {
     /// work on any hull; the Lab is only the mek way in). The spare lands
     /// at the hull's site and its own tech fits it on the weekly pass.
     replace_gear: types.UnitId,
-    /// Forget a standing order (play feedback): the inbox asks about that
+    /// Forget a standing order: the inbox asks about that
     /// event kind again. `sop` lists them.
     clear_standing_order: []const u8,
     /// Lance role, MekHQ-style: fighting (default), defense (+power on
     /// garrison contracts), scouting (recon), training (held out of
     /// battles, gains XP at home).
     set_role: struct { force: types.ForceId, role: force_mod.LanceRole },
-    /// Rules of engagement for a company (12D.4).
+    /// Rules of engagement for a company.
     set_roe: struct { company: types.ForceId, roe: force_mod.Roe },
     /// Automatic provisions resupply: ship `tons` from the home warehouse
     /// whenever the deployed company's stores fall under `min_days`.
@@ -194,7 +194,7 @@ pub const Command = union(enum) {
     set_supply_policy: struct { company: types.ForceId, min_days: u16, tons: u32, ammo_battles: u8 = 0 },
     /// Put a hull into a lance (line or support) of its company, at home.
     move_unit: struct { unit: types.UnitId, force: types.ForceId },
-    /// Raise a new lance under a company (Stage 12.15): a line lance (HQ
+    /// Raise a new lance under a company: a line lance (HQ
     /// lance cap), an air lance under the air wing, or a support lance of
     /// one kind under Omega (facility-gated, support-lance cap).
     new_lance: struct { company: types.ForceId, name: []const u8, kind: force_mod.NewLanceKind = .line },
@@ -206,15 +206,15 @@ pub const Command = union(enum) {
     set_stock_policy: struct { hq: types.HqId, part_key: []const u8, min: u32, target: u32 },
     /// Let the medbay admit the wounded on its own each morning.
     set_auto_admit: bool,
-    /// Difficulty (12.32): green | regular | veteran | elite — logged, takes effect at once.
+    /// Difficulty: green | regular | veteran | elite — logged, takes effect at once.
     set_difficulty: @import("../domain/difficulty.zig").Level,
-    /// Share of contract income paid to shareholders at completion (12C.3),
+    /// Share of contract income paid to shareholders at completion,
     /// in percent 0–100.
     set_shares_pct: u8,
     /// Sell part of a warehouse line for its resale value (into the HQ's
     /// treasury). Refused below a keep-stocked line's minimum.
     sell_stock: struct { hq: types.HqId, part_key: []const u8, quantity: u32 },
-    /// Raise a company as a skeleton (Stage 12): empty line lances up to
+    /// Raise a company as a skeleton: empty line lances up to
     /// the HQ's lance cap, an empty support echelon, no hulls, no crews.
     /// The wizard (or the market and the halls) fills it.
     raise_company: struct { name: []const u8, hq: types.HqId },
@@ -222,7 +222,7 @@ pub const Command = union(enum) {
     /// its home HQ (placed in `lance`, or the first lance with room),
     /// otherwise shipped with the map transit.
     buy_hull_for: struct { listing: usize, company: types.ForceId, lance: types.ForceId = .none },
-    /// Fill a company's manning table (12B.13): astechs and medics hired
+    /// Fill a company's manning table: astechs and medics hired
     /// to complement on the spot (MekHQ pools), every other short role
     /// taken from the hiring halls while candidates last.
     crew_company: types.ForceId,
@@ -272,13 +272,13 @@ pub const Error = error{
     UnknownUnit,
     UnknownChassis,
     NoSuchEvent,
-    /// No pending inbox decision with that id (12G.1).
+    /// No pending inbox decision with that id.
     NoSuchDecision,
-    /// No engagement on record with that id (12G.5).
+    /// No engagement on record with that id.
     NoSuchBattle,
     /// An engagement has not been read, and the turn waits on it.
     ReportUnread,
-    /// A battle decision is unanswered, and the turn waits on it (12G.6).
+    /// A battle decision is unanswered, and the turn waits on it.
     DecisionPending,
     NoSuchChoice,
     NotADecision,
@@ -346,11 +346,11 @@ pub const Error = error{
     Bankrupt,
     NothingToRepair,
     NothingToReplace,
-    /// Scrap (12D.2): nothing to rebuild — strip it for parts.
+    /// Scrap: nothing to rebuild — strip it for parts.
     WrittenOff,
-    /// The bay is not rated for this assembly's weight class (12D.8).
+    /// The bay is not rated for this assembly's weight class.
     BayTooSmall,
-    /// The offer is on another HQ's board (12E.4).
+    /// The offer is on another HQ's board.
     OutOfRange,
     KeepStocked,
     /// The home HQ's spaceport hosts no (more) air wings.
@@ -456,13 +456,13 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
         },
         .fire => |id| {
             const p = gs.person(id) orelse return Error.UnknownPerson;
-            // 12C.2: a firing pays half the departure payout; seats open.
+            // A firing pays half the departure payout; seats open.
             const paid = try @import("personnel.zig").depart(gs, id, .resigned, tuning.person.fire_severance_bp, "severance (fired)");
             if (paid > 0) try gs.log(.rotation, .{ .company = gs.companyOf(p.assigned_force) }, "[personnel] {s} fired — {d} c-bills severance", .{ try p.fullName(gs.allocator()), paid });
             return .{};
         },
         .new_company => |name| {
-            // First HQ with a free combat-company slot (Stage 9D capacity);
+            // First HQ with a free combat-company slot;
             // no HQ yet (tests, pre-commander) → unassigned.
             const hq_id = hq_ops.hqWithCompanySlot(gs, .none);
             if (hq_id == .none and gs.hqs.count() > 0) return Error.CapacityFull;
@@ -496,8 +496,8 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             return .{};
         },
         .upgrade_tier => |hq_id| {
-            // Check everything before a c-bill moves: a refused upgrade used
-            // to keep the money.
+            // Check everything before a c-bill moves: a refused upgrade keeps
+            // the money.
             const h = gs.hqs.getPtr(hq_id) orelse return Error.UnknownHq;
             if (h.tier != .field) return Error.MaxLevel;
             for (h.projects.items) |p| if (p.kind == .tier_upgrade) return Error.ProjectInProgress;
@@ -534,7 +534,7 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             const existing = network.findLink(gs, l.a, l.b);
             const from_level: u8 = if (existing) |e| e.level else 0;
             if (l.level <= from_level) return Error.BadLevel;
-            // A dedicated line is your own jumpship on the run (Stage 12.15).
+            // A dedicated line is your own jumpship on the run.
             if (l.level >= 3 and !gs.ownsCrewedJumpshipAt(l.a, l.b)) return Error.NoJumpship;
             const cost = network.linkCost(l.level) - network.linkCost(from_level);
             try debitPurchase(gs, .outfit, .{
@@ -596,7 +596,7 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
                 if (p.unit != unit_id) continue;
                 if (p.committed) {
                     // A committed plan lives with its bay job; one without a
-                    // job is an orphan (12.27) — clear it and give the parts back.
+                    // job is an orphan — clear it and give the parts back.
                     if (hq_ops.hasJobForUnit(gs, unit_id)) return Error.ProjectInProgress;
                     const home: types.Site = .{ .hq = gs.homeHqFor(if (gs.unit(unit_id)) |u| u.force else .none) };
                     for (p.ops.items) |op| if (op == .install) try gs.addStock(home, op.install.part_key, 1);
@@ -787,7 +787,7 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             gs.clock.date.year = c.start_year;
             _ = try gs.createCommander(c.name, c.origin, c.profession);
             // Until renamed, the outfit carries the commander's name — it
-            // reads far better in the campaign registry (Stage 11).
+            // reads far better in the campaign registry.
             if (std.mem.eql(u8, gs.outfit_name, "Provisional Mercenary Command")) {
                 gs.outfit_name = try std.fmt.allocPrint(gs.allocator(), "{s}'s Command", .{c.name});
             }
@@ -827,8 +827,8 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             if (index >= gs.market_listings.items.len) return Error.NoSuchListing;
             if (gs.hqs.count() == 0) return Error.NoHq;
             const listing = gs.market_listings.items[index];
-            const price = types.applyBp(listing.price, gs.diff().purchase_bp); // difficulty (12.32)
-            // The contract world's board (12D.7): the company buys where it
+            const price = types.applyBp(listing.price, gs.diff().purchase_bp); // difficulty
+            // The contract world's board: the company buys where it
             // stands, from its local funds, and the hull joins it there.
             if (listing.company != .none) {
                 const co = listing.company;
@@ -852,9 +852,9 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
                 });
                 return .{ .unit = uid };
             }
-            // The board's own HQ pays and receives (Stage 9D).
+            // The board's own HQ pays and receives.
             const hq_id: types.HqId = if (listing.hq != .none) listing.hq else gs.hqs.keys()[0];
-            // Transports need a berth at the board's HQ (Stage 12.15).
+            // Transports need a berth at the board's HQ.
             var berth_kind: ?unit_mod.UnitKind = null;
             if (listing.kind == .unit) if (chassis_mod.find(listing.item_key)) |design| if (design.kind.isTransport()) {
                 const h = gs.hqs.getPtr(hq_id) orelse return Error.UnknownHq;
@@ -871,7 +871,7 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
                 .hq = hq_id,
                 .note = if (listing.black_market) "black market" else listing.item_key,
             });
-            // Off the books (12C.17): the fence may vanish with the money, and
+            // Off the books: the fence may vanish with the money, and
             // the house notices either way; the pirates approve.
             if (listing.black_market) {
                 const bm = tuning.market;
@@ -933,8 +933,8 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             if (co == .none) return Error.NotACompany;
             const from_co = gs.companyOf(u.force);
             // A hull already with the company can change lances wherever the
-            // company is (play feedback: trucks transferred to the field sat
-            // on the company roster, unplaceable); joining from outside waits
+            // company is, so a hull shipped to it in the field can be placed
+            // there; joining from outside waits
             // for the company to be home — `transfer_unit` ships it there.
             if (from_co != co and !gs.isCompanyHome(co)) return Error.CompanyDeployed;
             if (from_co != .none and from_co != co) return Error.SameForce; // use transfer_unit between companies
@@ -1359,7 +1359,7 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             const u = gs.unit(unit_id) orelse return Error.UnknownUnit;
             if (u.status != .mothballed) return Error.NotMothballed;
             if (hq_ops.hasJobForUnit(gs, unit_id)) return Error.ProjectInProgress;
-            try hq_ops.queueReactivation(gs, unit_id); // a bay job (Stage 9C)
+            try hq_ops.queueReactivation(gs, unit_id); // a bay job
             return .{};
         },
         .fabricate => |f0| {
@@ -1369,8 +1369,8 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             const def = part_mod.find(f.part_key) orelse return Error.UnknownPart;
             if (!part_mod.isComponent(def.key)) return Error.NotAComponent;
             if (hq_ops.baySlots(gs, f.hq) == 0) return Error.NoBay;
-            if (!hq_ops.canFabricate(gs, f.hq, def.key)) return Error.BayTooSmall; // heavy/assault assemblies (12D.8)
-            const total = types.applyBp(types.applyBp(def.cost * f.quantity, market_mod.structural_fab_cost_mult_bp), gs.diff().fab_cost_bp); // difficulty (12.32)
+            if (!hq_ops.canFabricate(gs, f.hq, def.key)) return Error.BayTooSmall; // heavy/assault assemblies
+            const total = types.applyBp(types.applyBp(def.cost * f.quantity, market_mod.structural_fab_cost_mult_bp), gs.diff().fab_cost_bp); // difficulty
             try gs.bay_jobs.ensureUnusedCapacity(gs.allocator(), f.quantity);
             try gs.reserveLedger(1);
             try debitPurchase(gs, .{ .hq = f.hq }, .{
@@ -1822,7 +1822,7 @@ const Freight = struct {
     tons: u32 = 0,
 };
 
-/// Quote freight between two sites (Stage 9D): HQ→HQ legs ride the
+/// Quote freight between two sites: HQ→HQ legs ride the
 /// supply-link route (multi-hop, throughput-capped; charter if unlinked);
 /// the last leg to a deployed company is a direct charter from its home
 /// HQ. Transport admins negotiate better rates. Pure: refuses with
@@ -2001,7 +2001,7 @@ fn orderPart(gs: *GameState, part_key: []const u8, quantity: u32, dest_opt: ?typ
     try validateSite(gs, dest);
     try checkRoom(gs, dest, part_key, quantity);
 
-    // The destination's home HQ sources and pays (Stage 9D).
+    // The destination's home HQ sources and pays.
     const hq_id: types.HqId = switch (dest) {
         .hq => |id| id,
         .company => |id| gs.homeHqFor(id),
@@ -2010,7 +2010,7 @@ fn orderPart(gs: *GameState, part_key: []const u8, quantity: u32, dest_opt: ?typ
     const hq = gs.hqs.getPtr(hq_id) orelse return Error.UnknownHq;
     const world = planet_mod.find(hq.planet_key) orelse return Error.UnknownPlanet;
 
-    const cost_mult: types.Bp = types.applyBp(tuning.market.procurement_markup_bp, gs.diff().purchase_bp); // 10% procurement markup, scaled by difficulty (12.32)
+    const cost_mult: types.Bp = types.applyBp(tuning.market.procurement_markup_bp, gs.diff().purchase_bp); // 10% procurement markup, scaled by difficulty
     var lead_days: u32 = logistics.transitDays(1);
     // Onward shipment to a deployed company: more days, freight on top.
     var arena = std.heap.ArenaAllocator.init(gs.scratch());
@@ -2019,13 +2019,13 @@ fn orderPart(gs: *GameState, part_key: []const u8, quantity: u32, dest_opt: ?typ
     if (dest == .company) lead_days += onward.days;
 
     // Logistics-admin acquisition roll vs. rarity (MekHQ-style). The back
-    // office (Stage 9C): the best posted logistics admin works the roll, and
+    // office: the best posted logistics admin works the roll, and
     // a bigger office shaves the lead time. Components can be bought this
     // way when rarity allows — or fabricated (guaranteed) in the bay.
     const logi = gs.hqStaff(hq_id, .admin_logistics);
     const admin_bonus: i32 = if (logi.count == 0) -2 else 5 - @as(i32, logi.best_skill);
     lead_days = @max(3, lead_days -| @min(4, logi.count / 2));
-    // Sourcing (12C.14): the part's availability code, the world's shelves,
+    // Sourcing: the part's availability code, the world's shelves,
     // the HQ's comms reach.
     const src = part_mod.sourcing(def, @import("../domain/faction.zig").isPeriphery(world.faction), hq.effectiveFacilityLevel(.comms));
     const roll = @as(i32, gs.rng.roll2d6(.acquisition)) + admin_bonus + world.industry / 2 + src.total();
@@ -2047,7 +2047,7 @@ fn orderPart(gs: *GameState, part_key: []const u8, quantity: u32, dest_opt: ?typ
         return .{ .sourced = false };
     }
 
-    // Orders placed at the HQ are paid from the HQ's treasury (Stage 9A),
+    // Orders placed at the HQ are paid from the HQ's treasury,
     // onward freight to the field included.
     var total = types.applyBp(def.cost * quantity, cost_mult);
     total = types.applyBp(total, gs.commanderMultBp(.freight));
@@ -2080,7 +2080,7 @@ pub const LiftPlan = struct {
     ships: u32 = 0,
 };
 
-/// How much of a company the outfit's own ships can lift (Stage 12.15).
+/// How much of a company the outfit's own ships can lift.
 /// At home: the crewed, idle ships berthed at the home HQ. Away (a
 /// redeploy from the field): the ships already carrying it. `commit`
 /// marks the ships as sailing with the company (`force` = company).
@@ -2138,7 +2138,7 @@ fn commitLift(gs: *GameState, company_id: types.ForceId) Error!LiftPlan {
     };
 }
 
-/// CamOps negotiation, one round per offer (12B.3): 2d6 + reputation edge
+/// CamOps negotiation, one round per offer: 2d6 + reputation edge
 /// + the command office's skill edge against a target eased by standing
 /// with the employer. Success moves the chosen term a step; a miss hardens
 /// the pay; a natural 2 and the employer walks away.
@@ -2152,7 +2152,7 @@ fn negotiate(gs: *GameState, offer_index: usize, term: contract_mod.NegotiableTe
     const seat: types.HqId = if (gs.hqs.count() > 0) gs.hqs.keys()[0] else .none;
     const office = if (seat != .none) gs.hqStaff(seat, .admin_command) else state_mod.StaffSummary{};
     const office_edge: i32 = if (office.count == 0) -1 else 5 - @as(i32, office.best_skill);
-    // The letter at the table (12C.7): F −2 … A* +3.
+    // The letter at the table: F −2 … A* +3.
     const rep_edge: i32 = @as(i32, @import("rating.zig").currentIndex(gs)) - tuning.rating.negotiation_offset;
     const target: i32 = t.negotiation_target - @divTrunc(gs.standing(c.employer_key), t.negotiation_standing_per);
     const raw = gs.rng.roll2d6(.market);
@@ -2176,10 +2176,10 @@ fn negotiate(gs: *GameState, offer_index: usize, term: contract_mod.NegotiableTe
     return .{ .negotiation = .hardened };
 }
 
-/// Can this company take this offer (12E.4)? An offer belongs to the board
+/// Can this company take this offer? An offer belongs to the board
 /// of the HQ that posted it: only companies based there (their home HQ)
 /// may accept — from home, or redeploying from wherever they stand. Offers
-/// from before 12E.4 carry no board and are open to anyone.
+/// saved before schema v24 carry no board and are open to anyone.
 pub fn offerEligible(gs: *GameState, offer: *const contract_mod.Contract, company: types.ForceId) bool {
     if (offer.offer_hq == .none) return true;
     return gs.homeHqFor(company) == offer.offer_hq;
@@ -2204,7 +2204,7 @@ fn acceptContract(gs: *GameState, offer_index: usize, company_id: types.ForceId)
     c.id = id;
     c.status = .transit;
     c.assigned_company = company_id;
-    // Transit from wherever the company stands (Stage 9E redeploy): the
+    // Transit from wherever the company stands (a redeploy): the
     // world it's idling on, else its home HQ.
     var jumps: u32 = planet_mod.jumpsForLy(c.dist_ly);
     if (planet_mod.find(sitePlanetKey(gs, .{ .company = company_id }) orelse "")) |from| {
@@ -2229,7 +2229,7 @@ fn acceptContract(gs: *GameState, offer_index: usize, company_id: types.ForceId)
     const freight_base: types.CBills = @as(types.CBills, c.dist_ly) * tuning.logistics.freight_per_ly;
     var freight = @divTrunc(freight_base * (100 - @as(i64, c.terms.transport_pct)), 100);
     freight = types.applyBp(freight, gs.commanderMultBp(.freight));
-    // Your own ships lift what they can (Stage 12.15): every hull a berthed
+    // Your own ships lift what they can: every hull a berthed
     // dropship carries is charter you don't pay; a jumpship of your own
     // removes the collar fee too. The ships sail with the company.
     const lift = try commitLift(gs, company_id);
@@ -2250,7 +2250,7 @@ fn acceptContract(gs: *GameState, offer_index: usize, company_id: types.ForceId)
     try gs.contracts.put(gs.allocator(), id, c);
     if (gs.force(company_id)) |f| f.location_planet = null; // underway
 
-    // Kit out from the home warehouse before the dropships lift (Stage 9B);
+    // Kit out from the home warehouse before the dropships lift;
     // a company redeploying from the field goes with what's in its trucks.
     try gs.loadOutCompany(company_id);
     try deploymentDefaults(gs, company_id, signing);
@@ -2263,7 +2263,7 @@ fn acceptContract(gs: *GameState, offer_index: usize, company_id: types.ForceId)
     return .{};
 }
 
-/// Defaults a deployment gets unless the player set their own (Stage 12.19):
+/// Defaults a deployment gets unless the player set their own:
 /// a resupply policy on the field plan, a share of the advance as local
 /// operating funds (handed over on the ramp, no courier), and a standing
 /// top-up so the float never runs dry. Every one is clearable.
@@ -2291,7 +2291,7 @@ fn deploymentDefaults(gs: *GameState, company_id: types.ForceId, signing: types.
     });
 }
 
-/// The turn-hold as an error (12G.5/12G.6). The checklist decides what
+/// The turn-hold as an error. The checklist decides what
 /// holds the turn; this only names the refusal, so a new hold cannot be
 /// enforced in one place and reported in another.
 fn holdError(gs: *GameState) ?Error {
@@ -2304,11 +2304,11 @@ fn holdError(gs: *GameState) ?Error {
 fn advance(gs: *GameState, days: u32) Error!Result {
     // Turn-based: each day is a turn; nothing interrupts the advance.
     // Decisions wait in the inbox and default at their deadlines — except
-    // money (Stage 12): a negative outfit treasury holds the turn until a
+    // money: a negative outfit treasury holds the turn until a
     // loan or a sale covers it, and past all credit the outfit folds.
     var result: Result = .{};
-    // Nothing moves while an engagement is unread (12G.5) or a battle
-    // decision is unanswered (12G.6); `read <id>` clears the first,
+    // Nothing moves while an engagement is unread or a battle
+    // decision is unanswered; `read <id>` clears the first,
     // `decide <id> <n>` the second, and the client opens both for you.
     if (holdError(gs)) |e| return e;
     for (0..days) |_| {
@@ -2348,7 +2348,7 @@ test "insolvency holds the turn; bankruptcy ends the campaign" {
     _ = try execute(&gs, .{ .new_company = "Alpha" });
     gs.funds = -1;
     try std.testing.expectError(Error.Insolvent, execute(&gs, .advance_day));
-    // Money couriered back from an HQ covers the hole before it lands (12.24 bug fix).
+    // Money couriered back from an HQ covers the hole before it lands.
     const hq0 = gs.hqs.keys()[0];
     gs.hqs.getPtr(hq0).?.funds = 100_000;
     _ = try execute(&gs, .{ .transfer = .{ .from = .{ .hq = hq0 }, .to = .outfit, .amount = 50_000 } });
@@ -2384,7 +2384,7 @@ test "policies run daily under a monthly cap; resupply ships provisions to a com
     _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
     const co = (try execute(&gs, .{ .new_company = "Alpha" })).created_force;
     const hq = gs.hqs.keys()[0];
-    gs.policies.clearRetainingCapacity(); // drop the starter HQ's default top-up (12.19) — this test counts policies
+    gs.policies.clearRetainingCapacity(); // drop the starter HQ's default top-up — this test counts policies
 
     // Cash: a top-up dispatches on the next day, not on payday, and no second
     // courier leaves while the first is in flight.
@@ -2495,7 +2495,7 @@ test "wounded only heal once admitted" {
     try std.testing.expect(gs.person(pid).?.wound_heal_day != null);
 }
 
-test "12: auto-admit sends the wounded to the medbay on its own and never blocks the turn" {
+test "auto-admit sends the wounded to the medbay on its own and never blocks the turn" {
     const checklist = @import("checklist.zig");
     var gs = GameState.init(std.testing.allocator, .{ .seed = 9 });
     defer gs.deinit();
@@ -2525,13 +2525,13 @@ test "12: auto-admit sends the wounded to the medbay on its own and never blocks
     try std.testing.expect(gs.person(other).?.wound_heal_day != null);
 }
 
-test "12: a stock policy reorders a warehouse line to its target, once, and can be removed" {
+test "a stock policy reorders a warehouse line to its target, once, and can be removed" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 12 });
     defer gs.deinit();
     _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
     const hq = gs.hqs.keys()[0];
     gs.hqs.getPtr(hq).?.funds = 20_000_000;
-    gs.stock_policies.clearRetainingCapacity(); // drop the default provisions line (12.19) — this test counts lines
+    gs.stock_policies.clearRetainingCapacity(); // drop the default provisions line — this test counts lines
     try std.testing.expectError(Error.UnknownPart, execute(&gs, .{ .set_stock_policy = .{ .hq = hq, .part_key = "unobtainium", .min = 1, .target = 2 } }));
     _ = try execute(&gs, .{ .set_stock_policy = .{ .hq = hq, .part_key = "ammo_lrm", .min = 5, .target = 30 } });
     try std.testing.expectEqual(@as(usize, 1), gs.stock_policies.items.len);
@@ -2564,7 +2564,7 @@ test "12: a stock policy reorders a warehouse line to its target, once, and can 
     try std.testing.expectEqual(@as(usize, 0), gs.stock_policies.items.len);
 }
 
-test "12: selling warehouse stock pays the HQ and respects a keep-stocked minimum" {
+test "selling warehouse stock pays the HQ and respects a keep-stocked minimum" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 12 });
     defer gs.deinit();
     _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
@@ -2582,7 +2582,7 @@ test "12: selling warehouse stock pays the HQ and respects a keep-stocked minimu
     _ = try execute(&gs, .{ .sell_stock = .{ .hq = hq, .part_key = "ammo_lrm", .quantity = 2 } });
 }
 
-test "12: trim_stock returns excess and unplanned consumables home, keeps spares" {
+test "trim_stock returns excess and unplanned consumables home, keeps spares" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 2025 });
     defer gs.deinit();
     _ = try execute(&gs, .{ .create_commander = .{ .name = "E", .origin = .CC, .profession = .paymaster } });
@@ -2617,7 +2617,7 @@ test "12: trim_stock returns excess and unplanned consumables home, keeps spares
     try std.testing.expectEqual(@as(u32, 0), (try execute(&gs, .{ .trim_stock = co })).tons_moved);
 }
 
-test "12: a raised company is an empty skeleton; hulls bought for it land in a lance or ship with the map transit; halls crew it" {
+test "a raised company is an empty skeleton; hulls bought for it land in a lance or ship with the map transit; halls crew it" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 12 });
     defer gs.deinit();
     _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
@@ -2675,7 +2675,7 @@ test "12: a raised company is an empty skeleton; hulls bought for it land in a l
     const c = try execute(&gs, .{ .crew_company = co });
     try std.testing.expect(gs.unit(r.unit).?.pilot != .none);
     try std.testing.expect(gs.unit(r.unit).?.tech != .none);
-    // 12B.13: astechs and medics come to complement without a market;
+    // Astechs and medics come to complement without a market;
     // the doctor, mechanics and office nobody offered stay open.
     const personnel = @import("personnel.zig");
     for (personnel.manningNeeds(&gs, co)) |n| {
@@ -2718,7 +2718,7 @@ test "tier upgrade: refusals keep the money; a funded field HQ starts the projec
     try std.testing.expectEqual(@as(types.CBills, 1), gs.hqs.getPtr(fb).?.funds);
 }
 
-test "12C.16: the start year sets the calendar and gates the catalogue" {
+test "the start year sets the calendar and gates the catalogue" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1216 });
     defer gs.deinit();
     try std.testing.expectError(Error.BadYear, execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster, .start_year = 2800 } }));
@@ -2735,7 +2735,7 @@ test "12C.16: the start year sets the calendar and gates the catalogue" {
     };
 }
 
-test "12C.17: a black-market buy is a fraud or a sale, and the house notices either way" {
+test "a black-market buy is a fraud or a sale, and the house notices either way" {
     var fraud = false;
     var sale = false;
     var seed: u64 = 1;
@@ -2879,10 +2879,7 @@ test "training uses the trainee's home HQ, not any HQ with a training ground" {
     try std.testing.expectError(Error.NoTrainingGround, execute(&gs, .{ .train_company = .{ .company = gs.person(t.at_second).?.assigned_force, .skill = null } }));
 }
 
-/// Advance `days`, reading each after-action as it lands — the loop a
-/// commander walks by hand once 12G.5 holds the turn. Tests that are
-/// about something else use this instead of `advance_days` directly.
-/// Walk `days` the way a commander does (12G.5/12G.6): read every
+/// Walk `days` the way a commander does: read every
 /// after-action the advance stops on, answer every battle decision it
 /// raises with that decision's own default, and carry on. Tests that do
 /// not care about the fight use this instead of `advance_days`.
@@ -2907,7 +2904,7 @@ fn clearHolds(gs: *GameState) !void {
     };
 }
 
-test "12G.5: an unread after-action holds the turn, and a week stops on the day it lands" {
+test "an unread after-action holds the turn, and a week stops on the day it lands" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 4242 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .line_officer);
@@ -2959,7 +2956,7 @@ test "12G.5: an unread after-action holds the turn, and a week stops on the day 
     try std.testing.expect(saw);
 
     // Reading it lets time move again — once the decision that fight may
-    // have raised is answered too (12G.6).
+    // have raised is answered too.
     _ = try execute(&gs, .{ .read_report = waiting.id });
     try clearHolds(&gs);
     const after = try execute(&gs, .advance_day);
@@ -2970,7 +2967,7 @@ test "12G.5: an unread after-action holds the turn, and a week stops on the day 
     try std.testing.expectError(Error.NoSuchBattle, execute(&gs, .{ .read_report = @enumFromInt(9999) }));
 }
 
-test "12G.6: a field held asks for the tempo, and the turn waits for the answer" {
+test "a field held asks for the tempo, and the turn waits for the answer" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 4242 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .line_officer);
@@ -2991,7 +2988,7 @@ test "12G.6: a field held asks for the tempo, and the turn waits for the answer"
     for (@import("../domain/part.zig").munition_keys) |key| try gs.addStock(site, key, 40);
 
     // Fight until a held field raises the tempo decision, reading each
-    // report on the way (the other hold, 12G.5).
+    // report on the way (the other hold).
     var guard: u32 = 0;
     while (gs.event_queue.blocking() == null and guard < 40) : (guard += 1) {
         while (gs.battle_reports.unread()) |u| _ = try execute(&gs, .{ .read_report = u.id });
@@ -3037,7 +3034,7 @@ test "12G.6: a field held asks for the tempo, and the turn waits for the answer"
     try std.testing.expect(gs.clock.day_index > held_at);
 }
 
-test "12G.6: garrison work has no advance to press" {
+test "garrison work has no advance to press" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 4243 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .line_officer);
@@ -3052,7 +3049,7 @@ test "12G.6: garrison work has no advance to press" {
         .status = .active,
         .assigned_company = co,
         .monthly_net = 300_000,
-        // 12D.5: without a force to probe with, garrison work never fights
+        // Without a force to probe with, garrison work never fights
         // and the assertions below would be vacuous.
         .enemy_lances = 2,
         .enemy_lance_bv = 4_000,
@@ -3098,8 +3095,8 @@ test "golden master: same seed + same script = same state hash" {
     var other = GameState.init(std.testing.allocator, .{ .seed = 43 });
     defer other.deinit();
     for (script) |cmd| _ = try execute(&other, cmd);
-    // Note: with RNG unused in Stage 1 phases the state can legitimately
-    // match across seeds; day/funds/roster still must match the script.
+    // The script draws little randomness, so the states may legitimately
+    // match across seeds; the day must still follow the script.
     try std.testing.expectEqual(@as(u32, 90), other.clock.day_index);
 }
 
@@ -3110,7 +3107,7 @@ test "payroll drains funds over three months, resignations stop costing" {
     const warrior = (try execute(&gs, .{ .hire = .{ .first = "A", .last = "B", .role = .mekwarrior } })).hired;
     _ = try execute(&gs, .{ .hire = .{ .first = "C", .last = "D", .role = .astech } });
 
-    _ = try execute(&gs, .{ .advance_days = 31 }); // Feb 1: (1500 + 400) × 1.1 — regulars rank Corporal (12B.4)
+    _ = try execute(&gs, .{ .advance_days = 31 }); // Feb 1: (1500 + 400) × 1.1 — regulars rank Corporal
     try std.testing.expectEqual(@as(i64, 997_910), gs.funds);
 
     _ = try execute(&gs, .{ .fire = warrior });
@@ -3160,7 +3157,7 @@ test "turn-based decisions: time never blocks, deadlines default" {
     try std.testing.expectEqual(@as(i32, 1), gs.reputation); // -1 +2 defaulted
 }
 
-test "stage 4 end to end: commander, company, contract to completion" {
+test "end to end: commander, company, contract to completion" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 2025 });
     defer gs.deinit();
 
@@ -3193,7 +3190,7 @@ test "stage 4 end to end: commander, company, contract to completion" {
     }));
 
     // Run to completion: transit + length + slack. The player's one duty
-    // along the way (Stage 12): admit the wounded, or they never heal and
+    // along the way: admit the wounded, or they never heal and
     // the company bleeds out to combat-ineffectiveness.
     const total_days = c.transit_days + @as(u32, c.terms.length_months) * 30 + 40;
     var advanced: u32 = 0;
@@ -3232,7 +3229,7 @@ test "loans draw down and get serviced monthly" {
     try std.testing.expect(s.category(.loan_interest) < 0);
 }
 
-test "9C: components — fabrication is guaranteed, purchase is a roll" {
+test "components — fabrication is guaranteed, purchase is a roll" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 55 });
     defer gs.deinit();
     _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
@@ -3250,7 +3247,7 @@ test "9C: components — fabrication is guaranteed, purchase is a roll" {
     try std.testing.expectEqual(@as(u32, 1 + 3), gs.stockCount(.{ .hq = hq_id }, "comp_leg")); // 1 seeded
 
     // Common parts source most months; failures cost nothing. Orders are
-    // paid by the HQ treasury (Stage 9A).
+    // paid by the HQ treasury.
     const hq_before_order = gs.hqs.values()[0].funds;
     _ = try execute(&gs, .{ .order_part = .{ .part_key = "mlas", .quantity = 2 } });
     const order = gs.part_orders.items[gs.part_orders.items.len - 1];
@@ -3282,7 +3279,7 @@ test "cold storage cuts the bill and takes real time to undo" {
     try std.testing.expect(gs.unit(uid).?.status == .ready);
 }
 
-test "9C: construction is paid by the HQ and the back office sets the pace" {
+test "construction is paid by the HQ and the back office sets the pace" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 57 });
     defer gs.deinit();
     _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .FS, .profession = .paymaster } });
@@ -3318,7 +3315,7 @@ test "9C: construction is paid by the HQ and the back office sets the pace" {
     try std.testing.expectEqual(@as(u8, 2), gs.hqs.values()[0].facilityLevel(.mess));
 }
 
-test "9B: deployment eats field stores, then buys local, then goes hungry" {
+test "deployment eats field stores, then buys local, then goes hungry" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 2025 });
     defer gs.deinit();
     _ = try execute(&gs, .{ .create_commander = .{ .name = "E", .origin = .CC, .profession = .paymaster } });
@@ -3331,7 +3328,7 @@ test "9B: deployment eats field stores, then buys local, then goes hungry" {
     try std.testing.expect(loaded > 0);
     try std.testing.expect(gs.siteTons(site) <= gs.siteCapacityTons(site).?);
     // No employer convoys, no resupply policy, no float for this test (the
-    // 12.19 defaults would feed them): the trucks are all they have.
+    // deployment defaults would feed them): the trucks are all they have.
     gs.contracts.values()[0].terms.overhead_pct = 0;
     gs.supply_policies.clearRetainingCapacity();
     gs.policies.clearRetainingCapacity();
@@ -3358,7 +3355,7 @@ test "9B: deployment eats field stores, then buys local, then goes hungry" {
     try std.testing.expect(s.category(.supplies) + s.category(.local_supplies) < 0);
 }
 
-test "9B: warehouses are finite — orders that won't fit are refused" {
+test "warehouses are finite — orders that won't fit are refused" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 94 });
     defer gs.deinit();
     _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
@@ -3408,7 +3405,7 @@ test "training: HQ-gated, takes a month, improves the skill" {
     }));
 }
 
-test "9A: treasuries — HQ purchases draw HQ funds and refuse when short" {
+test "treasuries — HQ purchases draw HQ funds and refuse when short" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 91 });
     defer gs.deinit();
     _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
@@ -3436,7 +3433,7 @@ test "9A: treasuries — HQ purchases draw HQ funds and refuse when short" {
     try std.testing.expectEqual(@as(i64, 0), fin.summarize(&gs.ledger, 0, 1, .{ .company = @enumFromInt(1) }).category(.fabrication));
 }
 
-test "9A: couriers debit now, credit on arrival; policies top up on payday" {
+test "couriers debit now, credit on arrival; policies top up on payday" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 92 });
     defer gs.deinit();
     _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .DC, .profession = .paymaster } });
@@ -3457,7 +3454,7 @@ test "9A: couriers debit now, credit on arrival; policies top up on payday" {
         .transfer = .{ .from = .{ .company = co }, .to = .outfit, .amount = 999_999 },
     }));
 
-    // Standing policy (Stage 12: checked daily, capped per month): below the
+    // Standing policy (checked daily, capped per month): below the
     // floor → a courier leaves the next day for the month's cap; payday
     // opens a fresh cap, so crossing Feb 1 brings a second 100k — never the
     // full 350k gap.
@@ -3468,7 +3465,7 @@ test "9A: couriers debit now, credit on arrival; policies top up on payday" {
     try std.testing.expectEqual(@as(i64, 450_000), gs.force(co).?.local_funds); // February's cap, and no more
 }
 
-test "9A: the structured log filters by entity and category" {
+test "the structured log filters by entity and category" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 93 });
     defer gs.deinit();
     const co: types.ForceId = @enumFromInt(7);
@@ -3490,7 +3487,7 @@ test "9A: the structured log filters by entity and category" {
     try std.testing.expectEqual(@as(usize, 1), hq_lines);
 }
 
-test "12.28: a failed sourcing roll is reported, keeps its destination, and clears after two weeks" {
+test "a failed sourcing roll is reported, keeps its destination, and clears after two weeks" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1228 });
     defer gs.deinit();
     _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
@@ -3512,7 +3509,7 @@ test "12.28: a failed sourcing roll is reported, keeps its destination, and clea
     for (gs.part_orders.items) |po| try std.testing.expect(po.status != .failed);
 }
 
-test "12.26: assign without a slot word picks the seat by role, on pool hulls too" {
+test "assign without a slot word picks the seat by role, on pool hulls too" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1226 });
     defer gs.deinit();
     _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
@@ -3532,7 +3529,7 @@ test "12.26: assign without a slot word picks the seat by role, on pool hulls to
     _ = try execute(&gs, .{ .unassign = .{ .unit = hull, .slot = .any } });
     const seats = try @import("queries.zig").openSeats(arena.allocator(), &gs, tech2);
     try std.testing.expect(seats.len >= 1);
-    // A tech whose company is away cannot reach the pool (12.26).
+    // A tech whose company is away cannot reach the pool.
     const co = (try execute(&gs, .{ .new_company = "Alpha" })).created_force;
     _ = try execute(&gs, .{ .accept_contract = .{ .offer_index = 0, .company = co } });
     var away: types.PersonId = .none;
@@ -3544,7 +3541,7 @@ test "12.26: assign without a slot word picks the seat by role, on pool hulls to
     try std.testing.expectEqual(@as(usize, 0), (try @import("queries.zig").openSeats(arena.allocator(), &gs, away)).len);
 }
 
-test "9C.2: assignments — roles enforced, one seat per pilot, hall hiring" {
+test "assignments — roles enforced, one seat per pilot, hall hiring" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 71 });
     defer gs.deinit();
     _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
@@ -3594,7 +3591,7 @@ test "9C.2: assignments — roles enforced, one seat per pilot, hall hiring" {
     try std.testing.expectError(Error.NoSuchCandidate, execute(&gs, .{ .hire_candidate = 99 }));
 }
 
-test "9C.2: medbay beds and triage decide who heals when it's crowded" {
+test "medbay beds and triage decide who heals when it's crowded" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 72 });
     defer gs.deinit();
     _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .line_officer } }); // hospital lv1 = 10 beds
@@ -3630,7 +3627,7 @@ test "9C.2: medbay beds and triage decide who heals when it's crowded" {
     try std.testing.expect(gs.person(rested).?.isAvailable(gs.clock.day_index));
 }
 
-test "9C.3: buying a wreck buys a project" {
+test "buying a wreck buys a project" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 73 });
     defer gs.deinit();
     _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .FS, .profession = .chief_engineer } });
@@ -3671,7 +3668,7 @@ test "9C.3: buying a wreck buys a project" {
     try std.testing.expectEqual(qty - 1, gs.market_listings.items[staple_idx.?].quantity);
 }
 
-test "9D: one HQ, one company — the second needs a second regional HQ" {
+test "one HQ, one company — the second needs a second regional HQ" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 81 });
     defer gs.deinit();
     // A Combine commander: every DC world is within reach of Zebebelgenubi
@@ -3684,7 +3681,7 @@ test "9D: one HQ, one company — the second needs a second regional HQ" {
     try std.testing.expectError(Error.CapacityFull, execute(&gs, .{ .new_company = "Bravo" }));
 
     // Found a field HQ on a reachable world: a forward base that hosts one
-    // company as it stands (play feedback), and only one.
+    // company as it stands, and only one.
     gs.funds = 20_000_000;
     try std.testing.expectError(Error.NotReachable, execute(&gs, .{ .found_hq = .{ .name = "Far", .planet_key = "callison" } }));
     _ = try execute(&gs, .{ .found_hq = .{ .name = "Firebase", .planet_key = "zebebelgenubi" } });
@@ -3724,7 +3721,7 @@ test "9D: one HQ, one company — the second needs a second regional HQ" {
     try std.testing.expect(gs.unit(uid).?.tech == .none); // needs a Bravo tech
 }
 
-test "9E: idle companies stay where they worked; recall brings them home; redeploy from the field" {
+test "idle companies stay where they worked; recall brings them home; redeploy from the field" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 83 });
     defer gs.deinit();
     _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .CC, .profession = .quartermaster } });
@@ -3762,7 +3759,7 @@ test "9E: idle companies stay where they worked; recall brings them home; redepl
     while (!gs.isCompanyHome(co)) _ = try execute(&gs, .{ .advance_days = 5 });
 }
 
-test "10: the lab refuses illegal fits, gates by bay class, and refits through the bay" {
+test "the lab refuses illegal fits, gates by bay class, and refits through the bay" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1010 });
     defer gs.deinit();
     _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .chief_engineer } });
@@ -3819,11 +3816,10 @@ test "10: the lab refuses illegal fits, gates by bay class, and refits through t
     try std.testing.expect(gs.refitPlanFor(uid) == null);
 }
 
-test "answering one decision does not shift the answer to another (12G.1)" {
-    // Regression: `resolve_decision` took an index into the pending queue,
-    // and `resolveChoice` orderedRemove'd, sliding every later event down
-    // one. A frontend holding the second row's index then answered the
-    // third event. The inbox is addressed by id for exactly this reason.
+test "answering one decision does not shift the answer to another" {
+    // Answering removes an event and slides every later row up, so a row
+    // index held by a frontend would reach the wrong event; the inbox is
+    // addressed by id.
     var gs = GameState.init(std.testing.allocator, .{});
     defer gs.deinit();
     const al = gs.allocator();
@@ -3881,7 +3877,7 @@ test "identity commands: outfit and company names, emblem bytes" {
     try std.testing.expect(f.emblem != null);
 }
 
-test "12: the resupply plan keeps a deployed company fed and armed on a long line" {
+test "the resupply plan keeps a deployed company fed and armed on a long line" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 2025 });
     defer gs.deinit();
     _ = try execute(&gs, .{ .create_commander = .{ .name = "E", .origin = .CC, .profession = .paymaster } });
@@ -3929,7 +3925,7 @@ fn setFacilityLevel(gs: *GameState, hq_id: types.HqId, kind: hq_mod.FacilityKind
     h.staff_assigned = 999;
 }
 
-test "12.15: air wings need a spaceport; fighters fly in air lances; support lances are facility-gated" {
+test "air wings need a spaceport; fighters fly in air lances; support lances are facility-gated" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 15 });
     defer gs.deinit();
     _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
@@ -3973,7 +3969,7 @@ test "12.15: air wings need a spaceport; fighters fly in air lances; support lan
     try std.testing.expectError(Error.NoSupportSlot, execute(&gs, .{ .new_lance = .{ .company = co, .name = "More", .kind = .{ .support = .salvage } } }));
 }
 
-test "12.15: ships need berths, lift the company for less charter, and come home with it; a dedicated line needs a jumpship" {
+test "ships need berths, lift the company for less charter, and come home with it; a dedicated line needs a jumpship" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 16 });
     defer gs.deinit();
     _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
@@ -3994,7 +3990,7 @@ test "12.15: ships need berths, lift the company for less charter, and come home
 
     // No jumpship: a dedicated line is refused; charter and scheduled are fine.
     // Found the second HQ on a world inside the starter ring (the map is
-    // Terra-wide now, 12B.9; the starter world moves with the seed).
+    // Terra-wide; the starter world moves with the seed).
     const home_world = planet_mod.find(gs.hqs.getPtr(hq).?.planet_key).?;
     var far_key: []const u8 = "";
     for (planet_mod.catalog) |*p| if (p != home_world and planet_mod.distanceLy(p, home_world) <= gs.hqs.getPtr(hq).?.influenceLy() and far_key.len == 0) {
@@ -4063,7 +4059,7 @@ test "12.15: ships need berths, lift the company for less charter, and come home
     try std.testing.expect((try planLift(&gs, co, false)).own_jumpship);
 }
 
-test "12B.3: one negotiation round per offer — improved, hardened, or withdrawn; never a second" {
+test "one negotiation round per offer — improved, hardened, or withdrawn; never a second" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1233 });
     defer gs.deinit();
     _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
@@ -4100,7 +4096,7 @@ test "12B.3: one negotiation round per offer — improved, hardened, or withdraw
     try std.testing.expectError(Error.TermAtCap, execute(&gs, .{ .negotiate = .{ .offer_index = 0, .term = .advance } }));
 }
 
-test "12B.6: abilities are bought with XP at a training ground and change the battle math" {
+test "abilities are bought with XP at a training ground and change the battle math" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1236 });
     defer gs.deinit();
     _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
@@ -4123,7 +4119,7 @@ test "12B.6: abilities are bought with XP at a training ground and change the ba
     try std.testing.expectError(Error.PersonDeployed, execute(&gs, .{ .train_ability = .{ .person = pilot.id, .key = "edge" } }));
 }
 
-test "9.7: gear on any hull is field work — replace orders the spare to its site, the tech fits it" {
+test "gear on any hull is field work — replace orders the spare to its site, the tech fits it" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 61 });
     defer gs.deinit();
     _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
@@ -4158,7 +4154,7 @@ test "9.7: gear on any hull is field work — replace orders the spare to its si
     try std.testing.expectError(Error.NothingToReplace, execute(&gs, .{ .replace_gear = uid }));
 }
 
-test "9D: depot work happens at the hull's home HQ — its components, its bay — not the outfit's first one" {
+test "depot work happens at the hull's home HQ — its components, its bay — not the outfit's first one" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 97 });
     defer gs.deinit();
     _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
@@ -4194,7 +4190,7 @@ test "9D: depot work happens at the hull's home HQ — its components, its bay �
     try std.testing.expect(uid != .none);
 
     // The torso assembly sits in Bravo's own depot; the first HQ has none.
-    const torso = @import("../domain/part.zig").componentFor("lt.structure", gs.unit(uid).?.chassis_key); // by weight class (12D.8)
+    const torso = @import("../domain/part.zig").componentFor("lt.structure", gs.unit(uid).?.chassis_key); // by weight class
     _ = gs.takeStock(.{ .hq = home }, torso, gs.stockCount(.{ .hq = home }, torso));
     _ = gs.takeStock(.{ .hq = fb }, torso, gs.stockCount(.{ .hq = fb }, torso));
     try gs.addStock(.{ .hq = fb }, torso, 1);
@@ -4204,7 +4200,7 @@ test "9D: depot work happens at the hull's home HQ — its components, its bay �
     try std.testing.expectEqual(@as(u32, 0), gs.stockCount(.{ .hq = fb }, torso));
 }
 
-test "9D: a truck sent to a deployed company lands in its transport lance, and can still change lances out there" {
+test "a truck sent to a deployed company lands in its transport lance, and can still change lances out there" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 44 });
     defer gs.deinit();
     _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
@@ -4240,7 +4236,7 @@ test "9D: a truck sent to a deployed company lands in its transport lance, and c
     try std.testing.expectError(Error.CompanyDeployed, execute(&gs, .{ .move_unit = .{ .unit = outsider, .force = transport } }));
 }
 
-test "play feedback: train co:N enrols the whole home company at their trades, and says who it skipped" {
+test "train co:N enrols the whole home company at their trades, and says who it skipped" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 88 });
     defer gs.deinit();
     _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .FS, .profession = .line_officer } });
@@ -4277,7 +4273,7 @@ test "play feedback: train co:N enrols the whole home company at their trades, a
     try std.testing.expectError(Error.CompanyDeployed, execute(&gs, .{ .train_company = .{ .company = co } }));
 }
 
-test "12.31: a wreck is rebuilt in the depot — a component and bay time — and comes back ready" {
+test "a wreck is rebuilt in the depot — a component and bay time — and comes back ready" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 95 });
     defer gs.deinit();
     _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
@@ -4305,7 +4301,7 @@ test "12.31: a wreck is rebuilt in the depot — a component and bay time — an
     try std.testing.expect(ct_destroyed);
 
     // No centre torso on the shelf: the depot asks for it; with one, it queues.
-    const ct = @import("../domain/part.zig").componentFor("ct.structure", u.chassis_key); // by weight class (12D.8)
+    const ct = @import("../domain/part.zig").componentFor("ct.structure", u.chassis_key); // by weight class
     _ = gs.takeStock(.{ .hq = home }, ct, gs.stockCount(.{ .hq = home }, ct));
     try std.testing.expectError(Error.MissingComponents, execute(&gs, .{ .depot = uid }));
     try gs.addStock(.{ .hq = home }, ct, 1);
@@ -4326,13 +4322,13 @@ test "12.31: a wreck is rebuilt in the depot — a component and bay time — an
     const legacy = try gs.addUnit("LCT-1V");
     gs.unit(legacy).?.status = .destroyed;
     try std.testing.expect(gs.unit(legacy).?.needsDepot());
-    try gs.addStock(.{ .hq = home }, "comp_ct_l", 1); // a Locust's centre torso is a light assembly (12D.8)
+    try gs.addStock(.{ .hq = home }, "comp_ct_l", 1); // a Locust's centre torso is a light assembly
     _ = try execute(&gs, .{ .depot = legacy });
     try std.testing.expect(hq_ops.hasJobForUnit(&gs, legacy));
     try std.testing.expectEqual(@as(u32, 0), gs.stockCount(.{ .hq = home }, "comp_ct_l"));
 }
 
-test "12.32: difficulty scales pay, fabrication and purchases — regular is the game as tuned, and it persists as a setting" {
+test "difficulty scales pay, fabrication and purchases — regular is the game as tuned, and it persists as a setting" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 98 });
     defer gs.deinit();
     _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
@@ -4386,7 +4382,7 @@ test "12.32: difficulty scales pay, fabrication and purchases — regular is the
     try std.testing.expect(seen);
 }
 
-test "play feedback: a resignation notice waits two weeks — a week's skip cannot walk past it" {
+test "a resignation notice waits two weeks — a week's skip cannot walk past it" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 99 });
     defer gs.deinit();
     _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
@@ -4411,7 +4407,7 @@ test "play feedback: a resignation notice waits two weeks — a week's skip cann
     try std.testing.expect(still_open);
 }
 
-test "12D.2: how a hull died decides the rebuild — engine kills cost an engine, scrap only strips" {
+test "how a hull died decides the rebuild — engine kills cost an engine, scrap only strips" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1202 });
     defer gs.deinit();
     _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
@@ -4461,7 +4457,7 @@ test "12D.2: how a hull died decides the rebuild — engine kills cost an engine
     try std.testing.expectEqual(ct_before, gs.stockCount(.{ .hq = home }, "comp_ct")); // scrap has no structure left
 }
 
-test "12D.7: the contract world has a hull board — local funds pay, the hull joins the company there" {
+test "the contract world has a hull board — local funds pay, the hull joins the company there" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1207 });
     defer gs.deinit();
     _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
@@ -4494,7 +4490,7 @@ test "12D.7: the contract world has a hull board — local funds pay, the hull j
     for (gs.market_listings.items) |l| try std.testing.expect(l.company == .none);
 }
 
-test "12D.8: heavy assemblies need a level-2 bay, assault ones a level-3 bay at a regional HQ" {
+test "heavy assemblies need a level-2 bay, assault ones a level-3 bay at a regional HQ" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1208 });
     defer gs.deinit();
     _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
@@ -4520,7 +4516,7 @@ test "12D.8: heavy assemblies need a level-2 bay, assault ones a level-3 bay at 
     try std.testing.expect(hq_ops.canFabricate(&gs, hq_id, "comp_ct_h"));
 }
 
-test "12E.4: one board per HQ — offers inside its reach, taken only by companies based there" {
+test "one board per HQ — offers inside its reach, taken only by companies based there" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1240 });
     defer gs.deinit();
     _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
