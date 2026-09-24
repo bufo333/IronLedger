@@ -263,11 +263,16 @@ pub fn interdictionEntry() Entry {
 /// way `standing_order_after` times running, apply that answer on the spot.
 fn queueDecision(gs: *GameState, deck: Entry, c: *contract_mod.Contract, roll: u8) !void {
     const ctx: @import("state.zig").LogCtx = .{ .company = c.assigned_company, .contract = c.id };
-    const mem = try gs.event_memory.getOrPut(gs.allocator(), deck.kind);
-    if (!mem.found_existing) mem.value_ptr.* = .{};
-    mem.value_ptr.last_day = gs.clock.day_index;
-    if (mem.value_ptr.streak >= tuning.contract.standing_order_after and mem.value_ptr.last_choice < deck.options.len) {
-        const opt = deck.options[mem.value_ptr.last_choice];
+    // The standing answer, if any, read out before the effects run: they
+    // can reach `event_memory` and move its entries.
+    const standing: ?usize = standing: {
+        const mem = try gs.event_memory.getOrPut(gs.allocator(), deck.kind);
+        if (!mem.found_existing) mem.value_ptr.* = .{};
+        mem.value_ptr.last_day = gs.clock.day_index;
+        break :standing if (mem.value_ptr.streak >= tuning.contract.standing_order_after and mem.value_ptr.last_choice < deck.options.len) mem.value_ptr.last_choice else null;
+    };
+    if (standing) |choice| {
+        const opt = deck.options[choice];
         try applyEffects(gs, opt.effects, c);
         try gs.log(.contract, ctx, "[{s}] (2d6 = {d}) {s} — standing order: \"{s}\"{s} (`sop clear {s}` to be asked again)", .{ c.kind.label(), roll, deck.log, opt.label, try effectsPlain(gs, opt.effects), @tagName(deck.kind) });
         return;
@@ -305,6 +310,66 @@ fn effectsPlain(gs: *GameState, effects: []const events.Effect) ![]const u8 {
     return out.items;
 }
 
+/// Queue a decision straight from its deck, for the tests below.
+fn pushDeckForTest(gs: *GameState, entry: Entry, company: types.ForceId, person: types.PersonId, deadline: u32) !types.EventId {
+    const id: types.EventId = @enumFromInt(gs.event_queue.next_id);
+    try gs.event_queue.push(gs.allocator(), .{ .day = gs.clock.day_index, .kind = entry.kind, .company = company, .person = person, .options = entry.options, .default_choice = entry.default_choice, .deadline_day = deadline });
+    return id;
+}
+
+test "an answer whose effect removes an earlier event logs and removes its own event" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 64 });
+    defer gs.deinit();
+    const co = try gs.createForce("Alpha", .company, .none);
+    const pow = try gs.hirePerson("Held", "Prisoner", .mekwarrior);
+    gs.person(pow).?.status = .pow;
+    gs.person(pow).?.faction = "DC";
+    const mia = try gs.hirePerson("Lost", "Pilot", .mekwarrior);
+    gs.person(mia).?.status = .mia;
+    gs.person(mia).?.faction = "DC";
+    const day = gs.clock.day_index;
+    // [prisoner_held, mia_held, notice_given]: trading the prisoner removes
+    // the row in front of the one being answered.
+    _ = try pushDeckForTest(&gs, prisonerEntry(), co, pow, day + 7);
+    const mia_ev = try pushDeckForTest(&gs, miaEntry(), co, mia, day + 7);
+    const notice = try pushDeckForTest(&gs, noticeEntry(), co, mia, day + 7);
+
+    try resolveChoice(&gs, mia_ev, 1); // trade a prisoner of their house
+    const last = gs.event_log.items[gs.event_log.items.len - 1].text;
+    try std.testing.expect(std.mem.indexOf(u8, last, "mia_held") != null);
+    try std.testing.expect(gs.event_queue.find(mia_ev) == null);
+    try std.testing.expect(gs.event_queue.find(notice) != null);
+    try std.testing.expectEqual(@as(usize, 1), gs.event_queue.pending.items.len);
+}
+
+test "a deadline whose default removes an earlier event leaves every other event standing" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 65 });
+    defer gs.deinit();
+    const co = try gs.createForce("Alpha", .company, .none);
+    const pow = try gs.hirePerson("Held", "Prisoner", .mekwarrior);
+    gs.person(pow).?.status = .pow;
+    gs.person(pow).?.faction = "DC";
+    const mia = try gs.hirePerson("Lost", "Pilot", .mekwarrior);
+    gs.person(mia).?.status = .mia;
+    gs.person(mia).?.faction = "DC";
+    const day = gs.clock.day_index;
+    // Only the MIA row is due, and its default is made the trade here so
+    // the effect reaches back into the queue.
+    var entry = miaEntry();
+    entry.default_choice = 1;
+    const later = try pushDeckForTest(&gs, noticeEntry(), co, mia, day + 30);
+    _ = try pushDeckForTest(&gs, prisonerEntry(), co, pow, day + 30);
+    const due = try pushDeckForTest(&gs, entry, co, mia, day);
+    const after = try pushDeckForTest(&gs, noticeEntry(), co, mia, day + 30);
+
+    try expireDue(&gs);
+    try std.testing.expect(gs.event_queue.find(due) == null);
+    try std.testing.expect(gs.event_queue.find(later) != null);
+    try std.testing.expect(gs.event_queue.find(after) != null);
+    try std.testing.expectEqual(@as(usize, 2), gs.event_queue.pending.items.len);
+    try std.testing.expect(std.mem.indexOf(u8, gs.event_log.items[gs.event_log.items.len - 1].text, "mia_held") != null);
+}
+
 test "data: weekly deck: every non-quiet kind resolves through entryForKind" {
     var roll: u8 = 2;
     while (roll <= 12) : (roll += 1) {
@@ -339,22 +404,30 @@ pub fn rollMonthly(gs: *GameState) !void {
 
 /// Resolve one inbox decision by event id. Player-initiated, between turns.
 pub fn resolveChoice(gs: *GameState, event_id: types.EventId, choice: usize) !void {
-    const ev = gs.event_queue.find(event_id) orelse return error.NoSuchDecision;
+    // A copy, not a pointer: the effects can add events to the queue or
+    // remove earlier ones, so the event is found again by id afterwards.
+    const ev = (gs.event_queue.find(event_id) orelse return error.NoSuchDecision).*;
     if (!ev.needsDecision()) return error.NotADecision;
     if (choice >= ev.options.len) return error.NoSuchChoice;
 
     if (ev.contract != .none) try gs.event_memory.ensureUnusedCapacity(gs.allocator(), 1);
-    ev.chosen = choice;
-    // Remember the answer: the same one enough times running becomes a standing order.
+    // Answered while its effects run, so nothing they reach answers it
+    // again; unanswered again if one fails.
+    gs.event_queue.find(event_id).?.chosen = choice;
+    errdefer if (gs.event_queue.find(event_id)) |e| {
+        e.chosen = null;
+    };
+    const c = if (ev.contract != .none) gs.contracts.getPtr(ev.contract) else null;
+    try applyEffectsFor(gs, ev.options[choice].effects, c, .{ .person = ev.person, .battle = ev.battle });
+    try gs.log(.decision, .{ .company = ev.company, .contract = ev.contract }, "[decision] {s}: chose \"{s}\"", .{ @tagName(ev.kind), ev.options[choice].label });
+    // Remember the answer once it has applied: the same one enough times
+    // running becomes a standing order (capacity reserved above).
     if (ev.contract != .none) {
-        const mem = try gs.event_memory.getOrPut(gs.allocator(), ev.kind);
+        const mem = gs.event_memory.getOrPutAssumeCapacity(ev.kind);
         if (!mem.found_existing) mem.value_ptr.* = .{};
         mem.value_ptr.streak = if (mem.found_existing and mem.value_ptr.last_choice == choice) mem.value_ptr.streak +| 1 else 1;
         mem.value_ptr.last_choice = @intCast(choice);
     }
-    const c = if (ev.contract != .none) gs.contracts.getPtr(ev.contract) else null;
-    try applyEffectsFor(gs, ev.options[choice].effects, c, .{ .person = ev.person, .battle = ev.battle });
-    try gs.log(.decision, .{ .company = ev.company, .contract = ev.contract }, "[decision] {s}: chose \"{s}\"", .{ @tagName(ev.kind), ev.options[choice].label });
     _ = gs.event_queue.pending.orderedRemove(gs.event_queue.indexOf(event_id).?);
 }
 
@@ -362,13 +435,17 @@ pub fn resolveChoice(gs: *GameState, event_id: types.EventId, choice: usize) !vo
 pub fn expireDue(gs: *GameState) !void {
     var i: usize = 0;
     while (i < gs.event_queue.pending.items.len) {
-        const ev = &gs.event_queue.pending.items[i];
+        // A copy: the effects can reshape the queue under it.
+        const ev = gs.event_queue.pending.items[i];
         if (ev.needsDecision() and gs.clock.day_index >= ev.deadline_day) {
             const opt = ev.options[ev.default_choice];
             const c = if (ev.contract != .none) gs.contracts.getPtr(ev.contract) else null;
             try applyEffectsFor(gs, opt.effects, c, .{ .person = ev.person, .battle = ev.battle });
             try gs.log(.decision, .{ .company = ev.company, .contract = ev.contract }, "[deadline] {s}: no answer — defaulted to \"{s}\"", .{ @tagName(ev.kind), opt.label });
-            _ = gs.event_queue.pending.orderedRemove(i);
+            if (gs.event_queue.indexOf(ev.id)) |at| _ = gs.event_queue.pending.orderedRemove(at);
+            // Rows before `i` may have gone too: walk again from the top
+            // (a defaulted event is gone, so none applies twice).
+            i = 0;
         } else {
             i += 1;
         }
