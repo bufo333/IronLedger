@@ -465,17 +465,22 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             const world = planet_mod.find(f.planet_key) orelse return Error.UnknownPlanet;
             if (!reachable(gs, world)) return Error.NotReachable;
             const cost: types.CBills = tuning.hq.found_field_hq_cost;
+            if (gs.treasuryBalance(.outfit) < cost) return Error.InsufficientTreasury;
+            // The HQ is built and its slots reserved before the money moves.
+            const hq = gs.prepareHq(f.name, .field, world.key) catch |err| switch (err) {
+                error.UnknownPlanet => return Error.UnknownPlanet,
+                error.NotReachable => return Error.NotReachable,
+                error.OutOfMemory => return Error.OutOfMemory,
+            };
+            try gs.hqs.ensureUnusedCapacity(gs.allocator(), 1);
+            try gs.reserveLedger(1);
             try debitPurchase(gs, .outfit, .{
                 .day = gs.clock.day_index,
                 .amount = -cost,
                 .category = .hq_construction,
                 .note = "field HQ founded",
             });
-            const id = gs.foundHq(f.name, .field, world.key) catch |err| switch (err) {
-                error.UnknownPlanet => return Error.UnknownPlanet,
-                error.NotReachable => return Error.NotReachable,
-                error.OutOfMemory => return Error.OutOfMemory,
-            };
+            const id = gs.commitHq(hq);
             try gs.log(.construction, .{ .hq = id }, "[network] field HQ \"{s}\" founded on {s} — post staff, send funds, link it", .{ f.name, world.name });
             return .{};
         },
@@ -1361,6 +1366,8 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             if (hq_ops.baySlots(gs, f.hq) == 0) return Error.NoBay;
             if (!hq_ops.canFabricate(gs, f.hq, def.key)) return Error.BayTooSmall; // heavy/assault assemblies (12D.8)
             const total = types.applyBp(types.applyBp(def.cost * f.quantity, market_mod.structural_fab_cost_mult_bp), gs.diff().fab_cost_bp); // difficulty (12.32)
+            try gs.bay_jobs.ensureUnusedCapacity(gs.allocator(), f.quantity);
+            try gs.reserveLedger(1);
             try debitPurchase(gs, .{ .hq = f.hq }, .{
                 .day = gs.clock.day_index,
                 .amount = -total,
@@ -1381,6 +1388,8 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             };
             const to_level = hq.facilityLevel(u.kind) + 1;
             const cost = hq_mod.upgradeCost(u.kind, to_level);
+            try hq.projects.ensureUnusedCapacity(gs.allocator(), 1);
+            try gs.reserveLedger(1);
             try debitPurchase(gs, .{ .hq = u.hq }, .{
                 .day = gs.clock.day_index,
                 .amount = -cost,
@@ -1645,6 +1654,7 @@ fn transferUnit(gs: *GameState, unit_id: types.UnitId, to_company: types.ForceId
         return .{ .in_transit = false };
     }
     // Ship it: leaves the old roster now, joins the new one on arrival.
+    try gs.unit_transfers.ensureUnusedCapacity(gs.allocator(), 1);
     if (gs.forces.getPtr(u.force)) |old| {
         for (old.units.items, 0..) |id, i| {
             if (id == unit_id) {
@@ -1703,6 +1713,7 @@ fn commitRefit(gs: *GameState, unit_id: types.UnitId) Error!Result {
     while (dit.next()) |d| {
         if (gs.stockCount(site, d.key_ptr.*) < d.value_ptr.*) return Error.MissingParts;
     }
+    try gs.bay_jobs.ensureUnusedCapacity(gs.allocator(), 1);
     dit = demand.iterator();
     while (dit.next()) |d| {
         if (!gs.takeStock(site, d.key_ptr.*, d.value_ptr.*)) return Error.MissingParts;
