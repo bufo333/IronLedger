@@ -71,7 +71,10 @@ pub const Tuning = struct {
         delay_step_per_level_bp: types.Bp,
         raw_hop_cost_bp: types.Bp,
         hub_discount_per_level_bp: types.Bp,
+        /// Supply units a week a link moves per level.
         throughput_per_level: u32,
+        /// Tons in one supply unit.
+        tons_per_supply_unit: u32, // TUNE
         local_base_bp: types.Bp,
         local_step_bp: types.Bp,
         local_step_ly: u32,
@@ -82,7 +85,6 @@ pub const Tuning = struct {
         freight_per_ly: types.CBills,
     },
     network: struct {
-        weeks_of_capacity: u32,
         upkeep_per_level: types.CBills,
         link_cost_per_level_sq: types.CBills,
     },

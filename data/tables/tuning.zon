@@ -48,6 +48,7 @@
         .raw_hop_cost_bp = 14_000,
         .hub_discount_per_level_bp = 500,
         .throughput_per_level = 10,
+        .tons_per_supply_unit = 4, // TUNE
         .local_base_bp = 20_000, // ARCH §9.6
         .local_step_bp = 5_000,
         .local_step_ly = 30,
@@ -58,7 +59,6 @@
         .freight_per_ly = 2_000,
     },
     .network = .{
-        .weeks_of_capacity = 4,
         .upkeep_per_level = 60_000,
         .link_cost_per_level_sq = 250_000,
     },

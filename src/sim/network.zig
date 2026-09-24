@@ -23,9 +23,9 @@ pub const HqLink = struct {
         return (self.a == x and self.b == y) or (self.a == y and self.b == x);
     }
 
-    /// Weekly tonnage the link can move.
-    pub fn capacityPerWeek(self: HqLink) u32 {
-        return logistics.linkThroughputPerWeek(self.level) * tuning.network.weeks_of_capacity;
+    /// Tons a week the link can move.
+    pub fn tonsPerWeek(self: HqLink) u32 {
+        return logistics.linkTonsPerWeek(self.level);
     }
 
     /// Monthly upkeep by level; a dedicated line (level 3) rides your own
@@ -151,16 +151,31 @@ fn indexOf(keys: []const types.HqId, id: types.HqId) ?usize {
 
 /// Reserve tonnage on every link of a route; refused if any link is at
 /// capacity this week (nothing reserved in that case).
-pub fn reserveThroughput(gs: *GameState, route: []const RouteHop, tons: u32) error{ThroughputExceeded}!void {
+/// Whether `tons` more fits every linked hop of the route this week.
+/// Pure: books nothing.
+pub fn fitsThroughput(gs: *const GameState, route: []const RouteHop, tons: u32) bool {
     for (route) |h| {
         const li = h.link_index orelse continue;
         const l = gs.hq_links.items[li];
-        if (l.tons_this_week + tons > l.capacityPerWeek()) return error.ThroughputExceeded;
+        if (l.tons_this_week + tons > l.tonsPerWeek()) return false;
     }
+    return true;
+}
+
+/// Book `tons` on every linked hop of the route. Cannot fail: the caller
+/// has checked `fitsThroughput` against the same state.
+pub fn commitThroughput(gs: *GameState, route: []const RouteHop, tons: u32) void {
     for (route) |h| {
         const li = h.link_index orelse continue;
         gs.hq_links.items[li].tons_this_week += tons;
     }
+}
+
+/// Check and book in one step, for callers with nothing to validate in
+/// between.
+pub fn reserveThroughput(gs: *GameState, route: []const RouteHop, tons: u32) error{ThroughputExceeded}!void {
+    if (!fitsThroughput(gs, route, tons)) return error.ThroughputExceeded;
+    commitThroughput(gs, route, tons);
 }
 
 pub fn resetWeeklyThroughput(gs: *GameState) void {

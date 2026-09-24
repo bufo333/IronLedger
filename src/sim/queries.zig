@@ -4888,7 +4888,7 @@ pub fn hqLinks(alloc: Alloc, gs: *GameState) ![]const []const u8 {
     var out: std.ArrayListUnmanaged([]const u8) = .empty;
     for (gs.hq_links.items) |l| {
         try out.append(alloc, try std.fmt.allocPrint(alloc, "link hq:{d} — hq:{d} level {d}: {d}/{d} t this week, {s}/mo", .{
-            @intFromEnum(l.a), @intFromEnum(l.b), l.level, l.tons_this_week, l.capacityPerWeek(), try money(alloc, l.monthlyCost()),
+            @intFromEnum(l.a), @intFromEnum(l.b), l.level, l.tons_this_week, l.tonsPerWeek(), try money(alloc, l.monthlyCost()),
         }));
     }
     for (gs.unit_transfers.items) |t| {
