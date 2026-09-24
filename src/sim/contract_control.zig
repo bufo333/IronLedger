@@ -39,8 +39,8 @@ pub fn onAccept(gs: *GameState, c: *contract_mod.Contract) void {
     c.objective = contract_mod.objectiveFor(c.kind);
     c.committed_bv = fieldableBv(gs, c.assigned_company);
     if (c.objective == .attrition) {
-        // The enemy's own force and its reinforcements (12D.5); a contract
-        // from before then still sizes off the company.
+        // The enemy's own force and its reinforcements; a contract saved
+        // before schema v22 has no opfor and sizes off the company.
         c.enemy_pool_bv = if (c.hasOpfor())
             @import("../domain/opfor.zig").poolBv(c.opforBv(), c.terms.length_months)
         else
@@ -83,19 +83,18 @@ pub fn complete(gs: *GameState, c: *contract_mod.Contract, objectives_broken: bo
         });
     }
     c.status = .completed;
-    // Reputation by victory points: a tour in the red earns none (12.19:
-    // a raid closed at −8 VP was still "reputation rises").
+    // Reputation by victory points: a tour in the red earns none.
     const t = tuning.contract;
     const vp_bonus = std.math.clamp(@divTrunc(c.victory_points, t.rep_vp_per_point), t.rep_vp_bonus_min, t.rep_vp_bonus_max);
     const gain: i32 = if (c.victory_points < 0) vp_bonus else 1 + vp_bonus; // −8 VP → 0, −25 VP → −1
     gs.reputation += gain;
-    // Standing (12.21): the employer remembers a tour served, and so does
+    // Standing: the employer remembers a tour served, and so does
     // whoever you served it against.
     const employer_now = try gs.adjustStanding(c.employer_key, @max(2, t.standing_complete_gain + @divTrunc(c.victory_points, t.standing_vp_divisor)) + @as(i32, @intFromBool(c.beachhead)) * 2);
     const enemy_now = if (!std.mem.eql(u8, c.enemy_key, "PER")) try gs.adjustStanding(c.enemy_key, -t.standing_enemy_loss) else 0;
     try gs.log(.contract, .{ .company = c.assigned_company, .contract = c.id }, "[standing] {s} +{d} → {d}{s}", .{ c.employer_key, @max(2, t.standing_complete_gain + @divTrunc(c.victory_points, t.standing_vp_divisor)), employer_now, if (!std.mem.eql(u8, c.enemy_key, "PER")) try std.fmt.allocPrint(gs.allocator(), " · {s} −{d} → {d}", .{ c.enemy_key, t.standing_enemy_loss, enemy_now }) else "" });
     try finishTour(gs, c);
-    // Service records (12B.5): a tour served, and an outstanding one noted.
+    // Service records: a tour served, and an outstanding one noted.
     {
         const outstanding = c.gradeOf() == .outstanding;
         var ids: std.ArrayListUnmanaged(types.PersonId) = .empty;
@@ -106,19 +105,19 @@ pub fn complete(gs: *GameState, c: *contract_mod.Contract, objectives_broken: bo
             if (!p.isOnBooks() or !gs.personInCompany(p, c.assigned_company)) continue;
             p.tours += 1;
             if (outstanding) p.outstanding_tours += 1;
-            p.edge_spent = false; // Edge (12B.6) is per contract
+            p.edge_spent = false; // Edge is per contract
             try ids.append(gs.allocator(), p.id);
         }
         for (ids.items) |id| _ = try @import("personnel.zig").checkAwards(gs, id);
     }
-    // Shares (12C.3): the stakeholders take their cut of what the tour earned.
+    // Shares: the stakeholders take their cut of what the tour earned.
     _ = try @import("personnel.zig").payShares(gs, c.id, c.assigned_company);
-    // Morale (12C.11): a strong finish lifts the whole outfit.
+    // Morale: a strong finish lifts the whole outfit.
     if (@intFromEnum(c.gradeOf()) >= @intFromEnum(contract_mod.Contract.Grade.strong)) {
         const n = @import("personnel.zig").adjustMoraleAll(gs, tuning.person.morale_contract_strong);
         try gs.log(.rotation, .{ .company = c.assigned_company, .contract = c.id }, "[morale] a {s} tour — spirits lift across the outfit (+{d} morale, {d} people)", .{ c.grade(), tuning.person.morale_contract_strong, n });
     }
-    // What the employer pays (12D.1): a term served runs its course, a broken
+    // What the employer pays: a term served runs its course, a broken
     // pool earns the bonus, an early close-out forfeits the months left.
     const pay_note: []const u8 = if (months_left <= 0) "the employer pays in full" else if (objectives_broken) "the employer pays in full plus the early-completion bonus" else "closed out early — the remaining payments are forfeited";
     try gs.log(.contract, .{ .company = c.assigned_company, .contract = c.id }, "[{s}] contract COMPLETE — {s} ({s}, {d} VP, score {d}) — reputation {s} ({s}{d}); {s}", .{
@@ -147,7 +146,7 @@ pub fn breach(gs: *GameState, c: *contract_mod.Contract, reason: []const u8) !vo
     }
     c.status = .breached;
     c.breach_day = gs.clock.day_index;
-    // Morale (12C.11): a breach shames everyone.
+    // Morale: a breach shames everyone.
     _ = @import("personnel.zig").adjustMoraleAll(gs, tuning.person.morale_contract_breached);
     try gs.log(.rotation, .{ .company = c.assigned_company, .contract = c.id }, "[morale] the breach is felt across the outfit ({d} morale)", .{tuning.person.morale_contract_breached});
     gs.reputation -= 2;
@@ -160,7 +159,7 @@ pub fn breach(gs: *GameState, c: *contract_mod.Contract, reason: []const u8) !vo
     });
 }
 
-/// Performance failure at the end of term (12D.1, CamOps: failure is not
+/// Performance failure at the end of term (CamOps: failure is not
 /// breach). The term was served, so nothing is clawed back and the employer
 /// does not cool — but the tour earns no reputation, the employer marks you
 /// down, and the outfit feels it.
@@ -244,7 +243,7 @@ pub fn checkEffectiveness(gs: *GameState) !void {
     }
 }
 
-/// The transports that sailed with a company (Stage 12.15) go back to
+/// The transports that sailed with a company go back to
 /// their berths once it is home. Returns how many.
 pub fn releaseCarriers(gs: *GameState, company: types.ForceId) !u32 {
     var n: u32 = 0;
@@ -266,7 +265,7 @@ pub fn releaseCarriers(gs: *GameState, company: types.ForceId) !u32 {
 }
 
 /// Payday: standing drifts back toward neutral — grudges and gratitude
-/// both fade (Stage 12.21).
+/// both fade.
 pub fn driftStanding(gs: *GameState) void {
     const step = tuning.contract.standing_drift_per_month;
     var it = gs.faction_standing.iterator();
@@ -396,7 +395,7 @@ test "combat-ineffective past the grace window is breach" {
     try std.testing.expectEqual(contract_mod.ContractStatus.breached, c.status);
 }
 
-test "12.21: standing rises with the employer and falls with the enemy on completion, drops on breach, drifts home" {
+test "standing rises with the employer and falls with the enemy on completion, drops on breach, drifts home" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1221 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .line_officer);
@@ -419,7 +418,7 @@ test "12.21: standing rises with the employer and falls with the enemy on comple
     const lc_after = gs.standing("LC");
     driftStanding(&gs);
     try std.testing.expectEqual(lc_after - 1, gs.standing("LC"));
-    // A breach with the Combine drops them well below the shun line over a couple of tours.
+    // A breach with the Combine costs a further `standing_breach_loss`.
     try gs.contracts.put(gs.allocator(), @enumFromInt(2), .{
         .id = @enumFromInt(2),
         .kind = .garrison_duty,
@@ -435,7 +434,7 @@ test "12.21: standing rises with the employer and falls with the enemy on comple
     try std.testing.expect(gs.standing("DC") <= -20);
 }
 
-test "12.29: the verdict grades by victory points; failure is the score at term" {
+test "the verdict grades by victory points; failure is the score at term" {
     var c: contract_mod.Contract = .{ .id = @enumFromInt(1), .kind = .planetary_assault, .employer_key = "LC", .enemy_key = "DC", .planet_key = "galatea", .terms = .{ .length_months = 6, .base_pay_month = 400_000 }, .status = .active, .assigned_company = @enumFromInt(1), .monthly_net = 300_000 };
     c.victory_points = 20;
     try std.testing.expectEqualStrings("satisfactory", c.grade());
@@ -446,7 +445,7 @@ test "12.29: the verdict grades by victory points; failure is the score at term"
     try std.testing.expectEqual(@as(i32, -5), contract_mod.Contract.fail_score);
 }
 
-test "12D.1: a performance failure at term is .failed — no clawback, no cooling, VP counted once" {
+test "a performance failure at term is .failed — no clawback, no cooling, VP counted once" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1201 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .FS, .line_officer);
@@ -466,7 +465,7 @@ test "12D.1: a performance failure at term is .failed — no clawback, no coolin
     });
     const c = gs.contracts.getPtr(@enumFromInt(1)).?;
     onAccept(&gs, c);
-    // Two lost fights on the books: score −2 each, VP banked as they happen.
+    // Two lost fights on the books: score −3 each, VP banked as they happen.
     c.score = -6;
     try recordBattle(&gs, c, 0, -3);
     try recordBattle(&gs, c, 0, -3);
@@ -484,7 +483,7 @@ test "12D.1: a performance failure at term is .failed — no clawback, no coolin
     try std.testing.expectEqual(@as(i64, 0), @import("../econ/finance.zig").summarize(&gs.ledger, 0, 1000, .all).category(.breach_clawback));
 }
 
-test "12D.5: an offer carries its opposition, and acceptance sizes the pool from it" {
+test "an offer carries its opposition, and acceptance sizes the pool from it" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1205 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .line_officer);

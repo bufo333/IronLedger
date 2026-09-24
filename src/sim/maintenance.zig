@@ -1,8 +1,8 @@
-//! Weekly maintenance checks and repair work (Stage 5, ARCH §9.7), on the
-//! Stage 9C.2 tech-time budget: every hull needs an assigned tech, every
-//! tech has weekly hours, and hulls nobody has hours for roll uncovered.
-//! Mirrors MekHQ's maintenance system: tech skill vs. a target number from
-//! quality and conditions; failures drift quality A-ward and break parts.
+//! Weekly maintenance checks and repair work (Stage 5, ARCH §9.7), on a
+//! tech-time budget: every hull needs an assigned tech, every tech has
+//! weekly hours, and hulls nobody has hours for roll uncovered.
+//! Adaptation of MekHQ's maintenance check: tech skill vs. a target number
+//! from quality and conditions; failures drift quality A-ward and break parts.
 //! Techs get hurt doing it, and free techs are swapped in when they do.
 
 const std = @import("std");
@@ -21,7 +21,7 @@ const hours_destroyed_slot = tuning.maintenance.hours_destroyed_slot;
 const hours_armor_patch = tuning.maintenance.hours_armor_patch;
 
 /// Hours and labour for one field job on a slot (tuning.maintenance):
-/// one rule for the weekly pass and the field repair push (12G.6).
+/// one rule for the weekly pass and the field repair push.
 fn slotHours(wrecked: bool) u32 {
     return if (wrecked) hours_destroyed_slot else hours_damaged_slot;
 }
@@ -97,7 +97,7 @@ pub fn runWeeklyMaintenance(gs: *GameState) !void {
         if (!u.takesFieldWork()) continue;
         if (u.kind == .infantry) continue; // platoons maintain their own kit
 
-        // What this hull asks of this tech (12C.15): quality, design and skill.
+        // What this hull asks of this tech: quality, design and skill.
         const need_hours = if (activeTech(gs, u)) |t| gs.techHoursFor(t, u) else gs.hullHours(u);
         var covered = false;
         var skill: u8 = 7;
@@ -123,7 +123,7 @@ pub fn runWeeklyMaintenance(gs: *GameState) !void {
             // Clear miss: quality drifts toward A; a snake-eyes week also
             // breaks a piece of gear (weapon, equipment, ammo feed, armor —
             // field-fixable). Neglect never cores a torso: structure is
-            // battle damage (12.19: a quiet garrison was filling the depot).
+            // battle damage.
             const q = @intFromEnum(u.quality);
             if (q > 0) u.quality = @enumFromInt(q - 1);
             if (raw == 2 and u.slots.items.len > 0) {
@@ -152,12 +152,12 @@ pub fn runWeeklyMaintenance(gs: *GameState) !void {
             const q = @intFromEnum(u.quality);
             if (q < 5) u.quality = @enumFromInt(q + 1);
         }
-        // Quality drift is news (12C.13): the letter on the resale ticket moved.
+        // Quality drift is news: the letter on the resale ticket moved.
         if (u.quality != before_q) try gs.log(.construction, .{ .company = gs.companyOf(u.force) }, "[maintenance] {s} #{d} quality {s} {s} → {s}{s}", .{
             u.chassis_key, @intFromEnum(u.id), if (@intFromEnum(u.quality) < @intFromEnum(before_q)) "slips" else "lifts", @tagName(before_q), @tagName(u.quality), if (!covered) " (nobody turning wrenches)" else "",
         });
 
-        // Accidents happen in the hangar (Stage 9C.2): snake-eyes while
+        // Accidents happen in the hangar: snake-eyes while
         // working a hull, and then only one bad week in twelve hurts the
         // tech (≈0.23% per hull-week; a 32-hull company sees one every
         // three months or so; tuning.maintenance.accident_*).
@@ -185,7 +185,7 @@ pub fn runWeeklyMaintenance(gs: *GameState) !void {
 pub fn injureTech(gs: *GameState, tech_id: types.PersonId, days: u32, cause: []const u8) !void {
     const t = gs.person(tech_id) orelse return;
     if (t.status != .active) return;
-    // The accident's size sets the wound (Stage 12.16): a short spell is a
+    // The accident's size sets the wound: a short spell is a
     // light injury, a long one serious, the worst crippling.
     const severity: u8 = if (days <= tuning.maintenance.injury_days_serious) 1 else if (days <= tuning.maintenance.injury_days_crippling) 2 else 3;
     try @import("medical.zig").inflict(gs, tech_id, .accident, severity, cause);
@@ -213,7 +213,7 @@ pub fn injureTech(gs: *GameState, tech_id: types.PersonId, days: u32, cause: []c
 }
 
 /// Weekly repair pass: field work by the hull's own tech from their spare
-/// hours; depot work becomes a bay job (Stage 9C). Destroyed parts consume
+/// hours; depot work becomes a bay job. Destroyed parts consume
 /// spares from the hull's site.
 pub fn runWeeklyRepairs(gs: *GameState) !void {
     var depot_ok = false;
@@ -251,7 +251,7 @@ pub fn runWeeklyRepairs(gs: *GameState) !void {
                     },
                     .ok => {},
                 },
-                // Structural work is a bay job (Stage 9C): queued once per
+                // Structural work is a bay job: queued once per
                 // hull, components taken from the warehouse up front.
                 .depot => if (at_home and depot_ok and !hq_ops.hasJobForUnit(gs, u.id)) {
                     _ = hq_ops.queueDepotRepair(gs, u.id) catch false;
@@ -272,7 +272,7 @@ pub fn runWeeklyRepairs(gs: *GameState) !void {
     try postRepairLabour(gs, labor_cost);
 }
 
-// ── The field repair push (12G.6) ────────────────────────────────────
+// ── The field repair push ────────────────────────────────────────────
 //
 // The night after a fight the company's techs pool a share of their spare
 // hours and work through the damage with the field armour and spares, in
@@ -342,7 +342,7 @@ pub const RepairPlan = struct {
     }
 };
 
-/// How the damage is worked under one order (12G.6). Pure: no state and
+/// How the damage is worked under one order. Pure: no state and
 /// no dice. Each job is one damaged slot (hours), one wrecked slot (hours
 /// and a spare) or one armour patch (hours and a ton, up to full plating).
 /// Worst-hit and heaviest take each hull as far as the budget reaches
@@ -446,7 +446,7 @@ pub fn repairPlan(alloc: std.mem.Allocator, needs: []const RepairNeed, budget: R
     return .{ .order = order, .hulls = out, .hours = budget.hours - hours, .armor_tons = budget.armor_tons - tons };
 }
 
-/// Is there a real choice here (12G.6)? Only when some hull is shot up
+/// Is there a real choice here? Only when some hull is shot up
 /// and the three orders leave the hulls in different shape — otherwise
 /// the night goes the one way there is, or is a tidy-up, and the
 /// commander is not troubled with it.
@@ -534,7 +534,7 @@ pub fn planFor(gs: *GameState, alloc: std.mem.Allocator, company: types.ForceId,
     return repairPlan(alloc, needs, try repairBudget(gs, alloc, company, needs), order);
 }
 
-/// Carry out the night's work in `order` (12G.6): slots put right, spares
+/// Carry out the night's work in `order`: slots put right, spares
 /// and armour taken from the field stores, labour billed. Returns the plan
 /// it carried out, for the log, in `alloc` (a caller's scratch arena).
 pub fn repairPush(gs: *GameState, alloc: std.mem.Allocator, company: types.ForceId, order: types.RepairOrder) !RepairPlan {
@@ -664,7 +664,7 @@ test "repairs consume spares; depot work needs the HQ" {
     try std.testing.expect(hq_ops.hasJobForUnit(&gs, uid));
     try hq_ops.runDaily(&gs);
     gs.clock.day_index += 30;
-    // A failed repair check keeps the job on the bench (12C.12): walk it off.
+    // A failed repair check keeps the job on the bench: walk it off.
     var days: u32 = 0;
     while (hq_ops.hasJobForUnit(&gs, uid) and days < 200) : (days += 1) {
         try hq_ops.runDaily(&gs);
@@ -675,7 +675,7 @@ test "repairs consume spares; depot work needs the HQ" {
     for (u.slots.items) |slot| if (slot.class == .structure) try std.testing.expectEqual(unit_mod.PartCondition.ok, slot.condition);
 }
 
-test "12G.6: the three repair orders spend one night three ways" {
+test "the three repair orders spend one night three ways" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
@@ -716,7 +716,7 @@ test "12G.6: the three repair orders spend one night three ways" {
     try std.testing.expect(!try repairWorthAsking(a, &scuffed, budget));
 }
 
-test "12G.6: a wrecked slot takes a spare as well as hours, and waits without one" {
+test "a wrecked slot takes a spare as well as hours, and waits without one" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();

@@ -1,5 +1,6 @@
 //! Contract event decks & the decision engine (Stage 6, ARCH §8).
-//! Mirrors MekHQ's AtB monthly events: each active contract rolls 2d6 on
+//! MekHQ counterpart: the AtB monthly contract events (`AtBContract`).
+//! Each active contract rolls 2d6 on
 //! its class deck (garrison vs. combat) on the 1st. Auto events apply
 //! immediately; decisions land in the inbox with a deadline (turn-based —
 //! time never stops; the default applies if the deadline passes).
@@ -19,7 +20,7 @@ pub const notice_window_days = tuning.contract.notice_window_days;
 // ------------------------------------------------------------------ decks
 // Static decks; dynamic magnitudes go through relative effects.
 
-// The inbox rule (12.24, play feedback): an event is a dice roll logged
+// The inbox rule: an event is a dice roll logged
 // with its result unless it meaningfully moves money or breaks hulls —
 // cash in or out, supply losses, salvage and stock windfalls, damage — and
 // those are decisions the player sees. Fatigue, morale, XP, score,
@@ -77,7 +78,7 @@ fn garrisonDeck(roll: u8) Entry {
 
 fn combatDeck(roll: u8) Entry {
     return switch (roll) {
-        // Betrayal escalates (12D.9): the liaison who sold your routes now
+        // Betrayal escalates: the liaison who sold your routes also
         // wants a hull as "collateral" against your conduct.
         2 => .{ .kind = .betrayal, .log = "Liaison feeds the enemy your patrol routes — and now demands your most battered hull as collateral", .options = &.{
             .{ .label = "Hand the hull over", .effects = &.{ .seize_hull, .{ .morale = -4 }, .{ .score = -1 } } },
@@ -112,7 +113,7 @@ fn combatDeck(roll: u8) Entry {
             .{ .label = "Strike (risk the machines)", .effects = &.{ .{ .score = 3 }, .{ .damage_random_units = 2 }, .{ .fatigue = 10 } } },
             .{ .label = "Hold position", .effects = &.{} },
         }, .default_choice = 1 },
-        // Real engagements (sim/battle.zig) carry the damage now; the deck's
+        // Real engagements (sim/battle.zig) carry the damage; the deck's
         // middle band is the grind between them.
         else => .{ .kind = .heavy_fighting, .log = "Sustained patrol operations grind on", .auto_effects = &.{
             .{ .fatigue = 5 },
@@ -120,7 +121,7 @@ fn combatDeck(roll: u8) Entry {
     };
 }
 
-/// Weekly happenings (Stage 12): rolled every week a contract is active,
+/// Weekly happenings: rolled every week a contract is active,
 /// on top of the monthly deck. Most weeks are quiet; the tails bring
 /// small choices so the player has something to decide between battles.
 fn weeklyDeck(garrison: bool, roll: u8) Entry {
@@ -134,7 +135,7 @@ fn weeklyDeck(garrison: bool, roll: u8) Entry {
             .{ .label = "Turn them in to the employer", .effects = &.{.{ .reputation = 1 }} },
             .{ .label = "Send them away", .effects = &.{} },
         }, .default_choice = 2 },
-        // Flavour happens on its own (12.24): the inbox is for trade-offs.
+        // Flavour happens on its own: the inbox is for trade-offs.
         4 => .{ .kind = .employer_inspection, .log = "The employer's liaison inspects the hangar — a long day of parade polish", .auto_effects = &.{
             .{ .fatigue = 2 },
         } },
@@ -183,7 +184,7 @@ fn weeklyDeck(garrison: bool, roll: u8) Entry {
 }
 
 /// The static deck entry for an event kind (options live in the decks, so
-/// a saved pending decision is rebuilt from its kind — Stage 11).
+/// a saved pending decision is rebuilt from its kind).
 pub fn entryForKind(kind: events.EventKind) ?Entry {
     if (kind == .notice_given) return noticeEntry();
     if (kind == .prisoner_held) return prisonerEntry();
@@ -191,7 +192,7 @@ pub fn entryForKind(kind: events.EventKind) ?Entry {
     if (kind == .jump_interdiction) return interdictionEntry();
     // Without this the store drops the decision on load: `save`/`load`
     // rebuild an event's options from its kind, and a kind with no entry
-    // is skipped (12G.6).
+    // is skipped.
     if (kind == .press_or_consolidate) return pressEntry();
     if (kind == .recovery_push) return pushEntry();
     if (kind == .salvage_priority) return salvageEntry();
@@ -210,13 +211,14 @@ pub fn entryForKind(kind: events.EventKind) ?Entry {
     return null;
 }
 
-/// Weekly roll for every active contract (Stage 12): quiet most weeks.
+/// Weekly roll for every active contract: quiet most weeks.
 pub fn rollWeekly(gs: *GameState) !void {
     var it = gs.contracts.iterator();
     while (it.next()) |entry| {
         const c = entry.value_ptr;
         if (c.status != .active) continue;
-        // Most weeks nothing worth a line happens (12.24: play feedback).
+        // `weekly_event_chance_bp` thins the rolls; the deck's quiet middle
+        // keeps most of the rest silent.
         if (gs.rng.random(.events).uintLessThan(u32, 10_000) >= tuning.contract.weekly_event_chance_bp) continue;
         const roll = gs.rng.roll2d6(.events);
         const deck = weeklyDeck(c.kind.isGarrisonClass(), roll);
@@ -233,7 +235,7 @@ pub fn rollWeekly(gs: *GameState) !void {
     }
 }
 
-/// Jump-point interdiction (12D.9): a company in transit without an owned,
+/// Jump-point interdiction: a company in transit without an owned,
 /// crewed DropShip of its own to escort the charter risks raiders at the
 /// jump point — weekly, on 2d6 ≥ `interdiction_target`.
 pub fn rollInterdiction(gs: *GameState) !void {
@@ -258,8 +260,7 @@ pub fn interdictionEntry() Entry {
 }
 
 /// Queue a decision — or, once the player has answered this kind the same
-/// way `standing_order_after` times running, apply that answer on the spot
-/// (play feedback: the same smuggler, the same answer, every month).
+/// way `standing_order_after` times running, apply that answer on the spot.
 fn queueDecision(gs: *GameState, deck: Entry, c: *contract_mod.Contract, roll: u8) !void {
     const ctx: @import("state.zig").LogCtx = .{ .company = c.assigned_company, .contract = c.id };
     const mem = try gs.event_memory.getOrPut(gs.allocator(), deck.kind);
@@ -336,7 +337,7 @@ pub fn rollMonthly(gs: *GameState) !void {
     }
 }
 
-/// Resolve one inbox decision by index. Player-initiated, between turns.
+/// Resolve one inbox decision by event id. Player-initiated, between turns.
 pub fn resolveChoice(gs: *GameState, event_id: types.EventId, choice: usize) !void {
     const ev = gs.event_queue.find(event_id) orelse return error.NoSuchDecision;
     if (!ev.needsDecision()) return error.NotADecision;
@@ -390,7 +391,7 @@ fn applyEffectsFor(gs: *GameState, effects: []const events.Effect, contract: ?*c
     const company: types.ForceId = if (contract) |c| c.assigned_company else if (gs.person(person_id)) |p| gs.companyOf(p.assigned_force) else .none;
     const contract_id: types.ContractId = if (contract) |c| c.id else .none;
 
-    // Field events move field money (Stage 9A): company-tagged cash flows
+    // Field events move field money: company-tagged cash flows
     // through the company's local funds; outfit-level events stay central.
     const treasury: @import("state.zig").Treasury = if (company != .none) .{ .company = company } else .outfit;
     for (effects) |effect| {
@@ -424,7 +425,7 @@ fn applyEffectsFor(gs: *GameState, effects: []const events.Effect, contract: ?*c
             .reputation => |delta| gs.reputation += delta,
             .score => |delta| if (contract) |c| {
                 c.score += delta;
-                c.victory_points += delta * @import("../domain/tuning.zig").t.contract.vp_per_score; // VP when earned, never again at term end (12D.1)
+                c.victory_points += delta * @import("../domain/tuning.zig").t.contract.vp_per_score; // VP when earned, never again at term end
             },
             .morale => |delta| applyToCompany(gs, company, .morale, delta),
             .fatigue => |amount| applyToCompany(gs, company, .fatigue, @intCast(amount)),
@@ -450,14 +451,14 @@ fn applyEffectsFor(gs: *GameState, effects: []const events.Effect, contract: ?*c
                 const was = p.monthlySalary();
                 p.salary_override = types.applyBp(was, 10_000 + @as(types.Bp, pct) * 100);
                 p.morale = @intCast(@min(100, @as(u32, p.morale) + 10));
-                p.last_raise_day = gs.clock.day_index; // 12C.5
+                p.last_raise_day = gs.clock.day_index;
                 try gs.log(.rotation, .{ .company = company }, "[turnover] {s} stays on a raise: {d} → {d} c-bills/mo", .{ try p.fullName(gs.allocator()), was, p.monthlySalary() });
             },
             .retention_bonus_months => |months| if (gs.person(person_id)) |p| {
                 const bonus = p.monthlySalary() * months;
                 try gs.postTransaction(.{ .day = gs.clock.day_index, .amount = -bonus, .category = .payroll, .company = company, .note = "retention bonus" });
                 p.morale = @intCast(@min(100, @as(u32, p.morale) + 5));
-                p.last_raise_day = gs.clock.day_index; // 12C.5
+                p.last_raise_day = gs.clock.day_index;
                 try gs.log(.rotation, .{ .company = company }, "[turnover] {s} stays for a {d} c-bill retention bonus", .{ try p.fullName(gs.allocator()), bonus });
             },
             .let_go => try letGo(gs, person_id, false),
@@ -517,11 +518,11 @@ fn applyEffectsFor(gs: *GameState, effects: []const events.Effect, contract: ?*c
                 }
             },
             .engagement => if (contract) |c| {
-                // On station, or caught at the jump point on the way in (12D.9).
+                // On station, or caught at the jump point on the way in.
                 if (c.isRunning()) try @import("battle.zig").resolveEngagement(gs, c);
             },
             .seize_hull => if (company != .none) {
-                // The most battered line hull the company has (12D.9).
+                // The most battered line hull the company has.
                 var worst: ?*@import("../domain/unit.zig").Unit = null;
                 var uit = gs.units.iterator();
                 while (uit.next()) |e| {
@@ -538,7 +539,7 @@ fn applyEffectsFor(gs: *GameState, effects: []const events.Effect, contract: ?*c
                     try gs.log(.contract, .{ .company = company }, "[betrayal] the employer's liaison takes {s} #{d} as collateral — gone from the books", .{ key, @intFromEnum(id) });
                 }
             },
-            // 12G.6: the contract's tempo. Revalidated here rather than
+            // The contract's tempo. Revalidated here rather than
             // pre-checked by the screen — the fight that raised this may
             // have completed the contract before the answer came.
             .next_battle_in => |days| if (contract) |c| {
@@ -546,7 +547,7 @@ fn applyEffectsFor(gs: *GameState, effects: []const events.Effect, contract: ?*c
                 c.next_battle_day = gs.clock.day_index + days;
                 try gs.log(.battle, .{ .company = company, .contract = c.id }, "[tempo] the company presses the advance — contact expected in {d} days", .{days});
             },
-            // 12G.6: one more roll for everything left on the field.
+            // One more roll for everything left on the field.
             // Revalidated here — the hulls may have been won back or the
             // pilots ransomed while the decision sat.
             .recovery_push => {
@@ -556,7 +557,7 @@ fn applyEffectsFor(gs: *GameState, effects: []const events.Effect, contract: ?*c
                     got.hulls, got.people, if (got.mishap) " — and it cost somebody" else "",
                 });
             },
-            // 12G.6: divide the haul the way the commander chose. The
+            // Divide the haul the way the commander chose. The
             // wrecks were rolled when the fight ended and live in the
             // record, so this takes exactly what was offered.
             .take_salvage => |plan| if (contract) |c| {
@@ -570,7 +571,7 @@ fn applyEffectsFor(gs: *GameState, effects: []const events.Effect, contract: ?*c
                 }
                 try gs.log(.battle, .{ .company = company, .contract = contract_id }, "[salvage] the trucks are loaded: {s}", .{if (text.len > 0) text else "nothing the claim could reach"});
             },
-            // 12G.6: the night's repairs, in the order chosen. Planned again
+            // The night's repairs, in the order chosen. Planned again
             // here from the live stores, by the function the inbox row
             // called — so what was offered is what the techs do.
             .field_repair => |order| try fieldRepairNight(gs, company, contract_id, order),
@@ -620,7 +621,8 @@ fn letGo(gs: *GameState, person_id: types.PersonId, replace: bool) !void {
     try gs.log(.rotation, .{ .company = company }, "[turnover] no {s} on the hiring halls to replace them — hire when one walks in", .{@tagName(p.role)});
 }
 
-/// What a house asks, or pays, for a pilot by experience (12B.7 table).
+/// What a house asks, or pays, for a pilot by experience
+/// (`tuning.contract.ransom_*`).
 pub fn ransomPrice(p: *const @import("../domain/person.zig").Person) types.CBills {
     const t = @import("../domain/tuning.zig").t.contract;
     return switch (p.experience()) {
@@ -631,7 +633,7 @@ pub fn ransomPrice(p: *const @import("../domain/person.zig").Person) types.CBill
     };
 }
 
-/// A missing pilot walks out under their own power (12G.6): home, and
+/// A missing pilot walks out under their own power: home, and
 /// the inbox decision about ransoming them goes with them — it is about
 /// somebody who is no longer missing.
 pub fn walkOut(gs: *GameState, p: *@import("../domain/person.zig").Person, company: types.ForceId) !void {
@@ -644,7 +646,7 @@ pub fn walkOut(gs: *GameState, p: *@import("../domain/person.zig").Person, compa
     }
 }
 
-/// A missing pilot comes home (12D.3): back on the books, still nursing
+/// A missing pilot comes home: back on the books, still nursing
 /// whatever wound they walked away with, seat to be reassigned.
 fn bringHome(p: *@import("../domain/person.zig").Person, day: u32) void {
     _ = day;
@@ -657,7 +659,7 @@ fn bringHome(p: *@import("../domain/person.zig").Person, day: u32) void {
     p.morale = @min(p.morale, 40);
 }
 
-/// Missing, presumed dead (12D.3).
+/// Missing, presumed dead.
 fn writeOffMissing(gs: *GameState, p: *@import("../domain/person.zig").Person, company: types.ForceId) !void {
     p.status = .kia;
     gs.stats.people_kia += 1;
@@ -666,7 +668,7 @@ fn writeOffMissing(gs: *GameState, p: *@import("../domain/person.zig").Person, c
     try gs.log(.contract, .{ .company = company }, "[missing] {s}, held by {s}, is written off — missing, presumed dead (company morale {d})", .{ try p.fullName(gs.allocator()), p.faction, t.mia_morale });
 }
 
-/// The missing-pilot decision (12D.3): ransom, trade a prisoner, or write
+/// The missing-pilot decision: ransom, trade a prisoner, or write
 /// them off. The default spends nothing.
 pub fn miaEntry() Entry {
     return .{ .kind = .mia_held, .log = "was left behind on a lost field and is held by the enemy — pay the ransom, trade a prisoner of theirs, or write them off", .options = &.{
@@ -676,7 +678,7 @@ pub fn miaEntry() Entry {
     }, .default_choice = 2 };
 }
 
-/// Queue the missing-pilot decision (12D.3). No contract on the event, so
+/// Queue the missing-pilot decision. No contract on the event, so
 /// the answer never hardens into a standing order: every pilot is asked for.
 pub fn queueMissing(gs: *GameState, person_id: types.PersonId, company: types.ForceId) !void {
     const e = miaEntry();
@@ -691,7 +693,7 @@ pub fn queueMissing(gs: *GameState, person_id: types.PersonId, company: types.Fo
     });
 }
 
-/// The tempo decision (12G.6): the field is held and the enemy is off
+/// The tempo decision: the field is held and the enemy is off
 /// balance. Press, and the next contact comes in days rather than weeks —
 /// the employer sees initiative, but the company fights it unrepaired,
 /// unrearmed and unslept. Consolidate, and the troops get a night off the
@@ -704,7 +706,7 @@ pub fn pressEntry() Entry {
     }, .default_choice = 1 };
 }
 
-/// Ask for the tempo after a field held (12G.6). Garrison work has no
+/// Ask for the tempo after a field held. Garrison work has no
 /// front to press, and a contract the fight just completed has no next
 /// engagement to schedule — neither asks.
 pub fn queuePress(gs: *GameState, c: *const contract_mod.Contract) !void {
@@ -722,7 +724,7 @@ pub fn queuePress(gs: *GameState, c: *const contract_mod.Contract) !void {
     try gs.log(.decision, .{ .company = c.assigned_company, .contract = c.id }, "[tempo] DECISION: {s}", .{e.log});
 }
 
-/// Go back for the downed (12G.6): the field is lost and hulls and
+/// Go back for the downed: the field is lost and hulls and
 /// people are still out there. The numbers live in `tuning.loss`, once;
 /// `battle.recoveryPush` is the rule this option triggers.
 pub fn pushEntry() Entry {
@@ -732,8 +734,8 @@ pub fn pushEntry() Entry {
     }, .default_choice = 1 };
 }
 
-/// Ask whether to go back, after a field that cost hulls or people
-/// (12G.6). Nothing left out there, nothing to ask.
+/// Ask whether to go back, after a field that cost hulls or people.
+/// Nothing left out there, nothing to ask.
 pub fn queueRecoveryPush(gs: *GameState, c: *const contract_mod.Contract, battle: types.BattleId) !void {
     if (c.status != .active) return;
     const e = pushEntry();
@@ -750,7 +752,7 @@ pub fn queueRecoveryPush(gs: *GameState, c: *const contract_mod.Contract, battle
     try gs.log(.decision, .{ .company = c.assigned_company, .contract = c.id }, "[recovery] DECISION: {s}", .{e.log});
 }
 
-/// How the salvage claim is spent (12G.6). The labels are fixed so the
+/// How the salvage claim is spent. The labels are fixed so the
 /// store can rebuild them from the kind; what is actually on offer comes
 /// from the battle's record, which the inbox row shows alongside.
 pub fn salvageEntry() Entry {
@@ -761,7 +763,7 @@ pub fn salvageEntry() Entry {
     }, .default_choice = 1 };
 }
 
-/// Ask how to divide a haul, after a field held (12G.6).
+/// Ask how to divide a haul, after a field held.
 pub fn queueSalvage(gs: *GameState, c: *const contract_mod.Contract, battle: types.BattleId) !void {
     if (c.status != .active) return;
     const e = salvageEntry();
@@ -778,7 +780,7 @@ pub fn queueSalvage(gs: *GameState, c: *const contract_mod.Contract, battle: typ
     try gs.log(.decision, .{ .company = c.assigned_company, .contract = c.id }, "[salvage] DECISION: {s}", .{e.log});
 }
 
-/// Field repair priority (12G.6): the pooled hours and the field armour
+/// Field repair priority: the pooled hours and the field armour
 /// will not stretch over all the damage. The labels are fixed so the store
 /// can rebuild them from the kind; what each order actually does comes
 /// from `maintenance.repairPlan`, which the inbox row shows alongside.
@@ -790,7 +792,7 @@ pub fn repairEntry() Entry {
     }, .default_choice = 1 };
 }
 
-/// The night after a fight (12G.6): ask whose hull comes first when the
+/// The night after a fight: ask whose hull comes first when the
 /// orders give different results; otherwise the techs just work the one
 /// way there is. A contract the fight completed asks nothing either — the
 /// company still patches up, spread.
@@ -820,7 +822,7 @@ pub fn queueFieldRepair(gs: *GameState, c: *const contract_mod.Contract, battle:
     try fieldRepairNight(gs, company, c.id, .spread);
 }
 
-/// Carry out the night's repairs and log what they did (12G.6).
+/// Carry out the night's repairs and log what they did.
 fn fieldRepairNight(gs: *GameState, company: types.ForceId, contract: types.ContractId, order: types.RepairOrder) !void {
     var arena = std.heap.ArenaAllocator.init(gs.scratch());
     defer arena.deinit();
@@ -829,7 +831,7 @@ fn fieldRepairNight(gs: *GameState, company: types.ForceId, contract: types.Cont
     try gs.log(.construction, .{ .company = company, .contract = contract }, "[repair] the techs work the night through: {s}", .{try maintenance.pushSummary(arena.allocator(), plan)});
 }
 
-/// The prisoner decision (12B.7): ransom, release, or recruit.
+/// The prisoner decision: ransom, release, or recruit.
 pub fn prisonerEntry() Entry {
     return .{ .kind = .prisoner_held, .log = "is held prisoner by the company — ransom to their house, release for goodwill, or offer them a contract", .options = &.{
         .{ .label = "Ransom them to their house", .effects = &.{.ransom_prisoner} },
@@ -838,7 +840,7 @@ pub fn prisonerEntry() Entry {
     }, .default_choice = 1 };
 }
 
-/// Queue the prisoner decision for a captive (12B.7).
+/// Queue the prisoner decision for a captive.
 pub fn queuePrisoner(gs: *GameState, person_id: types.PersonId, company: types.ForceId) !void {
     const e = prisonerEntry();
     try gs.event_queue.push(gs.allocator(), .{
@@ -852,7 +854,7 @@ pub fn queuePrisoner(gs: *GameState, person_id: types.PersonId, company: types.F
     });
 }
 
-/// The notice decision (Stage 12.25): keep them or let them go.
+/// The notice decision: keep them or let them go.
 pub fn noticeEntry() Entry {
     return .{ .kind = .notice_given, .log = "hands in notice — morale or fatigue has worn them down", .options = &.{
         .{ .label = "A raise (+25% for good)", .effects = &.{.{ .raise_pct = 25 }} },
@@ -1013,12 +1015,12 @@ test "effects change real state: cash, reputation, score, spares" {
     try applyEffects(&gs, &.{
         .{ .cash_monthly_pct = 50 }, .{ .reputation = 2 }, .{ .score = 3 }, .{ .parts_windfall = 2 },
     }, c);
-    // Field cash lands in the company's local funds (Stage 9A), not home.
+    // Field cash lands in the company's local funds, not home.
     try std.testing.expectEqual(@as(i64, 150_000), gs.force(co).?.local_funds); // +50% of 300k
     try std.testing.expectEqual(@as(i64, 10_000_000), gs.funds);
     try std.testing.expectEqual(@as(i32, 2), gs.reputation);
     try std.testing.expectEqual(@as(i32, 3), c.score);
-    // Weapons stay with the company; structural parts are crated home (Stage 12).
+    // Weapons stay with the company; structural parts are crated home.
     try std.testing.expectEqual(@as(u32, 2), gs.stockCount(.{ .company = co }, "mlas"));
     try std.testing.expectEqual(@as(u32, 0), gs.stockCount(.{ .company = co }, "comp_arm"));
     var crated: u32 = gs.stockCount(gs.defaultSite(), "comp_arm"); // no HQ in this test → the outfit depot
@@ -1028,7 +1030,7 @@ test "effects change real state: cash, reputation, score, spares" {
     try std.testing.expectEqual(@as(u32, 2), crated);
 }
 
-test "12.22: the black market and a salvage dispute move standing and field stock" {
+test "the black market and a salvage dispute move standing and field stock" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1222 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .line_officer);
@@ -1063,7 +1065,7 @@ test "12.22: the black market and a salvage dispute move standing and field stoc
     try std.testing.expect(weeklyDeck(false, 9).kind == .black_market_contact);
 }
 
-test "12.24: automatic events never move money, stock or hulls — those are decisions" {
+test "automatic events never move money, stock or hulls — those are decisions" {
     var roll: u8 = 2;
     while (roll <= 12) : (roll += 1) {
         const decks = [_]Entry{ garrisonDeck(roll), combatDeck(roll), weeklyDeck(true, roll), weeklyDeck(false, roll) };
@@ -1080,7 +1082,7 @@ test "12.24: automatic events never move money, stock or hulls — those are dec
     }
 }
 
-test "12.25: notice is a decision — a raise keeps them, letting go vacates the seat, replacing hires from the hall" {
+test "notice is a decision — a raise keeps them, letting go vacates the seat, replacing hires from the hall" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1225 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .paymaster);
@@ -1114,7 +1116,7 @@ test "12.25: notice is a decision — a raise keeps them, letting go vacates the
     try std.testing.expectEqual(co, gs.person(gs.people.keys()[gs.people.count() - 1]).?.assigned_force);
 }
 
-test "12B.7: a prisoner can be ransomed, released for standing, or recruited on a loyalty roll" {
+test "a prisoner can be ransomed, released for standing, or recruited on a loyalty roll" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1237 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .line_officer);
@@ -1164,7 +1166,7 @@ test "12B.7: a prisoner can be ransomed, released for standing, or recruited on 
     try std.testing.expectEqual(payroll_before, gs.monthlyPayroll());
 }
 
-test "play feedback: a weekly decision cools down, and the same answer three times becomes a standing order" {
+test "a weekly decision cools down, and the same answer three times becomes a standing order" {
     const commands = @import("commands.zig");
     var gs = GameState.init(std.testing.allocator, .{ .seed = 303 });
     defer gs.deinit();
@@ -1224,7 +1226,7 @@ test "play feedback: a weekly decision cools down, and the same answer three tim
     try std.testing.expectError(commands.Error.NoSuchEvent, commands.execute(&gs, .{ .clear_standing_order = "no_such_thing" }));
 }
 
-test "12D.3: a missing pilot is ransomed, traded for a prisoner of their house, or written off" {
+test "a missing pilot is ransomed, traded for a prisoner of their house, or written off" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1203 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .paymaster);
@@ -1267,7 +1269,7 @@ test "12D.3: a missing pilot is ransomed, traded for a prisoner of their house, 
     try std.testing.expect(gs.person(pilots[2]).?.status == .kia);
 }
 
-test "12D.9: betrayal can cost a hull; raiders at the jump point delay or fight an unescorted company" {
+test "betrayal can cost a hull; raiders at the jump point delay or fight an unescorted company" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1209 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .line_officer);
@@ -1309,7 +1311,7 @@ test "12D.9: betrayal can cost a hull; raiders at the jump point delay or fight 
 }
 
 /// A company on an active contract with three hulls shot up and nothing
-/// else to fix, and `armor` tons in its stores (12G.6 tests).
+/// else to fix, and `armor` tons in its stores (a shared test fixture).
 pub fn damagedCompanyForTest(gs: *GameState, armor: u32) !struct { c: *contract_mod.Contract, hulls: [3]types.UnitId } {
     _ = try gs.createCommander("T", .LC, .line_officer);
     const co = try @import("starter_company.zig").generateInto(gs, "Alpha");
@@ -1343,7 +1345,7 @@ pub fn damagedCompanyForTest(gs: *GameState, armor: u32) !struct { c: *contract_
     return .{ .c = gs.contracts.getPtr(@enumFromInt(1)).?, .hulls = hulls };
 }
 
-test "12G.6: the repairs the inbox offers are the repairs the techs make" {
+test "the repairs the inbox offers are the repairs the techs make" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 12066 });
     defer gs.deinit();
     const f = try damagedCompanyForTest(&gs, 2);
@@ -1369,7 +1371,7 @@ test "12G.6: the repairs the inbox offers are the repairs the techs make" {
     try std.testing.expect(gs.event_queue.blocking() == null);
 }
 
-test "12G.6: when the stores cover everything, the techs just do it" {
+test "when the stores cover everything, the techs just do it" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 12067 });
     defer gs.deinit();
     const f = try damagedCompanyForTest(&gs, 60);

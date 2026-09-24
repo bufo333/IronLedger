@@ -1,8 +1,7 @@
 //! The daily tick: one campaign day through the ordered phase pipeline
-//! (ARCH §6, clock.DayPhase). Mirrors MekHQ `Campaign.newDay()`.
+//! (ARCH §6, clock.DayPhase). MekHQ counterpart: `Campaign.newDay()`.
 //!
-//! Stage 1 wires the pipeline with most phases stubbed; each later stage
-//! fills in its phase without touching the order. Order is part of the spec.
+//! Phase order is part of the spec.
 
 const std = @import("std");
 const tuning = @import("../domain/tuning.zig").t;
@@ -29,15 +28,15 @@ const field_supply = @import("field_supply.zig");
 /// several turns.
 pub fn advanceDay(gs: *GameState) !void {
     gs.clock.advance();
-    gs.refreshHqStaffing(); // the back office is people (Stage 9C)
+    gs.refreshHqStaffing(); // the back office is people
 
-    // Phase order per clock.DayPhase — stubs marked with their stage.
-    if (gs.clock.day_index % 7 == 0) network.resetWeeklyThroughput(gs); // links' week (Stage 9D)
+    // Phase order per clock.DayPhase.
+    if (gs.clock.day_index % 7 == 0) network.resetWeeklyThroughput(gs); // links' week
     try runTravel(gs); // deliveries, couriers, transfers
-    try runPolicies(gs); // standing cash top-ups and resupply (Stage 12: daily)
-    try runStockPolicies(gs); // warehouse reorder points (Stage 12)
-    try hq_ops.runDaily(gs); // bays, fabrication, construction (Stage 9C)
-    try runSupplyConsumption(gs); // supply_consumption phase (Stage 9B)
+    try runPolicies(gs); // standing cash top-ups and resupply
+    try runStockPolicies(gs); // warehouse reorder points
+    try hq_ops.runDaily(gs); // bays, fabrication, construction
+    try runSupplyConsumption(gs); // supply_consumption phase
     try medical.runDailyHealing(gs); // medical phase
     try runMarkets(gs); // acquisition_and_markets
     if (gs.clock.day_index % 7 == 0 and gs.clock.day_index > 0) {
@@ -49,24 +48,23 @@ pub fn advanceDay(gs: *GameState) !void {
     try contract_control.runReturns(gs); // companies travelling home arrive
     if (gs.clock.date.day == 1) try contract_events.rollMonthly(gs); // event decks
     if (gs.clock.day_index % 7 == 3) {
-        try contract_events.rollWeekly(gs); // weekly happenings (Stage 12)
-        try contract_events.rollInterdiction(gs); // raiders at the jump point (12D.9)
+        try contract_events.rollWeekly(gs); // weekly happenings
+        try contract_events.rollInterdiction(gs); // raiders at the jump point
     }
     try battle.runDaily(gs); // battle_resolution: due engagements resolve
-    try contract_control.checkEffectiveness(gs); // the ineffectiveness clock (Stage 9E)
+    try contract_control.checkEffectiveness(gs); // the ineffectiveness clock
     if (gs.clock.day_index % 7 == 0 and gs.clock.day_index > 0) {
         try medical.runWeeklyRest(gs); // morale_fatigue phase
-        runTrainingLances(gs); // lance roles (Stage 12)
+        runTrainingLances(gs); // training lances drill
     }
     try runFinances(gs);
     try contract_events.expireDue(gs); // decisions phase: deadlines pass
 }
 
-/// Standing policies, daily (Stage 12). Cash: top an entity up to its
+/// Standing policies, checked daily. Cash: top an entity up to its
 /// floor by courier, at most the monthly cap per month, and never while a
-/// courier to it is already in flight. Provisions: ship the policy's
-/// tonnage from the home warehouse when a deployed company's days of
-/// supply fall under the floor, one shipment in flight at a time.
+/// courier to it is already in flight. Resupply: a deployed company's
+/// field-plan lines ship from the home warehouse (see below).
 fn runPolicies(gs: *GameState) !void {
     for (gs.policies.items) |*policy| {
         const balance = gs.treasuryBalance(policy.entity);
@@ -86,7 +84,7 @@ fn runPolicies(gs: *GameState) !void {
         try gs.log(.finance, .{ .company = tags.company, .hq = tags.hq }, "[finance] standing policy dispatches {d} c-bills (eta {d} days, {d} of {d} this month)", .{ amount, eta, policy.sent_this_month, policy.monthly_cap });
     }
 
-    // Resupply (Stage 12): every line of the company's field plan —
+    // Resupply: every line of the company's field plan —
     // provisions, medical, armor, each munition family it fires — is kept
     // between a floor and a target sized to the line's transit and the
     // trucks' tonnage (field_supply.plan). A line ships when on hand plus
@@ -115,9 +113,8 @@ const Result = commands.Result;
             if (recent) continue;
             var want = line.target - on_hand - inbound;
             if (sp.tons > 0) want = @min(want, sp.tons);
-            // Ship what the trucks can take (12B.8 fix: a top-up larger than
-            // the free tonnage used to be refused outright and the company
-            // starved beside a full warehouse). Trucks packed with surplus
+            // Ship what the trucks can take: a top-up larger than the free
+            // tonnage is cut to fit, not refused. Trucks packed with surplus
             // ammo from employer convoys are trimmed first — excess rides
             // home on the empty convoy so the food can land.
             const room_now = gs.siteFreeTons(site) -| field_supply.inboundTons(gs, sp.company);
@@ -201,7 +198,7 @@ test "forward depot: the nearest HQ holding the line ships it, the home HQ other
     try std.testing.expectEqual(fb, gs.force(co).?.supplying_hq);
 }
 
-/// Warehouse reorder points (Stage 12): every line an HQ keeps stocked is
+/// Warehouse reorder points: every line an HQ keeps stocked is
 /// checked daily; under `min` the shortfall to `target` is fabricated
 /// (components, when the HQ has a bay) or ordered through the catalogue.
 /// One order per line in flight; a failed sourcing roll waits a week.
@@ -219,7 +216,7 @@ fn runStockPolicies(gs: *GameState) !void {
         }
         if (pending > 0 or failed_recently) continue;
         const want = sp.target - have;
-        const fabricate = hq_ops.canFabricate(gs, sp.hq, sp.part_key); // what this bay is rated for (12D.8), else order it
+        const fabricate = hq_ops.canFabricate(gs, sp.hq, sp.part_key); // what this bay is rated for, else order it
         const cmd: commands.Command = if (fabricate)
             .{ .fabricate = .{ .hq = sp.hq, .part_key = sp.part_key, .quantity = want } }
         else
@@ -260,7 +257,7 @@ pub fn runTravel(gs: *GameState) !void {
         if (order.eta_day != null and gs.clock.day_index >= order.eta_day.?) {
             order.status = .delivered;
             // Land at the destination site; anything the warehouse or the
-            // trucks can't hold is lost on the dock (Stage 9B).
+            // trucks can't hold is lost on the dock.
             const dest: types.Site = if (order.dest == .outfit) gs.defaultSite() else order.dest;
             const room = gs.siteFreeTons(dest) / @max(1, part_mod.tons(order.part_key));
             const landed = @min(order.quantity, room);
@@ -273,7 +270,7 @@ pub fn runTravel(gs: *GameState) !void {
         }
     }
 
-    // Transferred hulls arrive (Stage 9D).
+    // Transferred hulls arrive.
     var ti: usize = 0;
     while (ti < gs.unit_transfers.items.len) {
         const t = gs.unit_transfers.items[ti];
@@ -281,7 +278,7 @@ pub fn runTravel(gs: *GameState) !void {
             try gs.placeUnitInCompany(t.unit, t.to_company);
             const name = if (gs.unit(t.unit)) |u| u.chassis_key else "?";
             if (t.to_company == .none) {
-                // Salvage (12.23): the wreck lands in the pool at the HQ, status by its damage.
+                // Salvage: the wreck lands in the pool at the HQ, status by its damage.
                 if (gs.unit(t.unit)) |u| u.status = if (u.needsDepot()) .damaged else .ready;
                 try gs.log(.delivery, .{ .hq = if (gs.hqs.count() > 0) gs.hqs.keys()[0] else .none }, "[salvage] wreck {s} #{d} lands in the HQ pool — Forces: place it in a company and [D] sends it to the depot, or sell it", .{ name, @intFromEnum(t.unit) });
             } else try gs.log(.delivery, .{ .company = t.to_company }, "[transfer] {s} arrives and joins the company", .{name});
@@ -303,12 +300,12 @@ pub fn runTravel(gs: *GameState) !void {
     }
 }
 
-/// supply_consumption phase (Stage 9B): deployed companies eat from their
+/// supply_consumption phase: deployed companies eat from their
 /// field stores daily. Empty stores → buy locally with local funds (the
 /// §9.6 valve, at local prices); no funds → the company goes hungry.
 fn runSupplyConsumption(gs: *GameState) !void {
     // Every company away from home eats from its trucks — on contract or
-    // idling on the world it last worked (Stage 9E).
+    // idling on the world it last worked.
     var fit = gs.forces.iterator();
     while (fit.next()) |fentry| {
         const f = fentry.value_ptr;
@@ -349,10 +346,10 @@ fn runSupplyConsumption(gs: *GameState) !void {
     }
 }
 
-/// markets phase: contract board and site-market listings refresh monthly;
-/// hiring halls weekly.
+/// markets phase: hiring halls churn daily; the contract board and
+/// site-market listings refresh on the 1st.
 fn runMarkets(gs: *GameState) !void {
-    try contract_market.churnCandidates(gs); // people move daily (Stage 9C.3)
+    try contract_market.churnCandidates(gs); // people move daily
     if (gs.clock.date.day != 1) return;
     try contract_market.refresh(gs);
     try contract_market.refreshListings(gs);
@@ -370,14 +367,14 @@ fn runContracts(gs: *GameState) !void {
                 c.end_day = gs.clock.day_index + @as(u32, c.terms.length_months) * types.days_per_month;
                 if (gs.force(c.assigned_company)) |f| f.location_planet = c.planet_key;
                 try gs.log(.contract, .{ .company = c.assigned_company, .contract = c.id }, "[{s}] company on station at {s} — contract active", .{ c.kind.label(), c.planet_key });
-                // The contract world's hull board opens on arrival (12D.7).
+                // The contract world's hull board opens on arrival.
                 try contract_market.refreshContractWorld(gs, c);
             },
             .active => if (c.end_day != null and gs.clock.day_index >= c.end_day.?) {
-                // End of term (Stage 9E): a performance failure is a failed
-                // contract (12D.1, CamOps — not a breach: no clawback, no
-                // cooling); otherwise the tour completes. VP were banked as
-                // the score moved, so nothing is added here.
+                // End of term: a performance failure is a failed contract
+                // (CamOps — not a breach: no clawback, no cooling); otherwise
+                // the tour completes. VP are banked as the score moves, so
+                // nothing is added here.
                 if (c.score <= contract_mod.Contract.fail_score) {
                     try contract_control.fail(gs, c, "failed on performance");
                 } else {
@@ -417,11 +414,10 @@ fn landStock(gs: *GameState, site: types.Site, key: []const u8, qty: u32) !u32 {
     return n;
 }
 
-/// finances phase: payday on the 1st of the month — salaries out, and a
-/// month of service XP in (MekHQ's idle-XP analog; scenario and task XP
-/// arrive with Stages 5/7).
 const monthly_service_xp = tuning.person.monthly_service_xp;
 
+/// finances phase: payday on the 1st of the month — salaries out, and a
+/// month of service XP in (MekHQ's idle-XP analog).
 fn runFinances(gs: *GameState) !void {
     if (!gs.clock.date.isPayday()) return;
 
@@ -430,14 +426,14 @@ fn runFinances(gs: *GameState) !void {
         const p = entry.value_ptr;
         if (p.status == .active) p.xp += monthly_service_xp;
     }
-    // Seats and experience set ranks before pay is counted (12B.4); service
-    // awards come due (12B.5).
+    // Seats and experience set ranks before pay is counted; service
+    // awards come due.
     _ = try @import("personnel.zig").refreshRanks(gs);
     _ = @import("personnel.zig").refreshShares(gs);
-    // New Year's Day (12C.8): the rating goes in the book.
+    // New Year's Day: the rating goes in the book.
     if (gs.clock.date.month == 1) {
         try gs.rating_history.append(gs.allocator(), .{ .year = gs.clock.date.year, .score = @import("rating.zig").score(gs) });
-        // Tech news (12C.16): the designs entering service this year.
+        // Tech news: the designs entering service this year.
         var news: std.ArrayListUnmanaged(u8) = .empty;
         for (@import("../domain/chassis.zig").catalog) |*c| if (c.intro_year == gs.clock.date.year) {
             if (news.items.len > 0) try news.appendSlice(gs.allocator(), ", ");
@@ -446,7 +442,7 @@ fn runFinances(gs: *GameState) !void {
         if (news.items.len > 0) try gs.log(.market, .{}, "[tech] new in {d}: {s} — on the house tables and the boards from this year", .{ gs.clock.date.year, news.items });
     }
     _ = try @import("personnel.zig").checkAllAwards(gs);
-    // Notice is handed in on payday (Stage 12.20); grudges fade (12.21).
+    // Notice is handed in on payday; grudges fade.
     _ = try @import("medical.zig").runMonthlyTurnover(gs);
     @import("contract_control.zig").driftStanding(gs);
 
@@ -471,7 +467,7 @@ fn runFinances(gs: *GameState) !void {
         });
     }
 
-    // HQ upkeep draws each HQ's own treasury (Stage 9A); running dry is
+    // HQ upkeep draws each HQ's own treasury; running dry is
     // allowed but flagged — obligations don't wait for the courier.
     var hqit = gs.hqs.iterator();
     while (hqit.next()) |entry| {
@@ -489,7 +485,7 @@ fn runFinances(gs: *GameState) !void {
         }
     }
 
-    // Supply-link upkeep (Stage 9D): the network is a standing cost.
+    // Supply-link upkeep: the network is a standing cost.
     for (gs.hq_links.items) |l| {
         try gs.postTransaction(.{
             .day = gs.clock.day_index,
@@ -531,7 +527,7 @@ fn runFinances(gs: *GameState) !void {
             }
         }
 
-        // Straight support (Stage 9B): employers with overhead terms ship
+        // Straight support: employers with overhead terms ship
         // supplies monthly — goods, not cash — landing in the company's
         // field stores as far as the trucks can hold.
         if (c.terms.overhead_pct > 0) {
@@ -559,8 +555,8 @@ fn runFinances(gs: *GameState) !void {
     // Loan service.
     for (gs.loans.items) |*loan| {
         if (loan.balance <= 0) continue;
-        // Simple interest on the original principal, spread over the term
-        // (Stage 12 rule): every month costs the same, so early repayment
+        // Simple interest on the original principal, spread over the term:
+        // every month costs the same, so early repayment
         // (`repay_loan`) saves the interest that hasn't been charged yet.
         const interest = @divTrunc(loan.principal * loan.rate_bp, 10_000 * 12);
         const principal_part = @min(@max(0, loan.payment - interest), loan.balance);
@@ -573,7 +569,7 @@ fn runFinances(gs: *GameState) !void {
 test "payday fires on the 1st and only on the 1st" {
     var gs = GameState.init(std.testing.allocator, .{ .start_funds = 1_000_000 });
     defer gs.deinit();
-    _ = try gs.hirePerson("Natasha", "Kerensky", .mekwarrior); // 1500/mo regular → Corporal ×1.1 on payday (12B.4)
+    _ = try gs.hirePerson("Natasha", "Kerensky", .mekwarrior); // 1500/mo regular → Corporal ×1.1 on payday
 
     // Jan 1 (day 0) start → advancing 30 days lands on Jan 31: no payroll yet.
     for (0..30) |_| _ = try advanceDay(&gs);

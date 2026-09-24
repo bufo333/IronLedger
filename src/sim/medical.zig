@@ -13,8 +13,8 @@ const GameState = @import("state.zig").GameState;
 /// Days of training to improve a skill one step.
 pub const training_days = tuning.medical.training_days;
 
-/// Training program length at the outfit's HQ: a staffed HR office runs a
-/// tighter schedule (Stage 9C back office).
+/// Training program length at `hq_id`: each HR admin there shortens it,
+/// down to `training_min_days`.
 pub fn trainingDaysFor(gs: *GameState, hq_id: types.HqId) u32 {
     if (gs.hqs.getPtr(hq_id) == null) return training_days;
     const hr = gs.hqStaff(hq_id, .admin_hr);
@@ -23,7 +23,7 @@ pub fn trainingDaysFor(gs: *GameState, hq_id: types.HqId) u32 {
 
 pub const WoundCause = enum { combat, accident };
 
-/// Where a wound lands (Stage 12.16; MekHQ `InjuryUtil` hit locations,
+/// Where a wound lands (MekHQ `InjuryUtil` hit locations,
 /// collapsed to 2d6): head and internal on the extremes, limbs in the
 /// middle. Accidents in the bay break arms, legs and ribs, not skulls.
 pub fn rollLocation(gs: *GameState, cause: WoundCause) person_mod.InjuryLocation {
@@ -49,8 +49,8 @@ pub fn rollLocation(gs: *GameState, cause: WoundCause) person_mod.InjuryLocation
 
 /// Wound someone: they leave duty with a new injury of `severity` (1
 /// light, 2 serious, 3 crippling) at a rolled location. A crippling head
-/// or internal wound is permanent on 2d6 ≤ 4 (`.medical` stream). Healing
-/// starts when the medbay admits them (tuning.medical.permanent_target).
+/// or internal wound is permanent on 2d6 ≤ `tuning.medical.permanent_target`
+/// (`.medical` stream). Healing starts when the medbay admits them.
 pub fn inflict(gs: *GameState, person_id: types.PersonId, cause: WoundCause, severity: u8, why: []const u8) !void {
     const p = gs.person(person_id) orelse return;
     if (p.status == .kia) return;
@@ -65,7 +65,7 @@ pub fn inflict(gs: *GameState, person_id: types.PersonId, cause: WoundCause, sev
     p.status = .wounded;
     p.wound_heal_day = null; // triage again with the new wound
     if (!gs.auto_admit) p.medbay_admitted = false;
-    _ = try @import("personnel.zig").checkAwards(gs, person_id); // 12B.5: the Wound Badge
+    _ = try @import("personnel.zig").checkAwards(gs, person_id); // the Wound Badge
     try gs.log(.medical, .{ .company = gs.companyOf(p.assigned_force) }, "[medbay] {s} wounded ({s}): {s} {s}{s}", .{
         try p.fullName(gs.allocator()), why, severityLabel(severity), @tagName(location), if (permanent) " — permanent" else "",
     });
@@ -112,7 +112,7 @@ pub fn healDays(gs: *GameState, care: Care) u32 {
     var days: u32 = m.heal_base_days + gs.rng.roll2d6(.medical);
 
     // Doctor coverage: 1 doctor per 25 patients (MekHQ ratio); medics
-    // (12B.11) each carry a few patients of their own.
+    // each carry a few patients of their own.
     var doctors: u32 = 0;
     var medics: u32 = 0;
     var wounded: u32 = 0;
@@ -126,7 +126,7 @@ pub fn healDays(gs: *GameState, care: Care) u32 {
     if (wounded > doctors * m.patients_per_doctor + medics * m.patients_per_medic) days = @intCast(types.applyBp(days, m.understaffed_bp)); // understaffed infirmary
 
     if (care == .field_mash) days = @intCast(types.applyBp(days, m.mash_bp)); // MASH lance forward surgery
-    // Home hospital: better facilities, shorter stays.
+    // Home hospital: any hospital in the outfit shortens the stay.
     var hqit = gs.hqs.iterator();
     var best_hospital: u8 = 0;
     while (hqit.next()) |entry| {
@@ -137,8 +137,8 @@ pub fn healDays(gs: *GameState, care: Care) u32 {
     return @max(days, m.heal_min_days);
 }
 
-/// Medbay beds (Stage 9C.2): hospital level × 10 at home; 4 per MASH truck
-/// with a deployed company.
+/// Medbay beds: the outfit's best hospital level × 10 at home; for a
+/// deployed company, 4 per operational MASH truck plus its medics.
 pub fn bedCapacity(gs: *GameState, company: types.ForceId, deployed: bool) u32 {
     if (deployed) {
         var beds: u32 = 0;
@@ -147,7 +147,7 @@ pub fn bedCapacity(gs: *GameState, company: types.ForceId, deployed: bool) u32 {
             const u = entry.value_ptr;
             if (u.kind == .mash and gs.companyOf(u.force) == company and gs.unitOperational(u)) beds += tuning.medical.beds_per_mash;
         }
-        // Medics (12B.11): staffing the MASH trucks, a bed each up to
+        // Medics: staffing the MASH trucks, a bed each up to
         // doubling the trucks; without trucks, an aid station of one bed
         // per two medics.
         var medics: u32 = 0;
@@ -224,7 +224,7 @@ pub fn runDailyHealing(gs: *GameState) !void {
         if (p.wound_heal_day == null) {
             // Nobody heals in a corridor: the player admits the wounded
             // (`admit`), and only then does triage run — unless the medbay
-            // runs its own morning round (Stage 12 auto-admit).
+            // runs its own morning round (`gs.auto_admit`).
             if (!p.medbay_admitted) {
                 if (!gs.auto_admit) continue;
                 p.medbay_admitted = true;
@@ -234,9 +234,9 @@ pub fn runDailyHealing(gs: *GameState) !void {
             // lie; an empty dispensary heals half again as slowly.
             var days = healDays(gs, careFor(gs, p));
             if (!gs.takeStock(gs.siteForForce(p.assigned_force), "medical_supplies", 1)) days = @intCast(types.applyBp(days, tuning.medical.no_supplies_bp));
-            if (p.has("iron_man")) days = @max(tuning.medical.iron_man_min_days, @as(u32, @intCast(types.applyBp(days, tuning.medical.iron_man_heal_bp)))); // 12B.6
-            // A wound with no record behind it (older saves, event
-            // effects): one light internal injury stands in for it.
+            if (p.has("iron_man")) days = @max(tuning.medical.iron_man_min_days, @as(u32, @intCast(types.applyBp(days, tuning.medical.iron_man_heal_bp))));
+            // A wound with no record behind it (saves before schema v7,
+            // event effects): one light internal injury stands in for it.
             if (p.openInjuries() == 0) try p.injuries.append(gs.allocator(), .{ .location = .internal, .severity = 1, .incurred_day = gs.clock.day_index });
             // Every open injury closes on its own day: serious ones take
             // half again as long, crippling ones twice as long: days × (severity + 1) / 2.
@@ -264,12 +264,12 @@ pub fn runDailyHealing(gs: *GameState) !void {
     }
 }
 
-/// Payday turnover (Stage 12.20; AtB retirement/defection rolls,
-/// abstracted): the restless — morale under the line, fatigue over it —
-/// with a year on the payroll roll 2d6 against a target that climbs with
-/// every complaint; a miss is notice handed in. Long service retires
-/// instead. Seats are vacated so the checklist shows the hole. Returns
-/// how many left.
+/// Payday turnover (AtB retirement/defection rolls, abstracted): anyone
+/// at `age_retire` retires, seats vacated so the checklist shows the hole.
+/// The restless — morale under the line, fatigue over it — with a year on
+/// the payroll roll 2d6 against a target that climbs with every
+/// complaint; a miss queues notice in the inbox. Deployed people wait for
+/// the tour to end. Returns retirements plus notices queued.
 pub fn runMonthlyTurnover(gs: *GameState) !u32 {
     const t = tuning.person;
     const day = gs.clock.day_index;
@@ -280,7 +280,7 @@ pub fn runMonthlyTurnover(gs: *GameState) !u32 {
         if (p.status != .active) continue;
         // Nobody walks out mid-contract: notice waits for the tour to end.
         if (isDeployed(gs, p)) continue;
-        // Age (12C.4): past the line they hang up the neurohelmet.
+        // Age: past the line they hang up the neurohelmet.
         const age = p.ageYears(day);
         if (age != null and age.? >= t.age_retire) {
             const company = gs.companyOf(p.assigned_force);
@@ -292,8 +292,8 @@ pub fn runMonthlyTurnover(gs: *GameState) !u32 {
         const restless = turnoverRisk(p, day);
         if (restless == 0) continue;
         const roll = gs.rng.roll2d6(.medical);
-        if (roll >= t.turnover_target + gs.diff().turnover_delta + restless) continue; // difficulty (12.32)
-        // Notice, not a disappearance (12.25): the inbox offers a raise, a
+        if (roll >= t.turnover_target + gs.diff().turnover_delta + restless) continue; // difficulty
+        // Notice, not a disappearance: the inbox offers a raise, a
         // bonus, a replacement from the hall, or the door.
         try @import("contract_events.zig").queueNotice(gs, p.id);
         notices += 1;
@@ -301,11 +301,11 @@ pub fn runMonthlyTurnover(gs: *GameState) !u32 {
     return notices;
 }
 
-/// How many restless flags a person carries into the payday roll (12C.5):
-/// none under a year's tenure, morale and fatigue flags plus one for age,
-/// founders stand by the outfit unless truly miserable, and every other
-/// loyalty modifier cancels a flag. Zero means they do not roll. The
-/// checklist counts who will roll from the same function.
+/// How many restless flags a person carries into the payday roll: none
+/// under a year's tenure, morale and fatigue flags plus one for age;
+/// founders stand by the outfit unless truly miserable, and each loyalty
+/// modifier (founder included) cancels a flag. Zero means they do not
+/// roll. The checklist counts who will roll from the same function.
 pub fn turnoverRisk(p: *const person_mod.Person, day: u32) u8 {
     const t = tuning.person;
     if (p.tenureMonths(day) < t.turnover_min_tenure_months) return 0;
@@ -352,7 +352,7 @@ pub fn runWeeklyRest(gs: *GameState) !void {
             const contract = gs.deploymentContract(company);
             const garrison = if (contract) |c| c.kind.isGarrisonClass() else false;
             if (garrison) {
-                // Garrison duty is nearly home (12.30): barracks and a town.
+                // Garrison duty is nearly home: barracks and a town.
                 // Fatigue recovers at a share of the home rate — the mess
                 // lance stands in for the mess hall — and spirits hold.
                 const mess_lance = if (gs.supportLance(company, .mess)) |l| l.units.items.len > 0 else false;
@@ -360,9 +360,8 @@ pub fn runWeeklyRest(gs: *GameState) !void {
                 p.addFatigue(-@as(i32, @intCast(@min(field_decay, 255))));
                 if (p.morale < tuning.person.morale_garrison_lift_below and p.fatigue <= tuning.person.fatigue_grind) p.addMorale(1);
             }
-            // Exhaustion grinds morale down, and an empty mess tent grinds
-            // it faster (Stage 9B); combat tours get no rest at all. Cool
-            // Under Fire (12B.6) shrugs the grind off.
+            // Exhaustion grinds morale down, and a hungry company grinds
+            // faster; combat tours get no rest at all.
             if (p.fatigue > tuning.person.fatigue_grind) p.addMorale(-1); // Cool Under Fire shrugs a one-point grind off entirely
             if (gs.force(company)) |co| {
                 if (co.supply_shortage_days > 0) p.addMorale(-2);
@@ -374,7 +373,7 @@ pub fn runWeeklyRest(gs: *GameState) !void {
             const mess: u8 = if (gs.hqs.getPtr(home)) |h| h.effectiveFacilityLevel(.mess) else 0;
             const decay: u32 = @intCast(types.applyBp(person_mod.fatigueDecayPerWeek(mess), gs.commanderMultBp(.fatigue_recovery)));
             const hr_bonus: u8 = if (gs.hqs.getPtr(home) != null) @intCast(@min(tp.hr_morale_bonus_max, gs.hqStaff(home, .admin_hr).count / tp.hr_morale_admins_per_point)) else 0;
-            // On leave: double recovery (Stage 9C.2).
+            // On leave: double recovery.
             const on_leave = p.leave_until_day != null and gs.clock.day_index < p.leave_until_day.?;
             p.addFatigue(-@as(i32, @intCast(@min(if (on_leave) decay * 2 else decay, 255))));
             // Rested spirits drift toward content (50), mess food helps.
@@ -455,7 +454,7 @@ test "rested companies reset their rotation debt" {
     try std.testing.expect(gs.force(co).?.last_rotation_day != null);
 }
 
-test "12.16: injuries land by location, heal on their own days, and permanent ones scar the record" {
+test "injuries land by location, heal on their own days, and permanent ones scar the record" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1216 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .paymaster);
@@ -500,7 +499,7 @@ test "12.16: injuries land by location, heal on their own days, and permanent on
     try std.testing.expectEqual(@as(u8, 1), p.permanentPenalty());
     try std.testing.expectEqual(@as(u32, 0), p.openInjuries());
 
-    // A wound with no record (legacy) gets one at triage.
+    // A wound with no record gets one at triage.
     const other = try gs.hirePerson("Ana", "Ruiz", .mekwarrior);
     gs.person(other).?.status = .wounded;
     gs.person(other).?.medbay_admitted = true;
@@ -508,13 +507,13 @@ test "12.16: injuries land by location, heal on their own days, and permanent on
     try std.testing.expectEqual(@as(u32, 1), gs.person(other).?.openInjuries());
 }
 
-test "12.20/12.25: the restless hand in notice after a year (an inbox decision), the content stay" {
+test "the restless hand in notice after a year (an inbox decision), the content stay" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1220 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .paymaster);
     _ = try @import("starter_company.zig").generateInto(&gs, "Alpha");
-    // Content and fresh (and all thirty — age rolls are 12C.4's business):
-    // nobody stirs however low the dice.
+    // Content and fresh (and all thirty, under the age flag): nobody
+    // stirs however low the dice.
     gs.clock.day_index = 400;
     var ait = gs.people.iterator();
     while (ait.next()) |e| e.value_ptr.born_day = -30 * 365;
@@ -551,7 +550,7 @@ test "12.20/12.25: the restless hand in notice after a year (an inbox decision),
     try std.testing.expectEqual(@as(u32, 0), try runMonthlyTurnover(&fresh));
 }
 
-test "12C.4: the old retire on payday with their payout; the merely older roll to leave" {
+test "the old retire on payday with their payout; the merely older roll to leave" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 124 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .paymaster);
@@ -566,7 +565,7 @@ test "12C.4: the old retire on payday with their payout; the merely older roll t
     try std.testing.expectEqual(person_mod.Status.retired, gs.person(old).?.status);
     try std.testing.expect(gs.funds < funds); // a year in: one month's severance
     try std.testing.expectEqual(person_mod.Status.active, gs.person(young).?.status);
-    // Fifty and content: one restless flag from age alone, so they roll (some seeds notice).
+    // Past fifty and content: one restless flag from age alone, so they roll (some seeds notice).
     const older = try gs.hirePerson("Mid", "Career", .mekwarrior);
     gs.person(older).?.born_day = -55 * 365;
     gs.person(older).?.recruited_day = 1; // a year in, not a founder
@@ -582,7 +581,7 @@ test "12C.4: the old retire on payday with their payout; the merely older roll t
     try std.testing.expect(noticed);
 }
 
-test "12C.5: a founder never rolls while morale holds; a veteran's loyalty cancels a flag" {
+test "a founder never rolls while morale holds; a veteran's loyalty cancels a flag" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 125 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .paymaster);
@@ -613,7 +612,7 @@ test "12C.5: a founder never rolls while morale holds; a veteran's loyalty cance
     try std.testing.expect(noticed);
 }
 
-test "12.30: garrison duty recovers fatigue in the field; a combat tour does not" {
+test "garrison duty recovers fatigue in the field; a combat tour does not" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1230 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .paymaster);
@@ -641,7 +640,7 @@ test "12.30: garrison duty recovers fatigue in the field; a combat tour does not
     try std.testing.expectEqual(before, gs.person(pilot).?.fatigue);
 }
 
-test "12B.11: medics add field beds and carry patients toward the doctor ratio" {
+test "medics add field beds and carry patients toward the doctor ratio" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1211 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .paymaster);

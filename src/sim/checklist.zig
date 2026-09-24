@@ -17,8 +17,7 @@ pub const WarningKind = enum {
     decision_due,
     open_slots,
     understaffed_hq,
-    /// Someone reaches retirement age within the quarter (play feedback:
-    /// HQs lost admins "without my knowledge").
+    /// Someone reaches retirement age within the quarter.
     retiring_soon,
     hungry,
     dry_ammo,
@@ -34,27 +33,27 @@ pub const WarningKind = enum {
     /// The outfit treasury is negative: the turn cannot advance until a
     /// loan or a sale covers it; past the credit limit, the outfit folds.
     insolvent,
-    /// People with a year in and morale or fatigue past the line: they
-    /// roll to leave on payday (Stage 12.20).
+    /// People at home who roll to leave on payday
+    /// (`medical.turnoverRisk`): a year in and restless.
     restless_crew,
     /// A company's manning table has open seats beyond pilots and techs
     /// (astechs, doctors, medics, office) — quietly slowing repairs and
-    /// healing (12B.11).
+    /// healing.
     manning_short,
-    /// Seated pilots in the spent fatigue band (12C.1): +3 to gunnery and
+    /// Seated pilots in the spent fatigue band: +3 to gunnery and
     /// piloting until they rest; the auto-assigner benches them when it can.
     unfit_crew,
-    /// A company fields hulls whose structure its home HQ's bay is not
-    /// rated to rebuild (12E.2): heavy assemblies need bay 2, assault bay 3
+    /// A company fields meks whose structure its home HQ's bay is not
+    /// rated to rebuild: heavy assemblies need bay 2, assault bay 3
     /// at a regional HQ.
     unrebuildable_hulls,
-    /// An engagement resolved that nobody has read (12G.5). The only
-    /// non-financial warning the turn actually waits on.
+    /// An engagement resolved that nobody has read. With `battle_decision`,
+    /// it holds the turn outright (`turnHold`), acknowledged or not.
     unread_after_action,
     /// An active contract rates 4½ skulls or worse for the company on it
-    /// today (12E.5): consider cautious ROE or recall.
+    /// today: consider cautious ROE or recall.
     outmatched,
-    /// A battle decision nobody has answered (12G.6). Like the unread
+    /// A battle decision nobody has answered. Like the unread
     /// after-action, the turn waits on it rather than defaulting.
     battle_decision,
     /// An engagement is inside the contact warning window: the odds, the
@@ -176,7 +175,7 @@ test "depot backlog only counts hulls whose company is home" {
     };
     try std.testing.expect(found);
 
-    // Send the company away: the same damage is no longer a backlog.
+    // Send the company away: the same damage is not a backlog.
     gs.forces.getPtr(res.created_force).?.location_planet = "galatea";
     const away = try turnWarnings(&gs, arena.allocator());
     for (away) |w| try std.testing.expect(w.kind != .depot_backlog);
@@ -187,7 +186,7 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
     var out: std.ArrayListUnmanaged(Warning) = .empty;
     const day = gs.clock.day_index;
 
-    // An engagement nobody has read (12G.5): the turn waits on it, so it
+    // An engagement nobody has read: the turn waits on it, so it
     // leads — there is nothing to decide until the commander has seen it.
     if (gs.battle_reports.unread()) |r| {
         try out.append(alloc, .{ .kind = .unread_after_action, .text = try std.fmt.allocPrint(alloc, "after-action from day {d} unread: {s} on {s} — {s}, field {s}", .{
@@ -195,7 +194,7 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
         }) });
     }
 
-    // A battle decision nobody has answered (12G.6): the turn waits on
+    // A battle decision nobody has answered: the turn waits on
     // it too, so it sits with the report it followed.
     if (gs.event_queue.blocking()) |ev| {
         const entry = @import("contract_events.zig").entryForKind(ev.kind);
@@ -253,7 +252,7 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
         if (restless > 0) try out.append(alloc, .{ .kind = .restless_crew, .text = try std.fmt.allocPrint(alloc, "{d} restless (morale < {d} or fatigue > {d}, a year in) — they roll to quit on payday: rotate home, grant leave, feed and rest them", .{ restless, t.restless_morale, t.exhausted_fatigue }) });
     }
 
-    // Spent pilots still in a seat (12C.1).
+    // Spent pilots still in a seat.
     {
         var n: u32 = 0;
         var uit = gs.units.iterator();
@@ -295,7 +294,7 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
         if (no_pilot + no_tech > 0) {
             try out.append(alloc, .{ .kind = .open_slots, .text = try std.fmt.allocPrint(alloc, "{s}: {d} hull(s) without a pilot, {d} without a tech (no repairs/reloads)", .{ try table.plain(alloc, f.name), no_pilot, no_tech }) });
         }
-        // The rest of the manning table (12B.11): who is short and by how much.
+        // The rest of the manning table: who is short and by how much.
         {
             var text: std.ArrayListUnmanaged(u8) = .empty;
             var short_total: u32 = 0;
@@ -333,7 +332,7 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
         }
     }
 
-    // Contract control (Stage 9E).
+    // Contract control.
     var cit = gs.contracts.iterator();
     while (cit.next()) |centry| {
         const c = centry.value_ptr;
@@ -359,8 +358,7 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
         const hq = hentry.value_ptr;
         const req = hq.staffRequired().total();
         if (hq.staff_assigned < req) {
-            // Which desks are short, and who walked lately (play feedback: the
-            // bare count said nothing about why or what to do).
+            // Which desks are short, and who walked lately.
             var short: std.ArrayListUnmanaged(u8) = .empty;
             for (hq.staffRequired().desks()) |d| {
                 const have = gs.hqStaff(hq.id, d.role).count;
@@ -407,7 +405,7 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
             if (gs.homeHqFor(u.force) != hq.id) continue; // this HQ's bay, its hulls
             if (u.needsDepot() and u.status != .repairing and gs.isCompanyHome(gs.companyOf(u.force)) and !hq_ops.hasJobForUnit(gs, u.id)) waiting += 1;
         }
-        // Hulls this HQ's bay could not rebuild (12E.2), per company based here.
+        // Hulls this HQ's bay could not rebuild, per company based here.
         var rit = gs.forces.iterator();
         while (rit.next()) |ce| {
             const co = ce.value_ptr;
@@ -431,7 +429,7 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
         }
     }
 
-    // Retirements coming (play feedback): the age line is a hard stop at the
+    // Retirements coming: the age line is a hard stop at the
     // monthly turnover, so say who reaches it within the quarter.
     {
         const tp = @import("../domain/tuning.zig").t.person;
@@ -494,7 +492,7 @@ test "the checklist names open slots and overloaded techs" {
     try std.testing.expect(saw_open);
 }
 
-test "12C.1: a spent pilot in a seat is a checklist warning" {
+test "a spent pilot in a seat is a checklist warning" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 62 });
     defer gs.deinit();
     const co = try gs.createForce("Alpha", .company, .none);
@@ -552,7 +550,7 @@ test "dry-ammo warning names only the families the company fires" {
     try std.testing.expect(named);
 }
 
-test "play feedback: the understaffed warning names the short desks, and retirements are announced a quarter out" {
+test "the understaffed warning names the short desks, and retirements are announced a quarter out" {
     const commands = @import("commands.zig");
     var gs = GameState.init(std.testing.allocator, .{ .seed = 93 });
     defer gs.deinit();
@@ -586,7 +584,7 @@ test "play feedback: the understaffed warning names the short desks, and retirem
     try std.testing.expect(saw_retire);
 }
 
-test "12E.2: a company with hulls its home bay cannot rebuild is flagged" {
+test "a company with hulls its home bay cannot rebuild is flagged" {
     const commands = @import("commands.zig");
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1222 });
     defer gs.deinit();
@@ -594,7 +592,7 @@ test "12E.2: a company with hulls its home bay cannot rebuild is flagged" {
     const co = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
-    for (try turnWarnings(&gs, arena.allocator())) |w| try std.testing.expect(w.kind != .unrebuildable_hulls); // lights and mediums (12E.1)
+    for (try turnWarnings(&gs, arena.allocator())) |w| try std.testing.expect(w.kind != .unrebuildable_hulls); // lights and mediums
     const lance = gs.force(co).?.children.items[0];
     const big = try gs.addUnit("AS7-D");
     try gs.moveUnitToForce(big, lance);
