@@ -41,15 +41,6 @@ Done: every Stage 12 feature (12, 12B–12G) has shipped. Part 2 is next.
 
 - [ ] Still uncovered by the smoke: the GAME OVER modal (a fresh campaign starts solvent, so reaching it needs a saved campaign already past all credit as a test fixture; bankruptcy itself stays terminal by design), the exact 120-column layout boundary, and the refusal branch of each confirm once run (they open and close only).
 
-## D15. Save integrity (audit #4, #5, #13, #14, #18; rules 1, 27)
-
-Landing as three increments; D15a and D15b are done (see Done).
-
-**D15c. RNG persisted per stream (#18).**
-- [ ] RNG saved one row per named stream plus the campaign seed; a stream absent from an older save is seeded from the campaign seed; a malformed row is `CorruptSave` (store.zig:385, 893-900). Adding a stream no longer reseeds old saves to 3025.
-
-- Note (#14): SQL-level foreign keys wait for a schema change that rebuilds tables anyway; the loader is the integrity check.
-
 ## D16. Battle and medical rule bugs (audit #7, #8, #9, #10, #11; rules 5, 6)
 
 - [ ] `Force.hasReadyUnit` (one predicate on `Unit.canFight()`); `companyMods` recon and support lances (battle.zig:258-283) and MASH beds (medical.zig:127) call it.
@@ -120,6 +111,7 @@ Contract deliverables closed before this list merged, all from the 2026-09-22 co
 - D14 gameplay corruption, audit #1–#3 (PR #53): black-market fraud returns no hull instead of `next_unit_id - 1`; refit demand is counted per part before any is taken; `next_battle_id` is saved and resumed past every referenced battle
 - D15a save identity, audit #4–#5 (PR #54): a first save sets `campaign_id` only after COMMIT; saving over a missing campaign row and loading an unknown id both return `NoSuchCampaign`; the TUI and REPL print `cli.errorText` for save errors
 - D15b loading fails closed, audit #13 (PR #55): every stored integer and id is range-checked (`Stmt.intAs`, `fit`, `toId`); missing parent rows, unknown enum values, unknown treasury/site kinds and a bad difficulty return `CorruptSave` instead of being skipped or defaulted
+- D15c RNG persisted per stream, audit #18 (PR #56): schema v32 saves one `rng_stream` row per named stream (format 1, little-endian words) plus the seed; a stream missing from a save starts fresh from the seed, so adding one no longer reseeds old saves; v31 blobs still load; malformed or unknown rows are `CorruptSave`. Audit #14 closed with it: SQL foreign keys wait for a schema change that rebuilds tables, and the loader is the integrity check
 
 ---
 
