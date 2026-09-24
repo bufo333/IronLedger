@@ -654,14 +654,14 @@ fn openingRoll(gs: *GameState, c: *const contract_mod.Contract, player: *const S
     };
     var roll = @as(i32, gs.rng.roll2d6(.battle)) + ratio_bonus + scenario_mod + roe_roll;
     // Edge: a pilot with Edge to spend re-rolls a lost engagement once per contract.
-    var edge_used_by: ?*person_mod.Person = null;
+    var edge_used_by: types.PersonId = .none;
     if (roll < 6) {
         for (player.engaged.items) |uid| {
             const u = gs.unit(uid) orelse continue;
             const p = gs.person(u.pilot) orelse continue;
             if (p.has("edge") and !p.edge_spent) {
                 p.edge_spent = true;
-                edge_used_by = p;
+                edge_used_by = p.id;
                 roll = @as(i32, gs.rng.roll2d6(.battle)) + ratio_bonus + scenario_mod + roe_roll;
                 break;
             }
@@ -723,7 +723,9 @@ const Opening = struct {
     lost_fight: bool,
     enemy_loss_pct: u32,
     hits: u32,
-    edge_used_by: ?*person_mod.Person,
+    /// An id, not a pointer: prisoners are hired into `people` before
+    /// the report is written, and that insertion can move every entry.
+    edge_used_by: types.PersonId,
 };
 
 /// What the engagement leaves behind once the shooting stops: the
@@ -989,7 +991,7 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
         .close_terrain = env.close(),
         .air_grounded = env.groundsAir(),
         .convoy_hit = convoy_hit,
-        .edge_spent_by = if (edge_used_by) |p| try p.rankedName(gs.allocator()) else "",
+        .edge_spent_by = if (gs.person(edge_used_by)) |p| try p.rankedName(gs.allocator()) else "",
         .recon_quality = player.mods.recon_quality,
         .avg_fatigue = player.mods.avg_fatigue,
         .avg_morale = player.mods.avg_morale,
