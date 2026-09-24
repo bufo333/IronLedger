@@ -15,9 +15,9 @@ pub const training_days = tuning.medical.training_days;
 
 /// Training program length at the outfit's HQ: a staffed HR office runs a
 /// tighter schedule (Stage 9C back office).
-pub fn trainingDaysFor(gs: *GameState) u32 {
-    if (gs.hqs.count() == 0) return training_days;
-    const hr = gs.hqStaff(gs.hqs.keys()[0], .admin_hr);
+pub fn trainingDaysFor(gs: *GameState, hq_id: types.HqId) u32 {
+    if (gs.hqs.getPtr(hq_id) == null) return training_days;
+    const hr = gs.hqStaff(hq_id, .admin_hr);
     return @max(tuning.medical.training_min_days, training_days -| tuning.medical.training_days_per_hr_staff * hr.count);
 }
 
@@ -340,17 +340,7 @@ pub fn runDailyTraining(gs: *GameState) !void {
 /// morale_fatigue phase, weekly: rest at home, grind in the field, and the
 /// rotation reset that clears a company's deployment debt.
 pub fn runWeeklyRest(gs: *GameState) !void {
-    // Best mess level across HQs feeds the recovery rate.
-    var best_mess: u8 = 0;
-    var hqit = gs.hqs.iterator();
-    while (hqit.next()) |entry| {
-        best_mess = @max(best_mess, entry.value_ptr.effectiveFacilityLevel(.mess));
-    }
-    const base_decay: u32 = person_mod.fatigueDecayPerWeek(best_mess);
-    const decay: u32 = @intCast(types.applyBp(base_decay, gs.commanderMultBp(.fatigue_recovery)));
-    // HR staff keep spirits up at home (Stage 9C).
     const tp = tuning.person;
-    const hr_bonus: u8 = if (gs.hqs.count() > 0) @intCast(@min(tp.hr_morale_bonus_max, gs.hqStaff(gs.hqs.keys()[0], .admin_hr).count / tp.hr_morale_admins_per_point)) else 0;
 
     var it = gs.people.iterator();
     while (it.next()) |entry| {
@@ -378,11 +368,17 @@ pub fn runWeeklyRest(gs: *GameState) !void {
                 if (co.supply_shortage_days > 0) p.addMorale(-2);
             }
         } else {
+            // Rest at home is the home HQ's: its mess sets the recovery
+            // rate, its HR staff keep spirits up.
+            const home = gs.homeHqOf(p);
+            const mess: u8 = if (gs.hqs.getPtr(home)) |h| h.effectiveFacilityLevel(.mess) else 0;
+            const decay: u32 = @intCast(types.applyBp(person_mod.fatigueDecayPerWeek(mess), gs.commanderMultBp(.fatigue_recovery)));
+            const hr_bonus: u8 = if (gs.hqs.getPtr(home) != null) @intCast(@min(tp.hr_morale_bonus_max, gs.hqStaff(home, .admin_hr).count / tp.hr_morale_admins_per_point)) else 0;
             // On leave: double recovery (Stage 9C.2).
             const on_leave = p.leave_until_day != null and gs.clock.day_index < p.leave_until_day.?;
             p.addFatigue(-@as(i32, @intCast(@min(if (on_leave) decay * 2 else decay, 255))));
             // Rested spirits drift toward content (50), mess food helps.
-            const target: u8 = tuning.person.morale_content + 2 * best_mess + hr_bonus;
+            const target: u8 = tuning.person.morale_content + 2 * mess + hr_bonus;
             if (p.morale < target) p.addMorale(1);
             if (p.fatigue > tuning.person.fatigue_grind) p.addMorale(-1);
         }
@@ -741,4 +737,30 @@ test "five tied field patients and four beds: exactly one waits" {
     var waiting: u32 = 0;
     for (patients) |id| waiting += @intFromBool(gs.person(id).?.wound_heal_day.? == due + 1);
     try std.testing.expectEqual(@as(u32, 1), waiting);
+}
+
+test "weekly rest uses the home HQ's mess, not the best mess in the outfit" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 7602 });
+    defer gs.deinit();
+    _ = try gs.createCommander("T", .LC, .paymaster);
+    const seat = gs.hqs.keys()[0];
+    const second = try gs.foundHq("Second", .regional, "alkaid");
+    for (gs.hqs.getPtr(seat).?.facilities.items) |*f| {
+        if (f.kind == .mess) f.level = 3;
+    }
+    gs.hqs.getPtr(seat).?.staff_assigned = 999;
+    gs.hqs.getPtr(second).?.staff_assigned = 999;
+    var tired: [2]types.PersonId = undefined;
+    for ([_]types.HqId{ seat, second }, 0..) |hq, i| {
+        const co = try gs.createForce(if (i == 0) "Alpha" else "Bravo", .company, .none);
+        gs.force(co).?.supplying_hq = hq;
+        const id = try gs.hirePerson("T", "Ired", .mekwarrior);
+        gs.person(id).?.assigned_force = co;
+        gs.person(id).?.fatigue = 60;
+        tired[i] = id;
+    }
+    try runWeeklyRest(&gs);
+    const rested_at_seat = 60 - gs.person(tired[0]).?.fatigue;
+    const rested_at_second = 60 - gs.person(tired[1]).?.fatigue;
+    try std.testing.expect(rested_at_seat > rested_at_second);
 }

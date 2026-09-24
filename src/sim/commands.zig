@@ -790,13 +790,8 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
         .accept_contract => |a| return acceptContract(gs, a.offer_index, a.company),
         .negotiate => |n| return negotiate(gs, n.offer_index, n.term),
         .train_ability => |ta| {
-            var has_ground = false;
-            var hqit = gs.hqs.iterator();
-            while (hqit.next()) |entry| {
-                if (entry.value_ptr.supportsTraining()) has_ground = true;
-            }
-            if (!has_ground) return Error.NoTrainingGround;
             const p = gs.person(ta.person) orelse return Error.UnknownPerson;
+            _ = gs.trainingHqFor(p) orelse return Error.NoTrainingGround;
             if (p.status != .active) return Error.PersonUnavailable;
             if (gs.isCompanyDeployed(gs.companyOf(p.assigned_force))) return Error.PersonDeployed;
             const a = @import("../domain/ability.zig").find(ta.key) orelse return Error.UnknownAbility;
@@ -1461,14 +1456,8 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             return .{};
         },
         .train => |t| {
-            var has_ground = false;
-            var hqit = gs.hqs.iterator();
-            while (hqit.next()) |entry| {
-                if (entry.value_ptr.supportsTraining()) has_ground = true;
-            }
-            if (!has_ground) return Error.NoTrainingGround;
-
             const p = gs.person(t.person) orelse return Error.UnknownPerson;
+            const ground = gs.trainingHqFor(p) orelse return Error.NoTrainingGround;
             if (p.status != .active) return Error.PersonUnavailable;
             if (p.training != null) return Error.AlreadyTraining;
             if (gs.isCompanyDeployed(gs.companyOf(p.assigned_force))) return Error.PersonDeployed;
@@ -1478,7 +1467,7 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             if (current == 0) return Error.AlreadyMastered;
             if (p.xp < person_mod.improveCost(current - 1)) return Error.InsufficientXp;
 
-            p.training = .{ .skill = t.skill, .done_day = gs.clock.day_index + medical_mod.trainingDaysFor(gs) };
+            p.training = .{ .skill = t.skill, .done_day = gs.clock.day_index + medical_mod.trainingDaysFor(gs, ground) };
             return .{};
         },
         .train_company => |t| return trainCompany(gs, t.company, t.skill),
@@ -1893,15 +1882,12 @@ fn trainCompany(gs: *GameState, company: types.ForceId, skill_opt: ?types.SkillT
     const f = gs.force(company) orelse return Error.UnknownForce;
     if (f.echelon != .company) return Error.NotACompany;
     if (!gs.isCompanyHome(company)) return Error.CompanyDeployed;
-    var has_ground = false;
-    var hqit = gs.hqs.iterator();
-    while (hqit.next()) |entry| {
-        if (entry.value_ptr.supportsTraining()) has_ground = true;
-    }
-    if (!has_ground) return Error.NoTrainingGround;
+    const ground = gs.homeHqFor(company);
+    const ground_hq = gs.hqs.getPtr(ground) orelse return Error.NoTrainingGround;
+    if (!ground_hq.supportsTraining()) return Error.NoTrainingGround;
 
     var r: Result = .{};
-    const days = medical_mod.trainingDaysFor(gs);
+    const days = medical_mod.trainingDaysFor(gs, ground);
     var pit = gs.people.iterator();
     while (pit.next()) |e| {
         const p = e.value_ptr;
@@ -2819,6 +2805,38 @@ test "a shipment the payer cannot afford uses no link capacity" {
     }));
     try std.testing.expectEqual(@as(u32, 0), gs.hq_links.items[0].tons_this_week);
     try std.testing.expectEqual(@as(u32, 10), gs.stockCount(.{ .hq = far }, "armor"));
+}
+
+/// Two regional HQs on different worlds: the seat keeps its training
+/// ground, the second has none. A company homed at each, one trainee in
+/// each. Returns the two trainees.
+fn twoHqTrainingForTest(gs: *GameState) !struct { at_seat: types.PersonId, at_second: types.PersonId } {
+    _ = try execute(gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    const seat = gs.hqs.keys()[0];
+    const second = try gs.foundHq("Second", .regional, "alkaid");
+    for (gs.hqs.getPtr(second).?.facilities.items) |*f| {
+        if (f.kind == .training_ground) f.level = 0;
+    }
+    var out: [2]types.PersonId = undefined;
+    for ([_]types.HqId{ seat, second }, 0..) |hq, i| {
+        const co = try gs.createForce(if (i == 0) "Alpha" else "Bravo", .company, .none);
+        gs.force(co).?.supplying_hq = hq;
+        const id = try gs.hirePerson("T", "Rainee", .mekwarrior);
+        const p = gs.person(id).?;
+        p.assigned_force = co;
+        p.xp = 10_000;
+        out[i] = id;
+    }
+    return .{ .at_seat = out[0], .at_second = out[1] };
+}
+
+test "training uses the trainee's home HQ, not any HQ with a training ground" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 7601 });
+    defer gs.deinit();
+    const t = try twoHqTrainingForTest(&gs);
+    _ = try execute(&gs, .{ .train = .{ .person = t.at_seat, .skill = .gunnery_mek } });
+    try std.testing.expectError(Error.NoTrainingGround, execute(&gs, .{ .train = .{ .person = t.at_second, .skill = .gunnery_mek } }));
+    try std.testing.expectError(Error.NoTrainingGround, execute(&gs, .{ .train_company = .{ .company = gs.person(t.at_second).?.assigned_force, .skill = null } }));
 }
 
 /// Advance `days`, reading each after-action as it lands — the loop a
