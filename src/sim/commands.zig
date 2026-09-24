@@ -3267,7 +3267,7 @@ test "golden master: same seed + same script = same state hash" {
         var gs = GameState.init(std.testing.allocator, .{ .seed = 42 });
         defer gs.deinit();
         for (script) |cmd| _ = try execute(&gs, cmd);
-        out.* = gs.hash();
+        out.* = @import("digest.zig").stateHash(&gs);
     }
     try std.testing.expectEqual(hashes[0], hashes[1]);
 

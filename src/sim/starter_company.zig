@@ -154,7 +154,7 @@ test "generateInto builds the full starter force and is deterministic" {
         try std.testing.expectEqual(@as(u32, 4), support_lances);
         // The tail outnumbers the teeth.
         try std.testing.expect(gs.people.count() > 120);
-        out.* = gs.hash();
+        out.* = @import("digest.zig").stateHash(&gs);
     }
     try std.testing.expectEqual(hashes[0], hashes[1]);
 }

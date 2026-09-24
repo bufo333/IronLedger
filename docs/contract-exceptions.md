@@ -63,7 +63,7 @@ Owner of every entry: the project owner.
 - **Scope:**
   - Every module and function listed in the ratchet below.
   - Three switches with more than ten substantive arms (an arm body past three lines), measured by the check that guards them: `contract_events.applyEffectsFor` (21), `app.listView` (19), `forces.handle` (19). Five more sit at the threshold without crossing it: `app.listEnter` and `app.handleModalKey` (10 each), `market.handle` (10), `app.drawModal` (9), `supply.handle` (7).
-  - About 90 `GameState` methods with subsystem behaviour: pricing, liquidation, staffing, hiring, founding, posture, TO&E, crew, tech time, lift, supply, refit, aftermath, hashing.
+  - About 90 `GameState` methods with subsystem behaviour: pricing, liquidation, staffing, hiring, founding, posture, TO&E, crew, tech time, lift, supply, refit, aftermath. (Hashing has moved to `digest.zig`.)
   - Two layering violations: `state.zig:653` imports `rating.zig`, which imports `commands.zig`; `state.zig:1165` imports `field_supply.zig`.
   - The named atomic operations that rule 14 cites do not exist.
 - **Removal:** C4.
@@ -481,7 +481,7 @@ src/sim/queries.zig:offerCandidates 108
 src/sim/queries.zig:stockTable 102
 src/sim/queries.zig:summary 141
 src/sim/rating.zig:report 133
-src/sim/state.zig 2245
+src/sim/state.zig 2207
 src/sim/tick.zig:runFinances 147
 src/tui/app.zig 4060
 src/tui/app.zig:drawModal 136

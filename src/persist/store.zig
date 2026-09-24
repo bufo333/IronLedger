@@ -2081,7 +2081,7 @@ test "save → load → identical hash, and the loaded campaign keeps playing" {
     // A wreck remembers how it died.
     const wreck = try gs.addUnit("GRF-1N");
     gs.unit(wreck).?.markWreckedBy(.engine);
-    const before = gs.hash();
+    const before = @import("../sim/digest.zig").stateHash(&gs);
 
     const store = try Store.open(":memory:");
     defer store.close();
@@ -2091,8 +2091,8 @@ test "save → load → identical hash, and the loaded campaign keeps playing" {
     var loaded = try store.load(std.testing.allocator, gs.campaign_id);
     defer loaded.deinit();
     var diff_buf: [128]u8 = undefined;
-    try std.testing.expectEqualStrings("", gs.firstHashDifference(&loaded, &diff_buf) orelse "");
-    try std.testing.expectEqual(before, loaded.hash());
+    try std.testing.expectEqualStrings("", @import("../sim/digest.zig").firstStateDifference(&gs, &loaded, &diff_buf) orelse "");
+    try std.testing.expectEqual(before, @import("../sim/digest.zig").stateHash(&loaded));
     try std.testing.expectEqual(gs.hqs.keys()[0], loaded.unit(ship).?.berth_hq);
     try std.testing.expectEqual(@import("../domain/unit.zig").WreckCause.engine, loaded.unit(wreck).?.wreck);
     try std.testing.expectEqual(@import("../domain/force.zig").Roe.cautious, loaded.forces.getPtr(gs.forces.keys()[0]).?.roe);
@@ -2156,7 +2156,7 @@ test "save → load → identical hash, and the loaded campaign keeps playing" {
     // Determinism survives the round trip: both worlds evolve identically.
     _ = try commands.execute(&gs, .{ .advance_days = 30 });
     _ = try commands.execute(&loaded, .{ .advance_days = 30 });
-    try std.testing.expectEqual(gs.hash(), loaded.hash());
+    try std.testing.expectEqual(@import("../sim/digest.zig").stateHash(&gs), @import("../sim/digest.zig").stateHash(&loaded));
 }
 
 test "players own campaigns; deleting a player cascades" {
@@ -2231,7 +2231,7 @@ test "one store, many playthroughs: list, overwrite, delete" {
     try std.testing.expectEqualStrings("Bravo Outfit", after[0].name.raw);
     var still = try store.load(std.testing.allocator, b.campaign_id);
     defer still.deinit();
-    try std.testing.expectEqual(b.hash(), still.hash());
+    try std.testing.expectEqual(@import("../sim/digest.zig").stateHash(&b), @import("../sim/digest.zig").stateHash(&still));
 }
 
 test "a v5 store upgrades in place — columns added, version stamped, wounds left to triage" {
@@ -2866,7 +2866,7 @@ test "golden master: a played year hashes to its pinned value, and a save of it 
     try std.testing.expect(gs.battle_reports.kept.items.len > 0); // the year saw fighting
     // Any change to a simulated or saved result moves this; re-pin it only
     // when the change is meant.
-    try std.testing.expectEqual(@as(u64, 12374000996448995992), gs.hash());
+    try std.testing.expectEqual(@as(u64, 12374000996448995992), @import("../sim/digest.zig").stateHash(&gs));
 
     const store = try Store.open(":memory:");
     defer store.close();
@@ -2874,10 +2874,10 @@ test "golden master: a played year hashes to its pinned value, and a save of it 
     var loaded = try store.load(std.testing.allocator, gs.campaign_id);
     defer loaded.deinit();
     var buf: [128]u8 = undefined;
-    try std.testing.expectEqualStrings("", gs.firstHashDifference(&loaded, &buf) orelse "");
+    try std.testing.expectEqualStrings("", @import("../sim/digest.zig").firstStateDifference(&gs, &loaded, &buf) orelse "");
     const commands = @import("../sim/commands.zig");
     for ([_]*GameState{ &gs, &loaded }) |g| _ = try commands.execute(g, .{ .advance_days = 60 });
-    try std.testing.expectEqualStrings("", gs.firstHashDifference(&loaded, &buf) orelse "");
+    try std.testing.expectEqualStrings("", @import("../sim/digest.zig").firstStateDifference(&gs, &loaded, &buf) orelse "");
 }
 
 test "the table registry matches the tables the executable schema creates" {
