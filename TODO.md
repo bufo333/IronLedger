@@ -50,7 +50,6 @@ D19a, D19b-1, D19b-2a and D19b-2b are done (see Done); the typed endpoint is lef
 
 ## D22. Build, data and tests (audit #20, #24, #25, #26, #28; rules 6, 9)
 
-- [ ] In-file tests for `app.zig` and each `screens/*.zig`: row identity (after D21), cursor clamp on resize, key handlers against a generated campaign.
 - [ ] `commands.execute` becomes a dispatch switch into per-subsystem functions; `Store.load` becomes per-table decoders. Last, because it moves every cited line.
 
 ---
@@ -109,6 +108,7 @@ Contract deliverables closed before this list merged, all from the 2026-09-22 co
 - D22a-5 comments in persist, the terminal client, `main.zig`, `root.zig`, `build.zig` and every `data/*.zon` (rule 43): about 110 stage tags and the history notes out; migration comments keep their schema versions (one split so v26 and v28 each describe their own column); nine test names behavioural; the stock `zig init` tutorial comments in build.zig replaced by short ones; comments that disagreed with the code corrected (a bad battle-report row is `CorruptSave`, not skipped; enum binding; where music is found; root.zig's scope); the D22a sweep is complete, and the repo-wide greps for stage tags, history words, stage-prefixed tests, TODO and "mirrors" return nothing; no code or data value changed
 - D22-1 package paths, freight knobs and tuning checks, audit #24/#25: `build.zig.zon` `.paths` adds `docs/logos` and `LICENSE` (a tree holding only those paths builds and installs); `freightQuote`'s literals are `tuning.logistics.freight_per_ton_jump`, `transport_admin_discount_bp`, `transport_admin_max` and `freight_min_days`; the tuning check covers signed knobs (every `_bp` share in 0..100000, money never negative) with the 27 negative-by-design knobs named in `signed_knobs`, reports every failure in one run, and proves each listed name is a real field; the demo CLI's two stage-tagged strings are gone
 - D22-2 validate-data, audit #26: the data-consistency tests are named `data: …` (tables against each other, markup-safe strings, tuning ranges); `zig build validate-data` runs them alone, and with `-Ddata` the install depends on them, so an overlay with an empty `rat.zon` fails `zig build` naming the check and installs nothing; docs/modding.md says so
+- D22-3 client tests, audit #28: `app.clientForTest` runs the terminal client headless over a generated campaign (frames to a discarding writer, an in-memory store, 200x50), and `pressForTest` sends a key and draws a frame; `app.zig` tests draw every screen at full size and at 80x24 with the cursor run past every list, and end a turn through the checklist; each `screens/*.zig` tests one of its own keys, the HQ screen's `u` against the facility `hqDetailView` puts under the cursor
 
 ---
 

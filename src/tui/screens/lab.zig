@@ -80,3 +80,18 @@ pub fn key(self: *App, ch: u21) anyerror!void {
         }
 
 }
+
+fn toTab(c: *app.ClientForTest, tab: app.Tab) !void {
+    try app.pressForTest(c, .{ .f = @intFromEnum(tab) + 1 });
+}
+
+test "] and [ step through the hangar's meks" {
+    const c = try app.clientForTest(std.testing.allocator);
+    defer app.deinitForTest(c, std.testing.allocator);
+    try toTab(c, .lab);
+    const start = c.app.lab_sel;
+    try app.pressForTest(c, .{ .char = ']' });
+    try std.testing.expect(c.app.lab_sel != start);
+    try app.pressForTest(c, .{ .char = '[' });
+    try std.testing.expectEqual(start, c.app.lab_sel);
+}

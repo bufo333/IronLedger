@@ -86,3 +86,15 @@ pub fn key(self: *App, ch: u21) anyerror!void {
         }
 
 }
+
+fn toTab(c: *app.ClientForTest, tab: app.Tab) !void {
+    try app.pressForTest(c, .{ .f = @intFromEnum(tab) + 1 });
+}
+
+test "x on a person opens the company picker for that person" {
+    const c = try app.clientForTest(std.testing.allocator);
+    defer app.deinitForTest(c, std.testing.allocator);
+    try toTab(c, .people);
+    try app.pressForTest(c, .{ .char = 'x' });
+    try std.testing.expect(c.app.modal == .pick_company);
+}

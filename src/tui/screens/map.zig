@@ -148,3 +148,19 @@ pub fn key(self: *App, ch: u21) anyerror!void {
         else => {},
     }
 }
+
+fn toTab(c: *app.ClientForTest, tab: app.Tab) !void {
+    try app.pressForTest(c, .{ .f = @intFromEnum(tab) + 1 });
+}
+
+test "+ and - zoom the star map, and o jumps to the contract board" {
+    const c = try app.clientForTest(std.testing.allocator);
+    defer app.deinitForTest(c, std.testing.allocator);
+    try toTab(c, .map);
+    try app.pressForTest(c, .{ .char = '+' });
+    try std.testing.expectEqual(@as(u8, 2), c.app.map_zoom);
+    try app.pressForTest(c, .{ .char = '-' });
+    try std.testing.expectEqual(@as(u8, 1), c.app.map_zoom);
+    try app.pressForTest(c, .{ .char = 'o' });
+    try std.testing.expectEqual(app.Tab.contracts, c.app.tab);
+}

@@ -146,3 +146,15 @@ pub fn key(self: *App, ch: u21) anyerror!void {
         }
 
 }
+
+fn toTab(c: *app.ClientForTest, tab: app.Tab) !void {
+    try app.pressForTest(c, .{ .f = @intFromEnum(tab) + 1 });
+}
+
+test "o opens the part picker for an order" {
+    const c = try app.clientForTest(std.testing.allocator);
+    defer app.deinitForTest(c, std.testing.allocator);
+    try toTab(c, .supply);
+    try app.pressForTest(c, .{ .char = 'o' });
+    try std.testing.expect(c.app.modal == .pick_part);
+}

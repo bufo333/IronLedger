@@ -118,3 +118,15 @@ pub fn key(self: *App, ch: u21) anyerror!void {
         else => {},
     }
 }
+
+fn toTab(c: *app.ClientForTest, tab: app.Tab) !void {
+    try app.pressForTest(c, .{ .f = @intFromEnum(tab) + 1 });
+}
+
+test "L opens the loan form" {
+    const c = try app.clientForTest(std.testing.allocator);
+    defer app.deinitForTest(c, std.testing.allocator);
+    try toTab(c, .ledger);
+    try app.pressForTest(c, .{ .char = 'L' });
+    try std.testing.expect(c.app.modal == .amount);
+}

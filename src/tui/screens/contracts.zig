@@ -176,3 +176,17 @@ pub fn key(self: *App, ch: u21) anyerror!void {
         }
 
 }
+
+fn toTab(c: *app.ClientForTest, tab: app.Tab) !void {
+    try app.pressForTest(c, .{ .f = @intFromEnum(tab) + 1 });
+}
+
+test "b on an offer opens its negotiation for that offer" {
+    const c = try app.clientForTest(std.testing.allocator);
+    defer app.deinitForTest(c, std.testing.allocator);
+    try toTab(c, .contracts);
+    c.app.focus = 0;
+    try app.pressForTest(c, .{ .char = 'b' });
+    try std.testing.expect(c.app.modal == .negotiate);
+    try std.testing.expectEqual(c.app.cur(0).*, c.app.modal.negotiate);
+}
