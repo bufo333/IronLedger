@@ -43,8 +43,9 @@ Done: every Stage 12 feature (12, 12B–12G) has shipped. Part 2 is next.
 
 ## D17. Logistics accounting (audit #6, #12; rules 5, 6, 27)
 
-- [ ] `freightBetween` split into quote and commit; `shipStock` reserves throughput after `debitPurchase` succeeds (commands.zig:1784, 1816-1825).
-- [ ] Rename `tuning.network.weeks_of_capacity` (tuning.zon:61, network.zig:27-28) to what it measures (e.g. `tons_per_supply_unit`); delete or align `logistics.routeThroughputPerWeek` (logistics.zig:119-123) so one function answers "tons per week on this link".
+D17a is done (see Done); D17b is left.
+
+
 - [ ] `ensureUnusedCapacity` before the debit at the audit #6 sites: HQ founding (commands.zig:461-474), facility upgrade (1365-1387), fabrication (1346-1363), unit transfer (1638-1655), refit commit (1694-1705), `resolveChoice` (contract_events.zig:337-348). No transaction framework; these fail only on arena OOM.
 
 ## D18. HQ locality (audit #21; rules 5, 8)
@@ -85,6 +86,7 @@ Done: every Stage 12 feature (12, 12B–12G) has shipped. Part 2 is next.
 ## D22. Build, data and tests (audit #20, #24, #25, #26, #28; rules 6, 9)
 
 - [ ] `build.zig.zon` `.paths` adds `docs/logos` and `LICENSE`.
+- [ ] `commands.freightQuote` literals into `tuning.logistics`: 2,000 C-bills per ton per jump (both legs), 500 bp off per transport admin up to 4, the 3-day floor (rule 6).
 - [ ] `tuning.zig:743` validation keyed on field type (`Bp` → 0..100_000, `CBills` ≥ 0) with an explicit allow-list for signed deltas; today the bp bound runs on no field at all.
 - [ ] `validate-data` build step running the cross-file checks; install with `-Ddata` depends on it (an empty `rat.zon` fails the build, not the run).
 - [ ] In-file tests for `app.zig` and each `screens/*.zig`: row identity (after D21), cursor clamp on resize, key handlers against a generated campaign.
@@ -115,6 +117,7 @@ Contract deliverables closed before this list merged, all from the 2026-09-22 co
 - D16c vehicle skills, audit #9 (PR #59): `Role.pilotingSkill` beside `Role.primarySkill` is the one role-to-skill pair; the battle reads the hull kind's crew skills (a vehicle fights on gunnery_vee/driving_vee), and escape, recovery, `experience()` and the roster text use the same pair
 - D16d conceded engagements, audit #11 (PR #60): `battle.concede` records a conceded `BattleReport` (defeat) that holds the turn, counts a lost battle and a battle fought, and scores `tuning.battle.score.concede` through `recordBattle` (VP at the usual rate); the after-action sheet shows what was given up instead of an empty fight
 - D16e the field workshop (PR #61, decided 2026-09-23): a ready Logistics lance adds `tuning.maintenance.push_workshop_hours` to the repair push budget; the unread `CampaignMods.has_field_repair` flag and the orphan `mobile_field_base` unit kind (no chassis could field one) are gone
+- D17a freight accounting, audit #12 (PR #62): `freightQuote` is pure (checks `network.fitsThroughput`, books nothing) and `commitFreight` books the tonnage after the payment clears, in `shipStock` and `orderPart`; one `logistics.linkTonsPerWeek` (`throughput_per_level` × `tons_per_supply_unit`, the renamed `weeks_of_capacity`) answers every link and route
 
 ---
 

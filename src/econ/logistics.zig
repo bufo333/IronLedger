@@ -109,16 +109,17 @@ pub fn routeCostMultBp(hops: []const Hop) types.Bp {
     return mult;
 }
 
-/// Supply units/week a link level can move.
-pub fn linkThroughputPerWeek(link_level: u8) u32 {
-    return @as(u32, link_level) * tuning.logistics.throughput_per_level;
+/// Tons a week a link of this level moves: `throughput_per_level` supply
+/// units per level, each `tons_per_supply_unit` tons.
+pub fn linkTonsPerWeek(link_level: u8) u32 {
+    return @as(u32, link_level) * tuning.logistics.throughput_per_level * tuning.logistics.tons_per_supply_unit;
 }
 
 /// A route moves only what its weakest hop can carry: stack two companies
 /// behind one charter link and both starve.
-pub fn routeThroughputPerWeek(hops: []const Hop) u32 {
+pub fn routeTonsPerWeek(hops: []const Hop) u32 {
     var min: u32 = std.math.maxInt(u32);
-    for (hops) |h| min = @min(min, linkThroughputPerWeek(h.link_level));
+    for (hops) |h| min = @min(min, linkTonsPerWeek(h.link_level));
     return if (hops.len == 0) 0 else min;
 }
 
@@ -174,7 +175,8 @@ test "throughput is bottlenecked by the weakest hop" {
         .{ .link_level = 1 }, // the charter link everyone forgot to upgrade
         .{ .link_level = 2 },
     };
-    try std.testing.expectEqual(@as(u32, 10), routeThroughputPerWeek(&hops));
+    try std.testing.expectEqual(linkTonsPerWeek(1), routeTonsPerWeek(&hops));
+    try std.testing.expectEqual(@as(u32, 40), linkTonsPerWeek(1)); // the charter link's 40 t/week
 }
 
 test "local purchases: expensive but viable, capped, eased by industry" {

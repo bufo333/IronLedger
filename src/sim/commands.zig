@@ -1773,13 +1773,26 @@ fn checkRoom(gs: *GameState, site: types.Site, part_key: []const u8, quantity: u
     if (used + quantity * part_mod.tons(part_key) > cap) return Error.StorageFull;
 }
 
-/// Freight & transit between two sites (Stage 9D): HQ→HQ legs ride the
+/// A freight quote: what a shipment costs, how long it takes, and the
+/// linked route whose weekly capacity it needs.
+const Freight = struct {
+    cost: types.CBills,
+    days: u32,
+    route: []const network.RouteHop = &.{},
+    tons: u32 = 0,
+};
+
+/// Quote freight between two sites (Stage 9D): HQ→HQ legs ride the
 /// supply-link route (multi-hop, throughput-capped; charter if unlinked);
 /// the last leg to a deployed company is a direct charter from its home
-/// HQ. Transport admins negotiate better rates.
-fn freightBetween(gs: *GameState, from: types.Site, to: types.Site, tons_moved: u32) Error!struct { cost: types.CBills, days: u32 } {
+/// HQ. Transport admins negotiate better rates. Pure: refuses with
+/// `ThroughputExceeded` when the route is full, but books nothing; the
+/// caller runs `commitFreight` once the payment has cleared. The route
+/// lives in `alloc`.
+fn freightQuote(gs: *GameState, alloc: std.mem.Allocator, from: types.Site, to: types.Site, tons_moved: u32) Error!Freight {
     const a = planet_mod.find(sitePlanetKey(gs, from) orelse "") orelse return .{ .cost = 0, .days = logistics.same_world_days };
     const b = planet_mod.find(sitePlanetKey(gs, to) orelse "") orelse return .{ .cost = 0, .days = logistics.same_world_days };
+    var route: []const network.RouteHop = &.{};
     var days: u32 = logistics.same_world_days;
     var cost: types.CBills = 0;
 
@@ -1794,10 +1807,8 @@ fn freightBetween(gs: *GameState, from: types.Site, to: types.Site, tons_moved: 
         .outfit => if (gs.hqs.count() > 0) gs.hqs.keys()[0] else .none,
     };
     if (from_hq != .none and to_hq != .none and from_hq != to_hq) {
-        var arena = std.heap.ArenaAllocator.init(gs.scratch());
-        defer arena.deinit();
-        const route = network.routeBetween(gs, from_hq, to_hq, arena.allocator()) catch return Error.NoRoute;
-        network.reserveThroughput(gs, route, tons_moved) catch return Error.ThroughputExceeded;
+        route = network.routeBetween(gs, from_hq, to_hq, alloc) catch return Error.NoRoute;
+        if (!network.fitsThroughput(gs, route, tons_moved)) return Error.ThroughputExceeded;
         days = network.routeDays(route);
         var jumps_total: u32 = 0;
         for (route) |h| jumps_total += h.hop.jumps;
@@ -1817,7 +1828,13 @@ fn freightBetween(gs: *GameState, from: types.Site, to: types.Site, tons_moved: 
         const transport = gs.hqStaff(gs.hqs.keys()[0], .admin_transport);
         cost = types.applyBp(cost, 10_000 - 500 * @as(types.Bp, @min(4, transport.count)));
     }
-    return .{ .cost = cost, .days = @max(3, days) };
+    return .{ .cost = cost, .days = @max(3, days), .route = route, .tons = tons_moved };
+}
+
+/// Book a quoted shipment's tonnage on its route. Cannot fail: the quote
+/// checked the capacity against the same state.
+fn commitFreight(gs: *GameState, f: Freight) void {
+    network.commitThroughput(gs, f.route, f.tons);
 }
 
 fn shipStock(gs: *GameState, part_key: []const u8, quantity: u32, from: types.Site, to: types.Site) Error!Result {
@@ -1827,7 +1844,9 @@ fn shipStock(gs: *GameState, part_key: []const u8, quantity: u32, from: types.Si
     if (gs.stockCount(from, part_key) < quantity) return Error.InsufficientStock;
     try checkRoom(gs, to, part_key, quantity);
 
-    const freight = try freightBetween(gs, from, to, quantity * part_mod.tons(part_key));
+    var arena = std.heap.ArenaAllocator.init(gs.scratch());
+    defer arena.deinit();
+    const freight = try freightQuote(gs, arena.allocator(), from, to, quantity * part_mod.tons(part_key));
     const payer = GameState.siteTreasury(from);
     const tags = GameState.treasuryTags(payer);
     if (freight.cost > 0) {
@@ -1840,7 +1859,8 @@ fn shipStock(gs: *GameState, part_key: []const u8, quantity: u32, from: types.Si
             .note = part_key,
         });
     }
-    _ = gs.takeStock(from, part_key, quantity);
+    if (!gs.takeStock(from, part_key, quantity)) return Error.InsufficientStock;
+    commitFreight(gs, freight);
     try gs.part_orders.append(gs.allocator(), .{
         .part_key = part_mod.find(part_key).?.key,
         .quantity = quantity,
@@ -1956,7 +1976,9 @@ fn orderPart(gs: *GameState, part_key: []const u8, quantity: u32, dest_opt: ?typ
     const cost_mult: types.Bp = types.applyBp(tuning.market.procurement_markup_bp, gs.diff().purchase_bp); // 10% procurement markup, scaled by difficulty (12.32)
     var lead_days: u32 = logistics.transitDays(1);
     // Onward shipment to a deployed company: more days, freight on top.
-    const onward = try freightBetween(gs, .{ .hq = hq_id }, dest, quantity * def.pallet_tons);
+    var arena = std.heap.ArenaAllocator.init(gs.scratch());
+    defer arena.deinit();
+    const onward = try freightQuote(gs, arena.allocator(), .{ .hq = hq_id }, dest, quantity * def.pallet_tons);
     if (dest == .company) lead_days += onward.days;
 
     // Logistics-admin acquisition roll vs. rarity (MekHQ-style). The back
@@ -2000,6 +2022,7 @@ fn orderPart(gs: *GameState, part_key: []const u8, quantity: u32, dest_opt: ?typ
         .hq = hq_id,
         .note = def.name,
     });
+    if (dest == .company) commitFreight(gs, onward);
     try gs.part_orders.append(gs.allocator(), .{
         .part_key = def.key,
         .quantity = quantity,
@@ -2768,6 +2791,23 @@ test "a refit cannot install two parts from one in stock" {
         }
     }
     return error.NoMekWithTwinMounts;
+}
+
+test "a shipment the payer cannot afford uses no link capacity" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 7501 });
+    defer gs.deinit();
+    _ = try gs.createCommander("T", .LC, .quartermaster);
+    const home = gs.hqs.keys()[0];
+    const far = try gs.foundHq("Frontier", .field, "alkaid");
+    try gs.hq_links.append(gs.allocator(), .{ .a = home, .b = far, .level = 1, .established_day = 0 });
+    // The shipment is paid from the sending HQ's treasury, which is empty.
+    try gs.addStock(.{ .hq = far }, "armor", 10);
+    gs.hqs.getPtr(far).?.funds = 0;
+    try std.testing.expectError(Error.InsufficientTreasury, execute(&gs, .{
+        .ship_stock = .{ .part_key = "armor", .quantity = 10, .from = .{ .hq = far }, .to = .{ .hq = home } },
+    }));
+    try std.testing.expectEqual(@as(u32, 0), gs.hq_links.items[0].tons_this_week);
+    try std.testing.expectEqual(@as(u32, 10), gs.stockCount(.{ .hq = far }, "armor"));
 }
 
 /// Advance `days`, reading each after-action as it lands — the loop a
