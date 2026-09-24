@@ -1,5 +1,5 @@
-//! How one company would fare on one contract (12E.3), and how much of
-//! the opposition the outfit's comms let it see (12D.5). MekHQ has no
+//! How one company would fare on one contract (Stage 12E), and how much
+//! of the opposition the outfit's comms let it see. MekHQ has no
 //! counterpart: AtB shows the player the scenario's forces outright. This
 //! is combat math (`battle.estimatePower`, the scenario tables, the ROE
 //! modifiers): the checklist warns from it and the board colours it, so
@@ -26,7 +26,7 @@ pub fn intelLevel(gs: *GameState, hq_id: types.HqId) u8 {
     return comms + @intFromBool(rating.currentIndex(gs) >= 3);
 }
 
-/// The enemy's lance count as the intel reads it (12E.3): exact from
+/// The enemy's lance count as the intel reads it: exact from
 /// comms 3, within a lance either way from comms 1, the kind's whole
 /// range blind.
 pub const LanceIntel = struct { lo: u8, hi: u8, mid: u8, exact: bool };
@@ -83,7 +83,7 @@ pub fn rateOffer(alloc: std.mem.Allocator, gs: *GameState, c: *const contract_mo
     if (!c.hasOpfor()) return null;
     const own = try battle.estimatePower(gs, alloc, c, company);
     const intel = intelLevel(gs, intelHq(gs, c));
-    // Garrison work meets a probe, not the whole force (12D.6).
+    // Garrison work meets a probe, not the whole force.
     const probe: ?u8 = if (c.kind.isGarrisonClass()) @min(tuning.battle.garrison_probe_lances, c.enemy_lances) else null;
     const li = lanceIntel(gs, c);
     const exact = li.exact or probe != null;

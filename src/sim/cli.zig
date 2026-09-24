@@ -265,7 +265,7 @@ fn parseVerb(verb: []const u8, tokens: *std.mem.TokenIterator(u8, .scalar)) Pars
         // start <LC|DC|FS|CC|FWL> <profession> <name>
         const origin = std.meta.stringToEnum(game.commander.Faction, try need(tokens.next())) orelse return error.BadArguments;
         const profession = std.meta.stringToEnum(game.commander.Profession, try need(tokens.next())) orelse return error.BadArguments;
-        // start <LC|DC|FS|CC|FWL> <profession> <name> [year]  (12C.16: a trailing 4-digit year)
+        // [year]: an optional trailing 4-digit word of the name is the start year.
         var name = takeRest(tokens);
         var year: u16 = 3025;
         if (std.mem.lastIndexOfScalar(u8, name, ' ')) |sp| {
@@ -716,7 +716,7 @@ test "command line parses the common verbs" {
     try std.testing.expectEqual(@as(?Command, null), try parseCommand("frobnicate", &it4));
     var it5 = std.mem.tokenizeScalar(u8, "x", ' ');
     try std.testing.expectError(error.BadArguments, parseCommand("hire", &it5));
-    // REPL forms the parser learned in 12.18.
+    // REPL forms: hire by role and name, start with a spaced name.
     var it6 = std.mem.tokenizeScalar(u8, "mekwarrior Grayson Carlyle", ' ');
     const cmd6 = (try parseCommand("hire", &it6)).?;
     try std.testing.expectEqualStrings("Carlyle", cmd6.hire.last);

@@ -1,5 +1,5 @@
 //! Campaign calendar and the daily tick pipeline (ARCH §6).
-//! Mirrors MekHQ `Campaign.newDay()`, decomposed into ordered phases.
+//! MekHQ counterpart: `Campaign.newDay()`, decomposed here into ordered phases.
 
 const std = @import("std");
 

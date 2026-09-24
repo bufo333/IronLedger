@@ -23,7 +23,7 @@ pub const Report = struct {
     finances: struct { score: i32, debt: types.CBills, months: i64, overdrawn: bool },
 };
 
-/// Letter index 0…5 (F, D, C, B, A, A*) — what the board reads (12C.7).
+/// Letter index 0…5 (F, D, C, B, A, A*) — what the board reads.
 pub fn index(total: i32) u8 {
     const t = tuning.rating;
     if (total >= t.letter_a_star) return 5;
@@ -45,7 +45,7 @@ pub fn letter(total: i32) []const u8 {
     };
 }
 
-/// Pay multiplier the letter earns (12C.7).
+/// Pay multiplier the letter earns.
 pub fn payBp(idx: u8) types.Bp {
     const t = tuning.rating;
     return switch (idx) {
