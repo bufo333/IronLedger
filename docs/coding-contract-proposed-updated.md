@@ -842,51 +842,151 @@ Modules and functions are named for the entity or rule, not the screen that
 first needed them. Quantities include units and accounting windows when
 ambiguity is possible.
 
-### 82. Comments state what is true now
+### 82. Comments explain present truth
 
-A comment names the rule, the invariant, the unit, or why a non-obvious choice
-holds. It never describes earlier code, what changed, who asked for it, or what
-was discussed: no "used to", "no longer", "now", "previously", "was changed",
-before/after comparisons, play-feedback anecdotes, names, or quoted
-conversation. History lives in commit messages, pull request descriptions, and
-`ROADMAP.md`.
+Code comments explain present invariants, hazards, interfaces, or durable
+compatibility facts. They never record conversations, authorship, development
+history, roadmap chronology, review findings, or work status. Git and planning
+documents remember how the code arrived; comments explain why the code must
+remain correct.
 
-A doc comment is one sentence saying what the function decides or what the
-field holds. Rationale adds at most two or three lines, and only when the code
-cannot show it. Comments do not restate the code or a type's name. Code is
-never left commented out, and a `TODO` in code requires a `TODO.md` item.
+A comment answers at least one of:
 
-### 83. Citations are sources, not provenance
+- What invariant must remain true?
+- Why is this implementation non-obvious?
+- What external rule, protocol, or sourcebook requirement governs it?
+- What ownership, lifetime, concurrency, or failure constraint is easy to
+  violate?
+- What compatibility behavior must remain for persisted or external data?
 
-A rule cites where its numbers come from: sourcebook edition and page, an
-`ARCHITECTURE.md` section, or the owning `data/tables` row. Roadmap stage tags
-are provenance: a module's top-of-file `//!` doc comment may name the
-`ROADMAP.md` stage that designs it, and nothing else carries one. Test names
-state the behaviour they prove, without a stage tag.
+Comments are written in the present tense about the current code. If deleting
+a comment would not make the current implementation harder to understand
+safely, it is omitted.
 
-A tuning knob states what it measures, with units and period. A placeholder is
-`// TUNE` plus the data that would settle it, never an anecdote.
+- **Doc comments state contracts.** A public declaration's doc comment states
+  what callers can rely on: inputs and units, returned meaning, mutation and
+  ownership, failure behavior, determinism and RNG use, relevant invariants,
+  and the governing source. It does not narrate implementation steps.
+- **Inline comments explain hazards, not syntax.** `// Loop over the units.`
+  is rejected; `// Iterate in stable ID order because RNG consumption is part
+  of replay state.` is accepted.
+- **Tests follow the same rules.** A test comment explains the invariant or
+  the fixture's shape. A test name describes behavior, such as `"battle report
+  IDs remain unique after save and load"`, never a roadmap stage or a fix.
+- **Comments change with the code.** A change that invalidates a nearby
+  comment updates or removes it in the same PR; a stale comment is a
+  correctness defect. When a refactor makes code self-explanatory, the comment
+  is deleted rather than rewritten.
+
+```zig
+// Rejected:
+// 12G.6: This used to lose the battle ID, so now we save it here.
+// Play feedback said a week was too short.
+
+// Accepted:
+// A pending recovery decision must retain its battle ID across save/load.
+// The cooldown prevents the same weekly decision from recurring back-to-back.
+```
+
+### 83. Comments hold no history, conversation, or work status
+
+Source comments, test comments, and test names do not contain:
+
+- conversation summaries or quotations, or references to prompts, users,
+  developers, reviewers, agents, or language models;
+- attribution such as "we decided", "the user asked", or "feedback said";
+- previous behavior or change language: "used to", "now", "formerly",
+  "changed from", "after the fix", or when a field, case, or column was added;
+- audit findings, review discussions, PR narratives, commit history, or dates
+  describing when a decision was made;
+- rejected alternatives, unless the alternative remains an immediate and
+  plausible maintenance hazard;
+- work status: "not implemented yet", "will be fixed later", or "temporary"
+  without a tracked removal condition;
+- operational metadata: names, assignments, review status, priority,
+  deadlines, branch names, commit IDs, test-run status, or drifting
+  measurements such as line counts;
+- credentials, tokens, keys, internal URLs, personal information, proprietary
+  conversation content, machine-specific paths, local environment details, or
+  diagnostic output.
+
+**Compatibility boundaries are the only place for history.** Database
+migrations, save-format upgrades, protocol versions, legacy data import,
+platform or ABI compatibility, and workarounds for a specific external
+implementation may describe old representations. Such a comment states the
+exact version boundary, the old representation that can still arrive, the
+deterministic transformation, and, when applicable, the condition for removing
+the path. Schema versions are durable data facts; roadmap stages and
+development dates are not.
+
+```zig
+// Allowed: Saves before schema v31 have no salvage remainder. Reconstruct it
+// from the unresolved report so loading preserves the original allocation total.
+```
+
+**TODO, FIXME, HACK, and XXX are prohibited.** Open work lives in `TODO.md`. A
+comment may carry a stable tracker reference only when the current
+implementation is intentionally incomplete but still correct, for example
+`// Tracked by TODO.md D22: split table decoding without changing row
+semantics.` Removing the tracker item removes the comment in the same change. A
+TODO comment never excuses incorrect behavior. `// TUNE` (rule 24) is not a
+TODO; it marks a placeholder value and names the data that would settle it.
+
+### 84. Citations name durable authorities
+
+Comments cite durable authorities: `ARCHITECTURE.md` headings, coding-contract
+rules, sourcebook edition with page or chapter, protocol and technical
+specifications (SQLite, POSIX, PNG), the MekHQ counterpart (rule 61), or a
+durable decision record. A named rule or heading is preferred over a line
+number. Comments never cite chat transcripts, private messages, prompt text,
+branch names, a commit hash as the only explanation, or issue or PR discussion
+as the only source of a permanent rule. A discussion that produced a lasting
+decision is recorded in the owning document, and code cites that document.
+
+Relationships are named precisely. "Mirrors" is ambiguous (rule 80); use
+`//! MekHQ counterpart: personnel/Person.java.`, `//! Adaptation: companies
+are independently deployable.`, or `/// CamOps, p. 42: lower gunnery is
+better.` A source citation never excuses duplicated code.
+
+Roadmap stage identifiers (`Stage 12`, `12G.6`) belong in `ROADMAP.md`, the
+work tracker, and release notes. A module's top-of-file `//!` doc comment may
+name the stage whose design it implements; no other comment or test name
+carries one.
 
 **Reviewer checks**
 
 ```sh
-rg -n '//.*\b(used to|no longer|previously|play feedback|we decided|was changed)\b' src
-rg -n '^\s*//[/ ].*\((Stage [0-9]|[0-9]+[A-G]?\.[0-9]+)' src   # stage tags outside //! headers
-rg -n '^test "[0-9]' src                                         # stage-tagged test names
+# Canonical versions live in docs/verify-contract.sh, which fails on new
+# occurrences against a recorded baseline. Allowlists: migration comments
+# naming schema versions, //! MekHQ counterpart and stage headers, and literal
+# test data.
+rg -n -i '//.*\b(play feedback|user asked|we decided|previously|used to|formerly|after the audit|after review|conversation|LLM|Claude|ChatGPT)\b' src
+rg -n '^\s*//[/ ].*\b(Stage [0-9]|1[0-9][A-G]?\.[0-9])' src
+rg -n '\b(TODO|FIXME|HACK|XXX)\b' src
+rg -n '^test "[0-9]' src
 ```
 
+- Does every new comment describe present behavior or a durable compatibility
+  boundary?
+- Does any comment reference a conversation, developer, language model, audit,
+  PR narrative, roadmap stage, or previous implementation?
+- Could the explanation move to `ARCHITECTURE.md`, the contract, or the work
+  tracker?
+- Does a migration comment name a real schema or version boundary rather than a
+  development milestone?
+- Does every public doc comment describe caller-visible behavior?
+- Did changed code make a nearby comment stale, or can a comment be deleted
+  because naming now makes the code self-explanatory?
 - Did a facade grow new subsystem logic instead of one dispatch arm?
 - Does temporary work allocate from the campaign arena?
 - Does a catch collapse a system failure into plausible gameplay output?
 - Does a name hide units, time window, or locality?
-- Does a comment narrate history, quote a conversation, or run past what the
-  code cannot show?
 
 ---
 
 ## 11. Pull requests and delivery
 
-### 84. One branch in flight at a time
+### 85. One branch in flight at a time
 
 A change lands on `main` before the next starts. Branches are sequential,
 never stacked. A branch is complete only when its PR is merged, the branch is
@@ -897,7 +997,7 @@ deleted locally and remotely, and local `main` is pulled.
 - No file is borrowed from another branch to make verification pass.
 - Large work is split into independently correct increments that each land.
 
-### 85. Deliverables are cohesive
+### 86. Deliverables are cohesive
 
 A deliverable has one primary invariant or subsystem outcome. Package fixes,
 schema migrations, frontend tests, and major module decompositions do not
@@ -905,7 +1005,7 @@ share a PR merely because they came from the same audit. Structural moves land
 after behavior fixes that rely on existing line ownership, unless the move is
 required to make the behavior fix safe.
 
-### 86. Exceptions are explicit debt
+### 87. Exceptions are explicit debt
 
 An exception to this contract names:
 
@@ -942,8 +1042,9 @@ Every PR answers:
 10. Is every new number declared once with units, accounting window, and
     source?
 11. Can every new external string reach only validated plain-text rendering?
-12. Do new and edited comments state only what is true now, citing sources
-    rather than history (rules 82 and 83)?
+12. Do new and edited comments state present truth only, with no history,
+    conversation, work status, or roadmap chronology, and cite durable
+    authorities (rules 82–84)?
 13. Which regression test fails on the old behavior?
 14. Which test proves refusal or injected failure leaves state unchanged?
 15. Are the full gate, both smokes when required, contract script, clean
@@ -959,5 +1060,5 @@ git log --oneline origin/main..HEAD
 
 - Is more than one branch in flight?
 - Does this change combine unrelated audit deliverables?
-- Does a claimed exception satisfy rule 86?
+- Does a claimed exception satisfy rule 87?
 - Is the reviewed commit exactly the commit that passed the gate?

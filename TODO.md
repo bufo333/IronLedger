@@ -114,7 +114,7 @@ When Part 1 is empty, Stage 12 is marked ✅ in ROADMAP.md and README.md.
 
 ## D22a. Comments and citations (contract rule 43)
 
-- [ ] Rewrite existing comments to rule 43: remove history and anecdote (47 lines match `rg -n '//.*\b(used to|no longer|previously|play feedback|we decided|was changed)\b' src` as of 2026-09-23), strip roadmap stage tags outside `//!` module headers (633), drop stage prefixes from test names (133), and trim narrative doc comments to what the code cannot show. Mechanical, one PR per layer (domain/econ/gen, sim, persist, tui).
+- [ ] Rewrite existing comments to rule 43 (proposal rules 82–84), using the reviewer greps in proposal rule 84. As of 2026-09-23: 42 history or attribution lines, 708 stage tags outside `//!` headers, 133 stage-prefixed test names, one `TODO(stage-4)` (domain/contract.zig). Also trim narrative doc comments to the caller-visible contract, and replace "mirrors" with precise counterpart or adaptation labels. One PR per layer (domain/econ/gen, sim, persist, tui). Until the sweep lands, `verify-contract.sh` checks against a recorded baseline so only new violations fail.
 
 ## D22. Build, data and tests (audit #20, #24, #25, #26, #28; rules 6, 9)
 
