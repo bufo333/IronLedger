@@ -1032,7 +1032,7 @@ test "12.22: the black market and a salvage dispute move standing and field stoc
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1222 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .line_officer);
-    const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
         .id = @enumFromInt(1),
         .kind = .objective_raid,
@@ -1084,7 +1084,7 @@ test "12.25: notice is a decision — a raise keeps them, letting go vacates the
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1225 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .paymaster);
-    const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     var pilot: types.PersonId = .none;
     var mek: types.UnitId = .none;
     var uit = gs.units.iterator();
@@ -1118,7 +1118,7 @@ test "12B.7: a prisoner can be ransomed, released for standing, or recruited on 
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1237 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .line_officer);
-    const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     const mk = struct {
         fn captive(g: *GameState, company: types.ForceId) !types.PersonId {
             const spec = @import("../gen/person_gen.zig").generate(&g.rng, .market, .mekwarrior);
@@ -1228,7 +1228,7 @@ test "12D.3: a missing pilot is ransomed, traded for a prisoner of their house, 
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1203 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .paymaster);
-    const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     var pilots: [3]types.PersonId = undefined;
     var n: usize = 0;
     var uit = gs.units.iterator();
@@ -1271,7 +1271,7 @@ test "12D.9: betrayal can cost a hull; raiders at the jump point delay or fight 
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1209 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .line_officer);
-    const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
         .id = @enumFromInt(1),
         .kind = .objective_raid,
@@ -1312,7 +1312,7 @@ test "12D.9: betrayal can cost a hull; raiders at the jump point delay or fight 
 /// else to fix, and `armor` tons in its stores (12G.6 tests).
 pub fn damagedCompanyForTest(gs: *GameState, armor: u32) !struct { c: *contract_mod.Contract, hulls: [3]types.UnitId } {
     _ = try gs.createCommander("T", .LC, .line_officer);
-    const co = try @import("../gen/company_gen.zig").generateInto(gs, "Alpha");
+    const co = try @import("starter_company.zig").generateInto(gs, "Alpha");
     try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
         .id = @enumFromInt(1),
         .kind = .recon_raid,

@@ -15,7 +15,7 @@ re-implemented in Zig. Paths below are under `MekHQ/src/mekhq/campaign/`.
 | `unit/Unit.java` | Entity wrapper + crew + repair state | `src/domain/unit.zig` | 3 |
 | `parts/*` (Part, Armor, MekLocation, ...) | Part instances, quality A–F, repair TNs | `src/domain/part.zig` + catalog `data/parts/*.zon` | 5 |
 | `Quartermaster.java`, `procurement/*` | Acquisition rolls, shopping list, delivery ETA | `src/econ/logistics.zig` | 5 |
-| `market/ContractMarket` | Monthly offers, CamOps terms | `src/econ/contract_market.zig` (offer counts/visibility in `src/econ/market.zig`) | 4 |
+| `market/ContractMarket` | Monthly offers, CamOps terms | `src/sim/contract_market.zig` (offer counts/visibility in `src/econ/market.zig`) | 4 |
 | `market/PersonnelMarket`, `UnitMarket` | Hiring pool, unit purchases | `src/econ/market.zig` | 4/9 |
 | `mission/Mission,Contract,AtBContract` | 12 AtB contract types, payment math, command rights | `src/domain/contract.zig` | 4 |
 | `mission/AtBScenario*` | Scenario generation over a contract's life | `src/domain/scenario.zig` + `src/sim/battle.zig`; event decks in `src/sim/contract_events.zig` (no StratCon) | 7/12C |
@@ -23,9 +23,9 @@ re-implemented in Zig. Paths below are under `MekHQ/src/mekhq/campaign/`.
 | `finances/Finances.java`, `Loan.java` | Ledger, categories, loans | `src/econ/finance.zig` | 2/4 |
 | `rating/*` (FMMR, CamOps reputation) | Unit rating → pay & offer quality | reputation in `GameState`, Dragoons rating in `src/sim/queries.zig` `rating()` | 4/12C |
 | — (HBS BattleTech skulls) | Contract difficulty before signing | `src/domain/skulls.zig` + `data/tables/skulls.zon`; `queries.rateOffer` against a company | 12E |
-| `universe/generators/companyGenerators/*` | **AtB company autogeneration** | `src/gen/company_gen.zig` | 3 |
+| `universe/generators/companyGenerators/*` | **AtB company autogeneration** | `src/sim/starter_company.zig` (rolls and manning table in `src/gen/company_gen.zig`) | 3 |
 | `universe/Planet,Systems` (`planets.xml`) | Star map, jump distances, planet socio-industrial codes | `data/planets.zon` (curated) + `src/econ/logistics.zig` routes | 9 |
-| `universe/RandomNameGenerator` | Names by faction/origin | `src/gen/company_gen.zig` name tables | 2 |
+| `universe/RandomNameGenerator` | Names by faction/origin | `src/gen/person_gen.zig` + `data/tables/names.zon` | 2 |
 | `CampaignXmlParser`, `.cpnx.gz` saves | Persistence (XML, **not SQL**) | `src/persist/` + `docs/schema.sql` (SQLite) | 11 |
 | MegaMek `.mtf`/`.blk` data files | Unit/equipment catalog | curated `data/chassis/*.zon` (licensing: re-encode, don't copy) | 3 |
 | MegaMekLab | Loadout editing, refit kits, refit classes A–F | `src/domain/unit.zig` refits + meklab commands | 10 |
@@ -52,7 +52,7 @@ re-implemented in Zig. Paths below are under `MekHQ/src/mekhq/campaign/`.
 | Local operating funds for deployed companies | `force.local_funds` + `fund_transfer` txn category | 9 |
 | Player identity: named companies + emblem images | `force.name`/`force.emblem` | 3 |
 | Commander character creation (origin faction → HQ placement, profession → 2% edge) | `src/domain/commander.zig` + `state.createCommander` | 4 |
-| Beachhead premium pricing + hardship pay on remote contracts | `src/econ/contract_market.zig` + tick finances phase | 4 |
+| Beachhead premium pricing + hardship pay on remote contracts | `src/sim/contract_market.zig` + tick finances phase | 4 |
 | Decentralized treasuries + fund couriers + standing policies (extends MekHQ Finances) | Stage 9A: `Hq.funds`, live `local_funds`, `fund_transfer`/`standing_policy` | 9A |
 | Structured, filterable campaign log (MekHQ has per-person logs only) | Stage 9A: `LogEntry` with company/hq/contract tags | 9A |
 | Per-munition stocks w/ pallet tonnage vs. warehouse capacity (MekHQ tracks ammo bins per unit, no site storage) | Stage 9B: `inventory` + `pallet_tons`, `supplies`/`demand` reports | 9B |

@@ -294,7 +294,7 @@ test "attrition contracts break when the pool does; duration ones don't care" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 50 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .line_officer);
-    const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
 
     try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
         .id = @enumFromInt(1),
@@ -362,7 +362,7 @@ test "combat-ineffective past the grace window is breach" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 52 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .DC, .chief_engineer);
-    const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
         .id = @enumFromInt(1),
         .kind = .recon_raid,
@@ -400,7 +400,7 @@ test "12.21: standing rises with the employer and falls with the enemy on comple
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1221 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .line_officer);
-    const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
         .id = @enumFromInt(1),
         .kind = .objective_raid,
@@ -450,7 +450,7 @@ test "12D.1: a performance failure at term is .failed — no clawback, no coolin
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1201 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .FS, .line_officer);
-    const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
         .id = @enumFromInt(1),
         .kind = .objective_raid,
@@ -488,8 +488,8 @@ test "12D.5: an offer carries its opposition, and acceptance sizes the pool from
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1205 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .line_officer);
-    const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
-    try @import("../econ/contract_market.zig").refresh(&gs);
+    const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
+    try @import("contract_market.zig").refresh(&gs);
     var saw_combat = false;
     for (gs.contract_offers.items) |o| {
         try std.testing.expect(o.hasOpfor());

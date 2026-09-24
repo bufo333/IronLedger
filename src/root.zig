@@ -76,10 +76,11 @@ pub const after_action = @import("sim/after_action.zig");
 pub const finance = @import("econ/finance.zig");
 pub const logistics = @import("econ/logistics.zig");
 pub const market = @import("econ/market.zig");
-pub const contract_market = @import("econ/contract_market.zig");
+pub const contract_market = @import("sim/contract_market.zig");
 
 // gen/ — procedural generation
 pub const company_gen = @import("gen/company_gen.zig");
+pub const starter_company = @import("sim/starter_company.zig");
 pub const person_gen = @import("gen/person_gen.zig");
 
 test {

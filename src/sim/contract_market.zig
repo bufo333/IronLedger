@@ -7,9 +7,9 @@ const tuning = @import("../domain/tuning.zig").t;
 const types = @import("../domain/types.zig");
 const contract = @import("../domain/contract.zig");
 const planet = @import("../domain/planet.zig");
-const market = @import("market.zig");
-const logistics = @import("logistics.zig");
-const GameState = @import("../sim/state.zig").GameState;
+const market = @import("../econ/market.zig");
+const logistics = @import("../econ/logistics.zig");
+const GameState = @import("state.zig").GameState;
 const unit_mod = @import("../domain/unit.zig");
 const hq_mod = @import("../domain/hq.zig");
 const person_mod = @import("../domain/person.zig");
@@ -74,7 +74,7 @@ fn pickEnemy(gs: *GameState, employer: []const u8, kind: contract.ContractKind) 
 /// regular skill). A veteran five-lance force pays more than a green four.
 pub fn threatPayBp(kind: contract.ContractKind, lances: u8, quality: types.ExperienceLevel, lance_bv: i64) types.Bp {
     const opfor = @import("../domain/opfor.zig");
-    const Element = @import("../sim/autoresolve.zig").Element;
+    const Element = @import("autoresolve.zig").Element;
     const t = tuning.contract;
     const row = opfor.rowFor(kind);
     const sk = opfor.skills(quality);
@@ -101,7 +101,7 @@ pub fn refresh(gs: *GameState) !void {
     const base = types.applyBp(@max(perCompanyOpsCost(gs), tuning.market.min_ops_cost), types.applyBp(market_margin_bp, gs.diff().contract_pay_bp)); // difficulty (12.32)
 
     // The Dragoons rating (12C.7) sets how many come calling, who, and at what pay.
-    const rating = @import("../sim/rating.zig");
+    const rating = @import("rating.zig");
     const rt = tuning.rating;
     const rating_idx = rating.currentIndex(gs);
     // One board per HQ (12E.4): each posts work inside its own ring and
@@ -522,7 +522,7 @@ fn shortAdminRole(gs: *GameState, hq: *const hq_mod.Hq) ?person_mod.Role {
 /// people who heard the outfit is hiring that trade.
 fn shortRole(gs: *GameState, hq: *const hq_mod.Hq) ?person_mod.Role {
     if (shortAdminRole(gs, hq)) |r| return r;
-    const personnel = @import("../sim/personnel.zig");
+    const personnel = @import("personnel.zig");
     var best: ?person_mod.Role = null;
     var best_gap: u32 = 0;
     var fit = gs.forces.iterator();
@@ -630,14 +630,14 @@ pub fn perCompanyOpsCost(gs: *GameState) types.CBills {
 
 /// Expected monthly maintenance consumables: `maintenance.monthlyConsumablesEstimate`.
 fn maintenanceEstimate(gs: *GameState) types.CBills {
-    return @import("../sim/maintenance.zig").monthlyConsumablesEstimate(gs);
+    return @import("maintenance.zig").monthlyConsumablesEstimate(gs);
 }
 
 test "refresh only offers work inside rings or the beachhead band" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 5 });
     defer gs.deinit();
     _ = try gs.createCommander("Erik Kalmar", .CC, .quartermaster);
-    _ = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha Company");
+    _ = try @import("starter_company.zig").generateInto(&gs, "Alpha Company");
 
     try refresh(&gs);
     try std.testing.expect(gs.contract_offers.items.len >= 1);
@@ -745,14 +745,14 @@ test "12C.7: an F-rated outfit hears only from the periphery and never gets a pl
     var gs = GameState.init(std.testing.allocator, .{ .seed = 127 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .paymaster);
-    _ = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    _ = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     gs.funds = -1;
     gs.reputation = -100; // record −40, treasury −20 …
     var pit = gs.people.iterator();
     while (pit.next()) |e| if (e.value_ptr.role.isCombat()) {
         try e.value_ptr.skills.put(gs.allocator(), e.value_ptr.role.primarySkill(), 7); // … and green as grass: firmly F
     };
-    const rating = @import("../sim/rating.zig");
+    const rating = @import("rating.zig");
     try std.testing.expectEqual(@as(u8, 0), rating.currentIndex(&gs));
     gs.contract_offers.clearRetainingCapacity();
     try refresh(&gs);
@@ -867,7 +867,7 @@ test "the board is a mix: at least offers_min offers, no kind over a third of th
     var gs = GameState.init(std.testing.allocator, .{ .seed = 610 });
     defer gs.deinit();
     _ = try gs.createCommander("Erik Kalmar", .LC, .quartermaster);
-    _ = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha Company");
+    _ = try @import("starter_company.zig").generateInto(&gs, "Alpha Company");
     try refresh(&gs);
     const n = gs.contract_offers.items.len;
     try std.testing.expect(n >= tuning.market.offers_min and n <= tuning.market.offers_max);
@@ -892,9 +892,9 @@ test "play feedback: offers are priced per company — a second company does not
     var gs = GameState.init(std.testing.allocator, .{ .seed = 96 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .quartermaster);
-    _ = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    _ = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     const one = perCompanyOpsCost(&gs);
-    _ = try @import("../gen/company_gen.zig").generateInto(&gs, "Bravo");
+    _ = try @import("starter_company.zig").generateInto(&gs, "Bravo");
     const two = perCompanyOpsCost(&gs);
     // Two like companies: the per-company figure barely moves (HQ overhead is now shared).
     try std.testing.expect(two < one);

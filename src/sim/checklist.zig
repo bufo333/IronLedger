@@ -610,7 +610,7 @@ test "12E.2: a company with hulls its home bay cannot rebuild is flagged" {
 /// A company on an active raid contract with ammunition in its stores.
 fn contactFixture(gs: *GameState) !*@import("../domain/contract.zig").Contract {
     _ = try gs.createCommander("T", .LC, .line_officer);
-    const co = try @import("../gen/company_gen.zig").generateInto(gs, "Alpha");
+    const co = try @import("starter_company.zig").generateInto(gs, "Alpha");
     try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
         .id = @enumFromInt(1),
         .kind = .recon_raid,
