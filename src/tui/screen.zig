@@ -333,10 +333,13 @@ pub const Screen = struct {
             const la: []const u8 = if (self.ascii) "<" else "◀";
             const ra: []const u8 = if (self.ascii) ">" else "▶";
             const hint = if (view.hidden_left > 0 and view.hidden_right > 0)
+                // best-effort: a scroll marker in a fixed buffer; too long leaves it blank.
                 std.fmt.bufPrint(&buf, " {s} {d} · {d} {s} ", .{ la, view.hidden_left, view.hidden_right, ra }) catch ""
             else if (view.hidden_left > 0)
+                // best-effort: a scroll marker in a fixed buffer; too long leaves it blank.
                 std.fmt.bufPrint(&buf, " {s} {d} ", .{ la, view.hidden_left }) catch ""
             else
+                // best-effort: a scroll marker in a fixed buffer; too long leaves it blank.
                 std.fmt.bufPrint(&buf, " {d} {s} ", .{ view.hidden_right, ra }) catch "";
             const hl: i32 = @intCast(visibleLen(hint));
             if (hl < inner.w) _ = self.text(edge - hl, inner.y, @intCast(hl), hint, .amber);

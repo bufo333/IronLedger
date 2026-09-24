@@ -175,6 +175,7 @@ pub const Store = struct {
         const stored = try fit(u32, @max(1, store.getSetting("schema_version", 1)));
         if (stored > schema_version) return error.StoreNewerThanGame;
         try db.exec("BEGIN");
+        // best-effort: rolling back a failed transaction; the original error propagates.
         errdefer db.exec("ROLLBACK") catch {};
         for (migrations) |m| {
             if (m.version <= stored) continue;
@@ -315,6 +316,7 @@ pub const Store = struct {
     /// Remove a campaign and every row that belonged to it.
     pub fn deleteCampaign(self: Store, cid: i64) !void {
         try self.db.exec("BEGIN");
+        // best-effort: rolling back a failed transaction; the original error propagates.
         errdefer self.db.exec("ROLLBACK") catch {};
         try self.clearRows(cid);
         const st = try self.db.prepare("DELETE FROM campaign WHERE id = ?1");
@@ -341,6 +343,7 @@ pub const Store = struct {
     /// campaign whose row is gone returns `error.NoSuchCampaign`.
     pub fn save(self: Store, gs: *GameState) !void {
         try self.db.exec("BEGIN");
+        // best-effort: rolling back a failed transaction; the original error propagates.
         errdefer self.db.exec("ROLLBACK") catch {};
 
         const cid = try self.saveCampaignRow(gs);

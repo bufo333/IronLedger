@@ -51,6 +51,7 @@ pub const Player = struct {
         seed ^= @as(u64, @truncate(@as(u96, @bitCast(now.nanoseconds))));
         p.rng = std.Random.DefaultPrng.init(seed);
         p.root = p.arena.allocator().dupe(u8, dir_path) catch dir_path;
+        // best-effort: an unreadable music folder leaves the soundtrack empty.
         p.scan(dir_path) catch {};
         p.player_cmd = detectPlayer();
         p.rebuild();
@@ -253,6 +254,7 @@ pub const Player = struct {
     pub fn stop(self: *Player) void {
         if (self.child) |*c| {
             if (c.id) |pid| {
+                // best-effort: the player process may already have exited.
                 std.posix.kill(pid, .TERM) catch {};
                 var status: c_int = 0;
                 _ = std.c.waitpid(pid, &status, 0);

@@ -123,6 +123,7 @@ pub const Term = struct {
         try posix.tcsetattr(fd, .FLUSH, raw);
         // Until init returns, nothing else restores the terminal: every
         // step past raw mode undoes itself on failure.
+        // best-effort: restoring the terminal while init fails.
         errdefer posix.tcsetattr(fd, .FLUSH, orig) catch {};
 
         var act: posix.Sigaction = .{
@@ -137,6 +138,7 @@ pub const Term = struct {
         }
 
         // Alternate screen, hide cursor, clear.
+        // best-effort: restoring the terminal while init fails.
         errdefer out.writeAll("\x1b[?25h\x1b[?1049l") catch {};
         try out.writeAll("\x1b[?1049h\x1b[?25l\x1b[2J\x1b[H");
         try out.flush();
@@ -144,8 +146,11 @@ pub const Term = struct {
     }
 
     pub fn deinit(self: *Term) void {
+        // best-effort: restoring the terminal on exit.
         self.out.writeAll("\x1b[0m\x1b[?25h\x1b[2J\x1b[H\x1b[?1049l") catch {};
+        // best-effort: restoring the terminal on exit.
         self.out.flush() catch {};
+        // best-effort: restoring the terminal on exit.
         posix.tcsetattr(self.in_fd, .FLUSH, self.orig) catch {};
     }
 

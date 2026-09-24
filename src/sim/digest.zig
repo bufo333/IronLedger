@@ -92,17 +92,20 @@ fn descend(w: *std.Io.Writer, a: anytype, b: @TypeOf(a)) void {
     switch (@typeInfo(T)) {
         .optional => if (a != null and b != null) descend(w, a.?, b.?),
         .array => for (a, b, 0..) |x, y, i| if (of(x) != of(y)) {
+            // best-effort: a diagnostic path in a fixed buffer truncates.
             w.print("[{d}]", .{i}) catch {};
             return descend(w, x, y);
         },
         .pointer => |p| if (p.size == .slice and p.child != u8 and a.len == b.len) {
             for (a, b, 0..) |x, y, i| if (of(x) != of(y)) {
+                // best-effort: a diagnostic path in a fixed buffer truncates.
                 w.print("[{d}]", .{i}) catch {};
                 return descend(w, x, y);
             };
         },
         .@"union" => if (std.meta.activeTag(a) == std.meta.activeTag(b)) switch (a) {
             inline else => |x, tag| {
+                // best-effort: a diagnostic path in a fixed buffer truncates.
                 w.print(".{s}", .{@tagName(tag)}) catch {};
                 descend(w, x, @field(b, @tagName(tag)));
             },
@@ -111,6 +114,7 @@ fn descend(w: *std.Io.Writer, a: anytype, b: @TypeOf(a)) void {
             if (comptime isMap(T)) return;
             if (comptime isArrayList(T)) return descend(w, a.items, b.items);
             inline for (s.fields) |f| if (of(@field(a, f.name)) != of(@field(b, f.name))) {
+                // best-effort: a diagnostic path in a fixed buffer truncates.
                 w.print(".{s}", .{f.name}) catch {};
                 return descend(w, @field(a, f.name), @field(b, f.name));
             };
