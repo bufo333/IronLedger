@@ -222,7 +222,7 @@
         .wound_serious_severity = 10,
         .wound_target = 8,
         .wound_target_mash = 9,
-        .score = .{ .decisive_victory = 2, .victory = 1, .draw = 0, .rout = -2 },
+        .score = .{ .decisive_victory = 2, .victory = 1, .draw = 0, .rout = -2, .concede = -2 }, // concede: an objective given up without a shot scores as a rout
         .morale = .{ .decisive_victory = 5, .victory = 3, .draw = -1, .defeat = -5, .rout = -10, .mess_relief = 2 },
         .fatigue_base = 4,
         .xp_scored = 3,

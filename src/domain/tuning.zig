@@ -340,8 +340,9 @@ pub const Tuning = struct {
         /// The follow-up 2d6 a hard hit must reach to wound (MASH forward: harder).
         wound_target: u8,
         wound_target_mash: u8,
-        /// Contract score per outcome (defeat comes from the command rights).
-        score: struct { decisive_victory: i32, victory: i32, draw: i32, rout: i32 },
+        /// Contract score per outcome (defeat comes from the command rights;
+        /// concede is an engagement with nobody to put in the line).
+        score: struct { decisive_victory: i32, victory: i32, draw: i32, rout: i32, concede: i32 },
         /// Company morale per outcome, and the relief a mess lance gives after a loss.
         morale: struct { decisive_victory: i32, victory: i32, draw: i32, defeat: i32, rout: i32, mess_relief: i32 },
         /// Fatigue a fight adds before the environment's share.

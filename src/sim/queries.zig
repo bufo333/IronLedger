@@ -3896,6 +3896,33 @@ test "12.20: the hangar ranks a pilotless hull above one earning its keep, mothb
     try std.testing.expect(view.len == rows.len + 2);
 }
 
+test "the after-action sheet for a concession says what was given up and what it cost" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 7302 });
+    defer gs.deinit();
+    _ = try gs.createCommander("T", .LC, .line_officer);
+    const co = try gs.createForce("Alpha", .company, .none);
+    try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
+        .id = @enumFromInt(1),
+        .kind = .recon_raid,
+        .employer_key = "LC",
+        .enemy_key = "PER",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 6, .base_pay_month = 400_000 },
+        .status = .active,
+        .assigned_company = co,
+    });
+    try @import("battle.zig").resolveEngagement(&gs, gs.contracts.getPtr(@enumFromInt(1)).?);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const r = gs.battle_reports.unread().?;
+    const sheet = (try afterAction(a, &gs, r.id)).?;
+    const text = try std.mem.join(a, "\n", sheet.fight);
+    try std.testing.expect(std.mem.indexOf(u8, text, "objective conceded") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "power 0 vs 0") == null);
+    try std.testing.expect(std.mem.indexOf(u8, text, try std.fmt.allocPrint(a, "{d}", .{r.score_delta})) != null);
+}
+
 test "the contact line an advance stops for is the checklist's contact warning" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1210 });
     defer gs.deinit();
@@ -5124,33 +5151,40 @@ pub fn afterAction(alloc: Alloc, gs: *GameState, id: types.BattleId) !?AfterActi
     const mk = outcomeMark(r.outcome);
 
     var fight: std.ArrayListUnmanaged([]const u8) = .empty;
-    try fight.append(alloc, try std.fmt.allocPrint(alloc, "{s} · {s}", .{ r.scenario, r.terrain }));
-    try fight.append(alloc, try std.fmt.allocPrint(alloc, "{s}{s}{{/}} · {s}", .{
-        mk, @tagName(r.outcome), if (r.held_field) "{g}field held{/}" else "{c}field lost{/}",
-    }));
-    try fight.append(alloc, "");
-    try fight.append(alloc, try std.fmt.allocPrint(alloc, "power {d} vs {d}", .{ r.player_power, r.enemy_power }));
-    try fight.append(alloc, try std.fmt.allocPrint(alloc, "ROE {s}{s}{s}", .{
-        @tagName(r.roe),
-        if (r.roe_overridden) " {d}(integrated command){/}" else "",
-        if (r.withdrew) " {a}· withdrew{/}" else "",
-    }));
-    try fight.append(alloc, try std.fmt.allocPrint(alloc, "{{d}}recon {d} · fatigue {d} · morale {d}{{/}}", .{ r.recon_quality, r.avg_fatigue, r.avg_morale }));
-    try fight.append(alloc, "");
-    try fight.append(alloc, try std.fmt.allocPrint(alloc, "{d} hit · {s}{d} destroyed{{/}} · {s}{d} WIA{{/}} · {s}{d} KIA{{/}}", .{
-        r.hits_taken,
-        if (r.destroyed > 0) "{c}" else "{g}", r.destroyed,
-        if (r.wounded > 0) "{a}" else "{g}", r.wounded,
-        if (r.kia > 0) "{c}" else "{g}", r.kia,
-    }));
-    if (r.lost_hulls > 0) try fight.append(alloc, try std.fmt.allocPrint(alloc, "{{c}}{d} hull(s) left to {s}{{/}}{s}", .{
-        r.lost_hulls, r.enemy_key,
-        if (r.missing > 0) try std.fmt.allocPrint(alloc, " {{c}}· {d} pilot(s) missing{{/}}", .{r.missing}) else "",
-    }));
-    // Applied to every active hand since 12C.1, reported since 12G.
-    try fight.append(alloc, try std.fmt.allocPrint(alloc, "morale {s}{s}{d}{{/}} · fatigue {{a}}+{d}{{/}}", .{
-        if (r.morale_delta < 0) "{c}" else "{g}", if (r.morale_delta > 0) "+" else "", r.morale_delta, r.fatigue_add,
-    }));
+    // A concession has no fight to describe: what was given up and what it cost.
+    if (r.conceded) {
+        try fight.append(alloc, "{c}objective conceded{/} — no combat-effective units to field");
+        try fight.append(alloc, try std.fmt.allocPrint(alloc, "{s}{s}{{/}} · {{c}}field lost{{/}}", .{ mk, @tagName(r.outcome) }));
+        try fight.append(alloc, "");
+    } else try fight.append(alloc, try std.fmt.allocPrint(alloc, "{s} · {s}", .{ r.scenario, r.terrain }));
+    if (!r.conceded) {
+        try fight.append(alloc, try std.fmt.allocPrint(alloc, "{s}{s}{{/}} · {s}", .{
+            mk, @tagName(r.outcome), if (r.held_field) "{g}field held{/}" else "{c}field lost{/}",
+        }));
+        try fight.append(alloc, "");
+        try fight.append(alloc, try std.fmt.allocPrint(alloc, "power {d} vs {d}", .{ r.player_power, r.enemy_power }));
+        try fight.append(alloc, try std.fmt.allocPrint(alloc, "ROE {s}{s}{s}", .{
+            @tagName(r.roe),
+            if (r.roe_overridden) " {d}(integrated command){/}" else "",
+            if (r.withdrew) " {a}· withdrew{/}" else "",
+        }));
+        try fight.append(alloc, try std.fmt.allocPrint(alloc, "{{d}}recon {d} · fatigue {d} · morale {d}{{/}}", .{ r.recon_quality, r.avg_fatigue, r.avg_morale }));
+        try fight.append(alloc, "");
+        try fight.append(alloc, try std.fmt.allocPrint(alloc, "{d} hit · {s}{d} destroyed{{/}} · {s}{d} WIA{{/}} · {s}{d} KIA{{/}}", .{
+            r.hits_taken,
+            if (r.destroyed > 0) "{c}" else "{g}", r.destroyed,
+            if (r.wounded > 0) "{a}" else "{g}", r.wounded,
+            if (r.kia > 0) "{c}" else "{g}", r.kia,
+        }));
+        if (r.lost_hulls > 0) try fight.append(alloc, try std.fmt.allocPrint(alloc, "{{c}}{d} hull(s) left to {s}{{/}}{s}", .{
+            r.lost_hulls, r.enemy_key,
+            if (r.missing > 0) try std.fmt.allocPrint(alloc, " {{c}}· {d} pilot(s) missing{{/}}", .{r.missing}) else "",
+        }));
+        // Applied to every active hand since 12C.1, reported since 12G.
+        try fight.append(alloc, try std.fmt.allocPrint(alloc, "morale {s}{s}{d}{{/}} · fatigue {{a}}+{d}{{/}}", .{
+            if (r.morale_delta < 0) "{c}" else "{g}", if (r.morale_delta > 0) "+" else "", r.morale_delta, r.fatigue_add,
+        }));
+    }
     try fight.append(alloc, try std.fmt.allocPrint(alloc, "score {s}{s}{d}{{/}} (now {d}) · comp {s}", .{
         if (r.score_delta < 0) "{c}" else "{g}", if (r.score_delta > 0) "+" else "", r.score_delta, r.score_after, try money(alloc, r.battle_loss_comp),
     }));
