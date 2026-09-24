@@ -83,6 +83,15 @@ pub const Tuning = struct {
         collar_charter_bp: types.Bp,
         dedicated_line_cost_bp: types.Bp,
         freight_per_ly: types.CBills,
+        /// Stock freight: C-bills per ton per jump on every leg (a same-world
+        /// leg bills one jump).
+        freight_per_ton_jump: types.CBills,
+        /// Each transport admin at the seat takes this off freight, up to
+        /// `transport_admin_max` of them.
+        transport_admin_discount_bp: types.Bp,
+        transport_admin_max: u8,
+        /// No shipment lands in fewer days than this, same HQ included.
+        freight_min_days: u32,
     },
     network: struct {
         upkeep_per_level: types.CBills,
@@ -748,29 +757,101 @@ pub const Tuning = struct {
 /// The live table.
 pub const t: Tuning = @import("tuning_zon");
 
-fn expectTuningSane(comptime T: type, value: T, comptime name: []const u8) !void {
+/// Tuning knobs that are negative by design (roll modifiers, score, morale
+/// and reputation deltas, a quality discount), by path under `t`: every
+/// other signed knob must be zero or more.
+const signed_knobs = [_][]const u8{
+    "autoresolve.quality_step_bp",
+    "battle.morale.defeat",
+    "battle.morale.draw",
+    "battle.morale.rout",
+    "battle.score.concede",
+    "battle.score.rout",
+    "contract.failure_reputation",
+    "contract.rep_vp_bonus_min",
+    "contract.rights.gap_delta.house",
+    "contract.rights.gap_delta.integrated",
+    "contract.rights.integrated_defeat_score",
+    "loss.mia_morale",
+    "loss.push_mod",
+    "loss.recovery_rout",
+    "loss.roe.cautious_hits_pct",
+    "loss.roe.cautious_roll",
+    "loss.roe.hold_morale",
+    "loss.roe.hold_recovery",
+    "loss.roe.withdrawal_score",
+    "market.avail_mod.d",
+    "market.avail_mod.e",
+    "market.avail_mod.f",
+    "part.fab_class_delta.light",
+    "person.morale_contract_breached",
+    "rating.record_breached",
+    "rating.record_failed",
+    "rating.record_unproven",
+};
+
+fn signedAllowed(comptime name: []const u8) bool {
+    inline for (signed_knobs) |k| if (std.mem.eql(u8, name, "t." ++ k)) return true;
+    return false;
+}
+
+fn expectTuningSane(comptime T: type, value: T, comptime name: []const u8, bad: *u32) void {
     switch (@typeInfo(T)) {
         .int => |info| {
-            // Signed knobs (deltas, scores) may be zero or negative by design.
-            if (info.signedness == .signed) return;
+            // `Bp` and `CBills` are both i64, so the field name carries the
+            // unit: a `_bp` knob is a share in 0..100_000 basis points.
+            if (std.mem.endsWith(u8, name, "_bp") and !signedAllowed(name) and (value < 0 or value > 100_000)) {
+                std.debug.print("tuning field {s} = {d} is outside 0..100000 basis points\n", .{ name, value });
+                bad.* += 1;
+            }
+            if (info.signedness == .signed) {
+                // Money, scores and deltas: never negative unless named in `signed_knobs`.
+                if (value < 0 and !signedAllowed(name)) {
+                    std.debug.print("tuning field {s} = {d} is negative and not a listed signed knob\n", .{ name, value });
+                    bad.* += 1;
+                }
+                return;
+            }
             // Slot and desk tables hold real zeros (a field HQ has no air wing).
             if (std.mem.indexOf(u8, name, ".staff_base.") != null or std.mem.indexOf(u8, name, ".capacity_") != null) return;
             if (value <= 0) {
                 std.debug.print("tuning field {s} must be positive\n", .{name});
-                return error.BadTuning;
-            }
-            if (std.mem.endsWith(u8, name, "_bp") and value > 100_000) {
-                std.debug.print("tuning field {s} is over 100000 basis points\n", .{name});
-                return error.BadTuning;
+                bad.* += 1;
             }
         },
-        .@"struct" => |info| inline for (info.fields) |f| try expectTuningSane(f.type, @field(value, f.name), name ++ "." ++ f.name),
+        .@"struct" => |info| inline for (info.fields) |f| expectTuningSane(f.type, @field(value, f.name), name ++ "." ++ f.name, bad),
         else => {},
     }
 }
 
 test "every tuning value is positive and every basis-point knob is sane" {
-    try expectTuningSane(Tuning, t, "t");
+    var bad: u32 = 0;
+    expectTuningSane(Tuning, t, "t", &bad);
+    try std.testing.expectEqual(@as(u32, 0), bad);
+}
+
+test "an out-of-range share or an unlisted negative knob fails the check" {
+    var bad: u32 = 0;
+    expectTuningSane(struct { share_bp: i64 }, .{ .share_bp = 150_000 }, "t.x", &bad);
+    try std.testing.expectEqual(@as(u32, 1), bad);
+    bad = 0;
+    expectTuningSane(struct { cost: i64 }, .{ .cost = -1 }, "t.x", &bad);
+    try std.testing.expectEqual(@as(u32, 1), bad);
+    bad = 0;
+    expectTuningSane(struct { share_bp: i64, cost: i64 }, .{ .share_bp = 2_500, .cost = 0 }, "t.x", &bad);
+    try std.testing.expectEqual(@as(u32, 0), bad);
+}
+
+fn fieldExists(comptime T: type, comptime path: []const u8) bool {
+    const dot = std.mem.indexOfScalar(u8, path, '.');
+    const head = if (dot) |d| path[0..d] else path;
+    if (!@hasField(T, head)) return false;
+    const F = @FieldType(T, head);
+    return if (dot) |d| (@typeInfo(F) == .@"struct" and fieldExists(F, path[d + 1 ..])) else true;
+}
+
+test "every listed signed knob names a real tuning field" {
+    inline for (signed_knobs) |k| try std.testing.expect(comptime fieldExists(Tuning, k));
 }
 
 test "spot checks against the values the formulas were built on" {

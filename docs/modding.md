@@ -61,6 +61,10 @@ screen (F12) and the REPL banner say which files are overlaid.
   newlines or escape codes. `zig build test -Ddata=<dir>` walks every
   string in every data file and names the first one that breaks this.
 - Money is integer C-bills; multipliers are basis points (`10_000` = ×1).
+- `zig build test` checks every tuning knob: a `_bp` share stays within
+  0..100000, an unsigned count is above zero (desk and slot tables may hold
+  zeros), and a signed knob is never negative unless `domain/tuning.zig`
+  lists it in `signed_knobs` (roll modifiers and penalties).
 - Knobs are named by subsystem in `tuning.zon`. For example, an HQ supply
   link carries `logistics.throughput_per_level` supply units a week per
   link level, each `logistics.tons_per_supply_unit` tons.
