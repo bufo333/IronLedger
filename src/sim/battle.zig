@@ -838,12 +838,7 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     };
     var player = try playerSideIn(gs, gs.allocator(), c, env);
     defer player.engaged.deinit(gs.allocator());
-    if (player.engaged.items.len == 0) {
-        c.score -= 2;
-        c.victory_points -= 10;
-        try gs.log(.battle, .{ .company = c.assigned_company, .contract = c.id }, "[AAR] {s}: no combat-effective units — objective conceded", .{c.kind.label()});
-        return;
-    }
+    if (player.engaged.items.len == 0) return concede(gs, c);
 
     const open = openingRoll(gs, c, &player, env);
     const scenario = open.scenario;
@@ -1054,6 +1049,41 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     // changes the outcome. Last, so a salvage answer's spares and armour
     // are in the stores before the techs reach for them.
     try @import("contract_events.zig").queueFieldRepair(gs, c, report.id);
+}
+
+/// An engagement with nobody to put in the line: the objective is given up
+/// without a shot. It is a defeat on the record: a report that holds the
+/// turn, a lost battle in the stats, and `tuning.battle.score.concede` on
+/// the contract, with victory points at the usual rate.
+fn concede(gs: *GameState, c: *contract_mod.Contract) !void {
+    const score_delta = tuning.battle.score.concede;
+    c.score += score_delta;
+    c.battles_fought +|= 1;
+    gs.stats.battles_lost += 1;
+    const report: after_action.BattleReport = .{
+        .id = gs.nextBattleId(),
+        .day = gs.clock.day_index,
+        .contract = c.id,
+        .company = c.assigned_company,
+        .kind = c.kind.label(),
+        .enemy_key = c.enemy_key,
+        .scenario = "",
+        .terrain = "",
+        .weather = "",
+        .outcome = .defeat,
+        .roe = effectiveRoe(gs, c, c.assigned_company),
+        .roe_overridden = c.terms.command_rights.overridesRoe(),
+        .score_after = c.score,
+        .score_delta = score_delta,
+        .battle_loss_pct = c.terms.battle_loss_pct,
+        .salvage_pct = c.terms.salvage_pct,
+        .command_rights = @tagName(c.terms.command_rights),
+        .conceded = true,
+    };
+    const ctx: @import("state.zig").LogCtx = .{ .company = c.assigned_company, .contract = c.id };
+    for (try after_action.render(gs.allocator(), &report)) |line| try gs.log(.battle, ctx, "{s}", .{line});
+    try gs.battle_reports.record(gs.allocator(), report);
+    try @import("contract_control.zig").recordBattle(gs, c, 0, score_delta);
 }
 
 /// " · field lost · recovery 6 vs 7 — LEFT TO THE ENEMY" (12D.3).
@@ -2172,4 +2202,34 @@ test "vehicle crews fight with their vehicle skills" {
     const green = try vehiclePowerForTest(6, 7);
     try std.testing.expect(elite > 0);
     try std.testing.expect(elite > green);
+}
+
+test "a conceded engagement leaves a report that holds the turn and counts as a loss" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 7301 });
+    defer gs.deinit();
+    _ = try gs.createCommander("T", .LC, .line_officer);
+    // A company with nobody in the line.
+    const co = try gs.createForce("Alpha", .company, .none);
+    try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
+        .id = @enumFromInt(1),
+        .kind = .recon_raid,
+        .employer_key = "LC",
+        .enemy_key = "PER",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 6, .base_pay_month = 400_000 },
+        .status = .active,
+        .assigned_company = co,
+    });
+    const c = gs.contracts.getPtr(@enumFromInt(1)).?;
+    try resolveEngagement(&gs, c);
+
+    const r = gs.battle_reports.unread() orelse return error.NoReport;
+    try std.testing.expect(r.conceded);
+    try std.testing.expectEqual(autoresolve.Outcome.defeat, r.outcome);
+    try std.testing.expectEqual(tuning.battle.score.concede, r.score_delta);
+    try std.testing.expectEqual(@import("checklist.zig").Hold.unread_after_action, @import("checklist.zig").turnHold(&gs).?);
+    try std.testing.expectEqual(@as(u32, 1), gs.stats.battles_lost);
+    try std.testing.expectEqual(@as(u32, 1), c.battles_fought);
+    try std.testing.expectEqual(tuning.battle.score.concede, c.score);
+    try std.testing.expectEqual(tuning.battle.score.concede * tuning.contract.vp_per_score, c.victory_points);
 }

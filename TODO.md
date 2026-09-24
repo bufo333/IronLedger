@@ -43,9 +43,8 @@ Done: every Stage 12 feature (12, 12B–12G) has shipped. Part 2 is next.
 
 ## D16. Battle and medical rule bugs (audit #7, #8, #9, #10, #11; rules 5, 6)
 
-Landing as increments; D16a–D16c are done (see Done).
+Landing as increments; D16a–D16d are done (see Done); D16e is left.
 
-- [ ] **D16d.** Conceded engagement (battle.zig:808-814) emits a minimal `BattleReport` (defeat, no hits) through the normal aftermath bookkeeping (stats, `battles_fought`); the report holds the turn like any other; the -2 score / -10 VP move into tuning.
 - [ ] **D16e (decided 2026-09-23: wire it).** A ready mobile field base (`UnitKind.mobile_field_base`, `unitOperational`) adds tech-hours to the night-after-battle repair push budget (`maintenance.repairBudget`), with its own tuning value and test. The unread `autoresolve.CampaignMods.has_field_repair` flag, set by the transport lance, is deleted.
 - Design backlog (not a defect): per-site hospital and doctor capacity (#7). ARCHITECTURE.md never specified per-site care; decide there first.
 
@@ -112,6 +111,7 @@ Contract deliverables closed before this list merged, all from the 2026-09-22 co
 - D16a support readiness, audit #10 and #7's MASH bug (PR #57): `GameState.unitOperational` (can take the field, crew fit for duty) and `forceOperational` are the one readiness test for support modifiers, recon, air cover, MASH beds, the battle line and fieldable BV; wounds get `medical.Care` (home, field with a ready MASH, field without), so the MASH multiplier needs an operational MASH truck
 - D16b field bed ties, audit #8 (PR #58): field beds are handed out in one pass over the priority-sorted patients with a beds-left count per company; ROADMAP 9C.2 corrected (decided 2026-09-23): reloads need a tech but no hours, and uncovered work waits for the next weekly pass
 - D16c vehicle skills, audit #9 (PR #59): `Role.pilotingSkill` beside `Role.primarySkill` is the one role-to-skill pair; the battle reads the hull kind's crew skills (a vehicle fights on gunnery_vee/driving_vee), and escape, recovery, `experience()` and the roster text use the same pair
+- D16d conceded engagements, audit #11 (PR #60): `battle.concede` records a conceded `BattleReport` (defeat) that holds the turn, counts a lost battle and a battle fought, and scores `tuning.battle.score.concede` through `recordBattle` (VP at the usual rate); the after-action sheet shows what was given up instead of an empty fight
 
 ---
 
