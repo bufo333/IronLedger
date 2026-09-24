@@ -167,7 +167,8 @@ pub const Status = struct {
     people: u32,
     inbox: usize,
     checklist: usize,
-    blocking: usize,
+    /// Checklist rows marked urgent (`WarningKind.urgent`).
+    urgent: usize,
 };
 
 pub fn status(alloc: Alloc, gs: *GameState) !Status {
@@ -188,9 +189,9 @@ pub fn status(alloc: Alloc, gs: *GameState) !Status {
         headcount += 1;
     };
     const warnings = try checklist.turnWarnings(gs, alloc);
-    var blocking: usize = 0;
-    for (warnings) |w| if (isBlocking(w.kind)) {
-        blocking += 1;
+    var urgent: usize = 0;
+    for (warnings) |w| if (w.kind.urgent()) {
+        urgent += 1;
     };
     return .{
         .date = try d.textAlloc(alloc),
@@ -209,7 +210,7 @@ pub fn status(alloc: Alloc, gs: *GameState) !Status {
         .people = headcount,
         .inbox = gs.event_queue.unresolvedCount(),
         .checklist = warnings.len,
-        .blocking = blocking,
+        .urgent = urgent,
     };
 }
 
@@ -230,17 +231,12 @@ pub fn turnHold(gs: *GameState) TurnHold {
     };
 }
 
-/// Warnings that should stop a turn until acknowledged (the rest are notices).
-/// `checklist.WarningKind.blocking` is the rule; kept as a name the frontends know.
-pub fn isBlocking(kind: checklist.WarningKind) bool {
-    return kind.blocking();
-}
-
 // -------------------------------------------------------------------- desk
 
 pub const ChecklistRow = struct {
     kind: checklist.WarningKind,
-    blocking: bool,
+    /// Marked red: it costs something if left (`WarningKind.urgent`).
+    urgent: bool,
     /// The end-turn prompt asks about it (`WarningKind.prompts`); the
     /// rest are Desk notes.
     prompts: bool,
@@ -459,7 +455,7 @@ pub fn desk(alloc: Alloc, gs: *GameState, log_rows: usize) !Desk {
     const warnings = try checklist.turnWarnings(gs, alloc);
     var cl: std.ArrayListUnmanaged(ChecklistRow) = .empty;
     for (warnings) |w| {
-        try cl.append(alloc, .{ .kind = w.kind, .blocking = isBlocking(w.kind), .prompts = w.kind.prompts(), .text = w.text, .jump = jumpFor(w.kind), .contract = w.contract });
+        try cl.append(alloc, .{ .kind = w.kind, .urgent = w.kind.urgent(), .prompts = w.kind.prompts(), .text = w.text, .jump = jumpFor(w.kind), .contract = w.contract });
     }
 
     var inbox: std.ArrayListUnmanaged(InboxRow) = .empty;

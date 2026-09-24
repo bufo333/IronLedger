@@ -65,9 +65,10 @@ pub const WarningKind = enum {
     /// for them and the hull sits out until they are back.
     crew_recovering,
 
-    /// Stops the turn until dealt with (ARCH §9.9): the desk decides which
-    /// warnings gate `advance_day`; the screens only colour them.
-    pub fn blocking(self: WarningKind) bool {
+    /// Costs the outfit something if it is left (ARCH §9.9): the screens
+    /// mark it red. Advisory — the turn ends anyway; only `turnHold` and
+    /// an insolvent outfit refuse an advance.
+    pub fn urgent(self: WarningKind) bool {
         return switch (self) {
             .unread_after_action, .battle_decision, .decision_due, .understaffed_hq, .overdrawn, .combat_ineffective, .dry_ammo, .hungry, .untreated_wounded, .insolvent => true,
             else => false,
@@ -397,7 +398,9 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
     while (hit.next()) |hentry| {
         const hq = hentry.value_ptr;
         const req = hq.staffRequired().total();
-        if (hq.staff_assigned < req) {
+        // Only a shortfall that costs a level is worth a warning.
+        const steps = hq.understaffingSteps();
+        if (steps > 0) {
             // Which desks are short, and who walked lately.
             var short: std.ArrayListUnmanaged(u8) = .empty;
             for (hq.staffRequired().desks()) |d| {
@@ -423,8 +426,9 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
                     last_name = try table.plain(alloc, try lp.fullName(alloc));
                 }
             }
-            try out.append(alloc, .{ .kind = .understaffed_hq, .text = try std.fmt.allocPrint(alloc, "{s} understaffed {d}/{d} (short {s}) — facilities run a level low{s} · HQ screen: S autostaff from the pool, h hire at the hall; answer notice decisions in the inbox before they expire", .{
-                try table.plain(alloc, hq.name), hq.staff_assigned, req, if (short.items.len > 0) short.items else "none by desk: posted staff hold the wrong roles",
+            try out.append(alloc, .{ .kind = .understaffed_hq, .text = try std.fmt.allocPrint(alloc, "{s} understaffed {d}/{d} (short {s}) — facilities run {d} level{s} low{s} · HQ screen: S autostaff from the pool, h hire at the hall; answer notice decisions in the inbox before they expire", .{
+                try table.plain(alloc, hq.name), hq.staff_assigned,           req, if (short.items.len > 0) short.items else "none by desk: posted staff hold the wrong roles",
+                steps,                           if (steps == 1) "" else "s",
                 if (left > 0) try std.fmt.allocPrint(alloc, " · {d} left in the last quarter (last: {s})", .{ left, last_name }) else "",
             }) });
         }
@@ -626,6 +630,31 @@ test "dry-ammo warning names only the families the company fires" {
     try std.testing.expect(named);
 }
 
+test "a staffing shortfall that costs no level raises no warning; one that does names the levels" {
+    const commands = @import("commands.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 94 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const al = arena.allocator();
+    const hq = gs.hqs.getPtr(gs.hqs.keys()[0]).?;
+    const req = hq.staffRequired().total();
+    try std.testing.expect(req >= 4);
+
+    hq.staff_assigned = req - 1; // under 25% short: no level lost
+    try std.testing.expectEqual(@as(u8, 0), hq.understaffingSteps());
+    for (try turnWarnings(&gs, al)) |w| try std.testing.expect(w.kind != .understaffed_hq);
+
+    hq.staff_assigned = req / 2; // half short: two levels
+    try std.testing.expectEqual(@as(u8, 2), hq.understaffingSteps());
+    var saw = false;
+    for (try turnWarnings(&gs, al)) |w| if (w.kind == .understaffed_hq) {
+        saw = std.mem.indexOf(u8, w.text, "run 2 levels low") != null;
+    };
+    try std.testing.expect(saw);
+}
+
 test "the understaffed warning names the short desks, and retirements are announced a quarter out" {
     const commands = @import("commands.zig");
     var gs = GameState.init(std.testing.allocator, .{ .seed = 93 });
@@ -720,7 +749,7 @@ test "an engagement inside the window warns with odds, strength, ammunition and 
         if (w.kind == .contact_imminent) found = w.text;
     }
     const text = found orelse return error.NoContactWarning;
-    try std.testing.expect(!WarningKind.contact_imminent.blocking());
+    try std.testing.expect(!WarningKind.contact_imminent.urgent());
     for ([_][]const u8{ "contact on Galatea in 2 days", "skull", "fieldable", "100% of committed", "ammo ", "ROE standard", "give battle orders" }) |want| {
         if (std.mem.indexOf(u8, text, want) == null) {
             std.debug.print("missing \"{s}\" in: {s}\n", .{ want, text });

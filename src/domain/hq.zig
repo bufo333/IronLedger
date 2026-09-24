@@ -196,12 +196,15 @@ pub const Hq = struct {
     /// full 25% staffing shortfall (ARCH §9.4). Plateaus at 0 — degraded,
     /// never a death spiral.
     pub fn effectiveFacilityLevel(self: *const Hq, kind: FacilityKind) u8 {
-        const built = self.facilityLevel(kind);
-        if (built == 0) return 0;
+        return self.facilityLevel(kind) -| self.understaffingSteps();
+    }
+
+    /// Levels every built facility loses to the staffing shortfall: one
+    /// per full 25% short, 0 when a shortfall costs nothing yet.
+    pub fn understaffingSteps(self: *const Hq) u8 {
         const required = self.staffRequired().total();
-        if (required == 0 or self.staff_assigned >= required) return built;
-        const shortfall_steps: u8 = @intCast(((required - self.staff_assigned) * tuning.hq.understaffing_steps) / required);
-        return built -| shortfall_steps;
+        if (required == 0 or self.staff_assigned >= required) return 0;
+        return @intCast(((required - self.staff_assigned) * tuning.hq.understaffing_steps) / required);
     }
 
     /// Influence ring radius in LY (ARCH §9.2): reputation travels by HPG

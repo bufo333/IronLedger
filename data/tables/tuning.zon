@@ -465,7 +465,6 @@
         .gunnery_above_bp = 1_500,
         .piloting_bp = 500,
         .quality_step_bp = -500,
-        .no_ammo_bp = 2_500,
         .no_parts_bp = 1_500,
         .no_provisions_bp = 1_000,
         .fatigue_scale_bp = 2_000,

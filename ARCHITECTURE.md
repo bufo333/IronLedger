@@ -693,9 +693,12 @@ recovery.
 **The end-turn checklist.** Ending a turn first runs `turnWarnings`:
 decisions near deadline, open pilot/tech slots, understaffed HQs, hungry or
 dry companies, overdrawn treasuries, idle bays with demand, untriaged
-wounded. The CLI refuses to advance until acknowledged; the TUI renders the
-same list as a modal. Nothing the player should have known slips past a
-turn boundary unannounced. A warning the player can do nothing about this
+wounded. Every advance, a day or a week, asks first: the REPL prints the
+list and waits for `day n force`, the TUI opens it as a modal. The asking
+is advisory — urgent warnings (`WarningKind.urgent`) are marked red, and
+the turn ends anyway once the player says so; only the turn holds
+(`checklist.turnHold`) and an insolvent outfit refuse. Nothing the player
+should have known slips past a turn boundary unannounced. A warning the player can do nothing about this
 turn stays on the Desk and does not stop the turn (`WarningKind.prompts`):
 a hull whose pilot or tech is wounded or on leave keeps the seat for them
 (`Person.seatState`) and sits out until they are back, marked on the TO&E

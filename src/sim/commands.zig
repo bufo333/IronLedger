@@ -3131,7 +3131,7 @@ test "an unread after-action holds the turn, and a week stops on the day it land
     var saw = false;
     for (warnings) |w| if (w.kind == .unread_after_action) {
         saw = true;
-        try std.testing.expect(w.kind.blocking());
+        try std.testing.expect(w.kind.urgent());
     };
     try std.testing.expect(saw);
 
@@ -3193,7 +3193,7 @@ test "a field held asks for the tempo, and the turn waits for the answer" {
     var saw = false;
     for (warnings) |w| if (w.kind == .battle_decision) {
         saw = true;
-        try std.testing.expect(w.kind.blocking());
+        try std.testing.expect(w.kind.urgent());
     };
     try std.testing.expect(saw);
     const hold = @import("queries.zig").turnHold(&gs);

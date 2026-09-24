@@ -434,7 +434,7 @@ fn printChecklist(gs: *game.state.GameState, al: std.mem.Allocator) usize {
         if (w.prompts) asks += 1;
     }
     if (asks == 0) std.debug.print("END-TURN CHECKLIST: all clear.\n", .{}) else std.debug.print("END-TURN CHECKLIST ({d}):\n", .{asks});
-    for (d.checklist) |w| std.debug.print("  {s} {s}\n", .{ if (w.blocking) "!" else if (w.prompts) "·" else " ", q.stripMarks(al, w.text) catch w.text });
+    for (d.checklist) |w| std.debug.print("  {s} {s}\n", .{ if (w.urgent) "!" else if (w.prompts) "·" else " ", q.stripMarks(al, w.text) catch w.text });
     return asks;
 }
 
@@ -464,8 +464,8 @@ fn printTreasuries(gs: *game.state.GameState, al: std.mem.Allocator) !void {
 
 fn printStatus(gs: *game.state.GameState, al: std.mem.Allocator) !void {
     const st = try q.status(al, gs);
-    std.debug.print("{s} (day {d}) | funds {s} | rep {d} | people {d} | hulls {d} | inbox {d} | checklist {d} ({d} blocking)\n", .{
-        st.date, st.day, st.funds, st.reputation, st.people, st.hulls, st.inbox, st.checklist, st.blocking,
+    std.debug.print("{s} (day {d}) | funds {s} | rep {d} | people {d} | hulls {d} | inbox {d} | checklist {d} ({d} urgent)\n", .{
+        st.date, st.day, st.funds, st.reputation, st.people, st.hulls, st.inbox, st.checklist, st.urgent,
     });
 }
 
@@ -706,15 +706,14 @@ fn runRepl(session: *game.lobby.Session, io: std.Io, gpa: std.mem.Allocator, sto
             }
             printLines(al, try q.pnlLines(al, gs, from, st.day, filter), "") catch |err| showError(err);
         } else if (std.mem.eql(u8, verb, "day")) {
-            // day [n] [force] — the end-turn checklist gates the advance:
-            // fix it, or `day force` to proceed regardless.
-            var n: u32 = 1;
-            var force = false;
-            while (tokens.next()) |t| {
-                if (std.mem.eql(u8, t, "force") or std.mem.eql(u8, t, "!")) {
-                    force = true;
-                } else n = std.fmt.parseInt(u32, t, 10) catch n;
-            }
+            // day [n] [force] — the end-turn checklist asks first: fix
+            // it, or `day n force` to proceed regardless.
+            const d = game.cli.parseDay(&tokens) catch |err| {
+                std.debug.print("{s} — usage: {s}\n", .{ game.cli.errorText(err), game.cli.usage("day").? });
+                continue;
+            };
+            const n = d.days;
+            const force = d.force;
             if (!force and printChecklist(gs, al) > 0) {
                 std.debug.print("turn not ended — address the checklist or `day {d} force`\n", .{n});
                 continue;

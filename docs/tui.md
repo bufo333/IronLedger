@@ -64,7 +64,7 @@ One persistent frame, three fixed rows plus the screen body:
 
 ```
 tab bar        F1 Desk  F2 Map  F3 Forces  F4 Contracts  F5 Ledger  F6 Supply  F7 HQ  F8 Lab   <outfit>  ▒▒ emblem
-status strip   <date> day N · outfit <funds> · rep · inbox N · checklist N · turn ready: YES/NO          ▒▒ (8×3)
+status strip   <date> day N · outfit <funds> · rep · inbox N · checklist N · urgent N                   ▒▒ (8×3)
 screen body    2–4 panes; the focused pane has the bright border
 command line   `:` prompt (opens on `:`), hints on the right
 ```
@@ -106,7 +106,9 @@ with tab completion over verbs and entity ids here. Frontend-only verbs
 `briefing <contract id>` prints what the battle-orders box shows. Results
 land in the Desk log pane.
 
-Parsing is strict. Every word must be used: anything left over after a
+Parsing is strict, for the client's own verbs too (`day`, `save`,
+`manning`, …: `cli.parseClientVerb`; `:day junk` moves no time). Every
+word must be used: anything left over after a
 complete command is refused, and a verb that takes a name (`raise`,
 `rename`, …) takes the rest of the line as that name. A choice word
 outside its list (`xfer`, `office`, `promote`, `cycledifficulty`) is
@@ -158,7 +160,7 @@ titles and the help modal come from the same tables.
 | `← →` | scroll a wide table's columns (◀ 2 · 3 ▶ = hidden); pan the star map |
 | `:` | the command line: every CLI verb works (day, transfer, order, accept, …) |
 | `n` | end the turn (the checklist opens first) |
-| `N` | end 7 turns |
+| `N` | end 7 turns (the checklist opens first) |
 | `M` | music on/off |
 | `?` | help |
 | `q` | back to the welcome screen (save / discard / stay) |
@@ -521,8 +523,10 @@ titles and the help modal come from the same tables.
 
 Money keys: Ledger `L` → `take_loan`, `R` → `repay_loan`; Forces `$` →
 `sell_unit`, `X` → `disband_company`; HQ `$` → `sell_hq`. Turn rules the
-client surfaces: untreated wounded and a negative outfit treasury are
-blocking checklist items; an **unread after-action** refuses with
+client surfaces: urgent checklist items (untreated wounded, hungry or dry
+companies, overdrawn treasuries, understaffed HQs, a contract running
+combat-ineffective, decisions near deadline) are marked red but advisory —
+the turn ends anyway; an **unread after-action** refuses with
 `ReportUnread` and a multi-day advance stops on the day the battle lands,
 dropping the player into its sheet; it also stops once on the day an
 engagement's contact window opens, dropping the player into its battle
@@ -530,9 +534,11 @@ orders, and the next advance goes ahead; `advance` refuses with
 `Insolvent` until a loan or sale covers it, and `Bankrupt` (game over
 modal, campaign saved as it ended) once nothing could.
 
-Modals: **End turn** (the checklist rows that prompt, with jump targets,
-`n` proceed; it opens only when one does — Desk notes such as a hull
-waiting on a pilot in the medbay stay on the Desk) ·
+Modals: **End turn** (the checklist rows that prompt, with jump targets;
+`n` ends the advance asked for — a day, a week from `N`, or `:day n` —
+and `N` a week; it opens for every advance while a row prompts, and
+`:day n force` skips it; Desk notes such as a hull waiting on a pilot in
+the medbay stay on the Desk) ·
 **Decision** (options with effects, default marked) ·
 **Battle orders** (the situation and odds; ←/→ step the ROE and each
 lance's role with the odds recomputed, Enter buys the emergency resupply,

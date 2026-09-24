@@ -197,9 +197,8 @@ pub const AmountForm = struct {
 /// Size tiers (docs/tui.md): the largest that fits decides how many panes
 /// a screen shows. Narrow (< 120 cols) drops side panes; short (< 30
 /// rows) drops the third band.
-/// Frontend-only verbs; the command verbs come from `game.cli.verbs`.
-const tui_verbs = [_][]const u8{ "day", "save", "quit", "help", "settings", "emblem", "manning", "readiness", "summary", "music" };
-const verbs = tui_verbs ++ game.cli.verbs;
+/// Completion's verbs: the client's own, then every command verb.
+const verbs = game.cli.client_verbs.* ++ game.cli.verbs;
 
 pub const Emblem = struct { name: []const u8, art: [3][]const u8 };
 pub const emblems = [_]Emblem{
@@ -338,6 +337,8 @@ pub const App = struct {
     forces_pane: enum { damage, readiness, manning } = .damage,
     /// The raise-a-company wizard's state.
     raise: RaiseState = .{},
+    /// Days the open end-turn prompt ends on `n` (`N`, `:day 7`: a week).
+    end_turn_days: u32 = 1,
     /// Star map zoom: 1 = every world fitted into the pane; 2/4/8 = that
     /// many times closer, centred on the cursor world.
     map_zoom: u8 = 1,
@@ -923,20 +924,21 @@ pub const App = struct {
         }
         _ = s.text(@as(i32, s.cols) - @as(i32, @intCast(right.len)) - 1 - mark_w, 0, @intCast(right.len), right, .dim);
         if (self.narrow()) {
-            const short = try std.fmt.allocPrint(al, "{{a}}{s}{{/}} d{d} · {{a}}{s}{{/}} C · rep {d} · inbox {s}{d}{{/}} · chk {s}{d}{{/}} · ready {s}", .{
-                st.date, st.day, st.funds, st.reputation, if (st.inbox > 0) "{c}" else "{g}", st.inbox, if (st.blocking > 0) "{c}" else "{g}", st.checklist, if (st.blocking > 0) "{c}NO{/}" else "{g}YES{/}",
+            const short = try std.fmt.allocPrint(al, "{{a}}{s}{{/}} d{d} · {{a}}{s}{{/}} C · rep {d} · inbox {s}{d}{{/}} · chk {s}{d}{{/}} · urgent {s}{d}{{/}}", .{
+                st.date, st.day, st.funds, st.reputation, if (st.inbox > 0) "{c}" else "{g}", st.inbox, if (st.urgent > 0) "{c}" else if (st.checklist > 0) "{a}" else "{g}", st.checklist, if (st.urgent > 0) "{c}" else "{g}", st.urgent,
             });
             s.textPad(0, 1, s.cols, short, .normal);
             return;
         }
-        const line = try std.fmt.allocPrint(al, "{{a}}{s}{{/}}  day {d}  ·  outfit {{a}}{s}{{/}} C  ·  rep {s}{d}{{/}}  ·  {d} companies · {d} HQs · {d} hulls · {d} people  ·  inbox {s}{d}{{/}}  ·  checklist {s}{d}{{/}}  ·  turn ready: {s}", .{
+        const line = try std.fmt.allocPrint(al, "{{a}}{s}{{/}}  day {d}  ·  outfit {{a}}{s}{{/}} C  ·  rep {s}{d}{{/}}  ·  {d} companies · {d} HQs · {d} hulls · {d} people  ·  inbox {s}{d}{{/}}  ·  checklist {s}{d}{{/}}  ·  urgent {s}{d}{{/}}", .{
             st.date,       st.day,
             st.funds,      if (st.reputation < 0) "{c}" else "{g}",
             st.reputation, st.companies,
             st.hqs,        st.hulls,
             st.people,     if (st.inbox > 0) "{c}" else "{g}",
-            st.inbox,      if (st.blocking > 0) "{c}" else if (st.checklist > 0) "{a}" else "{g}",
-            st.checklist,  if (st.blocking > 0) "{c}NO{/}" else "{g}YES{/}",
+            st.inbox,      if (st.urgent > 0) "{c}" else if (st.checklist > 0) "{a}" else "{g}",
+            st.checklist,  if (st.urgent > 0) "{c}" else "{g}",
+            st.urgent,
         });
         const np = try self.nowPlayingLine();
         s.textPad(0, 1, s.cols, if (np.len > 0 and layout.extraWide(s.cols)) try std.fmt.allocPrint(al, "{s}  ·  {{d}}{s}{{/}}", .{ line, np }) else line, .normal);
@@ -1278,11 +1280,11 @@ pub const App = struct {
                 try rows.append(al, try std.fmt.allocPrint(al, "  {d} things on your desk before day {d}:", .{ asks.len, (try q.status(al, g)).day + 1 }));
                 try rows.append(al, "");
                 for (asks, 0..) |w, i| {
-                    try rows.append(al, try std.fmt.allocPrint(al, "  {s} {s}   {{d}}→ [{d}] {s}{{/}}", .{ if (w.blocking) "{c}!{/}" else "{a}·{/}", w.text, i + 1, tab_names[w.jump] }));
+                    try rows.append(al, try std.fmt.allocPrint(al, "  {s} {s}   {{d}}→ [{d}] {s}{{/}}", .{ if (w.urgent) "{c}!{/}" else "{a}·{/}", w.text, i + 1, tab_names[w.jump] }));
                 }
                 try rows.append(al, "");
                 try rows.append(al, try std.fmt.allocPrint(al, "  {{s}} {s} {{/}}    {{d}}{s} · {s}{{/}}", .{ try keyHint(EndTurnAction, al, &end_turn_bindings, .day, "end the turn anyway"), try keyHint(EndTurnAction, al, &end_turn_bindings, .week, "end 7 turns"), try keyHint(EndTurnAction, al, &end_turn_bindings, .cancel, "back") }));
-                self.dialog(try std.fmt.allocPrint(al, "END TURN? · {s} · {s} · {s}", .{ try keyHint(EndTurnAction, al, &end_turn_bindings, .day, "a day"), try keyHint(EndTurnAction, al, &end_turn_bindings, .week, "a week"), try keyHint(EndTurnAction, al, &end_turn_bindings, .cancel, "not yet") }), rows.items, layout.modal.end_turn_w, @intCast(@min(rows.items.len + 3, layout.modal.end_turn_max_h)));
+                self.dialog(try std.fmt.allocPrint(al, "END TURN? · {s} · {s} · {s}", .{ try keyHint(EndTurnAction, al, &end_turn_bindings, .day, if (self.end_turn_days == 1) "a day" else try std.fmt.allocPrint(al, "{d} days", .{self.end_turn_days})), try keyHint(EndTurnAction, al, &end_turn_bindings, .week, "a week"), try keyHint(EndTurnAction, al, &end_turn_bindings, .cancel, "not yet") }), rows.items, layout.modal.end_turn_w, @intCast(@min(rows.items.len + 3, layout.modal.end_turn_max_h)));
             },
             .quit => {
                 const g = self.state();
@@ -1842,7 +1844,7 @@ pub const App = struct {
         .{ .match = .{ .key = .escape }, .action = .clear_message, .label = "clear the status line", .group = .misc, .show_footer = false, .show_help = false },
         .{ .match = keys.Match.char(':'), .action = .command, .label = "command", .group = .misc, .help = "the command line: every CLI verb works (day, transfer, order, accept, …)" },
         .{ .match = keys.Match.char('n'), .action = .end_turn, .label = "end turn", .group = .misc, .help = "end the turn (the checklist opens first)" },
-        .{ .match = keys.Match.char('N'), .action = .end_week, .label = "end 7 turns", .group = .misc, .show_footer = false },
+        .{ .match = keys.Match.char('N'), .action = .end_week, .label = "end 7 turns", .group = .misc, .show_footer = false, .help = "end 7 turns (the checklist opens first)" },
         .{ .match = keys.Match.char('M'), .action = .music, .label = "music on/off", .group = .misc, .show_footer = false },
         .{ .match = keys.Match.char('?'), .action = .help, .label = "help", .group = .misc },
         .{ .match = keys.Match.char('q'), .action = .quit, .label = "welcome", .group = .misc, .help = "back to the welcome screen (save / discard / stay)" },
@@ -2444,7 +2446,9 @@ pub const App = struct {
         const al = self.a();
         const g = self.state();
         const view = try q.desk(al, g, 0);
-        if ((try endTurnRows(al, view.checklist)).len > 0 and days == 1) {
+        // Every length of advance asks while a warning prompts.
+        if ((try endTurnRows(al, view.checklist)).len > 0) {
+            self.end_turn_days = days;
             self.modal = .end_turn;
             return;
         }
@@ -3599,7 +3603,7 @@ pub const App = struct {
                     .cancel => self.modal = .none,
                     .day => {
                         self.modal = .none;
-                        try self.advance(1);
+                        try self.advance(self.end_turn_days);
                     },
                     .week => {
                         self.modal = .none;
@@ -3786,54 +3790,37 @@ pub const App = struct {
         var tokens = std.mem.tokenizeScalar(u8, line, ' ');
         const verb = tokens.next() orelse return;
         const g = self.state();
-        const eq = std.mem.eql;
 
-        if (eq(u8, verb, "day")) {
-            const n = std.fmt.parseInt(u32, tokens.next() orelse "1", 10) catch 1;
-            return self.advance(n);
-        }
-        if (eq(u8, verb, "save")) {
-            self.store.save(&self.session.?, self.player_id) catch |err| {
-                self.say(.crit, "save failed: {s}", .{game.cli.errorText(err)});
-                return;
-            };
-            self.say(.good, "saved at day {d}", .{(try q.status(self.a(), g)).day});
+        const client = game.cli.parseClientVerb(verb, &tokens) catch |err| {
+            self.say(.amber, "{s} — usage: {s}", .{ game.cli.errorText(err), game.cli.usage(verb) orelse verb });
             return;
-        }
-        if (eq(u8, verb, "quit")) {
-            self.modal = .quit;
-            return;
-        }
-        if (eq(u8, verb, "help")) {
-            self.modal = .help;
-            return;
-        }
-        if (eq(u8, verb, "settings")) {
-            self.modal = .settings;
-            return;
-        }
-        if (eq(u8, verb, "summary")) {
-            self.modal = .summary;
-            return;
-        }
-        if (eq(u8, verb, "music")) {
-            self.openModal(.music);
-            return;
-        }
-        if (eq(u8, verb, "readiness")) {
-            self.modal = .readiness;
-            return;
-        }
-        if (eq(u8, verb, "manning")) {
-            const site = game.cli.parseSite(try game.cli.need(tokens.next())) catch return error.BadSite;
-            if (site != .company) return error.BadSite;
-            self.raise.company = site.company;
-            self.modal = .raise_crews;
-            return;
-        }
-        if (eq(u8, verb, "emblem")) {
-            try self.loadLogoList();
-            self.openModal(.emblem);
+        };
+        if (client) |cv| {
+            switch (cv) {
+                // The checklist asks first, as for `n`, unless forced.
+                .day => |d| if (d.force) try self.advance(d.days) else try self.endTurnRequest(d.days),
+                .save => {
+                    self.store.save(&self.session.?, self.player_id) catch |err| {
+                        self.say(.crit, "save failed: {s}", .{game.cli.errorText(err)});
+                        return;
+                    };
+                    self.say(.good, "saved at day {d}", .{(try q.status(self.a(), g)).day});
+                },
+                .quit => self.modal = .quit,
+                .help => self.modal = .help,
+                .settings => self.modal = .settings,
+                .summary => self.modal = .summary,
+                .music => self.openModal(.music),
+                .readiness => self.modal = .readiness,
+                .manning => |co| {
+                    self.raise.company = co;
+                    self.modal = .raise_crews;
+                },
+                .emblem => {
+                    try self.loadLogoList();
+                    self.openModal(.emblem);
+                },
+            }
             return;
         }
         const cmd = game.cli.parseCommand(verb, &tokens) catch |err| {
@@ -3977,10 +3964,32 @@ test "the end-turn key moves the calendar, and Esc closes whatever modal it open
     try std.testing.expect(c.app.modal == .none);
 }
 
+test "a malformed :day moves no time; N asks first like n, and n there ends the week" {
+    const c = try clientForTest(std.testing.allocator);
+    defer deinitForTest(c, std.testing.allocator);
+    const al = c.app.a();
+    const day0 = (try q.status(al, c.app.state())).day;
+    for ([_][]const u8{ "day junk", "day -1", "day 1 extra", "day 0", "save now" }) |line| {
+        try c.app.runCommandLine(line);
+        try std.testing.expectEqual(day0, (try q.status(al, c.app.state())).day);
+    }
+    // An empty seat is a warning the prompt asks about.
+    for (try q.toe(al, c.app.state())) |r| if (r.unit != .none) {
+        try c.app.runCommandLine(try std.fmt.allocPrint(al, "unassign {d} pilot", .{@intFromEnum(r.unit)}));
+        break;
+    };
+    c.app.modal = .none;
+    try pressForTest(c, .{ .char = 'N' });
+    try std.testing.expect(c.app.modal == .end_turn);
+    try std.testing.expectEqual(day0, (try q.status(al, c.app.state())).day);
+    try pressForTest(c, .{ .char = 'n' });
+    try std.testing.expect((try q.status(al, c.app.state())).day > day0);
+}
+
 test "the end-turn prompt asks only about warnings that prompt; Desk notes stay out" {
     const rows = [_]q.ChecklistRow{
-        .{ .kind = .crew_recovering, .blocking = false, .prompts = false, .text = "heals", .jump = 2 },
-        .{ .kind = .open_slots, .blocking = false, .prompts = true, .text = "empty seat", .jump = 2 },
+        .{ .kind = .crew_recovering, .urgent = false, .prompts = false, .text = "heals", .jump = 2 },
+        .{ .kind = .open_slots, .urgent = false, .prompts = true, .text = "empty seat", .jump = 2 },
     };
     const asks = try App.endTurnRows(std.testing.allocator, &rows);
     defer std.testing.allocator.free(asks);

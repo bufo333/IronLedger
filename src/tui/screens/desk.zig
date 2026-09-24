@@ -40,7 +40,7 @@ pub fn draw(self: *App) anyerror!void {
     }
     var cl: std.ArrayListUnmanaged([]const u8) = .empty;
     for (view.checklist) |w| {
-        try cl.append(al, try std.fmt.allocPrint(al, "{s} {s}   {{d}}→ {s}{{/}}", .{ if (w.blocking) "{c}!{/}" else "{a}·{/}", w.text, tab_names[w.jump] }));
+        try cl.append(al, try std.fmt.allocPrint(al, "{s} {s}   {{d}}→ {s}{{/}}", .{ if (w.urgent) "{c}!{/}" else "{a}·{/}", w.text, tab_names[w.jump] }));
     }
     if (view.checklist.len == 0) try cl.append(al, "{g}all clear{/} — nothing blocks the turn");
     // The Dragoons rating rides in the title so the cursor still maps onto the warnings.
