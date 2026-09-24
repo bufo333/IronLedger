@@ -66,6 +66,9 @@ re-implemented in Zig. Paths below are under `MekHQ/src/mekhq/campaign/`.
 | End-turn checklist (no MekHQ analog; MekHQ's day-advance warnings are partial) | Stage 9C.2: `turnWarnings` query + `day force` | 9C.2 |
 | Persistent, condition-priced hull listings; staple vs. rare-slot parts; daily hiring churn (MekHQ UnitMarket/PersonnelMarket regenerate wholesale) | Stage 9C.3: `market_listing` condition columns, `staple` | 9C.3 |
 | MegaMekLab construction rules: per-location crits, tonnage, heat sinks, location rules; engines/gyros/actuators as parts | Stage 10: chassis + parts data growth, loadout validator | 10 |
+| Per-company field plan for deployed trucks (no MekHQ analog; AtB resupply drops are the nearest) | Stage 12: `src/sim/field_supply.zig` — floors/targets per line from consumption, transit and truck shares | 12 |
+| Golden-master state digest (MekHQ has no determinism harness) | `src/sim/digest.zig`: a canonical digest of any plain value, maps order-independent; `GameState.hash` feeds every persisted field through it | 12 |
+| Key-binding tables (MekHQ's Swing menus carry their own accelerators) | `src/tui/keys.zig`: one table per screen maps keys to actions and holds every word shown about them; footer, help and the `docs/tui.md` key reference are generated from it | 12 |
 
 ## Useful MekHQ rule references while implementing
 
@@ -75,4 +78,3 @@ re-implemented in Zig. Paths below are under `MekHQ/src/mekhq/campaign/`.
   costs, contract payment multipliers, reputation, refit classes, maintenance
   target numbers. Our tables in `data/tables/` cite chapter names.
 - BattleTech TechManual — part/equipment catalog structure, tech ratings.
-| Per-company field plan for deployed trucks (no MekHQ analog; AtB resupply drops are the nearest) | Stage 12: `src/sim/field_supply.zig` — floors/targets per line from consumption, transit and truck shares | 12 |

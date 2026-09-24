@@ -24,8 +24,8 @@ features first, then code quality (contract and audit deliverables).
   terminal client (Stage 12); `docs/tui_smoke.py zig-out/bin/game /tmp/x.db`
   drives it through a pty; `docs/repl_smoke.sh zig-out/bin/game /tmp/r.db`
   scripts the REPL
-- `docs/reviewer_checks.sh` — the coding contract's mechanical reviewer
-  checks; prints `REVIEWER CHECKS OK` or the violations (CI runs it)
+- `docs/verify-contract.sh` — the coding contract's mechanical checks;
+  prints `CONTRACT CHECKS OK` or the violations (CI runs it)
 
 ## Git workflow
 

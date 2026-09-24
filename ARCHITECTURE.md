@@ -165,6 +165,14 @@ section explains the shape, the contract states the rules.
   command payload or an exact comparison, with a `// raw:` reason.
   Data-file strings and a save's display copies must be
   `table.markupSafe`.
+- **Keys are data.** The TUI maps keys to semantic actions through binding
+  tables (`tui/keys.zig`): one for the keys every screen shares and one per
+  screen, modal, welcome step and wizard step. A binding carries its
+  footer group and every word shown about it, and a handler switches on
+  actions, so a key cannot work without being listed or be listed without
+  working. The footer, pane titles, help modal and the key reference in
+  `docs/tui.md` are generated from the tables (`game --keys-markdown`; a
+  test compares the doc block).
 
 ## 5. Domain model (core entities)
 
@@ -796,15 +804,20 @@ bulk-copy MegaMek data files into the repo without deciding on licensing.
   checked at compile time both ways, and the digest hashes the persisted and
   derived ones. A played year is pinned to one constant. The
   determinism pillar makes regression testing nearly free.
+- The gate: `zig build test --summary all`, `zig fmt --check`, and
+  `docs/verify-contract.sh`, which runs the contract's mechanical checks
+  (layering, frontend boundary, core purity, broad catches, module
+  headers) and prints `CONTRACT CHECKS OK` or each violation; CI runs all
+  three.
 - Style and every other coding rule: [`docs/coding-contract.md`](docs/coding-contract.md).
 
 ## 14. Directory layout
 
 ```
 build.zig, build.zig.zon
-ARCHITECTURE.md, ROADMAP.md
 ARCHITECTURE.md, GAMEPLAY.md, ROADMAP.md, TODO.md
-docs/            schema.sql, coding-contract.md, tui.md, modding.md, smoke scripts
+docs/            schema.sql, coding-contract.md, tui.md, modding.md,
+                 verify-contract.sh, smoke scripts
 data/            static game data (.zon): chassis, parts, planets, factions,
                  tuning; data/tables/ for rule tables
 src/
@@ -815,11 +828,12 @@ src/
   sim/           state tick commands battle autoresolve medical maintenance
                  field_supply network rng contract_market
                  starter_company …; queries.zig (read-only views),
-                 cli.zig (verbs), table.zig (markup)
+                 cli.zig (verbs), table.zig (markup), digest.zig (hash)
   econ/          finance logistics market
   gen/           company_gen person_gen
   persist/       sqlite.zig (C wrapper), store.zig (campaign saves), lobby.zig
-  tui/           terminal client: app.zig, screens/, term, screen, emblem, music
+  tui/           terminal client: app.zig, screens/, keys (bindings), term,
+                 screen, emblem, music
 ```
 
 ## 15. Open questions (decide during the relevant stage)

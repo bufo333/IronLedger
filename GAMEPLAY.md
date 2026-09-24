@@ -75,6 +75,12 @@ there or raise it to regional. **Want a second company at full service? You
 need a second regional HQ** — with the staff, upkeep, and supply line that
 implies. Growth is infrastructure-first, always.
 
+A new company is raised empty: you name it, then take every hull from the
+pool, cold storage and the boards, buy its support train and crew it. The
+slot check is the order's, not the screen's — name a company where no HQ
+has a free combat-company slot and the order is refused after the name,
+with the reason.
+
 ## Upgrades: C-bills are the cheap part
 
 Every facility (mek bay, logistics warehouse, hospital, mess, training ground,
@@ -185,6 +191,12 @@ you own reports to you (Stages 9A–9C):
   recall that breaches the contract. The odds recompute as you change
   them. Confirming the orders clears the warning; skipping them leaves the
   current settings standing, and the next advance goes ahead either way.
+- **Orders are exact**: the command line (and the console) takes every
+  word you type or refuses the order with its usage — a stray word is
+  never quietly dropped, a choice outside its list is never read as the
+  default. Bare `autoadmit` flips the medbay's standing order to admit the
+  wounded itself. A refused order says why in one sentence
+  (`refused: …`), in the same words on every screen and in the console.
 
 ## Your outfit, your hangar
 
