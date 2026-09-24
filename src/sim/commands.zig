@@ -440,7 +440,8 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             return .{ .hired = id };
         },
         .recruit => |role| {
-            const id = try gs.recruitGenerated(role);
+            // The verb names no HQ: a recruit signs on at the outfit's seat.
+            const id = try gs.recruitGenerated(role, gs.homeHqFor(.none));
             return .{ .hired = id };
         },
         .fire => |id| {
@@ -621,7 +622,7 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
         .set_office_staff => |o| {
             if (gs.hqs.getPtr(o.hq) == null) return Error.UnknownHq;
             if (o.delta > 0) {
-                const id = try gs.recruitGenerated(o.role);
+                const id = try gs.recruitGenerated(o.role, o.hq);
                 gs.postToHq(id, o.hq) catch return Error.UnknownHq;
                 return .{ .hired = id };
             }
@@ -1076,7 +1077,7 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
                     if (personnel.isPooledRole(n.role)) {
                         // MekHQ hires astechs and medics to complement on
                         // demand: no market, no signing bonus, salary only.
-                        const spec = person_gen.generateWithBonus(&gs.rng, n.role, gs.recruitBonus());
+                        const spec = person_gen.generateWithBonus(&gs.rng, n.role, gs.recruitBonus(gs.homeHqFor(company)));
                         const id = try gs.hireFromSpec(spec);
                         gs.person(id).?.assigned_force = company;
                         hired += 1;
@@ -3264,7 +3265,7 @@ test "9C: construction is paid by the HQ and the back office sets the pace" {
     const unstaffed = hq_ops.paperworkDaysFor(&gs, hq_id);
     try std.testing.expect(unstaffed > staffed);
     for (0..2) |_| {
-        const id = try gs.recruitGenerated(.admin_command);
+        const id = try gs.recruitGenerated(.admin_command, gs.homeHqFor(.none));
         _ = try execute(&gs, .{ .post_person = .{ .person = id, .hq = hq_id } });
     }
     try std.testing.expect(hq_ops.paperworkDaysFor(&gs, hq_id) < unstaffed);

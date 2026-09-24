@@ -626,7 +626,7 @@ pub const skullText = offer_rating.skullText;
 
 pub fn opforText(alloc: Alloc, gs: *GameState, c: *const contract_mod.Contract) ![]const u8 {
     if (!c.hasOpfor()) return "opposition sized to the company";
-    const intel = intelLevel(gs);
+    const intel = intelLevel(gs, @import("offer_rating.zig").intelHq(gs, c));
     const li = lanceIntel(gs, c);
     if (intel >= 3) return try std.fmt.allocPrint(alloc, "{d} lance{s} of {s} {s} ≈{s} BV a fight", .{ c.enemy_lances, if (c.enemy_lances == 1) "" else "s", @tagName(c.enemy_quality), c.enemy_key, try money(alloc, types.applyBp(c.opforBv(), gs.diff().enemy_bp)) });
     if (intel >= 1) return try std.fmt.allocPrint(alloc, "{d}–{d} lances of {s} {s}", .{ li.lo, li.hi, @tagName(c.enemy_quality), c.enemy_key });
@@ -710,7 +710,7 @@ fn boardRatingCells(alloc: Alloc, gs: *GameState, offer_index: usize) ![6][]cons
 /// says it in full).
 pub fn opforShort(alloc: Alloc, gs: *GameState, c: *const contract_mod.Contract) ![]const u8 {
     if (!c.hasOpfor()) return "sized to the company";
-    const intel = intelLevel(gs);
+    const intel = intelLevel(gs, @import("offer_rating.zig").intelHq(gs, c));
     const li = lanceIntel(gs, c);
     if (intel >= 3) return try std.fmt.allocPrint(alloc, "{d} lance{s}, {s}, ≈{s} BV/fight", .{ c.enemy_lances, if (c.enemy_lances == 1) "" else "s", @tagName(c.enemy_quality), try moneyShort(alloc, types.applyBp(c.opforBv(), gs.diff().enemy_bp)) });
     if (intel >= 1) return try std.fmt.allocPrint(alloc, "{d}–{d} lances, {s}", .{ li.lo, li.hi, @tagName(c.enemy_quality) });

@@ -460,8 +460,8 @@ pub const GameState = struct {
     /// Recruit a randomly generated person (AtB-style: experience on 2d6,
     /// skills from the band, names from the tables). Stage 4+: candidates
     /// come through the personnel market with signing bonuses instead.
-    pub fn recruitGenerated(self: *GameState, role: person_mod.Role) !types.PersonId {
-        const spec = person_gen.generateWithBonus(&self.rng, role, self.recruitBonus());
+    pub fn recruitGenerated(self: *GameState, role: person_mod.Role, hq_id: types.HqId) !types.PersonId {
+        const spec = person_gen.generateWithBonus(&self.rng, role, self.recruitBonus(hq_id));
         return self.hireFromSpec(spec);
     }
 
@@ -559,7 +559,7 @@ pub const GameState = struct {
         };
         for (staff_plan) |entry| {
             for (0..entry[1]) |_| {
-                const pid = try self.recruitGenerated(entry[0]);
+                const pid = try self.recruitGenerated(entry[0], id);
                 self.person(pid).?.posted_hq = id;
             }
         }
@@ -632,7 +632,7 @@ pub const GameState = struct {
             const have = self.hqStaff(hq_id, entry[0]).count;
             var n: u32 = entry[1] -| have;
             while (n > 0) : (n -= 1) {
-                const pid = try self.recruitGenerated(entry[0]);
+                const pid = try self.recruitGenerated(entry[0], hq_id);
                 self.person(pid).?.posted_hq = hq_id;
                 hired += 1;
             }
@@ -641,11 +641,10 @@ pub const GameState = struct {
         return hired;
     }
 
-    /// Recruit-quality bonus on the 2d6 experience roll: the hiring hall and
-    /// a staffed HR office find better people.
-    pub fn recruitBonus(self: *GameState) i32 {
-        if (self.hqs.count() == 0) return 0;
-        const hq = &self.hqs.values()[0];
+    /// Recruit-quality bonus on the 2d6 experience roll at one HQ: its
+    /// hiring hall and a staffed HR office find better people.
+    pub fn recruitBonus(self: *GameState, hq_id: types.HqId) i32 {
+        const hq = self.hqs.getPtr(hq_id) orelse return 0;
         var bonus: i32 = hq.effectiveFacilityLevel(.hiring_hall);
         if (self.hqStaff(hq.id, .admin_hr).count >= tuning.person.recruit_hr_admins) bonus += 1;
         // A famous outfit (12C.7) draws a better class of walk-in.
@@ -2217,4 +2216,20 @@ test "company posture is one cascade: contract, then the road home, then a world
     };
     try std.testing.expect(in_co > 0 and in_co == gs.companyHeadcount(co));
     try std.testing.expect(gs.supportLance(co, .mash) != null);
+}
+
+test "the recruiting bonus is the recruiting HQ's hiring hall, not the first HQ's" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 7701 });
+    defer gs.deinit();
+    _ = try gs.createCommander("T", .LC, .paymaster);
+    const seat = gs.hqs.keys()[0];
+    const second = try gs.foundHq("Second", .regional, "alkaid");
+    for ([_]types.HqId{ seat, second }) |id| gs.hqs.getPtr(id).?.staff_assigned = 999;
+    for (gs.hqs.getPtr(seat).?.facilities.items) |*f| {
+        if (f.kind == .hiring_hall) f.level = 3;
+    }
+    for (gs.hqs.getPtr(second).?.facilities.items) |*f| {
+        if (f.kind == .hiring_hall) f.level = 0;
+    }
+    try std.testing.expect(gs.recruitBonus(seat) > gs.recruitBonus(second));
 }

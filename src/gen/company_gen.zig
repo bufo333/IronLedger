@@ -126,7 +126,7 @@ pub fn generateInto(gs: *GameState, name: []const u8) !types.ForceId {
             const design = @import("../domain/rat.zig").roll(&gs.rng, .generation, home, class, gs.clock.date.year);
 
             const unit_id = try gs.addUnit(design.key);
-            const pilot_id = try gs.recruitGenerated(.mekwarrior);
+            const pilot_id = try gs.recruitGenerated(.mekwarrior, gs.homeHqFor(company_id));
             try gs.assignUnit(unit_id, lance_id, pilot_id);
         }
     }
@@ -138,7 +138,7 @@ pub fn generateInto(gs: *GameState, name: []const u8) !types.ForceId {
     for (0..force.lance_size) |_| {
         const design = scouts[gs.rng.random(.generation).uintLessThan(usize, scouts.len)];
         const unit_id = try gs.addUnit(design.key);
-        const pilot_id = try gs.recruitGenerated(.mekwarrior);
+        const pilot_id = try gs.recruitGenerated(.mekwarrior, gs.homeHqFor(company_id));
         try gs.assignUnit(unit_id, recon_id, pilot_id);
     }
 
@@ -161,11 +161,11 @@ pub fn generateInto(gs: *GameState, name: []const u8) !types.ForceId {
         gs.force(lance_id).?.support_kind = plan.kind;
         for (0..force.lance_size) |_| {
             const unit_id = try gs.addUnit(plan.chassis_key);
-            const crew_id = try gs.recruitGenerated(plan.crew_role);
+            const crew_id = try gs.recruitGenerated(plan.crew_role, gs.homeHqFor(company_id));
             try gs.assignUnit(unit_id, lance_id, crew_id);
         }
         for (0..plan.attached_medics) |_| {
-            const id = try gs.recruitGenerated(.medic);
+            const id = try gs.recruitGenerated(.medic, gs.homeHqFor(company_id));
             gs.person(id).?.assigned_force = lance_id;
         }
     }
@@ -178,7 +178,7 @@ pub fn generateInto(gs: *GameState, name: []const u8) !types.ForceId {
     for (staffNeeds(tally)) |entry| {
         if (entry.role.isCombat() or entry.role == .tech_aero) continue;
         for (0..entry.need) |_| {
-            const id = try gs.recruitGenerated(entry.role);
+            const id = try gs.recruitGenerated(entry.role, gs.homeHqFor(company_id));
             gs.person(id).?.assigned_force = company_id;
         }
     }
