@@ -26,11 +26,7 @@ the rule and the symbol are the stable key.
 
 # Part 1 — Finish Stage 12
 
-## 12F. Size-aware screens (ROADMAP Stage 12F)
-
-- [ ] **12F.6 Drop a column before scrolling** when a table names one droppable, for screens that read better without the tail than scrolled.
-
-When Part 1 is empty, Stage 12 is marked ✅ in ROADMAP.md and README.md.
+Done: every Stage 12 feature (12, 12B–12G) has shipped. Part 2 is next.
 
 ---
 

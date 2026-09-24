@@ -268,9 +268,10 @@ send("\x1b")
 send("k"); send("X", 0.8)      # disband confirm on the company row: opens, Esc keeps it
 assert "DISBAND COMPANY?" in plain()[-30000:] and "cannot be undone" in plain()[-30000:], plain()[-2000:]
 send("\x1b", 0.6)
-send("4"); send("\x1b[C", 0.6); send("\x1b[C", 0.6)   # contracts board: → scrolls columns behind the first
-assert "◀" in plain()[-30000:], plain()[-3000:]
-send("\x1b[D", 0.6); send("\x1b[D", 0.6)
+mark = len(out)
+send("4", 1.0)                 # contracts board at 200 wide: droppable tail columns leave before anything scrolls
+board = re.sub(rb"\x1b\[[0-9;?]*[A-Za-z]", b"", out[mark:]).decode("utf-8", "replace")
+assert "CONTRACT BOARD" in board and "▶" not in board and "◀" not in board, board[-3000:]
 send("1"); send("b", 0.8)      # Desk: the after-action reports
 assert "AFTER-ACTION REPORTS" in plain()[-30000:], plain()[-3000:]
 send("\r", 0.8)               # Enter reads one (or does nothing when none are on record)
@@ -344,6 +345,9 @@ send("\t"); send("\r", 3.0)
 assert wait_for("F1 Desk", timeout=20) and "+-" in plain(), plain()[-2000:]          # ascii borders
 for k in "234567891":
     send(k, 0.6)
+send("4"); send("\x1b[C", 0.6); send("\x1b[C", 0.6)        # contracts board at 80 wide: what cannot drop scrolls
+assert re.search(r"< \d", plain()[-30000:]), plain()[-3000:]
+send("\x1b[D", 0.6); send("\x1b[D", 0.6)
 send("3"); send("j"); send("j"); send("\r", 0.8)            # hull modal at narrow width
 assert "HULL" in plain(), plain()[-2000:]
 send("\x1b")
