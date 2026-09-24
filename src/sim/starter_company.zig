@@ -14,6 +14,7 @@ const person = @import("../domain/person.zig");
 const chassis = @import("../domain/chassis.zig");
 const company_gen = @import("../gen/company_gen.zig");
 const GameState = @import("state.zig").GameState;
+const personnel = @import("personnel.zig");
 
 /// Generate a full starter company into the campaign:
 ///   - 3 line lances × 4 meks (light/medium RAT rolls) with pilots
@@ -38,7 +39,7 @@ pub fn generateInto(gs: *GameState, name: []const u8) !types.ForceId {
             const design = @import("../domain/rat.zig").roll(&gs.rng, .generation, home, class, gs.clock.date.year);
 
             const unit_id = try gs.addUnit(design.key);
-            const pilot_id = try gs.recruitGenerated(.mekwarrior, gs.homeHqFor(company_id), .generation);
+            const pilot_id = try personnel.recruitGenerated(gs, .mekwarrior, gs.homeHqFor(company_id), .generation);
             try gs.assignUnit(unit_id, lance_id, pilot_id);
         }
     }
@@ -50,7 +51,7 @@ pub fn generateInto(gs: *GameState, name: []const u8) !types.ForceId {
     for (0..force.lance_size) |_| {
         const design = scouts[gs.rng.random(.generation).uintLessThan(usize, scouts.len)];
         const unit_id = try gs.addUnit(design.key);
-        const pilot_id = try gs.recruitGenerated(.mekwarrior, gs.homeHqFor(company_id), .generation);
+        const pilot_id = try personnel.recruitGenerated(gs, .mekwarrior, gs.homeHqFor(company_id), .generation);
         try gs.assignUnit(unit_id, recon_id, pilot_id);
     }
 
@@ -73,11 +74,11 @@ pub fn generateInto(gs: *GameState, name: []const u8) !types.ForceId {
         gs.force(lance_id).?.support_kind = plan.kind;
         for (0..force.lance_size) |_| {
             const unit_id = try gs.addUnit(plan.chassis_key);
-            const crew_id = try gs.recruitGenerated(plan.crew_role, gs.homeHqFor(company_id), .generation);
+            const crew_id = try personnel.recruitGenerated(gs, plan.crew_role, gs.homeHqFor(company_id), .generation);
             try gs.assignUnit(unit_id, lance_id, crew_id);
         }
         for (0..plan.attached_medics) |_| {
-            const id = try gs.recruitGenerated(.medic, gs.homeHqFor(company_id), .generation);
+            const id = try personnel.recruitGenerated(gs, .medic, gs.homeHqFor(company_id), .generation);
             gs.person(id).?.assigned_force = lance_id;
         }
     }
@@ -89,14 +90,14 @@ pub fn generateInto(gs: *GameState, name: []const u8) !types.ForceId {
     for (company_gen.staffNeeds(tally)) |entry| {
         if (entry.role.isCombat() or entry.role == .tech_aero) continue;
         for (0..entry.need) |_| {
-            const id = try gs.recruitGenerated(entry.role, gs.homeHqFor(company_id), .generation);
+            const id = try personnel.recruitGenerated(gs, entry.role, gs.homeHqFor(company_id), .generation);
             gs.person(id).?.assigned_force = company_id;
         }
     }
 
     // Every hull gets its tech: the tail is sized for it.
     _ = try gs.autoAssign(company_id);
-    _ = try @import("personnel.zig").refreshRanks(gs); // officers by seat
+    _ = try personnel.refreshRanks(gs); // officers by seat
     return company_id;
 }
 

@@ -1202,7 +1202,7 @@ test "a prisoner can be ransomed, released for standing, or recruited on a loyal
     const mk = struct {
         fn captive(g: *GameState, company: types.ForceId) !types.PersonId {
             const spec = @import("../gen/person_gen.zig").generate(&g.rng, .market, .mekwarrior);
-            const pid = try g.hireFromSpec(spec);
+            const pid = try @import("personnel.zig").hireFromSpec(g, spec);
             const p = g.person(pid).?;
             p.status = .pow;
             p.assigned_force = company;
@@ -1332,7 +1332,7 @@ test "a missing pilot is ransomed, traded for a prisoner of their house, or writ
 
     // Trade: a Combine prisoner goes back, their decision with them.
     const spec = @import("../gen/person_gen.zig").generateWithBonus(&gs.rng, .events, .mekwarrior, 0);
-    const pow = try gs.hireFromSpec(spec);
+    const pow = try @import("personnel.zig").hireFromSpec(&gs, spec);
     gs.person(pow).?.status = .pow;
     gs.person(pow).?.faction = "DC";
     try queuePrisoner(&gs, pow, co);

@@ -424,60 +424,6 @@ pub const GameState = struct {
         return self.people.getPtr(id);
     }
 
-    /// Recruit a randomly generated person (AtB-style: experience on 2d6,
-    /// skills from the band, names from the tables). No signing bonus:
-    /// that belongs to hiring-hall candidates.
-    pub fn recruitGenerated(self: *GameState, role: person_mod.Role, hq_id: types.HqId, stream: rng_mod.Stream) !types.PersonId {
-        const spec = person_gen.generateWithBonus(&self.rng, stream, role, self.recruitBonus(hq_id));
-        return self.hireFromSpec(spec);
-    }
-
-    /// Put a generated person on the books (recruiting, or hiring a
-    /// hall candidate).
-    pub fn hireFromSpec(self: *GameState, spec: person_gen.GeneratedPerson) !types.PersonId {
-        const role = spec.role;
-        const id = try self.hirePerson(spec.first, spec.last, role);
-        const p = self.person(id).?;
-        if (spec.callsign) |c| p.callsign = try self.allocator().dupe(u8, c);
-        p.setBirthdayFromAge(self.clock.day_index, spec.age);
-
-        // Overwrite the hire defaults with the generated experience band.
-        const alloc = self.allocator();
-        switch (role) {
-            .mekwarrior => {
-                try p.skills.put(alloc, .gunnery_mek, spec.primary_skill);
-                try p.skills.put(alloc, .piloting_mek, spec.secondary_skill);
-            },
-            .vehicle_crew => {
-                try p.skills.put(alloc, .gunnery_vee, spec.primary_skill);
-                try p.skills.put(alloc, .driving_vee, spec.secondary_skill);
-            },
-            .aero_pilot => {
-                try p.skills.put(alloc, .gunnery_aero, spec.primary_skill);
-                try p.skills.put(alloc, .piloting_aero, spec.secondary_skill);
-            },
-            .ba_trooper, .infantry => try p.skills.put(alloc, .small_arms, spec.primary_skill),
-            .tech_mek, .tech_ba => try p.skills.put(alloc, .tech_mek, spec.primary_skill),
-            .tech_mechanic => try p.skills.put(alloc, .tech_mechanic, spec.primary_skill),
-            .tech_aero => try p.skills.put(alloc, .tech_aero, spec.primary_skill),
-            .astech => try p.skills.put(alloc, .astech, spec.primary_skill),
-            .doctor => try p.skills.put(alloc, .doctor, spec.primary_skill),
-            .medic => try p.skills.put(alloc, .medtech, spec.primary_skill),
-            .admin_command, .admin_logistics, .admin_transport, .admin_hr, .admin_finance => try p.skills.put(alloc, .admin, spec.primary_skill),
-            .dropship_crew, .jumpship_crew => {},
-        }
-        return id;
-    }
-
-    /// Post a person to an HQ's staff (off any force).
-    pub fn postToHq(self: *GameState, person_id: types.PersonId, hq_id: types.HqId) !void {
-        const p = self.person(person_id) orelse return error.UnknownPerson;
-        if (self.hqs.getPtr(hq_id) == null) return error.UnknownHq;
-        p.posted_hq = hq_id;
-        p.assigned_force = .none;
-        self.refreshHqStaffing();
-    }
-
     // --------------------------------------------- character creation & HQ
 
     pub const CreateCommanderError = error{ CommanderExists, NoHomeWorld } || std.mem.Allocator.Error;
@@ -525,7 +471,7 @@ pub const GameState = struct {
         };
         for (staff_plan) |entry| {
             for (0..entry[1]) |_| {
-                const pid = try self.recruitGenerated(entry[0], id, .generation);
+                const pid = try @import("personnel.zig").recruitGenerated(self, entry[0], id, .generation);
                 self.person(pid).?.posted_hq = id;
             }
         }
@@ -602,24 +548,13 @@ pub const GameState = struct {
             const have = self.hqStaff(hq_id, entry[0]).count;
             var n: u32 = entry[1] -| have;
             while (n > 0) : (n -= 1) {
-                const pid = try self.recruitGenerated(entry[0], hq_id, .market);
+                const pid = try @import("personnel.zig").recruitGenerated(self, entry[0], hq_id, .market);
                 self.person(pid).?.posted_hq = hq_id;
                 hired += 1;
             }
         }
         self.refreshHqStaffing();
         return hired;
-    }
-
-    /// Recruit-quality bonus on the 2d6 experience roll at one HQ: its
-    /// hiring hall and a staffed HR office find better people.
-    pub fn recruitBonus(self: *GameState, hq_id: types.HqId) i32 {
-        const hq = self.hqs.getPtr(hq_id) orelse return 0;
-        var bonus: i32 = hq.effectiveFacilityLevel(.hiring_hall);
-        if (self.hqStaff(hq.id, .admin_hr).count >= tuning.person.recruit_hr_admins) bonus += 1;
-        // A famous outfit draws a better class of walk-in.
-        if (@import("rating.zig").currentIndex(self) >= @import("../domain/tuning.zig").t.rating.recruit_bonus_index) bonus += 1;
-        return @min(bonus, 4);
     }
 
     // ------------------------------------- the HQ network
@@ -1952,20 +1887,4 @@ test "company posture is one cascade: contract, then the road home, then a world
     };
     try std.testing.expect(in_co > 0 and in_co == gs.companyHeadcount(co));
     try std.testing.expect(gs.supportLance(co, .mash) != null);
-}
-
-test "the recruiting bonus is the recruiting HQ's hiring hall, not the first HQ's" {
-    var gs = GameState.init(std.testing.allocator, .{ .seed = 7701 });
-    defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .paymaster);
-    const seat = gs.hqs.keys()[0];
-    const second = try gs.foundHq("Second", .regional, "alkaid");
-    for ([_]types.HqId{ seat, second }) |id| gs.hqs.getPtr(id).?.staff_assigned = 999;
-    for (gs.hqs.getPtr(seat).?.facilities.items) |*f| {
-        if (f.kind == .hiring_hall) f.level = 3;
-    }
-    for (gs.hqs.getPtr(second).?.facilities.items) |*f| {
-        if (f.kind == .hiring_hall) f.level = 0;
-    }
-    try std.testing.expect(gs.recruitBonus(seat) > gs.recruitBonus(second));
 }
