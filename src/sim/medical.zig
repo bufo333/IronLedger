@@ -198,16 +198,18 @@ pub fn runDailyHealing(gs: *GameState) !void {
             return a.heal_day < b.heal_day;
         }
     }.lt);
+    // One pass in that order: each patient takes a bed while any are left
+    // at home or in their company's field beds.
     var home_beds = bedCapacity(gs, .none, false);
+    var field_left: std.AutoHashMapUnmanaged(types.ForceId, u32) = .empty;
+    defer field_left.deinit(gs.scratch());
     for (patients.items) |pt| {
         if (pt.deployed) {
-            // Field: MASH beds per company, first come first served.
-            const beds = bedCapacity(gs, pt.company, true);
-            var used: u32 = 0;
-            for (patients.items) |other| {
-                if (other.deployed and other.company == pt.company and other.priority >= pt.priority and other.id != pt.id) used += 1;
-            }
-            if (used >= beds) gs.person(pt.id).?.wound_heal_day.? += 1;
+            const left = try field_left.getOrPut(gs.scratch(), pt.company);
+            if (!left.found_existing) left.value_ptr.* = bedCapacity(gs, pt.company, true);
+            if (left.value_ptr.* > 0) {
+                left.value_ptr.* -= 1;
+            } else gs.person(pt.id).?.wound_heal_day.? += 1;
         } else if (home_beds > 0) {
             home_beds -= 1;
         } else {
@@ -705,4 +707,38 @@ test "a deployed patient without a ready MASH lance heals slower than one with i
         d.* = p.wound_heal_day.? - gs.clock.day_index;
     }
     try std.testing.expect(days[0] > days[1]);
+}
+
+test "five tied field patients and four beds: exactly one waits" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 7101 });
+    defer gs.deinit();
+    _ = try gs.createCommander("T", .LC, .paymaster);
+    const co = try gs.createForce("Alpha", .company, .none);
+    try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
+        .id = @enumFromInt(1),
+        .kind = .recon_raid,
+        .employer_key = "LC",
+        .enemy_key = "PER",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 6, .base_pay_month = 400_000 },
+        .status = .active,
+        .assigned_company = co,
+    });
+    // Eight medics and no MASH truck: an aid station of four beds.
+    for (0..8) |_| gs.person(try gs.hirePerson("M", "Edic", .medic)).?.assigned_force = co;
+    try std.testing.expectEqual(@as(u32, 4), bedCapacity(&gs, co, true));
+    const due = gs.clock.day_index + 10;
+    var patients: [5]types.PersonId = undefined;
+    for (&patients) |*id| {
+        id.* = try gs.hirePerson("W", "Ounded", .mekwarrior);
+        const p = gs.person(id.*).?;
+        p.assigned_force = co;
+        p.status = .wounded;
+        p.medbay_admitted = true;
+        p.wound_heal_day = due;
+    }
+    try runDailyHealing(&gs);
+    var waiting: u32 = 0;
+    for (patients) |id| waiting += @intFromBool(gs.person(id).?.wound_heal_day.? == due + 1);
+    try std.testing.expectEqual(@as(u32, 1), waiting);
 }

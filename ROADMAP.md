@@ -166,10 +166,11 @@ need real assignments underneath.)
   fills slots; `assign`/`unassign`/`assign auto` manage them afterward.
 - **Tech time is a budget**: each tech has weekly hours; every assigned
   hull costs maintenance hours by weight class (astech teams multiply a
-  tech's throughput; short teams halve it); field repairs, armor patching,
-  and reloading cost additional hours; bay jobs draw on the HQ's techs.
-  Over-budget work queues, and missed maintenance rolls with the uncovered
-  penalty. Techs pulled for training or wounded leave their hulls uncovered
+  tech's throughput; short teams halve it); field repairs and armor
+  patching cost additional hours, and reloading needs an assigned tech but
+  no hours; bay jobs draw on the HQ's techs. Work the week's hours cannot
+  cover waits for the next weekly pass, and missed maintenance rolls with
+  the uncovered penalty. Techs pulled for training or wounded leave their hulls uncovered
   until swapped.
 - **Roster reviews**: `roster co:<id>` lists every hull with pilot/tech and
   every open slot; `roster hq:<id>` lists posted staff vs. required and the

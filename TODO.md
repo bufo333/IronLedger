@@ -43,13 +43,11 @@ Done: every Stage 12 feature (12, 12B–12G) has shipped. Part 2 is next.
 
 ## D16. Battle and medical rule bugs (audit #7, #8, #9, #10, #11; rules 5, 6)
 
-Landing as increments; D16a is done (see Done).
+Landing as increments; D16a and D16b are done (see Done).
 
-- [ ] **D16b.** Field beds allocated in one pass over the sorted patient list with a used-bed count per company (medical.zig:181-188). Test: five equal-priority patients, four beds, exactly one waits.
 - [ ] **D16c.** One combat-skill selector keyed on unit kind (reuse person.zig:378-380); battle.zig:209-210 calls it. Test: a vehicle crewed by a good `vehicle_crew` pilot fights at their vee skills.
 - [ ] **D16d.** Conceded engagement (battle.zig:808-814) emits a minimal `BattleReport` (defeat, no hits) through the normal aftermath bookkeeping (stats, `battles_fought`); the report holds the turn like any other; the -2 score / -10 VP move into tuning.
-- [ ] **Decision needed.** `autoresolve.CampaignMods.has_field_repair` is set by a transport support lance and read nowhere; the mobile field base (`UnitKind.mobile_field_base`) has no repair effect. Either wire it (e.g. into the field repair push budget) or delete the flag.
-- [ ] **Decision needed.** ROADMAP 9C.2 says reloads cost tech hours; `runWeeklyRepairs` charges none. Implement or correct the roadmap.
+- [ ] **D16e (decided 2026-09-23: wire it).** A ready mobile field base (`UnitKind.mobile_field_base`, `unitOperational`) adds tech-hours to the night-after-battle repair push budget (`maintenance.repairBudget`), with its own tuning value and test. The unread `autoresolve.CampaignMods.has_field_repair` flag, set by the transport lance, is deleted.
 - Design backlog (not a defect): per-site hospital and doctor capacity (#7). ARCHITECTURE.md never specified per-site care; decide there first.
 
 ## D17. Logistics accounting (audit #6, #12; rules 5, 6, 27)
@@ -113,6 +111,7 @@ Contract deliverables closed before this list merged, all from the 2026-09-22 co
 - D15b loading fails closed, audit #13 (PR #55): every stored integer and id is range-checked (`Stmt.intAs`, `fit`, `toId`); missing parent rows, unknown enum values, unknown treasury/site kinds and a bad difficulty return `CorruptSave` instead of being skipped or defaulted
 - D15c RNG persisted per stream, audit #18 (PR #56): schema v32 saves one `rng_stream` row per named stream (format 1, little-endian words) plus the seed; a stream missing from a save starts fresh from the seed, so adding one no longer reseeds old saves; v31 blobs still load; malformed or unknown rows are `CorruptSave`. Audit #14 closed with it: SQL foreign keys wait for a schema change that rebuilds tables, and the loader is the integrity check
 - D16a support readiness, audit #10 and #7's MASH bug (PR #57): `GameState.unitOperational` (can take the field, crew fit for duty) and `forceOperational` are the one readiness test for support modifiers, recon, air cover, MASH beds, the battle line and fieldable BV; wounds get `medical.Care` (home, field with a ready MASH, field without), so the MASH multiplier needs an operational MASH truck
+- D16b field bed ties, audit #8 (PR #58): field beds are handed out in one pass over the priority-sorted patients with a beds-left count per company; ROADMAP 9C.2 corrected (decided 2026-09-23): reloads need a tech but no hours, and uncovered work waits for the next weekly pass
 
 ---
 
