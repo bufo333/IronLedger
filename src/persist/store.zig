@@ -343,6 +343,48 @@ pub const Store = struct {
         try self.db.exec("BEGIN");
         errdefer self.db.exec("ROLLBACK") catch {};
 
+        const cid = try self.saveCampaignRow(gs);
+        try self.clearRows(cid);
+
+        try self.saveMeta(gs, cid);
+        try self.saveRngStream(gs, cid);
+        try self.saveCommander(gs, cid);
+        try self.savePerson(gs, cid);
+        try self.saveUnit(gs, cid);
+        try self.saveForce(gs, cid);
+        try self.saveStock(cid, "outfit", 0, &gs.spare_parts);
+        try self.saveHq(gs, cid);
+        try self.saveContracts(gs, cid);
+        try self.saveTxn(gs, cid);
+        try self.saveLoan(gs, cid);
+        try self.saveCourier(gs, cid);
+        try self.savePolicy(gs, cid);
+        try self.saveSupplyPolicy(gs, cid);
+        try self.saveStockPolicy(gs, cid);
+        try self.saveBayJob(gs, cid);
+        try self.saveCandidate(gs, cid);
+        try self.saveHqLink(gs, cid);
+        try self.saveUnitTransfer(gs, cid);
+        try self.saveFactionCooling(gs, cid);
+        try self.saveFactionStanding(gs, cid);
+        try self.saveEventMemory(gs, cid);
+        try self.saveRatingSnapshot(gs, cid);
+        try self.saveListing(gs, cid);
+        try self.savePartOrder(gs, cid);
+        try self.saveEventLog(gs, cid);
+        try self.savePendingEvent(gs, cid);
+        try self.saveBattleReport(gs, cid);
+        try self.saveRefitPlan(gs, cid);
+
+        try self.db.exec("COMMIT");
+        gs.campaign_id = cid;
+    }
+
+    // ---- the per-table encoders `save` runs, in its order ----
+
+    /// Insert or update the campaign registry row; returns its id.
+    /// `NoSuchCampaign` when an id already set has no row.
+    fn saveCampaignRow(self: Store, gs: *GameState) !i64 {
         var date_buf: [10]u8 = undefined;
         const date = gs.clock.date.text(&date_buf);
         const cmdr_name: []const u8 = if (gs.commander) |c| c.name else "";
@@ -364,465 +406,482 @@ pub const Store = struct {
             try up.run();
             if (self.db.changes() == 0) return error.NoSuchCampaign;
         }
-        try self.clearRows(cid);
+        return cid;
+    }
 
-        // Scalars.
-        {
-            const difficulty_int: i64 = @intFromEnum(gs.difficulty);
-            const st = try self.db.prepare("INSERT INTO meta VALUES (?1, ?2, ?3)");
-            defer st.finalize();
-            const ints = [_]struct { []const u8, i64 }{
-                .{ "day_index", gs.clock.day_index },                 .{ "year", gs.clock.date.year },
-                .{ "month", gs.clock.date.month },                    .{ "day", gs.clock.date.day },
-                .{ "funds", gs.funds },                               .{ "reputation", gs.reputation },
-                .{ "bankrupt", @as(i64, @intFromBool(gs.bankrupt)) }, .{ "auto_admit", @as(i64, @intFromBool(gs.auto_admit)) },
-                .{ "difficulty", difficulty_int },                    .{ "share_profit_bp", @as(i64, gs.share_profit_bp) },
-                .{ "stat_battles_won", gs.stats.battles_won },       .{ "stat_battles_drawn", gs.stats.battles_drawn },
-                .{ "stat_battles_lost", gs.stats.battles_lost },     .{ "stat_hulls_lost", gs.stats.hulls_lost },
-                .{ "stat_hulls_salvaged", gs.stats.hulls_salvaged }, .{ "stat_people_kia", gs.stats.people_kia },
-                .{ "stat_enemy_bv", @as(i64, @intCast(gs.stats.enemy_bv_destroyed)) }, .{ "next_person_id", gs.next_person_id },
-                .{ "next_unit_id", gs.next_unit_id },                 .{ "next_force_id", gs.next_force_id },
-                .{ "next_hq_id", gs.next_hq_id },                     .{ "next_contract_id", gs.next_contract_id },
-                .{ "next_battle_id", gs.next_battle_id },           .{ "rng_seed", @as(i64, @bitCast(gs.rng.seed)) },
-                .{ "next_event_id", gs.event_queue.next_id },
-            };
-            for (ints) |kv| {
-                try st.bindAll(.{ cid, kv[0], kv[1] });
-                try st.run();
-            }
-            const tx = try self.db.prepare("INSERT INTO meta_text VALUES (?1, ?2, ?3)");
-            defer tx.finalize();
-            try tx.bindAll(.{ cid, "outfit_name", gs.outfit_name });
-            try tx.run();
+    // Scalars.
+    fn saveMeta(self: Store, gs: *GameState, cid: i64) !void {
+        const difficulty_int: i64 = @intFromEnum(gs.difficulty);
+        const st = try self.db.prepare("INSERT INTO meta VALUES (?1, ?2, ?3)");
+        defer st.finalize();
+        const ints = [_]struct { []const u8, i64 }{
+            .{ "day_index", gs.clock.day_index },                 .{ "year", gs.clock.date.year },
+            .{ "month", gs.clock.date.month },                    .{ "day", gs.clock.date.day },
+            .{ "funds", gs.funds },                               .{ "reputation", gs.reputation },
+            .{ "bankrupt", @as(i64, @intFromBool(gs.bankrupt)) }, .{ "auto_admit", @as(i64, @intFromBool(gs.auto_admit)) },
+            .{ "difficulty", difficulty_int },                    .{ "share_profit_bp", @as(i64, gs.share_profit_bp) },
+            .{ "stat_battles_won", gs.stats.battles_won },       .{ "stat_battles_drawn", gs.stats.battles_drawn },
+            .{ "stat_battles_lost", gs.stats.battles_lost },     .{ "stat_hulls_lost", gs.stats.hulls_lost },
+            .{ "stat_hulls_salvaged", gs.stats.hulls_salvaged }, .{ "stat_people_kia", gs.stats.people_kia },
+            .{ "stat_enemy_bv", @as(i64, @intCast(gs.stats.enemy_bv_destroyed)) }, .{ "next_person_id", gs.next_person_id },
+            .{ "next_unit_id", gs.next_unit_id },                 .{ "next_force_id", gs.next_force_id },
+            .{ "next_hq_id", gs.next_hq_id },                     .{ "next_contract_id", gs.next_contract_id },
+            .{ "next_battle_id", gs.next_battle_id },           .{ "rng_seed", @as(i64, @bitCast(gs.rng.seed)) },
+            .{ "next_event_id", gs.event_queue.next_id },
+        };
+        for (ints) |kv| {
+            try st.bindAll(.{ cid, kv[0], kv[1] });
+            try st.run();
         }
-        {
-            const st = try self.db.prepare("INSERT INTO rng_stream VALUES (?1, ?2, ?3, ?4)");
-            defer st.finalize();
-            for (std.enums.values(rng_mod.Stream)) |stream| {
-                const bytes = gs.rng.encode(stream);
-                try st.bindAll(.{ cid, @tagName(stream), rng_mod.Rng.state_format });
-                try st.bindBlob(4, &bytes);
-                try st.run();
-            }
+        const tx = try self.db.prepare("INSERT INTO meta_text VALUES (?1, ?2, ?3)");
+        defer tx.finalize();
+        try tx.bindAll(.{ cid, "outfit_name", gs.outfit_name });
+        try tx.run();
+    }
+
+    fn saveRngStream(self: Store, gs: *GameState, cid: i64) !void {
+        const st = try self.db.prepare("INSERT INTO rng_stream VALUES (?1, ?2, ?3, ?4)");
+        defer st.finalize();
+        for (std.enums.values(rng_mod.Stream)) |stream| {
+            const bytes = gs.rng.encode(stream);
+            try st.bindAll(.{ cid, @tagName(stream), rng_mod.Rng.state_format });
+            try st.bindBlob(4, &bytes);
+            try st.run();
         }
+    }
+
+    fn saveCommander(self: Store, gs: *GameState, cid: i64) !void {
         if (gs.commander) |c| {
             const st = try self.db.prepare("INSERT INTO commander VALUES (?1, ?2, ?3, ?4)");
             defer st.finalize();
             try st.bindAll(.{ cid, c.name, c.origin, c.profession });
             try st.run();
         }
+    }
 
-        // People.
-        {
-            const st = try self.db.prepare("INSERT INTO person VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33,?34,?35,?36)");
-            const aw = try self.db.prepare("INSERT INTO award VALUES (?1,?2,?3)");
-            defer aw.finalize();
-            const ab = try self.db.prepare("INSERT INTO ability VALUES (?1,?2,?3)");
-            defer ab.finalize();
-            defer st.finalize();
-            const sk = try self.db.prepare("INSERT INTO person_skill VALUES (?1, ?2, ?3, ?4)");
-            defer sk.finalize();
-            const inj = try self.db.prepare("INSERT INTO injury VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)");
-            defer inj.finalize();
-            var it = gs.people.iterator();
-            var ord: i64 = 0;
-            while (it.next()) |entry| : (ord += 1) {
-                const p = entry.value_ptr;
-                try st.bindAll(.{
-                    cid,                                       ord,                                                               @intFromEnum(p.id),
-                    p.first_name,                              p.last_name,                                                       p.callsign,
-                    p.role,                                    @as(i64, p.xp),                                                    p.status,
-                    @as(i64, p.fatigue),                       @as(i64, p.morale),                                                @as(i64, p.recruited_day),
-                    p.salary_override,                         @intFromEnum(p.assigned_force),                                    @intFromEnum(p.posted_hq),
-                    @as(i64, p.weekly_hours),                  @as(i64, p.medbay_priority),                                       p.leave_until_day,
-                    p.wound_heal_day,                          if (p.training) |t| @as(?[]const u8, @tagName(t.skill)) else null, if (p.training) |t| @as(?u32, t.done_day) else null,
-                    @as(i64, @intFromBool(p.medbay_admitted)), p.rank,                                                            @as(i64, @intFromBool(p.rank_pinned)),
-                    @as(i64, p.kills),                         @as(i64, p.kill_bv),                                               @as(i64, p.battles),
-                    @as(i64, p.tours),                         @as(i64, p.outstanding_tours),                                     @as(i64, @intFromBool(p.edge_spent)),
-                    p.faction,                                 @as(i64, p.shares),                                                p.born_day,
-                    p.last_raise_day,                          p.last_award_day,                                                  p.departed_day,
+    // People.
+    fn savePerson(self: Store, gs: *GameState, cid: i64) !void {
+        const st = try self.db.prepare("INSERT INTO person VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33,?34,?35,?36)");
+        const aw = try self.db.prepare("INSERT INTO award VALUES (?1,?2,?3)");
+        defer aw.finalize();
+        const ab = try self.db.prepare("INSERT INTO ability VALUES (?1,?2,?3)");
+        defer ab.finalize();
+        defer st.finalize();
+        const sk = try self.db.prepare("INSERT INTO person_skill VALUES (?1, ?2, ?3, ?4)");
+        defer sk.finalize();
+        const inj = try self.db.prepare("INSERT INTO injury VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)");
+        defer inj.finalize();
+        var it = gs.people.iterator();
+        var ord: i64 = 0;
+        while (it.next()) |entry| : (ord += 1) {
+            const p = entry.value_ptr;
+            try st.bindAll(.{
+                cid,                                       ord,                                                               @intFromEnum(p.id),
+                p.first_name,                              p.last_name,                                                       p.callsign,
+                p.role,                                    @as(i64, p.xp),                                                    p.status,
+                @as(i64, p.fatigue),                       @as(i64, p.morale),                                                @as(i64, p.recruited_day),
+                p.salary_override,                         @intFromEnum(p.assigned_force),                                    @intFromEnum(p.posted_hq),
+                @as(i64, p.weekly_hours),                  @as(i64, p.medbay_priority),                                       p.leave_until_day,
+                p.wound_heal_day,                          if (p.training) |t| @as(?[]const u8, @tagName(t.skill)) else null, if (p.training) |t| @as(?u32, t.done_day) else null,
+                @as(i64, @intFromBool(p.medbay_admitted)), p.rank,                                                            @as(i64, @intFromBool(p.rank_pinned)),
+                @as(i64, p.kills),                         @as(i64, p.kill_bv),                                               @as(i64, p.battles),
+                @as(i64, p.tours),                         @as(i64, p.outstanding_tours),                                     @as(i64, @intFromBool(p.edge_spent)),
+                p.faction,                                 @as(i64, p.shares),                                                p.born_day,
+                p.last_raise_day,                          p.last_award_day,                                                  p.departed_day,
+            });
+            for (p.awards.items) |key| {
+                try aw.bindAll(.{ cid, @intFromEnum(p.id), key });
+                try aw.run();
+            }
+            for (p.abilities.items) |key| {
+                try ab.bindAll(.{ cid, @intFromEnum(p.id), key });
+                try ab.run();
+            }
+            try st.run();
+            var skit = p.skills.iterator();
+            while (skit.next()) |s| {
+                try sk.bindAll(.{ cid, @intFromEnum(p.id), s.key_ptr.*, @as(i64, s.value_ptr.*) });
+                try sk.run();
+            }
+            for (p.injuries.items, 0..) |i, n| {
+                try inj.bindAll(.{ cid, @intFromEnum(p.id), @as(i64, @intCast(n)), i.location, @as(i64, i.severity), @as(i64, i.incurred_day), i.heal_done_day, @intFromEnum(i.doctor), @as(i64, @intFromBool(i.permanent)), @as(i64, @intFromBool(i.healed)) });
+                try inj.run();
+            }
+        }
+    }
+
+    // Units and slots.
+    fn saveUnit(self: Store, gs: *GameState, cid: i64) !void {
+        const st = try self.db.prepare("INSERT INTO unit VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22)");
+        defer st.finalize();
+        const sl = try self.db.prepare("INSERT INTO unit_slot VALUES (?1,?2,?3,?4,?5,?6,?7)");
+        defer sl.finalize();
+        var ord: i64 = 0;
+        const Writer = struct {
+            // One writer for both, so an owned hull and a held one can
+            // never be saved by two loops that drift apart.
+            fn put(unit_st: anytype, slot_st: anytype, c: i64, o: i64, u: *const unit_mod.Unit, held: unit_mod.HeldHull.Mark) !void {
+                try unit_st.bindAll(.{
+                    c,                        o,                        @intFromEnum(u.id),    u.chassis_key,
+                    u.name,                   u.kind,                   @intFromEnum(u.force), @intFromEnum(u.pilot),
+                    @intFromEnum(u.tech),     @as(i64, u.armor_pct),    u.quality,             u.status,
+                    u.last_maintenance_day,   @as(i64, u.acquired_day), u.purchase_price,      u.reactivation_done_day,
+                    @intFromEnum(u.berth_hq), u.wreck,                  held.by,               @as(i64, held.day),
+                    @as(i64, @intFromEnum(held.battle)), @as(i64, @intFromEnum(held.from_force)),
                 });
-                for (p.awards.items) |key| {
-                    try aw.bindAll(.{ cid, @intFromEnum(p.id), key });
-                    try aw.run();
-                }
-                for (p.abilities.items) |key| {
-                    try ab.bindAll(.{ cid, @intFromEnum(p.id), key });
-                    try ab.run();
-                }
-                try st.run();
-                var skit = p.skills.iterator();
-                while (skit.next()) |s| {
-                    try sk.bindAll(.{ cid, @intFromEnum(p.id), s.key_ptr.*, @as(i64, s.value_ptr.*) });
-                    try sk.run();
-                }
-                for (p.injuries.items, 0..) |i, n| {
-                    try inj.bindAll(.{ cid, @intFromEnum(p.id), @as(i64, @intCast(n)), i.location, @as(i64, i.severity), @as(i64, i.incurred_day), i.heal_done_day, @intFromEnum(i.doctor), @as(i64, @intFromBool(i.permanent)), @as(i64, @intFromBool(i.healed)) });
-                    try inj.run();
+                try unit_st.run();
+                for (u.slots.items, 0..) |s, i| {
+                    try slot_st.bindAll(.{ c, @intFromEnum(u.id), @as(i64, @intCast(i)), s.slot_key, s.part_key, s.class, s.condition });
+                    try slot_st.run();
                 }
             }
+        };
+        var it = gs.units.iterator();
+        while (it.next()) |entry| : (ord += 1) try Writer.put(st, sl, cid, ord, entry.value_ptr, .{});
+        for (gs.held_hulls.items) |*h| {
+            try Writer.put(st, sl, cid, ord, &h.unit, h.mark());
+            ord += 1;
         }
+    }
 
-        // Units and slots.
-        {
-            const st = try self.db.prepare("INSERT INTO unit VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22)");
-            defer st.finalize();
-            const sl = try self.db.prepare("INSERT INTO unit_slot VALUES (?1,?2,?3,?4,?5,?6,?7)");
-            defer sl.finalize();
-            var ord: i64 = 0;
-            const Writer = struct {
-                // One writer for both, so an owned hull and a held one can
-                // never be saved by two loops that drift apart.
-                fn put(unit_st: anytype, slot_st: anytype, c: i64, o: i64, u: *const unit_mod.Unit, held: unit_mod.HeldHull.Mark) !void {
-                    try unit_st.bindAll(.{
-                        c,                        o,                        @intFromEnum(u.id),    u.chassis_key,
-                        u.name,                   u.kind,                   @intFromEnum(u.force), @intFromEnum(u.pilot),
-                        @intFromEnum(u.tech),     @as(i64, u.armor_pct),    u.quality,             u.status,
-                        u.last_maintenance_day,   @as(i64, u.acquired_day), u.purchase_price,      u.reactivation_done_day,
-                        @intFromEnum(u.berth_hq), u.wreck,                  held.by,               @as(i64, held.day),
-                        @as(i64, @intFromEnum(held.battle)), @as(i64, @intFromEnum(held.from_force)),
-                    });
-                    try unit_st.run();
-                    for (u.slots.items, 0..) |s, i| {
-                        try slot_st.bindAll(.{ c, @intFromEnum(u.id), @as(i64, @intCast(i)), s.slot_key, s.part_key, s.class, s.condition });
-                        try slot_st.run();
-                    }
-                }
-            };
-            var it = gs.units.iterator();
-            while (it.next()) |entry| : (ord += 1) try Writer.put(st, sl, cid, ord, entry.value_ptr, .{});
-            for (gs.held_hulls.items) |*h| {
-                try Writer.put(st, sl, cid, ord, &h.unit, h.mark());
-                ord += 1;
+    // Forces, their unit and child orderings, and field stores.
+    fn saveForce(self: Store, gs: *GameState, cid: i64) !void {
+        const st = try self.db.prepare("INSERT INTO force VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)");
+        defer st.finalize();
+        const fu = try self.db.prepare("INSERT INTO force_unit VALUES (?1,?2,?3,?4)");
+        defer fu.finalize();
+        const fc = try self.db.prepare("INSERT INTO force_child VALUES (?1,?2,?3,?4)");
+        defer fc.finalize();
+        var it = gs.forces.iterator();
+        var ord: i64 = 0;
+        while (it.next()) |entry| : (ord += 1) {
+            const f = entry.value_ptr;
+            try st.bind(1, cid);
+            try st.bind(2, ord);
+            try st.bind(3, @intFromEnum(f.id));
+            try st.bind(4, @intFromEnum(f.parent));
+            try st.bind(5, f.name);
+            if (f.emblem) |e| try st.bindBlob(6, e) else try st.bind(6, null);
+            try st.bind(7, f.local_funds);
+            try st.bind(8, f.echelon);
+            try st.bind(9, @intFromEnum(f.commander));
+            try st.bind(10, @intFromEnum(f.supplying_hq));
+            try st.bind(11, f.role);
+            try st.bind(12, f.support_kind);
+            try st.bind(13, f.last_rotation_day);
+            try st.bind(14, @as(i64, f.contracts_since_rotation));
+            try st.bind(15, f.location_planet);
+            try st.bind(16, f.return_eta_day);
+            try st.bind(17, @as(i64, f.supply_shortage_days));
+            try st.bind(18, f.roe);
+            try st.run();
+            for (f.units.items, 0..) |uid, i| {
+                try fu.bindAll(.{ cid, @intFromEnum(f.id), @as(i64, @intCast(i)), @intFromEnum(uid) });
+                try fu.run();
             }
+            for (f.children.items, 0..) |child, i| {
+                try fc.bindAll(.{ cid, @intFromEnum(f.id), @as(i64, @intCast(i)), @intFromEnum(child) });
+                try fc.run();
+            }
+            try self.saveStock(cid, "company", @intFromEnum(f.id), &f.stock);
         }
+    }
 
-        // Forces, their unit and child orderings, and field stores.
-        {
-            const st = try self.db.prepare("INSERT INTO force VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)");
-            defer st.finalize();
-            const fu = try self.db.prepare("INSERT INTO force_unit VALUES (?1,?2,?3,?4)");
-            defer fu.finalize();
-            const fc = try self.db.prepare("INSERT INTO force_child VALUES (?1,?2,?3,?4)");
-            defer fc.finalize();
-            var it = gs.forces.iterator();
-            var ord: i64 = 0;
-            while (it.next()) |entry| : (ord += 1) {
-                const f = entry.value_ptr;
-                try st.bind(1, cid);
-                try st.bind(2, ord);
-                try st.bind(3, @intFromEnum(f.id));
-                try st.bind(4, @intFromEnum(f.parent));
-                try st.bind(5, f.name);
-                if (f.emblem) |e| try st.bindBlob(6, e) else try st.bind(6, null);
-                try st.bind(7, f.local_funds);
-                try st.bind(8, f.echelon);
-                try st.bind(9, @intFromEnum(f.commander));
-                try st.bind(10, @intFromEnum(f.supplying_hq));
-                try st.bind(11, f.role);
-                try st.bind(12, f.support_kind);
-                try st.bind(13, f.last_rotation_day);
-                try st.bind(14, @as(i64, f.contracts_since_rotation));
-                try st.bind(15, f.location_planet);
-                try st.bind(16, f.return_eta_day);
-                try st.bind(17, @as(i64, f.supply_shortage_days));
-                try st.bind(18, f.roe);
-                try st.run();
-                for (f.units.items, 0..) |uid, i| {
-                    try fu.bindAll(.{ cid, @intFromEnum(f.id), @as(i64, @intCast(i)), @intFromEnum(uid) });
-                    try fu.run();
-                }
-                for (f.children.items, 0..) |child, i| {
-                    try fc.bindAll(.{ cid, @intFromEnum(f.id), @as(i64, @intCast(i)), @intFromEnum(child) });
-                    try fc.run();
-                }
-                try self.saveStock(cid, "company", @intFromEnum(f.id), &f.stock);
+    // HQs, facilities, projects, warehouse stock.
+    fn saveHq(self: Store, gs: *GameState, cid: i64) !void {
+        const st = try self.db.prepare("INSERT INTO hq VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)");
+        defer st.finalize();
+        const fa = try self.db.prepare("INSERT INTO hq_facility VALUES (?1,?2,?3,?4,?5)");
+        defer fa.finalize();
+        const pr = try self.db.prepare("INSERT INTO hq_project VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)");
+        defer pr.finalize();
+        var it = gs.hqs.iterator();
+        var ord: i64 = 0;
+        while (it.next()) |entry| : (ord += 1) {
+            const h = entry.value_ptr;
+            try st.bindAll(.{ cid, ord, @intFromEnum(h.id), h.name, h.tier, h.planet_key, @as(i64, h.staff_assigned), h.monthly_upkeep, h.funds });
+            try st.run();
+            for (h.facilities.items, 0..) |f, i| {
+                try fa.bindAll(.{ cid, @intFromEnum(h.id), @as(i64, @intCast(i)), f.kind, @as(i64, f.level) });
+                try fa.run();
             }
+            for (h.projects.items, 0..) |p, i| {
+                try pr.bindAll(.{ cid, @intFromEnum(h.id), @as(i64, @intCast(i)), p.kind, p.facility, @as(i64, p.target_level), @as(i64, p.started_day), @as(i64, p.paperwork_done_day), @as(i64, p.construction_done_day), p.cost });
+                try pr.run();
+            }
+            try self.saveStock(cid, "hq", @intFromEnum(h.id), &h.stock);
         }
-        try self.saveStock(cid, "outfit", 0, &gs.spare_parts);
+    }
 
-        // HQs, facilities, projects, warehouse stock.
-        {
-            const st = try self.db.prepare("INSERT INTO hq VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)");
-            defer st.finalize();
-            const fa = try self.db.prepare("INSERT INTO hq_facility VALUES (?1,?2,?3,?4,?5)");
-            defer fa.finalize();
-            const pr = try self.db.prepare("INSERT INTO hq_project VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)");
-            defer pr.finalize();
-            var it = gs.hqs.iterator();
-            var ord: i64 = 0;
-            while (it.next()) |entry| : (ord += 1) {
-                const h = entry.value_ptr;
-                try st.bindAll(.{ cid, ord, @intFromEnum(h.id), h.name, h.tier, h.planet_key, @as(i64, h.staff_assigned), h.monthly_upkeep, h.funds });
-                try st.run();
-                for (h.facilities.items, 0..) |f, i| {
-                    try fa.bindAll(.{ cid, @intFromEnum(h.id), @as(i64, @intCast(i)), f.kind, @as(i64, f.level) });
-                    try fa.run();
-                }
-                for (h.projects.items, 0..) |p, i| {
-                    try pr.bindAll(.{ cid, @intFromEnum(h.id), @as(i64, @intCast(i)), p.kind, p.facility, @as(i64, p.target_level), @as(i64, p.started_day), @as(i64, p.paperwork_done_day), @as(i64, p.construction_done_day), p.cost });
-                    try pr.run();
-                }
-                try self.saveStock(cid, "hq", @intFromEnum(h.id), &h.stock);
-            }
-        }
+    // Contracts and offers.
+    fn saveContracts(self: Store, gs: *GameState, cid: i64) !void {
+        const st = try self.db.prepare("INSERT INTO contract VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33,?34,?35,?36,?37,?38,?39,?40,?41,?42,?43,?44,?45)");
+        defer st.finalize();
+        var ord: i64 = 0;
+        var it = gs.contracts.iterator();
+        while (it.next()) |entry| : (ord += 1) try saveContract(st, cid, false, ord, entry.value_ptr);
+        for (gs.contract_offers.items, 0..) |*o, i| try saveContract(st, cid, true, @intCast(i), o);
+    }
 
-        // Contracts and offers.
-        {
-            const st = try self.db.prepare("INSERT INTO contract VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33,?34,?35,?36,?37,?38,?39,?40,?41,?42,?43,?44,?45)");
-            defer st.finalize();
-            var ord: i64 = 0;
-            var it = gs.contracts.iterator();
-            while (it.next()) |entry| : (ord += 1) try saveContract(st, cid, false, ord, entry.value_ptr);
-            for (gs.contract_offers.items, 0..) |*o, i| try saveContract(st, cid, true, @intCast(i), o);
+    // Ledger and the rest of the lists.
+    fn saveTxn(self: Store, gs: *GameState, cid: i64) !void {
+        const st = try self.db.prepare("INSERT INTO txn VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)");
+        defer st.finalize();
+        for (gs.ledger.transactions.items, 0..) |t, i| {
+            try st.bindAll(.{ cid, @as(i64, @intCast(i)), @as(i64, t.day), t.amount, t.category, @intFromEnum(t.company), @intFromEnum(t.hq), @intFromEnum(t.contract), t.note });
+            try st.run();
         }
+    }
 
-        // Ledger and the rest of the lists.
-        {
-            const st = try self.db.prepare("INSERT INTO txn VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)");
-            defer st.finalize();
-            for (gs.ledger.transactions.items, 0..) |t, i| {
-                try st.bindAll(.{ cid, @as(i64, @intCast(i)), @as(i64, t.day), t.amount, t.category, @intFromEnum(t.company), @intFromEnum(t.hq), @intFromEnum(t.contract), t.note });
-                try st.run();
-            }
+    fn saveLoan(self: Store, gs: *GameState, cid: i64) !void {
+        const st = try self.db.prepare("INSERT INTO loan VALUES (?1,?2,?3,?4,?5,?6,?7,?8)");
+        defer st.finalize();
+        for (gs.loans.items, 0..) |l, i| {
+            try st.bindAll(.{ cid, @as(i64, @intCast(i)), l.principal, l.balance, l.rate_bp, @as(i64, l.term_months), @as(i64, l.next_pay_day), l.payment });
+            try st.run();
         }
-        {
-            const st = try self.db.prepare("INSERT INTO loan VALUES (?1,?2,?3,?4,?5,?6,?7,?8)");
-            defer st.finalize();
-            for (gs.loans.items, 0..) |l, i| {
-                try st.bindAll(.{ cid, @as(i64, @intCast(i)), l.principal, l.balance, l.rate_bp, @as(i64, l.term_months), @as(i64, l.next_pay_day), l.payment });
-                try st.run();
-            }
+    }
+
+    fn saveCourier(self: Store, gs: *GameState, cid: i64) !void {
+        const st = try self.db.prepare("INSERT INTO courier VALUES (?1,?2,?3,?4,?5,?6,?7)");
+        defer st.finalize();
+        for (gs.fund_couriers.items, 0..) |c, i| {
+            const t = treasuryCols(c.to);
+            try st.bindAll(.{ cid, @as(i64, @intCast(i)), t.kind, t.id, c.amount, @as(i64, c.sent_day), @as(i64, c.eta_day) });
+            try st.run();
         }
-        {
-            const st = try self.db.prepare("INSERT INTO courier VALUES (?1,?2,?3,?4,?5,?6,?7)");
-            defer st.finalize();
-            for (gs.fund_couriers.items, 0..) |c, i| {
-                const t = treasuryCols(c.to);
-                try st.bindAll(.{ cid, @as(i64, @intCast(i)), t.kind, t.id, c.amount, @as(i64, c.sent_day), @as(i64, c.eta_day) });
-                try st.run();
-            }
+    }
+
+    fn savePolicy(self: Store, gs: *GameState, cid: i64) !void {
+        const st = try self.db.prepare("INSERT INTO policy VALUES (?1,?2,?3,?4,?5,?6,?7)");
+        defer st.finalize();
+        for (gs.policies.items, 0..) |p, i| {
+            const t = treasuryCols(p.entity);
+            try st.bindAll(.{ cid, @as(i64, @intCast(i)), t.kind, t.id, p.floor, p.monthly_cap, p.sent_this_month });
+            try st.run();
         }
-        {
-            const st = try self.db.prepare("INSERT INTO policy VALUES (?1,?2,?3,?4,?5,?6,?7)");
-            defer st.finalize();
-            for (gs.policies.items, 0..) |p, i| {
-                const t = treasuryCols(p.entity);
-                try st.bindAll(.{ cid, @as(i64, @intCast(i)), t.kind, t.id, p.floor, p.monthly_cap, p.sent_this_month });
-                try st.run();
-            }
+    }
+
+    fn saveSupplyPolicy(self: Store, gs: *GameState, cid: i64) !void {
+        const st = try self.db.prepare("INSERT INTO supply_policy VALUES (?1,?2,?3,?4,?5,?6)");
+        defer st.finalize();
+        for (gs.supply_policies.items, 0..) |p, i| {
+            try st.bindAll(.{ cid, @as(i64, @intCast(i)), @intFromEnum(p.company), @as(i64, p.min_days), @as(i64, p.tons), @as(i64, p.ammo_battles) });
+            try st.run();
         }
-        {
-            const st = try self.db.prepare("INSERT INTO supply_policy VALUES (?1,?2,?3,?4,?5,?6)");
-            defer st.finalize();
-            for (gs.supply_policies.items, 0..) |p, i| {
-                try st.bindAll(.{ cid, @as(i64, @intCast(i)), @intFromEnum(p.company), @as(i64, p.min_days), @as(i64, p.tons), @as(i64, p.ammo_battles) });
-                try st.run();
-            }
+    }
+
+    fn saveStockPolicy(self: Store, gs: *GameState, cid: i64) !void {
+        const st = try self.db.prepare("INSERT INTO stock_policy VALUES (?1,?2,?3,?4,?5,?6)");
+        defer st.finalize();
+        for (gs.stock_policies.items, 0..) |p, i| {
+            try st.bindAll(.{ cid, @as(i64, @intCast(i)), @intFromEnum(p.hq), p.part_key, @as(i64, p.min), @as(i64, p.target) });
+            try st.run();
         }
-        {
-            const st = try self.db.prepare("INSERT INTO stock_policy VALUES (?1,?2,?3,?4,?5,?6)");
-            defer st.finalize();
-            for (gs.stock_policies.items, 0..) |p, i| {
-                try st.bindAll(.{ cid, @as(i64, @intCast(i)), @intFromEnum(p.hq), p.part_key, @as(i64, p.min), @as(i64, p.target) });
-                try st.run();
-            }
+    }
+
+    fn saveBayJob(self: Store, gs: *GameState, cid: i64) !void {
+        const st = try self.db.prepare("INSERT INTO bay_job VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)");
+        defer st.finalize();
+        for (gs.bay_jobs.items, 0..) |j, i| {
+            try st.bindAll(.{ cid, @as(i64, @intCast(i)), @intFromEnum(j.hq), j.kind, @intFromEnum(j.unit), j.item_key, @as(i64, j.duration_days), @as(i64, j.queued_day), j.started_day, j.done_day, j.cost });
+            try st.run();
         }
-        {
-            const st = try self.db.prepare("INSERT INTO bay_job VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)");
-            defer st.finalize();
-            for (gs.bay_jobs.items, 0..) |j, i| {
-                try st.bindAll(.{ cid, @as(i64, @intCast(i)), @intFromEnum(j.hq), j.kind, @intFromEnum(j.unit), j.item_key, @as(i64, j.duration_days), @as(i64, j.queued_day), j.started_day, j.done_day, j.cost });
-                try st.run();
-            }
+    }
+
+    fn saveCandidate(self: Store, gs: *GameState, cid: i64) !void {
+        const st = try self.db.prepare("INSERT INTO candidate VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)");
+        defer st.finalize();
+        for (gs.candidates.items, 0..) |c, i| {
+            try st.bindAll(.{ cid, @as(i64, @intCast(i)), @intFromEnum(c.hq), c.spec.first, c.spec.last, c.spec.callsign, c.spec.role, c.spec.experience, @as(i64, c.spec.primary_skill), @as(i64, c.spec.secondary_skill), c.asking_bonus, @as(i64, c.listed_day), @as(i64, c.expires_day), @as(i64, c.spec.age) });
+            try st.run();
         }
-        {
-            const st = try self.db.prepare("INSERT INTO candidate VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)");
-            defer st.finalize();
-            for (gs.candidates.items, 0..) |c, i| {
-                try st.bindAll(.{ cid, @as(i64, @intCast(i)), @intFromEnum(c.hq), c.spec.first, c.spec.last, c.spec.callsign, c.spec.role, c.spec.experience, @as(i64, c.spec.primary_skill), @as(i64, c.spec.secondary_skill), c.asking_bonus, @as(i64, c.listed_day), @as(i64, c.expires_day), @as(i64, c.spec.age) });
-                try st.run();
-            }
+    }
+
+    fn saveHqLink(self: Store, gs: *GameState, cid: i64) !void {
+        const st = try self.db.prepare("INSERT INTO hq_link VALUES (?1,?2,?3,?4,?5,?6,?7)");
+        defer st.finalize();
+        for (gs.hq_links.items, 0..) |l, i| {
+            try st.bindAll(.{ cid, @as(i64, @intCast(i)), @intFromEnum(l.a), @intFromEnum(l.b), @as(i64, l.level), @as(i64, l.tons_this_week), @as(i64, l.established_day) });
+            try st.run();
         }
-        {
-            const st = try self.db.prepare("INSERT INTO hq_link VALUES (?1,?2,?3,?4,?5,?6,?7)");
-            defer st.finalize();
-            for (gs.hq_links.items, 0..) |l, i| {
-                try st.bindAll(.{ cid, @as(i64, @intCast(i)), @intFromEnum(l.a), @intFromEnum(l.b), @as(i64, l.level), @as(i64, l.tons_this_week), @as(i64, l.established_day) });
-                try st.run();
-            }
+    }
+
+    fn saveUnitTransfer(self: Store, gs: *GameState, cid: i64) !void {
+        const st = try self.db.prepare("INSERT INTO unit_transfer VALUES (?1,?2,?3,?4,?5)");
+        defer st.finalize();
+        for (gs.unit_transfers.items, 0..) |t, i| {
+            try st.bindAll(.{ cid, @as(i64, @intCast(i)), @intFromEnum(t.unit), @intFromEnum(t.to_company), @as(i64, t.eta_day) });
+            try st.run();
         }
-        {
-            const st = try self.db.prepare("INSERT INTO unit_transfer VALUES (?1,?2,?3,?4,?5)");
-            defer st.finalize();
-            for (gs.unit_transfers.items, 0..) |t, i| {
-                try st.bindAll(.{ cid, @as(i64, @intCast(i)), @intFromEnum(t.unit), @intFromEnum(t.to_company), @as(i64, t.eta_day) });
-                try st.run();
-            }
+    }
+
+    fn saveFactionCooling(self: Store, gs: *GameState, cid: i64) !void {
+        const st = try self.db.prepare("INSERT INTO faction_cooling VALUES (?1,?2,?3,?4)");
+        defer st.finalize();
+        for (gs.faction_cooling.items, 0..) |f, i| {
+            try st.bindAll(.{ cid, @as(i64, @intCast(i)), f.faction, @as(i64, f.until_day) });
+            try st.run();
         }
-        {
-            const st = try self.db.prepare("INSERT INTO faction_cooling VALUES (?1,?2,?3,?4)");
-            defer st.finalize();
-            for (gs.faction_cooling.items, 0..) |f, i| {
-                try st.bindAll(.{ cid, @as(i64, @intCast(i)), f.faction, @as(i64, f.until_day) });
-                try st.run();
-            }
+    }
+
+    fn saveFactionStanding(self: Store, gs: *GameState, cid: i64) !void {
+        const st = try self.db.prepare("INSERT INTO faction_standing VALUES (?1,?2,?3)");
+        defer st.finalize();
+        var it = gs.faction_standing.iterator();
+        while (it.next()) |e| {
+            try st.bindAll(.{ cid, e.key_ptr.*, @as(i64, e.value_ptr.*) });
+            try st.run();
         }
-        {
-            const st = try self.db.prepare("INSERT INTO faction_standing VALUES (?1,?2,?3)");
-            defer st.finalize();
-            var it = gs.faction_standing.iterator();
-            while (it.next()) |e| {
-                try st.bindAll(.{ cid, e.key_ptr.*, @as(i64, e.value_ptr.*) });
-                try st.run();
-            }
+    }
+
+    fn saveEventMemory(self: Store, gs: *GameState, cid: i64) !void {
+        const st = try self.db.prepare("INSERT INTO event_memory VALUES (?1,?2,?3,?4,?5)");
+        defer st.finalize();
+        var it = gs.event_memory.iterator();
+        while (it.next()) |e| {
+            try st.bindAll(.{ cid, e.key_ptr.*, @as(i64, e.value_ptr.last_day), @as(i64, e.value_ptr.last_choice), @as(i64, e.value_ptr.streak) });
+            try st.run();
         }
-        {
-            const st = try self.db.prepare("INSERT INTO event_memory VALUES (?1,?2,?3,?4,?5)");
-            defer st.finalize();
-            var it = gs.event_memory.iterator();
-            while (it.next()) |e| {
-                try st.bindAll(.{ cid, e.key_ptr.*, @as(i64, e.value_ptr.last_day), @as(i64, e.value_ptr.last_choice), @as(i64, e.value_ptr.streak) });
-                try st.run();
-            }
+    }
+
+    fn saveRatingSnapshot(self: Store, gs: *GameState, cid: i64) !void {
+        const st = try self.db.prepare("INSERT INTO rating_snapshot VALUES (?1,?2,?3)");
+        defer st.finalize();
+        for (gs.rating_history.items) |snap| {
+            try st.bindAll(.{ cid, @as(i64, snap.year), @as(i64, snap.score) });
+            try st.run();
         }
-        {
-            const st = try self.db.prepare("INSERT INTO rating_snapshot VALUES (?1,?2,?3)");
-            defer st.finalize();
-            for (gs.rating_history.items) |snap| {
-                try st.bindAll(.{ cid, @as(i64, snap.year), @as(i64, snap.score) });
-                try st.run();
-            }
+    }
+
+    fn saveListing(self: Store, gs: *GameState, cid: i64) !void {
+        const st = try self.db.prepare("INSERT INTO listing VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)");
+        defer st.finalize();
+        for (gs.market_listings.items, 0..) |l, i| {
+            try st.bindAll(.{
+                cid,                                                                  @as(i64, @intCast(i)),                                     l.kind,                                                      l.item_key,
+                l.rarity,                                                             l.price,                                                   @as(i64, l.quantity),                                        l.staple,
+                @as(i64, l.listed_day),                                               @as(i64, l.expires_day),                                   @intFromEnum(l.hq),                                          if (l.condition) |c| @as(?i64, c.armor_pct) else null,
+                if (l.condition) |c| @as(?[]const u8, @tagName(c.quality)) else null, if (l.condition) |c| @as(?i64, c.damaged_slots) else null, if (l.condition) |c| @as(?i64, c.destroyed_slots) else null, if (l.condition) |c| @as(?i64, c.missing_components) else null,
+                @as(i64, @intFromBool(l.black_market)),                           @intFromEnum(l.company),
+            });
+            try st.run();
         }
-        {
-            const st = try self.db.prepare("INSERT INTO listing VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)");
-            defer st.finalize();
-            for (gs.market_listings.items, 0..) |l, i| {
-                try st.bindAll(.{
-                    cid,                                                                  @as(i64, @intCast(i)),                                     l.kind,                                                      l.item_key,
-                    l.rarity,                                                             l.price,                                                   @as(i64, l.quantity),                                        l.staple,
-                    @as(i64, l.listed_day),                                               @as(i64, l.expires_day),                                   @intFromEnum(l.hq),                                          if (l.condition) |c| @as(?i64, c.armor_pct) else null,
-                    if (l.condition) |c| @as(?[]const u8, @tagName(c.quality)) else null, if (l.condition) |c| @as(?i64, c.damaged_slots) else null, if (l.condition) |c| @as(?i64, c.destroyed_slots) else null, if (l.condition) |c| @as(?i64, c.missing_components) else null,
-                    @as(i64, @intFromBool(l.black_market)),                           @intFromEnum(l.company),
+    }
+
+    fn savePartOrder(self: Store, gs: *GameState, cid: i64) !void {
+        const st = try self.db.prepare("INSERT INTO part_order VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)");
+        defer st.finalize();
+        for (gs.part_orders.items, 0..) |o, i| {
+            const dest_cols = siteCols(o.dest);
+            try st.bindAll(.{ cid, @as(i64, @intCast(i)), o.part_key, @as(i64, o.quantity), dest_cols.kind, dest_cols.id, @as(i64, o.ordered_day), o.eta_day, o.cost, o.status });
+            try st.run();
+        }
+    }
+
+    fn saveEventLog(self: Store, gs: *GameState, cid: i64) !void {
+        const st = try self.db.prepare("INSERT INTO event_log VALUES (?1,?2,?3,?4,?5,?6,?7,?8)");
+        defer st.finalize();
+        for (gs.event_log.items, 0..) |e, i| {
+            try st.bindAll(.{ cid, @as(i64, @intCast(i)), @as(i64, e.day), e.category, @intFromEnum(e.company), @intFromEnum(e.hq), @intFromEnum(e.contract), e.text });
+            try st.run();
+        }
+    }
+
+    fn savePendingEvent(self: Store, gs: *GameState, cid: i64) !void {
+        const st = try self.db.prepare("INSERT INTO pending_event VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)");
+        defer st.finalize();
+        for (gs.event_queue.pending.items, 0..) |e, i| {
+            try st.bindAll(.{ cid, @as(i64, @intCast(i)), e.kind, @as(i64, e.day), @intFromEnum(e.contract), @intFromEnum(e.company), @as(i64, @intCast(e.default_choice)), @as(i64, e.deadline_day), if (e.chosen) |c| @as(?i64, @intCast(c)) else null, @intFromEnum(e.person), @intFromEnum(e.id), @intFromEnum(e.battle) });
+            try st.run();
+        }
+    }
+
+    fn saveBattleReport(self: Store, gs: *GameState, cid: i64) !void {
+        // Battle reports: the record a screen reads. Hits and ammunition
+        // are child rows; the ammunition family is stored by name, not
+        // by position, because `part.munition_keys` can grow and a
+        // positional encoding would silently re-label saved rows.
+        const br = try self.db.prepare("INSERT INTO battle_report VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33,?34,?35,?36,?37,?38,?39,?40,?41,?42,?43,?44,?45,?46,?47,?48,?49,?50,?51,?52,?53)");
+        defer br.finalize();
+        const bh = try self.db.prepare("INSERT INTO battle_report_hit VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22)");
+        defer bh.finalize();
+        const ba = try self.db.prepare("INSERT INTO battle_report_ammo VALUES (?1,?2,?3,?4,?5,?6)");
+        defer ba.finalize();
+        const bs = try self.db.prepare("INSERT INTO battle_report_salvage VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)");
+        defer bs.finalize();
+        for (gs.battle_reports.kept.items, 0..) |r, i| {
+            const ord: i64 = @intCast(i);
+            try br.bindAll(.{
+                cid,                             ord,                            @intFromEnum(r.id),              @as(i64, r.day),
+                @intFromEnum(r.contract),        @intFromEnum(r.company),        r.kind,                          r.enemy_key,
+                r.scenario,                      r.terrain,                      r.weather,                       @tagName(r.outcome),
+                @as(i64, @intFromBool(r.held_field)), @as(i64, @intFromBool(r.withdrew)), @tagName(r.roe),        @as(i64, @intFromBool(r.roe_overridden)),
+                r.player_power,                  r.enemy_power,                  @as(i64, r.conditions_mod),      @as(i64, @intFromBool(r.close_terrain)),
+                @as(i64, @intFromBool(r.air_grounded)), @as(i64, @intFromBool(r.convoy_hit)), r.edge_spent_by,    @as(i64, r.recon_quality),
+                @as(i64, r.avg_fatigue),         @as(i64, r.avg_morale),         @as(i64, r.hits_taken),          @as(i64, r.destroyed),
+                @as(i64, r.wounded),             @as(i64, r.kia),                @as(i64, r.lost_hulls),          @as(i64, r.missing),
+                r.enemy_destroyed_bv,            @as(i64, r.kills_credited),     @as(i64, r.prisoners),           r.battle_loss_comp,
+                @as(i64, r.score_after),         @as(i64, r.score_delta),        @as(i64, r.morale_delta),        @as(i64, r.fatigue_add),
+                @as(i64, r.battle_loss_pct),     @as(i64, r.salvage_pct),        r.command_rights,                @as(i64, r.silenced_mounts),
+                @as(i64, r.armor_left),          r.salvage.claimed_bv,           r.salvage.haulable_bv,           r.salvage.liaison_cut,
+                r.salvage.exchange_cash,         r.salvage.items,                @as(i64, @intFromBool(r.conceded)),
+                @as(i64, @intFromBool(r.acknowledged)), r.salvage.unclaimed_bv,
+            });
+            try br.run();
+            for (r.hulls, 0..) |h, hi| {
+                // Each value in its own local: a mixed if/else inside
+                // the tuple lets peer resolution pick a type the
+                // binder then reads as the wrong kind of column.
+                const slot_key: []const u8 = h.slot orelse "";
+                const wound_severity: ?i64 = if (h.crew.wound) |w| @intCast(w.severity) else null;
+                const wound_location: []const u8 = if (h.crew.wound) |w| @tagName(w.location) else "";
+                const wound_permanent: i64 = if (h.crew.wound) |w| @intFromBool(w.permanent) else 0;
+                const recovery_roll: ?i64 = if (h.recovery) |rec| @intCast(rec.roll) else null;
+                const recovery_target: ?i64 = if (h.recovery) |rec| @intCast(rec.target) else null;
+                try bh.bindAll(.{
+                    cid,                              ord,                              @as(i64, @intCast(hi)),           @as(i64, @intFromEnum(h.unit)),
+                    h.chassis_key,                    h.chassis_name,                   @as(i64, h.armor_before),         @as(i64, h.armor_after),
+                    slot_key,                         h.slot_part,                      @tagName(h.slot_result),          @as(i64, @intFromBool(h.destroyed)),
+                    @tagName(h.cause),                @as(i64, @intFromEnum(h.pilot)),  h.crew_name,
+                    wound_severity,                   wound_location,                   wound_permanent,                  @tagName(h.crew.fate),
+                    recovery_roll,                    recovery_target,                  @as(i64, @intFromBool(h.lost)),
                 });
-                try st.run();
+                try bh.run();
             }
-        }
-        {
-            const st = try self.db.prepare("INSERT INTO part_order VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)");
-            defer st.finalize();
-            for (gs.part_orders.items, 0..) |o, i| {
-                const dest_cols = siteCols(o.dest);
-                try st.bindAll(.{ cid, @as(i64, @intCast(i)), o.part_key, @as(i64, o.quantity), dest_cols.kind, dest_cols.id, @as(i64, o.ordered_day), o.eta_day, o.cost, o.status });
-                try st.run();
+            for (r.ammo, 0..) |a, ai| {
+                try ba.bindAll(.{ cid, ord, @as(i64, @intCast(ai)), a.key, @as(i64, a.burned), @as(i64, a.left) });
+                try ba.run();
             }
-        }
-        {
-            const st = try self.db.prepare("INSERT INTO event_log VALUES (?1,?2,?3,?4,?5,?6,?7,?8)");
-            defer st.finalize();
-            for (gs.event_log.items, 0..) |e, i| {
-                try st.bindAll(.{ cid, @as(i64, @intCast(i)), @as(i64, e.day), e.category, @intFromEnum(e.company), @intFromEnum(e.hq), @intFromEnum(e.contract), e.text });
-                try st.run();
-            }
-        }
-        {
-            const st = try self.db.prepare("INSERT INTO pending_event VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)");
-            defer st.finalize();
-            for (gs.event_queue.pending.items, 0..) |e, i| {
-                try st.bindAll(.{ cid, @as(i64, @intCast(i)), e.kind, @as(i64, e.day), @intFromEnum(e.contract), @intFromEnum(e.company), @as(i64, @intCast(e.default_choice)), @as(i64, e.deadline_day), if (e.chosen) |c| @as(?i64, @intCast(c)) else null, @intFromEnum(e.person), @intFromEnum(e.id), @intFromEnum(e.battle) });
-                try st.run();
-            }
-        }
-
-        {
-            // Battle reports: the record a screen reads. Hits and ammunition
-            // are child rows; the ammunition family is stored by name, not
-            // by position, because `part.munition_keys` can grow and a
-            // positional encoding would silently re-label saved rows.
-            const br = try self.db.prepare("INSERT INTO battle_report VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33,?34,?35,?36,?37,?38,?39,?40,?41,?42,?43,?44,?45,?46,?47,?48,?49,?50,?51,?52,?53)");
-            defer br.finalize();
-            const bh = try self.db.prepare("INSERT INTO battle_report_hit VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22)");
-            defer bh.finalize();
-            const ba = try self.db.prepare("INSERT INTO battle_report_ammo VALUES (?1,?2,?3,?4,?5,?6)");
-            defer ba.finalize();
-            const bs = try self.db.prepare("INSERT INTO battle_report_salvage VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)");
-            defer bs.finalize();
-            for (gs.battle_reports.kept.items, 0..) |r, i| {
-                const ord: i64 = @intCast(i);
-                try br.bindAll(.{
-                    cid,                             ord,                            @intFromEnum(r.id),              @as(i64, r.day),
-                    @intFromEnum(r.contract),        @intFromEnum(r.company),        r.kind,                          r.enemy_key,
-                    r.scenario,                      r.terrain,                      r.weather,                       @tagName(r.outcome),
-                    @as(i64, @intFromBool(r.held_field)), @as(i64, @intFromBool(r.withdrew)), @tagName(r.roe),        @as(i64, @intFromBool(r.roe_overridden)),
-                    r.player_power,                  r.enemy_power,                  @as(i64, r.conditions_mod),      @as(i64, @intFromBool(r.close_terrain)),
-                    @as(i64, @intFromBool(r.air_grounded)), @as(i64, @intFromBool(r.convoy_hit)), r.edge_spent_by,    @as(i64, r.recon_quality),
-                    @as(i64, r.avg_fatigue),         @as(i64, r.avg_morale),         @as(i64, r.hits_taken),          @as(i64, r.destroyed),
-                    @as(i64, r.wounded),             @as(i64, r.kia),                @as(i64, r.lost_hulls),          @as(i64, r.missing),
-                    r.enemy_destroyed_bv,            @as(i64, r.kills_credited),     @as(i64, r.prisoners),           r.battle_loss_comp,
-                    @as(i64, r.score_after),         @as(i64, r.score_delta),        @as(i64, r.morale_delta),        @as(i64, r.fatigue_add),
-                    @as(i64, r.battle_loss_pct),     @as(i64, r.salvage_pct),        r.command_rights,                @as(i64, r.silenced_mounts),
-                    @as(i64, r.armor_left),          r.salvage.claimed_bv,           r.salvage.haulable_bv,           r.salvage.liaison_cut,
-                    r.salvage.exchange_cash,         r.salvage.items,                @as(i64, @intFromBool(r.conceded)),
-                    @as(i64, @intFromBool(r.acknowledged)), r.salvage.unclaimed_bv,
+            // The wrecks on offer. Rolled once when the fight ended, so a reload must offer the same ones — rolling
+            // again would hand the player a different battlefield.
+            for (r.salvage.candidates, 0..) |sc, si| {
+                try bs.bindAll(.{
+                    cid,                     ord,                    @as(i64, @intCast(si)), sc.key,
+                    sc.name,                 sc.bv,                  @as(i64, sc.armor_pct), @tagName(sc.quality),
+                    @as(i64, sc.damaged_slots), @as(i64, sc.destroyed_slots), @as(i64, sc.missing_components),
                 });
-                try br.run();
-                for (r.hulls, 0..) |h, hi| {
-                    // Each value in its own local: a mixed if/else inside
-                    // the tuple lets peer resolution pick a type the
-                    // binder then reads as the wrong kind of column.
-                    const slot_key: []const u8 = h.slot orelse "";
-                    const wound_severity: ?i64 = if (h.crew.wound) |w| @intCast(w.severity) else null;
-                    const wound_location: []const u8 = if (h.crew.wound) |w| @tagName(w.location) else "";
-                    const wound_permanent: i64 = if (h.crew.wound) |w| @intFromBool(w.permanent) else 0;
-                    const recovery_roll: ?i64 = if (h.recovery) |rec| @intCast(rec.roll) else null;
-                    const recovery_target: ?i64 = if (h.recovery) |rec| @intCast(rec.target) else null;
-                    try bh.bindAll(.{
-                        cid,                              ord,                              @as(i64, @intCast(hi)),           @as(i64, @intFromEnum(h.unit)),
-                        h.chassis_key,                    h.chassis_name,                   @as(i64, h.armor_before),         @as(i64, h.armor_after),
-                        slot_key,                         h.slot_part,                      @tagName(h.slot_result),          @as(i64, @intFromBool(h.destroyed)),
-                        @tagName(h.cause),                @as(i64, @intFromEnum(h.pilot)),  h.crew_name,
-                        wound_severity,                   wound_location,                   wound_permanent,                  @tagName(h.crew.fate),
-                        recovery_roll,                    recovery_target,                  @as(i64, @intFromBool(h.lost)),
-                    });
-                    try bh.run();
-                }
-                for (r.ammo, 0..) |a, ai| {
-                    try ba.bindAll(.{ cid, ord, @as(i64, @intCast(ai)), a.key, @as(i64, a.burned), @as(i64, a.left) });
-                    try ba.run();
-                }
-                // The wrecks on offer. Rolled once when the fight ended, so a reload must offer the same ones — rolling
-                // again would hand the player a different battlefield.
-                for (r.salvage.candidates, 0..) |sc, si| {
-                    try bs.bindAll(.{
-                        cid,                     ord,                    @as(i64, @intCast(si)), sc.key,
-                        sc.name,                 sc.bv,                  @as(i64, sc.armor_pct), @tagName(sc.quality),
-                        @as(i64, sc.damaged_slots), @as(i64, sc.destroyed_slots), @as(i64, sc.missing_components),
-                    });
-                    try bs.run();
-                }
+                try bs.run();
             }
         }
+    }
 
-        {
-            const pl = try self.db.prepare("INSERT INTO refit_plan VALUES (?1,?2,?3,?4)");
-            defer pl.finalize();
-            const op = try self.db.prepare("INSERT INTO refit_op VALUES (?1,?2,?3,?4,?5,?6,?7)");
-            defer op.finalize();
-            for (gs.refit_plans.items, 0..) |p, i| {
-                try pl.bindAll(.{ cid, @as(i64, @intCast(i)), @intFromEnum(p.unit), p.committed });
-                try pl.run();
-                for (p.ops.items, 0..) |o, j| {
-                    switch (o) {
-                        .remove => |slot_key| try op.bindAll(.{ cid, @as(i64, @intCast(i)), @as(i64, @intCast(j)), "remove", slot_key, @as(?[]const u8, null), @as(?[]const u8, null) }),
-                        .install => |it| try op.bindAll(.{ cid, @as(i64, @intCast(i)), @as(i64, @intCast(j)), "install", @as(?[]const u8, null), it.location, it.part_key }),
-                    }
-                    try op.run();
+    fn saveRefitPlan(self: Store, gs: *GameState, cid: i64) !void {
+        const pl = try self.db.prepare("INSERT INTO refit_plan VALUES (?1,?2,?3,?4)");
+        defer pl.finalize();
+        const op = try self.db.prepare("INSERT INTO refit_op VALUES (?1,?2,?3,?4,?5,?6,?7)");
+        defer op.finalize();
+        for (gs.refit_plans.items, 0..) |p, i| {
+            try pl.bindAll(.{ cid, @as(i64, @intCast(i)), @intFromEnum(p.unit), p.committed });
+            try pl.run();
+            for (p.ops.items, 0..) |o, j| {
+                switch (o) {
+                    .remove => |slot_key| try op.bindAll(.{ cid, @as(i64, @intCast(i)), @as(i64, @intCast(j)), "remove", slot_key, @as(?[]const u8, null), @as(?[]const u8, null) }),
+                    .install => |it| try op.bindAll(.{ cid, @as(i64, @intCast(i)), @as(i64, @intCast(j)), "install", @as(?[]const u8, null), it.location, it.part_key }),
                 }
+                try op.run();
             }
         }
-
-        try self.db.exec("COMMIT");
-        gs.campaign_id = cid;
     }
 
     fn saveStock(self: Store, cid: i64, kind: []const u8, owner: i64, stock: *const std.StringArrayHashMapUnmanaged(u32)) !void {
@@ -1605,66 +1664,9 @@ pub const Store = struct {
             const outcome = br.enumValue(autoresolve_mod.Outcome, 10) orelse return error.CorruptSave;
             const roe = br.enumValue(force_mod.Roe, 13) orelse return error.CorruptSave;
 
-            var hulls: std.ArrayListUnmanaged(after_action_mod.HullHit) = .empty;
-            {
-                const bh = try self.db.prepare("SELECT unit, chassis_key, chassis_name, armor_before, armor_after, slot, slot_part, slot_result, destroyed, cause, pilot, crew_name, wound_severity, wound_location, wound_permanent, fate, recovery_roll, recovery_target, lost FROM battle_report_hit WHERE cid = ?1 AND report_ord = ?2 ORDER BY ord");
-                defer bh.finalize();
-                try bh.bindAll(.{ cid, ord });
-                while (try bh.next()) {
-                    const slot_text = try bh.text(5, alloc);
-                    try hulls.append(alloc, .{
-                        .unit = try toId(types.UnitId, bh.int(0)),
-                        .chassis_key = try bh.text(1, alloc),
-                        .chassis_name = try bh.text(2, alloc),
-                        .armor_before = try bh.intAs(u8, 3),
-                        .armor_after = try bh.intAs(u8, 4),
-                        .slot = if (slot_text.len > 0) slot_text else null,
-                        .slot_part = try bh.text(6, alloc),
-                        .slot_result = bh.enumValue(after_action_mod.SlotResult, 7) orelse return error.CorruptSave,
-                        .destroyed = bh.int(8) != 0,
-                        .cause = bh.enumValue(unit_mod.WreckCause, 9) orelse return error.CorruptSave,
-                        .pilot = try toId(types.PersonId, bh.int(10)),
-                        .crew_name = try bh.text(11, alloc),
-                        .crew = .{
-                            .wound = if (bh.optInt(12)) |sev| .{
-                                .severity = try fit(u8, sev),
-                                .location = bh.enumValue(person_mod.InjuryLocation, 13) orelse return error.CorruptSave,
-                                .permanent = bh.int(14) != 0,
-                            } else null,
-                            .fate = bh.enumValue(after_action_mod.CrewOutcome.Fate, 15) orelse return error.CorruptSave,
-                        },
-                        .recovery = if (bh.optInt(16)) |roll| .{ .roll = try fit(i32, roll), .target = try bh.intAs(i32, 17) } else null,
-                        .lost = bh.int(18) != 0,
-                    });
-                }
-            }
-            var ammo: std.ArrayListUnmanaged(after_action_mod.AmmoLine) = .empty;
-            {
-                const ba = try self.db.prepare("SELECT family, burned, reserve FROM battle_report_ammo WHERE cid = ?1 AND report_ord = ?2 ORDER BY ord");
-                defer ba.finalize();
-                try ba.bindAll(.{ cid, ord });
-                while (try ba.next()) try ammo.append(alloc, .{
-                    .key = try ba.text(0, alloc),
-                    .burned = try ba.intAs(u32, 1),
-                    .left = try ba.intAs(u32, 2),
-                });
-            }
-            var candidates: std.ArrayListUnmanaged(after_action_mod.SalvageCandidate) = .empty;
-            {
-                const bs = try self.db.prepare("SELECT key, name, bv, armor_pct, quality, damaged, destroyed, missing FROM battle_report_salvage WHERE cid = ?1 AND report_ord = ?2 ORDER BY ord");
-                defer bs.finalize();
-                try bs.bindAll(.{ cid, ord });
-                while (try bs.next()) try candidates.append(alloc, .{
-                    .key = try bs.text(0, alloc),
-                    .name = try bs.text(1, alloc),
-                    .bv = bs.int(2),
-                    .armor_pct = try bs.intAs(u8, 3),
-                    .quality = bs.enumValue(types.Quality, 4) orelse return error.CorruptSave,
-                    .damaged_slots = try bs.intAs(u8, 5),
-                    .destroyed_slots = try bs.intAs(u8, 6),
-                    .missing_components = try bs.intAs(u8, 7),
-                });
-            }
+            const hulls = try self.loadReportHits(alloc, cid, ord);
+            const ammo = try self.loadReportAmmo(alloc, cid, ord);
+            const candidates = try self.loadReportSalvage(alloc, cid, ord);
             try gs.battle_reports.kept.append(alloc, .{
                 .id = try toId(types.BattleId, br.int(1)),
                 .day = try br.intAs(u32, 2),
@@ -1707,8 +1709,8 @@ pub const Store = struct {
                 .battle_loss_pct = try br.intAs(u8, 39),
                 .salvage_pct = try br.intAs(u8, 40),
                 .command_rights = try br.text(41, alloc),
-                .hulls = hulls.items,
-                .ammo = ammo.items,
+                .hulls = hulls,
+                .ammo = ammo,
                 .silenced_mounts = try br.intAs(u32, 42),
                 .armor_left = try br.intAs(u32, 43),
                 .salvage = .{
@@ -1717,13 +1719,82 @@ pub const Store = struct {
                     .liaison_cut = br.int(46),
                     .exchange_cash = br.int(47),
                     .items = try br.text(48, alloc),
-                    .candidates = candidates.items,
+                    .candidates = candidates,
                     .unclaimed_bv = br.int(51),
                 },
                 .conceded = br.int(49) != 0,
                 .acknowledged = br.int(50) != 0,
             });
         }
+    }
+
+    /// The hulls a report's hit rows name, in order.
+    fn loadReportHits(self: Store, alloc: std.mem.Allocator, cid: i64, ord: i64) ![]after_action_mod.HullHit {
+        var hulls: std.ArrayListUnmanaged(after_action_mod.HullHit) = .empty;
+        const bh = try self.db.prepare("SELECT unit, chassis_key, chassis_name, armor_before, armor_after, slot, slot_part, slot_result, destroyed, cause, pilot, crew_name, wound_severity, wound_location, wound_permanent, fate, recovery_roll, recovery_target, lost FROM battle_report_hit WHERE cid = ?1 AND report_ord = ?2 ORDER BY ord");
+        defer bh.finalize();
+        try bh.bindAll(.{ cid, ord });
+        while (try bh.next()) {
+            const slot_text = try bh.text(5, alloc);
+            try hulls.append(alloc, .{
+                .unit = try toId(types.UnitId, bh.int(0)),
+                .chassis_key = try bh.text(1, alloc),
+                .chassis_name = try bh.text(2, alloc),
+                .armor_before = try bh.intAs(u8, 3),
+                .armor_after = try bh.intAs(u8, 4),
+                .slot = if (slot_text.len > 0) slot_text else null,
+                .slot_part = try bh.text(6, alloc),
+                .slot_result = bh.enumValue(after_action_mod.SlotResult, 7) orelse return error.CorruptSave,
+                .destroyed = bh.int(8) != 0,
+                .cause = bh.enumValue(unit_mod.WreckCause, 9) orelse return error.CorruptSave,
+                .pilot = try toId(types.PersonId, bh.int(10)),
+                .crew_name = try bh.text(11, alloc),
+                .crew = .{
+                    .wound = if (bh.optInt(12)) |sev| .{
+                        .severity = try fit(u8, sev),
+                        .location = bh.enumValue(person_mod.InjuryLocation, 13) orelse return error.CorruptSave,
+                        .permanent = bh.int(14) != 0,
+                    } else null,
+                    .fate = bh.enumValue(after_action_mod.CrewOutcome.Fate, 15) orelse return error.CorruptSave,
+                },
+                .recovery = if (bh.optInt(16)) |roll| .{ .roll = try fit(i32, roll), .target = try bh.intAs(i32, 17) } else null,
+                .lost = bh.int(18) != 0,
+            });
+        }
+        return hulls.items;
+    }
+
+    /// A report's ammunition lines, in order.
+    fn loadReportAmmo(self: Store, alloc: std.mem.Allocator, cid: i64, ord: i64) ![]after_action_mod.AmmoLine {
+        var ammo: std.ArrayListUnmanaged(after_action_mod.AmmoLine) = .empty;
+        const ba = try self.db.prepare("SELECT family, burned, reserve FROM battle_report_ammo WHERE cid = ?1 AND report_ord = ?2 ORDER BY ord");
+        defer ba.finalize();
+        try ba.bindAll(.{ cid, ord });
+        while (try ba.next()) try ammo.append(alloc, .{
+            .key = try ba.text(0, alloc),
+            .burned = try ba.intAs(u32, 1),
+            .left = try ba.intAs(u32, 2),
+        });
+        return ammo.items;
+    }
+
+    /// The wrecks a report's salvage claim was divided over, in order.
+    fn loadReportSalvage(self: Store, alloc: std.mem.Allocator, cid: i64, ord: i64) ![]after_action_mod.SalvageCandidate {
+        var candidates: std.ArrayListUnmanaged(after_action_mod.SalvageCandidate) = .empty;
+        const bs = try self.db.prepare("SELECT key, name, bv, armor_pct, quality, damaged, destroyed, missing FROM battle_report_salvage WHERE cid = ?1 AND report_ord = ?2 ORDER BY ord");
+        defer bs.finalize();
+        try bs.bindAll(.{ cid, ord });
+        while (try bs.next()) try candidates.append(alloc, .{
+            .key = try bs.text(0, alloc),
+            .name = try bs.text(1, alloc),
+            .bv = bs.int(2),
+            .armor_pct = try bs.intAs(u8, 3),
+            .quality = bs.enumValue(types.Quality, 4) orelse return error.CorruptSave,
+            .damaged_slots = try bs.intAs(u8, 5),
+            .destroyed_slots = try bs.intAs(u8, 6),
+            .missing_components = try bs.intAs(u8, 7),
+        });
+        return candidates.items;
     }
 
     fn loadRefitPlan(self: Store, gs: *GameState, cid: i64) !void {

@@ -48,11 +48,6 @@ D19a, D19b-1, D19b-2a and D19b-2b are done (see Done); the typed endpoint is lef
 
 - [ ] Endpoint for untrusted text (decided in review): a type that makes unsafe composition fail to compile (e.g. an `Untrusted` wrapper on stored names, or `MarkupBuilder` as the only way a query composes markup), plus the Part 3 verify-script check. Until then the convention holds: query `text`/`cells`/`lines`/titles are escaped markup, query `name` fields are raw values, and whoever composes a raw name into markup calls `table.plain`.
 
-## D22. Build, data and tests (audit #20, #24, #25, #26, #28; rules 6, 9)
-
-- [ ] `Store.save` (484 lines) becomes per-table encoders the way `load` became decoders, and `loadBattleReport` (131 lines) splits its hit, ammo and salvage rows into their own decoders (rule 42).
-
----
 
 ## Data verification
 
@@ -111,6 +106,7 @@ Contract deliverables closed before this list merged, all from the 2026-09-22 co
 - D22-3 client tests, audit #28: `app.clientForTest` runs the terminal client headless over a generated campaign (frames to a discarding writer, an in-memory store, 200x50), and `pressForTest` sends a key and draws a frame; `app.zig` tests draw every screen at full size and at 80x24 with the cursor run past every list, and end a turn through the checklist; each `screens/*.zig` tests one of its own keys, the HQ screen's `u` against the facility `hqDetailView` puts under the cursor
 - D22-4 `execute` is a dispatch, audit #20: the 1,099-line switch is one line per command; each of the 76 multi-line arms is a named `exec…` function taking that command's payload (`@FieldType(Command, …)`), in the switch's order; the longest function in commands.zig is 94 lines; a mechanical move, so the golden master holds
 - D22-5 `Store.load` is a sequence of decoders, audit #20: the 772-line function is 47 lines calling one `load<Table>` method per table (29 of them: `loadVersion` returns the saved schema version, `loadMeta` whether the seed is stored, the rest fill `GameState`), in the order it ran; a mechanical move: every round-trip test and the golden master hold, and a real v34 save loads, plays and reloads
+- D22-6 `Store.save` is a sequence of encoders, audit #20: the 484-line function is 39 lines (the transaction, `saveCampaignRow`, one `save<Table>` per table, COMMIT, then `campaign_id`); `loadBattleReport` reads its hit, ammo and salvage rows through `loadReportHits`, `loadReportAmmo` and `loadReportSalvage`; no function in store.zig passes 83 lines; round trips, the golden master and a real save hold. D22 is done
 
 ---
 
