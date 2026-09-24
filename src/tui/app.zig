@@ -637,14 +637,14 @@ pub const App = struct {
         var prow: std.ArrayListUnmanaged([]const u8) = .empty;
         for (players) |p| {
             const mk: []const u8 = if (p.id == self.player_id) "{a}" else "";
-            try prow.append(al, try std.fmt.allocPrint(al, "{s}{s}{{/}}  {d} campaign{s}", .{ mk, p.name, p.campaigns, if (p.campaigns == 1) "" else "s" }));
+            try prow.append(al, try std.fmt.allocPrint(al, "{s}{s}{{/}}  {d} campaign{s}", .{ mk, try q.plain(al, p.name), p.campaigns, if (p.campaigns == 1) "" else "s" }));
         }
         if (players.len == 0) try prow.append(al, "{d}no players yet — [p] creates one{/}");
         self.listPane(.{ .x = b.x, .y = b.y, .w = pw, .h = top_h }, "PLAYERS", prow.items, 0, self.focus == 0, true);
 
         var crow: std.ArrayListUnmanaged([]const u8) = .empty;
         for (campaigns) |c| {
-            try crow.append(al, try std.fmt.allocPrint(al, "{{a}}{s}{{/}}  ·  {s}  ·  day {d} ({s})  ·  save #{d}", .{ c.name, c.commander, c.day, c.date, c.save_seq }));
+            try crow.append(al, try std.fmt.allocPrint(al, "{{a}}{s}{{/}}  ·  {s}  ·  day {d} ({s})  ·  save #{d}", .{ try q.plain(al, c.name), try q.plain(al, c.commander), c.day, c.date, c.save_seq }));
         }
         if (campaigns.len == 0) try crow.append(al, "{d}no campaigns for this player — [n] starts one{/}");
         const cw: u16 = b.w - pw - 1;
@@ -655,7 +655,7 @@ pub const App = struct {
             const ci = self.cur(1).*;
             if (campaigns.len > 0 and ci < campaigns.len) {
                 const c = campaigns[ci];
-                try snap.append(al, try std.fmt.allocPrint(al, "{{a}}{s}{{/}} — commander {s}", .{ c.name, c.commander }));
+                try snap.append(al, try std.fmt.allocPrint(al, "{{a}}{s}{{/}} — commander {s}", .{ try q.plain(al, c.name), try q.plain(al, c.commander) }));
                 try snap.append(al, try std.fmt.allocPrint(al, "saved at day {d} · {s} · registry id {d}", .{ c.day, c.date, c.id }));
                 try snap.append(al, "");
                 try snap.append(al, "{d}[Enter] continue this campaign{/}");
@@ -818,7 +818,7 @@ pub const App = struct {
                         self.listPane(office_rect, "BACK OFFICE", office.items, 1, self.w_field == 1, false);
                         if (wide and b.h > oh + 3) {
                             const detail = try q.hqDetail(al, g, hq_id);
-                            self.listPane(.{ .x = lw + 1, .y = b.y + oh, .w = b.w - lw - 1, .h = b.h - oh }, try std.fmt.allocPrint(al, "starter HQ · {s}", .{q.hqName(g, hq_id)}), detail, 2, false, false);
+                            self.listPane(.{ .x = lw + 1, .y = b.y + oh, .w = b.w - lw - 1, .h = b.h - oh }, try std.fmt.allocPrint(al, "starter HQ · {s}", .{try q.hqName(self.a(), g, hq_id)}), detail, 2, false, false);
                         }
                     }
                 }
@@ -884,7 +884,7 @@ pub const App = struct {
             x += s.text(x, 0, @intCast(t.len), t, st);
         }
         const st = try q.status(al, g);
-        const right = st.outfit_name;
+        const right = try q.plain(al, st.outfit_name);
         var mark_w: u16 = 0;
         if (self.emblem != null and layout.wide(s.cols)) {
             mark_w = 8;
@@ -1125,11 +1125,11 @@ pub const App = struct {
         const c = cands[@min(self.modal_cursor, cands.len - 1)];
         switch (c.kind) {
             .pool => {
-                _ = try self.execSay(.{ .move_unit = .{ .unit = c.unit, .force = lance.id } }, .good, "#{d} joins {s}", .{ @intFromEnum(c.unit), lance.name });
+                _ = try self.execSay(.{ .move_unit = .{ .unit = c.unit, .force = lance.id } }, .good, "#{d} joins {s}", .{ @intFromEnum(c.unit), try q.plain(self.a(), lance.name) });
             },
             .mothballed => {
                 if (!try self.exec(.{ .reactivate = c.unit })) return;
-                _ = try self.execSay(.{ .move_unit = .{ .unit = c.unit, .force = lance.id } }, .good, "#{d} reactivating and assigned to {s}", .{ @intFromEnum(c.unit), lance.name });
+                _ = try self.execSay(.{ .move_unit = .{ .unit = c.unit, .force = lance.id } }, .good, "#{d} reactivating and assigned to {s}", .{ @intFromEnum(c.unit), try q.plain(self.a(), lance.name) });
             },
             .listing => {
                 const r = game.commands.execute(g, .{ .buy_hull_for = .{ .listing = c.listing, .company = self.raise.company, .lance = lance.id } }) catch |err| {
@@ -1139,7 +1139,7 @@ pub const App = struct {
                 if (r.unit == .none) {
                     self.say(.crit, "{s}", .{game.cli.hull_fraud_text});
                 } else if (r.eta_days == 0) {
-                    self.say(.good, "#{d} bought and placed in {s}", .{ @intFromEnum(r.unit), lance.name });
+                    self.say(.good, "#{d} bought and placed in {s}", .{ @intFromEnum(r.unit), try q.plain(self.a(), lance.name) });
                 } else {
                     self.say(.good, "#{d} bought — {d} days in transit, it joins the first lance with room on arrival", .{ @intFromEnum(r.unit), r.eta_days });
                 }
@@ -1262,7 +1262,7 @@ pub const App = struct {
                 var rows: std.ArrayListUnmanaged([]const u8) = .empty;
                 try rows.append(al, "");
                 const st = try q.status(al, g);
-                try rows.append(al, try std.fmt.allocPrint(al, "  campaign {{a}}{s}{{/}} · day {d}{s}", .{ st.outfit_name, st.day, if (!st.saved) " · {c}never saved{/}" else "" }));
+                try rows.append(al, try std.fmt.allocPrint(al, "  campaign {{a}}{s}{{/}} · day {d}{s}", .{ try q.plain(al, st.outfit_name), st.day, if (!st.saved) " · {c}never saved{/}" else "" }));
                 try rows.append(al, "");
                 try rows.append(al, "  {s} [s] save and return {/}");
                 try rows.append(al, "    [r] return without saving");
@@ -1295,7 +1295,7 @@ pub const App = struct {
                 const g = &self.gs.?;
                 const rows = [_][]const u8{
                     "",
-                    try std.fmt.allocPrint(al, "  {{c}}{s}{{/}} could not cover its debts on day {d}.", .{ (try q.status(al, g)).outfit_name, (try q.status(al, g)).day }),
+                    try std.fmt.allocPrint(al, "  {{c}}{s}{{/}} could not cover its debts on day {d}.", .{ try q.plain(al, (try q.status(al, g)).outfit_name), (try q.status(al, g)).day }),
                     "  Loans are exhausted and nothing left to sell would close the gap. The creditors take the rest.",
                     "",
                     "  The campaign is saved as it ended; delete it from the welcome screen, or keep it as a record.",
@@ -1491,7 +1491,7 @@ pub const App = struct {
         self.focus = 0;
         self.refreshEmblem();
         const st = try q.status(self.a(), &self.gs.?);
-        self.say(.good, "loaded \"{s}\" at day {d}", .{ st.outfit_name, st.day });
+        self.say(.good, "loaded \"{s}\" at day {d}", .{ try q.plain(self.a(), st.outfit_name), st.day });
     }
 
     fn handleWizardKey(self: *App, key: Key) !void {
@@ -1667,18 +1667,18 @@ pub const App = struct {
         if (self.logos.len == 0) return;
         const path = self.logos[@min(self.w_logo, self.logos.len - 1)];
         const bytes = emblem_mod.readFile(self.io, self.gpa, path) catch |err| {
-            self.say(.crit, "could not read {s}: {s}", .{ path, @errorName(err) });
+            self.say(.crit, "could not read {s}: {s}", .{ try q.plain(self.a(), path), @errorName(err) });
             return;
         };
         const e = emblem_mod.Emblem.load(self.gpa, bytes, 2) catch |err| {
             self.gpa.free(bytes);
-            self.say(.crit, "{s}: {s} (8-bit non-interlaced PNG only)", .{ path, @errorName(err) });
+            self.say(.crit, "{s}: {s} (8-bit non-interlaced PNG only)", .{ try q.plain(self.a(), path), @errorName(err) });
             return;
         };
         self.w_png = bytes;
         self.w_preview = e;
         if (self.graphics == .kitty) emblem_mod.kittyTransmit(self.term.out, self.gpa, 2, bytes) catch {};
-        self.say(.good, "{s}: {d}×{d}", .{ path, e.img.width, e.img.height });
+        self.say(.good, "{s}: {d}×{d}", .{ try q.plain(self.a(), path), e.img.width, e.img.height });
     }
 
     fn wizardList(self: *App, delta: i32) void {
@@ -2107,7 +2107,7 @@ pub const App = struct {
                 if (pc.what == .stock) {
                     const pkey = pc.key_buf[0..pc.key_len];
                     const on_hand: i64 = q.stockCount(g, .{ .hq = @enumFromInt(pc.id) }, pkey);
-                    self.openAmount(try std.fmt.allocPrint(al, "SHIP {s} TO {s}", .{ pkey, q.forceName(g, co) }), .{ .ship = .{ .from = pc.id, .to = co, .key = pkey } }, &.{
+                    self.openAmount(try std.fmt.allocPrint(al, "SHIP {s} TO {s}", .{ pkey, try q.forceName(self.a(), g, co) }), .{ .ship = .{ .from = pc.id, .to = co, .key = pkey } }, &.{
                         .{ .label = "quantity", .value = @min(on_hand, 10), .min = 1, .max = on_hand, .step = 5 },
                     });
                     return;
@@ -2117,13 +2117,13 @@ pub const App = struct {
                         self.say(.crit, "{s}", .{game.cli.errorText(err)});
                         return;
                     };
-                    self.say(.good, "#{d} sent to {s}{s}", .{ pc.id, q.forceName(g, co), if (res.in_transit) " — in transit" else " — placed" });
+                    self.say(.good, "#{d} sent to {s}{s}", .{ pc.id, try q.forceName(self.a(), g, co), if (res.in_transit) " — in transit" else " — placed" });
                 } else {
-                    _ = try self.execSay(.{ .transfer_person = .{ .person = @enumFromInt(pc.id), .to_force = co } }, .good, "{s} transferred to {s}", .{ try q.personName(al, g, @enumFromInt(pc.id)), q.forceName(g, co) });
+                    _ = try self.execSay(.{ .transfer_person = .{ .person = @enumFromInt(pc.id), .to_force = co } }, .good, "{s} transferred to {s}", .{ try q.personName(al, g, @enumFromInt(pc.id)), try q.forceName(self.a(), g, co) });
                 }
             },
             .pick_hq => |pid| {
-                _ = try self.execSay(.{ .post_person = .{ .person = pid, .hq = @enumFromInt(row.id) } }, .good, "{s} posted to {s}", .{ try q.personName(al, g, pid), q.hqName(g, @enumFromInt(row.id)) });
+                _ = try self.execSay(.{ .post_person = .{ .person = pid, .hq = @enumFromInt(row.id) } }, .good, "{s} posted to {s}", .{ try q.personName(al, g, pid), try q.hqName(self.a(), g, @enumFromInt(row.id)) });
             },
             .pick_crew => |uid| {
                 _ = try self.execSay(.{ .assign = .{ .unit = uid, .slot = row.slot, .person = @enumFromInt(row.id) } }, .good, "{s} assigned as {s} of #{d}", .{ try q.personName(al, g, @enumFromInt(row.id)), @tagName(row.slot), @intFromEnum(uid) });
@@ -2142,7 +2142,7 @@ pub const App = struct {
                         .hq => |hid| {
                             // Where to: a company row already said; an HQ row asks.
                             if (pp.ship_to) |co| {
-                                self.openAmount(try std.fmt.allocPrint(al, "SHIP {s} TO {s}", .{ key, q.forceName(g, co) }), .{ .ship = .{ .from = @intFromEnum(hid), .to = co, .key = key } }, &.{
+                                self.openAmount(try std.fmt.allocPrint(al, "SHIP {s} TO {s}", .{ key, try q.forceName(self.a(), g, co) }), .{ .ship = .{ .from = @intFromEnum(hid), .to = co, .key = key } }, &.{
                                     .{ .label = "quantity", .value = @min(on_hand, 10), .min = 1, .max = on_hand, .step = 5 },
                                 });
                             } else {
@@ -2308,7 +2308,7 @@ pub const App = struct {
                     .title = "SELL HQ? · [y] sell · [Esc] keep",
                     .rows = try al.dupe([]const u8, &.{
                         "",
-                        if (quote) |qq| try std.fmt.allocPrint(al, "  Sell off {{a}}{s}{{/}} for {{g}}{s}{{/}} C (40% of build cost + its treasury)?", .{ qq.name, try q.money(al, qq.value) }) else "  no such HQ",
+                        if (quote) |qq| try std.fmt.allocPrint(al, "  Sell off {{a}}{s}{{/}} for {{g}}{s}{{/}} C (40% of build cost + its treasury)?", .{ try q.plain(al, qq.name), try q.money(al, qq.value) }) else "  no such HQ",
                         "  Staff posted there become unassigned; its stock, board, bay work and links are lost.",
                         "  Companies must be assigned elsewhere first (:assignco co:N hq:M).",
                         "",
@@ -2326,7 +2326,7 @@ pub const App = struct {
                     .title = "DISBAND COMPANY? · [y] disband · [Esc] keep",
                     .rows = try al.dupe([]const u8, &.{
                         "",
-                        try std.fmt.allocPrint(al, "  Disband {{a}}{s}{{/}}? Every hull under it sells for about {{g}}{s}{{/}} C and everyone in it is released.", .{ q.forceName(g, fid), try q.money(al, q.disbandQuote(g, fid)) }),
+                        try std.fmt.allocPrint(al, "  Disband {{a}}{s}{{/}}? Every hull under it sells for about {{g}}{s}{{/}} C and everyone in it is released.", .{ try q.forceName(self.a(), g, fid), try q.money(al, q.disbandQuote(g, fid)) }),
                         "  This cannot be undone.",
                         "",
                         "  {s} [y] disband {/}   {d}[Esc] keep{/}",
@@ -2343,14 +2343,14 @@ pub const App = struct {
                     .title = "RECALL UNDER CONTRACT? · [y] recall · [Esc] keep",
                     .rows = try al.dupe([]const u8, &.{
                         "",
-                        try std.fmt.allocPrint(al, "  Recall {{a}}{s}{{/}} from its contract? That is a breach: the employer keeps the balance and standing falls.", .{q.forceName(g, co)}),
+                        try std.fmt.allocPrint(al, "  Recall {{a}}{s}{{/}} from its contract? That is a breach: the employer keeps the balance and standing falls.", .{try q.forceName(self.a(), g, co)}),
                         "",
                         "  {s} [y] recall {/}   {d}[Esc] keep{/}",
                     }),
                     .w = layout.modal.confirm_w,
                     .h = 7,
                     .cmd = .{ .recall_company = co },
-                    .done = try std.fmt.allocPrint(al, "{s} recalled — breach clause applies", .{q.forceName(g, co)}),
+                    .done = try std.fmt.allocPrint(al, "{s} recalled — breach clause applies", .{try q.forceName(self.a(), g, co)}),
                 };
             },
         }
@@ -2483,10 +2483,10 @@ pub const App = struct {
                 const cands = try q.raiseCandidates(al, g, self.raise.company, self.raise.passed[0..self.raise.passed_len]);
                 var lance_line: std.ArrayListUnmanaged(u8) = .empty;
                 for (lances, 0..) |l, i| {
-                    try lance_line.appendSlice(al, try std.fmt.allocPrint(al, "{s}{s} {d}/{d}{s}  ", .{ if (i == self.raise.lance_idx) "{a}▶ " else "{d}", l.name, l.used, l.cap, "{/}" }));
+                    try lance_line.appendSlice(al, try std.fmt.allocPrint(al, "{s}{s} {d}/{d}{s}  ", .{ if (i == self.raise.lance_idx) "{a}▶ " else "{d}", try q.plain(al, l.name), l.used, l.cap, "{/}" }));
                 }
                 return .{
-                    .title = try std.fmt.allocPrint(al, "RAISE {s} · HULLS · [ ] lance · Enter/b take or buy · p pass · n support train · ←/→ columns · Esc leave (the company keeps what it has)", .{q.forceName(g, self.raise.company)}),
+                    .title = try std.fmt.allocPrint(al, "RAISE {s} · HULLS · [ ] lance · Enter/b take or buy · p pass · n support train · ←/→ columns · Esc leave (the company keeps what it has)", .{try q.forceName(self.a(), g, self.raise.company)}),
                     .head = try al.dupe([]const u8, &.{ lance_line.items, "" }),
                     .table = try q.tableOf(al, q.raise_cols, cands),
                     .n = cands.len,
@@ -2501,7 +2501,7 @@ pub const App = struct {
                 var rows: std.ArrayListUnmanaged([]const u8) = .empty;
                 for (train.lines) |line| try rows.append(al, line.text);
                 return .{
-                    .title = try std.fmt.allocPrint(al, "RAISE {s} · SUPPORT TRAIN · Enter/b buy one · n crews · Esc leave", .{q.forceName(g, self.raise.company)}),
+                    .title = try std.fmt.allocPrint(al, "RAISE {s} · SUPPORT TRAIN · Enter/b buy one · n crews · Esc leave", .{try q.forceName(self.a(), g, self.raise.company)}),
                     .head = &.{"hull      name                  owned   price (staple line at home)   what it does"},
                     .rows = rows.items,
                     .n = train.lines.len,
@@ -2524,7 +2524,7 @@ pub const App = struct {
                     for (m.order) |ti| {
                         const t = m.tracks[ti];
                         const now = m.current != null and m.current.? == ti and m.child != null;
-                        try rows.append(al, try std.fmt.allocPrint(al, "  {s}{s} {s: <40} {s}{{/}}", .{ if (now) "{g}" else "", if (now) "♪" else " ", t.name, m.sets[t.set] }));
+                        try rows.append(al, try std.fmt.allocPrint(al, "  {s}{s} {s: <40} {s}{{/}}", .{ if (now) "{g}" else "", if (now) "♪" else " ", try q.plain(al, t.name), try q.plain(al, m.sets[t.set]) }));
                     }
                     try rows.append(al, "");
                     try rows.append(al, "  {d}Enter on a soundtrack selects it (the playlist reshuffles) · Enter on a track plays it · m on/off · < > previous/next · - + volume · Esc close{/}");
@@ -2563,7 +2563,7 @@ pub const App = struct {
                 try rows.append(al, "  {a}[a]{/} hire from the halls now: a pilot per crewless hull and a tech where none has hours (signing bonuses from the outfit)");
                 try rows.append(al, "  {d}or hire by hand later: HQ screen Tab into the hall (f filters by role), People P posts staff · this table is also :manning co:N{/}");
                 try rows.append(al, "  {a}[Enter]{/} finish");
-                return .{ .title = try std.fmt.allocPrint(al, "RAISE {s} · CREWS", .{q.forceName(g, self.raise.company)}), .rows = rows.items, .read_only = true, .w = layout.modal.raise_crews_w, .max_h = full_h };
+                return .{ .title = try std.fmt.allocPrint(al, "RAISE {s} · CREWS", .{try q.forceName(self.a(), g, self.raise.company)}), .rows = rows.items, .read_only = true, .w = layout.modal.raise_crews_w, .max_h = full_h };
             },
             .negotiate => |idx| {
                 var head: std.ArrayListUnmanaged([]const u8) = .empty;
@@ -2599,7 +2599,7 @@ pub const App = struct {
             .upgrade => |hid| {
                 const rows_v = try q.upgrades(al, &self.gs.?, hid);
                 return .{
-                    .title = try std.fmt.allocPrint(al, "UPGRADE · {s} · [Enter] start · [←/→] columns · [Esc] cancel", .{q.hqName(&self.gs.?, hid)}),
+                    .title = try std.fmt.allocPrint(al, "UPGRADE · {s} · [Enter] start · [←/→] columns · [Esc] cancel", .{try q.hqName(self.a(), &self.gs.?, hid)}),
                     .right_title = "one project per facility at a time",
                     .table = try q.tableOf(al, q.upgrade_cols, rows_v),
                     .n = rows_v.len,
@@ -2795,7 +2795,7 @@ pub const App = struct {
                 } else if (c <= m.sets.len) {
                     m.selectSet(c - 1);
                     try self.store.setSetting("music_set", @intCast(c - 1));
-                    self.say(.dim, "♪ soundtrack {s}", .{m.sets[c - 1]});
+                    self.say(.dim, "♪ soundtrack {s}", .{try q.plain(self.a(), m.sets[c - 1])});
                 } else {
                     // Header rows: sets + blank + "playing" line, then the tracks in playlist order.
                     const first_track = m.sets.len + 3;
@@ -2803,7 +2803,7 @@ pub const App = struct {
                         const ti = m.order[c - first_track];
                         m.play(ti);
                         try self.store.setSetting("music", 1);
-                        self.say(.dim, "♪ {s} — {s}", .{ m.tracks[ti].name, m.sets[m.tracks[ti].set] });
+                        self.say(.dim, "♪ {s} — {s}", .{ try q.plain(self.a(), m.tracks[ti].name), try q.plain(self.a(), m.sets[m.tracks[ti].set]) });
                     }
                 }
             } else {
@@ -2829,19 +2829,19 @@ pub const App = struct {
                 if (cands.len == 0) return;
                 const c = cands[@min(self.modal_cursor, cands.len - 1)];
                 if (!c.eligible) {
-                    self.say(.amber, "{s} cannot go: {s}", .{ q.forceName(&self.gs.?, c.company), c.why });
+                    self.say(.amber, "{s} cannot go: {s}", .{ try q.forceName(self.a(), &self.gs.?, c.company), c.why });
                     return;
                 }
                 self.modal = .none;
                 const lift = try q.liftText(al, &self.gs.?, c.company);
-                _ = try self.execSay(.{ .accept_contract = .{ .offer_index = oi, .company = c.company } }, .good, "accepted — {s} is on its way, {d} days out{s}{s}", .{ q.forceName(&self.gs.?, c.company), c.transit_days, if (lift.len > 0) " · " else "", lift });
+                _ = try self.execSay(.{ .accept_contract = .{ .offer_index = oi, .company = c.company } }, .good, "accepted — {s} is on its way, {d} days out{s}{s}", .{ try q.forceName(self.a(), &self.gs.?, c.company), c.transit_days, if (lift.len > 0) " · " else "", lift });
             },
             .lance_pick => |uid| {
                 const lances = try self.lanceChoices(uid);
                 if (lances.len == 0) return;
                 const lc = lances[@min(self.modal_cursor, lances.len - 1)];
                 self.modal = .none;
-                _ = try self.execSay(.{ .move_unit = .{ .unit = uid, .force = lc.force } }, .good, "#{d} moved to {s}", .{ @intFromEnum(uid), lc.name });
+                _ = try self.execSay(.{ .move_unit = .{ .unit = uid, .force = lc.force } }, .good, "#{d} moved to {s}", .{ @intFromEnum(uid), try q.plain(self.a(), lc.name) });
             },
             .upgrade => |hid| {
                 const rows = try q.upgrades(al, &self.gs.?, hid);
@@ -2889,16 +2889,16 @@ pub const App = struct {
                 } else if (i - emblems.len < self.logos.len) {
                     const path = self.logos[i - emblems.len];
                     const bytes = emblem_mod.readFile(self.io, self.gpa, path) catch |err| {
-                        self.say(.crit, "could not read {s}: {s}", .{ path, @errorName(err) });
+                        self.say(.crit, "could not read {s}: {s}", .{ try q.plain(self.a(), path), @errorName(err) });
                         return;
                     };
                     defer self.gpa.free(bytes);
                     if (!png.isPng(bytes)) {
-                        self.say(.crit, "{s} is not a PNG", .{path});
+                        self.say(.crit, "{s} is not a PNG", .{try q.plain(self.a(), path)});
                         return;
                     }
                     try self.applyEmblem(bytes);
-                    self.say(.good, "emblem set from {s}{s}", .{ path, if (self.emblem == null) " (could not decode it — 8-bit non-interlaced PNG only)" else "" });
+                    self.say(.good, "emblem set from {s}{s}", .{ try q.plain(self.a(), path), if (self.emblem == null) " (could not decode it — 8-bit non-interlaced PNG only)" else "" });
                 }
             },
             .contract_log => self.modal = .none,
@@ -3183,7 +3183,7 @@ pub const App = struct {
                 for (players, 0..) |p, i| if (p.id == id) {
                     self.cur(0).* = i;
                 };
-                self.say(.good, "player \"{s}\" created", .{text});
+                self.say(.good, "player \"{s}\" created", .{try q.plain(self.a(), text)});
             },
             .delete_campaign => {
                 const campaigns = try self.store.campaigns(al, self.player_id);
@@ -3194,7 +3194,7 @@ pub const App = struct {
                     return;
                 }
                 try self.store.deleteCampaign(c.id, if (self.gs) |*g| g else null);
-                self.say(.good, "deleted \"{s}\"", .{c.name});
+                self.say(.good, "deleted \"{s}\"", .{try q.plain(self.a(), c.name)});
             },
             .delete_player => {
                 const players = try self.store.players(al);
@@ -3205,7 +3205,7 @@ pub const App = struct {
                             return;
                         }
                         try self.store.deletePlayer(p.id);
-                        self.say(.good, "deleted player \"{s}\" and their campaigns", .{p.name});
+                        self.say(.good, "deleted player \"{s}\" and their campaigns", .{try q.plain(self.a(), p.name)});
                         self.player_id = 0;
                         self.cur(0).* = 0;
                         self.pickDefaultPlayer();
@@ -3224,7 +3224,7 @@ pub const App = struct {
                 self.raise.lance_idx = 0;
                 self.raise.passed_len = 0;
                 self.openModal(.raise_hulls);
-                self.say(.good, "{s} raised at {s} — empty lances: pick hulls from the pool and every board", .{ text, q.hqName(g, self.raise.hq) });
+                self.say(.good, "{s} raised at {s} — empty lances: pick hulls from the pool and every board", .{ try q.plain(self.a(), text), try q.hqName(self.a(), g, self.raise.hq) });
             },
             .command => try self.runCommandLine(text),
         }

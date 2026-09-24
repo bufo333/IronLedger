@@ -32,7 +32,7 @@ pub fn draw(self: *App) anyerror!void {
             switch (self.forces_pane) {
                 .readiness => {
                     const lines = try q.readinessLines(al, g, co);
-                    self.listPane(.{ .x = b.x + lw, .y = b.y, .w = b.w - lw, .h = detail_h }, try std.fmt.allocPrint(al, "READINESS · {s} · r = manning", .{q.forceName(g, co)}), lines, 1, false, false);
+                    self.listPane(.{ .x = b.x + lw, .y = b.y, .w = b.w - lw, .h = detail_h }, try std.fmt.allocPrint(al, "READINESS · {s} · r = manning", .{try q.forceName(self.a(), g, co)}), lines, 1, false, false);
                 },
                 .manning => {
                     var mrows: std.ArrayListUnmanaged([]const u8) = .empty;
@@ -42,11 +42,11 @@ pub fn draw(self: *App) anyerror!void {
                     for (mq) |m| open_total += m.need -| m.have;
                     try mrows.append(al, "");
                     try mrows.append(al, if (open_total == 0) "{g}every seat filled{/}" else try std.fmt.allocPrint(al, "{{c}}{d} open{{/}} — HQ screen Tab into the hall (f filters by role) · :crew co:N hires the open seats from the halls", .{open_total}));
-                    self.listPane(.{ .x = b.x + lw, .y = b.y, .w = b.w - lw, .h = detail_h }, try std.fmt.allocPrint(al, "MANNING · {s} · r = damage", .{q.forceName(g, co)}), mrows.items, 1, false, false);
+                    self.listPane(.{ .x = b.x + lw, .y = b.y, .w = b.w - lw, .h = detail_h }, try std.fmt.allocPrint(al, "MANNING · {s} · r = damage", .{try q.forceName(self.a(), g, co)}), mrows.items, 1, false, false);
                 },
                 .damage => {
                     const dmg = try q.companyDamage(al, g, co);
-                    self.listPane(.{ .x = b.x + lw, .y = b.y, .w = b.w - lw, .h = detail_h }, try std.fmt.allocPrint(al, "DAMAGE · {s} · r = readiness", .{q.forceName(g, co)}), dmg.lines, 1, false, false);
+                    self.listPane(.{ .x = b.x + lw, .y = b.y, .w = b.w - lw, .h = detail_h }, try std.fmt.allocPrint(al, "DAMAGE · {s} · r = readiness", .{try q.forceName(self.a(), g, co)}), dmg.lines, 1, false, false);
                 },
             }
         } else {
@@ -110,7 +110,7 @@ pub fn key(self: *App, ch: u21) anyerror!void {
             'A' => if (row) |r| {
                 const co = r.company;
                 if (co != .none) {
-                    _ = try self.execSay(.{ .auto_assign = co }, .good, "auto-assigned {s}", .{q.forceName(g, co)});
+                    _ = try self.execSay(.{ .auto_assign = co }, .good, "auto-assigned {s}", .{try q.forceName(self.a(), g, co)});
                 }
             },
             'c' => if (row) |r| {
@@ -120,7 +120,7 @@ pub fn key(self: *App, ch: u21) anyerror!void {
                         self.say(.crit, "{s}", .{game.cli.errorText(err)});
                         return;
                     };
-                    self.say(if (res.still_open == 0) .good else .amber, "{s}: {d} hired to fill the manning table · {d} lines still open (no candidates on the boards yet)", .{ q.forceName(g, co), res.hired_count, res.still_open });
+                    self.say(if (res.still_open == 0) .good else .amber, "{s}: {d} hired to fill the manning table · {d} lines still open (no candidates on the boards yet)", .{ try q.forceName(self.a(), g, co), res.hired_count, res.still_open });
                 }
             },
             't' => self.openCommand("train "),
@@ -135,7 +135,7 @@ pub fn key(self: *App, ch: u21) anyerror!void {
                     return;
                 };
                 self.say(if (res.enrolled > 0) .good else .amber, "{s}: {d} enrolled at their trades · {d} short of XP · {d} busy · {d} nothing to learn  (:train co:{d} <skill> targets one skill)", .{
-                    q.forceName(g, co), res.enrolled, res.short_xp, res.busy, res.nothing_to_learn, @intFromEnum(co),
+                    try q.forceName(self.a(), g, co), res.enrolled, res.short_xp, res.busy, res.nothing_to_learn, @intFromEnum(co),
                 });
             },
             'r' => {
@@ -157,7 +157,7 @@ pub fn key(self: *App, ch: u21) anyerror!void {
                     self.say(.dim, "put the cursor on a company to raise its air wing", .{});
                     return;
                 }
-                _ = try self.execSay(.{ .raise_air_company = co }, .good, "{s} has an air wing — fighters go in its air lances (Market: aero filter; :newlance co:N air <name> adds a lance)", .{q.forceName(g, co)});
+                _ = try self.execSay(.{ .raise_air_company = co }, .good, "{s} has an air wing — fighters go in its air lances (Market: aero filter; :newlance co:N air <name> adds a lance)", .{try q.forceName(self.a(), g, co)});
             },
             'x' => if (row) |r| {
                 if (r.unit == .none) {
@@ -197,10 +197,10 @@ pub fn key(self: *App, ch: u21) anyerror!void {
                 }
                 const dmg = try q.companyDamage(al, g, co);
                 if (dmg.short_key) |part| {
-                    self.openAmount(try std.fmt.allocPrint(al, "FABRICATE {s} for {s}", .{ part, q.forceName(g, co) }), .{ .fabricate = .{ .hq = self.homeHqOf(co), .key = part } }, &.{
+                    self.openAmount(try std.fmt.allocPrint(al, "FABRICATE {s} for {s}", .{ part, try q.forceName(self.a(), g, co) }), .{ .fabricate = .{ .hq = self.homeHqOf(co), .key = part } }, &.{
                         .{ .label = "quantity", .value = 1, .min = 1, .max = 20, .step = 1 },
                     });
-                } else self.say(.good, "{s} needs no structural components the home HQ lacks", .{q.forceName(g, co)});
+                } else self.say(.good, "{s} needs no structural components the home HQ lacks", .{try q.forceName(self.a(), g, co)});
             },
             'm' => if (row) |r| {
                 if (r.unit == .none) return;
@@ -219,7 +219,7 @@ pub fn key(self: *App, ch: u21) anyerror!void {
                         self.say(.crit, "{s}", .{game.cli.errorText(err)});
                         return;
                     };
-                    self.say(.good, "#{d} queued for depot repair at {s} — HQ screen, [ ] to that HQ, its bays list the job", .{ @intFromEnum(r.unit), q.hqName(g, res.hq) });
+                    self.say(.good, "#{d} queued for depot repair at {s} — HQ screen, [ ] to that HQ, its bays list the job", .{ @intFromEnum(r.unit), try q.hqName(self.a(), g, res.hq) });
                 }
             },
             'o' => if (row) |r| {
@@ -230,7 +230,7 @@ pub fn key(self: *App, ch: u21) anyerror!void {
                         self.say(.crit, "{s}", .{game.cli.errorText(err)});
                         return;
                     };
-                    self.say(.good, "{s} ROE → {s}", .{ r.name, res.roe.?.describe() });
+                    self.say(.good, "{s} ROE → {s}", .{ try q.plain(self.a(), r.name), res.roe.?.describe() });
                     return;
                 }
                 if (!r.is_lance) {
@@ -241,7 +241,7 @@ pub fn key(self: *App, ch: u21) anyerror!void {
                     self.say(.crit, "{s}", .{game.cli.errorText(err)});
                     return;
                 };
-                self.say(.good, "{s} → {s}: {s}", .{ r.name, @tagName(res.role.?), res.role.?.describe() });
+                self.say(.good, "{s} → {s}: {s}", .{ try q.plain(self.a(), r.name), @tagName(res.role.?), res.role.?.describe() });
             },
             'X' => if (row) |r| {
                 const co = r.company;
@@ -266,7 +266,7 @@ pub fn key(self: *App, ch: u21) anyerror!void {
                 }
                 const co = r.company;
                 if (co == .none) return;
-                _ = try self.execSay(.{ .recall_idle = co }, .good, "{s} is coming home", .{q.forceName(g, co)});
+                _ = try self.execSay(.{ .recall_idle = co }, .good, "{s} is coming home", .{try q.forceName(self.a(), g, co)});
             },
             else => {},
         }

@@ -43,10 +43,11 @@ Done: every Stage 12 feature (12, 12B–12G) has shipped. Part 2 is next.
 
 ## D19. Terminal safety (audit #15, #16; rule 24)
 
-D19a and D19b-1 are done (see Done); D19b-2 is left.
+D19a, D19b-1 and D19b-2a are done (see Done); D19b-2b and the typed endpoint are left.
 
 
-- [ ] **D19b-2, the escape sweep (design decided 2026-09-23).** Every place untrusted text enters screen markup goes through `table.MarkupBuilder.appendPlain` or `table.plain` (~89 sites in `queries.zig`, ~46 in `src/tui`): person names and callsigns, company/force/HQ/outfit/commander names, player and campaign names, filenames and music tracks, mod-provided names and descriptions, and stored log lines (presented as plain unless logs become structured segments). Escaping happens only at the presentation boundary: stored state and logs stay plain. Regression test first: a company named `{c}Alpha` recolours itself today. End-to-end tests for company/person/HQ names, save and campaign names, mod names, filenames and tracks, campaign logs, table cells, pane titles and status messages. The verify script (Part 3) flags markup composed with `{s}` of an unescaped value.
+- [ ] **D19b-2b, strings trusted by construction.** A test (and D22's `validate-data` step) that every data-file string (chassis, parts, planets, factions, abilities, awards, names, scenarios, …) contains no `{` and no control character; and a load check that every stored key (planet, chassis, part, faction, employer/enemy) resolves to a catalogue entry, `CorruptSave` otherwise. Chassis names copied into battle reports are validated the same way. After it, the strings the free-text sweep left raw are safe without per-site escaping.
+- [ ] Endpoint for untrusted text (decided in review): a type that makes unsafe composition fail to compile (e.g. an `Untrusted` wrapper on stored names, or `MarkupBuilder` as the only way a query composes markup), plus the Part 3 verify-script check. Until then the convention holds: query `text`/`cells`/`lines`/titles are escaped markup, query `name` fields are raw values, and whoever composes a raw name into markup calls `table.plain`.
 
 ## D20. Determinism (audit #17, #18; rules 1, 40)
 
@@ -108,6 +109,7 @@ Contract deliverables closed before this list merged, all from the 2026-09-22 co
 - D18b recruiting and intel locality, audit #21 (PR #65): `recruitBonus(hq)` and `recruitGenerated(role, hq)` read the recruiting HQ's hiring hall and HR (hall boards, office staffing, company crews at the company's home HQ; the bare `recruit` verb hires at the seat); `offer_rating.intelLevel(gs, hq)` reads one HQ's comms and `intelHq` picks the board that offered the contract, else the company's home HQ
 - D19a renderer safety, audit #15/#16 (PR #66): `table.nextGlyph` is the one decoder for drawing and measuring (invalid or truncated UTF-8 is U+FFFD, C0/C1 controls and DEL are `?`); the encode fallback writes U+FFFD; `Screen.resize` allocates before it frees; `Term.init` restores raw mode, the resize handler and the main screen if it fails part way
 - D19b-1 one markup tokenizer, audit #15 (PR #67): `table.Tokenizer` is the one reader of screen markup (drawing, width, padding, wrapping, plain CLI text); `{{` is a literal brace; `MarkupBuilder` (`appendPlain` sanitizes and escapes, `appendMarkup` for trusted literals) and `table.plain`; `queries.stripMarks` is `table.plainText`, which knows every tag and sanitizes controls
+- D19b-2a free-text names escaped, audit #15 (PR #68): the name helpers (`forceName`, `hqName`, `personName`, `personText`) return escaped markup; every query and client site that composes a person, company, HQ, outfit, commander, player or campaign name, a callsign, a log line, battle-report prose, a filename or a music track into markup escapes it; `clip` reads whole tokens; the REPL prints raw names through `terminalText`. Tests: the hostile-name view test across desk, forces, people, contracts, HQ, roster, log, summary and commander views, and a lobby smoke step with a player named `{c}Evil`
 
 ---
 

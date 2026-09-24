@@ -9,6 +9,7 @@ const types = @import("../domain/types.zig");
 const unit_mod = @import("../domain/unit.zig");
 const part_mod = @import("../domain/part.zig");
 const hq_ops = @import("hq_ops.zig");
+const table = @import("table.zig");
 const medical = @import("medical.zig");
 const GameState = @import("state.zig").GameState;
 
@@ -96,7 +97,7 @@ pub fn contactText(alloc: std.mem.Allocator, gs: *GameState, c: *const @import("
     const days = battle.daysToContact(gs, c) orelse 0;
     var out: std.ArrayListUnmanaged(u8) = .empty;
     const world = if (@import("../domain/planet.zig").find(c.planet_key)) |p| p.name else c.planet_key;
-    try out.print(alloc, "{s}: contact on {s} in {d} day{s}", .{ if (gs.force(company)) |f| f.name else "—", world, days, if (days == 1) "" else "s" });
+    try out.print(alloc, "{s}: contact on {s} in {d} day{s}", .{ if (gs.force(company)) |f| try table.plain(alloc, f.name) else "—", world, days, if (days == 1) "" else "s" });
     if (try offer_rating.rateOffer(alloc, gs, c, company)) |rt| {
         try out.print(alloc, " — {s}{s}, wins {d}% of fights, loses the field {d}%", .{
             if (rt.warrantsWarning()) "OUTMATCHED at " else "", try offer_rating.skullText(alloc, rt), rt.win_pct, rt.lose_field_pct,
@@ -223,7 +224,7 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
             const rt = (try offer_rating.rateOffer(alloc, gs, c, c.assigned_company)) orelse continue;
             if (!rt.warrantsWarning()) continue;
             try out.append(alloc, .{ .kind = .outmatched, .text = try std.fmt.allocPrint(alloc, "{s} is outmatched on {s}: {s} — wins {d}% of fights, loses the field {d}%; consider cautious ROE (Forces o) or recall", .{
-                if (gs.force(c.assigned_company)) |f| f.name else "—", c.planet_key, try offer_rating.skullText(alloc, rt), rt.win_pct, rt.lose_field_pct,
+                if (gs.force(c.assigned_company)) |f| try table.plain(alloc, f.name) else "—", c.planet_key, try offer_rating.skullText(alloc, rt), rt.win_pct, rt.lose_field_pct,
             }) });
         }
     }
@@ -288,7 +289,7 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
             }
         }
         if (no_pilot + no_tech > 0) {
-            try out.append(alloc, .{ .kind = .open_slots, .text = try std.fmt.allocPrint(alloc, "{s}: {d} hull(s) without a pilot, {d} without a tech (no repairs/reloads)", .{ f.name, no_pilot, no_tech }) });
+            try out.append(alloc, .{ .kind = .open_slots, .text = try std.fmt.allocPrint(alloc, "{s}: {d} hull(s) without a pilot, {d} without a tech (no repairs/reloads)", .{ try table.plain(alloc, f.name), no_pilot, no_tech }) });
         }
         // The rest of the manning table (12B.11): who is short and by how much.
         {
@@ -304,12 +305,12 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
             }
             // A deployed company can't hire from the halls; people reach it by transfer.
             if (short_total > 0) try out.append(alloc, .{ .kind = .manning_short, .text = if (gs.isCompanyDeployed(f.id))
-                try std.fmt.allocPrint(alloc, "{s} manning short: {s} (deployed — hire at an HQ hall, then :xfer person <id> co:{d}; they travel to the company)", .{ f.name, text.items, @intFromEnum(f.id) })
+                try std.fmt.allocPrint(alloc, "{s} manning short: {s} (deployed — hire at an HQ hall, then :xfer person <id> co:{d}; they travel to the company)", .{ try table.plain(alloc, f.name), text.items, @intFromEnum(f.id) })
             else
-                try std.fmt.allocPrint(alloc, "{s} manning short: {s} (Forces r → MANNING; :crew co:{d} hires from the halls)", .{ f.name, text.items, @intFromEnum(f.id) }) });
+                try std.fmt.allocPrint(alloc, "{s} manning short: {s} (Forces r → MANNING; :crew co:{d} hires from the halls)", .{ try table.plain(alloc, f.name), text.items, @intFromEnum(f.id) }) });
         }
         if (f.supply_shortage_days > 0) {
-            try out.append(alloc, .{ .kind = .hungry, .text = try std.fmt.allocPrint(alloc, "{s} has been hungry {d} day(s) — send provisions or funds", .{ f.name, f.supply_shortage_days }) });
+            try out.append(alloc, .{ .kind = .hungry, .text = try std.fmt.allocPrint(alloc, "{s} has been hungry {d} day(s) — send provisions or funds", .{ try table.plain(alloc, f.name), f.supply_shortage_days }) });
         }
         if (gs.isCompanyDeployed(f.id)) {
             // Only the families the company's working mounts actually fire.
@@ -323,8 +324,8 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
                 if (names.items.len > 0) try names.appendSlice(alloc, ", ");
                 try names.appendSlice(alloc, key);
             }
-            if (dry > 0) try out.append(alloc, .{ .kind = .dry_ammo, .text = try std.fmt.allocPrint(alloc, "{s}: {s} at zero in the field stores — those mounts fall silent", .{ f.name, names.items }) });
-            if (f.local_funds < 0) try out.append(alloc, .{ .kind = .overdrawn, .text = try std.fmt.allocPrint(alloc, "{s} operating funds overdrawn ({d})", .{ f.name, f.local_funds }) });
+            if (dry > 0) try out.append(alloc, .{ .kind = .dry_ammo, .text = try std.fmt.allocPrint(alloc, "{s}: {s} at zero in the field stores — those mounts fall silent", .{ try table.plain(alloc, f.name), names.items }) });
+            if (f.local_funds < 0) try out.append(alloc, .{ .kind = .overdrawn, .text = try std.fmt.allocPrint(alloc, "{s} operating funds overdrawn ({d})", .{ try table.plain(alloc, f.name), f.local_funds }) });
         }
     }
 
@@ -345,7 +346,7 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
     while (idle_it.next()) |fentry| {
         const f = fentry.value_ptr;
         if (f.echelon != .company or gs.companyPosture(f.id) != .idle_afield) continue;
-        try out.append(alloc, .{ .kind = .company_idle_afield, .text = try std.fmt.allocPrint(alloc, "{s} is idling on {s} eating its trucks — accept work from the field or `recall co:{d}`", .{ f.name, f.location_planet.?, @intFromEnum(f.id) }) });
+        try out.append(alloc, .{ .kind = .company_idle_afield, .text = try std.fmt.allocPrint(alloc, "{s} is idling on {s} eating its trucks — accept work from the field or `recall co:{d}`", .{ try table.plain(alloc, f.name), f.location_planet.?, @intFromEnum(f.id) }) });
     }
 
     // HQ staffing, treasuries, bays.
@@ -377,16 +378,16 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
                 left += 1;
                 if (gone_day >= last_day) {
                     last_day = gone_day;
-                    last_name = try lp.fullName(alloc);
+                    last_name = try table.plain(alloc, try lp.fullName(alloc));
                 }
             }
             try out.append(alloc, .{ .kind = .understaffed_hq, .text = try std.fmt.allocPrint(alloc, "{s} understaffed {d}/{d} (short {s}) — facilities run a level low{s} · HQ screen: S autostaff from the pool, h hire at the hall; answer notice decisions in the inbox before they expire", .{
-                hq.name, hq.staff_assigned, req, if (short.items.len > 0) short.items else "none by desk: posted staff hold the wrong roles",
+                try table.plain(alloc, hq.name), hq.staff_assigned, req, if (short.items.len > 0) short.items else "none by desk: posted staff hold the wrong roles",
                 if (left > 0) try std.fmt.allocPrint(alloc, " · {d} left in the last quarter (last: {s})", .{ left, last_name }) else "",
             }) });
         }
         if (hq.funds < 0) {
-            try out.append(alloc, .{ .kind = .overdrawn, .text = try std.fmt.allocPrint(alloc, "{s} treasury overdrawn ({d})", .{ hq.name, hq.funds }) });
+            try out.append(alloc, .{ .kind = .overdrawn, .text = try std.fmt.allocPrint(alloc, "{s} treasury overdrawn ({d})", .{ try table.plain(alloc, hq.name), hq.funds }) });
         }
         const idle = hq_ops.baySlots(gs, hq.id) -| hq_ops.activeJobs(gs, hq.id);
         var waiting: u32 = 0;
@@ -418,7 +419,7 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
                 if (class == .assault) assault += 1 else heavy += 1;
             }
             if (heavy + assault > 0) try out.append(alloc, .{ .kind = .unrebuildable_hulls, .text = try std.fmt.allocPrint(alloc, "{s} fields {d} heavy and {d} assault hull(s) {s} (bay {d}) cannot rebuild structure for — heavy needs bay 2, assault bay 3 at a regional HQ", .{
-                co.name, heavy, assault, hq.name, hq.effectiveFacilityLevel(.mek_bay),
+                try table.plain(alloc, co.name), heavy, assault, try table.plain(alloc, hq.name), hq.effectiveFacilityLevel(.mek_bay),
             }) });
         }
         if (waiting > 0 and idle > 0) {
@@ -439,7 +440,7 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
             const age = p.ageYears(day + 90) orelse continue;
             if (age < tp.age_retire) continue;
             n += 1;
-            if (first.len == 0) first = try std.fmt.allocPrint(alloc, "{s} ({s}{s})", .{ try p.fullName(alloc), @tagName(p.role), if (p.posted_hq != .none) try std.fmt.allocPrint(alloc, ", {s}", .{if (gs.hqs.getPtr(p.posted_hq)) |h| h.name else "HQ"}) else "" });
+            if (first.len == 0) first = try std.fmt.allocPrint(alloc, "{s} ({s}{s})", .{ try table.plain(alloc, try p.fullName(alloc)), @tagName(p.role), if (p.posted_hq != .none) try std.fmt.allocPrint(alloc, ", {s}", .{if (gs.hqs.getPtr(p.posted_hq)) |h| h.name else "HQ"}) else "" });
         }
         if (n > 0) try out.append(alloc, .{ .kind = .retiring_soon, .text = try std.fmt.allocPrint(alloc, "{d} reach{s} retirement age ({d}) within the quarter — {s}{s}; hire the replacement now (halls churn daily)", .{ n, if (n == 1) "es" else "", tp.age_retire, first, if (n > 1) try std.fmt.allocPrint(alloc, " and {d} more", .{n - 1}) else "" }) });
     }

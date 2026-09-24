@@ -68,7 +68,7 @@ pub fn key(self: *App, ch: u21) anyerror!void {
                     error.MountIsFine => return self.say(.dim, "{s} is fine — [R] orders a replacement for damaged or destroyed gear", .{m.slot_key}),
                     else => return self.say(.crit, "{s}", .{game.cli.errorText(err)}),
                 };
-                self.say(.good, "ordered 1 × {s} to {s}; techs fit it on the next repair pass once it lands", .{ m.part_key, q.hqName(g, res.hq) });
+                self.say(.good, "ordered 1 × {s} to {s}; techs fit it on the next repair pass once it lands", .{ m.part_key, try q.hqName(self.a(), g, res.hq) });
             },
             'c' => {
                 _ = try self.execSay(.{ .refit_clear = uid }, .good, "#{d}: refit plan cleared", .{@intFromEnum(uid)});
