@@ -29,9 +29,13 @@ open exceptions (`docs/contract-exceptions.md`) comes first.
   working directory
 - `zig build run` — demo CLI; `zig build run -- --repl` command console;
   `zig build run -- --tui [--store path] [--ascii] [--no-splash] [--no-music]`
-  terminal client (Stage 12); `docs/tui_smoke.py zig-out/bin/game /tmp/x.db`
-  drives it through a pty; `docs/repl_smoke.sh zig-out/bin/game /tmp/r.db`
-  scripts the REPL
+  terminal client (Stage 12); `docs/tui_smoke.py zig-out/bin/game [x.db]`
+  drives it through a pty; `docs/repl_smoke.sh zig-out/bin/game [r.db]`
+  scripts the REPL. With no path each uses a private temporary store; a
+  given path must end in `.db`. Both reap their clients, require exit
+  status 0, and time out (`SMOKE_TIMEOUT_S`)
+- `docs/data-fixtures.py` — builds a broken mod overlay of each data family
+  and requires every one to fail; prints `DATA FIXTURES OK` (CI runs it)
 - `docs/verify-contract.sh` — the coding contract's mechanical checks;
   prints `CONTRACT CHECKS OK` or the violations (CI runs it)
 - `docs/clean-package.sh` — builds a ReleaseFast release from a tree

@@ -1,11 +1,25 @@
 #!/bin/sh
 # Drive the REPL through a script and grep for landmarks (Stage 12.18):
 # the command verbs both frontends share, plus the print views.
-#   docs/repl_smoke.sh zig-out/bin/game /tmp/repl.db
+#   docs/repl_smoke.sh zig-out/bin/game [store.db]
+# With no store path the script uses a private temporary directory. A given
+# path must end in .db and, if it exists, be a regular file: it is
+# replaced. The REPL runs under a watchdog (SMOKE_TIMEOUT_S, default 300)
+# and must exit with status 0.
 set -e
-exe="$1"; db="$2"
-rm -f "$db"
-out=$(printf '%s\n' \
+exe="$1"; db="${2:-}"
+work=$(mktemp -d "${TMPDIR:-/tmp}/iron-ledger-repl-smoke.XXXXXX")
+trap 'rm -rf "$work"' EXIT
+if [ -z "$db" ]; then
+  db="$work/smoke.db"
+else
+  case "$db" in *.db) ;; *) echo "refusing store path '$db': it must end in .db" >&2; exit 1 ;; esac
+  if [ -L "$db" ] || { [ -e "$db" ] && [ ! -f "$db" ]; }; then
+    echo "refusing store path '$db': it exists and is not a regular file" >&2; exit 1
+  fi
+  rm -f "$db"
+fi
+printf '%s\n' \
   'start LC quartermaster Erik Kalmar' \
   'newco Alpha' \
   'newlance co:1 air Sky Lance' \
@@ -40,7 +54,30 @@ out=$(printf '%s\n' \
   'xfer hull 3 co:1' \
   'autoadmit maybe' \
   'save' \
-  'quit' | "$exe" --repl --store "$db" 2>&1)
+  'quit' > "$work/input"
+# A watchdog kills a hung REPL (macOS has no `timeout`); the exit status
+# is checked either way.
+"$exe" --repl --store "$db" < "$work/input" > "$work/output" 2>&1 &
+repl=$!
+# The watchdog's sleep is its own child, killed with it, so none outlives
+# the run.
+(
+  sleep "${SMOKE_TIMEOUT_S:-300}" &
+  nap=$!
+  trap 'kill "$nap" 2>/dev/null; exit 0' TERM
+  wait "$nap" && kill -9 "$repl" 2>/dev/null
+) &
+watchdog=$!
+status=0
+wait "$repl" || status=$?
+kill "$watchdog" 2>/dev/null || true
+wait "$watchdog" 2>/dev/null || true
+out=$(cat "$work/output")
+if [ "$status" -ne 0 ]; then
+  echo "REPL exited with status $status (killed after ${SMOKE_TIMEOUT_S:-300}s if 137)"
+  echo "$out" | tail -40
+  exit 1
+fi
 check() { echo "$out" | grep -q -- "$1" || { echo "MISSING: $1"; echo "$out" | tail -40; exit 1; }; }
 check 'no air wing slot'
 check 'that HQ has no free company slot'
