@@ -123,8 +123,9 @@ send("5")
 assert "TREASURIES" in plain()
 send("3")
 assert "TO&E" in plain()
-send("+", 0.8)                 # raise a company: the only HQ already hosts one
-assert "no HQ has a free company slot" in plain()[-600:], plain()[-800:]
+send("+", 0.8)                 # raise a company: the only HQ already hosts one,
+send("Bravo\r", 0.8)           # so the command refuses once it is named
+assert wait_for("that HQ has no free company slot", tail=1200), plain()[-1500:]
 send("j"); send("w", 0.8)      # air wing: the starter HQ has a level-1 spaceport
 assert "no air wing slot" in plain()[-800:], plain()[-1000:]
 send(":", 0.6); send("newlance co:1 air Sky Lance\r", 1.0)

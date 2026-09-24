@@ -1845,24 +1845,6 @@ pub const App = struct {
         return &screen_table[@intFromEnum(tab)];
     }
 
-    pub fn inboxRowCount(self: *App, view: q.Desk) usize {
-        _ = self;
-        var n: usize = 0;
-        for (view.inbox) |it| n += 2 + it.options.len;
-        return n;
-    }
-
-    pub fn inboxEventAtCursor(self: *App, view: q.Desk) ?types.EventId {
-        var n: usize = 0;
-        const c = self.cur(1).*;
-        for (view.inbox) |it| {
-            const span = 2 + it.options.len;
-            if (c < n + span) return it.event_id;
-            n += span;
-        }
-        return null;
-    }
-
     // ---- battle orders: the levers that can still change the fight ----
 
     const OrdersRow = struct {

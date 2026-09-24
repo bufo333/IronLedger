@@ -47,21 +47,9 @@ pub fn draw(self: *App) anyerror!void {
     const cl_title = try std.fmt.allocPrint(al, "END-TURN CHECKLIST · {s}", .{q.clip(rating_plain, if (cl_w > 30) cl_w - 26 else 0)});
     self.listPane(.{ .x = x, .y = b.y, .w = cl_w, .h = top_h }, cl_title, cl.items, 0, self.focus == 0, true);
     x += cl_w;
-    var ib: std.ArrayListUnmanaged([]const u8) = .empty;
-    var ib_index: std.ArrayListUnmanaged(usize) = .empty;
-    for (view.inbox, 0..) |it, i| {
-        const mk: []const u8 = if (it.days_left <= 1) "{c}" else "{a}";
-        try ib.append(al, try std.fmt.allocPrint(al, "> {{a}}{s}{{/}} · {s} · {s}{d} days left{{/}}", .{ it.kind, it.company, mk, it.days_left }));
-        try ib_index.append(al, i);
-        for (it.options, 0..) |o, oi| {
-            try ib.append(al, try std.fmt.allocPrint(al, "    {d}  {s}{s}", .{ oi + 1, o, if (oi == it.default_choice) "   {d}default{/}" else "" }));
-            try ib_index.append(al, i);
-        }
-        try ib.append(al, "");
-        try ib_index.append(al, i);
-    }
-    if (view.inbox.len == 0) try ib.append(al, "{d}nothing pending{/}");
-    self.listPane(.{ .x = x, .y = b.y, .w = ib_w, .h = top_h }, "INBOX", ib.items, 1, self.focus == 1, true);
+    const ib = try inboxPane(al, view);
+    const ib_lines: []const []const u8 = if (ib.lines.len == 0) &.{"{d}nothing pending{/}"} else ib.lines;
+    self.listPane(.{ .x = x, .y = b.y, .w = ib_w, .h = top_h }, "INBOX", ib_lines, 1, self.focus == 1, true);
 
     const co_h: u16 = @min(b.h - top_h, @as(u16, @intCast(view.companies.len + 3)));
     const co_inner = self.screen.pane(.{ .x = b.x, .y = b.y + top_h, .w = b.w, .h = co_h }, .{ .title = "COMPANIES" });
@@ -77,13 +65,32 @@ pub fn draw(self: *App) anyerror!void {
     }
 }
 
+/// The INBOX pane's lines, and beside each the decision it belongs to: one
+/// layout for drawing, the cursor's range and Enter.
+const InboxPane = struct { lines: []const []const u8, event: []const app.types.EventId };
+
+fn inboxPane(al: std.mem.Allocator, view: q.Desk) !InboxPane {
+    var lines: std.ArrayListUnmanaged([]const u8) = .empty;
+    var event: std.ArrayListUnmanaged(app.types.EventId) = .empty;
+    for (view.inbox) |it| {
+        const mk: []const u8 = if (it.days_left <= 1) "{c}" else "{a}";
+        try lines.append(al, try std.fmt.allocPrint(al, "> {{a}}{s}{{/}} · {s} · {s}{d} days left{{/}}", .{ it.kind, it.company, mk, it.days_left }));
+        for (it.options, 0..) |o, oi| {
+            try lines.append(al, try std.fmt.allocPrint(al, "    {d}  {s}{s}", .{ oi + 1, o, if (oi == it.default_choice) "   {d}default{/}" else "" }));
+        }
+        try lines.append(al, "");
+        while (event.items.len < lines.items.len) try event.append(al, it.event_id);
+    }
+    return .{ .lines = lines.items, .event = event.items };
+}
+
 pub fn move(self: *App, delta: i32) anyerror!void {
     const al = self.a();
     const g = &self.gs.?;
         const view = try q.desk(al, g, q.desk_log_rows);
         switch (self.focus) {
             0 => self.moveCursor(0, delta, view.checklist.len),
-            1 => self.moveCursor(1, delta, self.inboxRowCount(view)),
+            1 => self.moveCursor(1, delta, (try inboxPane(al, view)).lines.len),
             else => self.moveCursor(2, delta, view.log.len),
         }
 
@@ -100,7 +107,9 @@ pub fn enter(self: *App) anyerror!void {
                 self.openOrders(w.contract);
             } else self.switchTab(@enumFromInt(w.jump));
         } else if (self.focus == 1) {
-            if (self.inboxEventAtCursor(view)) |idx| self.modal = .{ .decision = idx };
+            const ib = try inboxPane(al, view);
+            const c = self.cur(1).*;
+            if (c < ib.event.len) self.modal = .{ .decision = ib.event[c] };
         } else if (view.log.len > 0) {
             // The LOG pane clips; the modal wraps the whole entry.
             self.openModal(.{ .log_entry = @min(self.cur(2).*, view.log.len - 1) });
@@ -122,4 +131,23 @@ pub fn key(self: *App, ch: u21) anyerror!void {
         },
         else => {},
     }
+}
+
+test "every inbox line belongs to the decision it was drawn for" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const al = arena.allocator();
+    var rows = [_]q.InboxRow{
+        .{ .event_id = @enumFromInt(7), .kind = "a", .company = "Alpha", .deadline_day = 9, .days_left = 3, .description = "", .options = &.{ "x", "y" }, .default_choice = 0 },
+        .{ .event_id = @enumFromInt(4), .kind = "b", .company = "Bravo", .deadline_day = 9, .days_left = 1, .description = "", .options = &.{"z"}, .default_choice = 0 },
+    };
+    const view: q.Desk = .{ .rating_line = "", .checklist = &.{}, .inbox = &rows, .companies = &.{}, .hqs = &.{}, .log = &.{} };
+    const pane = try inboxPane(al, view);
+    try std.testing.expectEqual(pane.lines.len, pane.event.len);
+    // Header, two options and a gap for the first; header, one option and a gap for the second.
+    try std.testing.expectEqual(@as(usize, 7), pane.lines.len);
+    for (pane.event[0..4]) |e| try std.testing.expectEqual(@as(app.types.EventId, @enumFromInt(7)), e);
+    for (pane.event[4..]) |e| try std.testing.expectEqual(@as(app.types.EventId, @enumFromInt(4)), e);
+    const empty: q.Desk = .{ .rating_line = "", .checklist = &.{}, .inbox = &.{}, .companies = &.{}, .hqs = &.{}, .log = &.{} };
+    try std.testing.expectEqual(@as(usize, 0), (try inboxPane(al, empty)).event.len);
 }
