@@ -2,6 +2,7 @@
 //! `--repl` (`zig build run -- --repl`) for an interactive command loop,
 //! or `--tui` for the terminal client (Stage 12, src/tui/). The CLI stays
 //! the scripting/debug interface.
+//! No MekHQ counterpart: the scripted demo and the REPL (docs/mekhq-map.md).
 
 test {
     _ = @import("tui/screen.zig");

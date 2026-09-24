@@ -114,6 +114,11 @@ check "a broad catch with no best-effort reason and no baseline entry" \
 check "a baseline entry that no longer exists (remove it)" \
     "$(printf '%s\n' "$baseline" | grep -vxF -f <(printf '%s\n' "$broad") | grep -v '^$')"
 
+# §7 Every module names its MekHQ counterpart, or says it has none (rule 61):
+# the //! header at the top of the file mentions MekHQ.
+check "a module header that names no MekHQ counterpart" \
+    "$(for f in $(find src -name '*.zig' | sort); do awk 'NR == FNR && /^\/\/!/ { if (/MekHQ/) found = 1; next } { exit } END { if (!found) print FILENAME }' "$f"; done)"
+
 # §9 Every source file is reachable (rule 74): from src/root.zig and
 # src/main.zig through @import, so nothing sits outside the build.
 check "a source file no import reaches" "$(python3 - <<'PY'

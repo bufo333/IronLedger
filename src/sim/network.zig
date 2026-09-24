@@ -3,6 +3,8 @@
 //! a weekly tonnage cap, and upkeep. Shipments route over links hop by hop
 //! — every hop costs delay and freight unless the intermediary is a real
 //! hub — and a link at capacity refuses more freight until next week.
+//! No MekHQ counterpart: the supply network is this game's extension
+//! (docs/mekhq-map.md).
 
 const std = @import("std");
 const tuning = @import("../domain/tuning.zig").t;

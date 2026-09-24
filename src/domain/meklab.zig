@@ -4,6 +4,8 @@
 //! rule a fit breaks, and how big a job a refit is (CamOps class A–F).
 //!
 //! Integer arithmetic throughout: masses in half-tons, no floats.
+//! MekHQ counterpart: the MekLab tab and its customization rules
+//! (docs/mekhq-map.md).
 
 const std = @import("std");
 const types = @import("types.zig");

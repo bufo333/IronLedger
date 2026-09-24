@@ -5,6 +5,7 @@
 //! critical, selected, dim) so the client holds on any terminal theme.
 //! Inline markup `{a}…{/}` uses the tag set of docs/tui_mockup_gen.py so
 //! query text can carry emphasis. Pure: no I/O except `flush`.
+//! No MekHQ counterpart: MekHQ draws with Swing (docs/mekhq-map.md).
 
 const std = @import("std");
 const table_mod = @import("game").table;

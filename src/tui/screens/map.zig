@@ -1,6 +1,7 @@
 //! The Map screen (docs/coding-contract.md rule 18): its draw, cursor
 //! move, Enter and letter keys, registered once in `app.screen_table`.
 //! Reads through queries, mutates through commands, like every screen.
+//! MekHQ counterpart: the Interstellar Map tab (docs/mekhq-map.md).
 
 const std = @import("std");
 const app = @import("../app.zig");

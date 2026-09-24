@@ -2,6 +2,8 @@
 //! should know before time moves. A pure query over GameState — the CLI
 //! refuses to advance until it's acknowledged; the TUI renders it as a
 //! modal. Nothing slips past a turn boundary unannounced.
+//! No direct MekHQ counterpart: MekHQ reports these in its daily log and nag
+//! dialogs (docs/mekhq-map.md).
 
 const std = @import("std");
 const person_mod = @import("../domain/person.zig");

@@ -5,6 +5,8 @@
 //! below half strength with no replacements bought in time, triggers the
 //! breach clause: advance clawback, forfeited remainder, reputation, and a
 //! cooling employer.
+//! MekHQ counterpart: the AtB contract lifecycle (`AtBContract`)
+//! (docs/mekhq-map.md).
 
 const std = @import("std");
 const tuning = @import("../domain/tuning.zig").t;

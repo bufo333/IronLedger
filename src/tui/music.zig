@@ -8,6 +8,7 @@
 //! run so the first track differs; one soundtrack can be chosen instead
 //! of the mix. The app polls once per frame; when a track ends the next
 //! one starts. Settings (on/off, volume, soundtrack) persist in the store.
+//! No MekHQ counterpart: the soundtrack player (docs/mekhq-map.md).
 
 const std = @import("std");
 

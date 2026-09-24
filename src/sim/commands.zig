@@ -1,6 +1,8 @@
 //! Player commands: the single choke point for every action (ARCH §4).
 //! A tagged union in, validation, mutation via GameState, out. This gives us
 //! an audit log, replayability, and scriptable golden-master tests for free.
+//! No MekHQ counterpart: MekHQ changes the campaign from its GUI actions
+//! (docs/mekhq-map.md).
 
 const std = @import("std");
 const tuning = @import("../domain/tuning.zig").t;
