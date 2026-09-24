@@ -25,6 +25,7 @@ extern fn sqlite3_column_blob(stmt: *StmtHandle, col: c_int) ?*const anyopaque;
 extern fn sqlite3_column_bytes(stmt: *StmtHandle, col: c_int) c_int;
 extern fn sqlite3_column_type(stmt: *StmtHandle, col: c_int) c_int;
 extern fn sqlite3_errmsg(db: *Handle) [*:0]const u8;
+extern fn sqlite3_changes(db: *Handle) c_int;
 
 const SQLITE_OK = 0;
 const SQLITE_ROW = 100;
@@ -54,17 +55,22 @@ pub const Db = struct {
         const rc = sqlite3_exec(self.h, sql, null, null, &err);
         if (rc != SQLITE_OK) {
             if (err) |e| {
-                std.log.err("sqlite exec: {s}", .{e});
+                std.log.warn("sqlite exec: {s}", .{e});
                 sqlite3_free(e);
             }
             return error.SqliteError;
         }
     }
 
+    /// Rows the most recent INSERT, UPDATE or DELETE changed.
+    pub fn changes(self: Db) i64 {
+        return sqlite3_changes(self.h);
+    }
+
     pub fn prepare(self: Db, sql: []const u8) Error!Stmt {
         var s: ?*StmtHandle = null;
         if (sqlite3_prepare_v2(self.h, sql.ptr, @intCast(sql.len), &s, null) != SQLITE_OK or s == null) {
-            std.log.err("sqlite prepare: {s} — {s}", .{ sqlite3_errmsg(self.h), sql });
+            std.log.warn("sqlite prepare: {s} — {s}", .{ sqlite3_errmsg(self.h), sql });
             return error.SqliteError;
         }
         return .{ .h = s.?, .db = self.h };
@@ -121,7 +127,7 @@ pub const Stmt = struct {
     pub fn run(self: Stmt) Error!void {
         const rc = sqlite3_step(self.h);
         if (rc != SQLITE_DONE and rc != SQLITE_ROW) {
-            std.log.err("sqlite step: {s}", .{sqlite3_errmsg(self.db)});
+            std.log.warn("sqlite step: {s}", .{sqlite3_errmsg(self.db)});
             return error.SqliteError;
         }
         _ = sqlite3_reset(self.h);
@@ -132,7 +138,7 @@ pub const Stmt = struct {
         const rc = sqlite3_step(self.h);
         if (rc == SQLITE_ROW) return true;
         if (rc == SQLITE_DONE) return false;
-        std.log.err("sqlite step: {s}", .{sqlite3_errmsg(self.db)});
+        std.log.warn("sqlite step: {s}", .{sqlite3_errmsg(self.db)});
         return error.SqliteError;
     }
 

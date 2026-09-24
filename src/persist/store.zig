@@ -324,7 +324,10 @@ pub const Store = struct {
 
     // ------------------------------------------------------------------ save
 
-    /// Save the campaign; a first save registers it (gs.campaign_id set).
+    /// Save the campaign in one transaction. A first save registers it and
+    /// sets `gs.campaign_id` only once the transaction commits, so a failed
+    /// save leaves both the store and the state as they were. Saving over a
+    /// campaign whose row is gone returns `error.NoSuchCampaign`.
     pub fn save(self: Store, gs: *GameState) !void {
         try self.db.exec("BEGIN");
         errdefer self.db.exec("ROLLBACK") catch {};
@@ -333,7 +336,8 @@ pub const Store = struct {
         const date = gs.clock.date.text(&date_buf);
         const cmdr_name: []const u8 = if (gs.commander) |c| c.name else "";
 
-        if (gs.campaign_id == 0) {
+        var cid = gs.campaign_id;
+        if (cid == 0) {
             const ins = try self.db.prepare("INSERT INTO campaign (name, commander, day, date, schema_version, save_seq, player_id) VALUES (?1, ?2, ?3, ?4, ?5, (SELECT COALESCE(MAX(save_seq), 0) + 1 FROM campaign), ?6)");
             defer ins.finalize();
             try ins.bindAll(.{ gs.outfit_name, cmdr_name, @as(i64, gs.clock.day_index), date, @as(i64, schema_version), self.player_id });
@@ -341,14 +345,14 @@ pub const Store = struct {
             const q = try self.db.prepare("SELECT last_insert_rowid()");
             defer q.finalize();
             _ = try q.next();
-            gs.campaign_id = q.int(0);
+            cid = q.int(0);
         } else {
             const up = try self.db.prepare("UPDATE campaign SET name = ?1, commander = ?2, day = ?3, date = ?4, schema_version = ?5, save_seq = (SELECT COALESCE(MAX(save_seq), 0) + 1 FROM campaign) WHERE id = ?6");
             defer up.finalize();
-            try up.bindAll(.{ gs.outfit_name, cmdr_name, @as(i64, gs.clock.day_index), date, @as(i64, schema_version), gs.campaign_id });
+            try up.bindAll(.{ gs.outfit_name, cmdr_name, @as(i64, gs.clock.day_index), date, @as(i64, schema_version), cid });
             try up.run();
+            if (self.db.changes() == 0) return error.NoSuchCampaign;
         }
-        const cid = gs.campaign_id;
         try self.clearRows(cid);
 
         // Scalars.
@@ -805,6 +809,7 @@ pub const Store = struct {
         }
 
         try self.db.exec("COMMIT");
+        gs.campaign_id = cid;
     }
 
     fn saveStock(self: Store, cid: i64, kind: []const u8, owner: i64, stock: *const std.StringArrayHashMapUnmanaged(u32)) !void {
@@ -849,7 +854,8 @@ pub const Store = struct {
             const st = try self.db.prepare("SELECT schema_version FROM campaign WHERE id = ?1");
             defer st.finalize();
             try st.bindAll(.{cid});
-            if (try st.next()) saved_version = @intCast(@max(1, st.int(0)));
+            if (!try st.next()) return error.NoSuchCampaign;
+            saved_version = @intCast(@max(1, st.int(0)));
         }
         if (saved_version > schema_version) return error.SaveNewerThanGame;
 
@@ -2111,6 +2117,51 @@ test "12G.7: a hull the enemy holds round-trips, slots and all — off the books
     }
     // The slot rows really came back — the drop this test exists to catch.
     try std.testing.expect(slots_seen > 0);
+}
+
+fn countCampaignRows(store: Store) !i64 {
+    const st = try store.db.prepare("SELECT COUNT(*) FROM campaign");
+    defer st.finalize();
+    _ = try st.next();
+    return st.int(0);
+}
+
+test "loading a campaign id with no campaign row is refused" {
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try std.testing.expectError(error.NoSuchCampaign, store.load(std.testing.allocator, 999));
+}
+
+test "a first save that fails leaves the campaign unsaved, and a retry registers it" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 4004 });
+    defer gs.deinit();
+    _ = try gs.createCommander("T", .LC, .line_officer);
+    const store = try Store.open(":memory:");
+    defer store.close();
+    // A missing child table makes the save fail after the campaign INSERT.
+    try store.db.exec("DROP TABLE unit");
+    try std.testing.expect(std.meta.isError(store.save(&gs)));
+    try std.testing.expectEqual(@as(i64, 0), gs.campaign_id);
+    try std.testing.expectEqual(@as(i64, 0), try countCampaignRows(store));
+
+    try store.db.exec(ddl);
+    try store.save(&gs);
+    try std.testing.expect(gs.campaign_id != 0);
+    try std.testing.expectEqual(@as(i64, 1), try countCampaignRows(store));
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+}
+
+test "saving over a campaign row that no longer exists is refused" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 4005 });
+    defer gs.deinit();
+    _ = try gs.createCommander("T", .LC, .line_officer);
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    try store.db.exec("DELETE FROM campaign");
+    try std.testing.expectError(error.NoSuchCampaign, store.save(&gs));
+    try std.testing.expectEqual(@as(i64, 0), try countCampaignRows(store));
 }
 
 /// A campaign that has fought `fights` engagements, every battle decision

@@ -32,6 +32,7 @@ out=$(printf '%s\n' \
   'battles 999' \
   'read 999' \
   'help' \
+  'load 999' \
   'save' \
   'quit' | "$exe" --repl --store "$db" 2>&1)
 check() { echo "$out" | grep -q -- "$1" || { echo "MISSING: $1"; echo "$out" | tail -40; exit 1; }; }
@@ -54,6 +55,8 @@ check 'no engagement on record with that id'
 # 12G.5: `read` clears the after-action that holds the turn; a bad id is refused.
 check 'no engagement on record with that id'
 check 'fabricate'
+# A campaign id with no campaign row is refused, not loaded blank.
+check 'load failed: no saved campaign has that id'
 check 'stripped for parts'
 check 'drew 500000 c-bills over 12 months'
 check 'under contract:'
