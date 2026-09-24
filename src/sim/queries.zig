@@ -2459,12 +2459,7 @@ pub const People = struct {
 
 fn skillsText(alloc: Alloc, p: *const person_mod.Person) ![]const u8 {
     const primary = p.role.primarySkill();
-    const second: ?types.SkillType = switch (p.role) {
-        .mekwarrior => .piloting_mek,
-        .vehicle_crew => .driving_vee,
-        .aero_pilot => .piloting_aero,
-        else => null,
-    };
+    const second = p.role.pilotingSkill();
     if (second) |s| return std.fmt.allocPrint(alloc, "{d}/{d}", .{ p.skill(primary) orelse 7, p.skill(s) orelse 8 });
     return std.fmt.allocPrint(alloc, "{d}", .{p.skill(primary) orelse 7});
 }

@@ -45,6 +45,18 @@ pub const Role = enum {
         };
     }
 
+    /// The piloting (or driving) skill a combat role handles its unit with,
+    /// beside `primarySkill`'s gunnery; null for roles that crew no unit in
+    /// the line. MekHQ keeps per-unit-type gunnery and piloting the same way.
+    pub fn pilotingSkill(self: Role) ?types.SkillType {
+        return switch (self) {
+            .mekwarrior => .piloting_mek,
+            .vehicle_crew => .driving_vee,
+            .aero_pilot => .piloting_aero,
+            else => null,
+        };
+    }
+
     /// The skill a role's competence is measured by.
     pub fn primarySkill(self: Role) types.SkillType {
         return switch (self) {
@@ -375,9 +387,7 @@ pub const Person = struct {
     /// combat convention). Refined in Stage 2.
     pub fn experience(self: *const Person) types.ExperienceLevel {
         return switch (self.role) {
-            .mekwarrior => .fromCombatSkills(self.skill(.gunnery_mek) orelse 7, self.skill(.piloting_mek) orelse 8),
-            .vehicle_crew => .fromCombatSkills(self.skill(.gunnery_vee) orelse 7, self.skill(.driving_vee) orelse 8),
-            .aero_pilot => .fromCombatSkills(self.skill(.gunnery_aero) orelse 7, self.skill(.piloting_aero) orelse 8),
+            .mekwarrior, .vehicle_crew, .aero_pilot => .fromCombatSkills(self.skill(self.role.primarySkill()) orelse 7, self.skill(self.role.pilotingSkill().?) orelse 8),
             .ba_trooper, .infantry => fromSupportSkill(self.skill(.small_arms)),
             .tech_mek, .tech_ba => fromSupportSkill(self.skill(.tech_mek)),
             .tech_mechanic => fromSupportSkill(self.skill(.tech_mechanic)),
