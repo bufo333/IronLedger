@@ -2439,7 +2439,7 @@ fn deploymentDefaults(gs: *GameState, company_id: types.ForceId, signing: types.
     }
     const float = types.applyBp(signing, tuning.finance.field_float_bp);
     if (float > 0 and gs.funds >= float) {
-        gs.transferFunds(.outfit, .{ .company = company_id }, float, 0) catch {};
+        try gs.transferFunds(.outfit, .{ .company = company_id }, float, 0);
     }
     try gs.log(.finance, .{ .company = company_id }, "[deploy] defaults: resupply every {d} days on the field plan, {d} local operating funds, top-up policy {d}/{d} per month — `supplypolicy`/`policy` with 0 clear them", .{
         tuning.field_supply.default_min_days, float, tuning.finance.field_policy_floor, tuning.finance.field_policy_cap,

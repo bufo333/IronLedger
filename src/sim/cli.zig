@@ -448,6 +448,45 @@ pub fn errorText(err: anyerror) []const u8 {
     return switch (err) {
         error.NoSuchCampaign => "no saved campaign has that id — `campaigns` lists them",
         error.SaveNewerThanGame, error.StoreNewerThanGame => "that save was written by a newer version of the game",
+        error.UnknownForce => "no force has that id",
+        error.UnknownChassis => "no design by that key in the catalogue",
+        error.NoSuchChoice => "that decision has no option with that number",
+        error.NotADecision => "that event is not a decision",
+        error.CommanderExists => "the campaign already has a commander",
+        error.NoHomeWorld => "that house has no capital on the map to start from",
+        error.UnknownPlanet => "no world by that key on the map",
+        error.UnknownPart => "no part by that key in the catalogue",
+        error.NotMothballed => "that hull is not in mothballs",
+        error.AlreadyMothballed => "that hull is already in mothballs",
+        error.NoHq => "the outfit has no HQ for that yet",
+        error.PersonUnavailable => "that person is not available: wounded, on leave, away or gone",
+        error.AlreadyTraining => "that person is already training",
+        error.NotTrained => "that person does not have the skill to build on",
+        error.InsufficientXp => "not enough banked XP for that",
+        error.AlreadyMastered => "that skill is already as good as it gets",
+        error.UnknownTreasury => "no treasury by that name: outfit, hq:N or co:N",
+        error.InsufficientStock => "not enough of that part in stock there",
+        error.UnknownSite => "no site by that id",
+        error.UnknownHq => "no HQ has that id",
+        error.NotAComponent => "that part is not a structural component (comp_*)",
+        error.NoSuchCandidate => "no hall candidate with that number",
+        error.NoRoute => "no supply route links those sites",
+        error.ThroughputExceeded => "the supply line cannot carry that many tons this week",
+        error.BadLevel => "that level is out of range",
+        error.CompanyInTransit => "that company is in transit",
+        error.NoPlan => "that hull has no refit plan",
+        error.NotAMek => "only meks go through the MekLab",
+        error.NoSuchSlot => "that hull has no slot by that key",
+        error.BadArguments => "those arguments do not fit the verb",
+        error.BadSite => "that is not a site: outfit, hq:N or co:N",
+        error.BadNumber => "that is not a number the verb takes",
+        error.OutOfMemory => "out of memory — nothing was changed",
+        error.NotPng => "that file is not a PNG picture",
+        error.Unsupported => "that PNG uses a format the emblem loader does not read (8-bit, non-interlaced only)",
+        error.Corrupt => "that picture is damaged",
+        error.FileNotFound => "no file by that name",
+        error.AccessDenied => "the file could not be opened: permission denied",
+        error.StreamTooLong, error.FileTooBig => "that file is too large",
         error.CorruptSave => "that save is damaged and cannot be loaded",
         error.InsufficientTreasury => "not enough money in that treasury — transfer funds first",
         error.AlreadyHome => "that company is already home",
@@ -515,7 +554,7 @@ pub fn errorText(err: anyerror) []const u8 {
         error.NoBerth => "no free berth at that HQ — spaceport levels add dropship berths; a jumpship berth needs spaceport 4 and comms 3",
         error.NoJumpship => "a dedicated line (level 3) needs a crewed jumpship berthed at one end",
         error.WrongHullKind => "fighters fly in air lances, meks walk in line lances, and ships hold berths",
-        else => @errorName(err),
+        else => "an unexpected failure — nothing was changed",
     };
 }
 
@@ -786,5 +825,16 @@ test "a word that names a choice must be one of the choices" {
 test "every verb is listed once" {
     for (verbs, 0..) |v, i| {
         for (verbs[i + 1 ..]) |w| try std.testing.expect(!std.mem.eql(u8, v, w));
+    }
+}
+
+test "every command refusal and parse error has a sentence, never an error name" {
+    inline for (@typeInfo(game.commands.Error).error_set.?) |e| {
+        const text = errorText(@field(anyerror, e.name));
+        try std.testing.expect(!std.mem.eql(u8, text, "an unexpected failure — nothing was changed"));
+        try std.testing.expect(!std.mem.eql(u8, text, e.name));
+    }
+    inline for (@typeInfo(ParseError).error_set.?) |e| {
+        try std.testing.expect(!std.mem.eql(u8, errorText(@field(anyerror, e.name)), "an unexpected failure — nothing was changed"));
     }
 }

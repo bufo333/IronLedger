@@ -43,7 +43,7 @@ out=$(printf '%s\n' \
   'quit' | "$exe" --repl --store "$db" 2>&1)
 check() { echo "$out" | grep -q -- "$1" || { echo "MISSING: $1"; echo "$out" | tail -40; exit 1; }; }
 check 'no air wing slot'
-check 'CapacityFull'
+check 'that HQ has no free company slot'
 check 'role .*have  need'
 check 'banked XP'
 check 'Dragoons rating'
@@ -67,9 +67,9 @@ check 'load failed: no saved campaign has that id'
 check 'no engagement on that contract is close enough to give orders for'
 check 'no contract has that id'
 # A leftover token or a word outside the choices is refused with the usage.
-check 'BadArguments — usage: sell <unit>'
-check 'BadArguments — usage: xfer unit|person'
-check 'BadArguments — usage: autoadmit'
+check 'those arguments do not fit the verb — usage: sell <unit>'
+check 'those arguments do not fit the verb — usage: xfer unit|person'
+check 'those arguments do not fit the verb — usage: autoadmit'
 check 'stripped for parts'
 check 'drew 500000 c-bills over 12 months'
 check 'under contract:'
