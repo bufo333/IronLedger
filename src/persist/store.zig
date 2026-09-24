@@ -28,7 +28,7 @@ const contract_events = @import("../sim/contract_events.zig");
 const network = @import("../sim/network.zig");
 const clock_mod = @import("../sim/clock.zig");
 
-pub const schema_version = 33;
+pub const schema_version = 34;
 
 const ddl =
     \\CREATE TABLE IF NOT EXISTS player (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_seq INTEGER NOT NULL);
@@ -61,7 +61,7 @@ const ddl =
     \\CREATE TABLE IF NOT EXISTS supply_policy (cid INTEGER NOT NULL, ord INTEGER NOT NULL, company INTEGER, min_days INTEGER, tons INTEGER, ammo_battles INTEGER NOT NULL DEFAULT 0);
     \\CREATE TABLE IF NOT EXISTS stock_policy (cid INTEGER NOT NULL, ord INTEGER NOT NULL, hq INTEGER, part_key TEXT, min_qty INTEGER, target INTEGER);
     \\CREATE TABLE IF NOT EXISTS bay_job (cid INTEGER NOT NULL, ord INTEGER NOT NULL, hq INTEGER, kind TEXT, unit INTEGER, item_key TEXT, duration INTEGER, queued INTEGER, started INTEGER, done INTEGER, cost INTEGER);
-    \\CREATE TABLE IF NOT EXISTS candidate (cid INTEGER NOT NULL, ord INTEGER NOT NULL, hq INTEGER, first TEXT, last TEXT, callsign TEXT, role TEXT, experience TEXT, primary_skill INTEGER, secondary_skill INTEGER, bonus INTEGER, listed INTEGER, expires INTEGER);
+    \\CREATE TABLE IF NOT EXISTS candidate (cid INTEGER NOT NULL, ord INTEGER NOT NULL, hq INTEGER, first TEXT, last TEXT, callsign TEXT, role TEXT, experience TEXT, primary_skill INTEGER, secondary_skill INTEGER, bonus INTEGER, listed INTEGER, expires INTEGER, age INTEGER NOT NULL DEFAULT 30);
     \\CREATE TABLE IF NOT EXISTS hq_link (cid INTEGER NOT NULL, ord INTEGER NOT NULL, a INTEGER, b INTEGER, level INTEGER, tons INTEGER, established INTEGER);
     \\CREATE TABLE IF NOT EXISTS unit_transfer (cid INTEGER NOT NULL, ord INTEGER NOT NULL, unit INTEGER, to_company INTEGER, eta INTEGER);
     \\CREATE TABLE IF NOT EXISTS faction_cooling (cid INTEGER NOT NULL, ord INTEGER NOT NULL, faction TEXT, until_day INTEGER);
@@ -123,6 +123,8 @@ pub const Store = struct {
         // have no undivided hauls — their salvage was taken at claim time.
         .{ .version = 31, .table = "battle_report", .column = "salvage_unclaimed", .sql = "ALTER TABLE battle_report ADD COLUMN salvage_unclaimed INTEGER NOT NULL DEFAULT 0" },
         .{ .version = 33, .table = "contract", .column = "orders_day", .sql = "ALTER TABLE contract ADD COLUMN orders_day INTEGER" },
+        // v34: a hall candidate keeps the age it was generated with.
+        .{ .version = 34, .table = "candidate", .column = "age", .sql = "ALTER TABLE candidate ADD COLUMN age INTEGER NOT NULL DEFAULT 30" },
         // v7: the `injury` table (created by ddl); campaign data is
         // upgraded on load (`upgradeCampaign`). v8: `faction_standing`
         // (created by ddl; absent rows read as 0).
@@ -381,6 +383,7 @@ pub const Store = struct {
                 .{ "next_unit_id", gs.next_unit_id },                 .{ "next_force_id", gs.next_force_id },
                 .{ "next_hq_id", gs.next_hq_id },                     .{ "next_contract_id", gs.next_contract_id },
                 .{ "next_battle_id", gs.next_battle_id },           .{ "rng_seed", @as(i64, @bitCast(gs.rng.seed)) },
+                .{ "next_event_id", gs.event_queue.next_id },
             };
             for (ints) |kv| {
                 try st.bindAll(.{ cid, kv[0], kv[1] });
@@ -633,10 +636,10 @@ pub const Store = struct {
             }
         }
         {
-            const st = try self.db.prepare("INSERT INTO candidate VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)");
+            const st = try self.db.prepare("INSERT INTO candidate VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)");
             defer st.finalize();
             for (gs.candidates.items, 0..) |c, i| {
-                try st.bindAll(.{ cid, @as(i64, @intCast(i)), @intFromEnum(c.hq), c.spec.first, c.spec.last, c.spec.callsign, c.spec.role, c.spec.experience, @as(i64, c.spec.primary_skill), @as(i64, c.spec.secondary_skill), c.asking_bonus, @as(i64, c.listed_day), @as(i64, c.expires_day) });
+                try st.bindAll(.{ cid, @as(i64, @intCast(i)), @intFromEnum(c.hq), c.spec.first, c.spec.last, c.spec.callsign, c.spec.role, c.spec.experience, @as(i64, c.spec.primary_skill), @as(i64, c.spec.secondary_skill), c.asking_bonus, @as(i64, c.listed_day), @as(i64, c.expires_day), @as(i64, c.spec.age) });
                 try st.run();
             }
         }
@@ -942,6 +945,7 @@ pub const Store = struct {
                 if (std.mem.eql(u8, key, "next_hq_id")) gs.next_hq_id = try fit(@TypeOf(gs.next_hq_id), v);
                 if (std.mem.eql(u8, key, "next_contract_id")) gs.next_contract_id = try fit(@TypeOf(gs.next_contract_id), v);
                 if (std.mem.eql(u8, key, "next_battle_id")) gs.next_battle_id = try fit(@TypeOf(gs.next_battle_id), v);
+                if (std.mem.eql(u8, key, "next_event_id")) gs.event_queue.next_id = try fit(@TypeOf(gs.event_queue.next_id), v);
                 if (std.mem.eql(u8, key, "rng_seed")) {
                     gs.rng.seed = @bitCast(v);
                     has_seed = true;
@@ -1338,7 +1342,7 @@ pub const Store = struct {
             }
         }
         {
-            const st = try self.db.prepare("SELECT hq, first, last, callsign, role, experience, primary_skill, secondary_skill, bonus, listed, expires FROM candidate WHERE cid = ?1 ORDER BY ord");
+            const st = try self.db.prepare("SELECT hq, first, last, callsign, role, experience, primary_skill, secondary_skill, bonus, listed, expires, age FROM candidate WHERE cid = ?1 ORDER BY ord");
             defer st.finalize();
             try st.bindAll(.{cid});
             while (try st.next()) {
@@ -1352,6 +1356,7 @@ pub const Store = struct {
                         .experience = st.enumValue(types.ExperienceLevel, 5) orelse return error.CorruptSave,
                         .primary_skill = try st.intAs(u8, 6),
                         .secondary_skill = try st.intAs(u8, 7),
+                        .age = try st.intAs(u8, 11),
                     },
                     .asking_bonus = st.int(8),
                     .listed_day = try st.intAs(u32, 9),
@@ -1933,6 +1938,8 @@ test "save → load → identical hash, and the loaded campaign keeps playing" {
 
     var loaded = try store.load(std.testing.allocator, gs.campaign_id);
     defer loaded.deinit();
+    var diff_buf: [128]u8 = undefined;
+    try std.testing.expectEqualStrings("", gs.firstHashDifference(&loaded, &diff_buf) orelse "");
     try std.testing.expectEqual(before, loaded.hash());
     try std.testing.expectEqual(gs.hqs.keys()[0], loaded.unit(ship).?.berth_hq);
     try std.testing.expectEqual(@import("../domain/unit.zig").WreckCause.engine, loaded.unit(wreck).?.wreck);
@@ -2672,4 +2679,51 @@ test "12G.6: the wrecks on offer survive a save — the same battlefield after a
     const after = battle.salvagePlan(r.salvage.candidates, 1_500, .heaviest);
     try std.testing.expectEqual(before.hulls, after.hulls);
     try std.testing.expectEqualStrings("Dragon", r.salvage.candidates[after.take[0]].name);
+}
+
+/// A played year for the golden master: a commander, the starter company,
+/// every contract offer taken as the last one ends, every decision answered
+/// with its default and every after-action read.
+fn playedYearForTest(gs: *GameState) !void {
+    const commands = @import("../sim/commands.zig");
+    const checklist = @import("../sim/checklist.zig");
+    _ = try commands.execute(gs, .{ .create_commander = .{ .name = "Kalmar", .origin = .LC, .profession = .line_officer } });
+    const co = (try commands.execute(gs, .{ .new_company = "Alpha" })).created_force;
+    var day: u32 = 0;
+    while (day < 365) {
+        while (checklist.turnHold(gs)) |h| switch (h) {
+            .unread_after_action => _ = try commands.execute(gs, .{ .read_report = gs.battle_reports.unread().?.id }),
+            .battle_decision => {
+                const ev = gs.event_queue.blocking().?;
+                _ = try commands.execute(gs, .{ .resolve_decision = .{ .event = ev.id, .choice = ev.default_choice } });
+            },
+        };
+        if (!gs.isCompanyDeployed(co) and gs.contract_offers.items.len > 0) {
+            _ = commands.execute(gs, .{ .accept_contract = .{ .offer_index = 0, .company = co } }) catch {};
+        }
+        const r = try commands.execute(gs, .{ .advance_days = 7 });
+        if (r.days_advanced == 0) return error.TestUnexpectedResult;
+        day += @intCast(r.days_advanced);
+    }
+}
+
+test "golden master: a played year hashes to its pinned value, and a save of it plays on identically" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 20_260_924 });
+    defer gs.deinit();
+    try playedYearForTest(&gs);
+    try std.testing.expect(gs.battle_reports.kept.items.len > 0); // the year saw fighting
+    // Any change to a simulated or saved result moves this; re-pin it only
+    // when the change is meant.
+    try std.testing.expectEqual(@as(u64, 12374000996448995992), gs.hash());
+
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+    var buf: [128]u8 = undefined;
+    try std.testing.expectEqualStrings("", gs.firstHashDifference(&loaded, &buf) orelse "");
+    const commands = @import("../sim/commands.zig");
+    for ([_]*GameState{ &gs, &loaded }) |g| _ = try commands.execute(g, .{ .advance_days = 60 });
+    try std.testing.expectEqualStrings("", gs.firstHashDifference(&loaded, &buf) orelse "");
 }
