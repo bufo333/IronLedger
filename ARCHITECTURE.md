@@ -817,7 +817,7 @@ bulk-copy MegaMek data files into the repo without deciding on licensing.
   headers, the size ratchet) and prints `CONTRACT CHECKS OK` or each
   violation. CI runs the gate and both smokes on Linux and macOS, and
   builds a ReleaseFast release from a tree holding only the package's
-  declared paths (`docs/clean-package.sh`); a prose-only change skips it.
+  declared paths (`docs/clean-package.sh`), on every change.
 - Style and every other coding rule: [`docs/coding-contract.md`](docs/coding-contract.md).
 
 ## 14. Directory layout

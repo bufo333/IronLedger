@@ -3,28 +3,14 @@
 # build in ReleaseFast (rule 66). Pull requests run it; `main` runs it again
 # after a merge. Actions are pinned to reviewed commits.
 #
-# A change that touches only prose (Markdown, the HTML pages, generated
-# screenshots) skips CI. docs/tui.md (a test compares its key block) and
-# docs/contract-exceptions.md (the size ratchet) are gate inputs and run it.
+# Every change runs it, prose included: the four jobs are required status
+# checks on `main`, and a workflow skipped by a path filter leaves its
+# required checks pending, which blocks the merge.
 name: ci
 on:
   push:
     branches: [main]
-    paths:
-      - '**'
-      - '!**.md'
-      - '!docs/**.html'
-      - '!docs/screenshots/**'
-      - 'docs/tui.md'
-      - 'docs/contract-exceptions.md'
   pull_request:
-    paths:
-      - '**'
-      - '!**.md'
-      - '!docs/**.html'
-      - '!docs/screenshots/**'
-      - 'docs/tui.md'
-      - 'docs/contract-exceptions.md'
 permissions:
   contents: read
 concurrency:
