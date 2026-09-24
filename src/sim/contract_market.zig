@@ -495,7 +495,7 @@ const refresh_days: u32 = tuning.market.hall_refresh_days;
 /// Put one candidate on an HQ's board: rolled to the outfit's recruit
 /// bonus, asking a signing bonus by experience, gone after `ttl_days`.
 fn listCandidate(gs: *GameState, hq: *const hq_mod.Hq, role: person_mod.Role, ttl_days: u32) !void {
-    const spec = person_gen.generateWithBonus(&gs.rng, .market, role, gs.recruitBonus(hq.id));
+    const spec = person_gen.generateWithBonus(&gs.rng, .market, role, @import("personnel.zig").recruitBonus(gs, hq.id));
     const salary = types.applyBp(role.baseSalary(), spec.experience.salaryMultBp());
     try gs.candidates.append(gs.allocator(), .{
         .hq = hq.id,

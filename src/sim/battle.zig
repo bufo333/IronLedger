@@ -825,7 +825,7 @@ fn takePrisoners(gs: *GameState, c: *const contract_mod.Contract, player: *const
         captured = @min(t.prisoners_max_per_battle, kills_est / t.prisoners_per_kills);
         for (0..captured) |_| {
             const spec = @import("../gen/person_gen.zig").generateWithBonus(&gs.rng, .battle, .mekwarrior, if (std.mem.eql(u8, c.enemy_key, "PER")) -1 else 0);
-            const pid = try gs.hireFromSpec(spec);
+            const pid = try @import("personnel.zig").hireFromSpec(gs, spec);
             const pow = gs.person(pid).?;
             pow.status = .pow;
             pow.assigned_force = c.assigned_company;

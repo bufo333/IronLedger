@@ -1,6 +1,8 @@
-//! Personnel bookkeeping that spans people and forces (Stage 12B.4).
-//! Adaptation of MekHQ `personnel/ranks` and the AtB "commander/lance
-//! leader" designations: ranks follow seats and experience unless pinned.
+//! Personnel bookkeeping that spans people and forces (Stage 12B.4):
+//! recruiting and posting people, and ranks, shares, awards and the
+//! manning table. Adaptation of MekHQ `personnel/ranks`, the AtB
+//! "commander/lance leader" designations and the AtB personnel
+//! generation: ranks follow seats and experience unless pinned.
 
 const std = @import("std");
 const tuning = @import("../domain/tuning.zig").t;
@@ -11,6 +13,73 @@ const award_mod = @import("../domain/award.zig");
 const chassis_mod = @import("../domain/chassis.zig");
 const GameState = @import("state.zig").GameState;
 const company_gen = @import("../gen/company_gen.zig");
+const person_gen = @import("../gen/person_gen.zig");
+const rng_mod = @import("rng.zig");
+
+/// Recruit a randomly generated person (AtB-style: experience on 2d6,
+/// skills from the band, names from the tables). No signing bonus: that
+/// belongs to hiring-hall candidates.
+pub fn recruitGenerated(gs: *GameState, role: person_mod.Role, hq_id: types.HqId, stream: rng_mod.Stream) !types.PersonId {
+    const spec = person_gen.generateWithBonus(&gs.rng, stream, role, recruitBonus(gs, hq_id));
+    return hireFromSpec(gs, spec);
+}
+
+/// Put a generated person on the books (recruiting, or hiring a hall
+/// candidate).
+pub fn hireFromSpec(gs: *GameState, spec: person_gen.GeneratedPerson) !types.PersonId {
+    const role = spec.role;
+    const id = try gs.hirePerson(spec.first, spec.last, role);
+    const p = gs.person(id).?;
+    if (spec.callsign) |c| p.callsign = try gs.allocator().dupe(u8, c);
+    p.setBirthdayFromAge(gs.clock.day_index, spec.age);
+
+    // Overwrite the hire defaults with the generated experience band.
+    const alloc = gs.allocator();
+    switch (role) {
+        .mekwarrior => {
+            try p.skills.put(alloc, .gunnery_mek, spec.primary_skill);
+            try p.skills.put(alloc, .piloting_mek, spec.secondary_skill);
+        },
+        .vehicle_crew => {
+            try p.skills.put(alloc, .gunnery_vee, spec.primary_skill);
+            try p.skills.put(alloc, .driving_vee, spec.secondary_skill);
+        },
+        .aero_pilot => {
+            try p.skills.put(alloc, .gunnery_aero, spec.primary_skill);
+            try p.skills.put(alloc, .piloting_aero, spec.secondary_skill);
+        },
+        .ba_trooper, .infantry => try p.skills.put(alloc, .small_arms, spec.primary_skill),
+        .tech_mek, .tech_ba => try p.skills.put(alloc, .tech_mek, spec.primary_skill),
+        .tech_mechanic => try p.skills.put(alloc, .tech_mechanic, spec.primary_skill),
+        .tech_aero => try p.skills.put(alloc, .tech_aero, spec.primary_skill),
+        .astech => try p.skills.put(alloc, .astech, spec.primary_skill),
+        .doctor => try p.skills.put(alloc, .doctor, spec.primary_skill),
+        .medic => try p.skills.put(alloc, .medtech, spec.primary_skill),
+        .admin_command, .admin_logistics, .admin_transport, .admin_hr, .admin_finance => try p.skills.put(alloc, .admin, spec.primary_skill),
+        .dropship_crew, .jumpship_crew => {},
+    }
+    return id;
+}
+
+/// Post a person to an HQ's staff (off any force).
+pub fn postToHq(gs: *GameState, person_id: types.PersonId, hq_id: types.HqId) !void {
+    const p = gs.person(person_id) orelse return error.UnknownPerson;
+    if (gs.hqs.getPtr(hq_id) == null) return error.UnknownHq;
+    p.posted_hq = hq_id;
+    p.assigned_force = .none;
+    gs.refreshHqStaffing();
+}
+
+/// Recruit-quality bonus on the 2d6 experience roll at one HQ: its hiring
+/// hall and a staffed HR office find better people.
+pub fn recruitBonus(gs: *GameState, hq_id: types.HqId) i32 {
+    const hq = gs.hqs.getPtr(hq_id) orelse return 0;
+    var bonus: i32 = hq.effectiveFacilityLevel(.hiring_hall);
+    if (gs.hqStaff(hq.id, .admin_hr).count >= tuning.person.recruit_hr_admins) bonus += 1;
+    // A famous outfit draws a better class of walk-in.
+    if (@import("rating.zig").currentIndex(gs) >= tuning.rating.recruit_bonus_index) bonus += 1;
+    return @min(bonus, 4);
+}
 
 /// Morale across the whole outfit: a contract's ending is felt
 /// by everyone on the payroll, not only the company that fought it.
@@ -385,6 +454,22 @@ pub fn refreshRanks(gs: *GameState) !u32 {
         };
     }
     return changed;
+}
+
+test "the recruiting bonus is the recruiting HQ's hiring hall, not the first HQ's" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 7701 });
+    defer gs.deinit();
+    _ = try gs.createCommander("T", .LC, .paymaster);
+    const seat = gs.hqs.keys()[0];
+    const second = try gs.foundHq("Second", .regional, "alkaid");
+    for ([_]types.HqId{ seat, second }) |id| gs.hqs.getPtr(id).?.staff_assigned = 999;
+    for (gs.hqs.getPtr(seat).?.facilities.items) |*f| {
+        if (f.kind == .hiring_hall) f.level = 3;
+    }
+    for (gs.hqs.getPtr(second).?.facilities.items) |*f| {
+        if (f.kind == .hiring_hall) f.level = 0;
+    }
+    try std.testing.expect(recruitBonus(&gs, seat) > recruitBonus(&gs, second));
 }
 
 test "ranks follow seats: a lance leader is a lieutenant, the company commander a captain, the rest by experience" {

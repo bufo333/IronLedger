@@ -147,7 +147,7 @@ section explains the shape, the contract states the rules.
   system never perturbs another. A stream's identity is its permanent
   literal salt (`rng.Stream.salt`), not its place in the enum, so adding or
   reordering streams changes no existing draw. Shared generators
-  (`person_gen`, `company_gen`, `recruitGenerated`,
+  (`person_gen`, `company_gen`, `personnel.recruitGenerated`,
   `planet.weightedPickByFaction`) take the caller's stream: hall, market and
   hiring draw on `.market`, prisoners and salvage on `.battle`, event
   recruits on `.events`, the starter company on `.generation`. All dice are
@@ -480,7 +480,7 @@ generation already recruits this tail; hiring halls restock it.
 they are posted to, else their company's home HQ (`GameState.homeHqOf`).
 Weekly rest at home reads that HQ's mess and HR; training days read the
 training HQ's HR (§9.7). A recruit's quality reads the recruiting HQ's
-hiring hall and HR (`recruitBonus(hq)`, `recruitGenerated(role, hq)`):
+hiring hall and HR (`personnel.recruitBonus(hq)`, `personnel.recruitGenerated(role, hq)`):
 hall boards and office staffing at their own HQ, company crews at the
 company's home HQ, and the bare `recruit` verb at the outfit's seat.
 

@@ -546,7 +546,7 @@ fn execHire(gs: *GameState, h: @FieldType(Command, "hire")) Error!Result {
 
 fn execRecruit(gs: *GameState, role: @FieldType(Command, "recruit")) Error!Result {
     // The verb names no HQ: a recruit signs on at the outfit's seat.
-    const id = try gs.recruitGenerated(role, gs.homeHqFor(.none), .market);
+    const id = try @import("personnel.zig").recruitGenerated(gs, role, gs.homeHqFor(.none), .market);
     return .{ .hired = id };
 }
 
@@ -740,8 +740,8 @@ fn execSetOutfitEmblem(gs: *GameState, image: @FieldType(Command, "set_outfit_em
 fn execSetOfficeStaff(gs: *GameState, o: @FieldType(Command, "set_office_staff")) Error!Result {
     if (gs.hqs.getPtr(o.hq) == null) return Error.UnknownHq;
     if (o.delta > 0) {
-        const id = try gs.recruitGenerated(o.role, o.hq, .market);
-        try gs.postToHq(id, o.hq);
+        const id = try @import("personnel.zig").recruitGenerated(gs, o.role, o.hq, .market);
+        try @import("personnel.zig").postToHq(gs, id, o.hq);
         return .{ .hired = id };
     }
     var last: types.PersonId = .none;
@@ -1224,8 +1224,8 @@ fn execCrewCompany(gs: *GameState, company: @FieldType(Command, "crew_company"))
             if (personnel.isPooledRole(n.role)) {
                 // MekHQ hires astechs and medics to complement on
                 // demand: no market, no signing bonus, salary only.
-                const spec = person_gen.generateWithBonus(&gs.rng, .market, n.role, gs.recruitBonus(gs.homeHqFor(company)));
-                const id = try gs.hireFromSpec(spec);
+                const spec = person_gen.generateWithBonus(&gs.rng, .market, n.role, personnel.recruitBonus(gs, gs.homeHqFor(company)));
+                const id = try personnel.hireFromSpec(gs, spec);
                 gs.person(id).?.assigned_force = company;
                 hired += 1;
             } else if (try hireRoleFromHall(gs, n.role, company)) {
@@ -1566,7 +1566,7 @@ fn execUpgradeFacility(gs: *GameState, u: @FieldType(Command, "upgrade_facility"
 }
 
 fn execPostPerson(gs: *GameState, pp: @FieldType(Command, "post_person")) Error!Result {
-    gs.postToHq(pp.person, pp.hq) catch |err| switch (err) {
+    @import("personnel.zig").postToHq(gs, pp.person, pp.hq) catch |err| switch (err) {
         error.UnknownPerson => return Error.UnknownPerson,
         error.UnknownHq => return Error.UnknownHq,
     };
@@ -1608,7 +1608,7 @@ fn execHireCandidate(gs: *GameState, index: @FieldType(Command, "hire_candidate"
             .note = "signing bonus",
         });
     }
-    const id = try gs.hireFromSpec(cand.spec);
+    const id = try @import("personnel.zig").hireFromSpec(gs, cand.spec);
     _ = gs.candidates.orderedRemove(index);
     return .{ .hired = id };
 }
@@ -3475,7 +3475,7 @@ test "construction is paid by the HQ and the back office sets the pace" {
     const unstaffed = hq_ops.paperworkDaysFor(&gs, hq_id);
     try std.testing.expect(unstaffed > staffed);
     for (0..2) |_| {
-        const id = try gs.recruitGenerated(.admin_command, gs.homeHqFor(.none), .market);
+        const id = try @import("personnel.zig").recruitGenerated(&gs, .admin_command, gs.homeHqFor(.none), .market);
         _ = try execute(&gs, .{ .post_person = .{ .person = id, .hq = hq_id } });
     }
     try std.testing.expect(hq_ops.paperworkDaysFor(&gs, hq_id) < unstaffed);
