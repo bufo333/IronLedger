@@ -10,6 +10,7 @@ const tuning = @import("../domain/tuning.zig").t;
 const person_mod = @import("../domain/person.zig");
 const personnel = @import("personnel.zig");
 const GameState = @import("state.zig").GameState;
+const treasury = @import("treasury.zig");
 
 /// The six parts with the numbers each was scored from, so a screen can
 /// phrase them without recomputing anything.
@@ -186,7 +187,7 @@ pub fn report(gs: *GameState) Report {
     {
         var debt: types.CBills = 0;
         for (gs.loans.items) |l| debt += l.balance;
-        const payroll = gs.monthlyPayroll();
+        const payroll = treasury.monthlyPayroll(gs);
         var s: i32 = 10;
         var months: i64 = 0;
         if (debt > 0) {

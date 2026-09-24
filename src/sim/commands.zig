@@ -1176,7 +1176,7 @@ fn execSellStock(gs: *GameState, sale: @FieldType(Command, "sell_stock")) Error!
     for (gs.stock_policies.items) |sp| {
         if (sp.hq == sale.hq and std.mem.eql(u8, sp.part_key, def.key) and have - sale.quantity < sp.min) return Error.KeepStocked;
     }
-    const value = gs.stockSaleValue(def.key, sale.quantity);
+    const value = treasury.stockSaleValue(def.key, sale.quantity);
     _ = gs.takeStock(.{ .hq = sale.hq }, def.key, sale.quantity);
     try gs.postTreasury(.{ .hq = sale.hq }, .{ .day = gs.clock.day_index, .amount = value, .category = .unit_sale, .hq = sale.hq, .note = def.key });
     try gs.log(.market, .{ .hq = sale.hq }, "[sale] {d} {s} sold from {s} for {d}", .{ sale.quantity, def.key, h.name, value });
@@ -1376,7 +1376,7 @@ fn execRepayLoan(gs: *GameState, r: @FieldType(Command, "repay_loan")) Error!Res
 fn execSellUnit(gs: *GameState, unit_id: @FieldType(Command, "sell_unit")) Error!Result {
     const u = gs.unit(unit_id) orelse return Error.UnknownUnit;
     if (gs.isCompanyDeployed(gs.companyOf(u.force))) return Error.UnitDeployed;
-    const value = gs.unitSaleValue(u);
+    const value = treasury.unitSaleValue(u);
     const key = u.chassis_key;
     gs.removeUnit(unit_id);
     try gs.postTransaction(.{ .day = gs.clock.day_index, .amount = value, .category = .unit_sale, .note = key });
@@ -1391,7 +1391,7 @@ fn execStripUnit(gs: *GameState, unit_id: @FieldType(Command, "strip_unit")) Err
     if (u.status == .in_transit or (company != .none and !gs.isCompanyHome(company))) return Error.UnitAway;
     const hq_id = gs.homeHqFor(u.force);
     if (gs.hqs.getPtr(hq_id) == null) return Error.NoHq;
-    const lines = try gs.stripParts(gs.allocator(), u);
+    const lines = try treasury.stripParts(gs.allocator(), u);
     var text: std.ArrayListUnmanaged(u8) = .empty;
     for (lines, 0..) |l, i| {
         try gs.addStock(.{ .hq = hq_id }, l.key, l.qty);
@@ -1407,7 +1407,7 @@ fn execSellHq(gs: *GameState, hq_id: @FieldType(Command, "sell_hq")) Error!Resul
     const h = gs.hqs.getPtr(hq_id) orelse return Error.UnknownHq;
     if (gs.hqs.count() <= 1) return Error.LastHq;
     if (gs.companiesAtHq(hq_id) > 0) return Error.HqInUse;
-    const value = gs.hqSaleValue(h) + h.funds;
+    const value = treasury.hqSaleValue(h) + h.funds;
     const name = h.name;
     var pit = gs.people.iterator();
     while (pit.next()) |e| if (e.value_ptr.posted_hq == hq_id) {
@@ -1467,7 +1467,7 @@ fn execDisbandCompany(gs: *GameState, co: @FieldType(Command, "disband_company")
     var uit = gs.units.iterator();
     while (uit.next()) |e| if (gs.companyOf(e.value_ptr.force) == co) try uids.append(gs.allocator(), e.value_ptr.id);
     for (uids.items) |uid| {
-        total += gs.unitSaleValue(gs.unit(uid).?);
+        total += treasury.unitSaleValue(gs.unit(uid).?);
         gs.removeUnit(uid);
     }
     var pit = gs.people.iterator();
@@ -1676,7 +1676,7 @@ fn execSetPolicy(gs: *GameState, p: @FieldType(Command, "set_policy")) Error!Res
 
 fn execTakeLoan(gs: *GameState, l: @FieldType(Command, "take_loan")) Error!Result {
     if (l.principal <= 0 or l.term_months == 0) return Error.NoSuchLoan;
-    if (l.principal > gs.creditRemaining()) return Error.CreditExceeded;
+    if (l.principal > treasury.creditRemaining(gs)) return Error.CreditExceeded;
     const rate_bp: types.Bp = tuning.finance.loan_rate_bp; // 12%/yr simple interest
     const total_interest = @divTrunc(l.principal * rate_bp * l.term_months, 10_000 * 12);
     try gs.loans.append(gs.allocator(), .{
@@ -2473,7 +2473,7 @@ fn advance(gs: *GameState, days: u32) Error!Result {
         // Couriers already bound for the outfit count: the turn can end
         // while the money is on the road.
         if (gs.funds + treasury.inboundToOutfit(gs) < 0) {
-            if (gs.isInsolvent()) {
+            if (treasury.isInsolvent(gs)) {
                 gs.bankrupt = true;
                 try gs.log(.finance, .{}, "[bankrupt] the outfit cannot cover {d}: creditors seize what is left", .{gs.funds});
                 return Error.Bankrupt;
@@ -2749,8 +2749,8 @@ test "selling warehouse stock pays the HQ and respects a keep-stocked minimum" {
     try std.testing.expectError(Error.InsufficientStock, execute(&gs, .{ .sell_stock = .{ .hq = hq, .part_key = "ammo_lrm", .quantity = have + 1 } }));
     _ = try execute(&gs, .{ .sell_stock = .{ .hq = hq, .part_key = "ammo_lrm", .quantity = 10 } });
     try std.testing.expectEqual(have - 10, gs.stockCount(.{ .hq = hq }, "ammo_lrm"));
-    try std.testing.expectEqual(funds_before + gs.stockSaleValue("ammo_lrm", 10), gs.hqs.getPtr(hq).?.funds);
-    try std.testing.expect(gs.stockSaleValue("ammo_lrm", 10) > 0);
+    try std.testing.expectEqual(funds_before + treasury.stockSaleValue("ammo_lrm", 10), gs.hqs.getPtr(hq).?.funds);
+    try std.testing.expect(treasury.stockSaleValue("ammo_lrm", 10) > 0);
     _ = try execute(&gs, .{ .set_stock_policy = .{ .hq = hq, .part_key = "ammo_lrm", .min = have - 12, .target = have } });
     try std.testing.expectError(Error.KeepStocked, execute(&gs, .{ .sell_stock = .{ .hq = hq, .part_key = "ammo_lrm", .quantity = 5 } }));
     _ = try execute(&gs, .{ .sell_stock = .{ .hq = hq, .part_key = "ammo_lrm", .quantity = 2 } });
@@ -4618,7 +4618,7 @@ test "how a hull died decides the rebuild — engine kills cost an engine, scrap
     try std.testing.expectError(Error.WrittenOff, execute(&gs, .{ .depot = junk }));
     try std.testing.expect(hq_ops.rebuildEstimate(&gs, gs.unit(junk).?) == null);
     try std.testing.expect(hq_ops.beyondEconomicalRepair(&gs, gs.unit(junk).?));
-    try std.testing.expect(gs.unitSaleValue(gs.unit(junk).?) > 0); // the guns are still worth something
+    try std.testing.expect(treasury.unitSaleValue(gs.unit(junk).?) > 0); // the guns are still worth something
 
     // Stripping crates the guns and the armour left on it, and the hull is gone.
     const ac5_before = gs.stockCount(.{ .hq = home }, "ac5");

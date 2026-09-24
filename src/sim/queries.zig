@@ -19,6 +19,7 @@ const checklist = @import("checklist.zig");
 const contract_events = @import("contract_events.zig");
 const contract_control = @import("contract_control.zig");
 const state_mod = @import("state.zig");
+const treasury = @import("treasury.zig");
 const GameState = state_mod.GameState;
 
 const Alloc = std.mem.Allocator;
@@ -199,7 +200,7 @@ pub fn status(alloc: Alloc, gs: *GameState) !Status {
         .outfit_name = .{ .raw = gs.outfit_name },
         .funds = try money(alloc, gs.funds),
         .funds_cbills = gs.funds,
-        .payroll = try money(alloc, gs.monthlyPayroll()),
+        .payroll = try money(alloc, treasury.monthlyPayroll(gs)),
         .bankrupt = gs.bankrupt,
         .saved = gs.campaign_id != 0,
         .offers = gs.contract_offers.items.len,
@@ -1116,19 +1117,19 @@ pub fn ledger(alloc: Alloc, gs: *GameState, selected: state_mod.Treasury, period
     }
     if (gs.policies.items.len + gs.supply_policies.items.len > 0) try extras.append(alloc, "  {d}x on a treasury row clears its policy · keep-stocked lines live on the Market screen{/}");
     try extras.append(alloc, "");
-    try extras.append(alloc, try std.fmt.allocPrint(alloc, "loans · credit {s} of {s}", .{ try money(alloc, gs.creditRemaining()), try money(alloc, gs.creditLimit()) }));
+    try extras.append(alloc, try std.fmt.allocPrint(alloc, "loans · credit {s} of {s}", .{ try money(alloc, treasury.creditRemaining(gs)), try money(alloc, treasury.creditLimit(gs)) }));
     if (gs.loans.items.len == 0) try extras.append(alloc, "  none · [L] take one (12%/yr simple interest)");
     for (gs.loans.items, 0..) |l, i| {
         try extras.append(alloc, try std.fmt.allocPrint(alloc, "  [{d}] owe {s} of {s} · {s}/mo · next d{d}", .{ i, try money(alloc, l.balance), try money(alloc, l.principal), try money(alloc, l.payment), l.next_pay_day }));
     }
     try extras.append(alloc, "");
-    try extras.append(alloc, try std.fmt.allocPrint(alloc, "liquidation value    {s}", .{try money(alloc, gs.liquidationValue())}));
+    try extras.append(alloc, try std.fmt.allocPrint(alloc, "liquidation value    {s}", .{try money(alloc, treasury.liquidationValue(gs))}));
     try extras.append(alloc, "  {d}hulls at half value × condition · HQs at 40% of build cost{/}");
     try extras.append(alloc, "");
     try extras.append(alloc, "next 30 days (estimate)");
-    const payroll = gs.monthlyPayroll();
+    const payroll = treasury.monthlyPayroll(gs);
     try extras.append(alloc, try std.fmt.allocPrint(alloc, "  payroll        {s: >14}", .{try money(alloc, -payroll)}));
-    const hull_upkeep = gs.monthlyHullUpkeep();
+    const hull_upkeep = treasury.monthlyHullUpkeep(gs);
     try extras.append(alloc, try std.fmt.allocPrint(alloc, "  hull upkeep    {s: >14}", .{try money(alloc, -hull_upkeep)}));
     var upkeep: types.CBills = 0;
     var hit = gs.hqs.iterator();
@@ -1291,7 +1292,7 @@ pub fn holdsPrisonerOf(gs: *GameState, faction: []const u8) bool {
 pub fn wreckNote(alloc: std.mem.Allocator, gs: *GameState, u: *const @import("../domain/unit.zig").Unit) ![]const u8 {
     const hq_ops = @import("hq_ops.zig");
     const cause = if (u.wreck == .none) "wreck" else u.wreck.label();
-    const est = hq_ops.rebuildEstimate(gs, u) orelse return try std.fmt.allocPrint(alloc, "{{c}}{s} — strip it (Forces $, s) or sell for {s}{{/}}", .{ cause, try money(alloc, gs.unitSaleValue(u)) });
+    const est = hq_ops.rebuildEstimate(gs, u) orelse return try std.fmt.allocPrint(alloc, "{{c}}{s} — strip it (Forces $, s) or sell for {s}{{/}}", .{ cause, try money(alloc, treasury.unitSaleValue(u)) });
     const new_cost: types.CBills = if (chassis_mod.find(u.chassis_key)) |c| c.cost else 0;
     return try std.fmt.allocPrint(alloc, "{{c}}{s} — rebuild ≈{s} vs new {s}{s}{{/}}", .{
         cause, try money(alloc, est), try money(alloc, new_cost),
@@ -4308,14 +4309,14 @@ test "the hangar names a hull the enemy holds — a claim, not an asset" {
         unreachable;
     };
     const owned_before = gs.units.count();
-    const billed_before = gs.monthlyHullUpkeep();
+    const billed_before = treasury.monthlyHullUpkeep(&gs);
     try gs.holdUnit(taken, "DC", @enumFromInt(7));
 
     // Off the books: gone from `units`, gone from its lance, billing
     // nothing — the whole point of holding rather than keeping.
     try std.testing.expectEqual(owned_before - 1, gs.units.count());
     try std.testing.expect(gs.unit(taken) == null);
-    try std.testing.expect(gs.monthlyHullUpkeep() < billed_before);
+    try std.testing.expect(treasury.monthlyHullUpkeep(&gs) < billed_before);
     try std.testing.expect(gs.heldHull(taken) != null);
 
     // But the portfolio still names it, ranked nowhere and costing nothing.
@@ -5816,7 +5817,7 @@ pub fn commanderLine(alloc: Alloc, gs: *GameState) ![]const u8 {
 
 /// "Roster 42 | payroll 300,000/mo | hull upkeep 60,000/mo".
 pub fn payrollLine(alloc: Alloc, gs: *GameState) ![]const u8 {
-    return try std.fmt.allocPrint(alloc, "Roster {d} | payroll {s}/mo | hull upkeep {s}/mo", .{ gs.people.count(), try money(alloc, gs.monthlyPayroll()), try money(alloc, gs.monthlyHullUpkeep()) });
+    return try std.fmt.allocPrint(alloc, "Roster {d} | payroll {s}/mo | hull upkeep {s}/mo", .{ gs.people.count(), try money(alloc, treasury.monthlyPayroll(gs)), try money(alloc, treasury.monthlyHullUpkeep(gs)) });
 }
 
 /// The hangar in one line: quality spread, broken slots, structure spares.
@@ -5950,9 +5951,7 @@ pub fn outfitEmblem(gs: *GameState) ?[]const u8 {
 }
 
 /// Credit left to borrow against.
-pub fn creditRemaining(gs: *GameState) types.CBills {
-    return gs.creditRemaining();
-}
+pub const creditRemaining = treasury.creditRemaining;
 
 /// Balance of the oldest open loan (what R repays), null with no loans.
 pub fn oldestLoanBalance(gs: *GameState) ?types.CBills {
@@ -6010,10 +6009,10 @@ pub const SellQuote = struct {
 
 pub fn sellQuote(alloc: Alloc, gs: *GameState, uid: types.UnitId) !?SellQuote {
     const u = gs.unit(uid) orelse return null;
-    const lines = try gs.stripParts(alloc, u);
+    const lines = try treasury.stripParts(alloc, u);
     var buf: std.ArrayListUnmanaged(u8) = .empty;
     for (lines, 0..) |l, i| try buf.print(alloc, "{s}{d}× {s}", .{ if (i > 0) ", " else "", l.qty, l.key });
-    return .{ .chassis_key = u.chassis_key, .value = gs.unitSaleValue(u), .strip_text = if (lines.len > 0) buf.items else "nothing worth keeping" };
+    return .{ .chassis_key = u.chassis_key, .value = treasury.unitSaleValue(u), .strip_text = if (lines.len > 0) buf.items else "nothing worth keeping" };
 }
 
 /// What selling off an HQ brings: 40% of build cost plus its treasury.
@@ -6021,7 +6020,7 @@ pub const HqSaleQuote = struct { name: []const u8, value: types.CBills };
 
 pub fn hqSaleQuote(gs: *GameState, hq_id: types.HqId) ?HqSaleQuote {
     const h = gs.hqs.getPtr(hq_id) orelse return null;
-    return .{ .name = h.name, .value = gs.hqSaleValue(h) + h.funds };
+    return .{ .name = h.name, .value = treasury.hqSaleValue(h) + h.funds };
 }
 
 /// What disbanding a company sells its hulls for.
@@ -6029,7 +6028,7 @@ pub fn disbandQuote(gs: *GameState, company: types.ForceId) types.CBills {
     var value: types.CBills = 0;
     var uit = gs.units.iterator();
     while (uit.next()) |e| if (gs.companyOf(e.value_ptr.force) == company) {
-        value += gs.unitSaleValue(e.value_ptr);
+        value += treasury.unitSaleValue(e.value_ptr);
     };
     return value;
 }

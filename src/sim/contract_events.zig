@@ -1238,10 +1238,10 @@ test "a prisoner can be ransomed, released for standing, or recruited on a loyal
     try std.testing.expect(joined and refused);
     // Prisoners are not paid but do eat.
     const heads_before = gs.companyHeadcount(co);
-    const payroll_before = gs.monthlyPayroll();
+    const payroll_before = @import("treasury.zig").monthlyPayroll(&gs);
     _ = try mk.captive(&gs, co);
     try std.testing.expectEqual(heads_before + 1, gs.companyHeadcount(co));
-    try std.testing.expectEqual(payroll_before, gs.monthlyPayroll());
+    try std.testing.expectEqual(payroll_before, @import("treasury.zig").monthlyPayroll(&gs));
 }
 
 test "a weekly decision cools down, and the same answer three times becomes a standing order" {

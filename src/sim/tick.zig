@@ -453,7 +453,7 @@ fn runFinances(gs: *GameState) !void {
     _ = try @import("medical.zig").runMonthlyTurnover(gs);
     @import("contract_control.zig").driftStanding(gs);
 
-    const payroll = gs.monthlyPayroll();
+    const payroll = treasury.monthlyPayroll(gs);
     if (payroll != 0) {
         try gs.postTransaction(.{
             .day = gs.clock.day_index,
@@ -464,7 +464,7 @@ fn runFinances(gs: *GameState) !void {
     }
 
     // The hangar ledger (ARCH §9.8): every hull bills, running or not.
-    const hull_bill = gs.monthlyHullUpkeep();
+    const hull_bill = treasury.monthlyHullUpkeep(gs);
     if (hull_bill != 0) {
         try gs.postTransaction(.{
             .day = gs.clock.day_index,
@@ -521,7 +521,7 @@ fn runFinances(gs: *GameState) !void {
             .note = "monthly contract payment",
         });
         if (c.beachhead) {
-            const hardship = types.applyBp(gs.companyMonthlyPayroll(c.assigned_company), tuning.finance.hardship_bp); // +15%
+            const hardship = types.applyBp(treasury.companyMonthlyPayroll(gs, c.assigned_company), tuning.finance.hardship_bp); // +15%
             if (hardship > 0) {
                 try gs.postTreasury(.{ .company = c.assigned_company }, .{
                     .day = gs.clock.day_index,
