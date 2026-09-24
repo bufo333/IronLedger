@@ -73,14 +73,9 @@ pub fn handle(self: *App, k: app.Key) anyerror!bool {
         },
         .replace => if (view.mounts.len > 0) {
             const m = view.mounts[@min(self.cur(0).*, view.mounts.len - 1)];
-            // direct: a sound mount says what a replacement is for.
-            const res = game.commands.execute(g, .{ .replace_mount = .{ .unit = uid, .slot_key = m.slot_key } }) catch |err| {
-                switch (err) {
-                    error.MountIsFine => self.say(.dim, "{s} is fine — replacements are for damaged or destroyed gear", .{m.slot_key}),
-                    else => self.say(.crit, "{s}", .{game.cli.errorText(err)}),
-                }
-                return true;
-            };
+            const res = self.execResultWith(.{ .replace_mount = .{ .unit = uid, .slot_key = m.slot_key } }, &.{
+                .{ .err = error.MountIsFine, .style = .dim, .text = try std.fmt.allocPrint(self.a(), "{s} is fine — replacements are for damaged or destroyed gear", .{m.slot_key}) },
+            }) orelse return true;
             self.say(.good, "ordered 1 × {s} to {s}; techs fit it on the next repair pass once it lands", .{ m.part_key, try q.hqName(self.a(), g, res.hq) });
         },
         .clear => {
@@ -113,4 +108,14 @@ test "] and [ step through the hangar's meks" {
     try std.testing.expect(c.app.lab_sel != start);
     try app.pressForTest(c, .{ .char = '[' });
     try std.testing.expectEqual(start, c.app.lab_sel);
+}
+
+test "R on a sound mount words its own refusal" {
+    const c = try app.clientForTest(std.testing.allocator);
+    defer app.deinitForTest(c, std.testing.allocator);
+    try toTab(c, .lab);
+    try app.pressForTest(c, .{ .char = 'R' });
+    // A fresh company's gear is sound: the lab's sentence, not "refused: …".
+    try std.testing.expect(std.mem.indexOf(u8, c.app.msg.slice(), "is fine") != null);
+    try std.testing.expect(!std.mem.startsWith(u8, c.app.msg.slice(), "refused"));
 }

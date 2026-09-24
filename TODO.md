@@ -102,6 +102,7 @@ Contract deliverables closed before this list merged, all from the 2026-09-22 co
 - Part 3: `zig fmt --check build.zig src` is clean repo-wide (18 files reformatted, no behaviour change: the golden master holds) and CI runs it as a gate step (rule 72)
 - Part 3, small gaps part 1 (rules 10, 44, 79): the bankruptcy save reports a failure; every error the client or REPL shows goes through `cli.errorText`, which gains sentences for 29 command errors that fell back to their names, the parse errors, the PNG loader and file errors, and says "an unexpected failure" rather than a name for anything else (a test covers every command and parse error); the broad-catch baseline is empty: the sim's two funds transfers and the depot queueing handle their expected cases and propagate `OutOfMemory`, the REPL's 19 printers return errors that the REPL reports instead of stopping short, and the check covers `catch return` too; a check rejects `@errorName` in a frontend
 - Part 3, small gaps part 2 (rules 50, 58, 61): every `zig build` install waits on `validate-data`, stock tables or a mod's; the 29 module headers that named no MekHQ counterpart name one or say there is none, pointing at `docs/mekhq-map.md`, and `verify-contract.sh` requires it of every module; a test proves the table registry matches the tables the executable DDL creates, so clear, delete and overwrite cannot miss one
+- Part 3, rule 37: `App.execResultWith(cmd, refusals)` runs a command and words the listed refusals the screen's way (`App.Refusal`: error, style, text), every other error through `cli.errorText`; the support-train purchase, office staffing, lab mount replacement, shipping components home and the turn advance go through it, so only the wrapper and the wizard's pre-session campaign call `commands.execute`; `verify-contract.sh` rejects it in any screen module
 
 ---
 
@@ -112,7 +113,6 @@ full gate runs and passes. Until then `docs/coding-contract.md` and its gate
 govern. Order decided 2026-09-24, after the proposal was reviewed against the
 code; each item is one PR, in this order.
 
-- [ ] `execResult` takes a per-error message map, so the five `// direct:` calls that only customise refusal text go through it (rule 37); the wizard's pre-session campaign is the one remaining, listed exception.
 - [ ] Every `GameState` field classified as persisted, derived, session-only or scratch in one manifest the digest and a test read (rule 45).
 - [ ] A lobby-owned session handle that the TUI and REPL hold instead of a `GameState` value (rule 9).
 - [ ] Subsystem behaviour off `GameState` (rule 77): the hash into `digest.zig`, pricing, staffing and the rest into their owning modules.

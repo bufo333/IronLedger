@@ -1170,10 +1170,9 @@ pub const App = struct {
         const train = try q.supportTrain(self.a(), g, self.raise.company);
         if (train.lines.len == 0) return;
         const line = train.lines[@min(self.modal_cursor, train.lines.len - 1)];
-        const r = game.commands.execute(g, .{ .buy_support_hull = .{ .company = self.raise.company, .kind = line.kind } }) catch |err| switch (err) { // direct: names the missing line
-            error.NoSuchListing => return self.say(.amber, "{s} is not on the home board right now — staple lines restock as the board refreshes", .{line.key}),
-            else => return self.say(.crit, "{s}", .{game.cli.errorText(err)}),
-        };
+        const r = self.execResultWith(.{ .buy_support_hull = .{ .company = self.raise.company, .kind = line.kind } }, &.{
+            .{ .err = error.NoSuchListing, .text = try std.fmt.allocPrint(self.a(), "{s} is not on the home board right now — staple lines restock as the board refreshes", .{line.key}) },
+        }) orelse return;
         self.say(.good, "{s} #{d} bought into the {s} lance", .{ line.key, @intFromEnum(r.unit), @tagName(line.kind) });
     }
 
@@ -1699,10 +1698,9 @@ pub const App = struct {
         const desks = try q.backOffice(self.a(), g, hq_id);
         if (desks.len == 0) return;
         const role = desks[@min(self.w_office, desks.len - 1)].role;
-        _ = game.commands.execute(g, .{ .set_office_staff = .{ .hq = hq_id, .role = role, .delta = if (delta > 0) 1 else -1 } }) catch |err| switch (err) { // direct: names the role with nobody to release
-            error.UnknownPerson => return self.say(.amber, "no {s} to release", .{@tagName(role)}),
-            else => return self.say(.crit, "{s}", .{game.cli.errorText(err)}),
-        };
+        _ = self.execResultWith(.{ .set_office_staff = .{ .hq = hq_id, .role = role, .delta = if (delta > 0) 1 else -1 } }, &.{
+            .{ .err = error.UnknownPerson, .text = try std.fmt.allocPrint(self.a(), "no {s} to release", .{@tagName(role)}) },
+        }) orelse return;
         if (delta > 0) self.say(.good, "hired one {s}", .{@tagName(role)}) else self.say(.amber, "released one {s}", .{@tagName(role)});
     }
 
@@ -2443,8 +2441,8 @@ pub const App = struct {
 
     fn advance(self: *App, days: u32) !void {
         const g = &self.gs.?;
-        const res = game.commands.execute(g, if (days == 1) .advance_day else .{ .advance_days = days }) catch |err| { // direct: a refusal can be bankruptcy
-            self.say(.crit, "{s}", .{game.cli.errorText(err)});
+        const res = self.execResult(if (days == 1) .advance_day else .{ .advance_days = days }) orelse {
+            // A refusal can be bankruptcy: the game ends, saved as it ended.
             if ((try q.status(self.a(), g)).bankrupt) {
                 self.store.save(g, self.player_id) catch |save_err| self.say(.crit, "game over — and the final save failed: {s}", .{game.cli.errorText(save_err)});
                 self.modal = .game_over;
@@ -2481,8 +2479,22 @@ pub const App = struct {
     /// Run a command and hand back its result, or report the refusal
     /// (`cli.errorText`, the one sentence per error) and return null.
     pub fn execResult(self: *App, cmd: Command) ?game.commands.Result {
+        return self.execResultWith(cmd, &.{});
+    }
+
+    /// A refusal a screen words its own way: the error, and what to say
+    /// instead of `cli.errorText` (the part it names, the role with nobody).
+    pub const Refusal = struct { err: anyerror, style: Style = .amber, text: []const u8 };
+
+    /// `execResult`, with some refusals worded by the caller; any other
+    /// error gets the canonical sentence.
+    pub fn execResultWith(self: *App, cmd: Command, refusals: []const Refusal) ?game.commands.Result {
         const g = &self.gs.?;
         return game.commands.execute(g, cmd) catch |err| { // direct: the one wrapper
+            for (refusals) |r| if (r.err == err) {
+                self.say(r.style, "{s}", .{r.text});
+                return null;
+            };
             self.say(.crit, "refused: {s}", .{game.cli.errorText(err)});
             return null;
         };
