@@ -19,12 +19,10 @@ const battle = @import("battle.zig");
 const rating = @import("rating.zig");
 const GameState = @import("state.zig").GameState;
 
-/// How well the outfit reads an offer's opposition (12D.5): the best HQ
-/// comms level, one more for a B-or-better rating (employers share).
-pub fn intelLevel(gs: *GameState) u8 {
-    var comms: u8 = 0;
-    var it = gs.hqs.iterator();
-    while (it.next()) |e| comms = @max(comms, e.value_ptr.effectiveFacilityLevel(.comms));
+/// How well one HQ reads an opposition: its comms level, one more for a
+/// B-or-better outfit rating (employers share).
+pub fn intelLevel(gs: *GameState, hq_id: types.HqId) u8 {
+    const comms: u8 = if (gs.hqs.getPtr(hq_id)) |hq| hq.effectiveFacilityLevel(.comms) else 0;
     return comms + @intFromBool(rating.currentIndex(gs) >= 3);
 }
 
@@ -33,8 +31,15 @@ pub fn intelLevel(gs: *GameState) u8 {
 /// range blind.
 pub const LanceIntel = struct { lo: u8, hi: u8, mid: u8, exact: bool };
 
+/// The HQ whose comms read a contract's opposition: the board that
+/// offered it, else the company's home HQ.
+pub fn intelHq(gs: *GameState, c: *const contract_mod.Contract) types.HqId {
+    if (c.offer_hq != .none and gs.hqs.getPtr(c.offer_hq) != null) return c.offer_hq;
+    return gs.homeHqFor(c.assigned_company);
+}
+
 pub fn lanceIntel(gs: *GameState, c: *const contract_mod.Contract) LanceIntel {
-    const intel = intelLevel(gs);
+    const intel = intelLevel(gs, intelHq(gs, c));
     const row = opfor.rowFor(c.kind);
     if (intel >= 3) return .{ .lo = c.enemy_lances, .hi = c.enemy_lances, .mid = c.enemy_lances, .exact = true };
     if (intel >= 1) {
@@ -77,7 +82,7 @@ pub const OfferRating = struct {
 pub fn rateOffer(alloc: std.mem.Allocator, gs: *GameState, c: *const contract_mod.Contract, company: types.ForceId) !?OfferRating {
     if (!c.hasOpfor()) return null;
     const own = try battle.estimatePower(gs, alloc, c, company);
-    const intel = intelLevel(gs);
+    const intel = intelLevel(gs, intelHq(gs, c));
     // Garrison work meets a probe, not the whole force (12D.6).
     const probe: ?u8 = if (c.kind.isGarrisonClass()) @min(tuning.battle.garrison_probe_lances, c.enemy_lances) else null;
     const li = lanceIntel(gs, c);
@@ -140,6 +145,36 @@ pub fn skullText(alloc: std.mem.Allocator, r: OfferRating) ![]const u8 {
     const lo = skulls.number(&a, r.half_lo);
     if (r.half_lo == r.half_hi) return try std.fmt.allocPrint(alloc, "{s} skull{s}{s}", .{ lo, if (r.half_lo == 2) "" else "s", if (r.outmatched) " (outmatched)" else "" });
     return try std.fmt.allocPrint(alloc, "{s}–{s} skulls", .{ lo, skulls.number(&b, r.half_hi) });
+}
+
+test "an offer's intel is the comms of the board that offered it" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 7702 });
+    defer gs.deinit();
+    _ = try gs.createCommander("T", .LC, .paymaster);
+    const seat = gs.hqs.keys()[0];
+    const second = try gs.foundHq("Second", .regional, "alkaid");
+    for ([_]types.HqId{ seat, second }) |id| gs.hqs.getPtr(id).?.staff_assigned = 999;
+    for (gs.hqs.getPtr(seat).?.facilities.items) |*f| {
+        if (f.kind == .comms) f.level = 3;
+    }
+    for (gs.hqs.getPtr(second).?.facilities.items) |*f| {
+        if (f.kind == .comms) f.level = 0;
+    }
+    var c: contract_mod.Contract = .{
+        .id = @enumFromInt(1),
+        .kind = .objective_raid,
+        .employer_key = "LC",
+        .enemy_key = "FWL",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 3, .base_pay_month = 100_000 },
+        .enemy_lances = 3,
+        .enemy_lance_bv = 4_000,
+        .enemy_lance_tons = 220,
+        .offer_hq = seat,
+    };
+    try std.testing.expect(lanceIntel(&gs, &c).exact);
+    c.offer_hq = second;
+    try std.testing.expect(!lanceIntel(&gs, &c).exact);
 }
 
 test "blind intel widens the lance range; comms 3 pins it" {

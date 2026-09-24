@@ -41,15 +41,6 @@ Done: every Stage 12 feature (12, 12B–12G) has shipped. Part 2 is next.
 
 - [ ] Still uncovered by the smoke: the GAME OVER modal (a fresh campaign starts solvent, so reaching it needs a saved campaign already past all credit as a test fixture; bankruptcy itself stays terminal by design), the exact 120-column layout boundary, and the refusal branch of each confirm once run (they open and close only).
 
-## D18. HQ locality (audit #21; rules 5, 8)
-
-D18a is done (see Done); D18b is left.
-
-
-- [ ] `recruitBonus` (state.zig:645-647) reads the recruiting HQ, not `hqs.values()[0]`.
-- [ ] `intelLevel(gs, offer_hq)` (offer_rating.zig:22-27): per-board comms, matching 12E.4 per-HQ boards.
-- [ ] Asymmetric two-HQ tests for each: the facility at one HQ does not serve a company homed at the other.
-
 ## D19. Terminal safety (audit #15, #16; rule 24)
 
 - [ ] `Screen.text` (screen.zig:151) decodes with a validated view, draws U+FFFD for invalid bytes and `?` for C0/C1 controls; `utf8Encode(...) catch 1` (screen.zig:406) writes a replacement, not an uninitialised byte.
@@ -114,6 +105,7 @@ Contract deliverables closed before this list merged, all from the 2026-09-22 co
 - D17a freight accounting, audit #12 (PR #62): `freightQuote` is pure (checks `network.fitsThroughput`, books nothing) and `commitFreight` books the tonnage after the payment clears, in `shipStock` and `orderPart`; one `logistics.linkTonsPerWeek` (`throughput_per_level` × `tons_per_supply_unit`, the renamed `weeks_of_capacity`) answers every link and route
 - D17b slots before money, audit #6 (PR #63): HQ founding (`prepareHq`/`commitHq`), fabrication, facility upgrade, unit transfer, refit commit and `resolveChoice` reserve their ledger and list slots (`GameState.reserveLedger`, `ensureUnusedCapacity`) before the first mutation, so no list growth fails after money or stock moves
 - D18a home-HQ training and rest, audit #21 (PR #64): `GameState.homeHqOf` (posting, else company home) and `trainingHqFor` replace the three any-HQ training loops; training days use that HQ's HR; weekly rest uses the home HQ's mess and HR per person
+- D18b recruiting and intel locality, audit #21 (PR #65): `recruitBonus(hq)` and `recruitGenerated(role, hq)` read the recruiting HQ's hiring hall and HR (hall boards, office staffing, company crews at the company's home HQ; the bare `recruit` verb hires at the seat); `offer_rating.intelLevel(gs, hq)` reads one HQ's comms and `intelHq` picks the board that offered the contract, else the company's home HQ
 
 ---
 
