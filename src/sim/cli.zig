@@ -417,6 +417,10 @@ pub fn parseCommand(verb: []const u8, tokens: *std.mem.TokenIterator(u8, .scalar
 }
 
 
+/// What both frontends say when a black-market hull purchase is a fraud:
+/// the money is gone and no hull exists.
+pub const hull_fraud_text = "the black-market fence vanished with the money — no hull";
+
 pub fn errorText(err: anyerror) []const u8 {
     return switch (err) {
         error.InsufficientTreasury => "not enough money in that treasury — transfer funds first",

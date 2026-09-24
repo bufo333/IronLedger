@@ -41,12 +41,6 @@ Done: every Stage 12 feature (12, 12B–12G) has shipped. Part 2 is next.
 
 - [ ] Still uncovered by the smoke: the GAME OVER modal (a fresh campaign starts solvent, so reaching it needs a saved campaign already past all credit as a test fixture; bankruptcy itself stays terminal by design), the exact 120-column layout boundary, and the refusal branch of each confirm once run (they open and close only).
 
-## D14. Gameplay corruption (audit #1, #2, #3; rules 3, 27)
-
-- [ ] `buy_listing` returns the created unit in `Result` (null on fraud); `buy_hull_for` (commands.zig:1041-1042) uses it instead of `next_unit_id - 1` and returns early on fraud. Test: black-market hull fraud with an existing hull in another company leaves that hull where it was.
-- [ ] Refit commit (commands.zig:1687-1693): sum demand per part key, check totals against stock, then consume; a failed `takeStock` is an error. Test: two identical installs, one part in stock, refused; `refit_clear` refunds only what was taken.
-- [ ] Persist `next_battle_id` with the counters (store.zig:366-371); on load backfill to `max(saved, max(report.id, held.battle, event.battle) + 1)`; schema bump. Test: save, load, fight: the new report has a fresh ID and `read_report` marks it.
-
 ## D15. Save identity and corruption (audit #4, #5, #13, #14, #18; rules 1, 27)
 
 - [ ] First save keeps the inserted campaign ID local and assigns `gs.campaign_id` after COMMIT (store.zig:336-345, 806); the UPDATE path fails when no row changed.
@@ -123,6 +117,7 @@ Done: every Stage 12 feature (12, 12B–12G) has shipped. Part 2 is next.
 Contract deliverables closed before this list merged, all from the 2026-09-22 contract audit. The full item lists are in git history (`docs/contract-todo.md` at `7441a14`).
 
 - D0 one rule for structural needs (PR #3) · D1 the contract itself (PR #4) · D2 layering and core purity (PR #5) · D3 entity predicates (PR #6) · D4 one computation, one function (PR #7) · D5 ledgers (PR #8) · D6 numbers appear once (PRs #9, #10, #20) · D7 formatting helpers (PR #11) · D8 commands leave state consistent (PR #12) · D9 rules move out of queries (PR #13) · D10 REPL printers as query loops (PR #14) · D11 TUI boundary (PR #15) · D12a–c TUI structure (PRs #16, #17, #19, #22) · D13 tests and CI (PR #21, one item left above)
+- D14 gameplay corruption, audit #1–#3 (PR #53): black-market fraud returns no hull instead of `next_unit_id - 1`; refit demand is counted per part before any is taken; `next_battle_id` is saved and resumed past every referenced battle
 
 ---
 

@@ -759,7 +759,7 @@ fn printResult(gs: *game.state.GameState, al: std.mem.Allocator, cmd: Command, r
         .new_company, .new_company_at, .raise_company, .new_lance, .raise_air_company => std.debug.print("created force [{d}] — see `toe`\n", .{@intFromEnum(r.created_force)}),
         .hire, .hire_candidate, .recruit => std.debug.print("hired {s}\n", .{(q.personLine(al, gs, r.hired) catch null) orelse "—"}),
         .crew_company => std.debug.print("{d} hired to fill the manning table, {d} lines still open (no candidates)\n", .{ r.hired_count, r.still_open }),
-        .buy_hull_for => std.debug.print("hull #{d}, {d} days out\n", .{ @intFromEnum(r.unit), r.eta_days }),
+        .buy_hull_for => if (r.unit == .none) std.debug.print("{s}\n", .{game.cli.hull_fraud_text}) else std.debug.print("hull #{d}, {d} days out\n", .{ @intFromEnum(r.unit), r.eta_days }),
         .trim_stock => std.debug.print("{d} tons sent home\n", .{r.tons_moved}),
         .refit_install, .refit_remove, .refit_clear, .refit_commit => printLab(gs, al, refitUnit(cmd).?),
         .complete_contract, .recall_company => printContracts(gs, al),

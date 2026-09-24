@@ -880,6 +880,7 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
                     .unit => {
                         const uid = try gs.addUnit(listing.item_key);
                         if (listing.condition) |cond| gs.applyHullCondition(uid, cond);
+                        return .{ .unit = uid };
                     },
                     .part => try gs.addStock(.{ .hq = hq_id }, listing.item_key, listing.quantity),
                 }
@@ -896,6 +897,7 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
                     try gs.log(.market, .{ .hq = hq_id }, "[market] bought {s} ({s}) for {d}{s}", .{
                         listing.item_key, if (listing.condition) |c| c.label() else "new", price, if (berth_kind != null) " — berthed here" else "",
                     });
+                    return .{ .unit = uid };
                 },
                 .part => {
                     // Staple lines sell by the unit and stay listed until empty.
@@ -1041,8 +1043,10 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             const listing = gs.market_listings.items[b.listing];
             if (listing.kind != .unit or listing.company != .none) return Error.NoSuchListing;
             const board_hq: types.HqId = if (listing.hq != .none) listing.hq else gs.hqs.keys()[0];
-            _ = try execute(gs, .{ .buy_listing = b.listing });
-            const uid: types.UnitId = @enumFromInt(gs.next_unit_id - 1);
+            // A defrauded purchase creates no hull and returns none: there is
+            // nothing to place.
+            const uid = (try execute(gs, .{ .buy_listing = b.listing })).unit;
+            if (uid == .none) return .{};
             const home = gs.homeHqFor(b.company);
             const from = if (gs.hqs.getPtr(board_hq)) |h| planet_mod.find(h.planet_key) else null;
             const to = if (gs.hqs.getPtr(home)) |h| planet_mod.find(h.planet_key) else null;
@@ -1686,13 +1690,22 @@ fn commitRefit(gs: *GameState, unit_id: types.UnitId) Error!Result {
     const ceiling = hq.refitClassCeiling() orelse return Error.NoBay;
     if (@intFromEnum(class.asQuality()) > @intFromEnum(ceiling)) return Error.RefitClassTooHigh;
 
-    // The parts, all present before any are taken.
+    // The parts, counted per part across every install, all present
+    // before any are taken.
     const site: types.Site = .{ .hq = hq_id };
+    var demand: std.StringArrayHashMapUnmanaged(u32) = .empty;
     for (plan.ops.items) |op| {
-        if (op == .install and gs.stockCount(site, op.install.part_key) == 0) return Error.MissingParts;
+        if (op != .install) continue;
+        const entry = try demand.getOrPut(arena.allocator(), op.install.part_key);
+        entry.value_ptr.* = if (entry.found_existing) entry.value_ptr.* + 1 else 1;
     }
-    for (plan.ops.items) |op| {
-        if (op == .install) _ = gs.takeStock(site, op.install.part_key, 1);
+    var dit = demand.iterator();
+    while (dit.next()) |d| {
+        if (gs.stockCount(site, d.key_ptr.*) < d.value_ptr.*) return Error.MissingParts;
+    }
+    dit = demand.iterator();
+    while (dit.next()) |d| {
+        if (!gs.takeStock(site, d.key_ptr.*, d.value_ptr.*)) return Error.MissingParts;
     }
 
     const hours = meklab.refitHours(plan.ops.items, u.slots.items, class);
@@ -2691,6 +2704,70 @@ test "12C.17: a black-market buy is a fraud or a sale, and the house notices eit
         }
     }
     try std.testing.expect(fraud and sale);
+}
+
+test "a defrauded black-market hull purchase moves no hull the outfit already owns" {
+    var seed: u64 = 1;
+    var checked = false;
+    while (!checked and seed < 80) : (seed += 1) {
+        var gs = GameState.init(std.testing.allocator, .{ .seed = seed });
+        defer gs.deinit();
+        _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+        const alpha = (try execute(&gs, .{ .new_company = "Alpha" })).created_force;
+        const hq = gs.hqs.keys()[0];
+        gs.hqs.getPtr(hq).?.funds = 100_000_000;
+        // The newest hull on the books sits unassigned in the pool.
+        const pooled = try gs.addUnit("WSP-1A");
+        try gs.market_listings.append(gs.allocator(), .{ .kind = .unit, .item_key = "LCT-1V", .rarity = .common, .price = 500_000, .hq = hq, .listed_day = 0, .expires_day = 10, .black_market = true });
+        const units_before = gs.units.count();
+        const res = try execute(&gs, .{ .buy_hull_for = .{ .listing = gs.market_listings.items.len - 1, .company = alpha, .lance = .none } });
+        if (gs.units.count() != units_before) continue; // a sale; walk on to a fraud
+        checked = true;
+        try std.testing.expectEqual(types.UnitId.none, res.unit);
+        try std.testing.expectEqual(types.ForceId.none, gs.unit(pooled).?.force);
+        try std.testing.expectEqual(@as(usize, 0), gs.unit_transfers.items.len);
+    }
+    try std.testing.expect(checked);
+}
+
+test "a refit cannot install two parts from one in stock" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1010 });
+    defer gs.deinit();
+    _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .chief_engineer } });
+    const hq_id = gs.hqs.keys()[0];
+    _ = try execute(&gs, .{ .new_company = "Alpha" });
+    const site: types.Site = .{ .hq = hq_id };
+    // A mek with two mounts of one weapon: pull both and put the same
+    // weapon back in each, a legal like-for-like refit needing two parts.
+    var it = gs.units.iterator();
+    while (it.next()) |e| {
+        const u = e.value_ptr;
+        if (u.kind != .mek) continue;
+        for (u.slots.items, 0..) |a, i| {
+            if (a.class != .weapon) continue;
+            for (u.slots.items[i + 1 ..]) |b| {
+                if (b.class != .weapon or !std.mem.eql(u8, a.part_key, b.part_key)) continue;
+                const part = a.part_key;
+                const loc_a = meklab.parseLocation(a.slot_key).?;
+                const loc_b = meklab.parseLocation(b.slot_key).?;
+                const key_a = a.slot_key;
+                const key_b = b.slot_key;
+                _ = try execute(&gs, .{ .refit_remove = .{ .unit = u.id, .slot_key = key_a } });
+                _ = try execute(&gs, .{ .refit_remove = .{ .unit = u.id, .slot_key = key_b } });
+                _ = try execute(&gs, .{ .refit_install = .{ .unit = u.id, .location = loc_a, .part_key = part } });
+                _ = try execute(&gs, .{ .refit_install = .{ .unit = u.id, .location = loc_b, .part_key = part } });
+                _ = gs.takeStock(site, part, gs.stockCount(site, part));
+                try gs.addStock(site, part, 1);
+                try std.testing.expectError(Error.MissingParts, execute(&gs, .{ .refit_commit = u.id }));
+                try std.testing.expectEqual(@as(u32, 1), gs.stockCount(site, part));
+                try gs.addStock(site, part, 1);
+                _ = try execute(&gs, .{ .refit_commit = u.id });
+                try std.testing.expectEqual(@as(u32, 0), gs.stockCount(site, part));
+                return;
+            }
+        }
+    }
+    return error.NoMekWithTwinMounts;
 }
 
 /// Advance `days`, reading each after-action as it lands — the loop a
