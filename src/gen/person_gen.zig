@@ -1,4 +1,4 @@
-//! Person & name generation. Mirrors MekHQ's `RandomNameGenerator` +
+//! Person & name generation. MekHQ counterpart: `RandomNameGenerator` +
 //! AtB personnel generation: experience rolled on 2d6, skills set from the
 //! experience band. Name tables live in data/tables/names.zon.
 
@@ -8,7 +8,7 @@ const person = @import("../domain/person.zig");
 const rng_mod = @import("../sim/rng.zig");
 const company_gen = @import("company_gen.zig");
 
-/// Name tables from data/tables/names.zon (Stage 12.17).
+/// Name tables from data/tables/names.zon.
 pub const names: struct { first: []const []const u8, last: []const []const u8, callsigns: []const []const u8 } = @import("names_zon");
 const first_names = names.first;
 const last_names = names.last;
@@ -24,11 +24,11 @@ pub const GeneratedPerson = struct {
     /// combat crews; primary tech/medical/admin skill twice for support).
     primary_skill: u8,
     secondary_skill: u8,
-    /// Age in years at generation (12C.4).
+    /// Age in years at generation.
     age: u8 = 30,
 };
 
-/// Age band by trade and experience (12C.4, MekHQ `RandomAge`-style):
+/// Age band by trade and experience (MekHQ `RandomAge`-style):
 /// cockpits skew young and the elite have been at it a while; techs span
 /// a career; doctors and desk staff have had one already.
 pub fn rollAge(rng: *rng_mod.Rng, stream: rng_mod.Stream, role: person.Role, xp: types.ExperienceLevel) u8 {
@@ -64,8 +64,8 @@ pub fn generate(rng: *rng_mod.Rng, stream: rng_mod.Stream, role: person.Role) Ge
     return generateWithBonus(rng, stream, role, 0);
 }
 
-/// `bonus` shifts the 2d6 experience roll (hiring hall + HR office, Stage
-/// 9C). Every draw comes from `stream`: the caller's own, so generating a
+/// `bonus` shifts the 2d6 experience roll (hiring hall + HR office).
+/// Every draw comes from `stream`: the caller's own, so generating a
 /// person for one system never moves another's dice.
 pub fn generateWithBonus(rng: *rng_mod.Rng, stream: rng_mod.Stream, role: person.Role, bonus: i32) GeneratedPerson {
     const r = rng.random(stream);
@@ -88,7 +88,7 @@ pub fn generateWithBonus(rng: *rng_mod.Rng, stream: rng_mod.Stream, role: person
     };
 }
 
-test "12C.4: ages sit in the trade's band" {
+test "ages sit in the trade's band" {
     var rng = rng_mod.Rng.init(4);
     for (0..40) |_| {
         const pilot = generate(&rng, .generation, .mekwarrior);

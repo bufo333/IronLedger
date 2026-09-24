@@ -1,7 +1,7 @@
 //! Static chassis catalog: the designs meks are instances of.
 //! Data lives in data/chassis.zon (curated 3025 set), imported at comptime —
-//! MekHQ reads MegaMek's .mtf files here; we re-encode a curated set instead
-//! (licensing note in ARCHITECTURE §12).
+//! Adaptation of MekHQ's MegaMek .mtf loading: a curated set is re-encoded
+//! instead (licensing note in ARCHITECTURE §12).
 
 const std = @import("std");
 const types = @import("types.zig");
@@ -22,16 +22,16 @@ pub const Chassis = struct {
     bv: u16, // BV2 — autoresolve base strength (ARCH §7)
     cost: types.CBills,
     rarity: types.Rarity, // market appearance tier (ARCH §9.8)
-    /// First year the design is in service (12C.16, MekHQ `introYear`);
+    /// First year the design is in service (MekHQ `introYear`);
     /// the market, RATs and salvage only field what exists in the campaign year.
     intro_year: u16 = 2400,
     kind: unit.UnitKind = .mek,
-    // Construction facts (Stage 10 MekLab; meks only, defaults for others).
+    // Construction facts (MekLab; meks only, defaults for others).
     walk_mp: u8 = 0,
     jump_mp: u8 = 0,
     heat_sinks: u8 = 10,
     armor_half_tons: u16 = 0,
-    // Transport facts (Stage 12.15; dropships/jumpships only, TRO:3025).
+    // Transport facts (dropships/jumpships only, TRO:3025).
     // A dropship lifts hulls by bay kind; a jumpship carries dropships on
     // its docking collars. Tonnage is nominal for ships (u8).
     mek_bays: u8 = 0,
@@ -65,8 +65,7 @@ pub fn find(key: []const u8) ?*const Chassis {
 }
 
 /// All *mek* entries of one weight class — the company generator's RAT
-/// (random assignment table) pool.
-/// In service by `year` (12C.16).
+/// (random assignment table) pool, in service by `year`.
 pub fn availableIn(c: *const Chassis, year: u16) bool {
     return c.intro_year <= year;
 }
@@ -119,7 +118,7 @@ test "catalog loads from zon with sane values and unique keys" {
     }
 }
 
-test "12B.8: the catalogue is broad — TRO:3025 meks, 3026 vehicles, fighters" {
+test "the catalogue is broad — TRO:3025 meks, 3026 vehicles, fighters" {
     var meks: u32 = 0;
     var vehicles: u32 = 0;
     var fighters: u32 = 0;
@@ -176,7 +175,7 @@ test "find and weight classes" {
     try std.testing.expect(lights.len >= 3);
 }
 
-test "12C.16: designs appear with their year" {
+test "designs appear with their year" {
     var buf: [64]*const Chassis = undefined;
     const now = ofWeightClass(.medium, 3025, &buf).len;
     const early = ofWeightClass(.medium, 3000, &buf).len;

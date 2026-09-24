@@ -1,4 +1,4 @@
-//! Special pilot abilities (Stage 12B.6). Mirrors AtB/MekHQ `SpecialAbility`
+//! Special pilot abilities (Stage 12B.6). Adaptation of AtB/MekHQ `SpecialAbility`
 //! (`personnel/SpecialAbility.java`) abridged to eight the autoresolve model
 //! honours: each is one modifier — skill points, hit avoidance, wound
 //! survival, healing, morale, lance power, or a re-roll. Data in

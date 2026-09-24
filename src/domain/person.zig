@@ -1,6 +1,6 @@
 //! Personnel: roles, skills, salaries, status.
-//! Mirrors MekHQ `personnel/Person.java`; salaries follow the CamOps table
-//! (MekHQ default values). Stage 2 fleshes this out.
+//! MekHQ counterpart: `personnel/Person.java`; salaries follow the CamOps
+//! table (MekHQ default values).
 
 const std = @import("std");
 const tuning = @import("tuning.zig").t;
@@ -105,7 +105,7 @@ pub const Role = enum {
         };
     }
 
-    /// The hiring hall keeps the combat floor for these (12B.13): seat
+    /// The hiring hall keeps the combat floor for these: seat
     /// roles and the astech pool behind them.
     pub fn hallCombatFloor(self: Role) bool {
         return self.fillsHullSeat() or self == .astech;
@@ -116,7 +116,7 @@ pub const Status = enum { active, wounded, mia, kia, retired, resigned, pow, rel
 
 pub const InjuryLocation = enum { head, torso, left_arm, right_arm, left_leg, right_leg, internal };
 
-/// One wound (Stage 12.16, MekHQ advanced medical `Injury`): where, how
+/// One wound (MekHQ advanced medical `Injury`): where, how
 /// bad (1 light … 3 crippling), when, and when a doctor expects it closed.
 /// A permanent injury stays on the record after it heals and costs the
 /// crew a point of skill (`permanentPenalty`).
@@ -149,22 +149,22 @@ pub const Person = struct {
     departed_day: ?u32 = null,
     salary_override: ?types.CBills = null,
     assigned_force: types.ForceId = .none,
-    /// HQ staff posting (Stage 9C back office): admins here run the HQ.
+    /// HQ staff posting (back office): admins here run the HQ.
     posted_hq: types.HqId = .none,
-    /// Tech-time budget per week (techs only; Stage 9C.2).
+    /// Tech-time budget per week (techs only).
     weekly_hours: u16 = tuning.person.weekly_hours,
     /// Medbay: higher heals first when beds/doctors are short.
     medbay_priority: u8 = 0,
     /// R&R: unavailable until this day, fatigue decays double.
     leave_until_day: ?u32 = null,
-    /// Set by the medical system once a doctor triages the wound (Stage 8):
-    /// the day the last open injury closes (mirror of `healDoneDay`).
+    /// Set by the medical system once a doctor triages the wound: the day
+    /// the last open injury closes (a cached copy of `healDoneDay`).
     wound_heal_day: ?u32 = null,
-    /// Rank (12B.4): set by seat and experience each payday unless pinned
+    /// Rank: set by seat and experience each payday unless pinned
     /// by `promote`. Scales pay through `monthlySalary`.
     rank: @import("rank.zig").Rank = .private,
     rank_pinned: bool = false,
-    /// Service record (12B.5): kill credits, battles fought, tours served,
+    /// Service record: kill credits, battles fought, tours served,
     /// tours graded outstanding, and the awards earned (keys into
     /// data/tables/awards.zon).
     kills: u32 = 0,
@@ -173,27 +173,27 @@ pub const Person = struct {
     tours: u32 = 0,
     outstanding_tours: u32 = 0,
     awards: std.ArrayListUnmanaged([]const u8) = .empty,
-    /// Special abilities (12B.6), keys into data/tables/abilities.zon; Edge
+    /// Special abilities, keys into data/tables/abilities.zon; Edge
     /// is spent once per contract.
     abilities: std.ArrayListUnmanaged([]const u8) = .empty,
     edge_spent: bool = false,
-    /// House of origin (12B.7): set for prisoners of war, empty for your own.
+    /// House of origin: set for prisoners of war, empty for your own.
     faction: []const u8 = "",
-    /// Shares in contract profit (12C.3, AtB shares): refreshed each payday
+    /// Shares in contract profit (AtB shares): refreshed each payday
     /// from tenure, founding and rank; paid out pro rata at completion.
     shares: u8 = 0,
     /// Birthday as a day index relative to campaign start (negative for
     /// everyone born before it); null = unknown (legacy saves, bare hires).
     born_day: ?i32 = null,
-    /// Loyalty timers (12C.5): the last raise or bonus accepted, the last
+    /// Loyalty timers: the last raise or bonus accepted, the last
     /// award pinned on.
     last_raise_day: ?u32 = null,
     last_award_day: ?u32 = null,
-    /// Per-location injuries (Stage 12.16); open ones keep the person in
+    /// Per-location injuries; open ones keep the person in
     /// the medbay, permanent ones stay on the record.
     injuries: std.ArrayListUnmanaged(Injury) = .empty,
     /// A wound only starts healing once the player admits them (the
-    /// `admit` command) — untreated wounded block the turn (Stage 12).
+    /// `admit` command) — untreated wounded block the turn.
     medbay_admitted: bool = false,
     /// In-progress training program (regional/brigade HQ only, ARCH §9.7).
     training: ?struct { skill: types.SkillType, done_day: u32 } = null,
@@ -215,7 +215,7 @@ pub const Person = struct {
         return false;
     }
 
-    /// The counter an award checks (12B.5).
+    /// The counter an award checks.
     pub fn counter(self: *const Person, kind: @import("award.zig").Counter, day: u32) u32 {
         return switch (kind) {
             .kills => self.kills,
@@ -264,24 +264,24 @@ pub const Person = struct {
         return (day -| self.recruited_day) / types.days_per_month;
     }
 
-    /// Restless (Stage 12.20): low morale or deep fatigue — the flags the
+    /// Restless: low morale or deep fatigue — the flags the
     /// turnover roll counts. 0 = content.
     pub fn restlessness(self: *const Person) u8 {
         var n: u8 = 0;
         if (self.morale < tuning.person.restless_morale) n += 1;
         if (self.fatigue > tuning.person.exhausted_fatigue) n += 1;
-        // A stake in the outfit (12C.3) keeps people at the table.
+        // A stake in the outfit keeps people at the table.
         return n -| (self.shares / tuning.person.shares_per_restless);
     }
 
-    /// Age in years on `day` (12C.4), if the birthday is known.
+    /// Age in years on `day`, if the birthday is known.
     pub fn ageYears(self: *const Person, day: u32) ?u32 {
         const born = self.born_day orelse return null;
         const days = @as(i64, day) - @as(i64, born);
         return if (days < 0) 0 else @intCast(@divTrunc(days, @as(i64, types.days_per_year)));
     }
 
-    /// XP award scaled for youth (12C.4): the young learn faster.
+    /// XP award scaled for youth: the young learn faster.
     pub fn xpGain(self: *const Person, day: u32, base: u32) u32 {
         const t = tuning.person;
         const age = self.ageYears(day) orelse return base;
@@ -289,7 +289,7 @@ pub const Person = struct {
         return @intCast(@divTrunc(@as(u64, base) * t.xp_young_bp + 9_999, 10_000));
     }
 
-    /// Reasons to stay (12C.5): which loyalty modifiers are in play today.
+    /// Reasons to stay: which loyalty modifiers are in play today.
     pub fn loyalty(self: *const Person, day: u32) Loyalty {
         const t = tuning.person;
         return .{
@@ -300,13 +300,13 @@ pub const Person = struct {
         };
     }
 
-    /// On the books from day one (12C.3): founders hold more shares and
-    /// (12C.5) stand by the outfit.
+    /// On the books from day one: founders hold more shares and stand by
+    /// the outfit.
     pub fn isFounder(self: *const Person) bool {
         return self.recruited_day == 0;
     }
 
-    /// What this person's stake should be today (12C.3).
+    /// What this person's stake should be today.
     pub fn sharesDue(self: *const Person, day: u32) u8 {
         const t = tuning.person;
         if (!self.isOnBooks()) return 0;
@@ -321,7 +321,7 @@ pub const Person = struct {
         return n;
     }
 
-    /// CamOps fatigue band (12C.1): what tiredness costs in the cockpit.
+    /// CamOps fatigue band: what tiredness costs in the cockpit.
     pub fn fatigueBand(self: *const Person) FatigueBand {
         return fatigueBandOf(self.fatigue);
     }
@@ -335,18 +335,17 @@ pub const Person = struct {
         return .fresh;
     }
 
-    /// Points added to gunnery and piloting targets by fatigue (12C.1).
+    /// Points added to gunnery and piloting targets by fatigue.
     pub fn fatiguePenalty(self: *const Person) u8 {
         return self.fatigueBand().penalty();
     }
 
-    /// Spent: unfit for a seat while anyone fresher is free (12C.1).
+    /// Spent: unfit for a seat while anyone fresher is free.
     pub fn isUnfit(self: *const Person) bool {
         return self.fatigueBand() == .spent;
     }
 
-    /// Fit for duty today: active, not on leave.
-    /// Move morale by `delta`, clamped to 0…100. Cool Under Fire (12B.6)
+    /// Move morale by `delta`, clamped to 0…100. Cool Under Fire
     /// halves every loss; that rule lives here and nowhere else.
     pub fn addMorale(self: *Person, delta: i32) void {
         const d = if (delta < 0 and self.has("cool_under_fire")) @divTrunc(delta, 2) else delta;
@@ -384,7 +383,7 @@ pub const Person = struct {
 
     /// Combat crews rate on gunnery+piloting; support roles on their primary
     /// skill counted twice (so level 4 ⇒ Regular, 3 ⇒ Veteran, matching the
-    /// combat convention). Refined in Stage 2.
+    /// combat convention).
     pub fn experience(self: *const Person) types.ExperienceLevel {
         return switch (self.role) {
             .mekwarrior, .vehicle_crew, .aero_pilot => .fromCombatSkills(self.skill(self.role.primarySkill()) orelse 7, self.skill(self.role.pilotingSkill().?) orelse 8),
@@ -411,14 +410,14 @@ pub const Person = struct {
         return types.applyBp(types.applyBp(self.role.baseSalary(), self.experience().salaryMultBp()), self.rank.payBp());
     }
 
-    /// What the outfit owes when this person leaves (12C.2): a month's
+    /// What the outfit owes when this person leaves: a month's
     /// pay per full year served, capped. Under a year: nothing.
     pub fn severance(self: *const Person, day: u32) types.CBills {
         const t = tuning.person;
         const years = self.tenureMonths(day) / 12;
         const months = @min(years * t.severance_months_per_year, t.severance_cap_months);
         const full = self.monthlySalary() * @as(types.CBills, months);
-        // Shareholders (12C.3) already hold a stake: half the payout.
+        // Shareholders already hold a stake: half the payout.
         return if (self.shares > 0) @divTrunc(full, 2) else full;
     }
 
@@ -427,7 +426,7 @@ pub const Person = struct {
         return std.fmt.allocPrint(alloc, "{s} {s} {s}", .{ self.rank.abbrev(), self.first_name, self.last_name });
     }
 
-    /// Birthday from an age on a given day (12C.4): recruitment and the
+    /// Birthday from an age on a given day: recruitment and the
     /// save migration that back-fills older people both use it.
     pub fn setBirthdayFromAge(self: *Person, day: u32, age: u32) void {
         self.born_day = @as(i32, @intCast(day)) - @as(i32, @intCast(age)) * @as(i32, types.days_per_year);
@@ -447,7 +446,7 @@ pub const Person = struct {
 // ------------------------------------------------------------ xp progression
 // XP is earned anywhere (monthly service, scenarios, tech work); spending it
 // to improve a skill happens only through a training program at a regional/
-// brigade HQ (ARCH §9.7, Stage 8 wires the gate). The machinery lives here.
+// brigade HQ (ARCH §9.7). The machinery lives here.
 
 /// XP cost to improve a skill TO `new_level` (lower level = better, combat
 /// convention). Costs double per step toward mastery.
@@ -458,8 +457,8 @@ pub fn improveCost(new_level: u8) u32 {
 
 pub const TrainError = error{ NotTrained, InsufficientXp, AlreadyMastered };
 
-/// Spend XP to improve an existing skill by one step. The Stage 8 training
-/// system calls this after validating HQ + program time.
+/// Spend XP to improve an existing skill by one step. The training system
+/// calls this after validating HQ + program time.
 pub fn spendXpToImprove(p: *Person, skill_type: types.SkillType) TrainError!void {
     const current = p.skill(skill_type) orelse return TrainError.NotTrained;
     if (current == 0) return TrainError.AlreadyMastered;
@@ -500,7 +499,7 @@ test "spending xp improves a skill and drains the pool" {
 
 pub const max_fatigue = tuning.person.max_fatigue;
 
-/// The loyalty modifiers (12C.5); `count()` is how many restless flags
+/// The loyalty modifiers; `count()` is how many restless flags
 /// they cancel on the payday roll.
 pub const Loyalty = struct {
     founder: bool = false,
@@ -524,7 +523,7 @@ pub const Loyalty = struct {
     }
 };
 
-test "12C.5: loyalty modifiers count and name themselves" {
+test "loyalty modifiers count and name themselves" {
     const t = tuning.person;
     var p: Person = .{ .id = @enumFromInt(1), .first_name = "A", .last_name = "B", .role = .mekwarrior, .recruited_day = 10 };
     try std.testing.expectEqual(@as(u8, 0), p.loyalty(1000).count());
@@ -541,7 +540,7 @@ test "12C.5: loyalty modifiers count and name themselves" {
     try std.testing.expectEqualStrings("founder, veteran, recent raise, recent award", txt);
 }
 
-/// CamOps fatigue bands (12C.1). MekHQ: `Fatigue` option thresholds.
+/// CamOps fatigue bands. MekHQ counterpart: `Fatigue` option thresholds.
 pub const FatigueBand = enum {
     fresh,
     tired,
@@ -558,7 +557,7 @@ pub const FatigueBand = enum {
     }
 };
 
-test "12C.3: shares from tenure, founding and rank; they calm restlessness and halve severance" {
+test "shares from tenure, founding and rank; they calm restlessness and halve severance" {
     const t = tuning.person;
     var p: Person = .{ .id = @enumFromInt(1), .first_name = "A", .last_name = "B", .role = .mekwarrior, .recruited_day = 100 };
     try std.testing.expectEqual(@as(u8, 0), p.sharesDue(200)); // under a year, no stake
@@ -582,7 +581,7 @@ test "12C.3: shares from tenure, founding and rank; they calm restlessness and h
     try std.testing.expectEqual(without, f.severance(day));
 }
 
-test "12C.4: age from the birthday; the young learn faster" {
+test "age from the birthday; the young learn faster" {
     var p: Person = .{ .id = @enumFromInt(1), .first_name = "A", .last_name = "B", .role = .mekwarrior };
     try std.testing.expect(p.ageYears(100) == null);
     try std.testing.expectEqual(@as(u32, 3), p.xpGain(100, 3)); // unknown age: unchanged
@@ -594,7 +593,7 @@ test "12C.4: age from the birthday; the young learn faster" {
     try std.testing.expectEqual(@as(u32, 3), p.xpGain(0, 3));
 }
 
-test "12C.1: fatigue bands and their penalties" {
+test "fatigue bands and their penalties" {
     var p: Person = .{ .id = @enumFromInt(1), .first_name = "A", .last_name = "B", .role = .mekwarrior };
     p.fatigue = 0;
     try std.testing.expectEqual(FatigueBand.fresh, p.fatigueBand());
@@ -614,7 +613,7 @@ pub fn contractFatigueGain(length_months: u8, battles_fought: u8, casualties_pct
     return contractFatigueGainFor(length_months, battles_fought, casualties_pct, false);
 }
 
-/// Garrison-class tours (12.30) wear a third as much per month: barracks,
+/// Garrison-class tours wear a third as much per month: barracks,
 /// hot food and a town, not a laager.
 pub fn contractFatigueGainFor(length_months: u8, battles_fought: u8, casualties_pct: u8, garrison: bool) u8 {
     const months: u32 = if (garrison) @as(u32, length_months) / tuning.person.garrison_tour_months_divisor else length_months;
@@ -642,7 +641,7 @@ test "quiet garrisons wear lightly, bloody campaigns wear hard" {
     try std.testing.expectEqual(@as(u8, max_fatigue), applyFatigue(90, 40)); // capped overall
 }
 
-test "12.30: a long quiet garrison banks a third of a combat tour's fatigue" {
+test "a long quiet garrison banks a third of a combat tour's fatigue" {
     try std.testing.expect(contractFatigueGainFor(24, 0, 0, true) < contractFatigueGainFor(24, 0, 0, false));
     try std.testing.expectEqual(@as(u8, 8), contractFatigueGainFor(24, 0, 0, true));
 }

@@ -2,7 +2,7 @@
 //! loaded at comptime from data/tables/difficulty.zon and type-checked
 //! here. A level scales the economy and the opposition — contract margin,
 //! fabrication premium, purchase markup, enemy strength, turnover
-//! pressure, and how hard the enemy holds a field you lost (12D) — and
+//! pressure, and how hard the enemy holds a field you lost — and
 //! never the dice: skill rolls, repair odds and healing are
 //! the sim's physics on every level. MekHQ counterpart: none directly;
 //! CampaignOptions' economy sliders come closest.
@@ -29,7 +29,7 @@ pub const Row = struct {
     purchase_bp: types.Bp,
     enemy_bp: types.Bp,
     turnover_delta: i32,
-    /// Real loss (12D): added to the scrap target (higher = more engine
+    /// Real loss: added to the scrap target (higher = more engine
     /// and ammo kills are scrap) and to the recovery roll on a lost field
     /// (lower = the enemy sweeps the field harder). The opposition's grip,
     /// not the physics: skill, repair and healing rolls stay untouched.

@@ -1,9 +1,9 @@
-//! Opposing forces (Stage 12D.5). Mirrors AtB's OpFor generation (MekHQ
+//! Opposing forces (Stage 12D.5). Adaptation of AtB's OpFor generation (MekHQ
 //! `AtBScenario`/`AtBDynamicScenarioFactory` force generation, abridged):
 //! the enemy on a contract is a force of its own — a number of lances off
 //! the enemy house's RAT at a rolled skill level — rolled when the offer is
 //! posted, so the board can show what you would be walking into. A weak
-//! company taking a planetary assault now meets a planetary assault.
+//! company taking a planetary assault meets a planetary assault.
 //! Data in data/tables/opfor.zon.
 
 const std = @import("std");
@@ -39,7 +39,7 @@ pub const Force = struct {
     quality: types.ExperienceLevel,
     /// Summed BV of one representative lance off the house's RAT.
     lance_bv: i64,
-    /// Its tonnage (12E.3): shown beside the skulls.
+    /// Its tonnage: shown beside the skulls.
     lance_tons: u32 = 0,
 
     pub fn bv(self: Force) i64 {
@@ -99,7 +99,7 @@ pub fn poolBv(force_bv: i64, length_months: u8) i64 {
     return types.applyBp(force_bv, 10_000 + table.reinforcement_bp_per_month * months);
 }
 
-test "12D.5: every contract kind has an opfor row and rolls within it" {
+test "every contract kind has an opfor row and rolls within it" {
     inline for (@typeInfo(contract.ContractKind).@"enum".fields) |f| {
         var found = false;
         for (table.by_kind) |r| if (std.mem.eql(u8, r.kind, f.name)) {

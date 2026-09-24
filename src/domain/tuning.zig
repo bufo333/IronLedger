@@ -1,6 +1,6 @@
 //! Tuning tables: every balance constant the sim reads, loaded at comptime
-//! from data/tables/tuning.zon (Stage 12.17, closing the "// TUNE" debt).
-//! Mirrors MekHQ `campaign/CampaignOptions` — knobs, not rules; the
+//! from data/tables/tuning.zon (Stage 12.17).
+//! MekHQ counterpart: `campaign/CampaignOptions` — knobs, not rules; the
 //! formulas stay legible in the modules that use them. The ZON file is
 //! type-checked against `Tuning` at compile time: a missing or misspelled
 //! field is a build error, not a silent default.
@@ -56,7 +56,7 @@ pub const Tuning = struct {
         capacity_field: CapacityRow,
         capacity_regional: struct { combat_companies: u8, support_companies: u8, air_port_level: u8, dropship_base: u8, dropship_port_levels_each: u8, jumpship_port_level: u8, jumpship_comms_level: u8 },
         capacity_brigade: struct { combat_companies: u8, support_companies: u8, support_extra: u8, air_base: u8, air_port_level: u8, dropship_base: u8, jumpship_base: u8, jumpship_port_level: u8, jumpship_comms_level: u8 },
-        /// Facility levels a support trade needs at the home HQ (Stage 12.15).
+        /// Facility levels a support trade needs at the home HQ.
         support_lance_needs: struct { mess: u8, mash_hospital: u8, transport_warehouse: u8 },
         /// Highest refit class a tier's bay reaches (Quality index: 1 = B … 5 = F).
         refit_class_cap: struct { field: u8, regional: u8, brigade: u8 },
@@ -131,19 +131,19 @@ pub const Tuning = struct {
         market_margin_bp: types.Bp,
         min_ops_cost: types.CBills,
         hall_arrival_target: u32,
-        /// The hall never runs dry (12B.10): at least this many candidates
+        /// The hall never runs dry: at least this many candidates
         /// of every role walk the boards at a hiring hall (combat crews and
         /// techs get `hall_floor_combat`), topped up daily.
         hall_floor: u32,
         hall_floor_combat: u32,
         procurement_markup_bp: types.Bp,
         rarity_target: struct { common: u8, uncommon: u8, rare: u8, very_rare: u8 },
-        /// The contract board (play feedback): never fewer than `offers_min`
+        /// The contract board: never fewer than `offers_min`
         /// offers, never more than `offers_max`; the rating letter and comms
         /// reach fill the gap between.
         offers_min: u8,
         offers_max: u8,
-        /// Part availability (12C.14, MekHQ acquisition target by tech base
+        /// Part availability (MekHQ acquisition target by tech base
         /// and TechManual availability code): the roll modifier per
         /// availability letter, the penalty a periphery world puts on
         /// Inner Sphere parts rated D or worse, and what comms reach adds
@@ -151,7 +151,7 @@ pub const Tuning = struct {
         avail_mod: struct { a: i8, b: i8, c: i8, d: i8, e: i8, f: i8 },
         periphery_penalty: i32,
         comms_bonus_per_two_levels: i32,
-        /// Black market (12C.17, AtB black market): at an HQ with a hiring
+        /// Black market (AtB black market): at an HQ with a hiring
         /// hall and comms of `black_market_comms` or more, a monthly 2d6 of
         /// `black_market_target`+ puts one rare hull or scarce part on the
         /// board at `black_market_price_bp` of list, gone in
@@ -167,7 +167,7 @@ pub const Tuning = struct {
         black_market_standing_loss: i32,
     },
     medical: struct {
-        /// Iron Man (12B.6): heals in this share of the days, never under the floor.
+        /// Iron Man: heals in this share of the days, never under the floor.
         iron_man_heal_bp: types.Bp,
         iron_man_min_days: u32,
         training_days: u32,
@@ -182,14 +182,14 @@ pub const Tuning = struct {
         no_supplies_bp: types.Bp,
         beds_per_hospital_level: u32,
         beds_per_mash: u32,
-        /// Medics (12B.11): each covers this many patients toward the
+        /// Medics: each covers this many patients toward the
         /// doctor ratio, and adds a field bed (two medics per bed without a
         /// MASH truck to staff).
         patients_per_medic: u32,
         permanent_target: u8,
     },
     person: struct {
-        /// Readiness ranking for an offer (12E.5): points against a company
+        /// Readiness ranking for an offer: points against a company
         /// per hull in the depot, per spent crew, per wounded, and the
         /// divisors that turn fatigue, transit days and morale into points.
         readiness_depot_weight: i32,
@@ -227,22 +227,22 @@ pub const Tuning = struct {
         fatigue_decay_base: u8,
         fatigue_decay_per_mess: u8,
         monthly_service_xp: u32,
-        /// Turnover (Stage 12.20, AtB retirement/defection abstracted):
+        /// Garrison duty is nearly home: weekly fatigue recovery in
+        /// the field on garrison-class work as a share of the home rate,
+        /// and the tour's fatigue bill counts months divided by this.
+        garrison_rest_bp: types.Bp,
+        garrison_tour_months_divisor: u32,
+        /// Turnover (AtB retirement/defection abstracted):
         /// after `turnover_min_tenure_months`, anyone whose morale is under
         /// `restless_morale` or fatigue over `exhausted_fatigue` rolls 2d6
         /// each payday; under `turnover_target` (+1 per restless flag) they
         /// hand in their notice (an inbox decision, not a walkout). Target 3:
         /// one flag fires on a 3 or less (8.3%), both on a 4 or less (16.7%). Long service (`retire_tenure_months`)
         /// retires instead of resigning.
-        /// Garrison duty is nearly home (12.30): weekly fatigue recovery in
-        /// the field on garrison-class work as a share of the home rate,
-        /// and the tour's fatigue bill counts months divided by this.
-        garrison_rest_bp: types.Bp,
-        garrison_tour_months_divisor: u32,
         turnover_min_tenure_months: u32,
         restless_morale: u8,
         exhausted_fatigue: u8,
-        /// Fatigue bands (12C.1, CamOps fatigue / MekHQ Fatigue option):
+        /// Fatigue bands (CamOps fatigue / MekHQ Fatigue option):
         /// tired from `fatigue_tired` (+1 gunnery & piloting), exhausted
         /// from `exhausted_fatigue` (+2), spent from `fatigue_spent` (+3 and
         /// unfit: the auto-assigner seats someone fresher when it can).
@@ -250,14 +250,14 @@ pub const Tuning = struct {
         fatigue_spent: u8,
         turnover_target: u8,
         retire_tenure_months: u32,
-        /// Departure payout (12C.2, MekHQ retirement bonus / AtB retirement
+        /// Departure payout (MekHQ retirement bonus / AtB retirement
         /// payment): `severance_months_per_year` months' salary per full
         /// year served, capped at `severance_cap_months`; a plain firing
         /// pays `fire_severance_bp` of it.
         severance_months_per_year: u32,
         severance_cap_months: u32,
         fire_severance_bp: types.Bp,
-        /// Shares (12C.3, AtB shares system): a combat or tech hand holds
+        /// Shares (AtB shares system): a combat or tech hand holds
         /// `shares_base` after `shares_tenure_months`, a founder (on the
         /// books day 0) `shares_founder`, plus one per rank above sergeant;
         /// `share_profit_default_bp` of contract income is paid out pro rata
@@ -269,7 +269,7 @@ pub const Tuning = struct {
         shares_tenure_months: u32,
         shares_per_restless: u8,
         share_profit_default_bp: types.Bp,
-        /// Ages (12C.4, MekHQ birthdays / AtB age-based retirement): from
+        /// Ages (MekHQ birthdays / AtB age-based retirement): from
         /// `age_old` a person adds a restless flag on the turnover roll, at
         /// `age_retire` they retire on the next payday at home; under
         /// `age_young` XP awards are scaled by `xp_young_bp`.
@@ -277,7 +277,7 @@ pub const Tuning = struct {
         age_retire: u32,
         age_young: u32,
         xp_young_bp: types.Bp,
-        /// Loyalty (12C.5, AtB founder/loyalty modifiers): each modifier in
+        /// Loyalty (AtB founder/loyalty modifiers): each modifier in
         /// play cancels one restless flag on the payday roll — a founder
         /// (who also never rolls at all while morale is at least
         /// `founder_morale_floor`), `veteran_tours` or more tours served, a
@@ -285,7 +285,7 @@ pub const Tuning = struct {
         /// within `award_loyalty_days`.
         founder_morale_floor: u8,
         veteran_tours: u32,
-        /// Morale from the field (12C.11): outfit-wide swings when a
+        /// Morale from the field: outfit-wide swings when a
         /// contract closes strong (outstanding/strong grade) or is breached
         /// (a performance failure at term is a breach); and the extra point
         /// a win on a weighted scenario earns the company.
@@ -304,7 +304,7 @@ pub const Tuning = struct {
         mek_heavy_max_tons: u8,
         /// Below this condition the hangar calls a hull "shot up".
         shot_up_condition_pct: u8,
-        /// Where the armour meter turns amber, then red (12G.2). Bands, not
+        /// Where the armour meter turns amber, then red. Bands, not
         /// thresholds anything decides on: the rules read `armor_pct`.
         armor_amber_pct: u8, // TUNE
         armor_red_pct: u8, // TUNE
@@ -327,7 +327,7 @@ pub const Tuning = struct {
         /// per point, the severity that also breaks a slot, cooks an ammo
         /// bin off, kills the hull outright, or kills it with no armour left.
         armor_per_severity: u8,
-        /// Engagements kept as records (12G.4). The permanent account is
+        /// Engagements kept as records. The permanent account is
         /// the AAR in the campaign log; these are what the screens read,
         /// so a few tours' worth is plenty.
         reports_kept: u32, // TUNE
@@ -358,27 +358,27 @@ pub const Tuning = struct {
         defense_bonus_bp: types.Bp,
         salvage_bv_per_truck: i64,
         salvage_bv_by_hand: i64,
-        /// Physical salvage (Stage 12.23): a crewed salvage lance strips
+        /// Physical salvage: a crewed salvage lance strips
         /// this much more; what is not a whole hull becomes parts at these
         /// BV prices (armor per ton, a weapon, a structural component).
         salvage_lance_bonus_bp: types.Bp,
         salvage_bv_per_armor_ton: i64,
         salvage_bv_per_weapon: i64,
         salvage_bv_per_component: i64,
-        /// Garrison probes (12D.6, ARCH §8): garrison-class contracts see a
+        /// Garrison probes (ARCH §8): garrison-class contracts see a
         /// probe every `garrison_probe_base_days` + 2d6 × `garrison_probe_die_days`
         /// days, the enemy committing `garrison_probe_lances` of its lances.
         garrison_probe_base_days: u32,
         garrison_probe_die_days: u32,
         garrison_probe_lances: u8,
-        /// Press the advance or consolidate (12G.6): after a field held,
+        /// Wrecks rolled off the enemy's table after a field held,
+        /// from which the salvage claim buys what it can reach.
+        salvage_candidates: u32, // TUNE
+        /// Press the advance or consolidate: after a field held,
         /// the commander chooses the tempo. Pressing puts the next
         /// engagement `press_gap_days` out instead of the usual gap, and
         /// the employer notices (`press_score`); the company pays for it
         /// in fatigue. Consolidating buys a breather the troops feel.
-        /// Wrecks rolled off the enemy's table after a field held (12G.6),
-        /// from which the salvage claim buys what it can reach.
-        salvage_candidates: u32, // TUNE
         press_gap_days: u32, // TUNE
         press_score: i16, // TUNE
         press_fatigue: u8, // TUNE
@@ -403,7 +403,7 @@ pub const Tuning = struct {
         credit_liquidation_bp: types.Bp,
         hardship_bp: types.Bp,
         field_markup_bp: types.Bp,
-        /// Defaults set at acceptance (Stage 12.19): a share of the advance
+        /// Defaults set at acceptance: a share of the advance
         /// handed to the company as local operating funds, and a standing
         /// top-up policy for it — both clearable.
         field_float_bp: types.Bp,
@@ -423,7 +423,7 @@ pub const Tuning = struct {
         tier_upgrade_cost: types.CBills,
         tier_upgrade_build_days: u32,
         refit_labor_per_hour: types.CBills,
-        /// Repair outcomes (12C.12, MekHQ repair roll): a depot repair or
+        /// Repair outcomes (MekHQ repair roll): a depot repair or
         /// refit rolls 2d6 + (5 − tech skill) against `repair_target_base`
         /// + the hull's quality modifier (A worst … F best). Margin of
         /// `repair_fault_margin` or more is clean; under it the job lands
@@ -434,7 +434,7 @@ pub const Tuning = struct {
         repair_fault_margin: i32,
         repair_redo_bp: types.Bp,
     },
-    /// Quality drift (12C.13, MekHQ maintenance quality). The weekly
+    /// Quality drift (MekHQ maintenance quality). The weekly
     /// maintenance roll (2d6 + 5 − tech skill vs. 4 + quality modifier, +1
     /// afield, +3 uncovered) moves the hull's letter one step toward A
     /// (worst) on a miss by `quality_drop_margin` or more, one step toward
@@ -455,7 +455,7 @@ pub const Tuning = struct {
         /// Armour patched per week and its labour.
         armor_patch_pct: u8,
         armor_patch_labour: types.CBills,
-        /// The night after a fight (12G.6): the share of the company's
+        /// The night after a fight: the share of the company's
         /// pooled spare tech-hours the field repair push spends.
         push_hours_bp: types.Bp, // TUNE
         /// Tech-hours a ready Logistics lance's field workshop adds to the
@@ -465,7 +465,7 @@ pub const Tuning = struct {
         /// this, for this many days plus 2d6.
         accident_target: u8,
         accident_days_base: u8,
-        /// Days off a bay accident costs before the 2d6 (Stage 9C.2).
+        /// Days off a bay accident costs before the 2d6.
         bay_accident_days_base: u32,
         /// An injury's severity from its days off: light up to the first, serious up to the second, crippling past it.
         injury_days_serious: u32,
@@ -475,7 +475,7 @@ pub const Tuning = struct {
         quality_drop_margin: i32,
         quality_rise_margin: i32,
         quality_sale_bp_per_step: types.Bp,
-        /// Tech target numbers (12C.15): the flat hours-per-class table is
+        /// Tech target numbers: the flat hours-per-class table is
         /// scaled by the hull's quality (A worst … F best), by an exotic
         /// design (very rare on the market), and by the tech's own
         /// skill — a veteran turns a wrench faster than a green hand.
@@ -483,7 +483,7 @@ pub const Tuning = struct {
         hours_exotic_bp: types.Bp,
         hours_skill_bp: struct { elite: types.Bp, veteran: types.Bp, regular: types.Bp, green: types.Bp, untrained: types.Bp },
     },
-    /// Dragoons rating (12C.6, CamOps "Mercenary Rating", MekHQ
+    /// Dragoons rating (CamOps "Mercenary Rating", MekHQ
     /// `UnitRating`): the letter thresholds on the summed score and the
     /// points each contract outcome adds to the combat record.
     rating: struct {
@@ -501,7 +501,7 @@ pub const Tuning = struct {
         record_failed: i32,
         record_breached: i32,
         record_cap: i32,
-        /// 12C.7 — what the letter buys on the board: pay multiplier per
+        /// What the letter buys on the board: pay multiplier per
         /// letter (F…A*), the letter index from which the Great Houses hire
         /// (0 = F, 1 = D, …), the index from which planetary assaults are
         /// offered, and the negotiation edge (index − `negotiation_offset`).
@@ -540,9 +540,9 @@ pub const Tuning = struct {
         enemy_strength_bp: struct { garrison_duty: types.Bp, cadre_duty: types.Bp, security_duty: types.Bp, riot_duty: types.Bp, planetary_assault: types.Bp, relief_duty: types.Bp, guerrilla_warfare: types.Bp, pirate_hunting: types.Bp, diversionary_raid: types.Bp, objective_raid: types.Bp, recon_raid: types.Bp, extraction_raid: types.Bp },
         pool_per_month_divisor: types.Bp,
         pool_months_cap: u8,
-        /// Victory points per point of contract score (12D.1).
+        /// Victory points per point of contract score.
         vp_per_score: i32,
-        /// Grade thresholds on victory points (12.29): outstanding, strong.
+        /// Grade thresholds on victory points: outstanding, strong.
         grade_outstanding_vp: i32,
         grade_strong_vp: i32,
         /// Attrition objective met at this share of the enemy pool destroyed.
@@ -556,10 +556,10 @@ pub const Tuning = struct {
         cooling_days: u32,
         decision_window_days: u32,
         /// Personnel notices (raise, bonus, replace, let go) get a longer
-        /// window than contract events (play feedback: a week's skip ate the
-        /// whole 7 days and the person was gone before the inbox was read).
+        /// window than contract events, so a week's skip does not expire
+        /// one before the inbox is read.
         notice_window_days: u32,
-        /// Faction standing (Stage 12.21), −100…100 per house: what a
+        /// Faction standing, −100…100 per house: what a
         /// completed tour earns the employer, what fighting a house costs
         /// with them, what a breach costs, the pay swing per point (bp),
         /// the line under which a house shuns you (half its offers, like
@@ -567,14 +567,14 @@ pub const Tuning = struct {
         standing_complete_gain: i32,
         standing_enemy_loss: i32,
         standing_breach_loss: i32,
-        /// A performance failure at term (12D.1, CamOps): what it costs with
+        /// A performance failure at term (CamOps): what it costs with
         /// the employer and in reputation. No clawback, no cooling.
         standing_failure_loss: i32,
         failure_reputation: i32,
-        /// Jump-point interdiction (12D.9): weekly, a company in transit
+        /// Jump-point interdiction: weekly, a company in transit
         /// without its own crewed DropShip meets raiders on 2d6 ≥ this.
         interdiction_target: u8,
-        /// Threat pay (12E.6): an offer's pay scales with its opposition's
+        /// Threat pay: an offer's pay scales with its opposition's
         /// power against the kind's norm (the midpoint lance count of
         /// `reference_lance_bv` at regular skill) — by `threat_pay_weight_bp`
         /// of the difference, capped at ±`threat_pay_cap_bp`.
@@ -585,16 +585,15 @@ pub const Tuning = struct {
         /// Shunned when standing is at or under −this.
         standing_shun_depth: i32,
         standing_drift_per_month: i32,
-        /// Chance a contract rolls on the weekly deck at all (bp). Play
-        /// feedback (12.24): too many small happenings.
+        /// Chance a contract rolls on the weekly deck at all (bp).
         weekly_event_chance_bp: types.Bp,
         /// A weekly decision of one kind waits this many days before it can
-        /// come up again (play feedback: the same smuggler every month).
+        /// come up again.
         weekly_decision_cooldown_days: u32,
         /// After this many identical answers in a row the answer becomes a
         /// standing order, applied without asking (`sop clear <event>` resets).
         standing_order_after: u8,
-        /// Command rights (12B.1, AtB/CamOps): what the employer's grip on
+        /// Command rights (AtB/CamOps): what the employer's grip on
         /// your company costs and buys, from integrated to independent.
         rights: struct {
             /// Days off the battle gap: the employer picks more fights.
@@ -606,13 +605,13 @@ pub const Tuning = struct {
             /// Score a defeat costs under integrated command (harder grading).
             integrated_defeat_score: i32,
         },
-        /// Salvage exchange (12B.2, CamOps): the employer keeps the wrecks
+        /// Salvage exchange (CamOps): the employer keeps the wrecks
         /// and pays the claim in cash at this share of BV value, at this
         /// many C-bills per BV. Rolled on one offer in `salvage_exchange_in`.
         salvage_exchange_bp: types.Bp,
         salvage_cbills_per_bv: types.CBills,
         salvage_exchange_in: u32,
-        /// Negotiation (12B.3, CamOps): 2d6 + the rating edge (12C.7)
+        /// Negotiation (CamOps): 2d6 + the rating edge
         /// + the command office's skill edge vs `negotiation_target` −
         /// standing/`negotiation_standing_per`; a miss hardens the pay by
         /// `negotiation_fail_pay_bp`; a natural 2 withdraws the offer.
@@ -620,7 +619,7 @@ pub const Tuning = struct {
         negotiation_standing_per: i32,
         negotiation_fail_pay_bp: types.Bp,
         negotiation_pay_step_bp: types.Bp,
-        /// Prisoners (12B.7): captured per battle when a security lance holds
+        /// Prisoners: captured per battle when a security lance holds
         /// the field — one per this many kills, capped; ransom by experience
         /// (green…elite); the 2d6 target a captive must meet to take your coin.
         prisoners_per_kills: u32,
@@ -636,7 +635,7 @@ pub const Tuning = struct {
         weight_light_max: u8,
         weight_medium_max: u8,
         weight_heavy_max: u8,
-        /// Support staff ratios (12B.11): one doctor per this many combat
+        /// Support staff ratios: one doctor per this many combat
         /// crew, astechs per tech, medics per doctor, one admin per this
         /// many combat crew, and never fewer admins than the office needs.
         crew_per_doctor: u32,
@@ -653,12 +652,12 @@ pub const Tuning = struct {
         /// Keep-stocked provisions line at the starter HQ (min / target tons).
         provisions_keep_min: u32,
         provisions_keep_target: u32,
-        /// Starter line lances (12E.1): 2d6 at or under this is a light
+        /// Starter line lances: 2d6 at or under this is a light
         /// mek, anything higher a medium — no heavies or assaults the
         /// founding level-1 mek bay could not rebuild.
         starter_light_max: u8,
     },
-    /// Real loss (Stage 12D): how hulls die, what a rebuild needs, and when
+    /// Real loss: how hulls die, what a rebuild needs, and when
     /// one is not worth it.
     loss: struct {
         /// An engine kill or an ammunition explosion is scrap on 2d6 at or
@@ -669,7 +668,7 @@ pub const Tuning = struct {
         /// A rebuild costing more than this share of a new hull is flagged
         /// "beyond economical repair" (it can still be done).
         writeoff_bp: types.Bp,
-        /// Who holds the field keeps the wrecks (12D.3, CamOps salvage). On
+        /// Who holds the field keeps the wrecks (CamOps salvage). On
         /// a lost field each hull wrecked there is recovered on 2d6 + mods ≥
         /// this, else the enemy has it. Mods: a crewed salvage lance, enough
         /// SVT-1 trucks for the wrecks, an own DropShip on-world, a rout,
@@ -686,7 +685,7 @@ pub const Tuning = struct {
         escape_target: i32,
         /// Company morale when a missing pilot is written off.
         mia_morale: i32,
-        /// Rules of engagement (12D.4): roll shift, the share of engaged
+        /// Rules of engagement: roll shift, the share of engaged
         /// hulls hit on a lost fight (percentage points), the recovery
         /// roll, and the extra morale a lost stand costs.
         roe: struct {
@@ -700,7 +699,7 @@ pub const Tuning = struct {
             /// Score a cautious withdrawal from a draw costs.
             withdrawal_score: i32,
         },
-        /// Go back for the downed (12G.6): a night sortie onto ground the
+        /// Go back for the downed: a night sortie onto ground the
         /// enemy now holds. Each hull left and each pilot held gets one
         /// more roll, at `push_mod` to the target that failed the first
         /// time. The company pays for the night in fatigue; a sortie that

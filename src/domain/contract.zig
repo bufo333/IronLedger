@@ -1,5 +1,5 @@
 //! Contracts: the 12 AtB contract types with CamOps payment terms.
-//! Mirrors MekHQ `mission/AtBContract.java` + `market/ContractMarket`.
+//! MekHQ counterpart: `mission/AtBContract.java` + `market/ContractMarket`.
 //! Stage 4 implements the market and lifecycle; the math primitives live here.
 
 const std = @import("std");
@@ -61,8 +61,8 @@ pub const ContractKind = enum {
         };
     }
 
-    /// CamOps operations/employment multiplier, basis points.
-    /// TODO(stage-4): verify each value against CamOps contract payment table.
+    /// CamOps operations/employment multiplier, basis points; the values
+    /// are unchecked against the CamOps contract payment table.
     pub fn operationsMultBp(self: ContractKind) types.Bp {
         return switch (self) {
             .cadre_duty => 8_000, // ×0.8
@@ -81,7 +81,7 @@ pub const ContractKind = enum {
     }
 };
 
-/// Who runs the show (AtB/CamOps command rights, 12B.1). Integrated: the
+/// Who runs the show (AtB/CamOps command rights). Integrated: the
 /// employer's officers command — more fights, half the salvage, harder
 /// grading, no training lances, scouts pulled into the line, +10% pay.
 /// Independent: your war, your salvage, fewer fights, −5% pay.
@@ -135,7 +135,7 @@ pub const CommandRights = enum {
         return self == .integrated;
     }
 
-    /// Integrated command sets the rules of engagement (12D.4): the
+    /// Integrated command sets the rules of engagement: the
     /// employer's officers do not let a company pull back early.
     pub fn overridesRoe(self: CommandRights) bool {
         return self == .integrated;
@@ -152,7 +152,7 @@ pub const CommandRights = enum {
     }
 };
 
-/// What a negotiation round can move (12B.3): one step each.
+/// What a negotiation round can move: one step each.
 pub const NegotiableTerm = enum {
     advance, // 25% → 50%
     salvage, // +10 points (cap 60)
@@ -235,15 +235,15 @@ pub const Contract = struct {
     end_day: ?u32 = null,
     /// Monthly payment while active (base minus the advance's share).
     monthly_net: types.CBills = 0,
-    /// Next scheduled engagement (combat-class contracts, Stage 7).
+    /// Next scheduled engagement (combat-class contracts).
     next_battle_day: ?u32 = null,
     /// The engagement day the commander confirmed battle orders for; the
     /// contact warning stands until it matches `next_battle_day`.
     orders_day: ?u32 = null,
-    /// Wear bookkeeping for the rotation loop (ARCH §9.7, Stage 8).
+    /// Wear bookkeeping for the rotation loop (ARCH §9.7).
     battles_fought: u8 = 0,
     casualties: u8 = 0,
-    // Victory model (Stage 9E, ARCH §7): hold until the end date, or grind
+    // Victory model (ARCH §7): hold until the end date, or grind
     // an opposition force pool down across however many battles it takes.
     objective: ObjectiveKind = .duration,
     committed_bv: i64 = 0, // the player's combat BV at acceptance
@@ -254,19 +254,19 @@ pub const Contract = struct {
     /// grace window to buy local replacements runs from here.
     ineffective_since: ?u32 = null,
     breach_day: ?u32 = null,
-    /// One negotiation round per offer (12B.3): spent, whatever the outcome.
+    /// One negotiation round per offer: spent, whatever the outcome.
     negotiated: bool = false,
-    /// The opposing force (12D.5), rolled with the offer: lances brought to
+    /// The opposing force, rolled with the offer: lances brought to
     /// an engagement, their skill level, and one lance's BV off the enemy
-    /// house's RAT. Zero lances = a contract from before 12D.5, whose enemy
-    /// still mirrors the company.
+    /// house's RAT. Zero lances = no rolled opposition (`hasOpfor` false);
+    /// the enemy is sized to the company.
     enemy_lances: u8 = 0,
     enemy_quality: types.ExperienceLevel = .regular,
     enemy_lance_bv: i64 = 0,
-    /// One enemy lance's tonnage (12E.3), for the board's "your 610t vs ~720t".
+    /// One enemy lance's tonnage, for the board's "your 610t vs ~720t".
     enemy_lance_tons: u32 = 0,
-    /// The HQ whose board posted this offer (12E.4): only companies based
-    /// there may take it. `.none` = an offer from before 12E.4.
+    /// The HQ whose board posted this offer: only companies based
+    /// there may take it. `.none` = no posting HQ; any company may take it.
     offer_hq: types.HqId = .none,
 
     /// The company is out on it: in transit to the world or on station.
@@ -294,8 +294,7 @@ pub const Contract = struct {
         return @intCast(@min(100, @divTrunc(destroyed * 100, self.enemy_pool_bv)));
     }
 
-    /// Attrition objective substantially met: eligible for `complete`.
-    /// The verdict the employer writes on a completed tour (Stage 12.29):
+    /// The verdict the employer writes on a completed tour:
     /// by victory points — outstanding ≥ 50 (+3 rep), strong ≥ 25 (+2),
     /// satisfactory ≥ 0 (+1), poor < 0 (0 rep). Failure is separate: a
     /// score of −5 or worse at end of term is a breach on performance.
@@ -316,6 +315,7 @@ pub const Contract = struct {
     /// Score at which the employer declares performance failure at term.
     pub const fail_score: i32 = -5;
 
+    /// Attrition objective substantially met: eligible for `complete`.
     pub fn objectivesMet(self: *const Contract) bool {
         return self.objective == .attrition and self.poolDestroyedPct() >= @import("tuning.zig").t.contract.attrition_met_pct;
     }
@@ -377,7 +377,7 @@ test "advance is a percentage of total base pay" {
     try std.testing.expectEqual(@as(types.CBills, 1_500_000), t.advanceAmount());
 }
 
-test "12B.1: command rights trade pay for tempo and salvage" {
+test "command rights trade pay for tempo and salvage" {
     try std.testing.expect(CommandRights.integrated.payBp() > CommandRights.independent.payBp());
     try std.testing.expect(CommandRights.integrated.salvageShareBp() < CommandRights.independent.salvageShareBp());
     try std.testing.expect(CommandRights.integrated.gapDelta() < CommandRights.independent.gapDelta());
@@ -387,7 +387,7 @@ test "12B.1: command rights trade pay for tempo and salvage" {
     try std.testing.expect(CommandRights.liaison.allowsTrainingLances());
 }
 
-test "12B.3: negotiated steps move one term and stop at the cap" {
+test "negotiated steps move one term and stop at the cap" {
     var t: Terms = .{ .length_months = 6, .base_pay_month = 100_000, .salvage_pct = 50, .command_rights = .liaison };
     try std.testing.expect(t.improve(.advance));
     try std.testing.expectEqual(@as(u8, 50), t.advance_pct);

@@ -63,6 +63,12 @@ D19a, D19b-1, D19b-2a and D19b-2b are done (see Done); the typed endpoint is lef
 
 ---
 
+## Data verification
+
+- [ ] `contract.operationsMultBp`: check each contract kind's multiplier against the CamOps contract payment table and cite the page (rule 6).
+
+---
+
 ## Design backlog (not defects, not scheduled)
 
 Ideas that would change the game rather than fix it; each needs its design written in ROADMAP.md before it is scheduled.
@@ -103,6 +109,7 @@ Contract deliverables closed before this list merged, all from the 2026-09-22 co
 - D21b row identity, audit #22: `queries.hqDetailView` returns each row's facility beside its text (the HQ screen's `u` reads it; the text-parsing `hqFacilityAtRow` is gone); the Desk's `inboxPane` builds the inbox lines with the decision each belongs to, used by drawing, the cursor range and Enter (the row-counting app helpers are gone); the Forces `+` no longer pre-checks company slots: `raise_company` refuses and `cli.errorText` says why
 - D21c strict command parsing, audit #23: `parseCommand` refuses any token left after a complete command (name verbs consume the rest through `takeRest`); `shares` and `autoadmit` each parse in one branch (bare `autoadmit` toggles); `xfer unit|person`, `office +|-`, `promote … [unpin]` and `cycledifficulty [+|-]` refuse any other word; duplicate verb and usage entries gone; the TUI `:` line prints the usage on a parse error like the REPL; REPL smoke steps for each kind of refusal
 - D21d reviewer checks in CI, audit #27: `docs/reviewer_checks.sh` runs every mechanical check of the contract (frontends over `src/tui` recursively; core checks outside `test` blocks and `expect…`/`…ForTest` helpers) and fails on output; CI runs it first; each check was proven to fire on an injected violation (the escape-sequence grep had been blind to its own pattern). `App.execResult` returns a command's result or reports the refusal the one way; 17 direct `commands.execute` calls moved onto it, the six call sites that remain (and the wrapper) say why with `// direct:`. The REPL `new` seeds from `queries.status` instead of reading `GameState`
+- D22a-1 comments in domain, econ and gen (rule 43): stage tags only in `//!` headers, no history or play-feedback notes, behavioural test names, "mirrors" replaced by "MekHQ counterpart" or "Adaptation of", the one `TODO(stage-4)` moved to Data verification, misplaced doc comments moved onto the fields they describe; no code changed (checked line by line against main)
 
 ---
 

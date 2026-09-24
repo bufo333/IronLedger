@@ -1,4 +1,4 @@
-//! Ranks (Stage 12B.4). Mirrors MekHQ `personnel/ranks/Ranks` with one
+//! Ranks (Stage 12B.4). Adaptation of MekHQ `personnel/ranks/Ranks`: one
 //! mercenary ladder from data/tables/ranks.zon: a title on the roster and
 //! a CamOps pay multiplier. Seats decide officers (company commander →
 //! Captain, lance leaders → Lieutenant); everyone else ranks by experience

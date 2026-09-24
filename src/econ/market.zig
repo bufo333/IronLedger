@@ -1,5 +1,5 @@
 //! Markets: contract offers, hiring pool, unit purchases.
-//! Mirrors MekHQ `market/ContractMarket`, `PersonnelMarket`, `UnitMarket`.
+//! MekHQ counterpart: `market/ContractMarket`, `PersonnelMarket`, `UnitMarket`.
 //! Stage 4 implements generation; refresh cadence and offer shapes live here.
 
 const std = @import("std");
@@ -10,7 +10,7 @@ const person = @import("../domain/person.zig");
 const rng_mod = @import("../sim/rng.zig");
 
 
-/// Offers on the board (12C.7, play feedback): a floor so there is always
+/// Offers on the board: a floor so there is always
 /// a choice, the rating letter index (F 0 … A* 5) and the comms level on
 /// top, capped so the board stays readable.
 pub fn contractOfferCount(rating_index: u8, comms_level: u8) u8 {
@@ -66,13 +66,13 @@ pub const SiteKind = enum {
 pub const structural_fab_cost_mult_bp: types.Bp = tuning.market.fab_cost_bp; // ×1.5 vs. catalog
 pub const structural_fab_days = tuning.market.fab_days;
 
-/// What a warehouse line fetches when sold off (Stage 12 `sell_stock`):
+/// What a warehouse line fetches when sold off (`sell_stock`):
 /// a fraction of catalogue cost, like a hull at half value. Components
 /// move slower on the second-hand market.
 pub const stock_resale_bp: types.Bp = tuning.market.stock_resale_bp;
 pub const component_resale_bp: types.Bp = tuning.market.component_resale_bp;
 
-/// Transports list at a fraction of their canon price (Stage 12.15): a
+/// Transports list at a fraction of their canon price: a
 /// Leopard is a mid-game capital purchase, not a decade of profit.
 pub const transport_price_bp: types.Bp = tuning.market.transport_price_bp;
 
@@ -85,13 +85,13 @@ pub fn listingAppears(
     rarity: Rarity,
     planet_industry: u8, // 0–5
     site_bonus: u8, // from facilities, 0–3
-    extra: i32, // sourcing modifiers (12C.14): availability, periphery, comms
+    extra: i32, // sourcing modifiers: availability, periphery, comms
 ) bool {
     const roll: i32 = @as(i32, rng.roll2d6(.market)) + planet_industry / 2 + site_bonus + extra;
     return roll >= rarity.availabilityTarget();
 }
 
-/// What you'd be buying (Stage 9C.3): a listed hull's rolled condition.
+/// What you'd be buying: a listed hull's rolled condition.
 pub const HullCondition = struct {
     armor_pct: u8,
     quality: types.Quality,
@@ -130,23 +130,23 @@ pub const HullCondition = struct {
 };
 
 /// One entry on a site market's board (ARCH §9.8). Listings persist until
-/// bought or aged out (Stage 9C.3): hulls linger for months, staples are
+/// bought or aged out: hulls linger for months, staples are
 /// always restocked, rare slots roll monthly.
 pub const Listing = struct {
     kind: enum { unit, part },
     item_key: []const u8, // chassis_key or part_key (catalog memory)
     rarity: types.Rarity,
     price: types.CBills,
-    /// The HQ whose board this is (Stage 9D: every HQ has one).
+    /// The HQ whose board this is (every HQ has one).
     hq: types.HqId = .none,
     quantity: u32 = 1,
     staple: bool = false,
     listed_day: u32 = 0,
     expires_day: u32 = 0,
     condition: ?HullCondition = null,
-    /// Off the books (12C.17): a fence's offer — rare, dear, maybe a fraud.
+    /// Off the books: a fence's offer — rare, dear, maybe a fraud.
     black_market: bool = false,
-    /// The contract world's board (12D.7): a hull for sale where this
+    /// The contract world's board: a hull for sale where this
     /// deployed company stands, paid from its local funds and joining it on
     /// the spot. Shown on the company's home HQ board, gone when the
     /// contract ends.
@@ -251,7 +251,7 @@ test "only regional HQs guarantee structural parts" {
     try std.testing.expect(SiteKind.regional_hq.listingSlots(3) > SiteKind.field_hq.listingSlots(3));
 }
 
-test "9C.3: a wreck is priced like a wreck" {
+test "a wreck is priced like a wreck" {
     const new: HullCondition = .{ .armor_pct = 100, .quality = .f, .damaged_slots = 0, .destroyed_slots = 0, .missing_components = 0 };
     const wreck: HullCondition = .{ .armor_pct = 10, .quality = .a, .damaged_slots = 1, .destroyed_slots = 3, .missing_components = 2 };
     const p_new = hullPrice(4_672_315, 90_000, new, 10_000);

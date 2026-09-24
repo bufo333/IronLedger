@@ -386,12 +386,12 @@ test "refit classes: ammo is A, a like-for-like swap is B, new guns are C, jets 
     try std.testing.expect(refitHours(&.{.{ .install = .{ .location = .lt, .part_key = "ppc" } }}, &slots, .c) > refitHours(&.{.{ .remove = "ct.ammo_srm.1" }}, &slots, .a));
 }
 
-test "12.17: TechManual tables — engine masses and structure points are exact, armor is capped" {
+test "TechManual tables — engine masses and structure points are exact, armor is capped" {
     try std.testing.expectEqual(@as(u32, 38), engineHalfTons(300)); // 19 t
     try std.testing.expectEqual(@as(u32, 29), engineHalfTons(270)); // 14.5 t
     try std.testing.expectEqual(@as(u32, 17), engineHalfTons(200)); // 8.5 t
     try std.testing.expectEqual(@as(u32, 105), engineHalfTons(400)); // 52.5 t
-    try std.testing.expectEqual(@as(u32, 31), engineHalfTons(275)); // 15.5 t (was interpolated before)
+    try std.testing.expectEqual(@as(u32, 31), engineHalfTons(275)); // 15.5 t
     try std.testing.expectEqual(@as(u8, 31), structureRow(100).ct); // Atlas
     try std.testing.expectEqual(@as(u8, 4), structureRow(20).leg); // Locust
     try std.testing.expectEqual(@as(u32, 307), maxArmorPoints(100));

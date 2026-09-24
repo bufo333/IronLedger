@@ -1,4 +1,4 @@
-//! Awards (Stage 12B.5). Mirrors MekHQ `personnel/Award`: named ribbons
+//! Awards (Stage 12B.5). MekHQ counterpart: `personnel/Award`. Named ribbons
 //! earned automatically when a counter on the person crosses a threshold
 //! (data/tables/awards.zon). Each carries a small morale bump.
 
