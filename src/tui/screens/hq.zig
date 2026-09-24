@@ -14,7 +14,7 @@ const types = app.types;
 
 pub fn draw(self: *App) anyerror!void {
     const al = self.a();
-    const g = &self.gs.?;
+    const g = self.state();
     const b = self.body();
     const hqs = try q.hqList(al, g);
     if (hqs.len == 0) return;
@@ -38,7 +38,7 @@ pub fn draw(self: *App) anyerror!void {
 
 pub fn move(self: *App, delta: i32) anyerror!void {
     const al = self.a();
-    const g = &self.gs.?;
+    const g = self.state();
     const id: types.HqId = @enumFromInt(self.hqSelId(g));
     if (self.focus == 0) {
         const detail = try q.hqDetail(al, g, id);
@@ -69,7 +69,7 @@ pub const legend = app.keys.entries(Action, &bindings);
 pub fn handle(self: *App, k: app.Key) anyerror!bool {
     const hit = app.keys.lookup(Action, &bindings, self.focus, k) orelse return false;
     const al = self.a();
-    const g = &self.gs.?;
+    const g = self.state();
     const n = (try q.hqList(al, g)).len;
     switch (hit.action) {
         .next_hq => if (n > 0) {
@@ -144,7 +144,7 @@ test "u on a facility row acts on the facility the detail query puts under the c
     const c = try app.clientForTest(std.testing.allocator);
     defer app.deinitForTest(c, std.testing.allocator);
     try toTab(c, .hq);
-    const g = &c.app.gs.?;
+    const g = c.app.state();
     const id: app.types.HqId = @enumFromInt(c.app.hqSelId(g));
     const detail = try q.hqDetailView(c.app.a(), g, id);
     const row = for (detail.facility, 0..) |f, i| {

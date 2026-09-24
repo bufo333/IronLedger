@@ -15,7 +15,7 @@ const types = app.types;
 
 pub fn draw(self: *App) anyerror!void {
     const al = self.a();
-    const g = &self.gs.?;
+    const g = self.state();
     const b = self.body();
     const view = try q.contracts(al, g, @enumFromInt(self.hqSelId(g)));
     // Room for the offers and the candidates under the cursor's offer,
@@ -104,7 +104,7 @@ pub fn draw(self: *App) anyerror!void {
 
 pub fn move(self: *App, delta: i32) anyerror!void {
     const al = self.a();
-    const g = &self.gs.?;
+    const g = self.state();
     const view = try q.contracts(al, g, @enumFromInt(self.hqSelId(g)));
     if (self.focus == 0) self.moveCursor(0, delta, view.board.len) else if (self.focus == 1) self.moveCursor(1, delta, view.active.len) else self.moveCursor(2, delta, (try q.contractHistory(al, g)).len);
 }
@@ -126,7 +126,7 @@ pub const legend = app.keys.entries(Action, &bindings);
 pub fn handle(self: *App, k: app.Key) anyerror!bool {
     const hit = app.keys.lookup(Action, &bindings, self.focus, k) orelse return false;
     const al = self.a();
-    const g = &self.gs.?;
+    const g = self.state();
     const view = try q.contracts(al, g, @enumFromInt(self.hqSelId(g)));
     switch (hit.action) {
         // One board per HQ: [ ] steps through them.

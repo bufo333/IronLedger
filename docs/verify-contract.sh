@@ -43,6 +43,10 @@ check "frontends reaching sim, store or domain modules" \
     "$(grep -nE 'game\.(store|state|hq_ops|contract_market|contract_control|battle|maintenance|medical|tick|planet|faction|chassis|part|force|hq|person|unit|difficulty|dataProvenance)\b' $tui | grep -vE 'pub const (GameState|Treasury) = game\.state\.(GameState|Treasury);')"
 check "the sim, econ or domain importing the view layer (outside tests)" \
     "$(outside_tests 'queries\.zig' $(ls src/sim/*.zig | grep -v -e '/queries.zig$' -e '/cli.zig$') src/econ/*.zig src/domain/*.zig src/gen/*.zig)"
+# The lobby's Session owns the open campaign (rule 9): no frontend creates,
+# frees or loads a GameState itself.
+check "a frontend owning a GameState (use lobby.Session)" \
+    "$(grep -nE 'GameState\.init\(|\bgs\.deinit\(|\.store\.load\(|lobby\.load\(' $tui src/main.zig)"
 check "domain, econ or gen importing the sim (rng.zig is the one leaf)" \
     "$(grep -n '"\.\./sim/' src/domain/*.zig src/econ/*.zig src/gen/*.zig | grep -v '"\.\./sim/rng\.zig"')"
 check "impurity in the core (outside tests)" \

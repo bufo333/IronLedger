@@ -15,7 +15,7 @@ const types = app.types;
 
 pub fn draw(self: *App) anyerror!void {
     const al = self.a();
-    const g = &self.gs.?;
+    const g = self.state();
     const b = self.body();
     const view = try q.supply(al, g);
     const lw: u16 = if (self.narrow()) b.w else layout.list.of(b.w);
@@ -39,7 +39,7 @@ pub fn draw(self: *App) anyerror!void {
 
 pub fn move(self: *App, delta: i32) anyerror!void {
     const al = self.a();
-    const g = &self.gs.?;
+    const g = self.state();
     const view = try q.supply(al, g);
     self.moveCursor(0, delta, view.rows.len);
 }
@@ -63,7 +63,7 @@ pub const legend = app.keys.entries(Action, &bindings);
 pub fn handle(self: *App, k: app.Key) anyerror!bool {
     const hit = app.keys.lookup(Action, &bindings, self.focus, k) orelse return false;
     const al = self.a();
-    const g = &self.gs.?;
+    const g = self.state();
     const site = try self.supplySite();
     var buf: [128]u8 = undefined;
     switch (hit.action) {

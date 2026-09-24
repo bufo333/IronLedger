@@ -12,7 +12,7 @@ const q = app.q;
 
 pub fn draw(self: *App) anyerror!void {
     const al = self.a();
-    const g = &self.gs.?;
+    const g = self.state();
     const b = self.body();
     const all = try q.allTreasuries(al, g);
     App.clampIdx(&self.ledger_sel, all.len);
@@ -36,7 +36,7 @@ pub fn draw(self: *App) anyerror!void {
 
 pub fn move(self: *App, delta: i32) anyerror!void {
     const al = self.a();
-    const g = &self.gs.?;
+    const g = self.state();
     if (self.focus == 0) {
         const all = try q.allTreasuries(al, g);
         const v: i32 = @as(i32, @intCast(self.ledger_sel)) + delta;
@@ -63,7 +63,7 @@ pub const legend = app.keys.entries(Action, &bindings);
 pub fn handle(self: *App, k: app.Key) anyerror!bool {
     const hit = app.keys.lookup(Action, &bindings, self.focus, k) orelse return false;
     const al = self.a();
-    const g = &self.gs.?;
+    const g = self.state();
     switch (hit.action) {
         .transfer_command => {
             self.cmd_prefill.set("transfer outfit ");
