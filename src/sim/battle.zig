@@ -816,7 +816,7 @@ fn takePrisoners(gs: *GameState, c: *const contract_mod.Contract, player: *const
         const kills_est: u32 = estimatedKills(enemy_destroyed_bv);
         captured = @min(t.prisoners_max_per_battle, kills_est / t.prisoners_per_kills);
         for (0..captured) |_| {
-            const spec = @import("../gen/person_gen.zig").generateWithBonus(&gs.rng, .mekwarrior, if (std.mem.eql(u8, c.enemy_key, "PER")) -1 else 0);
+            const spec = @import("../gen/person_gen.zig").generateWithBonus(&gs.rng, .battle, .mekwarrior, if (std.mem.eql(u8, c.enemy_key, "PER")) -1 else 0);
             const pid = try gs.hireFromSpec(spec);
             const pow = gs.person(pid).?;
             pow.status = .pow;
@@ -1194,7 +1194,7 @@ fn rollSalvageCandidates(gs: *GameState, c: *const contract_mod.Contract) ![]aft
     const company_gen = @import("../gen/company_gen.zig");
     var out: std.ArrayListUnmanaged(after_action.SalvageCandidate) = .empty;
     for (0..tuning.battle.salvage_candidates) |_| {
-        const design = @import("../domain/rat.zig").roll(&gs.rng, .battle, c.enemy_key, company_gen.rollWeightClass(&gs.rng), gs.clock.date.year);
+        const design = @import("../domain/rat.zig").roll(&gs.rng, .battle, c.enemy_key, company_gen.rollWeightClass(&gs.rng, .battle), gs.clock.date.year);
         try out.append(gs.allocator(), .{
             .key = design.key,
             .name = design.name,
@@ -2232,4 +2232,28 @@ test "a conceded engagement leaves a report that holds the turn and counts as a 
     try std.testing.expectEqual(@as(u32, 1), c.battles_fought);
     try std.testing.expectEqual(tuning.battle.score.concede, c.score);
     try std.testing.expectEqual(tuning.battle.score.concede * tuning.contract.vp_per_score, c.victory_points);
+}
+
+test "a fight does not change who turns up at the hiring hall" {
+    var names: [2][]const u8 = undefined;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    for (&names, 0..) |*out, fought| {
+        var gs = GameState.init(std.testing.allocator, .{ .seed = 8201 });
+        defer gs.deinit();
+        const f = try @import("contract_events.zig").damagedCompanyForTest(&gs, 20);
+        gs.candidates.clearRetainingCapacity();
+        if (fought == 1) try resolveEngagement(&gs, f.c);
+        try @import("../econ/contract_market.zig").refreshCandidates(&gs);
+        var list: std.ArrayListUnmanaged(u8) = .empty;
+        for (gs.candidates.items) |c| {
+            try list.appendSlice(arena.allocator(), c.spec.first);
+            try list.append(arena.allocator(), ' ');
+            try list.appendSlice(arena.allocator(), c.spec.last);
+            try list.append(arena.allocator(), ';');
+        }
+        out.* = list.items;
+    }
+    try std.testing.expect(names[0].len > 0);
+    try std.testing.expectEqualStrings(names[0], names[1]);
 }

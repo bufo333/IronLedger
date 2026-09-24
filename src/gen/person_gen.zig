@@ -31,8 +31,8 @@ pub const GeneratedPerson = struct {
 /// Age band by trade and experience (12C.4, MekHQ `RandomAge`-style):
 /// cockpits skew young and the elite have been at it a while; techs span
 /// a career; doctors and desk staff have had one already.
-pub fn rollAge(rng: *rng_mod.Rng, role: person.Role, xp: types.ExperienceLevel) u8 {
-    const r = rng.random(.generation);
+pub fn rollAge(rng: *rng_mod.Rng, stream: rng_mod.Stream, role: person.Role, xp: types.ExperienceLevel) u8 {
+    const r = rng.random(stream);
     const band: struct { u8, u8 } = if (role.isCombat())
         switch (xp) {
             .green => .{ 19, 25 },
@@ -60,14 +60,16 @@ fn skillsFor(xp: types.ExperienceLevel) struct { u8, u8 } {
     };
 }
 
-pub fn generate(rng: *rng_mod.Rng, role: person.Role) GeneratedPerson {
-    return generateWithBonus(rng, role, 0);
+pub fn generate(rng: *rng_mod.Rng, stream: rng_mod.Stream, role: person.Role) GeneratedPerson {
+    return generateWithBonus(rng, stream, role, 0);
 }
 
-/// `bonus` shifts the 2d6 experience roll (hiring hall + HR office, Stage 9C).
-pub fn generateWithBonus(rng: *rng_mod.Rng, role: person.Role, bonus: i32) GeneratedPerson {
-    const r = rng.random(.generation);
-    const xp = company_gen.rollExperienceWithBonus(rng, bonus);
+/// `bonus` shifts the 2d6 experience roll (hiring hall + HR office, Stage
+/// 9C). Every draw comes from `stream`: the caller's own, so generating a
+/// person for one system never moves another's dice.
+pub fn generateWithBonus(rng: *rng_mod.Rng, stream: rng_mod.Stream, role: person.Role, bonus: i32) GeneratedPerson {
+    const r = rng.random(stream);
+    const xp = company_gen.rollExperienceWithBonus(rng, stream, bonus);
     const skills = skillsFor(xp);
     const combat = role.isCombat();
     return .{
@@ -82,16 +84,16 @@ pub fn generateWithBonus(rng: *rng_mod.Rng, role: person.Role, bonus: i32) Gener
         .experience = xp,
         .primary_skill = skills[0],
         .secondary_skill = if (combat) skills[1] else skills[0],
-        .age = rollAge(rng, role, xp),
+        .age = rollAge(rng, stream, role, xp),
     };
 }
 
 test "12C.4: ages sit in the trade's band" {
     var rng = rng_mod.Rng.init(4);
     for (0..40) |_| {
-        const pilot = generate(&rng, .mekwarrior);
+        const pilot = generate(&rng, .generation, .mekwarrior);
         try std.testing.expect(pilot.age >= 19 and pilot.age <= 48);
-        const doc = generate(&rng, .doctor);
+        const doc = generate(&rng, .generation, .doctor);
         try std.testing.expect(doc.age >= 30 and doc.age <= 60);
     }
 }
@@ -100,8 +102,8 @@ test "generation is deterministic per seed and skills match the band" {
     var a = rng_mod.Rng.init(99);
     var b = rng_mod.Rng.init(99);
     for (0..50) |_| {
-        const pa = generate(&a, .mekwarrior);
-        const pb = generate(&b, .mekwarrior);
+        const pa = generate(&a, .generation, .mekwarrior);
+        const pb = generate(&b, .generation, .mekwarrior);
         try std.testing.expectEqualStrings(pa.first, pb.first);
         try std.testing.expectEqualStrings(pa.last, pb.last);
         try std.testing.expectEqual(pa.experience, pb.experience);
@@ -118,7 +120,7 @@ test "experience distribution is 2d6-shaped over many rolls" {
     var regulars: u32 = 0;
     var elites: u32 = 0;
     for (0..2_000) |_| {
-        switch (generate(&rng, .mekwarrior).experience) {
+        switch (generate(&rng, .generation, .mekwarrior).experience) {
             .regular => regulars += 1,
             .elite => elites += 1,
             else => {},

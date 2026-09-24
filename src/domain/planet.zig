@@ -48,13 +48,13 @@ pub fn jumpsBetween(a: *const Planet, b: *const Planet) u32 {
 
 /// Weighted-random world in one faction's space — how the starter HQ lands
 /// "at home" for the commander's origin (industry-rich worlds more likely).
-pub fn weightedPickByFaction(rng: *rng_mod.Rng, faction_key: []const u8) ?*const Planet {
+pub fn weightedPickByFaction(rng: *rng_mod.Rng, stream: rng_mod.Stream, faction_key: []const u8) ?*const Planet {
     var total: u32 = 0;
     for (catalog) |*p| {
         if (std.mem.eql(u8, p.faction, faction_key)) total += p.industry + 1;
     }
     if (total == 0) return null;
-    var pick = rng.random(.generation).uintLessThan(u32, total);
+    var pick = rng.random(stream).uintLessThan(u32, total);
     for (catalog) |*p| {
         if (!std.mem.eql(u8, p.faction, faction_key)) continue;
         const w = p.industry + 1;
@@ -105,8 +105,8 @@ test "distances and jumps" {
 test "starter world lands in the commander's faction space" {
     var rng = rng_mod.Rng.init(11);
     for (0..50) |_| {
-        const world = weightedPickByFaction(&rng, "CC").?;
+        const world = weightedPickByFaction(&rng, .generation, "CC").?;
         try std.testing.expectEqualStrings("CC", world.faction);
     }
-    try std.testing.expect(weightedPickByFaction(&rng, "COMSTAR") == null);
+    try std.testing.expect(weightedPickByFaction(&rng, .generation, "COMSTAR") == null);
 }

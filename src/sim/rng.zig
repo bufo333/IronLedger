@@ -15,6 +15,22 @@ pub const Stream = enum(u8) {
     travel,
 
     pub const count = @typeInfo(Stream).@"enum".fields.len;
+
+    /// Each stream's permanent seed salt. A stream's identity is its salt,
+    /// not its place in this enum: reordering or adding streams changes no
+    /// existing stream.
+    pub fn salt(self: Stream) u64 {
+        return switch (self) {
+            .generation => 0x9E3779B97F4A7C15,
+            .market => 0x3C6EF372FE94F82A,
+            .maintenance => 0xDAA66D2C7DDF743F,
+            .acquisition => 0x78DDE6E5FD29F054,
+            .battle => 0x1715609F7C746C69,
+            .events => 0xB54CDA58FBBEE87E,
+            .medical => 0x538454127B096493,
+            .travel => 0xF1BBCDCBFA53E0A8,
+        };
+    }
 };
 
 pub const Rng = struct {
@@ -36,7 +52,7 @@ pub const Rng = struct {
     /// A stream's starting state for a seed: distinct per stream, stable
     /// for a given seed.
     pub fn fresh(seed: u64, stream: Stream) std.Random.DefaultPrng {
-        return std.Random.DefaultPrng.init(seed ^ (0x9E3779B97F4A7C15 *% (@as(u64, @intFromEnum(stream)) + 1)));
+        return std.Random.DefaultPrng.init(seed ^ stream.salt());
     }
 
     /// One stream's state in format 1.
@@ -92,4 +108,13 @@ test "2d6 stays in range" {
         const v = r.roll2d6(.events);
         try std.testing.expect(v >= 2 and v <= 12);
     }
+}
+
+test "stream salts are distinct and no longer depend on enum order" {
+    for (std.enums.values(Stream), 0..) |a, i| {
+        for (std.enums.values(Stream)[i + 1 ..]) |b| try std.testing.expect(a.salt() != b.salt());
+    }
+    // Pinned: the salts equal the values the ordinal once produced, so
+    // saves and seeds made before them draw the same numbers.
+    try std.testing.expectEqual(@as(u64, 0x1715609F7C746C69), Stream.battle.salt());
 }
