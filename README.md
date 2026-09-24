@@ -518,4 +518,7 @@ fan project, unaffiliated with Topps, Catalyst Game Labs or MegaMek.
 
 ## License
 
-GNU General Public License v3.0 — see [LICENSE](LICENSE).
+The code is under the GNU General Public License v3.0; see
+[LICENSE](LICENSE). The soundtrack and the Unforgiven crest are not under
+the GPL: they belong to the project owner and may be redistributed only as
+part of IRON LEDGER. See [ASSETS.md](ASSETS.md).

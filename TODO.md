@@ -44,10 +44,6 @@ D33 into C18.
 - [ ] C19 platforms (rule 65): Windows terminal, resize, child process, paths and audio behind target gates; CI builds macOS, Linux and Windows.
 - [ ] C20 documentation and naming (rules 61, 75, 81, 82, 84): module headers link `docs/mekhq-map.md`; misplaced comment, wrong §9.8 citations, long formula lines, weekly-hour names.
 
-## Other work
-
-- [ ] D34 asset rights (A33): `ASSETS.md` with source, owner, licence and redistribution terms for `data/music` (OST, OST Part 2, Supplimental Music: the owner's AI-generated tracks, watermarked to the owner's account, the owner holds the usage licence), `docs/logos`, test fixtures and screenshots; `unforgiven.png` at the root removed or used.
-
 ## Tests
 
 - [ ] Smoke coverage still missing: the GAME OVER modal (needs a saved campaign already past all credit as a fixture), the exact 120-column layout boundary, and the refusal branch of each confirm.

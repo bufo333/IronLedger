@@ -14,5 +14,9 @@ zig-out/
 scratch/
 *.log
 
+# Python bytecode from the docs/ scripts
+__pycache__/
+*.pyc
+
 # OS noise
 .DS_Store
