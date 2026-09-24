@@ -52,8 +52,10 @@ jobs:
         run: zig fmt --check build.zig src
       - name: contract checks (docs/verify-contract.sh)
         run: bash docs/verify-contract.sh
+      # Baseline CPU: hosted Linux runners differ in CPU model, and a
+      # native build's cache misses on every other model.
       - name: unit tests (builds zig-out/bin/game)
-        run: zig build test --summary all
+        run: zig build test --summary all -Dcpu=baseline
       - name: TUI smoke (pty)
         run: python3 docs/tui_smoke.py zig-out/bin/game /tmp/tui_smoke.db
       - name: REPL smoke
