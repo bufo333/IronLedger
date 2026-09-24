@@ -79,7 +79,7 @@ fn printCampaigns(lobby: game.lobby.Lobby, al: std.mem.Allocator) void {
     }
     std.debug.print("campaigns (most recently saved first):\n", .{});
     for (list) |c| {
-        std.debug.print("  [{d}] {s} — commander {s} — {s} (day {d})\n", .{ c.id, c.name, c.commander, c.date, c.day });
+        std.debug.print("  [{d}] {s} — commander {s} — {s} (day {d})\n", .{ c.id, q.terminalText(al, c.name) catch c.name, q.terminalText(al, c.commander) catch c.commander, c.date, c.day });
     }
 }
 
@@ -394,7 +394,8 @@ fn printReadiness(gs: *game.state.GameState, al: std.mem.Allocator) void {
     const rows = q.readiness(al, gs) catch return;
     printTable(al, q.readiness_cols, rows, "");
     for (rows) |r| {
-        std.debug.print("\n[{d}] {s}\n", .{ @intFromEnum(r.company), q.forceName(gs, r.company) });
+        const name = q.forceName(al, gs, r.company) catch "—";
+        std.debug.print("\n[{d}] {s}\n", .{ @intFromEnum(r.company), q.stripMarks(al, name) catch name });
         printLines(al, q.readinessLines(al, gs, r.company) catch continue, "  ");
     }
 }
@@ -437,7 +438,7 @@ fn printProjects(gs: *game.state.GameState, al: std.mem.Allocator) void {
 /// The back office: posted admins by role (Stage 9C).
 fn printStaff(gs: *game.state.GameState, al: std.mem.Allocator) void {
     for (q.hqList(al, gs) catch return) |h| {
-        std.debug.print("hq:{d} {s} back office:\n", .{ @intFromEnum(h.id), h.name });
+        std.debug.print("hq:{d} {s} back office:\n", .{ @intFromEnum(h.id), q.terminalText(al, h.name) catch h.name });
         for (q.backOffice(al, gs, h.id) catch continue) |row| {
             std.debug.print("    {s:<16} x{d:<3} of {d} best skill {d}\n", .{ @tagName(row.role), row.have, row.need, row.best_skill });
         }
@@ -507,7 +508,7 @@ fn runRepl(gs: *game.state.GameState, io: std.Io, gpa: std.mem.Allocator, store_
                 continue;
             };
             const st = try q.status(al, gs);
-            std.debug.print("saved campaign \"{s}\" at day {d}\n", .{ st.outfit_name, st.day });
+            std.debug.print("saved campaign \"{s}\" at day {d}\n", .{ q.terminalText(al, st.outfit_name) catch st.outfit_name, st.day });
         } else if (std.mem.eql(u8, verb, "campaigns")) {
             printCampaigns(lobby, al);
         } else if (std.mem.eql(u8, verb, "load")) {
@@ -521,7 +522,7 @@ fn runRepl(gs: *game.state.GameState, io: std.Io, gpa: std.mem.Allocator, store_
             };
             game.lobby.discard(gs);
             gs.* = loaded;
-            std.debug.print("loaded campaign [{d}] \"{s}\"\n", .{ id, (try q.status(al, gs)).outfit_name });
+            std.debug.print("loaded campaign [{d}] \"{s}\"\n", .{ id, try q.terminalText(al, (try q.status(al, gs)).outfit_name) });
             printStatus(gs, al);
         } else if (std.mem.eql(u8, verb, "delete")) {
             const id = std.fmt.parseInt(i64, tokens.next() orelse "", 10) catch {

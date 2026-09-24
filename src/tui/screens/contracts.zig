@@ -24,7 +24,7 @@ pub fn draw(self: *App) anyerror!void {
     const board_need: u16 = @intCast(@min(1 + view.board.len + 3 + 1 + cands.len + 2, 200));
     const board_h: u16 = @max(6, @min(board_need, layout.major.of(b.h)));
     const board_hq: types.HqId = @enumFromInt(self.hqSelId(g));
-    const inner = self.screen.pane(.{ .x = b.x, .y = b.y, .w = b.w, .h = board_h }, .{ .title = try std.fmt.allocPrint(al, "CONTRACT BOARD · {{a}}{s}{{/}} · for the companies based there", .{q.hqName(g, board_hq)}), .focused = self.focus == 0, .right_title = "[ ] other HQ  [←/→] columns  [Enter] accept" });
+    const inner = self.screen.pane(.{ .x = b.x, .y = b.y, .w = b.w, .h = board_h }, .{ .title = try std.fmt.allocPrint(al, "CONTRACT BOARD · {{a}}{s}{{/}} · for the companies based there", .{try q.hqName(self.a(), g, board_hq)}), .focused = self.focus == 0, .right_title = "[ ] other HQ  [←/→] columns  [Enter] accept" });
     if (view.board.len == 0) {
         self.screen.lines(inner, &.{"{d}no offers — the board refreshes on the 1st{/}"}, 0, null);
     } else {
@@ -170,7 +170,7 @@ pub fn key(self: *App, ch: u21) anyerror!void {
                     self.modal = .{ .confirm = .{ .kind = .recall_breach, .id = @intFromEnum(sel.company) } };
                     return;
                 }
-                _ = try self.execSay(.{ .recall_company = sel.company }, .good, "{s} is coming home", .{q.forceName(g, sel.company)});
+                _ = try self.execSay(.{ .recall_company = sel.company }, .good, "{s} is coming home", .{try q.forceName(self.a(), g, sel.company)});
             },
             else => {},
         }

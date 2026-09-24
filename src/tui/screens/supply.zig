@@ -99,7 +99,7 @@ pub fn key(self: *App, ch: u21) anyerror!void {
                     tons = sp.tons;
                     battles = sp.ammo_battles;
                 }
-                self.openAmount(try std.fmt.allocPrint(al, "RESUPPLY POLICY · {s}", .{q.forceName(g, co)}), .{ .supply_policy = co }, &.{
+                self.openAmount(try std.fmt.allocPrint(al, "RESUPPLY POLICY · {s}", .{try q.forceName(self.a(), g, co)}), .{ .supply_policy = co }, &.{
                     .{ .label = "safety days (0 clears)", .value = days, .min = 0, .max = 365, .step = 7 },
                     .{ .label = "max tons (0 = auto)", .value = tons, .min = 0, .max = 9_999, .step = 10 },
                     .{ .label = "ammo battles", .value = battles, .min = 0, .max = 20, .step = 1 },
@@ -122,9 +122,9 @@ pub fn key(self: *App, ch: u21) anyerror!void {
                     return;
                 };
                 if (r.tons_moved == 0) {
-                    self.say(.dim, "{s}'s stores already match the field plan", .{q.forceName(g, co)});
+                    self.say(.dim, "{s}'s stores already match the field plan", .{try q.forceName(self.a(), g, co)});
                 } else {
-                    self.say(.good, "{s} returns {d}t over the plan to the home HQ — riding the empty convoys, no freight", .{ q.forceName(g, co), r.tons_moved });
+                    self.say(.good, "{s} returns {d}t over the plan to the home HQ — riding the empty convoys, no freight", .{ try q.forceName(self.a(), g, co), r.tons_moved });
                 }
             },
             'H' => {
@@ -135,10 +135,10 @@ pub fn key(self: *App, ch: u21) anyerror!void {
                     return;
                 }
                 const res = game.commands.execute(g, .{ .ship_components_home = co }) catch |err| switch (err) {
-                    error.NothingToShip => return self.say(.dim, "no structural components in {s}'s field stores", .{q.forceName(g, co)}),
+                    error.NothingToShip => return self.say(.dim, "no structural components in {s}'s field stores", .{try q.forceName(self.a(), g, co)}),
                     else => return self.say(.crit, "{s}", .{game.cli.errorText(err)}),
                 };
-                self.say(.good, "{d} component{s} shipped from {s} to {s} (freight from local funds)", .{ res.count, if (res.count == 1) "" else "s", q.forceName(g, co), q.hqName(g, res.hq) });
+                self.say(.good, "{d} component{s} shipped from {s} to {s} (freight from local funds)", .{ res.count, if (res.count == 1) "" else "s", try q.forceName(self.a(), g, co), try q.hqName(self.a(), g, res.hq) });
             },
             'T' => self.openCommand(if (site) |s| switch (s) {
                 .company => |id| std.fmt.bufPrint(&buf, "transfer co:{d} outfit {d}", .{ @intFromEnum(id), @max(0, @divTrunc(q.balance(g, .{ .company = id }), 2)) }) catch "transfer ",
