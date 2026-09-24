@@ -108,6 +108,8 @@ test "data: every contract kind has an opfor row and rolls within it" {
         };
         try std.testing.expect(found);
     }
+    // Quality bands climb: green below regular below veteran (elite above).
+    try std.testing.expect(table.green_max < table.regular_max and table.regular_max < table.veteran_max);
     var rng = rng_mod.Rng.init(125);
     for (0..50) |_| {
         const f = roll(&rng, .market, .planetary_assault, "DC", 3025);

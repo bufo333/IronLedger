@@ -321,20 +321,36 @@ pub fn refitHours(ops: []const RefitOp, slots: []const unit_mod.PartSlot, class:
     return @intCast(types.applyBp(@as(types.CBills, hours), class.hoursMultBp()));
 }
 
-test "the canonical designs are legal and close to their tonnage" {
+/// Every catalogue mek's own loadout, run through the lab's rules.
+fn canonicalReportForTest(alloc: std.mem.Allocator, design: *const chassis_mod.Chassis) !?Report {
+    var items: std.ArrayListUnmanaged(Item) = .empty;
+    for (design.loadout) |l| {
+        const loc = parseLocation(l.slot) orelse {
+            std.debug.print("{s}: loadout slot '{s}' names no location\n", .{ design.key, l.slot });
+            return null;
+        };
+        try items.append(alloc, .{ .location = loc, .part_key = l.part });
+    }
+    return try validate(design, items.items, alloc);
+}
+
+test "data: every catalogue mek's own loadout is legal" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
-    const alloc = arena.allocator();
     for (chassis_mod.catalog) |*design| {
         if (design.kind != .mek) continue;
-        var items: std.ArrayListUnmanaged(Item) = .empty;
-        for (design.loadout) |l| {
-            try items.append(alloc, .{ .location = parseLocation(l.slot).?, .part_key = l.part });
-        }
-        const r = try validate(design, items.items, alloc);
+        const r = (try canonicalReportForTest(arena.allocator(), design)) orelse return error.TestUnexpectedResult;
         for (r.violations) |v| std.debug.print("{s}: {s}\n", .{ design.key, v.text });
         try std.testing.expect(r.legal);
-        // Abridged loadouts: never more than a few tons under.
+    }
+}
+
+test "the stock designs are abridged by at most seven tons" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    for (chassis_mod.catalog) |*design| {
+        if (design.kind != .mek) continue;
+        const r = (try canonicalReportForTest(arena.allocator(), design)).?;
         if (r.free_half_tons < 0 or r.free_half_tons > 14) std.debug.print("{s}: free {d} half-tons (fixed {d}, loadout {d})\n", .{ design.key, r.free_half_tons, r.fixed_half_tons, r.loadout_half_tons });
         try std.testing.expect(r.free_half_tons >= 0 and r.free_half_tons <= 14);
     }

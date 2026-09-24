@@ -49,6 +49,23 @@ pub fn chanceAtLeast(target: i32, mod: i32) u32 {
     return hits * 100 / 36;
 }
 
+// `fromRatioBp` falls back to the last band: an empty table fails the
+// build with the table's name.
+comptime {
+    if (table.bands.len == 0) @compileError("data/tables/skulls.zon: `bands` is empty; every ratio needs a band");
+}
+
+test "data: skull bands descend in ratio to a catch-all, climb in half skulls, and the warning is a band" {
+    for (table.bands[1..], table.bands[0 .. table.bands.len - 1]) |band, above| {
+        try std.testing.expect(band.min_ratio_bp < above.min_ratio_bp);
+        try std.testing.expect(band.half_skulls > above.half_skulls);
+    }
+    try std.testing.expectEqual(@as(types.Bp, 0), table.bands[table.bands.len - 1].min_ratio_bp);
+    for (table.bands) |band| try std.testing.expect(band.half_skulls >= 1 and band.half_skulls <= 10);
+    try std.testing.expect(table.warn_half_skulls >= 1 and table.warn_half_skulls <= 10);
+    try std.testing.expect(table.outmatched_below_bp > 0);
+}
+
 test "skull bands run from half a skull to five, and line up with the battle's ratio bonus" {
     // Monotone: more power, fewer skulls.
     var last: u8 = 0;

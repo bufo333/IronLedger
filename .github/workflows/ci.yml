@@ -102,3 +102,24 @@ jobs:
         run: dpkg -s libsqlite3-dev python3 >/dev/null 2>&1 || (sudo apt-get update && sudo apt-get install -y libsqlite3-dev python3)
       - name: release build from the declared package paths only
         run: bash docs/clean-package.sh ReleaseFast
+
+  data-fixtures:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          # The soundtrack is an optional asset no job reads.
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /*
+            !/data/music/
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
+        with:
+          version: 0.16.0
+      - name: system libraries
+        run: dpkg -s libsqlite3-dev python3 >/dev/null 2>&1 || (sudo apt-get update && sudo apt-get install -y libsqlite3-dev python3)
+      # Every family of broken mod data fails the build (rule 58).
+      - name: invalid-overlay fixtures
+        run: python3 docs/data-fixtures.py -Dcpu=baseline
