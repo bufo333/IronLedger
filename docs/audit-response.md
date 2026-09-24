@@ -194,7 +194,9 @@ does not need one, and the reserve-first pattern is sufficient.
 
 **Fix:**
 
-- **D24** (now, small):
+- **D24** (now, small). It stops a failure from being hidden or
+  mislabelled; it does not restore integrity after an allocation failure.
+  That comes only with the failure-atomicity item below.
   - The `runPolicies` catch propagates everything except
     `InsufficientTreasury`, the pattern already used at `state.zig:568-573`.
   - The `shipStock` catch does the same.
@@ -257,7 +259,21 @@ The integrity pass must therefore separate the two kinds of reference:
 - A strict stock loader instead of `addStock`.
 - Both ends checked for every live reference, with duplicate-key and NULL
   checks.
-- A post-decode graph pass over the live references, as the audit recommends.
+- A post-decode graph pass driven by an explicit **reference-policy table**
+  (added after the auditors' reply). Every reference column is listed in
+  it with one class, and the graph pass and the tests read the table
+  rather than comments in each loader:
+  - **Required live**: must resolve to a loaded entity (a unit's force, a
+    bay job's hull).
+  - **Optional live**: none, or it resolves (a unit's pilot, a force's
+    commander).
+  - **Historical**: may point at a removed entity (ledger and log tags,
+    battle-report hits).
+  - **Derived**: rebuilt after load and never trusted from the row (an
+    HQ's `staff_assigned`, recomputed by `refreshHqStaffing`).
+  - **Sentinel-capable**: a documented sentinel such as `.none` or the
+    outfit treasury is valid, and anything else must resolve (courier and
+    policy treasuries, stock owners, order destinations).
 - One corruption test per relationship family.
 
 ### A5. Unknown discriminators become valid data: Accepted → D28
@@ -1001,8 +1017,9 @@ where the audit's items join it.
 
 **Why this order:**
 
-- **The integrity fixes come first**, as the audit asks. D23 and D24 remove
-  the pointer and swallowed-error defects. D25–D27 are the ones a player can
+- **The integrity fixes come first**, as the audit asks. D23 removes the
+  pointer defects. D24 stops failures from being hidden or mislabelled;
+  integrity after an allocation failure comes with failure atomicity. D25–D27 are the ones a player can
   hit today, each with one keystroke: a malformed `:day`, the week advance, a
   mis-parsed policy, and an order reported as successful when it failed.
 - **The scheduled failure-atomicity work moves ahead of** the behaviour move
@@ -1024,3 +1041,17 @@ We would welcome the auditors' view on four points:
 3. The A17 rounding question.
 4. Whether they agree that A1 and A2 are High and Medium, given the arena
    allocator.
+
+## Auditors' reply (2026-09-24)
+
+The auditors had no substantive objection to the response or its order,
+and it stands as the implementation plan. Two changes were adopted:
+
+- **D24** is described as stopping failures from being concealed or
+  mislabelled, not as restoring integrity. Integrity after an allocation
+  failure comes only with the failure-atomicity item, which stays ahead of
+  the behaviour move off `GameState`.
+- **D28** validates the object graph against an explicit reference-policy
+  table with five classes: required live, optional live, historical,
+  derived and sentinel-capable. The table makes the distinction testable
+  rather than a matter of comments in individual loaders.
