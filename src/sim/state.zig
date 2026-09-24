@@ -565,7 +565,12 @@ pub const GameState = struct {
 
         // Founding capital: the HQ opens with its own operating treasury,
         // handed over on-site (no courier).
-        self.transferFunds(.outfit, .{ .hq = id }, tuning.hq.founding_funds, 0) catch {};
+        self.transferFunds(.outfit, .{ .hq = id }, tuning.hq.founding_funds, 0) catch |err| switch (err) {
+            // An outfit that cannot cover the founding capital opens the HQ
+            // with an empty treasury.
+            error.InsufficientTreasury => {},
+            error.OutOfMemory => return error.OutOfMemory,
+        };
 
         // Standing defaults the player can clear, so a hands-off outfit keeps
         // its HQ solvent and fed: the outfit tops the HQ up on payday, and

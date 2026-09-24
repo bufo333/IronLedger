@@ -254,7 +254,13 @@ pub fn runWeeklyRepairs(gs: *GameState) !void {
                 // Structural work is a bay job: queued once per
                 // hull, components taken from the warehouse up front.
                 .depot => if (at_home and depot_ok and !hq_ops.hasJobForUnit(gs, u.id)) {
-                    _ = hq_ops.queueDepotRepair(gs, u.id) catch false;
+                    // A job that cannot start yet (no bay, missing components,
+                    // a write-off) waits: the depot backlog and the parts demand
+                    // report it, and the next pass tries again.
+                    _ = hq_ops.queueDepotRepair(gs, u.id) catch |err| switch (err) {
+                        error.UnknownUnit, error.NoHq, error.NoBay, error.MissingComponents, error.WrittenOff => false,
+                        error.OutOfMemory => return err,
+                    };
                 },
             }
         }

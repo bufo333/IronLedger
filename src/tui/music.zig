@@ -78,6 +78,7 @@ pub const Player = struct {
         const al = self.arena.allocator();
         var tracks: std.ArrayListUnmanaged(Track) = .empty;
         var sets: std.ArrayListUnmanaged([]const u8) = .empty;
+        // best-effort: an unreadable music folder leaves the soundtrack empty.
         var dir = std.Io.Dir.cwd().openDir(self.io, dir_path, .{ .iterate = true }) catch return;
         defer dir.close(self.io);
         var it = dir.iterate();
@@ -143,6 +144,7 @@ pub const Player = struct {
         var order: std.ArrayListUnmanaged(usize) = .empty;
         for (self.tracks, 0..) |t, i| {
             if (self.selected_set) |s| if (t.set != s) continue;
+            // best-effort: a shuffle that runs out of memory plays what it has.
             order.append(al, i) catch return;
         }
         const r = self.rng.random();

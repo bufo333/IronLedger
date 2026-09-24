@@ -228,6 +228,7 @@ const TextBuf = struct {
 
     fn push(self: *TextBuf, cp: u21) void {
         var tmp: [4]u8 = undefined;
+        // best-effort: a code point that cannot be encoded is not typed.
         const n = std.unicode.utf8Encode(cp, &tmp) catch return;
         if (self.len + n > self.buf.len) return;
         @memcpy(self.buf[self.len .. self.len + n], tmp[0..n]);
@@ -383,7 +384,7 @@ pub const App = struct {
         self.w_name.set("Erik Kalmar");
         self.w_outfit.set("The Unforgiven");
         self.w_company.set("Alpha Company");
-        self.pickDefaultPlayer();
+        try self.pickDefaultPlayer();
         self.probeTerminal();
         if (self.music) |*m| {
             m.setEnabled(self.store.getSetting("music", 1) != 0);
@@ -410,7 +411,7 @@ pub const App = struct {
             }
             if (key == .none) continue;
             _ = self.frame.reset(.retain_capacity);
-            self.handleKey(key) catch |err| self.say(.crit, "error: {s}", .{@errorName(err)});
+            self.handleKey(key) catch |err| self.say(.crit, "error: {s}", .{game.cli.errorText(err)});
         }
     }
 
@@ -467,8 +468,8 @@ pub const App = struct {
         return &self.colscroll[t][pane];
     }
 
-    fn pickDefaultPlayer(self: *App) void {
-        const players = self.store.players(self.a()) catch return;
+    fn pickDefaultPlayer(self: *App) !void {
+        const players = try self.store.players(self.a());
         if (players.len > 0) self.player_id = players[0].id;
     }
 
@@ -559,6 +560,7 @@ pub const App = struct {
         const g = &(self.gs orelse return);
         const bytes = q.outfitEmblem(g) orelse return;
         if (!png.isPng(bytes)) return;
+        // best-effort: without a decodable picture the preset emblem stays.
         self.emblem = emblem_mod.Emblem.load(self.gpa, bytes, 1) catch return;
         // best-effort: an optional graphics image; the half-block emblem still draws.
         if (self.graphics == .kitty) emblem_mod.kittyTransmit(self.term.out, self.gpa, 1, bytes) catch {};
@@ -1311,7 +1313,7 @@ pub const App = struct {
             },
             .settings => {
                 const form = try self.settingsRows(al);
-                if (form.selectable > 0 and !form.rows[self.settings_cursor].active) self.settingsMove(1);
+                if (form.selectable > 0 and !form.rows[self.settings_cursor].active) try self.settingsMove(1);
                 var rows: std.ArrayListUnmanaged([]const u8) = .empty;
                 for (form.rows, 0..) |row, i| try rows.append(al, if (i == self.settings_cursor and row.active) try std.fmt.allocPrint(al, "{{a}}▶{{/}}{s}", .{row.text[1..]}) else row.text);
                 const r = self.modalRect(layout.modal.settings_w, @intCast(@min(rows.items.len + 2, self.screen.rows)));
@@ -1652,8 +1654,8 @@ pub const App = struct {
                     .back => self.step = .outfit,
                     .next => self.step = .review,
                     .switch_pane => self.w_field = if (self.w_field == 0) 1 else 0,
-                    .down => self.companyMove(1),
-                    .up => self.companyMove(-1),
+                    .down => try self.companyMove(1),
+                    .up => try self.companyMove(-1),
                     .reroll => {
                         self.w_seed += 1;
                         try self.generateCampaign();
@@ -1677,12 +1679,12 @@ pub const App = struct {
         }
     }
 
-    fn companyMove(self: *App, delta: i32) void {
+    fn companyMove(self: *App, delta: i32) !void {
         if (self.w_field == 0) {
             self.moveCursor(0, delta, 1000);
         } else {
             const g = &(self.gs orelse return);
-            const desks = (q.backOffice(self.a(), g, q.firstHq(g)) catch return).len;
+            const desks = (try q.backOffice(self.a(), g, q.firstHq(g))).len;
             if (desks == 0) return;
             self.w_office = @intCast(@max(0, @min(@as(i32, @intCast(desks - 1)), @as(i32, @intCast(self.w_office)) + delta)));
         }
@@ -1749,12 +1751,12 @@ pub const App = struct {
         if (self.logos.len == 0) return;
         const path = self.logos[@min(self.w_logo, self.logos.len - 1)];
         const bytes = emblem_mod.readFile(self.io, self.gpa, path) catch |err| {
-            self.say(.crit, "could not read {s}: {s}", .{ try q.plain(self.a(), path), @errorName(err) });
+            self.say(.crit, "could not read {s}: {s}", .{ try q.plain(self.a(), path), game.cli.errorText(err) });
             return;
         };
         const e = emblem_mod.Emblem.load(self.gpa, bytes, 2) catch |err| {
             self.gpa.free(bytes);
-            self.say(.crit, "{s}: {s} (8-bit non-interlaced PNG only)", .{ try q.plain(self.a(), path), @errorName(err) });
+            self.say(.crit, "{s}: {s} (8-bit non-interlaced PNG only)", .{ try q.plain(self.a(), path), game.cli.errorText(err) });
             return;
         };
         self.w_png = bytes;
@@ -1793,7 +1795,7 @@ pub const App = struct {
     fn beginCampaign(self: *App) !void {
         if (self.gs == null) return;
         self.store.save(&self.gs.?, self.player_id) catch |err| {
-            self.say(.crit, "save failed: {s}", .{@errorName(err)});
+            self.say(.crit, "save failed: {s}", .{game.cli.errorText(err)});
             return;
         };
         self.mode = .game;
@@ -2140,8 +2142,8 @@ pub const App = struct {
     }
 
     /// Move the highlight to the next selectable row in `dir`.
-    fn settingsMove(self: *App, dir: i32) void {
-        const form = self.settingsRows(self.a()) catch return;
+    fn settingsMove(self: *App, dir: i32) !void {
+        const form = try self.settingsRows(self.a());
         if (form.selectable == 0) return;
         var i = self.settings_cursor;
         var steps: usize = 0;
@@ -2444,7 +2446,7 @@ pub const App = struct {
         const res = game.commands.execute(g, if (days == 1) .advance_day else .{ .advance_days = days }) catch |err| { // direct: a refusal can be bankruptcy
             self.say(.crit, "{s}", .{game.cli.errorText(err)});
             if ((try q.status(self.a(), g)).bankrupt) {
-                self.store.save(g, self.player_id) catch {};
+                self.store.save(g, self.player_id) catch |save_err| self.say(.crit, "game over — and the final save failed: {s}", .{game.cli.errorText(save_err)});
                 self.modal = .game_over;
             }
             return;
@@ -3193,7 +3195,7 @@ pub const App = struct {
                 } else if (i - emblems.len < self.logos.len) {
                     const path = self.logos[i - emblems.len];
                     const bytes = emblem_mod.readFile(self.io, self.gpa, path) catch |err| {
-                        self.say(.crit, "could not read {s}: {s}", .{ try q.plain(self.a(), path), @errorName(err) });
+                        self.say(.crit, "could not read {s}: {s}", .{ try q.plain(self.a(), path), game.cli.errorText(err) });
                         return;
                     };
                     defer self.gpa.free(bytes);
@@ -3553,8 +3555,8 @@ pub const App = struct {
                 const hit = keys.lookup(FormAction, &form_bindings, 0, key) orelse return;
                 switch (hit.action) {
                     .close => self.modal = .none,
-                    .down => self.settingsMove(1),
-                    .up => self.settingsMove(-1),
+                    .down => try self.settingsMove(1),
+                    .up => try self.settingsMove(-1),
                     .less => try self.settingsAdjust(-1),
                     .more => try self.settingsAdjust(1),
                     .act => try self.settingsEnter(),
@@ -3588,7 +3590,7 @@ pub const App = struct {
                     .save => {
                         self.modal = .none;
                         self.store.save(&self.gs.?, self.player_id) catch |err| {
-                            self.say(.crit, "save failed: {s}", .{@errorName(err)});
+                            self.say(.crit, "save failed: {s}", .{game.cli.errorText(err)});
                             return;
                         };
                         self.leaveGame();
@@ -3687,7 +3689,7 @@ pub const App = struct {
                         self.say(.good, "deleted player \"{s}\" and their campaigns", .{try p.name.markup(self.a())});
                         self.player_id = 0;
                         self.cur(0).* = 0;
-                        self.pickDefaultPlayer();
+                        try self.pickDefaultPlayer();
                         return;
                     }
                 }
@@ -3761,7 +3763,7 @@ pub const App = struct {
         }
         if (eq(u8, verb, "save")) {
             self.store.save(g, self.player_id) catch |err| {
-                self.say(.crit, "save failed: {s}", .{@errorName(err)});
+                self.say(.crit, "save failed: {s}", .{game.cli.errorText(err)});
                 return;
             };
             self.say(.good, "saved at day {d}", .{(try q.status(self.a(), g)).day});
@@ -3804,7 +3806,7 @@ pub const App = struct {
             return;
         }
         const cmd = game.cli.parseCommand(verb, &tokens) catch |err| {
-            self.say(.amber, "{s} — usage: {s}", .{ @errorName(err), game.cli.usage(verb) orelse verb });
+            self.say(.amber, "{s} — usage: {s}", .{ game.cli.errorText(err), game.cli.usage(verb) orelse verb });
             return;
         };
         if (cmd) |c| {
@@ -3830,7 +3832,7 @@ pub const Options = struct {
 /// Entry point from main: open the store, take the terminal, run the app.
 pub fn run(io: std.Io, gpa: std.mem.Allocator, env: *const std.process.Environ.Map, store_path: [:0]const u8, options: Options) !void {
     const store = Lobby.open(store_path) catch |err| {
-        std.debug.print("could not open save store '{s}': {s}\n", .{ store_path, @errorName(err) });
+        std.debug.print("could not open save store '{s}': {s}\n", .{ store_path, game.cli.errorText(err) });
         return err;
     };
     defer store.close();

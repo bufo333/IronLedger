@@ -93,6 +93,11 @@ check "TODO / FIXME / HACK / XXX (open work lives in TODO.md)" \
 check "test names led by a roadmap stage" \
     "$(grep -nE '^test "(Stage )?[0-9]+[A-G]?(\.[0-9]+)*[a-z]?:' $code_and_data)"
 
+# Refusal text comes from cli.errorText (rule 10): a frontend never shows an
+# error's name.
+check "an error name shown in a frontend (use cli.errorText)" \
+    "$(grep -n '@errorName' $tui src/main.zig)"
+
 # §10 Errors keep their meaning (rule 79): a broad catch is best-effort
 # cleanup with a `// best-effort:` reason, or a known case recorded in
 # docs/verify-contract.baseline until its fix lands. A new one fails, and so
@@ -100,7 +105,7 @@ check "test names led by a roadmap stage" \
 broad=$(for f in $(find src -name '*.zig' | sort); do awk '
     FNR == 1 { in_test = 0 }
     /^test "/ || /^(pub )?fn (expect[A-Z][A-Za-z0-9_]*|[A-Za-z0-9_]+ForTest)\(/ { in_test = 1 }
-    !in_test && /catch (\{\}|false|"")/ && prev !~ /\/\/ best-effort:/ && $0 !~ /\/\/ best-effort:/ { line = $0; sub(/^[ \t]+/, "", line); print FILENAME ": " line }
+    !in_test && /catch (\{\}|false|""|return[;)])/ && prev !~ /\/\/ best-effort:/ && $0 !~ /\/\/ best-effort:/ { line = $0; sub(/^[ \t]+/, "", line); print FILENAME ": " line }
     in_test && /^}/ { in_test = 0 }
     { prev = $0 }' "$f"; done)
 baseline=$(grep -v '^#' docs/verify-contract.baseline 2>/dev/null)

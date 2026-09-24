@@ -73,7 +73,7 @@ pub fn main(init: std.process.Init) !void {
     }
 }
 
-fn printCampaigns(lobby: game.lobby.Lobby, al: std.mem.Allocator) void {
+fn printCampaigns(lobby: game.lobby.Lobby, al: std.mem.Allocator) !void {
     const list = lobby.allCampaigns(al) catch {
         std.debug.print("could not read the campaign registry\n", .{});
         return;
@@ -91,14 +91,14 @@ fn printCampaigns(lobby: game.lobby.Lobby, al: std.mem.Allocator) void {
 const q = game.queries;
 
 /// Print a query's lines, markup stripped (the console has no colour).
-fn printLines(al: std.mem.Allocator, lines: []const []const u8, indent: []const u8) void {
+fn printLines(al: std.mem.Allocator, lines: []const []const u8, indent: []const u8) !void {
     for (lines) |l| std.debug.print("{s}{s}\n", .{ indent, q.stripMarks(al, l) catch l });
 }
 
 /// Print a query's table, markup stripped.
-fn printTable(al: std.mem.Allocator, cols: []const game.table.Col, rows: anytype, indent: []const u8) void {
-    const t = q.tableOf(al, cols, rows) catch return;
-    printLines(al, t.render(al) catch return, indent);
+fn printTable(al: std.mem.Allocator, cols: []const game.table.Col, rows: anytype, indent: []const u8) !void {
+    const t = try q.tableOf(al, cols, rows);
+    printLines(al, t.render(al) catch return, indent) catch |err| showError(err);
 }
 
 /// Clear whatever is holding the turn: read the
@@ -137,9 +137,9 @@ fn runDemo(gs: *game.state.GameState, gpa: std.mem.Allocator) !void {
     _ = try game.commands.execute(gs, .{ .rename_outfit = "Kalmar's Free Legion" });
     const co = (try game.commands.execute(gs, .{ .new_company = "Alpha Company" })).created_force;
 
-    printHqs(gs, al);
+    printHqs(gs, al) catch |err| showError(err);
     std.debug.print("{s}\n{s}\n\n", .{ try q.commanderLine(al, gs), try q.payrollLine(al, gs) });
-    printOffers(gs, al);
+    printOffers(gs, al) catch |err| showError(err);
 
     // Hunt the monthly boards for combat-class work: a raid
     // start-to-finish, battles resolved hands-off.
@@ -167,7 +167,7 @@ fn runDemo(gs: *game.state.GameState, gpa: std.mem.Allocator) !void {
     _ = try game.commands.execute(gs, .{ .set_policy = .{ .entity = .{ .company = co }, .floor = 200_000, .monthly_cap = 400_000 } });
     std.debug.print("Dispatched 300k operating funds by courier; standing policy: top up to 200k monthly.\n", .{});
     std.debug.print("\nStores at departure:\n", .{});
-    printSupplies(gs, al);
+    printSupplies(gs, al) catch |err| showError(err);
 
     // The HQ works while the company is away — capital by
     // courier for a warehouse expansion, and two side torsos fabricated for
@@ -176,14 +176,14 @@ fn runDemo(gs: *game.state.GameState, gpa: std.mem.Allocator) !void {
     _ = try game.commands.execute(gs, .{ .transfer = .{ .from = .outfit, .to = .{ .hq = seat }, .amount = 2_000_000 } });
     _ = try game.commands.execute(gs, .{ .advance_days = 3 }); // the courier's three days of paperwork
     _ = game.commands.execute(gs, .{ .upgrade_facility = .{ .hq = seat, .kind = .warehouse } }) catch |err| {
-        std.debug.print("upgrade refused: {s}\n", .{@errorName(err)});
+        std.debug.print("upgrade refused: {s}\n", .{game.cli.errorText(err)});
     };
     _ = game.commands.execute(gs, .{ .fabricate = .{ .hq = seat, .part_key = "comp_torso", .quantity = 2 } }) catch |err| {
-        std.debug.print("fabrication refused: {s}\n", .{@errorName(err)});
+        std.debug.print("fabrication refused: {s}\n", .{game.cli.errorText(err)});
     };
     std.debug.print("\nHQ operations queued:\n", .{});
-    printProjects(gs, al);
-    printBays(gs, al);
+    printProjects(gs, al) catch |err| showError(err);
+    printBays(gs, al) catch |err| showError(err);
 
     // Run it month by month until completion (report capped at a year).
     // Turn-based: decisions land in the inbox; the demo answers the first
@@ -219,7 +219,7 @@ fn runDemo(gs: *game.state.GameState, gpa: std.mem.Allocator) !void {
                     ordered += 3;
                 } else |_| {}
             }
-            _ = game.commands.execute(gs, .{ .order_part = .{ .part_key = "provisions", .quantity = 15, .dest = .{ .company = co } } }) catch {};
+            _ = game.commands.execute(gs, .{ .order_part = .{ .part_key = "provisions", .quantity = 15, .dest = .{ .company = co } } }) catch |err| std.debug.print("order part refused: {s}\n", .{game.cli.errorText(err)});
             if (ordered > 0) std.debug.print("        resupply ordered: {d}t munitions + provisions to the field\n", .{ordered});
         }
         std.debug.print("  month {d:>2}: funds {s} ({s}){s}\n", .{
@@ -237,17 +237,17 @@ fn runDemo(gs: *game.state.GameState, gpa: std.mem.Allocator) !void {
     // The tour ended, but the company is still out there. Bring
     // it home (an idle recall is free; a mid-contract recall is a breach).
     std.debug.print("\n--- contract control ---\n", .{});
-    printContracts(gs, al);
-    _ = game.commands.execute(gs, .{ .recall_company = co }) catch |err| std.debug.print("recall refused: {s}\n", .{@errorName(err)});
+    printContracts(gs, al) catch |err| showError(err);
+    _ = game.commands.execute(gs, .{ .recall_company = co }) catch |err| std.debug.print("recall refused: {s}\n", .{game.cli.errorText(err)});
     while (!q.companyAtHome(gs, co)) _ = try game.commands.execute(gs, .{ .advance_days = 5 });
 
     // The rotation arc — come home worn, rest, heal, train.
     std.debug.print("\n--- tour over: readiness on return ---\n", .{});
-    printReadiness(gs, al);
+    printReadiness(gs, al) catch |err| showError(err);
     // The desk on return — assignments, the medbay, and what
     // the checklist would stop you on before the next turn.
-    printLines(al, try q.companyRoster(al, gs, co), "");
-    printLines(al, try q.medbay(al, gs), "");
+    printLines(al, try q.companyRoster(al, gs, co), "") catch |err| showError(err);
+    printLines(al, try q.medbay(al, gs), "") catch |err| showError(err);
     if (printChecklist(gs, al) == 0) std.debug.print("END-TURN CHECKLIST: all clear.\n", .{});
 
     // Send the highest-XP healthy mekwarrior to gunnery school, then rest
@@ -262,13 +262,13 @@ fn runDemo(gs: *game.state.GameState, gpa: std.mem.Allocator) !void {
         if (game.commands.execute(gs, .{ .train = .{ .person = row.id, .skill = .piloting_mek } })) |_| {
             std.debug.print("\n{s} ({d} xp) reports to the training ground.\n", .{ who, row.xp });
         } else |err| {
-            std.debug.print("\ntraining refused for {s}: {s}\n", .{ who, @errorName(err) });
+            std.debug.print("\ntraining refused for {s}: {s}\n", .{ who, game.cli.errorText(err) });
         }
     }
     _ = try game.commands.execute(gs, .{ .advance_days = 60 });
 
     std.debug.print("\n--- after two months of rest and refit ---\n", .{});
-    printReadiness(gs, al);
+    printReadiness(gs, al) catch |err| showError(err);
 
     // Into the lab. Swap the first mek's first weapon for a small
     // laser off the staples shelf — a class-B, like-for-like refit the
@@ -283,22 +283,22 @@ fn runDemo(gs: *game.state.GameState, gpa: std.mem.Allocator) !void {
         const lab = try q.lab(al, gs, lab_uid);
         // The HQ buys the part off its own board — so fund the HQ first
         // (its treasury has been paying for the warehouse and the bays).
-        _ = game.commands.execute(gs, .{ .transfer = .{ .from = .outfit, .to = .{ .hq = seat }, .amount = 3_000_000 } }) catch {};
+        _ = game.commands.execute(gs, .{ .transfer = .{ .from = .outfit, .to = .{ .hq = seat }, .amount = 3_000_000 } }) catch |err| std.debug.print("transfer refused: {s}\n", .{game.cli.errorText(err)});
         _ = try game.commands.execute(gs, .{ .advance_days = 3 });
         if (q.listingIndex(gs, "slas", true)) |i| {
-            _ = game.commands.execute(gs, .{ .buy_listing = i }) catch |err| std.debug.print("buy refused: {s}\n", .{@errorName(err)});
+            _ = game.commands.execute(gs, .{ .buy_listing = i }) catch |err| std.debug.print("buy refused: {s}\n", .{game.cli.errorText(err)});
         }
         if (lab.mounts.len > 0) {
             const m = lab.mounts[0];
-            _ = game.commands.execute(gs, .{ .refit_remove = .{ .unit = lab_uid, .slot_key = m.slot_key } }) catch {};
-            _ = game.commands.execute(gs, .{ .refit_install = .{ .unit = lab_uid, .location = m.location orelse .ra, .part_key = "slas" } }) catch {};
+            _ = game.commands.execute(gs, .{ .refit_remove = .{ .unit = lab_uid, .slot_key = m.slot_key } }) catch |err| std.debug.print("refit remove refused: {s}\n", .{game.cli.errorText(err)});
+            _ = game.commands.execute(gs, .{ .refit_install = .{ .unit = lab_uid, .location = m.location orelse .ra, .part_key = "slas" } }) catch |err| std.debug.print("refit install refused: {s}\n", .{game.cli.errorText(err)});
         }
-        printLab(gs, al, lab_uid);
+        printLab(gs, al, lab_uid) catch |err| showError(err);
         if (game.commands.execute(gs, .{ .refit_commit = lab_uid })) |_| {
             _ = try game.commands.execute(gs, .{ .advance_days = 10 });
             std.debug.print("after the bay:\n", .{});
-            printLab(gs, al, lab_uid);
-        } else |err| std.debug.print("refit refused: {s}\n", .{@errorName(err)});
+            printLab(gs, al, lab_uid) catch |err| showError(err);
+        } else |err| std.debug.print("refit refused: {s}\n", .{game.cli.errorText(err)});
     }
 
     // The beachhead loop. The contract planet is a place the
@@ -315,112 +315,112 @@ fn runDemo(gs: *game.state.GameState, gpa: std.mem.Allocator) !void {
         if (game.commands.execute(gs, .{ .transfer = .{ .from = .outfit, .to = .{ .hq = fb }, .amount = 3_500_000 } })) |_| {
             _ = try game.commands.execute(gs, .{ .link = .{ .a = seat, .b = fb, .level = 1 } });
             _ = try game.commands.execute(gs, .{ .advance_days = 30 }); // the courier arrives
-            _ = game.commands.execute(gs, .{ .upgrade_tier = fb }) catch |err| std.debug.print("tier upgrade refused: {s}\n", .{@errorName(err)});
+            _ = game.commands.execute(gs, .{ .upgrade_tier = fb }) catch |err| std.debug.print("tier upgrade refused: {s}\n", .{game.cli.errorText(err)});
             _ = try game.commands.execute(gs, .{ .advance_days = 95 }); // unstaffed paperwork (21) + 60-day build
             _ = try game.commands.execute(gs, .{ .autostaff = fb }); // a ring needs a back office
             if (game.commands.execute(gs, .{ .new_company_at = .{ .name = "Bravo Company", .hq = fb } })) |_| {
                 std.debug.print("Bravo Company stood up at the new regional HQ.\n", .{});
-            } else |err| std.debug.print("second company refused: {s}\n", .{@errorName(err)});
-        } else |err| std.debug.print("courier refused: {s} — the firebase stays a toehold\n", .{@errorName(err)});
-        printHqs(gs, al);
-        printLines(al, try q.logLines(al, gs, 5, .{ .category = .construction }), "  ");
-    } else |err| std.debug.print("founding refused: {s}\n", .{@errorName(err)});
+            } else |err| std.debug.print("second company refused: {s}\n", .{game.cli.errorText(err)});
+        } else |err| std.debug.print("courier refused: {s} — the firebase stays a toehold\n", .{game.cli.errorText(err)});
+        printHqs(gs, al) catch |err| showError(err);
+        printLines(al, try q.logLines(al, gs, 5, .{ .category = .construction }), "  ") catch |err| showError(err);
+    } else |err| std.debug.print("founding refused: {s}\n", .{game.cli.errorText(err)});
 
     std.debug.print("\nCampaign log (last 12):\n", .{});
-    printLines(al, try q.logLines(al, gs, 12, .all), "  ");
+    printLines(al, try q.logLines(al, gs, 12, .all), "  ") catch |err| showError(err);
 
     // Money lives in places. Books per entity.
     std.debug.print("\n--- treasuries & per-entity books ---\n", .{});
-    printTreasuries(gs, al);
+    printTreasuries(gs, al) catch |err| showError(err);
     const st = try q.status(al, gs);
-    printLines(al, try q.pnlLines(al, gs, 0, st.day, .{ .hq = seat }), "");
-    printLines(al, try q.pnlLines(al, gs, 0, st.day, .{ .company = co }), "");
+    printLines(al, try q.pnlLines(al, gs, 0, st.day, .{ .hq = seat }), "") catch |err| showError(err);
+    printLines(al, try q.pnlLines(al, gs, 0, st.day, .{ .company = co }), "") catch |err| showError(err);
     std.debug.print("Battle log for company {d} only:\n", .{@intFromEnum(co)});
-    printLines(al, try q.logLines(al, gs, 6, .{ .category = .battle }), "  ");
+    printLines(al, try q.logLines(al, gs, 6, .{ .category = .battle }), "  ") catch |err| showError(err);
     std.debug.print("\nStores on return:\n", .{});
-    printSupplies(gs, al);
-    printDemand(gs, al);
+    printSupplies(gs, al) catch |err| showError(err);
+    printDemand(gs, al) catch |err| showError(err);
     std.debug.print("\nHQ after the tour:\n", .{});
-    printProjects(gs, al);
-    printBays(gs, al);
-    printStaff(gs, al);
+    printProjects(gs, al) catch |err| showError(err);
+    printBays(gs, al) catch |err| showError(err);
+    printStaff(gs, al) catch |err| showError(err);
 
     // The hangar after months in the field — quality drift, broken
     // slots, and the spares pipeline.
     std.debug.print("\n{s}\n", .{try q.hangarSummaryLine(al, gs)});
 
     std.debug.print("\n", .{});
-    printLines(al, try q.pnlLines(al, gs, 0, st.day, .all), "");
+    printLines(al, try q.pnlLines(al, gs, 0, st.day, .all), "") catch |err| showError(err);
     std.debug.print("State hash (golden master): {x}\n", .{gs.hash()});
     std.debug.print("Run with `zig build run -- --repl` for the interactive loop.\n", .{});
 }
 
 /// The MekLab view: the same query the client's Lab screen draws.
-fn printLab(gs: *game.state.GameState, al: std.mem.Allocator, uid: game.types.UnitId) void {
-    const view = q.lab(al, gs, uid) catch return;
+fn printLab(gs: *game.state.GameState, al: std.mem.Allocator, uid: game.types.UnitId) !void {
+    const view = try q.lab(al, gs, uid);
     std.debug.print("LAB {s}\n", .{q.stripMarks(al, view.title) catch view.title});
-    printLines(al, view.budget, "  ");
+    printLines(al, view.budget, "  ") catch |err| showError(err);
     std.debug.print("  mounts:\n", .{});
     for (view.mounts) |m| std.debug.print("    {s}\n", .{q.stripMarks(al, m.text) catch m.text});
-    printLines(al, view.plan, "  ");
+    printLines(al, view.plan, "  ") catch |err| showError(err);
     std.debug.print("  RULES: {s}\n", .{if (view.legal) "legal fit." else "ILLEGAL"});
 }
 
 /// Contracts with their win condition and where the companies stand.
-fn printContracts(gs: *game.state.GameState, al: std.mem.Allocator) void {
-    printLines(al, q.contractLines(al, gs) catch return, "");
+fn printContracts(gs: *game.state.GameState, al: std.mem.Allocator) !void {
+    printLines(al, q.contractLines(al, gs) catch return, "") catch |err| showError(err);
 }
 
-fn printHqs(gs: *game.state.GameState, al: std.mem.Allocator) void {
-    for (q.hqList(al, gs) catch return) |row| {
+fn printHqs(gs: *game.state.GameState, al: std.mem.Allocator) !void {
+    for (try q.hqList(al, gs)) |row| {
         std.debug.print("{s}\n", .{row.title_line});
-        printLines(al, q.hqCompanies(al, gs, row.id) catch continue, "    ");
+        printLines(al, q.hqCompanies(al, gs, row.id) catch continue, "    ") catch |err| showError(err);
     }
-    printLines(al, q.hqLinks(al, gs) catch return, "  ");
+    printLines(al, q.hqLinks(al, gs) catch return, "  ") catch |err| showError(err);
 }
 
-fn printOffers(gs: *game.state.GameState, al: std.mem.Allocator) void {
-    const c = q.contracts(al, gs, .none) catch return;
+fn printOffers(gs: *game.state.GameState, al: std.mem.Allocator) !void {
+    const c = try q.contracts(al, gs, .none);
     std.debug.print("Contract board ({d} offers):\n", .{c.board.len});
-    printTable(al, q.board_cols, c.board, "  ");
+    printTable(al, q.board_cols, c.board, "  ") catch |err| showError(err);
     std.debug.print("  (* = beachhead: premium pay, hardship costs, slow resupply · `candidates <offer#>` ranks the companies that could go)\n", .{});
 }
 
-fn printToe(gs: *game.state.GameState, al: std.mem.Allocator) void {
-    const st = q.status(al, gs) catch return;
+fn printToe(gs: *game.state.GameState, al: std.mem.Allocator) !void {
+    const st = try q.status(al, gs);
     _ = st;
-    for (q.toe(al, gs) catch return) |row| std.debug.print("{s}\n", .{q.stripMarks(al, row.text) catch row.text});
-    std.debug.print("{s}\n", .{q.payrollLine(al, gs) catch ""});
+    for (try q.toe(al, gs)) |row| std.debug.print("{s}\n", .{q.stripMarks(al, row.text) catch row.text});
+    std.debug.print("{s}\n", .{try q.payrollLine(al, gs)});
 }
 
 /// The per-company readiness report (ARCH §9.7): the P&L's companion —
 /// profit is meaningless if the force that earned it is spent.
-fn printReadiness(gs: *game.state.GameState, al: std.mem.Allocator) void {
-    const rows = q.readiness(al, gs) catch return;
-    printTable(al, q.readiness_cols, rows, "");
+fn printReadiness(gs: *game.state.GameState, al: std.mem.Allocator) !void {
+    const rows = try q.readiness(al, gs);
+    printTable(al, q.readiness_cols, rows, "") catch |err| showError(err);
     for (rows) |r| {
         const name = q.forceName(al, gs, r.company) catch "—";
         std.debug.print("\n[{d}] {s}\n", .{ @intFromEnum(r.company), q.stripMarks(al, name) catch name });
-        printLines(al, q.readinessLines(al, gs, r.company) catch continue, "  ");
+        printLines(al, q.readinessLines(al, gs, r.company) catch continue, "  ") catch |err| showError(err);
     }
 }
 
 /// The Dragoons rating with its parts.
-fn printRating(gs: *game.state.GameState, al: std.mem.Allocator) void {
-    const r = q.rating(al, gs) catch return;
+fn printRating(gs: *game.state.GameState, al: std.mem.Allocator) !void {
+    const r = try q.rating(al, gs);
     std.debug.print("Dragoons rating {s} ({d})\n", .{ r.letter, r.score });
     for (r.parts) |p| std.debug.print("  {s: <14} {d: >4}   {s}\n", .{ p.name, p.score, p.note });
 }
 
 /// Stocks at every site with tonnage vs. capacity; burn & days-of-supply
 /// for deployed companies: the Supply screen's rows.
-fn printSupplies(gs: *game.state.GameState, al: std.mem.Allocator) void {
-    printLines(al, (q.supply(al, gs) catch return).rows, "");
+fn printSupplies(gs: *game.state.GameState, al: std.mem.Allocator) !void {
+    printLines(al, (try q.supply(al, gs)).rows, "") catch |err| showError(err);
 }
 
 /// Parts needed to fix what's broken: the depot's and the sites' ledgers.
-fn printDemand(gs: *game.state.GameState, al: std.mem.Allocator) void {
-    printLines(al, q.demandLines(al, gs) catch return, "");
+fn printDemand(gs: *game.state.GameState, al: std.mem.Allocator) !void {
+    printLines(al, q.demandLines(al, gs) catch return, "") catch |err| showError(err);
 }
 
 /// The end-turn checklist. Returns how many warnings printed.
@@ -432,17 +432,17 @@ fn printChecklist(gs: *game.state.GameState, al: std.mem.Allocator) usize {
     return d.checklist.len;
 }
 
-fn printBays(gs: *game.state.GameState, al: std.mem.Allocator) void {
-    for (q.hqList(al, gs) catch return) |h| printLines(al, q.bays(al, gs, h.id) catch continue, "");
+fn printBays(gs: *game.state.GameState, al: std.mem.Allocator) !void {
+    for (try q.hqList(al, gs)) |h| printLines(al, q.bays(al, gs, h.id) catch continue, "") catch |err| showError(err);
 }
 
-fn printProjects(gs: *game.state.GameState, al: std.mem.Allocator) void {
-    for (q.hqList(al, gs) catch return) |h| printLines(al, q.projects(al, gs, h.id) catch continue, "");
+fn printProjects(gs: *game.state.GameState, al: std.mem.Allocator) !void {
+    for (try q.hqList(al, gs)) |h| printLines(al, q.projects(al, gs, h.id) catch continue, "") catch |err| showError(err);
 }
 
 /// The back office: posted admins by role.
-fn printStaff(gs: *game.state.GameState, al: std.mem.Allocator) void {
-    for (q.hqList(al, gs) catch return) |h| {
+fn printStaff(gs: *game.state.GameState, al: std.mem.Allocator) !void {
+    for (try q.hqList(al, gs)) |h| {
         std.debug.print("hq:{d} {s} back office:\n", .{ @intFromEnum(h.id), h.name.terminal(al) catch "?" });
         for (q.backOffice(al, gs, h.id) catch continue) |row| {
             std.debug.print("    {s:<16} x{d:<3} of {d} best skill {d}\n", .{ @tagName(row.role), row.have, row.need, row.best_skill });
@@ -450,14 +450,14 @@ fn printStaff(gs: *game.state.GameState, al: std.mem.Allocator) void {
     }
 }
 
-fn printTreasuries(gs: *game.state.GameState, al: std.mem.Allocator) void {
-    const led = q.ledger(al, gs, .outfit, 31, 0) catch return;
-    printTable(al, q.treasury_cols, led.treasuries, "");
-    printLines(al, led.extras, "");
+fn printTreasuries(gs: *game.state.GameState, al: std.mem.Allocator) !void {
+    const led = try q.ledger(al, gs, .outfit, 31, 0);
+    printTable(al, q.treasury_cols, led.treasuries, "") catch |err| showError(err);
+    printLines(al, led.extras, "") catch |err| showError(err);
 }
 
-fn printStatus(gs: *game.state.GameState, al: std.mem.Allocator) void {
-    const st = q.status(al, gs) catch return;
+fn printStatus(gs: *game.state.GameState, al: std.mem.Allocator) !void {
+    const st = try q.status(al, gs);
     std.debug.print("{s} (day {d}) | funds {s} | rep {d} | people {d} | hulls {d} | inbox {d} | checklist {d} ({d} blocking)\n", .{
         st.date, st.day, st.funds, st.reputation, st.people, st.hulls, st.inbox, st.checklist, st.blocking,
     });
@@ -466,7 +466,7 @@ fn printStatus(gs: *game.state.GameState, al: std.mem.Allocator) void {
 fn runRepl(gs: *game.state.GameState, io: std.Io, gpa: std.mem.Allocator, store_path: [:0]const u8) !void {
     // The save store: one file, many campaigns.
     var lobby = game.lobby.Lobby.open(store_path) catch |err| {
-        std.debug.print("could not open save store '{s}': {s}\n", .{ store_path, @errorName(err) });
+        std.debug.print("could not open save store '{s}': {s}\n", .{ store_path, game.cli.errorText(err) });
         return err;
     };
     defer lobby.close();
@@ -474,7 +474,7 @@ fn runRepl(gs: *game.state.GameState, io: std.Io, gpa: std.mem.Allocator, store_
     {
         var arena = std.heap.ArenaAllocator.init(gpa);
         defer arena.deinit();
-        printCampaigns(lobby, arena.allocator());
+        printCampaigns(lobby, arena.allocator()) catch |err| showError(err);
         std.debug.print(
             \\=== IRON LEDGER — command console ===
             \\          save | campaigns | load <id> | delete <id> | new (fresh campaign) | quit
@@ -516,7 +516,7 @@ fn runRepl(gs: *game.state.GameState, io: std.Io, gpa: std.mem.Allocator, store_
             const st = try q.status(al, gs);
             std.debug.print("saved campaign \"{s}\" at day {d}\n", .{ st.outfit_name.terminal(al) catch "?", st.day });
         } else if (std.mem.eql(u8, verb, "campaigns")) {
-            printCampaigns(lobby, al);
+            printCampaigns(lobby, al) catch |err| showError(err);
         } else if (std.mem.eql(u8, verb, "load")) {
             const id = std.fmt.parseInt(i64, tokens.next() orelse "", 10) catch {
                 std.debug.print("usage: load <campaign id>  (see `campaigns`)\n", .{});
@@ -529,18 +529,18 @@ fn runRepl(gs: *game.state.GameState, io: std.Io, gpa: std.mem.Allocator, store_
             game.lobby.discard(gs);
             gs.* = loaded;
             std.debug.print("loaded campaign [{d}] \"{s}\"\n", .{ id, try (try q.status(al, gs)).outfit_name.terminal(al) });
-            printStatus(gs, al);
+            printStatus(gs, al) catch |err| showError(err);
         } else if (std.mem.eql(u8, verb, "delete")) {
             const id = std.fmt.parseInt(i64, tokens.next() orelse "", 10) catch {
                 std.debug.print("usage: delete <campaign id>\n", .{});
                 continue;
             };
             lobby.deleteCampaign(id, gs) catch |err| {
-                std.debug.print("delete failed: {s}\n", .{@errorName(err)});
+                std.debug.print("delete failed: {s}\n", .{game.cli.errorText(err)});
                 continue;
             };
             std.debug.print("deleted campaign [{d}]\n", .{id});
-            printCampaigns(lobby, al);
+            printCampaigns(lobby, al) catch |err| showError(err);
         } else if (std.mem.eql(u8, verb, "new")) {
             const st = try q.status(al, gs);
             const seed: u64 = @as(u64, st.day) + st.people + 1;
@@ -548,49 +548,49 @@ fn runRepl(gs: *game.state.GameState, io: std.Io, gpa: std.mem.Allocator, store_
             gs.* = game.state.GameState.init(gpa, .{ .seed = 3025 + seed });
             std.debug.print("fresh campaign — `start <faction> <profession> <name>` to begin\n", .{});
         } else if (std.mem.eql(u8, verb, "status")) {
-            printStatus(gs, al);
+            printStatus(gs, al) catch |err| showError(err);
         } else if (std.mem.eql(u8, verb, "roster")) {
             const site: ?game.types.Site = if (tokens.next()) |tok| (game.cli.parseSite(tok) catch null) else null;
             if (site) |s| switch (s) {
-                .company => |id| printLines(al, try q.companyRoster(al, gs, id), ""),
-                .hq => |id| printLines(al, try q.hqRoster(al, gs, id), ""),
-                .outfit => printTable(al, q.people_cols, (try q.people(al, gs, .all)).rows, ""),
-            } else printTable(al, q.people_cols, (try q.people(al, gs, .all)).rows, "");
+                .company => |id| printLines(al, try q.companyRoster(al, gs, id), "") catch |err| showError(err),
+                .hq => |id| printLines(al, try q.hqRoster(al, gs, id), "") catch |err| showError(err),
+                .outfit => printTable(al, q.people_cols, (try q.people(al, gs, .all)).rows, "") catch |err| showError(err),
+            } else printTable(al, q.people_cols, (try q.people(al, gs, .all)).rows, "") catch |err| showError(err);
         } else if (std.mem.eql(u8, verb, "medbay")) {
-            printLines(al, try q.medbay(al, gs), "");
+            printLines(al, try q.medbay(al, gs), "") catch |err| showError(err);
         } else if (std.mem.eql(u8, verb, "hall")) {
             const filter = if (tokens.next()) |t| std.meta.stringToEnum(q.HallFilter, t) orelse {
                 std.debug.print("usage: hall [all|combat|techs|medical|admin_command|admin_logistics|admin_transport|admin_hr|admin_finance|other]\n", .{});
                 continue;
             } else q.HallFilter.all;
             const lines = try q.hallAll(al, gs, filter);
-            if (lines.len == 0) std.debug.print("no candidates on any board.\n", .{}) else printLines(al, lines, "");
+            if (lines.len == 0) std.debug.print("no candidates on any board.\n", .{}) else printLines(al, lines, "") catch |err| showError(err);
         } else if (std.mem.eql(u8, verb, "checklist")) {
             if (printChecklist(gs, al) == 0) std.debug.print("all clear.\n", .{});
         } else if (std.mem.eql(u8, verb, "toe")) {
-            printToe(gs, al);
+            printToe(gs, al) catch |err| showError(err);
         } else if (std.mem.eql(u8, verb, "hqs")) {
-            printHqs(gs, al);
+            printHqs(gs, al) catch |err| showError(err);
         } else if (std.mem.eql(u8, verb, "offers")) {
-            printOffers(gs, al);
+            printOffers(gs, al) catch |err| showError(err);
         } else if (std.mem.eql(u8, verb, "candidates")) {
             const idx = std.fmt.parseInt(usize, tokens.next() orelse "0", 10) catch 0;
-            printTable(al, q.candidates_cols, try q.offerCandidates(al, gs, idx), "");
+            printTable(al, q.candidates_cols, try q.offerCandidates(al, gs, idx), "") catch |err| showError(err);
         } else if (std.mem.eql(u8, verb, "readiness")) {
-            printReadiness(gs, al);
+            printReadiness(gs, al) catch |err| showError(err);
         } else if (std.mem.eql(u8, verb, "rating")) {
-            printRating(gs, al);
+            printRating(gs, al) catch |err| showError(err);
         } else if (std.mem.eql(u8, verb, "summary")) {
-            printLines(al, try q.summary(al, gs), "");
+            printLines(al, try q.summary(al, gs), "") catch |err| showError(err);
         } else if (std.mem.eql(u8, verb, "inbox")) {
-            printLines(al, try q.inboxLines(al, gs), "");
+            printLines(al, try q.inboxLines(al, gs), "") catch |err| showError(err);
         } else if (std.mem.eql(u8, verb, "battles")) {
             // battles           — the engagements still on record
             // battles <id>      — that one's after-action, in full
             if (tokens.next()) |tok| {
                 const id: game.types.BattleId = @enumFromInt(std.fmt.parseInt(u32, tok, 10) catch 0);
                 if (try q.battleReport(al, gs, id)) |lines| {
-                    printLines(al, lines, "");
+                    printLines(al, lines, "") catch |err| showError(err);
                 } else {
                     std.debug.print("no engagement on record with that id — `battles` lists them\n", .{});
                 }
@@ -600,7 +600,7 @@ fn runRepl(gs: *game.state.GameState, io: std.Io, gpa: std.mem.Allocator, store_
                     std.debug.print("no engagements on record yet.\n", .{});
                 } else {
                     std.debug.print("AFTER-ACTION REPORTS ({d} on record, newest first — `battles <id>` reads one):\n", .{rows.len});
-                    printTable(al, q.battle_cols, rows, "  ");
+                    printTable(al, q.battle_cols, rows, "  ") catch |err| showError(err);
                 }
             }
         } else if (std.mem.eql(u8, verb, "log")) {
@@ -626,11 +626,11 @@ fn runRepl(gs: *game.state.GameState, io: std.Io, gpa: std.mem.Allocator, store_
                     std.debug.print("usage: log [n] [battle|decision|delivery|...|co:<id>|hq:<id>|contract:<id>]\n", .{});
                 }
             }
-            printLines(al, try q.logLines(al, gs, n, filter), "  ");
+            printLines(al, try q.logLines(al, gs, n, filter), "  ") catch |err| showError(err);
         } else if (std.mem.eql(u8, verb, "sop") and tokens.peek() == null) {
-            printLines(al, try q.standingOrders(al, gs), "");
+            printLines(al, try q.standingOrders(al, gs), "") catch |err| showError(err);
         } else if (std.mem.eql(u8, verb, "treasuries")) {
-            printTreasuries(gs, al);
+            printTreasuries(gs, al) catch |err| showError(err);
         } else if (std.mem.eql(u8, verb, "ledger")) {
             // ledger [co:<id>|hq:<id>] [n]
             var filter: game.finance.EntityFilter = .all;
@@ -644,41 +644,41 @@ fn runRepl(gs: *game.state.GameState, io: std.Io, gpa: std.mem.Allocator, store_
                     };
                 } else |_| n = std.fmt.parseInt(usize, tok, 10) catch n;
             }
-            printLines(al, try q.ledgerLines(al, gs, filter, n), "  ");
+            printLines(al, try q.ledgerLines(al, gs, filter, n), "  ") catch |err| showError(err);
         } else if (std.mem.eql(u8, verb, "units")) {
             const rows = try q.hangar(al, gs);
             std.debug.print("hangar ({d} hulls, worst value first — bill per point of contribution):\n", .{rows.len});
-            printTable(al, q.hangar_cols, rows, "  ");
+            printTable(al, q.hangar_cols, rows, "  ") catch |err| showError(err);
         } else if (std.mem.eql(u8, verb, "parts")) {
             std.debug.print("spares:\n", .{});
-            printLines(al, try q.spareLines(al, gs), "  ");
+            printLines(al, try q.spareLines(al, gs), "  ") catch |err| showError(err);
         } else if (std.mem.eql(u8, verb, "orders")) {
-            printLines(al, try q.orders(al, gs), "  ");
+            printLines(al, try q.orders(al, gs), "  ") catch |err| showError(err);
         } else if (std.mem.eql(u8, verb, "lab")) {
             const uid = std.fmt.parseInt(u32, tokens.next() orelse "", 10) catch 0;
             if (uid == 0) {
                 std.debug.print("usage: lab <unit id>\n", .{});
                 continue;
             }
-            printLab(gs, al, @enumFromInt(uid));
+            printLab(gs, al, @enumFromInt(uid)) catch |err| showError(err);
         } else if (std.mem.eql(u8, verb, "contracts")) {
-            printContracts(gs, al);
+            printContracts(gs, al) catch |err| showError(err);
             std.debug.print("standing:\n", .{});
-            printLines(al, try q.standings(al, gs), "");
+            printLines(al, try q.standings(al, gs), "") catch |err| showError(err);
         } else if (std.mem.eql(u8, verb, "bays")) {
-            printBays(gs, al);
+            printBays(gs, al) catch |err| showError(err);
         } else if (std.mem.eql(u8, verb, "projects")) {
-            printProjects(gs, al);
+            printProjects(gs, al) catch |err| showError(err);
         } else if (std.mem.eql(u8, verb, "staff")) {
-            printStaff(gs, al);
+            printStaff(gs, al) catch |err| showError(err);
         } else if (std.mem.eql(u8, verb, "supplies")) {
-            printSupplies(gs, al);
+            printSupplies(gs, al) catch |err| showError(err);
         } else if (std.mem.eql(u8, verb, "demand")) {
-            printDemand(gs, al);
+            printDemand(gs, al) catch |err| showError(err);
         } else if (std.mem.eql(u8, verb, "shop")) {
             const lines = try q.listings(al, gs);
             std.debug.print("site market ({d} listings):\n", .{lines.len});
-            printLines(al, lines, "  ");
+            printLines(al, lines, "  ") catch |err| showError(err);
         } else if (std.mem.eql(u8, verb, "pnl")) {
             // pnl [co:<id>|hq:<id>] — last 31 days for the outfit or one entity.
             const st = try q.status(al, gs);
@@ -693,7 +693,7 @@ fn runRepl(gs: *game.state.GameState, io: std.Io, gpa: std.mem.Allocator, store_
                     };
                 } else |_| {}
             }
-            printLines(al, try q.pnlLines(al, gs, from, st.day, filter), "");
+            printLines(al, try q.pnlLines(al, gs, from, st.day, filter), "") catch |err| showError(err);
         } else if (std.mem.eql(u8, verb, "day")) {
             // day [n] [force] — the end-turn checklist gates the advance:
             // fix it, or `day force` to proceed regardless.
@@ -715,14 +715,14 @@ fn runRepl(gs: *game.state.GameState, io: std.Io, gpa: std.mem.Allocator, store_
             };
             std.debug.print("advanced {d} day(s)\n", .{r.days_advanced});
             if (r.contact != .none) std.debug.print("stopped for the contact warning: {s}\n", .{try q.contactWarning(al, gs, r.contact)});
-            printStatus(gs, al);
+            printStatus(gs, al) catch |err| showError(err);
         } else if (std.mem.eql(u8, verb, "manning")) {
             const site = game.cli.parseSite(tokens.next() orelse "") catch null;
             if (site == null or site.? != .company) {
                 std.debug.print("usage: manning co:<id>\n", .{});
                 continue;
             }
-            printTable(al, q.manning_cols, try q.manning(al, gs, site.?.company), "");
+            printTable(al, q.manning_cols, try q.manning(al, gs, site.?.company), "") catch |err| showError(err);
         } else if (std.mem.eql(u8, verb, "briefing")) {
             const id = std.fmt.parseInt(u32, tokens.next() orelse "", 10) catch {
                 std.debug.print("usage: briefing <contract id>\n", .{});
@@ -732,13 +732,13 @@ fn runRepl(gs: *game.state.GameState, io: std.Io, gpa: std.mem.Allocator, store_
                 std.debug.print("{s}\n", .{game.cli.errorText(error.NoContact)});
                 continue;
             };
-            printBattleOrders(al, view);
+            printBattleOrders(al, view) catch |err| showError(err);
         } else if (std.mem.eql(u8, verb, "help") or std.mem.eql(u8, verb, "?")) {
             for (game.cli.verbs) |v| std.debug.print("  {s}\n", .{game.cli.usage(v) orelse v});
         } else {
             // Every command verb goes through the parser both frontends share.
             const parsed = game.cli.parseCommand(verb, &tokens) catch |err| {
-                std.debug.print("{s} — usage: {s}\n", .{ @errorName(err), game.cli.usage(verb) orelse verb });
+                std.debug.print("{s} — usage: {s}\n", .{ game.cli.errorText(err), game.cli.usage(verb) orelse verb });
                 continue;
             };
             const cmd = parsed orelse {
@@ -746,11 +746,11 @@ fn runRepl(gs: *game.state.GameState, io: std.Io, gpa: std.mem.Allocator, store_
                 continue;
             };
             const r = game.commands.execute(gs, cmd) catch |err| {
-                std.debug.print("error: {s} — {s}\n", .{ @errorName(err), game.cli.errorText(err) });
-                if (err == error.IllegalFit) if (refitUnit(cmd)) |u| printLab(gs, al, u);
+                std.debug.print("refused: {s}\n", .{game.cli.errorText(err)});
+                if (err == error.IllegalFit) if (refitUnit(cmd)) |u| printLab(gs, al, u) catch |print_err| showError(print_err);
                 continue;
             };
-            printResult(gs, al, cmd, r);
+            printResult(gs, al, cmd, r) catch |err| showError(err);
         }
     }
 }
@@ -768,19 +768,19 @@ fn refitUnit(cmd: Command) ?game.types.UnitId {
 /// What the REPL says after a command lands: ids created, hires, hulls
 /// bought, and the screen the verb naturally leads to.
 /// The battle orders as console lines (the TUI's box reads the same query).
-fn printBattleOrders(al: std.mem.Allocator, view: q.BattleOrders) void {
+fn printBattleOrders(al: std.mem.Allocator, view: q.BattleOrders) !void {
     std.debug.print("{s}{s}\n", .{ q.stripMarks(al, view.title) catch view.title, if (view.confirmed) " — orders given" else "" });
-    printLines(al, view.situation, "  ");
+    printLines(al, view.situation, "  ") catch |err| showError(err);
     std.debug.print("  ROE {s}{s}\n", .{ @tagName(view.roe), if (view.roe_locked) " (set by integrated command)" else "" });
     for (view.lances) |l| std.debug.print("  lance {d}: {s}\n", .{ @intFromEnum(l.force), q.stripMarks(al, l.text) catch l.text });
     if (view.rush.len > 0) std.debug.print("  emergency resupply: {s}\n", .{q.stripMarks(al, view.rush) catch view.rush});
 }
 
-fn printResult(gs: *game.state.GameState, al: std.mem.Allocator, cmd: Command, r: game.commands.Result) void {
+fn printResult(gs: *game.state.GameState, al: std.mem.Allocator, cmd: Command, r: game.commands.Result) !void {
     switch (cmd) {
         .create_commander => {
-            printHqs(gs, al);
-            printOffers(gs, al);
+            printHqs(gs, al) catch |err| showError(err);
+            printOffers(gs, al) catch |err| showError(err);
         },
         .accept_contract => std.debug.print("{s}\n", .{(q.acceptedLine(al, gs) catch null) orelse "under contract"}),
         .new_company, .new_company_at, .raise_company, .new_lance, .raise_air_company => std.debug.print("created force [{d}] — see `toe`\n", .{@intFromEnum(r.created_force)}),
@@ -788,11 +788,11 @@ fn printResult(gs: *game.state.GameState, al: std.mem.Allocator, cmd: Command, r
         .crew_company => std.debug.print("{d} hired to fill the manning table, {d} lines still open (no candidates)\n", .{ r.hired_count, r.still_open }),
         .buy_hull_for => if (r.unit == .none) std.debug.print("{s}\n", .{game.cli.hull_fraud_text}) else std.debug.print("hull #{d}, {d} days out\n", .{ @intFromEnum(r.unit), r.eta_days }),
         .trim_stock => std.debug.print("{d} tons sent home\n", .{r.tons_moved}),
-        .refit_install, .refit_remove, .refit_clear, .refit_commit => printLab(gs, al, refitUnit(cmd).?),
-        .complete_contract, .recall_company => printContracts(gs, al),
-        .found_hq, .link, .assign_company => printHqs(gs, al),
-        .auto_assign => |co| printLines(al, q.companyRoster(al, gs, co) catch &.{}, ""),
-        .autostaff => |hq| printLines(al, q.hqRoster(al, gs, hq) catch &.{}, ""),
+        .refit_install, .refit_remove, .refit_clear, .refit_commit => printLab(gs, al, refitUnit(cmd).?) catch |err| showError(err),
+        .complete_contract, .recall_company => printContracts(gs, al) catch |err| showError(err),
+        .found_hq, .link, .assign_company => printHqs(gs, al) catch |err| showError(err),
+        .auto_assign => |co| printLines(al, q.companyRoster(al, gs, co) catch &.{}, "") catch |err| showError(err),
+        .autostaff => |hq| printLines(al, q.hqRoster(al, gs, hq) catch &.{}, "") catch |err| showError(err),
         .order_part => std.debug.print("{s}\n", .{(q.lastOrderLine(al, gs) catch null) orelse "ordered"}),
         .take_loan => |l| std.debug.print("drew {d} c-bills over {d} months\n", .{ l.principal, l.term_months }),
         .strip_unit => std.debug.print("{s}\n", .{q.stripMarks(al, (q.lastLogLine(al, gs) catch null) orelse "stripped") catch "stripped"}),
@@ -800,4 +800,9 @@ fn printResult(gs: *game.state.GameState, al: std.mem.Allocator, cmd: Command, r
         .emergency_resupply => std.debug.print("emergency resupply: {d}t delivered to the field stores\n", .{r.tons_moved}),
         else => std.debug.print("done.\n", .{}),
     }
+}
+
+/// A REPL view that could not be printed says why instead of stopping short.
+fn showError(err: anyerror) void {
+    std.debug.print("could not show that: {s}\n", .{game.cli.errorText(err)});
 }
