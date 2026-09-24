@@ -32,10 +32,6 @@ Every Stage 12 feature (12, 12B–12G) has shipped.
 
 # Part 2 — Code quality
 
-## D12. TUI structure (contract rules 18-25)
-
-- [ ] Key tables for the modals and dialogs (confirm dialogs as generic confirm / cancel actions, with the verb from the dialog), and the welcome and wizard footers: the same `keys.Binding` mechanism, so no modal title or footer spells out a key by hand.
-
 ## D13. Tests and CI (contract rules 37-40)
 
 - [ ] Still uncovered by the smoke: the GAME OVER modal (a fresh campaign starts solvent, so reaching it needs a saved campaign already past all credit as a test fixture; bankruptcy itself stays terminal by design), the exact 120-column layout boundary, and the refusal branch of each confirm once run (they open and close only).
@@ -108,6 +104,7 @@ Contract deliverables closed before this list merged, all from the 2026-09-22 co
 - D22-6 `Store.save` is a sequence of encoders, audit #20: the 484-line function is 39 lines (the transaction, `saveCampaignRow`, one `save<Table>` per table, COMMIT, then `campaign_id`); `loadBattleReport` reads its hit, ammo and salvage rows through `loadReportHits`, `loadReportAmmo` and `loadReportSalvage`; no function in store.zig passes 83 lines; round trips, the golden master and a real save hold. D22 is done
 - D12 wizard steps: `drawWizard` draws the title bar and dispatches to `drawWizardCommander`, `drawWizardOutfit`, `drawWizardCompany` and `drawWizardReview`, one per step
 - D12 key tables for the game screens (rule 22): `src/tui/keys.zig` maps keys to semantic actions with every word shown about them (label, group, pane scope, title pane, help); one global table (screens, panes, cursor, command line, end turn, music, help, welcome) and one per screen, whose `handle` switches on the action; the footer, pane titles, help modal key section and the `docs/tui.md` key block (`game --keys-markdown`, compared exactly by a test) are generated from them; tests reject an unbound action, a key bound twice in one pane, and a screen binding that shadows a global key. Drift fixed on the way: help said F1-F8 for ten screens, HQ help said `h hire`, the People title offered `?` (global help) for the previous filter, and Forces `M` (manning) never fired under global `M` (music) and is gone (`r` cycles to MANNING)
+- D12 key tables for the modals, welcome and wizard (rule 22): every modal (lists, sheets, the raise flow, soundtrack, decision, contract log, after-action, emblem editor, number form, battle orders and settings, end turn, leave, game over, confirm, text prompts), the welcome screen and each wizard step resolve keys through a table and switch on actions; `keys.Match.text` declares typed text as a fallback (a focused text field takes every character); confirm dialogs share one table (y / s / Esc) and name their verbs; every title, footer, button row and hint is generated (`keys.title`, `keyHint`, `listTitle`, `formTitle`), and the docs key reference lists all 23 tables. Found on the way: the after-action sheet's "[←/→] columns" hint was false (now it scrolls), and a raise-crews hint named other screens' keys
 
 ---
 

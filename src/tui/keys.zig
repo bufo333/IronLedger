@@ -14,12 +14,15 @@ pub const Key = term.Key;
 /// Footer order, everywhere: navigate | act | money · misc.
 pub const Group = enum { navigate, act, money, misc };
 
-/// What a binding answers to: one key, a run of characters, or a run of
-/// function keys. A run hands its handler the offset of the key pressed.
+/// What a binding answers to: one key, a run of characters, a run of
+/// function keys, or typed text (any printable character no other binding
+/// claims). A run hands its handler the offset of the key pressed; a text
+/// handler reads the character from the key itself.
 pub const Match = union(enum) {
     key: Key,
     chars: struct { u21, u21 },
     fkeys: struct { u8, u8 },
+    text,
 
     pub fn char(c: u21) Match {
         return .{ .key = .{ .char = c } };
@@ -37,11 +40,17 @@ pub const Match = union(enum) {
                 .f => |n| if (n >= r[0] and n <= r[1]) n - r[0] else null,
                 else => null,
             },
+            .text => return switch (k) {
+                .char => |c| if (c >= 0x20 and c != 0x7f) 0 else null,
+                else => null,
+            },
         }
     }
 
     /// True when two matches share any key.
     pub fn overlaps(a: Match, b: Match) bool {
+        // Text is the fallback: it gives way to every other binding.
+        if (a == .text or b == .text) return a == .text and b == .text;
         return switch (a) {
             .key => |k| b.offset(k) != null,
             .chars => |r| blk: {
@@ -54,6 +63,7 @@ pub const Match = union(enum) {
                 while (n <= r[1]) : (n += 1) if (b.offset(.{ .f = n }) != null) break :blk true;
                 break :blk false;
             },
+            .text => unreachable,
         };
     }
 };
@@ -94,17 +104,20 @@ pub fn Hit(comptime Action: type) type {
     return struct { action: Action, offset: u8 };
 }
 
-/// The action `k` means with pane `focus` focused. A binding for that
-/// pane wins over one for every pane.
+/// The action `k` means with pane `focus` focused, in this order: the
+/// pane's own key, typed text in that pane, an every-pane key, typed text
+/// anywhere. So a text field takes every character while it has focus.
 pub fn lookup(comptime Action: type, bindings: []const Binding(Action), focus: u8, k: Key) ?Hit(Action) {
-    var any: ?Hit(Action) = null;
+    var found: [4]?Hit(Action) = .{ null, null, null, null };
     for (bindings) |b| {
         const off = b.match.offset(k) orelse continue;
-        if (b.pane) |p| {
-            if (p == focus) return .{ .action = b.action, .offset = off };
-        } else if (any == null) any = .{ .action = b.action, .offset = off };
+        const in_pane = if (b.pane) |p| p == focus else false;
+        if (b.pane != null and !in_pane) continue;
+        const rank: usize = (if (b.pane == null) @as(usize, 2) else 0) + @intFromBool(b.match == .text);
+        if (found[rank] == null) found[rank] = .{ .action = b.action, .offset = off };
     }
-    return any;
+    for (found) |f| if (f) |hit| return hit;
+    return null;
 }
 
 /// A binding stripped of its action type, for the text generators and the
@@ -144,6 +157,7 @@ pub fn keyText(buf: []u8, e: Entry) []const u8 {
         .key => |k| keyName(buf, k),
         .chars => |r| std.fmt.bufPrint(buf, "{u}-{u}", .{ r[0], r[1] }) catch "?",
         .fkeys => |r| std.fmt.bufPrint(buf, "F{d}-F{d}", .{ r[0], r[1] }) catch "?",
+        .text => "type",
     };
 }
 
@@ -196,6 +210,37 @@ pub fn paneTitle(alloc: std.mem.Allocator, list: []const Entry, pane: u8) ![]con
         if ((e.title orelse e.pane) != pane or !e.show_footer) continue;
         if (out.items.len > 0) try out.appendSlice(alloc, "  ");
         var buf: [16]u8 = undefined;
+        try out.print(alloc, "[{s}] {s}", .{ keyText(&buf, e), e.label });
+    }
+    return out.toOwnedSlice(alloc);
+}
+
+/// How the first binding for `action` is written, for a hint whose verb
+/// the caller supplies ("[Enter] choose").
+pub fn keyFor(comptime Action: type, buf: []u8, bindings: []const Binding(Action), action: Action) []const u8 {
+    for (bindings) |b| if (b.action == action) return keyText(buf, .{
+        .match = b.match,
+        .label = b.label,
+        .group = b.group,
+        .pane = b.pane,
+        .title = b.title,
+        .shown = b.shown,
+        .help = b.help,
+        .show_footer = b.show_footer,
+        .show_help = b.show_help,
+    });
+    return "?";
+}
+
+/// A modal title: its name, then `[key] label` for each binding shown
+/// (an empty name gives just the keys, for a hint line).
+pub fn title(alloc: std.mem.Allocator, name: []const u8, list: []const Entry) ![]const u8 {
+    var out: std.ArrayListUnmanaged(u8) = .empty;
+    try out.appendSlice(alloc, name);
+    for (list) |e| {
+        if (!e.show_footer) continue;
+        var buf: [16]u8 = undefined;
+        if (out.items.len > 0) try out.appendSlice(alloc, " · ");
         try out.print(alloc, "[{s}] {s}", .{ keyText(&buf, e), e.label });
     }
     return out.toOwnedSlice(alloc);
@@ -267,6 +312,28 @@ test "an unbound action or a doubled key is refused" {
         .{ .match = .{ .chars = .{ 'v', 'z' } }, .action = .b, .label = "b", .group = .act },
     };
     try std.testing.expectError(error.DuplicateBinding, expectWellFormed(R, &doubled));
+}
+
+test "a focused text field takes every character, even one bound elsewhere" {
+    const R = enum { down, typed };
+    const b = [_]Binding(R){
+        .{ .match = Match.char('j'), .action = .down, .label = "down", .group = .navigate },
+        .{ .match = .text, .action = .typed, .label = "type", .group = .act, .pane = 0 },
+    };
+    try std.testing.expectEqual(R.typed, lookup(R, &b, 0, .{ .char = 'j' }).?.action);
+    try std.testing.expectEqual(R.down, lookup(R, &b, 1, .{ .char = 'j' }).?.action);
+}
+
+test "typed text is the fallback: a named key wins, any other character types" {
+    const R = enum { save, typed };
+    const b = [_]Binding(R){
+        .{ .match = .text, .action = .typed, .label = "type", .group = .act },
+        .{ .match = Match.char('u'), .action = .save, .label = "undo", .group = .act },
+    };
+    try expectWellFormed(R, &b);
+    try std.testing.expectEqual(R.save, lookup(R, &b, 0, .{ .char = 'u' }).?.action);
+    try std.testing.expectEqual(R.typed, lookup(R, &b, 0, .{ .char = 'x' }).?.action);
+    try std.testing.expect(lookup(R, &b, 0, .enter) == null);
 }
 
 test "the footer groups in order and a pane title lists that pane's keys" {

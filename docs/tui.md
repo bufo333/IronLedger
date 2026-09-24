@@ -283,6 +283,222 @@ titles and the help modal come from the same tables.
 | `K` | catalog | keep the catalogue part under the cursor stocked at this HQ |
 | `x` | keep stocked | remove the keep-stocked line under the cursor |
 
+### Welcome
+
+| Key | Does |
+|---|---|
+| `Tab` | players / campaigns |
+| `j/k` | choose |
+| `Enter` | campaigns |
+| `Enter` | continue |
+| `n` | new campaign |
+| `d` | delete campaign |
+| `p` | new player |
+| `D` | delete player |
+| `s` | settings |
+| `M` | music on/off |
+| `?` | help |
+| `q` | quit |
+
+### New campaign · commander
+
+| Key | Does |
+|---|---|
+| `Tab` | next field |
+| `j/k` | choose |
+| `type` | type the name |
+| `Backspace` | erase |
+| `Enter` | next step |
+| `Esc` | back to welcome |
+
+### New campaign · outfit and emblem
+
+| Key | Does |
+|---|---|
+| `Tab` | next field |
+| `h` | presets |
+| `l` | import a picture |
+| `j/k` | choose |
+| `type` | type the outfit's name |
+| `type` | type the company's name |
+| `Backspace` | erase |
+| `Enter` | next step |
+| `Esc` | back |
+
+### New campaign · company and back office
+
+| Key | Does |
+|---|---|
+| `r` | reroll (new seed) |
+| `Tab` | company / back office |
+| `j/k` | row |
+| `-/+` | adjust headcount |
+| `Enter` | next step |
+| `Esc` | back |
+
+### New campaign · review
+
+| Key | Does |
+|---|---|
+| `Enter` | begin campaign |
+| `1-3` | back to a step |
+| `Esc` | discard |
+
+### Lists (pick a company, a part, a seat, …)
+
+| Key | Does |
+|---|---|
+| `j/k ↑/↓` | row |
+| `PgUp/PgDn` | page |
+| `Home` | top |
+| `End` | end |
+| `←/→` | columns |
+| `Enter` | choose |
+| `Esc` | cancel |
+
+### Sheets (hull, record, help, summary, …)
+
+| Key | Does |
+|---|---|
+| `←/→` | columns |
+| `Esc` | close |
+| `type` | any other key closes |
+
+### Raise a company · hulls
+
+| Key | Does |
+|---|---|
+| `[ ]` | lance |
+| `b` | take the hull under the cursor (Enter does the same) |
+| `p` | pass on a board listing |
+| `n` | support train |
+
+### Raise a company · support train
+
+| Key | Does |
+|---|---|
+| `b` | buy a support hull (Enter does the same) |
+| `n` | crews |
+
+### Raise a company · crews
+
+| Key | Does |
+|---|---|
+| `a` | crew from the halls |
+
+### Soundtrack
+
+| Key | Does |
+|---|---|
+| `m` | music on/off |
+| `< >` | previous / next track |
+| `+ -` | louder / quieter |
+| `q` | close |
+
+### Decision
+
+| Key | Does |
+|---|---|
+| `1-9` | choose |
+
+### Contract log
+
+| Key | Does |
+|---|---|
+| `g` | start |
+| `G` | end |
+| `q` | close |
+
+### After-action report
+
+| Key | Does |
+|---|---|
+| `←/→` | columns |
+| `Esc` | read |
+
+### Emblem editor
+
+| Key | Does |
+|---|---|
+| `arrows` | move |
+| `Backspace` | erase |
+| `u` | undo |
+| `type` | paint the cell with the character typed |
+| `Enter` | save as the outfit's crest |
+| `Esc` | cancel |
+
+### Number form
+
+| Key | Does |
+|---|---|
+| `Tab j/k` | field |
+| `+ -` | step |
+| `0-9` | type |
+| `Backspace` | erase |
+| `Enter` | finish |
+| `Esc` | cancel |
+
+### Battle orders and settings
+
+| Key | Does |
+|---|---|
+| `j/k` | row |
+| `← →` | change |
+| `Enter` | act |
+| `Esc` | close |
+
+### Settings shortcuts
+
+| Key | Does |
+|---|---|
+| `m` | music |
+| `+ -` | volume |
+| `< >` | track |
+| `t` | soundtracks |
+| `d` | difficulty |
+| `a` | auto-admit |
+
+### End turn
+
+| Key | Does |
+|---|---|
+| `n` | end the turn anyway |
+| `N` | end 7 turns |
+| `1-9` | go to that warning |
+| `Esc` | not yet |
+
+### Leave the campaign
+
+| Key | Does |
+|---|---|
+| `s` | save and return |
+| `r` | return without saving |
+| `Esc` | stay in the campaign |
+
+### Game over
+
+| Key | Does |
+|---|---|
+| `Enter` | return to the welcome screen |
+
+### Confirm (fire, sell, disband, recall)
+
+| Key | Does |
+|---|---|
+| `y` | confirm |
+| `s` | the second choice |
+| `Esc` | keep |
+
+### Text prompts and the command line
+
+| Key | Does |
+|---|---|
+| `type` | type |
+| `Backspace` | erase |
+| `Tab` | complete a verb or an id (the command line) |
+| `Enter` | confirm |
+| `Esc` | cancel |
+
 <!-- /keys -->
 
 Money keys: Ledger `L` → `take_loan`, `R` → `repay_loan`; Forces `$` →
