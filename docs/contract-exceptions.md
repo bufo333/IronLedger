@@ -15,15 +15,6 @@ Owner of every entry: the project owner.
 
 ---
 
-### C1. The gate is incomplete
-
-- **Rules:** 72, 73.
-- **Why not yet:** Each part needs its own verified pull request.
-- **Scope:**
-  - **`docs/verify-contract.sh`.** It has no switch-arm check (rule 76) and no duplicated-pattern check.
-- **Removal:** C1.
-- **Guard:** the gate runs on every pull request on Linux and macOS, with a clean ReleaseFast package build (`docs/clean-package.sh`) and the invalid-overlay fixtures (`docs/data-fixtures.py`). Nothing mechanical stops CI shrinking; review checklist question 15 covers it.
-
 ### C2. Errors lose their meaning or are swallowed
 
 - **Rules:** 4, 10, 18, 79.
@@ -71,16 +62,12 @@ Owner of every entry: the project owner.
 - **Why not yet:** Decomposition is behaviour-preserving work spread over several pull requests, one module at a time, with the golden hash unchanged.
 - **Scope:**
   - Every module and function listed in the ratchet below.
-  - Eight switches over ten arms that are not dispatch switches:
-    - `contract_events.zig:475`
-    - `app.zig:2669`, `3117`, `3487`, `1271`, `1467`
-    - `forces.zig:110`
-    - `hq.zig:74`
+  - Three switches with more than ten substantive arms (an arm body past three lines), measured by the check that guards them: `contract_events.applyEffectsFor` (21), `app.listView` (19), `forces.handle` (19). Five more sit at the threshold without crossing it: `app.listEnter` and `app.handleModalKey` (10 each), `market.handle` (10), `app.drawModal` (9), `supply.handle` (7).
   - About 90 `GameState` methods with subsystem behaviour: pricing, liquidation, staffing, hiring, founding, posture, TO&E, crew, tech time, lift, supply, refit, aftermath, hashing.
   - Two layering violations: `state.zig:653` imports `rating.zig`, which imports `commands.zig`; `state.zig:1165` imports `field_supply.zig`.
   - The named atomic operations that rule 14 cites do not exist.
 - **Removal:** C4.
-- **Guard:** the rule 76 ratchet in `verify-contract.sh`. A listed module or function may not grow past its ceiling, and an unlisted one may not cross the threshold. There is no switch-arm check yet (C1).
+- **Guard:** the rule 76 ratchet in `verify-contract.sh`. A listed module, function or switch may not grow past its ceiling, and an unlisted one may not cross the threshold.
 
 ### C5. Commands and ticks are not failure-atomic
 
@@ -460,7 +447,9 @@ Owner of every entry: the project owner.
 ## Ratchet
 
 The rule 76 ceilings: each module over 1,000 lines and each function over
-100, at its size when the contract was adopted. `docs/verify-contract.sh`
+100, at its size when the contract was adopted, and each non-dispatch
+switch with more than ten substantive arms (`path:function#switch`, in
+arms). `docs/verify-contract.sh`
 fails on anything over its threshold that is not listed, on a listed entry
 over its ceiling, and on a listed entry that has dropped under its threshold
 (delete it). A split lowers the ceiling in the pull request that makes it.
@@ -479,6 +468,7 @@ src/sim/cli.zig:parseVerb 385
 src/sim/commands.zig 4819
 src/sim/contract_events.zig 1459
 src/sim/contract_events.zig:applyEffectsFor 210
+src/sim/contract_events.zig:applyEffectsFor#switch 21
 src/sim/contract_market.zig:refresh 121
 src/sim/contract_market.zig:refreshBoard 203
 src/sim/queries.zig 6253
@@ -498,8 +488,10 @@ src/tui/app.zig:drawModal 136
 src/tui/app.zig:handleModalKey 192
 src/tui/app.zig:listEnter 127
 src/tui/app.zig:listView 261
+src/tui/app.zig:listView#switch 19
 src/tui/png.zig:decode 116
 src/tui/screens/forces.zig:handle 173
+src/tui/screens/forces.zig:handle#switch 19
 src/tui/screens/map.zig:draw 103
 src/tui/screens/supply.zig:handle 113
 ```

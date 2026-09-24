@@ -104,6 +104,11 @@ check "TODO / FIXME / HACK / XXX (open work lives in TODO.md)" \
     "$(grep -nE '\b(TODO|FIXME|HACK|XXX)\b' $code_and_data)"
 check "test names led by a roadmap stage" \
     "$(grep -nE '^test "(Stage )?[0-9]+[A-G]?(\.[0-9]+)*[a-z]?:' $code_and_data)"
+# Duplicated patterns (rules 20, 73, 80): a comment saying code "mirrors",
+# is the "same as", "equivalent to" or kept "in sync with" other code marks
+# a copy; replace it with a call, generated data or a comparing test.
+check "a comment marking copied code (mirrors / same as / equivalent to / in sync)" \
+    "$(grep -niE '//.*\b(mirrors|same as|equivalent to|keep in sync|kept in sync|in sync with)\b' $code_and_data)"
 
 # Refusal text comes from cli.errorText (rule 10): a frontend never shows an
 # error's name.
@@ -150,10 +155,13 @@ PY
 )"
 
 # §10 Review thresholds (rule 76), held by ratchet (rule 87): a module over
-# 1,000 lines or a function over 100 is a violation unless
-# docs/contract-exceptions.md lists it under `ratchet`, and a listed one
-# may not grow past its recorded size. A split lowers the ceiling.
-check "a module or function over its review threshold or its recorded ceiling" "$(python3 - <<'PY'
+# 1,000 lines, a function over 100, or a switch with more than ten
+# substantive arms is a violation unless docs/contract-exceptions.md lists
+# it under `ratchet`, and a listed one may not grow past its recorded size.
+# A split lowers the ceiling. An arm is substantive when its body runs past
+# three lines; a dispatch switch (a call or a few lines per arm) has none,
+# so it never counts. A switch is keyed `path:function#switch`.
+check "a module, function or switch over its review threshold or its recorded ceiling" "$(python3 - <<'PY'
 import os, re
 ceil = {}
 try:
@@ -187,9 +195,30 @@ for d, _, fs in os.walk("src"):
                 i = j + 1 if ind == "" else i + 1
                 continue
             i += 1
+        # Switch arms: walk each non-test switch body at its own depth.
+        in_test, fn_name = False, "?"
+        for i, ln in enumerate(lines):
+            if re.match(r'^test\s+"', ln): in_test = True
+            if in_test:
+                if ln.startswith("}"): in_test = False
+                continue
+            fm = FN.match(ln)
+            if fm: fn_name = fm.group(2)
+            if not re.search(r'\bswitch\s*\(.*\)\s*\{\s*$', ln): continue
+            depth, j, arms = 1, i + 1, []
+            while j < len(lines) and depth > 0:
+                body = re.sub(r'"(\\.|[^"\\])*"', '""', lines[j])
+                body = re.sub(r"'(\\.|[^'\\])*'", "''", body).split("//")[0]
+                if depth == 1 and re.match(r'^\s*[^/\s].*=>', lines[j]): arms.append(j)
+                depth += body.count("{") - body.count("}")
+                j += 1
+            substantive = sum(1 for a, b in zip(arms, arms[1:] + [j - 1]) if b - a > 3)
+            key = f"{p}:{fn_name}#switch"
+            if substantive > 10: found[key] = max(found.get(key, 0), substantive)
 for key, n in sorted(found.items()):
-    if key not in ceil: print(f"{key}: {n} lines, over the threshold and not in the ratchet")
-    elif n > ceil[key]: print(f"{key}: {n} lines, over its ceiling of {ceil[key]}")
+    unit = "substantive arms" if key.endswith("#switch") else "lines"
+    if key not in ceil: print(f"{key}: {n} {unit}, over the threshold and not in the ratchet")
+    elif n > ceil[key]: print(f"{key}: {n} {unit}, over its ceiling of {ceil[key]}")
 for key in sorted(set(ceil) - set(found)):
     print(f"{key}: under its threshold now; remove it from the ratchet")
 PY
