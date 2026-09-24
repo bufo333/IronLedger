@@ -3,6 +3,8 @@
 //! decays only at home (mess-boosted, line-officer-boosted); morale drifts
 //! with rest and grinds with exhaustion; skill training runs only at a
 //! regional/brigade HQ with a training ground.
+//! MekHQ counterpart: the medical system and advanced medical injuries
+//! (docs/mekhq-map.md).
 
 const std = @import("std");
 const tuning = @import("../domain/tuning.zig").t;

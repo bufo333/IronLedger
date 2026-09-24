@@ -1,6 +1,7 @@
 //! Module root for the simulation core and its SQLite persistence. See
 //! ARCHITECTURE.md. The core (domain, sim, econ, gen) is pure and
 //! deterministic: no I/O, no wall clock, no globals.
+//! No MekHQ counterpart: the module root (docs/mekhq-map.md).
 
 const std = @import("std");
 

@@ -26,7 +26,7 @@ zig build run -Ddata=mymod -- --tui
 The data checks are the tests named `data: …`: every table against the
 others (RAT entries are catalogue meks, loadout parts exist, factions and
 capitals line up), every string markup-safe, every tuning knob in range.
-With `-Ddata`, installing waits on them.
+Every build's install waits on them, a mod's or not.
 
 Files you leave out fall back to the stock ones in `data/`. The settings
 screen (F12) and the REPL banner say which files are overlaid.

@@ -22,6 +22,8 @@
 //!
 //! MekHQ counterpart: `AtBScenario` + the campaign-report entries it
 //! writes (MekHQ keeps the narrative only; the fields here are ours).
+//! MekHQ counterpart: the scenario resolution step after a battle
+//! (docs/mekhq-map.md).
 
 const std = @import("std");
 const types = @import("../domain/types.zig");

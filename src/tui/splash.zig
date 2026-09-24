@@ -1,6 +1,7 @@
 //! Title screen (Stage 12): the game's name and a BattleMech in ASCII,
 //! held for five seconds at start or until a key is pressed. Pure drawing
 //! into the cell grid; the wait loop lives in app.zig.
+//! No MekHQ counterpart: the title screen (docs/mekhq-map.md).
 
 const std = @import("std");
 const screen_mod = @import("screen.zig");

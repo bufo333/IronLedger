@@ -1,5 +1,6 @@
 //! Shared primitive types: typed IDs, money, core enums.
 //! See ARCHITECTURE.md §5.
+//! No MekHQ counterpart: shared value and ID types (docs/mekhq-map.md).
 
 const std = @import("std");
 

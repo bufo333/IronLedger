@@ -1,6 +1,7 @@
 //! Minimal hand-bound SQLite3 surface (Stage 11): open/close, exec,
 //! prepared statements with typed bind/column helpers. Just enough for
 //! save/load; no ORM ambitions.
+//! No MekHQ counterpart: MekHQ saves campaigns as XML (docs/mekhq-map.md).
 
 const std = @import("std");
 

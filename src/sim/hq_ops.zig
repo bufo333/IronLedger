@@ -2,6 +2,8 @@
 //! queues, construction/upgrade projects, and component fabrication. The
 //! back office sets the pace: command admins shorten paperwork, and the
 //! whole staff must be there for facilities to run at built level.
+//! No MekHQ counterpart: the HQ network is this game's extension
+//! (docs/mekhq-map.md).
 
 const std = @import("std");
 const tuning = @import("../domain/tuning.zig").t;

@@ -4,6 +4,8 @@
 //! world in the commander's faction space. Profession grants one small
 //! permanent edge (tuning.commander.bonus_bp): enough to feel, never enough to replace
 //! good logistics.
+//! MekHQ counterpart: the campaign commander, a flagged person; the
+//! character creation is an adaptation (docs/mekhq-map.md).
 
 const std = @import("std");
 const tuning = @import("tuning.zig").t;

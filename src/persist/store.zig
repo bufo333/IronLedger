@@ -6,6 +6,8 @@
 //! The sim core never touches SQL — this module maps GameState ↔ rows.
 //! docs/schema.sql remains the design document; this DDL is the executable
 //! truth and stays close to it.
+//! MekHQ counterpart: the campaign save and load (XML there, SQLite here)
+//! (docs/mekhq-map.md).
 
 const std = @import("std");
 const rng_mod = @import("../sim/rng.zig");
@@ -2876,4 +2878,32 @@ test "golden master: a played year hashes to its pinned value, and a save of it 
     const commands = @import("../sim/commands.zig");
     for ([_]*GameState{ &gs, &loaded }) |g| _ = try commands.execute(g, .{ .advance_days = 60 });
     try std.testing.expectEqualStrings("", gs.firstHashDifference(&loaded, &buf) orelse "");
+}
+
+test "the table registry matches the tables the executable schema creates" {
+    // Campaign clear, delete and overwrite walk `tables`: a table the DDL
+    // creates but the registry misses would keep a deleted campaign's rows.
+    const store_wide = [_][]const u8{ "campaign", "player", "setting" };
+    var created: std.ArrayListUnmanaged([]const u8) = .empty;
+    defer created.deinit(std.testing.allocator);
+    var rest: []const u8 = ddl;
+    const marker = "CREATE TABLE IF NOT EXISTS ";
+    while (std.mem.indexOf(u8, rest, marker)) |i| {
+        rest = rest[i + marker.len ..];
+        const end = std.mem.indexOfAny(u8, rest, " (") orelse rest.len;
+        const name = rest[0..end];
+        const shared = for (store_wide) |w| {
+            if (std.mem.eql(u8, w, name)) break true;
+        } else false;
+        if (!shared) try created.append(std.testing.allocator, name);
+    }
+    try std.testing.expectEqual(tables.len, created.items.len);
+    for (tables, 0..) |t, i| {
+        for (tables[i + 1 ..]) |u| try std.testing.expect(!std.mem.eql(u8, t, u));
+        const in_ddl = for (created.items) |c| {
+            if (std.mem.eql(u8, c, t)) break true;
+        } else false;
+        if (!in_ddl) std.debug.print("registry table {s} is not in the DDL\n", .{t});
+        try std.testing.expect(in_ddl);
+    }
 }

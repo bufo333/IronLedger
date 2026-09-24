@@ -136,8 +136,9 @@ pub fn build(b: *std.Build) void {
     // Data validation: the tests named "data: …" check the tables against
     // each other (every RAT entry is a catalogue mek, every loadout part
     // exists, every string is markup-safe, every tuning knob is in range).
-    // `zig build validate-data` runs them alone; with -Ddata they gate the
-    // install, so a broken mod fails the build instead of the first game.
+    // `zig build validate-data` runs them alone, and every install waits on
+    // them, so broken data (a mod's or the stock tables) fails the build
+    // instead of the first game.
     const data_tests = b.addTest(.{
         .root_module = mod,
         .filters = &.{"data: "},
@@ -145,7 +146,7 @@ pub fn build(b: *std.Build) void {
     const run_data_tests = b.addRunArtifact(data_tests);
     const validate_step = b.step("validate-data", "Check the data tables (and any -Ddata mod) against each other");
     validate_step.dependOn(&run_data_tests.step);
-    if (data_dir != null) b.getInstallStep().dependOn(&run_data_tests.step);
+    b.getInstallStep().dependOn(&run_data_tests.step);
 
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_mod_tests.step);

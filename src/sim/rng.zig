@@ -1,6 +1,8 @@
 //! Deterministic RNG with named per-subsystem streams (ARCH §4).
 //! Adding a roll in one system must never perturb another, so every
 //! subsystem draws from its own stream. All combat/campaign dice are 2d6.
+//! MekHQ counterpart: MegaMek's `Compute` dice; here every roll draws from a
+//! named, seeded stream (docs/mekhq-map.md).
 
 const std = @import("std");
 

@@ -5,6 +5,8 @@
 //! out. The player resolves them between turns; past the deadline the
 //! default option applies automatically (and the log notes it). Ignoring
 //! your inbox is a choice with consequences, not an impossibility.
+//! MekHQ counterpart: the AtB contract event and decision prompts
+//! (docs/mekhq-map.md).
 
 const std = @import("std");
 const types = @import("../domain/types.zig");
