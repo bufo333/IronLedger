@@ -2125,7 +2125,7 @@ test "company posture is one cascade: contract, then the road home, then a world
     var gs = GameState.init(std.testing.allocator, .{ .seed = 5 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .line_officer);
-    _ = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    _ = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     var co: types.ForceId = .none;
     var it = gs.forces.iterator();
     while (it.next()) |e| if (e.value_ptr.echelon == .company) {

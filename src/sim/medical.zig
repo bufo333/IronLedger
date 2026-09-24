@@ -512,7 +512,7 @@ test "12.20/12.25: the restless hand in notice after a year (an inbox decision),
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1220 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .paymaster);
-    _ = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    _ = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     // Content and fresh (and all thirty — age rolls are 12C.4's business):
     // nobody stirs however low the dice.
     gs.clock.day_index = 400;
@@ -544,7 +544,7 @@ test "12.20/12.25: the restless hand in notice after a year (an inbox decision),
     var fresh = GameState.init(std.testing.allocator, .{ .seed = 1221 });
     defer fresh.deinit();
     _ = try fresh.createCommander("T", .LC, .paymaster);
-    _ = try @import("../gen/company_gen.zig").generateInto(&fresh, "Alpha");
+    _ = try @import("starter_company.zig").generateInto(&fresh, "Alpha");
     var fit = fresh.people.iterator();
     while (fit.next()) |e| e.value_ptr.morale = 0;
     fresh.clock.day_index = 100;
@@ -617,7 +617,7 @@ test "12.30: garrison duty recovers fatigue in the field; a combat tour does not
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1230 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .paymaster);
-    const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
         .id = @enumFromInt(1),
         .kind = .garrison_duty,

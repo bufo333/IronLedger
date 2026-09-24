@@ -698,7 +698,7 @@ pub const Contracts = struct {
 /// the house is cooling or shunning you.
 pub fn standings(alloc: Alloc, gs: *GameState) ![]const []const u8 {
     var out: std.ArrayListUnmanaged([]const u8) = .empty;
-    const cm = @import("../econ/contract_market.zig");
+    const cm = @import("contract_market.zig");
     const t = @import("../domain/tuning.zig").t.contract;
     for (@import("../domain/faction.zig").table) |fr| {
         if (!fr.hires) continue;
@@ -3943,7 +3943,7 @@ test "12.16: readiness counts wounded, permanent injuries, banked XP and depot h
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1216 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .paymaster);
-    const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
@@ -3978,7 +3978,7 @@ test "12.20: the hangar ranks a pilotless hull above one earning its keep, mothb
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1220 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .paymaster);
-    _ = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    _ = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
@@ -4132,7 +4132,7 @@ test "the contact line an advance stops for is the checklist's contact warning" 
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1210 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .line_officer);
-    const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
         .id = @enumFromInt(1),
         .kind = .recon_raid,
@@ -4188,7 +4188,7 @@ test "12G.6: the inbox shows the wrecks a salvage claim is being divided over" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1266 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .line_officer);
-    const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
@@ -4249,7 +4249,7 @@ test "12G.7: the hangar names a hull the enemy holds — a claim, not an asset" 
     var gs = GameState.init(std.testing.allocator, .{ .seed = 12007 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .paymaster);
-    _ = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    _ = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
@@ -4451,7 +4451,7 @@ test "play feedback: offer candidates rank the ready company first and name why 
     defer gs.deinit();
     _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
     // One company lives at the HQ; the others are on the books without a slot (the HQ hosts one).
-    const gen = @import("../gen/company_gen.zig");
+    const gen = @import("starter_company.zig");
     const worn = (try commands.execute(&gs, .{ .new_company = "Worn" })).created_force;
     const fresh = try gen.generateInto(&gs, "Fresh");
     const busy = try gen.generateInto(&gs, "Busy");
@@ -4723,7 +4723,7 @@ test "pickers: crew rows are the right roles, own company and free first; compan
     defer gs.deinit();
     _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
     const co = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
-    const other = try @import("../gen/company_gen.zig").generateInto(&gs, "Bravo");
+    const other = try @import("starter_company.zig").generateInto(&gs, "Bravo");
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const al = arena.allocator();
@@ -4831,7 +4831,7 @@ test "play feedback: the board's transit column is real — from the nearest com
     defer gs.deinit();
     _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
     _ = try commands.execute(&gs, .{ .new_company = "Alpha" });
-    try @import("../econ/contract_market.zig").refresh(&gs);
+    try @import("contract_market.zig").refresh(&gs);
     try std.testing.expect(gs.contract_offers.items.len > 0);
     for (gs.contract_offers.items) |*o| {
         const d = offerTransitDays(&gs, o);
@@ -4905,8 +4905,8 @@ test "12E.3: skulls — a weaker company rates harder, a heavier one easier; low
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    const alpha = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
-    const bravo = try @import("../gen/company_gen.zig").generateInto(&gs, "Bravo");
+    const alpha = try @import("starter_company.zig").generateInto(&gs, "Alpha");
+    const bravo = try @import("starter_company.zig").generateInto(&gs, "Bravo");
     const site_a: types.Site = .{ .company = alpha };
     const site_b: types.Site = .{ .company = bravo };
     for (@import("../domain/part.zig").munition_keys) |k| {
@@ -5475,7 +5475,7 @@ test "12G.4b: the after-action panes read from the record" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 31337 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .line_officer);
-    const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
         .id = @enumFromInt(1),
         .kind = .recon_raid,
@@ -6138,7 +6138,7 @@ pub fn factionKeyLine(alloc: Alloc) ![]const u8 {
 /// the distance from every HQ, what is here, and the offers posted here.
 pub fn worldDetail(alloc: Alloc, gs: *GameState, view: *const Map, w: *const World) ![]const []const u8 {
     const faction = @import("../domain/faction.zig");
-    const cm = @import("../econ/contract_market.zig");
+    const cm = @import("contract_market.zig");
     var rows: std.ArrayListUnmanaged([]const u8) = .empty;
     const fr = faction.get(w.faction);
     const wp = planet_mod.find(w.key) orelse return rows.toOwnedSlice(alloc);

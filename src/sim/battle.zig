@@ -1303,7 +1303,7 @@ test "battles resolve with consequences and stronger forces win more" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 777 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .line_officer);
-    const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
 
     try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
         .id = @enumFromInt(1),
@@ -1361,7 +1361,7 @@ test "hard hits wound pilots: a season of fighting sends someone to the medbay" 
     var gs = GameState.init(std.testing.allocator, .{ .seed = 4242 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .line_officer);
-    const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
         .id = @enumFromInt(1),
         .kind = .objective_raid,
@@ -1402,7 +1402,7 @@ test "9B: dry mounts are silenced — ammo is combat power" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 778 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .line_officer);
-    const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
         .id = @enumFromInt(1),
         .kind = .objective_raid,
@@ -1456,7 +1456,7 @@ test "12.15: air cover is a fighter that can fly, not an empty wing" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 15 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .line_officer);
-    const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
         .id = @enumFromInt(1),
         .kind = .garrison_duty,
@@ -1485,7 +1485,7 @@ test "12.23: a salvage claim becomes a wreck in transit to the depot pool and pa
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1223 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .line_officer);
-    const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
         .id = @enumFromInt(1),
         .kind = .objective_raid,
@@ -1529,7 +1529,7 @@ test "12B.1: integrated command sends training lances to fight and pulls the sco
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1231 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .line_officer);
-    const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
         .id = @enumFromInt(1),
         .kind = .objective_raid,
@@ -1575,7 +1575,7 @@ test "12B.2: salvage exchange pays cash into local funds and ships no wreck" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1232 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .line_officer);
-    const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
         .id = @enumFromInt(1),
         .kind = .objective_raid,
@@ -1619,7 +1619,7 @@ fn lossRun(seed: u64, level: @import("../domain/difficulty.zig").Level, n: u32) 
     defer gs.deinit();
     gs.difficulty = level;
     _ = try gs.createCommander("T", .LC, .line_officer);
-    const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
         .id = @enumFromInt(1),
         .kind = .planetary_assault,
@@ -1724,7 +1724,7 @@ fn repairOfferRoundTrip(seed: u64) !bool {
     var gs = GameState.init(std.testing.allocator, .{ .seed = seed });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .line_officer);
-    const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
         .id = @enumFromInt(1),
         .kind = .recon_raid,
@@ -1779,7 +1779,7 @@ fn salvageOfferRoundTrip(seed: u64) !bool {
     var gs = GameState.init(std.testing.allocator, .{ .seed = seed });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .line_officer);
-    const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
         .id = @enumFromInt(1),
         .kind = .recon_raid,
@@ -1854,7 +1854,7 @@ test "12G.6: a lost field asks whether to go back, and going back wins hulls and
         defer gs.deinit();
         gs.difficulty = .elite;
         _ = try gs.createCommander("T", .LC, .line_officer);
-        const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+        const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
         try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
             .id = @enumFromInt(1),
             .kind = .planetary_assault,
@@ -1923,7 +1923,7 @@ test "12G.6: a hull won back goes home to the lance it was taken from" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 6006 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .line_officer);
-    _ = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    _ = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     const taken = blk: {
         var it = gs.units.iterator();
         while (it.next()) |e| if (e.value_ptr.kind == .mek and e.value_ptr.force != .none) break :blk e.value_ptr.id;
@@ -1986,7 +1986,7 @@ test "12D.4: rules of engagement — cautious withdraws from draws, integrated c
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1204 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .line_officer);
-    const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
         .id = @enumFromInt(1),
         .kind = .objective_raid,
@@ -2058,7 +2058,7 @@ test "12D.6: garrison work sees probes — a lance of the enemy's, every few wee
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1206 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .line_officer);
-    const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     const site: types.Site = .{ .company = co };
     for (part_mod.munition_keys) |key| try gs.addStock(site, key, 100);
     try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
@@ -2101,7 +2101,7 @@ test "12G.3: the AAR is rendered from the record, and the record outlives the fi
     var gs = GameState.init(std.testing.allocator, .{ .seed = 424242 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .line_officer);
-    const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
         .id = @enumFromInt(1),
         .kind = .recon_raid,
@@ -2250,7 +2250,7 @@ test "a fight does not change who turns up at the hiring hall" {
         const f = try @import("contract_events.zig").damagedCompanyForTest(&gs, 20);
         gs.candidates.clearRetainingCapacity();
         if (fought == 1) try resolveEngagement(&gs, f.c);
-        try @import("../econ/contract_market.zig").refreshCandidates(&gs);
+        try @import("contract_market.zig").refreshCandidates(&gs);
         var list: std.ArrayListUnmanaged(u8) = .empty;
         for (gs.candidates.items) |c| {
             try list.appendSlice(arena.allocator(), c.spec.first);

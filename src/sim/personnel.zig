@@ -392,7 +392,7 @@ test "ranks follow seats: a lance leader is a lieutenant, the company commander 
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1234 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .paymaster);
-    const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     _ = try refreshRanks(&gs);
     const cmdr = gs.force(co).?.commander;
     try std.testing.expect(cmdr != .none);
@@ -424,7 +424,7 @@ test "12B.5: kills are credited to engaged pilots and awards follow the counters
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1235 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .paymaster);
-    const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     var engaged: std.ArrayListUnmanaged(types.UnitId) = .empty;
     defer engaged.deinit(gs.allocator());
     var uit = gs.units.iterator();

@@ -21,13 +21,18 @@ sim           src/sim/queries.zig                    ← view models (a leaf)
               src/sim/{commands,tick,checklist,hq_ops,battle,…}.zig  ← rules and mutation
               src/sim/state.zig                      ← GameState
 domain/econ   src/domain/*  ·  src/econ/*  ·  src/gen/*
+leaf          src/sim/rng.zig                        ← named streams (imports only std)
 data          data/*.zon  ·  data/tables/*.zon
 ```
 
 1. **Imports point down only.** A module may import modules in its own
    layer or below. Nothing below `queries.zig` imports `queries.zig`:
    it is a leaf. A rule that both a screen and the tick need lives in a
-   rules module, and `queries` calls it.
+   rules module, and `queries` calls it. `sim/rng.zig` sits below the
+   domain: it imports only `std`, so domain, econ and gen code may take
+   an `*Rng` and a stream. Nothing else under `src/sim` is importable
+   from those layers; a module that needs `GameState` is sim code and
+   lives in `src/sim`.
 2. **The sim core is pure and deterministic.** `src/domain`, `src/sim`,
    `src/econ`, `src/gen` contain no I/O, no wall clock, no file-scope
    `var`, no PRNG outside `sim/rng.zig`, and no `std.heap.page_allocator`
@@ -62,6 +67,8 @@ grep -nE '\b(g|gs)\.[a-zA-Z_]+\(' src/tui/*.zig | grep -vE '\.(allocator|diff)\(
 grep -nE 'game\.(store|state|hq_ops|contract_market|contract_control|battle|maintenance|medical|tick|planet|faction|chassis|part|force|hq|person|unit|difficulty|dataProvenance)\b' src/tui/*.zig
 # the sim importing the view layer: must print nothing outside test blocks (a test may cross-check a screen against a command)
 grep -n 'queries.zig' src/sim/{state,tick,commands,checklist,hq_ops,battle,maintenance,medical,contract_control,contract_events,field_supply}.zig src/econ/*.zig src/domain/*.zig
+# domain/econ/gen reaching up into the sim: must print nothing (rng.zig is the one leaf)
+grep -n '"\.\./sim/' src/domain/*.zig src/econ/*.zig src/gen/*.zig | grep -v '"\.\./sim/rng\.zig"'
 # impurity in the core: must print nothing outside tests
 grep -nE 'std\.(time|fs|Io|process|posix|os)\b|page_allocator|std\.debug\.print|^var ' src/domain/*.zig src/sim/*.zig src/econ/*.zig src/gen/*.zig
 ```

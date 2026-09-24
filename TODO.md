@@ -50,8 +50,6 @@ D19a, D19b-1, D19b-2a and D19b-2b are done (see Done); the typed endpoint is lef
 
 ## D21. Layering and boundaries (audit #19, #22, #23, #27; rules 1, 4, 6, 17, 26)
 
-- [ ] Contract layer diagram lists `sim/rng.zig` as a leaf below domain (it imports only `std`).
-- [ ] `econ/contract_market.zig` and `gen/company_gen.zig` `generateInto` move into `src/sim/` (they import `GameState` and sim rules).
 - [ ] `hqDetail` rows carry a typed facility identity; `hqFacilityAtRow` stops parsing rendered text (queries.zig:1757-1772).
 - [ ] Inbox rows carry event identity; `inboxRowCount` / `inboxEventAtCursor` (app.zig:1825-1840) stop counting rows.
 - [ ] Forces `+` pre-check on `hqWithCompanySlot` (screens/forces.zig:178-182) deleted; the command refuses.
@@ -109,6 +107,7 @@ Contract deliverables closed before this list merged, all from the 2026-09-22 co
 - 12G.9 battle orders, PR 2 (PR #72): the terminal box, opened by Enter on the contact warning and by the advance that stops for it; ←/→ step the ROE and lance roles (`Roe.next/prev`, `LanceRole.next/prev`, shared with the cycle commands), Enter buys the resupply, recalls behind a confirm, or confirms; smoke step
 - Design docs caught up (PR #73): ARCHITECTURE, GAMEPLAY, tui.md and modding.md describe the post-audit behaviour; schema.sql is a commented mirror of the runtime DDL
 - D20b full-state digest, audit #17: `GameState.hash` digests every persisted field through `sim/digest.zig` (elements in order, maps order-independently, RNG words and ID counters included; `unhashed_fields` checked at compile time); `firstHashDifference` names the first value a round trip lost; a played year is pinned to one golden constant and plays on identically after a save. It found two round-trip losses, both fixed: the decision queue's `next_id` (meta `next_event_id`) and a hall candidate's age (schema v34)
+- D21a layering, audit #19: the contract diagram lists `sim/rng.zig` as a leaf below the domain, with a reviewer grep for any other upward import; `contract_market.zig` moves to `src/sim/`, and the starter company (`generateInto`) to `sim/starter_company.zig`, leaving `gen/company_gen.zig` pure rolls and the manning table
 
 ---
 

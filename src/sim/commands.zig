@@ -9,9 +9,9 @@ const person_mod = @import("../domain/person.zig");
 const state_mod = @import("state.zig");
 const GameState = state_mod.GameState;
 const tick = @import("tick.zig");
-const company_gen = @import("../gen/company_gen.zig");
+const starter_company = @import("starter_company.zig");
 const commander_mod = @import("../domain/commander.zig");
-const contract_market = @import("../econ/contract_market.zig");
+const contract_market = @import("contract_market.zig");
 const logistics = @import("../econ/logistics.zig");
 const part_mod = @import("../domain/part.zig");
 const planet_mod = @import("../domain/planet.zig");
@@ -1592,7 +1592,7 @@ fn newCompanyAt(gs: *GameState, name: []const u8, hq_id: types.HqId) Error!Resul
         const hq = gs.hqs.getPtr(hq_id) orelse return Error.UnknownHq;
         if (gs.companiesAtHq(hq_id) >= hq.capacity().combat_companies) return Error.CapacityFull;
     }
-    const id = try company_gen.generateInto(gs, name);
+    const id = try starter_company.generateInto(gs, name);
     if (hq_id != .none) {
         gs.assignCompanyToHq(id, hq_id) catch |err| switch (err) {
             error.CapacityFull => return Error.CapacityFull,
@@ -2911,7 +2911,7 @@ test "12G.5: an unread after-action holds the turn, and a week stops on the day 
     var gs = GameState.init(std.testing.allocator, .{ .seed = 4242 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .line_officer);
-    const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
         .id = @enumFromInt(1),
         .kind = .recon_raid,
@@ -2974,7 +2974,7 @@ test "12G.6: a field held asks for the tempo, and the turn waits for the answer"
     var gs = GameState.init(std.testing.allocator, .{ .seed = 4242 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .line_officer);
-    const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
         .id = @enumFromInt(1),
         .kind = .recon_raid,
@@ -3041,7 +3041,7 @@ test "12G.6: garrison work has no advance to press" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 4243 });
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .line_officer);
-    const co = try @import("../gen/company_gen.zig").generateInto(&gs, "Alpha");
+    const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
         .id = @enumFromInt(1),
         .kind = .garrison_duty,
@@ -4073,7 +4073,7 @@ test "12B.3: one negotiation round per offer — improved, hardened, or withdraw
     var withdrawn: u32 = 0;
     var rounds: u32 = 0;
     while (rounds < 60) : (rounds += 1) {
-        if (gs.contract_offers.items.len == 0) try @import("../econ/contract_market.zig").refresh(&gs);
+        if (gs.contract_offers.items.len == 0) try @import("contract_market.zig").refresh(&gs);
         const before = gs.contract_offers.items[0].terms;
         const r = try execute(&gs, .{ .negotiate = .{ .offer_index = 0, .term = .salvage } });
         switch (r.negotiation) {
@@ -4095,7 +4095,7 @@ test "12B.3: one negotiation round per offer — improved, hardened, or withdraw
     }
     try std.testing.expect(improved > 0 and hardened > 0);
     // A term at its cap is refused before any dice are thrown.
-    try @import("../econ/contract_market.zig").refresh(&gs);
+    try @import("contract_market.zig").refresh(&gs);
     gs.contract_offers.items[0].terms.advance_pct = 50;
     try std.testing.expectError(Error.TermAtCap, execute(&gs, .{ .negotiate = .{ .offer_index = 0, .term = .advance } }));
 }
@@ -4356,7 +4356,7 @@ test "12.32: difficulty scales pay, fabrication and purchases — regular is the
     try std.testing.expectEqual(types.applyBp(part_mod2.cost("comp_leg"), tuning.market.fab_cost_bp), cost_r);
 
     // Contract pay: the same board, rolled under green and under elite, pays in the table's ratio.
-    const cm = @import("../econ/contract_market.zig");
+    const cm = @import("contract_market.zig");
     _ = try execute(&gs, .{ .set_difficulty = .green });
     var green = GameState.init(std.testing.allocator, .{ .seed = 98 });
     defer green.deinit();
@@ -4473,7 +4473,7 @@ test "12D.7: the contract world has a hull board — local funds pay, the hull j
     var tries: u32 = 0;
     var idx: ?usize = null;
     while (idx == null and tries < 20) : (tries += 1) {
-        try @import("../econ/contract_market.zig").refreshContractWorld(&gs, gs.contracts.getPtr(cid).?);
+        try @import("contract_market.zig").refreshContractWorld(&gs, gs.contracts.getPtr(cid).?);
         for (gs.market_listings.items, 0..) |l, i| if (l.company == co) {
             idx = i;
         };
@@ -4490,7 +4490,7 @@ test "12D.7: the contract world has a hull board — local funds pay, the hull j
     try std.testing.expectEqual(hq_funds, gs.hqs.values()[0].funds);
     // Not a raise candidate, and gone with the contract at the next refresh.
     gs.contracts.getPtr(cid).?.status = .completed;
-    try @import("../econ/contract_market.zig").refreshListings(&gs);
+    try @import("contract_market.zig").refreshListings(&gs);
     for (gs.market_listings.items) |l| try std.testing.expect(l.company == .none);
 }
 
@@ -4546,7 +4546,7 @@ test "12E.4: one board per HQ — offers inside its reach, taken only by compani
         h.staff_assigned = 999;
     }
     const bravo = (try execute(&gs, .{ .new_company_at = .{ .name = "Bravo", .hq = far } })).created_force;
-    try @import("../econ/contract_market.zig").refresh(&gs);
+    try @import("contract_market.zig").refresh(&gs);
     var on_home: u32 = 0;
     var on_far: u32 = 0;
     var far_offer: ?usize = null;

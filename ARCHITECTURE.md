@@ -806,9 +806,10 @@ src/
   domain/        entities and rule tables: types person unit part chassis
                  force contract hq planet faction tuning skulls scenario …
   sim/           state tick commands battle autoresolve medical maintenance
-                 field_supply network rng …; queries.zig (read-only views),
+                 field_supply network rng contract_market
+                 starter_company …; queries.zig (read-only views),
                  cli.zig (verbs), table.zig (markup)
-  econ/          finance logistics market contract_market
+  econ/          finance logistics market
   gen/           company_gen person_gen
   persist/       sqlite.zig (C wrapper), store.zig (campaign saves), lobby.zig
   tui/           terminal client: app.zig, screens/, term, screen, emblem, music
