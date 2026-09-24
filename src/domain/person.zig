@@ -114,6 +114,9 @@ pub const Role = enum {
 
 pub const Status = enum { active, wounded, mia, kia, retired, resigned, pow, released };
 
+/// A seat's occupant today (`Person.seatState`).
+pub const SeatState = enum { fit, recovering, away };
+
 pub const InjuryLocation = enum { head, torso, left_arm, right_arm, left_leg, right_leg, internal };
 
 /// One wound (MekHQ advanced medical `Injury`): where, how
@@ -377,6 +380,25 @@ pub const Person = struct {
         return true;
     }
 
+    /// Whether a seated person takes their seat today: fit, recovering
+    /// (wounded or on leave; the seat waits for them and the hull sits
+    /// out), or away (missing, captured or gone; the seat is open).
+    pub fn seatState(self: *const Person, day: u32) SeatState {
+        if (self.isAvailable(day)) return .fit;
+        return switch (self.status) {
+            .wounded, .active => .recovering,
+            else => .away,
+        };
+    }
+
+    /// The day a recovering person is back: the triaged wound's discharge
+    /// or the end of leave (null: not triaged yet, or not recovering).
+    pub fn backDay(self: *const Person, day: u32) ?u32 {
+        if (self.status == .wounded) return self.wound_heal_day;
+        if (self.leave_until_day) |until| if (day < until) return until;
+        return null;
+    }
+
     pub fn skill(self: *const Person, s: types.SkillType) ?u8 {
         return self.skills.get(s);
     }
@@ -466,6 +488,23 @@ pub fn spendXpToImprove(p: *Person, skill_type: types.SkillType) TrainError!void
     if (p.xp < cost) return TrainError.InsufficientXp;
     p.xp -= cost;
     p.skills.putAssumeCapacity(skill_type, current - 1);
+}
+
+test "a wounded or resting pilot keeps the seat; a missing one leaves it open" {
+    var p: Person = .{ .id = @enumFromInt(1), .first_name = "A", .last_name = "B", .role = .mekwarrior };
+    try std.testing.expectEqual(SeatState.fit, p.seatState(10));
+    p.leave_until_day = 14;
+    try std.testing.expectEqual(SeatState.recovering, p.seatState(10));
+    try std.testing.expectEqual(@as(?u32, 14), p.backDay(10));
+    try std.testing.expectEqual(SeatState.fit, p.seatState(14));
+    p.leave_until_day = null;
+    p.status = .wounded;
+    try std.testing.expectEqual(SeatState.recovering, p.seatState(10));
+    try std.testing.expectEqual(@as(?u32, null), p.backDay(10));
+    p.wound_heal_day = 30;
+    try std.testing.expectEqual(@as(?u32, 30), p.backDay(10));
+    p.status = .mia;
+    try std.testing.expectEqual(SeatState.away, p.seatState(10));
 }
 
 test "xp costs double toward mastery" {

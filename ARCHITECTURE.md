@@ -695,7 +695,11 @@ decisions near deadline, open pilot/tech slots, understaffed HQs, hungry or
 dry companies, overdrawn treasuries, idle bays with demand, untriaged
 wounded. The CLI refuses to advance until acknowledged; the TUI renders the
 same list as a modal. Nothing the player should have known slips past a
-turn boundary unannounced.
+turn boundary unannounced. A warning the player can do nothing about this
+turn stays on the Desk and does not stop the turn (`WarningKind.prompts`):
+a hull whose pilot or tech is wounded or on leave keeps the seat for them
+(`Person.seatState`) and sits out until they are back, marked on the TO&E
+with the day; only an empty seat is an open slot.
 
 ## 10. MekLab / refits
 

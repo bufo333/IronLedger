@@ -61,6 +61,9 @@ pub const WarningKind = enum {
     /// An engagement is inside the contact warning window: the odds, the
     /// strength and the ammunition while ROE and recall can still act.
     contact_imminent,
+    /// Hulls whose pilot or tech is wounded or on leave: the seat waits
+    /// for them and the hull sits out until they are back.
+    crew_recovering,
 
     /// Stops the turn until dealt with (ARCH §9.9): the desk decides which
     /// warnings gate `advance_day`; the screens only colour them.
@@ -68,6 +71,16 @@ pub const WarningKind = enum {
         return switch (self) {
             .unread_after_action, .battle_decision, .decision_due, .understaffed_hq, .overdrawn, .combat_ineffective, .dry_ammo, .hungry, .untreated_wounded, .insolvent => true,
             else => false,
+        };
+    }
+
+    /// The end-turn prompt asks about it. A warning the commander has
+    /// nothing to do about this turn stays on the Desk and does not
+    /// stop the turn to say so again.
+    pub fn prompts(self: WarningKind) bool {
+        return switch (self) {
+            .crew_recovering => false,
+            else => true,
         };
     }
 };
@@ -286,19 +299,40 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
         if (f.echelon != .company) continue;
         var no_pilot: u32 = 0;
         var no_tech: u32 = 0;
+        var wait_pilot: u32 = 0;
+        var wait_tech: u32 = 0;
+        var back: ?u32 = null;
         var uit = gs.units.iterator();
         while (uit.next()) |uentry| {
             const u = uentry.value_ptr;
             if (gs.companyOf(u.force) != f.id or u.isParked()) continue;
-            const pilot_ok = if (gs.person(u.pilot)) |p| p.isAvailable(day) else false;
-            if (!pilot_ok) no_pilot += 1;
+            const pilot = gs.person(u.pilot);
+            switch (if (pilot) |p| p.seatState(day) else .away) {
+                .fit => {},
+                .recovering => {
+                    wait_pilot += 1;
+                    if (pilot.?.backDay(day)) |d| back = @max(back orelse 0, d);
+                },
+                .away => no_pilot += 1,
+            }
             if (unit_mod.techRoleFor(u.kind) != null) {
-                const tech_ok = if (gs.person(u.tech)) |t| t.isAvailable(day) else false;
-                if (!tech_ok) no_tech += 1;
+                const tech = gs.person(u.tech);
+                switch (if (tech) |t| t.seatState(day) else .away) {
+                    .fit => {},
+                    .recovering => {
+                        wait_tech += 1;
+                        if (tech.?.backDay(day)) |d| back = @max(back orelse 0, d);
+                    },
+                    .away => no_tech += 1,
+                }
             }
         }
         if (no_pilot + no_tech > 0) {
             try out.append(alloc, .{ .kind = .open_slots, .text = try std.fmt.allocPrint(alloc, "{s}: {d} hull(s) without a pilot, {d} without a tech (no repairs/reloads)", .{ try table.plain(alloc, f.name), no_pilot, no_tech }) });
+        }
+        if (wait_pilot + wait_tech > 0) {
+            const until = if (back) |d| try std.fmt.allocPrint(alloc, " — all back by day {d}", .{d}) else "";
+            try out.append(alloc, .{ .kind = .crew_recovering, .text = try std.fmt.allocPrint(alloc, "{s}: {d} hull(s) sit out while the pilot heals or rests, {d} wait on the tech{s} (Forces A seats a spare)", .{ try table.plain(alloc, f.name), wait_pilot, wait_tech, until }) });
         }
         // The rest of the manning table: who is short and by how much.
         {
@@ -496,6 +530,42 @@ test "the checklist names open slots and overloaded techs" {
         if (w.kind == .open_slots) saw_open = true;
     }
     try std.testing.expect(saw_open);
+}
+
+test "a wounded pilot keeps the seat: a Desk note the end-turn prompt skips, not an open seat" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 63 });
+    defer gs.deinit();
+    const co = try gs.createForce("Alpha", .company, .none);
+    const uid = try gs.addUnit("AS7-D");
+    try gs.assignUnit(uid, co, .none);
+    const pid = try gs.hirePerson("Hurt", "Pilot", .mekwarrior);
+    gs.person(pid).?.assigned_force = co;
+    try gs.assignSlot(uid, .pilot, pid);
+    const tid = try gs.hirePerson("Fit", "Tech", .tech_mek);
+    gs.person(tid).?.assigned_force = co;
+    try gs.assignSlot(uid, .tech, tid);
+    const p = gs.person(pid).?;
+    p.status = .wounded;
+    p.wound_heal_day = gs.clock.day_index + 12;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var recovering: ?Warning = null;
+    for (try turnWarnings(&gs, arena.allocator())) |w| {
+        try std.testing.expect(w.kind != .open_slots);
+        if (w.kind == .crew_recovering) recovering = w;
+    }
+    const w = recovering orelse return error.TestExpectedEqual;
+    try std.testing.expect(!w.kind.prompts());
+    try std.testing.expect(std.mem.indexOf(u8, w.text, try std.fmt.allocPrint(arena.allocator(), "day {d}", .{gs.clock.day_index + 12})) != null);
+
+    // Missing in action leaves the seat open: that one the prompt asks about.
+    p.status = .mia;
+    var open = false;
+    for (try turnWarnings(&gs, arena.allocator())) |x| if (x.kind == .open_slots) {
+        open = x.kind.prompts();
+    };
+    try std.testing.expect(open);
 }
 
 test "a spent pilot in a seat is a checklist warning" {
