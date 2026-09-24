@@ -43,10 +43,9 @@ Done: every Stage 12 feature (12, 12B–12G) has shipped. Part 2 is next.
 
 ## D19. Terminal safety (audit #15, #16; rule 24)
 
-D19a, D19b-1 and D19b-2a are done (see Done); D19b-2b and the typed endpoint are left.
+D19a, D19b-1, D19b-2a and D19b-2b are done (see Done); the typed endpoint is left.
 
 
-- [ ] **D19b-2b, strings trusted by construction.** A test (and D22's `validate-data` step) that every data-file string (chassis, parts, planets, factions, abilities, awards, names, scenarios, …) contains no `{` and no control character; and a load check that every stored key (planet, chassis, part, faction, employer/enemy) resolves to a catalogue entry, `CorruptSave` otherwise. Chassis names copied into battle reports are validated the same way. After it, the strings the free-text sweep left raw are safe without per-site escaping.
 - [ ] Endpoint for untrusted text (decided in review): a type that makes unsafe composition fail to compile (e.g. an `Untrusted` wrapper on stored names, or `MarkupBuilder` as the only way a query composes markup), plus the Part 3 verify-script check. Until then the convention holds: query `text`/`cells`/`lines`/titles are escaped markup, query `name` fields are raw values, and whoever composes a raw name into markup calls `table.plain`.
 
 ## D20. Determinism (audit #17, #18; rules 1, 40)
@@ -74,7 +73,7 @@ D19a, D19b-1 and D19b-2a are done (see Done); D19b-2b and the typed endpoint are
 - [ ] `build.zig.zon` `.paths` adds `docs/logos` and `LICENSE`.
 - [ ] `commands.freightQuote` literals into `tuning.logistics`: 2,000 C-bills per ton per jump (both legs), 500 bp off per transport admin up to 4, the 3-day floor (rule 6).
 - [ ] `tuning.zig:743` validation keyed on field type (`Bp` → 0..100_000, `CBills` ≥ 0) with an explicit allow-list for signed deltas; today the bp bound runs on no field at all.
-- [ ] `validate-data` build step running the cross-file checks; install with `-Ddata` depends on it (an empty `rat.zon` fails the build, not the run).
+- [ ] `validate-data` build step running the cross-file checks; install with `-Ddata` depends on it (an empty `rat.zon` fails the build, not the run); it includes the markup-safety test over every data string (`table.unsafeString`).
 - [ ] In-file tests for `app.zig` and each `screens/*.zig`: row identity (after D21), cursor clamp on resize, key handlers against a generated campaign.
 - [ ] `commands.execute` becomes a dispatch switch into per-subsystem functions; `Store.load` becomes per-table decoders. Last, because it moves every cited line.
 
@@ -110,6 +109,7 @@ Contract deliverables closed before this list merged, all from the 2026-09-22 co
 - D19a renderer safety, audit #15/#16 (PR #66): `table.nextGlyph` is the one decoder for drawing and measuring (invalid or truncated UTF-8 is U+FFFD, C0/C1 controls and DEL are `?`); the encode fallback writes U+FFFD; `Screen.resize` allocates before it frees; `Term.init` restores raw mode, the resize handler and the main screen if it fails part way
 - D19b-1 one markup tokenizer, audit #15 (PR #67): `table.Tokenizer` is the one reader of screen markup (drawing, width, padding, wrapping, plain CLI text); `{{` is a literal brace; `MarkupBuilder` (`appendPlain` sanitizes and escapes, `appendMarkup` for trusted literals) and `table.plain`; `queries.stripMarks` is `table.plainText`, which knows every tag and sanitizes controls
 - D19b-2a free-text names escaped, audit #15 (PR #68): the name helpers (`forceName`, `hqName`, `personName`, `personText`) return escaped markup; every query and client site that composes a person, company, HQ, outfit, commander, player or campaign name, a callsign, a log line, battle-report prose, a filename or a music track into markup escapes it; `clip` reads whole tokens; the REPL prints raw names through `terminalText`. Tests: the hostile-name view test across desk, forces, people, contracts, HQ, roster, log, summary and commander views, and a lobby smoke step with a player named `{c}Evil`
+- D19b-2b strings trusted by construction, audit #15 (PR #69): `table.markupSafe` and a generic `unsafeString` walker; a test that every data-file string (all catalogues, tuning, name tables) is markup-safe; the loader's `validateStoredStrings` requires every stored chassis, part, planet and faction key to resolve and every battle-report display copy to be markup-safe (`CorruptSave` otherwise); `part.structure_key`/`isKnownKey` name the structure placeholder once; hall candidate names escaped
 
 ---
 

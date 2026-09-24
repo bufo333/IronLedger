@@ -1935,7 +1935,7 @@ pub fn hqDetail(alloc: Alloc, gs: *GameState, id: types.HqId) ![]const []const u
     for (gs.candidates.items, 0..) |c, i| {
         if (c.hq != id) continue;
         any = true;
-        try out.append(alloc, try std.fmt.allocPrint(alloc, "  [{d}] {s} {s}  {s} {s}  bonus {s}  expires day {d}", .{ i, c.spec.first, c.spec.last, @tagName(c.spec.role), @tagName(c.spec.experience), try money(alloc, c.asking_bonus), c.expires_day }));
+        try out.append(alloc, try std.fmt.allocPrint(alloc, "  [{d}] {s} {s}  {s} {s}  bonus {s}  expires day {d}", .{ i, try table.plain(alloc, c.spec.first), try table.plain(alloc, c.spec.last), @tagName(c.spec.role), @tagName(c.spec.experience), try money(alloc, c.asking_bonus), c.expires_day }));
     }
     if (!any) try out.append(alloc, "  no candidates");
     return out.toOwnedSlice(alloc);
@@ -2025,7 +2025,7 @@ pub fn hall(alloc: Alloc, gs: *GameState, hq_id: types.HqId, filter: HallFilter)
                 note = if (have < n) try std.fmt.allocPrint(alloc, "{{g}}fills {s} {d}→{d} of {d}{{/}}", .{ @tagName(c.spec.role), have, have + 1, n }) else "{d}desk already staffed{/}";
             }
         }
-        const name = try std.fmt.allocPrint(alloc, "{s} {s}", .{ c.spec.first, c.spec.last });
+        const name = try table.plain(alloc, try std.fmt.allocPrint(alloc, "{s} {s}", .{ c.spec.first, c.spec.last }));
         try rows.append(alloc, .{ .index = i, .cells = try table.row(alloc, &.{
             try std.fmt.allocPrint(alloc, "{d}", .{i}),
             name,
@@ -5661,7 +5661,7 @@ pub fn hangarSummaryLine(alloc: Alloc, gs: *GameState) ![]const u8 {
             if (s.condition != .ok) broken_slots += 1;
         }
     }
-    return try std.fmt.allocPrint(alloc, "Hangar quality A-F: {any} | broken slots outstanding: {d} | structure spares: {d}", .{ quality_counts, broken_slots, gs.spareCount("structure") });
+    return try std.fmt.allocPrint(alloc, "Hangar quality A-F: {any} | broken slots outstanding: {d} | structure spares: {d}", .{ quality_counts, broken_slots, gs.spareCount(@import("../domain/part.zig").structure_key) });
 }
 
 /// The next pending decision for a script that answers it: its index, kind and first option.

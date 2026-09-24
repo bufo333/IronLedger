@@ -1302,15 +1302,15 @@ pub const GameState = struct {
             const locations = [_][]const u8{ "hd", "ct", "lt", "rt", "la", "ra", "ll", "rl" };
             for (locations) |loc| {
                 try u.slots.append(alloc, .{
-                    .slot_key = try std.fmt.allocPrint(alloc, "{s}.structure", .{loc}),
-                    .part_key = "structure",
+                    .slot_key = try std.fmt.allocPrint(alloc, "{s}.{s}", .{ loc, part_mod.structure_key }),
+                    .part_key = part_mod.structure_key,
                     .class = .structure,
                 });
             }
         } else {
             try u.slots.append(alloc, .{
                 .slot_key = "chassis.structure",
-                .part_key = "structure",
+                .part_key = part_mod.structure_key,
                 .class = .structure,
             });
         }

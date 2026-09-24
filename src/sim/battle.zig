@@ -276,7 +276,7 @@ fn companyMods(gs: *GameState, c: *const contract_mod.Contract) autoresolve.Camp
     // Supply state (Stage 9B): the company's own field stores — spares on
     // hand, and whether the mess has been feeding people.
     const site: types.Site = .{ .company = c.assigned_company };
-    mods.supply_parts = gs.stockCount(site, "structure") > 0 or gs.stockCount(site, "armor") > 0;
+    mods.supply_parts = gs.stockCount(site, part_mod.structure_key) > 0 or gs.stockCount(site, "armor") > 0;
     const shortage = if (gs.force(c.assigned_company)) |f| f.supply_shortage_days else 0;
     mods.supply_provisions = shortage == 0;
 
