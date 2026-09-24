@@ -1,0 +1,11 @@
+# Governance files: a pull request touching any of these needs the owner's
+# review (the `main` ruleset requires Code Owner review).
+/CLAUDE.md                        @bufo333
+/ARCHITECTURE.md                  @bufo333
+/TODO.md                          @bufo333
+/docs/coding-contract*.md         @bufo333
+/docs/contract-exceptions.md      @bufo333
+/docs/verify-contract.sh          @bufo333
+/docs/verify-contract.baseline    @bufo333
+/.github/                         @bufo333
+/.claude/                         @bufo333
