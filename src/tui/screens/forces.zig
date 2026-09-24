@@ -250,3 +250,17 @@ pub fn key(self: *App, ch: u21) anyerror!void {
         }
 
 }
+
+fn toTab(c: *app.ClientForTest, tab: app.Tab) !void {
+    try app.pressForTest(c, .{ .f = @intFromEnum(tab) + 1 });
+}
+
+test "+ opens the raise-a-company name prompt and Esc leaves it" {
+    const c = try app.clientForTest(std.testing.allocator);
+    defer app.deinitForTest(c, std.testing.allocator);
+    try toTab(c, .forces);
+    try app.pressForTest(c, .{ .char = '+' });
+    try std.testing.expect(c.app.modal == .input and c.app.modal.input == .raise_name);
+    try app.pressForTest(c, .escape);
+    try std.testing.expect(c.app.modal == .none);
+}

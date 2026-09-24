@@ -122,3 +122,25 @@ pub fn key(self: *App, ch: u21) anyerror!void {
         }
 
 }
+
+fn toTab(c: *app.ClientForTest, tab: app.Tab) !void {
+    try app.pressForTest(c, .{ .f = @intFromEnum(tab) + 1 });
+}
+
+test "u on a facility row acts on the facility the detail query puts under the cursor" {
+    const c = try app.clientForTest(std.testing.allocator);
+    defer app.deinitForTest(c, std.testing.allocator);
+    try toTab(c, .hq);
+    const g = &c.app.gs.?;
+    const id: app.types.HqId = @enumFromInt(c.app.hqSelId(g));
+    const detail = try q.hqDetailView(c.app.a(), g, id);
+    const row = for (detail.facility, 0..) |f, i| {
+        if (f != null) break i;
+    } else return error.TestUnexpectedResult;
+    const kind = detail.facility[row].?;
+    c.app.cur(0).* = row;
+    try app.pressForTest(c, .{ .char = 'u' });
+    // Started or refused, the line names the facility the row showed.
+    try std.testing.expect(std.mem.indexOf(u8, c.app.msg.slice(), @tagName(kind)) != null or std.mem.startsWith(u8, c.app.msg.slice(), "refused"));
+    try std.testing.expect(c.app.modal == .none); // a facility row upgrades directly, no picker
+}

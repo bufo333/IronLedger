@@ -148,3 +148,18 @@ pub fn key(self: *App, ch: u21) anyerror!void {
         else => {},
     }
 }
+
+fn toTab(c: *app.ClientForTest, tab: app.Tab) !void {
+    try app.pressForTest(c, .{ .f = @intFromEnum(tab) + 1 });
+}
+
+test "/ steps the market filter and resets the cursors" {
+    const c = try app.clientForTest(std.testing.allocator);
+    defer app.deinitForTest(c, std.testing.allocator);
+    try toTab(c, .market);
+    const before = c.app.market_filter;
+    c.app.cur(0).* = 3;
+    try app.pressForTest(c, .{ .char = '/' });
+    try std.testing.expect(c.app.market_filter != before);
+    try std.testing.expectEqual(@as(usize, 0), c.app.cur(0).*);
+}

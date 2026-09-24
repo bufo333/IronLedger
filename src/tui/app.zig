@@ -3478,3 +3478,77 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, env: *const std.process.Environ.M
     try app.run();
 }
 
+
+/// A headless client over a generated campaign, for the screen tests: the
+/// frames go to a discarding writer, saves to an in-memory store, and the
+/// screen is 200x50. Heap-allocated because `App` keeps a pointer to its
+/// `Term`; `deinitForTest` frees it.
+pub const ClientForTest = struct {
+    sink: std.Io.Writer.Discarding,
+    term: Term,
+    app: App,
+};
+
+pub fn clientForTest(gpa: std.mem.Allocator) !*ClientForTest {
+    const c = try gpa.create(ClientForTest);
+    errdefer gpa.destroy(c);
+    c.sink = std.Io.Writer.Discarding.init(&.{});
+    c.term = .{ .in_fd = -1, .orig = undefined, .out = &c.sink.writer };
+    const store = try game.lobby.Lobby.open(":memory:");
+    c.app = try App.init(gpa, std.testing.io, &c.term, store);
+    try c.app.screen.resize(200, 50);
+    c.app.player_id = try store.createPlayer("Test");
+    c.app.w_name.set("Erik Kalmar");
+    c.app.w_outfit.set("The Unforgiven");
+    c.app.w_company.set("Alpha Company");
+    try c.app.generateCampaign();
+    try c.app.beginCampaign();
+    return c;
+}
+
+pub fn deinitForTest(c: *ClientForTest, gpa: std.mem.Allocator) void {
+    const store = c.app.store;
+    c.app.deinit();
+    store.close();
+    gpa.destroy(c);
+}
+
+/// One key through the client's handler, then a frame, as the run loop does.
+pub fn pressForTest(c: *ClientForTest, key: Key) !void {
+    _ = c.app.frame.reset(.retain_capacity);
+    try c.app.handleKey(key);
+    try c.app.draw();
+}
+
+test "every screen draws at full size and at 80x24, and the cursor clamps after a resize" {
+    const c = try clientForTest(std.testing.allocator);
+    defer deinitForTest(c, std.testing.allocator);
+    for (0..10) |t| {
+        try pressForTest(c, .{ .f = @intCast(t + 1) });
+        try std.testing.expectEqual(@as(Tab, @enumFromInt(t)), c.app.tab);
+        // Run the cursor far past any list, then shrink: every pane still draws.
+        for (0..60) |_| try pressForTest(c, .{ .char = 'j' });
+    }
+    try c.app.screen.resize(80, 24);
+    for (0..10) |t| {
+        try pressForTest(c, .{ .f = @intCast(t + 1) });
+        for (0..3) |_| try pressForTest(c, .tab);
+        try pressForTest(c, .{ .char = 'k' });
+    }
+    try c.app.screen.resize(200, 50);
+    try c.app.draw();
+}
+
+test "the end-turn key moves the calendar, and Esc closes whatever modal it opened" {
+    const c = try clientForTest(std.testing.allocator);
+    defer deinitForTest(c, std.testing.allocator);
+    const day0 = (try q.status(c.app.a(), &c.app.gs.?)).day;
+    try pressForTest(c, .{ .char = 'n' });
+    // With warnings standing the checklist asks first; `n` again confirms.
+    if (c.app.modal != .none) try pressForTest(c, .{ .char = 'n' });
+    try std.testing.expect((try q.status(c.app.a(), &c.app.gs.?)).day > day0);
+    try pressForTest(c, .{ .char = '?' });
+    try std.testing.expect(c.app.modal != .none);
+    try pressForTest(c, .escape);
+    try std.testing.expect(c.app.modal == .none);
+}

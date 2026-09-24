@@ -151,3 +151,25 @@ test "every inbox line belongs to the decision it was drawn for" {
     const empty: q.Desk = .{ .rating_line = "", .checklist = &.{}, .inbox = &.{}, .companies = &.{}, .hqs = &.{}, .log = &.{} };
     try std.testing.expectEqual(@as(usize, 0), (try inboxPane(al, empty)).event.len);
 }
+
+fn toTab(c: *app.ClientForTest, tab: app.Tab) !void {
+    try app.pressForTest(c, .{ .f = @intFromEnum(tab) + 1 });
+}
+
+test "Enter on a checklist warning goes where the warning says; e opens the emblem picker" {
+    const c = try app.clientForTest(std.testing.allocator);
+    defer app.deinitForTest(c, std.testing.allocator);
+    try toTab(c, .desk);
+    const view = try q.desk(c.app.a(), &c.app.gs.?, q.desk_log_rows);
+    if (view.checklist.len > 0) {
+        const w = view.checklist[0];
+        try app.pressForTest(c, .enter);
+        if (w.kind == .contact_imminent) {
+            try std.testing.expect(c.app.modal == .battle_orders);
+        } else try std.testing.expectEqual(@as(app.Tab, @enumFromInt(w.jump)), c.app.tab);
+        try app.pressForTest(c, .escape);
+        try toTab(c, .desk);
+    }
+    try app.pressForTest(c, .{ .char = 'e' });
+    try std.testing.expect(c.app.modal == .emblem);
+}
