@@ -87,50 +87,61 @@ fn inboxPane(al: std.mem.Allocator, view: q.Desk) !InboxPane {
 pub fn move(self: *App, delta: i32) anyerror!void {
     const al = self.a();
     const g = &self.gs.?;
-        const view = try q.desk(al, g, q.desk_log_rows);
-        switch (self.focus) {
-            0 => self.moveCursor(0, delta, view.checklist.len),
-            1 => self.moveCursor(1, delta, (try inboxPane(al, view)).lines.len),
-            else => self.moveCursor(2, delta, view.log.len),
-        }
-
+    const view = try q.desk(al, g, q.desk_log_rows);
+    switch (self.focus) {
+        0 => self.moveCursor(0, delta, view.checklist.len),
+        1 => self.moveCursor(1, delta, (try inboxPane(al, view)).lines.len),
+        else => self.moveCursor(2, delta, view.log.len),
+    }
 }
 
-pub fn enter(self: *App) anyerror!void {
+const Action = enum { go_to, decide, read_entry, battles, emblem };
+
+pub const bindings = [_]app.keys.Binding(Action){
+    .{ .match = .{ .key = .enter }, .action = .go_to, .label = "go to", .group = .act, .pane = 0, .help = "go where the warning points (a contact warning opens its battle orders)" },
+    .{ .match = .{ .key = .enter }, .action = .decide, .label = "decide", .group = .act, .pane = 1, .help = "open the decision under the cursor" },
+    .{ .match = .{ .key = .enter }, .action = .read_entry, .label = "read entry", .group = .act, .pane = 2, .help = "read the whole log entry under the cursor" },
+    .{ .match = app.keys.Match.char('b'), .action = .battles, .label = "battles", .group = .act, .help = "the engagements still on record: pick one to read" },
+    .{ .match = app.keys.Match.char('e'), .action = .emblem, .label = "emblem", .group = .act, .help = "choose the outfit's emblem" },
+};
+pub const legend = app.keys.entries(Action, &bindings);
+
+pub fn handle(self: *App, k: app.Key) anyerror!bool {
+    const hit = app.keys.lookup(Action, &bindings, self.focus, k) orelse return false;
     const al = self.a();
     const g = &self.gs.?;
-        const view = try q.desk(al, g, q.desk_log_rows);
-        if (self.focus == 0 and view.checklist.len > 0) {
+    switch (hit.action) {
+        .go_to => {
+            const view = try q.desk(al, g, q.desk_log_rows);
+            if (view.checklist.len == 0) return true;
             const w = view.checklist[@min(self.cur(0).*, view.checklist.len - 1)];
             // A contact warning opens that engagement's battle orders.
             if (w.kind == .contact_imminent and w.contract != .none) {
                 self.openOrders(w.contract);
             } else self.switchTab(@enumFromInt(w.jump));
-        } else if (self.focus == 1) {
+        },
+        .decide => {
+            const view = try q.desk(al, g, q.desk_log_rows);
             const ib = try inboxPane(al, view);
             const c = self.cur(1).*;
             if (c < ib.event.len) self.modal = .{ .decision = ib.event[c] };
-        } else if (view.log.len > 0) {
+        },
+        .read_entry => {
+            const view = try q.desk(al, g, q.desk_log_rows);
             // The LOG pane clips; the modal wraps the whole entry.
-            self.openModal(.{ .log_entry = @min(self.cur(2).*, view.log.len - 1) });
-        }
-
-}
-
-pub fn key(self: *App, ch: u21) anyerror!void {
-    switch (ch) {
-        // The engagements still on record: pick one to read.
-        'b' => {
+            if (view.log.len > 0) self.openModal(.{ .log_entry = @min(self.cur(2).*, view.log.len - 1) });
+        },
+        .battles => {
             self.battles_from_list = true;
             self.openModal(.battle_list);
         },
-        'e' => {
+        .emblem => {
             self.logos = &.{};
             try self.loadLogoList();
             self.openModal(.emblem);
         },
-        else => {},
     }
+    return true;
 }
 
 test "every inbox line belongs to the decision it was drawn for" {
@@ -154,6 +165,10 @@ test "every inbox line belongs to the decision it was drawn for" {
 
 fn toTab(c: *app.ClientForTest, tab: app.Tab) !void {
     try app.pressForTest(c, .{ .f = @intFromEnum(tab) + 1 });
+}
+
+test "the desk bindings are well formed" {
+    try app.keys.expectWellFormed(Action, &bindings);
 }
 
 test "Enter on a checklist warning goes where the warning says; e opens the emblem picker" {

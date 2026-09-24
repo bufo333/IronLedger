@@ -19,7 +19,7 @@ pub fn draw(self: *App) anyerror!void {
     if (view.worlds.len == 0) return;
     if (self.map_cursor >= view.worlds.len) self.map_cursor = 0;
     const mw: u16 = if (layout.wide(b.w)) layout.three_quarters.of(b.w) else b.w;
-    const inner = s.pane(.{ .x = b.x, .y = b.y, .w = mw, .h = b.h }, .{ .title = try std.fmt.allocPrint(al, "STAR MAP · colour by {s} [c]", .{@tagName(self.map_color)}), .focused = true, .right_title = try std.fmt.allocPrint(al, "{d} worlds · {d} in ring · {d} beachhead · {d} dark · zoom ×{d} [+] [-]", .{ view.worlds.len, view.in_ring, view.in_band, view.dark, self.map_zoom }) });
+    const inner = s.pane(.{ .x = b.x, .y = b.y, .w = mw, .h = b.h }, .{ .title = try std.fmt.allocPrint(al, "STAR MAP · colour by {s}", .{@tagName(self.map_color)}), .focused = true, .right_title = try std.fmt.allocPrint(al, "{d} worlds · {d} in ring · {d} beachhead · {d} dark · zoom ×{d}  {s}", .{ view.worlds.len, view.in_ring, view.in_band, view.dark, self.map_zoom, try app.keys.paneTitle(al, &legend, 0) }) });
     const cw = view.worlds[self.map_cursor];
     const geom = App.mapGeom(view, inner, self.map_zoom, .{ cw.x, cw.y });
     var offscreen: u32 = 0;
@@ -70,16 +70,16 @@ pub fn draw(self: *App) anyerror!void {
         if (w.companies_here > 0 and w.hq_here == .none) s.put(c[0] + 3 + @as(i32, nw), c[1], '+', .good);
     }
     if (mw < b.w) {
-        const legend: []const u8 = switch (self.map_color) {
+        const colour_legend: []const u8 = switch (self.map_color) {
             .faction => try q.factionKeyLine(al),
             .industry => "{g}bright = industry 4–5{/}   normal = 2–3   {d}dim = backwater{/}",
             .standing => "{g}green = favoured{/}   {a}amber = below zero{/}   {c}red = shunned{/}   {d}dim = neutral{/}",
             .activity => "{a}@ HQ{/}   {g}+ company{/}   {a}^ offers{/}   {p}= worked{/}   {d}dim = nothing yet{/}",
         };
-        s.textPad(inner.x, inner.y + inner.h - 1, inner.w, if (offscreen > 0) try std.fmt.allocPrint(al, "{s}   {{d}}· c colour · +/- zoom · h j k l pan · names show at zoom ×2 ·{{/}} {{a}}{d} off screen{{/}}", .{ legend, offscreen }) else try std.fmt.allocPrint(al, "{s}   {{d}}· c colour · +/- zoom · h j k l pan · names show at zoom ×2{{/}}", .{legend}), .normal);
+        s.textPad(inner.x, inner.y + inner.h - 1, inner.w, if (offscreen > 0) try std.fmt.allocPrint(al, "{s}   {{d}}· names show at zoom ×2 ·{{/}} {{a}}{d} off screen{{/}}", .{ colour_legend, offscreen }) else try std.fmt.allocPrint(al, "{s}   {{d}}· names show at zoom ×2{{/}}", .{colour_legend}), .normal);
     } else {
         const w = view.worlds[self.map_cursor];
-        s.textPad(inner.x, inner.y + inner.h - 1, inner.w, try std.fmt.allocPrint(al, "{{a}}{s}{{/}} {s} · ind {d} · {d} LY · {s} · {d} offers  {{d}}[f] found [o] board{{/}}", .{
+        s.textPad(inner.x, inner.y + inner.h - 1, inner.w, try std.fmt.allocPrint(al, "{{a}}{s}{{/}} {s} · ind {d} · {d} LY · {s} · {d} offers", .{
             w.name,        w.faction, w.industry, w.dist_ly,
             switch (w.band) {
                 .ring => "{g}in ring{/}",
@@ -94,8 +94,6 @@ pub fn draw(self: *App) anyerror!void {
         const w = view.worlds[self.map_cursor];
         var rows: std.ArrayListUnmanaged([]const u8) = .empty;
         try rows.appendSlice(al, try q.worldDetail(al, g, &view, &w));
-        try rows.append(al, "");
-        try rows.append(al, "{d}[f] found HQ here  [o] contract board{/}");
         const side_h: u16 = layout.major.of(b.h);
         self.listPane(.{ .x = b.x + mw, .y = b.y, .w = b.w - mw, .h = side_h }, "WORLD", rows.items, 1, false, false);
         var reach: std.ArrayListUnmanaged([]const u8) = .empty;
@@ -120,37 +118,53 @@ pub fn move(self: *App, delta: i32) anyerror!void {
     try self.mapPan(0, if (delta > 0) -1 else 1);
 }
 
-pub fn enter(self: *App) anyerror!void {
-    self.switchTab(.contracts);
-}
+const Action = enum { pan_left, pan_right, zoom_in, zoom_out, colours, found, offers };
 
-pub fn key(self: *App, ch: u21) anyerror!void {
+pub const bindings = [_]app.keys.Binding(Action){
+    .{ .match = app.keys.Match.char('h'), .action = .pan_left, .label = "pan", .group = .navigate, .shown = "h l", .title = 0, .help = "pan the map west / east (j k and the arrows pan too)" },
+    .{ .match = app.keys.Match.char('l'), .action = .pan_right, .label = "pan east", .group = .navigate, .show_footer = false, .show_help = false },
+    .{ .match = app.keys.Match.char('+'), .action = .zoom_in, .label = "zoom", .group = .navigate, .shown = "+ -", .title = 0, .help = "zoom in / out (names show at zoom ×2)" },
+    .{ .match = app.keys.Match.char('='), .action = .zoom_in, .label = "zoom in", .group = .navigate, .show_footer = false, .show_help = false },
+    .{ .match = app.keys.Match.char('-'), .action = .zoom_out, .label = "zoom out", .group = .navigate, .show_footer = false, .show_help = false },
+    .{ .match = app.keys.Match.char('c'), .action = .colours, .label = "colours", .group = .navigate, .title = 0, .help = "colour the map by faction, industry, standing or activity" },
+    .{ .match = app.keys.Match.char('f'), .action = .found, .label = "found HQ here", .group = .act, .title = 0, .help = "found an HQ on the world under the cursor (fills the command line)" },
+    .{ .match = app.keys.Match.char('o'), .action = .offers, .label = "offers here", .group = .act, .title = 0, .help = "open the contract board" },
+    .{ .match = .{ .key = .enter }, .action = .offers, .label = "contract board", .group = .act, .show_footer = false, .show_help = false },
+};
+pub const legend = app.keys.entries(Action, &bindings);
+
+pub fn handle(self: *App, k: app.Key) anyerror!bool {
+    const hit = app.keys.lookup(Action, &bindings, self.focus, k) orelse return false;
     const al = self.a();
     const g = &self.gs.?;
-    switch (ch) {
-        'h' => try self.mapPan(-1, 0),
-        'l' => try self.mapPan(1, 0),
-        '+', '=' => self.map_zoom = @min(8, self.map_zoom * 2),
-        '-' => self.map_zoom = @max(1, self.map_zoom / 2),
-        'c' => self.map_color = switch (self.map_color) {
+    switch (hit.action) {
+        .pan_left => try self.mapPan(-1, 0),
+        .pan_right => try self.mapPan(1, 0),
+        .zoom_in => self.map_zoom = @min(8, self.map_zoom * 2),
+        .zoom_out => self.map_zoom = @max(1, self.map_zoom / 2),
+        .colours => self.map_color = switch (self.map_color) {
             .faction => .industry,
             .industry => .standing,
             .standing => .activity,
             .activity => .faction,
         },
-        'f' => {
+        .found => {
             const view = try q.map(al, g);
-            if (view.worlds.len == 0) return;
+            if (view.worlds.len == 0) return true;
             var buf: [96]u8 = undefined;
             self.openCommand(std.fmt.bufPrint(&buf, "found {s} ", .{view.worlds[@min(self.map_cursor, view.worlds.len - 1)].key}) catch "found ");
         },
-        'o' => self.switchTab(.contracts),
-        else => {},
+        .offers => self.switchTab(.contracts),
     }
+    return true;
 }
 
 fn toTab(c: *app.ClientForTest, tab: app.Tab) !void {
     try app.pressForTest(c, .{ .f = @intFromEnum(tab) + 1 });
+}
+
+test "the map bindings are well formed" {
+    try app.keys.expectWellFormed(Action, &bindings);
 }
 
 test "+ and - zoom the star map, and o jumps to the contract board" {
