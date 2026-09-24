@@ -1136,7 +1136,9 @@ pub const App = struct {
                     self.say(.crit, "{s}", .{game.cli.errorText(err)});
                     return;
                 };
-                if (r.eta_days == 0) {
+                if (r.unit == .none) {
+                    self.say(.crit, "{s}", .{game.cli.hull_fraud_text});
+                } else if (r.eta_days == 0) {
                     self.say(.good, "#{d} bought and placed in {s}", .{ @intFromEnum(r.unit), lance.name });
                 } else {
                     self.say(.good, "#{d} bought — {d} days in transit, it joins the first lance with room on arrival", .{ @intFromEnum(r.unit), r.eta_days });

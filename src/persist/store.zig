@@ -368,6 +368,7 @@ pub const Store = struct {
                 .{ "stat_enemy_bv", @as(i64, @intCast(gs.stats.enemy_bv_destroyed)) }, .{ "next_person_id", gs.next_person_id },
                 .{ "next_unit_id", gs.next_unit_id },                 .{ "next_force_id", gs.next_force_id },
                 .{ "next_hq_id", gs.next_hq_id },                     .{ "next_contract_id", gs.next_contract_id },
+                .{ "next_battle_id", gs.next_battle_id },
             };
             for (ints) |kv| {
                 try st.bindAll(.{ cid, kv[0], kv[1] });
@@ -881,6 +882,7 @@ pub const Store = struct {
                 if (std.mem.eql(u8, key, "next_force_id")) gs.next_force_id = @intCast(v);
                 if (std.mem.eql(u8, key, "next_hq_id")) gs.next_hq_id = @intCast(v);
                 if (std.mem.eql(u8, key, "next_contract_id")) gs.next_contract_id = @intCast(v);
+                if (std.mem.eql(u8, key, "next_battle_id")) gs.next_battle_id = @intCast(v);
             }
             const tx = try self.db.prepare("SELECT key, value FROM meta_text WHERE cid = ?1");
             defer tx.finalize();
@@ -1604,6 +1606,9 @@ pub const Store = struct {
         // Counters that arrived after the campaign started (12C.8): if the
         // book is empty but the log has battles, count them up.
         if (gs.stats.isEmpty()) recoverStatsFromLog(&gs);
+        // Saves without a `next_battle_id` row still hold reports, held hulls
+        // and decisions that name battles; numbering resumes past all of them.
+        gs.resumeBattleIds();
         return gs;
     }
 
@@ -2106,6 +2111,63 @@ test "12G.7: a hull the enemy holds round-trips, slots and all — off the books
     }
     // The slot rows really came back — the drop this test exists to catch.
     try std.testing.expect(slots_seen > 0);
+}
+
+/// A campaign that has fought `fights` engagements, every battle decision
+/// answered with its default and every report read.
+fn foughtCampaignForTest(gs: *GameState, fights: u32) !void {
+    _ = try gs.createCommander("T", .LC, .line_officer);
+    const co = try @import("../gen/company_gen.zig").generateInto(gs, "Alpha");
+    try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
+        .id = @enumFromInt(1),
+        .kind = .recon_raid,
+        .employer_key = "LC",
+        .enemy_key = "PER",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 6, .base_pay_month = 400_000 },
+        .status = .active,
+        .assigned_company = co,
+    });
+    const c = gs.contracts.getPtr(@enumFromInt(1)).?;
+    for (@import("../domain/part.zig").munition_keys) |key| try gs.addStock(.{ .company = co }, key, 40);
+    for (0..fights) |_| {
+        try @import("../sim/battle.zig").resolveEngagement(gs, c);
+        while (gs.event_queue.blocking()) |ev| try contract_events.resolveChoice(gs, ev.id, ev.default_choice);
+        while (gs.battle_reports.unread()) |r| _ = gs.battle_reports.markRead(r.id);
+    }
+}
+
+test "battle report IDs stay unique after a save and load" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 3003 });
+    defer gs.deinit();
+    try foughtCampaignForTest(&gs, 3);
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+    try std.testing.expectEqual(gs.next_battle_id, loaded.next_battle_id);
+    const fresh = loaded.nextBattleId();
+    for (loaded.battle_reports.kept.items) |r| try std.testing.expect(r.id != fresh);
+}
+
+test "a save without the battle counter resumes numbering past every battle it references" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 3004 });
+    defer gs.deinit();
+    try foughtCampaignForTest(&gs, 3);
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    // Saves before the counter was stored carry no `next_battle_id` row.
+    try store.db.exec("DELETE FROM meta WHERE key = 'next_battle_id'");
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+    var max: u32 = 0;
+    for (loaded.battle_reports.kept.items) |r| max = @max(max, @intFromEnum(r.id));
+    for (loaded.held_hulls.items) |h| max = @max(max, @intFromEnum(h.battle));
+    for (loaded.event_queue.pending.items) |ev| max = @max(max, @intFromEnum(ev.battle));
+    try std.testing.expect(max > 0);
+    try std.testing.expect(loaded.next_battle_id > max);
 }
 
 test "12G.6: a battle decision round-trips answerable, and still holds the turn" {

@@ -1848,11 +1848,22 @@ pub const GameState = struct {
         return @max(0, self.creditLimit() - owed);
     }
 
-    /// The next engagement's id (12G.3); never reused within a campaign.
+    /// The next engagement's id; never reused within a campaign.
     pub fn nextBattleId(self: *GameState) types.BattleId {
         const id: types.BattleId = @enumFromInt(self.next_battle_id);
         self.next_battle_id += 1;
         return id;
+    }
+
+    /// Raise the battle counter past every battle a report, a held hull or
+    /// a pending decision names, so a new engagement cannot reuse an id
+    /// that is still referenced.
+    pub fn resumeBattleIds(self: *GameState) void {
+        var max: u32 = 0;
+        for (self.battle_reports.kept.items) |r| max = @max(max, @intFromEnum(r.id));
+        for (self.held_hulls.items) |h| max = @max(max, @intFromEnum(h.battle));
+        for (self.event_queue.pending.items) |ev| max = @max(max, @intFromEnum(ev.battle));
+        self.next_battle_id = @max(self.next_battle_id, max + 1);
     }
 
     /// Strike a hull from the books: seats open, bay work and refit plans
