@@ -740,7 +740,7 @@ fn execSetOfficeStaff(gs: *GameState, o: @FieldType(Command, "set_office_staff")
     if (gs.hqs.getPtr(o.hq) == null) return Error.UnknownHq;
     if (o.delta > 0) {
         const id = try gs.recruitGenerated(o.role, o.hq, .market);
-        gs.postToHq(id, o.hq) catch return Error.UnknownHq;
+        try gs.postToHq(id, o.hq);
         return .{ .hired = id };
     }
     var last: types.PersonId = .none;
@@ -769,7 +769,13 @@ fn execShipComponentsHome(gs: *GameState, co: @FieldType(Command, "ship_componen
     if (keys.items.len == 0) return Error.NothingToShip;
     var sent: u32 = 0;
     for (keys.items, qtys.items) |key, qty| {
-        _ = shipStock(gs, key, qty, .{ .company = co }, .{ .hq = home }) catch continue;
+        // A line the route, the room or the funds refuse stays with the
+        // company; `shipStock` refuses before anything moves, so only an
+        // allocation failure can follow a paid freight bill.
+        _ = shipStock(gs, key, qty, .{ .company = co }, .{ .hq = home }) catch |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+            else => continue,
+        };
         sent += qty;
     }
     return .{ .count = sent, .hq = home };
@@ -968,7 +974,7 @@ fn execBuyListing(gs: *GameState, index: @FieldType(Command, "buy_listing")) Err
         _ = gs.market_listings.orderedRemove(index);
         const uid = try gs.addUnit(listing.item_key);
         if (listing.condition) |cond| gs.applyHullCondition(uid, cond);
-        gs.placeUnitInCompany(uid, co) catch return Error.UnknownForce;
+        try gs.placeUnitInCompany(uid, co);
         try gs.log(.market, .{ .company = co, .contract = c.id }, "[market] {s} bought {s} ({s}) on {s} for {d} from local funds — seat a pilot and a tech", .{
             if (gs.force(co)) |f| f.name else "company", listing.item_key, if (listing.condition) |cd| cd.label() else "new", c.planet_key, price,
         });
@@ -1193,7 +1199,7 @@ fn execBuyHullFor(gs: *GameState, b: @FieldType(Command, "buy_hull_for")) Error!
     const days: u32 = if (from != null and to != null) logistics.deliveryDays(from.?, to.?) else 0;
     if (days == 0) {
         const lance_ok = if (gs.force(b.lance)) |l| (gs.companyOf(b.lance) == b.company and (l.echelon != .lance or l.units.items.len < force_mod.lance_size)) else false;
-        if (lance_ok) gs.moveUnitToForce(uid, b.lance) catch return Error.UnknownForce else gs.placeUnitInCompany(uid, b.company) catch return Error.UnknownForce;
+        if (lance_ok) try gs.moveUnitToForce(uid, b.lance) else try gs.placeUnitInCompany(uid, b.company);
         try gs.log(.market, .{ .company = b.company }, "[raise] {s} #{d} joins {s}", .{ listing.item_key, @intFromEnum(uid), dest.name });
     } else {
         const u = gs.unit(uid).?;
@@ -1579,7 +1585,7 @@ fn execAssign(gs: *GameState, a: @FieldType(Command, "assign")) Error!Result {
 }
 
 fn execUnassign(gs: *GameState, u: @FieldType(Command, "unassign")) Error!Result {
-    gs.unassignSlot(u.unit, u.slot) catch return Error.UnknownUnit;
+    try gs.unassignSlot(u.unit, u.slot);
     return .{};
 }
 
@@ -2004,7 +2010,7 @@ fn freightQuote(gs: *GameState, alloc: std.mem.Allocator, from: types.Site, to: 
         .outfit => if (gs.hqs.count() > 0) gs.hqs.keys()[0] else .none,
     };
     if (from_hq != .none and to_hq != .none and from_hq != to_hq) {
-        route = network.routeBetween(gs, from_hq, to_hq, alloc) catch return Error.NoRoute;
+        route = try network.routeBetween(gs, from_hq, to_hq, alloc);
         if (!network.fitsThroughput(gs, route, tons_moved)) return Error.ThroughputExceeded;
         days = network.routeDays(route);
         var jumps_total: u32 = 0;
@@ -2533,6 +2539,23 @@ test "insolvency holds the turn; bankruptcy ends the campaign" {
     gs.funds = -1_000_000_000;
     try std.testing.expectError(Error.Bankrupt, execute(&gs, .advance_day));
     try std.testing.expect(gs.bankrupt);
+}
+
+test "a policy the outfit cannot fund is skipped, and the day still advances" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 13 });
+    defer gs.deinit();
+    _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    const co = (try execute(&gs, .{ .new_company = "Alpha" })).created_force;
+    gs.policies.clearRetainingCapacity();
+    _ = try execute(&gs, .{ .set_policy = .{ .entity = .{ .company = co }, .floor = 300_000, .monthly_cap = 400_000 } });
+    gs.forces.getPtr(co).?.local_funds = 0;
+    gs.funds = 1_000; // far short of the top-up
+    gs.clock.date.day = 10;
+    const day = gs.clock.day_index;
+    _ = try execute(&gs, .advance_day);
+    try std.testing.expectEqual(day + 1, gs.clock.day_index);
+    try std.testing.expectEqual(@as(usize, 0), gs.fund_couriers.items.len);
+    try std.testing.expectEqual(@as(i64, 0), gs.policies.items[0].sent_this_month);
 }
 
 test "policies run daily under a monthly cap; resupply ships provisions to a company in the field" {
