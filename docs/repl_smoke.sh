@@ -33,6 +33,9 @@ out=$(printf '%s\n' \
   'read 999' \
   'help' \
   'load 999' \
+  'briefing 999' \
+  'confirm 999' \
+  'rush 999' \
   'save' \
   'quit' | "$exe" --repl --store "$db" 2>&1)
 check() { echo "$out" | grep -q -- "$1" || { echo "MISSING: $1"; echo "$out" | tail -40; exit 1; }; }
@@ -57,6 +60,9 @@ check 'no engagement on record with that id'
 check 'fabricate'
 # A campaign id with no campaign row is refused, not loaded blank.
 check 'load failed: no saved campaign has that id'
+# Battle orders need an engagement in view; an unknown contract is refused.
+check 'no engagement on that contract is close enough to give orders for'
+check 'no contract has that id'
 check 'stripped for parts'
 check 'drew 500000 c-bills over 12 months'
 check 'under contract:'

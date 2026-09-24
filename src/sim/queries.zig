@@ -245,6 +245,8 @@ pub const ChecklistRow = struct {
     text: []const u8,
     /// Tab that fixes it: 0 desk … 7 lab (docs/tui.md screen order).
     jump: u8,
+    /// The contract it is about: a contact warning opens its battle orders.
+    contract: types.ContractId = .none,
 };
 
 pub const InboxRow = struct {
@@ -317,6 +319,101 @@ fn repairDetail(alloc: Alloc, gs: *GameState, ev: *const @import("events.zig").E
     return out.toOwnedSlice(alloc);
 }
 
+/// One lance in the battle orders: its role, cycled with ←/→.
+pub const OrdersLance = struct {
+    force: types.ForceId,
+    role: @import("../domain/force.zig").LanceRole,
+    text: []const u8,
+};
+
+/// Everything the commander can still change before an engagement
+/// with the situation it is judged against.
+pub const BattleOrders = struct {
+    contract: types.ContractId,
+    company: types.ForceId,
+    title: []const u8,
+    situation: []const []const u8,
+    roe: @import("../domain/force.zig").Roe,
+    /// Integrated command sets the ROE; the box shows it but cannot change it.
+    roe_locked: bool,
+    lances: []OrdersLance,
+    /// The emergency resupply on offer; empty when the stores cover the fight.
+    rush: []const u8,
+    confirmed: bool,
+};
+
+/// The battle orders for a contract whose engagement is in view, or null.
+pub fn battleOrders(alloc: Alloc, gs: *GameState, id: types.ContractId) !?BattleOrders {
+    const battle = @import("battle.zig");
+    const field_supply = @import("field_supply.zig");
+    const part_mod = @import("../domain/part.zig");
+    const c = gs.contracts.getPtr(id) orelse return null;
+    if (!battle.inContactWindow(gs, c)) return null;
+    const company = c.assigned_company;
+    const days = battle.daysToContact(gs, c) orelse 0;
+
+    var situation: std.ArrayListUnmanaged([]const u8) = .empty;
+    try situation.append(alloc, try std.fmt.allocPrint(alloc, "{{a}}contact in {d} day{s}{{/}} on {s} · {s} for {s} against {s}", .{
+        days, if (days == 1) "" else "s", planetName(c.planet_key), c.kind.label(), c.employer_key, c.enemy_key,
+    }));
+    if (try rateOffer(alloc, gs, c, company)) |rt| {
+        try situation.append(alloc, try std.fmt.allocPrint(alloc, "{s} · wins {d}% of fights, loses the field {d}%{s}", .{
+            try ratingLine(alloc, gs, rt), rt.win_pct, rt.lose_field_pct, if (rt.warrantsWarning()) " {c}— outmatched{/}" else "",
+        }));
+    }
+    const fieldable = contract_control.fieldableBv(gs, company);
+    const pct: i64 = if (c.committed_bv > 0) @divTrunc(fieldable * 100, c.committed_bv) else 100;
+    try situation.append(alloc, try std.fmt.allocPrint(alloc, "fieldable {d} BV ({d}% of committed)", .{ fieldable, pct }));
+    var ammo: std.ArrayListUnmanaged(u8) = .empty;
+    for (try field_supply.ammoFights(alloc, gs, company), 0..) |a, i| {
+        if (i > 0) try ammo.appendSlice(alloc, ", ");
+        if (a.fights == 0) {
+            try ammo.print(alloc, "{{c}}{s} dry{{/}}", .{part_mod.munitionLabel(a.key)});
+        } else try ammo.print(alloc, "{s} {d} fight{s}", .{ part_mod.munitionLabel(a.key), a.fights, if (a.fights == 1) "" else "s" });
+    }
+    try situation.append(alloc, try std.fmt.allocPrint(alloc, "ammunition: {s}", .{if (ammo.items.len > 0) ammo.items else "no guns that need it"}));
+
+    var lances: std.ArrayListUnmanaged(OrdersLance) = .empty;
+    if (gs.force(company)) |co| for (co.children.items) |lid| {
+        const l = gs.force(lid) orelse continue;
+        if (!l.isCombatLance()) continue;
+        try lances.append(alloc, .{ .force = lid, .role = l.role, .text = try std.fmt.allocPrint(alloc, "{s} — {s} · {d} hull{s}", .{
+            try table.plain(alloc, l.name), @tagName(l.role), l.units.items.len, if (l.units.items.len == 1) "" else "s",
+        }) });
+    };
+
+    const rush = try field_supply.rushQuote(alloc, gs, c);
+    var rush_text: []const u8 = "";
+    if (rush.lines.len > 0) {
+        var what: std.ArrayListUnmanaged(u8) = .empty;
+        for (rush.lines, 0..) |l, i| {
+            if (i > 0) try what.appendSlice(alloc, ", ");
+            try what.print(alloc, "{s} {d}t", .{ if (std.mem.eql(u8, l.key, "armor")) "armour" else part_mod.munitionLabel(l.key), l.qty * part_mod.tons(l.key) });
+        }
+        const funds = gs.treasuryBalance(.{ .company = company });
+        rush_text = try std.fmt.allocPrint(alloc, "{s} — {s} C at the local price ×{s}{s}", .{
+            what.items, try money(alloc, rush.price), try bpMultText(alloc, rush.mult_bp),
+            if (funds < rush.price) " {c}(local funds short){/}" else "",
+        });
+    }
+    return .{
+        .contract = id,
+        .company = company,
+        .title = try std.fmt.allocPrint(alloc, "BATTLE ORDERS · {s}", .{try forceName(alloc, gs, company)}),
+        .situation = try situation.toOwnedSlice(alloc),
+        .roe = battle.effectiveRoe(gs, c, company),
+        .roe_locked = c.terms.command_rights.overridesRoe(),
+        .lances = try lances.toOwnedSlice(alloc),
+        .rush = rush_text,
+        .confirmed = battle.ordersConfirmed(c),
+    };
+}
+
+/// "2.0" for 20,000 bp.
+fn bpMultText(alloc: Alloc, bp: types.Bp) ![]const u8 {
+    return std.fmt.allocPrint(alloc, "{d}.{d}", .{ @divTrunc(bp, 10_000), @divTrunc(@mod(bp, 10_000), 1_000) });
+}
+
 /// The contact warning for one contract: the line a multi-day advance
 /// stopped to show. Empty when the contract is gone or not in its window.
 pub fn contactWarning(alloc: Alloc, gs: *GameState, id: types.ContractId) ![]const u8 {
@@ -359,7 +456,7 @@ pub fn desk(alloc: Alloc, gs: *GameState, log_rows: usize) !Desk {
     const warnings = try checklist.turnWarnings(gs, alloc);
     var cl: std.ArrayListUnmanaged(ChecklistRow) = .empty;
     for (warnings) |w| {
-        try cl.append(alloc, .{ .kind = w.kind, .blocking = isBlocking(w.kind), .text = w.text, .jump = jumpFor(w.kind) });
+        try cl.append(alloc, .{ .kind = w.kind, .blocking = isBlocking(w.kind), .text = w.text, .jump = jumpFor(w.kind), .contract = w.contract });
     }
 
     var inbox: std.ArrayListUnmanaged(InboxRow) = .empty;
@@ -4006,6 +4103,29 @@ test "plain CLI text drops every markup tag and cannot carry a terminal control"
     defer arena.deinit();
     const a = arena.allocator();
     try std.testing.expectEqualStrings("selected tab purple?x", try stripMarks(a, "{s}selected{/} {t}tab{/} {p}purple{/}\x1bx"));
+}
+
+test "the battle orders show the levers and the resupply the command would buy" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1213 });
+    defer gs.deinit();
+    const f = try contract_events.damagedCompanyForTest(&gs, 0);
+    const c = f.c;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    c.next_battle_day = gs.clock.day_index + 30;
+    try std.testing.expect((try battleOrders(a, &gs, c.id)) == null);
+    c.next_battle_day = gs.clock.day_index + 2;
+    const view = (try battleOrders(a, &gs, c.id)).?;
+    try std.testing.expect(!view.confirmed);
+    try std.testing.expect(view.lances.len > 0);
+    try std.testing.expect(std.mem.indexOf(u8, view.situation[0], "contact in 2 days") != null);
+    // Every line of the quote is named in the offer the box shows.
+    const quote = try @import("field_supply.zig").rushQuote(a, &gs, c);
+    try std.testing.expect(quote.lines.len > 0); // the fixture's hulls are dented and it carries no armour
+    try std.testing.expect(std.mem.indexOf(u8, view.rush, try money(a, quote.price)) != null);
+    _ = try @import("commands.zig").execute(&gs, .{ .confirm_orders = c.id });
+    try std.testing.expect((try battleOrders(a, &gs, c.id)).?.confirmed);
 }
 
 test "the contact line an advance stops for is the checklist's contact warning" {

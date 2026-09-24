@@ -84,6 +84,9 @@ fn companyFires(gs: *GameState, company: types.ForceId, family: []const u8) bool
 pub const Warning = struct {
     kind: WarningKind,
     text: []const u8,
+    /// The contract the warning is about, when it is about one (the
+    /// contact warning opens that contract's battle orders).
+    contract: types.ContractId = .none,
 };
 
 /// The contact warning for one contract: days to contact, the skulls and
@@ -115,10 +118,11 @@ pub fn contactText(alloc: std.mem.Allocator, gs: *GameState, c: *const @import("
         } else try out.print(alloc, "{s} {d} fight{s}", .{ part_mod.munitionLabel(a.key), a.fights, if (a.fights == 1) "" else "s" });
     }
     if (c.terms.command_rights.overridesRoe()) {
-        try out.appendSlice(alloc, " · ROE held by the employer's command; recall (Contracts R) is the lever left");
+        try out.appendSlice(alloc, " · ROE held by the employer's command");
     } else {
-        try out.print(alloc, " · ROE {s}: change it (Forces o) or recall (Contracts R)", .{@tagName(battle.effectiveRoe(gs, c, company))});
+        try out.print(alloc, " · ROE {s}", .{@tagName(battle.effectiveRoe(gs, c, company))});
     }
+    try out.appendSlice(alloc, " · give battle orders");
     return out.toOwnedSlice(alloc);
 }
 
@@ -218,7 +222,7 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
             const c = ce.value_ptr;
             if (c.status != .active) continue;
             if (battle.inContactWindow(gs, c)) {
-                try out.append(alloc, .{ .kind = .contact_imminent, .text = try contactText(alloc, gs, c) });
+                if (!battle.ordersConfirmed(c)) try out.append(alloc, .{ .kind = .contact_imminent, .text = try contactText(alloc, gs, c), .contract = c.id });
                 continue;
             }
             const rt = (try offer_rating.rateOffer(alloc, gs, c, c.assigned_company)) orelse continue;
@@ -643,13 +647,13 @@ test "an engagement inside the window warns with odds, strength, ammunition and 
     }
     const text = found orelse return error.NoContactWarning;
     try std.testing.expect(!WarningKind.contact_imminent.blocking());
-    for ([_][]const u8{ "contact on Galatea in 2 days", "skull", "fieldable", "100% of committed", "ammo ", "ROE standard", "recall" }) |want| {
+    for ([_][]const u8{ "contact on Galatea in 2 days", "skull", "fieldable", "100% of committed", "ammo ", "ROE standard", "give battle orders" }) |want| {
         if (std.mem.indexOf(u8, text, want) == null) {
             std.debug.print("missing \"{s}\" in: {s}\n", .{ want, text });
             return error.TestUnexpectedResult;
         }
     }
-    // Integrated command holds the ROE, so recall is the lever named.
+    // Integrated command holds the ROE, and the warning says so.
     c.terms.command_rights = .integrated;
     const held = try contactText(a, &gs, c);
     try std.testing.expect(std.mem.indexOf(u8, held, "held by the employer") != null);
@@ -671,4 +675,74 @@ test "a multi-day advance stops once when contact comes into view, and the next 
     const second = try commands.execute(&gs, .{ .advance_days = 1 });
     try std.testing.expectEqual(@as(u32, 1), second.days_advanced);
     try std.testing.expectEqual(types.ContractId.none, second.contact);
+}
+
+test "confirming battle orders clears the contact warning until the next engagement" {
+    const commands = @import("commands.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1211 });
+    defer gs.deinit();
+    const c = try contactFixture(&gs);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const Count = struct {
+        fn contact(al: std.mem.Allocator, g: *GameState) !u32 {
+            var n: u32 = 0;
+            for (try turnWarnings(g, al)) |w| n += @intFromBool(w.kind == .contact_imminent);
+            return n;
+        }
+    };
+    // Out of the window there is nothing to give orders for.
+    c.next_battle_day = gs.clock.day_index + 20;
+    try std.testing.expectError(commands.Error.NoContact, commands.execute(&gs, .{ .confirm_orders = c.id }));
+
+    c.next_battle_day = gs.clock.day_index + 2;
+    try std.testing.expectEqual(@as(u32, 1), try Count.contact(a, &gs));
+    for (try turnWarnings(&gs, a)) |w| if (w.kind == .contact_imminent) try std.testing.expectEqual(c.id, w.contract);
+    _ = try commands.execute(&gs, .{ .confirm_orders = c.id });
+    try std.testing.expectEqual(@as(u32, 0), try Count.contact(a, &gs));
+    // A new engagement asks for new orders.
+    c.next_battle_day = gs.clock.day_index + 3;
+    try std.testing.expectEqual(@as(u32, 1), try Count.contact(a, &gs));
+}
+
+test "emergency resupply buys what the quote says, and refuses before money moves" {
+    const commands = @import("commands.zig");
+    const field_supply = @import("field_supply.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1212 });
+    defer gs.deinit();
+    const c = try contactFixture(&gs);
+    const co = c.assigned_company;
+    const site = gs.siteForForce(co);
+    c.next_battle_day = gs.clock.day_index + 2;
+    // Stores already cover the fight: nothing to buy.
+    try std.testing.expectError(commands.Error.NothingToRush, commands.execute(&gs, .{ .emergency_resupply = c.id }));
+    // Carry two tons of each munition (room on the trucks), run the LRM
+    // racks dry, and dent two hulls.
+    for (part_mod.munition_keys) |key| {
+        _ = gs.takeStock(site, key, gs.stockCount(site, key));
+        if (!std.mem.eql(u8, key, "ammo_lrm")) try gs.addStock(site, key, 2);
+    }
+    var dented: u32 = 0;
+    var it = gs.units.iterator();
+    while (it.next()) |e| if (dented < 2 and gs.companyOf(e.value_ptr.force) == co and e.value_ptr.kind == .mek) {
+        e.value_ptr.armor_pct = 50;
+        dented += 1;
+    };
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const quote = try field_supply.rushQuote(arena.allocator(), &gs, c);
+    try std.testing.expect(quote.lines.len > 0);
+    // Without the local funds, nothing moves.
+    gs.force(co).?.local_funds = quote.price - 1;
+    const lrm_before = gs.stockCount(site, "ammo_lrm");
+    try std.testing.expectError(commands.Error.CompanyFundsShort, commands.execute(&gs, .{ .emergency_resupply = c.id }));
+    try std.testing.expectEqual(lrm_before, gs.stockCount(site, "ammo_lrm"));
+    // With them, the stores gain exactly the quoted lines and the funds pay the quoted price.
+    gs.force(co).?.local_funds = quote.price + 1_000;
+    var before: [8]u32 = undefined;
+    for (quote.lines, 0..) |l, i| before[i] = gs.stockCount(site, l.key);
+    _ = try commands.execute(&gs, .{ .emergency_resupply = c.id });
+    for (quote.lines, 0..) |l, i| try std.testing.expectEqual(before[i] + l.qty, gs.stockCount(site, l.key));
+    try std.testing.expectEqual(@as(types.CBills, 1_000), gs.force(co).?.local_funds);
 }

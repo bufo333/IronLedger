@@ -476,6 +476,7 @@ fn runRepl(gs: *game.state.GameState, io: std.Io, gpa: std.mem.Allocator, store_
             \\views:    status | toe | hqs | offers | contracts | roster [co:<id>|hq:<id>] | medbay | hall [filter]
             \\          checklist | inbox | battles [id] | log [n] [filter] | pnl | ledger | treasuries | units | parts | orders | sop | candidates <offer#>
             \\          shop | supplies | demand | bays | projects | staff | lab <unit> | readiness | rating | summary | manning co:<id>
+            \\          briefing <contract id>   (battle orders before contact: `confirm`, `rush`, `roe`, `role`)
             \\turn:     day [n] [force]   (the checklist gates it)
             \\commands: `help` lists every verb with its usage — the same verbs the TUI's `:` line takes
             \\factions: LC DC FS CC FWL — professions: quartermaster paymaster chief_engineer line_officer
@@ -716,6 +717,16 @@ fn runRepl(gs: *game.state.GameState, io: std.Io, gpa: std.mem.Allocator, store_
                 continue;
             }
             printTable(al, q.manning_cols, try q.manning(al, gs, site.?.company), "");
+        } else if (std.mem.eql(u8, verb, "briefing")) {
+            const id = std.fmt.parseInt(u32, tokens.next() orelse "", 10) catch {
+                std.debug.print("usage: briefing <contract id>\n", .{});
+                continue;
+            };
+            const view = (try q.battleOrders(al, gs, @enumFromInt(id))) orelse {
+                std.debug.print("{s}\n", .{game.cli.errorText(error.NoContact)});
+                continue;
+            };
+            printBattleOrders(al, view);
         } else if (std.mem.eql(u8, verb, "help") or std.mem.eql(u8, verb, "?")) {
             for (game.cli.verbs) |v| std.debug.print("  {s}\n", .{game.cli.usage(v) orelse v});
         } else {
@@ -750,6 +761,15 @@ fn refitUnit(cmd: Command) ?game.types.UnitId {
 
 /// What the REPL says after a command lands: ids created, hires, hulls
 /// bought, and the screen the verb naturally leads to.
+/// The battle orders as console lines (the TUI's box reads the same query).
+fn printBattleOrders(al: std.mem.Allocator, view: q.BattleOrders) void {
+    std.debug.print("{s}{s}\n", .{ q.stripMarks(al, view.title) catch view.title, if (view.confirmed) " — orders given" else "" });
+    printLines(al, view.situation, "  ");
+    std.debug.print("  ROE {s}{s}\n", .{ @tagName(view.roe), if (view.roe_locked) " (set by integrated command)" else "" });
+    for (view.lances) |l| std.debug.print("  lance {d}: {s}\n", .{ @intFromEnum(l.force), q.stripMarks(al, l.text) catch l.text });
+    if (view.rush.len > 0) std.debug.print("  emergency resupply: {s}\n", .{q.stripMarks(al, view.rush) catch view.rush});
+}
+
 fn printResult(gs: *game.state.GameState, al: std.mem.Allocator, cmd: Command, r: game.commands.Result) void {
     switch (cmd) {
         .create_commander => {
@@ -770,6 +790,8 @@ fn printResult(gs: *game.state.GameState, al: std.mem.Allocator, cmd: Command, r
         .order_part => std.debug.print("{s}\n", .{(q.lastOrderLine(al, gs) catch null) orelse "ordered"}),
         .take_loan => |l| std.debug.print("drew {d} c-bills over {d} months\n", .{ l.principal, l.term_months }),
         .strip_unit => std.debug.print("{s}\n", .{q.stripMarks(al, (q.lastLogLine(al, gs) catch null) orelse "stripped") catch "stripped"}),
+        .confirm_orders => std.debug.print("battle orders given — the contact warning is cleared\n", .{}),
+        .emergency_resupply => std.debug.print("emergency resupply: {d}t delivered to the field stores\n", .{r.tons_moved}),
         else => std.debug.print("done.\n", .{}),
     }
 }

@@ -237,6 +237,9 @@ pub const Contract = struct {
     monthly_net: types.CBills = 0,
     /// Next scheduled engagement (combat-class contracts, Stage 7).
     next_battle_day: ?u32 = null,
+    /// The engagement day the commander confirmed battle orders for; the
+    /// contact warning stands until it matches `next_battle_day`.
+    orders_day: ?u32 = null,
     /// Wear bookkeeping for the rotation loop (ARCH §9.7, Stage 8).
     battles_fought: u8 = 0,
     casualties: u8 = 0,

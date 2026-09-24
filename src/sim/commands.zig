@@ -250,6 +250,12 @@ pub const Command = union(enum) {
     cycle_roe: types.ForceId,
     /// Step a lance's role: fighting → defense → scouting → training.
     cycle_role: types.ForceId,
+    /// Battle orders for the engagement in view are given; the contact
+    /// warning clears.
+    confirm_orders: types.ContractId,
+    /// Buy the short munitions and armour on the contract world, delivered
+    /// today (`field_supply.rushQuote`).
+    emergency_resupply: types.ContractId,
     /// Step the difficulty up or down the ladder.
     cycle_difficulty: i8,
     /// Move the shareholders' cut by a few points, clamped to 0…100.
@@ -380,6 +386,10 @@ pub const Error = error{
     AlreadyLearned,
     /// That term is already at the best the employer will give.
     TermAtCap,
+    /// No engagement on that contract is inside the contact window.
+    NoContact,
+    /// The company's stores already cover the next fight.
+    NothingToRush,
 } || std.mem.Allocator.Error;
 
 pub const Result = struct {
@@ -685,6 +695,14 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             _ = try execute(gs, .{ .mothball = unit_id });
             return .{ .mothballed = true };
         },
+        .confirm_orders => |id| {
+            const c = gs.contracts.getPtr(id) orelse return Error.UnknownContract;
+            if (!@import("battle.zig").inContactWindow(gs, c)) return Error.NoContact;
+            c.orders_day = c.next_battle_day;
+            try gs.log(.battle, .{ .company = c.assigned_company, .contract = id }, "[orders] battle orders given for the engagement on day {d}", .{c.next_battle_day.?});
+            return .{};
+        },
+        .emergency_resupply => |id| return emergencyResupply(gs, id),
         .cycle_roe => |co| {
             const f = gs.force(co) orelse return Error.UnknownForce;
             if (f.echelon != .company) return Error.NotACompany;
@@ -1772,6 +1790,36 @@ fn checkRoom(gs: *GameState, site: types.Site, part_key: []const u8, quantity: u
     const cap = gs.siteCapacityTons(site) orelse return;
     const used = gs.siteTons(site) + @import("field_supply.zig").inboundTonsTo(gs, site);
     if (used + quantity * part_mod.tons(part_key) > cap) return Error.StorageFull;
+}
+
+/// Emergency resupply: the quote from `field_supply.rushQuote`,
+/// checked against truck room and local funds before anything moves.
+fn emergencyResupply(gs: *GameState, id: types.ContractId) Error!Result {
+    const field_supply = @import("field_supply.zig");
+    const c = gs.contracts.getPtr(id) orelse return Error.UnknownContract;
+    if (c.status != .active) return Error.NoContact;
+    var arena = std.heap.ArenaAllocator.init(gs.scratch());
+    defer arena.deinit();
+    const rush = try field_supply.rushQuote(arena.allocator(), gs, c);
+    if (rush.lines.len == 0) return Error.NothingToRush;
+    const site = gs.siteForForce(c.assigned_company);
+    if (gs.siteCapacityTons(site)) |cap| {
+        if (gs.siteTons(site) + field_supply.inboundTonsTo(gs, site) + rush.tons > cap) return Error.StorageFull;
+    }
+    if (gs.treasuryBalance(.{ .company = c.assigned_company }) < rush.price) return Error.CompanyFundsShort;
+    for (rush.lines) |l| try gs.addStock(site, l.key, 0); // every stock slot exists before money moves
+    try gs.reserveLedger(1);
+    try debitPurchase(gs, .{ .company = c.assigned_company }, .{
+        .day = gs.clock.day_index,
+        .amount = -rush.price,
+        .category = if (c.beachhead) .local_supplies else .supplies,
+        .company = c.assigned_company,
+        .contract = id,
+        .note = "emergency resupply",
+    });
+    for (rush.lines) |l| gs.addStock(site, l.key, l.qty) catch unreachable; // slots reserved above
+    try gs.log(.delivery, .{ .company = c.assigned_company, .contract = id }, "[resupply] emergency purchase on {s}: {d}t for {d} c-bills", .{ c.planet_key, rush.tons, rush.price });
+    return .{ .tons_moved = rush.tons };
 }
 
 /// A freight quote: what a shipment costs, how long it takes, and the

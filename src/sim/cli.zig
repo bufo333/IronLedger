@@ -300,6 +300,8 @@ pub fn parseCommand(verb: []const u8, tokens: *std.mem.TokenIterator(u8, .scalar
     if (eq(u8, verb, "mothball")) return .{ .mothball = @enumFromInt(try num(u32, tokens.next())) };
     if (eq(u8, verb, "activate")) return .{ .reactivate = @enumFromInt(try num(u32, tokens.next())) };
     if (eq(u8, verb, "complete")) return .{ .complete_contract = @enumFromInt(try num(u32, tokens.next())) };
+    if (eq(u8, verb, "confirm")) return .{ .confirm_orders = @enumFromInt(try num(u32, tokens.next())) };
+    if (eq(u8, verb, "rush")) return .{ .emergency_resupply = @enumFromInt(try num(u32, tokens.next())) };
     if (eq(u8, verb, "recall")) {
         const site = try parseSite(try need(tokens.next()));
         if (site != .company) return error.BadSite;
@@ -430,6 +432,9 @@ pub fn errorText(err: anyerror) []const u8 {
         error.AlreadyHome => "that company is already home",
         error.UnderContract => "that company is under contract — recall from the Contracts screen (R there) to accept the breach clause",
         error.HqTreasuryShort => "the board's HQ treasury cannot cover that listing — Ledger t couriers funds there",
+        error.UnknownContract => "no contract has that id — `contracts` lists them",
+        error.NoContact => "no engagement on that contract is close enough to give orders for",
+        error.NothingToRush => "the company's stores already cover the next fight",
         error.CompanyFundsShort => "the company's local funds cannot cover that hull — Ledger t couriers funds to the company (days in transit)",
         error.NothingToShip => "no structural components in those field stores",
         error.MountIsFine => "that mount is fine — a replacement is for damaged or destroyed gear",
@@ -575,6 +580,8 @@ pub const verbs = [_][]const u8{
     "mothball",
     "activate",
     "complete",
+    "confirm",
+    "rush",
     "recall",
     "found",
     "link",
@@ -653,6 +660,8 @@ pub fn usage(verb: []const u8) ?[]const u8 {
         .{ "mothball", "mothball <unit>" },
         .{ "activate", "activate <unit>" },
         .{ "complete", "complete <contract id>" },
+        .{ "confirm", "confirm <contract id>   (battle orders given; see `orders <contract id>`)" },
+        .{ "rush", "rush <contract id>   (emergency resupply on the contract world before contact)" },
         .{ "recall", "recall co:N" },
         .{ "found", "found <planet key> <name>" },
         .{ "link", "link hq:A hq:B [level 1-3]" },
