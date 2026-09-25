@@ -504,7 +504,7 @@ pub fn desk(alloc: Alloc, gs: *GameState, log_rows: usize) !Desk {
         try hqs.append(alloc, try std.fmt.allocPrint(alloc, "     funds {s}{s}{{/}} · staff {s}{d}/{d}{{/}} · companies {d}/{d} · bays {d} busy, {d} queued", .{
             funds_mk,                                     funds_s,
             if (h.staff_assigned < req) "{c}" else "{g}", h.staff_assigned,
-            req,                                          gs.companiesAtHq(h.id),
+            req,                                          @import("hq_network.zig").companiesAtHq(gs, h.id),
             h.capacity().combat_companies,                busy,
             queued,
         }));
@@ -1948,7 +1948,7 @@ pub fn hqDetailView(alloc: Alloc, gs: *GameState, id: types.HqId) !HqDetail {
     // Tier first: what this HQ can host, and how to raise it.
     {
         const hq_ops_mod = @import("hq_ops.zig");
-        const hosted = gs.companiesAtHq(id);
+        const hosted = @import("hq_network.zig").companiesAtHq(gs, id);
         switch (h.tier) {
             .field => {
                 var upgrading: ?@import("../domain/hq.zig").Project = null;
@@ -1998,7 +1998,7 @@ pub fn hqDetailView(alloc: Alloc, gs: *GameState, id: types.HqId) !HqDetail {
     }
     try out.append(alloc, "");
     const cap = h.capacity();
-    try out.append(alloc, try std.fmt.allocPrint(alloc, "capacity   {d} companies · ≤{d} lances each · {d} support lances · {d} air wing{s} ({d} here) · {d}t storage", .{ cap.combat_companies, cap.lances_per_company, cap.support_lances, cap.air_companies, if (cap.air_companies == 1) "" else "s", gs.airCompaniesAtHq(id), h.warehouseCapacityTons() }));
+    try out.append(alloc, try std.fmt.allocPrint(alloc, "capacity   {d} companies · ≤{d} lances each · {d} support lances · {d} air wing{s} ({d} here) · {d}t storage", .{ cap.combat_companies, cap.lances_per_company, cap.support_lances, cap.air_companies, if (cap.air_companies == 1) "" else "s", @import("hq_network.zig").airCompaniesAtHq(gs, id), h.warehouseCapacityTons() }));
     try out.append(alloc, try std.fmt.allocPrint(alloc, "berths     {d} dropship ({d} held) · {d} jumpship ({d} held){s}", .{ cap.dropship_berths, gs.transportsBerthedAt(id, .dropship), cap.jumpship_berths, gs.transportsBerthedAt(id, .jumpship), if (cap.air_companies == 0) " · {d}spaceport 3 opens an air wing slot, 4 (+comms 3) a jumpship berth{/}" else "" }));
     for (try berths(alloc, gs, id)) |line| try out.append(alloc, line);
     try out.append(alloc, try std.fmt.allocPrint(alloc, "upkeep     {s} / month · funds {s}", .{ try money(alloc, h.monthly_upkeep), try money(alloc, h.funds) }));
@@ -5109,7 +5109,7 @@ pub fn hqList(alloc: Alloc, gs: *GameState) ![]HqRow {
             .funds = hq.funds,
             .staff_assigned = hq.staff_assigned,
             .staff_required = hq.staffRequired().total(),
-            .companies = gs.companiesAtHq(hq.id),
+            .companies = @import("hq_network.zig").companiesAtHq(gs, hq.id),
             .company_cap = cap.combat_companies,
             .lances_cap = cap.lances_per_company,
             .title_line = "",

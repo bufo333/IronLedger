@@ -14,6 +14,7 @@ const unit_mod = @import("../domain/unit.zig");
 const person_mod = @import("../domain/person.zig");
 const state_mod = @import("state.zig");
 const GameState = state_mod.GameState;
+const hq_network = @import("hq_network.zig");
 
 // ----------------------------------------------------- the back office
 
@@ -169,9 +170,9 @@ pub fn slotNeedsComponent(s: unit_mod.PartSlot) bool {
 /// it has a free combat-company slot, else the first HQ that has one,
 /// else `.none`. `new_company` and the Forces screen's + share it.
 pub fn hqWithCompanySlot(gs: *GameState, preferred: types.HqId) types.HqId {
-    if (gs.hqs.getPtr(preferred)) |h| if (gs.companiesAtHq(preferred) < h.capacity().combat_companies) return preferred;
+    if (gs.hqs.getPtr(preferred)) |h| if (hq_network.companiesAtHq(gs, preferred) < h.capacity().combat_companies) return preferred;
     var hit = gs.hqs.iterator();
-    while (hit.next()) |e| if (gs.companiesAtHq(e.value_ptr.id) < e.value_ptr.capacity().combat_companies) return e.value_ptr.id;
+    while (hit.next()) |e| if (hq_network.companiesAtHq(gs, e.value_ptr.id) < e.value_ptr.capacity().combat_companies) return e.value_ptr.id;
     return .none;
 }
 

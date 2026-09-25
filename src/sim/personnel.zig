@@ -462,7 +462,7 @@ test "the recruiting bonus is the recruiting HQ's hiring hall, not the first HQ'
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .paymaster);
     const seat = gs.hqs.keys()[0];
-    const second = try gs.foundHq("Second", .regional, "alkaid");
+    const second = try @import("hq_network.zig").foundHq(&gs, "Second", .regional, "alkaid");
     for ([_]types.HqId{ seat, second }) |id| gs.hqs.getPtr(id).?.staff_assigned = 999;
     for (gs.hqs.getPtr(seat).?.facilities.items) |*f| {
         if (f.kind == .hiring_hall) f.level = 3;

@@ -503,17 +503,6 @@ pub const GameState = struct {
 
     // ------------------------------------- the HQ network
 
-    pub const FoundError = error{ UnknownPlanet, NotReachable } || std.mem.Allocator.Error;
-
-    /// Stand up an HQ on a world. Field HQs open with a bay, a warehouse
-    /// and a mess; regional ones add comms, a spaceport, a hospital and a
-    /// hiring hall. Staffing is the player's problem from day one.
-    pub fn foundHq(self: *GameState, name: []const u8, tier: hq_mod.HqTier, planet_key: []const u8) FoundError!types.HqId {
-        const hq = try self.prepareHq(name, tier, planet_key);
-        try self.hqs.ensureUnusedCapacity(self.allocator(), 1);
-        return self.commitHq(hq);
-    }
-
     /// Room for `n` more ledger entries, so the next `n` postings cannot
     /// fail.
     pub fn reserveLedger(self: *GameState, n: usize) !void {
@@ -528,26 +517,6 @@ pub const GameState = struct {
         self.next_hq_id += 1;
         self.hqs.putAssumeCapacity(hq.id, hq);
         return hq.id;
-    }
-
-    /// A new HQ with every allocation done but no id and nothing on the
-    /// books; `commitHq` registers it.
-    pub fn prepareHq(self: *GameState, name: []const u8, tier: hq_mod.HqTier, planet_key: []const u8) FoundError!hq_mod.Hq {
-        const world = planet_mod.find(planet_key) orelse return error.UnknownPlanet;
-        var hq: hq_mod.Hq = .{
-            .id = .none,
-            .name = try self.allocator().dupe(u8, name),
-            .tier = tier,
-            .planet_key = world.key,
-            .monthly_upkeep = tier.monthlyUpkeep(),
-        };
-        const base = [_]hq_mod.FacilityKind{ .mek_bay, .warehouse, .mess };
-        for (base) |kind| try hq.facilities.append(self.allocator(), .{ .kind = kind, .level = 1 });
-        if (tier != .field) {
-            const more = [_]hq_mod.FacilityKind{ .comms, .spaceport, .hospital, .hiring_hall, .training_ground };
-            for (more) |kind| try hq.facilities.append(self.allocator(), .{ .kind = kind, .level = 1 });
-        }
-        return hq;
     }
 
     /// The HQ that supplies a force: its company's assignment, else the
@@ -575,17 +544,6 @@ pub const GameState = struct {
         return if (hq.supportsTraining()) id else null;
     }
 
-    /// Combat companies currently assigned to an HQ.
-    pub fn companiesAtHq(self: *GameState, hq_id: types.HqId) u32 {
-        var n: u32 = 0;
-        var it = self.forces.iterator();
-        while (it.next()) |entry| {
-            const f = entry.value_ptr;
-            if (f.echelon == .company and f.supplying_hq == hq_id) n += 1;
-        }
-        return n;
-    }
-
     /// Combat (mek/air) lances under a company.
     pub fn combatLancesOf(self: *GameState, company: types.ForceId) u32 {
         const f = self.forces.getPtr(company) orelse return 0;
@@ -593,19 +551,6 @@ pub const GameState = struct {
         for (f.children.items) |cid| {
             const c = self.forces.getPtr(cid) orelse continue;
             if (c.isCombatLance()) n += 1;
-        }
-        return n;
-    }
-
-    /// Air wings of the companies assigned to an HQ.
-    pub fn airCompaniesAtHq(self: *GameState, hq_id: types.HqId) u32 {
-        var n: u32 = 0;
-        var it = self.forces.iterator();
-        while (it.next()) |entry| {
-            const f = entry.value_ptr;
-            if (f.echelon != .air_company) continue;
-            const co = self.forces.getPtr(f.parent) orelse continue;
-            if (co.supplying_hq == hq_id) n += 1;
         }
         return n;
     }
@@ -705,21 +650,6 @@ pub const GameState = struct {
             if (crew.isAvailable(self.clock.day_index)) return true;
         }
         return false;
-    }
-
-    pub const AssignHqError = error{ UnknownForce, UnknownHq, NotACompany, CapacityFull, TooManyLances };
-
-    /// Assign a company to an HQ, enforcing the HQ's capacity slots
-    /// (ARCH §9.3): companies per HQ and lances per company.
-    pub fn assignCompanyToHq(self: *GameState, company: types.ForceId, hq_id: types.HqId) AssignHqError!void {
-        const f = self.forces.getPtr(company) orelse return error.UnknownForce;
-        if (f.echelon != .company) return error.NotACompany;
-        const hq = self.hqs.getPtr(hq_id) orelse return error.UnknownHq;
-        const cap = hq.capacity();
-        const already = self.companiesAtHq(hq_id) - @intFromBool(f.supplying_hq == hq_id);
-        if (already >= cap.combat_companies) return error.CapacityFull;
-        if (self.combatLancesOf(company) > cap.lances_per_company) return error.TooManyLances;
-        f.supplying_hq = hq_id;
     }
 
     /// Commander cost multiplier for a category (neutral without a commander).

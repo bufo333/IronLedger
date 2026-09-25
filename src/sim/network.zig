@@ -207,8 +207,8 @@ test "routes follow links, charter when there are none, and links cap tonnage" {
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .quartermaster);
     const home = gs.hqs.keys()[0];
-    const far = try gs.foundHq("Frontier", .field, "alkaid");
-    const mid = try gs.foundHq("Waypoint", .field, "skye");
+    const far = try @import("hq_network.zig").foundHq(&gs, "Frontier", .field, "alkaid");
+    const mid = try @import("hq_network.zig").foundHq(&gs, "Waypoint", .field, "skye");
 
     // No links: charter direct, one expensive hop.
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);

@@ -577,7 +577,7 @@ fn execFoundHq(gs: *GameState, f: @FieldType(Command, "found_hq")) Error!Result 
     const cost: types.CBills = tuning.hq.found_field_hq_cost;
     if (gs.treasuryBalance(.outfit) < cost) return Error.InsufficientTreasury;
     // The HQ is built and its slots reserved before the money moves.
-    const hq = gs.prepareHq(f.name, .field, world.key) catch |err| switch (err) {
+    const hq = @import("hq_network.zig").prepareHq(gs, f.name, .field, world.key) catch |err| switch (err) {
         error.UnknownPlanet => return Error.UnknownPlanet,
         error.NotReachable => return Error.NotReachable,
         error.OutOfMemory => return Error.OutOfMemory,
@@ -619,7 +619,7 @@ fn execUpgradeTier(gs: *GameState, hq_id: @FieldType(Command, "upgrade_tier")) E
 }
 
 fn execAssignCompany(gs: *GameState, a: @FieldType(Command, "assign_company")) Error!Result {
-    gs.assignCompanyToHq(a.company, a.hq) catch |err| switch (err) {
+    @import("hq_network.zig").assignCompanyToHq(gs, a.company, a.hq) catch |err| switch (err) {
         error.UnknownForce => return Error.UnknownForce,
         error.UnknownHq => return Error.UnknownHq,
         error.NotACompany => return Error.NotACompany,
@@ -1114,7 +1114,7 @@ fn execRaiseAirCompany(gs: *GameState, company: @FieldType(Command, "raise_air_c
     if (co.echelon != .company) return Error.NotACompany;
     if (gs.airCompanyOf(company) != null) return Error.NoAirSlot;
     const h = gs.hqs.getPtr(co.supplying_hq) orelse return Error.NoHq;
-    if (gs.airCompaniesAtHq(h.id) >= h.capacity().air_companies) return Error.NoAirSlot;
+    if (@import("hq_network.zig").airCompaniesAtHq(gs, h.id) >= h.capacity().air_companies) return Error.NoAirSlot;
     const hq_id = h.id;
     const wing = try gs.createForce("Air Wing", .air_company, company);
     _ = try gs.createForce("1st Air Lance", .air_lance, wing);
@@ -1406,7 +1406,7 @@ fn execStripUnit(gs: *GameState, unit_id: @FieldType(Command, "strip_unit")) Err
 fn execSellHq(gs: *GameState, hq_id: @FieldType(Command, "sell_hq")) Error!Result {
     const h = gs.hqs.getPtr(hq_id) orelse return Error.UnknownHq;
     if (gs.hqs.count() <= 1) return Error.LastHq;
-    if (gs.companiesAtHq(hq_id) > 0) return Error.HqInUse;
+    if (@import("hq_network.zig").companiesAtHq(gs, hq_id) > 0) return Error.HqInUse;
     const value = treasury.hqSaleValue(h) + h.funds;
     const name = h.name;
     var pit = gs.people.iterator();
@@ -1723,7 +1723,7 @@ fn hireRoleFromHall(gs: *GameState, role: person_mod.Role, company: types.ForceI
 /// in it yet.
 fn raiseCompany(gs: *GameState, name: []const u8, hq_id: types.HqId) Error!Result {
     const hq = gs.hqs.getPtr(hq_id) orelse return Error.UnknownHq;
-    if (gs.companiesAtHq(hq_id) >= hq.capacity().combat_companies) return Error.CapacityFull;
+    if (@import("hq_network.zig").companiesAtHq(gs, hq_id) >= hq.capacity().combat_companies) return Error.CapacityFull;
     const id = try gs.createForce(name, .company, .none);
     const n: usize = @max(3, hq.capacity().lances_per_company);
     const names = [_][]const u8{ "1st Lance", "2nd Lance", "3rd Lance", "4th Lance", "5th Lance" };
@@ -1740,7 +1740,7 @@ fn raiseCompany(gs: *GameState, name: []const u8, hq_id: types.HqId) Error!Resul
         const lid = try gs.createForce(entry[0], .support_lance, omega);
         gs.force(lid).?.support_kind = entry[1];
     }
-    gs.assignCompanyToHq(id, hq_id) catch |err| switch (err) {
+    @import("hq_network.zig").assignCompanyToHq(gs, id, hq_id) catch |err| switch (err) {
         error.CapacityFull => return Error.CapacityFull,
         error.TooManyLances => return Error.TooManyLances,
         else => return Error.UnknownHq,
@@ -1754,11 +1754,11 @@ fn newCompanyAt(gs: *GameState, name: []const u8, hq_id: types.HqId) Error!Resul
     // nowhere to live.
     if (hq_id != .none) {
         const hq = gs.hqs.getPtr(hq_id) orelse return Error.UnknownHq;
-        if (gs.companiesAtHq(hq_id) >= hq.capacity().combat_companies) return Error.CapacityFull;
+        if (@import("hq_network.zig").companiesAtHq(gs, hq_id) >= hq.capacity().combat_companies) return Error.CapacityFull;
     }
     const id = try starter_company.generateInto(gs, name);
     if (hq_id != .none) {
-        gs.assignCompanyToHq(id, hq_id) catch |err| switch (err) {
+        @import("hq_network.zig").assignCompanyToHq(gs, id, hq_id) catch |err| switch (err) {
             error.CapacityFull => return Error.CapacityFull,
             error.TooManyLances => return Error.TooManyLances,
             else => return Error.UnknownHq,
@@ -3009,7 +3009,7 @@ test "a shipment the payer cannot afford uses no link capacity" {
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .quartermaster);
     const home = gs.hqs.keys()[0];
-    const far = try gs.foundHq("Frontier", .field, "alkaid");
+    const far = try @import("hq_network.zig").foundHq(&gs, "Frontier", .field, "alkaid");
     try gs.hq_links.append(gs.allocator(), .{ .a = home, .b = far, .level = 1, .established_day = 0 });
     // The shipment is paid from the sending HQ's treasury, which is empty.
     try gs.addStock(.{ .hq = far }, "armor", 10);
@@ -3027,7 +3027,7 @@ test "a shipment the payer cannot afford uses no link capacity" {
 fn twoHqTrainingForTest(gs: *GameState) !struct { at_seat: types.PersonId, at_second: types.PersonId } {
     _ = try execute(gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
     const seat = gs.hqs.keys()[0];
-    const second = try gs.foundHq("Second", .regional, "alkaid");
+    const second = try @import("hq_network.zig").foundHq(gs, "Second", .regional, "alkaid");
     for (gs.hqs.getPtr(second).?.facilities.items) |*f| {
         if (f.kind == .training_ground) f.level = 0;
     }

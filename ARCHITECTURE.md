@@ -127,7 +127,7 @@ section explains the shape, the contract states the rules.
   `AdvanceDay`) — a tagged union. This gives us one choke point for
   validation, an audit log, replayability, and trivially scriptable tests.
   A command reserves every ledger and list slot it needs
-  (`GameState.reserveLedger`, `ensureUnusedCapacity`, `prepareHq` before
+  (`GameState.reserveLedger`, `ensureUnusedCapacity`, `hq_network.prepareHq` before
   `commitHq`) ahead of its first mutation, so no allocation can fail after
   money or stock has moved.
 - **The campaign log is structured** (Stage 9A): every entry carries day,
@@ -835,7 +835,8 @@ src/
   domain/        entities and rule tables: types person unit part chassis
                  force contract hq planet faction tuning skulls scenario …
   sim/           state tick commands battle autoresolve medical maintenance
-                 field_supply network rng contract_market
+                 field_supply network hq_network hq_ops treasury personnel
+                 rng contract_market
                  starter_company …; queries.zig (read-only views),
                  cli.zig (verbs), table.zig (markup), digest.zig (hash)
   econ/          finance logistics market

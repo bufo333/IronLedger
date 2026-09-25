@@ -201,7 +201,7 @@ test "forward depot: the nearest HQ holding the line ships it, the home HQ other
     try gs.addStock(.{ .hq = fb }, "provisions", 20);
     try std.testing.expectEqual(fb, bestSupplyHq(&gs, co, "provisions", 10, home));
     // The firebase can host the company now (field capacity 1).
-    try gs.assignCompanyToHq(co, fb);
+    try @import("hq_network.zig").assignCompanyToHq(&gs, co, fb);
     try std.testing.expectEqual(fb, gs.force(co).?.supplying_hq);
 }
 

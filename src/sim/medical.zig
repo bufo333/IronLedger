@@ -747,7 +747,7 @@ test "weekly rest uses the home HQ's mess, not the best mess in the outfit" {
     defer gs.deinit();
     _ = try gs.createCommander("T", .LC, .paymaster);
     const seat = gs.hqs.keys()[0];
-    const second = try gs.foundHq("Second", .regional, "alkaid");
+    const second = try @import("hq_network.zig").foundHq(&gs, "Second", .regional, "alkaid");
     for (gs.hqs.getPtr(seat).?.facilities.items) |*f| {
         if (f.kind == .mess) f.level = 3;
     }
