@@ -348,11 +348,11 @@ Owner of every entry: the project owner.
 - **Why not yet:** Passing streams changes generator signatures, and the uncited dice need their sources found.
 - **Scope:**
   - **Shared generators hard-code their stream:**
-    - `econ/market.zig:89`, `163-191`
+    - `econ/market.zig:167`, `241-269`
     - `gen/company_gen.zig:98`
     - `sim/personnel.zig:359`
   - **About 20 uncited non-2d6 dice:**
-    - `market.zig:167-191`
+    - `market.zig:245-269`
     - `contract_market.zig:46`, `63`, `153`, `159`, `300-323`, `376`, `422`
     - `battle.zig:373`, `1205-1208`
 - **Removal:** C14.
