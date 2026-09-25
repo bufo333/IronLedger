@@ -13,6 +13,8 @@ const contract_mod = @import("../domain/contract.zig");
 const GameState = @import("state.zig").GameState;
 const unit_mod = @import("../domain/unit.zig");
 const maintenance = @import("maintenance.zig");
+const personnel = @import("personnel.zig");
+const treasury = @import("treasury.zig");
 
 pub const decision_window_days = tuning.contract.decision_window_days;
 pub const notice_window_days = tuning.contract.notice_window_days;
@@ -470,10 +472,10 @@ fn applyEffectsFor(gs: *GameState, effects: []const events.Effect, contract: ?*c
 
     // Field events move field money: company-tagged cash flows
     // through the company's local funds; outfit-level events stay central.
-    const treasury: @import("state.zig").Treasury = if (company != .none) .{ .company = company } else .outfit;
+    const account: @import("state.zig").Treasury = if (company != .none) .{ .company = company } else .outfit;
     for (effects) |effect| {
         switch (effect) {
-            .cash => |amount| try gs.postTreasury(treasury, .{
+            .cash => |amount| try gs.postTreasury(account, .{
                 .day = gs.clock.day_index,
                 .amount = amount,
                 .category = .event,
@@ -482,7 +484,7 @@ fn applyEffectsFor(gs: *GameState, effects: []const events.Effect, contract: ?*c
                 .note = "contract event",
             }),
             .cash_monthly_pct => |pct| if (contract) |c| {
-                try gs.postTreasury(treasury, .{
+                try gs.postTreasury(account, .{
                     .day = gs.clock.day_index,
                     .amount = @divTrunc(c.monthly_net * pct, 100),
                     .category = .event,
@@ -491,7 +493,7 @@ fn applyEffectsFor(gs: *GameState, effects: []const events.Effect, contract: ?*c
                     .note = "contract event",
                 });
             },
-            .supply_loss => |amount| try gs.postTreasury(treasury, .{
+            .supply_loss => |amount| try gs.postTreasury(account, .{
                 .day = gs.clock.day_index,
                 .amount = -amount,
                 .category = .supplies,
@@ -682,7 +684,7 @@ fn letGo(gs: *GameState, person_id: types.PersonId, replace: bool) !void {
     const t = @import("../domain/tuning.zig").t.person;
     const retiring = p.tenureMonths(gs.clock.day_index) >= t.retire_tenure_months;
     const company = gs.companyOf(p.assigned_force);
-    const paid = try @import("personnel.zig").depart(gs, person_id, if (retiring) .retired else .resigned, types.full_bp, if (retiring) "retirement payout" else "severance");
+    const paid = try personnel.depart(gs, person_id, if (retiring) .retired else .resigned, types.full_bp, if (retiring) "retirement payout" else "severance");
     try gs.log(.rotation, .{ .company = company, .hq = p.posted_hq }, "[turnover] {s} ({s}) {s}{s}", .{ try p.fullName(gs.allocator()), @tagName(p.role), if (retiring) "retires" else "resigns", if (paid > 0) try std.fmt.allocPrint(gs.allocator(), " — {d} c-bills paid out for {d} years' service", .{ paid, p.tenureMonths(gs.clock.day_index) / 12 }) else "" });
     if (!replace) return;
     for (gs.candidates.items, 0..) |cand, i| if (cand.spec.role == p.role) {
@@ -1202,7 +1204,7 @@ test "a prisoner can be ransomed, released for standing, or recruited on a loyal
     const mk = struct {
         fn captive(g: *GameState, company: types.ForceId) !types.PersonId {
             const spec = @import("../gen/person_gen.zig").generate(&g.rng, .market, .mekwarrior);
-            const pid = try @import("personnel.zig").hireFromSpec(g, spec);
+            const pid = try personnel.hireFromSpec(g, spec);
             const p = g.person(pid).?;
             p.status = .pow;
             p.assigned_force = company;
@@ -1238,10 +1240,10 @@ test "a prisoner can be ransomed, released for standing, or recruited on a loyal
     try std.testing.expect(joined and refused);
     // Prisoners are not paid but do eat.
     const heads_before = gs.companyHeadcount(co);
-    const payroll_before = @import("treasury.zig").monthlyPayroll(&gs);
+    const payroll_before = treasury.monthlyPayroll(&gs);
     _ = try mk.captive(&gs, co);
     try std.testing.expectEqual(heads_before + 1, gs.companyHeadcount(co));
-    try std.testing.expectEqual(payroll_before, @import("treasury.zig").monthlyPayroll(&gs));
+    try std.testing.expectEqual(payroll_before, treasury.monthlyPayroll(&gs));
 }
 
 test "a weekly decision cools down, and the same answer three times becomes a standing order" {
@@ -1317,7 +1319,7 @@ test "a missing pilot is ransomed, traded for a prisoner of their house, or writ
         n += 1;
     };
     for (pilots) |pid| {
-        _ = try @import("personnel.zig").depart(&gs, pid, .mia, 0, "");
+        _ = try personnel.depart(&gs, pid, .mia, 0, "");
         gs.person(pid).?.faction = "DC";
         try queueMissing(&gs, pid, co);
     }
@@ -1332,7 +1334,7 @@ test "a missing pilot is ransomed, traded for a prisoner of their house, or writ
 
     // Trade: a Combine prisoner goes back, their decision with them.
     const spec = @import("../gen/person_gen.zig").generateWithBonus(&gs.rng, .events, .mekwarrior, 0);
-    const pow = try @import("personnel.zig").hireFromSpec(&gs, spec);
+    const pow = try personnel.hireFromSpec(&gs, spec);
     gs.person(pow).?.status = .pow;
     gs.person(pow).?.faction = "DC";
     try queuePrisoner(&gs, pow, co);

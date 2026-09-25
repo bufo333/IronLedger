@@ -21,6 +21,7 @@ re-implemented in Zig. Paths below are under `MekHQ/src/mekhq/campaign/`.
 | `mission/AtBScenario*` | Scenario generation over a contract's life | `src/domain/scenario.zig` + `src/sim/battle.zig`; event decks in `src/sim/contract_events.zig` (no StratCon) | 7/12C |
 | `autoresolve/` (ACAR) | Abstract combat auto resolution | `src/sim/autoresolve.zig` — extended with supply/morale/support modifiers (ARCH §7) | 7 |
 | `finances/Finances.java`, `Loan.java` | Ledger, categories, loans | `src/econ/finance.zig` | 2/4 |
+| `finances/Finances.java` | One account, payroll and loans | `src/sim/treasury.zig` (per-entity treasuries, couriers, liquidation-backed credit are this game's) | 9A |
 | `rating/*` (FMMR, CamOps reputation) | Unit rating → pay & offer quality | reputation in `GameState`, Dragoons rating in `src/sim/queries.zig` `rating()` | 4/12C |
 | — (HBS BattleTech skulls) | Contract difficulty before signing | `src/domain/skulls.zig` + `data/tables/skulls.zon`; `queries.rateOffer` against a company | 12E |
 | `universe/generators/companyGenerators/*` | **AtB company autogeneration** | `src/sim/starter_company.zig` (rolls and manning table in `src/gen/company_gen.zig`) | 3 |

@@ -6,7 +6,7 @@
 //! ledger-and-balance primitive itself, `GameState.postTreasury`, stays
 //! with the state it keeps in step. MekHQ counterpart: `finances/Finances`
 //! (one account, payroll and loans); the per-entity treasuries, couriers
-//! and liquidation-backed credit are this game's.
+//! and liquidation-backed credit are this game's (docs/mekhq-map.md).
 
 const std = @import("std");
 const tuning = @import("../domain/tuning.zig").t;

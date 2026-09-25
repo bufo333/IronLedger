@@ -15,6 +15,7 @@ const chassis = @import("../domain/chassis.zig");
 const company_gen = @import("../gen/company_gen.zig");
 const GameState = @import("state.zig").GameState;
 const personnel = @import("personnel.zig");
+const digest = @import("digest.zig");
 
 /// Generate a full starter company into the campaign:
 ///   - 3 line lances × 4 meks (light/medium RAT rolls) with pilots
@@ -155,7 +156,7 @@ test "generateInto builds the full starter force and is deterministic" {
         try std.testing.expectEqual(@as(u32, 4), support_lances);
         // The tail outnumbers the teeth.
         try std.testing.expect(gs.people.count() > 120);
-        out.* = @import("digest.zig").stateHash(&gs);
+        out.* = digest.stateHash(&gs);
     }
     try std.testing.expectEqual(hashes[0], hashes[1]);
 }

@@ -32,6 +32,7 @@ const force_mod = @import("../domain/force.zig");
 const unit_mod = @import("../domain/unit.zig");
 const chassis_mod = @import("../domain/chassis.zig");
 const person_gen = @import("../gen/person_gen.zig");
+const digest = @import("digest.zig");
 
 pub const Command = union(enum) {
     /// End the turn: advance one day. Turn-based — time only moves here,
@@ -3261,7 +3262,7 @@ test "golden master: same seed + same script = same state hash" {
         var gs = GameState.init(std.testing.allocator, .{ .seed = 42 });
         defer gs.deinit();
         for (script) |cmd| _ = try execute(&gs, cmd);
-        out.* = @import("digest.zig").stateHash(&gs);
+        out.* = digest.stateHash(&gs);
     }
     try std.testing.expectEqual(hashes[0], hashes[1]);
 

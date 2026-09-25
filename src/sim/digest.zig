@@ -169,6 +169,17 @@ fn of(value: anytype) u64 {
     return h.final();
 }
 
+test "a session field cannot move the golden master; a persisted one does" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 45 });
+    defer gs.deinit();
+    const before = stateHash(&gs);
+    gs.campaign_id = 99; // session: the store's row
+    try std.testing.expectEqual(before, stateHash(&gs));
+    gs.reputation += 1; // persisted
+    try std.testing.expect(stateHash(&gs) != before);
+    try std.testing.expectEqual(GameState.Persistence.session, comptime GameState.persistenceOf("campaign_id"));
+}
+
 test "a map digests the same whatever order its entries went in" {
     const a = std.testing.allocator;
     var one: std.AutoArrayHashMapUnmanaged(u32, []const u8) = .empty;

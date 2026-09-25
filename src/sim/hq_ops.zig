@@ -1,7 +1,9 @@
 //! HQ operations (Stage 9C, ARCH §9.4): mek bays as occupied slots with
 //! queues, construction/upgrade projects, and component fabrication. The
 //! back office sets the pace: command admins shorten paperwork, and the
-//! whole staff must be there for facilities to run at built level.
+//! whole staff must be there for facilities to run at built level. It also
+//! owns the back-office staff counts (`hqStaff`), the staffing refresh, and
+//! autostaffing.
 //! No MekHQ counterpart: the HQ network is this game's extension
 //! (docs/mekhq-map.md).
 
@@ -17,10 +19,12 @@ const GameState = state_mod.GameState;
 
 // ----------------------------------------------------- the back office
 
-/// Posted admins of one role at an HQ: how many, and the best skill.
+/// `count` is how many admins of the role are posted; `best_skill` is the
+/// lowest, i.e. best, admin skill among them (rule 60), staying at its
+/// default of 7 when `count` is zero — no admin posted.
 pub const StaffSummary = struct { count: u32 = 0, best_skill: u8 = 7 };
 
-/// Posted admins of one role at an HQ: how many, and the best of them.
+/// Reads the current postings at `hq_id` into a `StaffSummary` for `role`.
 pub fn hqStaff(gs: *GameState, hq_id: types.HqId, role: person_mod.Role) StaffSummary {
     var s: StaffSummary = .{};
     var it = gs.people.iterator();

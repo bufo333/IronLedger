@@ -1726,18 +1726,6 @@ pub const GameState = struct {
     }
 };
 
-test "a session field cannot move the golden master; a persisted one does" {
-    const digest = @import("digest.zig");
-    var gs = GameState.init(std.testing.allocator, .{ .seed = 45 });
-    defer gs.deinit();
-    const before = digest.stateHash(&gs);
-    gs.campaign_id = 99; // session: the store's row
-    try std.testing.expectEqual(before, digest.stateHash(&gs));
-    gs.reputation += 1; // persisted
-    try std.testing.expect(digest.stateHash(&gs) != before);
-    try std.testing.expectEqual(GameState.Persistence.session, comptime GameState.persistenceOf("campaign_id"));
-}
-
 test "hiring assigns role-appropriate regular skills" {
     var gs = GameState.init(std.testing.allocator, .{});
     defer gs.deinit();
