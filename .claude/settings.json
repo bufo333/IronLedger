@@ -18,21 +18,17 @@
       "Bash(git switch -c *)",
       "Bash(git commit *)",
       "Bash(git merge --ff-only *)",
-      "Bash(git branch -d *)",
+      "Bash(git branch -d *)"
+    ],
+    "allow": [
       "Edit(/CLAUDE.md)",
       "Edit(/ARCHITECTURE.md)",
       "Edit(/TODO.md)",
-      "Edit(/docs/coding-contract*.md)",
-      "Edit(/docs/contract-exceptions.md)",
-      "Edit(/docs/verify-contract.sh)",
-      "Edit(/docs/verify-contract.baseline)",
-      "Edit(/.github/**)",
-      "Edit(/.claude/**)"
-    ],
-    "allow": [
       "Edit(/src/**)",
       "Edit(/docs/**)",
       "Edit(/data/**)",
+      "Edit(/.github/**)",
+      "Edit(/.claude/**)",
       "Bash(zig build *)",
       "Bash(zig fmt *)",
       "Bash(docs/verify-contract.sh)",

@@ -835,7 +835,7 @@ existing owner, error propagation, a test of behavior the listed code already
 owns, a comment, or formatting adds no responsibility.
 
 Listed code leaves the registry only through substantive simplification,
-deletion, or decomposition (rule 86) that brings it under its threshold; that
+deletion, or decomposition that brings it under its threshold; that
 branch deletes the entry, and the contract check fails until it does.
 Splitting lines, inlining imports, aliasing, compressing declarations,
 relocating tests, or deleting comments to fall under a threshold is not

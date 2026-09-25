@@ -65,20 +65,22 @@ Owner of every entry: the project owner.
   - Three switches with more than ten substantive arms (an arm body past three lines), measured by the check that guards them: `contract_events.applyEffectsFor`, `app.listView`, `forces.handle`. Five more sit at the threshold without crossing it: `app.listEnter` and `app.handleModalKey`, `market.handle`, `app.drawModal`, `supply.handle`.
   - `GameState` methods with subsystem behaviour: founding, posture, TO&E, crew, tech time, lift, supply, refit, aftermath, `commanderMultBp`, and `hirePerson`'s default skill table (it leaves with C11's single role-to-skill rule; the creation itself is a storage primitive). (Hashing has moved to `digest.zig`; transfers, couriers, purchase debits, payroll, upkeep, sale values, liquidation and credit to `treasury.zig`; recruiting, spec hiring, posting and the recruit bonus to `personnel.zig`; the back-office counts, staffing refresh and autostaffing to `hq_ops.zig`.)
   - Eleven upward imports in `state.zig`, held by the C4 layering record below:
-    - behaviour called from state: `clock.zig` (in `advance`), `events.zig`, `after_action.zig`, `personnel.zig` (`createCommander`'s `recruitGenerated`), `hq_ops.zig` (`refreshHqStaffing`), `treasury.zig` (`transferFunds`, `sendHome`'s `courierEtaDays`), `field_supply.zig` (`loadOutCompany`);
-    - simulation types stored in `GameState` fields: `network.zig` (the `HqLink` field type);
+    - behaviour called from state: `personnel.zig` (`createCommander`'s `recruitGenerated`), `hq_ops.zig` (`refreshHqStaffing`), `treasury.zig` (`transferFunds`, `sendHome`'s `courierEtaDays`), `field_supply.zig` (`loadOutCompany`);
+    - simulation types stored in `GameState` fields: `clock.zig` (the `Date` and `Clock` field types), `events.zig` (the `EventQueue` and `EventKind` field types), `after_action.zig` (the `Journal` field type), `network.zig` (the `HqLink` field type);
     - tests in `state.zig` importing the simulation layer: `digest.zig`, `starter_company.zig`. Rule 5's test clause covers only command-view agreement tests importing `queries.zig`, so these two need their own listing.
   - The 5 test-only `queries.zig` imports in `commands.zig` and `hq_ops.zig` are agreement tests allowed by rule 5's test clause and are not part of this entry.
   - This sub-list records existing debt found by a full audit; it grants no
-    permission. A new upward import is a violation even beside a listed one,
-    and the layering-check failure names it.
+    permission. A new upward import is a violation even beside a listed one:
+    the layering check names a new edge, and review (rule 87) holds a new
+    site on an already-recorded edge.
   - The named atomic operations that rule 14 cites do not exist.
 - **Removal:** C4.
 - **Guard:** `verify-contract.sh` fails on over-threshold code not in the
   registry, on a registry key that names nothing or is under its threshold,
   and on an upward import edge missing from the layering record or a record
   edge that no longer exists. Review holds what listed code may gain (rule
-  76; delivery checklist question 16).
+  76; delivery checklist question 16) and a new import site on an
+  already-recorded edge (rule 87).
 
 ### C5. Commands and ticks are not failure-atomic
 
@@ -461,10 +463,9 @@ One key per line, named only: `path:function` for a function, `path` for a
 module, `path:function#switch` for a switch. The registry records no size.
 `docs/verify-contract.sh` fails on over-threshold code that is not listed, on
 a listed key that names nothing in `src`, and on a listed key that has
-dropped under its threshold (both cases: remove the key). The branch that
-brings listed code under its threshold, by substantive simplification,
-deletion or decomposition (rule 76), deletes its key in the same branch. A
-listing records debt and grants no room for new responsibility.
+dropped under its threshold (both cases: remove the key); the branch that
+brings its code under its threshold deletes its key in the same branch
+(rule 76). A listing records debt.
 
 ```oversized
 src/domain/meklab.zig:validate
@@ -512,9 +513,11 @@ src/tui/screens/supply.zig:handle
 
 The C4 layering debt (rule 5), one canonical edge per line as
 `<source file> -> <resolved imported module>`, both paths relative to the
-repository root. `docs/verify-contract.sh` resolves every non-test,
-non-`queries.zig` upward import in `src` and fails on one missing from this
-record, and on a record edge whose import no longer exists (remove it). The
+repository root. `docs/verify-contract.sh` resolves every upward import in
+`src`, except a test's import of `queries.zig` (rule 5's test clause), and
+fails on one missing from this record, and on a record edge whose import no
+longer exists (remove it). The checker also checks test code, which is why
+the `digest.zig` and `starter_company.zig` edges are recorded. The
 record only shrinks: reformatting a recorded import line, without changing
 which module it names, still matches its edge and passes. A line records
 existing debt and permits nothing; a new upward import is a violation even
