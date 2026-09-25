@@ -11,8 +11,8 @@ and stop conditions bind every session.
 | `main` ruleset | GitHub settings | PR with 1 approval, Code Owner review, last-push approval, the four CI checks; nobody pushes to `main` |
 | `.github/CODEOWNERS` | repo | John reviews every change to the governance files |
 | `.claude/settings.json` | repo | permission rules: `deny` never runs, `ask` needs John's approval (and is denied outright in `dontAsk` sessions), `allow` runs unprompted |
-| `.claude/hooks/guard.py` | repo | blocks merge, approve, auth, token, keychain, push-to-`main`, local merge, git identity and `sed` commands by their full text, including `bash -c` and `git -C` forms a permission rule misses |
-| `.claude/agents/*.md` | repo | the five roles below: tools, permission mode, model, turn limit, prompt |
+| `.claude/hooks/guard.py` | repo | blocks merge, approve, auth, token, keychain, push-to-`main`, local merge, git identity and `sed` commands by their full text, including `bash -c` and `git -C` forms a permission rule misses; `python3 .claude/hooks/test_guard.py` checks it against its regression cases |
+| `.claude/agents/*.md` | repo | the six roles below: tools, permission mode, model, turn limit, prompt |
 | bot account | machine | agent sessions act on GitHub as `bufo333ironbot`, never as John |
 
 Permission rules and the hook match what an agent types; a script that

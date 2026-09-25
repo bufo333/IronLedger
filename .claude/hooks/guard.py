@@ -28,7 +28,9 @@ BLOCKED = [
     (r"\bsecurity\s+(find|add|delete)-", "the keychain is not to be read or changed"),
     (GIT + r"push\b" + ARGS + r"((?<![\w/.-])(main|master)(?![\w/.-])|--force|\s-f\b|--delete|\s-d\b|--mirror|--all|\s\+|\s:\S)",
      "pushes to main, force pushes and remote branch deletion are not allowed"),
-    (GIT + r"merge\b", "merging is John's; never merge locally"),
+    # `merge` alone: `merge-base`, `merge-file` and `merge-tree` are other
+    # subcommands.
+    (GIT + r"merge(?=\s|$)", "merging is John's; never merge locally"),
     (GIT + r"config\b(?!" + ARGS + r"--(get|get-all|list|show-origin)\b)" + ARGS + r"\b(credential|user\.name|user\.email|url\.|remote\.|core\.hooksPath)",
      "git identity, credentials and remotes are set by John"),
     (GIT + r"remote\s+(add|set-url|rename|remove)\b", "git remotes are set by John"),
