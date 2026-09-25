@@ -1,0 +1,82 @@
+{
+  "permissions": {
+    "disableBypassPermissionsMode": "disable",
+    "deny": [
+      "Bash(gh pr merge *)",
+      "Bash(gh pr review *)",
+      "Bash(gh auth *)",
+      "Bash(gh repo edit *)",
+      "Bash(gh project item-edit *)",
+      "Bash(git merge *)",
+      "Bash(sed *)",
+      "Edit(~/.claude/CLAUDE.md)",
+      "Edit(~/.claude/settings*.json)",
+      "Edit(~/.claude/agents/**)",
+      "Edit(~/.claude/hooks/**)",
+      "Edit(~/.claude/projects/**/memory/**)"
+    ],
+    "ask": [
+      "Bash(git push *)",
+      "Bash(gh pr create *)",
+      "Bash(gh pr comment *)",
+      "Bash(gh pr edit *)",
+      "Bash(gh issue create *)",
+      "Bash(gh issue comment *)",
+      "Bash(gh issue edit *)",
+      "Bash(gh api *)",
+      "Edit(/CLAUDE.md)",
+      "Edit(/ARCHITECTURE.md)",
+      "Edit(/TODO.md)",
+      "Edit(/docs/coding-contract*.md)",
+      "Edit(/docs/contract-exceptions.md)",
+      "Edit(/docs/verify-contract.sh)",
+      "Edit(/docs/verify-contract.baseline)",
+      "Edit(/.github/**)",
+      "Edit(/.claude/**)"
+    ],
+    "allow": [
+      "Edit(/src/**)",
+      "Edit(/docs/**)",
+      "Edit(/data/**)",
+      "Bash(zig build *)",
+      "Bash(zig fmt *)",
+      "Bash(docs/verify-contract.sh)",
+      "Bash(bash docs/verify-contract.sh)",
+      "Bash(python3 docs/tui_smoke.py *)",
+      "Bash(bash docs/repl_smoke.sh *)",
+      "Bash(docs/clean-package.sh)",
+      "Bash(bash docs/clean-package.sh)",
+      "Bash(python3 docs/data-fixtures.py)",
+      "Bash(git status *)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(git show *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git checkout main)",
+      "Bash(git pull --ff-only)",
+      "Bash(git checkout -b *)",
+      "Bash(git switch -c *)",
+      "Bash(gh issue view *)",
+      "Bash(gh pr view *)",
+      "Bash(gh pr diff *)",
+      "Bash(gh pr checks *)",
+      "Bash(gh run list *)",
+      "Bash(gh run view *)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/guard.py",
+            "args": []
+          }
+        ]
+      }
+    ]
+  }
+}
