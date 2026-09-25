@@ -24,6 +24,7 @@ regardless.
 
 | Agent | Writes? | Mode | Output |
 | --- | --- | --- | --- |
+| `issue-scribe` | GitHub issues, with John's approval of each | default | issues from ideas, TODO.md and ROADMAP.md |
 | `triage-planner` | no | plan | an implementation plan for one issue |
 | `implementer` | source, tests, docs | dontAsk | one committed branch, gate results, the PR checklist |
 | `verifier` | no | dontAsk | the gate's raw results |
@@ -33,6 +34,23 @@ regardless.
 There is no governance agent. Changes to CLAUDE.md, the contract, the
 exception ledger, the contract checks, CI, `.claude/` and memory happen only
 in a session John starts for that purpose, approving each edit.
+
+## Getting work onto the board
+
+All work is a GitHub issue. `issue-scribe` writes them; it never plans an
+implementation and never edits the repository.
+
+- **An idea.** Start `claude --agent issue-scribe` and talk the feature
+  through. When the scope is settled, say "file it": the scribe shows the
+  full draft, and `gh issue create` asks for approval before it runs.
+- **TODO.md and ROADMAP.md.** Ask the scribe to migrate one file. It lists
+  the proposed issues (for ROADMAP.md, each feature marked implemented, not
+  implemented or unsure, with the evidence), John prunes the list, and the
+  scribe writes `scratch/create-issues.sh`. John reads the script and runs
+  it.
+- **Into Inbox.** The bot cannot write to the project. Either the project's
+  auto-add workflow puts new repository issues in Inbox, or John adds them
+  with `gh project item-add`.
 
 ## One issue, start to finish
 
@@ -69,6 +87,27 @@ env GH_TOKEN=(security find-generic-password -s ironledger-bot-gh -w) claude --a
    to a new `implementer` session. Then verify and review again.
 7. **Merge.** John approves and merges the PR, deletes the branch, and moves
    the card to Done.
+
+## Running roles from agent view
+
+`claude agents` (research preview) shows every background session on one
+screen: Needs input, Working, Ready for review, Completed. Start a role in
+the background with `claude --agent <role> --bg "<prompt>"`, or type
+`@<role> <prompt>` in agent view. A session waiting on a permission prompt
+shows under Needs input; Space opens it, and Enter attaches.
+
+Read-only roles suit it: both reviewers, or the planner, can run in the
+background while John does something else. The implementer runs
+interactively, one at a time. A background session moves into a worktree
+under `.claude/worktrees/` before editing, and its built-in instructions
+tell it to commit and push that branch and open a draft PR; for the
+implementer those pushes stop at the `git push` ask rule.
+
+Not yet checked on this setup: whether a background session keeps the
+`GH_TOKEN` of the shell that dispatched it (the docs name `PATH` and the
+provider variables), and whether it runs the project hook. Test both with
+a read-only role before relying on them: `gh api user -q .login` should
+print `bufo333ironbot`, and a blocked command should be refused.
 
 ## Setup on a new machine
 
