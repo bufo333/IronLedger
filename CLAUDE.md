@@ -19,7 +19,7 @@ open exceptions (`docs/contract-exceptions.md`) comes first.
 ## Standing instruction
 
 The coordinator workflow and role boundaries are in `docs/agent-workflow.md`.
-Implementation begins only from a user-approved plan. A fresh planner reviews
+Implementation begins only from a user-approved plan. A fresh reviewer checks
 the committed branch before a separate integration task may fast-forward it
 into local `main`. The user owns every remote operation.
 
@@ -102,8 +102,8 @@ git branch -d <branch>
 - Branch creation, commits, the fast-forward merge, and branch deletion each
   require John's approval through the permission prompt showing the exact
   command.
-- The planner that reviews a branch must be a fresh invocation, not the
-  planner that authored the plan.
+- The reviewer must be a fresh invocation that did not plan or implement the
+  branch.
 - **Never verify a change with a file borrowed from another branch.** If
   the gate needs a fix from another branch, that fix must reach local `main`
   first.

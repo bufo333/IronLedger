@@ -1,111 +1,68 @@
 # Agent workflow
 
-IRON LEDGER uses one interactive coordinator and short-lived specialist
-subagents. The specialists make implementation decisions; John chooses product
-direction, approves plans, and approves git writes. The agents never use
-GitHub or a remote.
+IRON LEDGER uses one long-lived read-only coordinator and two short-lived
+workers. John approves plans and local git writes. Claude never uses GitHub or
+a remote.
 
 ## Roles
 
-| Agent | Scope | Writes? | Output |
-| --- | --- | --- | --- |
-| `coordinator` | user-level | no | Routes handoffs and asks John for decisions |
-| `brainstormer` | user-level | no | Options, tradeoffs, and a decision brief |
-| `planner` | user-level | no | An implementation plan or fresh committed-diff review |
-| `implementer` | project | source, tests, local git | One committed branch or an approved local integration |
+| Agent | Lifetime | Authority |
+| --- | --- | --- |
+| `coordinator` | one interactive session | Reads, brainstorms, plans, and delegates; never writes |
+| `implementer` | one approved task | Edits, verifies, commits, corrects, or locally integrates |
+| `reviewer` | one committed revision | Independently reviews; never writes |
 
-The user-level configuration also provides a generic `implementer`, making the
-workflow portable to other repositories. This project's closer definition
-overrides it with IRON LEDGER's contract and gate requirements.
-
-Each subagent starts with its own context. The coordinator passes only the
-selected direction, approved plan, accepted findings, or reviewed commit that
-the next phase needs. It never passes an entire transcript by default.
+The three user-level agents are portable across repositories. IRON LEDGER's
+`CLAUDE.md`, contract, and `.claude/settings.json` supply project-specific
+rules and permissions.
 
 ## Start
 
-From the repository root, start one interactive session:
+From the repository root:
 
 ```sh
 claude --agent coordinator
 ```
 
-Describe the idea normally. The coordinator invokes the specialists and keeps
-the handoffs in the same conversation; John does not copy text between Claude
-Code sessions.
+Describe work normally. The coordinator inspects the repository and scales its
+process to the task. An exact edit gets a brief plan; normal work gets a focused
+implementation plan; ambiguous work is brainstormed interactively before the
+same coordinator writes the plan. There is no mandatory brainstorm or planning
+subagent.
 
-## Workflow
+## Delivery
 
-1. **Brainstorm.** A fresh `brainstormer` reads relevant code and recommends
-   one direction. It asks John only about consequential product behavior or
-   architectural policy that durable project sources do not determine.
-2. **Plan.** A fresh `planner` receives the recommended direction, verifies
-   the repository independently, and makes technical decisions such as module
-   ownership, imports, boundaries, tests, thresholds, and record corrections.
-   John reviews and explicitly approves the recommended plan.
-3. **Implement.** A fresh `implementer` receives the exact approved plan. It
-   proposes a branch through the `git checkout -b` permission prompt, edits
-   only approved scope, runs the gate, and proposes its commit through the
-   `git commit` permission prompt.
-4. **Review.** A new `planner` invocation reviews the complete committed diff
-   against the approved plan, architecture, and coding contract. It is never
-   the planning invocation reused with old context.
-5. **Correct.** Confirmed review findings within approved scope go to a fresh
-   `implementer`, which commits corrections after approval and returns to a
-   fresh review. A finding that materially expands behavior, architecture,
-   contract, governance, or scope requires a revised plan and John's approval.
-6. **Integrate.** A fresh `implementer` receives the accepted review and exact
-   reviewed commit. It confirms a clean worktree and fast-forward ancestry,
-   then requests approval for the local fast-forward merge and local branch
-   deletion.
-7. **Stop.** Claude performs no remote operation. John pushes local `main`
-   after closing Claude Code for the day.
+1. The coordinator presents one recommended plan. John approves or revises it.
+2. A fresh `implementer` creates the approved branch, edits, runs the gate, and
+   commits. Branch creation and commit use permission prompts.
+3. A fresh `reviewer` checks the exact commit against the approved plan and
+   project contract.
+4. Confirmed findings inside approved scope go to an implementer in correction
+   mode. A material behavior, architecture, contract, governance, or scope
+   change requires a revised plan and John's approval. Every correction gets a
+   fresh review.
+5. After acceptance, an implementer verifies the reviewed commit, fast-forwards
+   local `main`, and deletes the local branch through permission prompts.
+6. Claude stops. John pushes local `main` after closing Claude Code.
 
-Permission denial stops the current phase. An agent does not rename a branch,
-rewrite a commit message, use another command form, or broaden scope to evade
-a denial.
+A partial implementer is resumed by task ID. If its session no longer exists,
+continuation mode inspects the existing branch and diff before proceeding. It
+never restarts ordinary implementation on a dirty branch.
 
-## Decision boundary
+## Boundaries
 
-John is asked only for product or architectural-policy choices not settled by
-durable project sources, plan approval, material scope revisions, and git
-permission prompts. Agents do not ask John to choose imports, module owners,
-helper shapes, test locations, threshold treatment, tracker wording, or other
-implementation mechanics.
+The coordinator asks John only for product or architectural-policy choices not
+settled by durable project sources, plan approval, material plan revisions, and
+git permission prompts. Technical choices belong to the coordinator. Historical
+approval, remote refs, stale patches, imports, module ownership, helper shape,
+test placement, tracker wording, and rule-76 registry treatment are not sent to
+John as decision menus.
 
-Memory, old conversation summaries, issue or pull-request discussion, branch
-names, and uncommitted patches are leads, not authority. A specialist verifies
-them against current code and durable project documents. An undocumented pause
-does not block planning. Conflicting records go to the planner for one
-recommended resolution rather than back to John as a list of questions.
+Normal implementation does not alter governance, contracts, gates, CI, agent
+configuration, or memory. Governance mode may change only files named by an
+explicitly approved governance plan.
 
-Historical approval, remote-ref ownership, old patch disposition, rule 76
-registry treatment, and similar technical cleanup choices are not sent to
-John. The planner evaluates current correctness, chooses the smallest honest
-branch, includes prerequisite cleanup when necessary, and assigns remaining
-work to an existing tracker or a later independently correct increment.
-
-## Controls
-
-- `CLAUDE.md` and `docs/coding-contract.md` define project behavior and the
-  delivery rules.
-- `.claude/settings.json` denies remote and GitHub commands, disables bypass
-  mode, and asks for branch creation, commits, local fast-forward merges, and
-  branch deletion.
-- `.claude/agents/implementer.md` limits implementation and integration work.
-- `docs/verify-contract.sh`, tests, smoke scripts, and packaging checks enforce
-  the executable contract.
-- A fresh planner review catches plan drift, wrong ownership, guessed facts,
-  and attempts to satisfy metrics without reducing architectural complexity.
-
-Permissions and prompts reduce accidental authority; they are not a sandbox
-against arbitrary programs launched through Bash. The durable controls are a
-small approved scope, executable gates, exact-commit review, fast-forward-only
-integration, and John retaining all remote authority.
-
-## Governance
-
-Normal implementation agents do not change `CLAUDE.md`, architecture,
-contracts, exception registries, contract checks, CI, `.claude/`, or memory.
-John must explicitly dispatch governance work, and review it like any other
-change.
+Permissions reduce accidental authority but are not a sandbox against arbitrary
+programs launched through Bash. Durable controls are the approved scope,
+executable gates, fresh exact-commit review, fast-forward-only integration, and
+John retaining all remote authority.
