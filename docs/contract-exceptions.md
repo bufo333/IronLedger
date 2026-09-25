@@ -49,7 +49,7 @@ Owner of every entry: the project owner.
   - Couriers to a sold HQ or disbanded company are never cancelled. On arrival the ledger says received and no balance moves (`commands.zig:1405-1506`, `tick.zig:295-301`, `state.zig:343-353`).
   - `addStock` and `postTreasury` silently skip an unknown site (`state.zig:1093`, `347-352`).
   - Selling an HQ drops its bay jobs, but the hulls stay repairing or refitting (`commands.zig:1415-1418`).
-  - `queueDepotRepair` wrecks the hull before refusing (`hq_ops.zig:364-372`).
+  - `queueDepotRepair` wrecks the hull before refusing (`hq_ops.zig:367-373`).
   - `execCreateCommander` sets the year before its refusal (`commands.zig:907-909`).
   - `orderPart` rolls the dice before the funds check (`commands.zig:2194` vs `2217`).
   - GAME OVER says "saved" after a failed final save (`app.zig:2463`, `1342`).
@@ -225,14 +225,14 @@ Owner of every entry: the project owner.
 - **Rules:** 20, 21, 26, 27, 29, 60.
 - **Why not yet:** Each duplicate has to be collapsed into one owning function, with a test that the owner and its consumers agree.
 - **Scope, copies that already disagree:**
-  - **Admin desk requirement,** defined three ways (`hq.zig:84`, `hq_ops.staffHqToRequirement`'s desk split and `state.createCommander`'s staff plan, `queries.zig:5204-5210`, `2012-2017`).
+  - **Admin desk requirement,** defined three ways (`hq.zig:84`; `hq_ops.staffHqToRequirement`'s desk split, copied in `state.createCommander`'s staff plan; `queries.zig:5204-5210`, `2012-2017`).
   - **Disband quote** leaves out company funds (`queries.zig:6028` vs `commands.zig:1461`).
   - **Medbay cover** leaves out medics (`queries.zig:5302-5309` vs `medical.zig:119-129`).
   - **Effectiveness %** reads 100 in one place and 0 in another (`queries.zig:364`, `925`; `checklist.zig:126`).
   - **Two "coming" ledgers** disagree (`hq_ops.comingToHq`, `hq_ops.comingToSite`; `field_supply.zig:256`).
   - **Skill selection and untrained fallbacks** differ:
     - selection: `battle.zig:246`, `personnel.zig:345`, `rating.zig:84`
-    - fallbacks: `personnel.hireFromSpec`, `queries.zig:4724`
+    - fallbacks: `state.hirePerson`'s default skill table, `personnel.hireFromSpec`, `queries.zig:4724`
 - **Scope, copies:**
   - HQ sale proceeds (`queries.zig:6024`, `commands.zig:1409`)
   - transit days (`commands.zig:2371`, `queries.zig:4431`, `722`)
@@ -391,10 +391,9 @@ Owner of every entry: the project owner.
 - **Why not yet:** 421 public functions in the sim and domain have no in-file test naming them. The rule functions among them need a test that the rule and its consumers agree.
 - **Scope:**
   - Rule functions with no test:
-    - `hq_ops`: `beyondEconomicalRepair`, `canFabricate`, `bayCanRebuild`, `upgradeBlock`, `rebuildEstimate`, `engineCharge`, `paperworkDaysFor`, `depotHqFor`
+    - `hq_ops`: `beyondEconomicalRepair`, `canFabricate`, `bayCanRebuild`, `upgradeBlock`, `rebuildEstimate`, `engineCharge`, `paperworkDaysFor`, `depotHqFor`, `staffHqToRequirement`
     - `state`: `assignBlock`, `canReachPool`, `techHoursAvailable`, `findFreeTech`, `siteCapacityTons`, `moveStock`, `applyRefit`
     - `treasury`: `transferFunds`, `isInsolvent`, `liquidationValue`, `creditLimit`, `courierEtaDays`
-    - `hq_ops`: `staffHqToRequirement`
     - `battle`: `effectiveRoe`, `estimatePower`, `estimatedKills`, `inContactWindow`
     - `medical`: `healDays`, `careFor`, `turnoverRisk`
     - `personnel`: `severanceOwed`, `manningNeeds`, `readinessPenalty`
