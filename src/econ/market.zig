@@ -1,4 +1,5 @@
-//! Markets: contract offers, hiring pool, unit purchases.
+//! Markets: contract offers, hiring pool, unit purchases, and what hulls,
+//! stock and HQ facilities fetch when sold.
 //! MekHQ counterpart: `market/ContractMarket`, `PersonnelMarket`, `UnitMarket`.
 //! Stage 4 implements generation; refresh cadence and offer shapes live here.
 
@@ -8,6 +9,10 @@ const types = @import("../domain/types.zig");
 const contract = @import("../domain/contract.zig");
 const person = @import("../domain/person.zig");
 const rng_mod = @import("../sim/rng.zig");
+const unit_mod = @import("../domain/unit.zig");
+const chassis_mod = @import("../domain/chassis.zig");
+const part_mod = @import("../domain/part.zig");
+const hq_mod = @import("../domain/hq.zig");
 
 /// Offers on the board: a floor so there is always
 /// a choice, the rating letter index (F 0 … A* 5) and the comms level on
@@ -70,6 +75,79 @@ pub const structural_fab_days = tuning.market.fab_days;
 /// move slower on the second-hand market.
 pub const stock_resale_bp: types.Bp = tuning.market.stock_resale_bp;
 pub const component_resale_bp: types.Bp = tuning.market.component_resale_bp;
+
+// -------------------------------------------------------- sale values
+
+/// What a hull fetches on a forced sale: half its value, scaled by
+/// condition.
+pub fn unitSaleValue(u: *const unit_mod.Unit) types.CBills {
+    // A wreck is worth what can be stripped off it.
+    if (u.status == .destroyed) return stripValue(u);
+    const base: types.CBills = if (u.purchase_price > 0) u.purchase_price else if (chassis_mod.find(u.chassis_key)) |c| c.cost else 0;
+    const by_condition = @divTrunc(base * @as(types.CBills, u.conditionPct()) * tuning.unit.sale_bp, 10_000 * 100);
+    // Quality on the ticket: ± per step from C (A worst, F best).
+    const steps: i64 = @as(i64, @intFromEnum(u.quality)) - @intFromEnum(types.Quality.c);
+    return types.applyBp(by_condition, @intCast(10_000 + steps * tuning.maintenance.quality_sale_bp_per_step));
+}
+
+/// One line of what stripping a hull recovers.
+pub const StripLine = struct { key: []const u8, qty: u32 };
+
+/// What a hull yields stripped for parts (MekHQ "salvage unit"): every
+/// intact weapon and piece of equipment, every intact structural
+/// component, and the armour still on it. Ammunition bins and damaged gear
+/// go with the scrap.
+pub fn stripParts(alloc: std.mem.Allocator, u: *const unit_mod.Unit) ![]StripLine {
+    var out: std.ArrayListUnmanaged(StripLine) = .empty;
+    for (u.slots.items) |s| {
+        if (s.condition != .ok) continue;
+        const key: []const u8 = switch (s.class) {
+            .weapon, .equipment => s.part_key,
+            .structure => part_mod.componentFor(s.slot_key, u.chassis_key),
+            .armor, .ammo => continue,
+        };
+        if (part_mod.find(key) == null) continue;
+        for (out.items) |*l| {
+            if (std.mem.eql(u8, l.key, key)) {
+                l.qty += 1;
+                break;
+            }
+        } else try out.append(alloc, .{ .key = key, .qty = 1 });
+    }
+    if (chassis_mod.find(u.chassis_key)) |design| {
+        const armor_tons: u32 = @as(u32, design.armor_half_tons) * u.armor_pct / 200;
+        if (armor_tons > 0) try out.append(alloc, .{ .key = "armor", .qty = armor_tons });
+    }
+    return out.toOwnedSlice(alloc);
+}
+
+/// Resale value of everything `stripParts` would recover.
+pub fn stripValue(u: *const unit_mod.Unit) types.CBills {
+    var buf: [4096]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&buf);
+    const lines = stripParts(fba.allocator(), u) catch return 0;
+    var total: types.CBills = 0;
+    for (lines) |l| total += stockSaleValue(l.key, l.qty);
+    return total;
+}
+
+/// What an HQ's facilities fetch: 40% of what they cost to build.
+pub fn hqSaleValue(h: *const hq_mod.Hq) types.CBills {
+    var total: types.CBills = 0;
+    for (h.facilities.items) |f| {
+        var lvl: u8 = 1;
+        while (lvl <= f.level) : (lvl += 1) total += hq_mod.upgradeCost(f.kind, lvl);
+    }
+    return @divTrunc(total * @as(types.CBills, tuning.hq.sale_pct), 100);
+}
+
+/// Resale value of `qty` of a stock line: stock_resale_bp of
+/// catalogue cost, component_resale_bp for comp_* parts.
+pub fn stockSaleValue(key: []const u8, qty: u32) types.CBills {
+    const def = part_mod.find(key) orelse return 0;
+    const bp: types.Bp = if (part_mod.isComponent(key)) component_resale_bp else stock_resale_bp;
+    return types.applyBp(def.cost * qty, bp);
+}
 
 /// Transports list at a fraction of their canon price: a
 /// Leopard is a mid-game capital purchase, not a decade of profit.
@@ -268,4 +346,21 @@ test "offer visibility bands: ring, beachhead, dark" {
     try std.testing.expectEqual(OfferVisibility.beachhead, visibilityFor(61, ring));
     try std.testing.expectEqual(OfferVisibility.beachhead, visibilityFor(90, ring));
     try std.testing.expectEqual(OfferVisibility.hidden, visibilityFor(91, ring));
+}
+
+test "quality moves the resale ticket" {
+    const chassis = chassis_mod.find("SHD-2H").?;
+    var u: unit_mod.Unit = .{
+        .id = @enumFromInt(1),
+        .chassis_key = chassis.key,
+        .kind = chassis.kind,
+        .purchase_price = chassis.cost,
+    };
+    defer u.deinit(std.testing.allocator);
+    u.quality = .c;
+    const c = unitSaleValue(&u);
+    u.quality = .f;
+    try std.testing.expect(unitSaleValue(&u) > c);
+    u.quality = .a;
+    try std.testing.expect(unitSaleValue(&u) < c);
 }

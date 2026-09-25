@@ -17,7 +17,7 @@ folded in: D26 into C10, D27 and D30 into C12, D28 into C7, D29 into C15,
 D31 into C8, D33 into C18 (D32 closed with C1, the gate).
 
 - [ ] C4 decomposition (rules 5, 14, 76, 77) — first, because the fixes after it add code to modules in the rule 76 registry. Behaviour-preserving, golden hash unchanged, one increment per branch:
-  - [ ] C4a `GameState` keeps storage and primitives; hashing to `digest.zig`, treasury and pricing/liquidation to econ, hiring to personnel, staffing and founding to `hq_ops`, posture to a posture module, TO&E and crew, tech time to maintenance, lift, supply, refit, aftermath and readiness to their owners (the grouping is in the ledger); `state.zig` imports nothing above the state layer (the C4 layering record).
+  - [ ] C4a `GameState` keeps storage and primitives; hashing to `digest.zig`, treasury behaviour (transfers, couriers, payroll, upkeep, liquidation, credit) to `sim/treasury.zig`, the pure sale values to `econ/market.zig`, hiring to personnel, staffing and founding to `hq_ops`, posture to a posture module, TO&E and crew, tech time to maintenance, lift, supply, refit, aftermath and readiness to their owners (the grouping is in the ledger); `state.zig` imports nothing above the state layer (the C4 layering record).
   - [ ] C4b `commands.zig` keeps the union, dispatch and error set; handlers move to subsystem command modules; the named atomic operations of rule 14 exist.
   - [ ] C4c `queries.zig` keeps the public namespace; view builders move to finance, contracts, personnel, forces, HQ, market and battle query modules.
   - [ ] C4d `tui/app.zig` splits into session/lobby, wizard, modal controllers, command line and settings.

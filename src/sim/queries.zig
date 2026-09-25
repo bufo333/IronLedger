@@ -1292,7 +1292,7 @@ pub fn holdsPrisonerOf(gs: *GameState, faction: []const u8) bool {
 pub fn wreckNote(alloc: std.mem.Allocator, gs: *GameState, u: *const @import("../domain/unit.zig").Unit) ![]const u8 {
     const hq_ops = @import("hq_ops.zig");
     const cause = if (u.wreck == .none) "wreck" else u.wreck.label();
-    const est = hq_ops.rebuildEstimate(gs, u) orelse return try std.fmt.allocPrint(alloc, "{{c}}{s} — strip it (Forces $, s) or sell for {s}{{/}}", .{ cause, try money(alloc, treasury.unitSaleValue(u)) });
+    const est = hq_ops.rebuildEstimate(gs, u) orelse return try std.fmt.allocPrint(alloc, "{{c}}{s} — strip it (Forces $, s) or sell for {s}{{/}}", .{ cause, try money(alloc, market_mod.unitSaleValue(u)) });
     const new_cost: types.CBills = if (chassis_mod.find(u.chassis_key)) |c| c.cost else 0;
     return try std.fmt.allocPrint(alloc, "{{c}}{s} — rebuild ≈{s} vs new {s}{s}{{/}}", .{
         cause, try money(alloc, est), try money(alloc, new_cost),
@@ -6009,10 +6009,10 @@ pub const SellQuote = struct {
 
 pub fn sellQuote(alloc: Alloc, gs: *GameState, uid: types.UnitId) !?SellQuote {
     const u = gs.unit(uid) orelse return null;
-    const lines = try treasury.stripParts(alloc, u);
+    const lines = try market_mod.stripParts(alloc, u);
     var buf: std.ArrayListUnmanaged(u8) = .empty;
     for (lines, 0..) |l, i| try buf.print(alloc, "{s}{d}× {s}", .{ if (i > 0) ", " else "", l.qty, l.key });
-    return .{ .chassis_key = u.chassis_key, .value = treasury.unitSaleValue(u), .strip_text = if (lines.len > 0) buf.items else "nothing worth keeping" };
+    return .{ .chassis_key = u.chassis_key, .value = market_mod.unitSaleValue(u), .strip_text = if (lines.len > 0) buf.items else "nothing worth keeping" };
 }
 
 /// What selling off an HQ brings: 40% of build cost plus its treasury.
@@ -6020,7 +6020,7 @@ pub const HqSaleQuote = struct { name: []const u8, value: types.CBills };
 
 pub fn hqSaleQuote(gs: *GameState, hq_id: types.HqId) ?HqSaleQuote {
     const h = gs.hqs.getPtr(hq_id) orelse return null;
-    return .{ .name = h.name, .value = treasury.hqSaleValue(h) + h.funds };
+    return .{ .name = h.name, .value = market_mod.hqSaleValue(h) + h.funds };
 }
 
 /// What disbanding a company sells its hulls for.
@@ -6028,7 +6028,7 @@ pub fn disbandQuote(gs: *GameState, company: types.ForceId) types.CBills {
     var value: types.CBills = 0;
     var uit = gs.units.iterator();
     while (uit.next()) |e| if (gs.companyOf(e.value_ptr.force) == company) {
-        value += treasury.unitSaleValue(e.value_ptr);
+        value += market_mod.unitSaleValue(e.value_ptr);
     };
     return value;
 }

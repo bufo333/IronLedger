@@ -12,10 +12,6 @@ const std = @import("std");
 const tuning = @import("../domain/tuning.zig").t;
 const types = @import("../domain/types.zig");
 const planet_mod = @import("../domain/planet.zig");
-const unit_mod = @import("../domain/unit.zig");
-const chassis_mod = @import("../domain/chassis.zig");
-const part_mod = @import("../domain/part.zig");
-const hq_mod = @import("../domain/hq.zig");
 const logistics = @import("../econ/logistics.zig");
 const finance_mod = @import("../econ/finance.zig");
 const market = @import("../econ/market.zig");
@@ -137,77 +133,6 @@ pub fn companyMonthlyPayroll(gs: *GameState, company_id: types.ForceId) types.CB
 
 // -------------------------------------------------------- liquidation
 
-/// What a hull fetches on a forced sale: half its value, scaled by
-/// condition.
-pub fn unitSaleValue(u: *const unit_mod.Unit) types.CBills {
-    // A wreck is worth what can be stripped off it.
-    if (u.status == .destroyed) return stripValue(u);
-    const base: types.CBills = if (u.purchase_price > 0) u.purchase_price else if (chassis_mod.find(u.chassis_key)) |c| c.cost else 0;
-    const by_condition = @divTrunc(base * @as(types.CBills, u.conditionPct()) * tuning.unit.sale_bp, 10_000 * 100);
-    // Quality on the ticket: ± per step from C (A worst, F best).
-    const steps: i64 = @as(i64, @intFromEnum(u.quality)) - @intFromEnum(types.Quality.c);
-    return types.applyBp(by_condition, @intCast(10_000 + steps * tuning.maintenance.quality_sale_bp_per_step));
-}
-
-/// One line of what stripping a hull recovers.
-pub const StripLine = struct { key: []const u8, qty: u32 };
-
-/// What a hull yields stripped for parts (MekHQ "salvage unit"): every
-/// intact weapon and piece of equipment, every intact structural
-/// component, and the armour still on it. Ammunition bins and damaged gear
-/// go with the scrap.
-pub fn stripParts(alloc: std.mem.Allocator, u: *const unit_mod.Unit) ![]StripLine {
-    var out: std.ArrayListUnmanaged(StripLine) = .empty;
-    for (u.slots.items) |s| {
-        if (s.condition != .ok) continue;
-        const key: []const u8 = switch (s.class) {
-            .weapon, .equipment => s.part_key,
-            .structure => part_mod.componentFor(s.slot_key, u.chassis_key),
-            .armor, .ammo => continue,
-        };
-        if (part_mod.find(key) == null) continue;
-        for (out.items) |*l| {
-            if (std.mem.eql(u8, l.key, key)) {
-                l.qty += 1;
-                break;
-            }
-        } else try out.append(alloc, .{ .key = key, .qty = 1 });
-    }
-    if (chassis_mod.find(u.chassis_key)) |design| {
-        const armor_tons: u32 = @as(u32, design.armor_half_tons) * u.armor_pct / 200;
-        if (armor_tons > 0) try out.append(alloc, .{ .key = "armor", .qty = armor_tons });
-    }
-    return out.toOwnedSlice(alloc);
-}
-
-/// Resale value of everything `stripParts` would recover.
-pub fn stripValue(u: *const unit_mod.Unit) types.CBills {
-    var buf: [4096]u8 = undefined;
-    var fba = std.heap.FixedBufferAllocator.init(&buf);
-    const lines = stripParts(fba.allocator(), u) catch return 0;
-    var total: types.CBills = 0;
-    for (lines) |l| total += stockSaleValue(l.key, l.qty);
-    return total;
-}
-
-/// What an HQ's facilities fetch: 40% of what they cost to build.
-pub fn hqSaleValue(h: *const hq_mod.Hq) types.CBills {
-    var total: types.CBills = 0;
-    for (h.facilities.items) |f| {
-        var lvl: u8 = 1;
-        while (lvl <= f.level) : (lvl += 1) total += hq_mod.upgradeCost(f.kind, lvl);
-    }
-    return @divTrunc(total * @as(types.CBills, tuning.hq.sale_pct), 100);
-}
-
-/// Resale value of `qty` of a stock line: market.stock_resale_bp of
-/// catalogue cost, component_resale_bp for comp_* parts.
-pub fn stockSaleValue(key: []const u8, qty: u32) types.CBills {
-    const def = part_mod.find(key) orelse return 0;
-    const bp: types.Bp = if (part_mod.isComponent(key)) market.component_resale_bp else market.stock_resale_bp;
-    return types.applyBp(def.cost * qty, bp);
-}
-
 /// Nothing left covers the hole: funds, everything sellable and every
 /// credit line together are below zero. The checklist warns on it and the
 /// payday folds the outfit on it; one expression.
@@ -220,13 +145,13 @@ pub fn isInsolvent(gs: *GameState) bool {
 pub fn liquidationValue(gs: *GameState) types.CBills {
     var total: types.CBills = 0;
     var uit = gs.units.iterator();
-    while (uit.next()) |e| total += unitSaleValue(e.value_ptr);
+    while (uit.next()) |e| total += market.unitSaleValue(e.value_ptr);
     var sit = gs.spare_parts.iterator();
-    while (sit.next()) |e| total += stockSaleValue(e.key_ptr.*, e.value_ptr.*);
+    while (sit.next()) |e| total += market.stockSaleValue(e.key_ptr.*, e.value_ptr.*);
     var hqs_it = gs.hqs.iterator();
     while (hqs_it.next()) |e| {
         var st = e.value_ptr.stock.iterator();
-        while (st.next()) |line| total += stockSaleValue(line.key_ptr.*, line.value_ptr.*);
+        while (st.next()) |line| total += market.stockSaleValue(line.key_ptr.*, line.value_ptr.*);
     }
     var first = true;
     var hit = gs.hqs.iterator();
@@ -235,7 +160,7 @@ pub fn liquidationValue(gs: *GameState) types.CBills {
             first = false;
             continue;
         }
-        total += hqSaleValue(e.value_ptr);
+        total += market.hqSaleValue(e.value_ptr);
     }
     return total;
 }
@@ -250,19 +175,6 @@ pub fn creditRemaining(gs: *GameState) types.CBills {
     var owed: types.CBills = 0;
     for (gs.loans.items) |l| owed += l.balance;
     return @max(0, creditLimit(gs) - owed);
-}
-
-test "quality moves the resale ticket" {
-    var gs = GameState.init(std.testing.allocator, .{ .seed = 1213 });
-    defer gs.deinit();
-    const uid = try gs.addUnit("SHD-2H");
-    const u = gs.unit(uid).?;
-    u.quality = .c;
-    const c = unitSaleValue(u);
-    u.quality = .f;
-    try std.testing.expect(unitSaleValue(u) > c);
-    u.quality = .a;
-    try std.testing.expect(unitSaleValue(u) < c);
 }
 
 test "the credit line is backed by what the outfit could sell, less what it owes" {

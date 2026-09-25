@@ -22,7 +22,7 @@ Owner of every entry: the project owner.
 - **Scope:** every entry in `docs/verify-contract.baseline`. The ones that already change outcomes:
   - Rating and liquidation:
     - `rating.zig:157` (`planLift catch continue`)
-    - `treasury.stripValue` (`stripParts catch return 0`)
+    - `market.stripValue` (`stripParts catch return 0`)
   - Hidden warnings and results:
     - `checklist.zig:95`
     - `tick.zig:127` (`trim_stock catch Result{}`)
@@ -63,7 +63,7 @@ Owner of every entry: the project owner.
 - **Scope:**
   - Every module and function listed in the rule 76 registry below.
   - Three switches with more than ten substantive arms (an arm body past three lines), measured by the check that guards them: `contract_events.applyEffectsFor`, `app.listView`, `forces.handle`. Five more sit at the threshold without crossing it: `app.listEnter` and `app.handleModalKey`, `market.handle`, `app.drawModal`, `supply.handle`.
-  - `GameState` methods with subsystem behaviour: founding, posture, TO&E, crew, tech time, lift, supply, refit, aftermath, `commanderMultBp`, and `hirePerson`'s default skill table (it leaves with C11's single role-to-skill rule; the creation itself is a storage primitive). (Hashing has moved to `digest.zig`; transfers, couriers, purchase debits, payroll, upkeep, sale values, liquidation and credit to `treasury.zig`; recruiting, spec hiring, posting and the recruit bonus to `personnel.zig`; the back-office counts, staffing refresh and autostaffing to `hq_ops.zig`.)
+  - `GameState` methods with subsystem behaviour: founding, posture, TO&E, crew, tech time, lift, supply, refit, aftermath, `commanderMultBp`, and `hirePerson`'s default skill table (it leaves with C11's single role-to-skill rule; the creation itself is a storage primitive). (Hashing has moved to `digest.zig`; sale values to `econ/market.zig`; transfers, couriers, purchase debits, payroll, upkeep, liquidation and credit to `treasury.zig`; recruiting, spec hiring, posting and the recruit bonus to `personnel.zig`; the back-office counts, staffing refresh and autostaffing to `hq_ops.zig`.)
   - Nine upward imports in `state.zig`, held by the C4 layering record below:
     - behaviour called from state: `personnel.zig` (`createCommander`'s `recruitGenerated`), `hq_ops.zig` (`refreshHqStaffing`), `treasury.zig` (`transferFunds`, `sendHome`'s `courierEtaDays`), `field_supply.zig` (`loadOutCompany`);
     - simulation types stored in `GameState` fields: `clock.zig` (the `Date` and `Clock` field types), `events.zig` (the `EventQueue` and `EventKind` field types), `after_action.zig` (the `Journal` field type), `network.zig` (the `HqLink` field type);
