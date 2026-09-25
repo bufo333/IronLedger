@@ -1,16 +1,13 @@
 # The gate (docs/coding-contract.md rule 72): formatting, the contract checks,
 # unit tests and both smoke scripts on Linux and macOS, and a clean package
-# build in ReleaseFast (rule 66). Pull requests run it; `main` runs it again
-# after a merge. Actions are pinned to reviewed commits.
+# build in ReleaseFast (rule 66). It verifies `main` after John pushes a
+# locally reviewed integration. Actions are pinned to reviewed commits.
 #
-# Every change runs it, prose included: the four jobs are required status
-# checks on `main`, and a workflow skipped by a path filter leaves its
-# required checks pending, which blocks the merge.
+# Every push to `main` runs all four jobs; there are no path filters.
 name: ci
 on:
   push:
     branches: [main]
-  pull_request:
 permissions:
   contents: read
 concurrency:

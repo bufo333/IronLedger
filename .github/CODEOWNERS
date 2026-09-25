@@ -1,5 +1,5 @@
-# Governance files: a pull request touching any of these needs the owner's
-# review (the `main` ruleset requires Code Owner review).
+# Governance ownership for hosted review tools. The local agent workflow also
+# requires John to dispatch any change to these files explicitly.
 /CLAUDE.md                        @bufo333
 /ARCHITECTURE.md                  @bufo333
 /TODO.md                          @bufo333

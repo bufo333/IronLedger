@@ -887,7 +887,7 @@ safely, it is omitted.
   the fixture's shape. A test name describes behavior, such as `"battle report
   IDs remain unique after save and load"`, never a roadmap stage or a fix.
 - **Comments change with the code.** A change that invalidates a nearby
-  comment updates or removes it in the same PR; a stale comment is a
+  comment updates or removes it in the same change; a stale comment is a
   correctness defect. When a refactor makes code self-explanatory, the comment
   is deleted rather than rewritten.
 
@@ -997,16 +997,20 @@ rg -n '^test "[0-9]' src
 
 ---
 
-## 11. Pull requests and delivery
+## 11. Branches and delivery
 
 ### 85. One branch in flight at a time
 
 A change lands on `main` before the next starts. Branches are sequential,
-never stacked. A branch is complete only when its PR is merged, the branch is
-deleted locally and remotely, and local `main` is pulled.
+never stacked. A branch is complete only when its exact reviewed commit is
+fast-forwarded into local `main` and the local branch is deleted.
 
-- A pushed branch always has a PR.
 - The gate runs on the branch exactly as reviewed.
+- A fresh read-only reviewer checks the committed diff against the approved
+  plan and this contract before integration.
+- Local integration uses `git merge --ff-only`; it never creates a merge
+  commit or changes the reviewed commit.
+- Remote operations happen outside the agent workflow after local integration.
 - No file is borrowed from another branch to make verification pass.
 - Large work is split into independently correct increments that each land.
 
@@ -1014,9 +1018,9 @@ deleted locally and remotely, and local `main` is pulled.
 
 A deliverable has one primary invariant or subsystem outcome. Package fixes,
 schema migrations, frontend tests, and major module decompositions do not
-share a PR merely because they came from the same audit. Structural moves land
-after behavior fixes that rely on existing line ownership, unless the move is
-required to make the behavior fix safe.
+share a branch merely because they came from the same audit. Structural moves
+land after behavior fixes that rely on existing line ownership, unless the
+move is required to make the behavior fix safe.
 
 ### 87. Exceptions are explicit debt
 
@@ -1035,9 +1039,9 @@ Limited reach, such as a path only the REPL exercises, may lower remediation
 priority, but it does not waive an invariant; a temporary exception is still
 documented and bounded as above.
 
-### Pull request checklist
+### Delivery checklist
 
-Every PR answers:
+Every branch answers before integration:
 
 1. Which rule functions changed, and how many files changed for each?
 2. What is the first mutation in each changed compound operation, and how is
@@ -1068,12 +1072,13 @@ Every PR answers:
 ### Reviewer checks
 
 ```sh
-gh pr list --state open
-git branch -a
-git log --oneline origin/main..HEAD
+git status --short
+git branch --show-current
+git log --oneline main..HEAD
 ```
 
 - Is more than one branch in flight?
 - Does this change combine unrelated audit deliverables?
 - Does a claimed exception satisfy rule 87?
 - Is the reviewed commit exactly the commit that passed the gate?
+- Can local `main` reach the reviewed commit by fast-forward only?

@@ -2,28 +2,23 @@
   "permissions": {
     "disableBypassPermissionsMode": "disable",
     "deny": [
-      "Bash(gh pr merge *)",
-      "Bash(gh pr review *)",
-      "Bash(gh auth *)",
-      "Bash(gh repo edit *)",
-      "Bash(gh project item-edit *)",
-      "Bash(git merge *)",
+      "Bash(git push *)",
+      "Bash(gh *)",
+      "Bash(git reset --hard *)",
+      "Bash(git checkout -- *)",
+      "Bash(git clean *)",
       "Bash(sed *)",
       "Edit(~/.claude/CLAUDE.md)",
       "Edit(~/.claude/settings*.json)",
       "Edit(~/.claude/agents/**)",
-      "Edit(~/.claude/hooks/**)",
       "Edit(~/.claude/projects/**/memory/**)"
     ],
     "ask": [
-      "Bash(git push *)",
-      "Bash(gh pr create *)",
-      "Bash(gh pr comment *)",
-      "Bash(gh pr edit *)",
-      "Bash(gh issue create *)",
-      "Bash(gh issue comment *)",
-      "Bash(gh issue edit *)",
-      "Bash(gh api *)",
+      "Bash(git checkout -b *)",
+      "Bash(git switch -c *)",
+      "Bash(git commit *)",
+      "Bash(git merge --ff-only *)",
+      "Bash(git branch -d *)",
       "Edit(/CLAUDE.md)",
       "Edit(/ARCHITECTURE.md)",
       "Edit(/TODO.md)",
@@ -51,32 +46,11 @@
       "Bash(git diff *)",
       "Bash(git log *)",
       "Bash(git show *)",
+      "Bash(git rev-parse *)",
+      "Bash(git branch --show-current)",
       "Bash(git add *)",
-      "Bash(git commit *)",
       "Bash(git checkout main)",
-      "Bash(git pull --ff-only)",
-      "Bash(git checkout -b *)",
-      "Bash(git switch -c *)",
-      "Bash(gh issue view *)",
-      "Bash(gh pr view *)",
-      "Bash(gh pr diff *)",
-      "Bash(gh pr checks *)",
-      "Bash(gh run list *)",
-      "Bash(gh run view *)"
-    ]
-  },
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/guard.py",
-            "args": []
-          }
-        ]
-      }
+      "Bash(git switch main)"
     ]
   }
 }

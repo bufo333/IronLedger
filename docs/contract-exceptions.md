@@ -5,11 +5,11 @@ requires: the rule, why it is not fixed yet, the scope, the deliverable in
 `TODO.md` that removes it, and what stops it growing. The contract governs
 all new code in full; nothing here licenses a new violation. The deliverable
 that closes an entry deletes it (and its ratchet or baseline lines) in the
-same pull request.
+same branch.
 
 Scope lists name the sites a compliance sweep of every rule verified in the
 code when the contract was adopted. A site found later joins its entry in
-the pull request that finds it.
+the branch that finds it.
 
 Owner of every entry: the project owner.
 
@@ -59,7 +59,7 @@ Owner of every entry: the project owner.
 ### C4. Module and function size; behaviour on GameState; layering
 
 - **Rules:** 5, 14, 76, 77.
-- **Why not yet:** Decomposition is behaviour-preserving work spread over several pull requests, one module at a time, with the golden hash unchanged.
+- **Why not yet:** Decomposition is behaviour-preserving work spread over several branches, one module at a time, with the golden hash unchanged.
 - **Scope:**
   - Every module and function listed in the ratchet below.
   - Three switches with more than ten substantive arms (an arm body past three lines), measured by the check that guards them: `contract_events.applyEffectsFor` (21), `app.listView` (19), `forces.handle` (19). Five more sit at the threshold without crossing it: `app.listEnter` and `app.handleModalKey` (10 each), `market.handle` (10), `app.drawModal` (9), `supply.handle` (7).
@@ -452,7 +452,7 @@ switch with more than ten substantive arms (`path:function#switch`, in
 arms). `docs/verify-contract.sh`
 fails on anything over its threshold that is not listed, on a listed entry
 over its ceiling, and on a listed entry that has dropped under its threshold
-(delete it). A split lowers the ceiling in the pull request that makes it.
+(delete it). A split lowers the ceiling in the branch that makes it.
 
 ```ratchet
 src/domain/meklab.zig:validate 102

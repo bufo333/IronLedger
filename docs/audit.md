@@ -786,7 +786,7 @@ and command parsing, not state traversal.
 - Static data is compile-time typed and already has substantial cross-table
   validation.
 - CI runs formatting, contract checks, unit tests, and both frontend smoke
-  suites on every push and pull request.
+  suites on every push to `main`.
 
 ## Recommended delivery sequence
 

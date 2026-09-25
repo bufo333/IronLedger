@@ -18,10 +18,10 @@ open exceptions (`docs/contract-exceptions.md`) comes first.
 
 ## Standing instruction
 
-The roles, the per-issue workflow and the controls that enforce this are in
-`docs/agent-workflow.md`.
-
-You are an implementation author, not the final reviewer or merger.
+The coordinator workflow and role boundaries are in `docs/agent-workflow.md`.
+Implementation begins only from a user-approved plan. A fresh planner reviews
+the committed branch before a separate integration task may fast-forward it
+into local `main`. The user owns every remote operation.
 
 Never optimize for a mechanical metric at the expense of its architectural
 purpose. Do not use formatting, inline imports, aliases, compressed code,
@@ -40,9 +40,6 @@ Do not modify contracts, gates, exception registries, project instructions,
 agent configuration, memory, CI policy, or repository protections without
 explicit approval.
 
-Do not merge or approve your own work. Complete one approved deliverable,
-open its PR, report the evidence, and stop.
-
 ### Stop conditions
 
 - If the approved implementation conflicts with a contract rule, gate,
@@ -53,9 +50,8 @@ open its PR, report the evidence, and stop.
 - Never introduce a name, value, URL, quotation, citation, schema fact, or
   external claim unless it was verified from a source read during the
   current task. If it cannot be verified, stop and label it unverified.
-- Work comes only from an issue John has moved to Ready with an approved
-  plan and explicitly dispatched. Never select the next issue, move a card,
-  or start another branch.
+- Work comes only from a plan John explicitly approved and dispatched. Never
+  select the next item or start another branch.
 
 ## Commands
 
@@ -85,46 +81,38 @@ open its PR, report the evidence, and stop.
 
 ## Git workflow
 
-**One branch in flight at a time.** Start it, land it, delete it, pull
-`main` — then start the next. Never begin a second change while the first
-is unmerged, however small or unrelated it looks: parallel branches cut
-from `main` cannot see each other, so two of them editing one line is
-invisible until a merge conflict, and every branch after the first is
-verified against a `main` that does not exist yet.
+**One branch in flight at a time.** Start it, review it, fast-forward it into
+local `main`, and delete it before starting the next. Never stack work on an
+unintegrated branch.
 
 The loop, every time:
 
 ```sh
-git checkout main && git pull --ff-only     # never branch from a stale main
+git checkout main
 git checkout -b <area>/<short-name>         # tui/after-action, docs/git-workflow
 # …work; the gate (contract rule 72) must be green…
-git push -u origin <branch> && gh pr create # push and PR in the same step
-# John reviews and merges (the agent never runs gh pr merge or approves);
-# after the merge: git checkout main && git pull --ff-only
+# commit, then obtain a fresh read-only review of the exact commit
+git checkout main && git merge --ff-only <branch>
+git branch -d <branch>
 ```
 
-- Never commit to `main`, never push to `main`, never merge locally.
-- **Never push a branch without opening its PR in the same step.** A
-  pushed branch with no PR is invisible work: nobody can review it, it
-  rots behind `main`, and it is how dead branches happen.
+- Never commit directly to `main`.
+- Claude never pushes, fetches, pulls, or changes remotes. John pushes local
+  `main` himself after closing Claude Code.
+- Branch creation, commits, the fast-forward merge, and branch deletion each
+  require John's approval through the permission prompt showing the exact
+  command.
+- The planner that reviews a branch must be a fresh invocation, not the
+  planner that authored the plan.
 - **Never verify a change with a file borrowed from another branch.** If
-  the gate needs a fix that lives on a different branch, that fix must
-  land on `main` first — otherwise the gate is not one anybody else can
-  reproduce.
-- Finish the loop. A merged PR is not done until its branch is deleted
-  both sides and `main` is pulled; `git branch -a` should show `main`
-  alone before the next change starts. The merge and the remote branch
-  deletion are John's.
-- Use the `gh` CLI for every GitHub interaction — opening pull requests,
-  reading review comments, checking CI, listing issues.
-- CI runs on every pull request, prose included; its four jobs are
-  required checks on `main`.
-- Answer the contract's pull request checklist (section 11) in the PR
-  description.
+  the gate needs a fix from another branch, that fix must reach local `main`
+  first.
+- The reviewed commit must be exactly the commit that passed the gate and was
+  fast-forwarded into `main`.
+- Answer the contract's delivery checklist before integration.
 
-If a change is genuinely too big for one PR, split it into increments
-that each land on `main` before the next begins — sequentially, not as a
-stack of open branches.
+If a change is too big for one branch, split it into independently correct
+increments that each reach local `main` before the next begins.
 
 ## Hard rules
 

@@ -890,8 +890,7 @@ the repo.
 - `permissions: contents: read`.
 - `persist-credentials: false`.
 - Job timeouts.
-- Concurrency cancellation. Every PR currently runs CI twice (push and
-  pull_request), so this saves real time.
+- Concurrency cancellation prevents redundant runs on rapid pushes.
 
 ### A33. Bundled media has no rights manifest: Accepted → D34
 
@@ -991,7 +990,7 @@ correct each finding here by tracing a single path.
 
 ## Delivery plan
 
-Each deliverable is one pull request. Each lands on `main` before the next
+Each deliverable is one branch. Each lands on `main` before the next
 begins, and each adds its regression test before it changes behaviour, as the
 audit asks. Deliverables D23–D34 are new. Work already in `TODO.md` is shown
 where the audit's items join it.
