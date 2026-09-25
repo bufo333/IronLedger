@@ -4,8 +4,8 @@ Every place the code does not yet meet `docs/coding-contract.md`, as rule 87
 requires: the rule, why it is not fixed yet, the scope, the deliverable in
 `TODO.md` that removes it, and what stops it growing. The contract governs
 all new code in full; nothing here licenses a new violation. The deliverable
-that closes an entry deletes it (and its ratchet or baseline lines) in the
-same branch.
+that closes an entry deletes it (and its registry, layering-record or
+baseline lines) in the same branch.
 
 Scope lists name the sites a compliance sweep of every rule verified in the
 code when the contract was adopted. A site found later joins its entry in
@@ -61,13 +61,24 @@ Owner of every entry: the project owner.
 - **Rules:** 5, 14, 76, 77.
 - **Why not yet:** Decomposition is behaviour-preserving work spread over several branches, one module at a time, with the golden hash unchanged.
 - **Scope:**
-  - Every module and function listed in the ratchet below.
-  - Three switches with more than ten substantive arms (an arm body past three lines), measured by the check that guards them: `contract_events.applyEffectsFor` (21), `app.listView` (19), `forces.handle` (19). Five more sit at the threshold without crossing it: `app.listEnter` and `app.handleModalKey` (10 each), `market.handle` (10), `app.drawModal` (9), `supply.handle` (7).
+  - Every module and function listed in the rule 76 registry below.
+  - Three switches with more than ten substantive arms (an arm body past three lines), measured by the check that guards them: `contract_events.applyEffectsFor`, `app.listView`, `forces.handle`. Five more sit at the threshold without crossing it: `app.listEnter` and `app.handleModalKey`, `market.handle`, `app.drawModal`, `supply.handle`.
   - `GameState` methods with subsystem behaviour: founding, posture, TO&E, crew, tech time, lift, supply, refit, aftermath, `commanderMultBp`, and `hirePerson`'s default skill table (it leaves with C11's single role-to-skill rule; the creation itself is a storage primitive). (Hashing has moved to `digest.zig`; transfers, couriers, purchase debits, payroll, upkeep, sale values, liquidation and credit to `treasury.zig`; recruiting, spec hiring, posting and the recruit bonus to `personnel.zig`; the back-office counts, staffing refresh and autostaffing to `hq_ops.zig`.)
-  - One layering violation: `state.zig` imports `field_supply.zig` (in `loadOutCompany`). The `rating.zig` import left with `recruitBonus`.
+  - Eleven upward imports in `state.zig`, held by the C4 layering record below:
+    - behaviour called from state: `clock.zig` (in `advance`), `events.zig`, `after_action.zig`, `personnel.zig` (`createCommander`'s `recruitGenerated`), `hq_ops.zig` (`refreshHqStaffing`), `treasury.zig` (`transferFunds`, `sendHome`'s `courierEtaDays`), `field_supply.zig` (`loadOutCompany`);
+    - simulation types stored in `GameState` fields: `network.zig` (the `HqLink` field type);
+    - tests in `state.zig` importing the simulation layer: `digest.zig`, `starter_company.zig`. Rule 5's test clause covers only command-view agreement tests importing `queries.zig`, so these two need their own listing.
+  - The 5 test-only `queries.zig` imports in `commands.zig` and `hq_ops.zig` are agreement tests allowed by rule 5's test clause and are not part of this entry.
+  - This sub-list records existing debt found by a full audit; it grants no
+    permission. A new upward import is a violation even beside a listed one,
+    and the layering-check failure names it.
   - The named atomic operations that rule 14 cites do not exist.
 - **Removal:** C4.
-- **Guard:** the rule 76 ratchet in `verify-contract.sh`. A listed module, function or switch may not grow past its ceiling, and an unlisted one may not cross the threshold.
+- **Guard:** `verify-contract.sh` fails on over-threshold code not in the
+  registry, on a registry key that names nothing or is under its threshold,
+  and on an upward import edge missing from the layering record or a record
+  edge that no longer exists. Review holds what listed code may gain (rule
+  76; delivery checklist question 16).
 
 ### C5. Commands and ticks are not failure-atomic
 
@@ -444,54 +455,80 @@ Owner of every entry: the project owner.
 
 ---
 
-## Ratchet
+## Rule 76 registry
 
-The rule 76 ceilings: each module over 1,000 lines and each function over
-100, at its size when the contract was adopted, and each non-dispatch
-switch with more than ten substantive arms (`path:function#switch`, in
-arms). `docs/verify-contract.sh`
-fails on anything over its threshold that is not listed, on a listed entry
-over its ceiling, and on a listed entry that has dropped under its threshold
-(delete it). A split lowers the ceiling in the branch that makes it.
+One key per line, named only: `path:function` for a function, `path` for a
+module, `path:function#switch` for a switch. The registry records no size.
+`docs/verify-contract.sh` fails on over-threshold code that is not listed, on
+a listed key that names nothing in `src`, and on a listed key that has
+dropped under its threshold (both cases: remove the key). The branch that
+brings listed code under its threshold, by substantive simplification,
+deletion or decomposition (rule 76), deletes its key in the same branch. A
+listing records debt and grants no room for new responsibility.
 
-```ratchet
-src/domain/meklab.zig:validate 102
-src/main.zig:runDemo 232
-src/main.zig:runRepl 295
-src/persist/store.zig 2909
-src/sim/battle.zig 2261
-src/sim/battle.zig:playerSideIn 101
-src/sim/battle.zig:resolveEngagement 221
-src/sim/checklist.zig:turnWarnings 320
-src/sim/cli.zig:errorText 113
-src/sim/cli.zig:parseVerb 385
-src/sim/commands.zig 4813
-src/sim/contract_events.zig 1459
-src/sim/contract_events.zig:applyEffectsFor 210
-src/sim/contract_events.zig:applyEffectsFor#switch 21
-src/sim/contract_market.zig:refresh 121
-src/sim/contract_market.zig:refreshBoard 203
-src/sim/queries.zig 6252
-src/sim/queries.zig:afterAction 116
-src/sim/queries.zig:contracts 129
-src/sim/queries.zig:hqDetailView 113
-src/sim/queries.zig:lab 139
-src/sim/queries.zig:ledger 102
-src/sim/queries.zig:offerCandidates 108
-src/sim/queries.zig:stockTable 102
-src/sim/queries.zig:summary 141
-src/sim/rating.zig:report 133
-src/sim/state.zig 1834
-src/sim/tick.zig:runFinances 147
-src/tui/app.zig 4060
-src/tui/app.zig:drawModal 136
-src/tui/app.zig:handleModalKey 192
-src/tui/app.zig:listEnter 127
-src/tui/app.zig:listView 261
-src/tui/app.zig:listView#switch 19
-src/tui/png.zig:decode 116
-src/tui/screens/forces.zig:handle 173
-src/tui/screens/forces.zig:handle#switch 19
-src/tui/screens/map.zig:draw 103
-src/tui/screens/supply.zig:handle 113
+```oversized
+src/domain/meklab.zig:validate
+src/main.zig:runDemo
+src/main.zig:runRepl
+src/persist/store.zig
+src/sim/battle.zig
+src/sim/battle.zig:playerSideIn
+src/sim/battle.zig:resolveEngagement
+src/sim/checklist.zig:turnWarnings
+src/sim/cli.zig:errorText
+src/sim/cli.zig:parseVerb
+src/sim/commands.zig
+src/sim/contract_events.zig
+src/sim/contract_events.zig:applyEffectsFor
+src/sim/contract_events.zig:applyEffectsFor#switch
+src/sim/contract_market.zig:refresh
+src/sim/contract_market.zig:refreshBoard
+src/sim/queries.zig
+src/sim/queries.zig:afterAction
+src/sim/queries.zig:contracts
+src/sim/queries.zig:hqDetailView
+src/sim/queries.zig:lab
+src/sim/queries.zig:ledger
+src/sim/queries.zig:offerCandidates
+src/sim/queries.zig:stockTable
+src/sim/queries.zig:summary
+src/sim/rating.zig:report
+src/sim/state.zig
+src/sim/tick.zig:runFinances
+src/tui/app.zig
+src/tui/app.zig:drawModal
+src/tui/app.zig:handleModalKey
+src/tui/app.zig:listEnter
+src/tui/app.zig:listView
+src/tui/app.zig:listView#switch
+src/tui/png.zig:decode
+src/tui/screens/forces.zig:handle
+src/tui/screens/forces.zig:handle#switch
+src/tui/screens/map.zig:draw
+src/tui/screens/supply.zig:handle
+```
+
+## Layering record
+
+The C4 layering debt (rule 5), one canonical edge per line as
+`<source file> -> <resolved imported module>`, both paths relative to the
+repository root. `docs/verify-contract.sh` resolves every non-test,
+non-`queries.zig` upward import in `src` and fails on one missing from this
+record, and on a record edge whose import no longer exists (remove it). The
+record only shrinks: reformatting a recorded import line, without changing
+which module it names, still matches its edge and passes. A line records
+existing debt and permits nothing; a new upward import is a violation even
+beside a listed one.
+
+```layering
+src/sim/state.zig -> src/sim/after_action.zig
+src/sim/state.zig -> src/sim/clock.zig
+src/sim/state.zig -> src/sim/digest.zig
+src/sim/state.zig -> src/sim/events.zig
+src/sim/state.zig -> src/sim/field_supply.zig
+src/sim/state.zig -> src/sim/hq_ops.zig
+src/sim/state.zig -> src/sim/network.zig
+src/sim/state.zig -> src/sim/personnel.zig
+src/sim/state.zig -> src/sim/starter_company.zig
+src/sim/state.zig -> src/sim/treasury.zig
 ```

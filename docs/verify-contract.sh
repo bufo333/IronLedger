@@ -2,7 +2,8 @@
 # The mechanical checks of the coding contract (docs/coding-contract.md),
 # run as one gate: every check prints nothing on a clean tree, and any
 # output fails. Known violations are recorded in docs/contract-exceptions.md
-# (the rule 76 ratchet) and docs/verify-contract.baseline (broad catches).
+# (the rule 76 registry and the C4 layering record) and
+# docs/verify-contract.baseline (broad catches).
 #   docs/verify-contract.sh
 # Frontend checks walk src/tui recursively (screens/ included). Checks the
 # contract scopes to non-test code skip `test "…" { … }` blocks and test
@@ -35,7 +36,6 @@ check() {
 tui=$(find src/tui -name '*.zig' | sort)
 # Recursive (rule 73): a module split into a subdirectory stays checked.
 core=$(find src/domain src/sim src/econ src/gen -name '*.zig' | sort)
-below_sim=$(find src/domain src/econ src/gen -name '*.zig' | sort)
 
 # §1 Layers
 check "frontends touching GameState fields" \
@@ -44,14 +44,114 @@ check "frontends calling GameState methods" \
     "$(grep -nE '\b(g|gs)\.[a-zA-Z_]+\(' $tui | grep -vE '\.(allocator|diff)\(')"
 check "frontends reaching sim, store or domain modules" \
     "$(grep -nE 'game\.(store|state|hq_ops|contract_market|contract_control|battle|maintenance|medical|tick|planet|faction|chassis|part|force|hq|person|unit|difficulty|dataProvenance)\b' $tui | grep -vE 'pub const (GameState|Treasury) = game\.state\.(GameState|Treasury);')"
-check "the sim, econ or domain importing the view layer (outside tests)" \
-    "$(outside_tests 'queries\.zig' $(echo "$core" | grep -v -e '^src/sim/queries.zig$' -e '^src/sim/cli.zig$'))"
+# One rule 5 check (imports point down only): the layer map matches the
+# contract table (coding-contract.md §1), "game" resolves to src/root.zig
+# (build.zig:7), and every non-std/builtin import is resolved to a source
+# path and compared against the layer of its importer. An upward edge to
+# src/sim/queries.zig is allowed only from test code, citing rule 5's test
+# clause ("A test may cross the boundary only to assert that a command and
+# view agree"); every other upward edge must be a canonical
+# `<source> -> <resolved module>` line in the C4 layering record
+# (docs/contract-exceptions.md, rule 5). A recorded edge whose import no
+# longer exists must be removed, so the record only shrinks. Import lines
+# are matched across line breaks so reformatting a recorded import does not
+# change its edge.
+check "an import that does not point down (rule 5), or a stale layering-record edge" "$(python3 - <<'PY'
+import os, re
+
+def layer_of(p):
+    if p.startswith("src/tui/") or p == "src/main.zig":
+        return 0  # frontends
+    if p in ("src/sim/cli.zig", "src/persist/lobby.zig", "src/root.zig"):
+        return 1  # application
+    if p in ("src/persist/store.zig", "src/persist/sqlite.zig"):
+        return 2  # persistence
+    if p == "src/sim/queries.zig":
+        return 3  # views
+    if p == "src/sim/rng.zig":
+        return 7  # random, below rules despite its path (coding-contract.md §1)
+    if p == "src/sim/state.zig":
+        return 5  # state
+    if p.startswith("src/sim/"):
+        return 4  # simulation
+    if p.startswith("src/domain/") or p.startswith("src/econ/") or p.startswith("src/gen/"):
+        return 6  # rules
+    return None
+
+try:
+    exc_text = open("docs/contract-exceptions.md", encoding="utf-8").read()
+except OSError as e:
+    print(f"docs/contract-exceptions.md unreadable: {e}")
+    exc_text = ""
+m = re.search(r"```layering\n(.*?)```", exc_text, re.S)
+if m is None:
+    print("docs/contract-exceptions.md has no ```layering block")
+record = set(l.strip() for l in (m.group(1).splitlines() if m else []) if l.strip())
+
+fails = []
+seen_edges = set()
+unmapped = set()
+zig_files = []
+for d, _, fs in os.walk("src"):
+    for f in sorted(fs):
+        if f.endswith(".zig"):
+            zig_files.append(os.path.join(d, f))
+zig_files.sort()
+
+for p in zig_files:
+    lf = layer_of(p)
+    if lf is None:
+        unmapped.add(p)
+        continue
+    text = open(p, encoding="utf-8").read()
+    lines = text.split("\n")
+    in_test = [False] * (len(lines) + 1)
+    cur = False
+    for i, ln in enumerate(lines):
+        if re.match(r'^test "', ln) or re.match(r'^(pub )?fn (expect[A-Z][A-Za-z0-9_]*|[A-Za-z0-9_]+ForTest)\(', ln):
+            cur = True
+        in_test[i] = cur
+        if cur and ln.startswith("}"):
+            cur = False
+    for mm in re.finditer(r'@import\(\s*"([^"]+)"\s*,?\s*\)', text, re.S):
+        target = mm.group(1)
+        if target in ("std", "builtin"):
+            continue
+        if target == "game":
+            resolved = "src/root.zig"
+        elif target.endswith(".zig"):
+            resolved = os.path.normpath(os.path.join(os.path.dirname(p), target))
+        else:
+            continue  # data/*.zon or a build-system module, not a layer edge
+        line_no = text.count("\n", 0, mm.start())
+        lt = layer_of(resolved)
+        if lt is None:
+            unmapped.add(resolved)
+            continue
+        if lt >= lf:
+            continue  # downward or same layer: allowed
+        if resolved == "src/sim/queries.zig":
+            if in_test[line_no]:
+                continue  # rule 5 test clause
+            fails.append(f"{p}:{line_no + 1}: production import of queries.zig from below views (rule 5)")
+            continue
+        edge = f"{p} -> {resolved}"
+        seen_edges.add(edge)
+        if edge not in record:
+            fails.append(f"{p}:{line_no + 1}: upward import not in the C4 layering record: {edge}")
+
+for f in sorted(unmapped):
+    fails.append(f"{f}: outside the rule 5 layer table")
+for edge in sorted(record - seen_edges):
+    fails.append(f"{edge}: layering record edge no longer exists; remove it")
+for f in fails:
+    print(f)
+PY
+)"
 # The lobby's Session owns the open campaign (rule 9): no frontend creates,
 # frees or loads a GameState itself.
 check "a frontend owning a GameState (use lobby.Session)" \
     "$(grep -nE 'GameState\.init\(|\bgs\.deinit\(|\.store\.load\(|lobby\.load\(' $tui src/main.zig)"
-check "domain, econ or gen importing the sim (rng.zig is the one leaf)" \
-    "$(grep -nE '"(\.\./)+sim/' $below_sim | grep -vE '"(\.\./)+sim/rng\.zig"')"
 check "impurity in the core (outside tests)" \
     "$(outside_tests 'std\.(time|fs|Io|process|posix|os)([^a-zA-Z_]|$)|page_allocator|std\.debug\.print|^var ' $core | grep -v 'std\.Io\.Writer')"
 
@@ -154,32 +254,48 @@ for dirpath, _, files in os.walk("src"):
 PY
 )"
 
-# §10 Review thresholds (rule 76), held by ratchet (rule 87): a module over
-# 1,000 lines, a function over 100, or a switch with more than ten
+# §10 Review thresholds (rule 76), held by the registry (rule 87): a module
+# over 1,000 lines, a function over 100, or a switch with more than ten
 # substantive arms is a violation unless docs/contract-exceptions.md lists
-# it under `ratchet`, and a listed one may not grow past its recorded size.
-# A split lowers the ceiling. An arm is substantive when its body runs past
-# three lines; a dispatch switch (a call or a few lines per arm) has none,
-# so it never counts. A switch is keyed `path:function#switch`.
-check "a module, function or switch over its review threshold or its recorded ceiling" "$(python3 - <<'PY'
+# it in the rule 76 registry. The registry names code; it does not record a
+# size, so growth past the threshold is not measured here — rule 76 governs
+# what listed code may gain, and review checks it (delivery checklist
+# question 16). A key whose code no longer exists in src, or has dropped
+# under its threshold, fails until the key is removed. An arm is
+# substantive when its body runs past three lines; a dispatch switch (a
+# call or a few lines per arm) has none, so it never counts. A switch is
+# keyed `path:function#switch`.
+check "a module, function or switch over its review threshold and not in the rule 76 registry, or a registry key to remove" "$(python3 - <<'PY'
 import os, re
-ceil = {}
+keys = set()
 try:
     text = open("docs/contract-exceptions.md", encoding="utf-8").read()
 except OSError as e:
     print(f"docs/contract-exceptions.md unreadable: {e}")
     text = ""
-m = re.search(r"```ratchet\n(.*?)```", text, re.S)
+m = re.search(r"```oversized\n(.*?)```", text, re.S)
+if m is None:
+    print("docs/contract-exceptions.md has no ```oversized block")
 for line in (m.group(1).splitlines() if m else []):
+    if not line.strip(): continue
     parts = line.split()
-    if len(parts) == 2: ceil[parts[0]] = int(parts[1])
+    if len(parts) != 1:
+        print(f"registry line carries more than its name: {line}")
+        continue
+    key = parts[0]
+    if key in keys:
+        print(f"{key}: duplicate registry key")
+        continue
+    keys.add(key)
 FN = re.compile(r'^(\s*)(?:pub\s+)?(?:inline\s+|export\s+)?fn\s+([A-Za-z0-9_]+)\s*\(')
 found = {}
+exists = set()
 for d, _, fs in os.walk("src"):
     for f in sorted(fs):
         if not f.endswith(".zig"): continue
         p = os.path.join(d, f)
         lines = open(p, encoding="utf-8").read().split("\n")
+        exists.add(p)
         if len(lines) - 1 > 1000: found[p] = len(lines) - 1
         in_test, i = False, 0
         while i < len(lines):
@@ -191,6 +307,7 @@ for d, _, fs in os.walk("src"):
             if fm and not in_test and ln.rstrip().endswith("{"):
                 ind, j = fm.group(1), i + 1
                 while j < len(lines) and lines[j] != ind + "}": j += 1
+                exists.add(p + ":" + fm.group(2))
                 if j - i + 1 > 100: found[p + ":" + fm.group(2)] = j - i + 1
                 i = j + 1 if ind == "" else i + 1
                 continue
@@ -214,13 +331,17 @@ for d, _, fs in os.walk("src"):
                 j += 1
             substantive = sum(1 for a, b in zip(arms, arms[1:] + [j - 1]) if b - a > 3)
             key = f"{p}:{fn_name}#switch"
+            exists.add(key)
             if substantive > 10: found[key] = max(found.get(key, 0), substantive)
 for key, n in sorted(found.items()):
-    unit = "substantive arms" if key.endswith("#switch") else "lines"
-    if key not in ceil: print(f"{key}: {n} {unit}, over the threshold and not in the ratchet")
-    elif n > ceil[key]: print(f"{key}: {n} {unit}, over its ceiling of {ceil[key]}")
-for key in sorted(set(ceil) - set(found)):
-    print(f"{key}: under its threshold now; remove it from the ratchet")
+    if key not in keys:
+        unit = "substantive arms" if key.endswith("#switch") else "lines"
+        print(f"{key}: {n} {unit}, over the threshold and not in the rule 76 registry")
+for key in sorted(keys - set(found)):
+    if key not in exists:
+        print(f"{key}: names no module, function or switch in src; remove it")
+    else:
+        print(f"{key}: under its threshold now; remove it from the rule 76 registry")
 PY
 )"
 

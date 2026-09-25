@@ -813,8 +813,8 @@ bulk-copy MegaMek data files into the repo without deciding on licensing.
   determinism pillar makes regression testing nearly free.
 - The gate: `zig build test --summary all`, `zig fmt --check`, and
   `docs/verify-contract.sh`, which runs the contract's mechanical checks
-  (layering, frontend boundary, core purity, broad catches, module
-  headers, the size ratchet) and prints `CONTRACT CHECKS OK` or each
+  (layering, the rule 76 registry, frontend boundary, core purity, broad
+  catches, module headers) and prints `CONTRACT CHECKS OK` or each
   violation. CI runs the gate and both smokes on Linux and macOS, and
   builds a ReleaseFast release from a tree holding only the package's
   declared paths (`docs/clean-package.sh`), on every change.
@@ -830,7 +830,7 @@ docs/            schema.sql, coding-contract.md, contract-exceptions.md,
 data/            static game data (.zon): chassis, parts, planets, factions,
                  tuning; data/tables/ for rule tables
 src/
-  main.zig       demo CLI and REPL entry (application layer)
+  main.zig       demo CLI and REPL entry (frontends layer)
   root.zig       module root, re-exports
   domain/        entities and rule tables: types person unit part chassis
                  force contract hq planet faction tuning skulls scenario …
