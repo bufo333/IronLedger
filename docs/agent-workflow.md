@@ -1,8 +1,9 @@
 # Agent workflow
 
 IRON LEDGER uses one interactive coordinator and short-lived specialist
-subagents. John makes every scope decision and approves each git write. The
-agents never use GitHub or a remote.
+subagents. The specialists make implementation decisions; John chooses product
+direction, approves plans, and approves git writes. The agents never use
+GitHub or a remote.
 
 ## Roles
 
@@ -35,12 +36,13 @@ Code sessions.
 
 ## Workflow
 
-1. **Brainstorm.** A fresh `brainstormer` reads relevant code and presents
-   verified facts, options, tradeoffs, and decisions. John chooses the
-   direction.
-2. **Plan.** A fresh `planner` receives only the chosen direction and verifies
-   the repository independently. John reviews and explicitly approves the
-   detailed plan.
+1. **Brainstorm.** A fresh `brainstormer` reads relevant code and recommends
+   one direction. It asks John only about consequential product behavior or
+   architectural policy that durable project sources do not determine.
+2. **Plan.** A fresh `planner` receives the recommended direction, verifies
+   the repository independently, and makes technical decisions such as module
+   ownership, imports, boundaries, tests, thresholds, and record corrections.
+   John reviews and explicitly approves the recommended plan.
 3. **Implement.** A fresh `implementer` receives the exact approved plan. It
    proposes a branch through the `git checkout -b` permission prompt, edits
    only approved scope, runs the gate, and proposes its commit through the
@@ -48,9 +50,10 @@ Code sessions.
 4. **Review.** A new `planner` invocation reviews the complete committed diff
    against the approved plan, architecture, and coding contract. It is never
    the planning invocation reused with old context.
-5. **Correct.** John accepts or rejects each finding. A fresh `implementer`
-   receives only accepted findings, commits corrections after approval, and
-   returns to a fresh review.
+5. **Correct.** Confirmed review findings within approved scope go to a fresh
+   `implementer`, which commits corrections after approval and returns to a
+   fresh review. A finding that materially expands behavior, architecture,
+   contract, governance, or scope requires a revised plan and John's approval.
 6. **Integrate.** A fresh `implementer` receives the accepted review and exact
    reviewed commit. It confirms a clean worktree and fast-forward ancestry,
    then requests approval for the local fast-forward merge and local branch
@@ -61,6 +64,20 @@ Code sessions.
 Permission denial stops the current phase. An agent does not rename a branch,
 rewrite a commit message, use another command form, or broaden scope to evade
 a denial.
+
+## Decision boundary
+
+John is asked only for product or architectural-policy choices not settled by
+durable project sources, plan approval, material scope revisions, and git
+permission prompts. Agents do not ask John to choose imports, module owners,
+helper shapes, test locations, threshold treatment, tracker wording, or other
+implementation mechanics.
+
+Memory, old conversation summaries, issue or pull-request discussion, branch
+names, and uncommitted patches are leads, not authority. A specialist verifies
+them against current code and durable project documents. An undocumented pause
+does not block planning. Conflicting records go to the planner for one
+recommended resolution rather than back to John as a list of questions.
 
 ## Controls
 
