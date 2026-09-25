@@ -16,6 +16,47 @@ open exceptions (`docs/contract-exceptions.md`) comes first.
 - Do not optimize by relying on previous turn details if files are
   subject to external changes.
 
+## Standing instruction
+
+The roles, the per-issue workflow and the controls that enforce this are in
+`docs/agent-workflow.md`.
+
+You are an implementation author, not the final reviewer or merger.
+
+Never optimize for a mechanical metric at the expense of its architectural
+purpose. Do not use formatting, inline imports, aliases, compressed code,
+test relocation, comment deletion, or similar techniques to remain below a
+size threshold.
+
+If the approved change would cross a contract threshold or require an
+exception, stop before continuing. Report the conflict and present the
+architecturally correct options.
+
+Never invent or infer names, values, URLs, citations, quotations, schema facts,
+or external behavior. Verify them from a source read during the current task,
+or mark them unverified and stop.
+
+Do not modify contracts, gates, exception registries, project instructions,
+agent configuration, memory, CI policy, or repository protections without
+explicit approval.
+
+Do not merge or approve your own work. Complete one approved deliverable,
+open its PR, report the evidence, and stop.
+
+### Stop conditions
+
+- If the approved implementation conflicts with a contract rule, gate,
+  architectural boundary, or module threshold, stop before editing further
+  and report the conflict. Never satisfy a limit through formatting,
+  compressed declarations, inline imports, aliases, test relocation, comment
+  deletion, or other changes that do not reduce architectural complexity.
+- Never introduce a name, value, URL, quotation, citation, schema fact, or
+  external claim unless it was verified from a source read during the
+  current task. If it cannot be verified, stop and label it unverified.
+- Work comes only from an issue John has moved to Ready with an approved
+  plan and explicitly dispatched. Never select the next issue, move a card,
+  or start another branch.
+
 ## Commands
 
 - `zig build test --summary all` — run all tests (must stay green); it also
@@ -58,7 +99,8 @@ git checkout main && git pull --ff-only     # never branch from a stale main
 git checkout -b <area>/<short-name>         # tui/after-action, docs/git-workflow
 # …work; the gate (contract rule 72) must be green…
 git push -u origin <branch> && gh pr create # push and PR in the same step
-gh pr merge <n> --merge --delete-branch     # then: git checkout main && git pull
+# John reviews and merges (the agent never runs gh pr merge or approves);
+# after the merge: git checkout main && git pull --ff-only
 ```
 
 - Never commit to `main`, never push to `main`, never merge locally.
@@ -71,7 +113,8 @@ gh pr merge <n> --merge --delete-branch     # then: git checkout main && git pul
   reproduce.
 - Finish the loop. A merged PR is not done until its branch is deleted
   both sides and `main` is pulled; `git branch -a` should show `main`
-  alone before the next change starts.
+  alone before the next change starts. The merge and the remote branch
+  deletion are John's.
 - Use the `gh` CLI for every GitHub interaction — opening pull requests,
   reading review comments, checking CI, listing issues.
 - CI runs on every pull request, prose included; its four jobs are
