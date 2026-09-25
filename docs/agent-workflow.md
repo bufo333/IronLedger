@@ -79,6 +79,12 @@ them against current code and durable project documents. An undocumented pause
 does not block planning. Conflicting records go to the planner for one
 recommended resolution rather than back to John as a list of questions.
 
+Historical approval, remote-ref ownership, old patch disposition, ceiling
+tradeoffs, and similar technical cleanup choices are not sent to John. The
+planner evaluates current correctness, chooses the smallest honest branch,
+includes prerequisite cleanup when necessary, and assigns remaining work to an
+existing tracker or a later independently correct increment.
+
 ## Controls
 
 - `CLAUDE.md` and `docs/coding-contract.md` define project behavior and the
