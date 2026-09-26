@@ -2,8 +2,8 @@
 //! and lance counts, HQ and company capacity, support lances, unit
 //! placement and moves, and company membership.
 //!
-//! MekHQ counterpart: none — MekHQ has no per-HQ capacity slots or lance
-//! table of organization; see `docs/mekhq-map.md`.
+//! MekHQ counterpart: none for per-HQ capacity slots (`docs/mekhq-map.md`,
+//! HQ capacity slots row).
 
 const std = @import("std");
 const types = @import("../domain/types.zig");
@@ -96,8 +96,7 @@ pub fn assignCompanyToHq(gs: *GameState, company: types.ForceId, hq_id: types.Hq
 }
 
 /// The company's support lance of one trade under its Omega, if raised.
-/// (Posture predicates are tested at the end of state.zig; membership
-/// predicates are tested in this file.)
+/// (Membership predicates are tested in this file.)
 pub fn supportLance(gs: *GameState, company: types.ForceId, kind: force_mod.SupportLanceKind) ?*force_mod.Force {
     const co = gs.forces.getPtr(company) orelse return null;
     for (co.children.items) |cid| {
@@ -255,18 +254,20 @@ test "assign_company refuses CapacityFull exactly at the HQ's combat-company cap
     const cap = gs.hqs.getPtr(hq_id).?.capacity();
     try std.testing.expectEqual(@as(u32, 1), cap.combat_companies);
 
-    // Fill the regional founding HQ's one-company cap.
+    // Below capacity, the command assigns the HQ's one open slot.
     const resident = try gs.createForce("Alpha", .company, .none);
-    try assignCompanyToHq(&gs, resident, hq_id);
-    try std.testing.expectEqual(cap.combat_companies, companiesAtHq(&gs, hq_id));
+    try std.testing.expectEqual(@as(u32, 0), companiesAtHq(&gs, hq_id));
+    _ = try commands.execute(&gs, .{ .assign_company = .{ .company = resident, .hq = hq_id } });
+    try std.testing.expectEqual(@as(u32, 1), companiesAtHq(&gs, hq_id));
 
+    // At the cap, the same command refuses CapacityFull and leaves the
+    // outsider unassigned.
     const outsider = try gs.createForce("Outsider", .company, .none);
-    try std.testing.expectError(error.CapacityFull, assignCompanyToHq(&gs, outsider, hq_id));
-    try std.testing.expectEqual(cap.combat_companies, companiesAtHq(&gs, hq_id));
-
     const before_rng = gs.rng;
     try std.testing.expectError(error.CapacityFull, commands.execute(&gs, .{ .assign_company = .{ .company = outsider, .hq = hq_id } }));
     try std.testing.expectEqual(cap.combat_companies, companiesAtHq(&gs, hq_id));
+    try std.testing.expectEqual(types.HqId.none, gs.force(outsider).?.supplying_hq);
+    // assignCompanyToHq draws no RNG; the stream stays untouched too.
     try std.testing.expectEqual(before_rng, gs.rng);
 
     // A second, empty HQ sits below its own cap: the same company is

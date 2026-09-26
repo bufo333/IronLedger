@@ -3859,7 +3859,7 @@ test "hqList's companies and hqDetailView's hosted count match toe.companiesAtHq
     const lines = try hqDetail(a, &gs, hq_id);
     const needle = try std.fmt.allocPrint(a, "({d} here", .{expected});
     var says_hosted = false;
-    for (lines) |l| if (std.mem.indexOf(u8, l, needle) != null) {
+    for (lines) |l| if (std.mem.startsWith(u8, l, "tier") and std.mem.indexOf(u8, l, needle) != null) {
         says_hosted = true;
     };
     try std.testing.expect(says_hosted);
