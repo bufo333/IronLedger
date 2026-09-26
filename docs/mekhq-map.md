@@ -13,7 +13,7 @@ re-implemented in Zig. Paths below are under `MekHQ/src/mekhq/campaign/`.
 | `personnel/medical/*` (advanced medical) | Injuries per location, healing | `src/domain/person.zig` `Injury` | 8 |
 | `randomEvents/` + AtB monthly events | Random campaign events | `src/sim/events.zig` queue/decisions + `src/sim/contract_events.zig` decks | 6 |
 | `unit/Unit.java` | Entity wrapper + crew + repair state | `src/domain/unit.zig` | 3 |
-| `parts/*` (Part, Armor, MekLocation, ...) | Part instances, quality A–F, repair TNs | `src/domain/part.zig` + catalog `data/parts.zon` | 5 |
+| `parts/*` (Part, Armor, MekLocation, ...) | Fungible site stock, mounted-slot condition, hull quality A–F, repair TNs | `src/domain/part.zig`, `src/domain/unit.zig` + catalog `data/parts.zon` | 5 |
 | `Quartermaster.java`, `procurement/*` | Acquisition rolls, shopping list, delivery ETA | `src/econ/logistics.zig` | 5 |
 | `market/ContractMarket` | Monthly offers, CamOps terms | `src/sim/contract_market.zig` (offer counts/visibility in `src/econ/market.zig`) | 4 |
 | `market/PersonnelMarket`, `UnitMarket` | Hiring pool, unit purchases | `src/econ/market.zig` | 4/9 |

@@ -80,7 +80,8 @@ the day now.
 ### Contracts and combat
 
 - **Twelve contract types** from garrison duty to planetary assault,
-  priced off your fielded force, with victory points, an opposition pool
+  priced from average per-company operating cost and the offered operation
+  and opposition, with victory points, an opposition pool
   to grind down on attrition work, duration objectives on garrison work,
   a performance-failure line and a breach clause.
 - **Terms that matter**: command rights (integrated, house, liaison,
@@ -122,10 +123,10 @@ the day now.
 
 - **Regional HQs project influence rings**; beachhead contracts let you
   found field HQs beyond them. A field HQ is a forward base: it hosts one
-  company to rest, resupply and stage, its warehouse ships convoys to
-  whichever deployed company it is nearest, and it lacks only what needs
-  a facility it has not built. Raise it to regional through paperwork
-  and construction. Facilities (mek bay, warehouse, hospital,
+  company to rest, resupply and stage. Its facilities provide forward
+  services, but structural depot work and XP training require regional tier.
+  Raise it to regional through paperwork and construction. Facilities (mek
+  bay, warehouse, hospital,
   mess, training ground, hiring hall, comms, spaceport) upgrade the same
   way and raise the staff you must keep.
 - **The back office is staff**: command admins shorten paperwork,
@@ -174,12 +175,14 @@ the day now.
   a worn or exotic machine and shrink in a veteran's hands. Quality drifts
   with the roll and prices resale.
 - **Repairs in tiers**: field work by the company's techs from spares;
-  structural work in an HQ mek bay over real bay time. Depot repairs and
+  structural work in a regional HQ mek bay over real bay time. Depot repairs and
   refits roll at the end: clean, a lingering fault, a redo, or a botch on
   a natural 2 — with the odds shown before you commit.
-- **The MekLab** follows TechManual construction rules: tonnage, criticals
-  per location, heat, ammo placement, armor per location. Refits are
-  classed A–D and gated by the bay; removed mounts go back on the shelf.
+- **The MekLab** validates tonnage, per-location criticals, heat and ammunition
+  while editing weapon, equipment and ammunition mounts on the curated
+  chassis. Refits are classed A–D and gated by the bay; removed mounts go back
+  on the shelf. Full construction-component editing and persistent custom
+  variants are planned product depth.
 - **Cold storage**: mothball idle hulls to stop the bills; reactivation
   takes bay time that depends on quality. A hangar view ranks every hull
   by cost against contribution.

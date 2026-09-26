@@ -64,14 +64,14 @@ A regional HQ supports exactly:
 | Dropship berths | 1 | spaceport levels |
 | Jumpship berths | 0 | spaceport + comms levels |
 
-A brigade HQ (your home base, one only) carries roughly double. A field HQ
+A brigade HQ is the planned one-only home-base tier (Product completion P1)
+and carries roughly double. Current outfits begin at regional tier. A field HQ
 is a forward base: one company can be based there to rest, resupply and
 stage, and any deployed company's convoys ship from whichever of your
 warehouses is nearest with the line — so a stocked firebase beside the
-fighting shortens every convoy. What a field HQ lacks is whatever needs a
-facility it has not built: no training without a training ground, no
-structural repair without a mek bay, no hiring without a hall. Build them
-there or raise it to regional. **Want a second company at full service? You
+fighting shortens every convoy. Its facilities provide forward services, but
+the echelon still caps them: structural depot work and XP training activate
+only after promotion to regional. **Want a second company at full service? You
 need a second regional HQ** — with the staff, upkeep, and supply line that
 implies. Growth is infrastructure-first, always.
 
@@ -97,7 +97,10 @@ tail-to-teeth tradeoff, on purpose.
 HQs are connected by **supply links** the player establishes: charter
 (level 1) → scheduled service → dedicated jumpship (level 3+, requires owning
 one). A link has a throughput cap (supply units/week) and per-hop delay/cost
-multipliers. Shipments route through the network; every intermediate hop
+multipliers. A shipment excludes routes that cannot carry its tonnage, then
+chooses the least delivery time, freight cost and HQ id, in that order; direct
+charter is the capped fallback when no linked route is feasible. Every
+intermediate hop
 multiplies delay and freight cost — *unless* the intermediary HQ's warehouse
 and spaceport are upgraded, turning it into a proper hub. Throughput is
 bottlenecked by the weakest hop: stack two deployed companies behind one
@@ -117,7 +120,8 @@ The field keeps a company *running*; only a regional HQ keeps it *sharp*:
   three-quarter-strength meks and hangar queens riding the dropship.
 - **Fatigue** climbs with every contract finished without rotation — a
   little for a quiet garrison, a lot for a long bloody campaign — and falls
-  at home, as fast as the home HQ's mess allows, its HR staff keeping
+  only when physically at home, as fast as the home HQ's mess allows, its HR
+  staff keeping
   spirits up; garrison barracks give back only a share of that. Tired
   companies fight worse, maintain worse, and grumble.
 - **Training** converts XP into skill levels only at a training ground,
@@ -147,9 +151,10 @@ you own reports to you (Stages 9A–9C):
   to 500k, monthly"). A rich outfit with a broke forward company is a
   logistics failure you can see coming on two ledgers at once.
 - **Supplies are pallets, not abstractions**: munitions by family, parts,
-  provisions — stocked per site with real tonnage against warehouse
-  capacity, burned by battles and daily life, itemized in AARs (\"expended:
-  3t LRM reloads\"). The `supplies` and `demand` screens answer "what do we
+  provisions and medical stock — stocked per site with real tonnage against
+  warehouse capacity. Provisions burn daily, ammunition in battle, medical
+  stock when treatment begins, and parts during work; AARs itemize battle use
+  (\"expended: 3t LRM reloads\"). The `supplies` and `demand` screens answer "what do we
   have, what are we burning, what must be ordered" at every level.
 - **The HQ works in queues you can read**: mek bay slots (who's in, what
   for, done when), construction projects (paperwork → build), fabrication
@@ -163,7 +168,8 @@ you own reports to you (Stages 9A–9C):
   throughput, command admins shorten paperwork. Their headcount and
   experience are levers like any other — at the HQ where they sit: a
   recruit is as good as the hiring HQ's hall and HR office, and a company
-  trains and rests on its home HQ's staff.
+  trains and rests on its home HQ's staff. Negotiation uses the offer HQ's
+  command office; freight uses transport staff at the shipment's involved HQ.
 - **Support counts only when it can roll**: a MASH, mess, security,
   salvage or logistics lance helps only while one of its hulls can take
   the field with a crew fit for duty, and the same test decides recon (a

@@ -49,7 +49,7 @@ Borrowed subsystems (see the map doc for class-level detail):
 |---|---|
 | `campaign.Campaign` + new-day loop | The daily tick pipeline: healing, acquisition delivery, maintenance checks, market refresh, contract events, payday |
 | `personnel.Person` | Roles (MekWarrior, vehicle crew, aero pilot, Mek/Mechanic/Aero techs, doctor, admins: Command/Logistics/Transport/HR), skills + XP, ranks, injuries, salary tables, SPAs (later) |
-| `unit.Unit` + `parts.*` | Unit = chassis + armor + equipment + crew + part slots; part quality grades A–F; weekly maintenance checks by tech skill vs. target number |
+| `unit.Unit` + `parts.*` | Unit = chassis + armor + equipment + crew + conditioned mount slots; hull quality grades A–F; fungible spare stock; weekly maintenance checks by tech skill vs. target number |
 | `mission.AtBContract` | All 12 AtB contract types, contract terms (length, command rights, salvage %, transport %, straight support %, battle-loss comp, signing bonus, advance), payment multipliers by employer & reputation |
 | `market.ContractMarket` / `PersonnelMarket` / `UnitMarket` | Monthly market refreshes, offers scaled by reputation and location |
 | AtB / CamOps **CompanyGenerator** | Autogenerate a company: 3 mek lances (12 meks) + officers + support staff sized to tech-team needs, experience-weighted (Green/Regular/Veteran/Elite) |
@@ -67,9 +67,11 @@ config, GUI scenario editing, multiplayer.
    `Outfit → Battalion? → Company → Lance → Unit`. A *company* (with its
    attached support lance) is the unit of contract assignment. Several
    companies work several contracts at once, possibly on different planets.
-2. **HQ network.** Player builds/upgrades HQs at three tiers —
-   **Brigade HQ** (home base), **Regional HQ** (per region of space),
-   **Company/Field HQ** (per deployment). HQs project **influence rings**
+2. **HQ network.** The model has three tiers — **Brigade HQ** (the planned
+   unique home-base tier), **Regional HQ** (per region of space), and
+   **Company/Field HQ** (per deployment). Current progression runs from field
+   to regional; the brigade promotion is Product completion P1. HQs project
+   **influence rings**
    that gate the contract market, carry **capacity slots** that cap how many
    companies the outfit can field, and have facilities (parts depot,
    mek bays, hospital, mess/quartermaster, training grounds, hiring hall,
@@ -81,16 +83,20 @@ config, GUI scenario editing, multiplayer.
 3. **Supply lines are simulated.** Four supply classes — **parts, ammo,
    medical, provisions** — flow from HQs to deployed companies via
    dropship/jumpship legs with real transit times (jump routes on a star map).
-   A company in the field consumes supply daily; shortages degrade combat
-   power, morale, healing, and maintenance rolls.
+   Consumption belongs to the event that uses the stock: provisions daily,
+   ammunition in battle, medical supplies when treatment begins, and parts or
+   components during repair or refit; fabrication produces structural stock.
+   Shortages degrade combat
+   power, morale, healing, and maintenance.
 4. **Support echelon matters.** Support lances — MASH, mess, security,
    salvage, logistics transport — are raised and attached per company;
    each contributes a concrete modifier (wounded survival, fatigue
    recovery, prisoner handling, salvage yield, supply buffer and the field
    workshop's repair hours), and only while it is operational (§9.3).
-5. **Attached combat support.** Tank lances, aerospace flights, battle armor,
-   artillery — purchasable, attachable per company, and factored into battle
-   resolution as force multipliers.
+5. **Attached combat support.** Tank lances and aerospace flights are
+   purchasable, attachable per company, and factored into battle resolution as
+   force multipliers. Complete battle-armor and artillery flows are Product
+   completion P2.
 6. **Hands-off battle resolution** rich enough to reward all of the above (§7).
 
 ## 4. High-level architecture
@@ -188,11 +194,13 @@ cheap, copyable, and impossible to mix up.
 - **Unit** — reference to static **Chassis** (variant), per-unit state: armor
   %, internal damage, destroyed/damaged part slots, quality grade A–F,
   maintenance state, crew assignment, ammo state, customization delta (refits).
-  Covers meks, vehicles, aerospace, battle armor, infantry, support
-  vehicles (MASH and cargo trucks) and DropShips/JumpShips with one struct +
-  kind enum.
-- **Part** — static part type (catalog) + instances in inventories with
-  condition; acquisition orders with ETA (transit from wherever sourced).
+  Covers meks, vehicles, aerospace, infantry, support vehicles (MASH and cargo
+  trucks) and DropShips/JumpShips with one struct + kind enum; the enum also
+  reserves battle armor for Product completion P2.
+- **Part** — static part definition (catalog) plus fungible quantities in site
+  inventories; mounted unit slots carry condition, hulls carry maintenance
+  quality A–F, and catalogue availability A–F controls sourcing. Acquisition
+  orders carry an ETA from wherever sourced.
 - **Force** — TO&E tree node (outfit/battalion/company/lance), commander,
   attached support assets; a Company aggregates readiness from its lances.
   Companies carry player-set **identity**: a name and an emblem image (stored
@@ -274,8 +282,10 @@ part of the spec:
 
 1. **Travel** — jumpship/dropship legs progress; shipments and unit transfers
    arrive.
-2. **Supply consumption** — each deployed company consumes provisions/ammo/
-   medical; shortage flags update.
+2. **Supply consumption** — deployed companies consume daily provisions;
+   shortage flags update. Battles consume ammunition, treatment consumes
+   medical supplies, and repair or refit consumes parts in its own phase;
+   fabrication adds completed structural components to stock.
 3. **Medical** — doctors heal the wounded (MASH/hospital modifiers).
 4. **Acquisition & markets** — ordered parts arrive; weekly/monthly market
    refreshes (contract market monthly, personnel weekly, units monthly).
@@ -307,9 +317,9 @@ has a set of **elements** (lance/flight/platoon). Per round:
 2. Apply **campaign modifiers** — this is where the player's real decisions
    live: supply state (each missing supply class is a penalty), fatigue,
    morale, days-since-hot-food (mess), scouting/recon quality, commander
-   tactics skill, terrain & scenario type, attached support (air cover
-   negates enemy air; artillery adds pre-round attrition; battle armor holds
-   objectives).
+   tactics skill, terrain & scenario type, attached support and air cover.
+   Product completion P2 adds artillery pre-round attrition and battle armor
+   holding objectives.
 3. Exchange fire: opposed 2d6 rolls per element pair vs. target numbers built
    from the ratio of effective power; margins map to a **damage table**
    (armor loss → crits → unit destroyed/crew wounded/killed), borrowing the
@@ -438,18 +448,24 @@ HQ tier + facilities cap the fielded force; growth is infrastructure-first:
 | Dropship berths | 0 | 1 → 3 (spaceport) | 2 → 5 |
 | Jumpship berths | 0 | 0 → 1 (spaceport ≥4 + comms ≥3) | 1 → 2 |
 
+The Brigade column is the P1 target. Current campaigns begin with a regional
+home HQ and can promote field HQs only as far as regional.
+
 Support company lance kinds: **MASH, security/prisoner, mess, salvage,
 logistics transport** — each feeds a concrete autoresolve/campaign modifier
 (§7): wounded survival, prisoner handling & ransom events, fatigue/morale
 recovery, post-battle salvage yield, supply buffer and the field workshop
 (§9.7).
 
-**Readiness is one test.** A hull is operational when it can take the
-field and its crew is fit for duty (`GameState.unitOperational`); a force
-is operational when one of its own hulls is (`forceOperational`). Support
-modifiers, recon, air cover, MASH care and beds, the battle line and
-fieldable BV all count by it, so a MASH truck with no driver, or one in
-the shop, helps nobody.
+**Active support uses operational readiness.** A hull is operational when it
+can take the field and its crew is fit for duty (`GameState.unitOperational`);
+a force is operational when one of its own hulls is (`forceOperational`).
+Support modifiers, recon, air cover, MASH care and beds, the battle line and
+fieldable BV all count by it, so a MASH truck with no driver, or one in the
+shop, helps nobody. Passive storage is a different capability: a cargo truck
+must be physically present and usable, but a temporarily empty driver seat does
+not make its hold disappear. Destroyed, mothballed, in-transit, and in-shop
+trucks provide neither capability.
 
 ### 9.4 Facility upgrade paths, bays & the back office
 
@@ -466,7 +482,10 @@ the real price.
 **Mek bays are slots, not abstractions** (Stage 9C): a bay level grants
 work slots; depot repairs, cold-storage reactivations, component
 fabrication and refits are queued jobs occupying a slot for a span of days.
-A full bay queue is a visible bottleneck with a visible fix.
+A full bay queue is a visible bottleneck with a visible fix. Facility presence
+does not erase the HQ-tier ceiling: field HQs provide forward logistics, rest,
+markets, and permitted field work, but structural depot repair and XP training
+activate only after promotion to regional.
 
 **The back office is people, not a number** (Stage 9A/9C, MekHQ's admin
 roles made consequential): real personnel posted to HQ staff slots —
@@ -485,6 +504,9 @@ training HQ's HR (§9.7). A recruit's quality reads the recruiting HQ's
 hiring hall and HR (`personnel.recruitBonus(hq)`, `personnel.recruitGenerated(role, hq)`):
 hall boards and office staffing at their own HQ, company crews at the
 company's home HQ, and the bare `recruit` verb at the outfit's seat.
+Negotiation reads the offer HQ's command staff; freight reads transport staff
+at the shipment's involved HQ. No office applies globally merely because its HQ
+was created first.
 
 ### 9.5 Supply-line graph
 
@@ -518,14 +540,22 @@ full route (`network.fitsThroughput`) but books nothing — and
 `commitFreight` books the tonnage on the route once the payment has
 cleared, so a refused payment never eats capacity.
 
+Route selection includes the shipment tonnage, excludes saturated paths, and
+then minimizes delivery days, freight cost, and HQ id in that order. A capped
+direct charter is the fallback only when no linked route is feasible. Automatic
+resupply chooses a stocked origin through this same quote: prefer an HQ that can
+fill the line, otherwise the best partial source, rather than always drawing
+from the company's home HQ.
+
 ### 9.6 Out-of-influence operation (expensive but viable)
 
 A company deployed beyond every ring suffers, with all effects plateauing
 (no death spiral) and every effect a visible P&L line item:
 
 - **Local supplies valve:** missing supply classes can be bought locally at
-  `2.0× + 0.5× per 30 LY beyond the ring` (cap 4.0×), modified by planet
-  industry rating — its own transaction category so the ledger teaches.
+  normal field markup inside current reach; outside it, `2.0× + 0.5× ×
+  ceil(distance beyond the nearest ring / 30 LY)` (cap 4.0×), modified by
+  planet industry rating — its own transaction category so the ledger teaches.
 - **Hardship pay:** payroll bonus for remote deployment (own category).
 - **Morale/HR decay** and **training XP slowdown**, recovering once back in
   a ring (or once a field HQ is planted).
@@ -570,8 +600,10 @@ lightly; a bloody raid campaign wears hard), and compounding for every
 contract since the company last rotated: sat undeployed until its people
 were rested.
 Fatigue never decays on a combat tour; garrison duty recovers at a share
-of the home rate, the mess lance standing in for the hall. Off contract it
-decays weekly at the person's home HQ (§9.4), faster with a better mess. Effects: morale decay, the autoresolve fatigue penalty
+of the home rate, the mess lance standing in for the hall. Off contract and
+physically at home, it decays weekly at the person's home HQ (§9.4), faster
+with a better mess. Returning and idle-afield companies do not receive home
+benefits. Effects: morale decay, the autoresolve fatigue penalty
 (§7), slower maintenance and healing. Capped at 100 — degraded, never
 spiraling (§9.6 philosophy).
 
@@ -708,13 +740,15 @@ with the day; only an empty seat is an open slot.
 
 ## 10. MekLab / refits
 
-Borrow MegaMekLab's model in data terms: a refit = diff between current
-loadout and target loadout → parts list + tech-time + refit class (A–F per
+The shipped first cut edits weapon, equipment, and ammunition mounts on the
+curated chassis catalogue. A refit = diff between current
+loadout and target loadout → parts list + tech-time + refit class (A–D in the
+current cut, extending through F in P3) per
 CamOps) → validated against facility ceiling → queued as bay work (§9.4);
-the unit is out of action for the duration. Custom variants are saved as
-new Chassis entries in the campaign DB.
+the unit is out of action for the duration. Campaign-owned custom chassis and
+full construction-component editing are Product completion P3.
 
-**The lab knows the rules.** Each chassis carries its construction facts
+**The complete P3 lab target.** Each chassis carries its construction facts
 (TechManual): engine rating and weight, gyro, cockpit, internal structure,
 integral heat sinks, jump jets, armor tonnage, and per-location crit slots
 with their fixed occupants — so free tonnage and free crits per location
@@ -730,8 +764,10 @@ same screen that customizes a healthy one.
 ## 11. Economy
 
 All money is `i64` C-bills (no floats in the ledger, ever). Income: contract
-base pay (CamOps formula: base × employer multiplier × reputation multiplier ×
-contract-type multiplier), advances, salvage sales, battle-loss comp. Costs:
+base pay from average operating cost per combat company, then operation,
+opposition, employer, reputation, and term multipliers; candidate-company
+strength changes its skull rating, not the posted pay. Other income: advances,
+salvage sales, battle-loss comp. Costs:
 payroll (CamOps salary table), unit maintenance & spares, supply purchases,
 freight, HQ construction/upkeep, dropship/jumpship charter or upkeep, loan
 service, event outcomes. The monthly **per-company P&L** is a headline screen:

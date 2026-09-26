@@ -247,8 +247,9 @@ A–D, tech hours), chassis/parts construction facts in the data files (every
 canonical design validates legal), refit plans as staged edits →
 `refit_commit` (legal fit, class ≤ bay ceiling, parts on the shelf, hull at
 home) → bay job → mounts change and removed parts return to stock;
-persisted; REPL `lab`/`refit`. Original spec:
-The MekLab knows BattleTech construction rules per hull (TechManual):
+persisted; REPL `lab`/`refit`. The remaining original-spec depth is Product
+completion P3: editable construction components, the full A–F class range, and
+persistent custom variants. For context, the complete original target is:
 - **Chassis data grows** (`data/chassis.zon`): engine rating & weight, gyro,
   cockpit, internal structure weight, heat sinks (min 10, engine-integral
   count), jump jets, armor tonnage; and **per-location crit slots** (head 6,
@@ -924,14 +925,13 @@ item: tests green, both smokes, ROADMAP tick, one commit.
   lost / KIA / enemy BV from the losses line, wrecks from the salvage
   line); the next save writes them down for good.
 - ✅ Firebases made useful (play feedback 2026-09-05: "what is the point of
-  a firebase if it cannot host a company"). (1) Forward depot: a deployed
-  company's resupply line ships from whichever HQ warehouse is nearest
-  that holds the whole shipment (else the nearest with any of it, else
-  home) — `tick.bestSupplyHq`; the log names the source. (2) Basing: a
+  a firebase if it cannot host a company"). (1) Forward depot: the stocked-HQ
+  selector was added as `tick.bestSupplyHq`; wiring automatic resupply through
+  the tonnage-aware route quote remains C15. (2) Basing: a
   field HQ hosts one company as it stands (four combat lances, a support
-  company) to rest, resupply and stage; it lacks whatever needs a
-  facility it has not built, and the HQ tier line says which (training
-  ground, mek bay, hiring hall) — `u` builds them there.
+  company) to rest, resupply and stage; its facilities provide forward
+  services, but structural depot work and XP training remain regional-tier
+  capabilities.
 - ✅ 12C.15 **Tech target numbers**: `maintenance.hullHours` scales the
   class table by quality (`hours_quality_bp`: an A-grade wreck wants ×1.5,
   an F-grade machine ×0.8) and by an exotic design (`hours_exotic_bp`,
