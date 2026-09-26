@@ -7,13 +7,14 @@
 //! its supply line and the tonnage its trucks can carry, with a budget
 //! share per category so no single line crowds the others out. The
 //! resupply policy (tick.runPolicies) and the load-out at acceptance
-//! (state.loadOutCompany) both follow the same plan, and the Supply
-//! screen shows it.
+//! (field_supply.loadOutCompany) both follow the same plan, and the
+//! Supply screen shows it.
 
 const std = @import("std");
 const tuning = @import("../domain/tuning.zig").t;
 const types = @import("../domain/types.zig");
 const part_mod = @import("../domain/part.zig");
+const sites = @import("sites.zig");
 const GameState = @import("state.zig").GameState;
 
 /// Truck budget per category, in percent of field capacity: ammo, armor
@@ -56,7 +57,7 @@ pub const Plan = struct {
 /// the transit; `ammo_battles` overrides the munition target (0 = auto).
 pub fn plan(alloc: std.mem.Allocator, gs: *GameState, company: types.ForceId, transit_days: u32, min_days: u32, ammo_battles: u8) !Plan {
     var lines: std.ArrayListUnmanaged(Line) = .empty;
-    const cap = gs.siteCapacityTons(.{ .company = company }) orelse 0;
+    const cap = sites.siteCapacityTons(gs, .{ .company = company }) orelse 0;
     const heads = gs.companyHeadcount(company);
     const per_day: u32 = part_mod.provisionsPerDay(heads);
 
@@ -131,6 +132,27 @@ pub fn plan(alloc: std.mem.Allocator, gs: *GameState, company: types.ForceId, tr
     return .{ .lines = try lines.toOwnedSlice(alloc), .transit_days = transit_days, .provisions_per_day = per_day, .capacity = cap, .total_target = total };
 }
 
+/// Kit out a company from the home warehouse before it ships: a month
+/// of provisions, medical, ammo for its weapons, armor and structure —
+/// as far as its trucks can carry (the field plan sizes it).
+pub fn loadOutCompany(gs: *GameState, company_id: types.ForceId) !void {
+    const home = gs.homeSiteFor(company_id);
+    const dest: types.Site = .{ .company = company_id };
+    // The same plan the resupply policy follows, sized for the contract's
+    // transit so the trucks land with the line already covered.
+    const transit: u32 = if (gs.deploymentContract(company_id)) |c| c.transit_days else 0;
+    var arena = std.heap.ArenaAllocator.init(gs.allocator());
+    defer arena.deinit();
+    const p = try plan(arena.allocator(), gs, company_id, transit, 14, 0);
+    // Capped lines first; provisions fill whatever the trucks have left.
+    for (p.lines) |l| if (!std.mem.eql(u8, l.key, "provisions")) {
+        _ = try sites.moveStock(gs, home, dest, l.key, l.target);
+    };
+    for (p.lines) |l| if (std.mem.eql(u8, l.key, "provisions")) {
+        _ = try sites.moveStock(gs, home, dest, l.key, l.target);
+    };
+}
+
 /// Tons of one munition family an engagement burns: a ton feeds
 /// `mounts_per_ammo_ton` mounts.
 pub fn tonsPerBattle(mounts: u32) u32 {
@@ -144,7 +166,7 @@ pub const AmmoFights = struct { key: []const u8, fights: u32 };
 /// order: whole engagements the stock at its site feeds.
 pub fn ammoFights(alloc: std.mem.Allocator, gs: *GameState, company: types.ForceId) ![]AmmoFights {
     const mounts = try munitionMounts(alloc, gs, company, true);
-    const site = gs.siteForForce(company);
+    const site = sites.siteForForce(gs, company);
     var out: std.ArrayListUnmanaged(AmmoFights) = .empty;
     for (part_mod.munition_keys) |key| {
         const n = mounts.get(key) orelse continue;
@@ -183,7 +205,7 @@ pub const Rush = struct {
 /// funds and carries it out.
 pub fn rushQuote(alloc: std.mem.Allocator, gs: *GameState, c: *const @import("../domain/contract.zig").Contract) !Rush {
     const company = c.assigned_company;
-    const site = gs.siteForForce(company);
+    const site = sites.siteForForce(gs, company);
     var lines: std.ArrayListUnmanaged(RushLine) = .empty;
     const mounts = try munitionMounts(alloc, gs, company, true);
     for (part_mod.munition_keys) |key| {

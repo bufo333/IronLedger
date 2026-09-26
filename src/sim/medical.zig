@@ -12,6 +12,7 @@ const types = @import("../domain/types.zig");
 const person_mod = @import("../domain/person.zig");
 const GameState = @import("state.zig").GameState;
 const hq_ops = @import("hq_ops.zig");
+const sites = @import("sites.zig");
 
 /// Days of training to improve a skill one step.
 pub const training_days = tuning.medical.training_days;
@@ -237,7 +238,7 @@ pub fn runDailyHealing(gs: *GameState) !void {
             // Triage consumes a ton of medical supplies from wherever they
             // lie; an empty dispensary heals half again as slowly.
             var days = healDays(gs, careFor(gs, p));
-            if (!gs.takeStock(gs.siteForForce(p.assigned_force), "medical_supplies", 1)) days = @intCast(types.applyBp(days, tuning.medical.no_supplies_bp));
+            if (!gs.takeStock(sites.siteForForce(gs, p.assigned_force), "medical_supplies", 1)) days = @intCast(types.applyBp(days, tuning.medical.no_supplies_bp));
             if (p.has("iron_man")) days = @max(tuning.medical.iron_man_min_days, @as(u32, @intCast(types.applyBp(days, tuning.medical.iron_man_heal_bp))));
             // A wound with no record behind it (saves before schema v7,
             // event effects): one light internal injury stands in for it.

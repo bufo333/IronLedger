@@ -20,6 +20,7 @@ const contract_events = @import("contract_events.zig");
 const contract_control = @import("contract_control.zig");
 const state_mod = @import("state.zig");
 const treasury = @import("treasury.zig");
+const sites = @import("sites.zig");
 const GameState = state_mod.GameState;
 
 const Alloc = std.mem.Allocator;
@@ -508,7 +509,7 @@ pub fn desk(alloc: Alloc, gs: *GameState, log_rows: usize) !Desk {
             h.capacity().combat_companies,                busy,
             queued,
         }));
-        const tons = gs.siteTons(.{ .hq = h.id });
+        const tons = sites.siteTons(gs, .{ .hq = h.id });
         try hqs.append(alloc, try std.fmt.allocPrint(alloc, "     warehouse {d}t / {d}t · projects {d}", .{ tons, h.warehouseCapacityTons(), h.projects.items.len }));
         try hqs.append(alloc, "");
     }
@@ -633,8 +634,8 @@ fn companyRow(alloc: Alloc, gs: *GameState, id: types.ForceId) !table.Row {
     const contract_s: []const u8 = if (contract) |c| try std.fmt.allocPrint(alloc, "[{d}] {s}", .{ @intFromEnum(c.id), c.kind.label() }) else "—";
     const location: []const u8 = if (f.location_planet) |p| planetName(p) else if (gs.hqs.getPtr(f.supplying_hq)) |h| planetName(h.planet_key) else "—";
     const site: types.Site = .{ .company = id };
-    const tons = gs.siteTons(site);
-    const cap = gs.siteCapacityTons(site) orelse 0;
+    const tons = sites.siteTons(gs, site);
+    const cap = sites.siteCapacityTons(gs, site) orelse 0;
     const cap_mk: []const u8 = if (cap > 0 and tons * 4 < cap) "{a}" else "{g}";
     return table.row(alloc, &.{
         try std.fmt.allocPrint(alloc, "{d}", .{@intFromEnum(id)}),
@@ -1673,13 +1674,13 @@ pub const Supply = struct {
 
 pub fn supply(alloc: Alloc, gs: *GameState) !Supply {
     var out: std.ArrayListUnmanaged([]const u8) = .empty;
-    var sites: std.ArrayListUnmanaged(?types.Site) = .empty;
+    var row_sites: std.ArrayListUnmanaged(?types.Site) = .empty;
     var hit = gs.hqs.iterator();
     while (hit.next()) |e| {
         const h = e.value_ptr;
         const before = out.items.len;
         try siteLines(alloc, gs, &out, .{ .hq = h.id }, try std.fmt.allocPrint(alloc, "hq:{d} {{a}}{s}{{/}} warehouse lv{d}", .{ @intFromEnum(h.id), try table.plain(alloc, h.name), h.effectiveFacilityLevel(.warehouse) }));
-        while (sites.items.len < out.items.len) try sites.append(alloc, if (sites.items.len < out.items.len - 1 or before == out.items.len) .{ .hq = h.id } else null);
+        while (row_sites.items.len < out.items.len) try row_sites.append(alloc, if (row_sites.items.len < out.items.len - 1 or before == out.items.len) .{ .hq = h.id } else null);
     }
     var fit = gs.forces.iterator();
     while (fit.next()) |e| {
@@ -1703,26 +1704,26 @@ pub fn supply(alloc: Alloc, gs: *GameState) !Supply {
             try money(alloc, f.local_funds), resupply,
         });
         try siteLines(alloc, gs, &out, .{ .company = f.id }, title);
-        while (sites.items.len < out.items.len) try sites.append(alloc, if (sites.items.len < out.items.len - 1) .{ .company = f.id } else null);
+        while (row_sites.items.len < out.items.len) try row_sites.append(alloc, if (row_sites.items.len < out.items.len - 1) .{ .company = f.id } else null);
     }
     try out.append(alloc, "inbound");
-    try sites.append(alloc, null);
+    try row_sites.append(alloc, null);
     var any = false;
     for (gs.part_orders.items) |o| {
         if (o.status == .delivered) continue;
         any = true;
         try out.append(alloc, try std.fmt.allocPrint(alloc, "  {s} x{d} → {s}  {s}  eta day {d}  cost {s}", .{ o.part_key, o.quantity, try siteLabel(alloc, gs, o.dest), @tagName(o.status), o.eta_day orelse 0, try money(alloc, o.cost) }));
-        try sites.append(alloc, null);
+        try row_sites.append(alloc, null);
     }
     if (!any) {
         try out.append(alloc, "  none");
-        try sites.append(alloc, null);
+        try row_sites.append(alloc, null);
     }
     try out.append(alloc, "");
-    try sites.append(alloc, null);
+    try row_sites.append(alloc, null);
     try out.append(alloc, "{d}on a company row: [t] send cash by courier · [p] standing top-up policy · [s] ship provisions from home · [o] order to the field{/}");
-    try sites.append(alloc, null);
-    return .{ .rows = try out.toOwnedSlice(alloc), .site = try sites.toOwnedSlice(alloc) };
+    try row_sites.append(alloc, null);
+    return .{ .rows = try out.toOwnedSlice(alloc), .site = try row_sites.toOwnedSlice(alloc) };
 }
 
 /// The munition families a company's weapons fire (keys, deduplicated):
@@ -1820,7 +1821,7 @@ pub fn stockTable(alloc: Alloc, gs: *GameState, site: types.Site) ![]const []con
         };
         if (!any) try out.append(alloc, "{d}no keep-stocked lines · K here or on a Market catalogue row sets one · $ sells a line{/}");
     }
-    const cap = gs.siteCapacityTons(site);
+    const cap = sites.siteCapacityTons(gs, site);
     try out.append(alloc, "");
     try out.append(alloc, try std.fmt.allocPrint(alloc, "total {d}t{s}", .{ total, if (cap) |c| try std.fmt.allocPrint(alloc, " of {d}t capacity · {d}t free", .{ c, c -| total }) else "" }));
     if (site == .company) {
@@ -1900,8 +1901,8 @@ pub fn siteLabel(alloc: Alloc, gs: *GameState, site: types.Site) ![]const u8 {
 }
 
 fn siteLines(alloc: Alloc, gs: *GameState, out: *std.ArrayListUnmanaged([]const u8), site: types.Site, title: []const u8) !void {
-    const tons = gs.siteTons(site);
-    const cap = gs.siteCapacityTons(site) orelse 0;
+    const tons = sites.siteTons(gs, site);
+    const cap = sites.siteCapacityTons(gs, site) orelse 0;
     var bar_buf: [20]u8 = undefined;
     const mk: []const u8 = if (cap > 0 and tons * 4 < cap) "{a}" else "{g}";
     try out.append(alloc, try std.fmt.allocPrint(alloc, "{s}  {s}{s}{{/}} {d}t / {d}t", .{ title, mk, table.bar(&bar_buf, tons, cap), tons, cap }));
@@ -6110,7 +6111,7 @@ pub fn supportTrain(alloc: Alloc, gs: *GameState, company: types.ForceId) !Suppo
             .text = try std.fmt.allocPrint(alloc, "{s: <9} {s: <20} {d: >5}   {s: >12}                 {{d}}{s}{{/}}", .{ key, if (ch) |c| c.name else "?", owned, if (price) |pr| try money(alloc, pr) else "{c}not on the board{/}", kind.describe() }),
         });
     }
-    return .{ .lines = try out.toOwnedSlice(alloc), .capacity_tons = gs.siteCapacityTons(.{ .company = company }) orelse 0 };
+    return .{ .lines = try out.toOwnedSlice(alloc), .capacity_tons = sites.siteCapacityTons(gs, .{ .company = company }) orelse 0 };
 }
 
 /// The lances a hull can move to: its company's, or every home company's
@@ -6237,6 +6238,7 @@ test "raise lances, support train and sell quote read one company" {
     for (lances) |l| try std.testing.expectEqual(l.used >= l.cap, l.full);
     const train = try supportTrain(al, &gs, co);
     try std.testing.expectEqual(@as(usize, 4), train.lines.len);
+    try std.testing.expectEqual(sites.siteCapacityTons(&gs, .{ .company = co }) orelse 0, train.capacity_tons);
     const st = try status(al, &gs);
     try std.testing.expect(!st.bankrupt and !st.saved);
     try std.testing.expect(firstHq(&gs) != .none);

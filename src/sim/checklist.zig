@@ -15,6 +15,7 @@ const table = @import("table.zig");
 const medical = @import("medical.zig");
 const GameState = @import("state.zig").GameState;
 const treasury = @import("treasury.zig");
+const sites = @import("sites.zig");
 
 pub const WarningKind = enum {
     decision_due,
@@ -728,7 +729,7 @@ fn contactFixture(gs: *GameState) !*@import("../domain/contract.zig").Contract {
         .enemy_lances = 2,
         .enemy_lance_bv = 3_000,
     });
-    for (part_mod.munition_keys) |key| try gs.addStock(gs.siteForForce(co), key, 20);
+    for (part_mod.munition_keys) |key| try gs.addStock(sites.siteForForce(gs, co), key, 20);
     return gs.contracts.getPtr(@enumFromInt(1)).?;
 }
 
@@ -817,7 +818,7 @@ test "emergency resupply buys what the quote says, and refuses before money move
     defer gs.deinit();
     const c = try contactFixture(&gs);
     const co = c.assigned_company;
-    const site = gs.siteForForce(co);
+    const site = sites.siteForForce(&gs, co);
     c.next_battle_day = gs.clock.day_index + 2;
     // Stores already cover the fight: nothing to buy.
     try std.testing.expectError(commands.Error.NothingToRush, commands.execute(&gs, .{ .emergency_resupply = c.id }));

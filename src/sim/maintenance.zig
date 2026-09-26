@@ -13,6 +13,7 @@ const part_mod = @import("../domain/part.zig");
 const person_mod = @import("../domain/person.zig");
 const chassis_mod = @import("../domain/chassis.zig");
 const hq_ops = @import("hq_ops.zig");
+const sites = @import("sites.zig");
 const GameState = @import("state.zig").GameState;
 
 /// Hours a field repair costs the hull's tech (tuning.maintenance).
@@ -232,7 +233,7 @@ pub fn runWeeklyRepairs(gs: *GameState) !void {
         const tech = activeTech(gs, u) orelse continue; // no tech, no repairs
         const base_load = gs.techLoadHours(tech.id);
         const at_home = gs.isCompanyHome(gs.companyOf(u.force)); // not merely off contract: a company returning or idling afield is away too
-        const site = gs.siteForForce(u.force);
+        const site = sites.siteForForce(gs, u.force);
 
         for (u.slots.items) |*slot| {
             const tier = unit_mod.repairTier(slot.class, slot.condition) orelse continue;
@@ -516,7 +517,7 @@ pub fn repairBudget(gs: *GameState, alloc: std.mem.Allocator, company: types.For
         if ((try seen.getOrPut(alloc, tech.id)).found_existing) continue;
         spare_hours += gs.techHoursAvailable(tech) -| gs.techLoadHours(tech.id);
     }
-    const site = gs.siteForForce(company);
+    const site = sites.siteForForce(gs, company);
     var spares: std.ArrayListUnmanaged(Spare) = .empty;
     for (needs) |n| for (n.slots) |job| {
         if (!job.wrecked) continue;
@@ -545,7 +546,7 @@ pub fn planFor(gs: *GameState, alloc: std.mem.Allocator, company: types.ForceId,
 /// it carried out, for the log, in `alloc` (a caller's scratch arena).
 pub fn repairPush(gs: *GameState, alloc: std.mem.Allocator, company: types.ForceId, order: types.RepairOrder) !RepairPlan {
     const plan = try planFor(gs, alloc, company, order);
-    const site = gs.siteForForce(company);
+    const site = sites.siteForForce(gs, company);
     var labour: types.CBills = 0;
     for (plan.hulls) |h| {
         const u = gs.unit(h.unit) orelse continue;

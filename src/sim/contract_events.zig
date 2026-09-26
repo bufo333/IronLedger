@@ -15,6 +15,7 @@ const unit_mod = @import("../domain/unit.zig");
 const maintenance = @import("maintenance.zig");
 const personnel = @import("personnel.zig");
 const treasury = @import("treasury.zig");
+const sites = @import("sites.zig");
 
 pub const decision_window_days = tuning.contract.decision_window_days;
 pub const notice_window_days = tuning.contract.notice_window_days;
@@ -514,7 +515,7 @@ fn applyEffectsFor(gs: *GameState, effects: []const events.Effect, contract: ?*c
                 // structure goes home with the next convoy (depot work).
                 if (company != .none) {
                     try gs.addStock(.{ .company = company }, "mlas", n);
-                    try gs.sendHome(company, "comp_arm", n);
+                    try sites.sendHome(gs, company, "comp_arm", n);
                 } else {
                     try gs.addStock(gs.defaultSite(), "comp_arm", n);
                     try gs.addStock(gs.defaultSite(), "mlas", n);
@@ -668,7 +669,7 @@ fn applyEffectsFor(gs: *GameState, effects: []const events.Effect, contract: ?*c
             .field_stock => |fs| {
                 const site: types.Site = if (company != .none) .{ .company = company } else gs.defaultSite();
                 // Trucks have finite room: what does not fit is left on the dock.
-                const room: u32 = if (gs.siteCapacityTons(site)) |cap| cap -| gs.siteTons(site) else fs.qty;
+                const room: u32 = if (sites.siteCapacityTons(gs, site)) |cap| cap -| sites.siteTons(gs, site) else fs.qty;
                 const qty = @min(@as(u32, fs.qty), room);
                 if (qty > 0) try gs.addStock(site, fs.key, qty);
             },
@@ -1419,7 +1420,7 @@ pub fn damagedCompanyForTest(gs: *GameState, armor: u32) !struct { c: *contract_
             n += 1;
         }
     }
-    const site = gs.siteForForce(co);
+    const site = sites.siteForForce(gs, co);
     _ = gs.takeStock(site, "armor", gs.stockCount(site, "armor"));
     try gs.addStock(site, "armor", armor);
     return .{ .c = gs.contracts.getPtr(@enumFromInt(1)).?, .hulls = hulls };
@@ -1445,7 +1446,7 @@ test "the repairs the inbox offers are the repairs the techs make" {
     try resolveChoice(&gs, id, 0);
 
     for (offered.hulls) |h| try std.testing.expectEqual(h.armor_after, gs.unit(h.unit).?.armor_pct);
-    try std.testing.expectEqual(@as(u32, 0), gs.stockCount(gs.siteForForce(co), "armor"));
+    try std.testing.expectEqual(@as(u32, 0), gs.stockCount(sites.siteForForce(&gs, co), "armor"));
     // Worst-hit first put both tons on the worst hull.
     try std.testing.expectEqual(10 + 2 * tuning.maintenance.armor_patch_pct, gs.unit(f.hulls[0]).?.armor_pct);
     try std.testing.expect(gs.event_queue.blocking() == null);

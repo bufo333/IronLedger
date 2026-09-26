@@ -14,6 +14,7 @@ const hq_mod = @import("../domain/hq.zig");
 const part_mod = @import("../domain/part.zig");
 const unit_mod = @import("../domain/unit.zig");
 const person_mod = @import("../domain/person.zig");
+const sites = @import("sites.zig");
 const state_mod = @import("state.zig");
 const GameState = state_mod.GameState;
 
@@ -218,7 +219,7 @@ pub fn slotNeedsSpare(s: unit_mod.PartSlot) bool {
 
 /// Where a hull's field work happens and its spares must sit.
 pub fn spareSiteFor(gs: *GameState, u: *const unit_mod.Unit) types.Site {
-    return gs.siteForForce(u.force);
+    return sites.siteForForce(gs, u.force);
 }
 
 /// Units of a part already ordered to a site and still on the way.
@@ -746,7 +747,7 @@ fn completeJob(gs: *GameState, job: *state_mod.BayJob) !bool {
         },
         .fabrication => {
             const site: types.Site = .{ .hq = job.hq };
-            const room = gs.siteFreeTons(site) / @max(1, part_mod.tons(job.item_key));
+            const room = sites.siteFreeTons(gs, site) / @max(1, part_mod.tons(job.item_key));
             if (room > 0) try gs.addStock(site, job.item_key, 1);
             try gs.log(.construction, .{ .hq = job.hq }, "[bay] fabricated {s}{s}", .{
                 job.item_key,

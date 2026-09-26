@@ -63,9 +63,9 @@ Owner of every entry: the project owner.
 - **Scope:**
   - Every module and function listed in the rule 76 registry below.
   - Three switches with more than ten substantive arms (an arm body past three lines), measured by the check that guards them: `contract_events.applyEffectsFor`, `app.listView`, `forces.handle`. Five more sit at the threshold without crossing it: `app.listEnter` and `app.handleModalKey`, `market.handle`, `app.drawModal`, `supply.handle`.
-  - `GameState` methods with subsystem behaviour: founding, posture, TO&E, crew, tech time, lift, supply, refit, aftermath, `commanderMultBp`, and `hirePerson`'s default skill table (it leaves with C11's single role-to-skill rule; the creation itself is a storage primitive). (Hashing has moved to `digest.zig`; sale values to `econ/market.zig`; transfers, couriers, purchase debits, payroll, upkeep, liquidation and credit to `treasury.zig`; recruiting, spec hiring, posting and the recruit bonus to `personnel.zig`; the back-office counts, staffing refresh and autostaffing to `hq_ops.zig`.)
-  - Nine upward imports in `state.zig`, held by the C4 layering record below:
-    - behaviour called from state: `personnel.zig` (`createCommander`'s `recruitGenerated`), `hq_ops.zig` (`refreshHqStaffing`), `treasury.zig` (`transferFunds`, `sendHome`'s `courierEtaDays`), `field_supply.zig` (`loadOutCompany`);
+  - `GameState` methods with subsystem behaviour: founding, posture, TO&E, crew, tech time, lift, refit, aftermath, `commanderMultBp`, and `hirePerson`'s default skill table (it leaves with C11's single role-to-skill rule; the creation itself is a storage primitive). (Hashing has moved to `digest.zig`; sale values to `econ/market.zig`; transfers, couriers, purchase debits, payroll, upkeep, liquidation and credit to `treasury.zig`; recruiting, spec hiring, posting and the recruit bonus to `personnel.zig`; the back-office counts, staffing refresh and autostaffing to `hq_ops.zig`; stock-site capacity, handovers, a force's supply site and goods sent home to `sites.zig`; the company load-out to `field_supply.zig`.)
+  - Eight upward imports in `state.zig`, held by the C4 layering record below:
+    - behaviour called from state: `personnel.zig` (`createCommander`'s `recruitGenerated`), `hq_ops.zig` (`refreshHqStaffing`), `treasury.zig` (`transferFunds`);
     - simulation types stored in `GameState` fields: `clock.zig` (the `Date` and `Clock` field types), `events.zig` (the `EventQueue` and `EventKind` field types), `after_action.zig` (the `Journal` field type), `network.zig` (the `HqLink` field type);
     - a test in `state.zig` importing the simulation layer: `starter_company.zig`. Rule 5's test clause covers only command-view agreement tests importing `queries.zig`, so this one needs its own listing.
   - The 5 test-only `queries.zig` imports in `commands.zig` and `hq_ops.zig` are agreement tests allowed by rule 5's test clause and are not part of this entry.
@@ -91,7 +91,7 @@ Owner of every entry: the project owner.
   - **`acceptContract`.** It removes the offer before its fallible steps (`commands.zig:2351-2419`).
   - **Assets split by a fallible step after a mutation:**
     - `commands.zig`: `execSellStock:1179`, `execTrimStock:1276`, `execHireCandidate:1605`, `execLink:624`, `execTrainAbility:939`, `execUpgradeTier:604`, `orderPart:2210-2230`, `execDisbandCompany:1472`
-    - `state.moveStock:1156`
+    - `sites.moveStock`
     - `hq_ops.queueDepotRepair:385`
   - **Partial loops.**
     - `replaceGear` (`commands.zig:2118-2156`) runs a per-slot loop with no batch validation.
@@ -367,7 +367,7 @@ Owner of every entry: the project owner.
 - **Scope:**
   - **Routing.** It is a hop-count BFS that ignores capacity (`network.zig:63-144`). The charter fallback has no cap.
   - **Truck capacity:**
-    - Capacity counts any truck that isn't destroyed (`state.zig:1124-1140`, `battle.zig:24-33`).
+    - Capacity counts any truck that isn't destroyed (`sites.siteCapacityTons`, `battle.zig:24-33`).
     - Queries recount trucks with hard-coded 20t and 5t (`queries.zig:1825-1835`).
     - The support-lance bonus is applied when `units.len > 0` (`queries.zig:940`, `medical.zig:361`).
   - **Beachhead pricing:**
@@ -382,7 +382,7 @@ Owner of every entry: the project owner.
 - **Rules:** 78.
 - **Why not yet:** Small; scheduled after the error work so each site's allocator is chosen once.
 - **Scope:**
-  - Child arenas built on `gs.allocator()`: `tick.zig:107` (daily), `commands.zig:1247`, `state.zig:1171`.
+  - Child arenas built on `gs.allocator()`: `tick.zig:107` (daily), `commands.zig:1247`, `field_supply.loadOutCompany`.
   - `defer deinit(gs.allocator())` on local lists: `battle.zig:848`, `867`; `personnel.zig:335`, `337`, `393`; `contract_control.zig:103`; `commands.zig:761`, `763`, `1465`, `1481`, `2266`.
 - **Removal:** C16.
 - **Guard:** review. No mechanical check.
@@ -394,7 +394,8 @@ Owner of every entry: the project owner.
 - **Scope:**
   - Rule functions with no test:
     - `hq_ops`: `beyondEconomicalRepair`, `canFabricate`, `bayCanRebuild`, `upgradeBlock`, `rebuildEstimate`, `engineCharge`, `paperworkDaysFor`, `depotHqFor`, `staffHqToRequirement`
-    - `state`: `assignBlock`, `canReachPool`, `techHoursAvailable`, `findFreeTech`, `siteCapacityTons`, `moveStock`, `applyRefit`
+    - `state`: `assignBlock`, `canReachPool`, `techHoursAvailable`, `findFreeTech`, `applyRefit`
+    - `sites`: `siteCapacityTons`, `moveStock`
     - `treasury`: `transferFunds`, `isInsolvent`, `liquidationValue`, `creditLimit`, `courierEtaDays`
     - `battle`: `effectiveRoe`, `estimatePower`, `estimatedKills`, `inContactWindow`
     - `medical`: `healDays`, `careFor`, `turnoverRisk`
@@ -524,9 +525,9 @@ the `starter_company.zig` edge is recorded. The `treasury.zig`,
 `personnel.zig` and `hq_ops.zig` edges were introduced by C4a (PRs #119,
 #121, #122), which moved transfer, recruiting/posting and staffing
 behaviour off `GameState` into their owning modules; founding
-(`createCommander`) and `sendHome` are what still call back into them from
-`state.zig`, and the edges close when that behaviour leaves `state.zig` in
-turn. The record only shrinks: reformatting a recorded import line, without
+(`createCommander`) is what still calls back into them from `state.zig`,
+and the edges close when that behaviour leaves `state.zig` in turn. The
+record only shrinks: reformatting a recorded import line, without
 changing which module it names, still matches its edge and passes. A line
 records existing debt and permits nothing; a new upward import is a
 violation even beside a listed one.
@@ -535,7 +536,6 @@ violation even beside a listed one.
 src/sim/state.zig -> src/sim/after_action.zig
 src/sim/state.zig -> src/sim/clock.zig
 src/sim/state.zig -> src/sim/events.zig
-src/sim/state.zig -> src/sim/field_supply.zig
 src/sim/state.zig -> src/sim/hq_ops.zig
 src/sim/state.zig -> src/sim/network.zig
 src/sim/state.zig -> src/sim/personnel.zig

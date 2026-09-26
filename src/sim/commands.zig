@@ -33,6 +33,8 @@ const unit_mod = @import("../domain/unit.zig");
 const chassis_mod = @import("../domain/chassis.zig");
 const person_gen = @import("../gen/person_gen.zig");
 const digest = @import("digest.zig");
+const sites = @import("sites.zig");
+const field_supply = @import("field_supply.zig");
 
 pub const Command = union(enum) {
     /// End the turn: advance one day. Turn-based — time only moves here,
@@ -1245,7 +1247,6 @@ fn execCrewCompany(gs: *GameState, company: @FieldType(Command, "crew_company"))
 fn execTrimStock(gs: *GameState, company: @FieldType(Command, "trim_stock")) Error!Result {
     const f = gs.force(company) orelse return Error.UnknownForce;
     if (f.echelon != .company) return Error.NotACompany;
-    const field_supply = @import("field_supply.zig");
     var arena = std.heap.ArenaAllocator.init(gs.allocator());
     defer arena.deinit();
     var min_days: u32 = 14;
@@ -1276,7 +1277,7 @@ fn execTrimStock(gs: *GameState, company: @FieldType(Command, "trim_stock")) Err
         const excess: u32 = if (target) |t| have -| t else if (consumable) have else 0;
         if (excess == 0) continue;
         _ = gs.takeStock(site, key, excess);
-        try gs.sendHome(company, key, excess);
+        try sites.sendHome(gs, company, key, excess);
         moved += excess * part_mod.tons(key);
         try gs.log(.delivery, .{ .company = company }, "[supply] {s} returns {d} {s} to the home HQ ({s})", .{ f.name, excess, key, if (target != null) "over the plan's target" else "no line in the plan" });
     }
@@ -1936,24 +1937,23 @@ fn validateSite(gs: *GameState, site: types.Site) Error!void {
 
 /// Refuse anything the destination can't hold once inbound goods land.
 fn checkRoom(gs: *GameState, site: types.Site, part_key: []const u8, quantity: u32) Error!void {
-    const cap = gs.siteCapacityTons(site) orelse return;
-    const used = gs.siteTons(site) + @import("field_supply.zig").inboundTonsTo(gs, site);
+    const cap = sites.siteCapacityTons(gs, site) orelse return;
+    const used = sites.siteTons(gs, site) + field_supply.inboundTonsTo(gs, site);
     if (used + quantity * part_mod.tons(part_key) > cap) return Error.StorageFull;
 }
 
 /// Emergency resupply: the quote from `field_supply.rushQuote`,
 /// checked against truck room and local funds before anything moves.
 fn emergencyResupply(gs: *GameState, id: types.ContractId) Error!Result {
-    const field_supply = @import("field_supply.zig");
     const c = gs.contracts.getPtr(id) orelse return Error.UnknownContract;
     if (c.status != .active) return Error.NoContact;
     var arena = std.heap.ArenaAllocator.init(gs.scratch());
     defer arena.deinit();
     const rush = try field_supply.rushQuote(arena.allocator(), gs, c);
     if (rush.lines.len == 0) return Error.NothingToRush;
-    const site = gs.siteForForce(c.assigned_company);
-    if (gs.siteCapacityTons(site)) |cap| {
-        if (gs.siteTons(site) + field_supply.inboundTonsTo(gs, site) + rush.tons > cap) return Error.StorageFull;
+    const site = sites.siteForForce(gs, c.assigned_company);
+    if (sites.siteCapacityTons(gs, site)) |cap| {
+        if (sites.siteTons(gs, site) + field_supply.inboundTonsTo(gs, site) + rush.tons > cap) return Error.StorageFull;
     }
     if (gs.treasuryBalance(.{ .company = c.assigned_company }) < rush.price) return Error.CompanyFundsShort;
     for (rush.lines) |l| try gs.addStock(site, l.key, 0); // every stock slot exists before money moves
@@ -2410,11 +2410,11 @@ fn acceptContract(gs: *GameState, offer_index: usize, company_id: types.ForceId)
 
     // Kit out from the home warehouse before the dropships lift;
     // a company redeploying from the field goes with what's in its trucks.
-    try gs.loadOutCompany(company_id);
+    try field_supply.loadOutCompany(gs, company_id);
     try deploymentDefaults(gs, company_id, signing);
     const site: types.Site = .{ .company = company_id };
     try gs.log(.delivery, .{ .company = company_id, .contract = id }, "[loadout] trucks loaded: {d}t of {d}t — {d}t provisions, {d}t LRM, {d}t SRM, {d}t AC/5", .{
-        gs.siteTons(site),                 gs.siteCapacityTons(site) orelse 0,
+        sites.siteTons(gs, site),          sites.siteCapacityTons(gs, site) orelse 0,
         gs.stockCount(site, "provisions"), gs.stockCount(site, "ammo_lrm"),
         gs.stockCount(site, "ammo_srm"),   gs.stockCount(site, "ammo_ac5"),
     });
@@ -3501,7 +3501,7 @@ test "deployment eats field stores, then buys local, then goes hungry" {
     _ = try execute(&gs, .{ .accept_contract = .{ .offer_index = 0, .company = co } });
     const loaded = gs.stockCount(site, "provisions");
     try std.testing.expect(loaded > 0);
-    try std.testing.expect(gs.siteTons(site) <= gs.siteCapacityTons(site).?);
+    try std.testing.expect(sites.siteTons(&gs, site) <= sites.siteCapacityTons(&gs, site).?);
     // No employer convoys, no resupply policy, no float for this test (the
     // deployment defaults would feed them): the trucks are all they have.
     gs.contracts.values()[0].terms.overhead_pct = 0;
@@ -3540,7 +3540,7 @@ test "warehouses are finite — orders that won't fit are refused" {
     // The room check runs before the sourcing roll, so an oversized order
     // is refused deterministically.
     const cap = gs.hqs.values()[0].warehouseCapacityTons(); // 200t at level 1
-    const used = gs.siteTons(.{ .hq = hq_id });
+    const used = sites.siteTons(&gs, .{ .hq = hq_id });
     try std.testing.expectError(Error.StorageFull, execute(&gs, .{
         .order_part = .{ .part_key = "provisions", .quantity = cap - used + 1 },
     }));
@@ -4070,8 +4070,8 @@ test "the resupply plan keeps a deployed company fed and armed on a long line" {
     };
     _ = try execute(&gs, .{ .accept_contract = .{ .offer_index = nearest, .company = co } });
     // The load-out follows the plan: within capacity, no munitions the company cannot fire.
-    const cap = gs.siteCapacityTons(site).?;
-    try std.testing.expect(gs.siteTons(site) <= cap);
+    const cap = sites.siteCapacityTons(&gs, site).?;
+    try std.testing.expect(sites.siteTons(&gs, site) <= cap);
     _ = try execute(&gs, .{ .set_supply_policy = .{ .company = co, .min_days = 14, .tons = 0 } });
     _ = try execute(&gs, .{ .set_policy = .{ .entity = .{ .company = co }, .floor = 300_000, .monthly_cap = 600_000 } });
     var day: u32 = 0;
@@ -4079,7 +4079,7 @@ test "the resupply plan keeps a deployed company fed and armed on a long line" {
     var dry_battles: u32 = 0;
     while (day < 150) : (day += 1) {
         try advanceReading(&gs, 1);
-        try std.testing.expect(gs.siteTons(site) <= cap);
+        try std.testing.expect(sites.siteTons(&gs, site) <= cap);
         if (gs.stockCount(site, "provisions") == 0) hungry_days += 1;
     }
     for (gs.event_log.items) |e| if (std.mem.indexOf(u8, e.text, "silenced") != null and std.mem.indexOf(u8, e.text, "| 0 mounts silenced") == null) {
@@ -4311,7 +4311,7 @@ test "gear on any hull is field work — replace orders the spare to its site, t
 
     // replace orders exactly one winch to the hull's site; once it is on
     // order a second call orders nothing more.
-    const site = gs.siteForForce(gs.unit(uid).?.force);
+    const site = sites.siteForForce(&gs, gs.unit(uid).?.force);
     const r = try execute(&gs, .{ .replace_gear = uid });
     try std.testing.expectEqual(@as(u32, 1), r.ordered + r.unsourced);
     if (r.ordered == 1) {

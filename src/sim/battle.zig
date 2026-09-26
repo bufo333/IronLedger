@@ -18,6 +18,7 @@ const part_mod = @import("../domain/part.zig");
 const medical = @import("medical.zig");
 const person_mod = @import("../domain/person.zig");
 const unit_mod = @import("../domain/unit.zig");
+const sites = @import("sites.zig");
 const GameState = @import("state.zig").GameState;
 
 /// Salvage trucks (SVT-1) a company fields, wrecks excepted.
@@ -1265,19 +1266,19 @@ pub fn takeSalvage(
     while (remaining >= t.salvage_bv_per_component and components < 3) : (components += 1) {
         remaining -= t.salvage_bv_per_component;
         const class = @import("../domain/opfor.zig").weightClass(&gs.rng, .battle);
-        try gs.sendHome(c.assigned_company, part_mod.componentForSlotClass(comp_slots[components % comp_slots.len], class), 1);
+        try sites.sendHome(gs, c.assigned_company, part_mod.componentForSlotClass(comp_slots[components % comp_slots.len], class), 1);
     }
     var weapons: u32 = 0;
     const weapon_keys = [_][]const u8{ "mlas", "srm4", "ac5", "lrm5", "llas" };
     while (remaining >= t.salvage_bv_per_weapon and weapons < 4) : (weapons += 1) {
         remaining -= t.salvage_bv_per_weapon;
-        try gs.sendHome(c.assigned_company, weapon_keys[gs.rng.random(.battle).uintLessThan(usize, weapon_keys.len)], 1);
+        try sites.sendHome(gs, c.assigned_company, weapon_keys[gs.rng.random(.battle).uintLessThan(usize, weapon_keys.len)], 1);
     }
     var armor: u32 = 0;
     while (remaining >= t.salvage_bv_per_armor_ton and armor < 10) : (armor += 1) {
         remaining -= t.salvage_bv_per_armor_ton;
     }
-    if (armor > 0) try gs.sendHome(c.assigned_company, "armor", armor);
+    if (armor > 0) try sites.sendHome(gs, c.assigned_company, "armor", armor);
     if (components + weapons + armor > 0) {
         try text.appendSlice(gs.allocator(), try std.fmt.allocPrint(gs.allocator(), "crated home: {d} structural component{s}, {d} weapon{s}, {d}t armor", .{
             components, if (components == 1) "" else "s", weapons, if (weapons == 1) "" else "s", armor,
@@ -1733,7 +1734,7 @@ fn repairOfferRoundTrip(seed: u64) !bool {
         .assigned_company = co,
     });
     const c = gs.contracts.getPtr(@enumFromInt(1)).?;
-    const site = gs.siteForForce(co);
+    const site = sites.siteForForce(&gs, co);
     // Two tons of plating for a whole company: the order has to matter.
     _ = gs.takeStock(site, "armor", gs.stockCount(site, "armor"));
     try gs.addStock(site, "armor", 2);

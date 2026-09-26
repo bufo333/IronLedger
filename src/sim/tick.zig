@@ -23,6 +23,7 @@ const contract_control = @import("contract_control.zig");
 const planet_mod = @import("../domain/planet.zig");
 const logistics = @import("../econ/logistics.zig");
 const field_supply = @import("field_supply.zig");
+const sites = @import("sites.zig");
 
 /// Advance exactly one day — one turn. Turn-based: nothing blocks time;
 /// decision events sit in the inbox with deadlines, and the deadline applies
@@ -124,13 +125,13 @@ fn runPolicies(gs: *GameState) !void {
             // tonnage is cut to fit, not refused. Trucks packed with surplus
             // ammo from employer convoys are trimmed first — excess rides
             // home on the empty convoy so the food can land.
-            const room_now = gs.siteFreeTons(site) -| field_supply.inboundTons(gs, sp.company);
+            const room_now = sites.siteFreeTons(gs, site) -| field_supply.inboundTons(gs, sp.company);
             if (room_now < want * part_mod.tons(line.key)) {
                 const moved = (commands.execute(gs, .{ .trim_stock = sp.company }) catch Result{}).tons_moved;
                 if (moved > 0) try gs.log(.delivery, .{ .company = sp.company }, "[supply] trucks full: {d}t of surplus sent home to make room for {s}", .{ moved, line.key });
             }
             // Room counts what is already on the road (the shipment check does).
-            const free_tons = (gs.siteFreeTons(site) -| field_supply.inboundTons(gs, sp.company)) / @max(1, part_mod.tons(line.key));
+            const free_tons = (sites.siteFreeTons(gs, site) -| field_supply.inboundTons(gs, sp.company)) / @max(1, part_mod.tons(line.key));
             want = @min(want, free_tons);
             const available = gs.stockCount(.{ .hq = home }, line.key);
             const qty = @min(want, available);
@@ -266,7 +267,7 @@ pub fn runTravel(gs: *GameState) !void {
             // Land at the destination site; anything the warehouse or the
             // trucks can't hold is lost on the dock.
             const dest: types.Site = if (order.dest == .outfit) gs.defaultSite() else order.dest;
-            const room = gs.siteFreeTons(dest) / @max(1, part_mod.tons(order.part_key));
+            const room = sites.siteFreeTons(gs, dest) / @max(1, part_mod.tons(order.part_key));
             const landed = @min(order.quantity, room);
             try gs.addStock(dest, order.part_key, landed);
             const tags = Treasury.ofSite(dest).tags();
@@ -415,7 +416,7 @@ fn runContracts(gs: *GameState) !void {
 
 /// Put stock on the ground at a site, bounded by its free tonnage.
 fn landStock(gs: *GameState, site: types.Site, key: []const u8, qty: u32) !u32 {
-    const room = gs.siteFreeTons(site) / @max(1, part_mod.tons(key));
+    const room = sites.siteFreeTons(gs, site) / @max(1, part_mod.tons(key));
     const n = @min(qty, room);
     if (n > 0) try gs.addStock(site, key, n);
     return n;
