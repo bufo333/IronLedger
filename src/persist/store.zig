@@ -15,6 +15,7 @@ const sqlite = @import("sqlite.zig");
 const types = @import("../domain/types.zig");
 const state_mod = @import("../sim/state.zig");
 const GameState = state_mod.GameState;
+const founding = @import("../sim/founding.zig");
 const posture = @import("../sim/posture.zig");
 const person_mod = @import("../domain/person.zig");
 const unit_mod = @import("../domain/unit.zig");
@@ -2283,7 +2284,7 @@ test "a battle report round-trips as fields, not as a row count" {
     const part_mod = @import("../domain/part.zig");
     var gs = GameState.init(std.testing.allocator, .{ .seed = 90210 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .line_officer);
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
     const co = try @import("../sim/starter_company.zig").generateInto(&gs, "Alpha");
     try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
         .id = @enumFromInt(1),
@@ -2368,7 +2369,7 @@ test "a hull the enemy holds round-trips, slots and all — off the books, not s
     var gs = GameState.init(std.testing.allocator, .{ .seed = 12007 });
     defer gs.deinit();
     gs.difficulty = .elite; // a lost field is the point of the fixture
-    _ = try gs.createCommander("T", .LC, .line_officer);
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
     const co = try @import("../sim/starter_company.zig").generateInto(&gs, "Alpha");
     try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
         .id = @enumFromInt(1),
@@ -2446,7 +2447,7 @@ test "loading a campaign id with no campaign row is refused" {
 test "a first save that fails leaves the campaign unsaved, and a retry registers it" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 4004 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .line_officer);
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
     const store = try Store.open(":memory:");
     defer store.close();
     // A missing child table makes the save fail after the campaign INSERT.
@@ -2466,7 +2467,7 @@ test "a first save that fails leaves the campaign unsaved, and a retry registers
 test "saving over a campaign row that no longer exists is refused" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 4005 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .line_officer);
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
     const store = try Store.open(":memory:");
     defer store.close();
     try store.save(&gs);
@@ -2480,7 +2481,7 @@ test "saving over a campaign row that no longer exists is refused" {
 fn loadAfterTampering(sql: [*:0]const u8) !void {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 5005 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .line_officer);
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
     _ = try @import("../sim/starter_company.zig").generateInto(&gs, "Alpha");
     const store = try Store.open(":memory:");
     defer store.close();
@@ -2560,7 +2561,7 @@ fn stirRng(gs: *GameState) void {
 test "every RNG stream and the seed survive a save and load" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 6006 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .line_officer);
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
     stirRng(&gs);
     const store = try Store.open(":memory:");
     defer store.close();
@@ -2576,7 +2577,7 @@ test "every RNG stream and the seed survive a save and load" {
 test "a stream the save lacks starts fresh from the seed, and the others keep their state" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 6007 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .line_officer);
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
     stirRng(&gs);
     const store = try Store.open(":memory:");
     defer store.close();
@@ -2595,7 +2596,7 @@ test "a stream the save lacks starts fresh from the seed, and the others keep th
 test "a save from before per-stream rows loads every stream from its legacy blob" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 6008 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .line_officer);
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
     stirRng(&gs);
     const store = try Store.open(":memory:");
     defer store.close();
@@ -2622,7 +2623,7 @@ test "a save from before per-stream rows loads every stream from its legacy blob
 /// A campaign that has fought `fights` engagements, every battle decision
 /// answered with its default and every report read.
 fn foughtCampaignForTest(gs: *GameState, fights: u32) !void {
-    _ = try gs.createCommander("T", .LC, .line_officer);
+    _ = try founding.createCommander(gs, "T", .LC, .line_officer);
     const co = try @import("../sim/starter_company.zig").generateInto(gs, "Alpha");
     try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
         .id = @enumFromInt(1),
@@ -2679,7 +2680,7 @@ test "a save without the battle counter resumes numbering past every battle it r
 test "a battle decision round-trips answerable, and still holds the turn" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 12006 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .line_officer);
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
     const co = try @import("../sim/starter_company.zig").generateInto(&gs, "Alpha");
     try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
         .id = @enumFromInt(1),
@@ -2742,7 +2743,7 @@ test "a field repair decision comes back from a save with its three orders" {
 test "a recovery decision remembers its battle, and a held hull its lance" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 12066 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .line_officer);
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
     const co = try @import("../sim/starter_company.zig").generateInto(&gs, "Alpha");
     try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
         .id = @enumFromInt(1),
@@ -2784,7 +2785,7 @@ test "the wrecks on offer survive a save — the same battlefield after a reload
     const battle = @import("../sim/battle.zig");
     var gs = GameState.init(std.testing.allocator, .{ .seed = 12060 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .line_officer);
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
     const co = try @import("../sim/starter_company.zig").generateInto(&gs, "Alpha");
     // A report with a haul still to be divided, built by hand so the test
     // does not depend on a campaign happening to throw one up.

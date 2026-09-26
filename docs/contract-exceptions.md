@@ -63,9 +63,8 @@ Owner of every entry: the project owner.
 - **Scope:**
   - Every module and function listed in the rule 76 registry below.
   - Three switches with more than ten substantive arms (an arm body past three lines), measured by the check that guards them: `contract_events.applyEffectsFor`, `app.listView`, `forces.handle`. Five more sit at the threshold without crossing it: `app.listEnter` and `app.handleModalKey`, `market.handle`, `app.drawModal`, `supply.handle`.
-  - `GameState` methods with subsystem behaviour: founding, lift, refit, aftermath, `commanderMultBp`, and `hirePerson`'s default skill table (it leaves with C11's single role-to-skill rule; the creation itself is a storage primitive). (Hashing has moved to `digest.zig`; sale values to `econ/market.zig`; transfers, couriers, purchase debits, payroll, upkeep, liquidation and credit to `treasury.zig`; recruiting, spec hiring, posting and the recruit bonus to `personnel.zig`; the back-office counts, staffing refresh and autostaffing to `hq_ops.zig`; stock-site capacity, handovers, a force's supply site and goods sent home to `sites.zig`; the company load-out to `field_supply.zig`; seat eligibility, seat assignment and auto-assignment to `crew.zig`; hull and tech hours, tech capacity and free-tech search to `maintenance.zig`; company and lance counts, HQ and company capacity, support lances, unit placement and moves and company membership to `toe.zig`.)
-  - Seven upward imports in `state.zig`, held by the C4 layering record below:
-    - behaviour called from state: `personnel.zig` (`createCommander`'s `recruitGenerated`), `hq_ops.zig` (`refreshHqStaffing`), `treasury.zig` (`transferFunds`);
+  - `GameState` methods with subsystem behaviour: lift, refit, aftermath, `commanderMultBp`, and `hirePerson`'s default skill table (it leaves with C11's single role-to-skill rule; the creation itself is a storage primitive). (Hashing has moved to `digest.zig`; sale values to `econ/market.zig`; transfers, couriers, purchase debits, payroll, upkeep, liquidation and credit to `treasury.zig`; recruiting, spec hiring, posting and the recruit bonus to `personnel.zig`; the back-office counts, staffing refresh and autostaffing to `hq_ops.zig`; stock-site capacity, handovers, a force's supply site and goods sent home to `sites.zig`; the company load-out to `field_supply.zig`; seat eligibility, seat assignment and auto-assignment to `crew.zig`; hull and tech hours, tech capacity and free-tech search to `maintenance.zig`; company and lance counts, HQ and company capacity, support lances, unit placement and moves and company membership to `toe.zig`; founding to `founding.zig`.)
+  - Four upward imports in `state.zig`, held by the C4 layering record below:
     - simulation types stored in `GameState` fields: `clock.zig` (the `Date` and `Clock` field types), `events.zig` (the `EventQueue` and `EventKind` field types), `after_action.zig` (the `Journal` field type), `network.zig` (the `HqLink` field type).
   - The 6 test-only `queries.zig` imports in `commands.zig`, `hq_ops.zig` and `crew.zig` are agreement tests allowed by rule 5's test clause and are not part of this entry.
   - This sub-list records existing debt found by a full audit; it grants no
@@ -104,7 +103,7 @@ Owner of every entry: the project owner.
   - **Stock-mutation results ignored:** `battle.zig:943`, `maintenance.zig:247`, `271`.
   - **Tests.** There are no failure-injection tests in the sim.
   - **Refusal text.** The fallback "nothing was changed" (`cli.zig:621`) is not yet true.
-  - **`state.createCommander` is not failure-atomic.** It draws the `.generation` stream for the world pick, then commits in sequence — `commander`; `next_hq_id`; the HQ; the staff it recruits and posts (drawing `.generation` again and allocating); the staffing refresh; the founding funds transfer; the HQ and stock policies; the starter stock — and each fallible step follows earlier commits. A failure leaves the RNG advanced and every earlier change in place (`state.zig:432-502`).
+  - **`founding.createCommander` is not failure-atomic.** It draws the `.generation` stream for the world pick, then commits in sequence — `commander`; `next_hq_id`; the HQ; the staff it recruits and posts (drawing `.generation` again and allocating); the staffing refresh; the founding funds transfer; the HQ and stock policies; the starter stock — and each fallible step follows earlier commits. A failure leaves the RNG advanced and every earlier change in place (`founding.zig:29-97`).
   - **`commands.execFoundHq` writes its log entry after the debit and `commitHq`.** A failed log leaves the HQ founded and paid for, but returns an error (`commands.zig:595`).
 - **Removal:** C5.
 - **Guard:** review (checklist questions 2, 3 and 14). No mechanical check.
@@ -226,7 +225,7 @@ Owner of every entry: the project owner.
 - **Rules:** 20, 21, 26, 27, 29, 60.
 - **Why not yet:** Each duplicate has to be collapsed into one owning function, with a test that the owner and its consumers agree.
 - **Scope, copies that already disagree:**
-  - **Admin desk requirement,** defined three ways (`hq.zig:84`; `hq_ops.staffHqToRequirement`'s desk split, copied in `state.createCommander`'s staff plan; `queries.zig:5204-5210`, `2012-2017`).
+  - **Admin desk requirement,** defined three ways (`hq.zig:84`; `hq_ops.staffHqToRequirement`'s desk split, copied in `founding.createCommander`'s staff plan; `queries.zig:5204-5210`, `2012-2017`).
   - **Disband quote** leaves out company funds (`queries.zig:6028` vs `commands.zig:1461`).
   - **Medbay cover** leaves out medics (`queries.zig:5302-5309` vs `medical.zig:119-129`).
   - **Effectiveness %** reads 100 in one place and 0 in another (`queries.zig:364`, `925`; `checklist.zig:126`).
@@ -521,23 +520,18 @@ The C4 layering debt (rule 5), one canonical edge per line as
 repository root. `docs/verify-contract.sh` resolves every upward import in
 `src`, except a test's import of `queries.zig` (rule 5's test clause), and
 fails on one missing from this record, and on a record edge whose import no
-longer exists (remove it). The `treasury.zig`,
-`personnel.zig` and `hq_ops.zig` edges were introduced by C4a (PRs #119,
-#121, #122), which moved transfer, recruiting/posting and staffing
-behaviour off `GameState` into their owning modules; founding
-(`createCommander`) is what still calls back into them from `state.zig`,
-and the edges close when that behaviour leaves `state.zig` in turn. The
-record only shrinks: reformatting a recorded import line, without
-changing which module it names, still matches its edge and passes. A line
-records existing debt and permits nothing; a new upward import is a
-violation even beside a listed one.
+longer exists (remove it). The `treasury.zig`, `personnel.zig` and
+`hq_ops.zig` edges were introduced by C4a (PRs #119, #121, #122) and
+closed in C4a6: founding (`createCommander`) moved to `founding.zig`,
+taking those three back-calls off `state.zig`. The record only shrinks:
+reformatting a recorded import line, without changing which module it
+names, still matches its edge and passes. A line records existing debt
+and permits nothing; a new upward import is a violation even beside a
+listed one.
 
 ```layering
 src/sim/state.zig -> src/sim/after_action.zig
 src/sim/state.zig -> src/sim/clock.zig
 src/sim/state.zig -> src/sim/events.zig
-src/sim/state.zig -> src/sim/hq_ops.zig
 src/sim/state.zig -> src/sim/network.zig
-src/sim/state.zig -> src/sim/personnel.zig
-src/sim/state.zig -> src/sim/treasury.zig
 ```

@@ -10,6 +10,7 @@ const tuning = @import("../domain/tuning.zig").t;
 const person_mod = @import("../domain/person.zig");
 const personnel = @import("personnel.zig");
 const GameState = @import("state.zig").GameState;
+const founding = @import("founding.zig");
 const hq_ops = @import("hq_ops.zig");
 const treasury = @import("treasury.zig");
 
@@ -216,7 +217,7 @@ test "letters step at the tuned thresholds and pay follows the letter" {
 test "the report's parts sum to the score; a fresh outfit is unproven and debt-free" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 7 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .paymaster);
+    _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
     const r = report(&gs);
     try std.testing.expectEqual(r.experience.score + r.command.score + r.record.score + r.transport.score + r.support.score + r.finances.score, r.score);
     try std.testing.expectEqual(@as(u32, 0), r.record.closed);

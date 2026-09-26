@@ -17,6 +17,7 @@ const sites = @import("sites.zig");
 const crew = @import("crew.zig");
 const toe = @import("toe.zig");
 const GameState = @import("state.zig").GameState;
+const founding = @import("founding.zig");
 const posture = @import("posture.zig");
 
 /// Hours a field repair costs the hull's tech (tuning.maintenance).
@@ -835,7 +836,7 @@ test "repairs consume spares; depot work needs the HQ" {
     try runWeeklyRepairs(&gs);
     try std.testing.expect(u.needsDepot());
 
-    _ = try gs.createCommander("T", .LC, .chief_engineer);
+    _ = try founding.createCommander(&gs, "T", .LC, .chief_engineer);
     try gs.addSpare("ac5", 1);
     try runWeeklyRepairs(&gs);
     try std.testing.expectEqual(@as(u32, 0), gs.spareCount("ac5"));

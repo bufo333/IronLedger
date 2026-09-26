@@ -12,6 +12,7 @@ const unit_mod = @import("../domain/unit.zig");
 const force_mod = @import("../domain/force.zig");
 const state_mod = @import("state.zig");
 const GameState = state_mod.GameState;
+const founding = @import("founding.zig");
 
 /// Combat companies currently assigned to an HQ.
 pub fn companiesAtHq(gs: *GameState, hq_id: types.HqId) u32 {
@@ -229,7 +230,7 @@ pub fn companyHeadcount(gs: *GameState, company_id: types.ForceId) u32 {
 test "everyone under the company is in it; nobody else is" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 5 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .line_officer);
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
     _ = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     var co: types.ForceId = .none;
     var it = gs.forces.iterator();
@@ -250,7 +251,7 @@ test "assign_company refuses CapacityFull exactly at the HQ's combat-company cap
     defer gs.deinit();
     const commands = @import("commands.zig");
 
-    const hq_id = try gs.createCommander("T", .LC, .line_officer);
+    const hq_id = try founding.createCommander(&gs, "T", .LC, .line_officer);
     const cap = gs.hqs.getPtr(hq_id).?.capacity();
     try std.testing.expectEqual(@as(u32, 1), cap.combat_companies);
 
@@ -272,7 +273,7 @@ test "assign_company refuses CapacityFull exactly at the HQ's combat-company cap
 
     // A second, empty HQ sits below its own cap: the same company is
     // accepted there.
-    const second_hq = try gs.foundHq("Second", .regional, "alkaid");
+    const second_hq = try founding.foundHq(&gs, "Second", .regional, "alkaid");
     try std.testing.expectEqual(@as(u32, 0), companiesAtHq(&gs, second_hq));
     try assignCompanyToHq(&gs, outsider, second_hq);
     try std.testing.expectEqual(@as(u32, 1), companiesAtHq(&gs, second_hq));
@@ -283,7 +284,7 @@ test "hqWithCompanySlot never returns an HQ at its combat-company cap" {
     defer gs.deinit();
     const hq_ops = @import("hq_ops.zig");
 
-    const hq_id = try gs.createCommander("T", .LC, .line_officer);
+    const hq_id = try founding.createCommander(&gs, "T", .LC, .line_officer);
     const cap = gs.hqs.getPtr(hq_id).?.capacity();
     const resident = try gs.createForce("Alpha", .company, .none);
     try assignCompanyToHq(&gs, resident, hq_id);
@@ -293,7 +294,7 @@ test "hqWithCompanySlot never returns an HQ at its combat-company cap" {
     try std.testing.expectEqual(types.HqId.none, hq_ops.hqWithCompanySlot(&gs, hq_id));
 
     // Once a second HQ has room, the preferred (full) HQ is skipped for it.
-    const second_hq = try gs.foundHq("Second", .regional, "alkaid");
+    const second_hq = try founding.foundHq(&gs, "Second", .regional, "alkaid");
     const found = hq_ops.hqWithCompanySlot(&gs, hq_id);
     try std.testing.expectEqual(second_hq, found);
     try std.testing.expect(companiesAtHq(&gs, found) < gs.hqs.getPtr(found).?.capacity().combat_companies);

@@ -11,6 +11,7 @@ const tuning = @import("../domain/tuning.zig").t;
 const types = @import("../domain/types.zig");
 const person_mod = @import("../domain/person.zig");
 const GameState = @import("state.zig").GameState;
+const founding = @import("founding.zig");
 const hq_ops = @import("hq_ops.zig");
 const posture = @import("posture.zig");
 const sites = @import("sites.zig");
@@ -410,7 +411,7 @@ pub fn runWeeklyRest(gs: *GameState) !void {
 test "wounds heal; the field is slower than a home hospital" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 21 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .paymaster); // HQ has hospital lv1
+    _ = try founding.createCommander(&gs, "T", .LC, .paymaster); // HQ has hospital lv1
     const id = try gs.hirePerson("Lori", "Kalmar", .mekwarrior);
     _ = try gs.hirePerson("Ivan", "Petrov", .doctor);
 
@@ -429,7 +430,7 @@ test "wounds heal; the field is slower than a home hospital" {
 test "fatigue decays only at home, faster with a line officer" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 22 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .line_officer);
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
     const id = try gs.hirePerson("A", "B", .mekwarrior);
     gs.person(id).?.fatigue = 60;
 
@@ -440,7 +441,7 @@ test "fatigue decays only at home, faster with a line officer" {
     // Same person under a paymaster recovers slower (no 2% edge).
     var gs2 = GameState.init(std.testing.allocator, .{ .seed = 22 });
     defer gs2.deinit();
-    _ = try gs2.createCommander("T", .LC, .paymaster);
+    _ = try founding.createCommander(&gs2, "T", .LC, .paymaster);
     const id2 = try gs2.hirePerson("A", "B", .mekwarrior);
     gs2.person(id2).?.fatigue = 60;
     for (0..4) |_| try runWeeklyRest(&gs2);
@@ -464,7 +465,7 @@ test "rested companies reset their rotation debt" {
 test "injuries land by location, heal on their own days, and permanent ones scar the record" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1216 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .paymaster);
+    _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
     const id = try gs.hirePerson("Lori", "Kalmar", .mekwarrior);
     _ = try gs.hirePerson("Ivan", "Petrov", .doctor);
     try gs.addStock(.{ .hq = gs.hqs.keys()[0] }, "medical_supplies", 10);
@@ -517,7 +518,7 @@ test "injuries land by location, heal on their own days, and permanent ones scar
 test "the restless hand in notice after a year (an inbox decision), the content stay" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1220 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .paymaster);
+    _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
     _ = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     // Content and fresh (and all thirty, under the age flag): nobody
     // stirs however low the dice.
@@ -549,7 +550,7 @@ test "the restless hand in notice after a year (an inbox decision), the content 
     // Under a year on the books: restless but rolls nothing.
     var fresh = GameState.init(std.testing.allocator, .{ .seed = 1221 });
     defer fresh.deinit();
-    _ = try fresh.createCommander("T", .LC, .paymaster);
+    _ = try founding.createCommander(&fresh, "T", .LC, .paymaster);
     _ = try @import("starter_company.zig").generateInto(&fresh, "Alpha");
     var fit = fresh.people.iterator();
     while (fit.next()) |e| e.value_ptr.morale = 0;
@@ -560,7 +561,7 @@ test "the restless hand in notice after a year (an inbox decision), the content 
 test "the old retire on payday with their payout; the merely older roll to leave" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 124 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .paymaster);
+    _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
     const old = try gs.hirePerson("Grey", "Beard", .tech_mek);
     gs.clock.day_index = 400;
     gs.person(old).?.born_day = -66 * 365;
@@ -591,7 +592,7 @@ test "the old retire on payday with their payout; the merely older roll to leave
 test "a founder never rolls while morale holds; a veteran's loyalty cancels a flag" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 125 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .paymaster);
+    _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
     gs.clock.day_index = 400;
     const founder = try gs.hirePerson("Day", "One", .mekwarrior);
     gs.person(founder).?.recruited_day = 0;
@@ -622,7 +623,7 @@ test "a founder never rolls while morale holds; a veteran's loyalty cancels a fl
 test "garrison duty recovers fatigue in the field; a combat tour does not" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1230 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .paymaster);
+    _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
     const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
         .id = @enumFromInt(1),
@@ -650,7 +651,7 @@ test "garrison duty recovers fatigue in the field; a combat tour does not" {
 test "medics add field beds and carry patients toward the doctor ratio" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1211 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .paymaster);
+    _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
     const co = try gs.createForce("Alpha", .company, .none);
     // No MASH: two medics make one bed; four make two.
     try std.testing.expectEqual(@as(u32, 0), bedCapacity(&gs, co, true));
@@ -714,7 +715,7 @@ test "a deployed patient without a ready MASH lance heals slower than one with i
 test "five tied field patients and four beds: exactly one waits" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 7101 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .paymaster);
+    _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
     const co = try gs.createForce("Alpha", .company, .none);
     try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
         .id = @enumFromInt(1),
@@ -748,9 +749,9 @@ test "five tied field patients and four beds: exactly one waits" {
 test "weekly rest uses the home HQ's mess, not the best mess in the outfit" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 7602 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .paymaster);
+    _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
     const seat = gs.hqs.keys()[0];
-    const second = try gs.foundHq("Second", .regional, "alkaid");
+    const second = try founding.foundHq(&gs, "Second", .regional, "alkaid");
     for (gs.hqs.getPtr(seat).?.facilities.items) |*f| {
         if (f.kind == .mess) f.level = 3;
     }

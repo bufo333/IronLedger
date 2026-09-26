@@ -10,6 +10,7 @@ const types = @import("../domain/types.zig");
 const person_mod = @import("../domain/person.zig");
 const unit_mod = @import("../domain/unit.zig");
 const GameState = @import("state.zig").GameState;
+const founding = @import("founding.zig");
 const maintenance = @import("maintenance.zig");
 const posture = @import("posture.zig");
 
@@ -137,7 +138,7 @@ pub fn autoAssign(gs: *GameState, company: types.ForceId) !u32 {
 test "auto-assign benches a spent pilot when a fresher one is free, keeps them when nobody is" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 121 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .paymaster);
+    _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
     const co = try gs.createForce("Alpha", .company, .none);
     const lance = try gs.createForce("1st", .lance, co);
     const mek = try gs.addUnit("LCT-1V");
@@ -167,7 +168,7 @@ test "assignBlock's reason matches crewChoices' dim and the assign command's ref
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const al = arena.allocator();
-    _ = try gs.createCommander("T", .LC, .line_officer);
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
     const company_id = try starter_company.generateInto(&gs, "Alpha");
 
     var mek: types.UnitId = .none;

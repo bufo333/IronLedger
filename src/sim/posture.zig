@@ -6,6 +6,7 @@ const types = @import("../domain/types.zig");
 const contract_mod = @import("../domain/contract.zig");
 const force_mod = @import("../domain/force.zig");
 const GameState = @import("state.zig").GameState;
+const founding = @import("founding.zig");
 
 /// Where a company stands (ARCH §9.7): the one cascade every screen,
 /// warning and refusal reads. Contract first (en route, then on
@@ -41,7 +42,7 @@ pub fn isCompanyDeployed(gs: *GameState, company: types.ForceId) bool {
 test "company posture is one cascade: contract, then the road home, then a world, else home" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 5 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .line_officer);
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
     _ = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     var co: types.ForceId = .none;
     var it = gs.forces.iterator();
@@ -63,7 +64,7 @@ test "posture x sites.siteForForce: siteForForce returns company site iff !isCom
     const sites = @import("sites.zig");
     var gs = GameState.init(std.testing.allocator, .{ .seed = 7 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .line_officer);
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
     _ = try @import("starter_company.zig").generateInto(&gs, "Bravo");
     var co: types.ForceId = .none;
     var it = gs.forces.iterator();

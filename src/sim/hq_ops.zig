@@ -18,6 +18,7 @@ const sites = @import("sites.zig");
 const toe = @import("toe.zig");
 const state_mod = @import("state.zig");
 const GameState = state_mod.GameState;
+const founding = @import("founding.zig");
 const posture = @import("posture.zig");
 
 // ----------------------------------------------------- the back office
@@ -786,7 +787,7 @@ fn completeJob(gs: *GameState, job: *state_mod.BayJob) !bool {
 test "repair odds favour the sharper tech and the better hull; the parts sum to 100" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1212 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .chief_engineer);
+    _ = try founding.createCommander(&gs, "T", .LC, .chief_engineer);
     const hq_id = gs.hqs.keys()[0];
     const uid = try gs.addUnit("AS7-D");
     const none = repairOdds(&gs, hq_id, uid); // no tech at all: skill 7
@@ -806,7 +807,7 @@ test "repair odds favour the sharper tech and the better hull; the parts sum to 
 test "bays are slots: jobs queue when full and finish in order" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 31 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .chief_engineer); // mek_bay lv1 → 2 slots
+    _ = try founding.createCommander(&gs, "T", .LC, .chief_engineer); // mek_bay lv1 → 2 slots
     const hq_id = gs.hqs.keys()[0];
 
     try queueFabrication(&gs, hq_id, "comp_arm", 3); // 6 days each, 3 jobs, 2 slots
@@ -826,7 +827,7 @@ test "bays are slots: jobs queue when full and finish in order" {
 test "depot repair needs the right components, then holds a bay" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 32 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .chief_engineer);
+    _ = try founding.createCommander(&gs, "T", .LC, .chief_engineer);
     const hq_id = gs.hqs.keys()[0];
     const uid = try gs.addUnit("SHD-2H");
     const u = gs.unit(uid).?;
@@ -859,7 +860,7 @@ test "depot repair needs the right components, then holds a bay" {
 test "one rule for structural needs: the depot, the demand ledger and the screens read the same list" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 34 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .chief_engineer);
+    _ = try founding.createCommander(&gs, "T", .LC, .chief_engineer);
     const hq_id = gs.hqs.keys()[0];
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -920,7 +921,7 @@ test "one rule for structural needs: the depot, the demand ledger and the screen
 test "one rule for field spares: replace orders what the site's ledger says is short, and the Market shows the same line" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 35 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .chief_engineer);
+    _ = try founding.createCommander(&gs, "T", .LC, .chief_engineer);
     const hq_id = gs.hqs.keys()[0];
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -967,7 +968,7 @@ test "one rule for field spares: replace orders what the site's ledger says is s
 test "construction projects: paperwork then build, staffing bill rises" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 33 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .paymaster);
+    _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
     const hq_id = gs.hqs.keys()[0];
     const before = gs.hqs.values()[0].staffRequired().total();
 

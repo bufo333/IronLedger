@@ -36,6 +36,7 @@ const person_gen = @import("../gen/person_gen.zig");
 const digest = @import("digest.zig");
 const sites = @import("sites.zig");
 const field_supply = @import("field_supply.zig");
+const founding = @import("founding.zig");
 const crew = @import("crew.zig");
 const toe = @import("toe.zig");
 
@@ -583,7 +584,7 @@ fn execFoundHq(gs: *GameState, f: @FieldType(Command, "found_hq")) Error!Result 
     const cost: types.CBills = tuning.hq.found_field_hq_cost;
     if (gs.treasuryBalance(.outfit) < cost) return Error.InsufficientTreasury;
     // The HQ is built and its slots reserved before the money moves.
-    const hq = gs.prepareHq(f.name, .field, world.key) catch |err| switch (err) {
+    const hq = founding.prepareHq(gs, f.name, .field, world.key) catch |err| switch (err) {
         error.UnknownPlanet => return Error.UnknownPlanet,
         error.NotReachable => return Error.NotReachable,
         error.OutOfMemory => return Error.OutOfMemory,
@@ -921,7 +922,7 @@ fn execSetEmblem(gs: *GameState, e: @FieldType(Command, "set_emblem")) Error!Res
 fn execCreateCommander(gs: *GameState, c: @FieldType(Command, "create_commander")) Error!Result {
     if (c.start_year < 3000 or c.start_year > 3060) return Error.BadYear;
     gs.clock.date.year = c.start_year;
-    _ = try gs.createCommander(c.name, c.origin, c.profession);
+    _ = try founding.createCommander(gs, c.name, c.origin, c.profession);
     // Until renamed, the outfit carries the commander's name — it
     // reads far better in the campaign registry.
     if (std.mem.eql(u8, gs.outfit_name, "Provisional Mercenary Command")) {
@@ -3011,9 +3012,9 @@ test "a refit cannot install two parts from one in stock" {
 test "a shipment the payer cannot afford uses no link capacity" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 7501 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .quartermaster);
+    _ = try founding.createCommander(&gs, "T", .LC, .quartermaster);
     const home = gs.hqs.keys()[0];
-    const far = try gs.foundHq("Frontier", .field, "alkaid");
+    const far = try founding.foundHq(&gs, "Frontier", .field, "alkaid");
     try gs.hq_links.append(gs.allocator(), .{ .a = home, .b = far, .level = 1, .established_day = 0 });
     // The shipment is paid from the sending HQ's treasury, which is empty.
     try gs.addStock(.{ .hq = far }, "armor", 10);
@@ -3031,7 +3032,7 @@ test "a shipment the payer cannot afford uses no link capacity" {
 fn twoHqTrainingForTest(gs: *GameState) !struct { at_seat: types.PersonId, at_second: types.PersonId } {
     _ = try execute(gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
     const seat = gs.hqs.keys()[0];
-    const second = try gs.foundHq("Second", .regional, "alkaid");
+    const second = try founding.foundHq(gs, "Second", .regional, "alkaid");
     for (gs.hqs.getPtr(second).?.facilities.items) |*f| {
         if (f.kind == .training_ground) f.level = 0;
     }
@@ -3085,7 +3086,7 @@ fn clearHolds(gs: *GameState) !void {
 test "an unread after-action holds the turn, and a week stops on the day it lands" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 4242 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .line_officer);
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
     const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
         .id = @enumFromInt(1),
@@ -3148,7 +3149,7 @@ test "an unread after-action holds the turn, and a week stops on the day it land
 test "a field held asks for the tempo, and the turn waits for the answer" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 4242 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .line_officer);
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
     const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
         .id = @enumFromInt(1),
@@ -3215,7 +3216,7 @@ test "a field held asks for the tempo, and the turn waits for the answer" {
 test "garrison work has no advance to press" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 4243 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .line_officer);
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
     const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
         .id = @enumFromInt(1),

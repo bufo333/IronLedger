@@ -12,6 +12,7 @@ const rank_mod = @import("../domain/rank.zig");
 const award_mod = @import("../domain/award.zig");
 const chassis_mod = @import("../domain/chassis.zig");
 const GameState = @import("state.zig").GameState;
+const founding = @import("founding.zig");
 const hq_ops = @import("hq_ops.zig");
 const company_gen = @import("../gen/company_gen.zig");
 const person_gen = @import("../gen/person_gen.zig");
@@ -462,9 +463,9 @@ pub fn refreshRanks(gs: *GameState) !u32 {
 test "the recruiting bonus is the recruiting HQ's hiring hall, not the first HQ's" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 7701 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .paymaster);
+    _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
     const seat = gs.hqs.keys()[0];
-    const second = try gs.foundHq("Second", .regional, "alkaid");
+    const second = try founding.foundHq(&gs, "Second", .regional, "alkaid");
     for ([_]types.HqId{ seat, second }) |id| gs.hqs.getPtr(id).?.staff_assigned = 999;
     for (gs.hqs.getPtr(seat).?.facilities.items) |*f| {
         if (f.kind == .hiring_hall) f.level = 3;
@@ -478,7 +479,7 @@ test "the recruiting bonus is the recruiting HQ's hiring hall, not the first HQ'
 test "ranks follow seats: a lance leader is a lieutenant, the company commander a captain, the rest by experience" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1234 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .paymaster);
+    _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
     const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     _ = try refreshRanks(&gs);
     const cmdr = gs.force(co).?.commander;
@@ -510,7 +511,7 @@ test "ranks follow seats: a lance leader is a lieutenant, the company commander 
 test "kills are credited to engaged pilots and awards follow the counters" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1235 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .paymaster);
+    _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
     const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     var engaged: std.ArrayListUnmanaged(types.UnitId) = .empty;
     defer engaged.deinit(gs.allocator());

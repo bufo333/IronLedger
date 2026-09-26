@@ -18,6 +18,7 @@ const force_mod = @import("../domain/force.zig");
 const battle = @import("battle.zig");
 const rating = @import("rating.zig");
 const GameState = @import("state.zig").GameState;
+const founding = @import("founding.zig");
 
 /// How well one HQ reads an opposition: its comms level, one more for a
 /// B-or-better outfit rating (employers share).
@@ -150,9 +151,9 @@ pub fn skullText(alloc: std.mem.Allocator, r: OfferRating) ![]const u8 {
 test "an offer's intel is the comms of the board that offered it" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 7702 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .paymaster);
+    _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
     const seat = gs.hqs.keys()[0];
-    const second = try gs.foundHq("Second", .regional, "alkaid");
+    const second = try founding.foundHq(&gs, "Second", .regional, "alkaid");
     for ([_]types.HqId{ seat, second }) |id| gs.hqs.getPtr(id).?.staff_assigned = 999;
     for (gs.hqs.getPtr(seat).?.facilities.items) |*f| {
         if (f.kind == .comms) f.level = 3;
@@ -180,7 +181,7 @@ test "an offer's intel is the comms of the board that offered it" {
 test "blind intel widens the lance range; comms 3 pins it" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 3 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .line_officer);
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
     const c: contract_mod.Contract = .{
         .id = .none,
         .kind = .objective_raid,

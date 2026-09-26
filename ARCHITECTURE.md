@@ -134,8 +134,8 @@ section explains the shape, the contract states the rules.
   `AdvanceDay`) — a tagged union. This gives us one choke point for
   validation, an audit log, replayability, and trivially scriptable tests.
   A command reserves every ledger and list slot it needs
-  (`GameState.reserveLedger`, `ensureUnusedCapacity`, `prepareHq` before
-  `commitHq`) ahead of its first mutation, so no allocation can fail after
+  (`GameState.reserveLedger`, `ensureUnusedCapacity`, `founding.prepareHq` before
+  `GameState.commitHq`) ahead of its first mutation, so no allocation can fail after
   money or stock has moved.
 - **The campaign log is structured** (Stage 9A): every entry carries day,
   category, and company/HQ/contract tags, so any entity's complete history —

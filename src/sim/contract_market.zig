@@ -10,6 +10,7 @@ const planet = @import("../domain/planet.zig");
 const market = @import("../econ/market.zig");
 const logistics = @import("../econ/logistics.zig");
 const GameState = @import("state.zig").GameState;
+const founding = @import("founding.zig");
 const hq_ops = @import("hq_ops.zig");
 const treasury = @import("treasury.zig");
 const unit_mod = @import("../domain/unit.zig");
@@ -633,7 +634,7 @@ fn maintenanceEstimate(gs: *GameState) types.CBills {
 test "refresh only offers work inside rings or the beachhead band" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 5 });
     defer gs.deinit();
-    _ = try gs.createCommander("Erik Kalmar", .CC, .quartermaster);
+    _ = try founding.createCommander(&gs, "Erik Kalmar", .CC, .quartermaster);
     _ = try @import("starter_company.zig").generateInto(&gs, "Alpha Company");
 
     try refresh(&gs);
@@ -654,7 +655,7 @@ test "refresh only offers work inside rings or the beachhead band" {
 test "hulls persist across refreshes, staples are always stocked" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 19 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .quartermaster);
+    _ = try founding.createCommander(&gs, "T", .LC, .quartermaster);
     try refreshListings(&gs);
 
     // Support vehicles are a staple hull line at every regional board.
@@ -703,7 +704,7 @@ test "hulls persist across refreshes, staples are always stocked" {
 test "hiring halls churn daily" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 20 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .DC, .paymaster);
+    _ = try founding.createCommander(&gs, "T", .DC, .paymaster);
     try refreshCandidates(&gs);
     var arrivals: u32 = 0;
     var departures: u32 = 0;
@@ -722,7 +723,7 @@ test "hiring halls churn daily" {
 test "every admin desk walks into the hall, short desks first" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 21 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .DC, .paymaster);
+    _ = try founding.createCommander(&gs, "T", .DC, .paymaster);
     // The fresh commander's HQ has no finance clerk; the hall must offer one.
     var seen_finance = false;
     var seen_command = false;
@@ -741,7 +742,7 @@ test "every admin desk walks into the hall, short desks first" {
 test "an F-rated outfit hears only from the periphery and never gets a planetary assault" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 127 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .paymaster);
+    _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
     _ = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     gs.funds = -1;
     gs.reputation = -100; // record −40, treasury −20 …
@@ -764,7 +765,7 @@ test "an F-rated outfit hears only from the periphery and never gets a planetary
 test "a wired HQ with a hall eventually hears from a fence; a firebase never does" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1217 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .paymaster);
+    _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
     const hq = gs.hqs.keys()[0];
     // Comms up to the line.
     const h = gs.hqs.getPtr(hq).?;
@@ -798,7 +799,7 @@ test "no HQ, no reputation, no offers" {
 test "the transport slot opens with the spaceport; ordinary lots are meks only" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 21 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .quartermaster);
+    _ = try founding.createCommander(&gs, "T", .LC, .quartermaster);
     const chassis_mod = @import("../domain/chassis.zig");
     // Spaceport 1: never a fighter or ship, however many refreshes.
     for (0..12) |_| {
@@ -834,7 +835,7 @@ test "the transport slot opens with the spaceport; ordinary lots are meks only" 
 test "the hiring hall always has a few of every role" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1210 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .quartermaster);
+    _ = try founding.createCommander(&gs, "T", .LC, .quartermaster);
     gs.candidates.clearRetainingCapacity();
     try churnCandidates(&gs);
     const hq = gs.hqs.keys()[0];
@@ -863,7 +864,7 @@ test "the hiring hall always has a few of every role" {
 test "the board is a mix: at least offers_min offers, no kind over a third of them" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 610 });
     defer gs.deinit();
-    _ = try gs.createCommander("Erik Kalmar", .LC, .quartermaster);
+    _ = try founding.createCommander(&gs, "Erik Kalmar", .LC, .quartermaster);
     _ = try @import("starter_company.zig").generateInto(&gs, "Alpha Company");
     try refresh(&gs);
     const n = gs.contract_offers.items.len;
@@ -888,7 +889,7 @@ test "the board is a mix: at least offers_min offers, no kind over a third of th
 test "offers are priced per company — a second company does not double every contract's pay" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 96 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .quartermaster);
+    _ = try founding.createCommander(&gs, "T", .LC, .quartermaster);
     _ = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     const one = perCompanyOpsCost(&gs);
     _ = try @import("starter_company.zig").generateInto(&gs, "Bravo");

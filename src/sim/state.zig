@@ -418,98 +418,6 @@ pub const GameState = struct {
         return self.people.getPtr(id);
     }
 
-    // --------------------------------------------- character creation & HQ
-
-    pub const CreateCommanderError = error{ CommanderExists, NoHomeWorld } || std.mem.Allocator.Error;
-
-    /// Character creation: the commander's origin picks the starter world
-    /// (weighted-random in their faction's space) and stands up the starter
-    /// regional HQ there with modest level-1 facilities.
-    pub fn createCommander(
-        self: *GameState,
-        name: []const u8,
-        origin: commander_mod.Faction,
-        profession: commander_mod.Profession,
-    ) CreateCommanderError!types.HqId {
-        if (self.commander != null) return error.CommanderExists;
-        const world = planet_mod.weightedPickByFaction(&self.rng, .generation, origin.key()) orelse return error.NoHomeWorld;
-
-        self.commander = .{
-            .name = try self.allocator().dupe(u8, name),
-            .origin = origin,
-            .profession = profession,
-        };
-
-        const id: types.HqId = @enumFromInt(self.next_hq_id);
-        self.next_hq_id += 1;
-        var hq: hq_mod.Hq = .{
-            .id = id,
-            .name = try std.fmt.allocPrint(self.allocator(), "{s} Regional HQ", .{world.name}),
-            .tier = .regional,
-            .planet_key = world.key,
-            .monthly_upkeep = hq_mod.HqTier.regional.monthlyUpkeep(),
-        };
-        const starter_facilities = [_]hq_mod.FacilityKind{ .mek_bay, .warehouse, .hospital, .mess, .comms, .spaceport, .hiring_hall, .training_ground };
-        for (starter_facilities) |kind| {
-            try hq.facilities.append(self.allocator(), .{ .kind = kind, .level = 1 });
-        }
-        const req = hq.staffRequired();
-        try self.hqs.put(self.allocator(), id, hq);
-
-        // The back office is people: recruit the starter HQ's
-        // staff to requirement and post them. Their payroll is the tail.
-        const staff_plan = [_]struct { person_mod.Role, u32 }{
-            .{ .admin_command, req.admin },                           .{ .admin_logistics, req.logistics / 2 },
-            .{ .admin_transport, req.logistics - req.logistics / 2 }, .{ .admin_hr, req.hr },
-            .{ .admin_finance, req.finance },
-        };
-        for (staff_plan) |entry| {
-            for (0..entry[1]) |_| {
-                const pid = try @import("personnel.zig").recruitGenerated(self, entry[0], id, .generation);
-                self.person(pid).?.posted_hq = id;
-            }
-        }
-        @import("hq_ops.zig").refreshHqStaffing(self);
-
-        // Founding capital: the HQ opens with its own operating treasury,
-        // handed over on-site (no courier).
-        @import("treasury.zig").transferFunds(self, .outfit, .{ .hq = id }, tuning.hq.founding_funds, 0) catch |err| switch (err) {
-            // An outfit that cannot cover the founding capital opens the HQ
-            // with an empty treasury.
-            error.InsufficientTreasury => {},
-            error.OutOfMemory => return error.OutOfMemory,
-        };
-
-        // Standing defaults the player can clear, so a hands-off outfit keeps
-        // its HQ solvent and fed: the outfit tops the HQ up on payday, and
-        // the warehouse keeps provisions stocked.
-        try self.policies.append(self.allocator(), .{ .entity = .{ .hq = id }, .floor = tuning.finance.hq_policy_floor, .monthly_cap = tuning.finance.hq_policy_cap });
-        try self.stock_policies.append(self.allocator(), .{ .hq = id, .part_key = "provisions", .min = tuning.generation.provisions_keep_min, .target = tuning.generation.provisions_keep_target });
-
-        // A modestly stocked warehouse to start.
-        const site: types.Site = .{ .hq = id };
-        const g = tuning.generation;
-        try self.addStock(site, "provisions", g.starter_provisions);
-        try self.addStock(site, "medical_supplies", g.starter_medical);
-        try self.addStock(site, "armor", g.starter_armor);
-        for (part_mod.component_keys) |key| try self.addStock(site, key, g.starter_components_each);
-        for (part_mod.munition_keys) |key| try self.addStock(site, key, g.starter_munitions_each);
-        return id;
-    }
-
-    // ------------------------------------- the HQ network
-
-    pub const FoundError = error{ UnknownPlanet, NotReachable } || std.mem.Allocator.Error;
-
-    /// Stand up an HQ on a world. Field HQs open with a bay, a warehouse
-    /// and a mess; regional ones add comms, a spaceport, a hospital and a
-    /// hiring hall. Staffing is the player's problem from day one.
-    pub fn foundHq(self: *GameState, name: []const u8, tier: hq_mod.HqTier, planet_key: []const u8) FoundError!types.HqId {
-        const hq = try self.prepareHq(name, tier, planet_key);
-        try self.hqs.ensureUnusedCapacity(self.allocator(), 1);
-        return self.commitHq(hq);
-    }
-
     /// Room for `n` more ledger entries, so the next `n` postings cannot
     /// fail.
     pub fn reserveLedger(self: *GameState, n: usize) !void {
@@ -524,26 +432,6 @@ pub const GameState = struct {
         self.next_hq_id += 1;
         self.hqs.putAssumeCapacity(hq.id, hq);
         return hq.id;
-    }
-
-    /// A new HQ with every allocation done but no id and nothing on the
-    /// books; `commitHq` registers it.
-    pub fn prepareHq(self: *GameState, name: []const u8, tier: hq_mod.HqTier, planet_key: []const u8) FoundError!hq_mod.Hq {
-        const world = planet_mod.find(planet_key) orelse return error.UnknownPlanet;
-        var hq: hq_mod.Hq = .{
-            .id = .none,
-            .name = try self.allocator().dupe(u8, name),
-            .tier = tier,
-            .planet_key = world.key,
-            .monthly_upkeep = tier.monthlyUpkeep(),
-        };
-        const base = [_]hq_mod.FacilityKind{ .mek_bay, .warehouse, .mess };
-        for (base) |kind| try hq.facilities.append(self.allocator(), .{ .kind = kind, .level = 1 });
-        if (tier != .field) {
-            const more = [_]hq_mod.FacilityKind{ .comms, .spaceport, .hospital, .hiring_hall, .training_ground };
-            for (more) |kind| try hq.facilities.append(self.allocator(), .{ .kind = kind, .level = 1 });
-        }
-        return hq;
     }
 
     /// The HQ that supplies a force: its company's assignment, else the

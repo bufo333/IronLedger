@@ -52,7 +52,7 @@ re-implemented in Zig. Paths below are under `MekHQ/src/mekhq/campaign/`.
 | Per-hull carry cost + cold storage (extends MekHQ mothballing w/ reactivation time) | `src/domain/unit.zig` (`monthlyBill`, `reactivationDays`) | 5 |
 | Local operating funds for deployed companies | `force.local_funds` + `fund_transfer` txn category | 9 |
 | Player identity: named companies + emblem images | `force.name`/`force.emblem` | 3 |
-| Commander character creation (origin faction → HQ placement, profession → 2% edge) | `src/domain/commander.zig` + `state.createCommander` | 4 |
+| Commander character creation (origin faction → HQ placement, profession → 2% edge) | `src/domain/commander.zig` + `founding.createCommander` | 4 |
 | Beachhead premium pricing + hardship pay on remote contracts | `src/sim/contract_market.zig` + tick finances phase | 4 |
 | Decentralized treasuries + fund couriers + standing policies (extends MekHQ Finances) | Stage 9A: `Hq.funds`, live `local_funds`, `fund_transfer`/`standing_policy` | 9A |
 | Structured, filterable campaign log (MekHQ has per-person logs only) | Stage 9A: `LogEntry` with company/hq/contract tags | 9A |

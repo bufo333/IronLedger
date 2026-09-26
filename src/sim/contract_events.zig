@@ -11,6 +11,7 @@ const types = @import("../domain/types.zig");
 const events = @import("events.zig");
 const contract_mod = @import("../domain/contract.zig");
 const GameState = @import("state.zig").GameState;
+const founding = @import("founding.zig");
 const unit_mod = @import("../domain/unit.zig");
 const maintenance = @import("maintenance.zig");
 const personnel = @import("personnel.zig");
@@ -1045,7 +1046,7 @@ test "event wear lands on the line lances; only convoy events touch the support 
 test "auto events apply, decisions queue with deadlines, defaults fire" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 42 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .line_officer);
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
 
     // Hand-plant an active garrison contract.
     const co = try gs.createForce("Alpha", .company, .none);
@@ -1115,7 +1116,7 @@ test "effects change real state: cash, reputation, score, spares" {
 test "the black market and a salvage dispute move standing and field stock" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1222 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .line_officer);
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
     const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
         .id = @enumFromInt(1),
@@ -1167,7 +1168,7 @@ test "automatic events never move money, stock or hulls — those are decisions"
 test "notice is a decision — a raise keeps them, letting go vacates the seat, replacing hires from the hall" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1225 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .paymaster);
+    _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
     const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     var pilot: types.PersonId = .none;
     var mek: types.UnitId = .none;
@@ -1201,7 +1202,7 @@ test "notice is a decision — a raise keeps them, letting go vacates the seat, 
 test "a prisoner can be ransomed, released for standing, or recruited on a loyalty roll" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1237 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .line_officer);
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
     const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     const mk = struct {
         fn captive(g: *GameState, company: types.ForceId) !types.PersonId {
@@ -1311,7 +1312,7 @@ test "a weekly decision cools down, and the same answer three times becomes a st
 test "a missing pilot is ransomed, traded for a prisoner of their house, or written off" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1203 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .paymaster);
+    _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
     const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     var pilots: [3]types.PersonId = undefined;
     var n: usize = 0;
@@ -1354,7 +1355,7 @@ test "a missing pilot is ransomed, traded for a prisoner of their house, or writ
 test "betrayal can cost a hull; raiders at the jump point delay or fight an unescorted company" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1209 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .line_officer);
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
     const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
         .id = @enumFromInt(1),
@@ -1395,7 +1396,7 @@ test "betrayal can cost a hull; raiders at the jump point delay or fight an unes
 /// A company on an active contract with three hulls shot up and nothing
 /// else to fix, and `armor` tons in its stores (a shared test fixture).
 pub fn damagedCompanyForTest(gs: *GameState, armor: u32) !struct { c: *contract_mod.Contract, hulls: [3]types.UnitId } {
-    _ = try gs.createCommander("T", .LC, .line_officer);
+    _ = try founding.createCommander(gs, "T", .LC, .line_officer);
     const co = try @import("starter_company.zig").generateInto(gs, "Alpha");
     try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
         .id = @enumFromInt(1),

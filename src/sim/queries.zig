@@ -27,6 +27,7 @@ const maintenance = @import("maintenance.zig");
 // Named `toe_mod`, not `toe`: this file already owns a public `toe` query.
 const toe_mod = @import("toe.zig");
 const GameState = state_mod.GameState;
+const founding = @import("founding.zig");
 
 const Alloc = std.mem.Allocator;
 
@@ -4021,7 +4022,7 @@ test "desk and ledger queries build on a fresh campaign" {
 test "a wounded pilot: the TO&E marks the hull sitting out, the Desk notes it, the end-turn prompt does not ask" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1217 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .paymaster);
+    _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
     _ = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -4057,7 +4058,7 @@ test "a wounded pilot: the TO&E marks the hull sitting out, the Desk notes it, t
 test "readiness counts wounded, permanent injuries, banked XP and depot hulls; marks strip for the CLI" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1216 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .paymaster);
+    _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
     const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -4092,7 +4093,7 @@ test "readiness counts wounded, permanent injuries, banked XP and depot hulls; m
 test "the hangar ranks a pilotless hull above one earning its keep, mothballs cheap but idle" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1220 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .paymaster);
+    _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
     _ = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -4126,7 +4127,7 @@ test "the hangar ranks a pilotless hull above one earning its keep, mothballs ch
 test "the after-action sheet for a concession says what was given up and what it cost" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 7302 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .line_officer);
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
     const co = try gs.createForce("Alpha", .company, .none);
     try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
         .id = @enumFromInt(1),
@@ -4246,7 +4247,7 @@ test "the battle orders show the levers and the resupply the command would buy" 
 test "the contact line an advance stops for is the checklist's contact warning" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1210 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .line_officer);
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
     const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
         .id = @enumFromInt(1),
@@ -4301,7 +4302,7 @@ test "the inbox shows what each repair order would do, as the techs would do it"
 test "the inbox shows the wrecks a salvage claim is being divided over" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1266 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .line_officer);
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
     const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -4362,7 +4363,7 @@ test "the inbox shows the wrecks a salvage claim is being divided over" {
 test "the hangar names a hull the enemy holds — a claim, not an asset" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 12007 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .paymaster);
+    _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
     _ = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -5012,7 +5013,7 @@ test "the unassigned pool says where it sits and what each wreck's rebuild needs
 test "skulls: a weaker company rates harder, a heavier one easier; low intel gives a range around the truth" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1231 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .line_officer);
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
@@ -5589,7 +5590,7 @@ test "the after-action panes read from the record" {
 
     var gs = GameState.init(std.testing.allocator, .{ .seed = 31337 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .line_officer);
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
     const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
         .id = @enumFromInt(1),

@@ -13,6 +13,7 @@ const logistics = @import("../econ/logistics.zig");
 const planet_mod = @import("../domain/planet.zig");
 const state_mod = @import("state.zig");
 const GameState = state_mod.GameState;
+const founding = @import("founding.zig");
 
 pub const HqLink = struct {
     a: types.HqId,
@@ -205,10 +206,10 @@ pub fn routeCostMultBp(route: []const RouteHop) types.Bp {
 test "routes follow links, charter when there are none, and links cap tonnage" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 41 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .quartermaster);
+    _ = try founding.createCommander(&gs, "T", .LC, .quartermaster);
     const home = gs.hqs.keys()[0];
-    const far = try gs.foundHq("Frontier", .field, "alkaid");
-    const mid = try gs.foundHq("Waypoint", .field, "skye");
+    const far = try founding.foundHq(&gs, "Frontier", .field, "alkaid");
+    const mid = try founding.foundHq(&gs, "Waypoint", .field, "skye");
 
     // No links: charter direct, one expensive hop.
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);

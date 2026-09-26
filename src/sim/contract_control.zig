@@ -17,6 +17,7 @@ const planet_mod = @import("../domain/planet.zig");
 const logistics = @import("../econ/logistics.zig");
 const toe = @import("toe.zig");
 const GameState = @import("state.zig").GameState;
+const founding = @import("founding.zig");
 
 pub const grace_days: u32 = tuning.contract.grace_days;
 pub const cooling_days: u32 = tuning.contract.cooling_days;
@@ -295,7 +296,7 @@ pub fn runReturns(gs: *GameState) !void {
 test "attrition contracts break when the pool does; duration ones don't care" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 50 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .line_officer);
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
     const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
 
     try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
@@ -332,7 +333,7 @@ test "attrition contracts break when the pool does; duration ones don't care" {
 test "the breach clause: clawback, reputation, cooling employer" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 51 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .FS, .paymaster);
+    _ = try founding.createCommander(&gs, "T", .FS, .paymaster);
     const co = try gs.createForce("Alpha", .company, .none);
     try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
         .id = @enumFromInt(1),
@@ -363,7 +364,7 @@ test "the breach clause: clawback, reputation, cooling employer" {
 test "combat-ineffective past the grace window is breach" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 52 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .DC, .chief_engineer);
+    _ = try founding.createCommander(&gs, "T", .DC, .chief_engineer);
     const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
         .id = @enumFromInt(1),
@@ -401,7 +402,7 @@ test "combat-ineffective past the grace window is breach" {
 test "standing rises with the employer and falls with the enemy on completion, drops on breach, drifts home" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1221 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .line_officer);
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
     const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
         .id = @enumFromInt(1),
@@ -451,7 +452,7 @@ test "the verdict grades by victory points; failure is the score at term" {
 test "a performance failure at term is .failed — no clawback, no cooling, VP counted once" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1201 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .FS, .line_officer);
+    _ = try founding.createCommander(&gs, "T", .FS, .line_officer);
     const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
         .id = @enumFromInt(1),
@@ -489,7 +490,7 @@ test "a performance failure at term is .failed — no clawback, no cooling, VP c
 test "an offer carries its opposition, and acceptance sizes the pool from it" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1205 });
     defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .line_officer);
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
     const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     try @import("contract_market.zig").refresh(&gs);
     var saw_combat = false;

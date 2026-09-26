@@ -14,6 +14,7 @@ const person = @import("../domain/person.zig");
 const chassis = @import("../domain/chassis.zig");
 const company_gen = @import("../gen/company_gen.zig");
 const GameState = @import("state.zig").GameState;
+const founding = @import("founding.zig");
 const personnel = @import("personnel.zig");
 const digest = @import("digest.zig");
 const crew = @import("crew.zig");
@@ -167,7 +168,7 @@ test "the starter company fields lights and mediums only — the founding bay re
     for ([_]u64{ 1, 2, 3, 4, 5, 6, 7, 8 }) |seed| {
         var gs = GameState.init(std.testing.allocator, .{ .seed = seed });
         defer gs.deinit();
-        _ = try gs.createCommander("T", .LC, .line_officer);
+        _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
         const co = try generateInto(&gs, "Alpha");
         var it = gs.units.iterator();
         while (it.next()) |e| {
