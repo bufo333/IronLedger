@@ -6239,6 +6239,7 @@ test "raise lances, support train and sell quote read one company" {
     const train = try supportTrain(al, &gs, co);
     try std.testing.expectEqual(@as(usize, 4), train.lines.len);
     try std.testing.expectEqual(sites.siteCapacityTons(&gs, .{ .company = co }) orelse 0, train.capacity_tons);
+    try std.testing.expect(train.capacity_tons > 0);
     const st = try status(al, &gs);
     try std.testing.expect(!st.bankrupt and !st.saved);
     try std.testing.expect(firstHq(&gs) != .none);

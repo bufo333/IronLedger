@@ -98,6 +98,7 @@ pub fn sendHome(gs: *GameState, company: types.ForceId, key: []const u8, qty: u3
 
 test "order_part is refused over the site's free tons and accepted at the limit" {
     const commands = @import("commands.zig");
+    const field_supply = @import("field_supply.zig");
     var gs = GameState.init(std.testing.allocator, .{ .seed = 7 });
     defer gs.deinit();
     _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
@@ -105,12 +106,23 @@ test "order_part is refused over the site's free tons and accepted at the limit"
     gs.hqs.values()[0].funds = 100_000_000;
     const site: types.Site = .{ .hq = hq_id };
 
+    // An HQ site has a finite capacity, and nothing is already inbound to
+    // it: the refusal below is exactly siteFreeTons, with no overflow or
+    // inbound tonnage muddying the boundary.
+    try std.testing.expect(siteCapacityTons(&gs, site) != null);
+    try std.testing.expectEqual(@as(u32, 0), field_supply.inboundTonsTo(&gs, site));
+
     const free = siteFreeTons(&gs, site);
     try std.testing.expectError(commands.Error.StorageFull, commands.execute(&gs, .{
-        .order_part = .{ .part_key = "provisions", .quantity = free + 1 },
+        .order_part = .{ .part_key = "provisions", .quantity = free + 1, .dest = site },
     }));
 
-    // Exactly the free tonnage fits: the room check does not refuse it.
-    _ = try commands.execute(&gs, .{ .order_part = .{ .part_key = "provisions", .quantity = free } });
-    try std.testing.expect(siteTons(&gs, site) <= siteCapacityTons(&gs, site).?);
+    // Exactly the free tonnage fits: the room check does not refuse it, and
+    // the order is recorded against this site.
+    _ = try commands.execute(&gs, .{ .order_part = .{ .part_key = "provisions", .quantity = free, .dest = site } });
+    var found = false;
+    for (gs.part_orders.items) |o| {
+        if (std.mem.eql(u8, o.part_key, "provisions") and o.quantity == free and std.meta.eql(o.dest, site)) found = true;
+    }
+    try std.testing.expect(found);
 }
