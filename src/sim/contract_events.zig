@@ -12,6 +12,7 @@ const events = @import("events.zig");
 const contract_mod = @import("../domain/contract.zig");
 const GameState = @import("state.zig").GameState;
 const founding = @import("founding.zig");
+const lift = @import("lift.zig");
 const unit_mod = @import("../domain/unit.zig");
 const maintenance = @import("maintenance.zig");
 const personnel = @import("personnel.zig");
@@ -248,7 +249,7 @@ pub fn rollInterdiction(gs: *GameState) !void {
     while (it.next()) |entry| {
         const c = entry.value_ptr;
         if (c.status != .transit or !c.hasOpfor()) continue;
-        const escorted = gs.hasCrewedDropship(c.assigned_company);
+        const escorted = lift.hasCrewedDropship(gs, c.assigned_company);
         if (escorted) continue;
         const roll = gs.rng.roll2d6(.events);
         if (roll < tuning.contract.interdiction_target) continue;

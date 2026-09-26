@@ -459,71 +459,6 @@ pub const GameState = struct {
         return if (hq.supportsTraining()) id else null;
     }
 
-    /// Transports of one kind holding a berth at an HQ.
-    pub fn transportsBerthedAt(self: *GameState, hq_id: types.HqId, kind: unit_mod.UnitKind) u32 {
-        var n: u32 = 0;
-        var it = self.units.iterator();
-        while (it.next()) |entry| {
-            const u = entry.value_ptr;
-            if (u.kind == kind and u.berth_hq == hq_id and u.status != .destroyed) n += 1;
-        }
-        return n;
-    }
-
-    /// A ship is fit to sail when it is berthed, ready, crewed and not
-    /// already carrying a company (its `force` is set for the tour).
-    pub fn transportAvailable(self: *GameState, u: *const unit_mod.Unit) bool {
-        if (!u.kind.isTransport() or u.status != .ready or u.force != .none) return false;
-        const crew = self.person(u.pilot) orelse return false;
-        return crew.isAvailable(self.clock.day_index);
-    }
-
-    pub const Lift = struct {
-        mek: u32 = 0,
-        asf: u32 = 0,
-        vehicle: u32 = 0,
-        cargo_tons: u32 = 0,
-        dropships: u32 = 0,
-        jumpship_collars: u32 = 0,
-    };
-
-    /// What the crewed, idle ships berthed at an HQ can lift.
-    pub fn availableLift(self: *GameState, hq_id: types.HqId) Lift {
-        var lift: Lift = .{};
-        var it = self.units.iterator();
-        while (it.next()) |entry| {
-            const u = entry.value_ptr;
-            if (u.berth_hq != hq_id or !self.transportAvailable(u)) continue;
-            const design = chassis_mod.find(u.chassis_key) orelse continue;
-            switch (u.kind) {
-                .dropship => {
-                    lift.mek += design.mek_bays;
-                    lift.asf += design.asf_bays;
-                    lift.vehicle += design.vehicle_bays;
-                    lift.cargo_tons += design.cargo_tons;
-                    lift.dropships += 1;
-                },
-                .jumpship => lift.jumpship_collars += design.collars,
-                else => {},
-            }
-        }
-        return lift;
-    }
-
-    /// A crewed jumpship berthed at either end of a link (the dedicated
-    /// line of a level-3 supply link, GAMEPLAY "requires owning one").
-    pub fn ownsCrewedJumpshipAt(self: *GameState, a: types.HqId, b: types.HqId) bool {
-        var it = self.units.iterator();
-        while (it.next()) |entry| {
-            const u = entry.value_ptr;
-            if (u.kind != .jumpship or (u.berth_hq != a and u.berth_hq != b)) continue;
-            if (u.status == .destroyed) continue;
-            const crew = self.person(u.pilot) orelse continue;
-            if (crew.isAvailable(self.clock.day_index)) return true;
-        }
-        return false;
-    }
-
     /// Commander cost multiplier for a category (neutral without a commander).
     pub fn commanderMultBp(self: *const GameState, kind: commander_mod.BonusKind) types.Bp {
         const c = self.commander orelse return 10_000;
@@ -604,17 +539,6 @@ pub const GameState = struct {
             n += 1;
         };
         return n;
-    }
-
-    /// A crewed dropship in the company's own hangar: it lifts and escorts
-    /// the company on the way in.
-    pub fn hasCrewedDropship(self: *GameState, company: types.ForceId) bool {
-        var it = self.units.iterator();
-        while (it.next()) |e| {
-            const u = e.value_ptr;
-            if (u.kind == .dropship and u.force == company and u.pilot != .none) return true;
-        }
-        return false;
     }
 
     pub fn standing(self: *GameState, faction: []const u8) i32 {

@@ -28,6 +28,7 @@ const maintenance = @import("maintenance.zig");
 const toe_mod = @import("toe.zig");
 const GameState = state_mod.GameState;
 const founding = @import("founding.zig");
+const lift = @import("lift.zig");
 
 const Alloc = std.mem.Allocator;
 
@@ -2005,7 +2006,7 @@ pub fn hqDetailView(alloc: Alloc, gs: *GameState, id: types.HqId) !HqDetail {
     try out.append(alloc, "");
     const cap = h.capacity();
     try out.append(alloc, try std.fmt.allocPrint(alloc, "capacity   {d} companies · ≤{d} lances each · {d} support lances · {d} air wing{s} ({d} here) · {d}t storage", .{ cap.combat_companies, cap.lances_per_company, cap.support_lances, cap.air_companies, if (cap.air_companies == 1) "" else "s", toe_mod.airCompaniesAtHq(gs, id), h.warehouseCapacityTons() }));
-    try out.append(alloc, try std.fmt.allocPrint(alloc, "berths     {d} dropship ({d} held) · {d} jumpship ({d} held){s}", .{ cap.dropship_berths, gs.transportsBerthedAt(id, .dropship), cap.jumpship_berths, gs.transportsBerthedAt(id, .jumpship), if (cap.air_companies == 0) " · {d}spaceport 3 opens an air wing slot, 4 (+comms 3) a jumpship berth{/}" else "" }));
+    try out.append(alloc, try std.fmt.allocPrint(alloc, "berths     {d} dropship ({d} held) · {d} jumpship ({d} held){s}", .{ cap.dropship_berths, lift.transportsBerthedAt(gs, id, .dropship), cap.jumpship_berths, lift.transportsBerthedAt(gs, id, .jumpship), if (cap.air_companies == 0) " · {d}spaceport 3 opens an air wing slot, 4 (+comms 3) a jumpship berth{/}" else "" }));
     for (try berths(alloc, gs, id)) |line| try out.append(alloc, line);
     try out.append(alloc, try std.fmt.allocPrint(alloc, "upkeep     {s} / month · funds {s}", .{ try money(alloc, h.monthly_upkeep), try money(alloc, h.funds) }));
     try out.append(alloc, "");

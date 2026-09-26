@@ -27,7 +27,6 @@ later fixes add responsibility only to the decomposed owner modules.
 
 - [ ] C4 decomposition (rules 5, 14, 76, 77) — first, because the fixes after it add code to modules in the rule 76 registry. Behaviour-preserving, golden hash unchanged, one increment per branch:
   - [ ] C4a `GameState` keeps storage and primitives; subsystem behaviour moves to its owner and `state.zig` imports nothing above the state layer (the C4 layering record). Behaviour-preserving, one increment per branch, in this order; each branch deletes its own line:
-    - [ ] C4a7 lift: `transportsBerthedAt`, `transportAvailable`, `ownsCrewedJumpshipAt` and `hasCrewedDropship` to a new `sim/lift.zig`; the unused `availableLift` and `Lift` are deleted.
     - [ ] C4a8 refit: `tryInstall`, `labItems` and `applyRefit` to a new `sim/refit.zig`.
     - [ ] C4a9 held hulls: `holdUnit` and `releaseHull` to a new `sim/held_hulls.zig`.
     - [ ] C4a10 hull condition: `applyHullCondition` to `econ/market.zig`, taking a `std.Random`.

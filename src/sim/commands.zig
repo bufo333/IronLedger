@@ -28,6 +28,7 @@ const hq_mod = @import("../domain/hq.zig");
 const contract_mod = @import("../domain/contract.zig");
 const network = @import("network.zig");
 const contract_control = @import("contract_control.zig");
+const lift_mod = @import("lift.zig");
 const meklab = @import("../domain/meklab.zig");
 const force_mod = @import("../domain/force.zig");
 const unit_mod = @import("../domain/unit.zig");
@@ -644,7 +645,7 @@ fn execLink(gs: *GameState, l: @FieldType(Command, "link")) Error!Result {
     const from_level: u8 = if (existing) |e| e.level else 0;
     if (l.level <= from_level) return Error.BadLevel;
     // A dedicated line is your own jumpship on the run.
-    if (l.level >= 3 and !gs.ownsCrewedJumpshipAt(l.a, l.b)) return Error.NoJumpship;
+    if (l.level >= 3 and !lift_mod.ownsCrewedJumpshipAt(gs, l.a, l.b)) return Error.NoJumpship;
     const cost = network.linkCost(l.level) - network.linkCost(from_level);
     try treasury.debit(gs, .outfit, .{
         .day = gs.clock.day_index,
@@ -996,7 +997,7 @@ fn execBuyListing(gs: *GameState, index: @FieldType(Command, "buy_listing")) Err
         const h = gs.hqs.getPtr(hq_id) orelse return Error.UnknownHq;
         const cap = h.capacity();
         const berths: u32 = if (design.kind == .dropship) cap.dropship_berths else cap.jumpship_berths;
-        if (gs.transportsBerthedAt(hq_id, design.kind) >= berths) return Error.NoBerth;
+        if (lift_mod.transportsBerthedAt(gs, hq_id, design.kind) >= berths) return Error.NoBerth;
         berth_kind = design.kind;
     };
     if (gs.treasuryBalance(.{ .hq = hq_id }) < price) return Error.HqTreasuryShort;
@@ -2267,7 +2268,7 @@ pub fn planLift(gs: *GameState, company_id: types.ForceId, commit: bool) Error!L
     while (sit.next()) |e| {
         const u = e.value_ptr;
         if (!u.kind.isTransport() or u.status == .destroyed) continue;
-        const usable = if (at_home) (u.berth_hq == home and gs.transportAvailable(u)) else u.force == company_id;
+        const usable = if (at_home) (u.berth_hq == home and lift_mod.transportAvailable(gs, u)) else u.force == company_id;
         if (!usable) continue;
         const design = chassis_mod.find(u.chassis_key) orelse continue;
         switch (u.kind) {
@@ -4165,7 +4166,7 @@ test "ships need berths, lift the company for less charter, and come home with i
     const ship: types.UnitId = @enumFromInt(gs.next_unit_id - 1);
     try std.testing.expectEqual(hq, gs.unit(ship).?.berth_hq);
     try std.testing.expectError(Error.NoBerth, execute(&gs, .{ .buy_listing = gs.market_listings.items.len - 1 }));
-    try std.testing.expectEqual(@as(u32, 1), gs.transportsBerthedAt(hq, .dropship));
+    try std.testing.expectEqual(@as(u32, 1), lift_mod.transportsBerthedAt(&gs, hq, .dropship));
 
     // No jumpship: a dedicated line is refused; charter and scheduled are fine.
     // Found the second HQ on a world inside the starter ring (the map is
@@ -4210,7 +4211,7 @@ test "ships need berths, lift the company for less charter, and come home with i
     };
     try std.testing.expect(charter_paid > 0 and charter_paid < types.applyBp(charter_full, gs.commanderMultBp(.freight)));
     try std.testing.expectEqual(co, gs.unit(ship).?.force);
-    try std.testing.expect(!gs.transportAvailable(gs.unit(ship).?));
+    try std.testing.expect(!lift_mod.transportAvailable(&gs, gs.unit(ship).?));
     try std.testing.expectEqual(@as(u32, 0), (try planLift(&gs, co, false)).ships -| 1); // still one ship, the one carrying it
 
     // Home again: the ship returns to its berth.
@@ -4221,7 +4222,7 @@ test "ships need berths, lift the company for less charter, and come home with i
     gs.force(co).?.return_eta_day = gs.clock.day_index;
     try contract_control.runReturns(&gs);
     try std.testing.expectEqual(types.ForceId.none, gs.unit(ship).?.force);
-    try std.testing.expect(gs.transportAvailable(gs.unit(ship).?));
+    try std.testing.expect(lift_mod.transportAvailable(&gs, gs.unit(ship).?));
 
     // A crewed jumpship at the berth (spaceport 4, comms 3) unlocks the dedicated line.
     try setFacilityLevel(&gs, hq, .spaceport, 4);

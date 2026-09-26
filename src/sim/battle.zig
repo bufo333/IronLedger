@@ -23,6 +23,7 @@ const crew = @import("crew.zig");
 const toe = @import("toe.zig");
 const GameState = @import("state.zig").GameState;
 const founding = @import("founding.zig");
+const lift = @import("lift.zig");
 
 /// Salvage trucks (SVT-1) a company fields, wrecks excepted.
 pub fn salvageTrucks(gs: *GameState, company: types.ForceId) i64 {
@@ -483,7 +484,7 @@ fn recoverWrecks(
     const rt = tuning.loss.roe;
     var loss: FieldLoss = .{};
     const t = tuning.loss;
-    const has_dropship = gs.hasCrewedDropship(c.assigned_company);
+    const has_dropship = lift.hasCrewedDropship(gs, c.assigned_company);
     var wrecks_here: i64 = 0;
     for (hit_log.items) |h| wrecks_here += @intFromBool(h.destroyed);
     const situation: i32 = (if (player.mods.has_salvage_lance) t.recovery_salvage_lance else 0) //
