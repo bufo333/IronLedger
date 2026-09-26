@@ -504,9 +504,9 @@ training HQ's HR (§9.7). A recruit's quality reads the recruiting HQ's
 hiring hall and HR (`personnel.recruitBonus(hq)`, `personnel.recruitGenerated(role, hq)`):
 hall boards and office staffing at their own HQ, company crews at the
 company's home HQ, and the bare `recruit` verb at the outfit's seat.
-Negotiation reads the offer HQ's command staff; freight reads transport staff
-at the shipment's involved HQ. No office applies globally merely because its HQ
-was created first.
+**C10 target:** negotiation reads the offer HQ's command staff; freight reads
+transport staff at the shipment's involved HQ. No office applies globally
+merely because its HQ was created first.
 
 ### 9.5 Supply-line graph
 
@@ -540,22 +540,23 @@ full route (`network.fitsThroughput`) but books nothing — and
 `commitFreight` books the tonnage on the route once the payment has
 cleared, so a refused payment never eats capacity.
 
-Route selection includes the shipment tonnage, excludes saturated paths, and
-then minimizes delivery days, freight cost, and HQ id in that order. A capped
-direct charter is the fallback only when no linked route is feasible. Automatic
-resupply chooses a stocked origin through this same quote: prefer an HQ that can
-fill the line, otherwise the best partial source, rather than always drawing
-from the company's home HQ.
+**C15 target:** route selection includes the shipment tonnage, excludes
+saturated paths, and then minimizes delivery days, freight cost, and HQ id in
+that order. A capped direct charter is the fallback only when no linked route is
+feasible. Automatic resupply chooses a stocked origin through this same quote:
+prefer an HQ that can fill the line, otherwise the best partial source, rather
+than always drawing from the company's home HQ.
 
 ### 9.6 Out-of-influence operation (expensive but viable)
 
-A company deployed beyond every ring suffers, with all effects plateauing
-(no death spiral) and every effect a visible P&L line item:
+**C15 target:** a company deployed beyond every current ring suffers, with all
+effects plateauing (no death spiral) and every effect a visible P&L line item:
 
 - **Local supplies valve:** missing supply classes can be bought locally at
-  normal field markup inside current reach; outside it, `2.0× + 0.5× ×
-  ceil(distance beyond the nearest ring / 30 LY)` (cap 4.0×), modified by
-  planet industry rating — its own transaction category so the ledger teaches.
+  normal field markup inside current reach. The C15 target outside it is
+  `2.0× + 0.5× per 30 LY band beyond the nearest ring` (cap 4.0×), modified by
+  planet industry rating; C15 decides how a partial band rounds. It remains its
+  own transaction category so the ledger teaches.
 - **Hardship pay:** payroll bonus for remote deployment (own category).
 - **Morale/HR decay** and **training XP slowdown**, recovering once back in
   a ring (or once a field HQ is planted).
@@ -600,10 +601,10 @@ lightly; a bloody raid campaign wears hard), and compounding for every
 contract since the company last rotated: sat undeployed until its people
 were rested.
 Fatigue never decays on a combat tour; garrison duty recovers at a share
-of the home rate, the mess lance standing in for the hall. Off contract and
-physically at home, it decays weekly at the person's home HQ (§9.4), faster
-with a better mess. Returning and idle-afield companies do not receive home
-benefits. Effects: morale decay, the autoresolve fatigue penalty
+of the home rate, the mess lance standing in for the hall. **C10 target:** off
+contract and physically at home, fatigue decays weekly at the person's home HQ
+(§9.4), faster with a better mess; returning and idle-afield companies receive
+no home benefits. Effects: morale decay, the autoresolve fatigue penalty
 (§7), slower maintenance and healing. Capped at 100 — degraded, never
 spiraling (§9.6 philosophy).
 

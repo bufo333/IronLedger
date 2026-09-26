@@ -67,9 +67,9 @@ A regional HQ supports exactly:
 A brigade HQ is the planned one-only home-base tier (Product completion P1)
 and carries roughly double. Current outfits begin at regional tier. A field HQ
 is a forward base: one company can be based there to rest, resupply and
-stage, and any deployed company's convoys ship from whichever of your
-warehouses is nearest with the line — so a stocked firebase beside the
-fighting shortens every convoy. Its facilities provide forward services, but
+stage. The C15 target sends deployed-company convoys from the best stocked
+warehouse with a feasible route, so a stocked firebase beside the fighting
+shortens every convoy. Its facilities provide forward services, but
 the echelon still caps them: structural depot work and XP training activate
 only after promotion to regional. **Want a second company at full service? You
 need a second regional HQ** — with the staff, upkeep, and supply line that
@@ -97,10 +97,10 @@ tail-to-teeth tradeoff, on purpose.
 HQs are connected by **supply links** the player establishes: charter
 (level 1) → scheduled service → dedicated jumpship (level 3+, requires owning
 one). A link has a throughput cap (supply units/week) and per-hop delay/cost
-multipliers. A shipment excludes routes that cannot carry its tonnage, then
-chooses the least delivery time, freight cost and HQ id, in that order; direct
-charter is the capped fallback when no linked route is feasible. Every
-intermediate hop
+multipliers. In the C15 target, a shipment excludes routes that cannot carry
+its tonnage, then chooses the least delivery time, freight cost and HQ id, in
+that order; direct charter is the capped fallback when no linked route is
+feasible. Every intermediate hop
 multiplies delay and freight cost — *unless* the intermediary HQ's warehouse
 and spaceport are upgraded, turning it into a proper hub. Throughput is
 bottlenecked by the weakest hop: stack two deployed companies behind one
@@ -119,9 +119,9 @@ The field keeps a company *running*; only a regional HQ keeps it *sharp*:
   takes real weeks in it. Deploy long enough and your roster fills with
   three-quarter-strength meks and hangar queens riding the dropship.
 - **Fatigue** climbs with every contract finished without rotation — a
-  little for a quiet garrison, a lot for a long bloody campaign — and falls
-  only when physically at home, as fast as the home HQ's mess allows, its HR
-  staff keeping
+  little for a quiet garrison, a lot for a long bloody campaign. In the C10
+  target it falls only when physically at home, as fast as the home HQ's mess
+  allows, its HR staff keeping
   spirits up; garrison barracks give back only a share of that. Tired
   companies fight worse, maintain worse, and grumble.
 - **Training** converts XP into skill levels only at a training ground,
@@ -168,9 +168,10 @@ you own reports to you (Stages 9A–9C):
   throughput, command admins shorten paperwork. Their headcount and
   experience are levers like any other — at the HQ where they sit: a
   recruit is as good as the hiring HQ's hall and HR office, and a company
-  trains and rests on its home HQ's staff. Negotiation uses the offer HQ's
-  command office; freight uses transport staff at the shipment's involved HQ.
-- **Support counts only when it can roll**: a MASH, mess, security,
+  trains and rests on its home HQ's staff. The C10 target makes negotiation use
+  the offer HQ's command office and freight use transport staff at the
+  shipment's involved HQ.
+- **C15 target — support counts only when it can roll**: a MASH, mess, security,
   salvage or logistics lance helps only while one of its hulls can take
   the field with a crew fit for duty, and the same test decides recon (a
   scouting lance), air cover (a fighter) and the battle line. Field wounds heal at the MASH rate only with a
