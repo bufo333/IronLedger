@@ -195,8 +195,9 @@ cheap, copyable, and impossible to mix up.
   condition; acquisition orders with ETA (transit from wherever sourced).
 - **Force** — TO&E tree node (outfit/battalion/company/lance), commander,
   attached support assets; a Company aggregates readiness from its lances.
-  Companies (and the outfit) carry player-set **identity**: a name and an
-  emblem image (stored in the save, shown on rosters, AARs, and reports).
+  Companies carry player-set **identity**: a name and an emblem image (stored
+  in the save, shown on rosters, AARs, and reports); the outfit name is
+  campaign state and its displayed crest comes from the company emblems.
   Deployed companies also hold **local operating funds** (§9.8).
 - **Contract** — type (one of the 12 AtB types below), employer, enemy,
   planet, dates, financial terms, assigned company, required force size,

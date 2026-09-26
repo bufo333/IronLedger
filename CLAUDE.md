@@ -102,8 +102,8 @@ git branch -d <branch>
   `main` himself after closing Claude Code.
 - Branch creation belongs to the `branch-bootstrap` agent, commits belong to
   the implementer, and fast-forward merge plus branch deletion belong to the
-  coordinator. Each requires John's approval through the permission prompt
-  showing the exact command.
+  implementer in integration mode. Each requires John's approval through the
+  permission prompt showing the exact command.
 - The reviewer must be a fresh invocation that did not plan or implement the
   branch.
 - **Never verify a change with a file borrowed from another branch.** If

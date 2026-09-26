@@ -10,7 +10,7 @@ a remote.
 | --- | --- | --- |
 | `coordinator` | one interactive session | Reads, brainstorms, plans, and delegates; never writes |
 | `branch-bootstrap` | one approved branch | Creates the branch from local `main`; never edits or commits |
-| `implementer` | one approved task | Edits, verifies, commits, or corrects on the prepared branch |
+| `implementer` | one approved task | Edits, verifies, commits, corrects, or locally integrates |
 | `reviewer` | one committed revision | Independently reviews; never writes |
 
 The four user-level agents are portable across repositories. IRON LEDGER's
@@ -44,9 +44,9 @@ subagent.
    mode. A material behavior, architecture, contract, governance, or scope
    change requires a revised plan and John's approval. Every correction gets a
    fresh review.
-6. After acceptance, the coordinator verifies the reviewed commit,
-   fast-forwards local `main`, and deletes the local branch through permission
-   prompts.
+6. After acceptance, the coordinator invokes an implementer in integration
+   mode. It verifies the reviewed commit, fast-forwards local `main`, and
+   deletes the local branch through permission prompts.
 7. Claude stops. John pushes local `main` after closing Claude Code.
 
 A partial implementer is resumed by task ID. If its session no longer exists,
