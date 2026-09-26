@@ -990,10 +990,13 @@ correct each finding here by tracing a single path.
 
 ## Delivery plan
 
-Each deliverable is one branch. Each lands on `main` before the next
-begins, and each adds its regression test before it changes behaviour, as the
-audit asks. Deliverables D23–D34 are new. Work already in `TODO.md` is shown
-where the audit's items join it.
+This table records the accepted scope and the original 2026-09-24 sequencing.
+Completed work remains history here; open work is decomposed and ordered only
+in `TODO.md`. A later planning pass made C4 decomposition first so subsequent
+contract fixes add responsibility to the decomposed owner modules rather than
+to files already in the rule-76 registry. Each TODO child is one branch, lands
+on `main` before the next and adds its regression test before changing
+behaviour.
 
 | # | Deliverable | Findings | Size |
 |---|---|---|---|
@@ -1014,7 +1017,7 @@ where the audit's items join it.
 | D34 | Asset rights manifest | A33 | small; waits on the owner's rights statement |
 
 
-**Why this order:**
+**Original order rationale (superseded by `TODO.md`):**
 
 - **The integrity fixes come first**, as the audit asks. D23 removes the
   pointer defects. D24 stops failures from being hidden or mislabelled;
@@ -1054,3 +1057,7 @@ and it stands as the implementation plan. Two changes were adopted:
   table with five classes: required live, optional live, historical,
   derived and sentinel-capable. The table makes the distinction testable
   rather than a matter of comments in individual loaders.
+
+The reply accepted the plan as it stood on 2026-09-24. The later C4-first
+decision changes sequencing, not the accepted findings, scope or required
+tests. `TODO.md` is the single current work order.
