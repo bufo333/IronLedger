@@ -23,7 +23,7 @@ D31 into C8, D33 into C18 (D32 closed with C1, the gate).
     - [ ] C4a3 tech time: `hullHours`, `techHoursFor`, `techLoadHours`, `techHoursAvailable` and `findFreeTech` to `maintenance.zig`.
     - [ ] C4a4 TO&E: company and lance counts, HQ and company capacity (`assignCompanyToHq`), support lances, unit placement and moves, `personInCompany` and `companyHeadcount` to a new `sim/toe.zig`.
     - [ ] C4a5 posture: `CompanyPosture`, `companyPosture`, `isCompanyHome` and `isCompanyDeployed` to a new `sim/posture.zig`.
-    - [ ] C4a6 founding: `createCommander`, `foundHq` and `prepareHq` to a new `sim/founding.zig`.
+    - [ ] C4a6 founding: `createCommander`, `foundHq` and `prepareHq` to a new `sim/founding.zig`, not `hq_ops.zig`, which is at its size threshold; this replaces the earlier "founding to `hq_ops`".
     - [ ] C4a7 lift: `transportsBerthedAt`, `transportAvailable`, `ownsCrewedJumpshipAt` and `hasCrewedDropship` to a new `sim/lift.zig`; the unused `availableLift` and `Lift` are deleted.
     - [ ] C4a8 refit: `tryInstall`, `labItems` and `applyRefit` to a new `sim/refit.zig`.
     - [ ] C4a9 held hulls: `holdUnit` and `releaseHull` to a new `sim/held_hulls.zig`.
