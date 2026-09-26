@@ -39,7 +39,7 @@
 <text y="34" fill="#c8d3c5" x="123.2 130.4">45</text>
 <text y="34" fill="#c8d3c5" x="152.0">·</text>
 <text y="34" fill="#c8d3c5" x="173.6 180.8 188.0 195.2 202.4 209.6">outfit</text>
-<text y="34" fill="#e0a33a" x="224.0 231.2 238.4 245.6 252.8 260.0 267.2 274.4 281.6 288.8">19,239,765</text>
+<text y="34" fill="#e0a33a" x="224.0 231.2 238.4 245.6 252.8 260.0 267.2 274.4 281.6 288.8">11,116,621</text>
 <text y="34" fill="#c8d3c5" x="303.2">C</text>
 <text y="34" fill="#c8d3c5" x="324.8">·</text>
 <text y="34" fill="#c8d3c5" x="346.4 353.6 360.8">rep</text>
@@ -51,21 +51,20 @@
 <text y="34" fill="#c8d3c5" x="519.2">1</text>
 <text y="34" fill="#c8d3c5" x="533.6 540.8 548.0">HQs</text>
 <text y="34" fill="#c8d3c5" x="562.4">·</text>
-<text y="34" fill="#c8d3c5" x="576.8 584.0">34</text>
+<text y="34" fill="#c8d3c5" x="576.8 584.0">32</text>
 <text y="34" fill="#c8d3c5" x="598.4 605.6 612.8 620.0 627.2">hulls</text>
 <text y="34" fill="#c8d3c5" x="641.6">·</text>
 <text y="34" fill="#c8d3c5" x="656.0 663.2 670.4">196</text>
 <text y="34" fill="#c8d3c5" x="684.8 692.0 699.2 706.4 713.6 720.8">people</text>
 <text y="34" fill="#c8d3c5" x="742.4">·</text>
 <text y="34" fill="#c8d3c5" x="764.0 771.2 778.4 785.6 792.8">inbox</text>
-<text y="34" fill="#e05a4f" x="807.2">2</text>
+<text y="34" fill="#7fc97f" x="807.2">0</text>
 <text y="34" fill="#c8d3c5" x="828.8">·</text>
 <text y="34" fill="#c8d3c5" x="850.4 857.6 864.8 872.0 879.2 886.4 893.6 900.8 908.0">checklist</text>
 <text y="34" fill="#7fc97f" x="922.4">0</text>
 <text y="34" fill="#c8d3c5" x="944.0">·</text>
-<text y="34" fill="#c8d3c5" x="965.6 972.8 980.0 987.2">turn</text>
-<text y="34" fill="#c8d3c5" x="1001.6 1008.8 1016.0 1023.2 1030.4 1037.6">ready:</text>
-<text y="34" fill="#7fc97f" x="1052.0 1059.2 1066.4">YES</text>
+<text y="34" fill="#c8d3c5" x="965.6 972.8 980.0 987.2 994.4 1001.6">urgent</text>
+<text y="34" fill="#7fc97f" x="1016.0">0</text>
 <rect x="15.2" y="38.0" width="7.2" height="15" fill="#0f5c5c"/>
 <rect x="22.4" y="38.0" width="7.2" height="15" fill="#0f5c5c"/>
 <rect x="29.6" y="38.0" width="7.2" height="15" fill="#0f5c5c"/>
@@ -105,8 +104,18 @@
 <rect x="267.2" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
 <rect x="274.4" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
 <rect x="281.6" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
-<rect x="288.8" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
-<rect x="296.0" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="432.8" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="440.0" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="447.2" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="454.4" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="461.6" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="468.8" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="476.0" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="483.2" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="490.4" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="497.6" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="504.8" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
+<rect x="512.0" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
 <rect x="519.2" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
 <rect x="526.4" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
 <rect x="533.6" y="53.0" width="7.2" height="15" fill="#0f5c5c"/>
@@ -134,15 +143,15 @@
 <text y="64" fill="#e0a33a" x="159.2 166.4">HQ</text>
 <text y="64" fill="#0b0f0d" x="180.8 188.0 195.2 202.4 209.6 216.8 224.0 231.2 238.4">warehouse</text>
 <text y="64" fill="#0b0f0d" x="252.8 260.0 267.2">lv1</text>
-<text y="64" fill="#7fc97f" x="303.2 310.4 317.6 324.8 332.0 339.2 346.4 353.6 360.8 368.0 375.2 382.4 389.6 396.8 404.0 411.2 418.4 425.6 432.8 440.0 447.2 454.4 461.6 468.8 476.0 483.2 490.4 497.6 504.8 512.0">###################-----------</text>
-<text y="64" fill="#0b0f0d" x="533.6 540.8 548.0 555.2">131t</text>
-<text y="64" fill="#0b0f0d" x="569.6">/</text>
-<text y="64" fill="#0b0f0d" x="584.0 591.2 598.4 605.6">200t</text>
+<text y="64" fill="#7fc97f" x="288.8 296.0 303.2 310.4 317.6 324.8 332.0 339.2 346.4 353.6 360.8 368.0 375.2 382.4 389.6 396.8 404.0 411.2 418.4 425.6">############--------</text>
+<text y="64" fill="#0b0f0d" x="440.0 447.2 454.4 461.6">128t</text>
+<text y="64" fill="#0b0f0d" x="476.0">/</text>
+<text y="64" fill="#0b0f0d" x="490.4 497.6 504.8 512.0">200t</text>
 <text y="64" fill="#c8d3c5" x="670.4 677.6">││</text>
-<text y="64" fill="#c8d3c5" x="692.0 699.2 706.4 713.6">part</text>
-<text y="64" fill="#c8d3c5" x="872.0 879.2 886.4">qty</text>
-<text y="64" fill="#c8d3c5" x="929.6 936.8 944.0 951.2">tons</text>
-<text y="64" fill="#c8d3c5" x="972.8 980.0 987.2 994.4">kind</text>
+<text y="64" fill="#6f7d73" x="692.0 699.2 706.4 713.6">part</text>
+<text y="64" fill="#6f7d73" x="821.6 828.8 836.0">qty</text>
+<text y="64" fill="#6f7d73" x="857.6 864.8 872.0 879.2">tons</text>
+<text y="64" fill="#6f7d73" x="900.8 908.0 915.2 922.4">kind</text>
 <text y="64" fill="#c8d3c5" x="1224.8">│</text>
 <text y="79" fill="#c8d3c5" x="8.0">│</text>
 <text y="79" fill="#c8d3c5" x="44.0 51.2 58.4 65.6 72.8 80.0 87.2 94.4 101.6 108.8">provisions</text>
@@ -152,28 +161,28 @@
 <text y="79" fill="#c8d3c5" x="281.6">6</text>
 <text y="79" fill="#c8d3c5" x="296.0">·</text>
 <text y="79" fill="#c8d3c5" x="310.4 317.6 324.8 332.0 339.2">armor</text>
-<text y="79" fill="#c8d3c5" x="353.6">7</text>
-<text y="79" fill="#c8d3c5" x="368.0">·</text>
-<text y="79" fill="#c8d3c5" x="382.4 389.6 396.8 404.0 411.2 418.4 425.6 432.8 440.0">comp_head</text>
-<text y="79" fill="#c8d3c5" x="454.4">1</text>
-<text y="79" fill="#c8d3c5" x="468.8">·</text>
-<text y="79" fill="#c8d3c5" x="483.2 490.4 497.6 504.8 512.0 519.2 526.4">comp_ct</text>
-<text y="79" fill="#c8d3c5" x="540.8">1</text>
-<text y="79" fill="#c8d3c5" x="555.2">·</text>
-<text y="79" fill="#c8d3c5" x="569.6 576.8 584.0 591.2 598.4 605.6 612.8 620.0 627.2 634.4">comp_torso</text>
-<text y="79" fill="#c8d3c5" x="648.8">1</text>
+<text y="79" fill="#c8d3c5" x="353.6 360.8">12</text>
+<text y="79" fill="#c8d3c5" x="375.2">·</text>
+<text y="79" fill="#c8d3c5" x="389.6 396.8 404.0 411.2 418.4 425.6 432.8 440.0 447.2">comp_head</text>
+<text y="79" fill="#c8d3c5" x="461.6">1</text>
+<text y="79" fill="#c8d3c5" x="476.0">·</text>
+<text y="79" fill="#c8d3c5" x="490.4 497.6 504.8 512.0 519.2 526.4 533.6">comp_ct</text>
+<text y="79" fill="#c8d3c5" x="548.0">1</text>
+<text y="79" fill="#c8d3c5" x="562.4">·</text>
+<text y="79" fill="#c8d3c5" x="576.8 584.0 591.2 598.4 605.6 612.8 620.0 627.2 634.4 641.6">comp_torso</text>
+<text y="79" fill="#c8d3c5" x="656.0">1</text>
 <text y="79" fill="#c8d3c5" x="670.4 677.6">││</text>
 <text y="79" fill="#c8d3c5" x="692.0 699.2 706.4 713.6 720.8 728.0 735.2 742.4 749.6 756.8">provisions</text>
-<text y="79" fill="#c8d3c5" x="886.4 893.6">60</text>
-<text y="79" fill="#c8d3c5" x="944.0 951.2 958.4">60t</text>
-<text y="79" fill="#c8d3c5" x="980.0 987.2 994.4 1001.6 1008.8 1016.0 1023.2 1030.4">supplies</text>
+<text y="79" fill="#c8d3c5" x="828.8 836.0">60</text>
+<text y="79" fill="#c8d3c5" x="864.8 872.0 879.2">60t</text>
+<text y="79" fill="#c8d3c5" x="900.8 908.0 915.2 922.4 929.6 936.8 944.0 951.2">supplies</text>
 <text y="79" fill="#c8d3c5" x="1224.8">│</text>
 <text y="94" fill="#c8d3c5" x="8.0">│</text>
 <text y="94" fill="#c8d3c5" x="670.4 677.6">││</text>
 <text y="94" fill="#c8d3c5" x="692.0 699.2 706.4 713.6 720.8 728.0 735.2 742.4 749.6 756.8 764.0 771.2 778.4 785.6 792.8 800.0">medical_supplies</text>
-<text y="94" fill="#c8d3c5" x="893.6">6</text>
-<text y="94" fill="#c8d3c5" x="951.2 958.4">6t</text>
-<text y="94" fill="#c8d3c5" x="980.0 987.2 994.4 1001.6 1008.8 1016.0 1023.2 1030.4">supplies</text>
+<text y="94" fill="#c8d3c5" x="836.0">6</text>
+<text y="94" fill="#c8d3c5" x="872.0 879.2">6t</text>
+<text y="94" fill="#c8d3c5" x="900.8 908.0 915.2 922.4 929.6 936.8 944.0 951.2">supplies</text>
 <text y="94" fill="#c8d3c5" x="1224.8">│</text>
 <text y="109" fill="#c8d3c5" x="8.0">│</text>
 <text y="109" fill="#c8d3c5" x="22.4 29.6 36.8 44.0">co:1</text>
@@ -184,61 +193,61 @@
 <text y="109" fill="#c8d3c5" x="252.8">·</text>
 <text y="109" fill="#e0a33a" x="267.2 274.4 281.6 288.8 296.0 303.2 310.4 317.6">DEPLOYED</text>
 <text y="109" fill="#c8d3c5" x="332.0">·</text>
-<text y="109" fill="#7fc97f" x="346.4 353.6">28</text>
+<text y="109" fill="#7fc97f" x="346.4 353.6">15</text>
 <text y="109" fill="#7fc97f" x="368.0 375.2 382.4 389.6">days</text>
 <text y="109" fill="#7fc97f" x="404.0 411.2">of</text>
 <text y="109" fill="#7fc97f" x="425.6 432.8 440.0 447.2 454.4 461.6 468.8 476.0 483.2 490.4">provisions</text>
 <text y="109" fill="#c8d3c5" x="504.8">·</text>
 <text y="109" fill="#c8d3c5" x="519.2 526.4 533.6 540.8 548.0">funds</text>
-<text y="109" fill="#c8d3c5" x="562.4 569.6 576.8 584.0 591.2 598.4 605.6 612.8 620.0">1,018,692</text>
-<text y="109" fill="#c8d3c5" x="634.4">·</text>
-<text y="109" fill="#c8d3c5" x="648.8 656.0">re</text>
+<text y="109" fill="#c8d3c5" x="562.4 569.6 576.8 584.0 591.2 598.4 605.6">250,000</text>
+<text y="109" fill="#c8d3c5" x="620.0">·</text>
+<text y="109" fill="#c8d3c5" x="634.4 641.6 648.8 656.0">resu</text>
 <text y="109" fill="#c8d3c5" x="670.4 677.6">││</text>
 <text y="109" fill="#c8d3c5" x="692.0 699.2 706.4 713.6 720.8">armor</text>
-<text y="109" fill="#c8d3c5" x="893.6">7</text>
-<text y="109" fill="#c8d3c5" x="951.2 958.4">7t</text>
-<text y="109" fill="#c8d3c5" x="980.0 987.2 994.4 1001.6 1008.8 1016.0 1023.2 1030.4">supplies</text>
+<text y="109" fill="#c8d3c5" x="828.8 836.0">12</text>
+<text y="109" fill="#c8d3c5" x="864.8 872.0 879.2">12t</text>
+<text y="109" fill="#c8d3c5" x="900.8 908.0 915.2 922.4 929.6 936.8 944.0 951.2">supplies</text>
 <text y="109" fill="#c8d3c5" x="1224.8">│</text>
 <text y="124" fill="#c8d3c5" x="8.0">│</text>
 <text y="124" fill="#c8d3c5" x="44.0 51.2 58.4 65.6 72.8 80.0 87.2 94.4 101.6 108.8 116.0 123.2 130.4 137.6 144.8 152.0">medical_supplies</text>
 <text y="124" fill="#c8d3c5" x="166.4">4</text>
 <text y="124" fill="#c8d3c5" x="180.8">·</text>
-<text y="124" fill="#e05a4f" x="195.2 202.4 209.6 216.8 224.0">armor</text>
-<text y="124" fill="#e05a4f" x="238.4">0</text>
+<text y="124" fill="#c8d3c5" x="195.2 202.4 209.6 216.8 224.0">armor</text>
+<text y="124" fill="#c8d3c5" x="238.4">8</text>
 <text y="124" fill="#c8d3c5" x="252.8">·</text>
 <text y="124" fill="#c8d3c5" x="267.2 274.4 281.6 288.8 296.0 303.2 310.4 317.6">ammo_ac5</text>
-<text y="124" fill="#c8d3c5" x="332.0">4</text>
+<text y="124" fill="#c8d3c5" x="332.0">5</text>
 <text y="124" fill="#c8d3c5" x="346.4">·</text>
 <text y="124" fill="#c8d3c5" x="360.8 368.0 375.2 382.4 389.6 396.8 404.0 411.2 418.4">ammo_ac10</text>
-<text y="124" fill="#c8d3c5" x="432.8">4</text>
+<text y="124" fill="#c8d3c5" x="432.8">5</text>
 <text y="124" fill="#c8d3c5" x="447.2">·</text>
-<text y="124" fill="#c8d3c5" x="461.6 468.8 476.0 483.2 490.4 497.6 504.8 512.0">ammo_lrm</text>
-<text y="124" fill="#c8d3c5" x="526.4">4</text>
-<text y="124" fill="#c8d3c5" x="540.8">·</text>
-<text y="124" fill="#c8d3c5" x="555.2 562.4 569.6 576.8 584.0 591.2 598.4 605.6">ammo_srm</text>
-<text y="124" fill="#c8d3c5" x="620.0">4</text>
-<text y="124" fill="#c8d3c5" x="634.4">·</text>
-<text y="124" fill="#c8d3c5" x="648.8 656.0">am</text>
+<text y="124" fill="#c8d3c5" x="461.6 468.8 476.0 483.2 490.4 497.6 504.8 512.0 519.2">ammo_ac20</text>
+<text y="124" fill="#c8d3c5" x="533.6">5</text>
+<text y="124" fill="#c8d3c5" x="548.0">·</text>
+<text y="124" fill="#c8d3c5" x="562.4 569.6 576.8 584.0 591.2 598.4 605.6 612.8">ammo_lrm</text>
+<text y="124" fill="#c8d3c5" x="627.2">8</text>
+<text y="124" fill="#c8d3c5" x="641.6">·</text>
+<text y="124" fill="#c8d3c5" x="656.0">a</text>
 <text y="124" fill="#c8d3c5" x="670.4 677.6">││</text>
 <text y="124" fill="#c8d3c5" x="692.0 699.2 706.4 713.6 720.8 728.0 735.2 742.4 749.6">comp_head</text>
-<text y="124" fill="#c8d3c5" x="893.6">1</text>
-<text y="124" fill="#c8d3c5" x="951.2 958.4">2t</text>
-<text y="124" fill="#c8d3c5" x="980.0 987.2 994.4 1001.6 1008.8 1016.0 1023.2 1030.4 1037.6">component</text>
+<text y="124" fill="#c8d3c5" x="836.0">1</text>
+<text y="124" fill="#c8d3c5" x="872.0 879.2">2t</text>
+<text y="124" fill="#c8d3c5" x="900.8 908.0 915.2 922.4 929.6 936.8 944.0 951.2 958.4">component</text>
 <text y="124" fill="#c8d3c5" x="1224.8">│</text>
 <text y="139" fill="#c8d3c5" x="8.0">│</text>
 <text y="139" fill="#c8d3c5" x="670.4 677.6">││</text>
 <text y="139" fill="#c8d3c5" x="692.0 699.2 706.4 713.6 720.8 728.0 735.2">comp_ct</text>
-<text y="139" fill="#c8d3c5" x="893.6">1</text>
-<text y="139" fill="#c8d3c5" x="951.2 958.4">8t</text>
-<text y="139" fill="#c8d3c5" x="980.0 987.2 994.4 1001.6 1008.8 1016.0 1023.2 1030.4 1037.6">component</text>
+<text y="139" fill="#c8d3c5" x="836.0">1</text>
+<text y="139" fill="#c8d3c5" x="872.0 879.2">8t</text>
+<text y="139" fill="#c8d3c5" x="900.8 908.0 915.2 922.4 929.6 936.8 944.0 951.2 958.4">component</text>
 <text y="139" fill="#c8d3c5" x="1224.8">│</text>
 <text y="154" fill="#c8d3c5" x="8.0">│</text>
 <text y="154" fill="#c8d3c5" x="22.4 29.6 36.8 44.0 51.2 58.4 65.6">inbound</text>
 <text y="154" fill="#c8d3c5" x="670.4 677.6">││</text>
 <text y="154" fill="#c8d3c5" x="692.0 699.2 706.4 713.6 720.8 728.0 735.2 742.4 749.6 756.8">comp_torso</text>
-<text y="154" fill="#c8d3c5" x="893.6">1</text>
-<text y="154" fill="#c8d3c5" x="951.2 958.4">6t</text>
-<text y="154" fill="#c8d3c5" x="980.0 987.2 994.4 1001.6 1008.8 1016.0 1023.2 1030.4 1037.6">component</text>
+<text y="154" fill="#c8d3c5" x="836.0">1</text>
+<text y="154" fill="#c8d3c5" x="872.0 879.2">6t</text>
+<text y="154" fill="#c8d3c5" x="900.8 908.0 915.2 922.4 929.6 936.8 944.0 951.2 958.4">component</text>
 <text y="154" fill="#c8d3c5" x="1224.8">│</text>
 <text y="169" fill="#c8d3c5" x="8.0">│</text>
 <text y="169" fill="#c8d3c5" x="36.8 44.0 51.2 58.4 65.6 72.8 80.0 87.2 94.4 101.6">provisions</text>
@@ -255,195 +264,92 @@
 <text y="169" fill="#c8d3c5" x="512.0 519.2 526.4 533.6 540.8 548.0">47,040</text>
 <text y="169" fill="#c8d3c5" x="670.4 677.6">││</text>
 <text y="169" fill="#c8d3c5" x="692.0 699.2 706.4 713.6 720.8 728.0 735.2 742.4">comp_arm</text>
-<text y="169" fill="#c8d3c5" x="893.6">1</text>
-<text y="169" fill="#c8d3c5" x="951.2 958.4">4t</text>
-<text y="169" fill="#c8d3c5" x="980.0 987.2 994.4 1001.6 1008.8 1016.0 1023.2 1030.4 1037.6">component</text>
+<text y="169" fill="#c8d3c5" x="836.0">1</text>
+<text y="169" fill="#c8d3c5" x="872.0 879.2">4t</text>
+<text y="169" fill="#c8d3c5" x="900.8 908.0 915.2 922.4 929.6 936.8 944.0 951.2 958.4">component</text>
 <text y="169" fill="#c8d3c5" x="1224.8">│</text>
 <text y="184" fill="#c8d3c5" x="8.0">│</text>
-<text y="184" fill="#c8d3c5" x="36.8 44.0 51.2 58.4 65.6 72.8 80.0 87.2 94.4 101.6 108.8 116.0 123.2 130.4 137.6 144.8">medical_supplies</text>
-<text y="184" fill="#c8d3c5" x="159.2 166.4">x1</text>
-<text y="184" fill="#c8d3c5" x="180.8">→</text>
-<text y="184" fill="#c8d3c5" x="195.2 202.4 209.6 216.8">hq:1</text>
-<text y="184" fill="#c8d3c5" x="231.2 238.4 245.6 252.8">Skye</text>
-<text y="184" fill="#c8d3c5" x="267.2 274.4 281.6 288.8 296.0 303.2 310.4 317.6">Regional</text>
-<text y="184" fill="#c8d3c5" x="332.0 339.2">HQ</text>
-<text y="184" fill="#c8d3c5" x="360.8 368.0 375.2 382.4 389.6 396.8 404.0 411.2 418.4 425.6">in_transit</text>
-<text y="184" fill="#c8d3c5" x="447.2 454.4 461.6">eta</text>
-<text y="184" fill="#c8d3c5" x="476.0 483.2 490.4">day</text>
-<text y="184" fill="#c8d3c5" x="504.8 512.0">49</text>
-<text y="184" fill="#c8d3c5" x="533.6 540.8 548.0 555.2">cost</text>
-<text y="184" fill="#c8d3c5" x="569.6">0</text>
 <text y="184" fill="#c8d3c5" x="670.4 677.6">││</text>
 <text y="184" fill="#c8d3c5" x="692.0 699.2 706.4 713.6 720.8 728.0 735.2 742.4">comp_leg</text>
-<text y="184" fill="#c8d3c5" x="893.6">1</text>
-<text y="184" fill="#c8d3c5" x="951.2 958.4">5t</text>
-<text y="184" fill="#c8d3c5" x="980.0 987.2 994.4 1001.6 1008.8 1016.0 1023.2 1030.4 1037.6">component</text>
+<text y="184" fill="#c8d3c5" x="836.0">1</text>
+<text y="184" fill="#c8d3c5" x="872.0 879.2">5t</text>
+<text y="184" fill="#c8d3c5" x="900.8 908.0 915.2 922.4 929.6 936.8 944.0 951.2 958.4">component</text>
 <text y="184" fill="#c8d3c5" x="1224.8">│</text>
 <text y="199" fill="#c8d3c5" x="8.0">│</text>
-<text y="199" fill="#c8d3c5" x="36.8 44.0 51.2 58.4 65.6 72.8 80.0 87.2">ammo_ac5</text>
-<text y="199" fill="#c8d3c5" x="101.6 108.8">x1</text>
-<text y="199" fill="#c8d3c5" x="123.2">→</text>
-<text y="199" fill="#c8d3c5" x="137.6 144.8 152.0 159.2">hq:1</text>
-<text y="199" fill="#c8d3c5" x="173.6 180.8 188.0 195.2">Skye</text>
-<text y="199" fill="#c8d3c5" x="209.6 216.8 224.0 231.2 238.4 245.6 252.8 260.0">Regional</text>
-<text y="199" fill="#c8d3c5" x="274.4 281.6">HQ</text>
-<text y="199" fill="#c8d3c5" x="303.2 310.4 317.6 324.8 332.0 339.2 346.4 353.6 360.8 368.0">in_transit</text>
-<text y="199" fill="#c8d3c5" x="389.6 396.8 404.0">eta</text>
-<text y="199" fill="#c8d3c5" x="418.4 425.6 432.8">day</text>
-<text y="199" fill="#c8d3c5" x="447.2 454.4">49</text>
-<text y="199" fill="#c8d3c5" x="476.0 483.2 490.4 497.6">cost</text>
-<text y="199" fill="#c8d3c5" x="512.0">0</text>
+<text y="199" fill="#6f7d73" x="22.4 29.6">on</text>
+<text y="199" fill="#6f7d73" x="44.0">a</text>
+<text y="199" fill="#6f7d73" x="58.4 65.6 72.8 80.0 87.2 94.4 101.6">company</text>
+<text y="199" fill="#6f7d73" x="116.0 123.2 130.4 137.6">row:</text>
+<text y="199" fill="#6f7d73" x="152.0 159.2 166.4">[t]</text>
+<text y="199" fill="#6f7d73" x="180.8 188.0 195.2 202.4">send</text>
+<text y="199" fill="#6f7d73" x="216.8 224.0 231.2 238.4">cash</text>
+<text y="199" fill="#6f7d73" x="252.8 260.0">by</text>
+<text y="199" fill="#6f7d73" x="274.4 281.6 288.8 296.0 303.2 310.4 317.6">courier</text>
+<text y="199" fill="#6f7d73" x="332.0">·</text>
+<text y="199" fill="#6f7d73" x="346.4 353.6 360.8">[p]</text>
+<text y="199" fill="#6f7d73" x="375.2 382.4 389.6 396.8 404.0 411.2 418.4 425.6">standing</text>
+<text y="199" fill="#6f7d73" x="440.0 447.2 454.4 461.6 468.8 476.0">top-up</text>
+<text y="199" fill="#6f7d73" x="490.4 497.6 504.8 512.0 519.2 526.4">policy</text>
+<text y="199" fill="#6f7d73" x="540.8">·</text>
+<text y="199" fill="#6f7d73" x="555.2 562.4 569.6">[s]</text>
+<text y="199" fill="#6f7d73" x="584.0 591.2 598.4 605.6">ship</text>
+<text y="199" fill="#6f7d73" x="620.0 627.2 634.4 641.6 648.8 656.0">provis</text>
 <text y="199" fill="#c8d3c5" x="670.4 677.6">││</text>
 <text y="199" fill="#c8d3c5" x="692.0 699.2 706.4 713.6 720.8 728.0 735.2 742.4 749.6 756.8 764.0 771.2">comp_chassis</text>
-<text y="199" fill="#c8d3c5" x="893.6">1</text>
-<text y="199" fill="#c8d3c5" x="951.2 958.4">5t</text>
-<text y="199" fill="#c8d3c5" x="980.0 987.2 994.4 1001.6 1008.8 1016.0 1023.2 1030.4 1037.6">component</text>
+<text y="199" fill="#c8d3c5" x="836.0">1</text>
+<text y="199" fill="#c8d3c5" x="872.0 879.2">5t</text>
+<text y="199" fill="#c8d3c5" x="900.8 908.0 915.2 922.4 929.6 936.8 944.0 951.2 958.4">component</text>
 <text y="199" fill="#c8d3c5" x="1224.8">│</text>
 <text y="214" fill="#c8d3c5" x="8.0">│</text>
-<text y="214" fill="#c8d3c5" x="36.8 44.0 51.2 58.4 65.6 72.8 80.0 87.2 94.4">ammo_ac10</text>
-<text y="214" fill="#c8d3c5" x="108.8 116.0">x1</text>
-<text y="214" fill="#c8d3c5" x="130.4">→</text>
-<text y="214" fill="#c8d3c5" x="144.8 152.0 159.2 166.4">hq:1</text>
-<text y="214" fill="#c8d3c5" x="180.8 188.0 195.2 202.4">Skye</text>
-<text y="214" fill="#c8d3c5" x="216.8 224.0 231.2 238.4 245.6 252.8 260.0 267.2">Regional</text>
-<text y="214" fill="#c8d3c5" x="281.6 288.8">HQ</text>
-<text y="214" fill="#c8d3c5" x="310.4 317.6 324.8 332.0 339.2 346.4 353.6 360.8 368.0 375.2">in_transit</text>
-<text y="214" fill="#c8d3c5" x="396.8 404.0 411.2">eta</text>
-<text y="214" fill="#c8d3c5" x="425.6 432.8 440.0">day</text>
-<text y="214" fill="#c8d3c5" x="454.4 461.6">49</text>
-<text y="214" fill="#c8d3c5" x="483.2 490.4 497.6 504.8">cost</text>
-<text y="214" fill="#c8d3c5" x="519.2">0</text>
 <text y="214" fill="#c8d3c5" x="670.4 677.6">││</text>
 <text y="214" fill="#c8d3c5" x="692.0 699.2 706.4 713.6 720.8 728.0 735.2 742.4">ammo_ac2</text>
-<text y="214" fill="#c8d3c5" x="893.6">8</text>
-<text y="214" fill="#c8d3c5" x="951.2 958.4">8t</text>
-<text y="214" fill="#c8d3c5" x="980.0 987.2 994.4 1001.6">ammo</text>
+<text y="214" fill="#c8d3c5" x="836.0">8</text>
+<text y="214" fill="#c8d3c5" x="872.0 879.2">8t</text>
+<text y="214" fill="#c8d3c5" x="900.8 908.0 915.2 922.4">ammo</text>
 <text y="214" fill="#c8d3c5" x="1224.8">│</text>
 <text y="229" fill="#c8d3c5" x="8.0">│</text>
-<text y="229" fill="#c8d3c5" x="36.8 44.0 51.2 58.4 65.6 72.8 80.0 87.2">ammo_lrm</text>
-<text y="229" fill="#c8d3c5" x="101.6 108.8">x1</text>
-<text y="229" fill="#c8d3c5" x="123.2">→</text>
-<text y="229" fill="#c8d3c5" x="137.6 144.8 152.0 159.2">hq:1</text>
-<text y="229" fill="#c8d3c5" x="173.6 180.8 188.0 195.2">Skye</text>
-<text y="229" fill="#c8d3c5" x="209.6 216.8 224.0 231.2 238.4 245.6 252.8 260.0">Regional</text>
-<text y="229" fill="#c8d3c5" x="274.4 281.6">HQ</text>
-<text y="229" fill="#c8d3c5" x="303.2 310.4 317.6 324.8 332.0 339.2 346.4 353.6 360.8 368.0">in_transit</text>
-<text y="229" fill="#c8d3c5" x="389.6 396.8 404.0">eta</text>
-<text y="229" fill="#c8d3c5" x="418.4 425.6 432.8">day</text>
-<text y="229" fill="#c8d3c5" x="447.2 454.4">49</text>
-<text y="229" fill="#c8d3c5" x="476.0 483.2 490.4 497.6">cost</text>
-<text y="229" fill="#c8d3c5" x="512.0">0</text>
 <text y="229" fill="#c8d3c5" x="670.4 677.6">││</text>
 <text y="229" fill="#c8d3c5" x="692.0 699.2 706.4 713.6 720.8 728.0 735.2 742.4">ammo_ac5</text>
-<text y="229" fill="#c8d3c5" x="893.6">3</text>
-<text y="229" fill="#c8d3c5" x="951.2 958.4">3t</text>
-<text y="229" fill="#c8d3c5" x="980.0 987.2 994.4 1001.6">ammo</text>
+<text y="229" fill="#c8d3c5" x="836.0">3</text>
+<text y="229" fill="#c8d3c5" x="872.0 879.2">3t</text>
+<text y="229" fill="#c8d3c5" x="900.8 908.0 915.2 922.4">ammo</text>
 <text y="229" fill="#c8d3c5" x="1224.8">│</text>
 <text y="244" fill="#c8d3c5" x="8.0">│</text>
-<text y="244" fill="#c8d3c5" x="36.8 44.0 51.2 58.4 65.6 72.8 80.0">ammo_mg</text>
-<text y="244" fill="#c8d3c5" x="94.4 101.6">x1</text>
-<text y="244" fill="#c8d3c5" x="116.0">→</text>
-<text y="244" fill="#c8d3c5" x="130.4 137.6 144.8 152.0">hq:1</text>
-<text y="244" fill="#c8d3c5" x="166.4 173.6 180.8 188.0">Skye</text>
-<text y="244" fill="#c8d3c5" x="202.4 209.6 216.8 224.0 231.2 238.4 245.6 252.8">Regional</text>
-<text y="244" fill="#c8d3c5" x="267.2 274.4">HQ</text>
-<text y="244" fill="#c8d3c5" x="296.0 303.2 310.4 317.6 324.8 332.0 339.2 346.4 353.6 360.8">in_transit</text>
-<text y="244" fill="#c8d3c5" x="382.4 389.6 396.8">eta</text>
-<text y="244" fill="#c8d3c5" x="411.2 418.4 425.6">day</text>
-<text y="244" fill="#c8d3c5" x="440.0 447.2">49</text>
-<text y="244" fill="#c8d3c5" x="468.8 476.0 483.2 490.4">cost</text>
-<text y="244" fill="#c8d3c5" x="504.8">0</text>
 <text y="244" fill="#c8d3c5" x="670.4 677.6">││</text>
 <text y="244" fill="#c8d3c5" x="692.0 699.2 706.4 713.6 720.8 728.0 735.2 742.4 749.6">ammo_ac10</text>
-<text y="244" fill="#c8d3c5" x="893.6">3</text>
-<text y="244" fill="#c8d3c5" x="951.2 958.4">3t</text>
-<text y="244" fill="#c8d3c5" x="980.0 987.2 994.4 1001.6">ammo</text>
+<text y="244" fill="#c8d3c5" x="836.0">3</text>
+<text y="244" fill="#c8d3c5" x="872.0 879.2">3t</text>
+<text y="244" fill="#c8d3c5" x="900.8 908.0 915.2 922.4">ammo</text>
 <text y="244" fill="#c8d3c5" x="1224.8">│</text>
 <text y="259" fill="#c8d3c5" x="8.0">│</text>
-<text y="259" fill="#c8d3c5" x="36.8 44.0 51.2 58.4 65.6 72.8 80.0 87.2">ammo_ac2</text>
-<text y="259" fill="#c8d3c5" x="101.6 108.8">x2</text>
-<text y="259" fill="#c8d3c5" x="123.2">→</text>
-<text y="259" fill="#c8d3c5" x="137.6 144.8 152.0 159.2">hq:1</text>
-<text y="259" fill="#c8d3c5" x="173.6 180.8 188.0 195.2">Skye</text>
-<text y="259" fill="#c8d3c5" x="209.6 216.8 224.0 231.2 238.4 245.6 252.8 260.0">Regional</text>
-<text y="259" fill="#c8d3c5" x="274.4 281.6">HQ</text>
-<text y="259" fill="#c8d3c5" x="303.2 310.4 317.6 324.8 332.0 339.2 346.4 353.6 360.8 368.0">in_transit</text>
-<text y="259" fill="#c8d3c5" x="389.6 396.8 404.0">eta</text>
-<text y="259" fill="#c8d3c5" x="418.4 425.6 432.8">day</text>
-<text y="259" fill="#c8d3c5" x="447.2 454.4">49</text>
-<text y="259" fill="#c8d3c5" x="476.0 483.2 490.4 497.6">cost</text>
-<text y="259" fill="#c8d3c5" x="512.0">0</text>
 <text y="259" fill="#c8d3c5" x="670.4 677.6">││</text>
 <text y="259" fill="#c8d3c5" x="692.0 699.2 706.4 713.6 720.8 728.0 735.2 742.4 749.6">ammo_ac20</text>
-<text y="259" fill="#c8d3c5" x="893.6">8</text>
-<text y="259" fill="#c8d3c5" x="951.2 958.4">8t</text>
-<text y="259" fill="#c8d3c5" x="980.0 987.2 994.4 1001.6">ammo</text>
+<text y="259" fill="#c8d3c5" x="836.0">3</text>
+<text y="259" fill="#c8d3c5" x="872.0 879.2">3t</text>
+<text y="259" fill="#c8d3c5" x="900.8 908.0 915.2 922.4">ammo</text>
 <text y="259" fill="#c8d3c5" x="1224.8">│</text>
 <text y="274" fill="#c8d3c5" x="8.0">│</text>
-<text y="274" fill="#c8d3c5" x="36.8 44.0 51.2 58.4 65.6 72.8 80.0 87.2 94.4">ammo_ac20</text>
-<text y="274" fill="#c8d3c5" x="108.8 116.0">x2</text>
-<text y="274" fill="#c8d3c5" x="130.4">→</text>
-<text y="274" fill="#c8d3c5" x="144.8 152.0 159.2 166.4">hq:1</text>
-<text y="274" fill="#c8d3c5" x="180.8 188.0 195.2 202.4">Skye</text>
-<text y="274" fill="#c8d3c5" x="216.8 224.0 231.2 238.4 245.6 252.8 260.0 267.2">Regional</text>
-<text y="274" fill="#c8d3c5" x="281.6 288.8">HQ</text>
-<text y="274" fill="#c8d3c5" x="310.4 317.6 324.8 332.0 339.2 346.4 353.6 360.8 368.0 375.2">in_transit</text>
-<text y="274" fill="#c8d3c5" x="396.8 404.0 411.2">eta</text>
-<text y="274" fill="#c8d3c5" x="425.6 432.8 440.0">day</text>
-<text y="274" fill="#c8d3c5" x="454.4 461.6">49</text>
-<text y="274" fill="#c8d3c5" x="483.2 490.4 497.6 504.8">cost</text>
-<text y="274" fill="#c8d3c5" x="519.2">0</text>
 <text y="274" fill="#c8d3c5" x="670.4 677.6">││</text>
-<text y="274" fill="#c8d3c5" x="692.0 699.2 706.4 713.6 720.8 728.0 735.2 742.4">ammo_lrm</text>
-<text y="274" fill="#c8d3c5" x="893.6">3</text>
-<text y="274" fill="#c8d3c5" x="951.2 958.4">3t</text>
-<text y="274" fill="#c8d3c5" x="980.0 987.2 994.4 1001.6">ammo</text>
+<text y="274" fill="#e05a4f" x="692.0 699.2 706.4 713.6 720.8 728.0 735.2 742.4">ammo_lrm</text>
+<text y="274" fill="#e05a4f" x="836.0">0</text>
+<text y="274" fill="#e05a4f" x="872.0 879.2">0t</text>
+<text y="274" fill="#e05a4f" x="900.8 908.0 915.2 922.4">ammo</text>
 <text y="274" fill="#c8d3c5" x="1224.8">│</text>
 <text y="289" fill="#c8d3c5" x="8.0">│</text>
-<text y="289" fill="#c8d3c5" x="36.8 44.0 51.2 58.4 65.6">armor</text>
-<text y="289" fill="#c8d3c5" x="80.0 87.2">x5</text>
-<text y="289" fill="#c8d3c5" x="101.6">→</text>
-<text y="289" fill="#c8d3c5" x="116.0 123.2 130.4 137.6">co:1</text>
-<text y="289" fill="#c8d3c5" x="152.0 159.2 166.4 173.6 180.8">Alpha</text>
-<text y="289" fill="#c8d3c5" x="195.2 202.4 209.6 216.8 224.0 231.2 238.4">Company</text>
-<text y="289" fill="#c8d3c5" x="260.0 267.2 274.4 281.6 288.8 296.0 303.2 310.4 317.6 324.8">in_transit</text>
-<text y="289" fill="#c8d3c5" x="346.4 353.6 360.8">eta</text>
-<text y="289" fill="#c8d3c5" x="375.2 382.4 389.6">day</text>
-<text y="289" fill="#c8d3c5" x="404.0 411.2">56</text>
-<text y="289" fill="#c8d3c5" x="432.8 440.0 447.2 454.4">cost</text>
-<text y="289" fill="#c8d3c5" x="468.8 476.0 483.2 490.4 497.6 504.8">15,680</text>
 <text y="289" fill="#c8d3c5" x="670.4 677.6">││</text>
 <text y="289" fill="#e05a4f" x="692.0 699.2 706.4 713.6 720.8 728.0 735.2 742.4">ammo_srm</text>
-<text y="289" fill="#e05a4f" x="893.6">0</text>
-<text y="289" fill="#e05a4f" x="951.2 958.4">0t</text>
-<text y="289" fill="#e05a4f" x="980.0 987.2 994.4 1001.6">ammo</text>
+<text y="289" fill="#e05a4f" x="836.0">0</text>
+<text y="289" fill="#e05a4f" x="872.0 879.2">0t</text>
+<text y="289" fill="#e05a4f" x="900.8 908.0 915.2 922.4">ammo</text>
 <text y="289" fill="#c8d3c5" x="1224.8">│</text>
 <text y="304" fill="#c8d3c5" x="8.0">│</text>
 <text y="304" fill="#c8d3c5" x="670.4 677.6">││</text>
 <text y="304" fill="#c8d3c5" x="692.0 699.2 706.4 713.6 720.8 728.0 735.2">ammo_mg</text>
-<text y="304" fill="#c8d3c5" x="893.6">3</text>
-<text y="304" fill="#c8d3c5" x="951.2 958.4">3t</text>
-<text y="304" fill="#c8d3c5" x="980.0 987.2 994.4 1001.6">ammo</text>
+<text y="304" fill="#c8d3c5" x="836.0">3</text>
+<text y="304" fill="#c8d3c5" x="872.0 879.2">3t</text>
+<text y="304" fill="#c8d3c5" x="900.8 908.0 915.2 922.4">ammo</text>
 <text y="304" fill="#c8d3c5" x="1224.8">│</text>
 <text y="319" fill="#c8d3c5" x="8.0">│</text>
-<text y="319" fill="#6f7d73" x="22.4 29.6">on</text>
-<text y="319" fill="#6f7d73" x="44.0">a</text>
-<text y="319" fill="#6f7d73" x="58.4 65.6 72.8 80.0 87.2 94.4 101.6">company</text>
-<text y="319" fill="#6f7d73" x="116.0 123.2 130.4 137.6">row:</text>
-<text y="319" fill="#6f7d73" x="152.0 159.2 166.4">[t]</text>
-<text y="319" fill="#6f7d73" x="180.8 188.0 195.2 202.4">send</text>
-<text y="319" fill="#6f7d73" x="216.8 224.0 231.2 238.4">cash</text>
-<text y="319" fill="#6f7d73" x="252.8 260.0">by</text>
-<text y="319" fill="#6f7d73" x="274.4 281.6 288.8 296.0 303.2 310.4 317.6">courier</text>
-<text y="319" fill="#6f7d73" x="332.0">·</text>
-<text y="319" fill="#6f7d73" x="346.4 353.6 360.8">[p]</text>
-<text y="319" fill="#6f7d73" x="375.2 382.4 389.6 396.8 404.0 411.2 418.4 425.6">standing</text>
-<text y="319" fill="#6f7d73" x="440.0 447.2 454.4 461.6 468.8 476.0">top-up</text>
-<text y="319" fill="#6f7d73" x="490.4 497.6 504.8 512.0 519.2 526.4">policy</text>
-<text y="319" fill="#6f7d73" x="540.8">·</text>
-<text y="319" fill="#6f7d73" x="555.2 562.4 569.6">[s]</text>
-<text y="319" fill="#6f7d73" x="584.0 591.2 598.4 605.6">ship</text>
-<text y="319" fill="#6f7d73" x="620.0 627.2 634.4 641.6 648.8 656.0">provis</text>
 <text y="319" fill="#c8d3c5" x="670.4 677.6">││</text>
 <text y="319" fill="#c8d3c5" x="1224.8">│</text>
 <text y="334" fill="#c8d3c5" x="8.0">│</text>
@@ -471,148 +377,55 @@
 <text y="364" fill="#c8d3c5" x="864.8 872.0 879.2 886.4 893.6 900.8 908.0 915.2 922.4 929.6 936.8 944.0 951.2 958.4 965.6 972.8 980.0 987.2 994.4 1001.6 1008.8 1016.0 1023.2 1030.4 1037.6 1044.8 1052.0 1059.2 1066.4 1073.6 1080.8 1088.0 1095.2 1102.4 1109.6 1116.8 1124.0 1131.2 1138.4 1145.6 1152.8 1160.0 1167.2 1174.4 1181.6 1188.8 1196.0 1203.2 1210.4 1217.6 1224.8">──────────────────────────────────────────────────┐</text>
 <text y="379" fill="#c8d3c5" x="8.0">│</text>
 <text y="379" fill="#c8d3c5" x="670.4 677.6">││</text>
-<text y="379" fill="#c8d3c5" x="692.0 699.2 706.4 713.6">part</text>
-<text y="379" fill="#c8d3c5" x="828.8 836.0 843.2">qty</text>
-<text y="379" fill="#c8d3c5" x="864.8 872.0">to</text>
-<text y="379" fill="#c8d3c5" x="1037.6 1044.8 1052.0 1059.2 1066.4 1073.6">status</text>
-<text y="379" fill="#c8d3c5" x="1124.0 1131.2 1138.4">eta</text>
+<text y="379" fill="#6f7d73" x="692.0 699.2 706.4 713.6">part</text>
+<text y="379" fill="#6f7d73" x="778.4 785.6 792.8">qty</text>
+<text y="379" fill="#6f7d73" x="814.4 821.6">to</text>
+<text y="379" fill="#6f7d73" x="958.4 965.6 972.8 980.0 987.2 994.4">status</text>
+<text y="379" fill="#6f7d73" x="1044.8 1052.0 1059.2">eta</text>
+<text y="379" fill="#6f7d73" x="1160.0 1167.2 1174.4 1181.6">cost</text>
 <text y="379" fill="#c8d3c5" x="1224.8">│</text>
 <text y="394" fill="#c8d3c5" x="8.0">│</text>
 <text y="394" fill="#c8d3c5" x="670.4 677.6">││</text>
-<text y="394" fill="#c8d3c5" x="692.0 699.2 706.4 713.6 720.8 728.0 735.2 742.4 749.6 756.8 764.0 771.2 778.4 785.6 792.8 800.0">medical_supplies</text>
-<text y="394" fill="#c8d3c5" x="850.4">1</text>
-<text y="394" fill="#c8d3c5" x="872.0 879.2 886.4 893.6">hq:1</text>
-<text y="394" fill="#c8d3c5" x="908.0 915.2 922.4 929.6">Skye</text>
-<text y="394" fill="#c8d3c5" x="944.0 951.2 958.4 965.6 972.8 980.0 987.2 994.4">Regional</text>
-<text y="394" fill="#c8d3c5" x="1008.8 1016.0">HQ</text>
-<text y="394" fill="#c8d3c5" x="1044.8 1052.0 1059.2 1066.4 1073.6 1080.8 1088.0 1095.2 1102.4 1109.6">in_transit</text>
-<text y="394" fill="#c8d3c5" x="1131.2 1138.4 1145.6">d49</text>
-<text y="394" fill="#c8d3c5" x="1160.0 1167.2">(4</text>
-<text y="394" fill="#c8d3c5" x="1181.6 1188.8 1196.0 1203.2 1210.4">days)</text>
+<text y="394" fill="#c8d3c5" x="692.0 699.2 706.4 713.6 720.8 728.0 735.2 742.4 749.6 756.8">provisions</text>
+<text y="394" fill="#c8d3c5" x="785.6 792.8">15</text>
+<text y="394" fill="#c8d3c5" x="814.4 821.6 828.8 836.0">co:1</text>
+<text y="394" fill="#c8d3c5" x="850.4 857.6 864.8 872.0 879.2">Alpha</text>
+<text y="394" fill="#c8d3c5" x="893.6 900.8 908.0 915.2 922.4 929.6 936.8">Company</text>
+<text y="394" fill="#c8d3c5" x="958.4 965.6 972.8 980.0 987.2 994.4 1001.6 1008.8 1016.0 1023.2">in_transit</text>
+<text y="394" fill="#c8d3c5" x="1044.8 1052.0 1059.2">d51</text>
+<text y="394" fill="#c8d3c5" x="1073.6 1080.8">(6</text>
+<text y="394" fill="#c8d3c5" x="1095.2 1102.4 1109.6 1116.8 1124.0">days)</text>
+<text y="394" fill="#c8d3c5" x="1145.6 1152.8 1160.0 1167.2 1174.4 1181.6">47,040</text>
 <text y="394" fill="#c8d3c5" x="1224.8">│</text>
 <text y="409" fill="#c8d3c5" x="8.0">│</text>
 <text y="409" fill="#c8d3c5" x="670.4 677.6">││</text>
-<text y="409" fill="#c8d3c5" x="692.0 699.2 706.4 713.6 720.8 728.0 735.2 742.4">ammo_ac5</text>
-<text y="409" fill="#c8d3c5" x="850.4">1</text>
-<text y="409" fill="#c8d3c5" x="872.0 879.2 886.4 893.6">hq:1</text>
-<text y="409" fill="#c8d3c5" x="908.0 915.2 922.4 929.6">Skye</text>
-<text y="409" fill="#c8d3c5" x="944.0 951.2 958.4 965.6 972.8 980.0 987.2 994.4">Regional</text>
-<text y="409" fill="#c8d3c5" x="1008.8 1016.0">HQ</text>
-<text y="409" fill="#c8d3c5" x="1044.8 1052.0 1059.2 1066.4 1073.6 1080.8 1088.0 1095.2 1102.4 1109.6">in_transit</text>
-<text y="409" fill="#c8d3c5" x="1131.2 1138.4 1145.6">d49</text>
-<text y="409" fill="#c8d3c5" x="1160.0 1167.2">(4</text>
-<text y="409" fill="#c8d3c5" x="1181.6 1188.8 1196.0 1203.2 1210.4">days)</text>
 <text y="409" fill="#c8d3c5" x="1224.8">│</text>
 <text y="424" fill="#c8d3c5" x="8.0">│</text>
 <text y="424" fill="#c8d3c5" x="670.4 677.6">││</text>
-<text y="424" fill="#c8d3c5" x="692.0 699.2 706.4 713.6 720.8 728.0 735.2 742.4 749.6">ammo_ac10</text>
-<text y="424" fill="#c8d3c5" x="850.4">1</text>
-<text y="424" fill="#c8d3c5" x="872.0 879.2 886.4 893.6">hq:1</text>
-<text y="424" fill="#c8d3c5" x="908.0 915.2 922.4 929.6">Skye</text>
-<text y="424" fill="#c8d3c5" x="944.0 951.2 958.4 965.6 972.8 980.0 987.2 994.4">Regional</text>
-<text y="424" fill="#c8d3c5" x="1008.8 1016.0">HQ</text>
-<text y="424" fill="#c8d3c5" x="1044.8 1052.0 1059.2 1066.4 1073.6 1080.8 1088.0 1095.2 1102.4 1109.6">in_transit</text>
-<text y="424" fill="#c8d3c5" x="1131.2 1138.4 1145.6">d49</text>
-<text y="424" fill="#c8d3c5" x="1160.0 1167.2">(4</text>
-<text y="424" fill="#c8d3c5" x="1181.6 1188.8 1196.0 1203.2 1210.4">days)</text>
 <text y="424" fill="#c8d3c5" x="1224.8">│</text>
 <text y="439" fill="#c8d3c5" x="8.0">│</text>
 <text y="439" fill="#c8d3c5" x="670.4 677.6">││</text>
-<text y="439" fill="#c8d3c5" x="692.0 699.2 706.4 713.6 720.8 728.0 735.2 742.4">ammo_lrm</text>
-<text y="439" fill="#c8d3c5" x="850.4">1</text>
-<text y="439" fill="#c8d3c5" x="872.0 879.2 886.4 893.6">hq:1</text>
-<text y="439" fill="#c8d3c5" x="908.0 915.2 922.4 929.6">Skye</text>
-<text y="439" fill="#c8d3c5" x="944.0 951.2 958.4 965.6 972.8 980.0 987.2 994.4">Regional</text>
-<text y="439" fill="#c8d3c5" x="1008.8 1016.0">HQ</text>
-<text y="439" fill="#c8d3c5" x="1044.8 1052.0 1059.2 1066.4 1073.6 1080.8 1088.0 1095.2 1102.4 1109.6">in_transit</text>
-<text y="439" fill="#c8d3c5" x="1131.2 1138.4 1145.6">d49</text>
-<text y="439" fill="#c8d3c5" x="1160.0 1167.2">(4</text>
-<text y="439" fill="#c8d3c5" x="1181.6 1188.8 1196.0 1203.2 1210.4">days)</text>
 <text y="439" fill="#c8d3c5" x="1224.8">│</text>
 <text y="454" fill="#c8d3c5" x="8.0">│</text>
 <text y="454" fill="#c8d3c5" x="670.4 677.6">││</text>
-<text y="454" fill="#c8d3c5" x="692.0 699.2 706.4 713.6 720.8 728.0 735.2">ammo_mg</text>
-<text y="454" fill="#c8d3c5" x="850.4">1</text>
-<text y="454" fill="#c8d3c5" x="872.0 879.2 886.4 893.6">hq:1</text>
-<text y="454" fill="#c8d3c5" x="908.0 915.2 922.4 929.6">Skye</text>
-<text y="454" fill="#c8d3c5" x="944.0 951.2 958.4 965.6 972.8 980.0 987.2 994.4">Regional</text>
-<text y="454" fill="#c8d3c5" x="1008.8 1016.0">HQ</text>
-<text y="454" fill="#c8d3c5" x="1044.8 1052.0 1059.2 1066.4 1073.6 1080.8 1088.0 1095.2 1102.4 1109.6">in_transit</text>
-<text y="454" fill="#c8d3c5" x="1131.2 1138.4 1145.6">d49</text>
-<text y="454" fill="#c8d3c5" x="1160.0 1167.2">(4</text>
-<text y="454" fill="#c8d3c5" x="1181.6 1188.8 1196.0 1203.2 1210.4">days)</text>
 <text y="454" fill="#c8d3c5" x="1224.8">│</text>
 <text y="469" fill="#c8d3c5" x="8.0">│</text>
 <text y="469" fill="#c8d3c5" x="670.4 677.6">││</text>
-<text y="469" fill="#c8d3c5" x="692.0 699.2 706.4 713.6 720.8 728.0 735.2 742.4">ammo_ac2</text>
-<text y="469" fill="#c8d3c5" x="850.4">2</text>
-<text y="469" fill="#c8d3c5" x="872.0 879.2 886.4 893.6">hq:1</text>
-<text y="469" fill="#c8d3c5" x="908.0 915.2 922.4 929.6">Skye</text>
-<text y="469" fill="#c8d3c5" x="944.0 951.2 958.4 965.6 972.8 980.0 987.2 994.4">Regional</text>
-<text y="469" fill="#c8d3c5" x="1008.8 1016.0">HQ</text>
-<text y="469" fill="#c8d3c5" x="1044.8 1052.0 1059.2 1066.4 1073.6 1080.8 1088.0 1095.2 1102.4 1109.6">in_transit</text>
-<text y="469" fill="#c8d3c5" x="1131.2 1138.4 1145.6">d49</text>
-<text y="469" fill="#c8d3c5" x="1160.0 1167.2">(4</text>
-<text y="469" fill="#c8d3c5" x="1181.6 1188.8 1196.0 1203.2 1210.4">days)</text>
 <text y="469" fill="#c8d3c5" x="1224.8">│</text>
 <text y="484" fill="#c8d3c5" x="8.0">│</text>
 <text y="484" fill="#c8d3c5" x="670.4 677.6">││</text>
-<text y="484" fill="#c8d3c5" x="692.0 699.2 706.4 713.6 720.8 728.0 735.2 742.4 749.6">ammo_ac20</text>
-<text y="484" fill="#c8d3c5" x="850.4">2</text>
-<text y="484" fill="#c8d3c5" x="872.0 879.2 886.4 893.6">hq:1</text>
-<text y="484" fill="#c8d3c5" x="908.0 915.2 922.4 929.6">Skye</text>
-<text y="484" fill="#c8d3c5" x="944.0 951.2 958.4 965.6 972.8 980.0 987.2 994.4">Regional</text>
-<text y="484" fill="#c8d3c5" x="1008.8 1016.0">HQ</text>
-<text y="484" fill="#c8d3c5" x="1044.8 1052.0 1059.2 1066.4 1073.6 1080.8 1088.0 1095.2 1102.4 1109.6">in_transit</text>
-<text y="484" fill="#c8d3c5" x="1131.2 1138.4 1145.6">d49</text>
-<text y="484" fill="#c8d3c5" x="1160.0 1167.2">(4</text>
-<text y="484" fill="#c8d3c5" x="1181.6 1188.8 1196.0 1203.2 1210.4">days)</text>
 <text y="484" fill="#c8d3c5" x="1224.8">│</text>
 <text y="499" fill="#c8d3c5" x="8.0">│</text>
 <text y="499" fill="#c8d3c5" x="670.4 677.6">││</text>
-<text y="499" fill="#c8d3c5" x="692.0 699.2 706.4 713.6 720.8 728.0 735.2 742.4 749.6 756.8">provisions</text>
-<text y="499" fill="#c8d3c5" x="843.2 850.4">15</text>
-<text y="499" fill="#c8d3c5" x="872.0 879.2 886.4 893.6">co:1</text>
-<text y="499" fill="#c8d3c5" x="908.0 915.2 922.4 929.6 936.8">Alpha</text>
-<text y="499" fill="#c8d3c5" x="951.2 958.4 965.6 972.8 980.0 987.2 994.4">Company</text>
-<text y="499" fill="#c8d3c5" x="1044.8 1052.0 1059.2 1066.4 1073.6 1080.8 1088.0 1095.2 1102.4 1109.6">in_transit</text>
-<text y="499" fill="#c8d3c5" x="1131.2 1138.4 1145.6">d51</text>
-<text y="499" fill="#c8d3c5" x="1160.0 1167.2">(6</text>
-<text y="499" fill="#c8d3c5" x="1181.6 1188.8 1196.0 1203.2 1210.4">days)</text>
 <text y="499" fill="#c8d3c5" x="1224.8">│</text>
 <text y="514" fill="#c8d3c5" x="8.0">│</text>
 <text y="514" fill="#c8d3c5" x="670.4 677.6">││</text>
-<text y="514" fill="#c8d3c5" x="692.0 699.2 706.4 713.6 720.8">armor</text>
-<text y="514" fill="#c8d3c5" x="850.4">5</text>
-<text y="514" fill="#c8d3c5" x="872.0 879.2 886.4 893.6">co:1</text>
-<text y="514" fill="#c8d3c5" x="908.0 915.2 922.4 929.6 936.8">Alpha</text>
-<text y="514" fill="#c8d3c5" x="951.2 958.4 965.6 972.8 980.0 987.2 994.4">Company</text>
-<text y="514" fill="#c8d3c5" x="1044.8 1052.0 1059.2 1066.4 1073.6 1080.8 1088.0 1095.2 1102.4 1109.6">in_transit</text>
-<text y="514" fill="#c8d3c5" x="1131.2 1138.4 1145.6">d56</text>
-<text y="514" fill="#c8d3c5" x="1160.0 1167.2 1174.4">(11</text>
-<text y="514" fill="#c8d3c5" x="1188.8 1196.0 1203.2 1210.4">days</text>
 <text y="514" fill="#c8d3c5" x="1224.8">│</text>
 <text y="529" fill="#c8d3c5" x="8.0">│</text>
 <text y="529" fill="#c8d3c5" x="670.4 677.6">││</text>
-<text y="529" fill="#c8d3c5" x="692.0 699.2 706.4 713.6">hull</text>
-<text y="529" fill="#c8d3c5" x="728.0 735.2 742.4">#33</text>
-<text y="529" fill="#c8d3c5" x="872.0">—</text>
-<text y="529" fill="#c8d3c5" x="1030.4 1037.6">in</text>
-<text y="529" fill="#c8d3c5" x="1052.0 1059.2 1066.4 1073.6 1080.8 1088.0 1095.2">transit</text>
-<text y="529" fill="#c8d3c5" x="1116.8 1124.0 1131.2">d59</text>
-<text y="529" fill="#c8d3c5" x="1145.6 1152.8 1160.0">(14</text>
-<text y="529" fill="#c8d3c5" x="1174.4 1181.6 1188.8 1196.0 1203.2">days)</text>
 <text y="529" fill="#c8d3c5" x="1224.8">│</text>
 <text y="544" fill="#c8d3c5" x="8.0">│</text>
 <text y="544" fill="#c8d3c5" x="670.4 677.6">││</text>
-<text y="544" fill="#c8d3c5" x="692.0 699.2 706.4 713.6">hull</text>
-<text y="544" fill="#c8d3c5" x="728.0 735.2 742.4">#34</text>
-<text y="544" fill="#c8d3c5" x="872.0">—</text>
-<text y="544" fill="#c8d3c5" x="1030.4 1037.6">in</text>
-<text y="544" fill="#c8d3c5" x="1052.0 1059.2 1066.4 1073.6 1080.8 1088.0 1095.2">transit</text>
-<text y="544" fill="#c8d3c5" x="1116.8 1124.0 1131.2">d59</text>
-<text y="544" fill="#c8d3c5" x="1145.6 1152.8 1160.0">(14</text>
-<text y="544" fill="#c8d3c5" x="1174.4 1181.6 1188.8 1196.0 1203.2">days)</text>
 <text y="544" fill="#c8d3c5" x="1224.8">│</text>
 <text y="559" fill="#c8d3c5" x="8.0">│</text>
 <text y="559" fill="#c8d3c5" x="670.4 677.6">││</text>

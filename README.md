@@ -167,7 +167,7 @@ the day now.
 
 - **A curated 3025 catalogue**: 97 designs — 64 BattleMechs, 12 vehicles,
   11 aerospace fighters, 3 dropships, 3 jumpships and the support
-  vehicles — with intro years, house random assignment tables, and 41
+  vehicles — with intro years, house random assignment tables, and 59
   parts with availability codes.
 - **Weekly maintenance** by tech skill against a target from the hull's
   quality, with astech teams scaling the hour budget; hull hours grow with
@@ -199,14 +199,14 @@ the day now.
 - **Ten screens** (Desk, Map, Forces, Contracts, Ledger, Supply, HQ, Lab,
   People, Market), a wizard, settings, modals for readiness, records,
   hulls, negotiation, the summary and the emblem editor, and a `:` command
-  line with Tab completion that takes every console verb.
+  line with Tab completion for simulation commands and common reports.
 - **Layouts that degrade** from a maximised terminal to 80×24, `--ascii`
   borders, 24-bit or 256 colours, and half-block pictures where no
   graphics protocol exists.
 - **A soundtrack** through the system's command-line player: every audio
   file under `data/music/` plays, each sub-directory as a soundtrack of
-  its own — the game ships `OST`, the score, and `Supplimental Music`,
-  extra tracks that mix in — and any loose files as a default soundtrack.
+  its own — the game ships `OST`, `OST Part 2`, and `Supplimental Music`
+  — and any loose files as a default soundtrack.
   All of them are mixed into one playlist and reshuffled every launch; `:music` browses soundtracks and tracks,
   picks one soundtrack or the mix (remembered between runs), and plays a
   track on demand. `M` toggles music anywhere; Settings has previous,
@@ -224,7 +224,7 @@ the day now.
 - **A pure, deterministic core**: no I/O, no wall clock, integer C-bills
   and basis points, named RNG streams, commands as a tagged union, a
   golden-master hash. The terminal client and the console share one
-  parser and one command/query boundary. 220-odd tests, a pseudo-terminal
+  parser and one command/query boundary. More than 450 tests, a pseudo-terminal
   smoke test of the client, and a scripted smoke of the console.
 
 ## Running it
@@ -248,11 +248,12 @@ and campaign); `--data <dir>` points at an asset root; `--no-splash` and
 `--no-music` for scripts. A maximised terminal at a 14–16 px font gives the
 full layout; everything degrades down to 80×24.
 
-Without `--store`, a `campaigns.db` in the working directory is used if one
-is there (the source tree keeps its saves in the checkout), otherwise the
-save goes to the per-user data directory — `~/Library/Application Support/
-IRON LEDGER/` on macOS, `$XDG_DATA_HOME/iron-ledger/` (or
-`~/.local/share/iron-ledger/`) elsewhere.
+Without `--store`, an existing `campaigns.db` in the launch directory wins.
+Otherwise the game creates it in the per-user data directory —
+`~/Library/Application Support/IRON LEDGER/` on macOS,
+`$XDG_DATA_HOME/iron-ledger/` (or `~/.local/share/iron-ledger/`) elsewhere.
+If no user data directory can be resolved or created, it falls back to the
+launch directory.
 
 ### Packaging a build
 
@@ -287,8 +288,8 @@ platform it was built for.
 | `F1`–`F10` or `1`–`9`, `0` | screens: Desk, Map, Forces, Contracts, Ledger, Supply, HQ, Lab, People, Market |
 | `Tab` / `Shift-Tab` | move between panes |
 | `j` `k` or arrows, `Enter` | move the cursor, act on the row |
-| `:` | command line with Tab completion (every console verb works here; `:summary`, `:readiness`, `:manning co:N`) |
-| `n` / `N` | end the turn / end seven turns — the checklist opens first |
+| `:` | command line with Tab completion for simulation commands and common reports (`:summary`, `:readiness`, `:manning co:N`) |
+| `n` / `N` | end the turn / end seven turns — blocking checklist rows open the readiness prompt first |
 | `?` | help · `e` emblem · `F12` settings · `M` music on/off · `:music` soundtrack browser · `q` back to the welcome screen |
 
 Each screen's own keys are on its bottom line.
@@ -315,9 +316,9 @@ The graphics path in use and where the data came from are shown below.
 ### New campaign
 
 Four steps: commander (name, house of origin, profession, start year),
-outfit and emblem (presets, or import a PNG from `./`, `logos/` or
-`docs/logos/`), the generated company with the back office sized by
-hand, and a review.
+outfit and emblem (presets, or import a PNG from an asset root's `logos/`
+directory, `./`, `logos/` or `docs/logos/`), the generated company with
+the back office sized by hand, and a review.
 
 ![Commander](docs/screenshots/wizard-commander.svg)
 
@@ -460,7 +461,8 @@ shortfall.
 ### Reports and the turn
 
 `:summary` rolls the campaign up; `:readiness` lists every company;
-ending the turn opens the checklist.
+ending the turn opens the checklist when blocking readiness rows need a
+decision.
 
 ![Campaign summary](docs/screenshots/summary.svg)
 

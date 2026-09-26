@@ -13,30 +13,28 @@ that talks to the campaign registry directly (`persist/store.zig`):
 | Screen | Panes | Keys → store calls |
 |---|---|---|
 | Welcome | Players · Campaigns (emblem mark + outfit + commander + day) · Emblem of the selected campaign · Snapshot | `Enter` load · `n` new campaign · `d` delete campaign (typed-name confirm) · `p` new player · `D` delete player · `q` quit |
-| New campaign 1 · Commander | Form (name, callsign, faction of origin, profession) · What this means | `create_commander` staged, not yet executed |
-| New campaign 2 · Outfit & emblem | Outfit form + emblem source (presets / draw / import) · Preview | `rename_outfit`, `set_emblem` staged |
+| New campaign 1 · Commander | Form (name, faction of origin, profession, start year) · What this means | Campaign setup staged, not yet executed |
+| New campaign 2 · Outfit & emblem | Outfit form + emblem source (presets / import) · Preview | Campaign setup staged, not yet executed |
 | New campaign 3 · Company & back office | Generated company (reroll = new seed) · Back office headcount per admin role with payroll and effect | `new_company` + `hire`/`post_person` staged |
 | New campaign 4 · Review | Everything staged, with the emblem | `Enter` executes the staged commands against a fresh `GameState`, saves, opens the Desk on day 0 |
 
 Inside a campaign, `q` opens **Return to welcome?** (save and return · return
 without saving · stay). Saving writes under the current player.
 
-**Players.** The registry gains a `player` table (`id, name, created_seq`)
-and `campaign.player_id`; `listCampaigns` takes a player filter, and
-`deletePlayer` cascades to that player's campaigns. This is the one schema
-change Stage 12 needs (schema_version 3 → 4).
+**Players.** The registry has a `player` table (`id, name, created_seq`) and
+`campaign.player_id`; `listCampaignsOf` takes a player filter, and
+`deletePlayer` cascades to that player's campaigns.
 
-**Emblems.** An emblem is multi-line text stored on the outfit (`set_emblem`
-already takes a string; it becomes newline-separated rows, each cell an ASCII
-char with an optional colour hint). Three sources in the wizard:
+**Emblems.** An emblem is stored on the root force. Two sources appear in the
+wizard:
 
-- *presets* — a handful of 7×3 marks shipped in `data/emblems.zon`;
-- *draw* — a cell editor using the same character ramp;
-- *import* — any PNG dropped into `~/.merc/logos/` (or `--logos <dir>`).
-  The client needs a PNG decoder (`std.compress.zlib` + the five PNG
-  filters, 8-bit RGB/RGBA non-interlaced); JPEG is out of scope for now.
+- *presets* — the built-in heraldic marks;
+- *import* — PNG files found in an asset root's `logos/` directory, then
+  `./`, `logos/`, and `docs/logos/`. The decoder accepts 8-bit RGB/RGBA
+  non-interlaced PNGs; JPEG is out of scope.
 
-The decoded picture is stored with the campaign (`outfit_emblem` blob) and
+The in-campaign emblem studio supplies the cell editor. The decoded picture is
+stored with the campaign and
 **displayed by the best method the terminal supports**, probed once at
 startup (`tui/emblem.zig`):
 
@@ -97,9 +95,9 @@ are all generated from the same tables. Screen keys are shortcuts for
 commands the command line can also run.
 
 The command line and the REPL share one parser, `src/sim/cli.zig`
-(`game.cli.parseCommand`, `verbs`, `usage`, `errorText`): every command
-verb (`accept`, `order`, `transfer`, `assign`, `refit`, `found`, `link`,
-`raise`, `sellstock`, `roe`, `role`, `rush`, `confirm`, …) works in both,
+(`game.cli.parseCommand`, `verbs`, `usage`, `errorText`): simulation command
+verbs (`accept`, `order`, `transfer`, `assign`, `refit`, `found`, `link`,
+`raise`, `sellstock`, `roe`, `role`, `rush`, `confirm`, …) work in both,
 with tab completion over verbs and entity ids here. Frontend-only verbs
 (`day`, `save`, `quit`, `help`, `settings`, `emblem`, `manning`,
 `readiness`, `summary`, `music`) stay in `app.zig`; the REPL's
@@ -557,14 +555,14 @@ and the TUI:
   company postures; HQ summaries; log tail with filter)
 - `map` (worlds with ring/beachhead/dark classification per HQ, offers per
   world, HQ and company markers)
-- `toe` (tree with slot states), `hull`, `person`, `unassignedPool`
+- `toe` / `toeViews` (tree with slot states), `hull`, `personRecord`,
+  `unassigned`
 - `contracts` (board + active with objective/pool/VP/clock/exposure)
-- `treasuries`, `pnl(entity, period)` (from `finance.summarize`),
-  `ledger(entity, n)`
-- `supplies` (sites with tons/capacity/burn/days, inbound), `demand`
-- `hq` (facilities built/effective, projects, capacity/ceilings, bays,
-  staff vs requirement, candidates)
+- `allTreasuries`, `ledger(selected, period_days, max_rows)`
+- `supply` (sites with tons/capacity/burn/days, inbound), `demandLines`
+- `hqList`, `hqDetailView`, `hqCompanies`, `hqLinks` and `hqRoster`
 - `lab(unit)` (from `meklab.validate` + `state.labItems`)
+- `people(filter)` and `personRecord(id)`
 
 Every query is pure and allocator-parameterized so the TUI can rebuild its
 view model each frame from an arena.

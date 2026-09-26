@@ -89,6 +89,7 @@ The loop, every time:
 
 ```sh
 git checkout main
+# A fresh branch-bootstrap agent runs the approved branch creation command.
 git checkout -b <area>/<short-name>         # tui/after-action, docs/git-workflow
 # …work; the gate (contract rule 72) must be green…
 # commit, then obtain a fresh read-only review of the exact commit
@@ -99,9 +100,10 @@ git branch -d <branch>
 - Never commit directly to `main`.
 - Claude never pushes, fetches, pulls, or changes remotes. John pushes local
   `main` himself after closing Claude Code.
-- Branch creation, commits, the fast-forward merge, and branch deletion each
-  require John's approval through the permission prompt showing the exact
-  command.
+- Branch creation belongs to the `branch-bootstrap` agent, commits belong to
+  the implementer, and fast-forward merge plus branch deletion belong to the
+  coordinator. Each requires John's approval through the permission prompt
+  showing the exact command.
 - The reviewer must be a fresh invocation that did not plan or implement the
   branch.
 - **Never verify a change with a file borrowed from another branch.** If

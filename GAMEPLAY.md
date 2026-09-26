@@ -271,30 +271,23 @@ bay.
 ## A worked month (mid-game)
 
 Marik border, 3027. Two regional HQs: **Zenith** (home region, mature) and
-**Anchorage** (young, level-1 spaceport). Alpha Company (5 lances, veteran)
-garrisons inside Zenith's ring — quiet, profitable, training XP ticking.
-Bravo (3 lances, green) sits at Anchorage between contracts.
+**Anchorage** (young). Alpha Company is experienced; Bravo is still growing.
 
-1. Market day: Anchorage's ring shows four offers. A fifth is flagged
-   **beachhead** — an 8-month garrison on Talitha, 35 LY past the ring,
-   paying 1.6× because nobody else will go. Penalty preview: ~2.5× supplies,
-   hardship pay, one-jump-longer resupply.
-2. You take it for Bravo, but first spend 400k chartering a second supply
-   link and pre-shipping 8 weeks of provisions — cheaper than buying local
-   later.
-3. Week 3: Anchorage's link to Zenith is at throughput cap (Bravo's
-   pre-shipments + Alpha's spare parts). Queue a warehouse upgrade at
-   Anchorage: 2.1M, 3 weeks paperwork + 5 construction, and +6 permanent
-   staff. Approve. HR flags you're now 2 clerks short — hiring hall fills it
-   in a week.
-4. Week 5: decision event on Talitha — the local governor offers cut-rate
-   *local* provisions in exchange for escorting a food convoy (off-contract,
-   small risk). Accept: local-supply multiplier drops to 2.0× and morale
-   holds. The escort resolves as a minor skirmish; the AAR credits Bravo's
-   security lance for zero prisoners lost.
-5. Payday: Alpha +840k. Bravo −110k *this* month (freight-heavy), projected
-   +300k/month once pre-shipments stop. Decision: when the Talitha contract
-   ends, plant a field HQ there — the ring it will eventually project covers
-   three fat industrial worlds.
+1. Market day: the player compares the offers inside each HQ's reach with the
+   beachhead work beyond it. Pay, terms, opposition, travel and supply exposure
+   come from the same rules the command will enforce.
+2. Before assigning Bravo, the player reviews its readiness and field plan.
+   Any charter, local-purchase or resupply cost shown is the current quote, not
+   a promise baked into this example.
+3. Later, Anchorage's warehouse approaches its limit. The upgrade screen shows
+   cost, paperwork, construction and added staffing before the player commits;
+   understaffing lowers effective facility levels until corrected.
+4. An event arrives in the inbox with explicit choices and a deadline. It can
+   wait, but the turn cannot silently discard a decision whose deadline has
+   arrived.
+5. Payday posts the actual salaries, maintenance, food, housing and freight to
+   their treasuries. The ledger and P&L show whether each operation is carrying
+   itself; the player decides whether a forward HQ is worth the continuing
+   payroll and construction commitment.
 
 Nobody piloted a mek. That's the game.

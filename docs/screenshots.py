@@ -261,6 +261,7 @@ send(":"); send("settings\r", 1.5); send("j", 0.3); send("j", 0.3); send("j", 0.
 send("1"); send("e", 1.0)
 for _ in range(12): send("j", 0.1)
 send("\r", 1.0); shot("emblem-editor"); send("\x1b")
+send(":"); send("unassign 1 pilot\r", 1.0)
 send("n", 1.5); shot("end-turn")
 send("\x1b"); send("?"); shot("help"); send("\x1b")
 send("q"); send("r"); send("q")

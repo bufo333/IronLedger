@@ -38,8 +38,9 @@ gzipped XML files (`.cpnx.gz`) and loads static unit/equipment data from
 MegaMek's flat data files (`.mtf`/`.blk` unit definitions). What MekHQ has is a
 rich *object model*, and that is what we absorb — then persist it properly in
 **SQLite**, which suits this game far better (queries over rosters, ledgers,
-inventory; incremental saves; migrations). The full DDL lives in
-[`docs/schema.sql`](docs/schema.sql); the MekHQ→ours mapping in
+inventory; incremental saves; migrations). The executable DDL and ordered
+migrations live in `src/persist/store.zig`; [`docs/schema.sql`](docs/schema.sql)
+is the human-readable schema reference. The MekHQ→ours mapping is in
 [`docs/mekhq-map.md`](docs/mekhq-map.md).
 
 Borrowed subsystems (see the map doc for class-level detail):
@@ -834,10 +835,12 @@ src/
   root.zig       module root, re-exports
   domain/        entities and rule tables: types person unit part chassis
                  force contract hq planet faction tuning skulls scenario …
-  sim/           state crew tick commands battle autoresolve medical
-                 maintenance field_supply sites network rng contract_market
-                 starter_company toe …; queries.zig (read-only views),
-                 cli.zig (verbs), table.zig (markup), digest.zig (hash)
+  sim/           state plus focused personnel/posture/treasury owners;
+                  crew tick commands battle
+                  autoresolve medical maintenance field_supply sites network
+                  rng contract_market starter_company toe …;
+                  queries.zig (read-only views),
+                  cli.zig (verbs), table.zig (markup), digest.zig (hash)
   econ/          finance logistics market
   gen/           company_gen person_gen
   persist/       sqlite.zig (C wrapper), store.zig (campaign saves), lobby.zig
@@ -845,11 +848,13 @@ src/
                  screen, emblem, music
 ```
 
-## 15. Open questions (decide during the relevant stage)
+## 15. Current catalogue decisions
 
 - Era/start date: scaffolding defaults to **3025** (Succession Wars — scarcity
   makes logistics shine). Late-era tech (Clan invasion) later.
-- Star-map scope: full Inner Sphere (~2000 systems) vs. curated ~200-system
-  map. Leaning curated for v1.
-- How much of MegaMek's unit catalog to re-encode vs. a curated ~150-variant
-  starter set. Leaning curated.
+- Star-map scope: the checked-in curated catalogue is the v1 map and remains a
+  normal data/mod-overlay input rather than generated source.
+- Unit scope: the checked-in curated chassis catalogue is the v1 set and can be
+  replaced by the same data/mod-overlay mechanism.
+- Catalogue scans remain deterministic and linear at the current scale. A
+  spatial index is warranted only if measured campaign-scale use requires one.

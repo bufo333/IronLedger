@@ -732,8 +732,8 @@ map. Each item ends green with a ROADMAP tick, as before.
   class in `data/tables/rat.zon` (AtB) so Lyran companies field Zeuses and
   Combine ones Dragons.
 - ✅ 12B.9 **The full star map and factions** (234 systems in this cut) (MegaMek `planets.xml` is
-  GPL data; we re-encode). `data/planets.zon` grows to the 3025 Inner
-  Sphere at roughly 400 named systems: every house capital, regional
+  GPL data; we re-encode). `data/planets.zon` grows to the curated 3025 Inner
+  Sphere catalogue: every house capital, regional
   capitals, the mercenary hubs, the border worlds that appear in the
   sourcebooks, and the near Periphery (Taurian Concordat, Magistracy of
   Canopus, Outworlds Alliance, Circinus, Marian Hegemony, Oberon) as
@@ -744,8 +744,8 @@ map. Each item ends green with a ROADMAP tick, as before.
   border worlds outlined), by industry, by your standing (green to red),
   by contract activity; a legend pane; the world detail names the faction,
   the capital distance and the standing. Contract generation uses factions'
-  foe tables; company generation's RAT uses the home faction. Star-map
-  performance: a spatial grid for the 400-world neighbour queries.
+  foe tables; company generation's RAT uses the home faction. The current
+  catalogue remains small enough for deterministic linear scans.
 
 ## Stage 12C — Careers, rating & depth (planned 2026-09-05) ✅
 
@@ -932,7 +932,7 @@ item: tests green, both smokes, ROADMAP tick, one commit.
   company) to rest, resupply and stage; it lacks whatever needs a
   facility it has not built, and the HQ tier line says which (training
   ground, mek bay, hiring hall) — `u` builds them there.
-- ✅ 12C.15 **Tech target numbers**: `GameState.hullHours` scales the
+- ✅ 12C.15 **Tech target numbers**: `maintenance.hullHours` scales the
   class table by quality (`hours_quality_bp`: an A-grade wreck wants ×1.5,
   an F-grade machine ×0.8) and by an exotic design (`hours_exotic_bp`,
   very rare on the market: Highlanders, King Crabs, Stukas, the big
@@ -980,10 +980,9 @@ item: tests green, both smokes, ROADMAP tick, one commit.
 
 ### Order & schema
 
-A → B → C → D → E → F. Schema bumps: v15 (12C.4: `born_day`, `shares`),
-v16 (12C.8: `rating_snapshot` table), v17 (12C.13: `unit.quality` history
-not needed — letter already stored; 12C.14 part fields are data-only),
-v18 (12C.16: campaign `start_year`). Every knob lands in
+A → B → C → D → E → F. Schema bumps: v15 adds personnel shares; v16 adds
+nullable `born_day`; v17 adds `last_raise_day` and `last_award_day`; v18 adds
+the `rating_snapshot` table and persisted campaign-stat counters. Every knob lands in
 `data/tables/tuning.zon` from the start; rule tables cite the AtB /
 CamOps / MekHQ source next to the table.
 

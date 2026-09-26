@@ -1,6 +1,6 @@
 # Agent workflow
 
-IRON LEDGER uses one long-lived read-only coordinator and two short-lived
+IRON LEDGER uses one long-lived read-only coordinator and three short-lived
 workers. John approves plans and local git writes. Claude never uses GitHub or
 a remote.
 
@@ -9,10 +9,11 @@ a remote.
 | Agent | Lifetime | Authority |
 | --- | --- | --- |
 | `coordinator` | one interactive session | Reads, brainstorms, plans, and delegates; never writes |
-| `implementer` | one approved task | Edits, verifies, commits, corrects, or locally integrates |
+| `branch-bootstrap` | one approved branch | Creates the branch from local `main`; never edits or commits |
+| `implementer` | one approved task | Edits, verifies, commits, or corrects on the prepared branch |
 | `reviewer` | one committed revision | Independently reviews; never writes |
 
-The three user-level agents are portable across repositories. IRON LEDGER's
+The four user-level agents are portable across repositories. IRON LEDGER's
 `CLAUDE.md`, contract, and `.claude/settings.json` supply project-specific
 rules and permissions.
 
@@ -33,17 +34,20 @@ subagent.
 ## Delivery
 
 1. The coordinator presents one recommended plan. John approves or revises it.
-2. A fresh `implementer` creates the approved branch, edits, runs the gate, and
-   commits. Branch creation and commit use permission prompts.
-3. A fresh `reviewer` checks the exact commit against the approved plan and
+2. A fresh `branch-bootstrap` creates the approved branch from local `main`
+   through a permission prompt and reports its name and base commit.
+3. A fresh `implementer` verifies that handoff, edits, runs the gate, and
+   commits through a permission prompt.
+4. A fresh `reviewer` checks the exact commit against the approved plan and
    project contract.
-4. Confirmed findings inside approved scope go to an implementer in correction
+5. Confirmed findings inside approved scope go to an implementer in correction
    mode. A material behavior, architecture, contract, governance, or scope
    change requires a revised plan and John's approval. Every correction gets a
    fresh review.
-5. After acceptance, an implementer verifies the reviewed commit, fast-forwards
-   local `main`, and deletes the local branch through permission prompts.
-6. Claude stops. John pushes local `main` after closing Claude Code.
+6. After acceptance, the coordinator verifies the reviewed commit,
+   fast-forwards local `main`, and deletes the local branch through permission
+   prompts.
+7. Claude stops. John pushes local `main` after closing Claude Code.
 
 A partial implementer is resumed by task ID. If its session no longer exists,
 continuation mode inspects the existing branch and diff before proceeding. It

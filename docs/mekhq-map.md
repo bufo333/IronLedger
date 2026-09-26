@@ -8,12 +8,12 @@ re-implemented in Zig. Paths below are under `MekHQ/src/mekhq/campaign/`.
 |---|---|---|---|
 | `Campaign.java` (`newDay()`) | God object + daily tick: healing, acquisitions, maintenance, markets, payday | `src/sim/clock.zig` daily pipeline over `GameState` (no god object; ordered system fns) | 1 |
 | `personnel/Person.java` | Roles, skills, XP, ranks, status, salary | `src/domain/person.zig` | 2 |
-| `personnel/SkillType.java` | Skill catalog, target numbers, XP costs | `src/domain/types.zig` `SkillType` + `data/tables/skills.zon` | 2 |
+| `personnel/SkillType.java` | Skill catalog, target numbers, XP costs | `src/domain/types.zig` `SkillType` + `src/domain/person.zig` skill progression | 2 |
 | `personnel/ranks/*` | Rank systems | rank keys + `data/tables/ranks.zon` | 2 |
 | `personnel/medical/*` (advanced medical) | Injuries per location, healing | `src/domain/person.zig` `Injury` | 8 |
-| `randomEvents/` + AtB monthly events | Random campaign events | `src/sim/events.zig` decks + decisions | 6 |
+| `randomEvents/` + AtB monthly events | Random campaign events | `src/sim/events.zig` queue/decisions + `src/sim/contract_events.zig` decks | 6 |
 | `unit/Unit.java` | Entity wrapper + crew + repair state | `src/domain/unit.zig` | 3 |
-| `parts/*` (Part, Armor, MekLocation, ...) | Part instances, quality A–F, repair TNs | `src/domain/part.zig` + catalog `data/parts/*.zon` | 5 |
+| `parts/*` (Part, Armor, MekLocation, ...) | Part instances, quality A–F, repair TNs | `src/domain/part.zig` + catalog `data/parts.zon` | 5 |
 | `Quartermaster.java`, `procurement/*` | Acquisition rolls, shopping list, delivery ETA | `src/econ/logistics.zig` | 5 |
 | `market/ContractMarket` | Monthly offers, CamOps terms | `src/sim/contract_market.zig` (offer counts/visibility in `src/econ/market.zig`) | 4 |
 | `market/PersonnelMarket`, `UnitMarket` | Hiring pool, unit purchases | `src/econ/market.zig` | 4/9 |
@@ -22,14 +22,14 @@ re-implemented in Zig. Paths below are under `MekHQ/src/mekhq/campaign/`.
 | `autoresolve/` (ACAR) | Abstract combat auto resolution | `src/sim/autoresolve.zig` — extended with supply/morale/support modifiers (ARCH §7) | 7 |
 | `finances/Finances.java`, `Loan.java` | Ledger, categories, loans | `src/econ/finance.zig` | 2/4 |
 | `finances/Finances.java` | One account, payroll and loans | `src/sim/treasury.zig` (per-entity treasuries, couriers, liquidation-backed credit are this game's) | 9A |
-| `rating/*` (FMMR, CamOps reputation) | Unit rating → pay & offer quality | reputation in `GameState`, Dragoons rating in `src/sim/queries.zig` `rating()` | 4/12C |
+| `rating/*` (FMMR, CamOps reputation) | Unit rating → pay & offer quality | reputation state plus Dragoons rating rules in `src/sim/rating.zig`; queries format the result | 4/12C |
 | — (HBS BattleTech skulls) | Contract difficulty before signing | `src/domain/skulls.zig` + `data/tables/skulls.zon`; `queries.rateOffer` against a company | 12E |
 | `universe/generators/companyGenerators/*` | **AtB company autogeneration** | `src/sim/starter_company.zig` (rolls and manning table in `src/gen/company_gen.zig`) | 3 |
-| `universe/Planet,Systems` (`planets.xml`) | Star map, jump distances, planet socio-industrial codes | `data/planets.zon` (curated) + `src/econ/logistics.zig` routes | 9 |
+| `universe/Planet,Systems` (`planets.xml`) | Star map, jump distances, planet socio-industrial codes | `data/planets.zon` (curated) + `src/sim/network.zig` routes | 9 |
 | `universe/RandomNameGenerator` | Names by faction/origin | `src/gen/person_gen.zig` + `data/tables/names.zon` | 2 |
 | `CampaignXmlParser`, `.cpnx.gz` saves | Persistence (XML, **not SQL**) | `src/persist/` + `docs/schema.sql` (SQLite) | 11 |
-| MegaMek `.mtf`/`.blk` data files | Unit/equipment catalog | curated `data/chassis/*.zon` (licensing: re-encode, don't copy) | 3 |
-| MegaMekLab | Loadout editing, refit kits, refit classes A–F | `src/domain/unit.zig` refits + meklab commands | 10 |
+| MegaMek `.mtf`/`.blk` data files | Unit/equipment catalog | curated `data/chassis.zon` (licensing: re-encode, don't copy) | 3 |
+| MegaMekLab | Loadout editing, refit kits, refit classes A–F | `src/sim/refit.zig` with `src/domain/chassis.zig` and `src/domain/part.zig` construction data | 10 |
 
 ## No MekHQ equivalent (our extensions)
 
@@ -39,14 +39,14 @@ re-implemented in Zig. Paths below are under `MekHQ/src/mekhq/campaign/`.
 | Brigade/Regional/Field HQ tiers with facility upgrade paths & staffing overhead | `src/domain/hq.zig` (`Hq.staffRequired`, `Project`); postings and autostaffing in `src/sim/hq_ops.zig` (`hqStaff`, `staffHqToRequirement`) | 9 |
 | Influence rings gating the contract market + beachhead expansion | `src/domain/hq.zig` (`influenceLy`) + `src/econ/market.zig` (`visibilityFor`) | 4/9 |
 | HQ capacity slots (companies, air company, dropship/jumpship berths) | `src/domain/hq.zig` (`Capacity`); counted against by `src/sim/toe.zig` | 9 |
-| Supply-line graph: links, throughput caps, multi-hop delay/cost | `src/econ/logistics.zig` (`Route`) | 9 |
+| Supply-line graph: links, throughput caps, multi-hop delay/cost | `src/sim/network.zig` (routing) + `src/econ/logistics.zig` (cost/capacity rules) | 9 |
 | Supply classes (parts/ammo/medical/provisions) with shipments & delays | `src/econ/logistics.zig` | 5/9 |
 | Out-of-influence penalties + local-purchase valve + hardship pay | `src/econ/logistics.zig` (`localPurchaseMultBp`) | 9 |
 | Support-company lance kinds (MASH/security/mess/salvage/transport) in battle math | `src/domain/force.zig` + `src/sim/autoresolve.zig` modifiers | 7/8 |
 | Owned dropships/jumpships as logistics capacity | `src/domain/unit.zig` kinds + `src/econ/logistics.zig` | 9 |
 | Field-vs-depot repair split (armor/weapons/ammo in field; structure at HQ mek bays) | `src/domain/unit.zig` (`SlotClass`, `repairTier`, `needsDepot`) + `hq.supportsStructuralRepair` | 5 |
 | Rotation fatigue (accrues per contract, decays only at regional HQ) | `src/domain/person.zig` (`contractFatigueGain`, `fatigueDecayPerWeek`) + `force.zig` rotation tracking | 8 |
-| HQ-only skill training (XP earned anywhere, converted at home) | `hq.supportsTraining` + `training_assignment` table | 8 |
+| HQ-only skill training (XP earned anywhere, converted at home) | `src/sim/medical.zig` daily completion + `src/domain/person.zig` progression/state | 8 |
 | Site markets w/ rarity rolls (MekHQ's UnitMarket is global; ours are per-place) | `src/econ/market.zig` (`SiteKind`, `Rarity`, `listingAppears`) | 5 |
 | Structural-parts guarantee for owned chassis at regional HQs | `market.SiteKind.guaranteesStructural` + fabrication consts | 5 |
 | Per-hull carry cost + cold storage (extends MekHQ mothballing w/ reactivation time) | `src/domain/unit.zig` (`monthlyBill`, `reactivationDays`) | 5 |
@@ -61,7 +61,7 @@ re-implemented in Zig. Paths below are under `MekHQ/src/mekhq/campaign/`.
 | Back-office staff effects (MekHQ admin roles made consequential: logistics/HR/command experience scale ETAs, hiring, training, morale, paperwork) | Stage 9A/9C: HQ staff postings | 9C |
 | Victory points & objective kinds (cf. StratCon VP) + close-out/recall/redeploy | Stage 9E: `objective_kind`, `enemy_pool_bv`, `victory_points` | 9E |
 | Full breach clause w/ employer-faction cooling (extends AtB breach) | Stage 9E: `breach_clawback` category, `breach_day` | 9E |
-| Pilot + tech assignment per hull, tech minutes budget (`Unit.tech`, `Person.minutesLeft`), astech teams | Stage 9C.2: `unit_crew` 'tech' slot, `weekly_hours`, `assign`/`assign auto` | 9C.2 |
+| Pilot + tech assignment per hull, weekly tech-hours budget, astech teams | `src/sim/crew.zig` owns seats; `src/sim/maintenance.zig` consumes assigned techs and `weekly_hours` | 9C.2 |
 | Unassigned-pool seat reachability, no MekHQ analog; per-hull seat eligibility, assignment and auto-assignment implement the pilot/tech assignment row above | `src/sim/crew.zig` — `canReachPool` (pool reachability); `assignBlock`, `assignSlot`, `unassignSlot`, `autoAssign`, `isUnassigned` | 9C.2 |
 | Personnel market (MekHQ `PersonnelMarket`) → hiring hall candidates per HQ | Stage 9C.2: `hiring_candidate`, `hire <candidate>` | 9C.2 |
 | Tech accidents, medbay beds/priority, leave (MekHQ has injuries; no bed capacity) | Stage 9C.2: `medbay_priority`, `leave_until_day`, `medbay`/`triage`/`leave` | 9C.2 |
