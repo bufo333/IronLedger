@@ -17,7 +17,23 @@ folded in: D26 into C10, D27 and D30 into C12, D28 into C7, D29 into C15,
 D31 into C8, D33 into C18 (D32 closed with C1, the gate).
 
 - [ ] C4 decomposition (rules 5, 14, 76, 77) — first, because the fixes after it add code to modules in the rule 76 registry. Behaviour-preserving, golden hash unchanged, one increment per branch:
-  - [ ] C4a `GameState` keeps storage and primitives; hashing to `digest.zig`, treasury behaviour (transfers, couriers, payroll, upkeep, liquidation, credit) to `sim/treasury.zig`, the pure sale values to `econ/market.zig`, hiring to personnel, staffing and founding to `hq_ops`, posture to a posture module, TO&E and crew, tech time to maintenance, lift, supply, refit, aftermath and readiness to their owners (the grouping is in the ledger); `state.zig` imports nothing above the state layer (the C4 layering record).
+  - [ ] C4a `GameState` keeps storage and primitives; subsystem behaviour moves to its owner and `state.zig` imports nothing above the state layer (the C4 layering record). Behaviour-preserving, one increment per branch, in this order; each branch deletes its own line:
+    - [ ] C4a1 supply sites: `siteTons`, `siteCapacityTons`, `siteFreeTons`, `moveStock`, `siteForForce` and `sendHome` to a new `sim/sites.zig`; `loadOutCompany` to `field_supply.zig`.
+    - [ ] C4a2 crew: `canReachPool`, `assignBlock`, `assignSlot`, `unassignSlot`, `autoAssign` and `isUnassigned` to a new `sim/crew.zig`.
+    - [ ] C4a3 tech time: `hullHours`, `techHoursFor`, `techLoadHours`, `techHoursAvailable` and `findFreeTech` to `maintenance.zig`.
+    - [ ] C4a4 TO&E: company and lance counts, HQ and company capacity (`assignCompanyToHq`), support lances, unit placement and moves, `personInCompany` and `companyHeadcount` to a new `sim/toe.zig`.
+    - [ ] C4a5 posture: `CompanyPosture`, `companyPosture`, `isCompanyHome` and `isCompanyDeployed` to a new `sim/posture.zig`.
+    - [ ] C4a6 founding: `createCommander`, `foundHq` and `prepareHq` to a new `sim/founding.zig`.
+    - [ ] C4a7 lift: `transportsBerthedAt`, `transportAvailable`, `ownsCrewedJumpshipAt` and `hasCrewedDropship` to a new `sim/lift.zig`; the unused `availableLift` and `Lift` are deleted.
+    - [ ] C4a8 refit: `tryInstall`, `labItems` and `applyRefit` to a new `sim/refit.zig`.
+    - [ ] C4a9 held hulls: `holdUnit` and `releaseHull` to a new `sim/held_hulls.zig`.
+    - [ ] C4a10 hull condition: `applyHullCondition` to `econ/market.zig`, taking a `std.Random`.
+    - [ ] C4a11 readiness: `unitOperational` and `forceOperational` to a new `sim/readiness.zig`.
+    - [ ] C4a12 commander multiplier: one owner, `commander.costMultBp` over an optional commander, replacing `Commander.costMultBp` and `GameState.commanderMultBp`.
+    - [ ] C4a13 clock: `Date` and `Clock` to `domain/clock.zig`; `DayPhase` to `sim/tick.zig`.
+    - [ ] C4a14 events: `sim/events.zig` to `domain/events.zig`.
+    - [ ] C4a15 battle report: `autoresolve.zig` to `domain/`; the report record types and `Journal` to `domain/battle_report.zig`; `render` stays in `sim/after_action.zig`.
+    - [ ] C4a16 HQ link: `HqLink`, its methods and `linkCost` to `domain/hq_link.zig`; routing and throughput stay in `sim/network.zig`. This branch also deletes C4a.
   - [ ] C4b `commands.zig` keeps the union, dispatch and error set; handlers move to subsystem command modules; the named atomic operations of rule 14 exist.
   - [ ] C4c `queries.zig` keeps the public namespace; view builders move to finance, contracts, personnel, forces, HQ, market and battle query modules.
   - [ ] C4d `tui/app.zig` splits into session/lobby, wizard, modal controllers, command line and settings.

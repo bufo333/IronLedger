@@ -105,6 +105,8 @@ Owner of every entry: the project owner.
   - **Stock-mutation results ignored:** `battle.zig:943`, `maintenance.zig:247`, `271`.
   - **Tests.** There are no failure-injection tests in the sim.
   - **Refusal text.** The fallback "nothing was changed" (`cli.zig:621`) is not yet true.
+  - **`state.createCommander` is not failure-atomic.** It draws the `.generation` stream for the world pick, then commits in sequence, each step able to fail after the earlier ones: `commander`; `next_hq_id`; the HQ; the staff it recruits and posts (drawing `.generation` again and allocating); the staffing refresh; the founding funds transfer; the HQ and stock policies; the starter stock. A failure leaves the RNG advanced and every earlier change in place (`state.zig:432-502`).
+  - **`commands.execFoundHq` writes its log entry after the debit and `commitHq`.** A failed log leaves the HQ founded and paid for, but returns an error (`commands.zig:595`).
 - **Removal:** C5.
 - **Guard:** review (checklist questions 2, 3 and 14). No mechanical check.
 
