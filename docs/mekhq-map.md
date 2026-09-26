@@ -62,7 +62,7 @@ re-implemented in Zig. Paths below are under `MekHQ/src/mekhq/campaign/`.
 | Victory points & objective kinds (cf. StratCon VP) + close-out/recall/redeploy | Stage 9E: `objective_kind`, `enemy_pool_bv`, `victory_points` | 9E |
 | Full breach clause w/ employer-faction cooling (extends AtB breach) | Stage 9E: `breach_clawback` category, `breach_day` | 9E |
 | Pilot + tech assignment per hull, tech minutes budget (`Unit.tech`, `Person.minutesLeft`), astech teams | Stage 9C.2: `unit_crew` 'tech' slot, `weekly_hours`, `assign`/`assign auto` | 9C.2 |
-| Unassigned-pool seat eligibility, per-hull seat assignment and company auto-assignment (no MekHQ analog; MekHQ has no unassigned-pool seat model) | `src/sim/crew.zig` — `canReachPool`, `assignSlot`, `unassignSlot`, `autoAssign` | 9C.2 |
+| Unassigned-pool seat reachability, no MekHQ analog; per-hull seat eligibility, assignment and auto-assignment implement the pilot/tech assignment row above | `src/sim/crew.zig` — `canReachPool` (pool reachability); `assignBlock`, `assignSlot`, `unassignSlot`, `autoAssign`, `isUnassigned` | 9C.2 |
 | Personnel market (MekHQ `PersonnelMarket`) → hiring hall candidates per HQ | Stage 9C.2: `hiring_candidate`, `hire <candidate>` | 9C.2 |
 | Tech accidents, medbay beds/priority, leave (MekHQ has injuries; no bed capacity) | Stage 9C.2: `medbay_priority`, `leave_until_day`, `medbay`/`triage`/`leave` | 9C.2 |
 | End-turn checklist (no MekHQ analog; MekHQ's day-advance warnings are partial) | Stage 9C.2: `turnWarnings` query + `day force` | 9C.2 |

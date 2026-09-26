@@ -68,7 +68,7 @@ Owner of every entry: the project owner.
     - behaviour called from state: `personnel.zig` (`createCommander`'s `recruitGenerated`), `hq_ops.zig` (`refreshHqStaffing`), `treasury.zig` (`transferFunds`);
     - simulation types stored in `GameState` fields: `clock.zig` (the `Date` and `Clock` field types), `events.zig` (the `EventQueue` and `EventKind` field types), `after_action.zig` (the `Journal` field type), `network.zig` (the `HqLink` field type);
     - a test in `state.zig` importing the simulation layer: `starter_company.zig`. Rule 5's test clause covers only command-view agreement tests importing `queries.zig`, so this one needs its own listing.
-  - The 5 test-only `queries.zig` imports in `commands.zig` and `hq_ops.zig` are agreement tests allowed by rule 5's test clause and are not part of this entry.
+  - The 6 test-only `queries.zig` imports in `commands.zig`, `hq_ops.zig` and `crew.zig` are agreement tests allowed by rule 5's test clause and are not part of this entry.
   - This sub-list records existing debt found by a full audit; it grants no
     permission. A new upward import is a violation even beside a listed one:
     the layering check names a new edge, and review (rule 87) holds a new
@@ -395,7 +395,7 @@ Owner of every entry: the project owner.
   - Rule functions with no test:
     - `hq_ops`: `beyondEconomicalRepair`, `canFabricate`, `bayCanRebuild`, `upgradeBlock`, `rebuildEstimate`, `engineCharge`, `paperworkDaysFor`, `depotHqFor`, `staffHqToRequirement`
     - `state`: `techHoursAvailable`, `findFreeTech`, `applyRefit`
-    - `crew`: `assignBlock`, `canReachPool`
+    - `crew`: `canReachPool`
     - `sites`: `siteCapacityTons`, `moveStock`
     - `treasury`: `transferFunds`, `isInsolvent`, `liquidationValue`, `creditLimit`, `courierEtaDays`
     - `battle`: `effectiveRoe`, `estimatePower`, `estimatedKills`, `inContactWindow`

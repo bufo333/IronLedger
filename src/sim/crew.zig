@@ -1,8 +1,9 @@
 //! Who may take a hull's pilot or tech seat, and filling those seats
 //! (Stage 9C.2, `docs/mekhq-map.md`).
 //!
-//! MekHQ counterpart: none — MekHQ has no unassigned-pool seat model;
-//! see `docs/mekhq-map.md`.
+//! MekHQ counterpart: none for pool reachability (`canReachPool`); seat
+//! assignment and auto-assignment follow `docs/mekhq-map.md`'s pilot/tech
+//! assignment row.
 
 const std = @import("std");
 const types = @import("../domain/types.zig");
@@ -176,7 +177,7 @@ test "assignBlock's reason matches crewChoices' dim and the assign command's ref
     try std.testing.expect(mek != .none);
     const u = gs.unit(mek).?;
 
-    // A wounded pilot: assignBlock and crewChoices agree on "unavailable",
+    // A wounded pilot: assignBlock and crewChoices agree on "wounded",
     // and the real command refuses Unavailable.
     const wounded = try gs.hirePerson("Hurt", "Pilot", .mekwarrior);
     gs.person(wounded).?.assigned_force = company_id;
