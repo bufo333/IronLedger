@@ -276,6 +276,39 @@ pub fn isStaple(key: []const u8) bool {
     return false;
 }
 
+/// Apply a hull's listed condition to a freshly added unit: armor, quality,
+/// broken weapons, and missing structure — the project the player just bought.
+/// `r` must be the caller's `.market` random stream so RNG consumption order
+/// is preserved across call sites.
+pub fn applyHullCondition(u: *unit_mod.Unit, cond: HullCondition, r: std.Random) void {
+    u.armor_pct = cond.armor_pct;
+    u.quality = cond.quality;
+    var to_damage = cond.damaged_slots;
+    var to_destroy = cond.destroyed_slots;
+    var to_strip = cond.missing_components;
+    // Walk slots in a rolled order so different wrecks break differently.
+    var start = r.uintLessThan(usize, @max(1, u.slots.items.len));
+    for (0..u.slots.items.len) |_| {
+        const slot = &u.slots.items[start % u.slots.items.len];
+        start += 1;
+        if (slot.class == .structure) {
+            if (to_strip > 0 and !std.mem.startsWith(u8, slot.slot_key, "hd.")) {
+                slot.condition = .missing;
+                to_strip -= 1;
+            }
+        } else if (slot.class == .weapon) {
+            if (to_destroy > 0) {
+                slot.condition = .destroyed;
+                to_destroy -= 1;
+            } else if (to_damage > 0) {
+                slot.condition = .damaged;
+                to_damage -= 1;
+            }
+        }
+    }
+    if (u.needsDepot()) u.status = .damaged;
+}
+
 /// Price a hull by loadout value and condition: a new, fully loaded hull
 /// at a premium; a wreck missing a leg and its guns for a fraction (tuning.market).
 pub fn hullPrice(base_cost: types.CBills, avg_weapon_cost: types.CBills, cond: HullCondition, price_roll_bp: types.Bp) types.CBills {
@@ -363,4 +396,46 @@ test "quality moves the resale ticket" {
     try std.testing.expect(unitSaleValue(&u) > c);
     u.quality = .a;
     try std.testing.expect(unitSaleValue(&u) < c);
+}
+
+test "applyHullCondition stamps armor, quality, slot damage, and status" {
+    const alloc = std.testing.allocator;
+    var u: unit_mod.Unit = .{
+        .id = @enumFromInt(42),
+        .chassis_key = "SHD-2H",
+        .kind = .mek,
+    };
+    defer u.deinit(alloc);
+    // Two weapon slots and two structure slots (non-head).
+    try u.slots.append(alloc, .{ .slot_key = "rt.medium_laser.1", .part_key = "medium_laser", .class = .weapon });
+    try u.slots.append(alloc, .{ .slot_key = "lt.medium_laser.1", .part_key = "medium_laser", .class = .weapon });
+    try u.slots.append(alloc, .{ .slot_key = "rt.structure", .part_key = "structure", .class = .structure });
+    try u.slots.append(alloc, .{ .slot_key = "lt.structure", .part_key = "structure", .class = .structure });
+
+    const cond: HullCondition = .{
+        .armor_pct = 55,
+        .quality = .b,
+        .damaged_slots = 1,
+        .destroyed_slots = 1,
+        .missing_components = 1,
+    };
+    var prng = std.Random.DefaultPrng.init(12345);
+    applyHullCondition(&u, cond, prng.random());
+
+    try std.testing.expectEqual(@as(u8, 55), u.armor_pct);
+    try std.testing.expectEqual(types.Quality.b, u.quality);
+    // At least one weapon slot should be damaged or destroyed.
+    var weapon_hit: bool = false;
+    for (u.slots.items) |s| {
+        if (s.class == .weapon and (s.condition == .damaged or s.condition == .destroyed)) weapon_hit = true;
+    }
+    try std.testing.expect(weapon_hit);
+    // At least one structure slot should be missing.
+    var struct_missing: bool = false;
+    for (u.slots.items) |s| {
+        if (s.class == .structure and s.condition == .missing) struct_missing = true;
+    }
+    try std.testing.expect(struct_missing);
+    // Status must be .damaged because the unit needsDepot.
+    try std.testing.expectEqual(unit_mod.UnitStatus.damaged, u.status);
 }

@@ -983,7 +983,8 @@ fn execBuyListing(gs: *GameState, index: @FieldType(Command, "buy_listing")) Err
         });
         _ = gs.market_listings.orderedRemove(index);
         const uid = try gs.addUnit(listing.item_key);
-        if (listing.condition) |cond| gs.applyHullCondition(uid, cond);
+        const bought_co = gs.unit(uid).?;
+        if (listing.condition) |cond| market_mod.applyHullCondition(bought_co, cond, gs.rng.random(.market));
         try toe.placeUnitInCompany(gs, uid, co);
         try gs.log(.market, .{ .company = co, .contract = c.id }, "[market] {s} bought {s} ({s}) on {s} for {d} from local funds — seat a pilot and a tech", .{
             if (gs.force(co)) |f| f.name else "company", listing.item_key, if (listing.condition) |cd| cd.label() else "new", c.planet_key, price,
@@ -1027,7 +1028,8 @@ fn execBuyListing(gs: *GameState, index: @FieldType(Command, "buy_listing")) Err
         switch (listing.kind) {
             .unit => {
                 const uid = try gs.addUnit(listing.item_key);
-                if (listing.condition) |cond| gs.applyHullCondition(uid, cond);
+                const bought_bm = gs.unit(uid).?;
+                if (listing.condition) |cond| market_mod.applyHullCondition(bought_bm, cond, gs.rng.random(.market));
                 return .{ .unit = uid };
             },
             .part => try gs.addStock(.{ .hq = hq_id }, listing.item_key, listing.quantity),
@@ -1040,8 +1042,9 @@ fn execBuyListing(gs: *GameState, index: @FieldType(Command, "buy_listing")) Err
             const l = &gs.market_listings.items[index];
             if (listing.staple and l.quantity > 1) l.quantity -= 1 else _ = gs.market_listings.orderedRemove(index);
             const uid = try gs.addUnit(listing.item_key);
-            if (listing.condition) |cond| gs.applyHullCondition(uid, cond);
-            if (berth_kind != null) gs.unit(uid).?.berth_hq = hq_id;
+            const bought_hq = gs.unit(uid).?;
+            if (listing.condition) |cond| market_mod.applyHullCondition(bought_hq, cond, gs.rng.random(.market));
+            if (berth_kind != null) bought_hq.berth_hq = hq_id;
             try gs.log(.market, .{ .hq = hq_id }, "[market] bought {s} ({s}) for {d}{s}", .{
                 listing.item_key, if (listing.condition) |c| c.label() else "new", price,
                 if (berth_kind != null) " — berthed here" else "",

@@ -665,39 +665,6 @@ pub const GameState = struct {
         return self.units.getPtr(id);
     }
 
-    /// Make a freshly bought hull match its listing's condition: armor, quality, broken weapons, and missing structure —
-    /// the project the player just bought.
-    pub fn applyHullCondition(self: *GameState, unit_id: types.UnitId, cond: market_mod.HullCondition) void {
-        const u = self.unit(unit_id) orelse return;
-        u.armor_pct = cond.armor_pct;
-        u.quality = cond.quality;
-        const r = self.rng.random(.market);
-        var to_damage = cond.damaged_slots;
-        var to_destroy = cond.destroyed_slots;
-        var to_strip = cond.missing_components;
-        // Walk slots in a rolled order so different wrecks break differently.
-        var start = r.uintLessThan(usize, @max(1, u.slots.items.len));
-        for (0..u.slots.items.len) |_| {
-            const slot = &u.slots.items[start % u.slots.items.len];
-            start += 1;
-            if (slot.class == .structure) {
-                if (to_strip > 0 and !std.mem.startsWith(u8, slot.slot_key, "hd.")) {
-                    slot.condition = .missing;
-                    to_strip -= 1;
-                }
-            } else if (slot.class == .weapon) {
-                if (to_destroy > 0) {
-                    slot.condition = .destroyed;
-                    to_destroy -= 1;
-                } else if (to_damage > 0) {
-                    slot.condition = .damaged;
-                    to_damage -= 1;
-                }
-            }
-        }
-        if (u.needsDepot()) u.status = .damaged;
-    }
-
     pub fn createForce(self: *GameState, name: []const u8, echelon: force_mod.Echelon, parent: types.ForceId) !types.ForceId {
         const id: types.ForceId = @enumFromInt(self.next_force_id);
         self.next_force_id += 1;

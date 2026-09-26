@@ -1252,7 +1252,7 @@ pub fn takeSalvage(
             .destroyed_slots = cand.destroyed_slots,
             .missing_components = cand.missing_components,
         };
-        gs.applyHullCondition(uid, cond);
+        market.applyHullCondition(u, cond, gs.rng.random(.market));
         u.status = .in_transit;
         try gs.unit_transfers.append(gs.allocator(), .{ .unit = uid, .to_company = .none, .eta_day = gs.clock.day_index + days });
         gs.stats.hulls_salvaged += 1;
