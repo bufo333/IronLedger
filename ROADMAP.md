@@ -899,8 +899,8 @@ item: tests green, both smokes, ROADMAP tick, one commit.
   facility — it read the cursor as "row − 1 into the facility list", but
   the tier section above the table varies in length (a promoted firebase
   gained rows), so the highlighted mess hall resolved to the spaceport.
-  `queries.hqFacilityAtRow` now maps the rendered row back to its
-  facility; rows outside the table open the picker.
+  `queries.hqDetailView(...).facility` now carries the rendered row's facility
+  identity; rows outside the table open the picker.
 - ✅ Fix (play feedback 2026-09-05): the Market screen showed every HQ's
   listings on one board while naming the selected HQ as buyer; a purchase
   always drew on the listing's own HQ, so "not enough money in that

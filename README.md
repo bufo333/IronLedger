@@ -289,7 +289,7 @@ platform it was built for.
 | `Tab` / `Shift-Tab` | move between panes |
 | `j` `k` or arrows, `Enter` | move the cursor, act on the row |
 | `:` | command line with Tab completion for simulation commands and common reports (`:summary`, `:readiness`, `:manning co:N`) |
-| `n` / `N` | end the turn / end seven turns — blocking checklist rows open the readiness prompt first |
+| `n` / `N` | end the turn / end seven turns — prompting checklist rows open the advisory readiness prompt first |
 | `?` | help · `e` emblem · `F12` settings · `M` music on/off · `:music` soundtrack browser · `q` back to the welcome screen |
 
 Each screen's own keys are on its bottom line.
@@ -461,8 +461,8 @@ shortfall.
 ### Reports and the turn
 
 `:summary` rolls the campaign up; `:readiness` lists every company;
-ending the turn opens the checklist when blocking readiness rows need a
-decision.
+ending the turn opens the advisory checklist when prompting readiness rows
+need acknowledgement.
 
 ![Campaign summary](docs/screenshots/summary.svg)
 
