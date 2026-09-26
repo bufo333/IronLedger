@@ -22,6 +22,7 @@ const state_mod = @import("state.zig");
 const treasury = @import("treasury.zig");
 const sites = @import("sites.zig");
 const crew = @import("crew.zig");
+const maintenance = @import("maintenance.zig");
 const GameState = state_mod.GameState;
 
 const Alloc = std.mem.Allocator;
@@ -305,7 +306,6 @@ fn salvageDetail(alloc: Alloc, gs: *GameState, ev: *const @import("events.zig").
 /// stores — the function the command carries out with — so the screen
 /// never works out the repairs itself.
 fn repairDetail(alloc: Alloc, gs: *GameState, ev: *const @import("events.zig").Event) ![]const []const u8 {
-    const maintenance = @import("maintenance.zig");
     const needs = try maintenance.repairNeeds(gs, alloc, ev.company);
     if (needs.len == 0) return &.{};
     const budget = try maintenance.repairBudget(gs, alloc, ev.company, needs);
@@ -1624,7 +1624,7 @@ pub fn hull(alloc: Alloc, gs: *GameState, uid: types.UnitId) ![]const []const u8
         try out.append(alloc, try std.fmt.allocPrint(alloc, "pilot   {{g}}{s}{{/}}  {s}  {s}  fatigue {d} · morale {d}", .{ try personText(alloc, p), @tagName(p.role), @tagName(p.experience()), p.fatigue, p.morale }));
     } else try out.append(alloc, "pilot   {c}none{/}");
     if (gs.person(u.tech)) |t| {
-        try out.append(alloc, try std.fmt.allocPrint(alloc, "tech    {{g}}{s}{{/}}  {s}  {s}  {d}/{d} h this week", .{ try personText(alloc, t), @tagName(t.role), @tagName(t.experience()), gs.techLoadHours(t.id), t.weekly_hours }));
+        try out.append(alloc, try std.fmt.allocPrint(alloc, "tech    {{g}}{s}{{/}}  {s}  {s}  {d}/{d} h this week", .{ try personText(alloc, t), @tagName(t.role), @tagName(t.experience()), maintenance.techLoadHours(gs, t.id), t.weekly_hours }));
     } else if (unit_mod.techRoleFor(u.kind) != null) try out.append(alloc, "tech    {c}none{/}");
     try out.append(alloc, "");
     try out.append(alloc, "slot                 part            class      condition");
@@ -1638,7 +1638,7 @@ pub fn hull(alloc: Alloc, gs: *GameState, uid: types.UnitId) ![]const []const u8
     }
     try out.append(alloc, "");
     try out.append(alloc, try std.fmt.allocPrint(alloc, "upkeep {s}/mo · maintenance {d} h/week ({d} in its tech's hands; quality {s}{s}) · depot needed: {s}", .{
-        try money(alloc, u.monthlyBill()), gs.hullHours(u), if (gs.person(u.tech)) |t| gs.techHoursFor(t, u) else gs.hullHours(u), @tagName(u.quality), if (ch) |c| (if (c.rarity == .very_rare) ", exotic design" else "") else "", if (u.needsDepot()) "{c}yes{/}" else "no",
+        try money(alloc, u.monthlyBill()), maintenance.hullHours(gs, u), if (gs.person(u.tech)) |t| maintenance.techHoursFor(gs, t, u) else maintenance.hullHours(gs, u), @tagName(u.quality), if (ch) |c| (if (c.rarity == .very_rare) ", exotic design" else "") else "", if (u.needsDepot()) "{c}yes{/}" else "no",
     }));
     return out.toOwnedSlice(alloc);
 }
@@ -4242,7 +4242,6 @@ test "the contact line an advance stops for is the checklist's contact warning" 
 }
 
 test "the inbox shows what each repair order would do, as the techs would do it" {
-    const maintenance = @import("maintenance.zig");
     var gs = GameState.init(std.testing.allocator, .{ .seed = 12068 });
     defer gs.deinit();
     const f = try contract_events.damagedCompanyForTest(&gs, 2);
@@ -4749,11 +4748,11 @@ pub fn crewChoices(alloc: Alloc, gs: *GameState, unit_id: types.UnitId) ![]PickR
         if (!p.isOnBooks()) continue;
         const why: []const u8 = crew.assignBlock(gs, u, p) orelse "";
         const seat = gs.pilotSeat(p.id);
-        const load = if (slot == .tech) gs.techLoadHours(p.id) else 0;
+        const load = if (slot == .tech) maintenance.techLoadHours(gs, p.id) else 0;
         const now: []const u8 = if (slot == .pilot)
             (if (seat == unit_id) "this seat" else if (seat != .none) try std.fmt.allocPrint(alloc, "pilot of #{d}", .{@intFromEnum(seat)}) else "{g}free{/}")
         else
-            (if (u.tech == p.id) "this hull's tech" else try std.fmt.allocPrint(alloc, "{s}{d}h of {d}h{{/}}", .{ if (load == 0) "{g}" else "", load, gs.techHoursAvailable(p) }));
+            (if (u.tech == p.id) "this hull's tech" else try std.fmt.allocPrint(alloc, "{s}{d}h of {d}h{{/}}", .{ if (load == 0) "{g}" else "", load, maintenance.techHoursAvailable(gs, p) }));
         const skill = p.skill(p.role.primarySkill()) orelse 9;
         const same = gs.companyOf(p.assigned_force) == own and own != .none;
         const name = try std.fmt.allocPrint(alloc, "{s}", .{try personText(alloc, p)});
@@ -5286,7 +5285,7 @@ pub fn companyRoster(alloc: Alloc, gs: *GameState, co: types.ForceId) ![]const [
         const p = entry.value_ptr;
         if (gs.companyOf(p.assigned_force) != co or !p.role.isTech()) continue;
         try out.append(alloc, try std.fmt.allocPrint(alloc, "    #{d: <3} {s: <20} {s: <13} {d: >2}/{d: <2}h{s}", .{
-            @intFromEnum(p.id), try personText(alloc, p), @tagName(p.role), gs.techLoadHours(p.id), gs.techHoursAvailable(p), if (!p.isAvailable(day)) " (unavailable)" else "",
+            @intFromEnum(p.id), try personText(alloc, p), @tagName(p.role), maintenance.techLoadHours(gs, p.id), maintenance.techHoursAvailable(gs, p), if (!p.isAvailable(day)) " (unavailable)" else "",
         }));
     }
     var pool: std.ArrayListUnmanaged(u8) = .empty;
@@ -5576,7 +5575,7 @@ test "the after-action panes read from the record" {
     for (part.munition_keys) |key| try gs.addStock(site, key, 40);
     for (0..6) |_| {
         try battle.resolveEngagement(&gs, c);
-        try @import("maintenance.zig").runWeeklyRepairs(&gs);
+        try maintenance.runWeeklyRepairs(&gs);
     }
 
     const rows = try battleList(al, &gs);

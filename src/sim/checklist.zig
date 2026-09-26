@@ -17,6 +17,7 @@ const GameState = @import("state.zig").GameState;
 const treasury = @import("treasury.zig");
 const sites = @import("sites.zig");
 const crew = @import("crew.zig");
+const maintenance = @import("maintenance.zig");
 
 pub const WarningKind = enum {
     decision_due,
@@ -513,7 +514,7 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
         const t = tentry.value_ptr;
         if (!t.isAvailable(day)) continue;
         if (!t.role.isTech()) continue;
-        if (gs.techLoadHours(t.id) > gs.techHoursAvailable(t)) overloaded += 1;
+        if (maintenance.techLoadHours(gs, t.id) > maintenance.techHoursAvailable(gs, t)) overloaded += 1;
     }
     if (overloaded > 0) {
         try out.append(alloc, .{ .kind = .tech_overloaded, .text = try std.fmt.allocPrint(alloc, "{d} tech(s) assigned more hulls than their weekly hours cover — some hulls roll uncovered", .{overloaded}) });

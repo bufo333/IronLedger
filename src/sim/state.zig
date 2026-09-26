@@ -1065,93 +1065,6 @@ pub const GameState = struct {
         }
     }
 
-    /// Weekly hours a tech already carries across assigned hulls.
-    pub fn techLoadHours(self: *GameState, tech_id: types.PersonId) u32 {
-        var hours: u32 = 0;
-        const tech = self.person(tech_id);
-        var it = self.units.iterator();
-        while (it.next()) |entry| {
-            const u = entry.value_ptr;
-            if (u.tech != tech_id or u.isParked()) continue;
-            hours += if (tech) |t| self.techHoursFor(t, u) else self.hullHours(u);
-        }
-        return hours;
-    }
-
-    /// Weekly hours a hull wants from a regular tech: the class
-    /// table scaled by quality (a neglected machine fights back) and by an
-    /// exotic design (rare on the market, rare in the manuals).
-    pub fn hullHours(self: *GameState, u: *const unit_mod.Unit) u32 {
-        _ = self;
-        const t = tuning.maintenance;
-        const design = chassis_mod.find(u.chassis_key);
-        const tonnage: u8 = if (design) |d| d.tonnage else 50;
-        const base = unit_mod.maintenanceHours(u.kind, tonnage);
-        const q_bp: types.Bp = switch (u.quality) {
-            .a => t.hours_quality_bp.a,
-            .b => t.hours_quality_bp.b,
-            .c => t.hours_quality_bp.c,
-            .d => t.hours_quality_bp.d,
-            .e => t.hours_quality_bp.e,
-            .f => t.hours_quality_bp.f,
-        };
-        var hours = types.applyBp(@as(i64, base), q_bp);
-        if (design) |d| if (d.rarity == .very_rare) {
-            hours = types.applyBp(hours, t.hours_exotic_bp);
-        };
-        return @intCast(@max(1, hours));
-    }
-
-    /// The same hull in this tech's hands: skill sets the pace.
-    pub fn techHoursFor(self: *GameState, tech: *const person_mod.Person, u: *const unit_mod.Unit) u32 {
-        const t = tuning.maintenance;
-        const role = unit_mod.techRoleFor(u.kind) orelse tech.role;
-        const skill = tech.skill(role.primarySkill()) orelse 7;
-        const bp: types.Bp = if (skill <= 2) t.hours_skill_bp.elite else if (skill == 3) t.hours_skill_bp.veteran else if (skill == 4) t.hours_skill_bp.regular else if (skill == 5) t.hours_skill_bp.green else t.hours_skill_bp.untrained;
-        return @intCast(@max(1, types.applyBp(@as(i64, self.hullHours(u)), bp)));
-    }
-
-    /// Effective hours a tech can spend this week: the budget, scaled by the
-    /// astech team available in their company (`astechs_per_tech_full_rate`
-    /// per tech = full rate, none = `tech_no_team_bp`).
-    pub fn techHoursAvailable(self: *GameState, tech: *const person_mod.Person) u32 {
-        const company = self.companyOf(tech.assigned_force);
-        var techs: u32 = 0;
-        var astechs: u32 = 0;
-        var it = self.people.iterator();
-        while (it.next()) |entry| {
-            const p = entry.value_ptr;
-            if (!p.isAvailable(self.clock.day_index) or self.companyOf(p.assigned_force) != company) continue;
-            if (p.role == .astech) astechs += 1;
-            if (p.role.isTech()) techs += 1;
-        }
-        const tp = tuning.person;
-        const team_bp: types.Bp = if (techs == 0) types.full_bp else tp.tech_no_team_bp + @min(types.full_bp - tp.tech_no_team_bp, @divTrunc(@as(types.Bp, astechs) * (types.full_bp - tp.tech_no_team_bp), @as(types.Bp, tp.astechs_per_tech_full_rate) * @as(types.Bp, techs)));
-        return @intCast(types.applyBp(@as(types.CBills, tech.weekly_hours), team_bp));
-    }
-
-    /// A free tech of the right role in the same company (or any, if
-    /// `company` is .none) with hours to spare.
-    pub fn findFreeTech(self: *GameState, role: person_mod.Role, company: types.ForceId, hours_needed: u32) ?types.PersonId {
-        var best: ?types.PersonId = null;
-        var best_spare: u32 = 0;
-        var it = self.people.iterator();
-        while (it.next()) |entry| {
-            const p = entry.value_ptr;
-            if (p.role != role or !p.isAvailable(self.clock.day_index) or p.posted_hq != .none) continue;
-            if (company != .none and self.companyOf(p.assigned_force) != company) continue;
-            const avail = self.techHoursAvailable(p);
-            const load = self.techLoadHours(p.id);
-            if (avail < load + hours_needed) continue;
-            const spare = avail - load;
-            if (best == null or spare > best_spare) {
-                best = p.id;
-                best_spare = spare;
-            }
-        }
-        return best;
-    }
-
     // ------------------------------------------- the MekLab
 
     pub fn refitPlanFor(self: *GameState, unit_id: types.UnitId) ?*RefitPlan {
@@ -1519,29 +1432,6 @@ test "postTransaction keeps funds and ledger in lockstep" {
     try gs.postTransaction(.{ .day = 0, .amount = -300_000, .category = .unit_purchase });
     try std.testing.expectEqual(@as(types.CBills, 700_000), gs.funds);
     try std.testing.expectEqual(@as(types.CBills, -300_000), gs.ledger.balance());
-}
-
-test "a worn or exotic hull wants more hours; a sharper tech needs fewer" {
-    var gs = GameState.init(std.testing.allocator, .{ .seed = 1215 });
-    defer gs.deinit();
-    const uid = try gs.addUnit("AS7-D");
-    const u = gs.unit(uid).?;
-    u.quality = .c;
-    const plain = gs.hullHours(u);
-    try std.testing.expectEqual(@as(u32, 10), plain); // the class table, unchanged at C
-    u.quality = .a;
-    try std.testing.expect(gs.hullHours(u) > plain);
-    u.quality = .f;
-    try std.testing.expect(gs.hullHours(u) < plain);
-    u.quality = .c;
-    const tech = try gs.hirePerson("Ace", "Wrench", .tech_mek);
-    try gs.person(tech).?.skills.put(gs.allocator(), .tech_mek, 4);
-    const regular = gs.techHoursFor(gs.person(tech).?, u);
-    try std.testing.expectEqual(plain, regular);
-    try gs.person(tech).?.skills.put(gs.allocator(), .tech_mek, 2);
-    try std.testing.expect(gs.techHoursFor(gs.person(tech).?, u) < regular);
-    try gs.person(tech).?.skills.put(gs.allocator(), .tech_mek, 6);
-    try std.testing.expect(gs.techHoursFor(gs.person(tech).?, u) > regular);
 }
 
 test "company posture is one cascade: contract, then the road home, then a world, else home" {

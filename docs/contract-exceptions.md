@@ -63,7 +63,7 @@ Owner of every entry: the project owner.
 - **Scope:**
   - Every module and function listed in the rule 76 registry below.
   - Three switches with more than ten substantive arms (an arm body past three lines), measured by the check that guards them: `contract_events.applyEffectsFor`, `app.listView`, `forces.handle`. Five more sit at the threshold without crossing it: `app.listEnter` and `app.handleModalKey`, `market.handle`, `app.drawModal`, `supply.handle`.
-  - `GameState` methods with subsystem behaviour: founding, posture, TO&E, tech time, lift, refit, aftermath, `commanderMultBp`, and `hirePerson`'s default skill table (it leaves with C11's single role-to-skill rule; the creation itself is a storage primitive). (Hashing has moved to `digest.zig`; sale values to `econ/market.zig`; transfers, couriers, purchase debits, payroll, upkeep, liquidation and credit to `treasury.zig`; recruiting, spec hiring, posting and the recruit bonus to `personnel.zig`; the back-office counts, staffing refresh and autostaffing to `hq_ops.zig`; stock-site capacity, handovers, a force's supply site and goods sent home to `sites.zig`; the company load-out to `field_supply.zig`; seat eligibility, seat assignment and auto-assignment to `crew.zig`.)
+  - `GameState` methods with subsystem behaviour: founding, posture, TO&E, lift, refit, aftermath, `commanderMultBp`, and `hirePerson`'s default skill table (it leaves with C11's single role-to-skill rule; the creation itself is a storage primitive). (Hashing has moved to `digest.zig`; sale values to `econ/market.zig`; transfers, couriers, purchase debits, payroll, upkeep, liquidation and credit to `treasury.zig`; recruiting, spec hiring, posting and the recruit bonus to `personnel.zig`; the back-office counts, staffing refresh and autostaffing to `hq_ops.zig`; stock-site capacity, handovers, a force's supply site and goods sent home to `sites.zig`; the company load-out to `field_supply.zig`; seat eligibility, seat assignment and auto-assignment to `crew.zig`; hull and tech hours, tech capacity and free-tech search to `maintenance.zig`.)
   - Eight upward imports in `state.zig`, held by the C4 layering record below:
     - behaviour called from state: `personnel.zig` (`createCommander`'s `recruitGenerated`), `hq_ops.zig` (`refreshHqStaffing`), `treasury.zig` (`transferFunds`);
     - simulation types stored in `GameState` fields: `clock.zig` (the `Date` and `Clock` field types), `events.zig` (the `EventQueue` and `EventKind` field types), `after_action.zig` (the `Journal` field type), `network.zig` (the `HqLink` field type);
@@ -394,7 +394,8 @@ Owner of every entry: the project owner.
 - **Scope:**
   - Rule functions with no test:
     - `hq_ops`: `beyondEconomicalRepair`, `canFabricate`, `bayCanRebuild`, `upgradeBlock`, `rebuildEstimate`, `engineCharge`, `paperworkDaysFor`, `depotHqFor`, `staffHqToRequirement`
-    - `state`: `techHoursAvailable`, `findFreeTech`, `applyRefit`
+    - `state`: `applyRefit`
+    - `maintenance`: `techHoursAvailable`
     - `crew`: `canReachPool`
     - `sites`: `siteCapacityTons`, `moveStock`
     - `treasury`: `transferFunds`, `isInsolvent`, `liquidationValue`, `creditLimit`, `courierEtaDays`
@@ -455,7 +456,7 @@ Owner of every entry: the project owner.
   - **MekHQ map links (rule 61).** 35 module headers name a MekHQ counterpart without linking `docs/mekhq-map.md`.
   - **Misplaced comment (rule 82).** It sits at `state.zig:316`.
   - **Wrong citation (rule 84).** "ARCH §9.8 identity" should cite §5, at `state.zig:217`, `commands.zig:52` and `force.zig:144`.
-  - **Formula lines too long (rule 75):** `state.zig:1494`, `1513`.
+  - **Formula lines too long (rule 75):** `maintenance.zig:120` (`techHoursFor`), `152` (`techHoursAvailable`).
   - **Missing unit in names (rule 81).** The weekly-hour functions don't say they are weekly.
 - **Removal:** C20.
 - **Guard:** the module-header and comment checks in `verify-contract.sh` for the parts they cover; review for the rest.

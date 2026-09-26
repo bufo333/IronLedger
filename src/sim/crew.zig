@@ -10,6 +10,7 @@ const types = @import("../domain/types.zig");
 const person_mod = @import("../domain/person.zig");
 const unit_mod = @import("../domain/unit.zig");
 const GameState = @import("state.zig").GameState;
+const maintenance = @import("maintenance.zig");
 
 /// `any`: whichever seat the person's role fits — pilot roles
 /// take the crew seat, tech roles the tech slot.
@@ -119,8 +120,8 @@ pub fn autoAssign(gs: *GameState, company: types.ForceId) !u32 {
         }
         if (unit_mod.techRoleFor(u.kind)) |role| {
             if (u.tech == .none or !(gs.person(u.tech) orelse continue).isAvailable(gs.clock.day_index)) {
-                const hours = gs.hullHours(u);
-                if (gs.findFreeTech(role, company, hours) orelse gs.findFreeTech(role, .none, hours)) |tid| {
+                const hours = maintenance.hullHours(gs, u);
+                if (maintenance.findFreeTech(gs, role, company, hours) orelse maintenance.findFreeTech(gs, role, .none, hours)) |tid| {
                     assignSlot(gs, u.id, .tech, tid) catch {
                         open += 1;
                         continue;

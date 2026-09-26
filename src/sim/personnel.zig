@@ -16,6 +16,7 @@ const hq_ops = @import("hq_ops.zig");
 const company_gen = @import("../gen/company_gen.zig");
 const person_gen = @import("../gen/person_gen.zig");
 const rng_mod = @import("rng.zig");
+const maintenance = @import("maintenance.zig");
 
 /// Recruit a randomly generated person (AtB-style: experience on 2d6,
 /// skills from the band, names from the tables). No signing bonus: that
@@ -302,13 +303,13 @@ pub fn techHours(gs: *GameState, company: types.ForceId) TechHours {
     while (uit.next()) |e| {
         const u = e.value_ptr;
         if (u.isParked() or u.kind == .infantry or gs.companyOf(u.force) != company) continue;
-        needed += if (gs.person(u.tech)) |t| gs.techHoursFor(t, u) else gs.hullHours(u);
+        needed += if (gs.person(u.tech)) |t| maintenance.techHoursFor(gs, t, u) else maintenance.hullHours(gs, u);
     }
     var pit = gs.people.iterator();
     while (pit.next()) |e| {
         const p = e.value_ptr;
         if (!p.role.isTech() or !p.isAvailable(gs.clock.day_index) or gs.companyOf(p.assigned_force) != company) continue;
-        have += gs.techHoursAvailable(p);
+        have += maintenance.techHoursAvailable(gs, p);
     }
     return .{ .needed = needed, .have = have };
 }
