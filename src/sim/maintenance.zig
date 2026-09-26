@@ -17,6 +17,7 @@ const sites = @import("sites.zig");
 const crew = @import("crew.zig");
 const toe = @import("toe.zig");
 const GameState = @import("state.zig").GameState;
+const posture = @import("posture.zig");
 
 /// Hours a field repair costs the hull's tech (tuning.maintenance).
 const hours_damaged_slot = tuning.maintenance.hours_damaged_slot;
@@ -202,7 +203,7 @@ pub fn runWeeklyMaintenance(gs: *GameState) !void {
             }
         }
 
-        const deployed = gs.isCompanyDeployed(gs.companyOf(u.force));
+        const deployed = posture.isCompanyDeployed(gs, gs.companyOf(u.force));
         var tn: i32 = tuning.maintenance.target_base + u.quality.maintenanceModifier();
         if (deployed) tn += tuning.maintenance.target_deployed; // field conditions
         if (!covered) tn += tuning.maintenance.target_uncovered; // nobody turning wrenches
@@ -323,7 +324,7 @@ pub fn runWeeklyRepairs(gs: *GameState) !void {
         if (!u.takesFieldWork()) continue;
         const tech = activeTech(gs, u) orelse continue; // no tech, no repairs
         const base_load = techLoadHours(gs, tech.id);
-        const at_home = gs.isCompanyHome(gs.companyOf(u.force)); // not merely off contract: a company returning or idling afield is away too
+        const at_home = posture.isCompanyHome(gs, gs.companyOf(u.force)); // not merely off contract: a company returning or idling afield is away too
         const site = sites.siteForForce(gs, u.force);
 
         for (u.slots.items) |*slot| {

@@ -8,6 +8,7 @@ const tuning = @import("../domain/tuning.zig").t;
 const contract_mod = @import("../domain/contract.zig");
 const GameState = @import("state.zig").GameState;
 const Treasury = @import("state.zig").Treasury;
+const posture = @import("posture.zig");
 const treasury = @import("treasury.zig");
 const types = @import("../domain/types.zig");
 const contract_market = @import("contract_market.zig");
@@ -103,7 +104,7 @@ fn runPolicies(gs: *GameState) !void {
     const Result = commands.Result;
     for (gs.supply_policies.items) |sp| {
         const f = gs.forces.getPtr(sp.company) orelse continue;
-        if (gs.isCompanyHome(sp.company) or f.return_eta_day != null) continue;
+        if (posture.isCompanyHome(gs, sp.company) or f.return_eta_day != null) continue;
         const home = gs.homeHqFor(sp.company);
         if (home == .none) continue;
         const site: types.Site = .{ .company = sp.company };
@@ -247,7 +248,7 @@ fn runTrainingLances(gs: *GameState) void {
         if (p.status != .active) continue;
         const lance = gs.forces.getPtr(p.assigned_force) orelse continue;
         if (lance.role != .training) continue;
-        if (!gs.isCompanyHome(gs.companyOf(lance.id))) continue;
+        if (!posture.isCompanyHome(gs, gs.companyOf(lance.id))) continue;
         p.xp += p.xpGain(gs.clock.day_index, 1);
     }
 }
@@ -318,7 +319,7 @@ fn runSupplyConsumption(gs: *GameState) !void {
     var fit = gs.forces.iterator();
     while (fit.next()) |fentry| {
         const f = fentry.value_ptr;
-        if (f.echelon != .company or gs.isCompanyHome(f.id) or f.return_eta_day != null) continue;
+        if (f.echelon != .company or posture.isCompanyHome(gs, f.id) or f.return_eta_day != null) continue;
         const c = gs.deploymentContract(f.id);
         // Idling with no known world: no market to buy from.
         if (c == null and f.location_planet == null) continue;

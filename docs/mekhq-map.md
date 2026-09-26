@@ -72,6 +72,7 @@ re-implemented in Zig. Paths below are under `MekHQ/src/mekhq/campaign/`.
 | Per-site storage tonnage and handovers (no MekHQ analog; MekHQ has no per-site storage tonnage) | `src/sim/sites.zig` — site capacity, free tons, moves between sites, and goods crated home | 12 |
 | Golden-master state digest (MekHQ has no determinism harness) | `src/sim/digest.zig`: a canonical digest of any plain value, maps order-independent; `stateHash` feeds every persisted field of a campaign through it | 12 |
 | Key-binding tables (MekHQ's Swing menus carry their own accelerators) | `src/tui/keys.zig`: one table per screen maps keys to actions and holds every word shown about them; footer, help and the `docs/tui.md` key reference are generated from it | 12 |
+| — | Company posture: home / deployed / returning / idle afield | `src/sim/posture.zig` (`companyPosture`, `isCompanyHome`, `isCompanyDeployed`) | 12 |
 
 ## Useful MekHQ rule references while implementing
 

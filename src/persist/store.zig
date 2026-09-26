@@ -15,6 +15,7 @@ const sqlite = @import("sqlite.zig");
 const types = @import("../domain/types.zig");
 const state_mod = @import("../sim/state.zig");
 const GameState = state_mod.GameState;
+const posture = @import("../sim/posture.zig");
 const person_mod = @import("../domain/person.zig");
 const unit_mod = @import("../domain/unit.zig");
 const force_mod = @import("../domain/force.zig");
@@ -2852,7 +2853,7 @@ fn playedYearForTest(gs: *GameState) !void {
                 _ = try commands.execute(gs, .{ .resolve_decision = .{ .event = ev.id, .choice = ev.default_choice } });
             },
         };
-        if (!gs.isCompanyDeployed(co) and gs.contract_offers.items.len > 0) {
+        if (!posture.isCompanyDeployed(gs, co) and gs.contract_offers.items.len > 0) {
             _ = commands.execute(gs, .{ .accept_contract = .{ .offer_index = 0, .company = co } }) catch {};
         }
         const r = try commands.execute(gs, .{ .advance_days = 7 });

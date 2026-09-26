@@ -63,11 +63,10 @@ Owner of every entry: the project owner.
 - **Scope:**
   - Every module and function listed in the rule 76 registry below.
   - Three switches with more than ten substantive arms (an arm body past three lines), measured by the check that guards them: `contract_events.applyEffectsFor`, `app.listView`, `forces.handle`. Five more sit at the threshold without crossing it: `app.listEnter` and `app.handleModalKey`, `market.handle`, `app.drawModal`, `supply.handle`.
-  - `GameState` methods with subsystem behaviour: founding, posture, lift, refit, aftermath, `commanderMultBp`, and `hirePerson`'s default skill table (it leaves with C11's single role-to-skill rule; the creation itself is a storage primitive). (Hashing has moved to `digest.zig`; sale values to `econ/market.zig`; transfers, couriers, purchase debits, payroll, upkeep, liquidation and credit to `treasury.zig`; recruiting, spec hiring, posting and the recruit bonus to `personnel.zig`; the back-office counts, staffing refresh and autostaffing to `hq_ops.zig`; stock-site capacity, handovers, a force's supply site and goods sent home to `sites.zig`; the company load-out to `field_supply.zig`; seat eligibility, seat assignment and auto-assignment to `crew.zig`; hull and tech hours, tech capacity and free-tech search to `maintenance.zig`; company and lance counts, HQ and company capacity, support lances, unit placement and moves and company membership to `toe.zig`.)
-  - Eight upward imports in `state.zig`, held by the C4 layering record below:
+  - `GameState` methods with subsystem behaviour: founding, lift, refit, aftermath, `commanderMultBp`, and `hirePerson`'s default skill table (it leaves with C11's single role-to-skill rule; the creation itself is a storage primitive). (Hashing has moved to `digest.zig`; sale values to `econ/market.zig`; transfers, couriers, purchase debits, payroll, upkeep, liquidation and credit to `treasury.zig`; recruiting, spec hiring, posting and the recruit bonus to `personnel.zig`; the back-office counts, staffing refresh and autostaffing to `hq_ops.zig`; stock-site capacity, handovers, a force's supply site and goods sent home to `sites.zig`; the company load-out to `field_supply.zig`; seat eligibility, seat assignment and auto-assignment to `crew.zig`; hull and tech hours, tech capacity and free-tech search to `maintenance.zig`; company and lance counts, HQ and company capacity, support lances, unit placement and moves and company membership to `toe.zig`.)
+  - Seven upward imports in `state.zig`, held by the C4 layering record below:
     - behaviour called from state: `personnel.zig` (`createCommander`'s `recruitGenerated`), `hq_ops.zig` (`refreshHqStaffing`), `treasury.zig` (`transferFunds`);
-    - simulation types stored in `GameState` fields: `clock.zig` (the `Date` and `Clock` field types), `events.zig` (the `EventQueue` and `EventKind` field types), `after_action.zig` (the `Journal` field type), `network.zig` (the `HqLink` field type);
-    - a test in `state.zig` importing the simulation layer: `starter_company.zig`. Rule 5's test clause covers only command-view agreement tests importing `queries.zig`, so this one needs its own listing.
+    - simulation types stored in `GameState` fields: `clock.zig` (the `Date` and `Clock` field types), `events.zig` (the `EventQueue` and `EventKind` field types), `after_action.zig` (the `Journal` field type), `network.zig` (the `HqLink` field type).
   - The 6 test-only `queries.zig` imports in `commands.zig`, `hq_ops.zig` and `crew.zig` are agreement tests allowed by rule 5's test clause and are not part of this entry.
   - This sub-list records existing debt found by a full audit; it grants no
     permission. A new upward import is a violation even beside a listed one:
@@ -522,8 +521,7 @@ The C4 layering debt (rule 5), one canonical edge per line as
 repository root. `docs/verify-contract.sh` resolves every upward import in
 `src`, except a test's import of `queries.zig` (rule 5's test clause), and
 fails on one missing from this record, and on a record edge whose import no
-longer exists (remove it). The checker also checks test code, which is why
-the `starter_company.zig` edge is recorded. The `treasury.zig`,
+longer exists (remove it). The `treasury.zig`,
 `personnel.zig` and `hq_ops.zig` edges were introduced by C4a (PRs #119,
 #121, #122), which moved transfer, recruiting/posting and staffing
 behaviour off `GameState` into their owning modules; founding
@@ -541,6 +539,5 @@ src/sim/state.zig -> src/sim/events.zig
 src/sim/state.zig -> src/sim/hq_ops.zig
 src/sim/state.zig -> src/sim/network.zig
 src/sim/state.zig -> src/sim/personnel.zig
-src/sim/state.zig -> src/sim/starter_company.zig
 src/sim/state.zig -> src/sim/treasury.zig
 ```

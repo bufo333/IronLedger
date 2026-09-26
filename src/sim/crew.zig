@@ -11,6 +11,7 @@ const person_mod = @import("../domain/person.zig");
 const unit_mod = @import("../domain/unit.zig");
 const GameState = @import("state.zig").GameState;
 const maintenance = @import("maintenance.zig");
+const posture = @import("posture.zig");
 
 /// `any`: whichever seat the person's role fits — pilot roles
 /// take the crew seat, tech roles the tech slot.
@@ -40,7 +41,7 @@ pub fn assignBlock(gs: *GameState, u: *const unit_mod.Unit, p: *const person_mod
 pub fn canReachPool(gs: *GameState, p: *const person_mod.Person) bool {
     const company = gs.companyOf(p.assigned_force);
     if (company == .none) return true;
-    if (!gs.isCompanyHome(company)) return false;
+    if (!posture.isCompanyHome(gs, company)) return false;
     const seat: types.HqId = if (gs.hqs.count() > 0) gs.hqs.keys()[0] else .none;
     return gs.homeHqFor(company) == seat;
 }
@@ -201,7 +202,7 @@ test "assignBlock's reason matches crewChoices' dim and the assign command's ref
     const away_co = try gs.createForce("Bravo", .company, .none);
     gs.person(away_pilot).?.assigned_force = away_co;
     gs.force(away_co).?.location_planet = "galatea";
-    try std.testing.expect(!gs.isCompanyHome(away_co));
+    try std.testing.expect(!posture.isCompanyHome(&gs, away_co));
 
     const pool_mek = try gs.addUnit("LCT-1V");
     const pool_u = gs.unit(pool_mek).?;

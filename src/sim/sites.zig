@@ -15,12 +15,13 @@ const types = @import("../domain/types.zig");
 const part_mod = @import("../domain/part.zig");
 const treasury = @import("treasury.zig");
 const GameState = @import("state.zig").GameState;
+const posture = @import("posture.zig");
 
 /// Where a force draws supplies from: its own field stores while away
 /// from home, its home warehouse otherwise.
 pub fn siteForForce(gs: *GameState, force_id: types.ForceId) types.Site {
     const co = gs.companyOf(force_id);
-    if (co != .none and !gs.isCompanyHome(co)) return .{ .company = co };
+    if (co != .none and !posture.isCompanyHome(gs, co)) return .{ .company = co };
     return gs.homeSiteFor(force_id);
 }
 

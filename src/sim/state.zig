@@ -684,37 +684,6 @@ pub const GameState = struct {
         return if (hq != .none) .{ .hq = hq } else .outfit;
     }
 
-    /// Where a company stands (ARCH §9.7): the one cascade every screen,
-    /// warning and refusal reads. Contract first (en route, then on
-    /// station), then the road home, then a world it idles on, else home.
-    pub const CompanyPosture = union(enum) {
-        home,
-        en_route: *contract_mod.Contract,
-        deployed: *contract_mod.Contract,
-        returning: u32, // arrival day
-        idle_afield: []const u8, // planet key
-    };
-
-    pub fn companyPosture(self: *GameState, company: types.ForceId) CompanyPosture {
-        if (self.deploymentContract(company)) |c| return if (c.status == .transit) .{ .en_route = c } else .{ .deployed = c };
-        const f = self.forces.getPtr(company) orelse return .home;
-        if (f.return_eta_day) |eta| return .{ .returning = eta };
-        if (f.location_planet) |p| return .{ .idle_afield = p };
-        return .home;
-    }
-
-    /// Is the company physically at its home HQ (not deployed, not idling
-    /// on a contract world, not travelling)?
-    pub fn isCompanyHome(self: *GameState, company: types.ForceId) bool {
-        return self.companyPosture(company) == .home;
-    }
-
-    /// Out on a contract (en route or on station). Not the opposite of
-    /// home: a company returning or idling afield is neither.
-    pub fn isCompanyDeployed(self: *GameState, company: types.ForceId) bool {
-        return self.deploymentContract(company) != null;
-    }
-
     /// Ready to act today: the hull can take the field and its crew is fit
     /// for duty. Support modifiers, MASH beds, the battle line and
     /// fieldable strength all count hulls by this test.
@@ -1219,25 +1188,4 @@ test "postTransaction keeps funds and ledger in lockstep" {
     try gs.postTransaction(.{ .day = 0, .amount = -300_000, .category = .unit_purchase });
     try std.testing.expectEqual(@as(types.CBills, 700_000), gs.funds);
     try std.testing.expectEqual(@as(types.CBills, -300_000), gs.ledger.balance());
-}
-
-test "company posture is one cascade: contract, then the road home, then a world, else home" {
-    var gs = GameState.init(std.testing.allocator, .{ .seed = 5 });
-    defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .line_officer);
-    _ = try @import("starter_company.zig").generateInto(&gs, "Alpha");
-    var co: types.ForceId = .none;
-    var it = gs.forces.iterator();
-    while (it.next()) |e| if (e.value_ptr.echelon == .company) {
-        co = e.value_ptr.id;
-    };
-    try std.testing.expect(gs.companyPosture(co) == .home);
-    try std.testing.expect(gs.isCompanyHome(co) and !gs.isCompanyDeployed(co));
-    const f = gs.forces.getPtr(co).?;
-    f.location_planet = "galatea";
-    try std.testing.expect(gs.companyPosture(co) == .idle_afield);
-    try std.testing.expect(!gs.isCompanyHome(co) and !gs.isCompanyDeployed(co));
-    f.return_eta_day = 40;
-    try std.testing.expect(gs.companyPosture(co) == .returning);
-    try std.testing.expectEqual(@as(u32, 40), gs.companyPosture(co).returning);
 }

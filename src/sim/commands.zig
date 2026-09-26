@@ -10,6 +10,7 @@ const types = @import("../domain/types.zig");
 const person_mod = @import("../domain/person.zig");
 const state_mod = @import("state.zig");
 const GameState = state_mod.GameState;
+const posture = @import("posture.zig");
 const treasury = @import("treasury.zig");
 const tick = @import("tick.zig");
 const starter_company = @import("starter_company.zig");
@@ -868,8 +869,8 @@ fn execToggleAutoAdmit(gs: *GameState) Error!Result {
 fn execRecallIdle(gs: *GameState, company: @FieldType(Command, "recall_idle")) Error!Result {
     const f = gs.force(company) orelse return Error.UnknownForce;
     if (f.echelon != .company) return Error.NotACompany;
-    if (gs.isCompanyHome(company)) return Error.AlreadyHome;
-    if (gs.isCompanyDeployed(company)) return Error.UnderContract;
+    if (posture.isCompanyHome(gs, company)) return Error.AlreadyHome;
+    if (posture.isCompanyDeployed(gs, company)) return Error.UnderContract;
     return execute(gs, .{ .recall_company = company });
 }
 
@@ -885,7 +886,7 @@ fn execTransferPerson(gs: *GameState, t: @FieldType(Command, "transfer_person"))
     const p = gs.person(t.person) orelse return Error.UnknownPerson;
     const dest = gs.force(t.to_force) orelse return Error.UnknownForce;
     if (gs.companyOf(p.assigned_force) == gs.companyOf(dest.id) and p.assigned_force == dest.id) return Error.SameForce;
-    if (gs.isCompanyDeployed(gs.companyOf(p.assigned_force))) return Error.PersonDeployed;
+    if (posture.isCompanyDeployed(gs, gs.companyOf(p.assigned_force))) return Error.PersonDeployed;
     // Vacate any seat/tech slot they hold in the old company.
     var uit = gs.units.iterator();
     while (uit.next()) |entry| {
@@ -937,7 +938,7 @@ fn execTrainAbility(gs: *GameState, ta: @FieldType(Command, "train_ability")) Er
     const p = gs.person(ta.person) orelse return Error.UnknownPerson;
     _ = gs.trainingHqFor(p) orelse return Error.NoTrainingGround;
     if (p.status != .active) return Error.PersonUnavailable;
-    if (gs.isCompanyDeployed(gs.companyOf(p.assigned_force))) return Error.PersonDeployed;
+    if (posture.isCompanyDeployed(gs, gs.companyOf(p.assigned_force))) return Error.PersonDeployed;
     const a = @import("../domain/ability.zig").find(ta.key) orelse return Error.UnknownAbility;
     if (p.has(a.key)) return Error.AlreadyLearned;
     if (p.xp < a.xp_cost) return Error.InsufficientXp;
@@ -1057,7 +1058,7 @@ fn execBuyListing(gs: *GameState, index: @FieldType(Command, "buy_listing")) Err
 fn execMothball(gs: *GameState, unit_id: @FieldType(Command, "mothball")) Error!Result {
     const u = gs.unit(unit_id) orelse return Error.UnknownUnit;
     if (u.status == .mothballed) return Error.AlreadyMothballed;
-    if (gs.isCompanyDeployed(gs.companyOf(u.force))) return Error.UnitDeployed;
+    if (posture.isCompanyDeployed(gs, gs.companyOf(u.force))) return Error.UnitDeployed;
     u.status = .mothballed;
     return .{};
 }
@@ -1073,7 +1074,7 @@ fn execMoveUnit(gs: *GameState, m: @FieldType(Command, "move_unit")) Error!Resul
     // company is, so a hull shipped to it in the field can be placed
     // there; joining from outside waits
     // for the company to be home — `transfer_unit` ships it there.
-    if (from_co != co and !gs.isCompanyHome(co)) return Error.CompanyDeployed;
+    if (from_co != co and !posture.isCompanyHome(gs, co)) return Error.CompanyDeployed;
     if (from_co != .none and from_co != co) return Error.SameForce; // use transfer_unit between companies
     if (dest.isCombatLance() and dest.units.items.len >= force_mod.lance_size) return Error.TooManyLances;
     if (u.status == .in_transit) return Error.Unavailable;
@@ -1219,7 +1220,7 @@ fn execBuyHullFor(gs: *GameState, b: @FieldType(Command, "buy_hull_for")) Error!
 fn execCrewCompany(gs: *GameState, company: @FieldType(Command, "crew_company")) Error!Result {
     const f = gs.force(company) orelse return Error.UnknownForce;
     if (f.echelon != .company) return Error.NotACompany;
-    if (gs.isCompanyDeployed(company)) return Error.CompanyDeployed;
+    if (posture.isCompanyDeployed(gs, company)) return Error.CompanyDeployed;
     const personnel = @import("personnel.zig");
     var hired: u32 = 0;
     var still_open: u32 = 0;
@@ -1344,8 +1345,8 @@ fn execClearStandingOrder(gs: *GameState, name: @FieldType(Command, "clear_stand
 fn execDepot(gs: *GameState, unit_id: @FieldType(Command, "depot")) Error!Result {
     const u = gs.unit(unit_id) orelse return Error.UnknownUnit;
     if (!u.needsDepot()) return Error.NothingToRepair;
-    if (gs.isCompanyDeployed(gs.companyOf(u.force))) return Error.UnitDeployed;
-    if (!gs.isCompanyHome(gs.companyOf(u.force))) return Error.UnitAway;
+    if (posture.isCompanyDeployed(gs, gs.companyOf(u.force))) return Error.UnitDeployed;
+    if (!posture.isCompanyHome(gs, gs.companyOf(u.force))) return Error.UnitAway;
     const queued = hq_ops.queueDepotRepair(gs, unit_id) catch |err| return switch (err) {
         error.NoHq => Error.NoHq,
         error.NoBay => Error.NoBay,
@@ -1379,7 +1380,7 @@ fn execRepayLoan(gs: *GameState, r: @FieldType(Command, "repay_loan")) Error!Res
 
 fn execSellUnit(gs: *GameState, unit_id: @FieldType(Command, "sell_unit")) Error!Result {
     const u = gs.unit(unit_id) orelse return Error.UnknownUnit;
-    if (gs.isCompanyDeployed(gs.companyOf(u.force))) return Error.UnitDeployed;
+    if (posture.isCompanyDeployed(gs, gs.companyOf(u.force))) return Error.UnitDeployed;
     const value = market_mod.unitSaleValue(u);
     const key = u.chassis_key;
     gs.removeUnit(unit_id);
@@ -1391,8 +1392,8 @@ fn execSellUnit(gs: *GameState, unit_id: @FieldType(Command, "sell_unit")) Error
 fn execStripUnit(gs: *GameState, unit_id: @FieldType(Command, "strip_unit")) Error!Result {
     const u = gs.unit(unit_id) orelse return Error.UnknownUnit;
     const company = gs.companyOf(u.force);
-    if (gs.isCompanyDeployed(company)) return Error.UnitDeployed;
-    if (u.status == .in_transit or (company != .none and !gs.isCompanyHome(company))) return Error.UnitAway;
+    if (posture.isCompanyDeployed(gs, company)) return Error.UnitDeployed;
+    if (u.status == .in_transit or (company != .none and !posture.isCompanyHome(gs, company))) return Error.UnitAway;
     const hq_id = gs.homeHqFor(u.force);
     if (gs.hqs.getPtr(hq_id) == null) return Error.NoHq;
     const lines = try market_mod.stripParts(gs.allocator(), u);
@@ -1462,7 +1463,7 @@ fn execSellHq(gs: *GameState, hq_id: @FieldType(Command, "sell_hq")) Error!Resul
 fn execDisbandCompany(gs: *GameState, co: @FieldType(Command, "disband_company")) Error!Result {
     const f = gs.forces.getPtr(co) orelse return Error.UnknownForce;
     if (f.echelon != .company) return Error.NotACompany;
-    if (!gs.isCompanyHome(co)) return Error.CompanyDeployed;
+    if (!posture.isCompanyHome(gs, co)) return Error.CompanyDeployed;
     const name = f.name;
     var total: types.CBills = f.local_funds;
     // Hulls under the subtree, then people, then the forces.
@@ -1626,7 +1627,7 @@ fn execTriage(gs: *GameState, t: @FieldType(Command, "triage")) Error!Result {
 fn execLeave(gs: *GameState, l: @FieldType(Command, "leave")) Error!Result {
     const p = gs.person(l.person) orelse return Error.UnknownPerson;
     if (p.status != .active) return Error.PersonUnavailable;
-    if (gs.isCompanyDeployed(gs.companyOf(p.assigned_force))) return Error.PersonDeployed;
+    if (posture.isCompanyDeployed(gs, gs.companyOf(p.assigned_force))) return Error.PersonDeployed;
     p.leave_until_day = gs.clock.day_index + l.days;
     return .{};
 }
@@ -1636,7 +1637,7 @@ fn execTrain(gs: *GameState, t: @FieldType(Command, "train")) Error!Result {
     const ground = gs.trainingHqFor(p) orelse return Error.NoTrainingGround;
     if (p.status != .active) return Error.PersonUnavailable;
     if (p.training != null) return Error.AlreadyTraining;
-    if (gs.isCompanyDeployed(gs.companyOf(p.assigned_force))) return Error.PersonDeployed;
+    if (posture.isCompanyDeployed(gs, gs.companyOf(p.assigned_force))) return Error.PersonDeployed;
 
     // Validate up front so the refusal is explained now, not in 30 days.
     const current = p.skill(t.skill) orelse return Error.NotTrained;
@@ -1801,7 +1802,7 @@ fn travelDays(gs: *GameState, from_company: types.ForceId, to_company: types.For
 /// Why a hull cannot be moved to another company right now, or null:
 /// the transfer refuses on it and the company picker dims every row on it.
 pub fn transferBlock(gs: *GameState, u: *const unit_mod.Unit) ?[]const u8 {
-    if (gs.isCompanyDeployed(gs.companyOf(u.force))) return "its company is deployed";
+    if (posture.isCompanyDeployed(gs, gs.companyOf(u.force))) return "its company is deployed";
     if (u.status == .in_transit) return "it is in transit";
     if (u.inShop()) return "it is in the depot";
     return null;
@@ -1850,7 +1851,7 @@ fn commitRefit(gs: *GameState, unit_id: types.UnitId) Error!Result {
     const plan = gs.refitPlanFor(unit_id) orelse return Error.NoPlan;
     if (plan.committed or plan.ops.items.len == 0) return Error.NoPlan;
     if (u.isBusy() or u.isParked()) return Error.Unavailable;
-    if (!gs.isCompanyHome(gs.companyOf(u.force))) return Error.UnitAway;
+    if (!posture.isCompanyHome(gs, gs.companyOf(u.force))) return Error.UnitAway;
     const design = @import("../domain/chassis.zig").find(u.chassis_key) orelse return Error.UnknownChassis;
     const hq_id = gs.homeHqFor(u.force);
     const hq = gs.hqs.getPtr(hq_id) orelse return Error.NoHq;
@@ -2081,7 +2082,7 @@ fn shipStock(gs: *GameState, part_key: []const u8, quantity: u32, from: types.Si
 fn trainCompany(gs: *GameState, company: types.ForceId, skill_opt: ?types.SkillType) Error!Result {
     const f = gs.force(company) orelse return Error.UnknownForce;
     if (f.echelon != .company) return Error.NotACompany;
-    if (!gs.isCompanyHome(company)) return Error.CompanyDeployed;
+    if (!posture.isCompanyHome(gs, company)) return Error.CompanyDeployed;
     const ground = gs.homeHqFor(company);
     const ground_hq = gs.hqs.getPtr(ground) orelse return Error.NoTrainingGround;
     if (!ground_hq.supportsTraining()) return Error.NoTrainingGround;
@@ -2256,7 +2257,7 @@ pub fn planLift(gs: *GameState, company_id: types.ForceId, commit: bool) Error!L
     }
     plan.needed = need[0] + need[1] + need[2];
     if (plan.needed == 0) return plan;
-    const at_home = gs.isCompanyHome(company_id);
+    const at_home = posture.isCompanyHome(gs, company_id);
     const home = gs.homeHqFor(company_id);
     var have: [3]u32 = .{ 0, 0, 0 };
     var ships: std.ArrayListUnmanaged(types.UnitId) = .empty;
@@ -3917,7 +3918,7 @@ test "idle companies stay where they worked; recall brings them home; redeploy f
     try std.testing.expect(done.status == .completed or done.status == .breached or done.status == .failed);
 
     // The company is still out there, eating from its trucks, until told.
-    try std.testing.expect(!gs.isCompanyHome(co));
+    try std.testing.expect(!posture.isCompanyHome(&gs, co));
     try std.testing.expectEqualStrings(done.planet_key, gs.force(co).?.location_planet.?);
 
     // Redeploy straight from the field if there's work (transit from
@@ -3933,7 +3934,7 @@ test "idle companies stay where they worked; recall brings them home; redeploy f
     }
     // Either way the company is now travelling and can't be recalled twice.
     try std.testing.expectError(Error.CompanyInTransit, execute(&gs, .{ .recall_company = co }));
-    while (!gs.isCompanyHome(co)) _ = try execute(&gs, .{ .advance_days = 5 });
+    while (!posture.isCompanyHome(&gs, co)) _ = try execute(&gs, .{ .advance_days = 5 });
 }
 
 test "the lab refuses illegal fits, gates by bay class, and refits through the bay" {

@@ -14,6 +14,7 @@ const hq_ops = @import("hq_ops.zig");
 const table = @import("table.zig");
 const medical = @import("medical.zig");
 const GameState = @import("state.zig").GameState;
+const posture = @import("posture.zig");
 const treasury = @import("treasury.zig");
 const sites = @import("sites.zig");
 const crew = @import("crew.zig");
@@ -272,7 +273,7 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
         var pit = gs.people.iterator();
         while (pit.next()) |e| {
             const p = e.value_ptr;
-            if (p.status == .active and !gs.isCompanyDeployed(gs.companyOf(p.assigned_force)) and medical.turnoverRisk(p, day) > 0) restless += 1;
+            if (p.status == .active and !posture.isCompanyDeployed(gs, gs.companyOf(p.assigned_force)) and medical.turnoverRisk(p, day) > 0) restless += 1;
         }
         if (restless > 0) try out.append(alloc, .{ .kind = .restless_crew, .text = try std.fmt.allocPrint(alloc, "{d} restless (morale < {d} or fatigue > {d}, a year in) — they roll to quit on payday: rotate home, grant leave, feed and rest them", .{ restless, t.restless_morale, t.exhausted_fatigue }) });
     }
@@ -353,7 +354,7 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
                 short_total += open;
             }
             // A deployed company can't hire from the halls; people reach it by transfer.
-            if (short_total > 0) try out.append(alloc, .{ .kind = .manning_short, .text = if (gs.isCompanyDeployed(f.id))
+            if (short_total > 0) try out.append(alloc, .{ .kind = .manning_short, .text = if (posture.isCompanyDeployed(gs, f.id))
                 try std.fmt.allocPrint(alloc, "{s} manning short: {s} (deployed — hire at an HQ hall, then :xfer person <id> co:{d}; they travel to the company)", .{ try table.plain(alloc, f.name), text.items, @intFromEnum(f.id) })
             else
                 try std.fmt.allocPrint(alloc, "{s} manning short: {s} (Forces r → MANNING; :crew co:{d} hires from the halls)", .{ try table.plain(alloc, f.name), text.items, @intFromEnum(f.id) }) });
@@ -361,7 +362,7 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
         if (f.supply_shortage_days > 0) {
             try out.append(alloc, .{ .kind = .hungry, .text = try std.fmt.allocPrint(alloc, "{s} has been hungry {d} day(s) — send provisions or funds", .{ try table.plain(alloc, f.name), f.supply_shortage_days }) });
         }
-        if (gs.isCompanyDeployed(f.id)) {
+        if (posture.isCompanyDeployed(gs, f.id)) {
             // Only the families the company's working mounts actually fire.
             var dry: u32 = 0;
             var names: std.ArrayListUnmanaged(u8) = .empty;
@@ -394,7 +395,7 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
     var idle_it = gs.forces.iterator();
     while (idle_it.next()) |fentry| {
         const f = fentry.value_ptr;
-        if (f.echelon != .company or gs.companyPosture(f.id) != .idle_afield) continue;
+        if (f.echelon != .company or posture.companyPosture(gs, f.id) != .idle_afield) continue;
         try out.append(alloc, .{ .kind = .company_idle_afield, .text = try std.fmt.allocPrint(alloc, "{s} is idling on {s} eating its trucks — accept work from the field or `recall co:{d}`", .{ try table.plain(alloc, f.name), f.location_planet.?, @intFromEnum(f.id) }) });
     }
 
@@ -452,7 +453,7 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
             // their damage is the player's to schedule, not a backlog.
             if (u.status == .mothballed or u.force == .none) continue;
             if (gs.homeHqFor(u.force) != hq.id) continue; // this HQ's bay, its hulls
-            if (u.needsDepot() and u.status != .repairing and gs.isCompanyHome(gs.companyOf(u.force)) and !hq_ops.hasJobForUnit(gs, u.id)) waiting += 1;
+            if (u.needsDepot() and u.status != .repairing and posture.isCompanyHome(gs, gs.companyOf(u.force)) and !hq_ops.hasJobForUnit(gs, u.id)) waiting += 1;
         }
         // Hulls this HQ's bay could not rebuild, per company based here.
         var rit = gs.forces.iterator();
@@ -501,7 +502,7 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
     var pit = gs.people.iterator();
     while (pit.next()) |pentry| {
         const p = pentry.value_ptr;
-        if (p.status == .wounded and gs.isCompanyHome(gs.companyOf(p.assigned_force))) wounded_home += 1;
+        if (p.status == .wounded and posture.isCompanyHome(gs, gs.companyOf(p.assigned_force))) wounded_home += 1;
     }
     const beds = medical.bedCapacity(gs, .none, false);
     if (wounded_home > beds) {

@@ -18,6 +18,7 @@ const sites = @import("sites.zig");
 const toe = @import("toe.zig");
 const state_mod = @import("state.zig");
 const GameState = state_mod.GameState;
+const posture = @import("posture.zig");
 
 // ----------------------------------------------------- the back office
 
@@ -268,7 +269,7 @@ pub fn spareSitesOf(alloc: std.mem.Allocator, gs: *GameState, hq_id: types.HqId)
     var fit = gs.forces.iterator();
     while (fit.next()) |e| {
         const f = e.value_ptr;
-        if (f.echelon != .company or gs.homeHqFor(f.id) != hq_id or gs.isCompanyHome(f.id)) continue;
+        if (f.echelon != .company or gs.homeHqFor(f.id) != hq_id or posture.isCompanyHome(gs, f.id)) continue;
         try out.append(alloc, .{ .company = f.id });
     }
     return out.toOwnedSlice(alloc);

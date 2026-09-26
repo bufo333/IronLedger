@@ -12,6 +12,7 @@ const types = @import("../domain/types.zig");
 const person_mod = @import("../domain/person.zig");
 const GameState = @import("state.zig").GameState;
 const hq_ops = @import("hq_ops.zig");
+const posture = @import("posture.zig");
 const sites = @import("sites.zig");
 const toe = @import("toe.zig");
 
@@ -87,7 +88,7 @@ pub fn severityLabel(severity: u8) []const u8 {
 
 /// Is this person's posting currently deployed?
 fn isDeployed(gs: *GameState, p: *const person_mod.Person) bool {
-    return gs.isCompanyDeployed(gs.companyOf(p.assigned_force));
+    return posture.isCompanyDeployed(gs, gs.companyOf(p.assigned_force));
 }
 
 /// Where a fresh wound is treated: a home HQ's hospital, a MASH lance in
@@ -108,7 +109,7 @@ pub fn companyFieldsMash(gs: *GameState, company: types.ForceId) bool {
 /// The care a person's wound gets today.
 pub fn careFor(gs: *GameState, p: *const person_mod.Person) Care {
     const company = gs.companyOf(p.assigned_force);
-    if (!gs.isCompanyDeployed(company)) return .home;
+    if (!posture.isCompanyDeployed(gs, company)) return .home;
     return if (companyFieldsMash(gs, company)) .field_mash else .field;
 }
 
@@ -395,7 +396,7 @@ pub fn runWeeklyRest(gs: *GameState) !void {
     while (fit.next()) |entry| {
         const f = entry.value_ptr;
         if (f.echelon != .company or f.contracts_since_rotation == 0) continue;
-        if (gs.isCompanyDeployed(f.id)) continue;
+        if (posture.isCompanyDeployed(gs, f.id)) continue;
 
         const crew = @import("personnel.zig").companyCrewStats(gs, f.id);
         if (crew.heads > 0 and crew.avg_fatigue <= tuning.person.fatigue_rested) {
@@ -693,7 +694,7 @@ test "a deployed patient without a ready MASH lance heals slower than one with i
         defer gs.deinit();
         const f = try @import("contract_events.zig").damagedCompanyForTest(&gs, 0);
         const co = f.c.assigned_company;
-        try std.testing.expect(gs.isCompanyDeployed(co));
+        try std.testing.expect(posture.isCompanyDeployed(&gs, co));
         if (with_mash == 0) mothballMash(&gs, co);
         var patient: types.PersonId = .none;
         var it = gs.people.iterator();
