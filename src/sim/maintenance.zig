@@ -15,6 +15,7 @@ const chassis_mod = @import("../domain/chassis.zig");
 const hq_ops = @import("hq_ops.zig");
 const sites = @import("sites.zig");
 const crew = @import("crew.zig");
+const toe = @import("toe.zig");
 const GameState = @import("state.zig").GameState;
 
 /// Hours a field repair costs the hull's tech (tuning.maintenance).
@@ -616,7 +617,7 @@ pub fn repairBudget(gs: *GameState, alloc: std.mem.Allocator, company: types.For
         } else try spares.append(alloc, .{ .key = job.part_key, .count = gs.stockCount(site, job.part_key) });
     };
     // A ready Logistics lance carries the company's field workshop.
-    const workshop: u32 = if (gs.supportLance(company, .transport)) |lance| (if (gs.forceOperational(lance)) tuning.maintenance.push_workshop_hours else 0) else 0;
+    const workshop: u32 = if (toe.supportLance(gs, company, .transport)) |lance| (if (gs.forceOperational(lance)) tuning.maintenance.push_workshop_hours else 0) else 0;
     return .{
         .hours = @as(u32, @intCast(types.applyBp(spare_hours, tuning.maintenance.push_hours_bp))) + workshop,
         .armor_tons = gs.stockCount(site, "armor"),
@@ -746,7 +747,7 @@ test "an injured tech is swapped for a free one" {
     defer gs.deinit();
     const co = try gs.createForce("Alpha", .company, .none);
     const uid = try gs.addUnit("SHD-2H");
-    try gs.assignUnit(uid, co, .none);
+    try toe.assignUnit(&gs, uid, co, .none);
     const t1 = try gs.hirePerson("A", "One", .tech_mek);
     const t2 = try gs.hirePerson("B", "Two", .tech_mek);
     gs.person(t1).?.assigned_force = co;
@@ -763,7 +764,7 @@ test "an injured tech's hull goes to exactly the free tech findFreeTech would ch
     defer gs.deinit();
     const co = try gs.createForce("Alpha", .company, .none);
     const uid = try gs.addUnit("SHD-2H");
-    try gs.assignUnit(uid, co, .none);
+    try toe.assignUnit(&gs, uid, co, .none);
     const u = gs.unit(uid).?;
     const role = unit_mod.techRoleFor(u.kind) orelse return error.TestExpectedEqual; // this hull needs a tech
 
@@ -779,7 +780,7 @@ test "an injured tech's hull goes to exactly the free tech findFreeTech would ch
     // `busy` already carries another hull, leaving `idle` with more spare
     // hours; findFreeTech must prefer whichever has the most spare hours.
     const uid2 = try gs.addUnit("SHD-2H");
-    try gs.assignUnit(uid2, co, .none);
+    try toe.assignUnit(&gs, uid2, co, .none);
     try crew.assignSlot(&gs, uid2, .tech, busy);
 
     const hours = hullHours(&gs, u);
@@ -795,7 +796,7 @@ test "an injured tech's hull is left without a tech when no replacement exists" 
     defer gs.deinit();
     const co = try gs.createForce("Alpha", .company, .none);
     const uid = try gs.addUnit("SHD-2H");
-    try gs.assignUnit(uid, co, .none);
+    try toe.assignUnit(&gs, uid, co, .none);
     const u = gs.unit(uid).?;
     const role = unit_mod.techRoleFor(u.kind) orelse return error.TestExpectedEqual; // this hull needs a tech
 
@@ -921,7 +922,7 @@ test "a ready Logistics lance adds its workshop hours to the repair push" {
     const needs = try repairNeeds(&gs, a, co);
     const with_workshop = try repairBudget(&gs, a, co, needs);
     // Nobody fit to drive the trucks: the workshop stays behind.
-    const lance = gs.supportLance(co, .transport).?;
+    const lance = toe.supportLance(&gs, co, .transport).?;
     for (lance.units.items) |uid| gs.person(gs.unit(uid).?.pilot).?.status = .wounded;
     const without = try repairBudget(&gs, a, co, needs);
     try std.testing.expectEqual(tuning.maintenance.push_workshop_hours, with_workshop.hours - without.hours);

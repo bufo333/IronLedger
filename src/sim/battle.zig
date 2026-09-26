@@ -20,6 +20,7 @@ const person_mod = @import("../domain/person.zig");
 const unit_mod = @import("../domain/unit.zig");
 const sites = @import("sites.zig");
 const crew = @import("crew.zig");
+const toe = @import("toe.zig");
 const GameState = @import("state.zig").GameState;
 
 /// Salvage trucks (SVT-1) a company fields, wrecks excepted.
@@ -1292,7 +1293,7 @@ fn applyCompanyAftermath(gs: *GameState, company: types.ForceId, morale_delta: i
     var it = gs.people.iterator();
     while (it.next()) |entry| {
         const p = entry.value_ptr;
-        if (p.status != .active or !gs.personInCompany(p, company)) continue;
+        if (p.status != .active or !toe.personInCompany(gs, p, company)) continue;
         p.addMorale(morale_delta); // Cool Under Fire halves a loss (Person.addMorale)
         p.addFatigue(fatigue_add);
     }
@@ -1473,7 +1474,7 @@ test "air cover is a fighter that can fly, not an empty wing" {
     const lance = try gs.createForce("1st Air Lance", .air_lance, wing);
     try std.testing.expect(!companyMods(&gs, c).has_air_cover); // an empty wing
     const fighter = try gs.addUnit("SPR-H5");
-    try gs.moveUnitToForce(fighter, lance);
+    try toe.moveUnitToForce(&gs, fighter, lance);
     try std.testing.expect(!companyMods(&gs, c).has_air_cover); // no pilot
     const pilot = try gs.hirePerson("Ace", "Ito", .aero_pilot);
     try crew.assignSlot(&gs, fighter, .pilot, pilot);
@@ -2184,7 +2185,7 @@ fn vehiclePowerForTest(gunnery: u8, driving: u8) !i64 {
         const driver = try gs.hirePerson("V", "Crew", .vehicle_crew);
         try gs.person(driver).?.skills.put(gs.allocator(), .gunnery_vee, gunnery);
         try gs.person(driver).?.skills.put(gs.allocator(), .driving_vee, driving);
-        try gs.assignUnit(uid, lance, driver);
+        try toe.assignUnit(&gs, uid, lance, driver);
     }
     try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
         .id = @enumFromInt(1),

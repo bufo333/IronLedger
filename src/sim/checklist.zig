@@ -18,6 +18,7 @@ const treasury = @import("treasury.zig");
 const sites = @import("sites.zig");
 const crew = @import("crew.zig");
 const maintenance = @import("maintenance.zig");
+const toe = @import("toe.zig");
 
 pub const WarningKind = enum {
     decision_due,
@@ -528,7 +529,7 @@ test "the checklist names open slots and overloaded techs" {
     defer gs.deinit();
     const co = try gs.createForce("Alpha", .company, .none);
     const uid = try gs.addUnit("AS7-D");
-    try gs.assignUnit(uid, co, .none); // no pilot, no tech
+    try toe.assignUnit(&gs, uid, co, .none); // no pilot, no tech
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -545,7 +546,7 @@ test "a wounded pilot keeps the seat: a Desk note the end-turn prompt skips, not
     defer gs.deinit();
     const co = try gs.createForce("Alpha", .company, .none);
     const uid = try gs.addUnit("AS7-D");
-    try gs.assignUnit(uid, co, .none);
+    try toe.assignUnit(&gs, uid, co, .none);
     const pid = try gs.hirePerson("Hurt", "Pilot", .mekwarrior);
     gs.person(pid).?.assigned_force = co;
     try crew.assignSlot(&gs, uid, .pilot, pid);
@@ -581,7 +582,7 @@ test "a spent pilot in a seat is a checklist warning" {
     defer gs.deinit();
     const co = try gs.createForce("Alpha", .company, .none);
     const uid = try gs.addUnit("AS7-D");
-    try gs.assignUnit(uid, co, .none);
+    try toe.assignUnit(&gs, uid, co, .none);
     const pid = try gs.hirePerson("Worn", "Out", .mekwarrior);
     gs.person(pid).?.assigned_force = co;
     try crew.assignSlot(&gs, uid, .pilot, pid);
@@ -704,7 +705,7 @@ test "a company with hulls its home bay cannot rebuild is flagged" {
     for (try turnWarnings(&gs, arena.allocator())) |w| try std.testing.expect(w.kind != .unrebuildable_hulls); // lights and mediums
     const lance = gs.force(co).?.children.items[0];
     const big = try gs.addUnit("AS7-D");
-    try gs.moveUnitToForce(big, lance);
+    try toe.moveUnitToForce(&gs, big, lance);
     var found = false;
     for (try turnWarnings(&gs, arena.allocator())) |w| if (w.kind == .unrebuildable_hulls) {
         found = true;

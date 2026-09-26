@@ -836,7 +836,7 @@ src/
                  force contract hq planet faction tuning skulls scenario …
   sim/           state crew tick commands battle autoresolve medical
                  maintenance field_supply sites network rng contract_market
-                 starter_company …; queries.zig (read-only views),
+                 starter_company toe …; queries.zig (read-only views),
                  cli.zig (verbs), table.zig (markup), digest.zig (hash)
   econ/          finance logistics market
   gen/           company_gen person_gen

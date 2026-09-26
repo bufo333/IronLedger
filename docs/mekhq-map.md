@@ -38,7 +38,7 @@ re-implemented in Zig. Paths below are under `MekHQ/src/mekhq/campaign/`.
 | Companies as concurrent deployable profit centers | `src/domain/force.zig`, per-company P&L in `src/econ/finance.zig` | 9 |
 | Brigade/Regional/Field HQ tiers with facility upgrade paths & staffing overhead | `src/domain/hq.zig` (`Hq.staffRequired`, `Project`); postings and autostaffing in `src/sim/hq_ops.zig` (`hqStaff`, `staffHqToRequirement`) | 9 |
 | Influence rings gating the contract market + beachhead expansion | `src/domain/hq.zig` (`influenceLy`) + `src/econ/market.zig` (`visibilityFor`) | 4/9 |
-| HQ capacity slots (companies, air company, dropship/jumpship berths) | `src/domain/hq.zig` (`Capacity`) | 9 |
+| HQ capacity slots (companies, air company, dropship/jumpship berths) | `src/domain/hq.zig` (`Capacity`); counted against by `src/sim/toe.zig` | 9 |
 | Supply-line graph: links, throughput caps, multi-hop delay/cost | `src/econ/logistics.zig` (`Route`) | 9 |
 | Supply classes (parts/ammo/medical/provisions) with shipments & delays | `src/econ/logistics.zig` | 5/9 |
 | Out-of-influence penalties + local-purchase valve + hardship pay | `src/econ/logistics.zig` (`localPurchaseMultBp`) | 9 |

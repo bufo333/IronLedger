@@ -17,6 +17,7 @@ const GameState = @import("state.zig").GameState;
 const personnel = @import("personnel.zig");
 const digest = @import("digest.zig");
 const crew = @import("crew.zig");
+const toe = @import("toe.zig");
 
 /// Generate a full starter company into the campaign:
 ///   - 3 line lances × 4 meks (light/medium RAT rolls) with pilots
@@ -42,7 +43,7 @@ pub fn generateInto(gs: *GameState, name: []const u8) !types.ForceId {
 
             const unit_id = try gs.addUnit(design.key);
             const pilot_id = try personnel.recruitGenerated(gs, .mekwarrior, gs.homeHqFor(company_id), .generation);
-            try gs.assignUnit(unit_id, lance_id, pilot_id);
+            try toe.assignUnit(gs, unit_id, lance_id, pilot_id);
         }
     }
 
@@ -54,7 +55,7 @@ pub fn generateInto(gs: *GameState, name: []const u8) !types.ForceId {
         const design = scouts[gs.rng.random(.generation).uintLessThan(usize, scouts.len)];
         const unit_id = try gs.addUnit(design.key);
         const pilot_id = try personnel.recruitGenerated(gs, .mekwarrior, gs.homeHqFor(company_id), .generation);
-        try gs.assignUnit(unit_id, recon_id, pilot_id);
+        try toe.assignUnit(gs, unit_id, recon_id, pilot_id);
     }
 
     // Omega Company: the support echelon that wins battles (ARCH §9.3).
@@ -77,7 +78,7 @@ pub fn generateInto(gs: *GameState, name: []const u8) !types.ForceId {
         for (0..force.lance_size) |_| {
             const unit_id = try gs.addUnit(plan.chassis_key);
             const crew_id = try personnel.recruitGenerated(gs, plan.crew_role, gs.homeHqFor(company_id), .generation);
-            try gs.assignUnit(unit_id, lance_id, crew_id);
+            try toe.assignUnit(gs, unit_id, lance_id, crew_id);
         }
         for (0..plan.attached_medics) |_| {
             const id = try personnel.recruitGenerated(gs, .medic, gs.homeHqFor(company_id), .generation);

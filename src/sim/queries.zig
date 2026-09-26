@@ -23,6 +23,8 @@ const treasury = @import("treasury.zig");
 const sites = @import("sites.zig");
 const crew = @import("crew.zig");
 const maintenance = @import("maintenance.zig");
+// Named `toe_mod`, not `toe`: this file already owns a public `toe` query.
+const toe_mod = @import("toe.zig");
 const GameState = state_mod.GameState;
 
 const Alloc = std.mem.Allocator;
@@ -506,7 +508,7 @@ pub fn desk(alloc: Alloc, gs: *GameState, log_rows: usize) !Desk {
         try hqs.append(alloc, try std.fmt.allocPrint(alloc, "     funds {s}{s}{{/}} · staff {s}{d}/{d}{{/}} · companies {d}/{d} · bays {d} busy, {d} queued", .{
             funds_mk,                                     funds_s,
             if (h.staff_assigned < req) "{c}" else "{g}", h.staff_assigned,
-            req,                                          gs.companiesAtHq(h.id),
+            req,                                          toe_mod.companiesAtHq(gs, h.id),
             h.capacity().combat_companies,                busy,
             queued,
         }));
@@ -940,7 +942,7 @@ pub fn contracts(alloc: Alloc, gs: *GameState, board_hq: types.HqId) !Contracts 
             const battle = @import("battle.zig");
             const trucks = battle.salvageTrucks(gs, c.assigned_company);
             var salvage_lance = false;
-            if (gs.supportLance(c.assigned_company, .salvage)) |l| salvage_lance = l.units.items.len > 0;
+            if (toe_mod.supportLance(gs, c.assigned_company, .salvage)) |l| salvage_lance = l.units.items.len > 0;
             const tb = @import("../domain/tuning.zig").t.battle;
             const haul_bv: i64 = battle.haulCapacityBv(trucks);
             var claim: i64 = @divTrunc(haul_bv * c.terms.salvage_pct, 100);
@@ -1689,7 +1691,7 @@ pub fn supply(alloc: Alloc, gs: *GameState) !Supply {
         if (f.echelon != .company) continue;
         const home = gs.isCompanyHome(f.id);
         const days_left: ?u32 = if (!home) blk: {
-            const heads = gs.companyHeadcount(f.id);
+            const heads = toe_mod.companyHeadcount(gs, f.id);
             const tons = gs.stockCount(.{ .company = f.id }, "provisions");
             const per_day = @import("../domain/part.zig").provisionsPerDay(heads);
             break :blk tons / per_day;
@@ -1950,7 +1952,7 @@ pub fn hqDetailView(alloc: Alloc, gs: *GameState, id: types.HqId) !HqDetail {
     // Tier first: what this HQ can host, and how to raise it.
     {
         const hq_ops_mod = @import("hq_ops.zig");
-        const hosted = gs.companiesAtHq(id);
+        const hosted = toe_mod.companiesAtHq(gs, id);
         switch (h.tier) {
             .field => {
                 var upgrading: ?@import("../domain/hq.zig").Project = null;
@@ -2000,7 +2002,7 @@ pub fn hqDetailView(alloc: Alloc, gs: *GameState, id: types.HqId) !HqDetail {
     }
     try out.append(alloc, "");
     const cap = h.capacity();
-    try out.append(alloc, try std.fmt.allocPrint(alloc, "capacity   {d} companies · ≤{d} lances each · {d} support lances · {d} air wing{s} ({d} here) · {d}t storage", .{ cap.combat_companies, cap.lances_per_company, cap.support_lances, cap.air_companies, if (cap.air_companies == 1) "" else "s", gs.airCompaniesAtHq(id), h.warehouseCapacityTons() }));
+    try out.append(alloc, try std.fmt.allocPrint(alloc, "capacity   {d} companies · ≤{d} lances each · {d} support lances · {d} air wing{s} ({d} here) · {d}t storage", .{ cap.combat_companies, cap.lances_per_company, cap.support_lances, cap.air_companies, if (cap.air_companies == 1) "" else "s", toe_mod.airCompaniesAtHq(gs, id), h.warehouseCapacityTons() }));
     try out.append(alloc, try std.fmt.allocPrint(alloc, "berths     {d} dropship ({d} held) · {d} jumpship ({d} held){s}", .{ cap.dropship_berths, gs.transportsBerthedAt(id, .dropship), cap.jumpship_berths, gs.transportsBerthedAt(id, .jumpship), if (cap.air_companies == 0) " · {d}spaceport 3 opens an air wing slot, 4 (+comms 3) a jumpship berth{/}" else "" }));
     for (try berths(alloc, gs, id)) |line| try out.append(alloc, line);
     try out.append(alloc, try std.fmt.allocPrint(alloc, "upkeep     {s} / month · funds {s}", .{ try money(alloc, h.monthly_upkeep), try money(alloc, h.funds) }));
@@ -3833,6 +3835,36 @@ test "hq detail says a field HQ hosts no company and how to raise it" {
     try std.testing.expect(std.mem.indexOf(u8, home[0], "regional HQ") != null);
 }
 
+test "hqList's companies and hqDetailView's hosted count match toe.companiesAtHq" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 7 });
+    defer gs.deinit();
+    const commands = @import("commands.zig");
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .line_officer } });
+    _ = try commands.execute(&gs, .{ .new_company = "Alpha" });
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    const hq_id = gs.hqs.keys()[0];
+    const expected = toe_mod.companiesAtHq(&gs, hq_id);
+    try std.testing.expect(expected > 0);
+
+    var found = false;
+    for (try hqList(a, &gs)) |row| if (row.id == hq_id) {
+        try std.testing.expectEqual(expected, row.companies);
+        found = true;
+    };
+    try std.testing.expect(found);
+
+    const lines = try hqDetail(a, &gs, hq_id);
+    const needle = try std.fmt.allocPrint(a, "({d} here", .{expected});
+    var says_hosted = false;
+    for (lines) |l| if (std.mem.indexOf(u8, l, needle) != null) {
+        says_hosted = true;
+    };
+    try std.testing.expect(says_hosted);
+}
+
 test "manning matches the starter generator's ratios; raise candidates list pool hulls and mek listings" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 7 });
     defer gs.deinit();
@@ -4668,7 +4700,7 @@ pub fn companyChoices(alloc: Alloc, gs: *GameState, what: enum { unit, person, s
                     free += @intCast(force_dom.lance_size -| l.units.items.len);
                 };
                 room = try std.fmt.allocPrint(alloc, "{s}{d} lance slot{s} free{{/}}", .{ if (free == 0) "{a}" else "", free, if (free == 1) "" else "s" });
-            } else if (gs.supportLanceFor(co.id, subject_hull)) |sid| {
+            } else if (toe_mod.supportLanceFor(gs, co.id, subject_hull)) |sid| {
                 room = try std.fmt.allocPrint(alloc, "→ {s}", .{try forceName(alloc, gs, sid)});
             } else room = "{a}no lance of its trade{/}";
         } else if (p) |person| {
@@ -5140,7 +5172,7 @@ pub fn hqList(alloc: Alloc, gs: *GameState) ![]HqRow {
             .funds = hq.funds,
             .staff_assigned = hq.staff_assigned,
             .staff_required = hq.staffRequired().total(),
-            .companies = gs.companiesAtHq(hq.id),
+            .companies = toe_mod.companiesAtHq(gs, hq.id),
             .company_cap = cap.combat_companies,
             .lances_cap = cap.lances_per_company,
             .title_line = "",

@@ -17,6 +17,7 @@ const company_gen = @import("../gen/company_gen.zig");
 const person_gen = @import("../gen/person_gen.zig");
 const rng_mod = @import("rng.zig");
 const maintenance = @import("maintenance.zig");
+const toe = @import("toe.zig");
 
 /// Recruit a randomly generated person (AtB-style: experience on 2d6,
 /// skills from the band, names from the tables). No signing bonus: that
@@ -274,7 +275,7 @@ pub fn companyCrewStats(gs: *GameState, company: types.ForceId) CrewStats {
     var pit = gs.people.iterator();
     while (pit.next()) |e| {
         const p = e.value_ptr;
-        if (!p.isOnBooks() or !gs.personInCompany(p, company)) continue;
+        if (!p.isOnBooks() or !toe.personInCompany(gs, p, company)) continue;
         st.heads += 1;
         fat += p.fatigue;
         mor += p.morale;

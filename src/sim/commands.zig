@@ -36,6 +36,7 @@ const digest = @import("digest.zig");
 const sites = @import("sites.zig");
 const field_supply = @import("field_supply.zig");
 const crew = @import("crew.zig");
+const toe = @import("toe.zig");
 
 pub const Command = union(enum) {
     /// End the turn: advance one day. Turn-based — time only moves here,
@@ -623,7 +624,7 @@ fn execUpgradeTier(gs: *GameState, hq_id: @FieldType(Command, "upgrade_tier")) E
 }
 
 fn execAssignCompany(gs: *GameState, a: @FieldType(Command, "assign_company")) Error!Result {
-    gs.assignCompanyToHq(a.company, a.hq) catch |err| switch (err) {
+    toe.assignCompanyToHq(gs, a.company, a.hq) catch |err| switch (err) {
         error.UnknownForce => return Error.UnknownForce,
         error.UnknownHq => return Error.UnknownHq,
         error.NotACompany => return Error.NotACompany,
@@ -728,7 +729,7 @@ fn execBuySupportHull(gs: *GameState, b: @FieldType(Command, "buy_support_hull")
         idx = i;
     };
     const listing = idx orelse return Error.NoSuchListing;
-    const lance: types.ForceId = if (gs.supportLance(b.company, b.kind)) |sl| sl.id else .none;
+    const lance: types.ForceId = if (toe.supportLance(gs, b.company, b.kind)) |sl| sl.id else .none;
     return execute(gs, .{ .buy_hull_for = .{ .listing = listing, .company = b.company, .lance = lance } });
 }
 
@@ -979,7 +980,7 @@ fn execBuyListing(gs: *GameState, index: @FieldType(Command, "buy_listing")) Err
         _ = gs.market_listings.orderedRemove(index);
         const uid = try gs.addUnit(listing.item_key);
         if (listing.condition) |cond| gs.applyHullCondition(uid, cond);
-        try gs.placeUnitInCompany(uid, co);
+        try toe.placeUnitInCompany(gs, uid, co);
         try gs.log(.market, .{ .company = co, .contract = c.id }, "[market] {s} bought {s} ({s}) on {s} for {d} from local funds — seat a pilot and a tech", .{
             if (gs.force(co)) |f| f.name else "company", listing.item_key, if (listing.condition) |cd| cd.label() else "new", c.planet_key, price,
         });
@@ -1079,7 +1080,7 @@ fn execMoveUnit(gs: *GameState, m: @FieldType(Command, "move_unit")) Error!Resul
     if (dest.echelon == .air_lance and u.kind != .aerospace) return Error.WrongHullKind;
     if (dest.echelon == .lance and u.kind != .mek and u.kind != .vehicle) return Error.WrongHullKind; // mixed mek/vehicle lances are AtB-legal
     if (u.kind.isTransport()) return Error.WrongHullKind; // ships hold berths, not lance slots
-    try gs.moveUnitToForce(m.unit, m.force);
+    try toe.moveUnitToForce(gs, m.unit, m.force);
     return .{};
 }
 
@@ -1091,21 +1092,21 @@ fn execNewLance(gs: *GameState, nl: @FieldType(Command, "new_lance")) Error!Resu
     switch (nl.kind) {
         .line => {
             const cap: u32 = if (hq) |h| h.capacity().lances_per_company else 3;
-            if (gs.lancesOfEchelon(nl.company, .lance) >= cap) return Error.TooManyLances;
+            if (toe.lancesOfEchelon(gs, nl.company, .lance) >= cap) return Error.TooManyLances;
             const id = try gs.createForce(nl.name, .lance, nl.company);
             return .{ .created_force = id };
         },
         .air => {
-            const wing = gs.airCompanyOf(nl.company) orelse return Error.NoAirSlot;
-            if (gs.lancesOfEchelon(wing, .air_lance) >= force_mod.max_air_lances) return Error.TooManyLances;
+            const wing = toe.airCompanyOf(gs, nl.company) orelse return Error.NoAirSlot;
+            if (toe.lancesOfEchelon(gs, wing, .air_lance) >= force_mod.max_air_lances) return Error.TooManyLances;
             const id = try gs.createForce(nl.name, .air_lance, wing);
             return .{ .created_force = id };
         },
         .support => |kind| {
             const h = hq orelse return Error.NoSupportSlot;
-            const omega = gs.supportCompanyOf(nl.company) orelse return Error.NoSupportSlot;
+            const omega = toe.supportCompanyOf(gs, nl.company) orelse return Error.NoSupportSlot;
             if (!h.supportLanceAllowed(kind)) return Error.NoSupportSlot;
-            if (gs.lancesOfEchelon(omega, .support_lance) >= h.capacity().support_lances) return Error.NoSupportSlot;
+            if (toe.lancesOfEchelon(gs, omega, .support_lance) >= h.capacity().support_lances) return Error.NoSupportSlot;
             const id = try gs.createForce(nl.name, .support_lance, omega);
             gs.force(id).?.support_kind = kind;
             return .{ .created_force = id };
@@ -1116,9 +1117,9 @@ fn execNewLance(gs: *GameState, nl: @FieldType(Command, "new_lance")) Error!Resu
 fn execRaiseAirCompany(gs: *GameState, company: @FieldType(Command, "raise_air_company")) Error!Result {
     const co = gs.force(company) orelse return Error.UnknownForce;
     if (co.echelon != .company) return Error.NotACompany;
-    if (gs.airCompanyOf(company) != null) return Error.NoAirSlot;
+    if (toe.airCompanyOf(gs, company) != null) return Error.NoAirSlot;
     const h = gs.hqs.getPtr(co.supplying_hq) orelse return Error.NoHq;
-    if (gs.airCompaniesAtHq(h.id) >= h.capacity().air_companies) return Error.NoAirSlot;
+    if (toe.airCompaniesAtHq(gs, h.id) >= h.capacity().air_companies) return Error.NoAirSlot;
     const hq_id = h.id;
     const wing = try gs.createForce("Air Wing", .air_company, company);
     _ = try gs.createForce("1st Air Lance", .air_lance, wing);
@@ -1204,7 +1205,7 @@ fn execBuyHullFor(gs: *GameState, b: @FieldType(Command, "buy_hull_for")) Error!
     const days: u32 = if (from != null and to != null) logistics.deliveryDays(from.?, to.?) else 0;
     if (days == 0) {
         const lance_ok = if (gs.force(b.lance)) |l| (gs.companyOf(b.lance) == b.company and (l.echelon != .lance or l.units.items.len < force_mod.lance_size)) else false;
-        if (lance_ok) try gs.moveUnitToForce(uid, b.lance) else try gs.placeUnitInCompany(uid, b.company);
+        if (lance_ok) try toe.moveUnitToForce(gs, uid, b.lance) else try toe.placeUnitInCompany(gs, uid, b.company);
         try gs.log(.market, .{ .company = b.company }, "[raise] {s} #{d} joins {s}", .{ listing.item_key, @intFromEnum(uid), dest.name });
     } else {
         const u = gs.unit(uid).?;
@@ -1409,7 +1410,7 @@ fn execStripUnit(gs: *GameState, unit_id: @FieldType(Command, "strip_unit")) Err
 fn execSellHq(gs: *GameState, hq_id: @FieldType(Command, "sell_hq")) Error!Result {
     const h = gs.hqs.getPtr(hq_id) orelse return Error.UnknownHq;
     if (gs.hqs.count() <= 1) return Error.LastHq;
-    if (gs.companiesAtHq(hq_id) > 0) return Error.HqInUse;
+    if (toe.companiesAtHq(gs, hq_id) > 0) return Error.HqInUse;
     const value = market_mod.hqSaleValue(h) + h.funds;
     const name = h.name;
     var pit = gs.people.iterator();
@@ -1476,7 +1477,7 @@ fn execDisbandCompany(gs: *GameState, co: @FieldType(Command, "disband_company")
     var pit = gs.people.iterator();
     while (pit.next()) |e| {
         const p = e.value_ptr;
-        if (gs.personInCompany(p, co) and p.isOnBooks()) {
+        if (toe.personInCompany(gs, p, co) and p.isOnBooks()) {
             _ = try @import("personnel.zig").depart(gs, p.id, .resigned, types.full_bp, "severance (disbanded)");
             p.assigned_force = .none;
         }
@@ -1726,7 +1727,7 @@ fn hireRoleFromHall(gs: *GameState, role: person_mod.Role, company: types.ForceI
 /// in it yet.
 fn raiseCompany(gs: *GameState, name: []const u8, hq_id: types.HqId) Error!Result {
     const hq = gs.hqs.getPtr(hq_id) orelse return Error.UnknownHq;
-    if (gs.companiesAtHq(hq_id) >= hq.capacity().combat_companies) return Error.CapacityFull;
+    if (toe.companiesAtHq(gs, hq_id) >= hq.capacity().combat_companies) return Error.CapacityFull;
     const id = try gs.createForce(name, .company, .none);
     const n: usize = @max(3, hq.capacity().lances_per_company);
     const names = [_][]const u8{ "1st Lance", "2nd Lance", "3rd Lance", "4th Lance", "5th Lance" };
@@ -1743,7 +1744,7 @@ fn raiseCompany(gs: *GameState, name: []const u8, hq_id: types.HqId) Error!Resul
         const lid = try gs.createForce(entry[0], .support_lance, omega);
         gs.force(lid).?.support_kind = entry[1];
     }
-    gs.assignCompanyToHq(id, hq_id) catch |err| switch (err) {
+    toe.assignCompanyToHq(gs, id, hq_id) catch |err| switch (err) {
         error.CapacityFull => return Error.CapacityFull,
         error.TooManyLances => return Error.TooManyLances,
         else => return Error.UnknownHq,
@@ -1757,11 +1758,11 @@ fn newCompanyAt(gs: *GameState, name: []const u8, hq_id: types.HqId) Error!Resul
     // nowhere to live.
     if (hq_id != .none) {
         const hq = gs.hqs.getPtr(hq_id) orelse return Error.UnknownHq;
-        if (gs.companiesAtHq(hq_id) >= hq.capacity().combat_companies) return Error.CapacityFull;
+        if (toe.companiesAtHq(gs, hq_id) >= hq.capacity().combat_companies) return Error.CapacityFull;
     }
     const id = try starter_company.generateInto(gs, name);
     if (hq_id != .none) {
-        gs.assignCompanyToHq(id, hq_id) catch |err| switch (err) {
+        toe.assignCompanyToHq(gs, id, hq_id) catch |err| switch (err) {
             error.CapacityFull => return Error.CapacityFull,
             error.TooManyLances => return Error.TooManyLances,
             else => return Error.UnknownHq,
@@ -1816,7 +1817,7 @@ fn transferUnit(gs: *GameState, unit_id: types.UnitId, to_company: types.ForceId
 
     const days = travelDays(gs, from_company, to_company);
     if (days == 0) {
-        try gs.placeUnitInCompany(unit_id, to_company);
+        try toe.placeUnitInCompany(gs, unit_id, to_company);
         return .{ .in_transit = false };
     }
     // Ship it: leaves the old roster now, joins the new one on arrival.
@@ -2285,7 +2286,7 @@ pub fn planLift(gs: *GameState, company_id: types.ForceId, commit: bool) Error!L
     plan.carried = @min(have[0], need[0]) + @min(have[1], need[1]) + @min(have[2], need[2]);
     plan.covered_bp = @intCast(@as(u64, plan.carried) * 10_000 / plan.needed);
     if (commit and at_home) {
-        for (ships.items) |sid| try gs.moveUnitToForce(sid, company_id);
+        for (ships.items) |sid| try toe.moveUnitToForce(gs, sid, company_id);
     }
     return plan;
 }
@@ -2622,13 +2623,13 @@ test "hulls move between lances at home; a new lance respects the HQ's lance cap
     const truck = try gs.addUnit("CGT-3");
     _ = try execute(&gs, .{ .transfer_unit = .{ .unit = truck, .to_company = co } });
     // …and can be moved into the logistics lance.
-    const log_lance: types.ForceId = if (gs.supportLance(co, .transport)) |l| l.id else .none;
+    const log_lance: types.ForceId = if (toe.supportLance(&gs, co, .transport)) |l| l.id else .none;
     try std.testing.expect(log_lance != .none);
     _ = try execute(&gs, .{ .move_unit = .{ .unit = truck, .force = log_lance } });
     try std.testing.expectEqual(log_lance, gs.unit(truck).?.force);
     // Three line lances plus the recon lance fill a level-1 bay's four; the
     // fifth needs a level-3 mek bay.
-    try std.testing.expectEqual(@as(u32, 4), gs.combatLancesOf(co));
+    try std.testing.expectEqual(@as(u32, 4), toe.combatLancesOf(&gs, co));
     try std.testing.expectError(Error.TooManyLances, execute(&gs, .{ .new_lance = .{ .company = co, .name = "5th Lance" } }));
     const hq = gs.hqs.getPtr(gs.hqs.keys()[0]).?;
     for (hq.facilities.items) |*f| if (f.kind == .mek_bay) {
@@ -2637,7 +2638,7 @@ test "hulls move between lances at home; a new lance respects the HQ's lance cap
     hq_ops.refreshHqStaffing(&gs);
     if (hq.staff_assigned < hq.staffRequired().total()) _ = try execute(&gs, .{ .autostaff = hq.id });
     _ = try execute(&gs, .{ .new_lance = .{ .company = co, .name = "5th Lance" } });
-    try std.testing.expectEqual(@as(u32, 5), gs.combatLancesOf(co));
+    try std.testing.expectEqual(@as(u32, 5), toe.combatLancesOf(&gs, co));
 }
 
 test "lance roles: set on lances only, persisted on the force" {
@@ -4113,7 +4114,7 @@ test "air wings need a spaceport; fighters fly in air lances; support lances are
     try setFacilityLevel(&gs, hq, .spaceport, 3);
     const wing = (try execute(&gs, .{ .raise_air_company = co })).created_force;
     try std.testing.expectEqual(force_mod.Echelon.air_company, gs.force(wing).?.echelon);
-    try std.testing.expectEqual(@as(u32, 1), gs.lancesOfEchelon(wing, .air_lance));
+    try std.testing.expectEqual(@as(u32, 1), toe.lancesOfEchelon(&gs, wing, .air_lance));
     try std.testing.expectError(Error.NoAirSlot, execute(&gs, .{ .raise_air_company = co })); // one wing per company
     _ = try execute(&gs, .{ .new_lance = .{ .company = co, .name = "2nd Air Lance", .kind = .air } });
     _ = try execute(&gs, .{ .new_lance = .{ .company = co, .name = "3rd Air Lance", .kind = .air } });
@@ -4134,7 +4135,7 @@ test "air wings need a spaceport; fighters fly in air lances; support lances are
     try std.testing.expectError(Error.WrongHullKind, execute(&gs, .{ .move_unit = .{ .unit = mek, .force = air } }));
     _ = try execute(&gs, .{ .move_unit = .{ .unit = fighter, .force = air } });
     try std.testing.expectEqual(air, gs.unit(fighter).?.force);
-    try gs.placeUnitInCompany(try gs.addUnit("CSR-V12"), co);
+    try toe.placeUnitInCompany(&gs, try gs.addUnit("CSR-V12"), co);
     try std.testing.expectEqual(@as(usize, 2), gs.force(air).?.units.items.len);
 
     // Support lances: four staples fill the slot; a mess needs a mess hall.
@@ -4397,13 +4398,13 @@ test "a truck sent to a deployed company lands in its transport lance, and can s
 
     // A cargo truck arrives from the HQ: it joins the transport lance, not the company node.
     const truck = try gs.addUnit("CGT-3");
-    try gs.placeUnitInCompany(truck, co);
-    const transport = gs.supportLanceFor(co, gs.unit(truck).?).?;
+    try toe.placeUnitInCompany(&gs, truck, co);
+    const transport = toe.supportLanceFor(&gs, co, gs.unit(truck).?).?;
     try std.testing.expectEqual(transport, gs.unit(truck).?.force);
     try std.testing.expectEqual(force_mod.SupportLanceKind.transport, gs.force(transport).?.support_kind.?);
 
     // Reshuffling inside the deployed company works; a salvage truck goes to salvage.
-    const salvage: types.ForceId = if (gs.supportLance(co, .salvage)) |l| l.id else .none;
+    const salvage: types.ForceId = if (toe.supportLance(&gs, co, .salvage)) |l| l.id else .none;
     _ = try execute(&gs, .{ .move_unit = .{ .unit = truck, .force = salvage } });
     try std.testing.expectEqual(salvage, gs.unit(truck).?.force);
 

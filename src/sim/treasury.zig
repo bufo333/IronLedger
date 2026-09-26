@@ -18,6 +18,7 @@ const market = @import("../econ/market.zig");
 const state_mod = @import("state.zig");
 const GameState = state_mod.GameState;
 const Treasury = state_mod.Treasury;
+const toe = @import("toe.zig");
 
 pub const TransferError = error{InsufficientTreasury} || std.mem.Allocator.Error;
 
@@ -125,7 +126,7 @@ pub fn companyMonthlyPayroll(gs: *GameState, company_id: types.ForceId) types.CB
     var it = gs.people.iterator();
     while (it.next()) |entry| {
         const p = entry.value_ptr;
-        if (!p.isOnBooks() or !gs.personInCompany(p, company_id)) continue;
+        if (!p.isOnBooks() or !toe.personInCompany(gs, p, company_id)) continue;
         total += p.monthlySalary();
     }
     return total;

@@ -15,6 +15,7 @@ const tuning = @import("../domain/tuning.zig").t;
 const types = @import("../domain/types.zig");
 const part_mod = @import("../domain/part.zig");
 const sites = @import("sites.zig");
+const toe = @import("toe.zig");
 const GameState = @import("state.zig").GameState;
 
 /// Truck budget per category, in percent of field capacity: ammo, armor
@@ -58,7 +59,7 @@ pub const Plan = struct {
 pub fn plan(alloc: std.mem.Allocator, gs: *GameState, company: types.ForceId, transit_days: u32, min_days: u32, ammo_battles: u8) !Plan {
     var lines: std.ArrayListUnmanaged(Line) = .empty;
     const cap = sites.siteCapacityTons(gs, .{ .company = company }) orelse 0;
-    const heads = gs.companyHeadcount(company);
+    const heads = toe.companyHeadcount(gs, company);
     const per_day: u32 = part_mod.provisionsPerDay(heads);
 
     // Provisions: enough on hand or on the way to eat through the transit

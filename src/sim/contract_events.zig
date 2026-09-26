@@ -16,6 +16,7 @@ const maintenance = @import("maintenance.zig");
 const personnel = @import("personnel.zig");
 const treasury = @import("treasury.zig");
 const sites = @import("sites.zig");
+const toe = @import("toe.zig");
 
 pub const decision_window_days = tuning.contract.decision_window_days;
 pub const notice_window_days = tuning.contract.notice_window_days;
@@ -971,7 +972,7 @@ pub fn applyToCompany(gs: *GameState, company: types.ForceId, stat: PersonStat, 
     var it = gs.people.iterator();
     while (it.next()) |entry| {
         const p = entry.value_ptr;
-        if (p.status != .active or !gs.personInCompany(p, company)) continue;
+        if (p.status != .active or !toe.personInCompany(gs, p, company)) continue;
         switch (stat) {
             .morale => p.addMorale(delta),
             .fatigue => p.addFatigue(delta),
@@ -1240,10 +1241,10 @@ test "a prisoner can be ransomed, released for standing, or recruited on a loyal
     }
     try std.testing.expect(joined and refused);
     // Prisoners are not paid but do eat.
-    const heads_before = gs.companyHeadcount(co);
+    const heads_before = toe.companyHeadcount(&gs, co);
     const payroll_before = treasury.monthlyPayroll(&gs);
     _ = try mk.captive(&gs, co);
-    try std.testing.expectEqual(heads_before + 1, gs.companyHeadcount(co));
+    try std.testing.expectEqual(heads_before + 1, toe.companyHeadcount(&gs, co));
     try std.testing.expectEqual(payroll_before, treasury.monthlyPayroll(&gs));
 }
 

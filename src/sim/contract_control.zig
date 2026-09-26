@@ -15,6 +15,7 @@ const contract_mod = @import("../domain/contract.zig");
 const chassis_mod = @import("../domain/chassis.zig");
 const planet_mod = @import("../domain/planet.zig");
 const logistics = @import("../econ/logistics.zig");
+const toe = @import("toe.zig");
 const GameState = @import("state.zig").GameState;
 
 pub const grace_days: u32 = tuning.contract.grace_days;
@@ -104,7 +105,7 @@ pub fn complete(gs: *GameState, c: *contract_mod.Contract, objectives_broken: bo
         var pit = gs.people.iterator();
         while (pit.next()) |e| {
             const p = e.value_ptr;
-            if (!p.isOnBooks() or !gs.personInCompany(p, c.assigned_company)) continue;
+            if (!p.isOnBooks() or !toe.personInCompany(gs, p, c.assigned_company)) continue;
             p.tours += 1;
             if (outstanding) p.outstanding_tours += 1;
             p.edge_spent = false; // Edge is per contract

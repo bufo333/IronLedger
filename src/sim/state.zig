@@ -571,73 +571,6 @@ pub const GameState = struct {
         return if (hq.supportsTraining()) id else null;
     }
 
-    /// Combat companies currently assigned to an HQ.
-    pub fn companiesAtHq(self: *GameState, hq_id: types.HqId) u32 {
-        var n: u32 = 0;
-        var it = self.forces.iterator();
-        while (it.next()) |entry| {
-            const f = entry.value_ptr;
-            if (f.echelon == .company and f.supplying_hq == hq_id) n += 1;
-        }
-        return n;
-    }
-
-    /// Combat (mek/air) lances under a company.
-    pub fn combatLancesOf(self: *GameState, company: types.ForceId) u32 {
-        const f = self.forces.getPtr(company) orelse return 0;
-        var n: u32 = 0;
-        for (f.children.items) |cid| {
-            const c = self.forces.getPtr(cid) orelse continue;
-            if (c.isCombatLance()) n += 1;
-        }
-        return n;
-    }
-
-    /// Air wings of the companies assigned to an HQ.
-    pub fn airCompaniesAtHq(self: *GameState, hq_id: types.HqId) u32 {
-        var n: u32 = 0;
-        var it = self.forces.iterator();
-        while (it.next()) |entry| {
-            const f = entry.value_ptr;
-            if (f.echelon != .air_company) continue;
-            const co = self.forces.getPtr(f.parent) orelse continue;
-            if (co.supplying_hq == hq_id) n += 1;
-        }
-        return n;
-    }
-
-    /// The company's air wing, if raised.
-    pub fn airCompanyOf(self: *GameState, company: types.ForceId) ?types.ForceId {
-        const f = self.forces.getPtr(company) orelse return null;
-        for (f.children.items) |cid| {
-            const c = self.forces.getPtr(cid) orelse continue;
-            if (c.echelon == .air_company) return cid;
-        }
-        return null;
-    }
-
-    /// The company's support echelon (Omega Company), if any.
-    pub fn supportCompanyOf(self: *GameState, company: types.ForceId) ?types.ForceId {
-        const f = self.forces.getPtr(company) orelse return null;
-        for (f.children.items) |cid| {
-            const c = self.forces.getPtr(cid) orelse continue;
-            if (c.echelon == .support_company) return cid;
-        }
-        return null;
-    }
-
-    /// Lances under a force of one echelon (air lances of a wing, support
-    /// lances of a support company).
-    pub fn lancesOfEchelon(self: *GameState, parent: types.ForceId, echelon: force_mod.Echelon) u32 {
-        const f = self.forces.getPtr(parent) orelse return 0;
-        var n: u32 = 0;
-        for (f.children.items) |cid| {
-            const c = self.forces.getPtr(cid) orelse continue;
-            if (c.echelon == echelon) n += 1;
-        }
-        return n;
-    }
-
     /// Transports of one kind holding a berth at an HQ.
     pub fn transportsBerthedAt(self: *GameState, hq_id: types.HqId, kind: unit_mod.UnitKind) u32 {
         var n: u32 = 0;
@@ -701,21 +634,6 @@ pub const GameState = struct {
             if (crew.isAvailable(self.clock.day_index)) return true;
         }
         return false;
-    }
-
-    pub const AssignHqError = error{ UnknownForce, UnknownHq, NotACompany, CapacityFull, TooManyLances };
-
-    /// Assign a company to an HQ, enforcing the HQ's capacity slots
-    /// (ARCH §9.3): companies per HQ and lances per company.
-    pub fn assignCompanyToHq(self: *GameState, company: types.ForceId, hq_id: types.HqId) AssignHqError!void {
-        const f = self.forces.getPtr(company) orelse return error.UnknownForce;
-        if (f.echelon != .company) return error.NotACompany;
-        const hq = self.hqs.getPtr(hq_id) orelse return error.UnknownHq;
-        const cap = hq.capacity();
-        const already = self.companiesAtHq(hq_id) - @intFromBool(f.supplying_hq == hq_id);
-        if (already >= cap.combat_companies) return error.CapacityFull;
-        if (self.combatLancesOf(company) > cap.lances_per_company) return error.TooManyLances;
-        f.supplying_hq = hq_id;
     }
 
     /// Commander cost multiplier for a category (neutral without a commander).
@@ -797,11 +715,6 @@ pub const GameState = struct {
         return self.deploymentContract(company) != null;
     }
 
-    /// Does this person serve under this company (any force in its tree)?
-    pub fn personInCompany(self: *GameState, p: *const person_mod.Person, company: types.ForceId) bool {
-        return company != .none and self.companyOf(p.assigned_force) == company;
-    }
-
     /// Ready to act today: the hull can take the field and its crew is fit
     /// for duty. Support modifiers, MASH beds, the battle line and
     /// fieldable strength all count hulls by this test.
@@ -818,21 +731,6 @@ pub const GameState = struct {
             if (self.unitOperational(u)) return true;
         }
         return false;
-    }
-
-    /// The company's support lance of one trade under its Omega, if raised.
-    /// (Posture and membership predicates are tested at the end of this file.)
-    pub fn supportLance(self: *GameState, company: types.ForceId, kind: force_mod.SupportLanceKind) ?*force_mod.Force {
-        const co = self.forces.getPtr(company) orelse return null;
-        for (co.children.items) |cid| {
-            const omega = self.forces.getPtr(cid) orelse continue;
-            if (omega.echelon != .support_company) continue;
-            for (omega.children.items) |sid| {
-                const sl = self.forces.getPtr(sid) orelse continue;
-                if (sl.echelon == .support_lance and sl.support_kind == kind) return sl;
-            }
-        }
-        return null;
     }
 
     /// Does the outfit hold a prisoner of this house (a trade is possible)?
@@ -939,19 +837,6 @@ pub const GameState = struct {
         return null;
     }
 
-    /// Head count assigned under one company's subtree (active + wounded).
-    pub fn companyHeadcount(self: *GameState, company_id: types.ForceId) u32 {
-        var n: u32 = 0;
-        var it = self.people.iterator();
-        while (it.next()) |entry| {
-            const p = entry.value_ptr;
-            // Prisoners eat too.
-            if (!(p.isOnBooks() or p.status == .pow)) continue;
-            if (self.personInCompany(p, company_id)) n += 1;
-        }
-        return n;
-    }
-
     // ------------------------------------------------------ units & forces
 
     pub const AddUnitError = error{UnknownChassis} || std.mem.Allocator.Error;
@@ -1049,22 +934,6 @@ pub const GameState = struct {
         return self.forces.getPtr(id);
     }
 
-    pub const AssignError = error{ UnknownUnit, UnknownPerson, UnknownForce } || std.mem.Allocator.Error;
-
-    /// Put a unit in a lance and a pilot in the unit, keeping all three
-    /// views (unit.force, force.units, person.assigned_force) consistent.
-    pub fn assignUnit(self: *GameState, unit_id: types.UnitId, force_id: types.ForceId, pilot_id: types.PersonId) AssignError!void {
-        const u = self.unit(unit_id) orelse return error.UnknownUnit;
-        const f = self.force(force_id) orelse return error.UnknownForce;
-        u.force = force_id;
-        try f.units.append(self.allocator(), unit_id);
-        if (pilot_id != .none) {
-            const p = self.person(pilot_id) orelse return error.UnknownPerson;
-            u.pilot = pilot_id;
-            p.assigned_force = force_id;
-        }
-    }
-
     // ------------------------------------------- the MekLab
 
     pub fn refitPlanFor(self: *GameState, unit_id: types.UnitId) ?*RefitPlan {
@@ -1152,88 +1021,6 @@ pub const GameState = struct {
                 },
             }
         }
-    }
-
-    /// Move a hull between forces (lance ↔ lance, into a support lance, or
-    /// straight under a company): roster lists and the pilot's posting
-    /// follow it; the tech seat is kept.
-    pub fn moveUnitToForce(self: *GameState, unit_id: types.UnitId, force_id: types.ForceId) !void {
-        const u = self.unit(unit_id) orelse return error.UnknownUnit;
-        const dest = self.forces.getPtr(force_id) orelse return error.UnknownForce;
-        if (self.forces.getPtr(u.force)) |old| {
-            for (old.units.items, 0..) |id, i| {
-                if (id == unit_id) {
-                    _ = old.units.orderedRemove(i);
-                    break;
-                }
-            }
-        }
-        u.force = force_id;
-        try dest.units.append(self.allocator(), unit_id);
-        if (self.person(u.pilot)) |p| p.assigned_force = force_id;
-    }
-
-    /// The support lance under a company's Omega that a support hull
-    /// belongs in, by trade: MASH rigs to the MASH lance, salvage trucks to
-    /// salvage, cargo trucks to transport, platoons to security.
-    pub fn supportLanceFor(self: *GameState, company: types.ForceId, u: *const unit_mod.Unit) ?types.ForceId {
-        const want: force_mod.SupportLanceKind = switch (u.kind) {
-            .mash => .mash,
-            .cargo => if (std.mem.eql(u8, u.chassis_key, "SVT-1")) .salvage else .transport,
-            .infantry => .security,
-            else => return null,
-        };
-        return if (self.supportLance(company, want)) |sl| sl.id else null;
-    }
-
-    /// Move a hull into a company: the first lance with a seat free, else
-    /// the company's own pool. The pilot rides along; the old tech stays
-    /// behind (transfers cost coverage until reassigned).
-    pub fn placeUnitInCompany(self: *GameState, unit_id: types.UnitId, company: types.ForceId) !void {
-        const u = self.unit(unit_id) orelse return error.UnknownUnit;
-        // Leave the old force's roster.
-        if (self.forces.getPtr(u.force)) |old| {
-            for (old.units.items, 0..) |id, i| {
-                if (id == unit_id) {
-                    _ = old.units.orderedRemove(i);
-                    break;
-                }
-            }
-        }
-        var dest = company;
-        if (self.forces.getPtr(company)) |co| {
-            if (u.kind == .aerospace) {
-                // Fighters go to the air wing's first lance with room.
-                if (self.airCompanyOf(company)) |wing_id| {
-                    const wing = self.forces.getPtr(wing_id).?;
-                    for (wing.children.items) |cid| {
-                        const lance = self.forces.getPtr(cid) orelse continue;
-                        if (lance.echelon == .air_lance and lance.units.items.len < force_mod.lance_size) {
-                            dest = cid;
-                            break;
-                        }
-                    }
-                }
-            } else if (u.kind == .mek or u.kind == .vehicle) {
-                for (co.children.items) |cid| {
-                    const lance = self.forces.getPtr(cid) orelse continue;
-                    if (lance.echelon == .lance and lance.units.items.len < force_mod.lance_size) {
-                        dest = cid;
-                        break;
-                    }
-                }
-            } else if (self.supportLanceFor(company, u)) |sid| {
-                // Trucks, ambulances and platoons join the support lance of
-                // their trade.
-                dest = sid;
-            }
-        }
-        u.force = dest;
-        // A bought wreck lands as damaged, not ready.
-        if (u.status == .in_transit) u.status = if (u.needsDepot()) .damaged else .ready;
-        u.tech = .none;
-        if (self.forces.getPtr(dest)) |d| try d.units.append(self.allocator(), unit_id);
-        if (self.person(u.pilot)) |p| p.assigned_force = dest;
     }
 
     /// The hull a pilot currently sits in.
@@ -1453,12 +1240,4 @@ test "company posture is one cascade: contract, then the road home, then a world
     f.return_eta_day = 40;
     try std.testing.expect(gs.companyPosture(co) == .returning);
     try std.testing.expectEqual(@as(u32, 40), gs.companyPosture(co).returning);
-    // Everyone under the company is in it; nobody else is.
-    var pit = gs.people.iterator();
-    var in_co: u32 = 0;
-    while (pit.next()) |e| if (gs.personInCompany(e.value_ptr, co)) {
-        in_co += 1;
-    };
-    try std.testing.expect(in_co > 0 and in_co == gs.companyHeadcount(co));
-    try std.testing.expect(gs.supportLance(co, .mash) != null);
 }

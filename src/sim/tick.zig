@@ -24,6 +24,7 @@ const planet_mod = @import("../domain/planet.zig");
 const logistics = @import("../econ/logistics.zig");
 const field_supply = @import("field_supply.zig");
 const sites = @import("sites.zig");
+const toe = @import("toe.zig");
 
 /// Advance exactly one day — one turn. Turn-based: nothing blocks time;
 /// decision events sit in the inbox with deadlines, and the deadline applies
@@ -202,7 +203,7 @@ test "forward depot: the nearest HQ holding the line ships it, the home HQ other
     try gs.addStock(.{ .hq = fb }, "provisions", 20);
     try std.testing.expectEqual(fb, bestSupplyHq(&gs, co, "provisions", 10, home));
     // The firebase can host the company now (field capacity 1).
-    try gs.assignCompanyToHq(co, fb);
+    try toe.assignCompanyToHq(&gs, co, fb);
     try std.testing.expectEqual(fb, gs.force(co).?.supplying_hq);
 }
 
@@ -283,7 +284,7 @@ pub fn runTravel(gs: *GameState) !void {
     while (ti < gs.unit_transfers.items.len) {
         const t = gs.unit_transfers.items[ti];
         if (gs.clock.day_index >= t.eta_day) {
-            try gs.placeUnitInCompany(t.unit, t.to_company);
+            try toe.placeUnitInCompany(gs, t.unit, t.to_company);
             const name = if (gs.unit(t.unit)) |u| u.chassis_key else "?";
             if (t.to_company == .none) {
                 // Salvage: the wreck lands in the pool at the HQ, status by its damage.
@@ -325,7 +326,7 @@ fn runSupplyConsumption(gs: *GameState) !void {
         const contract_id: types.ContractId = if (c) |cc| cc.id else .none;
         const site: types.Site = .{ .company = f.id };
 
-        const heads = gs.companyHeadcount(f.id);
+        const heads = toe.companyHeadcount(gs, f.id);
         const need: u32 = part_mod.provisionsPerDay(heads);
         if (gs.takeStock(site, "provisions", need)) {
             f.supply_shortage_days = 0;
@@ -393,7 +394,7 @@ fn runContracts(gs: *GameState) !void {
                 // fatigue for everyone attached — scaled by how long it ran
                 // and how hard it fought, compounding for every contract
                 // since the company last rotated (medical.zig's rotation reset).
-                const heads = gs.companyHeadcount(c.assigned_company);
+                const heads = toe.companyHeadcount(gs, c.assigned_company);
                 const casualties_pct: u8 = if (heads == 0) 0 else @intCast(@min(100, @as(u32, c.casualties) * 100 / heads));
                 var gain = person_mod.contractFatigueGainFor(c.terms.length_months, c.battles_fought, casualties_pct, c.kind.isGarrisonClass());
                 if (gs.force(c.assigned_company)) |f| {
@@ -402,7 +403,7 @@ fn runContracts(gs: *GameState) !void {
                 var pit = gs.people.iterator();
                 while (pit.next()) |pentry| {
                     const p = pentry.value_ptr;
-                    if (!p.isOnBooks() or !gs.personInCompany(p, c.assigned_company)) continue;
+                    if (!p.isOnBooks() or !toe.personInCompany(gs, p, c.assigned_company)) continue;
                     p.fatigue = person_mod.applyFatigue(p.fatigue, gain);
                 }
                 try gs.log(.rotation, .{ .company = c.assigned_company, .contract = c.id }, "[rotation] tour complete: +{d} fatigue banked ({d} battles, {d} casualties)", .{
@@ -540,7 +541,7 @@ fn runFinances(gs: *GameState) !void {
         // field stores as far as the trucks can hold.
         if (c.terms.overhead_pct > 0) {
             const site: types.Site = .{ .company = c.assigned_company };
-            const heads = gs.companyHeadcount(c.assigned_company);
+            const heads = toe.companyHeadcount(gs, c.assigned_company);
             const month_food: u32 = part_mod.provisionsTons(heads, types.days_per_month);
             const food = month_food * c.terms.overhead_pct / 100;
             const ammo_each: u32 = if (c.terms.overhead_pct >= 50) 2 else 1;

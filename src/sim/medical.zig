@@ -13,6 +13,7 @@ const person_mod = @import("../domain/person.zig");
 const GameState = @import("state.zig").GameState;
 const hq_ops = @import("hq_ops.zig");
 const sites = @import("sites.zig");
+const toe = @import("toe.zig");
 
 /// Days of training to improve a skill one step.
 pub const training_days = tuning.medical.training_days;
@@ -360,7 +361,7 @@ pub fn runWeeklyRest(gs: *GameState) !void {
                 // Garrison duty is nearly home: barracks and a town.
                 // Fatigue recovers at a share of the home rate — the mess
                 // lance stands in for the mess hall — and spirits hold.
-                const mess_lance = if (gs.supportLance(company, .mess)) |l| l.units.items.len > 0 else false;
+                const mess_lance = if (toe.supportLance(gs, company, .mess)) |l| l.units.items.len > 0 else false;
                 const field_decay: u32 = @intCast(types.applyBp(person_mod.fatigueDecayPerWeek(if (mess_lance) 1 else 0), tuning.person.garrison_rest_bp));
                 p.addFatigue(-@as(i32, @intCast(@min(field_decay, 255))));
                 if (p.morale < tuning.person.morale_garrison_lift_below and p.fatigue <= tuning.person.fatigue_grind) p.addMorale(1);
@@ -659,7 +660,7 @@ test "medics add field beds and carry patients toward the doctor ratio" {
     try std.testing.expectEqual(@as(u32, 2), bedCapacity(&gs, co, true));
     // A crewed MASH truck: 4 beds, plus one per medic up to doubling it.
     const truck = try gs.addUnit("MASH-27");
-    try gs.moveUnitToForce(truck, co);
+    try toe.moveUnitToForce(&gs, truck, co);
     try std.testing.expectEqual(@as(u32, 2), bedCapacity(&gs, co, true)); // no crew, no truck beds
     gs.unit(truck).?.pilot = try gs.hirePerson("D", "River", .vehicle_crew);
     try std.testing.expectEqual(@as(u32, 8), bedCapacity(&gs, co, true));
