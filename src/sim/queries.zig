@@ -30,6 +30,7 @@ const GameState = state_mod.GameState;
 const founding = @import("founding.zig");
 const lift = @import("lift.zig");
 const refit_m = @import("refit.zig");
+const held_hulls_m = @import("held_hulls.zig");
 
 const Alloc = std.mem.Allocator;
 
@@ -4377,7 +4378,7 @@ test "the hangar names a hull the enemy holds — a claim, not an asset" {
     };
     const owned_before = gs.units.count();
     const billed_before = treasury.monthlyHullUpkeep(&gs);
-    try gs.holdUnit(taken, "DC", @enumFromInt(7));
+    try held_hulls_m.holdUnit(&gs, taken, "DC", @enumFromInt(7));
 
     // Off the books: gone from `units`, gone from its lance, billing
     // nothing — the whole point of holding rather than keeping.

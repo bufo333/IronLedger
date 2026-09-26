@@ -764,46 +764,6 @@ pub const GameState = struct {
         _ = self.units.orderedRemove(unit_id);
     }
 
-    /// The enemy dragged this hull off a field we lost: it leaves
-    /// the books exactly as `removeUnit` would — no bill, no bay, no
-    /// lance, invisible to every walker over `units` — but the hull
-    /// itself is kept in `held_hulls`, because a recovery raid can win it
-    /// back. The crew slots are cleared: our
-    /// people are not in it any more, whatever became of them.
-    pub fn holdUnit(self: *GameState, unit_id: types.UnitId, by: []const u8, battle: types.BattleId) !void {
-        self.detachUnit(unit_id);
-        var entry = self.units.fetchOrderedRemove(unit_id) orelse return;
-        const from_force = entry.value.force;
-        entry.value.force = .none;
-        entry.value.pilot = .none;
-        entry.value.tech = .none;
-        try self.held_hulls.append(self.allocator(), .{
-            .unit = entry.value,
-            .by = by,
-            .day = self.clock.day_index,
-            .battle = battle,
-            .from_force = from_force,
-        });
-    }
-
-    /// Won back: the hull comes off the limbo list and onto the
-    /// books, back in the lance it was taken from if that lance still
-    /// exists. It comes back as it left — a wreck for the depot, not a
-    /// runner. Returns false if nobody holds that hull.
-    pub fn releaseHull(self: *GameState, unit_id: types.UnitId) !bool {
-        const i = blk: {
-            for (self.held_hulls.items, 0..) |h, n| if (h.unit.id == unit_id) break :blk n;
-            return false;
-        };
-        var held = self.held_hulls.orderedRemove(i);
-        if (self.forces.getPtr(held.from_force)) |f| {
-            held.unit.force = held.from_force;
-            try f.units.append(self.allocator(), unit_id);
-        }
-        try self.units.put(self.allocator(), unit_id, held.unit);
-        return true;
-    }
-
     /// The hull the enemy holds under this id, if they hold it.
     pub fn heldHull(self: *const GameState, unit_id: types.UnitId) ?*const unit_mod.HeldHull {
         for (self.held_hulls.items) |*h| if (h.unit.id == unit_id) return h;
@@ -812,7 +772,7 @@ pub const GameState = struct {
 
     /// Everything that points at a hull lets go of it. Shared by striking
     /// one off and by losing one to the enemy, so the two can never drift.
-    fn detachUnit(self: *GameState, unit_id: types.UnitId) void {
+    pub fn detachUnit(self: *GameState, unit_id: types.UnitId) void {
         if (self.forces.getPtr(if (self.unit(unit_id)) |u| u.force else .none)) |f| {
             for (f.units.items, 0..) |id, i| if (id == unit_id) {
                 _ = f.units.orderedRemove(i);

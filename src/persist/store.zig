@@ -33,6 +33,7 @@ const network = @import("../sim/network.zig");
 const clock_mod = @import("../sim/clock.zig");
 const digest = @import("../sim/digest.zig");
 const hq_ops = @import("../sim/hq_ops.zig");
+const held_hulls_m = @import("../sim/held_hulls.zig");
 
 pub const schema_version = 34;
 
@@ -2762,7 +2763,7 @@ test "a recovery decision remembers its battle, and a held hull its lance" {
         unreachable;
     };
     const lance = gs.unit(taken).?.force;
-    try gs.holdUnit(taken, "DC", @enumFromInt(4));
+    try held_hulls_m.holdUnit(&gs, taken, "DC", @enumFromInt(4));
     try @import("../sim/contract_events.zig").queueRecoveryPush(&gs, c, @enumFromInt(4));
 
     const store = try Store.open(":memory:");
@@ -2777,7 +2778,7 @@ test "a recovery decision remembers its battle, and a held hull its lance" {
     try std.testing.expectEqual(@as(types.BattleId, @enumFromInt(4)), ev.battle);
     try std.testing.expectEqual(lance, loaded.heldHull(taken).?.from_force);
     // And a hull won back after a reload still goes home to that lance.
-    try std.testing.expect(try loaded.releaseHull(taken));
+    try std.testing.expect(try held_hulls_m.releaseHull(&loaded, taken));
     try std.testing.expectEqual(lance, loaded.unit(taken).?.force);
 }
 

@@ -24,6 +24,7 @@ const toe = @import("toe.zig");
 const GameState = @import("state.zig").GameState;
 const founding = @import("founding.zig");
 const lift = @import("lift.zig");
+const held_hulls_m = @import("held_hulls.zig");
 
 /// Salvage trucks (SVT-1) a company fields, wrecks excepted.
 pub fn salvageTrucks(gs: *GameState, company: types.ForceId) i64 {
@@ -558,7 +559,7 @@ pub fn recoveryPush(gs: *GameState, battle: types.BattleId, company: types.Force
         if (h.lost) {
             const target = if (h.recovery) |r| r.target else t.recovery_target;
             if (@as(i32, gs.rng.roll2d6(.battle)) + t.push_mod >= target) {
-                if (try gs.releaseHull(h.unit)) out.hulls += 1;
+                if (try held_hulls_m.releaseHull(gs, h.unit)) out.hulls += 1;
             }
         }
         if (h.crew.fate != .missing) continue;
@@ -1041,7 +1042,7 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     // Hulls left on the field pass into enemy hands — off
     // our books once the AAR has named them, but held, not struck off:
     // a recovery raid has something to win back.
-    for (hit_log.items) |h| if (h.lost) try gs.holdUnit(h.unit, c.enemy_key, report.id);
+    for (hit_log.items) |h| if (h.lost) try held_hulls_m.holdUnit(gs, h.unit, c.enemy_key, report.id);
 
     // Objectives: the pool shrinks, VP accrue, and a broken pool
     // completes the contract.
@@ -1932,16 +1933,16 @@ test "a hull won back goes home to the lance it was taken from" {
     };
     const lance = gs.unit(taken).?.force;
     const seats_before = gs.forces.getPtr(lance).?.units.items.len;
-    try gs.holdUnit(taken, "DC", @enumFromInt(1));
+    try held_hulls_m.holdUnit(&gs, taken, "DC", @enumFromInt(1));
     try std.testing.expectEqual(seats_before - 1, gs.forces.getPtr(lance).?.units.items.len);
 
-    try std.testing.expect(try gs.releaseHull(taken));
+    try std.testing.expect(try held_hulls_m.releaseHull(&gs, taken));
     try std.testing.expect(gs.heldHull(taken) == null);
     try std.testing.expectEqual(lance, gs.unit(taken).?.force);
     try std.testing.expectEqual(seats_before, gs.forces.getPtr(lance).?.units.items.len);
 
     // Asking twice is not an error and wins nothing the second time.
-    try std.testing.expect(!try gs.releaseHull(taken));
+    try std.testing.expect(!try held_hulls_m.releaseHull(&gs, taken));
 }
 
 test "a hull left on a lost field passes into enemy hands, not off the books" {
