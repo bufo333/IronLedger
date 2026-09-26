@@ -29,7 +29,7 @@ re-implemented in Zig. Paths below are under `MekHQ/src/mekhq/campaign/`.
 | `universe/RandomNameGenerator` | Names by faction/origin | `src/gen/person_gen.zig` + `data/tables/names.zon` | 2 |
 | `CampaignXmlParser`, `.cpnx.gz` saves | Persistence (XML, **not SQL**) | `src/persist/` + `docs/schema.sql` (SQLite) | 11 |
 | MegaMek `.mtf`/`.blk` data files | Unit/equipment catalog | curated `data/chassis.zon` (licensing: re-encode, don't copy) | 3 |
-| MegaMekLab | Loadout editing, refit kits, refit classes A–F | `src/sim/refit.zig` with `src/domain/chassis.zig` and `src/domain/part.zig` construction data | 10 |
+| MegaMekLab | Loadout editing, refit kits, refit classes A–D | `GameState.tryInstall` / `labItems` / `applyRefit` with `src/domain/meklab.zig` validation | 10 |
 
 ## No MekHQ equivalent (our extensions)
 
@@ -67,7 +67,8 @@ re-implemented in Zig. Paths below are under `MekHQ/src/mekhq/campaign/`.
 | Tech accidents, medbay beds/priority, leave (MekHQ has injuries; no bed capacity) | Stage 9C.2: `medbay_priority`, `leave_until_day`, `medbay`/`triage`/`leave` | 9C.2 |
 | End-turn checklist (no MekHQ analog; MekHQ's day-advance warnings are partial) | Stage 9C.2: `turnWarnings` query + `day force` | 9C.2 |
 | Persistent, condition-priced hull listings; staple vs. rare-slot parts; daily hiring churn (MekHQ UnitMarket/PersonnelMarket regenerate wholesale) | Stage 9C.3: `market_listing` condition columns, `staple` | 9C.3 |
-| MegaMekLab construction rules: per-location crits, tonnage, heat sinks, location rules; engines/gyros/actuators as parts | Stage 10: chassis + parts data growth, loadout validator | 10 |
+| MegaMekLab construction rules: per-location crits, tonnage, heat/ammo and fixed chassis construction facts | `src/domain/meklab.zig` loadout validator | 10 |
+| Full engines/gyros/actuators editing and persistent custom variants | Product completion P3 in `TODO.md` | P3 |
 | Per-company field plan for deployed trucks (no MekHQ analog; AtB resupply drops are the nearest) | Stage 12: `src/sim/field_supply.zig` — floors/targets per line from consumption, transit and truck shares | 12 |
 | Per-site storage tonnage and handovers (no MekHQ analog; MekHQ has no per-site storage tonnage) | `src/sim/sites.zig` — site capacity, free tons, moves between sites, and goods crated home | 12 |
 | Golden-master state digest (MekHQ has no determinism harness) | `src/sim/digest.zig`: a canonical digest of any plain value, maps order-independent; `stateHash` feeds every persisted field of a campaign through it | 12 |

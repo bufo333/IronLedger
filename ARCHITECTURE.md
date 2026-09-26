@@ -457,15 +457,15 @@ logistics transport** — each feeds a concrete autoresolve/campaign modifier
 recovery, post-battle salvage yield, supply buffer and the field workshop
 (§9.7).
 
-**Active support uses operational readiness.** A hull is operational when it
-can take the field and its crew is fit for duty (`GameState.unitOperational`);
-a force is operational when one of its own hulls is (`forceOperational`).
-Support modifiers, recon, air cover, MASH care and beds, the battle line and
-fieldable BV all count by it, so a MASH truck with no driver, or one in the
-shop, helps nobody. Passive storage is a different capability: a cargo truck
-must be physically present and usable, but a temporarily empty driver seat does
-not make its hold disappear. Destroyed, mothballed, in-transit, and in-shop
-trucks provide neither capability.
+**C15 target — active support uses operational readiness.** A hull is
+operational when it can take the field and its crew is fit for duty
+(`GameState.unitOperational`); a force is operational when one of its own hulls
+is (`forceOperational`). Support modifiers, recon, air cover, MASH care and
+beds, the battle line and fieldable BV all count by it, so a MASH truck with no
+driver, or one in the shop, helps nobody. Passive storage is a different
+capability: a cargo truck must be physically present and usable, but a
+temporarily empty driver seat does not make its hold disappear. Destroyed,
+mothballed, in-transit, and in-shop trucks provide neither capability.
 
 ### 9.4 Facility upgrade paths, bays & the back office
 
@@ -744,8 +744,8 @@ with the day; only an empty seat is an open slot.
 The shipped first cut edits weapon, equipment, and ammunition mounts on the
 curated chassis catalogue. A refit = diff between current
 loadout and target loadout → parts list + tech-time + refit class (A–D in the
-current cut, extending through F in P3) per
-CamOps) → validated against facility ceiling → queued as bay work (§9.4);
+current cut, extending through F in P3 per CamOps) → validated against facility
+ceiling → queued as bay work (§9.4);
 the unit is out of action for the duration. Campaign-owned custom chassis and
 full construction-component editing are Product completion P3.
 

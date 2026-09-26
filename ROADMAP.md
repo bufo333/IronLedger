@@ -45,7 +45,7 @@ profession grants one 2% edge (quartermaster/paymaster/chief_engineer/
 line_officer — freight, payroll, repair, fatigue recovery). Minimal star
 map (`data/planets.zon`, 27 worlds, all five houses), influence-ring
 contract market with beachhead premiums & hardship pay, offers priced off
-the outfit's operating cost × market margin × employer/reputation
+average operating cost per combat company × market margin × employer/reputation
 multipliers, contract lifecycle (accept → transit → active → completed,
 monthly payments net of the 25% advance, transit freight with employer
 transport share), reputation gain on completion, loans with monthly

@@ -145,7 +145,8 @@ the day now.
   companies for less charter, sail with them and come home with them.
 - **Acquisition** rolls against each part's TechManual availability code,
   a periphery world's shelves and the HQ's comms reach; failed orders say
-  why. Structural components can always be fabricated in a bay.
+  why. Structural components can always be fabricated in a capable regional
+  HQ bay.
 - **Markets** at every HQ: staples always, rare slots by rarity and
   industry, damaged hulls with a condition and repair bill, transports at
   bigger spaceports, and — at wired HQs with a hall — a fence's black
