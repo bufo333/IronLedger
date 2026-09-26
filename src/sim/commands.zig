@@ -38,6 +38,7 @@ const digest = @import("digest.zig");
 const sites = @import("sites.zig");
 const field_supply = @import("field_supply.zig");
 const founding = @import("founding.zig");
+const refit_m = @import("refit.zig");
 const crew = @import("crew.zig");
 const toe = @import("toe.zig");
 
@@ -1861,7 +1862,7 @@ fn commitRefit(gs: *GameState, unit_id: types.UnitId) Error!Result {
     // The rules.
     var arena = std.heap.ArenaAllocator.init(gs.scratch());
     defer arena.deinit();
-    const items = try gs.labItems(unit_id, arena.allocator());
+    const items = try refit_m.labItems(gs, unit_id, arena.allocator());
     const report = meklab.validate(design, items, arena.allocator()) catch return Error.OutOfMemory;
     if (!report.legal) return Error.IllegalFit;
 

@@ -29,7 +29,7 @@ re-implemented in Zig. Paths below are under `MekHQ/src/mekhq/campaign/`.
 | `universe/RandomNameGenerator` | Names by faction/origin | `src/gen/person_gen.zig` + `data/tables/names.zon` | 2 |
 | `CampaignXmlParser`, `.cpnx.gz` saves | Persistence (XML, **not SQL**) | `src/persist/` + `docs/schema.sql` (SQLite) | 11 |
 | MegaMek `.mtf`/`.blk` data files | Unit/equipment catalog | curated `data/chassis.zon` (licensing: re-encode, don't copy) | 3 |
-| MegaMekLab | Loadout editing, refit kits, refit classes A–D | `GameState.tryInstall` / `labItems` / `applyRefit` with `src/domain/meklab.zig` validation | 10 |
+| MegaMekLab | Loadout editing, refit kits, refit classes A–D | `src/sim/refit.zig` (`tryInstall`, `labItems`, `applyRefit`) with `src/domain/meklab.zig` validation | 10 |
 
 ## No MekHQ equivalent (our extensions)
 

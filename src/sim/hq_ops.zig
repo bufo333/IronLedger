@@ -20,6 +20,7 @@ const state_mod = @import("state.zig");
 const GameState = state_mod.GameState;
 const founding = @import("founding.zig");
 const posture = @import("posture.zig");
+const refit_m = @import("refit.zig");
 
 // ----------------------------------------------------- the back office
 
@@ -764,7 +765,7 @@ fn completeJob(gs: *GameState, job: *state_mod.BayJob) !bool {
             while (pi < gs.refit_plans.items.len) : (pi += 1) {
                 const plan = &gs.refit_plans.items[pi];
                 if (plan.unit != job.unit or !plan.committed) continue;
-                try gs.applyRefit(plan, .{ .hq = job.hq });
+                try refit_m.applyRefit(gs, plan, .{ .hq = job.hq });
                 _ = gs.refit_plans.orderedRemove(pi);
                 break;
             }

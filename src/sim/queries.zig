@@ -29,6 +29,7 @@ const toe_mod = @import("toe.zig");
 const GameState = state_mod.GameState;
 const founding = @import("founding.zig");
 const lift = @import("lift.zig");
+const refit_m = @import("refit.zig");
 
 const Alloc = std.mem.Allocator;
 
@@ -3435,7 +3436,7 @@ pub fn installLocations(alloc: Alloc, gs: *GameState, uid: types.UnitId, part_ke
     if (gs.unit(uid) == null) return out.toOwnedSlice(alloc);
     inline for (@typeInfo(meklab.Location).@"enum".fields) |f| {
         const loc: meklab.Location = @enumFromInt(f.value);
-        const r = gs.tryInstall(alloc, uid, loc, part_key) catch return out.toOwnedSlice(alloc);
+        const r = refit_m.tryInstall(gs, alloc, uid, loc, part_key) catch return out.toOwnedSlice(alloc);
         var why: []const u8 = "";
         if (!r.legal) {
             for (r.violations) |v| {
@@ -3491,7 +3492,7 @@ pub fn lab(alloc: Alloc, gs: *GameState, uid: types.UnitId) !Lab {
         return .{ .title = title, .budget = try budget.toOwnedSlice(alloc), .mounts = &.{}, .plan = &.{}, .legal = true, .meks = meks };
     }
     if (u.status == .destroyed) try budget.append(alloc, try std.fmt.allocPrint(alloc, "{s} · {{d}}no refits on a wreck{{/}}", .{try wreckNote(alloc, gs, u)}));
-    const items = try gs.labItems(uid, alloc);
+    const items = try refit_m.labItems(gs, uid, alloc);
     const r = try meklab.validate(design, items, alloc);
     try budget.append(alloc, try std.fmt.allocPrint(alloc, "chassis   {s}   mounts   {s}", .{ try halfTons(alloc, r.fixed_half_tons), try halfTons(alloc, r.loadout_half_tons) }));
     try budget.append(alloc, try std.fmt.allocPrint(alloc, "total     {s}   free     {s}{s}{{/}}", .{ try halfTons(alloc, @as(i64, r.fixed_half_tons) + r.loadout_half_tons), if (r.free_half_tons < 0) "{c}" else "{g}", try halfTons(alloc, r.free_half_tons) }));
