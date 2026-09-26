@@ -16,6 +16,7 @@ const company_gen = @import("../gen/company_gen.zig");
 const GameState = @import("state.zig").GameState;
 const personnel = @import("personnel.zig");
 const digest = @import("digest.zig");
+const crew = @import("crew.zig");
 
 /// Generate a full starter company into the campaign:
 ///   - 3 line lances × 4 meks (light/medium RAT rolls) with pilots
@@ -97,7 +98,7 @@ pub fn generateInto(gs: *GameState, name: []const u8) !types.ForceId {
     }
 
     // Every hull gets its tech: the tail is sized for it.
-    _ = try gs.autoAssign(company_id);
+    _ = try crew.autoAssign(gs, company_id);
     _ = try personnel.refreshRanks(gs); // officers by seat
     return company_id;
 }

@@ -16,6 +16,7 @@ const medical = @import("medical.zig");
 const GameState = @import("state.zig").GameState;
 const treasury = @import("treasury.zig");
 const sites = @import("sites.zig");
+const crew = @import("crew.zig");
 
 pub const WarningKind = enum {
     decision_due,
@@ -546,10 +547,10 @@ test "a wounded pilot keeps the seat: a Desk note the end-turn prompt skips, not
     try gs.assignUnit(uid, co, .none);
     const pid = try gs.hirePerson("Hurt", "Pilot", .mekwarrior);
     gs.person(pid).?.assigned_force = co;
-    try gs.assignSlot(uid, .pilot, pid);
+    try crew.assignSlot(&gs, uid, .pilot, pid);
     const tid = try gs.hirePerson("Fit", "Tech", .tech_mek);
     gs.person(tid).?.assigned_force = co;
-    try gs.assignSlot(uid, .tech, tid);
+    try crew.assignSlot(&gs, uid, .tech, tid);
     const p = gs.person(pid).?;
     p.status = .wounded;
     p.wound_heal_day = gs.clock.day_index + 12;
@@ -582,7 +583,7 @@ test "a spent pilot in a seat is a checklist warning" {
     try gs.assignUnit(uid, co, .none);
     const pid = try gs.hirePerson("Worn", "Out", .mekwarrior);
     gs.person(pid).?.assigned_force = co;
-    try gs.assignSlot(uid, .pilot, pid);
+    try crew.assignSlot(&gs, uid, .pilot, pid);
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     for (try turnWarnings(&gs, arena.allocator())) |w| try std.testing.expect(w.kind != .unfit_crew);

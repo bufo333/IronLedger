@@ -63,7 +63,7 @@ Owner of every entry: the project owner.
 - **Scope:**
   - Every module and function listed in the rule 76 registry below.
   - Three switches with more than ten substantive arms (an arm body past three lines), measured by the check that guards them: `contract_events.applyEffectsFor`, `app.listView`, `forces.handle`. Five more sit at the threshold without crossing it: `app.listEnter` and `app.handleModalKey`, `market.handle`, `app.drawModal`, `supply.handle`.
-  - `GameState` methods with subsystem behaviour: founding, posture, TO&E, crew, tech time, lift, refit, aftermath, `commanderMultBp`, and `hirePerson`'s default skill table (it leaves with C11's single role-to-skill rule; the creation itself is a storage primitive). (Hashing has moved to `digest.zig`; sale values to `econ/market.zig`; transfers, couriers, purchase debits, payroll, upkeep, liquidation and credit to `treasury.zig`; recruiting, spec hiring, posting and the recruit bonus to `personnel.zig`; the back-office counts, staffing refresh and autostaffing to `hq_ops.zig`; stock-site capacity, handovers, a force's supply site and goods sent home to `sites.zig`; the company load-out to `field_supply.zig`.)
+  - `GameState` methods with subsystem behaviour: founding, posture, TO&E, tech time, lift, refit, aftermath, `commanderMultBp`, and `hirePerson`'s default skill table (it leaves with C11's single role-to-skill rule; the creation itself is a storage primitive). (Hashing has moved to `digest.zig`; sale values to `econ/market.zig`; transfers, couriers, purchase debits, payroll, upkeep, liquidation and credit to `treasury.zig`; recruiting, spec hiring, posting and the recruit bonus to `personnel.zig`; the back-office counts, staffing refresh and autostaffing to `hq_ops.zig`; stock-site capacity, handovers, a force's supply site and goods sent home to `sites.zig`; the company load-out to `field_supply.zig`; seat eligibility, seat assignment and auto-assignment to `crew.zig`.)
   - Eight upward imports in `state.zig`, held by the C4 layering record below:
     - behaviour called from state: `personnel.zig` (`createCommander`'s `recruitGenerated`), `hq_ops.zig` (`refreshHqStaffing`), `treasury.zig` (`transferFunds`);
     - simulation types stored in `GameState` fields: `clock.zig` (the `Date` and `Clock` field types), `events.zig` (the `EventQueue` and `EventKind` field types), `after_action.zig` (the `Journal` field type), `network.zig` (the `HqLink` field type);
@@ -252,7 +252,7 @@ Owner of every entry: the project owner.
   - `post_person`, which has no eligibility rule and does not vacate the person's seat (`commands.zig:1567`, `state.zig:505`)
   - `planLift`, which fuses quote and commit (`commands.zig:2250`)
 - **Scope, predicates:**
-  - errors chosen by comparing reason text (`state.zig:1417`, `commands.zig:1792`)
+  - errors chosen by comparing reason text (`crew.assignSlot`, `commands.zig:1792`)
   - `hasCrewedDropship` is incomplete (`state.zig:1043`)
   - `canFight` is misnamed (`unit.zig:258`)
   - medics are counted by raw status (`medical.zig:125`)
@@ -394,7 +394,8 @@ Owner of every entry: the project owner.
 - **Scope:**
   - Rule functions with no test:
     - `hq_ops`: `beyondEconomicalRepair`, `canFabricate`, `bayCanRebuild`, `upgradeBlock`, `rebuildEstimate`, `engineCharge`, `paperworkDaysFor`, `depotHqFor`, `staffHqToRequirement`
-    - `state`: `assignBlock`, `canReachPool`, `techHoursAvailable`, `findFreeTech`, `applyRefit`
+    - `state`: `techHoursAvailable`, `findFreeTech`, `applyRefit`
+    - `crew`: `assignBlock`, `canReachPool`
     - `sites`: `siteCapacityTons`, `moveStock`
     - `treasury`: `transferFunds`, `isInsolvent`, `liquidationValue`, `creditLimit`, `courierEtaDays`
     - `battle`: `effectiveRoe`, `estimatePower`, `estimatedKills`, `inContactWindow`

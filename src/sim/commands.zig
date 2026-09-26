@@ -35,6 +35,7 @@ const person_gen = @import("../gen/person_gen.zig");
 const digest = @import("digest.zig");
 const sites = @import("sites.zig");
 const field_supply = @import("field_supply.zig");
+const crew = @import("crew.zig");
 
 pub const Command = union(enum) {
     /// End the turn: advance one day. Turn-based — time only moves here,
@@ -110,8 +111,8 @@ pub const Command = union(enum) {
     post_person: struct { person: types.PersonId, hq: types.HqId },
     /// Crew/tech assignments: no tech → no repairs/reloads;
     /// no pilot → the hull doesn't fight.
-    assign: struct { unit: types.UnitId, slot: state_mod.Slot, person: types.PersonId },
-    unassign: struct { unit: types.UnitId, slot: state_mod.Slot },
+    assign: struct { unit: types.UnitId, slot: crew.Slot, person: types.PersonId },
+    unassign: struct { unit: types.UnitId, slot: crew.Slot },
     /// Fill every open slot in a company from its own people.
     auto_assign: types.ForceId,
     /// Hire off a hiring-hall board (asking bonus paid from the outfit).
@@ -1239,7 +1240,7 @@ fn execCrewCompany(gs: *GameState, company: @FieldType(Command, "crew_company"))
             }
         }
     }
-    _ = try gs.autoAssign(company);
+    _ = try crew.autoAssign(gs, company);
     try gs.log(.decision, .{ .company = company }, "[raise] {s}: {d} hired to fill the manning table ({d} still open — the halls had nobody)", .{ f.name, hired, still_open });
     return .{ .hired_count = hired, .still_open = still_open };
 }
@@ -1576,7 +1577,7 @@ fn execPostPerson(gs: *GameState, pp: @FieldType(Command, "post_person")) Error!
 }
 
 fn execAssign(gs: *GameState, a: @FieldType(Command, "assign")) Error!Result {
-    gs.assignSlot(a.unit, a.slot, a.person) catch |err| switch (err) {
+    crew.assignSlot(gs, a.unit, a.slot, a.person) catch |err| switch (err) {
         error.UnknownUnit => return Error.UnknownUnit,
         error.UnknownPerson => return Error.UnknownPerson,
         error.WrongRole => return Error.WrongRole,
@@ -1588,14 +1589,14 @@ fn execAssign(gs: *GameState, a: @FieldType(Command, "assign")) Error!Result {
 }
 
 fn execUnassign(gs: *GameState, u: @FieldType(Command, "unassign")) Error!Result {
-    try gs.unassignSlot(u.unit, u.slot);
+    try crew.unassignSlot(gs, u.unit, u.slot);
     return .{};
 }
 
 fn execAutoAssign(gs: *GameState, company: @FieldType(Command, "auto_assign")) Error!Result {
     const f = gs.force(company) orelse return Error.UnknownForce;
     if (f.echelon != .company) return Error.NotACompany;
-    _ = try gs.autoAssign(company);
+    _ = try crew.autoAssign(gs, company);
     return .{};
 }
 
@@ -4190,8 +4191,8 @@ test "ships need berths, lift the company for less charter, and come home with i
     };
     try std.testing.expectEqual(@as(types.Bp, 0), (try planLift(&gs, co, false)).covered_bp);
     // Crew it: a dropship crew in the pilot seat.
-    const crew = try gs.hirePerson("Ina", "Voss", .dropship_crew);
-    try gs.assignSlot(ship, .pilot, crew);
+    const dropship_pilot = try gs.hirePerson("Ina", "Voss", .dropship_crew);
+    try crew.assignSlot(&gs, ship, .pilot, dropship_pilot);
     const plan = try planLift(&gs, co, false);
     try std.testing.expectEqual(@as(u32, 1), plan.ships);
     try std.testing.expect(plan.carried >= 4 and plan.carried <= plan.needed);
@@ -4226,7 +4227,7 @@ test "ships need berths, lift the company for less charter, and come home with i
     _ = try execute(&gs, .{ .buy_listing = gs.market_listings.items.len - 1 });
     const jump: types.UnitId = @enumFromInt(gs.next_unit_id - 1);
     try std.testing.expectError(Error.NoJumpship, execute(&gs, .{ .link = .{ .a = hq, .b = far, .level = 3 } }));
-    try gs.assignSlot(jump, .pilot, try gs.hirePerson("Oda", "Ferro", .jumpship_crew));
+    try crew.assignSlot(&gs, jump, .pilot, try gs.hirePerson("Oda", "Ferro", .jumpship_crew));
     _ = try execute(&gs, .{ .link = .{ .a = hq, .b = far, .level = 3 } });
     try std.testing.expectEqual(@as(u8, 3), network.findLink(&gs, hq, far).?.level);
     try std.testing.expectEqual(@as(types.CBills, 0), network.findLink(&gs, hq, far).?.monthlyCost());
@@ -4300,7 +4301,7 @@ test "gear on any hull is field work — replace orders the spare to its site, t
     _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
     const uid = try gs.addUnit("SVT-1"); // a salvage truck: cargo, not a mek
     const tech = try gs.hirePerson("Wren", "Okafor", .tech_mechanic);
-    try gs.assignSlot(uid, .tech, tech);
+    try crew.assignSlot(&gs, uid, .tech, tech);
     for (gs.unit(uid).?.slots.items) |*s| if (std.mem.eql(u8, s.slot_key, "bed.winch.1")) {
         s.condition = .destroyed;
     };

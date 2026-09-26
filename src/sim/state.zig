@@ -196,10 +196,6 @@ pub const Candidate = struct {
     expires_day: u32,
 };
 
-/// `any`: whichever seat the person's role fits — pilot roles
-/// take the crew seat, tech roles the tech slot.
-pub const Slot = enum { pilot, tech, any };
-
 pub const UnitTransfer = struct {
     unit: types.UnitId,
     to_company: types.ForceId,
@@ -839,16 +835,6 @@ pub const GameState = struct {
         return null;
     }
 
-    /// Nobody's pilot, nobody's tech, not posted to an HQ, not on a
-    /// company's books: what the assignment column calls "unassigned".
-    pub fn isUnassigned(self: *GameState, p: *const person_mod.Person) bool {
-        if (p.posted_hq != .none or p.assigned_force != .none) return false;
-        if (self.pilotSeat(p.id) != .none) return false;
-        var uit = self.units.iterator();
-        while (uit.next()) |e| if (e.value_ptr.tech == p.id) return false;
-        return true;
-    }
-
     /// Does the outfit hold a prisoner of this house (a trade is possible)?
     pub fn holdsPrisonerOf(self: *GameState, faction: []const u8) bool {
         var it = self.people.iterator();
@@ -863,14 +849,6 @@ pub const GameState = struct {
             n += 1;
         };
         return n;
-    }
-
-    /// Why a person cannot take a seat or tech slot on a hull today, or
-    /// null: the one answer `assignSlot` refuses with and the picker dims with.
-    pub fn assignBlock(self: *GameState, u: *const unit_mod.Unit, p: *const person_mod.Person) ?[]const u8 {
-        if (!p.isAvailable(self.clock.day_index)) return if (p.status == .wounded) "wounded" else "unavailable";
-        if (u.force == .none and !self.canReachPool(p)) return "away with their company";
-        return null;
     }
 
     /// A crewed dropship in the company's own hangar: it lifts and escorts
@@ -1087,62 +1065,6 @@ pub const GameState = struct {
         }
     }
 
-    // --------------------------------------- assignments
-
-    /// Can this person work a hull in the unassigned pool? The
-    /// pool sits at the outfit's seat; their company must be home there
-    /// (or they belong to no company at all).
-    pub fn canReachPool(self: *GameState, p: *const person_mod.Person) bool {
-        const company = self.companyOf(p.assigned_force);
-        if (company == .none) return true;
-        if (!self.isCompanyHome(company)) return false;
-        const seat: types.HqId = if (self.hqs.count() > 0) self.hqs.keys()[0] else .none;
-        return self.homeHqFor(company) == seat;
-    }
-
-    pub const AssignSlotError = error{ UnknownUnit, UnknownPerson, WrongRole, Unavailable, NoTechSlot, PersonAway };
-
-    /// Put a person in a hull's pilot or tech slot. A pilot leaves any
-    /// previous hull; a tech may cover several hulls (hours permitting —
-    /// the maintenance pass enforces the budget, not this).
-    pub fn assignSlot(self: *GameState, unit_id: types.UnitId, slot: Slot, person_id: types.PersonId) AssignSlotError!void {
-        const u = self.unit(unit_id) orelse return error.UnknownUnit;
-        const p = self.person(person_id) orelse return error.UnknownPerson;
-        if (self.assignBlock(u, p)) |why| return if (std.mem.eql(u8, why, "away with their company")) error.PersonAway else error.Unavailable;
-        const resolved: Slot = if (slot != .any) slot else if (p.role == unit_mod.crewRoleFor(u.kind)) .pilot else if (unit_mod.techRoleFor(u.kind) == p.role) .tech else return error.WrongRole;
-        switch (resolved) {
-            .any => unreachable,
-            .pilot => {
-                if (p.role != unit_mod.crewRoleFor(u.kind)) return error.WrongRole;
-                // One seat per pilot.
-                var it = self.units.iterator();
-                while (it.next()) |entry| {
-                    if (entry.value_ptr.pilot == person_id) entry.value_ptr.pilot = .none;
-                }
-                u.pilot = person_id;
-                p.assigned_force = u.force;
-            },
-            .tech => {
-                const need = unit_mod.techRoleFor(u.kind) orelse return error.NoTechSlot;
-                if (p.role != need) return error.WrongRole;
-                u.tech = person_id;
-                if (p.assigned_force == .none) p.assigned_force = self.companyOf(u.force);
-            },
-        }
-    }
-
-    pub fn unassignSlot(self: *GameState, unit_id: types.UnitId, slot: Slot) error{UnknownUnit}!void {
-        const u = self.unit(unit_id) orelse return error.UnknownUnit;
-        switch (slot) {
-            .pilot => u.pilot = .none,
-            .tech => u.tech = .none,
-            .any => {
-                u.pilot = .none;
-                u.tech = .none;
-            },
-        }
-    }
-
     /// Weekly hours a tech already carries across assigned hulls.
     pub fn techLoadHours(self: *GameState, tech_id: types.PersonId) u32 {
         var hours: u32 = 0;
@@ -1228,51 +1150,6 @@ pub const GameState = struct {
             }
         }
         return best;
-    }
-
-    /// Fill every open pilot/tech slot in a company from its own people
-    /// (and the unassigned pool). Returns how many slots remain open.
-    pub fn autoAssign(self: *GameState, company: types.ForceId) !u32 {
-        var open: u32 = 0;
-        var uit = self.units.iterator();
-        while (uit.next()) |entry| {
-            const u = entry.value_ptr;
-            if (self.companyOf(u.force) != company or u.isParked()) continue;
-
-            // A seat needs filling when empty or its pilot is away; a spent
-            // pilot is benched only when someone fresher is free.
-            const seated = if (u.pilot != .none) self.person(u.pilot) else null;
-            const pilot_missing = seated == null or !seated.?.isAvailable(self.clock.day_index);
-            const pilot_spent = seated != null and seated.?.isUnfit();
-            if (pilot_missing or pilot_spent) {
-                const role = unit_mod.crewRoleFor(u.kind);
-                var pit = self.people.iterator();
-                var found = false;
-                while (pit.next()) |pe| {
-                    const p = pe.value_ptr;
-                    if (p.role != role or !p.isAvailable(self.clock.day_index) or p.posted_hq != .none) continue;
-                    if (self.companyOf(p.assigned_force) != company and p.assigned_force != .none) continue;
-                    if (self.pilotSeat(p.id) != .none) continue;
-                    if (pilot_spent and p.isUnfit()) continue; // no better off
-                    self.assignSlot(u.id, .pilot, p.id) catch continue;
-                    found = true;
-                    break;
-                }
-                if (!found and pilot_missing) open += 1;
-            }
-            if (unit_mod.techRoleFor(u.kind)) |role| {
-                if (u.tech == .none or !(self.person(u.tech) orelse continue).isAvailable(self.clock.day_index)) {
-                    const hours = self.hullHours(u);
-                    if (self.findFreeTech(role, company, hours) orelse self.findFreeTech(role, .none, hours)) |tid| {
-                        self.assignSlot(u.id, .tech, tid) catch {
-                            open += 1;
-                            continue;
-                        };
-                    } else open += 1;
-                }
-            }
-        }
-        return open;
     }
 
     // ------------------------------------------- the MekLab
@@ -1642,29 +1519,6 @@ test "postTransaction keeps funds and ledger in lockstep" {
     try gs.postTransaction(.{ .day = 0, .amount = -300_000, .category = .unit_purchase });
     try std.testing.expectEqual(@as(types.CBills, 700_000), gs.funds);
     try std.testing.expectEqual(@as(types.CBills, -300_000), gs.ledger.balance());
-}
-
-test "auto-assign benches a spent pilot when a fresher one is free, keeps them when nobody is" {
-    var gs = GameState.init(std.testing.allocator, .{ .seed = 121 });
-    defer gs.deinit();
-    _ = try gs.createCommander("T", .LC, .paymaster);
-    const co = try gs.createForce("Alpha", .company, .none);
-    const lance = try gs.createForce("1st", .lance, co);
-    const mek = try gs.addUnit("LCT-1V");
-    gs.unit(mek).?.force = lance;
-    const worn = try gs.hirePerson("Worn", "Out", .mekwarrior);
-    gs.person(worn).?.assigned_force = co;
-    gs.person(worn).?.fatigue = 100;
-    try gs.assignSlot(mek, .pilot, worn);
-    // Alone, the spent pilot keeps the seat; only the tech slot counts as open.
-    try std.testing.expectEqual(@as(u32, 1), try gs.autoAssign(co));
-    try std.testing.expectEqual(worn, gs.unit(mek).?.pilot);
-    // A fresh pilot on the books takes over.
-    const fresh = try gs.hirePerson("Fresh", "Face", .mekwarrior);
-    gs.person(fresh).?.assigned_force = co;
-    _ = try gs.autoAssign(co);
-    try std.testing.expectEqual(fresh, gs.unit(mek).?.pilot);
-    try std.testing.expect(gs.pilotSeat(worn) == .none);
 }
 
 test "a worn or exotic hull wants more hours; a sharper tech needs fewer" {

@@ -276,10 +276,10 @@ fn parseVerb(verb: []const u8, tokens: *std.mem.TokenIterator(u8, .scalar)) Pars
         // assign <unit> [pilot|tech] <person> — no slot word: the person's
         // role decides. unassign <unit> [pilot|tech] — no slot word: both.
         const unit: types.UnitId = @enumFromInt(try num(u32, tokens.next()));
-        var slot: game.state.Slot = .any;
+        var slot: game.crew.Slot = .any;
         var person_tok: ?[]const u8 = null;
         if (tokens.next()) |second| {
-            if (std.meta.stringToEnum(game.state.Slot, second)) |s| slot = s else person_tok = second;
+            if (std.meta.stringToEnum(game.crew.Slot, second)) |s| slot = s else person_tok = second;
         }
         if (verb[0] == 'u') return .{ .unassign = .{ .unit = unit, .slot = slot } };
         const pid = if (person_tok) |t| (std.fmt.parseInt(u32, t, 10) catch return error.BadNumber) else try num(u32, tokens.next());

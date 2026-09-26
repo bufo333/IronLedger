@@ -21,6 +21,7 @@ const contract_control = @import("contract_control.zig");
 const state_mod = @import("state.zig");
 const treasury = @import("treasury.zig");
 const sites = @import("sites.zig");
+const crew = @import("crew.zig");
 const GameState = state_mod.GameState;
 
 const Alloc = std.mem.Allocator;
@@ -622,7 +623,7 @@ fn companyRow(alloc: Alloc, gs: *GameState, id: types.ForceId) !table.Row {
         hulls += 1;
         if (u.status == .ready) ready += 1;
     }
-    const crew = @import("personnel.zig").companyCrewStats(gs, id);
+    const crew_stats = @import("personnel.zig").companyCrewStats(gs, id);
     const contract = gs.deploymentContract(id);
     const posture: []const u8 = switch (gs.companyPosture(id)) {
         .en_route => |c| try std.fmt.allocPrint(alloc, "{{a}}IN TRANSIT · arrive d{d}{{/}}", .{c.arrive_day orelse day}),
@@ -644,8 +645,8 @@ fn companyRow(alloc: Alloc, gs: *GameState, id: types.ForceId) !table.Row {
         posture,
         contract_s,
         location,
-        try std.fmt.allocPrint(alloc, "{d}", .{crew.avg_fatigue}),
-        try std.fmt.allocPrint(alloc, "{d}", .{crew.avg_morale}),
+        try std.fmt.allocPrint(alloc, "{d}", .{crew_stats.avg_fatigue}),
+        try std.fmt.allocPrint(alloc, "{d}", .{crew_stats.avg_morale}),
         try std.fmt.allocPrint(alloc, "{d}", .{hulls}),
         try std.fmt.allocPrint(alloc, "{d}", .{ready}),
         try std.fmt.allocPrint(alloc, "{s}{d}t / {d}t{{/}}", .{ cap_mk, tons, cap }),
@@ -2545,12 +2546,12 @@ pub fn berths(alloc: Alloc, gs: *GameState, hq_id: types.HqId) ![][]const u8 {
         const u = e.value_ptr;
         if (!u.kind.isTransport() or u.berth_hq != hq_id) continue;
         const ch = chassis_mod.find(u.chassis_key);
-        const crew = gs.person(u.pilot);
+        const pilot = gs.person(u.pilot);
         const lift_text = if (ch) |c| (if (c.kind == .dropship) try std.fmt.allocPrint(alloc, "{d} mek · {d} fighter · {d}t cargo", .{ c.mek_bays, c.asf_bays, c.cargo_tons }) else try std.fmt.allocPrint(alloc, "{d} collar{s}", .{ c.collars, if (c.collars == 1) "" else "s" })) else "";
         const where: []const u8 = if (u.force != .none) try std.fmt.allocPrint(alloc, "{{a}}away with {s}{{/}}", .{try forceName(alloc, gs, u.force)}) else if (u.status != .ready) try std.fmt.allocPrint(alloc, "{{c}}{s}{{/}}", .{@tagName(u.status)}) else "{g}at berth{/}";
         try out.append(alloc, try std.fmt.allocPrint(alloc, "  #{d: <3} {s: <9} {s: <9} {s}  {s}  {s}", .{
             @intFromEnum(u.id), u.chassis_key, if (ch) |c| c.name else "?", try padCells(alloc, "", lift_text, 30),
-            if (crew) |c| try padCells(alloc, "", try std.fmt.allocPrint(alloc, "{s}", .{try personText(alloc, c)}), 18) else try padCells(alloc, "{c}", "— no crew", 18),
+            if (pilot) |c| try padCells(alloc, "", try std.fmt.allocPrint(alloc, "{s}", .{try personText(alloc, c)}), 18) else try padCells(alloc, "{c}", "— no crew", 18),
             where,
         }));
     }
@@ -2840,7 +2841,7 @@ pub fn severanceOwed(gs: *GameState, id: types.PersonId, fired: bool) types.CBil
 /// Nobody's pilot, nobody's tech, not posted to an HQ, not on a company's
 /// books: the people the assignment column shows as "unassigned".
 pub fn isUnassigned(gs: *GameState, p: *const person_mod.Person) bool {
-    return gs.isUnassigned(p);
+    return crew.isUnassigned(gs, p);
 }
 
 pub fn statusText(alloc: Alloc, gs: *GameState, p: *const person_mod.Person) ![]const u8 {
@@ -2960,16 +2961,16 @@ pub fn readiness(alloc: Alloc, gs: *GameState) ![]ReadinessRow {
             .days_since_rotation = if (co.last_rotation_day) |d| day -| d else null,
             .cells = &.{},
         };
-        const crew = @import("personnel.zig").companyCrewStats(gs, co.id);
-        row.heads = crew.heads;
-        row.tired = crew.tired;
-        row.spent = crew.spent;
-        row.wounded = crew.wounded;
-        row.permanent = crew.permanent;
-        row.training = crew.training;
-        row.banked_xp = crew.banked_xp;
-        row.fatigue = crew.avg_fatigue;
-        row.morale = crew.avg_morale;
+        const crew_stats = @import("personnel.zig").companyCrewStats(gs, co.id);
+        row.heads = crew_stats.heads;
+        row.tired = crew_stats.tired;
+        row.spent = crew_stats.spent;
+        row.wounded = crew_stats.wounded;
+        row.permanent = crew_stats.permanent;
+        row.training = crew_stats.training;
+        row.banked_xp = crew_stats.banked_xp;
+        row.fatigue = crew_stats.avg_fatigue;
+        row.morale = crew_stats.avg_morale;
         var qsum: u64 = 0;
         var uit = gs.units.iterator();
         while (uit.next()) |ue| {
@@ -3142,7 +3143,7 @@ pub fn personRecord(alloc: Alloc, gs: *GameState, id: types.PersonId) ![]const [
 
 pub const Seat = struct {
     unit: types.UnitId,
-    slot: state_mod.Slot,
+    slot: crew.Slot,
     text: []const u8,
 };
 
@@ -3154,7 +3155,7 @@ pub fn openSeats(alloc: Alloc, gs: *GameState, id: types.PersonId) ![]Seat {
     while (it.next()) |e| {
         const u = e.value_ptr;
         if (u.isParked()) continue;
-        if (u.force == .none and !gs.canReachPool(p)) continue; // the pool is at the seat; their company is away
+        if (u.force == .none and !crew.canReachPool(gs, p)) continue; // the pool is at the seat; their company is away
         const ch = chassis_mod.find(u.chassis_key);
         const label = try std.fmt.allocPrint(alloc, "#{d: <3} {s: <8} {s: <16} {s}", .{ @intFromEnum(u.id), u.chassis_key, if (ch) |c| c.name else "?", if (u.force == .none) "unassigned pool" else clip(try forceName(alloc, gs, gs.companyOf(u.force)), 20) });
         if (unit_mod.crewRoleFor(u.kind) == p.role and gs.person(u.pilot) == null) {
@@ -3165,6 +3166,36 @@ pub fn openSeats(alloc: Alloc, gs: *GameState, id: types.PersonId) ![]Seat {
         }
     }
     return out.toOwnedSlice(alloc);
+}
+
+test "openSeats omits the unassigned pool exactly when the person cannot reach it" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 771 });
+    defer gs.deinit();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const al = arena.allocator();
+
+    const pool_mek = try gs.addUnit("LCT-1V");
+    try std.testing.expect(gs.unit(pool_mek).?.force == .none);
+    const pid = try gs.hirePerson("Free", "Lance", .mekwarrior);
+
+    try std.testing.expect(crew.canReachPool(&gs, gs.person(pid).?));
+    const reachable = try openSeats(al, &gs, pid);
+    var saw_pool = false;
+    for (reachable) |s| if (s.unit == pool_mek) {
+        saw_pool = true;
+    };
+    try std.testing.expect(saw_pool);
+
+    // Assigned to a company that is away from the seat: the pool drops out.
+    const away_co = try gs.createForce("Bravo", .company, .none);
+    gs.person(pid).?.assigned_force = away_co;
+    gs.force(away_co).?.location_planet = "galatea";
+    try std.testing.expect(!gs.isCompanyHome(away_co));
+    try std.testing.expect(!crew.canReachPool(&gs, gs.person(pid).?));
+
+    const unreachable_seats = try openSeats(al, &gs, pid);
+    for (unreachable_seats) |s| try std.testing.expect(s.unit != pool_mek);
 }
 
 // --------------------------------------------------------------------- map
@@ -4550,7 +4581,7 @@ pub const PickRow = struct {
     id: u32,
     eligible: bool,
     why: []const u8 = "",
-    slot: @import("state.zig").Slot = .any,
+    slot: crew.Slot = .any,
     /// Part pickers: the catalogue key behind the row.
     key: []const u8 = "",
     /// Part pickers: stock of the part at the picker's site.
@@ -4714,9 +4745,9 @@ pub fn crewChoices(alloc: Alloc, gs: *GameState, unit_id: types.UnitId) ![]PickR
     var pit = gs.people.iterator();
     while (pit.next()) |e| {
         const p = e.value_ptr;
-        const slot: @import("state.zig").Slot = if (p.role == pilot_role) .pilot else if (tech_role != null and p.role == tech_role.?) .tech else continue;
+        const slot: crew.Slot = if (p.role == pilot_role) .pilot else if (tech_role != null and p.role == tech_role.?) .tech else continue;
         if (!p.isOnBooks()) continue;
-        const why: []const u8 = gs.assignBlock(u, p) orelse "";
+        const why: []const u8 = crew.assignBlock(gs, u, p) orelse "";
         const seat = gs.pilotSeat(p.id);
         const load = if (slot == .tech) gs.techLoadHours(p.id) else 0;
         const now: []const u8 = if (slot == .pilot)
@@ -4783,15 +4814,15 @@ test "pickers: crew rows are the right roles, own company and free first; compan
         mek = e.value_ptr.id;
         break;
     };
-    const crew = try crewChoices(al, &gs, mek);
-    try std.testing.expect(crew.len > 0);
-    for (crew) |r| {
+    const crew_rows = try crewChoices(al, &gs, mek);
+    try std.testing.expect(crew_rows.len > 0);
+    for (crew_rows) |r| {
         const p = gs.person(@enumFromInt(r.id)).?;
         try std.testing.expect(p.role == .mekwarrior or p.role == .tech_mek);
         try std.testing.expect((r.slot == .pilot) == (p.role == .mekwarrior));
     }
-    try std.testing.expect(crew[0].eligible);
-    try std.testing.expectEqual(co, gs.companyOf(gs.person(@enumFromInt(crew[0].id)).?.assigned_force));
+    try std.testing.expect(crew_rows[0].eligible);
+    try std.testing.expectEqual(co, gs.companyOf(gs.person(@enumFromInt(crew_rows[0].id)).?.assigned_force));
 
     // Sending that mek elsewhere: Bravo is offered, Alpha is not.
     const cos = try companyChoices(al, &gs, .unit, @intFromEnum(mek));
@@ -5289,7 +5320,7 @@ pub fn hqRoster(alloc: Alloc, gs: *GameState, hq_id: types.HqId) ![]const []cons
     var pit2 = gs.people.iterator();
     while (pit2.next()) |entry| {
         const p = entry.value_ptr;
-        if (p.status != .active or !gs.isUnassigned(p)) continue;
+        if (p.status != .active or !crew.isUnassigned(gs, p)) continue;
         try pool.appendSlice(alloc, try std.fmt.allocPrint(alloc, " #{d} {s} ({s})", .{ @intFromEnum(p.id), p.last_name, @tagName(p.role) }));
     }
     try out.append(alloc, try std.fmt.allocPrint(alloc, "  unposted & unassigned:{s}", .{if (pool.items.len > 0) pool.items else " none"}));
@@ -5356,7 +5387,7 @@ pub fn battleList(alloc: Alloc, gs: *GameState) ![]BattleRow {
     while (i > 0) {
         i -= 1;
         const r = &gs.battle_reports.kept.items[i];
-        const crew = if (r.kia + r.wounded + @as(u8, @intCast(@min(r.missing, 255))) == 0)
+        const casualties = if (r.kia + r.wounded + @as(u8, @intCast(@min(r.missing, 255))) == 0)
             "{g}all in{/}"
         else
             try std.fmt.allocPrint(alloc, "{s}{d} WIA · {d} KIA · {d} MIA{{/}}", .{ if (r.kia + r.missing > 0) "{c}" else "{a}", r.wounded, r.kia, r.missing });
@@ -5369,7 +5400,7 @@ pub fn battleList(alloc: Alloc, gs: *GameState) ![]BattleRow {
             if (r.held_field) "{g}held{/}" else "{c}lost{/}",
             try std.fmt.allocPrint(alloc, "{d}", .{r.hits_taken}),
             try std.fmt.allocPrint(alloc, "{s}{d}{{/}}", .{ if (r.lost_hulls > 0) "{c}" else "", r.destroyed }),
-            crew,
+            casualties,
         }) });
     }
     return out.toOwnedSlice(alloc);
@@ -5457,7 +5488,7 @@ pub fn afterAction(alloc: Alloc, gs: *GameState, id: types.BattleId) !?AfterActi
             try std.fmt.allocPrint(alloc, "{s} {{d}}({s}){{/}} {s}{s}{{/}}", .{ sk, h.slot_part, if (h.slot_result == .destroyed) "{c}" else "{a}", h.slot_result.label() })
         else
             "{d}armour only{/}";
-        const crew = switch (h.crew.fate) {
+        const crew_fate = switch (h.crew.fate) {
             .kia => try std.fmt.allocPrint(alloc, "{{c}}{s} KIA{{/}}", .{try table.plain(alloc, h.crew_name)}),
             .missing => try std.fmt.allocPrint(alloc, "{{c}}{s} MIA{{/}}", .{try table.plain(alloc, h.crew_name)}),
             .unhurt => if (h.crew.wound) |w|
@@ -5469,7 +5500,7 @@ pub fn afterAction(alloc: Alloc, gs: *GameState, id: types.BattleId) !?AfterActi
             try std.fmt.allocPrint(alloc, "#{d} {s} {s}", .{ @intFromEnum(h.unit), h.chassis_key, h.chassis_name }),
             try std.fmt.allocPrint(alloc, "{d}% → {s}", .{ h.armor_before, try armorBar(alloc, h.armor_after) }),
             damage,
-            crew,
+            crew_fate,
         }));
     }
 

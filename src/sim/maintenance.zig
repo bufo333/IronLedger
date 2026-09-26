@@ -14,6 +14,7 @@ const person_mod = @import("../domain/person.zig");
 const chassis_mod = @import("../domain/chassis.zig");
 const hq_ops = @import("hq_ops.zig");
 const sites = @import("sites.zig");
+const crew = @import("crew.zig");
 const GameState = @import("state.zig").GameState;
 
 /// Hours a field repair costs the hull's tech (tuning.maintenance).
@@ -602,7 +603,7 @@ test "no tech, no maintenance: an unassigned hull rots; an assigned one holds" {
     gs2.unit(uid2).?.quality = .f;
     const tech = try gs2.hirePerson("Clay", "Cluny", .tech_mek);
     try gs2.person(tech).?.skills.put(gs2.allocator(), .tech_mek, 2);
-    try gs2.assignSlot(uid2, .tech, tech);
+    try crew.assignSlot(&gs2, uid2, .tech, tech);
     for (0..52) |_| try runWeeklyMaintenance(&gs2);
     try std.testing.expect(@intFromEnum(gs2.unit(uid2).?.quality) >= @intFromEnum(neglected));
     try std.testing.expect(gs2.ledger.balance() < 0); // consumables were paid for
@@ -616,7 +617,7 @@ test "tech hours are a budget: too many hulls leave some uncovered" {
     var uids: [4]types.UnitId = undefined;
     for (&uids) |*id| {
         id.* = try gs.addUnit("AS7-D");
-        try gs.assignSlot(id.*, .tech, tech);
+        try crew.assignSlot(&gs, id.*, .tech, tech);
     }
     try std.testing.expectEqual(@as(u32, 40), gs.techLoadHours(tech));
     try std.testing.expectEqual(@as(u32, 20), gs.techHoursAvailable(gs.person(tech).?));
@@ -638,7 +639,7 @@ test "an injured tech is swapped for a free one" {
     const t2 = try gs.hirePerson("B", "Two", .tech_mek);
     gs.person(t1).?.assigned_force = co;
     gs.person(t2).?.assigned_force = co;
-    try gs.assignSlot(uid, .tech, t1);
+    try crew.assignSlot(&gs, uid, .tech, t1);
 
     try injureTech(&gs, t1, 10, "test");
     try std.testing.expectEqual(person_mod.Status.wounded, gs.person(t1).?.status);
@@ -651,7 +652,7 @@ test "repairs consume spares; depot work needs the HQ" {
     const uid = try gs.addUnit("SHD-2H");
     const u = gs.unit(uid).?;
     const tech = try gs.hirePerson("Clay", "Cluny", .tech_mek);
-    try gs.assignSlot(uid, .tech, tech);
+    try crew.assignSlot(&gs, uid, .tech, tech);
 
     for (u.slots.items) |*slot| {
         if (slot.class == .weapon) {

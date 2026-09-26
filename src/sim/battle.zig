@@ -19,6 +19,7 @@ const medical = @import("medical.zig");
 const person_mod = @import("../domain/person.zig");
 const unit_mod = @import("../domain/unit.zig");
 const sites = @import("sites.zig");
+const crew = @import("crew.zig");
 const GameState = @import("state.zig").GameState;
 
 /// Salvage trucks (SVT-1) a company fields, wrecks excepted.
@@ -288,10 +289,10 @@ fn companyMods(gs: *GameState, c: *const contract_mod.Contract) autoresolve.Camp
     mods.supply_provisions = shortage == 0;
 
     // People: fatigue & morale across the company (one census: personnel.companyCrewStats).
-    const crew = @import("personnel.zig").companyCrewStats(gs, c.assigned_company);
-    if (crew.heads > 0) {
-        mods.avg_fatigue = crew.avg_fatigue;
-        mods.avg_morale = crew.avg_morale;
+    const crew_stats = @import("personnel.zig").companyCrewStats(gs, c.assigned_company);
+    if (crew_stats.heads > 0) {
+        mods.avg_fatigue = crew_stats.avg_fatigue;
+        mods.avg_morale = crew_stats.avg_morale;
     }
 
     // Force structure: recon lance and the support echelon (ARCH §9.3).
@@ -1475,7 +1476,7 @@ test "air cover is a fighter that can fly, not an empty wing" {
     try gs.moveUnitToForce(fighter, lance);
     try std.testing.expect(!companyMods(&gs, c).has_air_cover); // no pilot
     const pilot = try gs.hirePerson("Ace", "Ito", .aero_pilot);
-    try gs.assignSlot(fighter, .pilot, pilot);
+    try crew.assignSlot(&gs, fighter, .pilot, pilot);
     try std.testing.expect(companyMods(&gs, c).has_air_cover);
 }
 
@@ -2161,7 +2162,7 @@ test "support lances grant their modifiers only while a hull is ready and crewed
         const u = e.value_ptr;
         if (u.kind == .mash) u.status = .mothballed; // parked
         if (gs.force(u.force)) |lance| if (lance.support_kind == .salvage) {
-            if (gs.person(u.pilot)) |crew| crew.status = .wounded; // nobody to drive it
+            if (gs.person(u.pilot)) |driver| driver.status = .wounded; // nobody to drive it
         };
     }
     const after = companyMods(&gs, f.c);
@@ -2180,10 +2181,10 @@ fn vehiclePowerForTest(gunnery: u8, driving: u8) !i64 {
     const lance = try gs.createForce("Armor", .lance, co);
     for (0..4) |_| {
         const uid = try gs.addUnit("VDT");
-        const crew = try gs.hirePerson("V", "Crew", .vehicle_crew);
-        try gs.person(crew).?.skills.put(gs.allocator(), .gunnery_vee, gunnery);
-        try gs.person(crew).?.skills.put(gs.allocator(), .driving_vee, driving);
-        try gs.assignUnit(uid, lance, crew);
+        const driver = try gs.hirePerson("V", "Crew", .vehicle_crew);
+        try gs.person(driver).?.skills.put(gs.allocator(), .gunnery_vee, gunnery);
+        try gs.person(driver).?.skills.put(gs.allocator(), .driving_vee, driving);
+        try gs.assignUnit(uid, lance, driver);
     }
     try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
         .id = @enumFromInt(1),
