@@ -14,6 +14,9 @@ zig-out/
 scratch/
 *.log
 
+# local agent planning artifacts
+.claude/plans/
+
 # Python bytecode from the docs/ scripts
 __pycache__/
 *.pyc
