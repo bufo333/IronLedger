@@ -436,3 +436,119 @@ pub fn trimStock(gs: *GameState, company: types.ForceId) !u32 {
     }
     return moved;
 }
+
+test "trim_stock returns excess and unplanned consumables home, keeps spares" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 2025 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "E", .origin = .CC, .profession = .paymaster } });
+    const co = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
+    const site: @import("../domain/types.zig").Site = .{ .company = co };
+    _ = try commands.execute(&gs, .{ .accept_contract = .{ .offer_index = 0, .company = co } });
+    // Overstock one family, add a family nothing fires, a component and a spare laser.
+    _ = gs.takeStock(site, "provisions", gs.stockCount(site, "provisions"));
+    try gs.addStock(site, "ammo_lrm", 30);
+    try gs.addStock(site, "ammo_ac20", 3);
+    try gs.addStock(site, "comp_arm", 1);
+    try gs.addStock(site, "mlas", 2);
+    const before = gs.part_orders.items.len;
+    const r = try commands.execute(&gs, .{ .trim_stock = co });
+    try std.testing.expect(r.tons_moved > 0);
+    try std.testing.expect(gs.part_orders.items.len > before);
+    try std.testing.expectEqual(@as(u32, 0), gs.stockCount(site, "comp_arm"));
+    try std.testing.expectEqual(@as(u32, 2), gs.stockCount(site, "mlas"));
+    var lrm_target: u32 = 0;
+    var ac20_planned = false;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const p = try plan(arena.allocator(), &gs, co, treasury.courierEtaDays(&gs, .{ .company = co }), 14, 0);
+    for (p.lines) |l| {
+        if (std.mem.eql(u8, l.key, "ammo_lrm")) lrm_target = l.target;
+        if (std.mem.eql(u8, l.key, "ammo_ac20")) ac20_planned = true;
+    }
+    try std.testing.expect(gs.stockCount(site, "ammo_lrm") <= lrm_target);
+    if (!ac20_planned) try std.testing.expectEqual(@as(u32, 0), gs.stockCount(site, "ammo_ac20"));
+    // Trimming again moves nothing.
+    try std.testing.expectEqual(@as(u32, 0), (try commands.execute(&gs, .{ .trim_stock = co })).tons_moved);
+}
+
+test "deployment eats field stores, then buys local, then goes hungry" {
+    const tick = @import("tick.zig");
+    const sites_m = @import("sites.zig");
+    const finance_mod = @import("../econ/finance.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 2025 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "E", .origin = .CC, .profession = .paymaster } });
+    const co = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
+    const site: @import("../domain/types.zig").Site = .{ .company = co };
+
+    // Accepting a contract loads the trucks from the home warehouse.
+    _ = try commands.execute(&gs, .{ .accept_contract = .{ .offer_index = 0, .company = co } });
+    const loaded = gs.stockCount(site, "provisions");
+    try std.testing.expect(loaded > 0);
+    try std.testing.expect(sites_m.siteTons(&gs, site) <= sites_m.siteCapacityTons(&gs, site).?);
+    // No employer convoys, no resupply policy, no float for this test (the
+    // deployment defaults would feed them): the trucks are all they have.
+    gs.contracts.values()[0].terms.overhead_pct = 0;
+    gs.supply_policies.clearRetainingCapacity();
+    gs.policies.clearRetainingCapacity();
+
+    // On station, provisions burn daily out of the field stores.
+    const c = gs.contracts.values()[0];
+    try tick.advanceReading(&gs, c.transit_days + 10);
+    try std.testing.expect(gs.stockCount(site, "provisions") < loaded);
+
+    // Stores run dry: either the valve bought local (salvage money) or the
+    // company went hungry (no money) — never a silent third option.
+    gs.force(co).?.local_funds = 0;
+    try tick.advanceReading(&gs, 40);
+    const mid = finance_mod.summarize(&gs.ledger, 0, gs.clock.day_index, .{ .company = co });
+    try std.testing.expect(gs.force(co).?.supply_shortage_days > 0 or
+        mid.category(.supplies) + mid.category(.local_supplies) < 0);
+
+    // ...until a courier arrives and the local-purchase valve opens (the
+    // courier takes the map transit, however far this seed's contract is).
+    _ = try commands.execute(&gs, .{ .transfer = .{ .from = .outfit, .to = .{ .company = co }, .amount = 500_000 } });
+    try tick.advanceReading(&gs, treasury.courierEtaDays(&gs, .{ .company = co }) + 3);
+    try std.testing.expectEqual(@as(u16, 0), gs.force(co).?.supply_shortage_days);
+    const s = finance_mod.summarize(&gs.ledger, 0, gs.clock.day_index, .{ .company = co });
+    try std.testing.expect(s.category(.supplies) + s.category(.local_supplies) < 0);
+}
+
+test "the resupply plan keeps a deployed company fed and armed on a long line" {
+    const tick = @import("tick.zig");
+    const sites_m = @import("sites.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 2025 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "E", .origin = .CC, .profession = .paymaster } });
+    const co = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
+    const hq = gs.hqs.keys()[0];
+    const site: @import("../domain/types.zig").Site = .{ .company = co };
+    for (part_mod.munition_keys) |k| try gs.addStock(.{ .hq = hq }, k, 60);
+    try gs.addStock(.{ .hq = hq }, "provisions", 400);
+    try gs.addStock(.{ .hq = hq }, "medical_supplies", 30);
+    try gs.addStock(.{ .hq = hq }, "armor", 60);
+    // The nearest offer: the plan is judged on supply, not on a long transit.
+    var nearest: usize = 0;
+    for (gs.contract_offers.items, 0..) |o, i| if (o.dist_ly < gs.contract_offers.items[nearest].dist_ly) {
+        nearest = i;
+    };
+    _ = try commands.execute(&gs, .{ .accept_contract = .{ .offer_index = nearest, .company = co } });
+    // The load-out follows the plan: within capacity, no munitions the company cannot fire.
+    const cap = sites_m.siteCapacityTons(&gs, site).?;
+    try std.testing.expect(sites_m.siteTons(&gs, site) <= cap);
+    _ = try commands.execute(&gs, .{ .set_supply_policy = .{ .company = co, .min_days = 14, .tons = 0 } });
+    _ = try commands.execute(&gs, .{ .set_policy = .{ .entity = .{ .company = co }, .floor = 300_000, .monthly_cap = 600_000 } });
+    var day: u32 = 0;
+    var hungry_days: u32 = 0;
+    var dry_battles: u32 = 0;
+    while (day < 150) : (day += 1) {
+        try tick.advanceReading(&gs, 1);
+        try std.testing.expect(sites_m.siteTons(&gs, site) <= cap);
+        if (gs.stockCount(site, "provisions") == 0) hungry_days += 1;
+    }
+    for (gs.event_log.items) |e| if (std.mem.indexOf(u8, e.text, "silenced") != null and std.mem.indexOf(u8, e.text, "| 0 mounts silenced") == null) {
+        dry_battles += 1;
+    };
+    try std.testing.expectEqual(@as(u32, 0), hungry_days);
+    try std.testing.expectEqual(@as(u32, 0), dry_battles);
+}

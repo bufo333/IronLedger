@@ -480,7 +480,6 @@ src/sim/battle.zig:resolveEngagement
 src/sim/checklist.zig:turnWarnings
 src/sim/cli.zig:errorText
 src/sim/cli.zig:parseVerb
-src/sim/commands.zig
 src/sim/contract_events.zig
 src/sim/contract_events.zig:applyEffectsFor
 src/sim/contract_events.zig:applyEffectsFor#switch
@@ -488,6 +487,7 @@ src/sim/contract_market.zig
 src/sim/contract_market.zig:refresh
 src/sim/contract_market.zig:refreshBoard
 src/sim/hq_ops.zig
+src/sim/medical.zig
 src/sim/queries.zig
 src/sim/queries.zig:afterAction
 src/sim/queries.zig:contracts

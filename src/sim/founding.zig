@@ -216,3 +216,21 @@ test "createCommander yields the same commander, HQ, staff and stock regardless 
         try std.testing.expectEqual(gs1.stockCount(site1, key), gs2.stockCount(site2, key));
     }
 }
+
+test "the start year sets the calendar and gates the catalogue" {
+    const chassis_mod = @import("../domain/chassis.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1216 });
+    defer gs.deinit();
+    try std.testing.expectError(commands.Error.BadYear, commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster, .start_year = 2800 } }));
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster, .start_year = 3010 } });
+    try std.testing.expectEqual(@as(u16, 3010), gs.clock.date.year);
+    _ = try commands.execute(&gs, .{ .new_company = "Alpha" });
+    var it = gs.units.iterator();
+    while (it.next()) |e| {
+        const c = chassis_mod.find(e.value_ptr.chassis_key).?;
+        try std.testing.expect(c.intro_year <= 3010);
+    }
+    for (gs.market_listings.items) |l| if (l.kind == .unit) {
+        try std.testing.expect(chassis_mod.find(l.item_key).?.intro_year <= 3010);
+    };
+}

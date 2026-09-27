@@ -686,3 +686,76 @@ test "shares are paid pro rata from contract income at the configured share" {
     gs.share_profit_bp = 0;
     try std.testing.expectEqual(@as(types.CBills, 0), try payShares(&gs, cid, .none));
 }
+
+test "a raised company is an empty skeleton; hulls bought for it land in a lance or ship with the map transit; halls crew it" {
+    const unit_mod = @import("../domain/unit.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 12 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    const hq = gs.hqs.keys()[0];
+    gs.hqs.getPtr(hq).?.funds = 50_000_000;
+    const co = (try commands.execute(&gs, .{ .raise_company = .{ .name = "Bravo", .hq = hq } })).created_force;
+    // The slot is taken: a second one is refused.
+    try std.testing.expectError(commands.Error.CapacityFull, commands.execute(&gs, .{ .raise_company = .{ .name = "Charlie", .hq = hq } }));
+    var line: u32 = 0;
+    var support: u32 = 0;
+    var fit = gs.forces.iterator();
+    while (fit.next()) |e| {
+        const f = e.value_ptr;
+        if (gs.companyOf(f.id) != co) continue;
+        try std.testing.expectEqual(@as(usize, 0), f.units.items.len);
+        if (f.echelon == .lance) line += 1;
+        if (f.echelon == .support_lance) support += 1;
+    }
+    try std.testing.expectEqual(gs.hqs.getPtr(hq).?.capacity().lances_per_company, @as(u8, @intCast(line)));
+    try std.testing.expectEqual(@as(u32, 4), support);
+    try std.testing.expectEqual(hq, gs.force(co).?.supplying_hq);
+
+    // A mek on the home board: bought straight into the first lance.
+    var first_lance: types.ForceId = .none;
+    for (gs.force(co).?.children.items) |cid| if (gs.force(cid).?.echelon == .lance and first_lance == .none) {
+        first_lance = cid;
+    };
+    var mek_listing: ?usize = null;
+    for (gs.market_listings.items, 0..) |l, i| if (l.kind == .unit and l.hq == hq and !l.staple and chassis_mod.find(l.item_key) != null and chassis_mod.find(l.item_key).?.kind == .mek) {
+        mek_listing = i;
+        break;
+    };
+    if (mek_listing == null) {
+        try gs.market_listings.append(gs.allocator(), .{ .kind = .unit, .item_key = "LCT-1V", .rarity = .common, .price = 1_500_000, .hq = hq, .listed_day = 0, .expires_day = 400 });
+        mek_listing = gs.market_listings.items.len - 1;
+    }
+    const r = try commands.execute(&gs, .{ .buy_hull_for = .{ .listing = mek_listing.?, .company = co, .lance = first_lance } });
+    try std.testing.expectEqual(@as(u32, 0), r.eta_days);
+    try std.testing.expectEqual(first_lance, gs.unit(r.unit).?.force);
+
+    // The same hull on a distant HQ's board ships with the map transit.
+    _ = try commands.execute(&gs, .{ .found_hq = .{ .name = "Far", .planet_key = "zebebelgenubi" } });
+    const far = gs.hqs.keys()[1];
+    gs.hqs.getPtr(far).?.funds = 5_000_000;
+    try gs.market_listings.append(gs.allocator(), .{ .kind = .unit, .item_key = "LCT-1V", .rarity = .common, .price = 1_500_000, .hq = far, .listed_day = 0, .expires_day = 400 });
+    const r2 = try commands.execute(&gs, .{ .buy_hull_for = .{ .listing = gs.market_listings.items.len - 1, .company = co, .lance = first_lance } });
+    try std.testing.expect(r2.eta_days > 0);
+    try std.testing.expectEqual(unit_mod.UnitStatus.in_transit, gs.unit(r2.unit).?.status);
+    try std.testing.expectEqual(@as(usize, 1), gs.unit_transfers.items.len);
+
+    // Crews come from the halls: seed one of each role (and only those) and fill the seats.
+    gs.candidates.clearRetainingCapacity();
+    try gs.candidates.append(gs.allocator(), .{ .hq = hq, .spec = person_gen.generate(&gs.rng, .market, .mekwarrior), .asking_bonus = 0, .listed_day = 0, .expires_day = 400 });
+    try gs.candidates.append(gs.allocator(), .{ .hq = hq, .spec = person_gen.generate(&gs.rng, .market, .tech_mek), .asking_bonus = 0, .listed_day = 0, .expires_day = 400 });
+    const c = try commands.execute(&gs, .{ .crew_company = co });
+    try std.testing.expect(gs.unit(r.unit).?.pilot != .none);
+    try std.testing.expect(gs.unit(r.unit).?.tech != .none);
+    // Astechs and medics come to complement without a market;
+    // the doctor, mechanics and office nobody offered stay open.
+    for (manningNeeds(&gs, co)) |n| {
+        const have = manningHave(&gs, co, n.role);
+        // Two meks (one in transit) want two pilots and two techs; the hall
+        // offered one of each, so those lines stay half open.
+        if (isPooledRole(n.role)) try std.testing.expectEqual(n.need, have);
+        if (n.role == .mekwarrior or n.role == .tech_mek) try std.testing.expectEqual(@as(u32, 1), have);
+    }
+    try std.testing.expect(c.hired_count > 2);
+    try std.testing.expect(c.still_open > 0);
+    for (gs.candidates.items) |cand| try std.testing.expect(cand.spec.role != .mekwarrior and cand.spec.role != .tech_mek);
+}

@@ -680,3 +680,83 @@ test "identity commands: outfit and company names, emblem bytes" {
     try std.testing.expectEqualStrings("The Iron Ledger", f.name);
     try std.testing.expect(f.emblem != null);
 }
+
+test "air wings need a spaceport; fighters fly in air lances; support lances are facility-gated" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 15 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    const hq = gs.hqs.keys()[0];
+    const co = (try commands.execute(&gs, .{ .raise_company = .{ .name = "Bravo", .hq = hq } })).created_force;
+    // Spaceport 1: no air slot.
+    try std.testing.expectError(commands.Error.NoAirSlot, commands.execute(&gs, .{ .raise_air_company = co }));
+    try std.testing.expectError(commands.Error.NoAirSlot, commands.execute(&gs, .{ .new_lance = .{ .company = co, .name = "Sky", .kind = .air } }));
+    try setFacilityLevel(&gs, hq, .spaceport, 3);
+    const wing = (try commands.execute(&gs, .{ .raise_air_company = co })).created_force;
+    try std.testing.expectEqual(force_mod.Echelon.air_company, gs.force(wing).?.echelon);
+    try std.testing.expectEqual(@as(u32, 1), lancesOfEchelon(&gs, wing, .air_lance));
+    try std.testing.expectError(commands.Error.NoAirSlot, commands.execute(&gs, .{ .raise_air_company = co })); // one wing per company
+    _ = try commands.execute(&gs, .{ .new_lance = .{ .company = co, .name = "2nd Air Lance", .kind = .air } });
+    _ = try commands.execute(&gs, .{ .new_lance = .{ .company = co, .name = "3rd Air Lance", .kind = .air } });
+    try std.testing.expectError(commands.Error.TooManyLances, commands.execute(&gs, .{ .new_lance = .{ .company = co, .name = "4th", .kind = .air } }));
+
+    // A fighter goes to an air lance, never a line lance; a mek never to an air lance.
+    const fighter = try gs.addUnit("SPR-H5");
+    const mek = try gs.addUnit("LCT-1V");
+    var line: types.ForceId = .none;
+    var air: types.ForceId = .none;
+    for (gs.force(co).?.children.items) |cid| if (gs.force(cid).?.echelon == .lance and line == .none) {
+        line = cid;
+    };
+    for (gs.force(wing).?.children.items) |cid| if (air == .none) {
+        air = cid;
+    };
+    try std.testing.expectError(commands.Error.WrongHullKind, commands.execute(&gs, .{ .move_unit = .{ .unit = fighter, .force = line } }));
+    try std.testing.expectError(commands.Error.WrongHullKind, commands.execute(&gs, .{ .move_unit = .{ .unit = mek, .force = air } }));
+    _ = try commands.execute(&gs, .{ .move_unit = .{ .unit = fighter, .force = air } });
+    try std.testing.expectEqual(air, gs.unit(fighter).?.force);
+    try placeUnitInCompany(&gs, try gs.addUnit("CSR-V12"), co);
+    try std.testing.expectEqual(@as(usize, 2), gs.force(air).?.units.items.len);
+
+    // Support lances: four staples fill the slot; a mess needs a mess hall.
+    try std.testing.expectError(commands.Error.NoSupportSlot, commands.execute(&gs, .{ .new_lance = .{ .company = co, .name = "Mess", .kind = .{ .support = .mess } } }));
+    try setFacilityLevel(&gs, hq, .mess, 2);
+    const mess = (try commands.execute(&gs, .{ .new_lance = .{ .company = co, .name = "Mess Lance", .kind = .{ .support = .mess } } })).created_force;
+    try std.testing.expectEqual(force_mod.SupportLanceKind.mess, gs.force(mess).?.support_kind.?);
+    try std.testing.expectError(commands.Error.NoSupportSlot, commands.execute(&gs, .{ .new_lance = .{ .company = co, .name = "More", .kind = .{ .support = .salvage } } }));
+}
+
+test "a truck sent to a deployed company lands in its transport lance, and can still change lances out there" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 44 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
+    const co = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
+    // Alpha is away on a garrison contract.
+    const cid: types.ContractId = @enumFromInt(901);
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "PER",
+        .planet_key = gs.hqs.values()[0].planet_key,
+        .status = .active,
+        .assigned_company = co,
+        .terms = .{ .length_months = 12, .base_pay_month = 100_000 },
+    });
+    try std.testing.expect(gs.deploymentContract(co) != null);
+
+    // A cargo truck arrives from the HQ: it joins the transport lance, not the company node.
+    const truck = try gs.addUnit("CGT-3");
+    try placeUnitInCompany(&gs, truck, co);
+    const transport = supportLanceFor(&gs, co, gs.unit(truck).?).?;
+    try std.testing.expectEqual(transport, gs.unit(truck).?.force);
+    try std.testing.expectEqual(force_mod.SupportLanceKind.transport, gs.force(transport).?.support_kind.?);
+
+    // Reshuffling inside the deployed company works; a salvage truck goes to salvage.
+    const salvage: types.ForceId = if (supportLance(&gs, co, .salvage)) |l| l.id else .none;
+    _ = try commands.execute(&gs, .{ .move_unit = .{ .unit = truck, .force = salvage } });
+    try std.testing.expectEqual(salvage, gs.unit(truck).?.force);
+
+    // Joining a deployed company from outside still waits for home.
+    const outsider = try gs.addUnit("CGT-3");
+    try std.testing.expectError(commands.Error.CompanyDeployed, commands.execute(&gs, .{ .move_unit = .{ .unit = outsider, .force = transport } }));
+}

@@ -1181,3 +1181,225 @@ test "a veteran five-lance opposition pays more than a green four-lance one" {
     const norm = threatPayBp(.objective_raid, 3, .regular, tuning.contract.reference_lance_bv);
     try std.testing.expect(norm >= 9_900 and norm <= 10_100);
 }
+
+test "a black-market buy is a fraud or a sale, and the house notices either way" {
+    const planet_mod = @import("../domain/planet.zig");
+    var fraud = false;
+    var sale = false;
+    var seed: u64 = 1;
+    while ((!fraud or !sale) and seed < 60) : (seed += 1) {
+        var gs = GameState.init(std.testing.allocator, .{ .seed = seed });
+        defer gs.deinit();
+        _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+        const hq = gs.hqs.keys()[0];
+        gs.hqs.getPtr(hq).?.funds = 100_000_000;
+        const faction = planet_mod.find(gs.hqs.getPtr(hq).?.planet_key).?.faction;
+        const standing_before = gs.standing(faction);
+        const pirates_before = gs.standing("PER");
+        try gs.market_listings.append(gs.allocator(), .{ .kind = .part, .item_key = "ppc", .rarity = .uncommon, .price = 600_000, .hq = hq, .listed_day = 0, .expires_day = 10, .black_market = true });
+        const idx = gs.market_listings.items.len - 1;
+        const before = gs.stockCount(.{ .hq = hq }, "ppc");
+        const funds = gs.hqs.getPtr(hq).?.funds;
+        _ = try commands.execute(&gs, .{ .buy_listing = idx });
+        try std.testing.expectEqual(funds - 600_000, gs.hqs.getPtr(hq).?.funds); // paid either way
+        try std.testing.expectEqual(idx, gs.market_listings.items.len); // the offer is gone either way
+        if (gs.stockCount(.{ .hq = hq }, "ppc") == before) {
+            fraud = true;
+            try std.testing.expect(gs.standing(faction) < standing_before);
+        } else {
+            sale = true;
+            try std.testing.expect(gs.standing("PER") > pirates_before);
+        }
+    }
+    try std.testing.expect(fraud and sale);
+}
+
+test "a defrauded black-market hull purchase moves no hull the outfit already owns" {
+    var seed: u64 = 1;
+    var checked = false;
+    while (!checked and seed < 80) : (seed += 1) {
+        var gs = GameState.init(std.testing.allocator, .{ .seed = seed });
+        defer gs.deinit();
+        _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+        const alpha = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
+        const hq = gs.hqs.keys()[0];
+        gs.hqs.getPtr(hq).?.funds = 100_000_000;
+        // The newest hull on the books sits unassigned in the pool.
+        const pooled = try gs.addUnit("WSP-1A");
+        try gs.market_listings.append(gs.allocator(), .{ .kind = .unit, .item_key = "LCT-1V", .rarity = .common, .price = 500_000, .hq = hq, .listed_day = 0, .expires_day = 10, .black_market = true });
+        const units_before = gs.units.count();
+        const res = try commands.execute(&gs, .{ .buy_hull_for = .{ .listing = gs.market_listings.items.len - 1, .company = alpha, .lance = .none } });
+        if (gs.units.count() != units_before) continue; // a sale; walk on to a fraud
+        checked = true;
+        try std.testing.expectEqual(types.UnitId.none, res.unit);
+        try std.testing.expectEqual(types.ForceId.none, gs.unit(pooled).?.force);
+        try std.testing.expectEqual(@as(usize, 0), gs.unit_transfers.items.len);
+    }
+    try std.testing.expect(checked);
+}
+
+test "buying a wreck buys a project" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 73 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .FS, .profession = .chief_engineer } });
+    gs.hqs.values()[0].funds = 50_000_000;
+
+    // Plant a wreck listing so the test is deterministic.
+    try gs.market_listings.append(gs.allocator(), .{
+        .kind = .unit,
+        .item_key = "SHD-2H",
+        .rarity = .common,
+        .price = 900_000,
+        .listed_day = 0,
+        .expires_day = 90,
+        .condition = .{ .armor_pct = 12, .quality = .a, .damaged_slots = 1, .destroyed_slots = 2, .missing_components = 2 },
+    });
+    const idx = gs.market_listings.items.len - 1;
+    const units_before = gs.units.count();
+    _ = try commands.execute(&gs, .{ .buy_listing = idx });
+    try std.testing.expectEqual(units_before + 1, gs.units.count());
+
+    const u = &gs.units.values()[gs.units.count() - 1];
+    try std.testing.expectEqual(@as(u8, 12), u.armor_pct);
+    try std.testing.expectEqual(types.Quality.a, u.quality);
+    try std.testing.expect(u.needsDepot()); // missing structure → fabricate + bay
+    var destroyed: u32 = 0;
+    for (u.slots.items) |s| {
+        if (s.class == .weapon and s.condition == .destroyed) destroyed += 1;
+    }
+    try std.testing.expectEqual(@as(u32, 2), destroyed);
+
+    // Staples sell by the unit and stay on the board.
+    var staple_idx: ?usize = null;
+    for (gs.market_listings.items, 0..) |l, i| {
+        if (l.staple and std.mem.eql(u8, l.item_key, "ammo_lrm")) staple_idx = i;
+    }
+    const qty = gs.market_listings.items[staple_idx.?].quantity;
+    _ = try commands.execute(&gs, .{ .buy_listing = staple_idx.? });
+    try std.testing.expectEqual(qty - 1, gs.market_listings.items[staple_idx.?].quantity);
+}
+
+test "one negotiation round per offer — improved, hardened, or withdrawn; never a second" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1233 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    try std.testing.expect(gs.contract_offers.items.len > 0);
+    var improved: u32 = 0;
+    var hardened: u32 = 0;
+    var withdrawn: u32 = 0;
+    var rounds: u32 = 0;
+    while (rounds < 60) : (rounds += 1) {
+        if (gs.contract_offers.items.len == 0) try refresh(&gs);
+        const before = gs.contract_offers.items[0].terms;
+        const r = try commands.execute(&gs, .{ .negotiate = .{ .offer_index = 0, .term = .salvage } });
+        switch (r.negotiation) {
+            .improved => {
+                improved += 1;
+                try std.testing.expect(gs.contract_offers.items[0].terms.salvage_pct > before.salvage_pct);
+                try std.testing.expectError(commands.Error.AlreadyNegotiated, commands.execute(&gs, .{ .negotiate = .{ .offer_index = 0, .term = .pay } }));
+            },
+            .hardened => {
+                hardened += 1;
+                try std.testing.expect(gs.contract_offers.items[0].terms.base_pay_month < before.base_pay_month);
+                try std.testing.expectError(commands.Error.AlreadyNegotiated, commands.execute(&gs, .{ .negotiate = .{ .offer_index = 0, .term = .pay } }));
+            },
+            .withdrawn => withdrawn += 1,
+            .none => unreachable,
+        }
+        // Clear the board so the next round sees fresh offers.
+        gs.contract_offers.clearRetainingCapacity();
+    }
+    try std.testing.expect(improved > 0 and hardened > 0);
+    // A term at its cap is refused before any dice are thrown.
+    try refresh(&gs);
+    gs.contract_offers.items[0].terms.advance_pct = 50;
+    try std.testing.expectError(commands.Error.TermAtCap, commands.execute(&gs, .{ .negotiate = .{ .offer_index = 0, .term = .advance } }));
+}
+
+test "the contract world has a hull board — local funds pay, the hull joins the company there" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1207 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
+    const co = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
+    const cid: types.ContractId = @enumFromInt(1207);
+    try gs.contracts.put(gs.allocator(), cid, .{ .id = cid, .kind = .objective_raid, .employer_key = "LC", .enemy_key = "DC", .planet_key = "hesperus_ii", .status = .active, .assigned_company = co, .terms = .{ .length_months = 3, .base_pay_month = 100_000 } });
+    gs.force(co).?.location_planet = "hesperus_ii";
+    // Hesperus II builds meks: something turns up within a few tries.
+    var tries: u32 = 0;
+    var idx: ?usize = null;
+    while (idx == null and tries < 20) : (tries += 1) {
+        try refreshContractWorld(&gs, gs.contracts.getPtr(cid).?);
+        for (gs.market_listings.items, 0..) |l, i| if (l.company == co) {
+            idx = i;
+        };
+    }
+    try std.testing.expect(idx != null);
+    // Broke: refused; funded: bought from local funds, on the company's books at once.
+    gs.force(co).?.local_funds = 0;
+    try std.testing.expectError(commands.Error.CompanyFundsShort, commands.execute(&gs, .{ .buy_listing = idx.? }));
+    gs.force(co).?.local_funds = 50_000_000;
+    const hq_funds = gs.hqs.values()[0].funds;
+    const r = try commands.execute(&gs, .{ .buy_listing = idx.? });
+    try std.testing.expectEqual(co, gs.companyOf(gs.unit(r.unit).?.force));
+    try std.testing.expect(gs.force(co).?.local_funds < 50_000_000);
+    try std.testing.expectEqual(hq_funds, gs.hqs.values()[0].funds);
+    // Not a raise candidate, and gone with the contract at the next refresh.
+    gs.contracts.getPtr(cid).?.status = .completed;
+    try refreshListings(&gs);
+    for (gs.market_listings.items) |l| try std.testing.expect(l.company == .none);
+}
+
+test "one board per HQ — offers inside its reach, taken only by companies based there" {
+    const planet_mod = @import("../domain/planet.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1240 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
+    const home = gs.hqs.keys()[0];
+    const alpha = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
+    // A second base at the edge of the home ring, grown to host a company.
+    const home_world = planet_mod.find(gs.hqs.getPtr(home).?.planet_key).?;
+    var far_key: []const u8 = "";
+    var far_dist: u32 = 0;
+    for (planet_mod.catalog) |*p| {
+        const d = planet_mod.distanceLy(p, home_world);
+        if (d <= gs.hqs.getPtr(home).?.influenceLy() and d > far_dist) {
+            far_dist = d;
+            far_key = p.key;
+        }
+    }
+    _ = try commands.execute(&gs, .{ .found_hq = .{ .name = "Far", .planet_key = far_key } });
+    const far = gs.hqs.keys()[1];
+    {
+        const h = gs.hqs.getPtr(far).?;
+        h.tier = .regional;
+        try h.facilities.append(gs.allocator(), .{ .kind = hq_mod.FacilityKind.mek_bay, .level = 1 });
+        h.staff_assigned = 999;
+    }
+    const bravo = (try commands.execute(&gs, .{ .new_company_at = .{ .name = "Bravo", .hq = far } })).created_force;
+    try refresh(&gs);
+    var on_home: u32 = 0;
+    var on_far: u32 = 0;
+    var far_offer: ?usize = null;
+    var home_offer: ?usize = null;
+    for (gs.contract_offers.items, 0..) |o, i| {
+        const h = gs.hqs.getPtr(o.offer_hq) orelse return error.TestUnexpectedResult;
+        const dist = planet_mod.distanceLy(planet_mod.find(h.planet_key).?, planet_mod.find(o.planet_key).?);
+        try std.testing.expectEqual(dist, o.dist_ly);
+        const market_mod = @import("../econ/market.zig");
+        try std.testing.expect(dist <= h.influenceLy() + market_mod.beachhead_band_ly);
+        if (o.offer_hq == home) {
+            on_home += 1;
+            home_offer = i;
+        } else {
+            on_far += 1;
+            far_offer = i;
+        }
+    }
+    try std.testing.expect(on_home > 0 and on_far > 0);
+    // Alpha cannot take the far board's work; Bravo can.
+    try std.testing.expect(!offerEligible(&gs, &gs.contract_offers.items[far_offer.?], alpha));
+    try std.testing.expectError(commands.Error.OutOfRange, commands.execute(&gs, .{ .accept_contract = .{ .offer_index = far_offer.?, .company = alpha } }));
+    try std.testing.expectError(commands.Error.OutOfRange, commands.execute(&gs, .{ .accept_contract = .{ .offer_index = home_offer.?, .company = bravo } }));
+    _ = try commands.execute(&gs, .{ .accept_contract = .{ .offer_index = far_offer.?, .company = bravo } });
+    try std.testing.expect(gs.deploymentContract(bravo) != null);
+}

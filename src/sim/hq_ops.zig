@@ -1239,3 +1239,344 @@ test "construction projects: paperwork then build, staffing bill rises" {
     try std.testing.expectEqual(@as(u8, 2), gs.hqs.values()[0].facilityLevel(.warehouse));
     try std.testing.expect(gs.hqs.values()[0].staffRequired().total() > before);
 }
+
+test "tier upgrade: refusals keep the money; a funded field HQ starts the project and pays once" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1230 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    const home = gs.hqs.keys()[0];
+    const home_funds = gs.hqs.getPtr(home).?.funds;
+    try std.testing.expectError(commands.Error.MaxLevel, commands.execute(&gs, .{ .upgrade_tier = home })); // already regional
+    try std.testing.expectEqual(home_funds, gs.hqs.getPtr(home).?.funds);
+    // A firebase with an empty till: refused, nothing debited, no project.
+    const home_world = planet_mod.find(gs.hqs.getPtr(home).?.planet_key).?;
+    var key: []const u8 = "";
+    for (planet_mod.catalog) |*p| if (p != home_world and planet_mod.distanceLy(p, home_world) <= gs.hqs.getPtr(home).?.influenceLy() and key.len == 0) {
+        key = p.key;
+    };
+    _ = try commands.execute(&gs, .{ .found_hq = .{ .name = "Firebase", .planet_key = key } });
+    const fb = gs.hqs.keys()[1];
+    gs.hqs.getPtr(fb).?.funds = 0;
+    try std.testing.expectError(commands.Error.InsufficientTreasury, commands.execute(&gs, .{ .upgrade_tier = fb }));
+    try std.testing.expectEqual(@as(usize, 0), gs.hqs.getPtr(fb).?.projects.items.len);
+    // Funded: the project starts and the cost is paid exactly once.
+    gs.hqs.getPtr(fb).?.funds = tier_upgrade_cost + 1;
+    _ = try commands.execute(&gs, .{ .upgrade_tier = fb });
+    try std.testing.expectEqual(@as(types.CBills, 1), gs.hqs.getPtr(fb).?.funds);
+    try std.testing.expectEqual(@as(usize, 1), gs.hqs.getPtr(fb).?.projects.items.len);
+    try std.testing.expectError(commands.Error.ProjectInProgress, commands.execute(&gs, .{ .upgrade_tier = fb }));
+    try std.testing.expectEqual(@as(types.CBills, 1), gs.hqs.getPtr(fb).?.funds);
+}
+
+test "components — fabrication is guaranteed, purchase is a roll" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 55 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
+    const hq_id = gs.hqs.keys()[0];
+
+    // The guarantee: fabrication always happens, at the premium, over bay
+    // time (level-1 bay = 2 slots, so 3 legs take two 8-day rounds).
+    const hq_funds_before = gs.hqs.values()[0].funds;
+    _ = try commands.execute(&gs, .{ .fabricate = .{ .hq = hq_id, .part_key = "comp_leg", .quantity = 3 } });
+    try std.testing.expect(gs.hqs.values()[0].funds < hq_funds_before);
+    try std.testing.expectError(commands.Error.NotAComponent, commands.execute(&gs, .{
+        .fabricate = .{ .hq = hq_id, .part_key = "mlas", .quantity = 1 },
+    }));
+    _ = try commands.execute(&gs, .{ .advance_days = 17 });
+    try std.testing.expectEqual(@as(u32, 1 + 3), gs.stockCount(.{ .hq = hq_id }, "comp_leg")); // 1 seeded
+
+    // Common parts source most months; failures cost nothing. Orders are
+    // paid by the HQ treasury.
+    const hq_before_order = gs.hqs.values()[0].funds;
+    _ = try commands.execute(&gs, .{ .order_part = .{ .part_key = "mlas", .quantity = 2 } });
+    const order = gs.part_orders.items[gs.part_orders.items.len - 1];
+    if (order.status == .failed) {
+        try std.testing.expectEqual(hq_before_order, gs.hqs.values()[0].funds);
+    } else {
+        try std.testing.expect(gs.hqs.values()[0].funds < hq_before_order);
+        _ = try commands.execute(&gs, .{ .advance_days = 12 });
+        try std.testing.expectEqual(@as(u32, 2), gs.spareCount("mlas"));
+    }
+    try std.testing.expectError(commands.Error.UnknownPart, commands.execute(&gs, .{ .order_part = .{ .part_key = "gauss", .quantity = 1 } }));
+}
+
+test "construction is paid by the HQ and the back office sets the pace" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 57 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .FS, .profession = .paymaster } });
+    const hq_id = gs.hqs.keys()[0];
+    gs.hqs.values()[0].funds = 5_000_000;
+
+    // Starter HQ staff are real people, posted, and cover the requirement.
+    try std.testing.expect(hqStaff(&gs, hq_id, .admin_command).count > 0);
+    try std.testing.expect(gs.hqs.values()[0].staff_assigned >= gs.hqs.values()[0].staffRequired().total());
+
+    // Command admins push permits through: strip the office and paperwork
+    // slows down; post them back and it recovers.
+    const staffed = paperworkDaysFor(&gs, hq_id);
+    var pit = gs.people.iterator();
+    while (pit.next()) |entry| {
+        if (entry.value_ptr.role == .admin_command) entry.value_ptr.posted_hq = .none;
+    }
+    refreshHqStaffing(&gs);
+    const unstaffed = paperworkDaysFor(&gs, hq_id);
+    try std.testing.expect(unstaffed > staffed);
+    for (0..2) |_| {
+        const id = try @import("personnel.zig").recruitGenerated(&gs, .admin_command, gs.homeHqFor(.none), .market);
+        _ = try commands.execute(&gs, .{ .post_person = .{ .person = id, .hq = hq_id } });
+    }
+    try std.testing.expect(paperworkDaysFor(&gs, hq_id) < unstaffed);
+
+    // Upgrade the mess: paid now from HQ funds, lands after its span.
+    _ = try commands.execute(&gs, .{ .upgrade_facility = .{ .hq = hq_id, .kind = .mess } });
+    try std.testing.expect(gs.hqs.values()[0].funds < 5_000_000);
+    try std.testing.expectError(commands.Error.ProjectInProgress, commands.execute(&gs, .{ .upgrade_facility = .{ .hq = hq_id, .kind = .mess } }));
+    const p = gs.hqs.values()[0].projects.items[0];
+    _ = try commands.execute(&gs, .{ .advance_days = p.construction_done_day - gs.clock.day_index + 1 });
+    try std.testing.expectEqual(@as(u8, 2), gs.hqs.values()[0].facilityLevel(.mess));
+}
+
+test "one HQ, one company — the second needs a second regional HQ" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 81 });
+    defer gs.deinit();
+    // A Combine commander: every DC world is within reach of Zebebelgenubi
+    // and none within reach of Callison, whichever world the HQ landed on.
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .DC, .profession = .paymaster } });
+    const home = gs.hqs.keys()[0];
+
+    const alpha = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
+    try std.testing.expectEqual(home, gs.force(alpha).?.supplying_hq);
+    try std.testing.expectError(commands.Error.CapacityFull, commands.execute(&gs, .{ .new_company = "Bravo" }));
+
+    // Found a field HQ on a reachable world: a forward base that hosts one
+    // company as it stands, and only one.
+    gs.funds = 20_000_000;
+    try std.testing.expectError(commands.Error.NotReachable, commands.execute(&gs, .{ .found_hq = .{ .name = "Far", .planet_key = "callison" } }));
+    _ = try commands.execute(&gs, .{ .found_hq = .{ .name = "Firebase", .planet_key = "zebebelgenubi" } });
+    const fb = gs.hqs.keys()[1];
+    const bravo = (try commands.execute(&gs, .{ .new_company_at = .{ .name = "Bravo", .hq = fb } })).created_force;
+    try std.testing.expectEqual(fb, gs.force(bravo).?.supplying_hq);
+    try std.testing.expectError(commands.Error.CapacityFull, commands.execute(&gs, .{ .new_company_at = .{ .name = "Charlie", .hq = fb } }));
+
+    // Fund it (the courier takes as long as the jumps take), upgrade it to
+    // regional, wait out the build: still one company, now with full service.
+    _ = try commands.execute(&gs, .{ .transfer = .{ .from = .outfit, .to = .{ .hq = fb }, .amount = 4_000_000 } });
+    while (gs.fund_couriers.items.len > 0) _ = try commands.execute(&gs, .{ .advance_days = 5 });
+    _ = try commands.execute(&gs, .{ .upgrade_tier = fb });
+    const p = gs.hqs.values()[1].projects.items[0];
+    _ = try commands.execute(&gs, .{ .advance_days = p.construction_done_day - gs.clock.day_index + 1 });
+    try std.testing.expectEqual(hq_mod.HqTier.regional, gs.hqs.values()[1].tier);
+    _ = try commands.execute(&gs, .{ .autostaff = fb });
+    try std.testing.expectError(commands.Error.CapacityFull, commands.execute(&gs, .{ .new_company_at = .{ .name = "Charlie", .hq = fb } }));
+
+    // Link the two: shipments between them ride the link and count against it.
+    _ = try commands.execute(&gs, .{ .link = .{ .a = home, .b = fb, .level = 1 } });
+    try std.testing.expectEqual(@as(usize, 1), gs.hq_links.items.len);
+    gs.hqs.values()[0].funds = 10_000_000;
+    try gs.addStock(.{ .hq = home }, "armor", 60);
+    _ = try commands.execute(&gs, .{ .ship_stock = .{ .part_key = "armor", .quantity = 30, .from = .{ .hq = home }, .to = .{ .hq = fb } } });
+    try std.testing.expectError(commands.Error.ThroughputExceeded, commands.execute(&gs, .{
+        .ship_stock = .{ .part_key = "armor", .quantity = 20, .from = .{ .hq = home }, .to = .{ .hq = fb } },
+    }));
+
+    // Transfer a mek Alpha → Bravo: different worlds, so it ships.
+    const alpha_lance = gs.force(gs.force(alpha).?.children.items[0]).?;
+    const uid = alpha_lance.units.items[0];
+    _ = try commands.execute(&gs, .{ .transfer_unit = .{ .unit = uid, .to_company = bravo } });
+    try std.testing.expectEqual(unit_mod.UnitStatus.in_transit, gs.unit(uid).?.status);
+    _ = try commands.execute(&gs, .{ .advance_days = 40 });
+    try std.testing.expectEqual(bravo, gs.companyOf(gs.unit(uid).?.force));
+    try std.testing.expect(gs.unit(uid).?.tech == .none); // needs a Bravo tech
+}
+
+test "depot work happens at the hull's home HQ — its components, its bay — not the outfit's first one" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 97 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
+    const home = gs.hqs.keys()[0];
+    // A second HQ in the home ring, raised to regional with a staffed bay.
+    const home_world = planet_mod.find(gs.hqs.getPtr(home).?.planet_key).?;
+    var key: []const u8 = "";
+    for (planet_mod.catalog) |*p| if (p != home_world and planet_mod.distanceLy(p, home_world) <= gs.hqs.getPtr(home).?.influenceLy() and key.len == 0) {
+        key = p.key;
+    };
+    _ = try commands.execute(&gs, .{ .found_hq = .{ .name = "Firebase", .planet_key = key } });
+    const fb = gs.hqs.keys()[1];
+    {
+        const h = gs.hqs.getPtr(fb).?;
+        h.tier = .regional;
+        try h.facilities.append(gs.allocator(), .{ .kind = .mek_bay, .level = 1 });
+        h.staff_assigned = 999; // fully staffed, so the bay counts (and hosts four lances)
+    }
+    const co = (try commands.execute(&gs, .{ .new_company_at = .{ .name = "Bravo", .hq = fb } })).created_force;
+    try std.testing.expectEqual(fb, gs.homeHqFor(co));
+
+    // One of Bravo's meks loses a side torso.
+    var uid: types.UnitId = .none;
+    var it = gs.units.iterator();
+    while (it.next()) |e| if (e.value_ptr.kind == .mek and gs.companyOf(e.value_ptr.force) == co) {
+        for (e.value_ptr.slots.items) |*s| if (s.class == .structure and std.mem.startsWith(u8, s.slot_key, "lt.")) {
+            s.condition = .destroyed;
+            uid = e.value_ptr.id;
+            break;
+        };
+        if (uid != .none) break;
+    };
+    try std.testing.expect(uid != .none);
+
+    // The torso assembly sits in Bravo's own depot; the first HQ has none.
+    const torso = part_mod.componentFor("lt.structure", gs.unit(uid).?.chassis_key); // by weight class
+    _ = gs.takeStock(.{ .hq = home }, torso, gs.stockCount(.{ .hq = home }, torso));
+    _ = gs.takeStock(.{ .hq = fb }, torso, gs.stockCount(.{ .hq = fb }, torso));
+    try gs.addStock(.{ .hq = fb }, torso, 1);
+    _ = try commands.execute(&gs, .{ .depot = uid });
+    try std.testing.expect(hasJobForUnit(&gs, uid));
+    for (gs.bay_jobs.items) |j| if (j.unit == uid) try std.testing.expectEqual(fb, j.hq);
+    try std.testing.expectEqual(@as(u32, 0), gs.stockCount(.{ .hq = fb }, torso));
+}
+
+test "a wreck is rebuilt in the depot — a component and bay time — and comes back ready" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 95 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
+    const co = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
+    const home = gs.hqs.keys()[0];
+    gs.hqs.getPtr(home).?.staff_assigned = 999;
+    var uid: types.UnitId = .none;
+    var uit = gs.units.iterator();
+    while (uit.next()) |e| if (e.value_ptr.kind == .mek and gs.companyOf(e.value_ptr.force) == co) {
+        uid = e.value_ptr.id;
+        break;
+    };
+    const u = gs.unit(uid).?;
+    // Killed in action: destroyed, centre torso gone; a damaged ammo bin on top.
+    u.markWrecked();
+    for (u.slots.items) |*s| if (s.class == .ammo) {
+        s.condition = .damaged;
+        break;
+    };
+    try std.testing.expect(u.needsDepot());
+    var ct_destroyed = false;
+    for (u.slots.items) |s| if (std.mem.startsWith(u8, s.slot_key, "ct.") and s.class == .structure and s.condition == .destroyed) {
+        ct_destroyed = true;
+    };
+    try std.testing.expect(ct_destroyed);
+
+    // No centre torso on the shelf: the depot asks for it; with one, it queues.
+    const ct = part_mod.componentFor("ct.structure", u.chassis_key); // by weight class
+    _ = gs.takeStock(.{ .hq = home }, ct, gs.stockCount(.{ .hq = home }, ct));
+    try std.testing.expectError(commands.Error.MissingComponents, commands.execute(&gs, .{ .depot = uid }));
+    try gs.addStock(.{ .hq = home }, ct, 1);
+    _ = try commands.execute(&gs, .{ .depot = uid });
+    try std.testing.expect(hasJobForUnit(&gs, uid));
+    try std.testing.expectEqual(@as(u32, 0), gs.stockCount(.{ .hq = home }, ct));
+    // Bay time passes (a failed check redoes the work); the wreck is a hull again.
+    var days: u32 = 0;
+    while (hasJobForUnit(&gs, uid) and days < 300) : (days += 1) {
+        try runDaily(&gs);
+        gs.clock.day_index += 1;
+    }
+    try std.testing.expect(!hasJobForUnit(&gs, uid));
+    try std.testing.expectEqual(unit_mod.UnitStatus.ready, gs.unit(uid).?.status);
+    try std.testing.expect(!gs.unit(uid).?.needsDepot());
+
+    // A wreck from an older save — destroyed, structure untouched — gets its wreck on the way in.
+    const legacy = try gs.addUnit("LCT-1V");
+    gs.unit(legacy).?.status = .destroyed;
+    try std.testing.expect(gs.unit(legacy).?.needsDepot());
+    try gs.addStock(.{ .hq = home }, "comp_ct_l", 1); // a Locust's centre torso is a light assembly
+    _ = try commands.execute(&gs, .{ .depot = legacy });
+    try std.testing.expect(hasJobForUnit(&gs, legacy));
+    try std.testing.expectEqual(@as(u32, 0), gs.stockCount(.{ .hq = home }, "comp_ct_l"));
+}
+
+test "how a hull died decides the rebuild — engine kills cost an engine, scrap only strips" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1202 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
+    const home = gs.hqs.keys()[0];
+    gs.hqs.getPtr(home).?.staff_assigned = 999;
+
+    // An ammunition explosion guts both side torsos and needs an engine.
+    const boom = try gs.addUnit("SHD-2H");
+    gs.unit(boom).?.markWreckedBy(.ammo);
+    var torsos: u32 = 0;
+    for (gs.unit(boom).?.slots.items) |s| if (s.class == .structure and s.condition == .destroyed) {
+        torsos += 1;
+    };
+    try std.testing.expectEqual(@as(u32, 3), torsos); // ct + lt + rt
+    // TechManual engine price for the Shadow Hawk (55 t, walk 5 → 275).
+    try std.testing.expectEqual(@as(types.CBills, 5_000 * 275 * 55 / 75), engineCharge(gs.unit(boom).?));
+    try gs.addStock(.{ .hq = home }, "comp_ct", 1);
+    try gs.addStock(.{ .hq = home }, "comp_torso", 2);
+    _ = try commands.execute(&gs, .{ .depot = boom });
+    var job_cost: types.CBills = 0;
+    var job_days: u32 = 0;
+    for (gs.bay_jobs.items) |j| if (j.unit == boom) {
+        job_cost = j.cost;
+        job_days = j.duration_days;
+    };
+    try std.testing.expect(job_cost >= engineCharge(gs.unit(boom).?));
+    try std.testing.expect(job_days >= tuning.loss.engine_rebuild_days);
+    try std.testing.expect(rebuildEstimate(&gs, gs.unit(boom).?) != null);
+
+    // Scrap is refused by the depot and priced as parts.
+    const junk = try gs.addUnit("SHD-2H");
+    gs.unit(junk).?.markWreckedBy(.scrap);
+    gs.unit(junk).?.armor_pct = 50;
+    try std.testing.expectError(commands.Error.WrittenOff, commands.execute(&gs, .{ .depot = junk }));
+    try std.testing.expect(rebuildEstimate(&gs, gs.unit(junk).?) == null);
+    try std.testing.expect(beyondEconomicalRepair(&gs, gs.unit(junk).?));
+    try std.testing.expect(market_mod.unitSaleValue(gs.unit(junk).?) > 0); // the guns are still worth something
+
+    // Stripping crates the guns and the armour left on it, and the hull is gone.
+    const ac5_before = gs.stockCount(.{ .hq = home }, "ac5");
+    const armor_before = gs.stockCount(.{ .hq = home }, "armor");
+    const ct_before = gs.stockCount(.{ .hq = home }, "comp_ct");
+    _ = try commands.execute(&gs, .{ .strip_unit = junk });
+    try std.testing.expect(gs.unit(junk) == null);
+    try std.testing.expectEqual(ac5_before + 1, gs.stockCount(.{ .hq = home }, "ac5"));
+    try std.testing.expect(gs.stockCount(.{ .hq = home }, "armor") > armor_before);
+    try std.testing.expectEqual(ct_before, gs.stockCount(.{ .hq = home }, "comp_ct")); // scrap has no structure left
+}
+
+test "heavy assemblies need a level-2 bay, assault ones a level-3 bay at a regional HQ" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1208 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
+    const hq_id = gs.hqs.keys()[0];
+    const h = gs.hqs.getPtr(hq_id).?;
+    h.staff_assigned = 999;
+    h.funds = 50_000_000;
+    const bay = for (h.facilities.items) |*f| {
+        if (f.kind == .mek_bay) break f;
+    } else return error.TestUnexpectedResult;
+    bay.level = 1;
+    _ = try commands.execute(&gs, .{ .fabricate = .{ .hq = hq_id, .part_key = "comp_ct_l", .quantity = 1 } });
+    _ = try commands.execute(&gs, .{ .fabricate = .{ .hq = hq_id, .part_key = "comp_ct", .quantity = 1 } });
+    try std.testing.expectError(commands.Error.BayTooSmall, commands.execute(&gs, .{ .fabricate = .{ .hq = hq_id, .part_key = "comp_ct_h", .quantity = 1 } }));
+    bay.level = 2;
+    _ = try commands.execute(&gs, .{ .fabricate = .{ .hq = hq_id, .part_key = "comp_ct_h", .quantity = 1 } });
+    try std.testing.expectError(commands.Error.BayTooSmall, commands.execute(&gs, .{ .fabricate = .{ .hq = hq_id, .part_key = "comp_ct_a", .quantity = 1 } }));
+    bay.level = 3;
+    _ = try commands.execute(&gs, .{ .fabricate = .{ .hq = hq_id, .part_key = "comp_ct_a", .quantity = 1 } });
+    // A field HQ never builds assault assemblies, whatever its bay.
+    h.tier = .field;
+    try std.testing.expect(!canFabricate(&gs, hq_id, "comp_ct_a"));
+    try std.testing.expect(canFabricate(&gs, hq_id, "comp_ct_h"));
+}
+
+test "an upgrade the HQ cannot afford is refused before a C-bill moves, from the same rule the screen dims on" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 909 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    const hq = gs.hqs.keys()[0];
+    gs.hqs.getPtr(hq).?.funds = 1;
+    try std.testing.expectEqual(UpgradeBlock.funds_short, upgradeBlock(&gs, hq, .mess).?);
+    try std.testing.expectError(commands.Error.InsufficientTreasury, commands.execute(&gs, .{ .upgrade_facility = .{ .hq = hq, .kind = .mess } }));
+    try std.testing.expectEqual(@as(types.CBills, 1), gs.hqs.getPtr(hq).?.funds);
+    gs.hqs.getPtr(hq).?.funds = 50_000_000;
+    try std.testing.expect(upgradeBlock(&gs, hq, .mess) == null);
+    _ = try commands.execute(&gs, .{ .upgrade_facility = .{ .hq = hq, .kind = .mess } });
+    try std.testing.expectEqual(UpgradeBlock.in_progress, upgradeBlock(&gs, hq, .mess).?);
+}

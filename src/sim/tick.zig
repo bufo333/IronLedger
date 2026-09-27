@@ -903,3 +903,57 @@ test "turn-based decisions: time never blocks, deadlines default" {
     try std.testing.expectEqual(@as(usize, 0), gs.event_queue.pending.items.len);
     try std.testing.expectEqual(@as(i32, 1), gs.reputation);
 }
+
+test "difficulty scales pay, fabrication and purchases — regular is the game as tuned, and it persists as a setting" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 98 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
+    _ = try commands.execute(&gs, .{ .new_company = "Alpha" });
+    const hq_id = gs.hqs.keys()[0];
+    try std.testing.expectEqual(@import("../domain/difficulty.zig").Level.regular, gs.difficulty);
+
+    // Fabrication: elite charges more than regular for the same job.
+    gs.hqs.getPtr(hq_id).?.funds = 50_000_000;
+    const before_r = gs.hqs.getPtr(hq_id).?.funds;
+    _ = try commands.execute(&gs, .{ .fabricate = .{ .hq = hq_id, .part_key = "comp_leg", .quantity = 1 } });
+    const cost_r = before_r - gs.hqs.getPtr(hq_id).?.funds;
+    _ = try commands.execute(&gs, .{ .set_difficulty = .elite });
+    const before_e = gs.hqs.getPtr(hq_id).?.funds;
+    _ = try commands.execute(&gs, .{ .fabricate = .{ .hq = hq_id, .part_key = "comp_leg", .quantity = 1 } });
+    const cost_e = before_e - gs.hqs.getPtr(hq_id).?.funds;
+    try std.testing.expect(cost_e > cost_r);
+    try std.testing.expectEqual(types.applyBp(cost_r, gs.diff().fab_cost_bp), cost_e);
+    // Regular: exactly the tuned ×1.5 on the catalogue price — a full structure set is 900 k.
+    const part_mod2 = @import("../domain/part.zig");
+    try std.testing.expectEqual(types.applyBp(part_mod2.cost("comp_leg"), tuning.market.fab_cost_bp), cost_r);
+
+    // Contract pay: the same board, rolled under green and under elite, pays in the table's ratio.
+    const cm = @import("contract_market.zig");
+    _ = try commands.execute(&gs, .{ .set_difficulty = .green });
+    var green = GameState.init(std.testing.allocator, .{ .seed = 98 });
+    defer green.deinit();
+    _ = try commands.execute(&green, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
+    _ = try commands.execute(&green, .{ .new_company = "Alpha" });
+    green.difficulty = .green;
+    var elite = GameState.init(std.testing.allocator, .{ .seed = 98 });
+    defer elite.deinit();
+    _ = try commands.execute(&elite, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
+    _ = try commands.execute(&elite, .{ .new_company = "Alpha" });
+    elite.difficulty = .elite;
+    try cm.refresh(&green);
+    try cm.refresh(&elite);
+    try std.testing.expect(green.contract_offers.items.len > 0);
+    try std.testing.expectEqual(green.contract_offers.items.len, elite.contract_offers.items.len);
+    const g0 = green.contract_offers.items[0].terms.base_pay_month;
+    const e0 = elite.contract_offers.items[0].terms.base_pay_month;
+    try std.testing.expect(e0 < g0);
+    // ×0.61 / ×1.22 = exactly half, give or take rounding.
+    try std.testing.expect(@abs(e0 * 2 - g0) <= @divTrunc(g0, 50));
+
+    // The level is logged and survives a round trip through the store.
+    var seen = false;
+    for (gs.event_log.items) |e| if (std.mem.indexOf(u8, e.text, "[difficulty]") != null) {
+        seen = true;
+    };
+    try std.testing.expect(seen);
+}

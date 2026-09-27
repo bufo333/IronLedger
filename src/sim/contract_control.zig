@@ -655,3 +655,43 @@ test "an offer carries its opposition, and acceptance sizes the pool from it" {
     onAccept(&gs, &c);
     try std.testing.expectEqual(@import("../domain/opfor.zig").poolBv(c.opforBv(), c.terms.length_months), c.enemy_pool_bv);
 }
+
+test "idle companies stay where they worked; recall brings them home; redeploy from the field" {
+    const posture = @import("posture.zig");
+    const tick = @import("tick.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 83 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .CC, .profession = .quartermaster } });
+    const co = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
+
+    // Take the shortest offer, run it out.
+    var best: usize = 0;
+    for (gs.contract_offers.items, 0..) |o, i| {
+        if (o.terms.length_months < gs.contract_offers.items[best].terms.length_months) best = i;
+    }
+    _ = try commands.execute(&gs, .{ .accept_contract = .{ .offer_index = best, .company = co } });
+    const c = gs.contracts.values()[0];
+    try std.testing.expect(c.committed_bv > 0);
+    try tick.advanceReading(&gs, c.transit_days + @as(u32, c.terms.length_months) * 30 + 5);
+    const done = gs.contracts.values()[0];
+    try std.testing.expect(done.status == .completed or done.status == .breached or done.status == .failed);
+
+    // The company is still out there, eating from its trucks, until told.
+    try std.testing.expect(!posture.isCompanyHome(&gs, co));
+    try std.testing.expectEqualStrings(done.planet_key, gs.force(co).?.location_planet.?);
+
+    // Redeploy straight from the field if there's work (transit from
+    // where it stands), else recall it.
+    if (gs.contract_offers.items.len > 0) {
+        _ = try commands.execute(&gs, .{ .accept_contract = .{ .offer_index = 0, .company = co } });
+        try std.testing.expect(gs.deploymentContract(co) != null);
+        const rep = gs.reputation;
+        _ = try commands.execute(&gs, .{ .recall_company = co }); // aborted underway or breached on station
+        try std.testing.expect(gs.reputation <= rep);
+    } else {
+        _ = try commands.execute(&gs, .{ .recall_company = co }); // idle: heads home, no penalty
+    }
+    // Either way the company is now travelling and can't be recalled twice.
+    try std.testing.expectError(commands.Error.CompanyInTransit, commands.execute(&gs, .{ .recall_company = co }));
+    while (!posture.isCompanyHome(&gs, co)) _ = try commands.execute(&gs, .{ .advance_days = 5 });
+}

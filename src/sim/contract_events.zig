@@ -1479,3 +1479,64 @@ pub fn execClearStandingOrder(gs: *GameState, name: @FieldType(Command, "clear_s
     try gs.log(.decision, .{}, "[sop] {s}: standing order cleared — the inbox asks again", .{name});
     return .{};
 }
+
+test "answering one decision does not shift the answer to another" {
+    // Answering removes an event and slides every later row up, so a row
+    // index held by a frontend would reach the wrong event; the inbox is
+    // addressed by id.
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    const al = gs.allocator();
+    const opts: []const events.Option = &.{
+        .{ .label = "yes", .effects = &.{.{ .reputation = 1 }} },
+        .{ .label = "no", .effects = &.{} },
+    };
+    for (0..3) |i| try gs.event_queue.push(al, .{
+        .day = 0,
+        .kind = if (i == 0) .quiet_month else if (i == 1) .bonus_payment else .sports_riot,
+        .options = opts,
+        .deadline_day = 30,
+    });
+    const second = gs.event_queue.pending.items[1].id;
+    const third = gs.event_queue.pending.items[2].id;
+
+    // Answer the first: the queue now holds two, and the survivors keep
+    // the ids they were queued with even though their rows moved up.
+    _ = try commands.execute(&gs, .{ .resolve_decision = .{ .event = gs.event_queue.pending.items[0].id, .choice = 0 } });
+    try std.testing.expectEqual(@as(usize, 2), gs.event_queue.pending.items.len);
+    try std.testing.expectEqual(second, gs.event_queue.pending.items[0].id);
+
+    // Answering the third by id reaches the third, not whatever slid into
+    // its old row.
+    _ = try commands.execute(&gs, .{ .resolve_decision = .{ .event = third, .choice = 0 } });
+    try std.testing.expectEqual(@as(usize, 1), gs.event_queue.pending.items.len);
+    try std.testing.expectEqual(second, gs.event_queue.pending.items[0].id);
+
+    // An id that has already been answered is refused, not silently
+    // applied to its former neighbour.
+    try std.testing.expectError(commands.Error.NoSuchDecision, commands.execute(&gs, .{ .resolve_decision = .{ .event = third, .choice = 0 } }));
+}
+
+test "a resignation notice waits two weeks — a week's skip cannot walk past it" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 99 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    _ = try commands.execute(&gs, .{ .new_company = "Alpha" });
+    gs.funds = 50_000_000;
+    const someone = gs.people.values()[0].id;
+    try queueNotice(&gs, someone);
+    var deadline: u32 = 0;
+    for (gs.event_queue.pending.items) |ev| if (ev.kind == .notice_given and ev.person == someone) {
+        deadline = ev.deadline_day;
+    };
+    try std.testing.expectEqual(gs.clock.day_index + notice_window_days, deadline);
+    try std.testing.expect(notice_window_days >= 14);
+    try std.testing.expect(notice_window_days > decision_window_days);
+    // Seven days on: still in the inbox, still unanswered.
+    _ = try commands.execute(&gs, .{ .advance_days = 7 });
+    var still_open = false;
+    for (gs.event_queue.pending.items) |ev| if (ev.kind == .notice_given and ev.person == someone and ev.needsDecision()) {
+        still_open = true;
+    };
+    try std.testing.expect(still_open);
+}

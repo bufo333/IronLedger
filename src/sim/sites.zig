@@ -517,3 +517,158 @@ test "order_part is refused over the site's free tons and accepted at the limit"
     }
     try std.testing.expect(found);
 }
+
+test "a stock policy reorders a warehouse line to its target, once, and can be removed" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 12 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    const hq = gs.hqs.keys()[0];
+    gs.hqs.getPtr(hq).?.funds = 20_000_000;
+    gs.stock_policies.clearRetainingCapacity(); // drop the default provisions line — this test counts lines
+    try std.testing.expectError(commands.Error.UnknownPart, commands.execute(&gs, .{ .set_stock_policy = .{ .hq = hq, .part_key = "unobtainium", .min = 1, .target = 2 } }));
+    _ = try commands.execute(&gs, .{ .set_stock_policy = .{ .hq = hq, .part_key = "ammo_lrm", .min = 5, .target = 30 } });
+    try std.testing.expectEqual(@as(usize, 1), gs.stock_policies.items.len);
+    // The founding warehouse holds some reloads already: above the minimum, nothing happens.
+    _ = try commands.execute(&gs, .advance_day);
+    try std.testing.expectEqual(@as(usize, 0), gs.part_orders.items.len);
+    _ = gs.takeStock(.{ .hq = hq }, "ammo_lrm", gs.stockCount(.{ .hq = hq }, "ammo_lrm") - 4);
+    // A few days for the sourcing roll to land (a miss waits a week).
+    var ordered: u32 = 0;
+    var days: u32 = 0;
+    while (ordered == 0 and days < 30) : (days += 1) {
+        _ = try commands.execute(&gs, .advance_day);
+        for (gs.part_orders.items) |o| if (std.mem.eql(u8, o.part_key, "ammo_lrm") and o.dest == .hq and o.status != .failed) {
+            ordered += o.quantity;
+        };
+    }
+    try std.testing.expectEqual(@as(u32, 30 - 4), ordered);
+    // Nothing more is ordered while that one is in flight.
+    _ = try commands.execute(&gs, .advance_day);
+    var live: usize = 0;
+    for (gs.part_orders.items) |o| if (std.mem.eql(u8, o.part_key, "ammo_lrm") and o.status != .failed) {
+        live += 1;
+    };
+    try std.testing.expectEqual(@as(usize, 1), live);
+    // Re-setting replaces; target 0 removes.
+    _ = try commands.execute(&gs, .{ .set_stock_policy = .{ .hq = hq, .part_key = "ammo_lrm", .min = 5, .target = 3 } });
+    try std.testing.expectEqual(@as(usize, 1), gs.stock_policies.items.len);
+    try std.testing.expectEqual(@as(u32, 5), gs.stock_policies.items[0].target); // clamped up to min
+    _ = try commands.execute(&gs, .{ .set_stock_policy = .{ .hq = hq, .part_key = "ammo_lrm", .min = 0, .target = 0 } });
+    try std.testing.expectEqual(@as(usize, 0), gs.stock_policies.items.len);
+}
+
+test "selling warehouse stock pays the HQ and respects a keep-stocked minimum" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 12 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    const hq = gs.hqs.keys()[0];
+    try gs.addStock(.{ .hq = hq }, "ammo_lrm", 20);
+    const have = gs.stockCount(.{ .hq = hq }, "ammo_lrm");
+    const funds_before = gs.hqs.getPtr(hq).?.funds;
+    try std.testing.expectError(commands.Error.InsufficientStock, commands.execute(&gs, .{ .sell_stock = .{ .hq = hq, .part_key = "ammo_lrm", .quantity = have + 1 } }));
+    _ = try commands.execute(&gs, .{ .sell_stock = .{ .hq = hq, .part_key = "ammo_lrm", .quantity = 10 } });
+    try std.testing.expectEqual(have - 10, gs.stockCount(.{ .hq = hq }, "ammo_lrm"));
+    try std.testing.expectEqual(funds_before + market_mod.stockSaleValue("ammo_lrm", 10), gs.hqs.getPtr(hq).?.funds);
+    try std.testing.expect(market_mod.stockSaleValue("ammo_lrm", 10) > 0);
+    _ = try commands.execute(&gs, .{ .set_stock_policy = .{ .hq = hq, .part_key = "ammo_lrm", .min = have - 12, .target = have } });
+    try std.testing.expectError(commands.Error.KeepStocked, commands.execute(&gs, .{ .sell_stock = .{ .hq = hq, .part_key = "ammo_lrm", .quantity = 5 } }));
+    _ = try commands.execute(&gs, .{ .sell_stock = .{ .hq = hq, .part_key = "ammo_lrm", .quantity = 2 } });
+}
+
+test "warehouses are finite — orders that won't fit are refused" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 94 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
+    const hq_id = gs.hqs.keys()[0];
+    gs.hqs.values()[0].funds = 100_000_000;
+
+    // The room check runs before the sourcing roll, so an oversized order
+    // is refused deterministically.
+    const cap = gs.hqs.values()[0].warehouseCapacityTons(); // 200t at level 1
+    const used = siteTons(&gs, .{ .hq = hq_id });
+    try std.testing.expectError(commands.Error.StorageFull, commands.execute(&gs, .{
+        .order_part = .{ .part_key = "provisions", .quantity = cap - used + 1 },
+    }));
+    // Shipping something you don't have is refused too.
+    try std.testing.expectError(commands.Error.InsufficientStock, commands.execute(&gs, .{
+        .ship_stock = .{ .part_key = "ppc", .quantity = 1, .from = .{ .hq = hq_id }, .to = .{ .hq = hq_id } },
+    }));
+}
+
+test "a failed sourcing roll is reported, keeps its destination, and clears after two weeks" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1228 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    const hq = gs.hqs.keys()[0];
+    gs.hqs.getPtr(hq).?.funds = 50_000_000;
+    // Order a rare component many times: at least one roll fails.
+    var failed: ?usize = null;
+    var tries: u32 = 0;
+    while (failed == null and tries < 40) : (tries += 1) {
+        const r = try commands.execute(&gs, .{ .order_part = .{ .part_key = "comp_ct", .quantity = 1, .dest = .{ .hq = hq } } });
+        if (!r.sourced) failed = gs.part_orders.items.len - 1;
+    }
+    try std.testing.expect(failed != null);
+    const o = gs.part_orders.items[failed.?];
+    try std.testing.expect(o.status == .failed and o.dest == .hq and o.dest.hq == hq);
+    // Two weeks on, the failed record is gone.
+    const tick = @import("tick.zig");
+    gs.clock.day_index += 14;
+    try tick.runTravel(&gs);
+    for (gs.part_orders.items) |po| try std.testing.expect(po.status != .failed);
+}
+
+test "gear on any hull is field work — replace orders the spare to its site, the tech fits it" {
+    const crew = @import("crew.zig");
+    const unit_mod = @import("../domain/unit.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 61 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
+    const uid = try gs.addUnit("SVT-1"); // a salvage truck: cargo, not a mek
+    const tech = try gs.hirePerson("Wren", "Okafor", .tech_mechanic);
+    try crew.assignSlot(&gs, uid, .tech, tech);
+    for (gs.unit(uid).?.slots.items) |*s| if (std.mem.eql(u8, s.slot_key, "bed.winch.1")) {
+        s.condition = .destroyed;
+    };
+
+    // The Lab's door is shut to it, and the depot only does structure.
+    try std.testing.expectError(commands.Error.NotAMek, commands.execute(&gs, .{ .refit_remove = .{ .unit = uid, .slot_key = "bed.winch.1" } }));
+    try std.testing.expectError(commands.Error.NothingToRepair, commands.execute(&gs, .{ .depot = uid }));
+
+    // replace orders exactly one winch to the hull's site; once it is on
+    // order a second call orders nothing more.
+    const site = siteForForce(&gs, gs.unit(uid).?.force);
+    const r = try commands.execute(&gs, .{ .replace_gear = uid });
+    try std.testing.expectEqual(@as(u32, 1), r.ordered + r.unsourced);
+    if (r.ordered == 1) {
+        const again = try commands.execute(&gs, .{ .replace_gear = uid });
+        try std.testing.expectEqual(@as(u32, 0), again.ordered + again.unsourced);
+    }
+
+    // Sourcing is a roll: put the spare on the shelf and let the weekly
+    // pass fit it — the mechanic's own hours, no bay involved.
+    try gs.addStock(site, "winch", 1);
+    _ = try commands.execute(&gs, .{ .advance_days = 7 });
+    for (gs.unit(uid).?.slots.items) |s| if (std.mem.eql(u8, s.slot_key, "bed.winch.1")) {
+        try std.testing.expectEqual(unit_mod.PartCondition.ok, s.condition);
+    };
+    try std.testing.expectError(commands.Error.NothingToReplace, commands.execute(&gs, .{ .replace_gear = uid }));
+}
+
+test "a shipment the payer cannot afford uses no link capacity" {
+    const founding = @import("founding.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 7501 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .quartermaster);
+    const home = gs.hqs.keys()[0];
+    const far = try founding.foundHq(&gs, "Frontier", .field, "alkaid");
+    try gs.hq_links.append(gs.allocator(), .{ .a = home, .b = far, .level = 1, .established_day = 0 });
+    // The shipment is paid from the sending HQ's treasury, which is empty.
+    try gs.addStock(.{ .hq = far }, "armor", 10);
+    gs.hqs.getPtr(far).?.funds = 0;
+    try std.testing.expectError(commands.Error.InsufficientTreasury, commands.execute(&gs, .{
+        .ship_stock = .{ .part_key = "armor", .quantity = 10, .from = .{ .hq = far }, .to = .{ .hq = home } },
+    }));
+    try std.testing.expectEqual(@as(u32, 0), gs.hq_links.items[0].tons_this_week);
+    try std.testing.expectEqual(@as(u32, 10), gs.stockCount(.{ .hq = far }, "armor"));
+}
