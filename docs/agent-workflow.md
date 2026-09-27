@@ -46,6 +46,22 @@ checks the approved snapshot and gives its path and hash to every downstream
 worker. A mutable draft, pasted plan, or conversation summary is not an
 implementation handoff.
 
+For TODO-backed tracker reconciliation, the planner inspects current local
+`main`, identifies the exact completed item or group and its reachable commit
+evidence, and drafts only the corresponding deletion or wording repair. The
+plan names that exact item or group and declares every required TODO, registry,
+or baseline deletion. Uncommitted work, another branch, remote state, and a
+conversation claim are not completion evidence. Reconciliation is an explicit
+approved repair for stale entries, not unrelated-scope cleanup.
+
+Before dispatching tracker-reconciliation planning or presenting its hash, the
+coordinator verifies the draft artifact is present, its base is current local
+`main`, its cited commits are reachable from that base, and its proposed TODO
+removal is limited to work completed by those commits. The coordinator does not
+plan or inspect application code for this verification. If the evidence, tracker
+state, or approved scope does not agree, it requests a revised draft rather
+than dispatching implementation.
+
 ## Delivery
 
 1. A fresh planner inspects the repository and writes one complete draft. The
@@ -55,9 +71,20 @@ implementation handoff.
 3. A fresh `branch-bootstrap` creates the snapshot's branch from its exact local
    `main` base through a permission prompt.
 4. A fresh `implementer` verifies the snapshot path, hash, metadata and branch,
-   then edits, runs the gate, and commits through a permission prompt.
-5. A fresh `reviewer` verifies the same snapshot and checks the exact commit
-   against it and the current project contract.
+   then edits, runs the gate, and commits through a permission prompt. For an
+   approved tracker-reconciliation artifact, it also re-verifies the approved
+   base, cited commits, and current TODO wording; changes only approved
+   tracker/governance files; removes only the verified completed item or group;
+   and makes the approved TODO completion update. It stops for a new draft if
+   the TODO has moved, the evidence is not on local `main`, or the change would
+   alter contract, gate, CI, or agent-configuration policy.
+5. A fresh `reviewer` verifies the same snapshot and checks the exact committed
+   revision against it and the current project contract. For tracker
+   reconciliation, it confirms every TODO deletion has its cited reachable
+   local-main completion commit, no unfinished sibling item or group was
+   removed or reordered, and the exact commit is limited to approved
+   governance/tracker files. A material scope or policy finding follows the
+   new-draft path.
 6. Confirmed findings inside approved scope go to an implementer in correction
    mode with the same snapshot. A material behavior, architecture, contract,
    governance, or scope change requires a new draft, hash, approval and frozen
