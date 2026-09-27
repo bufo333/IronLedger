@@ -605,7 +605,7 @@ test "an offer carries its opposition, and acceptance sizes the pool from it" {
     defer gs.deinit();
     _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
     const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
-    try @import("contract_market.zig").refresh(&gs);
+    try contract_market.refresh(&gs);
     var saw_combat = false;
     for (gs.contract_offers.items) |o| {
         try std.testing.expect(o.hasOpfor());

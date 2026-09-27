@@ -338,7 +338,6 @@ pub fn engineCharge(u: *const unit_mod.Unit) types.CBills {
 /// the engine. Null for scrap. The hangar sets it against a new hull.
 pub fn rebuildEstimate(gs: *GameState, u: *const unit_mod.Unit) ?types.CBills {
     if (u.wreck == .scrap) return null;
-    const market = @import("../econ/market.zig");
     var total: types.CBills = 0;
     var needed: i64 = 0; // every structure hit is bay labour, damaged ones included
     for (u.slots.items) |s| {
@@ -347,7 +346,7 @@ pub fn rebuildEstimate(gs: *GameState, u: *const unit_mod.Unit) ?types.CBills {
     var buf: [max_depot_needs]DepotNeed = undefined;
     for (depotNeedsBuf(u, &buf)) |n| {
         const def = part_mod.find(n.component) orelse continue;
-        total += types.applyBp(types.applyBp(def.cost, market.structural_fab_cost_mult_bp), gs.diff().fab_cost_bp);
+        total += types.applyBp(types.applyBp(def.cost, market_mod.structural_fab_cost_mult_bp), gs.diff().fab_cost_bp);
     }
     total += @divTrunc(u.purchase_price, tuning.hq_ops.depot_labour_divisor) * needed;
     return total + engineCharge(u);

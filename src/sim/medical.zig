@@ -458,7 +458,7 @@ pub fn train(gs: *GameState, person_id: types.PersonId, skill: types.SkillType) 
     // Validate up front so the refusal is explained now, not in 30 days.
     const current = p.skill(skill) orelse return error.NotTrained;
     if (current == 0) return error.AlreadyMastered;
-    if (p.xp < @import("../domain/person.zig").improveCost(current - 1)) return error.InsufficientXp;
+    if (p.xp < person_mod.improveCost(current - 1)) return error.InsufficientXp;
 
     p.training = .{ .skill = skill, .done_day = gs.clock.day_index + trainingDaysFor(gs, ground) };
 }

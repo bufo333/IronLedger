@@ -606,7 +606,7 @@ test "kills are credited to engaged pilots and awards follow the counters" {
 test "severance is a month per year served, capped; a firing pays half; under a year nothing" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 122 });
     defer gs.deinit();
-    const t = @import("../domain/tuning.zig").t.person;
+    const t = tuning.person;
     const rookie = try gs.hirePerson("New", "Hand", .astech);
     gs.clock.day_index = 200;
     try std.testing.expectEqual(@as(types.CBills, 0), gs.person(rookie).?.severance(200));
