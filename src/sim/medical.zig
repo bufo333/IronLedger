@@ -16,6 +16,7 @@ const hq_ops = @import("hq_ops.zig");
 const posture = @import("posture.zig");
 const sites = @import("sites.zig");
 const toe = @import("toe.zig");
+const readiness_m = @import("readiness.zig");
 
 /// Days of training to improve a skill one step.
 pub const training_days = tuning.medical.training_days;
@@ -102,7 +103,7 @@ pub fn companyFieldsMash(gs: *GameState, company: types.ForceId) bool {
     var it = gs.units.iterator();
     while (it.next()) |entry| {
         const u = entry.value_ptr;
-        if (u.kind == .mash and gs.companyOf(u.force) == company and gs.unitOperational(u)) return true;
+        if (u.kind == .mash and gs.companyOf(u.force) == company and readiness_m.unitOperational(gs, u)) return true;
     }
     return false;
 }
@@ -153,7 +154,7 @@ pub fn bedCapacity(gs: *GameState, company: types.ForceId, deployed: bool) u32 {
         var it = gs.units.iterator();
         while (it.next()) |entry| {
             const u = entry.value_ptr;
-            if (u.kind == .mash and gs.companyOf(u.force) == company and gs.unitOperational(u)) beds += tuning.medical.beds_per_mash;
+            if (u.kind == .mash and gs.companyOf(u.force) == company and readiness_m.unitOperational(gs, u)) beds += tuning.medical.beds_per_mash;
         }
         // Medics: staffing the MASH trucks, a bed each up to
         // doubling the trucks; without trucks, an aid station of one bed

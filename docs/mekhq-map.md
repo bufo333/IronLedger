@@ -20,6 +20,7 @@ re-implemented in Zig. Paths below are under `MekHQ/src/mekhq/campaign/`.
 | `mission/Mission,Contract,AtBContract` | 12 AtB contract types, payment math, command rights | `src/domain/contract.zig` | 4 |
 | `mission/AtBScenario*` | Scenario generation over a contract's life | `src/domain/scenario.zig` + `src/sim/battle.zig`; event decks in `src/sim/contract_events.zig` (no StratCon) | 7/12C |
 | `autoresolve/` (ACAR) | Abstract combat auto resolution | `src/sim/autoresolve.zig` — extended with supply/morale/support modifiers (ARCH §7) | 7 |
+| `Unit.isPresent()`, `Force.getStrength()` readiness checks | Hull + crew operational-status predicates (can fight today?) | `src/sim/readiness.zig` (`unitOperational`, `forceOperational`) | 7 |
 | `finances/Finances.java`, `Loan.java` | Ledger, categories, loans | `src/econ/finance.zig` | 2/4 |
 | `finances/Finances.java` | One account, payroll and loans | `src/sim/treasury.zig` (per-entity treasuries, couriers, liquidation-backed credit are this game's) | 9A |
 | `rating/*` (FMMR, CamOps reputation) | Unit rating → pay & offer quality | reputation state plus Dragoons rating rules in `src/sim/rating.zig`; queries format the result | 4/12C |

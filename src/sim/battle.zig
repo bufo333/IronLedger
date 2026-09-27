@@ -25,6 +25,7 @@ const GameState = @import("state.zig").GameState;
 const founding = @import("founding.zig");
 const lift = @import("lift.zig");
 const held_hulls_m = @import("held_hulls.zig");
+const readiness_m = @import("readiness.zig");
 
 /// Salvage trucks (SVT-1) a company fields, wrecks excepted.
 pub fn salvageTrucks(gs: *GameState, company: types.ForceId) i64 {
@@ -218,7 +219,7 @@ fn playerSideIn(gs: *GameState, alloc: std.mem.Allocator, c: *const contract_mod
         for (lance.units.items) |uid| {
             const u = gs.unit(uid) orelse continue;
             // A hull that is not operational stays in the hangar.
-            if (!gs.unitOperational(u)) continue;
+            if (!readiness_m.unitOperational(gs, u)) continue;
             const design = chassis_mod.find(u.chassis_key) orelse continue;
             const pilot = gs.person(u.pilot).?;
             const reloaded = hasTech(gs, u);
@@ -303,7 +304,7 @@ fn companyMods(gs: *GameState, c: *const contract_mod.Contract) autoresolve.Camp
     const company = gs.force(c.assigned_company) orelse return mods;
     for (company.children.items) |child_id| {
         const child = gs.force(child_id) orelse continue;
-        if (child.echelon == .lance and child.role == .scouting and gs.forceOperational(child) and !c.terms.command_rights.overridesScouting())
+        if (child.echelon == .lance and child.role == .scouting and readiness_m.forceOperational(gs, child) and !c.terms.command_rights.overridesScouting())
             mods.recon_quality = 2;
         if (child.echelon == .air_company) {
             // Air cover is an operational fighter.
@@ -311,14 +312,14 @@ fn companyMods(gs: *GameState, c: *const contract_mod.Contract) autoresolve.Camp
                 const al = gs.force(al_id) orelse continue;
                 for (al.units.items) |uid| {
                     const u = gs.unit(uid) orelse continue;
-                    if (u.kind == .aerospace and gs.unitOperational(u)) mods.has_air_cover = true;
+                    if (u.kind == .aerospace and readiness_m.unitOperational(gs, u)) mods.has_air_cover = true;
                 }
             }
         }
         if (child.echelon == .support_company) {
             for (child.children.items) |sl_id| {
                 const sl = gs.force(sl_id) orelse continue;
-                if (!gs.forceOperational(sl)) continue;
+                if (!readiness_m.forceOperational(gs, sl)) continue;
                 switch (sl.support_kind orelse continue) {
                     .mash => mods.has_mash_lance = true,
                     .mess => mods.has_mess_lance = true,

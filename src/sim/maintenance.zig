@@ -19,6 +19,7 @@ const toe = @import("toe.zig");
 const GameState = @import("state.zig").GameState;
 const founding = @import("founding.zig");
 const posture = @import("posture.zig");
+const readiness_m = @import("readiness.zig");
 
 /// Hours a field repair costs the hull's tech (tuning.maintenance).
 const hours_damaged_slot = tuning.maintenance.hours_damaged_slot;
@@ -619,7 +620,7 @@ pub fn repairBudget(gs: *GameState, alloc: std.mem.Allocator, company: types.For
         } else try spares.append(alloc, .{ .key = job.part_key, .count = gs.stockCount(site, job.part_key) });
     };
     // A ready Logistics lance carries the company's field workshop.
-    const workshop: u32 = if (toe.supportLance(gs, company, .transport)) |lance| (if (gs.forceOperational(lance)) tuning.maintenance.push_workshop_hours else 0) else 0;
+    const workshop: u32 = if (toe.supportLance(gs, company, .transport)) |lance| (if (readiness_m.forceOperational(gs, lance)) tuning.maintenance.push_workshop_hours else 0) else 0;
     return .{
         .hours = @as(u32, @intCast(types.applyBp(spare_hours, tuning.maintenance.push_hours_bp))) + workshop,
         .armor_tons = gs.stockCount(site, "armor"),

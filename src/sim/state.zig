@@ -507,24 +507,6 @@ pub const GameState = struct {
         return if (hq != .none) .{ .hq = hq } else .outfit;
     }
 
-    /// Ready to act today: the hull can take the field and its crew is fit
-    /// for duty. Support modifiers, MASH beds, the battle line and
-    /// fieldable strength all count hulls by this test.
-    pub fn unitOperational(self: *GameState, u: *const unit_mod.Unit) bool {
-        if (!u.canFight()) return false;
-        const crew = self.person(u.pilot) orelse return false;
-        return crew.isAvailable(self.clock.day_index);
-    }
-
-    /// At least one of the force's own hulls is operational.
-    pub fn forceOperational(self: *GameState, f: *const force_mod.Force) bool {
-        for (f.units.items) |uid| {
-            const u = self.unit(uid) orelse continue;
-            if (self.unitOperational(u)) return true;
-        }
-        return false;
-    }
-
     /// Does the outfit hold a prisoner of this house (a trade is possible)?
     pub fn holdsPrisonerOf(self: *GameState, faction: []const u8) bool {
         var it = self.people.iterator();

@@ -18,6 +18,7 @@ const logistics = @import("../econ/logistics.zig");
 const toe = @import("toe.zig");
 const GameState = @import("state.zig").GameState;
 const founding = @import("founding.zig");
+const readiness_m = @import("readiness.zig");
 
 pub const grace_days: u32 = tuning.contract.grace_days;
 pub const cooling_days: u32 = tuning.contract.cooling_days;
@@ -30,7 +31,7 @@ pub fn fieldableBv(gs: *GameState, company: types.ForceId) i64 {
     while (it.next()) |entry| {
         const u = entry.value_ptr;
         if (gs.companyOf(u.force) != company or !u.kind.isCombat()) continue;
-        if (!gs.unitOperational(u)) continue;
+        if (!readiness_m.unitOperational(gs, u)) continue;
         const design = chassis_mod.find(u.chassis_key) orelse continue;
         total += design.bv;
     }
