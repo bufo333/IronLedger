@@ -27,7 +27,7 @@ const contract_mod = @import("../domain/contract.zig");
 const commander_mod = @import("../domain/commander.zig");
 const finance_mod = @import("../econ/finance.zig");
 const market_mod = @import("../econ/market.zig");
-const events_mod = @import("../sim/events.zig");
+const events_mod = @import("../domain/events.zig");
 const contract_events = @import("../sim/contract_events.zig");
 const network = @import("../sim/network.zig");
 const clock_mod = @import("../domain/clock.zig");
@@ -2707,7 +2707,7 @@ test "a battle decision round-trips answerable, and still holds the turn" {
     // `entryForKind` entry the decision comes back optionless — answered
     // by nobody, holding nothing, and silently gone.
     const ev = loaded.event_queue.blocking() orelse return error.DecisionLostOnLoad;
-    try std.testing.expectEqual(@import("../sim/events.zig").EventKind.press_or_consolidate, ev.kind);
+    try std.testing.expectEqual(@import("../domain/events.zig").EventKind.press_or_consolidate, ev.kind);
     try std.testing.expectEqual(@as(usize, 2), ev.options.len);
     try std.testing.expectEqual(gs.event_queue.blocking().?.id, ev.id);
     try std.testing.expectEqual(@as(usize, 1), ev.default_choice);
@@ -2728,7 +2728,7 @@ test "a field repair decision comes back from a save with its three orders" {
     defer loaded.deinit();
 
     const ev = loaded.event_queue.blocking() orelse return error.DecisionLostOnLoad;
-    try std.testing.expectEqual(@import("../sim/events.zig").EventKind.field_repair, ev.kind);
+    try std.testing.expectEqual(@import("../domain/events.zig").EventKind.field_repair, ev.kind);
     try std.testing.expectEqual(@as(usize, 3), ev.options.len);
     try std.testing.expect(ev.holdsTurn());
     // The damage is state, not part of the event: the reloaded plan matches.
@@ -2773,7 +2773,7 @@ test "a recovery decision remembers its battle, and a held hull its lance" {
     defer loaded.deinit();
 
     const ev = loaded.event_queue.blocking() orelse return error.DecisionLostOnLoad;
-    try std.testing.expectEqual(@import("../sim/events.zig").EventKind.recovery_push, ev.kind);
+    try std.testing.expectEqual(@import("../domain/events.zig").EventKind.recovery_push, ev.kind);
     // The two pointers this decision needs to do anything at all.
     try std.testing.expectEqual(@as(types.BattleId, @enumFromInt(4)), ev.battle);
     try std.testing.expectEqual(lance, loaded.heldHull(taken).?.from_force);

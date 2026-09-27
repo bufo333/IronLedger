@@ -279,7 +279,7 @@ pub const InboxRow = struct {
 /// offer, then what each plan would actually take. Both the list and the
 /// plans come from `battle.salvagePlan`, the same function the command
 /// materialises with — the screen never works out the haul itself.
-fn salvageDetail(alloc: Alloc, gs: *GameState, ev: *const @import("events.zig").Event) ![]const []const u8 {
+fn salvageDetail(alloc: Alloc, gs: *GameState, ev: *const @import("../domain/events.zig").Event) ![]const []const u8 {
     const battle = @import("battle.zig");
     const r = gs.battle_reports.find(ev.battle) orelse return &.{};
     const claim = r.salvage.unclaimed_bv;
@@ -312,7 +312,7 @@ fn salvageDetail(alloc: Alloc, gs: *GameState, ev: *const @import("events.zig").
 /// do. Every line comes from `maintenance.repairPlan` on the live
 /// stores — the function the command carries out with — so the screen
 /// never works out the repairs itself.
-fn repairDetail(alloc: Alloc, gs: *GameState, ev: *const @import("events.zig").Event) ![]const []const u8 {
+fn repairDetail(alloc: Alloc, gs: *GameState, ev: *const @import("../domain/events.zig").Event) ![]const []const u8 {
     const needs = try maintenance.repairNeeds(gs, alloc, ev.company);
     if (needs.len == 0) return &.{};
     const budget = try maintenance.repairBudget(gs, alloc, ev.company, needs);
@@ -542,7 +542,7 @@ pub fn desk(alloc: Alloc, gs: *GameState, log_rows: usize) !Desk {
 
 /// An option's consequences as coloured tags: green for gains, red for
 /// costs — reputation first, because it is the one that lingers.
-pub fn effectsText(alloc: Alloc, effects: []const @import("events.zig").Effect) ![]const u8 {
+pub fn effectsText(alloc: Alloc, effects: []const @import("../domain/events.zig").Effect) ![]const u8 {
     var out: std.ArrayListUnmanaged(u8) = .empty;
     if (effects.len == 0) return "{d}no effect{/}";
     // reputation first

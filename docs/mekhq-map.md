@@ -11,7 +11,7 @@ re-implemented in Zig. Paths below are under `MekHQ/src/mekhq/campaign/`.
 | `personnel/SkillType.java` | Skill catalog, target numbers, XP costs | `src/domain/types.zig` `SkillType` + `src/domain/person.zig` skill progression | 2 |
 | `personnel/ranks/*` | Rank systems | rank keys + `data/tables/ranks.zon` | 2 |
 | `personnel/medical/*` (advanced medical) | Injuries per location, healing | `src/domain/person.zig` `Injury` | 8 |
-| `randomEvents/` + AtB monthly events | Random campaign events | `src/sim/events.zig` queue/decisions + `src/sim/contract_events.zig` decks | 6 |
+| `randomEvents/` + AtB monthly events | Random campaign events | `src/domain/events.zig` queue/decisions + `src/sim/contract_events.zig` decks | 6 |
 | `unit/Unit.java` | Entity wrapper + crew + repair state | `src/domain/unit.zig` | 3 |
 | `parts/*` (Part, Armor, MekLocation, ...) | Fungible site stock, mounted-slot condition, hull quality A–F, repair TNs | `src/domain/part.zig`, `src/domain/unit.zig` + catalog `data/parts.zon` | 5 |
 | `Quartermaster.java`, `procurement/*` | Acquisition rolls, shopping list, delivery ETA | `src/econ/logistics.zig` | 5 |

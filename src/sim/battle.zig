@@ -1848,7 +1848,7 @@ fn salvageOfferRoundTrip(seed: u64) !bool {
 }
 
 test "a lost field asks whether to go back, and going back wins hulls and crew home" {
-    const events_mod = @import("events.zig");
+    const events_mod = @import("../domain/events.zig");
     var recovered_hulls: u32 = 0;
     var recovered_people: u32 = 0;
     var asked: u32 = 0;

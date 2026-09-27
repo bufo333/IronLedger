@@ -9,7 +9,7 @@
 //! (docs/mekhq-map.md).
 
 const std = @import("std");
-const types = @import("../domain/types.zig");
+const types = @import("types.zig");
 
 pub const EventKind = enum {
     // Garrison-class deck:
