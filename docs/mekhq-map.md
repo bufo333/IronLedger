@@ -6,7 +6,7 @@ re-implemented in Zig. Paths below are under `MekHQ/src/mekhq/campaign/`.
 
 | MekHQ (Java) | Purpose | Ours (Zig) | Stage |
 |---|---|---|---|
-| `Campaign.java` (`newDay()`) | God object + daily tick: healing, acquisitions, maintenance, markets, payday | `src/sim/clock.zig` daily pipeline over `GameState` (no god object; ordered system fns) | 1 |
+| `Campaign.java` (`newDay()`) | God object + daily tick: healing, acquisitions, maintenance, markets, payday | `src/domain/clock.zig` calendar primitives; `src/sim/tick.zig` daily pipeline over `GameState` (no god object; ordered system fns) | 1 |
 | `personnel/Person.java` | Roles, skills, XP, ranks, status, salary | `src/domain/person.zig` | 2 |
 | `personnel/SkillType.java` | Skill catalog, target numbers, XP costs | `src/domain/types.zig` `SkillType` + `src/domain/person.zig` skill progression | 2 |
 | `personnel/ranks/*` | Rank systems | rank keys + `data/tables/ranks.zon` | 2 |

@@ -63,9 +63,9 @@ Owner of every entry: the project owner.
 - **Scope:**
   - Every module and function listed in the rule 76 registry below.
   - Three switches with more than ten substantive arms (an arm body past three lines), measured by the check that guards them: `contract_events.applyEffectsFor`, `app.listView`, `forces.handle`. Five more sit at the threshold without crossing it: `app.listEnter` and `app.handleModalKey`, `market.handle`, `app.drawModal`, `supply.handle`.
-  - `GameState` methods with subsystem behaviour: aftermath and `hirePerson`'s default skill table (it leaves with C11's single role-to-skill rule; the creation itself is a storage primitive). (Hashing has moved to `digest.zig`; sale values to `econ/market.zig`; transfers, couriers, purchase debits, payroll, upkeep, liquidation and credit to `treasury.zig`; recruiting, spec hiring, posting and the recruit bonus to `personnel.zig`; the back-office counts, staffing refresh and autostaffing to `hq_ops.zig`; stock-site capacity, handovers, a force's supply site and goods sent home to `sites.zig`; the company load-out to `field_supply.zig`; seat eligibility, seat assignment and auto-assignment to `crew.zig`; hull and tech hours, tech capacity and free-tech search to `maintenance.zig`; company and lance counts, HQ and company capacity, support lances, unit placement and moves and company membership to `toe.zig`; founding to `founding.zig`; lift to `lift.zig`; refit to `refit.zig`; held hulls to `held_hulls.zig`; hull condition to `econ/market.zig`; readiness to `readiness.zig`; commander multiplier to `domain/commander.zig`.)
-  - Four upward imports in `state.zig`, held by the C4 layering record below:
-    - simulation types stored in `GameState` fields: `clock.zig` (the `Date` and `Clock` field types), `events.zig` (the `EventQueue` and `EventKind` field types), `after_action.zig` (the `Journal` field type), `network.zig` (the `HqLink` field type).
+  - `GameState` methods with subsystem behaviour: aftermath and `hirePerson`'s default skill table (it leaves with C11's single role-to-skill rule; the creation itself is a storage primitive). (Hashing has moved to `digest.zig`; sale values to `econ/market.zig`; transfers, couriers, purchase debits, payroll, upkeep, liquidation and credit to `treasury.zig`; recruiting, spec hiring, posting and the recruit bonus to `personnel.zig`; the back-office counts, staffing refresh and autostaffing to `hq_ops.zig`; stock-site capacity, handovers, a force's supply site and goods sent home to `sites.zig`; the company load-out to `field_supply.zig`; seat eligibility, seat assignment and auto-assignment to `crew.zig`; hull and tech hours, tech capacity and free-tech search to `maintenance.zig`; company and lance counts, HQ and company capacity, support lances, unit placement and moves and company membership to `toe.zig`; founding to `founding.zig`; lift to `lift.zig`; refit to `refit.zig`; held hulls to `held_hulls.zig`; hull condition to `econ/market.zig`; readiness to `readiness.zig`; commander multiplier to `domain/commander.zig`; calendar primitives to `domain/clock.zig`; tick phase specification to `sim/tick.zig`.)
+  - Three upward imports in `state.zig`, held by the C4 layering record below:
+    - simulation types stored in `GameState` fields: `events.zig` (the `EventQueue` and `EventKind` field types), `after_action.zig` (the `Journal` field type), `network.zig` (the `HqLink` field type).
   - The 6 test-only `queries.zig` imports in `commands.zig`, `hq_ops.zig` and `crew.zig` are agreement tests allowed by rule 5's test clause and are not part of this entry.
   - This sub-list records existing debt found by a full audit; it grants no
     permission. A new upward import is a violation even beside a listed one:
@@ -144,7 +144,7 @@ Owner of every entry: the project owner.
   - **Duplicate keys** overwrite silently (`1131`, `1202`, `1256`, `1290`, `1382`, `1536`, `1547`).
   - **NULL values** are read as 0 or an empty string (`sqlite.zig:153`, `163`).
   - **Meta rows.** Missing ones fall back to defaults (`store.zig:1031-1069`).
-  - **Range checks.** Dates and domain values are checked only against their storage width. Month 13 reaches `unreachable` (`1036`, `clock.zig:34`).
+  - **Range checks.** Dates and domain values are checked only against their storage width. Month 13 reaches `unreachable` (`1036`, `domain/clock.zig:33`).
   - **Stock sums** can overflow (`state.zig:1096`).
   - **Compatibility repairs** run on every load instead of in versioned migrations: RNG reseed, stats rebuilt from the log, event-ID stamping (`958-960`, `1005`, `1653`).
   - **Load writes state and draws dice.** It runs `refreshHqStaffing`, `upgradeCampaign` age rolls and `resumeBattleIds` (`1001-1008`).
@@ -404,7 +404,7 @@ Owner of every entry: the project owner.
     - `offer_rating.rateOffer`
     - `commands.transferBlock`
     - `checklist.turnHold`
-    - `clock.isPayday`
+    - domain `clock`: `Date.isPayday`
     - domain `contract`: `gradeOf`, `objectivesMet`
     - domain `person`: `baseSalary`
     - domain `unit`: `carryCost`, `maintenanceHours`
@@ -529,7 +529,6 @@ listed one.
 
 ```layering
 src/sim/state.zig -> src/sim/after_action.zig
-src/sim/state.zig -> src/sim/clock.zig
 src/sim/state.zig -> src/sim/events.zig
 src/sim/state.zig -> src/sim/network.zig
 ```

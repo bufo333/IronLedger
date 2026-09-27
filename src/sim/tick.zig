@@ -1,5 +1,5 @@
 //! The daily tick: one campaign day through the ordered phase pipeline
-//! (ARCH §6, clock.DayPhase). MekHQ counterpart: `Campaign.newDay()`.
+//! (ARCH §6, DayPhase). MekHQ counterpart: `Campaign.newDay()`.
 //!
 //! Phase order is part of the spec.
 
@@ -27,6 +27,23 @@ const field_supply = @import("field_supply.zig");
 const sites = @import("sites.zig");
 const toe = @import("toe.zig");
 
+/// The ordered phases of one campaign day. Order is part of the spec:
+/// e.g. shipments must arrive (travel) before supply consumption, and
+/// battles resolve after contract events may have spawned them.
+pub const DayPhase = enum {
+    travel,
+    supply_consumption,
+    medical,
+    acquisition_and_markets,
+    maintenance, // weekly per unit
+    training,
+    contract_events,
+    battle_resolution,
+    morale_fatigue,
+    finances, // payday on the 1st
+    decisions, // surface queued player decisions; pause auto-advance
+};
+
 /// Advance exactly one day — one turn. Turn-based: nothing blocks time;
 /// decision events sit in the inbox with deadlines, and the deadline applies
 /// the default (contract_events.expireDue). Multi-day advance is just
@@ -35,7 +52,7 @@ pub fn advanceDay(gs: *GameState) !void {
     gs.clock.advance();
     hq_ops.refreshHqStaffing(gs); // the back office is people
 
-    // Phase order per clock.DayPhase.
+    // Phase order per DayPhase.
     if (gs.clock.day_index % 7 == 0) network.resetWeeklyThroughput(gs); // links' week
     try runTravel(gs); // deliveries, couriers, transfers
     try runPolicies(gs); // standing cash top-ups and resupply
@@ -590,4 +607,10 @@ test "payday fires on the 1st and only on the 1st" {
     try std.testing.expectEqual(@as(i64, 998_350), gs.funds);
     try std.testing.expectEqual(@as(usize, 1), gs.ledger.transactions.items.len);
     try std.testing.expectEqual(@as(u32, monthly_service_xp), gs.people.values()[0].xp);
+}
+
+test "phases are in spec order" {
+    try std.testing.expect(@intFromEnum(DayPhase.travel) < @intFromEnum(DayPhase.supply_consumption));
+    try std.testing.expect(@intFromEnum(DayPhase.contract_events) < @intFromEnum(DayPhase.battle_resolution));
+    try std.testing.expect(@intFromEnum(DayPhase.finances) < @intFromEnum(DayPhase.decisions));
 }

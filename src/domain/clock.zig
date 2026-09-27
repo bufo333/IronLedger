@@ -1,5 +1,5 @@
-//! Campaign calendar and the daily tick pipeline (ARCH §6).
-//! MekHQ counterpart: `Campaign.newDay()`, decomposed here into ordered phases.
+//! Campaign calendar: date and clock primitives (ARCH §6).
+//! MekHQ counterpart: calendar day tracking in `Campaign.java`.
 
 const std = @import("std");
 
@@ -53,23 +53,6 @@ pub const Date = struct {
     }
 };
 
-/// The ordered phases of one campaign day. Order is part of the spec:
-/// e.g. shipments must arrive (travel) before supply consumption, and
-/// battles resolve after contract events may have spawned them.
-pub const DayPhase = enum {
-    travel,
-    supply_consumption,
-    medical,
-    acquisition_and_markets,
-    maintenance, // weekly per unit
-    training,
-    contract_events,
-    battle_resolution,
-    morale_fatigue,
-    finances, // payday on the 1st
-    decisions, // surface queued player decisions; pause auto-advance
-};
-
 pub const Clock = struct {
     date: Date = Date.campaign_default,
     day_index: u32 = 0, // days since campaign start; the canonical timestamp
@@ -86,12 +69,6 @@ test "date rollover incl. leap year" {
     try std.testing.expectEqual(Date{ .year = 3024, .month = 2, .day = 29 }, d); // 3024 is a leap year
     d = .{ .year = 3025, .month = 12, .day = 31 };
     try std.testing.expectEqual(Date{ .year = 3026, .month = 1, .day = 1 }, d.next());
-}
-
-test "phases are in spec order" {
-    try std.testing.expect(@intFromEnum(DayPhase.travel) < @intFromEnum(DayPhase.supply_consumption));
-    try std.testing.expect(@intFromEnum(DayPhase.contract_events) < @intFromEnum(DayPhase.battle_resolution));
-    try std.testing.expect(@intFromEnum(DayPhase.finances) < @intFromEnum(DayPhase.decisions));
 }
 
 test "one date rendering, zero-padded" {
