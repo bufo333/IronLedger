@@ -459,12 +459,6 @@ pub const GameState = struct {
         return if (hq.supportsTraining()) id else null;
     }
 
-    /// Commander cost multiplier for a category (neutral without a commander).
-    pub fn commanderMultBp(self: *const GameState, kind: commander_mod.BonusKind) types.Bp {
-        const c = self.commander orelse return 10_000;
-        return c.costMultBp(kind);
-    }
-
     /// Append a tagged, formatted entry (with the campaign date) to the log.
     pub fn log(self: *GameState, category: LogCategory, ctx: LogCtx, comptime fmt: []const u8, args: anytype) !void {
         var date_buf: [10]u8 = undefined;

@@ -27,7 +27,6 @@ later fixes add responsibility only to the decomposed owner modules.
 
 - [ ] C4 decomposition (rules 5, 14, 76, 77) — first, because the fixes after it add code to modules in the rule 76 registry. Behaviour-preserving, golden hash unchanged, one increment per branch:
   - [ ] C4a `GameState` keeps storage and primitives; subsystem behaviour moves to its owner and `state.zig` imports nothing above the state layer (the C4 layering record). Behaviour-preserving, one increment per branch, in this order; each branch deletes its own line:
-    - [ ] C4a12 commander multiplier: one owner, `commander.costMultBp` over an optional commander, replacing `Commander.costMultBp` and `GameState.commanderMultBp`.
     - [ ] C4a13 clock: `Date` and `Clock` to `domain/clock.zig`; `DayPhase` to `sim/tick.zig`.
     - [ ] C4a14 events: `sim/events.zig` to `domain/events.zig`.
     - [ ] C4a15 battle report: `autoresolve.zig` to `domain/`; the report record types and `Journal` to `domain/battle_report.zig`; `render` stays in `sim/after_action.zig`.

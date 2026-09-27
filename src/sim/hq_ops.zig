@@ -16,6 +16,7 @@ const unit_mod = @import("../domain/unit.zig");
 const person_mod = @import("../domain/person.zig");
 const sites = @import("sites.zig");
 const toe = @import("toe.zig");
+const commander_mod = @import("../domain/commander.zig");
 const state_mod = @import("state.zig");
 const GameState = state_mod.GameState;
 const founding = @import("founding.zig");
@@ -776,7 +777,7 @@ fn completeJob(gs: *GameState, job: *state_mod.BayJob) !bool {
     if (job.cost > 0) {
         try gs.postTreasury(.{ .hq = job.hq }, .{
             .day = gs.clock.day_index,
-            .amount = -types.applyBp(job.cost, gs.commanderMultBp(.repair)),
+            .amount = -types.applyBp(job.cost, commander_mod.costMultBp(gs.commander, .repair)),
             .category = .maintenance,
             .hq = job.hq,
             .note = @tagName(job.kind),

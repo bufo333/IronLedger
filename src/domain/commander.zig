@@ -63,28 +63,54 @@ pub const Commander = struct {
     name: []const u8,
     origin: Faction,
     profession: Profession,
-
-    /// Multiplier for a cost category in basis points (10_000 = neutral).
-    /// Costs shrink; recovery rates grow.
-    pub fn costMultBp(self: *const Commander, kind: BonusKind) types.Bp {
-        const matches = switch (kind) {
-            .freight => self.profession == .quartermaster,
-            .payroll => self.profession == .paymaster,
-            .repair => self.profession == .chief_engineer,
-            .fatigue_recovery => self.profession == .line_officer,
-        };
-        if (!matches) return 10_000;
-        return if (kind == .fatigue_recovery) 10_000 + bonus_bp else 10_000 - bonus_bp;
-    }
 };
 
-test "profession grants exactly one 2% edge" {
-    const cmdr: Commander = .{ .name = "Erik Kalmar", .origin = .CC, .profession = .paymaster };
-    try std.testing.expectEqual(@as(types.Bp, 9_800), cmdr.costMultBp(.payroll));
-    try std.testing.expectEqual(@as(types.Bp, 10_000), cmdr.costMultBp(.freight));
-    try std.testing.expectEqual(@as(types.Bp, 10_000), cmdr.costMultBp(.repair));
+/// Multiplier for a cost category in basis points (10_000 = neutral).
+/// Costs shrink; recovery rates grow. Returns neutral when no commander.
+pub fn costMultBp(cmdr: ?Commander, kind: BonusKind) types.Bp {
+    const c = cmdr orelse return 10_000;
+    const matches = switch (kind) {
+        .freight => c.profession == .quartermaster,
+        .payroll => c.profession == .paymaster,
+        .repair => c.profession == .chief_engineer,
+        .fatigue_recovery => c.profession == .line_officer,
+    };
+    if (!matches) return 10_000;
+    return if (kind == .fatigue_recovery) 10_000 + bonus_bp else 10_000 - bonus_bp;
+}
 
-    const medic: Commander = .{ .name = "A", .origin = .LC, .profession = .line_officer };
-    try std.testing.expectEqual(@as(types.Bp, 10_200), medic.costMultBp(.fatigue_recovery));
-    try std.testing.expectEqual(@as(types.Bp, 10_000), medic.costMultBp(.payroll));
+test "profession grants exactly one 2% edge" {
+    // null commander → neutral across all categories
+    try std.testing.expectEqual(@as(types.Bp, 10_000), costMultBp(null, .payroll));
+    try std.testing.expectEqual(@as(types.Bp, 10_000), costMultBp(null, .freight));
+    try std.testing.expectEqual(@as(types.Bp, 10_000), costMultBp(null, .repair));
+    try std.testing.expectEqual(@as(types.Bp, 10_000), costMultBp(null, .fatigue_recovery));
+
+    // paymaster: payroll down, others neutral
+    const paym: Commander = .{ .name = "Erik Kalmar", .origin = .CC, .profession = .paymaster };
+    try std.testing.expectEqual(@as(types.Bp, 9_800), costMultBp(paym, .payroll));
+    try std.testing.expectEqual(@as(types.Bp, 10_000), costMultBp(paym, .freight));
+    try std.testing.expectEqual(@as(types.Bp, 10_000), costMultBp(paym, .repair));
+    try std.testing.expectEqual(@as(types.Bp, 10_000), costMultBp(paym, .fatigue_recovery));
+
+    // quartermaster: freight down, others neutral
+    const qm: Commander = .{ .name = "B", .origin = .DC, .profession = .quartermaster };
+    try std.testing.expectEqual(@as(types.Bp, 9_800), costMultBp(qm, .freight));
+    try std.testing.expectEqual(@as(types.Bp, 10_000), costMultBp(qm, .payroll));
+    try std.testing.expectEqual(@as(types.Bp, 10_000), costMultBp(qm, .repair));
+    try std.testing.expectEqual(@as(types.Bp, 10_000), costMultBp(qm, .fatigue_recovery));
+
+    // chief_engineer: repair down, others neutral
+    const eng: Commander = .{ .name = "C", .origin = .FS, .profession = .chief_engineer };
+    try std.testing.expectEqual(@as(types.Bp, 9_800), costMultBp(eng, .repair));
+    try std.testing.expectEqual(@as(types.Bp, 10_000), costMultBp(eng, .payroll));
+    try std.testing.expectEqual(@as(types.Bp, 10_000), costMultBp(eng, .freight));
+    try std.testing.expectEqual(@as(types.Bp, 10_000), costMultBp(eng, .fatigue_recovery));
+
+    // line_officer: fatigue_recovery up, others neutral
+    const lo: Commander = .{ .name = "A", .origin = .LC, .profession = .line_officer };
+    try std.testing.expectEqual(@as(types.Bp, 10_200), costMultBp(lo, .fatigue_recovery));
+    try std.testing.expectEqual(@as(types.Bp, 10_000), costMultBp(lo, .payroll));
+    try std.testing.expectEqual(@as(types.Bp, 10_000), costMultBp(lo, .freight));
+    try std.testing.expectEqual(@as(types.Bp, 10_000), costMultBp(lo, .repair));
 }

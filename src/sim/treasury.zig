@@ -15,6 +15,7 @@ const planet_mod = @import("../domain/planet.zig");
 const logistics = @import("../econ/logistics.zig");
 const finance_mod = @import("../econ/finance.zig");
 const market = @import("../econ/market.zig");
+const commander_mod = @import("../domain/commander.zig");
 const state_mod = @import("state.zig");
 const GameState = state_mod.GameState;
 const Treasury = state_mod.Treasury;
@@ -117,7 +118,7 @@ pub fn monthlyPayroll(gs: *GameState) types.CBills {
         const p = entry.value_ptr;
         if (p.isOnBooks()) total += p.monthlySalary();
     }
-    return types.applyBp(total, gs.commanderMultBp(.payroll));
+    return types.applyBp(total, commander_mod.costMultBp(gs.commander, .payroll));
 }
 
 /// Monthly payroll for everyone assigned under one company's subtree.

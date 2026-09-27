@@ -10,6 +10,7 @@ const std = @import("std");
 const tuning = @import("../domain/tuning.zig").t;
 const types = @import("../domain/types.zig");
 const person_mod = @import("../domain/person.zig");
+const commander_mod = @import("../domain/commander.zig");
 const GameState = @import("state.zig").GameState;
 const founding = @import("founding.zig");
 const hq_ops = @import("hq_ops.zig");
@@ -380,7 +381,7 @@ pub fn runWeeklyRest(gs: *GameState) !void {
             // rate, its HR staff keep spirits up.
             const home = gs.homeHqOf(p);
             const mess: u8 = if (gs.hqs.getPtr(home)) |h| h.effectiveFacilityLevel(.mess) else 0;
-            const decay: u32 = @intCast(types.applyBp(person_mod.fatigueDecayPerWeek(mess), gs.commanderMultBp(.fatigue_recovery)));
+            const decay: u32 = @intCast(types.applyBp(person_mod.fatigueDecayPerWeek(mess), commander_mod.costMultBp(gs.commander, .fatigue_recovery)));
             const hr_bonus: u8 = if (gs.hqs.getPtr(home) != null) @intCast(@min(tp.hr_morale_bonus_max, hq_ops.hqStaff(gs, home, .admin_hr).count / tp.hr_morale_admins_per_point)) else 0;
             // On leave: double recovery.
             const on_leave = p.leave_until_day != null and gs.clock.day_index < p.leave_until_day.?;

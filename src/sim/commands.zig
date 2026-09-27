@@ -2030,7 +2030,7 @@ fn freightQuote(gs: *GameState, alloc: std.mem.Allocator, from: types.Site, to: 
     } else if (from_hq == to_hq) {
         days = tuning.logistics.freight_min_days;
     }
-    cost = types.applyBp(cost, gs.commanderMultBp(.freight));
+    cost = types.applyBp(cost, commander_mod.costMultBp(gs.commander, .freight));
     if (gs.hqs.count() > 0) {
         const transport = hq_ops.hqStaff(gs, gs.hqs.keys()[0], .admin_transport);
         cost = types.applyBp(cost, 10_000 - tuning.logistics.transport_admin_discount_bp * @as(types.Bp, @min(tuning.logistics.transport_admin_max, transport.count)));
@@ -2217,7 +2217,7 @@ fn orderPart(gs: *GameState, part_key: []const u8, quantity: u32, dest_opt: ?typ
     // Orders placed at the HQ are paid from the HQ's treasury,
     // onward freight to the field included.
     var total = types.applyBp(def.cost * quantity, cost_mult);
-    total = types.applyBp(total, gs.commanderMultBp(.freight));
+    total = types.applyBp(total, commander_mod.costMultBp(gs.commander, .freight));
     if (dest == .company) total += onward.cost;
     try treasury.debit(gs, .{ .hq = hq_id }, .{
         .day = gs.clock.day_index,
@@ -2395,7 +2395,7 @@ fn acceptContract(gs: *GameState, offer_index: usize, company_id: types.ForceId)
     });
     const freight_base: types.CBills = @as(types.CBills, c.dist_ly) * tuning.logistics.freight_per_ly;
     var freight = @divTrunc(freight_base * (100 - @as(i64, c.terms.transport_pct)), 100);
-    freight = types.applyBp(freight, gs.commanderMultBp(.freight));
+    freight = types.applyBp(freight, commander_mod.costMultBp(gs.commander, .freight));
     // Your own ships lift what they can: every hull a berthed
     // dropship carries is charter you don't pay; a jumpship of your own
     // removes the collar fee too. The ships sail with the company.
@@ -4213,7 +4213,7 @@ test "ships need berths, lift the company for less charter, and come home with i
     for (gs.ledger.transactions.items[ledger_before..]) |t| if (t.category == .transport_charter) {
         charter_paid = -t.amount;
     };
-    try std.testing.expect(charter_paid > 0 and charter_paid < types.applyBp(charter_full, gs.commanderMultBp(.freight)));
+    try std.testing.expect(charter_paid > 0 and charter_paid < types.applyBp(charter_full, commander_mod.costMultBp(gs.commander, .freight)));
     try std.testing.expectEqual(co, gs.unit(ship).?.force);
     try std.testing.expect(!lift_mod.transportAvailable(&gs, gs.unit(ship).?));
     try std.testing.expectEqual(@as(u32, 0), (try planLift(&gs, co, false)).ships -| 1); // still one ship, the one carrying it

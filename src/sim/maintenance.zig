@@ -16,6 +16,7 @@ const hq_ops = @import("hq_ops.zig");
 const sites = @import("sites.zig");
 const crew = @import("crew.zig");
 const toe = @import("toe.zig");
+const commander_mod = @import("../domain/commander.zig");
 const GameState = @import("state.zig").GameState;
 const founding = @import("founding.zig");
 const posture = @import("posture.zig");
@@ -41,7 +42,7 @@ fn postRepairLabour(gs: *GameState, labour: types.CBills) !void {
     if (labour <= 0) return;
     try gs.postTransaction(.{
         .day = gs.clock.day_index,
-        .amount = -types.applyBp(labour, gs.commanderMultBp(.repair)),
+        .amount = -types.applyBp(labour, commander_mod.costMultBp(gs.commander, .repair)),
         .category = .maintenance,
         .note = "repair labor & materials",
     });
@@ -267,7 +268,7 @@ pub fn runWeeklyMaintenance(gs: *GameState) !void {
     if (upkeep_cost > 0) {
         try gs.postTransaction(.{
             .day = gs.clock.day_index,
-            .amount = -types.applyBp(upkeep_cost, gs.commanderMultBp(.repair)),
+            .amount = -types.applyBp(upkeep_cost, commander_mod.costMultBp(gs.commander, .repair)),
             .category = .maintenance,
             .note = "weekly maintenance consumables",
         });
