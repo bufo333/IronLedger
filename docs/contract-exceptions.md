@@ -56,15 +56,23 @@ Owner of every entry: the project owner.
 - **Removal:** C3.
 - **Guard:** review (checklist questions 2 and 14). No mechanical check.
 
-### C4. Compound operations and GameState behavior
+### C4. Layering, compound operations and GameState behavior
 
-- **Rules:** 14, 77.
+- **Rules:** 5, 14, 77.
 - **Why not yet:** The remaining operations need ownership changes that preserve behavior and the golden hash.
 - **Scope:**
   - `GameState` methods with subsystem behaviour: aftermath and `hirePerson`'s default skill table (it leaves with C11's single role-to-skill rule; the creation itself is a storage primitive). (Hashing has moved to `digest.zig`; sale values to `econ/market.zig`; transfers, couriers, purchase debits, payroll, upkeep, liquidation and credit to `treasury.zig`; recruiting, spec hiring, posting and the recruit bonus to `personnel.zig`; the back-office counts, staffing refresh and autostaffing to `hq_ops.zig`; stock-site capacity, handovers, a force's supply site and goods sent home to `sites.zig`; the company load-out to `field_supply.zig`; seat eligibility, seat assignment and auto-assignment to `crew.zig`; hull and tech hours, tech capacity and free-tech search to `maintenance.zig`; company and lance counts, HQ and company capacity, support lances, unit placement and moves and company membership to `toe.zig`; founding to `founding.zig`; lift to `lift.zig`; refit to `refit.zig`; held hulls to `held_hulls.zig`; hull condition to `econ/market.zig`; readiness to `readiness.zig`; commander multiplier to `domain/commander.zig`; calendar primitives to `domain/clock.zig`; tick phase specification to `sim/tick.zig`; event types to `domain/events.zig`; autoresolve to `domain/autoresolve.zig`; battle-report records and journal to `domain/battle_report.zig`; HqLink to `domain/hq_link.zig`; HQ founding, tier upgrade, facility upgrade, fabrication, depot/reactivation, sell HQ, and autostaff to `hq_ops.zig`; link establishment and company assignment to `network.zig`; buy listing, buy hull, buy support hull, hire candidate and `hireRoleFromHall` to `contract_market.zig`; order part, ship stock, freight quoting, ship-components-home, replace mount/gear, sell stock, set stock policy to `sites.zig`; set supply policy and trim stock to `field_supply.zig`; hire, recruit, fire, transfer person, promote, post person and set office staff to `personnel.zig`; assign, unassign, auto-assign and crew company to `crew.zig`; triage, leave, admit, set/toggle auto-admit, train, train ability and train company to `medical.zig`.)
+  - No upward imports remain in `state.zig`; the C4 layering record is empty.
+  - The 6 test-only `queries.zig` imports in `commands.zig`, `hq_ops.zig` and `crew.zig` are agreement tests allowed by rule 5's test clause and are not part of this entry.
+  - This sub-list records existing debt found by a full audit; it grants no
+    permission. A new upward import is a violation even beside a listed one:
+    the layering check names a new edge, and review (rule 87) holds a new
+    site on an already-recorded edge.
   - The named atomic operations that rule 14 cites do not exist.
 - **Removal:** C4.
-- **Guard:** review (checklist questions 1 and 2). No mechanical check.
+- **Guard:** `verify-contract.sh` fails on an upward import edge missing from
+  the layering record or a record edge that no longer exists. Review (checklist
+  questions 1 and 2) holds the remaining scope.
 
 ### C5. Commands and ticks are not failure-atomic
 

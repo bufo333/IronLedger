@@ -24,7 +24,7 @@ C10, D27 and D30 into C12, D28 into C7, D29 into C15, D31 into C8, D33 into
 C18 (D23-D25, D32 and D34 are closed). The order below is authoritative and
 supersedes the audit response's original delivery order.
 
-- [ ] C4 compound operations and GameState behavior (rules 14, 77) — move the remaining named atomic operations to their owning subsystems and keep `GameState` to storage and primitive invariants. Behaviour-preserving, golden hash unchanged.
+- [ ] C4 layering, compound operations and GameState behavior (rules 5, 14, 77) — preserve downward imports, move the remaining named atomic operations to their owning subsystems, and keep `GameState` to storage and primitive invariants. Behaviour-preserving, golden hash unchanged.
 - [ ] C2 errors keep their meaning (rules 4, 10, 18, 79), in this order:
   - [ ] C2a arithmetic and pure-query fallbacks: replace impossible `divCeil` catches with checked invariants; propagate allocation/query failures in domain, field-supply, checklist, rating and market code; delete the corresponding baseline lines.
   - [ ] C2b REPL and TUI parsing/results: typed parse refusals replace zero/null sentinels; query failures reach the application error presenter; no successful fallback text is printed after a failed query.
