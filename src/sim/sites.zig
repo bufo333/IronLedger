@@ -84,6 +84,16 @@ pub fn moveStock(gs: *GameState, from: types.Site, to: types.Site, key: []const 
     return n;
 }
 
+/// Consume a batch of stock from a site: each key's quantity is removed.
+/// A missing or short entry is silently skipped (C5 will validate).
+/// Rule 14: the named consume operation for stock batches.
+pub fn consumeStockBatch(gs: *GameState, site: types.Site, batch: *const std.StringArrayHashMapUnmanaged(u32)) void {
+    var it = batch.iterator();
+    while (it.next()) |entry| {
+        _ = gs.takeStock(site, entry.key_ptr.*, entry.value_ptr.*);
+    }
+}
+
 /// Crate goods a company picked up in the field (salvaged structure,
 /// windfalls it cannot use out there) for the next convoy home: they
 /// arrive at the home warehouse after the map transit, no freight — the

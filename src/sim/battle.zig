@@ -946,10 +946,7 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     const salvage = salvage_bv; // for the AAR
 
     // Expend the reloads this fight consumed, itemized below.
-    var ammo_it = player.ammo_reserved.iterator();
-    while (ammo_it.next()) |entry| {
-        _ = gs.takeStock(player.site, entry.key_ptr.*, entry.value_ptr.*);
-    }
+    sites.consumeStockBatch(gs, player.site, &player.ammo_reserved);
     const captured = try takePrisoners(gs, c, &player, held_field, enemy_loss_pct, enemy_destroyed_bv);
     const comp = @divTrunc(damage_value * c.terms.battle_loss_pct, 100);
     if (comp > 0) {
