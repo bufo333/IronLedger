@@ -14,6 +14,9 @@ const state_mod = @import("state.zig");
 const GameState = state_mod.GameState;
 const founding = @import("founding.zig");
 const hq_link = @import("../domain/hq_link.zig");
+const lift_mod = @import("lift.zig");
+const treasury = @import("treasury.zig");
+const toe = @import("toe.zig");
 
 pub const HqLink = hq_link.HqLink;
 
@@ -174,6 +177,42 @@ pub fn routeCostMultBp(route: []const RouteHop) types.Bp {
         if (h.link_index == null) mult = @divTrunc(mult * 15_000, 10_000); // charter premium
     }
     return mult;
+}
+
+/// Assign a company to an HQ (capacity slots enforced).
+pub fn assignCompany(gs: *GameState, company: types.ForceId, hq: types.HqId) !void {
+    toe.assignCompanyToHq(gs, company, hq) catch |err| switch (err) {
+        error.UnknownForce => return error.UnknownForce,
+        error.UnknownHq => return error.UnknownHq,
+        error.NotACompany => return error.NotACompany,
+        error.CapacityFull => return error.CapacityFull,
+        error.TooManyLances => return error.TooManyLances,
+    };
+}
+
+/// Establish or raise a supply link between two HQs.
+pub fn establishLink(gs: *GameState, a: types.HqId, b: types.HqId, level: u8) !void {
+    if (gs.hqs.getPtr(a) == null or gs.hqs.getPtr(b) == null) return error.UnknownHq;
+    if (a == b) return error.SameForce;
+    if (level == 0 or level > 3) return error.BadLevel;
+    const existing = findLink(gs, a, b);
+    const from_level: u8 = if (existing) |e| e.level else 0;
+    if (level <= from_level) return error.BadLevel;
+    // A dedicated line is your own jumpship on the run.
+    if (level >= 3 and !lift_mod.ownsCrewedJumpshipAt(gs, a, b)) return error.NoJumpship;
+    const cost = hq_link.linkCost(level) - hq_link.linkCost(from_level);
+    try treasury.debit(gs, .outfit, .{
+        .day = gs.clock.day_index,
+        .amount = -cost,
+        .category = .transport_charter,
+        .note = "supply link established",
+    });
+    if (existing) |e| {
+        e.level = level;
+    } else {
+        try gs.hq_links.append(gs.allocator(), .{ .a = a, .b = b, .level = level, .established_day = gs.clock.day_index });
+    }
+    try gs.log(.delivery, .{ .hq = b }, "[network] supply link level {d} between hq:{d} and hq:{d}", .{ level, @intFromEnum(a), @intFromEnum(b) });
 }
 
 test "routes follow links, charter when there are none, and links cap tonnage" {

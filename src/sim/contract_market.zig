@@ -19,6 +19,12 @@ const hq_mod = @import("../domain/hq.zig");
 const person_mod = @import("../domain/person.zig");
 const person_gen = @import("../gen/person_gen.zig");
 const rating = @import("rating.zig");
+const chassis_mod = @import("../domain/chassis.zig");
+const force_mod = @import("../domain/force.zig");
+const toe = @import("toe.zig");
+const lift_mod = @import("lift.zig");
+const personnel = @import("personnel.zig");
+const posture = @import("posture.zig");
 
 /// Employer payment multiplier by faction, basis points (data/tables/factions.zon).
 pub fn employerMultBp(faction_key: []const u8) types.Bp {
@@ -273,7 +279,6 @@ fn refreshBoard(gs: *GameState, hq_id: types.HqId) !void {
     const world = planet.find(hq.planet_key) orelse return;
     const warehouse = hq.effectiveFacilityLevel(.warehouse);
     const day = gs.clock.day_index;
-    const chassis_mod = @import("../domain/chassis.zig");
     const part_mod = @import("../domain/part.zig");
     const thin = hq.tier == .field;
 
@@ -522,7 +527,6 @@ fn shortAdminRole(gs: *GameState, hq: *const hq_mod.Hq) ?person_mod.Role {
 /// people who heard the outfit is hiring that trade.
 fn shortRole(gs: *GameState, hq: *const hq_mod.Hq) ?person_mod.Role {
     if (shortAdminRole(gs, hq)) |r| return r;
-    const personnel = @import("personnel.zig");
     var best: ?person_mod.Role = null;
     var best_gap: u32 = 0;
     var fit = gs.forces.iterator();
@@ -800,7 +804,6 @@ test "the transport slot opens with the spaceport; ordinary lots are meks only" 
     var gs = GameState.init(std.testing.allocator, .{ .seed = 21 });
     defer gs.deinit();
     _ = try founding.createCommander(&gs, "T", .LC, .quartermaster);
-    const chassis_mod = @import("../domain/chassis.zig");
     // Spaceport 1: never a fighter or ship, however many refreshes.
     for (0..12) |_| {
         gs.clock.day_index += 31;
@@ -949,6 +952,187 @@ pub fn negotiate(gs: *GameState, offer_index: usize, term: contract.NegotiableTe
     c.terms.base_pay_month = types.applyBp(c.terms.base_pay_month, t.negotiation_fail_pay_bp);
     try gs.log(.contract, ctx, "[negotiation] {s} {s} on {s}: they hold firm on {s} and shave the pay 5% ({d}+{d}+{d} vs {d})", .{ c.employer_key, @tagName(c.kind), c.planet_key, @tagName(term), raw, office_edge, rep_edge, target });
     return .hardened;
+}
+
+// ---- C4b market command handlers moved from commands.zig ----
+
+/// Result returned by buy operations.
+pub const BuyResult = struct {
+    unit: types.UnitId = .none,
+    eta_days: u32 = 0,
+};
+
+/// Buy a listing off the market board.
+pub fn buyListing(gs: *GameState, index: usize) !BuyResult {
+    if (index >= gs.market_listings.items.len) return error.NoSuchListing;
+    if (gs.hqs.count() == 0) return error.NoHq;
+    const listing = gs.market_listings.items[index];
+    const price = types.applyBp(listing.price, gs.diff().purchase_bp); // difficulty
+    // The contract world's board: the company buys where it
+    // stands, from its local funds, and the hull joins it there.
+    if (listing.company != .none) {
+        const co = listing.company;
+        const c = gs.deploymentContract(co) orelse return error.NoSuchListing;
+        if (c.status != .active) return error.NoSuchListing;
+        if (gs.treasuryBalance(.{ .company = co }) < price) return error.CompanyFundsShort;
+        try treasury.debit(gs, .{ .company = co }, .{
+            .day = gs.clock.day_index,
+            .amount = -price,
+            .category = .unit_purchase,
+            .company = co,
+            .contract = c.id,
+            .note = listing.item_key,
+        });
+        _ = gs.market_listings.orderedRemove(index);
+        const uid = try gs.addUnit(listing.item_key);
+        const bought_co = gs.unit(uid).?;
+        if (listing.condition) |cond| market.applyHullCondition(bought_co, cond, gs.rng.random(.market));
+        try toe.placeUnitInCompany(gs, uid, co);
+        try gs.log(.market, .{ .company = co, .contract = c.id }, "[market] {s} bought {s} ({s}) on {s} for {d} from local funds — seat a pilot and a tech", .{
+            if (gs.force(co)) |f| f.name else "company", listing.item_key, if (listing.condition) |cd| cd.label() else "new", c.planet_key, price,
+        });
+        return .{ .unit = uid };
+    }
+    // The board's own HQ pays and receives.
+    const hq_id: types.HqId = if (listing.hq != .none) listing.hq else gs.hqs.keys()[0];
+    // Transports need a berth at the board's HQ.
+    var berth_kind: ?unit_mod.UnitKind = null;
+    if (listing.kind == .unit) if (chassis_mod.find(listing.item_key)) |design| if (design.kind.isTransport()) {
+        const h = gs.hqs.getPtr(hq_id) orelse return error.UnknownHq;
+        const cap = h.capacity();
+        const berths: u32 = if (design.kind == .dropship) cap.dropship_berths else cap.jumpship_berths;
+        if (lift_mod.transportsBerthedAt(gs, hq_id, design.kind) >= berths) return error.NoBerth;
+        berth_kind = design.kind;
+    };
+    if (gs.treasuryBalance(.{ .hq = hq_id }) < price) return error.HqTreasuryShort;
+    try treasury.debit(gs, .{ .hq = hq_id }, .{
+        .day = gs.clock.day_index,
+        .amount = -price,
+        .category = if (listing.kind == .unit) .unit_purchase else .parts,
+        .hq = hq_id,
+        .note = if (listing.black_market) "black market" else listing.item_key,
+    });
+    // Off the books: the fence may vanish with the money, and
+    // the house notices either way; the pirates approve.
+    if (listing.black_market) {
+        const bm = tuning.market;
+        const world_faction: []const u8 = if (gs.hqs.getPtr(hq_id)) |h| (if (planet.find(h.planet_key)) |w| w.faction else "PER") else "PER";
+        const roll = gs.rng.roll2d6(.market);
+        _ = gs.market_listings.orderedRemove(index);
+        if (roll <= bm.black_market_fraud_target) {
+            const now = if (!std.mem.eql(u8, world_faction, "PER")) try gs.adjustStanding(world_faction, -bm.black_market_standing_loss) else 0;
+            try gs.log(.market, .{ .hq = hq_id }, "[black market] the fence vanished with {d} c-bills — no {s} (2d6 = {d}); {s} standing −{d} → {d}", .{ price, listing.item_key, roll, world_faction, bm.black_market_standing_loss, now });
+            return .{};
+        }
+        const house_now = if (!std.mem.eql(u8, world_faction, "PER")) try gs.adjustStanding(world_faction, -1) else 0;
+        const pirate_now = try gs.adjustStanding("PER", 1);
+        try gs.log(.market, .{ .hq = hq_id }, "[black market] {s} changed hands for {d} c-bills, no questions asked — {s} standing −1 → {d}, pirates +1 → {d}", .{ listing.item_key, price, world_faction, house_now, pirate_now });
+        switch (listing.kind) {
+            .unit => {
+                const uid = try gs.addUnit(listing.item_key);
+                const bought_bm = gs.unit(uid).?;
+                if (listing.condition) |cond| market.applyHullCondition(bought_bm, cond, gs.rng.random(.market));
+                return .{ .unit = uid };
+            },
+            .part => try gs.addStock(.{ .hq = hq_id }, listing.item_key, listing.quantity),
+        }
+        return .{};
+    }
+    switch (listing.kind) {
+        .unit => {
+            // Staple hull lines (support trucks) sell one at a time.
+            const l = &gs.market_listings.items[index];
+            if (listing.staple and l.quantity > 1) l.quantity -= 1 else _ = gs.market_listings.orderedRemove(index);
+            const uid = try gs.addUnit(listing.item_key);
+            const bought_hq = gs.unit(uid).?;
+            if (listing.condition) |cond| market.applyHullCondition(bought_hq, cond, gs.rng.random(.market));
+            if (berth_kind != null) bought_hq.berth_hq = hq_id;
+            try gs.log(.market, .{ .hq = hq_id }, "[market] bought {s} ({s}) for {d}{s}", .{
+                listing.item_key, if (listing.condition) |c| c.label() else "new", price,
+                if (berth_kind != null) " — berthed here" else "",
+            });
+            return .{ .unit = uid };
+        },
+        .part => {
+            // Staple lines sell by the unit and stay listed until empty.
+            try gs.addStock(.{ .hq = hq_id }, listing.item_key, 1);
+            const l = &gs.market_listings.items[index];
+            if (l.quantity > 1) l.quantity -= 1 else _ = gs.market_listings.orderedRemove(index);
+        },
+    }
+    return .{};
+}
+
+/// Buy a hull listing for a specific company.
+pub fn buyHullFor(gs: *GameState, listing: usize, company: types.ForceId, lance: types.ForceId) !BuyResult {
+    const dest = gs.force(company) orelse return error.UnknownForce;
+    if (dest.echelon != .company) return error.NotACompany;
+    if (listing >= gs.market_listings.items.len) return error.NoSuchListing;
+    const l = gs.market_listings.items[listing];
+    if (l.kind != .unit or l.company != .none) return error.NoSuchListing;
+    const board_hq: types.HqId = if (l.hq != .none) l.hq else gs.hqs.keys()[0];
+    // A defrauded purchase creates no hull and returns none: there is
+    // nothing to place.
+    const buy_res = try buyListing(gs, listing);
+    const uid = buy_res.unit;
+    if (uid == .none) return .{};
+    const home = gs.homeHqFor(company);
+    const from = if (gs.hqs.getPtr(board_hq)) |h| planet.find(h.planet_key) else null;
+    const to = if (gs.hqs.getPtr(home)) |h| planet.find(h.planet_key) else null;
+    const days: u32 = if (from != null and to != null) logistics.deliveryDays(from.?, to.?) else 0;
+    if (days == 0) {
+        const lance_ok = if (gs.force(lance)) |lf| (gs.companyOf(lance) == company and (lf.echelon != .lance or lf.units.items.len < force_mod.lance_size)) else false;
+        if (lance_ok) try toe.moveUnitToForce(gs, uid, lance) else try toe.placeUnitInCompany(gs, uid, company);
+        try gs.log(.market, .{ .company = company }, "[raise] {s} #{d} joins {s}", .{ l.item_key, @intFromEnum(uid), dest.name });
+    } else {
+        const u = gs.unit(uid).?;
+        u.status = .in_transit;
+        try gs.unit_transfers.append(gs.allocator(), .{ .unit = uid, .to_company = company, .eta_day = gs.clock.day_index + days });
+        try gs.log(.market, .{ .company = company }, "[raise] {s} #{d} bought at {s} — {d} days to {s}", .{ l.item_key, @intFromEnum(uid), gs.hqs.getPtr(board_hq).?.name, days, dest.name });
+    }
+    return .{ .unit = uid, .eta_days = days };
+}
+
+/// Buy one support hull of a kind off the company's home board.
+pub fn buySupportHull(gs: *GameState, company: types.ForceId, kind: force_mod.SupportLanceKind) !BuyResult {
+    const f = gs.force(company) orelse return error.UnknownForce;
+    if (f.echelon != .company) return error.NotACompany;
+    const home = gs.homeHqFor(company);
+    const key = kind.hullKey();
+    var idx: ?usize = null;
+    for (gs.market_listings.items, 0..) |li, i| if (li.kind == .unit and li.staple and li.hq == home and std.mem.eql(u8, li.item_key, key)) {
+        idx = i;
+    };
+    const listing = idx orelse return error.NoSuchListing;
+    const sl: types.ForceId = if (toe.supportLance(gs, company, kind)) |sl2| sl2.id else .none;
+    return buyHullFor(gs, listing, company, sl);
+}
+
+/// Hire a candidate off the hall board; returns the new PersonId.
+pub fn hireCandidate(gs: *GameState, index: usize) !types.PersonId {
+    if (index >= gs.candidates.items.len) return error.NoSuchCandidate;
+    const cand = gs.candidates.items[index];
+    if (cand.asking_bonus > 0) {
+        try treasury.debit(gs, .outfit, .{
+            .day = gs.clock.day_index,
+            .amount = -cand.asking_bonus,
+            .category = .payroll,
+            .note = "signing bonus",
+        });
+    }
+    const id = try personnel.hireFromSpec(gs, cand.spec);
+    _ = gs.candidates.orderedRemove(index);
+    return id;
+}
+
+/// Hire the first hall candidate with `role` (any HQ's hall) into `company`.
+pub fn hireRoleFromHall(gs: *GameState, role: person_mod.Role, company: types.ForceId) !bool {
+    for (gs.candidates.items, 0..) |c, i| if (c.spec.role == role) {
+        const id = try hireCandidate(gs, i);
+        if (gs.person(id)) |p| p.assigned_force = company;
+        return true;
+    };
+    return false;
 }
 
 test "a veteran five-lance opposition pays more than a green four-lance one" {

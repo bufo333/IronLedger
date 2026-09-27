@@ -352,3 +352,67 @@ test "the plan fits the trucks and only stocks munitions the company fires" {
         try std.testing.expect(l.floor >= p.lines[i].floor);
     };
 }
+
+// ---- C4b field-supply command handlers moved from commands.zig ----
+
+/// Set the automatic resupply policy for a deployed company.
+pub fn setSupplyPolicy(gs: *GameState, company: types.ForceId, min_days: u16, tons: u32, ammo_battles: u8) !void {
+    const f = gs.force(company) orelse return error.UnknownForce;
+    if (f.echelon != .company) return error.NotACompany;
+    var i: usize = 0;
+    while (i < gs.supply_policies.items.len) : (i += 1) {
+        if (gs.supply_policies.items[i].company == company) {
+            if (min_days == 0) {
+                _ = gs.supply_policies.orderedRemove(i);
+            } else {
+                gs.supply_policies.items[i].min_days = min_days;
+                gs.supply_policies.items[i].tons = tons;
+                gs.supply_policies.items[i].ammo_battles = ammo_battles;
+            }
+            return;
+        }
+    }
+    if (min_days == 0) return;
+    try gs.supply_policies.append(gs.allocator(), .{ .company = company, .min_days = min_days, .tons = tons, .ammo_battles = ammo_battles });
+}
+
+/// Trim a deployed company's field stores to its field plan; returns tons moved.
+pub fn trimStock(gs: *GameState, company: types.ForceId) !u32 {
+    const f = gs.force(company) orelse return error.UnknownForce;
+    if (f.echelon != .company) return error.NotACompany;
+    var arena = std.heap.ArenaAllocator.init(gs.allocator());
+    defer arena.deinit();
+    var min_days: u32 = 14;
+    var battles: u8 = 0;
+    for (gs.supply_policies.items) |sp| if (sp.company == company) {
+        min_days = sp.min_days;
+        battles = sp.ammo_battles;
+    };
+    const transit = treasury.courierEtaDays(gs, .{ .company = company });
+    const p = try plan(arena.allocator(), gs, company, transit, min_days, battles);
+    const site: types.Site = .{ .company = company };
+    var moved: u32 = 0;
+    // Snapshot the keys first: sending home edits the stock map.
+    var keys: std.ArrayListUnmanaged([]const u8) = .empty;
+    if (gs.stockMap(site)) |m| {
+        var it = m.iterator();
+        while (it.next()) |e| try keys.append(arena.allocator(), e.key_ptr.*);
+    }
+    for (keys.items) |key| {
+        const have = gs.stockCount(site, key);
+        if (have == 0) continue;
+        var target: ?u32 = null;
+        for (p.lines) |l| if (std.mem.eql(u8, l.key, key)) {
+            target = l.target;
+        };
+        const def = part_mod.find(key);
+        const consumable = part_mod.isComponent(key) or (def != null and (def.?.mount == .ammo or def.?.mount == .none));
+        const excess: u32 = if (target) |t| have -| t else if (consumable) have else 0;
+        if (excess == 0) continue;
+        _ = gs.takeStock(site, key, excess);
+        try sites.sendHome(gs, company, key, excess);
+        moved += excess * part_mod.tons(key);
+        try gs.log(.delivery, .{ .company = company }, "[supply] {s} returns {d} {s} to the home HQ ({s})", .{ f.name, excess, key, if (target != null) "over the plan's target" else "no line in the plan" });
+    }
+    return moved;
+}

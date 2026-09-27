@@ -22,6 +22,11 @@ const GameState = state_mod.GameState;
 const founding = @import("founding.zig");
 const posture = @import("posture.zig");
 const refit_m = @import("refit.zig");
+const planet_mod = @import("../domain/planet.zig");
+const market_mod = @import("../econ/market.zig");
+const treasury = @import("treasury.zig");
+const network = @import("network.zig");
+const lift_mod = @import("lift.zig");
 
 // ----------------------------------------------------- the back office
 
@@ -784,6 +789,203 @@ fn completeJob(gs: *GameState, job: *state_mod.BayJob) !bool {
         });
     }
     return true;
+}
+
+// ---- C4b HQ/network command handlers moved from commands.zig ----
+
+/// A world is reachable for founding if a ring or beachhead band covers
+/// it, or the outfit has worked a contract there.
+fn reachable(gs: *GameState, world: *const planet_mod.Planet) bool {
+    var hit = gs.hqs.iterator();
+    while (hit.next()) |entry| {
+        const hq = entry.value_ptr;
+        const hq_world = planet_mod.find(hq.planet_key) orelse continue;
+        if (market_mod.visibilityFor(planet_mod.distanceLy(hq_world, world), hq.influenceLy()) != .hidden) return true;
+    }
+    var cit = gs.contracts.iterator();
+    while (cit.next()) |entry| {
+        if (std.mem.eql(u8, entry.value_ptr.planet_key, world.key)) return true;
+    }
+    return false;
+}
+
+/// Found a field HQ on a reachable world.
+pub fn foundHq(gs: *GameState, name: []const u8, planet_key: []const u8) !void {
+    const world = planet_mod.find(planet_key) orelse return error.UnknownPlanet;
+    if (!reachable(gs, world)) return error.NotReachable;
+    const cost: types.CBills = tuning.hq.found_field_hq_cost;
+    if (gs.treasuryBalance(.outfit) < cost) return error.InsufficientTreasury;
+    // The HQ is built and its slots reserved before the money moves.
+    const hq = founding.prepareHq(gs, name, .field, world.key) catch |err| switch (err) {
+        error.UnknownPlanet => return error.UnknownPlanet,
+        error.NotReachable => return error.NotReachable,
+        error.OutOfMemory => return error.OutOfMemory,
+    };
+    try gs.hqs.ensureUnusedCapacity(gs.allocator(), 1);
+    try gs.reserveLedger(1);
+    try treasury.debit(gs, .outfit, .{
+        .day = gs.clock.day_index,
+        .amount = -cost,
+        .category = .hq_construction,
+        .note = "field HQ founded",
+    });
+    const id = gs.commitHq(hq);
+    try gs.log(.construction, .{ .hq = id }, "[network] field HQ \"{s}\" founded on {s} — post staff, send funds, link it", .{ name, world.name });
+}
+
+/// Field → regional tier upgrade.
+pub fn upgradeTier(gs: *GameState, hq_id: types.HqId) !void {
+    const h = gs.hqs.getPtr(hq_id) orelse return error.UnknownHq;
+    if (h.tier != .field) return error.MaxLevel;
+    for (h.projects.items) |p| if (p.kind == .tier_upgrade) return error.ProjectInProgress;
+    if (gs.treasuryBalance(.{ .hq = hq_id }) < tier_upgrade_cost) return error.InsufficientTreasury;
+    startTierUpgrade(gs, hq_id) catch |err| switch (err) {
+        error.ProjectInProgress => return error.ProjectInProgress,
+        error.MaxLevel => return error.MaxLevel,
+        error.UnknownHq => return error.UnknownHq,
+        error.OutOfMemory => return error.OutOfMemory,
+    };
+    try gs.postTreasury(.{ .hq = hq_id }, .{
+        .day = gs.clock.day_index,
+        .amount = -tier_upgrade_cost,
+        .category = .hq_construction,
+        .hq = hq_id,
+        .note = "regional upgrade",
+    });
+}
+
+/// Recruit and post admins until an HQ meets its staffing requirement.
+pub fn autostaff(gs: *GameState, hq_id: types.HqId) !void {
+    _ = staffHqToRequirement(gs, hq_id) catch |err| switch (err) {
+        error.UnknownHq => return error.UnknownHq,
+        error.OutOfMemory => return error.OutOfMemory,
+    };
+}
+
+/// Fabricate structural components in the HQ mek bay.
+pub fn fabricate(gs: *GameState, hq_id: types.HqId, part_key: []const u8, quantity: u32) !void {
+    var actual_hq = hq_id;
+    if (actual_hq == .none and gs.hqs.count() > 0) actual_hq = gs.hqs.keys()[0];
+    if (gs.hqs.getPtr(actual_hq) == null) return error.UnknownHq;
+    const def = part_mod.find(part_key) orelse return error.UnknownPart;
+    if (!part_mod.isComponent(def.key)) return error.NotAComponent;
+    if (baySlots(gs, actual_hq) == 0) return error.NoBay;
+    if (!canFabricate(gs, actual_hq, def.key)) return error.BayTooSmall;
+    const total = types.applyBp(types.applyBp(def.cost * quantity, market_mod.structural_fab_cost_mult_bp), gs.diff().fab_cost_bp);
+    try gs.bay_jobs.ensureUnusedCapacity(gs.allocator(), quantity);
+    try gs.reserveLedger(1);
+    try treasury.debit(gs, .{ .hq = actual_hq }, .{
+        .day = gs.clock.day_index,
+        .amount = -total,
+        .category = .fabrication,
+        .hq = actual_hq,
+        .note = def.name,
+    });
+    try queueFabrication(gs, actual_hq, def.key, quantity);
+}
+
+/// Build or level up a facility at an HQ.
+pub fn upgradeFacility(gs: *GameState, hq_id: types.HqId, kind: hq_mod.FacilityKind) !void {
+    const hq = gs.hqs.getPtr(hq_id) orelse return error.UnknownHq;
+    if (upgradeBlock(gs, hq_id, kind)) |why| return switch (why) {
+        .in_progress => error.ProjectInProgress,
+        .maxed => error.MaxLevel,
+        .funds_short => error.InsufficientTreasury,
+    };
+    const to_level = hq.facilityLevel(kind) + 1;
+    const cost = hq_mod.upgradeCost(kind, to_level);
+    try hq.projects.ensureUnusedCapacity(gs.allocator(), 1);
+    try gs.reserveLedger(1);
+    try treasury.debit(gs, .{ .hq = hq_id }, .{
+        .day = gs.clock.day_index,
+        .amount = -cost,
+        .category = .hq_construction,
+        .hq = hq_id,
+        .note = @tagName(kind),
+    });
+    startUpgrade(gs, hq_id, kind) catch |err| switch (err) {
+        error.ProjectInProgress => return error.ProjectInProgress,
+        error.MaxLevel => return error.MaxLevel,
+        error.UnknownHq => return error.UnknownHq,
+        error.OutOfMemory => return error.OutOfMemory,
+    };
+}
+
+/// Sell off an HQ (not the last one; companies must be reassigned first).
+pub fn sellHq(gs: *GameState, hq_id: types.HqId) !void {
+    const h = gs.hqs.getPtr(hq_id) orelse return error.UnknownHq;
+    if (gs.hqs.count() <= 1) return error.LastHq;
+    if (toe.companiesAtHq(gs, hq_id) > 0) return error.HqInUse;
+    const value = market_mod.hqSaleValue(h) + h.funds;
+    const name = h.name;
+    var pit = gs.people.iterator();
+    while (pit.next()) |e| if (e.value_ptr.posted_hq == hq_id) {
+        e.value_ptr.posted_hq = .none;
+    };
+    var i: usize = 0;
+    while (i < gs.bay_jobs.items.len) {
+        if (gs.bay_jobs.items[i].hq == hq_id) _ = gs.bay_jobs.orderedRemove(i) else i += 1;
+    }
+    i = 0;
+    while (i < gs.hq_links.items.len) {
+        const l = gs.hq_links.items[i];
+        if (l.a == hq_id or l.b == hq_id) _ = gs.hq_links.orderedRemove(i) else i += 1;
+    }
+    i = 0;
+    while (i < gs.candidates.items.len) {
+        if (gs.candidates.items[i].hq == hq_id) _ = gs.candidates.orderedRemove(i) else i += 1;
+    }
+    i = 0;
+    while (i < gs.market_listings.items.len) {
+        if (gs.market_listings.items[i].hq == hq_id) _ = gs.market_listings.orderedRemove(i) else i += 1;
+    }
+    // Its standing orders, reorder points and the goods on the road
+    // to it go with it; transports berthed there move to the seat.
+    i = 0;
+    while (i < gs.policies.items.len) {
+        if (std.meta.eql(gs.policies.items[i].entity, .{ .hq = hq_id })) _ = gs.policies.orderedRemove(i) else i += 1;
+    }
+    i = 0;
+    while (i < gs.stock_policies.items.len) {
+        if (gs.stock_policies.items[i].hq == hq_id) _ = gs.stock_policies.orderedRemove(i) else i += 1;
+    }
+    for (gs.part_orders.items) |*o| if (o.inFlight() and std.meta.eql(o.dest, .{ .hq = hq_id })) {
+        o.status = .cancelled;
+    };
+    _ = gs.hqs.orderedRemove(hq_id);
+    const seat: types.HqId = if (gs.hqs.count() > 0) gs.hqs.keys()[0] else .none;
+    var uit2 = gs.units.iterator();
+    while (uit2.next()) |e| if (e.value_ptr.berth_hq == hq_id) {
+        e.value_ptr.berth_hq = seat;
+    };
+    refreshHqStaffing(gs);
+    try gs.postTransaction(.{ .day = gs.clock.day_index, .amount = value, .category = .unit_sale, .note = "HQ sold" });
+    try gs.log(.market, .{}, "[sale] {s} sold off for {d}", .{ name, value });
+}
+
+/// Send a hull to the depot for structural repair; returns the HQ whose bay took it.
+pub fn depot(gs: *GameState, unit_id: types.UnitId) !types.HqId {
+    const u = gs.unit(unit_id) orelse return error.UnknownUnit;
+    if (!u.needsDepot()) return error.NothingToRepair;
+    if (posture.isCompanyDeployed(gs, gs.companyOf(u.force))) return error.UnitDeployed;
+    if (!posture.isCompanyHome(gs, gs.companyOf(u.force))) return error.UnitAway;
+    const queued = queueDepotRepair(gs, unit_id) catch |err| return switch (err) {
+        error.NoHq => error.NoHq,
+        error.NoBay => error.NoBay,
+        error.UnknownUnit => error.UnknownUnit,
+        error.WrittenOff => error.WrittenOff,
+        else => error.NoBay,
+    };
+    if (!queued) return error.MissingComponents;
+    return depotHqFor(gs, u);
+}
+
+/// Reactivate a mothballed hull (queues a bay job).
+pub fn reactivate(gs: *GameState, unit_id: types.UnitId) !void {
+    const u = gs.unit(unit_id) orelse return error.UnknownUnit;
+    if (u.status != .mothballed) return error.NotMothballed;
+    if (hasJobForUnit(gs, unit_id)) return error.ProjectInProgress;
+    try queueReactivation(gs, unit_id);
 }
 
 test "repair odds favour the sharper tech and the better hull; the parts sum to 100" {

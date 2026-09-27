@@ -27,7 +27,6 @@ const hq_ops = @import("hq_ops.zig");
 const hq_mod = @import("../domain/hq.zig");
 const contract_mod = @import("../domain/contract.zig");
 const network = @import("network.zig");
-const hq_link = @import("../domain/hq_link.zig");
 const contract_control = @import("contract_control.zig");
 const lift_mod = @import("lift.zig");
 const meklab = @import("../domain/meklab.zig");
@@ -463,10 +462,22 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
         .fire => |id| return execFire(gs, id),
         .new_company => |name| return execNewCompany(gs, name),
         .new_company_at => |n| return execNewCompanyAt(gs, n),
-        .found_hq => |f| return execFoundHq(gs, f),
-        .upgrade_tier => |hq_id| return execUpgradeTier(gs, hq_id),
-        .assign_company => |a| return execAssignCompany(gs, a),
-        .link => |l| return execLink(gs, l),
+        .found_hq => |f| {
+            hq_ops.foundHq(gs, f.name, f.planet_key) catch |err| return @errorCast(err);
+            return .{};
+        },
+        .upgrade_tier => |hq_id| {
+            hq_ops.upgradeTier(gs, hq_id) catch |err| return @errorCast(err);
+            return .{};
+        },
+        .assign_company => |a| {
+            network.assignCompany(gs, a.company, a.hq) catch |err| return @errorCast(err);
+            return .{};
+        },
+        .link => |l| {
+            network.establishLink(gs, l.a, l.b, l.level) catch |err| return @errorCast(err);
+            return .{};
+        },
         .transfer_unit => |t| return transferUnit(gs, t.unit, t.to_company),
         .complete_contract => |cid| return execCompleteContract(gs, cid),
         .recall_company => |company| return execRecallCompany(gs, company),
@@ -474,11 +485,20 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
         .refit_install => |r| return execRefitInstall(gs, r),
         .refit_clear => |unit_id| return execRefitClear(gs, unit_id),
         .refit_commit => |unit_id| return commitRefit(gs, unit_id),
-        .buy_support_hull => |b| return execBuySupportHull(gs, b),
+        .buy_support_hull => |b| {
+            const res = contract_market.buySupportHull(gs, b.company, b.kind) catch |err| return @errorCast(err);
+            return .{ .unit = res.unit, .eta_days = res.eta_days };
+        },
         .set_outfit_emblem => |image| return execSetOutfitEmblem(gs, image),
         .set_office_staff => |o| return execSetOfficeStaff(gs, o),
-        .ship_components_home => |co| return execShipComponentsHome(gs, co),
-        .replace_mount => |r| return execReplaceMount(gs, r),
+        .ship_components_home => |co| {
+            const res = sites.shipComponentsHome(gs, co) catch |err| return @errorCast(err);
+            return .{ .count = res.count, .hq = res.hq };
+        },
+        .replace_mount => |r| {
+            const res = sites.replaceMount(gs, r.unit, r.slot_key) catch |err| return @errorCast(err);
+            return .{ .sourced = res.sourced, .hq = res.hq };
+        },
         .cover_shortfall => |c| return execCoverShortfall(gs, c),
         .toggle_mothball => |unit_id| return execToggleMothball(gs, unit_id),
         .confirm_orders => |id| return execConfirmOrders(gs, id),
@@ -492,7 +512,10 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
         .adjust_shares_pct => |delta| return execAdjustSharesPct(gs, delta),
         .toggle_auto_admit => return execToggleAutoAdmit(gs),
         .recall_idle => |company| return execRecallIdle(gs, company),
-        .autostaff => |hq_id| return execAutostaff(gs, hq_id),
+        .autostaff => |hq_id| {
+            hq_ops.autostaff(gs, hq_id) catch |err| return @errorCast(err);
+            return .{};
+        },
         .transfer_person => |t| return execTransferPerson(gs, t),
         .rename_outfit => |name| return execRenameOutfit(gs, name),
         .rename_force => |r| return execRenameForce(gs, r),
@@ -512,42 +535,87 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
         },
         .train_ability => |ta| return execTrainAbility(gs, ta),
         .promote => |pr| return execPromote(gs, pr),
-        .order_part => |o| return orderPart(gs, o.part_key, o.quantity, o.dest),
-        .ship_stock => |s| return shipStock(gs, s.part_key, s.quantity, s.from, s.to),
-        .buy_listing => |index| return execBuyListing(gs, index),
+        .order_part => |o| {
+            const res = sites.orderPart(gs, o.part_key, o.quantity, o.dest) catch |err| return @errorCast(err);
+            return .{ .sourced = res.sourced };
+        },
+        .ship_stock => |s| {
+            sites.shipStock(gs, s.part_key, s.quantity, s.from, s.to) catch |err| return @errorCast(err);
+            return .{};
+        },
+        .buy_listing => |index| {
+            const res = contract_market.buyListing(gs, index) catch |err| return @errorCast(err);
+            return .{ .unit = res.unit };
+        },
         .mothball => |unit_id| return execMothball(gs, unit_id),
         .move_unit => |m| return execMoveUnit(gs, m),
         .new_lance => |nl| return execNewLance(gs, nl),
         .raise_air_company => |company| return execRaiseAirCompany(gs, company),
-        .set_supply_policy => |sp| return execSetSupplyPolicy(gs, sp),
-        .set_stock_policy => |sp| return execSetStockPolicy(gs, sp),
-        .sell_stock => |sale| return execSellStock(gs, sale),
+        .set_supply_policy => |sp| {
+            field_supply.setSupplyPolicy(gs, sp.company, sp.min_days, sp.tons, sp.ammo_battles) catch |err| return @errorCast(err);
+            return .{};
+        },
+        .set_stock_policy => |sp| {
+            sites.setStockPolicy(gs, sp.hq, sp.part_key, sp.min, sp.target) catch |err| return @errorCast(err);
+            return .{};
+        },
+        .sell_stock => |sale| {
+            sites.sellStock(gs, sale.hq, sale.part_key, sale.quantity) catch |err| return @errorCast(err);
+            return .{};
+        },
         .raise_company => |r| return raiseCompany(gs, r.name, r.hq),
-        .buy_hull_for => |b| return execBuyHullFor(gs, b),
+        .buy_hull_for => |b| {
+            const res = contract_market.buyHullFor(gs, b.listing, b.company, b.lance) catch |err| return @errorCast(err);
+            return .{ .unit = res.unit, .eta_days = res.eta_days };
+        },
         .crew_company => |company| return execCrewCompany(gs, company),
-        .trim_stock => |company| return execTrimStock(gs, company),
+        .trim_stock => |company| {
+            const tons = field_supply.trimStock(gs, company) catch |err| return @errorCast(err);
+            return .{ .tons_moved = tons };
+        },
         .set_shares_pct => |pct| return execSetSharesPct(gs, pct),
         .set_difficulty => |level| return execSetDifficulty(gs, level),
         .set_auto_admit => |on| return execSetAutoAdmit(gs, on),
         .set_roe => |r| return execSetRoe(gs, r),
         .set_role => |r| return execSetRole(gs, r),
-        .replace_gear => |unit_id| return replaceGear(gs, unit_id),
+        .replace_gear => |unit_id| {
+            const res = sites.replaceGear(gs, unit_id) catch |err| return @errorCast(err);
+            return .{ .ordered = res.ordered, .unsourced = res.unsourced };
+        },
         .clear_standing_order => |name| return execClearStandingOrder(gs, name),
-        .depot => |unit_id| return execDepot(gs, unit_id),
+        .depot => |unit_id| {
+            const hq_id = hq_ops.depot(gs, unit_id) catch |err| return @errorCast(err);
+            return .{ .hq = hq_id };
+        },
         .admit => |pid| return execAdmit(gs, pid),
         .repay_loan => |r| return execRepayLoan(gs, r),
         .sell_unit => |unit_id| return execSellUnit(gs, unit_id),
         .strip_unit => |unit_id| return execStripUnit(gs, unit_id),
-        .sell_hq => |hq_id| return execSellHq(gs, hq_id),
+        .sell_hq => |hq_id| {
+            hq_ops.sellHq(gs, hq_id) catch |err| return @errorCast(err);
+            return .{};
+        },
         .disband_company => |co| return execDisbandCompany(gs, co),
-        .reactivate => |unit_id| return execReactivate(gs, unit_id),
-        .fabricate => |f0| return execFabricate(gs, f0),
-        .upgrade_facility => |u| return execUpgradeFacility(gs, u),
+        .reactivate => |unit_id| {
+            hq_ops.reactivate(gs, unit_id) catch |err| return @errorCast(err);
+            return .{};
+        },
+        .fabricate => |f0| {
+            hq_ops.fabricate(gs, f0.hq, f0.part_key, f0.quantity) catch |err| return @errorCast(err);
+            return .{};
+        },
+        .upgrade_facility => |u| {
+            hq_ops.upgradeFacility(gs, u.hq, u.kind) catch |err| return @errorCast(err);
+            return .{};
+        },
         .post_person => |pp| return execPostPerson(gs, pp),
         .assign => |a| return execAssign(gs, a),
         .unassign => |u| return execUnassign(gs, u),
         .auto_assign => |company| return execAutoAssign(gs, company),
-        .hire_candidate => |index| return execHireCandidate(gs, index),
+        .hire_candidate => |index| {
+            const id = contract_market.hireCandidate(gs, index) catch |err| return @errorCast(err);
+            return .{ .hired = id };
+        },
         .triage => |t| return execTriage(gs, t),
         .leave => |l| return execLeave(gs, l),
         .train => |t| return execTrain(gs, t),
@@ -592,89 +660,6 @@ fn execNewCompany(gs: *GameState, name: @FieldType(Command, "new_company")) Erro
 fn execNewCompanyAt(gs: *GameState, n: @FieldType(Command, "new_company_at")) Error!Result {
     if (gs.hqs.getPtr(n.hq) == null) return Error.UnknownHq;
     return newCompanyAt(gs, n.name, n.hq);
-}
-
-fn execFoundHq(gs: *GameState, f: @FieldType(Command, "found_hq")) Error!Result {
-    const world = planet_mod.find(f.planet_key) orelse return Error.UnknownPlanet;
-    if (!reachable(gs, world)) return Error.NotReachable;
-    const cost: types.CBills = tuning.hq.found_field_hq_cost;
-    if (gs.treasuryBalance(.outfit) < cost) return Error.InsufficientTreasury;
-    // The HQ is built and its slots reserved before the money moves.
-    const hq = founding.prepareHq(gs, f.name, .field, world.key) catch |err| switch (err) {
-        error.UnknownPlanet => return Error.UnknownPlanet,
-        error.NotReachable => return Error.NotReachable,
-        error.OutOfMemory => return Error.OutOfMemory,
-    };
-    try gs.hqs.ensureUnusedCapacity(gs.allocator(), 1);
-    try gs.reserveLedger(1);
-    try treasury.debit(gs, .outfit, .{
-        .day = gs.clock.day_index,
-        .amount = -cost,
-        .category = .hq_construction,
-        .note = "field HQ founded",
-    });
-    const id = gs.commitHq(hq);
-    try gs.log(.construction, .{ .hq = id }, "[network] field HQ \"{s}\" founded on {s} — post staff, send funds, link it", .{ f.name, world.name });
-    return .{};
-}
-
-fn execUpgradeTier(gs: *GameState, hq_id: @FieldType(Command, "upgrade_tier")) Error!Result {
-    // Check everything before a c-bill moves: a refused upgrade keeps
-    // the money.
-    const h = gs.hqs.getPtr(hq_id) orelse return Error.UnknownHq;
-    if (h.tier != .field) return Error.MaxLevel;
-    for (h.projects.items) |p| if (p.kind == .tier_upgrade) return Error.ProjectInProgress;
-    if (gs.treasuryBalance(.{ .hq = hq_id }) < hq_ops.tier_upgrade_cost) return Error.InsufficientTreasury;
-    hq_ops.startTierUpgrade(gs, hq_id) catch |err| switch (err) {
-        error.ProjectInProgress => return Error.ProjectInProgress,
-        error.MaxLevel => return Error.MaxLevel,
-        error.UnknownHq => return Error.UnknownHq,
-        error.OutOfMemory => return Error.OutOfMemory,
-    };
-    try gs.postTreasury(.{ .hq = hq_id }, .{
-        .day = gs.clock.day_index,
-        .amount = -hq_ops.tier_upgrade_cost,
-        .category = .hq_construction,
-        .hq = hq_id,
-        .note = "regional upgrade",
-    });
-    return .{};
-}
-
-fn execAssignCompany(gs: *GameState, a: @FieldType(Command, "assign_company")) Error!Result {
-    toe.assignCompanyToHq(gs, a.company, a.hq) catch |err| switch (err) {
-        error.UnknownForce => return Error.UnknownForce,
-        error.UnknownHq => return Error.UnknownHq,
-        error.NotACompany => return Error.NotACompany,
-        error.CapacityFull => return Error.CapacityFull,
-        error.TooManyLances => return Error.TooManyLances,
-    };
-    return .{};
-}
-
-fn execLink(gs: *GameState, l: @FieldType(Command, "link")) Error!Result {
-    if (gs.hqs.getPtr(l.a) == null or gs.hqs.getPtr(l.b) == null) return Error.UnknownHq;
-    if (l.a == l.b) return Error.SameForce;
-    if (l.level == 0 or l.level > 3) return Error.BadLevel;
-    const existing = network.findLink(gs, l.a, l.b);
-    const from_level: u8 = if (existing) |e| e.level else 0;
-    if (l.level <= from_level) return Error.BadLevel;
-    // A dedicated line is your own jumpship on the run.
-    if (l.level >= 3 and !lift_mod.ownsCrewedJumpshipAt(gs, l.a, l.b)) return Error.NoJumpship;
-    const cost = hq_link.linkCost(l.level) - hq_link.linkCost(from_level);
-    try treasury.debit(gs, .outfit, .{
-        .day = gs.clock.day_index,
-        .amount = -cost,
-        .category = .transport_charter,
-        .note = "supply link established",
-    });
-    if (existing) |e| {
-        e.level = l.level;
-    } else {
-        try gs.hq_links.append(gs.allocator(), .{ .a = l.a, .b = l.b, .level = l.level, .established_day = gs.clock.day_index });
-    }
-    try gs.log(.delivery, .{ .hq = l.b }, "[network] supply link level {d} between hq:{d} and hq:{d}", .{ l.level, @intFromEnum(l.a), @intFromEnum(l.b) });
-    return .{};
 }
 
 fn execCompleteContract(gs: *GameState, cid: @FieldType(Command, "complete_contract")) Error!Result {
@@ -737,20 +722,6 @@ fn execRefitClear(gs: *GameState, unit_id: @FieldType(Command, "refit_clear")) E
     return .{};
 }
 
-fn execBuySupportHull(gs: *GameState, b: @FieldType(Command, "buy_support_hull")) Error!Result {
-    const f = gs.force(b.company) orelse return Error.UnknownForce;
-    if (f.echelon != .company) return Error.NotACompany;
-    const home = gs.homeHqFor(b.company);
-    const key = b.kind.hullKey();
-    var idx: ?usize = null;
-    for (gs.market_listings.items, 0..) |l, i| if (l.kind == .unit and l.staple and l.hq == home and std.mem.eql(u8, l.item_key, key)) {
-        idx = i;
-    };
-    const listing = idx orelse return Error.NoSuchListing;
-    const lance: types.ForceId = if (toe.supportLance(gs, b.company, b.kind)) |sl| sl.id else .none;
-    return execute(gs, .{ .buy_hull_for = .{ .listing = listing, .company = b.company, .lance = lance } });
-}
-
 fn execSetOutfitEmblem(gs: *GameState, image: @FieldType(Command, "set_outfit_emblem")) Error!Result {
     const copy = try gs.allocator().dupe(u8, image);
     var fit = gs.forces.iterator();
@@ -775,47 +746,6 @@ fn execSetOfficeStaff(gs: *GameState, o: @FieldType(Command, "set_office_staff")
     }
     if (last == .none) return Error.UnknownPerson;
     return execute(gs, .{ .fire = last });
-}
-
-fn execShipComponentsHome(gs: *GameState, co: @FieldType(Command, "ship_components_home")) Error!Result {
-    const f = gs.forces.getPtr(co) orelse return Error.UnknownForce;
-    if (f.echelon != .company) return Error.NotACompany;
-    const home = gs.homeHqFor(co);
-    var keys: std.ArrayListUnmanaged([]const u8) = .empty;
-    defer keys.deinit(gs.allocator());
-    var qtys: std.ArrayListUnmanaged(u32) = .empty;
-    defer qtys.deinit(gs.allocator());
-    var it = f.stock.iterator();
-    while (it.next()) |e| if (part_mod.isComponent(e.key_ptr.*) and e.value_ptr.* > 0) {
-        try keys.append(gs.allocator(), e.key_ptr.*);
-        try qtys.append(gs.allocator(), e.value_ptr.*);
-    };
-    if (keys.items.len == 0) return Error.NothingToShip;
-    var sent: u32 = 0;
-    for (keys.items, qtys.items) |key, qty| {
-        // A line the route, the room or the funds refuse stays with the
-        // company; `shipStock` refuses before anything moves, so only an
-        // allocation failure can follow a paid freight bill.
-        _ = shipStock(gs, key, qty, .{ .company = co }, .{ .hq = home }) catch |err| switch (err) {
-            error.OutOfMemory => return error.OutOfMemory,
-            else => continue,
-        };
-        sent += qty;
-    }
-    return .{ .count = sent, .hq = home };
-}
-
-fn execReplaceMount(gs: *GameState, r: @FieldType(Command, "replace_mount")) Error!Result {
-    const u = gs.unit(r.unit) orelse return Error.UnknownUnit;
-    for (u.slots.items) |s| {
-        if (!std.mem.eql(u8, s.slot_key, r.slot_key)) continue;
-        if (s.condition == .ok) return Error.MountIsFine;
-        const home = gs.homeHqFor(u.force);
-        var res = try orderPart(gs, s.part_key, 1, .{ .hq = home });
-        res.hq = home;
-        return res;
-    }
-    return Error.NoSuchSlot;
 }
 
 fn execCoverShortfall(gs: *GameState, c: @FieldType(Command, "cover_shortfall")) Error!Result {
@@ -889,14 +819,6 @@ fn execRecallIdle(gs: *GameState, company: @FieldType(Command, "recall_idle")) E
     if (posture.isCompanyHome(gs, company)) return Error.AlreadyHome;
     if (posture.isCompanyDeployed(gs, company)) return Error.UnderContract;
     return execute(gs, .{ .recall_company = company });
-}
-
-fn execAutostaff(gs: *GameState, hq_id: @FieldType(Command, "autostaff")) Error!Result {
-    _ = hq_ops.staffHqToRequirement(gs, hq_id) catch |err| switch (err) {
-        error.UnknownHq => return Error.UnknownHq,
-        error.OutOfMemory => return Error.OutOfMemory,
-    };
-    return .{};
 }
 
 fn execTransferPerson(gs: *GameState, t: @FieldType(Command, "transfer_person")) Error!Result {
@@ -975,106 +897,6 @@ fn execPromote(gs: *GameState, pr: @FieldType(Command, "promote")) Error!Result 
     return .{};
 }
 
-fn execBuyListing(gs: *GameState, index: @FieldType(Command, "buy_listing")) Error!Result {
-    if (index >= gs.market_listings.items.len) return Error.NoSuchListing;
-    if (gs.hqs.count() == 0) return Error.NoHq;
-    const listing = gs.market_listings.items[index];
-    const price = types.applyBp(listing.price, gs.diff().purchase_bp); // difficulty
-    // The contract world's board: the company buys where it
-    // stands, from its local funds, and the hull joins it there.
-    if (listing.company != .none) {
-        const co = listing.company;
-        const c = gs.deploymentContract(co) orelse return Error.NoSuchListing;
-        if (c.status != .active) return Error.NoSuchListing;
-        if (gs.treasuryBalance(.{ .company = co }) < price) return Error.CompanyFundsShort;
-        try treasury.debit(gs, .{ .company = co }, .{
-            .day = gs.clock.day_index,
-            .amount = -price,
-            .category = .unit_purchase,
-            .company = co,
-            .contract = c.id,
-            .note = listing.item_key,
-        });
-        _ = gs.market_listings.orderedRemove(index);
-        const uid = try gs.addUnit(listing.item_key);
-        const bought_co = gs.unit(uid).?;
-        if (listing.condition) |cond| market_mod.applyHullCondition(bought_co, cond, gs.rng.random(.market));
-        try toe.placeUnitInCompany(gs, uid, co);
-        try gs.log(.market, .{ .company = co, .contract = c.id }, "[market] {s} bought {s} ({s}) on {s} for {d} from local funds — seat a pilot and a tech", .{
-            if (gs.force(co)) |f| f.name else "company", listing.item_key, if (listing.condition) |cd| cd.label() else "new", c.planet_key, price,
-        });
-        return .{ .unit = uid };
-    }
-    // The board's own HQ pays and receives.
-    const hq_id: types.HqId = if (listing.hq != .none) listing.hq else gs.hqs.keys()[0];
-    // Transports need a berth at the board's HQ.
-    var berth_kind: ?unit_mod.UnitKind = null;
-    if (listing.kind == .unit) if (chassis_mod.find(listing.item_key)) |design| if (design.kind.isTransport()) {
-        const h = gs.hqs.getPtr(hq_id) orelse return Error.UnknownHq;
-        const cap = h.capacity();
-        const berths: u32 = if (design.kind == .dropship) cap.dropship_berths else cap.jumpship_berths;
-        if (lift_mod.transportsBerthedAt(gs, hq_id, design.kind) >= berths) return Error.NoBerth;
-        berth_kind = design.kind;
-    };
-    if (gs.treasuryBalance(.{ .hq = hq_id }) < price) return Error.HqTreasuryShort;
-    try treasury.debit(gs, .{ .hq = hq_id }, .{
-        .day = gs.clock.day_index,
-        .amount = -price,
-        .category = if (listing.kind == .unit) .unit_purchase else .parts,
-        .hq = hq_id,
-        .note = if (listing.black_market) "black market" else listing.item_key,
-    });
-    // Off the books: the fence may vanish with the money, and
-    // the house notices either way; the pirates approve.
-    if (listing.black_market) {
-        const bm = tuning.market;
-        const world_faction: []const u8 = if (gs.hqs.getPtr(hq_id)) |h| (if (planet_mod.find(h.planet_key)) |w| w.faction else "PER") else "PER";
-        const roll = gs.rng.roll2d6(.market);
-        _ = gs.market_listings.orderedRemove(index);
-        if (roll <= bm.black_market_fraud_target) {
-            const now = if (!std.mem.eql(u8, world_faction, "PER")) try gs.adjustStanding(world_faction, -bm.black_market_standing_loss) else 0;
-            try gs.log(.market, .{ .hq = hq_id }, "[black market] the fence vanished with {d} c-bills — no {s} (2d6 = {d}); {s} standing −{d} → {d}", .{ price, listing.item_key, roll, world_faction, bm.black_market_standing_loss, now });
-            return .{};
-        }
-        const house_now = if (!std.mem.eql(u8, world_faction, "PER")) try gs.adjustStanding(world_faction, -1) else 0;
-        const pirate_now = try gs.adjustStanding("PER", 1);
-        try gs.log(.market, .{ .hq = hq_id }, "[black market] {s} changed hands for {d} c-bills, no questions asked — {s} standing −1 → {d}, pirates +1 → {d}", .{ listing.item_key, price, world_faction, house_now, pirate_now });
-        switch (listing.kind) {
-            .unit => {
-                const uid = try gs.addUnit(listing.item_key);
-                const bought_bm = gs.unit(uid).?;
-                if (listing.condition) |cond| market_mod.applyHullCondition(bought_bm, cond, gs.rng.random(.market));
-                return .{ .unit = uid };
-            },
-            .part => try gs.addStock(.{ .hq = hq_id }, listing.item_key, listing.quantity),
-        }
-        return .{};
-    }
-    switch (listing.kind) {
-        .unit => {
-            // Staple hull lines (support trucks) sell one at a time.
-            const l = &gs.market_listings.items[index];
-            if (listing.staple and l.quantity > 1) l.quantity -= 1 else _ = gs.market_listings.orderedRemove(index);
-            const uid = try gs.addUnit(listing.item_key);
-            const bought_hq = gs.unit(uid).?;
-            if (listing.condition) |cond| market_mod.applyHullCondition(bought_hq, cond, gs.rng.random(.market));
-            if (berth_kind != null) bought_hq.berth_hq = hq_id;
-            try gs.log(.market, .{ .hq = hq_id }, "[market] bought {s} ({s}) for {d}{s}", .{
-                listing.item_key, if (listing.condition) |c| c.label() else "new", price,
-                if (berth_kind != null) " — berthed here" else "",
-            });
-            return .{ .unit = uid };
-        },
-        .part => {
-            // Staple lines sell by the unit and stay listed until empty.
-            try gs.addStock(.{ .hq = hq_id }, listing.item_key, 1);
-            const l = &gs.market_listings.items[index];
-            if (l.quantity > 1) l.quantity -= 1 else _ = gs.market_listings.orderedRemove(index);
-        },
-    }
-    return .{};
-}
-
 fn execMothball(gs: *GameState, unit_id: @FieldType(Command, "mothball")) Error!Result {
     const u = gs.unit(unit_id) orelse return Error.UnknownUnit;
     if (u.status == .mothballed) return Error.AlreadyMothballed;
@@ -1150,93 +972,6 @@ fn execRaiseAirCompany(gs: *GameState, company: @FieldType(Command, "raise_air_c
     return .{ .created_force = wing };
 }
 
-fn execSetSupplyPolicy(gs: *GameState, sp: @FieldType(Command, "set_supply_policy")) Error!Result {
-    const f = gs.force(sp.company) orelse return Error.UnknownForce;
-    if (f.echelon != .company) return Error.NotACompany;
-    var i: usize = 0;
-    while (i < gs.supply_policies.items.len) : (i += 1) {
-        if (gs.supply_policies.items[i].company == sp.company) {
-            if (sp.min_days == 0) {
-                _ = gs.supply_policies.orderedRemove(i);
-            } else {
-                gs.supply_policies.items[i].min_days = sp.min_days;
-                gs.supply_policies.items[i].tons = sp.tons;
-                gs.supply_policies.items[i].ammo_battles = sp.ammo_battles;
-            }
-            return .{};
-        }
-    }
-    if (sp.min_days == 0) return .{};
-    try gs.supply_policies.append(gs.allocator(), .{ .company = sp.company, .min_days = sp.min_days, .tons = sp.tons, .ammo_battles = sp.ammo_battles });
-    return .{};
-}
-
-fn execSetStockPolicy(gs: *GameState, sp: @FieldType(Command, "set_stock_policy")) Error!Result {
-    if (gs.hqs.getPtr(sp.hq) == null) return Error.UnknownHq;
-    const def = part_mod.find(sp.part_key) orelse return Error.UnknownPart;
-    const target = @max(sp.target, sp.min);
-    var i: usize = 0;
-    while (i < gs.stock_policies.items.len) : (i += 1) {
-        const line = &gs.stock_policies.items[i];
-        if (line.hq == sp.hq and std.mem.eql(u8, line.part_key, def.key)) {
-            if (sp.target == 0) {
-                _ = gs.stock_policies.orderedRemove(i);
-            } else {
-                line.min = sp.min;
-                line.target = target;
-            }
-            return .{};
-        }
-    }
-    if (sp.target == 0) return .{};
-    try gs.stock_policies.append(gs.allocator(), .{ .hq = sp.hq, .part_key = def.key, .min = sp.min, .target = target });
-    return .{};
-}
-
-fn execSellStock(gs: *GameState, sale: @FieldType(Command, "sell_stock")) Error!Result {
-    const h = gs.hqs.getPtr(sale.hq) orelse return Error.UnknownHq;
-    const def = part_mod.find(sale.part_key) orelse return Error.UnknownPart;
-    if (sale.quantity == 0) return .{};
-    const have = gs.stockCount(.{ .hq = sale.hq }, def.key);
-    if (have < sale.quantity) return Error.InsufficientStock;
-    for (gs.stock_policies.items) |sp| {
-        if (sp.hq == sale.hq and std.mem.eql(u8, sp.part_key, def.key) and have - sale.quantity < sp.min) return Error.KeepStocked;
-    }
-    const value = market_mod.stockSaleValue(def.key, sale.quantity);
-    _ = gs.takeStock(.{ .hq = sale.hq }, def.key, sale.quantity);
-    try gs.postTreasury(.{ .hq = sale.hq }, .{ .day = gs.clock.day_index, .amount = value, .category = .unit_sale, .hq = sale.hq, .note = def.key });
-    try gs.log(.market, .{ .hq = sale.hq }, "[sale] {d} {s} sold from {s} for {d}", .{ sale.quantity, def.key, h.name, value });
-    return .{};
-}
-
-fn execBuyHullFor(gs: *GameState, b: @FieldType(Command, "buy_hull_for")) Error!Result {
-    const dest = gs.force(b.company) orelse return Error.UnknownForce;
-    if (dest.echelon != .company) return Error.NotACompany;
-    if (b.listing >= gs.market_listings.items.len) return Error.NoSuchListing;
-    const listing = gs.market_listings.items[b.listing];
-    if (listing.kind != .unit or listing.company != .none) return Error.NoSuchListing;
-    const board_hq: types.HqId = if (listing.hq != .none) listing.hq else gs.hqs.keys()[0];
-    // A defrauded purchase creates no hull and returns none: there is
-    // nothing to place.
-    const uid = (try execute(gs, .{ .buy_listing = b.listing })).unit;
-    if (uid == .none) return .{};
-    const home = gs.homeHqFor(b.company);
-    const from = if (gs.hqs.getPtr(board_hq)) |h| planet_mod.find(h.planet_key) else null;
-    const to = if (gs.hqs.getPtr(home)) |h| planet_mod.find(h.planet_key) else null;
-    const days: u32 = if (from != null and to != null) logistics.deliveryDays(from.?, to.?) else 0;
-    if (days == 0) {
-        const lance_ok = if (gs.force(b.lance)) |l| (gs.companyOf(b.lance) == b.company and (l.echelon != .lance or l.units.items.len < force_mod.lance_size)) else false;
-        if (lance_ok) try toe.moveUnitToForce(gs, uid, b.lance) else try toe.placeUnitInCompany(gs, uid, b.company);
-        try gs.log(.market, .{ .company = b.company }, "[raise] {s} #{d} joins {s}", .{ listing.item_key, @intFromEnum(uid), dest.name });
-    } else {
-        const u = gs.unit(uid).?;
-        u.status = .in_transit;
-        try gs.unit_transfers.append(gs.allocator(), .{ .unit = uid, .to_company = b.company, .eta_day = gs.clock.day_index + days });
-        try gs.log(.market, .{ .company = b.company }, "[raise] {s} #{d} bought at {s} — {d} days to {s}", .{ listing.item_key, @intFromEnum(uid), gs.hqs.getPtr(board_hq).?.name, days, dest.name });
-    }
-    return .{ .unit = uid, .eta_days = days };
-}
-
 fn execCrewCompany(gs: *GameState, company: @FieldType(Command, "crew_company")) Error!Result {
     const f = gs.force(company) orelse return Error.UnknownForce;
     if (f.echelon != .company) return Error.NotACompany;
@@ -1254,7 +989,7 @@ fn execCrewCompany(gs: *GameState, company: @FieldType(Command, "crew_company"))
                 const id = try personnel.hireFromSpec(gs, spec);
                 gs.person(id).?.assigned_force = company;
                 hired += 1;
-            } else if (try hireRoleFromHall(gs, n.role, company)) {
+            } else if (try contract_market.hireRoleFromHall(gs, n.role, company)) {
                 hired += 1;
             } else {
                 still_open += n.need - have;
@@ -1265,46 +1000,6 @@ fn execCrewCompany(gs: *GameState, company: @FieldType(Command, "crew_company"))
     _ = try crew.autoAssign(gs, company);
     try gs.log(.decision, .{ .company = company }, "[raise] {s}: {d} hired to fill the manning table ({d} still open — the halls had nobody)", .{ f.name, hired, still_open });
     return .{ .hired_count = hired, .still_open = still_open };
-}
-
-fn execTrimStock(gs: *GameState, company: @FieldType(Command, "trim_stock")) Error!Result {
-    const f = gs.force(company) orelse return Error.UnknownForce;
-    if (f.echelon != .company) return Error.NotACompany;
-    var arena = std.heap.ArenaAllocator.init(gs.allocator());
-    defer arena.deinit();
-    var min_days: u32 = 14;
-    var battles: u8 = 0;
-    for (gs.supply_policies.items) |sp| if (sp.company == company) {
-        min_days = sp.min_days;
-        battles = sp.ammo_battles;
-    };
-    const transit = treasury.courierEtaDays(gs, .{ .company = company });
-    const p = try field_supply.plan(arena.allocator(), gs, company, transit, min_days, battles);
-    const site: types.Site = .{ .company = company };
-    var moved: u32 = 0;
-    // Snapshot the keys first: sending home edits the stock map.
-    var keys: std.ArrayListUnmanaged([]const u8) = .empty;
-    if (gs.stockMap(site)) |m| {
-        var it = m.iterator();
-        while (it.next()) |e| try keys.append(arena.allocator(), e.key_ptr.*);
-    }
-    for (keys.items) |key| {
-        const have = gs.stockCount(site, key);
-        if (have == 0) continue;
-        var target: ?u32 = null;
-        for (p.lines) |l| if (std.mem.eql(u8, l.key, key)) {
-            target = l.target;
-        };
-        const def = part_mod.find(key);
-        const consumable = part_mod.isComponent(key) or (def != null and (def.?.mount == .ammo or def.?.mount == .none));
-        const excess: u32 = if (target) |t| have -| t else if (consumable) have else 0;
-        if (excess == 0) continue;
-        _ = gs.takeStock(site, key, excess);
-        try sites.sendHome(gs, company, key, excess);
-        moved += excess * part_mod.tons(key);
-        try gs.log(.delivery, .{ .company = company }, "[supply] {s} returns {d} {s} to the home HQ ({s})", .{ f.name, excess, key, if (target != null) "over the plan's target" else "no line in the plan" });
-    }
-    return .{ .tons_moved = moved };
 }
 
 fn execSetSharesPct(gs: *GameState, pct: @FieldType(Command, "set_shares_pct")) Error!Result {
@@ -1362,22 +1057,6 @@ fn execClearStandingOrder(gs: *GameState, name: @FieldType(Command, "clear_stand
     return .{};
 }
 
-fn execDepot(gs: *GameState, unit_id: @FieldType(Command, "depot")) Error!Result {
-    const u = gs.unit(unit_id) orelse return Error.UnknownUnit;
-    if (!u.needsDepot()) return Error.NothingToRepair;
-    if (posture.isCompanyDeployed(gs, gs.companyOf(u.force))) return Error.UnitDeployed;
-    if (!posture.isCompanyHome(gs, gs.companyOf(u.force))) return Error.UnitAway;
-    const queued = hq_ops.queueDepotRepair(gs, unit_id) catch |err| return switch (err) {
-        error.NoHq => Error.NoHq,
-        error.NoBay => Error.NoBay,
-        error.UnknownUnit => Error.UnknownUnit,
-        error.WrittenOff => Error.WrittenOff,
-        else => Error.NoBay,
-    };
-    if (!queued) return Error.MissingComponents;
-    return .{ .hq = hq_ops.depotHqFor(gs, u) };
-}
-
 fn execAdmit(gs: *GameState, pid: @FieldType(Command, "admit")) Error!Result {
     const p = gs.person(pid) orelse return Error.UnknownPerson;
     if (p.status != .wounded) return Error.NotWounded;
@@ -1425,58 +1104,6 @@ fn execStripUnit(gs: *GameState, unit_id: @FieldType(Command, "strip_unit")) Err
     const key = u.chassis_key;
     gs.removeUnit(unit_id);
     try gs.log(.market, .{ .hq = hq_id }, "[strip] {s} #{d} stripped for parts into the warehouse: {s}", .{ key, @intFromEnum(unit_id), if (lines.len == 0) "nothing worth keeping" else text.items });
-    return .{};
-}
-
-fn execSellHq(gs: *GameState, hq_id: @FieldType(Command, "sell_hq")) Error!Result {
-    const h = gs.hqs.getPtr(hq_id) orelse return Error.UnknownHq;
-    if (gs.hqs.count() <= 1) return Error.LastHq;
-    if (toe.companiesAtHq(gs, hq_id) > 0) return Error.HqInUse;
-    const value = market_mod.hqSaleValue(h) + h.funds;
-    const name = h.name;
-    var pit = gs.people.iterator();
-    while (pit.next()) |e| if (e.value_ptr.posted_hq == hq_id) {
-        e.value_ptr.posted_hq = .none;
-    };
-    var i: usize = 0;
-    while (i < gs.bay_jobs.items.len) {
-        if (gs.bay_jobs.items[i].hq == hq_id) _ = gs.bay_jobs.orderedRemove(i) else i += 1;
-    }
-    i = 0;
-    while (i < gs.hq_links.items.len) {
-        const l = gs.hq_links.items[i];
-        if (l.a == hq_id or l.b == hq_id) _ = gs.hq_links.orderedRemove(i) else i += 1;
-    }
-    i = 0;
-    while (i < gs.candidates.items.len) {
-        if (gs.candidates.items[i].hq == hq_id) _ = gs.candidates.orderedRemove(i) else i += 1;
-    }
-    i = 0;
-    while (i < gs.market_listings.items.len) {
-        if (gs.market_listings.items[i].hq == hq_id) _ = gs.market_listings.orderedRemove(i) else i += 1;
-    }
-    // Its standing orders, reorder points and the goods on the road
-    // to it go with it; transports berthed there move to the seat.
-    i = 0;
-    while (i < gs.policies.items.len) {
-        if (std.meta.eql(gs.policies.items[i].entity, .{ .hq = hq_id })) _ = gs.policies.orderedRemove(i) else i += 1;
-    }
-    i = 0;
-    while (i < gs.stock_policies.items.len) {
-        if (gs.stock_policies.items[i].hq == hq_id) _ = gs.stock_policies.orderedRemove(i) else i += 1;
-    }
-    for (gs.part_orders.items) |*o| if (o.inFlight() and std.meta.eql(o.dest, .{ .hq = hq_id })) {
-        o.status = .cancelled;
-    };
-    _ = gs.hqs.orderedRemove(hq_id);
-    const seat: types.HqId = if (gs.hqs.count() > 0) gs.hqs.keys()[0] else .none;
-    var uit2 = gs.units.iterator();
-    while (uit2.next()) |e| if (e.value_ptr.berth_hq == hq_id) {
-        e.value_ptr.berth_hq = seat;
-    };
-    hq_ops.refreshHqStaffing(gs);
-    try gs.postTransaction(.{ .day = gs.clock.day_index, .amount = value, .category = .unit_sale, .note = "HQ sold" });
-    try gs.log(.market, .{}, "[sale] {s} sold off for {d}", .{ name, value });
     return .{};
 }
 
@@ -1532,64 +1159,6 @@ fn execDisbandCompany(gs: *GameState, co: @FieldType(Command, "disband_company")
     return .{};
 }
 
-fn execReactivate(gs: *GameState, unit_id: @FieldType(Command, "reactivate")) Error!Result {
-    const u = gs.unit(unit_id) orelse return Error.UnknownUnit;
-    if (u.status != .mothballed) return Error.NotMothballed;
-    if (hq_ops.hasJobForUnit(gs, unit_id)) return Error.ProjectInProgress;
-    try hq_ops.queueReactivation(gs, unit_id); // a bay job
-    return .{};
-}
-
-fn execFabricate(gs: *GameState, f0: @FieldType(Command, "fabricate")) Error!Result {
-    var f = f0;
-    if (f.hq == .none and gs.hqs.count() > 0) f.hq = gs.hqs.keys()[0]; // the outfit's seat
-    if (gs.hqs.getPtr(f.hq) == null) return Error.UnknownHq;
-    const def = part_mod.find(f.part_key) orelse return Error.UnknownPart;
-    if (!part_mod.isComponent(def.key)) return Error.NotAComponent;
-    if (hq_ops.baySlots(gs, f.hq) == 0) return Error.NoBay;
-    if (!hq_ops.canFabricate(gs, f.hq, def.key)) return Error.BayTooSmall; // heavy/assault assemblies
-    const total = types.applyBp(types.applyBp(def.cost * f.quantity, market_mod.structural_fab_cost_mult_bp), gs.diff().fab_cost_bp); // difficulty
-    try gs.bay_jobs.ensureUnusedCapacity(gs.allocator(), f.quantity);
-    try gs.reserveLedger(1);
-    try treasury.debit(gs, .{ .hq = f.hq }, .{
-        .day = gs.clock.day_index,
-        .amount = -total,
-        .category = .fabrication,
-        .hq = f.hq,
-        .note = def.name,
-    });
-    try hq_ops.queueFabrication(gs, f.hq, def.key, f.quantity);
-    return .{};
-}
-
-fn execUpgradeFacility(gs: *GameState, u: @FieldType(Command, "upgrade_facility")) Error!Result {
-    const hq = gs.hqs.getPtr(u.hq) orelse return Error.UnknownHq;
-    // Refuse before a C-bill moves (hq_ops.upgradeBlock is the one rule).
-    if (hq_ops.upgradeBlock(gs, u.hq, u.kind)) |why| return switch (why) {
-        .in_progress => Error.ProjectInProgress,
-        .maxed => Error.MaxLevel,
-        .funds_short => Error.InsufficientTreasury,
-    };
-    const to_level = hq.facilityLevel(u.kind) + 1;
-    const cost = hq_mod.upgradeCost(u.kind, to_level);
-    try hq.projects.ensureUnusedCapacity(gs.allocator(), 1);
-    try gs.reserveLedger(1);
-    try treasury.debit(gs, .{ .hq = u.hq }, .{
-        .day = gs.clock.day_index,
-        .amount = -cost,
-        .category = .hq_construction,
-        .hq = u.hq,
-        .note = @tagName(u.kind),
-    });
-    hq_ops.startUpgrade(gs, u.hq, u.kind) catch |err| switch (err) {
-        error.ProjectInProgress => return Error.ProjectInProgress,
-        error.MaxLevel => return Error.MaxLevel,
-        error.UnknownHq => return Error.UnknownHq,
-        error.OutOfMemory => return Error.OutOfMemory,
-    };
-    return .{};
-}
-
 fn execPostPerson(gs: *GameState, pp: @FieldType(Command, "post_person")) Error!Result {
     @import("personnel.zig").postToHq(gs, pp.person, pp.hq) catch |err| switch (err) {
         error.UnknownPerson => return Error.UnknownPerson,
@@ -1620,22 +1189,6 @@ fn execAutoAssign(gs: *GameState, company: @FieldType(Command, "auto_assign")) E
     if (f.echelon != .company) return Error.NotACompany;
     _ = try crew.autoAssign(gs, company);
     return .{};
-}
-
-fn execHireCandidate(gs: *GameState, index: @FieldType(Command, "hire_candidate")) Error!Result {
-    if (index >= gs.candidates.items.len) return Error.NoSuchCandidate;
-    const cand = gs.candidates.items[index];
-    if (cand.asking_bonus > 0) {
-        try treasury.debit(gs, .outfit, .{
-            .day = gs.clock.day_index,
-            .amount = -cand.asking_bonus,
-            .category = .payroll,
-            .note = "signing bonus",
-        });
-    }
-    const id = try @import("personnel.zig").hireFromSpec(gs, cand.spec);
-    _ = gs.candidates.orderedRemove(index);
-    return .{ .hired = id };
 }
 
 fn execTriage(gs: *GameState, t: @FieldType(Command, "triage")) Error!Result {
@@ -1731,16 +1284,6 @@ fn execResolveDecision(gs: *GameState, r: @FieldType(Command, "resolve_decision"
     return .{};
 }
 
-/// Hire the first hall candidate with `role` (any HQ's hall) into `company`.
-fn hireRoleFromHall(gs: *GameState, role: person_mod.Role, company: types.ForceId) Error!bool {
-    for (gs.candidates.items, 0..) |c, i| if (c.spec.role == role) {
-        const r = try execute(gs, .{ .hire_candidate = i });
-        if (gs.person(r.hired)) |p| p.assigned_force = company;
-        return true;
-    };
-    return false;
-}
-
 /// The skeleton a raised company starts from: the HQ's lance cap in empty
 /// line lances (the last one a recon lance when there are four or more),
 /// and an empty Omega Company of salvage, MASH, logistics and security
@@ -1793,22 +1336,6 @@ fn newCompanyAt(gs: *GameState, name: []const u8, hq_id: types.HqId) Error!Resul
     // company changes every quote on the board.
     try contract_market.refresh(gs);
     return .{ .created_force = id };
-}
-
-/// A world is reachable for founding if a ring or beachhead band covers
-/// it, or the outfit has worked a contract there.
-fn reachable(gs: *GameState, world: *const planet_mod.Planet) bool {
-    var hit = gs.hqs.iterator();
-    while (hit.next()) |entry| {
-        const hq = entry.value_ptr;
-        const hq_world = planet_mod.find(hq.planet_key) orelse continue;
-        if (market_mod.visibilityFor(planet_mod.distanceLy(hq_world, world), hq.influenceLy()) != .hidden) return true;
-    }
-    var cit = gs.contracts.iterator();
-    while (cit.next()) |entry| {
-        if (std.mem.eql(u8, entry.value_ptr.planet_key, world.key)) return true;
-    }
-    return false;
 }
 
 /// Days between two companies' current locations (0 = co-located).
@@ -1934,125 +1461,6 @@ fn validateTreasury(gs: *GameState, t: state_mod.Treasury) Error!void {
     }
 }
 
-fn validateSite(gs: *GameState, site: types.Site) Error!void {
-    switch (site) {
-        .outfit => {},
-        .hq => |id| if (gs.hqs.getPtr(id) == null) return Error.UnknownSite,
-        .company => |id| {
-            const f = gs.force(id) orelse return Error.UnknownSite;
-            if (f.echelon != .company) return Error.NotACompany;
-        },
-    }
-}
-
-/// Refuse anything the destination can't hold once inbound goods land.
-fn checkRoom(gs: *GameState, site: types.Site, part_key: []const u8, quantity: u32) Error!void {
-    const cap = sites.siteCapacityTons(gs, site) orelse return;
-    const used = sites.siteTons(gs, site) + field_supply.inboundTonsTo(gs, site);
-    if (used + quantity * part_mod.tons(part_key) > cap) return Error.StorageFull;
-}
-
-/// A freight quote: what a shipment costs, how long it takes, and the
-/// linked route whose weekly capacity it needs.
-const Freight = struct {
-    cost: types.CBills,
-    days: u32,
-    route: []const network.RouteHop = &.{},
-    tons: u32 = 0,
-};
-
-/// Quote freight between two sites: HQ→HQ legs ride the
-/// supply-link route (multi-hop, throughput-capped; charter if unlinked);
-/// the last leg to a deployed company is a direct charter from its home
-/// HQ. Transport admins negotiate better rates. Pure: refuses with
-/// `ThroughputExceeded` when the route is full, but books nothing; the
-/// caller runs `commitFreight` once the payment has cleared. The route
-/// lives in `alloc`.
-fn freightQuote(gs: *GameState, alloc: std.mem.Allocator, from: types.Site, to: types.Site, tons_moved: u32) Error!Freight {
-    const a = planet_mod.find(sites.sitePlanetKey(gs, from) orelse "") orelse return .{ .cost = 0, .days = logistics.same_world_days };
-    const b = planet_mod.find(sites.sitePlanetKey(gs, to) orelse "") orelse return .{ .cost = 0, .days = logistics.same_world_days };
-    var route: []const network.RouteHop = &.{};
-    var days: u32 = logistics.same_world_days;
-    var cost: types.CBills = 0;
-
-    const from_hq: types.HqId = switch (from) {
-        .hq => |id| id,
-        .company => |id| gs.homeHqFor(id),
-        .outfit => if (gs.hqs.count() > 0) gs.hqs.keys()[0] else .none,
-    };
-    const to_hq: types.HqId = switch (to) {
-        .hq => |id| id,
-        .company => |id| gs.homeHqFor(id),
-        .outfit => if (gs.hqs.count() > 0) gs.hqs.keys()[0] else .none,
-    };
-    if (from_hq != .none and to_hq != .none and from_hq != to_hq) {
-        route = try network.routeBetween(gs, from_hq, to_hq, alloc);
-        if (!network.fitsThroughput(gs, route, tons_moved)) return Error.ThroughputExceeded;
-        days = network.routeDays(route);
-        var jumps_total: u32 = 0;
-        for (route) |h| jumps_total += h.hop.jumps;
-        cost = types.applyBp(@as(types.CBills, tons_moved) * tuning.logistics.freight_per_ton_jump * @as(types.CBills, @max(1, jumps_total)), network.routeCostMultBp(route));
-    }
-    // Final leg: home HQ → the company's contract planet (or same world).
-    const last_from = if (to_hq != .none) planet_mod.find(gs.hqs.getPtr(to_hq).?.planet_key) orelse a else a;
-    if (last_from != b) {
-        const jumps = planet_mod.jumpsBetween(last_from, b);
-        days += logistics.transitDays(jumps);
-        cost += @as(types.CBills, tons_moved) * tuning.logistics.freight_per_ton_jump * @as(types.CBills, @max(1, jumps));
-    } else if (from_hq == to_hq) {
-        days = tuning.logistics.freight_min_days;
-    }
-    cost = types.applyBp(cost, commander_mod.costMultBp(gs.commander, .freight));
-    if (gs.hqs.count() > 0) {
-        const transport = hq_ops.hqStaff(gs, gs.hqs.keys()[0], .admin_transport);
-        cost = types.applyBp(cost, 10_000 - tuning.logistics.transport_admin_discount_bp * @as(types.Bp, @min(tuning.logistics.transport_admin_max, transport.count)));
-    }
-    return .{ .cost = cost, .days = @max(tuning.logistics.freight_min_days, days), .route = route, .tons = tons_moved };
-}
-
-/// Book a quoted shipment's tonnage on its route. Cannot fail: the quote
-/// checked the capacity against the same state.
-fn commitFreight(gs: *GameState, f: Freight) void {
-    network.commitThroughput(gs, f.route, f.tons);
-}
-
-fn shipStock(gs: *GameState, part_key: []const u8, quantity: u32, from: types.Site, to: types.Site) Error!Result {
-    if (part_mod.find(part_key) == null) return Error.UnknownPart;
-    try validateSite(gs, from);
-    try validateSite(gs, to);
-    if (gs.stockCount(from, part_key) < quantity) return Error.InsufficientStock;
-    try checkRoom(gs, to, part_key, quantity);
-
-    var arena = std.heap.ArenaAllocator.init(gs.scratch());
-    defer arena.deinit();
-    const freight = try freightQuote(gs, arena.allocator(), from, to, quantity * part_mod.tons(part_key));
-    const payer = state_mod.Treasury.ofSite(from);
-    const tags = payer.tags();
-    if (freight.cost > 0) {
-        try treasury.debit(gs, payer, .{
-            .day = gs.clock.day_index,
-            .amount = -freight.cost,
-            .category = .freight,
-            .company = tags.company,
-            .hq = tags.hq,
-            .note = part_key,
-        });
-    }
-    if (!gs.takeStock(from, part_key, quantity)) return Error.InsufficientStock;
-    commitFreight(gs, freight);
-    try gs.part_orders.append(gs.allocator(), .{
-        .part_key = part_mod.find(part_key).?.key,
-        .quantity = quantity,
-        .dest = to,
-        .ordered_day = gs.clock.day_index,
-        .eta_day = gs.clock.day_index + freight.days,
-        .cost = freight.cost,
-        .status = .in_transit,
-    });
-    try gs.log(.delivery, .{ .company = tags.company, .hq = tags.hq }, "[shipment] {s} x{d} dispatched, eta {d} days, freight {d}", .{ part_key, quantity, freight.days, freight.cost });
-    return .{};
-}
-
 /// `train_company`: the `train` checks, applied to everyone on a home
 /// company's books. Nobody is refused loudly — the result counts who
 /// started, who is short of XP, who is busy, and who has nothing to learn
@@ -2095,120 +1503,6 @@ fn trainCompany(gs: *GameState, company: types.ForceId, skill_opt: ?types.SkillT
         f.name, r.enrolled, if (skill_opt) |s| try std.fmt.allocPrint(gs.allocator(), " at {s}", .{@tagName(s)}) else " at their trades", days, r.short_xp, r.busy, r.nothing_to_learn,
     });
     return r;
-}
-
-/// `replace_gear`: one spare per destroyed or missing weapon/equipment/ammo
-/// slot, ordered to the hull's site so its own tech can fit it on the
-/// weekly repair pass (ARCH §9.7). Spares already on that shelf or already
-/// on order for it are counted first, so calling twice orders nothing new.
-/// Damaged gear needs hours, not parts; structure is `depot` work.
-fn replaceGear(gs: *GameState, unit_id: types.UnitId) Error!Result {
-    const u = gs.unit(unit_id) orelse return Error.UnknownUnit;
-    if (gs.hqs.count() == 0) return Error.NoHq;
-    const site = hq_ops.spareSiteFor(gs, u);
-    var wanted: u32 = 0;
-    var ordered: u32 = 0;
-    var unsourced: u32 = 0;
-    // The site's ledger (hq_ops.spareDemand) says what is short across every
-    // hull there; this hull's broken mounts of a part get up to that many.
-    var arena = std.heap.ArenaAllocator.init(gs.scratch());
-    defer arena.deinit();
-    const ledger = hq_ops.spareDemand(arena.allocator(), gs, site) catch return Error.OutOfMemory;
-    for (u.slots.items, 0..) |s, i| {
-        if (!hq_ops.slotNeedsSpare(s)) continue;
-        wanted += 1;
-        var nth: u32 = 0;
-        for (u.slots.items[0..i]) |t| if (hq_ops.slotNeedsSpare(t) and std.mem.eql(u8, t.part_key, s.part_key)) {
-            nth += 1;
-        };
-        var short: u32 = 0;
-        for (ledger) |l| if (std.mem.eql(u8, l.key, s.part_key)) {
-            short = l.short;
-        };
-        if (nth >= short) continue;
-        const r = try orderPart(gs, s.part_key, 1, site);
-        if (r.sourced) ordered += 1 else unsourced += 1;
-    }
-    if (wanted == 0) return Error.NothingToReplace;
-    return .{ .ordered = ordered, .unsourced = unsourced };
-}
-
-fn orderPart(gs: *GameState, part_key: []const u8, quantity: u32, dest_opt: ?types.Site) Error!Result {
-    const def = part_mod.find(part_key) orelse return Error.UnknownPart;
-    if (gs.hqs.count() == 0) return Error.NoHq;
-    const dest: types.Site = dest_opt orelse gs.defaultSite();
-    try validateSite(gs, dest);
-    try checkRoom(gs, dest, part_key, quantity);
-
-    // The destination's home HQ sources and pays.
-    const hq_id: types.HqId = switch (dest) {
-        .hq => |id| id,
-        .company => |id| gs.homeHqFor(id),
-        .outfit => gs.hqs.keys()[0],
-    };
-    const hq = gs.hqs.getPtr(hq_id) orelse return Error.UnknownHq;
-    const world = planet_mod.find(hq.planet_key) orelse return Error.UnknownPlanet;
-
-    const cost_mult: types.Bp = types.applyBp(tuning.market.procurement_markup_bp, gs.diff().purchase_bp); // 10% procurement markup, scaled by difficulty
-    var lead_days: u32 = logistics.transitDays(1);
-    // Onward shipment to a deployed company: more days, freight on top.
-    var arena = std.heap.ArenaAllocator.init(gs.scratch());
-    defer arena.deinit();
-    const onward = try freightQuote(gs, arena.allocator(), .{ .hq = hq_id }, dest, quantity * def.pallet_tons);
-    if (dest == .company) lead_days += onward.days;
-
-    // Logistics-admin acquisition roll vs. rarity (MekHQ-style). The back
-    // office: the best posted logistics admin works the roll, and
-    // a bigger office shaves the lead time. Components can be bought this
-    // way when rarity allows — or fabricated (guaranteed) in the bay.
-    const logi = hq_ops.hqStaff(gs, hq_id, .admin_logistics);
-    const admin_bonus: i32 = if (logi.count == 0) -2 else 5 - @as(i32, logi.best_skill);
-    lead_days = @max(3, lead_days -| @min(4, logi.count / 2));
-    // Sourcing: the part's availability code, the world's shelves,
-    // the HQ's comms reach.
-    const src = part_mod.sourcing(def, @import("../domain/faction.zig").isPeriphery(world.faction), hq.effectiveFacilityLevel(.comms));
-    const roll = @as(i32, gs.rng.roll2d6(.acquisition)) + admin_bonus + world.industry / 2 + src.total();
-    const sourced = roll >= def.rarity.availabilityTarget();
-
-    if (!sourced) {
-        try gs.part_orders.append(gs.allocator(), .{
-            .part_key = def.key,
-            .quantity = quantity,
-            .dest = dest,
-            .ordered_day = gs.clock.day_index,
-            .cost = 0,
-            .status = .failed,
-        });
-        const why = try src.text(gs.allocator(), def);
-        try gs.log(.delivery, .{ .hq = hq_id }, "[order] logistics could not source {d} × {s} this time ({s}, roll {d} vs {d}{s}{s}) — retry after the monthly refresh{s}", .{
-            quantity, def.key, @tagName(def.rarity), roll, def.rarity.availabilityTarget(), if (why.len > 0) "; " else "", why, if (part_mod.isComponent(def.key)) ", or fabricate it in the bay" else "",
-        });
-        return .{ .sourced = false };
-    }
-
-    // Orders placed at the HQ are paid from the HQ's treasury,
-    // onward freight to the field included.
-    var total = types.applyBp(def.cost * quantity, cost_mult);
-    total = types.applyBp(total, commander_mod.costMultBp(gs.commander, .freight));
-    if (dest == .company) total += onward.cost;
-    try treasury.debit(gs, .{ .hq = hq_id }, .{
-        .day = gs.clock.day_index,
-        .amount = -total,
-        .category = .parts,
-        .hq = hq_id,
-        .note = def.name,
-    });
-    if (dest == .company) commitFreight(gs, onward);
-    try gs.part_orders.append(gs.allocator(), .{
-        .part_key = def.key,
-        .quantity = quantity,
-        .dest = dest,
-        .ordered_day = gs.clock.day_index,
-        .eta_day = gs.clock.day_index + lead_days,
-        .cost = total,
-        .status = .in_transit,
-    });
-    return .{};
 }
 
 /// The turn-hold as an error. The checklist decides what
