@@ -61,17 +61,17 @@ pub fn payBp(idx: u8) types.Bp {
     };
 }
 
-/// The score alone. Allocation-free, so the market and the dice can call
-/// it without an arena and nothing is swallowed on the way.
-pub fn score(gs: *GameState) i32 {
-    return report(gs).score;
+/// The total score. Propagates allocation errors from the transport
+/// section's lift plan.
+pub fn score(gs: *GameState) !i32 {
+    return (try report(gs)).score;
 }
 
-pub fn currentIndex(gs: *GameState) u8 {
-    return index(score(gs));
+pub fn currentIndex(gs: *GameState) !u8 {
+    return index(try score(gs));
 }
 
-pub fn report(gs: *GameState) Report {
+pub fn report(gs: *GameState) !Report {
     const t = tuning.rating;
     var r: Report = undefined;
     var total: i32 = 0;
@@ -156,7 +156,7 @@ pub fn report(gs: *GameState) Report {
             const f = e.value_ptr;
             if (f.echelon != .company) continue;
             companies += 1;
-            const plan = @import("lift.zig").planLift(gs, f.id, false) catch continue;
+            const plan = try @import("lift.zig").planLiftQuery(gs, f.id);
             covered_sum += plan.covered_bp;
             if (plan.own_jumpship) jumpship = true;
         }
@@ -217,9 +217,9 @@ test "the report's parts sum to the score; a fresh outfit is unproven and debt-f
     var gs = GameState.init(std.testing.allocator, .{ .seed = 7 });
     defer gs.deinit();
     _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
-    const r = report(&gs);
+    const r = try report(&gs);
     try std.testing.expectEqual(r.experience.score + r.command.score + r.record.score + r.transport.score + r.support.score + r.finances.score, r.score);
     try std.testing.expectEqual(@as(u32, 0), r.record.closed);
     try std.testing.expect(!r.finances.overdrawn);
-    try std.testing.expectEqual(score(&gs), r.score);
+    try std.testing.expectEqual(try score(&gs), r.score);
 }

@@ -111,7 +111,7 @@ pub fn refresh(gs: *GameState) !void {
 
     // The Dragoons rating sets how many come calling, who, and at what pay.
     const rt = tuning.rating;
-    const rating_idx = rating.currentIndex(gs);
+    const rating_idx = try rating.currentIndex(gs);
     // One board per HQ: each posts work inside its own ring and
     // beachhead band, for the companies based there; its comms set how many
     // come calling, and a field HQ hears half as much.
@@ -790,7 +790,7 @@ test "an F-rated outfit hears only from the periphery and never gets a planetary
     while (pit.next()) |e| if (e.value_ptr.role.isCombat()) {
         try e.value_ptr.skills.put(gs.allocator(), e.value_ptr.role.primarySkill(), 7); // … and green as grass: firmly F
     };
-    try std.testing.expectEqual(@as(u8, 0), rating.currentIndex(&gs));
+    try std.testing.expectEqual(@as(u8, 0), try rating.currentIndex(&gs));
     gs.contract_offers.clearRetainingCapacity();
     try refresh(&gs);
     for (gs.contract_offers.items) |o| {
@@ -966,7 +966,7 @@ pub fn negotiate(gs: *GameState, offer_index: usize, term: contract.NegotiableTe
     const office = if (seat != .none) hq_ops.hqStaff(gs, seat, .admin_command) else hq_ops.StaffSummary{};
     const office_edge: i32 = if (office.count == 0) -1 else 5 - @as(i32, office.best_skill);
     // The letter at the table: F −2 … A* +3.
-    const rep_edge: i32 = @as(i32, rating.currentIndex(gs)) - tuning.rating.negotiation_offset;
+    const rep_edge: i32 = @as(i32, try rating.currentIndex(gs)) - tuning.rating.negotiation_offset;
     const target: i32 = t.negotiation_target - @divTrunc(gs.standing(c.employer_key), t.negotiation_standing_per);
     const raw = gs.rng.roll2d6(.market);
     const total: i32 = @as(i32, raw) + office_edge + rep_edge;

@@ -211,10 +211,14 @@ pub fn fabricationDays(key: []const u8) u32 {
 /// Provisions: one ton feeds this many person-days (tuning.part).
 pub const provisions_person_days_per_ton = @import("tuning.zig").t.part.provisions_person_days_per_ton;
 
+comptime {
+    std.debug.assert(provisions_person_days_per_ton > 0);
+}
+
 /// Tons of provisions `heads` eat over `days`: rounded up, never under a
 /// ton (the one rounding every burn, plan and forecast uses).
 pub fn provisionsTons(heads: u32, days: u32) u32 {
-    return @max(1, std.math.divCeil(u32, heads * days, provisions_person_days_per_ton) catch 1);
+    return @max(1, std.math.divCeil(u32, heads * days, provisions_person_days_per_ton) catch unreachable);
 }
 
 /// Tons a company eats per day.

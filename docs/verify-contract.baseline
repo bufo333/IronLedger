@@ -3,8 +3,6 @@
 # error-meaning deliverable in TODO.md: its fix either propagates the
 # error or marks a genuine best-effort site with a `// best-effort:`
 # reason, and deletes the line here. A new broad catch fails the gate.
-src/domain/meklab.zig: const gyro: u32 = (std.math.divCeil(u32, rating, 100) catch 1) * 2;
-src/domain/part.zig: return @max(1, std.math.divCeil(u32, heads * days, provisions_person_days_per_ton) catch 1);
 src/main.zig: printLines(al, q.hqCompanies(al, gs, row.id) catch continue, "    ") catch |err| showError(err);
 src/main.zig: printLines(al, q.readinessLines(al, gs, r.company) catch continue, "  ") catch |err| showError(err);
 src/main.zig: const d = q.desk(al, gs, 0) catch return 0;
@@ -23,15 +21,7 @@ src/main.zig: .order_part => std.debug.print("{s}\n", .{(q.lastOrderLine(al, gs)
 src/main.zig: .strip_unit => std.debug.print("{s}\n", .{q.stripMarks(al, (q.lastLogLine(al, gs) catch null) orelse "stripped") catch "stripped"}),
 src/persist/store.zig: const name = st.text(1, fba.allocator()) catch continue;
 src/persist/store.zig: const name = st.text(1, fba.allocator()) catch continue;
-src/sim/checklist.zig: const mounts = @import("field_supply.zig").munitionMounts(arena.allocator(), gs, company, false) catch return false;
-src/sim/refit.zig: .duration_days = @max(1, std.math.divCeil(u32, hours, 8) catch 1),
-src/sim/refit.zig: u.chassis_key, @tagName(class), hours, @max(1, std.math.divCeil(u32, hours, 8) catch 1), try hq_ops.repairOddsText(gs.allocator(), gs, hq_id, unit_id),
-src/sim/field_supply.zig: const floor_battles: u32 = 1 + (std.math.divCeil(u32, transit_days, days_per_battle) catch 0);
-src/sim/field_supply.zig: return std.math.divCeil(u32, mounts, mounts_per_ammo_ton) catch 0;
-src/sim/queries.zig: const plan = @import("lift.zig").planLift(gs, company, false) catch return "";
-src/sim/rating.zig: const plan = @import("lift.zig").planLift(gs, f.id, false) catch continue;
 src/sim/crew.zig: assignSlot(gs, u.id, .pilot, p.id) catch continue;
-src/econ/market.zig: const lines = stripParts(fba.allocator(), u) catch return 0;
 src/sim/tick.zig: const moved = (commands.execute(gs, .{ .trim_stock = sp.company }) catch Result{}).tons_moved;
 src/tui/app.zig: const hqs = q.hqList(self.a(), g) catch return 0;
 src/tui/music.zig: var sd = std.Io.Dir.cwd().openDir(self.io, sub_path, .{ .iterate = true }) catch continue;

@@ -247,12 +247,12 @@ pub fn commitRefit(gs: *GameState, unit_id: types.UnitId) Error!Result {
         .hq = hq_id,
         .kind = .refit,
         .unit = unit_id,
-        .duration_days = @max(1, std.math.divCeil(u32, hours, 8) catch 1),
+        .duration_days = @max(1, std.math.divCeil(u32, hours, 8) catch unreachable),
         .queued_day = gs.clock.day_index,
         .cost = @as(types.CBills, hours) * tuning.hq_ops.refit_labor_per_hour, // labor
     });
     try gs.log(.construction, .{ .hq = hq_id }, "[lab] {s} refit committed: class {s}, {d} tech-hours, {d} bay day(s) · {s}", .{
-        u.chassis_key, @tagName(class), hours, @max(1, std.math.divCeil(u32, hours, 8) catch 1), try hq_ops.repairOddsText(gs.allocator(), gs, hq_id, unit_id),
+        u.chassis_key, @tagName(class), hours, @max(1, std.math.divCeil(u32, hours, 8) catch unreachable), try hq_ops.repairOddsText(gs.allocator(), gs, hq_id, unit_id),
     });
     return .{};
 }

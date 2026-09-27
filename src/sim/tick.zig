@@ -456,7 +456,7 @@ fn runFinances(gs: *GameState) !void {
     _ = @import("personnel.zig").refreshShares(gs);
     // New Year's Day: the rating goes in the book.
     if (gs.clock.date.month == 1) {
-        try gs.rating_history.append(gs.allocator(), .{ .year = gs.clock.date.year, .score = @import("rating.zig").score(gs) });
+        try gs.rating_history.append(gs.allocator(), .{ .year = gs.clock.date.year, .score = try @import("rating.zig").score(gs) });
         // Tech news: the designs entering service this year.
         var news: std.ArrayListUnmanaged(u8) = .empty;
         for (@import("../domain/chassis.zig").catalog) |*c| if (c.intro_year == gs.clock.date.year) {
@@ -642,7 +642,7 @@ pub fn advance(gs: *GameState, days: u32) Error!Result {
         // Couriers already bound for the outfit count: the turn can end
         // while the money is on the road.
         if (gs.funds + treasury.inboundToOutfit(gs) < 0) {
-            if (treasury.isInsolvent(gs)) {
+            if (try treasury.isInsolvent(gs.scratch(), gs)) {
                 gs.bankrupt = true;
                 try gs.log(.finance, .{}, "[bankrupt] the outfit cannot cover {d}: creditors seize what is left", .{gs.funds});
                 return Error.Bankrupt;

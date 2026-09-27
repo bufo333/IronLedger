@@ -80,9 +80,9 @@ pub const component_resale_bp: types.Bp = tuning.market.component_resale_bp;
 
 /// What a hull fetches on a forced sale: half its value, scaled by
 /// condition.
-pub fn unitSaleValue(u: *const unit_mod.Unit) types.CBills {
+pub fn unitSaleValue(alloc: std.mem.Allocator, u: *const unit_mod.Unit) !types.CBills {
     // A wreck is worth what can be stripped off it.
-    if (u.status == .destroyed) return stripValue(u);
+    if (u.status == .destroyed) return try stripValue(alloc, u);
     const base: types.CBills = if (u.purchase_price > 0) u.purchase_price else if (chassis_mod.find(u.chassis_key)) |c| c.cost else 0;
     const by_condition = @divTrunc(base * @as(types.CBills, u.conditionPct()) * tuning.unit.sale_bp, 10_000 * 100);
     // Quality on the ticket: ± per step from C (A worst, F best).
@@ -122,10 +122,9 @@ pub fn stripParts(alloc: std.mem.Allocator, u: *const unit_mod.Unit) ![]StripLin
 }
 
 /// Resale value of everything `stripParts` would recover.
-pub fn stripValue(u: *const unit_mod.Unit) types.CBills {
-    var buf: [4096]u8 = undefined;
-    var fba = std.heap.FixedBufferAllocator.init(&buf);
-    const lines = stripParts(fba.allocator(), u) catch return 0;
+pub fn stripValue(alloc: std.mem.Allocator, u: *const unit_mod.Unit) !types.CBills {
+    const lines = try stripParts(alloc, u);
+    defer alloc.free(lines);
     var total: types.CBills = 0;
     for (lines) |l| total += stockSaleValue(l.key, l.qty);
     return total;
@@ -391,11 +390,11 @@ test "quality moves the resale ticket" {
     };
     defer u.deinit(std.testing.allocator);
     u.quality = .c;
-    const c = unitSaleValue(&u);
+    const c = try unitSaleValue(std.testing.allocator, &u);
     u.quality = .f;
-    try std.testing.expect(unitSaleValue(&u) > c);
+    try std.testing.expect(try unitSaleValue(std.testing.allocator, &u) > c);
     u.quality = .a;
-    try std.testing.expect(unitSaleValue(&u) < c);
+    try std.testing.expect(try unitSaleValue(std.testing.allocator, &u) < c);
 }
 
 test "applyHullCondition stamps armor, quality, slot damage, and status" {

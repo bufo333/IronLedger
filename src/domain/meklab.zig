@@ -93,7 +93,7 @@ pub fn fixedHalfTons(design: *const chassis_mod.Chassis) u32 {
     const rating = design.engineRating();
     const structure: u32 = @as(u32, design.tonnage) * 2 / 10; // 10% of tonnage
     const engine = engineHalfTons(rating);
-    const gyro: u32 = (std.math.divCeil(u32, rating, 100) catch 1) * 2;
+    const gyro: u32 = (std.math.divCeil(u32, rating, 100) catch unreachable) * 2;
     const cockpit: u32 = 6;
     const jets: u32 = @as(u32, design.jump_mp) * jumpJetHalfTons(design.tonnage);
     const extra_sinks: u32 = @as(u32, design.heat_sinks -| 10) * 2;

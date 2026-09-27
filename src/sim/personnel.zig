@@ -84,7 +84,7 @@ pub fn recruitBonus(gs: *GameState, hq_id: types.HqId) i32 {
     var bonus: i32 = hq.effectiveFacilityLevel(.hiring_hall);
     if (hq_ops.hqStaff(gs, hq.id, .admin_hr).count >= tuning.person.recruit_hr_admins) bonus += 1;
     // A famous outfit draws a better class of walk-in.
-    if (@import("rating.zig").currentIndex(gs) >= tuning.rating.recruit_bonus_index) bonus += 1;
+    if ((@import("rating.zig").currentIndex(gs) catch 0) >= tuning.rating.recruit_bonus_index) bonus += 1; // best-effort: OOM skips recruit quality bonus
     return @min(bonus, 4);
 }
 

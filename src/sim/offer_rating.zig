@@ -22,9 +22,9 @@ const founding = @import("founding.zig");
 
 /// How well one HQ reads an opposition: its comms level, one more for a
 /// B-or-better outfit rating (employers share).
-pub fn intelLevel(gs: *GameState, hq_id: types.HqId) u8 {
+pub fn intelLevel(gs: *GameState, hq_id: types.HqId) !u8 {
     const comms: u8 = if (gs.hqs.getPtr(hq_id)) |hq| hq.effectiveFacilityLevel(.comms) else 0;
-    return comms + @intFromBool(rating.currentIndex(gs) >= 3);
+    return comms + @intFromBool(try rating.currentIndex(gs) >= 3);
 }
 
 /// The enemy's lance count as the intel reads it: exact from
@@ -39,8 +39,8 @@ pub fn intelHq(gs: *GameState, c: *const contract_mod.Contract) types.HqId {
     return gs.homeHqFor(c.assigned_company);
 }
 
-pub fn lanceIntel(gs: *GameState, c: *const contract_mod.Contract) LanceIntel {
-    const intel = intelLevel(gs, intelHq(gs, c));
+pub fn lanceIntel(gs: *GameState, c: *const contract_mod.Contract) !LanceIntel {
+    const intel = try intelLevel(gs, intelHq(gs, c));
     const row = opfor.rowFor(c.kind);
     if (intel >= 3) return .{ .lo = c.enemy_lances, .hi = c.enemy_lances, .mid = c.enemy_lances, .exact = true };
     if (intel >= 1) {
@@ -83,10 +83,10 @@ pub const OfferRating = struct {
 pub fn rateOffer(alloc: std.mem.Allocator, gs: *GameState, c: *const contract_mod.Contract, company: types.ForceId) !?OfferRating {
     if (!c.hasOpfor()) return null;
     const own = try battle.estimatePower(gs, alloc, c, company);
-    const intel = intelLevel(gs, intelHq(gs, c));
+    const intel = try intelLevel(gs, intelHq(gs, c));
     // Garrison work meets a probe, not the whole force.
     const probe: ?u8 = if (c.kind.isGarrisonClass()) @min(tuning.battle.garrison_probe_lances, c.enemy_lances) else null;
-    const li = lanceIntel(gs, c);
+    const li = try lanceIntel(gs, c);
     const exact = li.exact or probe != null;
     const lo: i64 = probe orelse li.lo;
     const hi: i64 = probe orelse li.hi;
@@ -173,9 +173,9 @@ test "an offer's intel is the comms of the board that offered it" {
         .enemy_lance_tons = 220,
         .offer_hq = seat,
     };
-    try std.testing.expect(lanceIntel(&gs, &c).exact);
+    try std.testing.expect((try lanceIntel(&gs, &c)).exact);
     c.offer_hq = second;
-    try std.testing.expect(!lanceIntel(&gs, &c).exact);
+    try std.testing.expect(!(try lanceIntel(&gs, &c)).exact);
 }
 
 test "blind intel widens the lance range; comms 3 pins it" {
@@ -194,7 +194,7 @@ test "blind intel widens the lance range; comms 3 pins it" {
         .enemy_lance_bv = 4_000,
         .enemy_lance_tons = 220,
     };
-    const blind = lanceIntel(&gs, &c);
+    const blind = try lanceIntel(&gs, &c);
     try std.testing.expect(blind.lo <= 3 and blind.hi >= 3);
     const hq = gs.hqs.getPtr(gs.hqs.keys()[0]).?;
     hq.staff_assigned = 999;
@@ -202,7 +202,7 @@ test "blind intel widens the lance range; comms 3 pins it" {
         if (f.kind == .comms) break f;
     } else return error.TestUnexpectedResult;
     comms.level = 3;
-    const seen = lanceIntel(&gs, &c);
+    const seen = try lanceIntel(&gs, &c);
     try std.testing.expect(seen.exact);
     try std.testing.expectEqual(@as(u8, 3), seen.lo);
 }

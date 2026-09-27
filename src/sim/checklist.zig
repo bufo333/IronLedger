@@ -96,10 +96,10 @@ pub const WarningKind = enum {
 /// Does any working weapon in the company draw on this munition family?
 /// (`field_supply.munitionMounts` is the census; callers with several
 /// families to ask about take the map once.)
-fn companyFires(gs: *GameState, company: types.ForceId, family: []const u8) bool {
+fn companyFires(gs: *GameState, company: types.ForceId, family: []const u8) !bool {
     var arena = std.heap.ArenaAllocator.init(gs.scratch());
     defer arena.deinit();
-    const mounts = @import("field_supply.zig").munitionMounts(arena.allocator(), gs, company, false) catch return false;
+    const mounts = try @import("field_supply.zig").munitionMounts(arena.allocator(), gs, company, false);
     return mounts.contains(family);
 }
 
@@ -228,9 +228,9 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
 
     // Money first: nothing else matters if the outfit cannot pay.
     if (gs.funds + treasury.inboundToOutfit(gs) < 0) {
-        const folds = treasury.isInsolvent(gs);
+        const folds = try treasury.isInsolvent(alloc, gs);
         try out.append(alloc, .{ .kind = .insolvent, .text = try std.fmt.allocPrint(alloc, "outfit treasury overdrawn ({d}{s}) — take a loan (credit {d}), transfer funds back from an HQ or company, or sell assets (worth {d}){s}", .{
-            gs.funds, if (treasury.inboundToOutfit(gs) > 0) try std.fmt.allocPrint(alloc, ", {d} on the road", .{treasury.inboundToOutfit(gs)}) else "", treasury.creditRemaining(gs), treasury.liquidationValue(gs), if (folds) "; nothing left covers it: the outfit folds" else "",
+            gs.funds, if (treasury.inboundToOutfit(gs) > 0) try std.fmt.allocPrint(alloc, ", {d} on the road", .{treasury.inboundToOutfit(gs)}) else "", try treasury.creditRemaining(alloc, gs), try treasury.liquidationValue(alloc, gs), if (folds) "; nothing left covers it: the outfit folds" else "",
         }) });
     }
 
@@ -614,7 +614,7 @@ test "dry-ammo warning names only the families the company fires" {
     var fired: ?[]const u8 = null;
     var unused: ?[]const u8 = null;
     for (part_mod.munition_keys) |key| {
-        if (companyFires(&gs, co, key)) {
+        if (try companyFires(&gs, co, key)) {
             if (fired == null) fired = key;
         } else if (unused == null) unused = key;
     }

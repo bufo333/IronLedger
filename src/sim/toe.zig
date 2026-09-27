@@ -582,7 +582,7 @@ pub fn execDisbandCompany(gs: *GameState, co: @FieldType(Command, "disband_compa
     var uit = gs.units.iterator();
     while (uit.next()) |e| if (gs.companyOf(e.value_ptr.force) == co) try uids.append(gs.allocator(), e.value_ptr.id);
     for (uids.items) |uid| {
-        total += market_mod.unitSaleValue(gs.unit(uid).?);
+        total += try market_mod.unitSaleValue(gs.allocator(), gs.unit(uid).?);
         gs.removeUnit(uid);
     }
     var pit = gs.people.iterator();

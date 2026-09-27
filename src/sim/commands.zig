@@ -709,11 +709,11 @@ test "ships need berths, lift the company for less charter, and come home with i
         const c = gs.contract_offers.items[offer];
         break :blk @divTrunc(@as(types.CBills, c.dist_ly) * 2_000 * (100 - @as(i64, c.terms.transport_pct)), 100);
     };
-    try std.testing.expectEqual(@as(types.Bp, 0), (try lift_mod.planLift(&gs, co, false)).covered_bp);
+    try std.testing.expectEqual(@as(types.Bp, 0), (try lift_mod.planLiftQuery(&gs, co)).covered_bp);
     // Crew it: a dropship crew in the pilot seat.
     const dropship_pilot = try gs.hirePerson("Ina", "Voss", .dropship_crew);
     try crew.assignSlot(&gs, ship, .pilot, dropship_pilot);
-    const plan = try lift_mod.planLift(&gs, co, false);
+    const plan = try lift_mod.planLiftQuery(&gs, co);
     try std.testing.expectEqual(@as(u32, 1), plan.ships);
     try std.testing.expect(plan.carried >= 4 and plan.carried <= plan.needed);
     try std.testing.expect(plan.covered_bp > 0 and plan.covered_bp < 10_000);
@@ -728,7 +728,7 @@ test "ships need berths, lift the company for less charter, and come home with i
     try std.testing.expect(charter_paid > 0 and charter_paid < types.applyBp(charter_full, commander_mod.costMultBp(gs.commander, .freight)));
     try std.testing.expectEqual(co, gs.unit(ship).?.force);
     try std.testing.expect(!lift_mod.transportAvailable(&gs, gs.unit(ship).?));
-    try std.testing.expectEqual(@as(u32, 0), (try lift_mod.planLift(&gs, co, false)).ships -| 1); // still one ship, the one carrying it
+    try std.testing.expectEqual(@as(u32, 0), (try lift_mod.planLiftQuery(&gs, co)).ships -| 1); // still one ship, the one carrying it
 
     // Home again: the ship returns to its berth.
     const cid = gs.contracts.keys()[0];
@@ -752,7 +752,7 @@ test "ships need berths, lift the company for less charter, and come home with i
     try std.testing.expectEqual(@as(u8, 3), network.findLink(&gs, hq, far).?.level);
     try std.testing.expectEqual(@as(types.CBills, 0), network.findLink(&gs, hq, far).?.monthlyCost());
     // With a jumpship of its own the company's next lift waives the collar fee too.
-    try std.testing.expect((try lift_mod.planLift(&gs, co, false)).own_jumpship);
+    try std.testing.expect((try lift_mod.planLiftQuery(&gs, co)).own_jumpship);
 }
 
 test "a command leaves derived state consistent: firing, disbanding and selling an HQ clean up after themselves" {

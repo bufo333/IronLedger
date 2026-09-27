@@ -35,6 +35,11 @@ pub const days_per_battle: u32 = tuning.field_supply.days_per_battle;
 /// A provisions shipment tops up this many days past the floor.
 pub const provisions_cadence_days: u32 = tuning.field_supply.provisions_cadence_days;
 
+comptime {
+    std.debug.assert(mounts_per_ammo_ton > 0);
+    std.debug.assert(days_per_battle > 0);
+}
+
 pub const Line = struct {
     key: []const u8,
     /// Ship when on hand + inbound drops under this.
@@ -105,7 +110,7 @@ pub fn plan(alloc: std.mem.Allocator, gs: *GameState, company: types.ForceId, tr
     // fought while a shipment travels, plus one; target = floor + 2 (or the
     // override). The families share the ammo budget pro rata.
     {
-        const floor_battles: u32 = 1 + (std.math.divCeil(u32, transit_days, days_per_battle) catch 0);
+        const floor_battles: u32 = 1 + (std.math.divCeil(u32, transit_days, days_per_battle) catch unreachable);
         const target_battles: u32 = if (ammo_battles > 0) @max(@as(u32, ammo_battles), floor_battles) else floor_battles + 2;
         const budget = cap * ammo_share_pct / 100;
         var sum: u32 = 0;
@@ -159,7 +164,7 @@ pub fn loadOutCompany(gs: *GameState, company_id: types.ForceId) !void {
 /// Tons of one munition family an engagement burns: a ton feeds
 /// `mounts_per_ammo_ton` mounts.
 pub fn tonsPerBattle(mounts: u32) u32 {
-    return std.math.divCeil(u32, mounts, mounts_per_ammo_ton) catch 0;
+    return std.math.divCeil(u32, mounts, mounts_per_ammo_ton) catch unreachable;
 }
 
 /// Engagements of one munition family the company's stores can feed.

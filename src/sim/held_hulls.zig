@@ -129,7 +129,7 @@ pub fn execToggleMothball(gs: *GameState, unit_id: @FieldType(Command, "toggle_m
 pub fn execSellUnit(gs: *GameState, unit_id: @FieldType(Command, "sell_unit")) Error!Result {
     const u = gs.unit(unit_id) orelse return Error.UnknownUnit;
     if (posture.isCompanyDeployed(gs, gs.companyOf(u.force))) return Error.UnitDeployed;
-    const value = market_mod.unitSaleValue(u);
+    const value = try market_mod.unitSaleValue(gs.allocator(), u);
     const key = u.chassis_key;
     gs.removeUnit(unit_id);
     try gs.postTransaction(.{ .day = gs.clock.day_index, .amount = value, .category = .unit_sale, .note = key });

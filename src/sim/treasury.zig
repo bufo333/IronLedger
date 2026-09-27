@@ -139,16 +139,16 @@ pub fn companyMonthlyPayroll(gs: *GameState, company_id: types.ForceId) types.CB
 /// Nothing left covers the hole: funds, everything sellable and every
 /// credit line together are below zero. The checklist warns on it and the
 /// payday folds the outfit on it; one expression.
-pub fn isInsolvent(gs: *GameState) bool {
-    return gs.funds + liquidationValue(gs) + creditRemaining(gs) < 0;
+pub fn isInsolvent(alloc: std.mem.Allocator, gs: *GameState) !bool {
+    return gs.funds + try liquidationValue(alloc, gs) + try creditRemaining(alloc, gs) < 0;
 }
 
 /// Everything the outfit could raise by selling hulls, stock and all HQs
 /// but the first.
-pub fn liquidationValue(gs: *GameState) types.CBills {
+pub fn liquidationValue(alloc: std.mem.Allocator, gs: *GameState) !types.CBills {
     var total: types.CBills = 0;
     var uit = gs.units.iterator();
-    while (uit.next()) |e| total += market.unitSaleValue(e.value_ptr);
+    while (uit.next()) |e| total += try market.unitSaleValue(alloc, e.value_ptr);
     var sit = gs.spare_parts.iterator();
     while (sit.next()) |e| total += market.stockSaleValue(e.key_ptr.*, e.value_ptr.*);
     var hqs_it = gs.hqs.iterator();
@@ -169,15 +169,15 @@ pub fn liquidationValue(gs: *GameState) types.CBills {
 }
 
 /// Lenders extend half the liquidation value plus a floor.
-pub fn creditLimit(gs: *GameState) types.CBills {
-    return types.applyBp(liquidationValue(gs), tuning.finance.credit_liquidation_bp) + tuning.finance.credit_floor;
+pub fn creditLimit(alloc: std.mem.Allocator, gs: *GameState) !types.CBills {
+    return types.applyBp(try liquidationValue(alloc, gs), tuning.finance.credit_liquidation_bp) + tuning.finance.credit_floor;
 }
 
 /// The credit line left after every open loan.
-pub fn creditRemaining(gs: *GameState) types.CBills {
+pub fn creditRemaining(alloc: std.mem.Allocator, gs: *GameState) !types.CBills {
     var owed: types.CBills = 0;
     for (gs.loans.items) |l| owed += l.balance;
-    return @max(0, creditLimit(gs) - owed);
+    return @max(0, try creditLimit(alloc, gs) - owed);
 }
 
 // ---- C4b handlers (moved from commands.zig) ----
@@ -241,7 +241,7 @@ pub fn execSetPolicy(gs: *GameState, p: @FieldType(Command, "set_policy")) Error
 
 pub fn execTakeLoan(gs: *GameState, l: @FieldType(Command, "take_loan")) Error!Result {
     if (l.principal <= 0 or l.term_months == 0) return Error.NoSuchLoan;
-    if (l.principal > creditRemaining(gs)) return Error.CreditExceeded;
+    if (l.principal > try creditRemaining(gs.scratch(), gs)) return Error.CreditExceeded;
     const rate_bp: types.Bp = tuning.finance.loan_rate_bp; // 12%/yr simple interest
     const total_interest = @divTrunc(l.principal * rate_bp * l.term_months, 10_000 * 12);
     try gs.loans.append(gs.allocator(), .{
@@ -279,14 +279,14 @@ test "the credit line is backed by what the outfit could sell, less what it owes
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1214 });
     defer gs.deinit();
     _ = try gs.addUnit("SHD-2H");
-    const worth = liquidationValue(&gs);
+    const worth = try liquidationValue(std.testing.allocator, &gs);
     try std.testing.expect(worth > 0);
-    try std.testing.expectEqual(types.applyBp(worth, tuning.finance.credit_liquidation_bp) + tuning.finance.credit_floor, creditLimit(&gs));
-    try std.testing.expectEqual(creditLimit(&gs), creditRemaining(&gs));
-    gs.funds = -(worth + creditRemaining(&gs)) - 1;
-    try std.testing.expect(isInsolvent(&gs));
+    try std.testing.expectEqual(types.applyBp(worth, tuning.finance.credit_liquidation_bp) + tuning.finance.credit_floor, try creditLimit(std.testing.allocator, &gs));
+    try std.testing.expectEqual(try creditLimit(std.testing.allocator, &gs), try creditRemaining(std.testing.allocator, &gs));
+    gs.funds = -(worth + try creditRemaining(std.testing.allocator, &gs)) - 1;
+    try std.testing.expect(try isInsolvent(std.testing.allocator, &gs));
     gs.funds = 0;
-    try std.testing.expect(!isInsolvent(&gs));
+    try std.testing.expect(!(try isInsolvent(std.testing.allocator, &gs)));
 }
 
 test "a transfer debits now and credits on arrival; a short treasury refuses and nothing moves" {

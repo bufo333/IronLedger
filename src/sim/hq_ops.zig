@@ -1527,7 +1527,7 @@ test "how a hull died decides the rebuild — engine kills cost an engine, scrap
     try std.testing.expectError(commands.Error.WrittenOff, commands.execute(&gs, .{ .depot = junk }));
     try std.testing.expect(rebuildEstimate(&gs, gs.unit(junk).?) == null);
     try std.testing.expect(beyondEconomicalRepair(&gs, gs.unit(junk).?));
-    try std.testing.expect(market_mod.unitSaleValue(gs.unit(junk).?) > 0); // the guns are still worth something
+    try std.testing.expect(try market_mod.unitSaleValue(std.testing.allocator, gs.unit(junk).?) > 0); // the guns are still worth something
 
     // Stripping crates the guns and the armour left on it, and the hull is gone.
     const ac5_before = gs.stockCount(.{ .hq = home }, "ac5");

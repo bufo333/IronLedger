@@ -758,8 +758,8 @@ pub const skullText = offer_rating.skullText;
 
 pub fn opforText(alloc: Alloc, gs: *GameState, c: *const contract_mod.Contract) ![]const u8 {
     if (!c.hasOpfor()) return "opposition sized to the company";
-    const intel = intelLevel(gs, @import("offer_rating.zig").intelHq(gs, c));
-    const li = lanceIntel(gs, c);
+    const intel = try intelLevel(gs, @import("offer_rating.zig").intelHq(gs, c));
+    const li = try lanceIntel(gs, c);
     if (intel >= 3) return try std.fmt.allocPrint(alloc, "{d} lance{s} of {s} {s} ≈{s} BV a fight", .{ c.enemy_lances, if (c.enemy_lances == 1) "" else "s", @tagName(c.enemy_quality), c.enemy_key, try money(alloc, types.applyBp(c.opforBv(), gs.diff().enemy_bp)) });
     if (intel >= 1) return try std.fmt.allocPrint(alloc, "{d}–{d} lances of {s} {s}", .{ li.lo, li.hi, @tagName(c.enemy_quality), c.enemy_key });
     return try std.fmt.allocPrint(alloc, "{d}–{d} lances of {s}, quality unknown (comms)", .{ li.lo, li.hi, c.enemy_key });
@@ -842,8 +842,8 @@ fn boardRatingCells(alloc: Alloc, gs: *GameState, offer_index: usize) ![6][]cons
 /// says it in full).
 pub fn opforShort(alloc: Alloc, gs: *GameState, c: *const contract_mod.Contract) ![]const u8 {
     if (!c.hasOpfor()) return "sized to the company";
-    const intel = intelLevel(gs, @import("offer_rating.zig").intelHq(gs, c));
-    const li = lanceIntel(gs, c);
+    const intel = try intelLevel(gs, @import("offer_rating.zig").intelHq(gs, c));
+    const li = try lanceIntel(gs, c);
     if (intel >= 3) return try std.fmt.allocPrint(alloc, "{d} lance{s}, {s}, ≈{s} BV/fight", .{ c.enemy_lances, if (c.enemy_lances == 1) "" else "s", @tagName(c.enemy_quality), try moneyShort(alloc, types.applyBp(c.opforBv(), gs.diff().enemy_bp)) });
     if (intel >= 1) return try std.fmt.allocPrint(alloc, "{d}–{d} lances, {s}", .{ li.lo, li.hi, @tagName(c.enemy_quality) });
     return try std.fmt.allocPrint(alloc, "{d}–{d} lances, quality unknown", .{ li.lo, li.hi });
@@ -1126,13 +1126,13 @@ pub fn ledger(alloc: Alloc, gs: *GameState, selected: state_mod.Treasury, period
     }
     if (gs.policies.items.len + gs.supply_policies.items.len > 0) try extras.append(alloc, "  {d}x on a treasury row clears its policy · keep-stocked lines live on the Market screen{/}");
     try extras.append(alloc, "");
-    try extras.append(alloc, try std.fmt.allocPrint(alloc, "loans · credit {s} of {s}", .{ try money(alloc, treasury.creditRemaining(gs)), try money(alloc, treasury.creditLimit(gs)) }));
+    try extras.append(alloc, try std.fmt.allocPrint(alloc, "loans · credit {s} of {s}", .{ try money(alloc, try treasury.creditRemaining(alloc, gs)), try money(alloc, try treasury.creditLimit(alloc, gs)) }));
     if (gs.loans.items.len == 0) try extras.append(alloc, "  none · [L] take one (12%/yr simple interest)");
     for (gs.loans.items, 0..) |l, i| {
         try extras.append(alloc, try std.fmt.allocPrint(alloc, "  [{d}] owe {s} of {s} · {s}/mo · next d{d}", .{ i, try money(alloc, l.balance), try money(alloc, l.principal), try money(alloc, l.payment), l.next_pay_day }));
     }
     try extras.append(alloc, "");
-    try extras.append(alloc, try std.fmt.allocPrint(alloc, "liquidation value    {s}", .{try money(alloc, treasury.liquidationValue(gs))}));
+    try extras.append(alloc, try std.fmt.allocPrint(alloc, "liquidation value    {s}", .{try money(alloc, try treasury.liquidationValue(alloc, gs))}));
     try extras.append(alloc, "  {d}hulls at half value × condition · HQs at 40% of build cost{/}");
     try extras.append(alloc, "");
     try extras.append(alloc, "next 30 days (estimate)");
@@ -1301,7 +1301,7 @@ pub fn holdsPrisonerOf(gs: *GameState, faction: []const u8) bool {
 pub fn wreckNote(alloc: std.mem.Allocator, gs: *GameState, u: *const @import("../domain/unit.zig").Unit) ![]const u8 {
     const hq_ops = @import("hq_ops.zig");
     const cause = if (u.wreck == .none) "wreck" else u.wreck.label();
-    const est = hq_ops.rebuildEstimate(gs, u) orelse return try std.fmt.allocPrint(alloc, "{{c}}{s} — strip it (Forces $, s) or sell for {s}{{/}}", .{ cause, try money(alloc, market_mod.unitSaleValue(u)) });
+    const est = hq_ops.rebuildEstimate(gs, u) orelse return try std.fmt.allocPrint(alloc, "{{c}}{s} — strip it (Forces $, s) or sell for {s}{{/}}", .{ cause, try money(alloc, try market_mod.unitSaleValue(alloc, u)) });
     const new_cost: types.CBills = if (chassis_mod.find(u.chassis_key)) |c| c.cost else 0;
     return try std.fmt.allocPrint(alloc, "{{c}}{s} — rebuild ≈{s} vs new {s}{s}{{/}}", .{
         cause, try money(alloc, est), try money(alloc, new_cost),
@@ -2567,7 +2567,7 @@ pub fn berths(alloc: Alloc, gs: *GameState, hq_id: types.HqId) ![][]const u8 {
 
 /// What the outfit's own ships would lift for a company's next contract.
 pub fn liftText(alloc: Alloc, gs: *GameState, company: types.ForceId) ![]const u8 {
-    const plan = @import("lift.zig").planLift(gs, company, false) catch return "";
+    const plan = try @import("lift.zig").planLiftQuery(gs, company);
     if (plan.needed == 0) return "";
     if (plan.ships == 0 and !plan.own_jumpship) return "lift: charter for every hull (no dropship of your own at the home berth)";
     const bp = @import("../econ/logistics.zig").transitFreightBp(plan.covered_bp, plan.own_jumpship);
@@ -2797,7 +2797,7 @@ pub const ratingLetter = rating_mod.letter;
 
 /// The rating phrased: `rating.report` scores it, this names the parts.
 pub fn rating(alloc: Alloc, gs: *GameState) !Rating {
-    const r = rating_mod.report(gs);
+    const r = try rating_mod.report(gs);
     var parts: std.ArrayListUnmanaged(RatingPart) = .empty;
     try parts.append(alloc, .{ .name = "experience", .score = r.experience.score, .note = try std.fmt.allocPrint(alloc, "{d} combat crew, average skill {d}.{d}", .{ r.experience.crews, r.experience.avg_x10 / 10, r.experience.avg_x10 % 10 }) });
     try parts.append(alloc, .{ .name = "command", .score = r.command.score, .note = try std.fmt.allocPrint(alloc, "{d} of {d} desks staffed, {d} officer{s}", .{ r.command.desks_have, r.command.desks_need, r.command.officers, if (r.command.officers == 1) "" else "s" }) });
@@ -6079,7 +6079,7 @@ pub fn sellQuote(alloc: Alloc, gs: *GameState, uid: types.UnitId) !?SellQuote {
     const lines = try market_mod.stripParts(alloc, u);
     var buf: std.ArrayListUnmanaged(u8) = .empty;
     for (lines, 0..) |l, i| try buf.print(alloc, "{s}{d}× {s}", .{ if (i > 0) ", " else "", l.qty, l.key });
-    return .{ .chassis_key = u.chassis_key, .value = market_mod.unitSaleValue(u), .strip_text = if (lines.len > 0) buf.items else "nothing worth keeping" };
+    return .{ .chassis_key = u.chassis_key, .value = try market_mod.unitSaleValue(alloc, u), .strip_text = if (lines.len > 0) buf.items else "nothing worth keeping" };
 }
 
 /// What selling off an HQ brings: 40% of build cost plus its treasury.
@@ -6091,11 +6091,11 @@ pub fn hqSaleQuote(gs: *GameState, hq_id: types.HqId) ?HqSaleQuote {
 }
 
 /// What disbanding a company sells its hulls for.
-pub fn disbandQuote(gs: *GameState, company: types.ForceId) types.CBills {
+pub fn disbandQuote(alloc: Alloc, gs: *GameState, company: types.ForceId) !types.CBills {
     var value: types.CBills = 0;
     var uit = gs.units.iterator();
     while (uit.next()) |e| if (gs.companyOf(e.value_ptr.force) == company) {
-        value += market_mod.unitSaleValue(e.value_ptr);
+        value += try market_mod.unitSaleValue(alloc, e.value_ptr);
     };
     return value;
 }

@@ -8,6 +8,7 @@ const types = @import("../domain/types.zig");
 const GameState = @import("state.zig").GameState;
 const posture = @import("posture.zig");
 const toe = @import("toe.zig");
+const commands = @import("commands.zig");
 const chassis_mod = @import("../domain/chassis.zig");
 
 /// Transports of one kind holding a berth at an HQ.
@@ -61,6 +62,52 @@ pub const LiftPlan = struct {
     own_jumpship: bool = false,
     ships: u32 = 0,
 };
+
+/// Query-only lift plan: what the outfit's own ships can carry for
+/// a company, without committing any ship movements. Used by rating,
+/// queries, and test code. Explicit error set: only allocation can fail.
+pub fn planLiftQuery(gs: *GameState, company_id: types.ForceId) error{OutOfMemory}!LiftPlan {
+    var plan: LiftPlan = .{};
+    var need: [3]u32 = .{ 0, 0, 0 };
+    var uit = gs.units.iterator();
+    while (uit.next()) |e| {
+        const u = e.value_ptr;
+        if (gs.companyOf(u.force) != company_id or u.isParked() or u.status == .in_transit) continue;
+        const bay = u.kind.bayKind() orelse continue;
+        need[@intFromEnum(bay)] += 1;
+    }
+    plan.needed = need[0] + need[1] + need[2];
+    if (plan.needed == 0) return plan;
+    const at_home = posture.isCompanyHome(gs, company_id);
+    const home = gs.homeHqFor(company_id);
+    var have: [3]u32 = .{ 0, 0, 0 };
+    var ships: std.ArrayListUnmanaged(types.UnitId) = .empty;
+    defer ships.deinit(gs.allocator());
+    var sit = gs.units.iterator();
+    while (sit.next()) |e| {
+        const u = e.value_ptr;
+        if (!u.kind.isTransport() or u.status == .destroyed) continue;
+        const usable = if (at_home) (u.berth_hq == home and transportAvailable(gs, u)) else u.force == company_id;
+        if (!usable) continue;
+        const design = chassis_mod.find(u.chassis_key) orelse continue;
+        switch (u.kind) {
+            .dropship => {
+                const adds = @min(design.mek_bays, need[0] -| have[0]) + @min(design.asf_bays, need[1] -| have[1]) + @min(design.vehicle_bays, need[2] -| have[2]);
+                if (adds == 0) continue;
+                have[0] += design.mek_bays;
+                have[1] += design.asf_bays;
+                have[2] += design.vehicle_bays;
+                plan.ships += 1;
+                try ships.append(gs.allocator(), u.id);
+            },
+            .jumpship => plan.own_jumpship = true,
+            else => {},
+        }
+    }
+    plan.carried = @min(have[0], need[0]) + @min(have[1], need[1]) + @min(have[2], need[2]);
+    plan.covered_bp = @intCast(@as(u64, plan.carried) * 10_000 / plan.needed);
+    return plan;
+}
 
 /// How much of a company the outfit's own ships can lift.
 /// At home: the crewed, idle ships berthed at the home HQ. Away (a
@@ -118,4 +165,20 @@ pub fn commitLift(gs: *GameState, company_id: types.ForceId) !LiftPlan {
         error.OutOfMemory => return error.OutOfMemory,
         else => return .{},
     };
+}
+
+test "planLiftQuery returns the same plan as planLift(commit=false) with OOM-only errors" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 42 });
+    defer gs.deinit();
+    _ = try @import("founding.zig").createCommander(&gs, "Q", .LC, .paymaster);
+    const co = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
+    // Compile-time proof that the error set is exactly OutOfMemory.
+    comptime std.debug.assert(@typeInfo(@typeInfo(@TypeOf(planLiftQuery)).@"fn".return_type.?).error_union.error_set == error{OutOfMemory});
+    const q = try planLiftQuery(&gs, co);
+    const p = try planLift(&gs, co, false);
+    try std.testing.expectEqual(q.needed, p.needed);
+    try std.testing.expectEqual(q.carried, p.carried);
+    try std.testing.expectEqual(q.covered_bp, p.covered_bp);
+    try std.testing.expectEqual(q.own_jumpship, p.own_jumpship);
+    try std.testing.expectEqual(q.ships, p.ships);
 }
