@@ -190,7 +190,7 @@ pub fn handle(self: *App, k: app.Key) anyerror!bool {
             // Aim at an HQ with a free combat-company slot (the selected
             // one if it has room); with none free, at the selected HQ,
             // and `raise_company` says why it refuses.
-            const selected: app.types.HqId = @enumFromInt(self.hqSelId(g));
+            const selected: app.types.HqId = @enumFromInt(try self.hqSelId(g));
             const pick = q.hqWithCompanySlot(g, selected);
             self.raise.hq = if (pick == .none) selected else pick;
             self.input.len = 0;
@@ -214,7 +214,7 @@ pub fn handle(self: *App, k: app.Key) anyerror!bool {
             }
             const dmg = try q.companyDamage(al, g, co);
             if (dmg.short_key) |part| {
-                self.openAmount(try std.fmt.allocPrint(al, "FABRICATE {s} for {s}", .{ part, try q.forceName(self.a(), g, co) }), .{ .fabricate = .{ .hq = self.homeHqOf(co), .key = part } }, &.{
+                self.openAmount(try std.fmt.allocPrint(al, "FABRICATE {s} for {s}", .{ part, try q.forceName(self.a(), g, co) }), .{ .fabricate = .{ .hq = try self.homeHqOf(co), .key = part } }, &.{
                     .{ .label = "quantity", .value = 1, .min = 1, .max = 20, .step = 1 },
                 });
             } else self.say(.good, "{s} needs no structural components the home HQ lacks", .{try q.forceName(self.a(), g, co)});

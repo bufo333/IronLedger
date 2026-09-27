@@ -39,7 +39,7 @@ pub fn draw(self: *App) anyerror!void {
 pub fn move(self: *App, delta: i32) anyerror!void {
     const al = self.a();
     const g = self.state();
-    const id: types.HqId = @enumFromInt(self.hqSelId(g));
+    const id: types.HqId = @enumFromInt(try self.hqSelId(g));
     if (self.focus == 0) {
         const detail = try q.hqDetail(al, g, id);
         self.moveCursor(0, delta, detail.len);
@@ -81,7 +81,7 @@ pub fn handle(self: *App, k: app.Key) anyerror!bool {
         .upgrade => {
             // The facility rows sit right under the header in the
             // HQ pane: with the cursor on one, upgrade it directly.
-            const hid: types.HqId = @enumFromInt(self.hqSelId(g));
+            const hid: types.HqId = @enumFromInt(try self.hqSelId(g));
             const c = self.cur(0).*;
             const detail = try q.hqDetailView(al, g, hid);
             const under_cursor = if (self.focus == 0 and c < detail.facility.len) detail.facility[c] else null;
@@ -99,10 +99,10 @@ pub fn handle(self: *App, k: app.Key) anyerror!bool {
             self.openModal(.{ .upgrade = hid });
         },
         .autostaff => {
-            _ = try self.execSay(.{ .autostaff = @enumFromInt(self.hqSelId(g)) }, .good, "back office staffed to requirement", .{});
+            _ = try self.execSay(.{ .autostaff = @enumFromInt(try self.hqSelId(g)) }, .good, "back office staffed to requirement", .{});
         },
         .tier => {
-            const hid: types.HqId = @enumFromInt(self.hqSelId(g));
+            const hid: types.HqId = @enumFromInt(try self.hqSelId(g));
             const name = try al.dupe(u8, try q.hqName(self.a(), g, hid));
             _ = try self.execSay(.{ .upgrade_tier = hid }, .good, "{s} → regional HQ: paperwork first, then construction — watch PROJECTS", .{name});
         },
@@ -118,16 +118,16 @@ pub fn handle(self: *App, k: app.Key) anyerror!bool {
             self.cur(1).* = 0;
         },
         .hire => {
-            const id: types.HqId = @enumFromInt(self.hqSelId(g));
+            const id: types.HqId = @enumFromInt(try self.hqSelId(g));
             const hallv = try q.hall(al, g, id, self.hall_filter);
             if (hallv.rows.len == 0) return true;
             const row = hallv.rows[@min(self.cur(1).*, hallv.rows.len - 1)];
             _ = try self.execSay(.{ .hire_candidate = row.index }, .good, "hired candidate [{d}]", .{row.index});
         },
         .fabricate => {
-            self.openModal(.{ .pick_part = .{ .purpose = .fabricate, .site = .{ .hq = @enumFromInt(self.hqSelId(g)) } } });
+            self.openModal(.{ .pick_part = .{ .purpose = .fabricate, .site = .{ .hq = @enumFromInt(try self.hqSelId(g)) } } });
         },
-        .sell => self.modal = .{ .confirm = .{ .kind = .sell_hq, .id = self.hqSelId(g) } },
+        .sell => self.modal = .{ .confirm = .{ .kind = .sell_hq, .id = try self.hqSelId(g) } },
     }
     return true;
 }
@@ -145,7 +145,7 @@ test "u on a facility row acts on the facility the detail query puts under the c
     defer app.deinitForTest(c, std.testing.allocator);
     try toTab(c, .hq);
     const g = c.app.state();
-    const id: app.types.HqId = @enumFromInt(c.app.hqSelId(g));
+    const id: app.types.HqId = @enumFromInt(try c.app.hqSelId(g));
     const detail = try q.hqDetailView(c.app.a(), g, id);
     const row = for (detail.facility, 0..) |f, i| {
         if (f != null) break i;

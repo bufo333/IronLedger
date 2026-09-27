@@ -18,19 +18,10 @@ Owner of every entry: the project owner.
 ### C2. Errors lose their meaning or are swallowed
 
 - **Rules:** 4, 10, 18, 79.
-- **Why not yet:** Each of the 40 sites needs to be either propagated or given a real best-effort reason, and that has to be decided one site at a time.
+- **Why not yet:** Each of the 23 sites needs to be either propagated or given a real best-effort reason, and that has to be decided one site at a time.
 - **Scope:** every entry in `docs/verify-contract.baseline`. The ones that already change outcomes:
-  - Rating and liquidation:
-    - `rating.zig:159` (`planLift catch continue`)
-    - `market.stripValue` (`stripParts catch return 0`)
   - Hidden warnings and results:
-    - `checklist.zig:95`
-    - `tick.zig:127` (`trim_stock catch Result{}`)
-    - `queries.zig:2561`, `3400`
-  - Frontend failures turned into zeros:
-    - `app.zig:2436` (`hqSelId`)
-    - the REPL's `parseInt catch 0` at `main.zig:568`, `602`, `629`, `669`
-    - the REPL checklist gate `main.zig:431`
+    - `tick.zig:148` (`trim_stock catch Result{}`)
   - Errors under the wrong name:
     - `execDepot` maps `OutOfMemory` and `MissingComponents` to `NoBay` (`commands.zig:1343-1349`).
     - `png.zig:91` maps `OutOfMemory` to `Corrupt`.

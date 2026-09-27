@@ -17,7 +17,7 @@ pub fn draw(self: *App) anyerror!void {
     const al = self.a();
     const g = self.state();
     const b = self.body();
-    const view = try q.contracts(al, g, @enumFromInt(self.hqSelId(g)));
+    const view = try q.contracts(al, g, @enumFromInt(try self.hqSelId(g)));
     // Room for the offers and the candidates under the cursor's offer,
     // up to three fifths of the screen.
     const c = self.cur(0);
@@ -25,7 +25,7 @@ pub fn draw(self: *App) anyerror!void {
     const cands = if (view.board.len > 0) try q.offerCandidates(al, g, view.board[c.*].index) else &[_]q.Candidate{};
     const board_need: u16 = @intCast(@min(1 + view.board.len + 3 + 1 + cands.len + 2, 200));
     const board_h: u16 = @max(6, @min(board_need, layout.major.of(b.h)));
-    const board_hq: types.HqId = @enumFromInt(self.hqSelId(g));
+    const board_hq: types.HqId = @enumFromInt(try self.hqSelId(g));
     const inner = self.screen.pane(.{ .x = b.x, .y = b.y, .w = b.w, .h = board_h }, .{ .title = try std.fmt.allocPrint(al, "CONTRACT BOARD · {{a}}{s}{{/}} · for the companies based there", .{try q.hqName(self.a(), g, board_hq)}), .focused = self.focus == 0, .right_title = try app.keys.paneTitle(al, &legend, 0) });
     if (view.board.len == 0) {
         self.screen.lines(inner, &.{"{d}no offers — the board refreshes on the 1st{/}"}, 0, null);
@@ -105,7 +105,7 @@ pub fn draw(self: *App) anyerror!void {
 pub fn move(self: *App, delta: i32) anyerror!void {
     const al = self.a();
     const g = self.state();
-    const view = try q.contracts(al, g, @enumFromInt(self.hqSelId(g)));
+    const view = try q.contracts(al, g, @enumFromInt(try self.hqSelId(g)));
     if (self.focus == 0) self.moveCursor(0, delta, view.board.len) else if (self.focus == 1) self.moveCursor(1, delta, view.active.len) else self.moveCursor(2, delta, (try q.contractHistory(al, g)).len);
 }
 
@@ -127,7 +127,7 @@ pub fn handle(self: *App, k: app.Key) anyerror!bool {
     const hit = app.keys.lookup(Action, &bindings, self.focus, k) orelse return false;
     const al = self.a();
     const g = self.state();
-    const view = try q.contracts(al, g, @enumFromInt(self.hqSelId(g)));
+    const view = try q.contracts(al, g, @enumFromInt(try self.hqSelId(g)));
     switch (hit.action) {
         // One board per HQ: [ ] steps through them.
         .next_hq, .prev_hq => {

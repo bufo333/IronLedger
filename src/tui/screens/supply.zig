@@ -73,7 +73,7 @@ pub fn handle(self: *App, k: app.Key) anyerror!bool {
         .ship => {
             // Ship from the home shelf: a company row means its home HQ's stores.
             const from: types.Site = if (site) |s| switch (s) {
-                .company => |id| .{ .hq = @enumFromInt(self.homeHqOf(id)) },
+                .company => |id| .{ .hq = @enumFromInt(try self.homeHqOf(id)) },
                 else => s,
             } else q.defaultSite(g);
             self.openModal(.{ .pick_part = .{ .purpose = .ship, .site = from, .ship_to = if (site) |s2| (if (s2 == .company) s2.company else null) else null } });

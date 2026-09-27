@@ -17,9 +17,9 @@ pub fn draw(self: *App) anyerror!void {
     const al = self.a();
     const g = self.state();
     const b = self.body();
-    const view = try q.market(al, g, self.market_filter, @enumFromInt(self.hqSelId(g)));
+    const view = try q.market(al, g, self.market_filter, @enumFromInt(try self.hqSelId(g)));
     const top_h: u16 = @max(6, layout.minor.of(b.h));
-    const hq_id: types.HqId = @enumFromInt(self.hqSelId(g));
+    const hq_id: types.HqId = @enumFromInt(try self.hqSelId(g));
     const inner = self.screen.pane(.{ .x = b.x, .y = b.y, .w = b.w, .h = top_h }, .{ .title = try std.fmt.allocPrint(al, "MARKET BOARD · {{a}}{s}{{/}} pays from its treasury ({s}) · filter {{a}}{s}{{/}} · {d} listings", .{ try q.hqName(self.a(), g, hq_id), try q.money(al, q.balance(g, .{ .hq = hq_id })), @tagName(self.market_filter), view.board.len }), .focused = self.focus == 0, .right_title = try app.keys.paneTitle(al, &legend, 0) });
     try self.tableOrNote(inner, try q.tableOf(al, q.market_cols, view.board), 0, self.focus == 0, "{d}nothing on the boards — they refresh on the 1st, staples restock as they sell{/}");
 
@@ -39,12 +39,12 @@ pub fn draw(self: *App) anyerror!void {
 pub fn move(self: *App, delta: i32) anyerror!void {
     const al = self.a();
     const g = self.state();
-    const view = try q.market(al, g, self.market_filter, @enumFromInt(self.hqSelId(g)));
+    const view = try q.market(al, g, self.market_filter, @enumFromInt(try self.hqSelId(g)));
     switch (self.focus) {
         0 => self.moveCursor(0, delta, view.board.len),
         1 => self.moveCursor(1, delta, view.catalog.len),
         2 => self.moveCursor(2, delta, view.demand.len),
-        else => self.moveCursor(3, delta, (try q.stockPolicies(al, g, @enumFromInt(self.hqSelId(g)))).len),
+        else => self.moveCursor(3, delta, (try q.stockPolicies(al, g, @enumFromInt(try self.hqSelId(g)))).len),
     }
 }
 
@@ -69,7 +69,7 @@ pub fn handle(self: *App, k: app.Key) anyerror!bool {
     const hit = app.keys.lookup(Action, &bindings, self.focus, k) orelse return false;
     const al = self.a();
     const g = self.state();
-    const hq_id: types.HqId = @enumFromInt(self.hqSelId(g));
+    const hq_id: types.HqId = @enumFromInt(try self.hqSelId(g));
     switch (hit.action) {
         .buy => {
             const view = try q.market(al, g, self.market_filter, hq_id);
@@ -134,7 +134,7 @@ pub fn handle(self: *App, k: app.Key) anyerror!bool {
                     self.say(.amber, "only structural components (comp_*) are fabricated; order the rest", .{});
                     return true;
                 }
-                self.openAmount(try std.fmt.allocPrint(al, "FABRICATE {s}", .{r.key}), .{ .fabricate = .{ .hq = self.hqSelId(g), .key = r.key } }, &.{
+                self.openAmount(try std.fmt.allocPrint(al, "FABRICATE {s}", .{r.key}), .{ .fabricate = .{ .hq = try self.hqSelId(g), .key = r.key } }, &.{
                     .{ .label = "quantity", .value = 1, .min = 1, .max = 20, .step = 1 },
                 });
             }
@@ -149,7 +149,7 @@ pub fn handle(self: *App, k: app.Key) anyerror!bool {
             const view = try q.market(al, g, self.market_filter, hq_id);
             if (view.catalog.len > 0) {
                 const r = view.catalog[@min(self.cur(1).*, view.catalog.len - 1)];
-                self.openAmount(try std.fmt.allocPrint(al, "KEEP {s} STOCKED", .{r.key}), .{ .stock_policy = .{ .hq = self.hqSelId(g), .key = r.key } }, &.{
+                self.openAmount(try std.fmt.allocPrint(al, "KEEP {s} STOCKED", .{r.key}), .{ .stock_policy = .{ .hq = try self.hqSelId(g), .key = r.key } }, &.{
                     .{ .label = "minimum", .value = 5, .min = 0, .max = 999, .step = 1 },
                     .{ .label = "target", .value = 10, .min = 0, .max = 999, .step = 1 },
                 });

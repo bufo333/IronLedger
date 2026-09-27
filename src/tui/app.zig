@@ -1197,10 +1197,10 @@ pub const App = struct {
         return q.toeFiltered(self.a(), g, views[self.forces_view].filter);
     }
 
-    pub fn homeHqOf(self: *App, company: types.ForceId) u32 {
+    pub fn homeHqOf(self: *App, company: types.ForceId) !u32 {
         const g = self.state();
         const id = q.homeHq(g, company);
-        return if (id != .none) @intFromEnum(id) else self.hqSelId(g);
+        return if (id != .none) @intFromEnum(id) else try self.hqSelId(g);
     }
 
     // ---- modals ----
@@ -2432,8 +2432,8 @@ pub const App = struct {
         return q.lanceChoices(self.a(), self.state(), uid);
     }
 
-    pub fn hqSelId(self: *App, g: *GameState) u32 {
-        const hqs = q.hqList(self.a(), g) catch return 0;
+    pub fn hqSelId(self: *App, g: *GameState) !u32 {
+        const hqs = try q.hqList(self.a(), g);
         return if (self.hq_sel < hqs.len) @intFromEnum(hqs[self.hq_sel].id) else 0;
     }
 
@@ -4068,4 +4068,11 @@ test "modalRect never covers the footer row" {
         const r = c.app.modalRect(60, rows);
         try std.testing.expect(r.y + r.h < rows);
     }
+}
+
+test "hqSelId propagates a query error instead of returning zero" {
+    // Compile-time proof: hqSelId returns an error union, not a plain u32.
+    const info = @typeInfo(@TypeOf(App.hqSelId));
+    const ret = info.@"fn".return_type.?;
+    comptime std.debug.assert(@typeInfo(ret) == .error_union);
 }
