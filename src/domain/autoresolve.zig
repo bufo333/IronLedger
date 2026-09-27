@@ -6,9 +6,11 @@
 //!
 //! Design goal: legible outcomes. The AAR must let the player trace a loss
 //! to "C-grade maintenance and two green lances," not to a die roll.
+//!
+//! MekHQ counterpart: `autoresolve/` (ACAR) — docs/mekhq-map.md row 7.
 
 const std = @import("std");
-const types = @import("../domain/types.zig");
+const types = @import("types.zig");
 
 /// Campaign-state modifiers for one side, gathered before the engagement.
 /// Every field is a lever the player controls without touching a battle.
@@ -46,7 +48,7 @@ pub const Element = struct {
     /// multiplier follows the 2d6 to-hit curve: each point of gunnery below
     /// 4 is worth 20%, above 4 costs 15% (`tuning.autoresolve`).
     pub fn effectivePower(self: Element, mods: CampaignMods) i64 {
-        const t = @import("../domain/tuning.zig").t.autoresolve;
+        const t = @import("tuning.zig").t.autoresolve;
         var bp: types.Bp = types.full_bp;
 
         // Crew skill (gunnery dominates, piloting supports).

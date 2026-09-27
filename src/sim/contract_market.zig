@@ -75,7 +75,7 @@ fn pickEnemy(gs: *GameState, employer: []const u8, kind: contract.ContractKind) 
 /// regular skill). A veteran five-lance force pays more than a green four.
 pub fn threatPayBp(kind: contract.ContractKind, lances: u8, quality: types.ExperienceLevel, lance_bv: i64) types.Bp {
     const opfor = @import("../domain/opfor.zig");
-    const Element = @import("autoresolve.zig").Element;
+    const Element = @import("../domain/autoresolve.zig").Element;
     const t = tuning.contract;
     const row = opfor.rowFor(kind);
     const sk = opfor.skills(quality);

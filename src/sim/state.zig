@@ -15,7 +15,7 @@ const contract_mod = @import("../domain/contract.zig");
 const clock_mod = @import("../domain/clock.zig");
 const rng_mod = @import("rng.zig");
 const events_mod = @import("../domain/events.zig");
-const after_action_mod = @import("after_action.zig");
+const battle_report_mod = @import("../domain/battle_report.zig");
 const difficulty_mod = @import("../domain/difficulty.zig");
 const finance_mod = @import("../econ/finance.zig");
 const person_gen = @import("../gen/person_gen.zig");
@@ -265,7 +265,7 @@ pub const GameState = struct {
     next_battle_id: u32 = 1,
     /// Recent engagements as records; the journal owns its own
     /// retention, as `event_queue` owns the inbox's.
-    battle_reports: after_action_mod.Journal = .{},
+    battle_reports: battle_report_mod.Journal = .{},
     /// Hulls the enemy dragged off a field we lost: off the books
     /// but not struck off, so a recovery raid has something to win back.
     held_hulls: std.ArrayListUnmanaged(unit_mod.HeldHull) = .empty,

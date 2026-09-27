@@ -20,8 +20,8 @@ const posture = @import("../sim/posture.zig");
 const person_mod = @import("../domain/person.zig");
 const unit_mod = @import("../domain/unit.zig");
 const force_mod = @import("../domain/force.zig");
-const after_action_mod = @import("../sim/after_action.zig");
-const autoresolve_mod = @import("../sim/autoresolve.zig");
+const battle_report_mod = @import("../domain/battle_report.zig");
+const autoresolve_mod = @import("../domain/autoresolve.zig");
 const hq_mod = @import("../domain/hq.zig");
 const contract_mod = @import("../domain/contract.zig");
 const commander_mod = @import("../domain/commander.zig");
@@ -1738,8 +1738,8 @@ pub const Store = struct {
     }
 
     /// The hulls a report's hit rows name, in order.
-    fn loadReportHits(self: Store, alloc: std.mem.Allocator, cid: i64, ord: i64) ![]after_action_mod.HullHit {
-        var hulls: std.ArrayListUnmanaged(after_action_mod.HullHit) = .empty;
+    fn loadReportHits(self: Store, alloc: std.mem.Allocator, cid: i64, ord: i64) ![]battle_report_mod.HullHit {
+        var hulls: std.ArrayListUnmanaged(battle_report_mod.HullHit) = .empty;
         const bh = try self.db.prepare("SELECT unit, chassis_key, chassis_name, armor_before, armor_after, slot, slot_part, slot_result, destroyed, cause, pilot, crew_name, wound_severity, wound_location, wound_permanent, fate, recovery_roll, recovery_target, lost FROM battle_report_hit WHERE cid = ?1 AND report_ord = ?2 ORDER BY ord");
         defer bh.finalize();
         try bh.bindAll(.{ cid, ord });
@@ -1753,7 +1753,7 @@ pub const Store = struct {
                 .armor_after = try bh.intAs(u8, 4),
                 .slot = if (slot_text.len > 0) slot_text else null,
                 .slot_part = try bh.text(6, alloc),
-                .slot_result = bh.enumValue(after_action_mod.SlotResult, 7) orelse return error.CorruptSave,
+                .slot_result = bh.enumValue(battle_report_mod.SlotResult, 7) orelse return error.CorruptSave,
                 .destroyed = bh.int(8) != 0,
                 .cause = bh.enumValue(unit_mod.WreckCause, 9) orelse return error.CorruptSave,
                 .pilot = try toId(types.PersonId, bh.int(10)),
@@ -1764,7 +1764,7 @@ pub const Store = struct {
                         .location = bh.enumValue(person_mod.InjuryLocation, 13) orelse return error.CorruptSave,
                         .permanent = bh.int(14) != 0,
                     } else null,
-                    .fate = bh.enumValue(after_action_mod.CrewOutcome.Fate, 15) orelse return error.CorruptSave,
+                    .fate = bh.enumValue(battle_report_mod.CrewOutcome.Fate, 15) orelse return error.CorruptSave,
                 },
                 .recovery = if (bh.optInt(16)) |roll| .{ .roll = try fit(i32, roll), .target = try bh.intAs(i32, 17) } else null,
                 .lost = bh.int(18) != 0,
@@ -1774,8 +1774,8 @@ pub const Store = struct {
     }
 
     /// A report's ammunition lines, in order.
-    fn loadReportAmmo(self: Store, alloc: std.mem.Allocator, cid: i64, ord: i64) ![]after_action_mod.AmmoLine {
-        var ammo: std.ArrayListUnmanaged(after_action_mod.AmmoLine) = .empty;
+    fn loadReportAmmo(self: Store, alloc: std.mem.Allocator, cid: i64, ord: i64) ![]battle_report_mod.AmmoLine {
+        var ammo: std.ArrayListUnmanaged(battle_report_mod.AmmoLine) = .empty;
         const ba = try self.db.prepare("SELECT family, burned, reserve FROM battle_report_ammo WHERE cid = ?1 AND report_ord = ?2 ORDER BY ord");
         defer ba.finalize();
         try ba.bindAll(.{ cid, ord });
@@ -1788,8 +1788,8 @@ pub const Store = struct {
     }
 
     /// The wrecks a report's salvage claim was divided over, in order.
-    fn loadReportSalvage(self: Store, alloc: std.mem.Allocator, cid: i64, ord: i64) ![]after_action_mod.SalvageCandidate {
-        var candidates: std.ArrayListUnmanaged(after_action_mod.SalvageCandidate) = .empty;
+    fn loadReportSalvage(self: Store, alloc: std.mem.Allocator, cid: i64, ord: i64) ![]battle_report_mod.SalvageCandidate {
+        var candidates: std.ArrayListUnmanaged(battle_report_mod.SalvageCandidate) = .empty;
         const bs = try self.db.prepare("SELECT key, name, bv, armor_pct, quality, damaged, destroyed, missing FROM battle_report_salvage WHERE cid = ?1 AND report_ord = ?2 ORDER BY ord");
         defer bs.finalize();
         try bs.bindAll(.{ cid, ord });
@@ -2357,8 +2357,9 @@ test "a battle report round-trips as fields, not as a row count" {
         // The AAR a reloaded report renders is the AAR it always rendered.
         var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
         defer arena.deinit();
-        const before_lines = try after_action_mod.render(arena.allocator(), &saved_r);
-        const after_lines = try after_action_mod.render(arena.allocator(), &loaded_r);
+        const after_action = @import("../sim/after_action.zig");
+        const before_lines = try after_action.render(arena.allocator(), &saved_r);
+        const after_lines = try after_action.render(arena.allocator(), &loaded_r);
         try std.testing.expectEqual(before_lines.len, after_lines.len);
         for (before_lines, after_lines) |bl, al2| try std.testing.expectEqualStrings(bl, al2);
     }
@@ -2790,7 +2791,7 @@ test "the wrecks on offer survive a save — the same battlefield after a reload
     const co = try @import("../sim/starter_company.zig").generateInto(&gs, "Alpha");
     // A report with a haul still to be divided, built by hand so the test
     // does not depend on a campaign happening to throw one up.
-    const candidates = [_]after_action_mod.SalvageCandidate{
+    const candidates = [_]battle_report_mod.SalvageCandidate{
         .{ .key = "DRG-1N", .name = "Dragon", .bv = 1_144, .armor_pct = 30, .quality = .c, .damaged_slots = 1, .destroyed_slots = 2, .missing_components = 1 },
         .{ .key = "LCT-1V", .name = "Locust", .bv = 432, .armor_pct = 24, .quality = .d, .damaged_slots = 1, .destroyed_slots = 1, .missing_components = 1 },
         .{ .key = "STG-3R", .name = "Stinger", .bv = 192, .armor_pct = 18, .quality = .c, .damaged_slots = 1, .destroyed_slots = 1, .missing_components = 1 },

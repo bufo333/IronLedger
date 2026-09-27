@@ -9,10 +9,11 @@
 const std = @import("std");
 const tuning = @import("../domain/tuning.zig").t;
 const types = @import("../domain/types.zig");
-const autoresolve = @import("autoresolve.zig");
+const autoresolve = @import("../domain/autoresolve.zig");
 const contract_mod = @import("../domain/contract.zig");
 const chassis_mod = @import("../domain/chassis.zig");
 const after_action = @import("after_action.zig");
+const battle_report = @import("../domain/battle_report.zig");
 const force_mod = @import("../domain/force.zig");
 const part_mod = @import("../domain/part.zig");
 const medical = @import("medical.zig");
@@ -368,7 +369,7 @@ fn applyHits(
     player: *const SideState,
     engaged: []const types.UnitId,
     hits: u32,
-    hit_log: *std.ArrayListUnmanaged(after_action.HullHit),
+    hit_log: *std.ArrayListUnmanaged(battle_report.HullHit),
 ) !Tally {
     const tb = tuning.battle;
     var tally: Tally = .{};
@@ -381,7 +382,7 @@ fn applyHits(
 
         const severity = gs.rng.roll2d6(.battle);
         const hit_ch = chassis_mod.find(u.chassis_key);
-        var rec: after_action.HullHit = .{
+        var rec: battle_report.HullHit = .{
             .unit = uid,
             .chassis_key = u.chassis_key,
             .chassis_name = if (hit_ch) |d| d.name else "",
@@ -481,7 +482,7 @@ fn recoverWrecks(
     outcome: autoresolve.Outcome,
     roe: force_mod.Roe,
     trucks: i64,
-    hit_log: *std.ArrayListUnmanaged(after_action.HullHit),
+    hit_log: *std.ArrayListUnmanaged(battle_report.HullHit),
 ) !FieldLoss {
     const rt = tuning.loss.roe;
     var loss: FieldLoss = .{};
@@ -869,8 +870,8 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     const engaged = player.engaged.items;
     // The detailed AAR: every hit on record — which
     // hull, what it lost, what happened to the crew. The record outlives
-    // the fight, so it copies the names it needs (after_action.HullHit).
-    var hit_log: std.ArrayListUnmanaged(after_action.HullHit) = .empty;
+    // the fight, so it copies the names it needs (battle_report.HullHit).
+    var hit_log: std.ArrayListUnmanaged(battle_report.HullHit) = .empty;
     defer hit_log.deinit(gs.allocator());
     const tally = try applyHits(gs, &player, engaged, hits, &hit_log);
     var damage_value = tally.damage_value;
@@ -904,7 +905,7 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     }
     // The wrecks on offer and the part of the claim still to be
     // divided. Both stay empty unless the haul is worth a decision.
-    var salvage_candidates: []const after_action.SalvageCandidate = &.{};
+    var salvage_candidates: []const battle_report.SalvageCandidate = &.{};
     var salvage_unclaimed: i64 = 0;
     // Salvage is things, not money: your share of what the
     // crews haul off a held field becomes wrecks and parts crated to the
@@ -971,13 +972,13 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
 
     // Everything this engagement did, as fields. The AAR is
     // rendered from it, so the record and the narrative cannot drift.
-    var ammo_lines: std.ArrayListUnmanaged(after_action.AmmoLine) = .empty;
+    var ammo_lines: std.ArrayListUnmanaged(battle_report.AmmoLine) = .empty;
     for (part_mod.munition_keys) |key| try ammo_lines.append(gs.allocator(), .{
         .key = key,
         .burned = player.ammo_reserved.get(key) orelse 0,
         .left = gs.stockCount(player.site, key),
     });
-    const report: after_action.BattleReport = .{
+    const report: battle_report.BattleReport = .{
         .id = gs.nextBattleId(),
         .day = gs.clock.day_index,
         .contract = c.id,
@@ -1021,7 +1022,7 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
         .command_rights = @tagName(c.terms.command_rights),
         // Owned, not borrowed: `hit_log` is freed when this function
         // returns, and the report outlives it.
-        .hulls = try gs.allocator().dupe(after_action.HullHit, hit_log.items),
+        .hulls = try gs.allocator().dupe(battle_report.HullHit, hit_log.items),
         .ammo = ammo_lines.items,
         .silenced_mounts = player.silenced_mounts,
         .armor_left = gs.stockCount(player.site, "armor"),
@@ -1075,7 +1076,7 @@ fn concede(gs: *GameState, c: *contract_mod.Contract) !void {
     c.score += score_delta;
     c.battles_fought +|= 1;
     gs.stats.battles_lost += 1;
-    const report: after_action.BattleReport = .{
+    const report: battle_report.BattleReport = .{
         .id = gs.nextBattleId(),
         .day = gs.clock.day_index,
         .contract = c.id,
@@ -1109,7 +1110,7 @@ fn recoveryText(gs: *GameState, recovery: ?[2]i32, lost: bool) ![]const u8 {
 
 /// The wound `medical.inflict` just recorded, as fields for the report.
 /// Null when the roll wounded nobody.
-fn lastWound(p: *const person_mod.Person) ?after_action.CrewOutcome.Wound {
+fn lastWound(p: *const person_mod.Person) ?battle_report.CrewOutcome.Wound {
     if (p.injuries.items.len == 0) return null;
     const inj = p.injuries.items[p.injuries.items.len - 1];
     return .{ .severity = inj.severity, .location = inj.location, .permanent = inj.permanent };
@@ -1142,7 +1143,7 @@ pub const SalvageChoice = struct {
 /// wrecks were rolled once when the fight ended and live in the record,
 /// so the manifest the screen offers and the manifest the command
 /// materialises come from this one function called twice.
-pub fn salvagePlan(candidates: []const after_action.SalvageCandidate, claim_bv: i64, kind: types.SalvagePlan) SalvageChoice {
+pub fn salvagePlan(candidates: []const battle_report.SalvageCandidate, claim_bv: i64, kind: types.SalvagePlan) SalvageChoice {
     var out: SalvageChoice = .{ .kind = kind, .parts_bv = @max(0, claim_bv) };
     switch (kind) {
         .parts_only => return out,
@@ -1189,7 +1190,7 @@ pub fn salvagePlan(candidates: []const after_action.SalvageCandidate, claim_bv: 
 /// wreck and taking the most wrecks are different hauls — otherwise the
 /// "decision" is one option wearing three labels, and the fight takes the
 /// only plan there is without troubling the commander.
-pub fn salvageWorthAsking(candidates: []const after_action.SalvageCandidate, claim_bv: i64) bool {
+pub fn salvageWorthAsking(candidates: []const battle_report.SalvageCandidate, claim_bv: i64) bool {
     const heavy = salvagePlan(candidates, claim_bv, .heaviest);
     if (heavy.hulls == 0) return false;
     return !heavy.sameHullsAs(salvagePlan(candidates, claim_bv, .most_hulls));
@@ -1199,9 +1200,9 @@ pub fn salvageWorthAsking(candidates: []const after_action.SalvageCandidate, cla
 /// enemy house's table with a condition each. Rolled once, when
 /// the fight ends, and then kept in the record: rolling again at claim
 /// time would offer the player one set of wrecks and deliver another.
-fn rollSalvageCandidates(gs: *GameState, c: *const contract_mod.Contract) ![]after_action.SalvageCandidate {
+fn rollSalvageCandidates(gs: *GameState, c: *const contract_mod.Contract) ![]battle_report.SalvageCandidate {
     const company_gen = @import("../gen/company_gen.zig");
-    var out: std.ArrayListUnmanaged(after_action.SalvageCandidate) = .empty;
+    var out: std.ArrayListUnmanaged(battle_report.SalvageCandidate) = .empty;
     for (0..tuning.battle.salvage_candidates) |_| {
         const design = @import("../domain/rat.zig").roll(&gs.rng, .battle, c.enemy_key, company_gen.rollWeightClass(&gs.rng, .battle), gs.clock.date.year);
         try out.append(gs.allocator(), .{
@@ -1227,7 +1228,7 @@ fn rollSalvageCandidates(gs: *GameState, c: *const contract_mod.Contract) ![]aft
 pub fn takeSalvage(
     gs: *GameState,
     c: *const contract_mod.Contract,
-    candidates: []const after_action.SalvageCandidate,
+    candidates: []const battle_report.SalvageCandidate,
     claim_bv: i64,
     kind: types.SalvagePlan,
 ) ![]const u8 {
@@ -1680,7 +1681,7 @@ fn lossRun(seed: u64, level: @import("../domain/difficulty.zig").Level, n: u32) 
 }
 
 test "the three salvage plans divide one claim three ways" {
-    const cands = [_]after_action.SalvageCandidate{
+    const cands = [_]battle_report.SalvageCandidate{
         .{ .key = "DRG-1N", .name = "Dragon", .bv = 1_144, .armor_pct = 30, .quality = .c, .damaged_slots = 1, .destroyed_slots = 2, .missing_components = 1 },
         .{ .key = "LCT-1V", .name = "Locust", .bv = 432, .armor_pct = 24, .quality = .d, .damaged_slots = 1, .destroyed_slots = 1, .missing_components = 1 },
         .{ .key = "STG-3R", .name = "Stinger", .bv = 192, .armor_pct = 18, .quality = .c, .damaged_slots = 1, .destroyed_slots = 1, .missing_components = 1 },

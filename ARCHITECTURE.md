@@ -117,8 +117,9 @@ section explains the shape, the contract states the rules.
 │  autosave, report formatting                        │
 ├──────────────────────┬──────────────────────────────┤
 │  Simulation core (pure, deterministic)              │
-│   sim/    clock, daily pipeline, events, autoresolve│
-│   domain/ person, unit, part, force, contract, hq   │
+│   sim/    daily pipeline, battle, tick               │
+│   domain/ person, unit, part, force, contract, hq,  │
+│           clock, events, autoresolve, battle_report  │
 │   econ/   finance, markets, logistics network       │
 │   gen/    company/person/name generation            │
 ├─────────────────────────────────────────────────────┤
@@ -872,10 +873,11 @@ src/
   main.zig       demo CLI and REPL entry (frontends layer)
   root.zig       module root, re-exports
   domain/        entities and rule tables: types person unit part chassis
-                 force contract hq planet faction tuning skulls scenario …
+                 force contract hq planet faction tuning skulls scenario …;
+                 clock events autoresolve battle_report
   sim/           state plus focused personnel/posture/treasury owners;
                   crew tick commands battle
-                  autoresolve medical maintenance field_supply sites network
+                  medical maintenance field_supply sites network
                   rng contract_market starter_company toe …;
                   queries.zig (read-only views),
                   cli.zig (verbs), table.zig (markup), digest.zig (hash)

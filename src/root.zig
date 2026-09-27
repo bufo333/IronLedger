@@ -46,6 +46,8 @@ pub const force = @import("domain/force.zig");
 pub const contract = @import("domain/contract.zig");
 pub const hq = @import("domain/hq.zig");
 pub const events = @import("domain/events.zig");
+pub const autoresolve = @import("domain/autoresolve.zig");
+pub const battle_report = @import("domain/battle_report.zig");
 
 // sim/ — state, time, randomness, battle resolution
 pub const state = @import("sim/state.zig");
@@ -71,7 +73,6 @@ pub const rng = @import("sim/rng.zig");
 pub const digest = @import("sim/digest.zig");
 pub const clock = @import("domain/clock.zig");
 pub const contract_events = @import("sim/contract_events.zig");
-pub const autoresolve = @import("sim/autoresolve.zig");
 pub const battle = @import("sim/battle.zig");
 pub const after_action = @import("sim/after_action.zig");
 

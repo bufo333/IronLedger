@@ -4311,8 +4311,8 @@ test "the inbox shows the wrecks a salvage claim is being divided over" {
     defer arena.deinit();
     const a = arena.allocator();
 
-    const after_action = @import("after_action.zig");
-    const candidates = [_]after_action.SalvageCandidate{
+    const battle_report = @import("../domain/battle_report.zig");
+    const candidates = [_]battle_report.SalvageCandidate{
         .{ .key = "DRG-1N", .name = "Dragon", .bv = 1_144, .armor_pct = 30, .quality = .c, .damaged_slots = 1, .destroyed_slots = 2, .missing_components = 1 },
         .{ .key = "LCT-1V", .name = "Locust", .bv = 432, .armor_pct = 24, .quality = .d, .damaged_slots = 1, .destroyed_slots = 1, .missing_components = 1 },
         .{ .key = "STG-3R", .name = "Stinger", .bv = 192, .armor_pct = 18, .quality = .c, .damaged_slots = 1, .destroyed_slots = 1, .missing_components = 1 },
@@ -5411,7 +5411,7 @@ pub const battle_cols: []const table.Col = &.{
 /// The colour a verdict reads in: a held field is the line between a win
 /// you can salvage and a loss you pay for, so it decides the mark rather
 /// than the outcome's name alone.
-pub fn outcomeMark(outcome: @import("autoresolve.zig").Outcome) []const u8 {
+pub fn outcomeMark(outcome: @import("../domain/autoresolve.zig").Outcome) []const u8 {
     if (outcome == .rout) return "{c}";
     if (outcome.isLoss()) return "{a}";
     return "{g}";

@@ -98,7 +98,7 @@ pub fn rateOffer(alloc: std.mem.Allocator, gs: *GameState, c: *const contract_mo
     mean_bp = @divTrunc(mean_bp, faces.len);
     const Power = struct {
         fn at(gs_: *GameState, lance_bv: i64, lances: i64, scen_bp: i64, g: u8, p: u8) i64 {
-            const elem: @import("autoresolve.zig").Element = .{ .base_strength = types.applyBp(types.applyBp(lance_bv * lances, gs_.diff().enemy_bp), @intCast(scen_bp)), .avg_gunnery = g, .avg_piloting = p };
+            const elem: @import("../domain/autoresolve.zig").Element = .{ .base_strength = types.applyBp(types.applyBp(lance_bv * lances, gs_.diff().enemy_bp), @intCast(scen_bp)), .avg_gunnery = g, .avg_piloting = p };
             return elem.effectivePower(.{});
         }
     };

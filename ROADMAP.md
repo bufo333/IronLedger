@@ -1223,14 +1223,14 @@ the player reads, and a turn that stops until they have.
   and both re-export it. `armorMark`/`armorBar`/`armorPct` band armour
   once (`tuning.unit.armor_amber_pct` / `armor_red_pct`) — the game's
   first armour meters.
-- ✅ 12G.3 **The record.** `sim/after_action.zig` owns `BattleReport`,
-  `HullHit`, `CrewOutcome`, `AmmoLine`, `SalvageManifest` and the one
-  place a battle becomes prose (`render`, which emits no markup).
+- ✅ 12G.3 **The record.** `domain/battle_report.zig` owns `BattleReport`,
+  `HullHit`, `CrewOutcome`, `AmmoLine`, `SalvageManifest` and `Journal`;
+  `render` stays in `sim/after_action.zig` (uses sim-level imports).
   `resolveEngagement` shrank 434 → 186 lines behind five named phases
   (`openingRoll`, `applyHits`, `recoverWrecks`, `takePrisoners`,
   `aftermath`), and the eight inline `gs.log` calls became one loop over
   the rendered lines. MekHQ counterpart: `AtBScenario` resolution.
-- ✅ 12G.4 **Reports kept, listed and read.** `after_action.Journal`
+- ✅ 12G.4 **Reports kept, listed and read.** `battle_report.Journal`
   holds the last `tuning.battle.reports_kept` fights; `battles` lists
   them and Enter opens a four-pane full-screen sheet — outcome and the
   roll that decided it, ammunition burned against what is left, every

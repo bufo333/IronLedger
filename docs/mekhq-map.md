@@ -18,8 +18,8 @@ re-implemented in Zig. Paths below are under `MekHQ/src/mekhq/campaign/`.
 | `market/ContractMarket` | Monthly offers, CamOps terms | `src/sim/contract_market.zig` (offer counts/visibility in `src/econ/market.zig`) | 4 |
 | `market/PersonnelMarket`, `UnitMarket` | Hiring pool, unit purchases | `src/econ/market.zig` | 4/9 |
 | `mission/Mission,Contract,AtBContract` | 12 AtB contract types, payment math, command rights | `src/domain/contract.zig` | 4 |
-| `mission/AtBScenario*` | Scenario generation over a contract's life | `src/domain/scenario.zig` + `src/sim/battle.zig`; event decks in `src/sim/contract_events.zig` (no StratCon) | 7/12C |
-| `autoresolve/` (ACAR) | Abstract combat auto resolution | `src/sim/autoresolve.zig` — extended with supply/morale/support modifiers (ARCH §7) | 7 |
+| `mission/AtBScenario*` | Scenario generation over a contract's life | `src/domain/scenario.zig` + `src/sim/battle.zig`; battle-report records in `src/domain/battle_report.zig`; event decks in `src/sim/contract_events.zig` (no StratCon) | 7/12C |
+| `autoresolve/` (ACAR) | Abstract combat auto resolution | `src/domain/autoresolve.zig` — extended with supply/morale/support modifiers (ARCH §7) | 7 |
 | `Unit.isPresent()`, `Force.getStrength()` readiness checks | Hull + crew operational-status predicates (can fight today?) | `src/sim/readiness.zig` (`unitOperational`, `forceOperational`) | 7 |
 | `finances/Finances.java`, `Loan.java` | Ledger, categories, loans | `src/econ/finance.zig` | 2/4 |
 | `finances/Finances.java` | One account, payroll and loans | `src/sim/treasury.zig` (per-entity treasuries, couriers, liquidation-backed credit are this game's) | 9A |
@@ -43,7 +43,7 @@ re-implemented in Zig. Paths below are under `MekHQ/src/mekhq/campaign/`.
 | Supply-line graph: links, throughput caps, multi-hop delay/cost | `src/sim/network.zig` (routing) + `src/econ/logistics.zig` (cost/capacity rules) | 9 |
 | Supply classes (parts/ammo/medical/provisions) with shipments & delays | `src/econ/logistics.zig` | 5/9 |
 | Out-of-influence penalties + local-purchase valve + hardship pay | `src/econ/logistics.zig` (`localPurchaseMultBp`) | 9 |
-| Support-company lance kinds (MASH/security/mess/salvage/transport) in battle math | `src/domain/force.zig` + `src/sim/autoresolve.zig` modifiers | 7/8 |
+| Support-company lance kinds (MASH/security/mess/salvage/transport) in battle math | `src/domain/force.zig` + `src/domain/autoresolve.zig` modifiers | 7/8 |
 | Owned dropships/jumpships as logistics capacity | `src/domain/unit.zig` kinds + `src/econ/logistics.zig` | 9 |
 | Field-vs-depot repair split (armor/weapons/ammo in field; structure at HQ mek bays) | `src/domain/unit.zig` (`SlotClass`, `repairTier`, `needsDepot`) + `hq.supportsStructuralRepair` | 5 |
 | Rotation fatigue (accrues per contract, decays only at regional HQ) | `src/domain/person.zig` (`contractFatigueGain`, `fatigueDecayPerWeek`) + `force.zig` rotation tracking | 8 |

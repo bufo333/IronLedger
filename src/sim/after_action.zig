@@ -1,8 +1,7 @@
-//! The after-action record (Stage 12G): what one engagement did, kept as
-//! fields instead of prose. `battle.resolveEngagement` fills a
-//! `BattleReport`; `render` turns it into the `[AAR]` lines the campaign
-//! log carries, so the record and the narrative cannot drift
-//! (docs/coding-contract.md rule 20 — a game rule is one named function).
+//! The after-action record renderer (Stage 12G): turns a `BattleReport`
+//! into the `[AAR]` lines the campaign log carries. Record types now live
+//! in `domain/battle_report.zig`; rendering stays here because it uses
+//! sim-level imports (`medical`, `part`).
 //!
 //! A report **outlives the hulls and the people it names**: a wreck left
 //! on the field is struck off the books the same day and a KIA
@@ -10,265 +9,20 @@
 //! resolution time rather than looked up later — a rank earned next year
 //! must not rewrite last year's AAR.
 //!
-//! Lifetime rule: everything a report holds must live in the campaign
-//! arena, which outlives every entity in it. Borrowing from a catalogue
-//! row or from arena-held entity memory is fine; borrowing from anything
-//! with an explicit `deinit` is not, because the arena will not keep a
-//! freed backing array alive. `battle.zig` duplicates the hit list for
-//! exactly that reason.
-//!
 //! Rule 33: nothing here emits markup. `gs.log` text is domain data; the
 //! screens colour it in `queries`.
 //!
-//! MekHQ counterpart: `AtBScenario` + the campaign-report entries it
-//! writes (MekHQ keeps the narrative only; the fields here are ours).
-//! MekHQ counterpart: the scenario resolution step after a battle
-//! (docs/mekhq-map.md).
+//! MekHQ counterpart: the scenario resolution step after a battle writes
+//! campaign-report entries (MekHQ keeps the narrative only; this module
+//! renders the structured record into `[AAR]` prose). See docs/mekhq-map.md.
 
 const std = @import("std");
-const types = @import("../domain/types.zig");
-const unit_mod = @import("../domain/unit.zig");
-const person_mod = @import("../domain/person.zig");
+const battle_report = @import("../domain/battle_report.zig");
+const BattleReport = battle_report.BattleReport;
+const HullHit = battle_report.HullHit;
+const SlotResult = battle_report.SlotResult;
 const part_mod = @import("../domain/part.zig");
-const force_mod = @import("../domain/force.zig");
-const autoresolve = @import("autoresolve.zig");
 const medical = @import("medical.zig");
-const tuning = @import("../domain/tuning.zig").t;
-
-/// What a hit did to a mounted part.
-pub const SlotResult = enum {
-    none,
-    damaged,
-    destroyed,
-
-    pub fn label(self: SlotResult) []const u8 {
-        return switch (self) {
-            .none => "",
-            .damaged => "damaged",
-            .destroyed => "destroyed",
-        };
-    }
-};
-
-/// What became of the hull's crew, as fields rather than a sentence, so
-/// the screens can count and colour without reading prose.
-///
-/// A wound and a fate are **independent**: a pilot hit in the fight can
-/// still be left on the field and taken, and the AAR says both
-/// ("… wounded (light torso); … MIA (held by DC)"). A tagged union here
-/// would quietly drop one of them.
-pub const CrewOutcome = struct {
-    wound: ?Wound = null,
-    fate: Fate = .unhurt,
-
-    pub const Wound = struct { severity: u8, location: person_mod.InjuryLocation, permanent: bool };
-    pub const Fate = enum {
-        unhurt,
-        kia,
-        /// Left on a lost field and taken: ransom, trade or write-off.
-        missing,
-    };
-
-    /// Nothing to report for this seat.
-    pub fn untouched(self: CrewOutcome) bool {
-        return self.wound == null and self.fate == .unhurt;
-    }
-};
-
-/// One recorded hit: which hull, what it lost, what happened to the crew.
-/// `chassis_key`/`chassis_name`/`crew_name` are copies — see the module
-/// note on why the record does not look them up again.
-pub const HullHit = struct {
-    unit: types.UnitId,
-    chassis_key: []const u8,
-    chassis_name: []const u8,
-    armor_before: u8,
-    armor_after: u8,
-    slot: ?[]const u8 = null,
-    slot_part: []const u8 = "",
-    slot_result: SlotResult = .none,
-    destroyed: bool = false,
-    cause: unit_mod.WreckCause = .none,
-    pilot: types.PersonId = .none,
-    crew_name: []const u8 = "",
-    crew: CrewOutcome = .{},
-    /// A lost field: the recovery roll and the target it needed.
-    recovery: ?struct { roll: i32, target: i32 } = null,
-    /// The recovery roll missed: the hull is the enemy's.
-    lost: bool = false,
-
-    /// Nothing but paint (the AAR says so rather than listing a bare hull).
-    pub fn armorOnly(self: *const HullHit) bool {
-        return !self.destroyed and self.slot == null and self.crew.untouched();
-    }
-};
-
-/// Tons of one munition family burned here, and what the trucks hold now.
-pub const AmmoLine = struct {
-    key: []const u8,
-    burned: u32 = 0,
-    left: u32 = 0,
-};
-
-/// A wreck the crews could get a chain around, rolled once off
-/// the enemy's RAT when the fight ends and then left alone. The roll
-/// lives in the record rather than happening again at claim time,
-/// because the manifest the player is offered and the manifest the
-/// command materialises have to be the same wrecks.
-pub const SalvageCandidate = struct {
-    key: []const u8,
-    name: []const u8,
-    bv: i64,
-    armor_pct: u8,
-    quality: types.Quality,
-    damaged_slots: u8,
-    destroyed_slots: u8,
-    missing_components: u8,
-};
-
-/// What the claim became: things crated home, or cash under a salvage
-/// exchange. `items` is the itemised manifest text.
-pub const SalvageManifest = struct {
-    claimed_bv: i64 = 0,
-    haulable_bv: i64 = 0,
-    liaison_cut: i64 = 0,
-    exchange_cash: types.CBills = 0,
-    items: []const u8 = "",
-    /// What was on offer, and whether the commander has yet chosen from
-    /// it. Empty when the haul was too small to be worth a choice — then
-    /// `items` already describes what was taken.
-    candidates: []const SalvageCandidate = &.{},
-    /// The haul still to be divided, in BV. Zero once taken.
-    unclaimed_bv: i64 = 0,
-};
-
-/// One engagement, whole.
-pub const BattleReport = struct {
-    id: types.BattleId,
-    day: u32,
-    contract: types.ContractId,
-    company: types.ForceId,
-
-    // Where and what kind of fight.
-    kind: []const u8,
-    enemy_key: []const u8,
-    scenario: []const u8,
-    terrain: []const u8,
-    weather: []const u8,
-
-    // How it was decided.
-    outcome: autoresolve.Outcome,
-    held_field: bool = false,
-    withdrew: bool = false,
-    roe: force_mod.Roe = .standard,
-    roe_overridden: bool = false,
-    player_power: i64 = 0,
-    enemy_power: i64 = 0,
-    conditions_mod: i32 = 0,
-    close_terrain: bool = false,
-    air_grounded: bool = false,
-    convoy_hit: bool = false,
-    edge_spent_by: []const u8 = "",
-    recon_quality: u8 = 0,
-    avg_fatigue: u8 = 0,
-    avg_morale: u8 = 0,
-
-    // What it cost and what it earned.
-    hits_taken: u32 = 0,
-    destroyed: u8 = 0,
-    wounded: u8 = 0,
-    kia: u8 = 0,
-    lost_hulls: u32 = 0,
-    missing: u32 = 0,
-    enemy_destroyed_bv: i64 = 0,
-    kills_credited: u32 = 0,
-    prisoners: u32 = 0,
-    battle_loss_comp: types.CBills = 0,
-    score_after: i32 = 0,
-    score_delta: i32 = 0,
-    /// Applied to every active hand in the company.
-    morale_delta: i32 = 0,
-    fatigue_add: u8 = 0,
-    battle_loss_pct: u8 = 0,
-    salvage_pct: u8 = 0,
-    command_rights: []const u8 = "",
-
-    hulls: []const HullHit = &.{},
-    ammo: []const AmmoLine = &.{},
-    silenced_mounts: u32 = 0,
-    armor_left: u32 = 0,
-    salvage: SalvageManifest = .{},
-
-    /// No combat-effective units: the objective was conceded without a shot.
-    conceded: bool = false,
-    /// The commander has read it. An unread report holds the turn:
-    /// a battle disposes of hulls and people permanently, so it is not
-    /// something a week-long advance may resolve past unseen (ARCH §6).
-    acknowledged: bool = false,
-
-    /// Hulls that never came home — the count the inbox and the
-    /// checklist both read, so neither counts rows itself (rule 20).
-    pub fn hullsLost(self: *const BattleReport) u32 {
-        var n: u32 = 0;
-        for (self.hulls) |h| n += @intFromBool(h.lost);
-        return n;
-    }
-
-    /// Tons of a family burned here; 0 for one that never fired.
-    pub fn burned(self: *const BattleReport, key: []const u8) u32 {
-        for (self.ammo) |a| if (std.mem.eql(u8, a.key, key)) return a.burned;
-        return 0;
-    }
-};
-
-/// The engagements still on record, oldest first. Owns its own
-/// retention, the way `events.EventQueue` owns the inbox: `GameState`
-/// holds one and nothing else decides how long a report lives.
-///
-/// The permanent account of a battle is its `[AAR]` lines in the campaign
-/// log, which are never pruned. These are what a screen reads to show a
-/// fight as something other than prose, so a few tours' worth is enough.
-pub const Journal = struct {
-    kept: std.ArrayListUnmanaged(BattleReport) = .empty,
-
-    /// Keep a resolved engagement, dropping the oldest past
-    /// `tuning.battle.reports_kept`. The one place retention is decided.
-    pub fn record(self: *Journal, alloc: std.mem.Allocator, report: BattleReport) !void {
-        try self.kept.append(alloc, report);
-        if (self.kept.items.len > tuning.battle.reports_kept) _ = self.kept.orderedRemove(0);
-    }
-
-    /// One kept engagement, or null once it has aged out of the window.
-    pub fn find(self: *const Journal, id: types.BattleId) ?*const BattleReport {
-        for (self.kept.items) |*r| if (r.id == id) return r;
-        return null;
-    }
-
-    /// The same record, writable. Only the salvage decision uses this —
-    /// the account of a fight is otherwise written once.
-    pub fn findMut(self: *Journal, id: types.BattleId) ?*BattleReport {
-        for (self.kept.items) |*r| if (r.id == id) return r;
-        return null;
-    }
-
-    /// The oldest engagement the commander has not read, if any. The one
-    /// place "is there something to see" is decided: the turn gate, the
-    /// checklist and the client all ask this.
-    pub fn unread(self: *const Journal) ?*const BattleReport {
-        for (self.kept.items) |*r| if (!r.acknowledged) return r;
-        return null;
-    }
-
-    /// Mark one read. Returns false when it has aged out of the window,
-    /// so the command can refuse rather than silently do nothing.
-    pub fn markRead(self: *Journal, id: types.BattleId) bool {
-        for (self.kept.items) |*r| if (r.id == id) {
-            r.acknowledged = true;
-            return true;
-        };
-        return false;
-    }
-};
 
 /// The `[AAR]` lines for a report, in log order. The one place a battle
 /// becomes prose: `battle.zig` logs what this returns and nothing else, so
@@ -378,7 +132,7 @@ test "render turns a report into the AAR lines, with no markup" {
         .{ .unit = @enumFromInt(14), .chassis_key = "SHD-2H", .chassis_name = "Shadow Hawk", .armor_before = 78, .armor_after = 31, .slot = "RT", .slot_part = "actuator", .slot_result = .destroyed },
         .{ .unit = @enumFromInt(17), .chassis_key = "LCT-1V", .chassis_name = "Locust", .armor_before = 44, .armor_after = 0, .destroyed = true, .cause = .ammo, .crew_name = "Cpl Petrov", .crew = .{ .fate = .kia } },
     };
-    const ammo = [_]AmmoLine{.{ .key = "ammo_lrm", .burned = 9, .left = 2 }};
+    const ammo = [_]battle_report.AmmoLine{.{ .key = "ammo_lrm", .burned = 9, .left = 2 }};
     const r: BattleReport = .{
         .id = @enumFromInt(1),
         .day = 412,
@@ -440,61 +194,4 @@ test "a conceded objective renders one line" {
     const lines = try render(arena.allocator(), &r);
     try std.testing.expectEqual(@as(usize, 1), lines.len);
     try std.testing.expect(std.mem.endsWith(u8, lines[0], "no combat-effective units — objective conceded"));
-}
-
-test "armorOnly and hullsLost read the record, not the prose" {
-    const paint: HullHit = .{ .unit = @enumFromInt(1), .chassis_key = "x", .chassis_name = "X", .armor_before = 90, .armor_after = 70 };
-    try std.testing.expect(paint.armorOnly());
-    const gone: HullHit = .{ .unit = @enumFromInt(2), .chassis_key = "y", .chassis_name = "Y", .armor_before = 10, .armor_after = 0, .destroyed = true, .lost = true };
-    try std.testing.expect(!gone.armorOnly());
-    const hulls = [_]HullHit{ paint, gone };
-    const r: BattleReport = .{
-        .id = @enumFromInt(1),
-        .day = 1,
-        .contract = @enumFromInt(1),
-        .company = @enumFromInt(1),
-        .kind = "k",
-        .enemy_key = "DC",
-        .scenario = "s",
-        .terrain = "t",
-        .weather = "w",
-        .outcome = .defeat,
-        .hulls = &hulls,
-    };
-    try std.testing.expectEqual(@as(u32, 1), r.hullsLost());
-    try std.testing.expectEqual(@as(u32, 0), r.burned("ammo_lrm"));
-}
-
-test "the journal is bounded, and the newest survive" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const al = arena.allocator();
-    const keep = tuning.battle.reports_kept;
-
-    var journal: Journal = .{};
-    // Record two windows' worth: the list stops growing, the oldest go.
-    var i: u32 = 0;
-    while (i < keep * 2) : (i += 1) {
-        try journal.record(al, .{
-            .id = @enumFromInt(i + 1),
-            .day = i,
-            .contract = @enumFromInt(1),
-            .company = @enumFromInt(1),
-            .kind = "raid",
-            .enemy_key = "DC",
-            .scenario = "s",
-            .terrain = "t",
-            .weather = "w",
-            .outcome = .victory,
-        });
-    }
-    try std.testing.expectEqual(@as(usize, keep), journal.kept.items.len);
-
-    // The window holds the most recent engagements, not the first ones.
-    try std.testing.expectEqual(@as(u32, keep * 2 - 1), journal.kept.items[keep - 1].day);
-    try std.testing.expectEqual(@as(u32, keep), journal.kept.items[0].day);
-
-    // A report inside the window is findable; one that aged out is not.
-    try std.testing.expect(journal.find(journal.kept.items[keep - 1].id) != null);
-    try std.testing.expect(journal.find(@enumFromInt(1)) == null);
 }
