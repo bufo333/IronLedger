@@ -85,6 +85,27 @@ than dispatching implementation.
    removed or reordered, and the exact commit is limited to approved
    governance/tracker files. A material scope or policy finding follows the
    new-draft path.
+
+   For a committed change to a decomposition module, the fresh reviewer inspects
+   every new inline import, identifies any duplicate of a file-scope import, and
+   assesses whether an inline import is being used to evade a rule-76 threshold
+   rather than support substantive decomposition. Inline imports remain
+   permitted when justified by the code; this review is evidence-based, not a
+   categorical prohibition. The review records the changed module's threshold
+   and applicable `docs/contract-exceptions.md` registry status: whether it
+   crossed a review threshold, remains listed, gained responsibility while
+   listed, or is claimed to leave the registry. A claimed exit requires the
+   existing substantive simplification, deletion, or decomposition, not
+   formatting, aliases, test relocation, comment deletion, or inline-import
+   placement.
+
+   The reviewer report gives every finding concrete evidence and exactly one
+   explicit disposition: `blocking`, `approved follow-up`, or `non-issue`. A
+   `blocking` finding prevents acceptance and follows the correction or
+   new-draft path. An `approved follow-up` finding identifies the approved
+   artifact or subsequent approved work that owns it; it is not silently
+   accepted as resolved. A `non-issue` finding states the inspected evidence
+   that refutes the concern. Only an empty finding list may report no findings.
 6. Confirmed findings inside approved scope go to an implementer in correction
    mode with the same snapshot. A material behavior, architecture, contract,
    governance, or scope change requires a new draft, hash, approval and frozen
@@ -93,6 +114,13 @@ than dispatching implementation.
    mode. It verifies the artifact and reviewed commit, fast-forwards local
    `main`, and deletes the local branch through permission prompts.
 8. Claude stops. John pushes local `main` after closing Claude Code.
+
+At handoff, the coordinator records and relays the reviewer's findings and
+stated dispositions verbatim. It may verify that every finding has a
+disposition, but cannot reinterpret, collapse, omit, downgrade, or report a
+finding as no findings. It cannot independently report no findings. Acceptance
+requires a reviewer report with no blocking findings and an explicit disposition
+for every finding.
 
 A partial implementer is resumed by task ID. If its session no longer exists,
 continuation mode verifies the same approved artifact and inspects the existing
