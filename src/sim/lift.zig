@@ -8,7 +8,6 @@ const types = @import("../domain/types.zig");
 const GameState = @import("state.zig").GameState;
 const posture = @import("posture.zig");
 const toe = @import("toe.zig");
-const commands = @import("commands.zig");
 const chassis_mod = @import("../domain/chassis.zig");
 
 /// Transports of one kind holding a berth at an HQ.
@@ -168,6 +167,7 @@ pub fn commitLift(gs: *GameState, company_id: types.ForceId) !LiftPlan {
 }
 
 test "planLiftQuery returns the same plan as planLift(commit=false) with OOM-only errors" {
+    const commands = @import("commands.zig");
     var gs = GameState.init(std.testing.allocator, .{ .seed = 42 });
     defer gs.deinit();
     _ = try @import("founding.zig").createCommander(&gs, "Q", .LC, .paymaster);
