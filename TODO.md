@@ -230,3 +230,4 @@ above is complete. Each child checkbox is one branch and lands in order.
 Design ideas, not defects; each needs its design in ROADMAP.md first.
 
 - A mobile field base as a buyable Repair support lance, adding to the repair push beyond the Logistics lance's workshop.
+- Help overlay UX: the help text overflows the screen and cannot scroll; design required first — either a scrollable overlay (up/down key navigation) or contextual help filtered to the current screen's active bindings; both touch the key-hint infrastructure (C12e).
