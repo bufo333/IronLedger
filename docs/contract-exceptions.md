@@ -21,7 +21,7 @@ Owner of every entry: the project owner.
 - **Why not yet:** Each of the 40 sites needs to be either propagated or given a real best-effort reason, and that has to be decided one site at a time.
 - **Scope:** every entry in `docs/verify-contract.baseline`. The ones that already change outcomes:
   - Rating and liquidation:
-    - `rating.zig:157` (`planLift catch continue`)
+    - `rating.zig:159` (`planLift catch continue`)
     - `market.stripValue` (`stripParts catch return 0`)
   - Hidden warnings and results:
     - `checklist.zig:95`
@@ -481,6 +481,7 @@ src/sim/checklist.zig:turnWarnings
 src/sim/cli.zig:errorText
 src/sim/cli.zig:parseVerb
 src/sim/commands.zig
+src/sim/commands.zig:execute
 src/sim/contract_events.zig
 src/sim/contract_events.zig:applyEffectsFor
 src/sim/contract_events.zig:applyEffectsFor#switch

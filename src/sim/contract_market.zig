@@ -9,7 +9,8 @@ const contract = @import("../domain/contract.zig");
 const planet = @import("../domain/planet.zig");
 const market = @import("../econ/market.zig");
 const logistics = @import("../econ/logistics.zig");
-const GameState = @import("state.zig").GameState;
+const state_mod = @import("state.zig");
+const GameState = state_mod.GameState;
 const founding = @import("founding.zig");
 const hq_ops = @import("hq_ops.zig");
 const treasury = @import("treasury.zig");
@@ -17,6 +18,7 @@ const unit_mod = @import("../domain/unit.zig");
 const hq_mod = @import("../domain/hq.zig");
 const person_mod = @import("../domain/person.zig");
 const person_gen = @import("../gen/person_gen.zig");
+const rating = @import("rating.zig");
 
 /// Employer payment multiplier by faction, basis points (data/tables/factions.zon).
 pub fn employerMultBp(faction_key: []const u8) types.Bp {
@@ -101,7 +103,6 @@ pub fn refresh(gs: *GameState) !void {
     const base = types.applyBp(@max(perCompanyOpsCost(gs), tuning.market.min_ops_cost), types.applyBp(market_margin_bp, gs.diff().contract_pay_bp)); // difficulty
 
     // The Dragoons rating sets how many come calling, who, and at what pay.
-    const rating = @import("rating.zig");
     const rt = tuning.rating;
     const rating_idx = rating.currentIndex(gs);
     // One board per HQ: each posts work inside its own ring and
@@ -750,7 +751,6 @@ test "an F-rated outfit hears only from the periphery and never gets a planetary
     while (pit.next()) |e| if (e.value_ptr.role.isCombat()) {
         try e.value_ptr.skills.put(gs.allocator(), e.value_ptr.role.primarySkill(), 7); // … and green as grass: firmly F
     };
-    const rating = @import("rating.zig");
     try std.testing.expectEqual(@as(u8, 0), rating.currentIndex(&gs));
     gs.contract_offers.clearRetainingCapacity();
     try refresh(&gs);
@@ -900,6 +900,55 @@ test "offers are priced per company — a second company does not double every c
     // The whole-outfit figure roughly doubles.
     const whole = treasury.monthlyPayroll(&gs) + treasury.monthlyHullUpkeep(&gs) + maintenanceEstimate(&gs);
     try std.testing.expect(whole > @divTrunc(two * 18, 10));
+}
+
+pub const NegotiateOutcome = enum { improved, hardened, withdrawn };
+
+/// Can this company take this offer? An offer belongs to the board
+/// of the HQ that posted it: only companies based there (their home HQ)
+/// may accept — from home, or redeploying from wherever they stand. Offers
+/// saved before schema v24 carry no board and are open to anyone.
+pub fn offerEligible(gs: *GameState, offer: *const contract.Contract, company: types.ForceId) bool {
+    if (offer.offer_hq == .none) return true;
+    return gs.homeHqFor(company) == offer.offer_hq;
+}
+
+/// CamOps negotiation, one round per offer: 2d6 + reputation edge
+/// + the command office's skill edge against a target eased by standing
+/// with the employer. Success moves the chosen term a step; a miss hardens
+/// the pay; a natural 2 and the employer walks away.
+pub fn negotiate(gs: *GameState, offer_index: usize, term: contract.NegotiableTerm) error{ NoSuchOffer, AlreadyNegotiated, TermAtCap, OutOfMemory }!NegotiateOutcome {
+    if (offer_index >= gs.contract_offers.items.len) return error.NoSuchOffer;
+    const c = &gs.contract_offers.items[offer_index];
+    if (c.negotiated) return error.AlreadyNegotiated;
+    var probe = c.terms;
+    if (!probe.improve(term)) return error.TermAtCap;
+    const t = tuning.contract;
+    const seat: types.HqId = if (gs.hqs.count() > 0) gs.hqs.keys()[0] else .none;
+    const office = if (seat != .none) hq_ops.hqStaff(gs, seat, .admin_command) else hq_ops.StaffSummary{};
+    const office_edge: i32 = if (office.count == 0) -1 else 5 - @as(i32, office.best_skill);
+    // The letter at the table: F −2 … A* +3.
+    const rep_edge: i32 = @as(i32, rating.currentIndex(gs)) - tuning.rating.negotiation_offset;
+    const target: i32 = t.negotiation_target - @divTrunc(gs.standing(c.employer_key), t.negotiation_standing_per);
+    const raw = gs.rng.roll2d6(.market);
+    const total: i32 = @as(i32, raw) + office_edge + rep_edge;
+    c.negotiated = true;
+    const ctx: state_mod.LogCtx = .{};
+    if (raw == 2) {
+        try gs.log(.contract, ctx, "[negotiation] {s} {s} on {s}: the employer walks away from the table (natural 2)", .{ c.employer_key, @tagName(c.kind), c.planet_key });
+        _ = gs.contract_offers.orderedRemove(offer_index);
+        return .withdrawn;
+    }
+    if (total >= target) {
+        _ = c.terms.improve(term);
+        try gs.log(.contract, ctx, "[negotiation] {s} {s} on {s}: {s} improved ({d}+{d}+{d} vs {d}) — advance {d}%, salvage {d}%, transport {d}%, support {d}%, {s} rights, {d}/mo", .{
+            c.employer_key, @tagName(c.kind), c.planet_key, @tagName(term), raw, office_edge, rep_edge, target, c.terms.advance_pct, c.terms.salvage_pct, c.terms.transport_pct, c.terms.overhead_pct, @tagName(c.terms.command_rights), c.terms.base_pay_month,
+        });
+        return .improved;
+    }
+    c.terms.base_pay_month = types.applyBp(c.terms.base_pay_month, t.negotiation_fail_pay_bp);
+    try gs.log(.contract, ctx, "[negotiation] {s} {s} on {s}: they hold firm on {s} and shave the pay 5% ({d}+{d}+{d} vs {d})", .{ c.employer_key, @tagName(c.kind), c.planet_key, @tagName(term), raw, office_edge, rep_edge, target });
+    return .hardened;
 }
 
 test "a veteran five-lance opposition pays more than a green four-lance one" {

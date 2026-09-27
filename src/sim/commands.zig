@@ -482,7 +482,10 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
         .cover_shortfall => |c| return execCoverShortfall(gs, c),
         .toggle_mothball => |unit_id| return execToggleMothball(gs, unit_id),
         .confirm_orders => |id| return execConfirmOrders(gs, id),
-        .emergency_resupply => |id| return emergencyResupply(gs, id),
+        .emergency_resupply => |id| {
+            const tons = field_supply.emergencyResupply(gs, id) catch |err| return @errorCast(err);
+            return .{ .tons_moved = tons };
+        },
         .cycle_roe => |co| return execCycleRoe(gs, co),
         .cycle_role => |fid| return execCycleRole(gs, fid),
         .cycle_difficulty => |dir| return execCycleDifficulty(gs, dir),
@@ -495,8 +498,18 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
         .rename_force => |r| return execRenameForce(gs, r),
         .set_emblem => |e| return execSetEmblem(gs, e),
         .create_commander => |c| return execCreateCommander(gs, c),
-        .accept_contract => |a| return acceptContract(gs, a.offer_index, a.company),
-        .negotiate => |n| return negotiate(gs, n.offer_index, n.term),
+        .accept_contract => |a| {
+            contract_control.acceptContract(gs, a.offer_index, a.company) catch |err| return @errorCast(err);
+            return .{};
+        },
+        .negotiate => |n| {
+            const outcome = contract_market.negotiate(gs, n.offer_index, n.term) catch |err| return @errorCast(err);
+            return .{ .negotiation = switch (outcome) {
+                .improved => .improved,
+                .hardened => .hardened,
+                .withdrawn => .withdrawn,
+            } };
+        },
         .train_ability => |ta| return execTrainAbility(gs, ta),
         .promote => |pr| return execPromote(gs, pr),
         .order_part => |o| return orderPart(gs, o.part_key, o.quantity, o.dest),
@@ -1800,8 +1813,8 @@ fn reachable(gs: *GameState, world: *const planet_mod.Planet) bool {
 
 /// Days between two companies' current locations (0 = co-located).
 fn travelDays(gs: *GameState, from_company: types.ForceId, to_company: types.ForceId) u32 {
-    const a = planet_mod.find(sitePlanetKey(gs, .{ .company = from_company }) orelse "") orelse return 0;
-    const b = planet_mod.find(sitePlanetKey(gs, .{ .company = to_company }) orelse "") orelse return 0;
+    const a = planet_mod.find(sites.sitePlanetKey(gs, .{ .company = from_company }) orelse "") orelse return 0;
+    const b = planet_mod.find(sites.sitePlanetKey(gs, .{ .company = to_company }) orelse "") orelse return 0;
     if (a == b) return 0;
     return logistics.daysBetween(a, b);
 }
@@ -1921,19 +1934,6 @@ fn validateTreasury(gs: *GameState, t: state_mod.Treasury) Error!void {
     }
 }
 
-/// The planet a site physically sits on.
-fn sitePlanetKey(gs: *GameState, site: types.Site) ?[]const u8 {
-    return switch (site) {
-        .outfit => if (gs.hqs.count() > 0) gs.hqs.values()[0].planet_key else null,
-        .hq => |id| if (gs.hqs.getPtr(id)) |h| h.planet_key else null,
-        .company => |id| blk: {
-            if (gs.deploymentContract(id)) |c| break :blk c.planet_key;
-            if (gs.force(id)) |f| if (f.location_planet) |p| break :blk p;
-            break :blk if (gs.hqs.getPtr(gs.homeHqFor(id))) |h| h.planet_key else null;
-        },
-    };
-}
-
 fn validateSite(gs: *GameState, site: types.Site) Error!void {
     switch (site) {
         .outfit => {},
@@ -1950,35 +1950,6 @@ fn checkRoom(gs: *GameState, site: types.Site, part_key: []const u8, quantity: u
     const cap = sites.siteCapacityTons(gs, site) orelse return;
     const used = sites.siteTons(gs, site) + field_supply.inboundTonsTo(gs, site);
     if (used + quantity * part_mod.tons(part_key) > cap) return Error.StorageFull;
-}
-
-/// Emergency resupply: the quote from `field_supply.rushQuote`,
-/// checked against truck room and local funds before anything moves.
-fn emergencyResupply(gs: *GameState, id: types.ContractId) Error!Result {
-    const c = gs.contracts.getPtr(id) orelse return Error.UnknownContract;
-    if (c.status != .active) return Error.NoContact;
-    var arena = std.heap.ArenaAllocator.init(gs.scratch());
-    defer arena.deinit();
-    const rush = try field_supply.rushQuote(arena.allocator(), gs, c);
-    if (rush.lines.len == 0) return Error.NothingToRush;
-    const site = sites.siteForForce(gs, c.assigned_company);
-    if (sites.siteCapacityTons(gs, site)) |cap| {
-        if (sites.siteTons(gs, site) + field_supply.inboundTonsTo(gs, site) + rush.tons > cap) return Error.StorageFull;
-    }
-    if (gs.treasuryBalance(.{ .company = c.assigned_company }) < rush.price) return Error.CompanyFundsShort;
-    for (rush.lines) |l| try gs.addStock(site, l.key, 0); // every stock slot exists before money moves
-    try gs.reserveLedger(1);
-    try treasury.debit(gs, .{ .company = c.assigned_company }, .{
-        .day = gs.clock.day_index,
-        .amount = -rush.price,
-        .category = if (c.beachhead) .local_supplies else .supplies,
-        .company = c.assigned_company,
-        .contract = id,
-        .note = "emergency resupply",
-    });
-    for (rush.lines) |l| gs.addStock(site, l.key, l.qty) catch unreachable; // slots reserved above
-    try gs.log(.delivery, .{ .company = c.assigned_company, .contract = id }, "[resupply] emergency purchase on {s}: {d}t for {d} c-bills", .{ c.planet_key, rush.tons, rush.price });
-    return .{ .tons_moved = rush.tons };
 }
 
 /// A freight quote: what a shipment costs, how long it takes, and the
@@ -1998,8 +1969,8 @@ const Freight = struct {
 /// caller runs `commitFreight` once the payment has cleared. The route
 /// lives in `alloc`.
 fn freightQuote(gs: *GameState, alloc: std.mem.Allocator, from: types.Site, to: types.Site, tons_moved: u32) Error!Freight {
-    const a = planet_mod.find(sitePlanetKey(gs, from) orelse "") orelse return .{ .cost = 0, .days = logistics.same_world_days };
-    const b = planet_mod.find(sitePlanetKey(gs, to) orelse "") orelse return .{ .cost = 0, .days = logistics.same_world_days };
+    const a = planet_mod.find(sites.sitePlanetKey(gs, from) orelse "") orelse return .{ .cost = 0, .days = logistics.same_world_days };
+    const b = planet_mod.find(sites.sitePlanetKey(gs, to) orelse "") orelse return .{ .cost = 0, .days = logistics.same_world_days };
     var route: []const network.RouteHop = &.{};
     var days: u32 = logistics.same_world_days;
     var cost: types.CBills = 0;
@@ -2238,225 +2209,6 @@ fn orderPart(gs: *GameState, part_key: []const u8, quantity: u32, dest_opt: ?typ
         .status = .in_transit,
     });
     return .{};
-}
-
-pub const LiftPlan = struct {
-    needed: u32 = 0,
-    carried: u32 = 0,
-    covered_bp: types.Bp = 0,
-    own_jumpship: bool = false,
-    ships: u32 = 0,
-};
-
-/// How much of a company the outfit's own ships can lift.
-/// At home: the crewed, idle ships berthed at the home HQ. Away (a
-/// redeploy from the field): the ships already carrying it. `commit`
-/// marks the ships as sailing with the company (`force` = company).
-pub fn planLift(gs: *GameState, company_id: types.ForceId, commit: bool) Error!LiftPlan {
-    var plan: LiftPlan = .{};
-    var need: [3]u32 = .{ 0, 0, 0 };
-    var uit = gs.units.iterator();
-    while (uit.next()) |e| {
-        const u = e.value_ptr;
-        if (gs.companyOf(u.force) != company_id or u.isParked() or u.status == .in_transit) continue;
-        const bay = u.kind.bayKind() orelse continue;
-        need[@intFromEnum(bay)] += 1;
-    }
-    plan.needed = need[0] + need[1] + need[2];
-    if (plan.needed == 0) return plan;
-    const at_home = posture.isCompanyHome(gs, company_id);
-    const home = gs.homeHqFor(company_id);
-    var have: [3]u32 = .{ 0, 0, 0 };
-    var ships: std.ArrayListUnmanaged(types.UnitId) = .empty;
-    defer ships.deinit(gs.allocator());
-    var sit = gs.units.iterator();
-    while (sit.next()) |e| {
-        const u = e.value_ptr;
-        if (!u.kind.isTransport() or u.status == .destroyed) continue;
-        const usable = if (at_home) (u.berth_hq == home and lift_mod.transportAvailable(gs, u)) else u.force == company_id;
-        if (!usable) continue;
-        const design = chassis_mod.find(u.chassis_key) orelse continue;
-        switch (u.kind) {
-            .dropship => {
-                // Only ships that carry something come along.
-                const adds = @min(design.mek_bays, need[0] -| have[0]) + @min(design.asf_bays, need[1] -| have[1]) + @min(design.vehicle_bays, need[2] -| have[2]);
-                if (adds == 0) continue;
-                have[0] += design.mek_bays;
-                have[1] += design.asf_bays;
-                have[2] += design.vehicle_bays;
-                plan.ships += 1;
-                try ships.append(gs.allocator(), u.id);
-            },
-            .jumpship => plan.own_jumpship = true,
-            else => {},
-        }
-    }
-    plan.carried = @min(have[0], need[0]) + @min(have[1], need[1]) + @min(have[2], need[2]);
-    plan.covered_bp = @intCast(@as(u64, plan.carried) * 10_000 / plan.needed);
-    if (commit and at_home) {
-        for (ships.items) |sid| try toe.moveUnitToForce(gs, sid, company_id);
-    }
-    return plan;
-}
-
-fn commitLift(gs: *GameState, company_id: types.ForceId) Error!LiftPlan {
-    return planLift(gs, company_id, true) catch |err| switch (err) {
-        error.OutOfMemory => return error.OutOfMemory,
-        else => return .{},
-    };
-}
-
-/// CamOps negotiation, one round per offer: 2d6 + reputation edge
-/// + the command office's skill edge against a target eased by standing
-/// with the employer. Success moves the chosen term a step; a miss hardens
-/// the pay; a natural 2 and the employer walks away.
-fn negotiate(gs: *GameState, offer_index: usize, term: contract_mod.NegotiableTerm) Error!Result {
-    if (offer_index >= gs.contract_offers.items.len) return Error.NoSuchOffer;
-    const c = &gs.contract_offers.items[offer_index];
-    if (c.negotiated) return Error.AlreadyNegotiated;
-    var probe = c.terms;
-    if (!probe.improve(term)) return Error.TermAtCap;
-    const t = tuning.contract;
-    const seat: types.HqId = if (gs.hqs.count() > 0) gs.hqs.keys()[0] else .none;
-    const office = if (seat != .none) hq_ops.hqStaff(gs, seat, .admin_command) else hq_ops.StaffSummary{};
-    const office_edge: i32 = if (office.count == 0) -1 else 5 - @as(i32, office.best_skill);
-    // The letter at the table: F −2 … A* +3.
-    const rep_edge: i32 = @as(i32, @import("rating.zig").currentIndex(gs)) - tuning.rating.negotiation_offset;
-    const target: i32 = t.negotiation_target - @divTrunc(gs.standing(c.employer_key), t.negotiation_standing_per);
-    const raw = gs.rng.roll2d6(.market);
-    const total: i32 = @as(i32, raw) + office_edge + rep_edge;
-    c.negotiated = true;
-    const ctx: state_mod.LogCtx = .{};
-    if (raw == 2) {
-        try gs.log(.contract, ctx, "[negotiation] {s} {s} on {s}: the employer walks away from the table (natural 2)", .{ c.employer_key, @tagName(c.kind), c.planet_key });
-        _ = gs.contract_offers.orderedRemove(offer_index);
-        return .{ .negotiation = .withdrawn };
-    }
-    if (total >= target) {
-        _ = c.terms.improve(term);
-        try gs.log(.contract, ctx, "[negotiation] {s} {s} on {s}: {s} improved ({d}+{d}+{d} vs {d}) — advance {d}%, salvage {d}%, transport {d}%, support {d}%, {s} rights, {d}/mo", .{
-            c.employer_key, @tagName(c.kind), c.planet_key, @tagName(term), raw, office_edge, rep_edge, target, c.terms.advance_pct, c.terms.salvage_pct, c.terms.transport_pct, c.terms.overhead_pct, @tagName(c.terms.command_rights), c.terms.base_pay_month,
-        });
-        return .{ .negotiation = .improved };
-    }
-    c.terms.base_pay_month = types.applyBp(c.terms.base_pay_month, t.negotiation_fail_pay_bp);
-    try gs.log(.contract, ctx, "[negotiation] {s} {s} on {s}: they hold firm on {s} and shave the pay 5% ({d}+{d}+{d} vs {d})", .{ c.employer_key, @tagName(c.kind), c.planet_key, @tagName(term), raw, office_edge, rep_edge, target });
-    return .{ .negotiation = .hardened };
-}
-
-/// Can this company take this offer? An offer belongs to the board
-/// of the HQ that posted it: only companies based there (their home HQ)
-/// may accept — from home, or redeploying from wherever they stand. Offers
-/// saved before schema v24 carry no board and are open to anyone.
-pub fn offerEligible(gs: *GameState, offer: *const contract_mod.Contract, company: types.ForceId) bool {
-    if (offer.offer_hq == .none) return true;
-    return gs.homeHqFor(company) == offer.offer_hq;
-}
-
-fn acceptContract(gs: *GameState, offer_index: usize, company_id: types.ForceId) Error!Result {
-    if (offer_index >= gs.contract_offers.items.len) return Error.NoSuchOffer;
-    const company = gs.force(company_id) orelse return Error.UnknownForce;
-    if (company.echelon != .company) return Error.NotACompany;
-    if (!offerEligible(gs, &gs.contract_offers.items[offer_index], company_id)) return Error.OutOfRange;
-    var cit = gs.contracts.iterator();
-    while (cit.next()) |entry| {
-        const c = entry.value_ptr;
-        if (c.assigned_company == company_id and c.isRunning()) return Error.CompanyDeployed;
-    }
-
-    if (company.return_eta_day != null) return Error.CompanyInTransit;
-
-    var c = gs.contract_offers.orderedRemove(offer_index);
-    const id: types.ContractId = @enumFromInt(gs.next_contract_id);
-    gs.next_contract_id += 1;
-    c.id = id;
-    c.status = .transit;
-    c.assigned_company = company_id;
-    // Transit from wherever the company stands (a redeploy): the
-    // world it's idling on, else its home HQ.
-    var jumps: u32 = planet_mod.jumpsForLy(c.dist_ly);
-    if (planet_mod.find(sitePlanetKey(gs, .{ .company = company_id }) orelse "")) |from| {
-        if (planet_mod.find(c.planet_key)) |to| jumps = planet_mod.jumpsBetween(from, to);
-    }
-    c.transit_days = if (jumps == 0) logistics.same_world_days else logistics.transitDays(jumps);
-    c.arrive_day = gs.clock.day_index + c.transit_days;
-    contract_control.onAccept(gs, &c);
-    c.monthly_net = @divTrunc(c.terms.base_pay_month * (100 - @as(i64, c.terms.advance_pct)), 100);
-
-    // Signing money in, transit freight out (employer covers transport_pct;
-    // the quartermaster's 2% shaves the rest).
-    const signing = c.terms.advanceAmount() + c.terms.signing_bonus;
-    try gs.postTransaction(.{
-        .day = gs.clock.day_index,
-        .amount = signing,
-        .category = .advance,
-        .company = company_id,
-        .contract = id,
-        .note = "contract advance + signing bonus",
-    });
-    const freight_base: types.CBills = @as(types.CBills, c.dist_ly) * tuning.logistics.freight_per_ly;
-    var freight = @divTrunc(freight_base * (100 - @as(i64, c.terms.transport_pct)), 100);
-    freight = types.applyBp(freight, commander_mod.costMultBp(gs.commander, .freight));
-    // Your own ships lift what they can: every hull a berthed
-    // dropship carries is charter you don't pay; a jumpship of your own
-    // removes the collar fee too. The ships sail with the company.
-    const lift = try commitLift(gs, company_id);
-    freight = types.applyBp(freight, logistics.transitFreightBp(lift.covered_bp, lift.own_jumpship));
-    if (freight > 0) {
-        try gs.postTransaction(.{
-            .day = gs.clock.day_index,
-            .amount = -freight,
-            .category = .transport_charter,
-            .company = company_id,
-            .contract = id,
-            .note = if (lift.covered_bp > 0) "outbound transit charter (own lift credited)" else "outbound transit charter",
-        });
-    }
-    if (lift.ships > 0) try gs.log(.delivery, .{ .company = company_id, .contract = id }, "[lift] {d} of {d} hulls ride the outfit's own ships ({d} dropship{s}{s}) — charter {s}", .{
-        lift.carried, lift.needed, lift.ships, if (lift.ships == 1) "" else "s", if (lift.own_jumpship) ", own jumpship" else "", if (freight > 0) "reduced" else "waived",
-    });
-    try gs.contracts.put(gs.allocator(), id, c);
-    if (gs.force(company_id)) |f| f.location_planet = null; // underway
-
-    // Kit out from the home warehouse before the dropships lift;
-    // a company redeploying from the field goes with what's in its trucks.
-    try field_supply.loadOutCompany(gs, company_id);
-    try deploymentDefaults(gs, company_id, signing);
-    const site: types.Site = .{ .company = company_id };
-    try gs.log(.delivery, .{ .company = company_id, .contract = id }, "[loadout] trucks loaded: {d}t of {d}t — {d}t provisions, {d}t LRM, {d}t SRM, {d}t AC/5", .{
-        sites.siteTons(gs, site),          sites.siteCapacityTons(gs, site) orelse 0,
-        gs.stockCount(site, "provisions"), gs.stockCount(site, "ammo_lrm"),
-        gs.stockCount(site, "ammo_srm"),   gs.stockCount(site, "ammo_ac5"),
-    });
-    return .{};
-}
-
-/// Defaults a deployment gets unless the player set their own:
-/// a resupply policy on the field plan, a share of the advance as local
-/// operating funds (handed over on the ramp, no courier), and a standing
-/// top-up so the float never runs dry. Every one is clearable.
-fn deploymentDefaults(gs: *GameState, company_id: types.ForceId, signing: types.CBills) Error!void {
-    var has_supply = false;
-    for (gs.supply_policies.items) |sp| if (sp.company == company_id) {
-        has_supply = true;
-    };
-    if (!has_supply) {
-        try gs.supply_policies.append(gs.allocator(), .{ .company = company_id, .min_days = tuning.field_supply.default_min_days, .tons = 0 });
-    }
-    var has_cash = false;
-    for (gs.policies.items) |p| if (std.meta.eql(p.entity, .{ .company = company_id })) {
-        has_cash = true;
-    };
-    if (!has_cash) {
-        try gs.policies.append(gs.allocator(), .{ .entity = .{ .company = company_id }, .floor = tuning.finance.field_policy_floor, .monthly_cap = tuning.finance.field_policy_cap });
-    }
-    const float = types.applyBp(signing, tuning.finance.field_float_bp);
-    if (float > 0 and gs.funds >= float) {
-        try treasury.transferFunds(gs, .outfit, .{ .company = company_id }, float, 0);
-    }
-    try gs.log(.finance, .{ .company = company_id }, "[deploy] defaults: resupply every {d} days on the field plan, {d} local operating funds, top-up policy {d}/{d} per month — `supplypolicy`/`policy` with 0 clear them", .{
-        tuning.field_supply.default_min_days, float, tuning.finance.field_policy_floor, tuning.finance.field_policy_cap,
-    });
 }
 
 /// The turn-hold as an error. The checklist decides what
@@ -4198,11 +3950,11 @@ test "ships need berths, lift the company for less charter, and come home with i
         const c = gs.contract_offers.items[offer];
         break :blk @divTrunc(@as(types.CBills, c.dist_ly) * 2_000 * (100 - @as(i64, c.terms.transport_pct)), 100);
     };
-    try std.testing.expectEqual(@as(types.Bp, 0), (try planLift(&gs, co, false)).covered_bp);
+    try std.testing.expectEqual(@as(types.Bp, 0), (try lift_mod.planLift(&gs, co, false)).covered_bp);
     // Crew it: a dropship crew in the pilot seat.
     const dropship_pilot = try gs.hirePerson("Ina", "Voss", .dropship_crew);
     try crew.assignSlot(&gs, ship, .pilot, dropship_pilot);
-    const plan = try planLift(&gs, co, false);
+    const plan = try lift_mod.planLift(&gs, co, false);
     try std.testing.expectEqual(@as(u32, 1), plan.ships);
     try std.testing.expect(plan.carried >= 4 and plan.carried <= plan.needed);
     try std.testing.expect(plan.covered_bp > 0 and plan.covered_bp < 10_000);
@@ -4217,7 +3969,7 @@ test "ships need berths, lift the company for less charter, and come home with i
     try std.testing.expect(charter_paid > 0 and charter_paid < types.applyBp(charter_full, commander_mod.costMultBp(gs.commander, .freight)));
     try std.testing.expectEqual(co, gs.unit(ship).?.force);
     try std.testing.expect(!lift_mod.transportAvailable(&gs, gs.unit(ship).?));
-    try std.testing.expectEqual(@as(u32, 0), (try planLift(&gs, co, false)).ships -| 1); // still one ship, the one carrying it
+    try std.testing.expectEqual(@as(u32, 0), (try lift_mod.planLift(&gs, co, false)).ships -| 1); // still one ship, the one carrying it
 
     // Home again: the ship returns to its berth.
     const cid = gs.contracts.keys()[0];
@@ -4241,7 +3993,7 @@ test "ships need berths, lift the company for less charter, and come home with i
     try std.testing.expectEqual(@as(u8, 3), network.findLink(&gs, hq, far).?.level);
     try std.testing.expectEqual(@as(types.CBills, 0), network.findLink(&gs, hq, far).?.monthlyCost());
     // With a jumpship of its own the company's next lift waives the collar fee too.
-    try std.testing.expect((try planLift(&gs, co, false)).own_jumpship);
+    try std.testing.expect((try lift_mod.planLift(&gs, co, false)).own_jumpship);
 }
 
 test "one negotiation round per offer — improved, hardened, or withdrawn; never a second" {
@@ -4747,7 +4499,7 @@ test "one board per HQ — offers inside its reach, taken only by companies base
     }
     try std.testing.expect(on_home > 0 and on_far > 0);
     // Alpha cannot take the far board's work; Bravo can.
-    try std.testing.expect(!offerEligible(&gs, &gs.contract_offers.items[far_offer.?], alpha));
+    try std.testing.expect(!contract_market.offerEligible(&gs, &gs.contract_offers.items[far_offer.?], alpha));
     try std.testing.expectError(Error.OutOfRange, execute(&gs, .{ .accept_contract = .{ .offer_index = far_offer.?, .company = alpha } }));
     try std.testing.expectError(Error.OutOfRange, execute(&gs, .{ .accept_contract = .{ .offer_index = home_offer.?, .company = bravo } }));
     _ = try execute(&gs, .{ .accept_contract = .{ .offer_index = far_offer.?, .company = bravo } });

@@ -2567,8 +2567,7 @@ pub fn berths(alloc: Alloc, gs: *GameState, hq_id: types.HqId) ![][]const u8 {
 
 /// What the outfit's own ships would lift for a company's next contract.
 pub fn liftText(alloc: Alloc, gs: *GameState, company: types.ForceId) ![]const u8 {
-    const commands = @import("commands.zig");
-    const plan = commands.planLift(gs, company, false) catch return "";
+    const plan = @import("lift.zig").planLift(gs, company, false) catch return "";
     if (plan.needed == 0) return "";
     if (plan.ships == 0 and !plan.own_jumpship) return "lift: charter for every hull (no dropship of your own at the home berth)";
     const bp = @import("../econ/logistics.zig").transitFreightBp(plan.covered_bp, plan.own_jumpship);
@@ -4463,7 +4462,7 @@ pub fn offerCandidates(alloc: Alloc, gs: *GameState, offer_index: usize) ![]Cand
         var from_key: ?[]const u8 = null;
         var stands: []const u8 = "home";
         var busy = false;
-        if (!@import("commands.zig").offerEligible(gs, &offer, r.company)) {
+        if (!@import("contract_market.zig").offerEligible(gs, &offer, r.company)) {
             // Another HQ's board.
             why = try std.fmt.allocPrint(alloc, "based at {s}, not {s}", .{ try hqName(alloc, gs, gs.homeHqFor(r.company)), try hqName(alloc, gs, offer.offer_hq) });
         } else switch (posture.companyPosture(gs, r.company)) {

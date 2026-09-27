@@ -148,7 +148,6 @@ pub fn report(gs: *GameState) Report {
     }
     // Transport: own lift for the companies at home, own jumpship.
     {
-        const commands = @import("commands.zig");
         var covered_sum: i64 = 0;
         var companies: u32 = 0;
         var jumpship = false;
@@ -157,7 +156,7 @@ pub fn report(gs: *GameState) Report {
             const f = e.value_ptr;
             if (f.echelon != .company) continue;
             companies += 1;
-            const plan = commands.planLift(gs, f.id, false) catch continue;
+            const plan = @import("lift.zig").planLift(gs, f.id, false) catch continue;
             covered_sum += plan.covered_bp;
             if (plan.own_jumpship) jumpship = true;
         }

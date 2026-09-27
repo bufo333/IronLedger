@@ -16,9 +16,16 @@ const chassis_mod = @import("../domain/chassis.zig");
 const planet_mod = @import("../domain/planet.zig");
 const logistics = @import("../econ/logistics.zig");
 const toe = @import("toe.zig");
-const GameState = @import("state.zig").GameState;
+const state_mod = @import("state.zig");
+const GameState = state_mod.GameState;
 const founding = @import("founding.zig");
 const readiness_m = @import("readiness.zig");
+const lift_mod = @import("lift.zig");
+const field_supply = @import("field_supply.zig");
+const sites = @import("sites.zig");
+const treasury = @import("treasury.zig");
+const commander_mod = @import("../domain/commander.zig");
+const contract_market = @import("contract_market.zig");
 
 pub const grace_days: u32 = tuning.contract.grace_days;
 pub const cooling_days: u32 = tuning.contract.cooling_days;
@@ -486,6 +493,111 @@ test "a performance failure at term is .failed — no clawback, no cooling, VP c
     try std.testing.expect(gs.standing("FS") < 0);
     // No clawback: whatever else the day posted, nothing is filed as one.
     try std.testing.expectEqual(@as(i64, 0), @import("../econ/finance.zig").summarize(&gs.ledger, 0, 1000, .all).category(.breach_clawback));
+}
+
+pub fn acceptContract(gs: *GameState, offer_index: usize, company_id: types.ForceId) !void {
+    if (offer_index >= gs.contract_offers.items.len) return error.NoSuchOffer;
+    const company = gs.force(company_id) orelse return error.UnknownForce;
+    if (company.echelon != .company) return error.NotACompany;
+    if (!contract_market.offerEligible(gs, &gs.contract_offers.items[offer_index], company_id)) return error.OutOfRange;
+    var cit = gs.contracts.iterator();
+    while (cit.next()) |entry| {
+        const c = entry.value_ptr;
+        if (c.assigned_company == company_id and c.isRunning()) return error.CompanyDeployed;
+    }
+
+    if (company.return_eta_day != null) return error.CompanyInTransit;
+
+    var c = gs.contract_offers.orderedRemove(offer_index);
+    const id: types.ContractId = @enumFromInt(gs.next_contract_id);
+    gs.next_contract_id += 1;
+    c.id = id;
+    c.status = .transit;
+    c.assigned_company = company_id;
+    // Transit from wherever the company stands (a redeploy): the
+    // world it's idling on, else its home HQ.
+    var jumps: u32 = planet_mod.jumpsForLy(c.dist_ly);
+    if (planet_mod.find(sites.sitePlanetKey(gs, .{ .company = company_id }) orelse "")) |from| {
+        if (planet_mod.find(c.planet_key)) |to| jumps = planet_mod.jumpsBetween(from, to);
+    }
+    c.transit_days = if (jumps == 0) logistics.same_world_days else logistics.transitDays(jumps);
+    c.arrive_day = gs.clock.day_index + c.transit_days;
+    onAccept(gs, &c);
+    c.monthly_net = @divTrunc(c.terms.base_pay_month * (100 - @as(i64, c.terms.advance_pct)), 100);
+
+    // Signing money in, transit freight out (employer covers transport_pct;
+    // the quartermaster's 2% shaves the rest).
+    const signing = c.terms.advanceAmount() + c.terms.signing_bonus;
+    try gs.postTransaction(.{
+        .day = gs.clock.day_index,
+        .amount = signing,
+        .category = .advance,
+        .company = company_id,
+        .contract = id,
+        .note = "contract advance + signing bonus",
+    });
+    const freight_base: types.CBills = @as(types.CBills, c.dist_ly) * tuning.logistics.freight_per_ly;
+    var freight = @divTrunc(freight_base * (100 - @as(i64, c.terms.transport_pct)), 100);
+    freight = types.applyBp(freight, commander_mod.costMultBp(gs.commander, .freight));
+    // Your own ships lift what they can: every hull a berthed
+    // dropship carries is charter you don't pay; a jumpship of your own
+    // removes the collar fee too. The ships sail with the company.
+    const lift = try lift_mod.commitLift(gs, company_id);
+    freight = types.applyBp(freight, logistics.transitFreightBp(lift.covered_bp, lift.own_jumpship));
+    if (freight > 0) {
+        try gs.postTransaction(.{
+            .day = gs.clock.day_index,
+            .amount = -freight,
+            .category = .transport_charter,
+            .company = company_id,
+            .contract = id,
+            .note = if (lift.covered_bp > 0) "outbound transit charter (own lift credited)" else "outbound transit charter",
+        });
+    }
+    if (lift.ships > 0) try gs.log(.delivery, .{ .company = company_id, .contract = id }, "[lift] {d} of {d} hulls ride the outfit's own ships ({d} dropship{s}{s}) — charter {s}", .{
+        lift.carried, lift.needed, lift.ships, if (lift.ships == 1) "" else "s", if (lift.own_jumpship) ", own jumpship" else "", if (freight > 0) "reduced" else "waived",
+    });
+    try gs.contracts.put(gs.allocator(), id, c);
+    if (gs.force(company_id)) |f| f.location_planet = null; // underway
+
+    // Kit out from the home warehouse before the dropships lift;
+    // a company redeploying from the field goes with what's in its trucks.
+    try field_supply.loadOutCompany(gs, company_id);
+    try deploymentDefaults(gs, company_id, signing);
+    const site: types.Site = .{ .company = company_id };
+    try gs.log(.delivery, .{ .company = company_id, .contract = id }, "[loadout] trucks loaded: {d}t of {d}t — {d}t provisions, {d}t LRM, {d}t SRM, {d}t AC/5", .{
+        sites.siteTons(gs, site),          sites.siteCapacityTons(gs, site) orelse 0,
+        gs.stockCount(site, "provisions"), gs.stockCount(site, "ammo_lrm"),
+        gs.stockCount(site, "ammo_srm"),   gs.stockCount(site, "ammo_ac5"),
+    });
+}
+
+/// Defaults a deployment gets unless the player set their own:
+/// a resupply policy on the field plan, a share of the advance as local
+/// operating funds (handed over on the ramp, no courier), and a standing
+/// top-up so the float never runs dry. Every one is clearable.
+fn deploymentDefaults(gs: *GameState, company_id: types.ForceId, signing: types.CBills) !void {
+    var has_supply = false;
+    for (gs.supply_policies.items) |sp| if (sp.company == company_id) {
+        has_supply = true;
+    };
+    if (!has_supply) {
+        try gs.supply_policies.append(gs.allocator(), .{ .company = company_id, .min_days = tuning.field_supply.default_min_days, .tons = 0 });
+    }
+    var has_cash = false;
+    for (gs.policies.items) |p| if (std.meta.eql(p.entity, .{ .company = company_id })) {
+        has_cash = true;
+    };
+    if (!has_cash) {
+        try gs.policies.append(gs.allocator(), .{ .entity = .{ .company = company_id }, .floor = tuning.finance.field_policy_floor, .monthly_cap = tuning.finance.field_policy_cap });
+    }
+    const float = types.applyBp(signing, tuning.finance.field_float_bp);
+    if (float > 0 and gs.funds >= float) {
+        try treasury.transferFunds(gs, .outfit, .{ .company = company_id }, float, 0);
+    }
+    try gs.log(.finance, .{ .company = company_id }, "[deploy] defaults: resupply every {d} days on the field plan, {d} local operating funds, top-up policy {d}/{d} per month — `supplypolicy`/`policy` with 0 clear them", .{
+        tuning.field_supply.default_min_days, float, tuning.finance.field_policy_floor, tuning.finance.field_policy_cap,
+    });
 }
 
 test "an offer carries its opposition, and acceptance sizes the pool from it" {

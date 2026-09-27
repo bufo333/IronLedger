@@ -17,6 +17,7 @@ const part_mod = @import("../domain/part.zig");
 const sites = @import("sites.zig");
 const toe = @import("toe.zig");
 const GameState = @import("state.zig").GameState;
+const treasury = @import("treasury.zig");
 
 /// Truck budget per category, in percent of field capacity: ammo, armor
 /// and medical are capped so provisions — the one line that burns every
@@ -284,6 +285,35 @@ pub fn inboundQty(gs: *GameState, company: types.ForceId, key: []const u8) u32 {
         if (o.inFlight()) n += o.quantity;
     }
     return n;
+}
+
+/// Emergency resupply: the quote from `rushQuote`,
+/// checked against truck room and local funds before anything moves.
+pub fn emergencyResupply(gs: *GameState, id: types.ContractId) !u32 {
+    const c = gs.contracts.getPtr(id) orelse return error.UnknownContract;
+    if (c.status != .active) return error.NoContact;
+    var arena = std.heap.ArenaAllocator.init(gs.scratch());
+    defer arena.deinit();
+    const rush = try rushQuote(arena.allocator(), gs, c);
+    if (rush.lines.len == 0) return error.NothingToRush;
+    const site = sites.siteForForce(gs, c.assigned_company);
+    if (sites.siteCapacityTons(gs, site)) |cap| {
+        if (sites.siteTons(gs, site) + inboundTonsTo(gs, site) + rush.tons > cap) return error.StorageFull;
+    }
+    if (gs.treasuryBalance(.{ .company = c.assigned_company }) < rush.price) return error.CompanyFundsShort;
+    for (rush.lines) |l| try gs.addStock(site, l.key, 0); // every stock slot exists before money moves
+    try gs.reserveLedger(1);
+    try treasury.debit(gs, .{ .company = c.assigned_company }, .{
+        .day = gs.clock.day_index,
+        .amount = -rush.price,
+        .category = if (c.beachhead) .local_supplies else .supplies,
+        .company = c.assigned_company,
+        .contract = id,
+        .note = "emergency resupply",
+    });
+    for (rush.lines) |l| gs.addStock(site, l.key, l.qty) catch unreachable; // slots reserved above
+    try gs.log(.delivery, .{ .company = c.assigned_company, .contract = id }, "[resupply] emergency purchase on {s}: {d}t for {d} c-bills", .{ c.planet_key, rush.tons, rush.price });
+    return rush.tons;
 }
 
 test "the plan fits the trucks and only stocks munitions the company fires" {

@@ -97,6 +97,19 @@ pub fn sendHome(gs: *GameState, company: types.ForceId, key: []const u8, qty: u3
     });
 }
 
+/// The planet a site physically sits on.
+pub fn sitePlanetKey(gs: *GameState, site: types.Site) ?[]const u8 {
+    return switch (site) {
+        .outfit => if (gs.hqs.count() > 0) gs.hqs.values()[0].planet_key else null,
+        .hq => |id| if (gs.hqs.getPtr(id)) |h| h.planet_key else null,
+        .company => |id| blk: {
+            if (gs.deploymentContract(id)) |c| break :blk c.planet_key;
+            if (gs.force(id)) |f| if (f.location_planet) |p| break :blk p;
+            break :blk if (gs.hqs.getPtr(gs.homeHqFor(id))) |h| h.planet_key else null;
+        },
+    };
+}
+
 test "order_part is refused over the site's free tons and accepted at the limit" {
     const commands = @import("commands.zig");
     const field_supply = @import("field_supply.zig");

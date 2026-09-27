@@ -2,9 +2,13 @@
 //! MekHQ counterpart: none; transport availability is checked inline
 //! across AtB (`docs/mekhq-map.md`).
 
+const std = @import("std");
 const unit_mod = @import("../domain/unit.zig");
 const types = @import("../domain/types.zig");
 const GameState = @import("state.zig").GameState;
+const posture = @import("posture.zig");
+const toe = @import("toe.zig");
+const chassis_mod = @import("../domain/chassis.zig");
 
 /// Transports of one kind holding a berth at an HQ.
 pub fn transportsBerthedAt(gs: *GameState, hq_id: types.HqId, kind: unit_mod.UnitKind) u32 {
@@ -48,4 +52,70 @@ pub fn hasCrewedDropship(gs: *GameState, company: types.ForceId) bool {
         if (u.kind == .dropship and u.force == company and u.pilot != .none) return true;
     }
     return false;
+}
+
+pub const LiftPlan = struct {
+    needed: u32 = 0,
+    carried: u32 = 0,
+    covered_bp: types.Bp = 0,
+    own_jumpship: bool = false,
+    ships: u32 = 0,
+};
+
+/// How much of a company the outfit's own ships can lift.
+/// At home: the crewed, idle ships berthed at the home HQ. Away (a
+/// redeploy from the field): the ships already carrying it. `commit`
+/// marks the ships as sailing with the company (`force` = company).
+pub fn planLift(gs: *GameState, company_id: types.ForceId, commit: bool) !LiftPlan {
+    var plan: LiftPlan = .{};
+    var need: [3]u32 = .{ 0, 0, 0 };
+    var uit = gs.units.iterator();
+    while (uit.next()) |e| {
+        const u = e.value_ptr;
+        if (gs.companyOf(u.force) != company_id or u.isParked() or u.status == .in_transit) continue;
+        const bay = u.kind.bayKind() orelse continue;
+        need[@intFromEnum(bay)] += 1;
+    }
+    plan.needed = need[0] + need[1] + need[2];
+    if (plan.needed == 0) return plan;
+    const at_home = posture.isCompanyHome(gs, company_id);
+    const home = gs.homeHqFor(company_id);
+    var have: [3]u32 = .{ 0, 0, 0 };
+    var ships: std.ArrayListUnmanaged(types.UnitId) = .empty;
+    defer ships.deinit(gs.allocator());
+    var sit = gs.units.iterator();
+    while (sit.next()) |e| {
+        const u = e.value_ptr;
+        if (!u.kind.isTransport() or u.status == .destroyed) continue;
+        const usable = if (at_home) (u.berth_hq == home and transportAvailable(gs, u)) else u.force == company_id;
+        if (!usable) continue;
+        const design = chassis_mod.find(u.chassis_key) orelse continue;
+        switch (u.kind) {
+            .dropship => {
+                // Only ships that carry something come along.
+                const adds = @min(design.mek_bays, need[0] -| have[0]) + @min(design.asf_bays, need[1] -| have[1]) + @min(design.vehicle_bays, need[2] -| have[2]);
+                if (adds == 0) continue;
+                have[0] += design.mek_bays;
+                have[1] += design.asf_bays;
+                have[2] += design.vehicle_bays;
+                plan.ships += 1;
+                try ships.append(gs.allocator(), u.id);
+            },
+            .jumpship => plan.own_jumpship = true,
+            else => {},
+        }
+    }
+    plan.carried = @min(have[0], need[0]) + @min(have[1], need[1]) + @min(have[2], need[2]);
+    plan.covered_bp = @intCast(@as(u64, plan.carried) * 10_000 / plan.needed);
+    if (commit and at_home) {
+        for (ships.items) |sid| try toe.moveUnitToForce(gs, sid, company_id);
+    }
+    return plan;
+}
+
+pub fn commitLift(gs: *GameState, company_id: types.ForceId) !LiftPlan {
+    return planLift(gs, company_id, true) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return .{},
+    };
 }
