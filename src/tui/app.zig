@@ -1208,7 +1208,7 @@ pub const App = struct {
     fn modalRect(self: *App, w: u16, h: u16) Rect {
         const s = &self.screen;
         const ww = @min(w, s.cols -| 2);
-        const hh = @min(h, s.rows);
+        const hh = @min(h, s.rows -| 1);
         return .{ .x = (s.cols - ww) / 2, .y = (s.rows - hh) / 2, .w = ww, .h = hh };
     }
 
@@ -1307,7 +1307,7 @@ pub const App = struct {
                 }
                 try rows.append(al, "");
                 try rows.append(al, try std.fmt.allocPrint(al, "  {{d}}{s}{{/}}", .{try keys.title(al, "", &amount_legend)}));
-                const r = self.modalRect(layout.modal.amount_w, @intCast(@min(rows.items.len + 2, self.screen.rows)));
+                const r = self.modalRect(layout.modal.amount_w, @intCast(@min(rows.items.len + 2, self.screen.rows -| 1)));
                 const inner = self.screen.pane(r, .{ .title = form.title(), .double = true });
                 self.screen.lines(inner, rows.items, 0, null);
             },
@@ -1319,7 +1319,7 @@ pub const App = struct {
                 self.ordersSnap(form, 1);
                 var rows: std.ArrayListUnmanaged([]const u8) = .empty;
                 for (form.rows, 0..) |row, i| try rows.append(al, if (i == self.modal_cursor and row.active) try std.fmt.allocPrint(al, "{{a}}▶{{/}}{s}", .{row.text[1..]}) else row.text);
-                const r = self.modalRect(layout.modal.settings_w, @intCast(@min(rows.items.len + 2, self.screen.rows)));
+                const r = self.modalRect(layout.modal.settings_w, @intCast(@min(rows.items.len + 2, self.screen.rows -| 1)));
                 const inner = self.screen.pane(r, .{ .title = try formTitle(al, form.title, "later"), .double = true });
                 self.screen.lines(inner, rows.items, 0, self.modal_cursor);
             },
@@ -1328,7 +1328,7 @@ pub const App = struct {
                 if (form.selectable > 0 and !form.rows[self.settings_cursor].active) try self.settingsMove(1);
                 var rows: std.ArrayListUnmanaged([]const u8) = .empty;
                 for (form.rows, 0..) |row, i| try rows.append(al, if (i == self.settings_cursor and row.active) try std.fmt.allocPrint(al, "{{a}}▶{{/}}{s}", .{row.text[1..]}) else row.text);
-                const r = self.modalRect(layout.modal.settings_w, @intCast(@min(rows.items.len + 2, self.screen.rows)));
+                const r = self.modalRect(layout.modal.settings_w, @intCast(@min(rows.items.len + 2, self.screen.rows -| 1)));
                 const inner = self.screen.pane(r, .{ .title = try formTitle(al, "SETTINGS", "close"), .double = true });
                 self.screen.lines(inner, rows.items, 0, if (form.selectable > 0) self.settings_cursor else null);
             },
@@ -4057,4 +4057,15 @@ test "a confirm dialog names its verbs on the table's keys" {
     const al = arena.allocator();
     try std.testing.expectEqualStrings("SELL OR STRIP HULL? · [y] sell · [s] strip · [Esc] keep", try App.confirmTitle(al, "SELL OR STRIP HULL?", "sell", "strip", "keep"));
     try std.testing.expectEqualStrings("FIRE? · [y] fire · [Esc] keep", try App.confirmTitle(al, "FIRE?", "fire", null, "keep"));
+}
+
+test "modalRect never covers the footer row" {
+    const c = try clientForTest(std.testing.allocator);
+    defer deinitForTest(c, std.testing.allocator);
+    for ([_]u16{ 24, 30, 40, 50 }) |rows| {
+        try c.app.screen.resize(80, rows);
+        // A modal requesting the full terminal height must not touch the footer.
+        const r = c.app.modalRect(60, rows);
+        try std.testing.expect(r.y + r.h < rows);
+    }
 }
