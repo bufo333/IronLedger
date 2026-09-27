@@ -48,6 +48,7 @@ pub const hq = @import("domain/hq.zig");
 pub const events = @import("domain/events.zig");
 pub const autoresolve = @import("domain/autoresolve.zig");
 pub const battle_report = @import("domain/battle_report.zig");
+pub const hq_link = @import("domain/hq_link.zig");
 
 // sim/ — state, time, randomness, battle resolution
 pub const state = @import("sim/state.zig");

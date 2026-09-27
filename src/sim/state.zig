@@ -281,7 +281,7 @@ pub const GameState = struct {
     /// Hiring-hall boards, churned daily.
     candidates: std.ArrayListUnmanaged(Candidate) = .empty,
     /// Supply links between HQs.
-    hq_links: std.ArrayListUnmanaged(@import("network.zig").HqLink) = .empty,
+    hq_links: std.ArrayListUnmanaged(@import("../domain/hq_link.zig").HqLink) = .empty,
     /// Units in transit between companies.
     unit_transfers: std.ArrayListUnmanaged(UnitTransfer) = .empty,
     /// Employer factions that remember a breach: thinner,

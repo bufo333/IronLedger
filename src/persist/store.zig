@@ -29,7 +29,6 @@ const finance_mod = @import("../econ/finance.zig");
 const market_mod = @import("../econ/market.zig");
 const events_mod = @import("../domain/events.zig");
 const contract_events = @import("../sim/contract_events.zig");
-const network = @import("../sim/network.zig");
 const clock_mod = @import("../domain/clock.zig");
 const digest = @import("../sim/digest.zig");
 const hq_ops = @import("../sim/hq_ops.zig");

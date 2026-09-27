@@ -27,6 +27,7 @@ const hq_ops = @import("hq_ops.zig");
 const hq_mod = @import("../domain/hq.zig");
 const contract_mod = @import("../domain/contract.zig");
 const network = @import("network.zig");
+const hq_link = @import("../domain/hq_link.zig");
 const contract_control = @import("contract_control.zig");
 const lift_mod = @import("lift.zig");
 const meklab = @import("../domain/meklab.zig");
@@ -647,7 +648,7 @@ fn execLink(gs: *GameState, l: @FieldType(Command, "link")) Error!Result {
     if (l.level <= from_level) return Error.BadLevel;
     // A dedicated line is your own jumpship on the run.
     if (l.level >= 3 and !lift_mod.ownsCrewedJumpshipAt(gs, l.a, l.b)) return Error.NoJumpship;
-    const cost = network.linkCost(l.level) - network.linkCost(from_level);
+    const cost = hq_link.linkCost(l.level) - hq_link.linkCost(from_level);
     try treasury.debit(gs, .outfit, .{
         .day = gs.clock.day_index,
         .amount = -cost,

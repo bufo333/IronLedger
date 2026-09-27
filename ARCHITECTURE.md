@@ -119,7 +119,7 @@ section explains the shape, the contract states the rules.
 │  Simulation core (pure, deterministic)              │
 │   sim/    daily pipeline, battle, tick               │
 │   domain/ person, unit, part, force, contract, hq,  │
-│           clock, events, autoresolve, battle_report  │
+│           clock, events, autoresolve, battle_report, hq_link│
 │   econ/   finance, markets, logistics network       │
 │   gen/    company/person/name generation            │
 ├─────────────────────────────────────────────────────┤
@@ -874,7 +874,7 @@ src/
   root.zig       module root, re-exports
   domain/        entities and rule tables: types person unit part chassis
                  force contract hq planet faction tuning skulls scenario …;
-                 clock events autoresolve battle_report
+                 clock events autoresolve battle_report hq_link
   sim/           state plus focused personnel/posture/treasury owners;
                   crew tick commands battle
                   medical maintenance field_supply sites network
