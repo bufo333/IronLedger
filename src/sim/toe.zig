@@ -21,6 +21,7 @@ const posture = @import("posture.zig");
 const market_mod = @import("../econ/market.zig");
 const personnel = @import("personnel.zig");
 const sites = @import("sites.zig");
+const hq_mod = @import("../domain/hq.zig");
 
 /// Combat companies currently assigned to an HQ.
 pub fn companiesAtHq(gs: *GameState, hq_id: types.HqId) u32 {
@@ -233,6 +234,20 @@ pub fn companyHeadcount(gs: *GameState, company_id: types.ForceId) u32 {
         if (personInCompany(gs, p, company_id)) n += 1;
     }
     return n;
+}
+
+/// Test helper: directly set a facility level on an HQ, bypassing the
+/// normal upgrade path. Used in tests that need a specific facility level
+/// without running a full construction project.
+pub fn setFacilityLevel(gs: *GameState, hq_id: types.HqId, kind: hq_mod.FacilityKind, level: u8) !void {
+    const h = gs.hqs.getPtr(hq_id).?;
+    for (h.facilities.items) |*f| if (f.kind == kind) {
+        f.level = level;
+        h.staff_assigned = 999;
+        return;
+    };
+    try h.facilities.append(gs.allocator(), .{ .kind = kind, .level = level });
+    h.staff_assigned = 999;
 }
 
 test "everyone under the company is in it; nobody else is" {

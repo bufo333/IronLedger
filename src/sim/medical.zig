@@ -18,6 +18,7 @@ const posture = @import("posture.zig");
 const sites = @import("sites.zig");
 const toe = @import("toe.zig");
 const readiness_m = @import("readiness.zig");
+const commands = @import("commands.zig");
 
 /// Days of training to improve a skill one step.
 pub const training_days = tuning.medical.training_days;
@@ -516,6 +517,50 @@ pub fn trainCompany(gs: *GameState, company: types.ForceId, skill_opt: ?types.Sk
         f.name, r.enrolled, if (skill_opt) |s| try std.fmt.allocPrint(gs.allocator(), " at {s}", .{@tagName(s)}) else " at their trades", days, r.short_xp, r.busy, r.nothing_to_learn,
     });
     return r;
+}
+
+// ---- C4b exec wrappers ----
+const Error = commands.Error;
+const Result = commands.Result;
+const Command = commands.Command;
+
+pub fn execAdmit(gs: *GameState, pid: @FieldType(Command, "admit")) Error!Result {
+    admit(gs, pid) catch |err| return @errorCast(err);
+    return .{};
+}
+
+pub fn execTriage(gs: *GameState, t: @FieldType(Command, "triage")) Error!Result {
+    triage(gs, t.person, t.priority) catch |err| return @errorCast(err);
+    return .{};
+}
+
+pub fn execLeave(gs: *GameState, l: @FieldType(Command, "leave")) Error!Result {
+    leave(gs, l.person, l.days) catch |err| return @errorCast(err);
+    return .{};
+}
+
+pub fn execTrain(gs: *GameState, t: @FieldType(Command, "train")) Error!Result {
+    train(gs, t.person, t.skill) catch |err| return @errorCast(err);
+    return .{};
+}
+
+pub fn execTrainCompany(gs: *GameState, t: @FieldType(Command, "train_company")) Error!Result {
+    const r = trainCompany(gs, t.company, t.skill) catch |err| return @errorCast(err);
+    return .{ .enrolled = r.enrolled, .short_xp = r.short_xp, .busy = r.busy, .nothing_to_learn = r.nothing_to_learn };
+}
+
+pub fn execTrainAbility(gs: *GameState, ta: @FieldType(Command, "train_ability")) Error!Result {
+    trainAbility(gs, ta.person, ta.key) catch |err| return @errorCast(err);
+    return .{};
+}
+
+pub fn execSetAutoAdmit(gs: *GameState, on: @FieldType(Command, "set_auto_admit")) Error!Result {
+    setAutoAdmit(gs, on);
+    return .{};
+}
+
+pub fn execToggleAutoAdmit(gs: *GameState) Error!Result {
+    return .{ .auto_admit = toggleAutoAdmit(gs) };
 }
 
 test "wounds heal; the field is slower than a home hospital" {

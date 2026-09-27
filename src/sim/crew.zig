@@ -16,6 +16,7 @@ const posture = @import("posture.zig");
 const personnel = @import("personnel.zig");
 const contract_market = @import("contract_market.zig");
 const person_gen = @import("../gen/person_gen.zig");
+const commands = @import("commands.zig");
 
 /// `any`: whichever seat the person's role fits — pilot roles
 /// take the crew seat, tech roles the tech slot.
@@ -177,6 +178,31 @@ pub fn crewCompany(gs: *GameState, company: types.ForceId) !CrewCompanyResult {
     return .{ .hired_count = hired, .still_open = still_open };
 }
 
+// ---- C4b exec wrappers ----
+const Error = commands.Error;
+const Result = commands.Result;
+const Command = commands.Command;
+
+pub fn execAssign(gs: *GameState, a: @FieldType(Command, "assign")) Error!Result {
+    assignSlot(gs, a.unit, a.slot, a.person) catch |err| return @errorCast(err);
+    return .{};
+}
+
+pub fn execUnassign(gs: *GameState, u: @FieldType(Command, "unassign")) Error!Result {
+    unassignSlot(gs, u.unit, u.slot) catch |err| return @errorCast(err);
+    return .{};
+}
+
+pub fn execAutoAssign(gs: *GameState, company: @FieldType(Command, "auto_assign")) Error!Result {
+    autoAssignCompany(gs, company) catch |err| return @errorCast(err);
+    return .{};
+}
+
+pub fn execCrewCompany(gs: *GameState, company: @FieldType(Command, "crew_company")) Error!Result {
+    const r = crewCompany(gs, company) catch |err| return @errorCast(err);
+    return .{ .hired_count = r.hired_count, .still_open = r.still_open };
+}
+
 test "auto-assign benches a spent pilot when a fresher one is free, keeps them when nobody is" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 121 });
     defer gs.deinit();
@@ -202,7 +228,6 @@ test "auto-assign benches a spent pilot when a fresher one is free, keeps them w
 
 test "assignBlock's reason matches crewChoices' dim and the assign command's refusal for the same two blocks" {
     const queries = @import("queries.zig");
-    const commands = @import("commands.zig");
     const starter_company = @import("starter_company.zig");
 
     var gs = GameState.init(std.testing.allocator, .{ .seed = 913 });
@@ -260,4 +285,86 @@ test "assignBlock's reason matches crewChoices' dim and the assign command's ref
     }
     try std.testing.expectEqualStrings(away_reason, away_row_why orelse return error.TestExpectedEqual);
     try std.testing.expectError(commands.Error.PersonAway, commands.execute(&gs, .{ .assign = .{ .unit = pool_mek, .slot = .pilot, .person = away_pilot } }));
+}
+
+test "assign without a slot word picks the seat by role, on pool hulls too" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1226 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    const hull = try gs.addUnit("LCT-1V"); // unassigned pool
+    const tech = try gs.hirePerson("Ana", "Ruiz", .tech_mek);
+    const pilot = try gs.hirePerson("Bo", "Lund", .mekwarrior);
+    _ = try commands.execute(&gs, .{ .assign = .{ .unit = hull, .slot = .any, .person = tech } });
+    _ = try commands.execute(&gs, .{ .assign = .{ .unit = hull, .slot = .any, .person = pilot } });
+    try std.testing.expectEqual(tech, gs.unit(hull).?.tech);
+    try std.testing.expectEqual(pilot, gs.unit(hull).?.pilot);
+    const doc = try gs.hirePerson("Cy", "Oda", .doctor);
+    try std.testing.expectError(Error.WrongRole, commands.execute(&gs, .{ .assign = .{ .unit = hull, .slot = .any, .person = doc } }));
+    // The seat picker lists pool hulls.
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const tech2 = try gs.hirePerson("Di", "Vos", .tech_mek);
+    _ = try commands.execute(&gs, .{ .unassign = .{ .unit = hull, .slot = .any } });
+    const seats = try @import("queries.zig").openSeats(arena.allocator(), &gs, tech2);
+    try std.testing.expect(seats.len >= 1);
+    // A tech whose company is away cannot reach the pool.
+    const co = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
+    _ = try commands.execute(&gs, .{ .accept_contract = .{ .offer_index = 0, .company = co } });
+    var away: types.PersonId = .none;
+    var pit = gs.people.iterator();
+    while (pit.next()) |e| if (e.value_ptr.role == .tech_mek and gs.companyOf(e.value_ptr.assigned_force) == co and away == .none) {
+        away = e.value_ptr.id;
+    };
+    try std.testing.expectError(Error.PersonAway, commands.execute(&gs, .{ .assign = .{ .unit = hull, .slot = .any, .person = away } }));
+    try std.testing.expectEqual(@as(usize, 0), (try @import("queries.zig").openSeats(arena.allocator(), &gs, away)).len);
+}
+
+test "assignments — roles enforced, one seat per pilot, hall hiring" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 71 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    const co = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
+
+    // Generation filled every slot.
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const before = try @import("checklist.zig").turnWarnings(&gs, arena.allocator());
+    for (before) |w| try std.testing.expect(w.kind != .open_slots);
+
+    // Pull a mek's tech for training → an open slot the checklist names.
+    const company = gs.force(co).?;
+    const lance = gs.force(company.children.items[0]).?;
+    const uid = lance.units.items[0];
+    const tech = gs.unit(uid).?.tech;
+    try std.testing.expect(tech != .none);
+    _ = try commands.execute(&gs, .{ .unassign = .{ .unit = uid, .slot = .tech } });
+    const after = try @import("checklist.zig").turnWarnings(&gs, arena.allocator());
+    var open = false;
+    for (after) |w| {
+        if (w.kind == .open_slots) open = true;
+    }
+    try std.testing.expect(open);
+
+    // Wrong role refused; the right one re-fills it.
+    const pilot = gs.unit(uid).?.pilot;
+    try std.testing.expectError(Error.WrongRole, commands.execute(&gs, .{ .assign = .{ .unit = uid, .slot = .tech, .person = pilot } }));
+    _ = try commands.execute(&gs, .{ .assign = .{ .unit = uid, .slot = .tech, .person = tech } });
+    try std.testing.expectEqual(tech, gs.unit(uid).?.tech);
+
+    // One seat per pilot: moving a pilot vacates the old hull.
+    const uid2 = lance.units.items[1];
+    _ = try commands.execute(&gs, .{ .assign = .{ .unit = uid2, .slot = .pilot, .person = pilot } });
+    try std.testing.expectEqual(types.PersonId.none, gs.unit(uid).?.pilot);
+    _ = try commands.execute(&gs, .{ .auto_assign = co });
+    try std.testing.expect(gs.unit(uid).?.pilot != .none or true); // may lack a spare pilot; no crash
+
+    // Hiring hall: candidates appear weekly and can be hired for a bonus.
+    _ = try commands.execute(&gs, .{ .advance_days = 7 });
+    try std.testing.expect(gs.candidates.items.len > 0);
+    const roster_before = gs.people.count();
+    const funds_before = gs.funds;
+    _ = try commands.execute(&gs, .{ .hire_candidate = 0 });
+    try std.testing.expectEqual(roster_before + 1, gs.people.count());
+    try std.testing.expect(gs.funds <= funds_before);
+    try std.testing.expectError(Error.NoSuchCandidate, commands.execute(&gs, .{ .hire_candidate = 99 }));
 }

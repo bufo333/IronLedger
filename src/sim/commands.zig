@@ -457,464 +457,95 @@ pub const Result = struct {
 
 pub fn execute(gs: *GameState, cmd: Command) Error!Result {
     switch (cmd) {
-        .advance_day => return advance(gs, 1),
-        .advance_days => |n| return advance(gs, n),
-        .hire => |h| {
-            const id = personnel.hire(gs, h.first, h.last, h.role) catch |err| return @errorCast(err);
-            return .{ .hired = id };
-        },
-        .recruit => |role| {
-            const id = personnel.recruit(gs, role) catch |err| return @errorCast(err);
-            return .{ .hired = id };
-        },
-        .fire => |id| {
-            personnel.fire(gs, id) catch |err| return @errorCast(err);
-            return .{};
-        },
+        .advance_day => return tick.advance(gs, 1),
+        .advance_days => |n| return tick.advance(gs, n),
+        .hire => |h| return personnel.execHire(gs, h),
+        .recruit => |role| return personnel.execRecruit(gs, role),
+        .fire => |id| return personnel.execFire(gs, id),
         .new_company => |name| return toe.execNewCompany(gs, name),
         .new_company_at => |n| return toe.execNewCompanyAt(gs, n),
-        .found_hq => |f| {
-            hq_ops.foundHq(gs, f.name, f.planet_key) catch |err| return @errorCast(err);
-            return .{};
-        },
-        .upgrade_tier => |hq_id| {
-            hq_ops.upgradeTier(gs, hq_id) catch |err| return @errorCast(err);
-            return .{};
-        },
-        .assign_company => |a| {
-            network.assignCompany(gs, a.company, a.hq) catch |err| return @errorCast(err);
-            return .{};
-        },
-        .link => |l| {
-            network.establishLink(gs, l.a, l.b, l.level) catch |err| return @errorCast(err);
-            return .{};
-        },
+        .found_hq => |f| return hq_ops.execFoundHq(gs, f),
+        .upgrade_tier => |hq_id| return hq_ops.execUpgradeTier(gs, hq_id),
+        .assign_company => |a| return network.execAssignCompany(gs, a),
+        .link => |l| return network.execLink(gs, l),
         .transfer_unit => |t| return toe.transferUnit(gs, t.unit, t.to_company),
-        .complete_contract => |cid| return execCompleteContract(gs, cid),
-        .recall_company => |company| return execRecallCompany(gs, company),
+        .complete_contract => |cid| return contract_control.execCompleteContract(gs, cid),
+        .recall_company => |company| return contract_control.execRecallCompany(gs, company),
         .refit_remove => |r| return refit_m.execRefitRemove(gs, r),
         .refit_install => |r| return refit_m.execRefitInstall(gs, r),
         .refit_clear => |unit_id| return refit_m.execRefitClear(gs, unit_id),
         .refit_commit => |unit_id| return refit_m.commitRefit(gs, unit_id),
-        .buy_support_hull => |b| {
-            const res = contract_market.buySupportHull(gs, b.company, b.kind) catch |err| return @errorCast(err);
-            return .{ .unit = res.unit, .eta_days = res.eta_days };
-        },
+        .buy_support_hull => |b| return contract_market.execBuySupportHull(gs, b),
         .set_outfit_emblem => |image| return toe.execSetOutfitEmblem(gs, image),
-        .set_office_staff => |o| {
-            const hired = personnel.setOfficeStaff(gs, o.hq, o.role, o.delta) catch |err| return @errorCast(err);
-            return .{ .hired = hired };
-        },
-        .ship_components_home => |co| {
-            const res = sites.shipComponentsHome(gs, co) catch |err| return @errorCast(err);
-            return .{ .count = res.count, .hq = res.hq };
-        },
-        .replace_mount => |r| {
-            const res = sites.replaceMount(gs, r.unit, r.slot_key) catch |err| return @errorCast(err);
-            return .{ .sourced = res.sourced, .hq = res.hq };
-        },
-        .cover_shortfall => |c| return execCoverShortfall(gs, c),
+        .set_office_staff => |o| return personnel.execSetOfficeStaff(gs, o),
+        .ship_components_home => |co| return sites.execShipComponentsHome(gs, co),
+        .replace_mount => |r| return sites.execReplaceMount(gs, r),
+        .cover_shortfall => |c| return hq_ops.execCoverShortfall(gs, c),
         .toggle_mothball => |unit_id| return held_hulls.execToggleMothball(gs, unit_id),
-        .confirm_orders => |id| return execConfirmOrders(gs, id),
-        .emergency_resupply => |id| {
-            const tons = field_supply.emergencyResupply(gs, id) catch |err| return @errorCast(err);
-            return .{ .tons_moved = tons };
-        },
+        .confirm_orders => |id| return contract_control.execConfirmOrders(gs, id),
+        .emergency_resupply => |id| return field_supply.execEmergencyResupply(gs, id),
         .cycle_roe => |co| return toe.execCycleRoe(gs, co),
         .cycle_role => |fid| return toe.execCycleRole(gs, fid),
-        .cycle_difficulty => |dir| return execCycleDifficulty(gs, dir),
-        .adjust_shares_pct => |delta| return execAdjustSharesPct(gs, delta),
-        .toggle_auto_admit => {
-            return .{ .auto_admit = medical_mod.toggleAutoAdmit(gs) };
-        },
+        .cycle_difficulty => |dir| return tick.execCycleDifficulty(gs, dir),
+        .adjust_shares_pct => |delta| return treasury.execAdjustSharesPct(gs, delta),
+        .toggle_auto_admit => return medical_mod.execToggleAutoAdmit(gs),
         .recall_idle => |company| return toe.execRecallIdle(gs, company),
-        .autostaff => |hq_id| {
-            hq_ops.autostaff(gs, hq_id) catch |err| return @errorCast(err);
-            return .{};
-        },
-        .transfer_person => |t| {
-            personnel.transferPerson(gs, t.person, t.to_force) catch |err| return @errorCast(err);
-            return .{};
-        },
+        .autostaff => |hq_id| return hq_ops.execAutostaff(gs, hq_id),
+        .transfer_person => |t| return personnel.execTransferPerson(gs, t),
         .rename_outfit => |name| return toe.execRenameOutfit(gs, name),
         .rename_force => |r| return toe.execRenameForce(gs, r),
         .set_emblem => |e| return toe.execSetEmblem(gs, e),
-        .create_commander => |c| return execCreateCommander(gs, c),
-        .accept_contract => |a| {
-            contract_control.acceptContract(gs, a.offer_index, a.company) catch |err| return @errorCast(err);
-            return .{};
-        },
-        .negotiate => |n| {
-            const outcome = contract_market.negotiate(gs, n.offer_index, n.term) catch |err| return @errorCast(err);
-            return .{ .negotiation = switch (outcome) {
-                .improved => .improved,
-                .hardened => .hardened,
-                .withdrawn => .withdrawn,
-            } };
-        },
-        .train_ability => |ta| {
-            medical_mod.trainAbility(gs, ta.person, ta.key) catch |err| return @errorCast(err);
-            return .{};
-        },
-        .promote => |pr| {
-            personnel.promote(gs, pr.person, pr.rank, pr.pin) catch |err| return @errorCast(err);
-            return .{};
-        },
-        .order_part => |o| {
-            const res = sites.orderPart(gs, o.part_key, o.quantity, o.dest) catch |err| return @errorCast(err);
-            return .{ .sourced = res.sourced };
-        },
-        .ship_stock => |s| {
-            sites.shipStock(gs, s.part_key, s.quantity, s.from, s.to) catch |err| return @errorCast(err);
-            return .{};
-        },
-        .buy_listing => |index| {
-            const res = contract_market.buyListing(gs, index) catch |err| return @errorCast(err);
-            return .{ .unit = res.unit };
-        },
+        .create_commander => |c| return founding.execCreateCommander(gs, c),
+        .accept_contract => |a| return contract_control.execAcceptContract(gs, a),
+        .negotiate => |n| return contract_market.execNegotiate(gs, n),
+        .train_ability => |ta| return medical_mod.execTrainAbility(gs, ta),
+        .promote => |pr| return personnel.execPromote(gs, pr),
+        .order_part => |o| return sites.execOrderPart(gs, o),
+        .ship_stock => |s| return sites.execShipStock(gs, s),
+        .buy_listing => |index| return contract_market.execBuyListing(gs, index),
         .mothball => |unit_id| return held_hulls.execMothball(gs, unit_id),
         .move_unit => |m| return toe.execMoveUnit(gs, m),
         .new_lance => |nl| return toe.execNewLance(gs, nl),
         .raise_air_company => |company| return toe.execRaiseAirCompany(gs, company),
-        .set_supply_policy => |sp| {
-            field_supply.setSupplyPolicy(gs, sp.company, sp.min_days, sp.tons, sp.ammo_battles) catch |err| return @errorCast(err);
-            return .{};
-        },
-        .set_stock_policy => |sp| {
-            sites.setStockPolicy(gs, sp.hq, sp.part_key, sp.min, sp.target) catch |err| return @errorCast(err);
-            return .{};
-        },
-        .sell_stock => |sale| {
-            sites.sellStock(gs, sale.hq, sale.part_key, sale.quantity) catch |err| return @errorCast(err);
-            return .{};
-        },
+        .set_supply_policy => |sp| return field_supply.execSetSupplyPolicy(gs, sp),
+        .set_stock_policy => |sp| return sites.execSetStockPolicy(gs, sp),
+        .sell_stock => |sale| return sites.execSellStock(gs, sale),
         .raise_company => |r| return toe.raiseCompany(gs, r.name, r.hq),
-        .buy_hull_for => |b| {
-            const res = contract_market.buyHullFor(gs, b.listing, b.company, b.lance) catch |err| return @errorCast(err);
-            return .{ .unit = res.unit, .eta_days = res.eta_days };
-        },
-        .crew_company => |company| {
-            const r = crew.crewCompany(gs, company) catch |err| return @errorCast(err);
-            return .{ .hired_count = r.hired_count, .still_open = r.still_open };
-        },
-        .trim_stock => |company| {
-            const tons = field_supply.trimStock(gs, company) catch |err| return @errorCast(err);
-            return .{ .tons_moved = tons };
-        },
-        .set_shares_pct => |pct| return execSetSharesPct(gs, pct),
-        .set_difficulty => |level| return execSetDifficulty(gs, level),
-        .set_auto_admit => |on| {
-            medical_mod.setAutoAdmit(gs, on);
-            return .{};
-        },
+        .buy_hull_for => |b| return contract_market.execBuyHullFor(gs, b),
+        .crew_company => |company| return crew.execCrewCompany(gs, company),
+        .trim_stock => |company| return field_supply.execTrimStock(gs, company),
+        .set_shares_pct => |pct| return treasury.execSetSharesPct(gs, pct),
+        .set_difficulty => |level| return tick.execSetDifficulty(gs, level),
+        .set_auto_admit => |on| return medical_mod.execSetAutoAdmit(gs, on),
         .set_roe => |r| return toe.execSetRoe(gs, r),
         .set_role => |r| return toe.execSetRole(gs, r),
-        .replace_gear => |unit_id| {
-            const res = sites.replaceGear(gs, unit_id) catch |err| return @errorCast(err);
-            return .{ .ordered = res.ordered, .unsourced = res.unsourced };
-        },
-        .clear_standing_order => |name| return execClearStandingOrder(gs, name),
-        .depot => |unit_id| {
-            const hq_id = hq_ops.depot(gs, unit_id) catch |err| return @errorCast(err);
-            return .{ .hq = hq_id };
-        },
-        .admit => |pid| {
-            medical_mod.admit(gs, pid) catch |err| return @errorCast(err);
-            return .{};
-        },
-        .repay_loan => |r| return execRepayLoan(gs, r),
+        .replace_gear => |unit_id| return sites.execReplaceGear(gs, unit_id),
+        .clear_standing_order => |name| return contract_events.execClearStandingOrder(gs, name),
+        .depot => |unit_id| return hq_ops.execDepot(gs, unit_id),
+        .admit => |pid| return medical_mod.execAdmit(gs, pid),
+        .repay_loan => |r| return treasury.execRepayLoan(gs, r),
         .sell_unit => |unit_id| return held_hulls.execSellUnit(gs, unit_id),
         .strip_unit => |unit_id| return held_hulls.execStripUnit(gs, unit_id),
-        .sell_hq => |hq_id| {
-            hq_ops.sellHq(gs, hq_id) catch |err| return @errorCast(err);
-            return .{};
-        },
+        .sell_hq => |hq_id| return hq_ops.execSellHq(gs, hq_id),
         .disband_company => |co| return toe.execDisbandCompany(gs, co),
-        .reactivate => |unit_id| {
-            hq_ops.reactivate(gs, unit_id) catch |err| return @errorCast(err);
-            return .{};
-        },
-        .fabricate => |f0| {
-            hq_ops.fabricate(gs, f0.hq, f0.part_key, f0.quantity) catch |err| return @errorCast(err);
-            return .{};
-        },
-        .upgrade_facility => |u| {
-            hq_ops.upgradeFacility(gs, u.hq, u.kind) catch |err| return @errorCast(err);
-            return .{};
-        },
-        .post_person => |pp| {
-            personnel.postToHq(gs, pp.person, pp.hq) catch |err| return @errorCast(err);
-            return .{};
-        },
-        .assign => |a| {
-            crew.assignSlot(gs, a.unit, a.slot, a.person) catch |err| return @errorCast(err);
-            return .{};
-        },
-        .unassign => |u| {
-            try crew.unassignSlot(gs, u.unit, u.slot);
-            return .{};
-        },
-        .auto_assign => |company| {
-            crew.autoAssignCompany(gs, company) catch |err| return @errorCast(err);
-            return .{};
-        },
-        .hire_candidate => |index| {
-            const id = contract_market.hireCandidate(gs, index) catch |err| return @errorCast(err);
-            return .{ .hired = id };
-        },
-        .triage => |t| {
-            medical_mod.triage(gs, t.person, t.priority) catch |err| return @errorCast(err);
-            return .{};
-        },
-        .leave => |l| {
-            medical_mod.leave(gs, l.person, l.days) catch |err| return @errorCast(err);
-            return .{};
-        },
-        .train => |t| {
-            medical_mod.train(gs, t.person, t.skill) catch |err| return @errorCast(err);
-            return .{};
-        },
-        .train_company => |t| {
-            const r = medical_mod.trainCompany(gs, t.company, t.skill) catch |err| return @errorCast(err);
-            return .{ .enrolled = r.enrolled, .short_xp = r.short_xp, .busy = r.busy, .nothing_to_learn = r.nothing_to_learn };
-        },
-        .transfer => |t| return execTransfer(gs, t),
-        .set_policy => |p| return execSetPolicy(gs, p),
-        .take_loan => |l| return execTakeLoan(gs, l),
-        .read_report => |id| return execReadReport(gs, id),
-        .resolve_decision => |r| return execResolveDecision(gs, r),
+        .reactivate => |unit_id| return hq_ops.execReactivate(gs, unit_id),
+        .fabricate => |f0| return hq_ops.execFabricate(gs, f0),
+        .upgrade_facility => |u| return hq_ops.execUpgradeFacility(gs, u),
+        .post_person => |pp| return personnel.execPostPerson(gs, pp),
+        .assign => |a| return crew.execAssign(gs, a),
+        .unassign => |u| return crew.execUnassign(gs, u),
+        .auto_assign => |company| return crew.execAutoAssign(gs, company),
+        .hire_candidate => |index| return contract_market.execHireCandidate(gs, index),
+        .triage => |t| return medical_mod.execTriage(gs, t),
+        .leave => |l| return medical_mod.execLeave(gs, l),
+        .train => |t| return medical_mod.execTrain(gs, t),
+        .train_company => |t| return medical_mod.execTrainCompany(gs, t),
+        .transfer => |t| return treasury.execTransfer(gs, t),
+        .set_policy => |p| return treasury.execSetPolicy(gs, p),
+        .take_loan => |l| return treasury.execTakeLoan(gs, l),
+        .read_report => |id| return tick.execReadReport(gs, id),
+        .resolve_decision => |r| return contract_events.execResolveDecision(gs, r),
     }
-}
-
-// ---- the commands, one function each, in `execute`'s order ----
-
-fn execCompleteContract(gs: *GameState, cid: @FieldType(Command, "complete_contract")) Error!Result {
-    const c = gs.contracts.getPtr(cid) orelse return Error.UnknownContract;
-    if (c.status != .active) return Error.UnknownContract;
-    if (!c.objectivesMet()) return Error.ObjectivesNotMet;
-    try contract_control.complete(gs, c, false);
-    return .{};
-}
-
-fn execRecallCompany(gs: *GameState, company: @FieldType(Command, "recall_company")) Error!Result {
-    const f = gs.force(company) orelse return Error.UnknownForce;
-    if (f.echelon != .company) return Error.NotACompany;
-    if (f.return_eta_day != null) return Error.CompanyInTransit;
-    _ = try contract_control.recall(gs, company);
-    return .{};
-}
-
-fn execCoverShortfall(gs: *GameState, c: @FieldType(Command, "cover_shortfall")) Error!Result {
-    if (hq_ops.canFabricate(gs, c.hq, c.part_key)) {
-        var res = try execute(gs, .{ .fabricate = .{ .hq = c.hq, .part_key = c.part_key, .quantity = c.quantity } });
-        res.fabricated = true;
-        return res;
-    }
-    return execute(gs, .{ .order_part = .{ .part_key = c.part_key, .quantity = c.quantity, .dest = .{ .hq = c.hq } } });
-}
-
-fn execConfirmOrders(gs: *GameState, id: @FieldType(Command, "confirm_orders")) Error!Result {
-    const c = gs.contracts.getPtr(id) orelse return Error.UnknownContract;
-    if (!@import("battle.zig").inContactWindow(gs, c)) return Error.NoContact;
-    c.orders_day = c.next_battle_day;
-    try gs.log(.battle, .{ .company = c.assigned_company, .contract = id }, "[orders] battle orders given for the engagement on day {d}", .{c.next_battle_day.?});
-    return .{};
-}
-
-fn execCycleDifficulty(gs: *GameState, dir: @FieldType(Command, "cycle_difficulty")) Error!Result {
-    const Level = @import("../domain/difficulty.zig").Level;
-    const n = @typeInfo(Level).@"enum".fields.len;
-    const now: usize = @intFromEnum(gs.difficulty);
-    const next: Level = @enumFromInt(if (dir >= 0) (now + 1) % n else (now + n - 1) % n);
-    _ = try execute(gs, .{ .set_difficulty = next });
-    return .{ .difficulty_name = gs.diff().name, .difficulty_blurb = gs.diff().blurb };
-}
-
-fn execAdjustSharesPct(gs: *GameState, delta: @FieldType(Command, "adjust_shares_pct")) Error!Result {
-    const pct: i64 = types.bpPercent(gs.share_profit_bp);
-    const next: i64 = std.math.clamp(pct + delta, 0, 100);
-    _ = try execute(gs, .{ .set_shares_pct = @intCast(next) });
-    return .{ .shares_pct = @intCast(next) };
-}
-
-fn execCreateCommander(gs: *GameState, c: @FieldType(Command, "create_commander")) Error!Result {
-    if (c.start_year < 3000 or c.start_year > 3060) return Error.BadYear;
-    gs.clock.date.year = c.start_year;
-    _ = try founding.createCommander(gs, c.name, c.origin, c.profession);
-    // Until renamed, the outfit carries the commander's name — it
-    // reads far better in the campaign registry.
-    if (std.mem.eql(u8, gs.outfit_name, "Provisional Mercenary Command")) {
-        gs.outfit_name = try std.fmt.allocPrint(gs.allocator(), "{s}'s Command", .{c.name});
-    }
-    // The boards open the day the shingle goes up.
-    try contract_market.refresh(gs);
-    try contract_market.refreshListings(gs);
-    try contract_market.refreshCandidates(gs);
-    return .{};
-}
-
-fn execSetSharesPct(gs: *GameState, pct: @FieldType(Command, "set_shares_pct")) Error!Result {
-    if (pct > 100) return Error.BadPercent;
-    gs.share_profit_bp = @as(types.Bp, pct) * 100;
-    try gs.log(.decision, .{}, "[shares] profit share set to {d}% of contract income", .{pct});
-    return .{};
-}
-
-fn execSetDifficulty(gs: *GameState, level: @FieldType(Command, "set_difficulty")) Error!Result {
-    const was = gs.difficulty;
-    gs.difficulty = level;
-    const row = gs.diff();
-    const dm = @import("../domain/difficulty.zig").multText;
-    var b1: [16]u8 = undefined;
-    var b2: [16]u8 = undefined;
-    var b3: [16]u8 = undefined;
-    try gs.log(.finance, .{}, "[difficulty] {s} → {s} — {s} (contract pay {s}, fabrication {s}, opposition {s})", .{
-        @tagName(was), row.name, row.blurb, dm(&b1, row.contract_pay_bp), dm(&b2, row.fab_cost_bp), dm(&b3, row.enemy_bp),
-    });
-    return .{};
-}
-
-fn execClearStandingOrder(gs: *GameState, name: @FieldType(Command, "clear_standing_order")) Error!Result {
-    const kind = std.meta.stringToEnum(events_mod.EventKind, name) orelse return Error.NoSuchEvent;
-    if (gs.event_memory.getPtr(kind)) |m| m.streak = 0;
-    try gs.log(.decision, .{}, "[sop] {s}: standing order cleared — the inbox asks again", .{name});
-    return .{};
-}
-
-fn execRepayLoan(gs: *GameState, r: @FieldType(Command, "repay_loan")) Error!Result {
-    if (r.index >= gs.loans.items.len) return Error.NoSuchLoan;
-    const loan = &gs.loans.items[r.index];
-    const amount = @min(r.amount, loan.balance);
-    if (amount <= 0) return Error.NoSuchLoan;
-    if (gs.funds < amount) return Error.InsufficientTreasury;
-    loan.balance -= amount;
-    try gs.postTransaction(.{ .day = gs.clock.day_index, .amount = -amount, .category = .loan_principal, .note = "early repayment" });
-    if (loan.balance <= 0) _ = gs.loans.orderedRemove(r.index);
-    return .{};
-}
-
-fn execTransfer(gs: *GameState, t: @FieldType(Command, "transfer")) Error!Result {
-    try validateTreasury(gs, t.from);
-    try validateTreasury(gs, t.to);
-    const eta = treasury.courierEtaDays(gs, t.to);
-    try treasury.transferFunds(gs, t.from, t.to, t.amount, eta);
-    const tags = t.to.tags();
-    try gs.log(.finance, .{ .company = tags.company, .hq = tags.hq }, "[finance] {d} c-bills dispatched by courier (eta {d} days)", .{ t.amount, eta });
-    return .{};
-}
-
-fn execSetPolicy(gs: *GameState, p: @FieldType(Command, "set_policy")) Error!Result {
-    try validateTreasury(gs, p.entity);
-    if (p.entity == .outfit) return Error.UnknownTreasury;
-    // One policy per entity: replace if present; a zero floor or cap removes it.
-    const remove = p.floor <= 0 or p.monthly_cap <= 0;
-    for (gs.policies.items, 0..) |*existing, i| {
-        if (std.meta.eql(existing.entity, p.entity)) {
-            if (remove) {
-                _ = gs.policies.orderedRemove(i);
-            } else {
-                existing.floor = p.floor;
-                existing.monthly_cap = p.monthly_cap;
-            }
-            return .{};
-        }
-    }
-    if (remove) return .{};
-    try gs.policies.append(gs.allocator(), .{ .entity = p.entity, .floor = p.floor, .monthly_cap = p.monthly_cap });
-    return .{};
-}
-
-fn execTakeLoan(gs: *GameState, l: @FieldType(Command, "take_loan")) Error!Result {
-    if (l.principal <= 0 or l.term_months == 0) return Error.NoSuchLoan;
-    if (l.principal > treasury.creditRemaining(gs)) return Error.CreditExceeded;
-    const rate_bp: types.Bp = tuning.finance.loan_rate_bp; // 12%/yr simple interest
-    const total_interest = @divTrunc(l.principal * rate_bp * l.term_months, 10_000 * 12);
-    try gs.loans.append(gs.allocator(), .{
-        .principal = l.principal,
-        .balance = l.principal,
-        .rate_bp = rate_bp,
-        .term_months = l.term_months,
-        .next_pay_day = gs.clock.day_index + 30,
-        .payment = @divTrunc(l.principal + total_interest, l.term_months),
-    });
-    try gs.postTransaction(.{
-        .day = gs.clock.day_index,
-        .amount = l.principal,
-        .category = .loan_principal,
-        .note = "loan drawdown",
-    });
-    return .{};
-}
-
-fn execReadReport(gs: *GameState, id: @FieldType(Command, "read_report")) Error!Result {
-    if (!gs.battle_reports.markRead(id)) return Error.NoSuchBattle;
-    return .{};
-}
-
-fn execResolveDecision(gs: *GameState, r: @FieldType(Command, "resolve_decision")) Error!Result {
-    try contract_events.resolveChoice(gs, r.event, r.choice);
-    return .{};
-}
-
-fn validateTreasury(gs: *GameState, t: state_mod.Treasury) Error!void {
-    switch (t) {
-        .outfit => {},
-        .hq => |id| if (gs.hqs.getPtr(id) == null) return Error.UnknownTreasury,
-        .company => |id| {
-            const f = gs.force(id) orelse return Error.UnknownTreasury;
-            if (f.echelon != .company) return Error.NotACompany;
-        },
-    }
-}
-
-/// The turn-hold as an error. The checklist decides what
-/// holds the turn; this only names the refusal, so a new hold cannot be
-/// enforced in one place and reported in another.
-fn holdError(gs: *GameState) ?Error {
-    return switch (@import("checklist.zig").turnHold(gs) orelse return null) {
-        .unread_after_action => Error.ReportUnread,
-        .battle_decision => Error.DecisionPending,
-    };
-}
-
-fn advance(gs: *GameState, days: u32) Error!Result {
-    // Turn-based: each day is a turn; nothing interrupts the advance.
-    // Decisions wait in the inbox and default at their deadlines — except
-    // money: a negative outfit treasury holds the turn until a
-    // loan or a sale covers it, and past all credit the outfit folds.
-    var result: Result = .{};
-    // Nothing moves while an engagement is unread or a battle
-    // decision is unanswered; `read <id>` clears the first,
-    // `decide <id> <n>` the second, and the client opens both for you.
-    if (holdError(gs)) |e| return e;
-    for (0..days) |_| {
-        if (gs.bankrupt) return Error.Bankrupt;
-        // Couriers already bound for the outfit count: the turn can end
-        // while the money is on the road.
-        if (gs.funds + treasury.inboundToOutfit(gs) < 0) {
-            if (treasury.isInsolvent(gs)) {
-                gs.bankrupt = true;
-                try gs.log(.finance, .{}, "[bankrupt] the outfit cannot cover {d}: creditors seize what is left", .{gs.funds});
-                return Error.Bankrupt;
-            }
-            return Error.Insolvent;
-        }
-        try tick.advanceDay(gs);
-        result.days_advanced += 1;
-        // A battle disposes of hulls and people permanently and has no
-        // safe default to lapse to (ARCH §6), so an unread after-action
-        // or an unanswered battle decision holds the turn. A multi-day
-        // advance stops on the day it lands rather than resolving the
-        // rest of the week around it.
-        if (@import("checklist.zig").turnHold(gs) != null) return result;
-        // The contact warning is a heads-up, not a hold: the advance stops
-        // on the day it appears and the next advance goes ahead.
-        if (@import("checklist.zig").contactOpenedToday(gs)) |c| {
-            result.contact = c.id;
-            return result;
-        }
-    }
-    return result;
 }
 
 test "insolvency holds the turn; bankruptcy ends the campaign" {
@@ -1388,199 +1019,6 @@ test "training uses the trainee's home HQ, not any HQ with a training ground" {
     try std.testing.expectError(Error.NoTrainingGround, execute(&gs, .{ .train_company = .{ .company = gs.person(t.at_second).?.assigned_force, .skill = null } }));
 }
 
-/// Walk `days` the way a commander does: read every
-/// after-action the advance stops on, answer every battle decision it
-/// raises with that decision's own default, and carry on. Tests that do
-/// not care about the fight use this instead of `advance_days`.
-fn advanceReading(gs: *GameState, days: u32) !void {
-    var left = days;
-    while (left > 0) {
-        try clearHolds(gs);
-        const r = try execute(gs, .{ .advance_days = left });
-        if (r.days_advanced == 0) break; // refused for a reason of its own
-        left -= @intCast(r.days_advanced);
-    }
-    try clearHolds(gs);
-}
-
-fn clearHolds(gs: *GameState) !void {
-    while (@import("checklist.zig").turnHold(gs)) |h| switch (h) {
-        .unread_after_action => _ = try execute(gs, .{ .read_report = gs.battle_reports.unread().?.id }),
-        .battle_decision => {
-            const ev = gs.event_queue.blocking().?;
-            _ = try execute(gs, .{ .resolve_decision = .{ .event = ev.id, .choice = ev.default_choice } });
-        },
-    };
-}
-
-test "an unread after-action holds the turn, and a week stops on the day it lands" {
-    var gs = GameState.init(std.testing.allocator, .{ .seed = 4242 });
-    defer gs.deinit();
-    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
-    const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
-    try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
-        .id = @enumFromInt(1),
-        .kind = .recon_raid,
-        .employer_key = "LC",
-        .enemy_key = "PER",
-        .planet_key = "galatea",
-        .terms = .{ .length_months = 6, .base_pay_month = 400_000, .salvage_pct = 30, .battle_loss_pct = 30 },
-        .status = .active,
-        .assigned_company = co,
-        .monthly_net = 300_000,
-    });
-    _ = gs.contracts.getPtr(@enumFromInt(1)).?;
-    const site: types.Site = .{ .company = co };
-    try gs.addStock(site, "armor", 60);
-    for (@import("../domain/part.zig").munition_keys) |key| try gs.addStock(site, key, 40);
-
-    // Walk a long advance until a battle lands. It must stop short: the
-    // week does not get to resolve around an engagement unseen.
-    var guard: u32 = 0;
-    while (gs.battle_reports.unread() == null and guard < 20) : (guard += 1) {
-        const r = try execute(&gs, .{ .advance_days = 7 });
-        if (gs.battle_reports.unread() != null) {
-            try std.testing.expect(r.days_advanced < 7);
-            break;
-        }
-        // A week also stops, once, when the contact warning comes into view.
-        if (r.contact == .none) try std.testing.expectEqual(@as(u32, 7), r.days_advanced);
-    }
-    const waiting = gs.battle_reports.unread() orelse return error.NoBattleInTwentyWeeks;
-
-    // While it waits, nothing moves — not a week, not a day.
-    try std.testing.expectError(Error.ReportUnread, execute(&gs, .{ .advance_days = 7 }));
-    try std.testing.expectError(Error.ReportUnread, execute(&gs, .advance_day));
-    const held_at = gs.clock.day_index;
-
-    // The checklist says so, and says it blocks.
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const warnings = try @import("checklist.zig").turnWarnings(&gs, arena.allocator());
-    var saw = false;
-    for (warnings) |w| if (w.kind == .unread_after_action) {
-        saw = true;
-        try std.testing.expect(w.kind.urgent());
-    };
-    try std.testing.expect(saw);
-
-    // Reading it lets time move again — once the decision that fight may
-    // have raised is answered too.
-    _ = try execute(&gs, .{ .read_report = waiting.id });
-    try clearHolds(&gs);
-    const after = try execute(&gs, .advance_day);
-    try std.testing.expectEqual(@as(u32, 1), after.days_advanced);
-    try std.testing.expect(gs.clock.day_index > held_at);
-
-    // An id that is not on record is refused, not silently ignored.
-    try std.testing.expectError(Error.NoSuchBattle, execute(&gs, .{ .read_report = @enumFromInt(9999) }));
-}
-
-test "a field held asks for the tempo, and the turn waits for the answer" {
-    var gs = GameState.init(std.testing.allocator, .{ .seed = 4242 });
-    defer gs.deinit();
-    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
-    const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
-    try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
-        .id = @enumFromInt(1),
-        .kind = .recon_raid,
-        .employer_key = "LC",
-        .enemy_key = "PER",
-        .planet_key = "galatea",
-        .terms = .{ .length_months = 6, .base_pay_month = 400_000, .salvage_pct = 30, .battle_loss_pct = 30 },
-        .status = .active,
-        .assigned_company = co,
-        .monthly_net = 300_000,
-    });
-    const site: types.Site = .{ .company = co };
-    try gs.addStock(site, "armor", 60);
-    for (@import("../domain/part.zig").munition_keys) |key| try gs.addStock(site, key, 40);
-
-    // Fight until a held field raises the tempo decision, reading each
-    // report on the way (the other hold).
-    var guard: u32 = 0;
-    while (gs.event_queue.blocking() == null and guard < 40) : (guard += 1) {
-        while (gs.battle_reports.unread()) |u| _ = try execute(&gs, .{ .read_report = u.id });
-        _ = try execute(&gs, .{ .advance_days = 7 });
-        while (gs.battle_reports.unread()) |u| _ = try execute(&gs, .{ .read_report = u.id });
-    }
-    const pending = gs.event_queue.blocking() orelse return error.NoHeldFieldInFortyWeeks;
-    const event_id = pending.id;
-    try std.testing.expectEqual(events_mod.EventKind.press_or_consolidate, pending.kind);
-
-    // Nothing moves while it waits — not a week, not a day.
-    try std.testing.expectError(Error.DecisionPending, execute(&gs, .{ .advance_days = 7 }));
-    try std.testing.expectError(Error.DecisionPending, execute(&gs, .advance_day));
-    const held_at = gs.clock.day_index;
-
-    // The checklist names it and says it blocks, and the query the client
-    // opens it by agrees with the rule the command enforces (rule 67).
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const a = arena.allocator();
-    const warnings = try @import("checklist.zig").turnWarnings(&gs, a);
-    var saw = false;
-    for (warnings) |w| if (w.kind == .battle_decision) {
-        saw = true;
-        try std.testing.expect(w.kind.urgent());
-    };
-    try std.testing.expect(saw);
-    const hold = @import("queries.zig").turnHold(&gs);
-    try std.testing.expectEqual(event_id, hold.decision);
-
-    // Pressing pulls the next contact in to the tuned gap and scores.
-    const c = gs.contracts.getPtr(@enumFromInt(1)).?;
-    const score_before = c.score;
-    _ = try execute(&gs, .{ .resolve_decision = .{ .event = event_id, .choice = 0 } });
-    const t = @import("../domain/tuning.zig").t.battle;
-    try std.testing.expectEqual(gs.clock.day_index + t.press_gap_days, c.next_battle_day.?);
-    try std.testing.expectEqual(score_before + t.press_score, c.score);
-
-    // And time moves again.
-    try std.testing.expect(gs.event_queue.blocking() == null);
-    const after = try execute(&gs, .advance_day);
-    try std.testing.expectEqual(@as(u32, 1), after.days_advanced);
-    try std.testing.expect(gs.clock.day_index > held_at);
-}
-
-test "garrison work has no advance to press" {
-    var gs = GameState.init(std.testing.allocator, .{ .seed = 4243 });
-    defer gs.deinit();
-    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
-    const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
-    try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
-        .id = @enumFromInt(1),
-        .kind = .garrison_duty,
-        .employer_key = "LC",
-        .enemy_key = "PER",
-        .planet_key = "galatea",
-        .terms = .{ .length_months = 12, .base_pay_month = 400_000 },
-        .status = .active,
-        .assigned_company = co,
-        .monthly_net = 300_000,
-        // Without a force to probe with, garrison work never fights
-        // and the assertions below would be vacuous.
-        .enemy_lances = 2,
-        .enemy_lance_bv = 4_000,
-    });
-    const site: types.Site = .{ .company = co };
-    try gs.addStock(site, "armor", 60);
-    for (@import("../domain/part.zig").munition_keys) |key| try gs.addStock(site, key, 40);
-
-    // A year of probes: they are fights, and some are won, but none of
-    // them is a front to press, so none of them holds the turn.
-    var fought: usize = 0;
-    for (0..52) |_| {
-        try advanceReading(&gs, 7);
-        fought = gs.battle_reports.kept.items.len;
-        try std.testing.expect(gs.event_queue.blocking() == null);
-    }
-    try std.testing.expect(fought > 0); // otherwise the assertion above is vacuous
-    for (gs.event_queue.pending.items) |ev| {
-        try std.testing.expect(ev.kind != .press_or_consolidate);
-    }
-}
-
 test "golden master: same seed + same script = same state hash" {
     const script = [_]Command{
         .{ .hire = .{ .first = "Grayson", .last = "Carlyle", .role = .mekwarrior } },
@@ -1624,48 +1062,6 @@ test "payroll drains funds over three months, resignations stop costing" {
     try std.testing.expectEqual(@as(i64, 997_470), gs.funds);
 }
 
-test "turn-based decisions: time never blocks, deadlines default" {
-    var gs = GameState.init(std.testing.allocator, .{});
-    defer gs.deinit();
-
-    try gs.event_queue.push(gs.allocator(), .{
-        .day = 0,
-        .kind = .off_contract_request,
-        .deadline_day = 7,
-        .options = &.{
-            .{ .label = "Accept the governor's job", .effects = &.{ .{ .cash = 2_000_000 }, .{ .reputation = -1 } } },
-            .{ .label = "Decline politely", .effects = &.{.{ .reputation = 1 }} },
-        },
-        .default_choice = 1,
-    });
-
-    // Time moves freely with a decision pending (turn-based, no blocking).
-    const r = try execute(&gs, .{ .advance_days = 3 });
-    try std.testing.expectEqual(@as(u32, 3), r.days_advanced);
-    try std.testing.expectEqual(@as(usize, 1), gs.event_queue.pending.items.len);
-
-    // Answering it applies the chosen option's effects.
-    _ = try execute(&gs, .{ .resolve_decision = .{ .event = gs.event_queue.pending.items[0].id, .choice = 0 } });
-    try std.testing.expectEqual(@as(i64, 12_000_000), gs.funds);
-    try std.testing.expectEqual(@as(i32, -1), gs.reputation);
-    try std.testing.expectEqual(@as(usize, 0), gs.event_queue.pending.items.len);
-
-    // A second decision left unanswered defaults at its deadline.
-    try gs.event_queue.push(gs.allocator(), .{
-        .day = gs.clock.day_index,
-        .kind = .equipment_cache,
-        .deadline_day = gs.clock.day_index + 4,
-        .options = &.{
-            .{ .label = "Crack it open", .effects = &.{.{ .reputation = -1 }} },
-            .{ .label = "Report it", .effects = &.{.{ .reputation = 2 }} },
-        },
-        .default_choice = 1,
-    });
-    _ = try execute(&gs, .{ .advance_days = 6 });
-    try std.testing.expectEqual(@as(usize, 0), gs.event_queue.pending.items.len);
-    try std.testing.expectEqual(@as(i32, 1), gs.reputation); // -1 +2 defaulted
-}
-
 test "end to end: commander, company, contract to completion" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 2025 });
     defer gs.deinit();
@@ -1704,7 +1100,7 @@ test "end to end: commander, company, contract to completion" {
     const total_days = c.transit_days + @as(u32, c.terms.length_months) * 30 + 40;
     var advanced: u32 = 0;
     while (advanced < total_days) : (advanced += 7) {
-        try advanceReading(&gs, 7);
+        try tick.advanceReading(&gs, 7);
         var pit = gs.people.iterator();
         while (pit.next()) |entry| {
             const p = entry.value_ptr;
@@ -1826,13 +1222,13 @@ test "deployment eats field stores, then buys local, then goes hungry" {
 
     // On station, provisions burn daily out of the field stores.
     const c = gs.contracts.values()[0];
-    try advanceReading(&gs, c.transit_days + 10);
+    try tick.advanceReading(&gs, c.transit_days + 10);
     try std.testing.expect(gs.stockCount(site, "provisions") < loaded);
 
     // Stores run dry: either the valve bought local (salvage money) or the
     // company went hungry (no money) — never a silent third option.
     gs.force(co).?.local_funds = 0;
-    try advanceReading(&gs, 40);
+    try tick.advanceReading(&gs, 40);
     const mid = @import("../econ/finance.zig").summarize(&gs.ledger, 0, gs.clock.day_index, .{ .company = co });
     try std.testing.expect(gs.force(co).?.supply_shortage_days > 0 or
         mid.category(.supplies) + mid.category(.local_supplies) < 0);
@@ -1840,7 +1236,7 @@ test "deployment eats field stores, then buys local, then goes hungry" {
     // ...until a courier arrives and the local-purchase valve opens (the
     // courier takes the map transit, however far this seed's contract is).
     _ = try execute(&gs, .{ .transfer = .{ .from = .outfit, .to = .{ .company = co }, .amount = 500_000 } });
-    try advanceReading(&gs, treasury.courierEtaDays(&gs, .{ .company = co }) + 3);
+    try tick.advanceReading(&gs, treasury.courierEtaDays(&gs, .{ .company = co }) + 3);
     try std.testing.expectEqual(@as(u16, 0), gs.force(co).?.supply_shortage_days);
     const s = @import("../econ/finance.zig").summarize(&gs.ledger, 0, gs.clock.day_index, .{ .company = co });
     try std.testing.expect(s.category(.supplies) + s.category(.local_supplies) < 0);
@@ -2000,88 +1396,6 @@ test "a failed sourcing roll is reported, keeps its destination, and clears afte
     for (gs.part_orders.items) |po| try std.testing.expect(po.status != .failed);
 }
 
-test "assign without a slot word picks the seat by role, on pool hulls too" {
-    var gs = GameState.init(std.testing.allocator, .{ .seed = 1226 });
-    defer gs.deinit();
-    _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
-    const hull = try gs.addUnit("LCT-1V"); // unassigned pool
-    const tech = try gs.hirePerson("Ana", "Ruiz", .tech_mek);
-    const pilot = try gs.hirePerson("Bo", "Lund", .mekwarrior);
-    _ = try execute(&gs, .{ .assign = .{ .unit = hull, .slot = .any, .person = tech } });
-    _ = try execute(&gs, .{ .assign = .{ .unit = hull, .slot = .any, .person = pilot } });
-    try std.testing.expectEqual(tech, gs.unit(hull).?.tech);
-    try std.testing.expectEqual(pilot, gs.unit(hull).?.pilot);
-    const doc = try gs.hirePerson("Cy", "Oda", .doctor);
-    try std.testing.expectError(Error.WrongRole, execute(&gs, .{ .assign = .{ .unit = hull, .slot = .any, .person = doc } }));
-    // The seat picker lists pool hulls.
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const tech2 = try gs.hirePerson("Di", "Vos", .tech_mek);
-    _ = try execute(&gs, .{ .unassign = .{ .unit = hull, .slot = .any } });
-    const seats = try @import("queries.zig").openSeats(arena.allocator(), &gs, tech2);
-    try std.testing.expect(seats.len >= 1);
-    // A tech whose company is away cannot reach the pool.
-    const co = (try execute(&gs, .{ .new_company = "Alpha" })).created_force;
-    _ = try execute(&gs, .{ .accept_contract = .{ .offer_index = 0, .company = co } });
-    var away: types.PersonId = .none;
-    var pit = gs.people.iterator();
-    while (pit.next()) |e| if (e.value_ptr.role == .tech_mek and gs.companyOf(e.value_ptr.assigned_force) == co and away == .none) {
-        away = e.value_ptr.id;
-    };
-    try std.testing.expectError(Error.PersonAway, execute(&gs, .{ .assign = .{ .unit = hull, .slot = .any, .person = away } }));
-    try std.testing.expectEqual(@as(usize, 0), (try @import("queries.zig").openSeats(arena.allocator(), &gs, away)).len);
-}
-
-test "assignments — roles enforced, one seat per pilot, hall hiring" {
-    var gs = GameState.init(std.testing.allocator, .{ .seed = 71 });
-    defer gs.deinit();
-    _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
-    const co = (try execute(&gs, .{ .new_company = "Alpha" })).created_force;
-
-    // Generation filled every slot.
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const before = try @import("checklist.zig").turnWarnings(&gs, arena.allocator());
-    for (before) |w| try std.testing.expect(w.kind != .open_slots);
-
-    // Pull a mek's tech for training → an open slot the checklist names.
-    const company = gs.force(co).?;
-    const lance = gs.force(company.children.items[0]).?;
-    const uid = lance.units.items[0];
-    const tech = gs.unit(uid).?.tech;
-    try std.testing.expect(tech != .none);
-    _ = try execute(&gs, .{ .unassign = .{ .unit = uid, .slot = .tech } });
-    const after = try @import("checklist.zig").turnWarnings(&gs, arena.allocator());
-    var open = false;
-    for (after) |w| {
-        if (w.kind == .open_slots) open = true;
-    }
-    try std.testing.expect(open);
-
-    // Wrong role refused; the right one re-fills it.
-    const pilot = gs.unit(uid).?.pilot;
-    try std.testing.expectError(Error.WrongRole, execute(&gs, .{ .assign = .{ .unit = uid, .slot = .tech, .person = pilot } }));
-    _ = try execute(&gs, .{ .assign = .{ .unit = uid, .slot = .tech, .person = tech } });
-    try std.testing.expectEqual(tech, gs.unit(uid).?.tech);
-
-    // One seat per pilot: moving a pilot vacates the old hull.
-    const uid2 = lance.units.items[1];
-    _ = try execute(&gs, .{ .assign = .{ .unit = uid2, .slot = .pilot, .person = pilot } });
-    try std.testing.expectEqual(types.PersonId.none, gs.unit(uid).?.pilot);
-    _ = try execute(&gs, .{ .auto_assign = co });
-    try std.testing.expect(gs.unit(uid).?.pilot != .none or true); // may lack a spare pilot; no crash
-
-    // Hiring hall: candidates appear weekly and can be hired for a bonus.
-    _ = try execute(&gs, .{ .advance_days = 7 });
-    try std.testing.expect(gs.candidates.items.len > 0);
-    const roster_before = gs.people.count();
-    const funds_before = gs.funds;
-    _ = try execute(&gs, .{ .hire_candidate = 0 });
-    try std.testing.expectEqual(roster_before + 1, gs.people.count());
-    try std.testing.expect(gs.funds <= funds_before);
-    try std.testing.expectError(Error.NoSuchCandidate, execute(&gs, .{ .hire_candidate = 99 }));
-}
-
 test "medbay beds and triage decide who heals when it's crowded" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 72 });
     defer gs.deinit();
@@ -2226,7 +1540,7 @@ test "idle companies stay where they worked; recall brings them home; redeploy f
     _ = try execute(&gs, .{ .accept_contract = .{ .offer_index = best, .company = co } });
     const c = gs.contracts.values()[0];
     try std.testing.expect(c.committed_bv > 0);
-    try advanceReading(&gs, c.transit_days + @as(u32, c.terms.length_months) * 30 + 5);
+    try tick.advanceReading(&gs, c.transit_days + @as(u32, c.terms.length_months) * 30 + 5);
     const done = gs.contracts.values()[0];
     try std.testing.expect(done.status == .completed or done.status == .breached or done.status == .failed);
 
@@ -2321,7 +1635,7 @@ test "the resupply plan keeps a deployed company fed and armed on a long line" {
     var hungry_days: u32 = 0;
     var dry_battles: u32 = 0;
     while (day < 150) : (day += 1) {
-        try advanceReading(&gs, 1);
+        try tick.advanceReading(&gs, 1);
         try std.testing.expect(sites.siteTons(&gs, site) <= cap);
         if (gs.stockCount(site, "provisions") == 0) hungry_days += 1;
     }

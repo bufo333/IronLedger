@@ -25,6 +25,7 @@ const toe = @import("toe.zig");
 const lift_mod = @import("lift.zig");
 const personnel = @import("personnel.zig");
 const posture = @import("posture.zig");
+const commands = @import("commands.zig");
 
 /// Employer payment multiplier by faction, basis points (data/tables/factions.zon).
 pub fn employerMultBp(faction_key: []const u8) types.Bp {
@@ -634,6 +635,40 @@ pub fn perCompanyOpsCost(gs: *GameState) types.CBills {
 /// Expected monthly maintenance consumables: `maintenance.monthlyConsumablesEstimate`.
 fn maintenanceEstimate(gs: *GameState) types.CBills {
     return @import("maintenance.zig").monthlyConsumablesEstimate(gs);
+}
+
+// ---- C4b exec wrappers ----
+const Error = commands.Error;
+const Result = commands.Result;
+const Command = commands.Command;
+
+pub fn execNegotiate(gs: *GameState, n: @FieldType(Command, "negotiate")) Error!Result {
+    const outcome = negotiate(gs, n.offer_index, n.term) catch |err| return @errorCast(err);
+    return .{ .negotiation = switch (outcome) {
+        .improved => .improved,
+        .hardened => .hardened,
+        .withdrawn => .withdrawn,
+    } };
+}
+
+pub fn execBuyListing(gs: *GameState, index: @FieldType(Command, "buy_listing")) Error!Result {
+    const res = buyListing(gs, index) catch |err| return @errorCast(err);
+    return .{ .unit = res.unit };
+}
+
+pub fn execBuyHullFor(gs: *GameState, b: @FieldType(Command, "buy_hull_for")) Error!Result {
+    const res = buyHullFor(gs, b.listing, b.company, b.lance) catch |err| return @errorCast(err);
+    return .{ .unit = res.unit, .eta_days = res.eta_days };
+}
+
+pub fn execBuySupportHull(gs: *GameState, b: @FieldType(Command, "buy_support_hull")) Error!Result {
+    const res = buySupportHull(gs, b.company, b.kind) catch |err| return @errorCast(err);
+    return .{ .unit = res.unit, .eta_days = res.eta_days };
+}
+
+pub fn execHireCandidate(gs: *GameState, index: @FieldType(Command, "hire_candidate")) Error!Result {
+    const id = hireCandidate(gs, index) catch |err| return @errorCast(err);
+    return .{ .hired = id };
 }
 
 test "refresh only offers work inside rings or the beachhead band" {

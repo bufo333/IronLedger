@@ -18,6 +18,7 @@ const sites = @import("sites.zig");
 const toe = @import("toe.zig");
 const GameState = @import("state.zig").GameState;
 const treasury = @import("treasury.zig");
+const commands = @import("commands.zig");
 
 /// Truck budget per category, in percent of field capacity: ammo, armor
 /// and medical are capped so provisions — the one line that burns every
@@ -316,8 +317,27 @@ pub fn emergencyResupply(gs: *GameState, id: types.ContractId) !u32 {
     return rush.tons;
 }
 
+// ---- C4b exec wrappers ----
+const Error = commands.Error;
+const Result = commands.Result;
+const Command = commands.Command;
+
+pub fn execSetSupplyPolicy(gs: *GameState, sp: @FieldType(Command, "set_supply_policy")) Error!Result {
+    setSupplyPolicy(gs, sp.company, sp.min_days, sp.tons, sp.ammo_battles) catch |err| return @errorCast(err);
+    return .{};
+}
+
+pub fn execTrimStock(gs: *GameState, company: @FieldType(Command, "trim_stock")) Error!Result {
+    const tons = trimStock(gs, company) catch |err| return @errorCast(err);
+    return .{ .tons_moved = tons };
+}
+
+pub fn execEmergencyResupply(gs: *GameState, id: @FieldType(Command, "emergency_resupply")) Error!Result {
+    const tons = emergencyResupply(gs, id) catch |err| return @errorCast(err);
+    return .{ .tons_moved = tons };
+}
+
 test "the plan fits the trucks and only stocks munitions the company fires" {
-    const commands = @import("commands.zig");
     var gs = GameState.init(std.testing.allocator, .{ .seed = 5 });
     defer gs.deinit();
     _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });

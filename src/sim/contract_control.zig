@@ -26,6 +26,7 @@ const sites = @import("sites.zig");
 const treasury = @import("treasury.zig");
 const commander_mod = @import("../domain/commander.zig");
 const contract_market = @import("contract_market.zig");
+const commands = @import("commands.zig");
 
 pub const grace_days: u32 = tuning.contract.grace_days;
 pub const cooling_days: u32 = tuning.contract.cooling_days;
@@ -299,6 +300,40 @@ pub fn runReturns(gs: *GameState) !void {
             try gs.log(.contract, .{ .company = f.id }, "[movement] {s} is home{s}", .{ f.name, if (ships > 0) " — its ships return to their berths" else "" });
         };
     }
+}
+
+// ---- C4b exec wrappers and handlers ----
+const Error = commands.Error;
+const Result = commands.Result;
+const Command = commands.Command;
+
+pub fn execCompleteContract(gs: *GameState, cid: @FieldType(Command, "complete_contract")) Error!Result {
+    const c = gs.contracts.getPtr(cid) orelse return Error.UnknownContract;
+    if (c.status != .active) return Error.UnknownContract;
+    if (!c.objectivesMet()) return Error.ObjectivesNotMet;
+    try complete(gs, c, false);
+    return .{};
+}
+
+pub fn execRecallCompany(gs: *GameState, company: @FieldType(Command, "recall_company")) Error!Result {
+    const f = gs.force(company) orelse return Error.UnknownForce;
+    if (f.echelon != .company) return Error.NotACompany;
+    if (f.return_eta_day != null) return Error.CompanyInTransit;
+    _ = try recall(gs, company);
+    return .{};
+}
+
+pub fn execConfirmOrders(gs: *GameState, id: @FieldType(Command, "confirm_orders")) Error!Result {
+    const c = gs.contracts.getPtr(id) orelse return Error.UnknownContract;
+    if (!@import("battle.zig").inContactWindow(gs, c)) return Error.NoContact;
+    c.orders_day = c.next_battle_day;
+    try gs.log(.battle, .{ .company = c.assigned_company, .contract = id }, "[orders] battle orders given for the engagement on day {d}", .{c.next_battle_day.?});
+    return .{};
+}
+
+pub fn execAcceptContract(gs: *GameState, a: @FieldType(Command, "accept_contract")) Error!Result {
+    acceptContract(gs, a.offer_index, a.company) catch |err| return @errorCast(err);
+    return .{};
 }
 
 test "attrition contracts break when the pool does; duration ones don't care" {

@@ -17,6 +17,7 @@ const hq_link = @import("../domain/hq_link.zig");
 const lift_mod = @import("lift.zig");
 const treasury = @import("treasury.zig");
 const toe = @import("toe.zig");
+const commands = @import("commands.zig");
 
 pub const HqLink = hq_link.HqLink;
 
@@ -213,6 +214,21 @@ pub fn establishLink(gs: *GameState, a: types.HqId, b: types.HqId, level: u8) !v
         try gs.hq_links.append(gs.allocator(), .{ .a = a, .b = b, .level = level, .established_day = gs.clock.day_index });
     }
     try gs.log(.delivery, .{ .hq = b }, "[network] supply link level {d} between hq:{d} and hq:{d}", .{ level, @intFromEnum(a), @intFromEnum(b) });
+}
+
+// ---- C4b exec wrappers ----
+const Error = commands.Error;
+const Result = commands.Result;
+const Command = commands.Command;
+
+pub fn execAssignCompany(gs: *GameState, a: @FieldType(Command, "assign_company")) Error!Result {
+    assignCompany(gs, a.company, a.hq) catch |err| return @errorCast(err);
+    return .{};
+}
+
+pub fn execLink(gs: *GameState, l: @FieldType(Command, "link")) Error!Result {
+    establishLink(gs, l.a, l.b, l.level) catch |err| return @errorCast(err);
+    return .{};
 }
 
 test "routes follow links, charter when there are none, and links cap tonnage" {

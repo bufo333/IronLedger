@@ -481,8 +481,6 @@ src/sim/checklist.zig:turnWarnings
 src/sim/cli.zig:errorText
 src/sim/cli.zig:parseVerb
 src/sim/commands.zig
-src/sim/commands.zig:execute
-src/sim/commands.zig:execute#switch
 src/sim/contract_events.zig
 src/sim/contract_events.zig:applyEffectsFor
 src/sim/contract_events.zig:applyEffectsFor#switch

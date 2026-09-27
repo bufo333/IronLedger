@@ -27,6 +27,7 @@ const market_mod = @import("../econ/market.zig");
 const treasury = @import("treasury.zig");
 const network = @import("network.zig");
 const lift_mod = @import("lift.zig");
+const commands = @import("commands.zig");
 
 // ----------------------------------------------------- the back office
 
@@ -987,6 +988,60 @@ pub fn reactivate(gs: *GameState, unit_id: types.UnitId) !void {
     try queueReactivation(gs, unit_id);
 }
 
+// ---- C4b exec wrappers ----
+const Error = commands.Error;
+const Result = commands.Result;
+const Command = commands.Command;
+
+pub fn execFoundHq(gs: *GameState, f: @FieldType(Command, "found_hq")) Error!Result {
+    foundHq(gs, f.name, f.planet_key) catch |err| return @errorCast(err);
+    return .{};
+}
+
+pub fn execUpgradeTier(gs: *GameState, hq_id: @FieldType(Command, "upgrade_tier")) Error!Result {
+    upgradeTier(gs, hq_id) catch |err| return @errorCast(err);
+    return .{};
+}
+
+pub fn execAutostaff(gs: *GameState, hq_id: @FieldType(Command, "autostaff")) Error!Result {
+    autostaff(gs, hq_id) catch |err| return @errorCast(err);
+    return .{};
+}
+
+pub fn execSellHq(gs: *GameState, hq_id: @FieldType(Command, "sell_hq")) Error!Result {
+    sellHq(gs, hq_id) catch |err| return @errorCast(err);
+    return .{};
+}
+
+pub fn execReactivate(gs: *GameState, unit_id: @FieldType(Command, "reactivate")) Error!Result {
+    reactivate(gs, unit_id) catch |err| return @errorCast(err);
+    return .{};
+}
+
+pub fn execFabricate(gs: *GameState, f0: @FieldType(Command, "fabricate")) Error!Result {
+    fabricate(gs, f0.hq, f0.part_key, f0.quantity) catch |err| return @errorCast(err);
+    return .{};
+}
+
+pub fn execUpgradeFacility(gs: *GameState, u: @FieldType(Command, "upgrade_facility")) Error!Result {
+    upgradeFacility(gs, u.hq, u.kind) catch |err| return @errorCast(err);
+    return .{};
+}
+
+pub fn execDepot(gs: *GameState, unit_id: @FieldType(Command, "depot")) Error!Result {
+    const hq_id = depot(gs, unit_id) catch |err| return @errorCast(err);
+    return .{ .hq = hq_id };
+}
+
+pub fn execCoverShortfall(gs: *GameState, c: @FieldType(Command, "cover_shortfall")) Error!Result {
+    if (canFabricate(gs, c.hq, c.part_key)) {
+        var res = try commands.execute(gs, .{ .fabricate = .{ .hq = c.hq, .part_key = c.part_key, .quantity = c.quantity } });
+        res.fabricated = true;
+        return res;
+    }
+    return commands.execute(gs, .{ .order_part = .{ .part_key = c.part_key, .quantity = c.quantity, .dest = .{ .hq = c.hq } } });
+}
+
 test "repair odds favour the sharper tech and the better hull; the parts sum to 100" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1212 });
     defer gs.deinit();
@@ -1129,7 +1184,6 @@ test "one rule for field spares: replace orders what the site's ledger says is s
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const al = arena.allocator();
-    const commands = @import("commands.zig");
     _ = try commands.execute(&gs, .{ .new_company = "Alpha" });
 
     // A hull at home with one weapon shot away; the shelf is bare of it.

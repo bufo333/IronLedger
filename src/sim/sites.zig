@@ -26,6 +26,7 @@ const market_mod = @import("../econ/market.zig");
 const field_supply = @import("field_supply.zig");
 const hq_mod = @import("../domain/hq.zig");
 const faction_mod = @import("../domain/faction.zig");
+const commands = @import("commands.zig");
 
 /// Where a force draws supplies from: its own field stores while away
 /// from home, its home warehouse otherwise.
@@ -448,8 +449,47 @@ pub fn travelDays(gs: *GameState, from_company: types.ForceId, to_company: types
     return logistics.daysBetween(a, b);
 }
 
+// ---- C4b exec wrappers ----
+const Error = commands.Error;
+const Result = commands.Result;
+const Command = commands.Command;
+
+pub fn execOrderPart(gs: *GameState, o: @FieldType(Command, "order_part")) Error!Result {
+    const res = orderPart(gs, o.part_key, o.quantity, o.dest) catch |err| return @errorCast(err);
+    return .{ .sourced = res.sourced };
+}
+
+pub fn execShipStock(gs: *GameState, s: @FieldType(Command, "ship_stock")) Error!Result {
+    shipStock(gs, s.part_key, s.quantity, s.from, s.to) catch |err| return @errorCast(err);
+    return .{};
+}
+
+pub fn execSetStockPolicy(gs: *GameState, sp: @FieldType(Command, "set_stock_policy")) Error!Result {
+    setStockPolicy(gs, sp.hq, sp.part_key, sp.min, sp.target) catch |err| return @errorCast(err);
+    return .{};
+}
+
+pub fn execSellStock(gs: *GameState, sale: @FieldType(Command, "sell_stock")) Error!Result {
+    sellStock(gs, sale.hq, sale.part_key, sale.quantity) catch |err| return @errorCast(err);
+    return .{};
+}
+
+pub fn execReplaceGear(gs: *GameState, unit_id: @FieldType(Command, "replace_gear")) Error!Result {
+    const res = replaceGear(gs, unit_id) catch |err| return @errorCast(err);
+    return .{ .ordered = res.ordered, .unsourced = res.unsourced };
+}
+
+pub fn execReplaceMount(gs: *GameState, r: @FieldType(Command, "replace_mount")) Error!Result {
+    const res = replaceMount(gs, r.unit, r.slot_key) catch |err| return @errorCast(err);
+    return .{ .sourced = res.sourced, .hq = res.hq };
+}
+
+pub fn execShipComponentsHome(gs: *GameState, co: @FieldType(Command, "ship_components_home")) Error!Result {
+    const res = shipComponentsHome(gs, co) catch |err| return @errorCast(err);
+    return .{ .count = res.count, .hq = res.hq };
+}
+
 test "order_part is refused over the site's free tons and accepted at the limit" {
-    const commands = @import("commands.zig");
     var gs = GameState.init(std.testing.allocator, .{ .seed = 7 });
     defer gs.deinit();
     _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });

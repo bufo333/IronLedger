@@ -14,6 +14,8 @@ const GameState = @import("state.zig").GameState;
 const personnel = @import("personnel.zig");
 const hq_ops = @import("hq_ops.zig");
 const treasury = @import("treasury.zig");
+const contract_market = @import("contract_market.zig");
+const commands = @import("commands.zig");
 
 pub const CreateCommanderError = error{ CommanderExists, NoHomeWorld } || std.mem.Allocator.Error;
 
@@ -123,6 +125,27 @@ pub fn prepareHq(gs: *GameState, name: []const u8, tier: hq_mod.HqTier, planet_k
         for (more) |kind| try hq.facilities.append(gs.allocator(), .{ .kind = kind, .level = 1 });
     }
     return hq;
+}
+
+// ---- C4b handler (moved from commands.zig) ----
+const Error = commands.Error;
+const Result = commands.Result;
+const Command = commands.Command;
+
+pub fn execCreateCommander(gs: *GameState, c: @FieldType(Command, "create_commander")) Error!Result {
+    if (c.start_year < 3000 or c.start_year > 3060) return Error.BadYear;
+    gs.clock.date.year = c.start_year;
+    _ = try createCommander(gs, c.name, c.origin, c.profession);
+    // Until renamed, the outfit carries the commander's name — it
+    // reads far better in the campaign registry.
+    if (std.mem.eql(u8, gs.outfit_name, "Provisional Mercenary Command")) {
+        gs.outfit_name = try std.fmt.allocPrint(gs.allocator(), "{s}'s Command", .{c.name});
+    }
+    // The boards open the day the shingle goes up.
+    try contract_market.refresh(gs);
+    try contract_market.refreshListings(gs);
+    try contract_market.refreshCandidates(gs);
+    return .{};
 }
 
 test "foundHq produces an HQ with exactly the facilities from prepareHq" {

@@ -21,6 +21,7 @@ const maintenance = @import("maintenance.zig");
 const toe = @import("toe.zig");
 const posture = @import("posture.zig");
 const sites = @import("sites.zig");
+const commands = @import("commands.zig");
 
 /// Recruit a randomly generated person (AtB-style: experience on 2d6,
 /// skills from the band, names from the tables). No signing bonus: that
@@ -521,6 +522,46 @@ pub fn promote(gs: *GameState, person_id: types.PersonId, rank: rank_mod.Rank, p
     p.rank_pinned = pin;
     if (!pin) _ = try refreshRanks(gs);
     try gs.log(.rotation, .{ .company = gs.companyOf(p.assigned_force), .hq = p.posted_hq }, "[rank] {s}: {s} → {s}{s} · {d} c-bills/mo", .{ try p.fullName(gs.allocator()), was.name(), p.rank.name(), if (pin) " (pinned)" else "", p.monthlySalary() });
+}
+
+// ---- C4b exec wrappers ----
+const Error = commands.Error;
+const Result = commands.Result;
+const Command = commands.Command;
+
+pub fn execHire(gs: *GameState, h: @FieldType(Command, "hire")) Error!Result {
+    const id = hire(gs, h.first, h.last, h.role) catch |err| return @errorCast(err);
+    return .{ .hired = id };
+}
+
+pub fn execRecruit(gs: *GameState, role: @FieldType(Command, "recruit")) Error!Result {
+    const id = recruit(gs, role) catch |err| return @errorCast(err);
+    return .{ .hired = id };
+}
+
+pub fn execFire(gs: *GameState, id: @FieldType(Command, "fire")) Error!Result {
+    fire(gs, id) catch |err| return @errorCast(err);
+    return .{};
+}
+
+pub fn execPromote(gs: *GameState, pr: @FieldType(Command, "promote")) Error!Result {
+    promote(gs, pr.person, pr.rank, pr.pin) catch |err| return @errorCast(err);
+    return .{};
+}
+
+pub fn execTransferPerson(gs: *GameState, t: @FieldType(Command, "transfer_person")) Error!Result {
+    transferPerson(gs, t.person, t.to_force) catch |err| return @errorCast(err);
+    return .{};
+}
+
+pub fn execPostPerson(gs: *GameState, pp: @FieldType(Command, "post_person")) Error!Result {
+    postToHq(gs, pp.person, pp.hq) catch |err| return @errorCast(err);
+    return .{};
+}
+
+pub fn execSetOfficeStaff(gs: *GameState, o: @FieldType(Command, "set_office_staff")) Error!Result {
+    const hired = setOfficeStaff(gs, o.hq, o.role, o.delta) catch |err| return @errorCast(err);
+    return .{ .hired = hired };
 }
 
 test "the recruiting bonus is the recruiting HQ's hiring hall, not the first HQ's" {

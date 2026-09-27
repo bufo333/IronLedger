@@ -20,6 +20,7 @@ const state_mod = @import("state.zig");
 const GameState = state_mod.GameState;
 const Treasury = state_mod.Treasury;
 const toe = @import("toe.zig");
+const commands = @import("commands.zig");
 
 pub const TransferError = error{InsufficientTreasury} || std.mem.Allocator.Error;
 
@@ -177,6 +178,101 @@ pub fn creditRemaining(gs: *GameState) types.CBills {
     var owed: types.CBills = 0;
     for (gs.loans.items) |l| owed += l.balance;
     return @max(0, creditLimit(gs) - owed);
+}
+
+// ---- C4b handlers (moved from commands.zig) ----
+const Error = commands.Error;
+const Result = commands.Result;
+const Command = commands.Command;
+
+fn validateTreasury(gs: *GameState, t: Treasury) Error!void {
+    switch (t) {
+        .outfit => {},
+        .hq => |id| if (gs.hqs.getPtr(id) == null) return Error.UnknownTreasury,
+        .company => |id| {
+            const f = gs.force(id) orelse return Error.UnknownTreasury;
+            if (f.echelon != .company) return Error.NotACompany;
+        },
+    }
+}
+
+pub fn execRepayLoan(gs: *GameState, r: @FieldType(Command, "repay_loan")) Error!Result {
+    if (r.index >= gs.loans.items.len) return Error.NoSuchLoan;
+    const loan = &gs.loans.items[r.index];
+    const amount = @min(r.amount, loan.balance);
+    if (amount <= 0) return Error.NoSuchLoan;
+    if (gs.funds < amount) return Error.InsufficientTreasury;
+    loan.balance -= amount;
+    try gs.postTransaction(.{ .day = gs.clock.day_index, .amount = -amount, .category = .loan_principal, .note = "early repayment" });
+    if (loan.balance <= 0) _ = gs.loans.orderedRemove(r.index);
+    return .{};
+}
+
+pub fn execTransfer(gs: *GameState, t: @FieldType(Command, "transfer")) Error!Result {
+    try validateTreasury(gs, t.from);
+    try validateTreasury(gs, t.to);
+    const eta = courierEtaDays(gs, t.to);
+    try transferFunds(gs, t.from, t.to, t.amount, eta);
+    const tags = t.to.tags();
+    try gs.log(.finance, .{ .company = tags.company, .hq = tags.hq }, "[finance] {d} c-bills dispatched by courier (eta {d} days)", .{ t.amount, eta });
+    return .{};
+}
+
+pub fn execSetPolicy(gs: *GameState, p: @FieldType(Command, "set_policy")) Error!Result {
+    try validateTreasury(gs, p.entity);
+    if (p.entity == .outfit) return Error.UnknownTreasury;
+    // One policy per entity: replace if present; a zero floor or cap removes it.
+    const remove = p.floor <= 0 or p.monthly_cap <= 0;
+    for (gs.policies.items, 0..) |*existing, i| {
+        if (std.meta.eql(existing.entity, p.entity)) {
+            if (remove) {
+                _ = gs.policies.orderedRemove(i);
+            } else {
+                existing.floor = p.floor;
+                existing.monthly_cap = p.monthly_cap;
+            }
+            return .{};
+        }
+    }
+    if (remove) return .{};
+    try gs.policies.append(gs.allocator(), .{ .entity = p.entity, .floor = p.floor, .monthly_cap = p.monthly_cap });
+    return .{};
+}
+
+pub fn execTakeLoan(gs: *GameState, l: @FieldType(Command, "take_loan")) Error!Result {
+    if (l.principal <= 0 or l.term_months == 0) return Error.NoSuchLoan;
+    if (l.principal > creditRemaining(gs)) return Error.CreditExceeded;
+    const rate_bp: types.Bp = tuning.finance.loan_rate_bp; // 12%/yr simple interest
+    const total_interest = @divTrunc(l.principal * rate_bp * l.term_months, 10_000 * 12);
+    try gs.loans.append(gs.allocator(), .{
+        .principal = l.principal,
+        .balance = l.principal,
+        .rate_bp = rate_bp,
+        .term_months = l.term_months,
+        .next_pay_day = gs.clock.day_index + 30,
+        .payment = @divTrunc(l.principal + total_interest, l.term_months),
+    });
+    try gs.postTransaction(.{
+        .day = gs.clock.day_index,
+        .amount = l.principal,
+        .category = .loan_principal,
+        .note = "loan drawdown",
+    });
+    return .{};
+}
+
+pub fn execSetSharesPct(gs: *GameState, pct: @FieldType(Command, "set_shares_pct")) Error!Result {
+    if (pct > 100) return Error.BadPercent;
+    gs.share_profit_bp = @as(types.Bp, pct) * 100;
+    try gs.log(.decision, .{}, "[shares] profit share set to {d}% of contract income", .{pct});
+    return .{};
+}
+
+pub fn execAdjustSharesPct(gs: *GameState, delta: @FieldType(Command, "adjust_shares_pct")) Error!Result {
+    const pct: i64 = types.bpPercent(gs.share_profit_bp);
+    const next: i64 = std.math.clamp(pct + delta, 0, 100);
+    _ = try commands.execute(gs, .{ .set_shares_pct = @intCast(next) });
+    return .{ .shares_pct = @intCast(next) };
 }
 
 test "the credit line is backed by what the outfit could sell, less what it owes" {

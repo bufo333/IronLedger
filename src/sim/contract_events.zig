@@ -19,6 +19,7 @@ const personnel = @import("personnel.zig");
 const treasury = @import("treasury.zig");
 const sites = @import("sites.zig");
 const toe = @import("toe.zig");
+const commands = @import("commands.zig");
 
 pub const decision_window_days = tuning.contract.decision_window_days;
 pub const notice_window_days = tuning.contract.notice_window_days;
@@ -1019,7 +1020,6 @@ pub fn damageRandomUnits(gs: *GameState, company: types.ForceId, n: u8, which: E
 }
 
 test "event wear lands on the line lances; only convoy events touch the support train" {
-    const commands = @import("commands.zig");
     var gs = GameState.init(std.testing.allocator, .{ .seed = 2025 });
     defer gs.deinit();
     _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "E", .origin = .CC, .profession = .paymaster } });
@@ -1251,7 +1251,6 @@ test "a prisoner can be ransomed, released for standing, or recruited on a loyal
 }
 
 test "a weekly decision cools down, and the same answer three times becomes a standing order" {
-    const commands = @import("commands.zig");
     var gs = GameState.init(std.testing.allocator, .{ .seed = 303 });
     defer gs.deinit();
     _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
@@ -1462,4 +1461,21 @@ test "when the stores cover everything, the techs just do it" {
     try queueFieldRepair(&gs, f.c, .none);
     try std.testing.expect(gs.event_queue.blocking() == null);
     for (f.hulls) |uid| try std.testing.expectEqual(@as(u8, 100), gs.unit(uid).?.armor_pct);
+}
+
+// ---- C4b handlers (moved from commands.zig) ----
+const Error = commands.Error;
+const Result = commands.Result;
+const Command = commands.Command;
+
+pub fn execResolveDecision(gs: *GameState, r: @FieldType(Command, "resolve_decision")) Error!Result {
+    try resolveChoice(gs, r.event, r.choice);
+    return .{};
+}
+
+pub fn execClearStandingOrder(gs: *GameState, name: @FieldType(Command, "clear_standing_order")) Error!Result {
+    const kind = std.meta.stringToEnum(events.EventKind, name) orelse return Error.NoSuchEvent;
+    if (gs.event_memory.getPtr(kind)) |m| m.streak = 0;
+    try gs.log(.decision, .{}, "[sop] {s}: standing order cleared — the inbox asks again", .{name});
+    return .{};
 }
