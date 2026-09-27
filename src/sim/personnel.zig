@@ -19,6 +19,8 @@ const person_gen = @import("../gen/person_gen.zig");
 const rng_mod = @import("rng.zig");
 const maintenance = @import("maintenance.zig");
 const toe = @import("toe.zig");
+const posture = @import("posture.zig");
+const sites = @import("sites.zig");
 
 /// Recruit a randomly generated person (AtB-style: experience on 2d6,
 /// skills from the band, names from the tables). No signing bonus: that
@@ -458,6 +460,67 @@ pub fn refreshRanks(gs: *GameState) !u32 {
         };
     }
     return changed;
+}
+
+// ---- C4b personnel command handlers moved from commands.zig ----
+
+pub fn hire(gs: *GameState, first: []const u8, last: []const u8, role: person_mod.Role) !types.PersonId {
+    return gs.hirePerson(first, last, role);
+}
+
+pub fn recruit(gs: *GameState, role: person_mod.Role) !types.PersonId {
+    return recruitGenerated(gs, role, gs.homeHqFor(.none), .market);
+}
+
+pub fn fire(gs: *GameState, id: types.PersonId) !void {
+    const p = gs.person(id) orelse return error.UnknownPerson;
+    const paid = try depart(gs, id, .resigned, tuning.person.fire_severance_bp, "severance (fired)");
+    if (paid > 0) try gs.log(.rotation, .{ .company = gs.companyOf(p.assigned_force) }, "[personnel] {s} fired — {d} c-bills severance", .{ try p.fullName(gs.allocator()), paid });
+}
+
+pub fn setOfficeStaff(gs: *GameState, hq: types.HqId, role: person_mod.Role, delta: i8) !types.PersonId {
+    if (gs.hqs.getPtr(hq) == null) return error.UnknownHq;
+    if (delta > 0) {
+        const id = try recruitGenerated(gs, role, hq, .market);
+        try postToHq(gs, id, hq);
+        return id;
+    }
+    var last: types.PersonId = .none;
+    var it = gs.people.iterator();
+    while (it.next()) |e| {
+        const p = e.value_ptr;
+        if (p.status == .active and p.role == role and p.posted_hq == hq) last = p.id;
+    }
+    if (last == .none) return error.UnknownPerson;
+    try fire(gs, last);
+    return .none;
+}
+
+pub fn transferPerson(gs: *GameState, person_id: types.PersonId, to_force: types.ForceId) !void {
+    const p = gs.person(person_id) orelse return error.UnknownPerson;
+    const dest = gs.force(to_force) orelse return error.UnknownForce;
+    if (gs.companyOf(p.assigned_force) == gs.companyOf(dest.id) and p.assigned_force == dest.id) return error.SameForce;
+    if (posture.isCompanyDeployed(gs, gs.companyOf(p.assigned_force))) return error.PersonDeployed;
+    // Vacate any seat/tech slot they hold in the old company.
+    var uit = gs.units.iterator();
+    while (uit.next()) |entry| {
+        if (entry.value_ptr.pilot == person_id) entry.value_ptr.pilot = .none;
+        if (entry.value_ptr.tech == person_id) entry.value_ptr.tech = .none;
+    }
+    const days = sites.travelDays(gs, gs.companyOf(p.assigned_force), gs.companyOf(dest.id));
+    p.assigned_force = dest.id;
+    p.posted_hq = .none;
+    hq_ops.refreshHqStaffing(gs);
+    if (days > 0) p.leave_until_day = gs.clock.day_index + days; // in transit
+}
+
+pub fn promote(gs: *GameState, person_id: types.PersonId, rank: rank_mod.Rank, pin: bool) !void {
+    const p = gs.person(person_id) orelse return error.UnknownPerson;
+    const was = p.rank;
+    p.rank = rank;
+    p.rank_pinned = pin;
+    if (!pin) _ = try refreshRanks(gs);
+    try gs.log(.rotation, .{ .company = gs.companyOf(p.assigned_force), .hq = p.posted_hq }, "[rank] {s}: {s} → {s}{s} · {d} c-bills/mo", .{ try p.fullName(gs.allocator()), was.name(), p.rank.name(), if (pin) " (pinned)" else "", p.monthlySalary() });
 }
 
 test "the recruiting bonus is the recruiting HQ's hiring hall, not the first HQ's" {

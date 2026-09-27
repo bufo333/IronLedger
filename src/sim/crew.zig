@@ -13,6 +13,9 @@ const GameState = @import("state.zig").GameState;
 const founding = @import("founding.zig");
 const maintenance = @import("maintenance.zig");
 const posture = @import("posture.zig");
+const personnel = @import("personnel.zig");
+const contract_market = @import("contract_market.zig");
+const person_gen = @import("../gen/person_gen.zig");
 
 /// `any`: whichever seat the person's role fits — pilot roles
 /// take the crew seat, tech roles the tech slot.
@@ -133,6 +136,45 @@ pub fn autoAssign(gs: *GameState, company: types.ForceId) !u32 {
         }
     }
     return open;
+}
+
+// ---- C4b crew command handlers moved from commands.zig ----
+
+pub const CrewCompanyResult = struct { hired_count: u32 = 0, still_open: u32 = 0 };
+
+pub fn autoAssignCompany(gs: *GameState, company: types.ForceId) !void {
+    const f = gs.force(company) orelse return error.UnknownForce;
+    if (f.echelon != .company) return error.NotACompany;
+    _ = try autoAssign(gs, company);
+}
+
+pub fn crewCompany(gs: *GameState, company: types.ForceId) !CrewCompanyResult {
+    const f = gs.force(company) orelse return error.UnknownForce;
+    if (f.echelon != .company) return error.NotACompany;
+    if (posture.isCompanyDeployed(gs, company)) return error.CompanyDeployed;
+    var hired: u32 = 0;
+    var still_open: u32 = 0;
+    for (personnel.manningNeeds(gs, company)) |n| {
+        var have = personnel.manningHave(gs, company, n.role);
+        while (have < n.need) : (have += 1) {
+            if (personnel.isPooledRole(n.role)) {
+                // MekHQ hires astechs and medics to complement on
+                // demand: no market, no signing bonus, salary only.
+                const spec = person_gen.generateWithBonus(&gs.rng, .market, n.role, personnel.recruitBonus(gs, gs.homeHqFor(company)));
+                const id = try personnel.hireFromSpec(gs, spec);
+                gs.person(id).?.assigned_force = company;
+                hired += 1;
+            } else if (try contract_market.hireRoleFromHall(gs, n.role, company)) {
+                hired += 1;
+            } else {
+                still_open += n.need - have;
+                break;
+            }
+        }
+    }
+    _ = try autoAssign(gs, company);
+    try gs.log(.decision, .{ .company = company }, "[raise] {s}: {d} hired to fill the manning table ({d} still open — the halls had nobody)", .{ f.name, hired, still_open });
+    return .{ .hired_count = hired, .still_open = still_open };
 }
 
 test "auto-assign benches a spent pilot when a fresher one is free, keeps them when nobody is" {

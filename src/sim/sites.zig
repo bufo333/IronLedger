@@ -438,6 +438,16 @@ pub fn replaceGear(gs: *GameState, unit_id: types.UnitId) !ReplaceGearResult {
     return .{ .ordered = ordered, .unsourced = unsourced };
 }
 
+// ---- C4b personnel/crew command handlers moved from commands.zig ----
+
+/// Transit days between two companies' worlds (0 if co-located).
+pub fn travelDays(gs: *GameState, from_company: types.ForceId, to_company: types.ForceId) u32 {
+    const a = planet_mod.find(sitePlanetKey(gs, .{ .company = from_company }) orelse "") orelse return 0;
+    const b = planet_mod.find(sitePlanetKey(gs, .{ .company = to_company }) orelse "") orelse return 0;
+    if (a == b) return 0;
+    return logistics.daysBetween(a, b);
+}
+
 test "order_part is refused over the site's free tons and accepted at the limit" {
     const commands = @import("commands.zig");
     var gs = GameState.init(std.testing.allocator, .{ .seed = 7 });

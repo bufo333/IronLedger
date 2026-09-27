@@ -410,6 +410,114 @@ pub fn runWeeklyRest(gs: *GameState) !void {
     }
 }
 
+// ---- C4b medical/training command handlers moved from commands.zig ----
+
+pub fn triage(gs: *GameState, person_id: types.PersonId, priority: u8) !void {
+    const p = gs.person(person_id) orelse return error.UnknownPerson;
+    p.medbay_priority = priority;
+}
+
+pub fn leave(gs: *GameState, person_id: types.PersonId, days: u16) !void {
+    const p = gs.person(person_id) orelse return error.UnknownPerson;
+    if (p.status != .active) return error.PersonUnavailable;
+    if (posture.isCompanyDeployed(gs, gs.companyOf(p.assigned_force))) return error.PersonDeployed;
+    p.leave_until_day = gs.clock.day_index + days;
+}
+
+pub fn admit(gs: *GameState, pid: types.PersonId) !void {
+    const p = gs.person(pid) orelse return error.UnknownPerson;
+    if (p.status != .wounded) return error.NotWounded;
+    p.medbay_admitted = true;
+    try gs.log(.medical, .{ .company = gs.companyOf(p.assigned_force) }, "[medbay] {s} admitted", .{try p.fullName(gs.allocator())});
+}
+
+pub fn setAutoAdmit(gs: *GameState, on: bool) void {
+    gs.auto_admit = on;
+    if (on) {
+        // Nobody waits for the morning round: admit today's wounded now.
+        var it = gs.people.iterator();
+        while (it.next()) |e| if (e.value_ptr.status == .wounded and !e.value_ptr.medbay_admitted) {
+            e.value_ptr.medbay_admitted = true;
+        };
+    }
+}
+
+pub fn toggleAutoAdmit(gs: *GameState) bool {
+    const on = !gs.auto_admit;
+    setAutoAdmit(gs, on);
+    return on;
+}
+
+pub fn train(gs: *GameState, person_id: types.PersonId, skill: types.SkillType) !void {
+    const p = gs.person(person_id) orelse return error.UnknownPerson;
+    const ground = gs.trainingHqFor(p) orelse return error.NoTrainingGround;
+    if (p.status != .active) return error.PersonUnavailable;
+    if (p.training != null) return error.AlreadyTraining;
+    if (posture.isCompanyDeployed(gs, gs.companyOf(p.assigned_force))) return error.PersonDeployed;
+
+    // Validate up front so the refusal is explained now, not in 30 days.
+    const current = p.skill(skill) orelse return error.NotTrained;
+    if (current == 0) return error.AlreadyMastered;
+    if (p.xp < @import("../domain/person.zig").improveCost(current - 1)) return error.InsufficientXp;
+
+    p.training = .{ .skill = skill, .done_day = gs.clock.day_index + trainingDaysFor(gs, ground) };
+}
+
+pub fn trainAbility(gs: *GameState, person_id: types.PersonId, key: []const u8) !void {
+    const p = gs.person(person_id) orelse return error.UnknownPerson;
+    _ = gs.trainingHqFor(p) orelse return error.NoTrainingGround;
+    if (p.status != .active) return error.PersonUnavailable;
+    if (posture.isCompanyDeployed(gs, gs.companyOf(p.assigned_force))) return error.PersonDeployed;
+    const a = @import("../domain/ability.zig").find(key) orelse return error.UnknownAbility;
+    if (p.has(a.key)) return error.AlreadyLearned;
+    if (p.xp < a.xp_cost) return error.InsufficientXp;
+    p.xp -= a.xp_cost;
+    try p.abilities.append(gs.allocator(), a.key);
+    try gs.log(.training, .{ .company = gs.companyOf(p.assigned_force) }, "[training] {s} learns {s} ({d} XP) — {s}", .{ try p.rankedName(gs.allocator()), a.name, a.xp_cost, a.text });
+}
+
+pub const TrainCompanyResult = struct { enrolled: u32 = 0, short_xp: u32 = 0, busy: u32 = 0, nothing_to_learn: u32 = 0 };
+
+pub fn trainCompany(gs: *GameState, company: types.ForceId, skill_opt: ?types.SkillType) !TrainCompanyResult {
+    const f = gs.force(company) orelse return error.UnknownForce;
+    if (f.echelon != .company) return error.NotACompany;
+    if (!posture.isCompanyHome(gs, company)) return error.CompanyDeployed;
+    const ground = gs.homeHqFor(company);
+    const ground_hq = gs.hqs.getPtr(ground) orelse return error.NoTrainingGround;
+    if (!ground_hq.supportsTraining()) return error.NoTrainingGround;
+
+    var r: TrainCompanyResult = .{};
+    const days = trainingDaysFor(gs, ground);
+    var pit = gs.people.iterator();
+    while (pit.next()) |e| {
+        const p = e.value_ptr;
+        if (gs.companyOf(p.assigned_force) != company) continue;
+        if (p.status != .active or !p.isAvailable(gs.clock.day_index) or p.training != null) {
+            r.busy += 1;
+            continue;
+        }
+        const skill = skill_opt orelse p.role.primarySkill();
+        const current = p.skill(skill) orelse {
+            r.nothing_to_learn += 1;
+            continue;
+        };
+        if (current == 0) {
+            r.nothing_to_learn += 1;
+            continue;
+        }
+        if (p.xp < person_mod.improveCost(current - 1)) {
+            r.short_xp += 1;
+            continue;
+        }
+        p.training = .{ .skill = skill, .done_day = gs.clock.day_index + days };
+        r.enrolled += 1;
+    }
+    try gs.log(.rotation, .{ .company = company }, "[training] {s}: {d} enrolled{s} for {d} days · {d} short of XP · {d} busy · {d} nothing to learn", .{
+        f.name, r.enrolled, if (skill_opt) |s| try std.fmt.allocPrint(gs.allocator(), " at {s}", .{@tagName(s)}) else " at their trades", days, r.short_xp, r.busy, r.nothing_to_learn,
+    });
+    return r;
+}
+
 test "wounds heal; the field is slower than a home hospital" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 21 });
     defer gs.deinit();

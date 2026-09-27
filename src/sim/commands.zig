@@ -41,6 +41,7 @@ const founding = @import("founding.zig");
 const refit_m = @import("refit.zig");
 const crew = @import("crew.zig");
 const toe = @import("toe.zig");
+const personnel = @import("personnel.zig");
 
 pub const Command = union(enum) {
     /// End the turn: advance one day. Turn-based — time only moves here,
@@ -457,9 +458,18 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
     switch (cmd) {
         .advance_day => return advance(gs, 1),
         .advance_days => |n| return advance(gs, n),
-        .hire => |h| return execHire(gs, h),
-        .recruit => |role| return execRecruit(gs, role),
-        .fire => |id| return execFire(gs, id),
+        .hire => |h| {
+            const id = personnel.hire(gs, h.first, h.last, h.role) catch |err| return @errorCast(err);
+            return .{ .hired = id };
+        },
+        .recruit => |role| {
+            const id = personnel.recruit(gs, role) catch |err| return @errorCast(err);
+            return .{ .hired = id };
+        },
+        .fire => |id| {
+            personnel.fire(gs, id) catch |err| return @errorCast(err);
+            return .{};
+        },
         .new_company => |name| return execNewCompany(gs, name),
         .new_company_at => |n| return execNewCompanyAt(gs, n),
         .found_hq => |f| {
@@ -490,7 +500,10 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             return .{ .unit = res.unit, .eta_days = res.eta_days };
         },
         .set_outfit_emblem => |image| return execSetOutfitEmblem(gs, image),
-        .set_office_staff => |o| return execSetOfficeStaff(gs, o),
+        .set_office_staff => |o| {
+            const hired = personnel.setOfficeStaff(gs, o.hq, o.role, o.delta) catch |err| return @errorCast(err);
+            return .{ .hired = hired };
+        },
         .ship_components_home => |co| {
             const res = sites.shipComponentsHome(gs, co) catch |err| return @errorCast(err);
             return .{ .count = res.count, .hq = res.hq };
@@ -510,13 +523,18 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
         .cycle_role => |fid| return execCycleRole(gs, fid),
         .cycle_difficulty => |dir| return execCycleDifficulty(gs, dir),
         .adjust_shares_pct => |delta| return execAdjustSharesPct(gs, delta),
-        .toggle_auto_admit => return execToggleAutoAdmit(gs),
+        .toggle_auto_admit => {
+            return .{ .auto_admit = medical_mod.toggleAutoAdmit(gs) };
+        },
         .recall_idle => |company| return execRecallIdle(gs, company),
         .autostaff => |hq_id| {
             hq_ops.autostaff(gs, hq_id) catch |err| return @errorCast(err);
             return .{};
         },
-        .transfer_person => |t| return execTransferPerson(gs, t),
+        .transfer_person => |t| {
+            personnel.transferPerson(gs, t.person, t.to_force) catch |err| return @errorCast(err);
+            return .{};
+        },
         .rename_outfit => |name| return execRenameOutfit(gs, name),
         .rename_force => |r| return execRenameForce(gs, r),
         .set_emblem => |e| return execSetEmblem(gs, e),
@@ -533,8 +551,14 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
                 .withdrawn => .withdrawn,
             } };
         },
-        .train_ability => |ta| return execTrainAbility(gs, ta),
-        .promote => |pr| return execPromote(gs, pr),
+        .train_ability => |ta| {
+            medical_mod.trainAbility(gs, ta.person, ta.key) catch |err| return @errorCast(err);
+            return .{};
+        },
+        .promote => |pr| {
+            personnel.promote(gs, pr.person, pr.rank, pr.pin) catch |err| return @errorCast(err);
+            return .{};
+        },
         .order_part => |o| {
             const res = sites.orderPart(gs, o.part_key, o.quantity, o.dest) catch |err| return @errorCast(err);
             return .{ .sourced = res.sourced };
@@ -568,14 +592,20 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             const res = contract_market.buyHullFor(gs, b.listing, b.company, b.lance) catch |err| return @errorCast(err);
             return .{ .unit = res.unit, .eta_days = res.eta_days };
         },
-        .crew_company => |company| return execCrewCompany(gs, company),
+        .crew_company => |company| {
+            const r = crew.crewCompany(gs, company) catch |err| return @errorCast(err);
+            return .{ .hired_count = r.hired_count, .still_open = r.still_open };
+        },
         .trim_stock => |company| {
             const tons = field_supply.trimStock(gs, company) catch |err| return @errorCast(err);
             return .{ .tons_moved = tons };
         },
         .set_shares_pct => |pct| return execSetSharesPct(gs, pct),
         .set_difficulty => |level| return execSetDifficulty(gs, level),
-        .set_auto_admit => |on| return execSetAutoAdmit(gs, on),
+        .set_auto_admit => |on| {
+            medical_mod.setAutoAdmit(gs, on);
+            return .{};
+        },
         .set_roe => |r| return execSetRoe(gs, r),
         .set_role => |r| return execSetRole(gs, r),
         .replace_gear => |unit_id| {
@@ -587,7 +617,10 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             const hq_id = hq_ops.depot(gs, unit_id) catch |err| return @errorCast(err);
             return .{ .hq = hq_id };
         },
-        .admit => |pid| return execAdmit(gs, pid),
+        .admit => |pid| {
+            medical_mod.admit(gs, pid) catch |err| return @errorCast(err);
+            return .{};
+        },
         .repay_loan => |r| return execRepayLoan(gs, r),
         .sell_unit => |unit_id| return execSellUnit(gs, unit_id),
         .strip_unit => |unit_id| return execStripUnit(gs, unit_id),
@@ -608,18 +641,42 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             hq_ops.upgradeFacility(gs, u.hq, u.kind) catch |err| return @errorCast(err);
             return .{};
         },
-        .post_person => |pp| return execPostPerson(gs, pp),
-        .assign => |a| return execAssign(gs, a),
-        .unassign => |u| return execUnassign(gs, u),
-        .auto_assign => |company| return execAutoAssign(gs, company),
+        .post_person => |pp| {
+            personnel.postToHq(gs, pp.person, pp.hq) catch |err| return @errorCast(err);
+            return .{};
+        },
+        .assign => |a| {
+            crew.assignSlot(gs, a.unit, a.slot, a.person) catch |err| return @errorCast(err);
+            return .{};
+        },
+        .unassign => |u| {
+            try crew.unassignSlot(gs, u.unit, u.slot);
+            return .{};
+        },
+        .auto_assign => |company| {
+            crew.autoAssignCompany(gs, company) catch |err| return @errorCast(err);
+            return .{};
+        },
         .hire_candidate => |index| {
             const id = contract_market.hireCandidate(gs, index) catch |err| return @errorCast(err);
             return .{ .hired = id };
         },
-        .triage => |t| return execTriage(gs, t),
-        .leave => |l| return execLeave(gs, l),
-        .train => |t| return execTrain(gs, t),
-        .train_company => |t| return trainCompany(gs, t.company, t.skill),
+        .triage => |t| {
+            medical_mod.triage(gs, t.person, t.priority) catch |err| return @errorCast(err);
+            return .{};
+        },
+        .leave => |l| {
+            medical_mod.leave(gs, l.person, l.days) catch |err| return @errorCast(err);
+            return .{};
+        },
+        .train => |t| {
+            medical_mod.train(gs, t.person, t.skill) catch |err| return @errorCast(err);
+            return .{};
+        },
+        .train_company => |t| {
+            const r = medical_mod.trainCompany(gs, t.company, t.skill) catch |err| return @errorCast(err);
+            return .{ .enrolled = r.enrolled, .short_xp = r.short_xp, .busy = r.busy, .nothing_to_learn = r.nothing_to_learn };
+        },
         .transfer => |t| return execTransfer(gs, t),
         .set_policy => |p| return execSetPolicy(gs, p),
         .take_loan => |l| return execTakeLoan(gs, l),
@@ -629,25 +686,6 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
 }
 
 // ---- the commands, one function each, in `execute`'s order ----
-
-fn execHire(gs: *GameState, h: @FieldType(Command, "hire")) Error!Result {
-    const id = try gs.hirePerson(h.first, h.last, h.role);
-    return .{ .hired = id };
-}
-
-fn execRecruit(gs: *GameState, role: @FieldType(Command, "recruit")) Error!Result {
-    // The verb names no HQ: a recruit signs on at the outfit's seat.
-    const id = try @import("personnel.zig").recruitGenerated(gs, role, gs.homeHqFor(.none), .market);
-    return .{ .hired = id };
-}
-
-fn execFire(gs: *GameState, id: @FieldType(Command, "fire")) Error!Result {
-    const p = gs.person(id) orelse return Error.UnknownPerson;
-    // A firing pays half the departure payout; seats open.
-    const paid = try @import("personnel.zig").depart(gs, id, .resigned, tuning.person.fire_severance_bp, "severance (fired)");
-    if (paid > 0) try gs.log(.rotation, .{ .company = gs.companyOf(p.assigned_force) }, "[personnel] {s} fired — {d} c-bills severance", .{ try p.fullName(gs.allocator()), paid });
-    return .{};
-}
 
 fn execNewCompany(gs: *GameState, name: @FieldType(Command, "new_company")) Error!Result {
     // First HQ with a free combat-company slot;
@@ -731,23 +769,6 @@ fn execSetOutfitEmblem(gs: *GameState, image: @FieldType(Command, "set_outfit_em
     return .{};
 }
 
-fn execSetOfficeStaff(gs: *GameState, o: @FieldType(Command, "set_office_staff")) Error!Result {
-    if (gs.hqs.getPtr(o.hq) == null) return Error.UnknownHq;
-    if (o.delta > 0) {
-        const id = try @import("personnel.zig").recruitGenerated(gs, o.role, o.hq, .market);
-        try @import("personnel.zig").postToHq(gs, id, o.hq);
-        return .{ .hired = id };
-    }
-    var last: types.PersonId = .none;
-    var it = gs.people.iterator();
-    while (it.next()) |e| {
-        const p = e.value_ptr;
-        if (p.status == .active and p.role == o.role and p.posted_hq == o.hq) last = p.id;
-    }
-    if (last == .none) return Error.UnknownPerson;
-    return execute(gs, .{ .fire = last });
-}
-
 fn execCoverShortfall(gs: *GameState, c: @FieldType(Command, "cover_shortfall")) Error!Result {
     if (hq_ops.canFabricate(gs, c.hq, c.part_key)) {
         var res = try execute(gs, .{ .fabricate = .{ .hq = c.hq, .part_key = c.part_key, .quantity = c.quantity } });
@@ -807,37 +828,12 @@ fn execAdjustSharesPct(gs: *GameState, delta: @FieldType(Command, "adjust_shares
     return .{ .shares_pct = @intCast(next) };
 }
 
-fn execToggleAutoAdmit(gs: *GameState) Error!Result {
-    const on = !gs.auto_admit;
-    _ = try execute(gs, .{ .set_auto_admit = on });
-    return .{ .auto_admit = on };
-}
-
 fn execRecallIdle(gs: *GameState, company: @FieldType(Command, "recall_idle")) Error!Result {
     const f = gs.force(company) orelse return Error.UnknownForce;
     if (f.echelon != .company) return Error.NotACompany;
     if (posture.isCompanyHome(gs, company)) return Error.AlreadyHome;
     if (posture.isCompanyDeployed(gs, company)) return Error.UnderContract;
     return execute(gs, .{ .recall_company = company });
-}
-
-fn execTransferPerson(gs: *GameState, t: @FieldType(Command, "transfer_person")) Error!Result {
-    const p = gs.person(t.person) orelse return Error.UnknownPerson;
-    const dest = gs.force(t.to_force) orelse return Error.UnknownForce;
-    if (gs.companyOf(p.assigned_force) == gs.companyOf(dest.id) and p.assigned_force == dest.id) return Error.SameForce;
-    if (posture.isCompanyDeployed(gs, gs.companyOf(p.assigned_force))) return Error.PersonDeployed;
-    // Vacate any seat/tech slot they hold in the old company.
-    var uit = gs.units.iterator();
-    while (uit.next()) |entry| {
-        if (entry.value_ptr.pilot == p.id) entry.value_ptr.pilot = .none;
-        if (entry.value_ptr.tech == p.id) entry.value_ptr.tech = .none;
-    }
-    const days = travelDays(gs, gs.companyOf(p.assigned_force), gs.companyOf(dest.id));
-    p.assigned_force = dest.id;
-    p.posted_hq = .none;
-    hq_ops.refreshHqStaffing(gs);
-    if (days > 0) p.leave_until_day = gs.clock.day_index + days; // in transit
-    return .{};
 }
 
 fn execRenameOutfit(gs: *GameState, name: @FieldType(Command, "rename_outfit")) Error!Result {
@@ -870,30 +866,6 @@ fn execCreateCommander(gs: *GameState, c: @FieldType(Command, "create_commander"
     try contract_market.refresh(gs);
     try contract_market.refreshListings(gs);
     try contract_market.refreshCandidates(gs);
-    return .{};
-}
-
-fn execTrainAbility(gs: *GameState, ta: @FieldType(Command, "train_ability")) Error!Result {
-    const p = gs.person(ta.person) orelse return Error.UnknownPerson;
-    _ = gs.trainingHqFor(p) orelse return Error.NoTrainingGround;
-    if (p.status != .active) return Error.PersonUnavailable;
-    if (posture.isCompanyDeployed(gs, gs.companyOf(p.assigned_force))) return Error.PersonDeployed;
-    const a = @import("../domain/ability.zig").find(ta.key) orelse return Error.UnknownAbility;
-    if (p.has(a.key)) return Error.AlreadyLearned;
-    if (p.xp < a.xp_cost) return Error.InsufficientXp;
-    p.xp -= a.xp_cost;
-    try p.abilities.append(gs.allocator(), a.key);
-    try gs.log(.training, .{ .company = gs.companyOf(p.assigned_force) }, "[training] {s} learns {s} ({d} XP) — {s}", .{ try p.rankedName(gs.allocator()), a.name, a.xp_cost, a.text });
-    return .{};
-}
-
-fn execPromote(gs: *GameState, pr: @FieldType(Command, "promote")) Error!Result {
-    const p = gs.person(pr.person) orelse return Error.UnknownPerson;
-    const was = p.rank;
-    p.rank = pr.rank;
-    p.rank_pinned = pr.pin;
-    if (!pr.pin) _ = try @import("personnel.zig").refreshRanks(gs);
-    try gs.log(.rotation, .{ .company = gs.companyOf(p.assigned_force), .hq = p.posted_hq }, "[rank] {s}: {s} → {s}{s} · {d} c-bills/mo", .{ try p.fullName(gs.allocator()), was.name(), p.rank.name(), if (pr.pin) " (pinned)" else "", p.monthlySalary() });
     return .{};
 }
 
@@ -972,36 +944,6 @@ fn execRaiseAirCompany(gs: *GameState, company: @FieldType(Command, "raise_air_c
     return .{ .created_force = wing };
 }
 
-fn execCrewCompany(gs: *GameState, company: @FieldType(Command, "crew_company")) Error!Result {
-    const f = gs.force(company) orelse return Error.UnknownForce;
-    if (f.echelon != .company) return Error.NotACompany;
-    if (posture.isCompanyDeployed(gs, company)) return Error.CompanyDeployed;
-    const personnel = @import("personnel.zig");
-    var hired: u32 = 0;
-    var still_open: u32 = 0;
-    for (personnel.manningNeeds(gs, company)) |n| {
-        var have = personnel.manningHave(gs, company, n.role);
-        while (have < n.need) : (have += 1) {
-            if (personnel.isPooledRole(n.role)) {
-                // MekHQ hires astechs and medics to complement on
-                // demand: no market, no signing bonus, salary only.
-                const spec = person_gen.generateWithBonus(&gs.rng, .market, n.role, personnel.recruitBonus(gs, gs.homeHqFor(company)));
-                const id = try personnel.hireFromSpec(gs, spec);
-                gs.person(id).?.assigned_force = company;
-                hired += 1;
-            } else if (try contract_market.hireRoleFromHall(gs, n.role, company)) {
-                hired += 1;
-            } else {
-                still_open += n.need - have;
-                break;
-            }
-        }
-    }
-    _ = try crew.autoAssign(gs, company);
-    try gs.log(.decision, .{ .company = company }, "[raise] {s}: {d} hired to fill the manning table ({d} still open — the halls had nobody)", .{ f.name, hired, still_open });
-    return .{ .hired_count = hired, .still_open = still_open };
-}
-
 fn execSetSharesPct(gs: *GameState, pct: @FieldType(Command, "set_shares_pct")) Error!Result {
     if (pct > 100) return Error.BadPercent;
     gs.share_profit_bp = @as(types.Bp, pct) * 100;
@@ -1020,18 +962,6 @@ fn execSetDifficulty(gs: *GameState, level: @FieldType(Command, "set_difficulty"
     try gs.log(.finance, .{}, "[difficulty] {s} → {s} — {s} (contract pay {s}, fabrication {s}, opposition {s})", .{
         @tagName(was), row.name, row.blurb, dm(&b1, row.contract_pay_bp), dm(&b2, row.fab_cost_bp), dm(&b3, row.enemy_bp),
     });
-    return .{};
-}
-
-fn execSetAutoAdmit(gs: *GameState, on: @FieldType(Command, "set_auto_admit")) Error!Result {
-    gs.auto_admit = on;
-    if (on) {
-        // Nobody waits for the morning round: admit today's wounded now.
-        var it = gs.people.iterator();
-        while (it.next()) |e| if (e.value_ptr.status == .wounded and !e.value_ptr.medbay_admitted) {
-            e.value_ptr.medbay_admitted = true;
-        };
-    }
     return .{};
 }
 
@@ -1054,14 +984,6 @@ fn execClearStandingOrder(gs: *GameState, name: @FieldType(Command, "clear_stand
     const kind = std.meta.stringToEnum(events_mod.EventKind, name) orelse return Error.NoSuchEvent;
     if (gs.event_memory.getPtr(kind)) |m| m.streak = 0;
     try gs.log(.decision, .{}, "[sop] {s}: standing order cleared — the inbox asks again", .{name});
-    return .{};
-}
-
-fn execAdmit(gs: *GameState, pid: @FieldType(Command, "admit")) Error!Result {
-    const p = gs.person(pid) orelse return Error.UnknownPerson;
-    if (p.status != .wounded) return Error.NotWounded;
-    p.medbay_admitted = true;
-    try gs.log(.medical, .{ .company = gs.companyOf(p.assigned_force) }, "[medbay] {s} admitted", .{try p.fullName(gs.allocator())});
     return .{};
 }
 
@@ -1156,68 +1078,6 @@ fn execDisbandCompany(gs: *GameState, co: @FieldType(Command, "disband_company")
     hq_ops.refreshHqStaffing(gs);
     try gs.postTransaction(.{ .day = gs.clock.day_index, .amount = total, .category = .unit_sale, .note = "company disbanded" });
     try gs.log(.market, .{}, "[sale] {s} disbanded: {d} hulls sold, people released, {d} raised", .{ name, uids.items.len, total });
-    return .{};
-}
-
-fn execPostPerson(gs: *GameState, pp: @FieldType(Command, "post_person")) Error!Result {
-    @import("personnel.zig").postToHq(gs, pp.person, pp.hq) catch |err| switch (err) {
-        error.UnknownPerson => return Error.UnknownPerson,
-        error.UnknownHq => return Error.UnknownHq,
-    };
-    return .{};
-}
-
-fn execAssign(gs: *GameState, a: @FieldType(Command, "assign")) Error!Result {
-    crew.assignSlot(gs, a.unit, a.slot, a.person) catch |err| switch (err) {
-        error.UnknownUnit => return Error.UnknownUnit,
-        error.UnknownPerson => return Error.UnknownPerson,
-        error.WrongRole => return Error.WrongRole,
-        error.Unavailable => return Error.Unavailable,
-        error.NoTechSlot => return Error.NoTechSlot,
-        error.PersonAway => return Error.PersonAway,
-    };
-    return .{};
-}
-
-fn execUnassign(gs: *GameState, u: @FieldType(Command, "unassign")) Error!Result {
-    try crew.unassignSlot(gs, u.unit, u.slot);
-    return .{};
-}
-
-fn execAutoAssign(gs: *GameState, company: @FieldType(Command, "auto_assign")) Error!Result {
-    const f = gs.force(company) orelse return Error.UnknownForce;
-    if (f.echelon != .company) return Error.NotACompany;
-    _ = try crew.autoAssign(gs, company);
-    return .{};
-}
-
-fn execTriage(gs: *GameState, t: @FieldType(Command, "triage")) Error!Result {
-    const p = gs.person(t.person) orelse return Error.UnknownPerson;
-    p.medbay_priority = t.priority;
-    return .{};
-}
-
-fn execLeave(gs: *GameState, l: @FieldType(Command, "leave")) Error!Result {
-    const p = gs.person(l.person) orelse return Error.UnknownPerson;
-    if (p.status != .active) return Error.PersonUnavailable;
-    if (posture.isCompanyDeployed(gs, gs.companyOf(p.assigned_force))) return Error.PersonDeployed;
-    p.leave_until_day = gs.clock.day_index + l.days;
-    return .{};
-}
-
-fn execTrain(gs: *GameState, t: @FieldType(Command, "train")) Error!Result {
-    const p = gs.person(t.person) orelse return Error.UnknownPerson;
-    const ground = gs.trainingHqFor(p) orelse return Error.NoTrainingGround;
-    if (p.status != .active) return Error.PersonUnavailable;
-    if (p.training != null) return Error.AlreadyTraining;
-    if (posture.isCompanyDeployed(gs, gs.companyOf(p.assigned_force))) return Error.PersonDeployed;
-
-    // Validate up front so the refusal is explained now, not in 30 days.
-    const current = p.skill(t.skill) orelse return Error.NotTrained;
-    if (current == 0) return Error.AlreadyMastered;
-    if (p.xp < person_mod.improveCost(current - 1)) return Error.InsufficientXp;
-
-    p.training = .{ .skill = t.skill, .done_day = gs.clock.day_index + medical_mod.trainingDaysFor(gs, ground) };
     return .{};
 }
 
@@ -1338,14 +1198,6 @@ fn newCompanyAt(gs: *GameState, name: []const u8, hq_id: types.HqId) Error!Resul
     return .{ .created_force = id };
 }
 
-/// Days between two companies' current locations (0 = co-located).
-fn travelDays(gs: *GameState, from_company: types.ForceId, to_company: types.ForceId) u32 {
-    const a = planet_mod.find(sites.sitePlanetKey(gs, .{ .company = from_company }) orelse "") orelse return 0;
-    const b = planet_mod.find(sites.sitePlanetKey(gs, .{ .company = to_company }) orelse "") orelse return 0;
-    if (a == b) return 0;
-    return logistics.daysBetween(a, b);
-}
-
 /// Why a hull cannot be moved to another company right now, or null:
 /// the transfer refuses on it and the company picker dims every row on it.
 pub fn transferBlock(gs: *GameState, u: *const unit_mod.Unit) ?[]const u8 {
@@ -1363,7 +1215,7 @@ fn transferUnit(gs: *GameState, unit_id: types.UnitId, to_company: types.ForceId
     if (from_company == to_company) return Error.SameForce;
     if (transferBlock(gs, u)) |why| return if (std.mem.eql(u8, why, "its company is deployed")) Error.UnitDeployed else Error.Unavailable;
 
-    const days = travelDays(gs, from_company, to_company);
+    const days = sites.travelDays(gs, from_company, to_company);
     if (days == 0) {
         try toe.placeUnitInCompany(gs, unit_id, to_company);
         return .{ .in_transit = false };
@@ -1459,50 +1311,6 @@ fn validateTreasury(gs: *GameState, t: state_mod.Treasury) Error!void {
             if (f.echelon != .company) return Error.NotACompany;
         },
     }
-}
-
-/// `train_company`: the `train` checks, applied to everyone on a home
-/// company's books. Nobody is refused loudly — the result counts who
-/// started, who is short of XP, who is busy, and who has nothing to learn
-/// at that skill — so one command trains a company at what it does.
-fn trainCompany(gs: *GameState, company: types.ForceId, skill_opt: ?types.SkillType) Error!Result {
-    const f = gs.force(company) orelse return Error.UnknownForce;
-    if (f.echelon != .company) return Error.NotACompany;
-    if (!posture.isCompanyHome(gs, company)) return Error.CompanyDeployed;
-    const ground = gs.homeHqFor(company);
-    const ground_hq = gs.hqs.getPtr(ground) orelse return Error.NoTrainingGround;
-    if (!ground_hq.supportsTraining()) return Error.NoTrainingGround;
-
-    var r: Result = .{};
-    const days = medical_mod.trainingDaysFor(gs, ground);
-    var pit = gs.people.iterator();
-    while (pit.next()) |e| {
-        const p = e.value_ptr;
-        if (gs.companyOf(p.assigned_force) != company) continue;
-        if (p.status != .active or !p.isAvailable(gs.clock.day_index) or p.training != null) {
-            r.busy += 1;
-            continue;
-        }
-        const skill = skill_opt orelse p.role.primarySkill();
-        const current = p.skill(skill) orelse {
-            r.nothing_to_learn += 1;
-            continue;
-        };
-        if (current == 0) {
-            r.nothing_to_learn += 1;
-            continue;
-        }
-        if (p.xp < person_mod.improveCost(current - 1)) {
-            r.short_xp += 1;
-            continue;
-        }
-        p.training = .{ .skill = skill, .done_day = gs.clock.day_index + days };
-        r.enrolled += 1;
-    }
-    try gs.log(.rotation, .{ .company = company }, "[training] {s}: {d} enrolled{s} for {d} days · {d} short of XP · {d} busy · {d} nothing to learn", .{
-        f.name, r.enrolled, if (skill_opt) |s| try std.fmt.allocPrint(gs.allocator(), " at {s}", .{@tagName(s)}) else " at their trades", days, r.short_xp, r.busy, r.nothing_to_learn,
-    });
-    return r;
 }
 
 /// The turn-hold as an error. The checklist decides what
@@ -1908,7 +1716,6 @@ test "a raised company is an empty skeleton; hulls bought for it land in a lance
     try std.testing.expect(gs.unit(r.unit).?.tech != .none);
     // Astechs and medics come to complement without a market;
     // the doctor, mechanics and office nobody offered stay open.
-    const personnel = @import("personnel.zig");
     for (personnel.manningNeeds(&gs, co)) |n| {
         const have = personnel.manningHave(&gs, co, n.role);
         // Two meks (one in transit) want two pilots and two techs; the hall
