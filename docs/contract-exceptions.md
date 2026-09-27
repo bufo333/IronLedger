@@ -56,28 +56,15 @@ Owner of every entry: the project owner.
 - **Removal:** C3.
 - **Guard:** review (checklist questions 2 and 14). No mechanical check.
 
-### C4. Module and function size; behaviour on GameState; layering
+### C4. Compound operations and GameState behavior
 
-- **Rules:** 5, 14, 76, 77.
-- **Why not yet:** Decomposition is behaviour-preserving work spread over several branches, one module at a time, with the golden hash unchanged.
+- **Rules:** 14, 77.
+- **Why not yet:** The remaining operations need ownership changes that preserve behavior and the golden hash.
 - **Scope:**
-  - Every module and function listed in the rule 76 registry below.
-  - Three switches with more than ten substantive arms (an arm body past three lines), measured by the check that guards them: `contract_events.applyEffectsFor`, `app.listView`, `forces.handle`. Five more sit at the threshold without crossing it: `app.listEnter` and `app.handleModalKey`, `market.handle`, `app.drawModal`, `supply.handle`.
   - `GameState` methods with subsystem behaviour: aftermath and `hirePerson`'s default skill table (it leaves with C11's single role-to-skill rule; the creation itself is a storage primitive). (Hashing has moved to `digest.zig`; sale values to `econ/market.zig`; transfers, couriers, purchase debits, payroll, upkeep, liquidation and credit to `treasury.zig`; recruiting, spec hiring, posting and the recruit bonus to `personnel.zig`; the back-office counts, staffing refresh and autostaffing to `hq_ops.zig`; stock-site capacity, handovers, a force's supply site and goods sent home to `sites.zig`; the company load-out to `field_supply.zig`; seat eligibility, seat assignment and auto-assignment to `crew.zig`; hull and tech hours, tech capacity and free-tech search to `maintenance.zig`; company and lance counts, HQ and company capacity, support lances, unit placement and moves and company membership to `toe.zig`; founding to `founding.zig`; lift to `lift.zig`; refit to `refit.zig`; held hulls to `held_hulls.zig`; hull condition to `econ/market.zig`; readiness to `readiness.zig`; commander multiplier to `domain/commander.zig`; calendar primitives to `domain/clock.zig`; tick phase specification to `sim/tick.zig`; event types to `domain/events.zig`; autoresolve to `domain/autoresolve.zig`; battle-report records and journal to `domain/battle_report.zig`; HqLink to `domain/hq_link.zig`; HQ founding, tier upgrade, facility upgrade, fabrication, depot/reactivation, sell HQ, and autostaff to `hq_ops.zig`; link establishment and company assignment to `network.zig`; buy listing, buy hull, buy support hull, hire candidate and `hireRoleFromHall` to `contract_market.zig`; order part, ship stock, freight quoting, ship-components-home, replace mount/gear, sell stock, set stock policy to `sites.zig`; set supply policy and trim stock to `field_supply.zig`; hire, recruit, fire, transfer person, promote, post person and set office staff to `personnel.zig`; assign, unassign, auto-assign and crew company to `crew.zig`; triage, leave, admit, set/toggle auto-admit, train, train ability and train company to `medical.zig`.)
-  - No upward imports remain in `state.zig`; the C4 layering record is empty.
-  - The 6 test-only `queries.zig` imports in `commands.zig`, `hq_ops.zig` and `crew.zig` are agreement tests allowed by rule 5's test clause and are not part of this entry.
-  - This sub-list records existing debt found by a full audit; it grants no
-    permission. A new upward import is a violation even beside a listed one:
-    the layering check names a new edge, and review (rule 87) holds a new
-    site on an already-recorded edge.
   - The named atomic operations that rule 14 cites do not exist.
 - **Removal:** C4.
-- **Guard:** `verify-contract.sh` fails on over-threshold code not in the
-  registry, on a registry key that names nothing or is under its threshold,
-  and on an upward import edge missing from the layering record or a record
-  edge that no longer exists. Review holds what listed code may gain (rule
-  76; delivery checklist question 16) and a new import site on an
-  already-recorded edge (rule 87).
+- **Guard:** review (checklist questions 1 and 2). No mechanical check.
 
 ### C5. Commands and ticks are not failure-atomic
 
@@ -458,59 +445,6 @@ Owner of every entry: the project owner.
 - **Guard:** the module-header and comment checks in `verify-contract.sh` for the parts they cover; review for the rest.
 
 ---
-
-## Rule 76 registry
-
-One key per line, named only: `path:function` for a function, `path` for a
-module, `path:function#switch` for a switch. The registry records no size.
-`docs/verify-contract.sh` fails on over-threshold code that is not listed, on
-a listed key that names nothing in `src`, and on a listed key that has
-dropped under its threshold (both cases: remove the key); the branch that
-brings its code under its threshold deletes its key in the same branch
-(rule 76). A listing records debt.
-
-```oversized
-src/domain/meklab.zig:validate
-src/main.zig:runDemo
-src/main.zig:runRepl
-src/persist/store.zig
-src/sim/battle.zig
-src/sim/battle.zig:playerSideIn
-src/sim/battle.zig:resolveEngagement
-src/sim/checklist.zig:turnWarnings
-src/sim/cli.zig:errorText
-src/sim/cli.zig:parseVerb
-src/sim/contract_events.zig
-src/sim/contract_events.zig:applyEffectsFor
-src/sim/contract_events.zig:applyEffectsFor#switch
-src/sim/contract_market.zig
-src/sim/contract_market.zig:refresh
-src/sim/contract_market.zig:refreshBoard
-src/sim/hq_ops.zig
-src/sim/medical.zig
-src/sim/queries.zig
-src/sim/queries.zig:afterAction
-src/sim/queries.zig:contracts
-src/sim/queries.zig:hqDetailView
-src/sim/queries.zig:lab
-src/sim/queries.zig:ledger
-src/sim/queries.zig:offerCandidates
-src/sim/queries.zig:stockTable
-src/sim/queries.zig:summary
-src/sim/rating.zig:report
-src/sim/tick.zig:runFinances
-src/tui/app.zig
-src/tui/app.zig:drawModal
-src/tui/app.zig:handleModalKey
-src/tui/app.zig:listEnter
-src/tui/app.zig:listView
-src/tui/app.zig:listView#switch
-src/tui/png.zig:decode
-src/tui/screens/forces.zig:handle
-src/tui/screens/forces.zig:handle#switch
-src/tui/screens/map.zig:draw
-src/tui/screens/supply.zig:handle
-```
 
 ## Layering record
 

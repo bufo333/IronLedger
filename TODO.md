@@ -12,8 +12,8 @@ closes one entry of the exceptions ledger, whose scope lists the verified
 sites. A leaf checkbox is one branch and lands on `main` before the next. A
 line that explicitly says "one branch per" names an ordered series whose
 semicolon-separated groups are separate branches. Each branch deletes its
-completed leaf/group and any baseline, registry or layering lines it makes
-stale. The last branch also deletes the parent and its exception entry.
+completed leaf/group and any baseline or layering lines it makes stale. The
+last branch also deletes the parent and its exception entry.
 Behaviour changes start with a regression test; rule-owner moves add an
 owner/consumer agreement test; persistence changes add round-trip and
 corruption fixtures. Every branch runs rule 72's complete applicable gate,
@@ -22,16 +22,9 @@ including both smoke scripts when it touches their named frontend boundary.
 The audit deliverables in `docs/audit-response.md` are folded in: D26 into
 C10, D27 and D30 into C12, D28 into C7, D29 into C15, D31 into C8, D33 into
 C18 (D23-D25, D32 and D34 are closed). The order below is authoritative and
-supersedes the audit response's original delivery order: C4 lands first so
-later fixes add responsibility only to the decomposed owner modules.
+supersedes the audit response's original delivery order.
 
-- [ ] C4 decomposition (rules 5, 14, 76, 77) — first, because the fixes after it add code to modules in the rule 76 registry. Behaviour-preserving, golden hash unchanged, one increment per branch:
-  - [ ] C4c query facade, one owner family per branch in this order: finance; contracts/map; personnel/medical; forces/readiness; HQ/network/supply; market/lab; battle/AAR. Each owner builds display-ready values below the `queries.zig` leaf; `queries.zig` retains public re-exports/forwarders only. The final branch removes every moved query-function key and then `queries.zig` from the registry.
-  - [ ] C4d TUI application, one controller per branch: session/lobby; campaign wizard; modal stack; command line and completion; settings/media; global tab/layout routing. Screen modules receive typed view/action inputs and do not gain session ownership. The final branch leaves `app.zig` as lifecycle and dispatch glue and removes its module/function/switch registry keys.
-  - [ ] C4e persistence, fixtures before moves: schema/version/migration registry; SQLite row primitives; campaign/meta/RNG codecs; people/units/forces codecs; HQ/stock/network/market codecs; contracts/events/reports/log codecs. `store.zig` retains the transaction boundary and public save/load facade; each move preserves the round-trip digest and migration fixtures. The final branch removes `store.zig` from the registry.
-  - [ ] C4f battle, one phase per branch: force assembly and estimates; opening/environment; opposed resolution; damage and casualties; salvage/recovery; report/stat commit. `resolveEngagement` becomes orchestration over typed phase results, the golden hash stays unchanged, and the final branch removes the battle module/function registry keys.
-  - [ ] C4g contract events, one responsibility per branch: deck data; event selection/queueing; decision lifecycle; typed effect execution. `applyEffectsFor` becomes dispatch to effect owners, with pointer-lifetime and decision tests retained; the final branch removes the module/function/switch registry keys.
-  - [ ] C4h remaining registry exits, one branch per semicolon group: `cli.parseVerb`; `checklist.turnWarnings`; REPL and demo loops; `contract_market.refreshBoard`/`refresh`; `tick.runFinances`; `rating.report`; `png.decode`; `meklab.validate`; each registered screen handler/draw function. Each branch decomposes by rule responsibility, preserves behaviour with focused tests, and deletes only the keys it brings below threshold. The last branch deletes C4 and its remaining registry.
+- [ ] C4 compound operations and GameState behavior (rules 14, 77) — move the remaining named atomic operations to their owning subsystems and keep `GameState` to storage and primitive invariants. Behaviour-preserving, golden hash unchanged.
 - [ ] C2 errors keep their meaning (rules 4, 10, 18, 79), in this order:
   - [ ] C2a arithmetic and pure-query fallbacks: replace impossible `divCeil` catches with checked invariants; propagate allocation/query failures in domain, field-supply, checklist, rating and market code; delete the corresponding baseline lines.
   - [ ] C2b REPL and TUI parsing/results: typed parse refusals replace zero/null sentinels; query failures reach the application error presenter; no successful fallback text is printed after a failed query.

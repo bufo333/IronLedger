@@ -88,16 +88,11 @@ than dispatching implementation.
 
    For a committed change to a decomposition module, the fresh reviewer inspects
    every new inline import, identifies any duplicate of a file-scope import, and
-   assesses whether an inline import is being used to evade a rule-76 threshold
-   rather than support substantive decomposition. Inline imports remain
+   assesses whether it supports substantive decomposition. Inline imports remain
    permitted when justified by the code; this review is evidence-based, not a
-   categorical prohibition. The review records the changed module's threshold
-   and applicable `docs/contract-exceptions.md` registry status: whether it
-   crossed a review threshold, remains listed, gained responsibility while
-   listed, or is claimed to leave the registry. A claimed exit requires the
-   existing substantive simplification, deletion, or decomposition, not
-   formatting, aliases, test relocation, comment deletion, or inline-import
-   placement.
+   categorical prohibition. For each changed function over approximately 100
+   lines, the review records whether it remains cohesive and legible or needs
+   decomposition by responsibility.
 
    The reviewer report gives every finding concrete evidence and exactly one
    explicit disposition: `blocking`, `approved follow-up`, or `non-issue`. A

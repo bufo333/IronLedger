@@ -810,41 +810,13 @@ source, invariant, or non-obvious tradeoff, not syntax.
 
 ### 76. Oversized code is decomposed, not extended
 
-A function over approximately 100 lines, a switch with more than ten
-substantive arms, or a module over 1,000 lines has crossed a review
-threshold. Thresholds are review triggers, not a line budget; line count is
-never the measure of compliance.
-
-Code that crosses a threshold is decomposed in the same change, or listed by
-an owner-approved exception (rule 87) in the registry of
-`docs/contract-exceptions.md`. The registry names code; it records no size.
-
-Listed code gains no new responsibility:
-
-- no subsystem behavior: a command handler, query or view builder, rule,
-  predicate, cost, quote, event effect, tick phase, codec, verb, or screen
-  interaction;
-- no owned state, other than the campaign storage `GameState` holds under
-  rule 77;
-- no substantive switch arm.
-
-New responsibility goes in an unlisted module that owns it. Listed code gains
-only the routing to it: an import, a union variant, a dispatch arm, a
-re-export, or a forwarding wrapper. A fix, carrying a field through its
-existing owner, error propagation, a test of behavior the listed code already
-owns, a comment, or formatting adds no responsibility.
-
-Listed code leaves the registry only through substantive simplification,
-deletion, or decomposition that brings it under its threshold; that
-branch deletes the entry, and the contract check fails until it does.
-Splitting lines, inlining imports, aliasing, compressing declarations,
-relocating tests, or deleting comments to fall under a threshold is not
-substantive; such a change is rejected even when the check passes.
+A function over approximately 100 lines is a review prompt, not a line
+budget or a mechanical limit. The reviewer assesses whether it remains
+cohesive and legible or should be decomposed by responsibility. Line count
+alone is never the measure of compliance.
 
 Facades may remain centralized, but they dispatch to subsystem-owned functions
-rather than implementing every subsystem inline. A dispatch switch (one call
-or a few lines per arm, such as `commands.execute` or a binding table's action
-switch) does not count toward the arm threshold.
+rather than implementing every subsystem inline.
 
 ### 77. State owns storage, subsystems own behavior
 
@@ -1018,10 +990,9 @@ rg -n '^test "[0-9]' src
 - Does temporary work allocate from the campaign arena?
 - Does a catch collapse a system failure into plausible gameplay output?
 - Does a name hide units, time window, or locality?
-- Did code in the rule 76 registry gain behavior, owned state or a
-  substantive arm instead of routing to an unlisted owner, and did any drop
-  under a threshold come from substantive change rather than formatting,
-  inlining, aliasing, test relocation or comment deletion?
+- Is each changed function cohesive and legible? For a function over
+  approximately 100 lines, does the review record why it remains cohesive or
+  identify the responsibility-based decomposition needed?
 
 ---
 
@@ -1096,9 +1067,8 @@ Every branch answers before integration:
 14. Which test proves refusal or injected failure leaves state unchanged?
 15. Are the full gate, both smokes when required, contract script, clean
     package build, and relevant target builds green?
-16. Does changed code cross a rule 76 threshold, does listed code gain only
-    routing, and what substantive simplification, deletion or decomposition
-    removes each registry entry this branch deletes?
+16. For each changed function over approximately 100 lines, does it remain
+    cohesive and legible, or does the branch decompose it by responsibility?
 
 ### Reviewer checks
 

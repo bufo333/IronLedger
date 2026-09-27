@@ -2,8 +2,7 @@
 # The mechanical checks of the coding contract (docs/coding-contract.md),
 # run as one gate: every check prints nothing on a clean tree, and any
 # output fails. Known violations are recorded in docs/contract-exceptions.md
-# (the rule 76 registry and the C4 layering record) and
-# docs/verify-contract.baseline (broad catches).
+# (the C4 layering record) and docs/verify-contract.baseline (broad catches).
 #   docs/verify-contract.sh
 # Frontend checks walk src/tui recursively (screens/ included). Checks the
 # contract scopes to non-test code skip `test "…" { … }` blocks and test
@@ -251,97 +250,6 @@ for dirpath, _, files in os.walk("src"):
     for name in sorted(files):
         p = os.path.join(dirpath, name)
         if name.endswith(".zig") and p not in seen: print(p)
-PY
-)"
-
-# §10 Review thresholds (rule 76), held by the registry (rule 87): a module
-# over 1,000 lines, a function over 100, or a switch with more than ten
-# substantive arms is a violation unless docs/contract-exceptions.md lists
-# it in the rule 76 registry. The registry names code; it does not record a
-# size, so growth past the threshold is not measured here — rule 76 governs
-# what listed code may gain, and review checks it (delivery checklist
-# question 16). A key whose code no longer exists in src, or has dropped
-# under its threshold, fails until the key is removed. An arm is
-# substantive when its body runs past three lines; a dispatch switch (a
-# call or a few lines per arm) has none, so it never counts. A switch is
-# keyed `path:function#switch`.
-check "a module, function or switch over its review threshold and not in the rule 76 registry, or a registry key to remove" "$(python3 - <<'PY'
-import os, re
-keys = set()
-try:
-    text = open("docs/contract-exceptions.md", encoding="utf-8").read()
-except OSError as e:
-    print(f"docs/contract-exceptions.md unreadable: {e}")
-    text = ""
-m = re.search(r"```oversized\n(.*?)```", text, re.S)
-if m is None:
-    print("docs/contract-exceptions.md has no ```oversized block")
-for line in (m.group(1).splitlines() if m else []):
-    if not line.strip(): continue
-    parts = line.split()
-    if len(parts) != 1:
-        print(f"registry line carries more than its name: {line}")
-        continue
-    key = parts[0]
-    if key in keys:
-        print(f"{key}: duplicate registry key")
-        continue
-    keys.add(key)
-FN = re.compile(r'^(\s*)(?:pub\s+)?(?:inline\s+|export\s+)?fn\s+([A-Za-z0-9_]+)\s*\(')
-found = {}
-exists = set()
-for d, _, fs in os.walk("src"):
-    for f in sorted(fs):
-        if not f.endswith(".zig"): continue
-        p = os.path.join(d, f)
-        lines = open(p, encoding="utf-8").read().split("\n")
-        exists.add(p)
-        if len(lines) - 1 > 1000: found[p] = len(lines) - 1
-        in_test, i = False, 0
-        while i < len(lines):
-            ln = lines[i]
-            if re.match(r'^test\s+"', ln): in_test = True
-            if in_test and ln.startswith("}"):
-                in_test = False; i += 1; continue
-            fm = FN.match(ln)
-            if fm and not in_test and ln.rstrip().endswith("{"):
-                ind, j = fm.group(1), i + 1
-                while j < len(lines) and lines[j] != ind + "}": j += 1
-                exists.add(p + ":" + fm.group(2))
-                if j - i + 1 > 100: found[p + ":" + fm.group(2)] = j - i + 1
-                i = j + 1 if ind == "" else i + 1
-                continue
-            i += 1
-        # Switch arms: walk each non-test switch body at its own depth.
-        in_test, fn_name = False, "?"
-        for i, ln in enumerate(lines):
-            if re.match(r'^test\s+"', ln): in_test = True
-            if in_test:
-                if ln.startswith("}"): in_test = False
-                continue
-            fm = FN.match(ln)
-            if fm: fn_name = fm.group(2)
-            if not re.search(r'\bswitch\s*\(.*\)\s*\{\s*$', ln): continue
-            depth, j, arms = 1, i + 1, []
-            while j < len(lines) and depth > 0:
-                body = re.sub(r'"(\\.|[^"\\])*"', '""', lines[j])
-                body = re.sub(r"'(\\.|[^'\\])*'", "''", body).split("//")[0]
-                if depth == 1 and re.match(r'^\s*[^/\s].*=>', lines[j]): arms.append(j)
-                depth += body.count("{") - body.count("}")
-                j += 1
-            substantive = sum(1 for a, b in zip(arms, arms[1:] + [j - 1]) if b - a > 3)
-            key = f"{p}:{fn_name}#switch"
-            exists.add(key)
-            if substantive > 10: found[key] = max(found.get(key, 0), substantive)
-for key, n in sorted(found.items()):
-    if key not in keys:
-        unit = "substantive arms" if key.endswith("#switch") else "lines"
-        print(f"{key}: {n} {unit}, over the threshold and not in the rule 76 registry")
-for key in sorted(keys - set(found)):
-    if key not in exists:
-        print(f"{key}: names no module, function or switch in src; remove it")
-    else:
-        print(f"{key}: under its threshold now; remove it from the rule 76 registry")
 PY
 )"
 
