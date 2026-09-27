@@ -4682,7 +4682,7 @@ pub fn companyChoices(alloc: Alloc, gs: *GameState, what: enum { unit, person, s
         .unit => {
             u = gs.unit(@enumFromInt(subject)) orelse return out.toOwnedSlice(alloc);
             from = gs.companyOf(u.?.force);
-            blocked = @import("commands.zig").transferBlock(gs, u.?) orelse "";
+            blocked = @import("toe.zig").transferBlock(gs, u.?) orelse "";
         },
         .person => {
             p = gs.person(@enumFromInt(subject)) orelse return out.toOwnedSlice(alloc);

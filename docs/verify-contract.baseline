@@ -24,8 +24,8 @@ src/main.zig: .strip_unit => std.debug.print("{s}\n", .{q.stripMarks(al, (q.last
 src/persist/store.zig: const name = st.text(1, fba.allocator()) catch continue;
 src/persist/store.zig: const name = st.text(1, fba.allocator()) catch continue;
 src/sim/checklist.zig: const mounts = @import("field_supply.zig").munitionMounts(arena.allocator(), gs, company, false) catch return false;
-src/sim/commands.zig: .duration_days = @max(1, std.math.divCeil(u32, hours, 8) catch 1),
-src/sim/commands.zig: u.chassis_key, @tagName(class), hours, @max(1, std.math.divCeil(u32, hours, 8) catch 1), try hq_ops.repairOddsText(gs.allocator(), gs, hq_id, unit_id),
+src/sim/refit.zig: .duration_days = @max(1, std.math.divCeil(u32, hours, 8) catch 1),
+src/sim/refit.zig: u.chassis_key, @tagName(class), hours, @max(1, std.math.divCeil(u32, hours, 8) catch 1), try hq_ops.repairOddsText(gs.allocator(), gs, hq_id, unit_id),
 src/sim/field_supply.zig: const floor_battles: u32 = 1 + (std.math.divCeil(u32, transit_days, days_per_battle) catch 0);
 src/sim/field_supply.zig: return std.math.divCeil(u32, mounts, mounts_per_ammo_ton) catch 0;
 src/sim/queries.zig: const plan = @import("lift.zig").planLift(gs, company, false) catch return "";

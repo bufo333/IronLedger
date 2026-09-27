@@ -42,6 +42,7 @@ const refit_m = @import("refit.zig");
 const crew = @import("crew.zig");
 const toe = @import("toe.zig");
 const personnel = @import("personnel.zig");
+const held_hulls = @import("held_hulls.zig");
 
 pub const Command = union(enum) {
     /// End the turn: advance one day. Turn-based — time only moves here,
@@ -470,8 +471,8 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             personnel.fire(gs, id) catch |err| return @errorCast(err);
             return .{};
         },
-        .new_company => |name| return execNewCompany(gs, name),
-        .new_company_at => |n| return execNewCompanyAt(gs, n),
+        .new_company => |name| return toe.execNewCompany(gs, name),
+        .new_company_at => |n| return toe.execNewCompanyAt(gs, n),
         .found_hq => |f| {
             hq_ops.foundHq(gs, f.name, f.planet_key) catch |err| return @errorCast(err);
             return .{};
@@ -488,18 +489,18 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             network.establishLink(gs, l.a, l.b, l.level) catch |err| return @errorCast(err);
             return .{};
         },
-        .transfer_unit => |t| return transferUnit(gs, t.unit, t.to_company),
+        .transfer_unit => |t| return toe.transferUnit(gs, t.unit, t.to_company),
         .complete_contract => |cid| return execCompleteContract(gs, cid),
         .recall_company => |company| return execRecallCompany(gs, company),
-        .refit_remove => |r| return execRefitRemove(gs, r),
-        .refit_install => |r| return execRefitInstall(gs, r),
-        .refit_clear => |unit_id| return execRefitClear(gs, unit_id),
-        .refit_commit => |unit_id| return commitRefit(gs, unit_id),
+        .refit_remove => |r| return refit_m.execRefitRemove(gs, r),
+        .refit_install => |r| return refit_m.execRefitInstall(gs, r),
+        .refit_clear => |unit_id| return refit_m.execRefitClear(gs, unit_id),
+        .refit_commit => |unit_id| return refit_m.commitRefit(gs, unit_id),
         .buy_support_hull => |b| {
             const res = contract_market.buySupportHull(gs, b.company, b.kind) catch |err| return @errorCast(err);
             return .{ .unit = res.unit, .eta_days = res.eta_days };
         },
-        .set_outfit_emblem => |image| return execSetOutfitEmblem(gs, image),
+        .set_outfit_emblem => |image| return toe.execSetOutfitEmblem(gs, image),
         .set_office_staff => |o| {
             const hired = personnel.setOfficeStaff(gs, o.hq, o.role, o.delta) catch |err| return @errorCast(err);
             return .{ .hired = hired };
@@ -513,20 +514,20 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             return .{ .sourced = res.sourced, .hq = res.hq };
         },
         .cover_shortfall => |c| return execCoverShortfall(gs, c),
-        .toggle_mothball => |unit_id| return execToggleMothball(gs, unit_id),
+        .toggle_mothball => |unit_id| return held_hulls.execToggleMothball(gs, unit_id),
         .confirm_orders => |id| return execConfirmOrders(gs, id),
         .emergency_resupply => |id| {
             const tons = field_supply.emergencyResupply(gs, id) catch |err| return @errorCast(err);
             return .{ .tons_moved = tons };
         },
-        .cycle_roe => |co| return execCycleRoe(gs, co),
-        .cycle_role => |fid| return execCycleRole(gs, fid),
+        .cycle_roe => |co| return toe.execCycleRoe(gs, co),
+        .cycle_role => |fid| return toe.execCycleRole(gs, fid),
         .cycle_difficulty => |dir| return execCycleDifficulty(gs, dir),
         .adjust_shares_pct => |delta| return execAdjustSharesPct(gs, delta),
         .toggle_auto_admit => {
             return .{ .auto_admit = medical_mod.toggleAutoAdmit(gs) };
         },
-        .recall_idle => |company| return execRecallIdle(gs, company),
+        .recall_idle => |company| return toe.execRecallIdle(gs, company),
         .autostaff => |hq_id| {
             hq_ops.autostaff(gs, hq_id) catch |err| return @errorCast(err);
             return .{};
@@ -535,9 +536,9 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             personnel.transferPerson(gs, t.person, t.to_force) catch |err| return @errorCast(err);
             return .{};
         },
-        .rename_outfit => |name| return execRenameOutfit(gs, name),
-        .rename_force => |r| return execRenameForce(gs, r),
-        .set_emblem => |e| return execSetEmblem(gs, e),
+        .rename_outfit => |name| return toe.execRenameOutfit(gs, name),
+        .rename_force => |r| return toe.execRenameForce(gs, r),
+        .set_emblem => |e| return toe.execSetEmblem(gs, e),
         .create_commander => |c| return execCreateCommander(gs, c),
         .accept_contract => |a| {
             contract_control.acceptContract(gs, a.offer_index, a.company) catch |err| return @errorCast(err);
@@ -571,10 +572,10 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             const res = contract_market.buyListing(gs, index) catch |err| return @errorCast(err);
             return .{ .unit = res.unit };
         },
-        .mothball => |unit_id| return execMothball(gs, unit_id),
-        .move_unit => |m| return execMoveUnit(gs, m),
-        .new_lance => |nl| return execNewLance(gs, nl),
-        .raise_air_company => |company| return execRaiseAirCompany(gs, company),
+        .mothball => |unit_id| return held_hulls.execMothball(gs, unit_id),
+        .move_unit => |m| return toe.execMoveUnit(gs, m),
+        .new_lance => |nl| return toe.execNewLance(gs, nl),
+        .raise_air_company => |company| return toe.execRaiseAirCompany(gs, company),
         .set_supply_policy => |sp| {
             field_supply.setSupplyPolicy(gs, sp.company, sp.min_days, sp.tons, sp.ammo_battles) catch |err| return @errorCast(err);
             return .{};
@@ -587,7 +588,7 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             sites.sellStock(gs, sale.hq, sale.part_key, sale.quantity) catch |err| return @errorCast(err);
             return .{};
         },
-        .raise_company => |r| return raiseCompany(gs, r.name, r.hq),
+        .raise_company => |r| return toe.raiseCompany(gs, r.name, r.hq),
         .buy_hull_for => |b| {
             const res = contract_market.buyHullFor(gs, b.listing, b.company, b.lance) catch |err| return @errorCast(err);
             return .{ .unit = res.unit, .eta_days = res.eta_days };
@@ -606,8 +607,8 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             medical_mod.setAutoAdmit(gs, on);
             return .{};
         },
-        .set_roe => |r| return execSetRoe(gs, r),
-        .set_role => |r| return execSetRole(gs, r),
+        .set_roe => |r| return toe.execSetRoe(gs, r),
+        .set_role => |r| return toe.execSetRole(gs, r),
         .replace_gear => |unit_id| {
             const res = sites.replaceGear(gs, unit_id) catch |err| return @errorCast(err);
             return .{ .ordered = res.ordered, .unsourced = res.unsourced };
@@ -622,13 +623,13 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
             return .{};
         },
         .repay_loan => |r| return execRepayLoan(gs, r),
-        .sell_unit => |unit_id| return execSellUnit(gs, unit_id),
-        .strip_unit => |unit_id| return execStripUnit(gs, unit_id),
+        .sell_unit => |unit_id| return held_hulls.execSellUnit(gs, unit_id),
+        .strip_unit => |unit_id| return held_hulls.execStripUnit(gs, unit_id),
         .sell_hq => |hq_id| {
             hq_ops.sellHq(gs, hq_id) catch |err| return @errorCast(err);
             return .{};
         },
-        .disband_company => |co| return execDisbandCompany(gs, co),
+        .disband_company => |co| return toe.execDisbandCompany(gs, co),
         .reactivate => |unit_id| {
             hq_ops.reactivate(gs, unit_id) catch |err| return @errorCast(err);
             return .{};
@@ -687,19 +688,6 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
 
 // ---- the commands, one function each, in `execute`'s order ----
 
-fn execNewCompany(gs: *GameState, name: @FieldType(Command, "new_company")) Error!Result {
-    // First HQ with a free combat-company slot;
-    // no HQ yet (tests, pre-commander) → unassigned.
-    const hq_id = hq_ops.hqWithCompanySlot(gs, .none);
-    if (hq_id == .none and gs.hqs.count() > 0) return Error.CapacityFull;
-    return newCompanyAt(gs, name, hq_id);
-}
-
-fn execNewCompanyAt(gs: *GameState, n: @FieldType(Command, "new_company_at")) Error!Result {
-    if (gs.hqs.getPtr(n.hq) == null) return Error.UnknownHq;
-    return newCompanyAt(gs, n.name, n.hq);
-}
-
 fn execCompleteContract(gs: *GameState, cid: @FieldType(Command, "complete_contract")) Error!Result {
     const c = gs.contracts.getPtr(cid) orelse return Error.UnknownContract;
     if (c.status != .active) return Error.UnknownContract;
@@ -716,59 +704,6 @@ fn execRecallCompany(gs: *GameState, company: @FieldType(Command, "recall_compan
     return .{};
 }
 
-fn execRefitRemove(gs: *GameState, r: @FieldType(Command, "refit_remove")) Error!Result {
-    const u = gs.unit(r.unit) orelse return Error.UnknownUnit;
-    if (u.kind != .mek) return Error.NotAMek;
-    if (u.status == .destroyed) return Error.Unavailable; // a wreck is rebuilt (depot) or stripped, not refitted
-    var found = false;
-    for (u.slots.items) |s| {
-        if (std.mem.eql(u8, s.slot_key, r.slot_key) and s.class != .structure) found = true;
-    }
-    if (!found) return Error.NoSuchSlot;
-    const plan = try gs.refitPlanOrCreate(r.unit);
-    if (plan.committed) return Error.ProjectInProgress;
-    try plan.ops.append(gs.allocator(), .{ .remove = try gs.allocator().dupe(u8, r.slot_key) });
-    return .{};
-}
-
-fn execRefitInstall(gs: *GameState, r: @FieldType(Command, "refit_install")) Error!Result {
-    const u = gs.unit(r.unit) orelse return Error.UnknownUnit;
-    if (u.kind != .mek) return Error.NotAMek;
-    if (u.status == .destroyed) return Error.Unavailable;
-    const def = part_mod.find(r.part_key) orelse return Error.UnknownPart;
-    if (!def.mountable()) return Error.NotAComponent;
-    const plan = try gs.refitPlanOrCreate(r.unit);
-    if (plan.committed) return Error.ProjectInProgress;
-    try plan.ops.append(gs.allocator(), .{ .install = .{ .location = r.location, .part_key = def.key } });
-    return .{};
-}
-
-fn execRefitClear(gs: *GameState, unit_id: @FieldType(Command, "refit_clear")) Error!Result {
-    for (gs.refit_plans.items, 0..) |p, i| {
-        if (p.unit != unit_id) continue;
-        if (p.committed) {
-            // A committed plan lives with its bay job; one without a
-            // job is an orphan — clear it and give the parts back.
-            if (hq_ops.hasJobForUnit(gs, unit_id)) return Error.ProjectInProgress;
-            const home: types.Site = .{ .hq = gs.homeHqFor(if (gs.unit(unit_id)) |u| u.force else .none) };
-            for (p.ops.items) |op| if (op == .install) try gs.addStock(home, op.install.part_key, 1);
-            try gs.log(.construction, .{}, "[lab] orphaned refit plan on #{d} cleared — parts returned to the warehouse", .{@intFromEnum(unit_id)});
-        }
-        _ = gs.refit_plans.orderedRemove(i);
-        break;
-    }
-    return .{};
-}
-
-fn execSetOutfitEmblem(gs: *GameState, image: @FieldType(Command, "set_outfit_emblem")) Error!Result {
-    const copy = try gs.allocator().dupe(u8, image);
-    var fit = gs.forces.iterator();
-    while (fit.next()) |e| if (e.value_ptr.echelon == .company) {
-        e.value_ptr.emblem = copy;
-    };
-    return .{};
-}
-
 fn execCoverShortfall(gs: *GameState, c: @FieldType(Command, "cover_shortfall")) Error!Result {
     if (hq_ops.canFabricate(gs, c.hq, c.part_key)) {
         var res = try execute(gs, .{ .fabricate = .{ .hq = c.hq, .part_key = c.part_key, .quantity = c.quantity } });
@@ -778,38 +713,12 @@ fn execCoverShortfall(gs: *GameState, c: @FieldType(Command, "cover_shortfall"))
     return execute(gs, .{ .order_part = .{ .part_key = c.part_key, .quantity = c.quantity, .dest = .{ .hq = c.hq } } });
 }
 
-fn execToggleMothball(gs: *GameState, unit_id: @FieldType(Command, "toggle_mothball")) Error!Result {
-    const u = gs.unit(unit_id) orelse return Error.UnknownUnit;
-    if (u.status == .mothballed) {
-        _ = try execute(gs, .{ .reactivate = unit_id });
-        return .{ .mothballed = false };
-    }
-    _ = try execute(gs, .{ .mothball = unit_id });
-    return .{ .mothballed = true };
-}
-
 fn execConfirmOrders(gs: *GameState, id: @FieldType(Command, "confirm_orders")) Error!Result {
     const c = gs.contracts.getPtr(id) orelse return Error.UnknownContract;
     if (!@import("battle.zig").inContactWindow(gs, c)) return Error.NoContact;
     c.orders_day = c.next_battle_day;
     try gs.log(.battle, .{ .company = c.assigned_company, .contract = id }, "[orders] battle orders given for the engagement on day {d}", .{c.next_battle_day.?});
     return .{};
-}
-
-fn execCycleRoe(gs: *GameState, co: @FieldType(Command, "cycle_roe")) Error!Result {
-    const f = gs.force(co) orelse return Error.UnknownForce;
-    if (f.echelon != .company) return Error.NotACompany;
-    const next = f.roe.next();
-    _ = try execute(gs, .{ .set_roe = .{ .company = co, .roe = next } });
-    return .{ .roe = next };
-}
-
-fn execCycleRole(gs: *GameState, fid: @FieldType(Command, "cycle_role")) Error!Result {
-    const f = gs.force(fid) orelse return Error.UnknownForce;
-    if (!f.isCombatLance()) return Error.NotACompany;
-    const next = f.role.next();
-    _ = try execute(gs, .{ .set_role = .{ .force = fid, .role = next } });
-    return .{ .role = next };
 }
 
 fn execCycleDifficulty(gs: *GameState, dir: @FieldType(Command, "cycle_difficulty")) Error!Result {
@@ -828,31 +737,6 @@ fn execAdjustSharesPct(gs: *GameState, delta: @FieldType(Command, "adjust_shares
     return .{ .shares_pct = @intCast(next) };
 }
 
-fn execRecallIdle(gs: *GameState, company: @FieldType(Command, "recall_idle")) Error!Result {
-    const f = gs.force(company) orelse return Error.UnknownForce;
-    if (f.echelon != .company) return Error.NotACompany;
-    if (posture.isCompanyHome(gs, company)) return Error.AlreadyHome;
-    if (posture.isCompanyDeployed(gs, company)) return Error.UnderContract;
-    return execute(gs, .{ .recall_company = company });
-}
-
-fn execRenameOutfit(gs: *GameState, name: @FieldType(Command, "rename_outfit")) Error!Result {
-    gs.outfit_name = try gs.allocator().dupe(u8, name);
-    return .{};
-}
-
-fn execRenameForce(gs: *GameState, r: @FieldType(Command, "rename_force")) Error!Result {
-    const f = gs.force(r.force) orelse return Error.UnknownForce;
-    f.name = try gs.allocator().dupe(u8, r.name);
-    return .{};
-}
-
-fn execSetEmblem(gs: *GameState, e: @FieldType(Command, "set_emblem")) Error!Result {
-    const f = gs.force(e.force) orelse return Error.UnknownForce;
-    f.emblem = try gs.allocator().dupe(u8, e.image);
-    return .{};
-}
-
 fn execCreateCommander(gs: *GameState, c: @FieldType(Command, "create_commander")) Error!Result {
     if (c.start_year < 3000 or c.start_year > 3060) return Error.BadYear;
     gs.clock.date.year = c.start_year;
@@ -867,81 +751,6 @@ fn execCreateCommander(gs: *GameState, c: @FieldType(Command, "create_commander"
     try contract_market.refreshListings(gs);
     try contract_market.refreshCandidates(gs);
     return .{};
-}
-
-fn execMothball(gs: *GameState, unit_id: @FieldType(Command, "mothball")) Error!Result {
-    const u = gs.unit(unit_id) orelse return Error.UnknownUnit;
-    if (u.status == .mothballed) return Error.AlreadyMothballed;
-    if (posture.isCompanyDeployed(gs, gs.companyOf(u.force))) return Error.UnitDeployed;
-    u.status = .mothballed;
-    return .{};
-}
-
-fn execMoveUnit(gs: *GameState, m: @FieldType(Command, "move_unit")) Error!Result {
-    const u = gs.unit(m.unit) orelse return Error.UnknownUnit;
-    const dest = gs.force(m.force) orelse return Error.UnknownForce;
-    if (dest.echelon != .lance and dest.echelon != .support_lance and dest.echelon != .company and dest.echelon != .air_lance) return Error.NotACompany;
-    const co = gs.companyOf(m.force);
-    if (co == .none) return Error.NotACompany;
-    const from_co = gs.companyOf(u.force);
-    // A hull already with the company can change lances wherever the
-    // company is, so a hull shipped to it in the field can be placed
-    // there; joining from outside waits
-    // for the company to be home — `transfer_unit` ships it there.
-    if (from_co != co and !posture.isCompanyHome(gs, co)) return Error.CompanyDeployed;
-    if (from_co != .none and from_co != co) return Error.SameForce; // use transfer_unit between companies
-    if (dest.isCombatLance() and dest.units.items.len >= force_mod.lance_size) return Error.TooManyLances;
-    if (u.status == .in_transit) return Error.Unavailable;
-    if (dest.echelon == .air_lance and u.kind != .aerospace) return Error.WrongHullKind;
-    if (dest.echelon == .lance and u.kind != .mek and u.kind != .vehicle) return Error.WrongHullKind; // mixed mek/vehicle lances are AtB-legal
-    if (u.kind.isTransport()) return Error.WrongHullKind; // ships hold berths, not lance slots
-    try toe.moveUnitToForce(gs, m.unit, m.force);
-    return .{};
-}
-
-fn execNewLance(gs: *GameState, nl: @FieldType(Command, "new_lance")) Error!Result {
-    const co = gs.force(nl.company) orelse return Error.UnknownForce;
-    if (co.echelon != .company) return Error.NotACompany;
-    if (nl.name.len == 0) return Error.UnknownForce;
-    const hq = gs.hqs.getPtr(co.supplying_hq);
-    switch (nl.kind) {
-        .line => {
-            const cap: u32 = if (hq) |h| h.capacity().lances_per_company else 3;
-            if (toe.lancesOfEchelon(gs, nl.company, .lance) >= cap) return Error.TooManyLances;
-            const id = try gs.createForce(nl.name, .lance, nl.company);
-            return .{ .created_force = id };
-        },
-        .air => {
-            const wing = toe.airCompanyOf(gs, nl.company) orelse return Error.NoAirSlot;
-            if (toe.lancesOfEchelon(gs, wing, .air_lance) >= force_mod.max_air_lances) return Error.TooManyLances;
-            const id = try gs.createForce(nl.name, .air_lance, wing);
-            return .{ .created_force = id };
-        },
-        .support => |kind| {
-            const h = hq orelse return Error.NoSupportSlot;
-            const omega = toe.supportCompanyOf(gs, nl.company) orelse return Error.NoSupportSlot;
-            if (!h.supportLanceAllowed(kind)) return Error.NoSupportSlot;
-            if (toe.lancesOfEchelon(gs, omega, .support_lance) >= h.capacity().support_lances) return Error.NoSupportSlot;
-            const id = try gs.createForce(nl.name, .support_lance, omega);
-            gs.force(id).?.support_kind = kind;
-            return .{ .created_force = id };
-        },
-    }
-}
-
-fn execRaiseAirCompany(gs: *GameState, company: @FieldType(Command, "raise_air_company")) Error!Result {
-    const co = gs.force(company) orelse return Error.UnknownForce;
-    if (co.echelon != .company) return Error.NotACompany;
-    if (toe.airCompanyOf(gs, company) != null) return Error.NoAirSlot;
-    const h = gs.hqs.getPtr(co.supplying_hq) orelse return Error.NoHq;
-    if (toe.airCompaniesAtHq(gs, h.id) >= h.capacity().air_companies) return Error.NoAirSlot;
-    const hq_id = h.id;
-    const wing = try gs.createForce("Air Wing", .air_company, company);
-    _ = try gs.createForce("1st Air Lance", .air_lance, wing);
-    // Re-fetch: creating forces may have moved the map's storage.
-    const co_now = gs.force(company).?;
-    try gs.log(.decision, .{ .company = company, .hq = hq_id }, "[raise] {s} stands up an air wing at {s} — buy fighters, hire aero pilots and techs", .{ co_now.name, gs.hqs.getPtr(hq_id).?.name });
-    return .{ .created_force = wing };
 }
 
 fn execSetSharesPct(gs: *GameState, pct: @FieldType(Command, "set_shares_pct")) Error!Result {
@@ -965,21 +774,6 @@ fn execSetDifficulty(gs: *GameState, level: @FieldType(Command, "set_difficulty"
     return .{};
 }
 
-fn execSetRoe(gs: *GameState, r: @FieldType(Command, "set_roe")) Error!Result {
-    const f = gs.force(r.company) orelse return Error.UnknownForce;
-    if (f.echelon != .company) return Error.NotACompany;
-    f.roe = r.roe;
-    try gs.log(.contract, .{ .company = r.company }, "[roe] {s}: {s}", .{ f.name, r.roe.describe() });
-    return .{};
-}
-
-fn execSetRole(gs: *GameState, r: @FieldType(Command, "set_role")) Error!Result {
-    const f = gs.force(r.force) orelse return Error.UnknownForce;
-    if (!f.isCombatLance()) return Error.NotACompany;
-    f.role = r.role;
-    return .{};
-}
-
 fn execClearStandingOrder(gs: *GameState, name: @FieldType(Command, "clear_standing_order")) Error!Result {
     const kind = std.meta.stringToEnum(events_mod.EventKind, name) orelse return Error.NoSuchEvent;
     if (gs.event_memory.getPtr(kind)) |m| m.streak = 0;
@@ -996,88 +790,6 @@ fn execRepayLoan(gs: *GameState, r: @FieldType(Command, "repay_loan")) Error!Res
     loan.balance -= amount;
     try gs.postTransaction(.{ .day = gs.clock.day_index, .amount = -amount, .category = .loan_principal, .note = "early repayment" });
     if (loan.balance <= 0) _ = gs.loans.orderedRemove(r.index);
-    return .{};
-}
-
-fn execSellUnit(gs: *GameState, unit_id: @FieldType(Command, "sell_unit")) Error!Result {
-    const u = gs.unit(unit_id) orelse return Error.UnknownUnit;
-    if (posture.isCompanyDeployed(gs, gs.companyOf(u.force))) return Error.UnitDeployed;
-    const value = market_mod.unitSaleValue(u);
-    const key = u.chassis_key;
-    gs.removeUnit(unit_id);
-    try gs.postTransaction(.{ .day = gs.clock.day_index, .amount = value, .category = .unit_sale, .note = key });
-    try gs.log(.market, .{}, "[sale] {s} #{d} sold for {d}", .{ key, @intFromEnum(unit_id), value });
-    return .{};
-}
-
-fn execStripUnit(gs: *GameState, unit_id: @FieldType(Command, "strip_unit")) Error!Result {
-    const u = gs.unit(unit_id) orelse return Error.UnknownUnit;
-    const company = gs.companyOf(u.force);
-    if (posture.isCompanyDeployed(gs, company)) return Error.UnitDeployed;
-    if (u.status == .in_transit or (company != .none and !posture.isCompanyHome(gs, company))) return Error.UnitAway;
-    const hq_id = gs.homeHqFor(u.force);
-    if (gs.hqs.getPtr(hq_id) == null) return Error.NoHq;
-    const lines = try market_mod.stripParts(gs.allocator(), u);
-    var text: std.ArrayListUnmanaged(u8) = .empty;
-    for (lines, 0..) |l, i| {
-        try gs.addStock(.{ .hq = hq_id }, l.key, l.qty);
-        try text.appendSlice(gs.allocator(), try std.fmt.allocPrint(gs.allocator(), "{s}{d}× {s}", .{ if (i > 0) ", " else "", l.qty, l.key }));
-    }
-    const key = u.chassis_key;
-    gs.removeUnit(unit_id);
-    try gs.log(.market, .{ .hq = hq_id }, "[strip] {s} #{d} stripped for parts into the warehouse: {s}", .{ key, @intFromEnum(unit_id), if (lines.len == 0) "nothing worth keeping" else text.items });
-    return .{};
-}
-
-fn execDisbandCompany(gs: *GameState, co: @FieldType(Command, "disband_company")) Error!Result {
-    const f = gs.forces.getPtr(co) orelse return Error.UnknownForce;
-    if (f.echelon != .company) return Error.NotACompany;
-    if (!posture.isCompanyHome(gs, co)) return Error.CompanyDeployed;
-    const name = f.name;
-    var total: types.CBills = f.local_funds;
-    // Hulls under the subtree, then people, then the forces.
-    var uids: std.ArrayListUnmanaged(types.UnitId) = .empty;
-    defer uids.deinit(gs.allocator());
-    var uit = gs.units.iterator();
-    while (uit.next()) |e| if (gs.companyOf(e.value_ptr.force) == co) try uids.append(gs.allocator(), e.value_ptr.id);
-    for (uids.items) |uid| {
-        total += market_mod.unitSaleValue(gs.unit(uid).?);
-        gs.removeUnit(uid);
-    }
-    var pit = gs.people.iterator();
-    while (pit.next()) |e| {
-        const p = e.value_ptr;
-        if (toe.personInCompany(gs, p, co) and p.isOnBooks()) {
-            _ = try @import("personnel.zig").depart(gs, p.id, .resigned, types.full_bp, "severance (disbanded)");
-            p.assigned_force = .none;
-        }
-    }
-    var fids: std.ArrayListUnmanaged(types.ForceId) = .empty;
-    defer fids.deinit(gs.allocator());
-    var fit = gs.forces.iterator();
-    while (fit.next()) |e| if (gs.companyOf(e.value_ptr.id) == co) try fids.append(gs.allocator(), e.value_ptr.id);
-    for (fids.items) |fid| _ = gs.forces.orderedRemove(fid);
-    // Nothing may keep pointing at a company that no longer exists:
-    // its standing orders, its resupply plan, the goods on the road
-    // to it and the hulls on their way to join it.
-    var pi: usize = 0;
-    while (pi < gs.policies.items.len) {
-        if (std.meta.eql(gs.policies.items[pi].entity, .{ .company = co })) _ = gs.policies.orderedRemove(pi) else pi += 1;
-    }
-    pi = 0;
-    while (pi < gs.supply_policies.items.len) {
-        if (gs.supply_policies.items[pi].company == co) _ = gs.supply_policies.orderedRemove(pi) else pi += 1;
-    }
-    for (gs.part_orders.items) |*o| if (o.inFlight() and std.meta.eql(o.dest, .{ .company = co })) {
-        o.status = .cancelled;
-    };
-    pi = 0;
-    while (pi < gs.unit_transfers.items.len) {
-        if (gs.unit_transfers.items[pi].to_company == co) _ = gs.unit_transfers.orderedRemove(pi) else pi += 1;
-    }
-    hq_ops.refreshHqStaffing(gs);
-    try gs.postTransaction(.{ .day = gs.clock.day_index, .amount = total, .category = .unit_sale, .note = "company disbanded" });
-    try gs.log(.market, .{}, "[sale] {s} disbanded: {d} hulls sold, people released, {d} raised", .{ name, uids.items.len, total });
     return .{};
 }
 
@@ -1141,164 +853,6 @@ fn execReadReport(gs: *GameState, id: @FieldType(Command, "read_report")) Error!
 
 fn execResolveDecision(gs: *GameState, r: @FieldType(Command, "resolve_decision")) Error!Result {
     try contract_events.resolveChoice(gs, r.event, r.choice);
-    return .{};
-}
-
-/// The skeleton a raised company starts from: the HQ's lance cap in empty
-/// line lances (the last one a recon lance when there are four or more),
-/// and an empty Omega Company of salvage, MASH, logistics and security
-/// lances — the same shape as a generated starter company, with nothing
-/// in it yet.
-fn raiseCompany(gs: *GameState, name: []const u8, hq_id: types.HqId) Error!Result {
-    const hq = gs.hqs.getPtr(hq_id) orelse return Error.UnknownHq;
-    if (toe.companiesAtHq(gs, hq_id) >= hq.capacity().combat_companies) return Error.CapacityFull;
-    const id = try gs.createForce(name, .company, .none);
-    const n: usize = @max(3, hq.capacity().lances_per_company);
-    const names = [_][]const u8{ "1st Lance", "2nd Lance", "3rd Lance", "4th Lance", "5th Lance" };
-    for (0..n) |i| {
-        const recon = i + 1 == n and n >= 4;
-        const lid = try gs.createForce(if (recon) "Recon Lance" else names[i], .lance, id);
-        if (recon) gs.force(lid).?.role = .scouting;
-    }
-    const omega = try gs.createForce("Omega Company", .support_company, id);
-    const plan = [_]struct { []const u8, force_mod.SupportLanceKind }{
-        .{ "Salvage Lance", .salvage }, .{ "MASH Lance", .mash }, .{ "Logistics Lance", .transport }, .{ "Security Lance", .security },
-    };
-    for (plan) |entry| {
-        const lid = try gs.createForce(entry[0], .support_lance, omega);
-        gs.force(lid).?.support_kind = entry[1];
-    }
-    toe.assignCompanyToHq(gs, id, hq_id) catch |err| switch (err) {
-        error.CapacityFull => return Error.CapacityFull,
-        error.TooManyLances => return Error.TooManyLances,
-        else => return Error.UnknownHq,
-    };
-    try gs.log(.decision, .{ .company = id, .hq = hq_id }, "[raise] {s} raised at {s}: {d} empty line lances and a support echelon — buy hulls, hire crews", .{ name, hq.name, n });
-    return .{ .created_force = id };
-}
-
-fn newCompanyAt(gs: *GameState, name: []const u8, hq_id: types.HqId) Error!Result {
-    // Check the slot BEFORE generating 160 people for a company that has
-    // nowhere to live.
-    if (hq_id != .none) {
-        const hq = gs.hqs.getPtr(hq_id) orelse return Error.UnknownHq;
-        if (toe.companiesAtHq(gs, hq_id) >= hq.capacity().combat_companies) return Error.CapacityFull;
-    }
-    const id = try starter_company.generateInto(gs, name);
-    if (hq_id != .none) {
-        toe.assignCompanyToHq(gs, id, hq_id) catch |err| switch (err) {
-            error.CapacityFull => return Error.CapacityFull,
-            error.TooManyLances => return Error.TooManyLances,
-            else => return Error.UnknownHq,
-        };
-    }
-    // Employers price contracts off your fielded force — standing up a
-    // company changes every quote on the board.
-    try contract_market.refresh(gs);
-    return .{ .created_force = id };
-}
-
-/// Why a hull cannot be moved to another company right now, or null:
-/// the transfer refuses on it and the company picker dims every row on it.
-pub fn transferBlock(gs: *GameState, u: *const unit_mod.Unit) ?[]const u8 {
-    if (posture.isCompanyDeployed(gs, gs.companyOf(u.force))) return "its company is deployed";
-    if (u.status == .in_transit) return "it is in transit";
-    if (u.inShop()) return "it is in the depot";
-    return null;
-}
-
-fn transferUnit(gs: *GameState, unit_id: types.UnitId, to_company: types.ForceId) Error!Result {
-    const u = gs.unit(unit_id) orelse return Error.UnknownUnit;
-    const dest = gs.force(to_company) orelse return Error.UnknownForce;
-    if (dest.echelon != .company) return Error.NotACompany;
-    const from_company = gs.companyOf(u.force);
-    if (from_company == to_company) return Error.SameForce;
-    if (transferBlock(gs, u)) |why| return if (std.mem.eql(u8, why, "its company is deployed")) Error.UnitDeployed else Error.Unavailable;
-
-    const days = sites.travelDays(gs, from_company, to_company);
-    if (days == 0) {
-        try toe.placeUnitInCompany(gs, unit_id, to_company);
-        return .{ .in_transit = false };
-    }
-    // Ship it: leaves the old roster now, joins the new one on arrival.
-    try gs.unit_transfers.ensureUnusedCapacity(gs.allocator(), 1);
-    if (gs.forces.getPtr(u.force)) |old| {
-        for (old.units.items, 0..) |id, i| {
-            if (id == unit_id) {
-                _ = old.units.orderedRemove(i);
-                break;
-            }
-        }
-    }
-    u.force = .none;
-    u.status = .in_transit;
-    u.tech = .none;
-    if (gs.person(u.pilot)) |p| {
-        p.assigned_force = to_company;
-        p.leave_until_day = gs.clock.day_index + days;
-    }
-    try gs.unit_transfers.append(gs.allocator(), .{ .unit = unit_id, .to_company = to_company, .eta_day = gs.clock.day_index + days });
-    try gs.log(.delivery, .{ .company = to_company }, "[transfer] {s} shipped, arrives in {d} days", .{ u.chassis_key, days });
-    return .{ .in_transit = true };
-}
-
-/// Commit a refit plan: legal fit, class within the bay's ceiling, parts on
-/// the shelf, hull at home — then a bay job for the hours it takes.
-fn commitRefit(gs: *GameState, unit_id: types.UnitId) Error!Result {
-    const u = gs.unit(unit_id) orelse return Error.UnknownUnit;
-    if (u.kind != .mek) return Error.NotAMek;
-    const plan = gs.refitPlanFor(unit_id) orelse return Error.NoPlan;
-    if (plan.committed or plan.ops.items.len == 0) return Error.NoPlan;
-    if (u.isBusy() or u.isParked()) return Error.Unavailable;
-    if (!posture.isCompanyHome(gs, gs.companyOf(u.force))) return Error.UnitAway;
-    const design = @import("../domain/chassis.zig").find(u.chassis_key) orelse return Error.UnknownChassis;
-    const hq_id = gs.homeHqFor(u.force);
-    const hq = gs.hqs.getPtr(hq_id) orelse return Error.NoHq;
-
-    // The rules.
-    var arena = std.heap.ArenaAllocator.init(gs.scratch());
-    defer arena.deinit();
-    const items = try refit_m.labItems(gs, unit_id, arena.allocator());
-    const report = meklab.validate(design, items, arena.allocator()) catch return Error.OutOfMemory;
-    if (!report.legal) return Error.IllegalFit;
-
-    // The bay's ceiling.
-    const class = meklab.classify(plan.ops.items, u.slots.items);
-    const ceiling = hq.refitClassCeiling() orelse return Error.NoBay;
-    if (@intFromEnum(class.asQuality()) > @intFromEnum(ceiling)) return Error.RefitClassTooHigh;
-
-    // The parts, counted per part across every install, all present
-    // before any are taken.
-    const site: types.Site = .{ .hq = hq_id };
-    var demand: std.StringArrayHashMapUnmanaged(u32) = .empty;
-    for (plan.ops.items) |op| {
-        if (op != .install) continue;
-        const entry = try demand.getOrPut(arena.allocator(), op.install.part_key);
-        entry.value_ptr.* = if (entry.found_existing) entry.value_ptr.* + 1 else 1;
-    }
-    var dit = demand.iterator();
-    while (dit.next()) |d| {
-        if (gs.stockCount(site, d.key_ptr.*) < d.value_ptr.*) return Error.MissingParts;
-    }
-    try gs.bay_jobs.ensureUnusedCapacity(gs.allocator(), 1);
-    dit = demand.iterator();
-    while (dit.next()) |d| {
-        if (!gs.takeStock(site, d.key_ptr.*, d.value_ptr.*)) return Error.MissingParts;
-    }
-
-    const hours = meklab.refitHours(plan.ops.items, u.slots.items, class);
-    plan.committed = true;
-    try gs.bay_jobs.append(gs.allocator(), .{
-        .hq = hq_id,
-        .kind = .refit,
-        .unit = unit_id,
-        .duration_days = @max(1, std.math.divCeil(u32, hours, 8) catch 1),
-        .queued_day = gs.clock.day_index,
-        .cost = @as(types.CBills, hours) * tuning.hq_ops.refit_labor_per_hour, // labor
-    });
-    try gs.log(.construction, .{ .hq = hq_id }, "[lab] {s} refit committed: class {s}, {d} tech-hours, {d} bay day(s) · {s}", .{
-        u.chassis_key, @tagName(class), hours, @max(1, std.math.divCeil(u32, hours, 8) catch 1), try hq_ops.repairOddsText(gs.allocator(), gs, hq_id, unit_id),
-    });
     return .{};
 }
 
@@ -1474,49 +1028,6 @@ test "policies run daily under a monthly cap; resupply ships provisions to a com
     // zero safety days removes it
     _ = try execute(&gs, .{ .set_supply_policy = .{ .company = co, .min_days = 0, .tons = 0 } });
     try std.testing.expectEqual(@as(usize, 0), gs.supply_policies.items.len);
-}
-
-test "hulls move between lances at home; a new lance respects the HQ's lance cap" {
-    var gs = GameState.init(std.testing.allocator, .{ .seed = 33 });
-    defer gs.deinit();
-    _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .FS, .profession = .chief_engineer } });
-    const co = (try execute(&gs, .{ .new_company = "Alpha" })).created_force;
-    // A bought truck joins the company in the first line lance with room…
-    const truck = try gs.addUnit("CGT-3");
-    _ = try execute(&gs, .{ .transfer_unit = .{ .unit = truck, .to_company = co } });
-    // …and can be moved into the logistics lance.
-    const log_lance: types.ForceId = if (toe.supportLance(&gs, co, .transport)) |l| l.id else .none;
-    try std.testing.expect(log_lance != .none);
-    _ = try execute(&gs, .{ .move_unit = .{ .unit = truck, .force = log_lance } });
-    try std.testing.expectEqual(log_lance, gs.unit(truck).?.force);
-    // Three line lances plus the recon lance fill a level-1 bay's four; the
-    // fifth needs a level-3 mek bay.
-    try std.testing.expectEqual(@as(u32, 4), toe.combatLancesOf(&gs, co));
-    try std.testing.expectError(Error.TooManyLances, execute(&gs, .{ .new_lance = .{ .company = co, .name = "5th Lance" } }));
-    const hq = gs.hqs.getPtr(gs.hqs.keys()[0]).?;
-    for (hq.facilities.items) |*f| if (f.kind == .mek_bay) {
-        f.level = 3;
-    };
-    hq_ops.refreshHqStaffing(&gs);
-    if (hq.staff_assigned < hq.staffRequired().total()) _ = try execute(&gs, .{ .autostaff = hq.id });
-    _ = try execute(&gs, .{ .new_lance = .{ .company = co, .name = "5th Lance" } });
-    try std.testing.expectEqual(@as(u32, 5), toe.combatLancesOf(&gs, co));
-}
-
-test "lance roles: set on lances only, persisted on the force" {
-    var gs = GameState.init(std.testing.allocator, .{ .seed = 3 });
-    defer gs.deinit();
-    _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .DC, .profession = .line_officer } });
-    const res = try execute(&gs, .{ .new_company = "Alpha" });
-    try std.testing.expectError(Error.NotACompany, execute(&gs, .{ .set_role = .{ .force = res.created_force, .role = .training } }));
-    const co = gs.force(res.created_force).?;
-    var lance: types.ForceId = .none;
-    for (co.children.items) |cid| if (gs.force(cid).?.echelon == .lance) {
-        lance = cid;
-        break;
-    };
-    _ = try execute(&gs, .{ .set_role = .{ .force = lance, .role = .training } });
-    try std.testing.expectEqual(force_mod.LanceRole.training, gs.force(lance).?.role);
 }
 
 test "wounded only heal once admitted" {
@@ -1826,46 +1337,6 @@ test "a defrauded black-market hull purchase moves no hull the outfit already ow
         try std.testing.expectEqual(@as(usize, 0), gs.unit_transfers.items.len);
     }
     try std.testing.expect(checked);
-}
-
-test "a refit cannot install two parts from one in stock" {
-    var gs = GameState.init(std.testing.allocator, .{ .seed = 1010 });
-    defer gs.deinit();
-    _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .chief_engineer } });
-    const hq_id = gs.hqs.keys()[0];
-    _ = try execute(&gs, .{ .new_company = "Alpha" });
-    const site: types.Site = .{ .hq = hq_id };
-    // A mek with two mounts of one weapon: pull both and put the same
-    // weapon back in each, a legal like-for-like refit needing two parts.
-    var it = gs.units.iterator();
-    while (it.next()) |e| {
-        const u = e.value_ptr;
-        if (u.kind != .mek) continue;
-        for (u.slots.items, 0..) |a, i| {
-            if (a.class != .weapon) continue;
-            for (u.slots.items[i + 1 ..]) |b| {
-                if (b.class != .weapon or !std.mem.eql(u8, a.part_key, b.part_key)) continue;
-                const part = a.part_key;
-                const loc_a = meklab.parseLocation(a.slot_key).?;
-                const loc_b = meklab.parseLocation(b.slot_key).?;
-                const key_a = a.slot_key;
-                const key_b = b.slot_key;
-                _ = try execute(&gs, .{ .refit_remove = .{ .unit = u.id, .slot_key = key_a } });
-                _ = try execute(&gs, .{ .refit_remove = .{ .unit = u.id, .slot_key = key_b } });
-                _ = try execute(&gs, .{ .refit_install = .{ .unit = u.id, .location = loc_a, .part_key = part } });
-                _ = try execute(&gs, .{ .refit_install = .{ .unit = u.id, .location = loc_b, .part_key = part } });
-                _ = gs.takeStock(site, part, gs.stockCount(site, part));
-                try gs.addStock(site, part, 1);
-                try std.testing.expectError(Error.MissingParts, execute(&gs, .{ .refit_commit = u.id }));
-                try std.testing.expectEqual(@as(u32, 1), gs.stockCount(site, part));
-                try gs.addStock(site, part, 1);
-                _ = try execute(&gs, .{ .refit_commit = u.id });
-                try std.testing.expectEqual(@as(u32, 0), gs.stockCount(site, part));
-                return;
-            }
-        }
-    }
-    return error.NoMekWithTwinMounts;
 }
 
 test "a shipment the payer cannot afford uses no link capacity" {
@@ -2297,24 +1768,6 @@ test "components — fabrication is guaranteed, purchase is a roll" {
         try std.testing.expectEqual(@as(u32, 2), gs.spareCount("mlas"));
     }
     try std.testing.expectError(Error.UnknownPart, execute(&gs, .{ .order_part = .{ .part_key = "gauss", .quantity = 1 } }));
-}
-
-test "cold storage cuts the bill and takes real time to undo" {
-    var gs = GameState.init(std.testing.allocator, .{ .seed = 56 });
-    defer gs.deinit();
-    _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } }); // bays needed to wake hulls
-    const uid = try gs.addUnit("AS7-D");
-    gs.unit(uid).?.quality = .a; // neglected hull: slow wake-up
-
-    _ = try execute(&gs, .{ .mothball = uid });
-    try std.testing.expectEqual(@as(i64, 400), gs.unit(uid).?.monthlyBill()); // 20% of the 2k mek rate
-    try std.testing.expectError(Error.AlreadyMothballed, execute(&gs, .{ .mothball = uid }));
-
-    _ = try execute(&gs, .{ .reactivate = uid });
-    _ = try execute(&gs, .{ .advance_days = 10 });
-    try std.testing.expect(gs.unit(uid).?.status == .mothballed); // A-grade takes 22 bay-days
-    _ = try execute(&gs, .{ .advance_days = 16 });
-    try std.testing.expect(gs.unit(uid).?.status == .ready);
 }
 
 test "construction is paid by the HQ and the back office sets the pace" {
@@ -2797,63 +2250,6 @@ test "idle companies stay where they worked; recall brings them home; redeploy f
     while (!posture.isCompanyHome(&gs, co)) _ = try execute(&gs, .{ .advance_days = 5 });
 }
 
-test "the lab refuses illegal fits, gates by bay class, and refits through the bay" {
-    var gs = GameState.init(std.testing.allocator, .{ .seed = 1010 });
-    defer gs.deinit();
-    _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .chief_engineer } });
-    const hq_id = gs.hqs.keys()[0];
-    const co = (try execute(&gs, .{ .new_company = "Alpha" })).created_force;
-    const lance = gs.force(gs.force(co).?.children.items[0]).?;
-    const uid = lance.units.items[0];
-    const u = gs.unit(uid).?;
-
-    // Find a weapon slot to swap.
-    var weapon_slot: []const u8 = "";
-    var weapon_loc: meklab.Location = .ra;
-    for (u.slots.items) |s| {
-        if (s.class == .weapon) {
-            weapon_slot = s.slot_key;
-            weapon_loc = meklab.parseLocation(s.slot_key).?;
-            break;
-        }
-    }
-
-    // An AC/20 crammed in place of one laser: the rules say no.
-    _ = try execute(&gs, .{ .refit_remove = .{ .unit = uid, .slot_key = weapon_slot } });
-    _ = try execute(&gs, .{ .refit_install = .{ .unit = uid, .location = weapon_loc, .part_key = "ac20" } });
-    _ = try execute(&gs, .{ .refit_install = .{ .unit = uid, .location = weapon_loc, .part_key = "ac20" } });
-    try std.testing.expectError(Error.IllegalFit, execute(&gs, .{ .refit_commit = uid }));
-    _ = try execute(&gs, .{ .refit_clear = uid });
-
-    // Jump jets are class D; a level-1 bay does class B only.
-    _ = try execute(&gs, .{ .refit_install = .{ .unit = uid, .location = .ll, .part_key = "jump_jet" } });
-    try gs.addStock(.{ .hq = hq_id }, "jump_jet", 1);
-    const r = execute(&gs, .{ .refit_commit = uid });
-    try std.testing.expect(r == Error.RefitClassTooHigh or r == Error.IllegalFit);
-    _ = try execute(&gs, .{ .refit_clear = uid });
-
-    // A like-for-like swap (class B): laser out, small laser in — legal,
-    // within the ceiling, parts required.
-    _ = try execute(&gs, .{ .refit_remove = .{ .unit = uid, .slot_key = weapon_slot } });
-    _ = try execute(&gs, .{ .refit_install = .{ .unit = uid, .location = weapon_loc, .part_key = "slas" } });
-    try std.testing.expectError(Error.MissingParts, execute(&gs, .{ .refit_commit = uid }));
-    try gs.addStock(.{ .hq = hq_id }, "slas", 1);
-    const slots_before = u.slots.items.len;
-    _ = try execute(&gs, .{ .refit_commit = uid });
-    try std.testing.expectEqual(@as(u32, 0), gs.stockCount(.{ .hq = hq_id }, "slas"));
-
-    // The bay does the work; the hull comes out with the new mount and the
-    // old laser goes back on the shelf.
-    _ = try execute(&gs, .{ .advance_days = 12 });
-    try std.testing.expectEqual(slots_before, u.slots.items.len);
-    var has_slas = false;
-    for (u.slots.items) |s| {
-        if (std.mem.eql(u8, s.part_key, "slas")) has_slas = true;
-    }
-    try std.testing.expect(has_slas);
-    try std.testing.expect(gs.refitPlanFor(uid) == null);
-}
-
 test "answering one decision does not shift the answer to another" {
     // Answering removes an event and slides every later row up, so a row
     // index held by a frontend would reach the wrong event; the inbox is
@@ -2897,22 +2293,6 @@ test "command validation errors" {
     try std.testing.expectError(Error.UnknownPerson, execute(&gs, .{ .fire = @enumFromInt(99) }));
     try std.testing.expectError(Error.NoSuchDecision, execute(&gs, .{ .resolve_decision = .{ .event = @enumFromInt(99), .choice = 0 } }));
     try std.testing.expectError(Error.UnknownForce, execute(&gs, .{ .rename_force = .{ .force = @enumFromInt(7), .name = "x" } }));
-}
-
-test "identity commands: outfit and company names, emblem bytes" {
-    var gs = GameState.init(std.testing.allocator, .{});
-    defer gs.deinit();
-
-    _ = try execute(&gs, .{ .rename_outfit = "Kalmar's Free Legion" });
-    try std.testing.expectEqualStrings("Kalmar's Free Legion", gs.outfit_name);
-
-    const r = try execute(&gs, .{ .new_company = "Alpha Company" });
-    _ = try execute(&gs, .{ .rename_force = .{ .force = r.created_force, .name = "The Iron Ledger" } });
-    _ = try execute(&gs, .{ .set_emblem = .{ .force = r.created_force, .image = "\x89PNG-fake-bytes" } });
-
-    const f = gs.force(r.created_force).?;
-    try std.testing.expectEqualStrings("The Iron Ledger", f.name);
-    try std.testing.expect(f.emblem != null);
 }
 
 test "the resupply plan keeps a deployed company fed and armed on a long line" {

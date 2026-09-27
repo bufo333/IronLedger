@@ -1,9 +1,12 @@
-//! Held hulls: enemy-captured hull limbo and recovery (ARCH §4).
+//! Hull custody: enemy capture and recovery, sale, stripping and cold storage (ARCH section 4, section 9.8).
 //! MekHQ counterpart: battle salvage and hull recovery.
 
 const std = @import("std");
 const types = @import("../domain/types.zig");
 const GameState = @import("state.zig").GameState;
+const posture = @import("posture.zig");
+const market_mod = @import("../econ/market.zig");
+const commands = @import("commands.zig");
 
 /// The enemy dragged this hull off a field we lost: it leaves
 /// the books exactly as `removeUnit` would — no bill, no bay, no
@@ -97,4 +100,76 @@ test "a second release returns false" {
     try std.testing.expect(try releaseHull(&gs, taken));
     // Asking twice is not an error and wins nothing the second time.
     try std.testing.expect(!try releaseHull(&gs, taken));
+}
+
+// ---- C4b assets command handlers moved from commands.zig ----
+
+const Error = commands.Error;
+const Result = commands.Result;
+const Command = commands.Command;
+
+pub fn execMothball(gs: *GameState, unit_id: @FieldType(Command, "mothball")) Error!Result {
+    const u = gs.unit(unit_id) orelse return Error.UnknownUnit;
+    if (u.status == .mothballed) return Error.AlreadyMothballed;
+    if (posture.isCompanyDeployed(gs, gs.companyOf(u.force))) return Error.UnitDeployed;
+    u.status = .mothballed;
+    return .{};
+}
+
+pub fn execToggleMothball(gs: *GameState, unit_id: @FieldType(Command, "toggle_mothball")) Error!Result {
+    const u = gs.unit(unit_id) orelse return Error.UnknownUnit;
+    if (u.status == .mothballed) {
+        _ = try commands.execute(gs, .{ .reactivate = unit_id });
+        return .{ .mothballed = false };
+    }
+    _ = try commands.execute(gs, .{ .mothball = unit_id });
+    return .{ .mothballed = true };
+}
+
+pub fn execSellUnit(gs: *GameState, unit_id: @FieldType(Command, "sell_unit")) Error!Result {
+    const u = gs.unit(unit_id) orelse return Error.UnknownUnit;
+    if (posture.isCompanyDeployed(gs, gs.companyOf(u.force))) return Error.UnitDeployed;
+    const value = market_mod.unitSaleValue(u);
+    const key = u.chassis_key;
+    gs.removeUnit(unit_id);
+    try gs.postTransaction(.{ .day = gs.clock.day_index, .amount = value, .category = .unit_sale, .note = key });
+    try gs.log(.market, .{}, "[sale] {s} #{d} sold for {d}", .{ key, @intFromEnum(unit_id), value });
+    return .{};
+}
+
+pub fn execStripUnit(gs: *GameState, unit_id: @FieldType(Command, "strip_unit")) Error!Result {
+    const u = gs.unit(unit_id) orelse return Error.UnknownUnit;
+    const company = gs.companyOf(u.force);
+    if (posture.isCompanyDeployed(gs, company)) return Error.UnitDeployed;
+    if (u.status == .in_transit or (company != .none and !posture.isCompanyHome(gs, company))) return Error.UnitAway;
+    const hq_id = gs.homeHqFor(u.force);
+    if (gs.hqs.getPtr(hq_id) == null) return Error.NoHq;
+    const lines = try market_mod.stripParts(gs.allocator(), u);
+    var text: std.ArrayListUnmanaged(u8) = .empty;
+    for (lines, 0..) |l, i| {
+        try gs.addStock(.{ .hq = hq_id }, l.key, l.qty);
+        try text.appendSlice(gs.allocator(), try std.fmt.allocPrint(gs.allocator(), "{s}{d}× {s}", .{ if (i > 0) ", " else "", l.qty, l.key }));
+    }
+    const key = u.chassis_key;
+    gs.removeUnit(unit_id);
+    try gs.log(.market, .{ .hq = hq_id }, "[strip] {s} #{d} stripped for parts into the warehouse: {s}", .{ key, @intFromEnum(unit_id), if (lines.len == 0) "nothing worth keeping" else text.items });
+    return .{};
+}
+
+test "cold storage cuts the bill and takes real time to undo" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 56 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } }); // bays needed to wake hulls
+    const uid = try gs.addUnit("AS7-D");
+    gs.unit(uid).?.quality = .a; // neglected hull: slow wake-up
+
+    _ = try commands.execute(&gs, .{ .mothball = uid });
+    try std.testing.expectEqual(@as(i64, 400), gs.unit(uid).?.monthlyBill()); // 20% of the 2k mek rate
+    try std.testing.expectError(Error.AlreadyMothballed, commands.execute(&gs, .{ .mothball = uid }));
+
+    _ = try commands.execute(&gs, .{ .reactivate = uid });
+    _ = try commands.execute(&gs, .{ .advance_days = 10 });
+    try std.testing.expect(gs.unit(uid).?.status == .mothballed); // A-grade takes 22 bay-days
+    _ = try commands.execute(&gs, .{ .advance_days = 16 });
+    try std.testing.expect(gs.unit(uid).?.status == .ready);
 }
