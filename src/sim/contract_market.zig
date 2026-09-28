@@ -1145,17 +1145,26 @@ pub fn buySupportHull(gs: *GameState, company: types.ForceId, kind: force_mod.Su
 
 /// Hire a candidate off the hall board; returns the new PersonId.
 pub fn hireCandidate(gs: *GameState, index: usize) !types.PersonId {
+    // -- validate --
     if (index >= gs.candidates.items.len) return error.NoSuchCandidate;
     const cand = gs.candidates.items[index];
+    if (cand.asking_bonus > 0 and gs.treasuryBalance(.outfit) < cand.asking_bonus)
+        return error.InsufficientTreasury;
+
+    // -- prepare: reserve the ledger slot for the debit before any mutation --
+    if (cand.asking_bonus > 0) try gs.reserveLedger(1);
+
+    // -- commit: atomic hire first, then guaranteed debit, then hall removal --
+    const id = try personnel.hireFromSpec(gs, cand.spec);
     if (cand.asking_bonus > 0) {
-        try treasury.debit(gs, .outfit, .{
+        gs.ledger.transactions.appendAssumeCapacity(.{
             .day = gs.clock.day_index,
             .amount = -cand.asking_bonus,
             .category = .payroll,
             .note = "signing bonus",
         });
+        gs.funds -= cand.asking_bonus;
     }
-    const id = try personnel.hireFromSpec(gs, cand.spec);
     _ = gs.candidates.orderedRemove(index);
     return id;
 }
@@ -1168,6 +1177,37 @@ pub fn hireRoleFromHall(gs: *GameState, role: person_mod.Role, company: types.Fo
         return true;
     };
     return false;
+}
+
+test "hireCandidate leaves funds, people and the hall unchanged when the hire allocation fails" {
+    const digest = @import("digest.zig");
+
+    var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer outer.deinit();
+    var gs = GameState.init(outer.allocator(), .{ .seed = 4401 });
+    _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
+    gs.funds = 10_000_000;
+    try gs.candidates.append(gs.allocator(), .{
+        .hq = gs.hqs.keys()[0],
+        .spec = person_gen.generate(&gs.rng, .market, .mekwarrior),
+        .asking_bonus = 500_000,
+        .listed_day = 0,
+        .expires_day = 400,
+    });
+
+    // Pre-reserve exactly one spare ledger slot so reserveLedger succeeds
+    // but the hire's own alloc (name dupe) fires the OOM.
+    try gs.ledger.transactions.ensureTotalCapacityPrecise(gs.allocator(), gs.ledger.transactions.items.len + 1);
+
+    const before = digest.stateHash(&gs);
+
+    // Block all further allocations.
+    gs.arena.state.used_list = null;
+    gs.arena.state.free_list = null;
+    gs.arena.child_allocator = std.testing.failing_allocator;
+
+    try std.testing.expectError(error.OutOfMemory, hireCandidate(&gs, 0));
+    try std.testing.expectEqual(before, digest.stateHash(&gs));
 }
 
 test "a veteran five-lance opposition pays more than a green four-lance one" {

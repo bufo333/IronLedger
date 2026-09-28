@@ -35,13 +35,18 @@ pub fn recruitGenerated(gs: *GameState, role: person_mod.Role, hq_id: types.HqId
 /// candidate).
 pub fn hireFromSpec(gs: *GameState, spec: person_gen.GeneratedPerson) !types.PersonId {
     const role = spec.role;
-    const id = try gs.hirePerson(spec.first, spec.last, role);
-    const p = gs.person(id).?;
-    if (spec.callsign) |c| p.callsign = try gs.allocator().dupe(u8, c);
+    const alloc = gs.allocator();
+    var p: person_mod.Person = .{
+        .id = @enumFromInt(0), // overwritten by commitPerson
+        .first_name = try alloc.dupe(u8, spec.first),
+        .last_name = try alloc.dupe(u8, spec.last),
+        .role = role,
+        .recruited_day = gs.clock.day_index,
+    };
+    if (spec.callsign) |c| p.callsign = try alloc.dupe(u8, c);
     p.setBirthdayFromAge(gs.clock.day_index, spec.age);
 
-    // Overwrite the hire defaults with the generated experience band.
-    const alloc = gs.allocator();
+    // Set the generated experience band.
     switch (role) {
         .mekwarrior => {
             try p.skills.put(alloc, .gunnery_mek, spec.primary_skill);
@@ -65,7 +70,7 @@ pub fn hireFromSpec(gs: *GameState, spec: person_gen.GeneratedPerson) !types.Per
         .admin_command, .admin_logistics, .admin_transport, .admin_hr, .admin_finance => try p.skills.put(alloc, .admin, spec.primary_skill),
         .dropship_crew, .jumpship_crew => {},
     }
-    return id;
+    return gs.commitPerson(p);
 }
 
 /// Post a person to an HQ's staff (off any force).

@@ -377,17 +377,14 @@ pub const GameState = struct {
 
     /// Hire with default skills for the role at Regular experience.
     pub fn hirePerson(self: *GameState, first: []const u8, last: []const u8, role: person_mod.Role) !types.PersonId {
-        const id: types.PersonId = @enumFromInt(self.next_person_id);
-        self.next_person_id += 1;
-
+        const alloc = self.allocator();
         var p: person_mod.Person = .{
-            .id = id,
-            .first_name = try self.allocator().dupe(u8, first),
-            .last_name = try self.allocator().dupe(u8, last),
+            .id = @enumFromInt(0), // overwritten by commitPerson
+            .first_name = try alloc.dupe(u8, first),
+            .last_name = try alloc.dupe(u8, last),
             .role = role,
             .recruited_day = self.clock.day_index,
         };
-        const alloc = self.allocator();
         switch (role) {
             .mekwarrior => {
                 try p.skills.put(alloc, .gunnery_mek, 4);
@@ -411,7 +408,19 @@ pub const GameState = struct {
             .ba_trooper, .infantry => try p.skills.put(alloc, .small_arms, 4),
             .dropship_crew, .jumpship_crew => {},
         }
-        try self.people.put(alloc, id, p);
+        return self.commitPerson(p);
+    }
+
+    /// Put a fully prepared person on the books under the next id. The people
+    /// map is the only fallible step and is reserved before any mutation, so a
+    /// failure leaves `next_person_id` and the map untouched (rule 11).
+    pub fn commitPerson(self: *GameState, prepared: person_mod.Person) !types.PersonId {
+        const id: types.PersonId = @enumFromInt(self.next_person_id);
+        try self.people.ensureUnusedCapacity(self.allocator(), 1);
+        var p = prepared;
+        p.id = id;
+        self.people.putAssumeCapacity(id, p);
+        self.next_person_id += 1;
         return id;
     }
 
