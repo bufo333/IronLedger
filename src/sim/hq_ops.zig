@@ -385,6 +385,10 @@ pub fn queueDepotRepair(gs: *GameState, unit_id: types.UnitId) QueueError!bool {
         };
         needs_coring = !any;
     }
+    // Reserve bay-job capacity before any mutation (rule 12): the append
+    // after the takeStock loop must not fail with the hull already cored
+    // or stock already consumed.
+    try gs.bay_jobs.ensureUnusedCapacity(gs.allocator(), 1);
     const prev_wreck = u.wreck;
     if (needs_coring) u.markWrecked();
 
@@ -394,10 +398,6 @@ pub fn queueDepotRepair(gs: *GameState, unit_id: types.UnitId) QueueError!bool {
     for (u.slots.items) |s| {
         if (s.class == .structure and s.condition != .ok) needed += 1;
     }
-    // Reserve bay-job capacity before consuming stock (rule 12):
-    // the append after the takeStock loop must not fail with stock
-    // already consumed.
-    try gs.bay_jobs.ensureUnusedCapacity(gs.allocator(), 1);
     // Every component present before any is consumed (`depotShortfall` is
     // the same check the screens print).
     if (depotShortfall(gs, u) != null) {
