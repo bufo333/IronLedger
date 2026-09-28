@@ -25,7 +25,6 @@ C18 (D23-D25, D32 and D34 are closed). The order below is authoritative and
 supersedes the audit response's original delivery order.
 
 - [ ] C5 failure atomicity (rules 11-15, 17, 69), each branch adding a `FailingAllocator` digest test for its mutation pattern:
-  - [ ] C5f `execSellStock` leaves stock, funds and ledger unchanged on every failure.
   - [ ] C5g `execTrimStock` validates and reserves the complete shipment before removing stock or paying freight.
   - [ ] C5h `execHireCandidate` reserves person, board, assignment, payment and log mutations before commit.
   - [ ] C5i `execLink` reserves link, payment, throughput metadata and log mutations before commit.

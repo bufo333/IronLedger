@@ -295,9 +295,33 @@ pub fn sellStock(gs: *GameState, hq_id: types.HqId, part_key: []const u8, quanti
         if (sp.hq == hq_id and std.mem.eql(u8, sp.part_key, def.key) and have - quantity < sp.min) return error.KeepStocked;
     }
     const value = market_mod.stockSaleValue(def.key, quantity);
+
+    // ---- prepare: reserve every fallible destination ----
+    try gs.reserveLedger(1);
+    var date_buf: [10]u8 = undefined;
+    const line = try std.fmt.allocPrint(
+        gs.allocator(),
+        "{s} [sale] {d} {s} sold from {s} for {d}",
+        .{ gs.clock.date.text(&date_buf), quantity, def.key, h.name, value },
+    );
+    try gs.reserveLog(1);
+
+    // ---- commit: no fallible operation past this point ----
     _ = gs.takeStock(.{ .hq = hq_id }, def.key, quantity);
-    try gs.postTreasury(.{ .hq = hq_id }, .{ .day = gs.clock.day_index, .amount = value, .category = .unit_sale, .hq = hq_id, .note = def.key });
-    try gs.log(.market, .{ .hq = hq_id }, "[sale] {d} {s} sold from {s} for {d}", .{ quantity, def.key, h.name, value });
+    gs.ledger.transactions.appendAssumeCapacity(.{
+        .day = gs.clock.day_index,
+        .amount = value,
+        .category = .unit_sale,
+        .hq = hq_id,
+        .note = def.key,
+    });
+    h.funds += value;
+    gs.event_log.appendAssumeCapacity(.{
+        .day = gs.clock.day_index,
+        .category = .market,
+        .hq = hq_id,
+        .text = line,
+    });
 }
 
 pub fn shipComponentsHome(gs: *GameState, company: types.ForceId) !ShipComponentsResult {
@@ -605,6 +629,32 @@ test "selling warehouse stock pays the HQ and respects a keep-stocked minimum" {
     _ = try commands.execute(&gs, .{ .set_stock_policy = .{ .hq = hq, .part_key = "ammo_lrm", .min = have - 12, .target = have } });
     try std.testing.expectError(commands.Error.KeepStocked, commands.execute(&gs, .{ .sell_stock = .{ .hq = hq, .part_key = "ammo_lrm", .quantity = 5 } }));
     _ = try commands.execute(&gs, .{ .sell_stock = .{ .hq = hq, .part_key = "ammo_lrm", .quantity = 2 } });
+}
+
+test "sellStock leaves stock, funds and ledger unchanged when allocation fails" {
+    const digest = @import("digest.zig");
+    const founding = @import("founding.zig");
+
+    var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer outer.deinit();
+    var gs = GameState.init(outer.allocator(), .{ .seed = 7700 });
+    _ = try founding.createCommander(&gs, "T", .LC, .quartermaster);
+    const hq_id = gs.hqs.keys()[0];
+    try gs.addStock(.{ .hq = hq_id }, "ammo_lrm", 20);
+
+    const before = digest.stateHash(&gs);
+    const stock_before = gs.stockCount(.{ .hq = hq_id }, "ammo_lrm");
+    const funds_before = gs.hqs.getPtr(hq_id).?.funds;
+
+    // Block every further allocation so reserveLedger or allocPrint fails.
+    gs.arena.state.used_list = null;
+    gs.arena.state.free_list = null;
+    gs.arena.child_allocator = std.testing.failing_allocator;
+
+    try std.testing.expectError(error.OutOfMemory, sellStock(&gs, hq_id, "ammo_lrm", 10));
+    try std.testing.expectEqual(before, digest.stateHash(&gs));
+    try std.testing.expectEqual(stock_before, gs.stockCount(.{ .hq = hq_id }, "ammo_lrm"));
+    try std.testing.expectEqual(funds_before, gs.hqs.getPtr(hq_id).?.funds);
 }
 
 test "warehouses are finite — orders that won't fit are refused" {
