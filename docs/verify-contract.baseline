@@ -1,7 +1,0 @@
-# Broad catches (rule 79) awaiting their fix. One entry per line:
-# <path>: <the line's code, trimmed>. Each is contract debt owned by the
-# error-meaning deliverable in TODO.md: its fix either propagates the
-# error or marks a genuine best-effort site with a `// best-effort:`
-# reason, and deletes the line here. A new broad catch fails the gate.
-src/persist/store.zig: const name = st.text(1, fba.allocator()) catch continue;
-src/persist/store.zig: const name = st.text(1, fba.allocator()) catch continue;

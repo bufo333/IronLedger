@@ -199,7 +199,7 @@ pub const Store = struct {
         defer st.finalize();
         while (try st.next()) {
             var fba = std.heap.FixedBufferAllocator.init(&buf);
-            const name = st.text(1, fba.allocator()) catch continue;
+            const name = st.text(1, fba.allocator()) catch continue; // best-effort: a column name exceeding the probe buffer cannot be the target
             if (std.mem.eql(u8, name, column)) return true;
         }
         return false;
@@ -211,7 +211,7 @@ pub const Store = struct {
         defer st.finalize();
         while (try st.next()) {
             var fba = std.heap.FixedBufferAllocator.init(&buf);
-            const name = st.text(1, fba.allocator()) catch continue;
+            const name = st.text(1, fba.allocator()) catch continue; // best-effort: a column name exceeding the probe buffer cannot be the target
             if (std.mem.eql(u8, name, column)) return true;
         }
         return false;

@@ -24,9 +24,7 @@ C10, D27 and D30 into C12, D28 into C7, D29 into C15, D31 into C8, D33 into
 C18 (D23-D25, D32 and D34 are closed). The order below is authoritative and
 supersedes the audit response's original delivery order.
 
-- [ ] C2 errors keep their meaning (rules 4, 10, 18, 79), in this order:
-  - [ ] C2d player-visible errors: replace every logged `@errorName` with the owning typed sentence, classify every remaining baseline entry, and delete the empty baseline file and C2 entry.
-- [ ] C16 scratch memory is scratch (rule 78), after C2 so each allocator is chosen once:
+- [ ] C16 scratch memory is scratch (rule 78):
   - [ ] C16a child arenas in tick, commands and field load-out are rooted in operation scratch and reset at the operation boundary.
   - [ ] C16b local battle, personnel, contract-control and command lists use operation scratch or an actually reclaiming allocator; an allocator-growth test proves repeated operations do not grow the campaign arena. Delete C16.
 - [ ] C3 money and assets always move with their record (rules 1, 13, 19, 44), one regression-first branch per line:

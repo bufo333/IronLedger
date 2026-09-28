@@ -15,15 +15,6 @@ Owner of every entry: the project owner.
 
 ---
 
-### C2. Errors lose their meaning or are swallowed
-
-- **Rules:** 4, 10, 18, 79.
-- **Why not yet:** The remaining site needs its `@errorName` replaced by an owning typed sentence.
-- **Scope:** every entry in `docs/verify-contract.baseline` (now only the 2 `store.zig` entries, owned by a later deliverable, not C2).
-  - `@errorName` written into player-visible log text: `tick.zig:140`, `230`, `contract_events.zig:690`, `medical.zig:333`.
-- **Removal:** C2.
-- **Guard:** `verify-contract.sh` fails on a broad catch missing from the baseline, and on a baseline entry that no longer exists, so the baseline can only shrink.
-
 ### C3. Money and assets change without a matching record
 
 - **Rules:** 1, 13, 19, 44.

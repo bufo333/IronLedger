@@ -695,7 +695,12 @@ fn letGo(gs: *GameState, person_id: types.PersonId, replace: bool) !void {
     for (gs.candidates.items, 0..) |cand, i| if (cand.spec.role == p.role) {
         const r = @import("commands.zig").execute(gs, .{ .hire_candidate = i }) catch |err| {
             if (err == error.OutOfMemory) return error.OutOfMemory;
-            try gs.log(.rotation, .{ .company = company }, "[turnover] no replacement hired: {s}", .{@errorName(err)});
+            const reason: []const u8 = switch (err) {
+                error.NoSuchCandidate => "no matching candidate on the hiring halls",
+                error.InsufficientTreasury => "the outfit cannot cover the signing bonus",
+                else => "the hire could not be completed",
+            };
+            try gs.log(.rotation, .{ .company = company }, "[turnover] no replacement hired: {s}", .{reason});
             return;
         };
         if (gs.person(r.hired)) |np| {
@@ -1220,6 +1225,23 @@ test "letGo propagates OutOfMemory from the replacement hire and hires no one" {
     try std.testing.expectEqual(candidates_before, gs.candidates.items.len);
     try std.testing.expectEqual(people_before, gs.people.count());
     try std.testing.expectEqual(funds_before, gs.funds);
+}
+
+test "letGo logs a human-readable reason when the replacement hire is refused, never the raw error name" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1225 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
+    const pilot = try gs.hirePerson("A", "Departing", .mekwarrior);
+    // A replacement candidate exists in the departing pilot's role, but
+    // the signing bonus exceeds the outfit's treasury.
+    try gs.candidates.append(gs.allocator(), .{ .hq = gs.hqs.keys()[0], .spec = @import("../gen/person_gen.zig").generate(&gs.rng, .market, .mekwarrior), .asking_bonus = 500_000, .listed_day = 0, .expires_day = 400 });
+    gs.funds = 0;
+
+    try letGo(&gs, pilot, true);
+
+    const last = gs.event_log.items[gs.event_log.items.len - 1].text;
+    try std.testing.expect(std.mem.indexOf(u8, last, "the outfit cannot cover the signing bonus") != null);
+    try std.testing.expect(std.mem.indexOf(u8, last, "InsufficientTreasury") == null);
 }
 
 test "notice is a decision — a raise keeps them, letting go vacates the seat, replacing hires from the hall" {

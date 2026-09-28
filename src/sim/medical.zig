@@ -337,8 +337,13 @@ pub fn runDailyTraining(gs: *GameState) !void {
         if (gs.clock.day_index < t.done_day) continue;
         p.training = null;
         person_mod.spendXpToImprove(p, t.skill) catch |err| {
+            const reason: []const u8 = switch (err) {
+                error.NotTrained => "that skill cannot be trained",
+                error.InsufficientXp => "not enough banked XP for that",
+                error.AlreadyMastered => "that skill is already mastered",
+            };
             try gs.log(.training, .{ .company = gs.companyOf(p.assigned_force) }, "[training] {s} washed out of {s} training ({s})", .{
-                try p.fullName(gs.allocator()), @tagName(t.skill), @errorName(err),
+                try p.fullName(gs.allocator()), @tagName(t.skill), reason,
             });
             continue;
         };
@@ -1023,6 +1028,24 @@ test "training: HQ-gated, takes a month, improves the skill" {
     try std.testing.expectError(commands.Error.InsufficientXp, commands.execute(&gs, .{
         .train = .{ .person = id, .skill = .gunnery_mek },
     }));
+}
+
+test "training washout logs a readable sentence, not the raw error name" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 88 });
+    defer gs.deinit();
+    const id = try gs.hirePerson("Kai", "Allard", .mekwarrior);
+    gs.person(id).?.xp = 50;
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .FS, .profession = .line_officer } });
+    _ = try commands.execute(&gs, .{ .train = .{ .person = id, .skill = .gunnery_mek } });
+    // XP is drained after enrollment, before the program completes: the
+    // day it lands, spendXpToImprove refuses with InsufficientXp.
+    gs.person(id).?.xp = 0;
+    _ = try commands.execute(&gs, .{ .advance_days = 31 });
+
+    const last = gs.event_log.items[gs.event_log.items.len - 1].text;
+    try std.testing.expect(std.mem.indexOf(u8, last, "washed out") != null);
+    try std.testing.expect(std.mem.indexOf(u8, last, "not enough banked XP for that") != null);
+    try std.testing.expect(std.mem.indexOf(u8, last, "InsufficientXp") == null);
 }
 
 test "training uses the trainee's home HQ, not any HQ with a training ground" {

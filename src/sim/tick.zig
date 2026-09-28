@@ -162,7 +162,15 @@ fn runPolicies(gs: *GameState) !void {
             }
             _ = commands.execute(gs, .{ .ship_stock = .{ .part_key = line.key, .quantity = qty, .from = .{ .hq = home }, .to = site } }) catch |err| {
                 if (err == error.OutOfMemory) return error.OutOfMemory;
-                if (gs.clock.day_index % 7 == 0) try gs.log(.delivery, .{ .company = sp.company, .hq = home }, "[supply] resupply policy could not ship {s} to {s}: {s}", .{ line.key, f.name, @errorName(err) });
+                const reason: []const u8 = switch (err) {
+                    error.InsufficientStock => "not enough stock at the warehouse",
+                    error.StorageFull => "the destination cannot hold that tonnage",
+                    error.InsufficientTreasury => "the shipping treasury cannot cover the freight",
+                    error.NoRoute => "no supply route links those sites",
+                    error.ThroughputExceeded => "the supply line is at capacity this week",
+                    else => "the shipment could not be completed",
+                };
+                if (gs.clock.day_index % 7 == 0) try gs.log(.delivery, .{ .company = sp.company, .hq = home }, "[supply] resupply policy could not ship {s} to {s}: {s}", .{ line.key, f.name, reason });
                 continue;
             };
             try gs.log(.delivery, .{ .company = sp.company, .hq = home }, "[supply] resupply policy ships {d}t of {s} to {s} ({d}t on hand + {d}t inbound, floor {d}t, target {d}t, {d}-day line)", .{ qty, line.key, f.name, on_hand, inbound, line.floor, line.target, transit });
@@ -251,11 +259,38 @@ fn runStockPolicies(gs: *GameState) !void {
             .{ .order_part = .{ .part_key = sp.part_key, .quantity = want, .dest = .{ .hq = sp.hq } } };
         _ = commands.execute(gs, cmd) catch |err| {
             if (err == error.OutOfMemory) return error.OutOfMemory;
-            if (today % 7 == 0) try gs.log(.market, .{ .hq = sp.hq }, "[stock] policy could not restock {s} at {s}: {s}", .{ sp.part_key, hq.name, @errorName(err) });
+            const reason: []const u8 = switch (err) {
+                error.InsufficientTreasury => "the HQ treasury cannot cover that order",
+                error.StorageFull => "the destination cannot hold that tonnage",
+                error.NoBay => "no mek bay at that HQ",
+                error.BayTooSmall => "the bay cannot build that assembly",
+                error.NotAComponent => "that part is not a structural component",
+                error.NoRoute => "no supply route to the destination",
+                error.ThroughputExceeded => "the supply line is at capacity this week",
+                else => "the restock could not be completed",
+            };
+            if (today % 7 == 0) try gs.log(.market, .{ .hq = sp.hq }, "[stock] policy could not restock {s} at {s}: {s}", .{ sp.part_key, hq.name, reason });
             continue;
         };
         try gs.log(.market, .{ .hq = sp.hq }, "[stock] policy {s} {d} {s} for {s} ({d} on hand, keep {d}-{d})", .{ if (fabricate) "fabricates" else "orders", want, sp.part_key, hq.name, have, sp.min, sp.target });
     }
+}
+
+test "stock policy failure logs a readable sentence, not the raw error name" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 4004 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    const hq = gs.hqs.keys()[0];
+    // Fill the level-1 warehouse (200t) with a filler line so an mlas
+    // order — a weapon, never fabricated — has nowhere to land.
+    try gs.addStock(.{ .hq = hq }, "structure", 200);
+    _ = try commands.execute(&gs, .{ .set_stock_policy = .{ .hq = hq, .part_key = "mlas", .min = 1, .target = 1 } });
+
+    try runStockPolicies(&gs);
+
+    const last = gs.event_log.items[gs.event_log.items.len - 1].text;
+    try std.testing.expect(std.mem.indexOf(u8, last, "the destination cannot hold") != null);
+    try std.testing.expect(std.mem.indexOf(u8, last, "StorageFull") == null);
 }
 
 /// Training lances (MekHQ lance role): held out of engagements, and their
