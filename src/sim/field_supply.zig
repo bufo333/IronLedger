@@ -459,7 +459,7 @@ test "trim_stock propagates OutOfMemory and moves nothing" {
     const funds_before = gs.funds;
 
     // Discard the arena's spare headroom and fail every further allocation
-    // (calibrated: 3000 bytes fails inside `trimStock`'s own internal
+    // (calibrated: 1500 bytes fails inside `trimStock`'s own internal
     // `plan()` call, verified against a stack trace — before it ever
     // touches stock): the refusal must surface as OutOfMemory and send
     // nothing home.
