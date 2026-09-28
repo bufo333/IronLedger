@@ -405,8 +405,11 @@ pub fn setSupplyPolicy(gs: *GameState, company: types.ForceId, min_days: u16, to
 pub fn trimStock(gs: *GameState, company: types.ForceId) !u32 {
     const f = gs.force(company) orelse return error.UnknownForce;
     if (f.echelon != .company) return error.NotACompany;
+
+    // ---- prepare: scratch arena for the plan and move list ----
     var arena = std.heap.ArenaAllocator.init(gs.scratch());
     defer arena.deinit();
+    const scratch_allocator = arena.allocator();
     var min_days: u32 = 14;
     var battles: u8 = 0;
     for (gs.supply_policies.items) |sp| if (sp.company == company) {
@@ -414,30 +417,53 @@ pub fn trimStock(gs: *GameState, company: types.ForceId) !u32 {
         battles = sp.ammo_battles;
     };
     const transit = treasury.courierEtaDays(gs, .{ .company = company });
-    const p = try plan(arena.allocator(), gs, company, transit, min_days, battles);
+    const p = try plan(scratch_allocator, gs, company, transit, min_days, battles);
     const site: types.Site = .{ .company = company };
-    var moved: u32 = 0;
+
     // Snapshot the keys first: sending home edits the stock map.
-    var keys: std.ArrayListUnmanaged([]const u8) = .empty;
+    const Move = struct { key: []const u8, excess: u32, line: []const u8 };
+    var moves: std.ArrayListUnmanaged(Move) = .empty;
+    var moved: u32 = 0;
     if (gs.stockMap(site)) |m| {
         var it = m.iterator();
-        while (it.next()) |e| try keys.append(arena.allocator(), e.key_ptr.*);
+        while (it.next()) |e| {
+            const key = e.key_ptr.*;
+            const have = e.value_ptr.*;
+            if (have == 0) continue;
+            var target: ?u32 = null;
+            for (p.lines) |l| if (std.mem.eql(u8, l.key, key)) {
+                target = l.target;
+            };
+            const def = part_mod.find(key);
+            const consumable = part_mod.isComponent(key) or (def != null and (def.?.mount == .ammo or def.?.mount == .none));
+            const excess: u32 = if (target) |t| have -| t else if (consumable) have else 0;
+            if (excess == 0) continue;
+            var date_buf: [10]u8 = undefined;
+            const line = try std.fmt.allocPrint(gs.allocator(), "{s} [supply] {s} returns {d} {s} to the home HQ ({s})", .{
+                gs.clock.date.text(&date_buf),
+                f.name,
+                excess,
+                key,
+                if (target != null) "over the plan's target" else "no line in the plan",
+            });
+            try moves.append(scratch_allocator, .{ .key = key, .excess = excess, .line = line });
+            moved += excess * part_mod.tons(key);
+        }
     }
-    for (keys.items) |key| {
-        const have = gs.stockCount(site, key);
-        if (have == 0) continue;
-        var target: ?u32 = null;
-        for (p.lines) |l| if (std.mem.eql(u8, l.key, key)) {
-            target = l.target;
-        };
-        const def = part_mod.find(key);
-        const consumable = part_mod.isComponent(key) or (def != null and (def.?.mount == .ammo or def.?.mount == .none));
-        const excess: u32 = if (target) |t| have -| t else if (consumable) have else 0;
-        if (excess == 0) continue;
-        _ = gs.takeStock(site, key, excess);
-        try sites.sendHome(gs, company, key, excess);
-        moved += excess * part_mod.tons(key);
-        try gs.log(.delivery, .{ .company = company }, "[supply] {s} returns {d} {s} to the home HQ ({s})", .{ f.name, excess, key, if (target != null) "over the plan's target" else "no line in the plan" });
+    // Reserve all fallible destinations before the first mutation (rule 12).
+    try sites.reserveSendHome(gs, company, moves.items.len);
+    try gs.reserveLog(moves.items.len);
+
+    // ---- commit: no fallible operation past this point ----
+    for (moves.items) |m| {
+        std.debug.assert(gs.takeStock(site, m.key, m.excess));
+        sites.sendHomeAssumeCapacity(gs, company, m.key, m.excess);
+        gs.event_log.appendAssumeCapacity(.{
+            .day = gs.clock.day_index,
+            .category = .delivery,
+            .company = company,
+            .text = m.line,
+        });
     }
     return moved;
 }
@@ -474,6 +500,40 @@ test "trim_stock propagates OutOfMemory and moves nothing" {
     try std.testing.expectEqual(comp_arm_before, gs.stockCount(site, "comp_arm"));
     try std.testing.expectEqual(orders_before, gs.part_orders.items.len);
     try std.testing.expectEqual(funds_before, gs.funds);
+}
+
+test "trim_stock is atomic when any allocation fails" {
+    const digest = @import("digest.zig");
+    var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer outer.deinit();
+    var gs = GameState.init(outer.allocator(), .{ .seed = 2025 });
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "E", .origin = .CC, .profession = .paymaster } });
+    const co = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
+    const site: types.Site = .{ .company = co };
+    _ = try commands.execute(&gs, .{ .accept_contract = .{ .offer_index = 0, .company = co } });
+    _ = gs.takeStock(site, "provisions", gs.stockCount(site, "provisions"));
+    try gs.addStock(site, "ammo_lrm", 30);
+    try gs.addStock(site, "ammo_ac20", 3);
+    try gs.addStock(site, "comp_arm", 1);
+
+    const before = digest.stateHash(&gs);
+
+    var i: usize = 0;
+    while (true) : (i += 1) {
+        gs.arena.state.used_list = null;
+        gs.arena.state.free_list = null;
+        var failing = std.testing.FailingAllocator.init(outer.allocator(), .{ .fail_index = i });
+        gs.arena.child_allocator = failing.allocator();
+
+        if (trimStock(&gs, co)) |_| {
+            // Success: the state must have changed (work happened).
+            try std.testing.expect(digest.stateHash(&gs) != before);
+            break;
+        } else |err| {
+            try std.testing.expectEqual(error.OutOfMemory, err);
+            try std.testing.expectEqual(before, digest.stateHash(&gs));
+        }
+    }
 }
 
 test "trim_stock returns excess and unplanned consumables home, keeps spares" {

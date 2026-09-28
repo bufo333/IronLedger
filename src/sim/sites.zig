@@ -100,20 +100,32 @@ pub fn consumeStockBatch(gs: *GameState, site: types.Site, batch: *const std.Str
     }
 }
 
+/// Reserves capacity for n sendHome operations. Call sendHomeAssumeCapacity
+/// after this succeeds (rule 12, ARCH §4).
+pub fn reserveSendHome(gs: *GameState, company: types.ForceId, n: usize) !void {
+    if (n == 0) return;
+    const home = gs.homeHqFor(company);
+    if (home == .none) {
+        const map = gs.stockMap(gs.defaultSite()) orelse return;
+        try map.ensureUnusedCapacity(gs.allocator(), n);
+    } else {
+        try gs.part_orders.ensureUnusedCapacity(gs.allocator(), n);
+    }
+}
+
 /// Crate goods a company picked up in the field (salvaged structure,
-/// windfalls it cannot use out there) for the next convoy home: they
-/// arrive at the home warehouse after the map transit, no freight — the
-/// salvage crews haul them. Structural work is depot work.
-pub fn sendHome(gs: *GameState, company: types.ForceId, key: []const u8, qty: u32) !void {
+/// windfalls it cannot use out there) for the next convoy home, without
+/// allocating. `reserveSendHome` must have been called first (rule 12).
+pub fn sendHomeAssumeCapacity(gs: *GameState, company: types.ForceId, key: []const u8, qty: u32) void {
     if (qty == 0) return;
     const home = gs.homeHqFor(company);
     if (home == .none) {
         // No HQ yet (tests, pre-commander): straight into the outfit depot.
-        try gs.addStock(gs.defaultSite(), key, qty);
+        gs.addStock(gs.defaultSite(), key, qty) catch unreachable;
         return;
     }
     const days = @max(3, treasury.courierEtaDays(gs, .{ .company = company }));
-    try gs.part_orders.append(gs.allocator(), .{
+    gs.part_orders.appendAssumeCapacity(.{
         .part_key = key,
         .quantity = qty,
         .dest = .{ .hq = home },
@@ -122,6 +134,16 @@ pub fn sendHome(gs: *GameState, company: types.ForceId, key: []const u8, qty: u3
         .cost = 0,
         .status = .in_transit,
     });
+}
+
+/// Crate goods a company picked up in the field (salvaged structure,
+/// windfalls it cannot use out there) for the next convoy home: they
+/// arrive at the home warehouse after the map transit, no freight — the
+/// salvage crews haul them. Structural work is depot work.
+pub fn sendHome(gs: *GameState, company: types.ForceId, key: []const u8, qty: u32) !void {
+    if (qty == 0) return;
+    try reserveSendHome(gs, company, 1);
+    sendHomeAssumeCapacity(gs, company, key, qty);
 }
 
 /// The planet a site physically sits on.
