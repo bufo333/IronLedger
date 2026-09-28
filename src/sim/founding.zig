@@ -185,7 +185,7 @@ test "createCommander yields the same commander, HQ, staff and stock regardless 
 
     _ = try createCommander(&gs1, "T", .LC, .quartermaster);
 
-    // Reproduce what execCreateCommander does: set the year, then found.
+    // Set the year first to prove createCommander is clock-independent.
     gs2.clock.date.year = 3025;
     _ = try createCommander(&gs2, "T", .LC, .quartermaster);
 
