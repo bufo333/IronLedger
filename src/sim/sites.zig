@@ -366,6 +366,12 @@ pub fn orderPart(gs: *GameState, part_key: []const u8, quantity: u32, dest_opt: 
     const logi = hq_ops.hqStaff(gs, hq_id, .admin_logistics);
     const admin_bonus: i32 = if (logi.count == 0) -2 else 5 - @as(i32, logi.best_skill);
     lead_days = @max(3, lead_days -| @min(4, logi.count / 2));
+    // The cost is known before the roll: check funds first so an
+    // expected refusal does not consume the acquisition stream (13).
+    var total = types.applyBp(def.cost * quantity, cost_mult);
+    total = types.applyBp(total, commander_mod.costMultBp(gs.commander, .freight));
+    if (dest == .company) total += onward.cost;
+    if (gs.treasuryBalance(.{ .hq = hq_id }) < total) return error.InsufficientTreasury;
     // Sourcing: the part's availability code, the world's shelves,
     // the HQ's comms reach.
     const src = part_mod.sourcing(def, faction_mod.isPeriphery(world.faction), hq.effectiveFacilityLevel(.comms));
@@ -388,11 +394,6 @@ pub fn orderPart(gs: *GameState, part_key: []const u8, quantity: u32, dest_opt: 
         return .{ .sourced = false };
     }
 
-    // Orders placed at the HQ are paid from the HQ's treasury,
-    // onward freight to the field included.
-    var total = types.applyBp(def.cost * quantity, cost_mult);
-    total = types.applyBp(total, commander_mod.costMultBp(gs.commander, .freight));
-    if (dest == .company) total += onward.cost;
     try treasury.debit(gs, .{ .hq = hq_id }, .{
         .day = gs.clock.day_index,
         .amount = -total,
@@ -526,6 +527,21 @@ test "order_part is refused over the site's free tons and accepted at the limit"
         if (std.mem.eql(u8, o.part_key, "provisions") and o.quantity == free and std.meta.eql(o.dest, site)) found = true;
     }
     try std.testing.expect(found);
+}
+
+test "order_part refused for insufficient funds does not consume RNG" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 7 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
+    gs.hqs.values()[0].funds = 0;
+
+    const before = gs.rng.encode(.acquisition);
+    try std.testing.expectError(commands.Error.InsufficientTreasury, commands.execute(&gs, .{
+        .order_part = .{ .part_key = "mlas", .quantity = 1 },
+    }));
+    try std.testing.expectEqual(before, gs.rng.encode(.acquisition));
+    try std.testing.expectEqual(@as(i64, 0), gs.hqs.values()[0].funds);
+    try std.testing.expectEqual(@as(usize, 0), gs.part_orders.items.len);
 }
 
 test "a stock policy reorders a warehouse line to its target, once, and can be removed" {
