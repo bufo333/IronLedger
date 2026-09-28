@@ -974,7 +974,8 @@ pub fn depot(gs: *GameState, unit_id: types.UnitId) !types.HqId {
         error.NoBay => error.NoBay,
         error.UnknownUnit => error.UnknownUnit,
         error.WrittenOff => error.WrittenOff,
-        else => error.NoBay,
+        error.MissingComponents => error.MissingComponents,
+        error.OutOfMemory => error.OutOfMemory,
     };
     if (!queued) return error.MissingComponents;
     return depotHqFor(gs, u);
@@ -1040,6 +1041,56 @@ pub fn execCoverShortfall(gs: *GameState, c: @FieldType(Command, "cover_shortfal
         return res;
     }
     return commands.execute(gs, .{ .order_part = .{ .part_key = c.part_key, .quantity = c.quantity, .dest = .{ .hq = c.hq } } });
+}
+
+test "fabricate propagates OutOfMemory and changes nothing" {
+    // `outer` owns every byte the campaign arena ever hands out, so
+    // detaching the arena's own headroom tracking below cannot leak.
+    var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer outer.deinit();
+    var gs = GameState.init(outer.allocator(), .{ .seed = 55 });
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
+    const hq_id = gs.hqs.keys()[0];
+    const funds_before = gs.hqs.values()[0].funds;
+    const jobs_before = gs.bay_jobs.items.len;
+    const stock_before = gs.stockCount(.{ .hq = hq_id }, "comp_leg");
+
+    // Discard the arena's spare headroom and fail every further allocation
+    // (calibrated: 500 bytes fails at `fabricate`'s very first step,
+    // `bay_jobs.ensureUnusedCapacity`, verified against a stack trace):
+    // the refusal must surface as OutOfMemory before the debit or the bay
+    // job queue it reserves capacity for, not queue a job or spend funds.
+    gs.arena.state.used_list = null;
+    gs.arena.state.free_list = null;
+    const buf = try std.testing.allocator.alloc(u8, 500);
+    defer std.testing.allocator.free(buf);
+    var fba = std.heap.FixedBufferAllocator.init(buf);
+    gs.arena.child_allocator = fba.allocator();
+
+    try std.testing.expectError(error.OutOfMemory, commands.execute(&gs, .{ .fabricate = .{ .hq = hq_id, .part_key = "comp_leg", .quantity = 3 } }));
+    try std.testing.expectEqual(funds_before, gs.hqs.values()[0].funds);
+    try std.testing.expectEqual(jobs_before, gs.bay_jobs.items.len);
+    try std.testing.expectEqual(stock_before, gs.stockCount(.{ .hq = hq_id }, "comp_leg"));
+}
+
+test "depot propagates OutOfMemory instead of mapping it to NoBay" {
+    // `outer` owns every byte the campaign arena ever hands out, so
+    // detaching the arena's own headroom tracking below cannot leak.
+    var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer outer.deinit();
+    var gs = GameState.init(outer.allocator(), .{ .seed = 4001 });
+    _ = try founding.createCommander(&gs, "T", .LC, .chief_engineer);
+    const uid = try gs.addUnit("SHD-2H");
+    const u = gs.unit(uid).?;
+    u.slots.items[1].condition = .destroyed; // ct.structure -> comp_ct, seeded on the shelf
+
+    // Discard the arena's spare headroom and fail every further allocation:
+    // queueDepotRepair's bay-job append must surface as OutOfMemory, not NoBay.
+    gs.arena.state.used_list = null;
+    gs.arena.state.free_list = null;
+    gs.arena.child_allocator = std.testing.failing_allocator;
+
+    try std.testing.expectError(error.OutOfMemory, depot(&gs, uid));
 }
 
 test "repair odds favour the sharper tech and the better hull; the parts sum to 100" {

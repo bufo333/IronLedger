@@ -25,9 +25,6 @@ C18 (D23-D25, D32 and D34 are closed). The order below is authoritative and
 supersedes the audit response's original delivery order.
 
 - [ ] C2 errors keep their meaning (rules 4, 10, 18, 79), in this order:
-  - [ ] C2a arithmetic and pure-query fallbacks: replace impossible `divCeil` catches with checked invariants; propagate allocation/query failures in domain, field-supply, checklist, rating and market code; delete the corresponding baseline lines.
-  - [ ] C2b REPL and TUI parsing/results: typed parse refusals replace zero/null sentinels; query failures reach the application error presenter; no successful fallback text is printed after a failed query.
-  - [ ] C2c automation and media/path best effort: tick/event automation propagates or records typed failures every time; `execDepot` and PNG preserve their real errors; each genuinely optional music/path/terminal cleanup catch gets a specific `// best-effort:` reason.
   - [ ] C2d player-visible errors: replace every logged `@errorName` with the owning typed sentence, classify every remaining baseline entry, and delete the empty baseline file and C2 entry.
 - [ ] C16 scratch memory is scratch (rule 78), after C2 so each allocator is chosen once:
   - [ ] C16a child arenas in tick, commands and field load-out are rooted in operation scratch and reset at the operation boundary.

@@ -18,16 +18,8 @@ Owner of every entry: the project owner.
 ### C2. Errors lose their meaning or are swallowed
 
 - **Rules:** 4, 10, 18, 79.
-- **Why not yet:** Each of the 23 sites needs to be either propagated or given a real best-effort reason, and that has to be decided one site at a time.
-- **Scope:** every entry in `docs/verify-contract.baseline`. The ones that already change outcomes:
-  - Hidden warnings and results:
-    - `tick.zig:148` (`trim_stock catch Result{}`)
-  - Errors under the wrong name:
-    - `execDepot` maps `OutOfMemory` and `MissingComponents` to `NoBay` (`commands.zig:1343-1349`).
-    - `png.zig:91` maps `OutOfMemory` to `Corrupt`.
-  - Automation that swallows failures:
-    - `tick.zig:139`, `229` (ship and stock-policy failures are logged only weekly)
-    - `contract_events.zig:689` (`hire_candidate`)
+- **Why not yet:** The remaining site needs its `@errorName` replaced by an owning typed sentence.
+- **Scope:** every entry in `docs/verify-contract.baseline` (now only the 2 `store.zig` entries, owned by a later deliverable, not C2).
   - `@errorName` written into player-visible log text: `tick.zig:140`, `230`, `contract_events.zig:690`, `medical.zig:333`.
 - **Removal:** C2.
 - **Guard:** `verify-contract.sh` fails on a broad catch missing from the baseline, and on a baseline entry that no longer exists, so the baseline can only shrink.

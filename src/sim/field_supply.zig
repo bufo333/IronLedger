@@ -442,6 +442,40 @@ pub fn trimStock(gs: *GameState, company: types.ForceId) !u32 {
     return moved;
 }
 
+test "trim_stock propagates OutOfMemory and moves nothing" {
+    // `outer` owns every byte the campaign arena ever hands out, so
+    // detaching the arena's own headroom tracking below cannot leak.
+    var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer outer.deinit();
+    var gs = GameState.init(outer.allocator(), .{ .seed = 2025 });
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "E", .origin = .CC, .profession = .paymaster } });
+    const co = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
+    const site: types.Site = .{ .company = co };
+    _ = try commands.execute(&gs, .{ .accept_contract = .{ .offer_index = 0, .company = co } });
+    _ = gs.takeStock(site, "provisions", gs.stockCount(site, "provisions"));
+    try gs.addStock(site, "comp_arm", 1);
+    const comp_arm_before = gs.stockCount(site, "comp_arm");
+    const orders_before = gs.part_orders.items.len;
+    const funds_before = gs.funds;
+
+    // Discard the arena's spare headroom and fail every further allocation
+    // (calibrated: 3000 bytes fails inside `trimStock`'s own internal
+    // `plan()` call, verified against a stack trace — before it ever
+    // touches stock): the refusal must surface as OutOfMemory and send
+    // nothing home.
+    gs.arena.state.used_list = null;
+    gs.arena.state.free_list = null;
+    const buf = try std.testing.allocator.alloc(u8, 3000);
+    defer std.testing.allocator.free(buf);
+    var fba = std.heap.FixedBufferAllocator.init(buf);
+    gs.arena.child_allocator = fba.allocator();
+
+    try std.testing.expectError(error.OutOfMemory, commands.execute(&gs, .{ .trim_stock = co }));
+    try std.testing.expectEqual(comp_arm_before, gs.stockCount(site, "comp_arm"));
+    try std.testing.expectEqual(orders_before, gs.part_orders.items.len);
+    try std.testing.expectEqual(funds_before, gs.funds);
+}
+
 test "trim_stock returns excess and unplanned consumables home, keeps spares" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 2025 });
     defer gs.deinit();

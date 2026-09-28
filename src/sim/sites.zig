@@ -665,6 +665,41 @@ test "gear on any hull is field work — replace orders the spare to its site, t
     try std.testing.expectError(commands.Error.NothingToReplace, commands.execute(&gs, .{ .replace_gear = uid }));
 }
 
+test "ship_stock propagates OutOfMemory and moves nothing" {
+    // `outer` owns every byte the campaign arena ever hands out, so
+    // detaching the arena's own headroom tracking below cannot leak.
+    const founding = @import("founding.zig");
+    var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer outer.deinit();
+    var gs = GameState.init(outer.allocator(), .{ .seed = 7501 });
+    _ = try founding.createCommander(&gs, "T", .LC, .quartermaster);
+    const home = gs.hqs.keys()[0];
+    const far = try founding.foundHq(&gs, "Frontier", .field, "alkaid");
+    try gs.hq_links.append(gs.allocator(), .{ .a = home, .b = far, .level = 1, .established_day = 0 });
+    try gs.addStock(.{ .hq = far }, "armor", 10);
+    gs.hqs.getPtr(far).?.funds = 10_000_000;
+    const funds_before = gs.hqs.getPtr(far).?.funds;
+    const stock_before = gs.stockCount(.{ .hq = far }, "armor");
+    const orders_before = gs.part_orders.items.len;
+
+    // Discard the arena's spare headroom and fail every further allocation
+    // (calibrated: 950 bytes fails inside `freightQuote`'s own
+    // `routeBetween` call, verified against a stack trace — before the
+    // freight debit, the stock move or the part-order log): the refusal
+    // must surface as OutOfMemory and move nothing.
+    gs.arena.state.used_list = null;
+    gs.arena.state.free_list = null;
+    const buf = try std.testing.allocator.alloc(u8, 950);
+    defer std.testing.allocator.free(buf);
+    var fba = std.heap.FixedBufferAllocator.init(buf);
+    gs.arena.child_allocator = fba.allocator();
+
+    try std.testing.expectError(error.OutOfMemory, commands.execute(&gs, .{ .ship_stock = .{ .part_key = "armor", .quantity = 10, .from = .{ .hq = far }, .to = .{ .hq = home } } }));
+    try std.testing.expectEqual(funds_before, gs.hqs.getPtr(far).?.funds);
+    try std.testing.expectEqual(stock_before, gs.stockCount(.{ .hq = far }, "armor"));
+    try std.testing.expectEqual(orders_before, gs.part_orders.items.len);
+}
+
 test "a shipment the payer cannot afford uses no link capacity" {
     const founding = @import("founding.zig");
     var gs = GameState.init(std.testing.allocator, .{ .seed = 7501 });

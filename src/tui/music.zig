@@ -99,6 +99,7 @@ pub const Player = struct {
         std.mem.sort([]const u8, subdirs.items, {}, lessThan);
         for (subdirs.items) |sub| {
             const sub_path = try std.fmt.allocPrint(al, "{s}/{s}", .{ dir_path, sub });
+            // best-effort: an unreadable soundtrack sub-directory is skipped.
             var sd = std.Io.Dir.cwd().openDir(self.io, sub_path, .{ .iterate = true }) catch continue;
             defer sd.close(self.io);
             var names: std.ArrayListUnmanaged([]const u8) = .empty;
@@ -128,6 +129,7 @@ pub const Player = struct {
             var it = std.mem.tokenizeScalar(u8, path, ':');
             while (it.next()) |dir| {
                 var buf: [512]u8 = undefined;
+                // best-effort: a PATH entry too long for the probe buffer is skipped.
                 const full = std.fmt.bufPrintZ(&buf, "{s}/{s}", .{ dir, cmd }) catch continue;
                 if (std.c.access(full, 1) == 0) return cmd; // X_OK
             }

@@ -694,6 +694,7 @@ fn letGo(gs: *GameState, person_id: types.PersonId, replace: bool) !void {
     if (!replace) return;
     for (gs.candidates.items, 0..) |cand, i| if (cand.spec.role == p.role) {
         const r = @import("commands.zig").execute(gs, .{ .hire_candidate = i }) catch |err| {
+            if (err == error.OutOfMemory) return error.OutOfMemory;
             try gs.log(.rotation, .{ .company = company }, "[turnover] no replacement hired: {s}", .{@errorName(err)});
             return;
         };

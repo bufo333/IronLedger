@@ -118,7 +118,9 @@ pub fn autoAssign(gs: *GameState, company: types.ForceId) !u32 {
                 if (gs.companyOf(p.assigned_force) != company and p.assigned_force != .none) continue;
                 if (gs.pilotSeat(p.id) != .none) continue;
                 if (pilot_spent and p.isUnfit()) continue; // no better off
-                assignSlot(gs, u.id, .pilot, p.id) catch continue;
+                assignSlot(gs, u.id, .pilot, p.id) catch |err| switch (err) {
+                    error.UnknownUnit, error.UnknownPerson, error.WrongRole, error.Unavailable, error.NoTechSlot, error.PersonAway => continue,
+                };
                 found = true;
                 break;
             }

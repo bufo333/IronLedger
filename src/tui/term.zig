@@ -171,8 +171,10 @@ pub const Term = struct {
     fn fill(self: *Term, timeout_ms: i32) bool {
         if (self.pending_len > 0) return true;
         var fds = [_]posix.pollfd{.{ .fd = self.in_fd, .events = posix.POLL.IN, .revents = 0 }};
+        // best-effort: a poll failure means no input is ready.
         const n = posix.poll(&fds, timeout_ms) catch return false;
         if (n == 0) return false;
+        // best-effort: a read failure means no input arrived.
         const got = posix.read(self.in_fd, &self.pending) catch return false;
         self.pending_len = got;
         return got > 0;
@@ -202,7 +204,9 @@ pub const Term = struct {
 
     /// Ask the terminal a question and collect its reply for a short while.
     pub fn probe(self: *Term, query: []const u8, buf: []u8, timeout_ms: i32) usize {
+        // best-effort: a probe that cannot be sent returns no reply.
         self.out.writeAll(query) catch return 0;
+        // best-effort: a probe that cannot be flushed returns no reply.
         self.out.flush() catch return 0;
         return self.readRaw(buf, timeout_ms);
     }

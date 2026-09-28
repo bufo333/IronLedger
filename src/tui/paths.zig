@@ -51,6 +51,7 @@ fn rootCandidates(al: std.mem.Allocator, exe_dir: ?[]const u8, override: ?[]cons
 }
 
 fn isDir(io: std.Io, path: []const u8) bool {
+    // best-effort: an unopenable path is not a directory.
     var dir = std.Io.Dir.cwd().openDir(io, path, .{}) catch return false;
     dir.close(io);
     return true;
@@ -60,10 +61,12 @@ fn isDir(io: std.Io, path: []const u8) bool {
 /// that outlives the app). Failures are not fatal: an empty `Roots` means the
 /// client runs without a soundtrack or imported pictures.
 pub fn resolve(io: std.Io, al: std.mem.Allocator, env: *const std.process.Environ.Map, override: ?[]const u8) Roots {
+    // best-effort: asset roots are optional; an empty Roots means no soundtrack or logos.
     return resolveFailing(io, al, env, override) catch .{};
 }
 
 fn resolveFailing(io: std.Io, al: std.mem.Allocator, env: *const std.process.Environ.Map, override: ?[]const u8) !Roots {
+    // best-effort: the executable's own path is unavailable on some platforms.
     const exe_dir: ?[]const u8 = std.process.executableDirPathAlloc(io, al) catch null;
     const chosen = if (override) |o| o else env.get(env_var);
     var music: ?[]const u8 = null;
@@ -104,6 +107,7 @@ fn userDataDir(al: std.mem.Allocator, env: *const std.process.Environ.Map) !?[]c
 /// keeps its saves beside it), otherwise the per-user data directory.
 pub fn defaultStore(io: std.Io, al: std.mem.Allocator, env: *const std.process.Environ.Map) ![:0]const u8 {
     if (std.Io.Dir.cwd().access(io, store_name, .{})) |_| return al.dupeZ(u8, store_name) else |_| {}
+    // best-effort: no user data directory falls back to the working directory.
     const dir = (userDataDir(al, env) catch null) orelse return al.dupeZ(u8, store_name);
     std.Io.Dir.cwd().createDirPath(io, dir) catch return al.dupeZ(u8, store_name);
     return std.fs.path.joinZ(al, &.{ dir, store_name });

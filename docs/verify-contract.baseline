@@ -5,15 +5,3 @@
 # reason, and deletes the line here. A new broad catch fails the gate.
 src/persist/store.zig: const name = st.text(1, fba.allocator()) catch continue;
 src/persist/store.zig: const name = st.text(1, fba.allocator()) catch continue;
-src/sim/crew.zig: assignSlot(gs, u.id, .pilot, p.id) catch continue;
-src/sim/tick.zig: const moved = (commands.execute(gs, .{ .trim_stock = sp.company }) catch Result{}).tons_moved;
-src/tui/music.zig: var sd = std.Io.Dir.cwd().openDir(self.io, sub_path, .{ .iterate = true }) catch continue;
-src/tui/music.zig: const full = std.fmt.bufPrintZ(&buf, "{s}/{s}", .{ dir, cmd }) catch continue;
-src/tui/paths.zig: var dir = std.Io.Dir.cwd().openDir(io, path, .{}) catch return false;
-src/tui/paths.zig: return resolveFailing(io, al, env, override) catch .{};
-src/tui/paths.zig: const exe_dir: ?[]const u8 = std.process.executableDirPathAlloc(io, al) catch null;
-src/tui/paths.zig: const dir = (userDataDir(al, env) catch null) orelse return al.dupeZ(u8, store_name);
-src/tui/term.zig: const n = posix.poll(&fds, timeout_ms) catch return false;
-src/tui/term.zig: const got = posix.read(self.in_fd, &self.pending) catch return false;
-src/tui/term.zig: self.out.writeAll(query) catch return 0;
-src/tui/term.zig: self.out.flush() catch return 0;

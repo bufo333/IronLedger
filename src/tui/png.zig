@@ -88,7 +88,10 @@ pub fn decode(alloc: std.mem.Allocator, bytes: []const u8) Error!Image {
     var dec = flate.Decompress.init(&in, .zlib, window);
     const stride: usize = @as(usize, width) * channels;
     const expected: usize = (stride + 1) * height;
-    const raw = dec.reader.allocRemaining(alloc, .limited(expected + 1)) catch return error.Corrupt;
+    const raw = dec.reader.allocRemaining(alloc, .limited(expected + 1)) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return error.Corrupt,
+    };
     defer alloc.free(raw);
     if (raw.len < expected) return error.Corrupt;
 
@@ -174,4 +177,14 @@ test "decodes an RGB PNG using the none, sub and up filters" {
     try std.testing.expectEqual([3]u8{ 128, 128, 128 }, img.pixel(1, 2));
     try std.testing.expectEqual([3]u8{ 1, 2, 3 }, img.pixel(3, 2));
     try std.testing.expectError(error.NotPng, decode(std.testing.allocator, "not a png"));
+}
+
+test "decode preserves OutOfMemory instead of mapping it to Corrupt" {
+    const bytes = @embedFile("testdata/rgb4x3.png");
+    try std.testing.checkAllAllocationFailures(std.testing.allocator, struct {
+        fn run(alloc: std.mem.Allocator, png_bytes: []const u8) !void {
+            var img = try decode(alloc, png_bytes);
+            img.deinit(alloc);
+        }
+    }.run, .{bytes});
 }

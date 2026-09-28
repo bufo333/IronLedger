@@ -145,7 +145,10 @@ fn runPolicies(gs: *GameState) !void {
             // home on the empty convoy so the food can land.
             const room_now = sites.siteFreeTons(gs, site) -| field_supply.inboundTons(gs, sp.company);
             if (room_now < want * part_mod.tons(line.key)) {
-                const moved = (commands.execute(gs, .{ .trim_stock = sp.company }) catch Result{}).tons_moved;
+                const moved = (commands.execute(gs, .{ .trim_stock = sp.company }) catch |err| switch (err) {
+                    error.OutOfMemory => return error.OutOfMemory,
+                    else => Result{},
+                }).tons_moved;
                 if (moved > 0) try gs.log(.delivery, .{ .company = sp.company }, "[supply] trucks full: {d}t of surplus sent home to make room for {s}", .{ moved, line.key });
             }
             // Room counts what is already on the road (the shipment check does).
@@ -158,6 +161,7 @@ fn runPolicies(gs: *GameState) !void {
                 continue;
             }
             _ = commands.execute(gs, .{ .ship_stock = .{ .part_key = line.key, .quantity = qty, .from = .{ .hq = home }, .to = site } }) catch |err| {
+                if (err == error.OutOfMemory) return error.OutOfMemory;
                 if (gs.clock.day_index % 7 == 0) try gs.log(.delivery, .{ .company = sp.company, .hq = home }, "[supply] resupply policy could not ship {s} to {s}: {s}", .{ line.key, f.name, @errorName(err) });
                 continue;
             };
@@ -246,6 +250,7 @@ fn runStockPolicies(gs: *GameState) !void {
         else
             .{ .order_part = .{ .part_key = sp.part_key, .quantity = want, .dest = .{ .hq = sp.hq } } };
         _ = commands.execute(gs, cmd) catch |err| {
+            if (err == error.OutOfMemory) return error.OutOfMemory;
             if (today % 7 == 0) try gs.log(.market, .{ .hq = sp.hq }, "[stock] policy could not restock {s} at {s}: {s}", .{ sp.part_key, hq.name, @errorName(err) });
             continue;
         };
