@@ -1167,6 +1167,61 @@ test "automatic events never move money, stock or hulls — those are decisions"
     }
 }
 
+test "letGo propagates OutOfMemory from the replacement hire and hires no one" {
+    // `outer` owns every byte the campaign arena ever hands out, so
+    // detaching the arena's own headroom tracking below cannot leak.
+    var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer outer.deinit();
+    var gs = GameState.init(outer.allocator(), .{ .seed = 1225 });
+    _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
+    // Hired today: zero tenure, zero severance, so `depart`'s unconditional
+    // status/seat change (below) is the only thing it touches — nothing
+    // moves money before the replacement hire is even attempted.
+    const pilot = try gs.hirePerson("A", "Departing", .mekwarrior);
+    // A replacement on the hall in the departing pilot's own role, at no
+    // signing bonus, so a successful hire would also move no money before
+    // `hirePerson` — isolating the failure to that one call.
+    try gs.candidates.append(gs.allocator(), .{ .hq = gs.hqs.keys()[0], .spec = @import("../gen/person_gen.zig").generate(&gs.rng, .market, .mekwarrior), .asking_bonus = 0, .listed_day = 0, .expires_day = 400 });
+    const candidates_before = gs.candidates.items.len;
+    const people_before = gs.people.count();
+    const funds_before = gs.funds;
+    const events_before = gs.event_log.items.len;
+
+    // Discard the arena's spare headroom and fail every further allocation
+    // (calibrated: 850 bytes fails inside the replacement `hire_candidate`
+    // call itself — verified against a stack trace through
+    // `hireFromSpec`/`state.hirePerson` — after `depart` and the departure
+    // log have already run their unconditional, allocation-free course):
+    // the replacement hire's own OOM must surface as OutOfMemory and hire
+    // no one, not be caught and logged as "no replacement hired".
+    gs.arena.state.used_list = null;
+    gs.arena.state.free_list = null;
+    const buf = try std.testing.allocator.alloc(u8, 850);
+    defer std.testing.allocator.free(buf);
+    var fba = std.heap.FixedBufferAllocator.init(buf);
+    gs.arena.child_allocator = fba.allocator();
+
+    try std.testing.expectError(error.OutOfMemory, letGo(&gs, pilot, true));
+
+    // `depart` itself is not reserve-first (a pre-existing, out-of-scope
+    // C5 concern): it sets status and vacates the unit seat as its very
+    // first, unconditional steps, before anything can allocate. So the
+    // departure itself has already happened by the time the replacement
+    // hire is even attempted — that part of the outcome is expected and
+    // unrelated to this fix.
+    try std.testing.expectEqual(@import("../domain/person.zig").Status.resigned, gs.person(pilot).?.status);
+    // The departure log is unconditional too, so exactly one line was
+    // appended (the departure) and no more — no "hired from the hall" and
+    // no "no replacement hired" fallback line, since the OOM never reaches
+    // either log call.
+    try std.testing.expectEqual(events_before + 1, gs.event_log.items.len);
+    // What the replacement hire's own OOM must not do: consume the
+    // candidate, create a new person, or move money.
+    try std.testing.expectEqual(candidates_before, gs.candidates.items.len);
+    try std.testing.expectEqual(people_before, gs.people.count());
+    try std.testing.expectEqual(funds_before, gs.funds);
+}
+
 test "notice is a decision — a raise keeps them, letting go vacates the seat, replacing hires from the hall" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1225 });
     defer gs.deinit();

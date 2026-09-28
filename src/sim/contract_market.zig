@@ -1170,35 +1170,6 @@ pub fn hireRoleFromHall(gs: *GameState, role: person_mod.Role, company: types.Fo
     return false;
 }
 
-test "hire_candidate propagates OutOfMemory and hires nothing" {
-    // `outer` owns every byte the campaign arena ever hands out, so
-    // detaching the arena's own headroom tracking below cannot leak.
-    var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer outer.deinit();
-    var gs = GameState.init(outer.allocator(), .{ .seed = 1225 });
-    try gs.candidates.append(gs.allocator(), .{ .hq = .none, .spec = person_gen.generate(&gs.rng, .market, .mekwarrior), .asking_bonus = 0, .listed_day = 0, .expires_day = 400 });
-    const candidates_before = gs.candidates.items.len;
-    const people_before = gs.people.count();
-    const funds_before = gs.funds;
-
-    // Discard the arena's spare headroom and fail every further allocation
-    // (calibrated: 1000 bytes fails inside `hirePerson` itself, verified
-    // against a stack trace through `hireFromSpec`/`hireCandidate`): the
-    // refusal must surface as OutOfMemory and hire nobody, not silently
-    // drop the candidate.
-    gs.arena.state.used_list = null;
-    gs.arena.state.free_list = null;
-    const buf = try std.testing.allocator.alloc(u8, 1000);
-    defer std.testing.allocator.free(buf);
-    var fba = std.heap.FixedBufferAllocator.init(buf);
-    gs.arena.child_allocator = fba.allocator();
-
-    try std.testing.expectError(error.OutOfMemory, commands.execute(&gs, .{ .hire_candidate = 0 }));
-    try std.testing.expectEqual(candidates_before, gs.candidates.items.len);
-    try std.testing.expectEqual(people_before, gs.people.count());
-    try std.testing.expectEqual(funds_before, gs.funds);
-}
-
 test "a veteran five-lance opposition pays more than a green four-lance one" {
     const hard = threatPayBp(.planetary_assault, 5, .veteran, 4_500);
     const soft = threatPayBp(.planetary_assault, 4, .green, 3_500);
