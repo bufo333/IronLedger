@@ -924,7 +924,13 @@ pub fn sellHq(gs: *GameState, hq_id: types.HqId) !void {
     };
     var i: usize = 0;
     while (i < gs.bay_jobs.items.len) {
-        if (gs.bay_jobs.items[i].hq == hq_id) _ = gs.bay_jobs.orderedRemove(i) else i += 1;
+        if (gs.bay_jobs.items[i].hq == hq_id) {
+            if (gs.unit(gs.bay_jobs.items[i].unit)) |u| {
+                if (u.status == .repairing) u.status = .damaged;
+                if (u.status == .refitting) u.status = .ready;
+            }
+            _ = gs.bay_jobs.orderedRemove(i);
+        } else i += 1;
     }
     i = 0;
     while (i < gs.hq_links.items.len) {
@@ -1665,4 +1671,50 @@ test "selling an HQ redirects its in-flight courier to the outfit treasury, not 
         found = true;
     };
     try std.testing.expect(found);
+}
+
+test "selling an HQ resets a repairing hull instead of leaving it stuck" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 91 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .DC, .profession = .paymaster } });
+    gs.funds = 20_000_000;
+    _ = try commands.execute(&gs, .{ .found_hq = .{ .name = "Far", .planet_key = "zebebelgenubi" } });
+    const far = gs.hqs.keys()[1];
+
+    const uid = try gs.addUnit("SHD-2H");
+    const u = gs.unit(uid).?;
+    u.status = .repairing;
+    try gs.bay_jobs.append(gs.allocator(), .{
+        .hq = far,
+        .kind = .depot_repair,
+        .unit = uid,
+        .duration_days = 10,
+        .queued_day = gs.clock.day_index,
+    });
+
+    _ = try commands.execute(&gs, .{ .sell_hq = far });
+    try std.testing.expectEqual(unit_mod.UnitStatus.damaged, u.status);
+}
+
+test "selling an HQ resets a refitting hull instead of leaving it stuck" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 91 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .DC, .profession = .paymaster } });
+    gs.funds = 20_000_000;
+    _ = try commands.execute(&gs, .{ .found_hq = .{ .name = "Far", .planet_key = "zebebelgenubi" } });
+    const far = gs.hqs.keys()[1];
+
+    const uid = try gs.addUnit("SHD-2H");
+    const u = gs.unit(uid).?;
+    u.status = .refitting;
+    try gs.bay_jobs.append(gs.allocator(), .{
+        .hq = far,
+        .kind = .refit,
+        .unit = uid,
+        .duration_days = 10,
+        .queued_day = gs.clock.day_index,
+    });
+
+    _ = try commands.execute(&gs, .{ .sell_hq = far });
+    try std.testing.expectEqual(unit_mod.UnitStatus.ready, u.status);
 }
