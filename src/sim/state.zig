@@ -655,15 +655,23 @@ pub const GameState = struct {
     }
 
     pub fn createForce(self: *GameState, name: []const u8, echelon: force_mod.Echelon, parent: types.ForceId) !types.ForceId {
+        // -- prepare: reserve capacity in every destination --
+        try self.forces.ensureUnusedCapacity(self.allocator(), 1);
+        // Re-fetch the parent pointer after forces map reservation, since
+        // ensureUnusedCapacity may rehash and invalidate pointers into forces.
+        if (self.force(parent)) |p| try p.children.ensureUnusedCapacity(self.allocator(), 1);
+        const owned_name = try self.allocator().dupe(u8, name);
+
+        // -- commit: no allocation can fail past this point --
         const id: types.ForceId = @enumFromInt(self.next_force_id);
         self.next_force_id += 1;
-        try self.forces.put(self.allocator(), id, .{
+        self.forces.putAssumeCapacity(id, .{
             .id = id,
             .parent = parent,
-            .name = try self.allocator().dupe(u8, name),
+            .name = owned_name,
             .echelon = echelon,
         });
-        if (self.force(parent)) |p| try p.children.append(self.allocator(), id);
+        if (self.force(parent)) |p| p.children.appendAssumeCapacity(id);
         return id;
     }
 

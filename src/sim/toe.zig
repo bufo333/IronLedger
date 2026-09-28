@@ -138,15 +138,8 @@ pub fn supportLanceFor(gs: *GameState, company: types.ForceId, u: *const unit_mo
 /// behind (transfers cost coverage until reassigned).
 pub fn placeUnitInCompany(gs: *GameState, unit_id: types.UnitId, company: types.ForceId) !void {
     const u = gs.unit(unit_id) orelse return error.UnknownUnit;
-    // Leave the old force's roster.
-    if (gs.forces.getPtr(u.force)) |old| {
-        for (old.units.items, 0..) |id, i| {
-            if (id == unit_id) {
-                _ = old.units.orderedRemove(i);
-                break;
-            }
-        }
-    }
+
+    // -- validate: find the destination force --
     var dest = company;
     if (gs.forces.getPtr(company)) |co| {
         if (u.kind == .aerospace) {
@@ -175,11 +168,24 @@ pub fn placeUnitInCompany(gs: *GameState, unit_id: types.UnitId, company: types.
             dest = sid;
         }
     }
+
+    // -- prepare: reserve the destination roster slot --
+    if (gs.forces.getPtr(dest)) |d| try d.units.ensureUnusedCapacity(gs.allocator(), 1);
+
+    // -- commit: no allocation can fail past this point --
+    if (gs.forces.getPtr(u.force)) |old| {
+        for (old.units.items, 0..) |id, i| {
+            if (id == unit_id) {
+                _ = old.units.orderedRemove(i);
+                break;
+            }
+        }
+    }
     u.force = dest;
     // A bought wreck lands as damaged, not ready.
     if (u.status == .in_transit) u.status = if (u.needsDepot()) .damaged else .ready;
     u.tech = .none;
-    if (gs.forces.getPtr(dest)) |d| try d.units.append(gs.allocator(), unit_id);
+    if (gs.forces.getPtr(dest)) |d| d.units.appendAssumeCapacity(unit_id);
     if (gs.person(u.pilot)) |p| p.assigned_force = dest;
 }
 
@@ -189,6 +195,11 @@ pub fn placeUnitInCompany(gs: *GameState, unit_id: types.UnitId, company: types.
 pub fn moveUnitToForce(gs: *GameState, unit_id: types.UnitId, force_id: types.ForceId) !void {
     const u = gs.unit(unit_id) orelse return error.UnknownUnit;
     const dest = gs.forces.getPtr(force_id) orelse return error.UnknownForce;
+
+    // -- prepare --
+    try dest.units.ensureUnusedCapacity(gs.allocator(), 1);
+
+    // -- commit --
     if (gs.forces.getPtr(u.force)) |old| {
         for (old.units.items, 0..) |id, i| {
             if (id == unit_id) {
@@ -198,7 +209,7 @@ pub fn moveUnitToForce(gs: *GameState, unit_id: types.UnitId, force_id: types.Fo
         }
     }
     u.force = force_id;
-    try dest.units.append(gs.allocator(), unit_id);
+    dest.units.appendAssumeCapacity(unit_id);
     if (gs.person(u.pilot)) |p| p.assigned_force = force_id;
 }
 
@@ -209,10 +220,15 @@ pub const AssignError = error{ UnknownUnit, UnknownPerson, UnknownForce } || std
 pub fn assignUnit(gs: *GameState, unit_id: types.UnitId, force_id: types.ForceId, pilot_id: types.PersonId) AssignError!void {
     const u = gs.unit(unit_id) orelse return error.UnknownUnit;
     const f = gs.force(force_id) orelse return error.UnknownForce;
+    const pilot = if (pilot_id != .none) gs.person(pilot_id) orelse return error.UnknownPerson else null;
+
+    // -- prepare --
+    try f.units.ensureUnusedCapacity(gs.allocator(), 1);
+
+    // -- commit --
     u.force = force_id;
-    try f.units.append(gs.allocator(), unit_id);
-    if (pilot_id != .none) {
-        const p = gs.person(pilot_id) orelse return error.UnknownPerson;
+    f.units.appendAssumeCapacity(unit_id);
+    if (pilot) |p| {
         u.pilot = pilot_id;
         p.assigned_force = force_id;
     }
@@ -763,6 +779,54 @@ test "a truck sent to a deployed company lands in its transport lance, and can s
     // Joining a deployed company from outside still waits for home.
     const outsider = try gs.addUnit("CGT-3");
     try std.testing.expectError(commands.Error.CompanyDeployed, commands.execute(&gs, .{ .move_unit = .{ .unit = outsider, .force = transport } }));
+}
+
+test "a failed createForce allocation leaves state unchanged" {
+    const digest = @import("digest.zig");
+
+    var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer outer.deinit();
+    var gs = GameState.init(outer.allocator(), .{ .seed = 700 });
+    const parent = try gs.createForce("Parent", .company, .none);
+    const before = digest.stateHash(&gs);
+
+    // Block every further allocation.
+    gs.arena.state.used_list = null;
+    gs.arena.state.free_list = null;
+    gs.arena.child_allocator = std.testing.failing_allocator;
+
+    try std.testing.expectError(error.OutOfMemory, gs.createForce("Child", .lance, parent));
+    try std.testing.expectEqual(before, digest.stateHash(&gs));
+}
+
+test "a failed placeUnitInCompany allocation leaves state unchanged" {
+    const digest = @import("digest.zig");
+
+    var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer outer.deinit();
+    var gs = GameState.init(outer.allocator(), .{ .seed = 701 });
+    // A company with no lance children: the mek routing loop finds no
+    // candidate, so the destination stays the company node itself, whose
+    // units list has never been appended to (capacity zero).
+    const co = try gs.createForce("Alpha", .company, .none);
+    // A separate holding force gives the unit a real old force to leave.
+    const pool = try gs.createForce("Pool", .lance, .none);
+    const uid = try gs.addUnit("LCT-1V");
+    try gs.force(pool).?.units.append(gs.allocator(), uid);
+    gs.unit(uid).?.force = pool;
+
+    const before = digest.stateHash(&gs);
+
+    // Block every further allocation.
+    gs.arena.state.used_list = null;
+    gs.arena.state.free_list = null;
+    gs.arena.child_allocator = std.testing.failing_allocator;
+
+    // With no lance children, dest resolves to the company node, whose
+    // units list has zero capacity: ensureUnusedCapacity must allocate and
+    // fails before any mutation.
+    try std.testing.expectError(error.OutOfMemory, placeUnitInCompany(&gs, uid, co));
+    try std.testing.expectEqual(before, digest.stateHash(&gs));
 }
 
 test "disbanding a company redirects its in-flight courier to the outfit treasury, not into the void" {
