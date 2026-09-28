@@ -499,6 +499,7 @@ titles and the help modal come from the same tables.
 | Key | Does |
 |---|---|
 | `Enter` | return to the welcome screen |
+| `r` | retry the save |
 
 ### Confirm (fire, sell, disband, recall)
 

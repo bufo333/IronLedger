@@ -24,8 +24,6 @@ C10, D27 and D30 into C12, D28 into C7, D29 into C15, D31 into C8, D33 into
 C18 (D23-D25, D32 and D34 are closed). The order below is authoritative and
 supersedes the audit response's original delivery order.
 
-- [ ] C3 money and assets always move with their record (rules 1, 13, 19, 44), one regression-first branch per line:
-  - [ ] C3g GAME OVER derives its wording from final-save success and offers a retry after failure. Delete C3 when every ledger site has its regression.
 - [ ] C5 failure atomicity (rules 11-15, 17, 69), each branch adding a `FailingAllocator` digest test for its mutation pattern:
   - [ ] C5a treasury transfer validates both treasuries and reserves debit, credit/courier and ledger capacity before commit.
   - [ ] C5b force creation and TO&E assignment/move/placement reserve every parent, child, unit and person collection before changing IDs or membership.

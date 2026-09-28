@@ -80,8 +80,11 @@ const Modal = union(enum) {
     hull: types.UnitId,
     /// A person's record as a modal.
     record: types.PersonId,
-    /// The outfit folded.
-    game_over,
+    /// The outfit folded; the final save succeeded.
+    game_over_saved,
+    /// The outfit folded; the final save failed. Carries the error text
+    /// (a static string from `cli.errorText`, safe across frames).
+    game_over_failed: []const u8,
     /// Lab install: pick a part, then a location with the rules' verdict.
     install_part: types.UnitId,
     install_loc: struct { unit: types.UnitId, part: []const u8 },
@@ -1332,7 +1335,7 @@ pub const App = struct {
                 const inner = self.screen.pane(r, .{ .title = try formTitle(al, "SETTINGS", "close"), .double = true });
                 self.screen.lines(inner, rows.items, 0, if (form.selectable > 0) self.settings_cursor else null);
             },
-            .game_over => {
+            .game_over_saved => {
                 const g = self.state();
                 const rows = [_][]const u8{
                     "",
@@ -1342,6 +1345,22 @@ pub const App = struct {
                     "  The campaign is saved as it ended; delete it from the welcome screen, or keep it as a record.",
                     "",
                     try std.fmt.allocPrint(al, "  {{s}} {s} {{/}}", .{try keyHint(GameOverAction, al, &game_over_bindings, .leave, "return to the welcome screen")}),
+                };
+                self.dialog("BANKRUPT — GAME OVER", &rows, layout.modal.game_over_w, layout.modal.game_over_h);
+            },
+            .game_over_failed => |err_text| {
+                const g = self.state();
+                const rows = [_][]const u8{
+                    "",
+                    try std.fmt.allocPrint(al, "  {{c}}{s}{{/}} could not cover its debts on day {d}.", .{ try (try q.status(al, g)).outfit_name.markup(al), (try q.status(al, g)).day }),
+                    "  Loans are exhausted and nothing left to sell would close the gap. The creditors take the rest.",
+                    "",
+                    try std.fmt.allocPrint(al, "  The final save failed: {s}", .{err_text}),
+                    "",
+                    try std.fmt.allocPrint(al, "  {{s}} {s} {{/}}   {{s}} {s} {{/}}", .{
+                        try keyHint(GameOverAction, al, &game_over_bindings, .retry, "retry the save"),
+                        try keyHint(GameOverAction, al, &game_over_bindings, .leave, "return without saving"),
+                    }),
                 };
                 self.dialog("BANKRUPT — GAME OVER", &rows, layout.modal.game_over_w, layout.modal.game_over_h);
             },
@@ -2458,10 +2477,12 @@ pub const App = struct {
     fn advance(self: *App, days: u32) !void {
         const g = self.state();
         const res = self.execResult(if (days == 1) .advance_day else .{ .advance_days = days }) orelse {
-            // A refusal can be bankruptcy: the game ends, saved as it ended.
+            // A refusal can be bankruptcy: try to save, then show the outcome.
             if ((try q.status(self.a(), g)).bankrupt) {
-                self.store.save(&self.session.?, self.player_id) catch |save_err| self.say(.crit, "game over — and the final save failed: {s}", .{game.cli.errorText(save_err)});
-                self.modal = .game_over;
+                if (self.store.save(&self.session.?, self.player_id)) |_|
+                    self.modal = .game_over_saved
+                else |save_err|
+                    self.modal = .{ .game_over_failed = game.cli.errorText(save_err) };
             }
             return;
         };
@@ -3409,10 +3430,11 @@ pub const App = struct {
         .{ .match = keys.Match.char('r'), .action = .discard, .label = "return without saving", .group = .act },
         .{ .match = .{ .key = .escape }, .action = .stay, .label = "stay in the campaign", .group = .misc },
     };
-    const GameOverAction = enum { leave };
+    const GameOverAction = enum { leave, retry };
     pub const game_over_bindings = [_]keys.Binding(GameOverAction){
         .{ .match = .{ .key = .enter }, .action = .leave, .label = "return to the welcome screen", .group = .act },
         .{ .match = .{ .key = .escape }, .action = .leave, .label = "return to the welcome screen", .group = .act, .show_footer = false, .show_help = false },
+        .{ .match = keys.Match.char('r'), .action = .retry, .label = "retry the save", .group = .act },
     };
     /// Every confirm dialog: the dialog names the verbs, the table owns the keys.
     const ConfirmAction = enum { confirm, alternative, cancel };
@@ -3636,12 +3658,28 @@ pub const App = struct {
                     },
                 }
             },
-            .game_over => {
+            .game_over_saved => {
                 const hit = keys.lookup(GameOverAction, &game_over_bindings, 0, key) orelse return;
                 switch (hit.action) {
                     .leave => {
                         self.modal = .none;
                         self.leaveGame();
+                    },
+                    .retry => {}, // already saved — no-op
+                }
+            },
+            .game_over_failed => {
+                const hit = keys.lookup(GameOverAction, &game_over_bindings, 0, key) orelse return;
+                switch (hit.action) {
+                    .leave => {
+                        self.modal = .none;
+                        self.leaveGame();
+                    },
+                    .retry => {
+                        if (self.store.save(&self.session.?, self.player_id)) |_|
+                            self.modal = .game_over_saved
+                        else |save_err|
+                            self.modal = .{ .game_over_failed = game.cli.errorText(save_err) };
                     },
                 }
             },
@@ -4075,4 +4113,19 @@ test "hqSelId propagates a query error instead of returning zero" {
     const info = @typeInfo(@TypeOf(App.hqSelId));
     const ret = info.@"fn".return_type.?;
     comptime std.debug.assert(@typeInfo(ret) == .error_union);
+}
+
+test "game-over modal distinguishes save success from save failure" {
+    // The Modal enum must carry the save result as distinct variants.
+    const saved: Modal = .game_over_saved;
+    const failed: Modal = .{ .game_over_failed = "test" };
+    try std.testing.expect(@as(std.meta.Tag(Modal), saved) != @as(std.meta.Tag(Modal), failed));
+    try std.testing.expect(@as(std.meta.Tag(Modal), saved) == .game_over_saved);
+    try std.testing.expect(@as(std.meta.Tag(Modal), failed) == .game_over_failed);
+
+    // The binding table must include a retry action.
+    const has_retry = for (App.game_over_bindings) |b| {
+        if (b.action == .retry) break true;
+    } else false;
+    try std.testing.expect(has_retry);
 }

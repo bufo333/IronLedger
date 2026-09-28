@@ -15,21 +15,6 @@ Owner of every entry: the project owner.
 
 ---
 
-### C3. Money and assets change without a matching record
-
-- **Rules:** 1, 13, 19, 44.
-- **Why not yet:** Each fix changes a player-visible outcome and needs its own regression test.
-- **Scope:**
-  - Couriers to a sold HQ or disbanded company are never cancelled. On arrival the ledger says received and no balance moves (`commands.zig:1405-1506`, `tick.zig:295-301`, `state.zig:343-353`).
-  - `addStock` and `postTreasury` silently skip an unknown site (`state.zig:1093`, `347-352`).
-  - Selling an HQ drops its bay jobs, but the hulls stay repairing or refitting (`commands.zig:1415-1418`).
-  - `queueDepotRepair` wrecks the hull before refusing (`hq_ops.zig:367-373`).
-  - `execCreateCommander` sets the year before its refusal (`commands.zig:907-909`).
-  - `orderPart` rolls the dice before the funds check (`commands.zig:2194` vs `2217`).
-  - GAME OVER says "saved" after a failed final save (`app.zig:2463`, `1342`).
-- **Removal:** C3.
-- **Guard:** review (checklist questions 2 and 14). No mechanical check.
-
 ### C5. Commands and ticks are not failure-atomic
 
 - **Rules:** 11, 12, 13, 15, 17, 69.
