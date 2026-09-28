@@ -15,13 +15,17 @@ const commands = @import("commands.zig");
 /// back. The crew slots are cleared: our
 /// people are not in it any more, whatever became of them.
 pub fn holdUnit(gs: *GameState, unit_id: types.UnitId, by: []const u8, battle: types.BattleId) !void {
+    // -- prepare: reserve capacity in the destination --
+    try gs.held_hulls.ensureUnusedCapacity(gs.allocator(), 1);
+
+    // -- commit: no allocation can fail past this point --
     gs.detachUnit(unit_id);
     var entry = gs.units.fetchOrderedRemove(unit_id) orelse return;
     const from_force = entry.value.force;
     entry.value.force = .none;
     entry.value.pilot = .none;
     entry.value.tech = .none;
-    try gs.held_hulls.append(gs.allocator(), .{
+    gs.held_hulls.appendAssumeCapacity(.{
         .unit = entry.value,
         .by = by,
         .day = gs.clock.day_index,
@@ -39,12 +43,19 @@ pub fn releaseHull(gs: *GameState, unit_id: types.UnitId) !bool {
         for (gs.held_hulls.items, 0..) |h, n| if (h.unit.id == unit_id) break :blk n;
         return false;
     };
+
+    // -- prepare: reserve capacity in every destination --
+    try gs.units.ensureUnusedCapacity(gs.allocator(), 1);
+    const from_force = gs.held_hulls.items[i].from_force;
+    if (gs.forces.getPtr(from_force)) |f| try f.units.ensureUnusedCapacity(gs.allocator(), 1);
+
+    // -- commit: no allocation can fail past this point --
     var held = gs.held_hulls.orderedRemove(i);
     if (gs.forces.getPtr(held.from_force)) |f| {
         held.unit.force = held.from_force;
-        try f.units.append(gs.allocator(), unit_id);
+        f.units.appendAssumeCapacity(unit_id);
     }
-    try gs.units.put(gs.allocator(), unit_id, held.unit);
+    gs.units.putAssumeCapacity(unit_id, held.unit);
     return true;
 }
 
@@ -100,6 +111,66 @@ test "a second release returns false" {
     try std.testing.expect(try releaseHull(&gs, taken));
     // Asking twice is not an error and wins nothing the second time.
     try std.testing.expect(!try releaseHull(&gs, taken));
+}
+
+test "a failed holdUnit allocation leaves state unchanged" {
+    const digest = @import("digest.zig");
+
+    var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer outer.deinit();
+    var gs = GameState.init(outer.allocator(), .{ .seed = 6007 });
+    _ = try @import("founding.zig").createCommander(&gs, "T", .LC, .line_officer);
+    _ = try @import("starter_company.zig").generateInto(&gs, "Alpha");
+    const taken = blk: {
+        var it = gs.units.iterator();
+        while (it.next()) |e| if (e.value_ptr.kind == .mek and e.value_ptr.force != .none) break :blk e.value_ptr.id;
+        unreachable;
+    };
+
+    const before = digest.stateHash(&gs);
+
+    // Block every further allocation. held_hulls is empty (zero capacity),
+    // so ensureUnusedCapacity(1) must allocate and fails.
+    gs.arena.state.used_list = null;
+    gs.arena.state.free_list = null;
+    gs.arena.child_allocator = std.testing.failing_allocator;
+
+    try std.testing.expectError(error.OutOfMemory, holdUnit(&gs, taken, "DC", @enumFromInt(1)));
+    try std.testing.expectEqual(before, digest.stateHash(&gs));
+}
+
+test "a failed releaseHull allocation leaves state unchanged" {
+    const digest = @import("digest.zig");
+
+    var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer outer.deinit();
+    var gs = GameState.init(outer.allocator(), .{ .seed = 6008 });
+    _ = try @import("founding.zig").createCommander(&gs, "T", .LC, .line_officer);
+    _ = try @import("starter_company.zig").generateInto(&gs, "Alpha");
+    const taken = blk: {
+        var it = gs.units.iterator();
+        while (it.next()) |e| if (e.value_ptr.kind == .mek and e.value_ptr.force != .none) break :blk e.value_ptr.id;
+        unreachable;
+    };
+    try holdUnit(&gs, taken, "DC", @enumFromInt(1));
+
+    // Point the held hull at a fresh empty force whose units list has
+    // zero capacity: ensureUnusedCapacity(1) on it must allocate.
+    const empty_force = try gs.createForce("Recovery", .lance, .none);
+    gs.held_hulls.items[0].from_force = empty_force;
+
+    const before = digest.stateHash(&gs);
+
+    // Block every further allocation. The units map has spare capacity
+    // (one entry was removed by holdUnit), so its reservation succeeds.
+    // But the empty force's units list has zero capacity, forcing an
+    // allocation that fails.
+    gs.arena.state.used_list = null;
+    gs.arena.state.free_list = null;
+    gs.arena.child_allocator = std.testing.failing_allocator;
+
+    try std.testing.expectError(error.OutOfMemory, releaseHull(&gs, taken));
+    try std.testing.expectEqual(before, digest.stateHash(&gs));
 }
 
 // ---- C4b assets command handlers moved from commands.zig ----
