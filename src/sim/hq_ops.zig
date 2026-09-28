@@ -374,14 +374,19 @@ pub fn queueDepotRepair(gs: *GameState, unit_id: types.UnitId) QueueError!bool {
     if (hasJobForUnit(gs, unit_id)) return true;
     if (u.wreck == .scrap) return error.WrittenOff; // strip it
     // A destroyed hull with every structure slot intact is cored here, so
-    // the rebuild needs its component like any other wreck.
+    // the rebuild needs its component like any other wreck. The coring
+    // below is provisional: a refusal in the component check that follows
+    // restores it, so an expected refusal leaves the hull untouched (13).
+    var needs_coring = false;
     if (u.status == .destroyed) {
         var any = false;
         for (u.slots.items) |s| if (s.class == .structure and s.condition != .ok) {
             any = true;
         };
-        if (!any) u.markWrecked();
+        needs_coring = !any;
     }
+    const prev_wreck = u.wreck;
+    if (needs_coring) u.markWrecked();
 
     if (!u.needsDepot()) return true; // whole: nothing to queue
     // Bay time scales with every structure hit, damaged ones included.
@@ -391,10 +396,16 @@ pub fn queueDepotRepair(gs: *GameState, unit_id: types.UnitId) QueueError!bool {
     }
     // Every component present before any is consumed (`depotShortfall` is
     // the same check the screens print).
-    if (depotShortfall(gs, u) != null) return false;
+    if (depotShortfall(gs, u) != null) {
+        if (needs_coring) uncore(u, prev_wreck);
+        return false;
+    }
     var buf: [max_depot_needs]DepotNeed = undefined;
     for (depotNeedsBuf(u, &buf)) |n| {
-        if (!gs.takeStock(.{ .hq = hq_id }, n.component, 1)) return false;
+        if (!gs.takeStock(.{ .hq = hq_id }, n.component, 1)) {
+            if (needs_coring) uncore(u, prev_wreck);
+            return false;
+        }
     }
 
     try gs.bay_jobs.append(gs.allocator(), .{
@@ -406,6 +417,16 @@ pub fn queueDepotRepair(gs: *GameState, unit_id: types.UnitId) QueueError!bool {
         .cost = @divTrunc(u.purchase_price, tuning.hq_ops.depot_labour_divisor) * needed + engineCharge(u), // a new engine goes in with an engine kill
     });
     return true;
+}
+
+/// Undo `queueDepotRepair`'s provisional coring: a hull that needed coring
+/// had every structure slot intact beforehand, so restoring the wreck
+/// cause and putting that one slot back to `.ok` is exact, not a guess.
+fn uncore(u: *unit_mod.Unit, prev_wreck: unit_mod.WreckCause) void {
+    u.wreck = prev_wreck;
+    for (u.slots.items) |*s| if (s.class == .structure and s.condition != .ok) {
+        s.condition = .ok;
+    };
 }
 
 pub fn queueReactivation(gs: *GameState, unit_id: types.UnitId) QueueError!void {
@@ -1174,6 +1195,26 @@ test "depot repair needs the right components, then holds a bay" {
     const uid2 = try gs.addUnit("SHD-2H");
     gs.unit(uid2).?.slots.items[1].condition = .destroyed;
     try std.testing.expect(!(try queueDepotRepair(&gs, uid2)));
+}
+
+test "depot refusal for a destroyed-but-intact hull leaves the hull untouched" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 36 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .chief_engineer);
+    const hq_id = gs.hqs.keys()[0];
+    const uid = try gs.addUnit("SHD-2H");
+    const u = gs.unit(uid).?;
+    u.status = .destroyed; // crew killed, hull structure intact: coring rebuilds it
+
+    // Strip every structural component the depot could take.
+    for (part_mod.component_keys) |key| while (gs.takeStock(.{ .hq = hq_id }, key, 1)) {};
+
+    try std.testing.expect(!(try queueDepotRepair(&gs, uid)));
+    try std.testing.expectEqual(unit_mod.WreckCause.none, u.wreck);
+    try std.testing.expectEqual(unit_mod.UnitStatus.destroyed, u.status);
+    for (u.slots.items) |s| if (s.class == .structure) {
+        try std.testing.expectEqual(unit_mod.PartCondition.ok, s.condition);
+    };
 }
 
 test "one rule for structural needs: the depot, the demand ledger and the screens read the same list" {
