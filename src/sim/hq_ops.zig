@@ -848,6 +848,14 @@ pub fn foundHq(gs: *GameState, name: []const u8, planet_key: []const u8) !void {
     };
     try gs.hqs.ensureUnusedCapacity(gs.allocator(), 1);
     try gs.reserveLedger(1);
+    var date_buf: [10]u8 = undefined;
+    const line = try std.fmt.allocPrint(
+        gs.allocator(),
+        "{s} [network] field HQ \"{s}\" founded on {s} — post staff, send funds, link it",
+        .{ gs.clock.date.text(&date_buf), name, world.name },
+    );
+    try gs.reserveLog(1);
+    // ---- commit: no fallible operation past this point ----
     try treasury.debit(gs, .outfit, .{
         .day = gs.clock.day_index,
         .amount = -cost,
@@ -855,7 +863,12 @@ pub fn foundHq(gs: *GameState, name: []const u8, planet_key: []const u8) !void {
         .note = "field HQ founded",
     });
     const id = gs.commitHq(hq);
-    try gs.log(.construction, .{ .hq = id }, "[network] field HQ \"{s}\" founded on {s} — post staff, send funds, link it", .{ name, world.name });
+    gs.event_log.appendAssumeCapacity(.{
+        .day = gs.clock.day_index,
+        .category = .construction,
+        .hq = id,
+        .text = line,
+    });
 }
 
 /// Field → regional tier upgrade.
@@ -1789,4 +1802,24 @@ test "selling an HQ resets a refitting hull instead of leaving it stuck" {
 
     _ = try commands.execute(&gs, .{ .sell_hq = far });
     try std.testing.expectEqual(unit_mod.UnitStatus.ready, u.status);
+}
+
+test "a failed foundHq leaves state unchanged" {
+    const digest = @import("digest.zig");
+
+    var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer outer.deinit();
+    var gs = GameState.init(outer.allocator(), .{ .seed = 92 });
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+
+    const before = digest.stateHash(&gs);
+
+    // Block every further allocation. prepareHq's first allocation (the
+    // HQ name dupe) must fail before anything commits.
+    gs.arena.state.used_list = null;
+    gs.arena.state.free_list = null;
+    gs.arena.child_allocator = std.testing.failing_allocator;
+
+    try std.testing.expectError(error.OutOfMemory, foundHq(&gs, "Far", "alkaid"));
+    try std.testing.expectEqual(before, digest.stateHash(&gs));
 }

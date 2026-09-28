@@ -10,37 +10,46 @@ const commander_mod = @import("../domain/commander.zig");
 const planet_mod = @import("../domain/planet.zig");
 const hq_mod = @import("../domain/hq.zig");
 const part_mod = @import("../domain/part.zig");
+const person_gen = @import("../gen/person_gen.zig");
 const GameState = @import("state.zig").GameState;
-const personnel = @import("personnel.zig");
 const hq_ops = @import("hq_ops.zig");
-const treasury = @import("treasury.zig");
 const contract_market = @import("contract_market.zig");
 const commands = @import("commands.zig");
 
 pub const CreateCommanderError = error{ CommanderExists, NoHomeWorld, UnknownSite } || std.mem.Allocator.Error;
 
+/// A generous fixed bound on the starter HQ's staff plan (rule 11-13:
+/// every founding allocation is pre-sized before anything commits). Derived
+/// from the tuning constants for a regional HQ at level-1 facilities; a
+/// future tuning change that raises the requirement past this trips the
+/// assertion below rather than silently overrunning a stack array.
+const max_founding_staff = 32;
+
 /// Character creation: the commander's origin picks the starter world
 /// (weighted-random in their faction's space) and stands up the starter
 /// regional HQ there with modest level-1 facilities.
+///
+/// Failure-atomic (rules 11-13): every RNG draw and allocation happens in
+/// a prepare phase that never touches `gs`; nothing commits until every
+/// destination has reserved capacity, so an OOM anywhere in preparation
+/// leaves `gs` — including `gs.rng` — exactly as it was.
 pub fn createCommander(
     gs: *GameState,
     name: []const u8,
     origin: commander_mod.Faction,
     profession: commander_mod.Profession,
 ) CreateCommanderError!types.HqId {
+    // ---- validate ----
     if (gs.commander != null) return error.CommanderExists;
-    const world = planet_mod.weightedPickByFaction(&gs.rng, .generation, origin.key()) orelse return error.NoHomeWorld;
 
-    gs.commander = .{
-        .name = try gs.allocator().dupe(u8, name),
-        .origin = origin,
-        .profession = profession,
-    };
+    // ---- prepare: RNG draws and allocations; no gs.* mutation ----
+    var rng_copy = gs.rng;
+    const world = planet_mod.weightedPickByFaction(&rng_copy, .generation, origin.key()) orelse return error.NoHomeWorld;
 
-    const id: types.HqId = @enumFromInt(gs.next_hq_id);
-    gs.next_hq_id += 1;
+    const owned_name = try gs.allocator().dupe(u8, name);
+
     var hq: hq_mod.Hq = .{
-        .id = id,
+        .id = .none,
         .name = try std.fmt.allocPrint(gs.allocator(), "{s} Regional HQ", .{world.name}),
         .tier = .regional,
         .planet_key = world.key,
@@ -50,49 +59,135 @@ pub fn createCommander(
     for (starter_facilities) |kind| {
         try hq.facilities.append(gs.allocator(), .{ .kind = kind, .level = 1 });
     }
-    const req = hq.staffRequired();
-    try gs.hqs.put(gs.allocator(), id, hq);
 
-    // The back office is people: recruit the starter HQ's
-    // staff to requirement and post them. Their payroll is the tail.
+    // The back office is people: the starter HQ's staff plan, to requirement.
+    const req = hq.staffRequired();
     const staff_plan = [_]struct { person_mod.Role, u32 }{
         .{ .admin_command, req.admin },                           .{ .admin_logistics, req.logistics / 2 },
         .{ .admin_transport, req.logistics - req.logistics / 2 }, .{ .admin_hr, req.hr },
         .{ .admin_finance, req.finance },
     };
+    var total_staff: u32 = 0;
+    for (staff_plan) |entry| total_staff += entry[1];
+    std.debug.assert(total_staff <= max_founding_staff);
+
+    // Draw every founding recruit's spec from the RNG copy. `recruitBonus`
+    // (personnel.zig) is role-agnostic: it awards +1 to every recruit once
+    // an HQ's assigned admin_hr count reaches `tuning.person.recruit_hr_admins`,
+    // regardless of the role being recruited. A local counter tracks that
+    // count as each admin_hr recruit is drawn; the bonus it unlocks then
+    // applies to every recruit that follows, admin_hr or not.
+    var specs: [max_founding_staff]person_gen.GeneratedPerson = undefined;
+    var staff_count: usize = 0;
+    var admin_hr_count: u32 = 0;
     for (staff_plan) |entry| {
         for (0..entry[1]) |_| {
-            const pid = try personnel.recruitGenerated(gs, entry[0], id, .generation);
-            gs.person(pid).?.posted_hq = id;
+            const bonus: i32 = if (admin_hr_count >= tuning.person.recruit_hr_admins) 1 else 0;
+            specs[staff_count] = person_gen.generateWithBonus(&rng_copy, .generation, entry[0], bonus);
+            staff_count += 1;
+            if (entry[0] == .admin_hr) admin_hr_count += 1;
         }
+    }
+
+    // Pre-build every Person struct: allocations only, no more RNG.
+    var built: [max_founding_staff]person_mod.Person = undefined;
+    for (specs[0..staff_count], 0..) |spec, i| {
+        var p: person_mod.Person = .{
+            .id = .none,
+            .first_name = try gs.allocator().dupe(u8, spec.first),
+            .last_name = try gs.allocator().dupe(u8, spec.last),
+            .role = spec.role,
+            .recruited_day = gs.clock.day_index,
+        };
+        if (spec.callsign) |c| p.callsign = try gs.allocator().dupe(u8, c);
+        try p.skills.put(gs.allocator(), .admin, spec.primary_skill);
+        p.setBirthdayFromAge(gs.clock.day_index, spec.age);
+        built[i] = p;
+    }
+
+    // A modestly stocked warehouse to start, on the local HQ (not yet on
+    // the books).
+    const g = tuning.generation;
+    {
+        const entry = try hq.stock.getOrPut(gs.allocator(), "provisions");
+        entry.value_ptr.* = g.starter_provisions;
+    }
+    {
+        const entry = try hq.stock.getOrPut(gs.allocator(), "medical_supplies");
+        entry.value_ptr.* = g.starter_medical;
+    }
+    {
+        const entry = try hq.stock.getOrPut(gs.allocator(), "armor");
+        entry.value_ptr.* = g.starter_armor;
+    }
+    for (part_mod.component_keys) |key| {
+        const entry = try hq.stock.getOrPut(gs.allocator(), key);
+        entry.value_ptr.* = g.starter_components_each;
+    }
+    for (part_mod.munition_keys) |key| {
+        const entry = try hq.stock.getOrPut(gs.allocator(), key);
+        entry.value_ptr.* = g.starter_munitions_each;
+    }
+
+    // Reserve capacity in every GameState destination: nothing past this
+    // point can fail.
+    try gs.hqs.ensureUnusedCapacity(gs.allocator(), 1);
+    try gs.people.ensureUnusedCapacity(gs.allocator(), total_staff);
+    try gs.policies.ensureUnusedCapacity(gs.allocator(), 1);
+    try gs.stock_policies.ensureUnusedCapacity(gs.allocator(), 1);
+    const founding_funds = tuning.hq.founding_funds;
+    const can_fund = gs.funds >= founding_funds;
+    if (can_fund) try gs.reserveLedger(2); // debit + credit
+
+    // ---- commit: no fallible operation past this point ----
+    gs.commander = .{
+        .name = owned_name,
+        .origin = origin,
+        .profession = profession,
+    };
+
+    const id = gs.commitHq(hq);
+
+    for (built[0..staff_count]) |person| {
+        var p = person;
+        const pid: types.PersonId = @enumFromInt(gs.next_person_id);
+        gs.next_person_id += 1;
+        p.id = pid;
+        p.posted_hq = id;
+        gs.people.putAssumeCapacity(pid, p);
     }
     hq_ops.refreshHqStaffing(gs);
 
     // Founding capital: the HQ opens with its own operating treasury,
-    // handed over on-site (no courier).
-    treasury.transferFunds(gs, .outfit, .{ .hq = id }, tuning.hq.founding_funds, 0) catch |err| switch (err) {
-        // An outfit that cannot cover the founding capital opens the HQ
-        // with an empty treasury.
-        error.InsufficientTreasury => {},
-        error.OutOfMemory => return error.OutOfMemory,
-        // The HQ was just put into gs.hqs above: its treasury exists.
-        error.UnknownTreasury => unreachable,
-    };
+    // handed over on-site (no courier). An outfit that cannot cover it
+    // opens the HQ with an empty treasury — matching `treasury.transferFunds`'s
+    // `InsufficientTreasury` refusal, done here without a fallible call.
+    if (can_fund) {
+        gs.ledger.transactions.appendAssumeCapacity(.{
+            .day = gs.clock.day_index,
+            .amount = -founding_funds,
+            .category = .fund_transfer,
+            .note = "funds dispatched",
+        });
+        gs.funds -= founding_funds;
+        gs.ledger.transactions.appendAssumeCapacity(.{
+            .day = gs.clock.day_index,
+            .amount = founding_funds,
+            .category = .fund_transfer,
+            .hq = id,
+            .note = "funds received",
+        });
+        gs.hqs.getPtr(id).?.funds += founding_funds;
+    }
 
     // Standing defaults the player can clear, so a hands-off outfit keeps
     // its HQ solvent and fed: the outfit tops the HQ up on payday, and
     // the warehouse keeps provisions stocked.
-    try gs.policies.append(gs.allocator(), .{ .entity = .{ .hq = id }, .floor = tuning.finance.hq_policy_floor, .monthly_cap = tuning.finance.hq_policy_cap });
-    try gs.stock_policies.append(gs.allocator(), .{ .hq = id, .part_key = "provisions", .min = tuning.generation.provisions_keep_min, .target = tuning.generation.provisions_keep_target });
+    gs.policies.appendAssumeCapacity(.{ .entity = .{ .hq = id }, .floor = tuning.finance.hq_policy_floor, .monthly_cap = tuning.finance.hq_policy_cap });
+    gs.stock_policies.appendAssumeCapacity(.{ .hq = id, .part_key = "provisions", .min = g.provisions_keep_min, .target = g.provisions_keep_target });
 
-    // A modestly stocked warehouse to start.
-    const site: types.Site = .{ .hq = id };
-    const g = tuning.generation;
-    try gs.addStock(site, "provisions", g.starter_provisions);
-    try gs.addStock(site, "medical_supplies", g.starter_medical);
-    try gs.addStock(site, "armor", g.starter_armor);
-    for (part_mod.component_keys) |key| try gs.addStock(site, key, g.starter_components_each);
-    for (part_mod.munition_keys) |key| try gs.addStock(site, key, g.starter_munitions_each);
+    // Commit the RNG state last: everything above is now on the books.
+    gs.rng = rng_copy;
     return id;
 }
 
@@ -227,6 +322,25 @@ test "a failed commander creation leaves the clock year untouched" {
 
     try std.testing.expectError(error.OutOfMemory, commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster, .start_year = 3040 } }));
     try std.testing.expectEqual(initial_year, gs.clock.date.year);
+}
+
+test "a failed createCommander leaves state and RNG unchanged" {
+    const digest = @import("digest.zig");
+
+    var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer outer.deinit();
+    var gs = GameState.init(outer.allocator(), .{ .seed = 8104 });
+
+    const before = digest.stateHash(&gs);
+
+    // Block every allocation. createCommander's first allocation (the
+    // commander name dupe) must fail before anything commits.
+    gs.arena.state.used_list = null;
+    gs.arena.state.free_list = null;
+    gs.arena.child_allocator = std.testing.failing_allocator;
+
+    try std.testing.expectError(error.OutOfMemory, createCommander(&gs, "T", .LC, .line_officer));
+    try std.testing.expectEqual(before, digest.stateHash(&gs));
 }
 
 test "the start year sets the calendar and gates the catalogue" {
