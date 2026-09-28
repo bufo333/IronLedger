@@ -24,13 +24,44 @@ const commands = @import("commands.zig");
 
 pub const TransferError = error{ InsufficientTreasury, UnknownTreasury } || std.mem.Allocator.Error;
 
-/// Move money between treasuries. The source is debited immediately (refused
-/// if short); the credit travels by courier for `eta_days` (0 = instant, as
-/// for founding capital handed over on site).
+fn validateTreasuryExists(gs: *GameState, t: Treasury) TransferError!void {
+    switch (t) {
+        .outfit => {},
+        .hq => |id| if (!gs.hqs.contains(id)) return error.UnknownTreasury,
+        .company => |id| if (!gs.forces.contains(id)) return error.UnknownTreasury,
+    }
+}
+
+fn applyBalance(gs: *GameState, treasury: Treasury, delta: types.CBills) void {
+    switch (treasury) {
+        .outfit => gs.funds += delta,
+        .hq => |id| gs.hqs.getPtr(id).?.funds += delta,
+        .company => |id| gs.forces.getPtr(id).?.local_funds += delta,
+    }
+}
+
+/// Move money between treasuries.  Both treasuries are validated and all
+/// ledger and courier capacity is reserved before any mutation.  The source
+/// is debited immediately (refused if short); the credit travels by courier
+/// for `eta_days` (0 = instant, as for founding capital handed over on site).
 pub fn transferFunds(gs: *GameState, from: Treasury, to: Treasury, amount: types.CBills, eta_days: u32) TransferError!void {
-    if (amount <= 0 or gs.treasuryBalance(from) < amount) return error.InsufficientTreasury;
+    // -- validate --
+    if (amount <= 0) return error.InsufficientTreasury;
+    try validateTreasuryExists(gs, from);
+    try validateTreasuryExists(gs, to);
+    if (gs.treasuryBalance(from) < amount) return error.InsufficientTreasury;
+
+    // -- prepare: reserve capacity for every fallible append --
+    if (eta_days == 0) {
+        try gs.reserveLedger(2); // debit + credit
+    } else {
+        try gs.reserveLedger(1); // debit only
+        try gs.reserveCourier(1);
+    }
+
+    // -- commit: no allocation can fail past this point --
     const from_tags = from.tags();
-    try gs.postTreasury(from, .{
+    gs.ledger.transactions.appendAssumeCapacity(.{
         .day = gs.clock.day_index,
         .amount = -amount,
         .category = .fund_transfer,
@@ -38,10 +69,21 @@ pub fn transferFunds(gs: *GameState, from: Treasury, to: Treasury, amount: types
         .hq = from_tags.hq,
         .note = "funds dispatched",
     });
+    applyBalance(gs, from, -amount);
+
     if (eta_days == 0) {
-        try creditTreasury(gs, to, amount);
+        const to_tags = to.tags();
+        gs.ledger.transactions.appendAssumeCapacity(.{
+            .day = gs.clock.day_index,
+            .amount = amount,
+            .category = .fund_transfer,
+            .company = to_tags.company,
+            .hq = to_tags.hq,
+            .note = "funds received",
+        });
+        applyBalance(gs, to, amount);
     } else {
-        try gs.fund_couriers.append(gs.allocator(), .{
+        gs.fund_couriers.appendAssumeCapacity(.{
             .to = to,
             .amount = amount,
             .sent_day = gs.clock.day_index,
@@ -212,6 +254,7 @@ pub fn execTransfer(gs: *GameState, t: @FieldType(Command, "transfer")) Error!Re
     try validateTreasury(gs, t.from);
     try validateTreasury(gs, t.to);
     const eta = courierEtaDays(gs, t.to);
+    try gs.reserveLog(1);
     try transferFunds(gs, t.from, t.to, t.amount, eta);
     const tags = t.to.tags();
     try gs.log(.finance, .{ .company = tags.company, .hq = tags.hq }, "[finance] {d} c-bills dispatched by courier (eta {d} days)", .{ t.amount, eta });
@@ -313,6 +356,55 @@ test "a transfer debits now and credits on arrival; a short treasury refuses and
     try std.testing.expectError(error.InsufficientTreasury, debit(&gs, .{ .company = co }, .{ .day = 0, .amount = -10_000, .category = .unit_purchase, .note = "too dear" }));
     try std.testing.expectEqual(posted, gs.ledger.transactions.items.len);
     try std.testing.expectEqual(@as(types.CBills, 600), gs.treasuryBalance(.{ .company = co }));
+}
+
+test "a failed transfer allocation leaves state unchanged" {
+    const digest = @import("digest.zig");
+
+    // Courier path — a true regression: pre-reserve exactly one ledger slot
+    // so the debit append can succeed without allocating (`reserveLedger`
+    // rounds up via `growCapacity`, so grow to exactly one slot directly).
+    // On the old code the debit commits using that slot and only the
+    // courier append then fails; on the fixed code `reserveCourier` is
+    // checked before any mutation.
+    {
+        // Outer arena holds actual memory; gs.deinit is not called because
+        // the outer arena owns teardown (same pattern as hq_ops.zig:1110).
+        var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer outer.deinit();
+        var gs = GameState.init(outer.allocator(), .{ .seed = 500 });
+        const co = try gs.createForce("Alpha", .company, .none);
+        gs.funds = 100_000;
+        try gs.ledger.transactions.ensureTotalCapacityPrecise(gs.allocator(), 1);
+        const before = digest.stateHash(&gs);
+
+        // Block every further allocation from the arena.
+        gs.arena.state.used_list = null;
+        gs.arena.state.free_list = null;
+        gs.arena.child_allocator = std.testing.failing_allocator;
+
+        try std.testing.expectError(error.OutOfMemory, transferFunds(&gs, .outfit, .{ .company = co }, 1_000, 5));
+        try std.testing.expectEqual(before, digest.stateHash(&gs));
+    }
+
+    // Instant-credit path: with no ledger capacity reserved at all, the
+    // fixed code's `reserveLedger(2)` must fail before either the debit or
+    // the credit is posted, leaving state untouched.
+    {
+        var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer outer.deinit();
+        var gs = GameState.init(outer.allocator(), .{ .seed = 501 });
+        const co = try gs.createForce("Alpha", .company, .none);
+        gs.funds = 100_000;
+        const before = digest.stateHash(&gs);
+
+        gs.arena.state.used_list = null;
+        gs.arena.state.free_list = null;
+        gs.arena.child_allocator = std.testing.failing_allocator;
+
+        try std.testing.expectError(error.OutOfMemory, transferFunds(&gs, .outfit, .{ .company = co }, 1_000, 0));
+        try std.testing.expectEqual(before, digest.stateHash(&gs));
+    }
 }
 
 test "insolvency holds the turn; bankruptcy ends the campaign" {

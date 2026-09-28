@@ -425,6 +425,18 @@ pub const GameState = struct {
         try self.ledger.transactions.ensureUnusedCapacity(self.allocator(), n);
     }
 
+    /// Room for `n` more log entries, so the next `n` event_log appends
+    /// cannot fail on list capacity.
+    pub fn reserveLog(self: *GameState, n: usize) !void {
+        try self.event_log.ensureUnusedCapacity(self.allocator(), n);
+    }
+
+    /// Room for `n` more fund couriers, so the next `n` courier appends
+    /// cannot fail.
+    pub fn reserveCourier(self: *GameState, n: usize) !void {
+        try self.fund_couriers.ensureUnusedCapacity(self.allocator(), n);
+    }
+
     /// Put a prepared HQ on the books under the next id. Cannot fail once
     /// `hqs` has room for it.
     pub fn commitHq(self: *GameState, prepared: hq_mod.Hq) types.HqId {

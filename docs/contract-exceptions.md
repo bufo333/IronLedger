@@ -20,7 +20,7 @@ Owner of every entry: the project owner.
 - **Rules:** 11, 12, 13, 15, 17, 69.
 - **Why not yet:** It needs reserve-first helpers and a failure-injection test per mutation pattern, landed in increments.
 - **Scope:**
-  - **Primitives.** `treasury.transferFunds`, `createForce`, `toe.assignUnit`, `toe.moveUnitToForce`, `toe.placeUnitInCompany`, `holdUnit` and `releaseHull` (`held_hulls.zig`) are not reserve-first. Only four commands call `reserveLedger`.
+  - **Primitives.** `createForce`, `toe.assignUnit`, `toe.moveUnitToForce`, `toe.placeUnitInCompany`, `holdUnit` and `releaseHull` (`held_hulls.zig`) are not reserve-first. Only four commands call `reserveLedger`.
   - **`acceptContract`.** It removes the offer before its fallible steps (`commands.zig:2351-2419`).
   - **Assets split by a fallible step after a mutation:**
     - `commands.zig`: `execSellStock:1179`, `execTrimStock:1276`, `execHireCandidate:1605`, `execLink:624`, `execTrainAbility:939`, `execUpgradeTier:604`, `orderPart:2210-2230`, `execDisbandCompany:1472`

@@ -25,7 +25,6 @@ C18 (D23-D25, D32 and D34 are closed). The order below is authoritative and
 supersedes the audit response's original delivery order.
 
 - [ ] C5 failure atomicity (rules 11-15, 17, 69), each branch adding a `FailingAllocator` digest test for its mutation pattern:
-  - [ ] C5a treasury transfer validates both treasuries and reserves debit, credit/courier and ledger capacity before commit.
   - [ ] C5b force creation and TO&E assignment/move/placement reserve every parent, child, unit and person collection before changing IDs or membership.
   - [ ] C5c held-hull hold/release validates the complete move and reserves destination capacity before changing ownership.
   - [ ] C5d stock movement and depot queueing reserve stock, bay job, hull-status and ledger/log capacity before commit.
