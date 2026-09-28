@@ -338,9 +338,9 @@ pub fn manningHave(gs: *GameState, company: types.ForceId, role: person_mod.Role
 /// battle. Returns kills credited.
 pub fn creditKills(gs: *GameState, engaged: []const types.UnitId, destroyed_bv: i64) !u32 {
     var weights: std.ArrayListUnmanaged(u32) = .empty;
-    defer weights.deinit(gs.allocator());
+    defer weights.deinit(gs.scratch());
     var pilots: std.ArrayListUnmanaged(types.PersonId) = .empty;
-    defer pilots.deinit(gs.allocator());
+    defer pilots.deinit(gs.scratch());
     var total_w: u64 = 0;
     for (engaged) |uid| {
         const u = gs.unit(uid) orelse continue;
@@ -350,8 +350,8 @@ pub fn creditKills(gs: *GameState, engaged: []const types.UnitId, destroyed_bv: 
         const bv: u32 = if (chassis_mod.find(u.chassis_key)) |c| c.bv else 500;
         const gunnery: u32 = p.skill(p.role.primarySkill()) orelse 4;
         const w: u32 = @max(1, bv * (9 - @min(8, gunnery)) / 100);
-        try weights.append(gs.allocator(), w);
-        try pilots.append(gs.allocator(), p.id);
+        try weights.append(gs.scratch(), w);
+        try pilots.append(gs.scratch(), p.id);
         total_w += w;
     }
     if (pilots.items.len == 0 or destroyed_bv <= 0) return 0;
@@ -396,9 +396,9 @@ pub fn checkAwards(gs: *GameState, person_id: types.PersonId) !u32 {
 pub fn checkAllAwards(gs: *GameState) !u32 {
     var n: u32 = 0;
     var ids: std.ArrayListUnmanaged(types.PersonId) = .empty;
-    defer ids.deinit(gs.allocator());
+    defer ids.deinit(gs.scratch());
     var it = gs.people.iterator();
-    while (it.next()) |e| try ids.append(gs.allocator(), e.value_ptr.id);
+    while (it.next()) |e| try ids.append(gs.scratch(), e.value_ptr.id);
     for (ids.items) |id| n += try checkAwards(gs, id);
     return n;
 }

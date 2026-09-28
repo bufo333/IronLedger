@@ -111,7 +111,7 @@ pub fn complete(gs: *GameState, c: *contract_mod.Contract, objectives_broken: bo
     {
         const outstanding = c.gradeOf() == .outstanding;
         var ids: std.ArrayListUnmanaged(types.PersonId) = .empty;
-        defer ids.deinit(gs.allocator());
+        defer ids.deinit(gs.scratch());
         var pit = gs.people.iterator();
         while (pit.next()) |e| {
             const p = e.value_ptr;
@@ -119,7 +119,7 @@ pub fn complete(gs: *GameState, c: *contract_mod.Contract, objectives_broken: bo
             p.tours += 1;
             if (outstanding) p.outstanding_tours += 1;
             p.edge_spent = false; // Edge is per contract
-            try ids.append(gs.allocator(), p.id);
+            try ids.append(gs.scratch(), p.id);
         }
         for (ids.items) |id| _ = try @import("personnel.zig").checkAwards(gs, id);
     }

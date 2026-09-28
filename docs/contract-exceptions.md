@@ -325,16 +325,6 @@ Owner of every entry: the project owner.
 - **Removal:** C15.
 - **Guard:** review. No mechanical check.
 
-### C16. Scratch memory on the campaign arena
-
-- **Rules:** 78.
-- **Why not yet:** Small; scheduled after the error work so each site's allocator is chosen once.
-- **Scope:**
-  - Child arenas built on `gs.allocator()`: `tick.zig:107` (daily), `commands.zig:1247`, `field_supply.loadOutCompany`.
-  - `defer deinit(gs.allocator())` on local lists: `battle.zig:848`, `867`; `personnel.zig:335`, `337`, `393`; `contract_control.zig:103`; `commands.zig:761`, `763`, `1465`, `1481`, `2266`.
-- **Removal:** C16.
-- **Guard:** review. No mechanical check.
-
 ### C17. Focused tests
 
 - **Rules:** 67.

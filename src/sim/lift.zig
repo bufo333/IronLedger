@@ -81,7 +81,7 @@ pub fn planLiftQuery(gs: *GameState, company_id: types.ForceId) error{OutOfMemor
     const home = gs.homeHqFor(company_id);
     var have: [3]u32 = .{ 0, 0, 0 };
     var ships: std.ArrayListUnmanaged(types.UnitId) = .empty;
-    defer ships.deinit(gs.allocator());
+    defer ships.deinit(gs.scratch());
     var sit = gs.units.iterator();
     while (sit.next()) |e| {
         const u = e.value_ptr;
@@ -97,7 +97,7 @@ pub fn planLiftQuery(gs: *GameState, company_id: types.ForceId) error{OutOfMemor
                 have[1] += design.asf_bays;
                 have[2] += design.vehicle_bays;
                 plan.ships += 1;
-                try ships.append(gs.allocator(), u.id);
+                try ships.append(gs.scratch(), u.id);
             },
             .jumpship => plan.own_jumpship = true,
             else => {},
@@ -128,7 +128,7 @@ pub fn planLift(gs: *GameState, company_id: types.ForceId, commit: bool) !LiftPl
     const home = gs.homeHqFor(company_id);
     var have: [3]u32 = .{ 0, 0, 0 };
     var ships: std.ArrayListUnmanaged(types.UnitId) = .empty;
-    defer ships.deinit(gs.allocator());
+    defer ships.deinit(gs.scratch());
     var sit = gs.units.iterator();
     while (sit.next()) |e| {
         const u = e.value_ptr;
@@ -145,7 +145,7 @@ pub fn planLift(gs: *GameState, company_id: types.ForceId, commit: bool) !LiftPl
                 have[1] += design.asf_bays;
                 have[2] += design.vehicle_bays;
                 plan.ships += 1;
-                try ships.append(gs.allocator(), u.id);
+                try ships.append(gs.scratch(), u.id);
             },
             .jumpship => plan.own_jumpship = true,
             else => {},

@@ -125,7 +125,7 @@ fn runPolicies(gs: *GameState) !void {
         if (home == .none) continue;
         const site: types.Site = .{ .company = sp.company };
         const transit = treasury.courierEtaDays(gs, .{ .company = sp.company });
-        var arena = std.heap.ArenaAllocator.init(gs.allocator());
+        var arena = std.heap.ArenaAllocator.init(gs.scratch());
         defer arena.deinit();
         const p = try field_supply.plan(arena.allocator(), gs, sp.company, transit, sp.min_days, sp.ammo_battles);
         for (p.lines) |line| {
@@ -996,4 +996,47 @@ test "difficulty scales pay, fabrication and purchases — regular is the game a
         seen = true;
     };
     try std.testing.expect(seen);
+}
+
+test "scratch operations do not grow the campaign arena" {
+    const lift_mod = @import("lift.zig");
+    const crew = @import("crew.zig");
+    var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer outer.deinit();
+    var gs = GameState.init(outer.allocator(), .{ .seed = 42 });
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    const hq = gs.hqs.keys()[0];
+    gs.hqs.getPtr(hq).?.funds = 500_000_000;
+    gs.funds = 50_000_000;
+    const co = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
+
+    // A crewed dropship so `planLiftQuery`'s ships list actually appends
+    // (an empty list never allocates, and would prove nothing).
+    try gs.market_listings.append(gs.allocator(), .{ .kind = .unit, .item_key = "LEOPARD", .rarity = .rare, .price = 20_000_000, .hq = hq, .listed_day = 0, .expires_day = 400 });
+    const listing = gs.market_listings.items.len - 1;
+    _ = try commands.execute(&gs, .{ .buy_listing = listing });
+    const ship: types.UnitId = @enumFromInt(gs.next_unit_id - 1);
+    const dropship_pilot = try gs.hirePerson("Ina", "Voss", .dropship_crew);
+    try crew.assignSlot(&gs, ship, .pilot, dropship_pilot);
+
+    // Discard the arena's spare headroom and swap to a bounded FBA. If any
+    // scratch allocation leaked into the arena (requesting more pages from
+    // `child_allocator`), the FBA would exhaust or `reset` would not fully
+    // recover it. After the fix, scratch goes through
+    // `gs.scratch() == child_allocator == fba`, and is freed back each round.
+    gs.arena.state.used_list = null;
+    gs.arena.state.free_list = null;
+    var buf: [16384]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&buf);
+    gs.arena.child_allocator = fba.allocator();
+
+    // Each round exercises a child-arena path (field_supply.trimStock's
+    // internal `plan()` arena) and a local-list path (lift.planLiftQuery's
+    // ships list). Neither round's scratch may survive to the next.
+    for (0..50) |_| {
+        _ = try commands.execute(&gs, .{ .trim_stock = co });
+        const plan = try lift_mod.planLiftQuery(&gs, co);
+        try std.testing.expectEqual(@as(u32, 1), plan.ships);
+        fba.reset();
+    }
 }

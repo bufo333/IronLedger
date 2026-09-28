@@ -143,7 +143,7 @@ const planet_mod = @import("../domain/planet.zig");
 
 /// Gather the company's combat lances into engaged units + summed power.
 fn playerSide(gs: *GameState, c: *const contract_mod.Contract) !SideState {
-    return playerSideIn(gs, gs.allocator(), c, .{});
+    return playerSideIn(gs, gs.scratch(), c, .{});
 }
 
 pub const Estimate = struct {
@@ -192,7 +192,9 @@ fn playerSideIn(gs: *GameState, alloc: std.mem.Allocator, c: *const contract_mod
     // family across the company, then decide how many each family's stock
     // can feed this fight. Reserved tons are expended after the battle.
     var family_mounts = try @import("field_supply.zig").munitionMounts(alloc, gs, c.assigned_company, true);
+    defer family_mounts.deinit(alloc);
     var family_fire_pct: std.StringArrayHashMapUnmanaged(u32) = .empty;
+    defer family_fire_pct.deinit(alloc);
     var fit = family_mounts.iterator();
     while (fit.next()) |entry| {
         const mounts = entry.value_ptr.*;
@@ -454,7 +456,7 @@ fn applyHits(
                 }
             }
         }
-        try hit_log.append(gs.allocator(), rec);
+        try hit_log.append(gs.scratch(), rec);
     }
     return tally;
 }
@@ -852,8 +854,9 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
         const t = terrain_mod.terrainOf(world);
         break :blk .{ .terrain = t, .weather = terrain_mod.rollWeather(&gs.rng, .battle, t) };
     };
-    var player = try playerSideIn(gs, gs.allocator(), c, env);
-    defer player.engaged.deinit(gs.allocator());
+    var player = try playerSideIn(gs, gs.scratch(), c, env);
+    defer player.engaged.deinit(gs.scratch());
+    defer player.ammo_reserved.deinit(gs.scratch());
     if (player.engaged.items.len == 0) return concede(gs, c);
 
     const open = openingRoll(gs, c, &player, env);
@@ -872,7 +875,7 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     // hull, what it lost, what happened to the crew. The record outlives
     // the fight, so it copies the names it needs (battle_report.HullHit).
     var hit_log: std.ArrayListUnmanaged(battle_report.HullHit) = .empty;
-    defer hit_log.deinit(gs.allocator());
+    defer hit_log.deinit(gs.scratch());
     const tally = try applyHits(gs, &player, engaged, hits, &hit_log);
     var damage_value = tally.damage_value;
     const destroyed = tally.destroyed;
@@ -1419,14 +1422,16 @@ test "dry mounts are silenced — ammo is combat power" {
 
     // No ammo in the trucks: ballistic/missile mounts fall silent.
     var dry = try playerSide(&gs, c);
-    defer dry.engaged.deinit(gs.allocator());
+    defer dry.engaged.deinit(gs.scratch());
+    defer dry.ammo_reserved.deinit(gs.scratch());
     try std.testing.expect(dry.silenced_mounts > 0);
 
     // Stock every family: full power, and the fight will expend reloads.
     const site: types.Site = .{ .company = co };
     for (part_mod.munition_keys) |key| try gs.addStock(site, key, 20);
     var armed = try playerSide(&gs, c);
-    defer armed.engaged.deinit(gs.allocator());
+    defer armed.engaged.deinit(gs.scratch());
+    defer armed.ammo_reserved.deinit(gs.scratch());
     try std.testing.expectEqual(@as(u32, 0), armed.silenced_mounts);
     try std.testing.expect(armed.power > dry.power);
 
@@ -1557,11 +1562,13 @@ test "integrated command sends training lances to fight and pulls the scouts' re
         }
     };
     var independent = try playerSide(&gs, c);
-    defer independent.engaged.deinit(gs.allocator());
+    defer independent.engaged.deinit(gs.scratch());
+    defer independent.ammo_reserved.deinit(gs.scratch());
     try std.testing.expectEqual(@as(u8, 2), independent.mods.recon_quality);
     c.terms.command_rights = .integrated;
     var integrated = try playerSide(&gs, c);
-    defer integrated.engaged.deinit(gs.allocator());
+    defer integrated.engaged.deinit(gs.scratch());
+    defer integrated.ammo_reserved.deinit(gs.scratch());
     try std.testing.expect(integrated.engaged.items.len > independent.engaged.items.len);
     try std.testing.expectEqual(@as(u8, 0), integrated.mods.recon_quality);
     // Tempo: integrated fights come sooner on average.

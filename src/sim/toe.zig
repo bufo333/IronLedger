@@ -578,11 +578,11 @@ pub fn execDisbandCompany(gs: *GameState, co: @FieldType(Command, "disband_compa
     var total: types.CBills = f.local_funds;
     // Hulls under the subtree, then people, then the forces.
     var uids: std.ArrayListUnmanaged(types.UnitId) = .empty;
-    defer uids.deinit(gs.allocator());
+    defer uids.deinit(gs.scratch());
     var uit = gs.units.iterator();
-    while (uit.next()) |e| if (gs.companyOf(e.value_ptr.force) == co) try uids.append(gs.allocator(), e.value_ptr.id);
+    while (uit.next()) |e| if (gs.companyOf(e.value_ptr.force) == co) try uids.append(gs.scratch(), e.value_ptr.id);
     for (uids.items) |uid| {
-        total += try market_mod.unitSaleValue(gs.allocator(), gs.unit(uid).?);
+        total += try market_mod.unitSaleValue(gs.scratch(), gs.unit(uid).?);
         gs.removeUnit(uid);
     }
     var pit = gs.people.iterator();
@@ -594,9 +594,9 @@ pub fn execDisbandCompany(gs: *GameState, co: @FieldType(Command, "disband_compa
         }
     }
     var fids: std.ArrayListUnmanaged(types.ForceId) = .empty;
-    defer fids.deinit(gs.allocator());
+    defer fids.deinit(gs.scratch());
     var fit = gs.forces.iterator();
-    while (fit.next()) |e| if (gs.companyOf(e.value_ptr.id) == co) try fids.append(gs.allocator(), e.value_ptr.id);
+    while (fit.next()) |e| if (gs.companyOf(e.value_ptr.id) == co) try fids.append(gs.scratch(), e.value_ptr.id);
     for (fids.items) |fid| _ = gs.forces.orderedRemove(fid);
     // Nothing may keep pointing at a company that no longer exists:
     // its standing orders, its resupply plan, the goods on the road

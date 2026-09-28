@@ -149,7 +149,7 @@ pub fn loadOutCompany(gs: *GameState, company_id: types.ForceId) !void {
     // The same plan the resupply policy follows, sized for the contract's
     // transit so the trucks land with the line already covered.
     const transit: u32 = if (gs.deploymentContract(company_id)) |c| c.transit_days else 0;
-    var arena = std.heap.ArenaAllocator.init(gs.allocator());
+    var arena = std.heap.ArenaAllocator.init(gs.scratch());
     defer arena.deinit();
     const p = try plan(arena.allocator(), gs, company_id, transit, 14, 0);
     // Capped lines first; provisions fill whatever the trucks have left.
@@ -405,7 +405,7 @@ pub fn setSupplyPolicy(gs: *GameState, company: types.ForceId, min_days: u16, to
 pub fn trimStock(gs: *GameState, company: types.ForceId) !u32 {
     const f = gs.force(company) orelse return error.UnknownForce;
     if (f.echelon != .company) return error.NotACompany;
-    var arena = std.heap.ArenaAllocator.init(gs.allocator());
+    var arena = std.heap.ArenaAllocator.init(gs.scratch());
     defer arena.deinit();
     var min_days: u32 = 14;
     var battles: u8 = 0;
@@ -465,7 +465,7 @@ test "trim_stock propagates OutOfMemory and moves nothing" {
     // nothing home.
     gs.arena.state.used_list = null;
     gs.arena.state.free_list = null;
-    const buf = try std.testing.allocator.alloc(u8, 3000);
+    const buf = try std.testing.allocator.alloc(u8, 1500);
     defer std.testing.allocator.free(buf);
     var fba = std.heap.FixedBufferAllocator.init(buf);
     gs.arena.child_allocator = fba.allocator();

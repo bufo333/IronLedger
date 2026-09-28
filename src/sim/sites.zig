@@ -299,13 +299,13 @@ pub fn shipComponentsHome(gs: *GameState, company: types.ForceId) !ShipComponent
     if (f.echelon != .company) return error.NotACompany;
     const home = gs.homeHqFor(company);
     var keys: std.ArrayListUnmanaged([]const u8) = .empty;
-    defer keys.deinit(gs.allocator());
+    defer keys.deinit(gs.scratch());
     var qtys: std.ArrayListUnmanaged(u32) = .empty;
-    defer qtys.deinit(gs.allocator());
+    defer qtys.deinit(gs.scratch());
     var it = f.stock.iterator();
     while (it.next()) |e| if (part_mod.isComponent(e.key_ptr.*) and e.value_ptr.* > 0) {
-        try keys.append(gs.allocator(), e.key_ptr.*);
-        try qtys.append(gs.allocator(), e.value_ptr.*);
+        try keys.append(gs.scratch(), e.key_ptr.*);
+        try qtys.append(gs.scratch(), e.value_ptr.*);
     };
     if (keys.items.len == 0) return error.NothingToShip;
     var sent: u32 = 0;
