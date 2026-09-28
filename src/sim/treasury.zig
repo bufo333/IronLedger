@@ -22,7 +22,7 @@ const Treasury = state_mod.Treasury;
 const toe = @import("toe.zig");
 const commands = @import("commands.zig");
 
-pub const TransferError = error{InsufficientTreasury} || std.mem.Allocator.Error;
+pub const TransferError = error{ InsufficientTreasury, UnknownTreasury } || std.mem.Allocator.Error;
 
 /// Move money between treasuries. The source is debited immediately (refused
 /// if short); the credit travels by courier for `eta_days` (0 = instant, as

@@ -17,7 +17,7 @@ const treasury = @import("treasury.zig");
 const contract_market = @import("contract_market.zig");
 const commands = @import("commands.zig");
 
-pub const CreateCommanderError = error{ CommanderExists, NoHomeWorld } || std.mem.Allocator.Error;
+pub const CreateCommanderError = error{ CommanderExists, NoHomeWorld, UnknownSite } || std.mem.Allocator.Error;
 
 /// Character creation: the commander's origin picks the starter world
 /// (weighted-random in their faction's space) and stands up the starter
@@ -75,6 +75,8 @@ pub fn createCommander(
         // with an empty treasury.
         error.InsufficientTreasury => {},
         error.OutOfMemory => return error.OutOfMemory,
+        // The HQ was just put into gs.hqs above: its treasury exists.
+        error.UnknownTreasury => unreachable,
     };
 
     // Standing defaults the player can clear, so a hands-off outfit keeps

@@ -352,15 +352,16 @@ pub const GameState = struct {
     /// in lockstep. Balances MAY go negative (obligations don't wait);
     /// purchases that should refuse instead go through `treasury.debit`.
     pub fn postTreasury(self: *GameState, treasury: Treasury, txn: finance_mod.Transaction) !void {
+        switch (treasury) {
+            .outfit => {},
+            .hq => |id| if (!self.hqs.contains(id)) return error.UnknownTreasury,
+            .company => |id| if (!self.forces.contains(id)) return error.UnknownTreasury,
+        }
         try self.ledger.post(self.allocator(), txn);
         switch (treasury) {
             .outfit => self.funds += txn.amount,
-            .hq => |id| if (self.hqs.getPtr(id)) |h| {
-                h.funds += txn.amount;
-            },
-            .company => |id| if (self.forces.getPtr(id)) |f| {
-                f.local_funds += txn.amount;
-            },
+            .hq => |id| self.hqs.getPtr(id).?.funds += txn.amount,
+            .company => |id| self.forces.getPtr(id).?.local_funds += txn.amount,
         }
     }
 
@@ -539,7 +540,7 @@ pub const GameState = struct {
     }
 
     pub fn addStock(self: *GameState, site: types.Site, key: []const u8, qty: u32) !void {
-        const map = self.stockMap(site) orelse return;
+        const map = self.stockMap(site) orelse return error.UnknownSite;
         const entry = try map.getOrPut(self.allocator(), key);
         if (!entry.found_existing) entry.value_ptr.* = 0;
         entry.value_ptr.* += qty;
@@ -829,4 +830,20 @@ test "postTransaction keeps funds and ledger in lockstep" {
     try gs.postTransaction(.{ .day = 0, .amount = -300_000, .category = .unit_purchase });
     try std.testing.expectEqual(@as(types.CBills, 700_000), gs.funds);
     try std.testing.expectEqual(@as(types.CBills, -300_000), gs.ledger.balance());
+}
+
+test "addStock at a removed HQ returns UnknownSite" {
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+
+    const missing: types.HqId = @enumFromInt(999);
+    try std.testing.expectError(error.UnknownSite, gs.addStock(.{ .hq = missing }, "armor", 10));
+}
+
+test "postTreasury against a removed HQ returns UnknownTreasury" {
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+
+    const missing: types.HqId = @enumFromInt(999);
+    try std.testing.expectError(error.UnknownTreasury, gs.postTreasury(.{ .hq = missing }, .{ .day = 0, .amount = 100, .category = .event }));
 }

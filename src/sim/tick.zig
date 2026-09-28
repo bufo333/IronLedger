@@ -106,6 +106,9 @@ fn runPolicies(gs: *GameState) !void {
         treasury.transferFunds(gs, .outfit, policy.entity, amount, eta) catch |err| switch (err) {
             error.InsufficientTreasury => continue,
             error.OutOfMemory => return error.OutOfMemory,
+            // sellHq and disbandCompany remove every standing policy for
+            // their entity, so a policy here always names a live treasury.
+            error.UnknownTreasury => unreachable,
         };
         policy.sent_this_month += amount;
         const tags = policy.entity.tags();

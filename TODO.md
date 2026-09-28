@@ -25,7 +25,6 @@ C18 (D23-D25, D32 and D34 are closed). The order below is authoritative and
 supersedes the audit response's original delivery order.
 
 - [ ] C3 money and assets always move with their record (rules 1, 13, 19, 44), one regression-first branch per line:
-  - [ ] C3b `addStock` and `postTreasury` return typed unknown-site/treasury errors and every caller handles them.
   - [ ] C3c selling an HQ releases or cancels every bay job and leaves each affected hull in the matching stable status.
   - [ ] C3d depot refusal leaves hull state and stock untouched.
   - [ ] C3e commander creation validates the year and existing commander before changing the clock or consuming RNG.
