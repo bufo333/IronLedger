@@ -394,6 +394,10 @@ pub fn queueDepotRepair(gs: *GameState, unit_id: types.UnitId) QueueError!bool {
     for (u.slots.items) |s| {
         if (s.class == .structure and s.condition != .ok) needed += 1;
     }
+    // Reserve bay-job capacity before consuming stock (rule 12):
+    // the append after the takeStock loop must not fail with stock
+    // already consumed.
+    try gs.bay_jobs.ensureUnusedCapacity(gs.allocator(), 1);
     // Every component present before any is consumed (`depotShortfall` is
     // the same check the screens print).
     if (depotShortfall(gs, u) != null) {
@@ -408,7 +412,7 @@ pub fn queueDepotRepair(gs: *GameState, unit_id: types.UnitId) QueueError!bool {
         }
     }
 
-    try gs.bay_jobs.append(gs.allocator(), .{
+    gs.bay_jobs.appendAssumeCapacity(.{
         .hq = hq_id,
         .kind = .depot_repair,
         .unit = unit_id,
@@ -1122,6 +1126,33 @@ test "depot propagates OutOfMemory instead of mapping it to NoBay" {
     gs.arena.child_allocator = std.testing.failing_allocator;
 
     try std.testing.expectError(error.OutOfMemory, depot(&gs, uid));
+}
+
+test "queueDepotRepair leaves stock unchanged when bay-job allocation fails" {
+    const digest = @import("digest.zig");
+
+    var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer outer.deinit();
+    var gs = GameState.init(outer.allocator(), .{ .seed = 4002 });
+    _ = try founding.createCommander(&gs, "T", .LC, .chief_engineer);
+    const hq_id = gs.hqs.keys()[0];
+    const uid = try gs.addUnit("SHD-2H");
+    const u = gs.unit(uid).?;
+    u.slots.items[1].condition = .destroyed; // ct.structure -> needs comp_ct
+
+    // Verify the component is on the shelf (founding seeds it).
+    try std.testing.expect(gs.stockCount(.{ .hq = hq_id }, "comp_ct") > 0);
+
+    const before = digest.stateHash(&gs);
+
+    // Block every further allocation: ensureUnusedCapacity on
+    // bay_jobs must fail before any stock is consumed.
+    gs.arena.state.used_list = null;
+    gs.arena.state.free_list = null;
+    gs.arena.child_allocator = std.testing.failing_allocator;
+
+    try std.testing.expectError(error.OutOfMemory, queueDepotRepair(&gs, uid));
+    try std.testing.expectEqual(before, digest.stateHash(&gs));
 }
 
 test "repair odds favour the sharper tech and the better hull; the parts sum to 100" {

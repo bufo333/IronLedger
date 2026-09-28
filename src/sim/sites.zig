@@ -79,8 +79,14 @@ pub fn moveStock(gs: *GameState, from: types.Site, to: types.Site, key: []const 
     const fits = if (per == 0) qty else siteFreeTons(gs, to) / per;
     const n = @min(qty, @min(have, fits));
     if (n == 0) return 0;
+    // Reserve destination capacity before the first mutation (rule 12):
+    // addStock's getOrPut may grow the map; if that allocation were to
+    // fail after takeStock, the taken stock would vanish.
+    const dest_map = gs.stockMap(to) orelse return 0;
+    try dest_map.ensureUnusedCapacity(gs.allocator(), 1);
     _ = gs.takeStock(from, key, n);
-    try gs.addStock(to, key, n);
+    // Cannot fail: capacity was reserved above, and the site is valid.
+    gs.addStock(to, key, n) catch unreachable;
     return n;
 }
 
@@ -732,4 +738,30 @@ test "a shipment the payer cannot afford uses no link capacity" {
     }));
     try std.testing.expectEqual(@as(u32, 0), gs.hq_links.items[0].tons_this_week);
     try std.testing.expectEqual(@as(u32, 10), gs.stockCount(.{ .hq = far }, "armor"));
+}
+
+test "moveStock leaves source unchanged when destination allocation fails" {
+    const digest = @import("digest.zig");
+    const founding = @import("founding.zig");
+
+    var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer outer.deinit();
+    var gs = GameState.init(outer.allocator(), .{ .seed = 7600 });
+    _ = try founding.createCommander(&gs, "T", .LC, .quartermaster);
+    const hq_id = gs.hqs.keys()[0];
+    // Put stock on the HQ shelf; the outfit depot's spare_parts map
+    // has the key only if founding seeded it. Use a key the depot
+    // does not carry so the destination getOrPut must allocate.
+    try gs.addStock(.{ .hq = hq_id }, "armor", 5);
+
+    const before = digest.stateHash(&gs);
+
+    // Block every further allocation: the destination map's
+    // ensureUnusedCapacity must fail before takeStock runs.
+    gs.arena.state.used_list = null;
+    gs.arena.state.free_list = null;
+    gs.arena.child_allocator = std.testing.failing_allocator;
+
+    try std.testing.expectError(error.OutOfMemory, moveStock(&gs, .{ .hq = hq_id }, .outfit, "armor", 5));
+    try std.testing.expectEqual(before, digest.stateHash(&gs));
 }

@@ -24,8 +24,6 @@ Owner of every entry: the project owner.
   - **`acceptContract`.** It removes the offer before its fallible steps (`commands.zig:2351-2419`).
   - **Assets split by a fallible step after a mutation:**
     - `commands.zig`: `execSellStock:1179`, `execTrimStock:1276`, `execHireCandidate:1605`, `execLink:624`, `execTrainAbility:939`, `execUpgradeTier:604`, `orderPart:2210-2230`, `execDisbandCompany:1472`
-    - `sites.moveStock`
-    - `hq_ops.queueDepotRepair:385`
   - **Partial loops.**
     - `replaceGear` (`commands.zig:2118-2156`) runs a per-slot loop with no batch validation.
     - `commitLift` (`commands.zig:2296-2301`) keeps moved ships after a failure.
