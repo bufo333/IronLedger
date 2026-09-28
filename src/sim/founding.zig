@@ -175,7 +175,7 @@ test "foundHq produces an HQ with exactly the facilities from prepareHq" {
 }
 
 test "createCommander yields the same commander, HQ, staff and stock regardless of clock year" {
-    // execCreateCommander sets the start year before calling createCommander;
+    // execCreateCommander sets the start year after createCommander succeeds;
     // this test verifies that the founding output is independent of the
     // clock's year value so the two paths always agree.
     var gs1 = GameState.init(std.testing.allocator, .{ .seed = 8102 });
