@@ -616,6 +616,10 @@ pub fn execDisbandCompany(gs: *GameState, co: @FieldType(Command, "disband_compa
     while (pi < gs.unit_transfers.items.len) {
         if (gs.unit_transfers.items[pi].to_company == co) _ = gs.unit_transfers.orderedRemove(pi) else pi += 1;
     }
+    // Money already dispatched to the disbanded company still lands — at the outfit.
+    for (gs.fund_couriers.items) |*c| if (std.meta.eql(c.to, .{ .company = co })) {
+        c.to = .outfit;
+    };
     hq_ops.refreshHqStaffing(gs);
     try gs.postTransaction(.{ .day = gs.clock.day_index, .amount = total, .category = .unit_sale, .note = "company disbanded" });
     try gs.log(.market, .{}, "[sale] {s} disbanded: {d} hulls sold, people released, {d} raised", .{ name, uids.items.len, total });
@@ -759,4 +763,27 @@ test "a truck sent to a deployed company lands in its transport lance, and can s
     // Joining a deployed company from outside still waits for home.
     const outsider = try gs.addUnit("CGT-3");
     try std.testing.expectError(commands.Error.CompanyDeployed, commands.execute(&gs, .{ .move_unit = .{ .unit = outsider, .force = transport } }));
+}
+
+test "disbanding a company redirects its in-flight courier to the outfit treasury, not into the void" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 45 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
+    gs.funds = 5_000_000;
+    const co = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
+    _ = try commands.execute(&gs, .{ .transfer = .{ .from = .outfit, .to = .{ .company = co }, .amount = 500_000 } });
+    try std.testing.expectEqual(@as(usize, 1), gs.fund_couriers.items.len);
+    const eta = gs.fund_couriers.items[0].eta_day;
+    try std.testing.expect(eta > gs.clock.day_index);
+
+    // Disband Alpha before the courier lands: the money must not vanish.
+    _ = try commands.execute(&gs, .{ .disband_company = co });
+    try std.testing.expectEqual(@as(usize, 1), gs.fund_couriers.items.len);
+    try std.testing.expectEqual(state_mod.Treasury.outfit, gs.fund_couriers.items[0].to);
+    try std.testing.expectEqual(@as(types.CBills, 500_000), gs.fund_couriers.items[0].amount);
+    const funds_after_disband = gs.funds;
+
+    while (gs.clock.day_index < eta) _ = try commands.execute(&gs, .{ .advance_days = 1 });
+    try std.testing.expectEqual(@as(usize, 0), gs.fund_couriers.items.len);
+    try std.testing.expectEqual(funds_after_disband + 500_000, gs.funds);
 }

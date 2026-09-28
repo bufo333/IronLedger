@@ -952,6 +952,10 @@ pub fn sellHq(gs: *GameState, hq_id: types.HqId) !void {
     for (gs.part_orders.items) |*o| if (o.inFlight() and std.meta.eql(o.dest, .{ .hq = hq_id })) {
         o.status = .cancelled;
     };
+    // Money already dispatched to the sold HQ still lands — at the outfit.
+    for (gs.fund_couriers.items) |*c| if (std.meta.eql(c.to, .{ .hq = hq_id })) {
+        c.to = .outfit;
+    };
     _ = gs.hqs.orderedRemove(hq_id);
     const seat: types.HqId = if (gs.hqs.count() > 0) gs.hqs.keys()[0] else .none;
     var uit2 = gs.units.iterator();
@@ -1630,4 +1634,35 @@ test "an upgrade the HQ cannot afford is refused before a C-bill moves, from the
     try std.testing.expect(upgradeBlock(&gs, hq, .mess) == null);
     _ = try commands.execute(&gs, .{ .upgrade_facility = .{ .hq = hq, .kind = .mess } });
     try std.testing.expectEqual(UpgradeBlock.in_progress, upgradeBlock(&gs, hq, .mess).?);
+}
+
+test "selling an HQ redirects its in-flight courier to the outfit treasury, not into the void" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 91 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .DC, .profession = .paymaster } });
+    gs.funds = 20_000_000;
+    _ = try commands.execute(&gs, .{ .found_hq = .{ .name = "Far", .planet_key = "zebebelgenubi" } });
+    const far = gs.hqs.keys()[1];
+    _ = try commands.execute(&gs, .{ .transfer = .{ .from = .outfit, .to = .{ .hq = far }, .amount = 1_000_000 } });
+    try std.testing.expectEqual(@as(usize, 1), gs.fund_couriers.items.len);
+    const eta = gs.fund_couriers.items[0].eta_day;
+    try std.testing.expect(eta > gs.clock.day_index);
+
+    // Sell Far before the courier lands: the money must not vanish.
+    _ = try commands.execute(&gs, .{ .sell_hq = far });
+    try std.testing.expectEqual(@as(usize, 1), gs.fund_couriers.items.len);
+    try std.testing.expectEqual(state_mod.Treasury.outfit, gs.fund_couriers.items[0].to);
+    try std.testing.expectEqual(@as(types.CBills, 1_000_000), gs.fund_couriers.items[0].amount);
+    const funds_after_sale = gs.funds;
+
+    const ledger_before = gs.ledger.transactions.items.len;
+    while (gs.clock.day_index < eta) _ = try commands.execute(&gs, .{ .advance_days = 1 });
+    try std.testing.expectEqual(@as(usize, 0), gs.fund_couriers.items.len);
+    try std.testing.expectEqual(funds_after_sale + 1_000_000, gs.funds);
+
+    var found = false;
+    for (gs.ledger.transactions.items[ledger_before..]) |t| if (t.category == .fund_transfer and t.amount == 1_000_000) {
+        found = true;
+    };
+    try std.testing.expect(found);
 }
