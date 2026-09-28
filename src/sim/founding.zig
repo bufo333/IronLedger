@@ -136,8 +136,8 @@ const Command = commands.Command;
 
 pub fn execCreateCommander(gs: *GameState, c: @FieldType(Command, "create_commander")) Error!Result {
     if (c.start_year < 3000 or c.start_year > 3060) return Error.BadYear;
-    gs.clock.date.year = c.start_year;
     _ = try createCommander(gs, c.name, c.origin, c.profession);
+    gs.clock.date.year = c.start_year;
     // Until renamed, the outfit carries the commander's name — it
     // reads far better in the campaign registry.
     if (std.mem.eql(u8, gs.outfit_name, "Provisional Mercenary Command")) {
@@ -217,6 +217,16 @@ test "createCommander yields the same commander, HQ, staff and stock regardless 
     for (part_mod.munition_keys) |key| {
         try std.testing.expectEqual(gs1.stockCount(site1, key), gs2.stockCount(site2, key));
     }
+}
+
+test "a failed commander creation leaves the clock year untouched" {
+    var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = 2 });
+    var gs = GameState.init(failing.allocator(), .{ .seed = 8103 });
+    defer gs.deinit();
+    const initial_year = gs.clock.date.year;
+
+    try std.testing.expectError(error.OutOfMemory, commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster, .start_year = 3040 } }));
+    try std.testing.expectEqual(initial_year, gs.clock.date.year);
 }
 
 test "the start year sets the calendar and gates the catalogue" {

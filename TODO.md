@@ -25,7 +25,6 @@ C18 (D23-D25, D32 and D34 are closed). The order below is authoritative and
 supersedes the audit response's original delivery order.
 
 - [ ] C3 money and assets always move with their record (rules 1, 13, 19, 44), one regression-first branch per line:
-  - [ ] C3e commander creation validates the year and existing commander before changing the clock or consuming RNG.
   - [ ] C3f part ordering checks destination and funds before money movement or RNG consumption.
   - [ ] C3g GAME OVER derives its wording from final-save success and offers a retry after failure. Delete C3 when every ledger site has its regression.
 - [ ] C5 failure atomicity (rules 11-15, 17, 69), each branch adding a `FailingAllocator` digest test for its mutation pattern:
