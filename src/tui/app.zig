@@ -436,7 +436,12 @@ pub const App = struct {
 
     /// Title screen: five seconds, or any key.
     fn runSplash(self: *App) !void {
-        splash.draw(&self.screen, self.screen.ascii);
+        var seed: u64 = @intCast(@as(u32, @bitCast(std.c.getpid())));
+        const now = std.Io.Clock.now(.real, self.io);
+        seed ^= @as(u64, @truncate(@as(u96, @bitCast(now.nanoseconds))));
+        var prng = std.Random.DefaultPrng.init(seed);
+        const idx = prng.random().uintLessThan(usize, splash.mechs.len);
+        splash.draw(&self.screen, self.screen.ascii, idx);
         try self.screen.flush(self.term.out);
         var ticks: u32 = 0;
         while (ticks < 50) : (ticks += 1) {

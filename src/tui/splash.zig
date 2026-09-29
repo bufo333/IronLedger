@@ -1,4 +1,5 @@
-//! Title screen (Stage 12): the game's name and a BattleMech in ASCII,
+//! Title screen (Stage 12): the game's name and one of four BattleMechs in
+//! ASCII, chosen at random each launch (Timber Wolf, Dire Wolf, Mad Dog, Nova),
 //! held for five seconds at start or until a key is pressed. Pure drawing
 //! into the cell grid; the wait loop lives in app.zig.
 //! No MekHQ counterpart: the title screen (docs/mekhq-map.md).
@@ -29,41 +30,156 @@ pub const title_ascii = [_][]const u8{
     "|___|_| \\_\\\\___/|_| \\_|  |_____|_____|____/ \\____|_____|_| \\_\\",
 };
 
-/// A heavy 'Mech, three-quarter view, ~26 rows × 58 columns.
-pub const mech = [_][]const u8{
-    "                         ______                           ",
-    "                    ____/      \\____                      ",
-    "                   |    |  __  |    |                     ",
-    "                   |____| |__| |____|         /\\          ",
-    "               ___/  [=====||=====]  \\___    //\\\\         ",
-    "              /   |   \\ ________ /   |   \\  //  \\\\        ",
-    "             / /| |    |  o  o  |    | |\\ \\//    \\\\       ",
-    "            / / | |    |________|    | | \\ /      \\\\      ",
-    "           / /  | |   /|   ||   |\\   | |  \\        \\\\     ",
-    "     _____/ /   | |  / |___||___| \\  | |   \\____    \\\\    ",
-    "    |  ___  |   | | /  |[]||||[]|  \\ | |   |  __|  __\\\\___",
-    "    | |LRM| |   | |/   |[]||||[]|   \\| |   | |__|  \\__  __/",
-    "    | |20 | |   |  |   |[]||||[]|   |  |   |  __|     ||  ",
-    "    | |___| |   |  |   |__||||__|   |  |   | |__|     ||  ",
-    "    |_______|   |__|   |  ||||  |   |__|   |____|   __||__",
-    "       | |       | |   |  ||||  |   | |       | |   |______|",
-    "       | |       | |   |__||||__|   | |       | |          ",
-    "       |_|      _| |___|  |  |  |___| |_      |_|          ",
-    "               |___________|  |___________|                ",
-    "                |    |    |    |    |    |                 ",
-    "                |    |    |    |    |    |                 ",
-    "                |    |    |    |    |    |                 ",
-    "                |____|    |    |    |____|                 ",
-    "               /     |    |    |    |     \\                ",
-    "              /______|____|    |____|______\\               ",
-    "             |_______________|_______________|              ",
+/// Shared attribution line shown below every mech drawing.
+pub const credit = "By: Rick Heney";
+
+/// One mech drawing: caption name and art rows (pure ASCII, no markup braces).
+pub const MechArt = struct {
+    /// The exact caption delivered with the drawing, e.g. "ASCII Timber Wolf".
+    name: []const u8,
+    /// Drawing rows only (no caption); every row is pure ASCII.
+    art: []const []const u8,
+};
+
+/// Four BattleMechs by Rick Heney; one is chosen at random each launch.
+pub const mechs = [_]MechArt{
+    // index 0
+    .{
+        .name = "ASCII Timber Wolf",
+        .art = &[_][]const u8{
+            "          ----             ----",
+            "         |oooo|           |oooo|",
+            "         |oooo|           |oooo|",
+            "         |oooo| /-------\\ |oooo|",
+            "        (|*ooo|/\\  | |  /\\|ooo*|)",
+            "          ----| /-------\\ |----",
+            "        /--\\| |/  \\ | /  \\| |/--\\",
+            "    ___/\\  || ||  /---\\  || ||  /\\___",
+            "   /\\\\__/\\-/|_|\\--|\\/_/|--/|_|\\-/\\__//\\",
+            "   | /         0=\\o---o/=0         \\ |",
+            "   |-|            \\o_o/            |-|",
+            "   (=)           |=====|           (=)",
+            "   |-|       _ __ |---| __ _       |-|",
+            "  /---\\    /| |||=======||| |\\    /---\\",
+            "  |<0>|    || |||=======||| ||    |<0>|",
+            "  \\---/    \\|_|--       --|_|/    \\---/",
+            "   |o|      ||             ||      |o|",
+            "           /||             ||\\",
+            "         /--|\\|           /||--\\",
+            "         |====|           |====|",
+            "         \\_||_/           \\_||_/",
+            "          /||\\             /||\\",
+            "          ||||             ||||",
+            "         //--\\\\           //--\\\\",
+            "         ||  ||           ||  ||",
+            "         ||  ||           ||  ||",
+            "         \\|  |/           \\|  |/",
+            "         /\\__/\\           /\\__/\\",
+            "      __ /====\\ __     __ /====\\ __",
+            "     /_/==|__|==\\_\\   /_/==|__|==\\_\\",
+        },
+    },
+    // index 1
+    .{
+        .name = "ASCII Dire Wolf",
+        .art = &[_][]const u8{
+            "                 _____",
+            "                /ooooo\\",
+            "                |\\oooo|",
+            "          ___----___oo|",
+            "        _/  ______  \\_/",
+            "   __  |/  / ____ \\  \\|  __",
+            "  || ||/= / /    \\ \\ =\\|| ||",
+            " [|| |||_/_| \\==/ |_\\_||| ||]",
+            "  || |||_| |\\____/| |_||| ||",
+            "  ||/    | |\\o()o/| |    \\||",
+            "  |||    |_| \\__/ |_|    |||",
+            " /---|      ==||==      |---\\",
+            " |O O|  ___  ====  ___  |O O|",
+            " | O | |   |||--|||   | | O |",
+            " |O O| |   |||__|||   | |O O|",
+            " \\---| |   | |/\\| |   | |---/",
+            "   V   |---|      |---|   V",
+            "       |___|      |___|",
+            "      /     \\    /     \\",
+            "      |     |    |     |",
+            "      \\     /    \\     /",
+            "       \\___/      \\___/",
+            "       /   \\      /   \\",
+            "    ___|___|      |___|___",
+            "   /  _|/-\\|      |/-\\|_  \\",
+            "   ---  ---        ---  ---",
+        },
+    },
+    // index 2
+    .{
+        .name = "ASCII Mad Dog",
+        .art = &[_][]const u8{
+            "             ___   ___   ___",
+            "            |---| /   \\ |---|",
+            "          _ |ooo|-|   |-|ooo| _",
+            "         / ||ooo| || || |ooo|| \\",
+            "        |  ||ooo| || || |ooo||  |",
+            "       / \\-||ooo|/|| ||\\|ooo||-/ \\",
+            "      / /   |ooo(||---||)ooo|   \\ \\",
+            "    _/ /    |---|\\|   |/|---|    \\ \\_",
+            "   /_\\/     |___|O|---|O|___|     \\/_\\",
+            " (0)_(0)         |=====|         (0)_(0)",
+            "    V        _ __ |---| __ _        V",
+            "           /| |||=======||| |\\",
+            "           || |||=======||| ||",
+            "           \\|_|--       --|_|/",
+            "            ||             ||",
+            "           /||             ||\\",
+            "         /--|\\|           /||--\\",
+            "         |====|           |====|",
+            "         \\_||_/           \\_||_/",
+            "          /||\\             /||\\",
+            "          ||||             ||||",
+            "         //--\\\\           //--\\\\",
+            "         ||  ||           ||  ||",
+            "         ||  ||           ||  ||",
+            "         \\|  |/           \\|  |/",
+            "         /\\__/\\           /\\__/\\",
+            "      __ /====\\ __     __ /====\\ __",
+            "     /_/==|__|==\\_\\   /_/==|__|==\\_\\",
+        },
+    },
+    // index 3
+    .{
+        .name = "ASCII Nova",
+        .art = &[_][]const u8{
+            "          __                  __",
+            "     _   _||-\\   ________   /-||_   _",
+            "    | |-| ||| |=| ______ |=| ||| |-| |",
+            "    | ||| ||| | ||-/||\\-|| | ||| ||| |",
+            "    | ||| ||| | |_/_/\\_\\_| | ||| ||| |",
+            "    | |-| ||| |=-| ____ |-=| ||| |-| |",
+            "    | | | ||-/   |/ __ \\|   \\-|| | | |",
+            "   _|_| | |||   _| |  | |_   ||| | |_|_",
+            "  _| |  |-|||] /=|_|__|_|=\\ [|||-|  | |_",
+            " /0--0| \\||||  \\o_/    \\_o/  ||||/ |0--0\\",
+            "|0|==||  /  \\                /  \\  ||==|0|",
+            "|0|=='|  |--|                |--|  |`==|0|",
+            " \\0__0|  |  |                |  |  |0__0/",
+            "         |__|                |__|",
+            "         /||\\                /||\\",
+            "          ||                  ||",
+            "         /--\\                /--\\",
+            "        /____\\              /____\\",
+            "     ____----_              _----____",
+            "    /|___|  |_|            |_|  |___|\\",
+            "   /__/ _|__|_              _|__|_ \\__\\",
+        },
+    },
 };
 
 /// Draw the splash centred on the screen.
-pub fn draw(s: *Screen, ascii: bool) void {
+pub fn draw(s: *Screen, ascii: bool, index: usize) void {
     s.clear();
+    const m = mechs[index];
     const t: []const []const u8 = if (ascii) &title_ascii else &title;
-    const total_h: i32 = @intCast(t.len + 2 + mech.len + 3);
+    const total_h: i32 = @intCast(t.len + 2 + m.art.len + 3 + 3);
     var y: i32 = @max(1, @divTrunc(@as(i32, s.rows) - total_h, 2));
     for (t) |line| {
         const w: i32 = @intCast(screen_mod.visibleLen(line));
@@ -76,22 +192,30 @@ pub fn draw(s: *Screen, ascii: bool) void {
     y += 2;
     // Centre the figure as a block: every row starts at the same column.
     var mech_w: i32 = 0;
-    for (mech) |line| mech_w = @max(mech_w, @as(i32, @intCast(line.len)));
+    for (m.art) |line| mech_w = @max(mech_w, @as(i32, @intCast(line.len)));
     const mech_x: i32 = @max(0, @divTrunc(@as(i32, s.cols) - mech_w, 2));
-    for (mech) |line| {
+    for (m.art) |line| {
         _ = s.text(mech_x, y, s.cols, line, .normal);
         y += 1;
     }
+    y += 1;
+    _ = s.text(@max(0, @divTrunc(@as(i32, s.cols) - @as(i32, @intCast(m.name.len)), 2)), y, s.cols, m.name, .dim);
+    y += 1;
+    _ = s.text(@max(0, @divTrunc(@as(i32, s.cols) - @as(i32, credit.len), 2)), y, s.cols, credit, .dim);
+    y += 1;
     y += 1;
     const hint = "press any key";
     _ = s.text(@max(0, @divTrunc(@as(i32, s.cols) - @as(i32, hint.len), 2)), @min(y, @as(i32, s.rows) - 1), s.cols, hint, .dim);
 }
 
-test "splash art fits a 200x50 frame and the mech rows share a width" {
+test "every splash mech and both titles fit a 200x50 frame" {
     var s = try Screen.init(std.testing.allocator, 200, 50);
     defer s.deinit();
-    draw(&s, false);
-    draw(&s, true);
-    for (mech) |row| try std.testing.expect(row.len <= 60);
+    try std.testing.expectEqual(@as(usize, 4), mechs.len);
+    for (mechs, 0..) |mech, i| {
+        draw(&s, false, i);
+        draw(&s, true, i);
+        for (mech.art) |row| try std.testing.expect(row.len <= 60);
+    }
     for (title) |row| try std.testing.expect(screen_mod.visibleLen(row) <= 90);
 }
