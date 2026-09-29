@@ -893,8 +893,8 @@ fn completeJob(gs: *GameState, job: *state_mod.BayJob) !bool {
             // Inlined from injureTech + inflict + checkAwards; all
             // allocations were pre-reserved above, so no fallible ops here.
             if (gs.rng.roll2d6(.medical) == 2 and u.tech != .none) {
+                const acc_days = tuning.maintenance.bay_accident_days_base + gs.rng.roll2d6(.medical);
                 if (injure_tech_ptr) |it| if (it.status == .active) {
-                    const acc_days = tuning.maintenance.bay_accident_days_base + gs.rng.roll2d6(.medical);
                     const severity: u8 = if (acc_days <= tuning.maintenance.injury_days_serious) 1 else if (acc_days <= tuning.maintenance.injury_days_crippling) 2 else 3;
                     // inflict: location, permanent check, append injury.
                     const location = @import("medical.zig").rollLocation(gs, .accident);
