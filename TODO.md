@@ -72,10 +72,6 @@ C18.
 - [ ] C15 routing, truck capacity, and beachhead operation (C15a-C15c; rules
   20, 22, 24): feasible tonnage-aware routing, passive/active truck capability,
   beachhead pricing, and field-HQ recovery. Delete C15.
-- [ ] C17 focused test coverage (rule 67): C17a1-C17b7 are completed with their
-  matching C5-C15/C20 rule and query owners; C17c's named screen binding and
-  empty-state coverage is completed with C12. The C20 completion inventory
-  confirms no scoped omission remains, then deletes C17.
 - [ ] C18 external input and resource bounds (C18a-C18e; rules 41, 64): cell
   width, PNG/blob/CSI validation, and bounded music lifecycle. Delete C18.
 - [ ] C19 explicit platforms (C19a-C19c; rule 65): target-gated terminal and
@@ -85,6 +81,14 @@ C18.
   rules 61, 75, 81, 82, 84): module links, corrected comments/citations,
   unit-bearing names, legible formulas, and the final C17 scope inventory.
   Delete C20 and C17.
+
+C17 focused coverage (rule 67) is required within its owner packages, not a
+separate branch: C17a1/b5 with C11-HQ; C17a2/a4/b3 with
+C11-medical-personnel; C17a3/b1 with C5 and C13; C17a5-a6/b2/b5-b6 with
+C11-contract-supply and C15; C17a7/b7 with C13 and C20; C17b4 with
+C11-forces; and C17c's Desk, Contracts, Ledger, Forces, People, Supply, HQ,
+Market, Lab, and Map coverage with the two C12 packages. C20's final inventory
+must show no scoped omission before it deletes C17.
 
 ## Data verification (needs the sourcebooks)
 
