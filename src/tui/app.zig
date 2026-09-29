@@ -571,11 +571,37 @@ pub const App = struct {
 
     /// Load the campaign's emblem (a PNG stored on one of its forces).
     /// Decodes the new emblem before freeing the old; on failure the current
-    /// emblem stays valid (rule 63).
+    /// emblem stays valid (rule 63). When there is no valid emblem to show
+    /// (no live state, no outfit emblem, or non-PNG bytes) the current emblem
+    /// is cleared so it does not bleed into a new campaign.
     fn refreshEmblem(self: *App) void {
-        const g = (self.stateOrNull() orelse return);
-        const bytes = q.outfitEmblem(g) orelse return;
-        if (!png.isPng(bytes)) return;
+        const g = self.stateOrNull() orelse {
+            if (self.emblem) |*e| {
+                // best-effort: freeing an optional graphics image.
+                if (self.graphics == .kitty) emblem_mod.kittyForget(self.term.out, e.kitty_id) catch {};
+                e.deinit(self.gpa);
+                self.emblem = null;
+            }
+            return;
+        };
+        const bytes = q.outfitEmblem(g) orelse {
+            if (self.emblem) |*e| {
+                // best-effort: freeing an optional graphics image.
+                if (self.graphics == .kitty) emblem_mod.kittyForget(self.term.out, e.kitty_id) catch {};
+                e.deinit(self.gpa);
+                self.emblem = null;
+            }
+            return;
+        };
+        if (!png.isPng(bytes)) {
+            if (self.emblem) |*e| {
+                // best-effort: freeing an optional graphics image.
+                if (self.graphics == .kitty) emblem_mod.kittyForget(self.term.out, e.kitty_id) catch {};
+                e.deinit(self.gpa);
+                self.emblem = null;
+            }
+            return;
+        }
         // Decode the replacement first; only on success replace the current emblem.
         // best-effort: without a decodable picture the preset emblem stays.
         const new_emblem = emblem_mod.Emblem.load(self.gpa, bytes, 1) catch return;
