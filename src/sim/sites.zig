@@ -411,6 +411,78 @@ pub fn replaceMount(gs: *GameState, unit_id: types.UnitId, slot_key: []const u8)
     return error.NoSuchSlot;
 }
 
+/// Per-order acquisition plan: computed in the prepare phase, consumed in
+/// the commit phase by `singleOrderAcquire`. Used by both `orderPart` and
+/// `replaceGear` so the cost formula, lead-time formula, sourcing logic,
+/// acquisition roll, and refusal wording live exactly once (rule 20).
+const OrderEntry = struct {
+    def: *const part_mod.PartDef,
+    /// Pre-allocated heap buffer for the refusal log line (persistent arena).
+    fail_buf: []u8,
+    /// Pre-allocated sourcing explanation string (persistent arena).
+    why: []const u8,
+    lead_days: u32,
+    cost: types.CBills,
+    onward: Freight,
+    src: part_mod.Sourcing,
+};
+
+/// Commit one acquisition order: roll `.acquisition`, then either append a
+/// failure log line or debit + freight + part_order record.  All list and
+/// ledger capacity must be pre-reserved by the caller.  Returns true when
+/// the order was sourced.
+fn singleOrderAcquire(
+    gs: *GameState,
+    od: OrderEntry,
+    hq_id: types.HqId,
+    site: types.Site,
+    quantity: u32,
+    admin_bonus: i32,
+    world_industry: u8,
+) bool {
+    const roll = @as(i32, gs.rng.roll2d6(.acquisition)) + admin_bonus + world_industry / 2 + od.src.total();
+    const sourced = roll >= od.def.rarity.availabilityTarget();
+    if (!sourced) {
+        var date_buf: [10]u8 = undefined;
+        const line = std.fmt.bufPrint(od.fail_buf, "{s} [order] logistics could not source {d} × {s} this time ({s}, roll {d} vs {d}{s}{s}) — retry after the monthly refresh{s}", .{
+            gs.clock.date.text(&date_buf), quantity, od.def.key, @tagName(od.def.rarity), roll, od.def.rarity.availabilityTarget(), if (od.why.len > 0) "; " else "", od.why, if (part_mod.isComponent(od.def.key)) ", or fabricate it in the bay" else "",
+        }) catch unreachable;
+        gs.part_orders.appendAssumeCapacity(.{
+            .part_key = od.def.key,
+            .quantity = quantity,
+            .dest = site,
+            .ordered_day = gs.clock.day_index,
+            .cost = 0,
+            .status = .failed,
+        });
+        gs.event_log.appendAssumeCapacity(.{
+            .day = gs.clock.day_index,
+            .category = .delivery,
+            .hq = hq_id,
+            .text = line,
+        });
+        return false;
+    }
+    gs.postTreasury(.{ .hq = hq_id }, .{
+        .day = gs.clock.day_index,
+        .amount = -od.cost,
+        .category = .parts,
+        .hq = hq_id,
+        .note = od.def.name,
+    }) catch unreachable; // ledger reserved by caller; treasury validated in prepare
+    if (site == .company) commitFreight(gs, od.onward);
+    gs.part_orders.appendAssumeCapacity(.{
+        .part_key = od.def.key,
+        .quantity = quantity,
+        .dest = site,
+        .ordered_day = gs.clock.day_index,
+        .eta_day = gs.clock.day_index + od.lead_days,
+        .cost = od.cost,
+        .status = .in_transit,
+    });
+    return true;
+}
+
 pub fn orderPart(gs: *GameState, part_key: []const u8, quantity: u32, dest_opt: ?types.Site) !OrderResult {
     const def = part_mod.find(part_key) orelse return error.UnknownPart;
     if (gs.hqs.count() == 0) return error.NoHq;
@@ -464,48 +536,18 @@ pub fn orderPart(gs: *GameState, part_key: []const u8, quantity: u32, dest_opt: 
     const fail_buf = try gs.allocator().alloc(u8, 256 + def.key.len + why.len);
 
     // ---- commit: the roll and everything after it cannot fail ----
-    const roll = @as(i32, gs.rng.roll2d6(.acquisition)) + admin_bonus + world.industry / 2 + src.total();
-    const sourced = roll >= def.rarity.availabilityTarget();
-
-    if (!sourced) {
-        var date_buf: [10]u8 = undefined;
-        const line = std.fmt.bufPrint(fail_buf, "{s} [order] logistics could not source {d} × {s} this time ({s}, roll {d} vs {d}{s}{s}) — retry after the monthly refresh{s}", .{
-            gs.clock.date.text(&date_buf), quantity, def.key, @tagName(def.rarity), roll, def.rarity.availabilityTarget(), if (why.len > 0) "; " else "", why, if (part_mod.isComponent(def.key)) ", or fabricate it in the bay" else "",
-        }) catch unreachable;
-        gs.part_orders.appendAssumeCapacity(.{
-            .part_key = def.key,
-            .quantity = quantity,
-            .dest = dest,
-            .ordered_day = gs.clock.day_index,
-            .cost = 0,
-            .status = .failed,
-        });
-        gs.event_log.appendAssumeCapacity(.{
-            .day = gs.clock.day_index,
-            .category = .delivery,
-            .hq = hq_id,
-            .text = line,
-        });
+    const od: OrderEntry = .{
+        .def = def,
+        .fail_buf = fail_buf,
+        .why = why,
+        .lead_days = lead_days,
+        .cost = total,
+        .onward = onward,
+        .src = src,
+    };
+    if (!singleOrderAcquire(gs, od, hq_id, dest, quantity, admin_bonus, world.industry)) {
         return .{ .sourced = false };
     }
-
-    try treasury.debit(gs, .{ .hq = hq_id }, .{
-        .day = gs.clock.day_index,
-        .amount = -total,
-        .category = .parts,
-        .hq = hq_id,
-        .note = def.name,
-    });
-    if (dest == .company) commitFreight(gs, onward);
-    gs.part_orders.appendAssumeCapacity(.{
-        .part_key = def.key,
-        .quantity = quantity,
-        .dest = dest,
-        .ordered_day = gs.clock.day_index,
-        .eta_day = gs.clock.day_index + lead_days,
-        .cost = total,
-        .status = .in_transit,
-    });
     return .{};
 }
 
@@ -543,15 +585,6 @@ pub fn replaceGear(gs: *GameState, unit_id: types.UnitId) !ReplaceGearResult {
 
     // Per-order data kept in the scratch arena; fail_buf and why are in
     // the persistent arena because event_log entries reference them (rule 12).
-    const OrderEntry = struct {
-        def: *const part_mod.PartDef,
-        fail_buf: []u8,
-        why: []const u8,
-        lead_days: u32,
-        cost: types.CBills,
-        onward: Freight,
-        src: part_mod.Sourcing,
-    };
     var order_entries: std.ArrayListUnmanaged(OrderEntry) = .empty;
     var total_wanted: u32 = 0;
     // Aggregate part_key → qty for the room check (rule 15).
@@ -619,48 +652,10 @@ pub fn replaceGear(gs: *GameState, unit_id: types.UnitId) !ReplaceGearResult {
     var ordered: u32 = 0;
     var unsourced: u32 = 0;
     for (order_entries.items) |od| {
-        const roll = @as(i32, gs.rng.roll2d6(.acquisition)) + admin_bonus + world.industry / 2 + od.src.total();
-        const sourced_ok = roll >= od.def.rarity.availabilityTarget();
-        if (!sourced_ok) {
-            var date_buf: [10]u8 = undefined;
-            const line = std.fmt.bufPrint(od.fail_buf, "{s} [order] logistics could not source {d} × {s} this time ({s}, roll {d} vs {d}{s}{s}) — retry after the monthly refresh{s}", .{
-                gs.clock.date.text(&date_buf), @as(u32, 1), od.def.key, @tagName(od.def.rarity), roll, od.def.rarity.availabilityTarget(), if (od.why.len > 0) "; " else "", od.why, if (part_mod.isComponent(od.def.key)) ", or fabricate it in the bay" else "",
-            }) catch unreachable;
-            gs.part_orders.appendAssumeCapacity(.{
-                .part_key = od.def.key,
-                .quantity = 1,
-                .dest = site,
-                .ordered_day = gs.clock.day_index,
-                .cost = 0,
-                .status = .failed,
-            });
-            gs.event_log.appendAssumeCapacity(.{
-                .day = gs.clock.day_index,
-                .category = .delivery,
-                .hq = hq_id,
-                .text = line,
-            });
-            unsourced += 1;
-        } else {
-            // Debit uses the reserved ledger slot; cannot fail after reservation.
-            treasury.debit(gs, .{ .hq = hq_id }, .{
-                .day = gs.clock.day_index,
-                .amount = -od.cost,
-                .category = .parts,
-                .hq = hq_id,
-                .note = od.def.name,
-            }) catch unreachable;
-            if (site == .company) commitFreight(gs, od.onward);
-            gs.part_orders.appendAssumeCapacity(.{
-                .part_key = od.def.key,
-                .quantity = 1,
-                .dest = site,
-                .ordered_day = gs.clock.day_index,
-                .eta_day = gs.clock.day_index + od.lead_days,
-                .cost = od.cost,
-                .status = .in_transit,
-            });
+        if (singleOrderAcquire(gs, od, hq_id, site, 1, admin_bonus, world.industry)) {
             ordered += 1;
+        } else {
+            unsourced += 1;
         }
     }
     return .{ .ordered = ordered, .unsourced = unsourced };

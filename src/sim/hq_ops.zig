@@ -770,12 +770,14 @@ fn completeJob(gs: *GameState, job: *state_mod.BayJob) !bool {
     // non-failing commit tail guarantees rollRepair runs exactly once.
     //
     // Log budget per job kind:
-    //   depot_repair: redo(1) or [tail(0-1) + complete(1) + injure(0-2)] → max 4
+    //   depot_repair: redo(1) or [tail(0-1) + complete(1) + wound(1) +
+    //                 awards(0-N) + roster(0-1)] → max 4 + award_table.len
     //   refit:        redo(1) or [tail(0-1) + complete(1)]               → max 2
     //   reactivation: complete(1)                                          → 1
     //   fabrication:  complete(1)                                          → 1
+    const award_table = @import("../domain/award.zig").table;
     const n_logs: usize = switch (job.kind) {
-        .depot_repair => 4,
+        .depot_repair => 4 + award_table.len,
         .refit => 2,
         .reactivation, .fabrication => 1,
     };
@@ -812,6 +814,31 @@ fn completeJob(gs: *GameState, job: *state_mod.BayJob) !bool {
             }
             break;
         }
+    }
+
+    // Depot-repair injure branch: pre-reserve everything inflict + checkAwards
+    // + injureTech need so the commit tail (which inlines those functions) is
+    // allocation-free (rule 17, C5q).  All the log slots are already included
+    // in n_logs above.
+    var injure_tech_ptr: ?*person_mod.Person = null;
+    var injure_full_name: []const u8 = "";
+    var injure_ranked_name: []const u8 = "";
+    var injure_wound_buf: []u8 = &.{};
+    var injure_award_bufs: [][]u8 = &.{};
+    var injure_roster_buf: []u8 = &.{};
+    if (job.kind == .depot_repair) blk: {
+        const u = gs.unit(job.unit) orelse break :blk;
+        if (u.tech == .none) break :blk;
+        const t = gs.person(u.tech) orelse break :blk;
+        injure_tech_ptr = t;
+        injure_full_name = try t.fullName(gs.allocator());
+        injure_ranked_name = try t.rankedName(gs.allocator());
+        injure_wound_buf = try gs.allocator().alloc(u8, 256);
+        injure_award_bufs = try gs.allocator().alloc([]u8, award_table.len);
+        for (injure_award_bufs) |*buf| buf.* = try gs.allocator().alloc(u8, 256);
+        injure_roster_buf = try gs.allocator().alloc(u8, 256);
+        try t.injuries.ensureUnusedCapacity(gs.allocator(), 1);
+        try t.awards.ensureUnusedCapacity(gs.allocator(), award_table.len);
     }
 
     // Pre-allocate log-line buffers (commit tail uses bufPrint — cannot fail).
@@ -861,10 +888,92 @@ fn completeJob(gs: *GameState, job: *state_mod.BayJob) !bool {
                 date_str, u.chassis_key,
             }) catch unreachable;
             gs.event_log.appendAssumeCapacity(.{ .day = today, .category = .construction, .hq = job.hq, .text = line });
-            // Big jobs hurt people: snake-eyes on 2d6 (≈3%)
-            // injures the hull's tech on the last day of the rebuild.
+            // Big jobs hurt people: snake-eyes on 2d6 (≈3%) injures
+            // the hull's tech on the last day of the rebuild.
+            // Inlined from injureTech + inflict + checkAwards; all
+            // allocations were pre-reserved above, so no fallible ops here.
             if (gs.rng.roll2d6(.medical) == 2 and u.tech != .none) {
-                try @import("maintenance.zig").injureTech(gs, u.tech, tuning.maintenance.bay_accident_days_base + gs.rng.roll2d6(.medical), "bay accident");
+                if (injure_tech_ptr) |it| if (it.status == .active) {
+                    const acc_days = tuning.maintenance.bay_accident_days_base + gs.rng.roll2d6(.medical);
+                    const severity: u8 = if (acc_days <= tuning.maintenance.injury_days_serious) 1 else if (acc_days <= tuning.maintenance.injury_days_crippling) 2 else 3;
+                    // inflict: location, permanent check, append injury.
+                    const location = @import("medical.zig").rollLocation(gs, .accident);
+                    const permanent = severity >= 3 and (location == .head or location == .internal) and gs.rng.roll2d6(.medical) <= tuning.medical.permanent_target;
+                    it.injuries.appendAssumeCapacity(.{
+                        .location = location,
+                        .severity = @min(severity, 3),
+                        .incurred_day = today,
+                        .permanent = permanent,
+                    });
+                    it.status = .wounded;
+                    it.wound_heal_day = null;
+                    if (!gs.auto_admit) it.medbay_admitted = false;
+                    // checkAwards: Wound Badge and any others that became eligible.
+                    for (award_table, 0..) |a, ai| {
+                        if (it.hasAward(a.key)) continue;
+                        if (it.counter(a.kind, today) < a.threshold) continue;
+                        it.awards.appendAssumeCapacity(a.key);
+                        it.last_award_day = today;
+                        it.morale = @intCast(@min(100, @as(u32, it.morale) + a.morale));
+                        const award_line = std.fmt.bufPrint(injure_award_bufs[ai], "{s} [award] {s} receives the {s} ({s} {d})", .{
+                            date_str,                  injure_ranked_name, a.name, @tagName(a.kind),
+                            it.counter(a.kind, today),
+                        }) catch unreachable;
+                        gs.event_log.appendAssumeCapacity(.{
+                            .day = today,
+                            .category = .rotation,
+                            .company = gs.companyOf(it.assigned_force),
+                            .hq = it.posted_hq,
+                            .contract = .none,
+                            .text = award_line,
+                        });
+                    }
+                    // Wound log.
+                    const wound_line = std.fmt.bufPrint(injure_wound_buf, "{s} [medbay] {s} wounded (bay accident): {s} {s}{s}", .{
+                        date_str,                                       injure_full_name,
+                        @import("medical.zig").severityLabel(severity), @tagName(location),
+                        if (permanent) " — permanent" else "",
+                    }) catch unreachable;
+                    gs.event_log.appendAssumeCapacity(.{
+                        .day = today,
+                        .category = .medical,
+                        .company = gs.companyOf(it.assigned_force),
+                        .hq = .none,
+                        .contract = .none,
+                        .text = wound_line,
+                    });
+                    // injureTech roster reassignment.
+                    const tech_company = gs.companyOf(it.assigned_force);
+                    var swapped: u32 = 0;
+                    var open: u32 = 0;
+                    var rit = gs.units.iterator();
+                    while (rit.next()) |uentry| {
+                        const ru = uentry.value_ptr;
+                        if (ru.tech != it.id) continue;
+                        const role = unit_mod.techRoleFor(ru.kind) orelse continue;
+                        const needed = @import("maintenance.zig").hullHours(gs, ru);
+                        if (@import("maintenance.zig").findFreeTech(gs, role, gs.companyOf(ru.force), needed)) |replacement| {
+                            ru.tech = replacement;
+                            swapped += 1;
+                        } else {
+                            ru.tech = .none;
+                            open += 1;
+                        }
+                    }
+                    if (swapped + open > 0) {
+                        const roster_line = std.fmt.bufPrint(injure_roster_buf, "{s} [roster] {d} hull(s) reassigned to free techs, {d} left without a tech", .{
+                            date_str, swapped, open,
+                        }) catch unreachable;
+                        gs.event_log.appendAssumeCapacity(.{
+                            .day = today,
+                            .category = .medical,
+                            .company = tech_company,
+                            .hq = .none,
+                            .contract = .none,
+                            .text = roster_line,
+                        });
+                    }
+                };
             }
         },
         .reactivation => if (gs.unit(job.unit)) |u| {
@@ -1983,7 +2092,7 @@ test "a due depot-repair bay job is unchanged — no RNG consumed, no treasury d
     const unit_status_before = gs.unit(uid).?.status;
     const funds_before = gs.hqs.getPtr(hq).?.funds;
 
-    // Block all further allocations: reserveLog(4) — the first call inside
+    // Block all further allocations: reserveLog(n_logs) — the first call inside
     // completeJob — fails before rollRepair ever runs (no RNG consumed).
     gs.arena.state.used_list = null;
     gs.arena.state.free_list = null;
@@ -1994,4 +2103,53 @@ test "a due depot-repair bay job is unchanged — no RNG consumed, no treasury d
     try std.testing.expectEqual(@as(usize, 1), gs.bay_jobs.items.len);
     try std.testing.expectEqual(unit_status_before, gs.unit(uid).?.status);
     try std.testing.expectEqual(funds_before, gs.hqs.getPtr(hq).?.funds);
+}
+
+test "bay-job injure-branch: when the bay accident fires the injury is atomically committed" {
+    // Scan seeds until one produces a completed depot-repair with a bay accident
+    // (roll2d6(.medical) == 2 in the commit tail).  With ≈2.8% per-seed odds,
+    // 500 seeds reliably yields several hits.  For each hit verify:
+    //   - the job is gone (the repair completed)
+    //   - the tech is wounded and their injuries list is non-empty
+    //   - status and list are consistent (no partial injury state)
+    const crew_m = @import("crew.zig");
+    var found: bool = false;
+    for (5051..5551) |seed_val| {
+        var gs = GameState.init(std.testing.allocator, .{ .seed = @intCast(seed_val) });
+        defer gs.deinit();
+        _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+        const hq2 = gs.hqs.keys()[0];
+        gs.hqs.getPtr(hq2).?.funds = 5_000_000;
+        const uid2 = try gs.addUnit("LCT-1V");
+        gs.unit(uid2).?.status = .repairing;
+        const tech_id = try gs.hirePerson("Ace", "Wrench", .tech_mek);
+        try crew_m.assignSlot(&gs, uid2, .tech, tech_id);
+        try gs.bay_jobs.append(gs.allocator(), .{
+            .hq = hq2,
+            .kind = .depot_repair,
+            .unit = uid2,
+            .duration_days = 0,
+            .queued_day = 0,
+            .started_day = 0,
+            .done_day = 0,
+            .cost = 0,
+        });
+
+        const jobs_before = gs.bay_jobs.items.len;
+        try runDaily(&gs);
+
+        const job_done = gs.bay_jobs.items.len < jobs_before;
+        const tech = gs.person(tech_id).?;
+        if (job_done and tech.status == .wounded) {
+            // Bay accident fired and injury was committed.
+            // Verify atomicity: status and injuries list are both present.
+            try std.testing.expect(tech.injuries.items.len > 0);
+            // wound_heal_day is null: the medbay has not triaged yet.
+            try std.testing.expectEqual(@as(?u32, null), tech.wound_heal_day);
+            found = true;
+            break;
+        }
+    }
+    // The seed range must contain at least one hit.
+    try std.testing.expect(found);
 }
