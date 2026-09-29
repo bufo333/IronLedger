@@ -726,3 +726,52 @@ CREATE TABLE battle_report_salvage (
     destroyed       INTEGER,                         -- destroyed slots
     missing         INTEGER                          -- missing components
 );
+
+-- Indexes (D31, A28): cid filters on every campaign load; composite shapes
+-- for battle_report sub-tables whose loaders filter on (cid, report_ord).
+-- The executable DDL in src/persist/store.zig is the truth; this block is
+-- the readable reference only.
+CREATE INDEX IF NOT EXISTS ix_meta_cid ON meta(cid);
+CREATE INDEX IF NOT EXISTS ix_meta_text_cid ON meta_text(cid);
+CREATE INDEX IF NOT EXISTS ix_rng_cid ON rng(cid);
+CREATE INDEX IF NOT EXISTS ix_commander_cid ON commander(cid);
+CREATE INDEX IF NOT EXISTS ix_person_cid ON person(cid);
+CREATE INDEX IF NOT EXISTS ix_person_skill_cid ON person_skill(cid);
+CREATE INDEX IF NOT EXISTS ix_injury_cid ON injury(cid);
+CREATE INDEX IF NOT EXISTS ix_award_cid ON award(cid);
+CREATE INDEX IF NOT EXISTS ix_ability_cid ON ability(cid);
+CREATE INDEX IF NOT EXISTS ix_unit_cid ON unit(cid);
+CREATE INDEX IF NOT EXISTS ix_unit_slot_cid ON unit_slot(cid);
+CREATE INDEX IF NOT EXISTS ix_force_cid ON force(cid);
+CREATE INDEX IF NOT EXISTS ix_force_unit_cid ON force_unit(cid);
+CREATE INDEX IF NOT EXISTS ix_force_child_cid ON force_child(cid);
+CREATE INDEX IF NOT EXISTS ix_stock_cid ON stock(cid);
+CREATE INDEX IF NOT EXISTS ix_hq_cid ON hq(cid);
+CREATE INDEX IF NOT EXISTS ix_hq_facility_cid ON hq_facility(cid);
+CREATE INDEX IF NOT EXISTS ix_hq_project_cid ON hq_project(cid);
+CREATE INDEX IF NOT EXISTS ix_contract_cid ON contract(cid);
+CREATE INDEX IF NOT EXISTS ix_txn_cid ON txn(cid);
+CREATE INDEX IF NOT EXISTS ix_loan_cid ON loan(cid);
+CREATE INDEX IF NOT EXISTS ix_courier_cid ON courier(cid);
+CREATE INDEX IF NOT EXISTS ix_policy_cid ON policy(cid);
+CREATE INDEX IF NOT EXISTS ix_bay_job_cid ON bay_job(cid);
+CREATE INDEX IF NOT EXISTS ix_candidate_cid ON candidate(cid);
+CREATE INDEX IF NOT EXISTS ix_hq_link_cid ON hq_link(cid);
+CREATE INDEX IF NOT EXISTS ix_unit_transfer_cid ON unit_transfer(cid);
+CREATE INDEX IF NOT EXISTS ix_supply_policy_cid ON supply_policy(cid);
+CREATE INDEX IF NOT EXISTS ix_stock_policy_cid ON stock_policy(cid);
+CREATE INDEX IF NOT EXISTS ix_faction_cooling_cid ON faction_cooling(cid);
+CREATE INDEX IF NOT EXISTS ix_faction_standing_cid ON faction_standing(cid);
+CREATE INDEX IF NOT EXISTS ix_event_memory_cid ON event_memory(cid);
+CREATE INDEX IF NOT EXISTS ix_listing_cid ON listing(cid);
+CREATE INDEX IF NOT EXISTS ix_part_order_cid ON part_order(cid);
+CREATE INDEX IF NOT EXISTS ix_event_log_cid ON event_log(cid);
+CREATE INDEX IF NOT EXISTS ix_pending_event_cid ON pending_event(cid);
+CREATE INDEX IF NOT EXISTS ix_refit_plan_cid ON refit_plan(cid);
+CREATE INDEX IF NOT EXISTS ix_refit_op_cid ON refit_op(cid);
+CREATE INDEX IF NOT EXISTS ix_rating_snapshot_cid ON rating_snapshot(cid);
+CREATE INDEX IF NOT EXISTS ix_battle_report_cid ON battle_report(cid);
+CREATE INDEX IF NOT EXISTS ix_battle_report_hit_report ON battle_report_hit(cid, report_ord);
+CREATE INDEX IF NOT EXISTS ix_battle_report_ammo_report ON battle_report_ammo(cid, report_ord);
+CREATE INDEX IF NOT EXISTS ix_battle_report_salvage_report ON battle_report_salvage(cid, report_ord);
+CREATE INDEX IF NOT EXISTS ix_rng_stream_cid ON rng_stream(cid);

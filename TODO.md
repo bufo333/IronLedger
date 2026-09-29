@@ -20,10 +20,6 @@ The audit deliverables in `docs/audit-response.md` remain folded in: D26 into
 C10, D27 and D30 into C12, D28 into C7, D29 into C15, D31 into C8, and D33 into
 C18.
 
-- [ ] C8 store and session lifecycle (C8a-C8g; rules 44, 49, 62, 63): strict
-  store opening, SQLite behavior, transactional session ownership, and
-  replacement-safe emblem, preview, campaign, and playlist resources. Include
-  the GAME OVER smoke path. Delete C8.
 - [ ] C9 schema integrity and migrations (C9a-C9c; rules 50, 51, 70): ordered
   migration fixtures, table-rebuild constraints and foreign keys, adversarial
   meta/counter coverage, and `docs/schema.sql`. Delete C9.

@@ -15,33 +15,6 @@ Owner of every entry: the project owner.
 
 ---
 
-### C8. Store lifecycle
-
-- **Rules:** 44, 49, 62, 63.
-- **Why not yet:** It needs SQLite error-code mapping and a strict version read ahead of any DDL.
-- **Scope:**
-  - **Opening a store:**
-    - DDL runs before the version check (`store.zig:174-177`).
-    - `getSetting` returns the default on any error (`267-273`).
-    - The stored version is clamped (`176`, `1021`).
-    - The handle leaks when open fails (`sqlite.zig:46-49`, `store.zig:168-170`).
-  - **Deleting a player:** `deletePlayer` is not atomic and leaves the live session pointing at the deleted player (`306-315`, `lobby.zig:55`).
-  - **SQLite behaviour:**
-    - Errors are coarse (`sqlite.zig:39`).
-    - There is no busy timeout.
-    - `Stmt.run` treats ROW as success (`133`).
-    - There are no indexes.
-  - **Failures shown the wrong way:**
-    - Registry-read errors (`main.zig:78`) and settings writes (`app.zig:1514`, `1524`, `3130-3142`) surface as generic lines.
-    - `lobby.zig:78` sets `player_id` before the save that can fail.
-  - **Old resource freed before its replacement succeeds (rule 63):**
-    - `refreshEmblem` (`app.zig:566-576`)
-    - `loadPreview` (`1752-1761`)
-    - `generateCampaign`, which closes the session first (`1790-1792`)
-    - the music playlist on out-of-memory (`music.zig:175`)
-- **Removal:** C8.
-- **Guard:** review (checklist question 15). No mechanical check.
-
 ### C9. Schema integrity and migrations
 
 - **Rules:** 50, 51, 70.

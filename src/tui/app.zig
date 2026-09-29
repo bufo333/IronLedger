@@ -570,18 +570,21 @@ pub const App = struct {
     }
 
     /// Load the campaign's emblem (a PNG stored on one of its forces).
+    /// Decodes the new emblem before freeing the old; on failure the current
+    /// emblem stays valid (rule 63).
     fn refreshEmblem(self: *App) void {
+        const g = (self.stateOrNull() orelse return);
+        const bytes = q.outfitEmblem(g) orelse return;
+        if (!png.isPng(bytes)) return;
+        // Decode the replacement first; only on success replace the current emblem.
+        // best-effort: without a decodable picture the preset emblem stays.
+        const new_emblem = emblem_mod.Emblem.load(self.gpa, bytes, 1) catch return;
         if (self.emblem) |*e| {
             // best-effort: freeing an optional graphics image.
             if (self.graphics == .kitty) emblem_mod.kittyForget(self.term.out, e.kitty_id) catch {};
             e.deinit(self.gpa);
-            self.emblem = null;
         }
-        const g = (self.stateOrNull() orelse return);
-        const bytes = q.outfitEmblem(g) orelse return;
-        if (!png.isPng(bytes)) return;
-        // best-effort: without a decodable picture the preset emblem stays.
-        self.emblem = emblem_mod.Emblem.load(self.gpa, bytes, 1) catch return;
+        self.emblem = new_emblem;
         // best-effort: an optional graphics image; the half-block emblem still draws.
         if (self.graphics == .kitty) emblem_mod.kittyTransmit(self.term.out, self.gpa, 1, bytes) catch {};
     }
@@ -1535,7 +1538,8 @@ pub const App = struct {
             return;
         });
         m.setEnabled(!m.enabled);
-        try self.store.setSetting("music", @intFromBool(m.enabled));
+        self.store.setSetting("music", @intFromBool(m.enabled)) catch |err|
+            self.say(.crit, "music preference not saved: {s}", .{game.cli.errorText(err)});
         if (m.enabled) m.poll();
         self.last_track = m.current;
         if (m.enabled) self.say(.dim, "♪ music on — {s} ({s}) · :music browses, F12 has the controls", .{ m.nowPlaying() orelse "starting", m.nowPlayingSet() orelse "" }) else self.say(.dim, "♪ music off (M turns it back on)", .{});
@@ -1545,7 +1549,8 @@ pub const App = struct {
         const m = &(self.music orelse return);
         const v: i32 = std.math.clamp(@as(i32, m.volume) + delta, 0, 100);
         m.setVolume(@intCast(v));
-        try self.store.setSetting("music_volume", v);
+        self.store.setSetting("music_volume", v) catch |err|
+            self.say(.crit, "music preference not saved: {s}", .{game.cli.errorText(err)});
         m.skip(); // restart the current track at the new level
     }
 
@@ -1772,33 +1777,44 @@ pub const App = struct {
     }
 
     /// Read and decode the selected picture; keep the bytes for the campaign.
+    /// Reads and decodes into locals first; only on success frees the old
+    /// preview and assigns the new one (rule 63).
     fn loadPreview(self: *App) !void {
+        if (self.logos.len == 0) {
+            if (self.w_preview) |*e| {
+                // best-effort: freeing an optional graphics image.
+                if (self.graphics == .kitty) emblem_mod.kittyForget(self.term.out, e.kitty_id) catch {};
+                e.deinit(self.gpa);
+                self.w_preview = null;
+            }
+            if (self.w_png) |p| {
+                self.gpa.free(p);
+                self.w_png = null;
+            }
+            return;
+        }
+        const path = self.logos[@min(self.w_logo, self.logos.len - 1)];
+        const new_bytes = emblem_mod.readFile(self.io, self.gpa, path) catch |err| {
+            self.say(.crit, "could not read {s}: {s}", .{ try q.plain(self.a(), path), game.cli.errorText(err) });
+            return;
+        };
+        const new_e = emblem_mod.Emblem.load(self.gpa, new_bytes, 2) catch |err| {
+            self.gpa.free(new_bytes);
+            self.say(.crit, "{s}: {s} (8-bit non-interlaced PNG only)", .{ try q.plain(self.a(), path), game.cli.errorText(err) });
+            return;
+        };
+        // Replacement ready: free the old resources and assign the new (rule 63).
         if (self.w_preview) |*e| {
             // best-effort: freeing an optional graphics image.
             if (self.graphics == .kitty) emblem_mod.kittyForget(self.term.out, e.kitty_id) catch {};
             e.deinit(self.gpa);
-            self.w_preview = null;
         }
-        if (self.w_png) |p| {
-            self.gpa.free(p);
-            self.w_png = null;
-        }
-        if (self.logos.len == 0) return;
-        const path = self.logos[@min(self.w_logo, self.logos.len - 1)];
-        const bytes = emblem_mod.readFile(self.io, self.gpa, path) catch |err| {
-            self.say(.crit, "could not read {s}: {s}", .{ try q.plain(self.a(), path), game.cli.errorText(err) });
-            return;
-        };
-        const e = emblem_mod.Emblem.load(self.gpa, bytes, 2) catch |err| {
-            self.gpa.free(bytes);
-            self.say(.crit, "{s}: {s} (8-bit non-interlaced PNG only)", .{ try q.plain(self.a(), path), game.cli.errorText(err) });
-            return;
-        };
-        self.w_png = bytes;
-        self.w_preview = e;
+        if (self.w_png) |p| self.gpa.free(p);
+        self.w_png = new_bytes;
+        self.w_preview = new_e;
         // best-effort: an optional graphics image; the half-block emblem still draws.
-        if (self.graphics == .kitty) emblem_mod.kittyTransmit(self.term.out, self.gpa, 2, bytes) catch {};
-        self.say(.good, "{s}: {d}×{d}", .{ try q.plain(self.a(), path), e.img.width, e.img.height });
+        if (self.graphics == .kitty) emblem_mod.kittyTransmit(self.term.out, self.gpa, 2, new_bytes) catch {};
+        self.say(.good, "{s}: {d}×{d}", .{ try q.plain(self.a(), path), new_e.img.width, new_e.img.height });
     }
 
     fn wizardList(self: *App, delta: i32) void {
@@ -1811,11 +1827,11 @@ pub const App = struct {
     }
 
     fn generateCampaign(self: *App) !void {
-        if (self.session) |*session| session.close();
-        self.session = null;
-        var session = try game.lobby.Session.fresh(self.gpa, 3025 + self.w_seed * 7919 + @as(u64, @intCast(self.w_faction)) * 13);
-        errdefer session.close();
-        const gs = session.state();
+        // Build the replacement session fully before touching the current one
+        // (rule 63): on failure the open session stays valid.
+        var new_session = try game.lobby.Session.fresh(self.gpa, 3025 + self.w_seed * 7919 + @as(u64, @intCast(self.w_faction)) * 13);
+        errdefer new_session.close();
+        const gs = new_session.state();
         // direct: the wizard builds a campaign that is not the open session yet.
         _ = try game.commands.execute(gs, .{ .create_commander = .{ .name = self.w_name.slice(), .origin = factions[self.w_faction], .profession = professions[self.w_profession], .start_year = start_years[self.w_year] } });
         _ = try game.commands.execute(gs, .{ .rename_outfit = self.w_outfit.slice() });
@@ -1824,7 +1840,9 @@ pub const App = struct {
             const image: []const u8 = if (self.w_src == 1 and self.w_png != null) self.w_png.? else emblems[self.w_emblem].name;
             _ = try game.commands.execute(gs, .{ .set_emblem = .{ .force = res.created_force, .image = image } });
         }
-        self.session = session;
+        // Replacement is ready; close the old session and install the new one (rule 63).
+        if (self.session) |*session| session.close();
+        self.session = new_session;
         self.cur(0).* = 0;
     }
 
@@ -3181,11 +3199,13 @@ pub const App = struct {
                 const c = self.modal_cursor;
                 if (c == 0) {
                     m.selectSet(null);
-                    try self.store.setSetting("music_set", -1);
+                    self.store.setSetting("music_set", -1) catch |err|
+                        self.say(.crit, "music preference not saved: {s}", .{game.cli.errorText(err)});
                     self.say(.dim, "♪ all soundtracks, mixed and reshuffled", .{});
                 } else if (c <= m.sets.len) {
                     m.selectSet(c - 1);
-                    try self.store.setSetting("music_set", @intCast(c - 1));
+                    self.store.setSetting("music_set", @intCast(c - 1)) catch |err|
+                        self.say(.crit, "music preference not saved: {s}", .{game.cli.errorText(err)});
                     self.say(.dim, "♪ soundtrack {s}", .{try q.plain(self.a(), m.sets[c - 1])});
                 } else {
                     // Header rows: sets + blank + "playing" line, then the tracks in playlist order.
@@ -3193,7 +3213,8 @@ pub const App = struct {
                     if (c >= first_track and c - first_track < m.order.len) {
                         const ti = m.order[c - first_track];
                         m.play(ti);
-                        try self.store.setSetting("music", 1);
+                        self.store.setSetting("music", 1) catch |err|
+                            self.say(.crit, "music preference not saved: {s}", .{game.cli.errorText(err)});
                         self.say(.dim, "♪ {s} — {s}", .{ try q.plain(self.a(), m.tracks[ti].name), try q.plain(self.a(), m.sets[m.tracks[ti].set]) });
                     }
                 }
@@ -3794,7 +3815,7 @@ pub const App = struct {
                             self.say(.amber, "name did not match — nothing deleted", .{});
                             return;
                         }
-                        try self.store.deletePlayer(p.id);
+                        try self.store.deletePlayer(p.id, if (self.session) |*s| s else null);
                         self.say(.good, "deleted player \"{s}\" and their campaigns", .{try p.name.markup(self.a())});
                         self.player_id = 0;
                         self.cur(0).* = 0;
@@ -4164,4 +4185,38 @@ test "game-over modal distinguishes save success from save failure" {
         if (b.action == .retry) break true;
     } else false;
     try std.testing.expect(has_retry);
+}
+
+test "handleGameOver saves and shows the correct modal (rule 44)" {
+    const al = std.testing.allocator;
+    // Success path: a bankrupt campaign is saved and shows game_over_saved.
+    {
+        const c = try clientForTest(al);
+        defer deinitForTest(c, al);
+        c.app.state().bankrupt = true;
+        try c.app.handleGameOver();
+        try std.testing.expect(c.app.modal == .game_over_saved);
+    }
+    // Failure path: save fails → game_over_failed with a truthful sentence.
+    // Point campaign_id at a non-existent row so the save returns NoSuchCampaign.
+    {
+        const c = try clientForTest(al);
+        defer deinitForTest(c, al);
+        c.app.state().bankrupt = true;
+        c.app.state().campaign_id = 99999; // no campaign row with this id
+        try c.app.handleGameOver();
+        switch (c.app.modal) {
+            .game_over_failed => |text| try std.testing.expect(text.len > 0),
+            else => return error.ExpectedGameOverFailed,
+        }
+        c.app.state().campaign_id = 0; // reset so deinit is clean
+    }
+    // Non-bankrupt: handleGameOver is a no-op (modal stays .none).
+    {
+        const c = try clientForTest(al);
+        defer deinitForTest(c, al);
+        c.app.state().bankrupt = false;
+        try c.app.handleGameOver();
+        try std.testing.expect(c.app.modal == .none);
+    }
 }

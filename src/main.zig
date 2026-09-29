@@ -75,9 +75,9 @@ pub fn main(init: std.process.Init) !void {
 }
 
 fn printCampaigns(lobby: game.lobby.Lobby, al: std.mem.Allocator) !void {
-    const list = lobby.allCampaigns(al) catch {
-        std.debug.print("could not read the campaign registry\n", .{});
-        return;
+    const list = lobby.allCampaigns(al) catch |err| {
+        std.debug.print("could not read the campaign registry: {s}\n", .{game.cli.errorText(err)});
+        return err;
     };
     if (list.len == 0) {
         std.debug.print("no saved campaigns.\n", .{});

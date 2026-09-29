@@ -147,7 +147,7 @@ pub const Player = struct {
         var order: std.ArrayListUnmanaged(usize) = .empty;
         for (self.tracks, 0..) |t, i| {
             if (self.selected_set) |s| if (t.set != s) continue;
-            // best-effort: a shuffle that runs out of memory plays what it has.
+            // best-effort: on OOM keep the existing playlist; no partial replacement (rule 63).
             order.append(al, i) catch return;
         }
         const r = self.rng.random();
@@ -156,7 +156,9 @@ pub const Player = struct {
             const j = r.uintLessThan(usize, i);
             std.mem.swap(usize, &order.items[i - 1], &order.items[j]);
         }
-        self.order = order.toOwnedSlice(al) catch &.{};
+        // Only replace the live playlist once the new one is fully built (rule 63).
+        // best-effort: on OOM keep the existing order and pos intact.
+        self.order = order.toOwnedSlice(al) catch return;
         self.pos = 0;
     }
 
@@ -348,4 +350,38 @@ test "the playlist mixes every soundtrack once, shuffled, and a selection filter
     p.child = .{ .id = null, .thread_handle = {}, .stdin = null, .stdout = null, .stderr = null, .request_resource_usage_statistics = false };
     try std.testing.expectEqualStrings("Raid", p.nowPlaying().?);
     try std.testing.expectEqualStrings("pirates", p.nowPlayingSet().?);
+}
+
+test "rebuild on OOM keeps the existing order and pos intact (rule 63)" {
+    const sets = [_][]const u8{"default"};
+    const tracks = [_]Track{
+        .{ .path = "a.mp3", .name = "a", .set = 0 },
+        .{ .path = "b.mp3", .name = "b", .set = 0 },
+        .{ .path = "c.mp3", .name = "c", .set = 0 },
+    };
+    // Back the arena with a zero-byte fixed buffer: every allocation fails.
+    var backing: [0]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&backing);
+    var p: Player = .{
+        .io = undefined,
+        .gpa = std.testing.allocator,
+        .arena = std.heap.ArenaAllocator.init(fba.allocator()),
+        .rng = std.Random.DefaultPrng.init(1),
+    };
+    p.sets = &sets;
+    p.tracks = &tracks;
+    // Set a sentinel order (heap-owned, not arena-owned, for this test).
+    const initial_order = try std.testing.allocator.dupe(usize, &[_]usize{ 2, 0, 1 });
+    defer std.testing.allocator.free(initial_order);
+    p.order = initial_order;
+    p.pos = 2;
+    // rebuild must fail silently and leave order and pos unchanged.
+    p.rebuild();
+    try std.testing.expectEqual(@as(usize, 3), p.order.len);
+    try std.testing.expectEqual(@as(usize, 2), p.pos);
+    try std.testing.expectEqual(@as(usize, 2), p.order[0]);
+    try std.testing.expectEqual(@as(usize, 0), p.order[1]);
+    try std.testing.expectEqual(@as(usize, 1), p.order[2]);
+    // The arena held nothing (zero-byte fba); deinit is safe.
+    p.arena.deinit();
 }

@@ -52,8 +52,26 @@ pub const Lobby = struct {
         return self.store.createPlayer(name);
     }
 
-    pub fn deletePlayer(self: Lobby, player: i64) !void {
-        return self.store.deletePlayer(player);
+    /// Delete a player and all their campaigns.  If `live` is non-null
+    /// and the live session's campaign belonged to the deleted player,
+    /// its `campaign_id` is reset to 0 (as `deleteCampaign` does).
+    pub fn deletePlayer(self: Lobby, player: i64, live: ?*Session) !void {
+        // Snapshot whether the live session's campaign belongs to this player
+        // before the deletion so we can reset it afterwards.
+        const session_cid: i64 = if (live) |s| s.gs.campaign_id else 0;
+        var session_owned = false;
+        if (session_cid != 0) {
+            var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+            defer arena.deinit();
+            if (self.store.listCampaignsOf(arena.allocator(), player)) |list| {
+                for (list) |c| if (c.id == session_cid) {
+                    session_owned = true;
+                    break;
+                };
+            } else |_| {}
+        }
+        try self.store.deletePlayer(player);
+        if (session_owned) live.?.gs.campaign_id = 0;
     }
 
     /// Delete a saved campaign; a live session that was it becomes unsaved.
@@ -73,8 +91,12 @@ pub const Lobby = struct {
     }
 
     /// Save a session under a player (a first save files a new campaign).
+    /// `player_id` is restored to its prior value if the save fails so
+    /// a failed first-save does not latch the wrong player (rule 49).
     pub fn save(self: *Lobby, session: *Session, player: i64) !void {
+        const prior_id = self.store.player_id;
         self.store.player_id = player;
+        errdefer self.store.player_id = prior_id;
         return self.store.save(session.gs);
     }
 };
@@ -133,4 +155,55 @@ test "lobby: a generated session saves and lists under its player" {
     defer again.close();
     const digest = @import("../sim/digest.zig");
     try std.testing.expectEqual(digest.stateHash(session.state()), digest.stateHash(again.state()));
+}
+
+test "deletePlayer resets the live session's campaign_id when it was owned by the deleted player" {
+    const sqlite = @import("sqlite.zig");
+    const commands = @import("../sim/commands.zig");
+    var lobby = Lobby.wrap(try store_mod.Store.fromDb(try sqlite.Db.open(":memory:")));
+    defer lobby.close();
+    const pid = try lobby.createPlayer("Ada");
+    const other = try lobby.createPlayer("Other");
+
+    var session = try Session.fresh(std.testing.allocator, 9);
+    defer session.close();
+    _ = try commands.execute(session.state(), .{ .create_commander = .{ .name = "C", .origin = .FS, .profession = .paymaster } });
+    try lobby.save(&session, pid);
+    try std.testing.expect(session.state().campaign_id != 0);
+
+    // Deleting the owning player resets the live session's campaign_id.
+    try lobby.deletePlayer(pid, &session);
+    try std.testing.expectEqual(@as(i64, 0), session.state().campaign_id);
+
+    // Deleting a different player leaves the session untouched.
+    session.state().campaign_id = 42; // arbitrary non-zero
+    try lobby.deletePlayer(other, &session);
+    try std.testing.expectEqual(@as(i64, 42), session.state().campaign_id);
+    session.state().campaign_id = 0; // clean up before close
+}
+
+test "save failure does not latch player_id" {
+    const sqlite = @import("sqlite.zig");
+    const commands = @import("../sim/commands.zig");
+    var lobby = Lobby.wrap(try store_mod.Store.fromDb(try sqlite.Db.open(":memory:")));
+    defer lobby.close();
+    const pid = try lobby.createPlayer("Ada");
+
+    var session = try Session.fresh(std.testing.allocator, 11);
+    defer session.close();
+    _ = try commands.execute(session.state(), .{ .create_commander = .{ .name = "D", .origin = .FS, .profession = .paymaster } });
+    // First save: succeeds, stamps campaign_id.
+    try lobby.save(&session, pid);
+    const cid = session.state().campaign_id;
+    try std.testing.expect(cid != 0);
+
+    // Point campaign_id at a non-existent row so the next save fails.
+    session.state().campaign_id = 99999;
+    const prior_player_id = lobby.store.player_id;
+    lobby.store.player_id = 0; // reset to probe the errdefer path
+    try std.testing.expectError(error.NoSuchCampaign, lobby.save(&session, pid));
+    // player_id must be restored to what it was before the failed save.
+    try std.testing.expectEqual(@as(i64, 0), lobby.store.player_id);
+    session.state().campaign_id = cid; // restore for clean close
+    _ = prior_player_id;
 }

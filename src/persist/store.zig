@@ -94,6 +94,56 @@ const tables = [_][]const u8{
     "refit_plan",    "refit_op",     "rating_snapshot", "battle_report",    "battle_report_hit", "battle_report_ammo", "battle_report_salvage", "rng_stream",
 };
 
+// Indexes for per-campaign tables (A28/D31): cid filters on every load;
+// composite shapes for the battle_report sub-tables whose loaders filter
+// on (cid, report_ord).  CREATE INDEX IF NOT EXISTS is idempotent.
+const index_ddl =
+    \\CREATE INDEX IF NOT EXISTS ix_meta_cid ON meta(cid);
+    \\CREATE INDEX IF NOT EXISTS ix_meta_text_cid ON meta_text(cid);
+    \\CREATE INDEX IF NOT EXISTS ix_rng_cid ON rng(cid);
+    \\CREATE INDEX IF NOT EXISTS ix_commander_cid ON commander(cid);
+    \\CREATE INDEX IF NOT EXISTS ix_person_cid ON person(cid);
+    \\CREATE INDEX IF NOT EXISTS ix_person_skill_cid ON person_skill(cid);
+    \\CREATE INDEX IF NOT EXISTS ix_injury_cid ON injury(cid);
+    \\CREATE INDEX IF NOT EXISTS ix_award_cid ON award(cid);
+    \\CREATE INDEX IF NOT EXISTS ix_ability_cid ON ability(cid);
+    \\CREATE INDEX IF NOT EXISTS ix_unit_cid ON unit(cid);
+    \\CREATE INDEX IF NOT EXISTS ix_unit_slot_cid ON unit_slot(cid);
+    \\CREATE INDEX IF NOT EXISTS ix_force_cid ON force(cid);
+    \\CREATE INDEX IF NOT EXISTS ix_force_unit_cid ON force_unit(cid);
+    \\CREATE INDEX IF NOT EXISTS ix_force_child_cid ON force_child(cid);
+    \\CREATE INDEX IF NOT EXISTS ix_stock_cid ON stock(cid);
+    \\CREATE INDEX IF NOT EXISTS ix_hq_cid ON hq(cid);
+    \\CREATE INDEX IF NOT EXISTS ix_hq_facility_cid ON hq_facility(cid);
+    \\CREATE INDEX IF NOT EXISTS ix_hq_project_cid ON hq_project(cid);
+    \\CREATE INDEX IF NOT EXISTS ix_contract_cid ON contract(cid);
+    \\CREATE INDEX IF NOT EXISTS ix_txn_cid ON txn(cid);
+    \\CREATE INDEX IF NOT EXISTS ix_loan_cid ON loan(cid);
+    \\CREATE INDEX IF NOT EXISTS ix_courier_cid ON courier(cid);
+    \\CREATE INDEX IF NOT EXISTS ix_policy_cid ON policy(cid);
+    \\CREATE INDEX IF NOT EXISTS ix_bay_job_cid ON bay_job(cid);
+    \\CREATE INDEX IF NOT EXISTS ix_candidate_cid ON candidate(cid);
+    \\CREATE INDEX IF NOT EXISTS ix_hq_link_cid ON hq_link(cid);
+    \\CREATE INDEX IF NOT EXISTS ix_unit_transfer_cid ON unit_transfer(cid);
+    \\CREATE INDEX IF NOT EXISTS ix_supply_policy_cid ON supply_policy(cid);
+    \\CREATE INDEX IF NOT EXISTS ix_stock_policy_cid ON stock_policy(cid);
+    \\CREATE INDEX IF NOT EXISTS ix_faction_cooling_cid ON faction_cooling(cid);
+    \\CREATE INDEX IF NOT EXISTS ix_faction_standing_cid ON faction_standing(cid);
+    \\CREATE INDEX IF NOT EXISTS ix_event_memory_cid ON event_memory(cid);
+    \\CREATE INDEX IF NOT EXISTS ix_listing_cid ON listing(cid);
+    \\CREATE INDEX IF NOT EXISTS ix_part_order_cid ON part_order(cid);
+    \\CREATE INDEX IF NOT EXISTS ix_event_log_cid ON event_log(cid);
+    \\CREATE INDEX IF NOT EXISTS ix_pending_event_cid ON pending_event(cid);
+    \\CREATE INDEX IF NOT EXISTS ix_refit_plan_cid ON refit_plan(cid);
+    \\CREATE INDEX IF NOT EXISTS ix_refit_op_cid ON refit_op(cid);
+    \\CREATE INDEX IF NOT EXISTS ix_rating_snapshot_cid ON rating_snapshot(cid);
+    \\CREATE INDEX IF NOT EXISTS ix_battle_report_cid ON battle_report(cid);
+    \\CREATE INDEX IF NOT EXISTS ix_battle_report_hit_report ON battle_report_hit(cid, report_ord);
+    \\CREATE INDEX IF NOT EXISTS ix_battle_report_ammo_report ON battle_report_ammo(cid, report_ord);
+    \\CREATE INDEX IF NOT EXISTS ix_battle_report_salvage_report ON battle_report_salvage(cid, report_ord);
+    \\CREATE INDEX IF NOT EXISTS ix_rng_stream_cid ON rng_stream(cid);
+;
+
 /// The stream order of the single `rng` blob that saves before schema v32
 /// hold: the generator states, one after another, in this order.
 const legacy_rng_order = [_]rng_mod.Stream{ .generation, .market, .maintenance, .acquisition, .battle, .events, .medical, .travel };
@@ -180,18 +230,44 @@ pub const Store = struct {
     };
 
     pub fn open(path: [*:0]const u8) !Store {
-        return fromDb(try sqlite.Db.open(path));
+        const db = try sqlite.Db.open(path);
+        // fromDb takes ownership of db on success (A24); close on any failure before then.
+        errdefer db.close();
+        return try fromDb(db);
+    }
+
+    /// Read the store's current schema version without mutating the database.
+    /// Returns null for a brand-new store (no `setting` table yet).
+    /// Returns 1 for a legacy store that has the table but no `schema_version` row.
+    /// Returns `error.CorruptStore` for a value < 1 or that does not fit u32.
+    fn readStoreVersion(db: sqlite.Db) !?u32 {
+        const sm = try db.prepare("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='setting'");
+        defer sm.finalize();
+        _ = try sm.next();
+        if (sm.int(0) == 0) return null; // brand-new store, no tables yet
+        const st = try db.prepare("SELECT value FROM setting WHERE key = 'schema_version'");
+        defer st.finalize();
+        if (!try st.next()) return 1; // legacy store: table exists but no version row
+        const v = st.int(0);
+        if (v < 1) return error.CorruptStore;
+        return std.math.cast(u32, v) orelse error.CorruptStore;
     }
 
     /// Adopt an open database: create what's missing, migrate what's old.
+    /// `db` is owned by the caller until this returns successfully; on any
+    /// error the caller must close it (A24).  Version is read before any
+    /// DDL so a future-version store is refused without mutation (rule 49).
+    /// DDL, indexes, and column migrations run in one transaction (rule 62).
     pub fn fromDb(db: sqlite.Db) !Store {
-        try db.exec(ddl);
+        const stored_opt = try readStoreVersion(db);
+        if (stored_opt) |s| if (s > schema_version) return error.StoreNewerThanGame;
+        const stored: u32 = stored_opt orelse 0;
         const store: Store = .{ .db = db };
-        const stored = try fit(u32, @max(1, store.getSetting("schema_version", 1)));
-        if (stored > schema_version) return error.StoreNewerThanGame;
         try db.exec("BEGIN");
         // best-effort: rolling back a failed transaction; the original error propagates.
         errdefer db.exec("ROLLBACK") catch {};
+        try db.exec(ddl);
+        try db.exec(index_ddl);
         for (migrations) |m| {
             if (m.version <= stored) continue;
             if (!try hasColumnRt(db, m.table, m.column)) try db.exec(m.sql);
@@ -316,16 +392,31 @@ pub const Store = struct {
         return q.int(0);
     }
 
-    /// Delete a player and every campaign filed under them.
+    /// Delete a player and every campaign filed under them, atomically (rule 49).
     pub fn deletePlayer(self: Store, player: i64) !void {
         var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
         defer arena.deinit();
+        // List campaigns before the transaction so the SELECT does not
+        // nest inside the BEGIN below (SQLite rejects nested BEGIN).
         const owned = try self.listCampaignsOf(arena.allocator(), player);
-        for (owned) |c| try self.deleteCampaign(c.id);
-        const st = try self.db.prepare("DELETE FROM player WHERE id = ?1");
-        defer st.finalize();
-        try st.bindAll(.{player});
-        try st.run();
+        try self.db.exec("BEGIN");
+        // best-effort: rolling back a failed transaction; the original error propagates.
+        errdefer self.db.exec("ROLLBACK") catch {};
+        for (owned) |c| {
+            // Clear rows then delete the campaign row inline: do NOT call
+            // deleteCampaign — it opens its own transaction and SQLite
+            // rejects nested BEGIN.
+            try self.clearRows(c.id);
+            const del_c = try self.db.prepare("DELETE FROM campaign WHERE id = ?1");
+            defer del_c.finalize();
+            try del_c.bindAll(.{c.id});
+            try del_c.run();
+        }
+        const del = try self.db.prepare("DELETE FROM player WHERE id = ?1");
+        defer del.finalize();
+        try del.bindAll(.{player});
+        try del.run();
+        try self.db.exec("COMMIT");
     }
 
     /// Remove a campaign and every row that belonged to it.
@@ -1037,12 +1128,15 @@ pub const Store = struct {
     // ---- the per-table decoders `load` runs, in its order ----
 
     /// The schema version a campaign was saved at; `NoSuchCampaign` when the id is unknown.
+    /// A campaign schema_version below 1 is corruption (rule 49).
     fn loadVersion(self: Store, cid: i64) !u32 {
         const st = try self.db.prepare("SELECT schema_version FROM campaign WHERE id = ?1");
         defer st.finalize();
         try st.bindAll(.{cid});
         if (!try st.next()) return error.NoSuchCampaign;
-        return try fit(u32, @max(1, st.int(0)));
+        const v = st.int(0);
+        if (v < 1) return error.CorruptSave;
+        return std.math.cast(u32, v) orelse error.CorruptSave;
     }
 
     /// The campaign scalars; true when the save holds its RNG seed.
@@ -2551,6 +2645,69 @@ test "players own campaigns; deleting a player cascades" {
     try std.testing.expectEqual(@as(usize, 1), (try store.listPlayers(al)).len);
     try std.testing.expectEqual(@as(usize, 1), (try store.listCampaigns(al)).len);
     try std.testing.expectEqual(guest, (try store.listCampaigns(al))[0].player_id);
+}
+
+test "a store with schema_version = 0 is refused as corrupt without partial upgrade" {
+    const raw = try sqlite.Db.open(":memory:");
+    // Create a store with a setting table holding schema_version = 0.
+    try raw.exec(
+        \\CREATE TABLE setting (key TEXT PRIMARY KEY, value INTEGER NOT NULL);
+        \\INSERT INTO setting VALUES ('schema_version', 0);
+    );
+    // readStoreVersion must detect the corrupt version; fromDb must refuse
+    // without running DDL (no campaign table should exist afterwards).
+    try std.testing.expectError(error.CorruptStore, Store.fromDb(raw));
+    // The raw handle is still open; verify no campaign table was created.
+    const st = try raw.prepare("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='campaign'");
+    defer st.finalize();
+    _ = try st.next();
+    try std.testing.expectEqual(@as(i64, 0), st.int(0));
+    raw.close();
+}
+
+test "a brand-new empty :memory: store opens (new-vs-corrupt distinction)" {
+    // A zero-byte :memory: must open as a new store, not be mistaken for
+    // a corrupt one.  readStoreVersion returns null → new store path.
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try std.testing.expectEqual(@as(i64, schema_version), store.getSetting("schema_version", 0));
+}
+
+test "a future-version store is refused with no DDL mutation" {
+    const raw = try sqlite.Db.open(":memory:");
+    // A store whose schema_version exceeds the game's.
+    try raw.exec(
+        \\CREATE TABLE setting (key TEXT PRIMARY KEY, value INTEGER NOT NULL);
+        \\INSERT INTO setting VALUES ('schema_version', 9999);
+    );
+    try std.testing.expectError(error.StoreNewerThanGame, Store.fromDb(raw));
+    // Verify that fromDb created no campaign table (no mutation).
+    const st = try raw.prepare("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='campaign'");
+    defer st.finalize();
+    _ = try st.next();
+    try std.testing.expectEqual(@as(i64, 0), st.int(0));
+    raw.close();
+}
+
+test "deletePlayer is atomic: a failure leaves no partial state" {
+    const commands = @import("../sim/commands.zig");
+    var store = try Store.open(":memory:");
+    defer store.close();
+    const pid = try store.createPlayer("P");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 5 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "C", .origin = .FS, .profession = .paymaster } });
+    store.player_id = pid;
+    try store.save(&gs);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    // Verify initial state.
+    try std.testing.expectEqual(@as(usize, 1), (try store.listCampaigns(arena.allocator())).len);
+    try std.testing.expectEqual(@as(usize, 1), (try store.listPlayers(arena.allocator())).len);
+    // Delete the player; both the player row and its campaigns must be gone.
+    try store.deletePlayer(pid);
+    try std.testing.expectEqual(@as(usize, 0), (try store.listCampaigns(arena.allocator())).len);
+    try std.testing.expectEqual(@as(usize, 0), (try store.listPlayers(arena.allocator())).len);
 }
 
 test "one store, many playthroughs: list, overwrite, delete" {

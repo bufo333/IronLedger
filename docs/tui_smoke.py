@@ -453,4 +453,55 @@ send("q"); send("r"); send("q")
 drain(0.5)
 finish(pid)
 print("80x24 + --ascii pass OK")
+
+
+def game_over_phase():
+    """GAME OVER smoke: load a bankrupt fixture, advance one forced day,
+    assert the modal.  Runs the fixture generator each time so the store
+    is always at the current schema."""
+    import tempfile, shutil, subprocess
+    go_tmp = tempfile.mkdtemp(prefix="iron-ledger-gameover-smoke-")
+    atexit.register(shutil.rmtree, go_tmp, ignore_errors=True)
+    gameover_db = os.path.join(go_tmp, "gameover.db")
+
+    # Generate the bankrupt fixture from the current binary.
+    gen = subprocess.run(
+        [sys.executable, "docs/make_gameover_fixture.py", exe, gameover_db],
+        capture_output=True,
+        text=True,
+    )
+    assert gen.returncode == 0, f"fixture generator failed:\n{gen.stdout}\n{gen.stderr}"
+    assert "GAMEOVER FIXTURE OK" in gen.stdout, f"unexpected generator output:\n{gen.stdout}"
+
+    # Spawn the TUI with the bankrupt store; no splash so we get the welcome screen fast.
+    go_pid, go_fd = spawn(["--tui", "--no-splash", "--no-music", "--store", gameover_db])
+    fcntl.ioctl(go_fd, termios.TIOCSWINSZ, struct.pack("HHHH", 50, 200, 0, 0))
+    global fd, out
+    saved_fd, saved_out = fd, out
+    fd, out = go_fd, b""
+
+    try:
+        assert wait_for("MERCENARY", timeout=20), "game-over: welcome screen missing: " + plain()[-2000:]
+        # Tab to the campaigns pane, Enter to load the bankrupt campaign.
+        send("\t")
+        send("\r", 2.0)
+        assert wait_for("loaded", timeout=10), "game-over: 'loaded' not seen after opening campaign: " + plain()[-2000:]
+        # Force one day: bypasses the checklist gate; the bankrupt flag triggers
+        # handleGameOver immediately (tick.zig Bankrupt → app.zig handleGameOver).
+        send(":"); send("day 1 force\r", 3.0)
+        assert wait_for("BANKRUPT", timeout=10), "game-over: BANKRUPT modal missing: " + plain()[-3000:]
+        p = plain()
+        assert "BANKRUPT — GAME OVER" in p or "BANKRUPT" in p, "game-over: title missing: " + p[-2000:]
+        assert "saved as it ended" in p, "game-over: save confirmation missing: " + p[-2000:]
+        # Leave the modal and quit.
+        send("\r", 1.0)
+        send("q", 1.0)
+    finally:
+        fd, out = saved_fd, saved_out
+
+    finish(go_pid, timeout=10)
+    print("GAME OVER phase OK")
+
+
+game_over_phase()
 print("SMOKE OK")
