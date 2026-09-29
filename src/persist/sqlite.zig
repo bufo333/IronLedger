@@ -107,6 +107,8 @@ pub const Db = struct {
         errdefer _ = sqlite3_close(h.?);
         _ = sqlite3_extended_result_codes(h.?, 1);
         _ = sqlite3_busy_timeout(h.?, busy_timeout_ms);
+        // Rule 50: enforce declared foreign keys on every connection.
+        _ = sqlite3_exec(h.?, "PRAGMA foreign_keys = ON", null, null, null);
         return .{ .h = h.? };
     }
 

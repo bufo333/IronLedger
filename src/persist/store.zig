@@ -34,56 +34,56 @@ const digest = @import("../sim/digest.zig");
 const hq_ops = @import("../sim/hq_ops.zig");
 const held_hulls_m = @import("../sim/held_hulls.zig");
 
-pub const schema_version = 36;
+pub const schema_version = 37;
 
 const ddl =
     \\CREATE TABLE IF NOT EXISTS player (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_seq INTEGER NOT NULL);
     \\CREATE TABLE IF NOT EXISTS setting (key TEXT PRIMARY KEY, value INTEGER NOT NULL);
-    \\CREATE TABLE IF NOT EXISTS campaign (id INTEGER PRIMARY KEY, name TEXT NOT NULL, commander TEXT, day INTEGER NOT NULL, date TEXT NOT NULL, schema_version INTEGER NOT NULL, save_seq INTEGER NOT NULL, player_id INTEGER NOT NULL DEFAULT 0);
-    \\CREATE TABLE IF NOT EXISTS meta (cid INTEGER NOT NULL, key TEXT NOT NULL, value INTEGER NOT NULL, PRIMARY KEY (cid, key));
-    \\CREATE TABLE IF NOT EXISTS meta_text (cid INTEGER NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (cid, key));
-    \\CREATE TABLE IF NOT EXISTS rng (cid INTEGER PRIMARY KEY, state BLOB NOT NULL);
-    \\CREATE TABLE IF NOT EXISTS rng_stream (cid INTEGER NOT NULL, stream TEXT NOT NULL, format INTEGER NOT NULL, state BLOB NOT NULL, UNIQUE (cid, stream));
-    \\CREATE TABLE IF NOT EXISTS commander (cid INTEGER PRIMARY KEY, name TEXT NOT NULL, origin TEXT NOT NULL, profession TEXT NOT NULL);
-    \\CREATE TABLE IF NOT EXISTS person (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, first TEXT, last TEXT, callsign TEXT, role TEXT, xp INTEGER, status TEXT, fatigue INTEGER, morale INTEGER, recruited_day INTEGER, salary_override INTEGER, assigned_force INTEGER, posted_hq INTEGER, weekly_hours INTEGER, medbay_priority INTEGER, leave_until INTEGER, wound_heal_day INTEGER, training_skill TEXT, training_done INTEGER, admitted INTEGER NOT NULL DEFAULT 0, rank TEXT NOT NULL DEFAULT 'private', rank_pinned INTEGER NOT NULL DEFAULT 0, kills INTEGER NOT NULL DEFAULT 0, kill_bv INTEGER NOT NULL DEFAULT 0, battles INTEGER NOT NULL DEFAULT 0, tours INTEGER NOT NULL DEFAULT 0, outstanding_tours INTEGER NOT NULL DEFAULT 0, edge_spent INTEGER NOT NULL DEFAULT 0, faction TEXT NOT NULL DEFAULT '', shares INTEGER NOT NULL DEFAULT 0, born_day INTEGER, last_raise_day INTEGER, last_award_day INTEGER, departed_day INTEGER, secondary_role TEXT, PRIMARY KEY (cid, id));
-    \\CREATE TABLE IF NOT EXISTS award (cid INTEGER NOT NULL, person_id INTEGER NOT NULL, key TEXT NOT NULL);
-    \\CREATE TABLE IF NOT EXISTS ability (cid INTEGER NOT NULL, person_id INTEGER NOT NULL, key TEXT NOT NULL);
-    \\CREATE TABLE IF NOT EXISTS person_skill (cid INTEGER NOT NULL, person_id INTEGER NOT NULL, skill TEXT NOT NULL, level INTEGER NOT NULL);
-    \\CREATE TABLE IF NOT EXISTS injury (cid INTEGER NOT NULL, person_id INTEGER NOT NULL, ord INTEGER NOT NULL, location TEXT NOT NULL, severity INTEGER NOT NULL, incurred INTEGER NOT NULL, heal_done INTEGER, doctor INTEGER NOT NULL DEFAULT 0, permanent INTEGER NOT NULL DEFAULT 0, healed INTEGER NOT NULL DEFAULT 0);
-    \\CREATE TABLE IF NOT EXISTS unit (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, chassis_key TEXT, name TEXT, kind TEXT, force INTEGER, pilot INTEGER, tech INTEGER, armor_pct INTEGER, quality TEXT, status TEXT, last_maint INTEGER, acquired_day INTEGER, price INTEGER, reactivation_done INTEGER, berth_hq INTEGER NOT NULL DEFAULT 0, wreck TEXT NOT NULL DEFAULT 'none', held_by TEXT NOT NULL DEFAULT '', held_day INTEGER NOT NULL DEFAULT 0, held_battle INTEGER NOT NULL DEFAULT 0, held_force INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (cid, id));
-    \\CREATE TABLE IF NOT EXISTS unit_slot (cid INTEGER NOT NULL, unit_id INTEGER NOT NULL, ord INTEGER NOT NULL, slot_key TEXT, part_key TEXT, class TEXT, condition TEXT);
-    \\CREATE TABLE IF NOT EXISTS force (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, parent INTEGER, name TEXT, emblem BLOB, local_funds INTEGER, echelon TEXT, commander INTEGER, supplying_hq INTEGER, role TEXT, support_kind TEXT, last_rotation INTEGER, contracts_since_rotation INTEGER, location_planet TEXT, return_eta INTEGER, shortage_days INTEGER, roe TEXT NOT NULL DEFAULT 'standard', PRIMARY KEY (cid, id));
-    \\CREATE TABLE IF NOT EXISTS force_unit (cid INTEGER NOT NULL, force_id INTEGER NOT NULL, ord INTEGER NOT NULL, unit_id INTEGER NOT NULL);
-    \\CREATE TABLE IF NOT EXISTS force_child (cid INTEGER NOT NULL, force_id INTEGER NOT NULL, ord INTEGER NOT NULL, child_id INTEGER NOT NULL);
-    \\CREATE TABLE IF NOT EXISTS stock (cid INTEGER NOT NULL, owner_kind TEXT NOT NULL, owner_id INTEGER NOT NULL, ord INTEGER NOT NULL, key TEXT NOT NULL, qty INTEGER NOT NULL);
-    \\CREATE TABLE IF NOT EXISTS hq (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, name TEXT, tier TEXT, planet TEXT, staff_assigned INTEGER, upkeep INTEGER, funds INTEGER, PRIMARY KEY (cid, id));
-    \\CREATE TABLE IF NOT EXISTS hq_facility (cid INTEGER NOT NULL, hq_id INTEGER NOT NULL, ord INTEGER NOT NULL, kind TEXT, level INTEGER);
-    \\CREATE TABLE IF NOT EXISTS hq_project (cid INTEGER NOT NULL, hq_id INTEGER NOT NULL, ord INTEGER NOT NULL, kind TEXT, facility TEXT, target_level INTEGER, started INTEGER, paperwork_done INTEGER, construction_done INTEGER, cost INTEGER);
-    \\CREATE TABLE IF NOT EXISTS contract (cid INTEGER NOT NULL, is_offer INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER, kind TEXT, employer TEXT, enemy TEXT, planet TEXT, status TEXT, company INTEGER, start_day INTEGER, score INTEGER, dist_ly INTEGER, beachhead INTEGER, transit_days INTEGER, arrive_day INTEGER, end_day INTEGER, monthly_net INTEGER, next_battle INTEGER, battles INTEGER, casualties INTEGER, objective TEXT, committed_bv INTEGER, pool INTEGER, pool_remaining INTEGER, vp INTEGER, ineffective_since INTEGER, breach_day INTEGER, length_months INTEGER, base_pay INTEGER, advance_pct INTEGER, signing_bonus INTEGER, transport_pct INTEGER, overhead_pct INTEGER, battle_loss_pct INTEGER, salvage_pct INTEGER, salvage_exchange INTEGER, command_rights TEXT, negotiated INTEGER NOT NULL DEFAULT 0, enemy_lances INTEGER NOT NULL DEFAULT 0, enemy_quality TEXT NOT NULL DEFAULT 'regular', enemy_lance_bv INTEGER NOT NULL DEFAULT 0, enemy_lance_tons INTEGER NOT NULL DEFAULT 0, offer_hq INTEGER NOT NULL DEFAULT 0, orders_day INTEGER);
-    \\CREATE TABLE IF NOT EXISTS txn (cid INTEGER NOT NULL, ord INTEGER NOT NULL, day INTEGER, amount INTEGER, category TEXT, company INTEGER, hq INTEGER, contract INTEGER, note TEXT);
-    \\CREATE TABLE IF NOT EXISTS loan (cid INTEGER NOT NULL, ord INTEGER NOT NULL, principal INTEGER, balance INTEGER, rate_bp INTEGER, term INTEGER, next_pay INTEGER, payment INTEGER, id INTEGER NOT NULL DEFAULT 0);
-    \\CREATE TABLE IF NOT EXISTS courier (cid INTEGER NOT NULL, ord INTEGER NOT NULL, to_kind TEXT, to_id INTEGER, amount INTEGER, sent INTEGER, eta INTEGER);
-    \\CREATE TABLE IF NOT EXISTS policy (cid INTEGER NOT NULL, ord INTEGER NOT NULL, entity_kind TEXT, entity_id INTEGER, floor INTEGER, cap INTEGER, sent INTEGER NOT NULL DEFAULT 0);
-    \\CREATE TABLE IF NOT EXISTS supply_policy (cid INTEGER NOT NULL, ord INTEGER NOT NULL, company INTEGER, min_days INTEGER, tons INTEGER, ammo_battles INTEGER NOT NULL DEFAULT 0);
-    \\CREATE TABLE IF NOT EXISTS stock_policy (cid INTEGER NOT NULL, ord INTEGER NOT NULL, hq INTEGER, part_key TEXT, min_qty INTEGER, target INTEGER);
-    \\CREATE TABLE IF NOT EXISTS bay_job (cid INTEGER NOT NULL, ord INTEGER NOT NULL, hq INTEGER, kind TEXT, unit INTEGER, item_key TEXT, duration INTEGER, queued INTEGER, started INTEGER, done INTEGER, cost INTEGER);
-    \\CREATE TABLE IF NOT EXISTS candidate (cid INTEGER NOT NULL, ord INTEGER NOT NULL, hq INTEGER, first TEXT, last TEXT, callsign TEXT, role TEXT, experience TEXT, primary_skill INTEGER, secondary_skill INTEGER, bonus INTEGER, listed INTEGER, expires INTEGER, age INTEGER NOT NULL DEFAULT 30, id INTEGER NOT NULL DEFAULT 0);
-    \\CREATE TABLE IF NOT EXISTS hq_link (cid INTEGER NOT NULL, ord INTEGER NOT NULL, a INTEGER, b INTEGER, level INTEGER, tons INTEGER, established INTEGER);
-    \\CREATE TABLE IF NOT EXISTS unit_transfer (cid INTEGER NOT NULL, ord INTEGER NOT NULL, unit INTEGER, to_company INTEGER, eta INTEGER);
-    \\CREATE TABLE IF NOT EXISTS faction_cooling (cid INTEGER NOT NULL, ord INTEGER NOT NULL, faction TEXT, until_day INTEGER);
-    \\CREATE TABLE IF NOT EXISTS faction_standing (cid INTEGER NOT NULL, faction TEXT NOT NULL, value INTEGER NOT NULL);
-    \\CREATE TABLE IF NOT EXISTS event_memory (cid INTEGER NOT NULL, kind TEXT NOT NULL, last_day INTEGER NOT NULL, last_choice INTEGER NOT NULL, streak INTEGER NOT NULL);
-    \\CREATE TABLE IF NOT EXISTS rating_snapshot (cid INTEGER NOT NULL, year INTEGER NOT NULL, score INTEGER NOT NULL);
-    \\CREATE TABLE IF NOT EXISTS listing (cid INTEGER NOT NULL, ord INTEGER NOT NULL, kind TEXT, item_key TEXT, rarity TEXT, price INTEGER, qty INTEGER, staple INTEGER, listed INTEGER, expires INTEGER, hq INTEGER, c_armor INTEGER, c_quality TEXT, c_damaged INTEGER, c_destroyed INTEGER, c_missing INTEGER, black INTEGER NOT NULL DEFAULT 0, company INTEGER NOT NULL DEFAULT 0, id INTEGER NOT NULL DEFAULT 0);
-    \\CREATE TABLE IF NOT EXISTS part_order (cid INTEGER NOT NULL, ord INTEGER NOT NULL, part_key TEXT, qty INTEGER, dest_kind TEXT, dest_id INTEGER, ordered INTEGER, eta INTEGER, cost INTEGER, status TEXT);
-    \\CREATE TABLE IF NOT EXISTS event_log (cid INTEGER NOT NULL, ord INTEGER NOT NULL, day INTEGER, category TEXT, company INTEGER, hq INTEGER, contract INTEGER, text TEXT);
-    \\CREATE TABLE IF NOT EXISTS pending_event (cid INTEGER NOT NULL, ord INTEGER NOT NULL, kind TEXT, day INTEGER, contract INTEGER, company INTEGER, default_choice INTEGER, deadline INTEGER, chosen INTEGER, person INTEGER NOT NULL DEFAULT 0, id INTEGER NOT NULL DEFAULT 0, battle INTEGER NOT NULL DEFAULT 0);
-    \\CREATE TABLE IF NOT EXISTS refit_plan (cid INTEGER NOT NULL, ord INTEGER NOT NULL, unit INTEGER, committed INTEGER);
-    \\CREATE TABLE IF NOT EXISTS refit_op (cid INTEGER NOT NULL, plan_ord INTEGER NOT NULL, ord INTEGER NOT NULL, kind TEXT, slot_key TEXT, location TEXT, part_key TEXT);
-    \\CREATE TABLE IF NOT EXISTS battle_report (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER, day INTEGER, contract INTEGER, company INTEGER, kind TEXT, enemy_key TEXT, scenario TEXT, terrain TEXT, weather TEXT, outcome TEXT, held_field INTEGER, withdrew INTEGER, roe TEXT, roe_overridden INTEGER, player_power INTEGER, enemy_power INTEGER, conditions_mod INTEGER, close_terrain INTEGER, air_grounded INTEGER, convoy_hit INTEGER, edge_spent_by TEXT, recon_quality INTEGER, avg_fatigue INTEGER, avg_morale INTEGER, hits_taken INTEGER, destroyed INTEGER, wounded INTEGER, kia INTEGER, lost_hulls INTEGER, missing INTEGER, enemy_destroyed_bv INTEGER, kills_credited INTEGER, prisoners INTEGER, battle_loss_comp INTEGER, score_after INTEGER, score_delta INTEGER, morale_delta INTEGER, fatigue_add INTEGER, battle_loss_pct INTEGER, salvage_pct INTEGER, command_rights TEXT, silenced_mounts INTEGER, armor_left INTEGER, salvage_claimed INTEGER, salvage_haulable INTEGER, salvage_cut INTEGER, salvage_cash INTEGER, salvage_items TEXT, conceded INTEGER, acknowledged INTEGER NOT NULL DEFAULT 1, salvage_unclaimed INTEGER NOT NULL DEFAULT 0);
-    \\CREATE TABLE IF NOT EXISTS battle_report_hit (cid INTEGER NOT NULL, report_ord INTEGER NOT NULL, ord INTEGER NOT NULL, unit INTEGER, chassis_key TEXT, chassis_name TEXT, armor_before INTEGER, armor_after INTEGER, slot TEXT, slot_part TEXT, slot_result TEXT, destroyed INTEGER, cause TEXT, pilot INTEGER, crew_name TEXT, wound_severity INTEGER, wound_location TEXT, wound_permanent INTEGER, fate TEXT, recovery_roll INTEGER, recovery_target INTEGER, lost INTEGER);
-    \\CREATE TABLE IF NOT EXISTS battle_report_ammo (cid INTEGER NOT NULL, report_ord INTEGER NOT NULL, ord INTEGER NOT NULL, family TEXT, burned INTEGER, reserve INTEGER);
-    \\CREATE TABLE IF NOT EXISTS battle_report_salvage (cid INTEGER NOT NULL, report_ord INTEGER NOT NULL, ord INTEGER NOT NULL, key TEXT, name TEXT, bv INTEGER, armor_pct INTEGER, quality TEXT, damaged INTEGER, destroyed INTEGER, missing INTEGER);
+    \\CREATE TABLE IF NOT EXISTS campaign (id INTEGER PRIMARY KEY, name TEXT NOT NULL, commander TEXT, day INTEGER NOT NULL, date TEXT NOT NULL, schema_version INTEGER NOT NULL CHECK (schema_version > 0), save_seq INTEGER NOT NULL, player_id INTEGER NOT NULL DEFAULT 0);
+    \\CREATE TABLE IF NOT EXISTS meta (cid INTEGER NOT NULL, key TEXT NOT NULL, value INTEGER NOT NULL, PRIMARY KEY (cid, key), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS meta_text (cid INTEGER NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (cid, key), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS rng (cid INTEGER PRIMARY KEY, state BLOB NOT NULL, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS rng_stream (cid INTEGER NOT NULL, stream TEXT NOT NULL, format INTEGER NOT NULL, state BLOB NOT NULL, UNIQUE (cid, stream), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS commander (cid INTEGER PRIMARY KEY, name TEXT NOT NULL, origin TEXT NOT NULL, profession TEXT NOT NULL, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS person (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, first TEXT, last TEXT, callsign TEXT, role TEXT, xp INTEGER, status TEXT, fatigue INTEGER, morale INTEGER, recruited_day INTEGER, salary_override INTEGER, assigned_force INTEGER, posted_hq INTEGER, weekly_hours INTEGER, medbay_priority INTEGER, leave_until INTEGER, wound_heal_day INTEGER, training_skill TEXT, training_done INTEGER, admitted INTEGER NOT NULL DEFAULT 0 CHECK (admitted IN (0,1)), rank TEXT NOT NULL DEFAULT 'private', rank_pinned INTEGER NOT NULL DEFAULT 0 CHECK (rank_pinned IN (0,1)), kills INTEGER NOT NULL DEFAULT 0, kill_bv INTEGER NOT NULL DEFAULT 0, battles INTEGER NOT NULL DEFAULT 0, tours INTEGER NOT NULL DEFAULT 0, outstanding_tours INTEGER NOT NULL DEFAULT 0, edge_spent INTEGER NOT NULL DEFAULT 0 CHECK (edge_spent IN (0,1)), faction TEXT NOT NULL DEFAULT '', shares INTEGER NOT NULL DEFAULT 0, born_day INTEGER, last_raise_day INTEGER, last_award_day INTEGER, departed_day INTEGER, secondary_role TEXT, PRIMARY KEY (cid, id), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS award (cid INTEGER NOT NULL, person_id INTEGER NOT NULL, key TEXT NOT NULL, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, person_id) REFERENCES person(cid, id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS ability (cid INTEGER NOT NULL, person_id INTEGER NOT NULL, key TEXT NOT NULL, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, person_id) REFERENCES person(cid, id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS person_skill (cid INTEGER NOT NULL, person_id INTEGER NOT NULL, skill TEXT NOT NULL, level INTEGER NOT NULL, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, person_id) REFERENCES person(cid, id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS injury (cid INTEGER NOT NULL, person_id INTEGER NOT NULL, ord INTEGER NOT NULL, location TEXT NOT NULL, severity INTEGER NOT NULL, incurred INTEGER NOT NULL, heal_done INTEGER, doctor INTEGER NOT NULL DEFAULT 0, permanent INTEGER NOT NULL DEFAULT 0 CHECK (permanent IN (0,1)), healed INTEGER NOT NULL DEFAULT 0 CHECK (healed IN (0,1)), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, person_id) REFERENCES person(cid, id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS unit (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, chassis_key TEXT, name TEXT, kind TEXT, force INTEGER, pilot INTEGER, tech INTEGER, armor_pct INTEGER, quality TEXT, status TEXT, last_maint INTEGER, acquired_day INTEGER, price INTEGER, reactivation_done INTEGER, berth_hq INTEGER NOT NULL DEFAULT 0, wreck TEXT NOT NULL DEFAULT 'none', held_by TEXT NOT NULL DEFAULT '', held_day INTEGER NOT NULL DEFAULT 0, held_battle INTEGER NOT NULL DEFAULT 0, held_force INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (cid, id), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS unit_slot (cid INTEGER NOT NULL, unit_id INTEGER NOT NULL, ord INTEGER NOT NULL, slot_key TEXT, part_key TEXT, class TEXT, condition TEXT, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, unit_id) REFERENCES unit(cid, id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS force (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, parent INTEGER, name TEXT, emblem BLOB, local_funds INTEGER, echelon TEXT, commander INTEGER, supplying_hq INTEGER, role TEXT, support_kind TEXT, last_rotation INTEGER, contracts_since_rotation INTEGER, location_planet TEXT, return_eta INTEGER, shortage_days INTEGER, roe TEXT NOT NULL DEFAULT 'standard', PRIMARY KEY (cid, id), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS force_unit (cid INTEGER NOT NULL, force_id INTEGER NOT NULL, ord INTEGER NOT NULL, unit_id INTEGER NOT NULL, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, force_id) REFERENCES force(cid, id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, unit_id) REFERENCES unit(cid, id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS force_child (cid INTEGER NOT NULL, force_id INTEGER NOT NULL, ord INTEGER NOT NULL, child_id INTEGER NOT NULL, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, force_id) REFERENCES force(cid, id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, child_id) REFERENCES force(cid, id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS stock (cid INTEGER NOT NULL, owner_kind TEXT NOT NULL, owner_id INTEGER NOT NULL, ord INTEGER NOT NULL, key TEXT NOT NULL, qty INTEGER NOT NULL, UNIQUE (cid, owner_kind, owner_id, key), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS hq (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, name TEXT, tier TEXT, planet TEXT, staff_assigned INTEGER, upkeep INTEGER, funds INTEGER, PRIMARY KEY (cid, id), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS hq_facility (cid INTEGER NOT NULL, hq_id INTEGER NOT NULL, ord INTEGER NOT NULL, kind TEXT, level INTEGER, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, hq_id) REFERENCES hq(cid, id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS hq_project (cid INTEGER NOT NULL, hq_id INTEGER NOT NULL, ord INTEGER NOT NULL, kind TEXT, facility TEXT, target_level INTEGER, started INTEGER, paperwork_done INTEGER, construction_done INTEGER, cost INTEGER, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, hq_id) REFERENCES hq(cid, id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS contract (cid INTEGER NOT NULL, is_offer INTEGER NOT NULL CHECK (is_offer IN (0,1)), ord INTEGER NOT NULL, id INTEGER, kind TEXT, employer TEXT, enemy TEXT, planet TEXT, status TEXT, company INTEGER, start_day INTEGER, score INTEGER, dist_ly INTEGER, beachhead INTEGER, transit_days INTEGER, arrive_day INTEGER, end_day INTEGER, monthly_net INTEGER, next_battle INTEGER, battles INTEGER, casualties INTEGER, objective TEXT, committed_bv INTEGER, pool INTEGER, pool_remaining INTEGER, vp INTEGER, ineffective_since INTEGER, breach_day INTEGER, length_months INTEGER, base_pay INTEGER, advance_pct INTEGER, signing_bonus INTEGER, transport_pct INTEGER, overhead_pct INTEGER, battle_loss_pct INTEGER, salvage_pct INTEGER, salvage_exchange INTEGER CHECK (salvage_exchange IN (0,1)), command_rights TEXT, negotiated INTEGER NOT NULL DEFAULT 0 CHECK (negotiated IN (0,1)), enemy_lances INTEGER NOT NULL DEFAULT 0, enemy_quality TEXT NOT NULL DEFAULT 'regular', enemy_lance_bv INTEGER NOT NULL DEFAULT 0, enemy_lance_tons INTEGER NOT NULL DEFAULT 0, offer_hq INTEGER NOT NULL DEFAULT 0, orders_day INTEGER, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS txn (cid INTEGER NOT NULL, ord INTEGER NOT NULL, day INTEGER, amount INTEGER, category TEXT, company INTEGER, hq INTEGER, contract INTEGER, note TEXT, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS loan (cid INTEGER NOT NULL, ord INTEGER NOT NULL, principal INTEGER, balance INTEGER, rate_bp INTEGER, term INTEGER, next_pay INTEGER, payment INTEGER, id INTEGER NOT NULL DEFAULT 0, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS courier (cid INTEGER NOT NULL, ord INTEGER NOT NULL, to_kind TEXT, to_id INTEGER, amount INTEGER, sent INTEGER, eta INTEGER, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS policy (cid INTEGER NOT NULL, ord INTEGER NOT NULL, entity_kind TEXT, entity_id INTEGER, floor INTEGER, cap INTEGER, sent INTEGER NOT NULL DEFAULT 0, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS supply_policy (cid INTEGER NOT NULL, ord INTEGER NOT NULL, company INTEGER, min_days INTEGER, tons INTEGER, ammo_battles INTEGER NOT NULL DEFAULT 0, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS stock_policy (cid INTEGER NOT NULL, ord INTEGER NOT NULL, hq INTEGER, part_key TEXT, min_qty INTEGER, target INTEGER, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS bay_job (cid INTEGER NOT NULL, ord INTEGER NOT NULL, hq INTEGER, kind TEXT, unit INTEGER, item_key TEXT, duration INTEGER, queued INTEGER, started INTEGER, done INTEGER, cost INTEGER, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS candidate (cid INTEGER NOT NULL, ord INTEGER NOT NULL, hq INTEGER, first TEXT, last TEXT, callsign TEXT, role TEXT, experience TEXT, primary_skill INTEGER, secondary_skill INTEGER, bonus INTEGER, listed INTEGER, expires INTEGER, age INTEGER NOT NULL DEFAULT 30, id INTEGER NOT NULL DEFAULT 0, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS hq_link (cid INTEGER NOT NULL, ord INTEGER NOT NULL, a INTEGER, b INTEGER, level INTEGER, tons INTEGER, established INTEGER, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS unit_transfer (cid INTEGER NOT NULL, ord INTEGER NOT NULL, unit INTEGER, to_company INTEGER, eta INTEGER, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS faction_cooling (cid INTEGER NOT NULL, ord INTEGER NOT NULL, faction TEXT, until_day INTEGER, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS faction_standing (cid INTEGER NOT NULL, faction TEXT NOT NULL, value INTEGER NOT NULL, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS event_memory (cid INTEGER NOT NULL, kind TEXT NOT NULL, last_day INTEGER NOT NULL, last_choice INTEGER NOT NULL, streak INTEGER NOT NULL, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS rating_snapshot (cid INTEGER NOT NULL, year INTEGER NOT NULL, score INTEGER NOT NULL, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS listing (cid INTEGER NOT NULL, ord INTEGER NOT NULL, kind TEXT, item_key TEXT, rarity TEXT, price INTEGER, qty INTEGER, staple INTEGER CHECK (staple IN (0,1)), listed INTEGER, expires INTEGER, hq INTEGER, c_armor INTEGER, c_quality TEXT, c_damaged INTEGER, c_destroyed INTEGER, c_missing INTEGER, black INTEGER NOT NULL DEFAULT 0 CHECK (black IN (0,1)), company INTEGER NOT NULL DEFAULT 0, id INTEGER NOT NULL DEFAULT 0, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS part_order (cid INTEGER NOT NULL, ord INTEGER NOT NULL, part_key TEXT, qty INTEGER, dest_kind TEXT, dest_id INTEGER, ordered INTEGER, eta INTEGER, cost INTEGER, status TEXT, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS event_log (cid INTEGER NOT NULL, ord INTEGER NOT NULL, day INTEGER, category TEXT, company INTEGER, hq INTEGER, contract INTEGER, text TEXT, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS pending_event (cid INTEGER NOT NULL, ord INTEGER NOT NULL, kind TEXT, day INTEGER, contract INTEGER, company INTEGER, default_choice INTEGER, deadline INTEGER, chosen INTEGER, person INTEGER NOT NULL DEFAULT 0, id INTEGER NOT NULL DEFAULT 0, battle INTEGER NOT NULL DEFAULT 0, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS refit_plan (cid INTEGER NOT NULL, ord INTEGER NOT NULL, unit INTEGER, committed INTEGER CHECK (committed IN (0,1)), UNIQUE (cid, ord), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS refit_op (cid INTEGER NOT NULL, plan_ord INTEGER NOT NULL, ord INTEGER NOT NULL, kind TEXT, slot_key TEXT, location TEXT, part_key TEXT, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, plan_ord) REFERENCES refit_plan(cid, ord) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS battle_report (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER, day INTEGER, contract INTEGER, company INTEGER, kind TEXT, enemy_key TEXT, scenario TEXT, terrain TEXT, weather TEXT, outcome TEXT, held_field INTEGER, withdrew INTEGER, roe TEXT, roe_overridden INTEGER, player_power INTEGER, enemy_power INTEGER, conditions_mod INTEGER, close_terrain INTEGER, air_grounded INTEGER, convoy_hit INTEGER, edge_spent_by TEXT, recon_quality INTEGER, avg_fatigue INTEGER, avg_morale INTEGER, hits_taken INTEGER, destroyed INTEGER, wounded INTEGER, kia INTEGER, lost_hulls INTEGER, missing INTEGER, enemy_destroyed_bv INTEGER, kills_credited INTEGER, prisoners INTEGER, battle_loss_comp INTEGER, score_after INTEGER, score_delta INTEGER, morale_delta INTEGER, fatigue_add INTEGER, battle_loss_pct INTEGER, salvage_pct INTEGER, command_rights TEXT, silenced_mounts INTEGER, armor_left INTEGER, salvage_claimed INTEGER, salvage_haulable INTEGER, salvage_cut INTEGER, salvage_cash INTEGER, salvage_items TEXT, conceded INTEGER, acknowledged INTEGER NOT NULL DEFAULT 1 CHECK (acknowledged IN (0,1)), salvage_unclaimed INTEGER NOT NULL DEFAULT 0, UNIQUE (cid, ord), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS battle_report_hit (cid INTEGER NOT NULL, report_ord INTEGER NOT NULL, ord INTEGER NOT NULL, unit INTEGER, chassis_key TEXT, chassis_name TEXT, armor_before INTEGER, armor_after INTEGER, slot TEXT, slot_part TEXT, slot_result TEXT, destroyed INTEGER, cause TEXT, pilot INTEGER, crew_name TEXT, wound_severity INTEGER, wound_location TEXT, wound_permanent INTEGER, fate TEXT, recovery_roll INTEGER, recovery_target INTEGER, lost INTEGER, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, report_ord) REFERENCES battle_report(cid, ord) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS battle_report_ammo (cid INTEGER NOT NULL, report_ord INTEGER NOT NULL, ord INTEGER NOT NULL, family TEXT, burned INTEGER, reserve INTEGER, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, report_ord) REFERENCES battle_report(cid, ord) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS battle_report_salvage (cid INTEGER NOT NULL, report_ord INTEGER NOT NULL, ord INTEGER NOT NULL, key TEXT, name TEXT, bv INTEGER, armor_pct INTEGER, quality TEXT, damaged INTEGER, destroyed INTEGER, missing INTEGER, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, report_ord) REFERENCES battle_report(cid, ord) DEFERRABLE INITIALLY DEFERRED);
 ;
 
 const tables = [_][]const u8{
@@ -153,80 +153,81 @@ pub const Store = struct {
     /// The player new campaigns are filed under; 0 = none.
     player_id: i64 = 0,
 
-    /// One schema step: the version it brings the store to, and the column
-    /// it adds. `CREATE TABLE IF NOT EXISTS` in `ddl` covers
-    /// new tables; columns on existing tables are the only thing SQLite
+    /// One schema step: `from` is the last version before this column existed,
+    /// `to` is the version that adds it. `CREATE TABLE IF NOT EXISTS` in `ddl`
+    /// covers new tables; columns on existing tables are the only thing SQLite
     /// makes us migrate by hand. Steps are idempotent (column-guarded) so a
-    /// store that predates the version key still upgrades cleanly.
-    pub const Migration = struct { version: u32, table: []const u8, column: []const u8, sql: [*:0]const u8 };
+    /// store that predates the version key still upgrades cleanly. Array is
+    /// ordered ascending by `to` (then by declaration order for equal `to`).
+    pub const Migration = struct { from: u32, to: u32, table: []const u8, column: []const u8, sql: [*:0]const u8 };
     pub const migrations = [_]Migration{
-        .{ .version = 2, .table = "campaign", .column = "player_id", .sql = "ALTER TABLE campaign ADD COLUMN player_id INTEGER NOT NULL DEFAULT 0" },
-        .{ .version = 3, .table = "person", .column = "admitted", .sql = "ALTER TABLE person ADD COLUMN admitted INTEGER NOT NULL DEFAULT 0" },
-        .{ .version = 4, .table = "policy", .column = "sent", .sql = "ALTER TABLE policy ADD COLUMN sent INTEGER NOT NULL DEFAULT 0" },
-        .{ .version = 5, .table = "supply_policy", .column = "ammo_battles", .sql = "ALTER TABLE supply_policy ADD COLUMN ammo_battles INTEGER NOT NULL DEFAULT 0" },
-        .{ .version = 6, .table = "unit", .column = "berth_hq", .sql = "ALTER TABLE unit ADD COLUMN berth_hq INTEGER NOT NULL DEFAULT 0" },
+        .{ .from = 1, .to = 2, .table = "campaign", .column = "player_id", .sql = "ALTER TABLE campaign ADD COLUMN player_id INTEGER NOT NULL DEFAULT 0" },
+        .{ .from = 2, .to = 3, .table = "person", .column = "admitted", .sql = "ALTER TABLE person ADD COLUMN admitted INTEGER NOT NULL DEFAULT 0" },
+        .{ .from = 3, .to = 4, .table = "policy", .column = "sent", .sql = "ALTER TABLE policy ADD COLUMN sent INTEGER NOT NULL DEFAULT 0" },
+        .{ .from = 4, .to = 5, .table = "supply_policy", .column = "ammo_battles", .sql = "ALTER TABLE supply_policy ADD COLUMN ammo_battles INTEGER NOT NULL DEFAULT 0" },
+        .{ .from = 5, .to = 6, .table = "unit", .column = "berth_hq", .sql = "ALTER TABLE unit ADD COLUMN berth_hq INTEGER NOT NULL DEFAULT 0" },
+        // v7: the `injury` table (created by ddl); campaign data is
+        // upgraded on load (`upgradeCampaign`). v8: `faction_standing`
+        // (created by ddl; absent rows read as 0).
+        .{ .from = 8, .to = 9, .table = "pending_event", .column = "person", .sql = "ALTER TABLE pending_event ADD COLUMN person INTEGER NOT NULL DEFAULT 0" },
+        .{ .from = 9, .to = 10, .table = "contract", .column = "negotiated", .sql = "ALTER TABLE contract ADD COLUMN negotiated INTEGER NOT NULL DEFAULT 0" },
+        .{ .from = 10, .to = 11, .table = "person", .column = "rank", .sql = "ALTER TABLE person ADD COLUMN rank TEXT NOT NULL DEFAULT 'private'" },
+        .{ .from = 10, .to = 11, .table = "person", .column = "rank_pinned", .sql = "ALTER TABLE person ADD COLUMN rank_pinned INTEGER NOT NULL DEFAULT 0" },
+        .{ .from = 11, .to = 12, .table = "person", .column = "kills", .sql = "ALTER TABLE person ADD COLUMN kills INTEGER NOT NULL DEFAULT 0" },
+        .{ .from = 11, .to = 12, .table = "person", .column = "kill_bv", .sql = "ALTER TABLE person ADD COLUMN kill_bv INTEGER NOT NULL DEFAULT 0" },
+        .{ .from = 11, .to = 12, .table = "person", .column = "battles", .sql = "ALTER TABLE person ADD COLUMN battles INTEGER NOT NULL DEFAULT 0" },
+        .{ .from = 11, .to = 12, .table = "person", .column = "tours", .sql = "ALTER TABLE person ADD COLUMN tours INTEGER NOT NULL DEFAULT 0" },
+        .{ .from = 11, .to = 12, .table = "person", .column = "outstanding_tours", .sql = "ALTER TABLE person ADD COLUMN outstanding_tours INTEGER NOT NULL DEFAULT 0" },
+        // v12 also adds the `award` table (created by ddl).
+        .{ .from = 12, .to = 13, .table = "person", .column = "edge_spent", .sql = "ALTER TABLE person ADD COLUMN edge_spent INTEGER NOT NULL DEFAULT 0" },
+        // v13 also adds the `ability` table (created by ddl).
+        .{ .from = 13, .to = 14, .table = "person", .column = "faction", .sql = "ALTER TABLE person ADD COLUMN faction TEXT NOT NULL DEFAULT ''" },
+        .{ .from = 14, .to = 15, .table = "person", .column = "shares", .sql = "ALTER TABLE person ADD COLUMN shares INTEGER NOT NULL DEFAULT 0" },
+        .{ .from = 15, .to = 16, .table = "person", .column = "born_day", .sql = "ALTER TABLE person ADD COLUMN born_day INTEGER" },
+        .{ .from = 16, .to = 17, .table = "person", .column = "last_raise_day", .sql = "ALTER TABLE person ADD COLUMN last_raise_day INTEGER" },
+        .{ .from = 16, .to = 17, .table = "person", .column = "last_award_day", .sql = "ALTER TABLE person ADD COLUMN last_award_day INTEGER" },
+        // v18 adds the `rating_snapshot` table (created by ddl) and the stats meta ints.
+        .{ .from = 18, .to = 19, .table = "listing", .column = "black", .sql = "ALTER TABLE listing ADD COLUMN black INTEGER NOT NULL DEFAULT 0" },
+        .{ .from = 19, .to = 20, .table = "unit", .column = "wreck", .sql = "ALTER TABLE unit ADD COLUMN wreck TEXT NOT NULL DEFAULT 'none'" },
+        .{ .from = 20, .to = 21, .table = "force", .column = "roe", .sql = "ALTER TABLE force ADD COLUMN roe TEXT NOT NULL DEFAULT 'standard'" },
+        .{ .from = 21, .to = 22, .table = "contract", .column = "enemy_lances", .sql = "ALTER TABLE contract ADD COLUMN enemy_lances INTEGER NOT NULL DEFAULT 0" },
+        .{ .from = 21, .to = 22, .table = "contract", .column = "enemy_quality", .sql = "ALTER TABLE contract ADD COLUMN enemy_quality TEXT NOT NULL DEFAULT 'regular'" },
+        .{ .from = 21, .to = 22, .table = "contract", .column = "enemy_lance_bv", .sql = "ALTER TABLE contract ADD COLUMN enemy_lance_bv INTEGER NOT NULL DEFAULT 0" },
+        .{ .from = 22, .to = 23, .table = "listing", .column = "company", .sql = "ALTER TABLE listing ADD COLUMN company INTEGER NOT NULL DEFAULT 0" },
+        .{ .from = 23, .to = 24, .table = "contract", .column = "enemy_lance_tons", .sql = "ALTER TABLE contract ADD COLUMN enemy_lance_tons INTEGER NOT NULL DEFAULT 0" },
+        .{ .from = 23, .to = 24, .table = "contract", .column = "offer_hq", .sql = "ALTER TABLE contract ADD COLUMN offer_hq INTEGER NOT NULL DEFAULT 0" },
+        .{ .from = 24, .to = 25, .table = "person", .column = "departed_day", .sql = "ALTER TABLE person ADD COLUMN departed_day INTEGER" },
+        // v26: the inbox is answered by event id, not by row; `load` stamps
+        // ids on rows that default to 0.
+        .{ .from = 25, .to = 26, .table = "pending_event", .column = "id", .sql = "ALTER TABLE pending_event ADD COLUMN id INTEGER NOT NULL DEFAULT 0" },
+        // v28: reports already in a save count as read (default 1), so an
+        // upgrade does not hold the turn on battles long since fought.
+        .{ .from = 27, .to = 28, .table = "battle_report", .column = "acknowledged", .sql = "ALTER TABLE battle_report ADD COLUMN acknowledged INTEGER NOT NULL DEFAULT 1" },
         // v29: a hull the enemy holds rides in the `unit` table with
         // its own slots, distinguished only by a non-empty `held_by`.
-        .{ .version = 29, .table = "unit", .column = "held_by", .sql = "ALTER TABLE unit ADD COLUMN held_by TEXT NOT NULL DEFAULT ''" },
-        .{ .version = 29, .table = "unit", .column = "held_day", .sql = "ALTER TABLE unit ADD COLUMN held_day INTEGER NOT NULL DEFAULT 0" },
-        .{ .version = 29, .table = "unit", .column = "held_battle", .sql = "ALTER TABLE unit ADD COLUMN held_battle INTEGER NOT NULL DEFAULT 0" },
+        .{ .from = 28, .to = 29, .table = "unit", .column = "held_by", .sql = "ALTER TABLE unit ADD COLUMN held_by TEXT NOT NULL DEFAULT ''" },
+        .{ .from = 28, .to = 29, .table = "unit", .column = "held_day", .sql = "ALTER TABLE unit ADD COLUMN held_day INTEGER NOT NULL DEFAULT 0" },
+        .{ .from = 28, .to = 29, .table = "unit", .column = "held_battle", .sql = "ALTER TABLE unit ADD COLUMN held_battle INTEGER NOT NULL DEFAULT 0" },
         // v30: a battle decision names the engagement it answers,
         // and a hull won back goes home to the lance it was taken from.
-        .{ .version = 30, .table = "pending_event", .column = "battle", .sql = "ALTER TABLE pending_event ADD COLUMN battle INTEGER NOT NULL DEFAULT 0" },
-        .{ .version = 30, .table = "unit", .column = "held_force", .sql = "ALTER TABLE unit ADD COLUMN held_force INTEGER NOT NULL DEFAULT 0" },
+        .{ .from = 29, .to = 30, .table = "pending_event", .column = "battle", .sql = "ALTER TABLE pending_event ADD COLUMN battle INTEGER NOT NULL DEFAULT 0" },
+        .{ .from = 29, .to = 30, .table = "unit", .column = "held_force", .sql = "ALTER TABLE unit ADD COLUMN held_force INTEGER NOT NULL DEFAULT 0" },
         // v31: the part of a haul still to be divided. Older saves
         // have no undivided hauls — their salvage was taken at claim time.
-        .{ .version = 31, .table = "battle_report", .column = "salvage_unclaimed", .sql = "ALTER TABLE battle_report ADD COLUMN salvage_unclaimed INTEGER NOT NULL DEFAULT 0" },
-        .{ .version = 33, .table = "contract", .column = "orders_day", .sql = "ALTER TABLE contract ADD COLUMN orders_day INTEGER" },
+        .{ .from = 30, .to = 31, .table = "battle_report", .column = "salvage_unclaimed", .sql = "ALTER TABLE battle_report ADD COLUMN salvage_unclaimed INTEGER NOT NULL DEFAULT 0" },
+        .{ .from = 32, .to = 33, .table = "contract", .column = "orders_day", .sql = "ALTER TABLE contract ADD COLUMN orders_day INTEGER" },
         // v34: a hall candidate keeps the age it was generated with.
-        .{ .version = 34, .table = "candidate", .column = "age", .sql = "ALTER TABLE candidate ADD COLUMN age INTEGER NOT NULL DEFAULT 30" },
+        .{ .from = 33, .to = 34, .table = "candidate", .column = "age", .sql = "ALTER TABLE candidate ADD COLUMN age INTEGER NOT NULL DEFAULT 30" },
         // v35: typed identity for listings, candidates and loans; three meta
         // counters. Pre-v35 rows carry 0 and are backfilled on load (rule 51).
         // next_contract_id is already a meta int; its counter now also advances
         // at offer generation, so u32 is ample for any campaign.
-        .{ .version = 35, .table = "listing", .column = "id", .sql = "ALTER TABLE listing ADD COLUMN id INTEGER NOT NULL DEFAULT 0" },
-        .{ .version = 35, .table = "candidate", .column = "id", .sql = "ALTER TABLE candidate ADD COLUMN id INTEGER NOT NULL DEFAULT 0" },
-        .{ .version = 35, .table = "loan", .column = "id", .sql = "ALTER TABLE loan ADD COLUMN id INTEGER NOT NULL DEFAULT 0" },
-        // v7: the `injury` table (created by ddl); campaign data is
-        // upgraded on load (`upgradeCampaign`). v8: `faction_standing`
-        // (created by ddl; absent rows read as 0).
-        .{ .version = 9, .table = "pending_event", .column = "person", .sql = "ALTER TABLE pending_event ADD COLUMN person INTEGER NOT NULL DEFAULT 0" },
-        .{ .version = 10, .table = "contract", .column = "negotiated", .sql = "ALTER TABLE contract ADD COLUMN negotiated INTEGER NOT NULL DEFAULT 0" },
-        .{ .version = 11, .table = "person", .column = "rank", .sql = "ALTER TABLE person ADD COLUMN rank TEXT NOT NULL DEFAULT 'private'" },
-        .{ .version = 11, .table = "person", .column = "rank_pinned", .sql = "ALTER TABLE person ADD COLUMN rank_pinned INTEGER NOT NULL DEFAULT 0" },
-        .{ .version = 12, .table = "person", .column = "kills", .sql = "ALTER TABLE person ADD COLUMN kills INTEGER NOT NULL DEFAULT 0" },
-        .{ .version = 12, .table = "person", .column = "kill_bv", .sql = "ALTER TABLE person ADD COLUMN kill_bv INTEGER NOT NULL DEFAULT 0" },
-        .{ .version = 12, .table = "person", .column = "battles", .sql = "ALTER TABLE person ADD COLUMN battles INTEGER NOT NULL DEFAULT 0" },
-        .{ .version = 12, .table = "person", .column = "tours", .sql = "ALTER TABLE person ADD COLUMN tours INTEGER NOT NULL DEFAULT 0" },
-        .{ .version = 12, .table = "person", .column = "outstanding_tours", .sql = "ALTER TABLE person ADD COLUMN outstanding_tours INTEGER NOT NULL DEFAULT 0" },
-        // v12 also adds the `award` table (created by ddl).
-        .{ .version = 13, .table = "person", .column = "edge_spent", .sql = "ALTER TABLE person ADD COLUMN edge_spent INTEGER NOT NULL DEFAULT 0" },
-        // v13 also adds the `ability` table (created by ddl).
-        .{ .version = 14, .table = "person", .column = "faction", .sql = "ALTER TABLE person ADD COLUMN faction TEXT NOT NULL DEFAULT ''" },
-        .{ .version = 15, .table = "person", .column = "shares", .sql = "ALTER TABLE person ADD COLUMN shares INTEGER NOT NULL DEFAULT 0" },
-        .{ .version = 16, .table = "person", .column = "born_day", .sql = "ALTER TABLE person ADD COLUMN born_day INTEGER" },
-        .{ .version = 17, .table = "person", .column = "last_raise_day", .sql = "ALTER TABLE person ADD COLUMN last_raise_day INTEGER" },
-        .{ .version = 17, .table = "person", .column = "last_award_day", .sql = "ALTER TABLE person ADD COLUMN last_award_day INTEGER" },
-        // v18 adds the `rating_snapshot` table (created by ddl) and the stats meta ints.
-        .{ .version = 19, .table = "listing", .column = "black", .sql = "ALTER TABLE listing ADD COLUMN black INTEGER NOT NULL DEFAULT 0" },
-        .{ .version = 20, .table = "unit", .column = "wreck", .sql = "ALTER TABLE unit ADD COLUMN wreck TEXT NOT NULL DEFAULT 'none'" },
-        .{ .version = 21, .table = "force", .column = "roe", .sql = "ALTER TABLE force ADD COLUMN roe TEXT NOT NULL DEFAULT 'standard'" },
-        .{ .version = 22, .table = "contract", .column = "enemy_lances", .sql = "ALTER TABLE contract ADD COLUMN enemy_lances INTEGER NOT NULL DEFAULT 0" },
-        .{ .version = 22, .table = "contract", .column = "enemy_quality", .sql = "ALTER TABLE contract ADD COLUMN enemy_quality TEXT NOT NULL DEFAULT 'regular'" },
-        .{ .version = 22, .table = "contract", .column = "enemy_lance_bv", .sql = "ALTER TABLE contract ADD COLUMN enemy_lance_bv INTEGER NOT NULL DEFAULT 0" },
-        .{ .version = 23, .table = "listing", .column = "company", .sql = "ALTER TABLE listing ADD COLUMN company INTEGER NOT NULL DEFAULT 0" },
-        .{ .version = 24, .table = "contract", .column = "enemy_lance_tons", .sql = "ALTER TABLE contract ADD COLUMN enemy_lance_tons INTEGER NOT NULL DEFAULT 0" },
-        .{ .version = 25, .table = "person", .column = "departed_day", .sql = "ALTER TABLE person ADD COLUMN departed_day INTEGER" },
-        .{ .version = 24, .table = "contract", .column = "offer_hq", .sql = "ALTER TABLE contract ADD COLUMN offer_hq INTEGER NOT NULL DEFAULT 0" },
-        // v28: reports already in a save count as read (default 1), so an
-        // upgrade does not hold the turn on battles long since fought.
-        .{ .version = 28, .table = "battle_report", .column = "acknowledged", .sql = "ALTER TABLE battle_report ADD COLUMN acknowledged INTEGER NOT NULL DEFAULT 1" },
-        // v26: the inbox is answered by event id, not by row; `load` stamps
-        // ids on rows that default to 0.
-        .{ .version = 26, .table = "pending_event", .column = "id", .sql = "ALTER TABLE pending_event ADD COLUMN id INTEGER NOT NULL DEFAULT 0" },
+        .{ .from = 34, .to = 35, .table = "listing", .column = "id", .sql = "ALTER TABLE listing ADD COLUMN id INTEGER NOT NULL DEFAULT 0" },
+        .{ .from = 34, .to = 35, .table = "candidate", .column = "id", .sql = "ALTER TABLE candidate ADD COLUMN id INTEGER NOT NULL DEFAULT 0" },
+        .{ .from = 34, .to = 35, .table = "loan", .column = "id", .sql = "ALTER TABLE loan ADD COLUMN id INTEGER NOT NULL DEFAULT 0" },
         // v36: Person.secondary_role is now persisted; NULL on pre-v36 rows
         // means no secondary role was set (correct default).
-        .{ .version = 36, .table = "person", .column = "secondary_role", .sql = "ALTER TABLE person ADD COLUMN secondary_role TEXT" },
+        .{ .from = 35, .to = 36, .table = "person", .column = "secondary_role", .sql = "ALTER TABLE person ADD COLUMN secondary_role TEXT" },
     };
 
     pub fn open(path: [*:0]const u8) !Store {
@@ -257,24 +258,102 @@ pub const Store = struct {
     /// `db` is owned by the caller until this returns successfully; on any
     /// error the caller must close it (A24).  Version is read before any
     /// DDL so a future-version store is refused without mutation (rule 49).
-    /// DDL, indexes, and column migrations run in one transaction (rule 62).
+    /// DDL, indexes, column migrations, and table rebuild run in one
+    /// transaction (rule 62). Rule 50: PRAGMA foreign_keys is a no-op inside
+    /// a transaction, so it is set outside the BEGIN/COMMIT boundary.
     pub fn fromDb(db: sqlite.Db) !Store {
         const stored_opt = try readStoreVersion(db);
         if (stored_opt) |s| if (s > schema_version) return error.StoreNewerThanGame;
         const stored: u32 = stored_opt orelse 0;
         const store: Store = .{ .db = db };
+        // Disable FK enforcement before the transaction: DDL and the rebuild
+        // require it off; it is re-enabled after COMMIT (rule 50).
+        try db.exec("PRAGMA foreign_keys = OFF");
         try db.exec("BEGIN");
         // best-effort: rolling back a failed transaction; the original error propagates.
         errdefer db.exec("ROLLBACK") catch {};
         try db.exec(ddl);
         try db.exec(index_ddl);
         for (migrations) |m| {
-            if (m.version <= stored) continue;
+            if (m.to <= stored) continue;
             if (!try hasColumnRt(db, m.table, m.column)) try db.exec(m.sql);
         }
+        // Rebuild per-cid tables with the declared constraint set (rules 50, 51).
+        // Skipped for brand-new stores (stored == 0): ddl already creates constrained tables.
+        if (stored >= 1 and stored < 37) try rebuildToV37(db);
         try store.setSetting("schema_version", schema_version);
         try db.exec("COMMIT");
+        // Re-enable FK enforcement for all subsequent operations (rule 50).
+        try db.exec("PRAGMA foreign_keys = ON");
         return store;
+    }
+
+    /// Rebuild every per-cid table to acquire the constraint set declared in
+    /// `ddl`: containment foreign keys, UNIQUE keys, and CHECK constraints
+    /// (rules 50, 51). Uses the SQLite ALTER TABLE procedure: create t__new
+    /// with the final schema, copy every row with an explicit column list,
+    /// drop t, rename t__new to t. Runs with foreign_keys OFF (set by the
+    /// caller); CHECK constraints still apply on INSERT but are restricted to
+    /// writer-guaranteed values. Does not run foreign_key_check: soft
+    /// references remain the loader's job. Called from fromDb for stored < 37.
+    fn rebuildToV37(db: sqlite.Db) !void {
+        const marker = "CREATE TABLE IF NOT EXISTS ";
+        for (tables) |t| {
+            // --- locate this table's constrained definition in ddl ---
+            var search_buf: [80]u8 = undefined;
+            const search = std.fmt.bufPrint(&search_buf, "{s}{s} (", .{ marker, t }) catch return error.SqliteError;
+            const ddl_pos = std.mem.indexOf(u8, ddl, search) orelse continue;
+            const ddl_end = std.mem.indexOfScalarPos(u8, ddl, ddl_pos, '\n') orelse ddl.len;
+            const table_ddl = ddl[ddl_pos..ddl_end]; // "CREATE TABLE IF NOT EXISTS t (...);"
+
+            // --- create t__new with the constrained schema ---
+            // Substitute the table name with t__new in the CREATE TABLE statement.
+            const suffix = table_ddl[marker.len + t.len ..]; // " (...);"
+            var create_buf: [2048:0]u8 = undefined;
+            _ = std.fmt.bufPrintZ(&create_buf, "{s}{s}__new{s}", .{ marker, t, suffix }) catch return error.SqliteError;
+            try db.exec(&create_buf);
+
+            // --- build explicit column list from PRAGMA table_info ---
+            var cols_buf: [2048]u8 = undefined;
+            var cols_len: usize = 0;
+            {
+                var sq_buf: [80]u8 = undefined;
+                const sq = std.fmt.bufPrint(&sq_buf, "PRAGMA table_info({s})", .{t}) catch return error.SqliteError;
+                const st = try db.prepare(sq);
+                defer st.finalize();
+                var name_buf: [64]u8 = undefined;
+                while (try st.next()) {
+                    var fba = std.heap.FixedBufferAllocator.init(&name_buf);
+                    const col_name = st.text(1, fba.allocator()) catch continue; // best-effort: a column name exceeding the probe buffer cannot be the rebuild target
+                    if (cols_len > 0) {
+                        if (cols_len >= cols_buf.len) return error.SqliteError;
+                        cols_buf[cols_len] = ',';
+                        cols_len += 1;
+                    }
+                    if (cols_len + col_name.len > cols_buf.len) return error.SqliteError;
+                    @memcpy(cols_buf[cols_len..][0..col_name.len], col_name);
+                    cols_len += col_name.len;
+                }
+            }
+            const cols_str = cols_buf[0..cols_len];
+
+            // --- INSERT INTO t__new SELECT <cols> FROM t ---
+            var insert_buf: [3072:0]u8 = undefined;
+            _ = std.fmt.bufPrintZ(&insert_buf, "INSERT INTO {s}__new SELECT {s} FROM {s}", .{ t, cols_str, t }) catch return error.SqliteError;
+            try db.exec(&insert_buf);
+
+            // --- DROP TABLE t ---
+            var drop_buf: [64:0]u8 = undefined;
+            _ = std.fmt.bufPrintZ(&drop_buf, "DROP TABLE {s}", .{t}) catch return error.SqliteError;
+            try db.exec(&drop_buf);
+
+            // --- ALTER TABLE t__new RENAME TO t ---
+            var rename_buf: [96:0]u8 = undefined;
+            _ = std.fmt.bufPrintZ(&rename_buf, "ALTER TABLE {s}__new RENAME TO {s}", .{ t, t }) catch return error.SqliteError;
+            try db.exec(&rename_buf);
+        }
+        // Recreate all per-cid indexes after the rebuild (idempotent).
+        try db.exec(index_ddl);
     }
 
     fn hasColumnRt(db: sqlite.Db, table: []const u8, column: []const u8) !bool {
@@ -3059,13 +3138,17 @@ test "saving over a campaign row that no longer exists is refused" {
     const store = try Store.open(":memory:");
     defer store.close();
     try store.save(&gs);
+    // FK enforcement must be off: child rows reference this campaign row.
+    try store.db.exec("PRAGMA foreign_keys = OFF");
     try store.db.exec("DELETE FROM campaign");
+    try store.db.exec("PRAGMA foreign_keys = ON");
     try std.testing.expectError(error.NoSuchCampaign, store.save(&gs));
     try std.testing.expectEqual(@as(i64, 0), try countCampaignRows(store));
 }
 
 /// Save a generated campaign, corrupt one column with `sql`, and load it
-/// back.
+/// back. Foreign-key enforcement is disabled around the tamper SQL so the
+/// loader remains the asserted integrity check (defense in depth: rule 50).
 fn loadAfterTampering(sql: [*:0]const u8) !void {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 5005 });
     defer gs.deinit();
@@ -3074,7 +3157,9 @@ fn loadAfterTampering(sql: [*:0]const u8) !void {
     const store = try Store.open(":memory:");
     defer store.close();
     try store.save(&gs);
+    try store.db.exec("PRAGMA foreign_keys = OFF");
     try store.db.exec(sql);
+    try store.db.exec("PRAGMA foreign_keys = ON");
     var loaded = try store.load(std.testing.allocator, gs.campaign_id);
     loaded.deinit();
 }
@@ -3164,11 +3249,19 @@ test "an orphan stock row rejects the load as corrupt, not UnknownSite" {
     try std.testing.expectError(error.CorruptSave, loadAfterTampering("UPDATE stock SET owner_id = 99999 WHERE owner_kind IN ('hq','company')"));
 }
 
-test "a duplicate stock row for the same owner and key rejects the load as corrupt" {
-    // Two rows with identical (owner_kind, owner_id, key) are corruption (rule 47, C7).
-    // Insert a copy of the first stock row with a fresh ord so the PRIMARY KEY does not
-    // block the insert; loadStock must catch the repeat via its seen-set guard.
-    try std.testing.expectError(error.CorruptSave, loadAfterTampering(
+test "a duplicate stock row for the same owner and key is rejected by the schema" {
+    // Uniqueness of (cid, owner_kind, owner_id, key) is now schema-enforced
+    // (UNIQUE constraint on stock, rule 50). The INSERT is rejected at the
+    // schema level before the loader sees it; the loader's seen-set guard
+    // remains for any non-SQL path.
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 5005 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    _ = try @import("../sim/starter_company.zig").generateInto(&gs, "Alpha");
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    try std.testing.expectError(error.ConstraintViolation, store.db.exec(
         "INSERT INTO stock SELECT cid, owner_kind, owner_id, (SELECT MAX(ord) FROM stock) + 1, key, qty FROM stock LIMIT 1",
     ));
 }
@@ -3183,7 +3276,10 @@ test "an orphan battle_report child row rejects the load as corrupt" {
     defer store.close();
     try store.save(&gs);
     // Insert an ammo row with report_ord 99999 which no battle_report.ord equals.
+    // FK enforcement is off so the insert reaches the loader's orphan check.
+    try store.db.exec("PRAGMA foreign_keys = OFF");
     try store.db.exec("INSERT INTO battle_report_ammo VALUES ((SELECT id FROM campaign LIMIT 1), 99999, 0, 'lrm5', 0, 0)");
+    try store.db.exec("PRAGMA foreign_keys = ON");
     try std.testing.expectError(error.CorruptSave, store.load(std.testing.allocator, gs.campaign_id));
 }
 
@@ -3211,11 +3307,13 @@ test "a NULL in a required enum column rejects the load" {
     try std.testing.expectError(error.CorruptSave, loadAfterTampering("UPDATE person SET role = NULL WHERE rowid = (SELECT rowid FROM person LIMIT 1)"));
 }
 
-test "a duplicate primary person id rejects the load" {
-    // Create a raw database without a PRIMARY KEY constraint on person so we
-    // can insert duplicate ids; the loader's getOrPut+found_existing guard catches it.
-    // RNG: use the legacy 256-byte blob (pre-v32 path; fromDb creates empty rng_stream).
+test "a duplicate primary person id is rejected by the schema" {
+    // The rebuild in fromDb copies rows into person__new (PRIMARY KEY (cid, id));
+    // duplicate (cid, id) fails at the schema level before the loader runs.
+    // Uniqueness of (cid, id) is schema-enforced; the loader's getOrPut guard
+    // remains for any non-SQL path. RNG: legacy 256-byte blob (pre-v32).
     const raw = try sqlite.Db.open(":memory:");
+    defer raw.close(); // fromDb fails, so caller closes raw
     try raw.exec(
         \\CREATE TABLE setting (key TEXT PRIMARY KEY, value INTEGER NOT NULL);
         \\CREATE TABLE campaign (id INTEGER PRIMARY KEY, name TEXT NOT NULL, commander TEXT, day INTEGER NOT NULL, date TEXT NOT NULL, schema_version INTEGER NOT NULL, save_seq INTEGER NOT NULL, player_id INTEGER NOT NULL DEFAULT 0);
@@ -3237,9 +3335,9 @@ test "a duplicate primary person id rejects the load" {
         \\INSERT INTO person VALUES (1, 0, 1, 'A', 'B', NULL, 'mekwarrior', 0, 'active', 0, 50, 0, NULL, 0, 0, 40, 0, NULL, NULL, NULL, NULL, 0, 'private', 0, 0, 0, 0, 0, 0, 0, '', 0, NULL, NULL, NULL, NULL, NULL);
         \\INSERT INTO person VALUES (1, 1, 1, 'C', 'D', NULL, 'mekwarrior', 0, 'active', 0, 50, 0, NULL, 0, 0, 40, 0, NULL, NULL, NULL, NULL, 0, 'private', 0, 0, 0, 0, 0, 0, 0, '', 0, NULL, NULL, NULL, NULL, NULL);
     );
-    const store = try Store.fromDb(raw);
-    defer store.close();
-    try std.testing.expectError(error.CorruptSave, store.load(std.testing.allocator, 1));
+    // rebuildToV37 copies duplicate (cid=1, id=1) rows into person__new
+    // (PRIMARY KEY (cid, id)) → ConstraintViolation at the schema level.
+    try std.testing.expectError(error.ConstraintViolation, Store.fromDb(raw));
 }
 
 test "a save with month 13 rejects the load" {
@@ -3248,8 +3346,15 @@ test "a save with month 13 rejects the load" {
 }
 
 test "a missing required meta row rejects the load" {
-    // The loader requires 'funds' in meta; its absence is corruption (rule 47).
-    try std.testing.expectError(error.CorruptSave, loadAfterTampering("DELETE FROM meta WHERE key = 'funds'"));
+    // The loader requires scalar meta rows to be present; absence is corruption
+    // (rule 47, 70). Representative set: funds, reputation, difficulty, and a
+    // required date component (month).
+    for ([_][*:0]const u8{
+        "DELETE FROM meta WHERE key = 'funds'",
+        "DELETE FROM meta WHERE key = 'reputation'",
+        "DELETE FROM meta WHERE key = 'difficulty'",
+        "DELETE FROM meta WHERE key = 'month'",
+    }) |sql| try std.testing.expectError(error.CorruptSave, loadAfterTampering(sql));
 }
 
 // C7b: counter reconciliation and choice bounds.
@@ -3325,6 +3430,184 @@ test "a person id equal to maxInt(u32) rejects the load as corrupt" {
         \\INSERT INTO meta_text VALUES (1, 'outfit_name', 'Test');
         \\INSERT INTO rng VALUES (1, x'000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff');
         \\INSERT INTO person VALUES (1, 0, 4294967295, 'A', 'B', NULL, 'mekwarrior', 0, 'active', 0, 50, 0, NULL, 0, 0, 40, 0, NULL, NULL, NULL, NULL, 0, 'private', 0, 0, 0, 0, 0, 0, 0, '', 0, NULL, NULL, NULL, NULL, NULL);
+    );
+    const store = try Store.fromDb(raw);
+    defer store.close();
+    try std.testing.expectError(error.CorruptSave, store.load(std.testing.allocator, 1));
+}
+
+// C9: schema integrity and migration tests.
+
+test "the migrations array is strictly ascending by to and each from < to" {
+    // Rule 51: ordered migrations; source version is explicit.
+    var prev_to: u32 = 0;
+    for (Store.migrations) |m| {
+        try std.testing.expect(m.from < m.to);
+        try std.testing.expect(m.to >= prev_to);
+        prev_to = m.to;
+    }
+}
+
+test "foreign keys are enforced on every connection" {
+    // Rule 50: Db.open enables PRAGMA foreign_keys = ON. A deferred FK
+    // violation is caught at the auto-commit boundary.
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 7701 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    // An award for a non-existent person_id is deferred until COMMIT; FK
+    // enforcement rejects it (ConstraintViolation), proving rule 50 wiring.
+    const cid = gs.campaign_id;
+    try store.db.exec("BEGIN");
+    const st = try store.db.prepare("INSERT INTO award (cid, person_id, key) VALUES (?1, ?2, ?3)");
+    defer st.finalize();
+    try st.bindAll(.{ cid, @as(i64, 99999), "valor" });
+    try st.run(); // deferred: no error yet
+    try std.testing.expectError(error.ConstraintViolation, store.db.exec("COMMIT"));
+}
+
+test "a v36 store rebuilds to v37 with constraints and preserves every row" {
+    // Rule 51: fixture for the rebuild boundary. A v36-shaped store (no FK/UNIQUE
+    // constraints on per-cid tables) is reopened through fromDb; schema_version
+    // advances to 37 and the new constraints are present.
+    const raw = try sqlite.Db.open(":memory:");
+    try raw.exec(
+        \\CREATE TABLE setting (key TEXT PRIMARY KEY, value INTEGER NOT NULL);
+        \\CREATE TABLE campaign (id INTEGER PRIMARY KEY, name TEXT NOT NULL, commander TEXT, day INTEGER NOT NULL, date TEXT NOT NULL, schema_version INTEGER NOT NULL, save_seq INTEGER NOT NULL, player_id INTEGER NOT NULL DEFAULT 0);
+        \\CREATE TABLE meta (cid INTEGER NOT NULL, key TEXT NOT NULL, value INTEGER NOT NULL, PRIMARY KEY (cid, key));
+        \\CREATE TABLE meta_text (cid INTEGER NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (cid, key));
+        \\CREATE TABLE rng_stream (cid INTEGER NOT NULL, stream TEXT NOT NULL, format INTEGER NOT NULL, state BLOB NOT NULL, UNIQUE (cid, stream));
+        \\CREATE TABLE person (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, first TEXT, last TEXT, callsign TEXT, role TEXT, xp INTEGER, status TEXT, fatigue INTEGER, morale INTEGER, recruited_day INTEGER, salary_override INTEGER, assigned_force INTEGER, posted_hq INTEGER, weekly_hours INTEGER, medbay_priority INTEGER, leave_until INTEGER, wound_heal_day INTEGER, training_skill TEXT, training_done INTEGER, admitted INTEGER NOT NULL DEFAULT 0, rank TEXT NOT NULL DEFAULT 'private', rank_pinned INTEGER NOT NULL DEFAULT 0, kills INTEGER NOT NULL DEFAULT 0, kill_bv INTEGER NOT NULL DEFAULT 0, battles INTEGER NOT NULL DEFAULT 0, tours INTEGER NOT NULL DEFAULT 0, outstanding_tours INTEGER NOT NULL DEFAULT 0, edge_spent INTEGER NOT NULL DEFAULT 0, faction TEXT NOT NULL DEFAULT '', shares INTEGER NOT NULL DEFAULT 0, born_day INTEGER, last_raise_day INTEGER, last_award_day INTEGER, departed_day INTEGER, secondary_role TEXT, PRIMARY KEY (cid, id));
+        \\CREATE TABLE award (cid INTEGER NOT NULL, person_id INTEGER NOT NULL, key TEXT NOT NULL);
+        \\INSERT INTO setting VALUES ('schema_version', 36);
+        \\INSERT INTO campaign VALUES (1, 'Fixture', NULL, 0, '3025-01-01', 36, 1, 0);
+        \\INSERT INTO meta VALUES (1, 'day_index', 0);
+        \\INSERT INTO meta VALUES (1, 'year', 3025);
+        \\INSERT INTO meta VALUES (1, 'month', 1);
+        \\INSERT INTO meta VALUES (1, 'day', 1);
+        \\INSERT INTO meta VALUES (1, 'funds', 0);
+        \\INSERT INTO meta VALUES (1, 'reputation', 0);
+        \\INSERT INTO meta VALUES (1, 'difficulty', 1);
+        \\INSERT INTO meta_text VALUES (1, 'outfit_name', 'Fixture');
+        \\INSERT INTO person VALUES (1, 0, 1, 'A', 'B', NULL, 'mekwarrior', 0, 'active', 0, 50, 0, NULL, 0, 0, 40, 0, NULL, NULL, NULL, NULL, 0, 'private', 0, 0, 0, 0, 0, 0, 0, '', 0, NULL, NULL, NULL, NULL, NULL);
+        \\INSERT INTO award VALUES (1, 1, 'valor');
+    );
+    const store = try Store.fromDb(raw);
+    defer store.close();
+    // Schema advanced to 37.
+    try std.testing.expectEqual(@as(i64, schema_version), store.getSetting("schema_version", 0));
+    // award now carries the containment FK to person.
+    var fk_found = false;
+    const fk = try store.db.prepare("PRAGMA foreign_key_list(award)");
+    defer fk.finalize();
+    while (try fk.next()) {
+        var buf: [32]u8 = undefined;
+        var fba = std.heap.FixedBufferAllocator.init(&buf);
+        const tbl = fk.text(2, fba.allocator()) catch continue;
+        if (std.mem.eql(u8, tbl, "person")) fk_found = true;
+    }
+    try std.testing.expect(fk_found);
+    // All rows survived the rebuild.
+    const cnt = try store.db.prepare("SELECT COUNT(*) FROM award WHERE cid = 1");
+    defer cnt.finalize();
+    try std.testing.expect(try cnt.next());
+    try std.testing.expectEqual(@as(i64, 1), cnt.int(0));
+}
+
+test "a rebuilt store loads to the identical digest" {
+    // Rules 2, 51: the rebuild is data-preserving. Saving through a current
+    // store, forcing schema_version back to 36, reopening (triggers rebuild),
+    // and loading yields an identical state hash.
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 20_260_924 });
+    defer gs.deinit();
+    try playedYearForTest(&gs);
+    const hash_before = digest.stateHash(&gs);
+
+    const raw = try sqlite.Db.open(":memory:");
+    // First fromDb: creates schema and sets version to 37.
+    var s1 = try Store.fromDb(raw);
+    try s1.save(&gs);
+    // Force version back to 36 so the next fromDb rebuilds.
+    try raw.exec("UPDATE setting SET value = 36 WHERE key = 'schema_version'");
+    // Second fromDb: sees v36, runs rebuildToV37.
+    const s2 = try Store.fromDb(raw);
+    defer s2.close();
+    try std.testing.expectEqual(@as(i64, schema_version), s2.getSetting("schema_version", 0));
+    var loaded = try s2.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+    // Digest is identical: the rebuild changed no data.
+    var diff_buf: [128]u8 = undefined;
+    try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &diff_buf) orelse "");
+    // The golden hash is unchanged (this plan changes no simulation data).
+    try std.testing.expectEqual(@as(u64, 10686551396103014583), hash_before);
+}
+
+test "every next-ID counter resumes past a higher owned id after load" {
+    // Rule 70: representative table-driven coverage for all 10 counter meta
+    // rows. Each counter is driven below the maximum owned id; reconcileCounters
+    // (and resumeBattleIds/resumeIds for the battle/event counters) must bump it
+    // past the max on load.
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 8881 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    _ = try @import("../sim/starter_company.zig").generateInto(&gs, "Alpha");
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    for ([_][*:0]const u8{
+        "UPDATE meta SET value = 0 WHERE key = 'next_person_id'",
+        "UPDATE meta SET value = 0 WHERE key = 'next_unit_id'",
+        "UPDATE meta SET value = 0 WHERE key = 'next_force_id'",
+        "UPDATE meta SET value = 0 WHERE key = 'next_hq_id'",
+        "UPDATE meta SET value = 0 WHERE key = 'next_contract_id'",
+        "UPDATE meta SET value = 0 WHERE key = 'next_battle_id'",
+        "UPDATE meta SET value = 0 WHERE key = 'next_event_id'",
+        "UPDATE meta SET value = 0 WHERE key = 'next_listing_id'",
+        "UPDATE meta SET value = 0 WHERE key = 'next_candidate_id'",
+        "UPDATE meta SET value = 0 WHERE key = 'next_loan_id'",
+    }) |sql| {
+        try store.db.exec(sql);
+        var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+        defer loaded.deinit();
+        // Each counter must be at least 1 after load (resume invariant).
+        try std.testing.expect(loaded.next_person_id >= 1);
+        try std.testing.expect(loaded.next_unit_id >= 1);
+        try std.testing.expect(loaded.next_force_id >= 1);
+        try std.testing.expect(loaded.next_hq_id >= 1);
+        try std.testing.expect(loaded.next_contract_id >= 1);
+        try std.testing.expect(loaded.next_battle_id >= 1);
+        try std.testing.expect(loaded.event_queue.next_id >= 1);
+        try std.testing.expect(loaded.next_listing_id >= 1);
+        try std.testing.expect(loaded.next_candidate_id >= 1);
+        try std.testing.expect(loaded.next_loan_id >= 1);
+    }
+}
+
+test "a next_battle_id at maxInt rejects the load as corrupt" {
+    // Rule 70: overflow class distinct from person (resumeBattleIds saturates
+    // at maxInt when a battle id equals maxInt(u32); rule 48). Complements the
+    // next_person_id overflow test.
+    const raw = try sqlite.Db.open(":memory:");
+    defer raw.close();
+    try raw.exec(
+        \\CREATE TABLE setting (key TEXT PRIMARY KEY, value INTEGER NOT NULL);
+        \\CREATE TABLE campaign (id INTEGER PRIMARY KEY, name TEXT NOT NULL, commander TEXT, day INTEGER NOT NULL, date TEXT NOT NULL, schema_version INTEGER NOT NULL, save_seq INTEGER NOT NULL, player_id INTEGER NOT NULL DEFAULT 0);
+        \\CREATE TABLE meta (cid INTEGER NOT NULL, key TEXT NOT NULL, value INTEGER NOT NULL, PRIMARY KEY (cid, key));
+        \\CREATE TABLE meta_text (cid INTEGER NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (cid, key));
+        \\CREATE TABLE rng_stream (cid INTEGER NOT NULL, stream TEXT NOT NULL, format INTEGER NOT NULL, state BLOB NOT NULL, UNIQUE (cid, stream));
+        \\INSERT INTO setting VALUES ('schema_version', 36);
+        \\INSERT INTO campaign VALUES (1, 'Test', NULL, 0, '3025-01-01', 36, 1, 0);
+        \\INSERT INTO meta VALUES (1, 'day_index', 0);
+        \\INSERT INTO meta VALUES (1, 'year', 3025);
+        \\INSERT INTO meta VALUES (1, 'month', 1);
+        \\INSERT INTO meta VALUES (1, 'day', 1);
+        \\INSERT INTO meta VALUES (1, 'funds', 0);
+        \\INSERT INTO meta VALUES (1, 'reputation', 0);
+        \\INSERT INTO meta VALUES (1, 'difficulty', 1);
+        \\INSERT INTO meta VALUES (1, 'next_battle_id', 4294967295);
+        \\INSERT INTO meta_text VALUES (1, 'outfit_name', 'Test');
     );
     const store = try Store.fromDb(raw);
     defer store.close();

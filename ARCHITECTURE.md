@@ -816,9 +816,11 @@ are forward-only. The golden-master hash proves round trips: save → load →
 identical hash, and identical evolution thereafter; a test that differs
 names the first value that did not survive (`digest.firstStateDifference`).
 
-**Loading fails closed.** The loader is the integrity check (SQL foreign
-keys wait for a schema change that rebuilds tables): every stored integer
-and id is range-checked, and a missing parent row, an unknown enum value,
+**Loading fails closed.** The schema declares enforceable foreign keys
+(containment references) via a table-rebuild migration (v37); the loader
+remains the integrity check for soft and polymorphic references that use
+NULL/0-as-none: every stored integer and id is range-checked, and a
+missing parent row, an unknown enum value,
 treasury or site kind, a bad difficulty, an unresolved chassis, part,
 planet or faction key, or a battle-report display copy that is not
 markup-safe (`validateStoredStrings`) returns `CorruptSave` — nothing is

@@ -15,19 +15,6 @@ Owner of every entry: the project owner.
 
 ---
 
-### C9. Schema integrity and migrations
-
-- **Rules:** 50, 51, 70.
-- **Why not yet:** The foreign keys need a table-rebuild migration, and fixtures at the old schema boundaries must exist first.
-- **Scope:**
-  - The schema has no `REFERENCES`, unique keys, `CHECK`s or `PRAGMA foreign_keys`.
-  - The only migration fixture is v5.
-  - The migrations array is out of version order (`store.zig:126-132`, `158-159`).
-  - A `Migration` names no source version (`107`).
-  - Next-ID counters and required meta rows have no adversarial tests.
-- **Removal:** C9.
-- **Guard:** the DDL-to-registry test (`store.zig:2883`) and review.
-
 ### C10. Location, posture and the seat
 
 - **Rules:** 21, 22, 23, 71.

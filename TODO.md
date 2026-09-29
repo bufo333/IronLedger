@@ -20,9 +20,6 @@ The audit deliverables in `docs/audit-response.md` remain folded in: D26 into
 C10, D27 and D30 into C12, D28 into C7, D29 into C15, D31 into C8, and D33 into
 C18.
 
-- [ ] C9 schema integrity and migrations (C9a-C9c; rules 50, 51, 70): ordered
-  migration fixtures, table-rebuild constraints and foreign keys, adversarial
-  meta/counter coverage, and `docs/schema.sql`. Delete C9.
 - [ ] C10 location, posture, and seat resolution (C10a-C10d; rules 21-23, 71):
   company posture, site-local office/medical effects, seat/outfit resolution,
   refit stock, and asymmetric two-HQ tests. Delete C10.

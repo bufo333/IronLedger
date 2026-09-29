@@ -1,6 +1,6 @@
 -- IRON LEDGER — SQLite save store schema (design document)
 --
--- Matches schema_version 34. The executable DDL and its column migrations
+-- Matches schema_version 37. The executable DDL and its column migrations
 -- live in src/persist/store.zig; this file is the readable reference for
 -- what each table and column means. Column order here is the runtime order.
 --
@@ -24,9 +24,24 @@
 --     the loader rejects an unknown tag as a corrupt save.
 --   * Static game data (chassis, part catalog, planets, tables) ships in data/
 --     .zon files; saves reference it by stable TEXT keys (e.g. chassis_key).
---   * No foreign keys are declared. "-> table.id" in a comment names the
---     relationship; the loader is the integrity check and rejects a save
---     whose rows do not resolve.
+--   * Foreign keys: every per-cid table declares
+--       FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
+--     Containment references (child rows always name a real parent) also carry
+--     explicit FKs: person_skill/award/ability/injury -> person; unit_slot ->
+--     unit; force_unit/force_child -> force and unit; hq_facility/hq_project ->
+--     hq; battle_report_hit/ammo/salvage -> battle_report; refit_op ->
+--     refit_plan. All FKs are DEFERRABLE INITIALLY DEFERRED so clearRows can
+--     delete parent rows before child rows within one transaction.
+--     Soft and polymorphic references that use NULL or 0-as-none (e.g.
+--     stock.owner_id, unit.force, contract.offer_hq) are the loader's
+--     responsibility; the loader rejects a save whose rows do not resolve.
+--   * UNIQUE keys: battle_report(cid, ord), refit_plan(cid, ord) (targets for
+--     the FK chains above); stock(cid, owner_kind, owner_id, key).
+--   * CHECK constraints: schema_version > 0; boolean NOT NULL columns in
+--     person (admitted, rank_pinned, edge_spent), contract (is_offer,
+--     negotiated, salvage_exchange), listing (black, staple),
+--     battle_report (acknowledged), injury (permanent, healed),
+--     refit_plan (committed) are constrained to CHECK (col IN (0,1)).
 
 ---------------------------------------------------------------- store
 
@@ -50,7 +65,7 @@ CREATE TABLE campaign (
     commander       TEXT,
     day             INTEGER NOT NULL,                -- day_index at save
     date            TEXT    NOT NULL,                -- in-game date at save
-    schema_version  INTEGER NOT NULL,                -- version that wrote it; newer than the game refuses to load
+    schema_version  INTEGER NOT NULL CHECK (schema_version > 0), -- version that wrote it; newer than the game refuses to load
     save_seq        INTEGER NOT NULL,                -- store-wide save counter, orders "most recent"
     player_id       INTEGER NOT NULL DEFAULT 0       -- -> player.id; 0 = none
 );
@@ -67,7 +82,8 @@ CREATE TABLE meta (
     cid             INTEGER NOT NULL,
     key             TEXT    NOT NULL,
     value           INTEGER NOT NULL,
-    PRIMARY KEY (cid, key)
+    PRIMARY KEY (cid, key),
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 
 -- Text scalars by key: outfit_name.
@@ -75,7 +91,8 @@ CREATE TABLE meta_text (
     cid             INTEGER NOT NULL,
     key             TEXT    NOT NULL,
     value           TEXT    NOT NULL,
-    PRIMARY KEY (cid, key)
+    PRIMARY KEY (cid, key),
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 
 -- One row per named RNG stream (sim/rng.zig Stream). A stream with no row
@@ -86,7 +103,8 @@ CREATE TABLE rng_stream (
     stream          TEXT    NOT NULL,                -- 'generation','market','battle',...
     format          INTEGER NOT NULL,                -- 1: four u64 words, little-endian
     state           BLOB    NOT NULL,                -- 32 bytes in format 1
-    UNIQUE (cid, stream)
+    UNIQUE (cid, stream),
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 
 -- Single-blob RNG state of older saves: every stream's native-endian state
@@ -94,7 +112,8 @@ CREATE TABLE rng_stream (
 -- saving writes none.
 CREATE TABLE rng (
     cid             INTEGER PRIMARY KEY,
-    state           BLOB    NOT NULL
+    state           BLOB    NOT NULL,
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 
 -- The player character.
@@ -102,7 +121,8 @@ CREATE TABLE commander (
     cid             INTEGER PRIMARY KEY,
     name            TEXT    NOT NULL,
     origin          TEXT    NOT NULL,                -- commander.Faction
-    profession      TEXT    NOT NULL                 -- commander.Profession
+    profession      TEXT    NOT NULL,                -- commander.Profession
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 
 ---------------------------------------------------------------- personnel
@@ -129,41 +149,49 @@ CREATE TABLE person (
     wound_heal_day  INTEGER,
     training_skill  TEXT,                            -- types.SkillType in training; null = none
     training_done   INTEGER,                         -- day the training completes
-    admitted        INTEGER NOT NULL DEFAULT 0,      -- bool: in the medbay
-    rank            TEXT    NOT NULL DEFAULT 'private', -- rank.Rank
-    rank_pinned     INTEGER NOT NULL DEFAULT 0,      -- bool: rank set by hand, not by merit
+    admitted        INTEGER NOT NULL DEFAULT 0 CHECK (admitted IN (0,1)),       -- bool: in the medbay
+    rank            TEXT    NOT NULL DEFAULT 'private',                          -- rank.Rank
+    rank_pinned     INTEGER NOT NULL DEFAULT 0 CHECK (rank_pinned IN (0,1)),    -- bool: rank set by hand, not by merit
     kills           INTEGER NOT NULL DEFAULT 0,
     kill_bv         INTEGER NOT NULL DEFAULT 0,
     battles         INTEGER NOT NULL DEFAULT 0,
     tours           INTEGER NOT NULL DEFAULT 0,
     outstanding_tours INTEGER NOT NULL DEFAULT 0,
-    edge_spent      INTEGER NOT NULL DEFAULT 0,      -- bool
+    edge_spent      INTEGER NOT NULL DEFAULT 0 CHECK (edge_spent IN (0,1)),     -- bool
     faction         TEXT    NOT NULL DEFAULT '',     -- faction of origin
     shares          INTEGER NOT NULL DEFAULT 0,
     born_day        INTEGER,                         -- negative = before campaign start
     last_raise_day  INTEGER,
     last_award_day  INTEGER,
     departed_day    INTEGER,                         -- set once they leave the outfit
-    PRIMARY KEY (cid, id)
+    secondary_role  TEXT,
+    PRIMARY KEY (cid, id),
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 
 CREATE TABLE award (
     cid             INTEGER NOT NULL,
     person_id       INTEGER NOT NULL,                -- -> person.id
-    key             TEXT    NOT NULL                 -- data/tables/awards.zon key
+    key             TEXT    NOT NULL,                -- data/tables/awards.zon key
+    FOREIGN KEY (cid, person_id) REFERENCES person(cid, id) DEFERRABLE INITIALLY DEFERRED,
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 
 CREATE TABLE ability (
     cid             INTEGER NOT NULL,
     person_id       INTEGER NOT NULL,                -- -> person.id
-    key             TEXT    NOT NULL                 -- data/tables/abilities.zon key
+    key             TEXT    NOT NULL,                -- data/tables/abilities.zon key
+    FOREIGN KEY (cid, person_id) REFERENCES person(cid, id) DEFERRABLE INITIALLY DEFERRED,
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 
 CREATE TABLE person_skill (
     cid             INTEGER NOT NULL,
     person_id       INTEGER NOT NULL,                -- -> person.id
     skill           TEXT    NOT NULL,                -- types.SkillType
-    level           INTEGER NOT NULL                 -- MekHQ convention: lower target = better
+    level           INTEGER NOT NULL,                -- MekHQ convention: lower target = better
+    FOREIGN KEY (cid, person_id) REFERENCES person(cid, id) DEFERRABLE INITIALLY DEFERRED,
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 
 CREATE TABLE injury (
@@ -175,8 +203,10 @@ CREATE TABLE injury (
     incurred        INTEGER NOT NULL,                -- day
     heal_done       INTEGER,                         -- day; null until a doctor is assigned
     doctor          INTEGER NOT NULL DEFAULT 0,      -- -> person.id
-    permanent       INTEGER NOT NULL DEFAULT 0,      -- bool
-    healed          INTEGER NOT NULL DEFAULT 0       -- bool
+    permanent       INTEGER NOT NULL DEFAULT 0 CHECK (permanent IN (0,1)),      -- bool
+    healed          INTEGER NOT NULL DEFAULT 0 CHECK (healed IN (0,1)),         -- bool
+    FOREIGN KEY (cid, person_id) REFERENCES person(cid, id) DEFERRABLE INITIALLY DEFERRED,
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 
 -- Hiring-hall candidates: generated per HQ, hired with a signing bonus or
@@ -196,7 +226,8 @@ CREATE TABLE candidate (
     bonus           INTEGER,                         -- asking signing bonus
     listed          INTEGER,                         -- day
     expires         INTEGER,                         -- day
-    age             INTEGER NOT NULL DEFAULT 30      -- years, as generated
+    age             INTEGER NOT NULL DEFAULT 30,     -- years, as generated
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 
 ---------------------------------------------------------------- materiel
@@ -226,7 +257,8 @@ CREATE TABLE unit (
     held_day        INTEGER NOT NULL DEFAULT 0,      -- day the field was lost
     held_battle     INTEGER NOT NULL DEFAULT 0,      -- BattleId that lost it
     held_force      INTEGER NOT NULL DEFAULT 0,      -- -> force.id it goes home to if won back
-    PRIMARY KEY (cid, id)
+    PRIMARY KEY (cid, id),
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 
 -- Installed equipment per slot. class decides the repair echelon: armor,
@@ -239,7 +271,9 @@ CREATE TABLE unit_slot (
     slot_key        TEXT,                            -- e.g. 'right_torso.medium_laser.1'
     part_key        TEXT,                            -- catalog key of the installed part
     class           TEXT,                            -- unit.SlotClass: armor | structure | weapon | equipment | ammo
-    condition       TEXT                             -- unit.PartCondition: ok | damaged | destroyed | missing
+    condition       TEXT,                            -- unit.PartCondition: ok | damaged | destroyed | missing
+    FOREIGN KEY (cid, unit_id) REFERENCES unit(cid, id) DEFERRABLE INITIALLY DEFERRED,
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 
 -- Physical stocks per site: spare parts, structural components, munition
@@ -251,7 +285,9 @@ CREATE TABLE stock (
     owner_id        INTEGER NOT NULL,                -- hq.id or force.id; 0 for outfit
     ord             INTEGER NOT NULL,
     key             TEXT    NOT NULL,                -- catalog key
-    qty             INTEGER NOT NULL
+    qty             INTEGER NOT NULL,
+    UNIQUE (cid, owner_kind, owner_id, key),
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 
 -- Parts on order from a market.
@@ -265,7 +301,8 @@ CREATE TABLE part_order (
     ordered         INTEGER,                         -- day
     eta             INTEGER,                         -- day; null while sourcing
     cost            INTEGER,
-    status          TEXT                             -- part.OrderStatus: sourcing | in_transit | delivered | failed | cancelled
+    status          TEXT,                            -- part.OrderStatus: sourcing | in_transit | delivered | failed | cancelled
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 
 -- Mek bay work: jobs hold a bay slot for a span of days and queue when the
@@ -281,7 +318,8 @@ CREATE TABLE bay_job (
     queued          INTEGER,                         -- day
     started         INTEGER,                         -- day; null while waiting for a slot
     done            INTEGER,                         -- day
-    cost            INTEGER                          -- labor posted to the HQ at completion
+    cost            INTEGER,                         -- labor posted to the HQ at completion
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 
 -- MekLab refit plans: edits staged against a hull, committed into a bay job.
@@ -289,7 +327,9 @@ CREATE TABLE refit_plan (
     cid             INTEGER NOT NULL,
     ord             INTEGER NOT NULL,
     unit            INTEGER,                         -- -> unit.id
-    committed       INTEGER                          -- bool
+    committed       INTEGER CHECK (committed IN (0,1)), -- bool
+    UNIQUE (cid, ord),
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 
 CREATE TABLE refit_op (
@@ -299,7 +339,9 @@ CREATE TABLE refit_op (
     kind            TEXT,                            -- 'remove' | 'install'
     slot_key        TEXT,                            -- remove: the slot emptied
     location        TEXT,                            -- install: where
-    part_key        TEXT                             -- install: what
+    part_key        TEXT,                            -- install: what
+    FOREIGN KEY (cid, plan_ord) REFERENCES refit_plan(cid, ord) DEFERRABLE INITIALLY DEFERRED,
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 
 -- A hull on its way to another company.
@@ -308,7 +350,8 @@ CREATE TABLE unit_transfer (
     ord             INTEGER NOT NULL,
     unit            INTEGER,                         -- -> unit.id
     to_company      INTEGER,                         -- -> force.id
-    eta             INTEGER                          -- day
+    eta             INTEGER,                         -- day
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 
 ---------------------------------------------------------------- organization
@@ -334,21 +377,28 @@ CREATE TABLE force (
     return_eta      INTEGER,                         -- day
     shortage_days   INTEGER,                         -- consecutive days short of supply
     roe             TEXT    NOT NULL DEFAULT 'standard', -- force.Roe: hold | standard | cautious
-    PRIMARY KEY (cid, id)
+    PRIMARY KEY (cid, id),
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 
 CREATE TABLE force_unit (
     cid             INTEGER NOT NULL,
     force_id        INTEGER NOT NULL,                -- -> force.id
     ord             INTEGER NOT NULL,
-    unit_id         INTEGER NOT NULL                 -- -> unit.id
+    unit_id         INTEGER NOT NULL,                -- -> unit.id
+    FOREIGN KEY (cid, force_id) REFERENCES force(cid, id) DEFERRABLE INITIALLY DEFERRED,
+    FOREIGN KEY (cid, unit_id) REFERENCES unit(cid, id) DEFERRABLE INITIALLY DEFERRED,
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 
 CREATE TABLE force_child (
     cid             INTEGER NOT NULL,
     force_id        INTEGER NOT NULL,                -- -> force.id
     ord             INTEGER NOT NULL,
-    child_id        INTEGER NOT NULL                 -- -> force.id
+    child_id        INTEGER NOT NULL,                -- -> force.id
+    FOREIGN KEY (cid, force_id) REFERENCES force(cid, id) DEFERRABLE INITIALLY DEFERRED,
+    FOREIGN KEY (cid, child_id) REFERENCES force(cid, id) DEFERRABLE INITIALLY DEFERRED,
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 
 CREATE TABLE hq (
@@ -361,7 +411,8 @@ CREATE TABLE hq (
     staff_assigned  INTEGER,                         -- recomputed on load from postings
     upkeep          INTEGER,                         -- monthly
     funds           INTEGER,                         -- HQ treasury
-    PRIMARY KEY (cid, id)
+    PRIMARY KEY (cid, id),
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 
 CREATE TABLE hq_facility (
@@ -369,7 +420,9 @@ CREATE TABLE hq_facility (
     hq_id           INTEGER NOT NULL,                -- -> hq.id
     ord             INTEGER NOT NULL,
     kind            TEXT,                            -- hq.FacilityKind
-    level           INTEGER
+    level           INTEGER,
+    FOREIGN KEY (cid, hq_id) REFERENCES hq(cid, id) DEFERRABLE INITIALLY DEFERRED,
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 
 -- Founding and upgrade projects: paperwork phase, then construction.
@@ -383,7 +436,9 @@ CREATE TABLE hq_project (
     started         INTEGER,                         -- day
     paperwork_done  INTEGER,                         -- day
     construction_done INTEGER,                       -- day
-    cost            INTEGER
+    cost            INTEGER,
+    FOREIGN KEY (cid, hq_id) REFERENCES hq(cid, id) DEFERRABLE INITIALLY DEFERRED,
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 
 -- Supply-line edge in the HQ network graph.
@@ -394,7 +449,8 @@ CREATE TABLE hq_link (
     b               INTEGER,                         -- -> hq.id
     level           INTEGER,
     tons            INTEGER,                         -- tonnage moved this week
-    established     INTEGER                          -- day
+    established     INTEGER,                         -- day
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 
 ---------------------------------------------------------------- contracts
@@ -402,7 +458,7 @@ CREATE TABLE hq_link (
 -- Contracts and the current offers (is_offer = 1) share this table.
 CREATE TABLE contract (
     cid             INTEGER NOT NULL,
-    is_offer        INTEGER NOT NULL,                -- bool
+    is_offer        INTEGER NOT NULL CHECK (is_offer IN (0,1)),    -- bool
     ord             INTEGER NOT NULL,
     id              INTEGER,
     kind            TEXT,                            -- contract.ContractKind
@@ -438,17 +494,18 @@ CREATE TABLE contract (
     overhead_pct    INTEGER,
     battle_loss_pct INTEGER,
     salvage_pct     INTEGER,
-    salvage_exchange INTEGER,                        -- bool
+    salvage_exchange INTEGER CHECK (salvage_exchange IN (0,1)),     -- bool
     command_rights  TEXT,                            -- contract.CommandRights
-    negotiated      INTEGER NOT NULL DEFAULT 0,      -- bool: terms already negotiated
+    negotiated      INTEGER NOT NULL DEFAULT 0 CHECK (negotiated IN (0,1)),     -- bool: terms already negotiated
     -- The opposing force as briefed
     enemy_lances    INTEGER NOT NULL DEFAULT 0,
-    enemy_quality   TEXT    NOT NULL DEFAULT 'regular', -- types.ExperienceLevel
+    enemy_quality   TEXT    NOT NULL DEFAULT 'regular',             -- types.ExperienceLevel
     enemy_lance_bv  INTEGER NOT NULL DEFAULT 0,
     enemy_lance_tons INTEGER NOT NULL DEFAULT 0,
     offer_hq        INTEGER NOT NULL DEFAULT 0,      -- -> hq.id whose board carries the offer
-    orders_day      INTEGER                          -- engagement day battle orders were confirmed for;
+    orders_day      INTEGER,                         -- engagement day battle orders were confirmed for;
                                                      -- the contact warning stands until it equals next_battle
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 
 -- Employers cooling on the outfit after a failure.
@@ -456,14 +513,16 @@ CREATE TABLE faction_cooling (
     cid             INTEGER NOT NULL,
     ord             INTEGER NOT NULL,
     faction         TEXT,
-    until_day       INTEGER
+    until_day       INTEGER,
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 
 -- Standing with each faction; an absent row reads as 0.
 CREATE TABLE faction_standing (
     cid             INTEGER NOT NULL,
     faction         TEXT    NOT NULL,
-    value           INTEGER NOT NULL
+    value           INTEGER NOT NULL,
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 
 ---------------------------------------------------------------- finances
@@ -477,7 +536,8 @@ CREATE TABLE txn (
     company         INTEGER,                         -- -> force.id cost/profit center; 0 = outfit-level
     hq              INTEGER,                         -- -> hq.id cost center
     contract        INTEGER,                         -- -> contract.id
-    note            TEXT
+    note            TEXT,
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 
 CREATE TABLE loan (
@@ -489,7 +549,8 @@ CREATE TABLE loan (
     rate_bp         INTEGER,                         -- basis points
     term            INTEGER,                         -- months
     next_pay        INTEGER,                         -- day
-    payment         INTEGER
+    payment         INTEGER,
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 
 -- Money in transit by courier to a treasury.
@@ -500,7 +561,8 @@ CREATE TABLE courier (
     to_id           INTEGER,                         -- 0 for outfit
     amount          INTEGER,
     sent            INTEGER,                         -- day
-    eta             INTEGER                          -- day
+    eta             INTEGER,                         -- day
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 
 -- Standing money policies, executed on payday by courier.
@@ -511,7 +573,8 @@ CREATE TABLE policy (
     entity_id       INTEGER,
     floor           INTEGER,                         -- top up to this level
     cap             INTEGER,                         -- max moved per month
-    sent            INTEGER NOT NULL DEFAULT 0       -- moved so far this month
+    sent            INTEGER NOT NULL DEFAULT 0,      -- moved so far this month
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 
 -- Standing supply orders for a deployed company.
@@ -521,7 +584,8 @@ CREATE TABLE supply_policy (
     company         INTEGER,                         -- -> force.id
     min_days        INTEGER,
     tons            INTEGER,
-    ammo_battles    INTEGER NOT NULL DEFAULT 0
+    ammo_battles    INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 
 -- Standing restock orders for an HQ warehouse.
@@ -531,14 +595,16 @@ CREATE TABLE stock_policy (
     hq              INTEGER,                         -- -> hq.id
     part_key        TEXT,
     min_qty         INTEGER,
-    target          INTEGER
+    target          INTEGER,
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 
 -- Yearly company rating history.
 CREATE TABLE rating_snapshot (
     cid             INTEGER NOT NULL,
     year            INTEGER NOT NULL,
-    score           INTEGER NOT NULL
+    score           INTEGER NOT NULL,
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 
 ---------------------------------------------------------------- markets
@@ -553,7 +619,7 @@ CREATE TABLE listing (
     rarity          TEXT,                            -- types.Rarity
     price           INTEGER,
     qty             INTEGER,
-    staple          INTEGER,                         -- bool: always-stocked part line
+    staple          INTEGER CHECK (staple IN (0,1)), -- bool: always-stocked part line
     listed          INTEGER,                         -- day
     expires         INTEGER,                         -- day
     hq              INTEGER,                         -- -> hq.id whose board this is
@@ -563,8 +629,9 @@ CREATE TABLE listing (
     c_damaged       INTEGER,                         -- damaged slots
     c_destroyed     INTEGER,                         -- destroyed slots
     c_missing       INTEGER,                         -- missing components
-    black           INTEGER NOT NULL DEFAULT 0,      -- bool: black-market offer
-    company         INTEGER NOT NULL DEFAULT 0       -- -> force.id: a contract-world hull for this deployed company
+    black           INTEGER NOT NULL DEFAULT 0 CHECK (black IN (0,1)), -- bool: black-market offer
+    company         INTEGER NOT NULL DEFAULT 0,      -- -> force.id: a contract-world hull for this deployed company
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 
 ---------------------------------------------------------------- events
@@ -580,7 +647,8 @@ CREATE TABLE event_log (
     company         INTEGER,                         -- -> force.id
     hq              INTEGER,                         -- -> hq.id
     contract        INTEGER,                         -- -> contract.id
-    text            TEXT
+    text            TEXT,
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 
 -- Decisions awaiting the commander.
@@ -596,7 +664,8 @@ CREATE TABLE pending_event (
     chosen          INTEGER,                         -- null until answered
     person          INTEGER NOT NULL DEFAULT 0,      -- -> person.id
     id              INTEGER NOT NULL DEFAULT 0,      -- EventId the inbox answers by
-    battle          INTEGER NOT NULL DEFAULT 0       -- BattleId the decision answers
+    battle          INTEGER NOT NULL DEFAULT 0,      -- BattleId the decision answers
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 
 -- One row per decision kind: when it last fired and how it was answered.
@@ -605,7 +674,8 @@ CREATE TABLE event_memory (
     kind            TEXT    NOT NULL,                -- events.EventKind
     last_day        INTEGER NOT NULL,
     last_choice     INTEGER NOT NULL,
-    streak          INTEGER NOT NULL                 -- times running the same answer was given
+    streak          INTEGER NOT NULL,                -- times running the same answer was given
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 
 ---------------------------------------------------------------- battles
@@ -667,8 +737,10 @@ CREATE TABLE battle_report (
     salvage_cash    INTEGER,                         -- salvage-exchange cash
     salvage_items   TEXT,                            -- what was taken
     conceded        INTEGER,                         -- bool: no combat-effective units, objective conceded without a shot
-    acknowledged    INTEGER NOT NULL DEFAULT 1,      -- bool: the player has read it
-    salvage_unclaimed INTEGER NOT NULL DEFAULT 0     -- BV of the haul still to be divided; 0 once taken
+    acknowledged    INTEGER NOT NULL DEFAULT 1 CHECK (acknowledged IN (0,1)),   -- bool: the player has read it
+    salvage_unclaimed INTEGER NOT NULL DEFAULT 0,    -- BV of the haul still to be divided; 0 once taken
+    UNIQUE (cid, ord),
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 
 -- One row per hit: the armour before and after, the slot that broke, how
@@ -696,7 +768,9 @@ CREATE TABLE battle_report_hit (
     fate            TEXT,                            -- unhurt | kia | missing
     recovery_roll   INTEGER,
     recovery_target INTEGER,
-    lost            INTEGER                          -- bool: left to the enemy
+    lost            INTEGER,                         -- bool: left to the enemy
+    FOREIGN KEY (cid, report_ord) REFERENCES battle_report(cid, ord) DEFERRABLE INITIALLY DEFERRED,
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 
 -- Munitions burned and what the trucks still hold. Keyed by family name,
@@ -708,7 +782,9 @@ CREATE TABLE battle_report_ammo (
     ord             INTEGER NOT NULL,
     family          TEXT,
     burned          INTEGER,
-    reserve         INTEGER
+    reserve         INTEGER,
+    FOREIGN KEY (cid, report_ord) REFERENCES battle_report(cid, ord) DEFERRABLE INITIALLY DEFERRED,
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 
 -- The wrecks on offer after a battle. Rolled once when the fight ended, so
@@ -724,7 +800,9 @@ CREATE TABLE battle_report_salvage (
     quality         TEXT,                            -- types.Quality
     damaged         INTEGER,                         -- damaged slots
     destroyed       INTEGER,                         -- destroyed slots
-    missing         INTEGER                          -- missing components
+    missing         INTEGER,                         -- missing components
+    FOREIGN KEY (cid, report_ord) REFERENCES battle_report(cid, ord) DEFERRABLE INITIALLY DEFERRED,
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 
 -- Indexes (D31, A28): cid filters on every campaign load; composite shapes
