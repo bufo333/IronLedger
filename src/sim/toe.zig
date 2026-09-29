@@ -587,21 +587,51 @@ pub fn execRecallIdle(gs: *GameState, company: @FieldType(Command, "recall_idle"
 }
 
 pub fn execDisbandCompany(gs: *GameState, co: @FieldType(Command, "disband_company")) Error!Result {
+    // ---- validate (no mutation) ----
     const f = gs.forces.getPtr(co) orelse return Error.UnknownForce;
     if (f.echelon != .company) return Error.NotACompany;
     if (!posture.isCompanyHome(gs, co)) return Error.CompanyDeployed;
     const name = f.name;
-    var total: types.CBills = f.local_funds;
-    // Hulls under the subtree, then people, then the forces.
+
+    // ---- collect + quote (fallible, no mutation) ----
+    // Gather hull IDs and sale totals, sub-force IDs, and departing personnel count.
     var uids: std.ArrayListUnmanaged(types.UnitId) = .empty;
     defer uids.deinit(gs.scratch());
+    var total: types.CBills = f.local_funds;
     var uit = gs.units.iterator();
-    while (uit.next()) |e| if (gs.companyOf(e.value_ptr.force) == co) try uids.append(gs.scratch(), e.value_ptr.id);
-    for (uids.items) |uid| {
-        total += try market_mod.unitSaleValue(gs.scratch(), gs.unit(uid).?);
-        gs.removeUnit(uid);
-    }
+    while (uit.next()) |e| if (gs.companyOf(e.value_ptr.force) == co) {
+        try uids.append(gs.scratch(), e.value_ptr.id);
+        total += try market_mod.unitSaleValue(gs.scratch(), e.value_ptr);
+    };
+    var fids: std.ArrayListUnmanaged(types.ForceId) = .empty;
+    defer fids.deinit(gs.scratch());
+    var fit = gs.forces.iterator();
+    while (fit.next()) |e| if (gs.companyOf(e.value_ptr.id) == co) try fids.append(gs.scratch(), e.value_ptr.id);
+    var n_depart: usize = 0;
     var pit = gs.people.iterator();
+    while (pit.next()) |e| if (personInCompany(gs, e.value_ptr, co) and e.value_ptr.isOnBooks()) {
+        n_depart += 1;
+    };
+
+    // ---- prepare: reserve every fallible destination ----
+    // One slot per possible severance post inside depart, plus one for the
+    // final unit_sale post.  Over-reserving is harmless (depart posts nothing
+    // when owed == 0).
+    try gs.reserveLedger(n_depart + 1);
+    var date_buf: [10]u8 = undefined;
+    const line = try std.fmt.allocPrint(
+        gs.allocator(),
+        "{s} [sale] {s} disbanded: {d} hulls sold, people released, {d} raised",
+        .{ gs.clock.date.text(&date_buf), name, uids.items.len, total },
+    );
+    try gs.reserveLog(1);
+
+    // ---- commit: no fallible allocation past this point ----
+    // Remove hulls.
+    for (uids.items) |uid| gs.removeUnit(uid);
+    // Depart on-books personnel.  The ledger capacity reserved above makes
+    // each depart's severance post non-allocating, so the try cannot fire.
+    pit = gs.people.iterator();
     while (pit.next()) |e| {
         const p = e.value_ptr;
         if (personInCompany(gs, p, co) and p.isOnBooks()) {
@@ -609,10 +639,7 @@ pub fn execDisbandCompany(gs: *GameState, co: @FieldType(Command, "disband_compa
             p.assigned_force = .none;
         }
     }
-    var fids: std.ArrayListUnmanaged(types.ForceId) = .empty;
-    defer fids.deinit(gs.scratch());
-    var fit = gs.forces.iterator();
-    while (fit.next()) |e| if (gs.companyOf(e.value_ptr.id) == co) try fids.append(gs.scratch(), e.value_ptr.id);
+    // Remove sub-forces.
     for (fids.items) |fid| _ = gs.forces.orderedRemove(fid);
     // Nothing may keep pointing at a company that no longer exists:
     // its standing orders, its resupply plan, the goods on the road
@@ -637,8 +664,18 @@ pub fn execDisbandCompany(gs: *GameState, co: @FieldType(Command, "disband_compa
         c.to = .outfit;
     };
     hq_ops.refreshHqStaffing(gs);
-    try gs.postTransaction(.{ .day = gs.clock.day_index, .amount = total, .category = .unit_sale, .note = "company disbanded" });
-    try gs.log(.market, .{}, "[sale] {s} disbanded: {d} hulls sold, people released, {d} raised", .{ name, uids.items.len, total });
+    gs.ledger.transactions.appendAssumeCapacity(.{
+        .day = gs.clock.day_index,
+        .amount = total,
+        .category = .unit_sale,
+        .note = "company disbanded",
+    });
+    gs.funds += total;
+    gs.event_log.appendAssumeCapacity(.{
+        .day = gs.clock.day_index,
+        .category = .market,
+        .text = line,
+    });
     return .{};
 }
 
@@ -850,4 +887,30 @@ test "disbanding a company redirects its in-flight courier to the outfit treasur
     while (gs.clock.day_index < eta) _ = try commands.execute(&gs, .{ .advance_days = 1 });
     try std.testing.expectEqual(@as(usize, 0), gs.fund_couriers.items.len);
     try std.testing.expectEqual(funds_after_disband + 500_000, gs.funds);
+}
+
+test "disbanding a company leaves state whole when an allocation fails" {
+    const digest = @import("digest.zig");
+
+    var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer outer.deinit();
+    var gs = GameState.init(outer.allocator(), .{ .seed = 4501 });
+    _ = try founding.createCommander(&gs, "T", .LC, .quartermaster);
+    const co = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
+    // Give the company something to sell and someone to release so the
+    // disband path exercises hull, personnel, ledger and log work.
+    const truck = try gs.addUnit("CGT-3");
+    _ = try commands.execute(&gs, .{ .transfer_unit = .{ .unit = truck, .to_company = co } });
+    _ = try contract_market.hireRoleFromHall(&gs, .mekwarrior, co); // best-effort crew
+    try std.testing.expect(posture.isCompanyHome(&gs, co));
+
+    const before = digest.stateHash(&gs);
+
+    // Block every further allocation so any fallible step in disband fails.
+    gs.arena.state.used_list = null;
+    gs.arena.state.free_list = null;
+    gs.arena.child_allocator = std.testing.failing_allocator;
+
+    try std.testing.expectError(error.OutOfMemory, execDisbandCompany(&gs, co));
+    try std.testing.expectEqual(before, digest.stateHash(&gs));
 }
