@@ -470,6 +470,7 @@ pub fn train(gs: *GameState, person_id: types.PersonId, skill: types.SkillType) 
 }
 
 pub fn trainAbility(gs: *GameState, person_id: types.PersonId, key: []const u8) !void {
+    // --- validate ---
     const p = gs.person(person_id) orelse return error.UnknownPerson;
     _ = gs.trainingHqFor(p) orelse return error.NoTrainingGround;
     if (p.status != .active) return error.PersonUnavailable;
@@ -477,9 +478,17 @@ pub fn trainAbility(gs: *GameState, person_id: types.PersonId, key: []const u8) 
     const a = @import("../domain/ability.zig").find(key) orelse return error.UnknownAbility;
     if (p.has(a.key)) return error.AlreadyLearned;
     if (p.xp < a.xp_cost) return error.InsufficientXp;
+    // --- prepare (fallible, no mutation) ---
+    const alloc = gs.allocator();
+    const name = try p.rankedName(alloc);
+    var date_buf: [10]u8 = undefined;
+    const line = try std.fmt.allocPrint(alloc, "{s} [training] {s} learns {s} ({d} XP) — {s}", .{ gs.clock.date.text(&date_buf), name, a.name, a.xp_cost, a.text });
+    try p.abilities.ensureUnusedCapacity(alloc, 1);
+    try gs.reserveLog(1);
+    // --- commit (no fallible ops) ---
     p.xp -= a.xp_cost;
-    try p.abilities.append(gs.allocator(), a.key);
-    try gs.log(.training, .{ .company = gs.companyOf(p.assigned_force) }, "[training] {s} learns {s} ({d} XP) — {s}", .{ try p.rankedName(gs.allocator()), a.name, a.xp_cost, a.text });
+    p.abilities.appendAssumeCapacity(a.key);
+    gs.event_log.appendAssumeCapacity(.{ .day = gs.clock.day_index, .category = .training, .company = gs.companyOf(p.assigned_force), .hq = .none, .contract = .none, .text = line });
 }
 
 pub const TrainCompanyResult = struct { enrolled: u32 = 0, short_xp: u32 = 0, busy: u32 = 0, nothing_to_learn: u32 = 0 };
@@ -1114,6 +1123,36 @@ test "abilities are bought with XP at a training ground and change the battle ma
     // Deployed: no school.
     _ = try commands.execute(&gs, .{ .accept_contract = .{ .offer_index = 0, .company = co } });
     try std.testing.expectError(commands.Error.PersonDeployed, commands.execute(&gs, .{ .train_ability = .{ .person = pilot.id, .key = "edge" } }));
+}
+
+test "trainAbility OOM leaves xp and abilities unchanged" {
+    const digest = @import("digest.zig");
+
+    var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer outer.deinit();
+    var gs = GameState.init(outer.allocator(), .{ .seed = 1237 });
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    _ = try commands.execute(&gs, .{ .new_company = "Alpha" });
+    const pilot = blk: {
+        var it = gs.units.iterator();
+        while (it.next()) |e| if (e.value_ptr.kind == .mek) break :blk gs.person(e.value_ptr.pilot).?;
+        unreachable;
+    };
+    pilot.xp = 100;
+
+    const before = digest.stateHash(&gs);
+    const xp_before = pilot.xp;
+    const abilities_len_before = pilot.abilities.items.len;
+
+    // Block all further allocations.
+    gs.arena.state.used_list = null;
+    gs.arena.state.free_list = null;
+    gs.arena.child_allocator = std.testing.failing_allocator;
+
+    try std.testing.expectError(error.OutOfMemory, trainAbility(&gs, pilot.id, "gunnery_specialist"));
+    try std.testing.expectEqual(before, digest.stateHash(&gs));
+    try std.testing.expectEqual(xp_before, pilot.xp);
+    try std.testing.expectEqual(abilities_len_before, pilot.abilities.items.len);
 }
 
 test "train co:N enrols the whole home company at their trades, and says who it skipped" {

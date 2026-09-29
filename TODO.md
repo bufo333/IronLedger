@@ -25,7 +25,6 @@ C18 (D23-D25, D32 and D34 are closed). The order below is authoritative and
 supersedes the audit response's original delivery order.
 
 - [ ] C5 failure atomicity (rules 11-15, 17, 69), each branch adding a `FailingAllocator` digest test for its mutation pattern:
-  - [ ] C5j `execTrainAbility` reserves the ability and log before spending XP.
   - [ ] C5k `execUpgradeTier` reserves the project/tier, payment and log before commit.
   - [ ] C5l `orderPart` checks funds before RNG and reserves order, debit and log mutations before either moves.
   - [ ] C5m `execDisbandCompany` prepares every personnel, hull, treasury, courier and force mutation before removing the company.
