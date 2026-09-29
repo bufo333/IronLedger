@@ -30,8 +30,10 @@ pub const title_ascii = [_][]const u8{
     "|___|_| \\_\\\\___/|_| \\_|  |_____|_____|____/ \\____|_____|_| \\_\\",
 };
 
-/// Shared attribution line shown below every mech drawing.
-pub const credit = "By: Rick Heney";
+/// The ASCII artist's credit, drawn in the splash's bottom-right corner.
+pub const credit_art = "ASCII art: Rick Heney";
+/// The game's author credit, drawn in the splash's bottom-left corner.
+pub const credit_game = "A game by John Burns";
 
 /// One mech drawing: caption name and art rows (pure ASCII, no markup braces).
 pub const MechArt = struct {
@@ -179,7 +181,7 @@ pub fn draw(s: *Screen, ascii: bool, index: usize) void {
     s.clear();
     const m = mechs[index];
     const t: []const []const u8 = if (ascii) &title_ascii else &title;
-    const total_h: i32 = @intCast(t.len + 2 + m.art.len + 3 + 3);
+    const total_h: i32 = @intCast(t.len + 2 + m.art.len + 3);
     var y: i32 = @max(1, @divTrunc(@as(i32, s.rows) - total_h, 2));
     for (t) |line| {
         const w: i32 = @intCast(screen_mod.visibleLen(line));
@@ -199,13 +201,11 @@ pub fn draw(s: *Screen, ascii: bool, index: usize) void {
         y += 1;
     }
     y += 1;
-    _ = s.text(@max(0, @divTrunc(@as(i32, s.cols) - @as(i32, @intCast(m.name.len)), 2)), y, s.cols, m.name, .dim);
-    y += 1;
-    _ = s.text(@max(0, @divTrunc(@as(i32, s.cols) - @as(i32, credit.len), 2)), y, s.cols, credit, .dim);
-    y += 1;
-    y += 1;
     const hint = "press any key";
     _ = s.text(@max(0, @divTrunc(@as(i32, s.cols) - @as(i32, hint.len), 2)), @min(y, @as(i32, s.rows) - 1), s.cols, hint, .dim);
+    // The game credit sits in the bottom-left corner, the art credit in the bottom-right.
+    _ = s.text(1, @as(i32, s.rows) - 1, s.cols, credit_game, .dim);
+    _ = s.text(@max(0, @as(i32, s.cols) - @as(i32, credit_art.len) - 1), @as(i32, s.rows) - 1, s.cols, credit_art, .dim);
 }
 
 test "every splash mech and both titles fit a 200x50 frame" {
@@ -216,6 +216,40 @@ test "every splash mech and both titles fit a 200x50 frame" {
         draw(&s, false, i);
         draw(&s, true, i);
         for (mech.art) |row| try std.testing.expect(row.len <= 60);
+        // The game credit is anchored to the bottom-left corner, in .dim.
+        for (credit_game, 0..) |byte, k| {
+            const c = s.get(1 + @as(u16, @intCast(k)), s.rows - 1);
+            try std.testing.expectEqual(@as(u21, byte), c.ch);
+            try std.testing.expectEqual(screen_mod.Style.dim, c.style);
+        }
+        // The art credit is anchored to the bottom-right corner, in .dim.
+        const art_x: u16 = @intCast(@as(usize, s.cols) - credit_art.len - 1);
+        for (credit_art, 0..) |byte, k| {
+            const c = s.get(art_x + @as(u16, @intCast(k)), s.rows - 1);
+            try std.testing.expectEqual(@as(u21, byte), c.ch);
+            try std.testing.expectEqual(screen_mod.Style.dim, c.style);
+        }
+        // The mech name is no longer captioned anywhere on the frame.
+        var named = false;
+        var yy: u16 = 0;
+        while (yy < s.rows) : (yy += 1) {
+            var xx: u16 = 0;
+            while (@as(usize, xx) + mech.name.len <= s.cols) : (xx += 1) {
+                var match = true;
+                for (mech.name, 0..) |byte, k| {
+                    if (s.get(xx + @as(u16, @intCast(k)), yy).ch != @as(u21, byte)) {
+                        match = false;
+                        break;
+                    }
+                }
+                if (match) {
+                    named = true;
+                    break;
+                }
+            }
+            if (named) break;
+        }
+        try std.testing.expect(!named);
     }
     for (title) |row| try std.testing.expect(screen_mod.visibleLen(row) <= 90);
 }
