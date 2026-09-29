@@ -18,7 +18,7 @@ Owner of every entry: the project owner.
 ### C5. Commands and ticks are not failure-atomic
 
 - **Rules:** 11, 12, 13, 15, 17, 69.
-- **Why not yet:** It needs reserve-first helpers and a failure-injection test per mutation pattern, landed in increments.
+- **Why not yet:** It needs reserve-first helpers and a failure-injection test per mutation pattern in one cohesive delivery.
 - **Scope:**
   - **Primitives.** Only four commands call `reserveLedger`.
   - **Partial loops.**

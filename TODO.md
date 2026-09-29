@@ -1,203 +1,135 @@
 # TODO
 
-Open work only, in the order it is done. One item per branch; it lands
-before the next starts (CLAUDE.md). The branch that finishes an item deletes
-its line and reports which docs it updated. Finished work lives in git
+Open work only, in the order it is done. One cohesive package per branch; it
+lands before the next starts (CLAUDE.md). A package has one primary invariant
+or subsystem outcome. Its source identifiers below preserve the exception,
+test, smoke, data, and product scope it closes. Finished work lives in git
 history, not here.
 
 ## Contract compliance (`docs/contract-exceptions.md`)
 
-The contract (`docs/coding-contract.md`) governs all code. Each item below
-closes one entry of the exceptions ledger, whose scope lists the verified
-sites. A leaf checkbox is one branch and lands on `main` before the next. A
-line that explicitly says "one branch per" names an ordered series whose
-semicolon-separated groups are separate branches. Each branch deletes its
-completed leaf/group and any baseline or layering lines it makes stale. The
-last branch also deletes the parent and its exception entry.
-Behaviour changes start with a regression test; rule-owner moves add an
-owner/consumer agreement test; persistence changes add round-trip and
-corruption fixtures. Every branch runs rule 72's complete applicable gate,
-including both smoke scripts when it touches their named frontend boundary.
+The contract (`docs/coding-contract.md`) governs all code. Each package below
+closes its listed scope completely. Behaviour changes start with a regression
+test; rule-owner moves add an owner/consumer agreement test; persistence work
+adds round-trip and corruption fixtures. Each branch runs rule 72's complete
+applicable gate, including both smoke scripts when it touches their named
+frontend boundary. The final package for an exception deletes its parent and
+the exception entry only after all of its listed scope is closed.
 
-The audit deliverables in `docs/audit-response.md` are folded in: D26 into
-C10, D27 and D30 into C12, D28 into C7, D29 into C15, D31 into C8, D33 into
-C18 (D23-D25, D32 and D34 are closed). The order below is authoritative and
-supersedes the audit response's original delivery order.
+The audit deliverables in `docs/audit-response.md` remain folded in: D26 into
+C10, D27 and D30 into C12, D28 into C7, D29 into C15, D31 into C8, and D33 into
+C18.
 
-- [ ] C5 failure atomicity (rules 11-15, 17, 69), each branch adding a `FailingAllocator` digest test for its mutation pattern:
-  - [ ] C5o `replaceGear` validates and reserves the complete slot batch before changing stock or mounts.
-  - [ ] C5p `advance` returns the number of days actually advanced and cannot report failure after a committed day.
-  - [ ] C5q courier and part-order tick phases record completion exactly once when retried after injected failure.
-  - [ ] C5r bay-job completion and weekly-repair phases record completion exactly once when retried after injected failure.
-  - [ ] C5s every stock mutation result is checked, the CLI may truthfully guarantee refusal changes nothing, and ARCHITECTURE §4 names each reserved resource. Delete C5.
-- [ ] C6 identity is typed and returned (rules 16, 32, 56), persistence migrations before frontend adoption:
-  - [ ] C6a offers get a persisted typed ID/counter and deterministic migration; acceptance and negotiation address that ID across command, query, REPL and TUI.
-  - [ ] C6b market listings get a persisted typed ID/counter and deterministic migration; purchase addresses that ID across command, query, REPL and TUI.
-  - [ ] C6c hiring candidates get a persisted typed ID/counter and deterministic migration; hiring addresses that ID across command, query, REPL and TUI.
-  - [ ] C6d loans get a persisted typed ID/counter and deterministic migration; repayment addresses that ID across command, query, REPL and TUI.
-  - [ ] C6e `Result` returns created HQ, contract, order and loan IDs plus explicit fraud/sourcing outcomes; remove accepted/last-order/last-log and `next_person_id - 1` lookups.
-  - [ ] C6f define one persisted/named seat HQ and replace every `hqs.keys()[0]` rule read with the seat or the location actually involved.
-  - [ ] C6g checklist rows, pickers, HQ selection and log selection carry typed targets/IDs across query and frontend boundaries; reordering rows cannot change the selected entity. Delete C6.
-- [ ] C7 loading fails closed (rules 2, 7, 45-48), in this order:
-  - [ ] C7a write the five-class reference-policy table (required live, optional live, historical, derived, sentinel-capable) and drive a post-decode graph validation pass from it; add one orphan/cycle corruption fixture per relationship family.
-  - [ ] C7b strict scalar decoding: NULL, booleans, enums, dates, domain ranges, checked integer casts and pending choices either decode exactly or return `CorruptSave`.
-  - [ ] C7c strict collections: duplicate keys and overflowing stock sums are refused; counters exceed every loaded ID without overflow; every order-sensitive load has `ORDER BY`; persist and round-trip `Person.secondary_role`.
-  - [ ] C7d compatibility repairs become source-version migrations; load neither draws RNG nor synthesizes state; meta rows are required and digest/map ordering is canonical. Update ARCHITECTURE §12 and delete C7.
-- [ ] C8 store lifecycle (rules 44, 49, 62, 63), in this order:
-  - [ ] C8a open reads and validates the stored version before DDL, closes every failed handle, and runs schema/migrations in one transaction without clamping/defaulting version errors.
-  - [ ] C8b SQLite maps actionable result codes, installs a busy timeout, makes `Stmt.run` reject ROW, and adds measured `(cid)` indexes without changing query results.
-  - [ ] C8c player deletion and campaign creation/load/save update the live `Session` only after the store transaction succeeds; registry/settings failures get typed application sentences.
-  - [ ] C8d emblem refresh acquires and validates the replacement before freeing the cached emblem, with an injected-failure test.
-  - [ ] C8e campaign preview acquires and validates the replacement before freeing the prior preview, with an injected-failure test.
-  - [ ] C8f campaign generation opens and saves the replacement session before closing the current one, with an injected-failure test.
-  - [ ] C8g music playlist replacement keeps the old playlist on allocation failure, with an injected-failure test. Delete C8.
-- [ ] C9 schema integrity (rules 50, 51, 70), in this order:
-  - [ ] C9a add load-and-migrate fixtures at four representative historical schema boundaries; order migrations by explicit source version and test missing/repeated versions.
-  - [ ] C9b table-rebuild migration adds foreign keys, unique `(cid, ord)`/identity keys, domain `CHECK`s and required `ON DELETE CASCADE`; enable and assert `PRAGMA foreign_keys` on every connection.
-  - [ ] C9c add adversarial counter/meta tests, keep C7 loader checks for old/damaged stores, update `docs/schema.sql`, and delete C9.
-- [ ] C10 location, posture and the seat (rules 21-23, 71), behaviour changes isolated by rule family:
-  - [ ] C10a named `CompanyPosture` predicates govern care, rest, rotation, training, leave, mothball/sale, hall crew, returning transfers, field maintenance and checklist counts; idling afield gets no home benefit.
-  - [ ] C10b negotiation, freight and every back-office effect read staff at the HQ involved, with two-HQ agreement tests.
-  - [ ] C10c medical beds, hospital effects, doctors and medics are site-local; tests cover home, second HQ, deployed and idle-afield care.
-  - [ ] C10d one seat/`.outfit` resolver owns fallback location; Lab stock includes only stock the refit can consume; complete two-HQ tests and update ARCHITECTURE §9.7. Delete C10.
-- [ ] C11 one rule, one owner (rules 20, 21, 26, 27, 29, 60), one owner/consumer agreement-tested branch per line:
-  - [ ] C11a one HQ admin-desk requirement drives capacity, founding/staffing and every query.
-  - [ ] C11b one disband quote includes company funds and is used by command and view.
-  - [ ] C11c one medbay-cover rule counts doctors and medics for care and display.
-  - [ ] C11d one effectiveness-percentage rule owns the zero-strength result for queries and checklist.
-  - [ ] C11e one inbound-goods ledger replaces `comingToHq`, `comingToSite` and the field-supply copy.
-  - [ ] C11f one role-to-skill rule owns selection and untrained fallback for battle, personnel, rating, hiring and views.
-  - [ ] C11g one HQ-sale quote owns proceeds for command and view.
-  - [ ] C11h one contract-transit-days rule owns offer, command and query ETAs.
-  - [ ] C11i one company-travel-days rule owns recall/transfer commands and queries.
-  - [ ] C11j one offer-acceptance predicate owns command refusal and eligibility display.
-  - [ ] C11k one reorder-wait rule owns tick scheduling and display.
-  - [ ] C11l one medical coverage iteration owns beds, staff and patient consumers.
-  - [ ] C11m one great-house predicate owns commander and contract-market use.
-  - [ ] C11n one needs-part predicate owns demand and maintenance.
-  - [ ] C11o one salvage-claim rule owns battle result and AAR query.
-  - [ ] C11p one manning-shortfall rule owns forces and TUI display.
-  - [ ] C11q `toe.companiesAtHq` owns every HQ company count.
-  - [ ] C11r one tier-upgrade eligibility rule owns command, project start and view.
-  - [ ] C11s one lance-placement rule owns command and TO&E mutation.
-  - [ ] C11t `post_person` gets one eligibility rule and vacates an occupied unit seat before posting.
-  - [ ] C11u split lift quote from commit and make every caller use the non-mutating quote owner.
-  - [ ] C11v crew assignment returns typed reasons instead of comparing reason text.
-  - [ ] C11w the crewed-transport predicate includes readiness, crew availability and assignment/location required by each consumer.
-  - [ ] C11x rename `canFight` to the exact hull-status predicate it implements and update callers.
-  - [ ] C11y one available-medic predicate replaces raw status checks.
-  - [ ] C11z one armor-demand predicate owns planning and consumption. Delete C11.
-- [ ] C12 frontend boundary and results (rules 9, 10, 30, 33-43), in this order:
-  - [ ] C12a one typed result presenter serves REPL and TUI; success includes sourcing/fraud details, all refusals come from `cli.errorText`, and eligibility views inform without blocking command execution.
-  - [ ] C12b one markup-escaping boundary covers names, paths, music, typed input, echoed verbs, ledger notes and REPL output; hostile-name tests exercise every listed sink.
-  - [ ] C12c layout owns all dimensions; resize clamps focus to drawn panes and tests 80-, 119-, 120- and 121-column layouts including absent Forces/Desk panes.
-  - [ ] C12d refresh client caches after mutations; separate lobby/tab cursors; move map pan, tab metadata, widgets and cursor behavior to their owners.
-  - [ ] C12e every shown key hint and semantic map color comes from its binding/style table, with table-to-screen agreement tests.
-  - [ ] C12f REPL client/view verbs parse strictly through `cli.zig`; queries own completion candidates and presentation windows; remove direct catalogue/hash/state reads and duplicate back-office/transfer wording.
-  - [ ] C12g create the wizard through `lobby.Session` without a pre-session direct command call; delete all boundary exceptions and C12.
-- [ ] C13 numbers, arithmetic, formatting and citations (rules 24, 25, 28, 54, 55, 59), one named owner and agreement test per branch:
-  - [ ] C13a replace copied rule numbers in query, map, TUI, force, command and personnel text with values from their owners; correct the paperwork help line.
-  - [ ] C13b one skull-band rule owns every cutoff and display.
-  - [ ] C13c one skill-edge rule owns every `(5 - skill)` calculation.
-  - [ ] C13d one market-price-roll rule owns every price roll.
-  - [ ] C13e one supply-link level enum/rule replaces bare level 3.
-  - [ ] C13f named day floors own every minimum-duration rule.
-  - [ ] C13g named negotiation caps own command and display limits.
-  - [ ] C13h one field-plan shape owns every default and display.
-  - [ ] C13i one listing-expiry rule owns generation and display.
-  - [ ] C13j one standing-gain rule owns every award and log.
-  - [ ] C13k one hours-per-bay-day rule owns every quote and schedule.
-  - [ ] C13l fabricate quantity limits move from frontend validation to the command owner.
-  - [ ] C13m loan term limits move from frontend validation to the command owner.
-  - [ ] C13n one loan-interest quote owns principal, term and payday calculations.
-  - [ ] C13o named week/month/calendar helpers replace bare conversions and fixed 30/365 arithmetic.
-  - [ ] C13p basis-point helpers replace every raw money-percentage multiplication in the ledger.
-  - [ ] C13q one money formatter below queries owns every player-visible C-bill value.
-  - [ ] C13r one event-effect formatter owns event and query presentation.
-  - [ ] C13s one basis-point multiplier text helper replaces its copies.
-  - [ ] C13t one half-ton text helper replaces its copies.
-  - [ ] C13u one day/ETA text owner replaces its copies.
-  - [ ] C13v audit all tuning rows: each gets a verified citation or `// TUNE`; no source or page is inferred.
-  - [ ] C13w add verified provenance labels for factions, awards, difficulty and ranks.
-  - [ ] C13x make tuning struct/data source and `// TUNE` markers agree, then delete C13.
-- [ ] C14 randomness (rule 57):
-  - [ ] C14a shared market, company and personnel generators accept a caller-supplied named stream; stream-salt tests prove unrelated streams do not move.
-  - [ ] C14b verify and cite every non-2d6 die listed in the exception from a source read during the branch; if a source cannot be verified, stop and report it rather than inventing a citation. Delete C14.
-- [ ] C15 routing, trucks, beachhead price (rules 20, 22, 24), one balance change per branch:
-  - [ ] C15a one tonnage-aware route quote skips saturated hops, minimizes days then cost then HQ ID, and caps charter fallback; manual and automatic resupply use the same feasible stocked-origin quote.
-  - [ ] C15b one passive truck-capacity rule and canonical operational-readiness rule replace hard-coded recounts and `units.len > 0`; storage and active support tests cover destroyed, mothballed, in-transit, in-shop and uncrewed hulls.
-  - [ ] C15c one beachhead-distance/rounding rule prices rush supply and renders Map text; implement and test ARCHITECTURE §9.6 field-HQ recovery. Delete C15.
-- [ ] C17 focused tests (rule 67), generated inventories refreshed on each branch:
-  - [ ] C17a1 test the named `hq_ops` rules against their command/query consumers.
-  - [ ] C17a2 test the named refit, maintenance and crew rules against their consumers.
-  - [ ] C17a3 test `sites.siteCapacityTons`/`moveStock` and the named treasury rules against their consumers.
-  - [ ] C17a4 test the named battle and medical rules against AAR/readiness/checklist consumers.
-  - [ ] C17a5 test the named personnel, field-supply, network and offer-rating rules against their consumers.
-  - [ ] C17a6 test `commands.transferBlock`, `checklist.turnHold` and `clock.isPayday` against command/view/tick consumers.
-  - [ ] C17a7 test the named domain contract, person, unit and types rules against every direct consumer.
-  - [ ] C17b1 cover finance, ledger and summary queries with normal, empty and refusal/error fixtures.
-  - [ ] C17b2 cover contract, offer and map queries with normal, empty and refusal/error fixtures.
-  - [ ] C17b3 cover personnel, roster and medical queries with normal, empty and refusal/error fixtures.
-  - [ ] C17b4 cover forces, readiness and TO&E queries with normal, empty and refusal/error fixtures.
-  - [ ] C17b5 cover HQ, network and supply queries with normal, empty and refusal/error fixtures.
-  - [ ] C17b6 cover market, demand and lab queries with normal, empty and refusal/error fixtures.
-  - [ ] C17b7 cover battle, AAR, event and log queries with normal, empty and refusal/error fixtures.
-  - [ ] C17c add binding and empty-state tests one screen module per branch, in this order: Desk; Contracts; Ledger; Forces; People; Supply; HQ; Market; Lab; Map. Regenerate the inventory after each branch and delete C17 only at zero scoped omissions.
-- [ ] C18 external input bounds (rules 41, 64), one decoder/resource family per branch:
-  - [ ] C18a one terminal-cell-width function owns clipping/padding; remove `padCells` and test combining, wide and invalid UTF-8 input.
-  - [ ] C18b PNG checks CRC, chunk order, exact inflate length and bounded dimensions/allocation; the half-block fallback blends alpha against its background. Fixtures cover each rejection plus transparent-image blending.
-  - [ ] C18c database blob decoding enforces a named byte cap before allocation.
-  - [ ] C18d CSI parameter decoding enforces a named value cap before arithmetic.
-  - [ ] C18e music stop has a bounded nonblocking reap path and playlist rebuild reuses reclaimable storage. Delete C18.
-- [ ] C19 platforms (rule 65), with target builds after each boundary:
-  - [ ] C19a isolate terminal raw mode, input and resize behind POSIX and Windows implementations; noninteractive builds compile without POSIX symbols.
-  - [ ] C19b isolate child-process lifecycle, executable search/path separators and audio player discovery behind target APIs; unsupported audio degrades through a typed no-player result.
-  - [ ] C19c add macOS, Linux and Windows build jobs, reject unsupported targets explicitly, document platform capability, and delete C19.
-- [ ] C20 documentation and naming (rules 61, 75, 81, 82, 84), after module splits settle names:
-  - [ ] C20a link every MekHQ-counterpart module header to `docs/mekhq-map.md`; correct field-HQ capability and contract-pricing comments, the misplaced comment and wrong §9.8 citations.
-  - [ ] C20b split long tech-time formulas and rename weekly-hour functions/callers with their unit; run the header/comment checks and delete C20.
-
-## Tests
-
-- [ ] Smoke coverage, one branch per reproducible path:
-  - [ ] GAME OVER: add a deterministic saved campaign already beyond all credit/liquidation, drive the modal through save success and injected save failure/retry, and require clean client exit.
-  - [ ] Layout boundary: run the same populated campaign at 119, exactly 120 and 121 columns and assert the documented pane transition, focus and no clipped key hints.
-  - [ ] Confirm refusals: inventory every confirmation binding, drive its cancel/no path, and assert unchanged `digest.stateHash` plus the expected view/refusal text.
+- [ ] C5 failure atomicity (C5o-C5s; rules 11-15, 17, 69): batch gear
+  replacement, partial-day advance reporting, retry-safe courier/order and
+  repair tick phases, checked stock mutations, truthful refusal text, and the
+  reserved-resource architecture record. Add one digest failure test per
+  distinct mutation pattern. Delete C5.
+- [ ] C6 typed identity and selection (C6a-C6g; rules 16, 32, 56): persisted
+  offer/listing/candidate/loan IDs, creation results, named seat resolution,
+  and typed query/frontend selections. Migrate before frontend adoption.
+  Delete C6.
+- [ ] C7 fail-closed loading (C7a-C7d; rules 2, 7, 45-48): reference-policy
+  validation, strict scalar/collection decoding, checked counters and ordering,
+  persisted secondary roles, versioned compatibility migrations, canonical
+  digest ordering, and corruption fixtures. Delete C7.
+- [ ] C8 store and session lifecycle (C8a-C8g; rules 44, 49, 62, 63): strict
+  store opening, SQLite behavior, transactional session ownership, and
+  replacement-safe emblem, preview, campaign, and playlist resources. Include
+  the GAME OVER smoke path. Delete C8.
+- [ ] C9 schema integrity and migrations (C9a-C9c; rules 50, 51, 70): ordered
+  migration fixtures, table-rebuild constraints and foreign keys, adversarial
+  meta/counter coverage, and `docs/schema.sql`. Delete C9.
+- [ ] C10 location, posture, and seat resolution (C10a-C10d; rules 21-23, 71):
+  company posture, site-local office/medical effects, seat/outfit resolution,
+  refit stock, and asymmetric two-HQ tests. Delete C10.
+- [ ] C11 one rule, one owner (rules 20, 21, 26, 27, 29, 60):
+  - [ ] C11-HQ (C11a, C11g, C11q-C11t): HQ capacity, sale/upgrade quotes,
+    company counts, lance placement, and posting.
+  - [ ] C11-medical-personnel (C11c, C11f, C11l, C11v, C11y): medical cover,
+    role skills, coverage iteration, typed crew reasons, and available medics.
+  - [ ] C11-contract-supply (C11b, C11e, C11h-C11k, C11m-C11o, C11u): disband,
+    inbound goods, transit/acceptance/reorder/house/part/salvage and lift rules.
+  - [ ] C11-forces (C11d, C11p, C11w-C11x, C11z): effectiveness, manning,
+    transport/hull readiness, and armor demand. Delete C11 after all four.
+- [ ] C12 frontend boundary and results (rules 9, 10, 30, 33-43):
+  - [ ] C12-results-trust (C12a-C12b, C12f-C12g): result presentation,
+    canonical refusals, parser/query boundary, session wizard, escaping, and
+    confirmation-refusal smoke coverage.
+  - [ ] C12-client-structure (C12c-C12e): layout/focus, client state, widgets,
+    bindings/styles, and layout-boundary smoke coverage. Delete C12.
+- [ ] C13 numbers, arithmetic, formatting, and citations (rules 24, 25, 28,
+  54, 55, 59):
+  - [ ] C13-rule-numbers (C13a-C13e): copied values, skill/market/link rules.
+  - [ ] C13-time-quotes-limits (C13f-C13p): durations, limits, loans, calendar,
+    and basis-point arithmetic.
+  - [ ] C13-formatting (C13q-C13u): money, effects, basis-point, tonnage, ETA.
+  - [ ] C13-provenance (C13v-C13x): tuning citations, labels, and TUNE markers.
+    Delete C13 after all four.
+- [ ] C14 randomness (C14a-C14b; rule 57): caller-selected generator streams
+  and verified citations for every non-2d6 die. Stop if a source is unavailable.
+  Delete C14.
+- [ ] C15 routing, truck capacity, and beachhead operation (C15a-C15c; rules
+  20, 22, 24): feasible tonnage-aware routing, passive/active truck capability,
+  beachhead pricing, and field-HQ recovery. Delete C15.
+- [ ] C17 focused test coverage (rule 67): C17a1-C17b7 are completed with their
+  matching C5-C15/C20 rule and query owners; C17c's named screen binding and
+  empty-state coverage is completed with C12. The C20 completion inventory
+  confirms no scoped omission remains, then deletes C17.
+- [ ] C18 external input and resource bounds (C18a-C18e; rules 41, 64): cell
+  width, PNG/blob/CSI validation, and bounded music lifecycle. Delete C18.
+- [ ] C19 explicit platforms (C19a-C19c; rule 65): target-gated terminal and
+  process support, supported-target builds, and documented capability. Delete
+  C19.
+- [ ] C20 residual documentation, naming, and coverage inventory (C20a-C20b;
+  rules 61, 75, 81, 82, 84): module links, corrected comments/citations,
+  unit-bearing names, legible formulas, and the final C17 scope inventory.
+  Delete C20 and C17.
 
 ## Data verification (needs the sourcebooks)
 
-- [ ] `contract.operationsMultBp`: with the CamOps sourcebook available, transcribe the contract-payment table into a test fixture, compare every contract kind, correct only verified mismatches, and cite edition/page on the owner and data row. Stop if the table cannot be verified.
-- [ ] Dragoons rating bands (`tuning.zon` `rating`): with the candidate sourcebooks available, identify the governing table (do not assume CamOps or FM: Mercenaries), compare every threshold in a fixture, correct only verified mismatches, and cite edition/page.
+- [ ] DATA-CAMOPS `contract.operationsMultBp`: transcribe the verified CamOps
+  table into a fixture, compare every contract kind, correct only verified
+  mismatches, and cite edition/page. Stop if the table cannot be verified.
+- [ ] DATA-RATING Dragoons rating bands: identify the governing source table,
+  compare every threshold in a fixture, correct only verified mismatches, and
+  cite edition/page. Do not assume a sourcebook.
 
 ## Product completion
 
-These product-depth items begin only after the contract, test and data work
-above is complete. Each child checkbox is one branch and lands in order.
+These product packages begin only after all compliance, focused-test, and data
+verification work above is complete.
 
-- [ ] P1 Brigade HQ:
-  - [ ] P1a write and approve the missing ROADMAP design first: construction price/duration, permanent staffing and upkeep, facility base/max effects, eligibility and one-brigade rule. Preserve the existing `ARCHITECTURE.md` §9.3 capacity table; do not invent uncited values during implementation.
-  - [ ] P1b implement the approved regional-to-brigade project; only the named seat is eligible and the command enforces one brigade before money, project or tier mutation.
-  - [ ] P1c implement the approved brigade capacity, facility, staffing and upkeep rules through shared owners, with regional-vs-brigade and two-HQ agreement tests.
-  - [ ] P1d persist/migrate the tier and project, expose eligibility/progress/capacity in shared queries, REPL and TUI, and update GAMEPLAY/ROADMAP from target to current behavior.
-- [ ] P2 battle armor and artillery:
-  - [ ] P2a write and approve the missing ROADMAP design first: canonical unit representation, attachment/echelon, crew roles, acquisition data source, maintenance/readiness, transport interaction, and exact battle rules. No catalogue values or rules are inferred.
-  - [ ] P2b add the verified battle-armor catalogue/domain facts and its persistence migration.
-  - [ ] P2c add battle-armor acquisition and company attachment/force placement through shared command and query owners.
-  - [ ] P2d add battle-armor crewing, readiness and maintenance rules with owner/consumer tests.
-  - [ ] P2e add the verified artillery catalogue/domain facts and its persistence migration.
-  - [ ] P2f add artillery acquisition and company attachment/force placement through shared command and query owners.
-  - [ ] P2g add artillery crewing, readiness and maintenance rules with owner/consumer tests.
-  - [ ] P2h make battle armor affect objective holding and artillery affect pre-resolution attrition exactly as the approved design states; battle consumers agree with the rule owners.
-  - [ ] P2i expose both attachments, readiness and battle effects through REPL and TUI, then update architecture/roadmap from target to current behavior.
-- [ ] P3 Full MekLab and custom variants:
-  - [ ] P3a make engines, gyros, cockpits, actuators, integral heat sinks, jump jets and armor editable construction parts with verified TechManual weight, critical-slot and location rules; canonical designs remain legal.
-  - [ ] P3b derive complete A-F refit class, parts and tech-time quotes from one owner and gate them by facility ceiling; illegal fits name the violated rule before stock or bay mutation.
-  - [ ] P3c persist campaign-owned custom chassis through an explicit migration and digest coverage; saved variants are buildable, orderable and refittable through the same command/query paths as canonical designs.
-  - [ ] P3d expose full construction editing and variant lifecycle through REPL and TUI, including damaged-market-hull completion, then update ARCHITECTURE/ROADMAP from target to current behavior.
+- [ ] P1-design Brigade HQ design approval (P1a): price/duration, permanent
+  staffing/upkeep, capacity/facility effects, eligibility, and one-brigade rule.
+- [ ] P1-brigade (P1b-P1d): regional-to-brigade project, shared rules,
+  persistence, queries, REPL/TUI, and current-behavior docs.
+- [ ] P2-design battle-armor/artillery design approval (P2a).
+- [ ] P2-battle-armor (P2b-P2d): verified domain facts, acquisition/attachment,
+  crewing, readiness, and persistence.
+- [ ] P2-artillery (P2e-P2g): verified domain facts, acquisition/attachment,
+  crewing, readiness, and persistence.
+- [ ] P2-battle-ui (P2h-P2i): both battle effects and REPL/TUI surfaces.
+- [ ] P3-construction (P3a-P3b): editable construction parts and A-F quotes.
+- [ ] P3-variants (P3c): persisted campaign-owned custom chassis.
+- [ ] P3-client (P3d): construction editor and variant lifecycle.
+- [ ] P4 Campaign operations and stories:
+  - [ ] P4a approve the operations-and-stories design and content boundary.
+  - [ ] P4b operation content/state foundation.
+  - [ ] P4c operations board and garrison/security vertical slice.
+  - [ ] P4d mission intent, quote/commit planning, and operation-aware battles.
+  - [ ] P4e per-operation lance tasking and reports.
+  - [ ] P4f intelligence versus tempo.
+  - [ ] P4g command capacity and interventions.
+  - [ ] P4h escalation, consolidation, withdrawal, and finales.
+  - [ ] P4i persistent actors, relationships, world state, rivals, and officers.
+  - [ ] P4j additional arcs, variants, reports, balance scripts, and docs.
 
 ## Not scheduled
 
 Design ideas, not defects; each needs its design in ROADMAP.md first.
 
-- A mobile field base as a buyable Repair support lance, adding to the repair push beyond the Logistics lance's workshop.
-- Help overlay UX: the help text overflows the screen and cannot scroll; design required first — either a scrollable overlay (up/down key navigation) or contextual help filtered to the current screen's active bindings; both touch the key-hint infrastructure (C12e).
+- A mobile field base as a buyable Repair support lance, adding to the repair
+  push beyond the Logistics lance's workshop.
+- Help overlay UX: design a scrollable overlay or contextual help filtered to
+  the current screen's active bindings; this touches C12's key infrastructure.

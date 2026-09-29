@@ -1361,6 +1361,10 @@ The current contract lifecycle, event inbox, battle orders, lance roles,
 support assets, after-action reports, faction standing, local markets, and
 structured log are the foundation. P4 extends them through shared domain rule
 owners; it does not create a parallel command, event, battle, or report path.
+Implementation follows the owning requirements in the coding contract, notably
+rules 3, 7, 11-17, 45-53, 57, and 67-71; this design does not restate them.
+The detailed P4a-P4i prompts below are design references only; `TODO.md` owns
+their consolidated P4a-P4j delivery order.
 
 ### P4a — Narrative and operations foundation
 
@@ -1372,25 +1376,22 @@ and migration behavior. Narrative content is authored game content; a
 sourcebook citation is never invented for it. New balance values are labelled
 `// TUNE` until verified or deliberately retained as play-tuning values.
 
-- [ ] P4a.1 Add a typed, data-driven campaign-content model: arc archetypes,
+- P4a.1 Add a typed, data-driven campaign-content model: arc archetypes,
   operation templates, intents, complications, escalation and finale
   templates, actor archetypes, rival archetypes, and world-state effects.
   Build validation checks stable keys, references, legal contract kinds,
   legal effects, and branch targets.
-- [ ] P4a.2 Add persisted operation state to `Contract`: selected arc,
+- P4a.2 Add operation state to `Contract`: selected arc,
   current beat, typed available/committed/resolved operation identities,
   operation history, escalation clocks, attached actors, relationship state,
-  command-capacity state, and counters. Classify every field, extend the
-  digest, add explicit migration, and reject corrupt keys, references,
-  counters and clocks on load.
-- [ ] P4a.3 Create the pure owner modules for operation eligibility, operation
+  command-capacity state, and counters. Persistence and validation follow the
+  contract's persistence rules.
+- P4a.3 Create the owner modules for operation eligibility, operation
   quotes, resolution outcome bands, escalation-clock changes, and finale
   selection. Commands, ticks, battle setup, queries and persistence validation
   call these owners rather than reconstructing their rules.
-- [ ] P4a.4 Add fixed-seed tests proving available operations and outcomes are
-  deterministic; add save/load continuation tests for a contract in each
-  operational state; add failing-allocator tests for each new compound command
-  pattern.
+- P4a.4 Add the deterministic, persistence, and failure-boundary coverage the
+  coding contract requires for the new operation paths.
 
 **Acceptance:** a contract can be accepted, saved, loaded, advanced and closed
 with an operation history that explains how its final result came to be.
@@ -1401,24 +1402,24 @@ Each deployment receives a compact arc: arrival, complication, escalation,
 climax and aftermath. An operation is the player-facing unit of deployment
 play, not every calendar day or every random event.
 
-- [ ] P4b.1 Add a contract briefing that states the employer goal, local
+- P4b.1 Add a contract briefing that states the employer goal, local
   pressure, opposition posture, known actors, current world state and known
   uncertainty. It is informative and never hides a command-only rule.
-- [ ] P4b.2 Implement bounded operation choice. Each operation has a type,
+- P4b.2 Implement bounded operation choice. Each operation has a type,
   objective, location context, expected time, stakes, force-role needs, known
   and unknown risks, rewards, and follow-up branches. Declining an operation
   remains a real choice with an explicit clock, standing, opportunity or
   readiness consequence.
-- [ ] P4b.3 Implement operation outcomes through a named pure outcome owner.
+- P4b.3 Implement operation outcomes through a named outcome owner.
   Outcomes may change contract score, victory points, local state, actors,
   faction or employer standing, stock, fatigue, enemy force, and follow-up
   availability. Every result is recorded in the contract history and the
   structured campaign log.
-- [ ] P4b.4 Deliver one complete vertical slice: a garrison/security
+- P4b.4 Deliver one complete vertical slice: a garrison/security
   `fracturing garrison` arc with a beginning, complication, escalation,
   finale and at least two materially different endings. It includes meaningful
   non-combat operations as well as engagements.
-- [ ] P4b.5 Expose briefings, available operations, committed plans, arc
+- P4b.5 Expose briefings, available operations, committed plans, arc
   progress, clocks and prior consequences in the Contracts query, REPL and
   TUI. Actionable rows carry typed operation IDs; the battle report identifies
   the operation that produced its engagement.
@@ -1433,23 +1434,22 @@ The player selects what an operation is trying to achieve before the
 autoresolver acts. Winning an engagement and accomplishing the operation are
 separate results.
 
-- [ ] P4c.1 Add operation-scoped intents: preserve force, secure objective,
+- P4c.1 Add operation-scoped intents: preserve force, secure objective,
   break enemy, protect assets, secure intelligence, and recover personnel or
   equipment. Operation template, command rights and current state determine
   the legal set.
-- [ ] P4c.2 Define one owner for every intent's battle-score weight,
+- P4c.2 Define intent effects for battle score,
   victory-point weight, field-holding requirement, salvage access, local-state
   exposure, enemy-attrition contribution, ammunition/fatigue profile and
   post-battle follow-up availability.
-- [ ] P4c.3 Pass the committed operation context into battle setup. Scenario
+- P4c.3 Pass the committed operation context into battle setup. Scenario
   selection, enemy posture, score effects and recovery context consume that
   context; the AAR names the selected intent and whether it succeeded.
-- [ ] P4c.4 Apply command-rights constraints through the existing
+- P4c.4 Apply command-rights constraints through the existing
   `CommandRights` owner: integrated command may mandate an intent, house or
   liaison command may limit it or penalize defiance, and independent command
   provides wider choice with its existing tradeoffs.
-- [ ] P4c.5 Add quote-then-commit commands and views. Refusal consumes no
-  command capacity, RNG, time, stock or operation availability. ROE remains a
+- P4c.5 Add planning commands and views under the command rules; ROE remains a
   distinct risk posture inside a mission plan.
 
 **Acceptance:** a force can preserve its hulls but fail the mission, or take
@@ -1460,22 +1460,22 @@ losses while securing an outcome that changes the contract campaign.
 Standing lance roles remain doctrine. Tasking is a per-operation assignment
 that decides how available lances serve that operation.
 
-- [ ] P4d.1 Add operation-scoped tasks: screen, main effort, reserve, escort,
+- P4d.1 Add operation-scoped tasks: screen, main effort, reserve, escort,
   objective/security, recovery and recon. Training is never an operational
   task.
-- [ ] P4d.2 Add one eligibility owner. A lance must be operational,
+- P4d.2 Define task eligibility. A lance must be operational,
   co-located, allowed by command rights and compatible with the chosen task.
   Recovery, escort and objective tasks require the actual force/support
   capability they claim to use.
-- [ ] P4d.3 Add one effect owner. Main effort adds combat power and exposure;
+- P4d.3 Define task effects. Main effort adds combat power and exposure;
   screen/recon reduce surprise; reserve protects against a bad opening;
   escort protects convoy/support assets while reducing line power;
   objective/security improves operation success; recovery improves post-field
   recovery. No screen or command re-derives these effects.
-- [ ] P4d.4 Extend battle reports and operation outcomes with each tasked
+- P4d.4 Extend battle reports and operation outcomes with each tasked
   lance, task success, and material consequence, such as a reserve avoiding a
   rout or an escort preserving a convoy.
-- [ ] P4d.5 Add command/query/TUI/REPL support through the existing
+- P4d.5 Add command/query/TUI/REPL support through the existing
   battle-orders planning surface. Tests cover fixed-seed outcome differences,
   command-rights refusal, and uncrewed, damaged or in-transit lance refusal.
 
@@ -1487,19 +1487,19 @@ and reserves play differently even at comparable BV.
 Before commitment, the player chooses whether to learn more, act immediately,
 prepare, or spend time restoring readiness while the situation worsens.
 
-- [ ] P4e.1 Add operation-scoped intelligence state: known enemy-strength
+- P4e.1 Add operation-scoped intelligence state: known enemy-strength
   range, scenario risks, actor motives, enemy preparedness, local support,
   confidence and source. Intelligence is explicitly known or uncertain; it
   never reveals an unrolled outcome.
-- [ ] P4e.2 Add quoted planning choices: reconnaissance, immediate advance,
+- P4e.2 Add planning choices: reconnaissance, immediate advance,
   applicable ambush/defensive preparation, and delay for supply, repair, rest
   or diplomacy. Each has named time, resource, readiness and escalation
   consequences.
-- [ ] P4e.3 Make recon lances, comms, local actors, faction standing, command
+- P4e.3 Make recon lances, comms, local actors, faction standing, command
   staff and completed operations contribute through location-sensitive rule
   owners. Asymmetric multi-HQ tests prove no unrelated HQ supplies an intel
   benefit.
-- [ ] P4e.4 Tie delay and tempo to arc-specific clocks: enemy preparation,
+- P4e.4 Tie delay and tempo to arc-specific clocks: enemy preparation,
   civilian danger, political pressure, supply risk or rival influence. Good
   intelligence must create distinct opportunities, not only numeric bonuses.
 
@@ -1512,20 +1512,19 @@ and the AAR.
 Command staff and leadership create a limited, visible intervention economy
 without becoming a second currency or a way to negate permanent loss.
 
-- [ ] P4f.1 Define a capped, named-cadence `CommandCapacity` resource. Its
+- P4f.1 Define a capped, named-cadence `CommandCapacity` resource. Its
   owner derives it from the company commander, relevant HQ command staff,
   comms, command rights and deployment conditions.
-- [ ] P4f.2 Add interventions that use existing capabilities: emergency
+- P4f.2 Add interventions that use existing capabilities: emergency
   reconnaissance, field-repair reprioritization, reinforcing a task,
   expediting local procurement/transport, medical evacuation, air-cover
   coordination and local-actor negotiation. Each requires the relevant
   personnel, assets, stock and location.
-- [ ] P4f.3 Define carry-over, refresh, cap and employer-reservation rules in
-  one owner. Integrated command can reserve capacity for employer demands;
+- P4f.3 Define carry-over, refresh, cap and employer-reservation behavior.
+  Integrated command can reserve capacity for employer demands;
   no intervention overrides a permanent-loss or command-refusal rule.
-- [ ] P4f.4 Use quote then atomic commit. The plan, resource cost and forecast
-  are visible before commitment; every spent point is preserved in the
-  operation record and AAR. Add failure-atomicity and locality tests.
+- P4f.4 Show plan, resource cost, forecast, and spending in the operation
+  record and AAR through the existing command path.
 
 **Acceptance:** command personnel matter during a deployment, and spending
 their attention on one problem prevents its use elsewhere.
@@ -1535,19 +1534,19 @@ their attention on one problem prevents its use elsewhere.
 The existing press/consolidate, recovery, salvage and field-repair decisions
 become part of the operation campaign rather than isolated battle aftermath.
 
-- [ ] P4g.1 Bind existing post-battle decisions to operation state and
+- P4g.1 Bind existing post-battle decisions to operation state and
   escalation clocks. Their answers change follow-up operations, enemy posture,
   readiness, local state or finale paths.
-- [ ] P4g.2 Add operation-level choices where the template permits: exploit
+- P4g.2 Add operation-level choices where the template permits: exploit
   success, consolidate gains, tactical withdrawal, redirect to a crisis,
   negotiate, or hand responsibility back to the employer.
-- [ ] P4g.3 Define distinct tactical withdrawal, operational withdrawal and
+- P4g.3 Define distinct tactical withdrawal, operational withdrawal and
   contract recall rules. Each owns its eligibility, cost and consequences;
   contract recall continues to use the breach clause.
-- [ ] P4g.4 Add named, arc-scoped clocks only where needed: enemy initiative,
+- P4g.4 Add named, arc-scoped clocks only where needed: enemy initiative,
   local instability, civilian danger, employer patience, supply pressure and
   rival influence. Do not add a universal hidden doom meter.
-- [ ] P4g.5 Implement finale selection and resolution from arc state,
+- P4g.5 Implement finale selection and resolution from arc state,
   operations, relationships, world state and clocks. A finale may be a battle,
   negotiation, evacuation, holdout, betrayal or withdrawal. It updates the
   contract result and persistent consequences through one resolution owner.
@@ -1560,30 +1559,30 @@ force-preserving retreat can remain strategically consequential.
 The deployment has memory outside its ledger. Returning to a world or meeting
 a former actor should reflect the player's previous choices.
 
-- [ ] P4h.1 Add contract-local actors: employer liaisons, officials, militia
+- P4h.1 Add contract-local actors: employer liaisons, officials, militia
   leaders, quartermasters, civilian organizers, smugglers, enemy officers and
   rival commanders. They have deterministic generated identity, archetype,
   faction, relationship and agenda tags.
-- [ ] P4h.2 Keep actors distinct from payroll `Person` records unless a named
+- P4h.2 Keep actors distinct from payroll `Person` records unless a named
   conversion rule turns an actor into a prisoner, recruit or employee.
-- [ ] P4h.3 Add a narrow relationship model, such as trust, debt, respect and
+- P4h.3 Add a narrow relationship model, such as trust, debt, respect and
   hostility. Every change has a recorded cause and affects only named owners
   for operations, intelligence, pricing, negotiation, recruitment or finales.
-- [ ] P4h.4 Add bounded per-world state: security, civilian support,
+- P4h.4 Add bounded per-world state: security, civilian support,
   infrastructure strain, employer control and enemy influence. Named operation
   and finale effects change it; future contract generation, markets, support
   and intelligence consume it. Map and Contracts queries display the state and
   history without implying a fully simulated population.
-- [ ] P4h.5 Add persistent rival companies with faction, doctrine,
+- P4h.5 Add persistent rival companies with faction, doctrine,
   relationship, status and bounded history. They can take declined work,
   contest contracts, cooperate temporarily or interfere through visible,
   deterministic operations; they never silently remove player assets or void
   an accepted contract.
-- [ ] P4h.6 Add compact officer arcs for company commanders and selected lance
+- P4h.6 Add compact officer arcs for company commanders and selected lance
   leaders only. Their proposals, loyalty, task performance, promotion and
   retention use the personnel system rather than a bespoke story for every
   generated person.
-- [ ] P4h.7 Extend contract history, campaign summary and filtered logs with
+- P4h.7 Extend contract history, campaign summary and filtered logs with
   arc, finale, principal actors, key decisions, affected-world summary,
   recurring rivals and officer milestones.
 
@@ -1595,46 +1594,28 @@ or officer produces legible consequences from prior decisions.
 Start with enough content to prove replayability, then grow content from the
 validated framework rather than adding a second story system.
 
-- [ ] P4i.1 Add four further complete arcs after the P4b vertical slice:
+- P4i.1 Add four further complete arcs after the P4b vertical slice:
   `aid under siege` for relief work, `enemy supply network` for raid/guerrilla
   work, `political evacuation` for extraction work, and `beachhead and
   breakthrough` for planetary assault. Each has at least two endings.
-- [ ] P4i.2 Add operation variants for every major contract family and a
+- P4i.2 Add operation variants for every major contract family and a
   bounded actor/rival archetype set. Content expansion changes data, not the
   operation engine.
-- [ ] P4i.3 Add reports for operation history, decision costs, world-state
+- P4i.3 Add reports for operation history, decision costs, world-state
   changes, actor/rival history, command-capacity use, and the visible answer to
   “what changed because of this operation?”
-- [ ] P4i.4 Add deterministic campaign scripts for aggressive, cautious,
+- P4i.4 Add deterministic campaign scripts for aggressive, cautious,
   intelligence-heavy, logistics-heavy and force-preservation play. Track
   completion, breach, hull loss, operation success, clock progression,
   capacity spending and ending distribution through test assertions.
-- [ ] P4i.5 Complete focused rule/consumer tests, failure-atomicity tests,
-  save/load and corruption fixtures, fixed-seed golden tests, asymmetric
-  locality tests, REPL smoke paths and TUI smoke paths for briefing, planning,
-  commitment, intervention, post-operation choice and finale.
-- [ ] P4i.6 Update `ARCHITECTURE.md`, `GAMEPLAY.md`, `docs/tui.md`, TUI mockups
+- P4i.5 Complete the contract-required verification for briefing, planning,
+  commitment, intervention, post-operation choice, and finale.
+- P4i.6 Update `ARCHITECTURE.md`, `GAMEPLAY.md`, `docs/tui.md`, TUI mockups
   and the roadmap only when the corresponding behavior is live.
 
 **Acceptance:** the game supports replayable, legible deployment stories whose
 choices affect force readiness, money, people, contracts, worlds and future
 opportunities without leaving the mercenary-command fantasy.
-
-### P4 branch order
-
-Each line is one independently correct branch that reaches local `main` before
-the next begins:
-
-1. P4a design and state/data foundation.
-2. P4b operations board and the garrison/security vertical slice.
-3. P4c mission planning and operation-aware battle context.
-4. P4d lance tasking.
-5. P4e intelligence versus tempo.
-6. P4f command capacity.
-7. P4g escalation, withdrawal and finales.
-8. P4h actors and world state.
-9. P4h rivals and officer arcs.
-10. P4i content expansion, balance scripts, reports and documentation.
 
 ## Later / icebox
 Edge points in play, audio beyond the music player, Stage 13 graphics.
