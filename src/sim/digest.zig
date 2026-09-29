@@ -84,7 +84,8 @@ pub fn update(h: *Hasher, value: anytype) void {
             }
         },
         .@"struct" => |s| {
-            if (comptime isMap(T)) return updateMap(h, value);
+            if (comptime isArrayHashMap(T)) return updateArrayHashMap(h, value);
+            if (comptime isHashMap(T)) return updateMap(h, value);
             if (comptime isArrayList(T)) return update(h, value.items);
             if (T == std.mem.Allocator) @compileError("digest: an allocator is not state");
             inline for (s.fields) |f| update(h, @field(value, f.name));
@@ -93,6 +94,8 @@ pub fn update(h: *Hasher, value: anytype) void {
     }
 }
 
+/// Order-independent fold for open-addressing hash maps (e.g. `AutoHashMapUnmanaged`).
+/// Two maps with the same entries in any insertion order produce the same hash.
 fn updateMap(h: *Hasher, map: anytype) void {
     update(h, @as(u64, map.count()));
     var sum: u64 = 0;
@@ -106,10 +109,31 @@ fn updateMap(h: *Hasher, map: anytype) void {
     update(h, sum);
 }
 
-/// `std` array hash maps (`entries`) and hash maps (`metadata`), managed
-/// or not: all of them iterate entries with `key_ptr` and `value_ptr`.
-fn isMap(comptime T: type) bool {
-    return @hasDecl(T, "KV") and @hasDecl(T, "iterator") and (@hasField(T, "entries") or @hasField(T, "metadata") or @hasField(T, "unmanaged"));
+/// Ordered hash for array hash maps (e.g. `AutoArrayHashMapUnmanaged`,
+/// `StringArrayHashMapUnmanaged`). Their iteration order is insertion order —
+/// the order RNG, seating and collections consume — and is gameplay-significant
+/// (rule 2, 53). Two maps with the same entries in a different insertion order
+/// produce different hashes, so a digest distinguishes materially different
+/// campaigns (rule 4 reviewer check).
+fn updateArrayHashMap(h: *Hasher, map: anytype) void {
+    update(h, @as(u64, map.count()));
+    var it = map.iterator();
+    while (it.next()) |entry| {
+        update(h, entry.key_ptr.*);
+        update(h, entry.value_ptr.*);
+    }
+}
+
+/// Array hash maps (`AutoArrayHashMapUnmanaged`, `StringArrayHashMapUnmanaged`,
+/// and their managed variants): have `KV`, `iterator`, and an `entries` field.
+fn isArrayHashMap(comptime T: type) bool {
+    return @hasDecl(T, "KV") and @hasDecl(T, "iterator") and @hasField(T, "entries");
+}
+
+/// Open-addressing hash maps (`AutoHashMapUnmanaged`, etc.): have `KV`,
+/// `iterator`, and a `metadata` field (no `entries`).
+fn isHashMap(comptime T: type) bool {
+    return @hasDecl(T, "KV") and @hasDecl(T, "iterator") and @hasField(T, "metadata") and !@hasField(T, "entries");
 }
 
 fn isArrayList(comptime T: type) bool {
@@ -151,7 +175,24 @@ fn descend(w: *std.Io.Writer, a: anytype, b: @TypeOf(a)) void {
             },
         },
         .@"struct" => |s| {
-            if (comptime isMap(T)) return;
+            if (comptime isHashMap(T)) return; // folded; can't descend into a fold
+            if (comptime isArrayHashMap(T)) {
+                // Ordered: descend into each entry by index for better diagnostics.
+                if (a.count() != b.count()) return;
+                var ia = a.iterator();
+                var ib = b.iterator();
+                var i: usize = 0;
+                while (ia.next()) |ea| {
+                    const eb = ib.next().?;
+                    if (of(ea.key_ptr.*) != of(eb.key_ptr.*) or of(ea.value_ptr.*) != of(eb.value_ptr.*)) {
+                        // best-effort: a diagnostic path in a fixed buffer truncates.
+                        w.print("[{d}]", .{i}) catch {};
+                        return;
+                    }
+                    i += 1;
+                }
+                return;
+            }
             if (comptime isArrayList(T)) return descend(w, a.items, b.items);
             inline for (s.fields) |f| if (of(@field(a, f.name)) != of(@field(b, f.name))) {
                 // best-effort: a diagnostic path in a fixed buffer truncates.
@@ -180,7 +221,10 @@ test "a session field cannot move the golden master; a persisted one does" {
     try std.testing.expectEqual(GameState.Persistence.session, comptime GameState.persistenceOf("campaign_id"));
 }
 
-test "a map digests the same whatever order its entries went in" {
+test "an array hash map digests differently when insertion order differs" {
+    // Array hash maps are gameplay-order-significant (rule 2, 53): two
+    // campaigns that differ only in the order their id map was populated
+    // are materially different and must produce different digests (rule 4).
     const a = std.testing.allocator;
     var one: std.AutoArrayHashMapUnmanaged(u32, []const u8) = .empty;
     defer one.deinit(a);
@@ -190,8 +234,32 @@ test "a map digests the same whatever order its entries went in" {
     try one.put(a, 2, "bravo");
     try two.put(a, 2, "bravo");
     try two.put(a, 1, "alpha");
+    // Same entries, different insertion order → different digest.
+    try std.testing.expect(of(one) != of(two));
+    // A value change still moves the digest.
+    var three: std.AutoArrayHashMapUnmanaged(u32, []const u8) = .empty;
+    defer three.deinit(a);
+    try three.put(a, 1, "alpha");
+    try three.put(a, 2, "charlie");
+    try std.testing.expect(of(one) != of(three));
+}
+
+test "an open-addressing hash map digests the same regardless of insertion order" {
+    // Plain hash maps (AutoHashMapUnmanaged) fold entries order-independently
+    // because their insertion order is genuinely nondeterministic (e.g. Person.skills).
+    const a = std.testing.allocator;
+    var one: std.AutoHashMapUnmanaged(u32, u32) = .empty;
+    defer one.deinit(a);
+    var two: std.AutoHashMapUnmanaged(u32, u32) = .empty;
+    defer two.deinit(a);
+    try one.put(a, 1, 10);
+    try one.put(a, 2, 20);
+    try two.put(a, 2, 20);
+    try two.put(a, 1, 10);
+    // Same entries, different insertion order → same digest.
     try std.testing.expectEqual(of(one), of(two));
-    try two.put(a, 2, "charlie");
+    // A value change still moves the digest.
+    try two.put(a, 2, 99);
     try std.testing.expect(of(one) != of(two));
 }
 

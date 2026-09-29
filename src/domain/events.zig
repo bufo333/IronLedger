@@ -217,9 +217,16 @@ pub const EventQueue = struct {
 
     /// After a load, resume numbering past everything restored and past
     /// the saved counter (already in `next_id`), whichever is later.
+    /// Saturates at `maxInt(u32)` rather than wrapping when any event
+    /// holds the maximum id; `reconcileCounters` in store.zig detects
+    /// the saturated value and returns `error.CorruptSave` (rule 48).
     pub fn resumeIds(self: *EventQueue) void {
         var max: u32 = 0;
         for (self.pending.items) |ev| max = @max(max, @intFromEnum(ev.id));
+        if (max == std.math.maxInt(u32)) {
+            self.next_id = std.math.maxInt(u32);
+            return;
+        }
         self.next_id = @max(self.next_id, max + 1);
     }
 
@@ -254,4 +261,21 @@ test "events carry options with typed effects" {
     };
     try std.testing.expect(ev.needsDecision());
     try std.testing.expectEqual(@as(usize, 2), ev.options.len);
+}
+
+test "resumeIds saturates at maxInt(u32) rather than wrapping" {
+    var q: EventQueue = .{};
+    defer q.pending.deinit(std.testing.allocator);
+    // An event holding the maximum u32 id saturates the counter; store.zig
+    // reconcileCounters detects the saturated value and returns CorruptSave.
+    try q.pending.append(std.testing.allocator, .{
+        .id = @enumFromInt(std.math.maxInt(u32)),
+        .day = 1,
+        .kind = .off_contract_request,
+        .deadline_day = 10,
+        .options = &.{},
+        .default_choice = 0,
+    });
+    q.resumeIds();
+    try std.testing.expectEqual(@as(u32, std.math.maxInt(u32)), q.next_id);
 }

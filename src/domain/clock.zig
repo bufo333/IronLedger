@@ -51,6 +51,17 @@ pub const Date = struct {
     pub fn isPayday(self: Date) bool {
         return self.day == 1;
     }
+
+    /// True when the date values are calendar-legal for a BattleTech
+    /// campaign (rule 47). Guards the `unreachable` branch in
+    /// `daysInMonth` so a tampered month-13 row is rejected before it
+    /// reaches undefined behaviour.
+    pub fn valid(self: Date) bool {
+        if (self.year < 3000 or self.year > 4000) return false;
+        if (self.month < 1 or self.month > 12) return false;
+        if (self.day < 1 or self.day > daysInMonth(self.year, self.month)) return false;
+        return true;
+    }
 };
 
 pub const Clock = struct {
@@ -69,6 +80,17 @@ test "date rollover incl. leap year" {
     try std.testing.expectEqual(Date{ .year = 3024, .month = 2, .day = 29 }, d); // 3024 is a leap year
     d = .{ .year = 3025, .month = 12, .day = 31 };
     try std.testing.expectEqual(Date{ .year = 3026, .month = 1, .day = 1 }, d.next());
+}
+
+test "Date.valid rejects out-of-range values and accepts legal ones" {
+    try std.testing.expect(Date.campaign_default.valid()); // 3025-01-01
+    try std.testing.expect(!(Date{ .year = 3025, .month = 0, .day = 1 }).valid()); // month 0
+    try std.testing.expect(!(Date{ .year = 3025, .month = 13, .day = 1 }).valid()); // month 13
+    try std.testing.expect(!(Date{ .year = 3025, .month = 1, .day = 0 }).valid()); // day 0
+    try std.testing.expect(!(Date{ .year = 3025, .month = 1, .day = 32 }).valid()); // day 32
+    try std.testing.expect((Date{ .year = 3025, .month = 2, .day = 28 }).valid());
+    try std.testing.expect(!(Date{ .year = 3025, .month = 2, .day = 29 }).valid()); // 3025 not leap
+    try std.testing.expect((Date{ .year = 3024, .month = 2, .day = 29 }).valid()); // 3024 is leap
 }
 
 test "one date rendering, zero-padded" {

@@ -568,6 +568,7 @@ pub fn errorText(err: anyerror) []const u8 {
         error.BadYear => "the campaign starts between 3000 and 3060",
         error.KeepStocked => "that would drop the line under its keep-stocked minimum — lower the policy first (K)",
         error.StorageFull => "the destination cannot hold that tonnage",
+        error.StockOverflow => "stock quantity would exceed the maximum counter — the stores are full",
         error.CompanyDeployed => "that company is deployed — hire at an HQ hall and `xfer person <id> co:N` to send people out to it",
         error.NotReachable => "outside your influence rings and beachhead bands",
         error.CapacityFull => "that HQ has no free company slot — a field HQ hosts none (HQ screen: T raises it to regional); a regional HQ hosts one",

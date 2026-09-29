@@ -15,38 +15,6 @@ Owner of every entry: the project owner.
 
 ---
 
-### C7. Loading does not fail closed
-
-- **Rules:** 2, 7, 45, 46, 47, 48.
-- **Why not yet:** It needs an explicit reference-policy table and one corruption test per relationship family.
-- **Scope:**
-  - **Orphan rows skipped:**
-    - `unit_slot` (`store.zig:1218-1220`)
-    - `refit_op` (`1817`)
-    - stock (`state.zig:1093`)
-    - report children (`store.zig:1736-1802`)
-  - **Unchecked links:** `force_unit` and `force_child` (`1263`, `1270`). No cross-entity reference is validated.
-  - **Discriminators.** An unknown value becomes a valid one (`1568`, `1819-1821`). Booleans are decoded as `!= 0`. An unknown optional enum becomes null (`1128`, `1248`, `1306`).
-  - **Counters.** They are never checked against the highest loaded ID. The v5 fixture reuses ID 1 (`2250-2262`).
-  - **Pending events.** Choice indices are unchecked (`1642-1644`).
-  - **Duplicate keys** overwrite silently (`1131`, `1202`, `1256`, `1290`, `1382`, `1536`, `1547`).
-  - **NULL values** are read as 0 or an empty string (`sqlite.zig:153`, `163`).
-  - **Meta rows.** Missing ones fall back to defaults (`store.zig:1031-1069`).
-  - **Range checks.** Dates and domain values are checked only against their storage width. Month 13 reaches `unreachable` (`1036`, `domain/clock.zig:33`).
-  - **Stock sums** can overflow (`state.zig:1096`).
-  - **Compatibility repairs** run on every load instead of in versioned migrations: RNG reseed, stats rebuilt from the log, event-ID stamping (`958-960`, `1005`, `1653`).
-  - **Load writes state and draws dice.** It runs `refreshHqStaffing`, `upgradeCampaign` age rolls and `resumeBattleIds` (`1001-1008`).
-  - **Integer casts:**
-    - `sqlite.zig:103`: `bind` does an unchecked `@intCast`.
-    - `store.zig:430`: `@intCast` of the stats counter.
-    - `store.zig:1654`: `@enumFromInt(i + 1)` when stamping event IDs.
-  - **ID overflow.** `resumeBattleIds` and `resumeIds` overflow at the u32 maximum.
-  - **Unsaved field.** `Person.secondary_role` is not persisted.
-  - **Unordered loads.** Award and ability rows load without `ORDER BY` (`1133`, `1141`, `1148`).
-  - **Digest.** It folds maps in any order, while play depends on map order (`digest.zig:57-67`).
-- **Removal:** C7.
-- **Guard:** review (checklist question 4). No mechanical check.
-
 ### C8. Store lifecycle
 
 - **Rules:** 44, 49, 62, 63.

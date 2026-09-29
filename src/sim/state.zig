@@ -577,7 +577,7 @@ pub const GameState = struct {
         const map = self.stockMap(site) orelse return error.UnknownSite;
         const entry = try map.getOrPut(self.allocator(), key);
         if (!entry.found_existing) entry.value_ptr.* = 0;
-        entry.value_ptr.* += qty;
+        entry.value_ptr.* = std.math.add(u32, entry.value_ptr.*, qty) catch return error.StockOverflow;
     }
 
     /// Take from a site's stock; false if not enough on hand.
@@ -734,12 +734,19 @@ pub const GameState = struct {
 
     /// Raise the battle counter past every battle a report, a held hull or
     /// a pending decision names, so a new engagement cannot reuse an id
-    /// that is still referenced.
+    /// that is still referenced. Saturates at `maxInt(u32)` rather than
+    /// wrapping when any entity holds the maximum id; `reconcileCounters`
+    /// in store.zig detects the saturated value and returns `error.CorruptSave`
+    /// (rule 48).
     pub fn resumeBattleIds(self: *GameState) void {
         var max: u32 = 0;
         for (self.battle_reports.kept.items) |r| max = @max(max, @intFromEnum(r.id));
         for (self.held_hulls.items) |h| max = @max(max, @intFromEnum(h.battle));
         for (self.event_queue.pending.items) |ev| max = @max(max, @intFromEnum(ev.battle));
+        if (max == std.math.maxInt(u32)) {
+            self.next_battle_id = std.math.maxInt(u32);
+            return;
+        }
         self.next_battle_id = @max(self.next_battle_id, max + 1);
     }
 
@@ -901,6 +908,14 @@ test "addStock at a removed HQ returns UnknownSite" {
 
     const missing: types.HqId = @enumFromInt(999);
     try std.testing.expectError(error.UnknownSite, gs.addStock(.{ .hq = missing }, "armor", 10));
+}
+
+test "addStock rejects a u32 overflow" {
+    // A stock sum that would overflow u32 is a corrupt save (rule 47).
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    try gs.addStock(.outfit, "armor", std.math.maxInt(u32));
+    try std.testing.expectError(error.StockOverflow, gs.addStock(.outfit, "armor", 1));
 }
 
 test "postTreasury against a removed HQ returns UnknownTreasury" {

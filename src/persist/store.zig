@@ -34,7 +34,7 @@ const digest = @import("../sim/digest.zig");
 const hq_ops = @import("../sim/hq_ops.zig");
 const held_hulls_m = @import("../sim/held_hulls.zig");
 
-pub const schema_version = 35;
+pub const schema_version = 36;
 
 const ddl =
     \\CREATE TABLE IF NOT EXISTS player (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_seq INTEGER NOT NULL);
@@ -45,7 +45,7 @@ const ddl =
     \\CREATE TABLE IF NOT EXISTS rng (cid INTEGER PRIMARY KEY, state BLOB NOT NULL);
     \\CREATE TABLE IF NOT EXISTS rng_stream (cid INTEGER NOT NULL, stream TEXT NOT NULL, format INTEGER NOT NULL, state BLOB NOT NULL, UNIQUE (cid, stream));
     \\CREATE TABLE IF NOT EXISTS commander (cid INTEGER PRIMARY KEY, name TEXT NOT NULL, origin TEXT NOT NULL, profession TEXT NOT NULL);
-    \\CREATE TABLE IF NOT EXISTS person (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, first TEXT, last TEXT, callsign TEXT, role TEXT, xp INTEGER, status TEXT, fatigue INTEGER, morale INTEGER, recruited_day INTEGER, salary_override INTEGER, assigned_force INTEGER, posted_hq INTEGER, weekly_hours INTEGER, medbay_priority INTEGER, leave_until INTEGER, wound_heal_day INTEGER, training_skill TEXT, training_done INTEGER, admitted INTEGER NOT NULL DEFAULT 0, rank TEXT NOT NULL DEFAULT 'private', rank_pinned INTEGER NOT NULL DEFAULT 0, kills INTEGER NOT NULL DEFAULT 0, kill_bv INTEGER NOT NULL DEFAULT 0, battles INTEGER NOT NULL DEFAULT 0, tours INTEGER NOT NULL DEFAULT 0, outstanding_tours INTEGER NOT NULL DEFAULT 0, edge_spent INTEGER NOT NULL DEFAULT 0, faction TEXT NOT NULL DEFAULT '', shares INTEGER NOT NULL DEFAULT 0, born_day INTEGER, last_raise_day INTEGER, last_award_day INTEGER, departed_day INTEGER, PRIMARY KEY (cid, id));
+    \\CREATE TABLE IF NOT EXISTS person (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, first TEXT, last TEXT, callsign TEXT, role TEXT, xp INTEGER, status TEXT, fatigue INTEGER, morale INTEGER, recruited_day INTEGER, salary_override INTEGER, assigned_force INTEGER, posted_hq INTEGER, weekly_hours INTEGER, medbay_priority INTEGER, leave_until INTEGER, wound_heal_day INTEGER, training_skill TEXT, training_done INTEGER, admitted INTEGER NOT NULL DEFAULT 0, rank TEXT NOT NULL DEFAULT 'private', rank_pinned INTEGER NOT NULL DEFAULT 0, kills INTEGER NOT NULL DEFAULT 0, kill_bv INTEGER NOT NULL DEFAULT 0, battles INTEGER NOT NULL DEFAULT 0, tours INTEGER NOT NULL DEFAULT 0, outstanding_tours INTEGER NOT NULL DEFAULT 0, edge_spent INTEGER NOT NULL DEFAULT 0, faction TEXT NOT NULL DEFAULT '', shares INTEGER NOT NULL DEFAULT 0, born_day INTEGER, last_raise_day INTEGER, last_award_day INTEGER, departed_day INTEGER, secondary_role TEXT, PRIMARY KEY (cid, id));
     \\CREATE TABLE IF NOT EXISTS award (cid INTEGER NOT NULL, person_id INTEGER NOT NULL, key TEXT NOT NULL);
     \\CREATE TABLE IF NOT EXISTS ability (cid INTEGER NOT NULL, person_id INTEGER NOT NULL, key TEXT NOT NULL);
     \\CREATE TABLE IF NOT EXISTS person_skill (cid INTEGER NOT NULL, person_id INTEGER NOT NULL, skill TEXT NOT NULL, level INTEGER NOT NULL);
@@ -174,6 +174,9 @@ pub const Store = struct {
         // v26: the inbox is answered by event id, not by row; `load` stamps
         // ids on rows that default to 0.
         .{ .version = 26, .table = "pending_event", .column = "id", .sql = "ALTER TABLE pending_event ADD COLUMN id INTEGER NOT NULL DEFAULT 0" },
+        // v36: Person.secondary_role is now persisted; NULL on pre-v36 rows
+        // means no secondary role was set (correct default).
+        .{ .version = 36, .table = "person", .column = "secondary_role", .sql = "ALTER TABLE person ADD COLUMN secondary_role TEXT" },
     };
 
     pub fn open(path: [*:0]const u8) !Store {
@@ -427,23 +430,25 @@ pub const Store = struct {
     // Scalars.
     fn saveMeta(self: Store, gs: *GameState, cid: i64) !void {
         const difficulty_int: i64 = @intFromEnum(gs.difficulty);
+        // A u64 enemy-BV counter that exceeds i64 is a corrupt save on write.
+        const enemy_bv_i64: i64 = std.math.cast(i64, gs.stats.enemy_bv_destroyed) orelse return error.SqliteError;
         const st = try self.db.prepare("INSERT INTO meta VALUES (?1, ?2, ?3)");
         defer st.finalize();
         const ints = [_]struct { []const u8, i64 }{
-            .{ "day_index", gs.clock.day_index },                                  .{ "year", gs.clock.date.year },
-            .{ "month", gs.clock.date.month },                                     .{ "day", gs.clock.date.day },
-            .{ "funds", gs.funds },                                                .{ "reputation", gs.reputation },
-            .{ "bankrupt", @as(i64, @intFromBool(gs.bankrupt)) },                  .{ "auto_admit", @as(i64, @intFromBool(gs.auto_admit)) },
-            .{ "difficulty", difficulty_int },                                     .{ "share_profit_bp", @as(i64, gs.share_profit_bp) },
-            .{ "stat_battles_won", gs.stats.battles_won },                         .{ "stat_battles_drawn", gs.stats.battles_drawn },
-            .{ "stat_battles_lost", gs.stats.battles_lost },                       .{ "stat_hulls_lost", gs.stats.hulls_lost },
-            .{ "stat_hulls_salvaged", gs.stats.hulls_salvaged },                   .{ "stat_people_kia", gs.stats.people_kia },
-            .{ "stat_enemy_bv", @as(i64, @intCast(gs.stats.enemy_bv_destroyed)) }, .{ "next_person_id", gs.next_person_id },
-            .{ "next_unit_id", gs.next_unit_id },                                  .{ "next_force_id", gs.next_force_id },
-            .{ "next_hq_id", gs.next_hq_id },                                      .{ "next_contract_id", gs.next_contract_id },
-            .{ "next_battle_id", gs.next_battle_id },                              .{ "rng_seed", @as(i64, @bitCast(gs.rng.seed)) },
-            .{ "next_event_id", gs.event_queue.next_id },                          .{ "next_listing_id", gs.next_listing_id },
-            .{ "next_candidate_id", gs.next_candidate_id },                        .{ "next_loan_id", gs.next_loan_id },
+            .{ "day_index", gs.clock.day_index },                 .{ "year", gs.clock.date.year },
+            .{ "month", gs.clock.date.month },                    .{ "day", gs.clock.date.day },
+            .{ "funds", gs.funds },                               .{ "reputation", gs.reputation },
+            .{ "bankrupt", @as(i64, @intFromBool(gs.bankrupt)) }, .{ "auto_admit", @as(i64, @intFromBool(gs.auto_admit)) },
+            .{ "difficulty", difficulty_int },                    .{ "share_profit_bp", @as(i64, gs.share_profit_bp) },
+            .{ "stat_battles_won", gs.stats.battles_won },        .{ "stat_battles_drawn", gs.stats.battles_drawn },
+            .{ "stat_battles_lost", gs.stats.battles_lost },      .{ "stat_hulls_lost", gs.stats.hulls_lost },
+            .{ "stat_hulls_salvaged", gs.stats.hulls_salvaged },  .{ "stat_people_kia", gs.stats.people_kia },
+            .{ "stat_enemy_bv", enemy_bv_i64 },                   .{ "next_person_id", gs.next_person_id },
+            .{ "next_unit_id", gs.next_unit_id },                 .{ "next_force_id", gs.next_force_id },
+            .{ "next_hq_id", gs.next_hq_id },                     .{ "next_contract_id", gs.next_contract_id },
+            .{ "next_battle_id", gs.next_battle_id },             .{ "rng_seed", @as(i64, @bitCast(gs.rng.seed)) },
+            .{ "next_event_id", gs.event_queue.next_id },         .{ "next_listing_id", gs.next_listing_id },
+            .{ "next_candidate_id", gs.next_candidate_id },       .{ "next_loan_id", gs.next_loan_id },
         };
         for (ints) |kv| {
             try st.bindAll(.{ cid, kv[0], kv[1] });
@@ -477,7 +482,7 @@ pub const Store = struct {
 
     // People.
     fn savePerson(self: Store, gs: *GameState, cid: i64) !void {
-        const st = try self.db.prepare("INSERT INTO person VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33,?34,?35,?36)");
+        const st = try self.db.prepare("INSERT INTO person VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33,?34,?35,?36,?37)");
         const aw = try self.db.prepare("INSERT INTO award VALUES (?1,?2,?3)");
         defer aw.finalize();
         const ab = try self.db.prepare("INSERT INTO ability VALUES (?1,?2,?3)");
@@ -504,6 +509,7 @@ pub const Store = struct {
                 @as(i64, p.tours),                         @as(i64, p.outstanding_tours),                                     @as(i64, @intFromBool(p.edge_spent)),
                 p.faction,                                 @as(i64, p.shares),                                                p.born_day,
                 p.last_raise_day,                          p.last_award_day,                                                  p.departed_day,
+                p.secondary_role,
             });
             for (p.awards.items) |key| {
                 try aw.bindAll(.{ cid, @intFromEnum(p.id), key });
@@ -1006,18 +1012,24 @@ pub const Store = struct {
         try self.loadListing(&gs, cid);
         try self.loadPartOrder(&gs, cid);
         try self.loadEventLog(&gs, cid);
-        try self.loadPendingEvent(&gs, cid);
+        try self.loadPendingEvent(&gs, cid, saved_version);
         try self.loadBattleReport(&gs, cid);
         try self.loadRefitPlan(&gs, cid);
 
         hq_ops.refreshHqStaffing(&gs);
         try upgradeCampaign(&gs, saved_version);
         // Saves before schema v18 have no stats counters: if the book is
-        // empty but the log has battles, count them up.
-        if (gs.stats.isEmpty()) recoverStatsFromLog(&gs);
+        // empty but the log has battles, count them up. Gated on version so
+        // a legitimately stats-empty current save is not re-derived from log
+        // text (rule 51, C7c).
+        if (saved_version < 18 and gs.stats.isEmpty()) recoverStatsFromLog(&gs);
         // Saves without a `next_battle_id` row still hold reports, held hulls
         // and decisions that name battles; numbering resumes past all of them.
         gs.resumeBattleIds();
+        // Validate all cross-entity references and reconcile counters before
+        // string validation (rules 47, 48).
+        try validateReferences(&gs);
+        try reconcileCounters(&gs);
         try validateStoredStrings(&gs);
         return gs;
     }
@@ -1034,24 +1046,56 @@ pub const Store = struct {
     }
 
     /// The campaign scalars; true when the save holds its RNG seed.
+    /// Required meta keys must all be present; a missing one is corrupt
+    /// (rule 47). The date is validated after reading so a month-13 row
+    /// is rejected before it reaches the `unreachable` in `daysInMonth`.
     fn loadMeta(self: Store, gs: *GameState, cid: i64) !bool {
         const alloc = gs.allocator();
         var has_seed = false;
+        // Required meta keys: a save missing any of these is a corrupt save.
+        var saw_day_index = false;
+        var saw_year = false;
+        var saw_month = false;
+        var saw_day_field = false;
+        var saw_funds = false;
+        var saw_reputation = false;
+        var saw_difficulty = false;
         const st = try self.db.prepare("SELECT key, value FROM meta WHERE cid = ?1");
         defer st.finalize();
         try st.bindAll(.{cid});
         while (try st.next()) {
             const key = try st.text(0, alloc);
             const v = st.int(1);
-            if (std.mem.eql(u8, key, "day_index")) gs.clock.day_index = try fit(@TypeOf(gs.clock.day_index), v);
-            if (std.mem.eql(u8, key, "year")) gs.clock.date.year = try fit(@TypeOf(gs.clock.date.year), v);
-            if (std.mem.eql(u8, key, "month")) gs.clock.date.month = try fit(@TypeOf(gs.clock.date.month), v);
-            if (std.mem.eql(u8, key, "day")) gs.clock.date.day = try fit(@TypeOf(gs.clock.date.day), v);
-            if (std.mem.eql(u8, key, "funds")) gs.funds = v;
-            if (std.mem.eql(u8, key, "reputation")) gs.reputation = try fit(@TypeOf(gs.reputation), v);
+            if (std.mem.eql(u8, key, "day_index")) {
+                gs.clock.day_index = try fit(@TypeOf(gs.clock.day_index), v);
+                saw_day_index = true;
+            }
+            if (std.mem.eql(u8, key, "year")) {
+                gs.clock.date.year = try fit(@TypeOf(gs.clock.date.year), v);
+                saw_year = true;
+            }
+            if (std.mem.eql(u8, key, "month")) {
+                gs.clock.date.month = try fit(@TypeOf(gs.clock.date.month), v);
+                saw_month = true;
+            }
+            if (std.mem.eql(u8, key, "day")) {
+                gs.clock.date.day = try fit(@TypeOf(gs.clock.date.day), v);
+                saw_day_field = true;
+            }
+            if (std.mem.eql(u8, key, "funds")) {
+                gs.funds = v;
+                saw_funds = true;
+            }
+            if (std.mem.eql(u8, key, "reputation")) {
+                gs.reputation = try fit(@TypeOf(gs.reputation), v);
+                saw_reputation = true;
+            }
             if (std.mem.eql(u8, key, "bankrupt")) gs.bankrupt = v != 0;
             if (std.mem.eql(u8, key, "auto_admit")) gs.auto_admit = v != 0;
-            if (std.mem.eql(u8, key, "difficulty")) gs.difficulty = std.enums.fromInt(@TypeOf(gs.difficulty), v) orelse return error.CorruptSave;
+            if (std.mem.eql(u8, key, "difficulty")) {
+                gs.difficulty = std.enums.fromInt(@TypeOf(gs.difficulty), v) orelse return error.CorruptSave;
+                saw_difficulty = true;
+            }
             if (std.mem.eql(u8, key, "share_profit_bp")) gs.share_profit_bp = try fit(@TypeOf(gs.share_profit_bp), v);
             if (std.mem.eql(u8, key, "stat_battles_won")) gs.stats.battles_won = try fit(@TypeOf(gs.stats.battles_won), v);
             if (std.mem.eql(u8, key, "stat_battles_drawn")) gs.stats.battles_drawn = try fit(@TypeOf(gs.stats.battles_drawn), v);
@@ -1075,13 +1119,23 @@ pub const Store = struct {
                 has_seed = true;
             }
         }
+        // All seven required meta-int keys must be present.
+        if (!saw_day_index or !saw_year or !saw_month or !saw_day_field or
+            !saw_funds or !saw_reputation or !saw_difficulty) return error.CorruptSave;
+        // Validate the calendar values before any code path reaches daysInMonth.
+        if (!gs.clock.date.valid()) return error.CorruptSave;
+        var saw_outfit_name = false;
         const tx = try self.db.prepare("SELECT key, value FROM meta_text WHERE cid = ?1");
         defer tx.finalize();
         try tx.bindAll(.{cid});
         while (try tx.next()) {
             const key = try tx.text(0, alloc);
-            if (std.mem.eql(u8, key, "outfit_name")) gs.outfit_name = try tx.text(1, alloc);
+            if (std.mem.eql(u8, key, "outfit_name")) {
+                gs.outfit_name = try tx.text(1, alloc);
+                saw_outfit_name = true;
+            }
         }
+        if (!saw_outfit_name) return error.CorruptSave;
         return has_seed;
     }
 
@@ -1102,7 +1156,7 @@ pub const Store = struct {
     // People.
     fn loadPerson(self: Store, gs: *GameState, cid: i64) !void {
         const alloc = gs.allocator();
-        const st = try self.db.prepare("SELECT id, first, last, callsign, role, xp, status, fatigue, morale, recruited_day, salary_override, assigned_force, posted_hq, weekly_hours, medbay_priority, leave_until, wound_heal_day, training_skill, training_done, admitted, rank, rank_pinned, kills, kill_bv, battles, tours, outstanding_tours, edge_spent, faction, shares, born_day, last_raise_day, last_award_day, departed_day FROM person WHERE cid = ?1 ORDER BY ord");
+        const st = try self.db.prepare("SELECT id, first, last, callsign, role, xp, status, fatigue, morale, recruited_day, salary_override, assigned_force, posted_hq, weekly_hours, medbay_priority, leave_until, wound_heal_day, training_skill, training_done, admitted, rank, rank_pinned, kills, kill_bv, battles, tours, outstanding_tours, edge_spent, faction, shares, born_day, last_raise_day, last_award_day, departed_day, secondary_role FROM person WHERE cid = ?1 ORDER BY ord");
         defer st.finalize();
         try st.bindAll(.{cid});
         while (try st.next()) {
@@ -1139,13 +1193,16 @@ pub const Store = struct {
                 .last_raise_day = try optU32(st.optInt(31)),
                 .last_award_day = try optU32(st.optInt(32)),
                 .departed_day = try optU32(st.optInt(33)),
+                .secondary_role = try st.optEnum(person_mod.Role, 34),
             };
-            if (st.enumValue(types.SkillType, 17)) |skill| {
+            if (try st.optEnum(types.SkillType, 17)) |skill| {
                 if (st.optInt(18)) |done| p.training = .{ .skill = skill, .done_day = try fit(u32, done) };
             }
-            try gs.people.put(alloc, p.id, p);
+            const gop_p = try gs.people.getOrPut(alloc, p.id);
+            if (gop_p.found_existing) return error.CorruptSave;
+            gop_p.value_ptr.* = p;
         }
-        const sk = try self.db.prepare("SELECT person_id, skill, level FROM person_skill WHERE cid = ?1");
+        const sk = try self.db.prepare("SELECT person_id, skill, level FROM person_skill WHERE cid = ?1 ORDER BY person_id, rowid");
         defer sk.finalize();
         try sk.bindAll(.{cid});
         while (try sk.next()) {
@@ -1153,14 +1210,14 @@ pub const Store = struct {
             const skill = sk.enumValue(types.SkillType, 1) orelse return error.CorruptSave;
             try p.skills.put(alloc, skill, try sk.intAs(u8, 2));
         }
-        const aw = try self.db.prepare("SELECT person_id, key FROM award WHERE cid = ?1");
+        const aw = try self.db.prepare("SELECT person_id, key FROM award WHERE cid = ?1 ORDER BY person_id, rowid");
         defer aw.finalize();
         try aw.bindAll(.{cid});
         while (try aw.next()) {
             const p = gs.people.getPtr(try toId(types.PersonId, aw.int(0))) orelse return error.CorruptSave;
             try p.awards.append(alloc, try aw.text(1, alloc));
         }
-        const ab = try self.db.prepare("SELECT person_id, key FROM ability WHERE cid = ?1");
+        const ab = try self.db.prepare("SELECT person_id, key FROM ability WHERE cid = ?1 ORDER BY person_id, rowid");
         defer ab.finalize();
         try ab.bindAll(.{cid});
         while (try ab.next()) {
@@ -1230,9 +1287,9 @@ pub const Store = struct {
         try sl.bindAll(.{cid});
         while (try sl.next()) {
             const uid = try toId(types.UnitId, sl.int(0));
-            const u = gs.units.getPtr(uid) orelse held: {
-                for (gs.held_hulls.items) |*h| if (h.unit.id == uid) break :held &h.unit;
-                continue;
+            const u = gs.units.getPtr(uid) orelse blk: {
+                for (gs.held_hulls.items) |*h| if (h.unit.id == uid) break :blk &h.unit;
+                return error.CorruptSave; // orphan unit_slot: no unit or held hull owns it
             };
             try u.slots.append(alloc, .{
                 .slot_key = try sl.text(1, alloc),
@@ -1260,7 +1317,7 @@ pub const Store = struct {
                 .commander = try toId(types.PersonId, st.int(6)),
                 .supplying_hq = try toId(types.HqId, st.int(7)),
                 .role = st.enumValue(force_mod.LanceRole, 8) orelse return error.CorruptSave,
-                .support_kind = st.enumValue(force_mod.SupportLanceKind, 9),
+                .support_kind = try st.optEnum(force_mod.SupportLanceKind, 9),
                 .last_rotation_day = try optU32(st.optInt(10)),
                 .contracts_since_rotation = try st.intAs(u16, 11),
                 .location_planet = try st.optText(12, alloc),
@@ -1268,7 +1325,9 @@ pub const Store = struct {
                 .supply_shortage_days = try st.intAs(u16, 14),
                 .roe = st.enumValue(force_mod.Roe, 15) orelse return error.CorruptSave,
             };
-            try gs.forces.put(alloc, f.id, f);
+            const gop_f = try gs.forces.getOrPut(alloc, f.id);
+            if (gop_f.found_existing) return error.CorruptSave;
+            gop_f.value_ptr.* = f;
         }
         const fu = try self.db.prepare("SELECT force_id, unit_id FROM force_unit WHERE cid = ?1 ORDER BY force_id, ord");
         defer fu.finalize();
@@ -1302,7 +1361,9 @@ pub const Store = struct {
                 .monthly_upkeep = st.int(5),
                 .funds = st.int(6),
             };
-            try gs.hqs.put(alloc, h.id, h);
+            const gop_h = try gs.hqs.getOrPut(alloc, h.id);
+            if (gop_h.found_existing) return error.CorruptSave;
+            gop_h.value_ptr.* = h;
         }
         const fa = try self.db.prepare("SELECT hq_id, kind, level FROM hq_facility WHERE cid = ?1 ORDER BY hq_id, ord");
         defer fa.finalize();
@@ -1318,7 +1379,7 @@ pub const Store = struct {
             const h = gs.hqs.getPtr(try toId(types.HqId, pr.int(0))) orelse return error.CorruptSave;
             try h.projects.append(alloc, .{
                 .kind = pr.enumValue(hq_mod.ProjectKind, 1) orelse return error.CorruptSave,
-                .facility = pr.enumValue(hq_mod.FacilityKind, 2),
+                .facility = try pr.optEnum(hq_mod.FacilityKind, 2),
                 .target_level = try pr.intAs(u8, 3),
                 .started_day = try pr.intAs(u32, 4),
                 .paperwork_done_day = try pr.intAs(u32, 5),
@@ -1337,7 +1398,12 @@ pub const Store = struct {
         while (try st.next()) {
             const kind = try st.text(0, alloc);
             const site = try siteFromCols(kind, st.int(1));
-            try gs.addStock(site, try st.text(2, alloc), try st.intAs(u32, 3));
+            gs.addStock(site, try st.text(2, alloc), try st.intAs(u32, 3)) catch |err| return switch (err) {
+                // An orphan stock row (site not in gs.hqs/gs.forces) or a
+                // sum that overflows u32 are both corruption (rule 47).
+                error.UnknownSite, error.StockOverflow => error.CorruptSave,
+                else => err,
+            };
         }
     }
 
@@ -1394,7 +1460,13 @@ pub const Store = struct {
                     .command_rights = st.enumValue(contract_mod.CommandRights, 35) orelse return error.CorruptSave,
                 },
             };
-            if (st.int(0) != 0) try gs.contract_offers.append(alloc, c) else try gs.contracts.put(alloc, c.id, c);
+            if (st.int(0) != 0) {
+                try gs.contract_offers.append(alloc, c);
+            } else {
+                const gop_c = try gs.contracts.getOrPut(alloc, c.id);
+                if (gop_c.found_existing) return error.CorruptSave;
+                gop_c.value_ptr.* = c;
+            }
         }
     }
 
@@ -1580,22 +1652,30 @@ pub const Store = struct {
 
     fn loadFactionStanding(self: Store, gs: *GameState, cid: i64) !void {
         const alloc = gs.allocator();
-        const st = try self.db.prepare("SELECT faction, value FROM faction_standing WHERE cid = ?1");
+        // ORDER BY rowid preserves save-insert order so the array hash map
+        // iteration order is deterministic; digest.zig hashes it in that order.
+        const st = try self.db.prepare("SELECT faction, value FROM faction_standing WHERE cid = ?1 ORDER BY rowid");
         defer st.finalize();
         try st.bindAll(.{cid});
         while (try st.next()) {
-            try gs.faction_standing.put(alloc, try st.text(0, alloc), try st.intAs(i32, 1));
+            const faction = try st.text(0, alloc);
+            const gop = try gs.faction_standing.getOrPut(alloc, faction);
+            if (gop.found_existing) return error.CorruptSave;
+            gop.value_ptr.* = try st.intAs(i32, 1);
         }
     }
 
     fn loadEventMemory(self: Store, gs: *GameState, cid: i64) !void {
         const alloc = gs.allocator();
-        const st = try self.db.prepare("SELECT kind, last_day, last_choice, streak FROM event_memory WHERE cid = ?1");
+        // ORDER BY rowid preserves save-insert order for deterministic digest.
+        const st = try self.db.prepare("SELECT kind, last_day, last_choice, streak FROM event_memory WHERE cid = ?1 ORDER BY rowid");
         defer st.finalize();
         try st.bindAll(.{cid});
         while (try st.next()) {
             const kind = st.enumValue(events_mod.EventKind, 0) orelse return error.CorruptSave;
-            try gs.event_memory.put(alloc, kind, .{ .last_day = try st.intAs(u32, 1), .last_choice = try st.intAs(u8, 2), .streak = try st.intAs(u8, 3) });
+            const gop = try gs.event_memory.getOrPut(alloc, kind);
+            if (gop.found_existing) return error.CorruptSave;
+            gop.value_ptr.* = .{ .last_day = try st.intAs(u32, 1), .last_choice = try st.intAs(u8, 2), .streak = try st.intAs(u8, 3) };
         }
     }
 
@@ -1625,8 +1705,9 @@ pub const Store = struct {
                 gs.next_listing_id += 1;
                 break :blk bid;
             };
+            const kind_text = try st.text(0, alloc);
             var l: market_mod.Listing = .{
-                .kind = if (std.mem.eql(u8, try st.text(0, alloc), "unit")) .unit else .part,
+                .kind = if (std.mem.eql(u8, kind_text, "unit")) .unit else if (std.mem.eql(u8, kind_text, "part")) .part else return error.CorruptSave,
                 .item_key = try st.text(1, alloc),
                 .rarity = st.enumValue(types.Rarity, 2) orelse return error.CorruptSave,
                 .price = st.int(3),
@@ -1689,7 +1770,7 @@ pub const Store = struct {
         }
     }
 
-    fn loadPendingEvent(self: Store, gs: *GameState, cid: i64) !void {
+    fn loadPendingEvent(self: Store, gs: *GameState, cid: i64, saved_version: u32) !void {
         const alloc = gs.allocator();
         const st = try self.db.prepare("SELECT kind, day, contract, company, default_choice, deadline, chosen, person, id, battle FROM pending_event WHERE cid = ?1 ORDER BY ord");
         defer st.finalize();
@@ -1697,25 +1778,35 @@ pub const Store = struct {
         while (try st.next()) {
             const kind = st.enumValue(events_mod.EventKind, 0) orelse return error.CorruptSave;
             const entry = contract_events.entryForKind(kind) orelse return error.CorruptSave;
+            const default_choice = try st.intAs(usize, 4);
+            if (default_choice >= entry.options.len) return error.CorruptSave; // out-of-range choice
+            const chosen: ?usize = if (st.optInt(6)) |c| blk: {
+                const ci = try fit(usize, c);
+                if (ci >= entry.options.len) return error.CorruptSave;
+                break :blk ci;
+            } else null;
             try gs.event_queue.pending.append(alloc, .{
                 .day = try st.intAs(u32, 1),
                 .kind = kind,
                 .contract = try toId(types.ContractId, st.int(2)),
                 .company = try toId(types.ForceId, st.int(3)),
                 .options = entry.options,
-                .default_choice = try st.intAs(usize, 4),
+                .default_choice = default_choice,
                 .deadline_day = try st.intAs(u32, 5),
-                .chosen = if (st.optInt(6)) |c| try fit(usize, c) else null,
+                .chosen = chosen,
                 .person = try toId(types.PersonId, st.int(7)),
                 .id = try toId(types.EventId, st.int(8)),
                 .battle = try toId(types.BattleId, st.int(9)),
             });
         }
-        // A save before schema v26 has every id defaulted to 0; stamp them
-        // in load order so the inbox is addressable, then resume past the
-        // highest (the queue owns the numbering, `events.EventQueue`).
-        for (gs.event_queue.pending.items, 0..) |*ev, i| {
-            if (ev.id == .none) ev.id = @enumFromInt(i + 1);
+        // Saves before schema v26 have every id defaulted to 0; stamp them
+        // in load order so the inbox is addressable. Current-version saves
+        // already hold real ids; this gate ensures no RNG or state growth
+        // occurs on a current-version load (rule 51, C7c).
+        if (saved_version < 26) {
+            for (gs.event_queue.pending.items, 0..) |*ev, i| {
+                if (ev.id == .none) ev.id = @enumFromInt(i + 1);
+            }
         }
         gs.event_queue.resumeIds();
     }
@@ -1878,7 +1969,7 @@ pub const Store = struct {
         try op.bindAll(.{cid});
         while (try op.next()) {
             const idx: usize = try op.intAs(usize, 0);
-            if (idx >= gs.refit_plans.items.len) continue;
+            if (idx >= gs.refit_plans.items.len) return error.CorruptSave; // orphan refit_op
             const kind = try op.text(1, alloc);
             if (std.mem.eql(u8, kind, "remove")) {
                 try gs.refit_plans.items[idx].ops.append(alloc, .{ .remove = try op.text(2, alloc) });
@@ -2068,6 +2159,171 @@ fn validateStoredStrings(gs: *GameState) error{CorruptSave}!void {
     }
 }
 
+/// Validate cross-entity references: every non-`.none` id that names a
+/// live entity must resolve; a dangling reference is corruption (rule 47).
+fn validateReferences(gs: *GameState) error{CorruptSave}!void {
+    // Helper: a non-none typed id must name a live entity in `map`.
+    const Ref = struct {
+        fn inMap(comptime Id: type, id: Id, map: anytype) error{CorruptSave}!void {
+            if (id == .none) return;
+            if (map.getPtr(id) == null) return error.CorruptSave;
+        }
+        fn unitExists(id: types.UnitId, gsp: *const GameState) error{CorruptSave}!void {
+            if (id == .none) return;
+            if (gsp.units.getPtr(id) != null) return;
+            for (gsp.held_hulls.items) |*h| if (h.unit.id == id) return;
+            return error.CorruptSave;
+        }
+    };
+    // Units
+    var uit = gs.units.iterator();
+    while (uit.next()) |e| {
+        const u = e.value_ptr;
+        try Ref.inMap(types.ForceId, u.force, gs.forces);
+        try Ref.inMap(types.PersonId, u.pilot, gs.people);
+        try Ref.inMap(types.PersonId, u.tech, gs.people);
+        try Ref.inMap(types.HqId, u.berth_hq, gs.hqs);
+    }
+    // Forces
+    var fit_it = gs.forces.iterator();
+    while (fit_it.next()) |e| {
+        const f = e.value_ptr;
+        try Ref.inMap(types.ForceId, f.parent, gs.forces);
+        try Ref.inMap(types.PersonId, f.commander, gs.people);
+        try Ref.inMap(types.HqId, f.supplying_hq, gs.hqs);
+        // Each unit/child reference in the list must resolve.
+        for (f.units.items) |uid| try Ref.unitExists(uid, gs);
+        for (f.children.items) |cid| try Ref.inMap(types.ForceId, cid, gs.forces);
+    }
+    // People
+    var pit = gs.people.iterator();
+    while (pit.next()) |e| {
+        const p = e.value_ptr;
+        try Ref.inMap(types.ForceId, p.assigned_force, gs.forces);
+        try Ref.inMap(types.HqId, p.posted_hq, gs.hqs);
+    }
+    // Contracts
+    for ([_][]const contract_mod.Contract{ gs.contracts.values(), gs.contract_offers.items }) |list| {
+        for (list) |c| {
+            try Ref.inMap(types.ForceId, c.assigned_company, gs.forces);
+            try Ref.inMap(types.HqId, c.offer_hq, gs.hqs);
+        }
+    }
+    // Bay jobs
+    for (gs.bay_jobs.items) |j| {
+        try Ref.inMap(types.HqId, j.hq, gs.hqs);
+        try Ref.unitExists(j.unit, gs);
+    }
+    // Pending events
+    for (gs.event_queue.pending.items) |ev| {
+        try Ref.inMap(types.ContractId, ev.contract, gs.contracts);
+        try Ref.inMap(types.ForceId, ev.company, gs.forces);
+        try Ref.inMap(types.PersonId, ev.person, gs.people);
+    }
+    // Held hulls
+    for (gs.held_hulls.items) |h| {
+        try Ref.inMap(types.ForceId, h.from_force, gs.forces);
+    }
+    // Ledger transactions
+    for (gs.ledger.transactions.items) |t| {
+        try Ref.inMap(types.ForceId, t.company, gs.forces);
+        try Ref.inMap(types.HqId, t.hq, gs.hqs);
+        try Ref.inMap(types.ContractId, t.contract, gs.contracts);
+    }
+    // HQ links
+    for (gs.hq_links.items) |l| {
+        try Ref.inMap(types.HqId, l.a, gs.hqs);
+        try Ref.inMap(types.HqId, l.b, gs.hqs);
+    }
+    // Unit transfers
+    for (gs.unit_transfers.items) |ut| {
+        try Ref.unitExists(ut.unit, gs);
+        try Ref.inMap(types.ForceId, ut.to_company, gs.forces);
+    }
+    // Supply and stock policies
+    for (gs.supply_policies.items) |sp| try Ref.inMap(types.ForceId, sp.company, gs.forces);
+    for (gs.stock_policies.items) |sp| try Ref.inMap(types.HqId, sp.hq, gs.hqs);
+    // Fund couriers and standing policies
+    for (gs.fund_couriers.items) |c| switch (c.to) {
+        .outfit => {},
+        .hq => |id| try Ref.inMap(types.HqId, id, gs.hqs),
+        .company => |id| try Ref.inMap(types.ForceId, id, gs.forces),
+    };
+    for (gs.policies.items) |p| switch (p.entity) {
+        .outfit => {},
+        .hq => |id| try Ref.inMap(types.HqId, id, gs.hqs),
+        .company => |id| try Ref.inMap(types.ForceId, id, gs.forces),
+    };
+}
+
+/// Ensure every entity counter exceeds the maximum owned id; detect
+/// impossible-maxima that would overflow on the next allocation (rule 48).
+fn reconcileCounters(gs: *GameState) error{CorruptSave}!void {
+    const max_u32 = std.math.maxInt(u32);
+    // Helper: find max id in a map and ensure counter > max.
+    // next_*_id stays at least 1, so the first allocation is always fresh.
+    {
+        var max: u32 = 0;
+        var it = gs.people.iterator();
+        while (it.next()) |e| max = @max(max, @intFromEnum(e.key_ptr.*));
+        if (max == max_u32) return error.CorruptSave;
+        gs.next_person_id = @max(gs.next_person_id, max + 1);
+    }
+    {
+        var max: u32 = 0;
+        var it = gs.units.iterator();
+        while (it.next()) |e| max = @max(max, @intFromEnum(e.key_ptr.*));
+        for (gs.held_hulls.items) |h| max = @max(max, @intFromEnum(h.unit.id));
+        if (max == max_u32) return error.CorruptSave;
+        gs.next_unit_id = @max(gs.next_unit_id, max + 1);
+    }
+    {
+        var max: u32 = 0;
+        var it = gs.forces.iterator();
+        while (it.next()) |e| max = @max(max, @intFromEnum(e.key_ptr.*));
+        if (max == max_u32) return error.CorruptSave;
+        gs.next_force_id = @max(gs.next_force_id, max + 1);
+    }
+    {
+        var max: u32 = 0;
+        var it = gs.hqs.iterator();
+        while (it.next()) |e| max = @max(max, @intFromEnum(e.key_ptr.*));
+        if (max == max_u32) return error.CorruptSave;
+        gs.next_hq_id = @max(gs.next_hq_id, max + 1);
+    }
+    {
+        var max: u32 = 0;
+        var it = gs.contracts.iterator();
+        while (it.next()) |e| max = @max(max, @intFromEnum(e.key_ptr.*));
+        for (gs.contract_offers.items) |c| max = @max(max, @intFromEnum(c.id));
+        if (max == max_u32) return error.CorruptSave;
+        gs.next_contract_id = @max(gs.next_contract_id, max + 1);
+    }
+    // Battle and event counters: resumeBattleIds/resumeIds saturate at maxInt
+    // when an entity holds the maximum id — detect that here (rule 48).
+    if (gs.next_battle_id == max_u32) return error.CorruptSave;
+    if (gs.event_queue.next_id == max_u32) return error.CorruptSave;
+    // Listing, candidate and loan: backfilled in their loaders; check max.
+    {
+        var max: u32 = 0;
+        for (gs.market_listings.items) |l| max = @max(max, @intFromEnum(l.id));
+        if (max == max_u32) return error.CorruptSave;
+        gs.next_listing_id = @max(gs.next_listing_id, max + 1);
+    }
+    {
+        var max: u32 = 0;
+        for (gs.candidates.items) |c| max = @max(max, @intFromEnum(c.id));
+        if (max == max_u32) return error.CorruptSave;
+        gs.next_candidate_id = @max(gs.next_candidate_id, max + 1);
+    }
+    {
+        var max: u32 = 0;
+        for (gs.loans.items) |l| max = @max(max, @intFromEnum(l.id));
+        if (max == max_u32) return error.CorruptSave;
+        gs.next_loan_id = @max(gs.next_loan_id, max + 1);
+    }
+}
+
 /// A stored integer as `T`; `error.CorruptSave` when it does not fit.
 fn fit(comptime T: type, v: i64) error{CorruptSave}!T {
     return std.math.cast(T, v) orelse error.CorruptSave;
@@ -2131,6 +2387,9 @@ test "save → load → identical hash, and the loaded campaign keeps playing" {
     gs.people.getPtr(gs.people.keys()[2]).?.shares = 4;
     gs.people.getPtr(gs.people.keys()[2]).?.last_raise_day = 3; // raise cooldown
     gs.stats.battles_won = 7; // campaign stats
+    // secondary_role round-trip (C7c): a non-null secondary_role must survive.
+    gs.people.getPtr(gs.people.keys()[1]).?.secondary_role = .tech_mek;
+    const secondary_role_person = gs.people.keys()[1];
     try gs.rating_history.append(gs.allocator(), .{ .year = 3025, .score = 40 });
     _ = try commands.execute(&gs, .{ .advance_days = 40 }); // battles, events, deliveries, couriers
     _ = try gs.adjustStanding("LC", 12); // faction standing rides along
@@ -2216,6 +2475,10 @@ test "save → load → identical hash, and the loaded campaign keeps playing" {
     try std.testing.expect(loaded.stats.battles_won >= 7);
     try std.testing.expectEqual(@as(usize, 1), loaded.rating_history.items.len);
     try std.testing.expectEqual(@as(i32, 40), loaded.rating_history.items[0].score);
+    try std.testing.expectEqual(
+        @as(?person_mod.Role, .tech_mek),
+        loaded.people.getPtr(secondary_role_person).?.secondary_role,
+    );
 
     // Determinism survives the round trip: both worlds evolve identically.
     _ = try commands.execute(&gs, .{ .advance_days = 30 });
@@ -2309,10 +2572,18 @@ test "a v5 store upgrades in place — columns added, version stamped, wounds le
         \\CREATE TABLE unit (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, chassis_key TEXT, name TEXT, kind TEXT, force INTEGER, pilot INTEGER, tech INTEGER, armor_pct INTEGER, quality TEXT, status TEXT, last_maint INTEGER, acquired_day INTEGER, price INTEGER, reactivation_done INTEGER, PRIMARY KEY (cid, id));
         \\CREATE TABLE person (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, first TEXT, last TEXT, callsign TEXT, role TEXT, xp INTEGER, status TEXT, fatigue INTEGER, morale INTEGER, recruited_day INTEGER, salary_override INTEGER, assigned_force INTEGER, posted_hq INTEGER, weekly_hours INTEGER, medbay_priority INTEGER, leave_until INTEGER, wound_heal_day INTEGER, training_skill TEXT, training_done INTEGER, admitted INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (cid, id));
         \\CREATE TABLE meta (cid INTEGER NOT NULL, key TEXT NOT NULL, value INTEGER NOT NULL);
+        \\CREATE TABLE meta_text (cid INTEGER NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (cid, key));
         \\CREATE TABLE rng (cid INTEGER PRIMARY KEY, state BLOB NOT NULL);
         \\INSERT INTO rng VALUES (1, x'000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff');
         \\INSERT INTO campaign VALUES (1, 'Old Outfit', 'K', 12, '3025-01-13', 5, 1, 0);
         \\INSERT INTO meta VALUES (1, 'day_index', 12);
+        \\INSERT INTO meta VALUES (1, 'year', 3025);
+        \\INSERT INTO meta VALUES (1, 'month', 1);
+        \\INSERT INTO meta VALUES (1, 'day', 13);
+        \\INSERT INTO meta VALUES (1, 'funds', 0);
+        \\INSERT INTO meta VALUES (1, 'reputation', 0);
+        \\INSERT INTO meta VALUES (1, 'difficulty', 1);
+        \\INSERT INTO meta_text VALUES (1, 'outfit_name', 'Old Outfit');
         \\INSERT INTO unit VALUES (1, 0, 1, 'LCT-1V', NULL, 'mek', 0, 0, 0, 100, 'c', 'ready', NULL, 0, 1500000, NULL);
         \\INSERT INTO person VALUES (1, 0, 1, 'Lori', 'Kalmar', NULL, 'mekwarrior', 0, 'wounded', 0, 50, 0, NULL, 0, 0, 40, 0, NULL, 30, NULL, NULL, 1);
     );
@@ -2350,12 +2621,20 @@ test "a v34 store backfills listing, candidate and loan ids in ord order" {
         \\CREATE TABLE setting (key TEXT PRIMARY KEY, value INTEGER NOT NULL);
         \\CREATE TABLE campaign (id INTEGER PRIMARY KEY, name TEXT NOT NULL, commander TEXT, day INTEGER NOT NULL, date TEXT NOT NULL, schema_version INTEGER NOT NULL, save_seq INTEGER NOT NULL, player_id INTEGER NOT NULL DEFAULT 0);
         \\CREATE TABLE meta (cid INTEGER NOT NULL, key TEXT NOT NULL, value INTEGER NOT NULL, PRIMARY KEY (cid, key));
+        \\CREATE TABLE meta_text (cid INTEGER NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (cid, key));
         \\CREATE TABLE rng (cid INTEGER PRIMARY KEY, state BLOB NOT NULL);
         \\CREATE TABLE listing (cid INTEGER NOT NULL, ord INTEGER NOT NULL, kind TEXT, item_key TEXT, rarity TEXT, price INTEGER, qty INTEGER, staple INTEGER, listed INTEGER, expires INTEGER, hq INTEGER, c_armor INTEGER, c_quality TEXT, c_damaged INTEGER, c_destroyed INTEGER, c_missing INTEGER, black INTEGER NOT NULL DEFAULT 0, company INTEGER NOT NULL DEFAULT 0);
         \\CREATE TABLE candidate (cid INTEGER NOT NULL, ord INTEGER NOT NULL, hq INTEGER, first TEXT, last TEXT, callsign TEXT, role TEXT, experience TEXT, primary_skill INTEGER, secondary_skill INTEGER, bonus INTEGER, listed INTEGER, expires INTEGER, age INTEGER NOT NULL DEFAULT 30);
         \\CREATE TABLE loan (cid INTEGER NOT NULL, ord INTEGER NOT NULL, principal INTEGER, balance INTEGER, rate_bp INTEGER, term INTEGER, next_pay INTEGER, payment INTEGER);
         \\INSERT INTO campaign VALUES (1, 'Old Outfit', NULL, 0, '3025-01-01', 34, 1, 0);
         \\INSERT INTO meta VALUES (1, 'day_index', 0);
+        \\INSERT INTO meta VALUES (1, 'year', 3025);
+        \\INSERT INTO meta VALUES (1, 'month', 1);
+        \\INSERT INTO meta VALUES (1, 'day', 1);
+        \\INSERT INTO meta VALUES (1, 'funds', 0);
+        \\INSERT INTO meta VALUES (1, 'reputation', 0);
+        \\INSERT INTO meta VALUES (1, 'difficulty', 1);
+        \\INSERT INTO meta_text VALUES (1, 'outfit_name', 'Old Outfit');
         \\INSERT INTO rng VALUES (1, x'000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff');
         \\INSERT INTO listing VALUES (1, 0, 'part', 'armor',      'common', 10000, 5,  0, 0, 400, 0, NULL, NULL, NULL, NULL, NULL, 0, 0);
         \\INSERT INTO listing VALUES (1, 1, 'part', 'provisions', 'common',  2000, 10, 0, 0, 400, 0, NULL, NULL, NULL, NULL, NULL, 0, 0);
@@ -2668,6 +2947,268 @@ test "an RNG row naming no known stream rejects the load as corrupt" {
 
 test "a malformed legacy RNG blob rejects the load as corrupt" {
     try std.testing.expectError(error.CorruptSave, loadAfterTampering("DELETE FROM rng_stream; INSERT INTO rng VALUES (1, x'00')"));
+}
+
+// C7a: orphan rows, dangling references, discriminator validation, NULL, duplicate, date, meta.
+
+test "an orphan unit_slot row rejects the load" {
+    // unit_slot.unit_id names a unit that does not exist (rule 47).
+    try std.testing.expectError(error.CorruptSave, loadAfterTampering("UPDATE unit_slot SET unit_id = 99999 WHERE rowid = (SELECT rowid FROM unit_slot LIMIT 1)"));
+}
+
+test "dangling cross-entity references reject the load" {
+    // Each tamper sets one cross-entity link to a non-existent live id (rule 47).
+    // force_unit: a force's unit list names a unit that is not in gs.units.
+    try std.testing.expectError(error.CorruptSave, loadAfterTampering("UPDATE force_unit SET unit_id = 99999"));
+    // unit.pilot: a unit's pilot id names a person that does not exist.
+    // All units that already have a pilot keep 99999; force != none units have pilots.
+    try std.testing.expectError(error.CorruptSave, loadAfterTampering("UPDATE unit SET pilot = 99999 WHERE pilot != 0"));
+    // person.assigned_force: a person's company assignment names a force that does not exist.
+    // generateInto assigns all pilots to a lance, so assigned_force != 0 rows exist.
+    try std.testing.expectError(error.CorruptSave, loadAfterTampering("UPDATE person SET assigned_force = 99999 WHERE assigned_force != 0"));
+}
+
+test "an orphan stock row rejects the load as corrupt, not UnknownSite" {
+    // stock.owner_id names a site (hq or company) that is not in the live maps;
+    // loadStock must surface this as error.CorruptSave (not the internal error.UnknownSite).
+    try std.testing.expectError(error.CorruptSave, loadAfterTampering("UPDATE stock SET owner_id = 99999 WHERE owner_kind IN ('hq','company')"));
+}
+
+test "an unknown optional enum value rejects the load" {
+    // force.support_kind non-NULL but unknown tag → CorruptSave (rule 47).
+    try std.testing.expectError(error.CorruptSave, loadAfterTampering("UPDATE force SET support_kind = 'heavy' WHERE rowid = (SELECT rowid FROM force LIMIT 1)"));
+}
+
+test "an unknown listing kind rejects the load" {
+    // listing.kind is strictly 'unit' or 'part'; anything else is corruption.
+    // Insert a row directly so the test does not depend on the market state.
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 7771 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    _ = try @import("../sim/starter_company.zig").generateInto(&gs, "Alpha");
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    try store.db.exec("INSERT INTO listing (cid, ord, kind) VALUES (1, 0, 'crate')");
+    try std.testing.expectError(error.CorruptSave, store.load(std.testing.allocator, gs.campaign_id));
+}
+
+test "a NULL in a required enum column rejects the load" {
+    // person.role is required; enumValue returns null on SQL NULL → CorruptSave.
+    try std.testing.expectError(error.CorruptSave, loadAfterTampering("UPDATE person SET role = NULL WHERE rowid = (SELECT rowid FROM person LIMIT 1)"));
+}
+
+test "a duplicate primary person id rejects the load" {
+    // Create a raw database without a PRIMARY KEY constraint on person so we
+    // can insert duplicate ids; the loader's getOrPut+found_existing guard catches it.
+    // RNG: use the legacy 256-byte blob (pre-v32 path; fromDb creates empty rng_stream).
+    const raw = try sqlite.Db.open(":memory:");
+    try raw.exec(
+        \\CREATE TABLE setting (key TEXT PRIMARY KEY, value INTEGER NOT NULL);
+        \\CREATE TABLE campaign (id INTEGER PRIMARY KEY, name TEXT NOT NULL, commander TEXT, day INTEGER NOT NULL, date TEXT NOT NULL, schema_version INTEGER NOT NULL, save_seq INTEGER NOT NULL, player_id INTEGER NOT NULL DEFAULT 0);
+        \\CREATE TABLE meta (cid INTEGER NOT NULL, key TEXT NOT NULL, value INTEGER NOT NULL, PRIMARY KEY (cid, key));
+        \\CREATE TABLE meta_text (cid INTEGER NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (cid, key));
+        \\CREATE TABLE rng (cid INTEGER PRIMARY KEY, state BLOB NOT NULL);
+        \\CREATE TABLE person (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, first TEXT, last TEXT, callsign TEXT, role TEXT, xp INTEGER, status TEXT, fatigue INTEGER, morale INTEGER, recruited_day INTEGER, salary_override INTEGER, assigned_force INTEGER, posted_hq INTEGER, weekly_hours INTEGER, medbay_priority INTEGER, leave_until INTEGER, wound_heal_day INTEGER, training_skill TEXT, training_done INTEGER, admitted INTEGER NOT NULL DEFAULT 0, rank TEXT NOT NULL DEFAULT 'private', rank_pinned INTEGER NOT NULL DEFAULT 0, kills INTEGER NOT NULL DEFAULT 0, kill_bv INTEGER NOT NULL DEFAULT 0, battles INTEGER NOT NULL DEFAULT 0, tours INTEGER NOT NULL DEFAULT 0, outstanding_tours INTEGER NOT NULL DEFAULT 0, edge_spent INTEGER NOT NULL DEFAULT 0, faction TEXT NOT NULL DEFAULT '', shares INTEGER NOT NULL DEFAULT 0, born_day INTEGER, last_raise_day INTEGER, last_award_day INTEGER, departed_day INTEGER, secondary_role TEXT);
+        \\INSERT INTO setting VALUES ('schema_version', 36);
+        \\INSERT INTO campaign VALUES (1, 'Test', NULL, 0, '3025-01-01', 36, 1, 0);
+        \\INSERT INTO meta VALUES (1, 'day_index', 0);
+        \\INSERT INTO meta VALUES (1, 'year', 3025);
+        \\INSERT INTO meta VALUES (1, 'month', 1);
+        \\INSERT INTO meta VALUES (1, 'day', 1);
+        \\INSERT INTO meta VALUES (1, 'funds', 0);
+        \\INSERT INTO meta VALUES (1, 'reputation', 0);
+        \\INSERT INTO meta VALUES (1, 'difficulty', 1);
+        \\INSERT INTO meta_text VALUES (1, 'outfit_name', 'Test');
+        \\INSERT INTO rng VALUES (1, x'000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff');
+        \\INSERT INTO person VALUES (1, 0, 1, 'A', 'B', NULL, 'mekwarrior', 0, 'active', 0, 50, 0, NULL, 0, 0, 40, 0, NULL, NULL, NULL, NULL, 0, 'private', 0, 0, 0, 0, 0, 0, 0, '', 0, NULL, NULL, NULL, NULL, NULL);
+        \\INSERT INTO person VALUES (1, 1, 1, 'C', 'D', NULL, 'mekwarrior', 0, 'active', 0, 50, 0, NULL, 0, 0, 40, 0, NULL, NULL, NULL, NULL, 0, 'private', 0, 0, 0, 0, 0, 0, 0, '', 0, NULL, NULL, NULL, NULL, NULL);
+    );
+    const store = try Store.fromDb(raw);
+    defer store.close();
+    try std.testing.expectError(error.CorruptSave, store.load(std.testing.allocator, 1));
+}
+
+test "a save with month 13 rejects the load" {
+    // Date validation (Date.valid) rejects month 13 (rule 47).
+    try std.testing.expectError(error.CorruptSave, loadAfterTampering("UPDATE meta SET value = 13 WHERE key = 'month'"));
+}
+
+test "a missing required meta row rejects the load" {
+    // The loader requires 'funds' in meta; its absence is corruption (rule 47).
+    try std.testing.expectError(error.CorruptSave, loadAfterTampering("DELETE FROM meta WHERE key = 'funds'"));
+}
+
+// C7b: counter reconciliation and choice bounds.
+
+test "next_person_id is resumed past a higher owned id after load" {
+    // A save with next_person_id below a live person id is repaired by
+    // reconcileCounters: the counter advances above the max owned id (rule 48).
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 8881 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    _ = try @import("../sim/starter_company.zig").generateInto(&gs, "Alpha");
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    // Drive next_person_id below the max owned id.
+    try store.db.exec("UPDATE meta SET value = 0 WHERE key = 'next_person_id'");
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+    // Counter must exceed every person id.
+    var max_pid: u32 = 0;
+    var pit = loaded.people.iterator();
+    while (pit.next()) |e| max_pid = @max(max_pid, @intFromEnum(e.key_ptr.*));
+    try std.testing.expect(loaded.next_person_id > max_pid);
+}
+
+test "a pending event with an out-of-range default_choice rejects the load" {
+    // default_choice >= options.len for the event's kind is corruption (rule 47).
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 9991 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    const co = try @import("../sim/starter_company.zig").generateInto(&gs, "Alpha");
+    try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
+        .id = @enumFromInt(1),
+        .kind = .recon_raid,
+        .employer_key = "LC",
+        .enemy_key = "PER",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 6, .base_pay_month = 400_000 },
+        .status = .active,
+        .assigned_company = co,
+    });
+    // press_or_consolidate has 2 options (default_choice = 1); tamper to 99.
+    try contract_events.queuePress(&gs, gs.contracts.getPtr(@enumFromInt(1)).?);
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    try store.db.exec("UPDATE pending_event SET default_choice = 99");
+    try std.testing.expectError(error.CorruptSave, store.load(std.testing.allocator, gs.campaign_id));
+}
+
+test "a person id equal to maxInt(u32) rejects the load as corrupt" {
+    // reconcileCounters: max owned id == maxInt(u32) means next allocation would
+    // overflow — the save is corrupt (rule 48). Use a raw fixture to bypass the
+    // PRIMARY KEY constraint and store the impossible id. The person table here
+    // has no PRIMARY KEY so SQLite allows id = 4294967295 (maxInt u32).
+    const raw = try sqlite.Db.open(":memory:");
+    try raw.exec(
+        \\CREATE TABLE setting (key TEXT PRIMARY KEY, value INTEGER NOT NULL);
+        \\CREATE TABLE campaign (id INTEGER PRIMARY KEY, name TEXT NOT NULL, commander TEXT, day INTEGER NOT NULL, date TEXT NOT NULL, schema_version INTEGER NOT NULL, save_seq INTEGER NOT NULL, player_id INTEGER NOT NULL DEFAULT 0);
+        \\CREATE TABLE meta (cid INTEGER NOT NULL, key TEXT NOT NULL, value INTEGER NOT NULL, PRIMARY KEY (cid, key));
+        \\CREATE TABLE meta_text (cid INTEGER NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (cid, key));
+        \\CREATE TABLE rng (cid INTEGER PRIMARY KEY, state BLOB NOT NULL);
+        \\CREATE TABLE person (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, first TEXT, last TEXT, callsign TEXT, role TEXT, xp INTEGER, status TEXT, fatigue INTEGER, morale INTEGER, recruited_day INTEGER, salary_override INTEGER, assigned_force INTEGER, posted_hq INTEGER, weekly_hours INTEGER, medbay_priority INTEGER, leave_until INTEGER, wound_heal_day INTEGER, training_skill TEXT, training_done INTEGER, admitted INTEGER NOT NULL DEFAULT 0, rank TEXT NOT NULL DEFAULT 'private', rank_pinned INTEGER NOT NULL DEFAULT 0, kills INTEGER NOT NULL DEFAULT 0, kill_bv INTEGER NOT NULL DEFAULT 0, battles INTEGER NOT NULL DEFAULT 0, tours INTEGER NOT NULL DEFAULT 0, outstanding_tours INTEGER NOT NULL DEFAULT 0, edge_spent INTEGER NOT NULL DEFAULT 0, faction TEXT NOT NULL DEFAULT '', shares INTEGER NOT NULL DEFAULT 0, born_day INTEGER, last_raise_day INTEGER, last_award_day INTEGER, departed_day INTEGER, secondary_role TEXT);
+        \\INSERT INTO setting VALUES ('schema_version', 36);
+        \\INSERT INTO campaign VALUES (1, 'Test', NULL, 0, '3025-01-01', 36, 1, 0);
+        \\INSERT INTO meta VALUES (1, 'day_index', 0);
+        \\INSERT INTO meta VALUES (1, 'year', 3025);
+        \\INSERT INTO meta VALUES (1, 'month', 1);
+        \\INSERT INTO meta VALUES (1, 'day', 1);
+        \\INSERT INTO meta VALUES (1, 'funds', 0);
+        \\INSERT INTO meta VALUES (1, 'reputation', 0);
+        \\INSERT INTO meta VALUES (1, 'difficulty', 1);
+        \\INSERT INTO meta_text VALUES (1, 'outfit_name', 'Test');
+        \\INSERT INTO rng VALUES (1, x'000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff');
+        \\INSERT INTO person VALUES (1, 0, 4294967295, 'A', 'B', NULL, 'mekwarrior', 0, 'active', 0, 50, 0, NULL, 0, 0, 40, 0, NULL, NULL, NULL, NULL, 0, 'private', 0, 0, 0, 0, 0, 0, 0, '', 0, NULL, NULL, NULL, NULL, NULL);
+    );
+    const store = try Store.fromDb(raw);
+    defer store.close();
+    try std.testing.expectError(error.CorruptSave, store.load(std.testing.allocator, 1));
+}
+
+// C7c: current-version no-RNG test and v17/v18 stats recovery.
+
+test "a current-version save draws no RNG and rewrites no counter on load" {
+    // Gate: recoverStatsFromLog (< v18) and event id stamping (< v26) must not
+    // run on a current-version save. Verify by checking every RNG stream state
+    // is byte-for-byte identical before and after load, and next_person_id is
+    // unchanged (no counter rewrite beyond the no-op reconciliation).
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 5551 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    _ = try @import("../sim/starter_company.zig").generateInto(&gs, "Alpha");
+    stirRng(&gs);
+    const pid_before = gs.next_person_id;
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+    // Every stream is bit-for-bit identical: no RNG draw happened on load.
+    for (std.enums.values(rng_mod.Stream)) |stream| {
+        try std.testing.expectEqual(gs.rng.encode(stream), loaded.rng.encode(stream));
+    }
+    // Counter is unchanged beyond the no-op reconcile (max owned id < counter).
+    try std.testing.expectEqual(pid_before, loaded.next_person_id);
+}
+
+test "a v17 store recovers stats from its log; a v18 store does not" {
+    // recoverStatsFromLog runs only when saved_version < 18. A v17 save with
+    // battle log lines should recover battles_won; a v18 save with the same
+    // rows but no stats meta should leave stats empty (the loader trusts the
+    // version gate and makes no attempt to re-derive, rule 51).
+    // Pre-v32 stores use the legacy `rng` blob (256 bytes for 8 streams × 32 bytes each).
+    // v17: stats empty in meta → recoverStatsFromLog runs → battles_won set.
+    {
+        const raw = try sqlite.Db.open(":memory:");
+        try raw.exec(
+            \\CREATE TABLE setting (key TEXT PRIMARY KEY, value INTEGER NOT NULL);
+            \\CREATE TABLE campaign (id INTEGER PRIMARY KEY, name TEXT NOT NULL, commander TEXT, day INTEGER NOT NULL, date TEXT NOT NULL, schema_version INTEGER NOT NULL, save_seq INTEGER NOT NULL, player_id INTEGER NOT NULL DEFAULT 0);
+            \\CREATE TABLE meta (cid INTEGER NOT NULL, key TEXT NOT NULL, value INTEGER NOT NULL, PRIMARY KEY (cid, key));
+            \\CREATE TABLE meta_text (cid INTEGER NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (cid, key));
+            \\CREATE TABLE rng (cid INTEGER PRIMARY KEY, state BLOB NOT NULL);
+            \\INSERT INTO setting VALUES ('schema_version', 17);
+            \\INSERT INTO campaign VALUES (1, 'Old', NULL, 0, '3025-01-01', 17, 1, 0);
+            \\INSERT INTO meta VALUES (1, 'day_index', 0);
+            \\INSERT INTO meta VALUES (1, 'year', 3025);
+            \\INSERT INTO meta VALUES (1, 'month', 1);
+            \\INSERT INTO meta VALUES (1, 'day', 1);
+            \\INSERT INTO meta VALUES (1, 'funds', 0);
+            \\INSERT INTO meta VALUES (1, 'reputation', 0);
+            \\INSERT INTO meta VALUES (1, 'difficulty', 1);
+            \\INSERT INTO meta_text VALUES (1, 'outfit_name', 'Old');
+            \\INSERT INTO rng VALUES (1, x'000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff');
+        );
+        const store = try Store.fromDb(raw);
+        defer store.close();
+        // Insert a battle-win log row using the current event_log schema so
+        // recoverStatsFromLog can parse it (requires [AAR] prefix and ' — power ').
+        try store.db.exec("INSERT INTO event_log (cid, ord, day, category, company, hq, contract, text) VALUES (1, 0, 5, 'battle', 0, 0, 0, '[AAR] recon_raid vs PER: victory \u{2014} power 3000 vs 2000')");
+        var loaded = try store.load(std.testing.allocator, 1);
+        defer loaded.deinit();
+        try std.testing.expect(loaded.stats.battles_won > 0);
+    }
+    // v18: same rows, version gate closed → stats stay empty (no re-derivation).
+    {
+        const raw = try sqlite.Db.open(":memory:");
+        try raw.exec(
+            \\CREATE TABLE setting (key TEXT PRIMARY KEY, value INTEGER NOT NULL);
+            \\CREATE TABLE campaign (id INTEGER PRIMARY KEY, name TEXT NOT NULL, commander TEXT, day INTEGER NOT NULL, date TEXT NOT NULL, schema_version INTEGER NOT NULL, save_seq INTEGER NOT NULL, player_id INTEGER NOT NULL DEFAULT 0);
+            \\CREATE TABLE meta (cid INTEGER NOT NULL, key TEXT NOT NULL, value INTEGER NOT NULL, PRIMARY KEY (cid, key));
+            \\CREATE TABLE meta_text (cid INTEGER NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (cid, key));
+            \\CREATE TABLE rng (cid INTEGER PRIMARY KEY, state BLOB NOT NULL);
+            \\INSERT INTO setting VALUES ('schema_version', 18);
+            \\INSERT INTO campaign VALUES (1, 'Old', NULL, 0, '3025-01-01', 18, 1, 0);
+            \\INSERT INTO meta VALUES (1, 'day_index', 0);
+            \\INSERT INTO meta VALUES (1, 'year', 3025);
+            \\INSERT INTO meta VALUES (1, 'month', 1);
+            \\INSERT INTO meta VALUES (1, 'day', 1);
+            \\INSERT INTO meta VALUES (1, 'funds', 0);
+            \\INSERT INTO meta VALUES (1, 'reputation', 0);
+            \\INSERT INTO meta VALUES (1, 'difficulty', 1);
+            \\INSERT INTO meta_text VALUES (1, 'outfit_name', 'Old');
+            \\INSERT INTO rng VALUES (1, x'000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff');
+        );
+        const store = try Store.fromDb(raw);
+        defer store.close();
+        // Insert the same battle-win log row; the v18 gate must suppress recovery.
+        try store.db.exec("INSERT INTO event_log (cid, ord, day, category, company, hq, contract, text) VALUES (1, 0, 5, 'battle', 0, 0, 0, '[AAR] recon_raid vs PER: victory \u{2014} power 3000 vs 2000')");
+        var loaded = try store.load(std.testing.allocator, 1);
+        defer loaded.deinit();
+        try std.testing.expect(loaded.stats.isEmpty());
+    }
 }
 
 /// Draw from every stream so none sits at its starting state.
@@ -2989,7 +3530,7 @@ test "golden master: a played year hashes to its pinned value, and a save of it 
     try std.testing.expect(gs.battle_reports.kept.items.len > 0); // the year saw fighting
     // Any change to a simulated or saved result moves this; re-pin it only
     // when the change is meant.
-    try std.testing.expectEqual(@as(u64, 13922281342641301871), digest.stateHash(&gs));
+    try std.testing.expectEqual(@as(u64, 10686551396103014583), digest.stateHash(&gs));
 
     const store = try Store.open(":memory:");
     defer store.close();

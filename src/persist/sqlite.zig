@@ -99,7 +99,7 @@ pub const Stmt = struct {
     pub fn bind(self: Stmt, idx: c_int, value: anytype) Error!void {
         const T = @TypeOf(value);
         const rc = switch (@typeInfo(T)) {
-            .int, .comptime_int => sqlite3_bind_int64(self.h, idx, @intCast(value)),
+            .int, .comptime_int => sqlite3_bind_int64(self.h, idx, std.math.cast(i64, value) orelse return error.SqliteError),
             .bool => sqlite3_bind_int64(self.h, idx, @intFromBool(value)),
             .@"enum" => blk: {
                 if (@typeInfo(T).@"enum".is_exhaustive) {
@@ -183,6 +183,31 @@ pub const Stmt = struct {
         const p = sqlite3_column_text(self.h, col) orelse return null;
         return std.meta.stringToEnum(E, std.mem.span(p));
     }
+
+    /// Column integer; `error.CorruptSave` when the column is SQL NULL
+    /// (use `optInt` for nullable columns). Rule 47: a NULL in a required
+    /// column is a corrupt save, not a silent 0.
+    pub fn intReq(self: Stmt, col: c_int) error{CorruptSave}!i64 {
+        if (self.isNull(col)) return error.CorruptSave;
+        return self.int(col);
+    }
+
+    /// Column text; `error.CorruptSave` when the column is SQL NULL
+    /// (use `optText` for nullable columns). Rule 47.
+    pub fn textReq(self: Stmt, col: c_int, alloc: std.mem.Allocator) ![]const u8 {
+        if (self.isNull(col)) return error.CorruptSave;
+        return self.text(col, alloc);
+    }
+
+    /// Column enum; null when the column is SQL NULL, `error.CorruptSave`
+    /// when the column is non-NULL but names no member of `E`. Replaces a
+    /// bare `enumValue` for optional-enum columns where an unknown stored
+    /// value must be corruption, not null (rule 47).
+    pub fn optEnum(self: Stmt, comptime E: type, col: c_int) error{CorruptSave}!?E {
+        if (self.isNull(col)) return null;
+        const p = sqlite3_column_text(self.h, col) orelse return error.CorruptSave;
+        return std.meta.stringToEnum(E, std.mem.span(p)) orelse error.CorruptSave;
+    }
 };
 
 test "sqlite links, round-trips a row" {
@@ -202,5 +227,7 @@ test "sqlite links, round-trips a row" {
     defer std.testing.allocator.free(name);
     try std.testing.expectEqualStrings("seven", name);
     try std.testing.expect(sel.isNull(2));
+    try std.testing.expectError(error.CorruptSave, sel.intReq(2)); // opt is SQL NULL
+    try std.testing.expectEqual(@as(i64, 7), try sel.intReq(0)); // id is non-NULL
     try std.testing.expect(!(try sel.next()));
 }

@@ -404,6 +404,8 @@ pub const Error = error{
     NoContact,
     /// The company's stores already cover the next fight.
     NothingToRush,
+    /// A stock quantity addition would overflow the u32 counter (rule 47).
+    StockOverflow,
 } || std.mem.Allocator.Error;
 
 pub const Result = struct {
