@@ -425,13 +425,30 @@ pub fn orderPart(gs: *GameState, part_key: []const u8, quantity: u32, dest_opt: 
     if (dest == .company) total += onward.cost;
     if (gs.treasuryBalance(.{ .hq = hq_id }) < total) return error.InsufficientTreasury;
     // Sourcing: the part's availability code, the world's shelves,
-    // the HQ's comms reach.
+    // the HQ's comms reach. Roll-independent, so it is known before the roll.
     const src = part_mod.sourcing(def, faction_mod.isPeriphery(world.faction), hq.effectiveFacilityLevel(.comms));
+
+    // ---- prepare: reserve every fallible destination before the acquisition
+    // roll, so a failed order (out of memory included) consumes no dice ----
+    try gs.part_orders.ensureUnusedCapacity(gs.allocator(), 1); // the order (either branch)
+    try gs.reserveLedger(1); // the purchase debit, if sourced
+    try gs.reserveLog(1); // the refusal line, if not sourced
+    const why = try src.text(gs.allocator(), def);
+    // Upper bound for the refusal line: 256 covers the fixed template, the
+    // date prefix, the rarity tag and the two decimal fields; def.key and why
+    // are the only variable-length parts.
+    const fail_buf = try gs.allocator().alloc(u8, 256 + def.key.len + why.len);
+
+    // ---- commit: the roll and everything after it cannot fail ----
     const roll = @as(i32, gs.rng.roll2d6(.acquisition)) + admin_bonus + world.industry / 2 + src.total();
     const sourced = roll >= def.rarity.availabilityTarget();
 
     if (!sourced) {
-        try gs.part_orders.append(gs.allocator(), .{
+        var date_buf: [10]u8 = undefined;
+        const line = std.fmt.bufPrint(fail_buf, "{s} [order] logistics could not source {d} × {s} this time ({s}, roll {d} vs {d}{s}{s}) — retry after the monthly refresh{s}", .{
+            gs.clock.date.text(&date_buf), quantity, def.key, @tagName(def.rarity), roll, def.rarity.availabilityTarget(), if (why.len > 0) "; " else "", why, if (part_mod.isComponent(def.key)) ", or fabricate it in the bay" else "",
+        }) catch unreachable;
+        gs.part_orders.appendAssumeCapacity(.{
             .part_key = def.key,
             .quantity = quantity,
             .dest = dest,
@@ -439,9 +456,11 @@ pub fn orderPart(gs: *GameState, part_key: []const u8, quantity: u32, dest_opt: 
             .cost = 0,
             .status = .failed,
         });
-        const why = try src.text(gs.allocator(), def);
-        try gs.log(.delivery, .{ .hq = hq_id }, "[order] logistics could not source {d} × {s} this time ({s}, roll {d} vs {d}{s}{s}) — retry after the monthly refresh{s}", .{
-            quantity, def.key, @tagName(def.rarity), roll, def.rarity.availabilityTarget(), if (why.len > 0) "; " else "", why, if (part_mod.isComponent(def.key)) ", or fabricate it in the bay" else "",
+        gs.event_log.appendAssumeCapacity(.{
+            .day = gs.clock.day_index,
+            .category = .delivery,
+            .hq = hq_id,
+            .text = line,
         });
         return .{ .sourced = false };
     }
@@ -454,7 +473,7 @@ pub fn orderPart(gs: *GameState, part_key: []const u8, quantity: u32, dest_opt: 
         .note = def.name,
     });
     if (dest == .company) commitFreight(gs, onward);
-    try gs.part_orders.append(gs.allocator(), .{
+    gs.part_orders.appendAssumeCapacity(.{
         .part_key = def.key,
         .quantity = quantity,
         .dest = dest,
@@ -720,6 +739,35 @@ test "a failed sourcing roll is reported, keeps its destination, and clears afte
     gs.clock.day_index += 14;
     try tick.runTravel(&gs);
     for (gs.part_orders.items) |po| try std.testing.expect(po.status != .failed);
+}
+
+test "orderPart reserves order, debit and log before the acquisition roll — a failed allocation changes nothing" {
+    const digest = @import("digest.zig");
+    const founding = @import("founding.zig");
+    var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer outer.deinit();
+    var gs = GameState.init(outer.allocator(), .{ .seed = 5150 });
+    _ = try founding.createCommander(&gs, "T", .LC, .quartermaster);
+    const hq_id = gs.hqs.keys()[0];
+    gs.hqs.getPtr(hq_id).?.funds = 50_000_000; // enough to pass the funds check
+
+    const before = digest.stateHash(&gs);
+    const orders_before = gs.part_orders.items.len;
+    const funds_before = gs.hqs.getPtr(hq_id).?.funds;
+
+    // Discard the arena's spare headroom and fail every further allocation,
+    // so a reservation fails before the acquisition roll.
+    gs.arena.state.used_list = null;
+    gs.arena.state.free_list = null;
+    gs.arena.child_allocator = std.testing.failing_allocator;
+
+    try std.testing.expectError(error.OutOfMemory, orderPart(&gs, "provisions", 1, .{ .hq = hq_id }));
+
+    // RNG words are part of the digest: an unchanged digest proves the roll
+    // never happened, along with the order list and funds.
+    try std.testing.expectEqual(before, digest.stateHash(&gs));
+    try std.testing.expectEqual(orders_before, gs.part_orders.items.len);
+    try std.testing.expectEqual(funds_before, gs.hqs.getPtr(hq_id).?.funds);
 }
 
 test "gear on any hull is field work — replace orders the spare to its site, the tech fits it" {
