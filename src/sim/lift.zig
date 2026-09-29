@@ -154,16 +154,18 @@ pub fn planLift(gs: *GameState, company_id: types.ForceId, commit: bool) !LiftPl
     plan.carried = @min(have[0], need[0]) + @min(have[1], need[1]) + @min(have[2], need[2]);
     plan.covered_bp = @intCast(@as(u64, plan.carried) * 10_000 / plan.needed);
     if (commit and at_home) {
-        for (ships.items) |sid| try toe.moveUnitToForce(gs, sid, company_id);
+        // Reserve the destination force's unit capacity for every ship
+        // before the move loop: if the reservation fails, no hull moves
+        // (all-or-nothing). moveUnitToForce's internal ensureUnusedCapacity(1)
+        // is then a no-op, so catch unreachable is sound (rules 11–13).
+        if (gs.forces.getPtr(company_id)) |dest| try dest.units.ensureUnusedCapacity(gs.allocator(), ships.items.len);
+        for (ships.items) |sid| toe.moveUnitToForce(gs, sid, company_id) catch unreachable;
     }
     return plan;
 }
 
 pub fn commitLift(gs: *GameState, company_id: types.ForceId) !LiftPlan {
-    return planLift(gs, company_id, true) catch |err| switch (err) {
-        error.OutOfMemory => return error.OutOfMemory,
-        else => return .{},
-    };
+    return planLift(gs, company_id, true);
 }
 
 test "planLiftQuery returns the same plan as planLift(commit=false) with OOM-only errors" {

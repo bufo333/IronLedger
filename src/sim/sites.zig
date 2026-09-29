@@ -70,14 +70,22 @@ pub fn siteFreeTons(gs: *GameState, site: types.Site) u32 {
     return cap -| siteTons(gs, site);
 }
 
+/// How many units of `key` would move from `from` to `to` given `qty`
+/// requested and `pending_dest_tons` already scheduled into `to` this
+/// batch but not yet applied. No mutation. One owner of the fit rule
+/// (rule 20).
+pub fn movableQty(gs: *GameState, from: types.Site, to: types.Site, key: []const u8, qty: u32, pending_dest_tons: u32) u32 {
+    const have = gs.stockCount(from, key);
+    const per = part_mod.tons(key);
+    const fits = if (per == 0) qty else (siteFreeTons(gs, to) -| pending_dest_tons) / per;
+    return @min(qty, @min(have, fits));
+}
+
 /// Move stock between sites on the spot (co-located handover). Returns
 /// the quantity actually moved (bounded by source stock and destination
 /// space).
 pub fn moveStock(gs: *GameState, from: types.Site, to: types.Site, key: []const u8, qty: u32) !u32 {
-    const have = gs.stockCount(from, key);
-    const per = part_mod.tons(key);
-    const fits = if (per == 0) qty else siteFreeTons(gs, to) / per;
-    const n = @min(qty, @min(have, fits));
+    const n = movableQty(gs, from, to, key, qty, 0);
     if (n == 0) return 0;
     // Reserve destination capacity before the first mutation (rule 12):
     // addStock's getOrPut may grow the map; if that allocation were to

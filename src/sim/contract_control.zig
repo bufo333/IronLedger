@@ -531,6 +531,7 @@ test "a performance failure at term is .failed — no clawback, no cooling, VP c
 }
 
 pub fn acceptContract(gs: *GameState, offer_index: usize, company_id: types.ForceId) !void {
+    // ---- VALIDATE: no mutation ----
     if (offer_index >= gs.contract_offers.items.len) return error.NoSuchOffer;
     const company = gs.force(company_id) orelse return error.UnknownForce;
     if (company.echelon != .company) return error.NotACompany;
@@ -540,12 +541,18 @@ pub fn acceptContract(gs: *GameState, offer_index: usize, company_id: types.Forc
         const c = entry.value_ptr;
         if (c.assigned_company == company_id and c.isRunning()) return error.CompanyDeployed;
     }
-
     if (company.return_eta_day != null) return error.CompanyInTransit;
 
-    var c = gs.contract_offers.orderedRemove(offer_index);
+    // ---- PREPARE: reserve every fallible destination; no GameState mutation ----
+
+    // Scratch arena for the load-out plan and move list; lives until return.
+    var scratch_arena = std.heap.ArenaAllocator.init(gs.scratch());
+    defer scratch_arena.deinit();
+    const scratch = scratch_arena.allocator();
+
+    // Copy the offer (do NOT remove it yet).
+    var c = gs.contract_offers.items[offer_index];
     const id: types.ContractId = @enumFromInt(gs.next_contract_id);
-    gs.next_contract_id += 1;
     c.id = id;
     c.status = .transit;
     c.assigned_company = company_id;
@@ -557,13 +564,85 @@ pub fn acceptContract(gs: *GameState, offer_index: usize, company_id: types.Forc
     }
     c.transit_days = if (jumps == 0) logistics.same_world_days else logistics.transitDays(jumps);
     c.arrive_day = gs.clock.day_index + c.transit_days;
-    onAccept(gs, &c);
+    onAccept(gs, &c); // mutates only the local copy c
     c.monthly_net = @divTrunc(c.terms.base_pay_month * (100 - @as(i64, c.terms.advance_pct)), 100);
 
     // Signing money in, transit freight out (employer covers transport_pct;
     // the quartermaster's 2% shaves the rest).
     const signing = c.terms.advanceAmount() + c.terms.signing_bonus;
-    try gs.postTransaction(.{
+    const freight_base: types.CBills = @as(types.CBills, c.dist_ly) * tuning.logistics.freight_per_ly;
+    var freight = @divTrunc(freight_base * (100 - @as(i64, c.terms.transport_pct)), 100);
+    freight = types.applyBp(freight, commander_mod.costMultBp(gs.commander, .freight));
+    // Your own ships lift what they can: query first (read-only), commit
+    // in the commit phase. planLiftQuery and commitLift compute identical
+    // plans since no unit state changes between the two.
+    const lift = try lift_mod.planLiftQuery(gs, company_id);
+    freight = types.applyBp(freight, logistics.transitFreightBp(lift.covered_bp, lift.own_jumpship));
+
+    // Deployment defaults: computed from current state (same conditions
+    // deploymentDefaults used), with projected funds after advance and charter.
+    var has_supply = false;
+    for (gs.supply_policies.items) |sp| if (sp.company == company_id) {
+        has_supply = true;
+    };
+    var has_cash = false;
+    for (gs.policies.items) |p| if (std.meta.eql(p.entity, .{ .company = company_id })) {
+        has_cash = true;
+    };
+    const float = types.applyBp(signing, tuning.finance.field_float_bp);
+    const do_float = float > 0 and (gs.funds + signing - freight) >= float;
+
+    // Prepare the load-out: simulates moves, reserves dest stock-map capacity.
+    // Pass transit_days explicitly; the contract is not yet in gs.contracts.
+    const lo = try field_supply.prepareLoadOut(scratch, gs, company_id, c.transit_days);
+
+    // Count log entries: lift line (if ships > 0) + deploy-defaults + loadout.
+    const n_log: usize = @as(usize, @intFromBool(lift.ships > 0)) + 2;
+    // Count ledger entries: advance + optional charter + optional float transfer (2).
+    const n_ledger: usize = 1 + @as(usize, @intFromBool(freight > 0)) + @as(usize, if (do_float) 2 else 0);
+
+    // Reserve all fallible destinations before the first GameState mutation.
+    try gs.reserveLedger(n_ledger);
+    try gs.reserveLog(n_log);
+    try gs.contracts.ensureUnusedCapacity(gs.allocator(), 1);
+    // Reserve lift hull capacity: commitLift's ensureUnusedCapacity is then a no-op.
+    if (gs.forces.getPtr(company_id)) |dest_force| try dest_force.units.ensureUnusedCapacity(gs.allocator(), lift.ships);
+    // Load-out dest stock capacity: already reserved inside prepareLoadOut.
+    if (!has_supply) try gs.supply_policies.ensureUnusedCapacity(gs.allocator(), 1);
+    if (!has_cash) try gs.policies.ensureUnusedCapacity(gs.allocator(), 1);
+
+    // Pre-format every log line now (allocPrint into gs.allocator()); these
+    // are the only remaining fallible allocations before the commit phase.
+    var date_buf: [10]u8 = undefined;
+    const date_text = gs.clock.date.text(&date_buf);
+
+    var lift_line: ?[]const u8 = null;
+    if (lift.ships > 0) {
+        lift_line = try std.fmt.allocPrint(gs.allocator(), "{s} [lift] {d} of {d} hulls ride the outfit's own ships ({d} dropship{s}{s}) — charter {s}", .{ date_text, lift.carried, lift.needed, lift.ships, if (lift.ships == 1) @as([]const u8, "") else "s", if (lift.own_jumpship) @as([]const u8, ", own jumpship") else "", if (freight > 0) @as([]const u8, "reduced") else "waived" });
+    }
+    const deploy_line = try std.fmt.allocPrint(gs.allocator(), "{s} [deploy] defaults: resupply every {d} days on the field plan, {d} local operating funds, top-up policy {d}/{d} per month — `supplypolicy`/`policy` with 0 clear them", .{ date_text, tuning.field_supply.default_min_days, float, tuning.finance.field_policy_floor, tuning.finance.field_policy_cap });
+
+    // Compute per-key counts after load-out: current stock + qty in lo.moves.
+    var provisions_after = gs.stockCount(.{ .company = company_id }, "provisions");
+    var lrm_after = gs.stockCount(.{ .company = company_id }, "ammo_lrm");
+    var srm_after = gs.stockCount(.{ .company = company_id }, "ammo_srm");
+    var ac5_after = gs.stockCount(.{ .company = company_id }, "ammo_ac5");
+    for (lo.moves) |m| {
+        if (std.mem.eql(u8, m.key, "provisions")) provisions_after += m.qty;
+        if (std.mem.eql(u8, m.key, "ammo_lrm")) lrm_after += m.qty;
+        if (std.mem.eql(u8, m.key, "ammo_srm")) srm_after += m.qty;
+        if (std.mem.eql(u8, m.key, "ammo_ac5")) ac5_after += m.qty;
+    }
+    const loadout_line = try std.fmt.allocPrint(gs.allocator(), "{s} [loadout] trucks loaded: {d}t of {d}t — {d}t provisions, {d}t LRM, {d}t SRM, {d}t AC/5", .{ date_text, lo.dest_tons_after, sites.siteCapacityTons(gs, .{ .company = company_id }) orelse 0, provisions_after, lrm_after, srm_after, ac5_after });
+
+    // ---- COMMIT: only *AssumeCapacity / catch unreachable / direct assignment ----
+
+    // Remove the offer (in-place shrink, no allocation).
+    _ = gs.contract_offers.orderedRemove(offer_index);
+    gs.next_contract_id += 1;
+
+    // Advance in.
+    gs.ledger.transactions.appendAssumeCapacity(.{
         .day = gs.clock.day_index,
         .amount = signing,
         .category = .advance,
@@ -571,16 +650,14 @@ pub fn acceptContract(gs: *GameState, offer_index: usize, company_id: types.Forc
         .contract = id,
         .note = "contract advance + signing bonus",
     });
-    const freight_base: types.CBills = @as(types.CBills, c.dist_ly) * tuning.logistics.freight_per_ly;
-    var freight = @divTrunc(freight_base * (100 - @as(i64, c.terms.transport_pct)), 100);
-    freight = types.applyBp(freight, commander_mod.costMultBp(gs.commander, .freight));
-    // Your own ships lift what they can: every hull a berthed
-    // dropship carries is charter you don't pay; a jumpship of your own
-    // removes the collar fee too. The ships sail with the company.
-    const lift = try lift_mod.commitLift(gs, company_id);
-    freight = types.applyBp(freight, logistics.transitFreightBp(lift.covered_bp, lift.own_jumpship));
+    gs.funds += signing;
+
+    // Commit lift: hull capacity reserved above; identical plan to planLiftQuery.
+    _ = lift_mod.commitLift(gs, company_id) catch unreachable;
+
+    // Charter out (if any).
     if (freight > 0) {
-        try gs.postTransaction(.{
+        gs.ledger.transactions.appendAssumeCapacity(.{
             .day = gs.clock.day_index,
             .amount = -freight,
             .category = .transport_charter,
@@ -588,50 +665,44 @@ pub fn acceptContract(gs: *GameState, offer_index: usize, company_id: types.Forc
             .contract = id,
             .note = if (lift.covered_bp > 0) "outbound transit charter (own lift credited)" else "outbound transit charter",
         });
+        gs.funds -= freight;
     }
-    if (lift.ships > 0) try gs.log(.delivery, .{ .company = company_id, .contract = id }, "[lift] {d} of {d} hulls ride the outfit's own ships ({d} dropship{s}{s}) — charter {s}", .{
-        lift.carried, lift.needed, lift.ships, if (lift.ships == 1) "" else "s", if (lift.own_jumpship) ", own jumpship" else "", if (freight > 0) "reduced" else "waived",
-    });
-    try gs.contracts.put(gs.allocator(), id, c);
-    if (gs.force(company_id)) |f| f.location_planet = null; // underway
 
-    // Kit out from the home warehouse before the dropships lift;
-    // a company redeploying from the field goes with what's in its trucks.
-    try field_supply.loadOutCompany(gs, company_id);
-    try deploymentDefaults(gs, company_id, signing);
-    const site: types.Site = .{ .company = company_id };
-    try gs.log(.delivery, .{ .company = company_id, .contract = id }, "[loadout] trucks loaded: {d}t of {d}t — {d}t provisions, {d}t LRM, {d}t SRM, {d}t AC/5", .{
-        sites.siteTons(gs, site),          sites.siteCapacityTons(gs, site) orelse 0,
-        gs.stockCount(site, "provisions"), gs.stockCount(site, "ammo_lrm"),
-        gs.stockCount(site, "ammo_srm"),   gs.stockCount(site, "ammo_ac5"),
+    // Lift log entry.
+    if (lift_line) |line| gs.event_log.appendAssumeCapacity(.{
+        .day = gs.clock.day_index,
+        .category = .delivery,
+        .company = company_id,
+        .contract = id,
+        .text = line,
     });
-}
 
-/// Defaults a deployment gets unless the player set their own:
-/// a resupply policy on the field plan, a share of the advance as local
-/// operating funds (handed over on the ramp, no courier), and a standing
-/// top-up so the float never runs dry. Every one is clearable.
-fn deploymentDefaults(gs: *GameState, company_id: types.ForceId, signing: types.CBills) !void {
-    var has_supply = false;
-    for (gs.supply_policies.items) |sp| if (sp.company == company_id) {
-        has_supply = true;
-    };
-    if (!has_supply) {
-        try gs.supply_policies.append(gs.allocator(), .{ .company = company_id, .min_days = tuning.field_supply.default_min_days, .tons = 0 });
-    }
-    var has_cash = false;
-    for (gs.policies.items) |p| if (std.meta.eql(p.entity, .{ .company = company_id })) {
-        has_cash = true;
-    };
-    if (!has_cash) {
-        try gs.policies.append(gs.allocator(), .{ .entity = .{ .company = company_id }, .floor = tuning.finance.field_policy_floor, .monthly_cap = tuning.finance.field_policy_cap });
-    }
-    const float = types.applyBp(signing, tuning.finance.field_float_bp);
-    if (float > 0 and gs.funds >= float) {
-        try treasury.transferFunds(gs, .outfit, .{ .company = company_id }, float, 0);
-    }
-    try gs.log(.finance, .{ .company = company_id }, "[deploy] defaults: resupply every {d} days on the field plan, {d} local operating funds, top-up policy {d}/{d} per month — `supplypolicy`/`policy` with 0 clear them", .{
-        tuning.field_supply.default_min_days, float, tuning.finance.field_policy_floor, tuning.finance.field_policy_cap,
+    // Record the contract and clear the company's planet (underway).
+    gs.contracts.putAssumeCapacity(id, c);
+    if (gs.force(company_id)) |f| f.location_planet = null;
+
+    // Load out from the home warehouse.
+    field_supply.applyLoadOut(gs, lo);
+
+    // Deployment defaults (inlined from the former deploymentDefaults):
+    // a resupply policy, a cash policy, and an immediate float transfer
+    // (eta 0) — no courier needed, handed over on the ramp.
+    if (!has_supply) gs.supply_policies.appendAssumeCapacity(.{ .company = company_id, .min_days = tuning.field_supply.default_min_days, .tons = 0 });
+    if (!has_cash) gs.policies.appendAssumeCapacity(.{ .entity = .{ .company = company_id }, .floor = tuning.finance.field_policy_floor, .monthly_cap = tuning.finance.field_policy_cap });
+    if (do_float) treasury.transferFunds(gs, .outfit, .{ .company = company_id }, float, 0) catch unreachable;
+
+    gs.event_log.appendAssumeCapacity(.{
+        .day = gs.clock.day_index,
+        .category = .finance,
+        .company = company_id,
+        .text = deploy_line,
+    });
+    gs.event_log.appendAssumeCapacity(.{
+        .day = gs.clock.day_index,
+        .category = .delivery,
+        .company = company_id,
+        .contract = id,
+        .text = loadout_line,
     });
 }
 
@@ -654,6 +725,41 @@ test "an offer carries its opposition, and acceptance sizes the pool from it" {
     c.assigned_company = co;
     onAccept(&gs, &c);
     try std.testing.expectEqual(@import("../domain/opfor.zig").poolBv(c.opforBv(), c.terms.length_months), c.enemy_pool_bv);
+}
+
+test "accepting a contract leaves state whole when an allocation fails" {
+    const digest = @import("digest.zig");
+    var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer outer.deinit();
+    var gs = GameState.init(outer.allocator(), .{ .seed = 8301 });
+    _ = try founding.createCommander(&gs, "T", .LC, .quartermaster);
+    const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
+    try contract_market.refresh(&gs);
+    try std.testing.expect(gs.contract_offers.items.len > 0);
+
+    // Find an eligible offer so validation passes and the first prepare
+    // allocation is the one that fails — not an early refusal.
+    var idx: usize = 0;
+    var found = false;
+    for (gs.contract_offers.items, 0..) |*offer, i| {
+        if (contract_market.offerEligible(&gs, offer, co)) {
+            idx = i;
+            found = true;
+            break;
+        }
+    }
+    try std.testing.expect(found);
+
+    const before = digest.stateHash(&gs);
+
+    // Block every further main-arena allocation to force OOM in the
+    // prepare phase, before any GameState mutation (rules 11–13, 69).
+    gs.arena.state.used_list = null;
+    gs.arena.state.free_list = null;
+    gs.arena.child_allocator = std.testing.failing_allocator;
+
+    try std.testing.expectError(error.OutOfMemory, acceptContract(&gs, idx, co));
+    try std.testing.expectEqual(before, digest.stateHash(&gs));
 }
 
 test "idle companies stay where they worked; recall brings them home; redeploy from the field" {

@@ -7,8 +7,8 @@
 //! its supply line and the tonnage its trucks can carry, with a budget
 //! share per category so no single line crowds the others out. The
 //! resupply policy (tick.runPolicies) and the load-out at acceptance
-//! (field_supply.loadOutCompany) both follow the same plan, and the
-//! Supply screen shows it.
+//! (field_supply.prepareLoadOut / applyLoadOut) both follow the same
+//! plan, and the Supply screen shows it.
 
 const std = @import("std");
 const tuning = @import("../domain/tuning.zig").t;
@@ -140,25 +140,82 @@ pub fn plan(alloc: std.mem.Allocator, gs: *GameState, company: types.ForceId, tr
     return .{ .lines = try lines.toOwnedSlice(alloc), .transit_days = transit_days, .provisions_per_day = per_day, .capacity = cap, .total_target = total };
 }
 
-/// Kit out a company from the home warehouse before it ships: a month
-/// of provisions, medical, ammo for its weapons, armor and structure —
-/// as far as its trucks can carry (the field plan sizes it).
-pub fn loadOutCompany(gs: *GameState, company_id: types.ForceId) !void {
+/// One stock item the load-out will move (rule 12: prepared before any
+/// mutation, applied all-or-nothing).
+pub const LoadMove = struct { key: []const u8, qty: u32 };
+
+/// The complete load-out plan for one acceptance: what will move, how
+/// many tons, and the destination fill once applied.
+pub const LoadOut = struct {
+    home: types.Site,
+    dest: types.Site,
+    /// Capped lines first, provisions last — same order as the two-pass fill.
+    moves: []const LoadMove,
+    /// Total tons that will move to dest.
+    loaded_tons: u32,
+    /// siteTons(dest) once applyLoadOut runs.
+    dest_tons_after: u32,
+};
+
+/// Compute the load-out plan without mutating GameState (rules 11–13).
+/// Simulates the two-pass fill using `sites.movableQty` — the single
+/// owner of the fit rule — and reserves dest stock-map capacity for the
+/// whole batch. `scratch` may be a short-lived arena; `moves` lives in
+/// `scratch`. `transit` is the contract's transit days (caller passes
+/// it explicitly because the contract may not be in the map yet).
+pub fn prepareLoadOut(scratch: std.mem.Allocator, gs: *GameState, company_id: types.ForceId, transit: u32) !LoadOut {
     const home = gs.homeSiteFor(company_id);
     const dest: types.Site = .{ .company = company_id };
-    // The same plan the resupply policy follows, sized for the contract's
-    // transit so the trucks land with the line already covered.
-    const transit: u32 = if (gs.deploymentContract(company_id)) |c| c.transit_days else 0;
-    var arena = std.heap.ArenaAllocator.init(gs.scratch());
-    defer arena.deinit();
-    const p = try plan(arena.allocator(), gs, company_id, transit, 14, 0);
-    // Capped lines first; provisions fill whatever the trucks have left.
-    for (p.lines) |l| if (!std.mem.eql(u8, l.key, "provisions")) {
-        _ = try sites.moveStock(gs, home, dest, l.key, l.target);
+    const p = try plan(scratch, gs, company_id, transit, 14, 0);
+
+    var move_list: std.ArrayListUnmanaged(LoadMove) = .empty;
+    var pending_tons: u32 = 0;
+    var loaded_tons: u32 = 0;
+
+    // Pass 1: capped lines (everything except provisions).
+    for (p.lines) |l| {
+        if (std.mem.eql(u8, l.key, "provisions")) continue;
+        const n = sites.movableQty(gs, home, dest, l.key, l.target, pending_tons);
+        if (n > 0) {
+            try move_list.append(scratch, .{ .key = l.key, .qty = n });
+            const tons = n * @import("../domain/part.zig").tons(l.key);
+            pending_tons += tons;
+            loaded_tons += tons;
+        }
+    }
+    // Pass 2: provisions fill whatever the trucks have left.
+    for (p.lines) |l| {
+        if (!std.mem.eql(u8, l.key, "provisions")) continue;
+        const n = sites.movableQty(gs, home, dest, l.key, l.target, pending_tons);
+        if (n > 0) {
+            try move_list.append(scratch, .{ .key = l.key, .qty = n });
+            const tons = n * @import("../domain/part.zig").tons(l.key);
+            loaded_tons += tons;
+        }
+    }
+
+    const moves = try move_list.toOwnedSlice(scratch);
+
+    // Reserve dest stock-map capacity for the whole batch before any
+    // mutation (rule 12). Over-reserving when a key already exists is
+    // harmless; the per-call ensureUnusedCapacity(1) in moveStock is then
+    // a no-op.
+    if (gs.stockMap(dest)) |m| try m.ensureUnusedCapacity(gs.allocator(), moves.len);
+
+    return .{
+        .home = home,
+        .dest = dest,
+        .moves = moves,
+        .loaded_tons = loaded_tons,
+        .dest_tons_after = sites.siteTons(gs, dest) + loaded_tons,
     };
-    for (p.lines) |l| if (std.mem.eql(u8, l.key, "provisions")) {
-        _ = try sites.moveStock(gs, home, dest, l.key, l.target);
-    };
+}
+
+/// Apply a prepared load-out. Cannot fail: dest stock capacity was
+/// reserved in prepareLoadOut and each moveStock's ensureUnusedCapacity(1)
+/// is covered by that reservation (rule 12).
+pub fn applyLoadOut(gs: *GameState, lo: LoadOut) void {
+    for (lo.moves) |m| _ = sites.moveStock(gs, lo.home, lo.dest, m.key, m.qty) catch unreachable;
 }
 
 /// Tons of one munition family an engagement burns: a ton feeds
