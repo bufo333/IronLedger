@@ -545,14 +545,28 @@ pub fn startTierUpgrade(gs: *GameState, hq_id: types.HqId) !void {
         if (p.kind == .tier_upgrade) return error.ProjectInProgress;
     }
     const paperwork = paperworkDaysFor(gs, hq_id);
-    try hq.projects.append(gs.allocator(), .{
+    try hq.projects.ensureUnusedCapacity(gs.allocator(), 1);
+    var date_buf: [10]u8 = undefined;
+    const line = try std.fmt.allocPrint(
+        gs.allocator(),
+        "{s} [construction] {s} → regional HQ: {d} days paperwork, {d} days build",
+        .{ gs.clock.date.text(&date_buf), hq.name, paperwork, tier_upgrade_build_days },
+    );
+    try gs.reserveLog(1);
+    // ---- commit: no fallible operation past this point ----
+    hq.projects.appendAssumeCapacity(.{
         .kind = .tier_upgrade,
         .started_day = gs.clock.day_index,
         .paperwork_done_day = gs.clock.day_index + paperwork,
         .construction_done_day = gs.clock.day_index + paperwork + tier_upgrade_build_days,
         .cost = tier_upgrade_cost,
     });
-    try gs.log(.construction, .{ .hq = hq_id }, "[construction] {s} → regional HQ: {d} days paperwork, {d} days build", .{ hq.name, paperwork, tier_upgrade_build_days });
+    gs.event_log.appendAssumeCapacity(.{
+        .day = gs.clock.day_index,
+        .category = .construction,
+        .hq = hq_id,
+        .text = line,
+    });
 }
 
 // ------------------------------------------------- repair outcomes
@@ -877,13 +891,14 @@ pub fn upgradeTier(gs: *GameState, hq_id: types.HqId) !void {
     if (h.tier != .field) return error.MaxLevel;
     for (h.projects.items) |p| if (p.kind == .tier_upgrade) return error.ProjectInProgress;
     if (gs.treasuryBalance(.{ .hq = hq_id }) < tier_upgrade_cost) return error.InsufficientTreasury;
+    try gs.reserveLedger(1);
     startTierUpgrade(gs, hq_id) catch |err| switch (err) {
         error.ProjectInProgress => return error.ProjectInProgress,
         error.MaxLevel => return error.MaxLevel,
         error.UnknownHq => return error.UnknownHq,
         error.OutOfMemory => return error.OutOfMemory,
     };
-    try gs.postTreasury(.{ .hq = hq_id }, .{
+    try treasury.debit(gs, .{ .hq = hq_id }, .{
         .day = gs.clock.day_index,
         .amount = -tier_upgrade_cost,
         .category = .hq_construction,
@@ -1821,5 +1836,32 @@ test "a failed foundHq leaves state unchanged" {
     gs.arena.child_allocator = std.testing.failing_allocator;
 
     try std.testing.expectError(error.OutOfMemory, foundHq(&gs, "Far", "alkaid"));
+    try std.testing.expectEqual(before, digest.stateHash(&gs));
+}
+
+test "upgradeTier leaves the HQ, its projects, the log and the ledger unchanged when an allocation fails" {
+    const digest = @import("digest.zig");
+
+    var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer outer.deinit();
+    var gs = GameState.init(outer.allocator(), .{ .seed = 1230 });
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    const home = gs.hqs.keys()[0];
+    const home_world = planet_mod.find(gs.hqs.getPtr(home).?.planet_key).?;
+    var key: []const u8 = "";
+    for (planet_mod.catalog) |*p| if (p != home_world and planet_mod.distanceLy(p, home_world) <= gs.hqs.getPtr(home).?.influenceLy() and key.len == 0) {
+        key = p.key;
+    };
+    _ = try commands.execute(&gs, .{ .found_hq = .{ .name = "Firebase", .planet_key = key } });
+    const fb = gs.hqs.keys()[1];
+    gs.hqs.getPtr(fb).?.funds = tier_upgrade_cost + 1;
+
+    const before = digest.stateHash(&gs);
+
+    gs.arena.state.used_list = null;
+    gs.arena.state.free_list = null;
+    gs.arena.child_allocator = std.testing.failing_allocator;
+
+    try std.testing.expectError(error.OutOfMemory, commands.execute(&gs, .{ .upgrade_tier = fb }));
     try std.testing.expectEqual(before, digest.stateHash(&gs));
 }
