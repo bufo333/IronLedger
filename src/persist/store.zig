@@ -1392,13 +1392,23 @@ pub const Store = struct {
     // Stock at every site.
     fn loadStock(self: Store, gs: *GameState, cid: i64) !void {
         const alloc = gs.allocator();
+        // Track (owner_kind, owner_id, key) triples to detect duplicate rows
+        // (rule 47, C7). Arena-backed; deinit reclaims the table array.
+        var seen: std.StringHashMapUnmanaged(void) = .empty;
+        defer seen.deinit(alloc);
         const st = try self.db.prepare("SELECT owner_kind, owner_id, key, qty FROM stock WHERE cid = ?1 ORDER BY owner_kind, owner_id, ord");
         defer st.finalize();
         try st.bindAll(.{cid});
         while (try st.next()) {
             const kind = try st.text(0, alloc);
-            const site = try siteFromCols(kind, st.int(1));
-            gs.addStock(site, try st.text(2, alloc), try st.intAs(u32, 3)) catch |err| return switch (err) {
+            const owner_id = st.int(1);
+            const key = try st.text(2, alloc);
+            const site = try siteFromCols(kind, owner_id);
+            // A second row for the same (owner_kind, owner_id, key) is corruption.
+            const tag = try std.fmt.allocPrint(alloc, "{s}\x00{d}\x00{s}", .{ kind, owner_id, key });
+            const gop = try seen.getOrPut(alloc, tag);
+            if (gop.found_existing) return error.CorruptSave;
+            gs.addStock(site, key, try st.intAs(u32, 3)) catch |err| return switch (err) {
                 // An orphan stock row (site not in gs.hqs/gs.forces) or a
                 // sum that overflows u32 are both corruption (rule 47).
                 error.UnknownSite, error.StockOverflow => error.CorruptSave,
@@ -1884,6 +1894,29 @@ pub const Store = struct {
                 .conceded = br.int(49) != 0,
                 .acknowledged = br.int(50) != 0,
             });
+        }
+        // Post-load orphan check: a child row whose report_ord names no loaded
+        // battle_report is corruption (rule 47, C7). One query per child table.
+        {
+            const chk = try self.db.prepare("SELECT COUNT(*) FROM battle_report_hit WHERE cid = ?1 AND report_ord NOT IN (SELECT ord FROM battle_report WHERE cid = ?1)");
+            defer chk.finalize();
+            try chk.bindAll(.{cid});
+            if (!try chk.next()) return error.CorruptSave;
+            if (chk.int(0) > 0) return error.CorruptSave;
+        }
+        {
+            const chk = try self.db.prepare("SELECT COUNT(*) FROM battle_report_ammo WHERE cid = ?1 AND report_ord NOT IN (SELECT ord FROM battle_report WHERE cid = ?1)");
+            defer chk.finalize();
+            try chk.bindAll(.{cid});
+            if (!try chk.next()) return error.CorruptSave;
+            if (chk.int(0) > 0) return error.CorruptSave;
+        }
+        {
+            const chk = try self.db.prepare("SELECT COUNT(*) FROM battle_report_salvage WHERE cid = ?1 AND report_ord NOT IN (SELECT ord FROM battle_report WHERE cid = ?1)");
+            defer chk.finalize();
+            try chk.bindAll(.{cid});
+            if (!try chk.next()) return error.CorruptSave;
+            if (chk.int(0) > 0) return error.CorruptSave;
         }
     }
 
@@ -2972,6 +3005,29 @@ test "an orphan stock row rejects the load as corrupt, not UnknownSite" {
     // stock.owner_id names a site (hq or company) that is not in the live maps;
     // loadStock must surface this as error.CorruptSave (not the internal error.UnknownSite).
     try std.testing.expectError(error.CorruptSave, loadAfterTampering("UPDATE stock SET owner_id = 99999 WHERE owner_kind IN ('hq','company')"));
+}
+
+test "a duplicate stock row for the same owner and key rejects the load as corrupt" {
+    // Two rows with identical (owner_kind, owner_id, key) are corruption (rule 47, C7).
+    // Insert a copy of the first stock row with a fresh ord so the PRIMARY KEY does not
+    // block the insert; loadStock must catch the repeat via its seen-set guard.
+    try std.testing.expectError(error.CorruptSave, loadAfterTampering(
+        "INSERT INTO stock SELECT cid, owner_kind, owner_id, (SELECT MAX(ord) FROM stock) + 1, key, qty FROM stock LIMIT 1",
+    ));
+}
+
+test "an orphan battle_report child row rejects the load as corrupt" {
+    // A battle_report_hit/ammo/salvage row whose report_ord names no battle_report is
+    // corruption (rule 47, C7). Use foughtCampaignForTest so battle_report rows exist.
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 9901 });
+    defer gs.deinit();
+    try foughtCampaignForTest(&gs, 1);
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    // Insert an ammo row with report_ord 99999 which no battle_report.ord equals.
+    try store.db.exec("INSERT INTO battle_report_ammo VALUES ((SELECT id FROM campaign LIMIT 1), 99999, 0, 'lrm5', 0, 0)");
+    try std.testing.expectError(error.CorruptSave, store.load(std.testing.allocator, gs.campaign_id));
 }
 
 test "an unknown optional enum value rejects the load" {
