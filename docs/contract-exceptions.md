@@ -23,7 +23,7 @@ Owner of every entry: the project owner.
   - **Primitives.** Only four commands call `reserveLedger`.
   - **`acceptContract`.** It removes the offer before its fallible steps (`commands.zig:2351-2419`).
   - **Assets split by a fallible step after a mutation:**
-    - `commands.zig`: `execLink:624`, `execTrainAbility:939`, `execUpgradeTier:604`, `orderPart:2210-2230`, `execDisbandCompany:1472`
+    - `commands.zig`: `execTrainAbility:939`, `execUpgradeTier:604`, `orderPart:2210-2230`, `execDisbandCompany:1472`
   - **Partial loops.**
     - `replaceGear` (`commands.zig:2118-2156`) runs a per-slot loop with no batch validation.
     - `commitLift` (`commands.zig:2296-2301`) keeps moved ships after a failure.

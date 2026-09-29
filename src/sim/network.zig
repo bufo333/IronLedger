@@ -15,7 +15,6 @@ const GameState = state_mod.GameState;
 const founding = @import("founding.zig");
 const hq_link = @import("../domain/hq_link.zig");
 const lift_mod = @import("lift.zig");
-const treasury = @import("treasury.zig");
 const toe = @import("toe.zig");
 const commands = @import("commands.zig");
 
@@ -193,6 +192,7 @@ pub fn assignCompany(gs: *GameState, company: types.ForceId, hq: types.HqId) !vo
 
 /// Establish or raise a supply link between two HQs.
 pub fn establishLink(gs: *GameState, a: types.HqId, b: types.HqId, level: u8) !void {
+    // Validate — no mutation.
     if (gs.hqs.getPtr(a) == null or gs.hqs.getPtr(b) == null) return error.UnknownHq;
     if (a == b) return error.SameForce;
     if (level == 0 or level > 3) return error.BadLevel;
@@ -202,18 +202,36 @@ pub fn establishLink(gs: *GameState, a: types.HqId, b: types.HqId, level: u8) !v
     // A dedicated line is your own jumpship on the run.
     if (level >= 3 and !lift_mod.ownsCrewedJumpshipAt(gs, a, b)) return error.NoJumpship;
     const cost = hq_link.linkCost(level) - hq_link.linkCost(from_level);
-    try treasury.debit(gs, .outfit, .{
+    if (gs.treasuryBalance(.outfit) < cost) return error.InsufficientTreasury;
+
+    // Prepare — fallible, still no mutation.
+    try gs.reserveLedger(1);
+    var date_buf: [10]u8 = undefined;
+    const line = try std.fmt.allocPrint(gs.allocator(), "{s} [network] supply link level {d} between hq:{d} and hq:{d}", .{ gs.clock.date.text(&date_buf), level, @intFromEnum(a), @intFromEnum(b) });
+    try gs.reserveLog(1);
+    if (existing == null) try gs.hq_links.ensureUnusedCapacity(gs.allocator(), 1);
+
+    // Commit — no fallible operation past this point.
+    gs.ledger.transactions.appendAssumeCapacity(.{
         .day = gs.clock.day_index,
         .amount = -cost,
         .category = .transport_charter,
         .note = "supply link established",
     });
+    gs.funds += -cost;
     if (existing) |e| {
         e.level = level;
     } else {
-        try gs.hq_links.append(gs.allocator(), .{ .a = a, .b = b, .level = level, .established_day = gs.clock.day_index });
+        gs.hq_links.appendAssumeCapacity(.{ .a = a, .b = b, .level = level, .established_day = gs.clock.day_index });
     }
-    try gs.log(.delivery, .{ .hq = b }, "[network] supply link level {d} between hq:{d} and hq:{d}", .{ level, @intFromEnum(a), @intFromEnum(b) });
+    gs.event_log.appendAssumeCapacity(.{
+        .day = gs.clock.day_index,
+        .category = .delivery,
+        .company = .none,
+        .hq = b,
+        .contract = .none,
+        .text = line,
+    });
 }
 
 // ---- C4b exec wrappers ----
@@ -258,4 +276,32 @@ test "routes follow links, charter when there are none, and links cap tonnage" {
     try std.testing.expectError(error.ThroughputExceeded, reserveThroughput(&gs, linked, 20));
     resetWeeklyThroughput(&gs);
     try reserveThroughput(&gs, linked, 20);
+}
+
+test "establishLink leaves funds, ledger and hq_links unchanged when allocation fails" {
+    const digest = @import("digest.zig");
+
+    var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer outer.deinit();
+    var gs = GameState.init(outer.allocator(), .{ .seed = 9109 });
+    _ = try founding.createCommander(&gs, "T", .LC, .quartermaster);
+    const home = gs.hqs.keys()[0];
+    const far = try founding.foundHq(&gs, "Frontier", .field, "alkaid");
+
+    // Guarantee funds cover linkCost(2) so the failure is OOM, not InsufficientTreasury.
+    gs.funds = 1_000_000_000;
+
+    const before = digest.stateHash(&gs);
+    const links_before = gs.hq_links.items.len;
+    const funds_before = gs.funds;
+
+    // Block every further allocation so reserveLedger or allocPrint fails.
+    gs.arena.state.used_list = null;
+    gs.arena.state.free_list = null;
+    gs.arena.child_allocator = std.testing.failing_allocator;
+
+    try std.testing.expectError(error.OutOfMemory, establishLink(&gs, home, far, 2));
+    try std.testing.expectEqual(before, digest.stateHash(&gs));
+    try std.testing.expectEqual(links_before, gs.hq_links.items.len);
+    try std.testing.expectEqual(funds_before, gs.funds);
 }
