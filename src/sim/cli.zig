@@ -169,7 +169,7 @@ fn parseVerb(verb: []const u8, tokens: *std.mem.TokenIterator(u8, .scalar)) Pars
         const role = std.meta.stringToEnum(game.force.LanceRole, try need(tokens.next())) orelse return error.BadArguments;
         return .{ .set_role = .{ .force = fid, .role = role } };
     }
-    if (eq(u8, verb, "repay")) return .{ .repay_loan = .{ .index = try num(usize, tokens.next()), .amount = try num(i64, tokens.next()) } };
+    if (eq(u8, verb, "repay")) return .{ .repay_loan = .{ .loan = @enumFromInt(try num(u32, tokens.next())), .amount = try num(i64, tokens.next()) } };
     if (eq(u8, verb, "sell")) return .{ .sell_unit = @enumFromInt(try num(u32, tokens.next())) };
     if (eq(u8, verb, "strip")) return .{ .strip_unit = @enumFromInt(try num(u32, tokens.next())) };
     if (eq(u8, verb, "raise")) {
@@ -241,21 +241,21 @@ fn parseVerb(verb: []const u8, tokens: *std.mem.TokenIterator(u8, .scalar)) Pars
         return .{ .promote = .{ .person = pid, .rank = r, .pin = pin } };
     }
     if (eq(u8, verb, "negotiate")) {
-        // negotiate <offer#> advance|salvage|transport|support|rights|pay
-        const idx = try num(usize, tokens.next());
+        // negotiate <offer-id> advance|salvage|transport|support|rights|pay
+        const offer_id: types.ContractId = @enumFromInt(try num(u32, tokens.next()));
         const term = std.meta.stringToEnum(game.contract.NegotiableTerm, try need(tokens.next())) orelse return error.BadArguments;
-        return .{ .negotiate = .{ .offer_index = idx, .term = term } };
+        return .{ .negotiate = .{ .offer = offer_id, .term = term } };
     }
     if (eq(u8, verb, "accept")) {
-        // accept <offer#> <co:N | N>
-        const idx = try num(usize, tokens.next());
+        // accept <offer-id> <co:N | N>
+        const offer_id: types.ContractId = @enumFromInt(try num(u32, tokens.next()));
         const tok = try need(tokens.next());
         const company: types.ForceId = if (std.fmt.parseInt(u32, tok, 10)) |n| @enumFromInt(n) else |_| blk: {
             const site = try parseSite(tok);
             if (site != .company) return error.BadSite;
             break :blk site.company;
         };
-        return .{ .accept_contract = .{ .offer_index = idx, .company = company } };
+        return .{ .accept_contract = .{ .offer = offer_id, .company = company } };
     }
     if (eq(u8, verb, "read")) return .{ .read_report = @enumFromInt(try num(u32, tokens.next())) };
     if (eq(u8, verb, "resolve")) {
@@ -271,7 +271,7 @@ fn parseVerb(verb: []const u8, tokens: *std.mem.TokenIterator(u8, .scalar)) Pars
     if (eq(u8, verb, "ship")) {
         return .{ .ship_stock = .{ .part_key = try need(tokens.next()), .quantity = try num(u32, tokens.next()), .from = try parseSite(try need(tokens.next())), .to = try parseSite(try need(tokens.next())) } };
     }
-    if (eq(u8, verb, "buy")) return .{ .buy_listing = try num(usize, tokens.next()) };
+    if (eq(u8, verb, "buy")) return .{ .buy_listing = @enumFromInt(try num(u32, tokens.next())) };
     if (eq(u8, verb, "assign") or eq(u8, verb, "unassign")) {
         // assign <unit> [pilot|tech] <person> — no slot word: the person's
         // role decides. unassign <unit> [pilot|tech] — no slot word: both.
@@ -319,9 +319,9 @@ fn parseVerb(verb: []const u8, tokens: *std.mem.TokenIterator(u8, .scalar)) Pars
         return .{ .fabricate = .{ .hq = hq_id, .part_key = tok, .quantity = qty } };
     }
     if (eq(u8, verb, "hire")) {
-        // hire <candidate#> (from the hall) | hire <role> <first> <last>
+        // hire <candidate-id> (from the hall) | hire <role> <first> <last>
         const first_tok = try need(tokens.next());
-        if (std.fmt.parseInt(usize, first_tok, 10)) |idx| return .{ .hire_candidate = idx } else |_| {}
+        if (std.fmt.parseInt(u32, first_tok, 10)) |id| return .{ .hire_candidate = @enumFromInt(id) } else |_| {}
         const role = std.meta.stringToEnum(game.person.Role, first_tok) orelse return error.BadArguments;
         return .{ .hire = .{ .first = tokens.next() orelse "New", .last = tokens.next() orelse "Recruit", .role = role } };
     }

@@ -1047,7 +1047,7 @@ fn reachable(gs: *GameState, world: *const planet_mod.Planet) bool {
 }
 
 /// Found a field HQ on a reachable world.
-pub fn foundHq(gs: *GameState, name: []const u8, planet_key: []const u8) !void {
+pub fn foundHq(gs: *GameState, name: []const u8, planet_key: []const u8) !types.HqId {
     const world = planet_mod.find(planet_key) orelse return error.UnknownPlanet;
     if (!reachable(gs, world)) return error.NotReachable;
     const cost: types.CBills = tuning.hq.found_field_hq_cost;
@@ -1081,6 +1081,7 @@ pub fn foundHq(gs: *GameState, name: []const u8, planet_key: []const u8) !void {
         .hq = id,
         .text = line,
     });
+    return id;
 }
 
 /// Field → regional tier upgrade.
@@ -1116,7 +1117,7 @@ pub fn autostaff(gs: *GameState, hq_id: types.HqId) !void {
 /// Fabricate structural components in the HQ mek bay.
 pub fn fabricate(gs: *GameState, hq_id: types.HqId, part_key: []const u8, quantity: u32) !void {
     var actual_hq = hq_id;
-    if (actual_hq == .none and gs.hqs.count() > 0) actual_hq = gs.hqs.keys()[0];
+    if (actual_hq == .none) actual_hq = gs.seat();
     if (gs.hqs.getPtr(actual_hq) == null) return error.UnknownHq;
     const def = part_mod.find(part_key) orelse return error.UnknownPart;
     if (!part_mod.isComponent(def.key)) return error.NotAComponent;
@@ -1214,7 +1215,7 @@ pub fn sellHq(gs: *GameState, hq_id: types.HqId) !void {
         c.to = .outfit;
     };
     _ = gs.hqs.orderedRemove(hq_id);
-    const seat: types.HqId = if (gs.hqs.count() > 0) gs.hqs.keys()[0] else .none;
+    const seat: types.HqId = gs.seat();
     var uit2 = gs.units.iterator();
     while (uit2.next()) |e| if (e.value_ptr.berth_hq == hq_id) {
         e.value_ptr.berth_hq = seat;
@@ -1256,8 +1257,8 @@ const Result = commands.Result;
 const Command = commands.Command;
 
 pub fn execFoundHq(gs: *GameState, f: @FieldType(Command, "found_hq")) Error!Result {
-    foundHq(gs, f.name, f.planet_key) catch |err| return @errorCast(err);
-    return .{};
+    const hq_id = foundHq(gs, f.name, f.planet_key) catch |err| return @errorCast(err);
+    return .{ .created_hq = hq_id };
 }
 
 pub fn execUpgradeTier(gs: *GameState, hq_id: @FieldType(Command, "upgrade_tier")) Error!Result {
@@ -1311,7 +1312,7 @@ test "fabricate propagates OutOfMemory and changes nothing" {
     defer outer.deinit();
     var gs = GameState.init(outer.allocator(), .{ .seed = 55 });
     _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
-    const hq_id = gs.hqs.keys()[0];
+    const hq_id = gs.seat();
     const funds_before = gs.hqs.values()[0].funds;
     const jobs_before = gs.bay_jobs.items.len;
     const stock_before = gs.stockCount(.{ .hq = hq_id }, "comp_leg");
@@ -1361,7 +1362,7 @@ test "queueDepotRepair leaves stock unchanged when bay-job allocation fails" {
     defer outer.deinit();
     var gs = GameState.init(outer.allocator(), .{ .seed = 4002 });
     _ = try founding.createCommander(&gs, "T", .LC, .chief_engineer);
-    const hq_id = gs.hqs.keys()[0];
+    const hq_id = gs.seat();
     const uid = try gs.addUnit("SHD-2H");
     const u = gs.unit(uid).?;
     u.slots.items[1].condition = .destroyed; // ct.structure -> needs comp_ct
@@ -1385,7 +1386,7 @@ test "repair odds favour the sharper tech and the better hull; the parts sum to 
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1212 });
     defer gs.deinit();
     _ = try founding.createCommander(&gs, "T", .LC, .chief_engineer);
-    const hq_id = gs.hqs.keys()[0];
+    const hq_id = gs.seat();
     const uid = try gs.addUnit("AS7-D");
     const none = repairOdds(&gs, hq_id, uid); // no tech at all: skill 7
     try std.testing.expectEqual(@as(u32, 100), @as(u32, none.clean_pct) + none.fault_pct + none.redo_pct);
@@ -1405,7 +1406,7 @@ test "bays are slots: jobs queue when full and finish in order" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 31 });
     defer gs.deinit();
     _ = try founding.createCommander(&gs, "T", .LC, .chief_engineer); // mek_bay lv1 → 2 slots
-    const hq_id = gs.hqs.keys()[0];
+    const hq_id = gs.seat();
 
     try queueFabrication(&gs, hq_id, "comp_arm", 3); // 6 days each, 3 jobs, 2 slots
     try runDaily(&gs);
@@ -1425,7 +1426,7 @@ test "depot repair needs the right components, then holds a bay" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 32 });
     defer gs.deinit();
     _ = try founding.createCommander(&gs, "T", .LC, .chief_engineer);
-    const hq_id = gs.hqs.keys()[0];
+    const hq_id = gs.seat();
     const uid = try gs.addUnit("SHD-2H");
     const u = gs.unit(uid).?;
     u.slots.items[1].condition = .destroyed; // ct.structure → comp_ct
@@ -1458,7 +1459,7 @@ test "depot refusal for a destroyed-but-intact hull leaves the hull untouched" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 36 });
     defer gs.deinit();
     _ = try founding.createCommander(&gs, "T", .LC, .chief_engineer);
-    const hq_id = gs.hqs.keys()[0];
+    const hq_id = gs.seat();
     const uid = try gs.addUnit("SHD-2H");
     const u = gs.unit(uid).?;
     u.status = .destroyed; // crew killed, hull structure intact: coring rebuilds it
@@ -1478,7 +1479,7 @@ test "one rule for structural needs: the depot, the demand ledger and the screen
     var gs = GameState.init(std.testing.allocator, .{ .seed = 34 });
     defer gs.deinit();
     _ = try founding.createCommander(&gs, "T", .LC, .chief_engineer);
-    const hq_id = gs.hqs.keys()[0];
+    const hq_id = gs.seat();
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const al = arena.allocator();
@@ -1539,7 +1540,7 @@ test "one rule for field spares: replace orders what the site's ledger says is s
     var gs = GameState.init(std.testing.allocator, .{ .seed = 35 });
     defer gs.deinit();
     _ = try founding.createCommander(&gs, "T", .LC, .chief_engineer);
-    const hq_id = gs.hqs.keys()[0];
+    const hq_id = gs.seat();
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const al = arena.allocator();
@@ -1585,7 +1586,7 @@ test "construction projects: paperwork then build, staffing bill rises" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 33 });
     defer gs.deinit();
     _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
-    const hq_id = gs.hqs.keys()[0];
+    const hq_id = gs.seat();
     const before = gs.hqs.values()[0].staffRequired().total();
 
     try startUpgrade(&gs, hq_id, .warehouse);
@@ -1603,7 +1604,7 @@ test "tier upgrade: refusals keep the money; a funded field HQ starts the projec
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1230 });
     defer gs.deinit();
     _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
-    const home = gs.hqs.keys()[0];
+    const home = gs.seat();
     const home_funds = gs.hqs.getPtr(home).?.funds;
     try std.testing.expectError(commands.Error.MaxLevel, commands.execute(&gs, .{ .upgrade_tier = home })); // already regional
     try std.testing.expectEqual(home_funds, gs.hqs.getPtr(home).?.funds);
@@ -1631,7 +1632,7 @@ test "components — fabrication is guaranteed, purchase is a roll" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 55 });
     defer gs.deinit();
     _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
-    const hq_id = gs.hqs.keys()[0];
+    const hq_id = gs.seat();
 
     // The guarantee: fabrication always happens, at the premium, over bay
     // time (level-1 bay = 2 slots, so 3 legs take two 8-day rounds).
@@ -1663,7 +1664,7 @@ test "construction is paid by the HQ and the back office sets the pace" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 57 });
     defer gs.deinit();
     _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .FS, .profession = .paymaster } });
-    const hq_id = gs.hqs.keys()[0];
+    const hq_id = gs.seat();
     gs.hqs.values()[0].funds = 5_000_000;
 
     // Starter HQ staff are real people, posted, and cover the requirement.
@@ -1701,7 +1702,7 @@ test "one HQ, one company — the second needs a second regional HQ" {
     // A Combine commander: every DC world is within reach of Zebebelgenubi
     // and none within reach of Callison, whichever world the HQ landed on.
     _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .DC, .profession = .paymaster } });
-    const home = gs.hqs.keys()[0];
+    const home = gs.seat();
 
     const alpha = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
     try std.testing.expectEqual(home, gs.force(alpha).?.supplying_hq);
@@ -1752,7 +1753,7 @@ test "depot work happens at the hull's home HQ — its components, its bay — n
     var gs = GameState.init(std.testing.allocator, .{ .seed = 97 });
     defer gs.deinit();
     _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
-    const home = gs.hqs.keys()[0];
+    const home = gs.seat();
     // A second HQ in the home ring, raised to regional with a staffed bay.
     const home_world = planet_mod.find(gs.hqs.getPtr(home).?.planet_key).?;
     var key: []const u8 = "";
@@ -1799,7 +1800,7 @@ test "a wreck is rebuilt in the depot — a component and bay time — and comes
     defer gs.deinit();
     _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
     const co = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
-    const home = gs.hqs.keys()[0];
+    const home = gs.seat();
     gs.hqs.getPtr(home).?.staff_assigned = 999;
     var uid: types.UnitId = .none;
     var uit = gs.units.iterator();
@@ -1853,7 +1854,7 @@ test "how a hull died decides the rebuild — engine kills cost an engine, scrap
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1202 });
     defer gs.deinit();
     _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
-    const home = gs.hqs.keys()[0];
+    const home = gs.seat();
     gs.hqs.getPtr(home).?.staff_assigned = 999;
 
     // An ammunition explosion guts both side torsos and needs an engine.
@@ -1903,7 +1904,7 @@ test "heavy assemblies need a level-2 bay, assault ones a level-3 bay at a regio
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1208 });
     defer gs.deinit();
     _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
-    const hq_id = gs.hqs.keys()[0];
+    const hq_id = gs.seat();
     const h = gs.hqs.getPtr(hq_id).?;
     h.staff_assigned = 999;
     h.funds = 50_000_000;
@@ -1929,7 +1930,7 @@ test "an upgrade the HQ cannot afford is refused before a C-bill moves, from the
     var gs = GameState.init(std.testing.allocator, .{ .seed = 909 });
     defer gs.deinit();
     _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
-    const hq = gs.hqs.keys()[0];
+    const hq = gs.seat();
     gs.hqs.getPtr(hq).?.funds = 1;
     try std.testing.expectEqual(UpgradeBlock.funds_short, upgradeBlock(&gs, hq, .mess).?);
     try std.testing.expectError(commands.Error.InsufficientTreasury, commands.execute(&gs, .{ .upgrade_facility = .{ .hq = hq, .kind = .mess } }));
@@ -2044,7 +2045,7 @@ test "upgradeTier leaves the HQ, its projects, the log and the ledger unchanged 
     defer outer.deinit();
     var gs = GameState.init(outer.allocator(), .{ .seed = 1230 });
     _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
-    const home = gs.hqs.keys()[0];
+    const home = gs.seat();
     const home_world = planet_mod.find(gs.hqs.getPtr(home).?.planet_key).?;
     var key: []const u8 = "";
     for (planet_mod.catalog) |*p| if (p != home_world and planet_mod.distanceLy(p, home_world) <= gs.hqs.getPtr(home).?.influenceLy() and key.len == 0) {
@@ -2071,7 +2072,7 @@ test "a due depot-repair bay job is unchanged — no RNG consumed, no treasury d
     defer outer.deinit();
     var gs = GameState.init(outer.allocator(), .{ .seed = 5050 });
     _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
-    const hq = gs.hqs.keys()[0];
+    const hq = gs.seat();
     gs.hqs.getPtr(hq).?.funds = 5_000_000;
     const uid = try gs.addUnit("LCT-1V");
     gs.unit(uid).?.status = .repairing;
@@ -2118,7 +2119,7 @@ test "bay-job injure-branch: when the bay accident fires the injury is atomicall
         var gs = GameState.init(std.testing.allocator, .{ .seed = @intCast(seed_val) });
         defer gs.deinit();
         _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
-        const hq2 = gs.hqs.keys()[0];
+        const hq2 = gs.seat();
         gs.hqs.getPtr(hq2).?.funds = 5_000_000;
         const uid2 = try gs.addUnit("LCT-1V");
         gs.unit(uid2).?.status = .repairing;

@@ -534,7 +534,7 @@ test "trim_stock propagates OutOfMemory and moves nothing" {
     _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "E", .origin = .CC, .profession = .paymaster } });
     const co = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
     const site: types.Site = .{ .company = co };
-    _ = try commands.execute(&gs, .{ .accept_contract = .{ .offer_index = 0, .company = co } });
+    _ = try commands.execute(&gs, .{ .accept_contract = .{ .offer = gs.contract_offers.items[0].id, .company = co } });
     _ = gs.takeStock(site, "provisions", gs.stockCount(site, "provisions"));
     try gs.addStock(site, "comp_arm", 1);
     const comp_arm_before = gs.stockCount(site, "comp_arm");
@@ -567,7 +567,7 @@ test "trim_stock is atomic when any allocation fails" {
     _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "E", .origin = .CC, .profession = .paymaster } });
     const co = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
     const site: types.Site = .{ .company = co };
-    _ = try commands.execute(&gs, .{ .accept_contract = .{ .offer_index = 0, .company = co } });
+    _ = try commands.execute(&gs, .{ .accept_contract = .{ .offer = gs.contract_offers.items[0].id, .company = co } });
     _ = gs.takeStock(site, "provisions", gs.stockCount(site, "provisions"));
     try gs.addStock(site, "ammo_lrm", 30);
     try gs.addStock(site, "ammo_ac20", 3);
@@ -599,7 +599,7 @@ test "trim_stock returns excess and unplanned consumables home, keeps spares" {
     _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "E", .origin = .CC, .profession = .paymaster } });
     const co = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
     const site: @import("../domain/types.zig").Site = .{ .company = co };
-    _ = try commands.execute(&gs, .{ .accept_contract = .{ .offer_index = 0, .company = co } });
+    _ = try commands.execute(&gs, .{ .accept_contract = .{ .offer = gs.contract_offers.items[0].id, .company = co } });
     // Overstock one family, add a family nothing fires, a component and a spare laser.
     _ = gs.takeStock(site, "provisions", gs.stockCount(site, "provisions"));
     try gs.addStock(site, "ammo_lrm", 30);
@@ -638,7 +638,7 @@ test "deployment eats field stores, then buys local, then goes hungry" {
     const site: @import("../domain/types.zig").Site = .{ .company = co };
 
     // Accepting a contract loads the trucks from the home warehouse.
-    _ = try commands.execute(&gs, .{ .accept_contract = .{ .offer_index = 0, .company = co } });
+    _ = try commands.execute(&gs, .{ .accept_contract = .{ .offer = gs.contract_offers.items[0].id, .company = co } });
     const loaded = gs.stockCount(site, "provisions");
     try std.testing.expect(loaded > 0);
     try std.testing.expect(sites_m.siteTons(&gs, site) <= sites_m.siteCapacityTons(&gs, site).?);
@@ -677,7 +677,7 @@ test "the resupply plan keeps a deployed company fed and armed on a long line" {
     defer gs.deinit();
     _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "E", .origin = .CC, .profession = .paymaster } });
     const co = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
-    const hq = gs.hqs.keys()[0];
+    const hq = gs.seat();
     const site: @import("../domain/types.zig").Site = .{ .company = co };
     for (part_mod.munition_keys) |k| try gs.addStock(.{ .hq = hq }, k, 60);
     try gs.addStock(.{ .hq = hq }, "provisions", 400);
@@ -688,7 +688,7 @@ test "the resupply plan keeps a deployed company fed and armed on a long line" {
     for (gs.contract_offers.items, 0..) |o, i| if (o.dist_ly < gs.contract_offers.items[nearest].dist_ly) {
         nearest = i;
     };
-    _ = try commands.execute(&gs, .{ .accept_contract = .{ .offer_index = nearest, .company = co } });
+    _ = try commands.execute(&gs, .{ .accept_contract = .{ .offer = gs.contract_offers.items[nearest].id, .company = co } });
     // The load-out follows the plan: within capacity, no munitions the company cannot fire.
     const cap = sites_m.siteCapacityTons(&gs, site).?;
     try std.testing.expect(sites_m.siteTons(&gs, site) <= cap);

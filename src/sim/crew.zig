@@ -47,7 +47,7 @@ pub fn canReachPool(gs: *GameState, p: *const person_mod.Person) bool {
     const company = gs.companyOf(p.assigned_force);
     if (company == .none) return true;
     if (!posture.isCompanyHome(gs, company)) return false;
-    const seat: types.HqId = if (gs.hqs.count() > 0) gs.hqs.keys()[0] else .none;
+    const seat: types.HqId = gs.seat();
     return gs.homeHqFor(company) == seat;
 }
 
@@ -260,7 +260,7 @@ test "assignBlock's reason matches crewChoices' dim and the assign command's ref
     const wounded_rows = try queries.crewChoices(al, &gs, mek);
     var wounded_row_why: ?[]const u8 = null;
     for (wounded_rows) |r| {
-        if (r.id == @intFromEnum(wounded)) wounded_row_why = r.why;
+        if (r.sel == .person and r.sel.person == wounded) wounded_row_why = r.why;
     }
     try std.testing.expectEqualStrings(wounded_reason, wounded_row_why orelse return error.TestExpectedEqual);
     try std.testing.expectError(commands.Error.Unavailable, commands.execute(&gs, .{ .assign = .{ .unit = mek, .slot = .pilot, .person = wounded } }));
@@ -283,7 +283,7 @@ test "assignBlock's reason matches crewChoices' dim and the assign command's ref
     const away_rows = try queries.crewChoices(al, &gs, pool_mek);
     var away_row_why: ?[]const u8 = null;
     for (away_rows) |r| {
-        if (r.id == @intFromEnum(away_pilot)) away_row_why = r.why;
+        if (r.sel.person == away_pilot) away_row_why = r.why;
     }
     try std.testing.expectEqualStrings(away_reason, away_row_why orelse return error.TestExpectedEqual);
     try std.testing.expectError(commands.Error.PersonAway, commands.execute(&gs, .{ .assign = .{ .unit = pool_mek, .slot = .pilot, .person = away_pilot } }));
@@ -311,7 +311,7 @@ test "assign without a slot word picks the seat by role, on pool hulls too" {
     try std.testing.expect(seats.len >= 1);
     // A tech whose company is away cannot reach the pool.
     const co = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
-    _ = try commands.execute(&gs, .{ .accept_contract = .{ .offer_index = 0, .company = co } });
+    _ = try commands.execute(&gs, .{ .accept_contract = .{ .offer = gs.contract_offers.items[0].id, .company = co } });
     var away: types.PersonId = .none;
     var pit = gs.people.iterator();
     while (pit.next()) |e| if (e.value_ptr.role == .tech_mek and gs.companyOf(e.value_ptr.assigned_force) == co and away == .none) {
@@ -365,8 +365,8 @@ test "assignments — roles enforced, one seat per pilot, hall hiring" {
     try std.testing.expect(gs.candidates.items.len > 0);
     const roster_before = gs.people.count();
     const funds_before = gs.funds;
-    _ = try commands.execute(&gs, .{ .hire_candidate = 0 });
+    _ = try commands.execute(&gs, .{ .hire_candidate = gs.candidates.items[0].id });
     try std.testing.expectEqual(roster_before + 1, gs.people.count());
     try std.testing.expect(gs.funds <= funds_before);
-    try std.testing.expectError(Error.NoSuchCandidate, commands.execute(&gs, .{ .hire_candidate = 99 }));
+    try std.testing.expectError(Error.NoSuchCandidate, commands.execute(&gs, .{ .hire_candidate = @as(types.CandidateId, @enumFromInt(99999)) }));
 }

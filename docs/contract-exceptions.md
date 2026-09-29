@@ -15,25 +15,6 @@ Owner of every entry: the project owner.
 
 ---
 
-### C6. Identity is inferred or positional
-
-- **Rules:** 16, 32, 56.
-- **Why not yet:** Typed IDs for offers, listings, candidates and loans change command payloads, the save format and every frontend that uses them.
-- **Scope:**
-  - **Commands take list positions:** `accept_contract`, `negotiate`, `buy_listing`, `hire_candidate`, `repay_loan` (`commands.zig:65`, `72`, `82`, `114`, `166`). `negotiate` removes an offer, which shifts every later index (`2327`).
-  - **Results carry no created ID:** `found_hq`, `accept_contract`, `order_part`, `take_loan`.
-  - **"Last" lookups:**
-    - `acceptedLine`, `lastOrderLine`, `lastLogLine` (`queries.zig:5757`, `5683`, `5637`)
-    - `battle.lastWound:1105`
-    - `queries.zig:2747` (`next_person_id - 1`)
-  - **The seat HQ by collection order:** about 100 `hqs.keys()[0]` sites.
-  - **Untyped rows and pickers:**
-    - Checklist rows carry a tab number, not a target.
-    - `PickRow.id` is an untyped `u32`.
-    - `hq_sel` and the log modal keep row positions.
-- **Removal:** C6.
-- **Guard:** review (checklist questions 7 and 8). No mechanical check.
-
 ### C7. Loading does not fail closed
 
 - **Rules:** 2, 7, 45, 46, 47, 48.

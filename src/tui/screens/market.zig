@@ -76,9 +76,9 @@ pub fn handle(self: *App, k: app.Key) anyerror!bool {
             if (view.board.len > 0) {
                 const l = view.board[@min(self.cur(0).*, view.board.len - 1)];
                 if (l.transport) {
-                    _ = try self.execSay(.{ .buy_listing = l.index }, .good, "bought listing [{d}] — berthed at {s}; hire a ship crew from the hall and it lifts the next deployment", .{ l.index, try q.hqName(self.a(), g, hq_id) });
+                    _ = try self.execSay(.{ .buy_listing = l.id }, .good, "bought listing [{d}] — berthed at {s}; hire a ship crew from the hall and it lifts the next deployment", .{ @intFromEnum(l.id), try q.hqName(self.a(), g, hq_id) });
                 } else {
-                    _ = try self.execSay(.{ .buy_listing = l.index }, .good, "bought listing [{d}]", .{l.index});
+                    _ = try self.execSay(.{ .buy_listing = l.id }, .good, "bought listing [{d}]", .{@intFromEnum(l.id)});
                 }
             }
         },
@@ -156,8 +156,17 @@ pub fn handle(self: *App, k: app.Key) anyerror!bool {
             }
         },
         .next_hq, .prev_hq => {
-            const n = (try q.hqList(al, g)).len;
-            if (n > 0) self.hq_sel = if (hit.action == .next_hq) (self.hq_sel + 1) % n else (self.hq_sel + n - 1) % n;
+            const hqs = try q.hqList(al, g);
+            const n = hqs.len;
+            if (n > 0) {
+                var cur_i: usize = 0;
+                for (hqs, 0..) |row, i| if (row.id == self.hq_sel) {
+                    cur_i = i;
+                    break;
+                };
+                const next_i = if (hit.action == .next_hq) (cur_i + 1) % n else (cur_i + n - 1) % n;
+                self.hq_sel = hqs[next_i].id;
+            }
         },
     }
     return true;

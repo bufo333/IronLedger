@@ -11,6 +11,7 @@ const tuning = @import("../domain/tuning.zig").t;
 const types = @import("../domain/types.zig");
 const person_mod = @import("../domain/person.zig");
 const commander_mod = @import("../domain/commander.zig");
+const battle_report = @import("../domain/battle_report.zig");
 const GameState = @import("state.zig").GameState;
 const founding = @import("founding.zig");
 const hq_ops = @import("hq_ops.zig");
@@ -57,13 +58,14 @@ pub fn rollLocation(gs: *GameState, cause: WoundCause) person_mod.InjuryLocation
     };
 }
 
-/// Wound someone: they leave duty with a new injury of `severity` (1
-/// light, 2 serious, 3 crippling) at a rolled location. A crippling head
-/// or internal wound is permanent on 2d6 ≤ `tuning.medical.permanent_target`
-/// (`.medical` stream). Healing starts when the medbay admits them.
-pub fn inflict(gs: *GameState, person_id: types.PersonId, cause: WoundCause, severity: u8, why: []const u8) !void {
-    const p = gs.person(person_id) orelse return;
-    if (p.status == .kia) return;
+/// Wound someone: record a new injury of `severity` (1 light, 2 serious,
+/// 3 crippling) at a rolled location. A crippling head or internal wound is
+/// permanent on 2d6 ≤ `tuning.medical.permanent_target` (`.medical` stream).
+/// Returns the wound for the caller's record, or `null` if the person was not
+/// found or was already KIA. Healing starts when the medbay admits them.
+pub fn inflict(gs: *GameState, person_id: types.PersonId, cause: WoundCause, severity: u8, why: []const u8) !?battle_report.CrewOutcome.Wound {
+    const p = gs.person(person_id) orelse return null;
+    if (p.status == .kia) return null;
     const location = rollLocation(gs, cause);
     const permanent = severity >= 3 and (location == .head or location == .internal) and gs.rng.roll2d6(.medical) <= tuning.medical.permanent_target;
     try p.injuries.append(gs.allocator(), .{
@@ -80,6 +82,7 @@ pub fn inflict(gs: *GameState, person_id: types.PersonId, cause: WoundCause, sev
         try p.fullName(gs.allocator()), why, severityLabel(severity), @tagName(location),
         if (permanent) " — permanent" else "",
     });
+    return .{ .severity = @min(severity, 3), .location = location, .permanent = permanent };
 }
 
 pub fn severityLabel(severity: u8) []const u8 {
@@ -637,10 +640,10 @@ test "injuries land by location, heal on their own days, and permanent ones scar
     _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
     const id = try gs.hirePerson("Lori", "Kalmar", .mekwarrior);
     _ = try gs.hirePerson("Ivan", "Petrov", .doctor);
-    try gs.addStock(.{ .hq = gs.hqs.keys()[0] }, "medical_supplies", 10);
+    try gs.addStock(.{ .hq = gs.seat() }, "medical_supplies", 10);
 
-    try inflict(&gs, id, .combat, 1, "test");
-    try inflict(&gs, id, .accident, 3, "test");
+    _ = try inflict(&gs, id, .combat, 1, "test");
+    _ = try inflict(&gs, id, .accident, 3, "test");
     const p = gs.person(id).?;
     try std.testing.expectEqual(person_mod.Status.wounded, p.status);
     try std.testing.expectEqual(@as(u32, 2), p.openInjuries());
@@ -919,7 +922,7 @@ test "weekly rest uses the home HQ's mess, not the best mess in the outfit" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 7602 });
     defer gs.deinit();
     _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
-    const seat = gs.hqs.keys()[0];
+    const seat = gs.seat();
     const second = try founding.foundHq(&gs, "Second", .regional, "alkaid");
     for (gs.hqs.getPtr(seat).?.facilities.items) |*f| {
         if (f.kind == .mess) f.level = 3;
@@ -946,7 +949,7 @@ test "weekly rest uses the home HQ's mess, not the best mess in the outfit" {
 /// each. Returns the two trainees.
 fn twoHqTrainingForTest(gs: *GameState) !struct { at_seat: types.PersonId, at_second: types.PersonId } {
     _ = try commands.execute(gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
-    const seat = gs.hqs.keys()[0];
+    const seat = gs.seat();
     const second = try founding.foundHq(gs, "Second", .regional, "alkaid");
     for (gs.hqs.getPtr(second).?.facilities.items) |*f| {
         if (f.kind == .training_ground) f.level = 0;
@@ -1121,7 +1124,7 @@ test "abilities are bought with XP at a training ground and change the battle ma
     try std.testing.expectEqual(@as(u32, 76), pilot.xp);
     try std.testing.expectError(commands.Error.AlreadyLearned, commands.execute(&gs, .{ .train_ability = .{ .person = pilot.id, .key = "gunnery_specialist" } }));
     // Deployed: no school.
-    _ = try commands.execute(&gs, .{ .accept_contract = .{ .offer_index = 0, .company = co } });
+    _ = try commands.execute(&gs, .{ .accept_contract = .{ .offer = gs.contract_offers.items[0].id, .company = co } });
     try std.testing.expectError(commands.Error.PersonDeployed, commands.execute(&gs, .{ .train_ability = .{ .person = pilot.id, .key = "edge" } }));
 }
 

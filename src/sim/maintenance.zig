@@ -284,7 +284,7 @@ pub fn injureTech(gs: *GameState, tech_id: types.PersonId, days: u32, cause: []c
     // The accident's size sets the wound: a short spell is a
     // light injury, a long one serious, the worst crippling.
     const severity: u8 = if (days <= tuning.maintenance.injury_days_serious) 1 else if (days <= tuning.maintenance.injury_days_crippling) 2 else 3;
-    try @import("medical.zig").inflict(gs, tech_id, .accident, severity, cause);
+    _ = try @import("medical.zig").inflict(gs, tech_id, .accident, severity, cause);
     const company = gs.companyOf(t.assigned_force);
 
     var swapped: u32 = 0;

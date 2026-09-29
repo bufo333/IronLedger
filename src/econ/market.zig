@@ -213,6 +213,8 @@ pub const Listing = struct {
     item_key: []const u8, // chassis_key or part_key (catalog memory)
     rarity: types.Rarity,
     price: types.CBills,
+    /// Typed identity: assigned at generation; survives save/load (rule 56).
+    id: types.ListingId = .none,
     /// The HQ whose board this is (every HQ has one).
     hq: types.HqId = .none,
     quantity: u32 = 1,

@@ -216,7 +216,7 @@ test "forward depot: the nearest HQ holding the line ships it, the home HQ other
     var gs = GameState.init(std.testing.allocator, .{ .seed = 909 });
     defer gs.deinit();
     _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
-    const home = gs.hqs.keys()[0];
+    const home = gs.seat();
     const co = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
     // A firebase on a world inside the ring; the company idles on that very world.
     const home_world = planet_mod.find(gs.hqs.getPtr(home).?.planet_key).?;
@@ -283,7 +283,7 @@ test "stock policy failure logs a readable sentence, not the raw error name" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 4004 });
     defer gs.deinit();
     _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
-    const hq = gs.hqs.keys()[0];
+    const hq = gs.seat();
     // Fill the level-1 warehouse (200t) with a filler line so an mlas
     // order — a weapon, never fabricated — has nowhere to land.
     try gs.addStock(.{ .hq = hq }, "structure", 200);
@@ -364,7 +364,7 @@ pub fn runTravel(gs: *GameState) !void {
             if (t.to_company == .none) {
                 // Salvage: the wreck lands in the pool at the HQ, status by its damage.
                 if (gs.unit(t.unit)) |u| u.status = if (u.needsDepot()) .damaged else .ready;
-                try gs.log(.delivery, .{ .hq = if (gs.hqs.count() > 0) gs.hqs.keys()[0] else .none }, "[salvage] wreck {s} #{d} lands in the HQ pool — Forces: place it in a company and [D] sends it to the depot, or sell it", .{ name, @intFromEnum(t.unit) });
+                try gs.log(.delivery, .{ .hq = gs.seat() }, "[salvage] wreck {s} #{d} lands in the HQ pool — Forces: place it in a company and [D] sends it to the depot, or sell it", .{ name, @intFromEnum(t.unit) });
             } else try gs.log(.delivery, .{ .company = t.to_company }, "[transfer] {s} arrives and joins the company", .{name});
             _ = gs.unit_transfers.swapRemove(ti);
         } else ti += 1;
@@ -997,7 +997,7 @@ test "difficulty scales pay, fabrication and purchases — regular is the game a
     defer gs.deinit();
     _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
     _ = try commands.execute(&gs, .{ .new_company = "Alpha" });
-    const hq_id = gs.hqs.keys()[0];
+    const hq_id = gs.seat();
     try std.testing.expectEqual(@import("../domain/difficulty.zig").Level.regular, gs.difficulty);
 
     // Fabrication: elite charges more than regular for the same job.
@@ -1115,7 +1115,7 @@ test "a part order in transit that lands today is stocked exactly once — first
     defer outer.deinit();
     var gs = GameState.init(outer.allocator(), .{ .seed = 270 });
     _ = try @import("founding.zig").createCommander(&gs, "T", .LC, .quartermaster);
-    const hq = gs.hqs.keys()[0];
+    const hq = gs.seat();
     const site: types.Site = .{ .hq = hq };
 
     // In-transit order for 1 mlas due today.
@@ -1160,16 +1160,17 @@ test "scratch operations do not grow the campaign arena" {
     defer outer.deinit();
     var gs = GameState.init(outer.allocator(), .{ .seed = 42 });
     _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
-    const hq = gs.hqs.keys()[0];
+    const hq = gs.seat();
     gs.hqs.getPtr(hq).?.funds = 500_000_000;
     gs.funds = 50_000_000;
     const co = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
 
     // A crewed dropship so `planLiftQuery`'s ships list actually appends
     // (an empty list never allocates, and would prove nothing).
-    try gs.market_listings.append(gs.allocator(), .{ .kind = .unit, .item_key = "LEOPARD", .rarity = .rare, .price = 20_000_000, .hq = hq, .listed_day = 0, .expires_day = 400 });
-    const listing = gs.market_listings.items.len - 1;
-    _ = try commands.execute(&gs, .{ .buy_listing = listing });
+    const leopard_lid: types.ListingId = @enumFromInt(gs.next_listing_id);
+    try gs.market_listings.append(gs.allocator(), .{ .id = leopard_lid, .kind = .unit, .item_key = "LEOPARD", .rarity = .rare, .price = 20_000_000, .hq = hq, .listed_day = 0, .expires_day = 400 });
+    gs.next_listing_id += 1;
+    _ = try commands.execute(&gs, .{ .buy_listing = leopard_lid });
     const ship: types.UnitId = @enumFromInt(gs.next_unit_id - 1);
     const dropship_pilot = try gs.hirePerson("Ina", "Voss", .dropship_crew);
     try crew.assignSlot(&gs, ship, .pilot, dropship_pilot);

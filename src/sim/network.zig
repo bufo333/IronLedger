@@ -253,7 +253,7 @@ test "routes follow links, charter when there are none, and links cap tonnage" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 41 });
     defer gs.deinit();
     _ = try founding.createCommander(&gs, "T", .LC, .quartermaster);
-    const home = gs.hqs.keys()[0];
+    const home = gs.seat();
     const far = try founding.foundHq(&gs, "Frontier", .field, "alkaid");
     const mid = try founding.foundHq(&gs, "Waypoint", .field, "skye");
 
@@ -285,7 +285,7 @@ test "establishLink leaves funds, ledger and hq_links unchanged when allocation 
     defer outer.deinit();
     var gs = GameState.init(outer.allocator(), .{ .seed = 9109 });
     _ = try founding.createCommander(&gs, "T", .LC, .quartermaster);
-    const home = gs.hqs.keys()[0];
+    const home = gs.seat();
     const far = try founding.foundHq(&gs, "Frontier", .field, "alkaid");
 
     // Guarantee funds cover linkCost(2) so the failure is OOM, not InsufficientTreasury.

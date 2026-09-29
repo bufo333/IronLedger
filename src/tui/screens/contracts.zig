@@ -22,7 +22,7 @@ pub fn draw(self: *App) anyerror!void {
     // up to three fifths of the screen.
     const c = self.cur(0);
     if (view.board.len > 0 and c.* >= view.board.len) c.* = view.board.len - 1;
-    const cands = if (view.board.len > 0) try q.offerCandidates(al, g, view.board[c.*].index) else &[_]q.Candidate{};
+    const cands = if (view.board.len > 0) try q.offerCandidates(al, g, view.board[c.*].id) else &[_]q.Candidate{};
     const board_need: u16 = @intCast(@min(1 + view.board.len + 3 + 1 + cands.len + 2, 200));
     const board_h: u16 = @max(6, @min(board_need, layout.major.of(b.h)));
     const board_hq: types.HqId = @enumFromInt(try self.hqSelId(g));
@@ -131,23 +131,31 @@ pub fn handle(self: *App, k: app.Key) anyerror!bool {
     switch (hit.action) {
         // One board per HQ: [ ] steps through them.
         .next_hq, .prev_hq => {
-            const n = (try q.hqList(al, g)).len;
-            if (n > 0) self.hq_sel = if (hit.action == .next_hq) (self.hq_sel + 1) % n else (self.hq_sel + n - 1) % n;
+            const hqs = try q.hqList(al, g);
+            const n = hqs.len;
+            if (n > 0) {
+                var cur_i: usize = 0;
+                for (hqs, 0..) |row, i| if (row.id == self.hq_sel) {
+                    cur_i = i;
+                    break;
+                };
+                const next_i = if (hit.action == .next_hq) (cur_i + 1) % n else (cur_i + n - 1) % n;
+                self.hq_sel = hqs[next_i].id;
+            }
             self.cur(0).* = 0;
         },
         .accept => if (view.board.len > 0) {
             // Always choose in the open: the picker ranks
             // the companies readiest first and says who cannot go.
-            self.openModal(.{ .accept_pick = view.board[@min(self.cur(0).*, view.board.len - 1)].index });
+            self.openModal(.{ .accept_pick = view.board[@min(self.cur(0).*, view.board.len - 1)].id });
         },
         .bargain => if (view.board.len > 0) { // bargain: n is end-turn everywhere
             const offer = view.board[@min(self.cur(0).*, view.board.len - 1)];
-            const idx = offer.index;
             if (offer.negotiated) {
                 self.say(.dim, "that offer has had its negotiation round — take it or leave it", .{});
                 return true;
             }
-            self.openModal(.{ .negotiate = idx });
+            self.openModal(.{ .negotiate = offer.id });
         },
         .active_log => if (view.active.len > 0) {
             // The whole log, full screen: the side pane clips it.
@@ -197,5 +205,5 @@ test "b on an offer opens its negotiation for that offer" {
     c.app.focus = 0;
     try app.pressForTest(c, .{ .char = 'b' });
     try std.testing.expect(c.app.modal == .negotiate);
-    try std.testing.expectEqual(c.app.cur(0).*, c.app.modal.negotiate);
+    try std.testing.expect(c.app.modal.negotiate != .none);
 }

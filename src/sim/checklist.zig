@@ -187,7 +187,7 @@ test "depot backlog only counts hulls whose company is home" {
     };
     try std.testing.expect(u.needsDepot());
     // Empty the warehouse of components so the bay cannot start the job.
-    if (gs.hqs.getPtr(gs.hqs.keys()[0])) |h| h.stock.clearRetainingCapacity();
+    if (gs.hqs.getPtr(gs.seat())) |h| h.stock.clearRetainingCapacity();
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -605,7 +605,7 @@ test "dry-ammo warning names only the families the company fires" {
     defer gs.deinit();
     _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "E", .origin = .CC, .profession = .paymaster } });
     const co = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
-    _ = try commands.execute(&gs, .{ .accept_contract = .{ .offer_index = 0, .company = co } });
+    _ = try commands.execute(&gs, .{ .accept_contract = .{ .offer = gs.contract_offers.items[0].id, .company = co } });
     const site: types.Site = .{ .company = co };
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -645,7 +645,7 @@ test "a staffing shortfall that costs no level raises no warning; one that does 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const al = arena.allocator();
-    const hq = gs.hqs.getPtr(gs.hqs.keys()[0]).?;
+    const hq = gs.hqs.getPtr(gs.seat()).?;
     const req = hq.staffRequired().total();
     try std.testing.expect(req >= 4);
 
@@ -713,8 +713,8 @@ test "a company with hulls its home bay cannot rebuild is flagged" {
         found = true;
     };
     try std.testing.expect(found);
-    try std.testing.expect(!hq_ops.bayCanRebuild(&gs, gs.hqs.keys()[0], "AS7-D"));
-    try std.testing.expect(hq_ops.bayCanRebuild(&gs, gs.hqs.keys()[0], "SHD-2H"));
+    try std.testing.expect(!hq_ops.bayCanRebuild(&gs, gs.seat(), "AS7-D"));
+    try std.testing.expect(hq_ops.bayCanRebuild(&gs, gs.seat(), "SHD-2H"));
 }
 
 /// A company on an active raid contract with ammunition in its stores.

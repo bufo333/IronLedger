@@ -239,14 +239,22 @@ fn validateTreasury(gs: *GameState, t: Treasury) Error!void {
 }
 
 pub fn execRepayLoan(gs: *GameState, r: @FieldType(Command, "repay_loan")) Error!Result {
-    if (r.index >= gs.loans.items.len) return Error.NoSuchLoan;
-    const loan = &gs.loans.items[r.index];
+    // Resolve by typed LoanId (not by index).
+    var loan_index: ?usize = null;
+    for (gs.loans.items, 0..) |l, i| {
+        if (l.id == r.loan) {
+            loan_index = i;
+            break;
+        }
+    }
+    const idx = loan_index orelse return Error.NoSuchLoan;
+    const loan = &gs.loans.items[idx];
     const amount = @min(r.amount, loan.balance);
     if (amount <= 0) return Error.NoSuchLoan;
     if (gs.funds < amount) return Error.InsufficientTreasury;
     loan.balance -= amount;
     try gs.postTransaction(.{ .day = gs.clock.day_index, .amount = -amount, .category = .loan_principal, .note = "early repayment" });
-    if (loan.balance <= 0) _ = gs.loans.orderedRemove(r.index);
+    if (loan.balance <= 0) _ = gs.loans.orderedRemove(idx);
     return .{};
 }
 
@@ -287,7 +295,9 @@ pub fn execTakeLoan(gs: *GameState, l: @FieldType(Command, "take_loan")) Error!R
     if (l.principal > try creditRemaining(gs.scratch(), gs)) return Error.CreditExceeded;
     const rate_bp: types.Bp = tuning.finance.loan_rate_bp; // 12%/yr simple interest
     const total_interest = @divTrunc(l.principal * rate_bp * l.term_months, 10_000 * 12);
+    const loan_id: types.LoanId = @enumFromInt(gs.next_loan_id);
     try gs.loans.append(gs.allocator(), .{
+        .id = loan_id,
         .principal = l.principal,
         .balance = l.principal,
         .rate_bp = rate_bp,
@@ -295,13 +305,14 @@ pub fn execTakeLoan(gs: *GameState, l: @FieldType(Command, "take_loan")) Error!R
         .next_pay_day = gs.clock.day_index + 30,
         .payment = @divTrunc(l.principal + total_interest, l.term_months),
     });
+    gs.next_loan_id += 1;
     try gs.postTransaction(.{
         .day = gs.clock.day_index,
         .amount = l.principal,
         .category = .loan_principal,
         .note = "loan drawdown",
     });
-    return .{};
+    return .{ .loan = loan_id };
 }
 
 pub fn execSetSharesPct(gs: *GameState, pct: @FieldType(Command, "set_shares_pct")) Error!Result {
@@ -415,7 +426,7 @@ test "insolvency holds the turn; bankruptcy ends the campaign" {
     gs.funds = -1;
     try std.testing.expectError(commands.Error.Insolvent, commands.execute(&gs, .advance_day));
     // Money couriered back from an HQ covers the hole before it lands.
-    const hq0 = gs.hqs.keys()[0];
+    const hq0 = gs.seat();
     gs.hqs.getPtr(hq0).?.funds = 100_000;
     _ = try commands.execute(&gs, .{ .transfer = .{ .from = .{ .hq = hq0 }, .to = .outfit, .amount = 50_000 } });
     try std.testing.expect(gs.funds < 0 and inboundToOutfit(&gs) >= 50_000);
@@ -430,7 +441,7 @@ test "insolvency holds the turn; bankruptcy ends the campaign" {
     // Early repayment clears the loan.
     gs.funds = 1_000_000;
     const bal = gs.loans.items[0].balance;
-    _ = try commands.execute(&gs, .{ .repay_loan = .{ .index = 0, .amount = bal } });
+    _ = try commands.execute(&gs, .{ .repay_loan = .{ .loan = gs.loans.items[0].id, .amount = bal } });
     try std.testing.expectEqual(@as(usize, 0), gs.loans.items.len);
     // Selling a hull raises money; disbanding the company raises the rest.
     const before = gs.funds;
@@ -466,7 +477,7 @@ test "policies run daily under a monthly cap; resupply ships provisions to a com
     defer gs.deinit();
     _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
     const co = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
-    const hq = gs.hqs.keys()[0];
+    const hq = gs.seat();
     gs.policies.clearRetainingCapacity(); // drop the starter HQ's default top-up — this test counts policies
 
     // Cash: a top-up dispatches on the next day, not on payday, and no second
@@ -552,7 +563,7 @@ test "treasuries — HQ purchases draw HQ funds and refuse when short" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 91 });
     defer gs.deinit();
     _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
-    const hq_id = gs.hqs.keys()[0];
+    const hq_id = gs.seat();
 
     // Founding capital moved outfit → HQ on-site.
     try std.testing.expectEqual(@as(i64, 1_000_000), gs.hqs.values()[0].funds);

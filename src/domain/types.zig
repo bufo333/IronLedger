@@ -49,6 +49,15 @@ pub const EventId = enum(u32) { none = 0, _ };
 /// One resolved engagement: the grouping key that gathers an AAR's log
 /// lines without reading its prose.
 pub const BattleId = enum(u32) { none = 0, _ };
+/// One entry on a site market board; typed so a buy command cannot be
+/// passed a loan index (rule 56).
+pub const ListingId = enum(u32) { none = 0, _ };
+/// One candidate on a hiring-hall board; typed so a hire command cannot
+/// be passed a listing index (rule 56).
+pub const CandidateId = enum(u32) { none = 0, _ };
+/// One outstanding loan; typed so a repay command cannot be passed a
+/// listing or candidate index (rule 56).
+pub const LoanId = enum(u32) { none = 0, _ };
 
 /// Skill catalog, following MekHQ's SkillType. Lower level = better
 /// (target-number convention: a 3/4 mekwarrior has gunnery 3, piloting 4).

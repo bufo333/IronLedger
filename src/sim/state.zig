@@ -189,6 +189,8 @@ pub const BayJob = struct {
 /// A hiring-hall candidate: the generated person, held for
 /// the player to hire (with a signing bonus) before they move on.
 pub const Candidate = struct {
+    /// Typed identity: assigned at generation; survives save/load (rule 56).
+    id: types.CandidateId,
     hq: types.HqId,
     spec: person_gen.GeneratedPerson,
     asking_bonus: types.CBills,
@@ -309,6 +311,9 @@ pub const GameState = struct {
     next_force_id: u32 = 1,
     next_hq_id: u32 = 1,
     next_contract_id: u32 = 1,
+    next_listing_id: u32 = 1,
+    next_candidate_id: u32 = 1,
+    next_loan_id: u32 = 1,
 
     pub fn init(gpa: std.mem.Allocator, config: Config) GameState {
         return .{
@@ -463,7 +468,7 @@ pub const GameState = struct {
         if (self.forces.getPtr(co)) |f| {
             if (f.supplying_hq != .none and self.hqs.getPtr(f.supplying_hq) != null) return f.supplying_hq;
         }
-        return if (self.hqs.count() > 0) self.hqs.keys()[0] else .none;
+        return self.seat();
     }
 
     /// The HQ a person lives at: the one they are posted to, else their
@@ -512,9 +517,17 @@ pub const GameState = struct {
         };
     }
 
+    /// The outfit's seat: the first HQ (lowest insertion order), or `.none`
+    /// before any HQ exists. Every rule that reads a seat-level attribute
+    /// calls this; C10 may change the rule without touching each call site.
+    pub fn seat(self: *GameState) types.HqId {
+        return if (self.hqs.count() > 0) self.hqs.keys()[0] else .none;
+    }
+
     /// The outfit's seat: first HQ, or the outfit depot before any exists.
     pub fn defaultSite(self: *GameState) types.Site {
-        return if (self.hqs.count() > 0) .{ .hq = self.hqs.keys()[0] } else .outfit;
+        const s = self.seat();
+        return if (s != .none) .{ .hq = s } else .outfit;
     }
 
     /// A force's home warehouse: its supplying HQ, else the seat.
@@ -827,6 +840,9 @@ pub const GameState = struct {
         .{ "next_force_id", .persisted },
         .{ "next_hq_id", .persisted },
         .{ "next_contract_id", .persisted },
+        .{ "next_listing_id", .persisted },
+        .{ "next_candidate_id", .persisted },
+        .{ "next_loan_id", .persisted },
     };
 
     pub fn persistenceOf(comptime name: []const u8) Persistence {

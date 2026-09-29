@@ -383,7 +383,7 @@ assert "day 4" in plain(), plain()[-2000:]
 # Battle orders: the advance stops short of contact and opens the box;
 # → changes the ROE, confirm clears the warning, and the next advance
 # runs on to the fight instead of stopping again.
-send(":"); send("accept 0 1\r", 1.5)
+send(":"); send("accept 9 1\r", 1.5)
 for _ in range(8):
     send(":"); send("day 30\r", 2.5)
     if "BATTLE ORDERS" in plain()[-20000:]:

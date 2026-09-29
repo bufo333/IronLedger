@@ -304,8 +304,8 @@ test "createCommander yields the same commander, HQ, staff and stock regardless 
     try std.testing.expectEqual(gs1.people.count(), gs2.people.count());
 
     // Starter stock must match for every part family.
-    const site1: types.Site = .{ .hq = gs1.hqs.keys()[0] };
-    const site2: types.Site = .{ .hq = gs2.hqs.keys()[0] };
+    const site1: types.Site = .{ .hq = gs1.seat() };
+    const site2: types.Site = .{ .hq = gs2.seat() };
     for (part_mod.component_keys) |key| {
         try std.testing.expectEqual(gs1.stockCount(site1, key), gs2.stockCount(site2, key));
     }

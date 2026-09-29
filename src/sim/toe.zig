@@ -696,7 +696,7 @@ test "hulls move between lances at home; a new lance respects the HQ's lance cap
     // fifth needs a level-3 mek bay.
     try std.testing.expectEqual(@as(u32, 4), combatLancesOf(&gs, co));
     try std.testing.expectError(Error.TooManyLances, commands.execute(&gs, .{ .new_lance = .{ .company = co, .name = "5th Lance" } }));
-    const hq = gs.hqs.getPtr(gs.hqs.keys()[0]).?;
+    const hq = gs.hqs.getPtr(gs.seat()).?;
     for (hq.facilities.items) |*f| if (f.kind == .mek_bay) {
         f.level = 3;
     };
@@ -742,7 +742,7 @@ test "air wings need a spaceport; fighters fly in air lances; support lances are
     var gs = GameState.init(std.testing.allocator, .{ .seed = 15 });
     defer gs.deinit();
     _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
-    const hq = gs.hqs.keys()[0];
+    const hq = gs.seat();
     const co = (try commands.execute(&gs, .{ .raise_company = .{ .name = "Bravo", .hq = hq } })).created_force;
     // Spaceport 1: no air slot.
     try std.testing.expectError(commands.Error.NoAirSlot, commands.execute(&gs, .{ .raise_air_company = co }));

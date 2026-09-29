@@ -37,8 +37,8 @@ printf '%s\n' \
   'strip 3' \
   'roe co:1 cautious' \
   'loan 500000' \
-  'candidates 0' \
-  'accept 0 1' \
+  'candidates 9' \
+  'accept 9 1' \
   'day 3 force' \
   'inbox' \
   'resolve 999 1' \

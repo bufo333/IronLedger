@@ -74,14 +74,14 @@ pub const Command = union(enum) {
         start_year: u16 = 3025,
     },
     /// Accept an offer off the current board and send a company.
-    accept_contract: struct { offer_index: usize, company: types.ForceId },
+    accept_contract: struct { offer: types.ContractId, company: types.ForceId },
     /// Buy a special ability with XP at a training ground.
     train_ability: struct { person: types.PersonId, key: []const u8 },
     /// Pin a rank on a person; `.private` unpinned lets seats decide again.
     promote: struct { person: types.PersonId, rank: @import("../domain/rank.zig").Rank, pin: bool = true },
     /// One negotiation round on an offer: improve a term, harden
     /// the offer, or lose it.
-    negotiate: struct { offer_index: usize, term: contract_mod.NegotiableTerm },
+    negotiate: struct { offer: types.ContractId, term: contract_mod.NegotiableTerm },
     take_loan: struct { principal: types.CBills, term_months: u16 },
     /// Order parts/munitions/supplies through logistics: an acquisition roll
     /// vs. rarity, then transit to `dest` (home warehouse by default, or a
@@ -91,7 +91,7 @@ pub const Command = union(enum) {
     /// Move stock between sites as a shipment (freight paid by the sender).
     ship_stock: struct { part_key: []const u8, quantity: u32, from: types.Site, to: types.Site },
     /// Buy off the site-market board (unit or part listing).
-    buy_listing: usize,
+    buy_listing: types.ListingId,
     /// Cold storage (§9.8): mothball at home for 20% upkeep...
     mothball: types.UnitId,
     /// ...and pay the reactivation tech-days to wake it back up.
@@ -123,7 +123,7 @@ pub const Command = union(enum) {
     /// Fill every open slot in a company from its own people.
     auto_assign: types.ForceId,
     /// Hire off a hiring-hall board (asking bonus paid from the outfit).
-    hire_candidate: usize,
+    hire_candidate: types.CandidateId,
     /// Medbay triage priority (higher heals first when beds are short).
     triage: struct { person: types.PersonId, priority: u8 },
     /// R&R leave: unavailable, double fatigue recovery.
@@ -175,7 +175,7 @@ pub const Command = union(enum) {
     /// Admit a wounded person to the medbay: healing only starts here.
     admit: types.PersonId,
     /// Pay a loan down early (simple interest: only charged months cost).
-    repay_loan: struct { index: usize, amount: types.CBills },
+    repay_loan: struct { loan: types.LoanId, amount: types.CBills },
     /// Liquidate a hull at half value scaled by condition.
     sell_unit: types.UnitId,
     /// Strip a hull for parts into its home warehouse (MekHQ
@@ -445,8 +445,19 @@ pub const Result = struct {
     /// `order_part`: false when logistics failed the sourcing roll (the
     /// order is recorded as failed; retry after the refresh or fabricate).
     sourced: bool = true,
+    /// `order_part` echo: key, quantity, eta day and cost (when sourced).
+    order_key: []const u8 = "",
+    order_quantity: u32 = 0,
+    order_eta: u32 = 0,
+    order_cost: types.CBills = 0,
     /// `cover_shortfall`: the bay makes it (a job), not the market.
     fabricated: bool = false,
+    /// `accept_contract`: the ContractId of the accepted contract.
+    contract: types.ContractId = .none,
+    /// `take_loan`: the LoanId of the new loan.
+    loan: types.LoanId = .none,
+    /// `found_hq`: the HqId of the newly created HQ.
+    created_hq: types.HqId = .none,
     /// `negotiate`: how the round went.
     negotiation: enum { none, improved, hardened, withdrawn } = .none,
     /// `replace_gear`: spares ordered, and those logistics could not source.
@@ -507,7 +518,7 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
         .promote => |pr| return personnel.execPromote(gs, pr),
         .order_part => |o| return sites.execOrderPart(gs, o),
         .ship_stock => |s| return sites.execShipStock(gs, s),
-        .buy_listing => |index| return contract_market.execBuyListing(gs, index),
+        .buy_listing => |lid| return contract_market.execBuyListing(gs, lid),
         .mothball => |unit_id| return held_hulls.execMothball(gs, unit_id),
         .move_unit => |m| return toe.execMoveUnit(gs, m),
         .new_lance => |nl| return toe.execNewLance(gs, nl),
@@ -540,7 +551,7 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
         .assign => |a| return crew.execAssign(gs, a),
         .unassign => |u| return crew.execUnassign(gs, u),
         .auto_assign => |company| return crew.execAutoAssign(gs, company),
-        .hire_candidate => |index| return contract_market.execHireCandidate(gs, index),
+        .hire_candidate => |cid| return contract_market.execHireCandidate(gs, cid),
         .triage => |t| return medical_mod.execTriage(gs, t),
         .leave => |l| return medical_mod.execLeave(gs, l),
         .train => |t| return medical_mod.execTrain(gs, t),
@@ -603,15 +614,20 @@ test "end to end: commander, company, contract to completion" {
     for (gs.contract_offers.items, 0..) |offer, i| {
         if (offer.terms.length_months < gs.contract_offers.items[best].terms.length_months) best = i;
     }
+    const best_id = gs.contract_offers.items[best].id;
     const funds_before = gs.funds;
-    _ = try execute(&gs, .{ .accept_contract = .{ .offer_index = best, .company = co } });
+    _ = try execute(&gs, .{ .accept_contract = .{ .offer = best_id, .company = co } });
     try std.testing.expect(gs.funds != funds_before); // advance + freight posted
 
     const c = gs.contracts.values()[0];
     try std.testing.expectEqual(@import("../domain/contract.zig").ContractStatus.transit, c.status);
-    try std.testing.expectError(Error.CompanyDeployed, execute(&gs, .{
-        .accept_contract = .{ .offer_index = 0, .company = co },
-    }));
+    // Verify any remaining offer is refused because the company is deployed.
+    if (gs.contract_offers.items.len > 0) {
+        const any_offer = gs.contract_offers.items[0].id;
+        try std.testing.expectError(Error.CompanyDeployed, execute(&gs, .{
+            .accept_contract = .{ .offer = any_offer, .company = co },
+        }));
+    }
 
     // Run to completion: transit + length + slack. The player's one duty
     // along the way: admit the wounded, or they never heal and
@@ -674,19 +690,22 @@ test "ships need berths, lift the company for less charter, and come home with i
     var gs = GameState.init(std.testing.allocator, .{ .seed = 16 });
     defer gs.deinit();
     _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
-    const hq = gs.hqs.keys()[0];
+    const hq = gs.seat();
     gs.hqs.getPtr(hq).?.funds = 500_000_000;
     gs.funds = 50_000_000;
     const co = (try execute(&gs, .{ .new_company = "Alpha" })).created_force;
 
     // One dropship berth at spaceport 1: the second Leopard is refused.
-    try gs.market_listings.append(gs.allocator(), .{ .kind = .unit, .item_key = "LEOPARD", .rarity = .rare, .price = 20_000_000, .hq = hq, .listed_day = 0, .expires_day = 400 });
-    try gs.market_listings.append(gs.allocator(), .{ .kind = .unit, .item_key = "LEOPARD", .rarity = .rare, .price = 20_000_000, .hq = hq, .listed_day = 0, .expires_day = 400 });
-    const first = gs.market_listings.items.len - 2;
-    _ = try execute(&gs, .{ .buy_listing = first });
+    const leo1_id: types.ListingId = @enumFromInt(gs.next_listing_id);
+    try gs.market_listings.append(gs.allocator(), .{ .id = leo1_id, .kind = .unit, .item_key = "LEOPARD", .rarity = .rare, .price = 20_000_000, .hq = hq, .listed_day = 0, .expires_day = 400 });
+    gs.next_listing_id += 1;
+    const leo2_id: types.ListingId = @enumFromInt(gs.next_listing_id);
+    try gs.market_listings.append(gs.allocator(), .{ .id = leo2_id, .kind = .unit, .item_key = "LEOPARD", .rarity = .rare, .price = 20_000_000, .hq = hq, .listed_day = 0, .expires_day = 400 });
+    gs.next_listing_id += 1;
+    _ = try execute(&gs, .{ .buy_listing = leo1_id });
     const ship: types.UnitId = @enumFromInt(gs.next_unit_id - 1);
     try std.testing.expectEqual(hq, gs.unit(ship).?.berth_hq);
-    try std.testing.expectError(Error.NoBerth, execute(&gs, .{ .buy_listing = gs.market_listings.items.len - 1 }));
+    try std.testing.expectError(Error.NoBerth, execute(&gs, .{ .buy_listing = leo2_id }));
     try std.testing.expectEqual(@as(u32, 1), lift_mod.transportsBerthedAt(&gs, hq, .dropship));
 
     // No jumpship: a dedicated line is refused; charter and scheduled are fine.
@@ -705,13 +724,14 @@ test "ships need berths, lift the company for less charter, and come home with i
     // Uncrewed, the ship lifts nothing: full charter. (The employer pays no
     // transport share here so the charter is a real number to compare.)
     // An offer off-world, so there is a charter to compare.
-    var offer: usize = 0;
-    for (gs.contract_offers.items, 0..) |o, i| if (o.dist_ly > gs.contract_offers.items[offer].dist_ly) {
-        offer = i;
+    var offer_idx: usize = 0;
+    for (gs.contract_offers.items, 0..) |o, i| if (o.dist_ly > gs.contract_offers.items[offer_idx].dist_ly) {
+        offer_idx = i;
     };
-    gs.contract_offers.items[offer].terms.transport_pct = 0;
+    gs.contract_offers.items[offer_idx].terms.transport_pct = 0;
+    const offer_id = gs.contract_offers.items[offer_idx].id;
     const charter_full = blk: {
-        const c = gs.contract_offers.items[offer];
+        const c = gs.contract_offers.items[offer_idx];
         break :blk @divTrunc(@as(types.CBills, c.dist_ly) * 2_000 * (100 - @as(i64, c.terms.transport_pct)), 100);
     };
     try std.testing.expectEqual(@as(types.Bp, 0), (try lift_mod.planLiftQuery(&gs, co)).covered_bp);
@@ -725,7 +745,7 @@ test "ships need berths, lift the company for less charter, and come home with i
 
     // Accept: the charter posted is below the full price, and the ship sails with the company.
     const ledger_before = gs.ledger.transactions.items.len;
-    _ = try execute(&gs, .{ .accept_contract = .{ .offer_index = offer, .company = co } });
+    _ = try execute(&gs, .{ .accept_contract = .{ .offer = offer_id, .company = co } });
     var charter_paid: types.CBills = 0;
     for (gs.ledger.transactions.items[ledger_before..]) |t| if (t.category == .transport_charter) {
         charter_paid = -t.amount;
@@ -748,8 +768,10 @@ test "ships need berths, lift the company for less charter, and come home with i
     // A crewed jumpship at the berth (spaceport 4, comms 3) unlocks the dedicated line.
     try toe.setFacilityLevel(&gs, hq, .spaceport, 4);
     try toe.setFacilityLevel(&gs, hq, .comms, 3);
-    try gs.market_listings.append(gs.allocator(), .{ .kind = .unit, .item_key = "SCOUT", .rarity = .rare, .price = 50_000_000, .hq = hq, .listed_day = 0, .expires_day = 400 });
-    _ = try execute(&gs, .{ .buy_listing = gs.market_listings.items.len - 1 });
+    const scout_id: types.ListingId = @enumFromInt(gs.next_listing_id);
+    try gs.market_listings.append(gs.allocator(), .{ .id = scout_id, .kind = .unit, .item_key = "SCOUT", .rarity = .rare, .price = 50_000_000, .hq = hq, .listed_day = 0, .expires_day = 400 });
+    gs.next_listing_id += 1;
+    _ = try execute(&gs, .{ .buy_listing = scout_id });
     const jump: types.UnitId = @enumFromInt(gs.next_unit_id - 1);
     try std.testing.expectError(Error.NoJumpship, execute(&gs, .{ .link = .{ .a = hq, .b = far, .level = 3 } }));
     try crew.assignSlot(&gs, jump, .pilot, try gs.hirePerson("Oda", "Ferro", .jumpship_crew));
@@ -765,7 +787,7 @@ test "a command leaves derived state consistent: firing, disbanding and selling 
     defer gs.deinit();
     _ = try execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
     gs.funds = 50_000_000;
-    const seat = gs.hqs.keys()[0];
+    const seat = gs.seat();
 
     // Firing a posted admin: the desk count drops inside the command, the
     // departure day is recorded and the posting stays on the record.

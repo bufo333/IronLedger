@@ -20,10 +20,6 @@ The audit deliverables in `docs/audit-response.md` remain folded in: D26 into
 C10, D27 and D30 into C12, D28 into C7, D29 into C15, D31 into C8, and D33 into
 C18.
 
-- [ ] C6 typed identity and selection (C6a-C6g; rules 16, 32, 56): persisted
-  offer/listing/candidate/loan IDs, creation results, named seat resolution,
-  and typed query/frontend selections. Migrate before frontend adoption.
-  Delete C6.
 - [ ] C7 fail-closed loading (C7a-C7d; rules 2, 7, 45-48): reference-policy
   validation, strict scalar/collection decoding, checked counters and ordering,
   persisted secondary roles, versioned compatibility migrations, canonical

@@ -118,6 +118,8 @@ pub fn summarize(ledger: *const Ledger, from_day: u32, to_day: u32, filter: Enti
 }
 
 pub const Loan = struct {
+    /// Typed identity: assigned when the loan is drawn; survives save/load (rule 56).
+    id: types.LoanId = .none,
     principal: types.CBills,
     balance: types.CBills,
     rate_bp: types.Bp, // annual, basis points

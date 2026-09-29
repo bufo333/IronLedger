@@ -144,23 +144,23 @@ fn runDemo(gs: *game.state.GameState, gpa: std.mem.Allocator) !void {
 
     // Hunt the monthly boards for combat-class work: a raid
     // start-to-finish, battles resolved hands-off.
-    var pick: ?usize = null;
+    var pick_id: ?game.types.ContractId = null;
     var hunts: u32 = 0;
-    while (pick == null and hunts < 8) : (hunts += 1) {
+    while (pick_id == null and hunts < 8) : (hunts += 1) {
         const board = (try q.contracts(al, gs, .none)).board;
         // Prefer in-ring combat work; take a beachhead raid over waiting.
         for (board) |offer| if (!offer.kind.isGarrisonClass() and !offer.beachhead) {
-            pick = offer.index;
+            pick_id = offer.id;
             break;
         };
-        if (pick == null) for (board) |offer| if (!offer.kind.isGarrisonClass()) {
-            pick = offer.index;
+        if (pick_id == null) for (board) |offer| if (!offer.kind.isGarrisonClass()) {
+            pick_id = offer.id;
             break;
         };
-        if (pick == null) _ = try game.commands.execute(gs, .{ .advance_days = 30 });
+        if (pick_id == null) _ = try game.commands.execute(gs, .{ .advance_days = 30 });
     }
-    _ = try game.commands.execute(gs, .{ .accept_contract = .{ .offer_index = pick orelse 0, .company = co } });
-    std.debug.print("\nAccepted — {s}\n", .{(try q.acceptedLine(al, gs)) orelse ""});
+    const accepted = try game.commands.execute(gs, .{ .accept_contract = .{ .offer = pick_id orelse @as(game.types.ContractId, @enumFromInt(1)), .company = co } });
+    std.debug.print("\nAccepted — {s}\n", .{(try q.acceptedLine(al, gs, accepted.contract)) orelse ""});
 
     // Fund the deployment — an initial courier plus a standing
     // top-up policy so the company can pay its suppliers in the field.
@@ -286,8 +286,8 @@ fn runDemo(gs: *game.state.GameState, gpa: std.mem.Allocator) !void {
         // (its treasury has been paying for the warehouse and the bays).
         _ = game.commands.execute(gs, .{ .transfer = .{ .from = .outfit, .to = .{ .hq = seat }, .amount = 3_000_000 } }) catch |err| std.debug.print("transfer refused: {s}\n", .{game.cli.errorText(err)});
         _ = try game.commands.execute(gs, .{ .advance_days = 3 });
-        if (q.listingIndex(gs, "slas", true)) |i| {
-            _ = game.commands.execute(gs, .{ .buy_listing = i }) catch |err| std.debug.print("buy refused: {s}\n", .{game.cli.errorText(err)});
+        if (q.listingId(gs, "slas", true)) |lid| {
+            _ = game.commands.execute(gs, .{ .buy_listing = lid }) catch |err| std.debug.print("buy refused: {s}\n", .{game.cli.errorText(err)});
         }
         if (lab.mounts.len > 0) {
             const m = lab.mounts[0];
@@ -606,11 +606,11 @@ fn runRepl(session: *game.lobby.Session, io: std.Io, gpa: std.mem.Allocator, sto
         } else if (std.mem.eql(u8, verb, "offers")) {
             printOffers(gs, al) catch |err| showError(err);
         } else if (std.mem.eql(u8, verb, "candidates")) {
-            const idx = std.fmt.parseInt(usize, tokens.next() orelse "0", 10) catch {
-                std.debug.print("usage: candidates <offer#>\n", .{});
+            const raw = std.fmt.parseInt(u32, tokens.next() orelse "0", 10) catch {
+                std.debug.print("usage: candidates <offer-id>\n", .{});
                 continue;
             };
-            printTable(al, q.candidates_cols, try q.offerCandidates(al, gs, idx), "") catch |err| showError(err);
+            printTable(al, q.candidates_cols, try q.offerCandidates(al, gs, @enumFromInt(raw)), "") catch |err| showError(err);
         } else if (std.mem.eql(u8, verb, "readiness")) {
             printReadiness(gs, al) catch |err| showError(err);
         } else if (std.mem.eql(u8, verb, "rating")) {
@@ -835,7 +835,7 @@ fn printResult(gs: *game.state.GameState, al: std.mem.Allocator, cmd: Command, r
             printHqs(gs, al) catch |err| showError(err);
             printOffers(gs, al) catch |err| showError(err);
         },
-        .accept_contract => if (q.acceptedLine(al, gs)) |line|
+        .accept_contract => if (q.acceptedLine(al, gs, r.contract)) |line|
             std.debug.print("{s}\n", .{line orelse "under contract"})
         else |err|
             showError(err),
@@ -852,15 +852,12 @@ fn printResult(gs: *game.state.GameState, al: std.mem.Allocator, cmd: Command, r
         .found_hq, .link, .assign_company => printHqs(gs, al) catch |err| showError(err),
         .auto_assign => |co| printLines(al, q.companyRoster(al, gs, co) catch &.{}, "") catch |err| showError(err),
         .autostaff => |hq| printLines(al, q.hqRoster(al, gs, hq) catch &.{}, "") catch |err| showError(err),
-        .order_part => if (q.lastOrderLine(al, gs)) |line|
-            std.debug.print("{s}\n", .{line orelse "ordered"})
-        else |err|
-            showError(err),
+        .order_part => if (!r.sourced)
+            std.debug.print("logistics couldn't source {s} this time (retry after refresh)\n", .{r.order_key})
+        else
+            std.debug.print("ordered {s} x{d}, eta day {d}, {s}\n", .{ r.order_key, r.order_quantity, r.order_eta, q.money(al, r.order_cost) catch "?" }),
         .take_loan => |l| std.debug.print("drew {d} c-bills over {d} months\n", .{ l.principal, l.term_months }),
-        .strip_unit => if (q.lastLogLine(al, gs)) |raw|
-            std.debug.print("{s}\n", .{if (raw) |line| (q.stripMarks(al, line) catch line) else "stripped"})
-        else |err|
-            showError(err),
+        .strip_unit => std.debug.print("stripped for parts — see Supply for the crates\n", .{}),
         .confirm_orders => std.debug.print("battle orders given — the contact warning is cleared\n", .{}),
         .emergency_resupply => std.debug.print("emergency resupply: {d}t delivered to the field stores\n", .{r.tons_moved}),
         else => std.debug.print("done.\n", .{}),

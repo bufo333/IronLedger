@@ -34,7 +34,7 @@ const digest = @import("../sim/digest.zig");
 const hq_ops = @import("../sim/hq_ops.zig");
 const held_hulls_m = @import("../sim/held_hulls.zig");
 
-pub const schema_version = 34;
+pub const schema_version = 35;
 
 const ddl =
     \\CREATE TABLE IF NOT EXISTS player (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_seq INTEGER NOT NULL);
@@ -61,20 +61,20 @@ const ddl =
     \\CREATE TABLE IF NOT EXISTS hq_project (cid INTEGER NOT NULL, hq_id INTEGER NOT NULL, ord INTEGER NOT NULL, kind TEXT, facility TEXT, target_level INTEGER, started INTEGER, paperwork_done INTEGER, construction_done INTEGER, cost INTEGER);
     \\CREATE TABLE IF NOT EXISTS contract (cid INTEGER NOT NULL, is_offer INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER, kind TEXT, employer TEXT, enemy TEXT, planet TEXT, status TEXT, company INTEGER, start_day INTEGER, score INTEGER, dist_ly INTEGER, beachhead INTEGER, transit_days INTEGER, arrive_day INTEGER, end_day INTEGER, monthly_net INTEGER, next_battle INTEGER, battles INTEGER, casualties INTEGER, objective TEXT, committed_bv INTEGER, pool INTEGER, pool_remaining INTEGER, vp INTEGER, ineffective_since INTEGER, breach_day INTEGER, length_months INTEGER, base_pay INTEGER, advance_pct INTEGER, signing_bonus INTEGER, transport_pct INTEGER, overhead_pct INTEGER, battle_loss_pct INTEGER, salvage_pct INTEGER, salvage_exchange INTEGER, command_rights TEXT, negotiated INTEGER NOT NULL DEFAULT 0, enemy_lances INTEGER NOT NULL DEFAULT 0, enemy_quality TEXT NOT NULL DEFAULT 'regular', enemy_lance_bv INTEGER NOT NULL DEFAULT 0, enemy_lance_tons INTEGER NOT NULL DEFAULT 0, offer_hq INTEGER NOT NULL DEFAULT 0, orders_day INTEGER);
     \\CREATE TABLE IF NOT EXISTS txn (cid INTEGER NOT NULL, ord INTEGER NOT NULL, day INTEGER, amount INTEGER, category TEXT, company INTEGER, hq INTEGER, contract INTEGER, note TEXT);
-    \\CREATE TABLE IF NOT EXISTS loan (cid INTEGER NOT NULL, ord INTEGER NOT NULL, principal INTEGER, balance INTEGER, rate_bp INTEGER, term INTEGER, next_pay INTEGER, payment INTEGER);
+    \\CREATE TABLE IF NOT EXISTS loan (cid INTEGER NOT NULL, ord INTEGER NOT NULL, principal INTEGER, balance INTEGER, rate_bp INTEGER, term INTEGER, next_pay INTEGER, payment INTEGER, id INTEGER NOT NULL DEFAULT 0);
     \\CREATE TABLE IF NOT EXISTS courier (cid INTEGER NOT NULL, ord INTEGER NOT NULL, to_kind TEXT, to_id INTEGER, amount INTEGER, sent INTEGER, eta INTEGER);
     \\CREATE TABLE IF NOT EXISTS policy (cid INTEGER NOT NULL, ord INTEGER NOT NULL, entity_kind TEXT, entity_id INTEGER, floor INTEGER, cap INTEGER, sent INTEGER NOT NULL DEFAULT 0);
     \\CREATE TABLE IF NOT EXISTS supply_policy (cid INTEGER NOT NULL, ord INTEGER NOT NULL, company INTEGER, min_days INTEGER, tons INTEGER, ammo_battles INTEGER NOT NULL DEFAULT 0);
     \\CREATE TABLE IF NOT EXISTS stock_policy (cid INTEGER NOT NULL, ord INTEGER NOT NULL, hq INTEGER, part_key TEXT, min_qty INTEGER, target INTEGER);
     \\CREATE TABLE IF NOT EXISTS bay_job (cid INTEGER NOT NULL, ord INTEGER NOT NULL, hq INTEGER, kind TEXT, unit INTEGER, item_key TEXT, duration INTEGER, queued INTEGER, started INTEGER, done INTEGER, cost INTEGER);
-    \\CREATE TABLE IF NOT EXISTS candidate (cid INTEGER NOT NULL, ord INTEGER NOT NULL, hq INTEGER, first TEXT, last TEXT, callsign TEXT, role TEXT, experience TEXT, primary_skill INTEGER, secondary_skill INTEGER, bonus INTEGER, listed INTEGER, expires INTEGER, age INTEGER NOT NULL DEFAULT 30);
+    \\CREATE TABLE IF NOT EXISTS candidate (cid INTEGER NOT NULL, ord INTEGER NOT NULL, hq INTEGER, first TEXT, last TEXT, callsign TEXT, role TEXT, experience TEXT, primary_skill INTEGER, secondary_skill INTEGER, bonus INTEGER, listed INTEGER, expires INTEGER, age INTEGER NOT NULL DEFAULT 30, id INTEGER NOT NULL DEFAULT 0);
     \\CREATE TABLE IF NOT EXISTS hq_link (cid INTEGER NOT NULL, ord INTEGER NOT NULL, a INTEGER, b INTEGER, level INTEGER, tons INTEGER, established INTEGER);
     \\CREATE TABLE IF NOT EXISTS unit_transfer (cid INTEGER NOT NULL, ord INTEGER NOT NULL, unit INTEGER, to_company INTEGER, eta INTEGER);
     \\CREATE TABLE IF NOT EXISTS faction_cooling (cid INTEGER NOT NULL, ord INTEGER NOT NULL, faction TEXT, until_day INTEGER);
     \\CREATE TABLE IF NOT EXISTS faction_standing (cid INTEGER NOT NULL, faction TEXT NOT NULL, value INTEGER NOT NULL);
     \\CREATE TABLE IF NOT EXISTS event_memory (cid INTEGER NOT NULL, kind TEXT NOT NULL, last_day INTEGER NOT NULL, last_choice INTEGER NOT NULL, streak INTEGER NOT NULL);
     \\CREATE TABLE IF NOT EXISTS rating_snapshot (cid INTEGER NOT NULL, year INTEGER NOT NULL, score INTEGER NOT NULL);
-    \\CREATE TABLE IF NOT EXISTS listing (cid INTEGER NOT NULL, ord INTEGER NOT NULL, kind TEXT, item_key TEXT, rarity TEXT, price INTEGER, qty INTEGER, staple INTEGER, listed INTEGER, expires INTEGER, hq INTEGER, c_armor INTEGER, c_quality TEXT, c_damaged INTEGER, c_destroyed INTEGER, c_missing INTEGER, black INTEGER NOT NULL DEFAULT 0, company INTEGER NOT NULL DEFAULT 0);
+    \\CREATE TABLE IF NOT EXISTS listing (cid INTEGER NOT NULL, ord INTEGER NOT NULL, kind TEXT, item_key TEXT, rarity TEXT, price INTEGER, qty INTEGER, staple INTEGER, listed INTEGER, expires INTEGER, hq INTEGER, c_armor INTEGER, c_quality TEXT, c_damaged INTEGER, c_destroyed INTEGER, c_missing INTEGER, black INTEGER NOT NULL DEFAULT 0, company INTEGER NOT NULL DEFAULT 0, id INTEGER NOT NULL DEFAULT 0);
     \\CREATE TABLE IF NOT EXISTS part_order (cid INTEGER NOT NULL, ord INTEGER NOT NULL, part_key TEXT, qty INTEGER, dest_kind TEXT, dest_id INTEGER, ordered INTEGER, eta INTEGER, cost INTEGER, status TEXT);
     \\CREATE TABLE IF NOT EXISTS event_log (cid INTEGER NOT NULL, ord INTEGER NOT NULL, day INTEGER, category TEXT, company INTEGER, hq INTEGER, contract INTEGER, text TEXT);
     \\CREATE TABLE IF NOT EXISTS pending_event (cid INTEGER NOT NULL, ord INTEGER NOT NULL, kind TEXT, day INTEGER, contract INTEGER, company INTEGER, default_choice INTEGER, deadline INTEGER, chosen INTEGER, person INTEGER NOT NULL DEFAULT 0, id INTEGER NOT NULL DEFAULT 0, battle INTEGER NOT NULL DEFAULT 0);
@@ -130,6 +130,13 @@ pub const Store = struct {
         .{ .version = 33, .table = "contract", .column = "orders_day", .sql = "ALTER TABLE contract ADD COLUMN orders_day INTEGER" },
         // v34: a hall candidate keeps the age it was generated with.
         .{ .version = 34, .table = "candidate", .column = "age", .sql = "ALTER TABLE candidate ADD COLUMN age INTEGER NOT NULL DEFAULT 30" },
+        // v35: typed identity for listings, candidates and loans; three meta
+        // counters. Pre-v35 rows carry 0 and are backfilled on load (rule 51).
+        // next_contract_id is already a meta int; its counter now also advances
+        // at offer generation, so u32 is ample for any campaign.
+        .{ .version = 35, .table = "listing", .column = "id", .sql = "ALTER TABLE listing ADD COLUMN id INTEGER NOT NULL DEFAULT 0" },
+        .{ .version = 35, .table = "candidate", .column = "id", .sql = "ALTER TABLE candidate ADD COLUMN id INTEGER NOT NULL DEFAULT 0" },
+        .{ .version = 35, .table = "loan", .column = "id", .sql = "ALTER TABLE loan ADD COLUMN id INTEGER NOT NULL DEFAULT 0" },
         // v7: the `injury` table (created by ddl); campaign data is
         // upgraded on load (`upgradeCampaign`). v8: `faction_standing`
         // (created by ddl; absent rows read as 0).
@@ -435,7 +442,8 @@ pub const Store = struct {
             .{ "next_unit_id", gs.next_unit_id },                                  .{ "next_force_id", gs.next_force_id },
             .{ "next_hq_id", gs.next_hq_id },                                      .{ "next_contract_id", gs.next_contract_id },
             .{ "next_battle_id", gs.next_battle_id },                              .{ "rng_seed", @as(i64, @bitCast(gs.rng.seed)) },
-            .{ "next_event_id", gs.event_queue.next_id },
+            .{ "next_event_id", gs.event_queue.next_id },                          .{ "next_listing_id", gs.next_listing_id },
+            .{ "next_candidate_id", gs.next_candidate_id },                        .{ "next_loan_id", gs.next_loan_id },
         };
         for (ints) |kv| {
             try st.bindAll(.{ cid, kv[0], kv[1] });
@@ -642,10 +650,10 @@ pub const Store = struct {
     }
 
     fn saveLoan(self: Store, gs: *GameState, cid: i64) !void {
-        const st = try self.db.prepare("INSERT INTO loan VALUES (?1,?2,?3,?4,?5,?6,?7,?8)");
+        const st = try self.db.prepare("INSERT INTO loan VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)");
         defer st.finalize();
         for (gs.loans.items, 0..) |l, i| {
-            try st.bindAll(.{ cid, @as(i64, @intCast(i)), l.principal, l.balance, l.rate_bp, @as(i64, l.term_months), @as(i64, l.next_pay_day), l.payment });
+            try st.bindAll(.{ cid, @as(i64, @intCast(i)), l.principal, l.balance, l.rate_bp, @as(i64, l.term_months), @as(i64, l.next_pay_day), l.payment, @intFromEnum(l.id) });
             try st.run();
         }
     }
@@ -698,10 +706,10 @@ pub const Store = struct {
     }
 
     fn saveCandidate(self: Store, gs: *GameState, cid: i64) !void {
-        const st = try self.db.prepare("INSERT INTO candidate VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)");
+        const st = try self.db.prepare("INSERT INTO candidate VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)");
         defer st.finalize();
         for (gs.candidates.items, 0..) |c, i| {
-            try st.bindAll(.{ cid, @as(i64, @intCast(i)), @intFromEnum(c.hq), c.spec.first, c.spec.last, c.spec.callsign, c.spec.role, c.spec.experience, @as(i64, c.spec.primary_skill), @as(i64, c.spec.secondary_skill), c.asking_bonus, @as(i64, c.listed_day), @as(i64, c.expires_day), @as(i64, c.spec.age) });
+            try st.bindAll(.{ cid, @as(i64, @intCast(i)), @intFromEnum(c.hq), c.spec.first, c.spec.last, c.spec.callsign, c.spec.role, c.spec.experience, @as(i64, c.spec.primary_skill), @as(i64, c.spec.secondary_skill), c.asking_bonus, @as(i64, c.listed_day), @as(i64, c.expires_day), @as(i64, c.spec.age), @intFromEnum(c.id) });
             try st.run();
         }
     }
@@ -763,7 +771,7 @@ pub const Store = struct {
     }
 
     fn saveListing(self: Store, gs: *GameState, cid: i64) !void {
-        const st = try self.db.prepare("INSERT INTO listing VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)");
+        const st = try self.db.prepare("INSERT INTO listing VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19)");
         defer st.finalize();
         for (gs.market_listings.items, 0..) |l, i| {
             try st.bindAll(.{
@@ -771,7 +779,7 @@ pub const Store = struct {
                 l.rarity,                                                             l.price,                                                   @as(i64, l.quantity),                                        l.staple,
                 @as(i64, l.listed_day),                                               @as(i64, l.expires_day),                                   @intFromEnum(l.hq),                                          if (l.condition) |c| @as(?i64, c.armor_pct) else null,
                 if (l.condition) |c| @as(?[]const u8, @tagName(c.quality)) else null, if (l.condition) |c| @as(?i64, c.damaged_slots) else null, if (l.condition) |c| @as(?i64, c.destroyed_slots) else null, if (l.condition) |c| @as(?i64, c.missing_components) else null,
-                @as(i64, @intFromBool(l.black_market)),                               @intFromEnum(l.company),
+                @as(i64, @intFromBool(l.black_market)),                               @intFromEnum(l.company),                                   @intFromEnum(l.id),
             });
             try st.run();
         }
@@ -1059,6 +1067,9 @@ pub const Store = struct {
             if (std.mem.eql(u8, key, "next_contract_id")) gs.next_contract_id = try fit(@TypeOf(gs.next_contract_id), v);
             if (std.mem.eql(u8, key, "next_battle_id")) gs.next_battle_id = try fit(@TypeOf(gs.next_battle_id), v);
             if (std.mem.eql(u8, key, "next_event_id")) gs.event_queue.next_id = try fit(@TypeOf(gs.event_queue.next_id), v);
+            if (std.mem.eql(u8, key, "next_listing_id")) gs.next_listing_id = try fit(@TypeOf(gs.next_listing_id), v);
+            if (std.mem.eql(u8, key, "next_candidate_id")) gs.next_candidate_id = try fit(@TypeOf(gs.next_candidate_id), v);
+            if (std.mem.eql(u8, key, "next_loan_id")) gs.next_loan_id = try fit(@TypeOf(gs.next_loan_id), v);
             if (std.mem.eql(u8, key, "rng_seed")) {
                 gs.rng.seed = @bitCast(v);
                 has_seed = true;
@@ -1408,11 +1419,31 @@ pub const Store = struct {
 
     fn loadLoan(self: Store, gs: *GameState, cid: i64) !void {
         const alloc = gs.allocator();
-        const st = try self.db.prepare("SELECT principal, balance, rate_bp, term, next_pay, payment FROM loan WHERE cid = ?1 ORDER BY ord");
+        // v35 added an `id` column to loan; pre-v35 rows carry 0 and are
+        // backfilled deterministically in ord order (rule 51).
+        const st = try self.db.prepare("SELECT principal, balance, rate_bp, term, next_pay, payment, id FROM loan WHERE cid = ?1 ORDER BY ord");
         defer st.finalize();
         try st.bindAll(.{cid});
         while (try st.next()) {
-            try gs.loans.append(alloc, .{ .principal = st.int(0), .balance = st.int(1), .rate_bp = st.int(2), .term_months = try st.intAs(u16, 3), .next_pay_day = try st.intAs(u32, 4), .payment = st.int(5) });
+            const raw_id = st.int(6);
+            const id: types.LoanId = if (raw_id != 0)
+                @enumFromInt(@as(u32, @intCast(raw_id)))
+            else blk: {
+                const bid: types.LoanId = @enumFromInt(gs.next_loan_id);
+                gs.next_loan_id += 1;
+                break :blk bid;
+            };
+            try gs.loans.append(alloc, .{
+                .id = id,
+                .principal = st.int(0),
+                .balance = st.int(1),
+                .rate_bp = st.int(2),
+                .term_months = try st.intAs(u16, 3),
+                .next_pay_day = try st.intAs(u32, 4),
+                .payment = st.int(5),
+            });
+            if (raw_id != 0 and @as(u32, @intCast(raw_id)) >= gs.next_loan_id)
+                gs.next_loan_id = @as(u32, @intCast(raw_id)) + 1;
         }
     }
 
@@ -1478,11 +1509,24 @@ pub const Store = struct {
 
     fn loadCandidate(self: Store, gs: *GameState, cid: i64) !void {
         const alloc = gs.allocator();
-        const st = try self.db.prepare("SELECT hq, first, last, callsign, role, experience, primary_skill, secondary_skill, bonus, listed, expires, age FROM candidate WHERE cid = ?1 ORDER BY ord");
+        // v35 added an `id` column to candidate; this query reads it when present
+        // (DEFAULT 0 after migration). Pre-v35 rows carry 0 and are backfilled
+        // deterministically in ord order from next_candidate_id (rule 51).
+        const st = try self.db.prepare("SELECT hq, first, last, callsign, role, experience, primary_skill, secondary_skill, bonus, listed, expires, age, id FROM candidate WHERE cid = ?1 ORDER BY ord");
         defer st.finalize();
         try st.bindAll(.{cid});
         while (try st.next()) {
+            const raw_id = st.int(12); // 0 on pre-v35 rows (DEFAULT 0 from migration)
+            const id: types.CandidateId = if (raw_id != 0)
+                @enumFromInt(@as(u32, @intCast(raw_id)))
+            else blk: {
+                // Backfill: assign the next counter value in ord order.
+                const bid: types.CandidateId = @enumFromInt(gs.next_candidate_id);
+                gs.next_candidate_id += 1;
+                break :blk bid;
+            };
             try gs.candidates.append(alloc, .{
+                .id = id,
                 .hq = try toId(types.HqId, st.int(0)),
                 .spec = .{
                     .first = try st.text(1, alloc),
@@ -1498,6 +1542,9 @@ pub const Store = struct {
                 .listed_day = try st.intAs(u32, 9),
                 .expires_day = try st.intAs(u32, 10),
             });
+            // Raise the counter above any persisted id that exceeds it.
+            if (raw_id != 0 and @as(u32, @intCast(raw_id)) >= gs.next_candidate_id)
+                gs.next_candidate_id = @as(u32, @intCast(raw_id)) + 1;
         }
     }
 
@@ -1564,10 +1611,20 @@ pub const Store = struct {
 
     fn loadListing(self: Store, gs: *GameState, cid: i64) !void {
         const alloc = gs.allocator();
-        const st = try self.db.prepare("SELECT kind, item_key, rarity, price, qty, staple, listed, expires, hq, c_armor, c_quality, c_damaged, c_destroyed, c_missing, black, company FROM listing WHERE cid = ?1 ORDER BY ord");
+        // v35 added an `id` column to listing; pre-v35 rows carry 0 and are
+        // backfilled deterministically in ord order (rule 51).
+        const st = try self.db.prepare("SELECT kind, item_key, rarity, price, qty, staple, listed, expires, hq, c_armor, c_quality, c_damaged, c_destroyed, c_missing, black, company, id FROM listing WHERE cid = ?1 ORDER BY ord");
         defer st.finalize();
         try st.bindAll(.{cid});
         while (try st.next()) {
+            const raw_id = st.int(16);
+            const id: types.ListingId = if (raw_id != 0)
+                @enumFromInt(@as(u32, @intCast(raw_id)))
+            else blk: {
+                const bid: types.ListingId = @enumFromInt(gs.next_listing_id);
+                gs.next_listing_id += 1;
+                break :blk bid;
+            };
             var l: market_mod.Listing = .{
                 .kind = if (std.mem.eql(u8, try st.text(0, alloc), "unit")) .unit else .part,
                 .item_key = try st.text(1, alloc),
@@ -1580,6 +1637,7 @@ pub const Store = struct {
                 .hq = try toId(types.HqId, st.int(8)),
                 .black_market = st.int(14) != 0,
                 .company = try toId(types.ForceId, st.int(15)),
+                .id = id,
             };
             if (st.optInt(9)) |armor| {
                 l.condition = .{
@@ -1591,6 +1649,8 @@ pub const Store = struct {
                 };
             }
             try gs.market_listings.append(alloc, l);
+            if (raw_id != 0 and @as(u32, @intCast(raw_id)) >= gs.next_listing_id)
+                gs.next_listing_id = @as(u32, @intCast(raw_id)) + 1;
         }
     }
 
@@ -2061,11 +2121,11 @@ test "save → load → identical hash, and the loaded campaign keeps playing" {
     _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "Erik Kalmar", .origin = .CC, .profession = .quartermaster } });
     _ = try commands.execute(&gs, .{ .rename_outfit = "Kalmar's Free Legion" });
     const co = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
-    _ = try commands.execute(&gs, .{ .accept_contract = .{ .offer_index = 0, .company = co } });
+    _ = try commands.execute(&gs, .{ .accept_contract = .{ .offer = gs.contract_offers.items[0].id, .company = co } });
     _ = try commands.execute(&gs, .{ .set_policy = .{ .entity = .{ .company = co }, .floor = 200_000, .monthly_cap = 300_000 } });
     _ = try commands.execute(&gs, .{ .set_supply_policy = .{ .company = co, .min_days = 14, .tons = 20 } });
     _ = try commands.execute(&gs, .{ .set_supply_policy = .{ .company = co, .min_days = 30, .tons = 60 } }); // re-setting replaces
-    _ = try commands.execute(&gs, .{ .set_stock_policy = .{ .hq = gs.hqs.keys()[0], .part_key = "ammo_lrm", .min = 10, .target = 30 } });
+    _ = try commands.execute(&gs, .{ .set_stock_policy = .{ .hq = gs.seat(), .part_key = "ammo_lrm", .min = 10, .target = 30 } });
     _ = try commands.execute(&gs, .{ .set_auto_admit = true });
     _ = try commands.execute(&gs, .{ .set_shares_pct = 45 }); // profit shares
     gs.people.getPtr(gs.people.keys()[2]).?.shares = 4;
@@ -2079,7 +2139,7 @@ test "save → load → identical hash, and the loaded campaign keeps playing" {
     try gs.people.getPtr(scarred).?.injuries.append(gs.allocator(), .{ .location = .head, .severity = 3, .incurred_day = 5, .heal_done_day = 40, .permanent = true, .healed = true });
     // A dropship holding a berth rides along.
     const ship = try gs.addUnit("LEOPARD");
-    gs.unit(ship).?.berth_hq = gs.hqs.keys()[0];
+    gs.unit(ship).?.berth_hq = gs.seat();
     // A company's rules of engagement ride along.
     gs.forces.getPtr(gs.forces.keys()[0]).?.roe = .cautious;
     // A wreck remembers how it died.
@@ -2097,7 +2157,7 @@ test "save → load → identical hash, and the loaded campaign keeps playing" {
     var diff_buf: [128]u8 = undefined;
     try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &diff_buf) orelse "");
     try std.testing.expectEqual(before, digest.stateHash(&loaded));
-    try std.testing.expectEqual(gs.hqs.keys()[0], loaded.unit(ship).?.berth_hq);
+    try std.testing.expectEqual(gs.seat(), loaded.unit(ship).?.berth_hq);
     try std.testing.expectEqual(@import("../domain/unit.zig").WreckCause.engine, loaded.unit(wreck).?.wreck);
     try std.testing.expectEqual(@import("../domain/force.zig").Roe.cautious, loaded.forces.getPtr(gs.forces.keys()[0]).?.roe);
     // Offers keep their opposition.
@@ -2856,7 +2916,7 @@ fn playedYearForTest(gs: *GameState) !void {
             },
         };
         if (!posture.isCompanyDeployed(gs, co) and gs.contract_offers.items.len > 0) {
-            _ = commands.execute(gs, .{ .accept_contract = .{ .offer_index = 0, .company = co } }) catch {};
+            _ = commands.execute(gs, .{ .accept_contract = .{ .offer = gs.contract_offers.items[0].id, .company = co } }) catch {};
         }
         const r = try commands.execute(gs, .{ .advance_days = 7 });
         if (r.days_advanced == 0) return error.TestUnexpectedResult;
@@ -2871,7 +2931,7 @@ test "golden master: a played year hashes to its pinned value, and a save of it 
     try std.testing.expect(gs.battle_reports.kept.items.len > 0); // the year saw fighting
     // Any change to a simulated or saved result moves this; re-pin it only
     // when the change is meant.
-    try std.testing.expectEqual(@as(u64, 12374000996448995992), digest.stateHash(&gs));
+    try std.testing.expectEqual(@as(u64, 13922281342641301871), digest.stateHash(&gs));
 
     const store = try Store.open(":memory:");
     defer store.close();

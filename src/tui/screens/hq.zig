@@ -18,8 +18,16 @@ pub fn draw(self: *App) anyerror!void {
     const b = self.body();
     const hqs = try q.hqList(al, g);
     if (hqs.len == 0) return;
-    App.clampIdx(&self.hq_sel, hqs.len);
-    const h = hqs[self.hq_sel];
+    // Revalidate hq_sel: fall back to first HQ if stale (rule 40).
+    var hq_sel_idx: usize = 0;
+    if (self.hq_sel != .none) {
+        for (hqs, 0..) |row, i| if (row.id == self.hq_sel) {
+            hq_sel_idx = i;
+            break;
+        };
+    }
+    self.hq_sel = hqs[hq_sel_idx].id;
+    const h = hqs[hq_sel_idx];
     const id = h.id;
     const detail = try q.hqDetail(al, g, id);
     const title = try std.fmt.allocPrint(al, "hq:{d} {s} · {s} · ring {d} LY · funds {s} · staff {d}/{d}", .{ @intFromEnum(id), try h.name.markup(al), h.tier, h.ring_ly, try q.money(al, h.funds), h.staff_assigned, h.staff_required });
@@ -70,13 +78,24 @@ pub fn handle(self: *App, k: app.Key) anyerror!bool {
     const hit = app.keys.lookup(Action, &bindings, self.focus, k) orelse return false;
     const al = self.a();
     const g = self.state();
-    const n = (try q.hqList(al, g)).len;
+    const hqs = try q.hqList(al, g);
+    const n = hqs.len;
     switch (hit.action) {
         .next_hq => if (n > 0) {
-            self.hq_sel = (self.hq_sel + 1) % n;
+            var cur_i: usize = 0;
+            for (hqs, 0..) |row, i| if (row.id == self.hq_sel) {
+                cur_i = i;
+                break;
+            };
+            self.hq_sel = hqs[(cur_i + 1) % n].id;
         },
         .prev_hq => if (n > 0) {
-            self.hq_sel = (self.hq_sel + n - 1) % n;
+            var cur_i: usize = 0;
+            for (hqs, 0..) |row, i| if (row.id == self.hq_sel) {
+                cur_i = i;
+                break;
+            };
+            self.hq_sel = hqs[(cur_i + n - 1) % n].id;
         },
         .upgrade => {
             // The facility rows sit right under the header in the
@@ -122,7 +141,7 @@ pub fn handle(self: *App, k: app.Key) anyerror!bool {
             const hallv = try q.hall(al, g, id, self.hall_filter);
             if (hallv.rows.len == 0) return true;
             const row = hallv.rows[@min(self.cur(1).*, hallv.rows.len - 1)];
-            _ = try self.execSay(.{ .hire_candidate = row.index }, .good, "hired candidate [{d}]", .{row.index});
+            _ = try self.execSay(.{ .hire_candidate = row.id }, .good, "hired candidate [{d}]", .{@intFromEnum(row.id)});
         },
         .fabricate => {
             self.openModal(.{ .pick_part = .{ .purpose = .fabricate, .site = .{ .hq = @enumFromInt(try self.hqSelId(g)) } } });

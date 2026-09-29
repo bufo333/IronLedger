@@ -186,7 +186,15 @@ pub fn sitePlanetKey(gs: *GameState, site: types.Site) ?[]const u8 {
 // ---- C4b supply/logistics command handlers moved from commands.zig ----
 
 /// Result for order_part and replace_mount.
-pub const OrderResult = struct { sourced: bool = true, hq: types.HqId = .none };
+pub const OrderResult = struct {
+    sourced: bool = true,
+    hq: types.HqId = .none,
+    /// Echo fields: populated only when sourced = true.
+    part_key: []const u8 = "",
+    quantity: u32 = 0,
+    eta_day: u32 = 0,
+    cost: types.CBills = 0,
+};
 /// Result for ship_components_home.
 pub const ShipComponentsResult = struct { count: u32 = 0, hq: types.HqId = .none };
 /// Result for replace_gear.
@@ -236,12 +244,12 @@ pub fn freightQuote(gs: *GameState, alloc: std.mem.Allocator, from: types.Site, 
     const from_hq: types.HqId = switch (from) {
         .hq => |id| id,
         .company => |id| gs.homeHqFor(id),
-        .outfit => if (gs.hqs.count() > 0) gs.hqs.keys()[0] else .none,
+        .outfit => gs.seat(),
     };
     const to_hq: types.HqId = switch (to) {
         .hq => |id| id,
         .company => |id| gs.homeHqFor(id),
-        .outfit => if (gs.hqs.count() > 0) gs.hqs.keys()[0] else .none,
+        .outfit => gs.seat(),
     };
     if (from_hq != .none and to_hq != .none and from_hq != to_hq) {
         route = try network.routeBetween(gs, from_hq, to_hq, alloc);
@@ -262,7 +270,7 @@ pub fn freightQuote(gs: *GameState, alloc: std.mem.Allocator, from: types.Site, 
     }
     cost = types.applyBp(cost, commander_mod.costMultBp(gs.commander, .freight));
     if (gs.hqs.count() > 0) {
-        const transport = hq_ops.hqStaff(gs, gs.hqs.keys()[0], .admin_transport);
+        const transport = hq_ops.hqStaff(gs, gs.seat(), .admin_transport);
         cost = types.applyBp(cost, 10_000 - tuning.logistics.transport_admin_discount_bp * @as(types.Bp, @min(tuning.logistics.transport_admin_max, transport.count)));
     }
     return .{ .cost = cost, .days = @max(tuning.logistics.freight_min_days, days), .route = route, .tons = tons_moved };
@@ -494,7 +502,7 @@ pub fn orderPart(gs: *GameState, part_key: []const u8, quantity: u32, dest_opt: 
     const hq_id: types.HqId = switch (dest) {
         .hq => |id| id,
         .company => |id| gs.homeHqFor(id),
-        .outfit => gs.hqs.keys()[0],
+        .outfit => gs.seat(),
     };
     const hq = gs.hqs.getPtr(hq_id) orelse return error.UnknownHq;
     const world = planet_mod.find(hq.planet_key) orelse return error.UnknownPlanet;
@@ -546,9 +554,9 @@ pub fn orderPart(gs: *GameState, part_key: []const u8, quantity: u32, dest_opt: 
         .src = src,
     };
     if (!singleOrderAcquire(gs, od, hq_id, dest, quantity, admin_bonus, world.industry)) {
-        return .{ .sourced = false };
+        return .{ .sourced = false, .part_key = part_key, .quantity = quantity };
     }
-    return .{};
+    return .{ .part_key = part_key, .quantity = quantity, .eta_day = gs.clock.day_index + lead_days, .cost = total };
 }
 
 /// `replace_gear`: one spare per destroyed or missing weapon/equipment/ammo
@@ -575,7 +583,7 @@ pub fn replaceGear(gs: *GameState, unit_id: types.UnitId) !ReplaceGearResult {
     const hq_id: types.HqId = switch (site) {
         .hq => |id| id,
         .company => |id| gs.homeHqFor(id),
-        .outfit => gs.hqs.keys()[0],
+        .outfit => gs.seat(),
     };
     const hq = gs.hqs.getPtr(hq_id) orelse return error.UnknownHq;
     const world = planet_mod.find(hq.planet_key) orelse return error.UnknownPlanet;
@@ -678,7 +686,7 @@ const Command = commands.Command;
 
 pub fn execOrderPart(gs: *GameState, o: @FieldType(Command, "order_part")) Error!Result {
     const res = orderPart(gs, o.part_key, o.quantity, o.dest) catch |err| return @errorCast(err);
-    return .{ .sourced = res.sourced };
+    return .{ .sourced = res.sourced, .order_key = res.part_key, .order_quantity = res.quantity, .order_eta = res.eta_day, .order_cost = res.cost };
 }
 
 pub fn execShipStock(gs: *GameState, s: @FieldType(Command, "ship_stock")) Error!Result {
@@ -715,7 +723,7 @@ test "order_part is refused over the site's free tons and accepted at the limit"
     var gs = GameState.init(std.testing.allocator, .{ .seed = 7 });
     defer gs.deinit();
     _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
-    const hq_id = gs.hqs.keys()[0];
+    const hq_id = gs.seat();
     gs.hqs.values()[0].funds = 100_000_000;
     const site: types.Site = .{ .hq = hq_id };
 
@@ -759,7 +767,7 @@ test "a stock policy reorders a warehouse line to its target, once, and can be r
     var gs = GameState.init(std.testing.allocator, .{ .seed = 12 });
     defer gs.deinit();
     _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
-    const hq = gs.hqs.keys()[0];
+    const hq = gs.seat();
     gs.hqs.getPtr(hq).?.funds = 20_000_000;
     gs.stock_policies.clearRetainingCapacity(); // drop the default provisions line — this test counts lines
     try std.testing.expectError(commands.Error.UnknownPart, commands.execute(&gs, .{ .set_stock_policy = .{ .hq = hq, .part_key = "unobtainium", .min = 1, .target = 2 } }));
@@ -798,7 +806,7 @@ test "selling warehouse stock pays the HQ and respects a keep-stocked minimum" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 12 });
     defer gs.deinit();
     _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
-    const hq = gs.hqs.keys()[0];
+    const hq = gs.seat();
     try gs.addStock(.{ .hq = hq }, "ammo_lrm", 20);
     const have = gs.stockCount(.{ .hq = hq }, "ammo_lrm");
     const funds_before = gs.hqs.getPtr(hq).?.funds;
@@ -820,7 +828,7 @@ test "sellStock leaves stock, funds and ledger unchanged when allocation fails" 
     defer outer.deinit();
     var gs = GameState.init(outer.allocator(), .{ .seed = 7700 });
     _ = try founding.createCommander(&gs, "T", .LC, .quartermaster);
-    const hq_id = gs.hqs.keys()[0];
+    const hq_id = gs.seat();
     try gs.addStock(.{ .hq = hq_id }, "ammo_lrm", 20);
 
     const before = digest.stateHash(&gs);
@@ -842,7 +850,7 @@ test "warehouses are finite — orders that won't fit are refused" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 94 });
     defer gs.deinit();
     _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
-    const hq_id = gs.hqs.keys()[0];
+    const hq_id = gs.seat();
     gs.hqs.values()[0].funds = 100_000_000;
 
     // The room check runs before the sourcing roll, so an oversized order
@@ -862,7 +870,7 @@ test "a failed sourcing roll is reported, keeps its destination, and clears afte
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1228 });
     defer gs.deinit();
     _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
-    const hq = gs.hqs.keys()[0];
+    const hq = gs.seat();
     gs.hqs.getPtr(hq).?.funds = 50_000_000;
     // Order a rare component many times: at least one roll fails.
     var failed: ?usize = null;
@@ -888,7 +896,7 @@ test "orderPart reserves order, debit and log before the acquisition roll — a 
     defer outer.deinit();
     var gs = GameState.init(outer.allocator(), .{ .seed = 5150 });
     _ = try founding.createCommander(&gs, "T", .LC, .quartermaster);
-    const hq_id = gs.hqs.keys()[0];
+    const hq_id = gs.seat();
     gs.hqs.getPtr(hq_id).?.funds = 50_000_000; // enough to pass the funds check
 
     const before = digest.stateHash(&gs);
@@ -955,7 +963,7 @@ test "ship_stock propagates OutOfMemory and moves nothing" {
     defer outer.deinit();
     var gs = GameState.init(outer.allocator(), .{ .seed = 7501 });
     _ = try founding.createCommander(&gs, "T", .LC, .quartermaster);
-    const home = gs.hqs.keys()[0];
+    const home = gs.seat();
     const far = try founding.foundHq(&gs, "Frontier", .field, "alkaid");
     try gs.hq_links.append(gs.allocator(), .{ .a = home, .b = far, .level = 1, .established_day = 0 });
     try gs.addStock(.{ .hq = far }, "armor", 10);
@@ -987,7 +995,7 @@ test "a shipment the payer cannot afford uses no link capacity" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 7501 });
     defer gs.deinit();
     _ = try founding.createCommander(&gs, "T", .LC, .quartermaster);
-    const home = gs.hqs.keys()[0];
+    const home = gs.seat();
     const far = try founding.foundHq(&gs, "Frontier", .field, "alkaid");
     try gs.hq_links.append(gs.allocator(), .{ .a = home, .b = far, .level = 1, .established_day = 0 });
     // The shipment is paid from the sending HQ's treasury, which is empty.
@@ -1008,7 +1016,7 @@ test "moveStock leaves source unchanged when destination allocation fails" {
     defer outer.deinit();
     var gs = GameState.init(outer.allocator(), .{ .seed = 7600 });
     _ = try founding.createCommander(&gs, "T", .LC, .quartermaster);
-    const hq_id = gs.hqs.keys()[0];
+    const hq_id = gs.seat();
     // Put stock on the HQ shelf; the outfit depot's spare_parts map
     // has the key only if founding seeded it. Use a key the depot
     // does not carry so the destination getOrPut must allocate.

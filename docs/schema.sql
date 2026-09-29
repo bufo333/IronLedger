@@ -61,7 +61,8 @@ CREATE TABLE campaign (
 -- bankrupt, auto_admit, difficulty, share_profit_bp, the stat_* counters
 -- (battles won/drawn/lost, hulls lost/salvaged, people_kia, enemy_bv),
 -- next_person_id, next_unit_id, next_force_id, next_hq_id,
--- next_contract_id, next_battle_id, next_event_id, rng_seed.
+-- next_contract_id, next_battle_id, next_event_id, rng_seed,
+-- next_listing_id, next_candidate_id, next_loan_id (added v35).
 CREATE TABLE meta (
     cid             INTEGER NOT NULL,
     key             TEXT    NOT NULL,
@@ -183,6 +184,7 @@ CREATE TABLE injury (
 CREATE TABLE candidate (
     cid             INTEGER NOT NULL,
     ord             INTEGER NOT NULL,
+    id              INTEGER,                         -- CandidateId, campaign-unique (meta next_candidate_id; added v35)
     hq              INTEGER,                         -- -> hq.id
     first           TEXT,
     last            TEXT,
@@ -481,6 +483,7 @@ CREATE TABLE txn (
 CREATE TABLE loan (
     cid             INTEGER NOT NULL,
     ord             INTEGER NOT NULL,
+    id              INTEGER,                         -- LoanId, campaign-unique (meta next_loan_id; added v35)
     principal       INTEGER,
     balance         INTEGER,
     rate_bp         INTEGER,                         -- basis points
@@ -544,6 +547,7 @@ CREATE TABLE rating_snapshot (
 CREATE TABLE listing (
     cid             INTEGER NOT NULL,
     ord             INTEGER NOT NULL,
+    id              INTEGER,                         -- ListingId, campaign-unique (meta next_listing_id; added v35)
     kind            TEXT,                            -- 'unit' | 'part'
     item_key        TEXT,                            -- chassis_key or part_key
     rarity          TEXT,                            -- types.Rarity

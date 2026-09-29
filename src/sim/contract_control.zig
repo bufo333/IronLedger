@@ -332,8 +332,9 @@ pub fn execConfirmOrders(gs: *GameState, id: @FieldType(Command, "confirm_orders
 }
 
 pub fn execAcceptContract(gs: *GameState, a: @FieldType(Command, "accept_contract")) Error!Result {
-    acceptContract(gs, a.offer_index, a.company) catch |err| return @errorCast(err);
-    return .{};
+    acceptContract(gs, a.offer, a.company) catch |err| return @errorCast(err);
+    // The accepted contract has the same id as the offer (assigned at generation).
+    return .{ .contract = a.offer };
 }
 
 test "attrition contracts break when the pool does; duration ones don't care" {
@@ -530,9 +531,17 @@ test "a performance failure at term is .failed — no clawback, no cooling, VP c
     try std.testing.expectEqual(@as(i64, 0), @import("../econ/finance.zig").summarize(&gs.ledger, 0, 1000, .all).category(.breach_clawback));
 }
 
-pub fn acceptContract(gs: *GameState, offer_index: usize, company_id: types.ForceId) !void {
+/// Resolve an offer from `contract_offers` by its typed ContractId.
+fn findOffer(gs: *GameState, offer_id: types.ContractId) ?usize {
+    for (gs.contract_offers.items, 0..) |o, i| {
+        if (o.id == offer_id) return i;
+    }
+    return null;
+}
+
+pub fn acceptContract(gs: *GameState, offer_id: types.ContractId, company_id: types.ForceId) !void {
     // ---- VALIDATE: no mutation ----
-    if (offer_index >= gs.contract_offers.items.len) return error.NoSuchOffer;
+    const offer_index = findOffer(gs, offer_id) orelse return error.NoSuchOffer;
     const company = gs.force(company_id) orelse return error.UnknownForce;
     if (company.echelon != .company) return error.NotACompany;
     if (!contract_market.offerEligible(gs, &gs.contract_offers.items[offer_index], company_id)) return error.OutOfRange;
@@ -550,10 +559,9 @@ pub fn acceptContract(gs: *GameState, offer_index: usize, company_id: types.Forc
     defer scratch_arena.deinit();
     const scratch = scratch_arena.allocator();
 
-    // Copy the offer (do NOT remove it yet).
+    // Copy the offer (do NOT remove it yet); the offer already carries its
+    // ContractId from generation time (C6a: no accept-time id draw).
     var c = gs.contract_offers.items[offer_index];
-    const id: types.ContractId = @enumFromInt(gs.next_contract_id);
-    c.id = id;
     c.status = .transit;
     c.assigned_company = company_id;
     // Transit from wherever the company stands (a redeploy): the
@@ -639,7 +647,6 @@ pub fn acceptContract(gs: *GameState, offer_index: usize, company_id: types.Forc
 
     // Remove the offer (in-place shrink, no allocation).
     _ = gs.contract_offers.orderedRemove(offer_index);
-    gs.next_contract_id += 1;
 
     // Advance in.
     gs.ledger.transactions.appendAssumeCapacity(.{
@@ -647,7 +654,7 @@ pub fn acceptContract(gs: *GameState, offer_index: usize, company_id: types.Forc
         .amount = signing,
         .category = .advance,
         .company = company_id,
-        .contract = id,
+        .contract = c.id,
         .note = "contract advance + signing bonus",
     });
     gs.funds += signing;
@@ -662,7 +669,7 @@ pub fn acceptContract(gs: *GameState, offer_index: usize, company_id: types.Forc
             .amount = -freight,
             .category = .transport_charter,
             .company = company_id,
-            .contract = id,
+            .contract = c.id,
             .note = if (lift.covered_bp > 0) "outbound transit charter (own lift credited)" else "outbound transit charter",
         });
         gs.funds -= freight;
@@ -673,12 +680,12 @@ pub fn acceptContract(gs: *GameState, offer_index: usize, company_id: types.Forc
         .day = gs.clock.day_index,
         .category = .delivery,
         .company = company_id,
-        .contract = id,
+        .contract = c.id,
         .text = line,
     });
 
     // Record the contract and clear the company's planet (underway).
-    gs.contracts.putAssumeCapacity(id, c);
+    gs.contracts.putAssumeCapacity(c.id, c);
     if (gs.force(company_id)) |f| f.location_planet = null;
 
     // Load out from the home warehouse.
@@ -701,7 +708,7 @@ pub fn acceptContract(gs: *GameState, offer_index: usize, company_id: types.Forc
         .day = gs.clock.day_index,
         .category = .delivery,
         .company = company_id,
-        .contract = id,
+        .contract = c.id,
         .text = loadout_line,
     });
 }
@@ -758,7 +765,7 @@ test "accepting a contract leaves state whole when an allocation fails" {
     gs.arena.state.free_list = null;
     gs.arena.child_allocator = std.testing.failing_allocator;
 
-    try std.testing.expectError(error.OutOfMemory, acceptContract(&gs, idx, co));
+    try std.testing.expectError(error.OutOfMemory, acceptContract(&gs, gs.contract_offers.items[idx].id, co));
     try std.testing.expectEqual(before, digest.stateHash(&gs));
 }
 
@@ -775,7 +782,7 @@ test "idle companies stay where they worked; recall brings them home; redeploy f
     for (gs.contract_offers.items, 0..) |o, i| {
         if (o.terms.length_months < gs.contract_offers.items[best].terms.length_months) best = i;
     }
-    _ = try commands.execute(&gs, .{ .accept_contract = .{ .offer_index = best, .company = co } });
+    _ = try commands.execute(&gs, .{ .accept_contract = .{ .offer = gs.contract_offers.items[best].id, .company = co } });
     const c = gs.contracts.values()[0];
     try std.testing.expect(c.committed_bv > 0);
     try tick.advanceReading(&gs, c.transit_days + @as(u32, c.terms.length_months) * 30 + 5);
@@ -789,7 +796,7 @@ test "idle companies stay where they worked; recall brings them home; redeploy f
     // Redeploy straight from the field if there's work (transit from
     // where it stands), else recall it.
     if (gs.contract_offers.items.len > 0) {
-        _ = try commands.execute(&gs, .{ .accept_contract = .{ .offer_index = 0, .company = co } });
+        _ = try commands.execute(&gs, .{ .accept_contract = .{ .offer = gs.contract_offers.items[0].id, .company = co } });
         try std.testing.expect(gs.deploymentContract(co) != null);
         const rep = gs.reputation;
         _ = try commands.execute(&gs, .{ .recall_company = co }); // aborted underway or breached on station

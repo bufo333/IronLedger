@@ -152,7 +152,7 @@ test "an offer's intel is the comms of the board that offered it" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 7702 });
     defer gs.deinit();
     _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
-    const seat = gs.hqs.keys()[0];
+    const seat = gs.seat();
     const second = try founding.foundHq(&gs, "Second", .regional, "alkaid");
     for ([_]types.HqId{ seat, second }) |id| gs.hqs.getPtr(id).?.staff_assigned = 999;
     for (gs.hqs.getPtr(seat).?.facilities.items) |*f| {
@@ -196,7 +196,7 @@ test "blind intel widens the lance range; comms 3 pins it" {
     };
     const blind = try lanceIntel(&gs, &c);
     try std.testing.expect(blind.lo <= 3 and blind.hi >= 3);
-    const hq = gs.hqs.getPtr(gs.hqs.keys()[0]).?;
+    const hq = gs.hqs.getPtr(gs.seat()).?;
     hq.staff_assigned = 999;
     const comms = for (hq.facilities.items) |*f| {
         if (f.kind == .comms) break f;

@@ -664,7 +664,7 @@ fn companyRow(alloc: Alloc, gs: *GameState, id: types.ForceId) !table.Row {
 // --------------------------------------------------------------- contracts
 
 pub const OfferRow = struct {
-    index: usize,
+    id: types.ContractId, // typed identity — the `accept_contract` / `negotiate` argument
     kind: contract_mod.ContractKind,
     beachhead: bool,
     planet_key: []const u8,
@@ -674,11 +674,12 @@ pub const OfferRow = struct {
 };
 
 pub const board_cols: []const table.Col = &.{
-    .{ .name = "kind" },                  .{ .name = "world" },                   .{ .name = "emp" },                       .{ .name = "LY", .justify = .right, .drop = 3 },
-    .{ .name = "band" },                  .{ .name = "mo", .justify = .right },   .{ .name = "pay/mo", .justify = .right }, .{ .name = "total", .justify = .right, .drop = 3 },
-    .{ .name = "enemy" },                 .{ .name = "salv", .justify = .right }, .{ .name = "rights" },                    .{ .name = "transit", .justify = .right },
-    .{ .name = "skulls" },                .{ .name = "rating" },                  .{ .name = "readiest co." },              .{ .name = "tons", .justify = .right, .drop = 1 },
-    .{ .name = "weight mix", .drop = 2 }, .{ .name = "enemy tons", .drop = 2 },   .{ .name = "opposition" },                .{ .name = "" },
+    .{ .name = "id", .justify = .right },               .{ .name = "kind" },                  .{ .name = "world" },                   .{ .name = "emp" },
+    .{ .name = "LY", .justify = .right, .drop = 3 },    .{ .name = "band" },                  .{ .name = "mo", .justify = .right },   .{ .name = "pay/mo", .justify = .right },
+    .{ .name = "total", .justify = .right, .drop = 3 }, .{ .name = "enemy" },                 .{ .name = "salv", .justify = .right }, .{ .name = "rights" },
+    .{ .name = "transit", .justify = .right },          .{ .name = "skulls" },                .{ .name = "rating" },                  .{ .name = "readiest co." },
+    .{ .name = "tons", .justify = .right, .drop = 1 },  .{ .name = "weight mix", .drop = 2 }, .{ .name = "enemy tons", .drop = 2 },   .{ .name = "opposition" },
+    .{ .name = "" },
 };
 
 pub const ActiveRow = struct {
@@ -765,22 +766,30 @@ pub fn opforText(alloc: Alloc, gs: *GameState, c: *const contract_mod.Contract) 
     return try std.fmt.allocPrint(alloc, "{d}–{d} lances of {s}, quality unknown (comms)", .{ li.lo, li.hi, c.enemy_key });
 }
 
+/// Resolve a contract offer ptr from the board by typed ContractId; null if absent.
+fn findOfferPtr(gs: *GameState, offer_id: types.ContractId) ?*const contract_mod.Contract {
+    for (gs.contract_offers.items) |*o| {
+        if (o.id == offer_id) return o;
+    }
+    return null;
+}
+
 /// The rating for the company best placed to take an offer: the
 /// readiest eligible one, as `candidates` ranks them. Null when no company
 /// of that board's HQ can go, or the offer predates rolled opposition.
-pub fn bestRating(alloc: Alloc, gs: *GameState, offer_index: usize) !?OfferRating {
-    if (offer_index >= gs.contract_offers.items.len) return null;
-    for (try offerCandidates(alloc, gs, offer_index)) |cand| {
+pub fn bestRating(alloc: Alloc, gs: *GameState, offer_id: types.ContractId) !?OfferRating {
+    const offer = findOfferPtr(gs, offer_id) orelse return null;
+    for (try offerCandidates(alloc, gs, offer_id)) |cand| {
         if (!cand.eligible) continue;
-        return try rateOffer(alloc, gs, &gs.contract_offers.items[offer_index], cand.company);
+        return try rateOffer(alloc, gs, offer, cand.company);
     }
     return null;
 }
 
 /// "☠☠☠◐ 3.5 Alpha 610t (L4 M8 H0 A0) vs ~720t" for a board row, coloured
 /// by difficulty.
-pub fn boardSkulls(alloc: Alloc, gs: *GameState, offer_index: usize) ![]const u8 {
-    const r = (try bestRating(alloc, gs, offer_index)) orelse return "{d}no company in range{/}";
+pub fn boardSkulls(alloc: Alloc, gs: *GameState, offer_id: types.ContractId) ![]const u8 {
+    const r = (try bestRating(alloc, gs, offer_id)) orelse return "{d}no company in range{/}";
     return try ratingLine(alloc, gs, r);
 }
 
@@ -819,8 +828,8 @@ pub fn factionLegend(alloc: Alloc) ![]const u8 {
 
 /// The board's rating cells: skulls · rating · company · own
 /// tons · weight mix · enemy tons, for the readiest company in range.
-fn boardRatingCells(alloc: Alloc, gs: *GameState, offer_index: usize) ![6][]const u8 {
-    const r = (try bestRating(alloc, gs, offer_index)) orelse return .{ "{d}—{/}", "{d}—{/}", "{d}no company in range{/}", "", "", "" };
+fn boardRatingCells(alloc: Alloc, gs: *GameState, offer_id: types.ContractId) ![6][]const u8 {
+    const r = (try bestRating(alloc, gs, offer_id)) orelse return .{ "{d}—{/}", "{d}—{/}", "{d}no company in range{/}", "", "", "" };
     const skulls = @import("../domain/skulls.zig");
     const mk: []const u8 = if (r.half_hi >= 9) "{c}" else if (r.half_hi >= 7) "{a}" else "{g}";
     var a: [8]u8 = undefined;
@@ -861,10 +870,11 @@ pub fn tonnageText(alloc: Alloc, r: OfferRating) ![]const u8 {
 pub fn contracts(alloc: Alloc, gs: *GameState, board_hq: types.HqId) !Contracts {
     const day = gs.clock.day_index;
     var board: std.ArrayListUnmanaged(OfferRow) = .empty;
-    for (gs.contract_offers.items, 0..) |c, i| {
+    for (gs.contract_offers.items) |c| {
         if (board_hq != .none and c.offer_hq != .none and c.offer_hq != board_hq) continue;
-        const rt = try boardRatingCells(alloc, gs, i);
-        try board.append(alloc, .{ .index = i, .kind = c.kind, .beachhead = c.beachhead, .planet_key = c.planet_key, .negotiated = c.negotiated, .cells = try table.row(alloc, &.{
+        const rt = try boardRatingCells(alloc, gs, c.id);
+        try board.append(alloc, .{ .id = c.id, .kind = c.kind, .beachhead = c.beachhead, .planet_key = c.planet_key, .negotiated = c.negotiated, .cells = try table.row(alloc, &.{
+            try std.fmt.allocPrint(alloc, "{d}", .{@intFromEnum(c.id)}),
             c.kind.label(),
             planetName(c.planet_key),
             c.employer_key,
@@ -1128,8 +1138,8 @@ pub fn ledger(alloc: Alloc, gs: *GameState, selected: state_mod.Treasury, period
     try extras.append(alloc, "");
     try extras.append(alloc, try std.fmt.allocPrint(alloc, "loans · credit {s} of {s}", .{ try money(alloc, try treasury.creditRemaining(alloc, gs)), try money(alloc, try treasury.creditLimit(alloc, gs)) }));
     if (gs.loans.items.len == 0) try extras.append(alloc, "  none · [L] take one (12%/yr simple interest)");
-    for (gs.loans.items, 0..) |l, i| {
-        try extras.append(alloc, try std.fmt.allocPrint(alloc, "  [{d}] owe {s} of {s} · {s}/mo · next d{d}", .{ i, try money(alloc, l.balance), try money(alloc, l.principal), try money(alloc, l.payment), l.next_pay_day }));
+    for (gs.loans.items) |l| {
+        try extras.append(alloc, try std.fmt.allocPrint(alloc, "  [{d}] owe {s} of {s} · {s}/mo · next d{d}", .{ @intFromEnum(l.id), try money(alloc, l.balance), try money(alloc, l.principal), try money(alloc, l.payment), l.next_pay_day }));
     }
     try extras.append(alloc, "");
     try extras.append(alloc, try std.fmt.allocPrint(alloc, "liquidation value    {s}", .{try money(alloc, try treasury.liquidationValue(alloc, gs))}));
@@ -1854,7 +1864,7 @@ fn sourcingNote(alloc: Alloc, gs: *GameState, part_key: []const u8, dest: types.
     const hq_id: types.HqId = switch (dest) {
         .hq => |id| id,
         .company => |id| gs.homeHqFor(id),
-        .outfit => if (gs.hqs.count() > 0) gs.hqs.keys()[0] else .none,
+        .outfit => gs.seat(),
     };
     const hq = gs.hqs.getPtr(hq_id) orelse return "";
     const world = planet_mod.find(hq.planet_key) orelse return "";
@@ -2108,7 +2118,7 @@ pub const HallFilter = enum {
 };
 
 pub const CandidateRow = struct {
-    index: usize, // into gs.candidates — the `hire_candidate` argument
+    id: types.CandidateId, // typed identity — the `hire_candidate` argument
     cells: table.Row,
 };
 
@@ -2129,7 +2139,7 @@ pub fn hall(alloc: Alloc, gs: *GameState, hq_id: types.HqId, filter: HallFilter)
     var rows: std.ArrayListUnmanaged(CandidateRow) = .empty;
     var total: usize = 0;
     const req = if (gs.hqs.getPtr(hq_id)) |h| h.staffRequired() else null;
-    for (gs.candidates.items, 0..) |c, i| {
+    for (gs.candidates.items) |c| {
         if (c.hq != hq_id) continue;
         total += 1;
         if (!filter.matches(c.spec.role)) continue;
@@ -2148,8 +2158,8 @@ pub fn hall(alloc: Alloc, gs: *GameState, hq_id: types.HqId, filter: HallFilter)
             }
         }
         const name = try table.plain(alloc, try std.fmt.allocPrint(alloc, "{s} {s}", .{ c.spec.first, c.spec.last }));
-        try rows.append(alloc, .{ .index = i, .cells = try table.row(alloc, &.{
-            try std.fmt.allocPrint(alloc, "{d}", .{i}),
+        try rows.append(alloc, .{ .id = c.id, .cells = try table.row(alloc, &.{
+            try std.fmt.allocPrint(alloc, "{d}", .{@intFromEnum(c.id)}),
             name,
             @tagName(c.spec.role),
             @tagName(c.spec.experience),
@@ -2222,7 +2232,7 @@ pub fn upgrades(alloc: Alloc, gs: *GameState, hq_id: types.HqId) ![]UpgradeRow {
 // ------------------------------------------------------------------ market
 
 pub const ListingRow = struct {
-    index: usize,
+    id: types.ListingId, // typed identity — the `buy_listing` argument
     cells: table.Row,
     /// The HQ whose board this is — and whose treasury pays.
     hq: types.HqId,
@@ -2346,7 +2356,7 @@ pub const MarketFilter = enum {
 /// damaged hulls need.
 pub fn market(alloc: Alloc, gs: *GameState, filter: MarketFilter, hq: types.HqId) !Market {
     var board: std.ArrayListUnmanaged(ListingRow) = .empty;
-    for (gs.market_listings.items, 0..) |l, i| {
+    for (gs.market_listings.items) |l| {
         if (l.hq != hq and l.hq != .none) continue;
         const keep = switch (l.kind) {
             .unit => filter.matchesUnit(if (chassis_mod.find(l.item_key)) |c| c.kind else .mek),
@@ -2365,8 +2375,8 @@ pub fn market(alloc: Alloc, gs: *GameState, filter: MarketFilter, hq: types.HqId
         if (l.company != .none) {
             // A contract world's hull.
             const world: []const u8 = if (gs.deploymentContract(l.company)) |c| planetName(c.planet_key) else "?";
-            try board.append(alloc, .{ .index = i, .hq = l.hq, .company = l.company, .transport = transport, .cells = try table.row(alloc, &.{
-                try std.fmt.allocPrint(alloc, "{d}", .{i}),
+            try board.append(alloc, .{ .id = l.id, .hq = l.hq, .company = l.company, .transport = transport, .cells = try table.row(alloc, &.{
+                try std.fmt.allocPrint(alloc, "{d}", .{@intFromEnum(l.id)}),
                 try std.fmt.allocPrint(alloc, "{{a}}@{s}{{/}}", .{world}),
                 l.item_key,
                 name,
@@ -2379,8 +2389,8 @@ pub fn market(alloc: Alloc, gs: *GameState, filter: MarketFilter, hq: types.HqId
             }) });
             continue;
         }
-        try board.append(alloc, .{ .index = i, .hq = l.hq, .transport = transport, .cells = try table.row(alloc, &.{
-            try std.fmt.allocPrint(alloc, "{d}", .{i}),
+        try board.append(alloc, .{ .id = l.id, .hq = l.hq, .transport = transport, .cells = try table.row(alloc, &.{
+            try std.fmt.allocPrint(alloc, "{d}", .{@intFromEnum(l.id)}),
             @tagName(l.kind),
             l.item_key,
             name,
@@ -3774,7 +3784,7 @@ test "contract history lists closed contracts with their world; the map counts w
     defer arena.deinit();
     const a = arena.allocator();
     try std.testing.expectEqual(@as(usize, 0), (try contractHistory(a, &gs)).len);
-    _ = try commands.execute(&gs, .{ .accept_contract = .{ .offer_index = 0, .company = co } });
+    _ = try commands.execute(&gs, .{ .accept_contract = .{ .offer = gs.contract_offers.items[0].id, .company = co } });
     const c = &gs.contracts.values()[0];
     try std.testing.expectEqual(@as(usize, 0), (try contractHistory(a, &gs)).len); // still open
     c.status = .completed;
@@ -3802,7 +3812,7 @@ test "the HQ screen's facility rows map back to facilities whatever sits above t
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    const hq = gs.hqs.keys()[0];
+    const hq = gs.seat();
     const view = try hqDetailView(a, &gs, hq);
     try std.testing.expectEqual(view.lines.len, view.facility.len);
     const h = gs.hqs.getPtr(hq).?;
@@ -3835,7 +3845,7 @@ test "hq detail says a field HQ hosts no company and how to raise it" {
         if (std.mem.indexOf(u8, l, "to regional") != null and std.mem.indexOf(u8, l, "days build") != null) says_how = true;
     }
     try std.testing.expect(says_none and says_how);
-    const home = try hqDetail(a, &gs, gs.hqs.keys()[0]);
+    const home = try hqDetail(a, &gs, gs.seat());
     try std.testing.expect(std.mem.indexOf(u8, home[0], "regional HQ") != null);
 }
 
@@ -3849,7 +3859,7 @@ test "hqList's companies and hqDetailView's hosted count match toe.companiesAtHq
     defer arena.deinit();
     const a = arena.allocator();
 
-    const hq_id = gs.hqs.keys()[0];
+    const hq_id = gs.seat();
     const expected = toe_mod.companiesAtHq(&gs, hq_id);
     try std.testing.expect(expected > 0);
 
@@ -3882,7 +3892,7 @@ test "manning matches the starter generator's ratios; raise candidates list pool
     for (try manning(a, &gs, co)) |row| try std.testing.expect(row.have >= row.need);
     // A loose mek shows as a free candidate; a mek listing as a priced one.
     const loose = try gs.addUnit("LCT-1V");
-    const hq = gs.hqs.keys()[0];
+    const hq = gs.seat();
     try gs.market_listings.append(gs.allocator(), .{ .kind = .unit, .item_key = "LCT-1V", .rarity = .common, .price = 1_500_000, .hq = hq, .listed_day = 0, .expires_day = 400, .condition = .{ .armor_pct = 60, .quality = .c, .damaged_slots = 1, .destroyed_slots = 1, .missing_components = 0 } });
     const cands = try raiseCandidates(a, &gs, co, &.{});
     var saw_pool = false;
@@ -3982,21 +3992,25 @@ test "each HQ's market board shows only its own listings" {
     defer gs.deinit();
     const commands = @import("commands.zig");
     _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
-    const home = gs.hqs.keys()[0];
+    const home = gs.seat();
     const far: types.HqId = @enumFromInt(99);
     gs.market_listings.clearRetainingCapacity();
-    try gs.market_listings.append(gs.allocator(), .{ .kind = .unit, .item_key = "LCT-1V", .rarity = .common, .price = 1, .hq = home, .listed_day = 0, .expires_day = 400 });
-    try gs.market_listings.append(gs.allocator(), .{ .kind = .unit, .item_key = "SHD-2H", .rarity = .common, .price = 1, .hq = far, .listed_day = 0, .expires_day = 400 });
+    const lid_home: types.ListingId = @enumFromInt(gs.next_listing_id);
+    try gs.market_listings.append(gs.allocator(), .{ .id = lid_home, .kind = .unit, .item_key = "LCT-1V", .rarity = .common, .price = 1, .hq = home, .listed_day = 0, .expires_day = 400 });
+    gs.next_listing_id += 1;
+    const lid_far: types.ListingId = @enumFromInt(gs.next_listing_id);
+    try gs.market_listings.append(gs.allocator(), .{ .id = lid_far, .kind = .unit, .item_key = "SHD-2H", .rarity = .common, .price = 1, .hq = far, .listed_day = 0, .expires_day = 400 });
+    gs.next_listing_id += 1;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
     const mine = try market(a, &gs, .all, home);
     try std.testing.expectEqual(@as(usize, 1), mine.board.len);
-    try std.testing.expectEqual(@as(usize, 0), mine.board[0].index);
+    try std.testing.expectEqual(lid_home, mine.board[0].id);
     try std.testing.expectEqual(home, mine.board[0].hq);
     const theirs = try market(a, &gs, .all, far);
     try std.testing.expectEqual(@as(usize, 1), theirs.board.len);
-    try std.testing.expectEqual(@as(usize, 1), theirs.board[0].index); // the global index buy_listing takes
+    try std.testing.expectEqual(lid_far, theirs.board[0].id); // typed id the buy_listing command takes
 }
 
 test "desk and ledger queries build on a fresh campaign" {
@@ -4072,7 +4086,7 @@ test "readiness counts wounded, permanent injuries, banked XP and depot hulls; m
         first_mek = e.value_ptr.id;
         first_pilot = e.value_ptr.pilot;
     };
-    try @import("medical.zig").inflict(&gs, first_pilot, .combat, 2, "test");
+    _ = try @import("medical.zig").inflict(&gs, first_pilot, .combat, 2, "test");
     try gs.person(first_pilot).?.injuries.append(gs.allocator(), .{ .location = .head, .severity = 3, .incurred_day = 0, .permanent = true, .healed = true });
     for (gs.unit(first_mek).?.slots.items) |*sl| if (sl.class == .structure) {
         sl.condition = .damaged;
@@ -4206,9 +4220,9 @@ test "player-chosen names draw literally in every desk, forces, people and contr
         if (r.cells) |c| try texts.appendSlice(a, c);
     }
     for ((try people(a, &gs, .all)).rows) |r| try texts.appendSlice(a, r.cells);
-    const cv = try contracts(a, &gs, gs.hqs.keys()[0]);
+    const cv = try contracts(a, &gs, gs.seat());
     for (cv.active) |r| try texts.appendSlice(a, r.lines);
-    try texts.appendSlice(a, try hqDetail(a, &gs, gs.hqs.keys()[0]));
+    try texts.appendSlice(a, try hqDetail(a, &gs, gs.seat()));
     try texts.appendSlice(a, try companyRoster(a, &gs, co));
     try texts.appendSlice(a, try logLines(a, &gs, 40, .all));
     try texts.appendSlice(a, try summary(a, &gs));
@@ -4450,10 +4464,10 @@ pub const candidates_cols: []const table.Col = &.{
 /// company stands, the jumps and days to the contract world from there
 /// (as `accept` reckons them), and the readiness that decides whether it
 /// should go. Readiest first; companies that cannot go come last, with why.
-pub fn offerCandidates(alloc: Alloc, gs: *GameState, offer_index: usize) ![]Candidate {
+pub fn offerCandidates(alloc: Alloc, gs: *GameState, offer_id: types.ContractId) ![]Candidate {
     var out: std.ArrayListUnmanaged(Candidate) = .empty;
-    if (offer_index >= gs.contract_offers.items.len) return out.toOwnedSlice(alloc);
-    const offer = gs.contract_offers.items[offer_index];
+    const offer_ptr = findOfferPtr(gs, offer_id) orelse return out.toOwnedSlice(alloc);
+    const offer = offer_ptr.*;
     const to = planet_mod.find(offer.planet_key);
     for (try readiness(alloc, gs)) |r| {
         const f = gs.force(r.company) orelse continue;
@@ -4592,7 +4606,7 @@ test "offer candidates rank the ready company first and name why the others cann
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
-    const cands = try offerCandidates(arena.allocator(), &gs, 0);
+    const cands = try offerCandidates(arena.allocator(), &gs, gs.contract_offers.items[0].id);
     try std.testing.expectEqual(@as(usize, 3), cands.len);
     try std.testing.expectEqual(fresh, cands[0].company);
     try std.testing.expect(cands[0].eligible);
@@ -4612,8 +4626,19 @@ test "offer candidates rank the ready company first and name why the others cann
 // the screens look alike: what can be chosen is ranked best first, what
 // cannot is still listed, dimmed, with the reason.
 
+/// The typed identity carried by an actionable picker row.
+pub const Selection = union(enum) {
+    company: types.ForceId,
+    hq: types.HqId,
+    person: types.PersonId,
+    /// Unassign pickers: which slot is being cleared (pilot / tech / any).
+    slot: crew.Slot,
+    /// Part pickers: the catalogue key.
+    part: []const u8,
+};
+
 pub const PickRow = struct {
-    id: u32,
+    sel: Selection = .{ .slot = .any },
     eligible: bool,
     why: []const u8 = "",
     slot: crew.Slot = .any,
@@ -4721,17 +4746,17 @@ pub fn companyChoices(alloc: Alloc, gs: *GameState, what: enum { unit, person, s
             try table.row(alloc, &.{ try std.fmt.allocPrint(alloc, "{{a}}{s}{{/}}", .{try table.plain(alloc, co.name)}), stands, try std.fmt.allocPrint(alloc, "{d}", .{days}), room })
         else
             try table.row(alloc, &.{ try std.fmt.allocPrint(alloc, "{{d}}{s}{{/}}", .{try table.plain(alloc, co.name)}), try std.fmt.allocPrint(alloc, "{{d}}{s}{{/}}", .{stands}), "", try std.fmt.allocPrint(alloc, "{{d}}cannot move: {s}{{/}}", .{blocked}) });
-        try out.append(alloc, .{ .id = @intFromEnum(co.id), .eligible = eligible, .why = blocked, .cells = cells });
+        try out.append(alloc, .{ .sel = .{ .company = co.id }, .eligible = eligible, .why = blocked, .cells = cells });
     }
     // Nearest first.
     const Ctx = struct { gs: *GameState, from: types.ForceId, from_key: ?[]const u8 };
     std.mem.sort(PickRow, out.items, Ctx{ .gs = gs, .from = from, .from_key = from_key }, struct {
-        fn days(c: Ctx, id: u32) u32 {
-            return if (c.from_key) |fk| daysFromWorld(c.gs, fk, @enumFromInt(id)) else daysBetweenCompanies(c.gs, c.from, @enumFromInt(id));
+        fn days(c: Ctx, co_id: types.ForceId) u32 {
+            return if (c.from_key) |fk| daysFromWorld(c.gs, fk, co_id) else daysBetweenCompanies(c.gs, c.from, co_id);
         }
         fn lt(c: Ctx, a: PickRow, b: PickRow) bool {
             if (a.eligible != b.eligible) return a.eligible;
-            return days(c, a.id) < days(c, b.id);
+            return days(c, a.sel.company) < days(c, b.sel.company);
         }
     }.lt);
     return out.toOwnedSlice(alloc);
@@ -4746,20 +4771,20 @@ pub fn hqChoices(alloc: Alloc, gs: *GameState, person_id: types.PersonId) ![]Pic
         const h = e.value_ptr;
         const req = h.staffRequired().total();
         const here = p.posted_hq == h.id;
-        try out.append(alloc, .{ .id = @intFromEnum(h.id), .eligible = !here, .why = if (here) "already posted here" else "", .cells = if (here)
+        try out.append(alloc, .{ .sel = .{ .hq = h.id }, .eligible = !here, .why = if (here) "already posted here" else "", .cells = if (here)
             try table.row(alloc, &.{ try std.fmt.allocPrint(alloc, "{{d}}{s}{{/}}", .{try table.plain(alloc, h.name)}), try std.fmt.allocPrint(alloc, "{{d}}{s}{{/}}", .{@tagName(h.tier)}), try std.fmt.allocPrint(alloc, "{{d}}{s}{{/}}", .{planetName(h.planet_key)}), try std.fmt.allocPrint(alloc, "{{d}}{d}/{d}{{/}}", .{ h.staff_assigned, req }), "{d}posted here{/}" })
         else
             try table.row(alloc, &.{ try std.fmt.allocPrint(alloc, "{{a}}{s}{{/}}", .{try table.plain(alloc, h.name)}), @tagName(h.tier), planetName(h.planet_key), try std.fmt.allocPrint(alloc, "{s}{d}/{d}{{/}}", .{ if (h.staff_assigned < req) "{c}" else "{g}", h.staff_assigned, req }), if (h.staff_assigned < req) "short-handed" else "" }) });
     }
     const Ctx = struct { gs: *GameState };
     std.mem.sort(PickRow, out.items, Ctx{ .gs = gs }, struct {
-        fn shortfall(c: Ctx, id: u32) i64 {
-            const h = c.gs.hqs.getPtr(@enumFromInt(id)) orelse return 0;
+        fn shortfall(c: Ctx, hq_id: types.HqId) i64 {
+            const h = c.gs.hqs.getPtr(hq_id) orelse return 0;
             return @as(i64, h.staffRequired().total()) - @as(i64, h.staff_assigned);
         }
         fn lt(c: Ctx, a: PickRow, b: PickRow) bool {
             if (a.eligible != b.eligible) return a.eligible;
-            return shortfall(c, a.id) > shortfall(c, b.id);
+            return shortfall(c, a.sel.hq) > shortfall(c, b.sel.hq);
         }
     }.lt);
     return out.toOwnedSlice(alloc);
@@ -4797,7 +4822,7 @@ pub fn crewChoices(alloc: Alloc, gs: *GameState, unit_id: types.UnitId) ![]PickR
             try table.row(alloc, &.{ try std.fmt.allocPrint(alloc, "{{a}}{s}{{/}}", .{name}), @tagName(p.role), try std.fmt.allocPrint(alloc, "{d}", .{skill}), now, if (!same) (if (gs.companyOf(p.assigned_force) == .none) "{d}(pool){/}" else "{d}(another company){/}") else "" })
         else
             try table.row(alloc, &.{ try std.fmt.allocPrint(alloc, "{{d}}{s}{{/}}", .{name}), try std.fmt.allocPrint(alloc, "{{d}}{s}{{/}}", .{@tagName(p.role)}), try std.fmt.allocPrint(alloc, "{{d}}{d}{{/}}", .{skill}), try std.fmt.allocPrint(alloc, "{{d}}{s}{{/}}", .{why}), "" });
-        try out.append(alloc, .{ .id = @intFromEnum(p.id), .eligible = eligible, .why = why, .slot = slot, .cells = cells });
+        try out.append(alloc, .{ .sel = .{ .person = p.id }, .eligible = eligible, .why = why, .slot = slot, .cells = cells });
         try ranks.append(alloc, .{ .same = same, .busy = if (slot == .pilot) @intFromBool(seat != .none and seat != unit_id) else load, .skill = skill });
     }
     // Sort an index permutation, then rebuild: eligible, own company, free, sharper.
@@ -4825,9 +4850,9 @@ pub fn crewChoices(alloc: Alloc, gs: *GameState, unit_id: types.UnitId) ![]PickR
 pub fn unassignChoices(alloc: Alloc, gs: *GameState, unit_id: types.UnitId) ![]PickRow {
     var out: std.ArrayListUnmanaged(PickRow) = .empty;
     const u = gs.unit(unit_id) orelse return out.toOwnedSlice(alloc);
-    if (gs.person(u.pilot)) |p| try out.append(alloc, .{ .id = 0, .eligible = true, .slot = .pilot, .cells = try table.row(alloc, &.{ "{a}pilot{/}", try std.fmt.allocPrint(alloc, "{s}", .{try personText(alloc, p)}) }) });
-    if (gs.person(u.tech)) |t| try out.append(alloc, .{ .id = 1, .eligible = true, .slot = .tech, .cells = try table.row(alloc, &.{ "{a}tech{/}", try std.fmt.allocPrint(alloc, "{s}", .{try personText(alloc, t)}) }) });
-    if (out.items.len == 2) try out.append(alloc, .{ .id = 2, .eligible = true, .slot = .any, .cells = try table.row(alloc, &.{ "{a}both{/}", "" }) });
+    if (gs.person(u.pilot)) |p| try out.append(alloc, .{ .sel = .{ .slot = .pilot }, .eligible = true, .slot = .pilot, .cells = try table.row(alloc, &.{ "{a}pilot{/}", try std.fmt.allocPrint(alloc, "{s}", .{try personText(alloc, p)}) }) });
+    if (gs.person(u.tech)) |t| try out.append(alloc, .{ .sel = .{ .slot = .tech }, .eligible = true, .slot = .tech, .cells = try table.row(alloc, &.{ "{a}tech{/}", try std.fmt.allocPrint(alloc, "{s}", .{try personText(alloc, t)}) }) });
+    if (out.items.len == 2) try out.append(alloc, .{ .sel = .{ .slot = .any }, .eligible = true, .slot = .any, .cells = try table.row(alloc, &.{ "{a}both{/}", "" }) });
     return out.toOwnedSlice(alloc);
 }
 
@@ -4852,17 +4877,17 @@ test "pickers: crew rows are the right roles, own company and free first; compan
     const crew_rows = try crewChoices(al, &gs, mek);
     try std.testing.expect(crew_rows.len > 0);
     for (crew_rows) |r| {
-        const p = gs.person(@enumFromInt(r.id)).?;
+        const p = gs.person(r.sel.person).?;
         try std.testing.expect(p.role == .mekwarrior or p.role == .tech_mek);
         try std.testing.expect((r.slot == .pilot) == (p.role == .mekwarrior));
     }
     try std.testing.expect(crew_rows[0].eligible);
-    try std.testing.expectEqual(co, gs.companyOf(gs.person(@enumFromInt(crew_rows[0].id)).?.assigned_force));
+    try std.testing.expectEqual(co, gs.companyOf(gs.person(crew_rows[0].sel.person).?.assigned_force));
 
     // Sending that mek elsewhere: Bravo is offered, Alpha is not.
     const cos = try companyChoices(al, &gs, .unit, @intFromEnum(mek));
     try std.testing.expectEqual(@as(usize, 1), cos.len);
-    try std.testing.expectEqual(@intFromEnum(other), cos[0].id);
+    try std.testing.expectEqual(other, cos[0].sel.company);
     try std.testing.expect(cos[0].eligible);
 
     // Posting: the one HQ is offered; once posted there it is dimmed.
@@ -4870,7 +4895,7 @@ test "pickers: crew rows are the right roles, own company and free first; compan
     const hqs = try hqChoices(al, &gs, pilot);
     try std.testing.expectEqual(gs.hqs.count(), hqs.len);
     try std.testing.expect(hqs[0].eligible);
-    _ = try commands.execute(&gs, .{ .post_person = .{ .person = pilot, .hq = @enumFromInt(hqs[0].id) } });
+    _ = try commands.execute(&gs, .{ .post_person = .{ .person = pilot, .hq = hqs[0].sel.hq } });
     try std.testing.expect(!(try hqChoices(al, &gs, pilot))[0].eligible);
 
     // Unassign offers what is filled.
@@ -4887,7 +4912,7 @@ pub const PartPurpose = enum { order, ship, keep, sell, fabricate };
 pub fn partChoices(alloc: Alloc, gs: *GameState, purpose: PartPurpose, site: types.Site) ![]PickRow {
     var out: std.ArrayListUnmanaged(PickRow) = .empty;
     const part_mod = @import("../domain/part.zig");
-    for (part_mod.catalog, 0..) |p, i| {
+    for (part_mod.catalog) |p| {
         const component = part_mod.isComponent(p.key);
         const on_hand = gs.stockCount(site, p.key);
         const keep = switch (purpose) {
@@ -4897,7 +4922,7 @@ pub fn partChoices(alloc: Alloc, gs: *GameState, purpose: PartPurpose, site: typ
         };
         if (!keep) continue;
         const source: []const u8 = if (component) (if (p.fab_regional) "{a}fabricable: bay 3 at a regional HQ{/}" else if (p.fab_min_bay > 1) try std.fmt.allocPrint(alloc, "{{a}}fabricable: bay {d}{{/}}", .{p.fab_min_bay}) else "{a}fabricable at any bay{/}") else if (isStaple(p.key)) "{g}staple{/}" else "{d}rolls for availability{/}";
-        try out.append(alloc, .{ .id = @intCast(i), .eligible = true, .key = p.key, .on_hand = on_hand, .cells = try table.row(alloc, &.{
+        try out.append(alloc, .{ .sel = .{ .part = p.key }, .eligible = true, .key = p.key, .on_hand = on_hand, .cells = try table.row(alloc, &.{
             try std.fmt.allocPrint(alloc, "{{a}}{s}{{/}}", .{p.key}),
             p.name,
             try money(alloc, p.cost),
@@ -4923,7 +4948,7 @@ test "pickers: part rows follow the purpose — shipping and selling offer only 
     var gs = GameState.init(std.testing.allocator, .{ .seed = 91 });
     defer gs.deinit();
     _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
-    const hq: types.Site = .{ .hq = gs.hqs.keys()[0] };
+    const hq: types.Site = .{ .hq = gs.seat() };
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const al = arena.allocator();
@@ -5027,7 +5052,7 @@ test "skulls: a weaker company rates harder, a heavier one easier; low intel giv
         try gs.addStock(site_a, k, 50);
         try gs.addStock(site_b, k, 50);
     }
-    const hq = gs.hqs.getPtr(gs.hqs.keys()[0]).?;
+    const hq = gs.hqs.getPtr(gs.seat()).?;
     hq.staff_assigned = 999;
     const comms = for (hq.facilities.items) |*f| {
         if (f.kind == .comms) break f;
@@ -5097,18 +5122,18 @@ test "skulls on the board, the candidates, the active pane — and an outmatched
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    const view = try contracts(a, &gs, gs.hqs.keys()[0]);
+    const view = try contracts(a, &gs, gs.seat());
     try std.testing.expect(view.board.len > 0);
     for (view.board) |row| {
         try std.testing.expectEqual(board_cols.len, row.cells.len);
-        try std.testing.expect(std.mem.indexOf(u8, row.cells[12], "☠") != null or std.mem.indexOf(u8, row.cells[12], "◐") != null);
+        try std.testing.expect(std.mem.indexOf(u8, row.cells[13], "☠") != null or std.mem.indexOf(u8, row.cells[13], "◐") != null);
     }
     // The board renders at natural width with every column under its name.
     const lines = try (try view.boardTable(a)).render(a);
     try std.testing.expectEqual(view.board.len + 1, lines.len);
-    try std.testing.expect(std.mem.startsWith(u8, lines[0], "kind"));
+    try std.testing.expect(std.mem.startsWith(u8, lines[0], "id"));
     var saw = false;
-    for (try offerCandidates(a, &gs, view.board[0].index)) |c| if (c.company == co and std.mem.indexOf(u8, c.text, "skull") != null) {
+    for (try offerCandidates(a, &gs, view.board[0].id)) |c| if (c.company == co and std.mem.indexOf(u8, c.text, "skull") != null) {
         saw = true;
     };
     try std.testing.expect(saw);
@@ -5700,23 +5725,18 @@ pub fn logLines(alloc: Alloc, gs: *GameState, n: usize, filter: state_mod.LogFil
 }
 
 /// The newest log line, for a command's echo.
-pub fn lastLogLine(alloc: Alloc, gs: *GameState) !?[]const u8 {
-    if (gs.event_log.items.len == 0) return null;
-    return try logRow(alloc, &gs.event_log.items[gs.event_log.items.len - 1]);
-}
-
 /// Every listing on every board, with its index (the `buy` argument).
 pub fn listings(alloc: Alloc, gs: *GameState) ![]const []const u8 {
     var out: std.ArrayListUnmanaged([]const u8) = .empty;
-    for (gs.market_listings.items, 0..) |l, i| {
+    for (gs.market_listings.items) |l| {
         if (l.condition) |c| {
             try out.append(alloc, try std.fmt.allocPrint(alloc, "[{d}] hull  {s: <8} {s: <5} armor {d: >3}% quality {s} | {d} dmg / {d} destroyed / {d} missing comps | {s} | gone day {d}{s}", .{
-                i,                                                                                                                                  l.item_key, c.label(), c.armor_pct, @tagName(c.quality), c.damaged_slots, c.destroyed_slots, c.missing_components, try money(alloc, l.price), l.expires_day,
+                @intFromEnum(l.id),                                                                                                                 l.item_key, c.label(), c.armor_pct, @tagName(c.quality), c.damaged_slots, c.destroyed_slots, c.missing_components, try money(alloc, l.price), l.expires_day,
                 if (l.company != .none) try std.fmt.allocPrint(alloc, " | contract world, co:{d} local funds", .{@intFromEnum(l.company)}) else "",
             }));
         } else {
             try out.append(alloc, try std.fmt.allocPrint(alloc, "[{d}] {s: <5} {s: <16} x{d: <3} ({s}{s}) {s}", .{
-                i, @tagName(l.kind), l.item_key, l.quantity, @tagName(l.rarity), if (l.staple) ", staple" else ", RARE SLOT", try money(alloc, l.price),
+                @intFromEnum(l.id), @tagName(l.kind), l.item_key, l.quantity, @tagName(l.rarity), if (l.staple) ", staple" else ", RARE SLOT", try money(alloc, l.price),
             }));
         }
     }
@@ -5742,15 +5762,6 @@ pub fn orders(alloc: Alloc, gs: *GameState) ![]const []const u8 {
         }));
     }
     return out.toOwnedSlice(alloc);
-}
-
-/// The newest order's echo: what was ordered and when it lands, or that
-/// logistics could not source it.
-pub fn lastOrderLine(alloc: Alloc, gs: *GameState) !?[]const u8 {
-    if (gs.part_orders.items.len == 0) return null;
-    const last = gs.part_orders.items[gs.part_orders.items.len - 1];
-    if (last.status == .failed) return try std.fmt.allocPrint(alloc, "logistics couldn't source {s} this time (retry after refresh)", .{last.part_key});
-    return try std.fmt.allocPrint(alloc, "ordered {s} x{d}, eta day {d}, {s}", .{ last.part_key, last.quantity, last.eta_day orelse 0, try money(alloc, last.cost) });
 }
 
 /// The last `n` transactions matching an entity filter, newest first.
@@ -5820,9 +5831,8 @@ pub fn contractLines(alloc: Alloc, gs: *GameState) ![]const []const u8 {
 }
 
 /// The newest running contract's one-line echo after `accept`.
-pub fn acceptedLine(alloc: Alloc, gs: *GameState) !?[]const u8 {
-    if (gs.contracts.count() == 0) return null;
-    const c = gs.contracts.values()[gs.contracts.count() - 1];
+pub fn acceptedLine(alloc: Alloc, gs: *GameState, contract_id: types.ContractId) !?[]const u8 {
+    const c = gs.contracts.getPtr(contract_id) orelse return null;
     return try std.fmt.allocPrint(alloc, "under contract: {s} on {s}, {d} days transit, {s}/mo net", .{ @tagName(c.kind), planetName(c.planet_key), c.transit_days, try money(alloc, c.monthly_net) });
 }
 
@@ -5862,6 +5872,14 @@ pub fn inboxLines(alloc: Alloc, gs: *GameState) ![]const []const u8 {
 pub fn listingIndex(gs: *GameState, item_key: []const u8, staple: bool) ?usize {
     for (gs.market_listings.items, 0..) |l, i| {
         if (l.staple == staple and std.mem.eql(u8, l.item_key, item_key)) return i;
+    }
+    return null;
+}
+
+/// Return the typed ListingId for the first listing matching item_key and staple flag.
+pub fn listingId(gs: *GameState, item_key: []const u8, staple: bool) ?types.ListingId {
+    for (gs.market_listings.items) |l| {
+        if (l.staple == staple and std.mem.eql(u8, l.item_key, item_key)) return l.id;
     }
     return null;
 }
@@ -6060,9 +6078,8 @@ pub fn settings(alloc: Alloc, gs: *GameState) !Settings {
 }
 
 /// One offer's headline terms for the negotiation modal, null past the board.
-pub fn offerTerms(alloc: Alloc, gs: *GameState, index: usize) !?[]const u8 {
-    if (index >= gs.contract_offers.items.len) return null;
-    const c = gs.contract_offers.items[index];
+pub fn offerTerms(alloc: Alloc, gs: *GameState, offer_id: types.ContractId) !?[]const u8 {
+    const c = findOfferPtr(gs, offer_id) orelse return null;
     return try std.fmt.allocPrint(alloc, "{{a}}{s}{{/}} for {s} on {s} · {s}/mo · advance {d}% · salvage {d}% · transport {d}% · support {d}% · {s} rights", .{ c.kind.label(), c.employer_key, planetName(c.planet_key), try money(alloc, c.terms.base_pay_month), c.terms.advance_pct, c.terms.salvage_pct, c.terms.transport_pct, c.terms.overhead_pct, @tagName(c.terms.command_rights) });
 }
 

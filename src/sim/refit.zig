@@ -328,7 +328,7 @@ test "a refit cannot install two parts from one in stock" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1010 });
     defer gs.deinit();
     _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .chief_engineer } });
-    const hq_id = gs.hqs.keys()[0];
+    const hq_id = gs.seat();
     _ = try commands.execute(&gs, .{ .new_company = "Alpha" });
     const site: types.Site = .{ .hq = hq_id };
     // A mek with two mounts of one weapon: pull both and put the same
@@ -368,7 +368,7 @@ test "the lab refuses illegal fits, gates by bay class, and refits through the b
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1010 });
     defer gs.deinit();
     _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .chief_engineer } });
-    const hq_id = gs.hqs.keys()[0];
+    const hq_id = gs.seat();
     const co = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
     const lance = gs.force(gs.force(co).?.children.items[0]).?;
     const uid = lance.units.items[0];

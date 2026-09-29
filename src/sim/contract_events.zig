@@ -692,8 +692,8 @@ fn letGo(gs: *GameState, person_id: types.PersonId, replace: bool) !void {
     const paid = try personnel.depart(gs, person_id, if (retiring) .retired else .resigned, types.full_bp, if (retiring) "retirement payout" else "severance");
     try gs.log(.rotation, .{ .company = company, .hq = p.posted_hq }, "[turnover] {s} ({s}) {s}{s}", .{ try p.fullName(gs.allocator()), @tagName(p.role), if (retiring) "retires" else "resigns", if (paid > 0) try std.fmt.allocPrint(gs.allocator(), " — {d} c-bills paid out for {d} years' service", .{ paid, p.tenureMonths(gs.clock.day_index) / 12 }) else "" });
     if (!replace) return;
-    for (gs.candidates.items, 0..) |cand, i| if (cand.spec.role == p.role) {
-        const r = @import("commands.zig").execute(gs, .{ .hire_candidate = i }) catch |err| {
+    for (gs.candidates.items) |cand| if (cand.spec.role == p.role) {
+        const r = @import("commands.zig").execute(gs, .{ .hire_candidate = cand.id }) catch |err| {
             if (err == error.OutOfMemory) return error.OutOfMemory;
             const reason: []const u8 = switch (err) {
                 error.NoSuchCandidate => "no matching candidate on the hiring halls",
@@ -1186,7 +1186,8 @@ test "letGo propagates OutOfMemory from the replacement hire and hires no one" {
     // A replacement on the hall in the departing pilot's own role, at no
     // signing bonus, so a successful hire would also move no money before
     // `hirePerson` — isolating the failure to that one call.
-    try gs.candidates.append(gs.allocator(), .{ .hq = gs.hqs.keys()[0], .spec = @import("../gen/person_gen.zig").generate(&gs.rng, .market, .mekwarrior), .asking_bonus = 0, .listed_day = 0, .expires_day = 400 });
+    try gs.candidates.append(gs.allocator(), .{ .id = @enumFromInt(gs.next_candidate_id), .hq = gs.seat(), .spec = @import("../gen/person_gen.zig").generate(&gs.rng, .market, .mekwarrior), .asking_bonus = 0, .listed_day = 0, .expires_day = 400 });
+    gs.next_candidate_id += 1;
     const candidates_before = gs.candidates.items.len;
     const people_before = gs.people.count();
     const funds_before = gs.funds;
@@ -1234,7 +1235,8 @@ test "letGo logs a human-readable reason when the replacement hire is refused, n
     const pilot = try gs.hirePerson("A", "Departing", .mekwarrior);
     // A replacement candidate exists in the departing pilot's role, but
     // the signing bonus exceeds the outfit's treasury.
-    try gs.candidates.append(gs.allocator(), .{ .hq = gs.hqs.keys()[0], .spec = @import("../gen/person_gen.zig").generate(&gs.rng, .market, .mekwarrior), .asking_bonus = 500_000, .listed_day = 0, .expires_day = 400 });
+    try gs.candidates.append(gs.allocator(), .{ .id = @enumFromInt(gs.next_candidate_id), .hq = gs.seat(), .spec = @import("../gen/person_gen.zig").generate(&gs.rng, .market, .mekwarrior), .asking_bonus = 500_000, .listed_day = 0, .expires_day = 400 });
+    gs.next_candidate_id += 1;
     gs.funds = 0;
 
     try letGo(&gs, pilot, true);
@@ -1270,7 +1272,8 @@ test "notice is a decision — a raise keeps them, letting go vacates the seat, 
     try std.testing.expectEqual(types.PersonId.none, gs.unit(mek).?.pilot);
     // Replace: a mekwarrior on the hall is hired into the company.
     const other = gs.unit(gs.units.keys()[1]).?.pilot;
-    try gs.candidates.append(gs.allocator(), .{ .hq = gs.hqs.keys()[0], .spec = @import("../gen/person_gen.zig").generate(&gs.rng, .market, .mekwarrior), .asking_bonus = 0, .listed_day = 0, .expires_day = 400 });
+    try gs.candidates.append(gs.allocator(), .{ .id = @enumFromInt(gs.next_candidate_id), .hq = gs.seat(), .spec = @import("../gen/person_gen.zig").generate(&gs.rng, .market, .mekwarrior), .asking_bonus = 0, .listed_day = 0, .expires_day = 400 });
+    gs.next_candidate_id += 1;
     const people_before = gs.people.count();
     try queueNotice(&gs, other);
     try resolveChoice(&gs, gs.event_queue.pending.items[0].id, 2);

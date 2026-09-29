@@ -441,17 +441,19 @@ fn applyHits(
                     gs.stats.people_kia += 1;
                     rec.crew.fate = .kia;
                 } else if (severity >= tb.cookoff_severity) {
-                    try medical.inflict(gs, u.pilot, .combat, wound_severity, "battle");
-                    tally.wounded += 1;
-                    rec.crew_name = try p.rankedName(gs.allocator());
-                    rec.crew.wound = lastWound(p);
+                    rec.crew.wound = try medical.inflict(gs, u.pilot, .combat, wound_severity, "battle");
+                    if (rec.crew.wound != null) {
+                        tally.wounded += 1;
+                        rec.crew_name = try p.rankedName(gs.allocator());
+                    }
                 } else if (severity >= tb.slot_hit_severity) {
                     const need: u8 = if (player.mods.has_mash_lance) tb.wound_target_mash else tb.wound_target;
                     if (gs.rng.roll2d6(.battle) >= need) {
-                        try medical.inflict(gs, u.pilot, .combat, wound_severity, "battle");
-                        tally.wounded += 1;
-                        rec.crew_name = try p.rankedName(gs.allocator());
-                        rec.crew.wound = lastWound(p);
+                        rec.crew.wound = try medical.inflict(gs, u.pilot, .combat, wound_severity, "battle");
+                        if (rec.crew.wound != null) {
+                            tally.wounded += 1;
+                            rec.crew_name = try p.rankedName(gs.allocator());
+                        }
                     }
                 }
             }
@@ -601,7 +603,7 @@ fn mishapOnTheSortie(gs: *GameState, company: types.ForceId) !bool {
             pick -= 1;
             continue;
         }
-        try @import("medical.zig").inflict(gs, p.id, .combat, tuning.battle.wound_serious_severity, "hurt on a night sortie to recover the downed");
+        _ = try @import("medical.zig").inflict(gs, p.id, .combat, tuning.battle.wound_serious_severity, "hurt on a night sortie to recover the downed");
         return true;
     }
     return false;
@@ -1108,14 +1110,6 @@ fn concede(gs: *GameState, c: *contract_mod.Contract) !void {
 fn recoveryText(gs: *GameState, recovery: ?[2]i32, lost: bool) ![]const u8 {
     const r = recovery orelse return "";
     return try std.fmt.allocPrint(gs.allocator(), " · field lost · recovery {d} vs {d} — {s}", .{ r[0], r[1], if (lost) "LEFT TO THE ENEMY" else "dragged off" });
-}
-
-/// The wound `medical.inflict` just recorded, as fields for the report.
-/// Null when the roll wounded nobody.
-fn lastWound(p: *const person_mod.Person) ?battle_report.CrewOutcome.Wound {
-    if (p.injuries.items.len == 0) return null;
-    const inj = p.injuries.items[p.injuries.items.len - 1];
-    return .{ .severity = inj.severity, .location = inj.location, .permanent = inj.permanent };
 }
 
 /// At most this many wrecks come home from one fight, however the claim

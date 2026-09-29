@@ -573,7 +573,7 @@ test "the recruiting bonus is the recruiting HQ's hiring hall, not the first HQ'
     var gs = GameState.init(std.testing.allocator, .{ .seed = 7701 });
     defer gs.deinit();
     _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
-    const seat = gs.hqs.keys()[0];
+    const seat = gs.seat();
     const second = try founding.foundHq(&gs, "Second", .regional, "alkaid");
     for ([_]types.HqId{ seat, second }) |id| gs.hqs.getPtr(id).?.staff_assigned = 999;
     for (gs.hqs.getPtr(seat).?.facilities.items) |*f| {
@@ -697,7 +697,7 @@ test "a raised company is an empty skeleton; hulls bought for it land in a lance
     var gs = GameState.init(std.testing.allocator, .{ .seed = 12 });
     defer gs.deinit();
     _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
-    const hq = gs.hqs.keys()[0];
+    const hq = gs.seat();
     gs.hqs.getPtr(hq).?.funds = 50_000_000;
     const co = (try commands.execute(&gs, .{ .raise_company = .{ .name = "Bravo", .hq = hq } })).created_force;
     // The slot is taken: a second one is refused.
@@ -746,8 +746,10 @@ test "a raised company is an empty skeleton; hulls bought for it land in a lance
 
     // Crews come from the halls: seed one of each role (and only those) and fill the seats.
     gs.candidates.clearRetainingCapacity();
-    try gs.candidates.append(gs.allocator(), .{ .hq = hq, .spec = person_gen.generate(&gs.rng, .market, .mekwarrior), .asking_bonus = 0, .listed_day = 0, .expires_day = 400 });
-    try gs.candidates.append(gs.allocator(), .{ .hq = hq, .spec = person_gen.generate(&gs.rng, .market, .tech_mek), .asking_bonus = 0, .listed_day = 0, .expires_day = 400 });
+    try gs.candidates.append(gs.allocator(), .{ .id = @enumFromInt(gs.next_candidate_id), .hq = hq, .spec = person_gen.generate(&gs.rng, .market, .mekwarrior), .asking_bonus = 0, .listed_day = 0, .expires_day = 400 });
+    gs.next_candidate_id += 1;
+    try gs.candidates.append(gs.allocator(), .{ .id = @enumFromInt(gs.next_candidate_id), .hq = hq, .spec = person_gen.generate(&gs.rng, .market, .tech_mek), .asking_bonus = 0, .listed_day = 0, .expires_day = 400 });
+    gs.next_candidate_id += 1;
     const c = try commands.execute(&gs, .{ .crew_company = co });
     try std.testing.expect(gs.unit(r.unit).?.pilot != .none);
     try std.testing.expect(gs.unit(r.unit).?.tech != .none);

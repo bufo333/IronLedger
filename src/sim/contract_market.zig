@@ -185,7 +185,7 @@ pub fn refresh(gs: *GameState) !void {
             // Harder work pays more: the employer prices the opposition.
             pay = types.applyBp(pay, threatPayBp(kind, opfor.lances, opfor.quality, opfor.lance_bv));
             try gs.contract_offers.append(gs.allocator(), .{
-                .id = .none, // assigned on acceptance
+                .id = @enumFromInt(gs.next_contract_id),
                 .kind = kind,
                 .employer_key = world.faction,
                 .enemy_key = enemy_key,
@@ -216,6 +216,7 @@ pub fn refresh(gs: *GameState) !void {
                     .command_rights = rights,
                 },
             });
+            gs.next_contract_id += 1;
         }
     }
 }
@@ -262,6 +263,7 @@ pub fn refreshContractWorld(gs: *GameState, c: *const contract.Contract) !void {
         };
         const avg_weapon = if (weapons > 0) @divTrunc(weapon_value, weapons) else 50_000;
         try gs.market_listings.append(gs.allocator(), .{
+            .id = @enumFromInt(gs.next_listing_id),
             .kind = .unit,
             .item_key = design.key,
             .rarity = design.rarity,
@@ -272,6 +274,7 @@ pub fn refreshContractWorld(gs: *GameState, c: *const contract.Contract) !void {
             .hq = home,
             .company = c.assigned_company,
         });
+        gs.next_listing_id += 1;
     }
 }
 
@@ -289,6 +292,7 @@ fn refreshBoard(gs: *GameState, hq_id: types.HqId) !void {
     for (market.staple_keys) |key| {
         const def = part_mod.find(key) orelse continue;
         try gs.market_listings.append(gs.allocator(), .{
+            .id = @enumFromInt(gs.next_listing_id),
             .kind = .part,
             .item_key = def.key,
             .rarity = def.rarity,
@@ -299,6 +303,7 @@ fn refreshBoard(gs: *GameState, hq_id: types.HqId) !void {
             .expires_day = day + 31,
             .hq = hq_id,
         });
+        gs.next_listing_id += 1;
     }
 
     // The black market: where the hall gossips and the comms
@@ -315,34 +320,42 @@ fn refreshBoard(gs: *GameState, hq_id: types.HqId) !void {
                 for (pool) |c| if (c.rarity == .rare or c.rarity == .very_rare) {
                     if (pick == null or rr.uintLessThan(u8, 3) == 0) pick = c;
                 };
-                if (pick) |c| try gs.market_listings.append(gs.allocator(), .{
-                    .kind = .unit,
-                    .item_key = c.key,
-                    .rarity = c.rarity,
-                    .price = types.applyBp(c.cost, bm.black_market_price_bp),
-                    .hq = hq_id,
-                    .listed_day = day,
-                    .expires_day = day + bm.black_market_days,
-                    .condition = .{ .armor_pct = @intCast(60 + rr.uintLessThan(u8, 40)), .quality = if (rr.boolean()) .c else .d, .damaged_slots = rr.uintLessThan(u8, 2), .destroyed_slots = 0, .missing_components = 0 },
-                    .black_market = true,
-                });
+                if (pick) |c| {
+                    try gs.market_listings.append(gs.allocator(), .{
+                        .id = @enumFromInt(gs.next_listing_id),
+                        .kind = .unit,
+                        .item_key = c.key,
+                        .rarity = c.rarity,
+                        .price = types.applyBp(c.cost, bm.black_market_price_bp),
+                        .hq = hq_id,
+                        .listed_day = day,
+                        .expires_day = day + bm.black_market_days,
+                        .condition = .{ .armor_pct = @intCast(60 + rr.uintLessThan(u8, 40)), .quality = if (rr.boolean()) .c else .d, .damaged_slots = rr.uintLessThan(u8, 2), .destroyed_slots = 0, .missing_components = 0 },
+                        .black_market = true,
+                    });
+                    gs.next_listing_id += 1;
+                }
             } else {
                 // A scarce part (availability D or worse).
                 var pick: ?*const part_mod.PartDef = null;
                 for (part_mod.catalog) |*def| if (@intFromEnum(def.availability) >= @intFromEnum(part_mod.Availability.d) and def.intro_year <= gs.clock.date.year) {
                     if (pick == null or rr.uintLessThan(u8, 3) == 0) pick = def;
                 };
-                if (pick) |def| try gs.market_listings.append(gs.allocator(), .{
-                    .kind = .part,
-                    .item_key = def.key,
-                    .rarity = def.rarity,
-                    .price = types.applyBp(def.cost, bm.black_market_price_bp),
-                    .hq = hq_id,
-                    .quantity = 1,
-                    .listed_day = day,
-                    .expires_day = day + bm.black_market_days,
-                    .black_market = true,
-                });
+                if (pick) |def| {
+                    try gs.market_listings.append(gs.allocator(), .{
+                        .id = @enumFromInt(gs.next_listing_id),
+                        .kind = .part,
+                        .item_key = def.key,
+                        .rarity = def.rarity,
+                        .price = types.applyBp(def.cost, bm.black_market_price_bp),
+                        .hq = hq_id,
+                        .quantity = 1,
+                        .listed_day = day,
+                        .expires_day = day + bm.black_market_days,
+                        .black_market = true,
+                    });
+                    gs.next_listing_id += 1;
+                }
             }
         }
     }
@@ -361,6 +374,7 @@ fn refreshBoard(gs: *GameState, hq_id: types.HqId) !void {
         if (!market.listingAppears(&gs.rng, def.rarity, world.industry, warehouse, src.total())) continue;
         const price_roll: types.Bp = 10_000 + (@as(types.Bp, gs.rng.roll2d6(.market)) - 7) * 500;
         try gs.market_listings.append(gs.allocator(), .{
+            .id = @enumFromInt(gs.next_listing_id),
             .kind = .part,
             .item_key = def.key,
             .rarity = def.rarity,
@@ -370,6 +384,7 @@ fn refreshBoard(gs: *GameState, hq_id: types.HqId) !void {
             .expires_day = day + 31,
             .hq = hq_id,
         });
+        gs.next_listing_id += 1;
     }
 
     // Hulls: fill the lot to its size with new arrivals, each with a rolled
@@ -402,6 +417,7 @@ fn refreshBoard(gs: *GameState, hq_id: types.HqId) !void {
         }
         const avg_weapon = if (weapons > 0) @divTrunc(weapon_value, weapons) else 50_000;
         try gs.market_listings.append(gs.allocator(), .{
+            .id = @enumFromInt(gs.next_listing_id),
             .kind = .unit,
             .item_key = design.key,
             .rarity = design.rarity,
@@ -411,6 +427,7 @@ fn refreshBoard(gs: *GameState, hq_id: types.HqId) !void {
             .condition = cond,
             .hq = hq_id,
         });
+        gs.next_listing_id += 1;
         hulls += 1;
     }
 
@@ -438,6 +455,7 @@ fn refreshBoard(gs: *GameState, hq_id: types.HqId) !void {
                     const price_roll: types.Bp = 10_000 + (@as(types.Bp, gs.rng.roll2d6(.market)) - 7) * 500;
                     const base = if (design.kind == .aerospace) design.cost else types.applyBp(design.cost, market.transport_price_bp);
                     try gs.market_listings.append(gs.allocator(), .{
+                        .id = @enumFromInt(gs.next_listing_id),
                         .kind = .unit,
                         .item_key = design.key,
                         .rarity = design.rarity,
@@ -446,6 +464,7 @@ fn refreshBoard(gs: *GameState, hq_id: types.HqId) !void {
                         .expires_day = day + 60 + @as(u32, gs.rng.roll2d6(.market)) * 5,
                         .hq = hq_id,
                     });
+                    gs.next_listing_id += 1;
                 }
             }
         }
@@ -464,6 +483,7 @@ fn refreshBoard(gs: *GameState, hq_id: types.HqId) !void {
             if (present) continue;
             const design = chassis_mod.find(key) orelse continue;
             try gs.market_listings.append(gs.allocator(), .{
+                .id = @enumFromInt(gs.next_listing_id),
                 .kind = .unit,
                 .item_key = design.key,
                 .rarity = .common,
@@ -474,6 +494,7 @@ fn refreshBoard(gs: *GameState, hq_id: types.HqId) !void {
                 .listed_day = day,
                 .expires_day = day + tuning.market.staple_listing_days,
             });
+            gs.next_listing_id += 1;
         }
     }
 }
@@ -507,12 +528,14 @@ fn listCandidate(gs: *GameState, hq: *const hq_mod.Hq, role: person_mod.Role, tt
     const spec = person_gen.generateWithBonus(&gs.rng, .market, role, personnel.recruitBonus(gs, hq.id));
     const salary = types.applyBp(role.baseSalary(), spec.experience.salaryMultBp());
     try gs.candidates.append(gs.allocator(), .{
+        .id = @enumFromInt(gs.next_candidate_id),
         .hq = hq.id,
         .spec = spec,
         .asking_bonus = salary * (tuning.market.asking_bonus_base_months + @as(types.CBills, @intFromEnum(spec.experience))),
         .listed_day = gs.clock.day_index,
         .expires_day = gs.clock.day_index + ttl_days,
     });
+    gs.next_candidate_id += 1;
 }
 
 /// An admin desk this HQ is short on, if any — the hall favours it.
@@ -642,8 +665,33 @@ const Error = commands.Error;
 const Result = commands.Result;
 const Command = commands.Command;
 
+/// Resolve a contract offer by typed ContractId; returns its index or null.
+fn findOffer(gs: *GameState, offer_id: types.ContractId) ?usize {
+    for (gs.contract_offers.items, 0..) |o, i| {
+        if (o.id == offer_id) return i;
+    }
+    return null;
+}
+
+/// Resolve a market listing by typed ListingId; returns its index or null.
+fn findListing(gs: *GameState, lid: types.ListingId) ?usize {
+    for (gs.market_listings.items, 0..) |l, i| {
+        if (l.id == lid) return i;
+    }
+    return null;
+}
+
+/// Resolve a hiring-hall candidate by typed CandidateId; returns its index or null.
+fn findCandidate(gs: *GameState, cid: types.CandidateId) ?usize {
+    for (gs.candidates.items, 0..) |c, i| {
+        if (c.id == cid) return i;
+    }
+    return null;
+}
+
 pub fn execNegotiate(gs: *GameState, n: @FieldType(Command, "negotiate")) Error!Result {
-    const outcome = negotiate(gs, n.offer_index, n.term) catch |err| return @errorCast(err);
+    const offer_index = findOffer(gs, n.offer) orelse return Error.NoSuchOffer;
+    const outcome = negotiate(gs, offer_index, n.term) catch |err| return @errorCast(err);
     return .{ .negotiation = switch (outcome) {
         .improved => .improved,
         .hardened => .hardened,
@@ -651,7 +699,8 @@ pub fn execNegotiate(gs: *GameState, n: @FieldType(Command, "negotiate")) Error!
     } };
 }
 
-pub fn execBuyListing(gs: *GameState, index: @FieldType(Command, "buy_listing")) Error!Result {
+pub fn execBuyListing(gs: *GameState, lid: @FieldType(Command, "buy_listing")) Error!Result {
+    const index = findListing(gs, lid) orelse return Error.NoSuchListing;
     const res = buyListing(gs, index) catch |err| return @errorCast(err);
     return .{ .unit = res.unit };
 }
@@ -666,7 +715,8 @@ pub fn execBuySupportHull(gs: *GameState, b: @FieldType(Command, "buy_support_hu
     return .{ .unit = res.unit, .eta_days = res.eta_days };
 }
 
-pub fn execHireCandidate(gs: *GameState, index: @FieldType(Command, "hire_candidate")) Error!Result {
+pub fn execHireCandidate(gs: *GameState, cid: @FieldType(Command, "hire_candidate")) Error!Result {
+    const index = findCandidate(gs, cid) orelse return Error.NoSuchCandidate;
     const id = hireCandidate(gs, index) catch |err| return @errorCast(err);
     return .{ .hired = id };
 }
@@ -805,7 +855,7 @@ test "a wired HQ with a hall eventually hears from a fence; a firebase never doe
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1217 });
     defer gs.deinit();
     _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
-    const hq = gs.hqs.keys()[0];
+    const hq = gs.seat();
     // Comms up to the line.
     const h = gs.hqs.getPtr(hq).?;
     var has_comms = false;
@@ -876,7 +926,7 @@ test "the hiring hall always has a few of every role" {
     _ = try founding.createCommander(&gs, "T", .LC, .quartermaster);
     gs.candidates.clearRetainingCapacity();
     try churnCandidates(&gs);
-    const hq = gs.hqs.keys()[0];
+    const hq = gs.seat();
     inline for (@typeInfo(person_mod.Role).@"enum".fields) |f| {
         const role: person_mod.Role = @enumFromInt(f.value);
         var have: u32 = 0;
@@ -962,7 +1012,7 @@ pub fn negotiate(gs: *GameState, offer_index: usize, term: contract.NegotiableTe
     var probe = c.terms;
     if (!probe.improve(term)) return error.TermAtCap;
     const t = tuning.contract;
-    const seat: types.HqId = if (gs.hqs.count() > 0) gs.hqs.keys()[0] else .none;
+    const seat: types.HqId = gs.seat();
     const office = if (seat != .none) hq_ops.hqStaff(gs, seat, .admin_command) else hq_ops.StaffSummary{};
     const office_edge: i32 = if (office.count == 0) -1 else 5 - @as(i32, office.best_skill);
     // The letter at the table: F −2 … A* +3.
@@ -1029,7 +1079,7 @@ pub fn buyListing(gs: *GameState, index: usize) !BuyResult {
         return .{ .unit = uid };
     }
     // The board's own HQ pays and receives.
-    const hq_id: types.HqId = if (listing.hq != .none) listing.hq else gs.hqs.keys()[0];
+    const hq_id: types.HqId = if (listing.hq != .none) listing.hq else gs.seat();
     // Transports need a berth at the board's HQ.
     var berth_kind: ?unit_mod.UnitKind = null;
     if (listing.kind == .unit) if (chassis_mod.find(listing.item_key)) |design| if (design.kind.isTransport()) {
@@ -1105,7 +1155,7 @@ pub fn buyHullFor(gs: *GameState, listing: usize, company: types.ForceId, lance:
     if (listing >= gs.market_listings.items.len) return error.NoSuchListing;
     const l = gs.market_listings.items[listing];
     if (l.kind != .unit or l.company != .none) return error.NoSuchListing;
-    const board_hq: types.HqId = if (l.hq != .none) l.hq else gs.hqs.keys()[0];
+    const board_hq: types.HqId = if (l.hq != .none) l.hq else gs.seat();
     // A defrauded purchase creates no hull and returns none: there is
     // nothing to place.
     const buy_res = try buyListing(gs, listing);
@@ -1188,12 +1238,14 @@ test "hireCandidate leaves funds, people and the hall unchanged when the hire al
     _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
     gs.funds = 10_000_000;
     try gs.candidates.append(gs.allocator(), .{
-        .hq = gs.hqs.keys()[0],
+        .id = @enumFromInt(gs.next_candidate_id),
+        .hq = gs.seat(),
         .spec = person_gen.generate(&gs.rng, .market, .mekwarrior),
         .asking_bonus = 500_000,
         .listed_day = 0,
         .expires_day = 400,
     });
+    gs.next_candidate_id += 1;
 
     // Pre-reserve exactly one spare ledger slot so reserveLedger succeeds
     // but the hire's own alloc (name dupe) fires the OOM.
@@ -1231,18 +1283,20 @@ test "a black-market buy is a fraud or a sale, and the house notices either way"
         var gs = GameState.init(std.testing.allocator, .{ .seed = seed });
         defer gs.deinit();
         _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
-        const hq = gs.hqs.keys()[0];
+        const hq = gs.seat();
         gs.hqs.getPtr(hq).?.funds = 100_000_000;
         const faction = planet_mod.find(gs.hqs.getPtr(hq).?.planet_key).?.faction;
         const standing_before = gs.standing(faction);
         const pirates_before = gs.standing("PER");
-        try gs.market_listings.append(gs.allocator(), .{ .kind = .part, .item_key = "ppc", .rarity = .uncommon, .price = 600_000, .hq = hq, .listed_day = 0, .expires_day = 10, .black_market = true });
-        const idx = gs.market_listings.items.len - 1;
+        const len_before = gs.market_listings.items.len;
+        const new_lid: types.ListingId = @enumFromInt(gs.next_listing_id);
+        try gs.market_listings.append(gs.allocator(), .{ .id = new_lid, .kind = .part, .item_key = "ppc", .rarity = .uncommon, .price = 600_000, .hq = hq, .listed_day = 0, .expires_day = 10, .black_market = true });
+        gs.next_listing_id += 1;
         const before = gs.stockCount(.{ .hq = hq }, "ppc");
         const funds = gs.hqs.getPtr(hq).?.funds;
-        _ = try commands.execute(&gs, .{ .buy_listing = idx });
+        _ = try commands.execute(&gs, .{ .buy_listing = new_lid });
         try std.testing.expectEqual(funds - 600_000, gs.hqs.getPtr(hq).?.funds); // paid either way
-        try std.testing.expectEqual(idx, gs.market_listings.items.len); // the offer is gone either way
+        try std.testing.expectEqual(len_before, gs.market_listings.items.len); // the offer is gone either way
         if (gs.stockCount(.{ .hq = hq }, "ppc") == before) {
             fraud = true;
             try std.testing.expect(gs.standing(faction) < standing_before);
@@ -1262,11 +1316,12 @@ test "a defrauded black-market hull purchase moves no hull the outfit already ow
         defer gs.deinit();
         _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
         const alpha = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
-        const hq = gs.hqs.keys()[0];
+        const hq = gs.seat();
         gs.hqs.getPtr(hq).?.funds = 100_000_000;
         // The newest hull on the books sits unassigned in the pool.
         const pooled = try gs.addUnit("WSP-1A");
-        try gs.market_listings.append(gs.allocator(), .{ .kind = .unit, .item_key = "LCT-1V", .rarity = .common, .price = 500_000, .hq = hq, .listed_day = 0, .expires_day = 10, .black_market = true });
+        try gs.market_listings.append(gs.allocator(), .{ .id = @enumFromInt(gs.next_listing_id), .kind = .unit, .item_key = "LCT-1V", .rarity = .common, .price = 500_000, .hq = hq, .listed_day = 0, .expires_day = 10, .black_market = true });
+        gs.next_listing_id += 1;
         const units_before = gs.units.count();
         const res = try commands.execute(&gs, .{ .buy_hull_for = .{ .listing = gs.market_listings.items.len - 1, .company = alpha, .lance = .none } });
         if (gs.units.count() != units_before) continue; // a sale; walk on to a fraud
@@ -1286,6 +1341,7 @@ test "buying a wreck buys a project" {
 
     // Plant a wreck listing so the test is deterministic.
     try gs.market_listings.append(gs.allocator(), .{
+        .id = @enumFromInt(gs.next_listing_id),
         .kind = .unit,
         .item_key = "SHD-2H",
         .rarity = .common,
@@ -1294,9 +1350,10 @@ test "buying a wreck buys a project" {
         .expires_day = 90,
         .condition = .{ .armor_pct = 12, .quality = .a, .damaged_slots = 1, .destroyed_slots = 2, .missing_components = 2 },
     });
-    const idx = gs.market_listings.items.len - 1;
+    gs.next_listing_id += 1;
+    const wreck_lid: types.ListingId = gs.market_listings.items[gs.market_listings.items.len - 1].id;
     const units_before = gs.units.count();
-    _ = try commands.execute(&gs, .{ .buy_listing = idx });
+    _ = try commands.execute(&gs, .{ .buy_listing = wreck_lid });
     try std.testing.expectEqual(units_before + 1, gs.units.count());
 
     const u = &gs.units.values()[gs.units.count() - 1];
@@ -1310,13 +1367,17 @@ test "buying a wreck buys a project" {
     try std.testing.expectEqual(@as(u32, 2), destroyed);
 
     // Staples sell by the unit and stay on the board.
-    var staple_idx: ?usize = null;
+    var staple_lid: ?types.ListingId = null;
+    var staple_array_idx: ?usize = null;
     for (gs.market_listings.items, 0..) |l, i| {
-        if (l.staple and std.mem.eql(u8, l.item_key, "ammo_lrm")) staple_idx = i;
+        if (l.staple and std.mem.eql(u8, l.item_key, "ammo_lrm")) {
+            staple_lid = l.id;
+            staple_array_idx = i;
+        }
     }
-    const qty = gs.market_listings.items[staple_idx.?].quantity;
-    _ = try commands.execute(&gs, .{ .buy_listing = staple_idx.? });
-    try std.testing.expectEqual(qty - 1, gs.market_listings.items[staple_idx.?].quantity);
+    const qty = gs.market_listings.items[staple_array_idx.?].quantity;
+    _ = try commands.execute(&gs, .{ .buy_listing = staple_lid.? });
+    try std.testing.expectEqual(qty - 1, gs.market_listings.items[staple_array_idx.?].quantity);
 }
 
 test "one negotiation round per offer — improved, hardened, or withdrawn; never a second" {
@@ -1331,17 +1392,18 @@ test "one negotiation round per offer — improved, hardened, or withdrawn; neve
     while (rounds < 60) : (rounds += 1) {
         if (gs.contract_offers.items.len == 0) try refresh(&gs);
         const before = gs.contract_offers.items[0].terms;
-        const r = try commands.execute(&gs, .{ .negotiate = .{ .offer_index = 0, .term = .salvage } });
+        const offer0_id = gs.contract_offers.items[0].id;
+        const r = try commands.execute(&gs, .{ .negotiate = .{ .offer = offer0_id, .term = .salvage } });
         switch (r.negotiation) {
             .improved => {
                 improved += 1;
                 try std.testing.expect(gs.contract_offers.items[0].terms.salvage_pct > before.salvage_pct);
-                try std.testing.expectError(commands.Error.AlreadyNegotiated, commands.execute(&gs, .{ .negotiate = .{ .offer_index = 0, .term = .pay } }));
+                try std.testing.expectError(commands.Error.AlreadyNegotiated, commands.execute(&gs, .{ .negotiate = .{ .offer = offer0_id, .term = .pay } }));
             },
             .hardened => {
                 hardened += 1;
                 try std.testing.expect(gs.contract_offers.items[0].terms.base_pay_month < before.base_pay_month);
-                try std.testing.expectError(commands.Error.AlreadyNegotiated, commands.execute(&gs, .{ .negotiate = .{ .offer_index = 0, .term = .pay } }));
+                try std.testing.expectError(commands.Error.AlreadyNegotiated, commands.execute(&gs, .{ .negotiate = .{ .offer = offer0_id, .term = .pay } }));
             },
             .withdrawn => withdrawn += 1,
             .none => unreachable,
@@ -1353,7 +1415,7 @@ test "one negotiation round per offer — improved, hardened, or withdrawn; neve
     // A term at its cap is refused before any dice are thrown.
     try refresh(&gs);
     gs.contract_offers.items[0].terms.advance_pct = 50;
-    try std.testing.expectError(commands.Error.TermAtCap, commands.execute(&gs, .{ .negotiate = .{ .offer_index = 0, .term = .advance } }));
+    try std.testing.expectError(commands.Error.TermAtCap, commands.execute(&gs, .{ .negotiate = .{ .offer = gs.contract_offers.items[0].id, .term = .advance } }));
 }
 
 test "the contract world has a hull board — local funds pay, the hull joins the company there" {
@@ -1366,20 +1428,20 @@ test "the contract world has a hull board — local funds pay, the hull joins th
     gs.force(co).?.location_planet = "hesperus_ii";
     // Hesperus II builds meks: something turns up within a few tries.
     var tries: u32 = 0;
-    var idx: ?usize = null;
-    while (idx == null and tries < 20) : (tries += 1) {
+    var found_lid: ?types.ListingId = null;
+    while (found_lid == null and tries < 20) : (tries += 1) {
         try refreshContractWorld(&gs, gs.contracts.getPtr(cid).?);
-        for (gs.market_listings.items, 0..) |l, i| if (l.company == co) {
-            idx = i;
+        for (gs.market_listings.items) |l| if (l.company == co) {
+            found_lid = l.id;
         };
     }
-    try std.testing.expect(idx != null);
+    try std.testing.expect(found_lid != null);
     // Broke: refused; funded: bought from local funds, on the company's books at once.
     gs.force(co).?.local_funds = 0;
-    try std.testing.expectError(commands.Error.CompanyFundsShort, commands.execute(&gs, .{ .buy_listing = idx.? }));
+    try std.testing.expectError(commands.Error.CompanyFundsShort, commands.execute(&gs, .{ .buy_listing = found_lid.? }));
     gs.force(co).?.local_funds = 50_000_000;
     const hq_funds = gs.hqs.values()[0].funds;
-    const r = try commands.execute(&gs, .{ .buy_listing = idx.? });
+    const r = try commands.execute(&gs, .{ .buy_listing = found_lid.? });
     try std.testing.expectEqual(co, gs.companyOf(gs.unit(r.unit).?.force));
     try std.testing.expect(gs.force(co).?.local_funds < 50_000_000);
     try std.testing.expectEqual(hq_funds, gs.hqs.values()[0].funds);
@@ -1394,7 +1456,7 @@ test "one board per HQ — offers inside its reach, taken only by companies base
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1240 });
     defer gs.deinit();
     _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
-    const home = gs.hqs.keys()[0];
+    const home = gs.seat();
     const alpha = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
     // A second base at the edge of the home ring, grown to host a company.
     const home_world = planet_mod.find(gs.hqs.getPtr(home).?.planet_key).?;
@@ -1419,8 +1481,9 @@ test "one board per HQ — offers inside its reach, taken only by companies base
     try refresh(&gs);
     var on_home: u32 = 0;
     var on_far: u32 = 0;
-    var far_offer: ?usize = null;
-    var home_offer: ?usize = null;
+    var far_offer: ?types.ContractId = null;
+    var home_offer: ?types.ContractId = null;
+    var far_offer_idx: ?usize = null;
     for (gs.contract_offers.items, 0..) |o, i| {
         const h = gs.hqs.getPtr(o.offer_hq) orelse return error.TestUnexpectedResult;
         const dist = planet_mod.distanceLy(planet_mod.find(h.planet_key).?, planet_mod.find(o.planet_key).?);
@@ -1429,17 +1492,18 @@ test "one board per HQ — offers inside its reach, taken only by companies base
         try std.testing.expect(dist <= h.influenceLy() + market_mod.beachhead_band_ly);
         if (o.offer_hq == home) {
             on_home += 1;
-            home_offer = i;
+            home_offer = o.id;
         } else {
             on_far += 1;
-            far_offer = i;
+            far_offer = o.id;
+            far_offer_idx = i;
         }
     }
     try std.testing.expect(on_home > 0 and on_far > 0);
     // Alpha cannot take the far board's work; Bravo can.
-    try std.testing.expect(!offerEligible(&gs, &gs.contract_offers.items[far_offer.?], alpha));
-    try std.testing.expectError(commands.Error.OutOfRange, commands.execute(&gs, .{ .accept_contract = .{ .offer_index = far_offer.?, .company = alpha } }));
-    try std.testing.expectError(commands.Error.OutOfRange, commands.execute(&gs, .{ .accept_contract = .{ .offer_index = home_offer.?, .company = bravo } }));
-    _ = try commands.execute(&gs, .{ .accept_contract = .{ .offer_index = far_offer.?, .company = bravo } });
+    try std.testing.expect(!offerEligible(&gs, &gs.contract_offers.items[far_offer_idx.?], alpha));
+    try std.testing.expectError(commands.Error.OutOfRange, commands.execute(&gs, .{ .accept_contract = .{ .offer = far_offer.?, .company = alpha } }));
+    try std.testing.expectError(commands.Error.OutOfRange, commands.execute(&gs, .{ .accept_contract = .{ .offer = home_offer.?, .company = bravo } }));
+    _ = try commands.execute(&gs, .{ .accept_contract = .{ .offer = far_offer.?, .company = bravo } });
     try std.testing.expect(gs.deploymentContract(bravo) != null);
 }

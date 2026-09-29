@@ -94,8 +94,8 @@ const Modal = union(enum) {
     upgrade: types.HqId,
     /// Lance picker for a hull.
     lance_pick: types.UnitId,
-    /// Company picker for an offer (board index): readiest first.
-    accept_pick: usize,
+    /// Company picker for an offer (typed ContractId): readiest first.
+    accept_pick: types.ContractId,
     /// The engagements still on record: pick one to read.
     battle_list,
     /// One engagement as a sheet — the fight, the field, the spoils, the
@@ -118,8 +118,8 @@ const Modal = union(enum) {
     /// Amount form: every number the client asks for goes
     /// through one modal — fields with a default, a range and a step.
     amount: AmountForm,
-    /// Negotiation term picker for an offer (board index).
-    negotiate: usize,
+    /// Negotiation term picker for an offer (typed ContractId).
+    negotiate: types.ContractId,
     /// Every company's readiness report (fatigue, morale, wounded, banked XP, depot).
     readiness,
     /// The campaign in aggregate.
@@ -327,7 +327,7 @@ pub const App = struct {
     w_seed: u64 = 0,
     // screens
     ledger_sel: usize = 0,
-    hq_sel: usize = 0,
+    hq_sel: types.HqId = .none,
     hall_filter: q.HallFilter = .all,
     people_filter: q.HallFilter = .all,
     market_filter: q.MarketFilter = .all,
@@ -2373,7 +2373,7 @@ pub const App = struct {
         self.modal = .none;
         switch (modal) {
             .pick_company => |pc| {
-                const co: types.ForceId = @enumFromInt(row.id);
+                const co: types.ForceId = row.sel.company;
                 if (pc.what == .stock) {
                     const pkey = pc.key_buf[0..pc.key_len];
                     const on_hand: i64 = q.stockCount(g, .{ .hq = @enumFromInt(pc.id) }, pkey);
@@ -2390,10 +2390,10 @@ pub const App = struct {
                 }
             },
             .pick_hq => |pid| {
-                _ = try self.execSay(.{ .post_person = .{ .person = pid, .hq = @enumFromInt(row.id) } }, .good, "{s} posted to {s}", .{ try q.personName(al, g, pid), try q.hqName(self.a(), g, @enumFromInt(row.id)) });
+                _ = try self.execSay(.{ .post_person = .{ .person = pid, .hq = row.sel.hq } }, .good, "{s} posted to {s}", .{ try q.personName(al, g, pid), try q.hqName(self.a(), g, row.sel.hq) });
             },
             .pick_crew => |uid| {
-                _ = try self.execSay(.{ .assign = .{ .unit = uid, .slot = row.slot, .person = @enumFromInt(row.id) } }, .good, "{s} assigned as {s} of #{d}", .{ try q.personName(al, g, @enumFromInt(row.id)), @tagName(row.slot), @intFromEnum(uid) });
+                _ = try self.execSay(.{ .assign = .{ .unit = uid, .slot = row.slot, .person = row.sel.person } }, .good, "{s} assigned as {s} of #{d}", .{ try q.personName(al, g, row.sel.person), @tagName(row.slot), @intFromEnum(uid) });
             },
             .pick_unassign => |uid| {
                 _ = try self.execSay(.{ .unassign = .{ .unit = uid, .slot = row.slot } }, .good, "#{d}: {s} cleared", .{ @intFromEnum(uid), if (row.slot == .any) "pilot and tech" else @tagName(row.slot) });
@@ -2451,9 +2451,17 @@ pub const App = struct {
         return q.lanceChoices(self.a(), self.state(), uid);
     }
 
+    /// Return the currently selected HQ's id as a u32.
+    /// If no HQ is selected or the selection is stale, fall back to the first HQ.
+    /// Revalidated each frame (rule 40).
     pub fn hqSelId(self: *App, g: *GameState) !u32 {
         const hqs = try q.hqList(self.a(), g);
-        return if (self.hq_sel < hqs.len) @intFromEnum(hqs[self.hq_sel].id) else 0;
+        if (hqs.len == 0) return 0;
+        if (self.hq_sel != .none) {
+            for (hqs) |row| if (row.id == self.hq_sel) return @intFromEnum(self.hq_sel);
+        }
+        self.hq_sel = hqs[0].id;
+        return @intFromEnum(hqs[0].id);
     }
 
     pub fn openCommand(self: *App, prefill: []const u8) void {
@@ -2670,7 +2678,7 @@ pub const App = struct {
     /// Client state a confirmed command invalidates.
     fn afterConfirm(self: *App, c: Confirm) void {
         switch (c.kind) {
-            .sell_hq => self.hq_sel = 0,
+            .sell_hq => self.hq_sel = .none,
             .disband => self.cur(0).* = 0,
             else => {},
         }
@@ -3187,10 +3195,10 @@ pub const App = struct {
             } else {
                 self.modal = .none;
             },
-            .negotiate => |idx| {
+            .negotiate => |offer_id| {
                 const term: game.contract.NegotiableTerm = @enumFromInt(@min(self.modal_cursor, negotiable_terms.len - 1));
                 self.modal = .none;
-                const r = self.execResult(.{ .negotiate = .{ .offer_index = idx, .term = term } }) orelse return;
+                const r = self.execResult(.{ .negotiate = .{ .offer = offer_id, .term = term } }) orelse return;
                 switch (r.negotiation) {
                     .improved => self.say(.good, "{s} improved — the offer row shows the new terms", .{@tagName(term)}),
                     .hardened => self.say(.amber, "they hold firm on {s} and shave the pay 5%", .{@tagName(term)}),
@@ -3199,8 +3207,8 @@ pub const App = struct {
                 }
             },
             .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_part => try self.pickEnter(),
-            .accept_pick => |oi| {
-                const cands = try q.offerCandidates(al, self.state(), oi);
+            .accept_pick => |offer_id| {
+                const cands = try q.offerCandidates(al, self.state(), offer_id);
                 if (cands.len == 0) return;
                 const c = cands[@min(self.modal_cursor, cands.len - 1)];
                 if (!c.eligible) {
@@ -3209,7 +3217,7 @@ pub const App = struct {
                 }
                 self.modal = .none;
                 const lift = try q.liftText(al, self.state(), c.company);
-                _ = try self.execSay(.{ .accept_contract = .{ .offer_index = oi, .company = c.company } }, .good, "accepted — {s} is on its way, {d} days out{s}{s}", .{ try q.forceName(self.a(), self.state(), c.company), c.transit_days, if (lift.len > 0) " · " else "", lift });
+                _ = try self.execSay(.{ .accept_contract = .{ .offer = offer_id, .company = c.company } }, .good, "accepted — {s} is on its way, {d} days out{s}{s}", .{ try q.forceName(self.a(), self.state(), c.company), c.transit_days, if (lift.len > 0) " · " else "", lift });
             },
             .lance_pick => |uid| {
                 const lances = try self.lanceChoices(uid);
@@ -3654,8 +3662,11 @@ pub const App = struct {
                     .jump => {
                         const asks = try endTurnRows(self.a(), (try q.desk(self.a(), self.state(), 0)).checklist);
                         if (hit.offset < asks.len) {
+                            const row = asks[hit.offset];
                             self.modal = .none;
-                            self.switchTab(@enumFromInt(asks[hit.offset].jump));
+                            self.switchTab(@enumFromInt(row.jump));
+                            // Open the specific entity the warning is about (rule 32).
+                            if (row.contract != .none) self.modal = .{ .contract_log = row.contract };
                         }
                     },
                 }
