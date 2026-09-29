@@ -800,7 +800,6 @@ fn expectTuningSane(comptime T: type, value: T, comptime name: []const u8, bad: 
             // `Bp` and `CBills` are both i64, so the field name carries the
             // unit: a `_bp` knob is a share in 0..100_000 basis points.
             if (std.mem.endsWith(u8, name, "_bp") and !signedAllowed(name) and (value < 0 or value > 100_000)) {
-                std.debug.print("tuning field {s} = {d} is outside 0..100000 basis points\n", .{ name, value });
                 bad.* += 1;
             }
             // A `_pct` knob (or a row of a `_pct` table) is a percentage:
@@ -809,13 +808,11 @@ fn expectTuningSane(comptime T: type, value: T, comptime name: []const u8, bad: 
             const pct = comptime (std.mem.endsWith(u8, name, "_pct") or std.mem.indexOf(u8, name, "_pct.") != null) and std.mem.indexOf(u8, name, "_per_pct") == null;
             const pct_low: i128 = comptime if (signedAllowed(name)) -100 else 0;
             if (pct and (@as(i128, value) > 100 or @as(i128, value) < pct_low)) {
-                std.debug.print("tuning field {s} = {d} is outside the percentage range\n", .{ name, value });
                 bad.* += 1;
             }
             if (info.signedness == .signed) {
                 // Money, scores and deltas: never negative unless named in `signed_knobs`.
                 if (value < 0 and !signedAllowed(name)) {
-                    std.debug.print("tuning field {s} = {d} is negative and not a listed signed knob\n", .{ name, value });
                     bad.* += 1;
                 }
                 return;
@@ -823,7 +820,6 @@ fn expectTuningSane(comptime T: type, value: T, comptime name: []const u8, bad: 
             // Slot and desk tables hold real zeros (a field HQ has no air wing).
             if (std.mem.indexOf(u8, name, ".staff_base.") != null or std.mem.indexOf(u8, name, ".capacity_") != null) return;
             if (value <= 0) {
-                std.debug.print("tuning field {s} must be positive\n", .{name});
                 bad.* += 1;
             }
         },

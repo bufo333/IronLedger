@@ -71,7 +71,6 @@ pub const Db = struct {
     pub fn prepare(self: Db, sql: []const u8) Error!Stmt {
         var s: ?*StmtHandle = null;
         if (sqlite3_prepare_v2(self.h, sql.ptr, @intCast(sql.len), &s, null) != SQLITE_OK or s == null) {
-            std.log.warn("sqlite prepare: {s} — {s}", .{ sqlite3_errmsg(self.h), sql });
             return error.SqliteError;
         }
         return .{ .h = s.?, .db = self.h };

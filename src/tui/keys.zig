@@ -267,14 +267,12 @@ pub fn expectWellFormed(comptime Action: type, bindings: []const Binding(Action)
         for (bindings) |b| {
             if (b.action == a) break;
         } else {
-            std.debug.print("action {s} has no binding\n", .{f.name});
             return error.UnboundAction;
         }
     }
     for (bindings, 0..) |a, i| for (bindings[i + 1 ..]) |b| {
         const same_scope = (a.pane == null and b.pane == null) or (a.pane != null and b.pane != null and a.pane.? == b.pane.?);
         if (same_scope and a.match.overlaps(b.match)) {
-            std.debug.print("{s} and {s} share a key in one pane\n", .{ a.label, b.label });
             return error.DuplicateBinding;
         }
     };
