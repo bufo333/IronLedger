@@ -650,15 +650,18 @@ fn rollRepair(gs: *GameState, hq_id: types.HqId, unit_id: types.UnitId) RepairRe
     return .redo;
 }
 
-/// Apply a fault or botch to the hull; returns the log tail.
-fn applyRepairResult(gs: *GameState, u: *unit_mod.Unit, result: RepairResult) ![]const u8 {
+/// Apply a fault or botch to the hull; fills `buf` with the log tail and
+/// returns the written slice.  Uses bufPrint so it cannot fail after the
+/// mutation — caller must pre-allocate `buf` with sufficient space (128 bytes
+/// covers every possible outcome; C5 pattern, sites.zig §prepare/commit).
+fn applyRepairResultBuf(gs: *GameState, u: *unit_mod.Unit, result: RepairResult, buf: []u8) []const u8 {
     switch (result) {
         .clean, .redo => return "",
         .fault => {
             // A fault left in: the machine is fussier from here on.
             const q = @intFromEnum(u.quality);
             if (q > 0) u.quality = @enumFromInt(q - 1);
-            return try std.fmt.allocPrint(gs.allocator(), " — with a lingering fault (quality now {s})", .{@tagName(u.quality)});
+            return std.fmt.bufPrint(buf, " — with a lingering fault (quality now {s})", .{@tagName(u.quality)}) catch unreachable;
         },
         .botch => {
             var gear: u32 = 0;
@@ -671,7 +674,7 @@ fn applyRepairResult(gs: *GameState, u: *unit_mod.Unit, result: RepairResult) ![
                 if (sl.class == .structure or sl.condition == .destroyed or sl.condition == .missing) continue;
                 if (pick == 0) {
                     sl.condition = .destroyed;
-                    return try std.fmt.allocPrint(gs.allocator(), " — BOTCHED (natural 2): {s} destroyed on the bench, order another", .{sl.part_key});
+                    return std.fmt.bufPrint(buf, " — BOTCHED (natural 2): {s} destroyed on the bench, order another", .{sl.part_key}) catch unreachable;
                 }
                 pick -= 1;
             }
@@ -761,18 +764,90 @@ pub fn runDaily(gs: *GameState) !void {
 /// Returns false when the job stays on the bench (a failed repair roll).
 fn completeJob(gs: *GameState, job: *state_mod.BayJob) !bool {
     const today = gs.clock.day_index;
-    // The repair check: depot work and refits can go wrong.
+    // ---- Prepare: reserve all list capacities and pre-allocate log-line
+    // buffers before any RNG draw, so an OOM returns before mutating state
+    // (rule 12, C5q).  Because the job is removed only on `true`, a
+    // non-failing commit tail guarantees rollRepair runs exactly once.
+    //
+    // Log budget per job kind:
+    //   depot_repair: redo(1) or [tail(0-1) + complete(1) + injure(0-2)] → max 4
+    //   refit:        redo(1) or [tail(0-1) + complete(1)]               → max 2
+    //   reactivation: complete(1)                                          → 1
+    //   fabrication:  complete(1)                                          → 1
+    const n_logs: usize = switch (job.kind) {
+        .depot_repair => 4,
+        .refit => 2,
+        .reactivation, .fabrication => 1,
+    };
+    try gs.reserveLog(n_logs);
+    if (job.cost > 0) try gs.reserveLedger(1);
+
+    // Fabrication: the stock-map may need a new key slot.
+    if (job.kind == .fabrication) {
+        const fab_site: types.Site = .{ .hq = job.hq };
+        if (gs.stockMap(fab_site)) |m| try m.ensureUnusedCapacity(gs.allocator(), 1);
+    }
+
+    // Refit: pre-reserve applyRefit's slot and stock-map capacity before the
+    // repair roll so its own prepare-phase ensureUnusedCapacity calls are
+    // no-ops (idempotent) on re-entry.
+    if (job.kind == .refit) {
+        for (gs.refit_plans.items) |*plan| {
+            if (plan.unit != job.unit or !plan.committed) continue;
+            const u = gs.unit(plan.unit) orelse break;
+            var n_installs: usize = 0;
+            for (plan.ops.items) |op| if (op == .install) {
+                n_installs += 1;
+            };
+            try u.slots.ensureUnusedCapacity(gs.allocator(), n_installs);
+            for (plan.ops.items) |op| {
+                if (op != .remove) continue;
+                for (u.slots.items) |s| {
+                    if (std.mem.eql(u8, s.slot_key, op.remove) and s.condition == .ok) {
+                        const dest_map = gs.stockMap(.{ .hq = job.hq }) orelse break;
+                        try dest_map.ensureUnusedCapacity(gs.allocator(), 1);
+                        break;
+                    }
+                }
+            }
+            break;
+        }
+    }
+
+    // Pre-allocate log-line buffers (commit tail uses bufPrint — cannot fail).
+    // 256 bytes covers the date prefix, chassis_key, kind tag, and any tail.
+    var repair_result_buf: [128]u8 = undefined; // for applyRepairResultBuf (stack)
+    const needs_repair_log = job.kind == .depot_repair or job.kind == .refit;
+    const redo_buf: []u8 = if (needs_repair_log) try gs.allocator().alloc(u8, 256) else &.{};
+    const tail_line_buf: []u8 = if (needs_repair_log) try gs.allocator().alloc(u8, 256) else &.{};
+    const complete_buf: []u8 = try gs.allocator().alloc(u8, 256);
+
+    // ---- Commit: roll and mutate — list appends use appendAssumeCapacity,
+    // string formatting uses bufPrint, both cannot fail. ----
+    var date_buf: [10]u8 = undefined;
+    const date_str = gs.clock.date.text(&date_buf);
+
     if (job.kind == .depot_repair or job.kind == .refit) {
         const result = rollRepair(gs, job.hq, job.unit);
         if (result == .redo) {
             const redo = @max(1, types.applyBp(@as(i64, job.duration_days), tuning.hq_ops.repair_redo_bp));
             job.done_day = today + @as(u32, @intCast(redo));
-            if (gs.unit(job.unit)) |u| try gs.log(.construction, .{ .hq = job.hq }, "[bay] {s} {s} failed the check — the work is redone ({d} more day{s})", .{ u.chassis_key, @tagName(job.kind), redo, if (redo == 1) "" else "s" });
+            if (gs.unit(job.unit)) |u| {
+                const line = std.fmt.bufPrint(redo_buf, "{s} [bay] {s} {s} failed the check — the work is redone ({d} more day{s})", .{
+                    date_str, u.chassis_key, @tagName(job.kind), redo, if (redo == 1) "" else "s",
+                }) catch unreachable;
+                gs.event_log.appendAssumeCapacity(.{ .day = today, .category = .construction, .hq = job.hq, .text = line });
+            }
             return false;
         }
         if (gs.unit(job.unit)) |u| {
-            const tail = try applyRepairResult(gs, u, result);
-            if (tail.len > 0) try gs.log(.construction, .{ .hq = job.hq }, "[bay] {s} {s}{s}", .{ u.chassis_key, @tagName(job.kind), tail });
+            const tail = applyRepairResultBuf(gs, u, result, &repair_result_buf);
+            if (tail.len > 0) {
+                const line = std.fmt.bufPrint(tail_line_buf, "{s} [bay] {s} {s}{s}", .{
+                    date_str, u.chassis_key, @tagName(job.kind), tail,
+                }) catch unreachable;
+                gs.event_log.appendAssumeCapacity(.{ .day = today, .category = .construction, .hq = job.hq, .text = line });
+            }
         }
     }
     switch (job.kind) {
@@ -782,7 +857,10 @@ fn completeJob(gs: *GameState, job: *state_mod.BayJob) !bool {
             }
             u.wreck = .none;
             if (u.status == .repairing) u.status = .ready;
-            try gs.log(.construction, .{ .hq = job.hq }, "[bay] {s} structural repair complete", .{u.chassis_key});
+            const line = std.fmt.bufPrint(complete_buf, "{s} [bay] {s} structural repair complete", .{
+                date_str, u.chassis_key,
+            }) catch unreachable;
+            gs.event_log.appendAssumeCapacity(.{ .day = today, .category = .construction, .hq = job.hq, .text = line });
             // Big jobs hurt people: snake-eyes on 2d6 (≈3%)
             // injures the hull's tech on the last day of the rebuild.
             if (gs.rng.roll2d6(.medical) == 2 and u.tech != .none) {
@@ -792,20 +870,28 @@ fn completeJob(gs: *GameState, job: *state_mod.BayJob) !bool {
         .reactivation => if (gs.unit(job.unit)) |u| {
             u.status = .ready;
             u.reactivation_done_day = null;
-            try gs.log(.construction, .{ .hq = job.hq }, "[bay] {s} reactivated from cold storage", .{u.chassis_key});
+            const line = std.fmt.bufPrint(complete_buf, "{s} [bay] {s} reactivated from cold storage", .{
+                date_str, u.chassis_key,
+            }) catch unreachable;
+            gs.event_log.appendAssumeCapacity(.{ .day = today, .category = .construction, .hq = job.hq, .text = line });
         },
         .fabrication => {
             const site: types.Site = .{ .hq = job.hq };
             const room = sites.siteFreeTons(gs, site) / @max(1, part_mod.tons(job.item_key));
-            if (room > 0) try gs.addStock(site, job.item_key, 1);
-            try gs.log(.construction, .{ .hq = job.hq }, "[bay] fabricated {s}{s}", .{
+            // Capacity pre-reserved above; addStock cannot fail for a new key.
+            if (room > 0) gs.addStock(site, job.item_key, 1) catch unreachable;
+            const line = std.fmt.bufPrint(complete_buf, "{s} [bay] fabricated {s}{s}", .{
+                date_str,
                 job.item_key,
                 if (room == 0) " — no warehouse room, scrapped" else "",
-            });
+            }) catch unreachable;
+            gs.event_log.appendAssumeCapacity(.{ .day = today, .category = .construction, .hq = job.hq, .text = line });
         },
         .refit => if (gs.unit(job.unit)) |u| {
-            // The committed plan lands on the hull; removed mounts
-            // go back on the shelf.
+            // The committed plan lands on the hull; removed mounts go back
+            // on the shelf.  applyRefit is atomic (prepare + commit); its
+            // prepare-phase allocations are idempotent with the reservations
+            // above, so this call cannot leave the hull half-applied.
             var pi: usize = 0;
             while (pi < gs.refit_plans.items.len) : (pi += 1) {
                 const plan = &gs.refit_plans.items[pi];
@@ -815,7 +901,10 @@ fn completeJob(gs: *GameState, job: *state_mod.BayJob) !bool {
                 break;
             }
             if (u.status == .refitting) u.status = .ready;
-            try gs.log(.construction, .{ .hq = job.hq }, "[bay] {s} refit complete — {d} mounts fitted", .{ u.chassis_key, u.slots.items.len });
+            const line = std.fmt.bufPrint(complete_buf, "{s} [bay] {s} refit complete — {d} mounts fitted", .{
+                date_str, u.chassis_key, u.slots.items.len,
+            }) catch unreachable;
+            gs.event_log.appendAssumeCapacity(.{ .day = today, .category = .construction, .hq = job.hq, .text = line });
         },
     }
     if (job.cost > 0) {
@@ -1864,4 +1953,45 @@ test "upgradeTier leaves the HQ, its projects, the log and the ledger unchanged 
 
     try std.testing.expectError(error.OutOfMemory, commands.execute(&gs, .{ .upgrade_tier = fb }));
     try std.testing.expectEqual(before, digest.stateHash(&gs));
+}
+
+test "a due depot-repair bay job is unchanged — no RNG consumed, no treasury debit — when the first allocation fails" {
+    const digest = @import("digest.zig");
+
+    var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer outer.deinit();
+    var gs = GameState.init(outer.allocator(), .{ .seed = 5050 });
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    const hq = gs.hqs.keys()[0];
+    gs.hqs.getPtr(hq).?.funds = 5_000_000;
+    const uid = try gs.addUnit("LCT-1V");
+    gs.unit(uid).?.status = .repairing;
+
+    // Plant a depot-repair job that is due today (day 0).
+    try gs.bay_jobs.append(gs.allocator(), .{
+        .hq = hq,
+        .kind = .depot_repair,
+        .unit = uid,
+        .duration_days = 0,
+        .queued_day = 0,
+        .started_day = 0,
+        .done_day = 0,
+        .cost = 10_000,
+    });
+
+    const before = digest.stateHash(&gs);
+    const unit_status_before = gs.unit(uid).?.status;
+    const funds_before = gs.hqs.getPtr(hq).?.funds;
+
+    // Block all further allocations: reserveLog(4) — the first call inside
+    // completeJob — fails before rollRepair ever runs (no RNG consumed).
+    gs.arena.state.used_list = null;
+    gs.arena.state.free_list = null;
+    gs.arena.child_allocator = std.testing.failing_allocator;
+
+    try std.testing.expectError(error.OutOfMemory, runDaily(&gs));
+    try std.testing.expectEqual(before, digest.stateHash(&gs));
+    try std.testing.expectEqual(@as(usize, 1), gs.bay_jobs.items.len);
+    try std.testing.expectEqual(unit_status_before, gs.unit(uid).?.status);
+    try std.testing.expectEqual(funds_before, gs.hqs.getPtr(hq).?.funds);
 }

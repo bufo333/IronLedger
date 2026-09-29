@@ -322,17 +322,34 @@ pub fn runTravel(gs: *GameState) !void {
     for (gs.part_orders.items) |*order| {
         if (order.status != .in_transit) continue;
         if (order.eta_day != null and gs.clock.day_index >= order.eta_day.?) {
-            order.status = .delivered;
             // Land at the destination site; anything the warehouse or the
             // trucks can't hold is lost on the dock.
             const dest: types.Site = if (order.dest == .outfit) gs.defaultSite() else order.dest;
             const room = sites.siteFreeTons(gs, dest) / @max(1, part_mod.tons(order.part_key));
             const landed = @min(order.quantity, room);
-            try gs.addStock(dest, order.part_key, landed);
-            const tags = Treasury.ofSite(dest).tags();
-            try gs.log(.delivery, .{ .company = tags.company, .hq = tags.hq }, "[delivery] {s} x{d} received{s}", .{
-                order.part_key, landed,
+            // Reserve stock-map capacity and the log line before setting
+            // delivered status: a failed allocation leaves the order
+            // in_transit so the next tick delivers it exactly once (rule 17).
+            if (landed > 0) {
+                const dest_map = gs.stockMap(dest) orelse continue;
+                try dest_map.ensureUnusedCapacity(gs.allocator(), 1);
+            }
+            var date_buf: [10]u8 = undefined;
+            const line = try std.fmt.allocPrint(gs.allocator(), "{s} [delivery] {s} x{d} received{s}", .{
+                gs.clock.date.text(&date_buf), order.part_key, landed,
                 if (landed < order.quantity) " — NO ROOM for the rest, written off" else "",
+            });
+            try gs.reserveLog(1);
+            // Commit: status, stock, and log cannot fail after the reservations.
+            order.status = .delivered;
+            if (landed > 0) gs.addStock(dest, order.part_key, landed) catch unreachable;
+            const tags = Treasury.ofSite(dest).tags();
+            gs.event_log.appendAssumeCapacity(.{
+                .day = gs.clock.day_index,
+                .category = .delivery,
+                .company = tags.company,
+                .hq = tags.hq,
+                .text = line,
             });
         }
     }
@@ -357,9 +374,23 @@ pub fn runTravel(gs: *GameState) !void {
     while (i < gs.fund_couriers.items.len) {
         const courier = gs.fund_couriers.items[i];
         if (gs.clock.day_index >= courier.eta_day) {
-            try treasury.creditTreasury(gs, courier.to, courier.amount);
+            // Reserve ledger and log before crediting: a failed allocation
+            // leaves the courier uncredited and in the list so the next
+            // tick credits it exactly once (rule 17).
+            var date_buf: [10]u8 = undefined;
+            const line = try std.fmt.allocPrint(gs.allocator(), "{s} [delivery] courier delivers {d} c-bills", .{ gs.clock.date.text(&date_buf), courier.amount });
+            try gs.reserveLog(1);
+            try gs.reserveLedger(1);
+            // Commit: credit, log, and remove cannot fail after the reservations.
             const tags = courier.to.tags();
-            try gs.log(.delivery, .{ .company = tags.company, .hq = tags.hq }, "[delivery] courier delivers {d} c-bills", .{courier.amount});
+            treasury.creditTreasury(gs, courier.to, courier.amount) catch unreachable;
+            gs.event_log.appendAssumeCapacity(.{
+                .day = gs.clock.day_index,
+                .category = .delivery,
+                .company = tags.company,
+                .hq = tags.hq,
+                .text = line,
+            });
             _ = gs.fund_couriers.swapRemove(i);
         } else {
             i += 1;
@@ -681,16 +712,27 @@ pub fn advance(gs: *GameState, days: u32) Error!Result {
     // `decide <id> <n>` the second, and the client opens both for you.
     if (holdError(gs)) |e| return e;
     for (0..days) |_| {
-        if (gs.bankrupt) return Error.Bankrupt;
+        if (gs.bankrupt) {
+            // Zero days: the hold is the same turn-start error (rule 1).
+            // One-or-more days: bankruptcy was reached during this advance;
+            // the days already committed are truthfully reported (C5p).
+            if (result.days_advanced == 0) return Error.Bankrupt;
+            result.stopped = .bankrupt;
+            return result;
+        }
         // Couriers already bound for the outfit count: the turn can end
         // while the money is on the road.
         if (gs.funds + treasury.inboundToOutfit(gs) < 0) {
             if (try treasury.isInsolvent(gs.scratch(), gs)) {
                 gs.bankrupt = true;
                 try gs.log(.finance, .{}, "[bankrupt] the outfit cannot cover {d}: creditors seize what is left", .{gs.funds});
-                return Error.Bankrupt;
+                if (result.days_advanced == 0) return Error.Bankrupt;
+                result.stopped = .bankrupt;
+                return result;
             }
-            return Error.Insolvent;
+            if (result.days_advanced == 0) return Error.Insolvent;
+            result.stopped = .insolvent;
+            return result;
         }
         try advanceDay(gs);
         result.days_advanced += 1;
@@ -745,6 +787,9 @@ pub fn advanceReading(gs: *GameState, days: u32) !void {
         const r = try commands.execute(gs, .{ .advance_days = left });
         if (r.days_advanced == 0) break; // refused for a reason of its own
         left -= @intCast(r.days_advanced);
+        // A stopped advance (insolvent or bankrupt) will not make progress
+        // on a retry; break instead of looping into the same refusal.
+        if (r.stopped != .none) break;
     }
     try clearHolds(gs);
 }
@@ -999,6 +1044,113 @@ test "difficulty scales pay, fabrication and purchases — regular is the game a
         seen = true;
     };
     try std.testing.expect(seen);
+}
+
+test "advance reports days elapsed and stopped reason when insolvency fires mid-run; zero-day block returns an error" {
+    // A MekWarrior's monthly salary (≈1 650 c-bills/month) drains funds on
+    // payday (the 1st of each month, day 31 after a Jan-1 start).
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 250, .start_funds = 1 });
+    defer gs.deinit();
+    _ = try gs.hirePerson("Nat", "K", .mekwarrior); // payroll > 1 c-bill
+    // Advance 30 days to land on Jan 31 (no payday yet).
+    for (0..30) |_| _ = try advanceDay(&gs);
+
+    // Two-day advance: day 31 (Feb 1) is payday — payroll leaves funds < 0.
+    // Day 32 fires the insolvency check: funds < 0 but credit line covers it.
+    const r = try advance(&gs, 3);
+    try std.testing.expect(r.days_advanced >= 1);
+    // stopped is an anonymous enum on Result; compare by tag name.
+    try std.testing.expectEqual(.insolvent, r.stopped);
+
+    // Sanity: a fresh start with already-negative funds blocks on day 0.
+    var gs2 = GameState.init(std.testing.allocator, .{ .seed = 251, .start_funds = 0 });
+    defer gs2.deinit();
+    gs2.funds = -1;
+    try std.testing.expectError(commands.Error.Insolvent, advance(&gs2, 1));
+}
+
+test "a fund courier that lands today is credited exactly once — first try fails atomically, retry credits once" {
+    const digest = @import("digest.zig");
+    var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer outer.deinit();
+    var gs = GameState.init(outer.allocator(), .{ .seed = 260 });
+    _ = try @import("founding.zig").createCommander(&gs, "T", .LC, .paymaster);
+    const funds_start = gs.funds;
+
+    // A courier due on day 0 (today).
+    try gs.fund_couriers.append(gs.allocator(), .{
+        .to = .outfit,
+        .amount = 1000,
+        .sent_day = 0,
+        .eta_day = 0,
+    });
+
+    const before = digest.stateHash(&gs);
+
+    // Block every allocation: allocPrint for the log line fails first.
+    gs.arena.state.used_list = null;
+    gs.arena.state.free_list = null;
+    gs.arena.child_allocator = std.testing.failing_allocator;
+
+    try std.testing.expectError(error.OutOfMemory, runTravel(&gs));
+    try std.testing.expectEqual(before, digest.stateHash(&gs));
+    try std.testing.expectEqual(@as(usize, 1), gs.fund_couriers.items.len);
+    try std.testing.expectEqual(funds_start, gs.funds);
+
+    // Restore allocator to the outer arena so new pages are tracked and freed
+    // by outer.deinit() (same allocator the GameState was initialised with).
+    gs.arena.child_allocator = outer.allocator();
+    try runTravel(&gs);
+    try std.testing.expectEqual(@as(usize, 0), gs.fund_couriers.items.len);
+    try std.testing.expectEqual(funds_start + 1000, gs.funds);
+
+    // A second runTravel does nothing further (courier is gone).
+    try runTravel(&gs);
+    try std.testing.expectEqual(funds_start + 1000, gs.funds);
+}
+
+test "a part order in transit that lands today is stocked exactly once — first try fails atomically, retry lands it once" {
+    const digest = @import("digest.zig");
+    var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer outer.deinit();
+    var gs = GameState.init(outer.allocator(), .{ .seed = 270 });
+    _ = try @import("founding.zig").createCommander(&gs, "T", .LC, .quartermaster);
+    const hq = gs.hqs.keys()[0];
+    const site: types.Site = .{ .hq = hq };
+
+    // In-transit order for 1 mlas due today.
+    try gs.part_orders.append(gs.allocator(), .{
+        .dest = site,
+        .part_key = "mlas",
+        .quantity = 1,
+        .ordered_day = 0,
+        .eta_day = 0,
+        .cost = 0,
+        .status = .in_transit,
+    });
+
+    const before = digest.stateHash(&gs);
+    const stock_before = gs.stockCount(site, "mlas");
+
+    gs.arena.state.used_list = null;
+    gs.arena.state.free_list = null;
+    gs.arena.child_allocator = std.testing.failing_allocator;
+
+    try std.testing.expectError(error.OutOfMemory, runTravel(&gs));
+    try std.testing.expectEqual(before, digest.stateHash(&gs));
+    try std.testing.expectEqual(part_mod.OrderStatus.in_transit, gs.part_orders.items[0].status);
+    try std.testing.expectEqual(stock_before, gs.stockCount(site, "mlas"));
+
+    // Restore allocator to the outer arena so new pages are tracked and freed
+    // by outer.deinit() (same allocator the GameState was initialised with).
+    gs.arena.child_allocator = outer.allocator();
+    try runTravel(&gs);
+    try std.testing.expectEqual(part_mod.OrderStatus.delivered, gs.part_orders.items[0].status);
+    try std.testing.expectEqual(stock_before + 1, gs.stockCount(site, "mlas"));
+
+    // A further runTravel does not double-deliver (status is already .delivered).
+    try runTravel(&gs);
+    try std.testing.expectEqual(stock_before + 1, gs.stockCount(site, "mlas"));
 }
 
 test "scratch operations do not grow the campaign arena" {

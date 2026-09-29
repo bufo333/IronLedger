@@ -759,6 +759,7 @@ fn runRepl(session: *game.lobby.Session, io: std.Io, gpa: std.mem.Allocator, sto
                 continue;
             };
             std.debug.print("advanced {d} day(s)\n", .{r.days_advanced});
+            if (r.stopped != .none) std.debug.print("{s}\n", .{game.cli.advanceStopText(r.stopped)});
             if (r.contact != .none) std.debug.print("stopped for the contact warning: {s}\n", .{try q.contactWarning(al, gs, r.contact)});
             printStatus(gs, al) catch |err| showError(err);
         } else if (std.mem.eql(u8, verb, "manning")) {

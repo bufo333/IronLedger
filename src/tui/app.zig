@@ -2477,16 +2477,24 @@ pub const App = struct {
     fn advance(self: *App, days: u32) !void {
         const g = self.state();
         const res = self.execResult(if (days == 1) .advance_day else .{ .advance_days = days }) orelse {
-            // A refusal can be bankruptcy: try to save, then show the outcome.
-            if ((try q.status(self.a(), g)).bankrupt) {
-                if (self.store.save(&self.session.?, self.player_id)) |_|
-                    self.modal = .game_over_saved
-                else |save_err|
-                    self.modal = .{ .game_over_failed = game.cli.errorText(save_err) };
-            }
+            // A zero-day refusal can be bankruptcy (the outfit entered the turn
+            // already bankrupt): save and show the GAME OVER screen.
+            try self.handleGameOver();
             return;
         };
         if (res.days_advanced == 0) return; // refused — the message says why
+        // A multi-day advance may reach insolvency or bankruptcy after at least
+        // one day has committed (C5p).  Bankruptcy gets the save path; insolvent
+        // gets the reason sentence.
+        if (res.stopped == .bankrupt) {
+            try self.handleGameOver();
+            return;
+        }
+        if (res.stopped == .insolvent) {
+            const st = try q.status(self.a(), g);
+            self.say(.amber, "day {d} · {s} — {s}", .{ st.day, st.date, game.cli.advanceStopText(.insolvent) });
+            return;
+        }
         const st = try q.status(self.a(), g);
         // A battle stopped the advance short: open what the
         // turn is waiting on rather than make the player go and find it.
@@ -2510,6 +2518,18 @@ pub const App = struct {
             return;
         }
         self.say(.good, "day {d} · {s}", .{ st.day, st.date });
+    }
+
+    /// Save the campaign and show GAME OVER (or save-failed) when the outfit
+    /// goes bankrupt.  Shared by the zero-day bankrupt error path and the
+    /// mid-advance stopped-bankrupt path (C5p).
+    fn handleGameOver(self: *App) !void {
+        const g = self.state();
+        if (!(try q.status(self.a(), g)).bankrupt) return;
+        if (self.store.save(&self.session.?, self.player_id)) |_|
+            self.modal = .game_over_saved
+        else |save_err|
+            self.modal = .{ .game_over_failed = game.cli.errorText(save_err) };
     }
 
     /// Run a command; a refusal becomes the status line. Returns whether it ran.

@@ -618,7 +618,18 @@ pub fn errorText(err: anyerror) []const u8 {
         error.NoBerth => "no free berth at that HQ — spaceport levels add dropship berths; a jumpship berth needs spaceport 4 and comms 3",
         error.NoJumpship => "a dedicated line (level 3) needs a crewed jumpship berthed at one end",
         error.WrongHullKind => "fighters fly in air lances, meks walk in line lances, and ships hold berths",
-        else => "an unexpected failure — nothing was changed",
+        else => "an unexpected internal error",
+    };
+}
+
+/// One owner for the stop-reason sentence shown when a multi-day advance
+/// stops mid-run because the outfit ran out of money (C5p, rule 10).
+/// Called by both frontends; the wording reuses the per-error sentences above.
+pub fn advanceStopText(stopped: @FieldType(game.commands.Result, "stopped")) []const u8 {
+    return switch (stopped) {
+        .none => "",
+        .insolvent => errorText(error.Insolvent),
+        .bankrupt => errorText(error.Bankrupt),
     };
 }
 
@@ -950,10 +961,10 @@ test "every verb is listed once" {
 test "every command refusal and parse error has a sentence, never an error name" {
     inline for (@typeInfo(game.commands.Error).error_set.?) |e| {
         const text = errorText(@field(anyerror, e.name));
-        try std.testing.expect(!std.mem.eql(u8, text, "an unexpected failure — nothing was changed"));
+        try std.testing.expect(!std.mem.eql(u8, text, "an unexpected internal error"));
         try std.testing.expect(!std.mem.eql(u8, text, e.name));
     }
     inline for (@typeInfo(ParseError).error_set.?) |e| {
-        try std.testing.expect(!std.mem.eql(u8, errorText(@field(anyerror, e.name)), "an unexpected failure — nothing was changed"));
+        try std.testing.expect(!std.mem.eql(u8, errorText(@field(anyerror, e.name)), "an unexpected internal error"));
     }
 }

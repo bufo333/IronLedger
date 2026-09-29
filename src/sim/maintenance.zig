@@ -317,6 +317,9 @@ pub fn runWeeklyRepairs(gs: *GameState) !void {
     while (hqit.next()) |entry| {
         if (entry.value_ptr.supportsStructuralRepair()) depot_ok = true;
     }
+    // Reserve the labour ledger entry before the repair loop mutates any
+    // slot or armor (rule 17): postRepairLabour can then never fail.
+    try gs.reserveLedger(1);
     var book: HourBook = .{ .alloc = gs.scratch() };
     defer book.map.deinit(book.alloc);
 
@@ -340,7 +343,9 @@ pub fn runWeeklyRepairs(gs: *GameState) !void {
                     },
                     .destroyed, .missing => if (gs.stockCount(site, slot.part_key) > 0) {
                         if (try book.spend(gs, tech, slotHours(true), base_load)) {
-                            _ = gs.takeStock(site, slot.part_key, 1);
+                            // stockCount > 0 and spend succeeded: the take
+                            // cannot be short — assert the invariant (rule 15).
+                            if (!gs.takeStock(site, slot.part_key, 1)) unreachable;
                             slot.condition = .ok;
                             labor_cost += slotLabour(slot.part_key, true);
                         }
@@ -364,7 +369,9 @@ pub fn runWeeklyRepairs(gs: *GameState) !void {
         // Armor patching: 15%/week, spares and hours permitting.
         if (u.armor_pct < 100 and gs.stockCount(site, "armor") > 0) {
             if (try book.spend(gs, tech, hours_armor_patch, base_load)) {
-                _ = gs.takeStock(site, "armor", 1);
+                // stockCount > 0 and spend succeeded: the take cannot be
+                // short — assert the invariant (rule 15).
+                if (!gs.takeStock(site, "armor", 1)) unreachable;
                 u.armor_pct = @min(100, u.armor_pct + tuning.maintenance.armor_patch_pct);
                 labor_cost += tuning.maintenance.armor_patch_labour;
             }
@@ -930,4 +937,44 @@ test "a ready Logistics lance adds its workshop hours to the repair push" {
     for (lance.units.items) |uid| gs.person(gs.unit(uid).?.pilot).?.status = .wounded;
     const without = try repairBudget(&gs, a, co, needs);
     try std.testing.expectEqual(tuning.maintenance.push_workshop_hours, with_workshop.hours - without.hours);
+}
+
+test "weekly-repair labour reservation fails before any slot or stock mutation — digest unchanged" {
+    const digest = @import("digest.zig");
+
+    var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer outer.deinit();
+    var gs = GameState.init(outer.allocator(), .{ .seed = 6060 });
+    _ = try @import("founding.zig").createCommander(&gs, "T", .LC, .paymaster);
+    const uid = try gs.addUnit("LCT-1V");
+    // Give the hull an active tech (mek role for a mek hull).
+    const tech = try gs.hirePerson("Wren", "Fix", .tech_mek);
+    try crew.assignSlot(&gs, uid, .tech, tech);
+    // Find a non-structure field slot; damage it and supply a spare.
+    const u = gs.unit(uid).?;
+    var dmg_slot_idx: usize = 0;
+    var dmg_part: []const u8 = "mlas";
+    for (u.slots.items, 0..) |s, i| if (s.class != .structure) {
+        dmg_slot_idx = i;
+        dmg_part = s.part_key;
+        break;
+    };
+    u.slots.items[dmg_slot_idx].condition = .damaged;
+    const site = @import("sites.zig").siteForForce(&gs, u.force);
+    try gs.addStock(site, dmg_part, 1);
+
+    const before = digest.stateHash(&gs);
+    const slot_cond = u.slots.items[dmg_slot_idx].condition;
+    const stock_before = gs.stockCount(site, dmg_part);
+
+    // Block all allocations: reserveLedger(1) — the first call in
+    // runWeeklyRepairs — fails before any slot or stock is touched (rule 17).
+    gs.arena.state.used_list = null;
+    gs.arena.state.free_list = null;
+    gs.arena.child_allocator = std.testing.failing_allocator;
+
+    try std.testing.expectError(error.OutOfMemory, runWeeklyRepairs(&gs));
+    try std.testing.expectEqual(before, digest.stateHash(&gs));
+    try std.testing.expectEqual(slot_cond, gs.unit(uid).?.slots.items[dmg_slot_idx].condition);
+    try std.testing.expectEqual(stock_before, gs.stockCount(site, dmg_part));
 }

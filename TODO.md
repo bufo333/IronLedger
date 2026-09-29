@@ -20,11 +20,6 @@ The audit deliverables in `docs/audit-response.md` remain folded in: D26 into
 C10, D27 and D30 into C12, D28 into C7, D29 into C15, D31 into C8, and D33 into
 C18.
 
-- [ ] C5 failure atomicity (C5o-C5s; rules 11-15, 17, 69): batch gear
-  replacement, partial-day advance reporting, retry-safe courier/order and
-  repair tick phases, checked stock mutations, truthful refusal text, and the
-  reserved-resource architecture record. Add one digest failure test per
-  distinct mutation pattern. Delete C5.
 - [ ] C6 typed identity and selection (C6a-C6g; rules 16, 32, 56): persisted
   offer/listing/candidate/loan IDs, creation results, named seat resolution,
   and typed query/frontend selections. Migrate before frontend adoption.

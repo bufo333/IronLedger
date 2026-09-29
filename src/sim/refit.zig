@@ -54,28 +54,95 @@ pub fn tryInstall(gs: *GameState, alloc: std.mem.Allocator, unit_id: types.UnitI
 
 /// Apply a committed plan to the hull: removed mounts come off (and
 /// return to the site's stock), installs become new slots.
+///
+/// Prepare/commit split (rule 12, C5q): all fallible allocations complete
+/// before any slot mutation so a partial failure leaves the hull unchanged.
 pub fn applyRefit(gs: *GameState, plan: *const RefitPlan, site: types.Site) !void {
     const u = gs.unit(plan.unit) orelse return;
     const alloc = gs.allocator();
+
+    // ---- Prepare ----
+    // Count installs and reserve slot capacity upfront.
+    var n_installs: usize = 0;
+    for (plan.ops.items) |op| if (op == .install) {
+        n_installs += 1;
+    };
+    try u.slots.ensureUnusedCapacity(alloc, n_installs);
+
+    // Reserve stock-map capacity for every ok-condition removal.
+    for (plan.ops.items) |op| {
+        if (op != .remove) continue;
+        for (u.slots.items) |s| {
+            if (std.mem.eql(u8, s.slot_key, op.remove) and s.condition == .ok) {
+                const dest_map = gs.stockMap(site) orelse break;
+                try dest_map.ensureUnusedCapacity(alloc, 1);
+                break;
+            }
+        }
+    }
+
+    // Pre-allocate install slot_keys accounting for which slots survive the
+    // removes in this plan.  Simulate the remove ops on an index list (no
+    // mutation) to determine post-remove numbering, then pre-alloc each key.
+    var scratch = std.heap.ArenaAllocator.init(gs.scratch());
+    defer scratch.deinit();
+    const sa = scratch.allocator();
+
+    // Build a list of slot indices that survive all removes.
+    var surviving = try std.ArrayListUnmanaged(usize).initCapacity(sa, u.slots.items.len);
+    for (0..u.slots.items.len) |idx| surviving.appendAssumeCapacity(idx);
+    for (plan.ops.items) |op| {
+        if (op != .remove) continue;
+        for (surviving.items, 0..) |slot_idx, ri| {
+            if (std.mem.eql(u8, u.slots.items[slot_idx].slot_key, op.remove)) {
+                _ = surviving.swapRemove(ri);
+                break;
+            }
+        }
+    }
+
+    // For each install, compute the slot_key with the post-remove numbering
+    // and pre-alloc it in the persistent arena.
+    var install_keys = try std.ArrayListUnmanaged([]const u8).initCapacity(sa, n_installs);
+    for (plan.ops.items) |op| {
+        if (op != .install) continue;
+        const it = op.install;
+        const def = part_mod.find(it.part_key) orelse {
+            install_keys.appendAssumeCapacity("");
+            continue;
+        };
+        var n: u32 = 1;
+        for (surviving.items) |slot_idx| {
+            const s = u.slots.items[slot_idx];
+            if (std.mem.startsWith(u8, s.slot_key, @tagName(it.location)) and std.mem.indexOf(u8, s.slot_key, def.key) != null) n += 1;
+        }
+        install_keys.appendAssumeCapacity(try std.fmt.allocPrint(alloc, "{s}.{s}.{d}", .{ @tagName(it.location), def.key, n }));
+    }
+
+    // ---- Commit: no allocation can fail past here ----
+    var install_idx: usize = 0;
     for (plan.ops.items) |op| {
         switch (op) {
             .remove => |slot_key| {
                 for (u.slots.items, 0..) |s, i| {
                     if (std.mem.eql(u8, s.slot_key, slot_key)) {
-                        if (s.condition == .ok) try gs.addStock(site, s.part_key, 1);
+                        // Capacity pre-reserved above; addStock cannot fail.
+                        if (s.condition == .ok) gs.addStock(site, s.part_key, 1) catch unreachable;
                         _ = u.slots.orderedRemove(i);
                         break;
                     }
                 }
             },
             .install => |it| {
-                const def = part_mod.find(it.part_key) orelse continue;
-                var n: u32 = 1;
-                for (u.slots.items) |s| {
-                    if (std.mem.startsWith(u8, s.slot_key, @tagName(it.location)) and std.mem.indexOf(u8, s.slot_key, def.key) != null) n += 1;
-                }
-                try u.slots.append(alloc, .{
-                    .slot_key = try std.fmt.allocPrint(alloc, "{s}.{s}.{d}", .{ @tagName(it.location), def.key, n }),
+                const def = part_mod.find(it.part_key) orelse {
+                    install_idx += 1;
+                    continue;
+                };
+                const sk = install_keys.items[install_idx];
+                install_idx += 1;
+                // Slot capacity pre-reserved above; appendAssumeCapacity cannot fail.
+                u.slots.appendAssumeCapacity(.{
+                    .slot_key = sk,
                     .part_key = def.key,
                     .class = switch (def.mount) {
                         .ammo => .ammo,

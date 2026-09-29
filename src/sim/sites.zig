@@ -99,13 +99,29 @@ pub fn moveStock(gs: *GameState, from: types.Site, to: types.Site, key: []const 
 }
 
 /// Consume a batch of stock from a site: each key's quantity is removed.
-/// A missing or short entry is silently skipped (C5 will validate).
+/// Validates the whole batch first (every key has at least its quantity on
+/// hand) before consuming any entry; returns false if the batch cannot be
+/// satisfied and nothing is taken (rule 15 batch atomicity).
+///
+/// The one production caller (`battle.zig:952`) passes `player.ammo_reserved`,
+/// which is reserved from on-hand stock during battle preparation, so the
+/// batch is always satisfiable there; a short would be a programming error.
 /// Rule 14: the named consume operation for stock batches.
-pub fn consumeStockBatch(gs: *GameState, site: types.Site, batch: *const std.StringArrayHashMapUnmanaged(u32)) void {
+pub fn consumeStockBatch(gs: *GameState, site: types.Site, batch: *const std.StringArrayHashMapUnmanaged(u32)) bool {
+    // Validation pass: confirm all keys with qty > 0 are on hand in sufficient
+    // quantity.  Zero-quantity entries are always satisfiable (no-op).
     var it = batch.iterator();
     while (it.next()) |entry| {
-        _ = gs.takeStock(site, entry.key_ptr.*, entry.value_ptr.*);
+        if (entry.value_ptr.* == 0) continue;
+        if (gs.stockCount(site, entry.key_ptr.*) < entry.value_ptr.*) return false;
     }
+    // Consume pass: every non-zero take succeeds (invariant confirmed above).
+    it = batch.iterator();
+    while (it.next()) |entry| {
+        if (entry.value_ptr.* == 0) continue;
+        if (!gs.takeStock(site, entry.key_ptr.*, entry.value_ptr.*)) unreachable;
+    }
+    return true;
 }
 
 /// Reserves capacity for n sendHome operations. Call sendHomeAssumeCapacity
@@ -498,21 +514,53 @@ pub fn orderPart(gs: *GameState, part_key: []const u8, quantity: u32, dest_opt: 
 /// weekly repair pass (ARCH §9.7). Spares already on that shelf or already
 /// on order for it are counted first, so calling twice orders nothing new.
 /// Damaged gear needs hours, not parts; structure is `depot` work.
+///
+/// Batch-atomic (rule 15): all per-order resources are reserved and
+/// aggregate room/funds are validated before any order is committed.
+/// A preparation failure orders nothing.
 pub fn replaceGear(gs: *GameState, unit_id: types.UnitId) !ReplaceGearResult {
     const u = gs.unit(unit_id) orelse return error.UnknownUnit;
     if (gs.hqs.count() == 0) return error.NoHq;
     const site = hq_ops.spareSiteFor(gs, u);
-    var wanted: u32 = 0;
-    var ordered: u32 = 0;
-    var unsourced: u32 = 0;
-    // The site's ledger (hq_ops.spareDemand) says what is short across every
-    // hull there; this hull's broken mounts of a part get up to that many.
+    // Scratch arena: all per-order computed data, freed on exit.
     var arena = std.heap.ArenaAllocator.init(gs.scratch());
     defer arena.deinit();
-    const ledger = hq_ops.spareDemand(arena.allocator(), gs, site) catch return error.OutOfMemory;
+    const sa = arena.allocator();
+    // The site's ledger says what is still short across every hull there.
+    const ledger = hq_ops.spareDemand(sa, gs, site) catch return error.OutOfMemory;
+
+    // Shared HQ data: all orders go to the same site/HQ.
+    const hq_id: types.HqId = switch (site) {
+        .hq => |id| id,
+        .company => |id| gs.homeHqFor(id),
+        .outfit => gs.hqs.keys()[0],
+    };
+    const hq = gs.hqs.getPtr(hq_id) orelse return error.UnknownHq;
+    const world = planet_mod.find(hq.planet_key) orelse return error.UnknownPlanet;
+    const cost_mult: types.Bp = types.applyBp(tuning.market.procurement_markup_bp, gs.diff().purchase_bp);
+    const logi = hq_ops.hqStaff(gs, hq_id, .admin_logistics);
+    const admin_bonus: i32 = if (logi.count == 0) -2 else 5 - @as(i32, logi.best_skill);
+
+    // Per-order data kept in the scratch arena; fail_buf and why are in
+    // the persistent arena because event_log entries reference them (rule 12).
+    const OrderEntry = struct {
+        def: *const part_mod.PartDef,
+        fail_buf: []u8,
+        why: []const u8,
+        lead_days: u32,
+        cost: types.CBills,
+        onward: Freight,
+        src: part_mod.Sourcing,
+    };
+    var order_entries: std.ArrayListUnmanaged(OrderEntry) = .empty;
+    var total_wanted: u32 = 0;
+    // Aggregate part_key → qty for the room check (rule 15).
+    var part_qty: std.StringHashMapUnmanaged(u32) = .empty;
+    var total_cost: types.CBills = 0;
+
     for (u.slots.items, 0..) |s, i| {
         if (!hq_ops.slotNeedsSpare(s)) continue;
-        wanted += 1;
+        total_wanted += 1;
         var nth: u32 = 0;
         for (u.slots.items[0..i]) |t| if (hq_ops.slotNeedsSpare(t) and std.mem.eql(u8, t.part_key, s.part_key)) {
             nth += 1;
@@ -522,10 +570,99 @@ pub fn replaceGear(gs: *GameState, unit_id: types.UnitId) !ReplaceGearResult {
             short = l.short;
         };
         if (nth >= short) continue;
-        const r = try orderPart(gs, s.part_key, 1, site);
-        if (r.sourced) ordered += 1 else unsourced += 1;
+        const def = part_mod.find(s.part_key) orelse continue;
+        var lead_days = logistics.transitDays(1);
+        const onward = try freightQuote(gs, sa, .{ .hq = hq_id }, site, def.pallet_tons);
+        if (site == .company) lead_days += onward.days;
+        lead_days = @max(3, lead_days -| @min(4, logi.count / 2));
+        var cost = types.applyBp(def.cost, cost_mult);
+        cost = types.applyBp(cost, commander_mod.costMultBp(gs.commander, .freight));
+        if (site == .company) cost += onward.cost;
+        const src = part_mod.sourcing(def, faction_mod.isPeriphery(world.faction), hq.effectiveFacilityLevel(.comms));
+        // Pre-allocate in the persistent arena; these may end up in event_log.
+        const why = try src.text(gs.allocator(), def);
+        const fail_buf = try gs.allocator().alloc(u8, 256 + def.key.len + why.len);
+        total_cost += cost;
+        const qt_entry = try part_qty.getOrPut(sa, s.part_key);
+        if (!qt_entry.found_existing) qt_entry.value_ptr.* = 0;
+        qt_entry.value_ptr.* += 1;
+        try order_entries.append(sa, .{
+            .def = def,
+            .fail_buf = fail_buf,
+            .why = why,
+            .lead_days = lead_days,
+            .cost = cost,
+            .onward = onward,
+            .src = src,
+        });
     }
-    if (wanted == 0) return error.NothingToReplace;
+    if (total_wanted == 0) return error.NothingToReplace;
+    const n_orders = order_entries.items.len;
+    if (n_orders == 0) return .{ .ordered = 0, .unsourced = 0 };
+
+    // Validate aggregate room per distinct part_key (rule 15).
+    {
+        var it = part_qty.iterator();
+        while (it.next()) |entry| {
+            try checkRoom(gs, site, entry.key_ptr.*, entry.value_ptr.*);
+        }
+    }
+    // Validate aggregate funds (rule 15).
+    if (gs.treasuryBalance(.{ .hq = hq_id }) < total_cost) return error.InsufficientTreasury;
+
+    // Reserve capacity for all orders before any commit (rule 12, ARCH §4).
+    try gs.part_orders.ensureUnusedCapacity(gs.allocator(), n_orders);
+    try gs.reserveLedger(n_orders); // worst case: all sourced → N debits
+    try gs.reserveLog(n_orders); // worst case: none sourced → N refusal lines
+
+    // Commit: no allocation, room check, or funds check can fail past here.
+    var ordered: u32 = 0;
+    var unsourced: u32 = 0;
+    for (order_entries.items) |od| {
+        const roll = @as(i32, gs.rng.roll2d6(.acquisition)) + admin_bonus + world.industry / 2 + od.src.total();
+        const sourced_ok = roll >= od.def.rarity.availabilityTarget();
+        if (!sourced_ok) {
+            var date_buf: [10]u8 = undefined;
+            const line = std.fmt.bufPrint(od.fail_buf, "{s} [order] logistics could not source {d} × {s} this time ({s}, roll {d} vs {d}{s}{s}) — retry after the monthly refresh{s}", .{
+                gs.clock.date.text(&date_buf), @as(u32, 1), od.def.key, @tagName(od.def.rarity), roll, od.def.rarity.availabilityTarget(), if (od.why.len > 0) "; " else "", od.why, if (part_mod.isComponent(od.def.key)) ", or fabricate it in the bay" else "",
+            }) catch unreachable;
+            gs.part_orders.appendAssumeCapacity(.{
+                .part_key = od.def.key,
+                .quantity = 1,
+                .dest = site,
+                .ordered_day = gs.clock.day_index,
+                .cost = 0,
+                .status = .failed,
+            });
+            gs.event_log.appendAssumeCapacity(.{
+                .day = gs.clock.day_index,
+                .category = .delivery,
+                .hq = hq_id,
+                .text = line,
+            });
+            unsourced += 1;
+        } else {
+            // Debit uses the reserved ledger slot; cannot fail after reservation.
+            treasury.debit(gs, .{ .hq = hq_id }, .{
+                .day = gs.clock.day_index,
+                .amount = -od.cost,
+                .category = .parts,
+                .hq = hq_id,
+                .note = od.def.name,
+            }) catch unreachable;
+            if (site == .company) commitFreight(gs, od.onward);
+            gs.part_orders.appendAssumeCapacity(.{
+                .part_key = od.def.key,
+                .quantity = 1,
+                .dest = site,
+                .ordered_day = gs.clock.day_index,
+                .eta_day = gs.clock.day_index + od.lead_days,
+                .cost = od.cost,
+                .status = .in_transit,
+            });
+            ordered += 1;
+        }
+    }
     return .{ .ordered = ordered, .unsourced = unsourced };
 }
 
@@ -892,4 +1029,56 @@ test "moveStock leaves source unchanged when destination allocation fails" {
 
     try std.testing.expectError(error.OutOfMemory, moveStock(&gs, .{ .hq = hq_id }, .outfit, "armor", 5));
     try std.testing.expectEqual(before, digest.stateHash(&gs));
+}
+
+test "consumeStockBatch validates before consuming: one short key blocks all; satisfiable batch consumes each key exactly once" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 901 });
+    defer gs.deinit();
+    try gs.addStock(.outfit, "mlas", 3);
+    try gs.addStock(.outfit, "mg", 1);
+
+    var batch: std.StringArrayHashMapUnmanaged(u32) = .empty;
+    defer batch.deinit(std.testing.allocator);
+    try batch.put(std.testing.allocator, "mlas", 2);
+    try batch.put(std.testing.allocator, "mg", 2); // exceeds the 1 on hand
+
+    // One key short: validate rejects, nothing consumed.
+    try std.testing.expect(!consumeStockBatch(&gs, .outfit, &batch));
+    try std.testing.expectEqual(@as(u32, 3), gs.stockCount(.outfit, "mlas"));
+    try std.testing.expectEqual(@as(u32, 1), gs.stockCount(.outfit, "mg"));
+
+    // Fix the batch so it is satisfiable.
+    batch.values()[1] = 1;
+    try std.testing.expect(consumeStockBatch(&gs, .outfit, &batch));
+    try std.testing.expectEqual(@as(u32, 1), gs.stockCount(.outfit, "mlas")); // 3−2
+    try std.testing.expectEqual(@as(u32, 0), gs.stockCount(.outfit, "mg")); // 1−1
+}
+
+test "replaceGear leaves no partial orders and consumes no acquisition roll when allocation fails" {
+    const digest = @import("digest.zig");
+    const founding = @import("founding.zig");
+
+    var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer outer.deinit();
+    var gs = GameState.init(outer.allocator(), .{ .seed = 81 });
+    _ = try founding.createCommander(&gs, "T", .LC, .quartermaster);
+    gs.hqs.values()[0].funds = 50_000_000;
+    const uid = try gs.addUnit("LCT-1V");
+    // Destroy all non-structure slots so there are several replace orders.
+    for (gs.unit(uid).?.slots.items) |*s| if (s.class != .structure) {
+        s.condition = .destroyed;
+    };
+
+    const before = digest.stateHash(&gs);
+    const orders_before = gs.part_orders.items.len;
+    const funds_before = gs.hqs.values()[0].funds;
+
+    gs.arena.state.used_list = null;
+    gs.arena.state.free_list = null;
+    gs.arena.child_allocator = std.testing.failing_allocator;
+
+    try std.testing.expectError(error.OutOfMemory, replaceGear(&gs, uid));
+    try std.testing.expectEqual(before, digest.stateHash(&gs));
+    try std.testing.expectEqual(orders_before, gs.part_orders.items.len);
+    try std.testing.expectEqual(funds_before, gs.hqs.values()[0].funds);
 }

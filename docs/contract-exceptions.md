@@ -15,26 +15,6 @@ Owner of every entry: the project owner.
 
 ---
 
-### C5. Commands and ticks are not failure-atomic
-
-- **Rules:** 11, 12, 13, 15, 17, 69.
-- **Why not yet:** It needs reserve-first helpers and a failure-injection test per mutation pattern in one cohesive delivery.
-- **Scope:**
-  - **Primitives.** Only four commands call `reserveLedger`.
-  - **Partial loops.**
-    - `replaceGear` (`commands.zig:2118-2156`) runs a per-slot loop with no batch validation.
-  - **`advance`.** It refuses after days have ticked and loses the count (`commands.zig:2477-2487`).
-  - **Tick phases retried after a failure apply twice:**
-    - couriers (`tick.zig:296-301`)
-    - part orders (`tick.zig:262-266`)
-    - `completeJob` (`hq_ops.zig:712-781`)
-    - weekly repairs (`maintenance.zig:237-276`)
-  - **Stock-mutation results ignored:** `sites.consumeStockBatch`, `maintenance.zig:247`, `271`.
-  - **Tests.** There are no failure-injection tests in the sim.
-  - **Refusal text.** The fallback "nothing was changed" (`cli.zig:621`) is not yet true.
-- **Removal:** C5.
-- **Guard:** review (checklist questions 2, 3 and 14). No mechanical check.
-
 ### C6. Identity is inferred or positional
 
 - **Rules:** 16, 32, 56.

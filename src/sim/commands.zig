@@ -408,6 +408,11 @@ pub const Error = error{
 
 pub const Result = struct {
     days_advanced: u32 = 0,
+    /// advance: why a multi-day advance stopped before the requested count.
+    /// `.none` when the full count ran or when zero days elapsed (the zero-
+    /// day case returns an error, not a Result). Ephemeral — not persisted,
+    /// not in the digest (rule 45 applies to state fields only).
+    stopped: enum { none, insolvent, bankrupt } = .none,
     /// advance: the contract whose contact warning stopped a multi-day
     /// advance early.
     contact: types.ContractId = .none,

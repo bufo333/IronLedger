@@ -949,7 +949,9 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     const salvage = salvage_bv; // for the AAR
 
     // Expend the reloads this fight consumed, itemized below.
-    sites.consumeStockBatch(gs, player.site, &player.ammo_reserved);
+    // ammo_reserved was drawn from on-hand stock during battle preparation;
+    // the batch must be satisfiable — a short is a programming error (rule 15).
+    if (!sites.consumeStockBatch(gs, player.site, &player.ammo_reserved)) unreachable;
     const captured = try takePrisoners(gs, c, &player, held_field, enemy_loss_pct, enemy_destroyed_bv);
     const comp = @divTrunc(damage_value * c.terms.battle_loss_pct, 100);
     if (comp > 0) {
