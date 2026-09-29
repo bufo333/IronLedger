@@ -719,6 +719,20 @@ pub fn execShipComponentsHome(gs: *GameState, co: @FieldType(Command, "ship_comp
     return .{ .count = res.count, .hq = res.hq };
 }
 
+test "execOrderPart echoes the part key and quantity in the Result" {
+    const founding = @import("founding.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 8 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .quartermaster);
+    gs.hqs.values()[0].funds = 50_000_000;
+    const hq_id = gs.seat();
+    const site: types.Site = .{ .hq = hq_id };
+    const r = try commands.execute(&gs, .{ .order_part = .{ .part_key = "armor", .quantity = 3, .dest = site } });
+    // Echo fields reflect what was ordered.
+    try std.testing.expectEqualStrings("armor", r.order_key);
+    try std.testing.expectEqual(@as(u32, 3), r.order_quantity);
+}
+
 test "order_part is refused over the site's free tons and accepted at the limit" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 7 });
     defer gs.deinit();

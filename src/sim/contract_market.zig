@@ -1507,3 +1507,20 @@ test "one board per HQ — offers inside its reach, taken only by companies base
     _ = try commands.execute(&gs, .{ .accept_contract = .{ .offer = far_offer.?, .company = bravo } });
     try std.testing.expect(gs.deploymentContract(bravo) != null);
 }
+
+test "offer ids survive removal of an earlier-indexed offer" {
+    // Typed ContractId resolution must be index-independent: removing offer[0]
+    // must not make the id of offer[1] unresolvable (C6f).
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 5050 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
+    const co = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
+    try std.testing.expect(gs.contract_offers.items.len >= 2);
+    // Record the second offer's id before any mutation.
+    const second_id = gs.contract_offers.items[1].id;
+    // Accept the first offer: it is removed from the offer list by swapRemove.
+    const first_id = gs.contract_offers.items[0].id;
+    _ = try commands.execute(&gs, .{ .accept_contract = .{ .offer = first_id, .company = co } });
+    // The second offer is still addressable by its original typed id.
+    try std.testing.expect(findOffer(&gs, second_id) != null);
+}

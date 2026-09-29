@@ -337,6 +337,23 @@ pub fn execAcceptContract(gs: *GameState, a: @FieldType(Command, "accept_contrac
     return .{ .contract = a.offer };
 }
 
+test "execAcceptContract returns the ContractId of the accepted contract" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 100 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
+    const co = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
+    try std.testing.expect(gs.contract_offers.items.len > 0);
+    const offer_id = for (gs.contract_offers.items) |o| {
+        if (contract_market.offerEligible(&gs, &o, co)) break o.id;
+    } else return error.TestUnexpectedResult;
+    const r = try commands.execute(&gs, .{ .accept_contract = .{ .offer = offer_id, .company = co } });
+    // The returned contract id is non-none and matches the accepted offer.
+    try std.testing.expect(r.contract != .none);
+    try std.testing.expectEqual(offer_id, r.contract);
+    // The id keys the new entry in gs.contracts.
+    try std.testing.expect(gs.contracts.contains(r.contract));
+}
+
 test "attrition contracts break when the pool does; duration ones don't care" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 50 });
     defer gs.deinit();

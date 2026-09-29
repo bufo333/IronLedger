@@ -546,6 +546,16 @@ test "payroll drains funds over three months, resignations stop costing" {
     try std.testing.expectEqual(@as(i64, 997_470), gs.funds);
 }
 
+test "execTakeLoan returns the LoanId of the newly created loan" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 42, .start_funds = 0 });
+    defer gs.deinit();
+    const r = try commands.execute(&gs, .{ .take_loan = .{ .principal = 500_000, .term_months = 6 } });
+    // The returned id is non-none and keys the new loan entry.
+    try std.testing.expect(r.loan != .none);
+    try std.testing.expectEqual(@as(usize, 1), gs.loans.items.len);
+    try std.testing.expectEqual(r.loan, gs.loans.items[0].id);
+}
+
 test "loans draw down and get serviced monthly" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 8, .start_funds = 0 });
     defer gs.deinit();

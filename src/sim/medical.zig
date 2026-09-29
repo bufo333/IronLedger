@@ -634,6 +634,19 @@ test "rested companies reset their rotation debt" {
     try std.testing.expect(gs.force(co).?.last_rotation_day != null);
 }
 
+test "inflict returns the wound that was appended to the person's injuries" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1215 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
+    const id = try gs.hirePerson("Lori", "Kalmar", .mekwarrior);
+    const wound = (try inflict(&gs, id, .combat, 2, "test")).?;
+    const p = gs.person(id).?;
+    // The returned wound describes the injury that was appended.
+    try std.testing.expectEqual(@as(usize, 1), p.injuries.items.len);
+    try std.testing.expectEqual(wound.location, p.injuries.items[0].location);
+    try std.testing.expectEqual(wound.severity, p.injuries.items[0].severity);
+}
+
 test "injuries land by location, heal on their own days, and permanent ones scar the record" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1216 });
     defer gs.deinit();

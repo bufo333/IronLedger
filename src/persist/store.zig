@@ -1427,7 +1427,7 @@ pub const Store = struct {
         while (try st.next()) {
             const raw_id = st.int(6);
             const id: types.LoanId = if (raw_id != 0)
-                @enumFromInt(@as(u32, @intCast(raw_id)))
+                try toId(types.LoanId, raw_id)
             else blk: {
                 const bid: types.LoanId = @enumFromInt(gs.next_loan_id);
                 gs.next_loan_id += 1;
@@ -1442,8 +1442,8 @@ pub const Store = struct {
                 .next_pay_day = try st.intAs(u32, 4),
                 .payment = st.int(5),
             });
-            if (raw_id != 0 and @as(u32, @intCast(raw_id)) >= gs.next_loan_id)
-                gs.next_loan_id = @as(u32, @intCast(raw_id)) + 1;
+            if (raw_id != 0 and try fit(u32, raw_id) >= gs.next_loan_id)
+                gs.next_loan_id = try fit(u32, raw_id) + 1;
         }
     }
 
@@ -1518,7 +1518,7 @@ pub const Store = struct {
         while (try st.next()) {
             const raw_id = st.int(12); // 0 on pre-v35 rows (DEFAULT 0 from migration)
             const id: types.CandidateId = if (raw_id != 0)
-                @enumFromInt(@as(u32, @intCast(raw_id)))
+                try toId(types.CandidateId, raw_id)
             else blk: {
                 // Backfill: assign the next counter value in ord order.
                 const bid: types.CandidateId = @enumFromInt(gs.next_candidate_id);
@@ -1543,8 +1543,8 @@ pub const Store = struct {
                 .expires_day = try st.intAs(u32, 10),
             });
             // Raise the counter above any persisted id that exceeds it.
-            if (raw_id != 0 and @as(u32, @intCast(raw_id)) >= gs.next_candidate_id)
-                gs.next_candidate_id = @as(u32, @intCast(raw_id)) + 1;
+            if (raw_id != 0 and try fit(u32, raw_id) >= gs.next_candidate_id)
+                gs.next_candidate_id = try fit(u32, raw_id) + 1;
         }
     }
 
@@ -1619,7 +1619,7 @@ pub const Store = struct {
         while (try st.next()) {
             const raw_id = st.int(16);
             const id: types.ListingId = if (raw_id != 0)
-                @enumFromInt(@as(u32, @intCast(raw_id)))
+                try toId(types.ListingId, raw_id)
             else blk: {
                 const bid: types.ListingId = @enumFromInt(gs.next_listing_id);
                 gs.next_listing_id += 1;
@@ -1649,8 +1649,8 @@ pub const Store = struct {
                 };
             }
             try gs.market_listings.append(alloc, l);
-            if (raw_id != 0 and @as(u32, @intCast(raw_id)) >= gs.next_listing_id)
-                gs.next_listing_id = @as(u32, @intCast(raw_id)) + 1;
+            if (raw_id != 0 and try fit(u32, raw_id) >= gs.next_listing_id)
+                gs.next_listing_id = try fit(u32, raw_id) + 1;
         }
     }
 
@@ -2337,6 +2337,64 @@ test "a v5 store upgrades in place — columns added, version stamped, wounds le
     // A save from a newer game is refused rather than misread.
     try store.db.exec("UPDATE campaign SET schema_version = 99 WHERE id = 1");
     try std.testing.expectError(error.SaveNewerThanGame, store.load(std.testing.allocator, 1));
+}
+
+test "a v34 store backfills listing, candidate and loan ids in ord order" {
+    // A store as the game wrote it at schema 34: listing, candidate and loan
+    // tables lack the `id` column that v35 adds. Rows carry 0 (the DEFAULT
+    // added by migration) and are backfilled deterministically in ord order
+    // from next_*_id (rule 51). The three meta counters are absent; the
+    // counters start at their GameState default of 1.
+    const raw = try sqlite.Db.open(":memory:");
+    try raw.exec(
+        \\CREATE TABLE setting (key TEXT PRIMARY KEY, value INTEGER NOT NULL);
+        \\CREATE TABLE campaign (id INTEGER PRIMARY KEY, name TEXT NOT NULL, commander TEXT, day INTEGER NOT NULL, date TEXT NOT NULL, schema_version INTEGER NOT NULL, save_seq INTEGER NOT NULL, player_id INTEGER NOT NULL DEFAULT 0);
+        \\CREATE TABLE meta (cid INTEGER NOT NULL, key TEXT NOT NULL, value INTEGER NOT NULL, PRIMARY KEY (cid, key));
+        \\CREATE TABLE rng (cid INTEGER PRIMARY KEY, state BLOB NOT NULL);
+        \\CREATE TABLE listing (cid INTEGER NOT NULL, ord INTEGER NOT NULL, kind TEXT, item_key TEXT, rarity TEXT, price INTEGER, qty INTEGER, staple INTEGER, listed INTEGER, expires INTEGER, hq INTEGER, c_armor INTEGER, c_quality TEXT, c_damaged INTEGER, c_destroyed INTEGER, c_missing INTEGER, black INTEGER NOT NULL DEFAULT 0, company INTEGER NOT NULL DEFAULT 0);
+        \\CREATE TABLE candidate (cid INTEGER NOT NULL, ord INTEGER NOT NULL, hq INTEGER, first TEXT, last TEXT, callsign TEXT, role TEXT, experience TEXT, primary_skill INTEGER, secondary_skill INTEGER, bonus INTEGER, listed INTEGER, expires INTEGER, age INTEGER NOT NULL DEFAULT 30);
+        \\CREATE TABLE loan (cid INTEGER NOT NULL, ord INTEGER NOT NULL, principal INTEGER, balance INTEGER, rate_bp INTEGER, term INTEGER, next_pay INTEGER, payment INTEGER);
+        \\INSERT INTO campaign VALUES (1, 'Old Outfit', NULL, 0, '3025-01-01', 34, 1, 0);
+        \\INSERT INTO meta VALUES (1, 'day_index', 0);
+        \\INSERT INTO rng VALUES (1, x'000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff');
+        \\INSERT INTO listing VALUES (1, 0, 'part', 'armor',      'common', 10000, 5,  0, 0, 400, 0, NULL, NULL, NULL, NULL, NULL, 0, 0);
+        \\INSERT INTO listing VALUES (1, 1, 'part', 'provisions', 'common',  2000, 10, 0, 0, 400, 0, NULL, NULL, NULL, NULL, NULL, 0, 0);
+        \\INSERT INTO candidate VALUES (1, 0, 0, 'Alpha', 'Tester', NULL, 'mekwarrior', 'regular', 4, 5, 100000, 0, 400, 25);
+        \\INSERT INTO candidate VALUES (1, 1, 0, 'Beta',  'Tester', NULL, 'mekwarrior', 'veteran', 3, 4, 200000, 0, 400, 30);
+        \\INSERT INTO loan VALUES (1, 0, 1000000, 1000000, 1200, 12, 30, 84000);
+        \\INSERT INTO loan VALUES (1, 1, 2000000, 2000000, 1200, 24, 30, 92000);
+    );
+
+    const store = try Store.fromDb(raw);
+    defer store.close();
+    // v35 migrations added the id columns to all three tables.
+    try std.testing.expect(try Store.hasColumnRt(store.db, "listing", "id"));
+    try std.testing.expect(try Store.hasColumnRt(store.db, "candidate", "id"));
+    try std.testing.expect(try Store.hasColumnRt(store.db, "loan", "id"));
+
+    var gs = try store.load(std.testing.allocator, 1);
+    defer gs.deinit();
+
+    // Listing backfill: ord 0 → id 1, ord 1 → id 2; counter past the max.
+    try std.testing.expectEqual(@as(usize, 2), gs.market_listings.items.len);
+    try std.testing.expect(@intFromEnum(gs.market_listings.items[0].id) != 0);
+    try std.testing.expectEqual(@as(types.ListingId, @enumFromInt(1)), gs.market_listings.items[0].id);
+    try std.testing.expectEqual(@as(types.ListingId, @enumFromInt(2)), gs.market_listings.items[1].id);
+    try std.testing.expect(gs.next_listing_id > @intFromEnum(gs.market_listings.items[1].id));
+
+    // Candidate backfill: ord 0 → id 1, ord 1 → id 2; counter past the max.
+    try std.testing.expectEqual(@as(usize, 2), gs.candidates.items.len);
+    try std.testing.expect(@intFromEnum(gs.candidates.items[0].id) != 0);
+    try std.testing.expectEqual(@as(types.CandidateId, @enumFromInt(1)), gs.candidates.items[0].id);
+    try std.testing.expectEqual(@as(types.CandidateId, @enumFromInt(2)), gs.candidates.items[1].id);
+    try std.testing.expect(gs.next_candidate_id > @intFromEnum(gs.candidates.items[1].id));
+
+    // Loan backfill: ord 0 → id 1, ord 1 → id 2; counter past the max.
+    try std.testing.expectEqual(@as(usize, 2), gs.loans.items.len);
+    try std.testing.expect(@intFromEnum(gs.loans.items[0].id) != 0);
+    try std.testing.expectEqual(@as(types.LoanId, @enumFromInt(1)), gs.loans.items[0].id);
+    try std.testing.expectEqual(@as(types.LoanId, @enumFromInt(2)), gs.loans.items[1].id);
+    try std.testing.expect(gs.next_loan_id > @intFromEnum(gs.loans.items[1].id));
 }
 
 test "a battle report round-trips as fields, not as a row count" {

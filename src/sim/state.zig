@@ -857,6 +857,24 @@ pub const GameState = struct {
     }
 };
 
+test "seat returns .none before any HQ, the only HQ when one exists, and the first HQ when several exist" {
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+
+    // No HQs yet.
+    try std.testing.expectEqual(types.HqId.none, gs.seat());
+
+    // One HQ: seat returns its id.
+    const id1: types.HqId = @enumFromInt(1);
+    try gs.hqs.put(gs.allocator(), id1, .{ .id = id1, .name = "Home", .tier = .field, .planet_key = "galatea" });
+    try std.testing.expectEqual(id1, gs.seat());
+
+    // A second HQ: seat still returns the first (lowest insertion order).
+    const id2: types.HqId = @enumFromInt(2);
+    try gs.hqs.put(gs.allocator(), id2, .{ .id = id2, .name = "Far", .tier = .field, .planet_key = "galatea" });
+    try std.testing.expectEqual(id1, gs.seat());
+}
+
 test "hiring assigns role-appropriate regular skills" {
     var gs = GameState.init(std.testing.allocator, .{});
     defer gs.deinit();

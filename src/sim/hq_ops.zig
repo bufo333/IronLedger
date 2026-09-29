@@ -2018,6 +2018,18 @@ test "selling an HQ resets a refitting hull instead of leaving it stuck" {
     try std.testing.expectEqual(unit_mod.UnitStatus.ready, u.status);
 }
 
+test "execFoundHq returns the HqId of the newly created HQ" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 93 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
+    const count_before = gs.hqs.count();
+    const r = try commands.execute(&gs, .{ .found_hq = .{ .name = "Far Base", .planet_key = "galatea" } });
+    // The returned id is non-none and keys the new HQ entry.
+    try std.testing.expect(r.created_hq != .none);
+    try std.testing.expectEqual(count_before + 1, gs.hqs.count());
+    try std.testing.expect(gs.hqs.contains(r.created_hq));
+}
+
 test "a failed foundHq leaves state unchanged" {
     const digest = @import("digest.zig");
 

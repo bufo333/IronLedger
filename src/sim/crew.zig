@@ -368,5 +368,9 @@ test "assignments — roles enforced, one seat per pilot, hall hiring" {
     _ = try commands.execute(&gs, .{ .hire_candidate = gs.candidates.items[0].id });
     try std.testing.expectEqual(roster_before + 1, gs.people.count());
     try std.testing.expect(gs.funds <= funds_before);
+    // An unknown CandidateId is refused without changing state (rule 13).
+    const digest = @import("digest.zig");
+    const before_hash = digest.stateHash(&gs);
     try std.testing.expectError(Error.NoSuchCandidate, commands.execute(&gs, .{ .hire_candidate = @as(types.CandidateId, @enumFromInt(99999)) }));
+    try std.testing.expectEqual(before_hash, digest.stateHash(&gs));
 }
