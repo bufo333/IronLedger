@@ -3042,6 +3042,7 @@ pub const App = struct {
         }
     }
 
+    // advance/salvage/transport steps source from board-roll pip constants (contract_market.zig); re-source from contract.zig:181-206 named literals when C13-time-quotes-limits lands.
     /// The negotiation terms in `NegotiableTerm` order (the cursor is the enum value).
     const negotiable_terms = [_][]const u8{
         std.fmt.comptimePrint("advance     {d}% → {d}% of the total up front", .{ q.advance_pct, q.advance_pct * 2 }),
