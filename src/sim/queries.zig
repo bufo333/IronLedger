@@ -4807,7 +4807,8 @@ pub fn crewChoices(alloc: Alloc, gs: *GameState, unit_id: types.UnitId) ![]PickR
         const p = e.value_ptr;
         const slot: crew.Slot = if (p.role == pilot_role) .pilot else if (tech_role != null and p.role == tech_role.?) .tech else continue;
         if (!p.isOnBooks()) continue;
-        const why: []const u8 = crew.assignBlock(gs, u, p) orelse "";
+        const b = crew.assignBlock(gs, u, p);
+        const why: []const u8 = if (b) |x| crew.assignBlockText(x) else "";
         const seat = gs.pilotSeat(p.id);
         const load = if (slot == .tech) maintenance.techLoadHours(gs, p.id) else 0;
         const now: []const u8 = if (slot == .pilot)
@@ -4817,7 +4818,7 @@ pub fn crewChoices(alloc: Alloc, gs: *GameState, unit_id: types.UnitId) ![]PickR
         const skill = p.skill(p.role.primarySkill()) orelse 9;
         const same = gs.companyOf(p.assigned_force) == own and own != .none;
         const name = try std.fmt.allocPrint(alloc, "{s}", .{try personText(alloc, p)});
-        const eligible = why.len == 0;
+        const eligible = b == null;
         const cells: table.Row = if (eligible)
             try table.row(alloc, &.{ try std.fmt.allocPrint(alloc, "{{a}}{s}{{/}}", .{name}), @tagName(p.role), try std.fmt.allocPrint(alloc, "{d}", .{skill}), now, if (!same) (if (gs.companyOf(p.assigned_force) == .none) "{d}(pool){/}" else "{d}(another company){/}") else "" })
         else
@@ -5383,15 +5384,14 @@ pub fn hqRoster(alloc: Alloc, gs: *GameState, hq_id: types.HqId) ![]const []cons
 pub fn medbay(alloc: Alloc, gs: *GameState) ![]const []const u8 {
     const medical = @import("medical.zig");
     var out: std.ArrayListUnmanaged([]const u8) = .empty;
-    var doctors: u32 = 0;
+    const ms = medical.medicalStaff(gs);
     var wounded: u32 = 0;
     var pit = gs.people.iterator();
     while (pit.next()) |entry| {
-        if (entry.value_ptr.status == .active and entry.value_ptr.role == .doctor) doctors += 1;
         if (entry.value_ptr.status == .wounded) wounded += 1;
     }
-    try out.append(alloc, try std.fmt.allocPrint(alloc, "medbay: {d} patients | {d} beds at home | {d} doctors (cover {d})", .{
-        wounded, medical.bedCapacity(gs, .none, false), doctors, doctors * @import("../domain/tuning.zig").t.medical.patients_per_doctor,
+    try out.append(alloc, try std.fmt.allocPrint(alloc, "medbay: {d} patients | {d} beds at home | {d} doctors, {d} medics (cover {d})", .{
+        wounded, medical.bedCapacity(gs, .none, false), ms.doctors, ms.medics, medical.medbayCover(gs),
     }));
     var pit2 = gs.people.iterator();
     while (pit2.next()) |entry| {

@@ -390,29 +390,9 @@ pub const GameState = struct {
             .role = role,
             .recruited_day = self.clock.day_index,
         };
-        switch (role) {
-            .mekwarrior => {
-                try p.skills.put(alloc, .gunnery_mek, 4);
-                try p.skills.put(alloc, .piloting_mek, 5);
-            },
-            .vehicle_crew => {
-                try p.skills.put(alloc, .gunnery_vee, 4);
-                try p.skills.put(alloc, .driving_vee, 5);
-            },
-            .aero_pilot => {
-                try p.skills.put(alloc, .gunnery_aero, 4);
-                try p.skills.put(alloc, .piloting_aero, 5);
-            },
-            .tech_mek, .tech_ba => try p.skills.put(alloc, .tech_mek, 4),
-            .tech_mechanic => try p.skills.put(alloc, .tech_mechanic, 4),
-            .tech_aero => try p.skills.put(alloc, .tech_aero, 4),
-            .astech => try p.skills.put(alloc, .astech, 4),
-            .doctor => try p.skills.put(alloc, .doctor, 4),
-            .medic => try p.skills.put(alloc, .medtech, 4),
-            .admin_command, .admin_logistics, .admin_transport, .admin_hr, .admin_finance => try p.skills.put(alloc, .admin, 4),
-            .ba_trooper, .infantry => try p.skills.put(alloc, .small_arms, 4),
-            .dropship_crew, .jumpship_crew => {},
-        }
+        const s = role.skillSlots();
+        if (s.primary) |k| try p.skills.put(alloc, k, 4);
+        if (s.secondary) |k| try p.skills.put(alloc, k, 5);
         return self.commitPerson(p);
     }
 

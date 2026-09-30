@@ -47,29 +47,9 @@ pub fn hireFromSpec(gs: *GameState, spec: person_gen.GeneratedPerson) !types.Per
     p.setBirthdayFromAge(gs.clock.day_index, spec.age);
 
     // Set the generated experience band.
-    switch (role) {
-        .mekwarrior => {
-            try p.skills.put(alloc, .gunnery_mek, spec.primary_skill);
-            try p.skills.put(alloc, .piloting_mek, spec.secondary_skill);
-        },
-        .vehicle_crew => {
-            try p.skills.put(alloc, .gunnery_vee, spec.primary_skill);
-            try p.skills.put(alloc, .driving_vee, spec.secondary_skill);
-        },
-        .aero_pilot => {
-            try p.skills.put(alloc, .gunnery_aero, spec.primary_skill);
-            try p.skills.put(alloc, .piloting_aero, spec.secondary_skill);
-        },
-        .ba_trooper, .infantry => try p.skills.put(alloc, .small_arms, spec.primary_skill),
-        .tech_mek, .tech_ba => try p.skills.put(alloc, .tech_mek, spec.primary_skill),
-        .tech_mechanic => try p.skills.put(alloc, .tech_mechanic, spec.primary_skill),
-        .tech_aero => try p.skills.put(alloc, .tech_aero, spec.primary_skill),
-        .astech => try p.skills.put(alloc, .astech, spec.primary_skill),
-        .doctor => try p.skills.put(alloc, .doctor, spec.primary_skill),
-        .medic => try p.skills.put(alloc, .medtech, spec.primary_skill),
-        .admin_command, .admin_logistics, .admin_transport, .admin_hr, .admin_finance => try p.skills.put(alloc, .admin, spec.primary_skill),
-        .dropship_crew, .jumpship_crew => {},
-    }
+    const s = role.skillSlots();
+    if (s.primary) |k| try p.skills.put(alloc, k, spec.primary_skill);
+    if (s.secondary) |k| try p.skills.put(alloc, k, spec.secondary_skill);
     return gs.commitPerson(p);
 }
 
@@ -808,4 +788,51 @@ test "posting a pilot clears their unit seat; an ineligible post changes nothing
     try std.testing.expectError(error.UnknownPerson, postToHq(&gs, bad_pid, hq));
     try std.testing.expectEqual(hq_funds_before, gs.hqs.getPtr(hq).?.funds);
     try std.testing.expectEqual(people_before, gs.people.count());
+}
+
+test "hirePerson and hireFromSpec seed identical skill keys that equal Role.skillSlots() (C11f write-path agreement)" {
+    const inline_roles = std.meta.fields(person_mod.Role);
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 20001 });
+    defer gs.deinit();
+
+    inline for (inline_roles) |rf| {
+        const role: person_mod.Role = @enumFromInt(rf.value);
+        const slots = role.skillSlots();
+
+        // hirePerson: skills seeded with fixed levels (4/5).
+        const direct_id = try gs.hirePerson("Direct", "Test", role);
+
+        // hireFromSpec: skills seeded from generated values.
+        const spec = person_gen.generate(&gs.rng, rng_mod.Stream.market, role);
+        const spec_id = try hireFromSpec(&gs, spec);
+
+        // Look up both persons after all hires (avoid dangling pointers).
+        const primary_key = slots.primary;
+        const secondary_key = slots.secondary;
+
+        if (primary_key) |k| {
+            try std.testing.expect(gs.person(direct_id).?.skill(k) != null);
+            try std.testing.expect(gs.person(spec_id).?.skill(k) != null);
+        } else {
+            try std.testing.expectEqual(@as(usize, 0), gs.person(direct_id).?.skills.count());
+            try std.testing.expectEqual(@as(usize, 0), gs.person(spec_id).?.skills.count());
+        }
+        if (secondary_key) |k| {
+            try std.testing.expect(gs.person(direct_id).?.skill(k) != null);
+            try std.testing.expect(gs.person(spec_id).?.skill(k) != null);
+        }
+        // No extra skills beyond the slots.
+        const expected_count: usize = @as(usize, @intFromBool(primary_key != null)) + @as(usize, @intFromBool(secondary_key != null));
+        try std.testing.expectEqual(expected_count, gs.person(direct_id).?.skills.count());
+        try std.testing.expectEqual(expected_count, gs.person(spec_id).?.skills.count());
+    }
+}
+
+test "readinessPenalty scores a company's readiness; lower is readier (C17a4)" {
+    const ready: CrewStats = .{ .heads = 4, .spent = 0, .wounded = 0, .avg_fatigue = 0, .avg_morale = 60 };
+    const tired: CrewStats = .{ .heads = 4, .spent = 2, .wounded = 1, .avg_fatigue = 40, .avg_morale = 20 };
+    try std.testing.expect(readinessPenalty(ready, 0, 0) < readinessPenalty(tired, 2, 30));
+    // Depot hulls and transit days add penalty.
+    try std.testing.expect(readinessPenalty(ready, 1, 0) > readinessPenalty(ready, 0, 0));
+    try std.testing.expect(readinessPenalty(ready, 0, 100) > readinessPenalty(ready, 0, 0));
 }

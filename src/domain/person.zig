@@ -75,6 +75,28 @@ pub const Role = enum {
         };
     }
 
+    /// The skill slots a role is seeded with at hire time: a primary and an
+    /// optional secondary. `dropship_crew` and `jumpship_crew` get no skills
+    /// at hire even though `primarySkill()` returns `.piloting_aero` for them —
+    /// that is a selection rule, not a seed rule (C11f write-path owner).
+    pub const SkillSlots = struct { primary: ?types.SkillType, secondary: ?types.SkillType };
+    pub fn skillSlots(self: Role) SkillSlots {
+        return switch (self) {
+            .mekwarrior => .{ .primary = .gunnery_mek, .secondary = .piloting_mek },
+            .vehicle_crew => .{ .primary = .gunnery_vee, .secondary = .driving_vee },
+            .aero_pilot => .{ .primary = .gunnery_aero, .secondary = .piloting_aero },
+            .ba_trooper, .infantry => .{ .primary = .small_arms, .secondary = null },
+            .tech_mek, .tech_ba => .{ .primary = .tech_mek, .secondary = null },
+            .tech_mechanic => .{ .primary = .tech_mechanic, .secondary = null },
+            .tech_aero => .{ .primary = .tech_aero, .secondary = null },
+            .astech => .{ .primary = .astech, .secondary = null },
+            .doctor => .{ .primary = .doctor, .secondary = null },
+            .medic => .{ .primary = .medtech, .secondary = null },
+            .admin_command, .admin_logistics, .admin_transport, .admin_hr, .admin_finance => .{ .primary = .admin, .secondary = null },
+            .dropship_crew, .jumpship_crew => .{ .primary = null, .secondary = null },
+        };
+    }
+
     pub fn isAdmin(self: Role) bool {
         return switch (self) {
             .admin_command, .admin_logistics, .admin_transport, .admin_hr, .admin_finance => true,

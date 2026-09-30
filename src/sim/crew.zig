@@ -32,11 +32,26 @@ pub fn isUnassigned(gs: *GameState, p: *const person_mod.Person) bool {
     return true;
 }
 
+/// Typed reason why a person cannot take a seat or tech slot on a hull
+/// today (C11v owner). The one answer `assignSlot` refuses with and the
+/// picker dims with.
+pub const AssignBlock = enum { wounded, unavailable, away };
+
+/// The display text for a block reason: the single site that owns the
+/// string so `crewChoices` and any future viewer call the same words.
+pub fn assignBlockText(b: AssignBlock) []const u8 {
+    return switch (b) {
+        .wounded => "wounded",
+        .unavailable => "unavailable",
+        .away => "away with their company",
+    };
+}
+
 /// Why a person cannot take a seat or tech slot on a hull today, or
 /// null: the one answer `assignSlot` refuses with and the picker dims with.
-pub fn assignBlock(gs: *GameState, u: *const unit_mod.Unit, p: *const person_mod.Person) ?[]const u8 {
-    if (!p.isAvailable(gs.clock.day_index)) return if (p.status == .wounded) "wounded" else "unavailable";
-    if (u.force == .none and !canReachPool(gs, p)) return "away with their company";
+pub fn assignBlock(gs: *GameState, u: *const unit_mod.Unit, p: *const person_mod.Person) ?AssignBlock {
+    if (!p.isAvailable(gs.clock.day_index)) return if (p.status == .wounded) .wounded else .unavailable;
+    if (u.force == .none and !canReachPool(gs, p)) return .away;
     return null;
 }
 
@@ -59,7 +74,10 @@ pub const AssignSlotError = error{ UnknownUnit, UnknownPerson, WrongRole, Unavai
 pub fn assignSlot(gs: *GameState, unit_id: types.UnitId, slot: Slot, person_id: types.PersonId) AssignSlotError!void {
     const u = gs.unit(unit_id) orelse return error.UnknownUnit;
     const p = gs.person(person_id) orelse return error.UnknownPerson;
-    if (assignBlock(gs, u, p)) |why| return if (std.mem.eql(u8, why, "away with their company")) error.PersonAway else error.Unavailable;
+    if (assignBlock(gs, u, p)) |b| return switch (b) {
+        .away => error.PersonAway,
+        else => error.Unavailable,
+    };
     const resolved: Slot = if (slot != .any) slot else if (p.role == unit_mod.crewRoleFor(u.kind)) .pilot else if (unit_mod.techRoleFor(u.kind) == p.role) .tech else return error.WrongRole;
     switch (resolved) {
         .any => unreachable,
@@ -255,14 +273,14 @@ test "assignBlock's reason matches crewChoices' dim and the assign command's ref
     gs.person(wounded).?.assigned_force = company_id;
     gs.person(wounded).?.status = .wounded;
     const wounded_p = gs.person(wounded).?;
-    const wounded_reason = assignBlock(&gs, u, wounded_p) orelse return error.TestExpectedEqual;
-    try std.testing.expectEqualStrings("wounded", wounded_reason);
+    const wounded_block = assignBlock(&gs, u, wounded_p) orelse return error.TestExpectedEqual;
+    try std.testing.expectEqualStrings("wounded", assignBlockText(wounded_block));
     const wounded_rows = try queries.crewChoices(al, &gs, mek);
     var wounded_row_why: ?[]const u8 = null;
     for (wounded_rows) |r| {
         if (r.sel == .person and r.sel.person == wounded) wounded_row_why = r.why;
     }
-    try std.testing.expectEqualStrings(wounded_reason, wounded_row_why orelse return error.TestExpectedEqual);
+    try std.testing.expectEqualStrings(assignBlockText(wounded_block), wounded_row_why orelse return error.TestExpectedEqual);
     try std.testing.expectError(commands.Error.Unavailable, commands.execute(&gs, .{ .assign = .{ .unit = mek, .slot = .pilot, .person = wounded } }));
 
     // An unassigned pool hull (force == .none), and a pilot whose own
@@ -278,14 +296,14 @@ test "assignBlock's reason matches crewChoices' dim and the assign command's ref
     const pool_u = gs.unit(pool_mek).?;
     try std.testing.expect(pool_u.force == .none);
     const away_p = gs.person(away_pilot).?;
-    const away_reason = assignBlock(&gs, pool_u, away_p) orelse return error.TestExpectedEqual;
-    try std.testing.expectEqualStrings("away with their company", away_reason);
+    const away_block = assignBlock(&gs, pool_u, away_p) orelse return error.TestExpectedEqual;
+    try std.testing.expectEqualStrings("away with their company", assignBlockText(away_block));
     const away_rows = try queries.crewChoices(al, &gs, pool_mek);
     var away_row_why: ?[]const u8 = null;
     for (away_rows) |r| {
         if (r.sel.person == away_pilot) away_row_why = r.why;
     }
-    try std.testing.expectEqualStrings(away_reason, away_row_why orelse return error.TestExpectedEqual);
+    try std.testing.expectEqualStrings(assignBlockText(away_block), away_row_why orelse return error.TestExpectedEqual);
     try std.testing.expectError(commands.Error.PersonAway, commands.execute(&gs, .{ .assign = .{ .unit = pool_mek, .slot = .pilot, .person = away_pilot } }));
 }
 

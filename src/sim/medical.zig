@@ -125,19 +125,14 @@ pub fn healDays(gs: *GameState, care: Care) u32 {
     const m = tuning.medical;
     var days: u32 = m.heal_base_days + gs.rng.roll2d6(.medical);
 
-    // Doctor coverage: 1 doctor per 25 patients (MekHQ ratio); medics
-    // each carry a few patients of their own.
-    var doctors: u32 = 0;
-    var medics: u32 = 0;
+    // Doctor/medic coverage (MekHQ ratio): understaffed when wounded exceed the
+    // combined cover; both roles counted through the single owner (C11c).
     var wounded: u32 = 0;
     var it = gs.people.iterator();
     while (it.next()) |entry| {
-        const p = entry.value_ptr;
-        if (p.status == .active and p.role == .doctor) doctors += 1;
-        if (p.status == .active and p.role == .medic) medics += 1;
-        if (p.status == .wounded) wounded += 1;
+        if (entry.value_ptr.status == .wounded) wounded += 1;
     }
-    if (wounded > doctors * m.patients_per_doctor + medics * m.patients_per_medic) days = @intCast(types.applyBp(days, m.understaffed_bp)); // understaffed infirmary
+    if (wounded > medbayCover(gs)) days = @intCast(types.applyBp(days, m.understaffed_bp)); // understaffed infirmary
 
     if (care == .field_mash) days = @intCast(types.applyBp(days, m.mash_bp)); // MASH lance forward surgery
     // Home hospital: any hospital in the outfit shortens the stay.
@@ -166,7 +161,7 @@ pub fn bedCapacity(gs: *GameState, company: types.ForceId, deployed: bool) u32 {
         // per two medics.
         var medics: u32 = 0;
         var pit = gs.people.iterator();
-        while (pit.next()) |e| if (e.value_ptr.status == .active and e.value_ptr.role == .medic and gs.companyOf(e.value_ptr.assigned_force) == company) {
+        while (pit.next()) |e| if (isActiveMedic(e.value_ptr) and gs.companyOf(e.value_ptr.assigned_force) == company) {
             medics += 1;
         };
         return beds + (if (beds > 0) @min(medics, beds) else medics / 2);
@@ -175,6 +170,37 @@ pub fn bedCapacity(gs: *GameState, company: types.ForceId, deployed: bool) u32 {
     var hqit = gs.hqs.iterator();
     while (hqit.next()) |entry| best = @max(best, @as(u32, entry.value_ptr.effectiveFacilityLevel(.hospital)) * tuning.medical.beds_per_hospital_level);
     return best;
+}
+
+/// Active doctor predicate: outfit-wide medical-staff counting owner (C11y/C11l).
+pub fn isActiveDoctor(p: *const person_mod.Person) bool {
+    return p.status == .active and p.role == .doctor;
+}
+
+/// Active medic predicate: outfit-wide medical-staff counting owner (C11y/C11l).
+pub fn isActiveMedic(p: *const person_mod.Person) bool {
+    return p.status == .active and p.role == .medic;
+}
+
+/// Outfit-wide medical staff count: one pass using the predicates.
+pub const MedicalStaff = struct { doctors: u32, medics: u32 };
+pub fn medicalStaff(gs: *GameState) MedicalStaff {
+    var st: MedicalStaff = .{ .doctors = 0, .medics = 0 };
+    var it = gs.people.iterator();
+    while (it.next()) |entry| {
+        const p = entry.value_ptr;
+        if (isActiveDoctor(p)) st.doctors += 1;
+        if (isActiveMedic(p)) st.medics += 1;
+    }
+    return st;
+}
+
+/// How many patients the outfit's active medical staff can cover:
+/// doctors × patients_per_doctor + medics × patients_per_medic (C11c owner).
+pub fn medbayCover(gs: *GameState) u32 {
+    const m = tuning.medical;
+    const st = medicalStaff(gs);
+    return st.doctors * m.patients_per_doctor + st.medics * m.patients_per_medic;
 }
 
 /// medical phase, daily: triage new wounds, discharge the healed, and —
@@ -1206,4 +1232,77 @@ test "train co:N enrols the whole home company at their trades, and says who it 
     const cid: types.ContractId = @enumFromInt(903);
     try gs.contracts.put(gs.allocator(), cid, .{ .id = cid, .kind = .garrison_duty, .employer_key = "LC", .enemy_key = "PER", .planet_key = gs.hqs.values()[0].planet_key, .status = .active, .assigned_company = co, .terms = .{ .length_months = 12, .base_pay_month = 100_000 } });
     try std.testing.expectError(commands.Error.CompanyDeployed, commands.execute(&gs, .{ .train_company = .{ .company = co } }));
+}
+
+test "medbayCover counts doctors and medics through one owner; the medbay display agrees (C11c/C11y/C11l, C17b3)" {
+    const queries = @import("queries.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 10001 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
+
+    // No staff: zero cover.
+    try std.testing.expectEqual(@as(u32, 0), medbayCover(&gs));
+
+    // Adding a medic raises cover by patients_per_medic.
+    const medic_id = try gs.hirePerson("M", "Edic", .medic);
+    _ = medic_id;
+    const m = tuning.medical;
+    try std.testing.expectEqual(@as(u32, m.patients_per_medic), medbayCover(&gs));
+
+    // Adding a doctor raises cover by patients_per_doctor.
+    _ = try gs.hirePerson("D", "Octor", .doctor);
+    const expected_cover = m.patients_per_medic + m.patients_per_doctor;
+    try std.testing.expectEqual(@as(u32, expected_cover), medbayCover(&gs));
+
+    // The medbay header line displays the same cover figure (display agrees).
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const lines = try queries.medbay(arena.allocator(), &gs);
+    const header = lines[0];
+    const marker = "(cover ";
+    const pos = std.mem.indexOf(u8, header, marker) orelse return error.TestExpectedEqual;
+    const after = header[pos + marker.len ..];
+    const end = std.mem.indexOfScalar(u8, after, ')') orelse return error.TestExpectedEqual;
+    const parsed = try std.fmt.parseInt(u32, after[0..end], 10);
+    try std.testing.expectEqual(expected_cover, parsed);
+}
+
+test "careFor names the care level for each posture (C17a2)" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 10002 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
+    const co = try gs.createForce("Alpha", .company, .none);
+    const id = try gs.hirePerson("A", "B", .mekwarrior);
+    gs.person(id).?.assigned_force = co;
+    const p = gs.person(id).?;
+    // At home: home care.
+    try std.testing.expectEqual(Care.home, careFor(&gs, p));
+    // Deployed without a MASH truck: field care.
+    try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
+        .id = @enumFromInt(1),
+        .kind = .recon_raid,
+        .employer_key = "LC",
+        .enemy_key = "PER",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 3, .base_pay_month = 100_000 },
+        .status = .active,
+        .assigned_company = co,
+    });
+    try std.testing.expectEqual(Care.field, careFor(&gs, p));
+}
+
+test "turnoverRisk is zero under a year's tenure; restless flags raise it (C17a2)" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 10003 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
+    const id = try gs.hirePerson("A", "B", .mekwarrior);
+    gs.person(id).?.recruited_day = 0;
+    // Under a year: no roll regardless of morale.
+    gs.clock.day_index = 200;
+    gs.person(id).?.morale = 0;
+    gs.person(id).?.fatigue = 100;
+    try std.testing.expectEqual(@as(u8, 0), turnoverRisk(gs.person(id).?, gs.clock.day_index));
+    // Over a year: restless flags register.
+    gs.clock.day_index = 400;
+    try std.testing.expect(turnoverRisk(gs.person(id).?, gs.clock.day_index) > 0);
 }
