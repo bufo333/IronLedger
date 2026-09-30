@@ -93,6 +93,41 @@ pub fn parseTreasury(tok: []const u8) ParseError!Treasury {
     };
 }
 
+/// Strict parser for the REPL's `log` view-verb filter (rule 10): one optional
+/// token consumed, an unknown category refused, a leftover token refused.
+/// Folds the `parseTreasury` mapping the REPL loops used inline.
+pub fn parseLogFilter(tokens: *std.mem.TokenIterator(u8, .scalar)) ParseError!game.state.LogFilter {
+    const tok = tokens.next() orelse return .all;
+    const filter: game.state.LogFilter = if (std.meta.stringToEnum(game.state.LogCategory, tok)) |cat|
+        .{ .category = cat }
+    else if (std.mem.startsWith(u8, tok, "contract:")) blk: {
+        const cid = std.fmt.parseInt(u32, tok[9..], 10) catch return error.BadArguments;
+        break :blk .{ .contract = @enumFromInt(cid) };
+    } else blk: {
+        const t = try parseTreasury(tok);
+        break :blk switch (t) {
+            .company => |id| .{ .company = id },
+            .hq => |id| .{ .hq = id },
+            .outfit => .all,
+        };
+    };
+    if (tokens.next() != null) return error.BadArguments;
+    return filter;
+}
+
+/// Strict parser for the REPL's `ledger`/`pnl` view-verb filter (rule 10):
+/// one optional treasury token, leftover tokens refused.
+pub fn parseEntityFilter(tokens: *std.mem.TokenIterator(u8, .scalar)) ParseError!game.finance.EntityFilter {
+    const tok = tokens.next() orelse return .all;
+    const filter: game.finance.EntityFilter = switch (try parseTreasury(tok)) {
+        .company => |id| .{ .company = id },
+        .hq => |id| .{ .hq = id },
+        .outfit => .all,
+    };
+    if (tokens.next() != null) return error.BadArguments;
+    return filter;
+}
+
 pub fn num(comptime T: type, tok: ?[]const u8) ParseError!T {
     return std.fmt.parseInt(T, tok orelse return error.BadArguments, 10) catch return error.BadNumber;
 }
@@ -504,9 +539,8 @@ fn parseVerb(verb: []const u8, tokens: *std.mem.TokenIterator(u8, .scalar)) Pars
     return null;
 }
 
-/// What both frontends say when a black-market hull purchase is a fraud:
-/// the money is gone and no hull exists.
-pub const hull_fraud_text = "the black-market fence vanished with the money — no hull";
+/// Re-exported from commands.hull_fraud_text (rule 24 — one string, one owner).
+pub const hull_fraud_text = game.commands.hull_fraud_text;
 
 pub fn errorText(err: anyerror) []const u8 {
     return switch (err) {
@@ -624,6 +658,9 @@ pub fn errorText(err: anyerror) []const u8 {
         error.NoBerth => "no free berth at that HQ — spaceport levels add dropship berths; a jumpship berth needs spaceport 4 and comms 3",
         error.NoJumpship => "a dedicated line (level 3) needs a crewed jumpship berthed at one end",
         error.WrongHullKind => "fighters fly in air lances, meks walk in line lances, and ships hold berths",
+        error.NoOneInRole => "no one in that role to release",
+        error.StapleOffBoard => "that staple line isn't on the home board right now — it restocks as the board refreshes",
+        error.AlreadyPosted => "already posted to that HQ",
         else => "an unexpected internal error",
     };
 }
@@ -637,25 +674,6 @@ pub fn advanceStopText(stopped: @FieldType(game.commands.Result, "stopped")) []c
         .insolvent => errorText(error.Insolvent),
         .bankrupt => errorText(error.Bankrupt),
     };
-}
-
-/// The words the `:` line completes after a verb: sites, roles, skills,
-/// facilities, part and world keys.
-pub fn completionPool(alloc: std.mem.Allocator, gs: *game.state.GameState) ![]const []const u8 {
-    var pool: std.ArrayListUnmanaged([]const u8) = .empty;
-    try pool.append(alloc, "outfit");
-    try pool.append(alloc, "pilot");
-    try pool.append(alloc, "tech");
-    var hit = gs.hqs.iterator();
-    while (hit.next()) |e| try pool.append(alloc, try std.fmt.allocPrint(alloc, "hq:{d}", .{@intFromEnum(e.value_ptr.id)}));
-    var fit = gs.forces.iterator();
-    while (fit.next()) |e| if (e.value_ptr.echelon == .company) try pool.append(alloc, try std.fmt.allocPrint(alloc, "co:{d}", .{@intFromEnum(e.value_ptr.id)}));
-    inline for (@typeInfo(game.hq.FacilityKind).@"enum".fields) |f| try pool.append(alloc, f.name);
-    inline for (@typeInfo(person_mod.Role).@"enum".fields) |f| try pool.append(alloc, f.name);
-    inline for (@typeInfo(types.SkillType).@"enum".fields) |f| try pool.append(alloc, f.name);
-    for (game.part.catalog) |p| try pool.append(alloc, p.key);
-    for (game.planet.catalog) |p| try pool.append(alloc, p.key);
-    return pool.toOwnedSlice(alloc);
 }
 
 pub const verbs = [_][]const u8{
@@ -973,4 +991,34 @@ test "every command refusal and parse error has a sentence, never an error name"
     inline for (@typeInfo(ParseError).error_set.?) |e| {
         try std.testing.expect(!std.mem.eql(u8, errorText(@field(anyerror, e.name)), "an unexpected internal error"));
     }
+}
+
+test "parseLogFilter: valid category accepted, unknown refused, trailing token refused" {
+    const t = std.testing;
+    const parse = struct {
+        fn f(line: []const u8) ParseError!game.state.LogFilter {
+            var it = std.mem.tokenizeScalar(u8, line, ' ');
+            return parseLogFilter(&it);
+        }
+    }.f;
+    try t.expect(std.meta.activeTag(try parse("")) == .all);
+    try t.expectEqual(game.state.LogCategory.battle, (try parse("battle")).category);
+    try t.expectError(error.BadSite, parse("frobnicate"));
+    try t.expectError(error.BadArguments, parse("battle extra"));
+    try t.expectEqual(game.state.LogCategory.finance, (try parse("finance")).category);
+}
+
+test "parseEntityFilter: valid treasury accepted, unknown refused, trailing token refused" {
+    const t = std.testing;
+    const parse = struct {
+        fn f(line: []const u8) ParseError!game.finance.EntityFilter {
+            var it = std.mem.tokenizeScalar(u8, line, ' ');
+            return parseEntityFilter(&it);
+        }
+    }.f;
+    try t.expect(std.meta.activeTag(try parse("")) == .all);
+    try t.expectError(error.BadSite, parse("junk"));
+    try t.expectError(error.BadArguments, parse("outfit extra"));
+    try t.expect(std.meta.activeTag(try parse("outfit")) == .all);
+    try t.expectEqual(@as(u32, 1), @intFromEnum((try parse("hq:1")).hq));
 }

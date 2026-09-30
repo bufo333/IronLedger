@@ -702,17 +702,17 @@ pub fn execNegotiate(gs: *GameState, n: @FieldType(Command, "negotiate")) Error!
 pub fn execBuyListing(gs: *GameState, lid: @FieldType(Command, "buy_listing")) Error!Result {
     const index = findListing(gs, lid) orelse return Error.NoSuchListing;
     const res = buyListing(gs, index) catch |err| return @errorCast(err);
-    return .{ .unit = res.unit };
+    return .{ .unit = res.unit, .fraud = res.fraud };
 }
 
 pub fn execBuyHullFor(gs: *GameState, b: @FieldType(Command, "buy_hull_for")) Error!Result {
     const res = buyHullFor(gs, b.listing, b.company, b.lance) catch |err| return @errorCast(err);
-    return .{ .unit = res.unit, .eta_days = res.eta_days };
+    return .{ .unit = res.unit, .eta_days = res.eta_days, .fraud = res.fraud };
 }
 
 pub fn execBuySupportHull(gs: *GameState, b: @FieldType(Command, "buy_support_hull")) Error!Result {
     const res = buySupportHull(gs, b.company, b.kind) catch |err| return @errorCast(err);
-    return .{ .unit = res.unit, .eta_days = res.eta_days };
+    return .{ .unit = res.unit, .eta_days = res.eta_days, .fraud = res.fraud };
 }
 
 pub fn execHireCandidate(gs: *GameState, cid: @FieldType(Command, "hire_candidate")) Error!Result {
@@ -1045,6 +1045,9 @@ pub fn negotiate(gs: *GameState, offer_index: usize, term: contract.NegotiableTe
 pub const BuyResult = struct {
     unit: types.UnitId = .none,
     eta_days: u32 = 0,
+    /// The black-market fence took the money; no unit/stock resulted (rule 33).
+    /// Ephemeral — not persisted, not in the digest (rule 45).
+    fraud: bool = false,
 };
 
 /// Buy a listing off the market board.
@@ -1107,7 +1110,7 @@ pub fn buyListing(gs: *GameState, index: usize) !BuyResult {
         if (roll <= bm.black_market_fraud_target) {
             const now = if (!std.mem.eql(u8, world_faction, "PER")) try gs.adjustStanding(world_faction, -bm.black_market_standing_loss) else 0;
             try gs.log(.market, .{ .hq = hq_id }, "[black market] the fence vanished with {d} c-bills — no {s} (2d6 = {d}); {s} standing −{d} → {d}", .{ price, listing.item_key, roll, world_faction, bm.black_market_standing_loss, now });
-            return .{};
+            return .{ .fraud = true };
         }
         const house_now = if (!std.mem.eql(u8, world_faction, "PER")) try gs.adjustStanding(world_faction, -1) else 0;
         const pirate_now = try gs.adjustStanding("PER", 1);
@@ -1160,7 +1163,7 @@ pub fn buyHullFor(gs: *GameState, listing: usize, company: types.ForceId, lance:
     // nothing to place.
     const buy_res = try buyListing(gs, listing);
     const uid = buy_res.unit;
-    if (uid == .none) return .{};
+    if (uid == .none) return .{ .fraud = buy_res.fraud };
     const home = gs.homeHqFor(company);
     const from = if (gs.hqs.getPtr(board_hq)) |h| planet.find(h.planet_key) else null;
     const to = if (gs.hqs.getPtr(home)) |h| planet.find(h.planet_key) else null;
@@ -1188,7 +1191,7 @@ pub fn buySupportHull(gs: *GameState, company: types.ForceId, kind: force_mod.Su
     for (gs.market_listings.items, 0..) |li, i| if (li.kind == .unit and li.staple and li.hq == home and std.mem.eql(u8, li.item_key, key)) {
         idx = i;
     };
-    const listing = idx orelse return error.NoSuchListing;
+    const listing = idx orelse return error.StapleOffBoard;
     const sl: types.ForceId = if (toe.supportLance(gs, company, kind)) |sl2| sl2.id else .none;
     return buyHullFor(gs, listing, company, sl);
 }
@@ -1294,18 +1297,31 @@ test "a black-market buy is a fraud or a sale, and the house notices either way"
         gs.next_listing_id += 1;
         const before = gs.stockCount(.{ .hq = hq }, "ppc");
         const funds = gs.hqs.getPtr(hq).?.funds;
-        _ = try commands.execute(&gs, .{ .buy_listing = new_lid });
+        const res = try commands.execute(&gs, .{ .buy_listing = new_lid });
         try std.testing.expectEqual(funds - 600_000, gs.hqs.getPtr(hq).?.funds); // paid either way
         try std.testing.expectEqual(len_before, gs.market_listings.items.len); // the offer is gone either way
         if (gs.stockCount(.{ .hq = hq }, "ppc") == before) {
             fraud = true;
+            // Result.fraud must be set so frontends can report it truthfully (rule 34).
+            try std.testing.expect(res.fraud);
             try std.testing.expect(gs.standing(faction) < standing_before);
         } else {
             sale = true;
+            try std.testing.expect(!res.fraud);
             try std.testing.expect(gs.standing("PER") > pirates_before);
         }
     }
     try std.testing.expect(fraud and sale);
+}
+
+test "buySupportHull returns StapleOffBoard when the staple line is off the board" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 7 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    const co = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
+    // Strip the market so no MASH hull is listed — the staple is off the board.
+    gs.market_listings.clearAndFree(gs.allocator());
+    try std.testing.expectError(commands.Error.StapleOffBoard, commands.execute(&gs, .{ .buy_support_hull = .{ .company = co, .kind = .mash } }));
 }
 
 test "a defrauded black-market hull purchase moves no hull the outfit already owns" {

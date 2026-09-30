@@ -1208,7 +1208,7 @@ pub fn ledger(alloc: Alloc, gs: *GameState, selected: state_mod.Treasury, period
         const t = &txns[i];
         if (!filter.matches(t)) continue;
         const mk: []const u8 = if (t.amount < 0) "" else "{g}";
-        try led.append(alloc, try table.row(alloc, &.{ try std.fmt.allocPrint(alloc, "d{d}", .{t.day}), @tagName(t.category), try std.fmt.allocPrint(alloc, "{s}{s}{{/}}", .{ mk, try money(alloc, t.amount) }), t.note }));
+        try led.append(alloc, try table.row(alloc, &.{ try std.fmt.allocPrint(alloc, "d{d}", .{t.day}), @tagName(t.category), try std.fmt.allocPrint(alloc, "{s}{s}{{/}}", .{ mk, try money(alloc, t.amount) }), try table.plain(alloc, t.note) }));
     }
 
     return .{
@@ -5786,7 +5786,7 @@ pub fn ledgerLines(alloc: Alloc, gs: *GameState, filter: finance.EntityFilter, n
         i -= 1;
         const t = &txns[i];
         if (!filter.matches(t)) continue;
-        try out.append(alloc, try std.fmt.allocPrint(alloc, "day {d: >4}  {s: <18} {s: >12}  {s}", .{ t.day, @tagName(t.category), try money(alloc, t.amount), t.note }));
+        try out.append(alloc, try std.fmt.allocPrint(alloc, "day {d: >4}  {s: <18} {s: >12}  {s}", .{ t.day, @tagName(t.category), try money(alloc, t.amount), try table.plain(alloc, t.note) }));
     }
     return out.toOwnedSlice(alloc);
 }
@@ -6313,6 +6313,181 @@ pub fn worldDetail(alloc: Alloc, gs: *GameState, view: *const Map, w: *const Wor
     if (offers.len == 0) try rows.append(alloc, "  {d}none{/}");
     for (offers) |o| try rows.append(alloc, try std.fmt.allocPrint(alloc, "  {s}", .{o}));
     return rows.toOwnedSlice(alloc);
+}
+
+/// The words the `:` line completes after a verb: sites, roles, skills,
+/// facilities, part and world keys (rule 31 — pure allocator-parameterised query).
+pub fn completionCandidates(alloc: Alloc, gs: *GameState) ![]const []const u8 {
+    const hq_dom = @import("../domain/hq.zig");
+    const part_dom = @import("../domain/part.zig");
+    var pool: std.ArrayListUnmanaged([]const u8) = .empty;
+    try pool.append(alloc, "outfit");
+    try pool.append(alloc, "pilot");
+    try pool.append(alloc, "tech");
+    var hit = gs.hqs.iterator();
+    while (hit.next()) |e| try pool.append(alloc, try std.fmt.allocPrint(alloc, "hq:{d}", .{@intFromEnum(e.value_ptr.id)}));
+    var fit = gs.forces.iterator();
+    while (fit.next()) |e| if (e.value_ptr.echelon == .company) try pool.append(alloc, try std.fmt.allocPrint(alloc, "co:{d}", .{@intFromEnum(e.value_ptr.id)}));
+    inline for (@typeInfo(hq_dom.FacilityKind).@"enum".fields) |f| try pool.append(alloc, f.name);
+    inline for (@typeInfo(person_mod.Role).@"enum".fields) |f| try pool.append(alloc, f.name);
+    inline for (@typeInfo(types.SkillType).@"enum".fields) |f| try pool.append(alloc, f.name);
+    for (part_dom.catalog) |p| try pool.append(alloc, p.key);
+    for (planet_mod.catalog) |p| try pool.append(alloc, p.key);
+    return pool.toOwnedSlice(alloc);
+}
+
+/// The rolling P&L window in days (rule 24 — one named owner for the literal).
+pub const pnl_window_days: u32 = 31;
+
+/// P&L for the default rolling window ending at the current day (rule 30).
+pub fn pnlDefault(alloc: Alloc, gs: *GameState, filter: finance.EntityFilter) ![]const []const u8 {
+    const to_day = gs.clock.day_index;
+    const from_day = to_day -| pnl_window_days;
+    return pnlLines(alloc, gs, from_day, to_day, filter);
+}
+
+/// Canonical success sentence for any command (rule 30 — one presenter, one owner).
+/// Escapes every player-chosen name through `plain`/`Raw`. Returns "done." for
+/// verbs without a per-command sentence.
+pub fn resultText(
+    alloc: Alloc,
+    gs: *GameState,
+    cmd: @import("commands.zig").Command,
+    result: @import("commands.zig").Result,
+) ![]const u8 {
+    const cmd_mod = @import("commands.zig");
+    switch (cmd) {
+        .new_company, .new_company_at, .raise_company, .new_lance, .raise_air_company => return try std.fmt.allocPrint(alloc, "created force [{d}] — see `toe`", .{@intFromEnum(result.created_force)}),
+        .hire, .hire_candidate, .recruit => return if (try personLine(alloc, gs, result.hired)) |line|
+            try std.fmt.allocPrint(alloc, "hired {s}", .{line})
+        else
+            "hired (details unavailable)",
+        .crew_company => return try std.fmt.allocPrint(alloc, "{d} hired to fill the manning table, {d} lines still open (no candidates)", .{ result.hired_count, result.still_open }),
+        .buy_listing => {
+            if (result.fraud) return cmd_mod.hull_fraud_text;
+            if (result.unit == .none) return "no hull acquired";
+            const u = gs.unit(result.unit) orelse return "bought";
+            if (u.kind.isTransport()) {
+                const hq_name = try hqName(alloc, gs, u.berth_hq);
+                return try std.fmt.allocPrint(alloc, "bought listing [{d}] — berthed at {s}; hire a ship crew from the hall and it lifts the next deployment", .{ @intFromEnum(cmd.buy_listing), hq_name });
+            }
+            return try std.fmt.allocPrint(alloc, "bought listing [{d}]", .{@intFromEnum(cmd.buy_listing)});
+        },
+        .buy_hull_for => return if (result.fraud)
+            cmd_mod.hull_fraud_text
+        else if (result.unit == .none)
+            "no hull acquired"
+        else
+            try std.fmt.allocPrint(alloc, "hull #{d}, {d} days out", .{ @intFromEnum(result.unit), result.eta_days }),
+        .buy_support_hull => return if (result.fraud)
+            cmd_mod.hull_fraud_text
+        else if (result.unit == .none)
+            "no hull acquired"
+        else
+            try std.fmt.allocPrint(alloc, "hull #{d}, {d} days out", .{ @intFromEnum(result.unit), result.eta_days }),
+        .order_part => return if (!result.sourced)
+            try std.fmt.allocPrint(alloc, "logistics couldn't source {s} this time (retry after refresh)", .{result.order_key})
+        else
+            try std.fmt.allocPrint(alloc, "ordered {s} x{d}, eta day {d}, {s}", .{ result.order_key, result.order_quantity, result.order_eta, try money(alloc, result.order_cost) }),
+        .cover_shortfall => |c| return if (result.fabricated)
+            try std.fmt.allocPrint(alloc, "fabricating {d} × {s} at {s} — a bay job, see the HQ screen", .{ c.quantity, c.part_key, try hqName(alloc, gs, c.hq) })
+        else if (result.sourced)
+            try std.fmt.allocPrint(alloc, "ordered {d} × {s} to {s}", .{ c.quantity, c.part_key, try hqName(alloc, gs, c.hq) })
+        else
+            try std.fmt.allocPrint(alloc, "logistics could not source {s} this time — retry after the monthly market refresh, or buy it off a board", .{c.part_key}),
+        .take_loan => |l| return try std.fmt.allocPrint(alloc, "drew {d} c-bills over {d} months", .{ l.principal, l.term_months }),
+        .accept_contract => return if (try acceptedLine(alloc, gs, result.contract)) |line|
+            line
+        else
+            "under contract",
+        .trim_stock => return try std.fmt.allocPrint(alloc, "{d} tons sent home", .{result.tons_moved}),
+        .strip_unit => return "stripped for parts — see Supply for the crates",
+        .confirm_orders => return "battle orders given — the contact warning is cleared",
+        .emergency_resupply => return try std.fmt.allocPrint(alloc, "emergency resupply: {d}t delivered to the field stores", .{result.tons_moved}),
+        else => return "done.",
+    }
+}
+
+/// Strict parser for the REPL's `hall` view-verb filter (rule 10): one optional
+/// token consumed, an unknown filter name refused.
+pub fn parseHallFilter(tok: ?[]const u8) error{BadArguments}!HallFilter {
+    const t = tok orelse return .all;
+    const f = std.meta.stringToEnum(HallFilter, t) orelse return error.BadArguments;
+    return f;
+}
+
+test "completionCandidates returns a pool for a seeded campaign" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 7 });
+    defer gs.deinit();
+    const cmds = @import("commands.zig");
+    _ = try cmds.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .FS, .profession = .paymaster } });
+    _ = try cmds.execute(&gs, .{ .new_company = "Alpha" });
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const candidates = try completionCandidates(arena.allocator(), &gs);
+    try std.testing.expect(candidates.len > 10);
+    var found_hq = false;
+    var found_part = false;
+    for (candidates) |c| {
+        if (std.mem.startsWith(u8, c, "hq:")) found_hq = true;
+        if (std.mem.startsWith(u8, c, "mlas")) found_part = true;
+    }
+    try std.testing.expect(found_hq);
+    try std.testing.expect(found_part);
+}
+
+test "pnl_window_days and pnlDefault: rolling window applied correctly" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 3 });
+    defer gs.deinit();
+    const cmds = @import("commands.zig");
+    _ = try cmds.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .FS, .profession = .paymaster } });
+    _ = try cmds.execute(&gs, .{ .new_company = "Alpha" });
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const lines = try pnlDefault(arena.allocator(), &gs, .all);
+    try std.testing.expect(lines.len > 0);
+    // Window constant is accessible.
+    try std.testing.expectEqual(@as(u32, 31), pnl_window_days);
+}
+
+test "resultText: canonical sentences per outcome class, hostile names escaped" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 42 });
+    defer gs.deinit();
+    const cmds = @import("commands.zig");
+    _ = try cmds.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .FS, .profession = .paymaster } });
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const al = arena.allocator();
+    // new_company sentence.
+    const r_co = try cmds.execute(&gs, .{ .new_company = "{hostile}" });
+    const s_co = try resultText(al, &gs, .{ .new_company = "{hostile}" }, r_co);
+    try std.testing.expect(std.mem.indexOf(u8, s_co, "created force") != null);
+    // order_part not sourced.
+    const r_os = cmds.Result{ .sourced = false, .order_key = "mlas" };
+    const s_os = try resultText(al, &gs, .{ .order_part = .{ .part_key = "mlas", .quantity = 1 } }, r_os);
+    try std.testing.expect(std.mem.indexOf(u8, s_os, "couldn't source") != null);
+    // order_part sourced.
+    const r_src = cmds.Result{ .sourced = true, .order_key = "mlas", .order_quantity = 2, .order_eta = 5, .order_cost = 10_000 };
+    const s_src = try resultText(al, &gs, .{ .order_part = .{ .part_key = "mlas", .quantity = 2 } }, r_src);
+    try std.testing.expect(std.mem.indexOf(u8, s_src, "ordered mlas x2") != null);
+    // buy_hull_for fraud — no unescaped `{` in the result.
+    const r_fraud = cmds.Result{ .fraud = true };
+    const s_fraud = try resultText(al, &gs, .{ .buy_hull_for = .{ .listing = 0, .company = @enumFromInt(0) } }, r_fraud);
+    try std.testing.expect(std.mem.indexOf(u8, s_fraud, "{") == null);
+    // take_loan sentence.
+    const r_loan = cmds.Result{};
+    const s_loan = try resultText(al, &gs, .{ .take_loan = .{ .principal = 500_000, .term_months = 12 } }, r_loan);
+    try std.testing.expect(std.mem.indexOf(u8, s_loan, "500000") != null);
+    // Default "done." for an unspecced verb.
+    const r_def = cmds.Result{};
+    const s_def = try resultText(al, &gs, .advance_day, r_def);
+    try std.testing.expectEqualStrings("done.", s_def);
+}
+
+test "parseHallFilter: valid filter accepted, unknown refused" {
+    try std.testing.expectEqual(HallFilter.all, try parseHallFilter(null));
+    try std.testing.expectEqual(HallFilter.combat, try parseHallFilter("combat"));
+    try std.testing.expectError(error.BadArguments, parseHallFilter("unknown_filter"));
 }
 
 test "raise lances, support train and sell quote read one company" {

@@ -72,6 +72,7 @@ pub fn postToHq(gs: *GameState, person_id: types.PersonId, hq_id: types.HqId) !v
         .unknown_hq => error.UnknownHq,
     };
     const p = gs.person(person_id).?;
+    if (p.posted_hq == hq_id) return error.AlreadyPosted;
     vacateSeats(gs, person_id);
     p.posted_hq = hq_id;
     p.assigned_force = .none;
@@ -499,7 +500,7 @@ pub fn setOfficeStaff(gs: *GameState, hq: types.HqId, role: person_mod.Role, del
         const p = e.value_ptr;
         if (p.status == .active and p.role == role and p.posted_hq == hq) last = p.id;
     }
-    if (last == .none) return error.UnknownPerson;
+    if (last == .none) return error.NoOneInRole;
     try fire(gs, last);
     return .none;
 }
@@ -790,6 +791,21 @@ test "posting a pilot clears their unit seat; an ineligible post changes nothing
     try std.testing.expectEqual(people_before, gs.people.count());
 }
 
+test "posting someone to their current HQ returns AlreadyPosted; nothing changes" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 42 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    const hq = gs.seat();
+    const pid = try gs.hirePerson("Jo", "Doe", .mekwarrior);
+    // First post: succeeds.
+    try postToHq(&gs, pid, hq);
+    try std.testing.expectEqual(hq, gs.person(pid).?.posted_hq);
+    const staff_before = gs.hqs.getPtr(hq).?.staff_assigned;
+    // Second post to the same HQ: AlreadyPosted, staffing unchanged.
+    try std.testing.expectError(error.AlreadyPosted, postToHq(&gs, pid, hq));
+    try std.testing.expectEqual(staff_before, gs.hqs.getPtr(hq).?.staff_assigned);
+}
+
 test "hirePerson and hireFromSpec seed identical skill keys that equal Role.skillSlots() (C11f write-path agreement)" {
     const inline_roles = std.meta.fields(person_mod.Role);
     var gs = GameState.init(std.testing.allocator, .{ .seed = 20001 });
@@ -826,6 +842,15 @@ test "hirePerson and hireFromSpec seed identical skill keys that equal Role.skil
         try std.testing.expectEqual(expected_count, gs.person(direct_id).?.skills.count());
         try std.testing.expectEqual(expected_count, gs.person(spec_id).?.skills.count());
     }
+}
+
+test "setOfficeStaff with delta < 0 and no one in that role returns NoOneInRole" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 14 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    const hq = gs.seat();
+    // No mekwarrior is ever posted to an HQ: release should return NoOneInRole.
+    try std.testing.expectError(commands.Error.NoOneInRole, commands.execute(&gs, .{ .set_office_staff = .{ .hq = hq, .role = .mekwarrior, .delta = -1 } }));
 }
 
 test "readinessPenalty scores a company's readiness; lower is readier (C17a4)" {

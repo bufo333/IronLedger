@@ -160,9 +160,7 @@ pub fn handle(self: *App, k: app.Key) anyerror!bool {
                 self.say(.dim, "move the cursor onto a company's field stores", .{});
                 return true;
             }
-            const res = self.execResultWith(.{ .ship_components_home = co }, &.{
-                .{ .err = error.NothingToShip, .style = .dim, .text = try std.fmt.allocPrint(self.a(), "no structural components in {s}'s field stores", .{try q.forceName(self.a(), g, co)}) },
-            }) orelse return true;
+            const res = self.execResult(.{ .ship_components_home = co }) orelse return true;
             self.say(.good, "{d} component{s} shipped from {s} to {s} (freight from local funds)", .{ res.count, if (res.count == 1) "" else "s", try q.forceName(self.a(), g, co), try q.hqName(self.a(), g, res.hq) });
         },
         .cash_back => self.openCommand(if (site) |s| switch (s) {

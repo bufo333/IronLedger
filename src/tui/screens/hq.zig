@@ -105,13 +105,6 @@ pub fn handle(self: *App, k: app.Key) anyerror!bool {
             const detail = try q.hqDetailView(al, g, hid);
             const under_cursor = if (self.focus == 0 and c < detail.facility.len) detail.facility[c] else null;
             if (under_cursor) |kind| {
-                const rows = try q.upgrades(al, g, hid);
-                for (rows) |r| if (r.kind == kind) {
-                    if (!r.possible) {
-                        self.say(.amber, "{s}: {s}", .{ @tagName(kind), r.reason });
-                        return true;
-                    }
-                };
                 _ = try self.execSay(.{ .upgrade_facility = .{ .hq = hid, .kind = kind } }, .good, "{s} upgrade started — paperwork first, then construction; watch PROJECTS", .{@tagName(kind)});
                 return true;
             }

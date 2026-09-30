@@ -412,7 +412,10 @@ pub const App = struct {
                 // A new track is worth a line in the status strip.
                 if (m.enabled and m.current != null and m.current != self.last_track and m.child != null) {
                     self.last_track = m.current;
-                    if (self.msg.len == 0) self.say(.dim, "♪ {s} — {s}   (M music · :music browse)", .{ m.nowPlaying() orelse "", m.nowPlayingSet() orelse "" });
+                    if (self.msg.len == 0) self.say(.dim, "♪ {s} — {s}   (M music · :music browse)", .{
+                        q.plain(self.a(), m.nowPlaying() orelse "") catch "", // best-effort: OOM keeps the raw name out of markup
+                        q.plain(self.a(), m.nowPlayingSet() orelse "") catch "", // best-effort: OOM keeps the raw name out of markup
+                    });
                 }
             }
             if (key == .none) continue;
@@ -461,7 +464,7 @@ pub const App = struct {
         const m = &(self.music orelse return "");
         if (!m.enabled) return "♪ off";
         const name = m.nowPlaying() orelse return "";
-        return std.fmt.allocPrint(self.a(), "♪ {s} — {s}", .{ name, m.nowPlayingSet() orelse "" });
+        return std.fmt.allocPrint(self.a(), "♪ {s} — {s}", .{ try q.plain(self.a(), name), try q.plain(self.a(), m.nowPlayingSet() orelse "") });
     }
 
     pub fn say(self: *App, style: Style, comptime fmt: []const u8, args: anytype) void {
@@ -681,7 +684,8 @@ pub const App = struct {
         var right_buf: [96]u8 = undefined;
         const players = try self.store.players(al);
         const campaigns = try self.store.campaigns(al, self.player_id);
-        const np = self.nowPlaying();
+        const np_raw = self.nowPlaying();
+        const np = if (np_raw.len > 0) q.plain(al, np_raw) catch np_raw else np_raw;
         // best-effort: a status label in a fixed buffer; too long leaves it blank.
         const right = std.fmt.bufPrint(&right_buf, "{s}{s}{d} players · {d} campaigns · schema v{d}", .{ if (np.len > 0) "♪ " else "", if (np.len > 0) np else "", players.len, campaigns.len, game.lobby.schema_version }) catch "";
         // (the separator between track and counts)
@@ -745,7 +749,7 @@ pub const App = struct {
         const al = self.a();
         const b = self.body();
         var rows: std.ArrayListUnmanaged([]const u8) = .empty;
-        try rows.append(al, try std.fmt.allocPrint(al, "name        {s}{s}{s}{{/}}", .{ if (self.w_field == 0) "{s}" else "", self.w_name.slice(), if (self.w_field == 0) "_" else "" }));
+        try rows.append(al, try std.fmt.allocPrint(al, "name        {s}{s}{s}{{/}}", .{ if (self.w_field == 0) "{s}" else "", try q.plain(al, self.w_name.slice()), if (self.w_field == 0) "_" else "" }));
         try rows.append(al, "");
         try rows.append(al, "faction of origin");
         for (factions, 0..) |f, i| {
@@ -789,8 +793,8 @@ pub const App = struct {
         const al = self.a();
         const b = self.body();
         var rows: std.ArrayListUnmanaged([]const u8) = .empty;
-        try rows.append(al, try std.fmt.allocPrint(al, "outfit name      {s}{s}{s}{{/}}", .{ if (self.w_field == 0) "{s}" else "", self.w_outfit.slice(), if (self.w_field == 0) "_" else "" }));
-        try rows.append(al, try std.fmt.allocPrint(al, "first company    {s}{s}{s}{{/}}", .{ if (self.w_field == 1) "{s}" else "", self.w_company.slice(), if (self.w_field == 1) "_" else "" }));
+        try rows.append(al, try std.fmt.allocPrint(al, "outfit name      {s}{s}{s}{{/}}", .{ if (self.w_field == 0) "{s}" else "", try q.plain(al, self.w_outfit.slice()), if (self.w_field == 0) "_" else "" }));
+        try rows.append(al, try std.fmt.allocPrint(al, "first company    {s}{s}{s}{{/}}", .{ if (self.w_field == 1) "{s}" else "", try q.plain(al, self.w_company.slice()), if (self.w_field == 1) "_" else "" }));
         try rows.append(al, "");
         try rows.append(al, try std.fmt.allocPrint(al, "emblem source    {s}{s}{{/}}   {s}{s}{{/}}", .{ if (self.w_src == 0) (if (self.w_field == 2) "{s}" else "{a}") else "{d}", try keyHint(OutfitAction, al, &outfit_bindings, .source_prev, "presets"), if (self.w_src == 1) (if (self.w_field == 2) "{s}" else "{a}") else "{d}", try keyHint(OutfitAction, al, &outfit_bindings, .source_next, "import a picture") }));
         try rows.append(al, "");
@@ -799,7 +803,7 @@ pub const App = struct {
             if (self.logos.len == 0) try rows.append(al, "  {d}none found — drop a .png in the project root or a logos/ directory{/}");
             for (self.logos, 0..) |name, i| {
                 const sel = i == self.w_logo;
-                try rows.append(al, try std.fmt.allocPrint(al, "  {s}{s} {s}{{/}}", .{ if (sel and self.w_field == 2) "{s}" else if (sel) "{a}" else "", if (sel) ">" else " ", name }));
+                try rows.append(al, try std.fmt.allocPrint(al, "  {s}{s} {s}{{/}}", .{ if (sel and self.w_field == 2) "{s}" else if (sel) "{a}" else "", if (sel) ">" else " ", try q.plain(al, name) }));
             }
             try rows.append(al, "");
             try rows.append(al, try std.fmt.allocPrint(al, "display          {s}", .{switch (self.graphics) {
@@ -1220,9 +1224,7 @@ pub const App = struct {
         const train = try q.supportTrain(self.a(), g, self.raise.company);
         if (train.lines.len == 0) return;
         const line = train.lines[@min(self.modal_cursor, train.lines.len - 1)];
-        const r = self.execResultWith(.{ .buy_support_hull = .{ .company = self.raise.company, .kind = line.kind } }, &.{
-            .{ .err = error.NoSuchListing, .text = try std.fmt.allocPrint(self.a(), "{s} is not on the home board right now — staple lines restock as the board refreshes", .{line.key}) },
-        }) orelse return;
+        const r = self.execResult(.{ .buy_support_hull = .{ .company = self.raise.company, .kind = line.kind } }) orelse return;
         self.say(.good, "{s} #{d} bought into the {s} lance", .{ line.key, @intFromEnum(r.unit), @tagName(line.kind) });
     }
 
@@ -1439,7 +1441,7 @@ pub const App = struct {
                     "",
                     try std.fmt.allocPrint(al, "  {s}", .{prompt}),
                     "",
-                    try std.fmt.allocPrint(al, "  > {{s}}{s}_{{/}}", .{self.input.slice()}),
+                    try std.fmt.allocPrint(al, "  > {{s}}{s}_{{/}}", .{try q.plain(al, self.input.slice())}),
                     "",
                     try std.fmt.allocPrint(al, "  {{d}}{s}{{/}}", .{try keys.title(al, "", &input_legend)}),
                 };
@@ -1568,7 +1570,11 @@ pub const App = struct {
             self.say(.crit, "music preference not saved: {s}", .{game.cli.errorText(err)});
         if (m.enabled) m.poll();
         self.last_track = m.current;
-        if (m.enabled) self.say(.dim, "♪ music on — {s} ({s}) · :music browses, F12 has the controls", .{ m.nowPlaying() orelse "starting", m.nowPlayingSet() orelse "" }) else self.say(.dim, "♪ music off (M turns it back on)", .{});
+        if (m.enabled) {
+            const esc_name = try q.plain(self.a(), m.nowPlaying() orelse "starting");
+            const esc_set = try q.plain(self.a(), m.nowPlayingSet() orelse "");
+            self.say(.dim, "♪ music on — {s} ({s}) · :music browses, F12 has the controls", .{ esc_name, esc_set });
+        } else self.say(.dim, "♪ music off (M turns it back on)", .{});
     }
 
     fn adjustVolume(self: *App, delta: i32) !void {
@@ -1766,9 +1772,7 @@ pub const App = struct {
         const desks = try q.backOffice(self.a(), g, hq_id);
         if (desks.len == 0) return;
         const role = desks[@min(self.w_office, desks.len - 1)].role;
-        _ = self.execResultWith(.{ .set_office_staff = .{ .hq = hq_id, .role = role, .delta = if (delta > 0) 1 else -1 } }, &.{
-            .{ .err = error.UnknownPerson, .text = try std.fmt.allocPrint(self.a(), "no {s} to release", .{@tagName(role)}) },
-        }) orelse return;
+        _ = self.execResult(.{ .set_office_staff = .{ .hq = hq_id, .role = role, .delta = if (delta > 0) 1 else -1 } }) orelse return;
         if (delta > 0) self.say(.good, "hired one {s}", .{@tagName(role)}) else self.say(.amber, "released one {s}", .{@tagName(role)});
     }
 
@@ -1855,17 +1859,18 @@ pub const App = struct {
     fn generateCampaign(self: *App) !void {
         // Build the replacement session fully before touching the current one
         // (rule 63): on failure the open session stays valid.
-        var new_session = try game.lobby.Session.fresh(self.gpa, 3025 + self.w_seed * 7919 + @as(u64, @intCast(self.w_faction)) * 13);
+        const seed: u64 = 3025 + self.w_seed * 7919 + @as(u64, @intCast(self.w_faction)) * 13;
+        const image: []const u8 = if (self.w_src == 1 and self.w_png != null) self.w_png.? else emblems[self.w_emblem].name;
+        var new_session = try game.lobby.Session.freshCampaign(self.gpa, seed, .{
+            .commander_name = self.w_name.slice(),
+            .origin = factions[self.w_faction],
+            .profession = professions[self.w_profession],
+            .start_year = start_years[self.w_year],
+            .outfit_name = self.w_outfit.slice(),
+            .company_name = self.w_company.slice(),
+            .emblem_image = image,
+        });
         errdefer new_session.close();
-        const gs = new_session.state();
-        // direct: the wizard builds a campaign that is not the open session yet.
-        _ = try game.commands.execute(gs, .{ .create_commander = .{ .name = self.w_name.slice(), .origin = factions[self.w_faction], .profession = professions[self.w_profession], .start_year = start_years[self.w_year] } });
-        _ = try game.commands.execute(gs, .{ .rename_outfit = self.w_outfit.slice() });
-        const res = try game.commands.execute(gs, .{ .new_company = self.w_company.slice() });
-        if (res.created_force != .none) {
-            const image: []const u8 = if (self.w_src == 1 and self.w_png != null) self.w_png.? else emblems[self.w_emblem].name;
-            _ = try game.commands.execute(gs, .{ .set_emblem = .{ .force = res.created_force, .image = image } });
-        }
         // Replacement is ready; close the old session and install the new one (rule 63).
         if (self.session) |*session| session.close();
         self.session = new_session;
@@ -2194,8 +2199,8 @@ pub const App = struct {
         if (self.music) |*m| {
             try rows.append(al, .{ .key = .music, .active = true, .text = try std.fmt.allocPrint(al, "  music        {s}", .{if (m.enabled) "{g}on{/}" else "{c}off{/}"}) });
             try rows.append(al, .{ .key = .volume, .active = true, .text = try std.fmt.allocPrint(al, "  volume       {d: >3}      {{d}}restarts the track{{/}}", .{m.volume}) });
-            try rows.append(al, .{ .key = .track, .active = true, .text = try std.fmt.allocPrint(al, "  track        {s}{s}", .{ m.nowPlaying() orelse "—", if (m.nowPlayingSet()) |set| try std.fmt.allocPrint(al, "  {{d}}({s}){{/}}", .{set}) else "" }) });
-            try rows.append(al, .{ .key = .soundtrack, .active = true, .text = try std.fmt.allocPrint(al, "  soundtrack   {{a}}{s}{{/}}      {{d}}{s} (also :music){{/}}", .{ try keyHint(FormAction, al, &form_bindings, .act, "browse soundtracks and tracks"), m.setName(m.selected_set) }) });
+            try rows.append(al, .{ .key = .track, .active = true, .text = try std.fmt.allocPrint(al, "  track        {s}{s}", .{ try q.plain(al, m.nowPlaying() orelse "—"), if (m.nowPlayingSet()) |set| try std.fmt.allocPrint(al, "  {{d}}({s}){{/}}", .{try q.plain(al, set)}) else "" }) });
+            try rows.append(al, .{ .key = .soundtrack, .active = true, .text = try std.fmt.allocPrint(al, "  soundtrack   {{a}}{s}{{/}}      {{d}}{s} (also :music){{/}}", .{ try keyHint(FormAction, al, &form_bindings, .act, "browse soundtracks and tracks"), try q.plain(al, m.setName(m.selected_set)) }) });
             try info.add(&rows, al, try std.fmt.allocPrint(al, "  {{d}}tracks       {d} in {d} soundtrack{s} under {s} · player: {s}{{/}}", .{ m.tracks.len, m.sets.len, if (m.sets.len == 1) "" else "s", m.root, m.player_cmd orelse "{c}none found{/}" }));
             selectable += 4;
         } else {
@@ -2414,10 +2419,6 @@ pub const App = struct {
         const v = try self.pickView(al);
         if (v.rows.len == 0) return;
         const row = v.rows[@min(self.modal_cursor, v.rows.len - 1)];
-        if (!row.eligible) {
-            self.say(.amber, "{s}", .{row.why});
-            return;
-        }
         const modal = self.modal;
         self.modal = .none;
         switch (modal) {
@@ -2589,26 +2590,11 @@ pub const App = struct {
             self.modal = .{ .game_over_failed = game.cli.errorText(save_err) };
     }
 
-    /// Run a command; a refusal becomes the status line. Returns whether it ran.
-    /// Run a command and hand back its result, or report the refusal
-    /// (`cli.errorText`, the one sentence per error) and return null.
+    /// Run a command and hand back its result, or report the canonical refusal
+    /// sentence (`cli.errorText`, the one sentence per error) and return null.
     pub fn execResult(self: *App, cmd: Command) ?game.commands.Result {
-        return self.execResultWith(cmd, &.{});
-    }
-
-    /// A refusal a screen words its own way: the error, and what to say
-    /// instead of `cli.errorText` (the part it names, the role with nobody).
-    pub const Refusal = struct { err: anyerror, style: Style = .amber, text: []const u8 };
-
-    /// `execResult`, with some refusals worded by the caller; any other
-    /// error gets the canonical sentence.
-    pub fn execResultWith(self: *App, cmd: Command, refusals: []const Refusal) ?game.commands.Result {
         const g = self.state();
         return game.commands.execute(g, cmd) catch |err| { // direct: the one wrapper
-            for (refusals) |r| if (r.err == err) {
-                self.say(r.style, "{s}", .{r.text});
-                return null;
-            };
             self.say(.crit, "refused: {s}", .{game.cli.errorText(err)});
             return null;
         };
@@ -2863,10 +2849,11 @@ pub const App = struct {
                     try rows.append(al, try std.fmt.allocPrint(al, "{s}{s} all soundtracks, mixed and shuffled{{/}}   {{d}}{d} tracks{{/}}", .{ if (m.selected_set == null) "{a}" else "", if (m.selected_set == null) ">" else " ", m.tracks.len }));
                     for (m.sets, 0..) |name, i| {
                         const sel = m.selected_set != null and m.selected_set.? == i;
-                        try rows.append(al, try std.fmt.allocPrint(al, "{s}{s} {s: <28}{{/}}   {{d}}{d} tracks · {s}/{s}{{/}}", .{ if (sel) "{a}" else "", if (sel) ">" else " ", name, m.setCount(i), m.root, if (std.mem.eql(u8, name, "default")) "" else name }));
+                        const esc_name = try q.plain(al, name);
+                        try rows.append(al, try std.fmt.allocPrint(al, "{s}{s} {s: <28}{{/}}   {{d}}{d} tracks · {s}/{s}{{/}}", .{ if (sel) "{a}" else "", if (sel) ">" else " ", esc_name, m.setCount(i), m.root, if (std.mem.eql(u8, name, "default")) "" else esc_name }));
                     }
                     try rows.append(al, "");
-                    try rows.append(al, try std.fmt.allocPrint(al, "{{d}}playing {s} · {s} · volume {d}{{/}}", .{ m.setName(m.selected_set), if (m.enabled) "on" else "off", m.volume }));
+                    try rows.append(al, try std.fmt.allocPrint(al, "{{d}}playing {s} · {s} · volume {d}{{/}}", .{ try q.plain(al, m.setName(m.selected_set)), if (m.enabled) "on" else "off", m.volume }));
                     for (m.order) |ti| {
                         const t = m.tracks[ti];
                         const now = m.current != null and m.current.? == ti and m.child != null;
@@ -3263,10 +3250,6 @@ pub const App = struct {
                 const cands = try q.offerCandidates(al, self.state(), offer_id);
                 if (cands.len == 0) return;
                 const c = cands[@min(self.modal_cursor, cands.len - 1)];
-                if (!c.eligible) {
-                    self.say(.amber, "{s} cannot go: {s}", .{ try q.forceName(self.a(), self.state(), c.company), c.why });
-                    return;
-                }
                 self.modal = .none;
                 const lift = try q.liftText(al, self.state(), c.company);
                 _ = try self.execSay(.{ .accept_contract = .{ .offer = offer_id, .company = c.company } }, .good, "accepted — {s} is on its way, {d} days out{s}{s}", .{ try q.forceName(self.a(), self.state(), c.company), c.transit_days, if (lift.len > 0) " · " else "", lift });
@@ -3282,10 +3265,6 @@ pub const App = struct {
                 const rows = try q.upgrades(al, self.state(), hid);
                 if (rows.len == 0) return;
                 const r = rows[@min(self.modal_cursor, rows.len - 1)];
-                if (!r.possible) {
-                    self.say(.amber, "{s}: {s}", .{ @tagName(r.kind), r.reason });
-                    return;
-                }
                 self.modal = .none;
                 _ = try self.execSay(.{ .upgrade_facility = .{ .hq = hid, .kind = r.kind } }, .good, "{s} upgrade started — paperwork first, then construction; watch PROJECTS", .{@tagName(r.kind)});
             },
@@ -3877,7 +3856,7 @@ pub const App = struct {
         if (start == 0) {
             for (verbs) |v| if (std.mem.startsWith(u8, v, prefix)) try cands.append(al, v);
         } else {
-            for (try game.cli.completionPool(al, self.state())) |c| if (std.mem.startsWith(u8, c, prefix)) try cands.append(al, c);
+            for (try q.completionCandidates(al, self.state())) |c| if (std.mem.startsWith(u8, c, prefix)) try cands.append(al, c);
         }
         if (cands.items.len == 0) {
             self.say(.dim, "no completion for '{s}'", .{prefix});
@@ -3949,9 +3928,10 @@ pub const App = struct {
             return;
         };
         if (cmd) |c| {
-            _ = try self.execSay(c, .good, "done: {s}", .{verb});
+            const res = self.execResult(c) orelse return;
+            self.say(.good, "{s}", .{try q.resultText(self.a(), self.state(), c, res)});
         } else {
-            self.say(.amber, "unknown verb '{s}' — see ? for the list, or use the CLI (--repl) for the rest", .{verb});
+            self.say(.amber, "unknown verb '{s}' — see ? for the list, or use the CLI (--repl) for the rest", .{try q.plain(self.a(), verb)});
         }
     }
 };

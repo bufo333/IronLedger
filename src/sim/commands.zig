@@ -406,6 +406,13 @@ pub const Error = error{
     NothingToRush,
     /// A stock quantity addition would overflow the u32 counter (rule 47).
     StockOverflow,
+    /// `set_office_staff` with delta < 0 and no one in that role to release.
+    NoOneInRole,
+    /// `buy_support_hull`: the staple line for that hull kind is not on the
+    /// home board right now (it restocks as the board refreshes).
+    StapleOffBoard,
+    /// `post_person`: the person is already posted at that HQ.
+    AlreadyPosted,
 } || std.mem.Allocator.Error;
 
 pub const Result = struct {
@@ -452,6 +459,10 @@ pub const Result = struct {
     order_quantity: u32 = 0,
     order_eta: u32 = 0,
     order_cost: types.CBills = 0,
+    /// `buy_listing`, `buy_hull_for`, `buy_support_hull`: the black-market fence
+    /// took the money; no unit/stock resulted (rules 33, 34 — ephemeral, not
+    /// persisted, not in the digest; rule 45 applies to GameState fields only).
+    fraud: bool = false,
     /// `cover_shortfall`: the bay makes it (a job), not the market.
     fabricated: bool = false,
     /// `accept_contract`: the ContractId of the accepted contract.
@@ -472,6 +483,10 @@ pub const Result = struct {
     busy: u32 = 0,
     nothing_to_learn: u32 = 0,
 };
+
+/// Canonical sentence for a black-market fraud outcome (rule 24 — one string,
+/// one owner; re-exported by cli.zig so frontends reach it as game.cli.hull_fraud_text).
+pub const hull_fraud_text = "the black-market fence vanished with the money — no hull";
 
 pub fn execute(gs: *GameState, cmd: Command) Error!Result {
     switch (cmd) {

@@ -588,10 +588,10 @@ fn runRepl(session: *game.lobby.Session, io: std.Io, gpa: std.mem.Allocator, sto
         } else if (std.mem.eql(u8, verb, "medbay")) {
             printLines(al, try q.medbay(al, gs), "") catch |err| showError(err);
         } else if (std.mem.eql(u8, verb, "hall")) {
-            const filter = if (tokens.next()) |t| std.meta.stringToEnum(q.HallFilter, t) orelse {
-                std.debug.print("usage: hall [all|combat|techs|medical|admin_command|admin_logistics|admin_transport|admin_hr|admin_finance|other]\n", .{});
+            const filter = q.parseHallFilter(tokens.next()) catch |err| {
+                std.debug.print("{s} — usage: hall [all|combat|techs|medical|admin_command|admin_logistics|admin_transport|admin_hr|admin_finance|other]\n", .{game.cli.errorText(err)});
                 continue;
-            } else q.HallFilter.all;
+            };
             const lines = try q.hallAll(al, gs, filter);
             if (lines.len == 0) std.debug.print("no candidates on any board.\n", .{}) else printLines(al, lines, "") catch |err| showError(err);
         } else if (std.mem.eql(u8, verb, "checklist")) {
@@ -643,51 +643,31 @@ fn runRepl(session: *game.lobby.Session, io: std.Io, gpa: std.mem.Allocator, sto
                 }
             }
         } else if (std.mem.eql(u8, verb, "log")) {
-            // log [n] [filter] — filter: outfit-wide default, a category name,
-            // or co:<id> / hq:<id> for one entity's full history.
+            // log [n] [filter] — optional count first, then optional filter
+            // through the canonical parser (rule 10).
             var n: usize = 10;
-            var filter: game.state.LogFilter = .all;
-            while (tokens.next()) |tok| {
+            if (tokens.peek()) |tok| {
                 if (std.fmt.parseInt(usize, tok, 10)) |v| {
                     n = v;
-                } else |_| if (std.meta.stringToEnum(game.state.LogCategory, tok)) |cat| {
-                    filter = .{ .category = cat };
-                } else if (std.mem.startsWith(u8, tok, "contract:")) {
-                    // Every AAR and event of one contract, past or present.
-                    const cid = std.fmt.parseInt(u32, tok[9..], 10) catch {
-                        std.debug.print("usage: log [n] [...|contract:<id>]\n", .{});
-                        continue;
-                    };
-                    filter = .{ .contract = @enumFromInt(cid) };
-                } else if (game.cli.parseTreasury(tok)) |t| {
-                    filter = switch (t) {
-                        .company => |id| .{ .company = id },
-                        .hq => |id| .{ .hq = id },
-                        .outfit => .all,
-                    };
-                } else |_| {
-                    std.debug.print("usage: log [n] [battle|decision|delivery|...|co:<id>|hq:<id>|contract:<id>]\n", .{});
-                }
+                    _ = tokens.next();
+                } else |_| {}
             }
+            const filter = game.cli.parseLogFilter(&tokens) catch |err| {
+                std.debug.print("{s} — usage: log [n] [battle|decision|delivery|...|co:<id>|hq:<id>|contract:<id>]\n", .{game.cli.errorText(err)});
+                continue;
+            };
             printLines(al, try q.logLines(al, gs, n, filter), "  ") catch |err| showError(err);
         } else if (std.mem.eql(u8, verb, "sop") and tokens.peek() == null) {
             printLines(al, try q.standingOrders(al, gs), "") catch |err| showError(err);
         } else if (std.mem.eql(u8, verb, "treasuries")) {
             printTreasuries(gs, al) catch |err| showError(err);
         } else if (std.mem.eql(u8, verb, "ledger")) {
-            // ledger [co:<id>|hq:<id>] [n]
-            var filter: game.finance.EntityFilter = .all;
-            var n: usize = 15;
-            while (tokens.next()) |tok| {
-                if (game.cli.parseTreasury(tok)) |t| {
-                    filter = switch (t) {
-                        .company => |id| .{ .company = id },
-                        .hq => |id| .{ .hq = id },
-                        .outfit => .all,
-                    };
-                } else |_| n = std.fmt.parseInt(usize, tok, 10) catch n;
-            }
-            printLines(al, try q.ledgerLines(al, gs, filter, n), "  ") catch |err| showError(err);
+            // ledger [co:<id>|hq:<id>] — canonical filter (rule 10).
+            const filter = game.cli.parseEntityFilter(&tokens) catch |err| {
+                std.debug.print("{s} — usage: ledger [outfit|hq:N|co:N]\n", .{game.cli.errorText(err)});
+                continue;
+            };
+            printLines(al, try q.ledgerLines(al, gs, filter, 15), "  ") catch |err| showError(err);
         } else if (std.mem.eql(u8, verb, "units")) {
             const rows = try q.hangar(al, gs);
             std.debug.print("hangar ({d} hulls, worst value first — bill per point of contribution):\n", .{rows.len});
@@ -722,20 +702,12 @@ fn runRepl(session: *game.lobby.Session, io: std.Io, gpa: std.mem.Allocator, sto
             std.debug.print("site market ({d} listings):\n", .{lines.len});
             printLines(al, lines, "  ") catch |err| showError(err);
         } else if (std.mem.eql(u8, verb, "pnl")) {
-            // pnl [co:<id>|hq:<id>] — last 31 days for the outfit or one entity.
-            const st = try q.status(al, gs);
-            const from = if (st.day > 31) st.day - 31 else 0;
-            var filter: game.finance.EntityFilter = .all;
-            if (tokens.next()) |tok| {
-                if (game.cli.parseTreasury(tok)) |t| {
-                    filter = switch (t) {
-                        .company => |id| .{ .company = id },
-                        .hq => |id| .{ .hq = id },
-                        .outfit => .all,
-                    };
-                } else |_| {}
-            }
-            printLines(al, try q.pnlLines(al, gs, from, st.day, filter), "") catch |err| showError(err);
+            // pnl [co:<id>|hq:<id>] — last q.pnl_window_days for the outfit or one entity.
+            const filter = game.cli.parseEntityFilter(&tokens) catch |err| {
+                std.debug.print("{s} — usage: pnl [outfit|hq:N|co:N]\n", .{game.cli.errorText(err)});
+                continue;
+            };
+            printLines(al, try q.pnlDefault(al, gs, filter), "") catch |err| showError(err);
         } else if (std.mem.eql(u8, verb, "day")) {
             // day [n] [force] — the end-turn checklist asks first: fix
             // it, or `day n force` to proceed regardless.
@@ -818,9 +790,8 @@ fn refitUnit(cmd: Command) ?game.types.UnitId {
     };
 }
 
-/// What the REPL says after a command lands: ids created, hires, hulls
-/// bought, and the screen the verb naturally leads to.
-/// The battle orders as console lines (the TUI's box reads the same query).
+/// What the REPL says after a command lands: the canonical presenter sentence
+/// (one owner: q.resultText), plus any REPL-only follow-up navigation.
 fn printBattleOrders(al: std.mem.Allocator, view: q.BattleOrders) !void {
     std.debug.print("{s}{s}\n", .{ q.stripMarks(al, view.title) catch view.title, if (view.confirmed) " — orders given" else "" });
     printLines(al, view.situation, "  ") catch |err| showError(err);
@@ -830,37 +801,20 @@ fn printBattleOrders(al: std.mem.Allocator, view: q.BattleOrders) !void {
 }
 
 fn printResult(gs: *game.state.GameState, al: std.mem.Allocator, cmd: Command, r: game.commands.Result) !void {
+    const text = try q.resultText(al, gs, cmd, r);
+    std.debug.print("{s}\n", .{text});
+    // REPL-only follow-up navigation: print the view most useful after this command.
     switch (cmd) {
         .create_commander => {
             printHqs(gs, al) catch |err| showError(err);
             printOffers(gs, al) catch |err| showError(err);
         },
-        .accept_contract => if (q.acceptedLine(al, gs, r.contract)) |line|
-            std.debug.print("{s}\n", .{line orelse "under contract"})
-        else |err|
-            showError(err),
-        .new_company, .new_company_at, .raise_company, .new_lance, .raise_air_company => std.debug.print("created force [{d}] — see `toe`\n", .{@intFromEnum(r.created_force)}),
-        .hire, .hire_candidate, .recruit => if (q.personLine(al, gs, r.hired)) |line|
-            std.debug.print("hired {s}\n", .{line orelse "—"})
-        else |err|
-            showError(err),
-        .crew_company => std.debug.print("{d} hired to fill the manning table, {d} lines still open (no candidates)\n", .{ r.hired_count, r.still_open }),
-        .buy_hull_for => if (r.unit == .none) std.debug.print("{s}\n", .{game.cli.hull_fraud_text}) else std.debug.print("hull #{d}, {d} days out\n", .{ @intFromEnum(r.unit), r.eta_days }),
-        .trim_stock => std.debug.print("{d} tons sent home\n", .{r.tons_moved}),
         .refit_install, .refit_remove, .refit_clear, .refit_commit => printLab(gs, al, refitUnit(cmd).?) catch |err| showError(err),
         .complete_contract, .recall_company => printContracts(gs, al) catch |err| showError(err),
         .found_hq, .link, .assign_company => printHqs(gs, al) catch |err| showError(err),
         .auto_assign => |co| printLines(al, q.companyRoster(al, gs, co) catch &.{}, "") catch |err| showError(err),
         .autostaff => |hq| printLines(al, q.hqRoster(al, gs, hq) catch &.{}, "") catch |err| showError(err),
-        .order_part => if (!r.sourced)
-            std.debug.print("logistics couldn't source {s} this time (retry after refresh)\n", .{r.order_key})
-        else
-            std.debug.print("ordered {s} x{d}, eta day {d}, {s}\n", .{ r.order_key, r.order_quantity, r.order_eta, q.money(al, r.order_cost) catch "?" }),
-        .take_loan => |l| std.debug.print("drew {d} c-bills over {d} months\n", .{ l.principal, l.term_months }),
-        .strip_unit => std.debug.print("stripped for parts — see Supply for the crates\n", .{}),
-        .confirm_orders => std.debug.print("battle orders given — the contact warning is cleared\n", .{}),
-        .emergency_resupply => std.debug.print("emergency resupply: {d}t delivered to the field stores\n", .{r.tons_moved}),
-        else => std.debug.print("done.\n", .{}),
+        else => {},
     }
 }
 

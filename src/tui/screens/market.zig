@@ -75,10 +75,12 @@ pub fn handle(self: *App, k: app.Key) anyerror!bool {
             const view = try q.market(al, g, self.market_filter, hq_id);
             if (view.board.len > 0) {
                 const l = view.board[@min(self.cur(0).*, view.board.len - 1)];
-                if (l.transport) {
-                    _ = try self.execSay(.{ .buy_listing = l.id }, .good, "bought listing [{d}] — berthed at {s}; hire a ship crew from the hall and it lifts the next deployment", .{ @intFromEnum(l.id), try q.hqName(self.a(), g, hq_id) });
+                const cmd: game.commands.Command = .{ .buy_listing = l.id };
+                const res = self.execResult(cmd) orelse return true;
+                if (res.fraud) {
+                    self.say(.crit, "{s}", .{game.cli.hull_fraud_text});
                 } else {
-                    _ = try self.execSay(.{ .buy_listing = l.id }, .good, "bought listing [{d}]", .{@intFromEnum(l.id)});
+                    self.say(.good, "{s}", .{try q.resultText(self.a(), g, cmd, res)});
                 }
             }
         },
@@ -131,7 +133,7 @@ pub fn handle(self: *App, k: app.Key) anyerror!bool {
             if (view.catalog.len > 0) {
                 const r = view.catalog[@min(self.cur(1).*, view.catalog.len - 1)];
                 if (!r.component) {
-                    self.say(.amber, "only structural components (comp_*) are fabricated; order the rest", .{});
+                    self.say(.amber, "{s}", .{game.cli.errorText(error.NotAComponent)});
                     return true;
                 }
                 self.openAmount(try std.fmt.allocPrint(al, "FABRICATE {s}", .{r.key}), .{ .fabricate = .{ .hq = try self.hqSelId(g), .key = r.key } }, &.{

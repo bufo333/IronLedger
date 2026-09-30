@@ -213,9 +213,9 @@ send(":"); send("summary\r", 0.8)          # 12C.8 campaign summary
 assert "CAMPAIGN SUMMARY" in plain()[-30000:] and "BATTLES" in plain()[-30000:], plain()[-3000:]
 send("\x1b", 0.6)
 send(":"); send("role 3 defense\r", 0.8)         # shared parser: lance role
-assert "done: role" in plain()[-800:], plain()[-1000:]
+assert "done." in plain()[-800:], plain()[-1000:]
 send(":"); send("autoadmit off\r", 0.8)
-assert "done: autoadmit" in plain()[-800:], plain()[-1000:]
+assert "done." in plain()[-800:], plain()[-1000:]
 send(":"); send("manning co:1\r", 0.8)   # crews table for the existing company
 assert "CREWS" in plain()[-30000:] and "mekwarrior" in plain()[-30000:], plain()[-3000:]
 send("\x1b", 0.6)
@@ -233,7 +233,7 @@ assert "UPGRADE ·" in plain()[-30000:] and "paperwork + build" in plain()[-3000
 send("\x1b")
 send("j"); send("j"); send("j"); send("u", 0.8)   # cursor on the first facility row (tier line, blank, header, then facilities) → starts (or says why not)
 p = plain()[-600:]
-assert "upgrade started" in p or "HQ funds short" in p or "project running" in p, plain()[-1500:]
+assert "upgrade started" in p or "refused:" in p, plain()[-1500:]
 send("T", 0.8)                 # tier: the starter HQ is already regional → says so (the key exists)
 assert "already at the top" in plain()[-800:], plain()[-1200:]
 send("$", 0.8)                 # sell-HQ confirm: opens, Esc keeps it
@@ -294,7 +294,7 @@ assert "SELL WHICH PART" in plain()[-30000:], plain()[-3000:]
 send("\r", 0.8)
 assert "quantity" in plain()[-30000:], plain()[-3000:]
 send("\r", 1.0)
-assert wait_for("done: sellstock", tail=2500) or "keep-stocked minimum" in plain()[-2500:], plain()[-800:]  # the footer redraw can push the message past a short window
+assert wait_for("done.", tail=2500) or "keep-stocked minimum" in plain()[-2500:], plain()[-800:]  # the footer redraw can push the message past a short window
 send("\x1b")
 send("3"); send("j", 0.6)       # forces: cursor on the company → damage pane
 assert "DAMAGE ·" in plain()[-30000:] or "every hull is whole" in plain()[-30000:], plain()[-3000:]

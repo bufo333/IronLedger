@@ -135,6 +135,38 @@ pub const Session = struct {
         self.gpa.destroy(self.gs);
         self.* = undefined;
     }
+
+    /// The new-campaign wizard spec (rule 9 — builder lives in the application
+    /// layer, not the frontend).
+    pub const WizardSpec = struct {
+        commander_name: []const u8,
+        origin: @import("../domain/commander.zig").Faction,
+        profession: @import("../domain/commander.zig").Profession,
+        start_year: u16,
+        outfit_name: []const u8,
+        company_name: []const u8,
+        /// If non-null, `set_emblem` is called on the created company.
+        emblem_image: ?[]const u8 = null,
+    };
+
+    /// Build a fresh campaign from the wizard spec: creates commander, renames
+    /// outfit, creates the first company, optionally sets the emblem. On any
+    /// error the session is closed before returning (rule 9 — no half-built
+    /// campaigns). The caller must close the returned session on their own error
+    /// paths.
+    pub fn freshCampaign(gpa: std.mem.Allocator, seed: u64, spec: WizardSpec) !Session {
+        const commands = @import("../sim/commands.zig");
+        var session = try Session.fresh(gpa, seed);
+        errdefer session.close();
+        const gs = session.gs;
+        _ = try commands.execute(gs, .{ .create_commander = .{ .name = spec.commander_name, .origin = spec.origin, .profession = spec.profession, .start_year = spec.start_year } });
+        _ = try commands.execute(gs, .{ .rename_outfit = spec.outfit_name });
+        const res = try commands.execute(gs, .{ .new_company = spec.company_name });
+        if (spec.emblem_image) |img| {
+            _ = try commands.execute(gs, .{ .set_emblem = .{ .force = res.created_force, .image = img } });
+        }
+        return session;
+    }
 };
 
 test "lobby: a generated session saves and lists under its player" {
@@ -206,4 +238,40 @@ test "save failure does not latch player_id" {
     try std.testing.expectEqual(@as(i64, 0), lobby.store.player_id);
     session.state().campaign_id = cid; // restore for clean close
     _ = prior_player_id;
+}
+
+test "freshCampaign builds a saveable session with commander, outfit, company and emblem" {
+    const sqlite = @import("sqlite.zig");
+    const commander_mod = @import("../domain/commander.zig");
+    var lobby = Lobby.wrap(try store_mod.Store.fromDb(try sqlite.Db.open(":memory:")));
+    defer lobby.close();
+    const pid = try lobby.createPlayer("Ada");
+    var session = try Session.freshCampaign(std.testing.allocator, 7, .{
+        .commander_name = "Kalmar",
+        .origin = .FS,
+        .profession = .paymaster,
+        .start_year = 3050, // u16
+        .outfit_name = "Iron Wolves",
+        .company_name = "Alpha Company",
+        .emblem_image = "WOLFHEAD",
+    });
+    defer session.close();
+    const gs = session.state();
+    try std.testing.expect(gs.commander != null);
+    try std.testing.expectEqualStrings("Kalmar", gs.commander.?.name);
+    try std.testing.expectEqualStrings("Iron Wolves", gs.outfit_name);
+    try std.testing.expect(gs.forces.count() > 0);
+    // Emblem was set on the company named "Alpha Company".
+    var fit = gs.forces.iterator();
+    var found_emblem = false;
+    while (fit.next()) |e| {
+        if (std.mem.eql(u8, e.value_ptr.name, "Alpha Company")) {
+            found_emblem = e.value_ptr.emblem != null;
+        }
+    }
+    try std.testing.expect(found_emblem);
+    // Session is saveable.
+    try lobby.save(&session, pid);
+    try std.testing.expect(gs.campaign_id != 0);
+    _ = commander_mod.Profession.paymaster; // ensures import is used
 }
