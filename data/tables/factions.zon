@@ -1,7 +1,9 @@
-// Factions of 3025. Typed against domain/faction.zig
-// `FactionRow`. `foes` feeds the contract market's enemy picks; `pay_bp`
-// the employer multiplier; `hires` whether the faction posts contracts;
-// `color` is the Map screen's political colouring.
+// Factions of 3025. Typed against domain/faction.zig `FactionRow`.
+// Canonical columns (name, capital, color, foes, hires) adapted from
+// MekHQ universe/Faction / factions.xml (ARCH §9.1).
+// `pay_bp` is a project-chosen employer multiplier. // TUNE
+// `foes` feeds the contract market's enemy picks; `hires` whether the
+// faction posts contracts; `color` is the Map screen's political colouring.
 .{
     .{ .key = "LC", .name = "Lyran Commonwealth", .color = .blue, .capital = "tharkad", .foes = .{ "DC", "FWL" }, .pay_bp = 10_500, .hires = true },
     .{ .key = "DC", .name = "Draconis Combine", .color = .red, .capital = "luthien", .foes = .{ "LC", "FS" }, .pay_bp = 10_000, .hires = true },

@@ -1,5 +1,7 @@
-// Difficulty levels: the BattleTech experience
-// ladder, applied to the economy and the opposition — never to the dice.
+// Difficulty levels: the BattleTech experience ladder, applied to the
+// economy and the opposition — never to the dice.
+// The ladder concept follows BattleTech's experience progression; all
+// bp multipliers and deltas are project-chosen balance values. // TUNE
 // Regular is the game as tuned in tables/tuning.zon; the other rows are
 // basis-point multipliers on top of it (10_000 = as tuned). Typed against
 // domain/difficulty.zig `Table`.

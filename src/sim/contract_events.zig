@@ -682,7 +682,7 @@ fn letGo(gs: *GameState, person_id: types.PersonId, replace: bool) !void {
     const retiring = p.tenureMonths(gs.clock.day_index) >= t.retire_tenure_months;
     const company = gs.companyOf(p.assigned_force);
     const paid = try personnel.depart(gs, person_id, if (retiring) .retired else .resigned, types.full_bp, if (retiring) "retirement payout" else "severance");
-    try gs.log(.rotation, .{ .company = company, .hq = p.posted_hq }, "[turnover] {s} ({s}) {s}{s}", .{ try p.fullName(gs.allocator()), @tagName(p.role), if (retiring) "retires" else "resigns", if (paid > 0) try std.fmt.allocPrint(gs.allocator(), " — {s} c-bills paid out for {d} years' service", .{ try types.moneyText(gs.allocator(), paid), p.tenureMonths(gs.clock.day_index) / 12 }) else "" });
+    try gs.log(.rotation, .{ .company = company, .hq = p.posted_hq }, "[turnover] {s} ({s}) {s}{s}", .{ try p.fullName(gs.allocator()), @tagName(p.role), if (retiring) "retires" else "resigns", if (paid > 0) try std.fmt.allocPrint(gs.allocator(), " — {s} c-bills paid out for {d} years' service", .{ try types.moneyText(gs.allocator(), paid), p.tenureMonths(gs.clock.day_index) / types.months_per_year }) else "" });
     if (!replace) return;
     for (gs.candidates.items) |cand| if (cand.spec.role == p.role) {
         const r = @import("commands.zig").execute(gs, .{ .hire_candidate = cand.id }) catch |err| {

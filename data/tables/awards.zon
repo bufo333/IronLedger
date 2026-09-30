@@ -1,6 +1,8 @@
-// Awards (MekHQ `personnel/Award`). Typed against
-// domain/award.zig `AwardRow`. `kind` names the counter on the person the
-// threshold is checked against; `morale` is the bump on receipt.
+// Awards. Typed against domain/award.zig `AwardRow`.
+// Award names and kinds adapted from MekHQ personnel/Award.
+// `threshold` and `morale` are project-chosen balance values. // TUNE
+// `kind` names the counter on the person the threshold is checked against;
+// `morale` is the bump on receipt.
 .{
     .{ .key = "first_blood", .name = "First Blood", .kind = .kills, .threshold = 1, .morale = 3 },
     .{ .key = "ace", .name = "Ace", .kind = .kills, .threshold = 5, .morale = 5 },

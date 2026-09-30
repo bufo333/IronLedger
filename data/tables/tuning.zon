@@ -2,7 +2,10 @@
 // comptime. Money in C-bills, multipliers in basis points (10_000 = ×1).
 // The formulas live beside their subsystems; this file holds only their
 // numbers, so balance edits land here.
+// Provenance: each section's source is in the matching group doc in
+// tuning.zig (ARCH §9); project-chosen sections and rows carry the marker.
 .{
+    // HQ structure, slots, and upkeep (ARCH §9).
     .hq = .{
         .influence_ly = .{ .field = 15, .regional = 60, .brigade = 90 }, // ARCH §9.2
         .influence_per_comms_ly = 10,
@@ -38,6 +41,7 @@
         .support_lance_needs = .{ .mess = 2, .mash_hospital = 1, .transport_warehouse = 1 },
         .refit_class_cap = .{ .field = 1, .regional = 3, .brigade = 5 }, // classes B, D, F
     },
+    // Transit and supply-line constants (ARCH §9); project-chosen rows // TUNE.
     .logistics = .{
         .same_world_days = 3,
         .ly_per_jump = 30,
@@ -62,10 +66,12 @@
         .transport_admin_max = 4,
         .freight_min_days = 3,
     },
+    // Link-network upkeep and construction. // TUNE
     .network = .{
         .upkeep_per_level = 60_000,
         .link_cost_per_level_sq = 250_000,
     },
+    // Part and hull market (CamOps pricing, MekHQ acquisition, AtB black market).
     .market = .{
         .staple_keys = .{
             "ammo_ac2", "ammo_ac5",   "ammo_ac10",        "ammo_ac20", "ammo_lrm", "ammo_srm", "ammo_mg",
@@ -125,6 +131,7 @@
         .black_market_fraud_target = 4,
         .black_market_standing_loss = 3,
     },
+    // Medical staffing and recovery (MekHQ ratios); project-chosen constants // TUNE.
     .medical = .{
         .iron_man_heal_bp = 7_500,
         .iron_man_min_days = 3,
@@ -143,6 +150,7 @@
         .patients_per_medic = 5,
         .permanent_target = 4,
     },
+    // Personnel constants (CamOps fatigue, AtB retention and shares, MekHQ).
     .person = .{
         .readiness_depot_weight = 10,
         .readiness_spent_weight = 5,
@@ -198,6 +206,7 @@
         .raise_loyalty_days = 365,
         .award_loyalty_days = 180,
     },
+    // Hull properties and maintenance hours. // TUNE
     .unit = .{
         .maintenance_hours = .{ .mek_light = 4, .mek_medium = 6, .mek_heavy = 8, .mek_assault = 10, .vehicle = 4, .aerospace = 8, .battle_armor = 2, .dropship = 20, .jumpship = 30 },
         .mek_light_max_tons = 35,
@@ -207,8 +216,8 @@
         // The armour meter's colour bands. Amber is roughly a hull
         // that has lost a full exchange; red is one an opposed roll can
         // core (tuning.battle.kill_armorless_severity).
-        .armor_amber_pct = 60,
-        .armor_red_pct = 30,
+        .armor_amber_pct = 60, // TUNE
+        .armor_red_pct = 30, // TUNE
         .carry = .{ .mek = 2_000, .vehicle = 1_200, .aerospace = 3_000, .battle_armor = 500, .infantry = 200, .mash = 800, .cargo = 500, .dropship = 15_000, .jumpship = 50_000 },
         .cold_storage_bp = 2_000,
         .reactivation_base_days = 7,
@@ -216,6 +225,7 @@
         .sale_bp = 5_000,
         .truck_tons = .{ .cargo = 20, .salvage = 5 },
     },
+    // Engagement resolution (TechManual hit and wound rules; ARCH §7–8).
     .battle = .{
         .outcome_at = .{ .decisive_victory = 11, .victory = 8, .draw = 6, .defeat = 4 },
         .hit_pct = .{ .decisive_victory = 8, .victory = 15, .draw = 25, .defeat = 40, .rout = 55 },
@@ -257,6 +267,7 @@
         .consolidate_morale = 2, // TUNE: a night off the line
         .contact_warning_days = 3, // TUNE: long enough to change ROE or recall before the fight
     },
+    // Field supply plan sizing constants. // TUNE
     .field_supply = .{
         .ammo_share_pct = 40,
         .armor_share_pct = 10,
@@ -271,6 +282,7 @@
         .ammo_target_battles_extra = 2, // TUNE: target = floor + this many buffer battles
         .line_floor_divisor = 2, // TUNE: each line's ship-when floor is target / this
     },
+    // Finance and lending constants. // TUNE
     .finance = .{
         .loan_rate_bp = 1_200, // 12%/yr simple interest
         .credit_floor = 2_000_000,
@@ -284,6 +296,7 @@
         .hq_policy_cap = 1_500_000,
         .loan_max_term_months = 60, // TUNE: longest term the UI has ever offered
     },
+    // Depot operations and repair quality (MekHQ repair and quality rolls).
     .hq_ops = .{
         .depot_labour_divisor = 25,
         .slots_per_bay_level = 2,
@@ -297,6 +310,7 @@
         .repair_fault_margin = 2,
         .repair_redo_bp = 5_000,
     },
+    // Quality drift and repair hours (MekHQ maintenance quality).
     .maintenance = .{
         .hours_damaged_slot = 3,
         .hours_destroyed_slot = 5,
@@ -323,6 +337,7 @@
         .hours_exotic_bp = 12_500,
         .hours_skill_bp = .{ .elite = 7_500, .veteran = 8_500, .regular = 10_000, .green = 11_500, .untrained = 13_000 },
     },
+    // Dragoons rating (CamOps "Mercenary Rating", MekHQ UnitRating).
     .rating = .{
         // CamOps Dragoons rating bands, rescaled to this sim's 0–150 score.
         .letter_d = 0,
@@ -349,6 +364,7 @@
         .negotiation_offset = 2,
         .recruit_bonus_index = 4,
     },
+    // Contract terms and negotiation (CamOps contract generation, AtB).
     .contract = .{
         .rep_vp_per_point = 25, // a raid closed at −8 VP earns nothing
         .rep_vp_bonus_min = -1,
@@ -428,6 +444,7 @@
         .recruit_prisoner_target = 8,
         .share_morale_bonus = 3, // morale bump per shareholder when profit shares are paid (AtB)
     },
+    // Starter company generation (AtB, HBS BattleTech).
     .generation = .{
         .weight_light_max = 4, // AtB flavour: mediums dominate a line company, assaults are prizes
         .weight_medium_max = 8,
@@ -496,13 +513,16 @@
         .recon_per_level_bp = 500,
         .support_lance_bp = 250,
     },
+    // Component fabrication and provisions (domain/part.zig).
     .part = .{
         .fab_days = .{ .ct = 12, .torso = 9, .leg = 8, .arm = 6, .head = 5, .other = 7 },
         .fab_class_delta = .{ .light = -2, .heavy = 3, .assault = 6 },
-        .provisions_person_days_per_ton = 200, // ~5 kg/person/day
+        .provisions_person_days_per_ton = 200, // TUNE: ~5 kg/person/day
     },
+    // Force shape constants not covered by ARCH §9.3. // TUNE
     .force = .{
         .max_air_lances = 3,
     },
+    // Commander bonus. // TUNE
     .commander = .{ .bonus_bp = 200 },
 }

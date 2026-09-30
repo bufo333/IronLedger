@@ -249,7 +249,7 @@ pub const Person = struct {
             .wounded => @intCast(self.injuries.items.len + @as(usize, @intFromBool(self.status == .wounded))),
             .tours => self.tours,
             .outstanding_tours => self.outstanding_tours,
-            .service_years => self.tenureMonths(day) / 12,
+            .service_years => self.tenureMonths(day) / types.months_per_year,
         };
     }
 
@@ -458,7 +458,7 @@ pub const Person = struct {
     /// pay per full year served, capped. Under a year: nothing.
     pub fn severance(self: *const Person, day: u32) types.CBills {
         const t = tuning.person;
-        const years = self.tenureMonths(day) / 12;
+        const years = self.tenureMonths(day) / types.months_per_year;
         const months = @min(years * t.severance_months_per_year, t.severance_cap_months);
         const full = self.monthlySalary() * @as(types.CBills, months);
         // Shareholders already hold a stake: half the payout.

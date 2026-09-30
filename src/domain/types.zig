@@ -27,8 +27,10 @@ pub fn bpPercent(bp: Bp) i64 {
     return @divTrunc(bp, 100);
 }
 
-/// The campaign calendar's arithmetic months and years (the rendered date
-/// follows the real calendar; tenure, terms and ages count in these).
+/// The campaign calendar's arithmetic week, months, and years (the rendered
+/// date follows the real calendar; tenure, terms and ages count in these).
+/// Rules 24, 25: each of the four owners is the one call-site for its unit.
+pub const days_per_week: u32 = 7;
 pub const days_per_month: u32 = 30;
 pub const days_per_year: u32 = 365;
 pub const months_per_year: u32 = 12;

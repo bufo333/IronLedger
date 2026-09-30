@@ -54,7 +54,7 @@ pub fn advanceDay(gs: *GameState) !void {
     hq_ops.refreshHqStaffing(gs); // the back office is people
 
     // Phase order per DayPhase.
-    if (gs.clock.day_index % 7 == 0) network.resetWeeklyThroughput(gs); // links' week
+    if (gs.clock.day_index % types.days_per_week == 0) network.resetWeeklyThroughput(gs); // links' week
     try runTravel(gs); // deliveries, couriers, transfers
     try runPolicies(gs); // standing cash top-ups and resupply
     try runStockPolicies(gs); // warehouse reorder points
@@ -62,7 +62,7 @@ pub fn advanceDay(gs: *GameState) !void {
     try runSupplyConsumption(gs); // supply_consumption phase
     try medical.runDailyHealing(gs); // medical phase
     try runMarkets(gs); // acquisition_and_markets
-    if (gs.clock.day_index % 7 == 0 and gs.clock.day_index > 0) {
+    if (gs.clock.day_index % types.days_per_week == 0 and gs.clock.day_index > 0) {
         try maintenance.runWeeklyMaintenance(gs); // maintenance phase
         try maintenance.runWeeklyRepairs(gs);
     }
@@ -70,13 +70,13 @@ pub fn advanceDay(gs: *GameState) !void {
     try runContracts(gs); // contract lifecycle
     try contract_control.runReturns(gs); // companies travelling home arrive
     if (gs.clock.date.day == 1) try contract_events.rollMonthly(gs); // event decks
-    if (gs.clock.day_index % 7 == 3) {
+    if (gs.clock.day_index % types.days_per_week == 3) {
         try contract_events.rollWeekly(gs); // weekly happenings
         try contract_events.rollInterdiction(gs); // raiders at the jump point
     }
     try battle.runDaily(gs); // battle_resolution: due engagements resolve
     try contract_control.checkEffectiveness(gs); // the ineffectiveness clock
-    if (gs.clock.day_index % 7 == 0 and gs.clock.day_index > 0) {
+    if (gs.clock.day_index % types.days_per_week == 0 and gs.clock.day_index > 0) {
         try medical.runWeeklyRest(gs); // morale_fatigue phase
         runTrainingLances(gs); // training lances drill
     }
@@ -160,7 +160,7 @@ fn runPolicies(gs: *GameState) !void {
             const available = gs.stockCount(.{ .hq = home }, line.key);
             const qty = @min(want, available);
             if (qty == 0) {
-                if (gs.clock.day_index % 7 == 0) try gs.log(.delivery, .{ .company = sp.company, .hq = home }, "[supply] resupply policy: no {s} at {s} to ship to {s} ({d}t on hand, floor {d}t)", .{ line.key, gs.hqs.getPtr(home).?.name, f.name, on_hand, line.floor });
+                if (gs.clock.day_index % types.days_per_week == 0) try gs.log(.delivery, .{ .company = sp.company, .hq = home }, "[supply] resupply policy: no {s} at {s} to ship to {s} ({d}t on hand, floor {d}t)", .{ line.key, gs.hqs.getPtr(home).?.name, f.name, on_hand, line.floor });
                 continue;
             }
             _ = commands.execute(gs, .{ .ship_stock = .{ .part_key = line.key, .quantity = qty, .from = .{ .hq = home }, .to = site } }) catch |err| {
@@ -173,7 +173,7 @@ fn runPolicies(gs: *GameState) !void {
                     error.ThroughputExceeded => "the supply line is at capacity this week",
                     else => "the shipment could not be completed",
                 };
-                if (gs.clock.day_index % 7 == 0) try gs.log(.delivery, .{ .company = sp.company, .hq = home }, "[supply] resupply policy could not ship {s} to {s}: {s}", .{ line.key, f.name, reason });
+                if (gs.clock.day_index % types.days_per_week == 0) try gs.log(.delivery, .{ .company = sp.company, .hq = home }, "[supply] resupply policy could not ship {s} to {s}: {s}", .{ line.key, f.name, reason });
                 continue;
             };
             try gs.log(.delivery, .{ .company = sp.company, .hq = home }, "[supply] resupply policy ships {d}t of {s} to {s} ({d}t on hand + {d}t inbound, floor {d}t, target {d}t, {d}-day line)", .{ qty, line.key, f.name, on_hand, inbound, line.floor, line.target, transit });
@@ -269,7 +269,7 @@ fn runStockPolicies(gs: *GameState) !void {
                 error.ThroughputExceeded => "the supply line is at capacity this week",
                 else => "the restock could not be completed",
             };
-            if (today % 7 == 0) try gs.log(.market, .{ .hq = sp.hq }, "[stock] policy could not restock {s} at {s}: {s}", .{ sp.part_key, hq.name, reason });
+            if (today % types.days_per_week == 0) try gs.log(.market, .{ .hq = sp.hq }, "[stock] policy could not restock {s} at {s}: {s}", .{ sp.part_key, hq.name, reason });
             continue;
         };
         try gs.log(.market, .{ .hq = sp.hq }, "[stock] policy {s} {d} {s} for {s} ({d} on hand, keep {d}-{d})", .{ if (fabricate) "fabricates" else "orders", want, sp.part_key, hq.name, have, sp.min, sp.target });
@@ -434,7 +434,7 @@ fn runSupplyConsumption(gs: *GameState) !void {
             f.supply_shortage_days = 0;
         } else {
             f.supply_shortage_days +|= 1;
-            if (f.supply_shortage_days == 1 or f.supply_shortage_days % 7 == 0) {
+            if (f.supply_shortage_days == 1 or f.supply_shortage_days % types.days_per_week == 0) {
                 try gs.log(.finance, .{ .company = f.id, .contract = contract_id }, "[supply] {s} is out of provisions and out of local funds — day {d} hungry", .{ f.name, f.supply_shortage_days });
             }
         }

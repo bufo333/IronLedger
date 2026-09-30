@@ -36,20 +36,6 @@ Owner of every entry: the project owner.
 - **Removal:** C10.
 - **Guard:** review (checklist question 5). No mechanical check.
 
-### C13. Numbers, arithmetic and formatting
-
-- **Rules:** 24, 25, 28, 54, 55, 59.
-- **Why not yet:** Mechanical, but it touches many rule sites. 331 tuning rows need a citation or `// TUNE`.
-- **Scope:**
-  - **Arithmetic:**
-    - Week and month conversions are bare literals.
-  - **Citations:**
-    - 331 tuning rows carry neither a source nor `// TUNE`.
-    - Provenance labels are missing (factions, awards, difficulty, ranks).
-    - `// TUNE` markers disagree between the struct and the data.
-- **Removal:** C13.
-- **Guard:** review (checklist question 10). No mechanical check.
-
 ### C14. Randomness
 
 - **Rules:** 57.

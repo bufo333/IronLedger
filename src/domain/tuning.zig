@@ -14,6 +14,7 @@ pub const StaffRow = struct { admin: u32, logistics: u32, hr: u32, finance: u32 
 pub const CapacityRow = struct { combat_companies: u8, lances_per_company: u8, support_companies: u8, support_lances: u8, air_companies: u8, dropship_berths: u8, jumpship_berths: u8 };
 
 pub const Tuning = struct {
+    /// HQ structure, slots, and upkeep (ARCH §9).
     hq: struct {
         influence_ly: struct { field: u32, regional: u32, brigade: u32 },
         influence_per_comms_ly: u32,
@@ -61,6 +62,7 @@ pub const Tuning = struct {
         /// Highest refit class a tier's bay reaches (Quality index: 1 = B … 5 = F).
         refit_class_cap: struct { field: u8, regional: u8, brigade: u8 },
     },
+    /// Transit and supply-line constants (ARCH §9); project-chosen rows // TUNE.
     logistics: struct {
         /// Days a same-world move still takes (loading, a short burn, paperwork).
         same_world_days: u32,
@@ -85,18 +87,20 @@ pub const Tuning = struct {
         freight_per_ly: types.CBills,
         /// Stock freight: C-bills per ton per jump on every leg (a same-world
         /// leg bills one jump).
-        freight_per_ton_jump: types.CBills,
+        freight_per_ton_jump: types.CBills, // TUNE
         /// Each transport admin at the seat takes this off freight, up to
         /// `transport_admin_max` of them.
-        transport_admin_discount_bp: types.Bp,
+        transport_admin_discount_bp: types.Bp, // TUNE
         transport_admin_max: u8,
         /// No shipment lands in fewer days than this, same HQ included.
         freight_min_days: u32,
     },
+    /// Link-network upkeep and construction. // TUNE
     network: struct {
         upkeep_per_level: types.CBills,
         link_cost_per_level_sq: types.CBills,
     },
+    /// Part and hull market (CamOps pricing, MekHQ acquisition, AtB black market).
     market: struct {
         /// Parts always on every board (weapons and ammo are readily available; the rare slots are for everything else).
         staple_keys: []const []const u8,
@@ -188,6 +192,7 @@ pub const Tuning = struct {
         black_market_fraud_target: u8,
         black_market_standing_loss: i32,
     },
+    /// Medical staffing and recovery (MekHQ ratios); project-chosen constants // TUNE.
     medical: struct {
         /// Iron Man: heals in this share of the days, never under the floor.
         iron_man_heal_bp: types.Bp,
@@ -210,6 +215,7 @@ pub const Tuning = struct {
         patients_per_medic: u32,
         permanent_target: u8,
     },
+    /// Personnel constants (CamOps fatigue, AtB retention and shares, MekHQ).
     person: struct {
         /// Readiness ranking for an offer: points against a company
         /// per hull in the depot, per spent crew, per wounded, and the
@@ -317,6 +323,7 @@ pub const Tuning = struct {
         raise_loyalty_days: u32,
         award_loyalty_days: u32,
     },
+    /// Hull properties and maintenance hours. // TUNE
     unit: struct {
         /// Weekly maintenance hours by kind; meks by tonnage band
         /// (infantry has no hull and takes none).
@@ -337,6 +344,7 @@ pub const Tuning = struct {
         sale_bp: types.Bp,
         truck_tons: struct { cargo: u32, salvage: u32 },
     },
+    /// Engagement resolution (TechManual hit and wound rules; ARCH §7–8).
     battle: struct {
         /// The engagement roll (2d6 + modifiers) at or above which each
         /// outcome falls; under `defeat` is a rout.
@@ -410,6 +418,7 @@ pub const Tuning = struct {
         /// engagement opens its window on an advance.
         contact_warning_days: u32, // TUNE
     },
+    /// Field supply plan sizing constants. // TUNE
     field_supply: struct {
         ammo_share_pct: u32,
         armor_share_pct: u32,
@@ -433,6 +442,7 @@ pub const Tuning = struct {
         /// this (minimum 1 ton). // TUNE
         line_floor_divisor: u32,
     },
+    /// Finance and lending constants. // TUNE
     finance: struct {
         loan_rate_bp: types.Bp,
         credit_floor: types.CBills,
@@ -451,6 +461,7 @@ pub const Tuning = struct {
         /// Maximum loan term a player may request. // TUNE
         loan_max_term_months: u16,
     },
+    /// Depot operations and repair quality (MekHQ repair and quality rolls).
     hq_ops: struct {
         /// Depot labour per structure hit: the hull's price over this.
         depot_labour_divisor: types.CBills,
@@ -554,6 +565,7 @@ pub const Tuning = struct {
         negotiation_offset: i32,
         recruit_bonus_index: u8,
     },
+    /// Contract terms and negotiation (CamOps contract generation, AtB).
     contract: struct {
         /// Reputation on completion: 1 + VP / `rep_vp_per_point`, the VP part clamped to [min, max]; a tour in the red earns only the (negative) VP part.
         rep_vp_per_point: i32,
@@ -689,6 +701,7 @@ pub const Tuning = struct {
         /// at contract completion (AtB shares system; rule 24).
         share_morale_bonus: i32,
     },
+    /// Starter company generation (AtB, HBS BattleTech).
     generation: struct {
         /// RAT weight-class roll (2d6): up to `light_max` light, `medium_max` medium, `heavy_max` heavy, else assault.
         weight_light_max: u8,
@@ -716,8 +729,8 @@ pub const Tuning = struct {
         /// founding level-1 mek bay could not rebuild.
         starter_light_max: u8,
     },
-    /// Real loss: how hulls die, what a rebuild needs, and when
-    /// one is not worth it.
+    /// Real loss: how hulls die, what a rebuild needs, and when one is not
+    /// worth it (TechManual hull destruction; CamOps salvage).
     loss: struct {
         /// An engine kill or an ammunition explosion is scrap on 2d6 at or
         /// under this (+ the difficulty's `scrap_mod`).
@@ -793,13 +806,14 @@ pub const Tuning = struct {
         fab_days: struct { ct: u32, torso: u32, leg: u32, arm: u32, head: u32, other: u32 },
         /// Days added by weight class (light is quicker).
         fab_class_delta: struct { light: i32, heavy: i32, assault: i32 },
-        /// One ton of provisions feeds this many person-days.
+        /// One ton of provisions feeds this many person-days. // TUNE
         provisions_person_days_per_ton: u32,
     },
-    /// Force shape constants not fixed by ARCH §9.3.
+    /// Force shape constants not covered by ARCH §9.3. // TUNE
     force: struct {
         max_air_lances: u8,
     },
+    /// Commander bonus. // TUNE
     commander: struct { bonus_bp: types.Bp },
 };
 

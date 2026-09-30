@@ -1,6 +1,8 @@
-// Mercenary rank ladder (MekHQ `personnel/ranks`, CamOps
-// officer pay). Typed against domain/rank.zig `RankRow` at comptime, one
-// row per `Rank` enum value in order. pay_bp scales the CamOps salary.
+// Mercenary rank ladder. Typed against domain/rank.zig `RankRow` at
+// comptime, one row per `Rank` enum value in order.
+// Rank names adapted from MekHQ personnel/ranks.
+// `pay_bp` is a project-chosen officer-pay scaling; page-precise CamOps
+// pay verification is deferred to DATA-CAMOPS. // TUNE
 .{
     .{ .key = "recruit", .name = "Recruit", .abbrev = "Rct.", .pay_bp = 10_000, .officer = false },
     .{ .key = "private", .name = "Private", .abbrev = "Pvt.", .pay_bp = 10_000, .officer = false },

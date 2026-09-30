@@ -23,12 +23,6 @@ C18.
 - [ ] C10 location, posture, and seat resolution (C10a-C10d; rules 21-23, 71):
   company posture, site-local office/medical effects, seat/outfit resolution,
   refit stock, and asymmetric two-HQ tests. Delete C10.
-- [ ] C13 numbers, arithmetic, formatting, and citations (rules 24, 25, 28,
-  54, 55, 59):
-  - [ ] C13-time-quotes-limits (C13f-C13p): durations, limits, loans, calendar,
-    and basis-point arithmetic.
-  - [ ] C13-provenance (C13v-C13x): tuning citations, labels, and TUNE markers.
-    Delete C13 after all four.
 - [ ] C14 randomness (C14a-C14b; rule 57): caller-selected generator streams
   and verified citations for every non-2d6 die. Stop if a source is unavailable.
   Delete C14.
@@ -47,7 +41,7 @@ C18.
 
 C17 focused coverage (rule 67) is required within its owner packages, not a
 separate branch: C17a1/b5, C17a2/a4/b3, C17a5-a6/b2/b5-b6 delivered; C17a3/b1 with C5;
-C17a7/b7 with C13 and C20; and C17c's
+C17a7/b7 with C20; and C17c's
 Desk, Contracts, Ledger, Forces, People, Supply, HQ, Market, Lab, and Map
 coverage with the two C12 packages. C20's final inventory must show no scoped
 omission before it deletes C17.
