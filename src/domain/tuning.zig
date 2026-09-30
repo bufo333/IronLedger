@@ -150,6 +150,16 @@ pub const Tuning = struct {
         hall_floor_combat: u32,
         procurement_markup_bp: types.Bp,
         rarity_target: struct { common: u8, uncommon: u8, rare: u8, very_rare: u8 },
+        /// Maximum quantity a single fabricate command may request. // TUNE
+        fab_max_qty: u32,
+        /// Days a hull listing stays on the board after the salvage
+        /// refresh or a board top-up (one day past a calendar month so it
+        /// survives the next monthly pass). // TUNE
+        hull_listing_days: u32,
+        /// Base days a contract-board hull offer stays listed. // TUNE
+        offer_days_base: u32,
+        /// Extra days per 2d6 pip above the base offer stay. // TUNE
+        offer_days_per_pip: u32,
         /// The contract board: never fewer than `offers_min`
         /// offers, never more than `offers_max`; the rating letter and comms
         /// reach fill the gap between.
@@ -408,6 +418,20 @@ pub const Tuning = struct {
         provisions_cadence_days: u32,
         /// Safety days for the resupply policy a deployment gets by default.
         default_min_days: u16,
+        /// Field-plan shape constants (floor and target sizing).
+        /// Medical: minimum tons regardless of capacity. // TUNE
+        medical_base_tons: u32,
+        /// Medical: base tons plus one per wounded person above this. // TUNE
+        medical_wounded_base: u32,
+        /// Armor: minimum tons in the target and in the clamp floor. // TUNE
+        armor_floor_tons: u32,
+        /// Ammo floor: engaged-battle count starts here before transit adds up. // TUNE
+        ammo_floor_battles_base: u32,
+        /// Ammo target: floor_battles plus this many extra buffer battles. // TUNE
+        ammo_target_battles_extra: u32,
+        /// Line floor: each supply line's floor is its target divided by
+        /// this (minimum 1 ton). // TUNE
+        line_floor_divisor: u32,
     },
     finance: struct {
         loan_rate_bp: types.Bp,
@@ -424,6 +448,8 @@ pub const Tuning = struct {
         /// Default standing top-up for the starter HQ.
         hq_policy_floor: types.CBills,
         hq_policy_cap: types.CBills,
+        /// Maximum loan term a player may request. // TUNE
+        loan_max_term_months: u16,
     },
     hq_ops: struct {
         /// Depot labour per structure hit: the hull's price over this.
@@ -623,6 +649,24 @@ pub const Tuning = struct {
         salvage_exchange_bp: types.Bp,
         salvage_cbills_per_bv: types.CBills,
         salvage_exchange_in: u32,
+        /// Negotiation term caps and steps (CamOps contract negotiation):
+        /// advance locks at the cap in one step; salvage, transport and
+        /// overhead each step up by their increment to their cap.
+        /// Values copied verbatim from CamOps / AtB contract negotiation.
+        negotiate_advance_cap_pct: u8, // CamOps: advance fixed at 50%
+        negotiate_salvage_cap_pct: u8, // CamOps: salvage cap 60%, step +10%
+        negotiate_salvage_step_pct: u8,
+        negotiate_transport_cap_pct: u8, // CamOps: full transport coverage
+        negotiate_transport_step_pct: u8,
+        negotiate_overhead_cap_pct: u8, // CamOps: full overhead coverage
+        negotiate_overhead_step_pct: u8,
+        /// Standing floor on contract completion: the employer always
+        /// gains at least this many standing points from a tour served,
+        /// regardless of VP. // TUNE
+        standing_gain_floor: i32,
+        /// Extra standing points earned with the employer on a beachhead
+        /// contract (CamOps employer relationship; rule 24). // TUNE
+        standing_beachhead_bonus: i32,
         /// Negotiation (CamOps): 2d6 + the rating edge
         /// + the command office's skill edge vs `negotiation_target` −
         /// standing/`negotiation_standing_per`; a miss hardens the pay by

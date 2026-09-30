@@ -413,6 +413,10 @@ pub const Error = error{
     StapleOffBoard,
     /// `post_person`: the person is already posted at that HQ.
     AlreadyPosted,
+    /// `take_loan`: term_months exceeds the maximum allowed (tuning.finance.loan_max_term_months).
+    LoanTermTooLong,
+    /// `fabricate`: quantity exceeds the per-command maximum (tuning.market.fab_max_qty).
+    TooManyFabricated,
 } || std.mem.Allocator.Error;
 
 pub const Result = struct {

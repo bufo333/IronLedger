@@ -4,6 +4,7 @@
 
 const std = @import("std");
 const types = @import("types.zig");
+const tuning = @import("tuning.zig").t;
 
 pub const ContractKind = enum {
     garrison_duty,
@@ -179,28 +180,29 @@ pub const Terms = struct {
 
     /// Apply one negotiated step. Returns false when the term is already at its cap.
     pub fn improve(self: *Terms, term: NegotiableTerm) bool {
+        const nc = tuning.contract;
         switch (term) {
             .advance => {
-                if (self.advance_pct >= 50) return false;
-                self.advance_pct = 50;
+                if (self.advance_pct >= nc.negotiate_advance_cap_pct) return false;
+                self.advance_pct = nc.negotiate_advance_cap_pct;
             },
             .salvage => {
-                if (self.salvage_pct >= 60) return false;
-                self.salvage_pct = @min(60, self.salvage_pct + 10);
+                if (self.salvage_pct >= nc.negotiate_salvage_cap_pct) return false;
+                self.salvage_pct = @min(nc.negotiate_salvage_cap_pct, self.salvage_pct + nc.negotiate_salvage_step_pct);
             },
             .transport => {
-                if (self.transport_pct >= 100) return false;
-                self.transport_pct = @min(100, self.transport_pct + 20);
+                if (self.transport_pct >= nc.negotiate_transport_cap_pct) return false;
+                self.transport_pct = @min(nc.negotiate_transport_cap_pct, self.transport_pct + nc.negotiate_transport_step_pct);
             },
             .support => {
-                if (self.overhead_pct >= 100) return false;
-                self.overhead_pct = @min(100, self.overhead_pct + 25);
+                if (self.overhead_pct >= nc.negotiate_overhead_cap_pct) return false;
+                self.overhead_pct = @min(nc.negotiate_overhead_cap_pct, self.overhead_pct + nc.negotiate_overhead_step_pct);
             },
             .rights => {
                 if (self.command_rights == .independent) return false;
                 self.command_rights = @enumFromInt(@intFromEnum(self.command_rights) + 1);
             },
-            .pay => self.base_pay_month = types.applyBp(self.base_pay_month, @import("tuning.zig").t.contract.negotiation_pay_step_bp),
+            .pay => self.base_pay_month = types.applyBp(self.base_pay_month, nc.negotiation_pay_step_bp),
         }
         return true;
     }
@@ -210,7 +212,7 @@ pub const Terms = struct {
     }
 
     pub fn advanceAmount(self: Terms) types.CBills {
-        return @divTrunc(self.totalBasePay() * self.advance_pct, 100);
+        return types.applyPct(self.totalBasePay(), self.advance_pct);
     }
 };
 
@@ -387,19 +389,30 @@ test "command rights trade pay for tempo and salvage" {
     try std.testing.expect(CommandRights.liaison.allowsTrainingLances());
 }
 
-test "negotiated steps move one term and stop at the cap" {
+test "negotiated steps move one term and stop at the named cap" {
+    const nc = @import("tuning.zig").t.contract;
     var t: Terms = .{ .length_months = 6, .base_pay_month = 100_000, .salvage_pct = 50, .command_rights = .liaison };
     try std.testing.expect(t.improve(.advance));
-    try std.testing.expectEqual(@as(u8, 50), t.advance_pct);
+    try std.testing.expectEqual(nc.negotiate_advance_cap_pct, t.advance_pct);
     try std.testing.expect(!t.improve(.advance));
     try std.testing.expect(t.improve(.salvage));
-    try std.testing.expectEqual(@as(u8, 60), t.salvage_pct);
+    try std.testing.expectEqual(nc.negotiate_salvage_cap_pct, t.salvage_pct);
     try std.testing.expect(!t.improve(.salvage));
     try std.testing.expect(t.improve(.rights));
     try std.testing.expectEqual(CommandRights.independent, t.command_rights);
     try std.testing.expect(!t.improve(.rights));
     try std.testing.expect(t.improve(.pay));
     try std.testing.expectEqual(@as(types.CBills, 110_000), t.base_pay_month);
+    // Transport: step from near-cap stops at cap.
+    var t2: Terms = .{ .length_months = 6, .base_pay_month = 100_000, .transport_pct = nc.negotiate_transport_cap_pct - nc.negotiate_transport_step_pct };
+    try std.testing.expect(t2.improve(.transport));
+    try std.testing.expectEqual(nc.negotiate_transport_cap_pct, t2.transport_pct);
+    try std.testing.expect(!t2.improve(.transport));
+    // Support (overhead): step from near-cap stops at cap.
+    var t3: Terms = .{ .length_months = 6, .base_pay_month = 100_000, .overhead_pct = nc.negotiate_overhead_cap_pct - nc.negotiate_overhead_step_pct };
+    try std.testing.expect(t3.improve(.support));
+    try std.testing.expectEqual(nc.negotiate_overhead_cap_pct, t3.overhead_pct);
+    try std.testing.expect(!t3.improve(.support));
 }
 
 test "gradeOf maps victory_points to the correct grade; objectivesMet fires at the threshold" {

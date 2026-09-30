@@ -292,9 +292,10 @@ pub fn execSetPolicy(gs: *GameState, p: @FieldType(Command, "set_policy")) Error
 
 pub fn execTakeLoan(gs: *GameState, l: @FieldType(Command, "take_loan")) Error!Result {
     if (l.principal <= 0 or l.term_months == 0) return Error.NoSuchLoan;
+    if (l.term_months > tuning.finance.loan_max_term_months) return Error.LoanTermTooLong;
     if (l.principal > try creditRemaining(gs.scratch(), gs)) return Error.CreditExceeded;
     const rate_bp: types.Bp = tuning.finance.loan_rate_bp; // 12%/yr simple interest
-    const total_interest = @divTrunc(l.principal * rate_bp * l.term_months, 10_000 * 12);
+    const total_interest = finance_mod.totalInterest(l.principal, rate_bp, l.term_months);
     const loan_id: types.LoanId = @enumFromInt(gs.next_loan_id);
     try gs.loans.append(gs.allocator(), .{
         .id = loan_id,
@@ -302,7 +303,7 @@ pub fn execTakeLoan(gs: *GameState, l: @FieldType(Command, "take_loan")) Error!R
         .balance = l.principal,
         .rate_bp = rate_bp,
         .term_months = l.term_months,
-        .next_pay_day = gs.clock.day_index + 30,
+        .next_pay_day = gs.clock.day_index + types.days_per_month,
         .payment = @divTrunc(l.principal + total_interest, l.term_months),
     });
     gs.next_loan_id += 1;
@@ -645,4 +646,19 @@ test "courierEtaDays floors at same_world_days and rises with jump distance" {
     try std.testing.expect(far_eta >= logistics.same_world_days);
     // Outfit-to-outfit is always same-world (both at the seat).
     try std.testing.expectEqual(logistics.same_world_days, courierEtaDays(&gs, .outfit));
+}
+
+test "loan term over the cap is refused before any state changes (rules 13, 69)" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 42 });
+    defer gs.deinit();
+    const term_too_long: u16 = @intCast(tuning.finance.loan_max_term_months + 1);
+    const funds_before = gs.funds;
+    const loans_before = gs.loans.items.len;
+    const next_id_before = gs.next_loan_id;
+    const txn_before = gs.ledger.transactions.items.len;
+    try std.testing.expectError(error.LoanTermTooLong, commands.execute(&gs, .{ .take_loan = .{ .principal = 100_000, .term_months = term_too_long } }));
+    try std.testing.expectEqual(funds_before, gs.funds);
+    try std.testing.expectEqual(loans_before, gs.loans.items.len);
+    try std.testing.expectEqual(next_id_before, gs.next_loan_id);
+    try std.testing.expectEqual(txn_before, gs.ledger.transactions.items.len);
 }

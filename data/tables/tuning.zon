@@ -109,6 +109,10 @@
         .hall_floor_combat = 3,
         .procurement_markup_bp = 11_000,
         .rarity_target = .{ .common = 5, .uncommon = 7, .rare = 9, .very_rare = 11 },
+        .fab_max_qty = 20, // TUNE: one batch of structural components per command
+        .hull_listing_days = 31, // TUNE: one day past the calendar month so listings survive the refresh
+        .offer_days_base = 60, // TUNE: two months base
+        .offer_days_per_pip = 5, // TUNE: 2d6 pips × 5 days extra
         .offers_min = 6, // the board always gives a choice
         .offers_max = 10,
         .avail_mod = .{ .a = 2, .b = 1, .c = 0, .d = -1, .e = -2, .f = -3 },
@@ -260,6 +264,12 @@
         .days_per_battle = 15,
         .provisions_cadence_days = 14,
         .default_min_days = 14,
+        .medical_base_tons = 2, // TUNE: always request at least this many tons of medical supplies
+        .medical_wounded_base = 4, // TUNE: base tonnage for wounded care before scaling
+        .armor_floor_tons = 2, // TUNE: minimum armor tons in the plan
+        .ammo_floor_battles_base = 1, // TUNE: at least one battle's ammo before transit adds up
+        .ammo_target_battles_extra = 2, // TUNE: target = floor + this many buffer battles
+        .line_floor_divisor = 2, // TUNE: each line's ship-when floor is target / this
     },
     .finance = .{
         .loan_rate_bp = 1_200, // 12%/yr simple interest
@@ -272,6 +282,7 @@
         .field_policy_cap = 500_000,
         .hq_policy_floor = 500_000,
         .hq_policy_cap = 1_500_000,
+        .loan_max_term_months = 60, // TUNE: longest term the UI has ever offered
     },
     .hq_ops = .{
         .depot_labour_divisor = 25,
@@ -395,6 +406,15 @@
         .salvage_exchange_bp = 6_000,
         .salvage_cbills_per_bv = 2_000,
         .salvage_exchange_in = 6,
+        .negotiate_advance_cap_pct = 50, // CamOps: advance locks at 50% in one step
+        .negotiate_salvage_cap_pct = 60, // CamOps: salvage cap 60%
+        .negotiate_salvage_step_pct = 10, // CamOps: step +10% per round
+        .negotiate_transport_cap_pct = 100, // CamOps: full transport coverage
+        .negotiate_transport_step_pct = 20, // CamOps: step +20% per round
+        .negotiate_overhead_cap_pct = 100, // CamOps: full overhead coverage
+        .negotiate_overhead_step_pct = 25, // CamOps: step +25% per round
+        .standing_gain_floor = 2, // TUNE: minimum standing gained on any completed tour
+        .standing_beachhead_bonus = 2, // TUNE: extra standing for a beachhead contract
         .negotiation_target = 8,
         .negotiation_standing_per = 25,
         .negotiation_fail_pay_bp = 9_500,

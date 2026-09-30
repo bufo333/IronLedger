@@ -126,7 +126,22 @@ pub const Loan = struct {
     term_months: u16,
     next_pay_day: u32,
     payment: types.CBills,
+
+    /// Monthly interest charge: simple interest on the original principal,
+    /// spread evenly over the term (CamOps; rule 25). Both the tick's loan
+    /// service and treasury.execTakeLoan call this; rule 20 forbids a second
+    /// copy of the formula.
+    pub fn monthlyInterest(self: Loan) types.CBills {
+        return @divTrunc(self.principal * self.rate_bp, types.full_bp * types.months_per_year);
+    }
 };
+
+/// Total interest charged over the full term at draw time: the monthly amount
+/// times the number of payments. Used by execTakeLoan to size the payment
+/// (CamOps simple interest on original principal; rule 25).
+pub fn totalInterest(principal: types.CBills, rate_bp: types.Bp, term_months: u16) types.CBills {
+    return @divTrunc(principal * rate_bp * term_months, types.full_bp * types.months_per_year);
+}
 
 test "summary splits income from expenses by category" {
     const alloc = std.testing.allocator;
@@ -161,4 +176,32 @@ test "ledger balance and company P&L" {
     try std.testing.expectEqual(@as(types.CBills, -150_000), ledger.balance());
     try std.testing.expectEqual(@as(types.CBills, 600_000), ledger.companyNet(alpha, 1, 31));
     try std.testing.expectEqual(@as(types.CBills, -700_000), ledger.companyNet(bravo, 1, 31));
+}
+
+test "loan interest owner: monthlyInterest and totalInterest agree with the draw-time formula" {
+    // Fixtures drawn from the treasury tests (principal / term_months).
+    // Expected values are principal × 1_200 / (10_000 × 12), computed by hand:
+    //   100_000 × 1_200 / 120_000 = 1_000/mo
+    //   500_000 × 1_200 / 120_000 = 5_000/mo
+    //   1_200_000 × 1_200 / 120_000 = 12_000/mo
+    const rate_bp: types.Bp = 1_200; // 12%/yr simple interest (tuning.finance.loan_rate_bp)
+    const cases = [_]struct { principal: types.CBills, term: u16, monthly: types.CBills }{
+        .{ .principal = 100_000, .term = 6, .monthly = 1_000 },
+        .{ .principal = 500_000, .term = 12, .monthly = 5_000 },
+        .{ .principal = 1_200_000, .term = 12, .monthly = 12_000 },
+    };
+    for (cases) |c| {
+        const loan: Loan = .{
+            .principal = c.principal,
+            .balance = c.principal,
+            .rate_bp = rate_bp,
+            .term_months = c.term,
+            .next_pay_day = 30,
+            .payment = 0,
+        };
+        // monthlyInterest returns the expected per-month charge, verified by hand.
+        try std.testing.expectEqual(c.monthly, loan.monthlyInterest());
+        // totalInterest matches monthly × term (same divisor, no rounding drift).
+        try std.testing.expectEqual(c.monthly * c.term, totalInterest(c.principal, rate_bp, c.term));
+    }
 }

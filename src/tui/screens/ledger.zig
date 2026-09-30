@@ -116,7 +116,7 @@ pub fn handle(self: *App, k: app.Key) anyerror!bool {
         },
         .loan => self.openAmount("TAKE A LOAN (simple interest)", .loan, &.{
             .{ .label = "principal", .value = @min(try q.creditRemaining(self.a(), g), 1_000_000), .min = 1, .max = @max(1, try q.creditRemaining(self.a(), g)), .step = 100_000 },
-            .{ .label = "months", .value = 12, .min = 1, .max = 60, .step = 6 },
+            .{ .label = "months", .value = 12, .min = 1, .max = q.loan_max_term_months, .step = 6 },
         }),
         .repay => {
             const bal = q.oldestLoanBalance(g) orelse {

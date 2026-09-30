@@ -1298,6 +1298,7 @@ pub fn execReactivate(gs: *GameState, unit_id: @FieldType(Command, "reactivate")
 }
 
 pub fn execFabricate(gs: *GameState, f0: @FieldType(Command, "fabricate")) Error!Result {
+    if (f0.quantity > tuning.market.fab_max_qty) return Error.TooManyFabricated;
     fabricate(gs, f0.hq, f0.part_key, f0.quantity) catch |err| return @errorCast(err);
     return .{};
 }
@@ -2344,4 +2345,17 @@ test "reorder state: a line under min with a recent failed order waits, not reor
     gs.part_orders.clearRetainingCapacity();
     try gs.addStock(.{ .hq = hq_id }, key, 10);
     try std.testing.expectEqual(ReorderState.stocked, stockLineState(&gs, sp, today));
+}
+
+test "fabricate over fab_max_qty is refused before any mutation (rule 13)" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 77 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
+    const hq_id = gs.seat();
+    const funds_before = gs.hqs.values()[0].funds;
+    const jobs_before = gs.bay_jobs.items.len;
+    const over_cap: u32 = tuning.market.fab_max_qty + 1;
+    try std.testing.expectError(error.TooManyFabricated, commands.execute(&gs, .{ .fabricate = .{ .hq = hq_id, .part_key = "comp_leg", .quantity = over_cap } }));
+    try std.testing.expectEqual(funds_before, gs.hqs.values()[0].funds);
+    try std.testing.expectEqual(jobs_before, gs.bay_jobs.items.len);
 }

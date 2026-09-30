@@ -661,6 +661,8 @@ pub fn errorText(err: anyerror) []const u8 {
         error.NoOneInRole => "no one in that role to release",
         error.StapleOffBoard => "that staple line isn't on the home board right now — it restocks as the board refreshes",
         error.AlreadyPosted => "already posted to that HQ",
+        error.LoanTermTooLong => "loan term exceeds the maximum — the longest term is 60 months (Ledger, L)",
+        error.TooManyFabricated => "fabricate quantity exceeds the per-command limit of 20 — split into smaller batches",
         else => "an unexpected internal error",
     };
 }

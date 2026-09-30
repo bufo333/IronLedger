@@ -965,7 +965,7 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     // the batch must be satisfiable — a short is a programming error (rule 15).
     if (!sites.consumeStockBatch(gs, player.site, &player.ammo_reserved)) unreachable;
     const captured = try takePrisoners(gs, c, &player, held_field, enemy_loss_pct, enemy_destroyed_bv);
-    const comp = @divTrunc(damage_value * c.terms.battle_loss_pct, 100);
+    const comp = types.applyPct(damage_value, c.terms.battle_loss_pct);
     if (comp > 0) {
         try gs.postTransaction(.{
             .day = gs.clock.day_index,

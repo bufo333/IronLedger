@@ -31,9 +31,18 @@ pub fn bpPercent(bp: Bp) i64 {
 /// follows the real calendar; tenure, terms and ages count in these).
 pub const days_per_month: u32 = 30;
 pub const days_per_year: u32 = 365;
+pub const months_per_year: u32 = 12;
 
 pub fn applyBp(amount: CBills, bp: Bp) CBills {
     return @divTrunc(amount * bp, 10_000);
+}
+
+/// Integer percentage math for CamOps pip-valued contract terms
+/// (advance_pct, transport_pct, overhead_pct, salvage_pct,
+/// battle_loss_pct, hq.sale_pct): one owner for all money×percent
+/// sites so no caller re-derives the 100 divisor (rules 24, 25).
+pub fn applyPct(amount: CBills, pct: i64) CBills {
+    return @divTrunc(amount * pct, 100);
 }
 
 // Typed IDs: non-exhaustive enums over u32 — copyable, comparable, and
@@ -196,4 +205,20 @@ test "one multiplier and one percent rendering for basis points" {
     try std.testing.expectEqualStrings("×1.47", bpText(&buf, 14_700));
     try std.testing.expectEqualStrings("×0.80", bpText(&buf, 8_000));
     try std.testing.expectEqual(@as(i64, 30), bpPercent(3_000));
+}
+
+test "applyPct is the one owner for money×percent: value matches divTrunc and equals applyBp at ×100" {
+    // Representative contract-term values in play (CamOps pip percentages).
+    const cases = [_]struct { amount: CBills, pct: i64 }{
+        .{ .amount = 5_400_000, .pct = 25 }, // advance_pct
+        .{ .amount = 1_800_000, .pct = 30 }, // battle_loss_pct
+        .{ .amount = 2_000_000, .pct = 60 }, // salvage_pct
+        .{ .amount = 800_000, .pct = 40 }, // hq.sale_pct
+    };
+    for (cases) |c| {
+        const expected = @divTrunc(c.amount * c.pct, 100);
+        try std.testing.expectEqual(expected, applyPct(c.amount, c.pct));
+        // applyBp with pct×100 must agree (value-preservation proof).
+        try std.testing.expectEqual(applyPct(c.amount, c.pct), applyBp(c.amount, c.pct * 100));
+    }
 }

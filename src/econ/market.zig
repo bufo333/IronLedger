@@ -137,7 +137,7 @@ pub fn hqSaleValue(h: *const hq_mod.Hq) types.CBills {
         var lvl: u8 = 1;
         while (lvl <= f.level) : (lvl += 1) total += hq_mod.upgradeCost(f.kind, lvl);
     }
-    return @divTrunc(total * @as(types.CBills, tuning.hq.sale_pct), 100);
+    return types.applyPct(total, tuning.hq.sale_pct);
 }
 
 /// Total proceeds from selling an HQ: its facilities' resale value plus the

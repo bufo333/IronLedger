@@ -6419,6 +6419,12 @@ pub const unit_sale_bp = _tn.unit.sale_bp;
 /// HQ facility resale as a percent of build cost (tuning.hq.sale_pct, rule 24).
 pub const hq_sale_pct = _tn.hq.sale_pct;
 
+/// Maximum loan term in months (tuning.finance.loan_max_term_months, rule 24).
+pub const loan_max_term_months = _tn.finance.loan_max_term_months;
+
+/// Maximum fabricate quantity per command (tuning.market.fab_max_qty, rule 24).
+pub const fab_max_qty = _tn.market.fab_max_qty;
+
 /// P&L for the default rolling window ending at the current day (rule 30).
 pub fn pnlDefault(alloc: Alloc, gs: *GameState, filter: finance.EntityFilter) ![]const []const u8 {
     const to_day = gs.clock.day_index;

@@ -86,9 +86,9 @@ pub fn plan(alloc: std.mem.Allocator, gs: *GameState, company: types.ForceId, tr
         while (pit.next()) |e| if (e.value_ptr.status == .wounded and gs.companyOf(e.value_ptr.assigned_force) == company) {
             wounded += 1;
         };
-        const share = @max(2, cap * medical_share_pct / 100);
-        const target = @min(4 + wounded, share);
-        try lines.append(alloc, .{ .key = "medical_supplies", .floor = @max(1, target / 2), .target = target, .note = try std.fmt.allocPrint(alloc, "a ton per wound treated · {d} wounded now", .{wounded}) });
+        const share = @max(tuning.field_supply.medical_base_tons, cap * medical_share_pct / 100);
+        const target = @min(tuning.field_supply.medical_wounded_base + wounded, share);
+        try lines.append(alloc, .{ .key = "medical_supplies", .floor = @max(1, target / tuning.field_supply.line_floor_divisor), .target = target, .note = try std.fmt.allocPrint(alloc, "a ton per wound treated · {d} wounded now", .{wounded}) });
     }
 
     // Armor: field repairs patch a ton per hull per week of damage.
@@ -102,17 +102,17 @@ pub fn plan(alloc: std.mem.Allocator, gs: *GameState, company: types.ForceId, tr
             if (gs.companyOf(u.force) != company) continue;
             if (u.takesFieldArmor()) hulls += 1;
         }
-        const share = @max(2, cap * armor_share_pct / 100);
-        const target = std.math.clamp(hulls / 2, 2, share);
-        try lines.append(alloc, .{ .key = "armor", .floor = @max(1, target / 2), .target = target, .note = try std.fmt.allocPrint(alloc, "{d} hulls · a ton patches one hull's plating", .{hulls}) });
+        const share = @max(tuning.field_supply.armor_floor_tons, cap * armor_share_pct / 100);
+        const target = std.math.clamp(hulls / 2, tuning.field_supply.armor_floor_tons, share);
+        try lines.append(alloc, .{ .key = "armor", .floor = @max(1, target / tuning.field_supply.line_floor_divisor), .target = target, .note = try std.fmt.allocPrint(alloc, "{d} hulls · a ton patches one hull's plating", .{hulls}) });
     }
 
     // Munitions: per family the company actually fires. Floor = the battles
     // fought while a shipment travels, plus one; target = floor + 2 (or the
     // override). The families share the ammo budget pro rata.
     {
-        const floor_battles: u32 = 1 + (std.math.divCeil(u32, transit_days, days_per_battle) catch unreachable);
-        const target_battles: u32 = if (ammo_battles > 0) @max(@as(u32, ammo_battles), floor_battles) else floor_battles + 2;
+        const floor_battles: u32 = tuning.field_supply.ammo_floor_battles_base + (std.math.divCeil(u32, transit_days, days_per_battle) catch unreachable);
+        const target_battles: u32 = if (ammo_battles > 0) @max(@as(u32, ammo_battles), floor_battles) else floor_battles + tuning.field_supply.ammo_target_battles_extra;
         const budget = cap * ammo_share_pct / 100;
         var sum: u32 = 0;
         const first_ammo = lines.items.len;

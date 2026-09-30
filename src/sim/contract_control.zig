@@ -120,9 +120,9 @@ pub fn complete(gs: *GameState, c: *contract_mod.Contract, objectives_broken: bo
     gs.reputation += gain;
     // Standing: the employer remembers a tour served, and so does
     // whoever you served it against.
-    const employer_now = try gs.adjustStanding(c.employer_key, @max(2, t.standing_complete_gain + @divTrunc(c.victory_points, t.standing_vp_divisor)) + @as(i32, @intFromBool(c.beachhead)) * 2);
+    const employer_now = try gs.adjustStanding(c.employer_key, @max(t.standing_gain_floor, t.standing_complete_gain + @divTrunc(c.victory_points, t.standing_vp_divisor)) + @as(i32, @intFromBool(c.beachhead)) * t.standing_beachhead_bonus);
     const enemy_now = if (!std.mem.eql(u8, c.enemy_key, "PER")) try gs.adjustStanding(c.enemy_key, -t.standing_enemy_loss) else 0;
-    try gs.log(.contract, .{ .company = c.assigned_company, .contract = c.id }, "[standing] {s} +{d} → {d}{s}", .{ c.employer_key, @max(2, t.standing_complete_gain + @divTrunc(c.victory_points, t.standing_vp_divisor)), employer_now, if (!std.mem.eql(u8, c.enemy_key, "PER")) try std.fmt.allocPrint(gs.allocator(), " · {s} −{d} → {d}", .{ c.enemy_key, t.standing_enemy_loss, enemy_now }) else "" });
+    try gs.log(.contract, .{ .company = c.assigned_company, .contract = c.id }, "[standing] {s} +{d} → {d}{s}", .{ c.employer_key, @max(t.standing_gain_floor, t.standing_complete_gain + @divTrunc(c.victory_points, t.standing_vp_divisor)), employer_now, if (!std.mem.eql(u8, c.enemy_key, "PER")) try std.fmt.allocPrint(gs.allocator(), " · {s} −{d} → {d}", .{ c.enemy_key, t.standing_enemy_loss, enemy_now }) else "" });
     try finishTour(gs, c);
     // Service records: a tour served, and an outstanding one noted.
     {
@@ -607,13 +607,13 @@ pub fn acceptContract(gs: *GameState, offer_id: types.ContractId, company_id: ty
     c.transit_days = logistics.daysForJumps(jumps);
     c.arrive_day = gs.clock.day_index + c.transit_days;
     onAccept(gs, &c); // mutates only the local copy c
-    c.monthly_net = @divTrunc(c.terms.base_pay_month * (100 - @as(i64, c.terms.advance_pct)), 100);
+    c.monthly_net = types.applyPct(c.terms.base_pay_month, 100 - @as(i64, c.terms.advance_pct));
 
     // Signing money in, transit freight out (employer covers transport_pct;
     // the quartermaster's 2% shaves the rest).
     const signing = c.terms.advanceAmount() + c.terms.signing_bonus;
     const freight_base: types.CBills = @as(types.CBills, c.dist_ly) * tuning.logistics.freight_per_ly;
-    var freight = @divTrunc(freight_base * (100 - @as(i64, c.terms.transport_pct)), 100);
+    var freight = types.applyPct(freight_base, 100 - @as(i64, c.terms.transport_pct));
     freight = types.applyBp(freight, commander_mod.costMultBp(gs.commander, .freight));
     // Your own ships lift what they can: query first (read-only), commit
     // in the commit phase. planLiftQuery and commitLift compute identical

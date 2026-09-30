@@ -653,7 +653,7 @@ fn runFinances(gs: *GameState) !void {
         // Simple interest on the original principal, spread over the term:
         // every month costs the same, so early repayment
         // (`repay_loan`) saves the interest that hasn't been charged yet.
-        const interest = @divTrunc(loan.principal * loan.rate_bp, 10_000 * 12);
+        const interest = loan.monthlyInterest();
         const principal_part = @min(@max(0, loan.payment - interest), loan.balance);
         loan.balance -= principal_part;
         try gs.postTransaction(.{ .day = gs.clock.day_index, .amount = -interest, .category = .loan_interest, .note = "loan interest" });

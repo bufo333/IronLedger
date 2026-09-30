@@ -269,7 +269,7 @@ pub fn refreshContractWorld(gs: *GameState, c: *const contract.Contract) !void {
             .rarity = design.rarity,
             .price = types.applyBp(market.hullPrice(design.cost, avg_weapon, cond, price_roll), tuning.finance.field_markup_bp),
             .listed_day = day,
-            .expires_day = day + 31,
+            .expires_day = day + tuning.market.hull_listing_days,
             .condition = cond,
             .hq = home,
             .company = c.assigned_company,
@@ -300,7 +300,7 @@ fn refreshBoard(gs: *GameState, hq_id: types.HqId) !void {
             .quantity = if (thin) 5 else 20,
             .staple = true,
             .listed_day = day,
-            .expires_day = day + 31,
+            .expires_day = day + tuning.market.hull_listing_days,
             .hq = hq_id,
         });
         gs.next_listing_id += 1;
@@ -381,7 +381,7 @@ fn refreshBoard(gs: *GameState, hq_id: types.HqId) !void {
             .price = types.applyBp(def.cost, price_roll),
             .quantity = r.intRangeAtMost(u32, 1, 2),
             .listed_day = day,
-            .expires_day = day + 31,
+            .expires_day = day + tuning.market.hull_listing_days,
             .hq = hq_id,
         });
         gs.next_listing_id += 1;
@@ -423,7 +423,7 @@ fn refreshBoard(gs: *GameState, hq_id: types.HqId) !void {
             .rarity = design.rarity,
             .price = market.hullPrice(design.cost, avg_weapon, cond, price_roll),
             .listed_day = day,
-            .expires_day = day + 60 + @as(u32, gs.rng.roll2d6(.market)) * 5,
+            .expires_day = day + tuning.market.offer_days_base + @as(u32, gs.rng.roll2d6(.market)) * tuning.market.offer_days_per_pip,
             .condition = cond,
             .hq = hq_id,
         });
@@ -461,7 +461,7 @@ fn refreshBoard(gs: *GameState, hq_id: types.HqId) !void {
                         .rarity = design.rarity,
                         .price = types.applyBp(base, price_roll),
                         .listed_day = day,
-                        .expires_day = day + 60 + @as(u32, gs.rng.roll2d6(.market)) * 5,
+                        .expires_day = day + tuning.market.offer_days_base + @as(u32, gs.rng.roll2d6(.market)) * tuning.market.offer_days_per_pip,
                         .hq = hq_id,
                     });
                     gs.next_listing_id += 1;

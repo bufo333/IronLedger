@@ -2518,7 +2518,7 @@ pub const App = struct {
                     },
                     .fabricate => switch (pp.site) {
                         .hq => |hid| self.openAmount(try std.fmt.allocPrint(al, "FABRICATE {s}", .{key}), .{ .fabricate = .{ .hq = @intFromEnum(hid), .key = key } }, &.{
-                            .{ .label = "quantity", .value = 1, .min = 1, .max = 20, .step = 1 },
+                            .{ .label = "quantity", .value = 1, .min = 1, .max = q.fab_max_qty, .step = 1 },
                         }),
                         else => self.say(.amber, "components are fabricated in an HQ bay", .{}),
                     },
