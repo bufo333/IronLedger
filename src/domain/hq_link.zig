@@ -61,4 +61,7 @@ test "isDedicated: level 2 is not dedicated, level 3 is; monthlyCost and logisti
     const hops3 = [_]logistics.Hop{.{ .link_level = 3 }};
     // A dedicated hop costs less (logistics.dedicated_line_cost_bp ≤ 10_000).
     try std.testing.expect(logistics.routeCostMultBp(&hops3) <= logistics.routeCostMultBp(&hops2));
+    // network.zig:203 (upgradeLink): `level >= logistics.dedicated_link_level` requires
+    // an owned crewed jumpship — same threshold, third consumer of the constant.
+    try std.testing.expectEqual(logistics.dedicated_link_level, @as(u8, 3));
 }

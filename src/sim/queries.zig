@@ -1195,7 +1195,7 @@ pub fn ledger(alloc: Alloc, gs: *GameState, selected: state_mod.Treasury, period
     try extras.append(alloc, try std.fmt.allocPrint(alloc, "liquidation value    {s}", .{try money(alloc, try treasury.liquidationValue(alloc, gs))}));
     try extras.append(alloc, comptime blk: {
         const tn = @import("../domain/tuning.zig").t;
-        break :blk "  {d}hulls at " ++ std.fmt.comptimePrint("{d}%", .{@import("../econ/market.zig").stock_resale_bp / 100}) ++ " value × condition · HQs at " ++ std.fmt.comptimePrint("{d}%", .{tn.hq.sale_pct}) ++ " of build cost{/}";
+        break :blk "  {d}hulls at " ++ std.fmt.comptimePrint("{d}%", .{tn.unit.sale_bp / 100}) ++ " value × condition · HQs at " ++ std.fmt.comptimePrint("{d}%", .{tn.hq.sale_pct}) ++ " of build cost{/}";
     });
     try extras.append(alloc, "");
     try extras.append(alloc, "next 30 days (estimate)");
@@ -6411,6 +6411,10 @@ pub const paperwork_min_days = _tn.hq.paperwork_min_days;
 /// Stock and component resale multipliers (econ/market.zig, rule 24).
 pub const stock_resale_bp = @import("../econ/market.zig").stock_resale_bp;
 pub const component_resale_bp = @import("../econ/market.zig").component_resale_bp;
+
+/// Unit (hull) resale multiplier (tuning.unit.sale_bp, rule 24).
+/// Governs `market.unitSaleValue`; independent of stock_resale_bp.
+pub const unit_sale_bp = _tn.unit.sale_bp;
 
 /// HQ facility resale as a percent of build cost (tuning.hq.sale_pct, rule 24).
 pub const hq_sale_pct = _tn.hq.sale_pct;
