@@ -633,7 +633,7 @@ pub fn repairOdds(gs: *GameState, hq_id: types.HqId, unit_id: types.UnitId) Repa
             redo += w; // botch counts against you too
             continue;
         }
-        const margin = raw + (5 - @as(i32, skill)) - target;
+        const margin = raw + person_mod.skillRollBonus(skill) - target;
         if (margin >= t.repair_fault_margin) clean += w else if (margin >= 0) fault += w else redo += w;
     }
     return .{
@@ -660,7 +660,7 @@ fn rollRepair(gs: *GameState, hq_id: types.HqId, unit_id: types.UnitId) RepairRe
     const o = repairOdds(gs, hq_id, unit_id);
     const raw = gs.rng.roll2d6(.maintenance);
     if (raw == 2) return .botch;
-    const margin = @as(i32, raw) + (5 - @as(i32, o.skill)) - o.target;
+    const margin = @as(i32, raw) + person_mod.skillRollBonus(o.skill) - o.target;
     if (margin >= t.repair_fault_margin) return .clean;
     if (margin >= 0) return .fault;
     return .redo;

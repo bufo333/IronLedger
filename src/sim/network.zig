@@ -200,7 +200,7 @@ pub fn establishLink(gs: *GameState, a: types.HqId, b: types.HqId, level: u8) !v
     const from_level: u8 = if (existing) |e| e.level else 0;
     if (level <= from_level) return error.BadLevel;
     // A dedicated line is your own jumpship on the run.
-    if (level >= 3 and !lift_mod.ownsCrewedJumpshipAt(gs, a, b)) return error.NoJumpship;
+    if (level >= logistics.dedicated_link_level and !lift_mod.ownsCrewedJumpshipAt(gs, a, b)) return error.NoJumpship;
     const cost = hq_link.linkCost(level) - hq_link.linkCost(from_level);
     if (gs.treasuryBalance(.outfit) < cost) return error.InsufficientTreasury;
 

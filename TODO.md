@@ -25,7 +25,6 @@ C18.
   refit stock, and asymmetric two-HQ tests. Delete C10.
 - [ ] C13 numbers, arithmetic, formatting, and citations (rules 24, 25, 28,
   54, 55, 59):
-  - [ ] C13-rule-numbers (C13a-C13e): copied values, skill/market/link rules.
   - [ ] C13-time-quotes-limits (C13f-C13p): durations, limits, loans, calendar,
     and basis-point arithmetic.
   - [ ] C13-formatting (C13q-C13u): money, effects, basis-point, tonnage, ETA.
@@ -48,8 +47,8 @@ C18.
   Delete C20 and C17.
 
 C17 focused coverage (rule 67) is required within its owner packages, not a
-separate branch: C17a1/b5, C17a2/a4/b3, C17a5-a6/b2/b5-b6 delivered; C17a3/b1 with C5 and
-C13; C17a7/b7 with C13 and C20; and C17c's
+separate branch: C17a1/b5, C17a2/a4/b3, C17a5-a6/b2/b5-b6 delivered; C17a3/b1 with C5;
+C17a7/b7 with C13 and C20; and C17c's
 Desk, Contracts, Ledger, Forces, People, Supply, HQ, Market, Lab, and Map
 coverage with the two C12 packages. C20's final inventory must show no scoped
 omission before it deletes C17.

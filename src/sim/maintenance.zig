@@ -212,7 +212,7 @@ pub fn runWeeklyMaintenance(gs: *GameState) !void {
         if (!covered) tn += tuning.maintenance.target_uncovered; // nobody turning wrenches
 
         const raw = gs.rng.roll2d6(.maintenance);
-        const total: i32 = @as(i32, raw) + (5 - @as(i32, skill));
+        const total: i32 = @as(i32, raw) + person_mod.skillRollBonus(skill);
 
         const before_q = u.quality;
         if (total <= tn - tuning.maintenance.quality_drop_margin) {

@@ -99,7 +99,7 @@ pub fn draw(self: *App) anyerror!void {
         self.listPane(.{ .x = b.x + mw, .y = b.y, .w = b.w - mw, .h = side_h }, "WORLD", rows.items, 1, false, false);
         var reach: std.ArrayListUnmanaged([]const u8) = .empty;
         try reach.append(al, try std.fmt.allocPrint(al, "in ring         {d} worlds", .{view.in_ring}));
-        try reach.append(al, try std.fmt.allocPrint(al, "beachhead band  {d} worlds  {{a}}×1.3 pay{{/}}", .{view.in_band}));
+        try reach.append(al, try std.fmt.allocPrint(al, "beachhead band  {d} worlds  {{a}}×{d}.{d} pay{{/}}", .{ view.in_band, q.beachhead_pay_bp / 10_000, (q.beachhead_pay_bp % 10_000) / 1_000 }));
         try reach.append(al, try std.fmt.allocPrint(al, "out of reach    {d} worlds", .{view.dark}));
         try reach.append(al, "");
         for (view.hqs) |h| try reach.append(al, try std.fmt.allocPrint(al, "{s}  ring {d} LY (+{d} band)", .{ q.clip(try h.name.markup(al), 24), h.ring_ly, view.band_ly }));

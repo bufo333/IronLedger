@@ -2693,7 +2693,7 @@ pub const App = struct {
                     .title = try confirmTitle(al, "SELL HQ?", "sell", null, "keep"),
                     .rows = try al.dupe([]const u8, &.{
                         "",
-                        if (quote) |qq| try std.fmt.allocPrint(al, "  Sell off {{a}}{s}{{/}} for {{g}}{s}{{/}} C (40% of build cost + its treasury)?", .{ try q.plain(al, qq.name), try q.money(al, qq.value) }) else "  no such HQ",
+                        if (quote) |qq| try std.fmt.allocPrint(al, "  Sell off {{a}}{s}{{/}} for {{g}}{s}{{/}} C ({d}% of build cost + its treasury)?", .{ try q.plain(al, qq.name), try q.money(al, qq.value), q.hq_sale_pct }) else "  no such HQ",
                         "  Staff posted there become unassigned; its stock, board, bay work and links are lost.",
                         "  Companies must be assigned elsewhere first (:assignco co:N hq:M).",
                         "",
@@ -2793,12 +2793,12 @@ pub const App = struct {
                     "  {a}field cash{/}  couriers carry cash out to a company and back; a policy keeps a treasury above a floor, checked daily, capped per month (`:policy co:N 0 0` clears one)",
                     "  {a}resupply{/}    `supplypolicy co:N days [max_tons] [battles]` — every line (provisions, medical, armor, each ammo family) kept to a field plan sized to the transit and the trucks; days = safety days past the transit; 0 days removes",
                     "  {a}trim{/}        trimming a company's stores (`:trim co:N`) returns everything over the field plan — and consumables it has no line for — to the home HQ, free",
-                    "  {a}sell stock{/}  `sellstock hq:N part qty` — half catalogue value (40% for comp_*) into the HQ treasury; never under a keep-stocked minimum",
+                    comptime std.fmt.comptimePrint("  {{a}}sell stock{{/}}  `sellstock hq:N part qty` — {d}% catalogue value ({d}% for comp_*) into the HQ treasury; never under a keep-stocked minimum", .{ q.stock_resale_bp / 100, q.component_resale_bp / 100 }),
                     "  {a}warehouse{/}   `stockpolicy hq:N part min [target]` — under min → order/fabricate to target, daily",
                     "  {a}medbay{/}      Settings: auto-admit the wounded every morning, or `:autoadmit on|off`",
                     "  {a}turn rules{/}  wounded must be admitted and a negative treasury covered before the day can end; bankruptcy ends the game",
-                    "  {a}reputation{/}  every offer's pay × (1 + rep × 0.5%), clamped 0.8–1.3, and more offers per board · complete +1 (+VP) · breach −2 · decisions show their rep effect",
-                    "  {a}board cols{/}  emp employer · LY light-years off · band in ring / beachhead (pay ×1.3, hardship, slow resupply) · mo months · salv salvage % (cash = salvage exchange: paid in cash, no wrecks) · rights command rights · transit days out",
+                    comptime std.fmt.comptimePrint("  {{a}}reputation{{/}}  Dragoons rating letter sets pay (F=×{d}.{d} … A*=×{d}.{d}); letter rises with combat record · complete +1 (+VP) · breach −2 · decisions show their rep effect", .{ q.rating_pay_lo_bp / 10_000, (q.rating_pay_lo_bp % 10_000) / 1_000, q.rating_pay_hi_bp / 10_000, (q.rating_pay_hi_bp % 10_000) / 1_000 }),
+                    comptime std.fmt.comptimePrint("  {{a}}board cols{{/}}  emp employer · LY light-years off · band in ring / beachhead (pay ×{d}.{d}, hardship, slow resupply) · mo months · salv salvage % (cash = salvage exchange: paid in cash, no wrecks) · rights command rights · transit days out", .{ q.beachhead_pay_bp / 10_000, (q.beachhead_pay_bp % 10_000) / 1_000 }),
                     "               skulls difficulty for the readiest company: ☠ one, ◐ half, green easy → amber → red; rating the same as a number (0.5–5), a range when intel cannot count the enemy, ! outmatched",
                     "               tons your company's mek tonnage · weight mix L light M medium H heavy A assault meks · enemy tons ~ estimated opposing tonnage · opposition lances, quality, faction (≈BV a fight at good intel)",
                 };
@@ -2970,7 +2970,7 @@ pub const App = struct {
                     .empty = "{d}nothing to upgrade{/}",
                     .foot = try al.dupe([]const u8, &.{
                         "",
-                        try std.fmt.allocPrint(al, "{{d}}paid from the HQ treasury ({s} C) when the project starts · paperwork is admin_command staffing, +2 days per missing finance admin{{/}}", .{try q.money(al, q.balance(self.state(), .{ .hq = hid }))}),
+                        try std.fmt.allocPrint(al, "{{d}}paid from the HQ treasury ({s} C) when the project starts · paperwork: {d}d base, −{d}d per command-admin level, floor {d}d{{/}}", .{ try q.money(al, q.balance(self.state(), .{ .hq = hid })), q.paperwork_base_days, q.paperwork_days_per_admin_level, q.paperwork_min_days }),
                         "{d}every level raises the staff the HQ must keep on payroll; understaffed HQs run a level lower{/}",
                     }),
                     .w = layout.modal.upgrade_w,
@@ -3043,7 +3043,14 @@ pub const App = struct {
     }
 
     /// The negotiation terms in `NegotiableTerm` order (the cursor is the enum value).
-    const negotiable_terms = [_][]const u8{ "advance     25% → 50% of the total up front", "salvage     +10 points of salvage rights", "transport   +20 points of transport paid", "support     +25 points of straight support (monthly employer convoys)", "rights      one step toward independent command", "pay         +10% monthly pay" };
+    const negotiable_terms = [_][]const u8{
+        std.fmt.comptimePrint("advance     {d}% → {d}% of the total up front", .{ q.advance_pct, q.advance_pct * 2 }),
+        std.fmt.comptimePrint("salvage     +{d} points of salvage rights", .{q.salvage_pct_per_pip * 2}),
+        std.fmt.comptimePrint("transport   +{d} points of transport paid", .{q.transport_pct_per_pip * 2}),
+        "support     +25 points of straight support (monthly employer convoys)",
+        "rights      one step toward independent command",
+        std.fmt.comptimePrint("pay         +{d}% monthly pay", .{(q.negotiation_pay_step_bp - 10_000) / 100}),
+    };
 
     fn drawList(self: *App, al: std.mem.Allocator) !void {
         const v = try self.listView(al);

@@ -11,6 +11,7 @@
 
 const std = @import("std");
 const types = @import("types.zig");
+const person_mod = @import("person.zig");
 
 /// Campaign-state modifiers for one side, gathered before the engagement.
 /// Every field is a lever the player controls without touching a battle.
@@ -55,7 +56,7 @@ pub const Element = struct {
         const g: i64 = self.avg_gunnery;
         const p: i64 = self.avg_piloting;
         bp += (4 - g) * if (g < 4) t.gunnery_below_bp else t.gunnery_above_bp;
-        bp += (5 - p) * t.piloting_bp;
+        bp += @as(i64, person_mod.skillRollBonus(@intCast(p))) * t.piloting_bp;
 
         // Materiel condition & maintenance quality.
         bp = @divTrunc(bp * self.avg_condition_pct, 100);

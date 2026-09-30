@@ -146,11 +146,11 @@ pub fn payShares(gs: *GameState, contract_id: types.ContractId, company: types.F
         if (!p.isOnBooks() or p.shares == 0) continue;
         paid += per_share * p.shares;
         holders += 1;
-        p.addMorale(3);
+        p.addMorale(tuning.contract.share_morale_bonus);
     }
     try gs.postTransaction(.{ .day = gs.clock.day_index, .amount = -paid, .category = .payroll, .company = company, .contract = contract_id, .note = "profit shares" });
-    try gs.log(.contract, .{ .company = company, .contract = contract_id }, "[shares] {d} c-bills of {d} contract income ({d}%) paid to {d} shareholders — {d} shares at {d} each (morale +3)", .{
-        paid, income, types.bpPercent(gs.share_profit_bp), holders, total_shares, per_share,
+    try gs.log(.contract, .{ .company = company, .contract = contract_id }, "[shares] {d} c-bills of {d} contract income ({d}%) paid to {d} shareholders — {d} shares at {d} each (morale +{d})", .{
+        paid, income, types.bpPercent(gs.share_profit_bp), holders, total_shares, per_share, tuning.contract.share_morale_bonus,
     });
     return paid;
 }

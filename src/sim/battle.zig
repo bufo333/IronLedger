@@ -529,7 +529,7 @@ fn recoverWrecks(
         const p = gs.person(u.pilot) orelse continue;
         if (!p.isOnBooks()) continue;
         const piloting: i32 = (if (p.role.pilotingSkill()) |s| p.skill(s) else null) orelse 5;
-        const escape = @as(i32, gs.rng.roll2d6(.battle)) + (5 - piloting) + gs.diff().recovery_mod + (if (outcome == .rout) t.recovery_rout else 0);
+        const escape = @as(i32, gs.rng.roll2d6(.battle)) + person_mod.skillRollBonus(@intCast(piloting)) + gs.diff().recovery_mod + (if (outcome == .rout) t.recovery_rout else 0);
         if (escape >= t.escape_target) continue;
         const pid = p.id;
         _ = try @import("personnel.zig").depart(gs, pid, .mia, 0, "");
@@ -583,7 +583,7 @@ pub fn recoveryPush(gs: *GameState, battle: types.BattleId, company: types.Force
         const p = gs.person(h.pilot) orelse continue;
         if (p.status != .mia) continue; // ransomed, traded or written off already
         const piloting: i32 = (if (p.role.pilotingSkill()) |s| p.skill(s) else null) orelse 5;
-        if (@as(i32, gs.rng.roll2d6(.battle)) + (5 - piloting) + t.push_mod < t.escape_target) continue;
+        if (@as(i32, gs.rng.roll2d6(.battle)) + person_mod.skillRollBonus(@intCast(piloting)) + t.push_mod < t.escape_target) continue;
         try @import("contract_events.zig").walkOut(gs, p, company);
         out.people += 1;
     }

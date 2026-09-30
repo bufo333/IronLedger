@@ -31,8 +31,18 @@ const founding = @import("founding.zig");
 const lift = @import("lift.zig");
 const refit_m = @import("refit.zig");
 const held_hulls_m = @import("held_hulls.zig");
+const skulls_mod = @import("../domain/skulls.zig");
 
 const Alloc = std.mem.Allocator;
+
+/// Map a skull severity to markup colour (rule 24/28; skulls.zig emits no markup).
+fn skullMarkup(half: u8) []const u8 {
+    return switch (skulls_mod.severity(half)) {
+        .hard => "{c}",
+        .warn => "{a}",
+        .easy => "{g}",
+    };
+}
 
 /// C-bills with thousands separators and a sign for negatives.
 pub fn money(alloc: Alloc, v: types.CBills) ![]const u8 {
@@ -799,7 +809,7 @@ pub fn boardSkulls(alloc: Alloc, gs: *GameState, offer_id: types.ContractId) ![]
 
 /// One rating on a line: glyphs, the number, whose, and the weights.
 pub fn ratingLine(alloc: Alloc, gs: *GameState, r: OfferRating) ![]const u8 {
-    const mk: []const u8 = if (r.half_hi >= 9) "{c}" else if (r.half_hi >= 7) "{a}" else "{g}";
+    const mk = skullMarkup(r.half_hi);
     return try std.fmt.allocPrint(alloc, "{s}{s}{{/}} {s} {s} · {s}", .{ mk, try skullGlyphs(alloc, r.half_hi), try skullText(alloc, r), try forceName(alloc, gs, r.company), try tonnageText(alloc, r) });
 }
 
@@ -834,12 +844,11 @@ pub fn factionLegend(alloc: Alloc) ![]const u8 {
 /// tons · weight mix · enemy tons, for the readiest company in range.
 fn boardRatingCells(alloc: Alloc, gs: *GameState, offer_id: types.ContractId) ![6][]const u8 {
     const r = (try bestRating(alloc, gs, offer_id)) orelse return .{ "{d}—{/}", "{d}—{/}", "{d}no company in range{/}", "", "", "" };
-    const skulls = @import("../domain/skulls.zig");
-    const mk: []const u8 = if (r.half_hi >= 9) "{c}" else if (r.half_hi >= 7) "{a}" else "{g}";
+    const mk = skullMarkup(r.half_hi);
     var a: [8]u8 = undefined;
     var b: [8]u8 = undefined;
-    const lo = skulls.number(&a, r.half_lo);
-    const num = if (r.half_lo == r.half_hi) lo else try std.fmt.allocPrint(alloc, "{s}–{s}", .{ lo, skulls.number(&b, r.half_hi) });
+    const lo = skulls_mod.number(&a, r.half_lo);
+    const num = if (r.half_lo == r.half_hi) lo else try std.fmt.allocPrint(alloc, "{s}–{s}", .{ lo, skulls_mod.number(&b, r.half_hi) });
     const m = r.own.mix;
     return .{
         try std.fmt.allocPrint(alloc, "{s}{s}{{/}}", .{ mk, try skullGlyphs(alloc, r.half_hi) }),
@@ -1005,7 +1014,36 @@ pub fn contracts(alloc: Alloc, gs: *GameState, board_hq: types.HqId) !Contracts 
     return .{
         .board = try board.toOwnedSlice(alloc),
         .active = try active.toOwnedSlice(alloc),
-        .notes = try std.fmt.allocPrint(alloc, "{s}  ·  {{d}}beachhead: ×1.3 pay · +15% hardship · local supplies ×2.5 · resupply via link only  ·  rights: integrated = more fights, salvage ×0.5, defeats −2, no training lances, pay +10% · house = ×0.75, +5% · liaison = ×0.9 · independent = fewer fights, full salvage, −5% · salv cash = salvage exchange (paid in cash, no wrecks)  ·  board refreshes on the 1st{{/}}", .{(try rating(alloc, gs)).line}),
+        .notes = blk: {
+            const tn = @import("../domain/tuning.zig").t;
+            const r = tn.contract.rights;
+            // Derive each literal from its named owner (rules 24/28).
+            const bpay = tn.market.beachhead_pay_bp; // ×1.3
+            const hard = tn.finance.hardship_bp; // +15%
+            const lsup = tn.logistics.local_base_bp + tn.logistics.local_step_bp; // ×2.5
+            const si = r.salvage_share_bp.integrated; // ×0.5
+            const pi = r.pay_bp.integrated; // +10%
+            const sh = r.salvage_share_bp.house; // ×0.75
+            const ph = r.pay_bp.house; // +5%
+            const sl = r.salvage_share_bp.liaison; // ×0.9
+            const pd = r.pay_bp.independent; // −5%
+            const notes_static = comptime std.fmt.comptimePrint(
+                "beachhead: ×{d}.{d} pay · +{d}% hardship · local supplies ×{d}.{d} · resupply via link only  ·  rights: integrated = more fights, salvage ×{d}.{d}, defeats −{d}, no training lances, pay +{d}% · house = ×{d}.{d}{d}, +{d}% · liaison = ×{d}.{d} · independent = fewer fights, full salvage, −{d}% · salv cash = salvage exchange (paid in cash, no wrecks)  ·  board refreshes on the 1st",
+                .{
+                    bpay / 10_000, (bpay % 10_000) / 1_000, // ×1.3
+                    hard / 100, // +15%
+                    lsup / 10_000, (lsup % 10_000) / 1_000, // ×2.5
+                    si / 10_000, (si % 10_000) / 1_000, // ×0.5
+                    0 - r.integrated_defeat_score, // 2
+                    (pi - 10_000) / 100, // +10%
+                    sh / 10_000, (sh % 10_000) / 1_000, (sh % 1_000) / 100, // ×0.75
+                    (ph - 10_000) / 100, // +5%
+                    sl / 10_000, (sl % 10_000) / 1_000, // ×0.9
+                    (10_000 - pd) / 100, // 5
+                },
+            );
+            break :blk try std.fmt.allocPrint(alloc, "{s}  ·  {{d}}" ++ notes_static ++ "{{/}}", .{(try rating(alloc, gs)).line});
+        },
         .standings = try standings(alloc, gs),
     };
 }
@@ -1155,7 +1193,10 @@ pub fn ledger(alloc: Alloc, gs: *GameState, selected: state_mod.Treasury, period
     }
     try extras.append(alloc, "");
     try extras.append(alloc, try std.fmt.allocPrint(alloc, "liquidation value    {s}", .{try money(alloc, try treasury.liquidationValue(alloc, gs))}));
-    try extras.append(alloc, "  {d}hulls at half value × condition · HQs at 40% of build cost{/}");
+    try extras.append(alloc, comptime blk: {
+        const tn = @import("../domain/tuning.zig").t;
+        break :blk "  {d}hulls at " ++ std.fmt.comptimePrint("{d}%", .{@import("../econ/market.zig").stock_resale_bp / 100}) ++ " value × condition · HQs at " ++ std.fmt.comptimePrint("{d}%", .{tn.hq.sale_pct}) ++ " of build cost{/}";
+    });
     try extras.append(alloc, "");
     try extras.append(alloc, "next 30 days (estimate)");
     const payroll = treasury.monthlyPayroll(gs);
@@ -4546,7 +4587,7 @@ pub fn offerCandidates(alloc: Alloc, gs: *GameState, offer_id: types.ContractId)
         const odds_mk: []const u8 = "";
         const rated = try rateOffer(alloc, gs, &offer, r.company);
         const odds: []const u8 = if (rated) |rt|
-            try std.fmt.allocPrint(alloc, "{s}{s}{{/}} {s} · {d}% / {d}% · {s}", .{ if (rt.half_hi >= 9) "{c}" else if (rt.half_hi >= 7) "{a}" else "{g}", try skullGlyphs(alloc, rt.half_hi), try skullText(alloc, rt), rt.win_pct, rt.lose_field_pct, try tonnageText(alloc, rt) })
+            try std.fmt.allocPrint(alloc, "{s}{s}{{/}} {s} · {d}% / {d}% · {s}", .{ skullMarkup(rt.half_hi), try skullGlyphs(alloc, rt.half_hi), try skullText(alloc, rt), rt.win_pct, rt.lose_field_pct, try tonnageText(alloc, rt) })
         else
             "—";
         const cells: table.Row = if (!eligible)
@@ -4562,7 +4603,7 @@ pub fn offerCandidates(alloc: Alloc, gs: *GameState, offer_id: types.ContractId)
                 try std.fmt.allocPrint(alloc, "{s}{d}{{/}}", .{ if (r.depot > 0) "{c}" else "", r.depot }),
                 try std.fmt.allocPrint(alloc, "{s}{d}{{/}}", .{ if (r.spent > 0) "{a}" else "", r.spent }),
                 try std.fmt.allocPrint(alloc, "{s}{d}{{/}}", .{ if (r.wounded > 0) "{a}" else "", r.wounded }),
-                if (rated) |rt| try std.fmt.allocPrint(alloc, "{s}{s}{{/}}", .{ if (rt.half_hi >= 9) "{c}" else if (rt.half_hi >= 7) "{a}" else "{g}", try skullGlyphs(alloc, rt.half_hi) }) else "—",
+                if (rated) |rt| try std.fmt.allocPrint(alloc, "{s}{s}{{/}}", .{ skullMarkup(rt.half_hi), try skullGlyphs(alloc, rt.half_hi) }) else "—",
                 if (rated) |rt| try skullText(alloc, rt) else "",
                 if (rated) |rt| try std.fmt.allocPrint(alloc, "{d}% / {d}%", .{ rt.win_pct, rt.lose_field_pct }) else "",
                 if (rated) |rt| try tonnageText(alloc, rt) else "",
@@ -6112,7 +6153,7 @@ pub fn sellQuote(alloc: Alloc, gs: *GameState, uid: types.UnitId) !?SellQuote {
     return .{ .chassis_key = u.chassis_key, .value = try market_mod.unitSaleValue(alloc, u), .strip_text = if (lines.len > 0) buf.items else "nothing worth keeping" };
 }
 
-/// What selling off an HQ brings: 40% of build cost plus its treasury.
+/// What selling off an HQ brings: `tuning.hq.sale_pct`% of build cost plus its treasury.
 pub const HqSaleQuote = struct { name: []const u8, value: types.CBills };
 
 pub fn hqSaleQuote(gs: *GameState, hq_id: types.HqId) ?HqSaleQuote {
@@ -6338,6 +6379,41 @@ pub fn completionCandidates(alloc: Alloc, gs: *GameState) ![]const []const u8 {
 
 /// The rolling P&L window in days (rule 24 — one named owner for the literal).
 pub const pnl_window_days: u32 = 31;
+
+// ---- pub const exports for frontend display (rules 24/28: frontend cannot
+// import domain/tuning.zig; queries is the routing layer) ----
+
+const _tn = @import("../domain/tuning.zig").t;
+
+/// Beachhead pay multiplier (tuning.market.beachhead_pay_bp, rule 24).
+pub const beachhead_pay_bp = _tn.market.beachhead_pay_bp;
+
+/// Dragoons rating pay range: F (lowest) and A* (highest) pay multipliers.
+pub const rating_pay_lo_bp = _tn.rating.pay_bp_f;
+pub const rating_pay_hi_bp = _tn.rating.pay_bp_a_star;
+
+/// Negotiation pay step (tuning.contract.negotiation_pay_step_bp, rule 24).
+pub const negotiation_pay_step_bp = _tn.contract.negotiation_pay_step_bp;
+
+/// Advance percent at signing (tuning.contract.advance_pct, rule 24).
+pub const advance_pct = _tn.contract.advance_pct;
+
+/// Salvage pct per 2d6 pip (tuning.contract.salvage_pct_per_pip, rule 24).
+pub const salvage_pct_per_pip = _tn.contract.salvage_pct_per_pip;
+/// Transport pct per 2d6 pip (tuning.contract.transport_pct_per_pip, rule 24).
+pub const transport_pct_per_pip = _tn.contract.transport_pct_per_pip;
+
+/// Paperwork lead-time constants (tuning.hq, rule 24).
+pub const paperwork_base_days = _tn.hq.paperwork_base_days;
+pub const paperwork_days_per_admin_level = _tn.hq.paperwork_days_per_admin_level;
+pub const paperwork_min_days = _tn.hq.paperwork_min_days;
+
+/// Stock and component resale multipliers (econ/market.zig, rule 24).
+pub const stock_resale_bp = @import("../econ/market.zig").stock_resale_bp;
+pub const component_resale_bp = @import("../econ/market.zig").component_resale_bp;
+
+/// HQ facility resale as a percent of build cost (tuning.hq.sale_pct, rule 24).
+pub const hq_sale_pct = _tn.hq.sale_pct;
 
 /// P&L for the default rolling window ending at the current day (rule 30).
 pub fn pnlDefault(alloc: Alloc, gs: *GameState, filter: finance.EntityFilter) ![]const []const u8 {

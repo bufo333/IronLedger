@@ -40,6 +40,22 @@ pub fn number(buf: []u8, half: u8) []const u8 {
         std.fmt.bufPrint(buf, "{d}.5", .{half / 2}) catch "?";
 }
 
+/// Half-skull thresholds for colour bands (HBS BattleTech scale, rule 24).
+/// Queries maps these to markup colours; skulls.zig emits no markup (rule 33).
+pub const amber_half_skulls: u8 = 7; // 3.5 skulls — elevated danger
+pub const red_half_skulls: u8 = 9; // 4.5 skulls — extreme danger
+
+/// Danger band for a skull rating.
+pub const Severity = enum { easy, warn, hard };
+
+/// Returns the danger band for `half` half-skulls (rule 24).
+/// easy → below amber_half_skulls; warn → amber but below red; hard → red+.
+pub fn severity(half: u8) Severity {
+    if (half >= red_half_skulls) return .hard;
+    if (half >= amber_half_skulls) return .warn;
+    return .easy;
+}
+
 /// Chance (percent) that 2d6 + `mod` lands at or above `target`.
 pub fn chanceAtLeast(target: i32, mod: i32) u32 {
     var hits: u32 = 0;
@@ -53,6 +69,18 @@ pub fn chanceAtLeast(target: i32, mod: i32) u32 {
 // build with the table's name.
 comptime {
     if (table.bands.len == 0) @compileError("data/tables/skulls.zon: `bands` is empty; every ratio needs a band");
+}
+
+test "severity: boundaries at amber_half_skulls and red_half_skulls" {
+    // Below amber
+    try std.testing.expectEqual(Severity.easy, severity(0));
+    try std.testing.expectEqual(Severity.easy, severity(amber_half_skulls - 1));
+    // At amber
+    try std.testing.expectEqual(Severity.warn, severity(amber_half_skulls));
+    try std.testing.expectEqual(Severity.warn, severity(red_half_skulls - 1));
+    // At red
+    try std.testing.expectEqual(Severity.hard, severity(red_half_skulls));
+    try std.testing.expectEqual(Severity.hard, severity(10));
 }
 
 test "data: skull bands descend in ratio to a catch-all, climb in half skulls, and the warning is a band" {

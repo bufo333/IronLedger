@@ -91,7 +91,7 @@ pub const LanceRole = enum {
     pub fn describe(self: LanceRole) []const u8 {
         return switch (self) {
             .fighting => "fights in every engagement",
-            .defense => "+10% power on garrison-class contracts",
+            .defense => comptime std.fmt.comptimePrint("+{d}% power on garrison-class contracts", .{(@import("tuning.zig").t.battle.defense_bonus_bp - 10_000) / 100}),
             .scouting => "recon: better intel before battles",
             .training => "held out of battles; crews gain XP weekly at home",
             .unassigned => "",

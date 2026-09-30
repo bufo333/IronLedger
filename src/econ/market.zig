@@ -155,6 +155,14 @@ pub fn stockSaleValue(key: []const u8, qty: u32) types.CBills {
     return types.applyBp(def.cost * qty, bp);
 }
 
+/// Market price roll (CamOps unit and part pricing, ARCH §9.8): draws exactly
+/// one `.market` 2d6 and returns the pricing multiplier in basis points.
+/// The pivot 7 is the 2d6 mean; a 7 prices at the base (×1.0). Rule 24: the
+/// step constant `price_roll_step_bp` is named once here.
+pub fn priceRollBp(rng: *rng_mod.Rng) types.Bp {
+    return 10_000 + (@as(types.Bp, rng.roll2d6(.market)) - 7) * tuning.market.price_roll_step_bp;
+}
+
 /// Transports list at a fraction of their canon price: a
 /// Leopard is a mid-game capital purchase, not a decade of profit.
 pub const transport_price_bp: types.Bp = tuning.market.transport_price_bp;
@@ -360,6 +368,25 @@ test "rarity works: common floods the boards, very rare is an event" {
     try std.testing.expect(very_rare_hits < 2_500);
     try std.testing.expect(very_rare_hits > 0); // rare, not impossible
     try std.testing.expect(common_hits > very_rare_hits * 4);
+}
+
+test "priceRollBp: draws one .market 2d6, range 7_500–12_500, deterministic" {
+    const step = tuning.market.price_roll_step_bp;
+    // Range: 2d6 runs 2–12; offset 7 gives −5..+5; step × that.
+    const lo: types.Bp = 10_000 - 5 * step;
+    const hi: types.Bp = 10_000 + 5 * step;
+    var rng = rng_mod.Rng.init(42);
+    const bp = priceRollBp(&rng);
+    try std.testing.expect(bp >= lo and bp <= hi);
+    // Determinism: same seed → same result (rule 57).
+    var rng2 = rng_mod.Rng.init(42);
+    try std.testing.expectEqual(bp, priceRollBp(&rng2));
+    // Agreement: priceRollBp draws the same single .market 2d6 the old inline formula drew.
+    var rng3 = rng_mod.Rng.init(99);
+    const raw = rng3.roll2d6(.market);
+    const manual: types.Bp = 10_000 + (@as(types.Bp, raw) - 7) * step;
+    var rng4 = rng_mod.Rng.init(99);
+    try std.testing.expectEqual(manual, priceRollBp(&rng4));
 }
 
 test "only regional HQs guarantee structural parts" {

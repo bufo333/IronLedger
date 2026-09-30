@@ -254,7 +254,7 @@ pub fn refreshContractWorld(gs: *GameState, c: *const contract.Contract) !void {
         const design = @import("../domain/rat.zig").roll(&gs.rng, .market, world.faction, @import("../gen/company_gen.zig").rollWeightClass(&gs.rng, .market), gs.clock.date.year);
         if (!market.listingAppears(&gs.rng, design.rarity, world.industry, 0, 0)) continue;
         const cond = market.rollHullCondition(&gs.rng);
-        const price_roll: types.Bp = 10_000 + (@as(types.Bp, gs.rng.roll2d6(.market)) - 7) * 500;
+        const price_roll = market.priceRollBp(&gs.rng);
         var weapon_value: types.CBills = 0;
         var weapons: types.CBills = 0;
         for (design.loadout) |slot| if (slot.class == .weapon) {
@@ -372,7 +372,7 @@ fn refreshBoard(gs: *GameState, hq_id: types.HqId) !void {
         // Sourcing: scarce parts, periphery shelves, comms reach.
         const src = part_mod.sourcing(def, @import("../domain/faction.zig").isPeriphery(world.faction), hq.effectiveFacilityLevel(.comms));
         if (!market.listingAppears(&gs.rng, def.rarity, world.industry, warehouse, src.total())) continue;
-        const price_roll: types.Bp = 10_000 + (@as(types.Bp, gs.rng.roll2d6(.market)) - 7) * 500;
+        const price_roll = market.priceRollBp(&gs.rng);
         try gs.market_listings.append(gs.allocator(), .{
             .id = @enumFromInt(gs.next_listing_id),
             .kind = .part,
@@ -406,7 +406,7 @@ fn refreshBoard(gs: *GameState, hq_id: types.HqId) !void {
         } else @import("../domain/rat.zig").roll(&gs.rng, .market, world.faction, @import("../gen/company_gen.zig").rollWeightClass(&gs.rng, .market), gs.clock.date.year);
         if (!market.listingAppears(&gs.rng, design.rarity, world.industry, warehouse, 0)) continue;
         const cond = market.rollHullCondition(&gs.rng);
-        const price_roll: types.Bp = 10_000 + (@as(types.Bp, gs.rng.roll2d6(.market)) - 7) * 500;
+        const price_roll = market.priceRollBp(&gs.rng);
         var weapon_value: types.CBills = 0;
         var weapons: types.CBills = 0;
         for (design.loadout) |slot| {
@@ -452,7 +452,7 @@ fn refreshBoard(gs: *GameState, hq_id: types.HqId) !void {
             if (pool.len > 0) {
                 const design = pool[r.uintLessThan(usize, pool.len)];
                 if (market.listingAppears(&gs.rng, design.rarity, world.industry, port, 0)) {
-                    const price_roll: types.Bp = 10_000 + (@as(types.Bp, gs.rng.roll2d6(.market)) - 7) * 500;
+                    const price_roll = market.priceRollBp(&gs.rng);
                     const base = if (design.kind == .aerospace) design.cost else types.applyBp(design.cost, market.transport_price_bp);
                     try gs.market_listings.append(gs.allocator(), .{
                         .id = @enumFromInt(gs.next_listing_id),
@@ -1014,7 +1014,7 @@ pub fn negotiate(gs: *GameState, offer_index: usize, term: contract.NegotiableTe
     const t = tuning.contract;
     const seat: types.HqId = gs.seat();
     const office = if (seat != .none) hq_ops.hqStaff(gs, seat, .admin_command) else hq_ops.StaffSummary{};
-    const office_edge: i32 = if (office.count == 0) -1 else 5 - @as(i32, office.best_skill);
+    const office_edge: i32 = if (office.count == 0) -1 else person_mod.skillRollBonus(office.best_skill);
     // The letter at the table: F −2 … A* +3.
     const rep_edge: i32 = @as(i32, try rating.currentIndex(gs)) - tuning.rating.negotiation_offset;
     const target: i32 = t.negotiation_target - @divTrunc(gs.standing(c.employer_key), t.negotiation_standing_per);

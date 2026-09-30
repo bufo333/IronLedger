@@ -94,6 +94,10 @@ pub fn transitFreightBp(covered_bp: types.Bp, own_jumpship: bool) types.Bp {
 /// already billed monthly.
 pub const dedicated_line_cost_bp: types.Bp = tuning.logistics.dedicated_line_cost_bp;
 
+/// Minimum link level that qualifies as a dedicated jumpship connection
+/// (ARCH §9.5, rule 24). Used by hq_link.isDedicated() and network routing.
+pub const dedicated_link_level: u8 = 3;
+
 /// Total door-to-door days for a route.
 pub fn routeDelayDays(hops: []const Hop) u32 {
     var total: u32 = 0;
@@ -109,7 +113,7 @@ pub fn routeCostMultBp(hops: []const Hop) types.Bp {
     var mult: types.Bp = 10_000;
     for (hops) |h| {
         mult = @divTrunc(mult * hopCostMultBp(h.via_warehouse, h.via_spaceport), 10_000);
-        if (h.link_level >= 3) mult = @divTrunc(mult * dedicated_line_cost_bp, 10_000);
+        if (h.link_level >= dedicated_link_level) mult = @divTrunc(mult * dedicated_line_cost_bp, 10_000);
     }
     return mult;
 }

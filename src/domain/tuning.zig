@@ -137,6 +137,9 @@ pub const Tuning = struct {
         staple_price_per_industry_bp: types.Bp,
         beachhead_pay_bp: types.Bp,
         cooling_pay_bp: types.Bp,
+        /// Step size for the market price roll (CamOps unit/part pricing):
+        /// `10_000 + (2d6 − 7) × price_roll_step_bp` (rule 24, ARCH §9.8).
+        price_roll_step_bp: types.Bp,
         market_margin_bp: types.Bp,
         min_ops_cost: types.CBills,
         hall_arrival_target: u32,
@@ -638,6 +641,9 @@ pub const Tuning = struct {
         ransom_veteran: types.CBills,
         ransom_elite: types.CBills,
         recruit_prisoner_target: u8,
+        /// Morale bonus each shareholder receives when profit shares are paid
+        /// at contract completion (AtB shares system; rule 24).
+        share_morale_bonus: i32,
     },
     generation: struct {
         /// RAT weight-class roll (2d6): up to `light_max` light, `medium_max` medium, `heavy_max` heavy, else assault.

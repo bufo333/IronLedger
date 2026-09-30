@@ -711,6 +711,36 @@ test "the mess hall earns its keep at home" {
     try std.testing.expect(fatigueDecayPerWeek(3) > fatigueDecayPerWeek(0));
 }
 
+// ---------------------------------------- skill → 2d6 roll bonus (ARCH §7)
+// MekHQ skill convention: lower value = more skilled (0 elite, 7 untrained).
+// The 2d6 modifier is `skill_roll_base − skill`, so an elite pilot adds +5
+// and an untrained hand adds −2 (MekHQ `SkillType.finalSkillValue`, rule 60).
+
+/// Baseline for the skill → 2d6 roll-bonus formula (MekHQ rule 60, CamOps
+/// skill system): `skill_roll_base − skill` maps 0 (elite) → +5, 5 (untrained
+/// entry) → 0. Every consumer calls this; the constant appears once.
+pub const skill_roll_base: i32 = 5;
+
+/// Roll bonus for a person's skill level (lower skill = better, combat
+/// convention). Returns `skill_roll_base − skill`. Pure and allocation-free.
+pub fn skillRollBonus(skill: u8) i32 {
+    return skill_roll_base - @as(i32, skill);
+}
+
+test "skillRollBonus: elite → +5, untrained → −2; agrees with inverse" {
+    try std.testing.expectEqual(@as(i32, 5), skillRollBonus(0));
+    try std.testing.expectEqual(@as(i32, 4), skillRollBonus(1));
+    try std.testing.expectEqual(@as(i32, 0), skillRollBonus(5));
+    try std.testing.expectEqual(@as(i32, -2), skillRollBonus(7)); // 7 = true untrained (no skill)
+    // Monotone: better skill → higher bonus.
+    try std.testing.expect(skillRollBonus(2) > skillRollBonus(3));
+    // The owner's formula: skill_roll_base − skill, every skill level.
+    for (0..8) |s| {
+        const expected: i32 = skill_roll_base - @as(i32, @intCast(s));
+        try std.testing.expectEqual(expected, skillRollBonus(@intCast(s)));
+    }
+}
+
 test "salary follows CamOps table with experience multiplier" {
     var p: Person = .{ .id = @enumFromInt(1), .first_name = "Natasha", .last_name = "K", .role = .mekwarrior };
     defer p.deinit(std.testing.allocator);

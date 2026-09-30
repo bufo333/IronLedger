@@ -13,6 +13,7 @@ const std = @import("std");
 const tuning = @import("../domain/tuning.zig").t;
 const types = @import("../domain/types.zig");
 const part_mod = @import("../domain/part.zig");
+const person_mod = @import("../domain/person.zig");
 const treasury = @import("treasury.zig");
 const state_mod = @import("state.zig");
 const GameState = state_mod.GameState;
@@ -520,7 +521,7 @@ pub fn orderPart(gs: *GameState, part_key: []const u8, quantity: u32, dest_opt: 
     // a bigger office shaves the lead time. Components can be bought this
     // way when rarity allows — or fabricated (guaranteed) in the bay.
     const logi = hq_ops.hqStaff(gs, hq_id, .admin_logistics);
-    const admin_bonus: i32 = if (logi.count == 0) -2 else 5 - @as(i32, logi.best_skill);
+    const admin_bonus: i32 = if (logi.count == 0) -2 else person_mod.skillRollBonus(logi.best_skill);
     lead_days = @max(3, lead_days -| @min(4, logi.count / 2));
     // The cost is known before the roll: check funds first so an
     // expected refusal does not consume the acquisition stream (13).
@@ -589,7 +590,7 @@ pub fn replaceGear(gs: *GameState, unit_id: types.UnitId) !ReplaceGearResult {
     const world = planet_mod.find(hq.planet_key) orelse return error.UnknownPlanet;
     const cost_mult: types.Bp = types.applyBp(tuning.market.procurement_markup_bp, gs.diff().purchase_bp);
     const logi = hq_ops.hqStaff(gs, hq_id, .admin_logistics);
-    const admin_bonus: i32 = if (logi.count == 0) -2 else 5 - @as(i32, logi.best_skill);
+    const admin_bonus: i32 = if (logi.count == 0) -2 else person_mod.skillRollBonus(logi.best_skill);
 
     // Per-order data kept in the scratch arena; fail_buf and why are in
     // the persistent arena because event_log entries reference them (rule 12).

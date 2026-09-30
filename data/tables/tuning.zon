@@ -101,6 +101,7 @@
         .staple_price_per_industry_bp = 400,
         .beachhead_pay_bp = 13_000,
         .cooling_pay_bp = 7_000,
+        .price_roll_step_bp = 500, // CamOps price roll step: 10_000 + (2d6 − 7) × 500
         .market_margin_bp = 18_000, // CamOps negotiation environment, abstracted
         .min_ops_cost = 50_000,
         .hall_arrival_target = 8,
@@ -405,6 +406,7 @@
         .ransom_veteran = 80_000,
         .ransom_elite = 150_000,
         .recruit_prisoner_target = 8,
+        .share_morale_bonus = 3, // morale bump per shareholder when profit shares are paid (AtB)
     },
     .generation = .{
         .weight_light_max = 4, // AtB flavour: mediums dominate a line company, assaults are prizes
