@@ -184,8 +184,8 @@ pub fn breach(gs: *GameState, c: *contract_mod.Contract, reason: []const u8) !vo
     const standing_now = try gs.adjustStanding(c.employer_key, -tuning.contract.standing_breach_loss);
     try gs.log(.contract, .{ .company = c.assigned_company, .contract = c.id }, "[standing] {s} −{d} → {d}", .{ c.employer_key, tuning.contract.standing_breach_loss, standing_now });
     try finishTour(gs, c);
-    try gs.log(.contract, .{ .company = c.assigned_company, .contract = c.id }, "[{s}] CONTRACT BREACHED ({s}) — {d} clawed back, remainder forfeited, {s} employers cool for a year", .{
-        @tagName(c.kind), reason, clawback, c.employer_key,
+    try gs.log(.contract, .{ .company = c.assigned_company, .contract = c.id }, "[{s}] CONTRACT BREACHED ({s}) — {s} clawed back, remainder forfeited, {s} employers cool for a year", .{
+        @tagName(c.kind), reason, try types.moneyText(gs.allocator(), clawback), c.employer_key,
     });
 }
 

@@ -315,6 +315,25 @@ test "data: structure is rated by weight class — every classed assembly is in 
     try std.testing.expect(find("comp_arm_a").?.fab_regional);
 }
 
+/// "{sign}{d}.{d}t" for a half-ton integer — the one owner for mass display
+/// in the Lab budget and overweight text (rules 24, 28). `ht` is in
+/// half-tons; each unit is 0.5 tonnes. Negative values are overweight.
+pub fn halfTonsText(alloc: std.mem.Allocator, ht: i64) ![]const u8 {
+    const mag = @abs(ht);
+    return std.fmt.allocPrint(alloc, "{s}{d}.{d}t", .{ if (ht < 0) "-" else "", mag / 2, (mag % 2) * 5 });
+}
+
+test "halfTonsText: whole and half tons and negative" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    try std.testing.expectEqualStrings("5.0t", try halfTonsText(a, 10));
+    try std.testing.expectEqualStrings("5.5t", try halfTonsText(a, 11));
+    try std.testing.expectEqualStrings("0.5t", try halfTonsText(a, 1));
+    try std.testing.expectEqualStrings("-2.5t", try halfTonsText(a, -5));
+    try std.testing.expectEqualStrings("0.0t", try halfTonsText(a, 0));
+}
+
 test "provisions round up and never under a ton" {
     try std.testing.expectEqual(@as(u32, 1), provisionsPerDay(0));
     try std.testing.expectEqual(@as(u32, 1), provisionsPerDay(200));

@@ -45,6 +45,24 @@ pub fn applyPct(amount: CBills, pct: i64) CBills {
     return @divTrunc(amount * pct, 100);
 }
 
+/// C-bills with thousands separators and a leading `−` for negatives
+/// (rules 24, 28): the one owner for money display in logs and screens.
+/// Logs below `queries` call this directly; `queries.money` delegates here.
+/// Only error is `error.OutOfMemory` (bufPrint over a 32-byte buffer cannot
+/// overflow for any i64 value — max 20 digits — so NoSpaceLeft is unreachable).
+pub fn moneyText(alloc: std.mem.Allocator, v: CBills) error{OutOfMemory}![]const u8 {
+    var digits: [32]u8 = undefined;
+    const mag: u64 = @intCast(if (v < 0) -v else v);
+    const raw = std.fmt.bufPrint(&digits, "{d}", .{mag}) catch unreachable;
+    var out: std.ArrayListUnmanaged(u8) = .empty;
+    if (v < 0) try out.append(alloc, '-');
+    for (raw, 0..) |c, i| {
+        if (i > 0 and (raw.len - i) % 3 == 0) try out.append(alloc, ',');
+        try out.append(alloc, c);
+    }
+    return out.toOwnedSlice(alloc);
+}
+
 // Typed IDs: non-exhaustive enums over u32 — copyable, comparable, and
 // impossible to pass a PersonId where a UnitId is expected.
 pub const PersonId = enum(u32) { none = 0, _ };
@@ -186,6 +204,18 @@ pub const Rarity = enum {
         };
     }
 };
+
+test "moneyText: thousands separators and sign" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    try std.testing.expectEqualStrings("0", try moneyText(a, 0));
+    try std.testing.expectEqualStrings("999", try moneyText(a, 999));
+    try std.testing.expectEqualStrings("1,000", try moneyText(a, 1_000));
+    try std.testing.expectEqualStrings("1,650", try moneyText(a, 1_650));
+    try std.testing.expectEqualStrings("1,234,567", try moneyText(a, 1_234_567));
+    try std.testing.expectEqualStrings("-45,000", try moneyText(a, -45_000));
+}
 
 test "basis point math stays in integers" {
     try std.testing.expectEqual(@as(CBills, 1_500), applyBp(1_500, 10_000));

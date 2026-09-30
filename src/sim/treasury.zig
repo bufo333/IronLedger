@@ -265,7 +265,7 @@ pub fn execTransfer(gs: *GameState, t: @FieldType(Command, "transfer")) Error!Re
     try gs.reserveLog(1);
     try transferFunds(gs, t.from, t.to, t.amount, eta);
     const tags = t.to.tags();
-    try gs.log(.finance, .{ .company = tags.company, .hq = tags.hq }, "[finance] {d} c-bills dispatched by courier (eta {d} days)", .{ t.amount, eta });
+    try gs.log(.finance, .{ .company = tags.company, .hq = tags.hq }, "[finance] {s} c-bills dispatched by courier (eta {d} days)", .{ try types.moneyText(gs.allocator(), t.amount), eta });
     return .{};
 }
 

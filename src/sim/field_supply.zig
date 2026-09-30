@@ -367,7 +367,7 @@ pub fn emergencyResupply(gs: *GameState, id: types.ContractId) !u32 {
         .note = "emergency resupply",
     });
     for (rush.lines) |l| gs.addStock(site, l.key, l.qty) catch unreachable; // slots reserved above
-    try gs.log(.delivery, .{ .company = c.assigned_company, .contract = id }, "[resupply] emergency purchase on {s}: {d}t for {d} c-bills", .{ c.planet_key, rush.tons, rush.price });
+    try gs.log(.delivery, .{ .company = c.assigned_company, .contract = id }, "[resupply] emergency purchase on {s}: {d}t for {s} c-bills", .{ c.planet_key, rush.tons, try types.moneyText(gs.allocator(), rush.price) });
     return rush.tons;
 }
 

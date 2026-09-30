@@ -2785,7 +2785,7 @@ pub const App = struct {
             .help => {
                 // The keys come from the binding tables; these rows explain
                 // what the keys are for.
-                const concepts = [_][]const u8{
+                const concepts_a = [_][]const u8{
                     "  {a}gear{/}        destroyed weapons and equipment are field work on every hull kind (trucks, MASH, tanks, fighters too): spares ordered to the hull's site are fitted by its tech on the weekly pass — no Lab needed",
                     "  {a}structure{/}   not fitted in the Lab: the hull goes to a depot, and the bay consumes comp_* parts from the home HQ",
                     "  {a}companies{/}   a raised company starts empty and walks a wizard: meks per lance from the pool, mothballs and every board (buy or pass; damaged listings show the repair bill and delivery days), the support train, then crews",
@@ -2797,8 +2797,8 @@ pub const App = struct {
                     "  {a}warehouse{/}   `stockpolicy hq:N part min [target]` — under min → order/fabricate to target, daily",
                     "  {a}medbay{/}      Settings: auto-admit the wounded every morning, or `:autoadmit on|off`",
                     "  {a}turn rules{/}  wounded must be admitted and a negative treasury covered before the day can end; bankruptcy ends the game",
-                    comptime std.fmt.comptimePrint("  {{a}}reputation{{/}}  Dragoons rating letter sets pay (F=×{d}.{d} … A*=×{d}.{d}); letter rises with combat record · complete +1 (+VP) · breach −2 · decisions show their rep effect", .{ q.rating_pay_lo_bp / 10_000, (q.rating_pay_lo_bp % 10_000) / 1_000, q.rating_pay_hi_bp / 10_000, (q.rating_pay_hi_bp % 10_000) / 1_000 }),
-                    comptime std.fmt.comptimePrint("  {{a}}board cols{{/}}  emp employer · LY light-years off · band in ring / beachhead (pay ×{d}.{d}, hardship, slow resupply) · mo months · salv salvage % (cash = salvage exchange: paid in cash, no wrecks) · rights command rights · transit days out", .{ q.beachhead_pay_bp / 10_000, (q.beachhead_pay_bp % 10_000) / 1_000 }),
+                };
+                const concepts_b = [_][]const u8{
                     "               skulls difficulty for the readiest company: ☠ one, ◐ half, green easy → amber → red; rating the same as a number (0.5–5), a range when intel cannot count the enemy, ! outmatched",
                     "               tons your company's mek tonnage · weight mix L light M medium H heavy A assault meks · enemy tons ~ estimated opposing tonnage · opposition lances, quality, faction (≈BV a fight at good intel)",
                 };
@@ -2806,7 +2806,13 @@ pub const App = struct {
                 try rows.append(al, "");
                 try rows.appendSlice(al, try keyHelpRows(al));
                 try rows.append(al, "");
-                try rows.appendSlice(al, &concepts);
+                try rows.appendSlice(al, &concepts_a);
+                var bp_lo: [16]u8 = undefined;
+                var bp_hi: [16]u8 = undefined;
+                var bp_bb: [16]u8 = undefined;
+                try rows.append(al, try std.fmt.allocPrint(al, "  {{a}}reputation{{/}}  Dragoons rating letter sets pay (F={s} … A*={s}); letter rises with combat record · complete +1 (+VP) · breach −2 · decisions show their rep effect", .{ types.bpText(&bp_lo, q.rating_pay_lo_bp), types.bpText(&bp_hi, q.rating_pay_hi_bp) }));
+                try rows.append(al, try std.fmt.allocPrint(al, "  {{a}}board cols{{/}}  emp employer · LY light-years off · band in ring / beachhead (pay {s}, hardship, slow resupply) · mo months · salv salvage % (cash = salvage exchange: paid in cash, no wrecks) · rights command rights · transit days out", .{types.bpText(&bp_bb, q.beachhead_pay_bp)}));
+                try rows.appendSlice(al, &concepts_b);
                 try rows.append(al, try std.fmt.allocPrint(al, "               factions {s}", .{try q.factionLegend(al)}));
                 try rows.append(al, "");
                 try rows.append(al, try std.fmt.allocPrint(al, "  {{d}}{s}{{/}}", .{try keyHint(SheetAction, al, &sheet_bindings, .close, "close")}));

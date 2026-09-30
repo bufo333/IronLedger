@@ -248,6 +248,68 @@ pub const EventQueue = struct {
     }
 };
 
+/// One effect as a plain phrase (no markup, no colour) — the single owner
+/// for per-effect wording (rules 24, 28). Both `queries.effectsText` and
+/// `contract_events.effectsPlain` call this; the exhaustive switch forces
+/// any new Effect variant to add its phrase here.
+pub fn effectPhrase(alloc: std.mem.Allocator, e: Effect) ![]const u8 {
+    return switch (e) {
+        .cash => |c| try std.fmt.allocPrint(alloc, "{s}{s} C", .{ if (c >= 0) "+" else "", try types.moneyText(alloc, c) }),
+        .cash_monthly_pct => |p| try std.fmt.allocPrint(alloc, "{s}{d}% of a month's pay", .{ if (p >= 0) "+" else "", p }),
+        .reputation => |d| try std.fmt.allocPrint(alloc, "rep {s}{d}", .{ if (d >= 0) "+" else "", d }),
+        .morale => |m| try std.fmt.allocPrint(alloc, "morale {s}{d}", .{ if (m >= 0) "+" else "", m }),
+        .fatigue => |f| try std.fmt.allocPrint(alloc, "fatigue +{d}", .{f}),
+        .xp_all => |x| try std.fmt.allocPrint(alloc, "XP +{d} all", .{x}),
+        .score => |s| try std.fmt.allocPrint(alloc, "contract score {s}{d}", .{ if (s >= 0) "+" else "", s }),
+        .damage_random_units => |n| try std.fmt.allocPrint(alloc, "{d} line hull{s} damaged", .{ n, if (n == 1) "" else "s" }),
+        .damage_convoy_units => |n| try std.fmt.allocPrint(alloc, "{d} support vehicle{s} damaged", .{ n, if (n == 1) "" else "s" }),
+        .parts_windfall => |n| try std.fmt.allocPrint(alloc, "parts windfall ×{d}", .{n}),
+        .supply_loss => |c| try std.fmt.allocPrint(alloc, "supplies −{s} C", .{try types.moneyText(alloc, c)}),
+        .employer_standing => |d| try std.fmt.allocPrint(alloc, "employer standing {s}{d}", .{ if (d >= 0) "+" else "−", @abs(d) }),
+        .field_stock => |fs| try std.fmt.allocPrint(alloc, "+{d} {s} to the trucks", .{ fs.qty, fs.key }),
+        .raise_pct => |pct| try std.fmt.allocPrint(alloc, "salary +{d}% for good", .{pct}),
+        .retention_bonus_months => |m| try std.fmt.allocPrint(alloc, "{d} months' pay once", .{m}),
+        .let_go => "they leave, seat opens",
+        .replace_from_hall => "they leave; hall replacement if listed",
+        .ransom_prisoner => "ransom by experience, they go home",
+        .release_prisoner => "+2 standing with their house",
+        .recruit_prisoner => "loyalty roll 2d6 ≥ 8: joins as a mekwarrior, company morale −2; else released",
+        .ransom_mia => "ransom by experience from the outfit, they come home",
+        .exchange_mia => "a prisoner of their house goes back; else written off",
+        .write_off_mia => "missing, presumed dead · company morale −5",
+        .engagement => "a real engagement against the contract's opposition",
+        .seize_hull => "your most battered line hull is taken, for good",
+        .delay_arrival => |d| try std.fmt.allocPrint(alloc, "+{d} days in transit", .{d}),
+        .next_battle_in => |d| try std.fmt.allocPrint(alloc, "contact in {d}d", .{d}),
+        .recovery_push => "one more roll for every hull and pilot left on the field",
+        .take_salvage => |plan| switch (plan) {
+            .heaviest => "the biggest wreck the claim reaches, rest in spares",
+            .most_hulls => "as many wrecks as the claim reaches, rest in spares",
+            .parts_only => "no wrecks — the whole claim in spares and armour",
+        },
+        .field_repair => |order| switch (order) {
+            .worst_first => "the near-wrecks first, each as far as the night reaches",
+            .spread => "one job a hull a round, so the most hulls get plating",
+            .heaviest_first => "the heaviest hulls first, to keep the big BV in the line",
+        },
+    };
+}
+
+test "effectPhrase: representative variants and sign handling" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    try std.testing.expectEqualStrings("+1,000 C", try effectPhrase(a, .{ .cash = 1_000 }));
+    try std.testing.expectEqualStrings("-2,500 C", try effectPhrase(a, .{ .cash = -2_500 }));
+    try std.testing.expectEqualStrings("rep +2", try effectPhrase(a, .{ .reputation = 2 }));
+    try std.testing.expectEqualStrings("rep -1", try effectPhrase(a, .{ .reputation = -1 }));
+    try std.testing.expectEqualStrings("fatigue +3", try effectPhrase(a, .{ .fatigue = 3 }));
+    try std.testing.expectEqualStrings("the biggest wreck the claim reaches, rest in spares", try effectPhrase(a, .{ .take_salvage = .heaviest }));
+    try std.testing.expectEqualStrings("the near-wrecks first, each as far as the night reaches", try effectPhrase(a, .{ .field_repair = .worst_first }));
+    try std.testing.expectEqualStrings("ransom by experience, they go home", try effectPhrase(a, .ransom_prisoner));
+    try std.testing.expectEqualStrings("supplies −1,500 C", try effectPhrase(a, .{ .supply_loss = 1_500 }));
+}
+
 test "events carry options with typed effects" {
     const ev: Event = .{
         .day = 3,

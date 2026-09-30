@@ -325,7 +325,7 @@ pub fn runMonthlyTurnover(gs: *GameState) !u32 {
         if (age != null and age.? >= t.age_retire) {
             const company = gs.companyOf(p.assigned_force);
             const paid = try @import("personnel.zig").depart(gs, p.id, .retired, types.full_bp, "retirement payout");
-            try gs.log(.rotation, .{ .company = company, .hq = p.posted_hq }, "[turnover] {s} ({s}) retires at {d}{s}", .{ try p.fullName(gs.allocator()), @tagName(p.role), age.?, if (paid > 0) try std.fmt.allocPrint(gs.allocator(), " — {d} c-bills paid out", .{paid}) else "" });
+            try gs.log(.rotation, .{ .company = company, .hq = p.posted_hq }, "[turnover] {s} ({s}) retires at {d}{s}", .{ try p.fullName(gs.allocator()), @tagName(p.role), age.?, if (paid > 0) try std.fmt.allocPrint(gs.allocator(), " — {s} c-bills paid out", .{try types.moneyText(gs.allocator(), paid)}) else "" });
             notices += 1;
             continue;
         }

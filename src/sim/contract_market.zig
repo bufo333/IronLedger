@@ -1109,12 +1109,12 @@ pub fn buyListing(gs: *GameState, index: usize) !BuyResult {
         _ = gs.market_listings.orderedRemove(index);
         if (roll <= bm.black_market_fraud_target) {
             const now = if (!std.mem.eql(u8, world_faction, "PER")) try gs.adjustStanding(world_faction, -bm.black_market_standing_loss) else 0;
-            try gs.log(.market, .{ .hq = hq_id }, "[black market] the fence vanished with {d} c-bills — no {s} (2d6 = {d}); {s} standing −{d} → {d}", .{ price, listing.item_key, roll, world_faction, bm.black_market_standing_loss, now });
+            try gs.log(.market, .{ .hq = hq_id }, "[black market] the fence vanished with {s} c-bills — no {s} (2d6 = {d}); {s} standing −{d} → {d}", .{ try types.moneyText(gs.allocator(), price), listing.item_key, roll, world_faction, bm.black_market_standing_loss, now });
             return .{ .fraud = true };
         }
         const house_now = if (!std.mem.eql(u8, world_faction, "PER")) try gs.adjustStanding(world_faction, -1) else 0;
         const pirate_now = try gs.adjustStanding("PER", 1);
-        try gs.log(.market, .{ .hq = hq_id }, "[black market] {s} changed hands for {d} c-bills, no questions asked — {s} standing −1 → {d}, pirates +1 → {d}", .{ listing.item_key, price, world_faction, house_now, pirate_now });
+        try gs.log(.market, .{ .hq = hq_id }, "[black market] {s} changed hands for {s} c-bills, no questions asked — {s} standing −1 → {d}, pirates +1 → {d}", .{ listing.item_key, try types.moneyText(gs.allocator(), price), world_faction, house_now, pirate_now });
         switch (listing.kind) {
             .unit => {
                 const uid = try gs.addUnit(listing.item_key);

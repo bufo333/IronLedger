@@ -112,7 +112,7 @@ fn runPolicies(gs: *GameState) !void {
         };
         policy.sent_this_month += amount;
         const tags = policy.entity.tags();
-        try gs.log(.finance, .{ .company = tags.company, .hq = tags.hq }, "[finance] standing policy dispatches {d} c-bills (eta {d} days, {d} of {d} this month)", .{ amount, eta, policy.sent_this_month, policy.monthly_cap });
+        try gs.log(.finance, .{ .company = tags.company, .hq = tags.hq }, "[finance] standing policy dispatches {s} c-bills (eta {d} days, {s} of {s} this month)", .{ try types.moneyText(gs.allocator(), amount), eta, try types.moneyText(gs.allocator(), policy.sent_this_month), try types.moneyText(gs.allocator(), policy.monthly_cap) });
     }
 
     // Resupply: every line of the company's field plan —
@@ -375,7 +375,7 @@ pub fn runTravel(gs: *GameState) !void {
             // leaves the courier uncredited and in the list so the next
             // tick credits it exactly once (rule 17).
             var date_buf: [10]u8 = undefined;
-            const line = try std.fmt.allocPrint(gs.allocator(), "{s} [delivery] courier delivers {d} c-bills", .{ gs.clock.date.text(&date_buf), courier.amount });
+            const line = try std.fmt.allocPrint(gs.allocator(), "{s} [delivery] courier delivers {s} c-bills", .{ gs.clock.date.text(&date_buf), try types.moneyText(gs.allocator(), courier.amount) });
             try gs.reserveLog(1);
             try gs.reserveLedger(1);
             // Commit: credit, log, and remove cannot fail after the reservations.

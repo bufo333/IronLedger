@@ -27,7 +27,6 @@ C18.
   54, 55, 59):
   - [ ] C13-time-quotes-limits (C13f-C13p): durations, limits, loans, calendar,
     and basis-point arithmetic.
-  - [ ] C13-formatting (C13q-C13u): money, effects, basis-point, tonnage, ETA.
   - [ ] C13-provenance (C13v-C13x): tuning citations, labels, and TUNE markers.
     Delete C13 after all four.
 - [ ] C14 randomness (C14a-C14b; rule 57): caller-selected generator streams

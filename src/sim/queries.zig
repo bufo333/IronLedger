@@ -32,6 +32,7 @@ const lift = @import("lift.zig");
 const refit_m = @import("refit.zig");
 const held_hulls_m = @import("held_hulls.zig");
 const skulls_mod = @import("../domain/skulls.zig");
+const clock_mod = @import("../domain/clock.zig");
 
 const Alloc = std.mem.Allocator;
 
@@ -45,18 +46,8 @@ fn skullMarkup(half: u8) []const u8 {
 }
 
 /// C-bills with thousands separators and a sign for negatives.
-pub fn money(alloc: Alloc, v: types.CBills) ![]const u8 {
-    var digits: [32]u8 = undefined;
-    const mag: u64 = @intCast(if (v < 0) -v else v);
-    const raw = try std.fmt.bufPrint(&digits, "{d}", .{mag});
-    var out: std.ArrayListUnmanaged(u8) = .empty;
-    if (v < 0) try out.append(alloc, '-');
-    for (raw, 0..) |c, i| {
-        if (i > 0 and (raw.len - i) % 3 == 0) try out.append(alloc, ',');
-        try out.append(alloc, c);
-    }
-    return out.toOwnedSlice(alloc);
-}
+/// Delegates to `types.moneyText`, the single owner (rules 24, 28).
+pub const money = types.moneyText;
 
 const table = @import("table.zig");
 pub const Table = table.Table;
@@ -414,8 +405,9 @@ pub fn battleOrders(alloc: Alloc, gs: *GameState, id: types.ContractId) !?Battle
             try what.print(alloc, "{s} {d}t", .{ if (std.mem.eql(u8, l.key, "armor")) "armour" else part_mod.munitionLabel(l.key), l.qty * part_mod.tons(l.key) });
         }
         const funds = gs.treasuryBalance(.{ .company = company });
-        rush_text = try std.fmt.allocPrint(alloc, "{s} — {s} C at the local price ×{s}{s}", .{
-            what.items,                                                   try money(alloc, rush.price), try bpMultText(alloc, rush.mult_bp),
+        var rush_bp_buf: [16]u8 = undefined;
+        rush_text = try std.fmt.allocPrint(alloc, "{s} — {s} C at the local price {s}{s}", .{
+            what.items,                                                   try money(alloc, rush.price), types.bpText(&rush_bp_buf, rush.mult_bp),
             if (funds < rush.price) " {c}(local funds short){/}" else "",
         });
     }
@@ -430,11 +422,6 @@ pub fn battleOrders(alloc: Alloc, gs: *GameState, id: types.ContractId) !?Battle
         .rush = rush_text,
         .confirmed = battle.ordersConfirmed(c),
     };
-}
-
-/// "2.0" for 20,000 bp.
-fn bpMultText(alloc: Alloc, bp: types.Bp) ![]const u8 {
-    return std.fmt.allocPrint(alloc, "{d}.{d}", .{ @divTrunc(bp, 10_000), @divTrunc(@mod(bp, 10_000), 1_000) });
 }
 
 /// The contact warning for one contract: the line a multi-day advance
@@ -556,53 +543,47 @@ pub fn desk(alloc: Alloc, gs: *GameState, log_rows: usize) !Desk {
 
 /// An option's consequences as coloured tags: green for gains, red for
 /// costs — reputation first, because it is the one that lingers.
+/// Per-effect phrase text comes from `events.effectPhrase` (the single owner).
 pub fn effectsText(alloc: Alloc, effects: []const @import("../domain/events.zig").Effect) ![]const u8 {
+    const events_mod = @import("../domain/events.zig");
     var out: std.ArrayListUnmanaged(u8) = .empty;
     if (effects.len == 0) return "{d}no effect{/}";
     // reputation first
     for (effects) |e| switch (e) {
-        .reputation => |d| try appendTag(alloc, &out, d >= 0, try std.fmt.allocPrint(alloc, "rep {s}{d}", .{ if (d >= 0) "+" else "", d })),
+        .reputation => |d| try appendTag(alloc, &out, d >= 0, try events_mod.effectPhrase(alloc, e)),
         else => {},
     };
     for (effects) |e| switch (e) {
         .reputation => {},
-        .cash => |c| try appendTag(alloc, &out, c >= 0, try std.fmt.allocPrint(alloc, "{s}{s} C", .{ if (c >= 0) "+" else "", try money(alloc, c) })),
-        .cash_monthly_pct => |p| try appendTag(alloc, &out, p >= 0, try std.fmt.allocPrint(alloc, "{s}{d}% of a month's pay", .{ if (p >= 0) "+" else "", p })),
-        .morale => |m| try appendTag(alloc, &out, m >= 0, try std.fmt.allocPrint(alloc, "morale {s}{d}", .{ if (m >= 0) "+" else "", m })),
-        .fatigue => |f| try appendTag(alloc, &out, false, try std.fmt.allocPrint(alloc, "fatigue +{d}", .{f})),
-        .next_battle_in => |d| try appendTag(alloc, &out, false, try std.fmt.allocPrint(alloc, "contact in {d}d", .{d})),
-        .recovery_push => try appendTag(alloc, &out, true, "one more roll for every hull and pilot left on the field"),
-        .take_salvage => |plan| try appendTag(alloc, &out, true, switch (plan) {
-            .heaviest => "the biggest wreck the claim reaches, rest in spares",
-            .most_hulls => "as many wrecks as the claim reaches, rest in spares",
-            .parts_only => "no wrecks — the whole claim in spares and armour",
-        }),
-        .field_repair => |order| try appendTag(alloc, &out, true, switch (order) {
-            .worst_first => "the near-wrecks first, each as far as the night reaches",
-            .spread => "one job a hull a round, so the most hulls get plating",
-            .heaviest_first => "the heaviest hulls first, to keep the big BV in the line",
-        }),
-        .xp_all => |x| try appendTag(alloc, &out, true, try std.fmt.allocPrint(alloc, "XP +{d} all", .{x})),
-        .score => |s| try appendTag(alloc, &out, s >= 0, try std.fmt.allocPrint(alloc, "contract score {s}{d}", .{ if (s >= 0) "+" else "", s })),
-        .damage_random_units => |n| try appendTag(alloc, &out, false, try std.fmt.allocPrint(alloc, "{d} line hull{s} damaged", .{ n, if (n == 1) "" else "s" })),
-        .damage_convoy_units => |n| try appendTag(alloc, &out, false, try std.fmt.allocPrint(alloc, "{d} support vehicle{s} damaged", .{ n, if (n == 1) "" else "s" })),
-        .parts_windfall => |n| try appendTag(alloc, &out, true, try std.fmt.allocPrint(alloc, "parts windfall ×{d}", .{n})),
-        .supply_loss => |c| try appendTag(alloc, &out, false, try std.fmt.allocPrint(alloc, "supplies −{s} C", .{try money(alloc, c)})),
-        .employer_standing => |d| try appendTag(alloc, &out, d >= 0, try std.fmt.allocPrint(alloc, "employer standing {s}{d}", .{ if (d >= 0) "+" else "−", @abs(d) })),
-        .field_stock => |fs| try appendTag(alloc, &out, true, try std.fmt.allocPrint(alloc, "+{d} {s} to the trucks", .{ fs.qty, fs.key })),
-        .ransom_prisoner => try appendTag(alloc, &out, true, "ransom by experience, they go home"),
-        .release_prisoner => try appendTag(alloc, &out, true, "+2 standing with their house"),
-        .recruit_prisoner => try appendTag(alloc, &out, false, "loyalty roll 2d6 ≥ 8: joins as a mekwarrior, company morale −2; else released"),
-        .raise_pct => |p| try appendTag(alloc, &out, false, try std.fmt.allocPrint(alloc, "salary +{d}% for good", .{p})),
-        .retention_bonus_months => |m| try appendTag(alloc, &out, false, try std.fmt.allocPrint(alloc, "{d} months' pay once", .{m})),
-        .let_go => try appendTag(alloc, &out, false, "they leave, seat opens"),
-        .replace_from_hall => try appendTag(alloc, &out, false, "they leave; hall replacement if listed"),
-        .ransom_mia => try appendTag(alloc, &out, false, "ransom by experience from the outfit, they come home"),
-        .exchange_mia => try appendTag(alloc, &out, true, "a prisoner of their house goes back; else written off"),
-        .write_off_mia => try appendTag(alloc, &out, false, "missing, presumed dead · company morale −5"),
-        .engagement => try appendTag(alloc, &out, false, "a real engagement against the contract's opposition"),
-        .seize_hull => try appendTag(alloc, &out, false, "your most battered line hull is taken, for good"),
-        .delay_arrival => |d| try appendTag(alloc, &out, false, try std.fmt.allocPrint(alloc, "+{d} days in transit", .{d})),
+        .cash => |c| try appendTag(alloc, &out, c >= 0, try events_mod.effectPhrase(alloc, e)),
+        .cash_monthly_pct => |p| try appendTag(alloc, &out, p >= 0, try events_mod.effectPhrase(alloc, e)),
+        .morale => |m| try appendTag(alloc, &out, m >= 0, try events_mod.effectPhrase(alloc, e)),
+        .fatigue => try appendTag(alloc, &out, false, try events_mod.effectPhrase(alloc, e)),
+        .next_battle_in => try appendTag(alloc, &out, false, try events_mod.effectPhrase(alloc, e)),
+        .recovery_push => try appendTag(alloc, &out, true, try events_mod.effectPhrase(alloc, e)),
+        .take_salvage => try appendTag(alloc, &out, true, try events_mod.effectPhrase(alloc, e)),
+        .field_repair => try appendTag(alloc, &out, true, try events_mod.effectPhrase(alloc, e)),
+        .xp_all => try appendTag(alloc, &out, true, try events_mod.effectPhrase(alloc, e)),
+        .score => |s| try appendTag(alloc, &out, s >= 0, try events_mod.effectPhrase(alloc, e)),
+        .damage_random_units => try appendTag(alloc, &out, false, try events_mod.effectPhrase(alloc, e)),
+        .damage_convoy_units => try appendTag(alloc, &out, false, try events_mod.effectPhrase(alloc, e)),
+        .parts_windfall => try appendTag(alloc, &out, true, try events_mod.effectPhrase(alloc, e)),
+        .supply_loss => try appendTag(alloc, &out, false, try events_mod.effectPhrase(alloc, e)),
+        .employer_standing => |d| try appendTag(alloc, &out, d >= 0, try events_mod.effectPhrase(alloc, e)),
+        .field_stock => try appendTag(alloc, &out, true, try events_mod.effectPhrase(alloc, e)),
+        .ransom_prisoner => try appendTag(alloc, &out, true, try events_mod.effectPhrase(alloc, e)),
+        .release_prisoner => try appendTag(alloc, &out, true, try events_mod.effectPhrase(alloc, e)),
+        .recruit_prisoner => try appendTag(alloc, &out, false, try events_mod.effectPhrase(alloc, e)),
+        .raise_pct => try appendTag(alloc, &out, false, try events_mod.effectPhrase(alloc, e)),
+        .retention_bonus_months => try appendTag(alloc, &out, false, try events_mod.effectPhrase(alloc, e)),
+        .let_go => try appendTag(alloc, &out, false, try events_mod.effectPhrase(alloc, e)),
+        .replace_from_hall => try appendTag(alloc, &out, false, try events_mod.effectPhrase(alloc, e)),
+        .ransom_mia => try appendTag(alloc, &out, false, try events_mod.effectPhrase(alloc, e)),
+        .exchange_mia => try appendTag(alloc, &out, true, try events_mod.effectPhrase(alloc, e)),
+        .write_off_mia => try appendTag(alloc, &out, false, try events_mod.effectPhrase(alloc, e)),
+        .engagement => try appendTag(alloc, &out, false, try events_mod.effectPhrase(alloc, e)),
+        .seize_hull => try appendTag(alloc, &out, false, try events_mod.effectPhrase(alloc, e)),
+        .delay_arrival => try appendTag(alloc, &out, false, try events_mod.effectPhrase(alloc, e)),
     };
     return out.toOwnedSlice(alloc);
 }
@@ -1000,7 +981,7 @@ pub fn contracts(alloc: Alloc, gs: *GameState, board_hq: types.HqId) !Contracts 
         if (f.echelon != .company) continue;
         var lines: std.ArrayListUnmanaged([]const u8) = .empty;
         switch (posture.companyPosture(gs, f.id)) {
-            .returning => |eta| try lines.append(alloc, try std.fmt.allocPrint(alloc, "[—] {{a}}returning{{/}}  co:{d} {s} on the way home from {s}  ·  arrives day {d} ({d} days)", .{ @intFromEnum(f.id), try table.plain(alloc, f.name), planetName(f.location_planet), eta, eta -| day })),
+            .returning => |eta| try lines.append(alloc, try std.fmt.allocPrint(alloc, "[—] {{a}}returning{{/}}  co:{d} {s} on the way home from {s}  ·  {s}", .{ @intFromEnum(f.id), try table.plain(alloc, f.name), planetName(f.location_planet), try clock_mod.etaText(alloc, eta, day) })),
             .idle_afield => |p| {
                 try lines.append(alloc, try std.fmt.allocPrint(alloc, "[—] {{a}}idle afield{{/}}  co:{d} {s} on {s}  ·  contract over, no orders", .{ @intFromEnum(f.id), try table.plain(alloc, f.name), planetName(p) }));
                 try lines.append(alloc, "    {d}eats from its trucks and pays field prices until it moves · [R] recall home (free) · or accept a new offer with it from here{/}");
@@ -1027,22 +1008,28 @@ pub fn contracts(alloc: Alloc, gs: *GameState, board_hq: types.HqId) !Contracts 
             const ph = r.pay_bp.house; // +5%
             const sl = r.salvage_share_bp.liaison; // ×0.9
             const pd = r.pay_bp.independent; // −5%
-            const notes_static = comptime std.fmt.comptimePrint(
-                "beachhead: ×{d}.{d} pay · +{d}% hardship · local supplies ×{d}.{d} · resupply via link only  ·  rights: integrated = more fights, salvage ×{d}.{d}, defeats −{d}, no training lances, pay +{d}% · house = ×{d}.{d}{d}, +{d}% · liaison = ×{d}.{d} · independent = fewer fights, full salvage, −{d}% · salv cash = salvage exchange (paid in cash, no wrecks)  ·  board refreshes on the 1st",
+            var b1: [16]u8 = undefined;
+            var b2: [16]u8 = undefined;
+            var b3: [16]u8 = undefined;
+            var b4: [16]u8 = undefined;
+            var b5: [16]u8 = undefined;
+            break :blk try std.fmt.allocPrint(
+                alloc,
+                "{s}  ·  {{d}}beachhead: {s} pay · +{d}% hardship · local supplies {s} · resupply via link only  ·  rights: integrated = more fights, salvage {s}, defeats −{d}, no training lances, pay +{d}% · house = {s}, +{d}% · liaison = {s} · independent = fewer fights, full salvage, −{d}% · salv cash = salvage exchange (paid in cash, no wrecks)  ·  board refreshes on the 1st{{/}}",
                 .{
-                    bpay / 10_000, (bpay % 10_000) / 1_000, // ×1.3
+                    (try rating(alloc, gs)).line,
+                    types.bpText(&b1, bpay),
                     hard / 100, // +15%
-                    lsup / 10_000, (lsup % 10_000) / 1_000, // ×2.5
-                    si / 10_000, (si % 10_000) / 1_000, // ×0.5
-                    0 - r.integrated_defeat_score, // 2
+                    types.bpText(&b2, lsup),
+                    types.bpText(&b3, si),
+                    0 - r.integrated_defeat_score,
                     (pi - 10_000) / 100, // +10%
-                    sh / 10_000, (sh % 10_000) / 1_000, (sh % 1_000) / 100, // ×0.75
+                    types.bpText(&b4, sh),
                     (ph - 10_000) / 100, // +5%
-                    sl / 10_000, (sl % 10_000) / 1_000, // ×0.9
-                    (10_000 - pd) / 100, // 5
+                    types.bpText(&b5, sl),
+                    (10_000 - pd) / 100, // −5%
                 },
             );
-            break :blk try std.fmt.allocPrint(alloc, "{s}  ·  {{d}}" ++ notes_static ++ "{{/}}", .{(try rating(alloc, gs)).line});
         },
         .standings = try standings(alloc, gs),
     };
@@ -1938,16 +1925,16 @@ pub fn inbound(alloc: Alloc, gs: *GameState) ![]InboundRow {
     for (gs.part_orders.items) |o| {
         if (o.status == .delivered or o.status == .cancelled) continue;
         const eta = o.eta_day orelse std.math.maxInt(u32);
-        const eta_s: []const u8 = if (o.eta_day) |e| (if (e > day) try std.fmt.allocPrint(alloc, "d{d} ({d} days)", .{ e, e - day }) else "today") else if (o.status == .failed) try std.fmt.allocPrint(alloc, "{{c}}not found{{/}}{s}", .{try sourcingNote(alloc, gs, o.part_key, o.dest)}) else "{a}sourcing{/}";
+        const eta_s: []const u8 = if (o.eta_day) |e| try clock_mod.etaText(alloc, e, day) else if (o.status == .failed) try std.fmt.allocPrint(alloc, "{{c}}not found{{/}}{s}", .{try sourcingNote(alloc, gs, o.part_key, o.dest)}) else "{a}sourcing{/}";
         try rows.append(alloc, .{ .eta = eta, .cells = try table.row(alloc, &.{
             o.part_key, try std.fmt.allocPrint(alloc, "{d}", .{o.quantity}), try siteLabel(alloc, gs, o.dest), @tagName(o.status), eta_s, try money(alloc, o.cost),
         }) });
     }
     for (gs.fund_couriers.items) |c| {
-        try rows.append(alloc, .{ .eta = c.eta_day, .cells = try table.row(alloc, &.{ "cash courier", "", try treasuryLabel(alloc, gs, c.to), "in transit", try std.fmt.allocPrint(alloc, "d{d} ({d} days)", .{ c.eta_day, c.eta_day -| day }), try money(alloc, c.amount) }) });
+        try rows.append(alloc, .{ .eta = c.eta_day, .cells = try table.row(alloc, &.{ "cash courier", "", try treasuryLabel(alloc, gs, c.to), "in transit", try clock_mod.etaText(alloc, c.eta_day, day), try money(alloc, c.amount) }) });
     }
     for (gs.unit_transfers.items) |t| {
-        try rows.append(alloc, .{ .eta = t.eta_day, .cells = try table.row(alloc, &.{ try std.fmt.allocPrint(alloc, "hull #{d}", .{@intFromEnum(t.unit)}), "", try forceName(alloc, gs, t.to_company), "in transit", try std.fmt.allocPrint(alloc, "d{d} ({d} days)", .{ t.eta_day, t.eta_day -| day }), "" }) });
+        try rows.append(alloc, .{ .eta = t.eta_day, .cells = try table.row(alloc, &.{ try std.fmt.allocPrint(alloc, "hull #{d}", .{@intFromEnum(t.unit)}), "", try forceName(alloc, gs, t.to_company), "in transit", try clock_mod.etaText(alloc, t.eta_day, day), "" }) });
     }
     std.mem.sort(Row, rows.items, {}, struct {
         fn lt(_: void, a: Row, b: Row) bool {
@@ -3455,6 +3442,7 @@ pub fn offersAt(alloc: Alloc, gs: *GameState, planet_key: []const u8) ![]const [
 // --------------------------------------------------------------------- lab
 
 const meklab = @import("../domain/meklab.zig");
+const part_dom = @import("../domain/part.zig");
 
 pub const MountRow = struct {
     slot_key: []const u8,
@@ -3546,11 +3534,6 @@ pub fn labMeks(alloc: Alloc, gs: *GameState) ![]types.UnitId {
     return out.toOwnedSlice(alloc);
 }
 
-fn halfTons(alloc: Alloc, ht: i64) ![]const u8 {
-    const mag = @abs(ht);
-    return std.fmt.allocPrint(alloc, "{s}{d}.{d}t", .{ if (ht < 0) "-" else "", mag / 2, (mag % 2) * 5 });
-}
-
 pub fn lab(alloc: Alloc, gs: *GameState, uid: types.UnitId) !Lab {
     const meks = try labMeks(alloc, gs);
     var budget: std.ArrayListUnmanaged([]const u8) = .empty;
@@ -3566,8 +3549,8 @@ pub fn lab(alloc: Alloc, gs: *GameState, uid: types.UnitId) !Lab {
     if (u.status == .destroyed) try budget.append(alloc, try std.fmt.allocPrint(alloc, "{s} · {{d}}no refits on a wreck{{/}}", .{try wreckNote(alloc, gs, u)}));
     const items = try refit_m.labItems(gs, uid, alloc);
     const r = try meklab.validate(design, items, alloc);
-    try budget.append(alloc, try std.fmt.allocPrint(alloc, "chassis   {s}   mounts   {s}", .{ try halfTons(alloc, r.fixed_half_tons), try halfTons(alloc, r.loadout_half_tons) }));
-    try budget.append(alloc, try std.fmt.allocPrint(alloc, "total     {s}   free     {s}{s}{{/}}", .{ try halfTons(alloc, @as(i64, r.fixed_half_tons) + r.loadout_half_tons), if (r.free_half_tons < 0) "{c}" else "{g}", try halfTons(alloc, r.free_half_tons) }));
+    try budget.append(alloc, try std.fmt.allocPrint(alloc, "chassis   {s}   mounts   {s}", .{ try part_dom.halfTonsText(alloc, r.fixed_half_tons), try part_dom.halfTonsText(alloc, r.loadout_half_tons) }));
+    try budget.append(alloc, try std.fmt.allocPrint(alloc, "total     {s}   free     {s}{s}{{/}}", .{ try part_dom.halfTonsText(alloc, @as(i64, r.fixed_half_tons) + r.loadout_half_tons), if (r.free_half_tons < 0) "{c}" else "{g}", try part_dom.halfTonsText(alloc, r.free_half_tons) }));
     try budget.append(alloc, try std.fmt.allocPrint(alloc, "heat      alpha strike {d} · sinks {d}", .{ r.heat_per_alpha, design.heat_sinks }));
     try budget.append(alloc, try std.fmt.allocPrint(alloc, "movement  walk {d}{s} · engine {d}", .{ design.walk_mp, if (design.jump_mp > 0) " · jump" else "", design.engineRating() }));
     try budget.append(alloc, "");
@@ -6360,7 +6343,6 @@ pub fn worldDetail(alloc: Alloc, gs: *GameState, view: *const Map, w: *const Wor
 /// facilities, part and world keys (rule 31 — pure allocator-parameterised query).
 pub fn completionCandidates(alloc: Alloc, gs: *GameState) ![]const []const u8 {
     const hq_dom = @import("../domain/hq.zig");
-    const part_dom = @import("../domain/part.zig");
     var pool: std.ArrayListUnmanaged([]const u8) = .empty;
     try pool.append(alloc, "outfit");
     try pool.append(alloc, "pilot");
@@ -6481,7 +6463,7 @@ pub fn resultText(
             try std.fmt.allocPrint(alloc, "ordered {d} × {s} to {s}", .{ c.quantity, c.part_key, try hqName(alloc, gs, c.hq) })
         else
             try std.fmt.allocPrint(alloc, "logistics could not source {s} this time — retry after the monthly market refresh, or buy it off a board", .{c.part_key}),
-        .take_loan => |l| return try std.fmt.allocPrint(alloc, "drew {d} c-bills over {d} months", .{ l.principal, l.term_months }),
+        .take_loan => |l| return try std.fmt.allocPrint(alloc, "drew {s} c-bills over {d} months", .{ try types.moneyText(alloc, l.principal), l.term_months }),
         .accept_contract => return if (try acceptedLine(alloc, gs, result.contract)) |line|
             line
         else
@@ -6563,7 +6545,7 @@ test "resultText: canonical sentences per outcome class, hostile names escaped" 
     // take_loan sentence.
     const r_loan = cmds.Result{};
     const s_loan = try resultText(al, &gs, .{ .take_loan = .{ .principal = 500_000, .term_months = 12 } }, r_loan);
-    try std.testing.expect(std.mem.indexOf(u8, s_loan, "500000") != null);
+    try std.testing.expect(std.mem.indexOf(u8, s_loan, "500,000") != null);
     // Default "done." for an unspecced verb.
     const r_def = cmds.Result{};
     const s_def = try resultText(al, &gs, .advance_day, r_def);

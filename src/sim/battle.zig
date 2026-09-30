@@ -945,7 +945,7 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
             .contract = c.id,
             .note = "salvage exchange",
         });
-        break :blk if (exchange_cash > 0) try std.fmt.allocPrint(gs.allocator(), "salvage exchange — the employer keeps the wrecks and pays {d} c-bills for your {d} BV claim", .{ exchange_cash, salvage_bv }) else "";
+        break :blk if (exchange_cash > 0) try std.fmt.allocPrint(gs.allocator(), "salvage exchange — the employer keeps the wrecks and pays {s} c-bills for your {d} BV claim", .{ try types.moneyText(gs.allocator(), exchange_cash), salvage_bv }) else "";
     } else blk: {
         // Roll what is out there once, then see whether the claim
         // buys a real choice. If it does, nothing is taken yet — the

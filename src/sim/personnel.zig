@@ -149,8 +149,8 @@ pub fn payShares(gs: *GameState, contract_id: types.ContractId, company: types.F
         p.addMorale(tuning.contract.share_morale_bonus);
     }
     try gs.postTransaction(.{ .day = gs.clock.day_index, .amount = -paid, .category = .payroll, .company = company, .contract = contract_id, .note = "profit shares" });
-    try gs.log(.contract, .{ .company = company, .contract = contract_id }, "[shares] {d} c-bills of {d} contract income ({d}%) paid to {d} shareholders — {d} shares at {d} each (morale +{d})", .{
-        paid, income, types.bpPercent(gs.share_profit_bp), holders, total_shares, per_share, tuning.contract.share_morale_bonus,
+    try gs.log(.contract, .{ .company = company, .contract = contract_id }, "[shares] {s} c-bills of {s} contract income ({d}%) paid to {d} shareholders — {d} shares at {s} each (morale +{d})", .{
+        try types.moneyText(gs.allocator(), paid), try types.moneyText(gs.allocator(), income), types.bpPercent(gs.share_profit_bp), holders, total_shares, try types.moneyText(gs.allocator(), per_share), tuning.contract.share_morale_bonus,
     });
     return paid;
 }
@@ -484,7 +484,7 @@ pub fn recruit(gs: *GameState, role: person_mod.Role) !types.PersonId {
 pub fn fire(gs: *GameState, id: types.PersonId) !void {
     const p = gs.person(id) orelse return error.UnknownPerson;
     const paid = try depart(gs, id, .resigned, tuning.person.fire_severance_bp, "severance (fired)");
-    if (paid > 0) try gs.log(.rotation, .{ .company = gs.companyOf(p.assigned_force) }, "[personnel] {s} fired — {d} c-bills severance", .{ try p.fullName(gs.allocator()), paid });
+    if (paid > 0) try gs.log(.rotation, .{ .company = gs.companyOf(p.assigned_force) }, "[personnel] {s} fired — {s} c-bills severance", .{ try p.fullName(gs.allocator()), try types.moneyText(gs.allocator(), paid) });
 }
 
 pub fn setOfficeStaff(gs: *GameState, hq: types.HqId, role: person_mod.Role, delta: i8) !types.PersonId {
@@ -525,7 +525,7 @@ pub fn promote(gs: *GameState, person_id: types.PersonId, rank: rank_mod.Rank, p
     p.rank = rank;
     p.rank_pinned = pin;
     if (!pin) _ = try refreshRanks(gs);
-    try gs.log(.rotation, .{ .company = gs.companyOf(p.assigned_force), .hq = p.posted_hq }, "[rank] {s}: {s} → {s}{s} · {d} c-bills/mo", .{ try p.fullName(gs.allocator()), was.name(), p.rank.name(), if (pin) " (pinned)" else "", p.monthlySalary() });
+    try gs.log(.rotation, .{ .company = gs.companyOf(p.assigned_force), .hq = p.posted_hq }, "[rank] {s}: {s} → {s}{s} · {s} c-bills/mo", .{ try p.fullName(gs.allocator()), was.name(), p.rank.name(), if (pin) " (pinned)" else "", try types.moneyText(gs.allocator(), p.monthlySalary()) });
 }
 
 // ---- C4b exec wrappers ----

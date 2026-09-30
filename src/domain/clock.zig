@@ -74,6 +74,26 @@ pub const Clock = struct {
     }
 };
 
+/// "today" when `eta_day <= now_day`, else "d{eta} ({N} days)" with
+/// `N = eta_day − now_day` — the one owner for ETA/arrival display
+/// (rules 24, 28). Both transit rows and the returning-company line
+/// call this so the wording cannot diverge.
+pub fn etaText(alloc: std.mem.Allocator, eta_day: u32, now_day: u32) ![]const u8 {
+    if (eta_day <= now_day) return alloc.dupe(u8, "today");
+    const n = eta_day - now_day;
+    return std.fmt.allocPrint(alloc, "d{d} ({d} days)", .{ eta_day, n });
+}
+
+test "etaText: today, future, and exact boundary" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    try std.testing.expectEqualStrings("today", try etaText(a, 10, 10));
+    try std.testing.expectEqualStrings("today", try etaText(a, 9, 10));
+    try std.testing.expectEqualStrings("d15 (5 days)", try etaText(a, 15, 10));
+    try std.testing.expectEqualStrings("d11 (1 days)", try etaText(a, 11, 10));
+}
+
 test "date rollover incl. leap year" {
     var d: Date = .{ .year = 3024, .month = 2, .day = 28 };
     d = d.next();

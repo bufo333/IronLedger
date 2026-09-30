@@ -196,8 +196,10 @@ pub fn validate(design: *const chassis_mod.Chassis, items: []const Item, alloc: 
     const total = report.fixed_half_tons + report.loadout_half_tons;
     report.free_half_tons = @as(i32, @intCast(@as(u32, design.tonnage) * 2)) - @as(i32, @intCast(total));
     if (report.free_half_tons < 0) {
-        try violations.append(alloc, .{ .rule = .overweight, .text = try std.fmt.allocPrint(alloc, "overweight by {d}.{d} tons ({d}.{d}/{d}t)", .{
-            @divTrunc(-report.free_half_tons, 2), @mod(-report.free_half_tons, 2) * 5, total / 2, (total % 2) * 5, design.tonnage,
+        const over_ht: i64 = @as(i64, report.free_half_tons);
+        const used_ht: i64 = @as(i64, @intCast(total));
+        try violations.append(alloc, .{ .rule = .overweight, .text = try std.fmt.allocPrint(alloc, "overweight by {s} ({s}/{d}t)", .{
+            try part_mod.halfTonsText(alloc, -over_ht), try part_mod.halfTonsText(alloc, used_ht), design.tonnage,
         }) });
     }
     for (0..location_count) |i| {
