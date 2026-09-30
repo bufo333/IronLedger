@@ -89,6 +89,22 @@ pub const StaffRequirement = struct {
             .{ .role = .admin_finance, .need = self.finance, .name = "finance" },
         };
     }
+
+    /// The five hiring entries for the back-office: the logistics requirement
+    /// splits into `admin_logistics` (half) and `admin_transport` (the rest)
+    /// so both roles are hired to plan (ARCH §9.4, rule 20). Every site that
+    /// recruits admins — `staffHqToRequirement`, `createCommander`, and the
+    /// staffing-detail view — iterates this. `desks()` stays as the four-desk
+    /// table for rating and checklist.
+    pub fn hiringPlan(self: StaffRequirement) [5]Desk {
+        return .{
+            .{ .role = .admin_command, .need = self.admin, .name = "command" },
+            .{ .role = .admin_logistics, .need = self.logistics / 2, .name = "logistics" },
+            .{ .role = .admin_transport, .need = self.logistics - self.logistics / 2, .name = "transport" },
+            .{ .role = .admin_hr, .need = self.hr, .name = "HR" },
+            .{ .role = .admin_finance, .need = self.finance, .name = "finance" },
+        };
+    }
 };
 
 pub const ProjectKind = enum { found, tier_upgrade, facility_upgrade };

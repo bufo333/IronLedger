@@ -69,18 +69,11 @@ pub fn staffHqToRequirement(gs: *GameState, hq_id: types.HqId) !u32 {
     const hq = gs.hqs.getPtr(hq_id) orelse return error.UnknownHq;
     const req = hq.staffRequired();
     var hired: u32 = 0;
-    const plan = [_]struct { person_mod.Role, u32 }{
-        .{ .admin_command, req.admin },
-        .{ .admin_logistics, req.logistics / 2 },
-        .{ .admin_transport, req.logistics - req.logistics / 2 },
-        .{ .admin_hr, req.hr },
-        .{ .admin_finance, req.finance },
-    };
-    for (plan) |entry| {
-        const have = hqStaff(gs, hq_id, entry[0]).count;
-        var n: u32 = entry[1] -| have;
+    for (req.hiringPlan()) |entry| {
+        const have = hqStaff(gs, hq_id, entry.role).count;
+        var n: u32 = entry.need -| have;
         while (n > 0) : (n -= 1) {
-            const pid = try @import("personnel.zig").recruitGenerated(gs, entry[0], hq_id, .market);
+            const pid = try @import("personnel.zig").recruitGenerated(gs, entry.role, hq_id, .market);
             gs.person(pid).?.posted_hq = hq_id;
             hired += 1;
         }
@@ -1168,7 +1161,7 @@ pub fn sellHq(gs: *GameState, hq_id: types.HqId) !void {
     const h = gs.hqs.getPtr(hq_id) orelse return error.UnknownHq;
     if (gs.hqs.count() <= 1) return error.LastHq;
     if (toe.companiesAtHq(gs, hq_id) > 0) return error.HqInUse;
-    const value = market_mod.hqSaleValue(h) + h.funds;
+    const value = market_mod.hqSaleProceeds(h);
     const name = h.name;
     var pit = gs.people.iterator();
     while (pit.next()) |e| if (e.value_ptr.posted_hq == hq_id) {
@@ -2116,6 +2109,76 @@ test "a due depot-repair bay job is unchanged — no RNG consumed, no treasury d
     try std.testing.expectEqual(@as(usize, 1), gs.bay_jobs.items.len);
     try std.testing.expectEqual(unit_status_before, gs.unit(uid).?.status);
     try std.testing.expectEqual(funds_before, gs.hqs.getPtr(hq).?.funds);
+}
+
+test "admin-desk hiring-split owner and consumers agree" {
+    // `staffHqToRequirement`, `createCommander` and `backOffice` all read
+    // `StaffRequirement.hiringPlan`; this test verifies agreement between the
+    // owner and each consumer for admin_logistics and admin_transport (rule 20).
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 901 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
+    const hq_id = gs.seat();
+    const req = gs.hqs.getPtr(hq_id).?.staffRequired();
+    const plan = req.hiringPlan();
+
+    // Locate the logistics and transport entries in the owner.
+    var owner_logistics: u32 = 0;
+    var owner_transport: u32 = 0;
+    for (plan) |e| {
+        if (e.role == .admin_logistics) owner_logistics = e.need;
+        if (e.role == .admin_transport) owner_transport = e.need;
+    }
+    // The split must partition logistics exactly.
+    try std.testing.expectEqual(req.logistics / 2, owner_logistics);
+    try std.testing.expectEqual(req.logistics - req.logistics / 2, owner_transport);
+
+    // staffHqToRequirement fills to the same counts.
+    _ = try staffHqToRequirement(&gs, hq_id);
+    const staffed_log = hqStaff(&gs, hq_id, .admin_logistics).count;
+    const staffed_tpt = hqStaff(&gs, hq_id, .admin_transport).count;
+    try std.testing.expectEqual(owner_logistics, staffed_log);
+    try std.testing.expectEqual(owner_transport, staffed_tpt);
+
+    // createCommander produced the same split for the founding HQ.
+    const alloc = std.testing.allocator;
+    const rows = try @import("queries.zig").backOffice(alloc, &gs, hq_id);
+    defer alloc.free(rows);
+    var view_logistics: u32 = 0;
+    var view_transport: u32 = 0;
+    for (rows) |row| {
+        if (row.role == .admin_logistics) view_logistics = row.need;
+        if (row.role == .admin_transport) view_transport = row.need;
+    }
+    try std.testing.expectEqual(owner_logistics, view_logistics);
+    try std.testing.expectEqual(owner_transport, view_transport);
+}
+
+test "hqSaleQuote value equals what sellHq credits to the outfit" {
+    // The quote and the commit both call `market.hqSaleProceeds`; this test
+    // verifies agreement between the two consumers (rules 20, 26).
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 902 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
+    const home = gs.seat();
+    gs.hqs.getPtr(home).?.funds = 5_000_000;
+    // Found a second HQ so home is not the last and can be sold.
+    const home_world = @import("../domain/planet.zig").find(gs.hqs.getPtr(home).?.planet_key).?;
+    var far_key: []const u8 = "";
+    for (@import("../domain/planet.zig").catalog) |*p| {
+        if (p != home_world and far_key.len == 0) far_key = p.key;
+    }
+    _ = try commands.execute(&gs, .{ .found_hq = .{ .name = "Second", .planet_key = far_key } });
+    const second = gs.hqs.keys()[1];
+
+    // Quote before selling.
+    const quote = @import("queries.zig").hqSaleQuote(&gs, second).?;
+
+    // Sell: the outfit funds rise by exactly the quoted value.
+    const outfit_before = gs.funds;
+    try sellHq(&gs, second);
+    const outfit_after = gs.funds;
+    try std.testing.expectEqual(quote.value, outfit_after - outfit_before);
 }
 
 test "bay-job injure-branch: when the bay accident fires the injury is atomically committed" {

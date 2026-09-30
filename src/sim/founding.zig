@@ -62,13 +62,9 @@ pub fn createCommander(
 
     // The back office is people: the starter HQ's staff plan, to requirement.
     const req = hq.staffRequired();
-    const staff_plan = [_]struct { person_mod.Role, u32 }{
-        .{ .admin_command, req.admin },                           .{ .admin_logistics, req.logistics / 2 },
-        .{ .admin_transport, req.logistics - req.logistics / 2 }, .{ .admin_hr, req.hr },
-        .{ .admin_finance, req.finance },
-    };
+    const staff_plan = req.hiringPlan();
     var total_staff: u32 = 0;
-    for (staff_plan) |entry| total_staff += entry[1];
+    for (staff_plan) |entry| total_staff += entry.need;
     std.debug.assert(total_staff <= max_founding_staff);
 
     // Draw every founding recruit's spec from the RNG copy. `recruitBonus`
@@ -81,11 +77,11 @@ pub fn createCommander(
     var staff_count: usize = 0;
     var admin_hr_count: u32 = 0;
     for (staff_plan) |entry| {
-        for (0..entry[1]) |_| {
+        for (0..entry.need) |_| {
             const bonus: i32 = if (admin_hr_count >= tuning.person.recruit_hr_admins) 1 else 0;
-            specs[staff_count] = person_gen.generateWithBonus(&rng_copy, .generation, entry[0], bonus);
+            specs[staff_count] = person_gen.generateWithBonus(&rng_copy, .generation, entry.role, bonus);
             staff_count += 1;
-            if (entry[0] == .admin_hr) admin_hr_count += 1;
+            if (entry.role == .admin_hr) admin_hr_count += 1;
         }
     }
 

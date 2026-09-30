@@ -73,10 +73,26 @@ pub fn hireFromSpec(gs: *GameState, spec: person_gen.GeneratedPerson) !types.Per
     return gs.commitPerson(p);
 }
 
-/// Post a person to an HQ's staff (off any force).
+/// Why posting a person to an HQ is blocked (rule 21: one named predicate for
+/// "may this person be posted here"; `postToHq` and any view eligibility call
+/// it before acting).
+pub const PostBlock = enum { unknown_person, unknown_hq };
+
+pub fn canPostToHq(gs: *GameState, person_id: types.PersonId, hq_id: types.HqId) ?PostBlock {
+    if (gs.person(person_id) == null) return .unknown_person;
+    if (gs.hqs.getPtr(hq_id) == null) return .unknown_hq;
+    return null;
+}
+
+/// Post a person to an HQ's staff (off any force). Vacates any pilot/tech
+/// seat they hold so no unit is left with a dangling assignment (rule 20).
 pub fn postToHq(gs: *GameState, person_id: types.PersonId, hq_id: types.HqId) !void {
-    const p = gs.person(person_id) orelse return error.UnknownPerson;
-    if (gs.hqs.getPtr(hq_id) == null) return error.UnknownHq;
+    if (canPostToHq(gs, person_id, hq_id)) |why| return switch (why) {
+        .unknown_person => error.UnknownPerson,
+        .unknown_hq => error.UnknownHq,
+    };
+    const p = gs.person(person_id).?;
+    vacateSeats(gs, person_id);
     p.posted_hq = hq_id;
     p.assigned_force = .none;
     hq_ops.refreshHqStaffing(gs);
@@ -158,6 +174,16 @@ pub fn payShares(gs: *GameState, contract_id: types.ContractId, company: types.F
     return paid;
 }
 
+/// Clear every pilot/tech slot that points at this person (rule 20: one owner
+/// for seat-vacating; called by `depart`, `transferPerson` and `postToHq`).
+fn vacateSeats(gs: *GameState, person_id: types.PersonId) void {
+    var uit = gs.units.iterator();
+    while (uit.next()) |ue| {
+        if (ue.value_ptr.pilot == person_id) ue.value_ptr.pilot = .none;
+        if (ue.value_ptr.tech == person_id) ue.value_ptr.tech = .none;
+    }
+}
+
 /// Someone leaves the outfit: status set, every seat vacated, and
 /// the departure payout posted to the outfit as payroll ("severance") —
 /// `share_bp` of the full amount (a firing pays half, a notice or a
@@ -166,11 +192,7 @@ pub fn depart(gs: *GameState, person_id: types.PersonId, status: person_mod.Stat
     const p = gs.person(person_id) orelse return 0;
     p.status = status;
     p.departed_day = gs.clock.day_index;
-    var uit = gs.units.iterator();
-    while (uit.next()) |ue| {
-        if (ue.value_ptr.pilot == person_id) ue.value_ptr.pilot = .none;
-        if (ue.value_ptr.tech == person_id) ue.value_ptr.tech = .none;
-    }
+    vacateSeats(gs, person_id);
     // The posting stays on the record (who walked from which desk); the
     // staffing count is derived from active people, refreshed here so no
     // caller has to remember.
@@ -508,11 +530,7 @@ pub fn transferPerson(gs: *GameState, person_id: types.PersonId, to_force: types
     if (gs.companyOf(p.assigned_force) == gs.companyOf(dest.id) and p.assigned_force == dest.id) return error.SameForce;
     if (posture.isCompanyDeployed(gs, gs.companyOf(p.assigned_force))) return error.PersonDeployed;
     // Vacate any seat/tech slot they hold in the old company.
-    var uit = gs.units.iterator();
-    while (uit.next()) |entry| {
-        if (entry.value_ptr.pilot == person_id) entry.value_ptr.pilot = .none;
-        if (entry.value_ptr.tech == person_id) entry.value_ptr.tech = .none;
-    }
+    vacateSeats(gs, person_id);
     const days = sites.travelDays(gs, gs.companyOf(p.assigned_force), gs.companyOf(dest.id));
     p.assigned_force = dest.id;
     p.posted_hq = .none;
@@ -765,4 +783,29 @@ test "a raised company is an empty skeleton; hulls bought for it land in a lance
     try std.testing.expect(c.hired_count > 2);
     try std.testing.expect(c.still_open > 0);
     for (gs.candidates.items) |cand| try std.testing.expect(cand.spec.role != .mekwarrior and cand.spec.role != .tech_mek);
+}
+
+test "posting a pilot clears their unit seat; an ineligible post changes nothing" {
+    const crew_m = @import("crew.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 42 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    const hq = gs.seat();
+
+    // Assign a pilot to a unit, then post them to HQ: no dangling assignment.
+    const uid = try gs.addUnit("LCT-1V");
+    const pilot_id = try gs.hirePerson("Jo", "Doe", .mekwarrior);
+    try crew_m.assignSlot(&gs, uid, .pilot, pilot_id);
+    try std.testing.expectEqual(pilot_id, gs.unit(uid).?.pilot);
+    try postToHq(&gs, pilot_id, hq);
+    try std.testing.expectEqual(types.PersonId.none, gs.unit(uid).?.pilot);
+
+    // An ineligible post (unknown person) returns an error and changes nothing
+    // (rule 13: a refused command mutates nothing).
+    const hq_funds_before = gs.hqs.getPtr(hq).?.funds;
+    const people_before = gs.people.count();
+    const bad_pid: types.PersonId = @enumFromInt(9999);
+    try std.testing.expectError(error.UnknownPerson, postToHq(&gs, bad_pid, hq));
+    try std.testing.expectEqual(hq_funds_before, gs.hqs.getPtr(hq).?.funds);
+    try std.testing.expectEqual(people_before, gs.people.count());
 }

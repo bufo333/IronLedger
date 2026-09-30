@@ -140,6 +140,13 @@ pub fn hqSaleValue(h: *const hq_mod.Hq) types.CBills {
     return @divTrunc(total * @as(types.CBills, tuning.hq.sale_pct), 100);
 }
 
+/// Total proceeds from selling an HQ: its facilities' resale value plus the
+/// treasury it holds (rules 20, 26; ARCH §9.6). The quote and the sell command
+/// both read this one figure; the quote stays pure, the command mutates.
+pub fn hqSaleProceeds(h: *const hq_mod.Hq) types.CBills {
+    return hqSaleValue(h) + h.funds;
+}
+
 /// Resale value of `qty` of a stock line: stock_resale_bp of
 /// catalogue cost, component_resale_bp for comp_* parts.
 pub fn stockSaleValue(key: []const u8, qty: u32) types.CBills {

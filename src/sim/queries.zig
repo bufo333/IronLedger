@@ -5288,20 +5288,12 @@ pub const OfficeRow = struct {
 };
 
 /// The back office at one HQ: every admin desk, who fills it, and the
-/// requirement (`StaffRequirement.desks` is the table; transport shares
-/// the logistics desk).
+/// requirement (rule 20: role+need pairs come from `StaffRequirement.hiringPlan`).
 pub fn backOffice(alloc: Alloc, gs: *GameState, hq_id: types.HqId) ![]OfficeRow {
     var out: std.ArrayListUnmanaged(OfficeRow) = .empty;
     const hq = gs.hqs.getPtr(hq_id) orelse return out.toOwnedSlice(alloc);
     const req = hq.staffRequired();
-    const roles = [_]struct { role: person_mod.Role, need: u32 }{
-        .{ .role = .admin_command, .need = req.admin },
-        .{ .role = .admin_logistics, .need = req.logistics / 2 },
-        .{ .role = .admin_transport, .need = req.logistics - req.logistics / 2 },
-        .{ .role = .admin_hr, .need = req.hr },
-        .{ .role = .admin_finance, .need = req.finance },
-    };
-    for (roles) |r| {
+    for (req.hiringPlan()) |r| {
         const s = @import("hq_ops.zig").hqStaff(gs, hq_id, r.role);
         try out.append(alloc, .{ .role = r.role, .have = s.count, .need = r.need, .best_skill = s.best_skill, .pay = r.role.baseSalary() * s.count, .effect = switch (r.role) {
             .admin_command => "orders, morale",
@@ -6104,7 +6096,7 @@ pub const HqSaleQuote = struct { name: []const u8, value: types.CBills };
 
 pub fn hqSaleQuote(gs: *GameState, hq_id: types.HqId) ?HqSaleQuote {
     const h = gs.hqs.getPtr(hq_id) orelse return null;
-    return .{ .name = h.name, .value = market_mod.hqSaleValue(h) + h.funds };
+    return .{ .name = h.name, .value = market_mod.hqSaleProceeds(h) };
 }
 
 /// What disbanding a company sells its hulls for.
