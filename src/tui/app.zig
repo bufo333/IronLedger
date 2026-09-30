@@ -34,7 +34,11 @@ pub const GameState = game.state.GameState;
 pub const Treasury = game.state.Treasury;
 
 pub const Tab = enum(u8) { desk, map, forces, contracts, ledger, supply, hq, lab, people, market };
-pub const tab_names = [_][]const u8{ "F1 Desk", "F2 Map", "F3 Forces", "F4 Contracts", "F5 Ledger", "F6 Supply", "F7 HQ", "F8 Lab", "F9 People", "F10 Market" };
+
+/// The tab-strip label for a tab ("F1 Desk", …), read from the registry.
+pub fn tabName(tab: Tab) []const u8 {
+    return App.screen_table[@intFromEnum(tab)].name;
+}
 
 const Mode = enum { welcome, wizard, game };
 const WizardStep = enum(u8) { commander, outfit, company, review };
@@ -307,6 +311,8 @@ pub const App = struct {
     /// some screens).
     /// The pane whose table columns ←/→ scroll this frame (set by the draw).
     focus_scroll: ?u8 = null,
+    /// Bit mask of pane indices drawn this frame; set by `paneFocused`.
+    panes_drawn: u16 = 0,
     msg: TextBuf = .{},
     msg_style: Style = .dim,
     input: TextBuf = .{},
@@ -404,6 +410,7 @@ pub const App = struct {
             if (self.term.tookResize()) {
                 const size = self.term.size();
                 try self.screen.resize(size.cols, size.rows);
+                self.clampFocus();
             }
             try self.draw();
             const key = self.term.readKey(500);
@@ -503,6 +510,7 @@ pub const App = struct {
         self.screen.clear();
         self.n_placements = 0;
         self.focus_scroll = null;
+        self.panes_drawn = 0;
         if (self.modal == .none) self.modal_colscroll = 0;
         const too_small = self.screen.cols < 80 or self.screen.rows < 24;
         if (too_small) {
@@ -626,6 +634,23 @@ pub const App = struct {
     /// Side panes are dropped below this width.
     pub fn narrow(self: *App) bool {
         return layout.narrow(self.screen.cols);
+    }
+
+    /// Record that pane `idx` was drawn this frame and return whether it is
+    /// focused.  Every screen draws its focusable panes through this call so
+    /// that the structural test can verify panes_drawn == (1<<paneCount)-1.
+    pub fn paneFocused(self: *App, idx: u8) bool {
+        self.panes_drawn |= (@as(u16, 1) << @intCast(idx));
+        return self.focus == idx;
+    }
+
+    /// Clamp `focus` to the panes actually rendered at the current terminal
+    /// width.  Called in the resize handler and at the top of `drawGame`.
+    fn clampFocus(self: *App) void {
+        if (self.mode == .game) {
+            const pc = self.paneCount();
+            if (pc > 0 and self.focus >= pc) self.focus = pc - 1;
+        }
     }
 
     fn titleBar(self: *App, title: []const u8, right: []const u8) void {
@@ -950,7 +975,8 @@ pub const App = struct {
         const g = self.state();
         s.textPad(0, 0, s.cols, "", .normal);
         var x: i32 = 0;
-        for (tab_names, 0..) |name, i| {
+        for (screen_table, 0..) |spec, i| {
+            const name = spec.name;
             var buf: [24]u8 = undefined;
             const t = std.fmt.bufPrint(&buf, " {s} ", .{name}) catch name;
             const st: Style = if (i == @intFromEnum(self.tab)) .tab else .dim;
@@ -986,6 +1012,7 @@ pub const App = struct {
     }
 
     fn drawGame(self: *App) !void {
+        self.clampFocus();
         try self.drawChrome();
         const spec = screenSpec(self.tab);
         try spec.draw(self);
@@ -1319,7 +1346,7 @@ pub const App = struct {
                 try rows.append(al, try std.fmt.allocPrint(al, "  {d} things on your desk before day {d}:", .{ asks.len, (try q.status(al, g)).day + 1 }));
                 try rows.append(al, "");
                 for (asks, 0..) |w, i| {
-                    try rows.append(al, try std.fmt.allocPrint(al, "  {s} {s}   {{d}}→ [{d}] {s}{{/}}", .{ if (w.urgent) "{c}!{/}" else "{a}·{/}", w.text, i + 1, tab_names[w.jump] }));
+                    try rows.append(al, try std.fmt.allocPrint(al, "  {s} {s}   {{d}}→ [{d}] {s}{{/}}", .{ if (w.urgent) "{c}!{/}" else "{a}·{/}", w.text, i + 1, tabName(@enumFromInt(w.jump)) }));
                 }
                 try rows.append(al, "");
                 try rows.append(al, try std.fmt.allocPrint(al, "  {{s}} {s} {{/}}    {{d}}{s} · {s}{{/}}", .{ try keyHint(EndTurnAction, al, &end_turn_bindings, .day, "end the turn anyway"), try keyHint(EndTurnAction, al, &end_turn_bindings, .week, "end 7 turns"), try keyHint(EndTurnAction, al, &end_turn_bindings, .cancel, "back") }));
@@ -1930,8 +1957,8 @@ pub const App = struct {
         var rows: std.ArrayListUnmanaged([]const u8) = .empty;
         try rows.append(al, "  {a}everywhere{/}");
         for (try keys.helpLines(al, &global_legend)) |l| try rows.append(al, try std.fmt.allocPrint(al, "    {s}", .{l}));
-        for (screen_table, 0..) |spec, i| {
-            try rows.append(al, try std.fmt.allocPrint(al, "  {{a}}{s}{{/}}", .{tab_names[i]}));
+        for (screen_table) |spec| {
+            try rows.append(al, try std.fmt.allocPrint(al, "  {{a}}{s}{{/}}", .{spec.name}));
             for (try keys.helpLines(al, spec.legend)) |l| try rows.append(al, try std.fmt.allocPrint(al, "    {s}", .{l}));
         }
         return rows.toOwnedSlice(al);
@@ -1946,8 +1973,8 @@ pub const App = struct {
             var buf: [16]u8 = undefined;
             try out.print(al, "| `{s}` | {s} |\n", .{ keys.keyText(&buf, e), e.help orelse e.label });
         };
-        for (screen_table, 0..) |spec, i| {
-            try out.print(al, "\n### {s}\n\n| Key | Pane | Does |\n|---|---|---|\n", .{tab_names[i]});
+        for (screen_table) |spec| {
+            try out.print(al, "\n### {s}\n\n| Key | Pane | Does |\n|---|---|---|\n", .{spec.name});
             for (spec.legend) |e| if (e.show_help) {
                 var buf: [16]u8 = undefined;
                 const pane = if (e.pane) |p| spec.pane_names[p] else "any";
@@ -2007,10 +2034,10 @@ pub const App = struct {
             .cursor_up => try self.screenMove(-1),
             .page_down => try self.screenMove(10),
             .page_up => try self.screenMove(-10),
-            .scroll_left => if (self.tab == .map) try self.mapPan(-1, 0) else if (self.focus_scroll) |pane| {
+            .scroll_left => if (screenSpec(self.tab).scroll_h) |f| try f(self, -1) else if (self.focus_scroll) |pane| {
                 self.colScroll(pane).* -|= 1;
             },
-            .scroll_right => if (self.tab == .map) try self.mapPan(1, 0) else if (self.focus_scroll) |pane| {
+            .scroll_right => if (screenSpec(self.tab).scroll_h) |f| try f(self, 1) else if (self.focus_scroll) |pane| {
                 self.colScroll(pane).* += 1;
             },
             .clear_message => self.msg.len = 0,
@@ -2045,6 +2072,8 @@ pub const App = struct {
     /// the five functions it names — no switch anywhere else grows.
     const ScreenSpec = struct {
         tab: Tab,
+        /// The tab-strip label ("F1 Desk", …).
+        name: []const u8,
         draw: *const fn (*App) anyerror!void,
         move: *const fn (*App, i32) anyerror!void,
         /// Resolve a key through the screen's bindings and run its action;
@@ -2057,6 +2086,8 @@ pub const App = struct {
         /// Panes Tab cycles through, and the count on a narrow terminal.
         panes: u8,
         narrow_panes: u8,
+        /// Optional horizontal-scroll handler for ←/→ in `runGlobal`.
+        scroll_h: ?*const fn (*App, i32) anyerror!void = null,
     };
 
     const screens = struct {
@@ -2073,16 +2104,16 @@ pub const App = struct {
     };
 
     const screen_table = [_]ScreenSpec{
-        .{ .tab = .desk, .draw = screens.desk.draw, .move = screens.desk.move, .handle = screens.desk.handle, .legend = &screens.desk.legend, .pane_names = &.{ "checklist", "inbox", "log" }, .panes = 3, .narrow_panes = 3 },
-        .{ .tab = .map, .draw = screens.map.draw, .move = screens.map.move, .handle = screens.map.handle, .legend = &screens.map.legend, .pane_names = &.{"star map"}, .panes = 1, .narrow_panes = 1 },
-        .{ .tab = .forces, .draw = screens.forces.draw, .move = screens.forces.move, .handle = screens.forces.handle, .legend = &screens.forces.legend, .pane_names = &.{ "TO&E", "side pane" }, .panes = 2, .narrow_panes = 2 },
-        .{ .tab = .contracts, .draw = screens.contracts.draw, .move = screens.contracts.move, .handle = screens.contracts.handle, .legend = &screens.contracts.legend, .pane_names = &.{ "board", "active", "history" }, .panes = 3, .narrow_panes = 3 },
-        .{ .tab = .ledger, .draw = screens.ledger.draw, .move = screens.ledger.move, .handle = screens.ledger.handle, .legend = &screens.ledger.legend, .pane_names = &.{ "treasuries", "ledger" }, .panes = 2, .narrow_panes = 2 },
-        .{ .tab = .supply, .draw = screens.supply.draw, .move = screens.supply.move, .handle = screens.supply.handle, .legend = &screens.supply.legend, .pane_names = &.{"sites"}, .panes = 1, .narrow_panes = 1 },
-        .{ .tab = .hq, .draw = screens.hq.draw, .move = screens.hq.move, .handle = screens.hq.handle, .legend = &screens.hq.legend, .pane_names = &.{ "HQ", "hiring hall" }, .panes = 2, .narrow_panes = 2 },
-        .{ .tab = .lab, .draw = screens.lab.draw, .move = screens.lab.move, .handle = screens.lab.handle, .legend = &screens.lab.legend, .pane_names = &.{"mounts"}, .panes = 1, .narrow_panes = 1 },
-        .{ .tab = .people, .draw = screens.people.draw, .move = screens.people.move, .handle = screens.people.handle, .legend = &screens.people.legend, .pane_names = &.{"roster"}, .panes = 1, .narrow_panes = 1 },
-        .{ .tab = .market, .draw = screens.market.draw, .move = screens.market.move, .handle = screens.market.handle, .legend = &screens.market.legend, .pane_names = &.{ "board", "catalog", "demand", "keep stocked" }, .panes = 4, .narrow_panes = 2 },
+        .{ .tab = .desk, .name = "F1 Desk", .draw = screens.desk.draw, .move = screens.desk.move, .handle = screens.desk.handle, .legend = &screens.desk.legend, .pane_names = &.{ "checklist", "inbox", "log" }, .panes = 3, .narrow_panes = 3 },
+        .{ .tab = .map, .name = "F2 Map", .draw = screens.map.draw, .move = screens.map.move, .handle = screens.map.handle, .legend = &screens.map.legend, .pane_names = &.{"star map"}, .panes = 1, .narrow_panes = 1, .scroll_h = screens.map.scrollH },
+        .{ .tab = .forces, .name = "F3 Forces", .draw = screens.forces.draw, .move = screens.forces.move, .handle = screens.forces.handle, .legend = &screens.forces.legend, .pane_names = &.{ "TO&E", "side pane" }, .panes = 2, .narrow_panes = 1 },
+        .{ .tab = .contracts, .name = "F4 Contracts", .draw = screens.contracts.draw, .move = screens.contracts.move, .handle = screens.contracts.handle, .legend = &screens.contracts.legend, .pane_names = &.{ "board", "active", "history" }, .panes = 3, .narrow_panes = 3 },
+        .{ .tab = .ledger, .name = "F5 Ledger", .draw = screens.ledger.draw, .move = screens.ledger.move, .handle = screens.ledger.handle, .legend = &screens.ledger.legend, .pane_names = &.{ "treasuries", "ledger" }, .panes = 2, .narrow_panes = 2 },
+        .{ .tab = .supply, .name = "F6 Supply", .draw = screens.supply.draw, .move = screens.supply.move, .handle = screens.supply.handle, .legend = &screens.supply.legend, .pane_names = &.{"sites"}, .panes = 1, .narrow_panes = 1 },
+        .{ .tab = .hq, .name = "F7 HQ", .draw = screens.hq.draw, .move = screens.hq.move, .handle = screens.hq.handle, .legend = &screens.hq.legend, .pane_names = &.{ "HQ", "hiring hall" }, .panes = 2, .narrow_panes = 2 },
+        .{ .tab = .lab, .name = "F8 Lab", .draw = screens.lab.draw, .move = screens.lab.move, .handle = screens.lab.handle, .legend = &screens.lab.legend, .pane_names = &.{"mounts"}, .panes = 1, .narrow_panes = 1 },
+        .{ .tab = .people, .name = "F9 People", .draw = screens.people.draw, .move = screens.people.move, .handle = screens.people.handle, .legend = &screens.people.legend, .pane_names = &.{"roster"}, .panes = 1, .narrow_panes = 1 },
+        .{ .tab = .market, .name = "F10 Market", .draw = screens.market.draw, .move = screens.market.move, .handle = screens.market.handle, .legend = &screens.market.legend, .pane_names = &.{ "board", "catalog", "demand", "keep stocked" }, .panes = 4, .narrow_panes = 2 },
     };
 
     comptime {
@@ -4102,9 +4133,9 @@ test "the end-turn prompt asks only about warnings that prompt; Desk notes stay 
 }
 
 test "no screen binds a key the whole client already answers" {
-    for (App.screen_table, 0..) |spec, i| for (spec.legend) |e| for (App.global_legend) |g| {
+    for (App.screen_table) |spec| for (spec.legend) |e| for (App.global_legend) |g| {
         if (e.match.overlaps(g.match)) {
-            std.debug.print("{s}: \"{s}\" shadows the global \"{s}\"\n", .{ tab_names[i], e.label, g.label });
+            std.debug.print("{s}: \"{s}\" shadows the global \"{s}\"\n", .{ spec.name, e.label, g.label });
             return error.TestUnexpectedResult;
         }
     };
@@ -4225,4 +4256,48 @@ test "handleGameOver saves and shows the correct modal (rule 44)" {
         try c.app.handleGameOver();
         try std.testing.expect(c.app.modal == .none);
     }
+}
+
+test "every focusable pane is drawn at each width tier" {
+    // Rule 38 / rule 67 / audit A19: for every screen and every tier width,
+    // the set of drawn panes must be exactly {0 .. paneCount()-1} (rule 38:
+    // "focus follows visibility").  This fails on the base for Forces at
+    // narrow widths when narrow_panes == 2 but the side pane is not drawn.
+    const c = try clientForTest(std.testing.allocator);
+    defer deinitForTest(c, std.testing.allocator);
+    const widths = [_]u16{ 80, 100, 119, 120, 121, 150, 151, 200 };
+    for (App.screen_table) |spec| {
+        for (widths) |w| {
+            try c.app.screen.resize(w, 50);
+            c.app.switchTab(spec.tab);
+            c.app.focus = 0;
+            try c.app.draw();
+            const pc = c.app.paneCount();
+            const want: u16 = (@as(u16, 1) << @intCast(pc)) - 1;
+            try std.testing.expectEqual(want, c.app.panes_drawn);
+        }
+    }
+}
+
+test "a wide-only focus clamps into the narrow panes on resize" {
+    // Rule 38: after a resize that reduces the pane count, focus must not
+    // remain on an undrawn pane.
+    const c = try clientForTest(std.testing.allocator);
+    defer deinitForTest(c, std.testing.allocator);
+    // Forces: wide has 2 panes, narrow has 1.
+    try c.app.screen.resize(200, 50);
+    c.app.switchTab(.forces);
+    const forces_wide_pc = c.app.paneCount();
+    c.app.focus = forces_wide_pc - 1;
+    try c.app.screen.resize(100, 50);
+    try c.app.draw();
+    try std.testing.expect(c.app.focus < c.app.paneCount());
+    // Market: wide has 4 panes, narrow has 2.
+    try c.app.screen.resize(200, 50);
+    c.app.switchTab(.market);
+    const market_wide_pc = c.app.paneCount();
+    c.app.focus = market_wide_pc - 1;
+    try c.app.screen.resize(100, 50);
+    try c.app.draw();
+    try std.testing.expect(c.app.focus < c.app.paneCount());
 }

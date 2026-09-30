@@ -16,7 +16,7 @@ pub fn draw(self: *App) anyerror!void {
     const view = try q.people(al, g, self.people_filter);
     const lw: u16 = if (layout.extraWide(b.w)) @max(layout.people_list.of(b.w), @min(b.w - 60, 128)) else b.w;
     const title = try std.fmt.allocPrint(al, "PERSONNEL · filter {{a}}{s}{{/}} · {d} of {d}", .{ @tagName(self.people_filter), view.rows.len, view.total });
-    const inner = self.screen.pane(.{ .x = b.x, .y = b.y, .w = lw, .h = b.h }, .{ .title = title, .focused = true, .right_title = try app.keys.paneTitle(al, &legend, 0) });
+    const inner = self.screen.pane(.{ .x = b.x, .y = b.y, .w = lw, .h = b.h }, .{ .title = title, .focused = self.paneFocused(0), .right_title = try app.keys.paneTitle(al, &legend, 0) });
     const c = self.cur(0);
     try self.tableOrNote(inner, try q.tableOf(al, q.people_cols, view.rows), 0, view.rows.len > 0, "{d}nobody matches this filter{/}");
     if (lw < b.w and view.rows.len > 0) {

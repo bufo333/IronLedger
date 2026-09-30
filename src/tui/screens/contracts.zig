@@ -26,7 +26,7 @@ pub fn draw(self: *App) anyerror!void {
     const board_need: u16 = @intCast(@min(1 + view.board.len + 3 + 1 + cands.len + 2, 200));
     const board_h: u16 = @max(6, @min(board_need, layout.major.of(b.h)));
     const board_hq: types.HqId = @enumFromInt(try self.hqSelId(g));
-    const inner = self.screen.pane(.{ .x = b.x, .y = b.y, .w = b.w, .h = board_h }, .{ .title = try std.fmt.allocPrint(al, "CONTRACT BOARD · {{a}}{s}{{/}} · for the companies based there", .{try q.hqName(self.a(), g, board_hq)}), .focused = self.focus == 0, .right_title = try app.keys.paneTitle(al, &legend, 0) });
+    const inner = self.screen.pane(.{ .x = b.x, .y = b.y, .w = b.w, .h = board_h }, .{ .title = try std.fmt.allocPrint(al, "CONTRACT BOARD · {{a}}{s}{{/}} · for the companies based there", .{try q.hqName(self.a(), g, board_hq)}), .focused = self.paneFocused(0), .right_title = try app.keys.paneTitle(al, &legend, 0) });
     if (view.board.len == 0) {
         self.screen.lines(inner, &.{"{d}no offers — the board refreshes on the 1st{/}"}, 0, null);
     } else {
@@ -72,7 +72,7 @@ pub fn draw(self: *App) anyerror!void {
     const act_h: u16 = if (wide) b.h - top_h else layout.major.of(b.h - top_h);
     const c1 = self.cur(1);
     if (view.active.len > 0 and c1.* >= view.active.len) c1.* = view.active.len - 1;
-    const inner2 = self.screen.pane(.{ .x = b.x, .y = b.y + top_h, .w = act_w, .h = act_h }, .{ .title = "ACTIVE", .focused = self.focus == 1, .right_title = try app.keys.paneTitle(al, &legend, 1) });
+    const inner2 = self.screen.pane(.{ .x = b.x, .y = b.y + top_h, .w = act_w, .h = act_h }, .{ .title = "ACTIVE", .focused = self.paneFocused(1), .right_title = try app.keys.paneTitle(al, &legend, 1) });
     var first: usize = 0;
     for (act_index.items, 0..) |ai, li| if (ai == c1.* and first == 0 and li > 0) {
         first = li;
@@ -88,7 +88,7 @@ pub fn draw(self: *App) anyerror!void {
         .{ .x = b.x + act_w, .y = b.y + top_h, .w = b.w - act_w, .h = (b.h - top_h) / 2 }
     else
         .{ .x = b.x, .y = b.y + top_h + act_h, .w = b.w, .h = b.h - top_h - act_h };
-    const hist_inner = self.screen.pane(hist_rect, .{ .title = "HISTORY", .focused = self.focus == 2, .right_title = try app.keys.paneTitle(al, &legend, 2) });
+    const hist_inner = self.screen.pane(hist_rect, .{ .title = "HISTORY", .focused = self.paneFocused(2), .right_title = try app.keys.paneTitle(al, &legend, 2) });
     // The closed contracts as a table, the standings as lines under it.
     const hist_rows: u16 = @intCast(@min(history.len + 1, hist_inner.h));
     try self.tablePane(.{ .x = hist_inner.x, .y = hist_inner.y, .w = hist_inner.w, .h = hist_rows }, try q.tableOf(al, q.history_cols, history), 2, self.focus == 2);

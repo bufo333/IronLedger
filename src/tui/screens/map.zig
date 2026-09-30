@@ -20,7 +20,7 @@ pub fn draw(self: *App) anyerror!void {
     if (view.worlds.len == 0) return;
     if (self.map_cursor >= view.worlds.len) self.map_cursor = 0;
     const mw: u16 = if (layout.wide(b.w)) layout.three_quarters.of(b.w) else b.w;
-    const inner = s.pane(.{ .x = b.x, .y = b.y, .w = mw, .h = b.h }, .{ .title = try std.fmt.allocPrint(al, "STAR MAP · colour by {s}", .{@tagName(self.map_color)}), .focused = true, .right_title = try std.fmt.allocPrint(al, "{d} worlds · {d} in ring · {d} beachhead · {d} dark · zoom ×{d}  {s}", .{ view.worlds.len, view.in_ring, view.in_band, view.dark, self.map_zoom, try app.keys.paneTitle(al, &legend, 0) }) });
+    const inner = s.pane(.{ .x = b.x, .y = b.y, .w = mw, .h = b.h }, .{ .title = try std.fmt.allocPrint(al, "STAR MAP · colour by {s}", .{@tagName(self.map_color)}), .focused = self.paneFocused(0), .right_title = try std.fmt.allocPrint(al, "{d} worlds · {d} in ring · {d} beachhead · {d} dark · zoom ×{d}  {s}", .{ view.worlds.len, view.in_ring, view.in_band, view.dark, self.map_zoom, try app.keys.paneTitle(al, &legend, 0) }) });
     const cw = view.worlds[self.map_cursor];
     const geom = App.mapGeom(view, inner, self.map_zoom, .{ cw.x, cw.y });
     var offscreen: u32 = 0;
@@ -117,6 +117,12 @@ pub fn draw(self: *App) anyerror!void {
 
 pub fn move(self: *App, delta: i32) anyerror!void {
     try self.mapPan(0, if (delta > 0) -1 else 1);
+}
+
+/// Horizontal-scroll hook called by `runGlobal` via the `scroll_h` registry
+/// field: `dir > 0` pans east, `dir < 0` pans west.
+pub fn scrollH(self: *App, dir: i32) anyerror!void {
+    try self.mapPan(if (dir > 0) 1 else -1, 0);
 }
 
 const Action = enum { pan_left, pan_right, zoom_in, zoom_out, colours, found, offers };

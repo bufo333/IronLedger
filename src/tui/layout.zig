@@ -18,7 +18,7 @@ pub fn narrow(cols: u16) bool {
 }
 
 pub fn wide(cols: u16) bool {
-    return cols > narrow_cols;
+    return !narrow(cols);
 }
 
 pub fn extraWide(cols: u16) bool {
@@ -108,5 +108,5 @@ test "ratios split exactly and the tiers nest" {
     try std.testing.expectEqual(@as(u16, 60), major.of(100));
     try std.testing.expectEqual(@as(u16, 55), list.of(100));
     try std.testing.expect(narrow_cols < wide_cols and wide_cols < emblem_cols);
-    try std.testing.expect(narrow(119) and !narrow(120) and !wide(120) and wide(121));
+    try std.testing.expect(narrow(119) and !narrow(120) and !wide(119) and wide(120) and wide(121));
 }

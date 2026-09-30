@@ -23,12 +23,6 @@ C18.
 - [ ] C10 location, posture, and seat resolution (C10a-C10d; rules 21-23, 71):
   company posture, site-local office/medical effects, seat/outfit resolution,
   refit stock, and asymmetric two-HQ tests. Delete C10.
-- [ ] C12 frontend boundary and results (rules 9, 10, 30, 33-43):
-  - [ ] C12-results-trust (C12a-C12b, C12f-C12g): result presentation,
-    canonical refusals, parser/query boundary, session wizard, escaping, and
-    confirmation-refusal smoke coverage.
-  - [ ] C12-client-structure (C12c-C12e): layout/focus, client state, widgets,
-    bindings/styles, and layout-boundary smoke coverage. Delete C12.
 - [ ] C13 numbers, arithmetic, formatting, and citations (rules 24, 25, 28,
   54, 55, 59):
   - [ ] C13-rule-numbers (C13a-C13e): copied values, skill/market/link rules.

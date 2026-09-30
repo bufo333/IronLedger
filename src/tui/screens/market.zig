@@ -20,18 +20,18 @@ pub fn draw(self: *App) anyerror!void {
     const view = try q.market(al, g, self.market_filter, @enumFromInt(try self.hqSelId(g)));
     const top_h: u16 = @max(6, layout.minor.of(b.h));
     const hq_id: types.HqId = @enumFromInt(try self.hqSelId(g));
-    const inner = self.screen.pane(.{ .x = b.x, .y = b.y, .w = b.w, .h = top_h }, .{ .title = try std.fmt.allocPrint(al, "MARKET BOARD · {{a}}{s}{{/}} pays from its treasury ({s}) · filter {{a}}{s}{{/}} · {d} listings", .{ try q.hqName(self.a(), g, hq_id), try q.money(al, q.balance(g, .{ .hq = hq_id })), @tagName(self.market_filter), view.board.len }), .focused = self.focus == 0, .right_title = try app.keys.paneTitle(al, &legend, 0) });
+    const inner = self.screen.pane(.{ .x = b.x, .y = b.y, .w = b.w, .h = top_h }, .{ .title = try std.fmt.allocPrint(al, "MARKET BOARD · {{a}}{s}{{/}} pays from its treasury ({s}) · filter {{a}}{s}{{/}} · {d} listings", .{ try q.hqName(self.a(), g, hq_id), try q.money(al, q.balance(g, .{ .hq = hq_id })), @tagName(self.market_filter), view.board.len }), .focused = self.paneFocused(0), .right_title = try app.keys.paneTitle(al, &legend, 0) });
     try self.tableOrNote(inner, try q.tableOf(al, q.market_cols, view.board), 0, self.focus == 0, "{d}nothing on the boards — they refresh on the 1st, staples restock as they sell{/}");
 
     const cw: u16 = if (self.narrow()) b.w else layout.list.of(b.w);
-    const inner2 = self.screen.pane(.{ .x = b.x, .y = b.y + top_h, .w = cw, .h = b.h - top_h }, .{ .title = try std.fmt.allocPrint(al, "ORDER CATALOG · delivered to {s}", .{try q.hqName(self.a(), g, hq_id)}), .focused = self.focus == 1, .right_title = try app.keys.paneTitle(al, &legend, 1) });
+    const inner2 = self.screen.pane(.{ .x = b.x, .y = b.y + top_h, .w = cw, .h = b.h - top_h }, .{ .title = try std.fmt.allocPrint(al, "ORDER CATALOG · delivered to {s}", .{try q.hqName(self.a(), g, hq_id)}), .focused = self.paneFocused(1), .right_title = try app.keys.paneTitle(al, &legend, 1) });
     try self.tableOrNote(inner2, try q.tableOf(al, q.catalog_cols, view.catalog), 1, self.focus == 1, "{d}nothing in the catalog under this filter{/}");
     if (cw < b.w) {
         const dem_h: u16 = layout.list.of(b.h - top_h);
-        const inner3 = self.screen.pane(.{ .x = b.x + cw, .y = b.y + top_h, .w = b.w - cw, .h = dem_h }, .{ .title = "DEMAND · damaged slots", .focused = self.focus == 2, .right_title = try app.keys.paneTitle(al, &legend, 2) });
+        const inner3 = self.screen.pane(.{ .x = b.x + cw, .y = b.y + top_h, .w = b.w - cw, .h = dem_h }, .{ .title = "DEMAND · damaged slots", .focused = self.paneFocused(2), .right_title = try app.keys.paneTitle(al, &legend, 2) });
         try self.tableOrNote(inner3, try q.tableOf(al, q.demand_cols, view.demand), 2, self.focus == 2, "{g}nothing damaged{/}");
         const pol = try q.stockPolicies(al, g, hq_id);
-        const inner4 = self.screen.pane(.{ .x = b.x + cw, .y = b.y + top_h + dem_h, .w = b.w - cw, .h = b.h - top_h - dem_h }, .{ .title = try std.fmt.allocPrint(al, "KEEP STOCKED · {s} · checked daily", .{try q.hqName(self.a(), g, hq_id)}), .focused = self.focus == 3, .right_title = try app.keys.paneTitle(al, &legend, 3) });
+        const inner4 = self.screen.pane(.{ .x = b.x + cw, .y = b.y + top_h + dem_h, .w = b.w - cw, .h = b.h - top_h - dem_h }, .{ .title = try std.fmt.allocPrint(al, "KEEP STOCKED · {s} · checked daily", .{try q.hqName(self.a(), g, hq_id)}), .focused = self.paneFocused(3), .right_title = try app.keys.paneTitle(al, &legend, 3) });
         try self.tableOrNote(inner4, try q.tableOf(al, q.stock_policy_cols, pol), 3, self.focus == 3, "{d}none — keep a catalogue row stocked to add a line here{/}");
     }
 }

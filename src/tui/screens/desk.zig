@@ -8,7 +8,7 @@ const app = @import("../app.zig");
 const App = app.App;
 const layout = app.layout;
 const q = app.q;
-const tab_names = app.tab_names;
+const tabName = app.tabName;
 
 pub fn draw(self: *App) anyerror!void {
     const al = self.a();
@@ -40,17 +40,17 @@ pub fn draw(self: *App) anyerror!void {
     }
     var cl: std.ArrayListUnmanaged([]const u8) = .empty;
     for (view.checklist) |w| {
-        try cl.append(al, try std.fmt.allocPrint(al, "{s} {s}   {{d}}→ {s}{{/}}", .{ if (w.urgent) "{c}!{/}" else "{a}·{/}", w.text, tab_names[w.jump] }));
+        try cl.append(al, try std.fmt.allocPrint(al, "{s} {s}   {{d}}→ {s}{{/}}", .{ if (w.urgent) "{c}!{/}" else "{a}·{/}", w.text, tabName(@enumFromInt(w.jump)) }));
     }
     if (view.checklist.len == 0) try cl.append(al, "{g}all clear{/} — nothing blocks the turn");
     // The Dragoons rating rides in the title so the cursor still maps onto the warnings.
     const rating_plain = try q.stripMarks(al, view.rating_line);
     const cl_title = try std.fmt.allocPrint(al, "END-TURN CHECKLIST · {s}", .{q.clip(rating_plain, if (cl_w > 30) cl_w - 26 else 0)});
-    self.listPane(.{ .x = x, .y = b.y, .w = cl_w, .h = top_h }, cl_title, cl.items, 0, self.focus == 0, true);
+    self.listPane(.{ .x = x, .y = b.y, .w = cl_w, .h = top_h }, cl_title, cl.items, 0, self.paneFocused(0), true);
     x += cl_w;
     const ib = try inboxPane(al, view);
     const ib_lines: []const []const u8 = if (ib.lines.len == 0) &.{"{d}nothing pending{/}"} else ib.lines;
-    self.listPane(.{ .x = x, .y = b.y, .w = ib_w, .h = top_h }, "INBOX", ib_lines, 1, self.focus == 1, true);
+    self.listPane(.{ .x = x, .y = b.y, .w = ib_w, .h = top_h }, "INBOX", ib_lines, 1, self.paneFocused(1), true);
 
     const co_h: u16 = @min(b.h - top_h, @as(u16, @intCast(view.companies.len + 3)));
     const co_inner = self.screen.pane(.{ .x = b.x, .y = b.y + top_h, .w = b.w, .h = co_h }, .{ .title = "COMPANIES" });
@@ -61,7 +61,7 @@ pub fn draw(self: *App) anyerror!void {
     const rest_h: u16 = b.h - top_h - co_h;
     if (rest_h >= 3) {
         const log_w: u16 = if (self.narrow()) b.w else layout.major.of(b.w);
-        self.listPane(.{ .x = b.x, .y = b.y + top_h + co_h, .w = log_w, .h = rest_h }, "LOG", view.log, 2, self.focus == 2, true);
+        self.listPane(.{ .x = b.x, .y = b.y + top_h + co_h, .w = log_w, .h = rest_h }, "LOG", view.log, 2, self.paneFocused(2), true);
         if (log_w < b.w) self.listPane(.{ .x = b.x + log_w, .y = b.y + top_h + co_h, .w = b.w - log_w, .h = rest_h }, "HQs", view.hqs, 3, false, false);
     }
 }

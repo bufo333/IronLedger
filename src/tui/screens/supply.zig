@@ -19,7 +19,7 @@ pub fn draw(self: *App) anyerror!void {
     const b = self.body();
     const view = try q.supply(al, g);
     const lw: u16 = if (self.narrow()) b.w else layout.list.of(b.w);
-    self.listPane(.{ .x = b.x, .y = b.y, .w = lw, .h = b.h }, "SITES", view.rows, 0, true, true);
+    self.listPane(.{ .x = b.x, .y = b.y, .w = lw, .h = b.h }, "SITES", view.rows, 0, self.paneFocused(0), true);
     if (lw < b.w) {
         const c = self.cur(0).*;
         const site: ?types.Site = if (c < view.site.len) view.site[c] else null;

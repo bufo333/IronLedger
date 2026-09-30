@@ -33,14 +33,14 @@ pub fn draw(self: *App) anyerror!void {
     const title = try std.fmt.allocPrint(al, "hq:{d} {s} · {s} · ring {d} LY · funds {s} · staff {d}/{d}", .{ @intFromEnum(id), try h.name.markup(al), h.tier, h.ring_ly, try q.money(al, h.funds), h.staff_assigned, h.staff_required });
     const lw: u16 = if (layout.extraWide(b.w)) layout.hq_detail.of(b.w) else b.w;
     const top_h: u16 = if (lw < b.w) b.h else layout.major.of(b.h);
-    const inner = self.screen.pane(.{ .x = b.x, .y = b.y, .w = lw, .h = top_h }, .{ .title = title, .focused = self.focus == 0, .right_title = try app.keys.paneTitle(al, &legend, 0) });
+    const inner = self.screen.pane(.{ .x = b.x, .y = b.y, .w = lw, .h = top_h }, .{ .title = title, .focused = self.paneFocused(0), .right_title = try app.keys.paneTitle(al, &legend, 0) });
     self.screen.lines(inner, detail, App.firstRow(self.cur(0).*, inner.h), if (self.focus == 0) self.cur(0).* else null);
 
     const hallv = try q.hall(al, g, id, self.hall_filter);
     const hall_note: []const u8 = if (hallv.total_at_hq == 0) "{d}no candidates today — the hall churns daily{/}" else "{d}no candidates match this filter{/}";
     const hall_title = try std.fmt.allocPrint(al, "HIRING HALL · filter {{a}}{s}{{/}} · {d} of {d}", .{ @tagName(self.hall_filter), hallv.rows.len, hallv.total_at_hq });
     const hr: Rect = if (lw < b.w) .{ .x = b.x + lw, .y = b.y, .w = b.w - lw, .h = b.h } else .{ .x = b.x, .y = b.y + top_h, .w = b.w, .h = b.h - top_h };
-    const hinner = self.screen.pane(hr, .{ .title = hall_title, .focused = self.focus == 1, .right_title = try app.keys.paneTitle(al, &legend, 1) });
+    const hinner = self.screen.pane(hr, .{ .title = hall_title, .focused = self.paneFocused(1), .right_title = try app.keys.paneTitle(al, &legend, 1) });
     try self.tableOrNote(hinner, try q.tableOf(al, q.hall_cols, hallv.rows), 1, self.focus == 1, hall_note);
 }
 

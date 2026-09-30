@@ -21,7 +21,7 @@ pub fn draw(self: *App) anyerror!void {
     var texts: std.ArrayListUnmanaged([]const u8) = .empty;
     for (rows) |r| try texts.append(al, r.text);
     const lw: u16 = if (layout.wide(b.w)) layout.list.of(b.w) else b.w;
-    self.listPane(.{ .x = b.x, .y = b.y, .w = lw, .h = b.h }, try std.fmt.allocPrint(al, "TO&E · {{a}}{s}{{/}} ({d}/{d}) · {s}", .{ views[self.forces_view].label, self.forces_view + 1, views.len, try app.keys.paneTitle(al, &legend, 0) }), texts.items, 0, self.focus == 0, true);
+    self.listPane(.{ .x = b.x, .y = b.y, .w = lw, .h = b.h }, try std.fmt.allocPrint(al, "TO&E · {{a}}{s}{{/}} ({d}/{d}) · {s}", .{ views[self.forces_view].label, self.forces_view + 1, views.len, try app.keys.paneTitle(al, &legend, 0) }), texts.items, 0, self.paneFocused(0), true);
     if (lw < b.w) {
         const c = self.cur(0).*;
         const detail_h: u16 = layout.major.of(b.h);
@@ -56,7 +56,7 @@ pub fn draw(self: *App) anyerror!void {
             self.listPane(.{ .x = b.x + lw, .y = b.y, .w = b.w - lw, .h = detail_h }, "HULL", &empty, 1, false, false);
         }
         const pool = try q.unassigned(al, g);
-        self.listPane(.{ .x = b.x + lw, .y = b.y + detail_h, .w = b.w - lw, .h = b.h - detail_h }, "UNASSIGNED POOL", pool, 2, self.focus == 1, true);
+        self.listPane(.{ .x = b.x + lw, .y = b.y + detail_h, .w = b.w - lw, .h = b.h - detail_h }, "UNASSIGNED POOL", pool, 2, self.paneFocused(1), true);
     }
 }
 

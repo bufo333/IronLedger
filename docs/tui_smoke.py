@@ -400,6 +400,25 @@ send(":"); send("day 30\r", 2.5)
 after = re.sub(rb"\x1b\[[0-9;?]*[A-Za-z]", b"", out[mark:]).decode("utf-8", "replace")
 assert "contact ahead" not in after and "BATTLE ORDERS" not in after, after[-3000:]
 send("\x1b", 0.5); send("\x1b", 0.5)
+# Layout-boundary smoke: Forces focus must not wedge on a narrow resize.
+# Switch to Forces, Tab to the pool pane (focus 1), shrink to 118 columns
+# (below the 120-column boundary: only pane 0 draws), drain, assert the
+# client is alive and TO&E shows (clampFocus sent focus back to 0); widen
+# again and confirm the pool pane reappears; restore before continuing.
+send("3")
+assert wait_for("TO&E"), plain()[-2000:]
+send("\t", 0.4)                # move focus to pool pane (focus 1 at 200 wide)
+fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 118, 0, 0))
+os.kill(pid, signal.SIGWINCH)
+drain(1.0)
+assert "TO&E" in plain()[-30000:], "Forces: TO&E missing after narrow resize: " + plain()[-2000:]
+fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 122, 0, 0))
+os.kill(pid, signal.SIGWINCH)
+drain(1.0)
+assert "UNASSIGNED POOL" in plain()[-30000:], "Forces: UNASSIGNED POOL missing after wide resize: " + plain()[-2000:]
+fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 50, 200, 0, 0))
+os.kill(pid, signal.SIGWINCH)
+drain(1.0)
 send("q"); send("s", 1.5)      # save and return
 p = plain()
 assert "back at the welcome screen" in p, p[-3000:]

@@ -28,7 +28,7 @@ pub fn draw(self: *App) anyerror!void {
     var mounts: std.ArrayListUnmanaged([]const u8) = .empty;
     for (view.mounts) |m| try mounts.append(al, m.text);
     if (view.mounts.len == 0) try mounts.append(al, "{d}no mounts{/}");
-    self.listPane(.{ .x = b.x + lw, .y = b.y, .w = mw, .h = b.h }, try std.fmt.allocPrint(al, "MOUNTS · hull {d} of {d}", .{ self.lab_sel + 1, meks.len }), mounts.items, 0, true, true);
+    self.listPane(.{ .x = b.x + lw, .y = b.y, .w = mw, .h = b.h }, try std.fmt.allocPrint(al, "MOUNTS · hull {d} of {d}", .{ self.lab_sel + 1, meks.len }), mounts.items, 0, self.paneFocused(0), true);
     self.listPane(.{ .x = b.x + lw + mw, .y = b.y, .w = b.w - lw - mw, .h = b.h }, if (view.legal) "PLAN" else "PLAN · {c}illegal{/}", view.plan, 2, false, false);
 }
 
