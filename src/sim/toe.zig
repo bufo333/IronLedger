@@ -586,6 +586,20 @@ pub fn execRecallIdle(gs: *GameState, company: @FieldType(Command, "recall_idle"
     return commands.execute(gs, .{ .recall_company = company });
 }
 
+/// The full proceeds of disbanding a company: the company's local funds
+/// plus every hull's sale value.  The one rule for disband quotes and the
+/// disband command; both read it in the collect phase before any mutation
+/// (atomicity rules 11-13, C11b).
+pub fn disbandProceeds(gs: *GameState, alloc: std.mem.Allocator, co: types.ForceId) !types.CBills {
+    const f = gs.forces.getPtr(co) orelse return Error.UnknownForce;
+    var total: types.CBills = f.local_funds;
+    var uit = gs.units.iterator();
+    while (uit.next()) |e| if (gs.companyOf(e.value_ptr.force) == co) {
+        total += try market_mod.unitSaleValue(alloc, e.value_ptr);
+    };
+    return total;
+}
+
 pub fn execDisbandCompany(gs: *GameState, co: @FieldType(Command, "disband_company")) Error!Result {
     // ---- validate (no mutation) ----
     const f = gs.forces.getPtr(co) orelse return Error.UnknownForce;
@@ -597,11 +611,10 @@ pub fn execDisbandCompany(gs: *GameState, co: @FieldType(Command, "disband_compa
     // Gather hull IDs and sale totals, sub-force IDs, and departing personnel count.
     var uids: std.ArrayListUnmanaged(types.UnitId) = .empty;
     defer uids.deinit(gs.scratch());
-    var total: types.CBills = f.local_funds;
+    const total: types.CBills = try disbandProceeds(gs, gs.scratch(), co);
     var uit = gs.units.iterator();
     while (uit.next()) |e| if (gs.companyOf(e.value_ptr.force) == co) {
         try uids.append(gs.scratch(), e.value_ptr.id);
-        total += try market_mod.unitSaleValue(gs.scratch(), e.value_ptr);
     };
     var fids: std.ArrayListUnmanaged(types.ForceId) = .empty;
     defer fids.deinit(gs.scratch());
@@ -913,4 +926,42 @@ test "disbanding a company leaves state whole when an allocation fails" {
 
     try std.testing.expectError(error.OutOfMemory, execDisbandCompany(&gs, co));
     try std.testing.expectEqual(before, digest.stateHash(&gs));
+}
+
+test "disbandProceeds equals the gs.funds delta from execDisbandCompany" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 4502 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .quartermaster);
+    const co = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
+    const truck = try gs.addUnit("CGT-3");
+    _ = try commands.execute(&gs, .{ .transfer_unit = .{ .unit = truck, .to_company = co } });
+    // Give the company some local funds so the quote includes them.
+    gs.forces.getPtr(co).?.local_funds = 100_000;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const quote = try disbandProceeds(&gs, arena.allocator(), co);
+    try std.testing.expect(quote > 0);
+    const funds_before = gs.funds;
+    _ = try execDisbandCompany(&gs, co);
+    // execDisbandCompany posts the full total (local_funds + hull sales) directly to gs.funds.
+    const delta = gs.funds - funds_before;
+    try std.testing.expectEqual(quote, delta);
+}
+
+test "transferBlock: a deployed company and an in-shop hull block transfers" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 4503 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .chief_engineer);
+    const co = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
+    const uid = try gs.addUnit("SHD-2H");
+    _ = try commands.execute(&gs, .{ .transfer_unit = .{ .unit = uid, .to_company = co } });
+    // At home, ready hull: no block.
+    try std.testing.expectEqual(@as(?[]const u8, null), transferBlock(&gs, gs.unit(uid).?));
+    // In the depot: blocked (inShop returns true for .repairing).
+    gs.unit(uid).?.status = .repairing;
+    try std.testing.expect(transferBlock(&gs, gs.unit(uid).?) != null);
+    gs.unit(uid).?.status = .ready;
+    // In transit: blocked.
+    gs.unit(uid).?.status = .in_transit;
+    try std.testing.expect(transferBlock(&gs, gs.unit(uid).?) != null);
 }

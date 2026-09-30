@@ -2694,7 +2694,7 @@ pub const App = struct {
                     .title = try confirmTitle(al, "DISBAND COMPANY?", "disband", null, "keep"),
                     .rows = try al.dupe([]const u8, &.{
                         "",
-                        try std.fmt.allocPrint(al, "  Disband {{a}}{s}{{/}}? Every hull under it sells for about {{g}}{s}{{/}} C and everyone in it is released.", .{ try q.forceName(self.a(), g, fid), try q.money(al, try q.disbandQuote(al, g, fid)) }),
+                        try std.fmt.allocPrint(al, "  Disband {{a}}{s}{{/}}? Hull sales plus company funds raise about {{g}}{s}{{/}} C and everyone in it is released.", .{ try q.forceName(self.a(), g, fid), try q.money(al, try q.disbandQuote(al, g, fid)) }),
                         "  This cannot be undone.",
                         "",
                         try confirmButtons(al, "disband", null, "keep"),

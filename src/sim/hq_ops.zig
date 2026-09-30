@@ -119,6 +119,29 @@ pub fn comingToHq(gs: *GameState, hq_id: types.HqId, key: []const u8) u32 {
     return coming;
 }
 
+/// State of an HQ keep-stocked line: what the Market screen shows and
+/// what the stock-policy tick uses for its skip decision.  One rule for
+/// both consumers (rule 20): the screen never says "reorders tomorrow"
+/// when the tick would skip the line.  Pure: no mutation, no RNG (C11k).
+pub const ReorderState = enum {
+    stocked, // have >= min; nothing to do
+    coming, // orders or fab jobs already bound for this shelf
+    waiting, // nothing coming, but a failed order within 7 days
+    reorders, // will place a new order or fab job next tick
+};
+
+/// Reorder state for one keep-stocked line.  Pure: no mutation, no RNG.
+/// `today` is `gs.clock.day_index`.
+pub fn stockLineState(gs: *GameState, sp: state_mod.StockPolicy, today: u32) ReorderState {
+    const have = gs.stockCount(.{ .hq = sp.hq }, sp.part_key);
+    if (have >= sp.min) return .stocked;
+    if (comingToHq(gs, sp.hq, sp.part_key) > 0) return .coming;
+    for (gs.part_orders.items) |o| {
+        if (std.mem.eql(u8, o.part_key, sp.part_key) and o.status == .failed and o.ordered_day + 7 > today) return .waiting;
+    }
+    return .reorders;
+}
+
 pub fn hasJobForUnit(gs: *GameState, unit_id: types.UnitId) bool {
     for (gs.bay_jobs.items) |j| {
         if (j.unit == unit_id) return true;
@@ -2228,4 +2251,97 @@ test "bay-job injure-branch: when the bay accident fires the injury is atomicall
     }
     // The seed range must contain at least one hit.
     try std.testing.expect(found);
+}
+
+test "slotNeedsComponent and slotNeedsSpare: one rule for the depot vs field ledger" {
+    // slotNeedsComponent: destroyed/missing structure — depot work only
+    const struct_destroyed = unit_mod.PartSlot{ .slot_key = "ct.structure", .part_key = "comp_ct", .class = .structure, .condition = .destroyed };
+    const struct_damaged = unit_mod.PartSlot{ .slot_key = "ct.structure", .part_key = "comp_ct", .class = .structure, .condition = .damaged };
+    const weap_destroyed = unit_mod.PartSlot{ .slot_key = "ra.er_ppc", .part_key = "er_ppc", .class = .weapon, .condition = .destroyed };
+    try std.testing.expect(slotNeedsComponent(struct_destroyed));
+    try std.testing.expect(!slotNeedsComponent(struct_damaged)); // damaged structure is bay time only
+    try std.testing.expect(!slotNeedsComponent(weap_destroyed)); // weapons go to field spares
+    // slotNeedsSpare: destroyed/missing non-structure (field tier)
+    try std.testing.expect(slotNeedsSpare(weap_destroyed));
+    try std.testing.expect(!slotNeedsSpare(struct_destroyed)); // structure goes to depot
+    // Consumer agreement: depotNeedsBuf counts the same slots slotNeedsComponent names.
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 101 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .chief_engineer);
+    const uid = try gs.addUnit("SHD-2H");
+    const u = gs.unit(uid).?;
+    u.markWreckedBy(.ammo);
+    var buf: [max_depot_needs]DepotNeed = undefined;
+    const needs = depotNeedsBuf(u, &buf);
+    var manual: usize = 0;
+    for (u.slots.items) |s| if (slotNeedsComponent(s)) {
+        manual += 1;
+    };
+    try std.testing.expectEqual(manual, needs.len);
+}
+
+test "comingToSite for a company site matches inbound the supply tick and plan pane read" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 202 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .quartermaster);
+    const hq_id = gs.seat();
+    const co = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
+    // Simulate an in-flight part order destined for the company.
+    const key = "provisions";
+    try gs.part_orders.append(gs.allocator(), .{
+        .dest = .{ .company = co },
+        .part_key = key,
+        .quantity = 5,
+        .ordered_day = 0,
+        .eta_day = null,
+        .status = .in_transit,
+        .cost = 0,
+    });
+    const site: types.Site = .{ .company = co };
+    const via_site = comingToSite(&gs, site, key);
+    const via_hq = comingToSite(&gs, .{ .hq = hq_id }, key);
+    try std.testing.expectEqual(@as(u32, 5), via_site);
+    try std.testing.expectEqual(@as(u32, 0), via_hq); // bound for company, not HQ
+}
+
+test "reorder state: a line under min with a recent failed order waits, not reorders; tick agrees" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 303 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
+    const hq_id = gs.seat();
+    gs.hqs.getPtr(hq_id).?.funds = 5_000_000;
+    // A stock policy for a part we have none of (under min).
+    const key = "armor";
+    try gs.stock_policies.append(gs.allocator(), .{ .hq = hq_id, .part_key = key, .min = 10, .target = 20 });
+    while (gs.takeStock(.{ .hq = hq_id }, key, 1)) {}
+    const sp = gs.stock_policies.items[gs.stock_policies.items.len - 1];
+    const today: u32 = gs.clock.day_index;
+    // No failed order yet: line should reorder.
+    try std.testing.expectEqual(ReorderState.reorders, stockLineState(&gs, sp, today));
+    // Inject a failed order within 7 days.
+    try gs.part_orders.append(gs.allocator(), .{
+        .dest = .{ .hq = hq_id },
+        .part_key = key,
+        .quantity = 10,
+        .ordered_day = today,
+        .eta_day = null,
+        .status = .failed,
+        .cost = 0,
+    });
+    try std.testing.expectEqual(ReorderState.waiting, stockLineState(&gs, sp, today));
+    // A coming (in-transit) order overrides the failed one.
+    try gs.part_orders.append(gs.allocator(), .{
+        .dest = .{ .hq = hq_id },
+        .part_key = key,
+        .quantity = 10,
+        .ordered_day = today,
+        .eta_day = null,
+        .status = .in_transit,
+        .cost = 0,
+    });
+    try std.testing.expectEqual(ReorderState.coming, stockLineState(&gs, sp, today));
+    // After clearing orders: above min → stocked.
+    gs.part_orders.clearRetainingCapacity();
+    try gs.addStock(.{ .hq = hq_id }, key, 10);
+    try std.testing.expectEqual(ReorderState.stocked, stockLineState(&gs, sp, today));
 }

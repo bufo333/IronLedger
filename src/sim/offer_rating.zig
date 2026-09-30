@@ -206,3 +206,40 @@ test "blind intel widens the lance range; comms 3 pins it" {
     try std.testing.expect(seen.exact);
     try std.testing.expectEqual(@as(u8, 3), seen.lo);
 }
+
+test "rateOffer: an offer with opfor yields a rating the board and contract-detail both display" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 7703 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    const co = (try @import("commands.zig").execute(&gs, .{ .new_company = "Alpha" })).created_force;
+    // Add a hull so the company has some BV to rate against.
+    const uid = try gs.addUnit("SHD-2H");
+    _ = try @import("commands.zig").execute(&gs, .{ .transfer_unit = .{ .unit = uid, .to_company = co } });
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const c: contract_mod.Contract = .{
+        .id = .none,
+        .kind = .objective_raid,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 3, .base_pay_month = 200_000 },
+        .enemy_lances = 2,
+        .enemy_quality = .regular,
+        .enemy_lance_bv = 3_500,
+        .enemy_lance_tons = 220,
+        .offer_hq = gs.seat(),
+    };
+    const rt = try rateOffer(arena.allocator(), &gs, &c, co);
+    // An offer with opfor and a company with BV must return a rating.
+    try std.testing.expect(rt != null);
+    const r = rt.?;
+    try std.testing.expectEqual(co, r.company);
+    try std.testing.expect(r.half_hi >= r.half_lo);
+    try std.testing.expect(r.win_pct + r.lose_field_pct <= 100);
+    // No opfor → null rating.
+    var no_opfor = c;
+    no_opfor.enemy_lances = 0;
+    const none_rating = try rateOffer(arena.allocator(), &gs, &no_opfor, co);
+    try std.testing.expectEqual(@as(?OfferRating, null), none_rating);
+}

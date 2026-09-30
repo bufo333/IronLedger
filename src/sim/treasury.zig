@@ -628,3 +628,21 @@ test "couriers debit now, credit on arrival; policies top up on payday" {
     _ = try commands.execute(&gs, .{ .advance_days = 30 }); // crosses Feb 1
     try std.testing.expectEqual(@as(i64, 450_000), gs.force(co).?.local_funds); // February's cap, and no more
 }
+
+test "courierEtaDays floors at same_world_days and rises with jump distance" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 93 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    const co = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
+    // Same-world case: outfit and company at the same HQ → same_world_days floor.
+    const same_world = courierEtaDays(&gs, .{ .company = co });
+    try std.testing.expectEqual(logistics.same_world_days, same_world);
+    // A far-off HQ: ETA must be at least same_world_days.
+    gs.funds = 20_000_000;
+    _ = try commands.execute(&gs, .{ .found_hq = .{ .name = "Far", .planet_key = "zebebelgenubi" } });
+    const far = gs.hqs.keys()[gs.hqs.count() - 1];
+    const far_eta = courierEtaDays(&gs, .{ .hq = far });
+    try std.testing.expect(far_eta >= logistics.same_world_days);
+    // Outfit-to-outfit is always same-world (both at the seat).
+    try std.testing.expectEqual(logistics.same_world_days, courierEtaDays(&gs, .outfit));
+}

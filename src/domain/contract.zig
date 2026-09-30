@@ -401,3 +401,38 @@ test "negotiated steps move one term and stop at the cap" {
     try std.testing.expect(t.improve(.pay));
     try std.testing.expectEqual(@as(types.CBills, 110_000), t.base_pay_month);
 }
+
+test "gradeOf maps victory_points to the correct grade; objectivesMet fires at the threshold" {
+    const tuning_t = @import("tuning.zig").t.contract;
+    var c: Contract = .{
+        .id = @enumFromInt(1),
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 3, .base_pay_month = 100_000 },
+    };
+    // Grade boundaries.
+    c.victory_points = tuning_t.grade_outstanding_vp;
+    try std.testing.expectEqual(Contract.Grade.outstanding, c.gradeOf());
+    c.victory_points = tuning_t.grade_strong_vp;
+    try std.testing.expectEqual(Contract.Grade.strong, c.gradeOf());
+    c.victory_points = 0;
+    try std.testing.expectEqual(Contract.Grade.satisfactory, c.gradeOf());
+    c.victory_points = -1;
+    try std.testing.expectEqual(Contract.Grade.poor, c.gradeOf());
+    // gradeOf → grade() agree.
+    try std.testing.expectEqualStrings("poor", c.grade());
+    // objectivesMet: only for attrition objective at threshold.
+    c.objective = .attrition;
+    c.enemy_pool_bv = 1000;
+    c.enemy_pool_remaining = 1000; // 0% destroyed
+    try std.testing.expect(!c.objectivesMet());
+    // Destroy enough to hit the threshold (pool_destroyed_pct >= attrition_met_pct).
+    const needed_pct = tuning_t.attrition_met_pct;
+    c.enemy_pool_remaining = @intCast(c.enemy_pool_bv - @divTrunc(c.enemy_pool_bv * needed_pct, 100));
+    try std.testing.expect(c.objectivesMet());
+    // Duration objective never meets via objectivesMet.
+    c.objective = .duration;
+    try std.testing.expect(!c.objectivesMet());
+}

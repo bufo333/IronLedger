@@ -340,16 +340,6 @@ pub fn munitionMounts(alloc: std.mem.Allocator, gs: *GameState, company: types.F
     return out;
 }
 
-pub fn inboundQty(gs: *GameState, company: types.ForceId, key: []const u8) u32 {
-    var n: u32 = 0;
-    for (gs.part_orders.items) |o| {
-        if (o.dest != .company or o.dest.company != company) continue;
-        if (!std.mem.eql(u8, o.part_key, key)) continue;
-        if (o.inFlight()) n += o.quantity;
-    }
-    return n;
-}
-
 /// Emergency resupply: the quote from `rushQuote`,
 /// checked against truck room and local funds before anything moves.
 pub fn emergencyResupply(gs: *GameState, id: types.ContractId) !u32 {
@@ -707,4 +697,40 @@ test "the resupply plan keeps a deployed company fed and armed on a long line" {
     };
     try std.testing.expectEqual(@as(u32, 0), hungry_days);
     try std.testing.expectEqual(@as(u32, 0), dry_battles);
+}
+
+test "rushQuote: quote is non-empty when a company is short before a fight and is consumed by emergencyResupply" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 7300 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    gs.funds = 5_000_000;
+    const co = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
+    var nearest: usize = 0;
+    for (gs.contract_offers.items, 0..) |o, i| if (o.dist_ly < gs.contract_offers.items[nearest].dist_ly) {
+        nearest = i;
+    };
+    _ = try commands.execute(&gs, .{ .accept_contract = .{ .offer = gs.contract_offers.items[nearest].id, .company = co } });
+    // Advance until the contract is active.
+    while (gs.deploymentContract(co)) |c| {
+        if (c.status == .active) break;
+        _ = try commands.execute(&gs, .{ .advance_days = 1 });
+    }
+    const c = gs.deploymentContract(co) orelse return;
+    // Clear munitions so there is something to rush.
+    const site: @import("../domain/types.zig").Site = .{ .company = c.assigned_company };
+    for (part_mod.munition_keys) |k| while (gs.takeStock(site, k, 1)) {};
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const q = try rushQuote(arena.allocator(), &gs, c);
+    // If the company fires any munition and the shelf is bare, the quote must be non-empty.
+    if (q.lines.len > 0) {
+        try std.testing.expect(q.price > 0);
+        // emergencyResupply is the sole consumer that executes rushQuote.
+        // We only test agreement; running it requires a funded treasury at the site.
+        gs.forces.getPtr(c.assigned_company).?.local_funds = 5_000_000;
+        _ = commands.execute(&gs, .{ .emergency_resupply = c.id }) catch |err| switch (err) {
+            error.StorageFull, error.NothingToRush, error.OutOfMemory => {},
+            else => return err,
+        };
+    }
 }

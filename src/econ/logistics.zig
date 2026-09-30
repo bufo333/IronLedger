@@ -25,9 +25,15 @@ pub fn transitDays(jumps: u32) u32 {
 /// rule every transit, ETA and board column reads.
 pub const same_world_days: u32 = tuning.logistics.same_world_days;
 
+/// The one same-world-floored transit rule: `jumps == 0` floors to
+/// `same_world_days`; any route with at least one hop takes `transitDays`.
+/// Every transit time, ETA and board column calls this (C11h).
+pub fn daysForJumps(jumps: u32) u32 {
+    return if (jumps == 0) same_world_days else transitDays(jumps);
+}
+
 pub fn daysBetween(a: *const planet_mod.Planet, b: *const planet_mod.Planet) u32 {
-    if (a == b) return same_world_days;
-    return transitDays(planet_mod.jumpsBetween(a, b));
+    return daysForJumps(planet_mod.jumpsBetween(a, b));
 }
 
 /// Days for a purchase to land: nothing when the board is on the buyer's
@@ -133,6 +139,19 @@ pub fn localPurchaseMultBp(ly_beyond_ring: u32, planet_industry: u8) types.Bp {
     const base: types.Bp = l.local_base_bp + l.local_step_bp * @as(types.Bp, ly_beyond_ring / l.local_step_ly);
     const eased = base - l.local_industry_ease_bp * @as(types.Bp, planet_industry);
     return std.math.clamp(eased, l.local_base_bp, l.local_max_bp);
+}
+
+test "daysForJumps is the one transit-floor rule: all former inline sites agree" {
+    // jumps == 0: same-world floor, not transitDays(0)
+    try std.testing.expectEqual(same_world_days, daysForJumps(0));
+    // jumps > 0: full transit
+    try std.testing.expectEqual(transitDays(1), daysForJumps(1));
+    try std.testing.expectEqual(transitDays(5), daysForJumps(5));
+    // daysBetween routes through daysForJumps: same catalog entry → jumps 0
+    const p = &planet_mod.catalog[0];
+    try std.testing.expectEqual(daysForJumps(0), daysBetween(p, p));
+    const q = &planet_mod.catalog[1];
+    try std.testing.expectEqual(daysForJumps(planet_mod.jumpsBetween(p, q)), daysBetween(p, q));
 }
 
 test "the same-world floor is one number: transit 3 days, delivery none" {

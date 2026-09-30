@@ -133,7 +133,7 @@ fn runPolicies(gs: *GameState) !void {
         const p = try field_supply.plan(arena.allocator(), gs, sp.company, transit, sp.min_days, sp.ammo_battles);
         for (p.lines) |line| {
             const on_hand = gs.stockCount(site, line.key);
-            const inbound = field_supply.inboundQty(gs, sp.company, line.key);
+            const inbound = hq_ops.comingToSite(gs, .{ .company = sp.company }, line.key);
             if (on_hand + inbound >= line.floor) continue;
             var recent = false;
             for (gs.part_orders.items) |o| if (o.dest == .company and o.dest.company == sp.company and std.mem.eql(u8, o.part_key, line.key) and o.ordered_day + 7 > gs.clock.day_index) {
@@ -246,14 +246,11 @@ fn runStockPolicies(gs: *GameState) !void {
     const today = gs.clock.day_index;
     for (gs.stock_policies.items) |sp| {
         const hq = gs.hqs.getPtr(sp.hq) orelse continue;
-        const have = gs.stockCount(.{ .hq = sp.hq }, sp.part_key);
-        if (have >= sp.min) continue;
-        const pending = hq_ops.comingToHq(gs, sp.hq, sp.part_key);
-        var failed_recently = false;
-        for (gs.part_orders.items) |o| {
-            if (std.mem.eql(u8, o.part_key, sp.part_key) and o.status == .failed and o.ordered_day + 7 > today) failed_recently = true;
+        switch (hq_ops.stockLineState(gs, sp, today)) {
+            .stocked, .coming, .waiting => continue,
+            .reorders => {},
         }
-        if (pending > 0 or failed_recently) continue;
+        const have = gs.stockCount(.{ .hq = sp.hq }, sp.part_key);
         const want = sp.target - have;
         const fabricate = hq_ops.canFabricate(gs, sp.hq, sp.part_key); // what this bay is rated for, else order it
         const cmd: commands.Command = if (fabricate)

@@ -745,7 +745,7 @@ pub fn offerTransitDays(gs: *GameState, offer: *const contract_mod.Contract) u32
     const seat = if (gs.hqs.count() > 0) planet_mod.find(gs.hqs.values()[0].planet_key) else null;
     if (seat) |s| return logistics_mod.daysBetween(s, to);
     const jumps = planet_mod.jumpsForLy(offer.dist_ly);
-    return if (jumps == 0) logistics_mod.same_world_days else logistics_mod.transitDays(jumps);
+    return logistics_mod.daysForJumps(jumps);
 }
 
 const offer_rating = @import("offer_rating.zig");
@@ -954,15 +954,16 @@ pub fn contracts(alloc: Alloc, gs: *GameState, board_hq: types.HqId) !Contracts 
         }));
         {
             // Salvage capacity: what the trucks can haul off a won field (battle.haulCapacityBv).
+            // The claim preview is gross — scenario.salvage_bp and the command-rights cut are
+            // battle-only factors — so it is labelled as an estimate (C11o).
             const battle = @import("battle.zig");
             const trucks = battle.salvageTrucks(gs, c.assigned_company);
             var salvage_lance = false;
             if (toe_mod.supportLance(gs, c.assigned_company, .salvage)) |l| salvage_lance = l.units.items.len > 0;
             const tb = @import("../domain/tuning.zig").t.battle;
             const haul_bv: i64 = battle.haulCapacityBv(trucks);
-            var claim: i64 = @divTrunc(haul_bv * c.terms.salvage_pct, 100);
-            if (salvage_lance) claim = types.applyBp(claim, tb.salvage_lance_bonus_bp);
-            try lines.append(alloc, try std.fmt.allocPrint(alloc, "    salvage     {d} SVT-1 truck{s} haul up to {d} BV per won battle → your {d}% is ≈{d} BV of wrecks and parts shipped to the home depot{s}", .{
+            const claim: i64 = battle.salvageClaimBv(haul_bv, c.terms.salvage_pct, salvage_lance);
+            try lines.append(alloc, try std.fmt.allocPrint(alloc, "    salvage     {d} SVT-1 truck{s} haul up to {d} BV per won battle → your {d}% is ≈{d} BV gross (before salvage roll and rights cut){s}", .{
                 trucks, if (trucks == 1) "" else "s", haul_bv, c.terms.salvage_pct, claim,
                 if (salvage_lance) try std.fmt.allocPrint(alloc, " (+{d}% crewed salvage lance)", .{@divTrunc(tb.salvage_lance_bonus_bp - 10_000, 100)}) else try std.fmt.allocPrint(alloc, " (no salvage lance: −{d}%)", .{@divTrunc(tb.salvage_lance_bonus_bp - 10_000, 100)}),
             }));
@@ -1819,7 +1820,7 @@ pub fn stockTable(alloc: Alloc, gs: *GameState, site: types.Site) ![]const []con
         var prows: std.ArrayListUnmanaged(table.Row) = .empty;
         for (p.lines) |l| {
             const have = gs.stockCount(site, l.key);
-            const coming = field_supply.inboundQty(gs, site.company, l.key);
+            const coming = @import("hq_ops.zig").comingToSite(gs, site, l.key);
             const mk: []const u8 = if (have + coming < l.floor) "{c}" else if (have < l.floor) "{a}" else "{g}";
             try prows.append(alloc, try table.row(alloc, &.{ l.key, try std.fmt.allocPrint(alloc, "{d}", .{l.floor}), try std.fmt.allocPrint(alloc, "{d}", .{l.target}), try std.fmt.allocPrint(alloc, "{s}{d}{{/}}", .{ mk, have }), try std.fmt.allocPrint(alloc, "{d}", .{coming}), try std.fmt.allocPrint(alloc, "{{d}}{s}{{/}}{s}", .{ l.note, if (l.trimmed) " {a}trimmed to the ammo share{/}" else "" }) }));
         }
@@ -2277,8 +2278,14 @@ pub fn stockPolicies(alloc: Alloc, gs: *GameState, hq: types.HqId) ![]StockPolic
     for (gs.stock_policies.items) |sp| {
         if (sp.hq != hq) continue;
         const have = gs.stockCount(.{ .hq = hq }, sp.part_key);
-        const coming = @import("hq_ops.zig").comingToHq(gs, hq, sp.part_key);
-        const state: []const u8 = if (coming > 0) try std.fmt.allocPrint(alloc, "{{a}}{d} coming{{/}}", .{coming}) else if (have < sp.min) "{c}short — reorders tomorrow{/}" else "{g}stocked{/}";
+        const hq_ops_m = @import("hq_ops.zig");
+        const coming = hq_ops_m.comingToHq(gs, hq, sp.part_key);
+        const state: []const u8 = switch (hq_ops_m.stockLineState(gs, sp, gs.clock.day_index)) {
+            .coming => try std.fmt.allocPrint(alloc, "{{a}}{d} coming{{/}}", .{coming}),
+            .waiting => "{c}short — waiting (failed order){/}",
+            .reorders => "{c}short — reorders tomorrow{/}",
+            .stocked => "{g}stocked{/}",
+        };
         try out.append(alloc, .{ .key = sp.part_key, .min = sp.min, .target = sp.target, .cells = try table.row(alloc, &.{
             sp.part_key,
             try std.fmt.allocPrint(alloc, "{d}", .{sp.min}),
@@ -4515,7 +4522,7 @@ pub fn offerCandidates(alloc: Alloc, gs: *GameState, offer_id: types.ContractId)
         if (from_key) |fk| if (planet_mod.find(fk)) |from| if (to) |t| {
             jumps = planet_mod.jumpsBetween(from, t);
         };
-        const days: u32 = if (jumps == 0) logistics_mod.same_world_days else logistics_mod.transitDays(jumps);
+        const days: u32 = logistics_mod.daysForJumps(jumps);
         const eligible = why.len == 0;
         const penalty: i32 = @import("personnel.zig").readinessPenalty(@import("personnel.zig").companyCrewStats(gs, r.company), r.depot, days);
         const fat_mk = fatigueMarkup(person_mod.Person.fatigueBandOf(r.fatigue));
@@ -6099,14 +6106,10 @@ pub fn hqSaleQuote(gs: *GameState, hq_id: types.HqId) ?HqSaleQuote {
     return .{ .name = h.name, .value = market_mod.hqSaleProceeds(h) };
 }
 
-/// What disbanding a company sells its hulls for.
+/// Full proceeds of disbanding a company: local funds plus hull sales.
+/// Delegates to the single owner `toe.disbandProceeds` (C11b).
 pub fn disbandQuote(alloc: Alloc, gs: *GameState, company: types.ForceId) !types.CBills {
-    var value: types.CBills = 0;
-    var uit = gs.units.iterator();
-    while (uit.next()) |e| if (gs.companyOf(e.value_ptr.force) == company) {
-        value += try market_mod.unitSaleValue(alloc, e.value_ptr);
-    };
-    return value;
+    return toe_mod.disbandProceeds(gs, alloc, company);
 }
 
 /// Hulls on hand and on the way for a company just raised.

@@ -587,7 +587,7 @@ pub fn acceptContract(gs: *GameState, offer_id: types.ContractId, company_id: ty
     if (planet_mod.find(sites.sitePlanetKey(gs, .{ .company = company_id }) orelse "")) |from| {
         if (planet_mod.find(c.planet_key)) |to| jumps = planet_mod.jumpsBetween(from, to);
     }
-    c.transit_days = if (jumps == 0) logistics.same_world_days else logistics.transitDays(jumps);
+    c.transit_days = logistics.daysForJumps(jumps);
     c.arrive_day = gs.clock.day_index + c.transit_days;
     onAccept(gs, &c); // mutates only the local copy c
     c.monthly_net = @divTrunc(c.terms.base_pay_month * (100 - @as(i64, c.terms.advance_pct)), 100);

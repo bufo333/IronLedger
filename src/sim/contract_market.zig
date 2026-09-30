@@ -26,6 +26,7 @@ const lift_mod = @import("lift.zig");
 const personnel = @import("personnel.zig");
 const posture = @import("posture.zig");
 const commands = @import("commands.zig");
+const commander = @import("../domain/commander.zig");
 
 /// Employer payment multiplier by faction, basis points (data/tables/factions.zon).
 pub fn employerMultBp(faction_key: []const u8) types.Bp {
@@ -39,11 +40,10 @@ pub fn standingPayBp(standing: i32) types.Bp {
 }
 
 /// The five Successor States: the employers an F-rated outfit
-/// cannot get in front of.
+/// cannot get in front of.  Delegates to the single-owner set
+/// `commander.Faction.isHouse` (C11m).
 pub fn isGreatHouse(faction_key: []const u8) bool {
-    const houses = [_][]const u8{ "LC", "DC", "FS", "CC", "FWL" };
-    for (houses) |h| if (std.mem.eql(u8, h, faction_key)) return true;
-    return false;
+    return commander.Faction.isHouse(faction_key);
 }
 
 /// Employers price contracts off your operating costs with a market margin
@@ -1506,6 +1506,19 @@ test "one board per HQ — offers inside its reach, taken only by companies base
     try std.testing.expectError(commands.Error.OutOfRange, commands.execute(&gs, .{ .accept_contract = .{ .offer = home_offer.?, .company = bravo } }));
     _ = try commands.execute(&gs, .{ .accept_contract = .{ .offer = far_offer.?, .company = bravo } });
     try std.testing.expect(gs.deploymentContract(bravo) != null);
+}
+
+test "isGreatHouse delegates to Faction.isHouse: all five houses and a periphery key agree" {
+    // All five Successor States must be houses.
+    for ([_][]const u8{ "LC", "DC", "FS", "CC", "FWL" }) |k| {
+        try std.testing.expect(isGreatHouse(k));
+        try std.testing.expect(commander.Faction.isHouse(k));
+        try std.testing.expectEqual(commander.Faction.isHouse(k), isGreatHouse(k));
+    }
+    // A periphery faction is not a house.
+    try std.testing.expect(!isGreatHouse("OWA"));
+    try std.testing.expect(!commander.Faction.isHouse("OWA"));
+    try std.testing.expectEqual(commander.Faction.isHouse("OWA"), isGreatHouse("OWA"));
 }
 
 test "offer ids survive removal of an earlier-indexed offer" {

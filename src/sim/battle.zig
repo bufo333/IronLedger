@@ -45,6 +45,17 @@ pub fn haulCapacityBv(trucks: i64) i64 {
     return if (trucks > 0) trucks * tuning.battle.salvage_bv_per_truck else tuning.battle.salvage_bv_by_hand;
 }
 
+/// The shared salvage-claim scaling: gross BV the player's share amounts
+/// to before the per-battle `scenario.salvage_bp` roll and the
+/// command-rights cut.  Both `battle.resolve` and the contract-detail
+/// preview call it (C11o); the preview is gross — it cannot know the
+/// roll — and must label itself accordingly.
+pub fn salvageClaimBv(haul_bv: i64, salvage_pct: u8, has_salvage_lance: bool) i64 {
+    var claim: i64 = @divTrunc(haul_bv * salvage_pct, 100);
+    if (has_salvage_lance) claim = types.applyBp(claim, tuning.battle.salvage_lance_bonus_bp);
+    return claim;
+}
+
 /// Whole hulls a destroyed-BV total amounts to (a thousand BV a kill,
 /// rounded): kill credit and prisoner counts both read it.
 pub fn estimatedKills(destroyed_bv: i64) u32 {
@@ -915,8 +926,7 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     // Salvage is things, not money: your share of what the
     // crews haul off a held field becomes wrecks and parts crated to the
     // home HQ depot — to store, strip, or rebuild into a working hull.
-    var salvage_bv: i64 = if (held_field) types.applyBp(@divTrunc(haulable_bv * c.terms.salvage_pct, 100), scenario.salvage_bp) else 0;
-    if (player.mods.has_salvage_lance) salvage_bv = types.applyBp(salvage_bv, tuning.battle.salvage_lance_bonus_bp); // crews strip fast
+    var salvage_bv: i64 = if (held_field) types.applyBp(salvageClaimBv(haulable_bv, c.terms.salvage_pct, player.mods.has_salvage_lance), scenario.salvage_bp) else 0;
     // The liaison's cut: under tighter command rights the employer
     // claims part of what you haul.
     const before_cut = salvage_bv;
@@ -2242,6 +2252,22 @@ test "a conceded engagement leaves a report that holds the turn and counts as a 
     try std.testing.expectEqual(@as(u32, 1), c.battles_fought);
     try std.testing.expectEqual(tuning.battle.score.concede, c.score);
     try std.testing.expectEqual(tuning.battle.score.concede * tuning.contract.vp_per_score, c.victory_points);
+}
+
+test "salvageClaimBv: owner used by resolve and the queries preview returns identical claims" {
+    // The owner and both consumers must agree on the same inputs (C11o).
+    const haul: i64 = 3_000;
+    const pct: u8 = 50;
+    // Without salvage lance.
+    const gross_no_lance = salvageClaimBv(haul, pct, false);
+    try std.testing.expectEqual(@divTrunc(haul * pct, 100), gross_no_lance);
+    // With salvage lance: applies the bonus bp.
+    const gross_with_lance = salvageClaimBv(haul, pct, true);
+    try std.testing.expect(gross_with_lance > gross_no_lance);
+    try std.testing.expectEqual(types.applyBp(@divTrunc(haul * pct, 100), tuning.battle.salvage_lance_bonus_bp), gross_with_lance);
+    // Zero salvage_pct → no claim regardless of lance.
+    try std.testing.expectEqual(@as(i64, 0), salvageClaimBv(haul, 0, true));
+    // Both call sites use the same function: owner/consumer agreement by construction.
 }
 
 test "a fight does not change who turns up at the hiring hall" {
