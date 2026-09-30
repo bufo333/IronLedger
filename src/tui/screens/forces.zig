@@ -41,7 +41,7 @@ pub fn draw(self: *App) anyerror!void {
                     const mq = try q.manning(al, g, co);
                     for (try (try q.tableOf(al, q.manning_cols, mq)).render(al), 0..) |ln, i| try mrows.append(al, if (i == 0) try std.fmt.allocPrint(al, "{{d}}{s}{{/}}", .{ln}) else ln);
                     var open_total: u32 = 0;
-                    for (mq) |m| open_total += m.need -| m.have;
+                    for (mq) |m| open_total += m.open;
                     try mrows.append(al, "");
                     try mrows.append(al, if (open_total == 0) "{g}every seat filled{/}" else try std.fmt.allocPrint(al, "{{c}}{d} open{{/}} — the hiring halls fill them", .{open_total}));
                     self.listPane(.{ .x = b.x + lw, .y = b.y, .w = b.w - lw, .h = detail_h }, try std.fmt.allocPrint(al, "MANNING · {s} · {s}", .{ try q.forceName(self.a(), g, co), side_hint }), mrows.items, 1, false, false);

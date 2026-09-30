@@ -10,7 +10,7 @@ const force_mod = @import("../domain/force.zig");
 /// for duty. Support modifiers, MASH beds, the battle line and
 /// fieldable strength all count hulls by this test.
 pub fn unitOperational(gs: *GameState, u: *const unit_mod.Unit) bool {
-    if (!u.canFight()) return false;
+    if (!u.standsInLine()) return false;
     const crew = gs.person(u.pilot) orelse return false;
     return crew.isAvailable(gs.clock.day_index);
 }

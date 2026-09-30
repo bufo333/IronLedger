@@ -21,12 +21,19 @@ pub fn transportsBerthedAt(gs: *GameState, hq_id: types.HqId, kind: unit_mod.Uni
     return n;
 }
 
+/// A ship's crew is fit for duty today: pilot slot is filled and that
+/// person is available. The single check `transportAvailable`,
+/// `ownsCrewedJumpshipAt` and `hasCrewedDropship` all share.
+pub fn crewFit(gs: *GameState, u: *const unit_mod.Unit) bool {
+    const crew = gs.person(u.pilot) orelse return false;
+    return crew.isAvailable(gs.clock.day_index);
+}
+
 /// A ship is fit to sail when it is berthed, ready, crewed and not
 /// already carrying a company (its `force` is set for the tour).
 pub fn transportAvailable(gs: *GameState, u: *const unit_mod.Unit) bool {
     if (!u.kind.isTransport() or u.status != .ready or u.force != .none) return false;
-    const crew = gs.person(u.pilot) orelse return false;
-    return crew.isAvailable(gs.clock.day_index);
+    return crewFit(gs, u);
 }
 
 /// A crewed jumpship berthed at either end of a link (the dedicated
@@ -37,19 +44,18 @@ pub fn ownsCrewedJumpshipAt(gs: *GameState, a: types.HqId, b: types.HqId) bool {
         const u = entry.value_ptr;
         if (u.kind != .jumpship or (u.berth_hq != a and u.berth_hq != b)) continue;
         if (u.status == .destroyed) continue;
-        const crew = gs.person(u.pilot) orelse continue;
-        if (crew.isAvailable(gs.clock.day_index)) return true;
+        if (crewFit(gs, u)) return true;
     }
     return false;
 }
 
-/// A crewed dropship in the company's own hangar: it lifts and escorts
-/// the company on the way in.
+/// A crewed, live dropship in the company's own force: it lifts and
+/// escorts the company on the way in.
 pub fn hasCrewedDropship(gs: *GameState, company: types.ForceId) bool {
     var it = gs.units.iterator();
     while (it.next()) |e| {
         const u = e.value_ptr;
-        if (u.kind == .dropship and u.force == company and u.pilot != .none) return true;
+        if (u.kind == .dropship and u.force == company and !u.isParked() and crewFit(gs, u)) return true;
     }
     return false;
 }
@@ -166,6 +172,77 @@ pub fn planLift(gs: *GameState, company_id: types.ForceId, commit: bool) !LiftPl
 
 pub fn commitLift(gs: *GameState, company_id: types.ForceId) !LiftPlan {
     return planLift(gs, company_id, true);
+}
+
+test "hasCrewedDropship: fit crewed dropship true; destroyed/mothballed/unfit/none false" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 81 });
+    defer gs.deinit();
+    const founding = @import("founding.zig");
+    const commands = @import("commands.zig");
+    _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
+    const co = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
+
+    // Add a Leopard dropship and a fit pilot; assign the ship to the company.
+    const ds_id = try gs.addUnit("LEOPARD");
+    const pid = try gs.hirePerson("D", "R", .dropship_crew);
+    const ds = gs.units.getPtr(ds_id).?;
+    ds.pilot = pid;
+    ds.force = co;
+    try std.testing.expect(hasCrewedDropship(&gs, co));
+
+    // Destroyed hull: false.
+    ds.status = .destroyed;
+    try std.testing.expect(!hasCrewedDropship(&gs, co));
+
+    // Mothballed hull: false.
+    ds.status = .mothballed;
+    try std.testing.expect(!hasCrewedDropship(&gs, co));
+
+    // Restore to ready, but wound the pilot: false.
+    ds.status = .ready;
+    gs.person(pid).?.status = .wounded;
+    try std.testing.expect(!hasCrewedDropship(&gs, co));
+
+    // On leave: false.
+    gs.person(pid).?.status = .active;
+    gs.person(pid).?.leave_until_day = gs.clock.day_index + 30;
+    try std.testing.expect(!hasCrewedDropship(&gs, co));
+
+    // Restore fit: true again.
+    gs.person(pid).?.leave_until_day = null;
+    try std.testing.expect(hasCrewedDropship(&gs, co));
+
+    // No pilot: false.
+    ds.pilot = .none;
+    try std.testing.expect(!hasCrewedDropship(&gs, co));
+}
+
+test "crewFit is shared: fit berthed transport is transportAvailable; fit berthed jumpship passes ownsCrewedJumpshipAt" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 82 });
+    defer gs.deinit();
+    const founding = @import("founding.zig");
+    const commands = @import("commands.zig");
+    _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
+    _ = try commands.execute(&gs, .{ .new_company = "Alpha" });
+    const hq_id = gs.seat();
+
+    // A ready berthed Leopard dropship with a fit pilot.
+    const dp_id = try gs.addUnit("LEOPARD");
+    const dp_pid = try gs.hirePerson("D", "R", .dropship_crew);
+    const dp = gs.units.getPtr(dp_id).?;
+    dp.pilot = dp_pid;
+    dp.berth_hq = hq_id;
+    try std.testing.expect(crewFit(&gs, dp));
+    try std.testing.expect(transportAvailable(&gs, dp));
+
+    // A ready berthed Invader jumpship with a fit pilot.
+    const js_id = try gs.addUnit("INVADER");
+    const js_pid = try gs.hirePerson("J", "R", .jumpship_crew);
+    const js = gs.units.getPtr(js_id).?;
+    js.pilot = js_pid;
+    js.berth_hq = hq_id;
+    try std.testing.expect(crewFit(&gs, js));
+    try std.testing.expect(ownsCrewedJumpshipAt(&gs, hq_id, .none));
 }
 
 test "planLiftQuery returns the same plan as planLift(commit=false) with OOM-only errors" {

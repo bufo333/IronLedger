@@ -2903,7 +2903,7 @@ pub const App = struct {
                 const mq = try q.manning(al, g, self.raise.company);
                 for (try (try q.tableOf(al, q.manning_cols, mq)).render(al), 0..) |ln, i| try rows.append(al, if (i == 0) try std.fmt.allocPrint(al, "{{d}}{s}{{/}}", .{ln}) else ln);
                 var open_total: u32 = 0;
-                for (mq) |m| open_total += m.need -| m.have;
+                for (mq) |m| open_total += m.open;
                 try rows.append(al, "");
                 try rows.append(al, try std.fmt.allocPrint(al, "{d} open · the counts match a generated starter company of this shape", .{open_total}));
                 try rows.append(al, try std.fmt.allocPrint(al, "  {{a}}{s}{{/}} now: a pilot per crewless hull and a tech where none has hours (signing bonuses from the outfit)", .{try keyHint(RaiseCrewsAction, al, &raise_crews_bindings, .crew, "hire from the halls")}));

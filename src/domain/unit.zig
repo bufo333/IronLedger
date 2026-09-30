@@ -253,9 +253,9 @@ pub const Unit = struct {
     }
 
     /// Stands in the line today (ARCH §7): not parked, not on the bench,
-    /// not in transit. The one definition the battle, the effectiveness
-    /// check and the hangar all use.
-    pub fn canFight(self: *const Unit) bool {
+    /// not in transit. The hull-status predicate `readiness.unitOperational`
+    /// builds on.
+    pub fn standsInLine(self: *const Unit) bool {
         return !self.isParked() and !self.isBusy();
     }
 
@@ -263,6 +263,14 @@ pub const Unit = struct {
     /// bench (a hull in transit still rides with its tech).
     pub fn takesFieldWork(self: *const Unit) bool {
         return !self.isParked() and !self.inShop();
+    }
+
+    /// Draws on the company's field-armor stock (ARCH §9.6): meks and
+    /// vehicles that take field work — a ton patches one hull's plating.
+    /// Hulls in the depot draw nothing; hulls in transit ride with their
+    /// tech and are patched on the road.
+    pub fn takesFieldArmor(self: *const Unit) bool {
+        return self.takesFieldWork() and (self.kind == .mek or self.kind == .vehicle);
     }
 
     /// This hull's monthly bill (ARCH §9.8) — owned means billed.
@@ -356,16 +364,16 @@ pub const HeldHull = struct {
     }
 };
 
-test "one line of hull status predicates: parked, in the shop, busy, fighting" {
+test "one line of hull status predicates: parked, in the shop, busy, on the line" {
     var u: Unit = .{ .id = @enumFromInt(1), .chassis_key = "SHD-2H", .kind = .mek };
     defer u.deinit(std.testing.allocator);
-    try std.testing.expect(u.canFight() and u.takesFieldWork() and !u.isParked() and !u.isBusy());
+    try std.testing.expect(u.standsInLine() and u.takesFieldWork() and !u.isParked() and !u.isBusy());
     u.status = .refitting;
-    try std.testing.expect(u.inShop() and u.isBusy() and !u.canFight() and !u.takesFieldWork());
+    try std.testing.expect(u.inShop() and u.isBusy() and !u.standsInLine() and !u.takesFieldWork());
     u.status = .in_transit;
-    try std.testing.expect(u.isBusy() and !u.canFight() and u.takesFieldWork()); // rides with its tech
+    try std.testing.expect(u.isBusy() and !u.standsInLine() and u.takesFieldWork()); // rides with its tech
     u.status = .mothballed;
-    try std.testing.expect(u.isParked() and !u.canFight() and !u.takesFieldWork());
+    try std.testing.expect(u.isParked() and !u.standsInLine() and !u.takesFieldWork());
     try std.testing.expectEqual(@as(u8, 0), u.conditionPct());
 }
 
@@ -405,6 +413,26 @@ test "armor and weapons are field work; structure is depot work" {
     try std.testing.expectEqual(RepairTier.field, repairTier(.weapon, .destroyed).?);
     try std.testing.expectEqual(RepairTier.field, repairTier(.ammo, .missing).?);
     try std.testing.expectEqual(RepairTier.depot, repairTier(.structure, .damaged).?);
+}
+
+test "takesFieldArmor: mek/vehicle taking field work yes; others no" {
+    const cases = .{
+        // { kind, status, expected }
+        .{ UnitKind.mek, UnitStatus.ready, true },
+        .{ UnitKind.mek, UnitStatus.repairing, false }, // in-shop mek excluded
+        .{ UnitKind.mek, UnitStatus.in_transit, true }, // in-transit mek counted
+        .{ UnitKind.vehicle, UnitStatus.ready, true },
+        .{ UnitKind.vehicle, UnitStatus.in_transit, true }, // in-transit vehicle counted
+        .{ UnitKind.vehicle, UnitStatus.mothballed, false }, // parked excluded
+        .{ UnitKind.aerospace, UnitStatus.ready, false },
+        .{ UnitKind.infantry, UnitStatus.ready, false },
+        .{ UnitKind.dropship, UnitStatus.ready, false },
+    };
+    inline for (cases) |c| {
+        var u: Unit = .{ .id = @enumFromInt(1), .chassis_key = "SHD-2H", .kind = c[0], .status = c[1] };
+        defer u.deinit(std.testing.allocator);
+        try std.testing.expectEqual(c[2], u.takesFieldArmor());
+    }
 }
 
 test "structural damage sends a unit home" {

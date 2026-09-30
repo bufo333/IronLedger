@@ -371,8 +371,12 @@ pub fn battleOrders(alloc: Alloc, gs: *GameState, id: types.ContractId) !?Battle
         }));
     }
     const fieldable = contract_control.fieldableBv(gs, company);
-    const pct: i64 = if (c.committed_bv > 0) @divTrunc(fieldable * 100, c.committed_bv) else 100;
-    try situation.append(alloc, try std.fmt.allocPrint(alloc, "fieldable {d} BV ({d}% of committed)", .{ fieldable, pct }));
+    const bo_pct = contract_control.effectivenessPct(fieldable, c.committed_bv);
+    if (bo_pct) |pct| {
+        try situation.append(alloc, try std.fmt.allocPrint(alloc, "fieldable {d} BV ({d}% of committed)", .{ fieldable, pct }));
+    } else {
+        try situation.append(alloc, try std.fmt.allocPrint(alloc, "fieldable {d} BV", .{fieldable}));
+    }
     var ammo: std.ArrayListUnmanaged(u8) = .empty;
     for (try field_supply.ammoFights(alloc, gs, company), 0..) |a, i| {
         if (i > 0) try ammo.appendSlice(alloc, ", ");
@@ -942,13 +946,20 @@ pub fn contracts(alloc: Alloc, gs: *GameState, board_hq: types.HqId) !Contracts 
             if (c.next_battle_day) |nb| try std.fmt.allocPrint(alloc, "~day {d}", .{nb}) else "—",
         }));
         const fieldable = contract_control.fieldableBv(gs, c.assigned_company);
-        const pct: i64 = if (c.committed_bv > 0) @divTrunc(fieldable * 100, c.committed_bv) else 0;
+        const ac_pct = contract_control.effectivenessPct(fieldable, c.committed_bv);
         const tc = @import("../domain/tuning.zig").t.contract;
-        const pct_mk: []const u8 = if (pct < tc.effective_min_pct) "{c}" else if (pct < tc.effective_warn_pct) "{a}" else "{g}";
-        try lines.append(alloc, try std.fmt.allocPrint(alloc, "    committed   {d} BV · fieldable {d} BV {s}({d}%){{/}} · ineffective below {d}%{s}", .{
-            c.committed_bv, fieldable, pct_mk, pct, tc.effective_min_pct,
-            if (c.ineffective_since) |since| try std.fmt.allocPrint(alloc, " · {{c}}grace since day {d}{{/}}", .{since}) else "",
-        }));
+        if (ac_pct) |pct| {
+            const pct_mk: []const u8 = if (pct < tc.effective_min_pct) "{c}" else if (pct < tc.effective_warn_pct) "{a}" else "{g}";
+            try lines.append(alloc, try std.fmt.allocPrint(alloc, "    committed   {d} BV · fieldable {d} BV {s}({d}%){{/}} · ineffective below {d}%{s}", .{
+                c.committed_bv, fieldable, pct_mk, pct, tc.effective_min_pct,
+                if (c.ineffective_since) |since| try std.fmt.allocPrint(alloc, " · {{c}}grace since day {d}{{/}}", .{since}) else "",
+            }));
+        } else {
+            try lines.append(alloc, try std.fmt.allocPrint(alloc, "    committed   {d} BV · fieldable {d} BV · ineffective below {d}%{s}", .{
+                c.committed_bv, fieldable, tc.effective_min_pct,
+                if (c.ineffective_since) |since| try std.fmt.allocPrint(alloc, " · {{c}}grace since day {d}{{/}}", .{since}) else "",
+            }));
+        }
         try lines.append(alloc, try std.fmt.allocPrint(alloc, "    pay         {s} / month · advance {s} · salvage {d}%{s} · {s} rights", .{
             try money(alloc, c.terms.base_pay_month), try money(alloc, c.terms.advanceAmount()), c.terms.salvage_pct, if (c.terms.salvage_exchange) " {a}(exchange: employer keeps the wrecks, pays cash){/}" else "", @tagName(c.terms.command_rights),
         }));
@@ -2469,6 +2480,9 @@ pub const ManningRow = struct {
     role: person_mod.Role,
     have: u32,
     need: u32,
+    /// Open seats for this role: the owner `personnel.manningLines` computes
+    /// it once; TUI totals read this field instead of recomputing need -| have.
+    open: u32,
     cells: table.Row,
 };
 
@@ -2482,7 +2496,7 @@ pub fn manning(alloc: Alloc, gs: *GameState, company: types.ForceId) ![]ManningR
     var out: std.ArrayListUnmanaged(ManningRow) = .empty;
     for (personnel.manningLines(gs, company)) |n| {
         const why = if (n.role == .astech or n.role == .tech_mek) try std.fmt.allocPrint(alloc, "{s} · {s}{d} of {d} tech-hours/week covered{{/}}", .{ n.why, if (hours.have >= hours.needed) "{g}" else "{c}", hours.have, hours.needed }) else n.why;
-        try out.append(alloc, .{ .role = n.role, .have = n.have, .need = n.need, .cells = try table.row(alloc, &.{
+        try out.append(alloc, .{ .role = n.role, .have = n.have, .need = n.need, .open = n.open, .cells = try table.row(alloc, &.{
             @tagName(n.role),
             try std.fmt.allocPrint(alloc, "{d}", .{n.have}),
             try std.fmt.allocPrint(alloc, "{d}", .{n.need}),
@@ -6330,6 +6344,121 @@ test "raise lances, support train and sell quote read one company" {
         const quote = (try sellQuote(al, &gs, e.value_ptr.id)).?;
         try std.testing.expect(quote.value >= 0);
     }
+}
+
+test "C11d display agreement: battleOrders and active-contracts effectiveness equal effectivenessPct (C17b4)" {
+    // Both query surfaces must agree with the single owner (contract_control.effectivenessPct).
+    // This test drives them with fieldable < committed (the branch that once disagreed).
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 9001 });
+    defer gs.deinit();
+    const commands = @import("commands.zig");
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    const co = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const al = arena.allocator();
+
+    // Accept a contract and force it to active with a battle window open.
+    _ = try commands.execute(&gs, .{ .accept_contract = .{ .offer = gs.contract_offers.items[0].id, .company = co } });
+    const cid = blk: {
+        var cit = gs.contracts.iterator();
+        while (cit.next()) |e| break :blk e.value_ptr.id;
+        unreachable;
+    };
+    const cptr = gs.contracts.getPtr(cid).?;
+    cptr.status = .active;
+    cptr.start_day = 0;
+    // Within the contact_warning_days window (3) so battleOrders returns non-null.
+    cptr.next_battle_day = gs.clock.day_index + 2;
+
+    // Wreck all meks so fieldable BV is well below committed.
+    {
+        var uit = gs.units.iterator();
+        while (uit.next()) |e| {
+            const u = e.value_ptr;
+            if (gs.companyOf(u.force) == co and u.kind == .mek) u.status = .destroyed;
+        }
+    }
+
+    const fieldable = contract_control.fieldableBv(&gs, co);
+    const expected_pct = contract_control.effectivenessPct(fieldable, cptr.committed_bv);
+    // committed_bv is set at acceptance; it should be > 0 for a generated company.
+    try std.testing.expect(cptr.committed_bv > 0);
+    try std.testing.expect(expected_pct != null);
+    try std.testing.expect(expected_pct.? < 100); // fieldable < committed
+
+    // battleOrders line must contain the same percentage.
+    const bo = (try battleOrders(al, &gs, cid)).?;
+    var bo_pct_found: bool = false;
+    for (bo.situation) |line| {
+        if (std.mem.indexOf(u8, line, "% of committed") != null) {
+            const pct_str = try std.fmt.allocPrint(al, "{d}% of committed", .{expected_pct.?});
+            try std.testing.expect(std.mem.indexOf(u8, line, pct_str) != null);
+            bo_pct_found = true;
+        }
+    }
+    try std.testing.expect(bo_pct_found);
+
+    // Active contracts pane must contain the same percentage.
+    const cr = try contracts(al, &gs, .none);
+    var ac_pct_found: bool = false;
+    for (cr.active) |row| {
+        if (row.id != cid) continue;
+        for (row.lines) |line| {
+            if (std.mem.indexOf(u8, line, "fieldable") != null and std.mem.indexOf(u8, line, "%") != null) {
+                const pct_str = try std.fmt.allocPrint(al, "({d}%)", .{expected_pct.?});
+                if (std.mem.indexOf(u8, line, pct_str) != null) ac_pct_found = true;
+            }
+        }
+    }
+    try std.testing.expect(ac_pct_found);
+}
+
+test "C11p agreement: ManningRow.open equals personnel.manningLines open; unfilled role has open > 0 (C17b4)" {
+    // The per-role gap must come from the single owner (personnel.manningLines),
+    // not be recomputed. ManningRow.open is now populated from n.open.
+    const personnel = @import("personnel.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 9002 });
+    defer gs.deinit();
+    const commands = @import("commands.zig");
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    const co = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const al = arena.allocator();
+
+    // Compare ManningRow.open to the owner for each role.
+    const rows = try manning(al, &gs, co);
+    const owner_lines = personnel.manningLines(&gs, co);
+    try std.testing.expectEqual(owner_lines.len, rows.len);
+    for (rows, owner_lines) |row, owner| {
+        try std.testing.expectEqual(owner.open, row.open);
+        try std.testing.expectEqual(owner.have, row.have);
+        try std.testing.expectEqual(owner.need, row.need);
+    }
+
+    // Fire a mekwarrior so there is an open seat; the owner's open > 0.
+    var fired: bool = false;
+    var pit = gs.people.iterator();
+    while (pit.next()) |e| {
+        const p = e.value_ptr;
+        if (p.role == .mekwarrior and gs.companyOf(p.assigned_force) == co) {
+            p.assigned_force = .none;
+            p.status = .retired;
+            fired = true;
+            break;
+        }
+    }
+    try std.testing.expect(fired);
+
+    const rows2 = try manning(al, &gs, co);
+    const owner2 = personnel.manningLines(&gs, co);
+    var found_open: bool = false;
+    for (rows2, owner2) |row, owner| {
+        try std.testing.expectEqual(owner.open, row.open);
+        if (row.role == .mekwarrior and row.open > 0) found_open = true;
+    }
+    try std.testing.expect(found_open);
 }
 
 test "companyStands renders text matching each posture tag" {

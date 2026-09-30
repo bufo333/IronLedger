@@ -46,6 +46,23 @@ pub fn fieldableBv(gs: *GameState, company: types.ForceId) i64 {
     return total;
 }
 
+/// Effectiveness as a percentage of committed BV: null when nothing was
+/// committed (no figure to show). The single representation all three
+/// display sites use.
+pub fn effectivenessPct(fieldable_bv: i64, committed_bv: i64) ?i64 {
+    if (committed_bv <= 0) return null;
+    return @divTrunc(fieldable_bv * 100, committed_bv);
+}
+
+/// True when the company meets the contract's effectiveness floor: at
+/// least `effective_min_pct` percent of committed BV is fieldable.
+/// False when nothing was committed (no contract baseline to measure
+/// against). The sole owner; `checkEffectiveness` routes through it.
+pub fn combatEffective(fieldable_bv: i64, committed_bv: i64) bool {
+    if (committed_bv <= 0) return false;
+    return fieldable_bv * 100 >= committed_bv * tuning.contract.effective_min_pct;
+}
+
 /// At acceptance: set the objective, remember what was committed, and
 /// size the opposition.
 pub fn onAccept(gs: *GameState, c: *contract_mod.Contract) void {
@@ -237,7 +254,7 @@ pub fn checkEffectiveness(gs: *GameState) !void {
         const c = entry.value_ptr;
         if (c.status != .active or c.committed_bv <= 0) continue;
         const now = fieldableBv(gs, c.assigned_company);
-        const effective = now * 100 >= c.committed_bv * tuning.contract.effective_min_pct;
+        const effective = combatEffective(now, c.committed_bv);
         if (effective) {
             if (c.ineffective_since != null) {
                 c.ineffective_since = null;
@@ -824,4 +841,31 @@ test "idle companies stay where they worked; recall brings them home; redeploy f
     // Either way the company is now travelling and can't be recalled twice.
     try std.testing.expectError(commands.Error.CompanyInTransit, commands.execute(&gs, .{ .recall_company = co }));
     while (!posture.isCompanyHome(&gs, co)) _ = try commands.execute(&gs, .{ .advance_days = 5 });
+}
+
+test "effectivenessPct: null when nothing committed; exact ratio otherwise" {
+    // committed_bv <= 0 → null.
+    try std.testing.expectEqual(@as(?i64, null), effectivenessPct(500, 0));
+    try std.testing.expectEqual(@as(?i64, null), effectivenessPct(500, -1));
+    // fieldable == committed → 100%.
+    try std.testing.expectEqual(@as(?i64, 100), effectivenessPct(1000, 1000));
+    // fieldable == half → 50%.
+    try std.testing.expectEqual(@as(?i64, 50), effectivenessPct(500, 1000));
+    // fieldable exceeds committed → > 100%.
+    try std.testing.expectEqual(@as(?i64, 150), effectivenessPct(1500, 1000));
+    // Division truncates toward zero.
+    try std.testing.expectEqual(@as(?i64, 66), effectivenessPct(666, 1000));
+}
+
+test "combatEffective: false when nothing committed; threshold at effective_min_pct" {
+    const min_pct = tuning.contract.effective_min_pct;
+    // Nothing committed: always false.
+    try std.testing.expect(!combatEffective(1000, 0));
+    try std.testing.expect(!combatEffective(1000, -1));
+    // Exactly at min: effective.
+    try std.testing.expect(combatEffective(min_pct, 100));
+    // One below min: ineffective.
+    try std.testing.expect(!combatEffective(min_pct - 1, 100));
+    // Well above: effective.
+    try std.testing.expect(combatEffective(100, 100));
 }

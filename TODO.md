@@ -23,15 +23,6 @@ C18.
 - [ ] C10 location, posture, and seat resolution (C10a-C10d; rules 21-23, 71):
   company posture, site-local office/medical effects, seat/outfit resolution,
   refit stock, and asymmetric two-HQ tests. Delete C10.
-- [ ] C11 one rule, one owner (rules 20, 21, 26, 27, 29, 60):
-  - [ ] C11-HQ (C11a, C11g, C11q-C11t): HQ capacity, sale/upgrade quotes,
-    company counts, lance placement, and posting.
-  - [ ] C11-medical-personnel (C11c, C11f, C11l, C11v, C11y): medical cover,
-    role skills, coverage iteration, typed crew reasons, and available medics.
-  - [ ] C11-contract-supply (C11b, C11e, C11h-C11k, C11m-C11o, C11u): disband,
-    inbound goods, transit/acceptance/reorder/house/part/salvage and lift rules.
-  - [ ] C11-forces (C11d, C11p, C11w-C11x, C11z): effectiveness, manning,
-    transport/hull readiness, and armor demand. Delete C11 after all four.
 - [ ] C12 frontend boundary and results (rules 9, 10, 30, 33-43):
   - [ ] C12-results-trust (C12a-C12b, C12f-C12g): result presentation,
     canonical refusals, parser/query boundary, session wizard, escaping, and
@@ -63,12 +54,11 @@ C18.
   Delete C20 and C17.
 
 C17 focused coverage (rule 67) is required within its owner packages, not a
-separate branch: C17a1/b5 with C11-HQ; C17a2/a4/b3 with
-C11-medical-personnel; C17a3/b1 with C5 and C13; C17a5-a6/b2/b5-b6 with
-C11-contract-supply and C15; C17a7/b7 with C13 and C20; C17b4 with
-C11-forces; and C17c's Desk, Contracts, Ledger, Forces, People, Supply, HQ,
-Market, Lab, and Map coverage with the two C12 packages. C20's final inventory
-must show no scoped omission before it deletes C17.
+separate branch: C17a1/b5, C17a2/a4/b3, C17a5-a6/b2/b5-b6 delivered; C17a3/b1 with C5 and
+C13; C17a7/b7 with C13 and C20; and C17c's
+Desk, Contracts, Ledger, Forces, People, Supply, HQ, Market, Lab, and Map
+coverage with the two C12 packages. C20's final inventory must show no scoped
+omission before it deletes C17.
 
 ## Data verification (needs the sourcebooks)
 

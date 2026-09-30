@@ -128,9 +128,10 @@ pub fn contactText(alloc: std.mem.Allocator, gs: *GameState, c: *const @import("
             if (rt.warrantsWarning()) "OUTMATCHED at " else "", try offer_rating.skullText(alloc, rt), rt.win_pct, rt.lose_field_pct,
         });
     }
-    const fieldable = @import("contract_control.zig").fieldableBv(gs, company);
-    if (c.committed_bv > 0) {
-        try out.print(alloc, " · fieldable {d} BV ({d}% of committed)", .{ fieldable, @divTrunc(fieldable * 100, c.committed_bv) });
+    const cc = @import("contract_control.zig");
+    const fieldable = cc.fieldableBv(gs, company);
+    if (cc.effectivenessPct(fieldable, c.committed_bv)) |pct| {
+        try out.print(alloc, " · fieldable {d} BV ({d}% of committed)", .{ fieldable, pct });
     } else try out.print(alloc, " · fieldable {d} BV", .{fieldable});
     const ammo = try @import("field_supply.zig").ammoFights(alloc, gs, company);
     for (ammo, 0..) |a, i| {

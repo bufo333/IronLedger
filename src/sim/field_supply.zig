@@ -92,14 +92,15 @@ pub fn plan(alloc: std.mem.Allocator, gs: *GameState, company: types.ForceId, tr
     }
 
     // Armor: field repairs patch a ton per hull per week of damage.
+    // Only hulls that take field armor (meks and vehicles not in the depot).
     var hulls: u32 = 0;
     var family_mounts = try munitionMounts(alloc, gs, company, false);
     {
         var uit = gs.units.iterator();
         while (uit.next()) |e| {
             const u = e.value_ptr;
-            if (u.isParked() or gs.companyOf(u.force) != company) continue;
-            if (u.kind == .mek or u.kind == .vehicle) hulls += 1;
+            if (gs.companyOf(u.force) != company) continue;
+            if (u.takesFieldArmor()) hulls += 1;
         }
         const share = @max(2, cap * armor_share_pct / 100);
         const target = std.math.clamp(hulls / 2, 2, share);
@@ -279,11 +280,12 @@ pub fn rushQuote(alloc: std.mem.Allocator, gs: *GameState, c: *const @import("..
         const have = gs.stockCount(site, key);
         if (have < per_battle) try lines.append(alloc, .{ .key = key, .qty = per_battle - have });
     }
+    // Count dented hulls that draw field armor (meks and vehicles, not in depot).
     var dented: u32 = 0;
     var uit = gs.units.iterator();
     while (uit.next()) |e| {
         const u = e.value_ptr;
-        if (gs.companyOf(u.force) == company and u.takesFieldWork() and u.armor_pct < 100) dented += 1;
+        if (gs.companyOf(u.force) == company and u.takesFieldArmor() and u.armor_pct < 100) dented += 1;
     }
     const armor_have = gs.stockCount(site, "armor");
     if (dented > armor_have) try lines.append(alloc, .{ .key = "armor", .qty = dented - armor_have });
@@ -697,6 +699,99 @@ test "the resupply plan keeps a deployed company fed and armed on a long line" {
     };
     try std.testing.expectEqual(@as(u32, 0), hungry_days);
     try std.testing.expectEqual(@as(u32, 0), dry_battles);
+}
+
+test "takesFieldArmor agreement: plan and rushQuote follow the same predicate" {
+    // Fixture: in-shop mek excluded; in-transit vehicle counted;
+    // dented aerospace excluded from dented count; dented ready mek counted.
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 7350 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    gs.funds = 5_000_000;
+    const co = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
+
+    // Accept a contract so rushQuote has a contract to quote against.
+    _ = try commands.execute(&gs, .{ .accept_contract = .{ .offer = gs.contract_offers.items[0].id, .company = co } });
+    const c = gs.deploymentContract(co) orelse return;
+
+    // Set all existing company hulls to full armor for a clean baseline.
+    {
+        var uit = gs.units.iterator();
+        while (uit.next()) |e| {
+            const u = e.value_ptr;
+            if (gs.companyOf(u.force) == co) u.armor_pct = 100;
+        }
+    }
+
+    // In-shop mek: takesFieldArmor = false (depot work, no field armor).
+    const mek_shop_id = try gs.addUnit("LCT-1V");
+    const mek_shop = gs.units.getPtr(mek_shop_id).?;
+    mek_shop.force = co;
+    mek_shop.status = .repairing;
+    mek_shop.armor_pct = 50; // dented but in shop: must not appear in dented count
+
+    // In-transit vehicle: takesFieldArmor = true (rides with its tech).
+    const veh_transit_id = try gs.addUnit("HTZ");
+    const veh_transit = gs.units.getPtr(veh_transit_id).?;
+    veh_transit.force = co;
+    veh_transit.status = .in_transit;
+    veh_transit.armor_pct = 100; // full armor: not dented
+
+    // Dented aerospace: takesFieldArmor = false (not .mek or .vehicle).
+    const aero_id = try gs.addUnit("SPR-H5");
+    const aero = gs.units.getPtr(aero_id).?;
+    aero.force = co;
+    aero.status = .ready;
+    aero.armor_pct = 60; // dented but kind .aerospace: must not count
+
+    // Dented ready mek: takesFieldArmor = true, armor_pct < 100.
+    const mek_id = try gs.addUnit("LCT-1V");
+    const mek = gs.units.getPtr(mek_id).?;
+    mek.force = co;
+    mek.status = .ready;
+    mek.armor_pct = 70;
+
+    // Count expected values from the predicate directly.
+    var expected_hulls: u32 = 0;
+    var expected_dented: u32 = 0;
+    {
+        var uit = gs.units.iterator();
+        while (uit.next()) |e| {
+            const u = e.value_ptr;
+            if (gs.companyOf(u.force) != co) continue;
+            if (u.takesFieldArmor()) {
+                expected_hulls += 1;
+                if (u.armor_pct < 100) expected_dented += 1;
+            }
+        }
+    }
+    // in-transit vehicle + dented ready mek counted; in-shop mek + aerospace excluded.
+    try std.testing.expect(expected_hulls >= 2);
+    try std.testing.expect(expected_dented >= 1); // the dented ready mek
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    // plan's armor note contains "{expected_hulls} hulls".
+    const p = try plan(a, &gs, co, 30, 14, 0);
+    const hull_needle = try std.fmt.allocPrint(a, "{d} hulls", .{expected_hulls});
+    var plan_agrees = false;
+    for (p.lines) |l| if (std.mem.eql(u8, l.key, "armor")) {
+        if (std.mem.indexOf(u8, l.note, hull_needle) != null) plan_agrees = true;
+    };
+    try std.testing.expect(plan_agrees);
+
+    // rushQuote with no armor stock: dented count matches expected_dented.
+    const site: @import("../domain/types.zig").Site = .{ .company = co };
+    while (gs.takeStock(site, "armor", 1)) {}
+    const q = try rushQuote(a, &gs, c);
+    var found_armor = false;
+    for (q.lines) |l| if (std.mem.eql(u8, l.key, "armor")) {
+        try std.testing.expectEqual(expected_dented, l.qty);
+        found_armor = true;
+    };
+    try std.testing.expect(found_armor);
 }
 
 test "rushQuote: quote is non-empty when a company is short before a fight and is consumed by emergencyResupply" {
