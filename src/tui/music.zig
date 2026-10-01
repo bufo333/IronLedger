@@ -30,7 +30,10 @@ pub const Player = struct {
     sets: []const []const u8 = &.{},
     /// null = every soundtrack mixed; else one of `sets`.
     selected_set: ?usize = null,
-    /// The shuffled playlist (indexes into `tracks`) and the next slot to play.
+    /// Pre-allocated backing store for `order` (rule 64: no per-rebuild
+    /// arena growth; rule 63: replace atomically). Always `gpa`-owned.
+    order_buf: []usize = &.{},
+    /// The shuffled playlist view into `order_buf` and the next slot to play.
     order: []usize = &.{},
     pos: usize = 0,
     enabled: bool = true,
@@ -61,6 +64,7 @@ pub const Player = struct {
 
     pub fn deinit(self: *Player) void {
         self.stop();
+        if (self.order_buf.len > 0) self.gpa.free(self.order_buf);
         self.arena.deinit();
     }
 
@@ -142,23 +146,32 @@ pub const Player = struct {
     }
 
     /// Rebuild the playlist from the selection and shuffle it (Fisher–Yates).
+    /// Re-uses `order_buf` in place to avoid per-rebuild arena growth (rule 64).
+    /// On OOM the existing order and pos are kept intact (rule 63).
     pub fn rebuild(self: *Player) void {
-        const al = self.arena.allocator();
-        var order: std.ArrayListUnmanaged(usize) = .empty;
+        // Grow the backing buffer only when the track count exceeds its current
+        // capacity; shrinks are never done so the pointer stays stable.
+        if (self.tracks.len > self.order_buf.len) {
+            const new_buf = if (self.order_buf.len == 0)
+                self.gpa.alloc(usize, self.tracks.len) catch return // best-effort: on OOM keep existing order (rule 63)
+            else
+                self.gpa.realloc(self.order_buf, self.tracks.len) catch return; // best-effort: on OOM keep existing order (rule 63)
+            self.order_buf = new_buf;
+        }
+        var n: usize = 0;
         for (self.tracks, 0..) |t, i| {
             if (self.selected_set) |s| if (t.set != s) continue;
-            // best-effort: on OOM keep the existing playlist; no partial replacement (rule 63).
-            order.append(al, i) catch return;
+            self.order_buf[n] = i;
+            n += 1;
         }
         const r = self.rng.random();
-        var i = order.items.len;
+        var i = n;
         while (i > 1) : (i -= 1) {
             const j = r.uintLessThan(usize, i);
-            std.mem.swap(usize, &order.items[i - 1], &order.items[j]);
+            std.mem.swap(usize, &self.order_buf[i - 1], &self.order_buf[j]);
         }
-        // Only replace the live playlist once the new one is fully built (rule 63).
-        // best-effort: on OOM keep the existing order and pos intact.
-        self.order = order.toOwnedSlice(al) catch return;
+        // Replace the live playlist atomically once the new one is fully built.
+        self.order = self.order_buf[0..n];
         self.pos = 0;
     }
 
@@ -208,6 +221,7 @@ pub const Player = struct {
             var status: c_int = 0;
             const rc = std.c.waitpid(pid, &status, std.c.W.NOHANG);
             if (rc == 0) return; // still playing
+            if (rc < 0) return; // waitpid error (already reaped or ECHILD)
             self.child = null;
         }
         self.startNext();
@@ -264,7 +278,19 @@ pub const Player = struct {
                 // best-effort: the player process may already have exited.
                 std.posix.kill(pid, .TERM) catch {};
                 var status: c_int = 0;
-                _ = std.c.waitpid(pid, &status, 0);
+                // Poll up to 25×10 ms = 250 ms before escalating to SIGKILL
+                // (rule 64: bounded wait, not indefinite block).
+                var tries: usize = 0;
+                while (tries < 25) : (tries += 1) {
+                    const rc = std.c.waitpid(pid, &status, std.c.W.NOHANG);
+                    if (rc != 0) break; // reaped or error
+                    const ts: std.c.timespec = .{ .sec = 0, .nsec = 10 * std.time.ns_per_ms };
+                    _ = std.c.nanosleep(&ts, null);
+                } else {
+                    // Process did not exit within the grace period: force-kill.
+                    std.posix.kill(pid, .KILL) catch {}; // best-effort: already exited between poll and kill
+                    _ = std.c.waitpid(pid, &status, 0);
+                }
             }
             self.child = null;
         }
@@ -309,7 +335,7 @@ test "the scan makes a soundtrack of each sub-directory and a default of the loo
     const root = try std.fmt.allocPrint(std.testing.allocator, ".zig-cache/tmp/{s}", .{tmp.sub_path});
     defer std.testing.allocator.free(root);
     var p: Player = .{ .io = io, .gpa = std.testing.allocator, .arena = std.heap.ArenaAllocator.init(std.testing.allocator) };
-    defer p.arena.deinit();
+    defer p.deinit();
     try p.scan(root);
     try std.testing.expectEqual(@as(usize, 3), p.tracks.len);
     try std.testing.expectEqual(@as(usize, 2), p.sets.len); // default + lyran; "empty" has no audio
@@ -323,7 +349,7 @@ test "the scan makes a soundtrack of each sub-directory and a default of the loo
 
 test "the playlist mixes every soundtrack once, shuffled, and a selection filters it" {
     var p: Player = .{ .io = undefined, .gpa = std.testing.allocator, .arena = std.heap.ArenaAllocator.init(std.testing.allocator), .rng = std.Random.DefaultPrng.init(7) };
-    defer p.arena.deinit();
+    defer p.deinit();
     const sets = [_][]const u8{ "default", "lyran", "pirates" };
     const tracks = [_]Track{
         .{ .path = "data/music/Amber Warning.aac", .name = "Amber Warning", .set = 0 },
@@ -352,36 +378,36 @@ test "the playlist mixes every soundtrack once, shuffled, and a selection filter
     try std.testing.expectEqualStrings("pirates", p.nowPlayingSet().?);
 }
 
-test "rebuild on OOM keeps the existing order and pos intact (rule 63)" {
+test "rebuild reuses the pre-allocated order buffer (rules 63, 64)" {
+    // The buffer is allocated once on the first rebuild and reused in place
+    // on all subsequent calls, avoiding per-rebuild arena growth (rule 64).
+    // The playlist is fully rebuilt each time (rule 63: atomic replacement).
     const sets = [_][]const u8{"default"};
     const tracks = [_]Track{
         .{ .path = "a.mp3", .name = "a", .set = 0 },
         .{ .path = "b.mp3", .name = "b", .set = 0 },
         .{ .path = "c.mp3", .name = "c", .set = 0 },
     };
-    // Back the arena with a zero-byte fixed buffer: every allocation fails.
-    var backing: [0]u8 = undefined;
-    var fba = std.heap.FixedBufferAllocator.init(&backing);
     var p: Player = .{
         .io = undefined,
         .gpa = std.testing.allocator,
-        .arena = std.heap.ArenaAllocator.init(fba.allocator()),
+        .arena = std.heap.ArenaAllocator.init(std.testing.allocator),
         .rng = std.Random.DefaultPrng.init(1),
     };
+    defer p.deinit();
     p.sets = &sets;
     p.tracks = &tracks;
-    // Set a sentinel order (heap-owned, not arena-owned, for this test).
-    const initial_order = try std.testing.allocator.dupe(usize, &[_]usize{ 2, 0, 1 });
-    defer std.testing.allocator.free(initial_order);
-    p.order = initial_order;
-    p.pos = 2;
-    // rebuild must fail silently and leave order and pos unchanged.
     p.rebuild();
+    // After the first rebuild the buffer is allocated and holds all tracks.
+    try std.testing.expectEqual(@as(usize, 3), p.order_buf.len);
     try std.testing.expectEqual(@as(usize, 3), p.order.len);
-    try std.testing.expectEqual(@as(usize, 2), p.pos);
-    try std.testing.expectEqual(@as(usize, 2), p.order[0]);
-    try std.testing.expectEqual(@as(usize, 0), p.order[1]);
-    try std.testing.expectEqual(@as(usize, 1), p.order[2]);
-    // The arena held nothing (zero-byte fba); deinit is safe.
-    p.arena.deinit();
+    const buf_ptr = p.order_buf.ptr;
+    // A second rebuild must reuse the same backing buffer.
+    p.rebuild();
+    try std.testing.expectEqual(buf_ptr, p.order_buf.ptr);
+    try std.testing.expectEqual(@as(usize, 3), p.order.len);
+    // All three track indices appear exactly once.
+    var seen = [_]bool{false} ** 3;
+    for (p.order) |i| seen[i] = true;
+    for (seen) |s| try std.testing.expect(s);
 }

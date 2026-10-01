@@ -69,6 +69,22 @@ test "paintPair picks the cube index for 256 colours" {
     try std.testing.expectEqual(@as(u8, 231), c256(.{ 255, 255, 255 }));
 }
 
+test "CSI digit overflow saturates and produces .escape, not undefined behaviour" {
+    // An overlong CSI digit string must not overflow; saturating arithmetic
+    // yields a value outside all named cases, which maps to .escape (rule 64).
+    // The entire sequence fits in `pending`, so `fill` never reads `in_fd`.
+    var t: Term = .{
+        .in_fd = posix.STDIN_FILENO,
+        .orig = undefined, // not read in readKey
+        .out = undefined, // not read in readKey
+    };
+    const seq = "\x1b[99999999999999999999~";
+    @memcpy(t.pending[0..seq.len], seq);
+    t.pending_len = seq.len;
+    const key = t.readKey(100);
+    try std.testing.expect(key == .escape);
+}
+
 pub const Key = union(enum) {
     char: u21,
     enter,
@@ -268,7 +284,7 @@ pub const Term = struct {
             const c = self.take() orelse return .escape;
             switch (c) {
                 '0'...'9' => {
-                    num = num * 10 + (c - '0');
+                    num = num *| 10 +| (c - '0');
                     have_num = true;
                 },
                 ';' => {

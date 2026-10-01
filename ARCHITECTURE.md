@@ -180,6 +180,11 @@ section explains the shape, the contract states the rules.
   command payload or an exact comparison, with a `// raw:` reason.
   Data-file strings and a save's display copies must be
   `table.markupSafe`.
+  **Display width** is owned by `sim/wcwidth.zig` (Unicode 16.0 Option A,
+  pinned to `EastAsianWidth-16.0.0.txt`): `table.cells` and `table.pad`
+  measure code points as 2 (East Asian W/F), 0 (combining/ignorable), or 1
+  (everything else). `queries.padCells` is gone; all width-sensitive
+  formatting goes through `table.pad`.
 - **Keys are data.** The TUI maps keys to semantic actions through binding
   tables (`tui/keys.zig`): one for the keys every screen shares and one per
   screen, modal, welcome step and wizard step. A binding carries its

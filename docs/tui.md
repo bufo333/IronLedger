@@ -31,8 +31,14 @@ to every company. Two sources appear in the wizard:
 
 - *presets* — the built-in heraldic marks;
 - *import* — PNG files found in an asset root's `logos/` directory, then
-  `./`, `logos/`, and `docs/logos/`. The decoder accepts 8-bit RGB/RGBA
-  non-interlaced PNGs; JPEG is out of scope.
+  `./`, `logos/`, and `docs/logos/`. The decoder accepts 8-bit
+  greyscale/RGB/RGBA/palette non-interlaced PNGs; JPEG is out of scope.
+  Validation bounds (rule 64): IHDR must be the first chunk; CRC is
+  verified on every chunk; images wider than 2048×2048 pixels are refused;
+  the inflate output must be exactly `(stride + 1) × height` bytes; colour
+  types 4 (grey+alpha) and 6 (RGBA) are alpha-composited against an opaque
+  black background before storage; the stored blob must not exceed
+  `max_emblem_bytes` (2048 × 2048 bytes, checked on load in `store.zig`).
 
 The in-campaign emblem studio supplies the cell editor. The decoded picture is
 stored with the campaign and
@@ -595,6 +601,14 @@ view model each frame from an arena.
   brace. Free text — names, callsigns, log lines, filenames — enters
   markup escaped (`MarkupBuilder.appendPlain`), and controls and invalid
   UTF-8 draw as `?` and U+FFFD.
+- **Soundtrack** (`music.zig`) drives a child-process player (`afplay`,
+  `mpv`, `ffplay`, or `aplay`). Lifecycle bounds (rule 64): `stop()` sends
+  SIGTERM and polls NOHANG up to 25 × 10 ms; if the process has not exited
+  within 250 ms it escalates to SIGKILL and blocks exactly once. `poll()`
+  discards ECHILD and other waitpid errors rather than blocking. The shuffle
+  order lives in a single `gpa`-allocated buffer sized to `tracks.len` on
+  first use and re-filled in place on each rebuild; no per-rebuild arena
+  growth occurs.
 - **Colors** are semantic only — amber (attention/active), green (ok),
   red (critical), cyan (cursor/focus), dim (chrome) — on the terminal's own
   background, so the client holds on any theme.

@@ -6,6 +6,7 @@
 //! rows can never disagree, and no screen has a fixed width.
 
 const std = @import("std");
+const wcwidth = @import("wcwidth.zig");
 
 pub const Align = enum { left, right };
 
@@ -110,11 +111,17 @@ pub fn isMark(c: u8) bool {
     return std.mem.indexOfScalar(u8, marks, c) != null;
 }
 
-/// Visible cells of markup text: code points, less the `{x}` tokens.
+/// Visible cells of markup text: display-cell count (Unicode 16, see
+/// `wcwidth.displayWidth`), less the `{x}` tokens. Wide code points
+/// (East Asian W/F) count as 2; combining marks and default-ignorable
+/// code points count as 0.
 pub fn cells(s: []const u8) usize {
     var n: usize = 0;
     var t: Tokenizer = .{ .s = s };
-    while (t.next()) |tok| n += @intFromBool(tok == .glyph);
+    while (t.next()) |tok| switch (tok) {
+        .glyph => |cp| n += wcwidth.displayWidth(cp),
+        .mark => {},
+    };
     return n;
 }
 
@@ -288,18 +295,20 @@ pub fn plainText(alloc: std.mem.Allocator, markup: []const u8) ![]const u8 {
 }
 
 /// One drawable character of screen text and the bytes it takes.
-pub const Glyph = struct { cp: u21, len: usize };
+/// `width` is the display-cell count from `wcwidth.displayWidth` (Unicode 16).
+pub const Glyph = struct { cp: u21, len: usize, width: u2 };
 
 /// The glyph starting at `s[i]`. Invalid or truncated UTF-8 is U+FFFD, and
 /// C0 and C1 controls and DEL are `?`, so screen text can never carry a
 /// terminal control. The width `cells` measures and the glyphs the screen
 /// draws both come from here.
 pub fn nextGlyph(s: []const u8, i: usize) Glyph {
-    const len = std.unicode.utf8ByteSequenceLength(s[i]) catch return .{ .cp = 0xFFFD, .len = 1 };
-    if (i + len > s.len) return .{ .cp = 0xFFFD, .len = s.len - i };
-    const cp = std.unicode.utf8Decode(s[i..][0..len]) catch return .{ .cp = 0xFFFD, .len = len };
+    const len = std.unicode.utf8ByteSequenceLength(s[i]) catch return .{ .cp = 0xFFFD, .len = 1, .width = 1 };
+    if (i + len > s.len) return .{ .cp = 0xFFFD, .len = s.len - i, .width = 1 };
+    const cp = std.unicode.utf8Decode(s[i..][0..len]) catch return .{ .cp = 0xFFFD, .len = len, .width = 1 };
     const control = cp < 0x20 or cp == 0x7f or (cp >= 0x80 and cp < 0xa0);
-    return .{ .cp = if (control) '?' else cp, .len = len };
+    const actual_cp: u21 = if (control) '?' else cp;
+    return .{ .cp = actual_cp, .len = len, .width = wcwidth.displayWidth(actual_cp) };
 }
 
 /// Markup-safe pad or clip to `width` cells. A clipped cell keeps its
@@ -322,15 +331,21 @@ pub fn pad(alloc: std.mem.Allocator, text: []const u8, width: usize, al: Align) 
         const tok = t.next() orelse break;
         switch (tok) {
             .mark => |m| open = m != '/',
-            .glyph => {
-                if (shown == width) break;
-                shown += 1;
+            .glyph => |cp| {
+                const w = wcwidth.displayWidth(cp);
+                // A wide char that would straddle the boundary is skipped
+                // entirely; trailing spaces fill the gap below.
+                if (shown + w > width) break;
+                shown += w;
             },
         }
         // The token's own bytes: an escaped `{{` is never split.
         try out.appendSlice(alloc, text[start..t.i]);
     }
     if (open) try out.appendSlice(alloc, "{/}");
+    // A skipped wide char may leave shown < width; fill with spaces so the
+    // caller always receives exactly `width` cells.
+    if (shown < width) try out.appendNTimes(alloc, ' ', width - shown);
     return out.toOwnedSlice(alloc);
 }
 
@@ -338,6 +353,25 @@ test "cells counts code points and skips markup" {
     try std.testing.expectEqual(@as(usize, 3), cells("a·b"));
     try std.testing.expectEqual(@as(usize, 4), cells("{a}☠ ☠{/}◐"));
     try std.testing.expectEqual(@as(usize, 3), cells("{x}"));
+}
+
+test "cells uses display width: wide chars count as 2, combining as 0" {
+    try std.testing.expectEqual(@as(usize, 1), cells("A")); // ASCII
+    try std.testing.expectEqual(@as(usize, 2), cells("\u{4E00}")); // CJK wide
+    try std.testing.expectEqual(@as(usize, 0), cells("\u{0300}")); // combining grave
+    try std.testing.expectEqual(@as(usize, 3), cells("a\u{4E00}")); // 1 + 2
+}
+
+test "pad honours display width for wide chars" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    // Wide char (2 cells) padded to 4 → two trailing spaces.
+    try std.testing.expectEqualStrings("\u{4E00}  ", try pad(a, "\u{4E00}", 4, .left));
+    // Clip "一a" (3 cells) to 2 → only "一" (2 cells), no trailing space.
+    try std.testing.expectEqualStrings("\u{4E00}", try pad(a, "\u{4E00}a", 2, .left));
+    // Wide char straddles a boundary: "a一" clipped to 2 → "a" + one space.
+    try std.testing.expectEqualStrings("a ", try pad(a, "a\u{4E00}", 2, .left));
 }
 
 test "pad aligns and clips without splitting a character or a colour" {

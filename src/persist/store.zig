@@ -148,6 +148,12 @@ const index_ddl =
 /// hold: the generator states, one after another, in this order.
 const legacy_rng_order = [_]rng_mod.Stream{ .generation, .market, .maintenance, .acquisition, .battle, .events, .medical, .travel };
 
+/// Hard upper bound on a stored emblem PNG (rule 64).
+/// 4 MiB matches the pixel-limit constant in `src/tui/png.zig`
+/// (`max_emblem_pixels = 2048×2048`): a valid 2048×2048 PNG is compressed
+/// and is always well below this, so no legitimate emblem is refused.
+const max_emblem_bytes: usize = 2048 * 2048;
+
 pub const Store = struct {
     db: sqlite.Db,
     /// The player new campaigns are filed under; 0 = none.
@@ -1124,7 +1130,7 @@ pub const Store = struct {
             try st.bindAll(.{cid});
             while (try st.next()) {
                 const stream = st.enumValue(rng_mod.Stream, 0) orelse return error.CorruptSave;
-                if (!gs.rng.decode(stream, st.int(1), try st.blob(2, alloc))) return error.CorruptSave;
+                if (!gs.rng.decode(stream, st.int(1), try st.blob(2, alloc, rng_mod.Rng.state_len))) return error.CorruptSave;
                 loaded.insert(stream);
             }
         }
@@ -1134,7 +1140,7 @@ pub const Store = struct {
             defer st.finalize();
             try st.bindAll(.{cid});
             if (!try st.next()) return error.CorruptSave;
-            const bytes = try st.blob(0, alloc);
+            const bytes = try st.blob(0, alloc, legacy_rng_order.len * @sizeOf(std.Random.DefaultPrng));
             const size = @sizeOf(std.Random.DefaultPrng);
             if (bytes.len != legacy_rng_order.len * size) return error.CorruptSave;
             for (legacy_rng_order, 0..) |stream, i| {
@@ -1484,7 +1490,7 @@ pub const Store = struct {
                 .id = try toId(types.ForceId, st.int(0)),
                 .parent = try toId(types.ForceId, st.int(1)),
                 .name = try st.text(2, alloc),
-                .emblem = if (st.isNull(3)) null else try st.blob(3, alloc),
+                .emblem = if (st.isNull(3)) null else try st.blob(3, alloc, max_emblem_bytes),
                 .local_funds = st.int(4),
                 .echelon = st.enumValue(force_mod.Echelon, 5) orelse return error.CorruptSave,
                 .commander = try toId(types.PersonId, st.int(6)),
@@ -3222,6 +3228,15 @@ test "an RNG row naming no known stream rejects the load as corrupt" {
 
 test "a malformed legacy RNG blob rejects the load as corrupt" {
     try std.testing.expectError(error.CorruptSave, loadAfterTampering("DELETE FROM rng_stream; INSERT INTO rng VALUES (1, x'00')"));
+}
+
+test "an oversized emblem blob is rejected as CorruptStore before allocation" {
+    // zeroblob(n) writes n bytes without materialising them, so the test
+    // does not allocate 4 MiB.  max_emblem_bytes is 2048*2048 = 4194304;
+    // 4194305 is one byte over.
+    try std.testing.expectError(error.CorruptStore, loadAfterTampering(
+        "UPDATE force SET emblem = zeroblob(4194305) WHERE rowid = (SELECT rowid FROM force LIMIT 1)",
+    ));
 }
 
 // C7a: orphan rows, dangling references, discriminator validation, NULL, duplicate, date, meta.

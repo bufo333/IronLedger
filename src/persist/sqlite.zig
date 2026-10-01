@@ -240,9 +240,12 @@ pub const Stmt = struct {
         return if (self.isNull(col)) null else try self.text(col, alloc);
     }
 
-    pub fn blob(self: Stmt, col: c_int, alloc: std.mem.Allocator) ![]const u8 {
+    /// Read a BLOB column; `error.CorruptStore` when the stored size
+    /// exceeds `max` (rule 64: external input is bounded before allocation).
+    pub fn blob(self: Stmt, col: c_int, alloc: std.mem.Allocator, max: usize) ![]const u8 {
         const p = sqlite3_column_blob(self.h, col) orelse return try alloc.dupe(u8, "");
         const n: usize = @intCast(sqlite3_column_bytes(self.h, col));
+        if (n > max) return error.CorruptStore;
         const bytes: [*]const u8 = @ptrCast(p);
         return try alloc.dupe(u8, bytes[0..n]);
     }

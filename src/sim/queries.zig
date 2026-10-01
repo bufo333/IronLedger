@@ -85,24 +85,6 @@ test "moneyShort rounds to k and M" {
     try std.testing.expectEqualStrings("-45k", try moneyShort(a, -45_000));
 }
 
-/// Pad plain `text` to `width` cells inside `mk` markup, counting code
-/// points rather than bytes (an em dash is one cell, three bytes) — for
-/// the line lists that are not tables.
-pub fn padCells(alloc: Alloc, mk: []const u8, text: []const u8, width: usize) ![]const u8 {
-    var out: std.ArrayListUnmanaged(u8) = .empty;
-    try out.appendSlice(alloc, mk);
-    var cells: usize = 0;
-    var it = std.unicode.Utf8View.initUnchecked(text).iterator();
-    while (it.nextCodepointSlice()) |cp| {
-        if (cells >= width) break;
-        try out.appendSlice(alloc, cp);
-        cells += 1;
-    }
-    while (cells < width) : (cells += 1) try out.append(alloc, ' ');
-    if (mk.len > 0) try out.appendSlice(alloc, "{/}");
-    return out.toOwnedSlice(alloc);
-}
-
 /// Clip plain text to `width` cells (no padding), never inside a
 /// multi-byte character.
 pub fn clip(text: []const u8, width: usize) []const u8 {
@@ -1513,10 +1495,10 @@ pub fn toeFiltered(alloc: Alloc, gs: *GameState, filter: ToeFilter) ![]ToeRow {
             try out.append(alloc, .{ .force = .none, .unit = u.id, .mothballed = u.status == .mothballed, .text = try std.fmt.allocPrint(alloc, "    #{d: <3} {s: <8} {s} {d: >3}t  {s} {s} armor {s}{s} · {s}/mo", .{
                 @intFromEnum(u.id),
                 u.chassis_key,
-                try padCells(alloc, "", if (ch) |c| c.name else "?", 14),
+                try table.pad(alloc, if (ch) |c| c.name else "?", 14, .left),
                 if (ch) |c| c.tonnage else 0,
-                try padCells(alloc, "", if (needs.items.len > 0) needs.items else "—", 36),
-                try padCells(alloc, st_mk, @tagName(u.status), 9),
+                try table.pad(alloc, if (needs.items.len > 0) needs.items else "—", 36, .left),
+                try std.fmt.allocPrint(alloc, "{s}{s}{{/}}", .{ st_mk, try table.pad(alloc, @tagName(u.status), 9, .left) }),
                 try armorPct(alloc, u.armor_pct),
                 try damageMarks(alloc, u),
                 try money(alloc, u.monthlyBill()),
@@ -2610,8 +2592,8 @@ pub fn berths(alloc: Alloc, gs: *GameState, hq_id: types.HqId) ![][]const u8 {
         const lift_text = if (ch) |c| (if (c.kind == .dropship) try std.fmt.allocPrint(alloc, "{d} mek · {d} fighter · {d}t cargo", .{ c.mek_bays, c.asf_bays, c.cargo_tons }) else try std.fmt.allocPrint(alloc, "{d} collar{s}", .{ c.collars, if (c.collars == 1) "" else "s" })) else "";
         const where: []const u8 = if (u.force != .none) try std.fmt.allocPrint(alloc, "{{a}}away with {s}{{/}}", .{try forceName(alloc, gs, u.force)}) else if (u.status != .ready) try std.fmt.allocPrint(alloc, "{{c}}{s}{{/}}", .{@tagName(u.status)}) else "{g}at berth{/}";
         try out.append(alloc, try std.fmt.allocPrint(alloc, "  #{d: <3} {s: <9} {s: <9} {s}  {s}  {s}", .{
-            @intFromEnum(u.id), u.chassis_key, if (ch) |c| c.name else "?", try padCells(alloc, "", lift_text, 30),
-            if (pilot) |c| try padCells(alloc, "", try std.fmt.allocPrint(alloc, "{s}", .{try personText(alloc, c)}), 18) else try padCells(alloc, "{c}", "— no crew", 18),
+            @intFromEnum(u.id), u.chassis_key, if (ch) |c| c.name else "?", try table.pad(alloc, lift_text, 30, .left),
+            if (pilot) |c| try table.pad(alloc, try personText(alloc, c), 18, .left) else try std.fmt.allocPrint(alloc, "{{c}}{s}{{/}}", .{try table.pad(alloc, "— no crew", 18, .left)}),
             where,
         }));
     }
@@ -3744,17 +3726,6 @@ test "the Lab lists a wreck and names its rebuild, so it agrees with Forces" {
     try std.testing.expectError(commands.Error.Unavailable, commands.execute(&gs, .{ .refit_remove = .{ .unit = wreck_id, .slot_key = slot } }));
 }
 
-test "padCells counts cells, not bytes" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const a = arena.allocator();
-    const dash = try padCells(a, "", "— no pilot", 12);
-    try std.testing.expectEqual(@as(usize, 12), try std.unicode.utf8CountCodepoints(dash));
-    const padded = try padCells(a, "", "Lori Kalmar", 12);
-    try std.testing.expectEqual(@as(usize, 12), padded.len);
-    try std.testing.expectEqualStrings("{c}Abc{/}", try padCells(a, "{c}", "Abcdef", 3));
-}
-
 test "money formats with separators" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -4588,13 +4559,13 @@ pub fn offerCandidates(alloc: Alloc, gs: *GameState, offer_id: types.ContractId)
             });
         const text = if (eligible)
             try std.fmt.allocPrint(alloc, "{s} {s} {d: >5}  {d: >4}   {s}{d: >7}{{/}}  {s}{d: >6}{{/}}  {s}{d: >5}{{/}}  {s}{d: >5}{{/}}  {s}{d: >7}{{/}}   {s}{s}", .{
-                try padCells(alloc, "{a}", try table.plain(alloc, f.name), 21), try padCells(alloc, "", clip(stands, 25), 25), jumps,                          days,
-                fat_mk,                                                         r.fatigue,                                     mor_mk,                         r.morale,
-                if (r.depot > 0) "{c}" else "",                                 r.depot,                                       if (r.spent > 0) "{a}" else "", r.spent,
-                if (r.wounded > 0) "{a}" else "",                               r.wounded,                                     odds_mk,                        odds,
+                try std.fmt.allocPrint(alloc, "{{a}}{s}{{/}}", .{try table.pad(alloc, try table.plain(alloc, f.name), 21, .left)}), try table.pad(alloc, clip(stands, 25), 25, .left), jumps,                          days,
+                fat_mk,                                                                                                             r.fatigue,                                         mor_mk,                         r.morale,
+                if (r.depot > 0) "{c}" else "",                                                                                     r.depot,                                           if (r.spent > 0) "{a}" else "", r.spent,
+                if (r.wounded > 0) "{a}" else "",                                                                                   r.wounded,                                         odds_mk,                        odds,
             })
         else
-            try std.fmt.allocPrint(alloc, "{{d}}{s: <21}{{/}} {s} {{d}}cannot go: {s}{{/}}", .{ try table.plain(alloc, f.name), try padCells(alloc, if (busy) "{a}" else "{d}", stands, if (busy) 48 else 25), why });
+            try std.fmt.allocPrint(alloc, "{{d}}{s: <21}{{/}} {s} {{d}}cannot go: {s}{{/}}", .{ try table.plain(alloc, f.name), try std.fmt.allocPrint(alloc, "{s}{s}{{/}}", .{ if (busy) "{a}" else "{d}", try table.pad(alloc, stands, if (busy) @as(usize, 48) else @as(usize, 25), .left) }), why });
         try out.append(alloc, .{ .company = r.company, .eligible = eligible, .why = why, .transit_days = days, .penalty = penalty, .text = text, .cells = cells });
     }
     std.mem.sort(Candidate, out.items, {}, struct {

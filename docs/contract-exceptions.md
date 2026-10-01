@@ -42,26 +42,6 @@ Owner of every entry: the project owner.
 - **Removal:** C17.
 - **Guard:** review (checklist question 13). No mechanical check.
 
-### C18. External input bounds
-
-- **Rules:** 41, 64.
-- **Why not yet:** Needs a width table and bounded decoders.
-- **Scope:**
-  - **Text width.** Width is counted per code point, not per cell (`screen.zig:149-177`). `queries.padCells` is a second counter, and it uses `initUnchecked` (`queries.zig:76-92`).
-  - **PNG decoding:**
-    - CRCs are not checked (`png.zig:69`).
-    - IHDR order is not checked (`56-68`).
-    - The pixel limit is 64M (`82`).
-    - The inflated length may exceed the expected length by one byte (`88-89`).
-    - Alpha is dropped in the fallback (`133`).
-  - **Database blobs** are copied with no size limit (`sqlite.zig:167-172`).
-  - **Terminal input.** A CSI parameter can overflow (`term.zig:258`).
-  - **Music:**
-    - `waitpid` blocks (`music.zig:256-266`), and `-1` is read as "finished" (`224-226`).
-    - Each playlist rebuild allocates in the long-lived arena (`161-176`).
-- **Removal:** C18.
-- **Guard:** review. No mechanical check.
-
 ### C19. Platform support
 
 - **Rules:** 65.
