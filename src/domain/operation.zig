@@ -114,6 +114,15 @@ test "data: operations.zon loads and validates" {
     try testing.expect(findTemplate("repel_probe") != null);
     try testing.expectEqual(@as(?*const OperationTemplate, null), findTemplate("__no_such_template__"));
 
+    // Every arc's opening keys must resolve to a template in this table.
+    // A bad opening key would pass data load but fail silently at runtime.
+    for (0..arc_mod.table.arcs.len) |ai| {
+        const a = &arc_mod.table.arcs[ai];
+        for (a.opening) |okey| {
+            try testing.expect(findTemplate(okey) != null);
+        }
+    }
+
     // Both templates belong to fracturing_garrison.
     const negotiate = findTemplate("negotiate_terms").?;
     try testing.expectEqualStrings("fracturing_garrison", negotiate.arc_key);

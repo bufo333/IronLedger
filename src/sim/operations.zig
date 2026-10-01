@@ -84,18 +84,20 @@ pub fn selectFinale(c: *const contract_mod.Contract) ?*const arc_mod.Finale {
 }
 
 /// Instantiate the opening operation(s) onto a pre-commit local contract copy.
+/// `id_start` is the first ID to assign; the caller (commit phase) is
+/// responsible for advancing `gs.next_operation_id` after all fallible steps
+/// succeed (rules 7, 11-13: the counter must not advance before commit).
 /// Failure-atomic: reserves list capacity before assigning any IDs, so an
-/// OOM returns without mutating live GameState (rules 7, 11-13).
-pub fn instantiateOpening(gs: *GameState, c: *contract_mod.Contract) !void {
+/// OOM returns without mutating live GameState.
+pub fn instantiateOpening(gs: *GameState, c: *contract_mod.Contract, id_start: u32) !void {
     if (c.arc_key.len == 0) return;
     const a = arc_mod.find(c.arc_key) orelse return;
     // Reserve capacity first — the only fallible step — before any id
-    // is assigned or clock state changes (failure-atomic, rules 7, 11-13).
+    // is assigned (failure-atomic, rules 7, 11-13).
     try c.operations.ensureUnusedCapacity(gs.allocator(), a.opening.len);
     // Infallible from here: capacity guaranteed, ids assigned in order.
-    for (a.opening) |tkey| {
-        const id: types.OperationId = @enumFromInt(gs.next_operation_id);
-        gs.next_operation_id += 1;
+    for (a.opening, 0..) |tkey, i| {
+        const id: types.OperationId = @enumFromInt(id_start + @as(u32, @intCast(i)));
         c.operations.appendAssumeCapacity(.{
             .id = id,
             .template_key = tkey,
@@ -140,7 +142,10 @@ pub fn advanceClocks(gs: *GameState) !void {
                 },
             );
             // Infallible from here.
-            c.escalation_clock += step;
+            // Reset the clock relative to the beat's threshold so the next
+            // beat's threshold measures elapsed time from this transition point
+            // (not cumulative from acceptance).  Excess ticks carry over.
+            c.escalation_clock = (c.escalation_clock + step) - beat.escalation_threshold;
             c.arc_beat += 1;
             gs.event_log.appendAssumeCapacity(.{
                 .day = gs.clock.day_index,
@@ -276,12 +281,32 @@ test "escalationStep and advanceClocks: clock accrues and beat advances at thres
         try testing.expectEqual(@as(u8, 0), c.arc_beat);
     }
 
-    // One more day: clock reaches threshold, beat advances to 1.
+    // One more day: clock reaches threshold, beat advances to 1; clock resets
+    // to 0 (excess = 0 here since clock was exactly threshold - 1).
     try advanceClocks(&gs);
     {
         const c = gs.contracts.getPtr(cid).?;
-        try testing.expect(c.escalation_clock >= threshold);
+        try testing.expectEqual(@as(u16, 0), c.escalation_clock);
         try testing.expectEqual(@as(u8, 1), c.arc_beat);
+    }
+
+    // Beat 1 should last its own escalation_threshold days (20), not advance
+    // immediately because the cumulative clock already exceeds it.
+    const beat1_threshold = a.beats[1].escalation_threshold; // 20
+    var day2: u16 = 0;
+    while (day2 < beat1_threshold - 1) : (day2 += 1) {
+        try advanceClocks(&gs);
+    }
+    {
+        const c = gs.contracts.getPtr(cid).?;
+        try testing.expectEqual(@as(u16, beat1_threshold - 1), c.escalation_clock);
+        try testing.expectEqual(@as(u8, 1), c.arc_beat);
+    }
+    // One more day: beat advances to 2.
+    try advanceClocks(&gs);
+    {
+        const c = gs.contracts.getPtr(cid).?;
+        try testing.expectEqual(@as(u8, 2), c.arc_beat);
     }
 
     // A contract with no arc_key is untouched.
@@ -320,7 +345,11 @@ test "instantiateOpening: consumer agreement with arc opening keys" {
         .status = .transit,
         .arc_key = "fracturing_garrison",
     };
-    try instantiateOpening(&gs, &c);
+    const before_oid = gs.next_operation_id;
+    try instantiateOpening(&gs, &c, gs.next_operation_id);
+    // instantiateOpening must not advance the counter — that is the commit
+    // phase's responsibility (rules 7, 11-13).
+    try testing.expectEqual(before_oid, gs.next_operation_id);
     try testing.expect(c.operations.items.len > 0);
 
     // Every instantiated template_key is in the arc's opening list.
@@ -347,7 +376,7 @@ test "instantiateOpening: consumer agreement with arc opening keys" {
         .status = .transit,
         .arc_key = "",
     };
-    try instantiateOpening(&gs, &c2);
+    try instantiateOpening(&gs, &c2, gs.next_operation_id);
     try testing.expectEqual(@as(usize, 0), c2.operations.items.len);
 }
 
@@ -376,11 +405,46 @@ test "instantiateOpening: failure-atomic under injected OOM" {
     gs.arena.state.free_list = null;
     gs.arena.child_allocator = std.testing.failing_allocator;
 
-    try testing.expectError(error.OutOfMemory, instantiateOpening(&gs, &c));
+    try testing.expectError(error.OutOfMemory, instantiateOpening(&gs, &c, gs.next_operation_id));
     // next_operation_id unchanged — no IDs consumed before the OOM.
     try testing.expectEqual(before_id, gs.next_operation_id);
     // No operations appended to the local copy.
     try testing.expectEqual(@as(usize, 0), c.operations.items.len);
+}
+
+test "instantiateOpening: caller owns the id counter increment" {
+    // The prepare phase calls instantiateOpening with gs.next_operation_id;
+    // the counter must remain unchanged until the commit phase advances it.
+    const testing = std.testing;
+    var gs = @import("state.zig").GameState.init(testing.allocator, .{});
+    defer gs.deinit();
+
+    var c: contract_mod.Contract = .{
+        .id = @enumFromInt(1),
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+        .status = .transit,
+        .arc_key = "fracturing_garrison",
+    };
+    const id_start = gs.next_operation_id;
+    try instantiateOpening(&gs, &c, id_start);
+
+    // Counter must not have advanced — that belongs to the commit phase.
+    try testing.expectEqual(id_start, gs.next_operation_id);
+
+    // Operations are assigned sequential IDs from id_start.
+    const a = arc_mod.find("fracturing_garrison").?;
+    try testing.expectEqual(a.opening.len, c.operations.items.len);
+    for (c.operations.items, 0..) |op, i| {
+        try testing.expectEqual(id_start + @as(u32, @intCast(i)), @intFromEnum(op.id));
+    }
+
+    // Simulated commit: the caller advances the counter.
+    gs.next_operation_id += @as(u32, @intCast(c.operations.items.len));
+    try testing.expectEqual(id_start + @as(u32, @intCast(a.opening.len)), gs.next_operation_id);
 }
 
 test "advanceClocks: failure-atomic under injected OOM at log reservation" {

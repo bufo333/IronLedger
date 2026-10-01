@@ -614,7 +614,10 @@ pub fn acceptContract(gs: *GameState, offer_id: types.ContractId, company_id: ty
     c.transit_days = logistics.daysForJumps(jumps);
     c.arrive_day = gs.clock.day_index + c.transit_days;
     onAccept(gs, &c); // mutates only the local copy c
-    try operations.instantiateOpening(gs, &c); // failure-atomic: c is still local
+    // Pass gs.next_operation_id as the id_start; instantiateOpening reads it
+    // but does NOT advance it — the commit phase below does that after all
+    // fallible steps succeed (rules 7, 11-13: no counter advance before commit).
+    try operations.instantiateOpening(gs, &c, gs.next_operation_id); // failure-atomic: c is still local
     c.monthly_net = types.applyPct(c.terms.base_pay_month, 100 - @as(i64, c.terms.advance_pct));
 
     // Signing money in, transit freight out (employer covers transport_pct;
@@ -725,6 +728,11 @@ pub fn acceptContract(gs: *GameState, offer_id: types.ContractId, company_id: ty
         .contract = c.id,
         .text = line,
     });
+
+    // Advance the operation id counter by the number of opening operations
+    // instantiated in the prepare phase.  This is the commit-phase increment
+    // deferred from instantiateOpening (rules 7, 11-13).
+    gs.next_operation_id += @as(u32, @intCast(c.operations.items.len));
 
     // Record the contract and clear the company's planet (underway).
     gs.contracts.putAssumeCapacity(c.id, c);

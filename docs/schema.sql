@@ -522,10 +522,9 @@ CREATE TABLE operation (
     id              INTEGER NOT NULL,                -- -> gs.next_operation_id sequence; unique per cid
     template_key    TEXT    NOT NULL,                -- -> operations.zon template key
     state           TEXT    NOT NULL,                -- domain/operation.zig OperationState
-    outcome         TEXT    NOT NULL DEFAULT 'none', -- domain/operation.zig OutcomeBand
+    outcome         TEXT    NOT NULL,                -- domain/operation.zig OutcomeBand
     opened_day      INTEGER NOT NULL,                -- day_index when instantiated
     resolved_day    INTEGER,                         -- day_index when resolved; NULL = unresolved
-    PRIMARY KEY (cid, contract_id, ord),
     FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 
