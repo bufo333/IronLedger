@@ -119,3 +119,20 @@ test "one date rendering, zero-padded" {
     const d: Date = .{ .year = 3026, .month = 12, .day = 9 };
     try std.testing.expectEqualStrings("3026-12-09", d.text(&buf));
 }
+
+test "isPayday fires on day 1 only; tick.zig gates payroll here" {
+    // Consumer: tick.zig gates payroll on gs.clock.date.isPayday() (rule 24 one-owner).
+    // Day 1 of any month is payday; every other day is not.
+    const payday: Date = .{ .year = 3025, .month = 1, .day = 1 };
+    const day2: Date = .{ .year = 3025, .month = 1, .day = 2 };
+    const last: Date = .{ .year = 3025, .month = 1, .day = 31 };
+    const mid: Date = .{ .year = 3025, .month = 6, .day = 15 };
+    try std.testing.expect(payday.isPayday());
+    try std.testing.expect(!day2.isPayday());
+    try std.testing.expect(!last.isPayday());
+    try std.testing.expect(!mid.isPayday());
+    // The day after the last day of a month wraps to day 1 = payday.
+    try std.testing.expect(last.next().isPayday());
+    // Day 2 advanced once is day 3, not payday.
+    try std.testing.expect(!day2.next().isPayday());
+}

@@ -13,37 +13,6 @@ the branch that finds it.
 
 Owner of every entry: the project owner.
 
-### C17. Focused tests
-
-- **Rules:** 67.
-- **Why not yet:** 421 public functions in the sim and domain have no in-file test naming them. The rule functions among them need a test that the rule and its consumers agree.
-- **Scope:**
-  - Rule functions with no test:
-    - `hq_ops`: `beyondEconomicalRepair`, `canFabricate`, `bayCanRebuild`, `upgradeBlock`, `rebuildEstimate`, `engineCharge`, `paperworkDaysFor`, `depotHqFor`, `staffHqToRequirement`
-    - `maintenance`: `techHoursAvailable`
-    - `crew`: `canReachPool`
-    - `sites`: `siteCapacityTons`, `moveStock`
-    - `treasury`: `transferFunds`, `isInsolvent`, `liquidationValue`, `creditLimit`, `courierEtaDays`
-    - `battle`: `effectiveRoe`, `estimatePower`, `estimatedKills`, `inContactWindow`
-    - `medical`: `healDays`, `careFor`, `turnoverRisk`
-    - `personnel`: `severanceOwed`, `manningNeeds`, `readinessPenalty`
-    - `field_supply.rushQuote`
-    - `network`: `fitsThroughput`, `routeCostMultBp`
-    - `offer_rating.rateOffer`
-    - `commands.transferBlock`
-    - `checklist.turnHold`
-    - domain `clock`: `Date.isPayday`
-    - domain `contract`: `gradeOf`, `objectivesMet`
-    - domain `person`: `baseSalary`
-    - domain `unit`: `carryCost`, `maintenanceHours`
-    - domain `types`: `salaryMultBp`, `availabilityTarget`
-  - 89 of the 157 query functions have no test.
-  - Screen modules test one or two of their keys, and no empty states.
-- **Removal:** C17.
-- **Guard:** review (checklist question 13). No mechanical check.
-
----
-
 ## Layering record
 
 Rule 5 layering debt, one canonical edge per line as

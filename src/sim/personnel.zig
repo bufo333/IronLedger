@@ -895,3 +895,25 @@ test "readinessPenalty scores a company's readiness; lower is readier (C17a4)" {
     try std.testing.expect(readinessPenalty(ready, 1, 0) > readinessPenalty(ready, 0, 0));
     try std.testing.expect(readinessPenalty(ready, 0, 100) > readinessPenalty(ready, 0, 0));
 }
+
+test "severanceOwed wraps person.severance with a share; depart posts the same amount" {
+    // Consumer agreement: depart calls severanceOwed and posts exactly what it returns.
+    const t = tuning.person;
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 11001 });
+    defer gs.deinit();
+    const vet = try gs.hirePerson("Old", "Hand", .mekwarrior);
+    gs.person(vet).?.recruited_day = 0;
+    gs.clock.day_index = 2 * types.days_per_year; // 2 years tenure
+    // Full-share severanceOwed equals person.severance.
+    const full = severanceOwed(&gs, vet, types.full_bp);
+    try std.testing.expectEqual(gs.person(vet).?.severance(gs.clock.day_index), full);
+    // Half share halves the payout.
+    const half_bp: types.Bp = types.full_bp / 2;
+    try std.testing.expectEqual(types.applyBp(full, half_bp), severanceOwed(&gs, vet, half_bp));
+    // Consumer: depart posts exactly severanceOwed and deducts it from gs.funds.
+    const expected = severanceOwed(&gs, vet, t.fire_severance_bp);
+    const funds_before = gs.funds;
+    const paid = try depart(&gs, vet, .resigned, t.fire_severance_bp, "severance");
+    try std.testing.expectEqual(expected, paid);
+    try std.testing.expectEqual(funds_before - paid, gs.funds);
+}

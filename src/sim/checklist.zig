@@ -917,3 +917,43 @@ test "medbay-over-capacity and home-bed counts agree with medical.homeBedCapacit
     };
     try std.testing.expect(found_cap);
 }
+
+test "turnHold owns the turn-gate; advance_days is refused while a report is unread" {
+    const battle_report = @import("../domain/battle_report.zig");
+    const autoresolve = @import("../domain/autoresolve.zig");
+    const commands = @import("commands.zig");
+    const queries = @import("queries.zig");
+
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 8001 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
+    // No reports: no hold.
+    try std.testing.expectEqual(@as(?Hold, null), turnHold(&gs));
+    // Add an unread battle report.
+    const report = battle_report.BattleReport{
+        .id = @enumFromInt(1),
+        .day = 0,
+        .contract = .none,
+        .company = .none,
+        .kind = "objective_raid",
+        .enemy_key = "DC",
+        .scenario = "breakthrough",
+        .terrain = "grasslands",
+        .weather = "clear",
+        .outcome = autoresolve.Outcome.victory,
+    };
+    try gs.battle_reports.record(gs.allocator(), report);
+    try std.testing.expectEqual(@as(?Hold, .unread_after_action), turnHold(&gs));
+    // Consumer: advance_days returns ReportUnread while the hold is active.
+    try std.testing.expectError(error.ReportUnread, commands.execute(&gs, .{ .advance_days = 1 }));
+    try std.testing.expectEqual(@as(u32, 0), gs.clock.day_index); // day did not advance
+    // queries.turnHold maps the hold to the matching union case.
+    const qh = queries.turnHold(&gs);
+    switch (qh) {
+        .after_action => |bid| try std.testing.expectEqual(report.id, bid),
+        else => return error.TestUnexpectedResult,
+    }
+    // Acknowledge the report: the hold clears.
+    gs.battle_reports.kept.items[0].acknowledged = true;
+    try std.testing.expectEqual(@as(?Hold, null), turnHold(&gs));
+}

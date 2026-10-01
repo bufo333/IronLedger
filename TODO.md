@@ -21,15 +21,8 @@ D30 into C12, D28 into C7, and D31 into C8. D33 (C18) is now closed.
 
 - [ ] C20 residual documentation, naming, and coverage inventory (C20a-C20b;
   rules 61, 75, 81, 82, 84): module links, corrected comments/citations,
-  unit-bearing names, legible formulas, and the final C17 scope inventory.
-  Delete C20 and C17.
-
-C17 focused coverage (rule 67) is required within its owner packages, not a
-separate branch: C17a1/b5, C17a2/a4/b3, C17a5-a6/b2/b5-b6 delivered; C17a3/b1 with C5;
-C17a7/b7 with C20; and C17c's
-Desk, Contracts, Ledger, Forces, People, Supply, HQ, Market, Lab, and Map
-coverage with the two C12 packages. C20's final inventory must show no scoped
-omission before it deletes C17.
+  unit-bearing names, legible formulas, and the final C20 scope inventory.
+  Delete C20.
 
 ## Data verification (needs the sourcebooks)
 

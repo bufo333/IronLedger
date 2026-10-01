@@ -792,3 +792,26 @@ test "names come from one family of helpers" {
     const short = p.shortName(&buf);
     try std.testing.expect(std.mem.endsWith(u8, short, " Kalmar"));
 }
+
+test "baseSalary owns the CamOps base; monthlySalary composes it with experience and rank" {
+    // Consumer: monthlySalary = applyBp(applyBp(role.baseSalary(), experience.salaryMultBp()), rank.payBp()).
+    // Verify representative roles against the CamOps table.
+    try std.testing.expectEqual(@as(types.CBills, 1_500), Role.mekwarrior.baseSalary());
+    try std.testing.expectEqual(@as(types.CBills, 1_500), Role.aero_pilot.baseSalary());
+    try std.testing.expectEqual(@as(types.CBills, 900), Role.vehicle_crew.baseSalary());
+    try std.testing.expectEqual(@as(types.CBills, 400), Role.astech.baseSalary());
+    // Regular mekwarrior at private rank (pay_bp=10_000): 1500 × 1.0 × 1.0 = 1500.
+    var reg: Person = .{ .id = @enumFromInt(20), .first_name = "A", .last_name = "B", .role = .mekwarrior };
+    defer reg.deinit(std.testing.allocator);
+    try reg.skills.put(std.testing.allocator, .gunnery_mek, 4);
+    try reg.skills.put(std.testing.allocator, .piloting_mek, 5);
+    try std.testing.expectEqual(types.ExperienceLevel.regular, reg.experience());
+    try std.testing.expectEqual(@as(types.CBills, 1_500), reg.monthlySalary());
+    // Veteran mekwarrior at private rank: 1500 × 1.6 = 2400.
+    var vet: Person = .{ .id = @enumFromInt(21), .first_name = "C", .last_name = "D", .role = .mekwarrior };
+    defer vet.deinit(std.testing.allocator);
+    try vet.skills.put(std.testing.allocator, .gunnery_mek, 3);
+    try vet.skills.put(std.testing.allocator, .piloting_mek, 4);
+    try std.testing.expectEqual(types.ExperienceLevel.veteran, vet.experience());
+    try std.testing.expectEqual(@as(types.CBills, 2_400), vet.monthlySalary());
+}

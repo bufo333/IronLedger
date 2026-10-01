@@ -339,6 +339,31 @@ test "assign without a slot word picks the seat by role, on pool hulls too" {
     try std.testing.expectEqual(@as(usize, 0), (try @import("queries.zig").openSeats(arena.allocator(), &gs, away)).len);
 }
 
+test "canReachPool owns the pool-access rule; assignBlock uses it for the .away block" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 6001 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
+    const co = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
+    const pool_mek = try gs.addUnit("LCT-1V");
+    // Person with no company can always reach the pool.
+    const pid = try gs.hirePerson("Lone", "Wolf", .mekwarrior);
+    const p = gs.person(pid).?;
+    try std.testing.expect(canReachPool(&gs, p));
+    // Person assigned to a home company can reach the pool.
+    p.assigned_force = co;
+    try std.testing.expect(canReachPool(&gs, p));
+    // Sending the company afield removes pool access.
+    gs.force(co).?.location_planet = "galatea";
+    try std.testing.expect(!canReachPool(&gs, p));
+    // Consumer: assignBlock returns .away for a pool hull when the person is afield.
+    const u = gs.unit(pool_mek).?;
+    try std.testing.expectEqual(@as(?AssignBlock, .away), assignBlock(&gs, u, p));
+    // Bringing the company home restores access and clears the block.
+    gs.force(co).?.location_planet = null;
+    try std.testing.expect(canReachPool(&gs, p));
+    try std.testing.expectEqual(@as(?AssignBlock, null), assignBlock(&gs, u, p));
+}
+
 test "assignments — roles enforced, one seat per pilot, hall hiring" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 71 });
     defer gs.deinit();

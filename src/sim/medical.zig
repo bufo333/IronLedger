@@ -1401,6 +1401,38 @@ test "idle_afield company gets no fatigue recovery from runWeeklyRest (C10-A3, A
     try std.testing.expectEqual(@as(u8, 80), gs.person(id_afield).?.fatigue);
 }
 
+test "healDays owns the wound-recovery formula; home hospital shortens the stay" {
+    // Two identical GameStates (same seed, same founding) so roll2d6(.medical) returns
+    // the same value on both. gs2 forces staff_assigned=0 → effectiveFacilityLevel(.hospital)=0.
+    var gs1 = GameState.init(std.testing.allocator, .{ .seed = 10001 });
+    defer gs1.deinit();
+    _ = try founding.createCommander(&gs1, "T", .LC, .paymaster);
+    const seat1 = gs1.seat();
+    const pid1 = try gs1.hirePerson("P", "Q", .mekwarrior);
+    gs1.person(pid1).?.status = .wounded; // wounded_here=1 > cover=0 → understaffed_bp applies
+
+    var gs2 = GameState.init(std.testing.allocator, .{ .seed = 10001 });
+    defer gs2.deinit();
+    _ = try founding.createCommander(&gs2, "T", .LC, .paymaster);
+    const seat2 = gs2.seat();
+    const pid2 = try gs2.hirePerson("P", "Q", .mekwarrior);
+    gs2.person(pid2).?.status = .wounded;
+    // Knock out hospital by zeroing staff: understaffingSteps = 4 → level 1 -| 4 = 0.
+    gs2.hqs.getPtr(seat2).?.staff_assigned = 0;
+
+    const days_hosp = healDays(&gs1, .home, seat1);
+    const days_no_hosp = healDays(&gs2, .home, seat2);
+    // hospital_bp = 7_000 < 10_000, so home+hospital is shorter than home without one.
+    try std.testing.expect(days_hosp < days_no_hosp);
+    // Both outcomes meet the floor (heal_min_days).
+    try std.testing.expect(days_hosp >= tuning.medical.heal_min_days);
+    try std.testing.expect(days_no_hosp >= tuning.medical.heal_min_days);
+    // Consumer: runDailyHealing calls healDays(gs, careFor(gs, p), gs.homeHqOf(p)).
+    // Verify the floor path: a fast-rolling sequence never dips below heal_min_days.
+    const floor_check = healDays(&gs1, .home, seat1);
+    try std.testing.expect(floor_check >= tuning.medical.heal_min_days);
+}
+
 test "returning company's wounded draw field beds, not home beds (C10-A2, ARCH §9.7)" {
     // Asymmetric: home HQ has a hospital; the returning company has none.
     var gs = GameState.init(std.testing.allocator, .{ .seed = 10102 });

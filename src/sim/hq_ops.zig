@@ -2380,3 +2380,43 @@ test "hqStaff counts staff posted at that HQ only — the other HQ gets no benef
     try std.testing.expectEqual(@as(u32, 0), hqStaff(&gs, plain, .admin_command).count);
     try std.testing.expectEqual(@as(u32, 1), hqStaff(&gs, second, .admin_command).count);
 }
+
+test "depotHqFor is the one owner of which HQ a hull's components must sit at" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 7001 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .chief_engineer);
+    const seat = gs.seat();
+    // Pool unit (force=.none) depots at the seat.
+    const pool = try gs.addUnit("SHD-2H");
+    try std.testing.expectEqual(seat, depotHqFor(&gs, gs.unit(pool).?));
+    // A unit in a company also depots at the seat (default supplying_hq).
+    const co = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
+    const lance = gs.force(co).?.children.items[0];
+    try toe.moveUnitToForce(&gs, pool, lance);
+    try std.testing.expectEqual(seat, depotHqFor(&gs, gs.unit(pool).?));
+    // Set a different supplying_hq: the depot follows the company's home.
+    const far = try founding.foundHq(&gs, "Far", .field, "alkaid");
+    gs.force(co).?.supplying_hq = far;
+    try std.testing.expectEqual(far, depotHqFor(&gs, gs.unit(pool).?));
+}
+
+test "bayCanRebuild delegates to canFabricate with the hull's ct.structure component" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 7101 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .chief_engineer);
+    const seat = gs.seat();
+    // Medium (SHD-2H): comp_ct, fab_min_bay=1; seat bay level 1 suffices.
+    try std.testing.expect(bayCanRebuild(&gs, seat, "SHD-2H"));
+    // Assault (AS7-D): comp_ct_a, fab_min_bay=3; seat bay level 1 is too low.
+    try std.testing.expect(!bayCanRebuild(&gs, seat, "AS7-D"));
+    // Raising the bay level to 3 on a regional HQ allows assault rebuild.
+    for (gs.hqs.getPtr(seat).?.facilities.items) |*f| {
+        if (f.kind == .mek_bay) f.level = 3;
+    }
+    try std.testing.expect(bayCanRebuild(&gs, seat, "AS7-D"));
+    // Lowering back to 2 still blocks assault (needs 3).
+    for (gs.hqs.getPtr(seat).?.facilities.items) |*f| {
+        if (f.kind == .mek_bay) f.level = 2;
+    }
+    try std.testing.expect(!bayCanRebuild(&gs, seat, "AS7-D"));
+}

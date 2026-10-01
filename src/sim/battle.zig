@@ -2295,3 +2295,104 @@ test "a fight does not change who turns up at the hiring hall" {
     try std.testing.expect(names[0].len > 0);
     try std.testing.expectEqualStrings(names[0], names[1]);
 }
+
+test "estimatedKills owns the BV-to-kills formula; kill credit and prisoner counts use it" {
+    // Formula: (destroyed_bv + 500) / 1000, rounded, floored at 0.
+    try std.testing.expectEqual(@as(u32, 0), estimatedKills(0));
+    try std.testing.expectEqual(@as(u32, 0), estimatedKills(499));
+    try std.testing.expectEqual(@as(u32, 1), estimatedKills(500));
+    try std.testing.expectEqual(@as(u32, 1), estimatedKills(1_499));
+    try std.testing.expectEqual(@as(u32, 2), estimatedKills(1_500));
+    try std.testing.expectEqual(@as(u32, 2), estimatedKills(2_499));
+    try std.testing.expectEqual(@as(u32, 3), estimatedKills(2_500));
+    // Negative BV never yields a kill.
+    try std.testing.expectEqual(@as(u32, 0), estimatedKills(-1));
+    try std.testing.expectEqual(@as(u32, 0), estimatedKills(-10_000));
+}
+
+test "effectiveRoe: integrated command overrides to hold; other rights use the company's setting" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 9001 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    const co = (try @import("commands.zig").execute(&gs, .{ .new_company = "Alpha" })).created_force;
+    var c: contract_mod.Contract = .{
+        .id = .none,
+        .kind = .objective_raid,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 3, .base_pay_month = 100_000, .command_rights = .independent },
+    };
+    // Independent: company's own ROE (default .standard).
+    try std.testing.expectEqual(force_mod.Roe.standard, effectiveRoe(&gs, &c, co));
+    // Cautious ROE on the company still comes through.
+    _ = try @import("commands.zig").execute(&gs, .{ .set_roe = .{ .company = co, .roe = .cautious } });
+    try std.testing.expectEqual(force_mod.Roe.cautious, effectiveRoe(&gs, &c, co));
+    // Integrated command rights override to .hold no matter the company's setting.
+    c.terms.command_rights = .integrated;
+    try std.testing.expectEqual(force_mod.Roe.hold, effectiveRoe(&gs, &c, co));
+}
+
+test "inContactWindow: true within contact_warning_days, false outside; execConfirmOrders checks it" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 9101 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    const warn = tuning.battle.contact_warning_days;
+    var c: contract_mod.Contract = .{
+        .id = @enumFromInt(1),
+        .kind = .objective_raid,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 3, .base_pay_month = 100_000 },
+        .status = .active,
+    };
+    // No next_battle_day: never in contact.
+    try std.testing.expect(!inContactWindow(&gs, &c));
+    // Battle further than warning: not in contact.
+    c.next_battle_day = gs.clock.day_index + warn + 1;
+    try std.testing.expect(!inContactWindow(&gs, &c));
+    // Exactly at the boundary: in contact.
+    c.next_battle_day = gs.clock.day_index + warn;
+    try std.testing.expect(inContactWindow(&gs, &c));
+    // Inside the window: in contact.
+    c.next_battle_day = gs.clock.day_index + 1;
+    try std.testing.expect(inContactWindow(&gs, &c));
+    // Consumer: execConfirmOrders checks inContactWindow; NoContact when outside.
+    c.next_battle_day = gs.clock.day_index + warn + 1;
+    try gs.contracts.put(gs.allocator(), c.id, c);
+    try std.testing.expectError(error.NoContact, @import("commands.zig").execute(&gs, .{ .confirm_orders = c.id }));
+    // Inside the window: confirm succeeds.
+    gs.contracts.getPtr(c.id).?.next_battle_day = gs.clock.day_index + warn;
+    _ = try @import("commands.zig").execute(&gs, .{ .confirm_orders = c.id });
+}
+
+test "estimatePower owns the company's combat strength; offer_rating.rateOffer agrees" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 9201 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    const co = (try @import("commands.zig").execute(&gs, .{ .new_company = "Alpha" })).created_force;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const c: contract_mod.Contract = .{
+        .id = .none,
+        .kind = .objective_raid,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 3, .base_pay_month = 100_000 },
+        .enemy_lances = 2,
+        .enemy_lance_bv = 3_500,
+        .enemy_lance_tons = 220,
+        .enemy_quality = .regular,
+    };
+    const est = try estimatePower(&gs, arena.allocator(), &c, co);
+    // A freshly generated company has at least one hull, so power > 0 and hulls > 0.
+    try std.testing.expect(est.power > 0);
+    try std.testing.expect(est.hulls > 0);
+    try std.testing.expect(est.tons > 0);
+    // Consumer: offer_rating.rateOffer uses estimatePower for its .own field.
+    const rating = try @import("offer_rating.zig").rateOffer(arena.allocator(), &gs, &c, co);
+    try std.testing.expect(rating != null);
+    try std.testing.expectEqual(est.power, rating.?.own.power);
+}

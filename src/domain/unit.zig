@@ -451,3 +451,38 @@ test "structural damage sends a unit home" {
     u.status = .destroyed;
     try std.testing.expect(u.needsDepot());
 }
+
+test "carryCost owns cold-storage discount; monthlyBill delegates here" {
+    const t = @import("tuning.zig").t.unit;
+    // Active carry cost is the base; cold storage applies cold_storage_bp fraction.
+    const mek_base = monthlyCarryCost(.mek);
+    try std.testing.expectEqual(mek_base, carryCost(.mek, false));
+    try std.testing.expectEqual(types.applyBp(mek_base, t.cold_storage_bp), carryCost(.mek, true));
+    try std.testing.expect(carryCost(.mek, true) < carryCost(.mek, false));
+    // Consumer: Unit.monthlyBill delegates to carryCost(kind, inColdStorage()).
+    var u: Unit = .{ .id = @enumFromInt(10), .chassis_key = "SHD-2H", .kind = .mek };
+    defer u.deinit(std.testing.allocator);
+    try std.testing.expectEqual(carryCost(.mek, false), u.monthlyBill());
+    u.status = .mothballed;
+    try std.testing.expectEqual(carryCost(.mek, true), u.monthlyBill());
+}
+
+test "maintenanceHours owns tonnage bands; consumers use it for the tech-time budget" {
+    const t = @import("tuning.zig").t.unit;
+    // Mek bands: light ≤35t, medium ≤55t, heavy ≤75t, assault >75t.
+    try std.testing.expectEqual(t.maintenance_hours.mek_light, maintenanceHours(.mek, t.mek_light_max_tons));
+    try std.testing.expectEqual(t.maintenance_hours.mek_medium, maintenanceHours(.mek, t.mek_light_max_tons + 1));
+    try std.testing.expectEqual(t.maintenance_hours.mek_medium, maintenanceHours(.mek, t.mek_medium_max_tons));
+    try std.testing.expectEqual(t.maintenance_hours.mek_heavy, maintenanceHours(.mek, t.mek_medium_max_tons + 1));
+    try std.testing.expectEqual(t.maintenance_hours.mek_heavy, maintenanceHours(.mek, t.mek_heavy_max_tons));
+    try std.testing.expectEqual(t.maintenance_hours.mek_assault, maintenanceHours(.mek, t.mek_heavy_max_tons + 1));
+    // Other unit kinds are flat.
+    try std.testing.expectEqual(t.maintenance_hours.vehicle, maintenanceHours(.vehicle, 100));
+    try std.testing.expectEqual(t.maintenance_hours.aerospace, maintenanceHours(.aerospace, 100));
+    try std.testing.expectEqual(t.maintenance_hours.battle_armor, maintenanceHours(.battle_armor, 100));
+    try std.testing.expectEqual(@as(u32, 0), maintenanceHours(.infantry, 0));
+    // Monotonic within mek: light ≤ medium ≤ heavy ≤ assault.
+    try std.testing.expect(maintenanceHours(.mek, 20) <= maintenanceHours(.mek, 40));
+    try std.testing.expect(maintenanceHours(.mek, 40) <= maintenanceHours(.mek, 60));
+    try std.testing.expect(maintenanceHours(.mek, 60) <= maintenanceHours(.mek, 80));
+}

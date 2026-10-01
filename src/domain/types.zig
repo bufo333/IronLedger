@@ -254,3 +254,34 @@ test "applyPct is the one owner for money×percent: value matches divTrunc and e
         try std.testing.expectEqual(applyPct(c.amount, c.pct), applyBp(c.amount, c.pct * 100));
     }
 }
+
+test "salaryMultBp owns the experience multiplier; monthlySalary agrees" {
+    // CamOps multipliers (MekHQ defaults), cited in the doc comment.
+    // Consumer: person.monthlySalary() composes salaryMultBp with baseSalary and payBp
+    // (see baseSalary consumer test in person.zig).
+    try std.testing.expectEqual(@as(Bp, 6_000), ExperienceLevel.green.salaryMultBp());
+    try std.testing.expectEqual(@as(Bp, 10_000), ExperienceLevel.regular.salaryMultBp());
+    try std.testing.expectEqual(@as(Bp, 16_000), ExperienceLevel.veteran.salaryMultBp());
+    try std.testing.expectEqual(@as(Bp, 32_000), ExperienceLevel.elite.salaryMultBp());
+    // Strictly ordered: green < regular < veteran < elite.
+    try std.testing.expect(ExperienceLevel.green.salaryMultBp() < ExperienceLevel.regular.salaryMultBp());
+    try std.testing.expect(ExperienceLevel.regular.salaryMultBp() < ExperienceLevel.veteran.salaryMultBp());
+    try std.testing.expect(ExperienceLevel.veteran.salaryMultBp() < ExperienceLevel.elite.salaryMultBp());
+}
+
+test "availabilityTarget owns the rarity target; the market roll agrees" {
+    const t = @import("tuning.zig").t.market.rarity_target;
+    try std.testing.expectEqual(t.common, Rarity.common.availabilityTarget());
+    try std.testing.expectEqual(t.uncommon, Rarity.uncommon.availabilityTarget());
+    try std.testing.expectEqual(t.rare, Rarity.rare.availabilityTarget());
+    try std.testing.expectEqual(t.very_rare, Rarity.very_rare.availabilityTarget());
+    // Monotonic: common ≤ uncommon ≤ rare ≤ very_rare.
+    try std.testing.expect(Rarity.common.availabilityTarget() <= Rarity.uncommon.availabilityTarget());
+    try std.testing.expect(Rarity.uncommon.availabilityTarget() <= Rarity.rare.availabilityTarget());
+    try std.testing.expect(Rarity.rare.availabilityTarget() <= Rarity.very_rare.availabilityTarget());
+    // Consumer: econ/market.zig and sites.zig check `roll >= rarity.availabilityTarget()`.
+    // A roll at the target sources the item; a roll below does not.
+    const ct = Rarity.common.availabilityTarget();
+    try std.testing.expect(ct >= Rarity.common.availabilityTarget()); // roll == target: sources
+    if (ct > 0) try std.testing.expect(ct - 1 < Rarity.common.availabilityTarget()); // roll < target: not sourced
+}

@@ -351,6 +351,52 @@ test "routes follow links, charter when there are none, and links cap tonnage" {
     try std.testing.expectEqual(mid, detour[0].to); // routes via mid, not the saturated direct
 }
 
+test "fitsThroughput is the one cap gate; reserveThroughput books atomically" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 5101 });
+    defer gs.deinit();
+    // Add a level-1 link directly; no route planning required to test the cap.
+    try gs.hq_links.append(gs.allocator(), .{
+        .a = @enumFromInt(1),
+        .b = @enumFromInt(2),
+        .level = 1,
+        .established_day = 0,
+    });
+    const cap = gs.hq_links.items[0].tonsPerWeek();
+    const hop: logistics.Hop = .{ .jumps = 1, .link_level = 1, .via_warehouse = 0, .via_spaceport = 0 };
+    const route = [_]RouteHop{.{ .from = @enumFromInt(1), .to = @enumFromInt(2), .hop = hop, .link_index = 0 }};
+    // Exactly at capacity fits; one ton over does not.
+    try std.testing.expect(fitsThroughput(&gs, &route, cap));
+    try std.testing.expect(!fitsThroughput(&gs, &route, cap + 1));
+    // reserveThroughput books the tons and commits them.
+    const half = cap / 2;
+    try reserveThroughput(&gs, &route, half);
+    try std.testing.expectEqual(half, gs.hq_links.items[0].tons_this_week);
+    try std.testing.expect(fitsThroughput(&gs, &route, cap - half));
+    try std.testing.expect(!fitsThroughput(&gs, &route, cap - half + 1));
+    // An overfill is atomically refused: tons_this_week is unchanged.
+    try std.testing.expectError(error.ThroughputExceeded, reserveThroughput(&gs, &route, cap - half + 1));
+    try std.testing.expectEqual(half, gs.hq_links.items[0].tons_this_week);
+}
+
+test "routeCostMultBp owns the per-hop freight cost; charter adds the premium" {
+    const hop: logistics.Hop = .{ .jumps = 1, .link_level = 1, .via_warehouse = 0, .via_spaceport = 0 };
+    // A single linked hop must equal logistics.routeCostMultBp for the same hop.
+    const linked = [_]RouteHop{.{ .from = @enumFromInt(1), .to = @enumFromInt(2), .hop = hop, .link_index = 0 }};
+    const one_hop = [_]logistics.Hop{hop};
+    try std.testing.expectEqual(logistics.routeCostMultBp(&one_hop), routeCostMultBp(&linked));
+    // A charter hop (link_index == null) carries the 15_000 bp premium on top.
+    const charter_r = [_]RouteHop{.{ .from = @enumFromInt(1), .to = @enumFromInt(2), .hop = hop, .link_index = null }};
+    const charter_cost = routeCostMultBp(&charter_r);
+    const linked_cost = routeCostMultBp(&linked);
+    try std.testing.expectEqual(@divTrunc(linked_cost * 15_000, 10_000), charter_cost);
+    // Two identical linked hops compose multiplicatively.
+    const two = [_]RouteHop{
+        .{ .from = @enumFromInt(1), .to = @enumFromInt(2), .hop = hop, .link_index = 0 },
+        .{ .from = @enumFromInt(2), .to = @enumFromInt(3), .hop = hop, .link_index = 1 },
+    };
+    try std.testing.expectEqual(@divTrunc(linked_cost * linked_cost, 10_000), routeCostMultBp(&two));
+}
+
 test "establishLink leaves funds, ledger and hq_links unchanged when allocation fails" {
     const digest = @import("digest.zig");
 
