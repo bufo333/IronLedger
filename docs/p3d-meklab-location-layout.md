@@ -20,9 +20,12 @@ spreadsheet.
 
 ## Design
 
-The layout is fully data-driven from `chassis.zon` per-location slot counts
-and fixed occupants. No per-chassis artwork is needed; the structural
-differences render themselves.
+The layout would be data-driven from `chassis.zon`, but requires two
+additions not present today: per-location critical slot counts (currently
+`meklab.zig` applies uniform standard-rules values via `freeCrits`) and
+per-chassis actuator and fixed-occupant configuration (cockpit, engine,
+gyro, actuators). No per-chassis artwork is needed; the structural
+differences render themselves once that data exists.
 
 ### Location arrangement (7 locations, classic BT)
 
@@ -57,10 +60,11 @@ Multi-slot items (e.g. LRM-20 takes 5 slots) are shown as one named group
 with a part counter (`LRM-20 1/5 … 5/5`) so removing the item frees all
 slots at once.
 
-Equipment location rules (CASE → side torso only; jump jets → legs/torso;
-AMS → head/torso) are enforced by the existing rules in `src/domain/meklab.zig`
-and visualised: attempting to place CASE in a leg shows the refusal inline
-with the violated rule named.
+The existing `src/domain/meklab.zig` enforces a jump-jet location rule
+(torsos and legs only). P3d would add CASE (side torso only) and AMS
+(head/torso only) placement rules to match the same owner pattern. The
+layout would visualise these constraints: attempting to place CASE in a
+leg shows the refusal inline with the violated rule named.
 
 ### Catapult CPLT-C1 example (approximate — driven by chassis.zon)
 
@@ -137,10 +141,13 @@ refused inline with the rule name, not a silent no-op.
 ## Dependency on P3a–P3c
 
 The read-only layout (showing the current loadout in location boxes) can ship
-earlier as a pure TUI improvement — it needs only the existing `chassis.zon`
-per-location data. The interactive, editable version (P3d) depends on P3a
-(editable construction parts with verified mass/crit data from TechManual)
-and P3b (full A–F refit class support).
+earlier as a pure TUI improvement, but needs new `chassis.zon` fields
+(fixed-occupant layout and per-chassis actuator configuration) before it can
+render chassis-specific slot arrangements. The interactive, editable version
+(P3d) depends on P3a (editable construction parts with verified mass/crit
+data from TechManual), P3b (full A–F refit class support), and P3c (persisted
+campaign-owned custom chassis), because interactive variant editing requires
+variant persistence.
 
 The layout question is essentially P3d's entire UX question; this note is
 the design input for that deliverable.
