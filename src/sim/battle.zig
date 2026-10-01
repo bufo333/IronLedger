@@ -995,7 +995,7 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
 
     // Score, morale, fatigue, experience.
     const after = try aftermath(gs, c, &player, open, env, engaged, enemy_destroyed_bv, wounded, kia);
-    var score_delta = after.score_delta;
+    const score_delta = after.score_delta;
     const morale_delta = after.morale_delta;
     const convoy_hit = after.convoy_hit;
     const kills_credited = after.kills_credited;
@@ -1010,9 +1010,11 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
             const base = after.score_delta;
             const score_extra = @as(i32, @intCast(types.applyBp(@as(i64, base), @as(i64, profile.score_bp)))) - base;
             const vp_extra = (@as(i32, @intCast(types.applyBp(@as(i64, base), @as(i64, profile.vp_bp)))) - base) * tuning.contract.vp_per_score;
+            // score_extra goes to c.score (contract grade) but NOT to score_delta;
+            // score_delta carries only the base engagement outcome to recordBattle,
+            // which converts it to VP. vp_extra is the full intent VP contribution.
             c.score += score_extra;
             c.victory_points += vp_extra;
-            score_delta += score_extra;
         }
         if (profile.fatigue_add > 0) applyCompanyAftermath(gs, c.assigned_company, 0, profile.fatigue_add);
     }
@@ -2604,6 +2606,7 @@ test "intent-shaped battle: break_enemy vs preserve_force produce different scor
     defer gs_pf.deinit();
 
     // Build a minimal combat-capable company in both states.
+    // Both use the same seed so the only difference is the intent profile.
     for (&[_]*GameState{ &gs_be, &gs_pf }) |gs| {
         const co = try @import("starter_company.zig").generateInto(gs, "Ghost");
         const cid: types.ContractId = @enumFromInt(1);
@@ -2643,57 +2646,103 @@ test "intent-shaped battle: break_enemy vs preserve_force produce different scor
     const vp_be = gs_be.contracts.getPtr(cid).?.victory_points;
     const vp_pf = gs_pf.contracts.getPtr(cid).?.victory_points;
 
-    // The two intents must produce materially different results.
-    // (They use the same seed, so the only difference is the profile.)
-    try testing.expect(score_be != score_pf or vp_be != vp_pf);
+    // After F1 fix the score and VP must both be affected and must agree on
+    // direction: break_enemy (score_bp 13 000, vp_bp 13 000) amplifies any
+    // non-zero base outcome more than preserve_force (7 000, 7 000), so the
+    // two measures must change in the same direction.
+    //
+    // Direction depends on whether the base was a win (break_enemy scores higher)
+    // or a loss (break_enemy scores lower — it amplifies the negative too).
+    // Both states share the same seed so they have the same base outcome.
+    // The pre-F1 bug could produce disagreement: score_extra was added to
+    // score_delta, double-counting it in VP, which could make VP move in a
+    // different direction from score. After the fix they must agree.
+    try testing.expect(score_be != score_pf);
+    try testing.expect(vp_be != vp_pf);
+    // Score and VP must move in the same direction (consistent with the base outcome).
+    try testing.expect((score_be > score_pf) == (vp_be > vp_pf));
 }
 
 test "intent salvage gate: preserve_force claims no salvage on a held field" {
     // Rule 20 consumer test: intentProfile.salvage_allowed = false means
     // no salvage even when the field is held and there are wrecks.
     // docs/p4-operations-design.md §6 decision 3.
+    //
+    // Two identical game states diverged only by intent: preserve_force vs
+    // break_enemy. The enemy (1 lance × 500 BV) is far outmatched, guaranteeing
+    // a held-field outcome. With the same seed both states see the same rolls;
+    // the only difference is the intent gate on salvage. This prevents a vacuous
+    // pass where 0 salvage comes from not holding the field rather than the gate.
     const testing = std.testing;
-    var gs = GameState.init(testing.allocator, .{ .seed = 42002 });
-    defer gs.deinit();
-
-    const co = try @import("starter_company.zig").generateInto(&gs, "Ghost");
     const cid: types.ContractId = @enumFromInt(1);
-    try gs.contracts.put(gs.allocator(), cid, .{
-        .id = cid,
-        .kind = .garrison_duty,
-        .employer_key = "LC",
-        .enemy_key = "DC",
-        .planet_key = "galatea",
-        .terms = .{
-            .length_months = 18,
-            .base_pay_month = 200_000,
-            .salvage_pct = 50,
-        },
-        .status = .active,
-        .assigned_company = co,
-        .arc_key = "fracturing_garrison",
-        .enemy_lances = 1,
-        .enemy_lance_bv = 3000,
-    });
-    const c = gs.contracts.getPtr(cid).?;
-    try c.operations.append(gs.allocator(), .{
+
+    const Contract = contract_mod.Contract;
+
+    // Build both states from the same seed.
+    var gs_pf = GameState.init(testing.allocator, .{ .seed = 42002 });
+    defer gs_pf.deinit();
+    var gs_be = GameState.init(testing.allocator, .{ .seed = 42002 });
+    defer gs_be.deinit();
+
+    for (&[_]*GameState{ &gs_pf, &gs_be }) |gs| {
+        const co = try @import("starter_company.zig").generateInto(gs, "Ghost");
+        try gs.contracts.put(gs.allocator(), cid, Contract{
+            .id = cid,
+            .kind = .garrison_duty,
+            .employer_key = "LC",
+            .enemy_key = "DC",
+            .planet_key = "galatea",
+            .terms = .{
+                .length_months = 18,
+                .base_pay_month = 200_000,
+                .salvage_pct = 50,
+            },
+            .status = .active,
+            .assigned_company = co,
+            .arc_key = "fracturing_garrison",
+            .enemy_lances = 1,
+            .enemy_lance_bv = 500, // very weak: guarantees the company holds the field
+        });
+    }
+    // Commit preserve_force (salvage_allowed = false) into gs_pf.
+    try gs_pf.contracts.getPtr(cid).?.operations.append(gs_pf.allocator(), .{
         .id = @enumFromInt(1),
         .template_key = "repel_probe",
         .state = .committed,
         .opened_day = 0,
         .committed_day = 0,
-        .intent = .preserve_force, // salvage_allowed = false
+        .intent = .preserve_force,
+    });
+    // Commit break_enemy (salvage_allowed = true) into gs_be.
+    try gs_be.contracts.getPtr(cid).?.operations.append(gs_be.allocator(), .{
+        .id = @enumFromInt(1),
+        .template_key = "repel_probe",
+        .state = .committed,
+        .opened_day = 0,
+        .committed_day = 0,
+        .intent = .break_enemy,
     });
 
-    try resolveEngagement(&gs, c);
+    try resolveEngagement(&gs_pf, gs_pf.contracts.getPtr(cid).?);
+    try resolveEngagement(&gs_be, gs_be.contracts.getPtr(cid).?);
 
-    // Any battle report produced must have 0 claimed salvage (intent gate).
-    for (gs.battle_reports.kept.items) |r| {
-        if (r.operation_intent) |intent| {
-            if (intent == .preserve_force) {
-                try testing.expectEqual(@as(i64, 0), r.salvage.claimed_bv);
-                try testing.expectEqual(@as(i64, 0), r.salvage.unclaimed_bv);
-            }
+    // preserve_force: gate blocks salvage regardless of field outcome.
+    var pf_salvage: i64 = 0;
+    for (gs_pf.battle_reports.kept.items) |r| {
+        if (r.operation_intent == .preserve_force) {
+            try testing.expectEqual(@as(i64, 0), r.salvage.claimed_bv);
+            try testing.expectEqual(@as(i64, 0), r.salvage.unclaimed_bv);
+        }
+        pf_salvage += r.salvage.claimed_bv + r.salvage.unclaimed_bv;
+    }
+    try testing.expectEqual(@as(i64, 0), pf_salvage);
+
+    // break_enemy: salvage_allowed = true; with a held field it must be non-zero.
+    var be_salvage: i64 = 0;
+    for (gs_be.battle_reports.kept.items) |r| {
+        if (r.held_field) {
+            be_salvage += r.salvage.claimed_bv + r.salvage.unclaimed_bv;
         }
     }
+    try testing.expect(be_salvage > 0);
 }

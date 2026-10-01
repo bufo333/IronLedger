@@ -4477,3 +4477,81 @@ test "a v37 store migrates to v38 with empty arc fields and no operations" {
     try std.testing.expectEqual(@as(u16, 0), c.escalation_clock);
     try std.testing.expectEqual(@as(usize, 0), c.operations.items.len);
 }
+
+test "non-default op.intent and non-null operation_intent round-trip through save/load" {
+    // Rule 47: the non-default save branch (@tagName(op.intent)) and the
+    // non-empty load branch (stringToEnum orelse CorruptSave) for both
+    // operation.intent and battle_report.operation_intent are exercised here.
+    // The default value for both columns is 'secure_objective' / ''; this test
+    // stores '.break_enemy' and '.preserve_force' to reach the non-default paths.
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 4301 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    const co = try gs.createForce("Alpha", .company, .none);
+    const cid: types.ContractId = @enumFromInt(1);
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "PER",
+        .planet_key = "caph",
+        .terms = .{ .length_months = 12, .base_pay_month = 100_000 },
+        .status = .active,
+        .assigned_company = co,
+        .arc_key = "fracturing_garrison",
+        .arc_beat = 1,
+        .escalation_clock = 10,
+    });
+    // Operation with non-default intent (.break_enemy ≠ 'secure_objective').
+    try gs.contracts.getPtr(cid).?.operations.append(gs.allocator(), .{
+        .id = @enumFromInt(1),
+        .template_key = "repel_probe",
+        .state = .committed,
+        .opened_day = 0,
+        .committed_day = 3,
+        .intent = .break_enemy, // non-default: exercises @tagName path in save
+    });
+    gs.next_operation_id = 2;
+    gs.next_contract_id = 2;
+    // Battle report with non-null operation_intent (.preserve_force ≠ null/'').
+    try gs.battle_reports.kept.append(gs.allocator(), .{
+        .id = @enumFromInt(1),
+        .day = 2,
+        .contract = cid,
+        .company = co,
+        .kind = "garrison duty",
+        .enemy_key = "PER",
+        .scenario = "",
+        .terrain = "",
+        .weather = "",
+        .outcome = .victory,
+        .score_delta = 2,
+        .score_after = 2,
+        .command_rights = "independent",
+        .operation = try gs.allocator().dupe(u8, "Repel Probe"),
+        .operation_intent = .preserve_force, // non-null: exercises non-empty load branch
+        .acknowledged = true,
+    });
+    gs.next_battle_id = 2;
+
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+
+    var diff_buf: [256]u8 = undefined;
+    try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &diff_buf) orelse "");
+
+    // Spot-check: operation.intent must survive as .break_enemy.
+    const lc = loaded.contracts.getPtr(cid).?;
+    try std.testing.expectEqual(@as(usize, 1), lc.operations.items.len);
+    try std.testing.expectEqual(operation_mod.Intent.break_enemy, lc.operations.items[0].intent);
+
+    // Spot-check: battle_report.operation_intent must survive as .preserve_force.
+    try std.testing.expectEqual(@as(usize, 1), loaded.battle_reports.kept.items.len);
+    try std.testing.expectEqual(
+        @as(?operation_mod.Intent, .preserve_force),
+        loaded.battle_reports.kept.items[0].operation_intent,
+    );
+}
