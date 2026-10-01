@@ -279,9 +279,9 @@ test "availabilityTarget owns the rarity target; the market roll agrees" {
     try std.testing.expect(Rarity.common.availabilityTarget() <= Rarity.uncommon.availabilityTarget());
     try std.testing.expect(Rarity.uncommon.availabilityTarget() <= Rarity.rare.availabilityTarget());
     try std.testing.expect(Rarity.rare.availabilityTarget() <= Rarity.very_rare.availabilityTarget());
-    // Consumer: econ/market.zig and sites.zig check `roll >= rarity.availabilityTarget()`.
-    // A roll at the target sources the item; a roll below does not.
-    const ct = Rarity.common.availabilityTarget();
-    try std.testing.expect(ct >= Rarity.common.availabilityTarget()); // roll == target: sources
-    if (ct > 0) try std.testing.expect(ct - 1 < Rarity.common.availabilityTarget()); // roll < target: not sourced
+    // Consumer: econ/market.zig:183 and sites.zig:469 check `roll >= rarity.availabilityTarget()`.
+    // Use t.common (tuning data, independent of the function) as the roll value so the
+    // predicate assertions are non-tautological: a wrong return would fail them.
+    try std.testing.expect(t.common >= Rarity.common.availabilityTarget()); // roll at target: sourced
+    try std.testing.expect(!(t.common - 1 >= Rarity.common.availabilityTarget())); // roll below: not sourced
 }

@@ -2308,6 +2308,19 @@ test "estimatedKills owns the BV-to-kills formula; kill credit and prisoner coun
     // Negative BV never yields a kill.
     try std.testing.expectEqual(@as(u32, 0), estimatedKills(-1));
     try std.testing.expectEqual(@as(u32, 0), estimatedKills(-10_000));
+    // Consumer: personnel.zig:371 (creditKills) calls estimatedKills(destroyed_bv) and returns it.
+    // With one engaged pilot and 1_500 destroyed BV, creditKills must equal estimatedKills(1_500) = 2.
+    {
+        var gs4 = GameState.init(std.testing.allocator, .{ .seed = 9002 });
+        defer gs4.deinit();
+        _ = try founding.createCommander(&gs4, "T", .LC, .chief_engineer);
+        const uid4 = try gs4.addUnit("SHD-2H");
+        const pid4 = try gs4.hirePerson("K", "Kill", .mekwarrior);
+        gs4.unit(uid4).?.pilot = pid4;
+        const engaged4 = [_]types.UnitId{uid4};
+        const kills4 = try @import("personnel.zig").creditKills(&gs4, &engaged4, 1_500, .battle);
+        try std.testing.expectEqual(estimatedKills(1_500), kills4);
+    }
 }
 
 test "effectiveRoe: integrated command overrides to hold; other rights use the company's setting" {
@@ -2331,6 +2344,18 @@ test "effectiveRoe: integrated command overrides to hold; other rights use the c
     // Integrated command rights override to .hold no matter the company's setting.
     c.terms.command_rights = .integrated;
     try std.testing.expectEqual(force_mod.Roe.hold, effectiveRoe(&gs, &c, co));
+    // Consumer: queries.zig:401 reads battle.effectiveRoe(gs, c, company) for the ROE field.
+    // Store the contract and confirm battleOrders.roe agrees with the owner.
+    c.id = @enumFromInt(1);
+    c.status = .active;
+    c.assigned_company = co;
+    c.next_battle_day = gs.clock.day_index + tuning.battle.contact_warning_days;
+    try gs.contracts.put(gs.allocator(), c.id, c);
+    var arena_roe = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_roe.deinit();
+    const bo = try @import("queries.zig").battleOrders(arena_roe.allocator(), &gs, c.id);
+    try std.testing.expectEqual(force_mod.Roe.hold, bo.?.roe);
+    try std.testing.expectEqual(effectiveRoe(&gs, gs.contracts.getPtr(c.id).?, co), bo.?.roe);
 }
 
 test "inContactWindow: true within contact_warning_days, false outside; execConfirmOrders checks it" {

@@ -485,4 +485,8 @@ test "maintenanceHours owns tonnage bands; consumers use it for the tech-time bu
     try std.testing.expect(maintenanceHours(.mek, 20) <= maintenanceHours(.mek, 40));
     try std.testing.expect(maintenanceHours(.mek, 40) <= maintenanceHours(.mek, 60));
     try std.testing.expect(maintenanceHours(.mek, 60) <= maintenanceHours(.mek, 80));
+    // Consumer: maintenance.zig:104 (hullHours) reads maintenanceHours(u.kind, tonnage) as `base`.
+    // AS7-D is 100t (assault band); maintenance.zig:737 asserts hullHours at quality C = 10 = mek_assault.
+    // This cross-reference proves owner and consumer target the same band boundaries.
+    try std.testing.expectEqual(t.maintenance_hours.mek_assault, maintenanceHours(.mek, 100));
 }

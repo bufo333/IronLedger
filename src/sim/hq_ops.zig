@@ -2398,6 +2398,14 @@ test "depotHqFor is the one owner of which HQ a hull's components must sit at" {
     const far = try founding.foundHq(&gs, "Far", .field, "alkaid");
     gs.force(co).?.supplying_hq = far;
     try std.testing.expectEqual(far, depotHqFor(&gs, gs.unit(pool).?));
+    // Consumer: depotShortfall queries stock at the HQ depotHqFor returns.
+    // Wreck the hull so it needs comp_ct; far has no stock → shortfall non-null.
+    gs.unit(pool).?.markWreckedBy(.ammo); // needs comp_ct + comp_torso × 2
+    try std.testing.expect(depotShortfall(&gs, gs.unit(pool).?) != null);
+    // Stock far with all needed components → shortfall clears at the same HQ.
+    try gs.addStock(.{ .hq = far }, "comp_ct", 1);
+    try gs.addStock(.{ .hq = far }, "comp_torso", 2);
+    try std.testing.expect(depotShortfall(&gs, gs.unit(pool).?) == null);
 }
 
 test "bayCanRebuild delegates to canFabricate with the hull's ct.structure component" {
@@ -2419,4 +2427,14 @@ test "bayCanRebuild delegates to canFabricate with the hull's ct.structure compo
         if (f.kind == .mek_bay) f.level = 2;
     }
     try std.testing.expect(!bayCanRebuild(&gs, seat, "AS7-D"));
+    // Consumer: bayCanRebuild delegates to canFabricate(gs, hq, componentFor("ct.structure", chassis)).
+    // Assert equality directly: owner and consumer must agree on both chassis.
+    try std.testing.expectEqual(
+        bayCanRebuild(&gs, seat, "SHD-2H"),
+        canFabricate(&gs, seat, part_mod.componentFor("ct.structure", "SHD-2H")),
+    );
+    try std.testing.expectEqual(
+        bayCanRebuild(&gs, seat, "AS7-D"),
+        canFabricate(&gs, seat, part_mod.componentFor("ct.structure", "AS7-D")),
+    );
 }

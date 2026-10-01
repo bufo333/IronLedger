@@ -135,4 +135,8 @@ test "isPayday fires on day 1 only; tick.zig gates payroll here" {
     try std.testing.expect(last.next().isPayday());
     // Day 2 advanced once is day 3, not payday.
     try std.testing.expect(!day2.next().isPayday());
+    // Boolean identity: isPayday() ↔ (day == 1); tick.zig:594 evaluates exactly this predicate.
+    // Asserting equality proves owner and consumer cannot disagree.
+    try std.testing.expectEqual(payday.day == 1, payday.isPayday());
+    try std.testing.expectEqual(day2.day == 1, day2.isPayday());
 }

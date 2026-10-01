@@ -1431,6 +1431,29 @@ test "healDays owns the wound-recovery formula; home hospital shortens the stay"
     // Verify the floor path: a fast-rolling sequence never dips below heal_min_days.
     const floor_check = healDays(&gs1, .home, seat1);
     try std.testing.expect(floor_check >= tuning.medical.heal_min_days);
+    // Owner/consumer agreement: runDailyHealing sets wound_heal_day = today + healDays.
+    // Two identical states (same seed, same setup) consume the same .medical stream roll.
+    // Both must have wounded_here = 1 and identical staffing so healDays sees the same inputs.
+    var gs_a = GameState.init(std.testing.allocator, .{ .seed = 20201 });
+    defer gs_a.deinit();
+    _ = try founding.createCommander(&gs_a, "T", .LC, .paymaster);
+    const seat_a = gs_a.seat();
+    const pid_a = try gs_a.hirePerson("H", "Alfa", .mekwarrior);
+    gs_a.person(pid_a).?.status = .wounded;
+    gs_a.auto_admit = true;
+    try gs_a.addStock(.{ .hq = seat_a }, "medical_supplies", 1);
+    const today_a = gs_a.clock.day_index;
+    try runDailyHealing(&gs_a); // internally calls healDays and sets wound_heal_day
+
+    var gs_b = GameState.init(std.testing.allocator, .{ .seed = 20201 });
+    defer gs_b.deinit();
+    _ = try founding.createCommander(&gs_b, "T", .LC, .paymaster);
+    const seat_b = gs_b.seat();
+    const pid_b = try gs_b.hirePerson("H", "Alfa", .mekwarrior); // same hire advances same non-medical streams
+    gs_b.person(pid_b).?.status = .wounded; // wounded_here = 1 matches gs_a at the healDays call
+    const days_b = healDays(&gs_b, .home, seat_b); // same .medical roll and same inputs as gs_a's internal call
+    // wound_heal_day = today + days (severity-1 injury: heal_done_day = today + days × 2 / 2 = today + days).
+    try std.testing.expectEqual(today_a + days_b, gs_a.person(pid_a).?.wound_heal_day.?);
 }
 
 test "returning company's wounded draw field beds, not home beds (C10-A2, ARCH §9.7)" {
