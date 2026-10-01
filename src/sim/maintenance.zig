@@ -1013,5 +1013,5 @@ test "idle_afield hull rolls the harder field-conditions target; home hull does 
         }
     }
     // Afield hulls should have more quality drops over many weeks (harder target).
-    try std.testing.expect(drops_afield >= drops_home);
+    try std.testing.expect(drops_afield > drops_home);
 }

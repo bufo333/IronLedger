@@ -615,7 +615,7 @@ test "recruitGenerated quality differs by HQ: hall + HR at seat, none at second 
         }
     }
     // Lower gunnery = better in BattleTech. Seat draws should be lower on average.
-    try std.testing.expect(total_seat <= total_second);
+    try std.testing.expect(total_seat < total_second);
 }
 
 test "ranks follow seats: a lance leader is a lieutenant, the company commander a captain, the rest by experience" {

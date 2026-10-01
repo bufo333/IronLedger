@@ -16,9 +16,8 @@ applicable gate, including both smoke scripts when it touches their named
 frontend boundary. The final package for an exception deletes its parent and
 the exception entry only after all of its listed scope is closed.
 
-The audit deliverables in `docs/audit-response.md` remain folded in: D26 into
-C10, D27 and D30 into C12, D28 into C7, D29 into C15, D31 into C8, and D33 into
-C18.
+The audit deliverables in `docs/audit-response.md` remain folded in: D27 and
+D30 into C12, D28 into C7, D29 into C15, D31 into C8, and D33 into C18.
 
 - [ ] C14 randomness (C14a-C14b; rule 57): caller-selected generator streams
   and verified citations for every non-2d6 die. Stop if a source is unavailable.

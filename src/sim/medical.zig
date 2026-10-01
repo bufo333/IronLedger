@@ -164,31 +164,24 @@ pub fn homeBedCapacity(gs: *GameState, hq_id: types.HqId) u32 {
 }
 
 /// Medbay beds for a company afield: 4 per operational MASH truck plus
-/// its medics. For home beds use `homeBedCapacity` per the patient's home HQ.
-pub fn bedCapacity(gs: *GameState, company: types.ForceId, afield: bool) u32 {
-    if (afield) {
-        var beds: u32 = 0;
-        var it = gs.units.iterator();
-        while (it.next()) |entry| {
-            const u = entry.value_ptr;
-            if (u.kind == .mash and gs.companyOf(u.force) == company and readiness_m.unitOperational(gs, u)) beds += tuning.medical.beds_per_mash;
-        }
-        // Medics: staffing the MASH trucks, a bed each up to
-        // doubling the trucks; without trucks, an aid station of one bed
-        // per two medics.
-        var medics: u32 = 0;
-        var pit = gs.people.iterator();
-        while (pit.next()) |e| if (isActiveMedic(e.value_ptr) and gs.companyOf(e.value_ptr.assigned_force) == company) {
-            medics += 1;
-        };
-        return beds + (if (beds > 0) @min(medics, beds) else medics / 2);
+/// its medics. Called only for field-posture companies; for home beds use
+/// `homeBedCapacity` per the patient's home HQ.
+pub fn bedCapacity(gs: *GameState, company: types.ForceId) u32 {
+    var beds: u32 = 0;
+    var it = gs.units.iterator();
+    while (it.next()) |entry| {
+        const u = entry.value_ptr;
+        if (u.kind == .mash and gs.companyOf(u.force) == company and readiness_m.unitOperational(gs, u)) beds += tuning.medical.beds_per_mash;
     }
-    // Legacy: sum best across all HQs (kept for the field branch only; home
-    // callers use homeBedCapacity directly).
-    var best: u32 = 0;
-    var hqit = gs.hqs.iterator();
-    while (hqit.next()) |entry| best = @max(best, @as(u32, entry.value_ptr.effectiveFacilityLevel(.hospital)) * tuning.medical.beds_per_hospital_level);
-    return best;
+    // Medics: staffing the MASH trucks, a bed each up to
+    // doubling the trucks; without trucks, an aid station of one bed
+    // per two medics.
+    var medics: u32 = 0;
+    var pit = gs.people.iterator();
+    while (pit.next()) |e| if (isActiveMedic(e.value_ptr) and gs.companyOf(e.value_ptr.assigned_force) == company) {
+        medics += 1;
+    };
+    return beds + (if (beds > 0) @min(medics, beds) else medics / 2);
 }
 
 /// Active doctor predicate: outfit-wide medical-staff counting owner (C11y/C11l).
@@ -290,7 +283,7 @@ pub fn runDailyHealing(gs: *GameState) !void {
     for (patients.items) |pt| {
         if (pt.at_field) {
             const left = try field_left.getOrPut(gs.scratch(), pt.company);
-            if (!left.found_existing) left.value_ptr.* = bedCapacity(gs, pt.company, true);
+            if (!left.found_existing) left.value_ptr.* = bedCapacity(gs, pt.company);
             if (left.value_ptr.* > 0) {
                 left.value_ptr.* -= 1;
             } else gs.person(pt.id).?.wound_heal_day.? += 1;
@@ -918,18 +911,18 @@ test "medics add field beds and carry patients toward the doctor ratio" {
     _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
     const co = try gs.createForce("Alpha", .company, .none);
     // No MASH: two medics make one bed; four make two.
-    try std.testing.expectEqual(@as(u32, 0), bedCapacity(&gs, co, true));
+    try std.testing.expectEqual(@as(u32, 0), bedCapacity(&gs, co));
     for (0..4) |_| {
         const id = try gs.hirePerson("M", "Edic", .medic);
         gs.person(id).?.assigned_force = co;
     }
-    try std.testing.expectEqual(@as(u32, 2), bedCapacity(&gs, co, true));
+    try std.testing.expectEqual(@as(u32, 2), bedCapacity(&gs, co));
     // A crewed MASH truck: 4 beds, plus one per medic up to doubling it.
     const truck = try gs.addUnit("MASH-27");
     try toe.moveUnitToForce(&gs, truck, co);
-    try std.testing.expectEqual(@as(u32, 2), bedCapacity(&gs, co, true)); // no crew, no truck beds
+    try std.testing.expectEqual(@as(u32, 2), bedCapacity(&gs, co)); // no crew, no truck beds
     gs.unit(truck).?.pilot = try gs.hirePerson("D", "River", .vehicle_crew);
-    try std.testing.expectEqual(@as(u32, 8), bedCapacity(&gs, co, true));
+    try std.testing.expectEqual(@as(u32, 8), bedCapacity(&gs, co));
 }
 
 /// Every MASH truck in the company mothballed: on the books, not rolling.
@@ -946,9 +939,9 @@ test "a MASH truck that cannot roll gives no field beds" {
     defer gs.deinit();
     const f = try @import("contract_events.zig").damagedCompanyForTest(&gs, 0);
     const co = f.c.assigned_company;
-    const rolling = bedCapacity(&gs, co, true);
+    const rolling = bedCapacity(&gs, co);
     mothballMash(&gs, co);
-    const parked = bedCapacity(&gs, co, true);
+    const parked = bedCapacity(&gs, co);
     try std.testing.expect(parked < rolling);
 }
 
@@ -993,7 +986,7 @@ test "five tied field patients and four beds: exactly one waits" {
     });
     // Eight medics and no MASH truck: an aid station of four beds.
     for (0..8) |_| gs.person(try gs.hirePerson("M", "Edic", .medic)).?.assigned_force = co;
-    try std.testing.expectEqual(@as(u32, 4), bedCapacity(&gs, co, true));
+    try std.testing.expectEqual(@as(u32, 4), bedCapacity(&gs, co));
     const due = gs.clock.day_index + 10;
     var patients: [5]types.PersonId = undefined;
     for (&patients) |*id| {
