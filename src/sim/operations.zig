@@ -15,7 +15,84 @@ const GameState = @import("state.zig").GameState;
 pub const Quote = struct {
     /// Expected days to resolution (tuning data, not a guarantee). // TUNE
     expected_days: u16,
+    /// Legal intents for this template × command rights combination (rule 20).
+    /// Points to a module-level constant; owned by `legalIntents`.
+    legal_intents: []const operation_mod.Intent,
+    /// The one intent the employer has mandated (integrated command rights only).
+    /// Null when the commander has a free choice.
+    mandated: ?operation_mod.Intent,
 };
+
+// --- Intent legal-set constants (docs/p4-operations-design.md §6 decision 2) ---
+// Module-level so the slices have static lifetime; `legalIntents` returns pointers to them.
+const combat_intents = [_]operation_mod.Intent{ .preserve_force, .secure_objective, .break_enemy, .protect_assets, .secure_intelligence, .recover };
+const noncombat_intents = [_]operation_mod.Intent{ .secure_objective, .protect_assets, .secure_intelligence, .recover };
+const integrated_intents = [_]operation_mod.Intent{.secure_objective};
+
+/// Rule owner: the intent mandated by `integrated` command rights (docs/p4-operations-design.md §6 decision 2).
+/// Integrated employers command the objective; the commander has no choice.
+pub fn mandatedIntent(combat: bool) operation_mod.Intent {
+    _ = combat; // the mandated intent is the same regardless of template type // TUNE
+    return .secure_objective;
+}
+
+/// Rule owner: the set of legal intents for this template × command-rights combination.
+/// `integrated` returns a single-element slice (the mandated intent).
+/// `house`/`liaison`/`independent` return the full set for the template type.
+/// Returned slice points to a module-level constant; lifetime is static (rule 26).
+pub fn legalIntents(combat: bool, rights: contract_mod.CommandRights) []const operation_mod.Intent {
+    if (rights == .integrated) return &integrated_intents;
+    return if (combat) &combat_intents else &noncombat_intents;
+}
+
+/// Rule owner: is the given intent legal for this template × command-rights combination?
+/// Consumer predicate — callers use this rather than inspecting the legal set (rule 20).
+pub fn intentLegal(c: *const contract_mod.Contract, t: *const operation_mod.OperationTemplate, intent: operation_mod.Intent) bool {
+    for (legalIntents(t.combat, c.terms.command_rights)) |li| if (li == intent) return true;
+    return false;
+}
+
+/// Intent profile: deterministic post-roll modifiers applied when a committed combat
+/// operation has this intent (docs/p4-operations-design.md §6 decision 3, rule 57).
+/// All values are // TUNE — balance balance balance; no RNG involved.
+pub const IntentProfile = struct {
+    /// Basis-point multiplier for the score contribution of the engagement (10_000 = ×1.0). // TUNE
+    score_bp: i32,
+    /// Basis-point multiplier for the VP contribution of the engagement (10_000 = ×1.0). // TUNE
+    vp_bp: i32,
+    /// Whether the salvage claim is permitted for this intent. // TUNE
+    salvage_allowed: bool,
+    /// Extra fatigue added to the company after the engagement. // TUNE
+    fatigue_add: u8,
+};
+
+/// Rule owner: the intent profile for a committed combat operation (rule 20).
+/// All return values are // TUNE balance constants.
+pub fn intentProfile(intent: operation_mod.Intent) IntentProfile {
+    return switch (intent) {
+        .preserve_force => .{ .score_bp = 7_000, .vp_bp = 7_000, .salvage_allowed = false, .fatigue_add = 0 }, // TUNE: retreat focus reduces scoring; forgo salvage
+        .secure_objective => .{ .score_bp = 10_000, .vp_bp = 10_000, .salvage_allowed = true, .fatigue_add = 0 }, // TUNE: baseline
+        .break_enemy => .{ .score_bp = 13_000, .vp_bp = 13_000, .salvage_allowed = true, .fatigue_add = 2 }, // TUNE: aggressive push earns more and is exhausting
+        .protect_assets => .{ .score_bp = 10_000, .vp_bp = 10_500, .salvage_allowed = false, .fatigue_add = 0 }, // TUNE: protecting assets focuses effort, forgoes salvage
+        .secure_intelligence => .{ .score_bp = 9_000, .vp_bp = 10_500, .salvage_allowed = false, .fatigue_add = 0 }, // TUNE: intel focus reduces raw score
+        .recover => .{ .score_bp = 8_500, .vp_bp = 9_000, .salvage_allowed = false, .fatigue_add = 1 }, // TUNE: recovery mission reduces scoring and adds fatigue
+    };
+}
+
+/// Rule owner: did the operation succeed given the resolved intent and outcome band?
+/// Success is intent-relative (docs/p4-operations-design.md §6 decision 4, rule 20).
+/// `none` always returns false (not yet resolved).
+pub fn operationSucceeded(intent: operation_mod.Intent, band: operation_mod.OutcomeBand) bool {
+    if (band == .none) return false;
+    return switch (intent) {
+        .preserve_force => band != .failure, // TUNE: succeeds short of a rout
+        .secure_objective => band == .success or band == .decisive, // TUNE: needs at least a win
+        .break_enemy => band == .success or band == .decisive, // TUNE: needs victory or decisive
+        .protect_assets => band != .failure and band != .setback, // TUNE: partial or better
+        .secure_intelligence => band != .failure and band != .setback, // TUNE: partial or better
+        .recover => band != .failure and band != .setback, // TUNE: partial or better
+    };
+}
 
 /// Rule owner: is the given arc eligible for this contract kind?
 /// An arc is eligible when the kind's tag name appears in arc.kinds.
@@ -49,10 +126,19 @@ pub fn operationEligible(gs: *const GameState, c: *const contract_mod.Contract, 
 }
 
 /// Rule owner: the quote (expected days, stakes) for one operation on a contract.
+/// Pure (rule 26); exposes legal intents and any mandate for planning views.
 pub fn operationQuote(gs: *const GameState, c: *const contract_mod.Contract, t: *const operation_mod.OperationTemplate) Quote {
     _ = gs;
-    _ = c;
-    return .{ .expected_days = t.expected_days };
+    const li = legalIntents(t.combat, c.terms.command_rights);
+    const mandated: ?operation_mod.Intent = if (c.terms.command_rights == .integrated)
+        mandatedIntent(t.combat)
+    else
+        null;
+    return .{
+        .expected_days = t.expected_days,
+        .legal_intents = li,
+        .mandated = mandated,
+    };
 }
 
 /// Rule owner: map a resolution score to an outcome band (pure; no roll).
@@ -105,14 +191,22 @@ pub fn combatBand(outcome: @import("../domain/autoresolve.zig").Outcome) operati
 }
 
 /// Rule owner: deterministic non-combat resolution score for one operation.
-/// Inputs: base + command_rights term + employer_standing term (all // TUNE).
-/// Pure; no RNG (design §6 P4c: non-combat is deterministic).
-pub fn nonCombatScore(gs: *GameState, c: *const contract_mod.Contract, t: *const operation_mod.OperationTemplate) i32 {
+/// Inputs: base + command_rights term + employer_standing term + intent term (all // TUNE).
+/// Pure; no RNG (docs/p4-operations-design.md §6, P4c non-combat is deterministic).
+pub fn nonCombatScore(gs: *GameState, c: *const contract_mod.Contract, t: *const operation_mod.OperationTemplate, intent: operation_mod.Intent) i32 {
     _ = t;
     const base: i32 = 8; // TUNE: default non-combat outcome
     const rights_bonus: i32 = @divTrunc(c.terms.command_rights.gapDelta() * -1, 2); // TUNE: independent rights help negotiation
     const standing_bonus: i32 = @divTrunc(gs.standing(c.employer_key), 20); // TUNE: standing/20 bonus
-    return base + rights_bonus + standing_bonus;
+    const intent_mod: i32 = switch (intent) {
+        .preserve_force => -3, // TUNE: holding back does not advance the operation's goal
+        .secure_objective => 0, // TUNE: baseline
+        .break_enemy => -2, // TUNE: aggression is wasteful in non-combat work
+        .protect_assets => 2, // TUNE: protection aligns with non-combat operations
+        .secure_intelligence => 2, // TUNE: intelligence gathering aligns with non-combat work
+        .recover => 1, // TUNE: recovery is compatible with non-combat operations
+    };
+    return base + rights_bonus + standing_bonus + intent_mod;
 }
 
 /// Rule owner: how the escalation clock moves after a resolved operation.
@@ -582,6 +676,140 @@ test "selectFinale: below min_clock threshold returns held (min_clock==0); at th
     };
     const f_high = selectFinale(&c_high).?;
     try testing.expectEqualStrings(fell_key, f_high.key);
+}
+
+test "legalIntents / mandatedIntent / intentLegal: legal set × CommandRights" {
+    // Rule 20 owner test: legalIntents owns the set; intentLegal agrees with it.
+    const testing = std.testing;
+
+    // integrated: exactly one legal intent (the mandated one); all others illegal.
+    const integrated_combat = legalIntents(true, .integrated);
+    try testing.expectEqual(@as(usize, 1), integrated_combat.len);
+    try testing.expectEqual(operation_mod.Intent.secure_objective, integrated_combat[0]);
+    try testing.expectEqual(operation_mod.Intent.secure_objective, mandatedIntent(true));
+    try testing.expectEqual(operation_mod.Intent.secure_objective, mandatedIntent(false));
+
+    // non-integrated combat: all 6 intents legal.
+    const ind_combat = legalIntents(true, .independent);
+    try testing.expectEqual(@as(usize, 6), ind_combat.len);
+
+    // non-integrated non-combat: 4 intents; preserve_force and break_enemy excluded.
+    const ind_noncombat = legalIntents(false, .independent);
+    try testing.expectEqual(@as(usize, 4), ind_noncombat.len);
+    for (ind_noncombat) |li| {
+        try testing.expect(li != .preserve_force and li != .break_enemy);
+    }
+
+    // intentLegal: returns true iff the intent is in the legal set.
+    var c_ind: contract_mod.Contract = .{
+        .id = @enumFromInt(1),
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 12, .base_pay_month = 100_000, .command_rights = .independent },
+        .status = .active,
+    };
+    var c_integrated: contract_mod.Contract = c_ind;
+    c_integrated.terms.command_rights = .integrated;
+
+    const t_combat = operation_mod.findTemplate("repel_probe").?;
+    const t_noncombat = operation_mod.findTemplate("negotiate_terms").?;
+
+    // Independent + combat: all 6 legal.
+    try testing.expect(intentLegal(&c_ind, t_combat, .preserve_force));
+    try testing.expect(intentLegal(&c_ind, t_combat, .break_enemy));
+
+    // Independent + non-combat: preserve_force and break_enemy not legal.
+    try testing.expect(!intentLegal(&c_ind, t_noncombat, .preserve_force));
+    try testing.expect(!intentLegal(&c_ind, t_noncombat, .break_enemy));
+    try testing.expect(intentLegal(&c_ind, t_noncombat, .secure_objective));
+    try testing.expect(intentLegal(&c_ind, t_noncombat, .recover));
+
+    // Integrated: only secure_objective legal.
+    try testing.expect(intentLegal(&c_integrated, t_combat, .secure_objective));
+    try testing.expect(!intentLegal(&c_integrated, t_combat, .preserve_force));
+    try testing.expect(!intentLegal(&c_integrated, t_combat, .break_enemy));
+}
+
+test "intentProfile: internal consistency — break_enemy ≥ preserve_force; preserve_force salvage gated" {
+    // Rule 20 owner test: profile fields satisfy documented invariants (rule 67).
+    const testing = std.testing;
+    const pf = intentProfile(.preserve_force);
+    const be = intentProfile(.break_enemy);
+    const so = intentProfile(.secure_objective);
+
+    // break_enemy must score more than preserve_force (rule 20 / design §6).
+    try testing.expect(be.score_bp >= pf.score_bp);
+    try testing.expect(be.vp_bp >= pf.vp_bp);
+
+    // preserve_force: salvage not allowed (must withdraw from salvage).
+    try testing.expect(!pf.salvage_allowed);
+
+    // secure_objective: salvage allowed (baseline).
+    try testing.expect(so.salvage_allowed);
+
+    // break_enemy: salvage allowed (pressing the advantage).
+    try testing.expect(be.salvage_allowed);
+
+    // break_enemy adds fatigue; preserve_force does not.
+    try testing.expect(be.fatigue_add > 0);
+    try testing.expectEqual(@as(u8, 0), pf.fatigue_add);
+}
+
+test "operationSucceeded: preserve_force / break_enemy / secure_objective verdicts" {
+    // Rule 20 owner test: verdict is intent-relative (rule 67).
+    const testing = std.testing;
+
+    // preserve_force: succeeds short of a rout (failure only = no).
+    try testing.expect(!operationSucceeded(.preserve_force, .failure));
+    try testing.expect(operationSucceeded(.preserve_force, .setback));
+    try testing.expect(operationSucceeded(.preserve_force, .partial));
+    try testing.expect(operationSucceeded(.preserve_force, .success));
+    try testing.expect(operationSucceeded(.preserve_force, .decisive));
+
+    // break_enemy: only on victory/decisive.
+    try testing.expect(!operationSucceeded(.break_enemy, .failure));
+    try testing.expect(!operationSucceeded(.break_enemy, .setback));
+    try testing.expect(!operationSucceeded(.break_enemy, .partial));
+    try testing.expect(operationSucceeded(.break_enemy, .success));
+    try testing.expect(operationSucceeded(.break_enemy, .decisive));
+
+    // secure_objective: success or decisive only.
+    try testing.expect(!operationSucceeded(.secure_objective, .failure));
+    try testing.expect(!operationSucceeded(.secure_objective, .partial));
+    try testing.expect(operationSucceeded(.secure_objective, .success));
+    try testing.expect(operationSucceeded(.secure_objective, .decisive));
+
+    // .none always false.
+    try testing.expect(!operationSucceeded(.preserve_force, .none));
+    try testing.expect(!operationSucceeded(.secure_objective, .none));
+}
+
+test "nonCombatScore: intent term moves the score; preserve_force < secure_objective < protect_assets" {
+    // Rule 20 owner test (rule 67): intent modifier is applied.
+    const testing = std.testing;
+    var gs = @import("state.zig").GameState.init(testing.allocator, .{});
+    defer gs.deinit();
+
+    const t = operation_mod.findTemplate("negotiate_terms").?;
+    var c: contract_mod.Contract = .{
+        .id = @enumFromInt(1),
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 12, .base_pay_month = 100_000 },
+        .status = .active,
+    };
+
+    const score_pf = nonCombatScore(&gs, &c, t, .preserve_force);
+    const score_so = nonCombatScore(&gs, &c, t, .secure_objective);
+    const score_pa = nonCombatScore(&gs, &c, t, .protect_assets);
+
+    // preserve_force < secure_objective (baseline) < protect_assets.
+    try testing.expect(score_pf < score_so);
+    try testing.expect(score_so < score_pa);
 }
 
 test "advanceClocks: failure-atomic under injected OOM at log reservation" {

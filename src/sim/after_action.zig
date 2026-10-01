@@ -23,6 +23,7 @@ const HullHit = battle_report.HullHit;
 const SlotResult = battle_report.SlotResult;
 const part_mod = @import("../domain/part.zig");
 const medical = @import("medical.zig");
+const operations_m = @import("operations.zig");
 
 /// The `[AAR]` lines for a report, in log order. The one place a battle
 /// becomes prose: `battle.zig` logs what this returns and nothing else, so
@@ -43,7 +44,13 @@ pub fn render(alloc: std.mem.Allocator, r: *const BattleReport) ![]const []const
         if (r.convoy_hit) " · the convoy was hit — support train damaged" else "",
         if (r.roe == .standard) "" else try std.fmt.allocPrint(alloc, " · ROE {s}{s}{s}", .{ @tagName(r.roe), if (r.roe_overridden) " (integrated command)" else "", if (r.withdrew) " — withdrew from a draw, field given up" else "" }),
         if (r.edge_spent_by.len > 0) try std.fmt.allocPrint(alloc, " · {s} spent Edge to re-roll a lost engagement", .{r.edge_spent_by}) else "",
-        if (r.operation.len > 0) try std.fmt.allocPrint(alloc, " · operation: {s}", .{r.operation}) else "",
+        if (r.operation.len > 0) try std.fmt.allocPrint(alloc, " · operation: {s}{s}", .{
+            r.operation,
+            if (r.operation_intent) |intent| try std.fmt.allocPrint(alloc, " (intent: {s} — {s})", .{
+                intent.label(),
+                if (operations_m.operationSucceeded(intent, operations_m.combatBand(r.outcome))) "mission success" else "mission failed",
+            }) else "",
+        }) else "",
     }));
 
     try out.append(alloc, try std.fmt.allocPrint(alloc, "[AAR]   losses: {d} hit / {d} destroyed, {d} wounded, {d} KIA | enemy losses {d} BV ≈ {d} kill{s} credited{s} | salvage {d} BV claimed | comp {d} | score {d}", .{
@@ -221,4 +228,55 @@ test "render: operation name appears in the AAR header when set" {
     // Header line (lines[0]) must contain the operation name.
     try std.testing.expect(lines.len >= 1);
     try std.testing.expect(std.mem.indexOf(u8, lines[0], "Repel Probe") != null);
+}
+
+test "render: intent and success verdict appear in the AAR header when operation_intent is set" {
+    // Rule 20 consumer test: render calls operationSucceeded and shows the verdict.
+    // docs/p4-operations-design.md §6.
+    const operation = @import("../domain/operation.zig");
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const ammo = [_]battle_report.AmmoLine{.{ .key = "ammo_lrm", .burned = 0, .left = 0 }};
+    // secure_objective + victory => "mission success"
+    const r_ok: BattleReport = .{
+        .id = @enumFromInt(3),
+        .day = 11,
+        .contract = @enumFromInt(1),
+        .company = @enumFromInt(1),
+        .kind = "garrison duty",
+        .enemy_key = "DC",
+        .scenario = "probe",
+        .terrain = "open",
+        .weather = "clear",
+        .outcome = .victory,
+        .operation = "Repel Probe",
+        .operation_intent = .secure_objective,
+        .ammo = &ammo,
+    };
+    const lines_ok = try render(arena.allocator(), &r_ok);
+    try std.testing.expect(lines_ok.len >= 1);
+    try std.testing.expect(std.mem.indexOf(u8, lines_ok[0], "intent: secure objective") != null);
+    try std.testing.expect(std.mem.indexOf(u8, lines_ok[0], "mission success") != null);
+
+    // preserve_force + rout => "mission failed"
+    const r_fail: BattleReport = .{
+        .id = @enumFromInt(4),
+        .day = 12,
+        .contract = @enumFromInt(1),
+        .company = @enumFromInt(1),
+        .kind = "garrison duty",
+        .enemy_key = "DC",
+        .scenario = "probe",
+        .terrain = "open",
+        .weather = "clear",
+        .outcome = .rout,
+        .operation = "Repel Probe",
+        .operation_intent = .preserve_force,
+        .ammo = &ammo,
+    };
+    _ = operation;
+    const lines_fail = try render(arena.allocator(), &r_fail);
+    try std.testing.expect(lines_fail.len >= 1);
+    try std.testing.expect(std.mem.indexOf(u8, lines_fail[0], "intent: preserve force") != null);
+    try std.testing.expect(std.mem.indexOf(u8, lines_fail[0], "mission failed") != null);
 }

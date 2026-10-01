@@ -29,6 +29,7 @@ const contract_mod = @import("../domain/contract.zig");
 const network = @import("network.zig");
 const contract_control = @import("contract_control.zig");
 const operation_control = @import("operation_control.zig");
+const operation_mod = @import("../domain/operation.zig");
 const lift_mod = @import("lift.zig");
 const meklab = @import("../domain/meklab.zig");
 const force_mod = @import("../domain/force.zig");
@@ -279,8 +280,8 @@ pub const Command = union(enum) {
     /// Bring an idle company home; refused under contract (the breach
     /// recall is `recall_company`).
     recall_idle: types.ForceId,
-    /// Commit an available operation on an active arc contract.
-    commit_operation: struct { contract: types.ContractId, operation: types.OperationId },
+    /// Commit an available operation on an active arc contract with an explicit mission intent.
+    commit_operation: struct { contract: types.ContractId, operation: types.OperationId, intent: operation_mod.Intent },
     /// Decline an available operation on an active arc contract.
     decline_operation: struct { contract: types.ContractId, operation: types.OperationId },
 };
@@ -430,6 +431,8 @@ pub const Error = error{
     OperationNoOpposition,
     /// A combat operation is already committed on this contract.
     OperationBusy,
+    /// The chosen intent is outside the legal set for this operation × command rights.
+    OperationIntentIllegal,
 } || std.mem.Allocator.Error;
 
 pub const Result = struct {

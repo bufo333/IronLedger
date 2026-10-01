@@ -9,6 +9,7 @@
 const std = @import("std");
 const person_mod = @import("../domain/person.zig");
 const force_mod = @import("../domain/force.zig");
+const operation_mod = @import("../domain/operation.zig");
 const game = @import("../root.zig");
 const types = game.types;
 const Command = game.commands.Command;
@@ -525,10 +526,12 @@ fn parseVerb(verb: []const u8, tokens: *std.mem.TokenIterator(u8, .scalar)) Pars
         return .{ .recall_idle = site.company };
     }
     if (eq(u8, verb, "commit")) {
-        // commit <contract-id> <operation-id>
+        // commit <contract-id> <operation-id> <intent>
         const cid: types.ContractId = @enumFromInt(try num(u32, tokens.next()));
         const oid: types.OperationId = @enumFromInt(try num(u32, tokens.next()));
-        return .{ .commit_operation = .{ .contract = cid, .operation = oid } };
+        const intent_str = try need(tokens.next());
+        const intent = std.meta.stringToEnum(operation_mod.Intent, intent_str) orelse return error.BadArguments;
+        return .{ .commit_operation = .{ .contract = cid, .operation = oid, .intent = intent } };
     }
     if (eq(u8, verb, "decline")) {
         // decline <contract-id> <operation-id>
@@ -679,6 +682,7 @@ pub fn errorText(err: anyerror) []const u8 {
         error.OperationUnavailable => "that operation is not available — it may already be committed, declined, or resolved.",
         error.OperationNoOpposition => "committing a combat operation requires an opposition force on this contract.",
         error.OperationBusy => "a combat operation is already committed on this contract — one at a time.",
+        error.OperationIntentIllegal => "the chosen intent is not permitted for this operation — check command rights and operation type.",
         else => "an unexpected internal error",
     };
 }
@@ -842,7 +846,7 @@ pub fn usage(verb: []const u8) ?[]const u8 {
         .{ "confirm", "confirm <contract id>   (battle orders given; see `briefing <contract id>`)" },
         .{ "rush", "rush <contract id>   (emergency resupply on the contract world before contact)" },
         .{ "recall", "recall co:N" },
-        .{ "commit", "commit <contract-id> <operation-id>   (commit an available operation)" },
+        .{ "commit", "commit <contract-id> <operation-id> <intent>   (commit an available operation; intent: preserve_force, secure_objective, break_enemy, protect_assets, secure_intelligence, recover)" },
         .{ "decline", "decline <contract-id> <operation-id>   (decline an available operation)" },
         .{ "found", "found <planet key> <name>" },
         .{ "link", "link hq:A hq:B [level 1-3]" },

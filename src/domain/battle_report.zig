@@ -24,6 +24,7 @@ const person_mod = @import("person.zig");
 const force_mod = @import("force.zig");
 const autoresolve = @import("autoresolve.zig");
 const tuning = @import("tuning.zig").t;
+const operation = @import("operation.zig");
 
 /// What a hit did to a mounted part.
 pub const SlotResult = enum {
@@ -191,6 +192,9 @@ pub const BattleReport = struct {
 
     /// The operation that produced this engagement (template name), or "".
     operation: []const u8 = "",
+    /// The commander's stated intent for the committed combat operation, if any.
+    /// Null when no combat operation was committed for this engagement.
+    operation_intent: ?operation.Intent = null,
     /// No combat-effective units: the objective was conceded without a shot.
     conceded: bool = false,
     /// The commander has read it. An unread report holds the turn:

@@ -1435,22 +1435,22 @@ The player selects what an operation is trying to achieve before the
 autoresolver acts. Winning an engagement and accomplishing the operation are
 separate results.
 
-- P4c.1 Add operation-scoped intents: preserve force, secure objective,
+- [x] P4c.1 Add operation-scoped intents: preserve force, secure objective,
   break enemy, protect assets, secure intelligence, and recover personnel or
   equipment. Operation template, command rights and current state determine
   the legal set.
-- P4c.2 Define intent effects for battle score,
+- [x] P4c.2 Define intent effects for battle score,
   victory-point weight, field-holding requirement, salvage access, local-state
   exposure, enemy-attrition contribution, ammunition/fatigue profile and
   post-battle follow-up availability.
-- P4c.3 Pass the committed operation context into battle setup. Scenario
+- [x] P4c.3 Pass the committed operation context into battle setup. Scenario
   selection, enemy posture, score effects and recovery context consume that
   context; the AAR names the selected intent and whether it succeeded.
-- P4c.4 Apply command-rights constraints through the existing
+- [x] P4c.4 Apply command-rights constraints through the existing
   `CommandRights` owner: integrated command may mandate an intent, house or
   liaison command may limit it or penalize defiance, and independent command
   provides wider choice with its existing tradeoffs.
-- P4c.5 Add planning commands and views under the command rules; ROE remains a
+- [x] P4c.5 Add planning commands and views under the command rules; ROE remains a
   distinct risk posture inside a mission plan.
 
 **Acceptance:** a force can preserve its hulls but fail the mission, or take

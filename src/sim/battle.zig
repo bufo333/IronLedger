@@ -927,10 +927,22 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     // divided. Both stay empty unless the haul is worth a decision.
     var salvage_candidates: []const battle_report.SalvageCandidate = &.{};
     var salvage_unclaimed: i64 = 0;
+    // Determine the committed combat operation's intent early — needed for
+    // salvage gating and score modifiers below (docs/p4-operations-design.md §6).
+    // battle.zig MUST NOT import operation_control.zig (rule 5).
+    const committed_op_early = operations_m.committedCombatOp(c);
+    const op_intent: ?operation_mod.Intent = if (committed_op_early) |op| op.intent else null;
     // Salvage is things, not money: your share of what the
     // crews haul off a held field becomes wrecks and parts crated to the
     // home HQ depot — to store, strip, or rebuild into a working hull.
     var salvage_bv: i64 = if (held_field) types.applyBp(salvageClaimBv(haulable_bv, c.terms.salvage_pct, player.mods.has_salvage_lance), scenario.salvage_bp) else 0;
+    // Gate salvage on the committed operation's intent profile (rule 20).
+    // No new RNG draw: intent is a deterministic post-roll modifier (design §6).
+    if (op_intent) |intent| {
+        if (!operations_m.intentProfile(intent).salvage_allowed) {
+            salvage_bv = 0;
+        }
+    }
     // The liaison's cut: under tighter command rights the employer
     // claims part of what you haul.
     const before_cut = salvage_bv;
@@ -983,16 +995,33 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
 
     // Score, morale, fatigue, experience.
     const after = try aftermath(gs, c, &player, open, env, engaged, enemy_destroyed_bv, wounded, kia);
-    const score_delta = after.score_delta;
+    var score_delta = after.score_delta;
     const morale_delta = after.morale_delta;
     const convoy_hit = after.convoy_hit;
     const kills_credited = after.kills_credited;
+
+    // Apply intent profile (deterministic post-roll modifiers; no new RNG draw;
+    // docs/p4-operations-design.md §6 decision 3, rule 57).
+    // `op_intent` was captured before the salvage section; the committed op is
+    // still the same (battle.zig MUST NOT import operation_control.zig, rule 5).
+    if (op_intent) |intent| {
+        const profile = operations_m.intentProfile(intent);
+        if (after.score_delta != 0) {
+            const base = after.score_delta;
+            const score_extra = @as(i32, @intCast(types.applyBp(@as(i64, base), @as(i64, profile.score_bp)))) - base;
+            const vp_extra = (@as(i32, @intCast(types.applyBp(@as(i64, base), @as(i64, profile.vp_bp)))) - base) * tuning.contract.vp_per_score;
+            c.score += score_extra;
+            c.victory_points += vp_extra;
+            score_delta += score_extra;
+        }
+        if (profile.fatigue_add > 0) applyCompanyAftermath(gs, c.assigned_company, 0, profile.fatigue_add);
+    }
 
     // Operation binding: if a combat operation was committed, associate it
     // with this engagement. Reserve the extra arc result log line now
     // (failure-atomic: reserve before any mutation, commit infallibly).
     // battle.zig MUST NOT import operation_control.zig (rule 5).
-    const committed_op = operations_m.committedCombatOp(c);
+    const committed_op = committed_op_early;
     const op_template_name: []const u8 = if (committed_op) |op|
         if (operation_mod.findTemplate(op.template_key)) |t| t.name else ""
     else
@@ -1020,6 +1049,7 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     const report: battle_report.BattleReport = .{
         .id = gs.nextBattleId(),
         .operation = op_template_name,
+        .operation_intent = op_intent,
         .day = gs.clock.day_index,
         .contract = c.id,
         .company = c.assigned_company,
@@ -1175,9 +1205,11 @@ fn concede(gs: *GameState, c: *contract_mod.Contract) !void {
         });
     }
 
+    const concede_op_intent: ?operation_mod.Intent = if (committed_op) |op| op.intent else null;
     const report: battle_report.BattleReport = .{
         .id = gs.nextBattleId(),
         .operation = op_template_name,
+        .operation_intent = concede_op_intent,
         .day = gs.clock.day_index,
         .contract = c.id,
         .company = c.assigned_company,
@@ -2558,4 +2590,110 @@ test "estimatePower owns the company's combat strength; offer_rating.rateOffer a
     const rating = try @import("offer_rating.zig").rateOffer(arena.allocator(), &gs, &c, co);
     try std.testing.expect(rating != null);
     try std.testing.expectEqual(est.power, rating.?.own.power);
+}
+
+test "intent-shaped battle: break_enemy vs preserve_force produce different score/VP; no extra RNG draw" {
+    // Rule 20 consumer test: intentProfile modifiers are applied as deterministic
+    // post-roll modifiers; the no-intent-op path produces the baseline score.
+    // docs/p4-operations-design.md §6 decision 3.
+    const testing = std.testing;
+    // Use two identical game states diverged only by the committed op's intent.
+    var gs_be = GameState.init(testing.allocator, .{ .seed = 42001 });
+    defer gs_be.deinit();
+    var gs_pf = GameState.init(testing.allocator, .{ .seed = 42001 });
+    defer gs_pf.deinit();
+
+    // Build a minimal combat-capable company in both states.
+    for (&[_]*GameState{ &gs_be, &gs_pf }) |gs| {
+        const co = try @import("starter_company.zig").generateInto(gs, "Ghost");
+        const cid: types.ContractId = @enumFromInt(1);
+        try gs.contracts.put(gs.allocator(), cid, .{
+            .id = cid,
+            .kind = .garrison_duty,
+            .employer_key = "LC",
+            .enemy_key = "DC",
+            .planet_key = "galatea",
+            .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+            .status = .active,
+            .assigned_company = co,
+            .arc_key = "fracturing_garrison",
+            .enemy_lances = 2,
+            .enemy_lance_bv = 8000,
+        });
+    }
+    // Commit the combat operation with different intents.
+    const cid: types.ContractId = @enumFromInt(1);
+    const oid: types.OperationId = @enumFromInt(1);
+    for (&[_]*GameState{ &gs_be, &gs_pf }, &[_]operation_mod.Intent{ .break_enemy, .preserve_force }) |gs, intent| {
+        try gs.contracts.getPtr(cid).?.operations.append(gs.allocator(), .{
+            .id = oid,
+            .template_key = "repel_probe",
+            .state = .committed,
+            .opened_day = 0,
+            .committed_day = 0,
+            .intent = intent,
+        });
+    }
+
+    try resolveEngagement(&gs_be, gs_be.contracts.getPtr(cid).?);
+    try resolveEngagement(&gs_pf, gs_pf.contracts.getPtr(cid).?);
+
+    const score_be = gs_be.contracts.getPtr(cid).?.score;
+    const score_pf = gs_pf.contracts.getPtr(cid).?.score;
+    const vp_be = gs_be.contracts.getPtr(cid).?.victory_points;
+    const vp_pf = gs_pf.contracts.getPtr(cid).?.victory_points;
+
+    // The two intents must produce materially different results.
+    // (They use the same seed, so the only difference is the profile.)
+    try testing.expect(score_be != score_pf or vp_be != vp_pf);
+}
+
+test "intent salvage gate: preserve_force claims no salvage on a held field" {
+    // Rule 20 consumer test: intentProfile.salvage_allowed = false means
+    // no salvage even when the field is held and there are wrecks.
+    // docs/p4-operations-design.md §6 decision 3.
+    const testing = std.testing;
+    var gs = GameState.init(testing.allocator, .{ .seed = 42002 });
+    defer gs.deinit();
+
+    const co = try @import("starter_company.zig").generateInto(&gs, "Ghost");
+    const cid: types.ContractId = @enumFromInt(1);
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{
+            .length_months = 18,
+            .base_pay_month = 200_000,
+            .salvage_pct = 50,
+        },
+        .status = .active,
+        .assigned_company = co,
+        .arc_key = "fracturing_garrison",
+        .enemy_lances = 1,
+        .enemy_lance_bv = 3000,
+    });
+    const c = gs.contracts.getPtr(cid).?;
+    try c.operations.append(gs.allocator(), .{
+        .id = @enumFromInt(1),
+        .template_key = "repel_probe",
+        .state = .committed,
+        .opened_day = 0,
+        .committed_day = 0,
+        .intent = .preserve_force, // salvage_allowed = false
+    });
+
+    try resolveEngagement(&gs, c);
+
+    // Any battle report produced must have 0 claimed salvage (intent gate).
+    for (gs.battle_reports.kept.items) |r| {
+        if (r.operation_intent) |intent| {
+            if (intent == .preserve_force) {
+                try testing.expectEqual(@as(i64, 0), r.salvage.claimed_bv);
+                try testing.expectEqual(@as(i64, 0), r.salvage.unclaimed_bv);
+            }
+        }
+    }
 }

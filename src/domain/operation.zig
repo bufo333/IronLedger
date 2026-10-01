@@ -63,6 +63,39 @@ pub const Operation = struct {
     resolved_day: ?u32 = null,
     /// Day the operation was committed (state → .committed); null until then.
     committed_day: ?u32 = null,
+    /// Commander's stated mission intent, chosen at commit time (docs/p4-operations-design.md §6).
+    /// Default `.secure_objective` keeps the baseline behaviour for ops committed before P4d.
+    intent: Intent = .secure_objective,
+};
+
+/// The commander's stated objective for this operation (docs/p4-operations-design.md §6).
+/// Legal set is derived from the template's `combat` flag and the contract's
+/// `CommandRights`; owned by `sim/operations.zig` (rule 20).
+pub const Intent = enum {
+    /// Hold back and protect the company; accept reduced score to preserve hulls. // TUNE
+    preserve_force,
+    /// Accomplish the stated objective — the baseline. // TUNE
+    secure_objective,
+    /// Destroy or rout the enemy; push hard for maximum score. // TUNE
+    break_enemy,
+    /// Protect employer or allied assets on the field. // TUNE
+    protect_assets,
+    /// Gather or protect intelligence; accept reduced score for recon value. // TUNE
+    secure_intelligence,
+    /// Recover personnel or equipment from a contested area. // TUNE
+    recover,
+
+    /// Short display label for the UI and AAR (markup-safe; rule 33). // TUNE
+    pub fn label(self: Intent) []const u8 {
+        return switch (self) {
+            .preserve_force => "preserve force",
+            .secure_objective => "secure objective",
+            .break_enemy => "break enemy",
+            .protect_assets => "protect assets",
+            .secure_intelligence => "secure intelligence",
+            .recover => "recover",
+        };
+    }
 };
 
 /// The template with this key, or null.
@@ -134,4 +167,23 @@ test "data: operations.zon loads and validates" {
     const repel = findTemplate("repel_probe").?;
     try testing.expectEqualStrings("fracturing_garrison", repel.arc_key);
     try testing.expect(repel.combat);
+}
+
+test "Intent: all six values have a non-empty markup-safe label; Operation.intent defaults to secure_objective" {
+    const testing = std.testing;
+    // All six labels must be non-empty and markup-safe (no '{', no C0).
+    const all_intents = [_]Intent{ .preserve_force, .secure_objective, .break_enemy, .protect_assets, .secure_intelligence, .recover };
+    for (all_intents) |i| {
+        const lbl = i.label();
+        try testing.expect(lbl.len > 0);
+        for (lbl) |ch| try testing.expect(ch != '{' and ch >= 0x20 and ch < 0x7f);
+    }
+    // Operation default intent is secure_objective.
+    const op: Operation = .{
+        .id = @enumFromInt(1),
+        .template_key = "negotiate_terms",
+        .state = .available,
+        .opened_day = 0,
+    };
+    try testing.expectEqual(Intent.secure_objective, op.intent);
 }

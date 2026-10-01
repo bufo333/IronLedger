@@ -108,6 +108,7 @@ pub fn execCommitOperation(gs: *GameState, args: @FieldType(commands.Command, "c
         if (!c.hasOpfor()) return error.OperationNoOpposition;
         if (operations.committedCombatOp(c) != null) return error.OperationBusy;
     }
+    if (!operations.intentLegal(c, t, args.intent)) return error.OperationIntentIllegal;
 
     // ---- PREPARE: reserve log slot and pre-format ----
     try gs.reserveLog(1);
@@ -120,6 +121,7 @@ pub fn execCommitOperation(gs: *GameState, args: @FieldType(commands.Command, "c
     // ---- COMMIT: infallible ----
     op.state = .committed;
     op.committed_day = gs.clock.day_index;
+    op.intent = args.intent;
     if (t.combat) {
         const due = gs.clock.day_index + @as(u32, t.expected_days);
         c.next_battle_day = @min(c.next_battle_day orelse std.math.maxInt(u32), due);
@@ -200,7 +202,7 @@ pub fn resolveDueOperations(gs: *GameState) !void {
 
             // Reserve + pre-format before any mutation (rule 13).
             try gs.reserveLog(1);
-            const band = operations.outcomeBand(operations.nonCombatScore(gs, c, t));
+            const band = operations.outcomeBand(operations.nonCombatScore(gs, c, t, op.intent));
             const score_d = bandScoreDelta(band);
             const vp_d = bandVpDelta(band);
             const clock_d = operations.outcomeClockDelta(band);
@@ -301,12 +303,13 @@ test "execCommitOperation: available → committed, sets committed_day" {
         .opened_day = 0,
     });
 
-    const result = try execCommitOperation(&gs, .{ .contract = cid, .operation = oid });
+    const result = try execCommitOperation(&gs, .{ .contract = cid, .operation = oid, .intent = .secure_objective });
     _ = result;
 
     const op = &c.operations.items[0];
     try testing.expectEqual(operation_mod.OperationState.committed, op.state);
     try testing.expectEqual(@as(?u32, gs.clock.day_index), op.committed_day);
+    try testing.expectEqual(operation_mod.Intent.secure_objective, op.intent);
 }
 
 test "execCommitOperation: combat op sets next_battle_day" {
@@ -336,7 +339,7 @@ test "execCommitOperation: combat op sets next_battle_day" {
         .opened_day = 0,
     });
 
-    _ = try execCommitOperation(&gs, .{ .contract = cid, .operation = oid });
+    _ = try execCommitOperation(&gs, .{ .contract = cid, .operation = oid, .intent = .secure_objective });
 
     const t = operation_mod.findTemplate("repel_probe").?;
     const expected_day = gs.clock.day_index + @as(u32, t.expected_days);
@@ -359,7 +362,7 @@ test "execCommitOperation: refuses non-active contract, unknown op, non-availabl
         .terms = .{ .length_months = 3, .base_pay_month = 100_000 },
         .status = .offer,
     });
-    try testing.expectError(error.UnknownContract, execCommitOperation(&gs, .{ .contract = cid_offer, .operation = @enumFromInt(1) }));
+    try testing.expectError(error.UnknownContract, execCommitOperation(&gs, .{ .contract = cid_offer, .operation = @enumFromInt(1), .intent = .secure_objective }));
 
     // Active contract.
     const cid: types.ContractId = @enumFromInt(1);
@@ -383,11 +386,11 @@ test "execCommitOperation: refuses non-active contract, unknown op, non-availabl
     });
 
     // Unknown operation id.
-    try testing.expectError(error.UnknownOperation, execCommitOperation(&gs, .{ .contract = cid, .operation = @enumFromInt(999) }));
+    try testing.expectError(error.UnknownOperation, execCommitOperation(&gs, .{ .contract = cid, .operation = @enumFromInt(999), .intent = .secure_objective }));
 
     // Op in non-available state.
     c.operations.items[0].state = .committed;
-    try testing.expectError(error.OperationUnavailable, execCommitOperation(&gs, .{ .contract = cid, .operation = oid }));
+    try testing.expectError(error.OperationUnavailable, execCommitOperation(&gs, .{ .contract = cid, .operation = oid, .intent = .secure_objective }));
     c.operations.items[0].state = .available;
 
     // Combat op with no opfor.
@@ -398,12 +401,12 @@ test "execCommitOperation: refuses non-active contract, unknown op, non-availabl
         .state = .available,
         .opened_day = 0,
     });
-    try testing.expectError(error.OperationNoOpposition, execCommitOperation(&gs, .{ .contract = cid, .operation = oid2 }));
+    try testing.expectError(error.OperationNoOpposition, execCommitOperation(&gs, .{ .contract = cid, .operation = oid2, .intent = .secure_objective }));
 
     // Add opfor; first combat op committed; second should be refused.
     c.enemy_lances = 2;
     c.enemy_lance_bv = 5000;
-    _ = try execCommitOperation(&gs, .{ .contract = cid, .operation = oid2 });
+    _ = try execCommitOperation(&gs, .{ .contract = cid, .operation = oid2, .intent = .secure_objective });
     const oid3: types.OperationId = @enumFromInt(3);
     try c.operations.append(gs.allocator(), .{
         .id = oid3,
@@ -411,7 +414,7 @@ test "execCommitOperation: refuses non-active contract, unknown op, non-availabl
         .state = .available,
         .opened_day = 0,
     });
-    try testing.expectError(error.OperationBusy, execCommitOperation(&gs, .{ .contract = cid, .operation = oid3 }));
+    try testing.expectError(error.OperationBusy, execCommitOperation(&gs, .{ .contract = cid, .operation = oid3, .intent = .secure_objective }));
 }
 
 test "execDeclineOperation: available → declined, clock rises" {
@@ -592,7 +595,7 @@ test "execCommitOperation: failure-atomic under OOM at log reservation" {
     gs.arena.state.free_list = null;
     gs.arena.child_allocator = std.testing.failing_allocator;
 
-    try testing.expectError(error.OutOfMemory, execCommitOperation(&gs, .{ .contract = cid, .operation = oid }));
+    try testing.expectError(error.OutOfMemory, execCommitOperation(&gs, .{ .contract = cid, .operation = oid, .intent = .secure_objective }));
     try testing.expectEqual(before, digest.stateHash(&gs));
     try testing.expectEqual(operation_mod.OperationState.available, c.operations.items[0].state);
 }
@@ -680,4 +683,97 @@ test "resolveDueOperations: failure-atomic under OOM at log reservation" {
     try testing.expectError(error.OutOfMemory, resolveDueOperations(&gs));
     try testing.expectEqual(before, digest.stateHash(&gs));
     try testing.expectEqual(operation_mod.OperationState.committed, c.operations.items[0].state);
+}
+
+test "execCommitOperation: stores the chosen intent; illegal intent refused before any mutation" {
+    // Rule 13 (failure-atomic) + rule 20 (single owner of legal-set check).
+    const testing = std.testing;
+    const digest = @import("digest.zig");
+    var gs = GameState.init(testing.allocator, .{});
+    defer gs.deinit();
+
+    const cid: types.ContractId = @enumFromInt(1);
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+        .status = .active,
+        .arc_key = "fracturing_garrison",
+    });
+    const c = gs.contracts.getPtr(cid).?;
+    const oid: types.OperationId = @enumFromInt(1);
+    try c.operations.append(gs.allocator(), .{
+        .id = oid,
+        .template_key = "negotiate_terms", // non-combat: preserve_force is illegal
+        .state = .available,
+        .opened_day = 0,
+    });
+
+    // Illegal intent is refused before any mutation: digest must be unchanged.
+    const before = digest.stateHash(&gs);
+    try testing.expectError(error.OperationIntentIllegal, execCommitOperation(&gs, .{
+        .contract = cid,
+        .operation = oid,
+        .intent = .preserve_force, // not legal on non-combat templates
+    }));
+    try testing.expectEqual(before, digest.stateHash(&gs));
+    try testing.expectEqual(operation_mod.OperationState.available, c.operations.items[0].state);
+
+    // Legal intent commits and stores the chosen intent.
+    _ = try execCommitOperation(&gs, .{ .contract = cid, .operation = oid, .intent = .protect_assets });
+    try testing.expectEqual(operation_mod.OperationState.committed, c.operations.items[0].state);
+    try testing.expectEqual(operation_mod.Intent.protect_assets, c.operations.items[0].intent);
+}
+
+test "resolveDueOperations: intent affects the resolved band (preserve_force < secure_objective)" {
+    // Rule 20 consumer test: nonCombatScore is called with op.intent.
+    const testing = std.testing;
+    var gs_pf = GameState.init(testing.allocator, .{});
+    defer gs_pf.deinit();
+    var gs_so = GameState.init(testing.allocator, .{});
+    defer gs_so.deinit();
+
+    const cid: types.ContractId = @enumFromInt(1);
+    const t = operation_mod.findTemplate("negotiate_terms").?;
+    const committed_day: u32 = 0;
+
+    // Build the same contract in both game states, one with preserve_force, one with secure_objective.
+    for (&[_]*GameState{ &gs_pf, &gs_so }, &[_]operation_mod.Intent{ .preserve_force, .secure_objective }) |gs, intent| {
+        try gs.contracts.put(gs.allocator(), cid, .{
+            .id = cid,
+            .kind = .garrison_duty,
+            .employer_key = "LC",
+            .enemy_key = "DC",
+            .planet_key = "galatea",
+            .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+            .status = .active,
+            .arc_key = "fracturing_garrison",
+        });
+        try gs.contracts.getPtr(cid).?.operations.append(gs.allocator(), .{
+            .id = @enumFromInt(1),
+            .template_key = "negotiate_terms",
+            .state = .committed,
+            .opened_day = committed_day,
+            .committed_day = committed_day,
+            .intent = intent,
+        });
+        gs.clock.day_index = committed_day + @as(u32, t.expected_days);
+    }
+
+    try resolveDueOperations(&gs_pf);
+    try resolveDueOperations(&gs_so);
+
+    const band_pf = gs_pf.contracts.getPtr(cid).?.operations.items[0].outcome;
+    const band_so = gs_so.contracts.getPtr(cid).?.operations.items[0].outcome;
+
+    // Both resolved; preserve_force (−3 mod) should yield a lower or equal band.
+    try testing.expect(band_pf != .none);
+    try testing.expect(band_so != .none);
+    // preserve_force intent penalty should push the score down; verify the score order.
+    const score_pf = operations.nonCombatScore(&gs_pf, gs_pf.contracts.getPtr(cid).?, t, .preserve_force);
+    const score_so = operations.nonCombatScore(&gs_so, gs_so.contracts.getPtr(cid).?, t, .secure_objective);
+    try testing.expect(score_pf < score_so);
 }

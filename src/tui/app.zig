@@ -132,6 +132,8 @@ const Modal = union(enum) {
     music,
     /// Pick commit/decline for an arc-contract operation.
     operation_pick: types.ContractId,
+    /// Pick the mission intent for a specific operation before committing it.
+    intent_pick: struct { contract: types.ContractId, operation: types.OperationId },
 };
 
 /// A yes/no over one command. `id` is the subject the kind names.
@@ -1340,7 +1342,7 @@ pub const App = struct {
         const al = self.a();
         switch (self.modal) {
             .none => {},
-            .help, .decision, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .seat, .emblem, .hull, .contract_log, .log_entry, .battle_list, .record, .operation_pick => try self.drawList(al),
+            .help, .decision, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .seat, .emblem, .hull, .contract_log, .log_entry, .battle_list, .record, .operation_pick, .intent_pick => try self.drawList(al),
             .after_action => |id| try self.drawAfterAction(al, id),
             .end_turn => {
                 const g = self.state();
@@ -3058,11 +3060,27 @@ pub const App = struct {
                 }
                 const hint: []const u8 = if (ops.briefing.len > 0) ops.briefing else "(no arc)";
                 return .{
-                    .title = try listTitle(al, try std.fmt.allocPrint(al, "OPERATIONS · [{d}]", .{@intFromEnum(cid)}), "Enter commit · x decline", "cancel", false),
+                    .title = try listTitle(al, try std.fmt.allocPrint(al, "OPERATIONS · [{d}]", .{@intFromEnum(cid)}), "Enter pick intent · x decline", "cancel", false),
                     .head = try al.dupe([]const u8, &.{ hint, "" }),
                     .rows = rows.items,
                     .n = ops.rows.len,
                     .empty = "{d}no operations on this contract{/}",
+                    .w = layout.modal.picker_w,
+                    .max_h = full_h,
+                };
+            },
+            .intent_pick => |ip| {
+                const choices = try q.intentChoices(al, self.state(), ip.contract, ip.operation);
+                var rows: std.ArrayListUnmanaged([]const u8) = .empty;
+                for (choices) |intent| {
+                    try rows.append(al, try std.fmt.allocPrint(al, "{s}", .{intent.label()}));
+                }
+                return .{
+                    .title = try listTitle(al, "MISSION INTENT", "Enter commit", "cancel", false),
+                    .head = try al.dupe([]const u8, &.{ "choose the commander's intent for this operation", "" }),
+                    .rows = rows.items,
+                    .n = choices.len,
+                    .empty = "{d}no intents available{/}",
                     .w = layout.modal.picker_w,
                     .max_h = full_h,
                 };
@@ -3326,8 +3344,20 @@ pub const App = struct {
                 const ops = try q.contractOperations(al, self.state(), cid);
                 if (ops.rows.len == 0) return;
                 const row = ops.rows[@min(self.modal_cursor, ops.rows.len - 1)];
+                // Open the intent picker for this operation; commit happens there.
+                self.openModal(.{ .intent_pick = .{ .contract = cid, .operation = row.id } });
+            },
+            .intent_pick => |ip| {
+                const choices = try q.intentChoices(al, self.state(), ip.contract, ip.operation);
+                if (choices.len == 0) return;
+                const intent = choices[@min(self.modal_cursor, choices.len - 1)];
                 self.modal = .none;
-                _ = try self.execSay(.{ .commit_operation = .{ .contract = cid, .operation = row.id } }, .good, "committed operation: {s}", .{row.name});
+                _ = try self.execSay(
+                    .{ .commit_operation = .{ .contract = ip.contract, .operation = ip.operation, .intent = intent } },
+                    .good,
+                    "committed operation with intent: {s}",
+                    .{intent.label()},
+                );
             },
             .lance_pick => |uid| {
                 const lances = try self.lanceChoices(uid);
@@ -3481,6 +3511,7 @@ pub const App = struct {
                 self.modal = .none;
                 return true;
             },
+            .intent_pick => return false, // only Enter (listEnter) is handled for intent_pick
             else => return false,
         }
         return true;
@@ -3654,7 +3685,7 @@ pub const App = struct {
     fn handleModalKey(self: *App, key: Key) !void {
         switch (self.modal) {
             .none => {},
-            .help, .decision, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .seat, .emblem, .hull, .contract_log, .log_entry, .battle_list, .record, .operation_pick => try self.listKey(key),
+            .help, .decision, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .seat, .emblem, .hull, .contract_log, .log_entry, .battle_list, .record, .operation_pick, .intent_pick => try self.listKey(key),
             .after_action => |id| {
                 const hit = keys.lookup(AfterActionAction, &after_action_bindings, 0, key) orelse return;
                 switch (hit.action) {

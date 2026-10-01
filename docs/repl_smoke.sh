@@ -53,6 +53,8 @@ printf '%s\n' \
   'sell 3 4' \
   'xfer hull 3 co:1' \
   'autoadmit maybe' \
+  'commit 999 999 break_enemy' \
+  'commit 999 999 notanintent' \
   'save' \
   'quit' > "$work/input"
 # A watchdog kills a hung REPL (macOS has no `timeout`); the exit status
@@ -107,6 +109,8 @@ check 'no contract has that id'
 check 'those arguments do not fit the verb — usage: sell <unit>'
 check 'those arguments do not fit the verb — usage: xfer unit|person'
 check 'those arguments do not fit the verb — usage: autoadmit'
+# P4d: commit requires an intent; an unknown intent is refused with the usage.
+check 'usage: commit'
 check 'stripped for parts'
 check 'drew 500,000 c-bills over 12 months'
 check 'under contract:'

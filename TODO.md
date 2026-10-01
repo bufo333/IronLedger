@@ -33,8 +33,8 @@ above is complete.
   - P4a operations-and-stories design and content boundary: approved
     (`docs/p4-operations-design.md`).
   - [x] P4b operation content/state foundation.
-  - [ ] P4c operations board and garrison/security vertical slice.
-  - [ ] P4d mission intent, quote/commit planning, and operation-aware battles.
+  - [x] P4c operations board and garrison/security vertical slice.
+  - [x] P4d mission intent, quote/commit planning, and operation-aware battles.
   - [ ] P4e per-operation lance tasking and reports.
   - [ ] P4f intelligence versus tempo.
   - [ ] P4g command capacity and interventions.

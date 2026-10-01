@@ -6787,6 +6787,14 @@ pub const OperationRow = struct {
     expected_days: u16,
     decline_note: []const u8,
     outcome: operation_mod.OutcomeBand,
+    /// The committed intent, or the default when not yet committed.
+    intent: operation_mod.Intent,
+    /// Legal intent choices for this op × contract command rights (all six for non-integrated).
+    legal_intents: []const operation_mod.Intent,
+    /// Non-null when command rights mandate a single intent (integrated).
+    mandated: ?operation_mod.Intent,
+    /// Whether the operation succeeded given its intent; null when not yet resolved.
+    succeeded: ?bool,
 };
 
 pub const Operations = struct {
@@ -6814,6 +6822,11 @@ pub fn contractOperations(alloc: Alloc, gs: *const GameState, contract_id: types
     var rows: std.ArrayListUnmanaged(OperationRow) = .empty;
     for (c.operations.items) |*op| {
         const t = operation_mod.findTemplate(op.template_key) orelse continue;
+        const q = operations_m.operationQuote(gs, c, t);
+        const succeeded: ?bool = if (op.outcome != .none)
+            operations_m.operationSucceeded(op.intent, op.outcome)
+        else
+            null;
         try rows.append(alloc, .{
             .id = op.id,
             .name = t.name,
@@ -6823,6 +6836,10 @@ pub fn contractOperations(alloc: Alloc, gs: *const GameState, contract_id: types
             .expected_days = t.expected_days,
             .decline_note = t.decline_note,
             .outcome = op.outcome,
+            .intent = op.intent,
+            .legal_intents = q.legal_intents,
+            .mandated = q.mandated,
+            .succeeded = succeeded,
         });
     }
     return Operations{ .briefing = briefing, .rows = try rows.toOwnedSlice(alloc) };
@@ -6879,4 +6896,84 @@ test "contractOperations: returns rows for arc contract" {
     try std.testing.expect(ops.briefing.len > 0);
     try std.testing.expectEqual(@as(usize, 1), ops.rows.len);
     try std.testing.expectEqual(operation_mod.OperationState.available, ops.rows[0].state);
+}
+
+/// Return the legal intent choices for a specific operation, suitable for the
+/// TUI intent_pick modal. Each element is a `Intent` the caller may pass to
+/// `commit_operation`. Caller owns the result slice; for `integrated` rights
+/// the slice holds exactly one element.
+pub fn intentChoices(alloc: Alloc, gs: *const GameState, contract_id: types.ContractId, operation_id: types.OperationId) ![]operation_mod.Intent {
+    const c = gs.contracts.getPtr(contract_id) orelse return alloc.dupe(operation_mod.Intent, &.{});
+    for (c.operations.items) |*op| {
+        if (op.id != operation_id) continue;
+        const t = operation_mod.findTemplate(op.template_key) orelse return alloc.dupe(operation_mod.Intent, &.{});
+        const q = operations_m.operationQuote(gs, c, t);
+        return alloc.dupe(operation_mod.Intent, q.legal_intents);
+    }
+    return alloc.dupe(operation_mod.Intent, &.{});
+}
+
+test "intentChoices: non-combat op on independent rights returns 4 choices" {
+    // Rule 20 consumer test: intentChoices delegates to operationQuote.legalIntents.
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const cid: types.ContractId = @enumFromInt(1);
+    const oid: types.OperationId = @enumFromInt(1);
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 18, .base_pay_month = 200_000, .command_rights = .independent },
+        .status = .active,
+        .arc_key = "fracturing_garrison",
+    });
+    const c = gs.contracts.getPtr(cid).?;
+    try c.operations.append(gs.allocator(), .{
+        .id = oid,
+        .template_key = "negotiate_terms", // non-combat
+        .state = .available,
+        .opened_day = 0,
+    });
+
+    const choices = try intentChoices(arena.allocator(), &gs, cid, oid);
+    // Non-combat × independent → noncombat_intents (4 values).
+    try std.testing.expectEqual(@as(usize, 4), choices.len);
+}
+
+test "intentChoices: integrated rights → exactly one choice" {
+    // Rule 20 consumer test: integrated rights mandate a single intent.
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const cid: types.ContractId = @enumFromInt(1);
+    const oid: types.OperationId = @enumFromInt(1);
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 18, .base_pay_month = 200_000, .command_rights = .integrated },
+        .status = .active,
+        .arc_key = "fracturing_garrison",
+    });
+    const c = gs.contracts.getPtr(cid).?;
+    try c.operations.append(gs.allocator(), .{
+        .id = oid,
+        .template_key = "repel_probe", // combat
+        .state = .available,
+        .opened_day = 0,
+    });
+
+    const choices = try intentChoices(arena.allocator(), &gs, cid, oid);
+    try std.testing.expectEqual(@as(usize, 1), choices.len);
+    // The single mandated intent is secure_objective.
+    try std.testing.expectEqual(operation_mod.Intent.secure_objective, choices[0]);
 }
