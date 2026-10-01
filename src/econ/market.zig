@@ -1,6 +1,6 @@
 //! Markets: contract offers, hiring pool, unit purchases, and what hulls,
 //! stock and HQ facilities fetch when sold.
-//! MekHQ counterpart: `market/ContractMarket`, `PersonnelMarket`, `UnitMarket`.
+//! MekHQ counterpart: `market/ContractMarket`, `PersonnelMarket`, `UnitMarket` (docs/mekhq-map.md).
 //! Stage 4 implements generation; refresh cadence and offer shapes live here.
 
 const std = @import("std");

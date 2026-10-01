@@ -141,7 +141,7 @@ pub const Roe = enum {
 pub const Force = struct {
     id: types.ForceId,
     parent: types.ForceId = .none,
-    /// Player-editable (ARCH §9.8 identity).
+    /// Player-editable (ARCH §5 identity).
     name: []const u8,
     /// Emblem image bytes (png/jpg), player-provided; shown on rosters/AARs.
     emblem: ?[]const u8 = null,

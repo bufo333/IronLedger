@@ -1,5 +1,5 @@
 //! Company posture: the one cascade every screen, warning and refusal reads (ARCH §9.7).
-//! MekHQ counterpart: none (§9.7 is this game's extension).
+//! MekHQ counterpart: none (§9.7 is this game's extension) (docs/mekhq-map.md).
 
 const std = @import("std");
 const types = @import("../domain/types.zig");

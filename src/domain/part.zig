@@ -1,5 +1,5 @@
 //! Parts: catalog references, inventory, acquisition orders.
-//! MekHQ counterpart: `parts/*` + the `Quartermaster` acquisition flow. Stage 5.
+//! MekHQ counterpart: `parts/*` + the `Quartermaster` acquisition flow (docs/mekhq-map.md). Stage 5.
 
 const std = @import("std");
 const types = @import("types.zig");

@@ -1,5 +1,5 @@
 //! Units: meks, vehicles, aerospace, support assets, transports.
-//! MekHQ counterpart: `unit/Unit.java`. Per-unit state only — the static design
+//! MekHQ counterpart: `unit/Unit.java` (docs/mekhq-map.md). Per-unit state only — the static design
 //! (tonnage, loadout, BV) comes from the chassis catalog in data/ (Stage 3).
 
 const std = @import("std");

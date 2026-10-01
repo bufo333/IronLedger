@@ -1,5 +1,5 @@
 //! Campaign calendar: date and clock primitives (ARCH §6).
-//! MekHQ counterpart: calendar day tracking in `Campaign.java`.
+//! MekHQ counterpart: calendar day tracking in `Campaign.java` (docs/mekhq-map.md).
 
 const std = @import("std");
 

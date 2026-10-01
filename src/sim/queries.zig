@@ -3,7 +3,7 @@
 //! the TUI. Pure — every function takes an allocator (the frontends hand
 //! in a per-frame arena) and mutates nothing. Row text carries the same
 //! `{a}…{/}` emphasis markup the mockups use; frontends strip or render it.
-//! MekHQ counterpart: none (its Swing panels read the campaign directly).
+//! MekHQ counterpart: none (its Swing panels read the campaign directly) (docs/mekhq-map.md).
 
 const std = @import("std");
 const types = @import("../domain/types.zig");
@@ -1664,7 +1664,7 @@ pub fn hull(alloc: Alloc, gs: *GameState, uid: types.UnitId) ![]const []const u8
         try out.append(alloc, try std.fmt.allocPrint(alloc, "pilot   {{g}}{s}{{/}}  {s}  {s}  fatigue {d} · morale {d}", .{ try personText(alloc, p), @tagName(p.role), @tagName(p.experience()), p.fatigue, p.morale }));
     } else try out.append(alloc, "pilot   {c}none{/}");
     if (gs.person(u.tech)) |t| {
-        try out.append(alloc, try std.fmt.allocPrint(alloc, "tech    {{g}}{s}{{/}}  {s}  {s}  {d}/{d} h this week", .{ try personText(alloc, t), @tagName(t.role), @tagName(t.experience()), maintenance.techLoadHours(gs, t.id), t.weekly_hours }));
+        try out.append(alloc, try std.fmt.allocPrint(alloc, "tech    {{g}}{s}{{/}}  {s}  {s}  {d}/{d} h this week", .{ try personText(alloc, t), @tagName(t.role), @tagName(t.experience()), maintenance.techWeeklyLoadHours(gs, t.id), t.weekly_hours }));
     } else if (unit_mod.techRoleFor(u.kind) != null) try out.append(alloc, "tech    {c}none{/}");
     try out.append(alloc, "");
     try out.append(alloc, "slot                 part            class      condition");
@@ -1678,7 +1678,7 @@ pub fn hull(alloc: Alloc, gs: *GameState, uid: types.UnitId) ![]const []const u8
     }
     try out.append(alloc, "");
     try out.append(alloc, try std.fmt.allocPrint(alloc, "upkeep {s}/mo · maintenance {d} h/week ({d} in its tech's hands; quality {s}{s}) · depot needed: {s}", .{
-        try money(alloc, u.monthlyBill()), maintenance.hullHours(gs, u), if (gs.person(u.tech)) |t| maintenance.techHoursFor(gs, t, u) else maintenance.hullHours(gs, u), @tagName(u.quality), if (ch) |c| (if (c.rarity == .very_rare) ", exotic design" else "") else "", if (u.needsDepot()) "{c}yes{/}" else "no",
+        try money(alloc, u.monthlyBill()), maintenance.hullHours(gs, u), if (gs.person(u.tech)) |t| maintenance.techWeeklyHoursFor(gs, t, u) else maintenance.hullHours(gs, u), @tagName(u.quality), if (ch) |c| (if (c.rarity == .very_rare) ", exotic design" else "") else "", if (u.needsDepot()) "{c}yes{/}" else "no",
     }));
     return out.toOwnedSlice(alloc);
 }
@@ -4820,11 +4820,11 @@ pub fn crewChoices(alloc: Alloc, gs: *GameState, unit_id: types.UnitId) ![]PickR
         const b = crew.assignBlock(gs, u, p);
         const why: []const u8 = if (b) |x| crew.assignBlockText(x) else "";
         const seat = gs.pilotSeat(p.id);
-        const load = if (slot == .tech) maintenance.techLoadHours(gs, p.id) else 0;
+        const load = if (slot == .tech) maintenance.techWeeklyLoadHours(gs, p.id) else 0;
         const now: []const u8 = if (slot == .pilot)
             (if (seat == unit_id) "this seat" else if (seat != .none) try std.fmt.allocPrint(alloc, "pilot of #{d}", .{@intFromEnum(seat)}) else "{g}free{/}")
         else
-            (if (u.tech == p.id) "this hull's tech" else try std.fmt.allocPrint(alloc, "{s}{d}h of {d}h{{/}}", .{ if (load == 0) "{g}" else "", load, maintenance.techHoursAvailable(gs, p) }));
+            (if (u.tech == p.id) "this hull's tech" else try std.fmt.allocPrint(alloc, "{s}{d}h of {d}h{{/}}", .{ if (load == 0) "{g}" else "", load, maintenance.techWeeklyHoursAvailable(gs, p) }));
         const skill = p.skill(p.role.primarySkill()) orelse 9;
         const same = gs.companyOf(p.assigned_force) == own and own != .none;
         const name = try std.fmt.allocPrint(alloc, "{s}", .{try personText(alloc, p)});
@@ -5349,7 +5349,7 @@ pub fn companyRoster(alloc: Alloc, gs: *GameState, co: types.ForceId) ![]const [
         const p = entry.value_ptr;
         if (gs.companyOf(p.assigned_force) != co or !p.role.isTech()) continue;
         try out.append(alloc, try std.fmt.allocPrint(alloc, "    #{d: <3} {s: <20} {s: <13} {d: >2}/{d: <2}h{s}", .{
-            @intFromEnum(p.id), try personText(alloc, p), @tagName(p.role), maintenance.techLoadHours(gs, p.id), maintenance.techHoursAvailable(gs, p), if (!p.isAvailable(day)) " (unavailable)" else "",
+            @intFromEnum(p.id), try personText(alloc, p), @tagName(p.role), maintenance.techWeeklyLoadHours(gs, p.id), maintenance.techWeeklyHoursAvailable(gs, p), if (!p.isAvailable(day)) " (unavailable)" else "",
         }));
     }
     var pool: std.ArrayListUnmanaged(u8) = .empty;

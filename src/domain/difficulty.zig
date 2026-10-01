@@ -5,7 +5,7 @@
 //! pressure, and how hard the enemy holds a field you lost — and
 //! never the dice: skill rolls, repair odds and healing are
 //! the sim's physics on every level. MekHQ counterpart: none directly;
-//! CampaignOptions' economy sliders come closest.
+//! CampaignOptions' economy sliders come closest (docs/mekhq-map.md).
 
 const std = @import("std");
 const types = @import("types.zig");

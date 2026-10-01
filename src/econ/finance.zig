@@ -1,6 +1,6 @@
 //! Finances: transaction ledger, per-company P&L, loans.
 //! MekHQ counterpart: `finances/Finances.java`, extended with company-level
-//! cost/profit centers (ARCH §11). All amounts are integer C-bills.
+//! cost/profit centers (ARCH §11) (docs/mekhq-map.md). All amounts are integer C-bills.
 
 const std = @import("std");
 const types = @import("../domain/types.zig");

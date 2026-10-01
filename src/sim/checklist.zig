@@ -523,7 +523,7 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
         const t = tentry.value_ptr;
         if (!t.isAvailable(day)) continue;
         if (!t.role.isTech()) continue;
-        if (maintenance.techLoadHours(gs, t.id) > maintenance.techHoursAvailable(gs, t)) overloaded += 1;
+        if (maintenance.techWeeklyLoadHours(gs, t.id) > maintenance.techWeeklyHoursAvailable(gs, t)) overloaded += 1;
     }
     if (overloaded > 0) {
         try out.append(alloc, .{ .kind = .tech_overloaded, .text = try std.fmt.allocPrint(alloc, "{d} tech(s) assigned more hulls than their weekly hours cover — some hulls roll uncovered", .{overloaded}) });

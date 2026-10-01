@@ -1,7 +1,7 @@
 //! Contract difficulty in skulls (Stage 12E.3). No MekHQ counterpart: the
 //! half-skull scale of HBS BattleTech, computed — not rolled — from the
 //! power ratio the battle model itself uses, so the rating and the dice
-//! agree. Data in data/tables/skulls.zon.
+//! agree (docs/mekhq-map.md). Data in data/tables/skulls.zon.
 
 const std = @import("std");
 const types = @import("types.zig");

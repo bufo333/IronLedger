@@ -2,7 +2,7 @@
 //! greyscale / RGB / RGBA / palette, non-interlaced, all five scanline
 //! filters. Enough for a crest dropped into the logos directory; anything
 //! fancier (16-bit, interlaced) is refused with a clear error. Output is
-//! packed RGB. No MekHQ counterpart.
+//! packed RGB. No MekHQ counterpart (docs/mekhq-map.md).
 
 const std = @import("std");
 const flate = std.compress.flate;

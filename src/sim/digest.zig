@@ -1,7 +1,7 @@
 //! A canonical digest of any plain value: every field, every element, every
 //! map entry. `stateHash` feeds each persisted field of a campaign through
 //! it, so a change to any saved number moves the golden master. MekHQ has
-//! no counterpart (it has no determinism harness).
+//! no counterpart (it has no determinism harness) (docs/mekhq-map.md).
 //!
 //! Canonical means independent of how the value was built: a slice or list
 //! digests its length and then each element in order; a map (array hash

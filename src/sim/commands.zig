@@ -61,7 +61,7 @@ pub const Command = union(enum) {
     new_company: []const u8,
     rename_outfit: []const u8,
     rename_force: struct { force: types.ForceId, name: []const u8 },
-    /// Attach an emblem image (raw bytes) to a force (ARCH §9.8 identity).
+    /// Attach an emblem image (raw bytes) to a force (ARCH §5 identity).
     set_emblem: struct { force: types.ForceId, image: []const u8 },
     /// Character creation: origin picks the starter world (weighted, in the
     /// commander's faction space); profession grants one 2% edge.

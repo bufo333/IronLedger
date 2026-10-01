@@ -1,7 +1,7 @@
 //! Tuning tables: every balance constant the sim reads, loaded at comptime
 //! from data/tables/tuning.zon (Stage 12.17).
 //! MekHQ counterpart: `campaign/CampaignOptions` — knobs, not rules; the
-//! formulas stay legible in the modules that use them. The ZON file is
+//! formulas stay legible in the modules that use them (docs/mekhq-map.md). The ZON file is
 //! type-checked against `Tuning` at compile time: a missing or misspelled
 //! field is a build error, not a silent default.
 

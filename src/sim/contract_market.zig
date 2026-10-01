@@ -1,6 +1,6 @@
 //! Contract market: monthly offer generation filtered by influence rings
 //! (ARCH §9.2). MekHQ counterpart: `market/ContractMarket`, with CamOps
-//! payment terms; adds per-place visibility and beachhead flagging.
+//! payment terms; adds per-place visibility and beachhead flagging (docs/mekhq-map.md).
 
 const std = @import("std");
 const tuning = @import("../domain/tuning.zig").t;

@@ -4,7 +4,7 @@
 //! every mutation goes through `game.commands.execute`; every read goes
 //! through `game.queries`. The screen is rebuilt from queries on each
 //! event into a per-frame arena, so no view state can drift from the sim.
-//! No MekHQ counterpart (MekHQ is Swing).
+//! No MekHQ counterpart (MekHQ is Swing) (docs/mekhq-map.md).
 
 const std = @import("std");
 pub const game = @import("game");

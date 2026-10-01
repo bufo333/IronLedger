@@ -1,5 +1,5 @@
 //! Contracts: the 12 AtB contract types with CamOps payment terms.
-//! MekHQ counterpart: `mission/AtBContract.java` + `market/ContractMarket`.
+//! MekHQ counterpart: `mission/AtBContract.java` + `market/ContractMarket` (docs/mekhq-map.md).
 //! Stage 4 implements the market and lifecycle; the math primitives live here.
 
 const std = @import("std");

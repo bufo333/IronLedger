@@ -4,7 +4,7 @@
 //! human-readable refusal text for every `commands.Error`. The terminal
 //! client's own verbs (day, save, screens) parse here too, as a
 //! `ClientVerb`; the REPL's print views stay in the REPL.
-//! No MekHQ counterpart — MekHQ has no scripting console.
+//! No MekHQ counterpart — MekHQ has no scripting console (docs/mekhq-map.md).
 
 const std = @import("std");
 const person_mod = @import("../domain/person.zig");

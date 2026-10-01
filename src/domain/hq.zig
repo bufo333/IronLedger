@@ -1,6 +1,6 @@
 //! HQ network: brigade / regional / field headquarters with facilities,
 //! influence rings, capacity slots, staffing overhead, and upgrade projects.
-//! No MekHQ equivalent — this is the game's centerpiece (ARCH §9, GAMEPLAY.md).
+//! No MekHQ equivalent — this is the game's centerpiece (ARCH §9, GAMEPLAY.md) (docs/mekhq-map.md).
 //!
 //! Tuning values live in data/tables/tuning.zon (`tuning.hq`).
 

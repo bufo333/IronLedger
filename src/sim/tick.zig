@@ -1,5 +1,5 @@
 //! The daily tick: one campaign day through the ordered phase pipeline
-//! (ARCH §6, DayPhase). MekHQ counterpart: `Campaign.newDay()`.
+//! (ARCH §6, DayPhase). MekHQ counterpart: `Campaign.newDay()` (docs/mekhq-map.md).
 //!
 //! Phase order is part of the spec.
 

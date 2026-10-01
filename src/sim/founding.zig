@@ -1,6 +1,6 @@
 //! Founding: commander creation and HQ setup (ARCH §4).
 //! MekHQ counterpart: `Campaign.java` initial setup; our version separates
-//! founding from the state it operates on.
+//! founding from the state it operates on (docs/mekhq-map.md).
 
 const std = @import("std");
 const tuning = @import("../domain/tuning.zig").t;

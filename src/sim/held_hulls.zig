@@ -1,5 +1,5 @@
 //! Hull custody: enemy capture and recovery, sale, stripping and cold storage (ARCH section 4, section 9.8).
-//! MekHQ counterpart: battle salvage and hull recovery.
+//! MekHQ counterpart: battle salvage and hull recovery (docs/mekhq-map.md).
 
 const std = @import("std");
 const types = @import("../domain/types.zig");

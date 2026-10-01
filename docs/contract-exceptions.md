@@ -42,19 +42,6 @@ Owner of every entry: the project owner.
 - **Removal:** C17.
 - **Guard:** review (checklist question 13). No mechanical check.
 
-### C20. Documentation and naming
-
-- **Rules:** 61, 75, 81, 82, 84.
-- **Why not yet:** Mechanical; batched once the module splits settle the file names.
-- **Scope:**
-  - **MekHQ map links (rule 61).** 35 module headers name a MekHQ counterpart without linking `docs/mekhq-map.md`.
-  - **Misplaced comment (rule 82).** It sits at `state.zig:316`.
-  - **Wrong citation (rule 84).** "ARCH §9.8 identity" should cite §5, at `state.zig:217`, `commands.zig:52` and `force.zig:144`.
-  - **Formula lines too long (rule 75):** `maintenance.techHoursFor`, `maintenance.techHoursAvailable`.
-  - **Missing unit in names (rule 81).** The weekly-hour functions don't say they are weekly.
-- **Removal:** C20.
-- **Guard:** the module-header and comment checks in `verify-contract.sh` for the parts they cover; review for the rest.
-
 ---
 
 ## Layering record

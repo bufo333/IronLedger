@@ -3,7 +3,7 @@
 //! Ghostty, WezTerm, Konsole) or iTerm2's inline-image protocol (OSC
 //! 1337), and as half-block colour cells everywhere else. Also the
 //! logos-directory listing for the wizard's import step.
-//! I/O lives here and in term.zig only. No MekHQ counterpart.
+//! I/O lives here and in term.zig only. No MekHQ counterpart (docs/mekhq-map.md).
 
 const std = @import("std");
 const png = @import("png.zig");

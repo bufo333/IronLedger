@@ -1,7 +1,7 @@
 //! Field-store planning for a deployed company (Stage 12).
 //!
 //! MekHQ counterpart: none — MekHQ has no per-company truck model; the
-//! nearest analogue is its AtB resupply drop. Here every line a company
+//! nearest analogue is its AtB resupply drop (docs/mekhq-map.md). Here every line a company
 //! burns in the field (provisions, medical, armor, each munition family)
 //! gets a floor and a target sized from consumption, the transit time of
 //! its supply line and the tonnage its trucks can carry, with a budget

@@ -1,7 +1,7 @@
 //! GameState: the one big tree the simulation systems operate on (ARCH §4).
 //! Owned by an arena; pure and deterministic — no I/O, no wall clock.
 //! MekHQ counterpart: `Campaign`, decomposed: state lives here, behavior
-//! lives in the system modules (tick.zig, commands.zig, ...).
+//! lives in the system modules (tick.zig, commands.zig, ...) (docs/mekhq-map.md).
 
 const std = @import("std");
 const tuning = @import("../domain/tuning.zig").t;
@@ -227,7 +227,7 @@ pub const GameState = struct {
     clock: clock_mod.Clock,
     funds: types.CBills,
     reputation: i32 = 0,
-    /// Player-set identity (ARCH §9.8); companies carry their own in Force.
+    /// Player-set identity (ARCH §5); companies carry their own in Force.
     outfit_name: []const u8 = "Provisional Mercenary Command",
     /// The player character (character creation): origin decides where the
     /// outfit stands up; profession grants one 2% edge (commander.zig).
@@ -328,7 +328,6 @@ pub const GameState = struct {
         self.arena.deinit();
     }
 
-    /// All campaign-lifetime allocations come from here.
     /// The difficulty row in force.
     pub fn diff(self: *const GameState) *const difficulty_mod.Row {
         return difficulty_mod.get(self.difficulty);
@@ -342,6 +341,7 @@ pub const GameState = struct {
         return self.arena.child_allocator;
     }
 
+    /// All campaign-lifetime allocations come from here.
     pub fn allocator(self: *GameState) std.mem.Allocator {
         return self.arena.allocator();
     }

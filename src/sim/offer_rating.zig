@@ -1,6 +1,6 @@
 //! How one company would fare on one contract (Stage 12E), and how much
 //! of the opposition the outfit's comms let it see. MekHQ has no
-//! counterpart: AtB shows the player the scenario's forces outright. This
+//! counterpart: AtB shows the player the scenario's forces outright (docs/mekhq-map.md). This
 //! is combat math (`battle.estimatePower`, the scenario tables, the ROE
 //! modifiers): the checklist warns from it and the board colours it, so
 //! it lives here and `queries` phrases it.

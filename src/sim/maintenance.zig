@@ -55,7 +55,7 @@ const HourBook = struct {
 
     fn spend(self: *HourBook, gs: *GameState, tech: *const person_mod.Person, hours: u32, base_load: u32) !bool {
         const entry = try self.map.getOrPut(self.alloc, tech.id);
-        if (!entry.found_existing) entry.value_ptr.* = techHoursAvailable(gs, tech) -| base_load;
+        if (!entry.found_existing) entry.value_ptr.* = techWeeklyHoursAvailable(gs, tech) -| base_load;
         if (entry.value_ptr.* < hours) return false;
         entry.value_ptr.* -= hours;
         return true;
@@ -118,23 +118,32 @@ pub fn hullHours(gs: *GameState, u: *const unit_mod.Unit) u32 {
 }
 
 /// The same hull in this tech's hands: skill sets the pace.
-pub fn techHoursFor(gs: *GameState, tech: *const person_mod.Person, u: *const unit_mod.Unit) u32 {
+pub fn techWeeklyHoursFor(gs: *GameState, tech: *const person_mod.Person, u: *const unit_mod.Unit) u32 {
     const t = tuning.maintenance;
     const role = unit_mod.techRoleFor(u.kind) orelse tech.role;
     const skill = tech.skill(role.primarySkill()) orelse 7;
-    const bp: types.Bp = if (skill <= 2) t.hours_skill_bp.elite else if (skill == 3) t.hours_skill_bp.veteran else if (skill == 4) t.hours_skill_bp.regular else if (skill == 5) t.hours_skill_bp.green else t.hours_skill_bp.untrained;
+    const bp: types.Bp = if (skill <= 2)
+        t.hours_skill_bp.elite
+    else if (skill == 3)
+        t.hours_skill_bp.veteran
+    else if (skill == 4)
+        t.hours_skill_bp.regular
+    else if (skill == 5)
+        t.hours_skill_bp.green
+    else
+        t.hours_skill_bp.untrained;
     return @intCast(@max(1, types.applyBp(@as(i64, hullHours(gs, u)), bp)));
 }
 
 /// Weekly hours a tech already carries across assigned hulls.
-pub fn techLoadHours(gs: *GameState, tech_id: types.PersonId) u32 {
+pub fn techWeeklyLoadHours(gs: *GameState, tech_id: types.PersonId) u32 {
     var hours: u32 = 0;
     const tech = gs.person(tech_id);
     var it = gs.units.iterator();
     while (it.next()) |entry| {
         const u = entry.value_ptr;
         if (u.tech != tech_id or u.isParked()) continue;
-        hours += if (tech) |t| techHoursFor(gs, t, u) else hullHours(gs, u);
+        hours += if (tech) |t| techWeeklyHoursFor(gs, t, u) else hullHours(gs, u);
     }
     return hours;
 }
@@ -142,7 +151,7 @@ pub fn techLoadHours(gs: *GameState, tech_id: types.PersonId) u32 {
 /// Effective hours a tech can spend this week: the budget, scaled by the
 /// astech team available in their company (`astechs_per_tech_full_rate`
 /// per tech = full rate, none = `tech_no_team_bp`).
-pub fn techHoursAvailable(gs: *GameState, tech: *const person_mod.Person) u32 {
+pub fn techWeeklyHoursAvailable(gs: *GameState, tech: *const person_mod.Person) u32 {
     const company = gs.companyOf(tech.assigned_force);
     var techs: u32 = 0;
     var astechs: u32 = 0;
@@ -154,7 +163,15 @@ pub fn techHoursAvailable(gs: *GameState, tech: *const person_mod.Person) u32 {
         if (p.role.isTech()) techs += 1;
     }
     const tp = tuning.person;
-    const team_bp: types.Bp = if (techs == 0) types.full_bp else tp.tech_no_team_bp + @min(types.full_bp - tp.tech_no_team_bp, @divTrunc(@as(types.Bp, astechs) * (types.full_bp - tp.tech_no_team_bp), @as(types.Bp, tp.astechs_per_tech_full_rate) * @as(types.Bp, techs)));
+    const max_boost: types.Bp = types.full_bp - tp.tech_no_team_bp;
+    const astech_ratio_boost: types.Bp = if (techs == 0) 0 else @divTrunc(
+        @as(types.Bp, astechs) * max_boost,
+        @as(types.Bp, tp.astechs_per_tech_full_rate) * @as(types.Bp, techs),
+    );
+    const team_bp: types.Bp = if (techs == 0)
+        types.full_bp
+    else
+        tp.tech_no_team_bp + @min(max_boost, astech_ratio_boost);
     return @intCast(types.applyBp(@as(types.CBills, tech.weekly_hours), team_bp));
 }
 
@@ -168,8 +185,8 @@ pub fn findFreeTech(gs: *GameState, role: person_mod.Role, company: types.ForceI
         const p = entry.value_ptr;
         if (p.role != role or !p.isAvailable(gs.clock.day_index) or p.posted_hq != .none) continue;
         if (company != .none and gs.companyOf(p.assigned_force) != company) continue;
-        const avail = techHoursAvailable(gs, p);
-        const load = techLoadHours(gs, p.id);
+        const avail = techWeeklyHoursAvailable(gs, p);
+        const load = techWeeklyLoadHours(gs, p.id);
         if (avail < load + hours_needed) continue;
         const spare = avail - load;
         if (best == null or spare > best_spare) {
@@ -194,7 +211,7 @@ pub fn runWeeklyMaintenance(gs: *GameState) !void {
         if (u.kind == .infantry) continue; // platoons maintain their own kit
 
         // What this hull asks of this tech: quality, design and skill.
-        const need_hours = if (activeTech(gs, u)) |t| techHoursFor(gs, t, u) else hullHours(gs, u);
+        const need_hours = if (activeTech(gs, u)) |t| techWeeklyHoursFor(gs, t, u) else hullHours(gs, u);
         var covered = false;
         var skill: u8 = 7;
         var tech_id: types.PersonId = .none;
@@ -329,7 +346,7 @@ pub fn runWeeklyRepairs(gs: *GameState) !void {
         const u = entry.value_ptr;
         if (!u.takesFieldWork()) continue;
         const tech = activeTech(gs, u) orelse continue; // no tech, no repairs
-        const base_load = techLoadHours(gs, tech.id);
+        const base_load = techWeeklyLoadHours(gs, tech.id);
         const at_home = posture.isCompanyHome(gs, gs.companyOf(u.force)); // not merely off contract: a company returning or idling afield is away too
         const site = sites.siteForForce(gs, u.force);
 
@@ -617,7 +634,7 @@ pub fn repairBudget(gs: *GameState, alloc: std.mem.Allocator, company: types.For
         if (gs.companyOf(u.force) != company or !u.takesFieldWork()) continue;
         const tech = activeTech(gs, u) orelse continue;
         if ((try seen.getOrPut(alloc, tech.id)).found_existing) continue;
-        spare_hours += techHoursAvailable(gs, tech) -| techLoadHours(gs, tech.id);
+        spare_hours += techWeeklyHoursAvailable(gs, tech) -| techWeeklyLoadHours(gs, tech.id);
     }
     const site = sites.siteForForce(gs, company);
     var spares: std.ArrayListUnmanaged(Spare) = .empty;
@@ -725,12 +742,12 @@ test "a worn or exotic hull wants more hours; a sharper tech needs fewer" {
     u.quality = .c;
     const tech = try gs.hirePerson("Ace", "Wrench", .tech_mek);
     try gs.person(tech).?.skills.put(gs.allocator(), .tech_mek, 4);
-    const regular = techHoursFor(&gs, gs.person(tech).?, u);
+    const regular = techWeeklyHoursFor(&gs, gs.person(tech).?, u);
     try std.testing.expectEqual(plain, regular);
     try gs.person(tech).?.skills.put(gs.allocator(), .tech_mek, 2);
-    try std.testing.expect(techHoursFor(&gs, gs.person(tech).?, u) < regular);
+    try std.testing.expect(techWeeklyHoursFor(&gs, gs.person(tech).?, u) < regular);
     try gs.person(tech).?.skills.put(gs.allocator(), .tech_mek, 6);
-    try std.testing.expect(techHoursFor(&gs, gs.person(tech).?, u) > regular);
+    try std.testing.expect(techWeeklyHoursFor(&gs, gs.person(tech).?, u) > regular);
 }
 
 test "tech hours are a budget: too many hulls leave some uncovered" {
@@ -743,8 +760,8 @@ test "tech hours are a budget: too many hulls leave some uncovered" {
         id.* = try gs.addUnit("AS7-D");
         try crew.assignSlot(&gs, id.*, .tech, tech);
     }
-    try std.testing.expectEqual(@as(u32, 40), techLoadHours(&gs, tech));
-    try std.testing.expectEqual(@as(u32, 20), techHoursAvailable(&gs, gs.person(tech).?));
+    try std.testing.expectEqual(@as(u32, 40), techWeeklyLoadHours(&gs, tech));
+    try std.testing.expectEqual(@as(u32, 20), techWeeklyHoursAvailable(&gs, gs.person(tech).?));
     try runWeeklyMaintenance(&gs);
     var maintained: u32 = 0;
     for (uids) |id| {

@@ -20,7 +20,7 @@
 //!   within each table, and the two tables are disjoint.
 //!
 //! The pin is Unicode 16.0; a future Unicode bump is a deliberate table
-//! regeneration, not a silent change.  No MekHQ counterpart.
+//! regeneration, not a silent change.  No MekHQ counterpart (docs/mekhq-map.md).
 
 const std = @import("std");
 

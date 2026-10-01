@@ -1,6 +1,6 @@
 //! Person & name generation. MekHQ counterpart: `RandomNameGenerator` +
 //! AtB personnel generation: experience rolled on 2d6, skills set from the
-//! experience band. Name tables live in data/tables/names.zon.
+//! experience band (docs/mekhq-map.md). Name tables live in data/tables/names.zon.
 
 const std = @import("std");
 const types = @import("../domain/types.zig");

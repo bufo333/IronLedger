@@ -1,4 +1,4 @@
-//! Column tables for the screens (Stage 12F). No MekHQ counterpart.
+//! Column tables for the screens (Stage 12F). No MekHQ counterpart (docs/mekhq-map.md).
 //! A query builds one — column names and cells of markup text — and the
 //! client lays it out for the width it has: the TUI (`screen.table`)
 //! pins the first column and scrolls the rest, the CLI prints it at its

@@ -1,6 +1,6 @@
 //! Where the client's loose runtime files live (Stage 12, packaging).
 //! No MekHQ counterpart in the sim sense; MekHQ resolves its user directory
-//! the same way (`MekHQ.getCampaignsDirectory`).
+//! the same way (`MekHQ.getCampaignsDirectory`) (docs/mekhq-map.md).
 //!
 //! Everything under `data/*.zon` is compiled into the binary, but the
 //! soundtrack, the emblem pictures and the save store are read from disk at

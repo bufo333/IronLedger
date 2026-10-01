@@ -4,7 +4,7 @@
 //! A `GameState` is handed out as an opaque session handle: the frontend
 //! passes it to `commands.execute` and `queries`, and gives it back to
 //! `discard`. MekHQ counterpart: `CampaignFactory` + the launcher's
-//! campaign list (loosely).
+//! campaign list (loosely) (docs/mekhq-map.md).
 
 const std = @import("std");
 const store_mod = @import("store.zig");

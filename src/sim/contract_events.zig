@@ -1,5 +1,5 @@
 //! Contract event decks & the decision engine (Stage 6, ARCH §8).
-//! MekHQ counterpart: the AtB monthly contract events (`AtBContract`).
+//! MekHQ counterpart: the AtB monthly contract events (`AtBContract`) (docs/mekhq-map.md).
 //! Each active contract rolls 2d6 on
 //! its class deck (garrison vs. combat) on the 1st. Auto events apply
 //! immediately; decisions land in the inbox with a deadline (turn-based —

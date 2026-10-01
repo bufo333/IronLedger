@@ -2,7 +2,7 @@
 //! mode, the alternate screen, window size, key decoding and the resize
 //! signal. Hand-rolled ANSI so the client has no dependency; a library
 //! can replace it behind this interface.
-//! No MekHQ counterpart (MekHQ is Swing).
+//! No MekHQ counterpart (MekHQ is Swing) (docs/mekhq-map.md).
 //! Platform-gated (rule 65): POSIX termios/SIGWINCH on macOS/Linux;
 //! Windows console VT mode on Windows (resize by polling the console size).
 

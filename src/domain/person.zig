@@ -1,6 +1,6 @@
 //! Personnel: roles, skills, salaries, status.
 //! MekHQ counterpart: `personnel/Person.java`; salaries follow the CamOps
-//! table (MekHQ default values).
+//! table (MekHQ default values) (docs/mekhq-map.md).
 
 const std = @import("std");
 const tuning = @import("tuning.zig").t;
