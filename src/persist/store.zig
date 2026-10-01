@@ -33,8 +33,10 @@ const clock_mod = @import("../domain/clock.zig");
 const digest = @import("../sim/digest.zig");
 const hq_ops = @import("../sim/hq_ops.zig");
 const held_hulls_m = @import("../sim/held_hulls.zig");
+const arc_mod = @import("../domain/arc.zig");
+const operation_mod = @import("../domain/operation.zig");
 
-pub const schema_version = 37;
+pub const schema_version = 38;
 
 const ddl =
     \\CREATE TABLE IF NOT EXISTS player (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_seq INTEGER NOT NULL);
@@ -59,7 +61,8 @@ const ddl =
     \\CREATE TABLE IF NOT EXISTS hq (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, name TEXT, tier TEXT, planet TEXT, staff_assigned INTEGER, upkeep INTEGER, funds INTEGER, PRIMARY KEY (cid, id), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS hq_facility (cid INTEGER NOT NULL, hq_id INTEGER NOT NULL, ord INTEGER NOT NULL, kind TEXT, level INTEGER, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, hq_id) REFERENCES hq(cid, id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS hq_project (cid INTEGER NOT NULL, hq_id INTEGER NOT NULL, ord INTEGER NOT NULL, kind TEXT, facility TEXT, target_level INTEGER, started INTEGER, paperwork_done INTEGER, construction_done INTEGER, cost INTEGER, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, hq_id) REFERENCES hq(cid, id) DEFERRABLE INITIALLY DEFERRED);
-    \\CREATE TABLE IF NOT EXISTS contract (cid INTEGER NOT NULL, is_offer INTEGER NOT NULL CHECK (is_offer IN (0,1)), ord INTEGER NOT NULL, id INTEGER, kind TEXT, employer TEXT, enemy TEXT, planet TEXT, status TEXT, company INTEGER, start_day INTEGER, score INTEGER, dist_ly INTEGER, beachhead INTEGER, transit_days INTEGER, arrive_day INTEGER, end_day INTEGER, monthly_net INTEGER, next_battle INTEGER, battles INTEGER, casualties INTEGER, objective TEXT, committed_bv INTEGER, pool INTEGER, pool_remaining INTEGER, vp INTEGER, ineffective_since INTEGER, breach_day INTEGER, length_months INTEGER, base_pay INTEGER, advance_pct INTEGER, signing_bonus INTEGER, transport_pct INTEGER, overhead_pct INTEGER, battle_loss_pct INTEGER, salvage_pct INTEGER, salvage_exchange INTEGER CHECK (salvage_exchange IN (0,1)), command_rights TEXT, negotiated INTEGER NOT NULL DEFAULT 0 CHECK (negotiated IN (0,1)), enemy_lances INTEGER NOT NULL DEFAULT 0, enemy_quality TEXT NOT NULL DEFAULT 'regular', enemy_lance_bv INTEGER NOT NULL DEFAULT 0, enemy_lance_tons INTEGER NOT NULL DEFAULT 0, offer_hq INTEGER NOT NULL DEFAULT 0, orders_day INTEGER, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS contract (cid INTEGER NOT NULL, is_offer INTEGER NOT NULL CHECK (is_offer IN (0,1)), ord INTEGER NOT NULL, id INTEGER, kind TEXT, employer TEXT, enemy TEXT, planet TEXT, status TEXT, company INTEGER, start_day INTEGER, score INTEGER, dist_ly INTEGER, beachhead INTEGER, transit_days INTEGER, arrive_day INTEGER, end_day INTEGER, monthly_net INTEGER, next_battle INTEGER, battles INTEGER, casualties INTEGER, objective TEXT, committed_bv INTEGER, pool INTEGER, pool_remaining INTEGER, vp INTEGER, ineffective_since INTEGER, breach_day INTEGER, length_months INTEGER, base_pay INTEGER, advance_pct INTEGER, signing_bonus INTEGER, transport_pct INTEGER, overhead_pct INTEGER, battle_loss_pct INTEGER, salvage_pct INTEGER, salvage_exchange INTEGER CHECK (salvage_exchange IN (0,1)), command_rights TEXT, negotiated INTEGER NOT NULL DEFAULT 0 CHECK (negotiated IN (0,1)), enemy_lances INTEGER NOT NULL DEFAULT 0, enemy_quality TEXT NOT NULL DEFAULT 'regular', enemy_lance_bv INTEGER NOT NULL DEFAULT 0, enemy_lance_tons INTEGER NOT NULL DEFAULT 0, offer_hq INTEGER NOT NULL DEFAULT 0, orders_day INTEGER, arc_key TEXT NOT NULL DEFAULT '', arc_beat INTEGER NOT NULL DEFAULT 0, escalation_clock INTEGER NOT NULL DEFAULT 0, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS operation (cid INTEGER NOT NULL, contract_id INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, template_key TEXT NOT NULL, state TEXT NOT NULL, outcome TEXT NOT NULL, opened_day INTEGER NOT NULL, resolved_day INTEGER, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS txn (cid INTEGER NOT NULL, ord INTEGER NOT NULL, day INTEGER, amount INTEGER, category TEXT, company INTEGER, hq INTEGER, contract INTEGER, note TEXT, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS loan (cid INTEGER NOT NULL, ord INTEGER NOT NULL, principal INTEGER, balance INTEGER, rate_bp INTEGER, term INTEGER, next_pay INTEGER, payment INTEGER, id INTEGER NOT NULL DEFAULT 0, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS courier (cid INTEGER NOT NULL, ord INTEGER NOT NULL, to_kind TEXT, to_id INTEGER, amount INTEGER, sent INTEGER, eta INTEGER, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
@@ -91,7 +94,7 @@ const tables = [_][]const u8{
     "unit",          "unit_slot",    "force",           "force_unit",       "force_child",       "stock",              "hq",                    "hq_facility", "hq_project",
     "contract",      "txn",          "loan",            "courier",          "policy",            "bay_job",            "candidate",             "hq_link",     "unit_transfer",
     "supply_policy", "stock_policy", "faction_cooling", "faction_standing", "event_memory",      "listing",            "part_order",            "event_log",   "pending_event",
-    "refit_plan",    "refit_op",     "rating_snapshot", "battle_report",    "battle_report_hit", "battle_report_ammo", "battle_report_salvage", "rng_stream",
+    "refit_plan",    "refit_op",     "rating_snapshot", "battle_report",    "battle_report_hit", "battle_report_ammo", "battle_report_salvage", "rng_stream",  "operation",
 };
 
 // Indexes for per-campaign tables (A28/D31): cid filters on every load;
@@ -142,6 +145,7 @@ const index_ddl =
     \\CREATE INDEX IF NOT EXISTS ix_battle_report_ammo_report ON battle_report_ammo(cid, report_ord);
     \\CREATE INDEX IF NOT EXISTS ix_battle_report_salvage_report ON battle_report_salvage(cid, report_ord);
     \\CREATE INDEX IF NOT EXISTS ix_rng_stream_cid ON rng_stream(cid);
+    \\CREATE INDEX IF NOT EXISTS ix_operation_cid ON operation(cid);
 ;
 
 /// The stream order of the single `rng` blob that saves before schema v32
@@ -234,6 +238,11 @@ pub const Store = struct {
         // v36: Person.secondary_role is now persisted; NULL on pre-v36 rows
         // means no secondary role was set (correct default).
         .{ .from = 35, .to = 36, .table = "person", .column = "secondary_role", .sql = "ALTER TABLE person ADD COLUMN secondary_role TEXT" },
+        // v38: operation arc state on contract; new `operation` child table
+        // (created by ddl). Pre-v38 rows default to "" / 0 / 0 (inert).
+        .{ .from = 37, .to = 38, .table = "contract", .column = "arc_key", .sql = "ALTER TABLE contract ADD COLUMN arc_key TEXT NOT NULL DEFAULT ''" },
+        .{ .from = 37, .to = 38, .table = "contract", .column = "arc_beat", .sql = "ALTER TABLE contract ADD COLUMN arc_beat INTEGER NOT NULL DEFAULT 0" },
+        .{ .from = 37, .to = 38, .table = "contract", .column = "escalation_clock", .sql = "ALTER TABLE contract ADD COLUMN escalation_clock INTEGER NOT NULL DEFAULT 0" },
     };
 
     pub fn open(path: [*:0]const u8) !Store {
@@ -549,6 +558,7 @@ pub const Store = struct {
         try self.saveStock(cid, "outfit", 0, &gs.spare_parts);
         try self.saveHq(gs, cid);
         try self.saveContracts(gs, cid);
+        try self.saveOperations(gs, cid);
         try self.saveTxn(gs, cid);
         try self.saveLoan(gs, cid);
         try self.saveCourier(gs, cid);
@@ -625,6 +635,7 @@ pub const Store = struct {
             .{ "next_battle_id", gs.next_battle_id },             .{ "rng_seed", @as(i64, @bitCast(gs.rng.seed)) },
             .{ "next_event_id", gs.event_queue.next_id },         .{ "next_listing_id", gs.next_listing_id },
             .{ "next_candidate_id", gs.next_candidate_id },       .{ "next_loan_id", gs.next_loan_id },
+            .{ "next_operation_id", gs.next_operation_id },
         };
         for (ints) |kv| {
             try st.bindAll(.{ cid, kv[0], kv[1] });
@@ -813,12 +824,67 @@ pub const Store = struct {
 
     // Contracts and offers.
     fn saveContracts(self: Store, gs: *GameState, cid: i64) !void {
-        const st = try self.db.prepare("INSERT INTO contract VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33,?34,?35,?36,?37,?38,?39,?40,?41,?42,?43,?44,?45)");
+        const st = try self.db.prepare("INSERT INTO contract VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33,?34,?35,?36,?37,?38,?39,?40,?41,?42,?43,?44,?45,?46,?47,?48)");
         defer st.finalize();
         var ord: i64 = 0;
         var it = gs.contracts.iterator();
         while (it.next()) |entry| : (ord += 1) try saveContract(st, cid, false, ord, entry.value_ptr);
         for (gs.contract_offers.items, 0..) |*o, i| try saveContract(st, cid, true, @intCast(i), o);
+    }
+
+    fn saveOperations(self: Store, gs: *GameState, cid: i64) !void {
+        const st = try self.db.prepare("INSERT INTO operation VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)");
+        defer st.finalize();
+        var it = gs.contracts.iterator();
+        while (it.next()) |entry| {
+            const c = entry.value_ptr;
+            for (c.operations.items, 0..) |op, ord| {
+                try st.bindAll(.{
+                    cid,
+                    @intFromEnum(c.id),
+                    @as(i64, @intCast(ord)),
+                    @intFromEnum(op.id),
+                    op.template_key,
+                    @tagName(op.state),
+                    @tagName(op.outcome),
+                    @as(i64, op.opened_day),
+                    op.resolved_day,
+                });
+                try st.run();
+            }
+        }
+    }
+
+    fn loadOperations(self: Store, gs: *GameState, cid: i64) !void {
+        const alloc = gs.allocator();
+        const st = try self.db.prepare("SELECT contract_id, id, template_key, state, outcome, opened_day, resolved_day FROM operation WHERE cid = ?1 ORDER BY contract_id, ord");
+        defer st.finalize();
+        try st.bindAll(.{cid});
+        while (try st.next()) {
+            const contract_id = try toId(types.ContractId, st.int(0));
+            const c = gs.contracts.getPtr(contract_id) orelse return error.CorruptSave;
+            const op: operation_mod.Operation = .{
+                .id = try toId(types.OperationId, st.int(1)),
+                .template_key = try st.text(2, alloc),
+                .state = st.enumValue(operation_mod.OperationState, 3) orelse return error.CorruptSave,
+                .outcome = st.enumValue(operation_mod.OutcomeBand, 4) orelse return error.CorruptSave,
+                .opened_day = try st.intAs(u32, 5),
+                .resolved_day = try optU32(st.optInt(6)),
+            };
+            try c.operations.append(alloc, op);
+        }
+        // Bump next_operation_id past the maximum stored id.
+        {
+            var max: u32 = 0;
+            var cit = gs.contracts.iterator();
+            while (cit.next()) |entry| {
+                for (entry.value_ptr.operations.items) |op| {
+                    max = @max(max, @intFromEnum(op.id));
+                }
+            }
+            if (max == std.math.maxInt(u32)) return error.CorruptSave;
+            gs.next_operation_id = @max(gs.next_operation_id, max + 1);
+        }
     }
 
     // Ledger and the rest of the lists.
@@ -1106,7 +1172,7 @@ pub const Store = struct {
             @as(i64, c.terms.transport_pct), @as(i64, c.terms.overhead_pct),   @as(i64, c.terms.battle_loss_pct), @as(i64, c.terms.salvage_pct),
             c.terms.salvage_exchange,        c.terms.command_rights,           c.negotiated,                      @as(i64, c.enemy_lances),
             c.enemy_quality,                 c.enemy_lance_bv,                 @as(i64, c.enemy_lance_tons),      @intFromEnum(c.offer_hq),
-            c.orders_day,
+            c.orders_day,                    c.arc_key,                        @as(i64, c.arc_beat),              @as(i64, c.escalation_clock),
         });
         try st.run();
     }
@@ -1171,6 +1237,7 @@ pub const Store = struct {
         try self.loadHq(&gs, cid);
         try self.loadStock(&gs, cid);
         try self.loadContract(&gs, cid);
+        try self.loadOperations(&gs, cid);
         try self.loadTxn(&gs, cid);
         try self.loadLoan(&gs, cid);
         try self.loadCourier(&gs, cid);
@@ -1293,6 +1360,7 @@ pub const Store = struct {
             if (std.mem.eql(u8, key, "next_listing_id")) gs.next_listing_id = try fit(@TypeOf(gs.next_listing_id), v);
             if (std.mem.eql(u8, key, "next_candidate_id")) gs.next_candidate_id = try fit(@TypeOf(gs.next_candidate_id), v);
             if (std.mem.eql(u8, key, "next_loan_id")) gs.next_loan_id = try fit(@TypeOf(gs.next_loan_id), v);
+            if (std.mem.eql(u8, key, "next_operation_id")) gs.next_operation_id = try fit(@TypeOf(gs.next_operation_id), v);
             if (std.mem.eql(u8, key, "rng_seed")) {
                 gs.rng.seed = @bitCast(v);
                 has_seed = true;
@@ -1599,7 +1667,7 @@ pub const Store = struct {
     // Contracts & offers.
     fn loadContract(self: Store, gs: *GameState, cid: i64) !void {
         const alloc = gs.allocator();
-        const st = try self.db.prepare("SELECT is_offer, id, kind, employer, enemy, planet, status, company, start_day, score, dist_ly, beachhead, transit_days, arrive_day, end_day, monthly_net, next_battle, battles, casualties, objective, committed_bv, pool, pool_remaining, vp, ineffective_since, breach_day, length_months, base_pay, advance_pct, signing_bonus, transport_pct, overhead_pct, battle_loss_pct, salvage_pct, salvage_exchange, command_rights, negotiated, enemy_lances, enemy_quality, enemy_lance_bv, enemy_lance_tons, offer_hq, orders_day FROM contract WHERE cid = ?1 ORDER BY is_offer, ord");
+        const st = try self.db.prepare("SELECT is_offer, id, kind, employer, enemy, planet, status, company, start_day, score, dist_ly, beachhead, transit_days, arrive_day, end_day, monthly_net, next_battle, battles, casualties, objective, committed_bv, pool, pool_remaining, vp, ineffective_since, breach_day, length_months, base_pay, advance_pct, signing_bonus, transport_pct, overhead_pct, battle_loss_pct, salvage_pct, salvage_exchange, command_rights, negotiated, enemy_lances, enemy_quality, enemy_lance_bv, enemy_lance_tons, offer_hq, orders_day, arc_key, arc_beat, escalation_clock FROM contract WHERE cid = ?1 ORDER BY is_offer, ord");
         defer st.finalize();
         try st.bindAll(.{cid});
         while (try st.next()) {
@@ -1636,6 +1704,9 @@ pub const Store = struct {
                 .enemy_lance_tons = try st.intAs(u32, 40),
                 .offer_hq = try toId(types.HqId, st.int(41)),
                 .orders_day = try optU32(st.optInt(42)),
+                .arc_key = try st.text(43, alloc),
+                .arc_beat = try st.intAs(u8, 44),
+                .escalation_clock = try st.intAs(u16, 45),
                 .terms = .{
                     .length_months = try st.intAs(u8, 26),
                     .base_pay_month = st.int(27),
@@ -2320,6 +2391,12 @@ fn validateStoredStrings(gs: *GameState) error{CorruptSave}!void {
         fn stock(map: *const std.StringArrayHashMapUnmanaged(u32)) error{CorruptSave}!void {
             for (map.keys()) |k| try item(k);
         }
+        fn arc(key: []const u8) error{CorruptSave}!void {
+            if (arc_mod.find(key) == null) return error.CorruptSave;
+        }
+        fn opTemplate(key: []const u8) error{CorruptSave}!void {
+            if (operation_mod.findTemplate(key) == null) return error.CorruptSave;
+        }
     };
     var uit = gs.units.iterator();
     while (uit.next()) |e| try Check.slots(e.value_ptr);
@@ -2339,6 +2416,8 @@ fn validateStoredStrings(gs: *GameState) error{CorruptSave}!void {
         try Check.world(c.planet_key);
         try Check.house(c.employer_key);
         try Check.house(c.enemy_key);
+        if (c.arc_key.len > 0) try Check.arc(c.arc_key);
+        for (c.operations.items) |op| try Check.opTemplate(op.template_key);
     };
     var pit = gs.people.iterator();
     while (pit.next()) |e| if (e.value_ptr.faction.len > 0) try Check.house(e.value_ptr.faction);
@@ -3556,7 +3635,7 @@ test "a rebuilt store loads to the identical digest" {
     var diff_buf: [128]u8 = undefined;
     try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &diff_buf) orelse "");
     // The golden hash is unchanged (this plan changes no simulation data).
-    try std.testing.expectEqual(@as(u64, 2367294160760975875), hash_before);
+    try std.testing.expectEqual(@as(u64, 12631872517540933635), hash_before);
 }
 
 test "every next-ID counter resumes past a higher owned id after load" {
@@ -4041,7 +4120,7 @@ test "golden master: a played year hashes to its pinned value, and a save of it 
     try std.testing.expect(gs.battle_reports.kept.items.len > 0); // the year saw fighting
     // Any change to a simulated or saved result moves this; re-pin it only
     // when the change is meant.
-    try std.testing.expectEqual(@as(u64, 2367294160760975875), digest.stateHash(&gs));
+    try std.testing.expectEqual(@as(u64, 12631872517540933635), digest.stateHash(&gs));
 
     const store = try Store.open(":memory:");
     defer store.close();
@@ -4081,4 +4160,171 @@ test "the table registry matches the tables the executable schema creates" {
         if (!in_ddl) std.debug.print("registry table {s} is not in the DDL\n", .{t});
         try std.testing.expect(in_ddl);
     }
+}
+
+// P4b: arc/operation persistence (rule 47, 67, 69).
+
+/// Build a store with a garrison contract carrying one operation; corrupt one
+/// column with `sql`, and attempt to load. FK enforcement is off during
+/// tampering so the loader remains the integrity check (rule 50, defense-in-depth).
+fn loadArcAfterTampering(sql: [*:0]const u8) !void {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 4205 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    const co = try gs.createForce("Alpha", .company, .none);
+    const cid: types.ContractId = @enumFromInt(1);
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "PER",
+        .planet_key = "caph",
+        .terms = .{ .length_months = 12, .base_pay_month = 100_000 },
+        .status = .active,
+        .assigned_company = co,
+        .arc_key = "fracturing_garrison",
+        .arc_beat = 0,
+        .escalation_clock = 10,
+    });
+    const c = gs.contracts.getPtr(cid).?;
+    try c.operations.append(gs.allocator(), .{
+        .id = @enumFromInt(1),
+        .template_key = "negotiate_terms",
+        .state = .available,
+        .opened_day = 0,
+    });
+    gs.next_operation_id = 2;
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    try store.db.exec("PRAGMA foreign_keys = OFF");
+    try store.db.exec(sql);
+    try store.db.exec("PRAGMA foreign_keys = ON");
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    loaded.deinit();
+}
+
+test "a garrison contract with arc state and operations round-trips to an identical digest" {
+    // Rule 47: arc_key/arc_beat/escalation_clock and the operation child table
+    // survive save → load. Two operations in distinct states and outcome bands
+    // cover the serialisation paths.
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 4201 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    const co = try gs.createForce("Alpha", .company, .none);
+    const cid: types.ContractId = @enumFromInt(1);
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "PER",
+        .planet_key = "caph",
+        .terms = .{ .length_months = 12, .base_pay_month = 100_000 },
+        .status = .active,
+        .assigned_company = co,
+        .arc_key = "fracturing_garrison",
+        .arc_beat = 1,
+        .escalation_clock = 35,
+    });
+    const c = gs.contracts.getPtr(cid).?;
+    try c.operations.append(gs.allocator(), .{
+        .id = @enumFromInt(1),
+        .template_key = "negotiate_terms",
+        .state = .available,
+        .opened_day = 0,
+    });
+    try c.operations.append(gs.allocator(), .{
+        .id = @enumFromInt(2),
+        .template_key = "repel_probe",
+        .state = .resolved,
+        .outcome = .success,
+        .opened_day = 0,
+        .resolved_day = 5,
+    });
+    gs.next_operation_id = 3;
+    gs.next_contract_id = 2; // one past the manually inserted id=1
+    const before = digest.stateHash(&gs);
+
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+    var diff_buf: [128]u8 = undefined;
+    try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &diff_buf) orelse "");
+    try std.testing.expectEqual(before, digest.stateHash(&loaded));
+    // Spot-check arc fields and operations.
+    const lc = loaded.contracts.getPtr(cid).?;
+    try std.testing.expectEqualStrings("fracturing_garrison", lc.arc_key);
+    try std.testing.expectEqual(@as(u8, 1), lc.arc_beat);
+    try std.testing.expectEqual(@as(u16, 35), lc.escalation_clock);
+    try std.testing.expectEqual(@as(usize, 2), lc.operations.items.len);
+    try std.testing.expectEqualStrings("negotiate_terms", lc.operations.items[0].template_key);
+    try std.testing.expectEqual(operation_mod.OperationState.available, lc.operations.items[0].state);
+    try std.testing.expectEqualStrings("repel_probe", lc.operations.items[1].template_key);
+    try std.testing.expectEqual(operation_mod.OperationState.resolved, lc.operations.items[1].state);
+    try std.testing.expectEqual(operation_mod.OutcomeBand.success, lc.operations.items[1].outcome);
+    try std.testing.expectEqual(@as(?u32, 5), lc.operations.items[1].resolved_day);
+    try std.testing.expectEqual(@as(u32, 3), loaded.next_operation_id);
+}
+
+test "a contract arc_key not in arcs.zon rejects the load as corrupt" {
+    try std.testing.expectError(error.CorruptSave, loadArcAfterTampering(
+        "UPDATE contract SET arc_key = '__bad_arc__' WHERE arc_key != ''",
+    ));
+}
+
+test "an operation with an unknown state rejects the load as corrupt" {
+    try std.testing.expectError(error.CorruptSave, loadArcAfterTampering(
+        "UPDATE operation SET state = 'bogus_state'",
+    ));
+}
+
+test "an operation template_key not in operations.zon rejects the load as corrupt" {
+    try std.testing.expectError(error.CorruptSave, loadArcAfterTampering(
+        "UPDATE operation SET template_key = '__bad_template__'",
+    ));
+}
+
+test "a v37 store migrates to v38 with empty arc fields and no operations" {
+    // Rule 51: additive forward-only migration. A v37-shaped store (no arc
+    // columns on contract, no operation table) opens and loads cleanly.
+    // arc_key defaults to '', escalation_clock to 0, operations list is empty.
+    const raw = try sqlite.Db.open(":memory:");
+    try raw.exec(
+        \\CREATE TABLE setting (key TEXT PRIMARY KEY, value INTEGER NOT NULL);
+        \\CREATE TABLE campaign (id INTEGER PRIMARY KEY, name TEXT NOT NULL, commander TEXT, day INTEGER NOT NULL, date TEXT NOT NULL, schema_version INTEGER NOT NULL, save_seq INTEGER NOT NULL, player_id INTEGER NOT NULL DEFAULT 0);
+        \\CREATE TABLE meta (cid INTEGER NOT NULL, key TEXT NOT NULL, value INTEGER NOT NULL, PRIMARY KEY (cid, key));
+        \\CREATE TABLE meta_text (cid INTEGER NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (cid, key));
+        \\CREATE TABLE rng_stream (cid INTEGER NOT NULL, stream TEXT NOT NULL, format INTEGER NOT NULL, state BLOB NOT NULL, UNIQUE (cid, stream));
+        \\CREATE TABLE person (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, first TEXT, last TEXT, callsign TEXT, role TEXT, xp INTEGER, status TEXT, fatigue INTEGER, morale INTEGER, recruited_day INTEGER, salary_override INTEGER, assigned_force INTEGER, posted_hq INTEGER, weekly_hours INTEGER, medbay_priority INTEGER, leave_until INTEGER, wound_heal_day INTEGER, training_skill TEXT, training_done INTEGER, admitted INTEGER NOT NULL DEFAULT 0, rank TEXT NOT NULL DEFAULT 'private', rank_pinned INTEGER NOT NULL DEFAULT 0, kills INTEGER NOT NULL DEFAULT 0, kill_bv INTEGER NOT NULL DEFAULT 0, battles INTEGER NOT NULL DEFAULT 0, tours INTEGER NOT NULL DEFAULT 0, outstanding_tours INTEGER NOT NULL DEFAULT 0, edge_spent INTEGER NOT NULL DEFAULT 0, faction TEXT NOT NULL DEFAULT '', shares INTEGER NOT NULL DEFAULT 0, born_day INTEGER, last_raise_day INTEGER, last_award_day INTEGER, departed_day INTEGER, secondary_role TEXT, PRIMARY KEY (cid, id));
+        \\CREATE TABLE rng (cid INTEGER PRIMARY KEY, state BLOB NOT NULL);
+        \\CREATE TABLE contract (cid INTEGER NOT NULL, is_offer INTEGER NOT NULL CHECK (is_offer IN (0,1)), ord INTEGER NOT NULL, id INTEGER, kind TEXT, employer TEXT, enemy TEXT, planet TEXT, status TEXT, company INTEGER, start_day INTEGER, score INTEGER, dist_ly INTEGER, beachhead INTEGER, transit_days INTEGER, arrive_day INTEGER, end_day INTEGER, monthly_net INTEGER, next_battle INTEGER, battles INTEGER, casualties INTEGER, objective TEXT, committed_bv INTEGER, pool INTEGER, pool_remaining INTEGER, vp INTEGER, ineffective_since INTEGER, breach_day INTEGER, length_months INTEGER, base_pay INTEGER, advance_pct INTEGER, signing_bonus INTEGER, transport_pct INTEGER, overhead_pct INTEGER, battle_loss_pct INTEGER, salvage_pct INTEGER, salvage_exchange INTEGER, command_rights TEXT, negotiated INTEGER NOT NULL DEFAULT 0, enemy_lances INTEGER NOT NULL DEFAULT 0, enemy_quality TEXT NOT NULL DEFAULT 'regular', enemy_lance_bv INTEGER NOT NULL DEFAULT 0, enemy_lance_tons INTEGER NOT NULL DEFAULT 0, offer_hq INTEGER NOT NULL DEFAULT 0, orders_day INTEGER);
+        \\INSERT INTO setting VALUES ('schema_version', 37);
+        \\INSERT INTO campaign VALUES (1, 'Fixture', NULL, 0, '3025-01-01', 37, 1, 0);
+        \\INSERT INTO meta VALUES (1, 'day_index', 0);
+        \\INSERT INTO meta VALUES (1, 'year', 3025);
+        \\INSERT INTO meta VALUES (1, 'month', 1);
+        \\INSERT INTO meta VALUES (1, 'day', 1);
+        \\INSERT INTO meta VALUES (1, 'funds', 0);
+        \\INSERT INTO meta VALUES (1, 'reputation', 0);
+        \\INSERT INTO meta VALUES (1, 'difficulty', 1);
+        \\INSERT INTO meta_text VALUES (1, 'outfit_name', 'Fixture');
+        \\INSERT INTO person VALUES (1, 0, 1, 'A', 'B', NULL, 'mekwarrior', 0, 'active', 0, 50, 0, NULL, 0, 0, 40, 0, NULL, NULL, NULL, NULL, 0, 'private', 0, 0, 0, 0, 0, 0, 0, '', 0, NULL, NULL, NULL, NULL, NULL);
+        \\INSERT INTO contract VALUES (1, 0, 0, 1, 'garrison_duty', 'LC', 'PER', 'caph', 'active', 0, 0, 0, 30, 0, 14, 14, 360, 80000, 30, 0, 0, 'duration', 0, 100000, 100000, 0, NULL, NULL, 12, 80000, 25, 0, 0, 0, 0, 0, 0, 'independent', 0, 0, 'regular', 0, 0, 0, NULL);
+        \\INSERT INTO rng VALUES (1, x'000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff');
+    );
+    // fromDb runs migrations and creates the operation table via DDL.
+    const store = try Store.fromDb(raw);
+    defer store.close();
+    try std.testing.expectEqual(@as(i64, schema_version), store.getSetting("schema_version", 0));
+    // Loading must succeed with empty arc state and no operations.
+    var loaded = try store.load(std.testing.allocator, 1);
+    defer loaded.deinit();
+    try std.testing.expectEqual(@as(usize, 1), loaded.contracts.count());
+    const c = loaded.contracts.values()[0];
+    try std.testing.expectEqualStrings("", c.arc_key);
+    try std.testing.expectEqual(@as(u8, 0), c.arc_beat);
+    try std.testing.expectEqual(@as(u16, 0), c.escalation_clock);
+    try std.testing.expectEqual(@as(usize, 0), c.operations.items.len);
 }

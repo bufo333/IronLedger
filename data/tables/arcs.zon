@@ -1,0 +1,57 @@
+// Operation arc archetypes. An arc is a narrative structure drawn at
+// contract acceptance for eligible contract kinds; it shapes the sequence of
+// operations the company may be offered and how the contract resolves.
+// Typed against domain/arc.zig `Table`.
+//
+//   kinds                 contract kinds (ContractKind tag names) that may
+//                         draw this arc at acceptance
+//   beats                 ordered narrative beats; escalation_threshold is
+//                         the accumulated clock value at which the beat
+//                         advances to the next; 0 = terminal (stays until
+//                         a finale is triggered, P4h)
+//   finales               possible ending conditions; bands checked
+//                         high-to-low by min_clock; one must have min_clock
+//                         = 0 as the unconditional fallback
+//   opening               operation template keys available at beat 0
+//
+// All numeric thresholds carry // TUNE; balance against escalationStep
+// (1 tick per active day in P4b).
+.{
+    .arcs = .{
+        .{
+            .key = "fracturing_garrison",
+            .name = "Fracturing Garrison",
+            .kinds = .{ "garrison_duty", "security_duty" },
+            .beats = .{
+                .{
+                    .key = "beginning",
+                    .name = "Uneasy Calm",
+                    .escalation_threshold = 30, // TUNE: ~30 active days before tension shows
+                },
+                .{
+                    .key = "complication",
+                    .name = "Rising Pressure",
+                    .escalation_threshold = 20, // TUNE: ~20 more days before situation worsens
+                },
+                .{
+                    .key = "escalation",
+                    .name = "Open Conflict",
+                    .escalation_threshold = 0, // terminal: awaiting finale
+                },
+            },
+            .finales = .{
+                .{
+                    .key = "fell",
+                    .name = "Garrison Overrun",
+                    .min_clock = 40, // TUNE: high accumulated pressure triggers collapse
+                },
+                .{
+                    .key = "held",
+                    .name = "Garrison Holds",
+                    .min_clock = 0, // unconditional fallback
+                },
+            },
+            .opening = .{ "negotiate_terms", "repel_probe" },
+        },
+    },
+}

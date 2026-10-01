@@ -1,0 +1,38 @@
+// Operation templates. Each template defines one type of mission the company
+// may be offered during a contract; templates belong to an arc and are
+// presented at the beat(s) named in the arc's opening or follow_up lists.
+// Typed against domain/operation.zig `Table`.
+//
+//   arc_key        the arc this template belongs to (must resolve in arcs.zon)
+//   combat         true = yields a battle engagement; false = non-combat
+//   objective      display line shown to the player (markup-safe, no braces)
+//   expected_days  typical days to resolution; // TUNE for balance
+//   follow_up      template keys unlocked on success (may be empty)
+//   decline_note   descriptor of the cost for declining (P4c promotes to
+//                  a typed effect; in P4b this is an informational label)
+//
+// No sourcebook citations; numbers are game balance values.
+.{
+    .templates = .{
+        .{
+            .key = "negotiate_terms",
+            .name = "Negotiate Terms",
+            .arc_key = "fracturing_garrison",
+            .combat = false,
+            .objective = "Meet with local officials to reduce political pressure on the garrison",
+            .expected_days = 7, // TUNE
+            .follow_up = .{},
+            .decline_note = "pressure_increase",
+        },
+        .{
+            .key = "repel_probe",
+            .name = "Repel Probe",
+            .arc_key = "fracturing_garrison",
+            .combat = true,
+            .objective = "Repel a probing attack on the garrison perimeter",
+            .expected_days = 1, // TUNE
+            .follow_up = .{},
+            .decline_note = "pressure_increase",
+        },
+    },
+}

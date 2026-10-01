@@ -314,6 +314,7 @@ pub const GameState = struct {
     next_listing_id: u32 = 1,
     next_candidate_id: u32 = 1,
     next_loan_id: u32 = 1,
+    next_operation_id: u32 = 1,
 
     pub fn init(gpa: std.mem.Allocator, config: Config) GameState {
         return .{
@@ -837,6 +838,7 @@ pub const GameState = struct {
         .{ "next_listing_id", .persisted },
         .{ "next_candidate_id", .persisted },
         .{ "next_loan_id", .persisted },
+        .{ "next_operation_id", .persisted },
     };
 
     pub fn persistenceOf(comptime name: []const u8) Persistence {

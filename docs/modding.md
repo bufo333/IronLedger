@@ -60,6 +60,8 @@ overlay of each family and checks that every one fails; CI runs it.
 | `tables/opfor.zon` | `domain/opfor.zig` `Table` | the opposing force per contract kind: lances, quality roll, reinforcements |
 | `tables/skulls.zon` | `domain/skulls.zig` `Table` | half-skull bands by power ratio (keep them aligned with `battle.ratioBonus`), the outmatched line, the checklist warning level |
 | `tables/terrain.zon` | `domain/terrain.zig` `Table` | terrain classes, weather, the 2d6 weather table |
+| `tables/arcs.zon` | `domain/arc.zig` `Table` | operation arc archetypes: narrative beats, finale options, opening templates per contract kind |
+| `tables/operations.zon` | `domain/operation.zig` `Table` | operation mission templates: arc ownership, combat flag, objectives, follow-up keys |
 
 ## Rules of the road
 
@@ -68,8 +70,10 @@ overlay of each family and checks that every one fails; CI runs it.
   with defaults may be omitted.
 - Keys are referenced across files: every loadout `part` must exist in
   `parts.zon`, every RAT entry in `chassis.zon`, every faction key in
-  `factions.zon`. `zig build test -Ddata=<dir>` runs the catalogue tests
-  that check those links, plus the MekLab construction rules on every mek.
+  `factions.zon`, every operation `arc_key` in `arcs.zon`, and every arc
+  `kinds` entry must name a known `ContractKind`. `zig build test -Ddata=<dir>`
+  runs the catalogue tests that check those links, plus the MekLab construction
+  rules on every mek.
 - Every string must be safe to show as it is: valid UTF-8, no `{`
   anywhere (braces start the screens' colour tags, and there is no escape
   for a literal one in data), and no control characters — no tabs,

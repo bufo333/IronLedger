@@ -19,7 +19,7 @@ the exception entry only after all of its listed scope is closed.
 The audit deliverables in `docs/audit-response.md` remain folded in: D27 and
 D30 into C12, D28 into C7, and D31 into C8. D33 (C18) is now closed.
 
-- [ ] C20 residual documentation, naming, and coverage inventory (C20a-C20b;
+- [x] C20 residual documentation, naming, and coverage inventory (C20a-C20b;
   rules 61, 75, 81, 82, 84): module links, corrected comments/citations,
   unit-bearing names, legible formulas, and the final C20 scope inventory.
   Delete C20.
@@ -32,7 +32,7 @@ above is complete.
 - [ ] P4 Campaign operations and stories:
   - P4a operations-and-stories design and content boundary: approved
     (`docs/p4-operations-design.md`).
-  - [ ] P4b operation content/state foundation.
+  - [x] P4b operation content/state foundation.
   - [ ] P4c operations board and garrison/security vertical slice.
   - [ ] P4d mission intent, quote/commit planning, and operation-aware battles.
   - [ ] P4e per-operation lance tasking and reports.

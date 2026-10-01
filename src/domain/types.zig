@@ -87,6 +87,9 @@ pub const CandidateId = enum(u32) { none = 0, _ };
 /// One outstanding loan; typed so a repay command cannot be passed a
 /// listing or candidate index (rule 56).
 pub const LoanId = enum(u32) { none = 0, _ };
+/// One instantiated operation on a contract; typed so an operation command
+/// cannot be passed a listing or loan index (rule 56).
+pub const OperationId = enum(u32) { none = 0, _ };
 
 /// Skill catalog, following MekHQ's SkillType. Lower level = better
 /// (target-number convention: a 3/4 mekwarrior has gunnery 3, piloting 4).

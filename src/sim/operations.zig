@@ -1,0 +1,428 @@
+//! Operation rule owners: arc eligibility, operation eligibility, quotes,
+//! outcome resolution, escalation-clock advancement, and finale selection.
+//! Every rule is owned here; callers call these functions, never re-derive
+//! the logic (rules 3, 20).
+//! No MekHQ counterpart (P4 operations design §§5-8).
+
+const std = @import("std");
+const arc_mod = @import("../domain/arc.zig");
+const operation_mod = @import("../domain/operation.zig");
+const contract_mod = @import("../domain/contract.zig");
+const types = @import("../domain/types.zig");
+const GameState = @import("state.zig").GameState;
+
+/// Quote returned by `operationQuote` for a single operation template.
+pub const Quote = struct {
+    /// Expected days to resolution (tuning data, not a guarantee). // TUNE
+    expected_days: u16,
+};
+
+/// Rule owner: is the given arc eligible for this contract kind?
+/// An arc is eligible when the kind's tag name appears in arc.kinds.
+pub fn arcEligible(a: *const arc_mod.Arc, kind: contract_mod.ContractKind) bool {
+    const tag = @tagName(kind);
+    for (a.kinds) |k| if (std.mem.eql(u8, k, tag)) return true;
+    return false;
+}
+
+/// Rule owner: the single arc eligible for a contract kind at acceptance,
+/// or null when none applies. Deterministic in P4b (exactly one arc per
+/// garrison/security vertical slice); when several become eligible later
+/// this takes an rng stream (P4 design §6 — not added until first roll).
+pub fn selectArcKeyFor(kind: contract_mod.ContractKind) ?[]const u8 {
+    for (0..arc_mod.table.arcs.len) |i| {
+        const a = &arc_mod.table.arcs[i];
+        if (arcEligible(a, kind)) return a.key;
+    }
+    return null;
+}
+
+/// Rule owner: may this operation be offered now?
+/// Gates (P4b): contract is active, arc_key non-empty, template's arc_key
+/// matches the contract's arc_key. command_rights gate is a stub (P4g).
+pub fn operationEligible(gs: *const GameState, c: *const contract_mod.Contract, t: *const operation_mod.OperationTemplate) bool {
+    _ = gs;
+    if (c.status != .active) return false;
+    if (c.arc_key.len == 0) return false;
+    if (!std.mem.eql(u8, t.arc_key, c.arc_key)) return false;
+    return true; // command_rights gate: stub true (P4g adds it)
+}
+
+/// Rule owner: the quote (expected days, stakes) for one operation on a contract.
+pub fn operationQuote(gs: *const GameState, c: *const contract_mod.Contract, t: *const operation_mod.OperationTemplate) Quote {
+    _ = gs;
+    _ = c;
+    return .{ .expected_days = t.expected_days };
+}
+
+/// Rule owner: map a resolution score to an outcome band (pure; no roll).
+/// Score < 0 → failure; 0-4 → setback; 5-9 → partial; 10-14 → success;
+/// >= 15 → decisive. All boundaries carry // TUNE.
+pub fn outcomeBand(score: i32) operation_mod.OutcomeBand {
+    if (score < 0) return .failure; // TUNE
+    if (score < 5) return .setback; // TUNE
+    if (score < 10) return .partial; // TUNE
+    if (score < 15) return .success; // TUNE
+    return .decisive; // TUNE
+}
+
+/// Rule owner: escalation ticks accrued per active day for a contract's arc.
+/// Deterministic daily accumulation; no RNG (design §6, P4c adds first roll).
+pub fn escalationStep(c: *const contract_mod.Contract) u16 {
+    _ = c;
+    return 1; // TUNE: 1 escalation tick per active contract day
+}
+
+/// Rule owner: the finale selected from the arc's options given the current
+/// escalation clock. Stub in P4b: returns the finale with min_clock == 0
+/// (the unconditional fallback). Full selection (highest eligible min_clock)
+/// is P4h.
+pub fn selectFinale(c: *const contract_mod.Contract) ?*const arc_mod.Finale {
+    const a = arc_mod.find(c.arc_key) orelse return null;
+    for (&a.finales) |*f| if (f.min_clock == 0) return f;
+    return null;
+}
+
+/// Instantiate the opening operation(s) onto a pre-commit local contract copy.
+/// Failure-atomic: reserves list capacity before assigning any IDs, so an
+/// OOM returns without mutating live GameState (rules 7, 11-13).
+pub fn instantiateOpening(gs: *GameState, c: *contract_mod.Contract) !void {
+    if (c.arc_key.len == 0) return;
+    const a = arc_mod.find(c.arc_key) orelse return;
+    // Reserve capacity first — the only fallible step — before any id
+    // is assigned or clock state changes (failure-atomic, rules 7, 11-13).
+    try c.operations.ensureUnusedCapacity(gs.allocator(), a.opening.len);
+    // Infallible from here: capacity guaranteed, ids assigned in order.
+    for (a.opening) |tkey| {
+        const id: types.OperationId = @enumFromInt(gs.next_operation_id);
+        gs.next_operation_id += 1;
+        c.operations.appendAssumeCapacity(.{
+            .id = id,
+            .template_key = tkey,
+            .state = .available,
+            .opened_day = gs.clock.day_index,
+        });
+    }
+}
+
+/// Phase-7 sub-step: advance each active, arc-bearing contract's escalation
+/// clock by one tick per day, and advance the beat when the threshold is
+/// crossed. Failure-atomic per contract: the log slot is reserved before any
+/// clock or beat mutation (rules 17, 69).
+pub fn advanceClocks(gs: *GameState) !void {
+    var it = gs.contracts.iterator();
+    while (it.next()) |entry| {
+        const c = entry.value_ptr;
+        if (c.status != .active or c.arc_key.len == 0) continue;
+        const a = arc_mod.find(c.arc_key) orelse continue;
+        if (c.arc_beat >= a.beats.len) continue;
+        const beat = a.beats[c.arc_beat];
+        // Terminal beat (threshold 0) waits for finale selection (P4h).
+        if (beat.escalation_threshold == 0) continue;
+
+        const step = escalationStep(c);
+        const will_advance = (c.escalation_clock + step >= beat.escalation_threshold) and
+            (c.arc_beat + 1 < a.beats.len);
+
+        if (will_advance) {
+            // Reserve log and pre-format before any mutation (rule 17).
+            try gs.reserveLog(1);
+            var date_buf: [10]u8 = undefined;
+            const log_text = try std.fmt.allocPrint(
+                gs.allocator(),
+                "{s} [arc] {s}: beat advances to {s} (clock {d}/{d})",
+                .{
+                    gs.clock.date.text(&date_buf),
+                    a.name,
+                    a.beats[c.arc_beat + 1].name,
+                    c.escalation_clock + step,
+                    beat.escalation_threshold,
+                },
+            );
+            // Infallible from here.
+            c.escalation_clock += step;
+            c.arc_beat += 1;
+            gs.event_log.appendAssumeCapacity(.{
+                .day = gs.clock.day_index,
+                .category = .contract,
+                .company = c.assigned_company,
+                .contract = c.id,
+                .text = log_text,
+            });
+        } else {
+            c.escalation_clock += step;
+        }
+    }
+}
+
+// ------------------------------------------------------------------ tests
+
+test "selectArcKeyFor: garrison/security select the slice arc; raid kinds select none" {
+    const testing = std.testing;
+    // Garrison-class kinds that should select the fracturing_garrison arc.
+    try testing.expectEqualStrings("fracturing_garrison", selectArcKeyFor(.garrison_duty).?);
+    try testing.expectEqualStrings("fracturing_garrison", selectArcKeyFor(.security_duty).?);
+    // Combat-heavy kinds that should select nothing.
+    try testing.expectEqual(@as(?[]const u8, null), selectArcKeyFor(.objective_raid));
+    try testing.expectEqual(@as(?[]const u8, null), selectArcKeyFor(.planetary_assault));
+    try testing.expectEqual(@as(?[]const u8, null), selectArcKeyFor(.recon_raid));
+}
+
+test "operationEligible: gates on active status, non-empty arc_key, and matching arc" {
+    const testing = std.testing;
+    var gs = @import("state.zig").GameState.init(testing.allocator, .{});
+    defer gs.deinit();
+
+    const tmpl = operation_mod.findTemplate("negotiate_terms").?;
+
+    // Gate 1: inactive contract is ineligible.
+    var c_offer: contract_mod.Contract = .{
+        .id = @enumFromInt(1),
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 12, .base_pay_month = 100_000 },
+        .status = .offer,
+        .arc_key = "fracturing_garrison",
+    };
+    try testing.expect(!operationEligible(&gs, &c_offer, tmpl));
+
+    // Gate 2: active contract with empty arc_key is ineligible.
+    var c_no_arc: contract_mod.Contract = .{
+        .id = @enumFromInt(2),
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 12, .base_pay_month = 100_000 },
+        .status = .active,
+        .arc_key = "",
+    };
+    try testing.expect(!operationEligible(&gs, &c_no_arc, tmpl));
+
+    // Gate 3: active contract with mismatched arc_key is ineligible.
+    var c_wrong_arc: contract_mod.Contract = .{
+        .id = @enumFromInt(3),
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 12, .base_pay_month = 100_000 },
+        .status = .active,
+        .arc_key = "some_other_arc",
+    };
+    try testing.expect(!operationEligible(&gs, &c_wrong_arc, tmpl));
+
+    // Eligible: active + matching arc_key.
+    var c_ok: contract_mod.Contract = .{
+        .id = @enumFromInt(4),
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 12, .base_pay_month = 100_000 },
+        .status = .active,
+        .arc_key = "fracturing_garrison",
+    };
+    try testing.expect(operationEligible(&gs, &c_ok, tmpl));
+}
+
+test "outcomeBand: boundary table" {
+    const testing = std.testing;
+    try testing.expectEqual(operation_mod.OutcomeBand.failure, outcomeBand(-1));
+    try testing.expectEqual(operation_mod.OutcomeBand.failure, outcomeBand(-100));
+    try testing.expectEqual(operation_mod.OutcomeBand.setback, outcomeBand(0));
+    try testing.expectEqual(operation_mod.OutcomeBand.setback, outcomeBand(4));
+    try testing.expectEqual(operation_mod.OutcomeBand.partial, outcomeBand(5));
+    try testing.expectEqual(operation_mod.OutcomeBand.partial, outcomeBand(9));
+    try testing.expectEqual(operation_mod.OutcomeBand.success, outcomeBand(10));
+    try testing.expectEqual(operation_mod.OutcomeBand.success, outcomeBand(14));
+    try testing.expectEqual(operation_mod.OutcomeBand.decisive, outcomeBand(15));
+    try testing.expectEqual(operation_mod.OutcomeBand.decisive, outcomeBand(100));
+}
+
+test "escalationStep and advanceClocks: clock accrues and beat advances at threshold" {
+    const testing = std.testing;
+    var gs = @import("state.zig").GameState.init(testing.allocator, .{});
+    defer gs.deinit();
+
+    const a = arc_mod.find("fracturing_garrison").?;
+    const threshold = a.beats[0].escalation_threshold; // 30
+
+    // Insert an active garrison contract with the slice arc.
+    const cid: types.ContractId = @enumFromInt(1);
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+        .status = .active,
+        .arc_key = "fracturing_garrison",
+        .arc_beat = 0,
+        .escalation_clock = 0,
+    });
+
+    // Advance threshold-1 days: clock should be threshold-1, beat still 0.
+    var day: u16 = 0;
+    while (day < threshold - 1) : (day += 1) {
+        try advanceClocks(&gs);
+    }
+    {
+        const c = gs.contracts.getPtr(cid).?;
+        try testing.expectEqual(@as(u16, threshold - 1), c.escalation_clock);
+        try testing.expectEqual(@as(u8, 0), c.arc_beat);
+    }
+
+    // One more day: clock reaches threshold, beat advances to 1.
+    try advanceClocks(&gs);
+    {
+        const c = gs.contracts.getPtr(cid).?;
+        try testing.expect(c.escalation_clock >= threshold);
+        try testing.expectEqual(@as(u8, 1), c.arc_beat);
+    }
+
+    // A contract with no arc_key is untouched.
+    const cid2: types.ContractId = @enumFromInt(2);
+    try gs.contracts.put(gs.allocator(), cid2, .{
+        .id = cid2,
+        .kind = .objective_raid,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 3, .base_pay_month = 300_000 },
+        .status = .active,
+        .arc_key = "",
+    });
+    try advanceClocks(&gs);
+    {
+        const c2 = gs.contracts.getPtr(cid2).?;
+        try testing.expectEqual(@as(u16, 0), c2.escalation_clock);
+        try testing.expectEqual(@as(u8, 0), c2.arc_beat);
+    }
+}
+
+test "instantiateOpening: consumer agreement with arc opening keys" {
+    const testing = std.testing;
+    var gs = @import("state.zig").GameState.init(testing.allocator, .{});
+    defer gs.deinit();
+
+    // Build a local contract copy with the garrison arc.
+    var c: contract_mod.Contract = .{
+        .id = @enumFromInt(1),
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+        .status = .transit,
+        .arc_key = "fracturing_garrison",
+    };
+    try instantiateOpening(&gs, &c);
+    try testing.expect(c.operations.items.len > 0);
+
+    // Every instantiated template_key is in the arc's opening list.
+    const a = arc_mod.find("fracturing_garrison").?;
+    for (c.operations.items) |op| {
+        var found = false;
+        for (a.opening) |ok| {
+            if (std.mem.eql(u8, ok, op.template_key)) {
+                found = true;
+                break;
+            }
+        }
+        try testing.expect(found);
+    }
+
+    // A contract with no arc gets no operations.
+    var c2: contract_mod.Contract = .{
+        .id = @enumFromInt(2),
+        .kind = .objective_raid,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 3, .base_pay_month = 300_000 },
+        .status = .transit,
+        .arc_key = "",
+    };
+    try instantiateOpening(&gs, &c2);
+    try testing.expectEqual(@as(usize, 0), c2.operations.items.len);
+}
+
+test "instantiateOpening: failure-atomic under injected OOM" {
+    const testing = std.testing;
+    var outer = std.heap.ArenaAllocator.init(testing.allocator);
+    defer outer.deinit();
+    var gs = @import("state.zig").GameState.init(outer.allocator(), .{});
+    defer gs.deinit();
+
+    var c: contract_mod.Contract = .{
+        .id = @enumFromInt(1),
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+        .status = .transit,
+        .arc_key = "fracturing_garrison",
+    };
+    const before_id = gs.next_operation_id;
+
+    // Block all further arena allocations so ensureUnusedCapacity fails before
+    // any ID is assigned (failure-atomic: no mutation on OOM).
+    gs.arena.state.used_list = null;
+    gs.arena.state.free_list = null;
+    gs.arena.child_allocator = std.testing.failing_allocator;
+
+    try testing.expectError(error.OutOfMemory, instantiateOpening(&gs, &c));
+    // next_operation_id unchanged — no IDs consumed before the OOM.
+    try testing.expectEqual(before_id, gs.next_operation_id);
+    // No operations appended to the local copy.
+    try testing.expectEqual(@as(usize, 0), c.operations.items.len);
+}
+
+test "advanceClocks: failure-atomic under injected OOM at log reservation" {
+    const testing = std.testing;
+    const digest = @import("digest.zig");
+
+    var outer = std.heap.ArenaAllocator.init(testing.allocator);
+    defer outer.deinit();
+    var gs = @import("state.zig").GameState.init(outer.allocator(), .{});
+    defer gs.deinit();
+
+    const a = arc_mod.find("fracturing_garrison").?;
+    const threshold = a.beats[0].escalation_threshold;
+
+    const cid: types.ContractId = @enumFromInt(1);
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+        .status = .active,
+        .arc_key = "fracturing_garrison",
+        .arc_beat = 0,
+        .escalation_clock = threshold - 1,
+    });
+
+    const before = digest.stateHash(&gs);
+
+    // Block all further arena allocations so reserveLog(1) fails before any
+    // clock or beat mutation (rule 17 failure-atomic, rule 69).
+    gs.arena.state.used_list = null;
+    gs.arena.state.free_list = null;
+    gs.arena.child_allocator = std.testing.failing_allocator;
+
+    try testing.expectError(error.OutOfMemory, advanceClocks(&gs));
+    // Digest unchanged: neither clock nor beat was mutated.
+    try testing.expectEqual(before, digest.stateHash(&gs));
+    {
+        const c = gs.contracts.getPtr(cid).?;
+        try testing.expectEqual(@as(u16, threshold - 1), c.escalation_clock);
+        try testing.expectEqual(@as(u8, 0), c.arc_beat);
+    }
+}

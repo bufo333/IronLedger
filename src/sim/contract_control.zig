@@ -27,6 +27,7 @@ const treasury = @import("treasury.zig");
 const commander_mod = @import("../domain/commander.zig");
 const contract_market = @import("contract_market.zig");
 const commands = @import("commands.zig");
+const operations = @import("operations.zig");
 
 pub const grace_days: u32 = tuning.contract.grace_days;
 pub const cooling_days: u32 = tuning.contract.cooling_days;
@@ -63,11 +64,17 @@ pub fn combatEffective(fieldable_bv: i64, committed_bv: i64) bool {
     return fieldable_bv * 100 >= committed_bv * tuning.contract.effective_min_pct;
 }
 
-/// At acceptance: set the objective, remember what was committed, and
-/// size the opposition.
+/// At acceptance: set the objective, remember what was committed, size the
+/// opposition, and select the contract arc (if any).
 pub fn onAccept(gs: *GameState, c: *contract_mod.Contract) void {
     c.objective = contract_mod.objectiveFor(c.kind);
     c.committed_bv = fieldableBv(gs, c.assigned_company);
+    // Arc selection: deterministic in P4b (at most one arc per kind).
+    if (operations.selectArcKeyFor(c.kind)) |k| {
+        c.arc_key = k;
+        c.arc_beat = 0;
+        c.escalation_clock = 0;
+    }
     if (c.objective == .attrition) {
         // The enemy's own force and its reinforcements; a contract saved
         // before schema v22 has no opfor and sizes off the company.
@@ -607,6 +614,7 @@ pub fn acceptContract(gs: *GameState, offer_id: types.ContractId, company_id: ty
     c.transit_days = logistics.daysForJumps(jumps);
     c.arrive_day = gs.clock.day_index + c.transit_days;
     onAccept(gs, &c); // mutates only the local copy c
+    try operations.instantiateOpening(gs, &c); // failure-atomic: c is still local
     c.monthly_net = types.applyPct(c.terms.base_pay_month, 100 - @as(i64, c.terms.advance_pct));
 
     // Signing money in, transit freight out (employer covers transport_pct;

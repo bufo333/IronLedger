@@ -1,6 +1,6 @@
 -- IRON LEDGER — SQLite save store schema (design document)
 --
--- Matches schema_version 37. The executable DDL and its column migrations
+-- Matches schema_version 38. The executable DDL and its column migrations
 -- live in src/persist/store.zig; this file is the readable reference for
 -- what each table and column means. Column order here is the runtime order.
 --
@@ -505,6 +505,27 @@ CREATE TABLE contract (
     offer_hq        INTEGER NOT NULL DEFAULT 0,      -- -> hq.id whose board carries the offer
     orders_day      INTEGER,                         -- engagement day battle orders were confirmed for;
                                                      -- the contact warning stands until it equals next_battle
+    -- Operation arc state (P4b)
+    arc_key         TEXT    NOT NULL DEFAULT '',     -- arc archetype key drawn at acceptance; empty = no arc
+    arc_beat        INTEGER NOT NULL DEFAULT 0,      -- current beat index into the arc's beats sequence
+    escalation_clock INTEGER NOT NULL DEFAULT 0,     -- accumulated escalation ticks since acceptance
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
+);
+
+-- Operations instantiated on a contract: missions offered during arc beats.
+-- (P4b) A row exists from instantiation through the campaign save; outcome is
+-- filled at resolution (P4c). Ordered by (contract_id, ord) within a campaign.
+CREATE TABLE operation (
+    cid             INTEGER NOT NULL,
+    contract_id     INTEGER NOT NULL,                -- -> contract.id
+    ord             INTEGER NOT NULL,                -- instantiation order within the contract
+    id              INTEGER NOT NULL,                -- -> gs.next_operation_id sequence; unique per cid
+    template_key    TEXT    NOT NULL,                -- -> operations.zon template key
+    state           TEXT    NOT NULL,                -- domain/operation.zig OperationState
+    outcome         TEXT    NOT NULL DEFAULT 'none', -- domain/operation.zig OutcomeBand
+    opened_day      INTEGER NOT NULL,                -- day_index when instantiated
+    resolved_day    INTEGER,                         -- day_index when resolved; NULL = unresolved
+    PRIMARY KEY (cid, contract_id, ord),
     FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 

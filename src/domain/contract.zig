@@ -5,6 +5,7 @@
 const std = @import("std");
 const types = @import("types.zig");
 const tuning = @import("tuning.zig").t;
+const operation = @import("operation.zig");
 
 pub const ContractKind = enum {
     garrison_duty,
@@ -270,6 +271,15 @@ pub const Contract = struct {
     /// The HQ whose board posted this offer: only companies based
     /// there may take it. `.none` = no posting HQ; any company may take it.
     offer_hq: types.HqId = .none,
+    /// The arc archetype drawn for this contract ("" = none). Validated
+    /// against arc.table on load, like employer_key.
+    arc_key: []const u8 = "",
+    /// Current beat index into the arc's beats slice.
+    arc_beat: u8 = 0,
+    /// Accumulated escalation pressure (deterministic daily accrual). // TUNE
+    escalation_clock: u16 = 0,
+    /// Instantiated operations for this contract, in creation order.
+    operations: std.ArrayListUnmanaged(operation.Operation) = .empty,
 
     /// The company is out on it: in transit to the world or on station.
     pub fn isRunning(self: *const Contract) bool {

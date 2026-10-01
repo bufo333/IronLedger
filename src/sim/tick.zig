@@ -21,6 +21,7 @@ const part_mod = @import("../domain/part.zig");
 const hq_ops = @import("hq_ops.zig");
 const network = @import("network.zig");
 const contract_control = @import("contract_control.zig");
+const operations = @import("operations.zig");
 const planet_mod = @import("../domain/planet.zig");
 const logistics = @import("../econ/logistics.zig");
 const field_supply = @import("field_supply.zig");
@@ -38,7 +39,7 @@ pub const DayPhase = enum {
     acquisition_and_markets,
     maintenance, // weekly per unit
     training,
-    contract_events,
+    contract_events, // includes escalation-clock advancement (operations.advanceClocks)
     battle_resolution,
     morale_fatigue,
     finances, // payday on the 1st
@@ -74,6 +75,7 @@ pub fn advanceDay(gs: *GameState) !void {
         try contract_events.rollWeekly(gs); // weekly happenings
         try contract_events.rollInterdiction(gs); // raiders at the jump point
     }
+    try operations.advanceClocks(gs); // contract_events sub-step: escalation-clock advancement
     try battle.runDaily(gs); // battle_resolution: due engagements resolve
     try contract_control.checkEffectiveness(gs); // the ineffectiveness clock
     if (gs.clock.day_index % types.days_per_week == 0 and gs.clock.day_index > 0) {
