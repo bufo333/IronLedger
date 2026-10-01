@@ -925,9 +925,10 @@ item: tests green, both smokes, ROADMAP tick, one commit.
   lost / KIA / enemy BV from the losses line, wrecks from the salvage
   line); the next save writes them down for good.
 - ✅ Firebases made useful (play feedback 2026-09-05: "what is the point of
-  a firebase if it cannot host a company"). (1) Forward depot: the stocked-HQ
-  selector was added as `tick.bestSupplyHq`; wiring automatic resupply through
-  the tonnage-aware route quote remains C15. (2) Basing: a
+  a firebase if it cannot host a company"). (1) Forward depot: `tick.bestSupplyHq`
+  is quote-aware (C15 closed) — it selects by (route days, freight cost, HQ id),
+  skipping saturated or unroutable sources, so the company's own supplying HQ
+  wins when other depots require an extra charter hop. (2) Basing: a
   field HQ hosts one company as it stands (four combat lances, a support
   company) to rest, resupply and stage; its facilities provide forward
   services, but structural depot work and XP training remain regional-tier

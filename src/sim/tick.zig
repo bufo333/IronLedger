@@ -157,9 +157,9 @@ fn runPolicies(gs: *GameState) !void {
             // Room counts what is already on the road (the shipment check does).
             const free_tons = (sites.siteFreeTons(gs, site) -| field_supply.inboundTons(gs, sp.company)) / @max(1, part_mod.tons(line.key));
             want = @min(want, free_tons);
-            // Origin selection: prefer the nearest HQ that holds the line,
-            // falling back through partial sources to home (C15a, rule 20).
-            const origin = bestSupplyHq(gs, sp.company, line.key, want, home);
+            // Origin selection: the HQ with the fastest feasible route,
+            // preferring full-stock over partial, falling back to home (C15a, rule 20).
+            const origin = try bestSupplyHq(gs, sp.company, line.key, want, home, arena.allocator());
             const available = gs.stockCount(.{ .hq = origin }, line.key);
             const qty = @min(want, available);
             if (qty == 0) {
@@ -185,37 +185,50 @@ fn runPolicies(gs: *GameState) !void {
 }
 
 /// The warehouse a deployed company's line should ship from: the HQ
-/// nearest the company that holds the whole shipment, else the nearest
-/// that holds any of it, else home. Distance is by star map.
-pub fn bestSupplyHq(gs: *GameState, company: types.ForceId, key: []const u8, want: u32, home: types.HqId) types.HqId {
-    const here_key: ?[]const u8 = if (gs.deploymentContract(company)) |c| c.planet_key else if (gs.force(company)) |f| f.location_planet else null;
-    const here = planet_mod.find(here_key orelse return home) orelse return home;
-    var best_full: types.HqId = .none;
-    var best_full_d: u32 = std.math.maxInt(u32);
-    var best_some: types.HqId = .none;
-    var best_some_d: u32 = std.math.maxInt(u32);
+/// whose route quote to the company is feasible and fastest, preferring
+/// a fully-stocked HQ over a partial source, falling back to home when
+/// no route is feasible (C15a, rule 20, ARCH §9.5). Selection is
+/// (route days, route cost, HQ id) — the same tiebreak as routeBetween.
+/// The allocator is the caller's scratch arena; no mutation of GameState.
+pub fn bestSupplyHq(gs: *GameState, company: types.ForceId, key: []const u8, want: u32, home: types.HqId, alloc: std.mem.Allocator) !types.HqId {
+    const dest: types.Site = .{ .company = company };
+    const tons = want * part_mod.tons(key);
+
+    const Candidate = struct {
+        id: types.HqId,
+        days: u32,
+        cost: types.CBills,
+
+        fn better(self: @This(), than: @This()) bool {
+            if (self.days != than.days) return self.days < than.days;
+            if (self.cost != than.cost) return self.cost < than.cost;
+            return @intFromEnum(self.id) < @intFromEnum(than.id);
+        }
+    };
+    var best_full: ?Candidate = null;
+    var best_some: ?Candidate = null;
+
     var it = gs.hqs.iterator();
     while (it.next()) |e| {
         const hq = e.value_ptr;
         const on_hand = gs.stockCount(.{ .hq = hq.id }, key);
         if (on_hand == 0) continue;
-        const w = planet_mod.find(hq.planet_key) orelse continue;
-        const d = planet_mod.distanceLy(w, here);
-        if (on_hand >= want and d < best_full_d) {
-            best_full = hq.id;
-            best_full_d = d;
+        const q = sites.freightQuote(gs, alloc, .{ .hq = hq.id }, dest, tons) catch |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+            else => continue, // NoRoute, ThroughputExceeded, or any routing failure
+        };
+        const c: Candidate = .{ .id = hq.id, .days = q.days, .cost = q.cost };
+        if (on_hand >= want) {
+            if (best_full == null or c.better(best_full.?)) best_full = c;
         }
-        if (d < best_some_d) {
-            best_some = hq.id;
-            best_some_d = d;
-        }
+        if (best_some == null or c.better(best_some.?)) best_some = c;
     }
-    if (best_full != .none) return best_full;
-    if (best_some != .none) return best_some;
+    if (best_full) |b| return b.id;
+    if (best_some) |b| return b.id;
     return home;
 }
 
-test "forward depot: the nearest HQ holding the line ships it, the home HQ otherwise" {
+test "bestSupplyHq: home ships when nothing else is stocked; home wins over chartered relay" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 909 });
     defer gs.deinit();
     _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
@@ -230,15 +243,63 @@ test "forward depot: the nearest HQ holding the line ships it, the home HQ other
     _ = try commands.execute(&gs, .{ .found_hq = .{ .name = "Firebase", .planet_key = fb_key } });
     const fb = gs.hqs.keys()[1];
     gs.force(co).?.location_planet = fb_key;
-    // Only home has provisions: home ships. Stock the firebase: it wins on distance.
-    try std.testing.expectEqual(home, bestSupplyHq(&gs, co, "provisions", 10, home));
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    // Only home has provisions (starter stock): home is the only feasible source.
+    try std.testing.expectEqual(home, try bestSupplyHq(&gs, co, "provisions", 10, home, arena.allocator()));
+    // Firebase has partial stock (4 < want 10): home still wins on full-stock preference.
     try gs.addStock(.{ .hq = fb }, "provisions", 4);
-    try std.testing.expectEqual(home, bestSupplyHq(&gs, co, "provisions", 10, home)); // home covers the whole shipment
+    try std.testing.expectEqual(home, try bestSupplyHq(&gs, co, "provisions", 10, home, arena.allocator()));
+    // Firebase has enough stock, but its route requires a charter to home first then the
+    // same last-mile leg — more days than shipping directly from home. Home wins.
     try gs.addStock(.{ .hq = fb }, "provisions", 20);
-    try std.testing.expectEqual(fb, bestSupplyHq(&gs, co, "provisions", 10, home));
-    // The firebase can host the company now (field capacity 1).
+    try std.testing.expectEqual(home, try bestSupplyHq(&gs, co, "provisions", 10, home, arena.allocator()));
+    // Once the firebase becomes the company's supplying HQ the route check from fb is
+    // same-to-same (no extra leg), so fb wins over home which now needs to route through fb.
     try toe.assignCompanyToHq(&gs, co, fb);
     try std.testing.expectEqual(fb, gs.force(co).?.supplying_hq);
+    try std.testing.expectEqual(fb, try bestSupplyHq(&gs, co, "provisions", 10, home, arena.allocator()));
+}
+
+test "bestSupplyHq: saturated route is skipped for the feasible source" {
+    // Two HQs both stocked. depot_a has a link to home but that link is at
+    // capacity; the shipment also exceeds the charter cap (40 t/week) so
+    // depot_a returns NoRoute. Home is the company's supplying_hq (same-to-same
+    // → no route check) and is always feasible. New code picks home; old
+    // distance-based code would have picked the nearer depot_a (C15a regression,
+    // acceptance criterion 2).
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 4321 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    const home = gs.seat();
+    const co = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
+
+    const home_world = planet_mod.find(gs.hqs.getPtr(home).?.planet_key).?;
+    // The depot must be reachable (inside the home ring).
+    var depot_planet: []const u8 = "";
+    for (planet_mod.catalog) |*p| {
+        if (p != home_world and planet_mod.distanceLy(p, home_world) <= gs.hqs.getPtr(home).?.influenceLy() and depot_planet.len == 0) {
+            depot_planet = p.key;
+            break;
+        }
+    }
+    _ = try commands.execute(&gs, .{ .found_hq = .{ .name = "Depot", .planet_key = depot_planet } });
+    const depot = gs.hqs.keys()[1];
+
+    // Both HQs have ample provisions. home starts with starter stock (60).
+    try gs.addStock(.{ .hq = depot }, "provisions", 100);
+
+    // A direct link depot→home, saturated so no more tonnage fits this week.
+    try gs.hq_links.append(gs.allocator(), .{ .a = depot, .b = home, .level = 1, .established_day = 0 });
+    const li = gs.hq_links.items.len - 1;
+    gs.hq_links.items[li].tons_this_week = gs.hq_links.items[li].tonsPerWeek();
+
+    // want=50 provisions = 50t, which exceeds the level-1 charter cap (40 t/week).
+    // depot: saturated link + 50t > charter cap → NoRoute → skipped.
+    // home: company's supplying_hq matches from_hq → no route check → always feasible → selected.
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    try std.testing.expectEqual(home, try bestSupplyHq(&gs, co, "provisions", 50, home, arena.allocator()));
 }
 
 /// Warehouse reorder points: every line an HQ keeps stocked is
