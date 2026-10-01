@@ -42,17 +42,6 @@ Owner of every entry: the project owner.
 - **Removal:** C17.
 - **Guard:** review (checklist question 13). No mechanical check.
 
-### C19. Platform support
-
-- **Rules:** 65.
-- **Why not yet:** Needs a target-gated terminal, resize, child process, paths and audio for Windows.
-- **Scope:**
-  - `term.zig` uses POSIX termios and SIGWINCH unconditionally.
-  - `music.zig` uses `waitpid`, `getpid`, `kill` and a PATH scan split on `:`.
-  - `build.zig` rejects no target.
-- **Removal:** C19.
-- **Guard:** review. No mechanical check.
-
 ### C20. Documentation and naming
 
 - **Rules:** 61, 75, 81, 82, 84.

@@ -583,7 +583,13 @@ view model each frame from an arena.
   found it the better long-term choice *if* it tracks Zig 0.16; given the
   0.15→0.16 std churn (Io, File, process), the hand-rolled layer (~400
   lines) keeps the build dependency-free now and can be swapped later
-  behind the same `Screen`/`Cell` interface.
+  behind the same `Screen`/`Cell` interface. Supported targets (rule 65):
+  macOS and Linux use POSIX termios raw mode and `SIGWINCH` for resize;
+  Windows uses the console in virtual-terminal mode
+  (`ENABLE_VIRTUAL_TERMINAL_PROCESSING` on output,
+  `ENABLE_VIRTUAL_TERMINAL_INPUT` on input) and detects resize by polling
+  the console size once per frame (no `SIGWINCH` on Windows). The build
+  rejects any target outside {macOS, Linux, Windows}.
 - **Cell buffer**: the frame renders into a `[]Cell` (char + fg + attrs)
   double buffer; only changed cells are flushed. No per-frame allocation
   beyond the arena the queries fill.
@@ -602,13 +608,19 @@ view model each frame from an arena.
   markup escaped (`MarkupBuilder.appendPlain`), and controls and invalid
   UTF-8 draw as `?` and U+FFFD.
 - **Soundtrack** (`music.zig`) drives a child-process player (`afplay`,
-  `mpv`, `ffplay`, or `aplay`). Lifecycle bounds (rule 64): `stop()` sends
-  SIGTERM and polls NOHANG up to 25 × 10 ms; if the process has not exited
-  within 250 ms it escalates to SIGKILL and blocks exactly once. `poll()`
-  discards ECHILD and other waitpid errors rather than blocking. The shuffle
-  order lives in a single `gpa`-allocated buffer sized to `tracks.len` on
-  first use and re-filled in place on each rebuild; no per-rebuild arena
-  growth occurs.
+  `mpv`, `ffplay`, or `aplay`). The player is discovered on `PATH` using
+  the platform path delimiter (`':'` on macOS/Linux, `';'` on Windows;
+  `std.fs.path.delimiter`). On Windows, only `mpv` or `ffplay` can be
+  found (if installed); `afplay` and `aplay` are macOS/Linux-only. The
+  client is silent if no supported player is on `PATH`. Lifecycle bounds
+  (rule 64): on POSIX, `stop()` sends SIGTERM and polls NOHANG up to
+  25 × 10 ms; if the process has not exited within 250 ms it escalates to
+  SIGKILL and blocks exactly once. On Windows, `stop()` calls
+  `NtTerminateProcess` and polls `NtWaitForSingleObject` up to 25 × 10 ms,
+  then waits once without bound. `poll()` discards non-success wait results
+  rather than blocking. The shuffle order lives in a single `gpa`-allocated
+  buffer sized to `tracks.len` on first use and re-filled in place on each
+  rebuild; no per-rebuild arena growth occurs.
 - **Colors** are semantic only — amber (attention/active), green (ok),
   red (critical), cyan (cursor/focus), dim (chrome) — on the terminal's own
   background, so the client holds on any theme.

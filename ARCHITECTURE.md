@@ -878,7 +878,10 @@ bulk-copy MegaMek data files into the repo without deciding on licensing.
   and prints `CONTRACT CHECKS OK` or each
   violation. CI runs the gate and both smokes on Linux and macOS, and
   builds a ReleaseFast release from a tree holding only the package's
-  declared paths (`docs/clean-package.sh`), on every change.
+  declared paths (`docs/clean-package.sh`), on every change. The build
+  rejects any target outside the supported set {macOS, Linux, Windows}
+  (rule 65); CI also compiles for each supported target to verify the
+  target-gated terminal and process code compiles on all three.
 - Style and every other coding rule: [`docs/coding-contract.md`](docs/coding-contract.md).
 
 ## 14. Directory layout

@@ -11,6 +11,7 @@
 //! No MekHQ counterpart: the soundtrack player (docs/mekhq-map.md).
 
 const std = @import("std");
+const native_os = @import("builtin").os.tag;
 
 const extensions = [_][]const u8{ ".aac", ".m4a", ".mp3", ".wav", ".flac", ".ogg" };
 
@@ -50,7 +51,9 @@ pub const Player = struct {
     pub fn init(io: std.Io, gpa: std.mem.Allocator, dir_path: []const u8) Player {
         var p: Player = .{ .io = io, .gpa = gpa, .arena = std.heap.ArenaAllocator.init(gpa) };
         // The client may roll dice: a fresh order every launch.
-        var seed: u64 = @intCast(@as(u32, @bitCast(std.c.getpid())));
+        // std.Thread.getCurrentId() returns Thread.Id (u32/u64 by platform;
+        // std/Thread.zig:279) — cross-platform replacement for getpid.
+        var seed: u64 = @intCast(std.Thread.getCurrentId());
         const now = std.Io.Clock.now(.real, io);
         seed ^= @as(u64, @truncate(@as(u96, @bitCast(now.nanoseconds))));
         p.rng = std.Random.DefaultPrng.init(seed);
@@ -130,12 +133,20 @@ pub const Player = struct {
     fn detectPlayer() ?[]const u8 {
         const path = std.mem.span(std.c.getenv("PATH") orelse return null);
         for ([_][]const u8{ "afplay", "mpv", "ffplay", "aplay" }) |cmd| {
-            var it = std.mem.tokenizeScalar(u8, path, ':');
+            // std.fs.path.delimiter is ':' on POSIX and ';' on Windows
+            // (std/fs/path.zig:42).
+            var it = std.mem.tokenizeScalar(u8, path, std.fs.path.delimiter);
             while (it.next()) |dir| {
                 var buf: [512]u8 = undefined;
                 // best-effort: a PATH entry too long for the probe buffer is skipped.
                 const full = std.fmt.bufPrintZ(&buf, "{s}/{s}", .{ dir, cmd }) catch continue;
                 if (std.c.access(full, 1) == 0) return cmd; // X_OK
+                // On Windows executables need a .exe suffix.
+                if (native_os == .windows) {
+                    // best-effort: a PATH entry too long for the probe buffer is skipped.
+                    const full_exe = std.fmt.bufPrintZ(&buf, "{s}/{s}.exe", .{ dir, cmd }) catch continue;
+                    if (std.c.access(full_exe, 1) == 0) return cmd;
+                }
             }
         }
         return null;
@@ -218,11 +229,20 @@ pub const Player = struct {
                 self.child = null;
                 return;
             };
-            var status: c_int = 0;
-            const rc = std.c.waitpid(pid, &status, std.c.W.NOHANG);
-            if (rc == 0) return; // still playing
-            if (rc < 0) return; // waitpid error (already reaped or ECHILD)
-            self.child = null;
+            if (native_os == .windows) {
+                // Windows: poll with a zero-timeout NtWaitForSingleObject.
+                // pid is a HANDLE on Windows (std/process/Child.zig:14).
+                var zero: std.os.windows.LARGE_INTEGER = 0;
+                const s = std.os.windows.ntdll.NtWaitForSingleObject(pid, .FALSE, &zero);
+                if (s != .SUCCESS) return; // still playing (or error)
+                self.child = null;
+            } else {
+                var status: c_int = 0;
+                const rc = std.c.waitpid(pid, &status, std.c.W.NOHANG);
+                if (rc == 0) return; // still playing
+                if (rc < 0) return; // waitpid error (already reaped or ECHILD)
+                self.child = null;
+            }
         }
         self.startNext();
     }
@@ -275,21 +295,43 @@ pub const Player = struct {
     pub fn stop(self: *Player) void {
         if (self.child) |*c| {
             if (c.id) |pid| {
-                // best-effort: the player process may already have exited.
-                std.posix.kill(pid, .TERM) catch {};
-                var status: c_int = 0;
-                // Poll up to 25×10 ms = 250 ms before escalating to SIGKILL
-                // (rule 64: bounded wait, not indefinite block).
-                var tries: usize = 0;
-                while (tries < 25) : (tries += 1) {
-                    const rc = std.c.waitpid(pid, &status, std.c.W.NOHANG);
-                    if (rc != 0) break; // reaped or error
-                    const ts: std.c.timespec = .{ .sec = 0, .nsec = 10 * std.time.ns_per_ms };
-                    _ = std.c.nanosleep(&ts, null);
+                if (native_os == .windows) {
+                    // Windows: NtTerminateProcess then bounded wait.
+                    // pid is a HANDLE on Windows (std/process/Child.zig:14).
+                    // NtTerminateProcess is the force-terminate equivalent
+                    // (std/os/windows/ntdll.zig:709).
+                    // best-effort: the player process may already have exited.
+                    _ = std.os.windows.ntdll.NtTerminateProcess(pid, .SUCCESS);
+                    // Poll up to 25×10 ms = 250 ms for the process to exit
+                    // (rule 64: bounded wait, not indefinite block).
+                    var tries: usize = 0;
+                    while (tries < 25) : (tries += 1) {
+                        // 10 ms relative timeout: -10ms × (10000 × 100ns/ms)
+                        var timeout: std.os.windows.LARGE_INTEGER = -100000;
+                        const s = std.os.windows.ntdll.NtWaitForSingleObject(pid, .FALSE, &timeout);
+                        if (s == .SUCCESS) break; // process exited
+                    } else {
+                        // Still not done: wait once more without bound.
+                        _ = std.os.windows.ntdll.NtWaitForSingleObject(pid, .FALSE, null);
+                    }
                 } else {
-                    // Process did not exit within the grace period: force-kill.
-                    std.posix.kill(pid, .KILL) catch {}; // best-effort: already exited between poll and kill
-                    _ = std.c.waitpid(pid, &status, 0);
+                    // POSIX: SIGTERM then poll up to 250 ms, then SIGKILL.
+                    // best-effort: the player process may already have exited.
+                    std.posix.kill(pid, .TERM) catch {};
+                    var status: c_int = 0;
+                    // Poll up to 25×10 ms = 250 ms before escalating to SIGKILL
+                    // (rule 64: bounded wait, not indefinite block).
+                    var tries: usize = 0;
+                    while (tries < 25) : (tries += 1) {
+                        const rc = std.c.waitpid(pid, &status, std.c.W.NOHANG);
+                        if (rc != 0) break; // reaped or error
+                        const ts: std.c.timespec = .{ .sec = 0, .nsec = 10 * std.time.ns_per_ms };
+                        _ = std.c.nanosleep(&ts, null);
+                    } else {
+                        // Process did not exit within the grace period: force-kill.
+                        std.posix.kill(pid, .KILL) catch {}; // best-effort: already exited between poll and kill
+                        _ = std.c.waitpid(pid, &status, 0);
+                    }
                 }
             }
             self.child = null;

@@ -19,9 +19,6 @@ the exception entry only after all of its listed scope is closed.
 The audit deliverables in `docs/audit-response.md` remain folded in: D27 and
 D30 into C12, D28 into C7, and D31 into C8. D33 (C18) is now closed.
 
-- [ ] C19 explicit platforms (C19a-C19c; rule 65): target-gated terminal and
-  process support, supported-target builds, and documented capability. Delete
-  C19.
 - [ ] C20 residual documentation, naming, and coverage inventory (C20a-C20b;
   rules 61, 75, 81, 82, 84): module links, corrected comments/citations,
   unit-bearing names, legible formulas, and the final C17 scope inventory.

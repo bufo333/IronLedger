@@ -2,6 +2,16 @@ const std = @import("std");
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
+    // Rule 65: supported platforms are macOS, Linux, and Windows only.
+    // target.result is std.Target (std/Build.zig:2699); .os.tag is Os.Tag
+    // (std/Target.zig:15).
+    switch (target.result.os.tag) {
+        .macos, .linux, .windows => {},
+        else => std.process.fatal(
+            "unsupported target OS '{s}' (rule 65); supported: macos, linux, windows",
+            .{@tagName(target.result.os.tag)},
+        ),
+    }
     const optimize = b.standardOptimizeOption(.{});
 
     // The sim core as the `game` module; src/root.zig is its public surface.

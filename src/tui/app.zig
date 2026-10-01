@@ -446,7 +446,9 @@ pub const App = struct {
 
     /// Title screen: five seconds, or any key.
     fn runSplash(self: *App) !void {
-        var seed: u64 = @intCast(@as(u32, @bitCast(std.c.getpid())));
+        // std.Thread.getCurrentId() returns Thread.Id (u32/u64 by platform;
+        // std/Thread.zig:279) — cross-platform replacement for getpid.
+        var seed: u64 = @intCast(std.Thread.getCurrentId());
         const now = std.Io.Clock.now(.real, self.io);
         seed ^= @as(u64, @truncate(@as(u96, @bitCast(now.nanoseconds))));
         var prng = std.Random.DefaultPrng.init(seed);
