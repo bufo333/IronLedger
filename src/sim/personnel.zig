@@ -344,7 +344,7 @@ pub fn manningHave(gs: *GameState, company: types.ForceId, role: person_mod.Role
 /// an engaged pilot at random weighted by their hull's BV and gunnery; the
 /// BV itself is split by the same weights. Every engaged pilot logs a
 /// battle. Returns kills credited.
-pub fn creditKills(gs: *GameState, engaged: []const types.UnitId, destroyed_bv: i64) !u32 {
+pub fn creditKills(gs: *GameState, engaged: []const types.UnitId, destroyed_bv: i64, stream: rng_mod.Stream) !u32 {
     var weights: std.ArrayListUnmanaged(u32) = .empty;
     defer weights.deinit(gs.scratch());
     var pilots: std.ArrayListUnmanaged(types.PersonId) = .empty;
@@ -370,7 +370,7 @@ pub fn creditKills(gs: *GameState, engaged: []const types.UnitId, destroyed_bv: 
     // Whole kills, weighted draws.
     const kills: u32 = @import("battle.zig").estimatedKills(destroyed_bv);
     for (0..kills) |_| {
-        var pick = gs.rng.random(.battle).uintLessThan(u64, total_w);
+        var pick = gs.rng.random(stream).uintLessThan(u64, total_w);
         for (pilots.items, weights.items) |pid, w| {
             if (pick < w) {
                 if (gs.person(pid)) |p| p.kills += 1;
@@ -659,7 +659,7 @@ test "kills are credited to engaged pilots and awards follow the counters" {
     defer engaged.deinit(gs.allocator());
     var uit = gs.units.iterator();
     while (uit.next()) |e| if (e.value_ptr.kind == .mek and gs.companyOf(e.value_ptr.force) == co) try engaged.append(gs.allocator(), e.value_ptr.id);
-    const kills = try creditKills(&gs, engaged.items, 5_400);
+    const kills = try creditKills(&gs, engaged.items, 5_400, .battle);
     try std.testing.expectEqual(@as(u32, 5), kills);
     var total_kills: u32 = 0;
     var total_bv: u32 = 0;

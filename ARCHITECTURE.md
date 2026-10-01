@@ -162,10 +162,11 @@ section explains the shape, the contract states the rules.
   literal salt (`rng.Stream.salt`), not its place in the enum, so adding or
   reordering streams changes no existing draw. Shared generators
   (`person_gen`, `company_gen`, `personnel.recruitGenerated`,
-  `planet.weightedPickByFaction`) take the caller's stream: hall, market and
-  hiring draw on `.market`, prisoners and salvage on `.battle`, event
-  recruits on `.events`, the starter company on `.generation`. All dice are
-  2d6 unless CamOps says otherwise.
+  `planet.weightedPickByFaction`, `market.priceRollBp`, `market.listingAppears`,
+  `market.rollHullCondition`, `personnel.creditKills`) take the caller's stream:
+  hall, market and hiring draw on `.market`, prisoners and salvage on `.battle`,
+  event recruits on `.events`, the starter company on `.generation`. All dice are
+  2d6 unless the cited source or design rule says otherwise (`// TUNE`).
 - **Presentation markup is escaped at the source.** Screen text carries
   inline tags (`{a}` … `{/}`); `table.Tokenizer` is the one reader of it
   (drawing, width, padding, wrapping, plain CLI text) and `{{` is a literal

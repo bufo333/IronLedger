@@ -19,9 +19,6 @@ the exception entry only after all of its listed scope is closed.
 The audit deliverables in `docs/audit-response.md` remain folded in: D27 and
 D30 into C12, D28 into C7, D29 into C15, D31 into C8, and D33 into C18.
 
-- [ ] C14 randomness (C14a-C14b; rule 57): caller-selected generator streams
-  and verified citations for every non-2d6 die. Stop if a source is unavailable.
-  Delete C14.
 - [ ] C15 routing, truck capacity, and beachhead operation (C15a-C15c; rules
   20, 22, 24): feasible tonnage-aware routing, passive/active truck capability,
   beachhead pricing, and field-HQ recovery. Delete C15.

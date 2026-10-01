@@ -155,12 +155,12 @@ pub fn stockSaleValue(key: []const u8, qty: u32) types.CBills {
     return types.applyBp(def.cost * qty, bp);
 }
 
-/// Market price roll (CamOps unit and part pricing, ARCH §9.8): draws exactly
-/// one `.market` 2d6 and returns the pricing multiplier in basis points.
+/// Market price roll (CamOps unit and part pricing, ARCH §9.8): draws one 2d6
+/// on the caller's stream and returns the pricing multiplier in basis points.
 /// The pivot 7 is the 2d6 mean; a 7 prices at the base (×1.0). Rule 24: the
 /// step constant `price_roll_step_bp` is named once here.
-pub fn priceRollBp(rng: *rng_mod.Rng) types.Bp {
-    return 10_000 + (@as(types.Bp, rng.roll2d6(.market)) - 7) * tuning.market.price_roll_step_bp;
+pub fn priceRollBp(rng: *rng_mod.Rng, stream: rng_mod.Stream) types.Bp {
+    return 10_000 + (@as(types.Bp, rng.roll2d6(stream)) - 7) * tuning.market.price_roll_step_bp;
 }
 
 /// Transports list at a fraction of their canon price: a
@@ -177,8 +177,9 @@ pub fn listingAppears(
     planet_industry: u8, // 0–5
     site_bonus: u8, // from facilities, 0–3
     extra: i32, // sourcing modifiers: availability, periphery, comms
+    stream: rng_mod.Stream,
 ) bool {
-    const roll: i32 = @as(i32, rng.roll2d6(.market)) + planet_industry / 2 + site_bonus + extra;
+    const roll: i32 = @as(i32, rng.roll2d6(stream)) + planet_industry / 2 + site_bonus + extra;
     return roll >= rarity.availabilityTarget();
 }
 
@@ -253,36 +254,36 @@ pub const staple_keys = tuning.market.staple_keys;
 /// Roll a listed hull's condition: most are used, some are new, a few are
 /// burned-out wrecks missing structure — priced accordingly (the roll
 /// bands are tuning.market.cond_*_roll).
-pub fn rollHullCondition(rng: *rng_mod.Rng) HullCondition {
-    const roll = rng.roll2d6(.market);
-    const r = rng.random(.market);
+pub fn rollHullCondition(rng: *rng_mod.Rng, stream: rng_mod.Stream) HullCondition {
+    const roll = rng.roll2d6(stream);
+    const r = rng.random(stream);
     if (roll >= tuning.market.cond_new_roll) return .{
         .armor_pct = 100,
-        .quality = if (r.boolean()) .f else .e,
+        .quality = if (r.boolean()) .f else .e, // TUNE: project-chosen used-hull condition bands
         .damaged_slots = 0,
         .destroyed_slots = 0,
         .missing_components = 0,
     };
     if (roll >= tuning.market.cond_used_roll) return .{
-        .armor_pct = @intCast(@min(100, 80 + rng.roll2d6(.market))),
-        .quality = if (r.boolean()) .d else .c,
-        .damaged_slots = r.intRangeAtMost(u8, 0, 1),
+        .armor_pct = @intCast(@min(100, 80 + rng.roll2d6(stream))), // 2d6-derived armour band
+        .quality = if (r.boolean()) .d else .c, // TUNE: project-chosen used-hull condition bands
+        .damaged_slots = r.intRangeAtMost(u8, 0, 1), // TUNE: project-chosen used-hull condition bands
         .destroyed_slots = 0,
         .missing_components = 0,
     };
     if (roll >= tuning.market.cond_worn_roll) return .{
-        .armor_pct = @intCast(30 + @as(u32, rng.roll2d6(.market)) * 4),
-        .quality = if (r.boolean()) .c else .b,
-        .damaged_slots = r.intRangeAtMost(u8, 1, 2),
+        .armor_pct = @intCast(30 + @as(u32, rng.roll2d6(stream)) * 4), // 2d6-derived armour band
+        .quality = if (r.boolean()) .c else .b, // TUNE: project-chosen used-hull condition bands
+        .damaged_slots = r.intRangeAtMost(u8, 1, 2), // TUNE: project-chosen used-hull condition bands
         .destroyed_slots = 1,
-        .missing_components = if (r.uintLessThan(u8, 4) == 0) 1 else 0,
+        .missing_components = if (r.uintLessThan(u8, 4) == 0) 1 else 0, // TUNE: project-chosen used-hull condition bands
     };
     return .{
-        .armor_pct = @intCast(@as(u32, rng.roll2d6(.market)) * 2),
-        .quality = if (r.boolean()) .b else .a,
+        .armor_pct = @intCast(@as(u32, rng.roll2d6(stream)) * 2), // 2d6-derived armour band
+        .quality = if (r.boolean()) .b else .a, // TUNE: project-chosen used-hull condition bands
         .damaged_slots = 1,
-        .destroyed_slots = r.intRangeAtMost(u8, 2, 3),
-        .missing_components = r.intRangeAtMost(u8, 1, 2),
+        .destroyed_slots = r.intRangeAtMost(u8, 2, 3), // TUNE: project-chosen used-hull condition bands
+        .missing_components = r.intRangeAtMost(u8, 1, 2), // TUNE: project-chosen used-hull condition bands
     };
 }
 
@@ -361,8 +362,8 @@ test "rarity works: common floods the boards, very rare is an event" {
     var common_hits: u32 = 0;
     var very_rare_hits: u32 = 0;
     for (0..10_000) |_| {
-        if (listingAppears(&rng, .common, 2, 0, 0)) common_hits += 1;
-        if (listingAppears(&rng, .very_rare, 2, 0, 0)) very_rare_hits += 1;
+        if (listingAppears(&rng, .common, 2, 0, 0, .market)) common_hits += 1;
+        if (listingAppears(&rng, .very_rare, 2, 0, 0, .market)) very_rare_hits += 1;
     }
     try std.testing.expect(common_hits > 8_000);
     try std.testing.expect(very_rare_hits < 2_500);
@@ -376,17 +377,17 @@ test "priceRollBp: draws one .market 2d6, range 7_500–12_500, deterministic" {
     const lo: types.Bp = 10_000 - 5 * step;
     const hi: types.Bp = 10_000 + 5 * step;
     var rng = rng_mod.Rng.init(42);
-    const bp = priceRollBp(&rng);
+    const bp = priceRollBp(&rng, .market);
     try std.testing.expect(bp >= lo and bp <= hi);
     // Determinism: same seed → same result (rule 57).
     var rng2 = rng_mod.Rng.init(42);
-    try std.testing.expectEqual(bp, priceRollBp(&rng2));
+    try std.testing.expectEqual(bp, priceRollBp(&rng2, .market));
     // Agreement: priceRollBp draws the same single .market 2d6 the old inline formula drew.
     var rng3 = rng_mod.Rng.init(99);
     const raw = rng3.roll2d6(.market);
     const manual: types.Bp = 10_000 + (@as(types.Bp, raw) - 7) * step;
     var rng4 = rng_mod.Rng.init(99);
-    try std.testing.expectEqual(manual, priceRollBp(&rng4));
+    try std.testing.expectEqual(manual, priceRollBp(&rng4, .market));
 }
 
 test "only regional HQs guarantee structural parts" {

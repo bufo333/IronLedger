@@ -55,7 +55,7 @@ pub const market_margin_bp: types.Bp = tuning.market.market_margin_bp; // ×1.8
 /// caps any one kind at a third of the board.
 fn rollKind(gs: *GameState) contract.ContractKind {
     const roll = gs.rng.roll2d6(.market);
-    const coin = gs.rng.random(.market).boolean();
+    const coin = gs.rng.random(.market).boolean(); // TUNE: design split of cadre vs security, riot vs relief within the AtB 2d6 kind table
     return switch (roll) {
         2 => .guerrilla_warfare,
         3 => .recon_raid,
@@ -72,11 +72,11 @@ fn rollKind(gs: *GameState) contract.ContractKind {
 
 fn pickEnemy(gs: *GameState, employer: []const u8, kind: contract.ContractKind) []const u8 {
     // Garrison-class work is as often about pirates as neighbors.
-    if (kind.isGarrisonClass() and gs.rng.random(.market).boolean()) return "PER";
+    if (kind.isGarrisonClass() and gs.rng.random(.market).boolean()) return "PER"; // TUNE: pirates vs neighbour
     // The faction table's foes: a house fights its neighbours.
     const foes = @import("../domain/faction.zig").get(employer).foes;
     if (foes.len == 0) return "PER";
-    return foes[gs.rng.random(.market).uintLessThan(usize, foes.len)];
+    return foes[gs.rng.random(.market).uintLessThan(usize, foes.len)]; // uniform pick from faction's foe list
 }
 
 /// Pay multiplier for an offer's opposition: its combat power
@@ -123,7 +123,7 @@ pub fn refresh(gs: *GameState) !void {
         if (hq.tier == .field) offer_count = @max(1, offer_count / 2);
         var attempts: u32 = 0;
         while (gs.contract_offers.items.len - board_start < offer_count and attempts < 1000) : (attempts += 1) {
-            const world = &planet.catalog[gs.rng.random(.market).uintLessThan(usize, planet.catalog.len)];
+            const world = &planet.catalog[gs.rng.random(.market).uintLessThan(usize, planet.catalog.len)]; // uniform pick from world catalog
             if (!@import("../domain/faction.zig").get(world.faction).hires) continue; // ComStar posts nothing
             const dist = planet.distanceLy(hq_world, world);
             const seen = market.visibilityFor(dist, hq.influenceLy());
@@ -161,13 +161,13 @@ pub fn refresh(gs: *GameState) !void {
             if (vis[0] == .beachhead) pay = types.applyBp(pay, tuning.market.beachhead_pay_bp);
             // A cooling employer (after a breach): half the offers, 70% pay.
             if (gs.factionCooling(world.faction)) {
-                if (gs.rng.random(.market).boolean()) continue;
+                if (gs.rng.random(.market).boolean()) continue; // TUNE: project-chosen "half the offers" odds
                 pay = types.applyBp(pay, tuning.market.cooling_pay_bp);
             }
             // Standing: a house that thinks well of you pays more and
             // one that doesn't shuns you like a cooling employer.
             const standing = gs.standing(world.faction);
-            if (standing <= -tuning.contract.standing_shun_depth and gs.rng.random(.market).boolean()) continue;
+            if (standing <= -tuning.contract.standing_shun_depth and gs.rng.random(.market).boolean()) continue; // TUNE: project-chosen "half the offers" odds
             pay = types.applyBp(pay, standingPayBp(standing));
             // Command rights: the employer pays for the reins.
             const rights: contract.CommandRights = switch (gs.rng.roll2d6(.market)) {
@@ -212,7 +212,7 @@ pub fn refresh(gs: *GameState) !void {
                     .battle_loss_pct = if (gs.rng.roll2d6(.market) >= tuning.contract.battle_loss_target) tuning.contract.battle_loss_pct else 0,
                     .salvage_pct = @intCast(@as(u32, gs.rng.roll2d6(.market) -| 2) * tuning.contract.salvage_pct_per_pip),
                     // Salvage exchange: the employer keeps the wrecks and pays cash.
-                    .salvage_exchange = gs.rng.random(.market).uintLessThan(u32, tuning.contract.salvage_exchange_in) == 0,
+                    .salvage_exchange = gs.rng.random(.market).uintLessThan(u32, tuning.contract.salvage_exchange_in) == 0, // TUNE: salvage_exchange_in constant named in tuning
                     .command_rights = rights,
                 },
             });
@@ -252,9 +252,9 @@ pub fn refreshContractWorld(gs: *GameState, c: *const contract.Contract) !void {
     const home = gs.homeHqFor(c.assigned_company);
     for (0..tuning.market.contract_planet_slots) |_| {
         const design = @import("../domain/rat.zig").roll(&gs.rng, .market, world.faction, @import("../gen/company_gen.zig").rollWeightClass(&gs.rng, .market), gs.clock.date.year);
-        if (!market.listingAppears(&gs.rng, design.rarity, world.industry, 0, 0)) continue;
-        const cond = market.rollHullCondition(&gs.rng);
-        const price_roll = market.priceRollBp(&gs.rng);
+        if (!market.listingAppears(&gs.rng, design.rarity, world.industry, 0, 0, .market)) continue;
+        const cond = market.rollHullCondition(&gs.rng, .market);
+        const price_roll = market.priceRollBp(&gs.rng, .market);
         var weapon_value: types.CBills = 0;
         var weapons: types.CBills = 0;
         for (design.loadout) |slot| if (slot.class == .weapon) {
@@ -312,13 +312,13 @@ fn refreshBoard(gs: *GameState, hq_id: types.HqId) !void {
         const bm = tuning.market;
         if (hq.effectiveFacilityLevel(.hiring_hall) >= 1 and hq.effectiveFacilityLevel(.comms) >= bm.black_market_comms and gs.rng.roll2d6(.market) >= bm.black_market_target) {
             const rr = gs.rng.random(.market);
-            if (rr.boolean()) {
+            if (rr.boolean()) { // TUNE: hull vs scarce-part split
                 // A rare hull, whatever house built it.
                 var buf: [64]*const chassis_mod.Chassis = undefined;
-                const pool = chassis_mod.ofWeightClass(if (rr.boolean()) .heavy else .assault, gs.clock.date.year, &buf);
+                const pool = chassis_mod.ofWeightClass(if (rr.boolean()) .heavy else .assault, gs.clock.date.year, &buf); // TUNE: heavy vs assault split
                 var pick: ?*const chassis_mod.Chassis = null;
                 for (pool) |c| if (c.rarity == .rare or c.rarity == .very_rare) {
-                    if (pick == null or rr.uintLessThan(u8, 3) == 0) pick = c;
+                    if (pick == null or rr.uintLessThan(u8, 3) == 0) pick = c; // TUNE: reservoir sample over rare pool
                 };
                 if (pick) |c| {
                     try gs.market_listings.append(gs.allocator(), .{
@@ -330,6 +330,7 @@ fn refreshBoard(gs: *GameState, hq_id: types.HqId) !void {
                         .hq = hq_id,
                         .listed_day = day,
                         .expires_day = day + bm.black_market_days,
+                        // TUNE: black-market condition bands
                         .condition = .{ .armor_pct = @intCast(60 + rr.uintLessThan(u8, 40)), .quality = if (rr.boolean()) .c else .d, .damaged_slots = rr.uintLessThan(u8, 2), .destroyed_slots = 0, .missing_components = 0 },
                         .black_market = true,
                     });
@@ -339,7 +340,7 @@ fn refreshBoard(gs: *GameState, hq_id: types.HqId) !void {
                 // A scarce part (availability D or worse).
                 var pick: ?*const part_mod.PartDef = null;
                 for (part_mod.catalog) |*def| if (@intFromEnum(def.availability) >= @intFromEnum(part_mod.Availability.d) and def.intro_year <= gs.clock.date.year) {
-                    if (pick == null or rr.uintLessThan(u8, 3) == 0) pick = def;
+                    if (pick == null or rr.uintLessThan(u8, 3) == 0) pick = def; // TUNE: reservoir sample over scarce catalog
                 };
                 if (pick) |def| {
                     try gs.market_listings.append(gs.allocator(), .{
@@ -364,22 +365,22 @@ fn refreshBoard(gs: *GameState, hq_id: types.HqId) !void {
     const rare_slots: u32 = if (thin) 1 else 2 + warehouse;
     const r = gs.rng.random(.market);
     for (0..rare_slots) |_| {
-        var def = &part_mod.catalog[r.uintLessThan(usize, part_mod.catalog.len)];
+        var def = &part_mod.catalog[r.uintLessThan(usize, part_mod.catalog.len)]; // uniform pick from part catalog
         var tries: u8 = 0;
         while (def.rarity == .common and tries < 6) : (tries += 1) {
-            def = &part_mod.catalog[r.uintLessThan(usize, part_mod.catalog.len)];
+            def = &part_mod.catalog[r.uintLessThan(usize, part_mod.catalog.len)]; // uniform pick, re-roll common up to 6 times
         }
         // Sourcing: scarce parts, periphery shelves, comms reach.
         const src = part_mod.sourcing(def, @import("../domain/faction.zig").isPeriphery(world.faction), hq.effectiveFacilityLevel(.comms));
-        if (!market.listingAppears(&gs.rng, def.rarity, world.industry, warehouse, src.total())) continue;
-        const price_roll = market.priceRollBp(&gs.rng);
+        if (!market.listingAppears(&gs.rng, def.rarity, world.industry, warehouse, src.total(), .market)) continue;
+        const price_roll = market.priceRollBp(&gs.rng, .market);
         try gs.market_listings.append(gs.allocator(), .{
             .id = @enumFromInt(gs.next_listing_id),
             .kind = .part,
             .item_key = def.key,
             .rarity = def.rarity,
             .price = types.applyBp(def.cost, price_roll),
-            .quantity = r.intRangeAtMost(u32, 1, 2),
+            .quantity = r.intRangeAtMost(u32, 1, 2), // TUNE: rare-slot quantity band
             .listed_day = day,
             .expires_day = day + tuning.market.hull_listing_days,
             .hq = hq_id,
@@ -398,15 +399,15 @@ fn refreshBoard(gs: *GameState, hq_id: types.HqId) !void {
     while (hulls < lot_size and attempts < 12) : (attempts += 1) {
         // Meks off the local house's table, the odd combat vehicle
         // from anywhere; fighters and ships have their own slot below.
-        const design = if (r.uintLessThan(u8, 4) == 0) blk: {
+        const design = if (r.uintLessThan(u8, 4) == 0) blk: { // TUNE: vehicle vs mek lot ratio (1-in-4)
             var vbuf: [32]*const chassis_mod.Chassis = undefined;
             const vehicles = chassis_mod.ofKind(.vehicle, gs.clock.date.year, &vbuf);
             if (vehicles.len == 0) continue;
-            break :blk vehicles[r.uintLessThan(usize, vehicles.len)];
+            break :blk vehicles[r.uintLessThan(usize, vehicles.len)]; // uniform pick from vehicle pool
         } else @import("../domain/rat.zig").roll(&gs.rng, .market, world.faction, @import("../gen/company_gen.zig").rollWeightClass(&gs.rng, .market), gs.clock.date.year);
-        if (!market.listingAppears(&gs.rng, design.rarity, world.industry, warehouse, 0)) continue;
-        const cond = market.rollHullCondition(&gs.rng);
-        const price_roll = market.priceRollBp(&gs.rng);
+        if (!market.listingAppears(&gs.rng, design.rarity, world.industry, warehouse, 0, .market)) continue;
+        const cond = market.rollHullCondition(&gs.rng, .market);
+        const price_roll = market.priceRollBp(&gs.rng, .market);
         var weapon_value: types.CBills = 0;
         var weapons: types.CBills = 0;
         for (design.loadout) |slot| {
@@ -446,13 +447,13 @@ fn refreshBoard(gs: *GameState, hq_id: types.HqId) !void {
         }
         if (!already) {
             const comms = hq.effectiveFacilityLevel(.comms);
-            const kind: unit_mod.UnitKind = if (port >= 4 and comms >= 3 and r.uintLessThan(u8, 3) == 0) .jumpship else if (port >= 3 and r.boolean()) .dropship else .aerospace;
+            const kind: unit_mod.UnitKind = if (port >= 4 and comms >= 3 and r.uintLessThan(u8, 3) == 0) .jumpship else if (port >= 3 and r.boolean()) .dropship else .aerospace; // TUNE: transport kind odds by port/comms tier
             var buf: [16]*const chassis_mod.Chassis = undefined;
             const pool = chassis_mod.ofKind(kind, gs.clock.date.year, &buf);
             if (pool.len > 0) {
-                const design = pool[r.uintLessThan(usize, pool.len)];
-                if (market.listingAppears(&gs.rng, design.rarity, world.industry, port, 0)) {
-                    const price_roll = market.priceRollBp(&gs.rng);
+                const design = pool[r.uintLessThan(usize, pool.len)]; // uniform pick from transport pool
+                if (market.listingAppears(&gs.rng, design.rarity, world.industry, port, 0, .market)) {
+                    const price_roll = market.priceRollBp(&gs.rng, .market);
                     const base = if (design.kind == .aerospace) design.cost else types.applyBp(design.cost, market.transport_price_bp);
                     try gs.market_listings.append(gs.allocator(), .{
                         .id = @enumFromInt(gs.next_listing_id),
@@ -514,7 +515,7 @@ fn arrivalRole(gs: *GameState, hq: *const hq_mod.Hq) person_mod.Role {
     // Dice order matters for replays: the short-desk roll first, the
     // pick from the hall roles only when it is needed.
     if (shortRole(gs, hq)) |short| if (gs.rng.roll2d6(.market) >= 7) return short;
-    return hall_roles[gs.rng.random(.market).uintLessThan(usize, hall_roles.len)];
+    return hall_roles[gs.rng.random(.market).uintLessThan(usize, hall_roles.len)]; // uniform pick from hall roles
 }
 
 /// Days a walk-in or a floor top-up stays on the board; the crowd

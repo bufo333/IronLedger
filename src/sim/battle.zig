@@ -387,10 +387,10 @@ fn applyHits(
     const tb = tuning.battle;
     var tally: Tally = .{};
     for (0..hits) |_| {
-        const uid = engaged[gs.rng.random(.battle).uintLessThan(usize, engaged.len)];
+        const uid = engaged[gs.rng.random(.battle).uintLessThan(usize, engaged.len)]; // uniform pick of hit target
         const u = gs.unit(uid) orelse continue;
         if (u.status == .destroyed) continue;
-        // Dodge: one hit in three aimed at this hull misses.
+        // Dodge: one hit in three aimed at this hull misses. // TUNE
         if (gs.person(u.pilot)) |dp| if (dp.has("dodge") and gs.rng.random(.battle).uintLessThan(u8, 3) == 0) continue;
 
         const severity = gs.rng.roll2d6(.battle);
@@ -409,7 +409,7 @@ fn applyHits(
 
         var ammo_hit = false;
         if (severity >= tb.slot_hit_severity and u.slots.items.len > 0) {
-            const slot = &u.slots.items[gs.rng.random(.battle).uintLessThan(usize, u.slots.items.len)];
+            const slot = &u.slots.items[gs.rng.random(.battle).uintLessThan(usize, u.slots.items.len)]; // uniform pick of damaged slot
             slot.condition = if (slot.condition == .ok) .damaged else .destroyed;
             ammo_hit = slot.class == .ammo;
             rec.slot = slot.slot_key;
@@ -815,7 +815,7 @@ fn aftermath(
     }
     // Kill credits and the awards they earn.
     const personnel = @import("personnel.zig");
-    const kills_credited = try personnel.creditKills(gs, engaged, enemy_destroyed_bv);
+    const kills_credited = try personnel.creditKills(gs, engaged, enemy_destroyed_bv, .battle);
     for (engaged) |uid| if (gs.unit(uid)) |u| {
         _ = try personnel.checkAwards(gs, u.pilot);
     };
@@ -1215,11 +1215,11 @@ fn rollSalvageCandidates(gs: *GameState, c: *const contract_mod.Contract) ![]bat
             .key = design.key,
             .name = design.name,
             .bv = design.bv,
-            .armor_pct = @intCast(@as(u32, gs.rng.roll2d6(.battle)) * 3),
-            .quality = if (gs.rng.random(.battle).boolean()) .c else .d,
+            .armor_pct = @intCast(@as(u32, gs.rng.roll2d6(.battle)) * 3), // 2d6-derived armour band
+            .quality = if (gs.rng.random(.battle).boolean()) .c else .d, // TUNE: salvage-wreck condition bands
             .damaged_slots = 1,
-            .destroyed_slots = gs.rng.random(.battle).intRangeAtMost(u8, 1, 3),
-            .missing_components = gs.rng.random(.battle).intRangeAtMost(u8, 1, 2),
+            .destroyed_slots = gs.rng.random(.battle).intRangeAtMost(u8, 1, 3), // TUNE: salvage-wreck condition bands
+            .missing_components = gs.rng.random(.battle).intRangeAtMost(u8, 1, 2), // TUNE: salvage-wreck condition bands
         });
     }
     return out.toOwnedSlice(gs.allocator());
@@ -1285,7 +1285,7 @@ pub fn takeSalvage(
     const weapon_keys = [_][]const u8{ "mlas", "srm4", "ac5", "lrm5", "llas" };
     while (remaining >= t.salvage_bv_per_weapon and weapons < 4) : (weapons += 1) {
         remaining -= t.salvage_bv_per_weapon;
-        try sites.sendHome(gs, c.assigned_company, weapon_keys[gs.rng.random(.battle).uintLessThan(usize, weapon_keys.len)], 1);
+        try sites.sendHome(gs, c.assigned_company, weapon_keys[gs.rng.random(.battle).uintLessThan(usize, weapon_keys.len)], 1); // uniform pick from salvageable weapons
     }
     var armor: u32 = 0;
     while (remaining >= t.salvage_bv_per_armor_ton and armor < 10) : (armor += 1) {

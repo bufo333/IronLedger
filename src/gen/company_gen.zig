@@ -94,8 +94,9 @@ pub fn rollWeightClass(rng: *rng_mod.Rng, stream: rng_mod.Stream) chassis.Weight
 /// The starter company's line lances: lights and mediums only, so
 /// the founding level-1 mek bay can rebuild everything the outfit fields;
 /// heavies and assaults come later, off the boards and the battlefield.
-pub fn starterWeightClass(rng: *rng_mod.Rng) chassis.WeightClass {
-    return if (rng.roll2d6(.generation) <= tuning.generation.starter_light_max) .light else .medium;
+/// Draws one 2d6 on the caller's stream.
+pub fn starterWeightClass(rng: *rng_mod.Rng, stream: rng_mod.Stream) chassis.WeightClass {
+    return if (rng.roll2d6(stream) <= tuning.generation.starter_light_max) .light else .medium;
 }
 
 /// Max tonnage for the recon lance's scout meks.

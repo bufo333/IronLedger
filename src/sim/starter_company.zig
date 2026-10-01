@@ -37,7 +37,7 @@ pub fn generateInto(gs: *GameState, name: []const u8) !types.ForceId {
     for (lance_names) |lance_name| {
         const lance_id = try gs.createForce(lance_name, .lance, company_id);
         for (0..force.lance_size) |_| {
-            const class = company_gen.starterWeightClass(&gs.rng);
+            const class = company_gen.starterWeightClass(&gs.rng, .generation);
             // The house you come from fields what it fields.
             const home: []const u8 = if (gs.commander) |c| c.origin.key() else "PER";
             const design = @import("../domain/rat.zig").roll(&gs.rng, .generation, home, class, gs.clock.date.year);
