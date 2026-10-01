@@ -206,9 +206,9 @@ pub fn runWeeklyMaintenance(gs: *GameState) !void {
             }
         }
 
-        const deployed = posture.isCompanyDeployed(gs, gs.companyOf(u.force));
+        const afield = !posture.isCompanyHome(gs, gs.companyOf(u.force));
         var tn: i32 = tuning.maintenance.target_base + u.quality.maintenanceModifier();
-        if (deployed) tn += tuning.maintenance.target_deployed; // field conditions
+        if (afield) tn += tuning.maintenance.target_deployed; // field conditions
         if (!covered) tn += tuning.maintenance.target_uncovered; // nobody turning wrenches
 
         const raw = gs.rng.roll2d6(.maintenance);
@@ -977,4 +977,41 @@ test "weekly-repair labour reservation fails before any slot or stock mutation â
     try std.testing.expectEqual(before, digest.stateHash(&gs));
     try std.testing.expectEqual(slot_cond, gs.unit(uid).?.slots.items[dmg_slot_idx].condition);
     try std.testing.expectEqual(stock_before, gs.stockCount(site, dmg_part));
+}
+
+test "idle_afield hull rolls the harder field-conditions target; home hull does not (C10-A4)" {
+    // Asymmetric two-posture fixture (rule 71): identical hulls, identical
+    // quality, same seed, one home one idle_afield. The afield hull has a
+    // higher target number so bad-roll outcomes are more likely.
+    const commands = @import("commands.zig");
+    const toe_m = @import("toe.zig");
+
+    // Count quality drops over many weeks for each posture.
+    var drops_home: u32 = 0;
+    var drops_afield: u32 = 0;
+    const runs = 60;
+    for (0..runs) |run_i| {
+        const seed: u64 = @intCast(9900 + run_i);
+        inline for (.{ false, true }, .{ &drops_home, &drops_afield }) |is_afield, counter| {
+            var gs = GameState.init(std.testing.allocator, .{ .seed = seed });
+            defer gs.deinit();
+            _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+            const co = try gs.createForce("Alpha", .company, .none);
+            const uid = try gs.addUnit("AS7-D");
+            try toe_m.assignUnit(&gs, uid, co, .none);
+            const tech_id = try gs.hirePerson("W", "Rench", .tech_mek);
+            gs.person(tech_id).?.assigned_force = co;
+            try crew.assignSlot(&gs, uid, .tech, tech_id);
+
+            if (is_afield) gs.force(co).?.location_planet = "galatea"; // idle_afield
+
+            const q_before = gs.unit(uid).?.quality;
+            try runWeeklyMaintenance(&gs);
+            // Only count quality degradation (toward A, i.e. lower enum value).
+            // Rising quality on a great roll doesn't indicate field hardship.
+            if (@intFromEnum(gs.unit(uid).?.quality) < @intFromEnum(q_before)) counter.* += 1;
+        }
+    }
+    // Afield hulls should have more quality drops over many weeks (harder target).
+    try std.testing.expect(drops_afield >= drops_home);
 }

@@ -123,10 +123,10 @@ pub fn inboundToOutfit(gs: *GameState) types.CBills {
     return sum;
 }
 
-/// Courier days to reach a treasury from the outfit's seat (first HQ):
+/// Courier days to reach a treasury from the outfit's seat:
 /// `logistics.daysBetween`, same-world floor included.
 pub fn courierEtaDays(gs: *GameState, to: Treasury) u32 {
-    const home_key: []const u8 = if (gs.hqs.count() > 0) gs.hqs.values()[0].planet_key else return logistics.same_world_days;
+    const home_key: []const u8 = gs.seatPlanetKey() orelse return logistics.same_world_days;
     const dest_key: []const u8 = switch (to) {
         .outfit => home_key,
         .hq => |id| if (gs.hqs.getPtr(id)) |h| h.planet_key else home_key,

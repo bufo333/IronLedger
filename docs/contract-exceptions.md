@@ -15,27 +15,6 @@ Owner of every entry: the project owner.
 
 ---
 
-### C10. Location, posture and the seat
-
-- **Rules:** 21, 22, 23, 71.
-- **Why not yet:** It changes gameplay balance. Named posture predicates and two-HQ tests come first.
-- **Scope:**
-  - **"Not deployed" used as "home".** These sites treat a company without a deployment contract as home:
-    - `medical.zig`: `87`, `108` (`careFor`), `353-381` (rest), `395` (rotation reset)
-    - `maintenance.zig:113`
-    - `checklist.zig:270`
-    - `commands.zig`: `866`, `882`, `934`, `1054`, `1216`, `1342`, `1377`, `1389`, `1624`, `1634`, `1799`
-    - The checklist's `isCompanyHome` count disagrees with `careFor` (`499`).
-  - **Rules reading the first HQ instead of the one involved:**
-    - negotiation uses the first HQ's command office (`commands.zig:2315-2317`)
-    - the freight discount comes from the first HQ (`2030-2032`)
-  - **Medical pooled across the outfit:** beds, hospital bonus, doctors and medics (`medical.zig:122-166`).
-  - **Seat and `.outfit` resolution** is re-derived at about 13 sites.
-  - **Lab stock double-counted:** `installCandidates` adds the seat's stock on top of the home HQ's (`queries.zig:3372`).
-  - **Two-HQ tests missing** for medical, maintenance, the hiring hall, negotiation, `hq_ops`, the checklist and field supply.
-- **Removal:** C10.
-- **Guard:** review (checklist question 5). No mechanical check.
-
 ### C14. Randomness
 
 - **Rules:** 57.

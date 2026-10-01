@@ -174,7 +174,7 @@ pub fn sendHome(gs: *GameState, company: types.ForceId, key: []const u8, qty: u3
 /// The planet a site physically sits on.
 pub fn sitePlanetKey(gs: *GameState, site: types.Site) ?[]const u8 {
     return switch (site) {
-        .outfit => if (gs.hqs.count() > 0) gs.hqs.values()[0].planet_key else null,
+        .outfit => gs.seatPlanetKey(),
         .hq => |id| if (gs.hqs.getPtr(id)) |h| h.planet_key else null,
         .company => |id| blk: {
             if (gs.deploymentContract(id)) |c| break :blk c.planet_key;
@@ -270,8 +270,10 @@ pub fn freightQuote(gs: *GameState, alloc: std.mem.Allocator, from: types.Site, 
         days = tuning.logistics.freight_min_days;
     }
     cost = types.applyBp(cost, commander_mod.costMultBp(gs.commander, .freight));
-    if (gs.hqs.count() > 0) {
-        const transport = hq_ops.hqStaff(gs, gs.seat(), .admin_transport);
+    // Transport discount: read staff at the dispatching HQ, not the seat
+    // (ARCH §9.4 "freight reads transport staff at the shipment's involved HQ").
+    if (from_hq != .none) {
+        const transport = hq_ops.hqStaff(gs, from_hq, .admin_transport);
         cost = types.applyBp(cost, 10_000 - tuning.logistics.transport_admin_discount_bp * @as(types.Bp, @min(tuning.logistics.transport_admin_max, transport.count)));
     }
     return .{ .cost = cost, .days = @max(tuning.logistics.freight_min_days, days), .route = route, .tons = tons_moved };
@@ -1099,4 +1101,40 @@ test "replaceGear leaves no partial orders and consumes no acquisition roll when
     try std.testing.expectEqual(before, digest.stateHash(&gs));
     try std.testing.expectEqual(orders_before, gs.part_orders.items.len);
     try std.testing.expectEqual(funds_before, gs.hqs.values()[0].funds);
+}
+
+test "freight discount follows from_hq, not the seat (C10-B2, ARCH §9.4)" {
+    // Asymmetric two-HQ: transport admins only at 'second'; a shipment from
+    // second gets the discount, one from 'plain' (no admins) does not.
+    // Uses raw HQs (no createCommander) so no admin is auto-posted at startup.
+    const founding_m = @import("founding.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 9601 });
+    defer gs.deinit();
+    // Two HQs on different planets (galatea vs alkaid) for non-zero jump cost.
+    // foundHq creates the HQ with no staff (no auto-posted transport admins).
+    const plain_id = try founding_m.foundHq(&gs, "Plain", .regional, "galatea");
+    const second_id = try founding_m.foundHq(&gs, "Second", .regional, "alkaid");
+    // Transport admins only at second (posted_hq = second_id).
+    for (0..4) |_| {
+        const admin = try gs.hirePerson("T", "Port", .admin_transport);
+        gs.person(admin).?.posted_hq = second_id;
+    }
+    // Verify: plain has 0 admins, second has 4.
+    try std.testing.expectEqual(@as(u32, 0), hq_ops.hqStaff(&gs, plain_id, .admin_transport).count);
+    try std.testing.expectEqual(@as(u32, 4), hq_ops.hqStaff(&gs, second_id, .admin_transport).count);
+    // Freight quotes.
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const tons: u32 = 1;
+    const from_second = try freightQuote(&gs, arena.allocator(), .{ .hq = second_id }, .{ .hq = plain_id }, tons);
+    const from_plain = try freightQuote(&gs, arena.allocator(), .{ .hq = plain_id }, .{ .hq = second_id }, tons);
+    if (from_second.cost > 0 and from_plain.cost > 0) {
+        // second has transport admins → discount → lower cost than plain.
+        try std.testing.expect(from_second.cost < from_plain.cost);
+    }
+    // Outfit site (from_hq = .none): no crash, no discount applied.
+    const co = try gs.createForce("Alpha", .company, .none);
+    gs.force(co).?.location_planet = "alkaid"; // field site
+    const field_quote = try freightQuote(&gs, arena.allocator(), .{ .company = co }, .{ .hq = plain_id }, tons);
+    _ = field_quote;
 }

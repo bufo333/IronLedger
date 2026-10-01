@@ -2359,3 +2359,21 @@ test "fabricate over fab_max_qty is refused before any mutation (rule 13)" {
     try std.testing.expectEqual(funds_before, gs.hqs.values()[0].funds);
     try std.testing.expectEqual(jobs_before, gs.bay_jobs.items.len);
 }
+
+test "hqStaff counts staff posted at that HQ only — the other HQ gets no benefit (C10-F hq_ops, rule 71)" {
+    // Asymmetric two-HQ: command admins only at the second HQ.
+    // hqStaff(plain, admin_command) = 0; hqStaff(second, admin_command) > 0.
+    // Uses foundHq (no createCommander) so no staff is auto-posted at startup.
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 9901 });
+    defer gs.deinit();
+    const plain = try founding.foundHq(&gs, "Plain", .regional, "galatea");
+    const second = try founding.foundHq(&gs, "Second", .regional, "alkaid");
+    gs.hqs.getPtr(plain).?.staff_assigned = 999;
+    gs.hqs.getPtr(second).?.staff_assigned = 999;
+    // Hire an admin_command and post them to the second HQ.
+    const admin = try gs.hirePerson("A", "Dmin", .admin_command);
+    gs.person(admin).?.posted_hq = second;
+    // Plain has zero command admins; second has one.
+    try std.testing.expectEqual(@as(u32, 0), hqStaff(&gs, plain, .admin_command).count);
+    try std.testing.expectEqual(@as(u32, 1), hqStaff(&gs, second, .admin_command).count);
+}

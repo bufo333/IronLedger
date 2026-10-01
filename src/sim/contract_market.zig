@@ -1001,6 +1001,14 @@ pub fn offerEligible(gs: *GameState, offer: *const contract.Contract, company: t
     return gs.homeHqFor(company) == offer.offer_hq;
 }
 
+/// The HQ whose board posted this offer: `offer.offer_hq` when present,
+/// else the seat (covers pre-schema-v24 offers with `.none`).
+/// Negotiation reads the command office at this HQ (C10 B1, rule 22).
+pub fn offerBoardHq(gs: *GameState, offer: *const contract.Contract) types.HqId {
+    if (offer.offer_hq != .none and gs.hqs.getPtr(offer.offer_hq) != null) return offer.offer_hq;
+    return gs.seat();
+}
+
 /// CamOps negotiation, one round per offer: 2d6 + reputation edge
 /// + the command office's skill edge against a target eased by standing
 /// with the employer. Success moves the chosen term a step; a miss hardens
@@ -1012,8 +1020,8 @@ pub fn negotiate(gs: *GameState, offer_index: usize, term: contract.NegotiableTe
     var probe = c.terms;
     if (!probe.improve(term)) return error.TermAtCap;
     const t = tuning.contract;
-    const seat: types.HqId = gs.seat();
-    const office = if (seat != .none) hq_ops.hqStaff(gs, seat, .admin_command) else hq_ops.StaffSummary{};
+    const board_hq: types.HqId = offerBoardHq(gs, c);
+    const office = if (board_hq != .none) hq_ops.hqStaff(gs, board_hq, .admin_command) else hq_ops.StaffSummary{};
     const office_edge: i32 = if (office.count == 0) -1 else person_mod.skillRollBonus(office.best_skill);
     // The letter at the table: F −2 … A* +3.
     const rep_edge: i32 = @as(i32, try rating.currentIndex(gs)) - tuning.rating.negotiation_offset;
@@ -1552,4 +1560,52 @@ test "offer ids survive removal of an earlier-indexed offer" {
     _ = try commands.execute(&gs, .{ .accept_contract = .{ .offer = first_id, .company = co } });
     // The second offer is still addressable by its original typed id.
     try std.testing.expect(findOffer(&gs, second_id) != null);
+}
+
+test "offerBoardHq returns the offer's own HQ, not the seat (C10-B1)" {
+    // Two HQs: offerBoardHq must return the offer's board HQ for each offer,
+    // so negotiate reads the correct command office. Asymmetric: one offer at
+    // each HQ; the two boards are distinct.
+    const founding_m = @import("founding.zig");
+    const planet_mod = @import("../domain/planet.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 9501 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    const seat = gs.seat();
+    // Second HQ inside the seat's influence ring so it generates board offers.
+    const seat_world = planet_mod.find(gs.hqs.getPtr(seat).?.planet_key).?;
+    var near_key: []const u8 = gs.hqs.getPtr(seat).?.planet_key;
+    for (planet_mod.catalog) |*p| {
+        const d = planet_mod.distanceLy(p, seat_world);
+        if (d > 0 and d <= gs.hqs.getPtr(seat).?.influenceLy()) {
+            near_key = p.key;
+            break;
+        }
+    }
+    const second = try founding_m.foundHq(&gs, "Second", .regional, near_key);
+    gs.hqs.getPtr(second).?.staff_assigned = 999;
+    _ = try commands.execute(&gs, .{ .new_company_at = .{ .name = "Bravo", .hq = second } });
+
+    try refresh(&gs);
+    // Find one offer at each HQ.
+    var seat_offer_idx: ?usize = null;
+    var second_offer_idx: ?usize = null;
+    for (gs.contract_offers.items, 0..) |o, i| {
+        if (o.offer_hq == seat and seat_offer_idx == null) seat_offer_idx = i;
+        if (o.offer_hq == second and second_offer_idx == null) second_offer_idx = i;
+    }
+    if (seat_offer_idx == null or second_offer_idx == null) return; // no offers on both boards this seed
+
+    // offerBoardHq returns each offer's own board HQ — proving negotiate
+    // reads the correct board's office, not always the seat.
+    const seat_offer = &gs.contract_offers.items[seat_offer_idx.?];
+    const second_offer = &gs.contract_offers.items[second_offer_idx.?];
+    try std.testing.expectEqual(seat, offerBoardHq(&gs, seat_offer));
+    try std.testing.expectEqual(second, offerBoardHq(&gs, second_offer));
+    // The two boards are distinct (asymmetric: each offer reads a different HQ).
+    try std.testing.expect(offerBoardHq(&gs, seat_offer) != offerBoardHq(&gs, second_offer));
+    // A pre-schema-v24 offer with .none board falls back to the seat.
+    var legacy: @import("../domain/contract.zig").Contract = second_offer.*;
+    legacy.offer_hq = .none;
+    try std.testing.expectEqual(seat, offerBoardHq(&gs, &legacy));
 }

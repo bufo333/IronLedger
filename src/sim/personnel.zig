@@ -584,6 +584,40 @@ test "the recruiting bonus is the recruiting HQ's hiring hall, not the first HQ'
     try std.testing.expect(recruitBonus(&gs, seat) > recruitBonus(&gs, second));
 }
 
+test "recruitGenerated quality differs by HQ: hall + HR at seat, none at second (C10-F hiring hall, rule 71)" {
+    // Asymmetric two-HQ: seat has max hiring hall + HR, second has none.
+    // Over many draws, average skill at seat must be better.
+    var total_seat: u32 = 0;
+    var total_second: u32 = 0;
+    const draws = 40;
+    for (0..draws) |i| {
+        const seed: u64 = @intCast(7800 + i);
+        for ([_]bool{ true, false }, [_]*u32{ &total_seat, &total_second }) |use_seat, acc| {
+            var gs = GameState.init(std.testing.allocator, .{ .seed = seed });
+            defer gs.deinit();
+            _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
+            const seat = gs.seat();
+            const second = try founding.foundHq(&gs, "Second", .regional, "alkaid");
+            gs.hqs.getPtr(seat).?.staff_assigned = 999;
+            gs.hqs.getPtr(second).?.staff_assigned = 999;
+            // Seat: hall lv3 + many HR; second: no hall, no HR.
+            for (gs.hqs.getPtr(seat).?.facilities.items) |*f| if (f.kind == .hiring_hall) {
+                f.level = 3;
+            };
+            for (gs.hqs.getPtr(second).?.facilities.items) |*f| if (f.kind == .hiring_hall) {
+                f.level = 0;
+            };
+            const hq_id: types.HqId = if (use_seat) seat else second;
+            const pid = try recruitGenerated(&gs, .mekwarrior, hq_id, .market);
+            const p = gs.person(pid).?;
+            const gunnery = p.skill(.gunnery_mek) orelse 8;
+            acc.* += gunnery;
+        }
+    }
+    // Lower gunnery = better in BattleTech. Seat draws should be lower on average.
+    try std.testing.expect(total_seat <= total_second);
+}
+
 test "ranks follow seats: a lance leader is a lieutenant, the company commander a captain, the rest by experience" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1234 });
     defer gs.deinit();

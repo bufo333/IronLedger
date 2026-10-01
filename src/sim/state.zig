@@ -499,9 +499,16 @@ pub const GameState = struct {
 
     /// The outfit's seat: the first HQ (lowest insertion order), or `.none`
     /// before any HQ exists. Every rule that reads a seat-level attribute
-    /// calls this; C10 may change the rule without touching each call site.
+    /// calls this; use `seatPlanetKey` for the seat's world.
     pub fn seat(self: *GameState) types.HqId {
         return if (self.hqs.count() > 0) self.hqs.keys()[0] else .none;
+    }
+
+    /// The planet key of the outfit's seat HQ, or null before any HQ exists.
+    /// One owner for every rule that needs the seat's world (C10 E1).
+    pub fn seatPlanetKey(self: *GameState) ?[]const u8 {
+        const s = self.seat();
+        return if (self.hqs.getPtr(s)) |h| h.planet_key else null;
     }
 
     /// The outfit's seat: first HQ, or the outfit depot before any exists.

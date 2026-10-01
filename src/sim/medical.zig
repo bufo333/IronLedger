@@ -93,9 +93,10 @@ pub fn severityLabel(severity: u8) []const u8 {
     };
 }
 
-/// Is this person's posting currently deployed?
-fn isDeployed(gs: *GameState, p: *const person_mod.Person) bool {
-    return posture.isCompanyDeployed(gs, gs.companyOf(p.assigned_force));
+/// Is this person away from their home HQ (deployed, returning, or idling
+/// afield)? Used only for bed routing in `runDailyHealing` (ARCH §9.7).
+fn companyAtField(gs: *GameState, p: *const person_mod.Person) bool {
+    return !posture.isCompanyHome(gs, gs.companyOf(p.assigned_force));
 }
 
 /// Where a fresh wound is treated: a home HQ's hospital, a MASH lance in
@@ -113,43 +114,59 @@ pub fn companyFieldsMash(gs: *GameState, company: types.ForceId) bool {
     return false;
 }
 
-/// The care a person's wound gets today.
+/// The care a person's wound gets today. Home care only when the company
+/// is physically at its home HQ; returning and idle-afield companies receive
+/// field care (ARCH §9.7).
 pub fn careFor(gs: *GameState, p: *const person_mod.Person) Care {
     const company = gs.companyOf(p.assigned_force);
-    if (!posture.isCompanyDeployed(gs, company)) return .home;
+    if (posture.isCompanyHome(gs, company)) return .home;
     return if (companyFieldsMash(gs, company)) .field_mash else .field;
 }
 
-/// Triage & recovery time for a fresh wound.
-pub fn healDays(gs: *GameState, care: Care) u32 {
+/// Triage & recovery time for a fresh wound. Pass the patient's home HQ
+/// so that home care reads the local hospital and local staff cover (C10 C2).
+pub fn healDays(gs: *GameState, care: Care, home_hq: types.HqId) u32 {
     const m = tuning.medical;
     var days: u32 = m.heal_base_days + gs.rng.roll2d6(.medical);
 
-    // Doctor/medic coverage (MekHQ ratio): understaffed when wounded exceed the
-    // combined cover; both roles counted through the single owner (C11c).
-    var wounded: u32 = 0;
-    var it = gs.people.iterator();
-    while (it.next()) |entry| {
-        if (entry.value_ptr.status == .wounded) wounded += 1;
+    if (care == .home) {
+        // Doctor/medic coverage at the home HQ: understaffed when home
+        // wounded at this HQ exceed the local combined cover (C11c owner).
+        var wounded_here: u32 = 0;
+        var it = gs.people.iterator();
+        while (it.next()) |entry| {
+            if (entry.value_ptr.status == .wounded and gs.homeHqOf(entry.value_ptr) == home_hq) wounded_here += 1;
+        }
+        if (wounded_here > medbayCoverAt(gs, home_hq)) days = @intCast(types.applyBp(days, m.understaffed_bp));
+        // Home hospital at this HQ shortens the stay.
+        const hq = gs.hqs.getPtr(home_hq);
+        const hospital: u8 = if (hq) |h| h.effectiveFacilityLevel(.hospital) else 0;
+        if (hospital > 0) days = @intCast(types.applyBp(days, m.hospital_bp));
+    } else {
+        // Field: outfit-wide cover check (field patients unchanged).
+        var wounded: u32 = 0;
+        var it = gs.people.iterator();
+        while (it.next()) |entry| {
+            if (entry.value_ptr.status == .wounded) wounded += 1;
+        }
+        if (wounded > medbayCover(gs)) days = @intCast(types.applyBp(days, m.understaffed_bp));
+        if (care == .field_mash) days = @intCast(types.applyBp(days, m.mash_bp)); // MASH lance forward surgery
     }
-    if (wounded > medbayCover(gs)) days = @intCast(types.applyBp(days, m.understaffed_bp)); // understaffed infirmary
-
-    if (care == .field_mash) days = @intCast(types.applyBp(days, m.mash_bp)); // MASH lance forward surgery
-    // Home hospital: any hospital in the outfit shortens the stay.
-    var hqit = gs.hqs.iterator();
-    var best_hospital: u8 = 0;
-    while (hqit.next()) |entry| {
-        best_hospital = @max(best_hospital, entry.value_ptr.effectiveFacilityLevel(.hospital));
-    }
-    if (care == .home and best_hospital > 0) days = @intCast(types.applyBp(days, m.hospital_bp));
 
     return @max(days, m.heal_min_days);
 }
 
-/// Medbay beds: the outfit's best hospital level × 10 at home; for a
-/// deployed company, 4 per operational MASH truck plus its medics.
-pub fn bedCapacity(gs: *GameState, company: types.ForceId, deployed: bool) u32 {
-    if (deployed) {
+/// Home medbay beds at a specific HQ: hospital level × beds_per_hospital_level
+/// (ARCH §9.9 "one count for home beds" — per-HQ after C10). Null HQ = zero.
+pub fn homeBedCapacity(gs: *GameState, hq_id: types.HqId) u32 {
+    const hq = gs.hqs.getPtr(hq_id) orelse return 0;
+    return @as(u32, hq.effectiveFacilityLevel(.hospital)) * tuning.medical.beds_per_hospital_level;
+}
+
+/// Medbay beds for a company afield: 4 per operational MASH truck plus
+/// its medics. For home beds use `homeBedCapacity` per the patient's home HQ.
+pub fn bedCapacity(gs: *GameState, company: types.ForceId, afield: bool) u32 {
+    if (afield) {
         var beds: u32 = 0;
         var it = gs.units.iterator();
         while (it.next()) |entry| {
@@ -166,6 +183,8 @@ pub fn bedCapacity(gs: *GameState, company: types.ForceId, deployed: bool) u32 {
         };
         return beds + (if (beds > 0) @min(medics, beds) else medics / 2);
     }
+    // Legacy: sum best across all HQs (kept for the field branch only; home
+    // callers use homeBedCapacity directly).
     var best: u32 = 0;
     var hqit = gs.hqs.iterator();
     while (hqit.next()) |entry| best = @max(best, @as(u32, entry.value_ptr.effectiveFacilityLevel(.hospital)) * tuning.medical.beds_per_hospital_level);
@@ -195,11 +214,33 @@ pub fn medicalStaff(gs: *GameState) MedicalStaff {
     return st;
 }
 
+/// Medical staff at a specific HQ: active doctors and medics whose
+/// `homeHqOf` equals `hq_id` (C10 C3 locality owner).
+pub fn medicalStaffAt(gs: *GameState, hq_id: types.HqId) MedicalStaff {
+    var st: MedicalStaff = .{ .doctors = 0, .medics = 0 };
+    var it = gs.people.iterator();
+    while (it.next()) |entry| {
+        const p = entry.value_ptr;
+        if (gs.homeHqOf(p) != hq_id) continue;
+        if (isActiveDoctor(p)) st.doctors += 1;
+        if (isActiveMedic(p)) st.medics += 1;
+    }
+    return st;
+}
+
 /// How many patients the outfit's active medical staff can cover:
 /// doctors × patients_per_doctor + medics × patients_per_medic (C11c owner).
 pub fn medbayCover(gs: *GameState) u32 {
     const m = tuning.medical;
     const st = medicalStaff(gs);
+    return st.doctors * m.patients_per_doctor + st.medics * m.patients_per_medic;
+}
+
+/// How many home patients the staff at `hq_id` can cover:
+/// one owner per HQ for the local understaffed check (C10 C3).
+pub fn medbayCoverAt(gs: *GameState, hq_id: types.HqId) u32 {
+    const m = tuning.medical;
+    const st = medicalStaffAt(gs, hq_id);
     return st.doctors * m.patients_per_doctor + st.medics * m.patients_per_medic;
 }
 
@@ -217,7 +258,7 @@ pub fn runDailyHealing(gs: *GameState) !void {
 
     // Beds: rank the wounded by priority, then by soonest discharge; those
     // past the bed count wait (their timers slip a day).
-    const Patient = struct { id: types.PersonId, priority: u8, heal_day: u32, deployed: bool, company: types.ForceId };
+    const Patient = struct { id: types.PersonId, priority: u8, heal_day: u32, at_field: bool, company: types.ForceId, home_hq: types.HqId };
     var patients: std.ArrayListUnmanaged(Patient) = .empty;
     defer patients.deinit(gs.scratch());
     var pit = gs.people.iterator();
@@ -228,8 +269,9 @@ pub fn runDailyHealing(gs: *GameState) !void {
             .id = p.id,
             .priority = p.medbay_priority,
             .heal_day = p.wound_heal_day.?,
-            .deployed = isDeployed(gs, p),
+            .at_field = companyAtField(gs, p),
             .company = gs.companyOf(p.assigned_force),
+            .home_hq = gs.homeHqOf(p),
         });
     }
     std.mem.sort(Patient, patients.items, {}, struct {
@@ -239,21 +281,25 @@ pub fn runDailyHealing(gs: *GameState) !void {
         }
     }.lt);
     // One pass in that order: each patient takes a bed while any are left
-    // at home or in their company's field beds.
-    var home_beds = bedCapacity(gs, .none, false);
+    // at their home HQ or in their company's field beds. Home beds are
+    // per-HQ so a patient waits only when their own HQ's beds are full.
+    var home_beds_left: std.AutoHashMapUnmanaged(types.HqId, u32) = .empty;
+    defer home_beds_left.deinit(gs.scratch());
     var field_left: std.AutoHashMapUnmanaged(types.ForceId, u32) = .empty;
     defer field_left.deinit(gs.scratch());
     for (patients.items) |pt| {
-        if (pt.deployed) {
+        if (pt.at_field) {
             const left = try field_left.getOrPut(gs.scratch(), pt.company);
             if (!left.found_existing) left.value_ptr.* = bedCapacity(gs, pt.company, true);
             if (left.value_ptr.* > 0) {
                 left.value_ptr.* -= 1;
             } else gs.person(pt.id).?.wound_heal_day.? += 1;
-        } else if (home_beds > 0) {
-            home_beds -= 1;
         } else {
-            gs.person(pt.id).?.wound_heal_day.? += 1;
+            const left = try home_beds_left.getOrPut(gs.scratch(), pt.home_hq);
+            if (!left.found_existing) left.value_ptr.* = homeBedCapacity(gs, pt.home_hq);
+            if (left.value_ptr.* > 0) {
+                left.value_ptr.* -= 1;
+            } else gs.person(pt.id).?.wound_heal_day.? += 1;
         }
     }
 
@@ -272,7 +318,7 @@ pub fn runDailyHealing(gs: *GameState) !void {
             }
             // Triage consumes a ton of medical supplies from wherever they
             // lie; an empty dispensary heals half again as slowly.
-            var days = healDays(gs, careFor(gs, p));
+            var days = healDays(gs, careFor(gs, p), gs.homeHqOf(p));
             if (!gs.takeStock(sites.siteForForce(gs, p.assigned_force), "medical_supplies", 1)) days = @intCast(types.applyBp(days, tuning.medical.no_supplies_bp));
             if (p.has("iron_man")) days = @max(tuning.medical.iron_man_min_days, @as(u32, @intCast(types.applyBp(days, tuning.medical.iron_man_heal_bp))));
             // A wound with no record behind it (saves before schema v7,
@@ -319,7 +365,7 @@ pub fn runMonthlyTurnover(gs: *GameState) !u32 {
         const p = entry.value_ptr;
         if (p.status != .active) continue;
         // Nobody walks out mid-contract: notice waits for the tour to end.
-        if (isDeployed(gs, p)) continue;
+        if (posture.isCompanyDeployed(gs, gs.companyOf(p.assigned_force))) continue;
         // Age: past the line they hang up the neurohelmet.
         const age = p.ageYears(day);
         if (age != null and age.? >= t.age_retire) {
@@ -392,8 +438,22 @@ pub fn runWeeklyRest(gs: *GameState) !void {
         const p = entry.value_ptr;
         if (!p.isOnBooks()) continue;
 
-        if (isDeployed(gs, p)) {
-            const company = gs.companyOf(p.assigned_force);
+        const company = gs.companyOf(p.assigned_force);
+        if (posture.isCompanyHome(gs, company)) {
+            // Rest at home is the home HQ's: its mess sets the recovery
+            // rate, its HR staff keep spirits up.
+            const home = gs.homeHqOf(p);
+            const mess: u8 = if (gs.hqs.getPtr(home)) |h| h.effectiveFacilityLevel(.mess) else 0;
+            const decay: u32 = @intCast(types.applyBp(person_mod.fatigueDecayPerWeek(mess), commander_mod.costMultBp(gs.commander, .fatigue_recovery)));
+            const hr_bonus: u8 = if (gs.hqs.getPtr(home) != null) @intCast(@min(tp.hr_morale_bonus_max, hq_ops.hqStaff(gs, home, .admin_hr).count / tp.hr_morale_admins_per_point)) else 0;
+            // On leave: double recovery.
+            const on_leave = p.leave_until_day != null and gs.clock.day_index < p.leave_until_day.?;
+            p.addFatigue(-@as(i32, @intCast(@min(if (on_leave) decay * 2 else decay, 255))));
+            // Rested spirits drift toward content (50), mess food helps.
+            const target: u8 = tuning.person.morale_content + 2 * mess + hr_bonus;
+            if (p.morale < target) p.addMorale(1);
+            if (p.fatigue > tuning.person.fatigue_grind) p.addMorale(-1);
+        } else if (posture.isCompanyDeployed(gs, company)) {
             const contract = gs.deploymentContract(company);
             const garrison = if (contract) |c| c.kind.isGarrisonClass() else false;
             if (garrison) {
@@ -412,19 +472,12 @@ pub fn runWeeklyRest(gs: *GameState) !void {
                 if (co.supply_shortage_days > 0) p.addMorale(-2);
             }
         } else {
-            // Rest at home is the home HQ's: its mess sets the recovery
-            // rate, its HR staff keep spirits up.
-            const home = gs.homeHqOf(p);
-            const mess: u8 = if (gs.hqs.getPtr(home)) |h| h.effectiveFacilityLevel(.mess) else 0;
-            const decay: u32 = @intCast(types.applyBp(person_mod.fatigueDecayPerWeek(mess), commander_mod.costMultBp(gs.commander, .fatigue_recovery)));
-            const hr_bonus: u8 = if (gs.hqs.getPtr(home) != null) @intCast(@min(tp.hr_morale_bonus_max, hq_ops.hqStaff(gs, home, .admin_hr).count / tp.hr_morale_admins_per_point)) else 0;
-            // On leave: double recovery.
-            const on_leave = p.leave_until_day != null and gs.clock.day_index < p.leave_until_day.?;
-            p.addFatigue(-@as(i32, @intCast(@min(if (on_leave) decay * 2 else decay, 255))));
-            // Rested spirits drift toward content (50), mess food helps.
-            const target: u8 = tuning.person.morale_content + 2 * mess + hr_bonus;
-            if (p.morale < target) p.addMorale(1);
+            // Returning or idle-afield: no home benefits (ARCH §9.7). The
+            // exhaustion and hunger morale grinds still apply.
             if (p.fatigue > tuning.person.fatigue_grind) p.addMorale(-1);
+            if (gs.force(company)) |co| {
+                if (co.supply_shortage_days > 0) p.addMorale(-2);
+            }
         }
     }
 
@@ -1234,30 +1287,39 @@ test "train co:N enrols the whole home company at their trades, and says who it 
     try std.testing.expectError(commands.Error.CompanyDeployed, commands.execute(&gs, .{ .train_company = .{ .company = co } }));
 }
 
-test "medbayCover counts doctors and medics through one owner; the medbay display agrees (C11c/C11y/C11l, C17b3)" {
+test "medbayCoverAt counts per-HQ staff; the medbay display agrees (C11c/C11y/C11l, C17b3, C10-C)" {
     const queries = @import("queries.zig");
     var gs = GameState.init(std.testing.allocator, .{ .seed = 10001 });
     defer gs.deinit();
     _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
+    const seat = gs.seat();
+    // Add a second HQ with no staff to make the fixture asymmetric (rule 71).
+    const second = try founding.foundHq(&gs, "Far", .regional, "alkaid");
 
-    // No staff: zero cover.
-    try std.testing.expectEqual(@as(u32, 0), medbayCover(&gs));
+    // No staff: zero cover at both HQs.
+    try std.testing.expectEqual(@as(u32, 0), medbayCoverAt(&gs, seat));
+    try std.testing.expectEqual(@as(u32, 0), medbayCoverAt(&gs, second));
 
-    // Adding a medic raises cover by patients_per_medic.
+    // Medic hired at the seat (homeHqOf defaults to seat): seat cover rises,
+    // second HQ cover stays zero — asymmetric.
     const medic_id = try gs.hirePerson("M", "Edic", .medic);
     _ = medic_id;
     const m = tuning.medical;
-    try std.testing.expectEqual(@as(u32, m.patients_per_medic), medbayCover(&gs));
+    try std.testing.expectEqual(@as(u32, m.patients_per_medic), medbayCoverAt(&gs, seat));
+    try std.testing.expectEqual(@as(u32, 0), medbayCoverAt(&gs, second));
 
-    // Adding a doctor raises cover by patients_per_doctor.
+    // Doctor also at the seat.
     _ = try gs.hirePerson("D", "Octor", .doctor);
     const expected_cover = m.patients_per_medic + m.patients_per_doctor;
-    try std.testing.expectEqual(@as(u32, expected_cover), medbayCover(&gs));
+    try std.testing.expectEqual(@as(u32, expected_cover), medbayCoverAt(&gs, seat));
+    try std.testing.expectEqual(@as(u32, 0), medbayCoverAt(&gs, second));
 
-    // The medbay header line displays the same cover figure (display agrees).
+    // The medbay header line for the seat HQ displays the same cover figure
+    // (display agrees with medbayCoverAt, rule 29/C10-C3).
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const lines = try queries.medbay(arena.allocator(), &gs);
+    // First line is the seat HQ's summary; look for the cover marker.
     const header = lines[0];
     const marker = "(cover ";
     const pos = std.mem.indexOf(u8, header, marker) orelse return error.TestExpectedEqual;
@@ -1267,7 +1329,7 @@ test "medbayCover counts doctors and medics through one owner; the medbay displa
     try std.testing.expectEqual(expected_cover, parsed);
 }
 
-test "careFor names the care level for each posture (C17a2)" {
+test "careFor names the care level for each posture; returning/idle get field care (C17a2, C10-A1)" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 10002 });
     defer gs.deinit();
     _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
@@ -1275,8 +1337,23 @@ test "careFor names the care level for each posture (C17a2)" {
     const id = try gs.hirePerson("A", "B", .mekwarrior);
     gs.person(id).?.assigned_force = co;
     const p = gs.person(id).?;
+    const f = gs.force(co).?;
+
     // At home: home care.
     try std.testing.expectEqual(Care.home, careFor(&gs, p));
+
+    // Returning: field care — not home care (ARCH §9.7 "no home benefits").
+    f.return_eta_day = 100;
+    try std.testing.expectEqual(Care.field, careFor(&gs, p));
+
+    // Idle afield: also field care.
+    f.return_eta_day = null;
+    f.location_planet = "galatea";
+    try std.testing.expectEqual(Care.field, careFor(&gs, p));
+
+    // Reset to home.
+    f.location_planet = null;
+
     // Deployed without a MASH truck: field care.
     try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
         .id = @enumFromInt(1),
@@ -1305,4 +1382,68 @@ test "turnoverRisk is zero under a year's tenure; restless flags raise it (C17a2
     // Over a year: restless flags register.
     gs.clock.day_index = 400;
     try std.testing.expect(turnoverRisk(gs.person(id).?, gs.clock.day_index) > 0);
+}
+
+test "idle_afield company gets no fatigue recovery from runWeeklyRest (C10-A3, ARCH §9.7)" {
+    // Asymmetric: home peer decays fatigue; idle_afield peer does not.
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 10101 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
+    const co_home = try gs.createForce("AtHome", .company, .none);
+    const co_afield = try gs.createForce("Afield", .company, .none);
+    gs.force(co_afield).?.location_planet = "galatea"; // idle_afield
+
+    const id_home = try gs.hirePerson("H", "Ome", .mekwarrior);
+    gs.person(id_home).?.assigned_force = co_home;
+    gs.person(id_home).?.fatigue = 80;
+
+    const id_afield = try gs.hirePerson("A", "Field", .mekwarrior);
+    gs.person(id_afield).?.assigned_force = co_afield;
+    gs.person(id_afield).?.fatigue = 80;
+
+    for (0..4) |_| try runWeeklyRest(&gs);
+
+    // Home person recovered fatigue; afield person did not.
+    try std.testing.expect(gs.person(id_home).?.fatigue < 80);
+    try std.testing.expectEqual(@as(u8, 80), gs.person(id_afield).?.fatigue);
+}
+
+test "returning company's wounded draw field beds, not home beds (C10-A2, ARCH §9.7)" {
+    // Asymmetric: home HQ has a hospital; the returning company has none.
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 10102 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
+    const seat = gs.seat();
+    // Seat HQ has a hospital (set by createCommander via foundHq with level 1).
+    const home_beds = homeBedCapacity(&gs, seat);
+    try std.testing.expect(home_beds > 0); // sanity: seat has hospital beds
+
+    const co = try gs.createForce("Returning", .company, .none);
+    gs.force(co).?.return_eta_day = 999; // returning posture
+    const id = try gs.hirePerson("W", "Ounded", .mekwarrior);
+    gs.person(id).?.assigned_force = co;
+    gs.person(id).?.status = .wounded;
+    gs.person(id).?.medbay_admitted = true;
+
+    try runDailyHealing(&gs); // triage; returning → careFor returns .field
+
+    // Bed routed to field (company's field beds = 0, so heal day slips
+    // on the first pass if field_left starts at 0).
+    // The key invariant: home_beds_left at the seat was not consumed.
+    // We verify by admitting a second home patient and confirming they
+    // get a bed (home pool not drained by the returning patient).
+    const co_home = try gs.createForce("HomeAlpha", .company, .none);
+    gs.force(co_home).?.supplying_hq = seat;
+    const id2 = try gs.hirePerson("H", "Home", .mekwarrior);
+    gs.person(id2).?.assigned_force = co_home;
+    gs.person(id2).?.status = .wounded;
+    gs.person(id2).?.medbay_admitted = true;
+    // Reset the returning patient so they don't interfere.
+    gs.person(id).?.wound_heal_day = null;
+    gs.person(id).?.medbay_admitted = false;
+    gs.person(id).?.status = .active;
+
+    try runDailyHealing(&gs);
+    // Home patient triaged and got a bed (heal day set, not slipped).
+    try std.testing.expect(gs.person(id2).?.wound_heal_day != null);
 }

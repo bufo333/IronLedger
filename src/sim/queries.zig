@@ -737,7 +737,7 @@ pub fn offerTransitDays(gs: *GameState, offer: *const contract_mod.Contract) u32
         if (best == null or days < best.?) best = days;
     }
     if (best) |b| return b;
-    const seat = if (gs.hqs.count() > 0) planet_mod.find(gs.hqs.values()[0].planet_key) else null;
+    const seat = if (gs.seatPlanetKey()) |k| planet_mod.find(k) else null;
     if (seat) |s| return logistics_mod.daysBetween(s, to);
     const jumps = planet_mod.jumpsForLy(offer.dist_ly);
     return logistics_mod.daysForJumps(jumps);
@@ -3468,7 +3468,7 @@ pub fn installCandidates(alloc: Alloc, gs: *GameState, uid: types.UnitId) ![]Ins
     const home = gs.homeHqFor(u.force);
     for (part_mod.catalog) |p| {
         if (!p.mountable()) continue;
-        const on_hand = gs.stockCount(.{ .hq = home }, p.key) + gs.spareCount(p.key);
+        const on_hand = gs.stockCount(.{ .hq = home }, p.key);
         try out.append(alloc, .{ .key = p.key, .on_hand = on_hand, .text = try std.fmt.allocPrint(alloc, "{s: <12} {s: <22} {s: <9} {d: >2}.{d}t {d: >2}c heat {d: >2}  {s}", .{
             clip(p.key, 12), clip(p.name, 22), @tagName(p.mount), p.mass_half_tons / 2, (p.mass_half_tons % 2) * 5, p.crits, p.heat, if (on_hand > 0) try std.fmt.allocPrint(alloc, "{{g}}{d} in stock{{/}}", .{on_hand}) else try std.fmt.allocPrint(alloc, "{{d}}buy {s}{{/}}", .{try money(alloc, p.cost)}),
         }) });
@@ -5426,17 +5426,20 @@ pub fn hqRoster(alloc: Alloc, gs: *GameState, hq_id: types.HqId) ![]const []cons
 }
 
 /// The medbay: patients, beds, doctors and their cover, then each patient.
+/// The first line covers the seat HQ's home medical (cover N uses the seat's
+/// local staff — the per-HQ owner; rule 29 / C10-C3).
 pub fn medbay(alloc: Alloc, gs: *GameState) ![]const []const u8 {
     const medical = @import("medical.zig");
     var out: std.ArrayListUnmanaged([]const u8) = .empty;
-    const ms = medical.medicalStaff(gs);
+    const seat = gs.seat();
+    const ms = medical.medicalStaffAt(gs, seat);
     var wounded: u32 = 0;
     var pit = gs.people.iterator();
     while (pit.next()) |entry| {
         if (entry.value_ptr.status == .wounded) wounded += 1;
     }
     try out.append(alloc, try std.fmt.allocPrint(alloc, "medbay: {d} patients | {d} beds at home | {d} doctors, {d} medics (cover {d})", .{
-        wounded, medical.bedCapacity(gs, .none, false), ms.doctors, ms.medics, medical.medbayCover(gs),
+        wounded, medical.homeBedCapacity(gs, seat), ms.doctors, ms.medics, medical.medbayCoverAt(gs, seat),
     }));
     var pit2 = gs.people.iterator();
     while (pit2.next()) |entry| {
@@ -6729,4 +6732,69 @@ test "companyStands renders text matching each posture tag" {
     gs.forces.getPtr(co).?.return_eta_day = 200;
     const ret_s = try companyStands(al, &gs, co);
     try std.testing.expectEqualStrings("in transit home", ret_s);
+}
+
+test "installCandidates on_hand equals home-HQ stock only — no spare leak (C10-D1, rule 29)" {
+    // Asymmetric: stock at the home HQ; spare parts at the outfit depot.
+    // on_hand must equal the HQ stock, not HQ + spare.
+    const commands_m = @import("commands.zig");
+    const founding_m = @import("founding.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 9701 });
+    defer gs.deinit();
+    _ = try commands_m.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    const co = (try commands_m.execute(&gs, .{ .new_company = "Alpha" })).created_force;
+    // Pick the first unit in the company.
+    var uid: @import("../domain/types.zig").UnitId = .none;
+    var uit = gs.units.iterator();
+    while (uit.next()) |e| if (gs.companyOf(e.value_ptr.force) == co) {
+        uid = e.key_ptr.*;
+        break;
+    };
+    try std.testing.expect(uid != .none);
+    const home = gs.homeHqFor(gs.unit(uid).?.force);
+    const part_key = "mlas";
+    // Put 3 at home HQ, 5 in outfit spare depot.
+    try gs.addStock(.{ .hq = home }, part_key, 3);
+    try gs.addStock(.outfit, part_key, 5);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const candidates = try installCandidates(arena.allocator(), &gs, uid);
+    var found: bool = false;
+    for (candidates) |c| {
+        if (!std.mem.eql(u8, c.key, part_key)) continue;
+        found = true;
+        // on_hand must equal HQ stock only (3), not 3+5=8.
+        try std.testing.expectEqual(@as(u32, 3), c.on_hand);
+    }
+    try std.testing.expect(found);
+
+    // Also verify with a second HQ that has seat stock (rule 29: query agrees
+    // with commitRefit, which reads homeHqFor only).
+    const second = try founding_m.foundHq(&gs, "Second", .regional, "alkaid");
+    _ = second;
+    const seat = gs.seat();
+    try gs.addStock(.{ .hq = seat }, part_key, 7); // seat != home for this unit
+    if (seat != home) {
+        const candidates2 = try installCandidates(arena.allocator(), &gs, uid);
+        for (candidates2) |c| {
+            if (!std.mem.eql(u8, c.key, part_key)) continue;
+            try std.testing.expectEqual(@as(u32, 3), c.on_hand); // still home-HQ only
+        }
+    }
+}
+
+test "seatPlanetKey returns the seat's planet and null before any HQ (C10-E1)" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 9801 });
+    defer gs.deinit();
+    // No HQ yet: null.
+    try std.testing.expectEqual(@as(?[]const u8, null), gs.seatPlanetKey());
+    _ = try @import("founding.zig").createCommander(&gs, "T", .LC, .paymaster);
+    const seat = gs.seat();
+    const hq_planet = gs.hqs.getPtr(seat).?.planet_key;
+    // After HQ creation: returns the seat's planet.
+    const spk = gs.seatPlanetKey() orelse return error.TestUnexpectedNull;
+    try std.testing.expectEqualStrings(hq_planet, spk);
+    // sitePlanetKey(.outfit) agrees.
+    const sites_m = @import("sites.zig");
+    try std.testing.expectEqualStrings(hq_planet, sites_m.sitePlanetKey(&gs, .outfit).?);
 }

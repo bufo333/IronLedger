@@ -511,7 +511,7 @@ training HQ's HR (§9.7). A recruit's quality reads the recruiting HQ's
 hiring hall and HR (`personnel.recruitBonus(hq)`, `personnel.recruitGenerated(role, hq)`):
 hall boards and office staffing at their own HQ, company crews at the
 company's home HQ, and the bare `recruit` verb at the outfit's seat.
-**C10 target:** negotiation reads the offer HQ's command staff; freight reads
+Negotiation reads the offer HQ's command staff; freight reads
 transport staff at the shipment's involved HQ. No office applies globally
 merely because its HQ was created first.
 
@@ -608,10 +608,10 @@ lightly; a bloody raid campaign wears hard), and compounding for every
 contract since the company last rotated: sat undeployed until its people
 were rested.
 Fatigue never decays on a combat tour; garrison duty recovers at a share
-of the home rate, the mess lance standing in for the hall. **C10 target:** off
-contract and physically at home, fatigue decays weekly at the person's home HQ
-(§9.4), faster with a better mess; returning and idle-afield companies receive
-no home benefits. Effects: morale decay, the autoresolve fatigue penalty
+of the home rate, the mess lance standing in for the hall. Off contract and
+physically at home, fatigue decays weekly at the person's home HQ (§9.4),
+faster with a better mess; returning and idle-afield companies receive no
+home benefits. Effects: morale decay, the autoresolve fatigue penalty
 (§7), slower maintenance and healing. Capped at 100 — degraded, never
 spiraling (§9.6 philosophy).
 
@@ -726,11 +726,10 @@ and the swap is logged and surfaced in the checklist. The **medbay** has
 beds (hospital level, plus operational MASH trucks and medics in the
 field) and doctor coverage. Where a wound is treated is one
 `medical.Care`: home, field with an operational MASH truck (the MASH
-healing multiplier), or field without. Beds go out in one pass over the
-wounded sorted by triage priority, then soonest discharge, with one count
-for home beds and one per deployed company's field beds; a patient past
-the count waits a day. Leave sends the exhausted to R&R at double
-recovery.
+healing multiplier), or field without. Beds go out in one pass over the wounded sorted by triage priority, then
+soonest discharge, with one count per home HQ's beds (`medical.homeBedCapacity`)
+and one per deployed company's field beds; a patient waits only when their
+own HQ's beds are full. Leave sends the exhausted to R&R at double recovery.
 
 **The end-turn checklist.** Ending a turn first runs `turnWarnings`:
 decisions near deadline, open pilot/tech slots, understaffed HQs, hungry or
