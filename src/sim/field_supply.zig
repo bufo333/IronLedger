@@ -14,6 +14,10 @@ const std = @import("std");
 const tuning = @import("../domain/tuning.zig").t;
 const types = @import("../domain/types.zig");
 const part_mod = @import("../domain/part.zig");
+const planet_mod = @import("../domain/planet.zig");
+const contract_mod = @import("../domain/contract.zig");
+const market_mod = @import("../econ/market.zig");
+const logistics_mod = @import("../econ/logistics.zig");
 const sites = @import("sites.zig");
 const toe = @import("toe.zig");
 const GameState = @import("state.zig").GameState;
@@ -243,13 +247,53 @@ pub fn ammoFights(alloc: std.mem.Allocator, gs: *GameState, company: types.Force
     return out.toOwnedSlice(alloc);
 }
 
+/// Whether a company is on an active beachhead deployment (ARCH §9.6):
+/// the contract is flagged beachhead AND the contract world is outside
+/// every current ring. Planting a field HQ on the beachhead world brings
+/// it inside the field HQ's ring and flips this false, lifting the
+/// local-supply markup and hardship pay (C15 D3).
+pub fn beachheadActive(gs: *GameState, c: *const contract_mod.Contract) bool {
+    if (!c.beachhead) return false;
+    const planet = planet_mod.find(c.planet_key) orelse return true;
+    var it = gs.hqs.iterator();
+    while (it.next()) |entry| {
+        const hq = entry.value_ptr;
+        const hq_planet = planet_mod.find(hq.planet_key) orelse continue;
+        const dist = planet_mod.distanceLy(planet, hq_planet);
+        if (market_mod.visibilityFor(dist, hq.influenceLy()) == .in_ring) return false;
+    }
+    return true;
+}
+
+/// Live distance beyond the nearest ring for a beachhead contract.
+/// Uses offer_hq's stored distance when available; falls back to the minimum
+/// of (dist_to_hq -| influenceLy) over all HQs when offer_hq is .none (D4).
+fn liveBeachheadLy(gs: *GameState, c: *const contract_mod.Contract) u32 {
+    if (gs.hqs.getPtr(c.offer_hq)) |hq| {
+        return c.dist_ly -| hq.influenceLy();
+    }
+    // D4: offer_hq is .none — minimum over all HQs.
+    const contract_planet = planet_mod.find(c.planet_key) orelse return 0;
+    var min: u32 = std.math.maxInt(u32);
+    var it = gs.hqs.iterator();
+    while (it.next()) |entry| {
+        const hq = entry.value_ptr;
+        const hq_planet = planet_mod.find(hq.planet_key) orelse continue;
+        const d = planet_mod.distanceLy(contract_planet, hq_planet);
+        const beyond = d -| hq.influenceLy();
+        if (beyond < min) min = beyond;
+    }
+    return if (min == std.math.maxInt(u32)) 0 else min;
+}
+
 /// The local supplies valve's price multiplier (ARCH §9.6) for a company
-/// on a contract: on a beachhead, remoteness beyond the ring eased by the
-/// world's industry; inside the rings, the ordinary field markup.
-pub fn localPriceMultBp(c: *const @import("../domain/contract.zig").Contract) types.Bp {
-    if (!c.beachhead) return tuning.finance.field_markup_bp;
-    const industry = if (@import("../domain/planet.zig").find(c.planet_key)) |w| w.industry else 0;
-    return @import("../econ/logistics.zig").localPurchaseMultBp(30, industry);
+/// on a contract: inside every ring (or once a field HQ is planted on the
+/// beachhead world), the ordinary field markup; on an active beachhead,
+/// remoteness beyond the nearest ring eased by the world's industry.
+pub fn localPriceMultBp(gs: *GameState, c: *const contract_mod.Contract) types.Bp {
+    if (!beachheadActive(gs, c)) return tuning.finance.field_markup_bp;
+    const industry: u8 = if (planet_mod.find(c.planet_key)) |w| w.industry else 0;
+    return logistics_mod.localPurchaseMultBp(liveBeachheadLy(gs, c), industry);
 }
 
 /// One line of an emergency resupply.
@@ -289,7 +333,7 @@ pub fn rushQuote(alloc: std.mem.Allocator, gs: *GameState, c: *const @import("..
     }
     const armor_have = gs.stockCount(site, "armor");
     if (dented > armor_have) try lines.append(alloc, .{ .key = "armor", .qty = dented - armor_have });
-    const mult = localPriceMultBp(c);
+    const mult = localPriceMultBp(gs, c);
     var tons: u32 = 0;
     var price: types.CBills = 0;
     for (lines.items) |l| {
@@ -361,7 +405,7 @@ pub fn emergencyResupply(gs: *GameState, id: types.ContractId) !u32 {
     try treasury.debit(gs, .{ .company = c.assigned_company }, .{
         .day = gs.clock.day_index,
         .amount = -rush.price,
-        .category = if (c.beachhead) .local_supplies else .supplies,
+        .category = if (beachheadActive(gs, c)) .local_supplies else .supplies,
         .company = c.assigned_company,
         .contract = id,
         .note = "emergency resupply",
@@ -828,4 +872,104 @@ test "rushQuote: quote is non-empty when a company is short before a fight and i
             else => return err,
         };
     }
+}
+
+test "localPriceMultBp: live distance — two beachhead distances give distinct multipliers (C15c A17 regression)" {
+    const founding_m = @import("founding.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 4422 });
+    defer gs.deinit();
+    _ = try founding_m.createCommander(&gs, "T", .LC, .paymaster);
+    const hq_id = gs.seat();
+    const hq = gs.hqs.getPtr(hq_id).?;
+    // Two synthetic contracts on the same beachhead flag, different dist_ly.
+    // Both share offer_hq = home HQ; the ring is hq.influenceLy().
+    const ring = hq.influenceLy();
+    const base_terms = contract_mod.Terms{ .length_months = 3, .base_pay_month = 100_000 };
+    // Use a synthetic planet key that is not in the catalog so that
+    // beachheadActive returns true via the `orelse return true` branch,
+    // and liveBeachheadLy reads c.dist_ly directly (offer_hq set).
+    var c_near = contract_mod.Contract{
+        .id = .none,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "test-synthetic-beachhead",
+        .terms = base_terms,
+    };
+    c_near.beachhead = true;
+    c_near.offer_hq = hq_id;
+    c_near.dist_ly = ring + 15; // 15 LY into the beachhead band
+    var c_far = contract_mod.Contract{
+        .id = .none,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "test-synthetic-beachhead",
+        .terms = base_terms,
+    };
+    c_far.beachhead = true;
+    c_far.offer_hq = hq_id;
+    c_far.dist_ly = ring + 45; // 45 LY → second band
+
+    const mult_near = localPriceMultBp(&gs, &c_near);
+    const mult_far = localPriceMultBp(&gs, &c_far);
+    // Both should be higher than the plain field markup.
+    try std.testing.expect(mult_near > tuning.finance.field_markup_bp);
+    try std.testing.expect(mult_far > tuning.finance.field_markup_bp);
+    // A farther world costs more; the old literal-30 bug gave a fixed value for all distances.
+    try std.testing.expect(mult_far > mult_near);
+}
+
+test "beachheadActive: founding a field HQ on the beachhead world lifts the penalty (C15c D3)" {
+    const founding_m = @import("founding.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 4423 });
+    defer gs.deinit();
+    _ = try founding_m.createCommander(&gs, "T", .LC, .paymaster);
+    const hq_id = gs.seat();
+    const hq = gs.hqs.getPtr(hq_id).?;
+    const ring = hq.influenceLy();
+    // Find a world in the beachhead band of the home HQ.
+    var beachhead_planet_key: []const u8 = "";
+    for (planet_mod.catalog) |*p| {
+        const d = planet_mod.distanceLy(p, planet_mod.find(hq.planet_key) orelse continue);
+        if (d > ring and d <= ring + market_mod.beachhead_band_ly and beachhead_planet_key.len == 0) {
+            beachhead_planet_key = p.key;
+        }
+    }
+    if (beachhead_planet_key.len == 0) return; // skip if no beachhead world in this seed's catalog
+
+    const base_terms = contract_mod.Terms{ .length_months = 3, .base_pay_month = 100_000 };
+    var c = contract_mod.Contract{
+        .id = .none,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = beachhead_planet_key,
+        .terms = base_terms,
+    };
+    c.beachhead = true;
+    c.offer_hq = hq_id;
+    c.dist_ly = planet_mod.distanceLy(
+        planet_mod.find(beachhead_planet_key).?,
+        planet_mod.find(hq.planet_key).?,
+    );
+
+    // Before: beachheadActive is true (no HQ on the beachhead world).
+    try std.testing.expect(beachheadActive(&gs, &c));
+    // After: found an HQ on the beachhead world → flips false.
+    const field_hq = try founding_m.foundHq(&gs, "Field", .field, beachhead_planet_key);
+    _ = field_hq;
+    try std.testing.expect(!beachheadActive(&gs, &c));
+    // Price drops to the ordinary field markup.
+    try std.testing.expectEqual(tuning.finance.field_markup_bp, localPriceMultBp(&gs, &c));
+}
+
+test "rounding D1: partial beachhead band (1-30 LY) → ×2.5, not ×2.0" {
+    // Pin the D1 rounding decision: a world 15 LY past the ring is in the
+    // first 30-LY band; round-up (D1) gives ×2.5.
+    try std.testing.expectEqual(@as(types.Bp, 25_000), logistics_mod.localPurchaseMultBp(15, 0));
+    // Just at the band edge (30 LY) also rounds up to band 1 → ×2.5.
+    try std.testing.expectEqual(@as(types.Bp, 25_000), logistics_mod.localPurchaseMultBp(30, 0));
+    // One step past (31 LY) rounds up to band 2 → ×3.0.
+    try std.testing.expectEqual(@as(types.Bp, 30_000), logistics_mod.localPurchaseMultBp(31, 0));
 }

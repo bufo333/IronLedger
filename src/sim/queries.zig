@@ -958,9 +958,10 @@ pub fn contracts(alloc: Alloc, gs: *GameState, board_hq: types.HqId) !Contracts 
             // The claim preview is gross — scenario.salvage_bp and the command-rights cut are
             // battle-only factors — so it is labelled as an estimate (C11o).
             const battle = @import("battle.zig");
+            const readiness_m = @import("readiness.zig");
             const trucks = battle.salvageTrucks(gs, c.assigned_company);
             var salvage_lance = false;
-            if (toe_mod.supportLance(gs, c.assigned_company, .salvage)) |l| salvage_lance = l.units.items.len > 0;
+            if (toe_mod.supportLance(gs, c.assigned_company, .salvage)) |l| salvage_lance = readiness_m.forceOperational(gs, l);
             const tb = @import("../domain/tuning.zig").t.battle;
             const haul_bv: i64 = battle.haulCapacityBv(trucks);
             const claim: i64 = battle.salvageClaimBv(haul_bv, c.terms.salvage_pct, salvage_lance);
@@ -1883,16 +1884,9 @@ pub fn stockTable(alloc: Alloc, gs: *GameState, site: types.Site) ![]const []con
     try out.append(alloc, "");
     try out.append(alloc, try std.fmt.allocPrint(alloc, "total {d}t{s}", .{ total, if (cap) |c| try std.fmt.allocPrint(alloc, " of {d}t capacity · {d}t free", .{ c, c -| total }) else "" }));
     if (site == .company) {
-        var cgt: u32 = 0;
-        var svt: u32 = 0;
-        var uit = gs.units.iterator();
-        while (uit.next()) |e| {
-            const u = e.value_ptr;
-            if (u.status == .destroyed or gs.companyOf(u.force) != site.company) continue;
-            if (std.mem.eql(u8, u.chassis_key, "CGT-3")) cgt += 1;
-            if (std.mem.eql(u8, u.chassis_key, "SVT-1")) svt += 1;
-        }
-        try out.append(alloc, try std.fmt.allocPrint(alloc, "{{d}}capacity = {d} CGT-3 × 20t + {d} SVT-1 × 5t · more trucks: Market (vehicles), then Forces x to move them in{{/}}", .{ cgt, svt }));
+        const tn = @import("../domain/tuning.zig").t;
+        const counts = sites.companyTruckCounts(gs, site.company);
+        try out.append(alloc, try std.fmt.allocPrint(alloc, "{{d}}capacity = {d} CGT-3 × {d}t + {d} SVT-1 × {d}t · more trucks: Market (vehicles), then Forces x to move them in{{/}}", .{ counts.cargo, tn.unit.truck_tons.cargo, counts.salvage, tn.unit.truck_tons.salvage }));
     }
     return out.toOwnedSlice(alloc);
 }
@@ -6329,11 +6323,21 @@ pub fn worldDetail(alloc: Alloc, gs: *GameState, view: *const Map, w: *const Wor
     if (w.hq_here != .none) try rows.append(alloc, try std.fmt.allocPrint(alloc, "HQ here      {{a}}{s}{{/}}", .{try hqName(alloc, gs, w.hq_here)}));
     try rows.append(alloc, try std.fmt.allocPrint(alloc, "companies    {d} here", .{w.companies_here}));
     if (w.worked > 0) try rows.append(alloc, try std.fmt.allocPrint(alloc, "history      {{p}}{d} contract{s} worked here{{/}} · an HQ can be founded (F4 History lists them)", .{ w.worked, if (w.worked == 1) "" else "s" }));
-    try rows.append(alloc, try std.fmt.allocPrint(alloc, "local supply {s}", .{switch (w.band) {
-        .ring => "×1.0 (in ring)",
-        .beachhead => "{a}×2.5{/} (beachhead)",
-        .dark => "{c}×4.0{/} (out of reach)",
-    }}));
+    {
+        const tn = @import("../domain/tuning.zig").t;
+        var sup_buf: [16]u8 = undefined;
+        const sup_text: []const u8 = switch (w.band) {
+            .ring => try std.fmt.allocPrint(alloc, "{s} (in ring)", .{types.bpText(&sup_buf, tn.finance.field_markup_bp)}),
+            .beachhead => blk: {
+                const ring_ly: u32 = if (gs.hqs.getPtr(w.nearest_hq)) |h| h.influenceLy() else 0;
+                const ly_beyond: u32 = w.dist_ly -| ring_ly;
+                const mbp = logistics_mod.localPurchaseMultBp(ly_beyond, w.industry);
+                break :blk try std.fmt.allocPrint(alloc, "{{a}}{s}{{/}} (beachhead, {d} LY past ring)", .{ types.bpText(&sup_buf, mbp), ly_beyond });
+            },
+            .dark => try std.fmt.allocPrint(alloc, "{{c}}{s}{{/}} (out of reach)", .{types.bpText(&sup_buf, tn.logistics.local_max_bp)}),
+        };
+        try rows.append(alloc, try std.fmt.allocPrint(alloc, "local supply {s}", .{sup_text}));
+    }
     try rows.append(alloc, "");
     try rows.append(alloc, "offers here");
     const offers = try offersAt(alloc, gs, w.key);

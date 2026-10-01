@@ -37,87 +37,141 @@ pub const RouteHop = struct {
 
 pub const RouteError = error{NoRoute} || std.mem.Allocator.Error;
 
-/// Shortest link path between two HQs (BFS; few nodes). Each hop carries
-/// the link level and the pass-through HQ's hub quality. No path → charter
-/// direct at level 1 (expensive, slow, but it moves).
-pub fn routeBetween(gs: *GameState, from: types.HqId, to: types.HqId, alloc: std.mem.Allocator) RouteError![]RouteHop {
+/// Tonnage-aware best route between two HQs (ARCH §9.5).
+/// Enumerates simple paths over the HQ link graph (few nodes). A path is
+/// feasible when every linked hop has weekly room for `tons`. Among feasible
+/// paths, chooses: minimum `routeDays`, then minimum `routeCostMultBp`, then
+/// lexicographically smallest HQ-id sequence (stable tiebreak). Falls back to
+/// a direct charter only when no linked path is feasible and
+/// `tons <= logistics.linkTonsPerWeek(1)` (D2 cap); otherwise `error.NoRoute`.
+/// All allocation is in `alloc` (caller's arena); no mutation.
+pub fn routeBetween(gs: *GameState, from: types.HqId, to: types.HqId, tons: u32, alloc: std.mem.Allocator) RouteError![]RouteHop {
     var out: std.ArrayListUnmanaged(RouteHop) = .empty;
     if (from == to) return out.toOwnedSlice(alloc);
 
     const n = gs.hqs.count();
     const keys = gs.hqs.keys();
-    var prev = try alloc.alloc(?usize, n);
-    defer alloc.free(prev);
-    var via_link = try alloc.alloc(?usize, n);
-    defer alloc.free(via_link);
-    var visited = try alloc.alloc(bool, n);
-    defer alloc.free(visited);
-    @memset(prev, null);
-    @memset(via_link, null);
-    @memset(visited, false);
-
-    var queue: std.ArrayListUnmanaged(usize) = .empty;
-    defer queue.deinit(alloc);
     const start = indexOf(keys, from) orelse return error.NoRoute;
     const goal = indexOf(keys, to) orelse return error.NoRoute;
-    visited[start] = true;
-    try queue.append(alloc, start);
-    var head: usize = 0;
-    while (head < queue.items.len) : (head += 1) {
-        const cur = queue.items[head];
-        if (cur == goal) break;
-        for (gs.hq_links.items, 0..) |l, li| {
-            const other: ?types.HqId = if (l.a == keys[cur]) l.b else if (l.b == keys[cur]) l.a else null;
-            const oi = indexOf(keys, other orelse continue) orelse continue;
-            if (visited[oi]) continue;
-            visited[oi] = true;
-            prev[oi] = cur;
-            via_link[oi] = li;
-            try queue.append(alloc, oi);
-        }
-    }
 
-    if (!visited[goal]) {
-        // Charter direct: one hop, level 1, no hub help.
-        const a = planet_mod.find(gs.hqs.values()[start].planet_key) orelse return error.NoRoute;
-        const b = planet_mod.find(gs.hqs.values()[goal].planet_key) orelse return error.NoRoute;
-        try out.append(alloc, .{ .from = from, .to = to, .hop = .{ .jumps = planet_mod.jumpsBetween(a, b), .link_level = 1 }, .link_index = null });
+    // DFS state: visited flags, current path, best feasible path found.
+    var visited = try alloc.alloc(bool, n);
+    defer alloc.free(visited);
+    @memset(visited, false);
+    var current: std.ArrayListUnmanaged(RouteHop) = .empty;
+    defer current.deinit(alloc);
+    var best: std.ArrayListUnmanaged(RouteHop) = .empty;
+    defer best.deinit(alloc);
+    var has_best = false;
+    var best_days: u32 = std.math.maxInt(u32);
+    var best_cost: types.Bp = std.math.maxInt(types.Bp);
+
+    // The DFS context holds all mutable state the recursive explore step needs.
+    const Ctx = struct {
+        gs: *GameState,
+        keys: []const types.HqId,
+        tons: u32,
+        goal: usize,
+        alloc: std.mem.Allocator,
+        visited: []bool,
+        current: *std.ArrayListUnmanaged(RouteHop),
+        best: *std.ArrayListUnmanaged(RouteHop),
+        has_best: *bool,
+        best_days: *u32,
+        best_cost: *types.Bp,
+
+        /// Returns true when path `a` beats path `b` on the tiebreak
+        /// (lexicographically smaller HQ-id sequence).
+        fn idSeqLt(a: []const RouteHop, b: []const RouteHop) bool {
+            const len = @min(a.len, b.len);
+            for (a[0..len], b[0..len]) |ah, bh| {
+                const ai = @intFromEnum(ah.to);
+                const bi = @intFromEnum(bh.to);
+                if (ai < bi) return true;
+                if (ai > bi) return false;
+            }
+            return a.len < b.len;
+        }
+
+        fn explore(self: @This(), cur: usize) !void {
+            if (cur == self.goal) {
+                // Check feasibility: every linked hop must have room for `tons`.
+                for (self.current.items) |h| {
+                    const li = h.link_index orelse continue;
+                    const l = self.gs.hq_links.items[li];
+                    if (l.tons_this_week + self.tons > l.tonsPerWeek()) return;
+                }
+                const days = routeDays(self.current.items);
+                const cost = routeCostMultBp(self.current.items);
+                const better = !self.has_best.* or
+                    days < self.best_days.* or
+                    (days == self.best_days.* and cost < self.best_cost.*) or
+                    (days == self.best_days.* and cost == self.best_cost.* and
+                        idSeqLt(self.current.items, self.best.items));
+                if (better) {
+                    self.has_best.* = true;
+                    self.best_days.* = days;
+                    self.best_cost.* = cost;
+                    self.best.clearRetainingCapacity();
+                    try self.best.appendSlice(self.alloc, self.current.items);
+                }
+                return;
+            }
+            // Try every link from `cur` to an unvisited neighbour.
+            for (self.gs.hq_links.items, 0..) |l, li| {
+                const other: ?types.HqId = if (l.a == self.keys[cur]) l.b else if (l.b == self.keys[cur]) l.a else null;
+                const oi = indexOf(self.keys, other orelse continue) orelse continue;
+                if (self.visited[oi]) continue;
+                const a = planet_mod.find(self.gs.hqs.values()[cur].planet_key) orelse continue;
+                const b = planet_mod.find(self.gs.hqs.values()[oi].planet_key) orelse continue;
+                const via = self.gs.hqs.values()[oi];
+                const is_final = oi == self.goal;
+                const hop = RouteHop{
+                    .from = self.keys[cur],
+                    .to = self.keys[oi],
+                    .hop = .{
+                        .jumps = planet_mod.jumpsBetween(a, b),
+                        .link_level = l.level,
+                        .via_warehouse = if (is_final) 0 else via.effectiveFacilityLevel(.warehouse),
+                        .via_spaceport = if (is_final) 0 else via.effectiveFacilityLevel(.spaceport),
+                    },
+                    .link_index = li,
+                };
+                self.visited[oi] = true;
+                try self.current.append(self.alloc, hop);
+                try self.explore(oi);
+                _ = self.current.pop();
+                self.visited[oi] = false;
+            }
+        }
+    };
+
+    visited[start] = true;
+    const ctx = Ctx{
+        .gs = gs,
+        .keys = keys,
+        .tons = tons,
+        .goal = goal,
+        .alloc = alloc,
+        .visited = visited,
+        .current = &current,
+        .best = &best,
+        .has_best = &has_best,
+        .best_days = &best_days,
+        .best_cost = &best_cost,
+    };
+    try ctx.explore(start);
+
+    if (has_best) {
+        try out.appendSlice(alloc, best.items);
         return out.toOwnedSlice(alloc);
     }
 
-    // Walk back, then reverse.
-    var path: std.ArrayListUnmanaged(usize) = .empty;
-    defer path.deinit(alloc);
-    var cur: usize = goal;
-    while (cur != start) {
-        try path.append(alloc, cur);
-        cur = prev[cur].?;
-    }
-    try path.append(alloc, start);
-    std.mem.reverse(usize, path.items);
-
-    for (path.items[0 .. path.items.len - 1], 0..) |ci, i| {
-        const ni = path.items[i + 1];
-        const li = via_link[ni].?;
-        const l = gs.hq_links.items[li];
-        const a = planet_mod.find(gs.hqs.values()[ci].planet_key) orelse return error.NoRoute;
-        const b = planet_mod.find(gs.hqs.values()[ni].planet_key) orelse return error.NoRoute;
-        // Pass-through quality: the HQ this hop arrives at (intermediaries
-        // matter; the final destination handles its own dock).
-        const via = gs.hqs.values()[ni];
-        const is_final = i + 2 == path.items.len;
-        try out.append(alloc, .{
-            .from = keys[ci],
-            .to = keys[ni],
-            .hop = .{
-                .jumps = planet_mod.jumpsBetween(a, b),
-                .link_level = l.level,
-                .via_warehouse = if (is_final) 0 else via.effectiveFacilityLevel(.warehouse),
-                .via_spaceport = if (is_final) 0 else via.effectiveFacilityLevel(.spaceport),
-            },
-            .link_index = li,
-        });
-    }
+    // No feasible linked path: charter fallback, capped at level-1 capacity (D2).
+    if (tons > logistics.linkTonsPerWeek(1)) return error.NoRoute;
+    const a = planet_mod.find(gs.hqs.values()[start].planet_key) orelse return error.NoRoute;
+    const b = planet_mod.find(gs.hqs.values()[goal].planet_key) orelse return error.NoRoute;
+    try out.append(alloc, .{ .from = from, .to = to, .hop = .{ .jumps = planet_mod.jumpsBetween(a, b), .link_level = 1 }, .link_index = null });
     return out.toOwnedSlice(alloc);
 }
 
@@ -257,17 +311,20 @@ test "routes follow links, charter when there are none, and links cap tonnage" {
     const far = try founding.foundHq(&gs, "Frontier", .field, "alkaid");
     const mid = try founding.foundHq(&gs, "Waypoint", .field, "skye");
 
-    // No links: charter direct, one expensive hop.
+    // No links: charter direct (tons=20 ≤ D2 cap of 40).
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
-    const charter = try routeBetween(&gs, home, far, arena.allocator());
+    const charter = try routeBetween(&gs, home, far, 20, arena.allocator());
     try std.testing.expectEqual(@as(usize, 1), charter.len);
     try std.testing.expect(charter[0].link_index == null);
+
+    // Charter refused over the D2 cap (> 40 t/week).
+    try std.testing.expectError(error.NoRoute, routeBetween(&gs, home, far, 50, arena.allocator()));
 
     // Link home—mid and mid—far: the route goes through the waypoint.
     try gs.hq_links.append(gs.allocator(), .{ .a = home, .b = mid, .level = 2, .established_day = 0 });
     try gs.hq_links.append(gs.allocator(), .{ .a = mid, .b = far, .level = 1, .established_day = 0 });
-    const linked = try routeBetween(&gs, home, far, arena.allocator());
+    const linked = try routeBetween(&gs, home, far, 20, arena.allocator());
     try std.testing.expectEqual(@as(usize, 2), linked.len);
     try std.testing.expectEqual(mid, linked[0].to);
 
@@ -276,6 +333,22 @@ test "routes follow links, charter when there are none, and links cap tonnage" {
     try std.testing.expectError(error.ThroughputExceeded, reserveThroughput(&gs, linked, 20));
     resetWeeklyThroughput(&gs);
     try reserveThroughput(&gs, linked, 20);
+
+    // Saturated linked path: fall back to charter (A15 regression).
+    // Saturate the mid-far hop so the only linked path is infeasible.
+    gs.hq_links.items[1].tons_this_week = gs.hq_links.items[1].tonsPerWeek();
+    const fallback = try routeBetween(&gs, home, far, 10, arena.allocator());
+    try std.testing.expectEqual(@as(usize, 1), fallback.len);
+    try std.testing.expect(fallback[0].link_index == null); // charter fallback
+    resetWeeklyThroughput(&gs);
+
+    // Add a direct home—far link; a saturated shorter direct hop routes
+    // through the feasible longer path via mid.
+    try gs.hq_links.append(gs.allocator(), .{ .a = home, .b = far, .level = 1, .established_day = 0 });
+    gs.hq_links.items[2].tons_this_week = gs.hq_links.items[2].tonsPerWeek(); // saturate direct link
+    const detour = try routeBetween(&gs, home, far, 10, arena.allocator());
+    try std.testing.expectEqual(@as(usize, 2), detour.len);
+    try std.testing.expectEqual(mid, detour[0].to); // routes via mid, not the saturated direct
 }
 
 test "establishLink leaves funds, ledger and hq_links unchanged when allocation fails" {

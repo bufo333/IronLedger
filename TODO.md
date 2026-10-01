@@ -17,11 +17,8 @@ frontend boundary. The final package for an exception deletes its parent and
 the exception entry only after all of its listed scope is closed.
 
 The audit deliverables in `docs/audit-response.md` remain folded in: D27 and
-D30 into C12, D28 into C7, D29 into C15, D31 into C8, and D33 into C18.
+D30 into C12, D28 into C7, D31 into C8, and D33 into C18.
 
-- [ ] C15 routing, truck capacity, and beachhead operation (C15a-C15c; rules
-  20, 22, 24): feasible tonnage-aware routing, passive/active truck capability,
-  beachhead pricing, and field-HQ recovery. Delete C15.
 - [ ] C18 external input and resource bounds (C18a-C18e; rules 41, 64): cell
   width, PNG/blob/CSI validation, and bounded music lifecycle. Delete C18.
 - [ ] C19 explicit platforms (C19a-C19c; rule 65): target-gated terminal and

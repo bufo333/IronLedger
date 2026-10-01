@@ -46,22 +46,36 @@ pub fn siteTons(gs: *GameState, site: types.Site) u32 {
     return total;
 }
 
+/// Cargo and salvage truck counts for a company: present-and-usable trucks
+/// only (standsInLine = not parked, not busy). Mothballed, in-transit,
+/// in-shop, and destroyed trucks provide no storage (ARCH §9.3, C15b).
+/// A crewless but present cargo truck still holds its tonnage (passive
+/// storage does not require a driver).
+pub const TruckCounts = struct { cargo: u32, salvage: u32 };
+pub fn companyTruckCounts(gs: *GameState, company: types.ForceId) TruckCounts {
+    var cargo: u32 = 0;
+    var salvage: u32 = 0;
+    var it = gs.units.iterator();
+    while (it.next()) |entry| {
+        const u = entry.value_ptr;
+        if (!u.standsInLine() or gs.companyOf(u.force) != company) continue;
+        if (std.mem.eql(u8, u.chassis_key, "CGT-3")) cargo += 1;
+        if (std.mem.eql(u8, u.chassis_key, "SVT-1")) salvage += 1;
+    }
+    return .{ .cargo = cargo, .salvage = salvage };
+}
+
 /// Storage capacity (null = unlimited outfit depot). A company's cap is
-/// its logistics trucks: 20t per cargo truck, 5t per salvage truck.
+/// its logistics trucks: cargo_tons per present cargo truck, salvage_tons
+/// per present salvage truck (ARCH §9.3).
 pub fn siteCapacityTons(gs: *GameState, site: types.Site) ?u32 {
     switch (site) {
         .outfit => return null,
         .hq => |id| return if (gs.hqs.getPtr(id)) |h| h.warehouseCapacityTons() else 0,
         .company => |id| {
-            var cap: u32 = 0;
-            var it = gs.units.iterator();
-            while (it.next()) |entry| {
-                const u = entry.value_ptr;
-                if (u.status == .destroyed or gs.companyOf(u.force) != id) continue;
-                if (std.mem.eql(u8, u.chassis_key, "CGT-3")) cap += tuning.unit.truck_tons.cargo;
-                if (std.mem.eql(u8, u.chassis_key, "SVT-1")) cap += tuning.unit.truck_tons.salvage;
-            }
-            return cap;
+            const counts = companyTruckCounts(gs, id);
+            return counts.cargo * tuning.unit.truck_tons.cargo +
+                counts.salvage * tuning.unit.truck_tons.salvage;
         },
     }
 }
@@ -253,7 +267,7 @@ pub fn freightQuote(gs: *GameState, alloc: std.mem.Allocator, from: types.Site, 
         .outfit => gs.seat(),
     };
     if (from_hq != .none and to_hq != .none and from_hq != to_hq) {
-        route = try network.routeBetween(gs, from_hq, to_hq, alloc);
+        route = try network.routeBetween(gs, from_hq, to_hq, tons_moved, alloc);
         if (!network.fitsThroughput(gs, route, tons_moved)) return error.ThroughputExceeded;
         days = network.routeDays(route);
         var jumps_total: u32 = 0;
@@ -1137,4 +1151,62 @@ test "freight discount follows from_hq, not the seat (C10-B2, ARCH §9.4)" {
     gs.force(co).?.location_planet = "alkaid"; // field site
     const field_quote = try freightQuote(&gs, arena.allocator(), .{ .company = co }, .{ .hq = plain_id }, tons);
     _ = field_quote;
+}
+
+test "companyTruckCounts: storage counts standsInLine, salvage needs operational crew (C15b)" {
+    // Table test across truck states (ARCH §9.3 passive/active distinction).
+    // Storage = standsInLine (crewless ok); salvage = unitOperational (crew required).
+    const readiness = @import("readiness.zig");
+    const founding_m = @import("founding.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 7771 });
+    defer gs.deinit();
+    _ = try founding_m.foundHq(&gs, "Base", .regional, "galatea");
+    const co = try gs.createForce("Alpha", .company, .none);
+
+    // Helper: add a SVT-1 in a given status and optionally a crewed pilot.
+    const addTruck = struct {
+        fn f(state: *GameState, company: types.ForceId, status: @import("../domain/unit.zig").UnitStatus, crewed: bool) !void {
+            const uid = try state.addUnit("SVT-1");
+            const u = state.units.getPtr(uid).?;
+            u.force = company;
+            u.status = status;
+            if (crewed) {
+                const pid = try state.hirePerson("T", "R", .mekwarrior);
+                u.pilot = pid;
+            }
+        }
+    }.f;
+    // ready, crewed — counts for both storage and salvage.
+    try addTruck(&gs, co, .ready, true);
+    // ready, crewless — counts for storage only.
+    try addTruck(&gs, co, .ready, false);
+    // damaged (ready) — standsInLine, crewless: storage only.
+    try addTruck(&gs, co, .ready, false);
+    // mothballed — not standsInLine: counts neither.
+    try addTruck(&gs, co, .mothballed, false);
+    // in_transit — busy: counts neither.
+    try addTruck(&gs, co, .in_transit, false);
+    // repairing (in_shop) — busy: counts neither.
+    try addTruck(&gs, co, .repairing, false);
+    // destroyed — parked: counts neither.
+    try addTruck(&gs, co, .destroyed, false);
+
+    // 3 standsInLine trucks (2 crewless + 1 crewed); mothballed/in_transit/repairing/destroyed excluded.
+    const counts = companyTruckCounts(&gs, co);
+    try std.testing.expectEqual(@as(u32, 0), counts.cargo); // all are SVT-1 (salvage)
+    try std.testing.expectEqual(@as(u32, 3), counts.salvage); // 3 standsInLine SVT-1s
+
+    // Storage capacity reflects all 3 present trucks.
+    const cap = siteCapacityTons(&gs, .{ .company = co });
+    try std.testing.expectEqual(@as(?u32, 3 * tuning.unit.truck_tons.salvage), cap);
+
+    // Rule-23 asymmetry: a present crewless salvage truck yields storage
+    // but no salvage capability (unitOperational requires a fit crew).
+    var op_count: u32 = 0;
+    var it = gs.units.iterator();
+    while (it.next()) |e| {
+        const u = e.value_ptr;
+        if (gs.companyOf(u.force) == co and std.mem.eql(u8, u.chassis_key, "SVT-1") and readiness.unitOperational(&gs, u)) op_count += 1;
+    }
+    try std.testing.expectEqual(@as(u32, 1), op_count); // only the crewed ready truck
 }

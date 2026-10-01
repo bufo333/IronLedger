@@ -138,9 +138,12 @@ pub fn routeTonsPerWeek(hops: []const Hop) u32 {
 /// (ARCH §9.6): ×2.0 base +0.5 per 30 LY beyond, capped ×4.0, eased by the
 /// planet's industry rating. Expensive but viable — the valve that prevents
 /// a death spiral, itemized on the P&L as 'local_supplies'.
+/// Partial-band rounding: round up (ARCH §9.6, C15 decision D1).
 pub fn localPurchaseMultBp(ly_beyond_ring: u32, planet_industry: u8) types.Bp {
     const l = tuning.logistics;
-    const base: types.Bp = l.local_base_bp + l.local_step_bp * @as(types.Bp, ly_beyond_ring / l.local_step_ly);
+    // Partial band rounds up (D1): 1–30 LY beyond the ring → ×2.5, not ×2.0.
+    const bands = std.math.divCeil(u32, ly_beyond_ring, l.local_step_ly) catch unreachable;
+    const base: types.Bp = l.local_base_bp + l.local_step_bp * @as(types.Bp, bands);
     const eased = base - l.local_industry_ease_bp * @as(types.Bp, planet_industry);
     return std.math.clamp(eased, l.local_base_bp, l.local_max_bp);
 }
@@ -202,8 +205,9 @@ test "throughput is bottlenecked by the weakest hop" {
 }
 
 test "local purchases: expensive but viable, capped, eased by industry" {
-    try std.testing.expectEqual(@as(types.Bp, 20_000), localPurchaseMultBp(10, 0)); // just past the ring: ×2
-    try std.testing.expectEqual(@as(types.Bp, 25_000), localPurchaseMultBp(35, 0)); // one jump beyond: ×2.5
+    // D1: partial band rounds up — 1–30 LY past the ring gives ×2.5, not ×2.0.
+    try std.testing.expectEqual(@as(types.Bp, 25_000), localPurchaseMultBp(10, 0)); // first band (round up): ×2.5
+    try std.testing.expectEqual(@as(types.Bp, 30_000), localPurchaseMultBp(35, 0)); // second band (round up): ×3.0
     try std.testing.expectEqual(@as(types.Bp, 40_000), localPurchaseMultBp(300, 0)); // deep space: capped ×4
     try std.testing.expect(localPurchaseMultBp(65, 3) < localPurchaseMultBp(65, 0)); // industry helps
 }

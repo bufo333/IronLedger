@@ -157,13 +157,16 @@ fn runPolicies(gs: *GameState) !void {
             // Room counts what is already on the road (the shipment check does).
             const free_tons = (sites.siteFreeTons(gs, site) -| field_supply.inboundTons(gs, sp.company)) / @max(1, part_mod.tons(line.key));
             want = @min(want, free_tons);
-            const available = gs.stockCount(.{ .hq = home }, line.key);
+            // Origin selection: prefer the nearest HQ that holds the line,
+            // falling back through partial sources to home (C15a, rule 20).
+            const origin = bestSupplyHq(gs, sp.company, line.key, want, home);
+            const available = gs.stockCount(.{ .hq = origin }, line.key);
             const qty = @min(want, available);
             if (qty == 0) {
                 if (gs.clock.day_index % types.days_per_week == 0) try gs.log(.delivery, .{ .company = sp.company, .hq = home }, "[supply] resupply policy: no {s} at {s} to ship to {s} ({d}t on hand, floor {d}t)", .{ line.key, gs.hqs.getPtr(home).?.name, f.name, on_hand, line.floor });
                 continue;
             }
-            _ = commands.execute(gs, .{ .ship_stock = .{ .part_key = line.key, .quantity = qty, .from = .{ .hq = home }, .to = site } }) catch |err| {
+            _ = commands.execute(gs, .{ .ship_stock = .{ .part_key = line.key, .quantity = qty, .from = .{ .hq = origin }, .to = site } }) catch |err| {
                 if (err == error.OutOfMemory) return error.OutOfMemory;
                 const reason: []const u8 = switch (err) {
                     error.InsufficientStock => "not enough stock at the warehouse",
@@ -408,7 +411,6 @@ fn runSupplyConsumption(gs: *GameState) !void {
         const c = gs.deploymentContract(f.id);
         // Idling with no known world: no market to buy from.
         if (c == null and f.location_planet == null) continue;
-        const beachhead = if (c) |cc| cc.beachhead else false;
         const contract_id: types.ContractId = if (c) |cc| cc.id else .none;
         const site: types.Site = .{ .company = f.id };
 
@@ -420,13 +422,15 @@ fn runSupplyConsumption(gs: *GameState) !void {
         }
 
         // Local purchase valve: price by remoteness, paid from local funds.
-        const mult = if (c) |cc| @import("field_supply.zig").localPriceMultBp(cc) else tuning.finance.field_markup_bp;
+        // Uses live distance so a planted field HQ drops the price to field_markup_bp.
+        const beachhead_now = if (c) |cc| field_supply.beachheadActive(gs, cc) else false;
+        const mult = if (c) |cc| field_supply.localPriceMultBp(gs, cc) else tuning.finance.field_markup_bp;
         const price = types.applyBp(part_mod.cost("provisions") * need, mult);
         if (f.local_funds >= price) {
             try gs.postTreasury(.{ .company = f.id }, .{
                 .day = gs.clock.day_index,
                 .amount = -price,
-                .category = if (beachhead) .local_supplies else .supplies,
+                .category = if (beachhead_now) .local_supplies else .supplies,
                 .company = f.id,
                 .contract = contract_id,
                 .note = "provisions bought locally (stores empty)",
@@ -608,7 +612,7 @@ fn runFinances(gs: *GameState) !void {
             .contract = c.id,
             .note = "monthly contract payment",
         });
-        if (c.beachhead) {
+        if (field_supply.beachheadActive(gs, c)) {
             const hardship = types.applyBp(treasury.companyMonthlyPayroll(gs, c.assigned_company), tuning.finance.hardship_bp); // +15%
             if (hardship > 0) {
                 try gs.postTreasury(.{ .company = c.assigned_company }, .{

@@ -13,25 +13,6 @@ the branch that finds it.
 
 Owner of every entry: the project owner.
 
----
-
-### C15. Routing, truck capacity, beachhead price
-
-- **Rules:** 20, 22, 24.
-- **Why not yet:** Changes gameplay balance. The rounding decision is recorded in `docs/audit-response.md` (A17).
-- **Scope:**
-  - **Routing.** It is a hop-count BFS that ignores capacity (`network.zig:63-144`). The charter fallback has no cap.
-  - **Truck capacity:**
-    - Capacity counts any truck that isn't destroyed (`sites.siteCapacityTons`, `battle.zig:24-33`).
-    - Queries recount trucks with hard-coded 20t and 5t (`queries.zig:1825-1835`).
-    - The support-lance bonus is applied when `units.len > 0` (`queries.zig:940`, `medical.zig:361`).
-  - **Beachhead pricing:**
-    - The distance is the literal 30 (`field_supply.zig:164`).
-    - The Map multiplier text is hard-coded and wrong in ring (`queries.zig:6214-6216`).
-    - The field-HQ recovery that ARCHITECTURE §9.6 describes is not implemented.
-- **Removal:** C15.
-- **Guard:** review. No mechanical check.
-
 ### C17. Focused tests
 
 - **Rules:** 67.

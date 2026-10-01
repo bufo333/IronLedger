@@ -453,7 +453,7 @@ pub fn runWeeklyRest(gs: *GameState) !void {
                 // Garrison duty is nearly home: barracks and a town.
                 // Fatigue recovers at a share of the home rate — the mess
                 // lance stands in for the mess hall — and spirits hold.
-                const mess_lance = if (toe.supportLance(gs, company, .mess)) |l| l.units.items.len > 0 else false;
+                const mess_lance = if (toe.supportLance(gs, company, .mess)) |l| readiness_m.forceOperational(gs, l) else false;
                 const field_decay: u32 = @intCast(types.applyBp(person_mod.fatigueDecayPerWeek(if (mess_lance) 1 else 0), tuning.person.garrison_rest_bp));
                 p.addFatigue(-@as(i32, @intCast(@min(field_decay, 255))));
                 if (p.morale < tuning.person.morale_garrison_lift_below and p.fatigue <= tuning.person.fatigue_grind) p.addMorale(1);

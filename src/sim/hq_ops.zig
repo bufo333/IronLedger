@@ -1752,9 +1752,12 @@ test "one HQ, one company — the second needs a second regional HQ" {
     gs.hqs.values()[0].funds = 10_000_000;
     try gs.addStock(.{ .hq = home }, "armor", 60);
     _ = try commands.execute(&gs, .{ .ship_stock = .{ .part_key = "armor", .quantity = 30, .from = .{ .hq = home }, .to = .{ .hq = fb } } });
-    try std.testing.expectError(commands.Error.ThroughputExceeded, commands.execute(&gs, .{
+    // C15a: when the direct link is saturated, the router falls back to capped charter
+    // (D2: 20t ≤ linkTonsPerWeek(1)=40t), so the shipment now succeeds via charter
+    // rather than returning ThroughputExceeded (old BFS behaviour, A15 regression).
+    _ = try commands.execute(&gs, .{
         .ship_stock = .{ .part_key = "armor", .quantity = 20, .from = .{ .hq = home }, .to = .{ .hq = fb } },
-    }));
+    });
 
     // Transfer a mek Alpha → Bravo: different worlds, so it ships.
     const alpha_lance = gs.force(gs.force(alpha).?.children.items[0]).?;

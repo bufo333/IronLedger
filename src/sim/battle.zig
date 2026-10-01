@@ -10,6 +10,7 @@ const std = @import("std");
 const tuning = @import("../domain/tuning.zig").t;
 const types = @import("../domain/types.zig");
 const autoresolve = @import("../domain/autoresolve.zig");
+const readiness = @import("readiness.zig");
 const contract_mod = @import("../domain/contract.zig");
 const chassis_mod = @import("../domain/chassis.zig");
 const after_action = @import("after_action.zig");
@@ -28,13 +29,14 @@ const lift = @import("lift.zig");
 const held_hulls_m = @import("held_hulls.zig");
 const readiness_m = @import("readiness.zig");
 
-/// Salvage trucks (SVT-1) a company fields, wrecks excepted.
+/// Salvage trucks (SVT-1) a company can work a battlefield: operational
+/// (fit crew, not parked or busy) SVT-1s only (ARCH §9.3 active capability).
 pub fn salvageTrucks(gs: *GameState, company: types.ForceId) i64 {
     var trucks: i64 = 0;
     var it = gs.units.iterator();
     while (it.next()) |entry| {
         const u = entry.value_ptr;
-        if (u.status != .destroyed and std.mem.eql(u8, u.chassis_key, "SVT-1") and gs.companyOf(u.force) == company) trucks += 1;
+        if (readiness.unitOperational(gs, u) and std.mem.eql(u8, u.chassis_key, "SVT-1") and gs.companyOf(u.force) == company) trucks += 1;
     }
     return trucks;
 }

@@ -465,15 +465,16 @@ logistics transport** — each feeds a concrete autoresolve/campaign modifier
 recovery, post-battle salvage yield, supply buffer and the field workshop
 (§9.7).
 
-**C15 target — active support uses operational readiness.** A hull is
-operational when it can take the field and its crew is fit for duty
-(`GameState.unitOperational`); a force is operational when one of its own hulls
-is (`forceOperational`). Support modifiers, recon, air cover, MASH care and
-beds, the battle line and fieldable BV all count by it, so a MASH truck with no
-driver, or one in the shop, helps nobody. Passive storage is a different
-capability: a cargo truck must be physically present and usable, but a
-temporarily empty driver seat does not make its hold disappear. Destroyed,
-mothballed, in-transit, and in-shop trucks provide neither capability.
+A hull is operational when it can take the field and its crew is fit for duty
+(`readiness.unitOperational`); a force is operational when one of its own hulls
+is (`readiness.forceOperational`). Support modifiers, recon, air cover, MASH
+care and beds, the battle line and fieldable BV all count by it, so a MASH
+truck with no driver, or one in the shop, helps nobody. Passive storage is a
+different capability: a cargo truck must be physically present and usable
+(`unit.standsInLine`), but a temporarily empty driver seat does not make its
+hold disappear. Destroyed, mothballed, in-transit, and in-shop trucks provide
+neither capability. `sites.companyTruckCounts` is the single owner of the
+present-and-usable count.
 
 ### 9.4 Facility upgrade paths, bays & the back office
 
@@ -548,26 +549,33 @@ full route (`network.fitsThroughput`) but books nothing — and
 `commitFreight` books the tonnage on the route once the payment has
 cleared, so a refused payment never eats capacity.
 
-**C15 target:** route selection includes the shipment tonnage, excludes
-saturated paths, and then minimizes delivery days, freight cost, and HQ id in
-that order. A capped direct charter is the fallback only when no linked route is
-feasible. Automatic resupply chooses a stocked origin through this same quote:
-prefer an HQ that can fill the line, otherwise the best partial source, rather
-than always drawing from the company's home HQ.
+Route selection enumerates all simple paths, excludes saturated hops, and then
+minimizes delivery days, freight cost, and HQ id in that order
+(`network.routeBetween`). A capped direct charter (capped at level-1 weekly
+throughput, D2) is the fallback only when no linked route is feasible.
+Automatic resupply chooses a stocked origin through this same quote
+(`tick.bestSupplyHq`): prefer an HQ that can fill the line, otherwise the best
+partial source, rather than always drawing from the company's home HQ.
 
 ### 9.6 Out-of-influence operation (expensive but viable)
 
-**C15 target:** a company deployed beyond every current ring suffers, with all
-effects plateauing (no death spiral) and every effect a visible P&L line item:
+A company deployed beyond every current ring suffers, with all effects
+plateauing (no death spiral) and every effect a visible P&L line item:
 
 - **Local supplies valve:** missing supply classes can be bought locally at
-  normal field markup inside current reach. The C15 target outside it is
-  `2.0× + 0.5× per 30 LY band beyond the nearest ring` (cap 4.0×), modified by
-  planet industry rating; C15 decides how a partial band rounds. It remains its
-  own transaction category so the ledger teaches.
-- **Hardship pay:** payroll bonus for remote deployment (own category).
+  normal field markup (×1.5) inside any current ring. Beyond the ring the
+  multiplier is `2.0× + 0.5× per 30 LY band beyond the nearest ring` (cap
+  4.0×), with partial bands rounded up (D1, ARCH §9.6 C15 decision), and eased
+  by the planet's industry rating. It is its own transaction category so the
+  ledger teaches. `field_supply.beachheadActive` gates the penalty: it is false
+  once the contract world falls inside any current ring (including a newly
+  planted field HQ, which has a 15 LY base ring). `field_supply.localPriceMultBp`
+  and `econ/logistics.localPurchaseMultBp` are the single owners.
+- **Hardship pay:** payroll bonus for remote deployment (own category), also
+  gated by `beachheadActive`.
 - **Morale/HR decay** and **training XP slowdown**, recovering once back in
-  a ring (or once a field HQ is planted).
+  a ring (or once a field HQ is planted) — these penalties are not yet
+  implemented; when added they must use the same `beachheadActive` gate.
 - **Logistics:** no link = every shipment is ad-hoc charter at worst-hop
   rates.
 
