@@ -4285,6 +4285,75 @@ test "a garrison contract with arc state and operations round-trips to an identi
     try std.testing.expectEqual(@as(u32, 3), loaded.next_operation_id);
 }
 
+test "arc_finale_key, committed_day, and battle_report.operation round-trip through save/load" {
+    // Rule 47: the three columns added in v39 carry non-default values through
+    // a full save → load cycle without loss (firstStateDifference == "").
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 3901 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    const co = try gs.createForce("Alpha", .company, .none);
+    const cid: types.ContractId = @enumFromInt(1);
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "PER",
+        .planet_key = "caph",
+        .terms = .{ .length_months = 12, .base_pay_month = 100_000 },
+        .status = .active,
+        .assigned_company = co,
+        .arc_key = "fracturing_garrison",
+        .arc_beat = 2,
+        .escalation_clock = 5,
+        .arc_finale_key = "held", // non-default
+    });
+    const c = gs.contracts.getPtr(cid).?;
+    // Operation with non-null committed_day.
+    try c.operations.append(gs.allocator(), .{
+        .id = @enumFromInt(1),
+        .template_key = "repel_probe",
+        .state = .committed,
+        .opened_day = 0,
+        .committed_day = 7, // non-default
+    });
+    gs.next_operation_id = 2;
+    gs.next_contract_id = 2;
+    // Battle report with non-empty operation.
+    try gs.battle_reports.kept.append(gs.allocator(), .{
+        .id = @enumFromInt(1),
+        .day = 5,
+        .contract = cid,
+        .company = co,
+        .kind = "garrison duty",
+        .enemy_key = "PER",
+        .scenario = "",
+        .terrain = "",
+        .weather = "",
+        .outcome = .defeat,
+        .score_delta = -2,
+        .score_after = -2,
+        .command_rights = "independent",
+        .operation = try gs.allocator().dupe(u8, "Repel Probe"), // non-default
+        .conceded = true,
+        .acknowledged = true,
+    });
+    gs.next_battle_id = 2;
+
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+    var diff_buf: [256]u8 = undefined;
+    try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &diff_buf) orelse "");
+
+    // Spot-check each new column.
+    const lc = loaded.contracts.getPtr(cid).?;
+    try std.testing.expectEqualStrings("held", lc.arc_finale_key);
+    try std.testing.expectEqual(@as(?u32, 7), lc.operations.items[0].committed_day);
+    try std.testing.expectEqualStrings("Repel Probe", loaded.battle_reports.kept.items[0].operation);
+}
+
 test "a contract arc_key not in arcs.zon rejects the load as corrupt" {
     try std.testing.expectError(error.CorruptSave, loadArcAfterTampering(
         "UPDATE contract SET arc_key = '__bad_arc__' WHERE arc_key != ''",
@@ -4301,6 +4370,57 @@ test "an operation template_key not in operations.zon rejects the load as corrup
     try std.testing.expectError(error.CorruptSave, loadArcAfterTampering(
         "UPDATE operation SET template_key = '__bad_template__'",
     ));
+}
+
+test "a v38 store migrates to v39 with arc_finale_key, committed_day, and operation defaults" {
+    // Rule 51: forward migration. A v38-shaped store (arc columns present on
+    // contract, operation table exists, battle_report exists — all missing
+    // the three v39 columns) opens cleanly; the new columns take their defaults:
+    // contract.arc_finale_key = '', operation.committed_day = null,
+    // battle_report.operation = ''.
+    const raw = try sqlite.Db.open(":memory:");
+    try raw.exec(
+        \\CREATE TABLE setting (key TEXT PRIMARY KEY, value INTEGER NOT NULL);
+        \\CREATE TABLE campaign (id INTEGER PRIMARY KEY, name TEXT NOT NULL, commander TEXT, day INTEGER NOT NULL, date TEXT NOT NULL, schema_version INTEGER NOT NULL, save_seq INTEGER NOT NULL, player_id INTEGER NOT NULL DEFAULT 0);
+        \\CREATE TABLE meta (cid INTEGER NOT NULL, key TEXT NOT NULL, value INTEGER NOT NULL, PRIMARY KEY (cid, key));
+        \\CREATE TABLE meta_text (cid INTEGER NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (cid, key));
+        \\CREATE TABLE rng_stream (cid INTEGER NOT NULL, stream TEXT NOT NULL, format INTEGER NOT NULL, state BLOB NOT NULL, UNIQUE (cid, stream));
+        \\CREATE TABLE person (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, first TEXT, last TEXT, callsign TEXT, role TEXT, xp INTEGER, status TEXT, fatigue INTEGER, morale INTEGER, recruited_day INTEGER, salary_override INTEGER, assigned_force INTEGER, posted_hq INTEGER, weekly_hours INTEGER, medbay_priority INTEGER, leave_until INTEGER, wound_heal_day INTEGER, training_skill TEXT, training_done INTEGER, admitted INTEGER NOT NULL DEFAULT 0, rank TEXT NOT NULL DEFAULT 'private', rank_pinned INTEGER NOT NULL DEFAULT 0, kills INTEGER NOT NULL DEFAULT 0, kill_bv INTEGER NOT NULL DEFAULT 0, battles INTEGER NOT NULL DEFAULT 0, tours INTEGER NOT NULL DEFAULT 0, outstanding_tours INTEGER NOT NULL DEFAULT 0, edge_spent INTEGER NOT NULL DEFAULT 0, faction TEXT NOT NULL DEFAULT '', shares INTEGER NOT NULL DEFAULT 0, born_day INTEGER, last_raise_day INTEGER, last_award_day INTEGER, departed_day INTEGER, secondary_role TEXT, PRIMARY KEY (cid, id));
+        \\CREATE TABLE rng (cid INTEGER PRIMARY KEY, state BLOB NOT NULL);
+        \\CREATE TABLE contract (cid INTEGER NOT NULL, is_offer INTEGER NOT NULL CHECK (is_offer IN (0,1)), ord INTEGER NOT NULL, id INTEGER, kind TEXT, employer TEXT, enemy TEXT, planet TEXT, status TEXT, company INTEGER, start_day INTEGER, score INTEGER, dist_ly INTEGER, beachhead INTEGER, transit_days INTEGER, arrive_day INTEGER, end_day INTEGER, monthly_net INTEGER, next_battle INTEGER, battles INTEGER, casualties INTEGER, objective TEXT, committed_bv INTEGER, pool INTEGER, pool_remaining INTEGER, vp INTEGER, ineffective_since INTEGER, breach_day INTEGER, length_months INTEGER, base_pay INTEGER, advance_pct INTEGER, signing_bonus INTEGER, transport_pct INTEGER, overhead_pct INTEGER, battle_loss_pct INTEGER, salvage_pct INTEGER, salvage_exchange INTEGER, command_rights TEXT, negotiated INTEGER NOT NULL DEFAULT 0, enemy_lances INTEGER NOT NULL DEFAULT 0, enemy_quality TEXT NOT NULL DEFAULT 'regular', enemy_lance_bv INTEGER NOT NULL DEFAULT 0, enemy_lance_tons INTEGER NOT NULL DEFAULT 0, offer_hq INTEGER NOT NULL DEFAULT 0, orders_day INTEGER, arc_key TEXT NOT NULL DEFAULT '', arc_beat INTEGER NOT NULL DEFAULT 0, escalation_clock INTEGER NOT NULL DEFAULT 0);
+        \\CREATE TABLE operation (cid INTEGER NOT NULL, contract_id INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, template_key TEXT NOT NULL, state TEXT NOT NULL, outcome TEXT NOT NULL, opened_day INTEGER NOT NULL, resolved_day INTEGER);
+        \\CREATE TABLE battle_report (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER, day INTEGER, contract INTEGER, company INTEGER, kind TEXT, enemy_key TEXT, scenario TEXT, terrain TEXT, weather TEXT, outcome TEXT, held_field INTEGER, withdrew INTEGER, roe TEXT, roe_overridden INTEGER, player_power INTEGER, enemy_power INTEGER, conditions_mod INTEGER, close_terrain INTEGER, air_grounded INTEGER, convoy_hit INTEGER, edge_spent_by TEXT, recon_quality INTEGER, avg_fatigue INTEGER, avg_morale INTEGER, hits_taken INTEGER, destroyed INTEGER, wounded INTEGER, kia INTEGER, lost_hulls INTEGER, missing INTEGER, enemy_destroyed_bv INTEGER, kills_credited INTEGER, prisoners INTEGER, battle_loss_comp INTEGER, score_after INTEGER, score_delta INTEGER, morale_delta INTEGER, fatigue_add INTEGER, battle_loss_pct INTEGER, salvage_pct INTEGER, command_rights TEXT, silenced_mounts INTEGER, armor_left INTEGER, salvage_claimed INTEGER, salvage_haulable INTEGER, salvage_cut INTEGER, salvage_cash INTEGER, salvage_items TEXT, conceded INTEGER, acknowledged INTEGER NOT NULL DEFAULT 1, salvage_unclaimed INTEGER NOT NULL DEFAULT 0, UNIQUE (cid, ord));
+        \\INSERT INTO setting VALUES ('schema_version', 38);
+        \\INSERT INTO campaign VALUES (1, 'Fixture', NULL, 0, '3025-01-01', 38, 1, 0);
+        \\INSERT INTO meta VALUES (1, 'day_index', 0);
+        \\INSERT INTO meta VALUES (1, 'year', 3025);
+        \\INSERT INTO meta VALUES (1, 'month', 1);
+        \\INSERT INTO meta VALUES (1, 'day', 1);
+        \\INSERT INTO meta VALUES (1, 'funds', 0);
+        \\INSERT INTO meta VALUES (1, 'reputation', 0);
+        \\INSERT INTO meta VALUES (1, 'difficulty', 1);
+        \\INSERT INTO meta_text VALUES (1, 'outfit_name', 'Fixture');
+        \\INSERT INTO person VALUES (1, 0, 1, 'A', 'B', NULL, 'mekwarrior', 0, 'active', 0, 50, 0, NULL, 0, 0, 40, 0, NULL, NULL, NULL, NULL, 0, 'private', 0, 0, 0, 0, 0, 0, 0, '', 0, NULL, NULL, NULL, NULL, NULL);
+        \\INSERT INTO rng VALUES (1, x'000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff');
+        \\INSERT INTO contract VALUES (1, 0, 0, 1, 'garrison_duty', 'LC', 'PER', 'caph', 'active', 0, 0, 0, 30, 0, 14, 14, 360, 80000, 30, 0, 0, 'duration', 0, 100000, 100000, 0, NULL, NULL, 12, 80000, 25, 0, 0, 0, 0, 0, 0, 'independent', 0, 0, 'regular', 0, 0, 0, NULL, 'fracturing_garrison', 0, 5);
+        \\INSERT INTO operation (cid, contract_id, ord, id, template_key, state, outcome, opened_day) VALUES (1, 1, 0, 1, 'negotiate_terms', 'committed', 'none', 0);
+        \\INSERT INTO battle_report (cid, ord, outcome, roe) VALUES (1, 0, 'defeat', 'standard');
+    );
+    const store = try Store.fromDb(raw);
+    defer store.close();
+    try std.testing.expectEqual(@as(i64, schema_version), store.getSetting("schema_version", 0));
+    var loaded = try store.load(std.testing.allocator, 1);
+    defer loaded.deinit();
+    // contract.arc_finale_key must default to "".
+    try std.testing.expectEqual(@as(usize, 1), loaded.contracts.count());
+    const c = loaded.contracts.values()[0];
+    try std.testing.expectEqualStrings("", c.arc_finale_key);
+    // operation.committed_day must default to null.
+    try std.testing.expectEqual(@as(usize, 1), c.operations.items.len);
+    try std.testing.expectEqual(@as(?u32, null), c.operations.items[0].committed_day);
+    // battle_report.operation must default to "".
+    try std.testing.expectEqual(@as(usize, 1), loaded.battle_reports.kept.items.len);
+    try std.testing.expectEqualStrings("", loaded.battle_reports.kept.items[0].operation);
 }
 
 test "a v37 store migrates to v38 with empty arc fields and no operations" {

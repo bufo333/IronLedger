@@ -198,20 +198,25 @@ pub fn resolveDueOperations(gs: *GameState) !void {
             const due = (op.committed_day orelse continue) + @as(u32, t.expected_days);
             if (gs.clock.day_index < due) continue;
 
-            // Reserve + pre-format before any mutation.
+            // Reserve + pre-format before any mutation (rule 13).
             try gs.reserveLog(1);
             const band = operations.outcomeBand(operations.nonCombatScore(gs, c, t));
             const score_d = bandScoreDelta(band);
             const vp_d = bandVpDelta(band);
             const clock_d = operations.outcomeClockDelta(band);
+            const standing_d = bandStandingDelta(band);
             var date_buf: [10]u8 = undefined;
             const log_text = try std.fmt.allocPrint(gs.allocator(), "{s} [arc] operation resolved: {s} ({s})", .{
                 gs.clock.date.text(&date_buf),
                 t.name,
                 @tagName(band),
             });
+            // Apply standing in the prepare phase so no allocation can fail
+            // after domain mutations begin; the entry is created here if absent
+            // (rules 11-13: prepare must complete before the first mutation).
+            if (standing_d != 0) _ = try gs.adjustStanding(c.employer_key, standing_d);
 
-            // Commit: infallible.
+            // Commit: infallible from here.
             op.state = .resolved;
             op.resolved_day = gs.clock.day_index;
             op.outcome = band;
@@ -222,12 +227,6 @@ pub fn resolveDueOperations(gs: *GameState) !void {
                 c.escalation_clock -= relief;
             } else {
                 c.escalation_clock +|= @as(u16, @intCast(clock_d));
-            }
-            // Standing adjustment: OOM here is exceptional; the entry was created
-            // at contract acceptance so in practice the key already exists.
-            const standing_d = bandStandingDelta(band);
-            if (standing_d != 0) {
-                _ = gs.adjustStanding(c.employer_key, standing_d) catch {}; // best-effort: OOM-only path; standing already tracked at contract start
             }
             gs.event_log.appendAssumeCapacity(.{
                 .day = gs.clock.day_index,
@@ -247,7 +246,7 @@ pub fn resolveDueOperations(gs: *GameState) !void {
 
         const finale = operations.selectFinale(c) orelse continue;
 
-        // Reserve + pre-format before any mutation.
+        // Reserve + pre-format before any mutation (rule 13).
         try gs.reserveLog(1);
         const s_d = finaleScoreDelta(finale.key);
         const vp_d = finaleVpDelta(finale.key);
@@ -257,14 +256,14 @@ pub fn resolveDueOperations(gs: *GameState) !void {
             gs.clock.date.text(&date_buf),
             finale.name,
         });
+        // Apply standing in the prepare phase so no allocation can fail
+        // after domain mutations begin (rules 11-13).
+        if (std_d != 0) _ = try gs.adjustStanding(c.employer_key, std_d);
 
-        // Commit: infallible.
+        // Commit: infallible from here.
         c.arc_finale_key = finale.key;
         c.score += s_d;
         c.victory_points += vp_d;
-        if (std_d != 0) {
-            _ = gs.adjustStanding(c.employer_key, std_d) catch {}; // best-effort: OOM-only path; standing already tracked at contract start
-        }
         gs.event_log.appendAssumeCapacity(.{
             .day = gs.clock.day_index,
             .category = .contract,

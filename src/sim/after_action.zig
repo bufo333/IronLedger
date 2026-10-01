@@ -196,3 +196,29 @@ test "a conceded objective renders one line" {
     try std.testing.expectEqual(@as(usize, 1), lines.len);
     try std.testing.expect(std.mem.endsWith(u8, lines[0], "no combat-effective units — objective conceded"));
 }
+
+test "render: operation name appears in the AAR header when set" {
+    // F3: consumer test — render must include the operation name in the
+    // header line when BattleReport.operation is non-empty (rule 20).
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const ammo = [_]battle_report.AmmoLine{.{ .key = "ammo_lrm", .burned = 0, .left = 0 }};
+    const r: BattleReport = .{
+        .id = @enumFromInt(2),
+        .day = 10,
+        .contract = @enumFromInt(1),
+        .company = @enumFromInt(1),
+        .kind = "garrison duty",
+        .enemy_key = "DC",
+        .scenario = "probe",
+        .terrain = "open",
+        .weather = "clear",
+        .outcome = .defeat,
+        .operation = "Repel Probe",
+        .ammo = &ammo,
+    };
+    const lines = try render(arena.allocator(), &r);
+    // Header line (lines[0]) must contain the operation name.
+    try std.testing.expect(lines.len >= 1);
+    try std.testing.expect(std.mem.indexOf(u8, lines[0], "Repel Probe") != null);
+}

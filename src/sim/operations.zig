@@ -148,12 +148,6 @@ pub fn committedCombatOp(c: *const contract_mod.Contract) ?*operation_mod.Operat
     return null;
 }
 
-/// Iterate available operations on this contract.
-pub fn availableOps(c: *const contract_mod.Contract) []operation_mod.Operation {
-    // Returns the full slice; callers filter by state == .available.
-    return c.operations.items;
-}
-
 /// Instantiate the opening operation(s) onto a pre-commit local contract copy.
 /// `id_start` is the first ID to assign; the caller (commit phase) is
 /// responsible for advancing `gs.next_operation_id` after all fallible steps

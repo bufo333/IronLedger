@@ -1132,14 +1132,52 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
 /// An engagement with nobody to put in the line: the objective is given up
 /// without a shot. It is a defeat on the record: a report that holds the
 /// turn, a lost battle in the stats, and `tuning.battle.score.concede` on
-/// the contract, with victory points at the usual rate.
+/// the contract, with victory points at the usual rate. A committed combat
+/// operation is resolved as failure (rule 7: a failed engagement resolves it).
 fn concede(gs: *GameState, c: *contract_mod.Contract) !void {
     const score_delta = tuning.battle.score.concede;
+
+    // If a combat op was committed, resolve it as failure on the concede path.
+    // Reserve the log slot before any mutation (failure-atomic, rule 17).
+    const committed_op = operations_m.committedCombatOp(c);
+    const op_template_name: []const u8 = if (committed_op) |op|
+        if (operation_mod.findTemplate(op.template_key)) |t| t.name else ""
+    else
+        "";
+    var arc_log_text: []const u8 = "";
+    if (committed_op != null) {
+        try gs.reserveLog(1);
+        var arc_date_buf: [10]u8 = undefined;
+        arc_log_text = try std.fmt.allocPrint(gs.allocator(), "{s} [arc] operation {s}: conceded (failure)", .{
+            gs.clock.date.text(&arc_date_buf),
+            op_template_name,
+        });
+    }
+
+    // Mutations start here (infallible).
     c.score += score_delta;
     c.battles_fought +|= 1;
     gs.stats.battles_lost += 1;
+
+    // Resolve committed combat op (log slot already reserved if needed).
+    if (committed_op) |op| {
+        op.state = .resolved;
+        op.outcome = .failure;
+        op.resolved_day = gs.clock.day_index;
+        const clock_d = operations_m.outcomeClockDelta(.failure);
+        c.escalation_clock +|= @as(u16, @intCast(clock_d));
+        gs.event_log.appendAssumeCapacity(.{
+            .day = gs.clock.day_index,
+            .category = .contract,
+            .company = c.assigned_company,
+            .contract = c.id,
+            .text = arc_log_text,
+        });
+    }
+
     const report: battle_report.BattleReport = .{
         .id = gs.nextBattleId(),
+        .operation = op_template_name,
         .day = gs.clock.day_index,
         .contract = c.id,
         .company = c.assigned_company,
@@ -2300,6 +2338,60 @@ test "a conceded engagement leaves a report that holds the turn and counts as a 
     try std.testing.expectEqual(@as(u32, 1), c.battles_fought);
     try std.testing.expectEqual(tuning.battle.score.concede, c.score);
     try std.testing.expectEqual(tuning.battle.score.concede * tuning.contract.vp_per_score, c.victory_points);
+}
+
+test "committed combat op on the concede path resolves to failure with clock and report" {
+    // F3 consumer test: a committed combat op must be resolved when the
+    // engagement is conceded (no combat-effective units). The op transitions
+    // to .resolved / .failure, the escalation clock rises by
+    // outcomeClockDelta(.failure), and report.operation names the template.
+    const testing = std.testing;
+    var gs = GameState.init(testing.allocator, .{ .seed = 7401 });
+    defer gs.deinit();
+    // Empty company → concede path.
+    const co = try gs.createForce("Ghost", .company, .none);
+    const cid: types.ContractId = @enumFromInt(1);
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+        .status = .active,
+        .assigned_company = co,
+        .arc_key = "fracturing_garrison",
+        .enemy_lances = 2,
+        .enemy_lance_bv = 5000,
+        .escalation_clock = 3,
+    });
+    const c = gs.contracts.getPtr(cid).?;
+    const oid: types.OperationId = @enumFromInt(1);
+    try c.operations.append(gs.allocator(), .{
+        .id = oid,
+        .template_key = "repel_probe",
+        .state = .committed,
+        .opened_day = 0,
+        .committed_day = 0,
+    });
+    const clock_before = c.escalation_clock;
+
+    try resolveEngagement(&gs, c);
+
+    // Op must be resolved as failure.
+    const op = &c.operations.items[0];
+    try testing.expectEqual(operation_mod.OperationState.resolved, op.state);
+    try testing.expectEqual(operation_mod.OutcomeBand.failure, op.outcome);
+    try testing.expect(op.outcome != .none);
+    try testing.expectEqual(@as(?u32, gs.clock.day_index), op.resolved_day);
+
+    // Escalation clock rose by outcomeClockDelta(.failure).
+    const expected_clock: u16 = clock_before + @as(u16, @intCast(operations_m.outcomeClockDelta(.failure)));
+    try testing.expectEqual(expected_clock, c.escalation_clock);
+
+    // Report names the operation.
+    const r = gs.battle_reports.unread() orelse return error.NoReport;
+    try testing.expectEqualStrings("Repel Probe", r.operation);
 }
 
 test "salvageClaimBv: owner used by resolve and the queries preview returns identical claims" {
