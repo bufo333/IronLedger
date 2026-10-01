@@ -24,35 +24,14 @@ D30 into C12, D28 into C7, and D31 into C8. D33 (C18) is now closed.
   unit-bearing names, legible formulas, and the final C20 scope inventory.
   Delete C20.
 
-## Data verification (needs the sourcebooks)
-
-- [ ] DATA-CAMOPS `contract.operationsMultBp`: transcribe the verified CamOps
-  table into a fixture, compare every contract kind, correct only verified
-  mismatches, and cite edition/page. Stop if the table cannot be verified.
-- [ ] DATA-RATING Dragoons rating bands: identify the governing source table,
-  compare every threshold in a fixture, correct only verified mismatches, and
-  cite edition/page. Do not assume a sourcebook.
-
 ## Product completion
 
-These product packages begin only after all compliance, focused-test, and data
-verification work above is complete.
+These product packages begin only after all compliance and focused-test work
+above is complete.
 
-- [ ] P1-design Brigade HQ design approval (P1a): price/duration, permanent
-  staffing/upkeep, capacity/facility effects, eligibility, and one-brigade rule.
-- [ ] P1-brigade (P1b-P1d): regional-to-brigade project, shared rules,
-  persistence, queries, REPL/TUI, and current-behavior docs.
-- [ ] P2-design battle-armor/artillery design approval (P2a).
-- [ ] P2-battle-armor (P2b-P2d): verified domain facts, acquisition/attachment,
-  crewing, readiness, and persistence.
-- [ ] P2-artillery (P2e-P2g): verified domain facts, acquisition/attachment,
-  crewing, readiness, and persistence.
-- [ ] P2-battle-ui (P2h-P2i): both battle effects and REPL/TUI surfaces.
-- [ ] P3-construction (P3a-P3b): editable construction parts and A-F quotes.
-- [ ] P3-variants (P3c): persisted campaign-owned custom chassis.
-- [ ] P3-client (P3d): construction editor and variant lifecycle.
 - [ ] P4 Campaign operations and stories:
-  - [ ] P4a approve the operations-and-stories design and content boundary.
+  - P4a operations-and-stories design and content boundary: approved
+    (`docs/p4-operations-design.md`).
   - [ ] P4b operation content/state foundation.
   - [ ] P4c operations board and garrison/security vertical slice.
   - [ ] P4d mission intent, quote/commit planning, and operation-aware battles.
@@ -66,6 +45,23 @@ verification work above is complete.
 ## Not scheduled
 
 Design ideas, not defects; each needs its design in ROADMAP.md first.
+
+Deferred indefinitely — uncommitted features. Their ROADMAP.md designs stand;
+reschedule only on explicit dispatch.
+
+- P1-design Brigade HQ design approval (P1a): price/duration, permanent
+  staffing/upkeep, capacity/facility effects, eligibility, and one-brigade rule.
+- P1-brigade (P1b-P1d): regional-to-brigade project, shared rules,
+  persistence, queries, REPL/TUI, and current-behavior docs.
+- P2-design battle-armor/artillery design approval (P2a).
+- P2-battle-armor (P2b-P2d): verified domain facts, acquisition/attachment,
+  crewing, readiness, and persistence.
+- P2-artillery (P2e-P2g): verified domain facts, acquisition/attachment,
+  crewing, readiness, and persistence.
+- P2-battle-ui (P2h-P2i): both battle effects and REPL/TUI surfaces.
+- P3-construction (P3a-P3b): editable construction parts and A-F quotes.
+- P3-variants (P3c): persisted campaign-owned custom chassis.
+- P3-client (P3d): construction editor and variant lifecycle.
 
 - A mobile field base as a buyable Repair support lance, adding to the repair
   push beyond the Logistics lance's workshop.
