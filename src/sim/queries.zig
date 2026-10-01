@@ -33,6 +33,8 @@ const refit_m = @import("refit.zig");
 const held_hulls_m = @import("held_hulls.zig");
 const skulls_mod = @import("../domain/skulls.zig");
 const clock_mod = @import("../domain/clock.zig");
+const operation_mod = @import("../domain/operation.zig");
+const operations_m = @import("operations.zig");
 
 const Alloc = std.mem.Allocator;
 
@@ -6772,4 +6774,109 @@ test "seatPlanetKey returns the seat's planet and null before any HQ (C10-E1)" {
     // sitePlanetKey(.outfit) agrees.
     const sites_m = @import("sites.zig");
     try std.testing.expectEqualStrings(hq_planet, sites_m.sitePlanetKey(&gs, .outfit).?);
+}
+
+// ---- Operations board query (P4c) ----------------------------------------
+
+pub const OperationRow = struct {
+    id: types.OperationId,
+    name: []const u8,
+    objective: []const u8,
+    combat: bool,
+    state: operation_mod.OperationState,
+    expected_days: u16,
+    decline_note: []const u8,
+    outcome: operation_mod.OutcomeBand,
+};
+
+pub const Operations = struct {
+    briefing: []const u8,
+    rows: []OperationRow,
+};
+
+/// Return the operations board for an active arc contract.
+/// Caller owns the result (arena-friendly).
+pub fn contractOperations(alloc: Alloc, gs: *const GameState, contract_id: types.ContractId) !Operations {
+    const c = gs.contracts.getPtr(contract_id) orelse return Operations{ .briefing = "", .rows = &.{} };
+    if (c.arc_key.len == 0) return Operations{ .briefing = "", .rows = &.{} };
+    const a = @import("../domain/arc.zig").find(c.arc_key) orelse return Operations{ .briefing = "", .rows = &.{} };
+
+    // Briefing: current beat's name + any active finale key.
+    const briefing: []const u8 = if (c.arc_beat < a.beats.len) blk: {
+        const beat = a.beats[c.arc_beat];
+        const finale_suffix = if (c.arc_finale_key.len > 0)
+            try std.fmt.allocPrint(alloc, " (arc resolved: {s})", .{c.arc_finale_key})
+        else
+            @as([]const u8, "");
+        break :blk try std.fmt.allocPrint(alloc, "{s}{s}", .{ beat.name, finale_suffix });
+    } else "";
+
+    var rows: std.ArrayListUnmanaged(OperationRow) = .empty;
+    for (c.operations.items) |*op| {
+        const t = operation_mod.findTemplate(op.template_key) orelse continue;
+        try rows.append(alloc, .{
+            .id = op.id,
+            .name = t.name,
+            .objective = t.objective,
+            .combat = t.combat,
+            .state = op.state,
+            .expected_days = t.expected_days,
+            .decline_note = t.decline_note,
+            .outcome = op.outcome,
+        });
+    }
+    return Operations{ .briefing = briefing, .rows = try rows.toOwnedSlice(alloc) };
+}
+
+test "contractOperations: empty for non-arc contract" {
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const cid: types.ContractId = @enumFromInt(1);
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 6, .base_pay_month = 100_000 },
+        .status = .active,
+        .arc_key = "", // no arc
+    });
+    const ops = try contractOperations(arena.allocator(), &gs, cid);
+    try std.testing.expectEqualStrings("", ops.briefing);
+    try std.testing.expectEqual(@as(usize, 0), ops.rows.len);
+}
+
+test "contractOperations: returns rows for arc contract" {
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const cid: types.ContractId = @enumFromInt(1);
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+        .status = .active,
+        .arc_key = "fracturing_garrison",
+    });
+    const c = gs.contracts.getPtr(cid).?;
+    try c.operations.append(gs.allocator(), .{
+        .id = @enumFromInt(1),
+        .template_key = "negotiate_terms",
+        .state = .available,
+        .opened_day = 0,
+    });
+
+    const ops = try contractOperations(arena.allocator(), &gs, cid);
+    try std.testing.expect(ops.briefing.len > 0);
+    try std.testing.expectEqual(@as(usize, 1), ops.rows.len);
+    try std.testing.expectEqual(operation_mod.OperationState.available, ops.rows[0].state);
 }

@@ -34,7 +34,7 @@ pub fn render(alloc: std.mem.Allocator, r: *const BattleReport) ![]const []const
         return out.toOwnedSlice(alloc);
     }
 
-    try out.append(alloc, try std.fmt.allocPrint(alloc, "[AAR] {s} vs {s} — {s} on {s}, {s}: {s} — power {d} vs {d} (recon {d}, fatigue {d}, morale {d}{s}{s}{s}){s}{s}{s}", .{
+    try out.append(alloc, try std.fmt.allocPrint(alloc, "[AAR] {s} vs {s} — {s} on {s}, {s}: {s} — power {d} vs {d} (recon {d}, fatigue {d}, morale {d}{s}{s}{s}){s}{s}{s}{s}", .{
         r.kind,                                                       r.enemy_key,                                       r.scenario,
         r.terrain,                                                    r.weather,                                         @tagName(r.outcome),
         r.player_power,                                               r.enemy_power,                                     r.recon_quality,
@@ -43,6 +43,7 @@ pub fn render(alloc: std.mem.Allocator, r: *const BattleReport) ![]const []const
         if (r.convoy_hit) " · the convoy was hit — support train damaged" else "",
         if (r.roe == .standard) "" else try std.fmt.allocPrint(alloc, " · ROE {s}{s}{s}", .{ @tagName(r.roe), if (r.roe_overridden) " (integrated command)" else "", if (r.withdrew) " — withdrew from a draw, field given up" else "" }),
         if (r.edge_spent_by.len > 0) try std.fmt.allocPrint(alloc, " · {s} spent Edge to re-roll a lost engagement", .{r.edge_spent_by}) else "",
+        if (r.operation.len > 0) try std.fmt.allocPrint(alloc, " · operation: {s}", .{r.operation}) else "",
     }));
 
     try out.append(alloc, try std.fmt.allocPrint(alloc, "[AAR]   losses: {d} hit / {d} destroyed, {d} wounded, {d} KIA | enemy losses {d} BV ≈ {d} kill{s} credited{s} | salvage {d} BV claimed | comp {d} | score {d}", .{

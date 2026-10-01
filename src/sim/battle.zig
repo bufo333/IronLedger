@@ -27,6 +27,8 @@ const GameState = @import("state.zig").GameState;
 const founding = @import("founding.zig");
 const lift = @import("lift.zig");
 const held_hulls_m = @import("held_hulls.zig");
+const operations_m = @import("operations.zig");
+const operation_mod = @import("../domain/operation.zig");
 const readiness_m = @import("readiness.zig");
 
 /// Salvage trucks (SVT-1) a company can work a battlefield: operational
@@ -986,6 +988,27 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     const convoy_hit = after.convoy_hit;
     const kills_credited = after.kills_credited;
 
+    // Operation binding: if a combat operation was committed, associate it
+    // with this engagement. Reserve the extra arc result log line now
+    // (failure-atomic: reserve before any mutation, commit infallibly).
+    // battle.zig MUST NOT import operation_control.zig (rule 5).
+    const committed_op = operations_m.committedCombatOp(c);
+    const op_template_name: []const u8 = if (committed_op) |op|
+        if (operation_mod.findTemplate(op.template_key)) |t| t.name else ""
+    else
+        "";
+    var arc_log_text: []const u8 = "";
+    if (committed_op != null) {
+        try gs.reserveLog(1);
+        var arc_date_buf: [10]u8 = undefined;
+        const band = operations_m.combatBand(outcome);
+        arc_log_text = try std.fmt.allocPrint(gs.allocator(), "{s} [arc] combat operation resolved: {s} ({s})", .{
+            gs.clock.date.text(&arc_date_buf),
+            op_template_name,
+            @tagName(band),
+        });
+    }
+
     // Everything this engagement did, as fields. The AAR is
     // rendered from it, so the record and the narrative cannot drift.
     var ammo_lines: std.ArrayListUnmanaged(battle_report.AmmoLine) = .empty;
@@ -996,6 +1019,7 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     });
     const report: battle_report.BattleReport = .{
         .id = gs.nextBattleId(),
+        .operation = op_template_name,
         .day = gs.clock.day_index,
         .contract = c.id,
         .company = c.assigned_company,
@@ -1065,6 +1089,28 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     // Objectives: the pool shrinks, VP accrue, and a broken pool
     // completes the contract.
     try @import("contract_control.zig").recordBattle(gs, c, enemy_destroyed_bv, score_delta);
+    // Arc operation binding: transition the committed combat op and log result.
+    // The log slot was reserved above; appendAssumeCapacity is infallible.
+    if (committed_op) |op| {
+        const band = operations_m.combatBand(outcome);
+        const clock_d = operations_m.outcomeClockDelta(band);
+        op.state = .resolved;
+        op.outcome = band;
+        op.resolved_day = gs.clock.day_index;
+        if (clock_d < 0) {
+            const relief: u16 = @intCast(@min(@as(i32, c.escalation_clock), -clock_d));
+            c.escalation_clock -= relief;
+        } else {
+            c.escalation_clock +|= @as(u16, @intCast(clock_d));
+        }
+        gs.event_log.appendAssumeCapacity(.{
+            .day = gs.clock.day_index,
+            .category = .contract,
+            .company = c.assigned_company,
+            .contract = c.id,
+            .text = arc_log_text,
+        });
+    }
     // The tempo is the commander's to set — asked only after the
     // field is held, and only once `recordBattle` has had its say about
     // whether there is a contract left to fight on.

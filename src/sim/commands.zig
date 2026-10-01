@@ -28,6 +28,7 @@ const hq_mod = @import("../domain/hq.zig");
 const contract_mod = @import("../domain/contract.zig");
 const network = @import("network.zig");
 const contract_control = @import("contract_control.zig");
+const operation_control = @import("operation_control.zig");
 const lift_mod = @import("lift.zig");
 const meklab = @import("../domain/meklab.zig");
 const force_mod = @import("../domain/force.zig");
@@ -278,6 +279,10 @@ pub const Command = union(enum) {
     /// Bring an idle company home; refused under contract (the breach
     /// recall is `recall_company`).
     recall_idle: types.ForceId,
+    /// Commit an available operation on an active arc contract.
+    commit_operation: struct { contract: types.ContractId, operation: types.OperationId },
+    /// Decline an available operation on an active arc contract.
+    decline_operation: struct { contract: types.ContractId, operation: types.OperationId },
 };
 
 pub const Error = error{
@@ -417,6 +422,14 @@ pub const Error = error{
     LoanTermTooLong,
     /// `fabricate`: quantity exceeds the per-command maximum (tuning.market.fab_max_qty).
     TooManyFabricated,
+    /// No operation with that id on the contract.
+    UnknownOperation,
+    /// The operation is not in the `available` state.
+    OperationUnavailable,
+    /// A combat operation requires an opposition force on this contract.
+    OperationNoOpposition,
+    /// A combat operation is already committed on this contract.
+    OperationBusy,
 } || std.mem.Allocator.Error;
 
 pub const Result = struct {
@@ -527,6 +540,8 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
         .adjust_shares_pct => |delta| return treasury.execAdjustSharesPct(gs, delta),
         .toggle_auto_admit => return medical_mod.execToggleAutoAdmit(gs),
         .recall_idle => |company| return toe.execRecallIdle(gs, company),
+        .commit_operation => |a| return operation_control.execCommitOperation(gs, a),
+        .decline_operation => |a| return operation_control.execDeclineOperation(gs, a),
         .autostaff => |hq_id| return hq_ops.execAutostaff(gs, hq_id),
         .transfer_person => |t| return personnel.execTransferPerson(gs, t),
         .rename_outfit => |name| return toe.execRenameOutfit(gs, name),

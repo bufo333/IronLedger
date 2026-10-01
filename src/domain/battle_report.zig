@@ -189,6 +189,8 @@ pub const BattleReport = struct {
     armor_left: u32 = 0,
     salvage: SalvageManifest = .{},
 
+    /// The operation that produced this engagement (template name), or "".
+    operation: []const u8 = "",
     /// No combat-effective units: the objective was conceded without a shot.
     conceded: bool = false,
     /// The commander has read it. An unread report holds the turn:

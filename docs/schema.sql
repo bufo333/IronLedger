@@ -509,6 +509,8 @@ CREATE TABLE contract (
     arc_key         TEXT    NOT NULL DEFAULT '',     -- arc archetype key drawn at acceptance; empty = no arc
     arc_beat        INTEGER NOT NULL DEFAULT 0,      -- current beat index into the arc's beats sequence
     escalation_clock INTEGER NOT NULL DEFAULT 0,     -- accumulated escalation ticks since acceptance
+    -- P4c
+    arc_finale_key  TEXT    NOT NULL DEFAULT '',     -- which finale was selected; empty until the terminal beat resolves
     FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 
@@ -525,6 +527,7 @@ CREATE TABLE operation (
     outcome         TEXT    NOT NULL,                -- domain/operation.zig OutcomeBand
     opened_day      INTEGER NOT NULL,                -- day_index when instantiated
     resolved_day    INTEGER,                         -- day_index when resolved; NULL = unresolved
+    committed_day   INTEGER,                         -- P4c: day_index when committed; NULL = not yet committed
     FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 
@@ -759,6 +762,7 @@ CREATE TABLE battle_report (
     conceded        INTEGER,                         -- bool: no combat-effective units, objective conceded without a shot
     acknowledged    INTEGER NOT NULL DEFAULT 1 CHECK (acknowledged IN (0,1)),   -- bool: the player has read it
     salvage_unclaimed INTEGER NOT NULL DEFAULT 0,    -- BV of the haul still to be divided; 0 once taken
+    operation       TEXT    NOT NULL DEFAULT '',     -- P4c: operation template name that triggered this engagement; empty = no arc op
     UNIQUE (cid, ord),
     FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );

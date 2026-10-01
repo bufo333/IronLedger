@@ -17,6 +17,7 @@ pub const OperationState = enum {
     escalation,
     finale,
     aftermath,
+    declined,
 };
 
 /// Resolution outcome bands, from worst to best. `none` = not yet resolved.
@@ -60,6 +61,8 @@ pub const Operation = struct {
     outcome: OutcomeBand = .none,
     opened_day: u32,
     resolved_day: ?u32 = null,
+    /// Day the operation was committed (state → .committed); null until then.
+    committed_day: ?u32 = null,
 };
 
 /// The template with this key, or null.

@@ -524,6 +524,18 @@ fn parseVerb(verb: []const u8, tokens: *std.mem.TokenIterator(u8, .scalar)) Pars
         if (site != .company) return error.BadSite;
         return .{ .recall_idle = site.company };
     }
+    if (eq(u8, verb, "commit")) {
+        // commit <contract-id> <operation-id>
+        const cid: types.ContractId = @enumFromInt(try num(u32, tokens.next()));
+        const oid: types.OperationId = @enumFromInt(try num(u32, tokens.next()));
+        return .{ .commit_operation = .{ .contract = cid, .operation = oid } };
+    }
+    if (eq(u8, verb, "decline")) {
+        // decline <contract-id> <operation-id>
+        const cid: types.ContractId = @enumFromInt(try num(u32, tokens.next()));
+        const oid: types.OperationId = @enumFromInt(try num(u32, tokens.next()));
+        return .{ .decline_operation = .{ .contract = cid, .operation = oid } };
+    }
     if (eq(u8, verb, "refit")) {
         const unit: types.UnitId = @enumFromInt(try num(u32, tokens.next()));
         const op = try need(tokens.next());
@@ -663,6 +675,10 @@ pub fn errorText(err: anyerror) []const u8 {
         error.AlreadyPosted => "already posted to that HQ",
         error.LoanTermTooLong => "loan term exceeds the maximum — the longest term is 60 months (Ledger, L)",
         error.TooManyFabricated => "fabricate quantity exceeds the per-command limit of 20 — split into smaller batches",
+        error.UnknownOperation => "no operation with that id on the contract — `operations <contract-id>` lists them.",
+        error.OperationUnavailable => "that operation is not available — it may already be committed, declined, or resolved.",
+        error.OperationNoOpposition => "committing a combat operation requires an opposition force on this contract.",
+        error.OperationBusy => "a combat operation is already committed on this contract — one at a time.",
         else => "an unexpected internal error",
     };
 }
@@ -743,6 +759,8 @@ pub const verbs = [_][]const u8{
     "confirm",
     "rush",
     "recall",
+    "commit",
+    "decline",
     "found",
     "link",
     "assignco",
@@ -824,6 +842,8 @@ pub fn usage(verb: []const u8) ?[]const u8 {
         .{ "confirm", "confirm <contract id>   (battle orders given; see `briefing <contract id>`)" },
         .{ "rush", "rush <contract id>   (emergency resupply on the contract world before contact)" },
         .{ "recall", "recall co:N" },
+        .{ "commit", "commit <contract-id> <operation-id>   (commit an available operation)" },
+        .{ "decline", "decline <contract-id> <operation-id>   (decline an available operation)" },
         .{ "found", "found <planet key> <name>" },
         .{ "link", "link hq:A hq:B [level 1-3]" },
         .{ "assignco", "assignco co:N hq:M" },

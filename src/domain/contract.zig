@@ -278,6 +278,8 @@ pub const Contract = struct {
     arc_beat: u8 = 0,
     /// Accumulated escalation pressure (deterministic daily accrual). // TUNE
     escalation_clock: u16 = 0,
+    /// The finale key the arc resolved to; "" until the terminal beat resolves.
+    arc_finale_key: []const u8 = "",
     /// Instantiated operations for this contract, in creation order.
     operations: std.ArrayListUnmanaged(operation.Operation) = .empty,
 

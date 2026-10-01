@@ -74,13 +74,84 @@ pub fn escalationStep(c: *const contract_mod.Contract) u16 {
 }
 
 /// Rule owner: the finale selected from the arc's options given the current
-/// escalation clock. Stub in P4b: returns the finale with min_clock == 0
-/// (the unconditional fallback). Full selection (highest eligible min_clock)
-/// is P4h.
+/// escalation clock. Selects the eligible finale with the highest min_clock
+/// (i.e. the most dramatic outcome the clock earned); falls back to min_clock==0.
+/// P4b stub (returns min_clock==0 only) is replaced here (P4c).
 pub fn selectFinale(c: *const contract_mod.Contract) ?*const arc_mod.Finale {
     const a = arc_mod.find(c.arc_key) orelse return null;
-    for (&a.finales) |*f| if (f.min_clock == 0) return f;
+    // Walk the finales; keep the one with the highest min_clock that is ≤ the clock.
+    var best: ?*const arc_mod.Finale = null;
+    for (0..a.finales.len) |i| {
+        const f = &a.finales[i];
+        if (f.min_clock == 0) {
+            if (best == null) best = f; // fallback
+        } else if (f.min_clock <= c.escalation_clock) {
+            if (best == null or f.min_clock > best.?.min_clock) best = f;
+        }
+    }
+    return best;
+}
+
+/// Rule owner: map an engagement outcome to an OutcomeBand (pure, no roll).
+/// decisive_victory/victory → success; draw → partial; defeat → setback; rout → failure.
+pub fn combatBand(outcome: @import("../domain/autoresolve.zig").Outcome) operation_mod.OutcomeBand {
+    return switch (outcome) {
+        .decisive_victory => .decisive, // TUNE
+        .victory => .success, // TUNE
+        .draw => .partial, // TUNE
+        .defeat => .setback, // TUNE
+        .rout => .failure, // TUNE
+    };
+}
+
+/// Rule owner: deterministic non-combat resolution score for one operation.
+/// Inputs: base + command_rights term + employer_standing term (all // TUNE).
+/// Pure; no RNG (design §6 P4c: non-combat is deterministic).
+pub fn nonCombatScore(gs: *GameState, c: *const contract_mod.Contract, t: *const operation_mod.OperationTemplate) i32 {
+    _ = t;
+    const base: i32 = 8; // TUNE: default non-combat outcome
+    const rights_bonus: i32 = @divTrunc(c.terms.command_rights.gapDelta() * -1, 2); // TUNE: independent rights help negotiation
+    const standing_bonus: i32 = @divTrunc(gs.standing(c.employer_key), 20); // TUNE: standing/20 bonus
+    return base + rights_bonus + standing_bonus;
+}
+
+/// Rule owner: how the escalation clock moves after a resolved operation.
+/// Relief (negative) for success/decisive; pressure (positive) for failure/setback/partial;
+/// neutral for none. // TUNE
+pub fn outcomeClockDelta(band: operation_mod.OutcomeBand) i32 {
+    return switch (band) {
+        .decisive => -6, // TUNE
+        .success => -3, // TUNE
+        .partial => 0, // TUNE
+        .setback => 4, // TUNE
+        .failure => 8, // TUNE
+        .none => 0,
+    };
+}
+
+/// Rule owner: clock pressure applied when a player declines an operation.
+/// Promotes the "pressure_increase" decline_note label to a typed tuned effect.
+pub fn declineClockDelta(t: *const operation_mod.OperationTemplate) u16 {
+    const pressure_increase_note = "pressure_increase";
+    const base: u16 = 3; // TUNE: default decline clock bump
+    const high: u16 = 6; // TUNE: named "pressure_increase" bump
+    return if (std.mem.eql(u8, t.decline_note, pressure_increase_note)) high else base;
+}
+
+/// Find the first committed combat operation on this contract, if any.
+pub fn committedCombatOp(c: *const contract_mod.Contract) ?*operation_mod.Operation {
+    for (c.operations.items) |*op| {
+        if (op.state != .committed) continue;
+        const t = operation_mod.findTemplate(op.template_key) orelse continue;
+        if (t.combat) return op;
+    }
     return null;
+}
+
+/// Iterate available operations on this contract.
+pub fn availableOps(c: *const contract_mod.Contract) []operation_mod.Operation {
+    // Returns the full slice; callers filter by state == .available.
+    return c.operations.items;
 }
 
 /// Instantiate the opening operation(s) onto a pre-commit local contract copy.
@@ -445,6 +516,78 @@ test "instantiateOpening: caller owns the id counter increment" {
     // Simulated commit: the caller advances the counter.
     gs.next_operation_id += @as(u32, @intCast(c.operations.items.len));
     try testing.expectEqual(id_start + @as(u32, @intCast(a.opening.len)), gs.next_operation_id);
+}
+
+test "combatBand: maps engagement outcome to OutcomeBand" {
+    const testing = std.testing;
+    try testing.expectEqual(operation_mod.OutcomeBand.decisive, combatBand(.decisive_victory));
+    try testing.expectEqual(operation_mod.OutcomeBand.success, combatBand(.victory));
+    try testing.expectEqual(operation_mod.OutcomeBand.partial, combatBand(.draw));
+    try testing.expectEqual(operation_mod.OutcomeBand.setback, combatBand(.defeat));
+    try testing.expectEqual(operation_mod.OutcomeBand.failure, combatBand(.rout));
+}
+
+test "outcomeClockDelta: success/decisive relieve, failure/setback pressure, partial neutral" {
+    const testing = std.testing;
+    try testing.expect(outcomeClockDelta(.decisive) < 0);
+    try testing.expect(outcomeClockDelta(.success) < 0);
+    try testing.expectEqual(@as(i32, 0), outcomeClockDelta(.partial));
+    try testing.expect(outcomeClockDelta(.setback) > 0);
+    try testing.expect(outcomeClockDelta(.failure) > 0);
+    try testing.expect(outcomeClockDelta(.failure) >= outcomeClockDelta(.setback));
+}
+
+test "declineClockDelta: pressure_increase note > 0, others > 0 too" {
+    const testing = std.testing;
+    const tmpl = operation_mod.findTemplate("negotiate_terms").?; // pressure_increase
+    const delta = declineClockDelta(tmpl);
+    try testing.expect(delta > 0);
+    // repel_probe also has pressure_increase; same result.
+    const repel = operation_mod.findTemplate("repel_probe").?;
+    try testing.expect(declineClockDelta(repel) > 0);
+}
+
+test "selectFinale: below min_clock threshold returns held (min_clock==0); at threshold returns fell" {
+    const testing = std.testing;
+    const a = arc_mod.find("fracturing_garrison").?;
+    // Identify the finales: one with min_clock 0 (held), one with min_clock 40 (fell).
+    var held_key: []const u8 = "";
+    var fell_key: []const u8 = "";
+    var fell_min: u16 = 0;
+    for (a.finales) |f| {
+        if (f.min_clock == 0) held_key = f.key;
+        if (f.min_clock > 0) {
+            fell_key = f.key;
+            fell_min = f.min_clock;
+        }
+    }
+    try testing.expect(held_key.len > 0 and fell_key.len > 0);
+
+    var c_low: contract_mod.Contract = .{
+        .id = @enumFromInt(1),
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+        .arc_key = "fracturing_garrison",
+        .escalation_clock = fell_min - 1, // below the threshold
+    };
+    const f_low = selectFinale(&c_low).?;
+    try testing.expectEqualStrings(held_key, f_low.key);
+
+    var c_high: contract_mod.Contract = .{
+        .id = @enumFromInt(2),
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+        .arc_key = "fracturing_garrison",
+        .escalation_clock = fell_min, // exactly at the threshold
+    };
+    const f_high = selectFinale(&c_high).?;
+    try testing.expectEqualStrings(fell_key, f_high.key);
 }
 
 test "advanceClocks: failure-atomic under injected OOM at log reservation" {

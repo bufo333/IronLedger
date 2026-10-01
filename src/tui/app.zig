@@ -130,6 +130,8 @@ const Modal = union(enum) {
     summary,
     /// Browse the soundtracks and tracks; pick what plays.
     music,
+    /// Pick commit/decline for an arc-contract operation.
+    operation_pick: types.ContractId,
 };
 
 /// A yes/no over one command. `id` is the subject the kind names.
@@ -1338,7 +1340,7 @@ pub const App = struct {
         const al = self.a();
         switch (self.modal) {
             .none => {},
-            .help, .decision, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .seat, .emblem, .hull, .contract_log, .log_entry, .battle_list, .record => try self.drawList(al),
+            .help, .decision, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .seat, .emblem, .hull, .contract_log, .log_entry, .battle_list, .record, .operation_pick => try self.drawList(al),
             .after_action => |id| try self.drawAfterAction(al, id),
             .end_turn => {
                 const g = self.state();
@@ -3046,6 +3048,25 @@ pub const App = struct {
                     .max_h = full_h,
                 };
             },
+            .operation_pick => |cid| {
+                const ops = try q.contractOperations(al, self.state(), cid);
+                var rows: std.ArrayListUnmanaged([]const u8) = .empty;
+                for (ops.rows) |r| {
+                    const state_tag = @tagName(r.state);
+                    const combat_tag: []const u8 = if (r.combat) "combat" else "non-combat";
+                    try rows.append(al, try std.fmt.allocPrint(al, "{s}  {s}  {s}  {d}d  {s}", .{ r.name, r.objective, combat_tag, r.expected_days, state_tag }));
+                }
+                const hint: []const u8 = if (ops.briefing.len > 0) ops.briefing else "(no arc)";
+                return .{
+                    .title = try listTitle(al, try std.fmt.allocPrint(al, "OPERATIONS · [{d}]", .{@intFromEnum(cid)}), "Enter commit · x decline", "cancel", false),
+                    .head = try al.dupe([]const u8, &.{ hint, "" }),
+                    .rows = rows.items,
+                    .n = ops.rows.len,
+                    .empty = "{d}no operations on this contract{/}",
+                    .w = layout.modal.picker_w,
+                    .max_h = full_h,
+                };
+            },
             else => unreachable,
         }
     }
@@ -3301,6 +3322,13 @@ pub const App = struct {
                 const lift = try q.liftText(al, self.state(), c.company);
                 _ = try self.execSay(.{ .accept_contract = .{ .offer = offer_id, .company = c.company } }, .good, "accepted — {s} is on its way, {d} days out{s}{s}", .{ try q.forceName(self.a(), self.state(), c.company), c.transit_days, if (lift.len > 0) " · " else "", lift });
             },
+            .operation_pick => |cid| {
+                const ops = try q.contractOperations(al, self.state(), cid);
+                if (ops.rows.len == 0) return;
+                const row = ops.rows[@min(self.modal_cursor, ops.rows.len - 1)];
+                self.modal = .none;
+                _ = try self.execSay(.{ .commit_operation = .{ .contract = cid, .operation = row.id } }, .good, "committed operation: {s}", .{row.name});
+            },
             .lance_pick => |uid| {
                 const lances = try self.lanceChoices(uid);
                 if (lances.len == 0) return;
@@ -3440,6 +3468,18 @@ pub const App = struct {
                     .bottom => self.modal_cursor = std.math.maxInt(usize) / 2,
                     .close => self.modal = .none,
                 }
+            },
+            .operation_pick => |cid| {
+                // `x` declines the highlighted operation.
+                if (key != .char or key.char != 'x') return false;
+                const al = self.a();
+                const ops = try q.contractOperations(al, self.state(), cid);
+                if (ops.rows.len == 0) return true;
+                const idx = @min(self.modal_cursor, ops.rows.len - 1);
+                const row = ops.rows[idx];
+                _ = try self.execSay(.{ .decline_operation = .{ .contract = cid, .operation = row.id } }, .amber, "declined operation: {s}", .{row.name});
+                self.modal = .none;
+                return true;
             },
             else => return false,
         }
@@ -3614,7 +3654,7 @@ pub const App = struct {
     fn handleModalKey(self: *App, key: Key) !void {
         switch (self.modal) {
             .none => {},
-            .help, .decision, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .seat, .emblem, .hull, .contract_log, .log_entry, .battle_list, .record => try self.listKey(key),
+            .help, .decision, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .seat, .emblem, .hull, .contract_log, .log_entry, .battle_list, .record, .operation_pick => try self.listKey(key),
             .after_action => |id| {
                 const hit = keys.lookup(AfterActionAction, &after_action_bindings, 0, key) orelse return;
                 switch (hit.action) {

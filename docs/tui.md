@@ -225,6 +225,7 @@ titles and the help modal come from the same tables.
 | `c` | active | close out the contract under the cursor |
 | `R` | active | recall the company (under contract: a breach, confirmed first) |
 | `Enter` | history | the closed contract's whole log, full screen |
+| `g` | active | open the arc operations board for the active contract (commit or decline) |
 
 ### F5 Ledger
 
@@ -526,6 +527,18 @@ titles and the help modal come from the same tables.
 | `Esc` | cancel |
 
 <!-- /keys -->
+
+#### Operations board (P4c)
+
+Opened with `g` in the active pane when the contract has an arc.
+Shows the arc's current beat briefing and all instantiated operations.
+
+| Key | Does |
+|---|---|
+| `↑ ↓` | move cursor |
+| `Enter` | commit the highlighted operation (combat: queues the next engagement; non-combat: resolves after `expected_days`) |
+| `x` | decline the highlighted operation (raises the escalation clock by the operation's `decline_note` pressure) |
+| `Esc` | close without acting |
 
 Money keys: Ledger `L` → `take_loan`, `R` → `repay_loan`; Forces `$` →
 `sell_unit`, `X` → `disband_company`; HQ `$` → `sell_hq`. Turn rules the

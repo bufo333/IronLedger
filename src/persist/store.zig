@@ -36,7 +36,7 @@ const held_hulls_m = @import("../sim/held_hulls.zig");
 const arc_mod = @import("../domain/arc.zig");
 const operation_mod = @import("../domain/operation.zig");
 
-pub const schema_version = 38;
+pub const schema_version = 39;
 
 const ddl =
     \\CREATE TABLE IF NOT EXISTS player (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_seq INTEGER NOT NULL);
@@ -61,8 +61,8 @@ const ddl =
     \\CREATE TABLE IF NOT EXISTS hq (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, name TEXT, tier TEXT, planet TEXT, staff_assigned INTEGER, upkeep INTEGER, funds INTEGER, PRIMARY KEY (cid, id), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS hq_facility (cid INTEGER NOT NULL, hq_id INTEGER NOT NULL, ord INTEGER NOT NULL, kind TEXT, level INTEGER, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, hq_id) REFERENCES hq(cid, id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS hq_project (cid INTEGER NOT NULL, hq_id INTEGER NOT NULL, ord INTEGER NOT NULL, kind TEXT, facility TEXT, target_level INTEGER, started INTEGER, paperwork_done INTEGER, construction_done INTEGER, cost INTEGER, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, hq_id) REFERENCES hq(cid, id) DEFERRABLE INITIALLY DEFERRED);
-    \\CREATE TABLE IF NOT EXISTS contract (cid INTEGER NOT NULL, is_offer INTEGER NOT NULL CHECK (is_offer IN (0,1)), ord INTEGER NOT NULL, id INTEGER, kind TEXT, employer TEXT, enemy TEXT, planet TEXT, status TEXT, company INTEGER, start_day INTEGER, score INTEGER, dist_ly INTEGER, beachhead INTEGER, transit_days INTEGER, arrive_day INTEGER, end_day INTEGER, monthly_net INTEGER, next_battle INTEGER, battles INTEGER, casualties INTEGER, objective TEXT, committed_bv INTEGER, pool INTEGER, pool_remaining INTEGER, vp INTEGER, ineffective_since INTEGER, breach_day INTEGER, length_months INTEGER, base_pay INTEGER, advance_pct INTEGER, signing_bonus INTEGER, transport_pct INTEGER, overhead_pct INTEGER, battle_loss_pct INTEGER, salvage_pct INTEGER, salvage_exchange INTEGER CHECK (salvage_exchange IN (0,1)), command_rights TEXT, negotiated INTEGER NOT NULL DEFAULT 0 CHECK (negotiated IN (0,1)), enemy_lances INTEGER NOT NULL DEFAULT 0, enemy_quality TEXT NOT NULL DEFAULT 'regular', enemy_lance_bv INTEGER NOT NULL DEFAULT 0, enemy_lance_tons INTEGER NOT NULL DEFAULT 0, offer_hq INTEGER NOT NULL DEFAULT 0, orders_day INTEGER, arc_key TEXT NOT NULL DEFAULT '', arc_beat INTEGER NOT NULL DEFAULT 0, escalation_clock INTEGER NOT NULL DEFAULT 0, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
-    \\CREATE TABLE IF NOT EXISTS operation (cid INTEGER NOT NULL, contract_id INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, template_key TEXT NOT NULL, state TEXT NOT NULL, outcome TEXT NOT NULL, opened_day INTEGER NOT NULL, resolved_day INTEGER, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS contract (cid INTEGER NOT NULL, is_offer INTEGER NOT NULL CHECK (is_offer IN (0,1)), ord INTEGER NOT NULL, id INTEGER, kind TEXT, employer TEXT, enemy TEXT, planet TEXT, status TEXT, company INTEGER, start_day INTEGER, score INTEGER, dist_ly INTEGER, beachhead INTEGER, transit_days INTEGER, arrive_day INTEGER, end_day INTEGER, monthly_net INTEGER, next_battle INTEGER, battles INTEGER, casualties INTEGER, objective TEXT, committed_bv INTEGER, pool INTEGER, pool_remaining INTEGER, vp INTEGER, ineffective_since INTEGER, breach_day INTEGER, length_months INTEGER, base_pay INTEGER, advance_pct INTEGER, signing_bonus INTEGER, transport_pct INTEGER, overhead_pct INTEGER, battle_loss_pct INTEGER, salvage_pct INTEGER, salvage_exchange INTEGER CHECK (salvage_exchange IN (0,1)), command_rights TEXT, negotiated INTEGER NOT NULL DEFAULT 0 CHECK (negotiated IN (0,1)), enemy_lances INTEGER NOT NULL DEFAULT 0, enemy_quality TEXT NOT NULL DEFAULT 'regular', enemy_lance_bv INTEGER NOT NULL DEFAULT 0, enemy_lance_tons INTEGER NOT NULL DEFAULT 0, offer_hq INTEGER NOT NULL DEFAULT 0, orders_day INTEGER, arc_key TEXT NOT NULL DEFAULT '', arc_beat INTEGER NOT NULL DEFAULT 0, escalation_clock INTEGER NOT NULL DEFAULT 0, arc_finale_key TEXT NOT NULL DEFAULT '', FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS operation (cid INTEGER NOT NULL, contract_id INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, template_key TEXT NOT NULL, state TEXT NOT NULL, outcome TEXT NOT NULL, opened_day INTEGER NOT NULL, resolved_day INTEGER, committed_day INTEGER, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS txn (cid INTEGER NOT NULL, ord INTEGER NOT NULL, day INTEGER, amount INTEGER, category TEXT, company INTEGER, hq INTEGER, contract INTEGER, note TEXT, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS loan (cid INTEGER NOT NULL, ord INTEGER NOT NULL, principal INTEGER, balance INTEGER, rate_bp INTEGER, term INTEGER, next_pay INTEGER, payment INTEGER, id INTEGER NOT NULL DEFAULT 0, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS courier (cid INTEGER NOT NULL, ord INTEGER NOT NULL, to_kind TEXT, to_id INTEGER, amount INTEGER, sent INTEGER, eta INTEGER, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
@@ -83,7 +83,7 @@ const ddl =
     \\CREATE TABLE IF NOT EXISTS pending_event (cid INTEGER NOT NULL, ord INTEGER NOT NULL, kind TEXT, day INTEGER, contract INTEGER, company INTEGER, default_choice INTEGER, deadline INTEGER, chosen INTEGER, person INTEGER NOT NULL DEFAULT 0, id INTEGER NOT NULL DEFAULT 0, battle INTEGER NOT NULL DEFAULT 0, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS refit_plan (cid INTEGER NOT NULL, ord INTEGER NOT NULL, unit INTEGER, committed INTEGER CHECK (committed IN (0,1)), UNIQUE (cid, ord), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS refit_op (cid INTEGER NOT NULL, plan_ord INTEGER NOT NULL, ord INTEGER NOT NULL, kind TEXT, slot_key TEXT, location TEXT, part_key TEXT, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, plan_ord) REFERENCES refit_plan(cid, ord) DEFERRABLE INITIALLY DEFERRED);
-    \\CREATE TABLE IF NOT EXISTS battle_report (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER, day INTEGER, contract INTEGER, company INTEGER, kind TEXT, enemy_key TEXT, scenario TEXT, terrain TEXT, weather TEXT, outcome TEXT, held_field INTEGER, withdrew INTEGER, roe TEXT, roe_overridden INTEGER, player_power INTEGER, enemy_power INTEGER, conditions_mod INTEGER, close_terrain INTEGER, air_grounded INTEGER, convoy_hit INTEGER, edge_spent_by TEXT, recon_quality INTEGER, avg_fatigue INTEGER, avg_morale INTEGER, hits_taken INTEGER, destroyed INTEGER, wounded INTEGER, kia INTEGER, lost_hulls INTEGER, missing INTEGER, enemy_destroyed_bv INTEGER, kills_credited INTEGER, prisoners INTEGER, battle_loss_comp INTEGER, score_after INTEGER, score_delta INTEGER, morale_delta INTEGER, fatigue_add INTEGER, battle_loss_pct INTEGER, salvage_pct INTEGER, command_rights TEXT, silenced_mounts INTEGER, armor_left INTEGER, salvage_claimed INTEGER, salvage_haulable INTEGER, salvage_cut INTEGER, salvage_cash INTEGER, salvage_items TEXT, conceded INTEGER, acknowledged INTEGER NOT NULL DEFAULT 1 CHECK (acknowledged IN (0,1)), salvage_unclaimed INTEGER NOT NULL DEFAULT 0, UNIQUE (cid, ord), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS battle_report (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER, day INTEGER, contract INTEGER, company INTEGER, kind TEXT, enemy_key TEXT, scenario TEXT, terrain TEXT, weather TEXT, outcome TEXT, held_field INTEGER, withdrew INTEGER, roe TEXT, roe_overridden INTEGER, player_power INTEGER, enemy_power INTEGER, conditions_mod INTEGER, close_terrain INTEGER, air_grounded INTEGER, convoy_hit INTEGER, edge_spent_by TEXT, recon_quality INTEGER, avg_fatigue INTEGER, avg_morale INTEGER, hits_taken INTEGER, destroyed INTEGER, wounded INTEGER, kia INTEGER, lost_hulls INTEGER, missing INTEGER, enemy_destroyed_bv INTEGER, kills_credited INTEGER, prisoners INTEGER, battle_loss_comp INTEGER, score_after INTEGER, score_delta INTEGER, morale_delta INTEGER, fatigue_add INTEGER, battle_loss_pct INTEGER, salvage_pct INTEGER, command_rights TEXT, silenced_mounts INTEGER, armor_left INTEGER, salvage_claimed INTEGER, salvage_haulable INTEGER, salvage_cut INTEGER, salvage_cash INTEGER, salvage_items TEXT, conceded INTEGER, acknowledged INTEGER NOT NULL DEFAULT 1 CHECK (acknowledged IN (0,1)), salvage_unclaimed INTEGER NOT NULL DEFAULT 0, operation TEXT NOT NULL DEFAULT '', UNIQUE (cid, ord), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS battle_report_hit (cid INTEGER NOT NULL, report_ord INTEGER NOT NULL, ord INTEGER NOT NULL, unit INTEGER, chassis_key TEXT, chassis_name TEXT, armor_before INTEGER, armor_after INTEGER, slot TEXT, slot_part TEXT, slot_result TEXT, destroyed INTEGER, cause TEXT, pilot INTEGER, crew_name TEXT, wound_severity INTEGER, wound_location TEXT, wound_permanent INTEGER, fate TEXT, recovery_roll INTEGER, recovery_target INTEGER, lost INTEGER, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, report_ord) REFERENCES battle_report(cid, ord) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS battle_report_ammo (cid INTEGER NOT NULL, report_ord INTEGER NOT NULL, ord INTEGER NOT NULL, family TEXT, burned INTEGER, reserve INTEGER, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, report_ord) REFERENCES battle_report(cid, ord) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS battle_report_salvage (cid INTEGER NOT NULL, report_ord INTEGER NOT NULL, ord INTEGER NOT NULL, key TEXT, name TEXT, bv INTEGER, armor_pct INTEGER, quality TEXT, damaged INTEGER, destroyed INTEGER, missing INTEGER, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, report_ord) REFERENCES battle_report(cid, ord) DEFERRABLE INITIALLY DEFERRED);
@@ -243,6 +243,9 @@ pub const Store = struct {
         .{ .from = 37, .to = 38, .table = "contract", .column = "arc_key", .sql = "ALTER TABLE contract ADD COLUMN arc_key TEXT NOT NULL DEFAULT ''" },
         .{ .from = 37, .to = 38, .table = "contract", .column = "arc_beat", .sql = "ALTER TABLE contract ADD COLUMN arc_beat INTEGER NOT NULL DEFAULT 0" },
         .{ .from = 37, .to = 38, .table = "contract", .column = "escalation_clock", .sql = "ALTER TABLE contract ADD COLUMN escalation_clock INTEGER NOT NULL DEFAULT 0" },
+        .{ .from = 38, .to = 39, .table = "contract", .column = "arc_finale_key", .sql = "ALTER TABLE contract ADD COLUMN arc_finale_key TEXT NOT NULL DEFAULT ''" },
+        .{ .from = 38, .to = 39, .table = "operation", .column = "committed_day", .sql = "ALTER TABLE operation ADD COLUMN committed_day INTEGER" },
+        .{ .from = 38, .to = 39, .table = "battle_report", .column = "operation", .sql = "ALTER TABLE battle_report ADD COLUMN operation TEXT NOT NULL DEFAULT ''" },
     };
 
     pub fn open(path: [*:0]const u8) !Store {
@@ -824,7 +827,7 @@ pub const Store = struct {
 
     // Contracts and offers.
     fn saveContracts(self: Store, gs: *GameState, cid: i64) !void {
-        const st = try self.db.prepare("INSERT INTO contract VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33,?34,?35,?36,?37,?38,?39,?40,?41,?42,?43,?44,?45,?46,?47,?48)");
+        const st = try self.db.prepare("INSERT INTO contract VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33,?34,?35,?36,?37,?38,?39,?40,?41,?42,?43,?44,?45,?46,?47,?48,?49)");
         defer st.finalize();
         var ord: i64 = 0;
         var it = gs.contracts.iterator();
@@ -833,7 +836,7 @@ pub const Store = struct {
     }
 
     fn saveOperations(self: Store, gs: *GameState, cid: i64) !void {
-        const st = try self.db.prepare("INSERT INTO operation VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)");
+        const st = try self.db.prepare("INSERT INTO operation VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)");
         defer st.finalize();
         var it = gs.contracts.iterator();
         while (it.next()) |entry| {
@@ -849,6 +852,7 @@ pub const Store = struct {
                     @tagName(op.outcome),
                     @as(i64, op.opened_day),
                     op.resolved_day,
+                    op.committed_day,
                 });
                 try st.run();
             }
@@ -857,7 +861,7 @@ pub const Store = struct {
 
     fn loadOperations(self: Store, gs: *GameState, cid: i64) !void {
         const alloc = gs.allocator();
-        const st = try self.db.prepare("SELECT contract_id, id, template_key, state, outcome, opened_day, resolved_day FROM operation WHERE cid = ?1 ORDER BY contract_id, ord");
+        const st = try self.db.prepare("SELECT contract_id, id, template_key, state, outcome, opened_day, resolved_day, committed_day FROM operation WHERE cid = ?1 ORDER BY contract_id, ord");
         defer st.finalize();
         try st.bindAll(.{cid});
         while (try st.next()) {
@@ -870,6 +874,7 @@ pub const Store = struct {
                 .outcome = st.enumValue(operation_mod.OutcomeBand, 4) orelse return error.CorruptSave,
                 .opened_day = try st.intAs(u32, 5),
                 .resolved_day = try optU32(st.optInt(6)),
+                .committed_day = try optU32(st.optInt(7)),
             };
             try c.operations.append(alloc, op);
         }
@@ -1066,7 +1071,7 @@ pub const Store = struct {
         // are child rows; the ammunition family is stored by name, not
         // by position, because `part.munition_keys` can grow and a
         // positional encoding would silently re-label saved rows.
-        const br = try self.db.prepare("INSERT INTO battle_report VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33,?34,?35,?36,?37,?38,?39,?40,?41,?42,?43,?44,?45,?46,?47,?48,?49,?50,?51,?52,?53)");
+        const br = try self.db.prepare("INSERT INTO battle_report VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33,?34,?35,?36,?37,?38,?39,?40,?41,?42,?43,?44,?45,?46,?47,?48,?49,?50,?51,?52,?53,?54)");
         defer br.finalize();
         const bh = try self.db.prepare("INSERT INTO battle_report_hit VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22)");
         defer bh.finalize();
@@ -1090,7 +1095,7 @@ pub const Store = struct {
                 @as(i64, r.battle_loss_pct),            @as(i64, r.salvage_pct),              r.command_rights,                   @as(i64, r.silenced_mounts),
                 @as(i64, r.armor_left),                 r.salvage.claimed_bv,                 r.salvage.haulable_bv,              r.salvage.liaison_cut,
                 r.salvage.exchange_cash,                r.salvage.items,                      @as(i64, @intFromBool(r.conceded)), @as(i64, @intFromBool(r.acknowledged)),
-                r.salvage.unclaimed_bv,
+                r.salvage.unclaimed_bv,                 r.operation,
             });
             try br.run();
             for (r.hulls, 0..) |h, hi| {
@@ -1173,6 +1178,7 @@ pub const Store = struct {
             c.terms.salvage_exchange,        c.terms.command_rights,           c.negotiated,                      @as(i64, c.enemy_lances),
             c.enemy_quality,                 c.enemy_lance_bv,                 @as(i64, c.enemy_lance_tons),      @intFromEnum(c.offer_hq),
             c.orders_day,                    c.arc_key,                        @as(i64, c.arc_beat),              @as(i64, c.escalation_clock),
+            c.arc_finale_key,
         });
         try st.run();
     }
@@ -1667,7 +1673,7 @@ pub const Store = struct {
     // Contracts & offers.
     fn loadContract(self: Store, gs: *GameState, cid: i64) !void {
         const alloc = gs.allocator();
-        const st = try self.db.prepare("SELECT is_offer, id, kind, employer, enemy, planet, status, company, start_day, score, dist_ly, beachhead, transit_days, arrive_day, end_day, monthly_net, next_battle, battles, casualties, objective, committed_bv, pool, pool_remaining, vp, ineffective_since, breach_day, length_months, base_pay, advance_pct, signing_bonus, transport_pct, overhead_pct, battle_loss_pct, salvage_pct, salvage_exchange, command_rights, negotiated, enemy_lances, enemy_quality, enemy_lance_bv, enemy_lance_tons, offer_hq, orders_day, arc_key, arc_beat, escalation_clock FROM contract WHERE cid = ?1 ORDER BY is_offer, ord");
+        const st = try self.db.prepare("SELECT is_offer, id, kind, employer, enemy, planet, status, company, start_day, score, dist_ly, beachhead, transit_days, arrive_day, end_day, monthly_net, next_battle, battles, casualties, objective, committed_bv, pool, pool_remaining, vp, ineffective_since, breach_day, length_months, base_pay, advance_pct, signing_bonus, transport_pct, overhead_pct, battle_loss_pct, salvage_pct, salvage_exchange, command_rights, negotiated, enemy_lances, enemy_quality, enemy_lance_bv, enemy_lance_tons, offer_hq, orders_day, arc_key, arc_beat, escalation_clock, arc_finale_key FROM contract WHERE cid = ?1 ORDER BY is_offer, ord");
         defer st.finalize();
         try st.bindAll(.{cid});
         while (try st.next()) {
@@ -1707,6 +1713,7 @@ pub const Store = struct {
                 .arc_key = try st.text(43, alloc),
                 .arc_beat = try st.intAs(u8, 44),
                 .escalation_clock = try st.intAs(u16, 45),
+                .arc_finale_key = try st.text(46, alloc),
                 .terms = .{
                     .length_months = try st.intAs(u8, 26),
                     .base_pay_month = st.int(27),
@@ -2075,7 +2082,7 @@ pub const Store = struct {
         const alloc = gs.allocator();
         // Battle reports. Child rows are read per report; an outcome or
         // ROE that does not parse is `error.CorruptSave`.
-        const br = try self.db.prepare("SELECT ord, id, day, contract, company, kind, enemy_key, scenario, terrain, weather, outcome, held_field, withdrew, roe, roe_overridden, player_power, enemy_power, conditions_mod, close_terrain, air_grounded, convoy_hit, edge_spent_by, recon_quality, avg_fatigue, avg_morale, hits_taken, destroyed, wounded, kia, lost_hulls, missing, enemy_destroyed_bv, kills_credited, prisoners, battle_loss_comp, score_after, score_delta, morale_delta, fatigue_add, battle_loss_pct, salvage_pct, command_rights, silenced_mounts, armor_left, salvage_claimed, salvage_haulable, salvage_cut, salvage_cash, salvage_items, conceded, acknowledged, salvage_unclaimed FROM battle_report WHERE cid = ?1 ORDER BY ord");
+        const br = try self.db.prepare("SELECT ord, id, day, contract, company, kind, enemy_key, scenario, terrain, weather, outcome, held_field, withdrew, roe, roe_overridden, player_power, enemy_power, conditions_mod, close_terrain, air_grounded, convoy_hit, edge_spent_by, recon_quality, avg_fatigue, avg_morale, hits_taken, destroyed, wounded, kia, lost_hulls, missing, enemy_destroyed_bv, kills_credited, prisoners, battle_loss_comp, score_after, score_delta, morale_delta, fatigue_add, battle_loss_pct, salvage_pct, command_rights, silenced_mounts, armor_left, salvage_claimed, salvage_haulable, salvage_cut, salvage_cash, salvage_items, conceded, acknowledged, salvage_unclaimed, operation FROM battle_report WHERE cid = ?1 ORDER BY ord");
         defer br.finalize();
         try br.bindAll(.{cid});
         while (try br.next()) {
@@ -2143,6 +2150,7 @@ pub const Store = struct {
                 },
                 .conceded = br.int(49) != 0,
                 .acknowledged = br.int(50) != 0,
+                .operation = try br.text(52, alloc),
             });
         }
         // Post-load orphan check: a child row whose report_ord names no loaded
@@ -2417,6 +2425,15 @@ fn validateStoredStrings(gs: *GameState) error{CorruptSave}!void {
         try Check.house(c.employer_key);
         try Check.house(c.enemy_key);
         if (c.arc_key.len > 0) try Check.arc(c.arc_key);
+        if (c.arc_key.len > 0 and c.arc_finale_key.len > 0) {
+            const a = arc_mod.find(c.arc_key) orelse return error.CorruptSave;
+            var found = false;
+            for (a.finales) |f| if (std.mem.eql(u8, f.key, c.arc_finale_key)) {
+                found = true;
+                break;
+            };
+            if (!found) return error.CorruptSave;
+        }
         for (c.operations.items) |op| try Check.opTemplate(op.template_key);
     };
     var pit = gs.people.iterator();
@@ -2435,7 +2452,7 @@ fn validateStoredStrings(gs: *GameState) error{CorruptSave}!void {
         .remove => |slot_key| try Check.shown(slot_key),
     };
     for (gs.battle_reports.kept.items) |r| {
-        inline for (.{ r.kind, r.enemy_key, r.scenario, r.terrain, r.weather, r.command_rights, r.salvage.items }) |text| try Check.shown(text);
+        inline for (.{ r.kind, r.enemy_key, r.scenario, r.terrain, r.weather, r.command_rights, r.salvage.items, r.operation }) |text| try Check.shown(text);
         for (r.hulls) |h| {
             try Check.hull(h.chassis_key);
             try Check.shown(h.chassis_name);
@@ -3635,7 +3652,7 @@ test "a rebuilt store loads to the identical digest" {
     var diff_buf: [128]u8 = undefined;
     try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &diff_buf) orelse "");
     // The golden hash is unchanged (this plan changes no simulation data).
-    try std.testing.expectEqual(@as(u64, 2717275706027105672), hash_before);
+    try std.testing.expectEqual(@as(u64, 5788287037817357512), hash_before);
 }
 
 test "every next-ID counter resumes past a higher owned id after load" {
@@ -4120,7 +4137,7 @@ test "golden master: a played year hashes to its pinned value, and a save of it 
     try std.testing.expect(gs.battle_reports.kept.items.len > 0); // the year saw fighting
     // Any change to a simulated or saved result moves this; re-pin it only
     // when the change is meant.
-    try std.testing.expectEqual(@as(u64, 2717275706027105672), digest.stateHash(&gs));
+    try std.testing.expectEqual(@as(u64, 5788287037817357512), digest.stateHash(&gs));
 
     const store = try Store.open(":memory:");
     defer store.close();
