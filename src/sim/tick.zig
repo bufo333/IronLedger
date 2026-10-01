@@ -262,12 +262,19 @@ test "bestSupplyHq: home ships when nothing else is stocked; home wins over char
 }
 
 test "bestSupplyHq: saturated route is skipped for the feasible source" {
-    // Two HQs both stocked. depot_a has a link to home but that link is at
-    // capacity; the shipment also exceeds the charter cap (40 t/week) so
-    // depot_a returns NoRoute. Home is the company's supplying_hq (same-to-same
-    // → no route check) and is always feasible. New code picks home; old
-    // distance-based code would have picked the nearer depot_a (C15a regression,
-    // acceptance criterion 2).
+    // Depot is the only stocked source; home's starter provisions are drained.
+    // A level-2 link depot↔home carries up to 80 t/week. The shipment is
+    // 50 t (want=50, 1 t/unit). When the link is clear: 50 t fits, depot's
+    // route succeeds, depot is the sole candidate — depot wins. When the link
+    // is fully saturated: the linked path is infeasible (80+50 > 80) and the
+    // direct charter cap (40 t/week) is also exceeded (50 > 40), so depot
+    // returns NoRoute and is skipped as a candidate. Home has no provisions
+    // on hand and is also skipped as a candidate. No feasible source exists;
+    // bestSupplyHq falls back to the home parameter (via the seat fallback in
+    // homeHqFor, since Alpha.supplying_hq = .none). Without the saturation-skip
+    // (else => continue), the NoRoute error would propagate and the assertion
+    // would fail — proving the test guards the intended skip behavior
+    // (C15a regression, acceptance criterion 2).
     var gs = GameState.init(std.testing.allocator, .{ .seed = 4321 });
     defer gs.deinit();
     _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
@@ -286,17 +293,22 @@ test "bestSupplyHq: saturated route is skipped for the feasible source" {
     _ = try commands.execute(&gs, .{ .found_hq = .{ .name = "Depot", .planet_key = depot_planet } });
     const depot = gs.hqs.keys()[1];
 
-    // Both HQs have ample provisions. home starts with starter stock (60).
+    // Company deployed on the depot's world; only depot has provisions stocked.
+    gs.force(co).?.location_planet = depot_planet;
     try gs.addStock(.{ .hq = depot }, "provisions", 100);
+    _ = gs.takeStock(.{ .hq = home }, "provisions", gs.stockCount(.{ .hq = home }, "provisions"));
 
-    // A direct link depot→home, saturated so no more tonnage fits this week.
-    try gs.hq_links.append(gs.allocator(), .{ .a = depot, .b = home, .level = 1, .established_day = 0 });
+    // A level-2 link depot↔home: cap 80 t/week, ample when the link is clear.
+    try gs.hq_links.append(gs.allocator(), .{ .a = depot, .b = home, .level = 2, .established_day = 0 });
     const li = gs.hq_links.items.len - 1;
+    // Saturate the link: no capacity remains this week.
     gs.hq_links.items[li].tons_this_week = gs.hq_links.items[li].tonsPerWeek();
 
-    // want=50 provisions = 50t, which exceeds the level-1 charter cap (40 t/week).
-    // depot: saturated link + 50t > charter cap → NoRoute → skipped.
-    // home: company's supplying_hq matches from_hq → no route check → always feasible → selected.
+    // want=50 provisions = 50 t. Depot: saturated level-2 link, charter cap
+    // (40 t/week) also exceeded by 50 t → NoRoute → skipped as a candidate.
+    // Home: no provisions on hand → skipped as a candidate. No feasible
+    // source; bestSupplyHq returns the home parameter via the seat fallback
+    // in homeHqFor (Alpha.supplying_hq = .none → seat = home).
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     try std.testing.expectEqual(home, try bestSupplyHq(&gs, co, "provisions", 50, home, arena.allocator()));
