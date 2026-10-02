@@ -47,6 +47,7 @@ CASES = [
     ("a percentage over 100", lambda: {"tables/tuning.zon": mutate("tables/tuning.zon", r"\.advance_pct = 25,", ".advance_pct = 120,")}, True),
     ("an arc with an unknown contract kind", lambda: {"tables/arcs.zon": mutate("tables/arcs.zon", r'"garrison_duty"', '"__bad_kind__"')}, True),
     ("an operation template with an unknown arc key", lambda: {"tables/operations.zon": mutate("tables/operations.zon", r'\.arc_key = "fracturing_garrison"', '.arc_key = "__bad_arc__"')}, True),
+    ("a min_clock==0 finale marked ends_contract=true is rejected (P4h invariant)", lambda: {"tables/arcs.zon": mutate("tables/arcs.zon", r'\.key = "held",\n\s+\.name = "Garrison Holds",\n\s+\.min_clock = 0,\s*// unconditional fallback\n\s+\.ends_contract = false,', '.key = "held",\n            .name = "Garrison Holds",\n            .min_clock = 0, // unconditional fallback\n            .ends_contract = true,', re.S)}, True),
 ]
 
 

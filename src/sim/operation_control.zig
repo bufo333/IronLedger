@@ -54,27 +54,6 @@ fn bandStandingDelta(band: operation_mod.OutcomeBand) i32 {
     };
 }
 
-/// Score delta for a finale by key. // TUNE
-fn finaleScoreDelta(key: []const u8) i32 {
-    if (std.mem.eql(u8, key, "held")) return 2; // TUNE
-    if (std.mem.eql(u8, key, "fell")) return -3; // TUNE
-    return 0;
-}
-
-/// VP delta for a finale. // TUNE
-fn finaleVpDelta(key: []const u8) i32 {
-    if (std.mem.eql(u8, key, "held")) return 3; // TUNE
-    if (std.mem.eql(u8, key, "fell")) return -5; // TUNE
-    return 0;
-}
-
-/// Standing delta for a finale. // TUNE
-fn finaleStandingDelta(key: []const u8) i32 {
-    if (std.mem.eql(u8, key, "held")) return 2; // TUNE
-    if (std.mem.eql(u8, key, "fell")) return -2; // TUNE
-    return 0;
-}
-
 // ---- Helper: look up a contract in the active map -----------------------
 
 fn findActiveContract(gs: *GameState, id: types.ContractId) Error!*contract_mod.Contract {
@@ -184,16 +163,17 @@ pub fn execDeclineOperation(gs: *GameState, args: @FieldType(commands.Command, "
 
 // ---- pub fn resolveDueOperations ----------------------------------------
 
-/// Phase-7 sub-step: resolve committed non-combat operations whose due date
-/// has passed, and select the arc finale at the terminal beat.
+/// Phase-7 sub-step: resolve committed non-combat operations whose due date has passed.
 /// Called once per day, before `operations.advanceClocks`.
+/// (The finale resolution sub-step was removed in P4h; resolveFinale is now called
+/// by tick.resolveArcFinales and tick.runContracts.)
 pub fn resolveDueOperations(gs: *GameState) !void {
     var it = gs.contracts.iterator();
     while (it.next()) |entry| {
         const c = entry.value_ptr;
         if (c.status != .active or c.arc_key.len == 0) continue;
 
-        // (a) Resolve committed non-combat operations that are due.
+        // Resolve committed non-combat operations that are due.
         for (c.operations.items) |*op| {
             if (op.state != .committed) continue;
             const t = operation_mod.findTemplate(op.template_key) orelse continue;
@@ -239,42 +219,207 @@ pub fn resolveDueOperations(gs: *GameState) !void {
                 .text = log_text,
             });
         }
+    }
+}
 
-        // (b) Finale resolution: at the terminal beat, if not yet selected.
-        if (c.arc_finale_key.len > 0) continue; // already resolved
-        const a = arc_mod.find(c.arc_key) orelse continue;
-        if (c.arc_beat >= a.beats.len) continue;
-        const beat = a.beats[c.arc_beat];
-        if (beat.escalation_threshold != 0) continue; // not terminal yet
+/// Finale resolution owner (P4h, rule 20).
+/// Selects the finale from the arc's options, applies data-driven deltas,
+/// and sets `arc_finale_key`. Returns null for non-arc contracts or when
+/// the finale has already been resolved (idempotent). Returns a pointer to
+/// the selected finale (into static data) on success.
+///
+/// A collapse finale (ends_contract == true) records the key and log only;
+/// contract disposition (fail) is decided by the caller (tick.zig) so that
+/// operation_control does not import contract_control (rule 5).
+/// Validate → reserve → commit (rules 7, 11-13).
+pub fn resolveFinale(gs: *GameState, c: *contract_mod.Contract) !?*const arc_mod.Finale {
+    // No arc, or already resolved: nothing to do.
+    if (c.arc_key.len == 0) return null;
+    if (c.arc_finale_key.len > 0) return null; // idempotent
 
-        const finale = operations.selectFinale(c) orelse continue;
+    const f = operations.selectFinale(c) orelse return null;
 
-        // Reserve + pre-format before any mutation (rule 13).
-        try gs.reserveLog(1);
-        const s_d = finaleScoreDelta(finale.key);
-        const vp_d = finaleVpDelta(finale.key);
-        const std_d = finaleStandingDelta(finale.key);
-        var date_buf: [10]u8 = undefined;
-        const log_text = try std.fmt.allocPrint(gs.allocator(), "{s} [arc] arc resolved: {s}", .{
-            gs.clock.date.text(&date_buf),
-            finale.name,
-        });
-        // Apply standing in the prepare phase so no allocation can fail
-        // after domain mutations begin (rules 11-13).
-        if (std_d != 0) _ = try gs.adjustStanding(c.employer_key, std_d);
+    // ---- PREPARE: reserve log slot and pre-format ----
+    try gs.reserveLog(1);
+    var date_buf: [10]u8 = undefined;
+    const log_text = try std.fmt.allocPrint(gs.allocator(), "{s} [arc] arc resolved: {s}", .{
+        gs.clock.date.text(&date_buf),
+        f.name,
+    });
+    // For non-collapse finales, apply standing in the prepare phase so no
+    // allocation can fail after domain mutations begin (rules 11-13).
+    if (!f.ends_contract and f.standing_delta != 0) _ = try gs.adjustStanding(c.employer_key, @as(i32, f.standing_delta));
 
-        // Commit: infallible from here.
-        c.arc_finale_key = finale.key;
-        c.score += s_d;
-        c.victory_points += vp_d;
-        gs.event_log.appendAssumeCapacity(.{
-            .day = gs.clock.day_index,
-            .category = .contract,
-            .company = c.assigned_company,
-            .contract = c.id,
-            .text = log_text,
+    // ---- COMMIT: infallible from here ----
+    c.arc_finale_key = f.key;
+    if (!f.ends_contract) {
+        const vp_per_score = @import("../domain/tuning.zig").t.contract.vp_per_score;
+        c.score += @as(i32, f.score_delta);
+        c.victory_points += @as(i32, f.vp_delta) + @as(i32, f.score_delta) * vp_per_score;
+    }
+    gs.event_log.appendAssumeCapacity(.{
+        .day = gs.clock.day_index,
+        .category = .contract,
+        .company = c.assigned_company,
+        .contract = c.id,
+        .text = log_text,
+    });
+    return f;
+}
+
+// ---- pub fn execWithdrawOperation ----------------------------------------
+
+pub fn execWithdrawOperation(gs: *GameState, args: @FieldType(commands.Command, "withdraw_operation")) Error!commands.Result {
+    const cid = args.contract;
+    const oid = args.operation;
+
+    // ---- VALIDATE: no mutation ----
+    const c = try findActiveContract(gs, cid);
+
+    var op_ptr: ?*operation_mod.Operation = null;
+    for (c.operations.items) |*op| if (op.id == oid) {
+        op_ptr = op;
+        break;
+    };
+    const op = op_ptr orelse return error.UnknownOperation;
+    if (!operations.operationalWithdrawEligible(op)) return error.OperationNotWithdrawable;
+
+    const is_committed_combat = (op.state == .committed) and blk: {
+        const t = operation_mod.findTemplate(op.template_key) orelse break :blk false;
+        break :blk t.combat;
+    };
+
+    // ---- PREPARE: reserve log slot and pre-format ----
+    try gs.reserveLog(1);
+    const pressure = operations.withdrawClockDelta();
+    var date_buf: [10]u8 = undefined;
+    const op_name = if (operation_mod.findTemplate(op.template_key)) |t| t.name else op.template_key;
+    const log_text = try std.fmt.allocPrint(gs.allocator(), "{s} [arc] withdrew from operation: {s} — force preserved, pressure +{d}", .{
+        gs.clock.date.text(&date_buf),
+        op_name,
+        pressure,
+    });
+
+    // ---- COMMIT: infallible from here ----
+    op.state = .withdrawn;
+    op.resolved_day = gs.clock.day_index;
+    if (is_committed_combat) {
+        c.next_battle_day = null;
+        c.orders_day = null;
+    }
+    c.escalation_clock +|= pressure;
+    const vp_per_score = @import("../domain/tuning.zig").t.contract.vp_per_score;
+    const sd: i32 = @as(i32, operations.withdrawScoreDelta());
+    c.score += sd;
+    c.victory_points += sd * vp_per_score;
+    gs.event_log.appendAssumeCapacity(.{
+        .day = gs.clock.day_index,
+        .category = .contract,
+        .company = c.assigned_company,
+        .contract = c.id,
+        .text = log_text,
+    });
+
+    return .{};
+}
+
+// ---- pub fn execExploitOperation -----------------------------------------
+
+pub fn execExploitOperation(gs: *GameState, args: @FieldType(commands.Command, "exploit_operation")) Error!commands.Result {
+    const cid = args.contract;
+    const oid = args.operation;
+
+    // ---- VALIDATE: no mutation ----
+    const c = try findActiveContract(gs, cid);
+
+    var op_ptr: ?*operation_mod.Operation = null;
+    for (c.operations.items) |*op| if (op.id == oid) {
+        op_ptr = op;
+        break;
+    };
+    const op = op_ptr orelse return error.UnknownOperation;
+    if (!operations.exploitEligible(c, op)) return error.OperationNotExploitable;
+    const t = operation_mod.findTemplate(op.template_key) orelse return error.UnknownOperation;
+    if (t.follow_up.len == 0) return error.NoFollowUp;
+
+    // ---- PREPARE: reserve log slot and pre-allocate follow-up capacity ----
+    // Important: reserve capacity BEFORE advancing gs.next_operation_id (rule 7, 11-13).
+    try gs.reserveLog(1);
+    // ensureUnusedCapacity is the only fallible step for the follow-ups.
+    try c.operations.ensureUnusedCapacity(gs.allocator(), t.follow_up.len);
+    const pressure = operations.exploitClockDelta();
+    var date_buf: [10]u8 = undefined;
+    const op_name = t.name;
+    const log_text = try std.fmt.allocPrint(gs.allocator(), "{s} [arc] exploit: pressed the advantage (pressure +{d})", .{
+        gs.clock.date.text(&date_buf),
+        pressure,
+    });
+
+    // ---- COMMIT: infallible from here ----
+    const id_start = gs.next_operation_id;
+    for (t.follow_up, 0..) |fkey, i| {
+        const fid: types.OperationId = @enumFromInt(id_start + @as(u32, @intCast(i)));
+        c.operations.appendAssumeCapacity(.{
+            .id = fid,
+            .template_key = fkey,
+            .state = .available,
+            .opened_day = gs.clock.day_index,
         });
     }
+    gs.next_operation_id += @as(u32, @intCast(t.follow_up.len));
+    c.escalation_clock +|= pressure;
+    @import("contract_events.zig").applyToCompany(gs, c.assigned_company, .fatigue, @intCast(operations.exploitFatigueAdd()));
+    gs.event_log.appendAssumeCapacity(.{
+        .day = gs.clock.day_index,
+        .category = .contract,
+        .company = c.assigned_company,
+        .contract = c.id,
+        .text = log_text,
+    });
+    _ = op_name;
+
+    return .{};
+}
+
+// ---- pub fn execConsolidateOperation --------------------------------------
+
+pub fn execConsolidateOperation(gs: *GameState, args: @FieldType(commands.Command, "consolidate_operation")) Error!commands.Result {
+    const cid = args.contract;
+    const oid = args.operation;
+
+    // ---- VALIDATE: no mutation ----
+    const c = try findActiveContract(gs, cid);
+
+    var op_ptr: ?*operation_mod.Operation = null;
+    for (c.operations.items) |*op| if (op.id == oid) {
+        op_ptr = op;
+        break;
+    };
+    const op = op_ptr orelse return error.UnknownOperation;
+    if (!operations.consolidateEligible(op)) return error.OperationNotConsolidatable;
+
+    // ---- PREPARE: reserve log slot and pre-format ----
+    try gs.reserveLog(1);
+    const relief = operations.consolidateClockRelief();
+    var date_buf: [10]u8 = undefined;
+    const log_text = try std.fmt.allocPrint(gs.allocator(), "{s} [arc] consolidate: gains secured (pressure −{d})", .{
+        gs.clock.date.text(&date_buf),
+        relief,
+    });
+
+    // ---- COMMIT: infallible from here ----
+    c.escalation_clock -|= relief;
+    const morale_gain: i32 = 2; // TUNE: consolidation lifts morale slightly
+    @import("contract_events.zig").applyToCompany(gs, c.assigned_company, .morale, morale_gain);
+    gs.event_log.appendAssumeCapacity(.{
+        .day = gs.clock.day_index,
+        .category = .contract,
+        .company = c.assigned_company,
+        .contract = c.id,
+        .text = log_text,
+    });
+
+    return .{};
 }
 
 // ---- pub fn execTaskLance -----------------------------------------------
@@ -714,7 +859,9 @@ test "resolveDueOperations: resolves exactly at committed_day + expected_days, n
     try testing.expectEqual(@as(?u32, gs.clock.day_index), c.operations.items[0].resolved_day);
 }
 
-test "resolveDueOperations: finale sets arc_finale_key once at terminal beat" {
+test "resolveFinale: sets arc_finale_key once; held/fell selection; idempotent (P4h, rule 20)" {
+    // This test replaces the old "resolveDueOperations: finale sets arc_finale_key once at
+    // terminal beat" test. Finales are now owned by resolveFinale, not resolveDueOperations.
     const testing = std.testing;
     var gs = GameState.init(testing.allocator, .{});
     defer gs.deinit();
@@ -741,14 +888,18 @@ test "resolveDueOperations: finale sets arc_finale_key once at terminal beat" {
             .arc_beat = terminal_beat,
             .escalation_clock = 0, // below fell threshold → "held"
         });
-        try resolveDueOperations(&gs);
         const c = gs.contracts.getPtr(cid).?;
+        const f = try resolveFinale(&gs, c);
+        try testing.expect(f != null);
         try testing.expect(c.arc_finale_key.len > 0);
         try testing.expectEqualStrings("held", c.arc_finale_key);
+        // held is non-collapse: score and vp should increase.
+        try testing.expect(c.score > 0);
 
-        // Called again: no change (already resolved).
+        // Called again: idempotent — returns null, no score change.
         const before_score = c.score;
-        try resolveDueOperations(&gs);
+        const f2 = try resolveFinale(&gs, c);
+        try testing.expectEqual(@as(?*const arc_mod.Finale, null), f2);
         try testing.expectEqual(before_score, c.score);
     }
 
@@ -772,9 +923,12 @@ test "resolveDueOperations: finale sets arc_finale_key once at terminal beat" {
             .arc_beat = terminal_beat,
             .escalation_clock = fell_min,
         });
-        try resolveDueOperations(&gs);
         const c2 = gs.contracts.getPtr(cid2).?;
+        const f = try resolveFinale(&gs, c2);
+        try testing.expect(f != null);
         try testing.expectEqualStrings("fell", c2.arc_finale_key);
+        // fell is ends_contract=true: score must not change (disposition by caller).
+        try testing.expectEqual(@as(i32, 0), c2.score);
     }
 }
 
@@ -1384,4 +1538,131 @@ test "resolveDueOperations: noncombat delay resolves later than advance" {
     gs.clock.day_index = @as(u32, t.expected_days) + delay_days;
     try resolveDueOperations(&gs);
     try testing.expectEqual(operation_mod.OperationState.resolved, c.operations.items[1].state);
+}
+
+test "execWithdrawOperation: sets withdrawn state, adds pressure, applies score delta, failure-atomic" {
+    const testing = std.testing;
+    var gs = GameState.init(testing.allocator, .{});
+    defer gs.deinit();
+
+    const cid: types.ContractId = @enumFromInt(1);
+    const oid: types.OperationId = @enumFromInt(1);
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+        .status = .active,
+        .arc_key = "fracturing_garrison",
+    });
+    const c = gs.contracts.getPtr(cid).?;
+    try c.operations.append(gs.allocator(), .{
+        .id = oid,
+        .template_key = "negotiate_terms",
+        .state = .available,
+        .opened_day = 0,
+    });
+
+    const before_clock = c.escalation_clock;
+    const before_score = c.score;
+    const result = try execWithdrawOperation(&gs, .{ .contract = cid, .operation = oid });
+    _ = result;
+    try testing.expectEqual(operation_mod.OperationState.withdrawn, c.operations.items[0].state);
+    try testing.expect(c.escalation_clock > before_clock);
+    try testing.expect(c.score < before_score); // withdrawScoreDelta is negative
+
+    // Refuse if already withdrawn.
+    try testing.expectError(error.OperationNotWithdrawable, execWithdrawOperation(&gs, .{ .contract = cid, .operation = oid }));
+}
+
+test "execExploitOperation: instantiates follow-ups; counter advanced; pressure added" {
+    const testing = std.testing;
+    var gs = GameState.init(testing.allocator, .{});
+    defer gs.deinit();
+
+    const cid: types.ContractId = @enumFromInt(1);
+    const oid: types.OperationId = @enumFromInt(1);
+    gs.next_operation_id = 2; // first follow-up will be id 2
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+        .status = .active,
+        .arc_key = "fracturing_garrison",
+    });
+    const c = gs.contracts.getPtr(cid).?;
+    try c.operations.append(gs.allocator(), .{
+        .id = oid,
+        .template_key = "repel_probe",
+        .state = .resolved,
+        .opened_day = 0,
+        .outcome = .success,
+        .intent = .secure_objective,
+    });
+
+    const before_clock = c.escalation_clock;
+    _ = try execExploitOperation(&gs, .{ .contract = cid, .operation = oid });
+    // Follow-ups appended.
+    const t = operation_mod.findTemplate("repel_probe").?;
+    try testing.expectEqual(1 + t.follow_up.len, c.operations.items.len);
+    // Counter advanced by follow_up count.
+    try testing.expectEqual(@as(u32, 2) + @as(u32, @intCast(t.follow_up.len)), gs.next_operation_id);
+    // Escalation pressure added.
+    try testing.expect(c.escalation_clock > before_clock);
+    // Refuse on non-eligible state: add a non-resolved op and try to exploit it.
+    const oid2: types.OperationId = @enumFromInt(3);
+    try c.operations.append(gs.allocator(), .{
+        .id = oid2,
+        .template_key = "repel_probe",
+        .state = .available, // not resolved → not exploitable
+        .opened_day = 0,
+    });
+    try testing.expectError(error.OperationNotExploitable, execExploitOperation(&gs, .{ .contract = cid, .operation = oid2 }));
+}
+
+test "execConsolidateOperation: relieves escalation_clock; refuses non-resolved" {
+    const testing = std.testing;
+    var gs = GameState.init(testing.allocator, .{});
+    defer gs.deinit();
+
+    const cid: types.ContractId = @enumFromInt(1);
+    const oid: types.OperationId = @enumFromInt(1);
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+        .status = .active,
+        .arc_key = "fracturing_garrison",
+        .escalation_clock = 20,
+    });
+    const c = gs.contracts.getPtr(cid).?;
+    try c.operations.append(gs.allocator(), .{
+        .id = oid,
+        .template_key = "negotiate_terms",
+        .state = .resolved,
+        .opened_day = 0,
+        .outcome = .success,
+    });
+
+    const before_clock = c.escalation_clock;
+    _ = try execConsolidateOperation(&gs, .{ .contract = cid, .operation = oid });
+    try testing.expect(c.escalation_clock < before_clock);
+
+    // Refuse on non-resolved op.
+    const oid2: types.OperationId = @enumFromInt(2);
+    try c.operations.append(gs.allocator(), .{
+        .id = oid2,
+        .template_key = "negotiate_terms",
+        .state = .available,
+        .opened_day = 0,
+    });
+    try testing.expectError(error.OperationNotConsolidatable, execConsolidateOperation(&gs, .{ .contract = cid, .operation = oid2 }));
 }

@@ -131,6 +131,10 @@ pub const Effect = union(enum) {
     /// The employer takes the company's most battered line hull as
     /// "collateral" — off the books for good.
     seize_hull,
+    /// Escalation clock delta on the event's contract (positive = pressure,
+    /// negative = relief, saturating at 0). Used by press/consolidate decisions
+    /// to bind battle aftermath to the arc's escalation clock (P4h). // TUNE
+    escalation: i16,
     /// Days added to a company's transit (waiting raiders out).
     delay_arrival: u8,
     /// The next engagement on this contract comes in N days rather than
@@ -279,6 +283,7 @@ pub fn effectPhrase(alloc: std.mem.Allocator, e: Effect) ![]const u8 {
         .write_off_mia => "missing, presumed dead · company morale −5",
         .engagement => "a real engagement against the contract's opposition",
         .seize_hull => "your most battered line hull is taken, for good",
+        .escalation => |d| try std.fmt.allocPrint(alloc, "escalation clock {s}{d}", .{ if (d >= 0) "+" else "", d }),
         .delay_arrival => |d| try std.fmt.allocPrint(alloc, "+{d} days in transit", .{d}),
         .next_battle_in => |d| try std.fmt.allocPrint(alloc, "contact in {d}d", .{d}),
         .recovery_push => "one more roll for every hull and pilot left on the field",

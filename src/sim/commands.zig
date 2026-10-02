@@ -292,6 +292,12 @@ pub const Command = union(enum) {
     set_operation_tempo: struct { contract: types.ContractId, operation: types.OperationId, tempo: operation_mod.TempoPosture },
     /// Apply a command intervention to a committed combat operation (P4g).
     apply_intervention: struct { contract: types.ContractId, operation: types.OperationId, intervention: operation_mod.Intervention },
+    /// Operationally withdraw from an available or committed operation (P4h).
+    withdraw_operation: struct { contract: types.ContractId, operation: types.OperationId },
+    /// Exploit a resolved successful combat operation by launching follow-ups (P4h).
+    exploit_operation: struct { contract: types.ContractId, operation: types.OperationId },
+    /// Consolidate a resolved operation to relieve escalation pressure (P4h).
+    consolidate_operation: struct { contract: types.ContractId, operation: types.OperationId },
 };
 
 pub const Error = error{
@@ -457,6 +463,14 @@ pub const Error = error{
     InsufficientCommandCapacity,
     /// This intervention has already been applied to this operation (P4g).
     InterventionAlreadyApplied,
+    /// This operation cannot be withdrawn (wrong state) (P4h).
+    OperationNotWithdrawable,
+    /// This operation cannot be exploited (not resolved combat success with follow-up) (P4h).
+    OperationNotExploitable,
+    /// No follow-up operations are defined for this template (P4h).
+    NoFollowUp,
+    /// This operation cannot be consolidated (not resolved) (P4h).
+    OperationNotConsolidatable,
 } || std.mem.Allocator.Error;
 
 pub const Result = struct {
@@ -573,6 +587,9 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
         .clear_lance_task => |a| return operation_control.execClearLanceTask(gs, a),
         .set_operation_tempo => |a| return operation_control.execSetOperationTempo(gs, a),
         .apply_intervention => |a| return operation_control.execApplyIntervention(gs, a),
+        .withdraw_operation => |a| return operation_control.execWithdrawOperation(gs, a),
+        .exploit_operation => |a| return operation_control.execExploitOperation(gs, a),
+        .consolidate_operation => |a| return operation_control.execConsolidateOperation(gs, a),
         .autostaff => |hq_id| return hq_ops.execAutostaff(gs, hq_id),
         .transfer_person => |t| return personnel.execTransferPerson(gs, t),
         .rename_outfit => |name| return toe.execRenameOutfit(gs, name),

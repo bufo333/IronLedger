@@ -488,6 +488,114 @@ pub fn instantiateOpening(gs: *GameState, c: *contract_mod.Contract, id_start: u
     }
 }
 
+// ---- Finale and collapse owners (P4h, rule 20) ---------------------------
+
+/// Rule owner: the highest min_clock among the arc's finales (the collapse
+/// threshold). Returns 0 when no finale has min_clock > 0.
+pub fn topCollapseMinClock(a: *const arc_mod.Arc) u16 {
+    var top: u16 = 0;
+    for (a.finales) |f| {
+        if (f.min_clock > top) top = f.min_clock;
+    }
+    return top;
+}
+
+/// Rule owner: is this contract currently at the terminal beat?
+/// Terminal: arc_key non-empty, arc_beat within bounds, and the beat's
+/// escalation_threshold is 0.
+pub fn atTerminalBeat(a: *const arc_mod.Arc, c: *const contract_mod.Contract) bool {
+    if (c.arc_beat >= a.beats.len) return false;
+    return a.beats[c.arc_beat].escalation_threshold == 0;
+}
+
+/// Rule owner: is an early collapse finale due right now?
+/// All of: contract active, arc present, no finale yet selected,
+/// at the terminal beat, and escalation_clock >= topCollapseMinClock (> 0).
+pub fn finaleCollapseDue(c: *const contract_mod.Contract) bool {
+    if (c.status != .active or c.arc_key.len == 0) return false;
+    if (c.arc_finale_key.len > 0) return false; // already resolved
+    const a = arc_mod.find(c.arc_key) orelse return false;
+    if (!atTerminalBeat(a, c)) return false;
+    const threshold = topCollapseMinClock(a);
+    if (threshold == 0) return false; // no collapse finale defined
+    return c.escalation_clock >= threshold;
+}
+
+// ---- Withdraw / exploit / consolidate owners (P4h, rule 20) -------------
+
+/// Rule owner: clock pressure added when an operation is operationally withdrawn. // TUNE
+/// Must be >= declineClockDelta for the highest-pressure case (design P4h decision 3).
+pub fn withdrawClockDelta() u16 {
+    return 10; // TUNE: above declineClockDelta(pressure_increase) = 6
+}
+
+/// Rule owner: score delta for an operational withdrawal. // TUNE
+pub fn withdrawScoreDelta() i16 {
+    return -2; // TUNE: withdrawal hurts the score
+}
+
+/// Rule owner: may this operation be operationally withdrawn?
+/// Available or committed operations may be withdrawn; resolved/declined/withdrawn cannot.
+pub fn operationalWithdrawEligible(op: *const operation_mod.Operation) bool {
+    return op.state == .available or op.state == .committed;
+}
+
+/// Rule owner: may the player exploit a resolved successful combat operation?
+/// Contract active, combat template, resolved, succeeded by intent, and has ≥1 follow_up.
+pub fn exploitEligible(c: *const contract_mod.Contract, op: *const operation_mod.Operation) bool {
+    if (c.status != .active) return false;
+    if (op.state != .resolved) return false;
+    const t = operation_mod.findTemplate(op.template_key) orelse return false;
+    if (!t.combat) return false;
+    if (!operationSucceeded(op.intent, op.outcome)) return false;
+    return t.follow_up.len > 0;
+}
+
+/// Rule owner: escalation clock pressure added when exploiting a success. // TUNE
+pub fn exploitClockDelta() u16 {
+    return 4; // TUNE: pressing the advantage costs escalation pressure
+}
+
+/// Rule owner: fatigue added to the company when exploiting a success. // TUNE
+pub fn exploitFatigueAdd() u8 {
+    return 2; // TUNE: costly push exhausts the troops
+}
+
+/// Rule owner: may the player consolidate a resolved operation?
+/// Any resolved operation (combat or non-combat) may be consolidated.
+pub fn consolidateEligible(op: *const operation_mod.Operation) bool {
+    return op.state == .resolved;
+}
+
+/// Rule owner: escalation clock relief when consolidating gains. // TUNE
+pub fn consolidateClockRelief() u16 {
+    return 4; // TUNE: securing gains relieves escalation pressure
+}
+
+/// Instantiate follow-up operations from a resolved operation's template onto
+/// the contract. `id_start` is the first ID to assign; the caller advances
+/// `gs.next_operation_id` after all fallible steps succeed (rules 7, 11-13).
+/// Failure-atomic: reserves list capacity before assigning any IDs, so an
+/// OOM returns without mutating live GameState. Returns the count of follow-ups
+/// instantiated.
+pub fn instantiateFollowUps(gs: *GameState, c: *contract_mod.Contract, op: *const operation_mod.Operation, id_start: u32) !u32 {
+    const t = operation_mod.findTemplate(op.template_key) orelse return 0;
+    if (t.follow_up.len == 0) return 0;
+    // Reserve capacity first — the only fallible step — before any id is assigned.
+    try c.operations.ensureUnusedCapacity(gs.allocator(), t.follow_up.len);
+    // Infallible from here: capacity guaranteed, ids assigned in order.
+    for (t.follow_up, 0..) |fkey, i| {
+        const id: types.OperationId = @enumFromInt(id_start + @as(u32, @intCast(i)));
+        c.operations.appendAssumeCapacity(.{
+            .id = id,
+            .template_key = fkey,
+            .state = .available,
+            .opened_day = gs.clock.day_index,
+        });
+    }
+    return @intCast(t.follow_up.len);
+}
+
 /// Phase-7 sub-step: advance each active, arc-bearing contract's escalation
 /// clock by one tick per day, and advance the beat when the threshold is
 /// crossed. Failure-atomic per contract: the log slot is reserved before any
@@ -1790,4 +1898,203 @@ test "interventionGate: each of the four gates accept and refuse correctly" {
     const tech_pid = try gs.hirePerson("Tech", "Smith", .tech_mek);
     gs.unit(uid_r).?.tech = tech_pid;
     try testing.expect(interventionGate(&gs, c, &op, .field_repair));
+}
+
+test "topCollapseMinClock / atTerminalBeat / finaleCollapseDue: threshold table" {
+    const testing = std.testing;
+    const a = arc_mod.find("fracturing_garrison").?;
+
+    // topCollapseMinClock returns the max min_clock (40 for fracturing_garrison).
+    const top = topCollapseMinClock(a);
+    try testing.expect(top > 0);
+    try testing.expectEqual(@as(u16, 40), top); // the fell finale's min_clock
+
+    // atTerminalBeat: non-terminal beat returns false.
+    var c_non_term: contract_mod.Contract = .{
+        .id = @enumFromInt(1),
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+        .arc_key = "fracturing_garrison",
+        .arc_beat = 0, // beat 0 has escalation_threshold = 30, not terminal
+        .escalation_clock = top,
+    };
+    try testing.expect(!atTerminalBeat(a, &c_non_term));
+
+    // atTerminalBeat: terminal beat (beat 2 has threshold 0).
+    var terminal_beat: u8 = 0;
+    for (a.beats, 0..) |b, i| {
+        if (b.escalation_threshold == 0) terminal_beat = @intCast(i);
+    }
+    var c_term: contract_mod.Contract = c_non_term;
+    c_term.arc_beat = terminal_beat;
+    try testing.expect(atTerminalBeat(a, &c_term));
+
+    // finaleCollapseDue: at terminal beat, clock below threshold → false.
+    c_term.status = .active;
+    c_term.arc_finale_key = "";
+    c_term.escalation_clock = top - 1;
+    try testing.expect(!finaleCollapseDue(&c_term));
+
+    // finaleCollapseDue: at terminal beat, clock at threshold → true.
+    c_term.escalation_clock = top;
+    try testing.expect(finaleCollapseDue(&c_term));
+
+    // finaleCollapseDue: already resolved → false.
+    c_term.arc_finale_key = "held";
+    try testing.expect(!finaleCollapseDue(&c_term));
+    c_term.arc_finale_key = "";
+
+    // finaleCollapseDue: non-terminal beat → false.
+    c_term.arc_beat = 0;
+    try testing.expect(!finaleCollapseDue(&c_term));
+}
+
+test "withdrawClockDelta / withdrawScoreDelta / exploitClockDelta / consolidateClockRelief: sign/magnitude invariants" {
+    const testing = std.testing;
+    // Withdraw pressure must be >= declineClockDelta for pressure_increase note.
+    const t_pressure = operation_mod.findTemplate("negotiate_terms").?; // pressure_increase
+    try testing.expect(withdrawClockDelta() >= declineClockDelta(t_pressure));
+    // Score delta is negative (withdrawal hurts the score).
+    try testing.expect(withdrawScoreDelta() < 0);
+    // Exploit adds pressure.
+    try testing.expect(exploitClockDelta() > 0);
+    // Exploit adds fatigue.
+    try testing.expect(exploitFatigueAdd() > 0);
+    // Consolidate relieves pressure.
+    try testing.expect(consolidateClockRelief() > 0);
+}
+
+test "operationalWithdrawEligible / exploitEligible / consolidateEligible: state-based gates" {
+    const testing = std.testing;
+
+    // operationalWithdrawEligible.
+    const op_avail: operation_mod.Operation = .{ .id = @enumFromInt(1), .template_key = "repel_probe", .state = .available, .opened_day = 0 };
+    const op_committed: operation_mod.Operation = .{ .id = @enumFromInt(1), .template_key = "repel_probe", .state = .committed, .opened_day = 0 };
+    const op_resolved: operation_mod.Operation = .{ .id = @enumFromInt(1), .template_key = "repel_probe", .state = .resolved, .opened_day = 0, .outcome = .success };
+    const op_declined: operation_mod.Operation = .{ .id = @enumFromInt(1), .template_key = "repel_probe", .state = .declined, .opened_day = 0 };
+    try testing.expect(operationalWithdrawEligible(&op_avail));
+    try testing.expect(operationalWithdrawEligible(&op_committed));
+    try testing.expect(!operationalWithdrawEligible(&op_resolved));
+    try testing.expect(!operationalWithdrawEligible(&op_declined));
+
+    // consolidateEligible: resolved → true; others → false.
+    try testing.expect(consolidateEligible(&op_resolved));
+    try testing.expect(!consolidateEligible(&op_avail));
+    try testing.expect(!consolidateEligible(&op_committed));
+
+    // exploitEligible: requires active, combat, resolved, succeeded, follow_up present.
+    var c_active: contract_mod.Contract = .{
+        .id = @enumFromInt(1),
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+        .status = .active,
+        .arc_key = "fracturing_garrison",
+    };
+    // repel_probe.follow_up now has "counterattack"; success → exploitable.
+    var op_repel_success: operation_mod.Operation = .{ .id = @enumFromInt(1), .template_key = "repel_probe", .state = .resolved, .opened_day = 0, .outcome = .success, .intent = .secure_objective };
+    try testing.expect(exploitEligible(&c_active, &op_repel_success));
+
+    // Non-combat → not exploitable.
+    const op_non_combat: operation_mod.Operation = .{ .id = @enumFromInt(2), .template_key = "negotiate_terms", .state = .resolved, .opened_day = 0, .outcome = .success, .intent = .secure_objective };
+    try testing.expect(!exploitEligible(&c_active, &op_non_combat));
+
+    // Failed → not exploitable.
+    op_repel_success.outcome = .failure;
+    try testing.expect(!exploitEligible(&c_active, &op_repel_success));
+    op_repel_success.outcome = .success;
+
+    // Non-active contract → not exploitable.
+    c_active.status = .completed;
+    try testing.expect(!exploitEligible(&c_active, &op_repel_success));
+    c_active.status = .active;
+}
+
+test "instantiateFollowUps: consumer agreement — every key in follow_up list; counter not advanced" {
+    const testing = std.testing;
+    var gs = @import("state.zig").GameState.init(testing.allocator, .{});
+    defer gs.deinit();
+
+    var c: contract_mod.Contract = .{
+        .id = @enumFromInt(1),
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+        .status = .active,
+        .arc_key = "fracturing_garrison",
+    };
+    const t_repel = operation_mod.findTemplate("repel_probe").?;
+    const op: operation_mod.Operation = .{
+        .id = @enumFromInt(1),
+        .template_key = "repel_probe",
+        .state = .resolved,
+        .opened_day = 0,
+        .outcome = .success,
+    };
+    try testing.expect(t_repel.follow_up.len > 0);
+
+    const id_start = gs.next_operation_id;
+    const count = try instantiateFollowUps(&gs, &c, &op, id_start);
+    // Counter must not be advanced by the owner.
+    try testing.expectEqual(id_start, gs.next_operation_id);
+    try testing.expectEqual(t_repel.follow_up.len, count);
+    try testing.expectEqual(t_repel.follow_up.len, c.operations.items.len);
+
+    // Every instantiated key is in the follow_up list.
+    for (c.operations.items) |new_op| {
+        var found = false;
+        for (t_repel.follow_up) |fk| {
+            if (std.mem.eql(u8, fk, new_op.template_key)) {
+                found = true;
+                break;
+            }
+        }
+        try testing.expect(found);
+        try testing.expectEqual(operation_mod.OperationState.available, new_op.state);
+    }
+}
+
+test "instantiateFollowUps: failure-atomic under injected OOM" {
+    const testing = std.testing;
+    var outer = std.heap.ArenaAllocator.init(testing.allocator);
+    defer outer.deinit();
+    var gs = @import("state.zig").GameState.init(outer.allocator(), .{});
+    defer gs.deinit();
+
+    var c: contract_mod.Contract = .{
+        .id = @enumFromInt(1),
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+        .status = .active,
+        .arc_key = "fracturing_garrison",
+    };
+    const op: operation_mod.Operation = .{
+        .id = @enumFromInt(1),
+        .template_key = "repel_probe",
+        .state = .resolved,
+        .opened_day = 0,
+        .outcome = .success,
+    };
+    const id_start = gs.next_operation_id;
+
+    // Block all further arena allocations so ensureUnusedCapacity fails.
+    gs.arena.state.used_list = null;
+    gs.arena.state.free_list = null;
+    gs.arena.child_allocator = std.testing.failing_allocator;
+
+    try testing.expectError(error.OutOfMemory, instantiateFollowUps(&gs, &c, &op, id_start));
+    // Counter unchanged — no IDs consumed.
+    try testing.expectEqual(id_start, gs.next_operation_id);
+    // No operations appended.
+    try testing.expectEqual(@as(usize, 0), c.operations.items.len);
 }

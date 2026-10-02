@@ -264,7 +264,9 @@
         .press_gap_days = 3, // TUNE: a pressed advance is the next morning-ish
         .press_score = 2, // TUNE: the employer sees initiative
         .press_fatigue = 4, // TUNE: no repair, no rearm, no sleep
+        .press_escalation = 4, // TUNE: pressing the advance adds escalation pressure (P4h)
         .consolidate_morale = 2, // TUNE: a night off the line
+        .consolidate_escalation = -3, // TUNE: consolidating relieves escalation pressure (P4h)
         .contact_warning_days = 3, // TUNE: long enough to change ROE or recall before the fight
     },
     // Field supply plan sizing constants. // TUNE

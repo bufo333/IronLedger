@@ -31,6 +31,16 @@
             .combat = true,
             .objective = "Repel a probing attack on the garrison perimeter",
             .expected_days = 1, // TUNE
+            .follow_up = .{"counterattack"},
+            .decline_note = "pressure_increase",
+        },
+        .{
+            .key = "counterattack",
+            .name = "Counterattack",
+            .arc_key = "fracturing_garrison",
+            .combat = true,
+            .objective = "Strike the enemy before they can regroup and press the advantage", // TUNE
+            .expected_days = 2, // TUNE
             .follow_up = .{},
             .decline_note = "pressure_increase",
         },

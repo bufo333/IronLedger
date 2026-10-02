@@ -1535,19 +1535,19 @@ their attention on one problem prevents its use elsewhere.
 The existing press/consolidate, recovery, salvage and field-repair decisions
 become part of the operation campaign rather than isolated battle aftermath.
 
-- P4g.1 Bind existing post-battle decisions to operation state and
+- [x] P4g.1 Bind existing post-battle decisions to operation state and
   escalation clocks. Their answers change follow-up operations, enemy posture,
   readiness, local state or finale paths.
-- P4g.2 Add operation-level choices where the template permits: exploit
+- [x] P4g.2 Add operation-level choices where the template permits: exploit
   success, consolidate gains, tactical withdrawal, redirect to a crisis,
   negotiate, or hand responsibility back to the employer.
-- P4g.3 Define distinct tactical withdrawal, operational withdrawal and
+- [x] P4g.3 Define distinct tactical withdrawal, operational withdrawal and
   contract recall rules. Each owns its eligibility, cost and consequences;
   contract recall continues to use the breach clause.
-- P4g.4 Add named, arc-scoped clocks only where needed: enemy initiative,
+- [x] P4g.4 Add named, arc-scoped clocks only where needed: enemy initiative,
   local instability, civilian danger, employer patience, supply pressure and
   rival influence. Do not add a universal hidden doom meter.
-- P4g.5 Implement finale selection and resolution from arc state,
+- [x] P4g.5 Implement finale selection and resolution from arc state,
   operations, relationships, world state and clocks. A finale may be a battle,
   negotiation, evacuation, holdout, betrayal or withdrawal. It updates the
   contract result and persistent consequences through one resolution owner.

@@ -536,6 +536,9 @@ Shows the arc's current beat briefing and all instantiated operations.
 Each row includes the current tempo posture (`tempo:advance/recon/prepare/delay`) and
 an intelligence confidence on a 0–10 scale when non-zero (`intel:N/10`).
 
+The briefing line shows the current beat name followed by the escalation clock and
+collapse threshold (`esc:N/T` when a collapse finale is defined; `esc:N` otherwise).
+
 | Key | Does |
 |---|---|
 | `↑ ↓` | move cursor |
@@ -543,6 +546,9 @@ an intelligence confidence on a 0–10 scale when non-zero (`intel:N/10`).
 | `r` | open the tempo picker for the highlighted operation (P4f) |
 | `i` | open the intervention picker for a committed combat operation (P4g) |
 | `x` | decline the highlighted operation (raises the escalation clock by the operation's `decline_note` pressure) |
+| `w` | operationally withdraw the highlighted operation (available or committed; adds escalation pressure, applies score penalty) (P4h) |
+| `e` | exploit a resolved successful combat operation (launches follow-ups, adds escalation pressure) (P4h) |
+| `o` | consolidate a resolved operation (relieves escalation pressure) (P4h) |
 | `Esc` | close without acting |
 
 #### Intervention picker (P4g)

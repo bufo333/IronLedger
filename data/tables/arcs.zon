@@ -44,11 +44,19 @@
                     .key = "fell",
                     .name = "Garrison Overrun",
                     .min_clock = 40, // TUNE: high accumulated pressure triggers collapse
+                    .ends_contract = true, // TUNE: collapse ends the contract immediately
+                    .score_delta = 0, // TUNE: fail clause owns consequences
+                    .vp_delta = 0, // TUNE
+                    .standing_delta = 0, // TUNE
                 },
                 .{
                     .key = "held",
                     .name = "Garrison Holds",
                     .min_clock = 0, // unconditional fallback
+                    .ends_contract = false, // TUNE: normal end-of-term
+                    .score_delta = 2, // TUNE: garrison held earns a bonus
+                    .vp_delta = 3, // TUNE
+                    .standing_delta = 2, // TUNE: employer pleased
                 },
             },
             .opening = .{ "negotiate_terms", "repel_probe" },

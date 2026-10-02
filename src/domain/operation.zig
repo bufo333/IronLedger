@@ -18,6 +18,9 @@ pub const OperationState = enum {
     finale,
     aftermath,
     declined,
+    /// Operationally withdrawn before resolution: force preserved,
+    /// escalation pressure applied. (P4h)
+    withdrawn,
 };
 
 /// Resolution outcome bands, from worst to best. `none` = not yet resolved.
@@ -255,6 +258,29 @@ test "data: operations.zon loads and validates" {
     const repel = findTemplate("repel_probe").?;
     try testing.expectEqualStrings("fracturing_garrison", repel.arc_key);
     try testing.expect(repel.combat);
+}
+
+test "OperationState: withdrawn exists and is distinct from all other states" {
+    const testing = std.testing;
+    const w = OperationState.withdrawn;
+    // Distinct from the original eight states.
+    try testing.expect(w != .briefing);
+    try testing.expect(w != .available);
+    try testing.expect(w != .committed);
+    try testing.expect(w != .resolved);
+    try testing.expect(w != .escalation);
+    try testing.expect(w != .finale);
+    try testing.expect(w != .aftermath);
+    try testing.expect(w != .declined);
+    // Default state is available (unchanged).
+    const op: Operation = .{
+        .id = @enumFromInt(1),
+        .template_key = "negotiate_terms",
+        .state = .available,
+        .opened_day = 0,
+    };
+    try testing.expectEqual(OperationState.available, op.state);
+    try testing.expect(op.state != .withdrawn);
 }
 
 test "LanceTask: all seven values have a non-empty markup-safe label; Operation.tasks defaults to empty" {

@@ -3819,7 +3819,7 @@ test "a rebuilt store loads to the identical digest" {
     var diff_buf: [128]u8 = undefined;
     try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &diff_buf) orelse "");
     // Re-pinned by P4g (adds command_capacity and operation_intervention).
-    try std.testing.expectEqual(@as(u64, 2760168904867966449), hash_before);
+    try std.testing.expectEqual(@as(u64, 11895774777608996228), hash_before);
 }
 
 test "every next-ID counter resumes past a higher owned id after load" {
@@ -4305,7 +4305,7 @@ test "golden master: a played year hashes to its pinned value, and a save of it 
     // Any change to a simulated or saved result moves this; re-pin it only
     // when the change is meant. Re-pinned by P4g (adds command_capacity and
     // operation_intervention).
-    try std.testing.expectEqual(@as(u64, 2760168904867966449), digest.stateHash(&gs));
+    try std.testing.expectEqual(@as(u64, 11895774777608996228), digest.stateHash(&gs));
 
     const store = try Store.open(":memory:");
     defer store.close();
@@ -5151,4 +5151,56 @@ test "invalid and orphaned operation_intervention rows reject the load as corrup
         try s.db.exec("PRAGMA foreign_keys = ON");
         try std.testing.expectError(error.CorruptSave, s.load(std.testing.allocator, gs.campaign_id));
     }
+}
+
+test "withdrawn operation and fell finale round-trip through save/load with identical stateHash (P4h)" {
+    // Rules 47, 67 / P4h: a contract whose operation is .withdrawn and whose
+    // arc_finale_key is 'fell' (status = .failed) survives save → load
+    // with an identical stateHash. This covers the new OperationState.withdrawn
+    // variant which relies on the existing TEXT column for operation.state.
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 77099 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    const co = try gs.createForce("Gamma", .company, .none);
+    const cid: types.ContractId = @enumFromInt(1);
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+        .status = .failed,
+        .assigned_company = co,
+        .arc_key = "fracturing_garrison",
+        .arc_finale_key = "fell",
+        .escalation_clock = 40,
+    });
+    const c = gs.contracts.getPtr(cid).?;
+    try c.operations.append(gs.allocator(), .{
+        .id = @enumFromInt(1),
+        .template_key = "repel_probe",
+        .state = .withdrawn,
+        .opened_day = 0,
+        .resolved_day = 0,
+    });
+    gs.next_operation_id = 2;
+    gs.next_contract_id = 2;
+
+    const before = digest.stateHash(&gs);
+
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+
+    var diff_buf: [128]u8 = undefined;
+    try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &diff_buf) orelse "");
+    try std.testing.expectEqual(before, digest.stateHash(&loaded));
+
+    const lc = loaded.contracts.getPtr(cid).?;
+    try std.testing.expectEqualStrings("fell", lc.arc_finale_key);
+    try std.testing.expectEqual(@import("../domain/contract.zig").ContractStatus.failed, lc.status);
+    try std.testing.expectEqual(operation_mod.OperationState.withdrawn, lc.operations.items[0].state);
 }

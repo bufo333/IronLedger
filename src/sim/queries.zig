@@ -568,6 +568,7 @@ pub fn effectsText(alloc: Alloc, effects: []const @import("../domain/events.zig"
         .engagement => try appendTag(alloc, &out, false, try events_mod.effectPhrase(alloc, e)),
         .seize_hull => try appendTag(alloc, &out, false, try events_mod.effectPhrase(alloc, e)),
         .delay_arrival => try appendTag(alloc, &out, false, try events_mod.effectPhrase(alloc, e)),
+        .escalation => |d| try appendTag(alloc, &out, d <= 0, try events_mod.effectPhrase(alloc, e)),
     };
     return out.toOwnedSlice(alloc);
 }
@@ -6828,19 +6829,30 @@ pub const OperationRow = struct {
     interventions: []const operation_mod.Intervention,
     /// Interventions that pass their gate and whose cost fits remaining capacity (P4g).
     affordable_interventions: []const operation_mod.Intervention,
+    /// Whether this operation may be operationally withdrawn (P4h).
+    can_withdraw: bool,
+    /// Whether this operation may be exploited (P4h).
+    can_exploit: bool,
+    /// Whether this operation may be consolidated (P4h).
+    can_consolidate: bool,
 };
 
 pub const Operations = struct {
     briefing: []const u8,
     rows: []OperationRow,
+    /// Current escalation clock for this contract (P4h).
+    escalation_clock: u16,
+    /// Collapse threshold (topCollapseMinClock); 0 if no collapse finale defined (P4h).
+    collapse_threshold: u16,
 };
 
 /// Return the operations board for an active arc contract.
 /// Caller owns the result (arena-friendly).
 pub fn contractOperations(alloc: Alloc, gs: *GameState, contract_id: types.ContractId) !Operations {
-    const c = gs.contracts.getPtr(contract_id) orelse return Operations{ .briefing = "", .rows = &.{} };
-    if (c.arc_key.len == 0) return Operations{ .briefing = "", .rows = &.{} };
-    const a = @import("../domain/arc.zig").find(c.arc_key) orelse return Operations{ .briefing = "", .rows = &.{} };
+    const c = gs.contracts.getPtr(contract_id) orelse return Operations{ .briefing = "", .rows = &.{}, .escalation_clock = 0, .collapse_threshold = 0 };
+    if (c.arc_key.len == 0) return Operations{ .briefing = "", .rows = &.{}, .escalation_clock = 0, .collapse_threshold = 0 };
+    const arc_mod = @import("../domain/arc.zig");
+    const a = arc_mod.find(c.arc_key) orelse return Operations{ .briefing = "", .rows = &.{}, .escalation_clock = 0, .collapse_threshold = 0 };
 
     // Briefing: current beat's name + any active finale key.
     const briefing: []const u8 = if (c.arc_beat < a.beats.len) blk: {
@@ -6884,9 +6896,17 @@ pub fn contractOperations(alloc: Alloc, gs: *GameState, contract_id: types.Contr
             .command_capacity_reserved = operations_m.employerReserved(c.terms.command_rights),
             .interventions = op.interventions.items,
             .affordable_interventions = affordable_interventions,
+            .can_withdraw = operations_m.operationalWithdrawEligible(op),
+            .can_exploit = operations_m.exploitEligible(c, op),
+            .can_consolidate = operations_m.consolidateEligible(op),
         });
     }
-    return Operations{ .briefing = briefing, .rows = try rows.toOwnedSlice(alloc) };
+    return Operations{
+        .briefing = briefing,
+        .rows = try rows.toOwnedSlice(alloc),
+        .escalation_clock = c.escalation_clock,
+        .collapse_threshold = operations_m.topCollapseMinClock(a),
+    };
 }
 
 /// Return the list of interventions that pass their gate and whose cost fits the
@@ -7220,6 +7240,65 @@ test "contractOperations: tempo and intel fields are populated (P4f)" {
     try std.testing.expect(row.legal_tempo.len > 0);
     // intel must be populated (confidence is a u8; just checking it compiles and is a value).
     _ = row.intel.confidence;
+}
+
+test "contractOperations: can_withdraw/can_exploit/can_consolidate and escalation_clock/collapse_threshold populated (P4h)" {
+    // Rule 20 consumer test / P4h: contractOperations must surface the P4h eligibility
+    // flags and escalation metadata from the rule owners.
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 77099 });
+    defer gs.deinit();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const cid: types.ContractId = @enumFromInt(1);
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+        .status = .active,
+        .arc_key = "fracturing_garrison",
+        .escalation_clock = 15,
+    });
+    const c = gs.contracts.getPtr(cid).?;
+
+    // An available operation: can_withdraw=true, can_exploit=false, can_consolidate=false.
+    try c.operations.append(gs.allocator(), .{
+        .id = @enumFromInt(1),
+        .template_key = "negotiate_terms",
+        .state = .available,
+        .opened_day = 0,
+    });
+    // A resolved successful combat op with follow-up: can_withdraw=false, can_exploit=true, can_consolidate=true.
+    try c.operations.append(gs.allocator(), .{
+        .id = @enumFromInt(2),
+        .template_key = "repel_probe",
+        .state = .resolved,
+        .opened_day = 0,
+        .outcome = .success,
+        .intent = .secure_objective,
+    });
+
+    const ops = try contractOperations(arena.allocator(), &gs, cid);
+    try std.testing.expectEqual(@as(usize, 2), ops.rows.len);
+
+    // Escalation metadata.
+    try std.testing.expectEqual(@as(u16, 15), ops.escalation_clock);
+    try std.testing.expect(ops.collapse_threshold > 0); // fracturing_garrison has fell at min_clock 40
+
+    // Available operation.
+    const row0 = ops.rows[0];
+    try std.testing.expect(row0.can_withdraw);
+    try std.testing.expect(!row0.can_exploit);
+    try std.testing.expect(!row0.can_consolidate);
+
+    // Resolved successful combat with follow-up.
+    const row1 = ops.rows[1];
+    try std.testing.expect(!row1.can_withdraw);
+    try std.testing.expect(row1.can_exploit); // repel_probe.follow_up is now non-empty
+    try std.testing.expect(row1.can_consolidate);
 }
 
 test "taskEligible excludes a non-operational lance that combatLances still lists (P4e)" {

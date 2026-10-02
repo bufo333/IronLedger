@@ -40,7 +40,7 @@ pub const DayPhase = enum {
     acquisition_and_markets,
     maintenance, // weekly per unit
     training,
-    contract_events, // includes: non-combat op resolution (operation_control.resolveDueOperations) then escalation-clock advancement (operations.advanceClocks)
+    contract_events, // includes: non-combat op resolution (operation_control.resolveDueOperations) then escalation-clock advancement (operations.advanceClocks); arc finale collapse check (resolveArcFinales) after battle.runDaily
     battle_resolution,
     morale_fatigue,
     finances, // payday on the 1st
@@ -80,6 +80,7 @@ pub fn advanceDay(gs: *GameState) !void {
     try operations.advanceClocks(gs); // contract_events sub-step: escalation-clock advancement
     if (gs.clock.date.isPayday()) try operations.refreshCommandCapacity(gs); // monthly command-capacity grant
     try battle.runDaily(gs); // battle_resolution: due engagements resolve
+    try resolveArcFinales(gs); // arc collapse check: high escalation at terminal beat triggers immediate finale (P4h)
     try contract_control.checkEffectiveness(gs); // the ineffectiveness clock
     if (gs.clock.day_index % types.days_per_week == 0 and gs.clock.day_index > 0) {
         try medical.runWeeklyRest(gs); // morale_fatigue phase
@@ -548,9 +549,18 @@ fn runContracts(gs: *GameState) !void {
                 try contract_market.refreshContractWorld(gs, c);
             },
             .active => if (c.end_day != null and gs.clock.day_index >= c.end_day.?) {
-                // End of term: a performance failure is a failed contract
-                // (CamOps — not a breach: no clawback, no cooling); otherwise
-                // the tour completes. VP are banked as the score moves, so
+                // End of term: resolve the arc finale if not yet selected (P4h).
+                // A collapse finale (ends_contract==true) immediately fails the contract.
+                if (c.arc_key.len > 0 and c.arc_finale_key.len == 0) {
+                    const f = try operation_control.resolveFinale(gs, c);
+                    if (f != null and f.?.ends_contract) {
+                        try contract_control.fail(gs, c, "garrison overrun");
+                        continue;
+                    }
+                }
+
+                // Performance failure (CamOps — not a breach: no clawback, no cooling);
+                // otherwise the tour completes. VP are banked as the score moves, so
                 // nothing is added here.
                 if (c.score <= contract_mod.Contract.fail_score) {
                     try contract_control.fail(gs, c, "failed on performance");
@@ -579,6 +589,26 @@ fn runContracts(gs: *GameState) !void {
                 });
             },
             else => {},
+        }
+    }
+}
+
+/// Arc collapse check (P4h): after each battle, if any active arc-bearing
+/// contract has accumulated enough escalation to trigger a collapse finale
+/// (`finaleCollapseDue`), select the finale immediately.  For a collapse
+/// finale (`ends_contract==true`) the contract is failed on the spot; the
+/// player does not wait until end-of-term.  Non-collapse finales (held) may
+/// also be selected here if the terminal beat has been reached.
+/// Failure-atomic per contract: `resolveFinale` follows validate→reserve→commit.
+fn resolveArcFinales(gs: *GameState) !void {
+    var it = gs.contracts.iterator();
+    while (it.next()) |entry| {
+        const c = entry.value_ptr;
+        if (c.status != .active or c.arc_key.len == 0) continue;
+        if (!operations.finaleCollapseDue(c)) continue;
+        const f = try operation_control.resolveFinale(gs, c) orelse continue;
+        if (f.ends_contract) {
+            try contract_control.fail(gs, c, "garrison overrun");
         }
     }
 }
@@ -1230,6 +1260,114 @@ test "a part order in transit that lands today is stocked exactly once — first
     // A further runTravel does not double-deliver (status is already .delivered).
     try runTravel(&gs);
     try std.testing.expectEqual(stock_before + 1, gs.stockCount(site, "mlas"));
+}
+
+test "runContracts: resolveFinale called at end-of-term; fell finale fails the contract (P4h)" {
+    const testing = std.testing;
+    var gs = GameState.init(testing.allocator, .{});
+    defer gs.deinit();
+
+    const arc_mod = @import("../domain/arc.zig");
+    const a = arc_mod.find("fracturing_garrison").?;
+    var terminal_beat: u8 = 0;
+    for (a.beats, 0..) |b, i| {
+        if (b.escalation_threshold == 0) terminal_beat = @intCast(i);
+    }
+
+    // Find fell min_clock.
+    var fell_min: u16 = 40;
+    for (a.finales) |f| {
+        if (f.min_clock > 0) fell_min = f.min_clock;
+    }
+
+    // Held finale at end of term (low clock, at terminal beat).
+    {
+        const cid: types.ContractId = @enumFromInt(1);
+        try gs.contracts.put(gs.allocator(), cid, .{
+            .id = cid,
+            .kind = .garrison_duty,
+            .employer_key = "LC",
+            .enemy_key = "DC",
+            .planet_key = "galatea",
+            .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+            .status = .active,
+            .arc_key = "fracturing_garrison",
+            .arc_beat = terminal_beat,
+            .escalation_clock = 0,
+            .end_day = 0, // due today
+        });
+        gs.clock.day_index = 0;
+        try runContracts(&gs);
+        const c = gs.contracts.getPtr(cid).?;
+        // held finale — not ends_contract, contract should complete (score ≥ fail_score).
+        try testing.expectEqualStrings("held", c.arc_finale_key);
+        try testing.expect(c.status == .completed);
+    }
+
+    // Fell finale at end of term (high clock, at terminal beat) → failed.
+    {
+        const cid2: types.ContractId = @enumFromInt(2);
+        try gs.contracts.put(gs.allocator(), cid2, .{
+            .id = cid2,
+            .kind = .garrison_duty,
+            .employer_key = "LC",
+            .enemy_key = "DC",
+            .planet_key = "galatea",
+            .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+            .status = .active,
+            .arc_key = "fracturing_garrison",
+            .arc_beat = terminal_beat,
+            .escalation_clock = fell_min,
+            .end_day = 0,
+        });
+        gs.clock.day_index = 0;
+        try runContracts(&gs);
+        const c2 = gs.contracts.getPtr(cid2).?;
+        try testing.expectEqualStrings("fell", c2.arc_finale_key);
+        try testing.expect(c2.status == .failed);
+    }
+}
+
+test "resolveArcFinales: collapse finale fires mid-tour when threshold crossed (P4h F1 fix)" {
+    const testing = std.testing;
+    var gs = GameState.init(testing.allocator, .{});
+    defer gs.deinit();
+
+    const arc_mod = @import("../domain/arc.zig");
+    const a = arc_mod.find("fracturing_garrison").?;
+    var terminal_beat: u8 = 0;
+    for (a.beats, 0..) |b, i| {
+        if (b.escalation_threshold == 0) terminal_beat = @intCast(i);
+    }
+    var fell_min: u16 = 40;
+    for (a.finales) |f| {
+        if (f.min_clock > 0) fell_min = f.min_clock;
+    }
+
+    const cid: types.ContractId = @enumFromInt(1);
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+        .status = .active,
+        .arc_key = "fracturing_garrison",
+        .arc_beat = terminal_beat,
+        .escalation_clock = fell_min, // threshold crossed
+        .end_day = 9999, // end of term far away — resolveArcFinales must fire
+    });
+
+    try resolveArcFinales(&gs);
+    const c = gs.contracts.getPtr(cid).?;
+    try testing.expectEqualStrings("fell", c.arc_finale_key);
+    try testing.expect(c.status == .failed); // collapse: failed immediately
+
+    // Idempotent: second call does nothing.
+    const before_status = c.status;
+    try resolveArcFinales(&gs);
+    try testing.expectEqual(before_status, c.status);
 }
 
 test "scratch operations do not grow the campaign arena" {

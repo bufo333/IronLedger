@@ -583,6 +583,24 @@ fn parseVerb(verb: []const u8, tokens: *std.mem.TokenIterator(u8, .scalar)) Pars
         const kind = std.meta.stringToEnum(operation_mod.Intervention, kind_str) orelse return error.BadArguments;
         return .{ .apply_intervention = .{ .contract = cid, .operation = oid, .intervention = kind } };
     }
+    if (eq(u8, verb, "withdraw")) {
+        // withdraw <contract-id> <operation-id>
+        const cid: types.ContractId = @enumFromInt(try num(u32, tokens.next()));
+        const oid: types.OperationId = @enumFromInt(try num(u32, tokens.next()));
+        return .{ .withdraw_operation = .{ .contract = cid, .operation = oid } };
+    }
+    if (eq(u8, verb, "exploit")) {
+        // exploit <contract-id> <operation-id>
+        const cid: types.ContractId = @enumFromInt(try num(u32, tokens.next()));
+        const oid: types.OperationId = @enumFromInt(try num(u32, tokens.next()));
+        return .{ .exploit_operation = .{ .contract = cid, .operation = oid } };
+    }
+    if (eq(u8, verb, "consolidate")) {
+        // consolidate <contract-id> <operation-id>
+        const cid: types.ContractId = @enumFromInt(try num(u32, tokens.next()));
+        const oid: types.OperationId = @enumFromInt(try num(u32, tokens.next()));
+        return .{ .consolidate_operation = .{ .contract = cid, .operation = oid } };
+    }
     return null;
 }
 
@@ -723,6 +741,10 @@ pub fn errorText(err: anyerror) []const u8 {
         error.InterventionGateUnmet => "the intervention gate is not met — check that the required assets are available (scout lance, reserve lance, fighter, or tech).",
         error.InsufficientCommandCapacity => "not enough command capacity — use `operations <contract-id>` to see remaining capacity.",
         error.InterventionAlreadyApplied => "that intervention has already been applied to this operation.",
+        error.OperationNotWithdrawable => "that operation cannot be withdrawn — only available or committed operations may be withdrawn.",
+        error.OperationNotExploitable => "that operation cannot be exploited — only resolved successful combat operations with follow-ups are exploitable.",
+        error.NoFollowUp => "no follow-up operations are defined for that template.",
+        error.OperationNotConsolidatable => "that operation cannot be consolidated — only resolved operations may be consolidated.",
         else => "an unexpected internal error",
     };
 }
@@ -809,6 +831,9 @@ pub const verbs = [_][]const u8{
     "untask",
     "tempo",
     "intervene",
+    "withdraw",
+    "exploit",
+    "consolidate",
     "found",
     "link",
     "assignco",
@@ -896,6 +921,9 @@ pub fn usage(verb: []const u8) ?[]const u8 {
         .{ "untask", "untask <contract-id> <operation-id> <lance-id>   (clear a lance task assignment)" },
         .{ "tempo", "tempo <contract-id> <operation-id> <posture>   (set operation tempo; posture: advance, recon, prepare, delay — recon/prepare for combat ops only)" },
         .{ "intervene", "intervene <contract-id> <operation-id> <kind>   (apply command intervention; kind: emergency_recon, reinforce, air_cover, field_repair)" },
+        .{ "withdraw", "withdraw <contract-id> <operation-id>   (operationally withdraw from an available or committed operation; adds escalation pressure)" },
+        .{ "exploit", "exploit <contract-id> <operation-id>   (exploit a resolved successful combat op; launches follow-ups, adds pressure)" },
+        .{ "consolidate", "consolidate <contract-id> <operation-id>   (consolidate a resolved op; relieves escalation pressure)" },
         .{ "found", "found <planet key> <name>" },
         .{ "link", "link hq:A hq:B [level 1-3]" },
         .{ "assignco", "assignco co:N hq:M" },

@@ -23,6 +23,16 @@ pub const Finale = struct {
     name: []const u8,
     /// Minimum escalation clock at which this ending may be selected.
     min_clock: u16,
+    /// true = this finale ends the contract immediately (collapse), triggering
+    /// contract_control.fail. The min_clock==0 fallback must have ends_contract==false
+    /// (an auto-failing default is illegal). // TUNE
+    ends_contract: bool = false,
+    /// Contract score delta applied when this finale resolves (non-collapse only). // TUNE
+    score_delta: i16 = 0,
+    /// Victory-point delta applied when this finale resolves (non-collapse only). // TUNE
+    vp_delta: i16 = 0,
+    /// Employer standing delta applied when this finale resolves (non-collapse only). // TUNE
+    standing_delta: i16 = 0,
 };
 
 /// One arc archetype: a set of contract kinds it applies to, an ordered
@@ -99,6 +109,14 @@ test "data: arcs.zon loads and validates" {
             try testing.expect(markupSafe(f.name));
             try testing.expect(f.key.len > 0);
             if (f.min_clock == 0) fallback_count += 1;
+            // Finale delta bounds // TUNE
+            try testing.expect(f.score_delta >= -100 and f.score_delta <= 100);
+            try testing.expect(f.vp_delta >= -100 and f.vp_delta <= 100);
+            try testing.expect(f.standing_delta >= -100 and f.standing_delta <= 100);
+            // The min_clock==0 fallback must NOT be a collapse (auto-fail is illegal).
+            if (f.min_clock == 0) try testing.expect(!f.ends_contract);
+            // A collapse finale must have a non-zero min_clock.
+            if (f.ends_contract) try testing.expect(f.min_clock > 0);
         }
         try testing.expectEqual(@as(u32, 1), fallback_count);
 

@@ -412,7 +412,11 @@ pub const Tuning = struct {
         press_gap_days: u32, // TUNE
         press_score: i16, // TUNE
         press_fatigue: u8, // TUNE
+        /// Escalation clock pressure added when pressing the advance (P4h). // TUNE
+        press_escalation: i16, // TUNE
         consolidate_morale: i8, // TUNE
+        /// Escalation clock relief when consolidating (P4h). // TUNE
+        consolidate_escalation: i16, // TUNE
         /// Days before a scheduled engagement that the contact warning
         /// shows. At most `battle.min_gap_days`, so every scheduled
         /// engagement opens its window on an advance.
@@ -825,6 +829,7 @@ pub const t: Tuning = @import("tuning_zon");
 /// other signed knob must be zero or more.
 const signed_knobs = [_][]const u8{
     "autoresolve.quality_step_bp",
+    "battle.consolidate_escalation",
     "battle.morale.defeat",
     "battle.morale.draw",
     "battle.morale.rout",

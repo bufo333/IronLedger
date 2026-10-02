@@ -652,6 +652,13 @@ fn applyEffectsFor(gs: *GameState, effects: []const events.Effect, contract: ?*c
             // here from the live stores, by the function the inbox row
             // called — so what was offered is what the techs do.
             .field_repair => |order| try fieldRepairNight(gs, company, contract_id, order),
+            .escalation => |delta| if (contract) |c| {
+                if (delta < 0) {
+                    c.escalation_clock -|= @intCast(@abs(delta));
+                } else {
+                    c.escalation_clock +|= @intCast(delta);
+                }
+            },
             .delay_arrival => |days| if (contract) |c| {
                 if (c.status == .transit) {
                     if (c.arrive_day) |d| c.arrive_day = d + days;
@@ -784,8 +791,8 @@ pub fn queueMissing(gs: *GameState, person_id: types.PersonId, company: types.Fo
 pub fn pressEntry() Entry {
     const t = tuning.battle;
     return .{ .kind = .press_or_consolidate, .log = "the field is held and the enemy is falling back — press the advance, or consolidate and put the company back together", .options = &.{
-        .{ .label = "Press the advance", .effects = &.{ .{ .next_battle_in = @intCast(t.press_gap_days) }, .{ .score = t.press_score }, .{ .fatigue = t.press_fatigue } } },
-        .{ .label = "Consolidate — repair, rearm, rest", .effects = &.{.{ .morale = t.consolidate_morale }} },
+        .{ .label = "Press the advance", .effects = &.{ .{ .next_battle_in = @intCast(t.press_gap_days) }, .{ .score = t.press_score }, .{ .fatigue = t.press_fatigue }, .{ .escalation = t.press_escalation } } },
+        .{ .label = "Consolidate — repair, rearm, rest", .effects = &.{ .{ .morale = t.consolidate_morale }, .{ .escalation = t.consolidate_escalation } } },
     }, .default_choice = 1 };
 }
 
@@ -1155,7 +1162,7 @@ test "automatic events never move money, stock or hulls — those are decisions"
             if (e.options.len > 0) continue;
             for (e.auto_effects) |fx| switch (fx) {
                 .fatigue, .morale, .xp_all, .score, .reputation, .employer_standing => {},
-                .cash, .cash_monthly_pct, .supply_loss, .parts_windfall, .field_stock, .damage_random_units, .damage_convoy_units, .raise_pct, .retention_bonus_months, .let_go, .replace_from_hall, .ransom_prisoner, .release_prisoner, .recruit_prisoner, .ransom_mia, .exchange_mia, .write_off_mia, .engagement, .seize_hull, .delay_arrival, .next_battle_in, .recovery_push, .take_salvage, .field_repair => {
+                .cash, .cash_monthly_pct, .supply_loss, .parts_windfall, .field_stock, .damage_random_units, .damage_convoy_units, .raise_pct, .retention_bonus_months, .let_go, .replace_from_hall, .ransom_prisoner, .release_prisoner, .recruit_prisoner, .ransom_mia, .exchange_mia, .write_off_mia, .engagement, .seize_hull, .delay_arrival, .next_battle_in, .recovery_push, .take_salvage, .field_repair, .escalation => {
                     std.debug.print("auto event {s} carries a player-facing effect\n", .{@tagName(e.kind)});
                     return error.TestUnexpectedResult;
                 },

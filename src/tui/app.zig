@@ -3069,9 +3069,15 @@ pub const App = struct {
                         "";
                     try rows.append(al, try std.fmt.allocPrint(al, "{s}  {s}  {s}  {d}d  {s}  tempo:{s}{s}", .{ r.name, r.objective, combat_tag, r.expected_days, state_tag, r.tempo.label(), intel_note }));
                 }
-                const hint: []const u8 = if (ops.briefing.len > 0) ops.briefing else "(no arc)";
+                const hint: []const u8 = if (ops.briefing.len > 0) blk: {
+                    const esc_note: []const u8 = if (ops.collapse_threshold > 0)
+                        try std.fmt.allocPrint(al, "  esc:{d}/{d}", .{ ops.escalation_clock, ops.collapse_threshold })
+                    else
+                        try std.fmt.allocPrint(al, "  esc:{d}", .{ops.escalation_clock});
+                    break :blk try std.fmt.allocPrint(al, "{s}{s}", .{ ops.briefing, esc_note });
+                } else "(no arc)";
                 return .{
-                    .title = try listTitle(al, try std.fmt.allocPrint(al, "OPERATIONS · [{d}]", .{@intFromEnum(cid)}), "Enter pick intent · r tempo · x decline", "cancel", false),
+                    .title = try listTitle(al, try std.fmt.allocPrint(al, "OPERATIONS · [{d}]", .{@intFromEnum(cid)}), "Enter pick intent · r tempo · x decline · w withdraw · e exploit · o consolidate", "cancel", false),
                     .head = try al.dupe([]const u8, &.{ hint, "" }),
                     .rows = rows.items,
                     .n = ops.rows.len,
@@ -3730,6 +3736,24 @@ pub const App = struct {
                     } else {
                         self.say(.amber, "interventions are only available for committed combat operations", .{});
                     }
+                    return true;
+                }
+                if (key.char == 'w') {
+                    // `w` operationally withdraws the highlighted operation.
+                    _ = try self.execSay(.{ .withdraw_operation = .{ .contract = cid, .operation = row.id } }, .amber, "withdrawn: {s}", .{row.name});
+                    self.modal = .none;
+                    return true;
+                }
+                if (key.char == 'e') {
+                    // `e` exploits a resolved successful combat operation.
+                    _ = try self.execSay(.{ .exploit_operation = .{ .contract = cid, .operation = row.id } }, .good, "exploiting success: {s}", .{row.name});
+                    self.modal = .none;
+                    return true;
+                }
+                if (key.char == 'o') {
+                    // `o` consolidates a resolved operation.
+                    _ = try self.execSay(.{ .consolidate_operation = .{ .contract = cid, .operation = row.id } }, .good, "consolidated: {s}", .{row.name});
+                    self.modal = .none;
                     return true;
                 }
                 return false;
