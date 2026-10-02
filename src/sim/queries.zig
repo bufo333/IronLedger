@@ -6996,3 +6996,137 @@ test "intentChoices: integrated rights → exactly one choice" {
     // The single mandated intent is secure_objective.
     try std.testing.expectEqual(operation_mod.Intent.secure_objective, choices[0]);
 }
+
+test "contractOperations: committed combat op tasks and legal_tasks are populated (P4e)" {
+    // Rule 20 consumer test / P4e: contractOperations must surface op.tasks (the
+    // committed operation's task assignments) and legal_tasks (delegated to
+    // operations_m.legalTasks) on the returned OperationRow.
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const cid: types.ContractId = @enumFromInt(1);
+    const oid: types.OperationId = @enumFromInt(1);
+    const lance_a: types.ForceId = @enumFromInt(5);
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 18, .base_pay_month = 200_000, .command_rights = .independent },
+        .status = .active,
+        .arc_key = "fracturing_garrison",
+    });
+    const c = gs.contracts.getPtr(cid).?;
+    try c.operations.append(gs.allocator(), .{
+        .id = oid,
+        .template_key = "repel_probe", // combat template
+        .state = .committed,
+        .opened_day = 0,
+        .committed_day = 1,
+    });
+    // Assign one task to the committed op.
+    try c.operations.items[0].tasks.append(gs.allocator(), .{
+        .lance = lance_a,
+        .task = .main_effort,
+    });
+
+    const ops = try contractOperations(arena.allocator(), &gs, cid);
+    try std.testing.expectEqual(@as(usize, 1), ops.rows.len);
+    const row = ops.rows[0];
+    // tasks must reflect the assigned task.
+    try std.testing.expectEqual(@as(usize, 1), row.tasks.len);
+    try std.testing.expectEqual(operation_mod.LanceTask.main_effort, row.tasks[0].task);
+    try std.testing.expectEqual(lance_a, row.tasks[0].lance);
+    // legal_tasks must be non-empty for a combat op on independent rights.
+    try std.testing.expect(row.legal_tasks.len > 0);
+}
+
+test "contractOperations: legal_tasks count differs between independent and integrated command rights (P4e)" {
+    // Rule 20 consumer test / P4e: legal_tasks is delegated to operations_m.legalTasks.
+    // Independent rights → all 7 tasks; integrated → restricted set (3 tasks).
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    for ([_]contract_mod.CommandRights{ .independent, .integrated }, [_]usize{ 7, 3 }) |rights, expected_len| {
+        const cid: types.ContractId = @enumFromInt(1);
+        gs.contracts.clearRetainingCapacity();
+        try gs.contracts.put(gs.allocator(), cid, .{
+            .id = cid,
+            .kind = .garrison_duty,
+            .employer_key = "LC",
+            .enemy_key = "DC",
+            .planet_key = "galatea",
+            .terms = .{ .length_months = 18, .base_pay_month = 200_000, .command_rights = rights },
+            .status = .active,
+            .arc_key = "fracturing_garrison",
+        });
+        const c = gs.contracts.getPtr(cid).?;
+        try c.operations.append(gs.allocator(), .{
+            .id = @enumFromInt(1),
+            .template_key = "repel_probe", // combat
+            .state = .committed,
+            .opened_day = 0,
+        });
+        const ops = try contractOperations(arena.allocator(), &gs, cid);
+        try std.testing.expectEqual(@as(usize, 1), ops.rows.len);
+        try std.testing.expectEqual(expected_len, ops.rows[0].legal_tasks.len);
+    }
+}
+
+test "taskEligible excludes a non-operational lance that combatLances still lists (P4e)" {
+    // Rule 20 consumer test / P4e: combatLances lists every isCombatLance child
+    // (it is a display query and makes no eligibility judgment). The eligibility
+    // rule lives in operations_m.taskEligible, which must return false for a
+    // combat lance with no operational units (readiness.forceOperational = false).
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 55009 });
+    defer gs.deinit();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    const co = try @import("commands.zig").execute(&gs, .{ .new_company = "Delta" });
+    const co_id = co.created_force;
+
+    // Add a combat lance with no units — it is a combat lance but not operational.
+    const empty_lance = try gs.createForce("Empty Lance", .lance, .none);
+    // echelon == .lance → isCombatLance() is true; no units → forceOperational() is false.
+    try gs.force(co_id).?.children.append(gs.allocator(), empty_lance);
+
+    const cid: types.ContractId = @enumFromInt(1);
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 18, .base_pay_month = 200_000, .command_rights = .independent },
+        .status = .active,
+        .assigned_company = co_id,
+        .arc_key = "fracturing_garrison",
+    });
+    const c = gs.contracts.getPtr(cid).?;
+    try c.operations.append(gs.allocator(), .{
+        .id = @enumFromInt(1),
+        .template_key = "repel_probe",
+        .state = .committed,
+        .opened_day = 0,
+        .committed_day = 1,
+    });
+    const op = &c.operations.items[0];
+
+    // combatLances includes the empty lance (it is still a combat lance).
+    const lances = try combatLances(arena.allocator(), &gs, co_id);
+    var found = false;
+    for (lances) |lid| if (lid == empty_lance) {
+        found = true;
+        break;
+    };
+    try std.testing.expect(found);
+
+    // taskEligible excludes it because forceOperational returns false (no units).
+    try std.testing.expect(!operations_m.taskEligible(&gs, c, op, empty_lance, .main_effort));
+}

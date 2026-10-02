@@ -4650,3 +4650,235 @@ test "non-default op.intent and non-null operation_intent round-trip through sav
         loaded.battle_reports.kept.items[0].operation_intent,
     );
 }
+
+test "operation_task and battle_report_task round-trip with ≥2 rows (P4e)" {
+    // Rule 47 / P4e: two LanceTasking rows on an operation and two TaskedLance
+    // rows on a battle report must survive save → load with firstStateDifference == "".
+    // Spot-checks verify the enum, lance id, success flag and note survive exactly.
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 55006 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    const co = try gs.createForce("Alpha", .company, .none);
+    const cid: types.ContractId = @enumFromInt(1);
+    const lance_a: types.ForceId = @enumFromInt(10);
+    const lance_b: types.ForceId = @enumFromInt(11);
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "caph",
+        .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+        .status = .active,
+        .assigned_company = co,
+        .arc_key = "fracturing_garrison",
+    });
+    // Operation with two task assignments.
+    try gs.contracts.getPtr(cid).?.operations.append(gs.allocator(), .{
+        .id = @enumFromInt(1),
+        .template_key = "repel_probe",
+        .state = .committed,
+        .opened_day = 0,
+        .committed_day = 3,
+    });
+    const op = &gs.contracts.getPtr(cid).?.operations.items[0];
+    try op.tasks.append(gs.allocator(), .{ .lance = lance_a, .task = .main_effort });
+    try op.tasks.append(gs.allocator(), .{ .lance = lance_b, .task = .reserve });
+    gs.next_operation_id = 2;
+    gs.next_contract_id = 2;
+
+    // Battle report with two TaskedLance rows.
+    const note_a = try gs.allocator().dupe(u8, "led the advance");
+    const note_b = try gs.allocator().dupe(u8, "held in reserve");
+    try gs.battle_reports.kept.append(gs.allocator(), .{
+        .id = @enumFromInt(1),
+        .day = 4,
+        .contract = cid,
+        .company = co,
+        .kind = "garrison duty",
+        .enemy_key = "DC",
+        .scenario = "",
+        .terrain = "",
+        .weather = "",
+        .outcome = .victory,
+        .score_delta = 2,
+        .score_after = 2,
+        .command_rights = "independent",
+        .acknowledged = true,
+        .tasks = try gs.allocator().dupe(battle_report_mod.TaskedLance, &.{
+            .{ .lance = lance_a, .lance_name = "", .task = .main_effort, .succeeded = true, .note = note_a },
+            .{ .lance = lance_b, .lance_name = "", .task = .reserve, .succeeded = false, .note = note_b },
+        }),
+    });
+    gs.next_battle_id = 2;
+
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+
+    var diff_buf: [256]u8 = undefined;
+    try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &diff_buf) orelse "");
+
+    // Spot-check operation tasks.
+    const lc = loaded.contracts.getPtr(cid).?;
+    try std.testing.expectEqual(@as(usize, 1), lc.operations.items.len);
+    try std.testing.expectEqual(@as(usize, 2), lc.operations.items[0].tasks.items.len);
+    try std.testing.expectEqual(operation_mod.LanceTask.main_effort, lc.operations.items[0].tasks.items[0].task);
+    try std.testing.expectEqual(lance_a, lc.operations.items[0].tasks.items[0].lance);
+    try std.testing.expectEqual(operation_mod.LanceTask.reserve, lc.operations.items[0].tasks.items[1].task);
+    try std.testing.expectEqual(lance_b, lc.operations.items[0].tasks.items[1].lance);
+
+    // Spot-check battle report tasks.
+    try std.testing.expectEqual(@as(usize, 1), loaded.battle_reports.kept.items.len);
+    const lr = loaded.battle_reports.kept.items[0];
+    try std.testing.expectEqual(@as(usize, 2), lr.tasks.len);
+    try std.testing.expectEqual(operation_mod.LanceTask.main_effort, lr.tasks[0].task);
+    try std.testing.expect(lr.tasks[0].succeeded);
+    try std.testing.expectEqualStrings("led the advance", lr.tasks[0].note);
+    try std.testing.expectEqual(operation_mod.LanceTask.reserve, lr.tasks[1].task);
+    try std.testing.expect(!lr.tasks[1].succeeded);
+    try std.testing.expectEqualStrings("held in reserve", lr.tasks[1].note);
+}
+
+test "a v40 store with no task tables loads cleanly with empty task lists" {
+    // Rule 51 / P4e: operation_task and battle_report_task are created by DDL when
+    // a v40 store is opened; the existing operation and battle_report rows load with
+    // empty task lists (correct migration default, like the operation table for v38).
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 55007 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    const co = try gs.createForce("Beta", .company, .none);
+    const cid: types.ContractId = @enumFromInt(1);
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "caph",
+        .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+        .status = .active,
+        .assigned_company = co,
+        .arc_key = "fracturing_garrison",
+    });
+    try gs.contracts.getPtr(cid).?.operations.append(gs.allocator(), .{
+        .id = @enumFromInt(1),
+        .template_key = "repel_probe",
+        .state = .committed,
+        .opened_day = 0,
+        .committed_day = 2,
+    });
+    gs.next_operation_id = 2;
+    gs.next_contract_id = 2;
+    try gs.battle_reports.kept.append(gs.allocator(), .{
+        .id = @enumFromInt(1),
+        .day = 3,
+        .contract = cid,
+        .company = co,
+        .kind = "garrison duty",
+        .enemy_key = "DC",
+        .scenario = "",
+        .terrain = "",
+        .weather = "",
+        .outcome = .victory,
+        .score_delta = 2,
+        .score_after = 2,
+        .command_rights = "independent",
+        .acknowledged = true,
+    });
+    gs.next_battle_id = 2;
+
+    const raw = try sqlite.Db.open(":memory:");
+    // First pass: save at the current schema.
+    const s1 = try Store.fromDb(raw);
+    try s1.save(&gs);
+    // Simulate a v40 store: drop the P4e task tables and roll back the version.
+    // fromDb will recreate them via DDL (CREATE TABLE IF NOT EXISTS) on reopen.
+    try raw.exec("DROP TABLE IF EXISTS operation_task");
+    try raw.exec("DROP TABLE IF EXISTS battle_report_task");
+    try raw.exec("UPDATE setting SET value = 40 WHERE key = 'schema_version'");
+    try raw.exec("UPDATE campaign SET schema_version = 40");
+
+    // Second pass: fromDb recreates the missing tables; schema advances to current.
+    const s2 = try Store.fromDb(raw);
+    defer s2.close();
+    try std.testing.expectEqual(@as(i64, schema_version), s2.getSetting("schema_version", 0));
+
+    var loaded = try s2.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+
+    // Load must succeed; operation and battle report must have empty task lists.
+    try std.testing.expectEqual(@as(usize, 1), loaded.contracts.count());
+    const lc = loaded.contracts.getPtr(cid).?;
+    try std.testing.expectEqual(@as(usize, 1), lc.operations.items.len);
+    try std.testing.expectEqual(@as(usize, 0), lc.operations.items[0].tasks.items.len);
+    try std.testing.expectEqual(@as(usize, 1), loaded.battle_reports.kept.items.len);
+    try std.testing.expectEqual(@as(usize, 0), loaded.battle_reports.kept.items[0].tasks.len);
+}
+
+test "invalid and orphaned operation_task rows reject the load as corrupt (P4e)" {
+    // Rules 47, 69 / P4e: an unknown task enum in operation_task → CorruptSave;
+    // an operation_task row whose operation_id names no operation → CorruptSave.
+    // Both follow the corruption-fixture pattern: save a valid campaign, inject bad
+    // SQL with FK enforcement off, attempt to load.
+
+    // Minimal campaign fixture with one committed operation.
+    const buildGs = struct {
+        fn run(alloc_gs: std.mem.Allocator) !GameState {
+            var gs = GameState.init(alloc_gs, .{ .seed = 55008 });
+            _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+            const co = try gs.createForce("Gamma", .company, .none);
+            const cid: types.ContractId = @enumFromInt(1);
+            try gs.contracts.put(gs.allocator(), cid, .{
+                .id = cid,
+                .kind = .garrison_duty,
+                .employer_key = "LC",
+                .enemy_key = "DC",
+                .planet_key = "caph",
+                .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+                .status = .active,
+                .assigned_company = co,
+                .arc_key = "fracturing_garrison",
+            });
+            try gs.contracts.getPtr(cid).?.operations.append(gs.allocator(), .{
+                .id = @enumFromInt(1),
+                .template_key = "repel_probe",
+                .state = .committed,
+                .opened_day = 0,
+                .committed_day = 1,
+            });
+            gs.next_operation_id = 2;
+            gs.next_contract_id = 2;
+            return gs;
+        }
+    }.run;
+
+    // G1: unknown task enum value in operation_task → CorruptSave.
+    {
+        var gs = try buildGs(std.testing.allocator);
+        defer gs.deinit();
+        const s = try Store.open(":memory:");
+        defer s.close();
+        try s.save(&gs);
+        try s.db.exec("PRAGMA foreign_keys = OFF");
+        // operation_id = 1 matches the saved operation; task is not a valid LanceTask tag.
+        try s.db.exec("INSERT INTO operation_task VALUES (1, 1, 1, 0, 10, 'nonexistent_task')");
+        try s.db.exec("PRAGMA foreign_keys = ON");
+        try std.testing.expectError(error.CorruptSave, s.load(std.testing.allocator, gs.campaign_id));
+    }
+
+    // G2: orphaned operation_task row (operation_id names no saved operation) → CorruptSave.
+    {
+        var gs = try buildGs(std.testing.allocator);
+        defer gs.deinit();
+        const s = try Store.open(":memory:");
+        defer s.close();
+        try s.save(&gs);
+        try s.db.exec("PRAGMA foreign_keys = OFF");
+        // operation_id = 99999 has no corresponding row in the operation table.
+        try s.db.exec("INSERT INTO operation_task VALUES (1, 1, 99999, 0, 10, 'main_effort')");
+        try s.db.exec("PRAGMA foreign_keys = ON");
+        try std.testing.expectError(error.CorruptSave, s.load(std.testing.allocator, gs.campaign_id));
+    }
+}
