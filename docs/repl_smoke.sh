@@ -55,6 +55,8 @@ printf '%s\n' \
   'autoadmit maybe' \
   'commit 999 999 break_enemy' \
   'commit 999 999 notanintent' \
+  'tempo 9 1 advance' \
+  'tempo 999 999 notaposture' \
   'save' \
   'quit' > "$work/input"
 # A watchdog kills a hung REPL (macOS has no `timeout`); the exit status
@@ -111,6 +113,8 @@ check 'those arguments do not fit the verb — usage: xfer unit|person'
 check 'those arguments do not fit the verb — usage: autoadmit'
 # P4d: commit requires an intent; an unknown intent is refused with the usage.
 check 'usage: commit'
+# P4f: tempo verb exercises and its refusal path (bad posture string is BadArguments).
+check 'usage: tempo'
 check 'stripped for parts'
 check 'drew 500,000 c-bills over 12 months'
 check 'under contract:'

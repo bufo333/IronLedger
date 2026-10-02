@@ -94,7 +94,7 @@ pub fn operationIntel(gs: *GameState, c: *const contract_mod.Contract, op: *cons
 
     const quality_known = effective_level >= quality_known_threshold;
     const confidence: u8 = @min(10, effective_level * 2 + recon_bonus * 1); // TUNE: simple scale
-    const source: []const u8 = if (recon_bonus > 0) "recon" else if (base_level >= 3) "comms" else if (base_level >= 2) "comms" else if (base_level >= 1) "rating" else "none";
+    const source: []const u8 = if (recon_bonus > 0) "recon" else if (base_level >= 2) "comms" else if (base_level >= 1) "rating" else "none";
     return .{
         .lances = lances,
         .quality_known = quality_known,

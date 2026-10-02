@@ -534,7 +534,7 @@ titles and the help modal come from the same tables.
 Opened with `g` in the active pane when the contract has an arc.
 Shows the arc's current beat briefing and all instantiated operations.
 Each row includes the current tempo posture (`tempo:advance/recon/prepare/delay`) and
-an intelligence confidence percentage when non-zero (`intel:N%`).
+an intelligence confidence on a 0–10 scale when non-zero (`intel:N/10`).
 
 | Key | Does |
 |---|---|

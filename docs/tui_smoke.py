@@ -384,6 +384,18 @@ assert "day 4" in plain(), plain()[-2000:]
 # → changes the ROE, confirm clears the warning, and the next advance
 # runs on to the fight instead of stopping again.
 send(":"); send("accept 9 1\r", 1.5)
+# Operations board and tempo picker: P4f — exercised right after contract acceptance.
+send("4", 0.6)                   # contracts tab
+send("\t", 0.6)                  # focus the active-contracts pane (pane 1)
+mark_ops = len(out)
+send("g", 0.8)                   # request operations board for the active contract
+ops_frame = re.sub(rb"\x1b\[[0-9;?]*[A-Za-z]", b"", out[mark_ops:]).decode("utf-8", "replace")
+if "OPERATIONS" in ops_frame:
+    if "no operations on this contract" not in ops_frame:
+        send("r", 0.8)           # open tempo posture picker
+        assert "TEMPO POSTURE" in plain()[-30000:], plain()[-3000:]
+        send("\r", 0.8)          # confirm: select the first posture (advance)
+    send("\x1b", 0.5)            # close operations modal
 for _ in range(8):
     send(":"); send("day 30\r", 2.5)
     if "BATTLE ORDERS" in plain()[-20000:]:

@@ -3061,7 +3061,7 @@ pub const App = struct {
                     const state_tag = @tagName(r.state);
                     const combat_tag: []const u8 = if (r.combat) "combat" else "non-combat";
                     const intel_note: []const u8 = if (r.intel.confidence > 0)
-                        try std.fmt.allocPrint(al, "  intel:{d}%", .{r.intel.confidence})
+                        try std.fmt.allocPrint(al, "  intel:{d}/10", .{r.intel.confidence})
                     else
                         "";
                     try rows.append(al, try std.fmt.allocPrint(al, "{s}  {s}  {s}  {d}d  {s}  tempo:{s}{s}", .{ r.name, r.objective, combat_tag, r.expected_days, state_tag, r.tempo.label(), intel_note }));
