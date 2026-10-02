@@ -285,6 +285,8 @@ pub const Contract = struct {
     /// Current command-capacity pool for this contract's arc.
     /// Deterministic monthly cadence (P4g); 0 = none available.
     command_capacity: u8 = 0,
+    /// Persistent actors attached to this contract by its arc (P4i).
+    actor_ids: std.ArrayListUnmanaged(types.ActorId) = .empty,
 
     /// The company is out on it: in transit to the world or on station.
     pub fn isRunning(self: *const Contract) bool {

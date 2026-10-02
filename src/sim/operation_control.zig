@@ -13,6 +13,7 @@ const types = @import("../domain/types.zig");
 const GameState = @import("state.zig").GameState;
 const operations = @import("operations.zig");
 const commands = @import("commands.zig");
+const actors_m = @import("actors.zig");
 
 const Error = commands.Error;
 
@@ -198,6 +199,17 @@ pub fn resolveDueOperations(gs: *GameState) !void {
             // after domain mutations begin; the entry is created here if absent
             // (rules 11-13: prepare must complete before the first mutation).
             if (standing_d != 0) _ = try gs.adjustStanding(c.employer_key, standing_d);
+            // Adjust all attached actors' relationships in prepare (all fallible
+            // work done here so the commit stays infallible; rules 11-13).
+            const rel_delta = actors_m.outcomeRelationshipDelta(band);
+            var actor_preps: [16]actors_m.PreparedAdjust = undefined;
+            var actor_prep_count: usize = 0;
+            for (c.actor_ids.items) |aid| {
+                if (actor_prep_count >= actor_preps.len) break;
+                if (gs.actor(aid) == null) continue;
+                actor_preps[actor_prep_count] = try actors_m.adjustRelationship(gs, aid, rel_delta, t.name);
+                actor_prep_count += 1;
+            }
 
             // Commit: infallible from here.
             op.state = .resolved;
@@ -218,6 +230,8 @@ pub fn resolveDueOperations(gs: *GameState) !void {
                 .contract = c.id,
                 .text = log_text,
             });
+            // Commit actor relationship adjustments (infallible; prepared above).
+            for (actor_preps[0..actor_prep_count]) |prep| actors_m.commitAdjustRelationship(gs, prep);
         }
     }
 }
@@ -249,6 +263,16 @@ pub fn resolveFinale(gs: *GameState, c: *contract_mod.Contract) !?*const arc_mod
     // For non-collapse finales, apply standing in the prepare phase so no
     // allocation can fail after domain mutations begin (rules 11-13).
     if (!f.ends_contract and f.standing_delta != 0) _ = try gs.adjustStanding(c.employer_key, @as(i32, f.standing_delta));
+    // Adjust attached actors' relationships for the finale (all fallible work in prepare; rules 11-13).
+    const finale_rel_delta = actors_m.finaleRelationshipDelta(f);
+    var finale_actor_preps: [16]actors_m.PreparedAdjust = undefined;
+    var finale_actor_prep_count: usize = 0;
+    for (c.actor_ids.items) |aid| {
+        if (finale_actor_prep_count >= finale_actor_preps.len) break;
+        if (gs.actor(aid) == null) continue;
+        finale_actor_preps[finale_actor_prep_count] = try actors_m.adjustRelationship(gs, aid, finale_rel_delta, f.name);
+        finale_actor_prep_count += 1;
+    }
 
     // ---- COMMIT: infallible from here ----
     c.arc_finale_key = f.key;
@@ -264,6 +288,8 @@ pub fn resolveFinale(gs: *GameState, c: *contract_mod.Contract) !?*const arc_mod
         .contract = c.id,
         .text = log_text,
     });
+    // Commit actor relationship adjustments (infallible; prepared above).
+    for (finale_actor_preps[0..finale_actor_prep_count]) |prep| actors_m.commitAdjustRelationship(gs, prep);
     return f;
 }
 

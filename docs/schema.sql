@@ -1,6 +1,6 @@
 -- IRON LEDGER — SQLite save store schema (design document)
 --
--- Matches schema_version 41. The executable DDL and its column migrations
+-- Matches schema_version 44. The executable DDL and its column migrations
 -- live in src/persist/store.zig; this file is the readable reference for
 -- what each table and column means. Column order here is the runtime order.
 --
@@ -77,7 +77,8 @@ CREATE TABLE campaign (
 -- (battles won/drawn/lost, hulls lost/salvaged, people_kia, enemy_bv),
 -- next_person_id, next_unit_id, next_force_id, next_hq_id,
 -- next_contract_id, next_battle_id, next_event_id, rng_seed,
--- next_listing_id, next_candidate_id, next_loan_id (added v35).
+-- next_listing_id, next_candidate_id, next_loan_id (added v35),
+-- next_operation_id (added v40), next_actor_id (added v44).
 CREATE TABLE meta (
     cid             INTEGER NOT NULL,
     key             TEXT    NOT NULL,
@@ -922,3 +923,28 @@ CREATE TABLE battle_report_task (
     FOREIGN KEY (cid, report_ord) REFERENCES battle_report(cid, ord) DEFERRABLE INITIALLY DEFERRED
 );
 CREATE INDEX IF NOT EXISTS ix_battle_report_task_report ON battle_report_task(cid, report_ord);
+
+-- P4i: persistent contract-introduced actors with a narrow relationship model.
+-- One row per actor per campaign. actors.recurring is set when the actor recurs
+-- from a prior contract (same faction_key + archetype_key encountered again).
+CREATE TABLE actor (
+    cid             INTEGER NOT NULL,
+    ord             INTEGER NOT NULL, -- stable insertion order
+    id              INTEGER NOT NULL, -- -> types.ActorId (u32 enum); nonzero
+    archetype_key   TEXT    NOT NULL, -- -> data/tables/actor_archetypes.zon
+    first_name      TEXT    NOT NULL,
+    last_name       TEXT    NOT NULL,
+    faction_key     TEXT    NOT NULL, -- employer or enemy faction at introduction
+    side            TEXT    NOT NULL, -- FactionSide tag: "employer" | "enemy"
+    contract        INTEGER NOT NULL DEFAULT 0, -- ContractId of introducing contract; 0 = none
+    trust           INTEGER NOT NULL DEFAULT 0, -- clamped −100…100
+    debt            INTEGER NOT NULL DEFAULT 0, -- clamped −100…100
+    respect         INTEGER NOT NULL DEFAULT 0, -- clamped −100…100
+    hostility       INTEGER NOT NULL DEFAULT 0, -- clamped −100…100
+    last_cause      TEXT    NOT NULL DEFAULT '', -- short markup-safe label for last rel change
+    last_cause_day  INTEGER NOT NULL DEFAULT 0,  -- day_index of last rel change
+    recurring       INTEGER NOT NULL DEFAULT 0 CHECK (recurring IN (0,1)),
+    PRIMARY KEY (cid, id),
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
+);
+CREATE INDEX IF NOT EXISTS ix_actor_cid ON actor(cid);

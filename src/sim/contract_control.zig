@@ -28,6 +28,7 @@ const commander_mod = @import("../domain/commander.zig");
 const contract_market = @import("contract_market.zig");
 const commands = @import("commands.zig");
 const operations = @import("operations.zig");
+const actors_m = @import("actors.zig");
 
 pub const grace_days: u32 = tuning.contract.grace_days;
 pub const cooling_days: u32 = tuning.contract.cooling_days;
@@ -66,6 +67,8 @@ pub fn combatEffective(fieldable_bv: i64, committed_bv: i64) bool {
 
 /// At acceptance: set the objective, remember what was committed, size the
 /// opposition, and select the contract arc (if any).
+/// NOTE: actor instantiation is done in the PREPARE phase of acceptContract,
+/// not here (instantiateActors is called after onAccept in acceptContract).
 pub fn onAccept(gs: *GameState, c: *contract_mod.Contract) void {
     c.objective = contract_mod.objectiveFor(c.kind);
     c.committed_bv = fieldableBv(gs, c.assigned_company);
@@ -619,6 +622,9 @@ pub fn acceptContract(gs: *GameState, offer_id: types.ContractId, company_id: ty
     // but does NOT advance it — the commit phase below does that after all
     // fallible steps succeed (rules 7, 11-13: no counter advance before commit).
     try operations.instantiateOpening(gs, &c, gs.next_operation_id); // failure-atomic: c is still local
+    // Attach actors for the arc (if any). Pass gs.next_actor_id as id_start;
+    // instantiateActors does NOT advance it — the commit phase does that below (rules 7, 11-13).
+    try actors_m.instantiateActors(gs, &c, gs.next_actor_id); // failure-atomic: c is still local
     c.monthly_net = types.applyPct(c.terms.base_pay_month, 100 - @as(i64, c.terms.advance_pct));
 
     // Signing money in, transit freight out (employer covers transport_pct;
@@ -734,6 +740,9 @@ pub fn acceptContract(gs: *GameState, offer_id: types.ContractId, company_id: ty
     // instantiated in the prepare phase.  This is the commit-phase increment
     // deferred from instantiateOpening (rules 7, 11-13).
     gs.next_operation_id += @as(u32, @intCast(c.operations.items.len));
+    // Advance the actor id counter by the number of actors attached in the
+    // prepare phase. Deferred from instantiateActors (rules 7, 11-13).
+    gs.next_actor_id += @as(u32, @intCast(c.actor_ids.items.len));
 
     // Record the contract and clear the company's planet (underway).
     gs.contracts.putAssumeCapacity(c.id, c);

@@ -1,0 +1,73 @@
+// Actor archetypes. Each row names a kind of contract-introduced NPC the
+// outfit may encounter; the archetype governs which arcs it may attach to
+// and what side of the conflict it stands on.
+// Typed against domain/actor.zig `Table`.
+//
+//   key           stable identifier (markup-safe)
+//   name          display label (markup-safe)
+//   kind          ActorKind tag name
+//   agenda        short description of the actor's goals (markup-safe)
+//   faction_side  which side: "employer" or "enemy"
+//   arcs          arc keys this archetype attaches to
+//
+// All string fields must be markup-safe (no { or control characters).
+.{
+    .archetypes = .{
+        .{
+            .key = "liaison",
+            .name = "Liaison Officer",
+            .kind = "liaison",
+            .agenda = "Coordinate employer objectives",
+            .faction_side = "employer",
+            .arcs = .{"fracturing_garrison"},
+        },
+        .{
+            .key = "local_official",
+            .name = "Local Official",
+            .kind = "official",
+            .agenda = "Maintain civil order and political standing",
+            .faction_side = "employer",
+            .arcs = .{"fracturing_garrison"},
+        },
+        .{
+            .key = "militia_commander",
+            .name = "Militia Commander",
+            .kind = "militia_leader",
+            .agenda = "Defend the garrison at all costs",
+            .faction_side = "employer",
+            .arcs = .{"fracturing_garrison"},
+        },
+        .{
+            .key = "logistics_officer",
+            .name = "Logistics Officer",
+            .kind = "quartermaster",
+            .agenda = "Keep supply lines open and costs down",
+            .faction_side = "employer",
+            .arcs = .{"fracturing_garrison"},
+        },
+        .{
+            .key = "civilian_leader",
+            .name = "Civilian Leader",
+            .kind = "civilian_organizer",
+            .agenda = "Protect the population from conflict",
+            .faction_side = "employer",
+            .arcs = .{"fracturing_garrison"},
+        },
+        .{
+            .key = "black_market",
+            .name = "Black Market Contact",
+            .kind = "smuggler",
+            .agenda = "Profit from the chaos",
+            .faction_side = "employer",
+            .arcs = .{"fracturing_garrison"},
+        },
+        .{
+            .key = "enemy_commander",
+            .name = "Enemy Commander",
+            .kind = "enemy_officer",
+            .agenda = "Overwhelm the garrison and seize the planet",
+            .faction_side = "enemy",
+            .arcs = .{"fracturing_garrison"},
+        },
+    },
+}

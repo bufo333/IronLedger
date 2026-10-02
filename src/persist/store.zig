@@ -35,8 +35,9 @@ const hq_ops = @import("../sim/hq_ops.zig");
 const held_hulls_m = @import("../sim/held_hulls.zig");
 const arc_mod = @import("../domain/arc.zig");
 const operation_mod = @import("../domain/operation.zig");
+const actor_mod = @import("../domain/actor.zig");
 
-pub const schema_version = 43;
+pub const schema_version = 44;
 
 const ddl =
     \\CREATE TABLE IF NOT EXISTS player (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_seq INTEGER NOT NULL);
@@ -90,6 +91,7 @@ const ddl =
     \\CREATE TABLE IF NOT EXISTS operation_task (cid INTEGER NOT NULL, contract_id INTEGER NOT NULL, operation_id INTEGER NOT NULL, ord INTEGER NOT NULL, lance_id INTEGER NOT NULL, task TEXT NOT NULL, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS operation_intervention (cid INTEGER NOT NULL, contract_id INTEGER NOT NULL, operation_id INTEGER NOT NULL, ord INTEGER NOT NULL, kind TEXT NOT NULL, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS battle_report_task (cid INTEGER NOT NULL, report_ord INTEGER NOT NULL, ord INTEGER NOT NULL, lance_id INTEGER NOT NULL, lance_name TEXT NOT NULL, task TEXT NOT NULL, succeeded INTEGER NOT NULL CHECK (succeeded IN (0,1)), note TEXT NOT NULL, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, report_ord) REFERENCES battle_report(cid, ord) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS actor (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, archetype_key TEXT NOT NULL, first_name TEXT NOT NULL, last_name TEXT NOT NULL, faction_key TEXT NOT NULL, side TEXT NOT NULL, contract INTEGER NOT NULL DEFAULT 0, trust INTEGER NOT NULL DEFAULT 0, debt INTEGER NOT NULL DEFAULT 0, respect INTEGER NOT NULL DEFAULT 0, hostility INTEGER NOT NULL DEFAULT 0, last_cause TEXT NOT NULL DEFAULT '', last_cause_day INTEGER NOT NULL DEFAULT 0, recurring INTEGER NOT NULL DEFAULT 0 CHECK (recurring IN (0,1)), PRIMARY KEY (cid, id), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
 ;
 
 const tables = [_][]const u8{
@@ -98,7 +100,7 @@ const tables = [_][]const u8{
     "contract",       "txn",                    "loan",               "courier",          "policy",            "bay_job",            "candidate",             "hq_link",     "unit_transfer",
     "supply_policy",  "stock_policy",           "faction_cooling",    "faction_standing", "event_memory",      "listing",            "part_order",            "event_log",   "pending_event",
     "refit_plan",     "refit_op",               "rating_snapshot",    "battle_report",    "battle_report_hit", "battle_report_ammo", "battle_report_salvage", "rng_stream",  "operation",
-    "operation_task", "operation_intervention", "battle_report_task",
+    "operation_task", "operation_intervention", "battle_report_task", "actor",
 };
 
 // Indexes for per-campaign tables (A28/D31): cid filters on every load;
@@ -153,6 +155,7 @@ const index_ddl =
     \\CREATE INDEX IF NOT EXISTS ix_operation_task_cid ON operation_task(cid, contract_id, operation_id);
     \\CREATE INDEX IF NOT EXISTS ix_operation_intervention_cid ON operation_intervention(cid, contract_id, operation_id);
     \\CREATE INDEX IF NOT EXISTS ix_battle_report_task_report ON battle_report_task(cid, report_ord);
+    \\CREATE INDEX IF NOT EXISTS ix_actor_cid ON actor(cid);
 ;
 
 /// The stream order of the single `rng` blob that saves before schema v32
@@ -263,6 +266,8 @@ pub const Store = struct {
         // operation_intervention table is new (no migration row needed; applySchema creates it).
         .{ .from = 42, .to = 43, .table = "contract", .column = "command_capacity", .sql = "ALTER TABLE contract ADD COLUMN command_capacity INTEGER NOT NULL DEFAULT 0" },
         .{ .from = 42, .to = 43, .table = "battle_report", .column = "operation_interventions", .sql = "ALTER TABLE battle_report ADD COLUMN operation_interventions TEXT NOT NULL DEFAULT ''" },
+        // v44: actor table (P4i). New table — no ALTER TABLE migration needed; applySchema creates it.
+        // The `actor` table is wholly new; existing saves open with zero actors, next_actor_id=1 (safe default).
     };
 
     pub fn open(path: [*:0]const u8) !Store {
@@ -579,6 +584,7 @@ pub const Store = struct {
         try self.saveHq(gs, cid);
         try self.saveContracts(gs, cid);
         try self.saveOperations(gs, cid);
+        try self.saveActors(gs, cid);
         try self.saveTxn(gs, cid);
         try self.saveLoan(gs, cid);
         try self.saveCourier(gs, cid);
@@ -655,7 +661,7 @@ pub const Store = struct {
             .{ "next_battle_id", gs.next_battle_id },             .{ "rng_seed", @as(i64, @bitCast(gs.rng.seed)) },
             .{ "next_event_id", gs.event_queue.next_id },         .{ "next_listing_id", gs.next_listing_id },
             .{ "next_candidate_id", gs.next_candidate_id },       .{ "next_loan_id", gs.next_loan_id },
-            .{ "next_operation_id", gs.next_operation_id },
+            .{ "next_operation_id", gs.next_operation_id },       .{ "next_actor_id", gs.next_actor_id },
         };
         for (ints) |kv| {
             try st.bindAll(.{ cid, kv[0], kv[1] });
@@ -994,6 +1000,99 @@ pub const Store = struct {
                     break;
                 }
             }
+        }
+    }
+
+    // P4i: save and load persistent actors.
+    fn saveActors(self: Store, gs: *GameState, cid: i64) !void {
+        const st = try self.db.prepare("INSERT INTO actor VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)");
+        defer st.finalize();
+        var it = gs.actors.iterator();
+        var ord: i64 = 0;
+        while (it.next()) |entry| : (ord += 1) {
+            const a = entry.value_ptr;
+            try st.bindAll(.{
+                cid,
+                ord,
+                @intFromEnum(a.id),
+                a.archetype_key,
+                a.first_name,
+                a.last_name,
+                a.faction_key,
+                @tagName(a.side),
+                @intFromEnum(a.contract),
+                @as(i64, a.trust),
+                @as(i64, a.debt),
+                @as(i64, a.respect),
+                @as(i64, a.hostility),
+                a.last_cause,
+                @as(i64, a.last_cause_day),
+                @as(i64, @intFromBool(a.recurring)),
+            });
+            try st.run();
+        }
+    }
+
+    fn loadActors(self: Store, gs: *GameState, cid: i64) !void {
+        const alloc = gs.allocator();
+        const st = try self.db.prepare("SELECT id, archetype_key, first_name, last_name, faction_key, side, contract, trust, debt, respect, hostility, last_cause, last_cause_day, recurring FROM actor WHERE cid = ?1 ORDER BY ord");
+        defer st.finalize();
+        try st.bindAll(.{cid});
+        while (try st.next()) {
+            const archetype_key = try st.text(1, alloc);
+            // Validate archetype_key references a known archetype.
+            if (actor_mod.find(archetype_key) == null) return error.CorruptSave;
+            const side_str = try st.text(5, alloc);
+            const side = std.meta.stringToEnum(actor_mod.FactionSide, side_str) orelse return error.CorruptSave;
+            const trust = try fit(i16, st.int(7));
+            const debt = try fit(i16, st.int(8));
+            const respect = try fit(i16, st.int(9));
+            const hostility = try fit(i16, st.int(10));
+            // Validate relationship dimensions in range.
+            if (trust < actor_mod.rel_min or trust > actor_mod.rel_max) return error.CorruptSave;
+            if (debt < actor_mod.rel_min or debt > actor_mod.rel_max) return error.CorruptSave;
+            if (respect < actor_mod.rel_min or respect > actor_mod.rel_max) return error.CorruptSave;
+            if (hostility < actor_mod.rel_min or hostility > actor_mod.rel_max) return error.CorruptSave;
+            const contract_raw = st.int(6);
+            const contract_id: types.ContractId = @enumFromInt(std.math.cast(u32, contract_raw) orelse return error.CorruptSave);
+            const a: actor_mod.Actor = .{
+                .id = try toId(types.ActorId, st.int(0)),
+                .archetype_key = archetype_key,
+                .first_name = try st.text(2, alloc),
+                .last_name = try st.text(3, alloc),
+                .faction_key = try st.text(4, alloc),
+                .side = side,
+                .contract = contract_id,
+                .trust = trust,
+                .debt = debt,
+                .respect = respect,
+                .hostility = hostility,
+                .last_cause = try st.text(11, alloc),
+                .last_cause_day = try st.intAs(u32, 12),
+                .recurring = st.int(13) != 0,
+            };
+            const gop = try gs.actors.getOrPut(alloc, a.id);
+            if (gop.found_existing) return error.CorruptSave;
+            gop.value_ptr.* = a;
+        }
+        // Validate: actors with a nonzero contract reference must resolve to a loaded contract.
+        // Rebuild actor_ids lists on contracts from actors' contract back-references.
+        {
+            var it = gs.actors.iterator();
+            while (it.next()) |entry| {
+                const a = entry.value_ptr;
+                if (a.contract == .none) continue;
+                const c = gs.contracts.getPtr(a.contract) orelse return error.CorruptSave;
+                try c.actor_ids.append(alloc, a.id);
+            }
+        }
+        // Bump next_actor_id past the maximum stored id.
+        {
+            var max: u32 = 0;
+            var it = gs.actors.iterator();
+            while (it.next()) |entry| max = @max(max, @intFromEnum(entry.key_ptr.*));
+            if (max == std.math.maxInt(u32)) return error.CorruptSave;
+            gs.next_actor_id = @max(gs.next_actor_id, max + 1);
         }
     }
 
@@ -1369,6 +1468,7 @@ pub const Store = struct {
         try self.loadOperations(&gs, cid);
         try self.loadOperationTasks(&gs, cid);
         try self.loadOperationInterventions(&gs, cid);
+        try self.loadActors(&gs, cid);
         try self.loadTxn(&gs, cid);
         try self.loadLoan(&gs, cid);
         try self.loadCourier(&gs, cid);
@@ -1492,6 +1592,7 @@ pub const Store = struct {
             if (std.mem.eql(u8, key, "next_candidate_id")) gs.next_candidate_id = try fit(@TypeOf(gs.next_candidate_id), v);
             if (std.mem.eql(u8, key, "next_loan_id")) gs.next_loan_id = try fit(@TypeOf(gs.next_loan_id), v);
             if (std.mem.eql(u8, key, "next_operation_id")) gs.next_operation_id = try fit(@TypeOf(gs.next_operation_id), v);
+            if (std.mem.eql(u8, key, "next_actor_id")) gs.next_actor_id = try fit(@TypeOf(gs.next_actor_id), v);
             if (std.mem.eql(u8, key, "rng_seed")) {
                 gs.rng.seed = @bitCast(v);
                 has_seed = true;
@@ -2617,6 +2718,15 @@ fn validateStoredStrings(gs: *GameState) error{CorruptSave}!void {
         .install => |it| try Check.item(it.part_key),
         .remove => |slot_key| try Check.shown(slot_key),
     };
+    // Actors: archetype_key and last_cause must be markup-safe.
+    {
+        var ait = gs.actors.iterator();
+        while (ait.next()) |e| {
+            const a = e.value_ptr;
+            if (actor_mod.find(a.archetype_key) == null) return error.CorruptSave;
+            if (a.last_cause.len > 0) try Check.shown(a.last_cause);
+        }
+    }
     for (gs.battle_reports.kept.items) |r| {
         inline for (.{ r.kind, r.enemy_key, r.scenario, r.terrain, r.weather, r.command_rights, r.salvage.items, r.operation, r.operation_interventions }) |text| try Check.shown(text);
         if (r.operation_intent) |i| try Check.shown(@tagName(i));
@@ -2773,6 +2883,13 @@ fn reconcileCounters(gs: *GameState) error{CorruptSave}!void {
         for (gs.contract_offers.items) |c| max = @max(max, @intFromEnum(c.id));
         if (max == max_u32) return error.CorruptSave;
         gs.next_contract_id = @max(gs.next_contract_id, max + 1);
+    }
+    {
+        var max: u32 = 0;
+        var it = gs.actors.iterator();
+        while (it.next()) |e| max = @max(max, @intFromEnum(e.key_ptr.*));
+        if (max == max_u32) return error.CorruptSave;
+        gs.next_actor_id = @max(gs.next_actor_id, max + 1);
     }
     // Battle and event counters: resumeBattleIds/resumeIds saturate at maxInt
     // when an entity holds the maximum id — detect that here (rule 48).
@@ -3818,8 +3935,8 @@ test "a rebuilt store loads to the identical digest" {
     // Digest is identical: the rebuild changed no data.
     var diff_buf: [128]u8 = undefined;
     try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &diff_buf) orelse "");
-    // Re-pinned by P4g (adds command_capacity and operation_intervention).
-    try std.testing.expectEqual(@as(u64, 11895774777608996228), hash_before);
+    // Re-pinned by P4i (adds actors map, next_actor_id, .actors RNG stream).
+    try std.testing.expectEqual(@as(u64, 2621491806281531819), hash_before);
 }
 
 test "every next-ID counter resumes past a higher owned id after load" {
@@ -4048,8 +4165,15 @@ test "a save from before per-stream rows loads every stream from its legacy blob
     try ins.run();
     var loaded = try store.load(std.testing.allocator, gs.campaign_id);
     defer loaded.deinit();
+    // Streams in the legacy blob are restored exactly. Streams added after v31
+    // (not in legacy_rng_order) are absent from the blob and start fresh from seed.
+    var fresh_from_seed = rng_mod.Rng.init(std.hash.Wyhash.hash(0, &blob));
     for (std.enums.values(rng_mod.Stream)) |stream| {
-        try std.testing.expectEqual(gs.rng.encode(stream), loaded.rng.encode(stream));
+        const in_legacy = for (legacy_rng_order) |ls| {
+            if (ls == stream) break true;
+        } else false;
+        const want = if (in_legacy) gs.rng.encode(stream) else fresh_from_seed.encode(stream);
+        try std.testing.expectEqual(want, loaded.rng.encode(stream));
     }
     try std.testing.expectEqual(std.hash.Wyhash.hash(0, &blob), loaded.rng.seed);
 }
@@ -4305,7 +4429,7 @@ test "golden master: a played year hashes to its pinned value, and a save of it 
     // Any change to a simulated or saved result moves this; re-pin it only
     // when the change is meant. Re-pinned by P4g (adds command_capacity and
     // operation_intervention).
-    try std.testing.expectEqual(@as(u64, 11895774777608996228), digest.stateHash(&gs));
+    try std.testing.expectEqual(@as(u64, 2621491806281531819), digest.stateHash(&gs));
 
     const store = try Store.open(":memory:");
     defer store.close();

@@ -15,6 +15,7 @@ pub const Stream = enum(u8) {
     events,
     medical,
     travel,
+    actors, // P4i: persistent actor identity and relationship seeds
 
     pub const count = @typeInfo(Stream).@"enum".fields.len;
 
@@ -31,6 +32,7 @@ pub const Stream = enum(u8) {
             .events => 0xB54CDA58FBBEE87E,
             .medical => 0x538454127B096493,
             .travel => 0xF1BBCDCBFA53E0A8,
+            .actors => 0xC2B2AE3D27D4EB4F, // P4i actor identity generation
         };
     }
 };
@@ -119,4 +121,6 @@ test "stream salts are distinct and independent of enum order" {
     // Pinned: a salt is part of every saved seed's meaning, so changing
     // one would change what existing saves draw.
     try std.testing.expectEqual(@as(u64, 0x1715609F7C746C69), Stream.battle.salt());
+    // P4i: actor stream salt pinned.
+    try std.testing.expectEqual(@as(u64, 0xC2B2AE3D27D4EB4F), Stream.actors.salt());
 }

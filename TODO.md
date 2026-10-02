@@ -40,6 +40,7 @@ above is complete.
   - [x] P4g command capacity and interventions.
   - [x] P4h escalation, consolidation, withdrawal, and finales.
   - [ ] P4i persistent actors, relationships, world state, rivals, and officers.
+    *(increment sim/p4i-actors-relationships: actors + 4-dim relationships + recurrence + read-only display — in review)*
   - [ ] P4j additional arcs, variants, reports, balance scripts, and docs.
 
 ## Not scheduled

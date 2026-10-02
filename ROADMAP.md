@@ -1564,6 +1564,9 @@ a former actor should reflect the player's previous choices.
   leaders, quartermasters, civilian organizers, smugglers, enemy officers and
   rival commanders. They have deterministic generated identity, archetype,
   faction, relationship and agenda tags.
+  *(P4h.1-P4h.3 implemented as increment P4i: persistent actors +
+  relationships; read-only display; recurrence; relationship adjustments on
+  operation/finale resolution — see branch sim/p4i-actors-relationships)*
 - P4h.2 Keep actors distinct from payroll `Person` records unless a named
   conversion rule turns an actor into a prisoner, recruit or employee.
 - P4h.3 Add a narrow relationship model, such as trust, debt, respect and

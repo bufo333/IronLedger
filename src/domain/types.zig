@@ -90,6 +90,9 @@ pub const LoanId = enum(u32) { none = 0, _ };
 /// One instantiated operation on a contract; typed so an operation command
 /// cannot be passed a listing or loan index (rule 56).
 pub const OperationId = enum(u32) { none = 0, _ };
+/// One persistent contract-introduced actor (P4i); typed so an actor command
+/// cannot be passed a listing or operation index (rule 56).
+pub const ActorId = enum(u32) { none = 0, _ };
 
 /// Skill catalog, following MekHQ's SkillType. Lower level = better
 /// (target-number convention: a 3/4 mekwarrior has gunnery 3, piloting 4).

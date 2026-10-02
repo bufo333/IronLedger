@@ -298,3 +298,18 @@ Marik border, 3027. Two regional HQs: **Zenith** (home region, mature) and
    payroll and construction commitment.
 
 Nobody piloted a mek. That's the game.
+
+---
+
+## Persistent actors (P4i)
+
+Some contracts introduce named NPCs — a sector liaison, an enemy commander, a
+black-market contact — who persist in the outfit's records after the contract
+ends. Each actor carries four relationship dimensions (trust, debt, respect,
+hostility; −100…100) that shift with every operation outcome and finale result.
+Encountering the same faction/archetype combination on a later contract surfaces
+the stored relationship: a trusted ally from a previous garrison duty turns up
+as a liaison again, their history intact. The Operations screen shows the
+current actors for the active contract with a "(returning)" tag for recurrences.
+No player decisions in this increment — actors are read-only display, groundwork
+for future conversation and mission choices.

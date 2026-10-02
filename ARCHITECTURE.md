@@ -234,7 +234,12 @@ cheap, copyable, and impossible to mix up.
 - **Finances** — transaction ledger (every c-bill has a category and date),
   loans, monthly close-out report per company (the *profit center* view).
 - **GameState** — campaign date, player outfit, reputation, all of the above,
-  markets, pending events, RNG state.
+  markets, pending events, RNG state, persistent actors map.
+- **Actor** — a contract-introduced NPC (liaison, official, enemy commander,
+  etc.) that persists across contracts. Each actor carries four relationship
+  dimensions (trust, debt, respect, hostility; −100…100). Actors are keyed by
+  `ActorId`; the same faction/archetype pair recurring in a later contract
+  surfaces the prior relationship. Owned by `sim/actors.zig` (P4i).
 
 Contract types (matching MekHQ/AtB): **Garrison Duty, Cadre Duty, Security
 Duty, Riot Duty, Planetary Assault, Relief Duty, Guerrilla Warfare, Pirate
@@ -906,11 +911,11 @@ src/
   root.zig       module root, re-exports
   domain/        entities and rule tables: types person unit part chassis
                  force contract hq planet faction tuning skulls scenario …;
-                 clock events autoresolve battle_report hq_link
+                 clock events autoresolve battle_report hq_link actor
   sim/           state plus focused personnel/posture/treasury owners;
                   crew tick commands battle
                   medical maintenance field_supply sites network
-                  rng contract_market starter_company toe …;
+                  rng contract_market starter_company toe actors …;
                   queries.zig (read-only views),
                   cli.zig (verbs), table.zig (markup), digest.zig (hash)
   econ/          finance logistics market

@@ -3353,6 +3353,8 @@ pub const HistoryRow = struct {
     id: types.ContractId,
     planet_key: []const u8,
     cells: table.Row,
+    /// Short summary of principal actors from this contract's arc (P4i); empty if none.
+    actors_summary: []const u8,
 };
 
 pub const history_cols: []const table.Col = &.{
@@ -3383,7 +3385,31 @@ pub fn contractHistory(alloc: Alloc, gs: *GameState) ![]HistoryRow {
             .breached, .failed => "{c}",
             else => "{a}",
         };
-        try out.append(alloc, .{ .id = c.id, .planet_key = c.planet_key, .cells = try table.row(alloc, &.{
+        // Build a brief actors summary (P4i): "liaison: Ann Smith (trust 20), ..."
+        var actors_summary: []const u8 = "";
+        if (c.actor_ids.items.len > 0) {
+            var summary_buf: std.ArrayListUnmanaged(u8) = .empty;
+            var first_actor = true;
+            for (c.actor_ids.items) |aid| {
+                const act = gs.actor(aid) orelse continue;
+                const arch = actor_dom.find(act.archetype_key);
+                const arch_name: []const u8 = if (arch) |ar| ar.name else act.archetype_key;
+                if (!first_actor) try summary_buf.appendSlice(alloc, "; ");
+                try summary_buf.appendSlice(alloc, arch_name);
+                try summary_buf.appendSlice(alloc, ": ");
+                try summary_buf.appendSlice(alloc, act.first_name);
+                try summary_buf.append(alloc, ' ');
+                try summary_buf.appendSlice(alloc, act.last_name);
+                if (act.trust != 0 or act.respect != 0) {
+                    const trust_note = try std.fmt.allocPrint(alloc, " (trust {d})", .{act.trust});
+                    try summary_buf.appendSlice(alloc, trust_note);
+                }
+                if (act.recurring) try summary_buf.appendSlice(alloc, " [returning]");
+                first_actor = false;
+            }
+            actors_summary = try summary_buf.toOwnedSlice(alloc);
+        }
+        try out.append(alloc, .{ .id = c.id, .planet_key = c.planet_key, .actors_summary = actors_summary, .cells = try table.row(alloc, &.{
             try std.fmt.allocPrint(alloc, "{d}", .{@intFromEnum(c.id)}),
             c.kind.label(),
             c.employer_key,
@@ -6792,6 +6818,23 @@ test "seatPlanetKey returns the seat's planet and null before any HQ (C10-E1)" {
 
 // ---- Operations board query (P4c) ----------------------------------------
 
+const actor_dom = @import("../domain/actor.zig");
+
+/// One attached actor row in the Operations view (P4i).
+pub const ActorRow = struct {
+    id: types.ActorId,
+    /// Display name as untrusted text (player-chosen? No — generated from tables. But we cross it as Raw for safety per rule 33).
+    name: table.Raw,
+    archetype: []const u8,
+    agenda: []const u8,
+    trust: i16,
+    debt: i16,
+    respect: i16,
+    hostility: i16,
+    last_cause: table.Raw,
+    recurring: bool,
+};
+
 pub const OperationRow = struct {
     id: types.OperationId,
     name: []const u8,
@@ -6844,15 +6887,17 @@ pub const Operations = struct {
     escalation_clock: u16,
     /// Collapse threshold (topCollapseMinClock); 0 if no collapse finale defined (P4h).
     collapse_threshold: u16,
+    /// Actors attached to this contract's arc (P4i); empty for non-arc contracts.
+    actors: []ActorRow,
 };
 
 /// Return the operations board for an active arc contract.
 /// Caller owns the result (arena-friendly).
 pub fn contractOperations(alloc: Alloc, gs: *GameState, contract_id: types.ContractId) !Operations {
-    const c = gs.contracts.getPtr(contract_id) orelse return Operations{ .briefing = "", .rows = &.{}, .escalation_clock = 0, .collapse_threshold = 0 };
-    if (c.arc_key.len == 0) return Operations{ .briefing = "", .rows = &.{}, .escalation_clock = 0, .collapse_threshold = 0 };
+    const c = gs.contracts.getPtr(contract_id) orelse return Operations{ .briefing = "", .rows = &.{}, .escalation_clock = 0, .collapse_threshold = 0, .actors = &.{} };
+    if (c.arc_key.len == 0) return Operations{ .briefing = "", .rows = &.{}, .escalation_clock = 0, .collapse_threshold = 0, .actors = &.{} };
     const arc_mod = @import("../domain/arc.zig");
-    const a = arc_mod.find(c.arc_key) orelse return Operations{ .briefing = "", .rows = &.{}, .escalation_clock = 0, .collapse_threshold = 0 };
+    const a = arc_mod.find(c.arc_key) orelse return Operations{ .briefing = "", .rows = &.{}, .escalation_clock = 0, .collapse_threshold = 0, .actors = &.{} };
 
     // Briefing: current beat's name + any active finale key.
     const briefing: []const u8 = if (c.arc_beat < a.beats.len) blk: {
@@ -6901,11 +6946,31 @@ pub fn contractOperations(alloc: Alloc, gs: *GameState, contract_id: types.Contr
             .can_consolidate = operations_m.consolidateEligible(op),
         });
     }
+    // Build actor rows for this contract (P4i).
+    var actor_rows: std.ArrayListUnmanaged(ActorRow) = .empty;
+    for (c.actor_ids.items) |aid| {
+        const act = gs.actor(aid) orelse continue;
+        const arch = actor_dom.find(act.archetype_key);
+        try actor_rows.append(alloc, .{
+            .id = aid,
+            .name = .{ .raw = try std.fmt.allocPrint(alloc, "{s} {s}", .{ act.first_name, act.last_name }) },
+            .archetype = if (arch) |ar| ar.name else act.archetype_key,
+            .agenda = if (arch) |ar| ar.agenda else "",
+            .trust = act.trust,
+            .debt = act.debt,
+            .respect = act.respect,
+            .hostility = act.hostility,
+            .last_cause = .{ .raw = act.last_cause },
+            .recurring = act.recurring,
+        });
+    }
+
     return Operations{
         .briefing = briefing,
         .rows = try rows.toOwnedSlice(alloc),
         .escalation_clock = c.escalation_clock,
         .collapse_threshold = operations_m.topCollapseMinClock(a),
+        .actors = try actor_rows.toOwnedSlice(alloc),
     };
 }
 

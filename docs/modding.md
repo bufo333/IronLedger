@@ -62,6 +62,7 @@ overlay of each family and checks that every one fails; CI runs it.
 | `tables/terrain.zon` | `domain/terrain.zig` `Table` | terrain classes, weather, the 2d6 weather table |
 | `tables/arcs.zon` | `domain/arc.zig` `Table` | operation arc archetypes: narrative beats, finale options, opening templates per contract kind |
 | `tables/operations.zon` | `domain/operation.zig` `Table` | operation mission templates: arc ownership, combat flag, objectives, follow-up keys |
+| `tables/actor_archetypes.zon` | `domain/actor.zig` `Table` | actor archetypes attached to arcs: NPC roles (liaison, official, militia leader …), faction side, agenda text, and the arc keys they appear in (P4i) |
 
 ## Rules of the road
 

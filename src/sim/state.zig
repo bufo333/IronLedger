@@ -24,6 +24,7 @@ const planet_mod = @import("../domain/planet.zig");
 const part_mod = @import("../domain/part.zig");
 const market_mod = @import("../econ/market.zig");
 const meklab = @import("../domain/meklab.zig");
+const actor_mod = @import("../domain/actor.zig");
 
 pub const Config = struct {
     seed: u64 = 3025,
@@ -306,6 +307,9 @@ pub const GameState = struct {
     /// MekLab refit plans, staged and committed.
     refit_plans: std.ArrayListUnmanaged(RefitPlan) = .empty,
 
+    /// Persistent contract-introduced actors (P4i).
+    actors: std.AutoArrayHashMapUnmanaged(types.ActorId, actor_mod.Actor) = .empty,
+
     next_person_id: u32 = 1,
     next_unit_id: u32 = 1,
     next_force_id: u32 = 1,
@@ -315,6 +319,7 @@ pub const GameState = struct {
     next_candidate_id: u32 = 1,
     next_loan_id: u32 = 1,
     next_operation_id: u32 = 1,
+    next_actor_id: u32 = 1,
 
     pub fn init(gpa: std.mem.Allocator, config: Config) GameState {
         return .{
@@ -412,6 +417,19 @@ pub const GameState = struct {
 
     pub fn person(self: *GameState, id: types.PersonId) ?*person_mod.Person {
         return self.people.getPtr(id);
+    }
+
+    /// Reserve capacity in `actors`, then write the prepared actor using the
+    /// next_actor_id assigned by the caller's commit phase (P4i, rules 7, 11-13).
+    /// The prepared actor must already carry the correct id (set by the caller).
+    /// `ensureUnusedCapacity` is the only fallible step; the put is infallible.
+    pub fn commitActor(self: *GameState, prepared: actor_mod.Actor) !void {
+        try self.actors.ensureUnusedCapacity(self.allocator(), 1);
+        self.actors.putAssumeCapacity(prepared.id, prepared);
+    }
+
+    pub fn actor(self: *GameState, id: types.ActorId) ?*actor_mod.Actor {
+        return self.actors.getPtr(id);
     }
 
     /// Room for `n` more ledger entries, so the next `n` postings cannot
@@ -839,6 +857,8 @@ pub const GameState = struct {
         .{ "next_candidate_id", .persisted },
         .{ "next_loan_id", .persisted },
         .{ "next_operation_id", .persisted },
+        .{ "actors", .persisted },
+        .{ "next_actor_id", .persisted },
     };
 
     pub fn persistenceOf(comptime name: []const u8) Persistence {

@@ -3076,9 +3076,30 @@ pub const App = struct {
                         try std.fmt.allocPrint(al, "  esc:{d}", .{ops.escalation_clock});
                     break :blk try std.fmt.allocPrint(al, "{s}{s}", .{ ops.briefing, esc_note });
                 } else "(no arc)";
+                // Build a read-only actors block (P4i): one line per attached actor.
+                var head_lines: std.ArrayListUnmanaged([]const u8) = .empty;
+                try head_lines.append(al, hint);
+                if (ops.actors.len > 0) {
+                    try head_lines.append(al, "");
+                    for (ops.actors) |ar| {
+                        const name_text = try ar.name.markup(al);
+                        const cause_text = if (ar.last_cause.raw.len > 0) try ar.last_cause.markup(al) else @as([]const u8, "");
+                        const recurring_tag: []const u8 = if (ar.recurring) " {a}(returning){/}" else "";
+                        const cause_note: []const u8 = if (cause_text.len > 0)
+                            try std.fmt.allocPrint(al, "  last:{s}", .{cause_text})
+                        else
+                            "";
+                        try head_lines.append(al, try std.fmt.allocPrint(al, "{s}  [{s}] {s}  tr:{d} dt:{d} re:{d} ho:{d}{s}{s}", .{
+                            name_text,    ar.archetype, ar.agenda,
+                            ar.trust,     ar.debt,      ar.respect,
+                            ar.hostility, cause_note,   recurring_tag,
+                        }));
+                    }
+                }
+                try head_lines.append(al, "");
                 return .{
                     .title = try listTitle(al, try std.fmt.allocPrint(al, "OPERATIONS · [{d}]", .{@intFromEnum(cid)}), "Enter pick intent · r tempo · x decline · w withdraw · e exploit · o consolidate", "cancel", false),
-                    .head = try al.dupe([]const u8, &.{ hint, "" }),
+                    .head = head_lines.items,
                     .rows = rows.items,
                     .n = ops.rows.len,
                     .empty = "{d}no operations on this contract{/}",
