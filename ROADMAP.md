@@ -1577,6 +1577,9 @@ a former actor should reflect the player's previous choices.
   and finale effects change it; future contract generation, markets, support
   and intelligence consume it. Map and Contracts queries display the state and
   history without implying a fully simulated population.
+  *(implemented as increment sim/p4i-world-state: persistent world_states map,
+  schema v44→45, outcomeWorldDelta/finaleWorldDelta owners, read-only display
+  on Map world-detail and Contracts active/history panes)*
 - P4h.5 Add persistent rival companies with faction, doctrine,
   relationship, status and bounded history. They can take declined work,
   contest contracts, cooperate temporarily or interfere through visible,

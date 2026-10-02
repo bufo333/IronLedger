@@ -1,6 +1,6 @@
 -- IRON LEDGER — SQLite save store schema (design document)
 --
--- Matches schema_version 44. The executable DDL and its column migrations
+-- Matches schema_version 45. The executable DDL and its column migrations
 -- live in src/persist/store.zig; this file is the readable reference for
 -- what each table and column means. Column order here is the runtime order.
 --
@@ -948,3 +948,23 @@ CREATE TABLE actor (
     FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 CREATE INDEX IF NOT EXISTS ix_actor_cid ON actor(cid);
+
+-- P4h.4: bounded per-world state that accumulates across contracts on the same
+-- world. Five numeric dimensions are clamped to world_min…world_max (±100).
+-- Loaded ORDER BY ord to preserve StringArrayHashMapUnmanaged insertion order
+-- for a deterministic round-trip digest.
+CREATE TABLE world_state (
+    cid                     INTEGER NOT NULL,
+    ord                     INTEGER NOT NULL, -- stable insertion order for deterministic digest
+    planet_key              TEXT    NOT NULL, -- -> domain/planet.zig catalog
+    security                INTEGER NOT NULL DEFAULT 0, -- clamped −100…100
+    civilian_support        INTEGER NOT NULL DEFAULT 0, -- clamped −100…100
+    infrastructure_strain   INTEGER NOT NULL DEFAULT 0, -- clamped −100…100
+    employer_control        INTEGER NOT NULL DEFAULT 0, -- clamped −100…100
+    enemy_influence         INTEGER NOT NULL DEFAULT 0, -- clamped −100…100
+    last_cause              TEXT    NOT NULL DEFAULT '', -- short markup-safe label for last change
+    last_cause_day          INTEGER NOT NULL DEFAULT 0,  -- day_index of last change
+    PRIMARY KEY (cid, planet_key),
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
+);
+CREATE INDEX IF NOT EXISTS ix_world_state_cid ON world_state(cid);

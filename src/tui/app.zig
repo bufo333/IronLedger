@@ -3096,6 +3096,10 @@ pub const App = struct {
                         }));
                     }
                 }
+                if (ops.world_state_summary.len > 0) {
+                    try head_lines.append(al, "");
+                    try head_lines.append(al, try std.fmt.allocPrint(al, "{{d}}world{{/}}  {s}", .{ops.world_state_summary}));
+                }
                 try head_lines.append(al, "");
                 return .{
                     .title = try listTitle(al, try std.fmt.allocPrint(al, "OPERATIONS · [{d}]", .{@intFromEnum(cid)}), "Enter pick intent · r tempo · x decline · w withdraw · e exploit · o consolidate", "cancel", false),

@@ -36,8 +36,9 @@ const held_hulls_m = @import("../sim/held_hulls.zig");
 const arc_mod = @import("../domain/arc.zig");
 const operation_mod = @import("../domain/operation.zig");
 const actor_mod = @import("../domain/actor.zig");
+const world_state_dom = @import("../domain/world_state.zig");
 
-pub const schema_version = 44;
+pub const schema_version = 45;
 
 const ddl =
     \\CREATE TABLE IF NOT EXISTS player (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_seq INTEGER NOT NULL);
@@ -92,6 +93,7 @@ const ddl =
     \\CREATE TABLE IF NOT EXISTS operation_intervention (cid INTEGER NOT NULL, contract_id INTEGER NOT NULL, operation_id INTEGER NOT NULL, ord INTEGER NOT NULL, kind TEXT NOT NULL, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS battle_report_task (cid INTEGER NOT NULL, report_ord INTEGER NOT NULL, ord INTEGER NOT NULL, lance_id INTEGER NOT NULL, lance_name TEXT NOT NULL, task TEXT NOT NULL, succeeded INTEGER NOT NULL CHECK (succeeded IN (0,1)), note TEXT NOT NULL, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, report_ord) REFERENCES battle_report(cid, ord) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS actor (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, archetype_key TEXT NOT NULL, first_name TEXT NOT NULL, last_name TEXT NOT NULL, faction_key TEXT NOT NULL, side TEXT NOT NULL, contract INTEGER NOT NULL DEFAULT 0, trust INTEGER NOT NULL DEFAULT 0, debt INTEGER NOT NULL DEFAULT 0, respect INTEGER NOT NULL DEFAULT 0, hostility INTEGER NOT NULL DEFAULT 0, last_cause TEXT NOT NULL DEFAULT '', last_cause_day INTEGER NOT NULL DEFAULT 0, recurring INTEGER NOT NULL DEFAULT 0 CHECK (recurring IN (0,1)), PRIMARY KEY (cid, id), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS world_state (cid INTEGER NOT NULL, ord INTEGER NOT NULL, planet_key TEXT NOT NULL, security INTEGER NOT NULL DEFAULT 0, civilian_support INTEGER NOT NULL DEFAULT 0, infrastructure_strain INTEGER NOT NULL DEFAULT 0, employer_control INTEGER NOT NULL DEFAULT 0, enemy_influence INTEGER NOT NULL DEFAULT 0, last_cause TEXT NOT NULL DEFAULT '', last_cause_day INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (cid, planet_key), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
 ;
 
 const tables = [_][]const u8{
@@ -100,7 +102,7 @@ const tables = [_][]const u8{
     "contract",       "txn",                    "loan",               "courier",          "policy",            "bay_job",            "candidate",             "hq_link",     "unit_transfer",
     "supply_policy",  "stock_policy",           "faction_cooling",    "faction_standing", "event_memory",      "listing",            "part_order",            "event_log",   "pending_event",
     "refit_plan",     "refit_op",               "rating_snapshot",    "battle_report",    "battle_report_hit", "battle_report_ammo", "battle_report_salvage", "rng_stream",  "operation",
-    "operation_task", "operation_intervention", "battle_report_task", "actor",
+    "operation_task", "operation_intervention", "battle_report_task", "actor",            "world_state",
 };
 
 // Indexes for per-campaign tables (A28/D31): cid filters on every load;
@@ -156,6 +158,7 @@ const index_ddl =
     \\CREATE INDEX IF NOT EXISTS ix_operation_intervention_cid ON operation_intervention(cid, contract_id, operation_id);
     \\CREATE INDEX IF NOT EXISTS ix_battle_report_task_report ON battle_report_task(cid, report_ord);
     \\CREATE INDEX IF NOT EXISTS ix_actor_cid ON actor(cid);
+    \\CREATE INDEX IF NOT EXISTS ix_world_state_cid ON world_state(cid);
 ;
 
 /// The stream order of the single `rng` blob that saves before schema v32
@@ -268,6 +271,8 @@ pub const Store = struct {
         .{ .from = 42, .to = 43, .table = "battle_report", .column = "operation_interventions", .sql = "ALTER TABLE battle_report ADD COLUMN operation_interventions TEXT NOT NULL DEFAULT ''" },
         // v44: actor table (P4i). New table — no ALTER TABLE migration needed; applySchema creates it.
         // The `actor` table is wholly new; existing saves open with zero actors, next_actor_id=1 (safe default).
+        // v45: world_state table (P4h.4). New table — no ALTER TABLE migration needed; applySchema creates it.
+        // Existing saves open with zero world states (safe default).
     };
 
     pub fn open(path: [*:0]const u8) !Store {
@@ -585,6 +590,7 @@ pub const Store = struct {
         try self.saveContracts(gs, cid);
         try self.saveOperations(gs, cid);
         try self.saveActors(gs, cid);
+        try self.saveWorldStates(gs, cid);
         try self.saveTxn(gs, cid);
         try self.saveLoan(gs, cid);
         try self.saveCourier(gs, cid);
@@ -1096,6 +1102,63 @@ pub const Store = struct {
         }
     }
 
+    // P4h.4: save and load per-world state.
+    fn saveWorldStates(self: Store, gs: *GameState, cid: i64) !void {
+        const st = try self.db.prepare("INSERT INTO world_state VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)");
+        defer st.finalize();
+        var it = gs.world_states.iterator();
+        var ord: i64 = 0;
+        while (it.next()) |entry| : (ord += 1) {
+            const ws = entry.value_ptr;
+            try st.bindAll(.{
+                cid,
+                ord,
+                entry.key_ptr.*,
+                @as(i64, ws.security),
+                @as(i64, ws.civilian_support),
+                @as(i64, ws.infrastructure_strain),
+                @as(i64, ws.employer_control),
+                @as(i64, ws.enemy_influence),
+                ws.last_cause,
+                @as(i64, ws.last_cause_day),
+            });
+            try st.run();
+        }
+    }
+
+    fn loadWorldStates(self: Store, gs: *GameState, cid: i64) !void {
+        const alloc = gs.allocator();
+        const st = try self.db.prepare("SELECT planet_key, security, civilian_support, infrastructure_strain, employer_control, enemy_influence, last_cause, last_cause_day FROM world_state WHERE cid = ?1 ORDER BY ord");
+        defer st.finalize();
+        try st.bindAll(.{cid});
+        while (try st.next()) {
+            const planet_key = try st.text(0, alloc);
+            const security = try fit(i16, st.int(1));
+            const civilian_support = try fit(i16, st.int(2));
+            const infrastructure_strain = try fit(i16, st.int(3));
+            const employer_control = try fit(i16, st.int(4));
+            const enemy_influence = try fit(i16, st.int(5));
+            // Validate dimension ranges.
+            if (security < world_state_dom.world_min or security > world_state_dom.world_max) return error.CorruptSave;
+            if (civilian_support < world_state_dom.world_min or civilian_support > world_state_dom.world_max) return error.CorruptSave;
+            if (infrastructure_strain < world_state_dom.world_min or infrastructure_strain > world_state_dom.world_max) return error.CorruptSave;
+            if (employer_control < world_state_dom.world_min or employer_control > world_state_dom.world_max) return error.CorruptSave;
+            if (enemy_influence < world_state_dom.world_min or enemy_influence > world_state_dom.world_max) return error.CorruptSave;
+            const ws: world_state_dom.WorldState = .{
+                .security = security,
+                .civilian_support = civilian_support,
+                .infrastructure_strain = infrastructure_strain,
+                .employer_control = employer_control,
+                .enemy_influence = enemy_influence,
+                .last_cause = try st.text(6, alloc),
+                .last_cause_day = try st.intAs(u32, 7),
+            };
+            const gop = try gs.world_states.getOrPut(alloc, planet_key);
+            if (gop.found_existing) return error.CorruptSave;
+            gop.value_ptr.* = ws;
+        }
+    }
+
     // Ledger and the rest of the lists.
     fn saveTxn(self: Store, gs: *GameState, cid: i64) !void {
         const st = try self.db.prepare("INSERT INTO txn VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)");
@@ -1469,6 +1532,7 @@ pub const Store = struct {
         try self.loadOperationTasks(&gs, cid);
         try self.loadOperationInterventions(&gs, cid);
         try self.loadActors(&gs, cid);
+        try self.loadWorldStates(&gs, cid);
         try self.loadTxn(&gs, cid);
         try self.loadLoan(&gs, cid);
         try self.loadCourier(&gs, cid);
@@ -2727,6 +2791,14 @@ fn validateStoredStrings(gs: *GameState) error{CorruptSave}!void {
             if (a.last_cause.len > 0) try Check.shown(a.last_cause);
         }
     }
+    // World states: planet_key must name a known planet; last_cause must be markup-safe.
+    {
+        var wsit = gs.world_states.iterator();
+        while (wsit.next()) |e| {
+            try Check.world(e.key_ptr.*);
+            if (e.value_ptr.last_cause.len > 0) try Check.shown(e.value_ptr.last_cause);
+        }
+    }
     for (gs.battle_reports.kept.items) |r| {
         inline for (.{ r.kind, r.enemy_key, r.scenario, r.terrain, r.weather, r.command_rights, r.salvage.items, r.operation, r.operation_interventions }) |text| try Check.shown(text);
         if (r.operation_intent) |i| try Check.shown(@tagName(i));
@@ -3935,8 +4007,8 @@ test "a rebuilt store loads to the identical digest" {
     // Digest is identical: the rebuild changed no data.
     var diff_buf: [128]u8 = undefined;
     try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &diff_buf) orelse "");
-    // Re-pinned by P4i corrections (enemy actors now tagged with enemy_key; F3 fix).
-    try std.testing.expectEqual(@as(u64, 12410792612607626998), hash_before);
+    // Re-pinned by P4h.4 (world_states added to digest via field_persistence).
+    try std.testing.expectEqual(@as(u64, 13217811148885818620), hash_before);
 }
 
 test "every next-ID counter resumes past a higher owned id after load" {
@@ -4427,9 +4499,9 @@ test "golden master: a played year hashes to its pinned value, and a save of it 
     try playedYearForTest(&gs);
     try std.testing.expect(gs.battle_reports.kept.items.len > 0); // the year saw fighting
     // Any change to a simulated or saved result moves this; re-pin it only
-    // when the change is meant. Re-pinned by P4i corrections (enemy actors now
-    // tagged with enemy_key instead of employer_key; F3 fix).
-    try std.testing.expectEqual(@as(u64, 12410792612607626998), digest.stateHash(&gs));
+    // when the change is meant. Re-pinned by P4h.4 (world_states added to
+    // digest via field_persistence).
+    try std.testing.expectEqual(@as(u64, 13217811148885818620), digest.stateHash(&gs));
 
     const store = try Store.open(":memory:");
     defer store.close();
@@ -5529,4 +5601,109 @@ test "withdrawn operation and fell finale round-trip through save/load with iden
     try std.testing.expectEqualStrings("fell", lc.arc_finale_key);
     try std.testing.expectEqual(@import("../domain/contract.zig").ContractStatus.failed, lc.status);
     try std.testing.expectEqual(operation_mod.OperationState.withdrawn, lc.operations.items[0].state);
+}
+
+// ---- P4h.4 world_state persistence tests ----------------------------------
+
+fn buildWorldStateGs(alloc: std.mem.Allocator) !GameState {
+    const world_state_sim = @import("../sim/world_state.zig");
+    var gs = GameState.init(alloc, .{ .seed = 30001 });
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    // Set world states for two known worlds.
+    const prep1 = try world_state_sim.prepareWorldAdjust(&gs, "galatea", .{ .security = 30, .employer_control = 20, .enemy_influence = -10 }, "big_win");
+    world_state_sim.commitWorldAdjust(&gs, prep1);
+    const prep2 = try world_state_sim.prepareWorldAdjust(&gs, "solaris7", .{ .enemy_influence = 15, .infrastructure_strain = 5 }, "setback");
+    world_state_sim.commitWorldAdjust(&gs, prep2);
+    return gs;
+}
+
+fn loadWorldStateAfterTampering(sql: [*:0]const u8) !void {
+    var gs = try buildWorldStateGs(std.testing.allocator);
+    defer gs.deinit();
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    try store.db.exec("PRAGMA foreign_keys = OFF");
+    try store.db.exec(sql);
+    try store.db.exec("PRAGMA foreign_keys = ON");
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    loaded.deinit();
+}
+
+test "world states on two worlds survive a save/load round-trip (P4h.4)" {
+    // Rules 47, 67 / P4h.4: a campaign with non-zero world state on two worlds
+    // saves and loads to an identical stateHash. Insertion order is preserved by
+    // the `ord` column + ORDER BY ord so the StringArrayHashMap digest matches.
+    var gs = try buildWorldStateGs(std.testing.allocator);
+    defer gs.deinit();
+
+    try std.testing.expectEqual(@as(usize, 2), gs.world_states.count());
+    const before = digest.stateHash(&gs);
+
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+
+    var diff_buf: [128]u8 = undefined;
+    try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &diff_buf) orelse "");
+    try std.testing.expectEqual(before, digest.stateHash(&loaded));
+    try std.testing.expectEqual(@as(usize, 2), loaded.world_states.count());
+    // Galatea values survive.
+    const gal = loaded.world_states.get("galatea").?;
+    try std.testing.expectEqual(@as(i16, 30), gal.security);
+    try std.testing.expectEqual(@as(i16, 20), gal.employer_control);
+    try std.testing.expectEqual(@as(i16, -10), gal.enemy_influence);
+    try std.testing.expectEqualStrings("big_win", gal.last_cause);
+}
+
+test "a v44 store migrates to v45 with the world_state table created (P4h.4)" {
+    // Rule 50 / P4h.4: a store at schema v44 (no world_state table) must migrate
+    // cleanly to v45 — applySchema creates the table — and loading yields zero world states.
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 30002 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+
+    const raw = try sqlite.Db.open(":memory:");
+    var s1 = try Store.fromDb(raw);
+    try s1.save(&gs);
+    // Simulate a v44 store: drop the world_state table and downgrade schema_version.
+    try raw.exec("DROP TABLE world_state");
+    try raw.exec("UPDATE setting SET value = 44 WHERE key = 'schema_version'");
+    // fromDb sees v44, runs applySchema (CREATE TABLE IF NOT EXISTS world_state), sets v45.
+    const s2 = try Store.fromDb(raw);
+    defer s2.close();
+    // Schema advanced to current.
+    try std.testing.expectEqual(@as(i64, schema_version), s2.getSetting("schema_version", 0));
+    // world_state table exists and is empty.
+    const cnt = try s2.db.prepare("SELECT COUNT(*) FROM world_state");
+    defer cnt.finalize();
+    try std.testing.expect(try cnt.next());
+    try std.testing.expectEqual(@as(i64, 0), cnt.int(0));
+    // Loading yields zero world states (safe default).
+    var loaded = try s2.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+    try std.testing.expectEqual(@as(usize, 0), loaded.world_states.count());
+}
+
+test "a world_state row with an unknown planet_key rejects the load as corrupt (P4h.4)" {
+    // Rule 47 / P4h.4: planet_key must name a known planet.
+    try std.testing.expectError(error.CorruptSave, loadWorldStateAfterTampering(
+        "UPDATE world_state SET planet_key = 'notaplanet' WHERE planet_key = 'galatea'",
+    ));
+}
+
+test "a world_state row with an out-of-range dimension rejects the load as corrupt (P4h.4)" {
+    // Rule 47 / P4h.4: dimension values must lie in [world_min, world_max].
+    try std.testing.expectError(error.CorruptSave, loadWorldStateAfterTampering(
+        "UPDATE world_state SET security = 200",
+    ));
+}
+
+test "a world_state row with a non-markup-safe last_cause rejects the load as corrupt (P4h.4)" {
+    // Rule 47 / P4h.4: last_cause must be markup-safe.
+    try std.testing.expectError(error.CorruptSave, loadWorldStateAfterTampering(
+        "UPDATE world_state SET last_cause = '{bad markup}'",
+    ));
 }

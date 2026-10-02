@@ -25,6 +25,7 @@ const part_mod = @import("../domain/part.zig");
 const market_mod = @import("../econ/market.zig");
 const meklab = @import("../domain/meklab.zig");
 const actor_mod = @import("../domain/actor.zig");
+const world_state_mod = @import("../domain/world_state.zig");
 
 pub const Config = struct {
     seed: u64 = 3025,
@@ -310,6 +311,9 @@ pub const GameState = struct {
     /// Persistent contract-introduced actors (P4i).
     actors: std.AutoArrayHashMapUnmanaged(types.ActorId, actor_mod.Actor) = .empty,
 
+    /// Persistent bounded per-world state, keyed by planet_key (P4h.4).
+    world_states: std.StringArrayHashMapUnmanaged(world_state_mod.WorldState) = .empty,
+
     next_person_id: u32 = 1,
     next_unit_id: u32 = 1,
     next_force_id: u32 = 1,
@@ -430,6 +434,11 @@ pub const GameState = struct {
 
     pub fn actor(self: *GameState, id: types.ActorId) ?*actor_mod.Actor {
         return self.actors.getPtr(id);
+    }
+
+    /// Return a pointer to the world state for this planet_key, or null if none yet.
+    pub fn worldState(self: *GameState, planet_key: []const u8) ?*world_state_mod.WorldState {
+        return self.world_states.getPtr(planet_key);
     }
 
     /// Room for `n` more ledger entries, so the next `n` postings cannot
@@ -859,6 +868,7 @@ pub const GameState = struct {
         .{ "next_operation_id", .persisted },
         .{ "actors", .persisted },
         .{ "next_actor_id", .persisted },
+        .{ "world_states", .persisted },
     };
 
     pub fn persistenceOf(comptime name: []const u8) Persistence {

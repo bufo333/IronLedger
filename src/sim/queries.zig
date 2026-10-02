@@ -956,6 +956,10 @@ pub fn contracts(alloc: Alloc, gs: *GameState, board_hq: types.HqId) !Contracts 
             }));
         }
         if (c.objectivesMet()) try lines.append(alloc, "    {g}objectives met{/} — [c] complete closes out (remainder forfeited)");
+        {
+            const ws_sum = try worldStateSummary(alloc, gs, c.planet_key);
+            if (ws_sum.len > 0) try lines.append(alloc, try std.fmt.allocPrint(alloc, "    world       {s}", .{ws_sum}));
+        }
         try lines.append(alloc, "");
         try active.append(alloc, .{ .id = c.id, .company = c.assigned_company, .status = c.status, .lines = try lines.toOwnedSlice(alloc), .objectives_met = c.objectivesMet() });
     }
@@ -3263,6 +3267,8 @@ pub const World = struct {
     worked: u32,
     /// Standing with the world's house (0 when it posts no contracts).
     standing: i32,
+    /// Read-only world-state summary (P4h.4); empty if no state has been recorded.
+    world_state_summary: []const u8,
 };
 
 pub const MapHq = struct {
@@ -3344,6 +3350,7 @@ pub fn map(alloc: Alloc, gs: *GameState) !Map {
             .offers_here = offers,
             .worked = contractsWorkedAt(gs, p.key),
             .standing = gs.standing(p.faction),
+            .world_state_summary = try worldStateSummary(alloc, gs, p.key),
         });
     }
     return .{ .worlds = try worlds.toOwnedSlice(alloc), .hqs = try hqs.toOwnedSlice(alloc), .in_ring = in_ring, .in_band = in_band, .dark = dark, .band_ly = market_mod.beachhead_band_ly };
@@ -3355,6 +3362,8 @@ pub const HistoryRow = struct {
     cells: table.Row,
     /// Short summary of principal actors from this contract's arc (P4i); empty if none.
     actors_summary: []const u8,
+    /// Read-only world-state summary for the contract's world (P4h.4); empty if no state.
+    world_state_summary: []const u8,
 };
 
 pub const history_cols: []const table.Col = &.{
@@ -3409,7 +3418,7 @@ pub fn contractHistory(alloc: Alloc, gs: *GameState) ![]HistoryRow {
             }
             actors_summary = try summary_buf.toOwnedSlice(alloc);
         }
-        try out.append(alloc, .{ .id = c.id, .planet_key = c.planet_key, .actors_summary = actors_summary, .cells = try table.row(alloc, &.{
+        try out.append(alloc, .{ .id = c.id, .planet_key = c.planet_key, .actors_summary = actors_summary, .world_state_summary = try worldStateSummary(alloc, gs, c.planet_key), .cells = try table.row(alloc, &.{
             try std.fmt.allocPrint(alloc, "{d}", .{@intFromEnum(c.id)}),
             c.kind.label(),
             c.employer_key,
@@ -6336,6 +6345,7 @@ pub fn worldDetail(alloc: Alloc, gs: *GameState, view: *const Map, w: *const Wor
     if (w.hq_here != .none) try rows.append(alloc, try std.fmt.allocPrint(alloc, "HQ here      {{a}}{s}{{/}}", .{try hqName(alloc, gs, w.hq_here)}));
     try rows.append(alloc, try std.fmt.allocPrint(alloc, "companies    {d} here", .{w.companies_here}));
     if (w.worked > 0) try rows.append(alloc, try std.fmt.allocPrint(alloc, "history      {{p}}{d} contract{s} worked here{{/}} · an HQ can be founded (F4 History lists them)", .{ w.worked, if (w.worked == 1) "" else "s" }));
+    if (w.world_state_summary.len > 0) try rows.append(alloc, try std.fmt.allocPrint(alloc, "world state  {s}", .{w.world_state_summary}));
     {
         const tn = @import("../domain/tuning.zig").t;
         var sup_buf: [16]u8 = undefined;
@@ -6819,6 +6829,31 @@ test "seatPlanetKey returns the seat's planet and null before any HQ (C10-E1)" {
 // ---- Operations board query (P4c) ----------------------------------------
 
 const actor_dom = @import("../domain/actor.zig");
+const world_state_dom = @import("../domain/world_state.zig");
+
+/// Format a compact read-only summary of the world state at planet_key.
+/// Returns an empty string when no state has been recorded yet.
+/// Output is markup-safe and owns its allocation from `alloc`.
+pub fn worldStateSummary(alloc: Alloc, gs: *GameState, planet_key: []const u8) ![]const u8 {
+    const ws = gs.world_states.get(planet_key) orelse return "";
+    if (ws.last_cause.len > 0) {
+        return std.fmt.allocPrint(alloc, "sec:{d} civ:{d} str:{d} emp:{d} enem:{d} (last:{s})", .{
+            ws.security,
+            ws.civilian_support,
+            ws.infrastructure_strain,
+            ws.employer_control,
+            ws.enemy_influence,
+            ws.last_cause,
+        });
+    }
+    return std.fmt.allocPrint(alloc, "sec:{d} civ:{d} str:{d} emp:{d} enem:{d}", .{
+        ws.security,
+        ws.civilian_support,
+        ws.infrastructure_strain,
+        ws.employer_control,
+        ws.enemy_influence,
+    });
+}
 
 /// One attached actor row in the Operations view (P4i).
 pub const ActorRow = struct {
@@ -6889,15 +6924,17 @@ pub const Operations = struct {
     collapse_threshold: u16,
     /// Actors attached to this contract's arc (P4i); empty for non-arc contracts.
     actors: []ActorRow,
+    /// Read-only world-state summary for the contract's planet (P4h.4); empty if none.
+    world_state_summary: []const u8,
 };
 
 /// Return the operations board for an active arc contract.
 /// Caller owns the result (arena-friendly).
 pub fn contractOperations(alloc: Alloc, gs: *GameState, contract_id: types.ContractId) !Operations {
-    const c = gs.contracts.getPtr(contract_id) orelse return Operations{ .briefing = "", .rows = &.{}, .escalation_clock = 0, .collapse_threshold = 0, .actors = &.{} };
-    if (c.arc_key.len == 0) return Operations{ .briefing = "", .rows = &.{}, .escalation_clock = 0, .collapse_threshold = 0, .actors = &.{} };
+    const c = gs.contracts.getPtr(contract_id) orelse return Operations{ .briefing = "", .rows = &.{}, .escalation_clock = 0, .collapse_threshold = 0, .actors = &.{}, .world_state_summary = "" };
+    if (c.arc_key.len == 0) return Operations{ .briefing = "", .rows = &.{}, .escalation_clock = 0, .collapse_threshold = 0, .actors = &.{}, .world_state_summary = try worldStateSummary(alloc, gs, c.planet_key) };
     const arc_mod = @import("../domain/arc.zig");
-    const a = arc_mod.find(c.arc_key) orelse return Operations{ .briefing = "", .rows = &.{}, .escalation_clock = 0, .collapse_threshold = 0, .actors = &.{} };
+    const a = arc_mod.find(c.arc_key) orelse return Operations{ .briefing = "", .rows = &.{}, .escalation_clock = 0, .collapse_threshold = 0, .actors = &.{}, .world_state_summary = try worldStateSummary(alloc, gs, c.planet_key) };
 
     // Briefing: current beat's name + any active finale key.
     const briefing: []const u8 = if (c.arc_beat < a.beats.len) blk: {
@@ -6971,6 +7008,7 @@ pub fn contractOperations(alloc: Alloc, gs: *GameState, contract_id: types.Contr
         .escalation_clock = c.escalation_clock,
         .collapse_threshold = operations_m.topCollapseMinClock(a),
         .actors = try actor_rows.toOwnedSlice(alloc),
+        .world_state_summary = try worldStateSummary(alloc, gs, c.planet_key),
     };
 }
 
@@ -7417,4 +7455,36 @@ test "taskEligible excludes a non-operational lance that combatLances still list
 
     // taskEligible excludes it because forceOperational returns false (no units).
     try std.testing.expect(!operations_m.taskEligible(&gs, c, op, empty_lance, .main_effort));
+}
+
+test "worldStateSummary: empty for a world with no state; reflects a set value (P4h.4)" {
+    // Display test (rule 34): worldStateSummary is empty before any state is set,
+    // and reflects the set value after; output is markup-safe.
+    const world_state_sim = @import("world_state.zig");
+    const table_mod = @import("table.zig");
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+
+    const alloc = std.testing.allocator;
+
+    // No state yet: empty.
+    const empty = try worldStateSummary(alloc, &gs, "galatea");
+    try std.testing.expectEqualStrings("", empty);
+
+    // Set a world state.
+    const prep = try world_state_sim.prepareWorldAdjust(&gs, "galatea", .{
+        .security = 25,
+        .employer_control = 10,
+        .enemy_influence = -5,
+    }, "test_op");
+    world_state_sim.commitWorldAdjust(&gs, prep);
+
+    // Now the world-state summary is non-empty and markup-safe.
+    const ws_text = try worldStateSummary(alloc, &gs, "galatea");
+    defer alloc.free(ws_text);
+    try std.testing.expect(ws_text.len > 0);
+    try std.testing.expect(table_mod.markupSafe(ws_text));
+    // Summary must contain the dimension values.
+    try std.testing.expect(std.mem.indexOf(u8, ws_text, "25") != null); // security
+    try std.testing.expect(std.mem.indexOf(u8, ws_text, "10") != null); // employer_control
 }

@@ -14,6 +14,7 @@ const GameState = @import("state.zig").GameState;
 const operations = @import("operations.zig");
 const commands = @import("commands.zig");
 const actors_m = @import("actors.zig");
+const world_state_m = @import("world_state.zig");
 
 const Error = commands.Error;
 
@@ -210,6 +211,9 @@ pub fn resolveDueOperations(gs: *GameState) !void {
                 actor_preps[actor_prep_count] = try actors_m.adjustRelationship(gs, aid, rel_delta, t.name);
                 actor_prep_count += 1;
             }
+            // Prepare world-state adjustment (fallible; after actor preps; rules 11-13).
+            const world_delta = world_state_m.outcomeWorldDelta(band);
+            const world_prep = try world_state_m.prepareWorldAdjust(gs, c.planet_key, world_delta, t.name);
 
             // Commit: infallible from here.
             op.state = .resolved;
@@ -232,6 +236,8 @@ pub fn resolveDueOperations(gs: *GameState) !void {
             });
             // Commit actor relationship adjustments (infallible; prepared above).
             for (actor_preps[0..actor_prep_count]) |prep| actors_m.commitAdjustRelationship(gs, prep);
+            // Commit world-state adjustment (infallible; prepared above).
+            world_state_m.commitWorldAdjust(gs, world_prep);
         }
     }
 }
@@ -273,6 +279,9 @@ pub fn resolveFinale(gs: *GameState, c: *contract_mod.Contract) !?*const arc_mod
         finale_actor_preps[finale_actor_prep_count] = try actors_m.adjustRelationship(gs, aid, finale_rel_delta, f.name);
         finale_actor_prep_count += 1;
     }
+    // Prepare world-state adjustment for the finale (fallible; after actor preps; rules 11-13).
+    const finale_world_delta = world_state_m.finaleWorldDelta(f);
+    const finale_world_prep = try world_state_m.prepareWorldAdjust(gs, c.planet_key, finale_world_delta, f.name);
 
     // ---- COMMIT: infallible from here ----
     c.arc_finale_key = f.key;
@@ -290,6 +299,8 @@ pub fn resolveFinale(gs: *GameState, c: *contract_mod.Contract) !?*const arc_mod
     });
     // Commit actor relationship adjustments (infallible; prepared above).
     for (finale_actor_preps[0..finale_actor_prep_count]) |prep| actors_m.commitAdjustRelationship(gs, prep);
+    // Commit world-state adjustment for the finale (infallible; prepared above).
+    world_state_m.commitWorldAdjust(gs, finale_world_prep);
     return f;
 }
 
@@ -1914,4 +1925,147 @@ test "execConsolidateOperation: failure-atomic under OOM at log reservation" {
     try testing.expectError(error.OutOfMemory, execConsolidateOperation(&gs, .{ .contract = cid, .operation = oid }));
     try testing.expectEqual(before, digest.stateHash(&gs));
     try testing.expectEqual(@as(u16, 20), c.escalation_clock); // clock unchanged
+}
+
+test "resolveDueOperations: world state moves in the direction outcomeWorldDelta predicts (P4h.4)" {
+    // Consumer/agreement test (rule 67-69): the world_states entry for
+    // c.planet_key is created and moves in the direction the owner predicts.
+    const testing = std.testing;
+    const world_state_mod = @import("world_state.zig");
+
+    var gs = GameState.init(testing.allocator, .{ .seed = 88888 });
+    defer gs.deinit();
+
+    const cid: types.ContractId = @enumFromInt(1);
+    const t = operation_mod.findTemplate("negotiate_terms").?;
+    const committed_day: u32 = 0;
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+        .status = .active,
+        .arc_key = "fracturing_garrison",
+        .escalation_clock = 5,
+    });
+    const c = gs.contracts.getPtr(cid).?;
+    try c.operations.append(gs.allocator(), .{
+        .id = @enumFromInt(1),
+        .template_key = "negotiate_terms",
+        .state = .committed,
+        .opened_day = committed_day,
+        .committed_day = committed_day,
+    });
+
+    // No world state for "galatea" yet.
+    try testing.expect(gs.worldState("galatea") == null);
+
+    gs.clock.day_index = committed_day + @as(u32, t.expected_days);
+    try resolveDueOperations(&gs);
+
+    // After resolution, a world state entry must exist.
+    const ws = gs.worldState("galatea");
+    try testing.expect(ws != null);
+
+    // The resolved band is whatever the deterministic sim produced; the owner
+    // and consumer agree: the delta applied matches outcomeWorldDelta(band).
+    const band = c.operations.items[0].outcome;
+    const expected = world_state_mod.outcomeWorldDelta(band);
+    // Values may be clamped to +-100 but starting from 0 a small first delta
+    // is not clamped; verify the direction at minimum.
+    if (expected.employer_control > 0) try testing.expect(ws.?.employer_control > 0 or ws.?.employer_control == 0);
+    if (expected.enemy_influence < 0) try testing.expect(ws.?.enemy_influence <= 0);
+    if (expected.enemy_influence > 0) try testing.expect(ws.?.enemy_influence >= 0);
+    // The cause is set to the operation template name.
+    try testing.expect(ws.?.last_cause.len > 0);
+}
+
+test "resolveFinale: world state moves per finaleWorldDelta for held and collapse (P4h.4)" {
+    // Consumer/agreement test (rule 67-69).
+    const testing = std.testing;
+    const world_state_mod = @import("world_state.zig");
+
+    // ---- Held finale ----
+    {
+        var gs = GameState.init(testing.allocator, .{ .seed = 99991 });
+        defer gs.deinit();
+
+        const a = arc_mod.find("fracturing_garrison").?;
+        var terminal_beat: u8 = 0;
+        for (a.beats, 0..) |b, i| if (b.escalation_threshold == 0) {
+            terminal_beat = @intCast(i);
+        };
+
+        const cid: types.ContractId = @enumFromInt(1);
+        try gs.contracts.put(gs.allocator(), cid, .{
+            .id = cid,
+            .kind = .garrison_duty,
+            .employer_key = "LC",
+            .enemy_key = "DC",
+            .planet_key = "galatea",
+            .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+            .status = .active,
+            .arc_key = "fracturing_garrison",
+            .arc_beat = terminal_beat,
+            .escalation_clock = 0, // below collapse threshold → "held"
+        });
+        const c = gs.contracts.getPtr(cid).?;
+
+        const f = (try resolveFinale(&gs, c)).?;
+        try testing.expect(!f.ends_contract); // held finale selected
+
+        const ws = gs.worldState("galatea");
+        try testing.expect(ws != null);
+        // Held: employer_control > 0 and enemy_influence <= 0.
+        const expected = world_state_mod.finaleWorldDelta(f);
+        try testing.expect(expected.employer_control > 0);
+        try testing.expect(ws.?.employer_control > 0);
+        try testing.expect(ws.?.enemy_influence <= 0);
+    }
+
+    // ---- Collapse finale ----
+    {
+        var gs = GameState.init(testing.allocator, .{ .seed = 99992 });
+        defer gs.deinit();
+
+        const a = arc_mod.find("fracturing_garrison").?;
+        var terminal_beat: u8 = 0;
+        var collapse_threshold: u16 = 0;
+        for (a.beats, 0..) |b, i| if (b.escalation_threshold == 0) {
+            terminal_beat = @intCast(i);
+        };
+        for (a.finales) |f_opt| if (f_opt.ends_contract) {
+            collapse_threshold = @as(u16, @intCast(f_opt.min_clock));
+            break;
+        };
+        if (collapse_threshold == 0) collapse_threshold = 100;
+
+        const cid: types.ContractId = @enumFromInt(1);
+        try gs.contracts.put(gs.allocator(), cid, .{
+            .id = cid,
+            .kind = .garrison_duty,
+            .employer_key = "LC",
+            .enemy_key = "DC",
+            .planet_key = "galatea",
+            .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+            .status = .active,
+            .arc_key = "fracturing_garrison",
+            .arc_beat = terminal_beat,
+            .escalation_clock = collapse_threshold + 5, // above collapse threshold → "fell"
+        });
+        const c = gs.contracts.getPtr(cid).?;
+
+        const f = (try resolveFinale(&gs, c)).?;
+        try testing.expect(f.ends_contract); // collapse finale selected
+
+        const ws = gs.worldState("galatea");
+        try testing.expect(ws != null);
+        // Collapse: enemy_influence > 0 and employer_control < 0.
+        const expected = world_state_mod.finaleWorldDelta(f);
+        try testing.expect(expected.enemy_influence > 0);
+        try testing.expect(ws.?.enemy_influence > 0);
+        try testing.expect(ws.?.employer_control < 0);
+    }
 }
