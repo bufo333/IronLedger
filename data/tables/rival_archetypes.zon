@@ -1,0 +1,42 @@
+// Rival company archetypes. Each row names a kind of persistent rival the
+// outfit may encounter through contract arcs; the archetype governs which
+// arcs it may attach to, which side of the conflict it stands on, and its
+// operational doctrine.
+// Typed against domain/rival.zig `ArchetypeTable`.
+//
+//   key           stable identifier (markup-safe)
+//   name          display label (markup-safe)
+//   doctrine      RivalDoctrine tag name
+//   faction_side  which side: "employer" or "enemy"
+//   unit_noun     generic unit type label (markup-safe, non-empty)
+//   arcs          arc keys this archetype attaches to
+//
+// All string fields must be markup-safe (no { or control characters).
+.{
+    .archetypes = .{
+        .{
+            .key = "enemy_raiders",
+            .name = "Enemy Raider Company",
+            .doctrine = "aggressive",
+            .faction_side = "enemy",
+            .unit_noun = "Raiders",
+            .arcs = .{"fracturing_garrison"},
+        },
+        .{
+            .key = "rival_garrison",
+            .name = "Rival Garrison Force",
+            .doctrine = "cautious",
+            .faction_side = "employer",
+            .unit_noun = "Guard",
+            .arcs = .{"fracturing_garrison"},
+        },
+        .{
+            .key = "opportunist_mercs",
+            .name = "Opportunist Mercenaries",
+            .doctrine = "opportunist",
+            .faction_side = "enemy",
+            .unit_noun = "Irregulars",
+            .arcs = .{"fracturing_garrison"},
+        },
+    },
+}

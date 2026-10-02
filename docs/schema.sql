@@ -1,6 +1,6 @@
 -- IRON LEDGER — SQLite save store schema (design document)
 --
--- Matches schema_version 45. The executable DDL and its column migrations
+-- Matches schema_version 46. The executable DDL and its column migrations
 -- live in src/persist/store.zig; this file is the readable reference for
 -- what each table and column means. Column order here is the runtime order.
 --
@@ -968,3 +968,27 @@ CREATE TABLE world_state (
     FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 CREATE INDEX IF NOT EXISTS ix_world_state_cid ON world_state(cid);
+
+-- Persistent rival companies encountered across contracts (P4i).
+-- `ord` preserves insertion order for a deterministic round-trip digest.
+CREATE TABLE rival (
+    cid                 INTEGER NOT NULL,
+    ord                 INTEGER NOT NULL, -- stable insertion order for deterministic digest
+    id                  INTEGER NOT NULL, -- RivalId enum value (u32)
+    archetype_key       TEXT    NOT NULL, -- -> data/tables/rival_archetypes.zon
+    commander_first     TEXT    NOT NULL DEFAULT '',
+    commander_last      TEXT    NOT NULL DEFAULT '',
+    unit_name           TEXT    NOT NULL DEFAULT '', -- markup-safe display name
+    faction_key         TEXT    NOT NULL DEFAULT '', -- -> factions catalog
+    side                TEXT    NOT NULL DEFAULT 'enemy', -- FactionSide tag
+    doctrine            TEXT    NOT NULL DEFAULT 'aggressive', -- RivalDoctrine tag
+    contract            INTEGER NOT NULL DEFAULT 0, -- most-recent ContractId (0 = none)
+    standing            INTEGER NOT NULL DEFAULT 0, -- clamped -100…100
+    encounters          INTEGER NOT NULL DEFAULT 0, -- operation outcomes tallied
+    last_cause          TEXT    NOT NULL DEFAULT '', -- markup-safe label for last standing change
+    last_cause_day      INTEGER NOT NULL DEFAULT 0,  -- day_index of last change
+    recurring           INTEGER NOT NULL DEFAULT 0,  -- boolean: carried forward from prior contract
+    PRIMARY KEY (cid, id),
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
+);
+CREATE INDEX IF NOT EXISTS ix_rival_cid ON rival(cid);

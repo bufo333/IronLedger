@@ -29,6 +29,7 @@ const contract_market = @import("contract_market.zig");
 const commands = @import("commands.zig");
 const operations = @import("operations.zig");
 const actors_m = @import("actors.zig");
+const rivals_m = @import("rivals.zig");
 
 pub const grace_days: u32 = tuning.contract.grace_days;
 pub const cooling_days: u32 = tuning.contract.cooling_days;
@@ -625,6 +626,10 @@ pub fn acceptContract(gs: *GameState, offer_id: types.ContractId, company_id: ty
     // Attach actors for the arc (if any). Pass gs.next_actor_id as id_start;
     // instantiateActors does NOT advance it — the commit phase does that below (rules 7, 11-13).
     try actors_m.instantiateActors(gs, &c, gs.next_actor_id); // failure-atomic: c is still local
+    // Attach rivals for the arc (if any). Called AFTER instantiateActors so actor RNG
+    // consumption order is unchanged for existing saves (plan: RNG order).
+    // instantiateRivals does NOT advance next_rival_id — the commit phase does (rules 7, 11-13).
+    try rivals_m.instantiateRivals(gs, &c, gs.next_rival_id); // failure-atomic: c is still local
     c.monthly_net = types.applyPct(c.terms.base_pay_month, 100 - @as(i64, c.terms.advance_pct));
 
     // Signing money in, transit freight out (employer covers transport_pct;
@@ -743,6 +748,9 @@ pub fn acceptContract(gs: *GameState, offer_id: types.ContractId, company_id: ty
     // Advance the actor id counter by the number of actors attached in the
     // prepare phase. Deferred from instantiateActors (rules 7, 11-13).
     gs.next_actor_id += @as(u32, @intCast(c.actor_ids.items.len));
+    // Advance the rival id counter by the number of rivals attached in the
+    // prepare phase. Deferred from instantiateRivals (rules 7, 11-13).
+    gs.next_rival_id += @as(u32, @intCast(c.rival_ids.items.len));
 
     // Record the contract and clear the company's planet (underway).
     gs.contracts.putAssumeCapacity(c.id, c);

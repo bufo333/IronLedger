@@ -1585,6 +1585,9 @@ a former actor should reflect the player's previous choices.
   contest contracts, cooperate temporarily or interfere through visible,
   deterministic operations; they never silently remove player assets or void
   an accepted contract.
+  *(P4h.5 implemented as increment sim/p4i-rivals: rival table, rivals.zig,
+  rival_archetypes.zon, standing deltas on outcomes/finale, recurring carry-
+  forward, Operations screen display, schema v46; committed 2026-10-02)*
 - P4h.6 Add compact officer arcs for company commanders and selected lance
   leaders only. Their proposals, loyalty, task performance, promotion and
   retention use the personnel system rather than a bespoke story for every

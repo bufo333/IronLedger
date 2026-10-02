@@ -313,3 +313,19 @@ as a liaison again, their history intact. The Operations screen shows the
 current actors for the active contract with a "(returning)" tag for recurrences.
 No player decisions in this increment — actors are read-only display, groundwork
 for future conversation and mission choices.
+
+## Persistent rivals (P4i)
+
+Some arcs introduce a named mercenary company that the outfit will encounter
+repeatedly over the course of a contract. Each rival carries a single standing
+dimension (−100…100). Standing starts at 0, then shifts each time a relevant
+operation resolves: +6 decisive, +3 success, 0 partial, −3 setback, −6 failure;
+the contract finale applies a larger swing (+10 held / −12 collapse). A rival
+with standing ≤ −40 is **hostile**; ≥ +40 is **allied**; between is **active**.
+
+When a new contract is accepted, any rival whose archetype key and faction key
+match a rival from a closed contract carries its standing forward (the
+**recurring** flag). The Operations screen shows the current rivals with their
+doctrine, status, standing, faction, and recurring tag. No player decisions in
+this increment — rivals are read-only display, groundwork for future narrative
+and negotiation hooks.

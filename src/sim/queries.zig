@@ -3362,6 +3362,8 @@ pub const HistoryRow = struct {
     cells: table.Row,
     /// Short summary of principal actors from this contract's arc (P4i); empty if none.
     actors_summary: []const u8,
+    /// Short summary of rival companies from this contract's arc (P4i); empty if none.
+    rivals_summary: []const u8,
     /// Read-only world-state summary for the contract's world (P4h.4); empty if no state.
     world_state_summary: []const u8,
 };
@@ -3418,7 +3420,29 @@ pub fn contractHistory(alloc: Alloc, gs: *GameState) ![]HistoryRow {
             }
             actors_summary = try summary_buf.toOwnedSlice(alloc);
         }
-        try out.append(alloc, .{ .id = c.id, .planet_key = c.planet_key, .actors_summary = actors_summary, .world_state_summary = try worldStateSummary(alloc, gs, c.planet_key), .cells = try table.row(alloc, &.{
+        // Build a brief rivals summary (P4i): "enemy_raiders: Smith Raiders (standing -20), ..."
+        var rivals_summary: []const u8 = "";
+        if (c.rival_ids.items.len > 0) {
+            var rsummary_buf: std.ArrayListUnmanaged(u8) = .empty;
+            var first_rival = true;
+            for (c.rival_ids.items) |rid| {
+                const rv = gs.rival(rid) orelse continue;
+                const arch = rival_dom.find(rv.archetype_key);
+                const arch_name: []const u8 = if (arch) |ar| ar.name else rv.archetype_key;
+                if (!first_rival) try rsummary_buf.appendSlice(alloc, "; ");
+                try rsummary_buf.appendSlice(alloc, arch_name);
+                try rsummary_buf.appendSlice(alloc, ": ");
+                try rsummary_buf.appendSlice(alloc, rv.unit_name);
+                if (rv.standing != 0) {
+                    const standing_note = try std.fmt.allocPrint(alloc, " (standing {d})", .{rv.standing});
+                    try rsummary_buf.appendSlice(alloc, standing_note);
+                }
+                if (rv.recurring) try rsummary_buf.appendSlice(alloc, " [returning]");
+                first_rival = false;
+            }
+            rivals_summary = try rsummary_buf.toOwnedSlice(alloc);
+        }
+        try out.append(alloc, .{ .id = c.id, .planet_key = c.planet_key, .actors_summary = actors_summary, .rivals_summary = rivals_summary, .world_state_summary = try worldStateSummary(alloc, gs, c.planet_key), .cells = try table.row(alloc, &.{
             try std.fmt.allocPrint(alloc, "{d}", .{@intFromEnum(c.id)}),
             c.kind.label(),
             c.employer_key,
@@ -6829,7 +6853,9 @@ test "seatPlanetKey returns the seat's planet and null before any HQ (C10-E1)" {
 // ---- Operations board query (P4c) ----------------------------------------
 
 const actor_dom = @import("../domain/actor.zig");
+const rival_dom = @import("../domain/rival.zig");
 const world_state_dom = @import("../domain/world_state.zig");
+const rivals_m = @import("rivals.zig");
 
 /// Format a compact read-only summary of the world state at planet_key.
 /// Returns an empty string when no state has been recorded yet.
@@ -6867,6 +6893,29 @@ pub const ActorRow = struct {
     respect: i16,
     hostility: i16,
     last_cause: table.Raw,
+    recurring: bool,
+};
+
+/// One attached rival row in the Operations view (P4i).
+pub const RivalRow = struct {
+    id: types.RivalId,
+    /// Unit name as untrusted text; crossed as Raw for safety (rule 33).
+    unit_name: table.Raw,
+    /// Commander display name (combined first + last).
+    commander: table.Raw,
+    /// Doctrine tag name.
+    doctrine: []const u8,
+    /// Derived status tag name.
+    status: []const u8,
+    /// Faction key.
+    faction_key: []const u8,
+    /// Signed standing score.
+    standing: i16,
+    /// Encounter count.
+    encounters: u16,
+    /// Last cause label as untrusted text; crossed as Raw for safety.
+    last_cause: table.Raw,
+    /// True when this rival recurs from a prior contract.
     recurring: bool,
 };
 
@@ -6924,6 +6973,8 @@ pub const Operations = struct {
     collapse_threshold: u16,
     /// Actors attached to this contract's arc (P4i); empty for non-arc contracts.
     actors: []ActorRow,
+    /// Rival companies attached to this contract's arc (P4i); empty for non-arc contracts.
+    rivals: []RivalRow,
     /// Read-only world-state summary for the contract's planet (P4h.4); empty if none.
     world_state_summary: []const u8,
 };
@@ -6931,10 +6982,10 @@ pub const Operations = struct {
 /// Return the operations board for an active arc contract.
 /// Caller owns the result (arena-friendly).
 pub fn contractOperations(alloc: Alloc, gs: *GameState, contract_id: types.ContractId) !Operations {
-    const c = gs.contracts.getPtr(contract_id) orelse return Operations{ .briefing = "", .rows = &.{}, .escalation_clock = 0, .collapse_threshold = 0, .actors = &.{}, .world_state_summary = "" };
-    if (c.arc_key.len == 0) return Operations{ .briefing = "", .rows = &.{}, .escalation_clock = 0, .collapse_threshold = 0, .actors = &.{}, .world_state_summary = try worldStateSummary(alloc, gs, c.planet_key) };
+    const c = gs.contracts.getPtr(contract_id) orelse return Operations{ .briefing = "", .rows = &.{}, .escalation_clock = 0, .collapse_threshold = 0, .actors = &.{}, .rivals = &.{}, .world_state_summary = "" };
+    if (c.arc_key.len == 0) return Operations{ .briefing = "", .rows = &.{}, .escalation_clock = 0, .collapse_threshold = 0, .actors = &.{}, .rivals = &.{}, .world_state_summary = try worldStateSummary(alloc, gs, c.planet_key) };
     const arc_mod = @import("../domain/arc.zig");
-    const a = arc_mod.find(c.arc_key) orelse return Operations{ .briefing = "", .rows = &.{}, .escalation_clock = 0, .collapse_threshold = 0, .actors = &.{}, .world_state_summary = try worldStateSummary(alloc, gs, c.planet_key) };
+    const a = arc_mod.find(c.arc_key) orelse return Operations{ .briefing = "", .rows = &.{}, .escalation_clock = 0, .collapse_threshold = 0, .actors = &.{}, .rivals = &.{}, .world_state_summary = try worldStateSummary(alloc, gs, c.planet_key) };
 
     // Briefing: current beat's name + any active finale key.
     const briefing: []const u8 = if (c.arc_beat < a.beats.len) blk: {
@@ -7002,12 +7053,31 @@ pub fn contractOperations(alloc: Alloc, gs: *GameState, contract_id: types.Contr
         });
     }
 
+    // Build rival rows for this contract (P4i).
+    var rival_rows: std.ArrayListUnmanaged(RivalRow) = .empty;
+    for (c.rival_ids.items) |rid| {
+        const rv = gs.rival(rid) orelse continue;
+        try rival_rows.append(alloc, .{
+            .id = rid,
+            .unit_name = .{ .raw = rv.unit_name },
+            .commander = .{ .raw = try std.fmt.allocPrint(alloc, "{s} {s}", .{ rv.commander_first, rv.commander_last }) },
+            .doctrine = @tagName(rv.doctrine),
+            .status = @tagName(rivals_m.statusFor(rv.standing)),
+            .faction_key = rv.faction_key,
+            .standing = rv.standing,
+            .encounters = rv.encounters,
+            .last_cause = .{ .raw = rv.last_cause },
+            .recurring = rv.recurring,
+        });
+    }
+
     return Operations{
         .briefing = briefing,
         .rows = try rows.toOwnedSlice(alloc),
         .escalation_clock = c.escalation_clock,
         .collapse_threshold = operations_m.topCollapseMinClock(a),
         .actors = try actor_rows.toOwnedSlice(alloc),
+        .rivals = try rival_rows.toOwnedSlice(alloc),
         .world_state_summary = try worldStateSummary(alloc, gs, c.planet_key),
     };
 }
@@ -7487,4 +7557,66 @@ test "worldStateSummary: empty for a world with no state; reflects a set value (
     // Summary must contain the dimension values.
     try std.testing.expect(std.mem.indexOf(u8, ws_text, "25") != null); // security
     try std.testing.expect(std.mem.indexOf(u8, ws_text, "10") != null); // employer_control
+}
+
+test "contractOperations: RivalRow populated for arc contract with an attached rival (P4i)" {
+    // Rule 20 consumer test: contractOperations returns a RivalRow carrying the
+    // stored doctrine/status/standing; a non-arc contract returns an empty rivals slice.
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 31415 });
+    defer gs.deinit();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    // Non-arc contract: no rivals.
+    const cid_non_arc: types.ContractId = @enumFromInt(1);
+    try gs.contracts.put(gs.allocator(), cid_non_arc, .{
+        .id = cid_non_arc,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 12, .base_pay_month = 100_000 },
+        .status = .active,
+    });
+    const ops_no_arc = try contractOperations(arena.allocator(), &gs, cid_non_arc);
+    try std.testing.expectEqual(@as(usize, 0), ops_no_arc.rivals.len);
+
+    // Arc contract with one rival.
+    const cid: types.ContractId = @enumFromInt(2);
+    const rid: types.RivalId = @enumFromInt(1);
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+        .status = .active,
+        .arc_key = "fracturing_garrison",
+    });
+    const c2 = gs.contracts.getPtr(cid).?;
+    try c2.rival_ids.append(gs.allocator(), rid);
+    try gs.rivals.put(gs.allocator(), rid, .{
+        .id = rid,
+        .archetype_key = "enemy_raiders",
+        .unit_name = "Smith Raiders",
+        .commander_first = "John",
+        .commander_last = "Smith",
+        .faction_key = "DC",
+        .doctrine = .aggressive,
+        .standing = -50,
+        .encounters = 2,
+        .contract = cid,
+        .recurring = true,
+    });
+
+    const ops = try contractOperations(arena.allocator(), &gs, cid);
+    try std.testing.expectEqual(@as(usize, 1), ops.rivals.len);
+    const rr = ops.rivals[0];
+    try std.testing.expectEqualStrings("aggressive", rr.doctrine);
+    try std.testing.expectEqualStrings("hostile", rr.status); // standing -50 ≤ -40 → hostile
+    try std.testing.expectEqual(@as(i16, -50), rr.standing);
+    try std.testing.expectEqual(@as(u16, 2), rr.encounters);
+    try std.testing.expect(rr.recurring);
+    try std.testing.expectEqualStrings("Smith Raiders", rr.unit_name.raw);
 }

@@ -63,6 +63,7 @@ overlay of each family and checks that every one fails; CI runs it.
 | `tables/arcs.zon` | `domain/arc.zig` `Table` | operation arc archetypes: narrative beats, finale options, opening templates per contract kind |
 | `tables/operations.zon` | `domain/operation.zig` `Table` | operation mission templates: arc ownership, combat flag, objectives, follow-up keys |
 | `tables/actor_archetypes.zon` | `domain/actor.zig` `Table` | actor archetypes attached to arcs: NPC roles (liaison, official, militia leader …), faction side, agenda text, and the arc keys they appear in (P4i) |
+| `tables/rival_archetypes.zon` | `domain/rival.zig` `ArchetypeTable` | rival company archetypes instantiated at contract accept: hostile/allied faction side, doctrine (aggressive/cautious/attritional/opportunist/honorable), and the arc keys they appear in (P4i) |
 
 ## Rules of the road
 

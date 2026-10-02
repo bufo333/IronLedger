@@ -234,12 +234,19 @@ cheap, copyable, and impossible to mix up.
 - **Finances** — transaction ledger (every c-bill has a category and date),
   loans, monthly close-out report per company (the *profit center* view).
 - **GameState** — campaign date, player outfit, reputation, all of the above,
-  markets, pending events, RNG state, persistent actors map, world-state map.
+  markets, pending events, RNG state, persistent actors map, rivals map,
+  world-state map.
 - **Actor** — a contract-introduced NPC (liaison, official, enemy commander,
   etc.) that persists across contracts. Each actor carries four relationship
   dimensions (trust, debt, respect, hostility; −100…100). Actors are keyed by
   `ActorId`; the same faction/archetype pair recurring in a later contract
   surfaces the prior relationship. Owned by `sim/actors.zig` (P4i).
+- **Rival** — a persistent opposing or allied mercenary company introduced by a
+  contract arc. Each rival carries a single standing dimension (−100…100) that
+  shifts on operation outcomes and the finale. Rivals are keyed by `RivalId`.
+  Recurring rivals (same archetype key + faction key, already closed contract)
+  carry their standing into the new contract. Doctrine shapes future narrative
+  hooks. Owned by `sim/rivals.zig` (P4i).
 - **WorldState** — five bounded numeric dimensions (security, civilian support,
   infrastructure strain, employer control, enemy influence; −100…100) keyed by
   `planet_key` in `GameState.world_states`. Changed only by
@@ -917,11 +924,11 @@ src/
   root.zig       module root, re-exports
   domain/        entities and rule tables: types person unit part chassis
                  force contract hq planet faction tuning skulls scenario …;
-                 clock events autoresolve battle_report hq_link actor world_state
+                 clock events autoresolve battle_report hq_link actor rival world_state
   sim/           state plus focused personnel/posture/treasury owners;
                   crew tick commands battle
                   medical maintenance field_supply sites network
-                  rng contract_market starter_company toe actors world_state …;
+                  rng contract_market starter_company toe actors rivals world_state …;
                   queries.zig (read-only views),
                   cli.zig (verbs), table.zig (markup), digest.zig (hash)
   econ/          finance logistics market

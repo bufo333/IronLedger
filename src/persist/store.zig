@@ -36,9 +36,10 @@ const held_hulls_m = @import("../sim/held_hulls.zig");
 const arc_mod = @import("../domain/arc.zig");
 const operation_mod = @import("../domain/operation.zig");
 const actor_mod = @import("../domain/actor.zig");
+const rival_mod = @import("../domain/rival.zig");
 const world_state_dom = @import("../domain/world_state.zig");
 
-pub const schema_version = 45;
+pub const schema_version = 46;
 
 const ddl =
     \\CREATE TABLE IF NOT EXISTS player (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_seq INTEGER NOT NULL);
@@ -94,6 +95,7 @@ const ddl =
     \\CREATE TABLE IF NOT EXISTS battle_report_task (cid INTEGER NOT NULL, report_ord INTEGER NOT NULL, ord INTEGER NOT NULL, lance_id INTEGER NOT NULL, lance_name TEXT NOT NULL, task TEXT NOT NULL, succeeded INTEGER NOT NULL CHECK (succeeded IN (0,1)), note TEXT NOT NULL, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, report_ord) REFERENCES battle_report(cid, ord) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS actor (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, archetype_key TEXT NOT NULL, first_name TEXT NOT NULL, last_name TEXT NOT NULL, faction_key TEXT NOT NULL, side TEXT NOT NULL, contract INTEGER NOT NULL DEFAULT 0, trust INTEGER NOT NULL DEFAULT 0, debt INTEGER NOT NULL DEFAULT 0, respect INTEGER NOT NULL DEFAULT 0, hostility INTEGER NOT NULL DEFAULT 0, last_cause TEXT NOT NULL DEFAULT '', last_cause_day INTEGER NOT NULL DEFAULT 0, recurring INTEGER NOT NULL DEFAULT 0 CHECK (recurring IN (0,1)), PRIMARY KEY (cid, id), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS world_state (cid INTEGER NOT NULL, ord INTEGER NOT NULL, planet_key TEXT NOT NULL, security INTEGER NOT NULL DEFAULT 0, civilian_support INTEGER NOT NULL DEFAULT 0, infrastructure_strain INTEGER NOT NULL DEFAULT 0, employer_control INTEGER NOT NULL DEFAULT 0, enemy_influence INTEGER NOT NULL DEFAULT 0, last_cause TEXT NOT NULL DEFAULT '', last_cause_day INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (cid, planet_key), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS rival (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, archetype_key TEXT NOT NULL, commander_first TEXT NOT NULL, commander_last TEXT NOT NULL, unit_name TEXT NOT NULL, faction_key TEXT NOT NULL, side TEXT NOT NULL, doctrine TEXT NOT NULL, contract INTEGER NOT NULL DEFAULT 0, standing INTEGER NOT NULL DEFAULT 0, encounters INTEGER NOT NULL DEFAULT 1, last_cause TEXT NOT NULL DEFAULT '', last_cause_day INTEGER NOT NULL DEFAULT 0, recurring INTEGER NOT NULL DEFAULT 0 CHECK (recurring IN (0,1)), PRIMARY KEY (cid, id), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
 ;
 
 const tables = [_][]const u8{
@@ -102,7 +104,7 @@ const tables = [_][]const u8{
     "contract",       "txn",                    "loan",               "courier",          "policy",            "bay_job",            "candidate",             "hq_link",     "unit_transfer",
     "supply_policy",  "stock_policy",           "faction_cooling",    "faction_standing", "event_memory",      "listing",            "part_order",            "event_log",   "pending_event",
     "refit_plan",     "refit_op",               "rating_snapshot",    "battle_report",    "battle_report_hit", "battle_report_ammo", "battle_report_salvage", "rng_stream",  "operation",
-    "operation_task", "operation_intervention", "battle_report_task", "actor",            "world_state",
+    "operation_task", "operation_intervention", "battle_report_task", "actor",            "world_state",       "rival",
 };
 
 // Indexes for per-campaign tables (A28/D31): cid filters on every load;
@@ -159,6 +161,7 @@ const index_ddl =
     \\CREATE INDEX IF NOT EXISTS ix_battle_report_task_report ON battle_report_task(cid, report_ord);
     \\CREATE INDEX IF NOT EXISTS ix_actor_cid ON actor(cid);
     \\CREATE INDEX IF NOT EXISTS ix_world_state_cid ON world_state(cid);
+    \\CREATE INDEX IF NOT EXISTS ix_rival_cid ON rival(cid);
 ;
 
 /// The stream order of the single `rng` blob that saves before schema v32
@@ -273,6 +276,8 @@ pub const Store = struct {
         // The `actor` table is wholly new; existing saves open with zero actors, next_actor_id=1 (safe default).
         // v45: world_state table (P4h.4). New table — no ALTER TABLE migration needed; applySchema creates it.
         // Existing saves open with zero world states (safe default).
+        // v46: rival table (P4i). New table — no ALTER TABLE migration needed; applySchema creates it.
+        // Existing saves open with zero rivals, next_rival_id=1 (safe default).
     };
 
     pub fn open(path: [*:0]const u8) !Store {
@@ -590,6 +595,7 @@ pub const Store = struct {
         try self.saveContracts(gs, cid);
         try self.saveOperations(gs, cid);
         try self.saveActors(gs, cid);
+        try self.saveRivals(gs, cid);
         try self.saveWorldStates(gs, cid);
         try self.saveTxn(gs, cid);
         try self.saveLoan(gs, cid);
@@ -668,6 +674,7 @@ pub const Store = struct {
             .{ "next_event_id", gs.event_queue.next_id },         .{ "next_listing_id", gs.next_listing_id },
             .{ "next_candidate_id", gs.next_candidate_id },       .{ "next_loan_id", gs.next_loan_id },
             .{ "next_operation_id", gs.next_operation_id },       .{ "next_actor_id", gs.next_actor_id },
+            .{ "next_rival_id", gs.next_rival_id },
         };
         for (ints) |kv| {
             try st.bindAll(.{ cid, kv[0], kv[1] });
@@ -1159,6 +1166,103 @@ pub const Store = struct {
         }
     }
 
+    // P4i: save and load persistent rivals.
+    fn saveRivals(self: Store, gs: *GameState, cid: i64) !void {
+        const st = try self.db.prepare("INSERT INTO rival VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)");
+        defer st.finalize();
+        var it = gs.rivals.iterator();
+        var ord: i64 = 0;
+        while (it.next()) |entry| : (ord += 1) {
+            const rv = entry.value_ptr;
+            try st.bindAll(.{
+                cid,
+                ord,
+                @intFromEnum(rv.id),
+                rv.archetype_key,
+                rv.commander_first,
+                rv.commander_last,
+                rv.unit_name,
+                rv.faction_key,
+                @tagName(rv.side),
+                @tagName(rv.doctrine),
+                @intFromEnum(rv.contract),
+                @as(i64, rv.standing),
+                @as(i64, rv.encounters),
+                rv.last_cause,
+                @as(i64, rv.last_cause_day),
+                @as(i64, @intFromBool(rv.recurring)),
+            });
+            try st.run();
+        }
+    }
+
+    fn loadRivals(self: Store, gs: *GameState, cid: i64) !void {
+        const alloc = gs.allocator();
+        const st = try self.db.prepare("SELECT id, archetype_key, commander_first, commander_last, unit_name, faction_key, side, doctrine, contract, standing, encounters, last_cause, last_cause_day, recurring FROM rival WHERE cid = ?1 ORDER BY ord");
+        defer st.finalize();
+        try st.bindAll(.{cid});
+        while (try st.next()) {
+            const archetype_key = try st.text(1, alloc);
+            // Validate archetype_key references a known archetype.
+            if (rival_mod.find(archetype_key) == null) return error.CorruptSave;
+            const side_str = try st.text(6, alloc);
+            const side = std.meta.stringToEnum(rival_mod.FactionSide, side_str) orelse return error.CorruptSave;
+            const doctrine_str = try st.text(7, alloc);
+            const doctrine = std.meta.stringToEnum(rival_mod.RivalDoctrine, doctrine_str) orelse return error.CorruptSave;
+            const standing = try fit(i16, st.int(9));
+            // Validate standing in range.
+            if (standing < rival_mod.rival_min or standing > rival_mod.rival_max) return error.CorruptSave;
+            const encounters_raw = st.int(10);
+            const encounters = std.math.cast(u16, encounters_raw) orelse return error.CorruptSave;
+            const contract_raw = st.int(8);
+            const contract_id: types.ContractId = @enumFromInt(std.math.cast(u32, contract_raw) orelse return error.CorruptSave);
+            const unit_name = try st.text(4, alloc);
+            // Validate unit_name markup-safe.
+            if (!@import("../sim/table.zig").markupSafe(unit_name)) return error.CorruptSave;
+            const last_cause = try st.text(11, alloc);
+            // Validate last_cause markup-safe (may be empty).
+            if (last_cause.len > 0 and !@import("../sim/table.zig").markupSafe(last_cause)) return error.CorruptSave;
+            const rv: rival_mod.Rival = .{
+                .id = try toId(types.RivalId, st.int(0)),
+                .archetype_key = archetype_key,
+                .commander_first = try st.text(2, alloc),
+                .commander_last = try st.text(3, alloc),
+                .unit_name = unit_name,
+                .faction_key = try st.text(5, alloc),
+                .side = side,
+                .doctrine = doctrine,
+                .contract = contract_id,
+                .standing = standing,
+                .encounters = encounters,
+                .last_cause = last_cause,
+                .last_cause_day = try st.intAs(u32, 12),
+                .recurring = st.int(13) != 0,
+            };
+            const gop = try gs.rivals.getOrPut(alloc, rv.id);
+            if (gop.found_existing) return error.CorruptSave;
+            gop.value_ptr.* = rv;
+        }
+        // Validate: rivals with a nonzero contract reference must resolve to a loaded contract.
+        // Rebuild rival_ids lists on contracts from rivals' contract back-references.
+        {
+            var it2 = gs.rivals.iterator();
+            while (it2.next()) |entry| {
+                const rv = entry.value_ptr;
+                if (rv.contract == .none) continue;
+                const c = gs.contracts.getPtr(rv.contract) orelse return error.CorruptSave;
+                try c.rival_ids.append(alloc, rv.id);
+            }
+        }
+        // Bump next_rival_id past the maximum stored id.
+        {
+            var max: u32 = 0;
+            var it2 = gs.rivals.iterator();
+            while (it2.next()) |entry| max = @max(max, @intFromEnum(entry.key_ptr.*));
+            if (max == std.math.maxInt(u32)) return error.CorruptSave;
+            gs.next_rival_id = @max(gs.next_rival_id, max + 1);
+        }
+    }
+
     // Ledger and the rest of the lists.
     fn saveTxn(self: Store, gs: *GameState, cid: i64) !void {
         const st = try self.db.prepare("INSERT INTO txn VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)");
@@ -1532,6 +1636,7 @@ pub const Store = struct {
         try self.loadOperationTasks(&gs, cid);
         try self.loadOperationInterventions(&gs, cid);
         try self.loadActors(&gs, cid);
+        try self.loadRivals(&gs, cid);
         try self.loadWorldStates(&gs, cid);
         try self.loadTxn(&gs, cid);
         try self.loadLoan(&gs, cid);
@@ -1657,6 +1762,7 @@ pub const Store = struct {
             if (std.mem.eql(u8, key, "next_loan_id")) gs.next_loan_id = try fit(@TypeOf(gs.next_loan_id), v);
             if (std.mem.eql(u8, key, "next_operation_id")) gs.next_operation_id = try fit(@TypeOf(gs.next_operation_id), v);
             if (std.mem.eql(u8, key, "next_actor_id")) gs.next_actor_id = try fit(@TypeOf(gs.next_actor_id), v);
+            if (std.mem.eql(u8, key, "next_rival_id")) gs.next_rival_id = try fit(@TypeOf(gs.next_rival_id), v);
             if (std.mem.eql(u8, key, "rng_seed")) {
                 gs.rng.seed = @bitCast(v);
                 has_seed = true;
@@ -2791,6 +2897,16 @@ fn validateStoredStrings(gs: *GameState) error{CorruptSave}!void {
             if (a.last_cause.len > 0) try Check.shown(a.last_cause);
         }
     }
+    // Rivals: archetype_key and unit_name and last_cause must be valid/markup-safe.
+    {
+        var rit = gs.rivals.iterator();
+        while (rit.next()) |e| {
+            const rv = e.value_ptr;
+            if (rival_mod.find(rv.archetype_key) == null) return error.CorruptSave;
+            if (!table.markupSafe(rv.unit_name)) return error.CorruptSave;
+            if (rv.last_cause.len > 0) try Check.shown(rv.last_cause);
+        }
+    }
     // World states: planet_key must name a known planet; last_cause must be markup-safe.
     {
         var wsit = gs.world_states.iterator();
@@ -2962,6 +3078,13 @@ fn reconcileCounters(gs: *GameState) error{CorruptSave}!void {
         while (it.next()) |e| max = @max(max, @intFromEnum(e.key_ptr.*));
         if (max == max_u32) return error.CorruptSave;
         gs.next_actor_id = @max(gs.next_actor_id, max + 1);
+    }
+    {
+        var max: u32 = 0;
+        var it = gs.rivals.iterator();
+        while (it.next()) |e| max = @max(max, @intFromEnum(e.key_ptr.*));
+        if (max == max_u32) return error.CorruptSave;
+        gs.next_rival_id = @max(gs.next_rival_id, max + 1);
     }
     // Battle and event counters: resumeBattleIds/resumeIds saturate at maxInt
     // when an entity holds the maximum id — detect that here (rule 48).
@@ -4007,8 +4130,8 @@ test "a rebuilt store loads to the identical digest" {
     // Digest is identical: the rebuild changed no data.
     var diff_buf: [128]u8 = undefined;
     try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &diff_buf) orelse "");
-    // Re-pinned by P4h.4 (world_states added to digest via field_persistence).
-    try std.testing.expectEqual(@as(u64, 13217811148885818620), hash_before);
+    // Re-pinned by P4i (rivals + next_rival_id added to digest via field_persistence).
+    try std.testing.expectEqual(@as(u64, 13434953745104815246), hash_before);
 }
 
 test "every next-ID counter resumes past a higher owned id after load" {
@@ -4034,6 +4157,7 @@ test "every next-ID counter resumes past a higher owned id after load" {
         "UPDATE meta SET value = 0 WHERE key = 'next_listing_id'",
         "UPDATE meta SET value = 0 WHERE key = 'next_candidate_id'",
         "UPDATE meta SET value = 0 WHERE key = 'next_loan_id'",
+        "UPDATE meta SET value = 0 WHERE key = 'next_rival_id'",
     }) |sql| {
         try store.db.exec(sql);
         var loaded = try store.load(std.testing.allocator, gs.campaign_id);
@@ -4049,6 +4173,7 @@ test "every next-ID counter resumes past a higher owned id after load" {
         try std.testing.expect(loaded.next_listing_id >= 1);
         try std.testing.expect(loaded.next_candidate_id >= 1);
         try std.testing.expect(loaded.next_loan_id >= 1);
+        try std.testing.expect(loaded.next_rival_id >= 1);
     }
 }
 
@@ -4499,9 +4624,9 @@ test "golden master: a played year hashes to its pinned value, and a save of it 
     try playedYearForTest(&gs);
     try std.testing.expect(gs.battle_reports.kept.items.len > 0); // the year saw fighting
     // Any change to a simulated or saved result moves this; re-pin it only
-    // when the change is meant. Re-pinned by P4h.4 (world_states added to
-    // digest via field_persistence).
-    try std.testing.expectEqual(@as(u64, 13217811148885818620), digest.stateHash(&gs));
+    // when the change is meant. Re-pinned by P4i (rivals + next_rival_id added
+    // to digest via field_persistence).
+    try std.testing.expectEqual(@as(u64, 13434953745104815246), digest.stateHash(&gs));
 
     const store = try Store.open(":memory:");
     defer store.close();
@@ -5705,5 +5830,195 @@ test "a world_state row with a non-markup-safe last_cause rejects the load as co
     // Rule 47 / P4h.4: last_cause must be markup-safe.
     try std.testing.expectError(error.CorruptSave, loadWorldStateAfterTampering(
         "UPDATE world_state SET last_cause = '{bad markup}'",
+    ));
+}
+
+// ---- P4i rival persistence tests ------------------------------------------
+
+fn buildRivalGs(alloc: std.mem.Allocator) !GameState {
+    var gs = GameState.init(alloc, .{ .seed = 40001 });
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    const co = try @import("../sim/starter_company.zig").generateInto(&gs, "Alpha");
+
+    // Contract 1 (completed) — introduces enemy_raiders rival (id=1).
+    const cid1: types.ContractId = @enumFromInt(1);
+    try gs.contracts.put(gs.allocator(), cid1, .{
+        .id = cid1,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+        .status = .completed,
+        .assigned_company = co,
+        .arc_key = "fracturing_garrison",
+    });
+    const c1 = gs.contracts.getPtr(cid1).?;
+    const rid1: types.RivalId = @enumFromInt(1);
+    const rv1: rival_mod.Rival = .{
+        .id = rid1,
+        .archetype_key = "enemy_raiders",
+        .commander_first = "Ann",
+        .commander_last = "Smith",
+        .unit_name = "Smith Raiders",
+        .faction_key = "DC",
+        .side = .enemy,
+        .doctrine = .aggressive,
+        .contract = cid1,
+        .standing = -20,
+        .encounters = 1,
+        .last_cause = "setback",
+        .last_cause_day = 10,
+    };
+    try gs.commitRival(rv1);
+    try c1.rival_ids.append(gs.allocator(), rid1);
+
+    // Contract 2 (active) — recurring enemy_raiders (id=2) carrying forward.
+    const cid2: types.ContractId = @enumFromInt(2);
+    try gs.contracts.put(gs.allocator(), cid2, .{
+        .id = cid2,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+        .status = .active,
+        .assigned_company = co,
+        .arc_key = "fracturing_garrison",
+    });
+    const c2 = gs.contracts.getPtr(cid2).?;
+    const rid2: types.RivalId = @enumFromInt(2);
+    const rv2: rival_mod.Rival = .{
+        .id = rid2,
+        .archetype_key = "enemy_raiders",
+        .commander_first = "Ann",
+        .commander_last = "Smith",
+        .unit_name = "Smith Raiders",
+        .faction_key = "DC",
+        .side = .enemy,
+        .doctrine = .aggressive,
+        .contract = cid2,
+        .standing = -30,
+        .encounters = 2,
+        .last_cause = "repeated_setback",
+        .last_cause_day = 40,
+        .recurring = true,
+    };
+    try gs.commitRival(rv2);
+    try c2.rival_ids.append(gs.allocator(), rid2);
+
+    gs.next_rival_id = 3;
+    gs.next_actor_id = 1;
+    gs.next_contract_id = 3;
+    return gs;
+}
+
+fn loadRivalAfterTampering(sql: [*:0]const u8) !void {
+    var gs = try buildRivalGs(std.testing.allocator);
+    defer gs.deinit();
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    try store.db.exec("PRAGMA foreign_keys = OFF");
+    try store.db.exec(sql);
+    try store.db.exec("PRAGMA foreign_keys = ON");
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    loaded.deinit();
+}
+
+test "rivals with nonzero standing and a recurring rival survive a save/load round-trip (P4i)" {
+    // Rules 47, 67 / P4i: a campaign with rivals — including a recurring rival that
+    // carries forward standing and encounters from a closed contract — survives save
+    // → load with an identical stateHash. Exercises saveRivals/loadRivals.
+    var gs = try buildRivalGs(std.testing.allocator);
+    defer gs.deinit();
+
+    try std.testing.expectEqual(@as(usize, 2), gs.rivals.count());
+    const before = digest.stateHash(&gs);
+
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+
+    var diff_buf: [128]u8 = undefined;
+    try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &diff_buf) orelse "");
+    try std.testing.expectEqual(before, digest.stateHash(&loaded));
+    // Rivals round-tripped.
+    try std.testing.expectEqual(@as(usize, 2), loaded.rivals.count());
+    const rid2: types.RivalId = @enumFromInt(2);
+    // Recurring flag survives.
+    try std.testing.expect(loaded.rivals.getPtr(rid2).?.recurring);
+    // Nonzero standing survives.
+    try std.testing.expectEqual(@as(i16, -30), loaded.rivals.getPtr(rid2).?.standing);
+    // Encounters survive.
+    try std.testing.expectEqual(@as(u16, 2), loaded.rivals.getPtr(rid2).?.encounters);
+    // rival_ids rebuilt on contracts.
+    const cid2: types.ContractId = @enumFromInt(2);
+    const lc2 = loaded.contracts.getPtr(cid2).?;
+    try std.testing.expectEqual(@as(usize, 1), lc2.rival_ids.items.len);
+    try std.testing.expectEqual(rid2, lc2.rival_ids.items[0]);
+}
+
+test "a v45 store migrates to v46 with the rival table created and next_rival_id defaults to 1 (P4i)" {
+    // Rule 50 / P4i: a store at schema v45 (no rival table, no next_rival_id meta row)
+    // must migrate cleanly to v46 — applySchema creates the rival table — and loading
+    // a campaign from the migrated store yields next_rival_id = 1 (safe default).
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 40002 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+
+    const raw = try sqlite.Db.open(":memory:");
+    var s1 = try Store.fromDb(raw);
+    try s1.save(&gs);
+    // Simulate a v45 store: drop the rival table and the next_rival_id meta row,
+    // then downgrade schema_version to 45.
+    try raw.exec("DROP TABLE rival");
+    try raw.exec("DELETE FROM meta WHERE key = 'next_rival_id'");
+    try raw.exec("UPDATE setting SET value = 45 WHERE key = 'schema_version'");
+    // fromDb sees v45, runs applySchema (CREATE TABLE IF NOT EXISTS rival), sets v46.
+    const s2 = try Store.fromDb(raw);
+    defer s2.close();
+    // Schema advanced to current.
+    try std.testing.expectEqual(@as(i64, schema_version), s2.getSetting("schema_version", 0));
+    // rival table exists and is empty.
+    const cnt = try s2.db.prepare("SELECT COUNT(*) FROM rival");
+    defer cnt.finalize();
+    try std.testing.expect(try cnt.next());
+    try std.testing.expectEqual(@as(i64, 0), cnt.int(0));
+    // Loading the campaign yields next_rival_id = 1 (no meta row → safe default).
+    var loaded = try s2.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+    try std.testing.expectEqual(@as(u32, 1), loaded.next_rival_id);
+    try std.testing.expectEqual(@as(usize, 0), loaded.rivals.count());
+}
+
+test "an unknown archetype_key in a rival row rejects the load as corrupt (P4i)" {
+    // Rule 47 / P4i: rival.archetype_key must name a known archetype.
+    try std.testing.expectError(error.CorruptSave, loadRivalAfterTampering(
+        "UPDATE rival SET archetype_key = 'notanarchetype' WHERE id = 1",
+    ));
+}
+
+test "an out-of-range standing in a rival row rejects the load as corrupt (P4i)" {
+    // Rule 47 / P4i: standing must lie in [rival_min, rival_max].
+    try std.testing.expectError(error.CorruptSave, loadRivalAfterTampering(
+        "UPDATE rival SET standing = 200 WHERE id = 1",
+    ));
+}
+
+test "a rival row with a dangling contract reference rejects the load as corrupt (P4i)" {
+    // Rule 47 / P4i: if rival.contract != 0, the contract_id must resolve to a loaded
+    // contract. A nonzero id that names nothing is corruption.
+    try std.testing.expectError(error.CorruptSave, loadRivalAfterTampering(
+        "UPDATE rival SET contract = 99999 WHERE id = 1",
+    ));
+}
+
+test "a rival row with a non-markup-safe unit_name rejects the load as corrupt (P4i)" {
+    // Rule 47 / P4i: unit_name must be markup-safe.
+    try std.testing.expectError(error.CorruptSave, loadRivalAfterTampering(
+        "UPDATE rival SET unit_name = '{bad markup}' WHERE id = 1",
     ));
 }

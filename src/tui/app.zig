@@ -3096,6 +3096,23 @@ pub const App = struct {
                         }));
                     }
                 }
+                if (ops.rivals.len > 0) {
+                    try head_lines.append(al, "");
+                    for (ops.rivals) |rr| {
+                        const unit_text = try rr.unit_name.markup(al);
+                        const cause_text = if (rr.last_cause.raw.len > 0) try rr.last_cause.markup(al) else @as([]const u8, "");
+                        const recurring_tag: []const u8 = if (rr.recurring) " {a}(returning){/}" else "";
+                        const cause_note: []const u8 = if (cause_text.len > 0)
+                            try std.fmt.allocPrint(al, "  last:{s}", .{cause_text})
+                        else
+                            "";
+                        try head_lines.append(al, try std.fmt.allocPrint(al, "{s}  [{s}] {s}  standing:{d}  {s}{s}{s}", .{
+                            unit_text,     rr.doctrine,    rr.status,
+                            rr.standing,   rr.faction_key, cause_note,
+                            recurring_tag,
+                        }));
+                    }
+                }
                 if (ops.world_state_summary.len > 0) {
                     try head_lines.append(al, "");
                     try head_lines.append(al, try std.fmt.allocPrint(al, "{{d}}world{{/}}  {s}", .{ops.world_state_summary}));

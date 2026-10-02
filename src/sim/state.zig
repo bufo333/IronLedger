@@ -25,6 +25,7 @@ const part_mod = @import("../domain/part.zig");
 const market_mod = @import("../econ/market.zig");
 const meklab = @import("../domain/meklab.zig");
 const actor_mod = @import("../domain/actor.zig");
+const rival_mod = @import("../domain/rival.zig");
 const world_state_mod = @import("../domain/world_state.zig");
 
 pub const Config = struct {
@@ -311,6 +312,9 @@ pub const GameState = struct {
     /// Persistent contract-introduced actors (P4i).
     actors: std.AutoArrayHashMapUnmanaged(types.ActorId, actor_mod.Actor) = .empty,
 
+    /// Persistent rival companies (P4i).
+    rivals: std.AutoArrayHashMapUnmanaged(types.RivalId, rival_mod.Rival) = .empty,
+
     /// Persistent bounded per-world state, keyed by planet_key (P4h.4).
     world_states: std.StringArrayHashMapUnmanaged(world_state_mod.WorldState) = .empty,
 
@@ -324,6 +328,7 @@ pub const GameState = struct {
     next_loan_id: u32 = 1,
     next_operation_id: u32 = 1,
     next_actor_id: u32 = 1,
+    next_rival_id: u32 = 1,
 
     pub fn init(gpa: std.mem.Allocator, config: Config) GameState {
         return .{
@@ -434,6 +439,19 @@ pub const GameState = struct {
 
     pub fn actor(self: *GameState, id: types.ActorId) ?*actor_mod.Actor {
         return self.actors.getPtr(id);
+    }
+
+    /// Reserve capacity in `rivals`, then write the prepared rival using the
+    /// next_rival_id assigned by the caller's commit phase (P4i, rules 7, 11-13).
+    /// The prepared rival must already carry the correct id (set by the caller).
+    /// `ensureUnusedCapacity` is the only fallible step; the put is infallible.
+    pub fn commitRival(self: *GameState, prepared: rival_mod.Rival) !void {
+        try self.rivals.ensureUnusedCapacity(self.allocator(), 1);
+        self.rivals.putAssumeCapacity(prepared.id, prepared);
+    }
+
+    pub fn rival(self: *GameState, id: types.RivalId) ?*rival_mod.Rival {
+        return self.rivals.getPtr(id);
     }
 
     /// Return a pointer to the world state for this planet_key, or null if none yet.
@@ -868,6 +886,8 @@ pub const GameState = struct {
         .{ "next_operation_id", .persisted },
         .{ "actors", .persisted },
         .{ "next_actor_id", .persisted },
+        .{ "rivals", .persisted },
+        .{ "next_rival_id", .persisted },
         .{ "world_states", .persisted },
     };
 

@@ -14,6 +14,7 @@ const GameState = @import("state.zig").GameState;
 const operations = @import("operations.zig");
 const commands = @import("commands.zig");
 const actors_m = @import("actors.zig");
+const rivals_m = @import("rivals.zig");
 const world_state_m = @import("world_state.zig");
 
 const Error = commands.Error;
@@ -214,6 +215,16 @@ pub fn resolveDueOperations(gs: *GameState) !void {
             // Prepare world-state adjustment (fallible; after actor preps; rules 11-13).
             const world_delta = world_state_m.outcomeWorldDelta(band);
             const world_prep = try world_state_m.prepareWorldAdjust(gs, c.planet_key, world_delta, t.name);
+            // Prepare rival standing adjustments (fallible; after world prep; rules 11-13).
+            const rival_std = rivals_m.outcomeRivalStandingDelta(band);
+            var rival_preps: [16]rivals_m.PreparedRivalAdjust = undefined;
+            var rival_prep_count: usize = 0;
+            for (c.rival_ids.items) |rid| {
+                if (rival_prep_count >= rival_preps.len) break;
+                if (gs.rival(rid) == null) continue;
+                rival_preps[rival_prep_count] = try rivals_m.adjustRival(gs, rid, rival_std, t.name);
+                rival_prep_count += 1;
+            }
 
             // Commit: infallible from here.
             op.state = .resolved;
@@ -238,6 +249,8 @@ pub fn resolveDueOperations(gs: *GameState) !void {
             for (actor_preps[0..actor_prep_count]) |prep| actors_m.commitAdjustRelationship(gs, prep);
             // Commit world-state adjustment (infallible; prepared above).
             world_state_m.commitWorldAdjust(gs, world_prep);
+            // Commit rival standing adjustments (infallible; prepared above).
+            for (rival_preps[0..rival_prep_count]) |prep| rivals_m.commitAdjustRival(gs, prep);
         }
     }
 }
@@ -282,6 +295,16 @@ pub fn resolveFinale(gs: *GameState, c: *contract_mod.Contract) !?*const arc_mod
     // Prepare world-state adjustment for the finale (fallible; after actor preps; rules 11-13).
     const finale_world_delta = world_state_m.finaleWorldDelta(f);
     const finale_world_prep = try world_state_m.prepareWorldAdjust(gs, c.planet_key, finale_world_delta, f.name);
+    // Prepare rival standing adjustments for the finale (fallible; rules 11-13).
+    const finale_rival_std = rivals_m.finaleRivalStandingDelta(f);
+    var finale_rival_preps: [16]rivals_m.PreparedRivalAdjust = undefined;
+    var finale_rival_prep_count: usize = 0;
+    for (c.rival_ids.items) |rid| {
+        if (finale_rival_prep_count >= finale_rival_preps.len) break;
+        if (gs.rival(rid) == null) continue;
+        finale_rival_preps[finale_rival_prep_count] = try rivals_m.adjustRival(gs, rid, finale_rival_std, f.name);
+        finale_rival_prep_count += 1;
+    }
 
     // ---- COMMIT: infallible from here ----
     c.arc_finale_key = f.key;
@@ -301,6 +324,8 @@ pub fn resolveFinale(gs: *GameState, c: *contract_mod.Contract) !?*const arc_mod
     for (finale_actor_preps[0..finale_actor_prep_count]) |prep| actors_m.commitAdjustRelationship(gs, prep);
     // Commit world-state adjustment for the finale (infallible; prepared above).
     world_state_m.commitWorldAdjust(gs, finale_world_prep);
+    // Commit rival standing adjustments for the finale (infallible; prepared above).
+    for (finale_rival_preps[0..finale_rival_prep_count]) |prep| rivals_m.commitAdjustRival(gs, prep);
     return f;
 }
 
@@ -2067,5 +2092,167 @@ test "resolveFinale: world state moves per finaleWorldDelta for held and collaps
         try testing.expect(expected.enemy_influence > 0);
         try testing.expect(ws.?.enemy_influence > 0);
         try testing.expect(ws.?.employer_control < 0);
+    }
+}
+
+test "resolveDueOperations: rival standing moves by outcomeRivalStandingDelta (P4i)" {
+    // Consumer/agreement test (rule 67-69): a rival attached to the contract
+    // has its standing moved by the owner predicts.
+    const testing = std.testing;
+
+    var gs = GameState.init(testing.allocator, .{ .seed = 88889 });
+    defer gs.deinit();
+
+    const cid: types.ContractId = @enumFromInt(1);
+    const rid: types.RivalId = @enumFromInt(1);
+    const t = operation_mod.findTemplate("negotiate_terms").?;
+    const committed_day: u32 = 0;
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+        .status = .active,
+        .arc_key = "fracturing_garrison",
+        .escalation_clock = 5,
+    });
+    const c = gs.contracts.getPtr(cid).?;
+    // Attach rival to the contract.
+    try c.rival_ids.append(gs.allocator(), rid);
+    try gs.rivals.put(gs.allocator(), rid, .{
+        .id = rid,
+        .archetype_key = "enemy_raiders",
+        .unit_name = "Test Raiders",
+        .faction_key = "DC",
+        .standing = 0,
+        .contract = cid,
+    });
+    try c.operations.append(gs.allocator(), .{
+        .id = @enumFromInt(1),
+        .template_key = "negotiate_terms",
+        .state = .committed,
+        .opened_day = committed_day,
+        .committed_day = committed_day,
+    });
+
+    gs.clock.day_index = committed_day + @as(u32, t.expected_days);
+    const before_standing = gs.rivals.getPtr(rid).?.standing;
+    try resolveDueOperations(&gs);
+
+    // After resolution, the rival's standing must have moved by the owner's delta.
+    const band = c.operations.items[0].outcome;
+    const expected_delta = rivals_m.outcomeRivalStandingDelta(band);
+    const after_standing = gs.rivals.getPtr(rid).?.standing;
+    // New standing = clamp(before + delta, rival_min, rival_max).
+    const rival_dom = @import("../domain/rival.zig");
+    const clamped: i16 = @intCast(@min(@as(i32, rival_dom.rival_max), @max(@as(i32, rival_dom.rival_min), @as(i32, before_standing) + expected_delta)));
+    try testing.expectEqual(clamped, after_standing);
+    // Status matches statusFor(new_standing).
+    try testing.expectEqual(rivals_m.statusFor(after_standing), rivals_m.statusFor(after_standing));
+    // Cause is recorded.
+    try testing.expect(gs.rivals.getPtr(rid).?.last_cause.len > 0);
+}
+
+test "resolveFinale: rival standing moves per finaleRivalStandingDelta for held and collapse (P4i)" {
+    const testing = std.testing;
+
+    // ---- Held finale ----
+    {
+        var gs = GameState.init(testing.allocator, .{ .seed = 99993 });
+        defer gs.deinit();
+
+        const a = arc_mod.find("fracturing_garrison").?;
+        var terminal_beat: u8 = 0;
+        for (a.beats, 0..) |b, i| if (b.escalation_threshold == 0) {
+            terminal_beat = @intCast(i);
+        };
+
+        const cid: types.ContractId = @enumFromInt(1);
+        const rid: types.RivalId = @enumFromInt(1);
+        try gs.contracts.put(gs.allocator(), cid, .{
+            .id = cid,
+            .kind = .garrison_duty,
+            .employer_key = "LC",
+            .enemy_key = "DC",
+            .planet_key = "galatea",
+            .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+            .status = .active,
+            .arc_key = "fracturing_garrison",
+            .arc_beat = terminal_beat,
+            .escalation_clock = 0,
+        });
+        const c = gs.contracts.getPtr(cid).?;
+        try c.rival_ids.append(gs.allocator(), rid);
+        try gs.rivals.put(gs.allocator(), rid, .{
+            .id = rid,
+            .archetype_key = "enemy_raiders",
+            .unit_name = "Test Raiders",
+            .faction_key = "DC",
+            .standing = 0,
+            .contract = cid,
+        });
+
+        const f = (try resolveFinale(&gs, c)).?;
+        try testing.expect(!f.ends_contract); // held finale selected
+
+        const expected_delta = rivals_m.finaleRivalStandingDelta(f);
+        const rival_dom = @import("../domain/rival.zig");
+        const clamped: i16 = @intCast(@min(@as(i32, rival_dom.rival_max), @max(@as(i32, rival_dom.rival_min), @as(i32, 0) + expected_delta)));
+        try testing.expectEqual(clamped, gs.rivals.getPtr(rid).?.standing);
+        try testing.expect(gs.rivals.getPtr(rid).?.standing > 0 or expected_delta == 0);
+    }
+
+    // ---- Collapse finale ----
+    {
+        var gs = GameState.init(testing.allocator, .{ .seed = 99994 });
+        defer gs.deinit();
+
+        const a = arc_mod.find("fracturing_garrison").?;
+        var terminal_beat: u8 = 0;
+        var collapse_threshold: u16 = 0;
+        for (a.beats, 0..) |b, i| if (b.escalation_threshold == 0) {
+            terminal_beat = @intCast(i);
+        };
+        for (a.finales) |f_opt| if (f_opt.ends_contract) {
+            collapse_threshold = @as(u16, @intCast(f_opt.min_clock));
+            break;
+        };
+        if (collapse_threshold == 0) collapse_threshold = 100;
+
+        const cid: types.ContractId = @enumFromInt(1);
+        const rid: types.RivalId = @enumFromInt(1);
+        try gs.contracts.put(gs.allocator(), cid, .{
+            .id = cid,
+            .kind = .garrison_duty,
+            .employer_key = "LC",
+            .enemy_key = "DC",
+            .planet_key = "galatea",
+            .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+            .status = .active,
+            .arc_key = "fracturing_garrison",
+            .arc_beat = terminal_beat,
+            .escalation_clock = collapse_threshold + 5,
+        });
+        const c = gs.contracts.getPtr(cid).?;
+        try c.rival_ids.append(gs.allocator(), rid);
+        try gs.rivals.put(gs.allocator(), rid, .{
+            .id = rid,
+            .archetype_key = "enemy_raiders",
+            .unit_name = "Test Raiders",
+            .faction_key = "DC",
+            .standing = 0,
+            .contract = cid,
+        });
+
+        const f = (try resolveFinale(&gs, c)).?;
+        try testing.expect(f.ends_contract); // collapse finale selected
+
+        const expected_delta = rivals_m.finaleRivalStandingDelta(f);
+        try testing.expect(expected_delta < 0);
+        const rival_dom = @import("../domain/rival.zig");
+        const clamped: i16 = @intCast(@min(@as(i32, rival_dom.rival_max), @max(@as(i32, rival_dom.rival_min), @as(i32, 0) + expected_delta)));
+        try testing.expectEqual(clamped, gs.rivals.getPtr(rid).?.standing);
     }
 }
