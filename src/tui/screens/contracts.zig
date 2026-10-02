@@ -109,7 +109,7 @@ pub fn move(self: *App, delta: i32) anyerror!void {
     if (self.focus == 0) self.moveCursor(0, delta, view.board.len) else if (self.focus == 1) self.moveCursor(1, delta, view.active.len) else self.moveCursor(2, delta, (try q.contractHistory(al, g)).len);
 }
 
-const Action = enum { prev_hq, next_hq, accept, bargain, active_log, history_log, complete, recall, ops_board, task_assign };
+const Action = enum { prev_hq, next_hq, accept, bargain, active_log, history_log, complete, recall, ops_board, task_assign, ops_report };
 
 pub const bindings = [_]app.keys.Binding(Action){
     .{ .match = app.keys.Match.char('['), .action = .prev_hq, .label = "other HQ", .group = .navigate, .shown = "[ ]", .title = 0, .help = "previous / next HQ's board" },
@@ -120,8 +120,9 @@ pub const bindings = [_]app.keys.Binding(Action){
     .{ .match = app.keys.Match.char('c'), .action = .complete, .label = "complete", .group = .act, .pane = 1, .help = "close out the contract under the cursor" },
     .{ .match = app.keys.Match.char('R'), .action = .recall, .label = "recall", .group = .act, .pane = 1, .help = "recall the company (under contract: a breach, confirmed first)" },
     .{ .match = .{ .key = .enter }, .action = .history_log, .label = "closed log", .group = .act, .pane = 2, .help = "the closed contract's whole log, full screen" },
-    .{ .match = app.keys.Match.char('g'), .action = .ops_board, .label = "operations", .group = .act, .pane = 1, .help = "open the arc operations board for the active contract (Enter opens the intent picker, then commits; r sets tempo posture; i opens intervention picker for committed combat ops; x declines)" },
+    .{ .match = app.keys.Match.char('g'), .action = .ops_board, .label = "operations", .group = .act, .pane = 1, .help = "open the arc operations board for the active contract (Enter opens the intent picker, then commits; r sets tempo posture; i opens intervention picker for committed combat ops; x declines); G opens the read-only operation report" },
     .{ .match = app.keys.Match.char('t'), .action = .task_assign, .label = "lance tasks", .group = .act, .pane = 1, .help = "assign lance tasks for the committed combat operation (P4e)" },
+    .{ .match = app.keys.Match.char('G'), .action = .ops_report, .label = "op report", .group = .act, .pane = 1, .help = "open the operation report for the active contract (history, decision costs, what each operation changed; read-only)" },
 };
 pub const legend = app.keys.entries(Action, &bindings);
 
@@ -213,6 +214,15 @@ pub fn handle(self: *App, k: app.Key) anyerror!bool {
             self.modal_cursor = 0;
             self.openModal(.{ .task_pick = .{ .contract = sel.id, .operation = op.id } });
         },
+        .ops_report => if (view.active.len > 0) {
+            const sel = view.active[@min(self.cur(1).*, view.active.len - 1)];
+            if (sel.id == .none) {
+                self.say(.dim, "no active contract — accept a contract first", .{});
+                return true;
+            }
+            self.modal_cursor = 0;
+            self.openModal(.{ .operation_report = sel.id });
+        },
     }
     return true;
 }
@@ -233,4 +243,28 @@ test "b on an offer opens its negotiation for that offer" {
     try app.pressForTest(c, .{ .char = 'b' });
     try std.testing.expect(c.app.modal == .negotiate);
     try std.testing.expect(c.app.modal.negotiate != .none);
+}
+
+test "T6: G on pane 1 with an active contract opens the operation report modal" {
+    // Rule 34 binding test: G on pane 1 opens .operation_report for the active contract.
+    // Follows the "b on an offer opens its negotiation" test pattern.
+    const c = try app.clientForTest(std.testing.allocator);
+    defer app.deinitForTest(c, std.testing.allocator);
+    // Inject a minimal active contract so pane 1 has a selectable row.
+    const gs = c.app.state();
+    const cid: app.types.ContractId = @enumFromInt(99);
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 6, .base_pay_month = 100_000 },
+        .status = .active,
+    });
+    try toTab(c, .contracts);
+    c.app.focus = 1; // pane 1 = active contracts
+    try app.pressForTest(c, .{ .char = 'G' });
+    try std.testing.expect(c.app.modal == .operation_report);
+    try std.testing.expectEqual(cid, c.app.modal.operation_report);
 }

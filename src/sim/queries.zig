@@ -6880,6 +6880,7 @@ const officer_dom = @import("../domain/officer.zig");
 const world_state_dom = @import("../domain/world_state.zig");
 const rivals_m = @import("rivals.zig");
 const officers_m = @import("officers.zig");
+const actors_sim = @import("actors.zig");
 
 /// Format a compact read-only summary of the world state at planet_key.
 /// Returns an empty string when no state has been recorded yet.
@@ -7023,6 +7024,67 @@ pub const Operations = struct {
     officers: []OfficerRow,
     /// Read-only world-state summary for the contract's planet (P4h.4); empty if none.
     world_state_summary: []const u8,
+};
+
+/// Per-operation consequence block for the operation report (P4i.3, rule 20).
+/// All delta values are exactly the band-derived deltas the resolution owners apply:
+/// `sim/operations.zig` (clock/decline/withdraw), `sim/world_state.zig`, `sim/actors.zig`,
+/// `sim/rivals.zig`, `sim/officers.zig`. See docs/p4-operations-design.md §6.
+pub const OpConsequence = struct {
+    clock_delta: i32 = 0,
+    score_delta: i16 = 0,
+    /// True for non-combat resolved ops only: the five campaign-state owners were applied.
+    /// False for combat ops (clock delta only, per battle.zig) and decline/withdraw.
+    applies_campaign_deltas: bool = false,
+    world_delta: @import("world_state.zig").WorldDelta = .{},
+    relationship_delta: actors_sim.RelDelta = .{},
+    rival_standing_delta: i16 = 0,
+    officer_delta: i16 = 0,
+    /// Count of attached actors/rivals/officers the owner loop adjusted (capped by owner).
+    actors_affected: u16 = 0,
+    rivals_affected: u16 = 0,
+    officers_affected: u16 = 0,
+};
+
+/// One decided/terminal operation row in the operation report (P4i.3, ROADMAP §P4i.3).
+pub const OperationReportRow = struct {
+    id: types.OperationId,
+    name: []const u8,
+    combat: bool,
+    state: operation_mod.OperationState,
+    intent: operation_mod.Intent,
+    tempo: operation_mod.TempoPosture,
+    outcome: operation_mod.OutcomeBand,
+    /// Whether the operation succeeded given its intent; null when state is declined/withdrawn.
+    succeeded: ?bool,
+    opened_day: u32,
+    committed_day: ?u32,
+    resolved_day: ?u32,
+    /// Total command capacity spent (sum of interventionCost over applied interventions).
+    capacity_spent: u8,
+    /// Interventions applied to this operation (slice into campaign arena).
+    interventions: []const operation_mod.Intervention,
+    /// Added days from tempo posture (tempoDelayDays).
+    delay_days: u16,
+    /// Campaign-state consequence this operation's resolution applied (or would apply).
+    consequence: OpConsequence,
+};
+
+/// Read-only report for one arc contract's decided/terminal operation history (P4i.3).
+/// All consequence values are derived from the owner functions — not re-derived here.
+/// Caller owns the result (arena-friendly). See docs/p4-operations-design.md §6.
+pub const OperationReport = struct {
+    briefing: []const u8,
+    arc_finale_key: []const u8,
+    escalation_clock: u16,
+    collapse_threshold: u16,
+    command_capacity: u8,
+    command_capacity_cap: u8,
+    command_capacity_reserved: u8,
+    contract_score: i32,
+    victory_points: i32,
+    world_state_summary: []const u8,
+    rows: []OperationReportRow,
 };
 
 /// Return the operations board for an active arc contract.
@@ -7755,4 +7817,412 @@ test "contractOperations: OfficerRow populated for arc contract with an attached
     try std.testing.expectEqual(@as(i16, -45), or_row.performance);
     try std.testing.expectEqualStrings("failing", or_row.band); // -45 <= -40 → failing
     try std.testing.expect(or_row.recurring);
+}
+
+// ---- Operation report query (P4i.3) -----------------------------------------
+
+/// Return the decided/terminal operation history for one arc contract.
+/// Each row carries the decision costs and campaign-state consequences the resolution
+/// owners actually applied, computed by calling those owners — never re-derived.
+/// See docs/p4-operations-design.md §6, ROADMAP §P4i.3.
+/// Caller owns the result (arena-friendly).
+pub fn operationReport(alloc: Alloc, gs: *GameState, contract_id: types.ContractId) !OperationReport {
+    const world_state_sim = @import("world_state.zig");
+    const empty_report = OperationReport{
+        .briefing = "",
+        .arc_finale_key = "",
+        .escalation_clock = 0,
+        .collapse_threshold = 0,
+        .command_capacity = 0,
+        .command_capacity_cap = 0,
+        .command_capacity_reserved = 0,
+        .contract_score = 0,
+        .victory_points = 0,
+        .world_state_summary = "",
+        .rows = &.{},
+    };
+    const c = gs.contracts.getPtr(contract_id) orelse return empty_report;
+    if (c.arc_key.len == 0) return OperationReport{
+        .briefing = "",
+        .arc_finale_key = "",
+        .escalation_clock = 0,
+        .collapse_threshold = 0,
+        .command_capacity = 0,
+        .command_capacity_cap = 0,
+        .command_capacity_reserved = 0,
+        .contract_score = 0,
+        .victory_points = 0,
+        .world_state_summary = try worldStateSummary(alloc, gs, c.planet_key),
+        .rows = &.{},
+    };
+    const arc_mod = @import("../domain/arc.zig");
+    const a = arc_mod.find(c.arc_key) orelse return OperationReport{
+        .briefing = "",
+        .arc_finale_key = "",
+        .escalation_clock = 0,
+        .collapse_threshold = 0,
+        .command_capacity = 0,
+        .command_capacity_cap = 0,
+        .command_capacity_reserved = 0,
+        .contract_score = 0,
+        .victory_points = 0,
+        .world_state_summary = try worldStateSummary(alloc, gs, c.planet_key),
+        .rows = &.{},
+    };
+
+    // Briefing: current beat's name + any active finale key (reuses the contractOperations construction; no new rule).
+    const briefing: []const u8 = if (c.arc_beat < a.beats.len) blk: {
+        const beat = a.beats[c.arc_beat];
+        const finale_suffix = if (c.arc_finale_key.len > 0)
+            try std.fmt.allocPrint(alloc, " (arc resolved: {s})", .{c.arc_finale_key})
+        else
+            @as([]const u8, "");
+        break :blk try std.fmt.allocPrint(alloc, "{s}{s}", .{ beat.name, finale_suffix });
+    } else "";
+
+    var rows: std.ArrayListUnmanaged(OperationReportRow) = .empty;
+    for (c.operations.items) |*op| {
+        // History filter: include decided/terminal ops only.
+        const is_decided = op.outcome != .none or
+            op.state == .resolved or op.state == .aftermath or
+            op.state == .withdrawn or op.state == .declined;
+        if (!is_decided) continue;
+
+        const t = operation_mod.findTemplate(op.template_key) orelse continue;
+
+        // Decision costs.
+        var capacity_spent: u8 = 0;
+        for (op.interventions.items) |iv| {
+            capacity_spent += operations_m.interventionCost(iv);
+        }
+        const delay_days = operations_m.tempoDelayDays(op.tempo);
+
+        const succeeded: ?bool = if (op.outcome != .none)
+            operations_m.operationSucceeded(op.intent, op.outcome)
+        else
+            null;
+
+        // Consequence path (rule 86): call owners, never re-derive.
+        const consequence: OpConsequence = switch (op.state) {
+            .declined => .{
+                .clock_delta = @intCast(operations_m.declineClockDelta(t)),
+                .applies_campaign_deltas = false,
+            },
+            .withdrawn => .{
+                .clock_delta = @intCast(operations_m.withdrawClockDelta()),
+                .score_delta = operations_m.withdrawScoreDelta(),
+                .applies_campaign_deltas = false,
+            },
+            .resolved, .aftermath => if (t.combat) .{
+                // Combat path (battle.zig): clock delta only.
+                .clock_delta = operations_m.outcomeClockDelta(op.outcome),
+                .applies_campaign_deltas = false,
+            } else .{
+                // Non-combat path (operation_control.resolveDueOperations): all five owners.
+                .clock_delta = operations_m.outcomeClockDelta(op.outcome),
+                .applies_campaign_deltas = true,
+                .world_delta = world_state_sim.outcomeWorldDelta(op.outcome),
+                .relationship_delta = actors_sim.outcomeRelationshipDelta(op.outcome),
+                .rival_standing_delta = rivals_m.outcomeRivalStandingDelta(op.outcome),
+                .officer_delta = officers_m.outcomeOfficerDelta(op.outcome),
+                .actors_affected = @intCast(c.actor_ids.items.len),
+                .rivals_affected = @intCast(c.rival_ids.items.len),
+                .officers_affected = @intCast(c.officer_arc_ids.items.len),
+            },
+            else => .{},
+        };
+
+        try rows.append(alloc, .{
+            .id = op.id,
+            .name = t.name,
+            .combat = t.combat,
+            .state = op.state,
+            .intent = op.intent,
+            .tempo = op.tempo,
+            .outcome = op.outcome,
+            .succeeded = succeeded,
+            .opened_day = op.opened_day,
+            .committed_day = op.committed_day,
+            .resolved_day = op.resolved_day,
+            .capacity_spent = capacity_spent,
+            .interventions = op.interventions.items,
+            .delay_days = delay_days,
+            .consequence = consequence,
+        });
+    }
+
+    return OperationReport{
+        .briefing = briefing,
+        .arc_finale_key = c.arc_finale_key,
+        .escalation_clock = c.escalation_clock,
+        .collapse_threshold = operations_m.topCollapseMinClock(a),
+        .command_capacity = c.command_capacity,
+        .command_capacity_cap = operations_m.commandCap(gs, c),
+        .command_capacity_reserved = operations_m.employerReserved(c.terms.command_rights),
+        .contract_score = c.score,
+        .victory_points = c.victory_points,
+        .world_state_summary = try worldStateSummary(alloc, gs, c.planet_key),
+        .rows = try rows.toOwnedSlice(alloc),
+    };
+}
+
+test "operationReport: T1 — history selection and decision costs" {
+    // Distinct invariant: which ops are history + recorded decision costs.
+    // Resolved non-combat, declined, withdrawn: all included. Available (outcome .none): excluded.
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const cid: types.ContractId = @enumFromInt(1);
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+        .status = .active,
+        .arc_key = "fracturing_garrison",
+    });
+    const c = gs.contracts.getPtr(cid).?;
+
+    // Op 1: resolved non-combat with two interventions.
+    try c.operations.append(gs.allocator(), .{
+        .id = @enumFromInt(1),
+        .template_key = "negotiate_terms",
+        .state = .resolved,
+        .outcome = .success,
+        .opened_day = 0,
+        .committed_day = 1,
+        .resolved_day = 10,
+        .tempo = .recon,
+    });
+    const op1 = &c.operations.items[0];
+    try op1.interventions.append(gs.allocator(), .emergency_recon);
+    try op1.interventions.append(gs.allocator(), .air_cover);
+
+    // Op 2: declined.
+    try c.operations.append(gs.allocator(), .{
+        .id = @enumFromInt(2),
+        .template_key = "negotiate_terms",
+        .state = .declined,
+        .outcome = .none,
+        .opened_day = 5,
+    });
+
+    // Op 3: withdrawn.
+    try c.operations.append(gs.allocator(), .{
+        .id = @enumFromInt(3),
+        .template_key = "negotiate_terms",
+        .state = .withdrawn,
+        .outcome = .none,
+        .opened_day = 10,
+    });
+
+    // Op 4: available with outcome .none → excluded.
+    try c.operations.append(gs.allocator(), .{
+        .id = @enumFromInt(4),
+        .template_key = "negotiate_terms",
+        .state = .available,
+        .outcome = .none,
+        .opened_day = 15,
+    });
+
+    const report = try operationReport(arena.allocator(), &gs, cid);
+    try std.testing.expectEqual(@as(usize, 3), report.rows.len);
+
+    // Op 1: two interventions → capacity_spent = cost(emergency_recon) + cost(air_cover) = 1+1 = 2.
+    const r1 = report.rows[0];
+    try std.testing.expectEqual(@as(u8, 2), r1.capacity_spent);
+    try std.testing.expectEqual(@as(usize, 2), r1.interventions.len);
+    // delay_days = tempoDelayDays(.recon) = 7.
+    try std.testing.expectEqual(operations_m.tempoDelayDays(.recon), r1.delay_days);
+}
+
+test "operationReport: T2 — non-combat consequence agreement" {
+    // Distinct invariant (rules 20/67-68): report == owner for the five non-combat deltas.
+    const world_state_sim = @import("world_state.zig");
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const cid: types.ContractId = @enumFromInt(1);
+    const aid: types.ActorId = @enumFromInt(1);
+    const rid: types.RivalId = @enumFromInt(1);
+    const oaid: types.OfficerArcId = @enumFromInt(1);
+    const pid: types.PersonId = @enumFromInt(1);
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+        .status = .active,
+        .arc_key = "fracturing_garrison",
+    });
+    const c = gs.contracts.getPtr(cid).?;
+    try c.actor_ids.append(gs.allocator(), aid);
+    try c.rival_ids.append(gs.allocator(), rid);
+    try c.officer_arc_ids.append(gs.allocator(), oaid);
+
+    // Also insert the person so gs.officerArc lookups don't fail if called.
+    try gs.people.put(gs.allocator(), pid, .{
+        .id = pid,
+        .first_name = "Bo",
+        .last_name = "Xu",
+        .role = .mekwarrior,
+        .rank = .sergeant,
+        .status = .active,
+        .xp = 0,
+    });
+
+    const band = operation_mod.OutcomeBand.decisive;
+    try c.operations.append(gs.allocator(), .{
+        .id = @enumFromInt(1),
+        .template_key = "negotiate_terms", // non-combat template
+        .state = .resolved,
+        .outcome = band,
+        .opened_day = 0,
+        .committed_day = 1,
+        .resolved_day = 10,
+    });
+
+    const report = try operationReport(arena.allocator(), &gs, cid);
+    try std.testing.expectEqual(@as(usize, 1), report.rows.len);
+    const con = report.rows[0].consequence;
+
+    try std.testing.expect(con.applies_campaign_deltas);
+    try std.testing.expectEqual(operations_m.outcomeClockDelta(band), con.clock_delta);
+    try std.testing.expectEqual(world_state_sim.outcomeWorldDelta(band), con.world_delta);
+    try std.testing.expectEqual(actors_sim.outcomeRelationshipDelta(band), con.relationship_delta);
+    try std.testing.expectEqual(rivals_m.outcomeRivalStandingDelta(band), con.rival_standing_delta);
+    try std.testing.expectEqual(officers_m.outcomeOfficerDelta(band), con.officer_delta);
+    try std.testing.expectEqual(@as(u16, 1), con.actors_affected);
+    try std.testing.expectEqual(@as(u16, 1), con.rivals_affected);
+    try std.testing.expectEqual(@as(u16, 1), con.officers_affected);
+}
+
+test "operationReport: T3 — combat asymmetry" {
+    // Distinct invariant: combat resolved op gets clock delta only; campaign deltas are false.
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const cid: types.ContractId = @enumFromInt(1);
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+        .status = .active,
+        .arc_key = "fracturing_garrison",
+    });
+    const c = gs.contracts.getPtr(cid).?;
+
+    const band = operation_mod.OutcomeBand.success;
+    try c.operations.append(gs.allocator(), .{
+        .id = @enumFromInt(1),
+        .template_key = "repel_probe", // combat template
+        .state = .resolved,
+        .outcome = band,
+        .opened_day = 0,
+        .committed_day = 1,
+        .resolved_day = 5,
+    });
+
+    const report = try operationReport(arena.allocator(), &gs, cid);
+    try std.testing.expectEqual(@as(usize, 1), report.rows.len);
+    const con = report.rows[0].consequence;
+
+    try std.testing.expect(!con.applies_campaign_deltas);
+    try std.testing.expectEqual(operations_m.outcomeClockDelta(band), con.clock_delta);
+    // World/actor/rival/officer deltas must be zero for combat ops.
+    try std.testing.expectEqual(@as(i16, 0), con.world_delta.security);
+    try std.testing.expectEqual(@as(i16, 0), con.world_delta.employer_control);
+    try std.testing.expectEqual(@as(i16, 0), con.rival_standing_delta);
+    try std.testing.expectEqual(@as(i16, 0), con.officer_delta);
+}
+
+test "operationReport: T4 — decline and withdraw decision costs" {
+    // Distinct invariant: decision-cost accounting for the two non-outcome decisions.
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const cid: types.ContractId = @enumFromInt(1);
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+        .status = .active,
+        .arc_key = "fracturing_garrison",
+    });
+    const c = gs.contracts.getPtr(cid).?;
+
+    // Declined op.
+    try c.operations.append(gs.allocator(), .{
+        .id = @enumFromInt(1),
+        .template_key = "negotiate_terms",
+        .state = .declined,
+        .outcome = .none,
+        .opened_day = 0,
+    });
+    // Withdrawn op.
+    try c.operations.append(gs.allocator(), .{
+        .id = @enumFromInt(2),
+        .template_key = "negotiate_terms",
+        .state = .withdrawn,
+        .outcome = .none,
+        .opened_day = 5,
+    });
+
+    const report = try operationReport(arena.allocator(), &gs, cid);
+    try std.testing.expectEqual(@as(usize, 2), report.rows.len);
+
+    const declined_row = report.rows[0];
+    const withdrawn_row = report.rows[1];
+
+    // Declined: clock_delta = declineClockDelta(template), applies_campaign_deltas = false.
+    const t = operation_mod.findTemplate("negotiate_terms").?;
+    try std.testing.expectEqual(@as(i32, @intCast(operations_m.declineClockDelta(t))), declined_row.consequence.clock_delta);
+    try std.testing.expect(!declined_row.consequence.applies_campaign_deltas);
+
+    // Withdrawn: clock_delta = withdrawClockDelta(), score_delta = withdrawScoreDelta().
+    try std.testing.expectEqual(@as(i32, @intCast(operations_m.withdrawClockDelta())), withdrawn_row.consequence.clock_delta);
+    try std.testing.expectEqual(operations_m.withdrawScoreDelta(), withdrawn_row.consequence.score_delta);
+    try std.testing.expect(!withdrawn_row.consequence.applies_campaign_deltas);
+}
+
+test "operationReport: T5 — empty for non-arc contract" {
+    // Guard/failure class: non-arc contract returns rows.len == 0 and briefing == "".
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const cid: types.ContractId = @enumFromInt(1);
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 6, .base_pay_month = 100_000 },
+        .status = .active,
+        .arc_key = "", // no arc
+    });
+
+    const report = try operationReport(arena.allocator(), &gs, cid);
+    try std.testing.expectEqualStrings("", report.briefing);
+    try std.testing.expectEqual(@as(usize, 0), report.rows.len);
 }

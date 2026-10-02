@@ -225,8 +225,9 @@ titles and the help modal come from the same tables.
 | `c` | active | close out the contract under the cursor |
 | `R` | active | recall the company (under contract: a breach, confirmed first) |
 | `Enter` | history | the closed contract's whole log, full screen |
-| `g` | active | open the arc operations board for the active contract (Enter opens the intent picker, then commits; r sets tempo posture; i opens intervention picker for committed combat ops; x declines) |
+| `g` | active | open the arc operations board for the active contract (Enter opens the intent picker, then commits; r sets tempo posture; i opens intervention picker for committed combat ops; x declines); G opens the read-only operation report |
 | `t` | active | assign lance tasks for the committed combat operation (P4e) |
+| `G` | active | open the operation report for the active contract (history, decision costs, what each operation changed; read-only) |
 
 ### F5 Ledger
 

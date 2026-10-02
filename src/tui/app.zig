@@ -141,6 +141,8 @@ const Modal = union(enum) {
     tempo_pick: struct { contract: types.ContractId, operation: types.OperationId },
     /// Apply a command intervention to a committed combat operation (P4g).
     intervention_pick: struct { contract: types.ContractId, operation: types.OperationId },
+    /// Read-only operation report for an arc contract: decided ops, decision costs, consequences (P4i.3).
+    operation_report: types.ContractId,
 };
 
 /// A yes/no over one command. `id` is the subject the kind names.
@@ -1349,7 +1351,7 @@ pub const App = struct {
         const al = self.a();
         switch (self.modal) {
             .none => {},
-            .help, .decision, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .seat, .emblem, .hull, .contract_log, .log_entry, .battle_list, .record, .operation_pick, .intent_pick, .task_pick, .tempo_pick, .intervention_pick => try self.drawList(al),
+            .help, .decision, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .seat, .emblem, .hull, .contract_log, .log_entry, .battle_list, .record, .operation_pick, .intent_pick, .task_pick, .tempo_pick, .intervention_pick, .operation_report => try self.drawList(al),
             .after_action => |id| try self.drawAfterAction(al, id),
             .end_turn => {
                 const g = self.state();
@@ -3258,6 +3260,93 @@ pub const App = struct {
                     .max_h = full_h,
                 };
             },
+            .operation_report => |cid| {
+                const rpt = try q.operationReport(al, self.state(), cid);
+                var rows: std.ArrayListUnmanaged([]const u8) = .empty;
+                for (rpt.rows) |r| {
+                    const combat_tag: []const u8 = if (r.combat) "{c}combat{/}" else "{d}non-combat{/}";
+                    const outcome_tag: []const u8 = if (r.outcome != .none)
+                        @tagName(r.outcome)
+                    else
+                        "-";
+                    const succeeded_tag: []const u8 = if (r.succeeded) |s| (if (s) " {g}ok{/}" else " {d}miss{/}") else "";
+                    try rows.append(al, try std.fmt.allocPrint(al, "{s}  {s}  {s}  {s}{s}  intent:{s}  tempo:{s}  Δclk:{d}", .{
+                        r.name,
+                        combat_tag,
+                        @tagName(r.state),
+                        outcome_tag,
+                        succeeded_tag,
+                        r.intent.label(),
+                        r.tempo.label(),
+                        r.consequence.clock_delta,
+                    }));
+                    // Decision costs line.
+                    var iv_buf: std.ArrayListUnmanaged(u8) = .empty;
+                    for (r.interventions, 0..) |iv, i| {
+                        if (i > 0) try iv_buf.appendSlice(al, ", ");
+                        try iv_buf.appendSlice(al, @tagName(iv));
+                    }
+                    const iv_text: []const u8 = if (iv_buf.items.len > 0) iv_buf.items else "-";
+                    try rows.append(al, try std.fmt.allocPrint(al, "   {{d}}cost: cap {d} ({s}) · delay {d}d{{/}}", .{
+                        r.capacity_spent,
+                        iv_text,
+                        r.delay_days,
+                    }));
+                    // Campaign-state consequence detail for non-combat resolved ops.
+                    if (r.consequence.applies_campaign_deltas) {
+                        const wd = r.consequence.world_delta;
+                        const rd = r.consequence.relationship_delta;
+                        try rows.append(al, try std.fmt.allocPrint(al, "   {{d}}world sec{d} civ{d} infra{d} ctrl{d} enemy{d} · rel tr{d}/re{d}/de{d}/ho{d} ×{d} · rival{d}×{d} · officer{d}×{d}{{/}}", .{
+                            wd.security,
+                            wd.civilian_support,
+                            wd.infrastructure_strain,
+                            wd.employer_control,
+                            wd.enemy_influence,
+                            rd.trust,
+                            rd.respect,
+                            rd.debt,
+                            rd.hostility,
+                            r.consequence.actors_affected,
+                            r.consequence.rival_standing_delta,
+                            r.consequence.rivals_affected,
+                            r.consequence.officer_delta,
+                            r.consequence.officers_affected,
+                        }));
+                    }
+                }
+                // Summary head.
+                const esc_note: []const u8 = if (rpt.collapse_threshold > 0)
+                    try std.fmt.allocPrint(al, "esc:{d}/{d}", .{ rpt.escalation_clock, rpt.collapse_threshold })
+                else
+                    try std.fmt.allocPrint(al, "esc:{d}", .{rpt.escalation_clock});
+                const cap_available = rpt.command_capacity -| rpt.command_capacity_reserved;
+                var head_lines: std.ArrayListUnmanaged([]const u8) = .empty;
+                if (rpt.briefing.len > 0) {
+                    try head_lines.append(al, try std.fmt.allocPrint(al, "{s}  {s}", .{ rpt.briefing, esc_note }));
+                } else {
+                    try head_lines.append(al, esc_note);
+                }
+                try head_lines.append(al, try std.fmt.allocPrint(al, "capacity {d}/{d} (reserved {d})  score {d} · VP {d}", .{
+                    cap_available,
+                    rpt.command_capacity_cap,
+                    rpt.command_capacity_reserved,
+                    rpt.contract_score,
+                    rpt.victory_points,
+                }));
+                if (rpt.world_state_summary.len > 0) {
+                    try head_lines.append(al, try std.fmt.allocPrint(al, "{{d}}world{{/}}  {s}", .{rpt.world_state_summary}));
+                }
+                try head_lines.append(al, "");
+                return .{
+                    .title = try listTitle(al, try std.fmt.allocPrint(al, "OPERATION REPORT · [{d}]", .{@intFromEnum(cid)}), null, "cancel", false),
+                    .head = head_lines.items,
+                    .rows = rows.items,
+                    .read_only = true,
+                    .w = layout.modal.picker_w,
+                    .max_h = full_h,
+                    .empty = "{d}no decided operations yet{/}",
+                };
+            },
             else => unreachable,
         }
     }
@@ -4007,7 +4096,7 @@ pub const App = struct {
     fn handleModalKey(self: *App, key: Key) !void {
         switch (self.modal) {
             .none => {},
-            .help, .decision, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .seat, .emblem, .hull, .contract_log, .log_entry, .battle_list, .record, .operation_pick, .intent_pick, .task_pick, .tempo_pick, .intervention_pick => try self.listKey(key),
+            .help, .decision, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .seat, .emblem, .hull, .contract_log, .log_entry, .battle_list, .record, .operation_pick, .intent_pick, .task_pick, .tempo_pick, .intervention_pick, .operation_report => try self.listKey(key),
             .after_action => |id| {
                 const hit = keys.lookup(AfterActionAction, &after_action_bindings, 0, key) orelse return;
                 switch (hit.action) {
