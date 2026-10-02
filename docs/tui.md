@@ -562,10 +562,10 @@ The four interventions and their cost:
 
 | Intervention | Cost | Gate | Effect |
 |---|---|---|---|
-| `emergency_recon` | 1 | scouting lance with an operational unit, or comms ≥ 2 | +2 surprise reduction |
-| `reinforce` | 2 | an operational lance without main_effort task | +1 surprise reduction, +1 prepared-roll bonus |
-| `air_cover` | 1 | operational, piloted aerospace fighter | +2 prepared-roll bonus |
-| `field_repair` | 1 | assigned operational tech person | +1 prepared-roll bonus |
+| `emergency_recon` | 1 | scouting lance with an operational unit, or comms ≥ 1 | +2 surprise reduction |
+| `reinforce` | 2 | an operational lance without main_effort task | +2 prepared-roll bonus |
+| `air_cover` | 1 | operational, piloted aerospace fighter | +1 prepared-roll bonus |
+| `field_repair` | 1 | assigned operational tech person | +2 prepared-roll bonus |
 
 #### Tempo picker (P4f)
 

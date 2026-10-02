@@ -659,27 +659,8 @@ pub fn interventionGate(gs: *GameState, c: *const contract_mod.Contract, op: *co
             break :blk readiness.companyHasOperationalFighter(gs, c.assigned_company);
         },
         .field_repair => blk: {
-            // Needs an assigned, operational tech with the deployed company.
-            const company = gs.force(c.assigned_company) orelse break :blk false;
-            const company_site: types.Site = .{ .company = c.assigned_company };
-            _ = company_site;
-            // Walk support lances for an operational tech.
-            for (company.children.items) |child_id| {
-                const child = gs.force(child_id) orelse continue;
-                if (child.echelon != .support_company) continue;
-                for (child.children.items) |sl_id| {
-                    const sl = gs.force(sl_id) orelse continue;
-                    // Any support lance with at least one unit is acceptable for tech assignment.
-                    for (sl.units.items) |uid| {
-                        const u = gs.unit(uid) orelse continue;
-                        // Tech check: unit is the support kind with a pilot (tech/astech).
-                        if (u.kind == .mek) continue; // meks are not tech assets
-                        // We check via readiness for an assigned tech on any unit in the company.
-                        if (readiness.unitOperational(gs, u)) break :blk true;
-                    }
-                }
-            }
-            // Also check if any unit in the company has a tech assigned (crew slot tech).
+            // Needs an assigned, operational tech with the deployed company
+            // (unit.tech slot filled by an available person). Rule 20: single owner.
             var uit = gs.units.iterator();
             while (uit.next()) |entry| {
                 const u = entry.value_ptr;
@@ -1792,6 +1773,19 @@ test "interventionGate: each of the four gates accept and refuse correctly" {
 
     // field_repair: refuses with no tech assigned.
     try testing.expect(!interventionGate(&gs, c, &op, .field_repair));
+
+    // Regression (F2): a support company containing only an operational vehicle
+    // (no tech assigned to any unit) must NOT satisfy the field_repair gate.
+    // Before the fix, Loop 1 returned true for any operational non-mek unit in
+    // a support lance; after the fix only the tech-assignment check (Loop 2) runs.
+    const sup_co = try gs.createForce("Omega", .support_company, co);
+    const sup_lance = try gs.createForce("Repair Lance", .support_lance, sup_co);
+    const uid_veh = try gs.addUnit("SVT-1");
+    const pid_veh = try gs.hirePerson("Drv", "One", .vehicle_crew);
+    try @import("toe.zig").assignUnit(&gs, uid_veh, sup_lance, pid_veh);
+    // The vehicle is operational but has no tech assigned; gate must still refuse.
+    try testing.expect(!interventionGate(&gs, c, &op, .field_repair));
+
     // Assign a tech to a unit already in the company (the recon unit).
     const tech_pid = try gs.hirePerson("Tech", "Smith", .tech_mek);
     gs.unit(uid_r).?.tech = tech_pid;

@@ -1231,6 +1231,107 @@ test "execCommitOperation: delay tempo pushes next_battle_day and raises escalat
     _ = op;
 }
 
+// ---- execApplyIntervention tests (P4g) ----------------------------------
+
+const InterventionFix = struct { cid: types.ContractId, oid: types.OperationId, lance: types.ForceId };
+
+/// Intervention fixture: an active arc garrison contract with a committed
+/// combat op and a company that satisfies the `reinforce` gate (at least one
+/// operational combat lance not tasked main_effort), with command_capacity = 5.
+fn interventionFixture(gs: *GameState) !InterventionFix {
+    const fix = try taskFixture(gs);
+    gs.contracts.getPtr(fix.cid).?.command_capacity = 5;
+    return .{ .cid = fix.cid, .oid = fix.oid, .lance = fix.lance };
+}
+
+test "execApplyIntervention: happy path — capacity reduced, intervention recorded, log written" {
+    const testing = std.testing;
+    var gs = GameState.init(testing.allocator, .{});
+    defer gs.deinit();
+    const fix = try interventionFixture(&gs);
+    const c = gs.contracts.getPtr(fix.cid).?;
+    const op = &c.operations.items[0];
+
+    const cap_before = c.command_capacity;
+    const log_before = gs.event_log.items.len;
+    _ = try execApplyIntervention(&gs, .{ .contract = fix.cid, .operation = fix.oid, .intervention = .reinforce });
+
+    try testing.expectEqual(cap_before - operations.interventionCost(.reinforce), c.command_capacity);
+    try testing.expectEqual(@as(usize, 1), op.interventions.items.len);
+    try testing.expectEqual(operation_mod.Intervention.reinforce, op.interventions.items[0]);
+    try testing.expect(gs.event_log.items.len > log_before);
+}
+
+test "execApplyIntervention: OperationNotCommitted refused; digest unchanged" {
+    const testing = std.testing;
+    const digest = @import("digest.zig");
+    var gs = GameState.init(testing.allocator, .{});
+    defer gs.deinit();
+    const fix = try interventionFixture(&gs);
+    const c = gs.contracts.getPtr(fix.cid).?;
+    c.operations.items[0].state = .available; // make it non-committed
+    const before = digest.stateHash(&gs);
+    try testing.expectError(error.OperationNotCommitted, execApplyIntervention(&gs, .{ .contract = fix.cid, .operation = fix.oid, .intervention = .reinforce }));
+    try testing.expectEqual(before, digest.stateHash(&gs));
+    c.operations.items[0].state = .committed;
+}
+
+test "execApplyIntervention: InterventionGateUnmet refused; digest unchanged" {
+    // air_cover requires an operational fighter; the fixture company has none.
+    const testing = std.testing;
+    const digest = @import("digest.zig");
+    var gs = GameState.init(testing.allocator, .{});
+    defer gs.deinit();
+    const fix = try interventionFixture(&gs);
+    const before = digest.stateHash(&gs);
+    try testing.expectError(error.InterventionGateUnmet, execApplyIntervention(&gs, .{ .contract = fix.cid, .operation = fix.oid, .intervention = .air_cover }));
+    try testing.expectEqual(before, digest.stateHash(&gs));
+}
+
+test "execApplyIntervention: InsufficientCommandCapacity refused; digest unchanged" {
+    const testing = std.testing;
+    const digest = @import("digest.zig");
+    var gs = GameState.init(testing.allocator, .{});
+    defer gs.deinit();
+    const fix = try interventionFixture(&gs);
+    const c = gs.contracts.getPtr(fix.cid).?;
+    c.command_capacity = 0;
+    const before = digest.stateHash(&gs);
+    try testing.expectError(error.InsufficientCommandCapacity, execApplyIntervention(&gs, .{ .contract = fix.cid, .operation = fix.oid, .intervention = .reinforce }));
+    try testing.expectEqual(before, digest.stateHash(&gs));
+}
+
+test "execApplyIntervention: InterventionAlreadyApplied refused on second application; digest unchanged" {
+    const testing = std.testing;
+    const digest = @import("digest.zig");
+    var gs = GameState.init(testing.allocator, .{});
+    defer gs.deinit();
+    const fix = try interventionFixture(&gs);
+    // First application succeeds.
+    _ = try execApplyIntervention(&gs, .{ .contract = fix.cid, .operation = fix.oid, .intervention = .reinforce });
+    const before = digest.stateHash(&gs);
+    // Second application of the same kind is refused.
+    try testing.expectError(error.InterventionAlreadyApplied, execApplyIntervention(&gs, .{ .contract = fix.cid, .operation = fix.oid, .intervention = .reinforce }));
+    try testing.expectEqual(before, digest.stateHash(&gs));
+}
+
+test "execApplyIntervention: failure-atomic under OOM at log reservation" {
+    const testing = std.testing;
+    const digest = @import("digest.zig");
+    var outer = std.heap.ArenaAllocator.init(testing.allocator);
+    defer outer.deinit();
+    var gs = GameState.init(outer.allocator(), .{});
+    defer gs.deinit();
+    const fix = try interventionFixture(&gs);
+
+    const before = digest.stateHash(&gs);
+    gs.arena.state.used_list = null;
+    gs.arena.state.free_list = null;
+    gs.arena.child_allocator = testing.failing_allocator;
+    try testing.expectError(error.OutOfMemory, execApplyIntervention(&gs, .{ .contract = fix.cid, .operation = fix.oid, .intervention = .reinforce }));
+    try testing.expectEqual(before, digest.stateHash(&gs));
+}
+
 test "resolveDueOperations: noncombat delay resolves later than advance" {
     const testing = std.testing;
     var gs = GameState.init(testing.allocator, .{});

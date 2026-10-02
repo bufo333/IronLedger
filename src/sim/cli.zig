@@ -967,6 +967,15 @@ test "command line parses the common verbs" {
     // Unknown posture string → BadArguments.
     var it15 = std.mem.tokenizeScalar(u8, "1 2 badposture", ' ');
     try std.testing.expectError(error.BadArguments, parseCommand("tempo", &it15));
+    // intervene parsing (P4g).
+    var it16 = std.mem.tokenizeScalar(u8, "5 2 emergency_recon", ' ');
+    const cmd16 = (try parseCommand("intervene", &it16)).?;
+    try std.testing.expectEqual(@as(u32, 5), @intFromEnum(cmd16.apply_intervention.contract));
+    try std.testing.expectEqual(@as(u32, 2), @intFromEnum(cmd16.apply_intervention.operation));
+    try std.testing.expectEqual(operation_mod.Intervention.emergency_recon, cmd16.apply_intervention.intervention);
+    // Unknown intervention kind → BadArguments.
+    var it17 = std.mem.tokenizeScalar(u8, "5 2 notakind", ' ');
+    try std.testing.expectError(error.BadArguments, parseCommand("intervene", &it17));
 }
 
 test "every listed verb parses or fails on arguments — never falls through as unknown" {

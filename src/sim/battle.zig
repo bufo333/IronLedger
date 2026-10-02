@@ -3230,6 +3230,67 @@ test "reserveLog fix: committed combat op + multi-line AAR does not corrupt the 
     try testing.expectEqual(@as(?operation_mod.TempoPosture, .advance), r.operation_tempo);
 }
 
+test "intervention consumer: emergency_recon changes conditions_mod versus no-intervention baseline (P4g rule 67)" {
+    // Rule 67 owner/consumer agreement: operationInterventionMods is owned by
+    // operations_m; this test proves battle.zig actually reads it.
+    // Two campaigns at the same seed, identical except one has emergency_recon
+    // applied to the committed combat op. The conditions_mod (= scenario_mod) in
+    // the report must differ by the intervention's surprise_reduction value (2).
+    const testing = std.testing;
+    const cid: types.ContractId = @enumFromInt(1);
+    const oid: types.OperationId = @enumFromInt(1);
+
+    var gs_base = GameState.init(testing.allocator, .{ .seed = 99003 });
+    defer gs_base.deinit();
+    var gs_iv = GameState.init(testing.allocator, .{ .seed = 99003 });
+    defer gs_iv.deinit();
+
+    for (&[_]*GameState{ &gs_base, &gs_iv }) |gs| {
+        const co = try @import("starter_company.zig").generateInto(gs, "Ghost");
+        try gs.contracts.put(gs.allocator(), cid, .{
+            .id = cid,
+            .kind = .garrison_duty,
+            .employer_key = "LC",
+            .enemy_key = "DC",
+            .planet_key = "galatea",
+            .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+            .status = .active,
+            .assigned_company = co,
+            .arc_key = "fracturing_garrison",
+            .enemy_lances = 2,
+            .enemy_lance_bv = 5000,
+        });
+        try gs.contracts.getPtr(cid).?.operations.append(gs.allocator(), .{
+            .id = oid,
+            .template_key = "repel_probe",
+            .state = .committed,
+            .opened_day = 0,
+            .committed_day = 0,
+        });
+        try gs.reserveLog(32);
+    }
+    // Apply emergency_recon on the intervention campaign only.
+    try gs_iv.contracts.getPtr(cid).?.operations.items[0].interventions.append(
+        gs_iv.allocator(),
+        operation_mod.Intervention.emergency_recon,
+    );
+
+    try resolveEngagement(&gs_base, gs_base.contracts.getPtr(cid).?);
+    try resolveEngagement(&gs_iv, gs_iv.contracts.getPtr(cid).?);
+
+    const r_base = gs_base.battle_reports.kept.items[0];
+    const r_iv = gs_iv.battle_reports.kept.items[0];
+    // emergency_recon adds surprise_reduction = 2 to conditions_mod; the two
+    // campaigns used the same seed so all other terms are identical.
+    const profile = operations_m.interventionProfile(.emergency_recon);
+    try testing.expectEqual(
+        r_base.conditions_mod + profile.surprise_reduction + profile.prepared_roll_bonus,
+        r_iv.conditions_mod,
+    );
+    // The intervention report must carry the label.
+    try testing.expect(r_iv.operation_interventions.len > 0);
+}
+
 test "tempo identity: advance posture produces the same battle outcome as pre-P4f (same seed)" {
     // Rule 20: default .advance must be behaviour-identical to pre-P4f.
     // The test uses two identical seeds; one sets tempo explicitly to .advance (the default posture).

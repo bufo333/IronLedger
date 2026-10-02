@@ -384,22 +384,23 @@ assert "day 4" in plain(), plain()[-2000:]
 # → changes the ROE, confirm clears the warning, and the next advance
 # runs on to the fight instead of stopping again.
 send(":"); send("accept 9 1\r", 1.5)
-# Operations board, tempo picker and intervention picker: P4f/P4g.
+# Operations board and tempo picker: P4f.
+# has_ops tracks whether the ops board was shown so the P4g block can skip
+# safely when the garrison arc is not available.
 send("4", 0.6)                   # contracts tab
 send("\t", 0.6)                  # focus the active-contracts pane (pane 1)
 mark_ops = len(out)
 send("g", 0.8)                   # request operations board for the active contract
 ops_frame = re.sub(rb"\x1b\[[0-9;?]*[A-Za-z]", b"", out[mark_ops:]).decode("utf-8", "replace")
-if "OPERATIONS" in ops_frame:
+has_ops = "OPERATIONS" in ops_frame
+if has_ops:
     if "no operations on this contract" not in ops_frame:
-        send("r", 0.8)           # open tempo posture picker
+        send("r", 0.8)           # open tempo posture picker (op is still available)
         assert "TEMPO POSTURE" in plain()[-30000:], plain()[-3000:]
         send("\r", 0.8)          # confirm: select the first posture (advance)
-        # P4g: try to open the intervention picker (key 'i').
-        # The op is not yet committed, so the picker shows a refusal message.
-        send("i", 0.8)           # attempt intervention picker
-        # just verify the key was accepted and the modal or status bar responded
     send("\x1b", 0.5)            # close operations modal
+else:
+    send("\x1b", 0.5)            # close any modal that opened
 for _ in range(8):
     send(":"); send("day 30\r", 2.5)
     if "BATTLE ORDERS" in plain()[-20000:]:
@@ -416,6 +417,26 @@ send(":"); send("day 30\r", 2.5)
 after = re.sub(rb"\x1b\[[0-9;?]*[A-Za-z]", b"", out[mark:]).decode("utf-8", "replace")
 assert "contact ahead" not in after and "BATTLE ORDERS" not in after, after[-3000:]
 send("\x1b", 0.5); send("\x1b", 0.5)
+# P4g: exercise the intervention picker on a committed combat op.  The
+# garrison auto-probe battle above has been resolved; the contract is still
+# active; repel_probe (op 2) is still in the .available state.  Commit it
+# now — the contract is well past its transit window (the battle loop
+# advanced ≥ 60 days) — then open the ops board and verify the picker.
+# After the check, advance through the committed battle and read the
+# after-action so the second client starts with no unresolved turn holds.
+if has_ops:
+    send(":"); send("commit 9 2 secure_objective\r", 1.0)
+    send("4", 0.6); send("\t", 0.6)   # contracts tab, active-contracts pane
+    send("g", 0.8)                    # open operations board
+    send("j", 0.3)                    # navigate to the second op (repel_probe, committed)
+    send("i", 0.8)                    # open intervention picker on the committed op
+    assert "INTERVENTION" in plain()[-30000:], plain()[-3000:]
+    send("\x1b", 0.5)                 # close intervention picker
+    send("\x1b", 0.5)                 # close operations modal
+    # press_gap_days = 3, so the committed battle fires within 3 days;
+    # advance 3 days with force so it fires and opens the after-action.
+    send(":"); send("day 3 force\r", 2.0)
+    send("\x1b", 0.5)                 # close after-action (marks it read)
 # Layout-boundary smoke: Forces focus must not wedge on a narrow resize.
 # Switch to Forces, Tab to the pool pane (focus 1), shrink to 118 columns
 # (below the 120-column boundary: only pane 0 draws), drain, assert the

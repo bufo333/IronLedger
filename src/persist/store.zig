@@ -3818,7 +3818,7 @@ test "a rebuilt store loads to the identical digest" {
     // Digest is identical: the rebuild changed no data.
     var diff_buf: [128]u8 = undefined;
     try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &diff_buf) orelse "");
-    // Re-pinned by P4f (adds operation_tempo to BattleReport).
+    // Re-pinned by P4g (adds command_capacity and operation_intervention).
     try std.testing.expectEqual(@as(u64, 2760168904867966449), hash_before);
 }
 
@@ -4303,8 +4303,8 @@ test "golden master: a played year hashes to its pinned value, and a save of it 
     try playedYearForTest(&gs);
     try std.testing.expect(gs.battle_reports.kept.items.len > 0); // the year saw fighting
     // Any change to a simulated or saved result moves this; re-pin it only
-    // when the change is meant. Re-pinned by P4f (adds operation_tempo to
-    // BattleReport).
+    // when the change is meant. Re-pinned by P4g (adds command_capacity and
+    // operation_intervention).
     try std.testing.expectEqual(@as(u64, 2760168904867966449), digest.stateHash(&gs));
 
     const store = try Store.open(":memory:");
@@ -5021,6 +5021,133 @@ test "invalid and orphaned operation_task rows reject the load as corrupt (P4e)"
         try s.db.exec("PRAGMA foreign_keys = OFF");
         // operation_id = 99999 has no corresponding row in the operation table.
         try s.db.exec("INSERT INTO operation_task VALUES (1, 1, 99999, 0, 10, 'main_effort')");
+        try s.db.exec("PRAGMA foreign_keys = ON");
+        try std.testing.expectError(error.CorruptSave, s.load(std.testing.allocator, gs.campaign_id));
+    }
+}
+
+// P4g persistence tests -------------------------------------------------------
+
+/// Minimal campaign fixture for P4g corrupt-load tests: one active arc contract
+/// with a committed combat operation (so operation_intervention rows are valid).
+fn buildInterventionGs(alloc_gs: std.mem.Allocator) !GameState {
+    var gs = GameState.init(alloc_gs, .{ .seed = 55009 });
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    const co = try gs.createForce("Delta", .company, .none);
+    const cid: types.ContractId = @enumFromInt(1);
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "caph",
+        .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+        .status = .active,
+        .assigned_company = co,
+        .arc_key = "fracturing_garrison",
+        .command_capacity = 3,
+    });
+    const c = gs.contracts.getPtr(cid).?;
+    try c.operations.append(gs.allocator(), .{
+        .id = @enumFromInt(1),
+        .template_key = "repel_probe",
+        .state = .committed,
+        .opened_day = 0,
+        .committed_day = 1,
+    });
+    try c.operations.items[0].interventions.append(gs.allocator(), operation_mod.Intervention.reinforce);
+    gs.next_operation_id = 2;
+    gs.next_contract_id = 2;
+    return gs;
+}
+
+test "command_capacity and applied intervention round-trip through save/load (P4g)" {
+    // Rules 47, 67: a non-zero command_capacity and an applied intervention
+    // survive save → load with an identical stateHash.
+    var gs = try buildInterventionGs(std.testing.allocator);
+    defer gs.deinit();
+    const before = digest.stateHash(&gs);
+
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+
+    var diff_buf: [128]u8 = undefined;
+    try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &diff_buf) orelse "");
+    try std.testing.expectEqual(before, digest.stateHash(&loaded));
+    const lc = loaded.contracts.getPtr(@enumFromInt(1)).?;
+    try std.testing.expectEqual(@as(u8, 3), lc.command_capacity);
+    try std.testing.expectEqual(@as(usize, 1), lc.operations.items[0].interventions.items.len);
+    try std.testing.expectEqual(operation_mod.Intervention.reinforce, lc.operations.items[0].interventions.items[0]);
+}
+
+test "a v42 store migrates to v43 with command_capacity and operation_interventions defaults" {
+    // Rule 50: a store at v42 must migrate cleanly; the new v43 columns must
+    // have their default values (0 and '' respectively) for existing rows.
+    var store_v42 = try sqlite.Db.open(":memory:");
+    defer store_v42.close();
+    // Build a v42-equivalent schema: the same tables minus the v43 additions
+    // (no command_capacity on contract, no operation_interventions on battle_report,
+    // no operation_intervention table).
+    try store_v42.exec(
+        \\CREATE TABLE setting (key TEXT NOT NULL PRIMARY KEY, value TEXT NOT NULL);
+        \\INSERT INTO setting VALUES ('schema_version', 42);
+        \\CREATE TABLE campaign (id INTEGER PRIMARY KEY, name TEXT NOT NULL, commander TEXT, day INTEGER NOT NULL, date TEXT NOT NULL, schema_version INTEGER NOT NULL CHECK (schema_version > 0), save_seq INTEGER NOT NULL, player_id INTEGER NOT NULL DEFAULT 0);
+        \\CREATE TABLE contract (cid INTEGER NOT NULL, is_offer INTEGER NOT NULL CHECK (is_offer IN (0,1)), ord INTEGER NOT NULL, id INTEGER, kind TEXT, employer TEXT, enemy TEXT, planet TEXT, status TEXT, company INTEGER, start_day INTEGER, score INTEGER, dist_ly INTEGER, beachhead INTEGER, transit_days INTEGER, arrive_day INTEGER, end_day INTEGER, monthly_net INTEGER, next_battle INTEGER, battles INTEGER, casualties INTEGER, objective TEXT, committed_bv INTEGER, pool INTEGER, pool_remaining INTEGER, vp INTEGER, ineffective_since INTEGER, breach_day INTEGER, length_months INTEGER, base_pay INTEGER, advance_pct INTEGER, signing_bonus INTEGER, transport_pct INTEGER, overhead_pct INTEGER, battle_loss_pct INTEGER, salvage_pct INTEGER, salvage_exchange INTEGER CHECK (salvage_exchange IN (0,1)), command_rights TEXT, negotiated INTEGER NOT NULL DEFAULT 0 CHECK (negotiated IN (0,1)), enemy_lances INTEGER NOT NULL DEFAULT 0, enemy_quality TEXT NOT NULL DEFAULT 'regular', enemy_lance_bv INTEGER NOT NULL DEFAULT 0, enemy_lance_tons INTEGER NOT NULL DEFAULT 0, offer_hq INTEGER NOT NULL DEFAULT 0, orders_day INTEGER, arc_key TEXT NOT NULL DEFAULT '', arc_beat INTEGER NOT NULL DEFAULT 0, escalation_clock INTEGER NOT NULL DEFAULT 0, arc_finale_key TEXT NOT NULL DEFAULT '', FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+        \\CREATE TABLE operation (cid INTEGER NOT NULL, contract_id INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, template_key TEXT NOT NULL, state TEXT NOT NULL, outcome TEXT NOT NULL, opened_day INTEGER NOT NULL, resolved_day INTEGER, committed_day INTEGER, intent TEXT NOT NULL DEFAULT 'secure_objective', tempo TEXT NOT NULL DEFAULT 'advance', FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+        \\CREATE TABLE battle_report (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER, day INTEGER, contract INTEGER, company INTEGER, kind TEXT, enemy_key TEXT, scenario TEXT, terrain TEXT, weather TEXT, outcome TEXT, held_field INTEGER, withdrew INTEGER, roe TEXT, roe_overridden INTEGER, player_power INTEGER, enemy_power INTEGER, conditions_mod INTEGER, close_terrain INTEGER, air_grounded INTEGER, convoy_hit INTEGER, edge_spent_by TEXT, recon_quality INTEGER, avg_fatigue INTEGER, avg_morale INTEGER, hits_taken INTEGER, destroyed INTEGER, wounded INTEGER, kia INTEGER, lost_hulls INTEGER, missing INTEGER, enemy_destroyed_bv INTEGER, kills_credited INTEGER, prisoners INTEGER, battle_loss_comp INTEGER, score_after INTEGER, score_delta INTEGER, morale_delta INTEGER, fatigue_add INTEGER, battle_loss_pct INTEGER, salvage_pct INTEGER, command_rights TEXT, silenced_mounts INTEGER, armor_left INTEGER, salvage_claimed INTEGER, salvage_haulable INTEGER, salvage_cut INTEGER, salvage_cash INTEGER, salvage_items TEXT, conceded INTEGER, acknowledged INTEGER NOT NULL DEFAULT 1 CHECK (acknowledged IN (0,1)), salvage_unclaimed INTEGER NOT NULL DEFAULT 0, operation TEXT NOT NULL DEFAULT '', operation_intent TEXT NOT NULL DEFAULT '', operation_tempo TEXT NOT NULL DEFAULT '', UNIQUE (cid, ord), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+    );
+    // fromDb must migrate v42 → v43 successfully.
+    const store = try Store.fromDb(store_v42);
+    defer store.close();
+    try std.testing.expectEqual(@as(i64, schema_version), store.getSetting("schema_version", 0));
+}
+
+test "invalid and orphaned operation_intervention rows reject the load as corrupt (P4g)" {
+    // Rules 47, 69 / P4g: an unknown intervention kind → CorruptSave;
+    // an orphaned operation_intervention row (references no saved operation) → CorruptSave;
+    // a contract with command_capacity out of u8 range → CorruptSave.
+
+    // G1: unknown intervention kind → CorruptSave.
+    {
+        var gs = try buildInterventionGs(std.testing.allocator);
+        defer gs.deinit();
+        const s = try Store.open(":memory:");
+        defer s.close();
+        try s.save(&gs);
+        try s.db.exec("PRAGMA foreign_keys = OFF");
+        // Insert an operation_intervention row with an invalid kind string.
+        // Schema: (cid, contract_id, operation_id, ord, kind).
+        try s.db.exec("INSERT INTO operation_intervention VALUES (1, 1, 1, 1, 'notakind')");
+        try s.db.exec("PRAGMA foreign_keys = ON");
+        try std.testing.expectError(error.CorruptSave, s.load(std.testing.allocator, gs.campaign_id));
+    }
+
+    // G2: orphaned operation_intervention row (operation_id names no saved operation) → CorruptSave.
+    {
+        var gs = try buildInterventionGs(std.testing.allocator);
+        defer gs.deinit();
+        const s = try Store.open(":memory:");
+        defer s.close();
+        try s.save(&gs);
+        try s.db.exec("PRAGMA foreign_keys = OFF");
+        // operation_id = 99999 does not match any operation in the campaign.
+        try s.db.exec("INSERT INTO operation_intervention VALUES (1, 1, 99999, 0, 'reinforce')");
+        try s.db.exec("PRAGMA foreign_keys = ON");
+        try std.testing.expectError(error.CorruptSave, s.load(std.testing.allocator, gs.campaign_id));
+    }
+
+    // G3: contract command_capacity out of u8 range (999 > 255) → CorruptSave.
+    {
+        var gs = try buildInterventionGs(std.testing.allocator);
+        defer gs.deinit();
+        const s = try Store.open(":memory:");
+        defer s.close();
+        try s.save(&gs);
+        try s.db.exec("PRAGMA foreign_keys = OFF");
+        try s.db.exec("UPDATE contract SET command_capacity = 999");
         try s.db.exec("PRAGMA foreign_keys = ON");
         try std.testing.expectError(error.CorruptSave, s.load(std.testing.allocator, gs.campaign_id));
     }
