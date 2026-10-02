@@ -33,8 +33,8 @@ pub const OfficerSelections = struct {
     count: usize,
 };
 
-/// Full selection function returning a bounded array with count.
-pub fn selectOfficersFull(gs: *GameState, company_id: types.ForceId) OfficerSelections {
+/// Selection function returning a bounded array with count.
+pub fn selectOfficers(gs: *GameState, company_id: types.ForceId) OfficerSelections {
     var result: OfficerSelections = .{ .items = undefined, .count = 0 };
 
     const co = gs.force(company_id) orelse return result;
@@ -201,7 +201,7 @@ pub fn instantiateOfficers(gs: *GameState, c: *contract_mod.Contract, id_start: 
     if (c.arc_key.len == 0) return;
     if (c.assigned_company == .none) return;
 
-    const selected = selectOfficersFull(gs, c.assigned_company);
+    const selected = selectOfficers(gs, c.assigned_company);
     if (selected.count == 0) return;
 
     const alloc = gs.allocator();
@@ -268,7 +268,7 @@ pub fn attachedOfficers(alloc: std.mem.Allocator, gs: *GameState, c: *const cont
 
 // ---- Tests -----------------------------------------------------------------
 
-test "selectOfficersFull: company commander + combat lance leaders, deduped, .none skipped" {
+test "selectOfficers: company commander + combat lance leaders, deduped, .none skipped" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1 });
     defer gs.deinit();
 
@@ -295,7 +295,7 @@ test "selectOfficersFull: company commander + combat lance leaders, deduped, .no
     const p4 = try gs.hirePerson("Dave", "Brown", .medic);
     if (gs.force(support)) |l| l.commander = p4;
 
-    const sel = selectOfficersFull(&gs, co_id);
+    const sel = selectOfficers(&gs, co_id);
     // Should have company commander + 2 lance leaders = 3 officers.
     try std.testing.expectEqual(@as(usize, 3), sel.count);
     try std.testing.expectEqual(p1, sel.items[0].person_id);
@@ -306,7 +306,7 @@ test "selectOfficersFull: company commander + combat lance leaders, deduped, .no
     try std.testing.expectEqual(officer_mod.OfficerSeat.lance_leader, sel.items[2].seat);
 }
 
-test "selectOfficersFull: company commander also a lance leader — one arc only (dedupe)" {
+test "selectOfficers: company commander also a lance leader — one arc only (dedupe)" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 2 });
     defer gs.deinit();
 
@@ -319,19 +319,19 @@ test "selectOfficersFull: company commander also a lance leader — one arc only
     // Same person commands both the company and lance1.
     if (gs.force(lance1)) |l| l.commander = p1;
 
-    const sel = selectOfficersFull(&gs, co_id);
+    const sel = selectOfficers(&gs, co_id);
     // Dedupe: p1 appears only once (as company_commander).
     try std.testing.expectEqual(@as(usize, 1), sel.count);
     try std.testing.expectEqual(p1, sel.items[0].person_id);
     try std.testing.expectEqual(officer_mod.OfficerSeat.company_commander, sel.items[0].seat);
 }
 
-test "selectOfficersFull: .none commander skipped; no company returns zero" {
+test "selectOfficers: .none commander skipped; no company returns zero" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 3 });
     defer gs.deinit();
 
     // No company at all.
-    const sel0 = selectOfficersFull(&gs, .none);
+    const sel0 = selectOfficers(&gs, .none);
     try std.testing.expectEqual(@as(usize, 0), sel0.count);
 
     // Company with no commander and a lance with .none commander.
@@ -340,7 +340,7 @@ test "selectOfficersFull: .none commander skipped; no company returns zero" {
     if (gs.force(co_id)) |co| try co.children.append(gs.allocator(), lance1);
     // No commanders set.
 
-    const sel1 = selectOfficersFull(&gs, co_id);
+    const sel1 = selectOfficers(&gs, co_id);
     try std.testing.expectEqual(@as(usize, 0), sel1.count);
 }
 
@@ -510,15 +510,19 @@ test "instantiateOfficers: attaches one arc per officer, carries performance on 
     try std.testing.expectEqual(@as(usize, 0), c2.officer_arc_ids.items.len);
 }
 
-test "instantiateOfficers: failure-atomic under injected OOM with next_officer_arc_id unchanged" {
-    // Use a fixed-buffer allocator that exhausts after a small number of allocs.
-    var buf: [128]u8 = undefined;
-    var fba = std.heap.FixedBufferAllocator.init(&buf);
-    var gs = GameState.init(fba.allocator(), .{ .seed = 2 });
-    defer gs.deinit();
+test "instantiateOfficers: failure-atomic under injected OOM" {
+    // Set up state with a real allocator so force + person creation succeeds,
+    // then inject a failing allocator so that the ensureUnusedCapacity calls
+    // inside instantiateOfficers are guaranteed to fail.
+    var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer outer.deinit();
+    var gs = GameState.init(outer.allocator(), .{ .seed = 2 });
 
-    // Set up a contract with a valid arc key; no force assignment so the
-    // call may OOM before or after the guard.  The invariant holds either way.
+    // Build a company with a commander (same shape as the success test).
+    const co_id = try gs.createForce("Alpha", .company, .none);
+    const p1 = try gs.hirePerson("Ann", "Smith", .mekwarrior);
+    if (gs.force(co_id)) |co| co.commander = p1;
+
     const cid: types.ContractId = @enumFromInt(1);
     var c = contract_mod.Contract{
         .id = cid,
@@ -528,21 +532,23 @@ test "instantiateOfficers: failure-atomic under injected OOM with next_officer_a
         .planet_key = "galatea",
         .kind = .garrison_duty,
         .terms = .{ .length_months = 3, .base_pay_month = 100_000 },
+        .assigned_company = co_id,
     };
 
     const before_count = gs.officer_arcs.count();
     const before_next = gs.next_officer_arc_id;
 
-    // With a tiny buffer this may OOM; whether or not it does, the invariant holds.
-    const result = instantiateOfficers(&gs, &c, gs.next_officer_arc_id);
-    _ = result catch {};
-    // next_officer_arc_id is NOT advanced by instantiateOfficers — only the caller's commit does.
+    // Discard the arena's free list so the next allocation goes to the
+    // child_allocator, then replace that with a permanently failing one.
+    gs.arena.state.used_list = null;
+    gs.arena.state.free_list = null;
+    gs.arena.child_allocator = std.testing.failing_allocator;
+
+    // instantiateOfficers must fail at ensureUnusedCapacity and roll back.
+    try std.testing.expectError(error.OutOfMemory, instantiateOfficers(&gs, &c, gs.next_officer_arc_id));
+    try std.testing.expectEqual(before_count, gs.officer_arcs.count());
+    // next_officer_arc_id is NOT advanced by instantiateOfficers — caller's commit does.
     try std.testing.expectEqual(before_next, gs.next_officer_arc_id);
-    if (result) |_| {
-        // Success path is fine.
-    } else |_| {
-        try std.testing.expectEqual(before_count, gs.officer_arcs.count());
-    }
 }
 
 test "Person-safety: adjustOfficer and instantiateOfficers never write Person fields" {

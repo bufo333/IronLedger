@@ -1006,7 +1006,7 @@ CREATE TABLE officer_arc (
     contract            INTEGER NOT NULL DEFAULT 0, -- ContractId (0 = none)
     seat                TEXT    NOT NULL DEFAULT 'lance_leader', -- OfficerSeat tag
     performance         INTEGER NOT NULL DEFAULT 0, -- clamped -100…100
-    encounters          INTEGER NOT NULL DEFAULT 0, -- operation outcomes tallied
+    encounters          INTEGER NOT NULL DEFAULT 1, -- arc count for this person (1 on first contract)
     last_cause          TEXT    NOT NULL DEFAULT '', -- markup-safe label for last perf change
     last_cause_day      INTEGER NOT NULL DEFAULT 0,  -- day_index of last change
     recurring           INTEGER NOT NULL DEFAULT 0,  -- boolean: carried forward from prior contract

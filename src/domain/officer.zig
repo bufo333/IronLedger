@@ -53,7 +53,7 @@ pub const OfficerArc = struct {
     /// Signed task-performance standing (clamped to perf_min..perf_max).
     performance: i16 = 0,
     /// How many contracts this officer has had arcs on.
-    encounters: u16 = 0,
+    encounters: u16 = 1,
     /// Short cause label for the most recent performance change (markup-safe).
     last_cause: []const u8 = "",
     /// Day the most recent performance change was recorded.
@@ -71,7 +71,7 @@ test "OfficerArc defaults" {
     try std.testing.expectEqual(types.ContractId.none, a.contract);
     try std.testing.expectEqual(OfficerSeat.lance_leader, a.seat);
     try std.testing.expectEqual(@as(i16, 0), a.performance);
-    try std.testing.expectEqual(@as(u16, 0), a.encounters);
+    try std.testing.expectEqual(@as(u16, 1), a.encounters);
     try std.testing.expectEqualStrings("", a.last_cause);
     try std.testing.expectEqual(@as(u32, 0), a.last_cause_day);
     try std.testing.expectEqual(false, a.recurring);
