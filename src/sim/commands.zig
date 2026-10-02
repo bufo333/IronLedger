@@ -288,6 +288,8 @@ pub const Command = union(enum) {
     task_lance: struct { contract: types.ContractId, operation: types.OperationId, lance: types.ForceId, task: operation_mod.LanceTask },
     /// Remove a lance's task assignment from a committed combat operation (P4e).
     clear_lance_task: struct { contract: types.ContractId, operation: types.OperationId, lance: types.ForceId },
+    /// Set the tempo posture for an available operation (P4f).
+    set_operation_tempo: struct { contract: types.ContractId, operation: types.OperationId, tempo: operation_mod.TempoPosture },
 };
 
 pub const Error = error{
@@ -445,6 +447,8 @@ pub const Error = error{
     TaskIllegal,
     /// No force with that id in this contract's company.
     UnknownLance,
+    /// The chosen tempo posture is not legal for this operation type.
+    OperationTempoIllegal,
 } || std.mem.Allocator.Error;
 
 pub const Result = struct {
@@ -559,6 +563,7 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
         .decline_operation => |a| return operation_control.execDeclineOperation(gs, a),
         .task_lance => |a| return operation_control.execTaskLance(gs, a),
         .clear_lance_task => |a| return operation_control.execClearLanceTask(gs, a),
+        .set_operation_tempo => |a| return operation_control.execSetOperationTempo(gs, a),
         .autostaff => |hq_id| return hq_ops.execAutostaff(gs, hq_id),
         .transfer_person => |t| return personnel.execTransferPerson(gs, t),
         .rename_outfit => |name| return toe.execRenameOutfit(gs, name),

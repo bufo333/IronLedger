@@ -206,6 +206,9 @@ pub const BattleReport = struct {
     /// The commander's stated intent for the committed combat operation, if any.
     /// Null when no combat operation was committed for this engagement.
     operation_intent: ?operation.Intent = null,
+    /// The tempo posture of the committed combat operation, if any (P4f).
+    /// Null when no combat operation was committed for this engagement.
+    operation_tempo: ?operation.TempoPosture = null,
     /// Per-lance task results for this engagement (P4e).
     /// Arena-owned slice (duped at resolution time); empty when no tasks assigned.
     tasks: []const TaskedLance = &.{},
@@ -280,7 +283,7 @@ pub const Journal = struct {
     }
 };
 
-test "BattleReport: default tasks slice is empty" {
+test "BattleReport: default tasks slice is empty; operation_tempo defaults null" {
     const r: BattleReport = .{
         .id = @enumFromInt(1),
         .day = 1,
@@ -294,6 +297,7 @@ test "BattleReport: default tasks slice is empty" {
         .outcome = .defeat,
     };
     try std.testing.expectEqual(@as(usize, 0), r.tasks.len);
+    try std.testing.expectEqual(@as(?operation.TempoPosture, null), r.operation_tempo);
 }
 
 test "armorOnly and hullsLost read the record, not the prose" {

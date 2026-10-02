@@ -1488,19 +1488,19 @@ and reserves play differently even at comparable BV.
 Before commitment, the player chooses whether to learn more, act immediately,
 prepare, or spend time restoring readiness while the situation worsens.
 
-- P4e.1 Add operation-scoped intelligence state: known enemy-strength
+- [x] P4e.1 Add operation-scoped intelligence state: known enemy-strength
   range, scenario risks, actor motives, enemy preparedness, local support,
   confidence and source. Intelligence is explicitly known or uncertain; it
   never reveals an unrolled outcome.
-- P4e.2 Add planning choices: reconnaissance, immediate advance,
+- [x] P4e.2 Add planning choices: reconnaissance, immediate advance,
   applicable ambush/defensive preparation, and delay for supply, repair, rest
   or diplomacy. Each has named time, resource, readiness and escalation
   consequences.
-- P4e.3 Make recon lances, comms, local actors, faction standing, command
+- [x] P4e.3 Make recon lances, comms, local actors, faction standing, command
   staff and completed operations contribute through location-sensitive rule
   owners. Asymmetric multi-HQ tests prove no unrelated HQ supplies an intel
   benefit.
-- P4e.4 Tie delay and tempo to arc-specific clocks: enemy preparation,
+- [x] P4e.4 Tie delay and tempo to arc-specific clocks: enemy preparation,
   civilian danger, political pressure, supply risk or rival influence. Good
   intelligence must create distinct opportunities, not only numeric bonuses.
 

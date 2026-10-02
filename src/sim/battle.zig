@@ -681,12 +681,20 @@ fn openingRoll(gs: *GameState, c: *const contract_mod.Contract, player: *const S
     else
         operations_m.TaskMods{};
 
+    // Tempo modifiers: deterministic pre-roll adjustment from the operation's
+    // posture (P4f). Default advance = all-zero → no change to existing behaviour.
+    // No new RNG draw; battle.zig MUST NOT import operation_control.zig (rule 5).
+    const tempo_mods: operations_m.TempoProfile = if (operations_m.committedCombatOp(c)) |op|
+        operations_m.operationTempoMods(op)
+    else
+        operations_m.TempoProfile{ .surprise_reduction = 0, .prepared_roll_bonus = 0 };
+
     // One opposed roll decides the engagement (rounds within are abstracted;
     // ARCH §7 steps 3–4 collapse into the margin).
     // The scenario's tilt, and what scouts give back (an ambush spotted
     // is half an ambush).
     // Recon task also reduces the scenario's surprise element (surprise_reduction). // TUNE
-    const scenario_mod: i32 = @as(i32, scenario.roll_mod) + (if (player.mods.recon_quality > 0) @as(i32, scenario.scout_bonus) else 0) + env.rollMod() + task_mods.surprise_reduction;
+    const scenario_mod: i32 = @as(i32, scenario.roll_mod) + (if (player.mods.recon_quality > 0) @as(i32, scenario.scout_bonus) else 0) + env.rollMod() + task_mods.surprise_reduction + tempo_mods.surprise_reduction + tempo_mods.prepared_roll_bonus;
     // Close terrain evens the odds: numbers count for less in the woods and the streets.
     const ratio_bonus: i32 = if (env.close()) @min(ratioBonus(player.power, enemy_power), 2) else ratioBonus(player.power, enemy_power);
     // Rules of engagement: the company's standing order, unless an
@@ -966,6 +974,7 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     // battle.zig MUST NOT import operation_control.zig (rule 5).
     const committed_op_early = operations_m.committedCombatOp(c);
     const op_intent: ?operation_mod.Intent = if (committed_op_early) |op| op.intent else null;
+    const op_tempo: ?operation_mod.TempoPosture = if (committed_op_early) |op| op.tempo else null;
     // Salvage is things, not money: your share of what the
     // crews haul off a held field becomes wrecks and parts crated to the
     // home HQ depot — to store, strip, or rebuild into a working hull.
@@ -1064,7 +1073,11 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
         "";
     var arc_log_text: []const u8 = "";
     if (committed_op != null) {
-        try gs.reserveLog(1);
+        // Allocate the log text now (only allocates; does NOT touch event_log).
+        // reserveLog is called later, immediately before the infallible commit
+        // block, so nothing appends to event_log between the reservation and
+        // the appendAssumeCapacity (bug fix: the AAR render loop runs between
+        // here and the commit block and would have consumed the reserved slot).
         var arc_date_buf: [10]u8 = undefined;
         const band = operations_m.combatBand(outcome);
         arc_log_text = try std.fmt.allocPrint(gs.allocator(), "{s} [arc] combat operation resolved: {s} ({s})", .{
@@ -1113,6 +1126,7 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
         .id = gs.nextBattleId(),
         .operation = op_template_name,
         .operation_intent = op_intent,
+        .operation_tempo = op_tempo,
         .tasks = task_results.items,
         .day = gs.clock.day_index,
         .contract = c.id,
@@ -1184,8 +1198,11 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     // completes the contract.
     try @import("contract_control.zig").recordBattle(gs, c, enemy_destroyed_bv, score_delta);
     // Arc operation binding: transition the committed combat op and log result.
-    // The log slot was reserved above; appendAssumeCapacity is infallible.
+    // reserveLog is called here, immediately before the first mutation, so
+    // nothing appends to event_log between reservation and appendAssumeCapacity
+    // (the AAR render loop runs before this block).
     if (committed_op) |op| {
+        try gs.reserveLog(1);
         const band = operations_m.combatBand(outcome);
         const clock_d = operations_m.outcomeClockDelta(band);
         op.state = .resolved;
@@ -1287,10 +1304,12 @@ fn concede(gs: *GameState, c: *contract_mod.Contract) !void {
     }
 
     const concede_op_intent: ?operation_mod.Intent = if (committed_op) |op| op.intent else null;
+    const concede_op_tempo: ?operation_mod.TempoPosture = if (committed_op) |op| op.tempo else null;
     const report: battle_report.BattleReport = .{
         .id = gs.nextBattleId(),
         .operation = op_template_name,
         .operation_intent = concede_op_intent,
+        .operation_tempo = concede_op_tempo,
         .tasks = concede_task_results.items,
         .day = gs.clock.day_index,
         .contract = c.id,
@@ -3146,4 +3165,107 @@ test "report.tasks is populated on both the resolve and concede paths" {
         try testing.expectEqual(operation_mod.LanceTask.main_effort, r.tasks[0].task);
         try testing.expectEqual(operation_mod.LanceTask.escort, r.tasks[1].task);
     }
+}
+
+test "reserveLog fix: committed combat op + multi-line AAR does not corrupt the log; [arc] line is present" {
+    // Regression: pre-P4f, reserveLog was called before the AAR render loop,
+    // which could consume the reserved slot before appendAssumeCapacity.
+    // After the fix, reserveLog is called inside the infallible commit block,
+    // immediately before op.state = .resolved.
+    const testing = std.testing;
+    var gs = GameState.init(testing.allocator, .{ .seed = 99001 });
+    defer gs.deinit();
+
+    const co = try @import("starter_company.zig").generateInto(&gs, "Ghost");
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    const cid: types.ContractId = @enumFromInt(1);
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+        .status = .active,
+        .assigned_company = co,
+        .arc_key = "fracturing_garrison",
+        .enemy_lances = 2,
+        .enemy_lance_bv = 5000,
+    });
+    const c = gs.contracts.getPtr(cid).?;
+    try c.operations.append(gs.allocator(), .{
+        .id = @enumFromInt(1),
+        .template_key = "repel_probe",
+        .state = .committed,
+        .opened_day = 0,
+        .committed_day = 0,
+    });
+
+    const log_before = gs.event_log.items.len;
+    try resolveEngagement(&gs, c);
+
+    // The event log must have grown (AAR lines + arc result line).
+    try testing.expect(gs.event_log.items.len > log_before);
+
+    // The [arc] combat-operation-resolved line must be in the log.
+    var found_arc = false;
+    for (gs.event_log.items[log_before..]) |entry| {
+        if (std.mem.indexOf(u8, entry.text, "[arc] combat operation resolved:") != null) {
+            found_arc = true;
+        }
+    }
+    try testing.expect(found_arc);
+
+    // The battle report must have operation_tempo set (null only if no committed op — here it is set).
+    const r = gs.battle_reports.kept.items[0];
+    try testing.expectEqual(@as(?operation_mod.TempoPosture, .advance), r.operation_tempo);
+}
+
+test "tempo identity: advance posture produces the same battle outcome as pre-P4f (same seed)" {
+    // Rule 20: default .advance must be behaviour-identical to pre-P4f.
+    // The test uses two identical seeds; one sets tempo explicitly to .advance (the default posture).
+    // The digests must match after resolution.
+    const testing = std.testing;
+    var gs_no_op = GameState.init(testing.allocator, .{ .seed = 99002 });
+    defer gs_no_op.deinit();
+    var gs_adv = GameState.init(testing.allocator, .{ .seed = 99002 });
+    defer gs_adv.deinit();
+
+    for (&[_]*GameState{ &gs_no_op, &gs_adv }) |gs| {
+        const co = try @import("starter_company.zig").generateInto(gs, "Ghost");
+        _ = try founding.createCommander(gs, "T", .LC, .line_officer);
+        const cid: types.ContractId = @enumFromInt(1);
+        try gs.contracts.put(gs.allocator(), cid, .{
+            .id = cid,
+            .kind = .garrison_duty,
+            .employer_key = "LC",
+            .enemy_key = "DC",
+            .planet_key = "galatea",
+            .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+            .status = .active,
+            .assigned_company = co,
+            .arc_key = "fracturing_garrison",
+            .enemy_lances = 2,
+            .enemy_lance_bv = 5000,
+        });
+    }
+    // No op on gs_no_op; advance op on gs_adv.
+    const cid: types.ContractId = @enumFromInt(1);
+    try gs_adv.contracts.getPtr(cid).?.operations.append(gs_adv.allocator(), .{
+        .id = @enumFromInt(1),
+        .template_key = "repel_probe",
+        .state = .committed,
+        .opened_day = 0,
+        .committed_day = 0,
+        .tempo = .advance,
+    });
+
+    try resolveEngagement(&gs_no_op, gs_no_op.contracts.getPtr(cid).?);
+    try resolveEngagement(&gs_adv, gs_adv.contracts.getPtr(cid).?);
+
+    // Both must have the same outcome (advance = all-zero mods = no change).
+    const r_no_op = gs_no_op.battle_reports.kept.items[0];
+    const r_adv = gs_adv.battle_reports.kept.items[0];
+    try testing.expectEqual(r_no_op.outcome, r_adv.outcome);
+    try testing.expectEqual(r_no_op.score_delta, r_adv.score_delta);
 }

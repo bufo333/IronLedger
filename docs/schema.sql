@@ -529,6 +529,7 @@ CREATE TABLE operation (
     resolved_day    INTEGER,                         -- day_index when resolved; NULL = unresolved
     committed_day   INTEGER,                         -- P4c: day_index when committed; NULL = not yet committed
     intent          TEXT    NOT NULL DEFAULT 'secure_objective', -- P4d: commander's stated intent (domain/operation.zig Intent)
+    tempo           TEXT    NOT NULL DEFAULT 'advance', -- P4f: TempoPosture tag name (advance/recon/prepare/delay)
     FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 
@@ -765,6 +766,7 @@ CREATE TABLE battle_report (
     salvage_unclaimed INTEGER NOT NULL DEFAULT 0,    -- BV of the haul still to be divided; 0 once taken
     operation       TEXT    NOT NULL DEFAULT '',     -- P4c: operation template name that triggered this engagement; empty = no arc op
     operation_intent TEXT   NOT NULL DEFAULT '',     -- P4d: Intent tag name of the committed operation; empty = no operation intent
+    operation_tempo TEXT    NOT NULL DEFAULT '',     -- P4f: TempoPosture tag name of the committed operation; empty = no tempo
     UNIQUE (cid, ord),
     FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );

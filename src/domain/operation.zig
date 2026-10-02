@@ -53,6 +53,32 @@ pub const Table = struct { templates: []const OperationTemplate };
 
 pub const table: Table = @import("operations_zon");
 
+/// Pre-commitment posture chosen per operation: trading operation speed
+/// (tempo) against better intelligence, readiness, and escalation pressure
+/// (docs/p4-operations-design.md §7 decision 7, P4f). Legal set is derived
+/// from the template's `combat` flag; owned by `sim/operations.zig` (rule 20).
+pub const TempoPosture = enum {
+    /// Act immediately at full speed — the baseline. // TUNE
+    advance,
+    /// Gather additional intelligence before committing; combat-only. // TUNE
+    recon,
+    /// Establish a prepared position before action; combat-only. // TUNE
+    prepare,
+    /// Delay the operation to reduce escalation pressure or wait for
+    /// reinforcement; legal on any operation type. // TUNE
+    delay,
+
+    /// Short display label for the UI and AAR (markup-safe; rule 33). // TUNE
+    pub fn label(self: TempoPosture) []const u8 {
+        return switch (self) {
+            .advance => "advance",
+            .recon => "recon",
+            .prepare => "prepare",
+            .delay => "delay",
+        };
+    }
+};
+
 /// Tactical task assigned to one lance for a committed combat operation
 /// (docs/p4-operations-design.md §7, rule 20). Legal set is derived from
 /// the template's `combat` flag and the contract's `CommandRights`;
@@ -99,6 +125,9 @@ pub const Operation = struct {
     /// Commander's stated mission intent, chosen at commit time (docs/p4-operations-design.md §6).
     /// Default `.secure_objective` keeps the baseline behaviour for ops committed before P4d.
     intent: Intent = .secure_objective,
+    /// Pre-commitment tempo posture for this operation (P4f).
+    /// Default `.advance` keeps the baseline behaviour for ops committed before P4f.
+    tempo: TempoPosture = .advance,
     /// Lance task assignments for this committed combat operation (P4e).
     /// Lives in the campaign arena; freed with the arena. Default empty.
     tasks: std.ArrayListUnmanaged(LanceTasking) = .empty,
@@ -222,6 +251,24 @@ test "LanceTask: all seven values have a non-empty markup-safe label; Operation.
         .opened_day = 0,
     };
     try testing.expectEqual(@as(usize, 0), op.tasks.items.len);
+}
+
+test "TempoPosture: all four values have a non-empty markup-safe label; Operation.tempo defaults to advance" {
+    const testing = std.testing;
+    const all_postures = [_]TempoPosture{ .advance, .recon, .prepare, .delay };
+    for (all_postures) |p| {
+        const lbl = p.label();
+        try testing.expect(lbl.len > 0);
+        for (lbl) |ch| try testing.expect(ch != '{' and ch >= 0x20 and ch < 0x7f);
+    }
+    // Operation default tempo is advance.
+    const op: Operation = .{
+        .id = @enumFromInt(1),
+        .template_key = "negotiate_terms",
+        .state = .available,
+        .opened_day = 0,
+    };
+    try testing.expectEqual(TempoPosture.advance, op.tempo);
 }
 
 test "Intent: all six values have a non-empty markup-safe label; Operation.intent defaults to secure_objective" {

@@ -19,6 +19,7 @@ const battle = @import("battle.zig");
 const rating = @import("rating.zig");
 const GameState = @import("state.zig").GameState;
 const founding = @import("founding.zig");
+const operation_mod = @import("../domain/operation.zig");
 
 /// How well one HQ reads an opposition: its comms level, one more for a
 /// B-or-better outfit rating (employers share).
@@ -49,6 +50,58 @@ pub fn lanceIntel(gs: *GameState, c: *const contract_mod.Contract) !LanceIntel {
         return .{ .lo = lo, .hi = hi, .mid = (lo + hi + 1) / 2, .exact = lo == hi };
     }
     return .{ .lo = row.lances_min, .hi = row.lances_max, .mid = (row.lances_min + row.lances_max + 1) / 2, .exact = row.lances_min == row.lances_max };
+}
+
+/// Operation-scoped intelligence readout (P4f). Explicitly known-or-uncertain;
+/// never reveals an unrolled outcome. Sources: comms level, company unit rating,
+/// faction standing, and recon tempo posture.
+pub const OperationIntel = struct {
+    /// The enemy lance count range at the effective intel level (accounting for recon bonus).
+    lances: LanceIntel,
+    /// True when intel is high enough to identify enemy quality precisely. // TUNE
+    quality_known: bool,
+    /// Confidence 0–10 (0 = blind; 10 = exact, all sources confirmed). // TUNE
+    confidence: u8,
+    /// Additional confidence points gained from recon posture. // TUNE
+    recon_bonus: u8,
+    /// Dominant source label (markup-safe, for the UI readout). // TUNE
+    source: []const u8,
+};
+
+/// The threshold effective intel level at which enemy quality is known. // TUNE
+const quality_known_threshold: u8 = 2;
+
+/// The raw intel bonus granted by a recon posture. // TUNE
+const recon_intel_bonus: u8 = 2;
+
+/// Rule owner: derive an `OperationIntel` readout for one operation on a
+/// contract (P4f, P4e.1, rule 20). Uses existing `intelLevel`/`intelHq`/
+/// `lanceIntel` owners; adds a recon posture bonus. Never reads or computes
+/// a battle roll. Pure up to rating queries.
+pub fn operationIntel(gs: *GameState, c: *const contract_mod.Contract, op: *const operation_mod.Operation) !OperationIntel {
+    const base_level = try intelLevel(gs, intelHq(gs, c));
+    const recon_bonus: u8 = if (op.tempo == .recon) recon_intel_bonus else 0; // TUNE
+    const effective_level = base_level + recon_bonus;
+    // Build the lance intel range at the effective intel level (recon bonus applied above).
+    const row = opfor.rowFor(c.kind);
+    const lances: LanceIntel = if (effective_level >= 3)
+        .{ .lo = c.enemy_lances, .hi = c.enemy_lances, .mid = c.enemy_lances, .exact = true }
+    else if (effective_level >= 1) blk: {
+        const lo = @max(row.lances_min, c.enemy_lances -| 1);
+        const hi = @min(row.lances_max, c.enemy_lances + 1);
+        break :blk .{ .lo = lo, .hi = hi, .mid = (lo + hi + 1) / 2, .exact = lo == hi };
+    } else .{ .lo = row.lances_min, .hi = row.lances_max, .mid = (row.lances_min + row.lances_max + 1) / 2, .exact = row.lances_min == row.lances_max };
+
+    const quality_known = effective_level >= quality_known_threshold;
+    const confidence: u8 = @min(10, effective_level * 2 + recon_bonus * 1); // TUNE: simple scale
+    const source: []const u8 = if (recon_bonus > 0) "recon" else if (base_level >= 3) "comms" else if (base_level >= 2) "comms" else if (base_level >= 1) "rating" else "none";
+    return .{
+        .lances = lances,
+        .quality_known = quality_known,
+        .confidence = confidence,
+        .recon_bonus = recon_bonus,
+        .source = source,
+    };
 }
 
 /// One company against one contract: skulls (a range when the intel
@@ -205,6 +258,94 @@ test "blind intel widens the lance range; comms 3 pins it" {
     const seen = try lanceIntel(&gs, &c);
     try std.testing.expect(seen.exact);
     try std.testing.expectEqual(@as(u8, 3), seen.lo);
+}
+
+test "operationIntel: recon posture raises confidence and narrows range vs advance" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 4201 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    const c: contract_mod.Contract = .{
+        .id = .none,
+        .kind = .objective_raid,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 3, .base_pay_month = 100_000 },
+        .enemy_lances = 3,
+        .enemy_quality = .regular,
+        .enemy_lance_bv = 4_000,
+        .enemy_lance_tons = 220,
+    };
+    // Advance posture.
+    var op_adv: operation_mod.Operation = .{
+        .id = @enumFromInt(1),
+        .template_key = "repel_probe",
+        .state = .available,
+        .opened_day = 0,
+        .tempo = .advance,
+    };
+    // Recon posture.
+    var op_rec: operation_mod.Operation = op_adv;
+    op_rec.tempo = .recon;
+
+    const adv_intel = try operationIntel(&gs, &c, &op_adv);
+    const rec_intel = try operationIntel(&gs, &c, &op_rec);
+    // Recon must have higher or equal confidence.
+    try std.testing.expect(rec_intel.confidence >= adv_intel.confidence);
+    // The range under recon must be no wider than under advance (or both exact).
+    const adv_width: u32 = @as(u32, adv_intel.lances.hi) - @as(u32, adv_intel.lances.lo);
+    const rec_width: u32 = @as(u32, rec_intel.lances.hi) - @as(u32, rec_intel.lances.lo);
+    try std.testing.expect(rec_width <= adv_width);
+    // The readout must bracket the stored enemy count.
+    try std.testing.expect(adv_intel.lances.lo <= c.enemy_lances and adv_intel.lances.hi >= c.enemy_lances);
+    try std.testing.expect(rec_intel.lances.lo <= c.enemy_lances and rec_intel.lances.hi >= c.enemy_lances);
+    // source label for recon posture must be "recon".
+    try std.testing.expectEqualStrings("recon", rec_intel.source);
+}
+
+test "operationIntel: asymmetric multi-HQ — only the intel HQ's comms count (P4e.3)" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 4202 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
+    const seat = gs.seat();
+    const second = try founding.foundHq(&gs, "Second", .regional, "alkaid");
+    // Seat has comms 3 (high); second has comms 0 (blind).
+    for (gs.hqs.getPtr(seat).?.facilities.items) |*f| {
+        if (f.kind == .comms) f.level = 3;
+    }
+    for (gs.hqs.getPtr(second).?.facilities.items) |*f| {
+        if (f.kind == .comms) f.level = 0;
+    }
+    gs.hqs.getPtr(seat).?.staff_assigned = 999;
+    gs.hqs.getPtr(second).?.staff_assigned = 999;
+    const c_seat: contract_mod.Contract = .{
+        .id = @enumFromInt(1),
+        .kind = .objective_raid,
+        .employer_key = "LC",
+        .enemy_key = "FWL",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 3, .base_pay_month = 100_000 },
+        .enemy_lances = 3,
+        .enemy_lance_bv = 4_000,
+        .enemy_lance_tons = 220,
+        .offer_hq = seat, // intel HQ is seat
+    };
+    var c_second = c_seat;
+    c_second.offer_hq = second; // intel HQ is second (comms 0)
+    var op: operation_mod.Operation = .{
+        .id = @enumFromInt(1),
+        .template_key = "repel_probe",
+        .state = .available,
+        .opened_day = 0,
+        .tempo = .advance,
+    };
+    const intel_seat = try operationIntel(&gs, &c_seat, &op);
+    const intel_second = try operationIntel(&gs, &c_second, &op);
+    // Seat with comms 3 must have exact intel; second with comms 0 must not.
+    try std.testing.expect(intel_seat.lances.exact);
+    try std.testing.expect(!intel_second.lances.exact);
+    // Only the intel HQ's comms count — not the other HQ's.
+    try std.testing.expect(intel_seat.confidence > intel_second.confidence);
 }
 
 test "rateOffer: an offer with opfor yields a rating the board and contract-detail both display" {

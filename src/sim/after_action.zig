@@ -44,12 +44,13 @@ pub fn render(alloc: std.mem.Allocator, r: *const BattleReport) ![]const []const
         if (r.convoy_hit) " · the convoy was hit — support train damaged" else "",
         if (r.roe == .standard) "" else try std.fmt.allocPrint(alloc, " · ROE {s}{s}{s}", .{ @tagName(r.roe), if (r.roe_overridden) " (integrated command)" else "", if (r.withdrew) " — withdrew from a draw, field given up" else "" }),
         if (r.edge_spent_by.len > 0) try std.fmt.allocPrint(alloc, " · {s} spent Edge to re-roll a lost engagement", .{r.edge_spent_by}) else "",
-        if (r.operation.len > 0) try std.fmt.allocPrint(alloc, " · operation: {s}{s}", .{
+        if (r.operation.len > 0) try std.fmt.allocPrint(alloc, " · operation: {s}{s}{s}", .{
             r.operation,
             if (r.operation_intent) |intent| try std.fmt.allocPrint(alloc, " (intent: {s} — {s})", .{
                 intent.label(),
                 if (operations_m.operationSucceeded(intent, operations_m.combatBand(r.outcome))) "mission success" else "mission failed",
             }) else "",
+            if (r.operation_tempo) |tempo| try std.fmt.allocPrint(alloc, " [tempo: {s}]", .{tempo.label()}) else "",
         }) else "",
     }));
 
@@ -237,6 +238,26 @@ test "render: operation name appears in the AAR header when set" {
     // Header line (lines[0]) must contain the operation name.
     try std.testing.expect(lines.len >= 1);
     try std.testing.expect(std.mem.indexOf(u8, lines[0], "Repel Probe") != null);
+
+    // When operation_tempo is set, the label appears in the header.
+    const r_tempo: BattleReport = .{
+        .id = @enumFromInt(6),
+        .day = 15,
+        .contract = @enumFromInt(1),
+        .company = @enumFromInt(1),
+        .kind = "garrison duty",
+        .enemy_key = "DC",
+        .scenario = "probe",
+        .terrain = "open",
+        .weather = "clear",
+        .outcome = .victory,
+        .operation = "Repel Probe",
+        .operation_tempo = .recon,
+        .ammo = &ammo,
+    };
+    const lines_tempo = try render(arena.allocator(), &r_tempo);
+    try std.testing.expect(lines_tempo.len >= 1);
+    try std.testing.expect(std.mem.indexOf(u8, lines_tempo[0], "[tempo: recon]") != null);
 }
 
 test "render: intent and success verdict appear in the AAR header when operation_intent is set" {

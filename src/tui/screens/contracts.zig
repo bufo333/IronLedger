@@ -120,7 +120,7 @@ pub const bindings = [_]app.keys.Binding(Action){
     .{ .match = app.keys.Match.char('c'), .action = .complete, .label = "complete", .group = .act, .pane = 1, .help = "close out the contract under the cursor" },
     .{ .match = app.keys.Match.char('R'), .action = .recall, .label = "recall", .group = .act, .pane = 1, .help = "recall the company (under contract: a breach, confirmed first)" },
     .{ .match = .{ .key = .enter }, .action = .history_log, .label = "closed log", .group = .act, .pane = 2, .help = "the closed contract's whole log, full screen" },
-    .{ .match = app.keys.Match.char('g'), .action = .ops_board, .label = "operations", .group = .act, .pane = 1, .help = "open the arc operations board for the active contract (Enter opens the intent picker, then commits; x declines)" },
+    .{ .match = app.keys.Match.char('g'), .action = .ops_board, .label = "operations", .group = .act, .pane = 1, .help = "open the arc operations board for the active contract (Enter opens the intent picker, then commits; r sets tempo posture; x declines)" },
     .{ .match = app.keys.Match.char('t'), .action = .task_assign, .label = "lance tasks", .group = .act, .pane = 1, .help = "assign lance tasks for the committed combat operation (P4e)" },
 };
 pub const legend = app.keys.entries(Action, &bindings);

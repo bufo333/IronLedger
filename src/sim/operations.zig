@@ -393,6 +393,76 @@ pub fn taskSucceeded(task: operation_mod.LanceTask, band: operation_mod.OutcomeB
     };
 }
 
+// ---- Tempo owners (docs/p4-operations-design.md §7 decision 7, P4f, rule 20) --
+
+// Module-level constants (static lifetime; `tempoLegal` returns values from these).
+const legal_tempo_combat = [_]operation_mod.TempoPosture{ .advance, .recon, .prepare, .delay };
+const legal_tempo_noncombat = [_]operation_mod.TempoPosture{ .advance, .delay };
+
+/// Rule owner: is the given tempo posture legal for this operation type?
+/// `prepare` and `recon` are combat-only; `advance` and `delay` are always legal.
+pub fn tempoLegal(combat: bool, posture: operation_mod.TempoPosture) bool {
+    const set: []const operation_mod.TempoPosture = if (combat) &legal_tempo_combat else &legal_tempo_noncombat;
+    for (set) |p| if (p == posture) return true;
+    return false;
+}
+
+/// Rule owner: the set of legal tempo postures for a given operation type.
+/// Returned slice points to a module-level constant; lifetime is static (rule 26).
+pub fn legalTempo(combat: bool) []const operation_mod.TempoPosture {
+    return if (combat) &legal_tempo_combat else &legal_tempo_noncombat;
+}
+
+/// Tempo profile: deterministic battle-phase modifiers applied when a committed
+/// combat operation has this tempo posture (P4f, rule 20). All values // TUNE.
+pub const TempoProfile = struct {
+    /// Additive bonus to scenario_mod (reduces enemy surprise). // TUNE
+    surprise_reduction: i32,
+    /// Additive bonus to scenario_mod (preparation increases readiness). // TUNE
+    prepared_roll_bonus: i32,
+};
+
+/// Rule owner: the tempo profile for a committed operation (rule 20).
+/// `advance` always returns all-zero so pre-P4f outcomes are unchanged.
+/// All return values are // TUNE balance constants.
+pub fn tempoProfile(posture: operation_mod.TempoPosture) TempoProfile {
+    return switch (posture) {
+        .advance => .{ .surprise_reduction = 0, .prepared_roll_bonus = 0 }, // TUNE: baseline — no change
+        .recon => .{ .surprise_reduction = 2, .prepared_roll_bonus = 0 }, // TUNE: recon cuts enemy surprise
+        .prepare => .{ .surprise_reduction = 0, .prepared_roll_bonus = 2 }, // TUNE: preparation improves readiness
+        .delay => .{ .surprise_reduction = 0, .prepared_roll_bonus = 0 }, // TUNE: delay delays, no direct battle mod
+    };
+}
+
+/// Rule owner: added days before operation resolution for this posture.
+/// `advance` = 0 so no change to existing operations (P4f, rule 20). // TUNE
+pub fn tempoDelayDays(posture: operation_mod.TempoPosture) u16 {
+    return switch (posture) {
+        .advance => 0, // TUNE: no delay — act at once
+        .recon => 7, // TUNE: one week to gather intelligence
+        .prepare => 7, // TUNE: one week to prepare a position
+        .delay => 14, // TUNE: two weeks — significant operational pause
+    };
+}
+
+/// Rule owner: escalation-clock pressure added at commit for this posture.
+/// `advance` = 0 so no change to existing operations (P4f, rule 20). // TUNE
+pub fn tempoClockDelta(posture: operation_mod.TempoPosture) u16 {
+    return switch (posture) {
+        .advance => 0, // TUNE: no additional escalation — act immediately
+        .recon => 3, // TUNE: short delay costs some escalation pressure
+        .prepare => 3, // TUNE: moderate delay — preparation costs escalation
+        .delay => 6, // TUNE: delay is costlier — higher escalation pressure
+    };
+}
+
+/// Rule owner: aggregate tempo modifiers for the opening roll (P4f, rule 20).
+/// Returns `tempoProfile(op.tempo)` for the committed op.
+/// Deterministic; no RNG.
+pub fn operationTempoMods(op: *const operation_mod.Operation) TempoProfile {
+    return tempoProfile(op.tempo);
+}
+
 /// Instantiate the opening operation(s) onto a pre-commit local contract copy.
 /// `id_start` is the first ID to assign; the caller (commit phase) is
 /// responsible for advancing `gs.next_operation_id` after all fallible steps
@@ -1198,4 +1268,54 @@ test "lanceTaskPower / operationTaskMods: tasked lance scales power; aggregate r
     const mods = operationTaskMods(&gs, c, &op);
     try testing.expect(mods.reserve_present);
     try testing.expectEqual(@as(i32, 0), mods.surprise_reduction); // main_effort has 0
+}
+
+test "tempoLegal: advance/delay always legal; recon/prepare combat-only" {
+    const testing = std.testing;
+    // advance and delay are always legal.
+    try testing.expect(tempoLegal(true, .advance));
+    try testing.expect(tempoLegal(false, .advance));
+    try testing.expect(tempoLegal(true, .delay));
+    try testing.expect(tempoLegal(false, .delay));
+    // recon and prepare are combat-only.
+    try testing.expect(tempoLegal(true, .recon));
+    try testing.expect(!tempoLegal(false, .recon));
+    try testing.expect(tempoLegal(true, .prepare));
+    try testing.expect(!tempoLegal(false, .prepare));
+    // legalTempo agrees.
+    try testing.expectEqual(@as(usize, 4), legalTempo(true).len);
+    try testing.expectEqual(@as(usize, 2), legalTempo(false).len);
+}
+
+test "tempoProfile: advance all-zero; recon surprise > 0; prepare bonus > 0; delay all-zero" {
+    const testing = std.testing;
+    const adv = tempoProfile(.advance);
+    try testing.expectEqual(@as(i32, 0), adv.surprise_reduction);
+    try testing.expectEqual(@as(i32, 0), adv.prepared_roll_bonus);
+    const rec = tempoProfile(.recon);
+    try testing.expect(rec.surprise_reduction > 0);
+    try testing.expectEqual(@as(i32, 0), rec.prepared_roll_bonus);
+    const prep = tempoProfile(.prepare);
+    try testing.expectEqual(@as(i32, 0), prep.surprise_reduction);
+    try testing.expect(prep.prepared_roll_bonus > 0);
+    const del = tempoProfile(.delay);
+    try testing.expectEqual(@as(i32, 0), del.surprise_reduction);
+    try testing.expectEqual(@as(i32, 0), del.prepared_roll_bonus);
+}
+
+test "tempoClockDelta: advance 0; others > 0; delay >= recon/prepare" {
+    const testing = std.testing;
+    try testing.expectEqual(@as(u16, 0), tempoClockDelta(.advance));
+    try testing.expect(tempoClockDelta(.recon) > 0);
+    try testing.expect(tempoClockDelta(.prepare) > 0);
+    try testing.expect(tempoClockDelta(.delay) >= tempoClockDelta(.recon));
+    try testing.expect(tempoClockDelta(.delay) >= tempoClockDelta(.prepare));
+}
+
+test "tempoDelayDays: advance == 0; others > 0" {
+    const testing = std.testing;
+    try testing.expectEqual(@as(u16, 0), tempoDelayDays(.advance));
+    try testing.expect(tempoDelayDays(.recon) > 0);
+    try testing.expect(tempoDelayDays(.prepare) > 0);
+    try testing.expect(tempoDelayDays(.delay) > 0);
 }

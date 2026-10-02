@@ -36,7 +36,7 @@ above is complete.
   - [x] P4c operations board and garrison/security vertical slice.
   - [x] P4d mission intent, quote/commit planning, and operation-aware battles.
   - [x] P4e per-operation lance tasking and reports.
-  - [ ] P4f intelligence versus tempo.
+  - [x] P4f intelligence versus tempo.
   - [ ] P4g command capacity and interventions.
   - [ ] P4h escalation, consolidation, withdrawal, and finales.
   - [ ] P4i persistent actors, relationships, world state, rivals, and officers.

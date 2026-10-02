@@ -567,6 +567,14 @@ fn parseVerb(verb: []const u8, tokens: *std.mem.TokenIterator(u8, .scalar)) Pars
         const lid: types.ForceId = @enumFromInt(try num(u32, tokens.next()));
         return .{ .clear_lance_task = .{ .contract = cid, .operation = oid, .lance = lid } };
     }
+    if (eq(u8, verb, "tempo")) {
+        // tempo <contract-id> <operation-id> <posture>
+        const cid: types.ContractId = @enumFromInt(try num(u32, tokens.next()));
+        const oid: types.OperationId = @enumFromInt(try num(u32, tokens.next()));
+        const posture_str = try need(tokens.next());
+        const posture = std.meta.stringToEnum(operation_mod.TempoPosture, posture_str) orelse return error.BadArguments;
+        return .{ .set_operation_tempo = .{ .contract = cid, .operation = oid, .tempo = posture } };
+    }
     return null;
 }
 
@@ -703,6 +711,7 @@ pub fn errorText(err: anyerror) []const u8 {
         error.LanceNotTaskable => "that lance is not eligible for tasking — check that it is operational, in the assigned company, and not in transit.",
         error.TaskIllegal => "that task is not permitted under your current command rights and operation type.",
         error.UnknownLance => "no lance with that id in this contract's company — `forces` lists available lances.",
+        error.OperationTempoIllegal => "that tempo posture is not permitted for this operation type — recon and prepare are combat operations only.",
         else => "an unexpected internal error",
     };
 }
@@ -787,6 +796,7 @@ pub const verbs = [_][]const u8{
     "decline",
     "task",
     "untask",
+    "tempo",
     "found",
     "link",
     "assignco",
@@ -872,6 +882,7 @@ pub fn usage(verb: []const u8) ?[]const u8 {
         .{ "decline", "decline <contract-id> <operation-id>   (decline an available operation)" },
         .{ "task", "task <contract-id> <operation-id> <lance-id> <task>   (assign a lance task; task: screen, main_effort, reserve, escort, objective_security, recovery, recon)" },
         .{ "untask", "untask <contract-id> <operation-id> <lance-id>   (clear a lance task assignment)" },
+        .{ "tempo", "tempo <contract-id> <operation-id> <posture>   (set operation tempo; posture: advance, recon, prepare, delay — recon/prepare for combat ops only)" },
         .{ "found", "found <planet key> <name>" },
         .{ "link", "link hq:A hq:B [level 1-3]" },
         .{ "assignco", "assignco co:N hq:M" },
@@ -934,6 +945,15 @@ test "command line parses the common verbs" {
     // Unknown task string → BadArguments.
     var it13 = std.mem.tokenizeScalar(u8, "1 2 3 badtask", ' ');
     try std.testing.expectError(error.BadArguments, parseCommand("task", &it13));
+    // tempo parsing (P4f).
+    var it14 = std.mem.tokenizeScalar(u8, "1 2 recon", ' ');
+    const cmd14 = (try parseCommand("tempo", &it14)).?;
+    try std.testing.expectEqual(@as(u32, 1), @intFromEnum(cmd14.set_operation_tempo.contract));
+    try std.testing.expectEqual(@as(u32, 2), @intFromEnum(cmd14.set_operation_tempo.operation));
+    try std.testing.expectEqual(operation_mod.TempoPosture.recon, cmd14.set_operation_tempo.tempo);
+    // Unknown posture string → BadArguments.
+    var it15 = std.mem.tokenizeScalar(u8, "1 2 badposture", ' ');
+    try std.testing.expectError(error.BadArguments, parseCommand("tempo", &it15));
 }
 
 test "every listed verb parses or fails on arguments — never falls through as unknown" {

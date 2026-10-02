@@ -225,7 +225,7 @@ titles and the help modal come from the same tables.
 | `c` | active | close out the contract under the cursor |
 | `R` | active | recall the company (under contract: a breach, confirmed first) |
 | `Enter` | history | the closed contract's whole log, full screen |
-| `g` | active | open the arc operations board for the active contract (Enter opens the intent picker, then commits; x declines) |
+| `g` | active | open the arc operations board for the active contract (Enter opens the intent picker, then commits; r sets tempo posture; x declines) |
 | `t` | active | assign lance tasks for the committed combat operation (P4e) |
 
 ### F5 Ledger
@@ -533,13 +533,33 @@ titles and the help modal come from the same tables.
 
 Opened with `g` in the active pane when the contract has an arc.
 Shows the arc's current beat briefing and all instantiated operations.
+Each row includes the current tempo posture (`tempo:advance/recon/prepare/delay`) and
+an intelligence confidence percentage when non-zero (`intel:N%`).
 
 | Key | Does |
 |---|---|
 | `↑ ↓` | move cursor |
 | `Enter` | commit the highlighted operation (combat: queues the next engagement; non-combat: resolves after `expected_days`) |
+| `r` | open the tempo picker for the highlighted operation (P4f) |
 | `x` | decline the highlighted operation (raises the escalation clock by the operation's `decline_note` pressure) |
 | `Esc` | close without acting |
+
+#### Tempo picker (P4f)
+
+Opened with `r` from the operations board.
+Lists the legal tempo postures for the operation type: all four for combat operations
+(`advance`, `recon`, `prepare`, `delay`); `advance` and `delay` only for non-combat.
+
+- **advance** — standard; no modifier
+- **recon** — +2 surprise reduction; delays the next battle 7 days; raises the escalation clock +3
+- **prepare** — +2 prepared-roll bonus; delays the next battle 7 days; raises the escalation clock +3
+- **delay** — delays next battle 14 days (non-combat: resolved 14 days later); raises the escalation clock +6
+
+| Key | Does |
+|---|---|
+| `↑ ↓` | move cursor |
+| `Enter` | set the tempo posture |
+| `Esc` | cancel |
 
 Money keys: Ledger `L` → `take_loan`, `R` → `repay_loan`; Forces `$` →
 `sell_unit`, `X` → `disband_company`; HQ `$` → `sell_hq`. Turn rules the

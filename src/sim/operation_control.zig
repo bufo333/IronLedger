@@ -123,10 +123,11 @@ pub fn execCommitOperation(gs: *GameState, args: @FieldType(commands.Command, "c
     op.committed_day = gs.clock.day_index;
     op.intent = args.intent;
     if (t.combat) {
-        const due = gs.clock.day_index + @as(u32, t.expected_days);
+        const due = gs.clock.day_index + @as(u32, t.expected_days) + @as(u32, operations.tempoDelayDays(op.tempo));
         c.next_battle_day = @min(c.next_battle_day orelse std.math.maxInt(u32), due);
         c.orders_day = null;
     }
+    c.escalation_clock +|= operations.tempoClockDelta(op.tempo);
     gs.event_log.appendAssumeCapacity(.{
         .day = gs.clock.day_index,
         .category = .contract,
@@ -197,7 +198,7 @@ pub fn resolveDueOperations(gs: *GameState) !void {
             if (op.state != .committed) continue;
             const t = operation_mod.findTemplate(op.template_key) orelse continue;
             if (t.combat) continue; // combat ops are resolved by battle.zig
-            const due = (op.committed_day orelse continue) + @as(u32, t.expected_days);
+            const due = (op.committed_day orelse continue) + @as(u32, t.expected_days) + @as(u32, operations.tempoDelayDays(op.tempo));
             if (gs.clock.day_index < due) continue;
 
             // Reserve + pre-format before any mutation (rule 13).
@@ -392,6 +393,49 @@ pub fn execClearLanceTask(gs: *GameState, args: @FieldType(commands.Command, "cl
         _ = op.tasks.orderedRemove(i);
         break;
     };
+    gs.event_log.appendAssumeCapacity(.{
+        .day = gs.clock.day_index,
+        .category = .contract,
+        .company = c.assigned_company,
+        .contract = c.id,
+        .text = log_text,
+    });
+
+    return .{};
+}
+
+// ---- pub fn execSetOperationTempo --------------------------------------
+
+pub fn execSetOperationTempo(gs: *GameState, args: @FieldType(commands.Command, "set_operation_tempo")) Error!commands.Result {
+    const cid = args.contract;
+    const oid = args.operation;
+    const posture = args.tempo;
+
+    // ---- VALIDATE: no mutation ----
+    const c = try findActiveContract(gs, cid);
+
+    var op_ptr: ?*operation_mod.Operation = null;
+    for (c.operations.items) |*op| if (op.id == oid) {
+        op_ptr = op;
+        break;
+    };
+    const op = op_ptr orelse return error.UnknownOperation;
+    if (op.state != .available) return error.OperationUnavailable;
+
+    const t = operation_mod.findTemplate(op.template_key) orelse return error.UnknownOperation;
+    if (!operations.tempoLegal(t.combat, posture)) return error.OperationTempoIllegal;
+
+    // ---- PREPARE: reserve log slot and pre-format ----
+    try gs.reserveLog(1);
+    var date_buf: [10]u8 = undefined;
+    const log_text = try std.fmt.allocPrint(gs.allocator(), "{s} [arc] tempo set: {s} — {s}", .{
+        gs.clock.date.text(&date_buf),
+        t.name,
+        posture.label(),
+    });
+
+    // ---- COMMIT: infallible ----
+    op.tempo = posture;
     gs.event_log.appendAssumeCapacity(.{
         .day = gs.clock.day_index,
         .category = .contract,
@@ -1029,4 +1073,167 @@ test "execClearLanceTask: failure-atomic under OOM" {
     gs.arena.child_allocator = testing.failing_allocator;
     try testing.expectError(error.OutOfMemory, execClearLanceTask(&gs, .{ .contract = fix.cid, .operation = fix.oid, .lance = fix.lance }));
     try testing.expectEqual(before, digest.stateHash(&gs));
+}
+
+// ---- execSetOperationTempo tests (P4f) ----------------------------------
+
+fn tempoFixture(gs: *GameState) !struct { cid: types.ContractId, combat_oid: types.OperationId, noncombat_oid: types.OperationId } {
+    const cid: types.ContractId = @enumFromInt(99);
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+        .status = .active,
+        .arc_key = "fracturing_garrison",
+        .enemy_lances = 2,
+        .enemy_lance_bv = 5000,
+    });
+    const c = gs.contracts.getPtr(cid).?;
+    const combat_oid: types.OperationId = @enumFromInt(10);
+    const noncombat_oid: types.OperationId = @enumFromInt(11);
+    try c.operations.append(gs.allocator(), .{
+        .id = combat_oid,
+        .template_key = "repel_probe", // combat
+        .state = .available,
+        .opened_day = 0,
+    });
+    try c.operations.append(gs.allocator(), .{
+        .id = noncombat_oid,
+        .template_key = "negotiate_terms", // non-combat
+        .state = .available,
+        .opened_day = 0,
+    });
+    return .{ .cid = cid, .combat_oid = combat_oid, .noncombat_oid = noncombat_oid };
+}
+
+test "execSetOperationTempo: set-tempo records posture on available combat op" {
+    const testing = std.testing;
+    var gs = GameState.init(testing.allocator, .{});
+    defer gs.deinit();
+    const fix = try tempoFixture(&gs);
+    const c = gs.contracts.getPtr(fix.cid).?;
+
+    _ = try execSetOperationTempo(&gs, .{ .contract = fix.cid, .operation = fix.combat_oid, .tempo = .recon });
+    const op = &c.operations.items[0];
+    try testing.expectEqual(operation_mod.TempoPosture.recon, op.tempo);
+    // Log should have been written.
+    try testing.expect(gs.event_log.items.len > 0);
+}
+
+test "execSetOperationTempo: refuses non-available op with digest unchanged" {
+    const testing = std.testing;
+    const digest = @import("digest.zig");
+    var gs = GameState.init(testing.allocator, .{});
+    defer gs.deinit();
+    const fix = try tempoFixture(&gs);
+    const c = gs.contracts.getPtr(fix.cid).?;
+    c.operations.items[0].state = .committed;
+    const before = digest.stateHash(&gs);
+    try testing.expectError(error.OperationUnavailable, execSetOperationTempo(&gs, .{ .contract = fix.cid, .operation = fix.combat_oid, .tempo = .recon }));
+    try testing.expectEqual(before, digest.stateHash(&gs));
+}
+
+test "execSetOperationTempo: refuses illegal posture (recon on noncombat) with digest unchanged" {
+    const testing = std.testing;
+    const digest = @import("digest.zig");
+    var gs = GameState.init(testing.allocator, .{});
+    defer gs.deinit();
+    const fix = try tempoFixture(&gs);
+    const before = digest.stateHash(&gs);
+    // recon is combat-only → illegal on negotiate_terms.
+    try testing.expectError(error.OperationTempoIllegal, execSetOperationTempo(&gs, .{ .contract = fix.cid, .operation = fix.noncombat_oid, .tempo = .recon }));
+    try testing.expectEqual(before, digest.stateHash(&gs));
+}
+
+test "execSetOperationTempo: failure-atomic under OOM at log reservation" {
+    const testing = std.testing;
+    const digest = @import("digest.zig");
+    var outer = std.heap.ArenaAllocator.init(testing.allocator);
+    defer outer.deinit();
+    var gs = GameState.init(outer.allocator(), .{});
+    defer gs.deinit();
+    const fix = try tempoFixture(&gs);
+    const before = digest.stateHash(&gs);
+    gs.arena.state.used_list = null;
+    gs.arena.state.free_list = null;
+    gs.arena.child_allocator = testing.failing_allocator;
+    try testing.expectError(error.OutOfMemory, execSetOperationTempo(&gs, .{ .contract = fix.cid, .operation = fix.combat_oid, .tempo = .recon }));
+    try testing.expectEqual(before, digest.stateHash(&gs));
+}
+
+test "execCommitOperation: delay tempo pushes next_battle_day and raises escalation_clock" {
+    const testing = std.testing;
+    var gs = GameState.init(testing.allocator, .{});
+    defer gs.deinit();
+    const fix = try tempoFixture(&gs);
+    const c = gs.contracts.getPtr(fix.cid).?;
+    // Set delay tempo before committing.
+    _ = try execSetOperationTempo(&gs, .{ .contract = fix.cid, .operation = fix.combat_oid, .tempo = .delay });
+    const clock_before = c.escalation_clock;
+    _ = try execCommitOperation(&gs, .{ .contract = fix.cid, .operation = fix.combat_oid, .intent = .secure_objective });
+    const t = operation_mod.findTemplate("repel_probe").?;
+    const op = &c.operations.items[0];
+    // next_battle_day should include tempoDelayDays(delay).
+    const expected_due = gs.clock.day_index + @as(u32, t.expected_days) + @as(u32, operations.tempoDelayDays(.delay));
+    try testing.expectEqual(expected_due, c.next_battle_day.?);
+    // escalation_clock should have increased by tempoClockDelta(delay).
+    try testing.expectEqual(clock_before + operations.tempoClockDelta(.delay), c.escalation_clock);
+    _ = op;
+}
+
+test "resolveDueOperations: noncombat delay resolves later than advance" {
+    const testing = std.testing;
+    var gs = GameState.init(testing.allocator, .{});
+    defer gs.deinit();
+    const t = operation_mod.findTemplate("negotiate_terms").?;
+    const delay_days = @as(u32, operations.tempoDelayDays(.delay));
+
+    const cid: types.ContractId = @enumFromInt(50);
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+        .status = .active,
+        .arc_key = "fracturing_garrison",
+    });
+    const c = gs.contracts.getPtr(cid).?;
+
+    // Commit one advance and one delay noncombat op, both at day 0.
+    const adv_oid: types.OperationId = @enumFromInt(20);
+    const del_oid: types.OperationId = @enumFromInt(21);
+    try c.operations.append(gs.allocator(), .{
+        .id = adv_oid,
+        .template_key = "negotiate_terms",
+        .state = .committed,
+        .opened_day = 0,
+        .committed_day = 0,
+        .tempo = .advance,
+    });
+    try c.operations.append(gs.allocator(), .{
+        .id = del_oid,
+        .template_key = "negotiate_terms",
+        .state = .committed,
+        .opened_day = 0,
+        .committed_day = 0,
+        .tempo = .delay,
+    });
+
+    // Advance to exactly the advance op's due date.
+    gs.clock.day_index = @as(u32, t.expected_days);
+    try resolveDueOperations(&gs);
+
+    // The advance op should be resolved; delay op still committed.
+    try testing.expectEqual(operation_mod.OperationState.resolved, c.operations.items[0].state);
+    try testing.expectEqual(operation_mod.OperationState.committed, c.operations.items[1].state);
+
+    // Advance to the delay op's due date.
+    gs.clock.day_index = @as(u32, t.expected_days) + delay_days;
+    try resolveDueOperations(&gs);
+    try testing.expectEqual(operation_mod.OperationState.resolved, c.operations.items[1].state);
 }

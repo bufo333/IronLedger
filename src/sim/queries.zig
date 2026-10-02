@@ -6812,6 +6812,12 @@ pub const OperationRow = struct {
     tasks: []const operation_mod.LanceTasking,
     /// Legal tasks for this op × command rights, or empty for non-combat. (P4e)
     legal_tasks: []const operation_mod.LanceTask,
+    /// Current tempo posture for this operation (P4f).
+    tempo: operation_mod.TempoPosture,
+    /// Legal tempo postures for this op type (P4f).
+    legal_tempo: []const operation_mod.TempoPosture,
+    /// Operation-scoped intelligence readout (P4f). Populated for all ops.
+    intel: offer_rating.OperationIntel,
 };
 
 pub const Operations = struct {
@@ -6821,7 +6827,7 @@ pub const Operations = struct {
 
 /// Return the operations board for an active arc contract.
 /// Caller owns the result (arena-friendly).
-pub fn contractOperations(alloc: Alloc, gs: *const GameState, contract_id: types.ContractId) !Operations {
+pub fn contractOperations(alloc: Alloc, gs: *GameState, contract_id: types.ContractId) !Operations {
     const c = gs.contracts.getPtr(contract_id) orelse return Operations{ .briefing = "", .rows = &.{} };
     if (c.arc_key.len == 0) return Operations{ .briefing = "", .rows = &.{} };
     const a = @import("../domain/arc.zig").find(c.arc_key) orelse return Operations{ .briefing = "", .rows = &.{} };
@@ -6859,6 +6865,9 @@ pub fn contractOperations(alloc: Alloc, gs: *const GameState, contract_id: types
             .succeeded = succeeded,
             .tasks = op.tasks.items,
             .legal_tasks = operations_m.legalTasks(t.combat, c.terms.command_rights),
+            .tempo = op.tempo,
+            .legal_tempo = operations_m.legalTempo(t.combat),
+            .intel = try offer_rating.operationIntel(gs, c, op),
         });
     }
     return Operations{ .briefing = briefing, .rows = try rows.toOwnedSlice(alloc) };
@@ -6931,6 +6940,21 @@ pub fn intentChoices(alloc: Alloc, gs: *const GameState, contract_id: types.Cont
     }
     return alloc.dupe(operation_mod.Intent, &.{});
 }
+
+/// TUI tempo_pick modal. Returns the legal tempo postures for this operation type.
+/// Caller owns the result slice. Falls back to advance-only when the op is not found.
+pub fn tempoChoices(alloc: Alloc, gs: *const GameState, contract_id: types.ContractId, operation_id: types.OperationId) ![]operation_mod.TempoPosture {
+    const c = gs.contracts.getPtr(contract_id) orelse return alloc.dupe(operation_mod.TempoPosture, &.{});
+    for (c.operations.items) |*op| {
+        if (op.id != operation_id) continue;
+        const t = operation_mod.findTemplate(op.template_key) orelse return alloc.dupe(operation_mod.TempoPosture, &.{});
+        return alloc.dupe(operation_mod.TempoPosture, operations_m.legalTempo(t.combat));
+    }
+    return alloc.dupe(operation_mod.TempoPosture, &.{});
+}
+
+/// Re-export: operation-scoped intelligence readout (P4f). Screens call this directly.
+pub const operationIntel = offer_rating.operationIntel;
 
 test "intentChoices: non-combat op on independent rights returns 4 choices" {
     // Rule 20 consumer test: intentChoices delegates to operationQuote.legalIntents.
@@ -7076,6 +7100,90 @@ test "contractOperations: legal_tasks count differs between independent and inte
         try std.testing.expectEqual(@as(usize, 1), ops.rows.len);
         try std.testing.expectEqual(expected_len, ops.rows[0].legal_tasks.len);
     }
+}
+
+test "tempoChoices: combat op returns 4 postures; non-combat returns 2 (P4f)" {
+    // Rule 20 consumer test / P4f: tempoChoices delegates to operations_m.legalTempo.
+    // combat → [advance, recon, prepare, delay]; non-combat → [advance, delay].
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const cid: types.ContractId = @enumFromInt(1);
+    const oid_combat: types.OperationId = @enumFromInt(1);
+    const oid_noncombat: types.OperationId = @enumFromInt(2);
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+        .status = .active,
+        .assigned_company = @enumFromInt(1),
+        .arc_key = "fracturing_garrison",
+    });
+    const c = gs.contracts.getPtr(cid).?;
+    try c.operations.append(gs.allocator(), .{
+        .id = oid_combat,
+        .template_key = "repel_probe", // combat
+        .state = .available,
+        .opened_day = 0,
+    });
+    try c.operations.append(gs.allocator(), .{
+        .id = oid_noncombat,
+        .template_key = "negotiate_terms", // non-combat (fracturing_garrison arc)
+        .state = .available,
+        .opened_day = 0,
+    });
+
+    const choices_combat = try tempoChoices(arena.allocator(), &gs, cid, oid_combat);
+    const choices_noncombat = try tempoChoices(arena.allocator(), &gs, cid, oid_noncombat);
+    try std.testing.expectEqual(@as(usize, 4), choices_combat.len);
+    try std.testing.expectEqual(@as(usize, 2), choices_noncombat.len);
+}
+
+test "contractOperations: tempo and intel fields are populated (P4f)" {
+    // Rule 20 consumer test / P4f: contractOperations must surface op.tempo
+    // and the intel struct for all operations.
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 55010 });
+    defer gs.deinit();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+
+    const cid: types.ContractId = @enumFromInt(1);
+    const oid: types.OperationId = @enumFromInt(1);
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+        .status = .active,
+        .assigned_company = @enumFromInt(1),
+        .arc_key = "fracturing_garrison",
+    });
+    const c = gs.contracts.getPtr(cid).?;
+    try c.operations.append(gs.allocator(), .{
+        .id = oid,
+        .template_key = "repel_probe",
+        .state = .available,
+        .opened_day = 0,
+        .tempo = .recon,
+    });
+
+    const ops = try contractOperations(arena.allocator(), &gs, cid);
+    try std.testing.expectEqual(@as(usize, 1), ops.rows.len);
+    const row = ops.rows[0];
+    // tempo must reflect the stored posture.
+    try std.testing.expectEqual(operation_mod.TempoPosture.recon, row.tempo);
+    // legal_tempo for a combat op must be non-empty.
+    try std.testing.expect(row.legal_tempo.len > 0);
+    // intel must be populated (confidence is a u8; just checking it compiles and is a value).
+    _ = row.intel.confidence;
 }
 
 test "taskEligible excludes a non-operational lance that combatLances still lists (P4e)" {
