@@ -73,9 +73,13 @@ overlay of each family and checks that every one fails; CI runs it.
 - Keys are referenced across files: every loadout `part` must exist in
   `parts.zon`, every RAT entry in `chassis.zon`, every faction key in
   `factions.zon`, every operation `arc_key` in `arcs.zon`, and every arc
-  `kinds` entry must name a known `ContractKind`. `zig build test -Ddata=<dir>`
-  runs the catalogue tests that check those links, plus the MekLab construction
-  rules on every mek.
+  `kinds` entry must name a known `ContractKind`. Additionally, every arc
+  defined in `arcs.zon` must have at least one actor archetype in
+  `actor_archetypes.zon` and at least one rival archetype in
+  `rival_archetypes.zon` whose `arcs` list includes that arc key; the build
+  enforces this at compile time and fails with the first uncovered arc key.
+  `zig build test -Ddata=<dir>` runs the catalogue tests that check those
+  links, plus the MekLab construction rules on every mek.
 - Every string must be safe to show as it is: valid UTF-8, no `{`
   anywhere (braces start the screens' colour tags, and there is no escape
   for a literal one in data), and no control characters — no tabs,

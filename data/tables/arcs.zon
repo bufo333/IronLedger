@@ -59,7 +59,7 @@
                     .standing_delta = 2, // TUNE: employer pleased
                 },
             },
-            .opening = .{ "negotiate_terms", "repel_probe" },
+            .opening = .{ "negotiate_terms", "repel_probe", "patrol_sweep" },
         },
         .{
             .key = "aid_under_siege",
@@ -102,7 +102,7 @@
                     .standing_delta = 2, // TUNE
                 },
             },
-            .opening = .{ "break_through_cordon", "coordinate_relief" },
+            .opening = .{ "break_through_cordon", "coordinate_relief", "escort_convoy" },
         },
         .{
             .key = "enemy_supply_network",
@@ -145,7 +145,7 @@
                     .standing_delta = 2, // TUNE
                 },
             },
-            .opening = .{ "raid_depot", "map_supply_routes" },
+            .opening = .{ "raid_depot", "map_supply_routes", "turn_informant" },
         },
         .{
             .key = "political_evacuation",
@@ -188,7 +188,7 @@
                     .standing_delta = 2, // TUNE
                 },
             },
-            .opening = .{ "secure_route", "contact_principals" },
+            .opening = .{ "secure_route", "contact_principals", "stage_diversion" },
         },
         .{
             .key = "beachhead_and_breakthrough",
@@ -231,7 +231,7 @@
                     .standing_delta = 2, // TUNE
                 },
             },
-            .opening = .{ "establish_beachhead", "recon_landing_zone" },
+            .opening = .{ "establish_beachhead", "recon_landing_zone", "orbital_drop" },
         },
     },
 }

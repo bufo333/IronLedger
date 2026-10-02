@@ -4237,8 +4237,8 @@ test "a rebuilt store loads to the identical digest" {
     // Digest is identical: the rebuild changed no data.
     var diff_buf: [128]u8 = undefined;
     try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &diff_buf) orelse "");
-    // Re-pinned by P4i (officer_arcs + next_officer_arc_id added to digest via field_persistence).
-    try std.testing.expectEqual(@as(u64, 12602985521653727254), hash_before);
+    // Re-pinned by P4j variants (actor/rival archetypes added to four new arcs, changing stream consumption).
+    try std.testing.expectEqual(@as(u64, 7047980796043445587), hash_before);
 }
 
 test "every next-ID counter resumes past a higher owned id after load" {
@@ -4733,9 +4733,9 @@ test "golden master: a played year hashes to its pinned value, and a save of it 
     try playedYearForTest(&gs);
     try std.testing.expect(gs.battle_reports.kept.items.len > 0); // the year saw fighting
     // Any change to a simulated or saved result moves this; re-pin it only
-    // when the change is meant. Re-pinned by P4i (officer_arcs + next_officer_arc_id
-    // added to digest via field_persistence).
-    try std.testing.expectEqual(@as(u64, 12602985521653727254), digest.stateHash(&gs));
+    // when the change is meant. Re-pinned by P4j variants (actor/rival archetypes
+    // added to four new arcs, changing stream consumption).
+    try std.testing.expectEqual(@as(u64, 7047980796043445587), digest.stateHash(&gs));
 
     const store = try Store.open(":memory:");
     defer store.close();

@@ -338,6 +338,27 @@ test "TempoPosture: all four values have a non-empty markup-safe label; Operatio
     try testing.expectEqual(TempoPosture.advance, op.tempo);
 }
 
+test "data: arc branch invariant — every arc has opening >= 2 and at least one template with follow_up >= 2" {
+    const testing = std.testing;
+    // For each arc in the table, assert:
+    // 1. The arc has at least 2 opening templates.
+    // 2. At least one operation template belonging to this arc has at least 2 follow_up keys.
+    for (arc_mod.table.arcs) |arc| {
+        // Opening depth.
+        try testing.expect(arc.opening.len >= 2);
+
+        // Branch depth: find at least one template with arc_key == arc.key and follow_up.len >= 2.
+        var has_branch = false;
+        for (table.templates) |t| {
+            if (std.mem.eql(u8, t.arc_key, arc.key) and t.follow_up.len >= 2) {
+                has_branch = true;
+                break;
+            }
+        }
+        try testing.expect(has_branch);
+    }
+}
+
 test "Intent: all six values have a non-empty markup-safe label; Operation.intent defaults to secure_objective" {
     const testing = std.testing;
     // All six labels must be non-empty and markup-safe (no '{', no C0).

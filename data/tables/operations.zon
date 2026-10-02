@@ -31,7 +31,7 @@
             .combat = true,
             .objective = "Repel a probing attack on the garrison perimeter",
             .expected_days = 1, // TUNE
-            .follow_up = .{"counterattack"},
+            .follow_up = .{ "counterattack", "fortify_positions" },
             .decline_note = "pressure_increase",
         },
         .{
@@ -51,7 +51,7 @@
             .combat = true,
             .objective = "Force a gap in the enemy cordon to open a relief corridor",
             .expected_days = 2, // TUNE
-            .follow_up = .{"stabilize_perimeter"},
+            .follow_up = .{ "stabilize_perimeter", "distribute_aid" },
             .decline_note = "pressure_increase",
         },
         .{
@@ -91,7 +91,7 @@
             .combat = true,
             .objective = "Strike an enemy supply depot to disrupt materiel flow",
             .expected_days = 2, // TUNE
-            .follow_up = .{"ambush_convoy"},
+            .follow_up = .{ "ambush_convoy", "destroy_fuel_dump" },
             .decline_note = "pressure_increase",
         },
         .{
@@ -141,7 +141,7 @@
             .combat = false,
             .objective = "Make covert contact with the evacuation targets and confirm their readiness",
             .expected_days = 6, // TUNE
-            .follow_up = .{"extract_under_fire"},
+            .follow_up = .{ "extract_under_fire", "forge_documents" },
             .decline_note = "readiness_slip",
         },
         .{
@@ -171,7 +171,7 @@
             .combat = true,
             .objective = "Seize and hold a landing zone against immediate enemy counterattack",
             .expected_days = 2, // TUNE
-            .follow_up = .{"break_enemy_line"},
+            .follow_up = .{ "break_enemy_line", "exploit_breakout" },
             .decline_note = "pressure_increase",
         },
         .{
@@ -201,6 +201,106 @@
             .combat = true,
             .objective = "Capture the key terrain feature that anchors the planetary assault",
             .expected_days = 3, // TUNE
+            .follow_up = .{},
+            .decline_note = "pressure_increase",
+        },
+        .{
+            .key = "patrol_sweep",
+            .name = "Patrol Sweep",
+            .arc_key = "fracturing_garrison",
+            .combat = true,
+            .objective = "Sweep garrison sectors and intercept enemy infiltrators before they can mass",
+            .expected_days = 2, // TUNE
+            .follow_up = .{},
+            .decline_note = "pressure_increase",
+        },
+        .{
+            .key = "fortify_positions",
+            .name = "Fortify Positions",
+            .arc_key = "fracturing_garrison",
+            .combat = false,
+            .objective = "Harden garrison strongpoints and improve defensive readiness after the probe",
+            .expected_days = 5, // TUNE
+            .follow_up = .{},
+            .decline_note = "readiness_slip",
+        },
+        .{
+            .key = "escort_convoy",
+            .name = "Escort Convoy",
+            .arc_key = "aid_under_siege",
+            .combat = true,
+            .objective = "Escort a relief convoy through contested territory to the besieged population",
+            .expected_days = 2, // TUNE
+            .follow_up = .{},
+            .decline_note = "pressure_increase",
+        },
+        .{
+            .key = "distribute_aid",
+            .name = "Distribute Aid",
+            .arc_key = "aid_under_siege",
+            .combat = false,
+            .objective = "Organize distribution of relief supplies to sustain morale behind the perimeter",
+            .expected_days = 4, // TUNE
+            .follow_up = .{},
+            .decline_note = "readiness_slip",
+        },
+        .{
+            .key = "turn_informant",
+            .name = "Turn Informant",
+            .arc_key = "enemy_supply_network",
+            .combat = false,
+            .objective = "Cultivate an inside source within the enemy logistics organization",
+            .expected_days = 6, // TUNE
+            .follow_up = .{},
+            .decline_note = "readiness_slip",
+        },
+        .{
+            .key = "destroy_fuel_dump",
+            .name = "Destroy Fuel Dump",
+            .arc_key = "enemy_supply_network",
+            .combat = true,
+            .objective = "Locate and destroy a hidden enemy fuel reserve to ground their mobile forces",
+            .expected_days = 2, // TUNE
+            .follow_up = .{},
+            .decline_note = "pressure_increase",
+        },
+        .{
+            .key = "stage_diversion",
+            .name = "Stage Diversion",
+            .arc_key = "political_evacuation",
+            .combat = true,
+            .objective = "Mount a visible engagement to draw enemy attention away from the extraction corridor",
+            .expected_days = 2, // TUNE
+            .follow_up = .{},
+            .decline_note = "pressure_increase",
+        },
+        .{
+            .key = "forge_documents",
+            .name = "Forge Documents",
+            .arc_key = "political_evacuation",
+            .combat = false,
+            .objective = "Obtain and authenticate cover documents to allow principals to move undetected",
+            .expected_days = 5, // TUNE
+            .follow_up = .{},
+            .decline_note = "readiness_slip",
+        },
+        .{
+            .key = "orbital_drop",
+            .name = "Orbital Drop",
+            .arc_key = "beachhead_and_breakthrough",
+            .combat = true,
+            .objective = "Execute a contested orbital insertion directly onto the planetary defense perimeter",
+            .expected_days = 1, // TUNE
+            .follow_up = .{},
+            .decline_note = "pressure_increase",
+        },
+        .{
+            .key = "exploit_breakout",
+            .name = "Exploit Breakout",
+            .arc_key = "beachhead_and_breakthrough",
+            .combat = true,
+            .objective = "Push rapidly through the breach before the enemy can seal the line",
+            .expected_days = 2, // TUNE
             .follow_up = .{},
             .decline_note = "pressure_increase",
         },

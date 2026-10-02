@@ -46,6 +46,7 @@ above is complete.
     *(increment sim/p4i-officers: officer arcs + performance + recurrence + Operations display, schema v47 — merged)*
   - [ ] P4j additional arcs, variants, reports, balance scripts, and docs.
     *(increment sim/p4j-arcs: four arcs — aid_under_siege, enemy_supply_network, political_evacuation, beachhead_and_breakthrough)*
+    *(increment sim/p4j-variants: operation variants across all five arcs + actor/rival archetype coverage for the four P4i.1 arcs)*
 
 ## Not scheduled
 

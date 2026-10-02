@@ -146,17 +146,20 @@ comptime {
         }
     }
 
-    // At least one archetype must attach to fracturing_garrison.
-    var found_fg = false;
-    for (table.archetypes) |a| {
-        for (a.arcs) |arc_key| {
-            if (std.mem.eql(u8, arc_key, "fracturing_garrison")) {
-                found_fg = true;
-                break;
+    // Every arc in arc_mod.table must have at least one actor archetype attached.
+    for (arc_mod.table.arcs) |arc| {
+        var found_arc = false;
+        for (table.archetypes) |a| {
+            for (a.arcs) |arc_key| {
+                if (std.mem.eql(u8, arc_key, arc.key)) {
+                    found_arc = true;
+                    break;
+                }
             }
+            if (found_arc) break;
         }
+        if (!found_arc) @compileError("actor_archetypes.zon: no archetype for arc: " ++ arc.key);
     }
-    if (!found_fg) @compileError("actor_archetypes.zon: no archetype for fracturing_garrison arc");
 }
 
 // ---- Tests -----------------------------------------------------------------
@@ -184,14 +187,20 @@ test "data: actor_archetypes.zon loads and validates" {
         try testing.expectEqualStrings(a.key, found.?.key);
     }
 
-    // At least one archetype for fracturing_garrison.
-    var count: u32 = 0;
-    for (table.archetypes) |a| {
-        for (a.arcs) |arc_key| {
-            if (std.mem.eql(u8, arc_key, "fracturing_garrison")) count += 1;
+    // Every arc in arc_mod.table has at least one actor archetype attached.
+    for (arc_mod.table.arcs) |arc| {
+        var found = false;
+        for (table.archetypes) |a| {
+            for (a.arcs) |arc_key| {
+                if (std.mem.eql(u8, arc_key, arc.key)) {
+                    found = true;
+                    break;
+                }
+            }
+            if (found) break;
         }
+        try testing.expect(found);
     }
-    try testing.expect(count > 0);
 
     // Every kind tag is parseable.
     for (table.archetypes) |a| {
