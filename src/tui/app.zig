@@ -3113,6 +3113,21 @@ pub const App = struct {
                         }));
                     }
                 }
+                if (ops.officers.len > 0) {
+                    try head_lines.append(al, "");
+                    for (ops.officers) |or_row| {
+                        const name_text = try or_row.name.markup(al);
+                        const recurring_tag: []const u8 = if (or_row.recurring) " {a}(returning){/}" else "";
+                        try head_lines.append(al, try std.fmt.allocPrint(al, "{s}  [{s}] {s}  perf:{d} ({s}){s}", .{
+                            name_text,
+                            or_row.seat,
+                            or_row.rank,
+                            or_row.performance,
+                            or_row.band,
+                            recurring_tag,
+                        }));
+                    }
+                }
                 if (ops.world_state_summary.len > 0) {
                     try head_lines.append(al, "");
                     try head_lines.append(al, try std.fmt.allocPrint(al, "{{d}}world{{/}}  {s}", .{ops.world_state_summary}));

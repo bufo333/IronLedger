@@ -16,6 +16,7 @@ const commands = @import("commands.zig");
 const actors_m = @import("actors.zig");
 const rivals_m = @import("rivals.zig");
 const world_state_m = @import("world_state.zig");
+const officers_m = @import("officers.zig");
 
 const Error = commands.Error;
 
@@ -225,6 +226,16 @@ pub fn resolveDueOperations(gs: *GameState) !void {
                 rival_preps[rival_prep_count] = try rivals_m.adjustRival(gs, rid, rival_std, t.name);
                 rival_prep_count += 1;
             }
+            // Prepare officer performance adjustments (fallible; after rival preps; rules 11-13).
+            const officer_delta = officers_m.outcomeOfficerDelta(band);
+            var officer_preps: [8]officers_m.PreparedOfficerAdjust = undefined;
+            var officer_prep_count: usize = 0;
+            for (c.officer_arc_ids.items) |oaid| {
+                if (officer_prep_count >= officer_preps.len) break;
+                if (gs.officerArc(oaid) == null) continue;
+                officer_preps[officer_prep_count] = try officers_m.adjustOfficer(gs, oaid, officer_delta, t.name);
+                officer_prep_count += 1;
+            }
 
             // Commit: infallible from here.
             op.state = .resolved;
@@ -251,6 +262,8 @@ pub fn resolveDueOperations(gs: *GameState) !void {
             world_state_m.commitWorldAdjust(gs, world_prep);
             // Commit rival standing adjustments (infallible; prepared above).
             for (rival_preps[0..rival_prep_count]) |prep| rivals_m.commitAdjustRival(gs, prep);
+            // Commit officer performance adjustments (infallible; prepared above).
+            for (officer_preps[0..officer_prep_count]) |prep| officers_m.commitAdjustOfficer(gs, prep);
         }
     }
 }
@@ -305,6 +318,16 @@ pub fn resolveFinale(gs: *GameState, c: *contract_mod.Contract) !?*const arc_mod
         finale_rival_preps[finale_rival_prep_count] = try rivals_m.adjustRival(gs, rid, finale_rival_std, f.name);
         finale_rival_prep_count += 1;
     }
+    // Prepare officer performance adjustments for the finale (fallible; rules 11-13).
+    const finale_officer_delta = officers_m.finaleOfficerDelta(f);
+    var finale_officer_preps: [8]officers_m.PreparedOfficerAdjust = undefined;
+    var finale_officer_prep_count: usize = 0;
+    for (c.officer_arc_ids.items) |oaid| {
+        if (finale_officer_prep_count >= finale_officer_preps.len) break;
+        if (gs.officerArc(oaid) == null) continue;
+        finale_officer_preps[finale_officer_prep_count] = try officers_m.adjustOfficer(gs, oaid, finale_officer_delta, f.name);
+        finale_officer_prep_count += 1;
+    }
 
     // ---- COMMIT: infallible from here ----
     c.arc_finale_key = f.key;
@@ -326,6 +349,8 @@ pub fn resolveFinale(gs: *GameState, c: *contract_mod.Contract) !?*const arc_mod
     world_state_m.commitWorldAdjust(gs, finale_world_prep);
     // Commit rival standing adjustments for the finale (infallible; prepared above).
     for (finale_rival_preps[0..finale_rival_prep_count]) |prep| rivals_m.commitAdjustRival(gs, prep);
+    // Commit officer performance adjustments for the finale (infallible; prepared above).
+    for (finale_officer_preps[0..finale_officer_prep_count]) |prep| officers_m.commitAdjustOfficer(gs, prep);
     return f;
 }
 
@@ -2252,5 +2277,166 @@ test "resolveFinale: rival standing moves per finaleRivalStandingDelta for held 
         const rival_dom = @import("../domain/rival.zig");
         const clamped: i16 = @intCast(@min(@as(i32, rival_dom.rival_max), @max(@as(i32, rival_dom.rival_min), @as(i32, 0) + expected_delta)));
         try testing.expectEqual(clamped, gs.rivals.getPtr(rid).?.standing);
+    }
+}
+
+test "resolveDueOperations: officer performance moves by outcomeOfficerDelta (P4i)" {
+    // Consumer/agreement test (rules 21, 67-69): an officer arc attached to the contract
+    // has its performance moved by the amount the owner predicts.
+    const testing = std.testing;
+
+    var gs = GameState.init(testing.allocator, .{ .seed = 88891 });
+    defer gs.deinit();
+
+    const cid: types.ContractId = @enumFromInt(1);
+    const oa_id: types.OfficerArcId = @enumFromInt(1);
+    const pid: types.PersonId = @enumFromInt(1);
+    const t = operation_mod.findTemplate("negotiate_terms").?;
+    const committed_day: u32 = 0;
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+        .status = .active,
+        .arc_key = "fracturing_garrison",
+        .escalation_clock = 5,
+    });
+    const c = gs.contracts.getPtr(cid).?;
+    // Attach officer arc to the contract.
+    try c.officer_arc_ids.append(gs.allocator(), oa_id);
+    try gs.commitOfficerArc(.{
+        .id = oa_id,
+        .person = pid,
+        .contract = cid,
+        .seat = .lance_leader,
+        .performance = 0,
+    });
+    try c.operations.append(gs.allocator(), .{
+        .id = @enumFromInt(1),
+        .template_key = "negotiate_terms",
+        .state = .committed,
+        .opened_day = committed_day,
+        .committed_day = committed_day,
+    });
+
+    gs.clock.day_index = committed_day + @as(u32, t.expected_days);
+    const before_perf = gs.officer_arcs.getPtr(oa_id).?.performance;
+    try resolveDueOperations(&gs);
+
+    // After resolution, the officer's performance must have moved by the owner's delta.
+    const band = c.operations.items[0].outcome;
+    const expected_delta = officers_m.outcomeOfficerDelta(band);
+    const after_perf = gs.officer_arcs.getPtr(oa_id).?.performance;
+    // New performance = clamp(before + delta, perf_min, perf_max).
+    const officer_dom = @import("../domain/officer.zig");
+    const clamped: i16 = @intCast(@min(@as(i32, officer_dom.perf_max), @max(@as(i32, officer_dom.perf_min), @as(i32, before_perf) + expected_delta)));
+    try testing.expectEqual(clamped, after_perf);
+    // Cause is recorded.
+    try testing.expect(gs.officer_arcs.getPtr(oa_id).?.last_cause.len > 0);
+}
+
+test "resolveFinale: officer performance moves per finaleOfficerDelta for held and collapse (P4i)" {
+    const testing = std.testing;
+
+    // ---- Held finale ----
+    {
+        var gs = GameState.init(testing.allocator, .{ .seed = 99997 });
+        defer gs.deinit();
+
+        const a = arc_mod.find("fracturing_garrison").?;
+        var terminal_beat: u8 = 0;
+        for (a.beats, 0..) |b, i| if (b.escalation_threshold == 0) {
+            terminal_beat = @intCast(i);
+        };
+
+        const cid: types.ContractId = @enumFromInt(1);
+        const oa_id: types.OfficerArcId = @enumFromInt(1);
+        const pid: types.PersonId = @enumFromInt(1);
+        try gs.contracts.put(gs.allocator(), cid, .{
+            .id = cid,
+            .kind = .garrison_duty,
+            .employer_key = "LC",
+            .enemy_key = "DC",
+            .planet_key = "galatea",
+            .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+            .status = .active,
+            .arc_key = "fracturing_garrison",
+            .arc_beat = terminal_beat,
+            .escalation_clock = 0,
+        });
+        const c = gs.contracts.getPtr(cid).?;
+        try c.officer_arc_ids.append(gs.allocator(), oa_id);
+        try gs.commitOfficerArc(.{
+            .id = oa_id,
+            .person = pid,
+            .contract = cid,
+            .seat = .company_commander,
+            .performance = 0,
+        });
+
+        const f = (try resolveFinale(&gs, c)).?;
+        try testing.expect(!f.ends_contract); // held finale selected
+
+        const expected_delta = officers_m.finaleOfficerDelta(f);
+        const officer_dom = @import("../domain/officer.zig");
+        const clamped: i16 = @intCast(@min(@as(i32, officer_dom.perf_max), @max(@as(i32, officer_dom.perf_min), @as(i32, 0) + expected_delta)));
+        try testing.expectEqual(clamped, gs.officer_arcs.getPtr(oa_id).?.performance);
+        // Held finale should award positive or zero performance.
+        try testing.expect(gs.officer_arcs.getPtr(oa_id).?.performance >= 0 or expected_delta == 0);
+    }
+
+    // ---- Collapse finale ----
+    {
+        var gs = GameState.init(testing.allocator, .{ .seed = 99998 });
+        defer gs.deinit();
+
+        const a = arc_mod.find("fracturing_garrison").?;
+        var terminal_beat: u8 = 0;
+        var collapse_threshold: u16 = 0;
+        for (a.beats, 0..) |b, i| if (b.escalation_threshold == 0) {
+            terminal_beat = @intCast(i);
+        };
+        for (a.finales) |f_opt| if (f_opt.ends_contract) {
+            collapse_threshold = @as(u16, @intCast(f_opt.min_clock));
+            break;
+        };
+        if (collapse_threshold == 0) collapse_threshold = 100;
+
+        const cid: types.ContractId = @enumFromInt(1);
+        const oa_id: types.OfficerArcId = @enumFromInt(1);
+        const pid: types.PersonId = @enumFromInt(1);
+        try gs.contracts.put(gs.allocator(), cid, .{
+            .id = cid,
+            .kind = .garrison_duty,
+            .employer_key = "LC",
+            .enemy_key = "DC",
+            .planet_key = "galatea",
+            .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+            .status = .active,
+            .arc_key = "fracturing_garrison",
+            .arc_beat = terminal_beat,
+            .escalation_clock = collapse_threshold + 5,
+        });
+        const c = gs.contracts.getPtr(cid).?;
+        try c.officer_arc_ids.append(gs.allocator(), oa_id);
+        try gs.commitOfficerArc(.{
+            .id = oa_id,
+            .person = pid,
+            .contract = cid,
+            .seat = .company_commander,
+            .performance = 0,
+        });
+
+        const f = (try resolveFinale(&gs, c)).?;
+        try testing.expect(f.ends_contract); // collapse finale selected
+
+        const expected_delta = officers_m.finaleOfficerDelta(f);
+        try testing.expect(expected_delta < 0);
+        const officer_dom = @import("../domain/officer.zig");
+        const clamped: i16 = @intCast(@min(@as(i32, officer_dom.perf_max), @max(@as(i32, officer_dom.perf_min), @as(i32, 0) + expected_delta)));
+        try testing.expectEqual(clamped, gs.officer_arcs.getPtr(oa_id).?.performance);
     }
 }

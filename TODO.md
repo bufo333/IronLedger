@@ -39,9 +39,11 @@ above is complete.
   - [x] P4f intelligence versus tempo.
   - [x] P4g command capacity and interventions.
   - [x] P4h escalation, consolidation, withdrawal, and finales.
-  - [ ] P4i persistent actors, relationships, world state, rivals, and officers.
+  - [x] P4i persistent actors, relationships, world state, rivals, and officers.
     *(increment sim/p4i-actors-relationships: actors + 4-dim relationships + recurrence + read-only display — merged)*
-    *(increment sim/p4i-rivals: rival companies + standing + recurrence + Operations display, schema v46 — in review)*
+    *(increment sim/p4i-world-state: world state 5-dim deltas + Operations/Map display, schema v45 — merged)*
+    *(increment sim/p4i-rivals: rival companies + standing + recurrence + Operations display, schema v46 — merged)*
+    *(increment sim/p4i-officers: officer arcs + performance + recurrence + Operations display, schema v47 — merged)*
   - [ ] P4j additional arcs, variants, reports, balance scripts, and docs.
 
 ## Not scheduled

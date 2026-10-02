@@ -235,7 +235,7 @@ cheap, copyable, and impossible to mix up.
   loans, monthly close-out report per company (the *profit center* view).
 - **GameState** — campaign date, player outfit, reputation, all of the above,
   markets, pending events, RNG state, persistent actors map, rivals map,
-  world-state map.
+  officer arcs map, world-state map.
 - **Actor** — a contract-introduced NPC (liaison, official, enemy commander,
   etc.) that persists across contracts. Each actor carries four relationship
   dimensions (trust, debt, respect, hostility; −100…100). Actors are keyed by
@@ -247,6 +247,14 @@ cheap, copyable, and impossible to mix up.
   Recurring rivals (same archetype key + faction key, already closed contract)
   carry their standing into the new contract. Doctrine shapes future narrative
   hooks. Owned by `sim/rivals.zig` (P4i).
+- **OfficerArc** — a bounded task-performance arc for the deployed company
+  commander and each combat-lance leader introduced when an arc contract is
+  accepted. Each arc rides on an existing payroll `Person` (referenced by
+  `PersonId`) and owns only its performance standing (−100…100) for one
+  contract's span. Performance shifts on operation outcomes and the finale
+  via the `prepareAdjustOfficer`/`commitAdjustOfficer` owner in
+  `sim/officers.zig`. Officers never alter loyalty, rank, retention, or any
+  other `Person` field; those remain owned by the personnel system (P4i).
 - **WorldState** — five bounded numeric dimensions (security, civilian support,
   infrastructure strain, employer control, enemy influence; −100…100) keyed by
   `planet_key` in `GameState.world_states`. Changed only by
@@ -924,11 +932,11 @@ src/
   root.zig       module root, re-exports
   domain/        entities and rule tables: types person unit part chassis
                  force contract hq planet faction tuning skulls scenario …;
-                 clock events autoresolve battle_report hq_link actor rival world_state
+                 clock events autoresolve battle_report hq_link actor rival officer world_state
   sim/           state plus focused personnel/posture/treasury owners;
                   crew tick commands battle
                   medical maintenance field_supply sites network
-                  rng contract_market starter_company toe actors rivals world_state …;
+                  rng contract_market starter_company toe actors rivals officers world_state …;
                   queries.zig (read-only views),
                   cli.zig (verbs), table.zig (markup), digest.zig (hash)
   econ/          finance logistics market

@@ -3364,6 +3364,8 @@ pub const HistoryRow = struct {
     actors_summary: []const u8,
     /// Short summary of rival companies from this contract's arc (P4i); empty if none.
     rivals_summary: []const u8,
+    /// Short summary of officer arcs from this contract's arc (P4i); empty if none.
+    officers_summary: []const u8,
     /// Read-only world-state summary for the contract's world (P4h.4); empty if no state.
     world_state_summary: []const u8,
 };
@@ -3442,7 +3444,27 @@ pub fn contractHistory(alloc: Alloc, gs: *GameState) ![]HistoryRow {
             }
             rivals_summary = try rsummary_buf.toOwnedSlice(alloc);
         }
-        try out.append(alloc, .{ .id = c.id, .planet_key = c.planet_key, .actors_summary = actors_summary, .rivals_summary = rivals_summary, .world_state_summary = try worldStateSummary(alloc, gs, c.planet_key), .cells = try table.row(alloc, &.{
+        // Build a brief officers summary (P4i): "Ann Smith (perf 20 distinguished), ..."
+        var officers_summary: []const u8 = "";
+        if (c.officer_arc_ids.items.len > 0) {
+            var osummary_buf: std.ArrayListUnmanaged(u8) = .empty;
+            var first_officer = true;
+            for (c.officer_arc_ids.items) |oaid| {
+                const oa = gs.officerArc(oaid) orelse continue;
+                const p = gs.person(oa.person) orelse continue;
+                if (!first_officer) try osummary_buf.appendSlice(alloc, "; ");
+                const name_str = try std.fmt.allocPrint(alloc, "{s} {s}", .{ p.first_name, p.last_name });
+                try osummary_buf.appendSlice(alloc, name_str);
+                if (oa.performance != 0) {
+                    const perf_note = try std.fmt.allocPrint(alloc, " (perf {d} {s})", .{ oa.performance, officers_m.performanceBand(oa.performance).label() });
+                    try osummary_buf.appendSlice(alloc, perf_note);
+                }
+                if (oa.recurring) try osummary_buf.appendSlice(alloc, " [returning]");
+                first_officer = false;
+            }
+            officers_summary = try osummary_buf.toOwnedSlice(alloc);
+        }
+        try out.append(alloc, .{ .id = c.id, .planet_key = c.planet_key, .actors_summary = actors_summary, .rivals_summary = rivals_summary, .officers_summary = officers_summary, .world_state_summary = try worldStateSummary(alloc, gs, c.planet_key), .cells = try table.row(alloc, &.{
             try std.fmt.allocPrint(alloc, "{d}", .{@intFromEnum(c.id)}),
             c.kind.label(),
             c.employer_key,
@@ -6854,8 +6876,10 @@ test "seatPlanetKey returns the seat's planet and null before any HQ (C10-E1)" {
 
 const actor_dom = @import("../domain/actor.zig");
 const rival_dom = @import("../domain/rival.zig");
+const officer_dom = @import("../domain/officer.zig");
 const world_state_dom = @import("../domain/world_state.zig");
 const rivals_m = @import("rivals.zig");
+const officers_m = @import("officers.zig");
 
 /// Format a compact read-only summary of the world state at planet_key.
 /// Returns an empty string when no state has been recorded yet.
@@ -6919,6 +6943,26 @@ pub const RivalRow = struct {
     recurring: bool,
 };
 
+/// One attached officer arc row in the Operations view (P4i).
+pub const OfficerRow = struct {
+    id: types.OfficerArcId,
+    person_id: types.PersonId,
+    /// Person's display name as untrusted text; crossed as Raw for safety (rule 33).
+    name: table.Raw,
+    /// Seat label.
+    seat: []const u8,
+    /// Person's rank name.
+    rank: []const u8,
+    /// Signed performance score.
+    performance: i16,
+    /// Derived performance band label.
+    band: []const u8,
+    /// Restlessness score (from Person.restlessness).
+    loyalty_restless: u8,
+    /// True when this arc carries forward a prior arc's performance.
+    recurring: bool,
+};
+
 pub const OperationRow = struct {
     id: types.OperationId,
     name: []const u8,
@@ -6975,6 +7019,8 @@ pub const Operations = struct {
     actors: []ActorRow,
     /// Rival companies attached to this contract's arc (P4i); empty for non-arc contracts.
     rivals: []RivalRow,
+    /// Officer arcs attached to this contract's arc (P4i); empty for non-arc contracts.
+    officers: []OfficerRow,
     /// Read-only world-state summary for the contract's planet (P4h.4); empty if none.
     world_state_summary: []const u8,
 };
@@ -6982,10 +7028,10 @@ pub const Operations = struct {
 /// Return the operations board for an active arc contract.
 /// Caller owns the result (arena-friendly).
 pub fn contractOperations(alloc: Alloc, gs: *GameState, contract_id: types.ContractId) !Operations {
-    const c = gs.contracts.getPtr(contract_id) orelse return Operations{ .briefing = "", .rows = &.{}, .escalation_clock = 0, .collapse_threshold = 0, .actors = &.{}, .rivals = &.{}, .world_state_summary = "" };
-    if (c.arc_key.len == 0) return Operations{ .briefing = "", .rows = &.{}, .escalation_clock = 0, .collapse_threshold = 0, .actors = &.{}, .rivals = &.{}, .world_state_summary = try worldStateSummary(alloc, gs, c.planet_key) };
+    const c = gs.contracts.getPtr(contract_id) orelse return Operations{ .briefing = "", .rows = &.{}, .escalation_clock = 0, .collapse_threshold = 0, .actors = &.{}, .rivals = &.{}, .officers = &.{}, .world_state_summary = "" };
+    if (c.arc_key.len == 0) return Operations{ .briefing = "", .rows = &.{}, .escalation_clock = 0, .collapse_threshold = 0, .actors = &.{}, .rivals = &.{}, .officers = &.{}, .world_state_summary = try worldStateSummary(alloc, gs, c.planet_key) };
     const arc_mod = @import("../domain/arc.zig");
-    const a = arc_mod.find(c.arc_key) orelse return Operations{ .briefing = "", .rows = &.{}, .escalation_clock = 0, .collapse_threshold = 0, .actors = &.{}, .rivals = &.{}, .world_state_summary = try worldStateSummary(alloc, gs, c.planet_key) };
+    const a = arc_mod.find(c.arc_key) orelse return Operations{ .briefing = "", .rows = &.{}, .escalation_clock = 0, .collapse_threshold = 0, .actors = &.{}, .rivals = &.{}, .officers = &.{}, .world_state_summary = try worldStateSummary(alloc, gs, c.planet_key) };
 
     // Briefing: current beat's name + any active finale key.
     const briefing: []const u8 = if (c.arc_beat < a.beats.len) blk: {
@@ -7071,6 +7117,24 @@ pub fn contractOperations(alloc: Alloc, gs: *GameState, contract_id: types.Contr
         });
     }
 
+    // Build officer rows for this contract (P4i).
+    var officer_rows: std.ArrayListUnmanaged(OfficerRow) = .empty;
+    for (c.officer_arc_ids.items) |oaid| {
+        const oa = gs.officerArc(oaid) orelse continue;
+        const p = gs.person(oa.person) orelse continue;
+        try officer_rows.append(alloc, .{
+            .id = oaid,
+            .person_id = oa.person,
+            .name = .{ .raw = try std.fmt.allocPrint(alloc, "{s} {s}", .{ p.first_name, p.last_name }) },
+            .seat = oa.seat.label(),
+            .rank = p.rank.name(),
+            .performance = oa.performance,
+            .band = officers_m.performanceBand(oa.performance).label(),
+            .loyalty_restless = p.restlessness(),
+            .recurring = oa.recurring,
+        });
+    }
+
     return Operations{
         .briefing = briefing,
         .rows = try rows.toOwnedSlice(alloc),
@@ -7078,6 +7142,7 @@ pub fn contractOperations(alloc: Alloc, gs: *GameState, contract_id: types.Contr
         .collapse_threshold = operations_m.topCollapseMinClock(a),
         .actors = try actor_rows.toOwnedSlice(alloc),
         .rivals = try rival_rows.toOwnedSlice(alloc),
+        .officers = try officer_rows.toOwnedSlice(alloc),
         .world_state_summary = try worldStateSummary(alloc, gs, c.planet_key),
     };
 }
@@ -7619,4 +7684,75 @@ test "contractOperations: RivalRow populated for arc contract with an attached r
     try std.testing.expectEqual(@as(u16, 2), rr.encounters);
     try std.testing.expect(rr.recurring);
     try std.testing.expectEqualStrings("Smith Raiders", rr.unit_name.raw);
+}
+
+test "contractOperations: OfficerRow populated for arc contract with an attached officer arc (P4i)" {
+    // Rule 20 consumer test (P4i): contractOperations returns an OfficerRow carrying the
+    // stored performance/seat/band; a non-arc contract returns an empty officers slice.
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 41416 });
+    defer gs.deinit();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    // Non-arc contract: no officers.
+    const cid_non_arc: types.ContractId = @enumFromInt(1);
+    try gs.contracts.put(gs.allocator(), cid_non_arc, .{
+        .id = cid_non_arc,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 12, .base_pay_month = 100_000 },
+        .status = .active,
+    });
+    const ops_no_arc = try contractOperations(arena.allocator(), &gs, cid_non_arc);
+    try std.testing.expectEqual(@as(usize, 0), ops_no_arc.officers.len);
+
+    // Arc contract with one officer arc attached to a real person.
+    const cid: types.ContractId = @enumFromInt(2);
+    const oa_id: types.OfficerArcId = @enumFromInt(1);
+    const pid: types.PersonId = @enumFromInt(1);
+    // Insert a minimal Person into gs.people so queries can look it up.
+    try gs.people.put(gs.allocator(), pid, .{
+        .id = pid,
+        .first_name = "Alice",
+        .last_name = "Chen",
+        .role = .mekwarrior,
+        .rank = .lieutenant,
+        .status = .active,
+        .xp = 0,
+    });
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+        .status = .active,
+        .arc_key = "fracturing_garrison",
+    });
+    const c2 = gs.contracts.getPtr(cid).?;
+    try c2.officer_arc_ids.append(gs.allocator(), oa_id);
+    try gs.commitOfficerArc(.{
+        .id = oa_id,
+        .person = pid,
+        .contract = cid,
+        .seat = .lance_leader,
+        .performance = -45,
+        .encounters = 3,
+        .last_cause = "setback",
+        .last_cause_day = 5,
+        .recurring = true,
+    });
+
+    const ops = try contractOperations(arena.allocator(), &gs, cid);
+    try std.testing.expectEqual(@as(usize, 1), ops.officers.len);
+    const or_row = ops.officers[0];
+    try std.testing.expectEqual(oa_id, or_row.id);
+    try std.testing.expectEqual(pid, or_row.person_id);
+    try std.testing.expectEqualStrings("lance leader", or_row.seat);
+    try std.testing.expectEqual(@as(i16, -45), or_row.performance);
+    try std.testing.expectEqualStrings("failing", or_row.band); // -45 <= -40 → failing
+    try std.testing.expect(or_row.recurring);
 }

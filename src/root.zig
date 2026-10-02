@@ -53,6 +53,7 @@ pub const arc = @import("domain/arc.zig");
 pub const operation = @import("domain/operation.zig");
 pub const actor = @import("domain/actor.zig");
 pub const rival = @import("domain/rival.zig");
+pub const officer = @import("domain/officer.zig");
 
 // sim/ — state, time, randomness, battle resolution
 pub const state = @import("sim/state.zig");

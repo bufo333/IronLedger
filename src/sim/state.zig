@@ -27,6 +27,7 @@ const meklab = @import("../domain/meklab.zig");
 const actor_mod = @import("../domain/actor.zig");
 const rival_mod = @import("../domain/rival.zig");
 const world_state_mod = @import("../domain/world_state.zig");
+const officer_mod = @import("../domain/officer.zig");
 
 pub const Config = struct {
     seed: u64 = 3025,
@@ -315,6 +316,9 @@ pub const GameState = struct {
     /// Persistent rival companies (P4i).
     rivals: std.AutoArrayHashMapUnmanaged(types.RivalId, rival_mod.Rival) = .empty,
 
+    /// Persistent officer arcs (P4i).
+    officer_arcs: std.AutoArrayHashMapUnmanaged(types.OfficerArcId, officer_mod.OfficerArc) = .empty,
+
     /// Persistent bounded per-world state, keyed by planet_key (P4h.4).
     world_states: std.StringArrayHashMapUnmanaged(world_state_mod.WorldState) = .empty,
 
@@ -329,6 +333,7 @@ pub const GameState = struct {
     next_operation_id: u32 = 1,
     next_actor_id: u32 = 1,
     next_rival_id: u32 = 1,
+    next_officer_arc_id: u32 = 1,
 
     pub fn init(gpa: std.mem.Allocator, config: Config) GameState {
         return .{
@@ -452,6 +457,19 @@ pub const GameState = struct {
 
     pub fn rival(self: *GameState, id: types.RivalId) ?*rival_mod.Rival {
         return self.rivals.getPtr(id);
+    }
+
+    /// Reserve capacity in `officer_arcs`, then write the prepared arc using the
+    /// next_officer_arc_id assigned by the caller's commit phase (P4i, rules 7, 11-13).
+    /// The prepared arc must already carry the correct id (set by the caller).
+    /// `ensureUnusedCapacity` is the only fallible step; the put is infallible.
+    pub fn commitOfficerArc(self: *GameState, prepared: officer_mod.OfficerArc) !void {
+        try self.officer_arcs.ensureUnusedCapacity(self.allocator(), 1);
+        self.officer_arcs.putAssumeCapacity(prepared.id, prepared);
+    }
+
+    pub fn officerArc(self: *GameState, id: types.OfficerArcId) ?*officer_mod.OfficerArc {
+        return self.officer_arcs.getPtr(id);
     }
 
     /// Return a pointer to the world state for this planet_key, or null if none yet.
@@ -888,6 +906,8 @@ pub const GameState = struct {
         .{ "next_actor_id", .persisted },
         .{ "rivals", .persisted },
         .{ "next_rival_id", .persisted },
+        .{ "officer_arcs", .persisted },
+        .{ "next_officer_arc_id", .persisted },
         .{ "world_states", .persisted },
     };
 

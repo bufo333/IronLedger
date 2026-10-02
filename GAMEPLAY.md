@@ -329,3 +329,21 @@ match a rival from a closed contract carries its standing forward (the
 doctrine, status, standing, faction, and recurring tag. No player decisions in
 this increment — rivals are read-only display, groundwork for future narrative
 and negotiation hooks.
+
+## Officer arcs (P4i)
+
+When an arc contract is accepted, a compact **officer arc** is created for the
+deployed company's commander and each combat-lance leader. An arc rides on the
+existing payroll `Person` — it never creates, converts, or modifies a person.
+Each arc carries a single task-performance standing (−100…100). Performance
+starts at 0, then shifts each time a relevant operation resolves: +6 decisive,
++3 success, 0 partial, −3 setback, −6 failure; the contract finale applies a
+larger swing (+10 held / −12 collapse). A performance standing ≤ −40 is
+**failing**; ≥ +40 is **distinguished**; between is **steady**.
+
+When a new contract is accepted, any officer whose person id already has a
+closed arc carries its performance forward (the **recurring** flag). The
+Operations screen shows current officers with their seat, rank, performance
+score, band, and recurring tag. Officers never alter loyalty, rank, retention,
+or any other `Person` field in this increment — officer arcs are read-only
+display, groundwork for future proposals and personnel hooks (ROADMAP P4h.6).

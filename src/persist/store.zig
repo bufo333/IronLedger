@@ -37,9 +37,10 @@ const arc_mod = @import("../domain/arc.zig");
 const operation_mod = @import("../domain/operation.zig");
 const actor_mod = @import("../domain/actor.zig");
 const rival_mod = @import("../domain/rival.zig");
+const officer_dom = @import("../domain/officer.zig");
 const world_state_dom = @import("../domain/world_state.zig");
 
-pub const schema_version = 46;
+pub const schema_version = 47;
 
 const ddl =
     \\CREATE TABLE IF NOT EXISTS player (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_seq INTEGER NOT NULL);
@@ -96,6 +97,7 @@ const ddl =
     \\CREATE TABLE IF NOT EXISTS actor (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, archetype_key TEXT NOT NULL, first_name TEXT NOT NULL, last_name TEXT NOT NULL, faction_key TEXT NOT NULL, side TEXT NOT NULL, contract INTEGER NOT NULL DEFAULT 0, trust INTEGER NOT NULL DEFAULT 0, debt INTEGER NOT NULL DEFAULT 0, respect INTEGER NOT NULL DEFAULT 0, hostility INTEGER NOT NULL DEFAULT 0, last_cause TEXT NOT NULL DEFAULT '', last_cause_day INTEGER NOT NULL DEFAULT 0, recurring INTEGER NOT NULL DEFAULT 0 CHECK (recurring IN (0,1)), PRIMARY KEY (cid, id), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS world_state (cid INTEGER NOT NULL, ord INTEGER NOT NULL, planet_key TEXT NOT NULL, security INTEGER NOT NULL DEFAULT 0, civilian_support INTEGER NOT NULL DEFAULT 0, infrastructure_strain INTEGER NOT NULL DEFAULT 0, employer_control INTEGER NOT NULL DEFAULT 0, enemy_influence INTEGER NOT NULL DEFAULT 0, last_cause TEXT NOT NULL DEFAULT '', last_cause_day INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (cid, planet_key), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS rival (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, archetype_key TEXT NOT NULL, commander_first TEXT NOT NULL, commander_last TEXT NOT NULL, unit_name TEXT NOT NULL, faction_key TEXT NOT NULL, side TEXT NOT NULL, doctrine TEXT NOT NULL, contract INTEGER NOT NULL DEFAULT 0, standing INTEGER NOT NULL DEFAULT 0, encounters INTEGER NOT NULL DEFAULT 1, last_cause TEXT NOT NULL DEFAULT '', last_cause_day INTEGER NOT NULL DEFAULT 0, recurring INTEGER NOT NULL DEFAULT 0 CHECK (recurring IN (0,1)), PRIMARY KEY (cid, id), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS officer_arc (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, person INTEGER NOT NULL, contract INTEGER NOT NULL DEFAULT 0, seat TEXT NOT NULL, performance INTEGER NOT NULL DEFAULT 0, encounters INTEGER NOT NULL DEFAULT 1, last_cause TEXT NOT NULL DEFAULT '', last_cause_day INTEGER NOT NULL DEFAULT 0, recurring INTEGER NOT NULL DEFAULT 0 CHECK (recurring IN (0,1)), PRIMARY KEY (cid, id), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
 ;
 
 const tables = [_][]const u8{
@@ -104,7 +106,7 @@ const tables = [_][]const u8{
     "contract",       "txn",                    "loan",               "courier",          "policy",            "bay_job",            "candidate",             "hq_link",     "unit_transfer",
     "supply_policy",  "stock_policy",           "faction_cooling",    "faction_standing", "event_memory",      "listing",            "part_order",            "event_log",   "pending_event",
     "refit_plan",     "refit_op",               "rating_snapshot",    "battle_report",    "battle_report_hit", "battle_report_ammo", "battle_report_salvage", "rng_stream",  "operation",
-    "operation_task", "operation_intervention", "battle_report_task", "actor",            "world_state",       "rival",
+    "operation_task", "operation_intervention", "battle_report_task", "actor",            "world_state",       "rival",              "officer_arc",
 };
 
 // Indexes for per-campaign tables (A28/D31): cid filters on every load;
@@ -162,6 +164,7 @@ const index_ddl =
     \\CREATE INDEX IF NOT EXISTS ix_actor_cid ON actor(cid);
     \\CREATE INDEX IF NOT EXISTS ix_world_state_cid ON world_state(cid);
     \\CREATE INDEX IF NOT EXISTS ix_rival_cid ON rival(cid);
+    \\CREATE INDEX IF NOT EXISTS ix_officer_arc_cid ON officer_arc(cid);
 ;
 
 /// The stream order of the single `rng` blob that saves before schema v32
@@ -278,6 +281,8 @@ pub const Store = struct {
         // Existing saves open with zero world states (safe default).
         // v46: rival table (P4i). New table — no ALTER TABLE migration needed; applySchema creates it.
         // Existing saves open with zero rivals, next_rival_id=1 (safe default).
+        // v47: officer_arc table (P4i). New table — no ALTER TABLE migration needed; applySchema creates it.
+        // Existing saves open with zero officer arcs, next_officer_arc_id=1 (safe default).
     };
 
     pub fn open(path: [*:0]const u8) !Store {
@@ -596,6 +601,7 @@ pub const Store = struct {
         try self.saveOperations(gs, cid);
         try self.saveActors(gs, cid);
         try self.saveRivals(gs, cid);
+        try self.saveOfficerArcs(gs, cid);
         try self.saveWorldStates(gs, cid);
         try self.saveTxn(gs, cid);
         try self.saveLoan(gs, cid);
@@ -674,7 +680,7 @@ pub const Store = struct {
             .{ "next_event_id", gs.event_queue.next_id },         .{ "next_listing_id", gs.next_listing_id },
             .{ "next_candidate_id", gs.next_candidate_id },       .{ "next_loan_id", gs.next_loan_id },
             .{ "next_operation_id", gs.next_operation_id },       .{ "next_actor_id", gs.next_actor_id },
-            .{ "next_rival_id", gs.next_rival_id },
+            .{ "next_rival_id", gs.next_rival_id },               .{ "next_officer_arc_id", gs.next_officer_arc_id },
         };
         for (ints) |kv| {
             try st.bindAll(.{ cid, kv[0], kv[1] });
@@ -1263,6 +1269,91 @@ pub const Store = struct {
         }
     }
 
+    // P4i: save and load persistent officer arcs.
+    fn saveOfficerArcs(self: Store, gs: *GameState, cid: i64) !void {
+        const st = try self.db.prepare("INSERT INTO officer_arc VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)");
+        defer st.finalize();
+        var it = gs.officer_arcs.iterator();
+        var ord: i64 = 0;
+        while (it.next()) |entry| : (ord += 1) {
+            const oa = entry.value_ptr;
+            try st.bindAll(.{
+                cid,
+                ord,
+                @intFromEnum(oa.id),
+                @intFromEnum(oa.person),
+                @intFromEnum(oa.contract),
+                @tagName(oa.seat),
+                @as(i64, oa.performance),
+                @as(i64, oa.encounters),
+                oa.last_cause,
+                @as(i64, oa.last_cause_day),
+                @as(i64, @intFromBool(oa.recurring)),
+            });
+            try st.run();
+        }
+    }
+
+    /// Min/max bounds for stored performance (validated on load; mirror rule 20 constants).
+    const perf_min: i16 = officer_dom.perf_min;
+    const perf_max: i16 = officer_dom.perf_max;
+
+    fn loadOfficerArcs(self: Store, gs: *GameState, cid: i64) !void {
+        const alloc = gs.allocator();
+        const st = try self.db.prepare("SELECT id, person, contract, seat, performance, encounters, last_cause, last_cause_day, recurring FROM officer_arc WHERE cid = ?1 ORDER BY ord");
+        defer st.finalize();
+        try st.bindAll(.{cid});
+        while (try st.next()) {
+            const seat_str = try st.text(3, alloc);
+            const seat = std.meta.stringToEnum(officer_dom.OfficerSeat, seat_str) orelse return error.CorruptSave;
+            const performance = try fit(i16, st.int(4));
+            if (performance < perf_min or performance > perf_max) return error.CorruptSave;
+            const encounters_raw = st.int(5);
+            const encounters = std.math.cast(u16, encounters_raw) orelse return error.CorruptSave;
+            const contract_raw = st.int(2);
+            const contract_id: types.ContractId = @enumFromInt(std.math.cast(u32, contract_raw) orelse return error.CorruptSave);
+            const person_raw = st.int(1);
+            const person_id: types.PersonId = @enumFromInt(std.math.cast(u32, person_raw) orelse return error.CorruptSave);
+            // Validate person back-reference: must resolve to a loaded Person.
+            if (person_id == .none or gs.people.getPtr(person_id) == null) return error.CorruptSave;
+            const last_cause = try st.text(6, alloc);
+            if (last_cause.len > 0 and !@import("../sim/table.zig").markupSafe(last_cause)) return error.CorruptSave;
+            const oa: officer_dom.OfficerArc = .{
+                .id = try toId(types.OfficerArcId, st.int(0)),
+                .person = person_id,
+                .contract = contract_id,
+                .seat = seat,
+                .performance = performance,
+                .encounters = encounters,
+                .last_cause = last_cause,
+                .last_cause_day = try st.intAs(u32, 7),
+                .recurring = st.int(8) != 0,
+            };
+            const gop = try gs.officer_arcs.getOrPut(alloc, oa.id);
+            if (gop.found_existing) return error.CorruptSave;
+            gop.value_ptr.* = oa;
+        }
+        // Validate: officer arcs with a nonzero contract reference must resolve to a loaded contract.
+        // Rebuild officer_arc_ids lists on contracts from officer arcs' contract back-references.
+        {
+            var it2 = gs.officer_arcs.iterator();
+            while (it2.next()) |entry| {
+                const oa = entry.value_ptr;
+                if (oa.contract == .none) continue;
+                const c = gs.contracts.getPtr(oa.contract) orelse return error.CorruptSave;
+                try c.officer_arc_ids.append(alloc, oa.id);
+            }
+        }
+        // Bump next_officer_arc_id past the maximum stored id.
+        {
+            var max: u32 = 0;
+            var it2 = gs.officer_arcs.iterator();
+            while (it2.next()) |entry| max = @max(max, @intFromEnum(entry.key_ptr.*));
+            if (max == std.math.maxInt(u32)) return error.CorruptSave;
+            gs.next_officer_arc_id = @max(gs.next_officer_arc_id, max + 1);
+        }
+    }
+
     // Ledger and the rest of the lists.
     fn saveTxn(self: Store, gs: *GameState, cid: i64) !void {
         const st = try self.db.prepare("INSERT INTO txn VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)");
@@ -1637,6 +1728,7 @@ pub const Store = struct {
         try self.loadOperationInterventions(&gs, cid);
         try self.loadActors(&gs, cid);
         try self.loadRivals(&gs, cid);
+        try self.loadOfficerArcs(&gs, cid);
         try self.loadWorldStates(&gs, cid);
         try self.loadTxn(&gs, cid);
         try self.loadLoan(&gs, cid);
@@ -1763,6 +1855,7 @@ pub const Store = struct {
             if (std.mem.eql(u8, key, "next_operation_id")) gs.next_operation_id = try fit(@TypeOf(gs.next_operation_id), v);
             if (std.mem.eql(u8, key, "next_actor_id")) gs.next_actor_id = try fit(@TypeOf(gs.next_actor_id), v);
             if (std.mem.eql(u8, key, "next_rival_id")) gs.next_rival_id = try fit(@TypeOf(gs.next_rival_id), v);
+            if (std.mem.eql(u8, key, "next_officer_arc_id")) gs.next_officer_arc_id = try fit(@TypeOf(gs.next_officer_arc_id), v);
             if (std.mem.eql(u8, key, "rng_seed")) {
                 gs.rng.seed = @bitCast(v);
                 has_seed = true;
@@ -2907,6 +3000,13 @@ fn validateStoredStrings(gs: *GameState) error{CorruptSave}!void {
             if (rv.last_cause.len > 0) try Check.shown(rv.last_cause);
         }
     }
+    // Officer arcs: last_cause must be markup-safe.
+    {
+        var oait = gs.officer_arcs.iterator();
+        while (oait.next()) |e| {
+            if (e.value_ptr.last_cause.len > 0) try Check.shown(e.value_ptr.last_cause);
+        }
+    }
     // World states: planet_key must name a known planet; last_cause must be markup-safe.
     {
         var wsit = gs.world_states.iterator();
@@ -3085,6 +3185,13 @@ fn reconcileCounters(gs: *GameState) error{CorruptSave}!void {
         while (it.next()) |e| max = @max(max, @intFromEnum(e.key_ptr.*));
         if (max == max_u32) return error.CorruptSave;
         gs.next_rival_id = @max(gs.next_rival_id, max + 1);
+    }
+    {
+        var max: u32 = 0;
+        var it = gs.officer_arcs.iterator();
+        while (it.next()) |e| max = @max(max, @intFromEnum(e.key_ptr.*));
+        if (max == max_u32) return error.CorruptSave;
+        gs.next_officer_arc_id = @max(gs.next_officer_arc_id, max + 1);
     }
     // Battle and event counters: resumeBattleIds/resumeIds saturate at maxInt
     // when an entity holds the maximum id — detect that here (rule 48).
@@ -4130,8 +4237,8 @@ test "a rebuilt store loads to the identical digest" {
     // Digest is identical: the rebuild changed no data.
     var diff_buf: [128]u8 = undefined;
     try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &diff_buf) orelse "");
-    // Re-pinned by P4i (rivals + next_rival_id added to digest via field_persistence).
-    try std.testing.expectEqual(@as(u64, 13434953745104815246), hash_before);
+    // Re-pinned by P4i (officer_arcs + next_officer_arc_id added to digest via field_persistence).
+    try std.testing.expectEqual(@as(u64, 12602985521653727254), hash_before);
 }
 
 test "every next-ID counter resumes past a higher owned id after load" {
@@ -4158,6 +4265,7 @@ test "every next-ID counter resumes past a higher owned id after load" {
         "UPDATE meta SET value = 0 WHERE key = 'next_candidate_id'",
         "UPDATE meta SET value = 0 WHERE key = 'next_loan_id'",
         "UPDATE meta SET value = 0 WHERE key = 'next_rival_id'",
+        "UPDATE meta SET value = 0 WHERE key = 'next_officer_arc_id'",
     }) |sql| {
         try store.db.exec(sql);
         var loaded = try store.load(std.testing.allocator, gs.campaign_id);
@@ -4174,6 +4282,7 @@ test "every next-ID counter resumes past a higher owned id after load" {
         try std.testing.expect(loaded.next_candidate_id >= 1);
         try std.testing.expect(loaded.next_loan_id >= 1);
         try std.testing.expect(loaded.next_rival_id >= 1);
+        try std.testing.expect(loaded.next_officer_arc_id >= 1);
     }
 }
 
@@ -4624,9 +4733,9 @@ test "golden master: a played year hashes to its pinned value, and a save of it 
     try playedYearForTest(&gs);
     try std.testing.expect(gs.battle_reports.kept.items.len > 0); // the year saw fighting
     // Any change to a simulated or saved result moves this; re-pin it only
-    // when the change is meant. Re-pinned by P4i (rivals + next_rival_id added
-    // to digest via field_persistence).
-    try std.testing.expectEqual(@as(u64, 13434953745104815246), digest.stateHash(&gs));
+    // when the change is meant. Re-pinned by P4i (officer_arcs + next_officer_arc_id
+    // added to digest via field_persistence).
+    try std.testing.expectEqual(@as(u64, 12602985521653727254), digest.stateHash(&gs));
 
     const store = try Store.open(":memory:");
     defer store.close();
@@ -6021,4 +6130,215 @@ test "a rival row with a non-markup-safe unit_name rejects the load as corrupt (
     try std.testing.expectError(error.CorruptSave, loadRivalAfterTampering(
         "UPDATE rival SET unit_name = '{bad markup}' WHERE id = 1",
     ));
+}
+
+// P4i: officer arc persistence (rules 47, 67, 69).
+
+fn buildOfficerGs(alloc: std.mem.Allocator) !GameState {
+    var gs = GameState.init(alloc, .{ .seed = 50001 });
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    const co = try @import("../sim/starter_company.zig").generateInto(&gs, "Alpha");
+
+    // Contract 1 (completed) — introduces officer arc (id=1, non-recurring).
+    const cid1: types.ContractId = @enumFromInt(1);
+    try gs.contracts.put(gs.allocator(), cid1, .{
+        .id = cid1,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+        .status = .completed,
+        .assigned_company = co,
+        .arc_key = "fracturing_garrison",
+    });
+    const c1 = gs.contracts.getPtr(cid1).?;
+    // Use person id 1 (the commander created above).
+    const pid1: types.PersonId = @enumFromInt(1);
+    const oa1_id: types.OfficerArcId = @enumFromInt(1);
+    const oa1: officer_dom.OfficerArc = .{
+        .id = oa1_id,
+        .person = pid1,
+        .contract = cid1,
+        .seat = .company_commander,
+        .performance = -20,
+        .encounters = 1,
+        .last_cause = "setback",
+        .last_cause_day = 10,
+        .recurring = false,
+    };
+    try gs.commitOfficerArc(oa1);
+    try c1.officer_arc_ids.append(gs.allocator(), oa1_id);
+
+    // Contract 2 (active) — recurring officer arc (id=2) carrying forward.
+    const cid2: types.ContractId = @enumFromInt(2);
+    try gs.contracts.put(gs.allocator(), cid2, .{
+        .id = cid2,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+        .status = .active,
+        .assigned_company = co,
+        .arc_key = "fracturing_garrison",
+    });
+    const c2 = gs.contracts.getPtr(cid2).?;
+    const oa2_id: types.OfficerArcId = @enumFromInt(2);
+    const oa2: officer_dom.OfficerArc = .{
+        .id = oa2_id,
+        .person = pid1,
+        .contract = cid2,
+        .seat = .company_commander,
+        .performance = -30,
+        .encounters = 2,
+        .last_cause = "repeated_setback",
+        .last_cause_day = 40,
+        .recurring = true,
+    };
+    try gs.commitOfficerArc(oa2);
+    try c2.officer_arc_ids.append(gs.allocator(), oa2_id);
+
+    gs.next_officer_arc_id = 3;
+    gs.next_rival_id = 1;
+    gs.next_actor_id = 1;
+    gs.next_contract_id = 3;
+    return gs;
+}
+
+fn loadOfficerAfterTampering(sql: [*:0]const u8) !void {
+    var gs = try buildOfficerGs(std.testing.allocator);
+    defer gs.deinit();
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    try store.db.exec("PRAGMA foreign_keys = OFF");
+    try store.db.exec(sql);
+    try store.db.exec("PRAGMA foreign_keys = ON");
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    loaded.deinit();
+}
+
+test "officer arcs with nonzero performance and a recurring arc survive a save/load round-trip (P4i)" {
+    // Rules 47, 67 / P4i: a campaign with officer arcs — including a recurring arc that
+    // carries forward performance and encounters from a closed contract — survives save
+    // → load with an identical stateHash. Exercises saveOfficerArcs/loadOfficerArcs.
+    var gs = try buildOfficerGs(std.testing.allocator);
+    defer gs.deinit();
+
+    try std.testing.expectEqual(@as(usize, 2), gs.officer_arcs.count());
+    const before = digest.stateHash(&gs);
+
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+
+    var diff_buf: [128]u8 = undefined;
+    try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &diff_buf) orelse "");
+    try std.testing.expectEqual(before, digest.stateHash(&loaded));
+    // Officer arcs round-tripped.
+    try std.testing.expectEqual(@as(usize, 2), loaded.officer_arcs.count());
+    const oa2_id: types.OfficerArcId = @enumFromInt(2);
+    // Recurring flag survives.
+    try std.testing.expect(loaded.officer_arcs.getPtr(oa2_id).?.recurring);
+    // Nonzero performance survives.
+    try std.testing.expectEqual(@as(i16, -30), loaded.officer_arcs.getPtr(oa2_id).?.performance);
+    // Encounters survive.
+    try std.testing.expectEqual(@as(u16, 2), loaded.officer_arcs.getPtr(oa2_id).?.encounters);
+    // officer_arc_ids rebuilt on contracts.
+    const cid2: types.ContractId = @enumFromInt(2);
+    const lc2 = loaded.contracts.getPtr(cid2).?;
+    try std.testing.expectEqual(@as(usize, 1), lc2.officer_arc_ids.items.len);
+    try std.testing.expectEqual(oa2_id, lc2.officer_arc_ids.items[0]);
+}
+
+test "a v46 store migrates to v47 with the officer_arc table created and next_officer_arc_id defaults to 1 (P4i)" {
+    // Rule 50 / P4i: a store at schema v46 (no officer_arc table, no next_officer_arc_id meta row)
+    // must migrate cleanly to v47 — applySchema creates the officer_arc table — and loading
+    // a campaign from the migrated store yields next_officer_arc_id = 1 (safe default).
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 50002 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+
+    const raw = try sqlite.Db.open(":memory:");
+    var s1 = try Store.fromDb(raw);
+    try s1.save(&gs);
+    // Simulate a v46 store: drop the officer_arc table and the next_officer_arc_id meta row,
+    // then downgrade schema_version to 46.
+    try raw.exec("DROP TABLE officer_arc");
+    try raw.exec("DELETE FROM meta WHERE key = 'next_officer_arc_id'");
+    try raw.exec("UPDATE setting SET value = 46 WHERE key = 'schema_version'");
+    // fromDb sees v46, runs applySchema (CREATE TABLE IF NOT EXISTS officer_arc), sets v47.
+    const s2 = try Store.fromDb(raw);
+    defer s2.close();
+    // Schema advanced to current.
+    try std.testing.expectEqual(@as(i64, schema_version), s2.getSetting("schema_version", 0));
+    // officer_arc table exists and is empty.
+    const cnt = try s2.db.prepare("SELECT COUNT(*) FROM officer_arc");
+    defer cnt.finalize();
+    try std.testing.expect(try cnt.next());
+    try std.testing.expectEqual(@as(i64, 0), cnt.int(0));
+    // Loading the campaign yields next_officer_arc_id = 1 (no meta row → safe default).
+    var loaded = try s2.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+    try std.testing.expectEqual(@as(u32, 1), loaded.next_officer_arc_id);
+    try std.testing.expectEqual(@as(usize, 0), loaded.officer_arcs.count());
+}
+
+test "an unknown seat tag in an officer_arc row rejects the load as corrupt (P4i)" {
+    // Rule 47 / P4i: officer_arc.seat must name a valid OfficerSeat tag.
+    try std.testing.expectError(error.CorruptSave, loadOfficerAfterTampering(
+        "UPDATE officer_arc SET seat = 'notaseat' WHERE id = 1",
+    ));
+}
+
+test "an out-of-range performance in an officer_arc row rejects the load as corrupt (P4i)" {
+    // Rule 47 / P4i: performance must lie in [perf_min, perf_max].
+    try std.testing.expectError(error.CorruptSave, loadOfficerAfterTampering(
+        "UPDATE officer_arc SET performance = 200 WHERE id = 1",
+    ));
+}
+
+test "an officer_arc row with a dangling contract reference rejects the load as corrupt (P4i)" {
+    // Rule 47 / P4i: if officer_arc.contract != 0, the contract_id must resolve to a loaded
+    // contract. A nonzero id that names nothing is corruption.
+    try std.testing.expectError(error.CorruptSave, loadOfficerAfterTampering(
+        "UPDATE officer_arc SET contract = 99999 WHERE id = 1",
+    ));
+}
+
+test "an officer_arc row with a dangling person reference rejects the load as corrupt (P4i)" {
+    // Rule 47 / P4i: officer_arc.person must resolve to a loaded Person.
+    try std.testing.expectError(error.CorruptSave, loadOfficerAfterTampering(
+        "UPDATE officer_arc SET person = 99999 WHERE id = 1",
+    ));
+}
+
+test "an officer_arc row with a non-markup-safe last_cause rejects the load as corrupt (P4i)" {
+    // Rule 47 / P4i: last_cause must be markup-safe.
+    try std.testing.expectError(error.CorruptSave, loadOfficerAfterTampering(
+        "UPDATE officer_arc SET last_cause = '{bad markup}' WHERE id = 1",
+    ));
+}
+
+test "next_officer_arc_id resumes past owned ids after load (P4i counter-resume)" {
+    // Rule 70 / P4i: next_officer_arc_id must be >= 1 and above every owned id after load.
+    var gs = try buildOfficerGs(std.testing.allocator);
+    defer gs.deinit();
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+
+    // Drive counter below the max owned id; reconcileCounters bumps it past the max on load.
+    try store.db.exec("UPDATE meta SET value = 0 WHERE key = 'next_officer_arc_id'");
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+    try std.testing.expect(loaded.next_officer_arc_id >= 1);
+    // Must be above all owned ids (max owned id = 2).
+    var it = loaded.officer_arcs.iterator();
+    while (it.next()) |e| {
+        try std.testing.expect(loaded.next_officer_arc_id > @intFromEnum(e.key_ptr.*));
+    }
 }

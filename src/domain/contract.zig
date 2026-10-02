@@ -289,6 +289,8 @@ pub const Contract = struct {
     actor_ids: std.ArrayListUnmanaged(types.ActorId) = .empty,
     /// Persistent rival companies attached to this contract by its arc (P4i).
     rival_ids: std.ArrayListUnmanaged(types.RivalId) = .empty,
+    /// Persistent officer arcs attached to this contract by its arc (P4i).
+    officer_arc_ids: std.ArrayListUnmanaged(types.OfficerArcId) = .empty,
 
     /// The company is out on it: in transit to the world or on station.
     pub fn isRunning(self: *const Contract) bool {

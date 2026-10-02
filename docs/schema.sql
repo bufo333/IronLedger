@@ -1,6 +1,6 @@
 -- IRON LEDGER — SQLite save store schema (design document)
 --
--- Matches schema_version 46. The executable DDL and its column migrations
+-- Matches schema_version 47. The executable DDL and its column migrations
 -- live in src/persist/store.zig; this file is the readable reference for
 -- what each table and column means. Column order here is the runtime order.
 --
@@ -78,7 +78,8 @@ CREATE TABLE campaign (
 -- next_person_id, next_unit_id, next_force_id, next_hq_id,
 -- next_contract_id, next_battle_id, next_event_id, rng_seed,
 -- next_listing_id, next_candidate_id, next_loan_id (added v35),
--- next_operation_id (added v40), next_actor_id (added v44).
+-- next_operation_id (added v40), next_actor_id (added v44),
+-- next_rival_id (added v46), next_officer_arc_id (added v47).
 CREATE TABLE meta (
     cid             INTEGER NOT NULL,
     key             TEXT    NOT NULL,
@@ -992,3 +993,24 @@ CREATE TABLE rival (
     FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 CREATE INDEX IF NOT EXISTS ix_rival_cid ON rival(cid);
+
+-- Persistent officer arcs for company commanders and combat-lance leaders
+-- encountered across contracts (P4i). Each arc rides on an existing Person;
+-- it owns only the bounded task-performance standing for one contract's span.
+-- `ord` preserves insertion order for a deterministic round-trip digest.
+CREATE TABLE officer_arc (
+    cid                 INTEGER NOT NULL,
+    ord                 INTEGER NOT NULL, -- stable insertion order for deterministic digest
+    id                  INTEGER NOT NULL, -- OfficerArcId enum value (u32)
+    person              INTEGER NOT NULL, -- PersonId back-reference (must exist at load)
+    contract            INTEGER NOT NULL DEFAULT 0, -- ContractId (0 = none)
+    seat                TEXT    NOT NULL DEFAULT 'lance_leader', -- OfficerSeat tag
+    performance         INTEGER NOT NULL DEFAULT 0, -- clamped -100…100
+    encounters          INTEGER NOT NULL DEFAULT 0, -- operation outcomes tallied
+    last_cause          TEXT    NOT NULL DEFAULT '', -- markup-safe label for last perf change
+    last_cause_day      INTEGER NOT NULL DEFAULT 0,  -- day_index of last change
+    recurring           INTEGER NOT NULL DEFAULT 0,  -- boolean: carried forward from prior contract
+    PRIMARY KEY (cid, id),
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
+);
+CREATE INDEX IF NOT EXISTS ix_officer_arc_cid ON officer_arc(cid);

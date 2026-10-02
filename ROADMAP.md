@@ -1592,6 +1592,9 @@ a former actor should reflect the player's previous choices.
   leaders only. Their proposals, loyalty, task performance, promotion and
   retention use the personnel system rather than a bespoke story for every
   generated person.
+  *(P4h.6 implemented as increment sim/p4i-officers: officer_arc table,
+  officers.zig, performance deltas on outcomes/finale, recurring carry-
+  forward, Operations screen display, schema v47; committed 2026-10-02)*
 - P4h.7 Extend contract history, campaign summary and filtered logs with
   arc, finale, principal actors, key decisions, affected-world summary,
   recurring rivals and officer milestones.
