@@ -112,6 +112,26 @@ pub const LanceTasking = struct {
     task: LanceTask,
 };
 
+/// A command intervention applied to a committed combat operation (P4g).
+/// Spends command capacity to shape the deterministic opening roll.
+/// Labels are markup-safe (rule 33).
+pub const Intervention = enum {
+    emergency_recon,
+    reinforce,
+    air_cover,
+    field_repair,
+
+    /// Short display label for the UI and AAR (markup-safe; rule 33). // TUNE
+    pub fn label(self: Intervention) []const u8 {
+        return switch (self) {
+            .emergency_recon => "emergency recon",
+            .reinforce => "reinforce",
+            .air_cover => "air cover",
+            .field_repair => "field repair",
+        };
+    }
+};
+
 /// One runtime operation instance held on a Contract.
 pub const Operation = struct {
     id: types.OperationId,
@@ -131,6 +151,9 @@ pub const Operation = struct {
     /// Lance task assignments for this committed combat operation (P4e).
     /// Lives in the campaign arena; freed with the arena. Default empty.
     tasks: std.ArrayListUnmanaged(LanceTasking) = .empty,
+    /// Command interventions applied to this committed combat operation (P4g).
+    /// Lives in the campaign arena; freed with the arena. Default empty.
+    interventions: std.ArrayListUnmanaged(Intervention) = .empty,
 };
 
 /// The commander's stated objective for this operation (docs/p4-operations-design.md §6).
@@ -251,6 +274,24 @@ test "LanceTask: all seven values have a non-empty markup-safe label; Operation.
         .opened_day = 0,
     };
     try testing.expectEqual(@as(usize, 0), op.tasks.items.len);
+}
+
+test "Intervention: all four values have a non-empty markup-safe label; Operation.interventions defaults empty" {
+    const testing = std.testing;
+    const all_interventions = [_]Intervention{ .emergency_recon, .reinforce, .air_cover, .field_repair };
+    for (all_interventions) |iv| {
+        const lbl = iv.label();
+        try testing.expect(lbl.len > 0);
+        for (lbl) |ch| try testing.expect(ch != '{' and ch >= 0x20 and ch < 0x7f);
+    }
+    // Operation defaults to empty interventions list.
+    const op: Operation = .{
+        .id = @enumFromInt(1),
+        .template_key = "negotiate_terms",
+        .state = .available,
+        .opened_day = 0,
+    };
+    try testing.expectEqual(@as(usize, 0), op.interventions.items.len);
 }
 
 test "TempoPosture: all four values have a non-empty markup-safe label; Operation.tempo defaults to advance" {

@@ -209,6 +209,9 @@ pub const BattleReport = struct {
     /// The tempo posture of the committed combat operation, if any (P4f).
     /// Null when no combat operation was committed for this engagement.
     operation_tempo: ?operation.TempoPosture = null,
+    /// Comma-separated list of intervention labels applied to the committed
+    /// combat operation, if any (P4g). Empty string when none.
+    operation_interventions: []const u8 = "",
     /// Per-lance task results for this engagement (P4e).
     /// Arena-owned slice (duped at resolution time); empty when no tasks assigned.
     tasks: []const TaskedLance = &.{},

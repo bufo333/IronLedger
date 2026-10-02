@@ -290,6 +290,8 @@ pub const Command = union(enum) {
     clear_lance_task: struct { contract: types.ContractId, operation: types.OperationId, lance: types.ForceId },
     /// Set the tempo posture for an available operation (P4f).
     set_operation_tempo: struct { contract: types.ContractId, operation: types.OperationId, tempo: operation_mod.TempoPosture },
+    /// Apply a command intervention to a committed combat operation (P4g).
+    apply_intervention: struct { contract: types.ContractId, operation: types.OperationId, intervention: operation_mod.Intervention },
 };
 
 pub const Error = error{
@@ -449,6 +451,12 @@ pub const Error = error{
     UnknownLance,
     /// The chosen tempo posture is not legal for this operation type.
     OperationTempoIllegal,
+    /// The intervention gate predicate is not met (P4g).
+    InterventionGateUnmet,
+    /// Insufficient command capacity to pay for this intervention (P4g).
+    InsufficientCommandCapacity,
+    /// This intervention has already been applied to this operation (P4g).
+    InterventionAlreadyApplied,
 } || std.mem.Allocator.Error;
 
 pub const Result = struct {
@@ -564,6 +572,7 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
         .task_lance => |a| return operation_control.execTaskLance(gs, a),
         .clear_lance_task => |a| return operation_control.execClearLanceTask(gs, a),
         .set_operation_tempo => |a| return operation_control.execSetOperationTempo(gs, a),
+        .apply_intervention => |a| return operation_control.execApplyIntervention(gs, a),
         .autostaff => |hq_id| return hq_ops.execAutostaff(gs, hq_id),
         .transfer_person => |t| return personnel.execTransferPerson(gs, t),
         .rename_outfit => |name| return toe.execRenameOutfit(gs, name),

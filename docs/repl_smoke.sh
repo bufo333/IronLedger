@@ -57,6 +57,8 @@ printf '%s\n' \
   'commit 999 999 notanintent' \
   'tempo 9 1 advance' \
   'tempo 999 999 notaposture' \
+  'intervene 9 1 emergency_recon' \
+  'intervene 999 999 notakind' \
   'save' \
   'quit' > "$work/input"
 # A watchdog kills a hung REPL (macOS has no `timeout`); the exit status
@@ -115,6 +117,8 @@ check 'those arguments do not fit the verb — usage: autoadmit'
 check 'usage: commit'
 # P4f: tempo verb exercises and its refusal path (bad posture string is BadArguments).
 check 'usage: tempo'
+# P4g: intervene verb exercises and its refusal path (bad kind string is BadArguments).
+check 'usage: intervene'
 check 'stripped for parts'
 check 'drew 500,000 c-bills over 12 months'
 check 'under contract:'

@@ -12,6 +12,7 @@ const types = @import("../domain/types.zig");
 const GameState = @import("state.zig").GameState;
 const readiness = @import("readiness.zig");
 const toe = @import("toe.zig");
+const hq_ops = @import("hq_ops.zig");
 
 /// Quote returned by `operationQuote` for a single operation template.
 pub const Quote = struct {
@@ -537,6 +538,214 @@ pub fn advanceClocks(gs: *GameState) !void {
         } else {
             c.escalation_clock += step;
         }
+    }
+}
+
+// ---- Command-capacity and intervention owners (P4g, rule 20) ----------------
+
+/// Rule owner: the supplying HQ for a contract's assigned company.
+/// Location-sensitive rule: only the home HQ counts (rule 22).
+pub fn commandCapacityHq(gs: *GameState, c: *const contract_mod.Contract) types.HqId {
+    return gs.homeHqFor(c.assigned_company);
+}
+
+/// Rule owner: monthly command-capacity grant from the supplying HQ and
+/// the global commander. Deterministic; no RNG (P4g). // TUNE
+pub fn commandGrant(gs: *GameState, c: *const contract_mod.Contract) u8 {
+    const max_grant: u8 = 8; // TUNE: absolute ceiling on the monthly grant
+    const hq_id = commandCapacityHq(gs, c);
+    const hq = gs.hqs.getPtr(hq_id) orelse return 2;
+    var grant: u32 = 2; // TUNE: base grant
+    if (gs.commander != null) grant += 1; // TUNE: commander present
+    // +1 per 2 admin_command desks staffed at the supplying HQ. // TUNE
+    const cmd_staff = hq_ops.hqStaff(gs, hq_id, .admin_command).count;
+    grant += cmd_staff / 2; // TUNE
+    if (hq.effectiveFacilityLevel(.comms) >= 2) grant += 1; // TUNE: comms ≥ 2
+    return @intCast(@min(max_grant, grant));
+}
+
+/// Rule owner: carry-over ceiling = grant × 2. // TUNE
+pub fn commandCap(gs: *GameState, c: *const contract_mod.Contract) u8 {
+    return commandGrant(gs, c) *| 2; // TUNE
+}
+
+/// Rule owner: capacity withheld by the employer based on command rights.
+/// Integrated employers reserve more attention for their own demands (P4g). // TUNE
+pub fn employerReserved(rights: contract_mod.CommandRights) u8 {
+    return switch (rights) {
+        .integrated => 2, // TUNE: integrated employer withholds 2
+        .house => 1, // TUNE: house liaison withholds 1
+        .liaison, .independent => 0, // TUNE: independent commands withold nothing
+    };
+}
+
+/// Rule owner: command capacity the player may actually spend on the current contract.
+pub fn commandCapacityAvailable(c: *const contract_mod.Contract) u8 {
+    return c.command_capacity -| employerReserved(c.terms.command_rights);
+}
+
+/// Rule owner: command-capacity cost per intervention type (P4g). // TUNE
+pub fn interventionCost(kind: operation_mod.Intervention) u8 {
+    return switch (kind) {
+        .emergency_recon => 1, // TUNE
+        .reinforce => 2, // TUNE: costs more — needs a reserve lance
+        .air_cover => 1, // TUNE
+        .field_repair => 1, // TUNE
+    };
+}
+
+/// Deterministic battle-phase modifiers applied when this intervention is active.
+/// Feeds the two existing `scenario_mod` knobs (P4g, rule 20). All values // TUNE.
+pub const InterventionProfile = struct {
+    /// Additive bonus to scenario_mod (reduces enemy surprise). // TUNE
+    surprise_reduction: i32,
+    /// Additive bonus to scenario_mod (preparation increases readiness). // TUNE
+    prepared_roll_bonus: i32,
+};
+
+/// Rule owner: the intervention profile for one intervention type (P4g, rule 20).
+/// All values // TUNE.
+pub fn interventionProfile(kind: operation_mod.Intervention) InterventionProfile {
+    return switch (kind) {
+        .emergency_recon => .{ .surprise_reduction = 2, .prepared_roll_bonus = 0 }, // TUNE
+        .reinforce => .{ .surprise_reduction = 0, .prepared_roll_bonus = 2 }, // TUNE
+        .air_cover => .{ .surprise_reduction = 0, .prepared_roll_bonus = 1 }, // TUNE
+        .field_repair => .{ .surprise_reduction = 0, .prepared_roll_bonus = 2 }, // TUNE
+    };
+}
+
+/// Rule owner: is this intervention already applied to the operation?
+pub fn interventionApplied(op: *const operation_mod.Operation, kind: operation_mod.Intervention) bool {
+    for (op.interventions.items) |iv| if (iv == kind) return true;
+    return false;
+}
+
+/// Rule owner: may this intervention be applied to this committed combat operation?
+/// Gates: op must be committed+combat, and the kind's distinct asset gate holds (P4g).
+pub fn interventionGate(gs: *GameState, c: *const contract_mod.Contract, op: *const operation_mod.Operation, kind: operation_mod.Intervention) bool {
+    if (op.state != .committed) return false;
+    const t = operation_mod.findTemplate(op.template_key) orelse return false;
+    if (!t.combat) return false;
+    return switch (kind) {
+        .emergency_recon => blk: {
+            // Needs an operational scouting/recon lance OR comms ≥ 1 at the supplying HQ.
+            const company = gs.force(c.assigned_company) orelse break :blk false;
+            for (company.children.items) |child_id| {
+                const child = gs.force(child_id) orelse continue;
+                if (child.echelon == .lance and child.role == .scouting and readiness.forceOperational(gs, child))
+                    break :blk true;
+            }
+            const hq_id = commandCapacityHq(gs, c);
+            const hq = gs.hqs.getPtr(hq_id) orelse break :blk false;
+            break :blk hq.effectiveFacilityLevel(.comms) >= 1;
+        },
+        .reinforce => blk: {
+            // Needs an operational combat child lance not already tasked main_effort.
+            const company = gs.force(c.assigned_company) orelse break :blk false;
+            for (company.children.items) |child_id| {
+                const child = gs.force(child_id) orelse continue;
+                if (!child.isCombatLance()) continue;
+                if (!readiness.forceOperational(gs, child)) continue;
+                // Must not already be tasked main_effort on this op.
+                const task = lanceTask(op, child_id);
+                if (task != null and task.? == .main_effort) continue;
+                break :blk true;
+            }
+            break :blk false;
+        },
+        .air_cover => blk: {
+            // Needs an operational, piloted fighter in the company's air wing.
+            // Single owner: readiness.companyHasOperationalFighter (rule 20, P4g).
+            break :blk readiness.companyHasOperationalFighter(gs, c.assigned_company);
+        },
+        .field_repair => blk: {
+            // Needs an assigned, operational tech with the deployed company.
+            const company = gs.force(c.assigned_company) orelse break :blk false;
+            const company_site: types.Site = .{ .company = c.assigned_company };
+            _ = company_site;
+            // Walk support lances for an operational tech.
+            for (company.children.items) |child_id| {
+                const child = gs.force(child_id) orelse continue;
+                if (child.echelon != .support_company) continue;
+                for (child.children.items) |sl_id| {
+                    const sl = gs.force(sl_id) orelse continue;
+                    // Any support lance with at least one unit is acceptable for tech assignment.
+                    for (sl.units.items) |uid| {
+                        const u = gs.unit(uid) orelse continue;
+                        // Tech check: unit is the support kind with a pilot (tech/astech).
+                        if (u.kind == .mek) continue; // meks are not tech assets
+                        // We check via readiness for an assigned tech on any unit in the company.
+                        if (readiness.unitOperational(gs, u)) break :blk true;
+                    }
+                }
+            }
+            // Also check if any unit in the company has a tech assigned (crew slot tech).
+            var uit = gs.units.iterator();
+            while (uit.next()) |entry| {
+                const u = entry.value_ptr;
+                if (gs.companyOf(u.force) != c.assigned_company) continue;
+                if (u.tech == .none) continue;
+                const tech = gs.person(u.tech) orelse continue;
+                if (tech.isAvailable(gs.clock.day_index)) break :blk true;
+            }
+            break :blk false;
+        },
+    };
+}
+
+/// Rule owner: aggregate intervention modifiers for the opening roll (P4g, rule 20).
+/// Sums interventionProfile over op.interventions. Deterministic; no RNG.
+pub fn operationInterventionMods(op: *const operation_mod.Operation) InterventionProfile {
+    var mods: InterventionProfile = .{ .surprise_reduction = 0, .prepared_roll_bonus = 0 };
+    for (op.interventions.items) |iv| {
+        const p = interventionProfile(iv);
+        mods.surprise_reduction += p.surprise_reduction;
+        mods.prepared_roll_bonus += p.prepared_roll_bonus;
+    }
+    return mods;
+}
+
+/// Rule owner: markup-safe comma-joined intervention labels (P4g, rule 20).
+/// Used by the AAR snapshot and queries; returns "" when none.
+pub fn interventionSummary(alloc: std.mem.Allocator, op: *const operation_mod.Operation) ![]const u8 {
+    if (op.interventions.items.len == 0) return "";
+    var buf: std.ArrayListUnmanaged(u8) = .empty;
+    for (op.interventions.items, 0..) |iv, i| {
+        if (i > 0) try buf.appendSlice(alloc, ", ");
+        try buf.appendSlice(alloc, iv.label());
+    }
+    return buf.toOwnedSlice(alloc);
+}
+
+/// Phase-7 sub-step: monthly command-capacity refresh on payday.
+/// Iterates active arc contracts; tops up command_capacity up to commandCap.
+/// Failure-atomic per contract: reserves the log slot before any mutation (rule 17).
+pub fn refreshCommandCapacity(gs: *GameState) !void {
+    var it = gs.contracts.iterator();
+    while (it.next()) |entry| {
+        const c = entry.value_ptr;
+        if (c.status != .active or c.arc_key.len == 0) continue;
+        const grant = commandGrant(gs, c);
+        const cap = commandCap(gs, c);
+        const new_cap = @min(cap, c.command_capacity +| grant);
+        if (new_cap == c.command_capacity) continue; // nothing to log if unchanged
+        // Reserve log and pre-format before any mutation (rule 17).
+        try gs.reserveLog(1);
+        var date_buf: [10]u8 = undefined;
+        const log_text = try std.fmt.allocPrint(
+            gs.allocator(),
+            "{s} [arc] command capacity: {d}/{d}",
+            .{ gs.clock.date.text(&date_buf), new_cap, cap },
+        );
+        // Infallible from here.
+        c.command_capacity = new_cap;
+        gs.event_log.appendAssumeCapacity(.{
+            .day = gs.clock.day_index,
+            .category = .contract,
+            .company = c.assigned_company,
+            .contract = c.id,
+            .text = log_text,
+        });
     }
 }
 
@@ -1318,4 +1527,273 @@ test "tempoDelayDays: advance == 0; others > 0" {
     try testing.expect(tempoDelayDays(.recon) > 0);
     try testing.expect(tempoDelayDays(.prepare) > 0);
     try testing.expect(tempoDelayDays(.delay) > 0);
+}
+
+test "commandGrant / commandCapacityHq: only the home HQ matters; comms moves grant" {
+    // P4g rule owner: location-sensitive — only the supplying HQ contributes.
+    const testing = std.testing;
+    var gs = @import("state.zig").GameState.init(testing.allocator, .{});
+    defer gs.deinit();
+
+    const hq_mod = @import("../domain/hq.zig");
+    // Build two HQs: hq_a is the home for the company; hq_b is unrelated.
+    const hq_a_id: types.HqId = @enumFromInt(1);
+    const hq_b_id: types.HqId = @enumFromInt(2);
+    try gs.hqs.put(gs.allocator(), hq_a_id, .{
+        .id = hq_a_id,
+        .name = "Seat",
+        .tier = .field,
+        .planet_key = "galatea",
+    });
+    try gs.hqs.put(gs.allocator(), hq_b_id, .{
+        .id = hq_b_id,
+        .name = "Other",
+        .tier = .field,
+        .planet_key = "galatea",
+    });
+    // Create a company assigned to hq_a.
+    const co = (try @import("toe.zig").execNewCompany(&gs, "Alpha")).created_force;
+    gs.force(co).?.supplying_hq = hq_a_id;
+
+    var c: contract_mod.Contract = .{
+        .id = @enumFromInt(1),
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+        .status = .active,
+        .arc_key = "fracturing_garrison",
+        .assigned_company = co,
+    };
+
+    // commandCapacityHq must return hq_a.
+    const hq_id = commandCapacityHq(&gs, &c);
+    try testing.expectEqual(hq_a_id, hq_id);
+
+    // Base grant ≥ 2.
+    const base_grant = commandGrant(&gs, &c);
+    try testing.expect(base_grant >= 2);
+
+    // Give hq_b comms level 3 — must NOT change the grant (hq_a is the home HQ).
+    const h_b = gs.hqs.getPtr(hq_b_id).?;
+    try h_b.facilities.append(gs.allocator(), .{ .kind = hq_mod.FacilityKind.comms, .level = 3 });
+    // Staff hq_b fully so its comms is effective — still must NOT affect hq_a's grant.
+    h_b.staff_assigned = h_b.staffRequired().total();
+    const grant_after_other_comms = commandGrant(&gs, &c);
+    try testing.expectEqual(base_grant, grant_after_other_comms);
+
+    // Give hq_a comms level 2 and enough staff so effective level ≥ 2 — grant must increase.
+    const h_a = gs.hqs.getPtr(hq_a_id).?;
+    try h_a.facilities.append(gs.allocator(), .{ .kind = hq_mod.FacilityKind.comms, .level = 2 });
+    h_a.staff_assigned = h_a.staffRequired().total();
+    const grant_with_comms = commandGrant(&gs, &c);
+    try testing.expect(grant_with_comms > base_grant);
+}
+
+test "commandCap / refreshCommandCapacity: monthly refresh clamps to cap; non-arc contract untouched" {
+    const testing = std.testing;
+    var gs = @import("state.zig").GameState.init(testing.allocator, .{});
+    defer gs.deinit();
+
+    // One arc contract.
+    const cid: types.ContractId = @enumFromInt(1);
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+        .status = .active,
+        .arc_key = "fracturing_garrison",
+        .command_capacity = 0,
+    });
+
+    // One non-arc contract — must be untouched.
+    const cid2: types.ContractId = @enumFromInt(2);
+    try gs.contracts.put(gs.allocator(), cid2, .{
+        .id = cid2,
+        .kind = .objective_raid,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 3, .base_pay_month = 300_000 },
+        .status = .active,
+        .arc_key = "",
+        .command_capacity = 0,
+    });
+
+    try refreshCommandCapacity(&gs);
+    {
+        const c = gs.contracts.getPtr(cid).?;
+        const grant = commandGrant(&gs, c);
+        try testing.expect(c.command_capacity > 0);
+        try testing.expect(c.command_capacity <= commandCap(&gs, c));
+        // Refreshing again should not exceed the cap.
+        c.command_capacity = commandCap(&gs, c); // set at cap
+        const old = c.command_capacity;
+        try refreshCommandCapacity(&gs);
+        try testing.expectEqual(old, gs.contracts.getPtr(cid).?.command_capacity);
+        _ = grant;
+    }
+    // Non-arc contract untouched.
+    try testing.expectEqual(@as(u8, 0), gs.contracts.getPtr(cid2).?.command_capacity);
+}
+
+test "refreshCommandCapacity: failure-atomic under injected OOM at log reservation" {
+    const testing = std.testing;
+    var outer = std.heap.ArenaAllocator.init(testing.allocator);
+    defer outer.deinit();
+    var gs = @import("state.zig").GameState.init(outer.allocator(), .{});
+    defer gs.deinit();
+
+    const cid: types.ContractId = @enumFromInt(1);
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+        .status = .active,
+        .arc_key = "fracturing_garrison",
+        .command_capacity = 0,
+    });
+
+    const d = @import("digest.zig");
+    const before = d.stateHash(&gs);
+
+    gs.arena.state.used_list = null;
+    gs.arena.state.free_list = null;
+    gs.arena.child_allocator = std.testing.failing_allocator;
+
+    try testing.expectError(error.OutOfMemory, refreshCommandCapacity(&gs));
+    // Digest unchanged: no mutation occurred.
+    try testing.expectEqual(before, d.stateHash(&gs));
+}
+
+test "employerReserved / commandCapacityAvailable: integrated withholds more than independent" {
+    const testing = std.testing;
+    try testing.expect(employerReserved(.integrated) > employerReserved(.independent));
+    try testing.expect(employerReserved(.integrated) > 0);
+    try testing.expectEqual(@as(u8, 0), employerReserved(.independent));
+
+    // commandCapacityAvailable saturates at 0.
+    var c: contract_mod.Contract = .{
+        .id = @enumFromInt(1),
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 12, .base_pay_month = 100_000, .command_rights = .integrated },
+        .command_capacity = 1,
+    };
+    // With 1 capacity and integrated (reserves 2), available = 0.
+    try testing.expectEqual(@as(u8, 0), commandCapacityAvailable(&c));
+    c.terms.command_rights = .independent;
+    try testing.expectEqual(@as(u8, 1), commandCapacityAvailable(&c));
+}
+
+test "interventionProfile / operationInterventionMods: aggregate mirrors sum" {
+    const testing = std.testing;
+    // Each profile has non-negative values.
+    for ([_]operation_mod.Intervention{ .emergency_recon, .reinforce, .air_cover, .field_repair }) |iv| {
+        const p = interventionProfile(iv);
+        try testing.expect(p.surprise_reduction >= 0);
+        try testing.expect(p.prepared_roll_bonus >= 0);
+        try testing.expect(p.surprise_reduction > 0 or p.prepared_roll_bonus > 0);
+    }
+    // Aggregate over two interventions equals sum.
+    var op: operation_mod.Operation = .{
+        .id = @enumFromInt(1),
+        .template_key = "repel_probe",
+        .state = .committed,
+        .opened_day = 0,
+    };
+    try op.interventions.append(testing.allocator, .emergency_recon);
+    defer op.interventions.deinit(testing.allocator);
+    try op.interventions.append(testing.allocator, .reinforce);
+
+    const mods = operationInterventionMods(&op);
+    const p1 = interventionProfile(.emergency_recon);
+    const p2 = interventionProfile(.reinforce);
+    try testing.expectEqual(p1.surprise_reduction + p2.surprise_reduction, mods.surprise_reduction);
+    try testing.expectEqual(p1.prepared_roll_bonus + p2.prepared_roll_bonus, mods.prepared_roll_bonus);
+}
+
+test "interventionGate: each of the four gates accept and refuse correctly" {
+    const testing = std.testing;
+    var gs = @import("state.zig").GameState.init(testing.allocator, .{});
+    defer gs.deinit();
+
+    // Build a minimal company by hand (no units, no lances) so all gates start refused.
+    const co = try gs.createForce("Alpha", .company, .none);
+    const cid: types.ContractId = @enumFromInt(1);
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+        .status = .active,
+        .arc_key = "fracturing_garrison",
+        .assigned_company = co,
+    });
+
+    // Build a committed combat operation.
+    var op: operation_mod.Operation = .{
+        .id = @enumFromInt(1),
+        .template_key = "repel_probe",
+        .state = .committed,
+        .opened_day = 0,
+    };
+    const c = gs.contracts.getPtr(cid).?;
+
+    // Non-committed op → all gates refuse.
+    op.state = .available;
+    try testing.expect(!interventionGate(&gs, c, &op, .emergency_recon));
+    try testing.expect(!interventionGate(&gs, c, &op, .reinforce));
+    try testing.expect(!interventionGate(&gs, c, &op, .air_cover));
+    try testing.expect(!interventionGate(&gs, c, &op, .field_repair));
+    op.state = .committed;
+
+    // Both emergency_recon and reinforce refuse on a completely empty company.
+    try testing.expect(!interventionGate(&gs, c, &op, .emergency_recon));
+    try testing.expect(!interventionGate(&gs, c, &op, .reinforce));
+
+    // Add a scouting lance with an operational unit.
+    // emergency_recon passes; reinforce also passes (recon_lance is operational, not main_effort).
+    const recon_lance = try gs.createForce("Recon", .lance, co);
+    gs.force(recon_lance).?.role = .scouting;
+    const uid_r = try gs.addUnit("LCT-1V");
+    const pid_r = try gs.hirePerson("Rn", "Rd", .mekwarrior);
+    try @import("toe.zig").assignUnit(&gs, uid_r, recon_lance, pid_r);
+    try testing.expect(interventionGate(&gs, c, &op, .emergency_recon));
+    try testing.expect(interventionGate(&gs, c, &op, .reinforce));
+
+    // Task the only operational lance as main_effort → reinforce refused.
+    try op.tasks.append(testing.allocator, .{ .lance = recon_lance, .task = .main_effort });
+    defer op.tasks.deinit(testing.allocator);
+    try testing.expect(!interventionGate(&gs, c, &op, .reinforce));
+    // Clear the task so the rest of the test works with a free lance.
+    op.tasks.clearRetainingCapacity();
+
+    // air_cover: refuses without a fighter.
+    try testing.expect(!interventionGate(&gs, c, &op, .air_cover));
+    // Stand up an air wing with an operational, piloted fighter.
+    const wing = try gs.createForce("Air Wing", .air_company, co);
+    const air_lance = try gs.createForce("Sky Lance", .air_lance, wing);
+    const uid_f = try gs.addUnit("SPR-H5");
+    const pid_f = try gs.hirePerson("Av", "Avi", .aero_pilot);
+    try @import("toe.zig").assignUnit(&gs, uid_f, air_lance, pid_f);
+    try testing.expect(interventionGate(&gs, c, &op, .air_cover));
+
+    // field_repair: refuses with no tech assigned.
+    try testing.expect(!interventionGate(&gs, c, &op, .field_repair));
+    // Assign a tech to a unit already in the company (the recon unit).
+    const tech_pid = try gs.hirePerson("Tech", "Smith", .tech_mek);
+    gs.unit(uid_r).?.tech = tech_pid;
+    try testing.expect(interventionGate(&gs, c, &op, .field_repair));
 }

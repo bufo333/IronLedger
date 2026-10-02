@@ -447,6 +447,53 @@ pub fn execSetOperationTempo(gs: *GameState, args: @FieldType(commands.Command, 
     return .{};
 }
 
+// ---- pub fn execApplyIntervention ---------------------------------------
+
+pub fn execApplyIntervention(gs: *GameState, args: @FieldType(commands.Command, "apply_intervention")) Error!commands.Result {
+    const cid = args.contract;
+    const oid = args.operation;
+    const kind = args.intervention;
+
+    // ---- VALIDATE: no mutation ----
+    const c = try findActiveContract(gs, cid);
+
+    var op_ptr: ?*operation_mod.Operation = null;
+    for (c.operations.items) |*op| if (op.id == oid) {
+        op_ptr = op;
+        break;
+    };
+    const op = op_ptr orelse return error.UnknownOperation;
+
+    if (op.state != .committed) return error.OperationNotCommitted;
+    if (!operations.interventionGate(gs, c, op, kind)) return error.InterventionGateUnmet;
+    if (operations.interventionApplied(op, kind)) return error.InterventionAlreadyApplied;
+    const cost = operations.interventionCost(kind);
+    if (operations.commandCapacityAvailable(c) < cost) return error.InsufficientCommandCapacity;
+
+    // ---- PREPARE: reserve log slot, pre-allocate list entry, pre-format ----
+    try gs.reserveLog(1);
+    try op.interventions.ensureUnusedCapacity(gs.allocator(), 1);
+    var date_buf: [10]u8 = undefined;
+    const log_text = try std.fmt.allocPrint(gs.allocator(), "{s} [arc] intervention applied: {s} ({d} capacity)", .{
+        gs.clock.date.text(&date_buf),
+        kind.label(),
+        cost,
+    });
+
+    // ---- COMMIT: infallible ----
+    c.command_capacity -|= cost;
+    op.interventions.appendAssumeCapacity(kind);
+    gs.event_log.appendAssumeCapacity(.{
+        .day = gs.clock.day_index,
+        .category = .contract,
+        .company = c.assigned_company,
+        .contract = c.id,
+        .text = log_text,
+    });
+
+    return .{};
+}
+
 // ------------------------------------------------------------------ tests
 
 test "execCommitOperation: available → committed, sets committed_day" {

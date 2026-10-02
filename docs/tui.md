@@ -225,7 +225,7 @@ titles and the help modal come from the same tables.
 | `c` | active | close out the contract under the cursor |
 | `R` | active | recall the company (under contract: a breach, confirmed first) |
 | `Enter` | history | the closed contract's whole log, full screen |
-| `g` | active | open the arc operations board for the active contract (Enter opens the intent picker, then commits; r sets tempo posture; x declines) |
+| `g` | active | open the arc operations board for the active contract (Enter opens the intent picker, then commits; r sets tempo posture; i opens intervention picker for committed combat ops; x declines) |
 | `t` | active | assign lance tasks for the committed combat operation (P4e) |
 
 ### F5 Ledger
@@ -541,8 +541,31 @@ an intelligence confidence on a 0–10 scale when non-zero (`intel:N/10`).
 | `↑ ↓` | move cursor |
 | `Enter` | commit the highlighted operation (combat: queues the next engagement; non-combat: resolves after `expected_days`) |
 | `r` | open the tempo picker for the highlighted operation (P4f) |
+| `i` | open the intervention picker for a committed combat operation (P4g) |
 | `x` | decline the highlighted operation (raises the escalation clock by the operation's `decline_note` pressure) |
 | `Esc` | close without acting |
+
+#### Intervention picker (P4g)
+
+Opened with `i` from the operations board when the highlighted operation is committed and combat.
+Shows remaining command capacity and the interventions that pass their gate and whose cost fits available capacity.
+
+The header shows `command capacity: current / cap (reserved: N)`.
+
+| Key | Does |
+|---|---|
+| `↑ ↓` | move cursor |
+| `Enter` | apply the highlighted intervention (spends capacity) |
+| `Esc` | cancel |
+
+The four interventions and their cost:
+
+| Intervention | Cost | Gate | Effect |
+|---|---|---|---|
+| `emergency_recon` | 1 | scouting lance with an operational unit, or comms ≥ 2 | +2 surprise reduction |
+| `reinforce` | 2 | an operational lance without main_effort task | +1 surprise reduction, +1 prepared-roll bonus |
+| `air_cover` | 1 | operational, piloted aerospace fighter | +2 prepared-roll bonus |
+| `field_repair` | 1 | assigned operational tech person | +1 prepared-roll bonus |
 
 #### Tempo picker (P4f)
 

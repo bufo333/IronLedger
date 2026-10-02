@@ -1513,18 +1513,18 @@ and the AAR.
 Command staff and leadership create a limited, visible intervention economy
 without becoming a second currency or a way to negate permanent loss.
 
-- P4f.1 Define a capped, named-cadence `CommandCapacity` resource. Its
+- [x] P4f.1 Define a capped, named-cadence `CommandCapacity` resource. Its
   owner derives it from the company commander, relevant HQ command staff,
   comms, command rights and deployment conditions.
-- P4f.2 Add interventions that use existing capabilities: emergency
+- [x] P4f.2 Add interventions that use existing capabilities: emergency
   reconnaissance, field-repair reprioritization, reinforcing a task,
   expediting local procurement/transport, medical evacuation, air-cover
   coordination and local-actor negotiation. Each requires the relevant
   personnel, assets, stock and location.
-- P4f.3 Define carry-over, refresh, cap and employer-reservation behavior.
+- [x] P4f.3 Define carry-over, refresh, cap and employer-reservation behavior.
   Integrated command can reserve capacity for employer demands;
   no intervention overrides a permanent-loss or command-refusal rule.
-- P4f.4 Show plan, resource cost, forecast, and spending in the operation
+- [x] P4f.4 Show plan, resource cost, forecast, and spending in the operation
   record and AAR through the existing command path.
 
 **Acceptance:** command personnel matter during a deployment, and spending

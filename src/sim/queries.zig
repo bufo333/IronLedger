@@ -6818,6 +6818,16 @@ pub const OperationRow = struct {
     legal_tempo: []const operation_mod.TempoPosture,
     /// Operation-scoped intelligence readout (P4f). Populated for all ops.
     intel: offer_rating.OperationIntel,
+    /// Command capacity remaining on the parent contract (P4g).
+    command_capacity: u8,
+    /// Ceiling (grant × 2) on command capacity (P4g).
+    command_capacity_cap: u8,
+    /// Capacity reserved by employer rights (P4g).
+    command_capacity_reserved: u8,
+    /// Interventions already applied to this operation (P4g).
+    interventions: []const operation_mod.Intervention,
+    /// Interventions that pass their gate and whose cost fits remaining capacity (P4g).
+    affordable_interventions: []const operation_mod.Intervention,
 };
 
 pub const Operations = struct {
@@ -6850,6 +6860,7 @@ pub fn contractOperations(alloc: Alloc, gs: *GameState, contract_id: types.Contr
             operations_m.operationSucceeded(op.intent, op.outcome)
         else
             null;
+        const affordable_interventions = try interventionChoices(alloc, gs, c, op);
         try rows.append(alloc, .{
             .id = op.id,
             .name = t.name,
@@ -6868,9 +6879,34 @@ pub fn contractOperations(alloc: Alloc, gs: *GameState, contract_id: types.Contr
             .tempo = op.tempo,
             .legal_tempo = operations_m.legalTempo(t.combat),
             .intel = try offer_rating.operationIntel(gs, c, op),
+            .command_capacity = c.command_capacity,
+            .command_capacity_cap = operations_m.commandCap(gs, c),
+            .command_capacity_reserved = operations_m.employerReserved(c.terms.command_rights),
+            .interventions = op.interventions.items,
+            .affordable_interventions = affordable_interventions,
         });
     }
     return Operations{ .briefing = briefing, .rows = try rows.toOwnedSlice(alloc) };
+}
+
+/// Return the list of interventions that pass their gate and whose cost fits the
+/// current available capacity for the given committed operation (P4g).
+/// Caller owns the result slice (alloc-owned).
+pub fn interventionChoices(
+    alloc: Alloc,
+    gs: *GameState,
+    c: *const contract_mod.Contract,
+    op: *const operation_mod.Operation,
+) ![]const operation_mod.Intervention {
+    var out: std.ArrayListUnmanaged(operation_mod.Intervention) = .empty;
+    const all: [4]operation_mod.Intervention = .{ .emergency_recon, .reinforce, .air_cover, .field_repair };
+    for (all) |iv| {
+        if (operations_m.interventionApplied(op, iv)) continue;
+        if (!operations_m.interventionGate(gs, c, op, iv)) continue;
+        if (operations_m.commandCapacityAvailable(c) < operations_m.interventionCost(iv)) continue;
+        try out.append(alloc, iv);
+    }
+    return out.toOwnedSlice(alloc);
 }
 
 test "contractOperations: empty for non-arc contract" {

@@ -37,7 +37,7 @@ above is complete.
   - [x] P4d mission intent, quote/commit planning, and operation-aware battles.
   - [x] P4e per-operation lance tasking and reports.
   - [x] P4f intelligence versus tempo.
-  - [ ] P4g command capacity and interventions.
+  - [x] P4g command capacity and interventions.
   - [ ] P4h escalation, consolidation, withdrawal, and finales.
   - [ ] P4i persistent actors, relationships, world state, rivals, and officers.
   - [ ] P4j additional arcs, variants, reports, balance scripts, and docs.

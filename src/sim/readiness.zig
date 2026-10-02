@@ -5,6 +5,7 @@ const std = @import("std");
 const GameState = @import("state.zig").GameState;
 const unit_mod = @import("../domain/unit.zig");
 const force_mod = @import("../domain/force.zig");
+const types = @import("../domain/types.zig");
 
 /// Ready to act today: the hull can take the field and its crew is fit
 /// for duty. Support modifiers, MASH beds, the battle line and
@@ -20,6 +21,25 @@ pub fn forceOperational(gs: *GameState, f: *const force_mod.Force) bool {
     for (f.units.items) |uid| {
         const u = gs.unit(uid) orelse continue;
         if (unitOperational(gs, u)) return true;
+    }
+    return false;
+}
+
+/// The company has at least one operational, piloted aerospace fighter in its
+/// air wing (P4g: air_cover intervention gate and battle.zig has_air_cover).
+/// Single owner (rule 20): both battle.zig and operations.zig call this.
+pub fn companyHasOperationalFighter(gs: *GameState, company: types.ForceId) bool {
+    const c = gs.force(company) orelse return false;
+    for (c.children.items) |child_id| {
+        const child = gs.force(child_id) orelse continue;
+        if (child.echelon != .air_company) continue;
+        for (child.children.items) |al_id| {
+            const al = gs.force(al_id) orelse continue;
+            for (al.units.items) |uid| {
+                const u = gs.unit(uid) orelse continue;
+                if (u.kind == .aerospace and unitOperational(gs, u)) return true;
+            }
+        }
     }
     return false;
 }
@@ -113,7 +133,6 @@ test "force with stale unit id (missing unit) is not operational" {
     const fid = try gs.createForce("Ghost", .lance, .none);
     const f = gs.force(fid).?;
     // Append a unit id that was never added to gs.units.
-    const types = @import("../domain/types.zig");
     const ghost_id: types.UnitId = @enumFromInt(9999);
     try f.units.append(gs.allocator(), ghost_id);
     try std.testing.expect(!forceOperational(&gs, f));

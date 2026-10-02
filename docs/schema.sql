@@ -511,6 +511,8 @@ CREATE TABLE contract (
     escalation_clock INTEGER NOT NULL DEFAULT 0,     -- accumulated escalation ticks since acceptance
     -- P4c
     arc_finale_key  TEXT    NOT NULL DEFAULT '',     -- which finale was selected; empty until the terminal beat resolves
+    -- P4g
+    command_capacity INTEGER NOT NULL DEFAULT 0,    -- remaining command capacity for this contract arc
     FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 
@@ -767,6 +769,7 @@ CREATE TABLE battle_report (
     operation       TEXT    NOT NULL DEFAULT '',     -- P4c: operation template name that triggered this engagement; empty = no arc op
     operation_intent TEXT   NOT NULL DEFAULT '',     -- P4d: Intent tag name of the committed operation; empty = no operation intent
     operation_tempo TEXT    NOT NULL DEFAULT '',     -- P4f: TempoPosture tag name of the committed operation; empty = no tempo
+    operation_interventions TEXT NOT NULL DEFAULT '', -- P4g: comma-separated intervention labels applied; empty = none
     UNIQUE (cid, ord),
     FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
@@ -893,6 +896,17 @@ CREATE TABLE operation_task (
     FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 CREATE INDEX IF NOT EXISTS ix_operation_task_cid ON operation_task(cid, contract_id, operation_id);
+
+-- P4g: per-operation command intervention applications.
+CREATE TABLE operation_intervention (
+    cid             INTEGER NOT NULL,
+    contract_id     INTEGER NOT NULL, -- -> contract.id
+    operation_id    INTEGER NOT NULL, -- -> operation.id
+    ord             INTEGER NOT NULL, -- application order within the operation
+    kind            TEXT    NOT NULL, -- domain/operation.zig Intervention tag name
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
+);
+CREATE INDEX IF NOT EXISTS ix_operation_intervention_cid ON operation_intervention(cid, contract_id, operation_id);
 
 -- P4e: per-engagement tasked-lance results (child of battle_report).
 CREATE TABLE battle_report_task (

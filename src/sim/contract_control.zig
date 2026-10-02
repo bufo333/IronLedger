@@ -74,6 +74,7 @@ pub fn onAccept(gs: *GameState, c: *contract_mod.Contract) void {
         c.arc_key = k;
         c.arc_beat = 0;
         c.escalation_clock = 0;
+        c.command_capacity = operations.commandGrant(gs, c);
     }
     if (c.objective == .attrition) {
         // The enemy's own force and its reinforcements; a contract saved

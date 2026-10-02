@@ -330,14 +330,8 @@ fn companyMods(gs: *GameState, c: *const contract_mod.Contract) autoresolve.Camp
         if (child.echelon == .lance and child.role == .scouting and readiness_m.forceOperational(gs, child) and !c.terms.command_rights.overridesScouting())
             mods.recon_quality = 2;
         if (child.echelon == .air_company) {
-            // Air cover is an operational fighter.
-            for (child.children.items) |al_id| {
-                const al = gs.force(al_id) orelse continue;
-                for (al.units.items) |uid| {
-                    const u = gs.unit(uid) orelse continue;
-                    if (u.kind == .aerospace and readiness_m.unitOperational(gs, u)) mods.has_air_cover = true;
-                }
-            }
+            // Air cover: delegate to the single owner in readiness (rule 20, P4g).
+            mods.has_air_cover = readiness_m.companyHasOperationalFighter(gs, c.assigned_company);
         }
         if (child.echelon == .support_company) {
             for (child.children.items) |sl_id| {
@@ -689,12 +683,17 @@ fn openingRoll(gs: *GameState, c: *const contract_mod.Contract, player: *const S
     else
         operations_m.TempoProfile{ .surprise_reduction = 0, .prepared_roll_bonus = 0 };
 
+    const intervention_mods: operations_m.InterventionProfile = if (operations_m.committedCombatOp(c)) |op|
+        operations_m.operationInterventionMods(op)
+    else
+        operations_m.InterventionProfile{ .surprise_reduction = 0, .prepared_roll_bonus = 0 };
+
     // One opposed roll decides the engagement (rounds within are abstracted;
     // ARCH §7 steps 3–4 collapse into the margin).
     // The scenario's tilt, and what scouts give back (an ambush spotted
     // is half an ambush).
     // Recon task also reduces the scenario's surprise element (surprise_reduction). // TUNE
-    const scenario_mod: i32 = @as(i32, scenario.roll_mod) + (if (player.mods.recon_quality > 0) @as(i32, scenario.scout_bonus) else 0) + env.rollMod() + task_mods.surprise_reduction + tempo_mods.surprise_reduction + tempo_mods.prepared_roll_bonus;
+    const scenario_mod: i32 = @as(i32, scenario.roll_mod) + (if (player.mods.recon_quality > 0) @as(i32, scenario.scout_bonus) else 0) + env.rollMod() + task_mods.surprise_reduction + tempo_mods.surprise_reduction + tempo_mods.prepared_roll_bonus + intervention_mods.surprise_reduction + intervention_mods.prepared_roll_bonus;
     // Close terrain evens the odds: numbers count for less in the woods and the streets.
     const ratio_bonus: i32 = if (env.close()) @min(ratioBonus(player.power, enemy_power), 2) else ratioBonus(player.power, enemy_power);
     // Rules of engagement: the company's standing order, unless an
@@ -975,6 +974,10 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     const committed_op_early = operations_m.committedCombatOp(c);
     const op_intent: ?operation_mod.Intent = if (committed_op_early) |op| op.intent else null;
     const op_tempo: ?operation_mod.TempoPosture = if (committed_op_early) |op| op.tempo else null;
+    const op_interventions: []const u8 = if (committed_op_early) |op|
+        try operations_m.interventionSummary(gs.allocator(), op)
+    else
+        "";
     // Salvage is things, not money: your share of what the
     // crews haul off a held field becomes wrecks and parts crated to the
     // home HQ depot — to store, strip, or rebuild into a working hull.
@@ -1127,6 +1130,7 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
         .operation = op_template_name,
         .operation_intent = op_intent,
         .operation_tempo = op_tempo,
+        .operation_interventions = op_interventions,
         .tasks = task_results.items,
         .day = gs.clock.day_index,
         .contract = c.id,
@@ -1305,11 +1309,16 @@ fn concede(gs: *GameState, c: *contract_mod.Contract) !void {
 
     const concede_op_intent: ?operation_mod.Intent = if (committed_op) |op| op.intent else null;
     const concede_op_tempo: ?operation_mod.TempoPosture = if (committed_op) |op| op.tempo else null;
+    const concede_op_interventions: []const u8 = if (committed_op) |op|
+        try operations_m.interventionSummary(gs.allocator(), op)
+    else
+        "";
     const report: battle_report.BattleReport = .{
         .id = gs.nextBattleId(),
         .operation = op_template_name,
         .operation_intent = concede_op_intent,
         .operation_tempo = concede_op_tempo,
+        .operation_interventions = concede_op_interventions,
         .tasks = concede_task_results.items,
         .day = gs.clock.day_index,
         .contract = c.id,

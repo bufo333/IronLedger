@@ -282,6 +282,9 @@ pub const Contract = struct {
     arc_finale_key: []const u8 = "",
     /// Instantiated operations for this contract, in creation order.
     operations: std.ArrayListUnmanaged(operation.Operation) = .empty,
+    /// Current command-capacity pool for this contract's arc.
+    /// Deterministic monthly cadence (P4g); 0 = none available.
+    command_capacity: u8 = 0,
 
     /// The company is out on it: in transit to the world or on station.
     pub fn isRunning(self: *const Contract) bool {

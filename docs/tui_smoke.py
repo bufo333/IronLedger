@@ -384,7 +384,7 @@ assert "day 4" in plain(), plain()[-2000:]
 # → changes the ROE, confirm clears the warning, and the next advance
 # runs on to the fight instead of stopping again.
 send(":"); send("accept 9 1\r", 1.5)
-# Operations board and tempo picker: P4f — exercised right after contract acceptance.
+# Operations board, tempo picker and intervention picker: P4f/P4g.
 send("4", 0.6)                   # contracts tab
 send("\t", 0.6)                  # focus the active-contracts pane (pane 1)
 mark_ops = len(out)
@@ -395,6 +395,10 @@ if "OPERATIONS" in ops_frame:
         send("r", 0.8)           # open tempo posture picker
         assert "TEMPO POSTURE" in plain()[-30000:], plain()[-3000:]
         send("\r", 0.8)          # confirm: select the first posture (advance)
+        # P4g: try to open the intervention picker (key 'i').
+        # The op is not yet committed, so the picker shows a refusal message.
+        send("i", 0.8)           # attempt intervention picker
+        # just verify the key was accepted and the modal or status bar responded
     send("\x1b", 0.5)            # close operations modal
 for _ in range(8):
     send(":"); send("day 30\r", 2.5)

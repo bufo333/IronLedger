@@ -78,6 +78,7 @@ pub fn advanceDay(gs: *GameState) !void {
     }
     try operation_control.resolveDueOperations(gs); // contract_events sub-step: resolve due non-combat ops and finale
     try operations.advanceClocks(gs); // contract_events sub-step: escalation-clock advancement
+    if (gs.clock.date.isPayday()) try operations.refreshCommandCapacity(gs); // monthly command-capacity grant
     try battle.runDaily(gs); // battle_resolution: due engagements resolve
     try contract_control.checkEffectiveness(gs); // the ineffectiveness clock
     if (gs.clock.day_index % types.days_per_week == 0 and gs.clock.day_index > 0) {

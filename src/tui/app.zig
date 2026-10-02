@@ -27,6 +27,7 @@ pub const Table = screen_mod.Table;
 pub const q = game.queries;
 pub const types = game.types;
 pub const Command = game.commands.Command;
+const operations_mod = game.operations;
 const Lobby = game.lobby.Lobby;
 /// The session handle the lobby hands out; the client passes it to
 /// `commands.execute` and `queries` and never looks inside.
@@ -138,6 +139,8 @@ const Modal = union(enum) {
     task_pick: struct { contract: types.ContractId, operation: types.OperationId },
     /// Set the tempo posture for an available operation (P4f).
     tempo_pick: struct { contract: types.ContractId, operation: types.OperationId },
+    /// Apply a command intervention to a committed combat operation (P4g).
+    intervention_pick: struct { contract: types.ContractId, operation: types.OperationId },
 };
 
 /// A yes/no over one command. `id` is the subject the kind names.
@@ -1346,7 +1349,7 @@ pub const App = struct {
         const al = self.a();
         switch (self.modal) {
             .none => {},
-            .help, .decision, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .seat, .emblem, .hull, .contract_log, .log_entry, .battle_list, .record, .operation_pick, .intent_pick, .task_pick, .tempo_pick => try self.drawList(al),
+            .help, .decision, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .seat, .emblem, .hull, .contract_log, .log_entry, .battle_list, .record, .operation_pick, .intent_pick, .task_pick, .tempo_pick, .intervention_pick => try self.drawList(al),
             .after_action => |id| try self.drawAfterAction(al, id),
             .end_turn => {
                 const g = self.state();
@@ -3160,6 +3163,38 @@ pub const App = struct {
                     .max_h = full_h,
                 };
             },
+            .intervention_pick => |ip| {
+                const gs = self.state();
+                const ops = try q.contractOperations(al, gs, ip.contract);
+                var op_row: ?q.OperationRow = null;
+                for (ops.rows) |row| if (row.id == ip.operation) {
+                    op_row = row;
+                    break;
+                };
+                const op = op_row orelse return .{
+                    .title = try listTitle(al, "COMMAND INTERVENTION", "Enter apply", "cancel", false),
+                    .head = try al.dupe([]const u8, &.{"operation not found"}),
+                    .rows = &.{},
+                    .n = 0,
+                    .empty = "{d}no interventions available{/}",
+                    .w = layout.modal.picker_w,
+                    .max_h = full_h,
+                };
+                var rows: std.ArrayListUnmanaged([]const u8) = .empty;
+                for (op.affordable_interventions) |iv| {
+                    try rows.append(al, try std.fmt.allocPrint(al, "{s}  (cost: {d})", .{ iv.label(), operations_mod.interventionCost(iv) }));
+                }
+                const cap_line = try std.fmt.allocPrint(al, "command capacity: {d} / {d} (reserved: {d})", .{ op.command_capacity, op.command_capacity_cap, op.command_capacity_reserved });
+                return .{
+                    .title = try listTitle(al, "COMMAND INTERVENTION", "Enter apply", "cancel", false),
+                    .head = try al.dupe([]const u8, &.{ cap_line, "" }),
+                    .rows = rows.items,
+                    .n = op.affordable_interventions.len,
+                    .empty = "{d}no interventions available{/}",
+                    .w = layout.modal.picker_w,
+                    .max_h = full_h,
+                };
+            },
             else => unreachable,
         }
     }
@@ -3512,6 +3547,24 @@ pub const App = struct {
                     .{posture.label()},
                 );
             },
+            .intervention_pick => |ip| {
+                const ops = try q.contractOperations(al, self.state(), ip.contract);
+                var op_row: ?q.OperationRow = null;
+                for (ops.rows) |row| if (row.id == ip.operation) {
+                    op_row = row;
+                    break;
+                };
+                const op = op_row orelse return;
+                if (op.affordable_interventions.len == 0) return;
+                const iv = op.affordable_interventions[@min(self.modal_cursor, op.affordable_interventions.len - 1)];
+                self.modal = .none;
+                _ = try self.execSay(
+                    .{ .apply_intervention = .{ .contract = ip.contract, .operation = ip.operation, .intervention = iv } },
+                    .good,
+                    "intervention applied: {s}",
+                    .{iv.label()},
+                );
+            },
             .lance_pick => |uid| {
                 const lances = try self.lanceChoices(uid);
                 if (lances.len == 0) return;
@@ -3668,6 +3721,15 @@ pub const App = struct {
                 if (key.char == 'r') {
                     // `r` opens the tempo picker for the highlighted operation.
                     self.openModal(.{ .tempo_pick = .{ .contract = cid, .operation = row.id } });
+                    return true;
+                }
+                if (key.char == 'i') {
+                    // `i` opens the intervention picker for committed combat ops.
+                    if (row.state == .committed and row.combat) {
+                        self.openModal(.{ .intervention_pick = .{ .contract = cid, .operation = row.id } });
+                    } else {
+                        self.say(.amber, "interventions are only available for committed combat operations", .{});
+                    }
                     return true;
                 }
                 return false;
@@ -3864,7 +3926,7 @@ pub const App = struct {
     fn handleModalKey(self: *App, key: Key) !void {
         switch (self.modal) {
             .none => {},
-            .help, .decision, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .seat, .emblem, .hull, .contract_log, .log_entry, .battle_list, .record, .operation_pick, .intent_pick, .task_pick, .tempo_pick => try self.listKey(key),
+            .help, .decision, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .seat, .emblem, .hull, .contract_log, .log_entry, .battle_list, .record, .operation_pick, .intent_pick, .task_pick, .tempo_pick, .intervention_pick => try self.listKey(key),
             .after_action => |id| {
                 const hit = keys.lookup(AfterActionAction, &after_action_bindings, 0, key) orelse return;
                 switch (hit.action) {
