@@ -3935,8 +3935,8 @@ test "a rebuilt store loads to the identical digest" {
     // Digest is identical: the rebuild changed no data.
     var diff_buf: [128]u8 = undefined;
     try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &diff_buf) orelse "");
-    // Re-pinned by P4i (adds actors map, next_actor_id, .actors RNG stream).
-    try std.testing.expectEqual(@as(u64, 2621491806281531819), hash_before);
+    // Re-pinned by P4i corrections (enemy actors now tagged with enemy_key; F3 fix).
+    try std.testing.expectEqual(@as(u64, 12410792612607626998), hash_before);
 }
 
 test "every next-ID counter resumes past a higher owned id after load" {
@@ -4427,9 +4427,9 @@ test "golden master: a played year hashes to its pinned value, and a save of it 
     try playedYearForTest(&gs);
     try std.testing.expect(gs.battle_reports.kept.items.len > 0); // the year saw fighting
     // Any change to a simulated or saved result moves this; re-pin it only
-    // when the change is meant. Re-pinned by P4g (adds command_capacity and
-    // operation_intervention).
-    try std.testing.expectEqual(@as(u64, 2621491806281531819), digest.stateHash(&gs));
+    // when the change is meant. Re-pinned by P4i corrections (enemy actors now
+    // tagged with enemy_key instead of employer_key; F3 fix).
+    try std.testing.expectEqual(@as(u64, 12410792612607626998), digest.stateHash(&gs));
 
     const store = try Store.open(":memory:");
     defer store.close();
@@ -5275,6 +5275,208 @@ test "invalid and orphaned operation_intervention rows reject the load as corrup
         try s.db.exec("PRAGMA foreign_keys = ON");
         try std.testing.expectError(error.CorruptSave, s.load(std.testing.allocator, gs.campaign_id));
     }
+}
+
+/// Build a minimal GameState with one active arc contract and one actor attached.
+/// Used by actor corrupt-load tests so `saveActors`/`loadActors` write real rows.
+fn buildActorGs(alloc: std.mem.Allocator) !GameState {
+    var gs = GameState.init(alloc, .{ .seed = 20050 });
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    const co = try @import("../sim/starter_company.zig").generateInto(&gs, "Alpha");
+    const cid: types.ContractId = @enumFromInt(1);
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+        .status = .active,
+        .assigned_company = co,
+        .arc_key = "fracturing_garrison",
+    });
+    const c = gs.contracts.getPtr(cid).?;
+    const aid: types.ActorId = @enumFromInt(1);
+    const a: actor_mod.Actor = .{
+        .id = aid,
+        .archetype_key = "liaison",
+        .first_name = "Ann",
+        .last_name = "Smith",
+        .faction_key = "LC",
+        .side = .employer,
+        .contract = cid,
+        .trust = 20,
+    };
+    try gs.commitActor(a);
+    try c.actor_ids.append(gs.allocator(), aid);
+    gs.next_actor_id = 2;
+    gs.next_contract_id = 2;
+    return gs;
+}
+
+/// Save a campaign with an actor row, corrupt it with `sql`, and try to load it back.
+fn loadActorAfterTampering(sql: [*:0]const u8) !void {
+    var gs = try buildActorGs(std.testing.allocator);
+    defer gs.deinit();
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    try store.db.exec("PRAGMA foreign_keys = OFF");
+    try store.db.exec(sql);
+    try store.db.exec("PRAGMA foreign_keys = ON");
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    loaded.deinit();
+}
+
+test "actors with nonzero relationships and a recurring actor survive a save/load round-trip (P4i)" {
+    // Rules 47, 67 / P4i: a campaign with actors — including a recurring actor that
+    // carries forward relationship values from a closed contract — survives save → load
+    // with an identical stateHash. Exercises saveActors/loadActors with real rows.
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 20001 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    const co = try @import("../sim/starter_company.zig").generateInto(&gs, "Alpha");
+
+    // Contract 1 (completed) — introduces liaison actor (id=1).
+    const cid1: types.ContractId = @enumFromInt(1);
+    try gs.contracts.put(gs.allocator(), cid1, .{
+        .id = cid1,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+        .status = .completed,
+        .assigned_company = co,
+        .arc_key = "fracturing_garrison",
+    });
+    const c1 = gs.contracts.getPtr(cid1).?;
+    const aid1: types.ActorId = @enumFromInt(1);
+    const actor1: actor_mod.Actor = .{
+        .id = aid1,
+        .archetype_key = "liaison",
+        .first_name = "Ann",
+        .last_name = "Smith",
+        .faction_key = "LC",
+        .side = .employer,
+        .contract = cid1,
+        .trust = 30,
+        .hostility = 5,
+        .last_cause = "good_work",
+        .last_cause_day = 10,
+    };
+    try gs.commitActor(actor1);
+    try c1.actor_ids.append(gs.allocator(), aid1);
+
+    // Contract 2 (active) — recurring liaison (id=2) carrying forward from contract 1.
+    const cid2: types.ContractId = @enumFromInt(2);
+    try gs.contracts.put(gs.allocator(), cid2, .{
+        .id = cid2,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+        .status = .active,
+        .assigned_company = co,
+        .arc_key = "fracturing_garrison",
+    });
+    const c2 = gs.contracts.getPtr(cid2).?;
+    const aid2: types.ActorId = @enumFromInt(2);
+    const actor2: actor_mod.Actor = .{
+        .id = aid2,
+        .archetype_key = "liaison",
+        .first_name = "Ann",
+        .last_name = "Smith",
+        .faction_key = "LC",
+        .side = .employer,
+        .contract = cid2,
+        .trust = 45,
+        .hostility = 3,
+        .last_cause = "repeated_service",
+        .last_cause_day = 40,
+        .recurring = true,
+    };
+    try gs.commitActor(actor2);
+    try c2.actor_ids.append(gs.allocator(), aid2);
+
+    gs.next_actor_id = 3;
+    gs.next_contract_id = 3;
+
+    try std.testing.expectEqual(@as(usize, 2), gs.actors.count());
+    const before = digest.stateHash(&gs);
+
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+
+    var diff_buf: [128]u8 = undefined;
+    try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &diff_buf) orelse "");
+    try std.testing.expectEqual(before, digest.stateHash(&loaded));
+    // Actors round-tripped.
+    try std.testing.expectEqual(@as(usize, 2), loaded.actors.count());
+    // Recurring flag survives.
+    try std.testing.expect(loaded.actors.getPtr(aid2).?.recurring);
+    // Nonzero relationships survive.
+    try std.testing.expectEqual(@as(i16, 45), loaded.actors.getPtr(aid2).?.trust);
+}
+
+test "a v43 store migrates to v44 with the actor table created and next_actor_id defaults to 1 (P4i)" {
+    // Rule 50 / P4i: a store at schema v43 (no actor table, no next_actor_id meta row)
+    // must migrate cleanly to v44 — applySchema creates the actor table — and loading
+    // a campaign from the migrated store yields next_actor_id = 1 (safe default for a
+    // campaign that had no actors before P4i).
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 20002 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+
+    const raw = try sqlite.Db.open(":memory:");
+    var s1 = try Store.fromDb(raw);
+    try s1.save(&gs);
+    // Simulate a v43 store: drop the actor table and the next_actor_id meta row,
+    // then downgrade schema_version to 43.
+    try raw.exec("DROP TABLE actor");
+    try raw.exec("DELETE FROM meta WHERE key = 'next_actor_id'");
+    try raw.exec("UPDATE setting SET value = 43 WHERE key = 'schema_version'");
+    // fromDb sees v43, runs applySchema (CREATE TABLE IF NOT EXISTS actor), sets v44.
+    const s2 = try Store.fromDb(raw);
+    defer s2.close();
+    // Schema advanced to 44.
+    try std.testing.expectEqual(@as(i64, schema_version), s2.getSetting("schema_version", 0));
+    // actor table exists and is empty.
+    const cnt = try s2.db.prepare("SELECT COUNT(*) FROM actor");
+    defer cnt.finalize();
+    try std.testing.expect(try cnt.next());
+    try std.testing.expectEqual(@as(i64, 0), cnt.int(0));
+    // Loading the campaign yields next_actor_id = 1 (no meta row → safe default).
+    var loaded = try s2.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+    try std.testing.expectEqual(@as(u32, 1), loaded.next_actor_id);
+}
+
+test "an unknown archetype_key in an actor row rejects the load as corrupt (P4i)" {
+    // Rule 47 / P4i: actor.archetype_key must name a known archetype (rule 50).
+    try std.testing.expectError(error.CorruptSave, loadActorAfterTampering(
+        "UPDATE actor SET archetype_key = 'notanarchetype'",
+    ));
+}
+
+test "an out-of-range relationship in an actor row rejects the load as corrupt (P4i)" {
+    // Rule 47 / P4i: trust (and the other dimensions) must lie in [rel_min, rel_max].
+    // trust = 200 > rel_max = 100.
+    try std.testing.expectError(error.CorruptSave, loadActorAfterTampering(
+        "UPDATE actor SET trust = 200",
+    ));
+}
+
+test "an actor row with a dangling contract reference rejects the load as corrupt (P4i)" {
+    // Rule 47 / P4i: if actor.contract != 0, the contract_id must resolve to a loaded
+    // contract. A nonzero id that names nothing is corruption.
+    try std.testing.expectError(error.CorruptSave, loadActorAfterTampering(
+        "UPDATE actor SET contract = 99999",
+    ));
 }
 
 test "withdrawn operation and fell finale round-trip through save/load with identical stateHash (P4h)" {

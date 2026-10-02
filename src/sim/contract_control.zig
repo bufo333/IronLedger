@@ -895,3 +895,55 @@ test "combatEffective: false when nothing committed; threshold at effective_min_
     // Well above: effective.
     try std.testing.expect(combatEffective(100, 100));
 }
+
+test "acceptContract: arc contract attaches actors (len > 0) and advances next_actor_id; non-arc attaches none (P4i)" {
+    const starter_company = @import("starter_company.zig");
+    // Arc contract (garrison_duty): actors are attached and next_actor_id advances.
+    {
+        var gs = GameState.init(std.testing.allocator, .{ .seed = 14141 });
+        defer gs.deinit();
+        _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+        const co = try starter_company.generateInto(&gs, "Alpha");
+        try contract_market.refresh(&gs);
+        var arc_idx: ?usize = null;
+        for (0..gs.contract_offers.items.len) |i| {
+            const o = &gs.contract_offers.items[i];
+            if (operations.selectArcKeyFor(o.kind) != null and
+                contract_market.offerEligible(&gs, o, co))
+            {
+                arc_idx = i;
+                break;
+            }
+        }
+        try std.testing.expect(arc_idx != null); // seed must generate a garrison offer
+        const id_before = gs.next_actor_id;
+        const offer_id = gs.contract_offers.items[arc_idx.?].id;
+        try acceptContract(&gs, offer_id, co);
+        const c = gs.contracts.getPtr(offer_id).?;
+        try std.testing.expect(c.actor_ids.items.len > 0);
+        try std.testing.expect(gs.actors.count() > 0);
+        try std.testing.expect(gs.next_actor_id > id_before);
+    }
+    // Non-arc contract (raid kind): no actors attached.
+    {
+        var gs = GameState.init(std.testing.allocator, .{ .seed = 14142 });
+        defer gs.deinit();
+        _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+        const co = try starter_company.generateInto(&gs, "Alpha");
+        try contract_market.refresh(&gs);
+        var noarc_idx: ?usize = null;
+        for (0..gs.contract_offers.items.len) |i| {
+            const o = &gs.contract_offers.items[i];
+            if (operations.selectArcKeyFor(o.kind) == null and
+                contract_market.offerEligible(&gs, o, co))
+            {
+                noarc_idx = i;
+                break;
+            }
+        }
+        try std.testing.expect(noarc_idx != null); // seed must generate a raid offer
+        const offer_id = gs.contract_offers.items[noarc_idx.?].id;
+        try acceptContract(&gs, offer_id, co);
+        try std.testing.expectEqual(@as(usize, 0), gs.actors.count());
+    }
+}

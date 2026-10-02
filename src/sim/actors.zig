@@ -50,8 +50,12 @@ pub fn generateActor(gs: *GameState, archetype_key: []const u8, faction_key: []c
 
 /// Look for a prior actor with the same (faction, archetype) whose contract is
 /// closed. Used at arc attachment to make an actor "recur" (P4h §3 recurrence).
-/// Returns the first match found (insertion order), or null.
+/// Returns the prior actor with the highest id (most recently introduced) among
+/// all matching closed-contract actors, so that a recurring actor carries forward
+/// the most recent accumulated history rather than a frozen older snapshot.
 pub fn priorRelationship(gs: *GameState, faction_key: []const u8, archetype_key: []const u8) ?*actor_mod.Actor {
+    var best: ?*actor_mod.Actor = null;
+    var best_id: u32 = 0;
     var it = gs.actors.iterator();
     while (it.next()) |entry| {
         const a = entry.value_ptr;
@@ -62,9 +66,13 @@ pub fn priorRelationship(gs: *GameState, faction_key: []const u8, archetype_key:
             const c = gs.contracts.getPtr(a.contract);
             if (c != null and c.?.isRunning()) continue; // still active — not eligible
         }
-        return a;
+        const id = @intFromEnum(a.id);
+        if (best == null or id > best_id) {
+            best = a;
+            best_id = id;
+        }
     }
-    return null;
+    return best;
 }
 
 /// Clamp a value to the actor relationship range.
@@ -200,17 +208,21 @@ pub fn instantiateActors(gs: *GameState, c: *contract_mod.Contract, id_start: u3
     var prep_count: usize = 0;
     var next_id: u32 = id_start;
     for (arch_keys[0..arch_count]) |arch_key| {
+        // Enemy-side archetypes belong to the enemy faction; all others to the employer.
+        const arch = actor_mod.find(arch_key).?; // validated when collecting arch_keys above
+        const side = std.meta.stringToEnum(actor_mod.FactionSide, arch.faction_side) orelse .employer;
+        const faction_key = if (side == .enemy) c.enemy_key else c.employer_key;
         const id: types.ActorId = @enumFromInt(next_id);
         var a: actor_mod.Actor = undefined;
-        // Check recurrence: same (employer faction, archetype) on a closed contract.
-        if (priorRelationship(gs, c.employer_key, arch_key)) |prior| {
+        // Check recurrence: same (faction, archetype) on a closed contract.
+        if (priorRelationship(gs, faction_key, arch_key)) |prior| {
             // Carry forward: same name and relationship values.
             a = prior.*;
             a.id = id;
             a.contract = c.id;
             a.recurring = true;
         } else {
-            a = try generateActor(gs, arch_key, c.employer_key, id);
+            a = try generateActor(gs, arch_key, faction_key, id);
             a.contract = c.id;
         }
         prepared[prep_count] = a;
@@ -360,6 +372,79 @@ test "conversionAllowed: returns .none for every actor" {
     try std.testing.expectEqual(ConversionKind.none, conversionAllowed(&a));
     const b: actor_mod.Actor = .{ .archetype_key = "enemy_commander" };
     try std.testing.expectEqual(ConversionKind.none, conversionAllowed(&b));
+}
+
+test "priorRelationship: multi-prior returns the most-recently-introduced actor (highest id)" {
+    // F2: when multiple prior actors share the same (faction, archetype), the one
+    // with the highest id (most recently introduced) is returned so that recurrence
+    // carries forward the latest accumulated history, not a frozen older snapshot.
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 8 });
+    defer gs.deinit();
+
+    // Three actors with the same (faction, archetype) and no active contract.
+    // trust values 10, 20, 30 distinguish them by id.
+    for ([_]u32{ 1, 2, 3 }) |raw_id| {
+        const aid: types.ActorId = @enumFromInt(raw_id);
+        const a: actor_mod.Actor = .{
+            .id = aid,
+            .archetype_key = "liaison",
+            .first_name = "A",
+            .last_name = "B",
+            .faction_key = "LC",
+            .contract = .none,
+            .trust = @intCast(raw_id * 10),
+        };
+        try gs.commitActor(a);
+    }
+
+    // Must return actor id=3 (trust=30), not id=1 or id=2.
+    const prior = priorRelationship(&gs, "LC", "liaison");
+    try std.testing.expect(prior != null);
+    try std.testing.expectEqual(@as(types.ActorId, @enumFromInt(3)), prior.?.id);
+    try std.testing.expectEqual(@as(i16, 30), prior.?.trust);
+}
+
+test "instantiateActors: enemy-side archetype gets enemy_key as faction_key" {
+    // F3: an enemy-side archetype (enemy_commander) must be tagged with c.enemy_key,
+    // not c.employer_key, so that recurrence matches correctly across employers.
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 3 });
+    defer gs.deinit();
+
+    const cid: types.ContractId = @enumFromInt(1);
+    var c = contract_mod.Contract{
+        .id = cid,
+        .arc_key = "fracturing_garrison",
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .kind = .garrison_duty,
+        .terms = .{ .length_months = 3, .base_pay_month = 100_000 },
+    };
+
+    try instantiateActors(&gs, &c, 1);
+    try std.testing.expect(gs.actors.count() > 0);
+
+    // At least one enemy-side actor must have faction_key == "DC".
+    var found_enemy = false;
+    var it = gs.actors.iterator();
+    while (it.next()) |entry| {
+        if (std.mem.eql(u8, entry.value_ptr.faction_key, "DC")) {
+            found_enemy = true;
+            break;
+        }
+    }
+    try std.testing.expect(found_enemy);
+
+    // Every actor's faction_key must match its archetype's side: LC for employer, DC for enemy.
+    it = gs.actors.iterator();
+    while (it.next()) |entry| {
+        const a = entry.value_ptr;
+        if (a.side == .enemy) {
+            try std.testing.expectEqualStrings("DC", a.faction_key);
+        } else {
+            try std.testing.expectEqualStrings("LC", a.faction_key);
+        }
+    }
 }
 
 test "instantiateActors: failure-atomic under injected OOM" {

@@ -1810,6 +1810,70 @@ test "execExploitOperation: failure-atomic under OOM at log reservation" {
     try testing.expectEqual(ops_before, c.operations.items.len); // no follow-ups appended
 }
 
+test "resolveDueOperations: adjusts attached actor relationship with non-zero delta and sets last_cause (P4i)" {
+    // Consumer test: resolving a non-combat operation calls adjustRelationship on
+    // all attached actors. The actor's last_cause is set (non-empty) and at least
+    // one relationship dimension changes (rule 20, F1.7).
+    const testing = std.testing;
+    const actor_mod = @import("../domain/actor.zig");
+    var gs = GameState.init(testing.allocator, .{ .seed = 77777 });
+    defer gs.deinit();
+
+    const cid: types.ContractId = @enumFromInt(1);
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+        .status = .active,
+        .arc_key = "fracturing_garrison",
+        .escalation_clock = 5,
+    });
+    const c = gs.contracts.getPtr(cid).?;
+    const t = operation_mod.findTemplate("negotiate_terms").?;
+    const committed_day: u32 = 0;
+    try c.operations.append(gs.allocator(), .{
+        .id = @enumFromInt(1),
+        .template_key = "negotiate_terms",
+        .state = .committed,
+        .opened_day = committed_day,
+        .committed_day = committed_day,
+    });
+
+    // Attach an actor (trust = 0, last_cause = "") so we can observe the adjustment.
+    const aid: types.ActorId = @enumFromInt(1);
+    try c.actor_ids.append(gs.allocator(), aid);
+    const a: actor_mod.Actor = .{
+        .id = aid,
+        .archetype_key = "liaison",
+        .first_name = "Ann",
+        .last_name = "Smith",
+        .faction_key = "LC",
+        .side = .employer,
+        .contract = cid,
+    };
+    try gs.commitActor(a);
+    gs.next_actor_id = 2;
+
+    // Advance to the resolution day and resolve.
+    gs.clock.day_index = committed_day + @as(u32, t.expected_days);
+    try resolveDueOperations(&gs);
+
+    // Operation resolved.
+    try testing.expectEqual(operation_mod.OperationState.resolved, c.operations.items[0].state);
+    try testing.expect(c.operations.items[0].outcome != .none);
+
+    // Actor relationship adjusted: last_cause is non-empty (template name was recorded).
+    const updated = gs.actor(aid).?;
+    try testing.expect(updated.last_cause.len > 0);
+    // At least one relationship dimension changed for any resolved outcome band.
+    const total_delta = @abs(@as(i32, updated.trust)) + @abs(@as(i32, updated.debt)) +
+        @abs(@as(i32, updated.respect)) + @abs(@as(i32, updated.hostility));
+    try testing.expect(total_delta > 0);
+}
+
 test "execConsolidateOperation: failure-atomic under OOM at log reservation" {
     const testing = std.testing;
     const digest = @import("digest.zig");
