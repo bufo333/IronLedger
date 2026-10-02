@@ -547,7 +547,7 @@ test "a performance failure at term is .failed — no clawback, no cooling, VP c
     const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
         .id = @enumFromInt(1),
-        .kind = .objective_raid,
+        .kind = .recon_raid, // arc-less kind: no arc finale interferes with the score check
         .employer_key = "FS",
         .enemy_key = "CC",
         .planet_key = "caph",

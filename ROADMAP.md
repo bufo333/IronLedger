@@ -1607,10 +1607,11 @@ or officer produces legible consequences from prior decisions.
 Start with enough content to prove replayability, then grow content from the
 validated framework rather than adding a second story system.
 
-- P4i.1 Add four further complete arcs after the P4b vertical slice:
+- [x] P4i.1 Add four further complete arcs after the P4b vertical slice:
   `aid under siege` for relief work, `enemy supply network` for raid/guerrilla
   work, `political evacuation` for extraction work, and `beachhead and
   breakthrough` for planetary assault. Each has at least two endings.
+  *(shipped sim/p4j-arcs)*
 - P4i.2 Add operation variants for every major contract family and a
   bounded actor/rival archetype set. Content expansion changes data, not the
   operation engine.

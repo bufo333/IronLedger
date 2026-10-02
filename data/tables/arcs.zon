@@ -61,5 +61,177 @@
             },
             .opening = .{ "negotiate_terms", "repel_probe" },
         },
+        .{
+            .key = "aid_under_siege",
+            .name = "Aid Under Siege",
+            .kinds = .{"relief_duty"},
+            .beats = .{
+                .{
+                    .key = "breakthrough",
+                    .name = "Breaking Through",
+                    .escalation_threshold = 30, // TUNE: ~30 active days before perimeter stress
+                },
+                .{
+                    .key = "strain",
+                    .name = "Perimeter Strained",
+                    .escalation_threshold = 20, // TUNE: ~20 more days before the line buckles
+                },
+                .{
+                    .key = "climax",
+                    .name = "Siege Breaks",
+                    .escalation_threshold = 0, // terminal: awaiting finale
+                },
+            },
+            .finales = .{
+                .{
+                    .key = "relief_fails",
+                    .name = "Siege Line Collapses",
+                    .min_clock = 40, // TUNE: high accumulated pressure triggers collapse
+                    .ends_contract = true,
+                    .score_delta = 0, // TUNE: fail clause owns consequences
+                    .vp_delta = 0, // TUNE
+                    .standing_delta = 0, // TUNE
+                },
+                .{
+                    .key = "relief_holds",
+                    .name = "Siege Lifted",
+                    .min_clock = 0, // unconditional fallback
+                    .ends_contract = false,
+                    .score_delta = 2, // TUNE
+                    .vp_delta = 3, // TUNE
+                    .standing_delta = 2, // TUNE
+                },
+            },
+            .opening = .{ "break_through_cordon", "coordinate_relief" },
+        },
+        .{
+            .key = "enemy_supply_network",
+            .name = "Enemy Supply Network",
+            .kinds = .{ "objective_raid", "diversionary_raid", "guerrilla_warfare" },
+            .beats = .{
+                .{
+                    .key = "infiltrate",
+                    .name = "Infiltration",
+                    .escalation_threshold = 25, // TUNE: ~25 active days before network exposed
+                },
+                .{
+                    .key = "exposed",
+                    .name = "Network Exposed",
+                    .escalation_threshold = 20, // TUNE: ~20 more days before open reprisal
+                },
+                .{
+                    .key = "reprisal",
+                    .name = "Open Reprisal",
+                    .escalation_threshold = 0, // terminal: awaiting finale
+                },
+            },
+            .finales = .{
+                .{
+                    .key = "network_intact",
+                    .name = "Supply Lines Restored",
+                    .min_clock = 40, // TUNE: high pressure means network reconstituted
+                    .ends_contract = true,
+                    .score_delta = 0, // TUNE: fail clause owns consequences
+                    .vp_delta = 0, // TUNE
+                    .standing_delta = 0, // TUNE
+                },
+                .{
+                    .key = "network_severed",
+                    .name = "Supply Network Crippled",
+                    .min_clock = 0, // unconditional fallback
+                    .ends_contract = false,
+                    .score_delta = 2, // TUNE
+                    .vp_delta = 3, // TUNE
+                    .standing_delta = 2, // TUNE
+                },
+            },
+            .opening = .{ "raid_depot", "map_supply_routes" },
+        },
+        .{
+            .key = "political_evacuation",
+            .name = "Political Evacuation",
+            .kinds = .{"extraction_raid"},
+            .beats = .{
+                .{
+                    .key = "quiet",
+                    .name = "Quiet Extraction",
+                    .escalation_threshold = 25, // TUNE: ~25 active days before cover blown
+                },
+                .{
+                    .key = "blown",
+                    .name = "Cover Blown",
+                    .escalation_threshold = 20, // TUNE: ~20 more days before hot exfil
+                },
+                .{
+                    .key = "hot_exfil",
+                    .name = "Hot Exfil",
+                    .escalation_threshold = 0, // terminal: awaiting finale
+                },
+            },
+            .finales = .{
+                .{
+                    .key = "evac_lost",
+                    .name = "Principals Captured",
+                    .min_clock = 40, // TUNE: high pressure means principals taken
+                    .ends_contract = true,
+                    .score_delta = 0, // TUNE: fail clause owns consequences
+                    .vp_delta = 0, // TUNE
+                    .standing_delta = 0, // TUNE
+                },
+                .{
+                    .key = "evac_success",
+                    .name = "Principals Extracted",
+                    .min_clock = 0, // unconditional fallback
+                    .ends_contract = false,
+                    .score_delta = 2, // TUNE
+                    .vp_delta = 3, // TUNE
+                    .standing_delta = 2, // TUNE
+                },
+            },
+            .opening = .{ "secure_route", "contact_principals" },
+        },
+        .{
+            .key = "beachhead_and_breakthrough",
+            .name = "Beachhead and Breakthrough",
+            .kinds = .{"planetary_assault"},
+            .beats = .{
+                .{
+                    .key = "beachhead",
+                    .name = "Beachhead",
+                    .escalation_threshold = 20, // TUNE: ~20 active days before breakout
+                },
+                .{
+                    .key = "breakout",
+                    .name = "Breakout",
+                    .escalation_threshold = 20, // TUNE: ~20 more days before decisive push
+                },
+                .{
+                    .key = "push",
+                    .name = "Decisive Push",
+                    .escalation_threshold = 0, // terminal: awaiting finale
+                },
+            },
+            .finales = .{
+                .{
+                    .key = "assault_repulsed",
+                    .name = "Beachhead Overrun",
+                    .min_clock = 45, // TUNE: high pressure means beachhead lost
+                    .ends_contract = true,
+                    .score_delta = 0, // TUNE: fail clause owns consequences
+                    .vp_delta = 0, // TUNE
+                    .standing_delta = 0, // TUNE
+                },
+                .{
+                    .key = "breakthrough",
+                    .name = "Breakthrough Achieved",
+                    .min_clock = 0, // unconditional fallback
+                    .ends_contract = false,
+                    .score_delta = 3, // TUNE
+                    .vp_delta = 4, // TUNE
+                    .standing_delta = 2, // TUNE
+                },
+            },
+            .opening = .{ "establish_beachhead", "recon_landing_zone" },
+        },
     },
 }

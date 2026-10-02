@@ -840,14 +840,25 @@ pub fn refreshCommandCapacity(gs: *GameState) !void {
 
 // ------------------------------------------------------------------ tests
 
-test "selectArcKeyFor: garrison/security select the slice arc; raid kinds select none" {
+test "selectArcKeyFor: all arc-mapped kinds and arc-less kinds" {
     const testing = std.testing;
-    // Garrison-class kinds that should select the fracturing_garrison arc.
+    // Garrison/security → fracturing_garrison (vertical slice).
     try testing.expectEqualStrings("fracturing_garrison", selectArcKeyFor(.garrison_duty).?);
     try testing.expectEqualStrings("fracturing_garrison", selectArcKeyFor(.security_duty).?);
-    // Combat-heavy kinds that should select nothing.
-    try testing.expectEqual(@as(?[]const u8, null), selectArcKeyFor(.objective_raid));
-    try testing.expectEqual(@as(?[]const u8, null), selectArcKeyFor(.planetary_assault));
+    // Relief → aid_under_siege.
+    try testing.expectEqualStrings("aid_under_siege", selectArcKeyFor(.relief_duty).?);
+    // Raid/guerrilla → enemy_supply_network.
+    try testing.expectEqualStrings("enemy_supply_network", selectArcKeyFor(.objective_raid).?);
+    try testing.expectEqualStrings("enemy_supply_network", selectArcKeyFor(.diversionary_raid).?);
+    try testing.expectEqualStrings("enemy_supply_network", selectArcKeyFor(.guerrilla_warfare).?);
+    // Extraction → political_evacuation.
+    try testing.expectEqualStrings("political_evacuation", selectArcKeyFor(.extraction_raid).?);
+    // Planetary assault → beachhead_and_breakthrough.
+    try testing.expectEqualStrings("beachhead_and_breakthrough", selectArcKeyFor(.planetary_assault).?);
+    // Arc-less kinds return null.
+    try testing.expectEqual(@as(?[]const u8, null), selectArcKeyFor(.cadre_duty));
+    try testing.expectEqual(@as(?[]const u8, null), selectArcKeyFor(.riot_duty));
+    try testing.expectEqual(@as(?[]const u8, null), selectArcKeyFor(.pirate_hunting));
     try testing.expectEqual(@as(?[]const u8, null), selectArcKeyFor(.recon_raid));
 }
 

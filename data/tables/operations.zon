@@ -44,5 +44,165 @@
             .follow_up = .{},
             .decline_note = "pressure_increase",
         },
+        .{
+            .key = "break_through_cordon",
+            .name = "Break Through Cordon",
+            .arc_key = "aid_under_siege",
+            .combat = true,
+            .objective = "Force a gap in the enemy cordon to open a relief corridor",
+            .expected_days = 2, // TUNE
+            .follow_up = .{"stabilize_perimeter"},
+            .decline_note = "pressure_increase",
+        },
+        .{
+            .key = "coordinate_relief",
+            .name = "Coordinate Relief",
+            .arc_key = "aid_under_siege",
+            .combat = false,
+            .objective = "Coordinate supply convoys and local defenders to sustain the relief effort",
+            .expected_days = 7, // TUNE
+            .follow_up = .{"evacuate_wounded"},
+            .decline_note = "readiness_slip",
+        },
+        .{
+            .key = "stabilize_perimeter",
+            .name = "Stabilize Perimeter",
+            .arc_key = "aid_under_siege",
+            .combat = true,
+            .objective = "Repel probing attacks and shore up the defensive perimeter",
+            .expected_days = 3, // TUNE
+            .follow_up = .{},
+            .decline_note = "pressure_increase",
+        },
+        .{
+            .key = "evacuate_wounded",
+            .name = "Evacuate Wounded",
+            .arc_key = "aid_under_siege",
+            .combat = false,
+            .objective = "Organize and escort medical convoys out of the combat zone",
+            .expected_days = 5, // TUNE
+            .follow_up = .{},
+            .decline_note = "readiness_slip",
+        },
+        .{
+            .key = "raid_depot",
+            .name = "Raid Depot",
+            .arc_key = "enemy_supply_network",
+            .combat = true,
+            .objective = "Strike an enemy supply depot to disrupt materiel flow",
+            .expected_days = 2, // TUNE
+            .follow_up = .{"ambush_convoy"},
+            .decline_note = "pressure_increase",
+        },
+        .{
+            .key = "map_supply_routes",
+            .name = "Map Supply Routes",
+            .arc_key = "enemy_supply_network",
+            .combat = false,
+            .objective = "Conduct covert reconnaissance to chart enemy logistics corridors",
+            .expected_days = 5, // TUNE
+            .follow_up = .{"sabotage_depot"},
+            .decline_note = "readiness_slip",
+        },
+        .{
+            .key = "ambush_convoy",
+            .name = "Ambush Convoy",
+            .arc_key = "enemy_supply_network",
+            .combat = true,
+            .objective = "Intercept and destroy an enemy resupply convoy",
+            .expected_days = 2, // TUNE
+            .follow_up = .{},
+            .decline_note = "pressure_increase",
+        },
+        .{
+            .key = "sabotage_depot",
+            .name = "Sabotage Depot",
+            .arc_key = "enemy_supply_network",
+            .combat = true,
+            .objective = "Infiltrate and demolish a hardened enemy supply depot",
+            .expected_days = 3, // TUNE
+            .follow_up = .{},
+            .decline_note = "pressure_increase",
+        },
+        .{
+            .key = "secure_route",
+            .name = "Secure Route",
+            .arc_key = "political_evacuation",
+            .combat = true,
+            .objective = "Clear and hold the extraction corridor against enemy interdiction",
+            .expected_days = 2, // TUNE
+            .follow_up = .{"hold_landing_zone"},
+            .decline_note = "pressure_increase",
+        },
+        .{
+            .key = "contact_principals",
+            .name = "Contact Principals",
+            .arc_key = "political_evacuation",
+            .combat = false,
+            .objective = "Make covert contact with the evacuation targets and confirm their readiness",
+            .expected_days = 6, // TUNE
+            .follow_up = .{"extract_under_fire"},
+            .decline_note = "readiness_slip",
+        },
+        .{
+            .key = "hold_landing_zone",
+            .name = "Hold Landing Zone",
+            .arc_key = "political_evacuation",
+            .combat = true,
+            .objective = "Defend the landing zone against enemy attempts to close it down",
+            .expected_days = 3, // TUNE
+            .follow_up = .{},
+            .decline_note = "pressure_increase",
+        },
+        .{
+            .key = "extract_under_fire",
+            .name = "Extract Under Fire",
+            .arc_key = "political_evacuation",
+            .combat = true,
+            .objective = "Fight through enemy interference to lift the principals to safety",
+            .expected_days = 2, // TUNE
+            .follow_up = .{},
+            .decline_note = "pressure_increase",
+        },
+        .{
+            .key = "establish_beachhead",
+            .name = "Establish Beachhead",
+            .arc_key = "beachhead_and_breakthrough",
+            .combat = true,
+            .objective = "Seize and hold a landing zone against immediate enemy counterattack",
+            .expected_days = 2, // TUNE
+            .follow_up = .{"break_enemy_line"},
+            .decline_note = "pressure_increase",
+        },
+        .{
+            .key = "recon_landing_zone",
+            .name = "Recon Landing Zone",
+            .arc_key = "beachhead_and_breakthrough",
+            .combat = false,
+            .objective = "Scout the designated landing zone and clear sensor-kill emplacements",
+            .expected_days = 4, // TUNE
+            .follow_up = .{"seize_objective"},
+            .decline_note = "readiness_slip",
+        },
+        .{
+            .key = "break_enemy_line",
+            .name = "Break Enemy Line",
+            .arc_key = "beachhead_and_breakthrough",
+            .combat = true,
+            .objective = "Punch through the main enemy defensive line to open the breakout corridor",
+            .expected_days = 3, // TUNE
+            .follow_up = .{},
+            .decline_note = "pressure_increase",
+        },
+        .{
+            .key = "seize_objective",
+            .name = "Seize Objective",
+            .arc_key = "beachhead_and_breakthrough",
+            .combat = true,
+            .objective = "Capture the key terrain feature that anchors the planetary assault",
+            .expected_days = 3, // TUNE
+            .follow_up = .{},
+            .decline_note = "pressure_increase",
+        },
     },
 }

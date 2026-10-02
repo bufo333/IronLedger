@@ -347,3 +347,7 @@ Operations screen shows current officers with their seat, rank, performance
 score, band, and recurring tag. Officers never alter loyalty, rank, retention,
 or any other `Person` field in this increment — officer arcs are read-only
 display, groundwork for future proposals and personnel hooks (ROADMAP P4h.6).
+
+Operation arcs now cover garrison/security, relief, raid/guerrilla, extraction,
+and planetary-assault contract families, so every major deployment type draws a
+narrative arc with ordered beats and two possible endings.
