@@ -379,6 +379,14 @@ out or goes missing — a ransom/trade/write-off decision. How a hull died
 (12D.2, TechManual: cored CT, engine kill, ammunition explosion) decides
 what its rebuild needs; some wrecks are scrap, only worth stripping.
 
+**Per-operation lance tasking** (P4e): before a committed combat operation
+resolves each combat lance may be assigned a role — main effort, screen,
+reserve, escort, objective/security, recovery, or recon — through the `task`
+and `untask` CLI verbs or the TUI 't' key on the active-contracts pane.
+`operations.legalTasks`, `taskEligible`, `taskProfile`, and
+`operationTaskMods` are the single rule owners; battle, queries and TUI
+consume only through those functions.  Each tasked lance appears in the AAR.
+
 Garrison-class contracts see §8 events (raids, sabotage, riots) and, since
 12D.6, a one-lance **probe** every six weeks or so.
 

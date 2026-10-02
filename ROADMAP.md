@@ -1461,22 +1461,22 @@ losses while securing an outcome that changes the contract campaign.
 Standing lance roles remain doctrine. Tasking is a per-operation assignment
 that decides how available lances serve that operation.
 
-- P4d.1 Add operation-scoped tasks: screen, main effort, reserve, escort,
+- [x] P4d.1 Add operation-scoped tasks: screen, main effort, reserve, escort,
   objective/security, recovery and recon. Training is never an operational
   task.
-- P4d.2 Define task eligibility. A lance must be operational,
+- [x] P4d.2 Define task eligibility. A lance must be operational,
   co-located, allowed by command rights and compatible with the chosen task.
   Recovery, escort and objective tasks require the actual force/support
   capability they claim to use.
-- P4d.3 Define task effects. Main effort adds combat power and exposure;
+- [x] P4d.3 Define task effects. Main effort adds combat power and exposure;
   screen/recon reduce surprise; reserve protects against a bad opening;
   escort protects convoy/support assets while reducing line power;
   objective/security improves operation success; recovery improves post-field
   recovery. No screen or command re-derives these effects.
-- P4d.4 Extend battle reports and operation outcomes with each tasked
+- [x] P4d.4 Extend battle reports and operation outcomes with each tasked
   lance, task success, and material consequence, such as a reserve avoiding a
   rout or an escort preserving a convoy.
-- P4d.5 Add command/query/TUI/REPL support through the existing
+- [x] P4d.5 Add command/query/TUI/REPL support through the existing
   battle-orders planning surface. Tests cover fixed-seed outcome differences,
   command-rights refusal, and uncrewed, damaged or in-transit lance refusal.
 

@@ -551,6 +551,22 @@ fn parseVerb(verb: []const u8, tokens: *std.mem.TokenIterator(u8, .scalar)) Pars
         if (eq(u8, op, "commit")) return .{ .refit_commit = unit };
         return error.BadArguments;
     }
+    if (eq(u8, verb, "task")) {
+        // task <contract-id> <operation-id> <lance-id> <task>
+        const cid: types.ContractId = @enumFromInt(try num(u32, tokens.next()));
+        const oid: types.OperationId = @enumFromInt(try num(u32, tokens.next()));
+        const lid: types.ForceId = @enumFromInt(try num(u32, tokens.next()));
+        const task_str = try need(tokens.next());
+        const task = std.meta.stringToEnum(operation_mod.LanceTask, task_str) orelse return error.BadArguments;
+        return .{ .task_lance = .{ .contract = cid, .operation = oid, .lance = lid, .task = task } };
+    }
+    if (eq(u8, verb, "untask")) {
+        // untask <contract-id> <operation-id> <lance-id>
+        const cid: types.ContractId = @enumFromInt(try num(u32, tokens.next()));
+        const oid: types.OperationId = @enumFromInt(try num(u32, tokens.next()));
+        const lid: types.ForceId = @enumFromInt(try num(u32, tokens.next()));
+        return .{ .clear_lance_task = .{ .contract = cid, .operation = oid, .lance = lid } };
+    }
     return null;
 }
 
@@ -683,6 +699,10 @@ pub fn errorText(err: anyerror) []const u8 {
         error.OperationNoOpposition => "committing a combat operation requires an opposition force on this contract.",
         error.OperationBusy => "a combat operation is already committed on this contract — one at a time.",
         error.OperationIntentIllegal => "the chosen intent is not permitted for this operation — check command rights and operation type.",
+        error.OperationNotCommitted => "that operation has not been committed yet — commit it before assigning lance tasks.",
+        error.LanceNotTaskable => "that lance is not eligible for tasking — check that it is operational, in the assigned company, and not in transit.",
+        error.TaskIllegal => "that task is not permitted under your current command rights and operation type.",
+        error.UnknownLance => "no lance with that id in this contract's company — `forces` lists available lances.",
         else => "an unexpected internal error",
     };
 }
@@ -765,6 +785,8 @@ pub const verbs = [_][]const u8{
     "recall",
     "commit",
     "decline",
+    "task",
+    "untask",
     "found",
     "link",
     "assignco",
@@ -848,6 +870,8 @@ pub fn usage(verb: []const u8) ?[]const u8 {
         .{ "recall", "recall co:N" },
         .{ "commit", "commit <contract-id> <operation-id> <intent>   (commit an available operation; intent: preserve_force, secure_objective, break_enemy, protect_assets, secure_intelligence, recover)" },
         .{ "decline", "decline <contract-id> <operation-id>   (decline an available operation)" },
+        .{ "task", "task <contract-id> <operation-id> <lance-id> <task>   (assign a lance task; task: screen, main_effort, reserve, escort, objective_security, recovery, recon)" },
+        .{ "untask", "untask <contract-id> <operation-id> <lance-id>   (clear a lance task assignment)" },
         .{ "found", "found <planet key> <name>" },
         .{ "link", "link hq:A hq:B [level 1-3]" },
         .{ "assignco", "assignco co:N hq:M" },
@@ -895,6 +919,21 @@ test "command line parses the common verbs" {
     try std.testing.expectEqual(types.HqId.none, cmd9.fabricate.hq);
     var it10 = std.mem.tokenizeScalar(u8, "co:1 air Sky Lance", ' ');
     try std.testing.expect((try parseCommand("newlance", &it10)).?.new_lance.kind == .air);
+    // task / untask parsing (P4e).
+    var it11 = std.mem.tokenizeScalar(u8, "1 2 3 main_effort", ' ');
+    const cmd11 = (try parseCommand("task", &it11)).?;
+    try std.testing.expectEqual(@as(u32, 1), @intFromEnum(cmd11.task_lance.contract));
+    try std.testing.expectEqual(@as(u32, 2), @intFromEnum(cmd11.task_lance.operation));
+    try std.testing.expectEqual(@as(u32, 3), @intFromEnum(cmd11.task_lance.lance));
+    try std.testing.expectEqual(operation_mod.LanceTask.main_effort, cmd11.task_lance.task);
+    var it12 = std.mem.tokenizeScalar(u8, "1 2 3", ' ');
+    const cmd12 = (try parseCommand("untask", &it12)).?;
+    try std.testing.expectEqual(@as(u32, 1), @intFromEnum(cmd12.clear_lance_task.contract));
+    try std.testing.expectEqual(@as(u32, 2), @intFromEnum(cmd12.clear_lance_task.operation));
+    try std.testing.expectEqual(@as(u32, 3), @intFromEnum(cmd12.clear_lance_task.lance));
+    // Unknown task string → BadArguments.
+    var it13 = std.mem.tokenizeScalar(u8, "1 2 3 badtask", ' ');
+    try std.testing.expectError(error.BadArguments, parseCommand("task", &it13));
 }
 
 test "every listed verb parses or fails on arguments — never falls through as unknown" {

@@ -276,6 +276,133 @@ pub fn resolveDueOperations(gs: *GameState) !void {
     }
 }
 
+// ---- pub fn execTaskLance -----------------------------------------------
+
+pub fn execTaskLance(gs: *GameState, args: @FieldType(commands.Command, "task_lance")) Error!commands.Result {
+    const cid = args.contract;
+    const oid = args.operation;
+    const lance = args.lance;
+    const task = args.task;
+
+    // ---- VALIDATE: no mutation ----
+    const c = try findActiveContract(gs, cid);
+
+    // Find op by id.
+    var op_ptr: ?*operation_mod.Operation = null;
+    for (c.operations.items) |*op| if (op.id == oid) {
+        op_ptr = op;
+        break;
+    };
+    const op = op_ptr orelse return error.UnknownOperation;
+    if (op.state != .committed) return error.OperationNotCommitted;
+
+    // Validate the template is combat.
+    const t = operation_mod.findTemplate(op.template_key) orelse return error.UnknownOperation;
+    if (!t.combat) return error.OperationNotCommitted;
+
+    // Lance must exist in the force tree.
+    if (gs.force(lance) == null) return error.UnknownLance;
+
+    // taskEligible covers: child check, operational, in-transit, taskLegal, capability.
+    if (!operations.taskEligible(gs, c, op, lance, task)) {
+        // Distinguish the specific refusal.
+        const company = gs.force(c.assigned_company) orelse return error.UnknownLance;
+        var is_child = false;
+        for (company.children.items) |child_id| if (child_id == lance) {
+            is_child = true;
+            break;
+        };
+        if (!is_child) return error.UnknownLance;
+        const template = operation_mod.findTemplate(op.template_key) orelse return error.UnknownOperation;
+        if (!operations.taskLegal(template.combat, c.terms.command_rights, task)) return error.TaskIllegal;
+        return error.LanceNotTaskable;
+    }
+
+    // ---- PREPARE: reserve log slot and pre-format ----
+    try gs.reserveLog(1);
+    var date_buf: [10]u8 = undefined;
+    const lance_name = if (gs.force(lance)) |f| f.name else "";
+    const log_text = try std.fmt.allocPrint(gs.allocator(), "{s} [arc] tasked {s}: {s}", .{
+        gs.clock.date.text(&date_buf),
+        lance_name,
+        task.label(),
+    });
+
+    // Ensure capacity for the tasks list before any mutation (failure-atomic).
+    // Upsert: if the lance already has a task, replace it; otherwise append.
+    var existing_idx: ?usize = null;
+    for (op.tasks.items, 0..) |lt, i| if (lt.lance == lance) {
+        existing_idx = i;
+        break;
+    };
+    if (existing_idx == null) {
+        // Need to grow: ensure capacity before mutation (rules 7, 11-13).
+        try op.tasks.ensureUnusedCapacity(gs.allocator(), 1);
+    }
+
+    // ---- COMMIT: infallible ----
+    if (existing_idx) |i| {
+        op.tasks.items[i].task = task;
+    } else {
+        op.tasks.appendAssumeCapacity(.{ .lance = lance, .task = task });
+    }
+    gs.event_log.appendAssumeCapacity(.{
+        .day = gs.clock.day_index,
+        .category = .contract,
+        .company = c.assigned_company,
+        .contract = c.id,
+        .text = log_text,
+    });
+
+    return .{};
+}
+
+// ---- pub fn execClearLanceTask ------------------------------------------
+
+pub fn execClearLanceTask(gs: *GameState, args: @FieldType(commands.Command, "clear_lance_task")) Error!commands.Result {
+    const cid = args.contract;
+    const oid = args.operation;
+    const lance = args.lance;
+
+    // ---- VALIDATE: no mutation ----
+    const c = try findActiveContract(gs, cid);
+
+    var op_ptr: ?*operation_mod.Operation = null;
+    for (c.operations.items) |*op| if (op.id == oid) {
+        op_ptr = op;
+        break;
+    };
+    const op = op_ptr orelse return error.UnknownOperation;
+    if (op.state != .committed) return error.OperationNotCommitted;
+
+    // Lance must exist (even if no task is assigned — no-op is fine).
+    if (gs.force(lance) == null) return error.UnknownLance;
+
+    // ---- PREPARE: reserve log slot ----
+    try gs.reserveLog(1);
+    var date_buf: [10]u8 = undefined;
+    const lance_name = if (gs.force(lance)) |f| f.name else "";
+    const log_text = try std.fmt.allocPrint(gs.allocator(), "{s} [arc] cleared task for {s}", .{
+        gs.clock.date.text(&date_buf),
+        lance_name,
+    });
+
+    // ---- COMMIT: infallible ----
+    for (op.tasks.items, 0..) |lt, i| if (lt.lance == lance) {
+        _ = op.tasks.orderedRemove(i);
+        break;
+    };
+    gs.event_log.appendAssumeCapacity(.{
+        .day = gs.clock.day_index,
+        .category = .contract,
+        .company = c.assigned_company,
+        .contract = c.id,
+        .text = log_text,
+    });
+
+    return .{};
+}
+
 // ------------------------------------------------------------------ tests
 
 test "execCommitOperation: available → committed, sets committed_day" {
@@ -776,4 +903,130 @@ test "resolveDueOperations: intent affects the resolved band (preserve_force < s
     const score_pf = operations.nonCombatScore(&gs_pf, gs_pf.contracts.getPtr(cid).?, t, .preserve_force);
     const score_so = operations.nonCombatScore(&gs_so, gs_so.contracts.getPtr(cid).?, t, .secure_objective);
     try testing.expect(score_pf < score_so);
+}
+
+/// Build a standard test fixture: an active garrison contract with a committed
+/// combat op and a populated company, returning the contract id, op id,
+/// and a lance id from that company.
+fn taskFixture(gs: *GameState) !struct { cid: types.ContractId, oid: types.OperationId, lance: types.ForceId } {
+    const cid: types.ContractId = @enumFromInt(1);
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+        .status = .active,
+        .arc_key = "fracturing_garrison",
+        .enemy_lances = 2,
+        .enemy_lance_bv = 5000,
+    });
+    const c = gs.contracts.getPtr(cid).?;
+    const fid = (try @import("toe.zig").execNewCompany(gs, "Alpha")).created_force;
+    c.assigned_company = fid;
+    const company = gs.force(fid).?;
+    var lance_id: types.ForceId = .none;
+    for (company.children.items) |child_id| {
+        if (gs.force(child_id)) |f| if (f.isCombatLance()) {
+            lance_id = child_id;
+            break;
+        };
+    }
+    const oid: types.OperationId = @enumFromInt(1);
+    try c.operations.append(gs.allocator(), .{
+        .id = oid,
+        .template_key = "repel_probe",
+        .state = .committed,
+        .opened_day = 0,
+        .committed_day = 0,
+    });
+    return .{ .cid = cid, .oid = oid, .lance = lance_id };
+}
+
+test "execTaskLance: task stored; upsert replaces prior task; clear removes" {
+    const testing = std.testing;
+    var gs = GameState.init(testing.allocator, .{});
+    defer gs.deinit();
+    const fix = try taskFixture(&gs);
+    const c = gs.contracts.getPtr(fix.cid).?;
+
+    // Assign main_effort.
+    _ = try execTaskLance(&gs, .{ .contract = fix.cid, .operation = fix.oid, .lance = fix.lance, .task = .main_effort });
+    try testing.expectEqual(@as(usize, 1), c.operations.items[0].tasks.items.len);
+    try testing.expectEqual(operation_mod.LanceTask.main_effort, c.operations.items[0].tasks.items[0].task);
+
+    // Upsert: replace with screen.
+    _ = try execTaskLance(&gs, .{ .contract = fix.cid, .operation = fix.oid, .lance = fix.lance, .task = .screen });
+    try testing.expectEqual(@as(usize, 1), c.operations.items[0].tasks.items.len);
+    try testing.expectEqual(operation_mod.LanceTask.screen, c.operations.items[0].tasks.items[0].task);
+
+    // Clear removes it.
+    _ = try execClearLanceTask(&gs, .{ .contract = fix.cid, .operation = fix.oid, .lance = fix.lance });
+    try testing.expectEqual(@as(usize, 0), c.operations.items[0].tasks.items.len);
+}
+
+test "execTaskLance: OperationNotCommitted / UnknownLance / TaskIllegal each refused; digest unchanged" {
+    const testing = std.testing;
+    const digest = @import("digest.zig");
+    var gs = GameState.init(testing.allocator, .{});
+    defer gs.deinit();
+    const fix = try taskFixture(&gs);
+    const c = gs.contracts.getPtr(fix.cid).?;
+
+    // Non-committed op.
+    c.operations.items[0].state = .available;
+    const before = digest.stateHash(&gs);
+    try testing.expectError(error.OperationNotCommitted, execTaskLance(&gs, .{ .contract = fix.cid, .operation = fix.oid, .lance = fix.lance, .task = .main_effort }));
+    try testing.expectEqual(before, digest.stateHash(&gs));
+    c.operations.items[0].state = .committed;
+
+    // Unknown lance.
+    const fake_lance: types.ForceId = @enumFromInt(9999);
+    const before2 = digest.stateHash(&gs);
+    try testing.expectError(error.UnknownLance, execTaskLance(&gs, .{ .contract = fix.cid, .operation = fix.oid, .lance = fake_lance, .task = .main_effort }));
+    try testing.expectEqual(before2, digest.stateHash(&gs));
+
+    // Illegal task (integrated rights + screen).
+    c.terms.command_rights = .integrated;
+    const before3 = digest.stateHash(&gs);
+    try testing.expectError(error.TaskIllegal, execTaskLance(&gs, .{ .contract = fix.cid, .operation = fix.oid, .lance = fix.lance, .task = .screen }));
+    try testing.expectEqual(before3, digest.stateHash(&gs));
+    c.terms.command_rights = .independent;
+}
+
+test "execTaskLance: failure-atomic under OOM" {
+    const testing = std.testing;
+    const digest = @import("digest.zig");
+    var outer = std.heap.ArenaAllocator.init(testing.allocator);
+    defer outer.deinit();
+    var gs = GameState.init(outer.allocator(), .{});
+    defer gs.deinit();
+    const fix = try taskFixture(&gs);
+
+    const before = digest.stateHash(&gs);
+    gs.arena.state.used_list = null;
+    gs.arena.state.free_list = null;
+    gs.arena.child_allocator = testing.failing_allocator;
+    try testing.expectError(error.OutOfMemory, execTaskLance(&gs, .{ .contract = fix.cid, .operation = fix.oid, .lance = fix.lance, .task = .main_effort }));
+    try testing.expectEqual(before, digest.stateHash(&gs));
+}
+
+test "execClearLanceTask: failure-atomic under OOM" {
+    const testing = std.testing;
+    const digest = @import("digest.zig");
+    var outer = std.heap.ArenaAllocator.init(testing.allocator);
+    defer outer.deinit();
+    var gs = GameState.init(outer.allocator(), .{});
+    defer gs.deinit();
+    const fix = try taskFixture(&gs);
+    // First assign a task using a valid non-OOM allocator.
+    _ = try execTaskLance(&gs, .{ .contract = fix.cid, .operation = fix.oid, .lance = fix.lance, .task = .main_effort });
+
+    const before = digest.stateHash(&gs);
+    gs.arena.state.used_list = null;
+    gs.arena.state.free_list = null;
+    gs.arena.child_allocator = testing.failing_allocator;
+    try testing.expectError(error.OutOfMemory, execClearLanceTask(&gs, .{ .contract = fix.cid, .operation = fix.oid, .lance = fix.lance }));
+    try testing.expectEqual(before, digest.stateHash(&gs));
 }

@@ -134,6 +134,8 @@ const Modal = union(enum) {
     operation_pick: types.ContractId,
     /// Pick the mission intent for a specific operation before committing it.
     intent_pick: struct { contract: types.ContractId, operation: types.OperationId },
+    /// Assign or clear lance tasks for a committed combat operation (P4e).
+    task_pick: struct { contract: types.ContractId, operation: types.OperationId },
 };
 
 /// A yes/no over one command. `id` is the subject the kind names.
@@ -1342,7 +1344,7 @@ pub const App = struct {
         const al = self.a();
         switch (self.modal) {
             .none => {},
-            .help, .decision, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .seat, .emblem, .hull, .contract_log, .log_entry, .battle_list, .record, .operation_pick, .intent_pick => try self.drawList(al),
+            .help, .decision, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .seat, .emblem, .hull, .contract_log, .log_entry, .battle_list, .record, .operation_pick, .intent_pick, .task_pick => try self.drawList(al),
             .after_action => |id| try self.drawAfterAction(al, id),
             .end_turn => {
                 const g = self.state();
@@ -3085,6 +3087,57 @@ pub const App = struct {
                     .max_h = full_h,
                 };
             },
+            .task_pick => |tp| {
+                // List the company's eligible lances with their current task.
+                const gs = self.state();
+                const ops = try q.contractOperations(al, gs, tp.contract);
+                var op_row: ?q.OperationRow = null;
+                for (ops.rows) |row| if (row.id == tp.operation) {
+                    op_row = row;
+                    break;
+                };
+                const op = op_row orelse return .{
+                    .title = try listTitle(al, "LANCE TASKS", "Enter set", "cancel", false),
+                    .head = try al.dupe([]const u8, &.{"operation not found"}),
+                    .rows = &.{},
+                    .n = 0,
+                    .empty = "{d}no lances{/}",
+                    .w = layout.modal.picker_w,
+                    .max_h = full_h,
+                };
+                const c = gs.contracts.getPtr(tp.contract) orelse return .{
+                    .title = try listTitle(al, "LANCE TASKS", "Enter set", "cancel", false),
+                    .head = &.{},
+                    .rows = &.{},
+                    .n = 0,
+                    .empty = "{d}no contract{/}",
+                    .w = layout.modal.picker_w,
+                    .max_h = full_h,
+                };
+                const lance_ids = try q.combatLances(al, gs, c.assigned_company);
+                var rows: std.ArrayListUnmanaged([]const u8) = .empty;
+                for (lance_ids) |child_id| {
+                    const lance_name = try q.forceName(al, gs, child_id);
+                    var task_label: []const u8 = "none";
+                    for (op.tasks) |lt| if (lt.lance == child_id) {
+                        task_label = lt.task.label();
+                        break;
+                    };
+                    try rows.append(al, try std.fmt.allocPrint(al, "{s}  [{s}]", .{ lance_name, task_label }));
+                }
+                return .{
+                    .title = try listTitle(al, "LANCE TASKS", "Enter cycle", "cancel", false),
+                    .head = try al.dupe([]const u8, &.{
+                        try std.fmt.allocPrint(al, "operation: {s} | {d} legal tasks", .{ op.name, op.legal_tasks.len }),
+                        "Enter cycles the task; x clears",
+                    }),
+                    .rows = rows.items,
+                    .n = rows.items.len,
+                    .empty = "{d}no eligible lances{/}",
+                    .w = layout.modal.picker_w,
+                    .max_h = full_h,
+                };
+            },
             else => unreachable,
         }
     }
@@ -3359,6 +3412,72 @@ pub const App = struct {
                     .{intent.label()},
                 );
             },
+            .task_pick => |tp| {
+                // Enter cycles the task for the highlighted lance through the legal set.
+                const gs = self.state();
+                const c = gs.contracts.getPtr(tp.contract) orelse return;
+                var op_ptr: ?*game.operation.Operation = null;
+                for (c.operations.items) |*op| if (op.id == tp.operation) {
+                    op_ptr = op;
+                    break;
+                };
+                const op = op_ptr orelse return;
+                const ops = try q.contractOperations(al, gs, tp.contract);
+                var op_row: ?q.OperationRow = null;
+                for (ops.rows) |row| if (row.id == tp.operation) {
+                    op_row = row;
+                    break;
+                };
+                const or_data = op_row orelse return;
+                // Enumerate eligible lances.
+                const lance_ids = try q.combatLances(al, gs, c.assigned_company);
+                if (lance_ids.len == 0) return;
+                const idx = @min(self.modal_cursor, lance_ids.len - 1);
+                const lid = lance_ids[idx];
+                // Find current task for this lance.
+                var current_idx: ?usize = null;
+                for (op.tasks.items, 0..) |lt, i| if (lt.lance == lid) {
+                    current_idx = i;
+                    break;
+                };
+                const current_task: ?game.operation.LanceTask = if (current_idx) |i|
+                    op.tasks.items[i].task
+                else
+                    null;
+                // Cycle to the next legal task, wrapping through null (clear).
+                const legal = or_data.legal_tasks;
+                if (legal.len == 0) {
+                    self.say(.amber, "no legal tasks for this operation", .{});
+                    return;
+                }
+                const next_task: ?game.operation.LanceTask = blk: {
+                    if (current_task) |ct| {
+                        for (legal, 0..) |t, i| if (t == ct) {
+                            // Next in cycle; after the last task cycle to null (clear).
+                            if (i + 1 < legal.len) break :blk legal[i + 1];
+                            break :blk null; // wrap to clear
+                        };
+                    }
+                    // null → first legal task.
+                    break :blk legal[0];
+                };
+                if (next_task) |task| {
+                    _ = try self.execSay(
+                        .{ .task_lance = .{ .contract = tp.contract, .operation = tp.operation, .lance = lid, .task = task } },
+                        .good,
+                        "tasked lance: {s}",
+                        .{task.label()},
+                    );
+                } else {
+                    _ = try self.execSay(
+                        .{ .clear_lance_task = .{ .contract = tp.contract, .operation = tp.operation, .lance = lid } },
+                        .good,
+                        "cleared task",
+                        .{},
+                    );
+                }
+                // Keep the modal open (cycling, not closing on Enter).
+            },
             .lance_pick => |uid| {
                 const lances = try self.lanceChoices(uid);
                 if (lances.len == 0) return;
@@ -3512,6 +3631,24 @@ pub const App = struct {
                 return true;
             },
             .intent_pick => return false, // only Enter (listEnter) is handled for intent_pick
+            .task_pick => |tp| {
+                // 'x' clears the current task for the highlighted lance.
+                if (key != .char or key.char != 'x') return false;
+                const al = self.a();
+                const gs = self.state();
+                const c = gs.contracts.getPtr(tp.contract) orelse return false;
+                const lance_ids = try q.combatLances(al, gs, c.assigned_company);
+                if (lance_ids.len == 0) return true;
+                const idx = @min(self.modal_cursor, lance_ids.len - 1);
+                const lid = lance_ids[idx];
+                _ = try self.execSay(
+                    .{ .clear_lance_task = .{ .contract = tp.contract, .operation = tp.operation, .lance = lid } },
+                    .good,
+                    "cleared task",
+                    .{},
+                );
+                return true;
+            },
             else => return false,
         }
         return true;
@@ -3685,7 +3822,7 @@ pub const App = struct {
     fn handleModalKey(self: *App, key: Key) !void {
         switch (self.modal) {
             .none => {},
-            .help, .decision, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .seat, .emblem, .hull, .contract_log, .log_entry, .battle_list, .record, .operation_pick, .intent_pick => try self.listKey(key),
+            .help, .decision, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .seat, .emblem, .hull, .contract_log, .log_entry, .battle_list, .record, .operation_pick, .intent_pick, .task_pick => try self.listKey(key),
             .after_action => |id| {
                 const hit = keys.lookup(AfterActionAction, &after_action_bindings, 0, key) orelse return;
                 switch (hit.action) {

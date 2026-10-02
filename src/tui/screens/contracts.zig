@@ -109,7 +109,7 @@ pub fn move(self: *App, delta: i32) anyerror!void {
     if (self.focus == 0) self.moveCursor(0, delta, view.board.len) else if (self.focus == 1) self.moveCursor(1, delta, view.active.len) else self.moveCursor(2, delta, (try q.contractHistory(al, g)).len);
 }
 
-const Action = enum { prev_hq, next_hq, accept, bargain, active_log, history_log, complete, recall, ops_board };
+const Action = enum { prev_hq, next_hq, accept, bargain, active_log, history_log, complete, recall, ops_board, task_assign };
 
 pub const bindings = [_]app.keys.Binding(Action){
     .{ .match = app.keys.Match.char('['), .action = .prev_hq, .label = "other HQ", .group = .navigate, .shown = "[ ]", .title = 0, .help = "previous / next HQ's board" },
@@ -121,6 +121,7 @@ pub const bindings = [_]app.keys.Binding(Action){
     .{ .match = app.keys.Match.char('R'), .action = .recall, .label = "recall", .group = .act, .pane = 1, .help = "recall the company (under contract: a breach, confirmed first)" },
     .{ .match = .{ .key = .enter }, .action = .history_log, .label = "closed log", .group = .act, .pane = 2, .help = "the closed contract's whole log, full screen" },
     .{ .match = app.keys.Match.char('g'), .action = .ops_board, .label = "operations", .group = .act, .pane = 1, .help = "open the arc operations board for the active contract (Enter opens the intent picker, then commits; x declines)" },
+    .{ .match = app.keys.Match.char('t'), .action = .task_assign, .label = "lance tasks", .group = .act, .pane = 1, .help = "assign lance tasks for the committed combat operation (P4e)" },
 };
 pub const legend = app.keys.entries(Action, &bindings);
 
@@ -195,6 +196,22 @@ pub fn handle(self: *App, k: app.Key) anyerror!bool {
             }
             self.modal_cursor = 0;
             self.openModal(.{ .operation_pick = sel.id });
+        },
+        .task_assign => if (view.active.len > 0) {
+            const sel = view.active[@min(self.cur(1).*, view.active.len - 1)];
+            if (sel.id == .none) {
+                self.say(.dim, "no active contract — accept a contract first", .{});
+                return true;
+            }
+            // Find the committed combat operation, if any.
+            const gs = self.state();
+            const c = gs.contracts.getPtr(sel.id) orelse return true;
+            const op = app.game.operations.committedCombatOp(c) orelse {
+                self.say(.dim, "no committed combat operation — commit a combat operation first", .{});
+                return true;
+            };
+            self.modal_cursor = 0;
+            self.openModal(.{ .task_pick = .{ .contract = sel.id, .operation = op.id } });
         },
     }
     return true;

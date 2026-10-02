@@ -10,6 +10,8 @@ const operation_mod = @import("../domain/operation.zig");
 const contract_mod = @import("../domain/contract.zig");
 const types = @import("../domain/types.zig");
 const GameState = @import("state.zig").GameState;
+const readiness = @import("readiness.zig");
+const toe = @import("toe.zig");
 
 /// Quote returned by `operationQuote` for a single operation template.
 pub const Quote = struct {
@@ -240,6 +242,155 @@ pub fn committedCombatOp(c: *const contract_mod.Contract) ?*operation_mod.Operat
         if (t.combat) return op;
     }
     return null;
+}
+
+// ---- Lance task owners (docs/p4-operations-design.md §7, rule 20) ------
+
+// Module-level task-set constants (static lifetime; `legalTasks` returns pointers to them).
+const all_tasks = [_]operation_mod.LanceTask{ .screen, .main_effort, .reserve, .escort, .objective_security, .recovery, .recon };
+const integrated_tasks = [_]operation_mod.LanceTask{ .main_effort, .objective_security, .recovery }; // TUNE: integrated command restricts the task set
+
+/// Rule owner: the set of legal tasks for a combat × command-rights combination
+/// (docs/p4-operations-design.md §7 decision 6, rule 20).
+/// Non-combat operations return an empty set; `integrated` returns the restricted set.
+/// Returned slice points to a module-level constant; lifetime is static (rule 26).
+pub fn legalTasks(combat: bool, rights: contract_mod.CommandRights) []const operation_mod.LanceTask {
+    if (!combat) return &.{};
+    if (rights == .integrated) return &integrated_tasks; // TUNE: integrated employers command the line
+    return &all_tasks;
+}
+
+/// Rule owner: is the given task legal for this combat × command-rights combination?
+/// Consumer predicate — callers use this rather than inspecting the legal set (rule 20).
+pub fn taskLegal(combat: bool, rights: contract_mod.CommandRights, task: operation_mod.LanceTask) bool {
+    return std.mem.indexOfScalar(operation_mod.LanceTask, legalTasks(combat, rights), task) != null;
+}
+
+/// Rule owner: does the company have the capability required for this task?
+/// (docs/p4-operations-design.md §7, rule 20). Pure capability check; no RNG.
+pub fn taskCapabilitySatisfied(gs: *GameState, c: *const contract_mod.Contract, task: operation_mod.LanceTask) bool {
+    return switch (task) {
+        .recovery => blk: {
+            // Recovery requires an operational salvage support lance. // TUNE
+            const sl = toe.supportLance(gs, c.assigned_company, .salvage) orelse break :blk false;
+            break :blk readiness.forceOperational(gs, sl);
+        },
+        .escort => true, // capability check deferred to P4f // TUNE
+        else => true, // all other tasks: always satisfied // TUNE
+    };
+}
+
+/// Rule owner: is this lance eligible to receive this task on this operation?
+/// (docs/p4-operations-design.md §7 decision 6, rule 20).
+/// Returns false (not an error) for any failing check; the caller decides the refusal text.
+pub fn taskEligible(gs: *GameState, c: *const contract_mod.Contract, op: *const operation_mod.Operation, lance: types.ForceId, task: operation_mod.LanceTask) bool {
+    // Op must be committed and combat.
+    if (op.state != .committed) return false;
+    const t = operation_mod.findTemplate(op.template_key) orelse return false;
+    if (!t.combat) return false;
+    // Lance must be a direct combat child of the assigned company.
+    const company = gs.force(c.assigned_company) orelse return false;
+    // Company must not be returning home (in-transit).
+    if (company.return_eta_day != null) return false;
+    var is_child = false;
+    for (company.children.items) |child_id| {
+        if (child_id == lance) {
+            is_child = true;
+            break;
+        }
+    }
+    if (!is_child) return false;
+    const lance_force = gs.force(lance) orelse return false;
+    if (!lance_force.isCombatLance()) return false;
+    // Lance must be operational.
+    if (!readiness.forceOperational(gs, lance_force)) return false;
+    // Task must be legal and capability satisfied.
+    if (!taskLegal(t.combat, c.terms.command_rights, task)) return false;
+    if (!taskCapabilitySatisfied(gs, c, task)) return false;
+    return true;
+}
+
+/// Per-task battle modifiers (docs/p4-operations-design.md §7, rule 20).
+/// All values // TUNE — balance constants.
+pub const TaskProfile = struct {
+    /// Basis-point multiplier for this lance's line power contribution. // TUNE
+    line_power_bp: i32,
+    /// Additive bonus to scenario_mod (reduces enemy surprise). // TUNE
+    surprise_reduction: i32,
+    /// This lance acts as a reserve (floor on bad opening hit_pct). // TUNE
+    reserve: bool,
+    /// Recovery roll modifier for recoverWrecks. // TUNE
+    recovery_bonus: i32,
+    /// Additive basis-point bonus to op success score. // TUNE
+    op_success_bonus: i32,
+    /// Suppresses convoy hit when present. // TUNE
+    convoy_protect: bool,
+    /// Exposure rating (informational; for future use). // TUNE
+    exposure: i32,
+};
+
+/// Rule owner: the task profile for a committed combat operation (rule 20).
+/// All return values are // TUNE balance constants.
+pub fn taskProfile(task: operation_mod.LanceTask) TaskProfile {
+    return switch (task) {
+        .main_effort => .{ .line_power_bp = 12_000, .surprise_reduction = 0, .reserve = false, .recovery_bonus = 0, .op_success_bonus = 0, .convoy_protect = false, .exposure = 200 }, // TUNE
+        .screen => .{ .line_power_bp = 10_000, .surprise_reduction = 2, .reserve = false, .recovery_bonus = 0, .op_success_bonus = 0, .convoy_protect = false, .exposure = 100 }, // TUNE
+        .recon => .{ .line_power_bp = 10_000, .surprise_reduction = 3, .reserve = false, .recovery_bonus = 0, .op_success_bonus = 0, .convoy_protect = false, .exposure = 50 }, // TUNE
+        .reserve => .{ .line_power_bp = 10_000, .surprise_reduction = 0, .reserve = true, .recovery_bonus = 0, .op_success_bonus = 0, .convoy_protect = false, .exposure = 0 }, // TUNE
+        .escort => .{ .line_power_bp = 8_000, .surprise_reduction = 0, .reserve = false, .recovery_bonus = 0, .op_success_bonus = 0, .convoy_protect = true, .exposure = 150 }, // TUNE
+        .recovery => .{ .line_power_bp = 9_000, .surprise_reduction = 0, .reserve = false, .recovery_bonus = 2, .op_success_bonus = 0, .convoy_protect = false, .exposure = 50 }, // TUNE
+        .objective_security => .{ .line_power_bp = 11_000, .surprise_reduction = 0, .reserve = false, .recovery_bonus = 0, .op_success_bonus = 200, .convoy_protect = false, .exposure = 100 }, // TUNE
+    };
+}
+
+/// Return the task assigned to this lance on the operation, or null.
+pub fn lanceTask(op: *const operation_mod.Operation, lance: types.ForceId) ?operation_mod.LanceTask {
+    for (op.tasks.items) |lt| if (lt.lance == lance) return lt.task;
+    return null;
+}
+
+/// Apply the lance's task line-power scaling (or return base_power unchanged).
+/// Pure; no RNG. Applied in playerSideIn (rule 20).
+pub fn lanceTaskPower(op: *const operation_mod.Operation, lance: types.ForceId, base_power: i64) i64 {
+    const t = lanceTask(op, lance) orelse return base_power;
+    return types.applyBp(base_power, taskProfile(t).line_power_bp);
+}
+
+/// Aggregate task modifiers for the opening roll and aftermath (not per-lance).
+pub const TaskMods = struct {
+    surprise_reduction: i32 = 0,
+    reserve_present: bool = false,
+    recovery_bonus: i32 = 0,
+    escort_present: bool = false,
+    objective_bonus: i32 = 0,
+};
+
+/// Rule owner: aggregate task modifiers across all assignments on the committed op
+/// (docs/p4-operations-design.md §7, rule 20). Deterministic; no RNG.
+pub fn operationTaskMods(gs: *GameState, c: *const contract_mod.Contract, op: *const operation_mod.Operation) TaskMods {
+    _ = gs;
+    _ = c;
+    var mods: TaskMods = .{};
+    for (op.tasks.items) |lt| {
+        const p = taskProfile(lt.task);
+        mods.surprise_reduction += p.surprise_reduction;
+        if (p.reserve) mods.reserve_present = true;
+        mods.recovery_bonus += p.recovery_bonus;
+        if (p.convoy_protect) mods.escort_present = true;
+        mods.objective_bonus += p.op_success_bonus;
+    }
+    return mods;
+}
+
+/// Rule owner: did this tasked lance succeed given the engagement outcome
+/// and whether the field was held? (docs/p4-operations-design.md §7, rule 20).
+pub fn taskSucceeded(task: operation_mod.LanceTask, band: operation_mod.OutcomeBand, held_field: bool) bool {
+    return switch (task) {
+        .main_effort, .objective_security => band != .failure and band != .setback, // TUNE: needs at least partial
+        .reserve => held_field, // TUNE: succeeded if the field was not lost
+        .escort, .screen, .recon => band != .failure, // TUNE: anything short of a rout
+        .recovery => band == .success or band == .decisive, // TUNE: needs a win to recover
+    };
 }
 
 /// Instantiate the opening operation(s) onto a pre-commit local contract copy.
@@ -854,4 +1005,197 @@ test "advanceClocks: failure-atomic under injected OOM at log reservation" {
         try testing.expectEqual(@as(u16, threshold - 1), c.escalation_clock);
         try testing.expectEqual(@as(u8, 0), c.arc_beat);
     }
+}
+
+test "legalTasks / taskLegal: non-combat → empty; combat independent → all 7; integrated → restricted" {
+    const testing = std.testing;
+    // Non-combat: empty regardless of rights.
+    try testing.expectEqual(@as(usize, 0), legalTasks(false, .independent).len);
+    try testing.expectEqual(@as(usize, 0), legalTasks(false, .integrated).len);
+    // Combat + independent: all 7 tasks.
+    const ind = legalTasks(true, .independent);
+    try testing.expectEqual(@as(usize, 7), ind.len);
+    // Combat + integrated: only main_effort, objective_security, recovery.
+    const integ = legalTasks(true, .integrated);
+    try testing.expectEqual(@as(usize, 3), integ.len);
+    var has_main = false;
+    var has_obj = false;
+    var has_rec = false;
+    for (integ) |t| {
+        if (t == .main_effort) has_main = true;
+        if (t == .objective_security) has_obj = true;
+        if (t == .recovery) has_rec = true;
+    }
+    try testing.expect(has_main and has_obj and has_rec);
+    // taskLegal agrees.
+    try testing.expect(taskLegal(true, .independent, .screen));
+    try testing.expect(taskLegal(true, .integrated, .main_effort));
+    try testing.expect(!taskLegal(true, .integrated, .screen));
+    try testing.expect(!taskLegal(false, .independent, .main_effort));
+}
+
+test "taskProfile: internal consistency invariants" {
+    const testing = std.testing;
+    const me = taskProfile(.main_effort);
+    const es = taskProfile(.escort);
+    const rv = taskProfile(.reserve);
+    const rn = taskProfile(.recon);
+    const sc = taskProfile(.screen);
+    const os = taskProfile(.objective_security);
+    const rc = taskProfile(.recovery);
+    // main_effort has line_power_bp > 10_000.
+    try testing.expect(me.line_power_bp > 10_000);
+    // escort has lower line_power_bp and convoy_protect.
+    try testing.expect(es.line_power_bp < 10_000);
+    try testing.expect(es.convoy_protect);
+    // reserve.reserve == true.
+    try testing.expect(rv.reserve);
+    // recon.surprise_reduction > screen.surprise_reduction.
+    try testing.expect(rn.surprise_reduction > sc.surprise_reduction);
+    // objective_security has op_success_bonus > 0.
+    try testing.expect(os.op_success_bonus > 0);
+    // recovery has recovery_bonus > 0.
+    try testing.expect(rc.recovery_bonus > 0);
+}
+
+test "taskEligible: representative refusals and accept case" {
+    const testing = std.testing;
+    var gs = @import("state.zig").GameState.init(testing.allocator, .{});
+    defer gs.deinit();
+
+    const cid: types.ContractId = @enumFromInt(1);
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+        .status = .active,
+        .arc_key = "fracturing_garrison",
+        .enemy_lances = 2,
+        .enemy_lance_bv = 5000,
+    });
+    const c = gs.contracts.getPtr(cid).?;
+    const oid: types.OperationId = @enumFromInt(1);
+    try c.operations.append(gs.allocator(), .{
+        .id = oid,
+        .template_key = "repel_probe",
+        .state = .available,
+        .opened_day = 0,
+    });
+
+    // Build a company with a combat lance and pilot.
+    const fid = (try @import("toe.zig").execNewCompany(&gs, "Alpha")).created_force;
+    c.assigned_company = fid;
+    const company = gs.force(fid).?;
+    // Find a combat lance.
+    var lance_id: types.ForceId = .none;
+    for (company.children.items) |cid2| {
+        if (gs.force(cid2)) |f| if (f.isCombatLance()) {
+            lance_id = cid2;
+            break;
+        };
+    }
+    try testing.expect(lance_id != .none);
+    const op = &c.operations.items[0];
+
+    // Refusal: op not committed.
+    try testing.expect(!taskEligible(&gs, c, op, lance_id, .main_effort));
+
+    // Commit the op.
+    op.state = .committed;
+    op.committed_day = 0;
+
+    // Refusal: non-combat op.
+    var noncombat_op: operation_mod.Operation = .{
+        .id = @enumFromInt(2),
+        .template_key = "negotiate_terms",
+        .state = .committed,
+        .opened_day = 0,
+        .committed_day = 0,
+    };
+    try testing.expect(!taskEligible(&gs, c, &noncombat_op, lance_id, .main_effort));
+
+    // Refusal: lance not a child of company (use a fake id).
+    const fake_lance: types.ForceId = @enumFromInt(9999);
+    try testing.expect(!taskEligible(&gs, c, op, fake_lance, .main_effort));
+
+    // Accept: committed combat op, real lance.
+    try testing.expect(taskEligible(&gs, c, op, lance_id, .main_effort));
+
+    // Refusal: in-transit (return_eta_day set on the force).
+    gs.force(fid).?.return_eta_day = 100;
+    try testing.expect(!taskEligible(&gs, c, op, lance_id, .main_effort));
+    gs.force(fid).?.return_eta_day = null;
+
+    // Refusal: integrated rights + screen (restricted task set).
+    c.terms.command_rights = .integrated;
+    try testing.expect(!taskEligible(&gs, c, op, lance_id, .screen));
+    // integrated + main_effort: legal.
+    try testing.expect(taskEligible(&gs, c, op, lance_id, .main_effort));
+    c.terms.command_rights = .independent;
+}
+
+test "taskSucceeded: representative verdicts" {
+    const testing = std.testing;
+    // main_effort / objective_security: need at least partial.
+    try testing.expect(!taskSucceeded(.main_effort, .failure, false));
+    try testing.expect(!taskSucceeded(.main_effort, .setback, false));
+    try testing.expect(taskSucceeded(.main_effort, .partial, false));
+    try testing.expect(taskSucceeded(.objective_security, .success, true));
+    // reserve: need held_field.
+    try testing.expect(taskSucceeded(.reserve, .failure, true));
+    try testing.expect(!taskSucceeded(.reserve, .success, false));
+    // escort / screen / recon: anything but failure.
+    try testing.expect(!taskSucceeded(.escort, .failure, false));
+    try testing.expect(taskSucceeded(.escort, .setback, false));
+    try testing.expect(taskSucceeded(.screen, .partial, true));
+    try testing.expect(taskSucceeded(.recon, .success, false));
+    // recovery: needs a win.
+    try testing.expect(!taskSucceeded(.recovery, .partial, true));
+    try testing.expect(taskSucceeded(.recovery, .success, true));
+    try testing.expect(taskSucceeded(.recovery, .decisive, false));
+}
+
+test "lanceTaskPower / operationTaskMods: tasked lance scales power; aggregate reflects assignments" {
+    const testing = std.testing;
+    var op: operation_mod.Operation = .{
+        .id = @enumFromInt(1),
+        .template_key = "repel_probe",
+        .state = .committed,
+        .opened_day = 0,
+    };
+    const lid1: types.ForceId = @enumFromInt(1);
+    const lid2: types.ForceId = @enumFromInt(2);
+
+    // No task: power unchanged.
+    try testing.expectEqual(@as(i64, 1000), lanceTaskPower(&op, lid1, 1000));
+
+    // Assign main_effort to lid1: scales by 12000/10000 = ×1.2.
+    try op.tasks.append(testing.allocator, .{ .lance = lid1, .task = .main_effort });
+    defer op.tasks.deinit(testing.allocator);
+    const p1 = lanceTaskPower(&op, lid1, 1000);
+    try testing.expect(p1 > 1000); // main_effort line_power_bp = 12000 > 10000
+
+    // Assign reserve to lid2.
+    try op.tasks.append(testing.allocator, .{ .lance = lid2, .task = .reserve });
+
+    // Aggregate: reserve_present, main_effort surprise_reduction=0.
+    var gs = @import("state.zig").GameState.init(testing.allocator, .{});
+    defer gs.deinit();
+    const cid: types.ContractId = @enumFromInt(1);
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+        .status = .active,
+    });
+    const c = gs.contracts.getPtr(cid).?;
+    const mods = operationTaskMods(&gs, c, &op);
+    try testing.expect(mods.reserve_present);
+    try testing.expectEqual(@as(i32, 0), mods.surprise_reduction); // main_effort has 0
 }

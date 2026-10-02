@@ -284,6 +284,10 @@ pub const Command = union(enum) {
     commit_operation: struct { contract: types.ContractId, operation: types.OperationId, intent: operation_mod.Intent },
     /// Decline an available operation on an active arc contract.
     decline_operation: struct { contract: types.ContractId, operation: types.OperationId },
+    /// Assign a tactical task to a lance for a committed combat operation (P4e).
+    task_lance: struct { contract: types.ContractId, operation: types.OperationId, lance: types.ForceId, task: operation_mod.LanceTask },
+    /// Remove a lance's task assignment from a committed combat operation (P4e).
+    clear_lance_task: struct { contract: types.ContractId, operation: types.OperationId, lance: types.ForceId },
 };
 
 pub const Error = error{
@@ -433,6 +437,14 @@ pub const Error = error{
     OperationBusy,
     /// The chosen intent is outside the legal set for this operation × command rights.
     OperationIntentIllegal,
+    /// The operation is not in the committed state (tasking requires commitment).
+    OperationNotCommitted,
+    /// The lance is not eligible for tasking on this operation.
+    LanceNotTaskable,
+    /// The task is not legal for this operation and command rights combination.
+    TaskIllegal,
+    /// No force with that id in this contract's company.
+    UnknownLance,
 } || std.mem.Allocator.Error;
 
 pub const Result = struct {
@@ -545,6 +557,8 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
         .recall_idle => |company| return toe.execRecallIdle(gs, company),
         .commit_operation => |a| return operation_control.execCommitOperation(gs, a),
         .decline_operation => |a| return operation_control.execDeclineOperation(gs, a),
+        .task_lance => |a| return operation_control.execTaskLance(gs, a),
+        .clear_lance_task => |a| return operation_control.execClearLanceTask(gs, a),
         .autostaff => |hq_id| return hq_ops.execAutostaff(gs, hq_id),
         .transfer_person => |t| return personnel.execTransferPerson(gs, t),
         .rename_outfit => |name| return toe.execRenameOutfit(gs, name),

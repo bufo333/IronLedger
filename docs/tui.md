@@ -226,6 +226,7 @@ titles and the help modal come from the same tables.
 | `R` | active | recall the company (under contract: a breach, confirmed first) |
 | `Enter` | history | the closed contract's whole log, full screen |
 | `g` | active | open the arc operations board for the active contract (Enter opens the intent picker, then commits; x declines) |
+| `t` | active | assign lance tasks for the committed combat operation (P4e) |
 
 ### F5 Ledger
 

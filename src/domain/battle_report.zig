@@ -133,6 +133,17 @@ pub const SalvageManifest = struct {
     unclaimed_bv: i64 = 0,
 };
 
+/// One tasked lance's result in a battle engagement (P4e).
+/// Names are duped into the campaign arena at resolution time (lifetime
+/// rule: no borrow from anything with a `deinit`; see module note).
+pub const TaskedLance = struct {
+    lance: types.ForceId,
+    lance_name: []const u8,
+    task: operation.LanceTask,
+    succeeded: bool,
+    note: []const u8,
+};
+
 /// One engagement, whole.
 pub const BattleReport = struct {
     id: types.BattleId,
@@ -195,6 +206,9 @@ pub const BattleReport = struct {
     /// The commander's stated intent for the committed combat operation, if any.
     /// Null when no combat operation was committed for this engagement.
     operation_intent: ?operation.Intent = null,
+    /// Per-lance task results for this engagement (P4e).
+    /// Arena-owned slice (duped at resolution time); empty when no tasks assigned.
+    tasks: []const TaskedLance = &.{},
     /// No combat-effective units: the objective was conceded without a shot.
     conceded: bool = false,
     /// The commander has read it. An unread report holds the turn:
@@ -265,6 +279,22 @@ pub const Journal = struct {
         return false;
     }
 };
+
+test "BattleReport: default tasks slice is empty" {
+    const r: BattleReport = .{
+        .id = @enumFromInt(1),
+        .day = 1,
+        .contract = @enumFromInt(1),
+        .company = @enumFromInt(1),
+        .kind = "k",
+        .enemy_key = "DC",
+        .scenario = "s",
+        .terrain = "t",
+        .weather = "w",
+        .outcome = .defeat,
+    };
+    try std.testing.expectEqual(@as(usize, 0), r.tasks.len);
+}
 
 test "armorOnly and hullsLost read the record, not the prose" {
     const paint: HullHit = .{ .unit = @enumFromInt(1), .chassis_key = "x", .chassis_name = "X", .armor_before = 90, .armor_after = 70 };

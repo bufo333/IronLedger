@@ -89,6 +89,15 @@ pub fn render(alloc: std.mem.Allocator, r: *const BattleReport) ![]const []const
         }));
     }
 
+    // Per-lance task results (P4e). One line per assigned lance.
+    for (r.tasks) |lt| {
+        try out.append(alloc, try std.fmt.allocPrint(alloc, "[AAR]   task {s}: {s} — {s}", .{
+            lt.task.label(),
+            lt.lance_name,
+            lt.note,
+        }));
+    }
+
     var spent: std.ArrayListUnmanaged(u8) = .empty;
     var left: std.ArrayListUnmanaged(u8) = .empty;
     for (r.ammo, 0..) |a, i| {
@@ -279,4 +288,47 @@ test "render: intent and success verdict appear in the AAR header when operation
     try std.testing.expect(lines_fail.len >= 1);
     try std.testing.expect(std.mem.indexOf(u8, lines_fail[0], "intent: preserve force") != null);
     try std.testing.expect(std.mem.indexOf(u8, lines_fail[0], "mission failed") != null);
+}
+
+test "render: per-lance task lines appear in AAR for each assigned task (P4e)" {
+    // Consumer test: render must produce one [AAR] task line per entry in report.tasks.
+    const operation = @import("../domain/operation.zig");
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const ammo = [_]battle_report.AmmoLine{.{ .key = "ammo_lrm", .burned = 0, .left = 0 }};
+    const tasks = [_]battle_report.TaskedLance{
+        .{ .lance = @enumFromInt(1), .lance_name = "Alpha Lance", .task = .main_effort, .succeeded = true, .note = "led the advance" },
+        .{ .lance = @enumFromInt(2), .lance_name = "Beta Lance", .task = .reserve, .succeeded = false, .note = "line broke before reserve could act" },
+    };
+    const r: BattleReport = .{
+        .id = @enumFromInt(5),
+        .day = 20,
+        .contract = @enumFromInt(1),
+        .company = @enumFromInt(1),
+        .kind = "garrison duty",
+        .enemy_key = "DC",
+        .scenario = "probe",
+        .terrain = "open",
+        .weather = "clear",
+        .outcome = .victory,
+        .tasks = &tasks,
+        .ammo = &ammo,
+    };
+    _ = operation;
+    const lines = try render(arena.allocator(), &r);
+    // There must be two task lines.
+    var task_lines: u32 = 0;
+    for (lines) |line| if (std.mem.indexOf(u8, line, "[AAR]   task ") != null) {
+        task_lines += 1;
+    };
+    try std.testing.expectEqual(@as(u32, 2), task_lines);
+    // The first task line must mention the task label and lance name.
+    var found_main = false;
+    var found_note = false;
+    for (lines) |line| {
+        if (std.mem.indexOf(u8, line, "main effort") != null and std.mem.indexOf(u8, line, "Alpha Lance") != null) found_main = true;
+        if (std.mem.indexOf(u8, line, "led the advance") != null) found_note = true;
+    }
+    try std.testing.expect(found_main);
+    try std.testing.expect(found_note);
 }

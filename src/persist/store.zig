@@ -36,7 +36,7 @@ const held_hulls_m = @import("../sim/held_hulls.zig");
 const arc_mod = @import("../domain/arc.zig");
 const operation_mod = @import("../domain/operation.zig");
 
-pub const schema_version = 40;
+pub const schema_version = 41;
 
 const ddl =
     \\CREATE TABLE IF NOT EXISTS player (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_seq INTEGER NOT NULL);
@@ -87,14 +87,17 @@ const ddl =
     \\CREATE TABLE IF NOT EXISTS battle_report_hit (cid INTEGER NOT NULL, report_ord INTEGER NOT NULL, ord INTEGER NOT NULL, unit INTEGER, chassis_key TEXT, chassis_name TEXT, armor_before INTEGER, armor_after INTEGER, slot TEXT, slot_part TEXT, slot_result TEXT, destroyed INTEGER, cause TEXT, pilot INTEGER, crew_name TEXT, wound_severity INTEGER, wound_location TEXT, wound_permanent INTEGER, fate TEXT, recovery_roll INTEGER, recovery_target INTEGER, lost INTEGER, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, report_ord) REFERENCES battle_report(cid, ord) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS battle_report_ammo (cid INTEGER NOT NULL, report_ord INTEGER NOT NULL, ord INTEGER NOT NULL, family TEXT, burned INTEGER, reserve INTEGER, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, report_ord) REFERENCES battle_report(cid, ord) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS battle_report_salvage (cid INTEGER NOT NULL, report_ord INTEGER NOT NULL, ord INTEGER NOT NULL, key TEXT, name TEXT, bv INTEGER, armor_pct INTEGER, quality TEXT, damaged INTEGER, destroyed INTEGER, missing INTEGER, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, report_ord) REFERENCES battle_report(cid, ord) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS operation_task (cid INTEGER NOT NULL, contract_id INTEGER NOT NULL, operation_id INTEGER NOT NULL, ord INTEGER NOT NULL, lance_id INTEGER NOT NULL, task TEXT NOT NULL, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS battle_report_task (cid INTEGER NOT NULL, report_ord INTEGER NOT NULL, ord INTEGER NOT NULL, lance_id INTEGER NOT NULL, lance_name TEXT NOT NULL, task TEXT NOT NULL, succeeded INTEGER NOT NULL CHECK (succeeded IN (0,1)), note TEXT NOT NULL, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, report_ord) REFERENCES battle_report(cid, ord) DEFERRABLE INITIALLY DEFERRED);
 ;
 
 const tables = [_][]const u8{
-    "meta",          "meta_text",    "rng",             "commander",        "person",            "person_skill",       "injury",                "award",       "ability",
-    "unit",          "unit_slot",    "force",           "force_unit",       "force_child",       "stock",              "hq",                    "hq_facility", "hq_project",
-    "contract",      "txn",          "loan",            "courier",          "policy",            "bay_job",            "candidate",             "hq_link",     "unit_transfer",
-    "supply_policy", "stock_policy", "faction_cooling", "faction_standing", "event_memory",      "listing",            "part_order",            "event_log",   "pending_event",
-    "refit_plan",    "refit_op",     "rating_snapshot", "battle_report",    "battle_report_hit", "battle_report_ammo", "battle_report_salvage", "rng_stream",  "operation",
+    "meta",           "meta_text",          "rng",             "commander",        "person",            "person_skill",       "injury",                "award",       "ability",
+    "unit",           "unit_slot",          "force",           "force_unit",       "force_child",       "stock",              "hq",                    "hq_facility", "hq_project",
+    "contract",       "txn",                "loan",            "courier",          "policy",            "bay_job",            "candidate",             "hq_link",     "unit_transfer",
+    "supply_policy",  "stock_policy",       "faction_cooling", "faction_standing", "event_memory",      "listing",            "part_order",            "event_log",   "pending_event",
+    "refit_plan",     "refit_op",           "rating_snapshot", "battle_report",    "battle_report_hit", "battle_report_ammo", "battle_report_salvage", "rng_stream",  "operation",
+    "operation_task", "battle_report_task",
 };
 
 // Indexes for per-campaign tables (A28/D31): cid filters on every load;
@@ -146,6 +149,8 @@ const index_ddl =
     \\CREATE INDEX IF NOT EXISTS ix_battle_report_salvage_report ON battle_report_salvage(cid, report_ord);
     \\CREATE INDEX IF NOT EXISTS ix_rng_stream_cid ON rng_stream(cid);
     \\CREATE INDEX IF NOT EXISTS ix_operation_cid ON operation(cid);
+    \\CREATE INDEX IF NOT EXISTS ix_operation_task_cid ON operation_task(cid, contract_id, operation_id);
+    \\CREATE INDEX IF NOT EXISTS ix_battle_report_task_report ON battle_report_task(cid, report_ord);
 ;
 
 /// The stream order of the single `rng` blob that saves before schema v32
@@ -841,6 +846,9 @@ pub const Store = struct {
     fn saveOperations(self: Store, gs: *GameState, cid: i64) !void {
         const st = try self.db.prepare("INSERT INTO operation VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)");
         defer st.finalize();
+        // P4e: per-operation task assignments.
+        const tt = try self.db.prepare("INSERT INTO operation_task VALUES (?1,?2,?3,?4,?5,?6)");
+        defer tt.finalize();
         var it = gs.contracts.iterator();
         while (it.next()) |entry| {
             const c = entry.value_ptr;
@@ -859,6 +867,17 @@ pub const Store = struct {
                     @tagName(op.intent),
                 });
                 try st.run();
+                for (op.tasks.items, 0..) |lt, ti| {
+                    try tt.bindAll(.{
+                        cid,
+                        @intFromEnum(c.id),
+                        @intFromEnum(op.id),
+                        @as(i64, @intCast(ti)),
+                        @as(i64, @intFromEnum(lt.lance)),
+                        @tagName(lt.task),
+                    });
+                    try tt.run();
+                }
             }
         }
     }
@@ -894,6 +913,35 @@ pub const Store = struct {
             }
             if (max == std.math.maxInt(u32)) return error.CorruptSave;
             gs.next_operation_id = @max(gs.next_operation_id, max + 1);
+        }
+        // FK-orphan: operation_task rows must reference loaded operation ids (P4e).
+        {
+            const chk = try self.db.prepare("SELECT COUNT(*) FROM operation_task WHERE cid = ?1 AND operation_id NOT IN (SELECT id FROM operation WHERE cid = ?1)");
+            defer chk.finalize();
+            try chk.bindAll(.{cid});
+            if (!try chk.next()) return error.CorruptSave;
+            if (chk.int(0) > 0) return error.CorruptSave;
+        }
+    }
+
+    // P4e: load lance task assignments onto operations (must run after loadOperations).
+    fn loadOperationTasks(self: Store, gs: *GameState, cid: i64) !void {
+        const alloc = gs.allocator();
+        const st = try self.db.prepare("SELECT contract_id, operation_id, lance_id, task FROM operation_task WHERE cid = ?1 ORDER BY contract_id, operation_id, ord");
+        defer st.finalize();
+        try st.bindAll(.{cid});
+        while (try st.next()) {
+            const contract_id = try toId(types.ContractId, st.int(0));
+            const operation_id = try toId(types.OperationId, st.int(1));
+            const lance_id = try toId(types.ForceId, st.int(2));
+            const task = st.enumValue(operation_mod.LanceTask, 3) orelse return error.CorruptSave;
+            const c = gs.contracts.getPtr(contract_id) orelse return error.CorruptSave;
+            for (c.operations.items) |*op| {
+                if (op.id == operation_id) {
+                    try op.tasks.append(alloc, .{ .lance = lance_id, .task = task });
+                    break;
+                }
+            }
         }
     }
 
@@ -1084,6 +1132,9 @@ pub const Store = struct {
         defer ba.finalize();
         const bs = try self.db.prepare("INSERT INTO battle_report_salvage VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)");
         defer bs.finalize();
+        // P4e: per-engagement task results.
+        const bt = try self.db.prepare("INSERT INTO battle_report_task VALUES (?1,?2,?3,?4,?5,?6,?7,?8)");
+        defer bt.finalize();
         for (gs.battle_reports.kept.items, 0..) |r, i| {
             const ord: i64 = @intCast(i);
             try br.bindAll(.{
@@ -1136,6 +1187,20 @@ pub const Store = struct {
                     @as(i64, sc.damaged_slots), @as(i64, sc.destroyed_slots), @as(i64, sc.missing_components),
                 });
                 try bs.run();
+            }
+            // P4e: task results.
+            for (r.tasks, 0..) |lt, ti| {
+                try bt.bindAll(.{
+                    cid,
+                    ord,
+                    @as(i64, @intCast(ti)),
+                    @as(i64, @intFromEnum(lt.lance)),
+                    lt.lance_name,
+                    @tagName(lt.task),
+                    @as(i64, @intFromBool(lt.succeeded)),
+                    lt.note,
+                });
+                try bt.run();
             }
         }
     }
@@ -1249,6 +1314,7 @@ pub const Store = struct {
         try self.loadStock(&gs, cid);
         try self.loadContract(&gs, cid);
         try self.loadOperations(&gs, cid);
+        try self.loadOperationTasks(&gs, cid);
         try self.loadTxn(&gs, cid);
         try self.loadLoan(&gs, cid);
         try self.loadCourier(&gs, cid);
@@ -2098,6 +2164,7 @@ pub const Store = struct {
             const hulls = try self.loadReportHits(alloc, cid, ord);
             const ammo = try self.loadReportAmmo(alloc, cid, ord);
             const candidates = try self.loadReportSalvage(alloc, cid, ord);
+            const tasks = try self.loadReportTasks(alloc, cid, ord);
             try gs.battle_reports.kept.append(alloc, .{
                 .id = try toId(types.BattleId, br.int(1)),
                 .day = try br.intAs(u32, 2),
@@ -2161,6 +2228,7 @@ pub const Store = struct {
                     if (raw.len == 0) break :blk null;
                     break :blk std.meta.stringToEnum(operation_mod.Intent, raw) orelse return error.CorruptSave;
                 },
+                .tasks = tasks,
             });
         }
         // Post-load orphan check: a child row whose report_ord names no loaded
@@ -2181,6 +2249,14 @@ pub const Store = struct {
         }
         {
             const chk = try self.db.prepare("SELECT COUNT(*) FROM battle_report_salvage WHERE cid = ?1 AND report_ord NOT IN (SELECT ord FROM battle_report WHERE cid = ?1)");
+            defer chk.finalize();
+            try chk.bindAll(.{cid});
+            if (!try chk.next()) return error.CorruptSave;
+            if (chk.int(0) > 0) return error.CorruptSave;
+        }
+        // P4e: task orphan check.
+        {
+            const chk = try self.db.prepare("SELECT COUNT(*) FROM battle_report_task WHERE cid = ?1 AND report_ord NOT IN (SELECT ord FROM battle_report WHERE cid = ?1)");
             defer chk.finalize();
             try chk.bindAll(.{cid});
             if (!try chk.next()) return error.CorruptSave;
@@ -2255,6 +2331,25 @@ pub const Store = struct {
             .missing_components = try bs.intAs(u8, 7),
         });
         return candidates.items;
+    }
+
+    // P4e: per-engagement task results for a single battle_report ord.
+    fn loadReportTasks(self: Store, alloc: std.mem.Allocator, cid: i64, ord: i64) ![]battle_report_mod.TaskedLance {
+        var tasks: std.ArrayListUnmanaged(battle_report_mod.TaskedLance) = .empty;
+        const bt = try self.db.prepare("SELECT lance_id, lance_name, task, succeeded, note FROM battle_report_task WHERE cid = ?1 AND report_ord = ?2 ORDER BY ord");
+        defer bt.finalize();
+        try bt.bindAll(.{ cid, ord });
+        while (try bt.next()) {
+            const task = bt.enumValue(operation_mod.LanceTask, 2) orelse return error.CorruptSave;
+            try tasks.append(alloc, .{
+                .lance = try toId(types.ForceId, bt.int(0)),
+                .lance_name = try bt.text(1, alloc),
+                .task = task,
+                .succeeded = bt.int(3) != 0,
+                .note = try bt.text(4, alloc),
+            });
+        }
+        return tasks.items;
     }
 
     fn loadRefitPlan(self: Store, gs: *GameState, cid: i64) !void {
@@ -3662,8 +3757,8 @@ test "a rebuilt store loads to the identical digest" {
     // Digest is identical: the rebuild changed no data.
     var diff_buf: [128]u8 = undefined;
     try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &diff_buf) orelse "");
-    // Re-pinned by P4d (adds intent to Operation, operation_intent to BattleReport).
-    try std.testing.expectEqual(@as(u64, 7947799814012943878), hash_before);
+    // Re-pinned by P4e (adds tasks to Operation and BattleReport).
+    try std.testing.expectEqual(@as(u64, 7363155052938059160), hash_before);
 }
 
 test "every next-ID counter resumes past a higher owned id after load" {
@@ -4147,9 +4242,9 @@ test "golden master: a played year hashes to its pinned value, and a save of it 
     try playedYearForTest(&gs);
     try std.testing.expect(gs.battle_reports.kept.items.len > 0); // the year saw fighting
     // Any change to a simulated or saved result moves this; re-pin it only
-    // when the change is meant. Re-pinned by P4d (adds intent to Operation,
-    // operation_intent to BattleReport).
-    try std.testing.expectEqual(@as(u64, 7947799814012943878), digest.stateHash(&gs));
+    // when the change is meant. Re-pinned by P4e (adds tasks to Operation
+    // and TaskedLance slice to BattleReport).
+    try std.testing.expectEqual(@as(u64, 7363155052938059160), digest.stateHash(&gs));
 
     const store = try Store.open(":memory:");
     defer store.close();

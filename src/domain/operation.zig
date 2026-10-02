@@ -53,6 +53,39 @@ pub const Table = struct { templates: []const OperationTemplate };
 
 pub const table: Table = @import("operations_zon");
 
+/// Tactical task assigned to one lance for a committed combat operation
+/// (docs/p4-operations-design.md §7, rule 20). Legal set is derived from
+/// the template's `combat` flag and the contract's `CommandRights`;
+/// owned by `sim/operations.zig` (rule 20).
+pub const LanceTask = enum {
+    screen,
+    main_effort,
+    reserve,
+    escort,
+    objective_security,
+    recovery,
+    recon,
+
+    /// Short display label for the UI and AAR (markup-safe; rule 33). // TUNE
+    pub fn label(self: LanceTask) []const u8 {
+        return switch (self) {
+            .screen => "screen",
+            .main_effort => "main effort",
+            .reserve => "reserve",
+            .escort => "escort",
+            .objective_security => "objective security",
+            .recovery => "recovery",
+            .recon => "recon",
+        };
+    }
+};
+
+/// One lance→task assignment on a committed combat operation (P4e).
+pub const LanceTasking = struct {
+    lance: types.ForceId,
+    task: LanceTask,
+};
+
 /// One runtime operation instance held on a Contract.
 pub const Operation = struct {
     id: types.OperationId,
@@ -66,6 +99,9 @@ pub const Operation = struct {
     /// Commander's stated mission intent, chosen at commit time (docs/p4-operations-design.md §6).
     /// Default `.secure_objective` keeps the baseline behaviour for ops committed before P4d.
     intent: Intent = .secure_objective,
+    /// Lance task assignments for this committed combat operation (P4e).
+    /// Lives in the campaign arena; freed with the arena. Default empty.
+    tasks: std.ArrayListUnmanaged(LanceTasking) = .empty,
 };
 
 /// The commander's stated objective for this operation (docs/p4-operations-design.md §6).
@@ -167,6 +203,25 @@ test "data: operations.zon loads and validates" {
     const repel = findTemplate("repel_probe").?;
     try testing.expectEqualStrings("fracturing_garrison", repel.arc_key);
     try testing.expect(repel.combat);
+}
+
+test "LanceTask: all seven values have a non-empty markup-safe label; Operation.tasks defaults to empty" {
+    const testing = std.testing;
+    const all_tasks = [_]LanceTask{ .screen, .main_effort, .reserve, .escort, .objective_security, .recovery, .recon };
+    for (all_tasks) |t| {
+        const lbl = t.label();
+        try testing.expect(lbl.len > 0);
+        // Markup-safe: no '{', no C0, no '<', '>', '&'.
+        for (lbl) |ch| try testing.expect(ch != '{' and ch >= 0x20 and ch < 0x7f and ch != '<' and ch != '>' and ch != '&');
+    }
+    // Operation defaults to empty tasks list.
+    const op: Operation = .{
+        .id = @enumFromInt(1),
+        .template_key = "negotiate_terms",
+        .state = .available,
+        .opened_day = 0,
+    };
+    try testing.expectEqual(@as(usize, 0), op.tasks.items.len);
 }
 
 test "Intent: all six values have a non-empty markup-safe label; Operation.intent defaults to secure_objective" {

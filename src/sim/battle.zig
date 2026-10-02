@@ -294,6 +294,11 @@ fn playerSideIn(gs: *GameState, alloc: std.mem.Allocator, c: *const contract_mod
         if (gs.person(lance.commander)) |leader| if (leader.has("tactical_genius")) {
             lance_power = types.applyBp(lance_power, 10_500);
         };
+        // Lance task power scaling: deterministic modifier via the task owner (P4e).
+        // No new RNG draw; battle.zig MUST NOT import operation_control.zig (rule 5).
+        if (operations_m.committedCombatOp(c)) |op| {
+            lance_power = operations_m.lanceTaskPower(op, child_id, lance_power);
+        }
         side.power += lance_power;
     }
     return side;
@@ -509,11 +514,17 @@ fn recoverWrecks(
     const has_dropship = lift.hasCrewedDropship(gs, c.assigned_company);
     var wrecks_here: i64 = 0;
     for (hit_log.items) |h| wrecks_here += @intFromBool(h.destroyed);
+    // Recovery task bonus: a dedicated recovery lance improves wreck retrieval. // TUNE
+    const task_recovery_bonus: i32 = if (operations_m.committedCombatOp(c)) |op|
+        operations_m.operationTaskMods(gs, c, op).recovery_bonus
+    else
+        0;
     const situation: i32 = (if (player.mods.has_salvage_lance) t.recovery_salvage_lance else 0) //
         + (if (trucks >= wrecks_here and trucks > 0) t.recovery_trucks else 0) //
         + (if (has_dropship) t.recovery_dropship else 0) //
         + (if (outcome == .rout) t.recovery_rout else 0) //
         + scenario.recovery_mod + gs.diff().recovery_mod //
+        + task_recovery_bonus //
         + switch (roe) {
             .hold => rt.hold_recovery,
             .standard => 0,
@@ -663,11 +674,19 @@ fn openingRoll(gs: *GameState, c: *const contract_mod.Contract, player: *const S
     };
     const enemy_power = enemy_elem.effectivePower(.{});
 
+    // Task modifiers: aggregate effect of per-lance assignments (P4e).
+    // Pure, deterministic, no new RNG draw.
+    const task_mods = if (operations_m.committedCombatOp(c)) |op|
+        operations_m.operationTaskMods(gs, c, op)
+    else
+        operations_m.TaskMods{};
+
     // One opposed roll decides the engagement (rounds within are abstracted;
     // ARCH §7 steps 3–4 collapse into the margin).
     // The scenario's tilt, and what scouts give back (an ambush spotted
     // is half an ambush).
-    const scenario_mod: i32 = @as(i32, scenario.roll_mod) + (if (player.mods.recon_quality > 0) @as(i32, scenario.scout_bonus) else 0) + env.rollMod();
+    // Recon task also reduces the scenario's surprise element (surprise_reduction). // TUNE
+    const scenario_mod: i32 = @as(i32, scenario.roll_mod) + (if (player.mods.recon_quality > 0) @as(i32, scenario.scout_bonus) else 0) + env.rollMod() + task_mods.surprise_reduction;
     // Close terrain evens the odds: numbers count for less in the woods and the streets.
     const ratio_bonus: i32 = if (env.close()) @min(ratioBonus(player.power, enemy_power), 2) else ratioBonus(player.power, enemy_power);
     // Rules of engagement: the company's standing order, unless an
@@ -708,11 +727,16 @@ fn openingRoll(gs: *GameState, c: *const contract_mod.Contract, player: *const S
     // A lost fight under hold costs more; a cautious company is already
     // pulling back when it turns.
     const lost_fight = outcome.isLoss();
-    const hit_pct: u32 = @intCast(@max(0, base_hit_pct + if (!lost_fight) 0 else switch (roe) {
+    var hit_pct: u32 = @intCast(@max(0, base_hit_pct + if (!lost_fight) 0 else switch (roe) {
         .hold => rt.hold_hits_pct,
         .standard => 0,
         .cautious => rt.cautious_hits_pct,
     }));
+    // Reserve task: if a reserve lance is assigned and the fight goes badly,
+    // clamp hit_pct to the draw level (the reserve steadies a collapsing line). // TUNE
+    const reserve_floor: u32 = @intCast(tb.hit_pct.draw);
+    const reserve_steadied = task_mods.reserve_present and lost_fight and hit_pct > reserve_floor;
+    if (reserve_steadied) hit_pct = reserve_floor;
     const enemy_loss_pct: u32 = switch (outcome) {
         inline else => |o| @field(tb.enemy_loss_pct, @tagName(o)),
     };
@@ -734,6 +758,7 @@ fn openingRoll(gs: *GameState, c: *const contract_mod.Contract, player: *const S
         .enemy_loss_pct = enemy_loss_pct,
         .hits = hits,
         .edge_used_by = edge_used_by,
+        .reserve_steadied = reserve_steadied,
     };
 }
 
@@ -753,6 +778,8 @@ const Opening = struct {
     /// An id, not a pointer: prisoners are hired into `people` before
     /// the report is written, and that insertion can move every entry.
     edge_used_by: types.PersonId,
+    /// A reserve lance was present and clamped a bad hit_pct (P4e).
+    reserve_steadied: bool = false,
 };
 
 /// What the engagement leaves behind once the shooting stops: the
@@ -799,9 +826,16 @@ fn aftermath(
         c.score += rt.withdrawal_score;
         c.victory_points += rt.withdrawal_score * tuning.contract.vp_per_score;
     }
-    // A convoy escort lost is a convoy hit: the support train takes it.
-    const convoy_hit = scenario.support_exposed and outcome.isLoss();
+    // Task mods: escort suppresses convoy damage; objective_security adds to score. // TUNE
+    const after_task_mods = if (operations_m.committedCombatOp(c)) |op|
+        operations_m.operationTaskMods(gs, c, op)
+    else
+        operations_m.TaskMods{};
+    // A convoy escort lost is a convoy hit, unless an escort lance was assigned (P4e).
+    const convoy_hit = scenario.support_exposed and outcome.isLoss() and !after_task_mods.escort_present;
     if (convoy_hit) @import("contract_events.zig").damageRandomUnits(gs, c.assigned_company, if (outcome == .rout) 2 else 1, .support);
+    // objective_security bonus goes to c.score only, NOT score_delta (avoids P4d VP double-count). // TUNE
+    if (after_task_mods.objective_bonus > 0) c.score += after_task_mods.objective_bonus;
     var morale_delta: i32 = switch (outcome) {
         inline else => |o| @field(tb.morale, @tagName(o)),
     };
@@ -1040,6 +1074,33 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
         });
     }
 
+    // Build per-lance task result slice (P4e). Arena-owned: names duped via gs.allocator().
+    // battle.zig MUST NOT import operation_control.zig (rule 5).
+    var task_results: std.ArrayListUnmanaged(battle_report.TaskedLance) = .empty;
+    if (committed_op) |op| {
+        for (op.tasks.items) |lt| {
+            const lf = gs.force(lt.lance);
+            const lance_name = if (lf) |f| try gs.allocator().dupe(u8, f.name) else "";
+            const succeeded = operations_m.taskSucceeded(lt.task, operations_m.combatBand(outcome), held_field);
+            const note = try gs.allocator().dupe(u8, switch (lt.task) {
+                .reserve => if (open.reserve_steadied) "steadied a bad opening" else if (succeeded) "held in reserve" else "line broke before reserve could act",
+                .main_effort => if (succeeded) "led the advance" else "could not break through",
+                .screen => if (succeeded) "screened the advance" else "screen failed",
+                .escort => if (succeeded) "escort held" else "escort failed",
+                .objective_security => if (succeeded) "secured objective" else "objective lost",
+                .recovery => if (succeeded) "recovery team succeeded" else "recovery team failed",
+                .recon => if (succeeded) "recon successful" else "recon incomplete",
+            });
+            try task_results.append(gs.allocator(), .{
+                .lance = lt.lance,
+                .lance_name = lance_name,
+                .task = lt.task,
+                .succeeded = succeeded,
+                .note = note,
+            });
+        }
+    }
+
     // Everything this engagement did, as fields. The AAR is
     // rendered from it, so the record and the narrative cannot drift.
     var ammo_lines: std.ArrayListUnmanaged(battle_report.AmmoLine) = .empty;
@@ -1052,6 +1113,7 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
         .id = gs.nextBattleId(),
         .operation = op_template_name,
         .operation_intent = op_intent,
+        .tasks = task_results.items,
         .day = gs.clock.day_index,
         .contract = c.id,
         .company = c.assigned_company,
@@ -1207,11 +1269,29 @@ fn concede(gs: *GameState, c: *contract_mod.Contract) !void {
         });
     }
 
+    // Per-lance task results for a concede: all tasks fail (defeat, field not held). (P4e)
+    var concede_task_results: std.ArrayListUnmanaged(battle_report.TaskedLance) = .empty;
+    if (committed_op) |op| {
+        for (op.tasks.items) |lt| {
+            const lf = gs.force(lt.lance);
+            const lance_name = if (lf) |f| try gs.allocator().dupe(u8, f.name) else "";
+            const note = try gs.allocator().dupe(u8, "objective conceded");
+            try concede_task_results.append(gs.allocator(), .{
+                .lance = lt.lance,
+                .lance_name = lance_name,
+                .task = lt.task,
+                .succeeded = false,
+                .note = note,
+            });
+        }
+    }
+
     const concede_op_intent: ?operation_mod.Intent = if (committed_op) |op| op.intent else null;
     const report: battle_report.BattleReport = .{
         .id = gs.nextBattleId(),
         .operation = op_template_name,
         .operation_intent = concede_op_intent,
+        .tasks = concede_task_results.items,
         .day = gs.clock.day_index,
         .contract = c.id,
         .company = c.assigned_company,

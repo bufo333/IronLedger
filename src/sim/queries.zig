@@ -6154,6 +6154,19 @@ pub fn raiseLances(alloc: Alloc, gs: *GameState, company: types.ForceId) ![]Lanc
     return out.toOwnedSlice(alloc);
 }
 
+/// Combat lances belonging to `company`, in child order.  Used by the TUI
+/// task-pick modal (P4e); rule 8: all GameState access goes through queries.
+pub fn combatLances(alloc: Alloc, gs: *GameState, company: types.ForceId) ![]types.ForceId {
+    var out: std.ArrayListUnmanaged(types.ForceId) = .empty;
+    const co = gs.force(company) orelse return out.toOwnedSlice(alloc);
+    for (co.children.items) |cid| {
+        if (gs.force(cid)) |l| if (l.isCombatLance()) {
+            try out.append(alloc, cid);
+        };
+    }
+    return out.toOwnedSlice(alloc);
+}
+
 /// The support train the raise wizard buys: one row per trade with the
 /// staple hull, what the company owns of it, and its price on the home board.
 pub const SupportLine = struct {
@@ -6795,6 +6808,10 @@ pub const OperationRow = struct {
     mandated: ?operation_mod.Intent,
     /// Whether the operation succeeded given its intent; null when not yet resolved.
     succeeded: ?bool,
+    /// Current lance task assignments on this operation (empty when non-combat or no tasks set).
+    tasks: []const operation_mod.LanceTasking,
+    /// Legal tasks for this op × command rights, or empty for non-combat. (P4e)
+    legal_tasks: []const operation_mod.LanceTask,
 };
 
 pub const Operations = struct {
@@ -6840,6 +6857,8 @@ pub fn contractOperations(alloc: Alloc, gs: *const GameState, contract_id: types
             .legal_intents = q.legal_intents,
             .mandated = q.mandated,
             .succeeded = succeeded,
+            .tasks = op.tasks.items,
+            .legal_tasks = operations_m.legalTasks(t.combat, c.terms.command_rights),
         });
     }
     return Operations{ .briefing = briefing, .rows = try rows.toOwnedSlice(alloc) };

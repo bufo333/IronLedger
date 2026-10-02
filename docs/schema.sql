@@ -1,6 +1,6 @@
 -- IRON LEDGER — SQLite save store schema (design document)
 --
--- Matches schema_version 40. The executable DDL and its column migrations
+-- Matches schema_version 41. The executable DDL and its column migrations
 -- live in src/persist/store.zig; this file is the readable reference for
 -- what each table and column means. Column order here is the runtime order.
 --
@@ -879,3 +879,30 @@ CREATE INDEX IF NOT EXISTS ix_battle_report_hit_report ON battle_report_hit(cid,
 CREATE INDEX IF NOT EXISTS ix_battle_report_ammo_report ON battle_report_ammo(cid, report_ord);
 CREATE INDEX IF NOT EXISTS ix_battle_report_salvage_report ON battle_report_salvage(cid, report_ord);
 CREATE INDEX IF NOT EXISTS ix_rng_stream_cid ON rng_stream(cid);
+
+-- P4e: per-operation lance task assignments.
+CREATE TABLE operation_task (
+    cid             INTEGER NOT NULL,
+    contract_id     INTEGER NOT NULL, -- -> contract.id
+    operation_id    INTEGER NOT NULL, -- -> operation.id
+    ord             INTEGER NOT NULL, -- assignment order within the operation
+    lance_id        INTEGER NOT NULL, -- -> force.id (the lance's ForceId)
+    task            TEXT    NOT NULL, -- domain/operation.zig LanceTask tag name
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
+);
+CREATE INDEX IF NOT EXISTS ix_operation_task_cid ON operation_task(cid, contract_id, operation_id);
+
+-- P4e: per-engagement tasked-lance results (child of battle_report).
+CREATE TABLE battle_report_task (
+    cid             INTEGER NOT NULL,
+    report_ord      INTEGER NOT NULL, -- -> battle_report.ord
+    ord             INTEGER NOT NULL, -- row order within the report
+    lance_id        INTEGER NOT NULL, -- -> force.id (ForceId at resolution time)
+    lance_name      TEXT    NOT NULL, -- duped at resolution time (arena-owned in memory)
+    task            TEXT    NOT NULL, -- domain/operation.zig LanceTask tag name
+    succeeded       INTEGER NOT NULL CHECK (succeeded IN (0,1)),
+    note            TEXT    NOT NULL, -- short consequence descriptor
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED,
+    FOREIGN KEY (cid, report_ord) REFERENCES battle_report(cid, ord) DEFERRABLE INITIALLY DEFERRED
+);
+CREATE INDEX IF NOT EXISTS ix_battle_report_task_report ON battle_report_task(cid, report_ord);
