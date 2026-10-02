@@ -342,31 +342,21 @@ pub fn execExploitOperation(gs: *GameState, args: @FieldType(commands.Command, "
     const t = operation_mod.findTemplate(op.template_key) orelse return error.UnknownOperation;
     if (t.follow_up.len == 0) return error.NoFollowUp;
 
-    // ---- PREPARE: reserve log slot and pre-allocate follow-up capacity ----
-    // Important: reserve capacity BEFORE advancing gs.next_operation_id (rule 7, 11-13).
+    // ---- PREPARE: reserve log slot; instantiateFollowUps is the final fallible step ----
+    // Important: reserve log and pre-format BEFORE appending follow-ups (rules 7, 11-13).
     try gs.reserveLog(1);
-    // ensureUnusedCapacity is the only fallible step for the follow-ups.
-    try c.operations.ensureUnusedCapacity(gs.allocator(), t.follow_up.len);
     const pressure = operations.exploitClockDelta();
     var date_buf: [10]u8 = undefined;
-    const op_name = t.name;
     const log_text = try std.fmt.allocPrint(gs.allocator(), "{s} [arc] exploit: pressed the advantage (pressure +{d})", .{
         gs.clock.date.text(&date_buf),
         pressure,
     });
+    // instantiateFollowUps reserves capacity then appends; it is the final
+    // fallible step (rules 7, 11-13: no fallible work after this).
+    const n = try operations.instantiateFollowUps(gs, c, op, gs.next_operation_id);
 
     // ---- COMMIT: infallible from here ----
-    const id_start = gs.next_operation_id;
-    for (t.follow_up, 0..) |fkey, i| {
-        const fid: types.OperationId = @enumFromInt(id_start + @as(u32, @intCast(i)));
-        c.operations.appendAssumeCapacity(.{
-            .id = fid,
-            .template_key = fkey,
-            .state = .available,
-            .opened_day = gs.clock.day_index,
-        });
-    }
-    gs.next_operation_id += @as(u32, @intCast(t.follow_up.len));
+    gs.next_operation_id += n;
     c.escalation_clock +|= pressure;
     @import("contract_events.zig").applyToCompany(gs, c.assigned_company, .fatigue, @intCast(operations.exploitFatigueAdd()));
     gs.event_log.appendAssumeCapacity(.{
@@ -376,7 +366,6 @@ pub fn execExploitOperation(gs: *GameState, args: @FieldType(commands.Command, "
         .contract = c.id,
         .text = log_text,
     });
-    _ = op_name;
 
     return .{};
 }
@@ -1665,4 +1654,174 @@ test "execConsolidateOperation: relieves escalation_clock; refuses non-resolved"
         .opened_day = 0,
     });
     try testing.expectError(error.OperationNotConsolidatable, execConsolidateOperation(&gs, .{ .contract = cid, .operation = oid2 }));
+}
+
+test "resolveFinale: failure-atomic under OOM at log reservation" {
+    const testing = std.testing;
+    const digest = @import("digest.zig");
+
+    var outer = std.heap.ArenaAllocator.init(testing.allocator);
+    defer outer.deinit();
+    var gs = GameState.init(outer.allocator(), .{});
+    defer gs.deinit();
+
+    // Find the terminal beat index for the fracturing_garrison arc.
+    const a = arc_mod.find("fracturing_garrison").?;
+    var terminal_beat: u8 = 0;
+    for (a.beats, 0..) |b, i| if (b.escalation_threshold == 0) {
+        terminal_beat = @intCast(i);
+    };
+
+    const cid: types.ContractId = @enumFromInt(1);
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+        .status = .active,
+        .arc_key = "fracturing_garrison",
+        .arc_beat = terminal_beat,
+        .escalation_clock = 0, // below fell threshold → "held" finale selected
+    });
+    const c = gs.contracts.getPtr(cid).?;
+
+    const before = digest.stateHash(&gs);
+
+    gs.arena.state.used_list = null;
+    gs.arena.state.free_list = null;
+    gs.arena.child_allocator = std.testing.failing_allocator;
+
+    try testing.expectError(error.OutOfMemory, resolveFinale(&gs, c));
+    try testing.expectEqual(before, digest.stateHash(&gs));
+    try testing.expectEqual(@as(usize, 0), c.arc_finale_key.len); // key still empty
+}
+
+test "execWithdrawOperation: failure-atomic under OOM at log reservation" {
+    const testing = std.testing;
+    const digest = @import("digest.zig");
+
+    var outer = std.heap.ArenaAllocator.init(testing.allocator);
+    defer outer.deinit();
+    var gs = GameState.init(outer.allocator(), .{});
+    defer gs.deinit();
+
+    const cid: types.ContractId = @enumFromInt(1);
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+        .status = .active,
+        .arc_key = "fracturing_garrison",
+    });
+    const c = gs.contracts.getPtr(cid).?;
+    const oid: types.OperationId = @enumFromInt(1);
+    try c.operations.append(gs.allocator(), .{
+        .id = oid,
+        .template_key = "negotiate_terms",
+        .state = .available,
+        .opened_day = 0,
+    });
+
+    const before = digest.stateHash(&gs);
+
+    gs.arena.state.used_list = null;
+    gs.arena.state.free_list = null;
+    gs.arena.child_allocator = std.testing.failing_allocator;
+
+    try testing.expectError(error.OutOfMemory, execWithdrawOperation(&gs, .{ .contract = cid, .operation = oid }));
+    try testing.expectEqual(before, digest.stateHash(&gs));
+    try testing.expectEqual(operation_mod.OperationState.available, c.operations.items[0].state);
+}
+
+test "execExploitOperation: failure-atomic under OOM at log reservation" {
+    const testing = std.testing;
+    const digest = @import("digest.zig");
+
+    var outer = std.heap.ArenaAllocator.init(testing.allocator);
+    defer outer.deinit();
+    var gs = GameState.init(outer.allocator(), .{});
+    defer gs.deinit();
+
+    const cid: types.ContractId = @enumFromInt(1);
+    const oid: types.OperationId = @enumFromInt(1);
+    gs.next_operation_id = 2;
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+        .status = .active,
+        .arc_key = "fracturing_garrison",
+    });
+    const c = gs.contracts.getPtr(cid).?;
+    try c.operations.append(gs.allocator(), .{
+        .id = oid,
+        .template_key = "repel_probe",
+        .state = .resolved,
+        .opened_day = 0,
+        .outcome = .success,
+        .intent = .secure_objective,
+    });
+
+    const before = digest.stateHash(&gs);
+    const id_before = gs.next_operation_id;
+    const ops_before = c.operations.items.len;
+
+    gs.arena.state.used_list = null;
+    gs.arena.state.free_list = null;
+    gs.arena.child_allocator = std.testing.failing_allocator;
+
+    try testing.expectError(error.OutOfMemory, execExploitOperation(&gs, .{ .contract = cid, .operation = oid }));
+    try testing.expectEqual(before, digest.stateHash(&gs));
+    try testing.expectEqual(id_before, gs.next_operation_id); // counter unchanged
+    try testing.expectEqual(ops_before, c.operations.items.len); // no follow-ups appended
+}
+
+test "execConsolidateOperation: failure-atomic under OOM at log reservation" {
+    const testing = std.testing;
+    const digest = @import("digest.zig");
+
+    var outer = std.heap.ArenaAllocator.init(testing.allocator);
+    defer outer.deinit();
+    var gs = GameState.init(outer.allocator(), .{});
+    defer gs.deinit();
+
+    const cid: types.ContractId = @enumFromInt(1);
+    const oid: types.OperationId = @enumFromInt(1);
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+        .status = .active,
+        .arc_key = "fracturing_garrison",
+        .escalation_clock = 20,
+    });
+    const c = gs.contracts.getPtr(cid).?;
+    try c.operations.append(gs.allocator(), .{
+        .id = oid,
+        .template_key = "negotiate_terms",
+        .state = .resolved,
+        .opened_day = 0,
+        .outcome = .success,
+    });
+
+    const before = digest.stateHash(&gs);
+
+    gs.arena.state.used_list = null;
+    gs.arena.state.free_list = null;
+    gs.arena.child_allocator = std.testing.failing_allocator;
+
+    try testing.expectError(error.OutOfMemory, execConsolidateOperation(&gs, .{ .contract = cid, .operation = oid }));
+    try testing.expectEqual(before, digest.stateHash(&gs));
+    try testing.expectEqual(@as(u16, 20), c.escalation_clock); // clock unchanged
 }
