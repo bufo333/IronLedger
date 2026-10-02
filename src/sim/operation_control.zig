@@ -2149,8 +2149,6 @@ test "resolveDueOperations: rival standing moves by outcomeRivalStandingDelta (P
     const rival_dom = @import("../domain/rival.zig");
     const clamped: i16 = @intCast(@min(@as(i32, rival_dom.rival_max), @max(@as(i32, rival_dom.rival_min), @as(i32, before_standing) + expected_delta)));
     try testing.expectEqual(clamped, after_standing);
-    // Status matches statusFor(new_standing).
-    try testing.expectEqual(rivals_m.statusFor(after_standing), rivals_m.statusFor(after_standing));
     // Cause is recorded.
     try testing.expect(gs.rivals.getPtr(rid).?.last_cause.len > 0);
 }

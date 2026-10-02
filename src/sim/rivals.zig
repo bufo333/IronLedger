@@ -243,7 +243,7 @@ pub fn attachedRivals(alloc: std.mem.Allocator, gs: *GameState, c: *const contra
 
 // ---- Tests -----------------------------------------------------------------
 
-test "generateRival: deterministic per seed, and drawing it does not perturb .actors, .battle, or .generation" {
+test "generateRival: deterministic per seed, and drawing it does not perturb .actors or .battle streams" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 42 });
     defer gs.deinit();
 
