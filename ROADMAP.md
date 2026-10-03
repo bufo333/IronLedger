@@ -1369,15 +1369,22 @@ sourced. No engine/gyro/cockpit/actuator part entries. The validator reads the
 new per-location capacity and location rule and stays behaviour-preserving for
 every existing catalogue design.
 
-### P3c — Persisted campaign-owned custom chassis
+### P3c — Hull lifecycle
 
-Add campaign-owned custom chassis state to `GameState`, persisted via a
-forward-only schema migration (the next version after v47) with its
-`docs/schema.sql` mirror, loader range-checks, `validateStoredStrings` for
-display copy, enforceable foreign keys where containment applies, and
-`sim/digest.zig` coverage proven by the golden-master round trip. Custom designs
-resolve alongside the static catalogue by key and appear as buildable/orderable
-designs. Prerequisite: P3a.
+The hull-lifecycle subsystem: five new persisted entity families (`HullInstance`,
+`HullLoadout`, `HullCombatRecord`, `MaintenanceEntry`, `HullOwnershipHistory`).
+Every hull that enters the campaign becomes a persisted entity with its own
+combat history, maintenance log, and ownership chain. Kills attributed to both
+hull and pilot. Custom variants are loadout-only. Prerequisite: P3a.
+
+- P3c.1 — Hull instance entity, loadout, and the Unit link (entity, migration, digest).
+- P3c.2 — Combat records and dual kill attribution (battle aftermath, all participating hulls).
+- P3c.3 — Maintenance log and repair/modify commands (cli.zig, failure-atomic).
+- P3c.4 — Ownership history and market integration (ownership chain, market listing).
+- P3c.5 — Company-generation seeded history (deterministic pre-campaign history).
+- P3c.6 — Mech detail modal, queries, and verbs (queries.zig, TUI modal, cli.zig verbs).
+
+Design: `docs/p3c-hull-lifecycle-design.md`; TODO.md owns delivery order.
 
 ### P3d — Construction editor and variant lifecycle
 

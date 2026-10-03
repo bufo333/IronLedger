@@ -155,20 +155,20 @@ P3a — data-driven crit capacity and location rules. Ships:
 
 Does NOT ship: persisted custom variants (P3c) or the editor UX (P3d).
 
-### P3-variants (P3c): persisted campaign-owned custom chassis
+### P3-variants (P3c): hull lifecycle
 
-Ships:
-- Campaign-owned custom chassis state on `GameState`, persisted via a new
-  forward-only schema migration (the next version after the current v47) with
-  its `docs/schema.sql` mirror, loader range-checks, `validateStoredStrings` for
-  any display copy, enforceable foreign keys where containment applies, and
-  `sim/digest.zig` coverage proven by the golden-master round trip.
-- Custom designs resolve alongside the static `chassis.zon` catalogue where a
-  design is looked up by key, and appear as buildable/orderable designs
-  (ROADMAP Stage 10 target).
+P3c delivers the hull-lifecycle subsystem: every hull that enters the campaign
+becomes a persisted entity (`HullInstance`) with its own combat history
+(`HullCombatRecord`), maintenance log (`MaintenanceEntry`), and ownership chain
+(`HullOwnershipHistory`). Kills are attributed to both the hull and the pilot.
+Custom variants are loadout-only (`HullLoadout` — the design state; `unit_slot`
+remains the live repair/condition state).
 
-Does NOT ship: the editor UX (P3d). Prerequisite: P3a construction data (a
-variant records a legal construction state).
+The authoritative P3c design and sub-increment schedule (P3c.1–P3c.6) is in
+`docs/p3c-hull-lifecycle-design.md`.
+
+P3d depends on P3c.1 (HullInstance + HullLoadout + the Unit link) and the
+loadout-edit (modify) command from P3c.3. Prerequisite: P3a.
 
 ### P3-client (P3d): construction editor and variant lifecycle
 
