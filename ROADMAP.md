@@ -1618,10 +1618,11 @@ validated framework rather than adding a second story system.
 - P4i.3 Add reports for operation history, decision costs, world-state
   changes, actor/rival history, command-capacity use, and the visible answer to
   “what changed because of this operation?”
-- P4i.4 Add deterministic campaign scripts for aggressive, cautious,
+- [x] P4i.4 Add deterministic campaign scripts for aggressive, cautious,
   intelligence-heavy, logistics-heavy and force-preservation play. Track
   completion, breach, hull loss, operation success, clock progression,
   capacity spending and ending distribution through test assertions.
+  *(shipped sim/p4j-scripts)*
 - P4i.5 Complete the contract-required verification for briefing, planning,
   commitment, intervention, post-operation choice, and finale.
 - P4i.6 Update `ARCHITECTURE.md`, `GAMEPLAY.md`, `docs/tui.md`, TUI mockups

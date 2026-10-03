@@ -68,6 +68,7 @@ pub const network = @import("sim/network.zig");
 pub const contract_control = @import("sim/contract_control.zig");
 pub const operations = @import("sim/operations.zig");
 pub const queries = @import("sim/queries.zig");
+pub const campaign_scripts = @import("sim/campaign_scripts.zig");
 pub const table = @import("sim/table.zig");
 
 // persist/ — SQLite save files
