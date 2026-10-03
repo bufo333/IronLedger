@@ -10,6 +10,21 @@ const layout = app.layout;
 const q = app.q;
 const tabName = app.tabName;
 
+/// The campaign-global reports the Desk hub lists; each opens its existing
+/// read-only modal (app.zig Modal). The list is frontend chrome, not a sim
+/// rule: it decides nothing, and each report's body comes from its own query.
+const Report = struct {
+    name: []const u8,
+    desc: []const u8,
+    target: enum { summary, readiness, battles },
+};
+
+const reports = [_]Report{
+    .{ .name = "Campaign summary", .desc = "the campaign in aggregate", .target = .summary },
+    .{ .name = "Readiness", .desc = "every company: fatigue, morale, wounded, banked XP, depot", .target = .readiness },
+    .{ .name = "Battles", .desc = "the engagements still on record", .target = .battles },
+};
+
 pub fn draw(self: *App) anyerror!void {
     const al = self.a();
     const g = self.state();
@@ -60,9 +75,27 @@ pub fn draw(self: *App) anyerror!void {
 
     const rest_h: u16 = b.h - top_h - co_h;
     if (rest_h >= 3) {
-        const log_w: u16 = if (self.narrow()) b.w else layout.major.of(b.w);
-        self.listPane(.{ .x = b.x, .y = b.y + top_h + co_h, .w = log_w, .h = rest_h }, "LOG", view.log, 2, self.paneFocused(2), true);
-        if (log_w < b.w) self.listPane(.{ .x = b.x + log_w, .y = b.y + top_h + co_h, .w = b.w - log_w, .h = rest_h }, "HQs", view.hqs, 3, false, false);
+        const by: u16 = b.y + top_h + co_h;
+        // The right column holds the reports hub and, when wide, the HQ summaries;
+        // the log takes the rest. Reports stays present at every width (rule 86 /
+        // the pane is always drawn so the structural test keeps all four panes).
+        const right_w: u16 = if (self.narrow()) layout.minor.of(b.w) else (b.w - layout.major.of(b.w));
+        const log_w: u16 = b.w - right_w;
+        self.listPane(.{ .x = b.x, .y = by, .w = log_w, .h = rest_h }, "LOG", view.log, 2, self.paneFocused(2), true);
+
+        const rx: u16 = b.x + log_w;
+        const rp_h: u16 = @min(rest_h, @as(u16, @intCast(reports.len + 3)));
+        // HQs below the reports hub when there is room (wide only). Drawn without a
+        // cursor slot (like the emblem fallback) so it does not clamp slot 3, which
+        // the focusable reports pane now owns.
+        if (!self.narrow() and rest_h > rp_h) {
+            const hq_inner = self.screen.pane(.{ .x = rx, .y = by + rp_h, .w = right_w, .h = rest_h - rp_h }, .{ .title = "HQs" });
+            self.screen.lines(hq_inner, view.hqs, 0, null);
+        }
+
+        var rl: std.ArrayListUnmanaged([]const u8) = .empty;
+        for (reports) |r| try rl.append(al, try std.fmt.allocPrint(al, "{s}   {{d}}{s}{{/}}", .{ r.name, r.desc }));
+        self.listPane(.{ .x = rx, .y = by, .w = right_w, .h = rp_h }, "REPORTS", rl.items, 3, self.paneFocused(3), true);
     }
 }
 
@@ -92,16 +125,18 @@ pub fn move(self: *App, delta: i32) anyerror!void {
     switch (self.focus) {
         0 => self.moveCursor(0, delta, view.checklist.len),
         1 => self.moveCursor(1, delta, (try inboxPane(al, view)).lines.len),
+        3 => self.moveCursor(3, delta, reports.len),
         else => self.moveCursor(2, delta, view.log.len),
     }
 }
 
-const Action = enum { go_to, decide, read_entry, battles, emblem };
+const Action = enum { go_to, decide, read_entry, open_report, battles, emblem };
 
 pub const bindings = [_]app.keys.Binding(Action){
     .{ .match = .{ .key = .enter }, .action = .go_to, .label = "go to", .group = .act, .pane = 0, .help = "go where the warning points (a contact warning opens its battle orders)" },
     .{ .match = .{ .key = .enter }, .action = .decide, .label = "decide", .group = .act, .pane = 1, .help = "open the decision under the cursor" },
     .{ .match = .{ .key = .enter }, .action = .read_entry, .label = "read entry", .group = .act, .pane = 2, .help = "read the whole log entry under the cursor" },
+    .{ .match = .{ .key = .enter }, .action = .open_report, .label = "open report", .group = .act, .pane = 3, .help = "open the selected report (read-only; Esc closes)" },
     .{ .match = app.keys.Match.char('b'), .action = .battles, .label = "battles", .group = .act, .help = "the engagements still on record: pick one to read" },
     .{ .match = app.keys.Match.char('e'), .action = .emblem, .label = "emblem", .group = .act, .help = "choose the outfit's emblem" },
 };
@@ -131,6 +166,17 @@ pub fn handle(self: *App, k: app.Key) anyerror!bool {
             const view = try q.desk(al, g, q.desk_log_rows);
             // The LOG pane clips; the modal wraps the whole entry.
             if (view.log.len > 0) self.openModal(.{ .log_entry = @min(self.cur(2).*, view.log.len - 1) });
+        },
+        .open_report => {
+            const r = reports[@min(self.cur(3).*, reports.len - 1)];
+            switch (r.target) {
+                .summary => self.modal = .summary,
+                .readiness => self.modal = .readiness,
+                .battles => {
+                    self.battles_from_list = true;
+                    self.openModal(.battle_list);
+                },
+            }
         },
         .battles => {
             self.battles_from_list = true;
@@ -170,6 +216,29 @@ fn toTab(c: *app.ClientForTest, tab: app.Tab) !void {
 
 test "the desk bindings are well formed" {
     try app.keys.expectWellFormed(Action, &bindings);
+}
+
+test "the reports pane opens the selected report under the cursor" {
+    const c = try app.clientForTest(std.testing.allocator);
+    defer app.deinitForTest(c, std.testing.allocator);
+    try toTab(c, .desk);
+    // focus 3 is the reports pane; each row opens its own read-only modal.
+    c.app.focus = 3;
+    c.app.cur(3).* = 0;
+    try app.pressForTest(c, .enter);
+    try std.testing.expect(c.app.modal == .summary);
+
+    c.app.modal = .none;
+    c.app.focus = 3;
+    c.app.cur(3).* = 1;
+    try app.pressForTest(c, .enter);
+    try std.testing.expect(c.app.modal == .readiness);
+
+    c.app.modal = .none;
+    c.app.focus = 3;
+    c.app.cur(3).* = 2;
+    try app.pressForTest(c, .enter);
+    try std.testing.expect(c.app.modal == .battle_list);
 }
 
 test "Enter on a checklist warning goes where the warning says; e opens the emblem picker" {

@@ -135,7 +135,7 @@ no room.
 
 | Tab | Screen | Panes |
 |---|---|---|
-| F1 | Desk | Emblem · Checklist · Inbox · Companies · Log · HQs |
+| F1 | Desk | Emblem · Checklist · Inbox · Companies · Log · HQs · Reports |
 | F2 | Map | Star map · World |
 | F3 | Forces | TO&E tree · Hull/Person detail · Unassigned pool |
 | F4 | Contracts | Board · Active · History (closed contracts: outcome, world, days served, VP, pay received) · Contract log |
@@ -177,6 +177,7 @@ titles and the help modal come from the same tables.
 | `Enter` | checklist | go where the warning points (a contact warning opens its battle orders) |
 | `Enter` | inbox | open the decision under the cursor |
 | `Enter` | log | read the whole log entry under the cursor |
+| `Enter` | reports | open the selected report (read-only; Esc closes) |
 | `b` | any | the engagements still on record: pick one to read |
 | `e` | any | choose the outfit's emblem |
 
