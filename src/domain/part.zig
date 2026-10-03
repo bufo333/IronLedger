@@ -7,6 +7,11 @@ const types = @import("types.zig");
 /// How a mountable item attaches (MekLab).
 pub const MountType = enum { none, energy, ballistic, missile, equipment, ammo };
 
+/// Where a mountable part may be placed: the data shape of the placement rule;
+/// the evaluator owner is `meklab.locationAllowed` (rule 20). Kept in part.zig
+/// because meklab imports part, not the reverse (no layering cycle).
+pub const LocationRule = enum { any, torso_or_leg, side_torso, head_or_torso };
+
 /// Who builds it: periphery worlds source Inner Sphere parts
 /// rated D or worse with a penalty.
 pub const TechBase = enum { inner_sphere, periphery };
@@ -78,6 +83,8 @@ pub const PartDef = struct {
     crits: u8 = 0,
     heat: u8 = 0,
     mount: MountType = .none,
+    /// Where this part may mount; `.any` = any location with free crits (CamOps).
+    loc_rule: LocationRule = .any,
     /// Structural components: the mek bay level a fabrication job
     /// needs, and whether only a regional or brigade HQ can run it.
     fab_min_bay: u8 = 1,

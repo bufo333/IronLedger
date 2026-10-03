@@ -51,11 +51,11 @@ above is complete.
     *(increment sim/p4j-scripts: five-style deterministic campaign tests — aggressive, cautious, intelligence-heavy, logistics-heavy, force-preservation)*
     *(increment sim/p4j-verify: rule 67 sweep — nine untested operation rule owners)*
     *(increment docs/p4j-sync: ARCHITECTURE/GAMEPLAY/tui.md/ROADMAP/TODO doc sync — no behavior change)*
-- [ ] P3 MekLab depth — editable construction, A-F quotes, and custom variants:
+- [ ] P3 MekLab depth — data-driven crit capacity/location rules and custom variants:
   - P3 design approval and content boundary: approved
     (`docs/p3-meklab-design.md`), grounded in
     `docs/p3d-meklab-location-layout.md`.
-  - [ ] P3-construction (P3a-P3b): editable construction parts and A-F quotes.
+  - [ ] P3-construction (P3a): data-driven crit capacity and location rules.
   - [ ] P3-variants (P3c): persisted campaign-owned custom chassis.
   - [ ] P3-client (P3d): construction editor and variant lifecycle.
 

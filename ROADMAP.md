@@ -248,8 +248,9 @@ canonical design validates legal), refit plans as staged edits →
 `refit_commit` (legal fit, class ≤ bay ceiling, parts on the shelf, hull at
 home) → bay job → mounts change and removed parts return to stock;
 persisted; REPL `lab`/`refit`. The remaining original-spec depth is Product
-completion P3: editable construction components, the full A–F class range, and
-persistent custom variants. For context, the complete original target is:
+completion P3: data-driven per-location crit capacity and location rules, and
+persistent custom variants (loadout only). For context, the complete original
+target is:
 - **Chassis data grows** (`data/chassis.zon`): engine rating & weight, gyro,
   cockpit, internal structure weight, heat sinks (min 10, engine-integral
   count), jump jets, armor tonnage; and **per-location crit slots** (head 6,
@@ -259,15 +260,14 @@ persistent custom variants. For context, the complete original target is:
 - **Parts data grows** (`data/parts.zon`): every mountable item gets
   tonnage, crit slots, mount type (energy / ballistic / missile /
   equipment), heat, and a location rule (jump jets torso/legs, ammo
-  anywhere, CASE side torso, etc.). Engines, heat sinks, jump jets, gyros,
-  cockpits, actuators become parts you can buy, salvage, and install.
+  anywhere, CASE side torso, etc.).
 - **Validation**: a target loadout is legal iff total weight ≤ tonnage,
   each location's crits ≤ capacity, heat sinks ≥ 10, ammo present for
   every ammo weapon, and location rules hold. Illegal fits are refused
   with the violated rule named. Multi-crit weapons may split across
   adjacent locations only where the rules allow.
 - **Refits**: loadout diff → parts to remove/install, tech hours, and the
-  CamOps refit class (A–F) from what moved; facility ceiling
+  CamOps refit class (A–D) from what moved; facility ceiling
   (`refitClassCeiling`) gates it; the job occupies a 9C bay; custom
   variants are saved to the campaign (`custom_chassis`) and appear as
   buildable/orderable designs thereafter. Damaged hulls bought off the
@@ -1345,39 +1345,29 @@ Architected after the TUI ships, reusing the same command/query boundary.
 ## Product completion P3 — MekLab depth
 
 Begins on explicit dispatch; the design is fixed in `docs/p3-meklab-design.md`
-(grounded in `docs/p3d-meklab-location-layout.md`). P3 completes the original
-Stage 10 MekLab target: editable construction components, the full CamOps refit
-class range A-F, campaign-owned custom variants, and a per-location slot-layout
-construction editor. The shipped first cut (Stage 10) edits weapon, equipment
-and ammunition mounts with refit classes A-D; P3 extends the pure validator
-(`domain/meklab.zig`), the refit pipeline, persistence, queries and the Lab
-screen through their existing owners. It adds no parallel lab/refit/persistence
-path, no RNG to construction, and no rule outside classic BattleTech/CamOps (no
-hardpoint gates). The detailed P3a-P3d prompts below are design references;
-`TODO.md` owns their delivery order and the design-approval entry.
+(grounded in `docs/p3d-meklab-location-layout.md`). P3 extends the original
+Stage 10 MekLab target: data-driven per-location crit capacity and location
+rules, campaign-owned custom variants (weapon/equipment/ammo loadout only), and
+a per-location slot-layout construction editor. The lab edits weapon, equipment
+and ammunition mounts with refit classes A-D; engine/gyro/cockpit/actuators and
+internal structure remain fixed derived facts (project-owner decision,
+2026-10-03). P3 extends the pure validator (`domain/meklab.zig`), the refit
+pipeline, persistence, queries and the Lab screen through their existing owners.
+It adds no parallel lab/refit/persistence path, no RNG to construction, and no
+rule outside classic BattleTech/CamOps (no hardpoint gates). The detailed
+P3a/P3c/P3d prompts below are design references; `TODO.md` owns their delivery
+order and the design-approval entry.
 
-### P3a — Editable construction parts and per-location data
+### P3a — Data-driven crit capacity and location rules
 
-Grow `data/chassis.zon` with per-location critical slot counts and the
-fixed-occupant / actuator configuration (cockpit, engine, gyro, actuators) per
-mek, so free tonnage and free crits per location derive from data rather than
-`meklab.zig`'s uniform `freeCrits`. Make engines, gyros, cockpits and actuators
-installable construction parts in `data/parts.zon` (heat sinks and jump jets
-already are), each with mass/crit/heat and a data-driven location rule; add a
-location-rule field to `PartDef` that replaces the hardcoded jump-jet check with
-one owner, plus CASE (side torso) and AMS (head/torso) placement rules per the
-layout note. The validator reads the new per-location capacity and location rule
-and stays behaviour-preserving for every existing catalogue design. Construction
-values come from TechManual where verifiable, else `// TUNE`.
-
-### P3b — The full A-F refit class range and quotes
-
-Extend `RefitClass` beyond D to E (engine touched) and F (structure/chassis
-touched), with `classify`, `refitHours` and the class-to-ceiling mapping
-covering all six classes, and extend `Hq.refitClassCeiling()` and
-`tuning.hq.refit_class_cap` to gate E/F. Construction edits (engine/structure
-changes) quote a class and tech-time through the same owner the Lab and
-`refit_commit` consume. A-D classification of existing plans is unchanged.
+Grow `data/chassis.zon` with per-location critical slot counts per mek, so free
+crits per location derive from data rather than `meklab.zig`'s uniform
+`freeCrits`. Add a location-rule field to `PartDef` that replaces the hardcoded
+jump-jet check with one owner; CASE (side torso) and AMS (head/torso) placement
+rules expressed and tested; part entries follow when TechManual values are
+sourced. No engine/gyro/cockpit/actuator part entries. The validator reads the
+new per-location capacity and location rule and stays behaviour-preserving for
+every existing catalogue design.
 
 ### P3c — Persisted campaign-owned custom chassis
 
@@ -1401,13 +1391,13 @@ the rule named. Variant lifecycle (create/name/save/delete a custom variant) is
 commands defined once in `cli.zig` with refusal sentences, failure-atomic, with
 new read-only `queries.zig` views. The read-only layout may ship first as a pure
 TUI improvement; chassis-specific arrangements consume the P3a data.
-Prerequisites: P3a, P3b, P3c. Gate includes both smoke scripts.
+Prerequisites: P3a, P3c. Gate includes both smoke scripts.
 
-**Acceptance:** a player can edit a hull's construction (weapons, equipment,
-engine and structure within the rules), the lab quotes the correct A-F refit
-class and tech-time, a saved custom variant survives save/load and appears as a
-buildable design, and the per-location layout renders each chassis's structure
-and refuses an illegal placement inline with the rule named.
+**Acceptance:** a player can edit a hull's loadout (weapons, equipment, ammo
+within the rules), the lab quotes the correct A-D refit class and tech-time, a
+saved custom variant survives save/load and appears as a buildable design, and
+the per-location layout renders each chassis's structure and refuses an illegal
+placement inline with the rule named.
 
 ## Product completion P4 — Campaign operations and stories
 

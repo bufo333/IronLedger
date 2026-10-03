@@ -31,6 +31,12 @@ pub const Chassis = struct {
     jump_mp: u8 = 0,
     heat_sinks: u8 = 10,
     armor_half_tons: u16 = 0,
+    /// Free critical slots per location after fixed occupants, indexed in
+    /// `meklab.Location` order: hd, ct, lt, rt, la, ra, ll, rl. Default is
+    /// the standard IS 'Mech (TechManual): head 1, CT 2, side torso 12,
+    /// arm 8, leg 2. Do NOT import meklab; the index order is a documented
+    /// contract.
+    crit_slots: [8]u8 = .{ 1, 2, 12, 12, 8, 8, 2, 2 },
     // Transport facts (dropships/jumpships only, TRO:3025).
     // A dropship lifts hulls by bay kind; a jumpship carries dropships on
     // its docking collars. Tonnage is nominal for ships (u8).

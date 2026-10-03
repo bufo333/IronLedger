@@ -1,7 +1,7 @@
 //! The MekLab rules (Stage 10, ARCH §10): TechManual construction for
 //! standard Inner Sphere 3025 BattleMechs. Pure functions over a chassis
 //! and a loadout: what the hull weighs, what each location can hold, what
-//! rule a fit breaks, and how big a job a refit is (CamOps class A–F).
+//! rule a fit breaks, and how big a job a refit is (CamOps class A–D).
 //!
 //! Integer arithmetic throughout: masses in half-tons, no floats.
 //! MekHQ counterpart: the MekLab tab and its customization rules
@@ -21,17 +21,11 @@ pub fn parseLocation(slot_key: []const u8) ?Location {
     return std.meta.stringToEnum(Location, slot_key[0..2]);
 }
 
-/// Free critical slots per location after the fixed occupants (TechManual):
-/// head 6 − life support/sensors/cockpit; center torso 12 − engine/gyro;
-/// side torsos 12; arms 12 − four actuators; legs 6 − four actuators.
-pub fn freeCrits(loc: Location) u8 {
-    return switch (loc) {
-        .hd => 1,
-        .ct => 2,
-        .lt, .rt => 12,
-        .la, .ra => 8,
-        .ll, .rl => 2,
-    };
+/// Free critical slots per location after fixed occupants, sourced from
+/// `Chassis.crit_slots` (design §2/§4, TechManual). Index order matches
+/// `Location` (hd=0 … rl=7).
+pub fn freeCrits(design: *const chassis_mod.Chassis, loc: Location) u8 {
+    return design.crit_slots[@intFromEnum(loc)];
 }
 
 pub fn isTorso(loc: Location) bool {
@@ -40,6 +34,28 @@ pub fn isTorso(loc: Location) bool {
 
 pub fn isLeg(loc: Location) bool {
     return loc == .ll or loc == .rl;
+}
+
+/// Whether a part's location rule permits placement in `loc` (design §2/§4,
+/// rule 20). One owner: the validator and the picker both call this.
+pub fn locationAllowed(rule: part_mod.LocationRule, loc: Location) bool {
+    return switch (rule) {
+        .any => true,
+        .torso_or_leg => isTorso(loc) or isLeg(loc),
+        .side_torso => loc == .lt or loc == .rt,
+        .head_or_torso => loc == .hd or isTorso(loc),
+    };
+}
+
+/// The refusal phrase for a location rule (rule 28: one owner for the
+/// refusal sentence fragment).
+fn locationRuleText(rule: part_mod.LocationRule) []const u8 {
+    return switch (rule) {
+        .any => "any location",
+        .torso_or_leg => "torsos or legs",
+        .side_torso => "side torsos",
+        .head_or_torso => "the head or torsos",
+    };
 }
 
 /// Construction tables from data/tables/meklab.zon (TechManual): the
@@ -156,11 +172,9 @@ pub fn validate(design: *const chassis_mod.Chassis, items: []const Item, alloc: 
             continue;
         }
         var mass: u32 = def.mass_half_tons;
-        if (std.mem.eql(u8, def.key, "jump_jet")) {
-            mass = jumpJetHalfTons(design.tonnage);
-            if (!isTorso(it.location) and !isLeg(it.location)) {
-                try violations.append(alloc, .{ .rule = .location, .text = try std.fmt.allocPrint(alloc, "jump jets mount only in torsos or legs, not {s}", .{@tagName(it.location)}) });
-            }
+        if (std.mem.eql(u8, def.key, "jump_jet")) mass = jumpJetHalfTons(design.tonnage);
+        if (!locationAllowed(def.loc_rule, it.location)) {
+            try violations.append(alloc, .{ .rule = .location, .text = try std.fmt.allocPrint(alloc, "{s} mount only in {s}, not {s}", .{ def.name, locationRuleText(def.loc_rule), @tagName(it.location) }) });
         }
         report.loadout_half_tons += mass;
         report.crits_used[@intFromEnum(it.location)] +|= def.crits;
@@ -177,7 +191,7 @@ pub fn validate(design: *const chassis_mod.Chassis, items: []const Item, alloc: 
     var jets: u32 = design.jump_mp;
     const jet_order = [_]Location{ .ll, .rl, .ct, .lt, .rt };
     for (jet_order) |loc| {
-        while (jets > 0 and report.crits_used[@intFromEnum(loc)] < freeCrits(loc)) : (jets -= 1) report.crits_used[@intFromEnum(loc)] += 1;
+        while (jets > 0 and report.crits_used[@intFromEnum(loc)] < freeCrits(design, loc)) : (jets -= 1) report.crits_used[@intFromEnum(loc)] += 1;
     }
     if (jets > 0) {
         try violations.append(alloc, .{ .rule = .crits, .text = try std.fmt.allocPrint(alloc, "no room in torsos or legs for {d} jump jet(s)", .{jets}) });
@@ -186,7 +200,7 @@ pub fn validate(design: *const chassis_mod.Chassis, items: []const Item, alloc: 
     var loose_sinks: u32 = @as(u32, design.heat_sinks) - integral;
     const sink_order = [_]Location{ .ll, .rl, .lt, .rt, .la, .ra, .ct, .hd };
     for (sink_order) |loc| {
-        while (loose_sinks > 0 and report.crits_used[@intFromEnum(loc)] < freeCrits(loc)) : (loose_sinks -= 1) report.crits_used[@intFromEnum(loc)] += 1;
+        while (loose_sinks > 0 and report.crits_used[@intFromEnum(loc)] < freeCrits(design, loc)) : (loose_sinks -= 1) report.crits_used[@intFromEnum(loc)] += 1;
     }
     if (loose_sinks > 0) {
         try violations.append(alloc, .{ .rule = .crits, .text = try std.fmt.allocPrint(alloc, "no critical slots left for {d} heat sink(s)", .{loose_sinks}) });
@@ -204,7 +218,7 @@ pub fn validate(design: *const chassis_mod.Chassis, items: []const Item, alloc: 
     }
     for (0..location_count) |i| {
         const loc: Location = @enumFromInt(i);
-        const cap = freeCrits(loc);
+        const cap = freeCrits(design, loc);
         if (report.crits_used[i] > cap) {
             try violations.append(alloc, .{ .rule = .crits, .text = try std.fmt.allocPrint(alloc, "{s} needs {d} critical slots but has {d}", .{ @tagName(loc), report.crits_used[i], cap }) });
         }
@@ -253,7 +267,8 @@ pub const RefitOp = union(enum) {
 /// CamOps refit class from what a plan touches (abridged): A = ammo or
 /// armor only; B = like-for-like weapon swaps in place; C = weapons or
 /// equipment added/removed/changed; D = jump jets or heat sinks touched.
-/// (E/F — engine, structure, chassis — are not offered.)
+/// (E/F — engine, structure, chassis — are intentionally never modeled;
+/// project-owner scope decision.)
 pub const RefitClass = enum(u8) {
     a = 0,
     b = 1,
@@ -427,4 +442,59 @@ test "TechManual tables — engine masses and structure points are exact, armor 
         armor_rule = true;
     };
     try std.testing.expect(armor_rule);
+}
+
+test "locationAllowed: each rule permits exactly the right locations" {
+    // .any allows all eight locations
+    for ([_]Location{ .hd, .ct, .lt, .rt, .la, .ra, .ll, .rl }) |loc| {
+        try std.testing.expect(locationAllowed(.any, loc));
+    }
+    // .torso_or_leg allows ct/lt/rt/ll/rl and refuses hd/la/ra
+    for ([_]Location{ .ct, .lt, .rt, .ll, .rl }) |loc| {
+        try std.testing.expect(locationAllowed(.torso_or_leg, loc));
+    }
+    for ([_]Location{ .hd, .la, .ra }) |loc| {
+        try std.testing.expect(!locationAllowed(.torso_or_leg, loc));
+    }
+    // .side_torso allows only lt/rt
+    try std.testing.expect(locationAllowed(.side_torso, .lt));
+    try std.testing.expect(locationAllowed(.side_torso, .rt));
+    for ([_]Location{ .hd, .ct, .la, .ra, .ll, .rl }) |loc| {
+        try std.testing.expect(!locationAllowed(.side_torso, loc));
+    }
+    // .head_or_torso allows only hd/ct/lt/rt
+    for ([_]Location{ .hd, .ct, .lt, .rt }) |loc| {
+        try std.testing.expect(locationAllowed(.head_or_torso, loc));
+    }
+    for ([_]Location{ .la, .ra, .ll, .rl }) |loc| {
+        try std.testing.expect(!locationAllowed(.head_or_torso, loc));
+    }
+}
+
+test "data-driven crit capacity: validate reads crit_slots, not a constant" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    // A copy of LCT-1V with left-arm capacity zeroed out.
+    var m = chassis_mod.find("LCT-1V").?.*;
+    m.crit_slots[@intFromEnum(Location.la)] = 0;
+
+    // A single medium laser in the left arm violates the zeroed capacity.
+    const one_item = [_]Item{.{ .location = .la, .part_key = "mlas" }};
+    const bad = try validate(&m, &one_item, alloc);
+    var saw_crits_la = false;
+    for (bad.violations) |v| {
+        if (v.rule == .crits and std.mem.indexOf(u8, v.text, "la") != null) saw_crits_la = true;
+    }
+    try std.testing.expect(saw_crits_la);
+
+    // The same loadout on the unmodified LCT-1V produces no crits violation for la.
+    const stock = chassis_mod.find("LCT-1V").?;
+    const good = try validate(stock, &one_item, alloc);
+    for (good.violations) |v| {
+        if (v.rule == .crits and std.mem.indexOf(u8, v.text, "la") != null) {
+            return error.TestUnexpectedResult;
+        }
+    }
 }

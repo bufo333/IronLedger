@@ -7,6 +7,9 @@ integration decisions the implementation increments must settle, and names the
 existing-architecture conflicts to resolve first. No behavior is implemented in
 this increment.
 
+Scope amendment (2026-10-03): engine/gyro/cockpit/actuator editing and refit
+classes E/F are permanently removed from P3; see §3 'P3 will NOT add'.
+
 This document is grounded in `docs/p3d-meklab-location-layout.md` (the
 authoritative per-location layout design input) and the code/data state at the
 base commit. `ROADMAP.md` "Product completion P3" and `ARCHITECTURE.md` §10 (the
@@ -74,10 +77,10 @@ design:
 - One row per critical slot, with a marker and TUI colour per kind (fixed,
   missile, energy, ballistic, equipment, free). Multi-slot items render as one
   named group with a part counter so removing the item frees all its slots.
-- The layout is data-driven and requires two additions not present today:
-  per-location critical slot counts and per-chassis actuator/fixed-occupant
-  configuration (cockpit, engine, gyro, actuators). No per-chassis artwork is
-  needed; structure renders itself once the data exists.
+- The layout is data-driven and requires one addition not present today:
+  per-location critical slot counts. Fixed occupants render as immovable (display
+  only), never edited. No per-chassis artwork is needed; structure renders itself
+  from data.
 - Placement rules are visualised and refused inline with the violated rule
   named: the note proposes CASE (side torso only) and AMS (head/torso only) in
   addition to the existing jump-jet rule, following the same one-owner pattern.
@@ -92,28 +95,23 @@ design:
 - Dependency: the read-only layout (current loadout in location boxes) can ship
   earlier as a pure TUI improvement, but chassis-specific slot arrangements need
   the new `chassis.zon` fields; the interactive, editable version (P3d) depends
-  on P3a (editable construction parts), P3b (full A-F class support), and P3c
-  (persisted custom chassis).
+  on P3a (editable construction parts) and P3c (persisted custom chassis).
 
 ## 3. Content boundary (global)
 
 P3 will add:
 
-- Per-location construction data: per-location critical slot counts and
-  fixed-occupant / actuator configuration on each `chassis.zon` mek, so free
-  crits per location derive from data instead of meklab.zig's uniform
-  `freeCrits`; construction facts sufficient to edit engines, gyros, cockpits
-  and actuators (TRO/TechManual values only where a verifiable source exists,
-  else `// TUNE`).
+- Per-location construction data: per-location critical slot counts on each
+  `chassis.zon` mek, so free crits per location derive from data instead of
+  meklab.zig's uniform `freeCrits`. Fixed occupants render as immovable (display
+  only), never edited.
 - A data-driven location-rule field on mountable parts, replacing the hardcoded
   jump-jet check with one owner consumed by the validator and the picker; CASE
   (side torso) and AMS (head/torso) placement rules per the layout note.
-- The full CamOps refit class range A-F (E = engine, F = structure/chassis)
-  extending the current A-D `classify`/`refitHours`/ceiling, so construction
-  edits beyond weapons quote a class and tech-time.
 - Campaign-owned custom chassis: persisted player-designed variants (new schema
   migration, digest coverage, per-field persistence class, loader that fails
-  closed), surfaced as buildable/orderable designs.
+  closed), surfaced as buildable/orderable designs (weapon/equipment/ammo loadout
+  only).
 - A per-location slot-layout construction editor in the TUI (the P3d UX) with
   variant lifecycle commands, reading through queries and mutating through
   commands.
@@ -129,42 +127,33 @@ P3 will NOT add:
 - Invented TechManual/CamOps construction or balance values; unverifiable
   numbers are `// TUNE`.
 - Per-chassis artwork (the note: structure renders itself from data).
+- Editable engines, gyros, cockpits, actuators or internal structure, and refit
+  classes E and F. These are fixed derived construction facts; the lab edits only
+  weapon/equipment/ammo/heat-sink/jump-jet loadout at refit classes A–D
+  (project-owner decision, 2026-10-03).
 
 ## 4. Per-increment boundary
 
 The increments keep their existing `TODO.md` source identifiers so the scope
 each closes is preserved.
 
-### P3-construction (P3a-P3b): editable construction parts and A-F quotes
+### P3-construction (P3a): data-driven crit capacity and location rules
 
-P3a — editable construction parts and per-location construction data. Ships:
-- `chassis.zon` growth: per-location critical slot counts and fixed-occupant /
-  actuator configuration (cockpit, engine, gyro, actuators) per mek, so free
-  crits per location are derived from data (the layout note's two required
-  additions). Free tonnage and free crits stop using meklab.zig's uniform
-  `freeCrits`.
-- `parts.zon` growth: engines, gyros, cockpits and actuators become mountable/
-  installable construction parts (heat sinks and jump jets already are), each
-  with mass/crit/heat and a data-driven location rule; a location-rule field on
-  `PartDef` replacing the hardcoded jump-jet check (one owner). CASE and AMS
-  parts with their placement rules per the note.
+P3a — data-driven crit capacity and location rules. Ships:
+- `chassis.zon` growth: per-location critical slot counts per mek, so free
+  crits per location are derived from data instead of meklab.zig's uniform
+  `freeCrits`. Behaviour-preserving for every catalogue design.
+- `parts.zon` growth: a location-rule field on `PartDef` replacing the
+  hardcoded jump-jet check with one owner. CASE and AMS placement rules
+  expressed and tested; part entries follow when TechManual values are sourced.
+  No engine/gyro/cockpit/actuator part entries.
 - `domain/meklab.zig`: the validator reads per-location capacity and the
   data-driven location rule from the new fields; the jump-jet special-case is
-  removed in favour of the one owner. Behavior-preserving for existing
+  removed in favour of the one owner. Behaviour-preserving for existing
   catalogue designs (the "every catalogue mek's own loadout is legal" test must
   still pass).
 
-P3b — the full A-F refit class range and quotes. Ships:
-- `RefitClass` extended to E (engine touched) and F (structure/chassis touched),
-  with `classify`, `refitHours` and the `asQuality`→ceiling mapping covering all
-  six classes; `Hq.refitClassCeiling()` and `tuning.hq.refit_class_cap` extended
-  to gate E/F.
-- The refit quote for construction edits (engine/structure changes) through the
-  same one owner the Lab and `refit_commit` already consume.
-
-Does NOT ship: persisted custom variants (P3c) or the editor UX (P3d). The
-validator and quote owners are extended but still consumed only by the existing
-refit pipeline and Lab mounts view.
+Does NOT ship: persisted custom variants (P3c) or the editor UX (P3d).
 
 ### P3-variants (P3c): persisted campaign-owned custom chassis
 
@@ -200,10 +189,10 @@ Does NOT ship: any rule beyond classic BT/CamOps (no hardpoints).
 
 ## 5. Integration with existing systems
 
-- Rule ownership (rules 3, 20-22): per-location capacity, the location rule, the
-  refit class and the construction quote are each one named owner in
-  `domain/meklab.zig` consumed by the validator, the refit pipeline, queries and
-  the editor. The location rule stops being a hardcoded `jump_jet` branch.
+- Rule ownership (rules 3, 20-22): per-location capacity, the location rule, and
+  the refit class are each one named owner in `domain/meklab.zig` consumed by
+  the validator, the refit pipeline, queries and the editor. The location rule
+  stops being a hardcoded `jump_jet` branch.
 - Mutation boundary (rules 7-13): variant create/save/delete and any
   construction edit are commands, failure-atomic; an expected refusal consumes
   nothing.
@@ -229,9 +218,6 @@ Does NOT ship: any rule beyond classic BT/CamOps (no hardpoints).
   "abridged by at most seven tons" tests). Resolve in P3a before adding fields.
 - Location-rule ownership: the hardcoded jump-jet check and the new CASE/AMS
   rules must collapse into one data-driven owner, not three branches.
-- Refit class identity: extending `RefitClass` past D and mapping E/F onto the
-  `types.Quality` ceiling must not change the A-D classification of existing
-  plans (the refit-class test). Resolve in P3b.
 - Custom-chassis vs. static catalogue: a design lookup by key must resolve both
   static and custom designs without a second lookup path or a layering
   inversion (queries stays a leaf). Resolve in P3c.
@@ -247,7 +233,7 @@ Does NOT ship: any rule beyond classic BT/CamOps (no hardpoints).
 the now-closed P4 work:
 
 1. P3 design approval and content boundary — this document.
-2. P3-construction (P3a-P3b): editable construction parts and A-F quotes.
+2. P3-construction (P3a): data-driven crit capacity and location rules.
 3. P3-variants (P3c): persisted campaign-owned custom chassis.
 4. P3-client (P3d): construction editor and variant lifecycle.
 

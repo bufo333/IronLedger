@@ -31,7 +31,7 @@
     .{ .key = "lrm20", .name = "LRM-20", .cost = 250_000, .rarity = .uncommon, .availability = .d, .pallet_tons = 10, .mass_half_tons = 20, .crits = 5, .heat = 6, .mount = .missile },
     // mek internals the lab can add or remove
     .{ .key = "heat_sink", .name = "Heat Sink", .cost = 2_000, .rarity = .common, .pallet_tons = 1, .mass_half_tons = 2, .crits = 1, .heat = 0, .mount = .equipment },
-    .{ .key = "jump_jet", .name = "Jump Jet", .cost = 20_000, .rarity = .uncommon, .availability = .d, .pallet_tons = 1, .mass_half_tons = 1, .crits = 1, .heat = 0, .mount = .equipment },
+    .{ .key = "jump_jet", .name = "Jump Jet", .cost = 20_000, .rarity = .uncommon, .availability = .d, .pallet_tons = 1, .mass_half_tons = 1, .crits = 1, .heat = 0, .mount = .equipment, .loc_rule = .torso_or_leg },
     // structural components: per-location assemblies. Bought on
     // the market when rarity allows, or fabricated at a regional HQ mek bay
     // — guaranteed, at a premium, over bay time.
