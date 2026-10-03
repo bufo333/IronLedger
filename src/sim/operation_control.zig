@@ -185,8 +185,11 @@ pub fn resolveDueOperations(gs: *GameState) !void {
             const due = (op.committed_day orelse continue) + @as(u32, t.expected_days) + @as(u32, operations.tempoDelayDays(op.tempo));
             if (gs.clock.day_index < due) continue;
 
-            // Reserve + pre-format before any mutation (rule 13).
-            try gs.reserveLog(1);
+            // Reserve all log slots upfront: one for the resolution line, one per
+            // attached actor, one for world state, one per rival, one per officer arc
+            // (rules 11-13: every fallible work before the first mutation).
+            const max_log = 1 + c.actor_ids.items.len + 1 + c.rival_ids.items.len + c.officer_arc_ids.items.len;
+            try gs.reserveLog(max_log);
             const band = operations.outcomeBand(operations.nonCombatScore(gs, c, t, op.intent));
             const score_d = bandScoreDelta(band);
             const vp_d = bandVpDelta(band);
@@ -285,8 +288,11 @@ pub fn resolveFinale(gs: *GameState, c: *contract_mod.Contract) !?*const arc_mod
 
     const f = operations.selectFinale(c) orelse return null;
 
-    // ---- PREPARE: reserve log slot and pre-format ----
-    try gs.reserveLog(1);
+    // ---- PREPARE: reserve all log slots upfront: one for the finale line, one
+    // per attached actor, one for world state, one per rival, one per officer arc
+    // (rules 11-13: every fallible work before the first mutation).
+    const max_log = 1 + c.actor_ids.items.len + 1 + c.rival_ids.items.len + c.officer_arc_ids.items.len;
+    try gs.reserveLog(max_log);
     var date_buf: [10]u8 = undefined;
     const log_text = try std.fmt.allocPrint(gs.allocator(), "{s} [arc] arc resolved: {s}", .{
         gs.clock.date.text(&date_buf),
@@ -2336,6 +2342,171 @@ test "resolveDueOperations: officer performance moves by outcomeOfficerDelta (P4
     try testing.expectEqual(clamped, after_perf);
     // Cause is recorded.
     try testing.expect(gs.officer_arcs.getPtr(oa_id).?.last_cause.len > 0);
+}
+
+test "resolveDueOperations: does not crash when one resolution logs many entries (regression)" {
+    // resolveDueOperations must reserve enough log slots upfront for all commit
+    // phase appends: 1 resolution + 6 actors + 1 world + 6 rivals + 6 officers
+    // = 20.  Reserving fewer slots causes appendAssumeCapacity to assert.
+    const testing = std.testing;
+
+    var gs = GameState.init(testing.allocator, .{ .seed = 11111 });
+    defer gs.deinit();
+
+    const cid: types.ContractId = @enumFromInt(1);
+    const t = operation_mod.findTemplate("negotiate_terms").?;
+    const committed_day: u32 = 0;
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+        .status = .active,
+        .arc_key = "fracturing_garrison",
+        .escalation_clock = 5,
+    });
+    const c = gs.contracts.getPtr(cid).?;
+    try c.operations.append(gs.allocator(), .{
+        .id = @enumFromInt(1),
+        .template_key = "negotiate_terms",
+        .state = .committed,
+        .opened_day = committed_day,
+        .committed_day = committed_day,
+    });
+
+    // Attach 6 actors.
+    for (0..6) |i| {
+        const aid: types.ActorId = @enumFromInt(@as(u32, @intCast(i + 1)));
+        try c.actor_ids.append(gs.allocator(), aid);
+        try gs.commitActor(.{
+            .id = aid,
+            .archetype_key = "liaison",
+            .first_name = "Ann",
+            .last_name = "Smith",
+            .faction_key = "LC",
+            .side = .employer,
+            .contract = cid,
+        });
+    }
+
+    // Attach 6 rivals.
+    for (0..6) |i| {
+        const rid: types.RivalId = @enumFromInt(@as(u32, @intCast(i + 1)));
+        try c.rival_ids.append(gs.allocator(), rid);
+        try gs.rivals.put(gs.allocator(), rid, .{
+            .id = rid,
+            .archetype_key = "enemy_raiders",
+            .unit_name = "Test Raiders",
+            .faction_key = "DC",
+            .standing = 0,
+            .contract = cid,
+        });
+    }
+
+    // Attach 6 officer arcs.
+    for (0..6) |i| {
+        const oa_id: types.OfficerArcId = @enumFromInt(@as(u32, @intCast(i + 1)));
+        const pid: types.PersonId = @enumFromInt(@as(u32, @intCast(i + 1)));
+        try c.officer_arc_ids.append(gs.allocator(), oa_id);
+        try gs.commitOfficerArc(.{
+            .id = oa_id,
+            .person = pid,
+            .contract = cid,
+            .seat = .lance_leader,
+            .performance = 0,
+        });
+    }
+
+    gs.clock.day_index = committed_day + @as(u32, t.expected_days);
+    try resolveDueOperations(&gs);
+
+    // Operation resolved without crashing.
+    try testing.expectEqual(operation_mod.OperationState.resolved, c.operations.items[0].state);
+    try testing.expect(c.operations.items[0].outcome != .none);
+    // 1 resolution + 6 actors + 1 world + 6 rivals + 6 officers = 20 entries.
+    try testing.expectEqual(@as(usize, 20), gs.event_log.items.len);
+}
+
+test "resolveFinale: does not crash when one finale logs many entries (regression)" {
+    // resolveFinale must reserve enough log slots upfront for all commit phase
+    // appends: 1 finale + 6 actors + 1 world + 6 rivals + 6 officers = 20.
+    // Reserving fewer slots causes appendAssumeCapacity to assert.
+    const testing = std.testing;
+
+    var gs = GameState.init(testing.allocator, .{ .seed = 22222 });
+    defer gs.deinit();
+
+    const a = arc_mod.find("fracturing_garrison").?;
+    var terminal_beat: u8 = 0;
+    for (a.beats, 0..) |b, i| if (b.escalation_threshold == 0) {
+        terminal_beat = @intCast(i);
+    };
+
+    const cid: types.ContractId = @enumFromInt(1);
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+        .status = .active,
+        .arc_key = "fracturing_garrison",
+        .arc_beat = terminal_beat,
+        .escalation_clock = 0, // below collapse threshold → "held"
+    });
+    const c = gs.contracts.getPtr(cid).?;
+
+    // Attach 6 actors.
+    for (0..6) |i| {
+        const aid: types.ActorId = @enumFromInt(@as(u32, @intCast(i + 1)));
+        try c.actor_ids.append(gs.allocator(), aid);
+        try gs.commitActor(.{
+            .id = aid,
+            .archetype_key = "liaison",
+            .first_name = "Ann",
+            .last_name = "Smith",
+            .faction_key = "LC",
+            .side = .employer,
+            .contract = cid,
+        });
+    }
+
+    // Attach 6 rivals.
+    for (0..6) |i| {
+        const rid: types.RivalId = @enumFromInt(@as(u32, @intCast(i + 1)));
+        try c.rival_ids.append(gs.allocator(), rid);
+        try gs.rivals.put(gs.allocator(), rid, .{
+            .id = rid,
+            .archetype_key = "enemy_raiders",
+            .unit_name = "Test Raiders",
+            .faction_key = "DC",
+            .standing = 0,
+            .contract = cid,
+        });
+    }
+
+    // Attach 6 officer arcs.
+    for (0..6) |i| {
+        const oa_id: types.OfficerArcId = @enumFromInt(@as(u32, @intCast(i + 1)));
+        const pid: types.PersonId = @enumFromInt(@as(u32, @intCast(i + 1)));
+        try c.officer_arc_ids.append(gs.allocator(), oa_id);
+        try gs.commitOfficerArc(.{
+            .id = oa_id,
+            .person = pid,
+            .contract = cid,
+            .seat = .lance_leader,
+            .performance = 0,
+        });
+    }
+
+    const f = try resolveFinale(&gs, c);
+    try testing.expect(f != null);
+    try testing.expect(c.arc_finale_key.len > 0);
+    // 1 finale + 6 actors + 1 world + 6 rivals + 6 officers = 20 entries.
+    try testing.expectEqual(@as(usize, 20), gs.event_log.items.len);
 }
 
 test "resolveFinale: officer performance moves per finaleOfficerDelta for held and collapse (P4i)" {
