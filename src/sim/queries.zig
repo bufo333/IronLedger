@@ -35,6 +35,7 @@ const skulls_mod = @import("../domain/skulls.zig");
 const clock_mod = @import("../domain/clock.zig");
 const operation_mod = @import("../domain/operation.zig");
 const operations_m = @import("operations.zig");
+const medical = @import("medical.zig");
 
 const Alloc = std.mem.Allocator;
 
@@ -3189,6 +3190,56 @@ pub fn personRecord(alloc: Alloc, gs: *GameState, id: types.PersonId) ![]const [
     return out.toOwnedSlice(alloc);
 }
 
+/// The action the player can invoke for a person, used by the TUI detail modal.
+/// The command still decides (rule 34); this only informs the view.
+pub const PersonAction = enum { seat, transfer, post, train, leave, triage, admit, fire };
+
+/// Which actions are currently eligible for a person. Composed from existing
+/// predicates — one named owner for the view, no new rules (rule 20).
+pub const PersonActions = struct {
+    can_seat: bool,
+    can_transfer: bool,
+    can_post: bool,
+    can_train: bool,
+    can_leave: bool,
+    can_triage: bool,
+    can_admit: bool,
+    can_fire: bool,
+    primary_skill: types.SkillType,
+    restless: bool,
+};
+
+/// Eligibility for the person-detail modal actions (rule 20, 34). Returns an
+/// all-false struct when the id is unknown (matches personRecord convention).
+pub fn personActions(alloc: Alloc, gs: *GameState, id: types.PersonId) !PersonActions {
+    const p = gs.person(id) orelse return PersonActions{
+        .can_seat = false,
+        .can_transfer = false,
+        .can_post = false,
+        .can_train = false,
+        .can_leave = false,
+        .can_triage = false,
+        .can_admit = false,
+        .can_fire = false,
+        .primary_skill = .gunnery_mek,
+        .restless = false,
+    };
+    const day = gs.clock.day_index;
+    const company = gs.companyOf(p.assigned_force);
+    return PersonActions{
+        .can_seat = (try openSeats(alloc, gs, id)).len > 0,
+        .can_admit = p.status == .wounded and !p.medbay_admitted,
+        .can_triage = p.status == .wounded,
+        .can_leave = p.isAvailable(day) and !posture.isCompanyDeployed(gs, company),
+        .can_train = p.status == .active and p.training == null and gs.trainingHqFor(p) != null,
+        .can_post = p.role.isAdmin(),
+        .can_transfer = p.isOnBooks(),
+        .can_fire = p.isOnBooks(),
+        .primary_skill = p.role.primarySkill(),
+        .restless = medical.turnoverRisk(p, day) > 0,
+    };
+}
+
 pub const Seat = struct {
     unit: types.UnitId,
     slot: crew.Slot,
@@ -5478,7 +5529,6 @@ pub fn hqRoster(alloc: Alloc, gs: *GameState, hq_id: types.HqId) ![]const []cons
 /// The first line covers the seat HQ's home medical (cover N uses the seat's
 /// local staff — the per-HQ owner; rule 29 / C10-C3).
 pub fn medbay(alloc: Alloc, gs: *GameState) ![]const []const u8 {
-    const medical = @import("medical.zig");
     var out: std.ArrayListUnmanaged([]const u8) = .empty;
     const seat = gs.seat();
     const ms = medical.medicalStaffAt(gs, seat);
@@ -8225,4 +8275,70 @@ test "operationReport: T5 — empty for non-arc contract" {
     const report = try operationReport(arena.allocator(), &gs, cid);
     try std.testing.expectEqualStrings("", report.briefing);
     try std.testing.expectEqual(@as(usize, 0), report.rows.len);
+}
+
+test "personActions eligibility invariants: wounded/admit, leave, admin, restless (rule 20/67)" {
+    // Verifies the four rule-owner invariants listed in the plan.
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 42001 });
+    defer gs.deinit();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
+
+    // --- wounded + not admitted ⇒ can_admit and can_triage; after admit ⇒ !can_admit ---
+    const wid = try gs.hirePerson("W", "Ounded", .mekwarrior);
+    gs.person(wid).?.status = .wounded;
+    gs.person(wid).?.medbay_admitted = false;
+    {
+        const pa = try personActions(arena.allocator(), &gs, wid);
+        try std.testing.expect(pa.can_admit);
+        try std.testing.expect(pa.can_triage);
+    }
+    try medical.admit(&gs, wid);
+    {
+        const pa = try personActions(arena.allocator(), &gs, wid);
+        try std.testing.expect(!pa.can_admit); // admitted — no longer eligible
+        try std.testing.expect(pa.can_triage); // still wounded ⇒ still triageable
+    }
+
+    // --- leave: on leave ⇒ !can_leave; after leave expires ⇒ can_leave ---
+    const lid = try gs.hirePerson("L", "Eave", .mekwarrior);
+    gs.person(lid).?.status = .active;
+    {
+        const pa = try personActions(arena.allocator(), &gs, lid);
+        try std.testing.expect(pa.can_leave);
+    }
+    try medical.leave(&gs, lid, 30);
+    {
+        const pa = try personActions(arena.allocator(), &gs, lid);
+        try std.testing.expect(!pa.can_leave); // currently on leave
+    }
+    gs.clock.day_index += 31;
+    {
+        const pa = try personActions(arena.allocator(), &gs, lid);
+        try std.testing.expect(pa.can_leave); // leave expired
+    }
+
+    // --- admin role ⇒ can_post; combat role ⇒ !can_post ---
+    const aid = try gs.hirePerson("A", "Dmin", .admin_hr);
+    const cid2 = try gs.hirePerson("C", "Ombat", .mekwarrior);
+    {
+        const pa_admin = try personActions(arena.allocator(), &gs, aid);
+        try std.testing.expect(pa_admin.can_post);
+        const pa_combat = try personActions(arena.allocator(), &gs, cid2);
+        try std.testing.expect(!pa_combat.can_post);
+    }
+
+    // --- restless: agrees with medical.turnoverRisk > 0 ---
+    const rid = try gs.hirePerson("R", "Estless", .mekwarrior);
+    gs.person(rid).?.recruited_day = 0;
+    gs.clock.day_index = 400; // over a year's tenure
+    gs.person(rid).?.morale = 0;
+    gs.person(rid).?.fatigue = 100;
+    {
+        const pa = try personActions(arena.allocator(), &gs, rid);
+        const risk = medical.turnoverRisk(gs.person(rid).?, gs.clock.day_index);
+        try std.testing.expectEqual(risk > 0, pa.restless);
+        try std.testing.expect(pa.restless); // high fatigue+low morale over a year ⇒ restless
+    }
 }

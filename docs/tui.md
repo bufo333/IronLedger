@@ -143,7 +143,7 @@ no room.
 | F6 | Supply | Sites · Demand · Order form · Shop |
 | F7 | HQ | Facilities/projects · Bays · Back office · Hiring hall |
 | F8 | Lab | Budget/crits · Mounts · Plan & rules |
-| F9 | People | Personnel (pinned header, role filter) · Record · Open seats |
+| F9 | People | Personnel (pinned header, role filter) · Person-detail modal (Enter or `r` opens it: file, skills, status, assignment and eligible actions) · Open seats |
 | F10 | Market | Boards · Order catalog · Demand |
 
 ## Keys
@@ -295,7 +295,7 @@ titles and the help modal come from the same tables.
 | `L` | any | send on leave for some days |
 | `T` | any | set medical triage priority (higher heals first) |
 | `m` | any | admit to the medbay |
-| `r` | any | open the full service record |
+| `r` | any | open the person's detail — file, skills and the actions you can take |
 | `D` | any | dismiss the person (asks first) |
 
 ### F10 Market
@@ -385,7 +385,7 @@ titles and the help modal come from the same tables.
 | `Enter` | choose |
 | `Esc` | cancel |
 
-### Sheets (hull, record, help, summary, …)
+### Sheets (hull, help, summary, …)
 
 | Key | Does |
 |---|---|

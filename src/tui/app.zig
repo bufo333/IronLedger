@@ -1078,6 +1078,40 @@ pub const App = struct {
         return view.rows[@min(self.cur(0).*, view.rows.len - 1)];
     }
 
+    /// Re-export for use by the People screen and the person-detail modal.
+    pub const PersonAction = q.PersonAction; // seat, transfer, post, train, leave, triage, admit, fire
+
+    /// Single dispatch owner for person actions; shared by the People screen
+    /// letter keys and the person-detail modal hotkeys (rule 20).
+    pub fn personAct(self: *App, id: types.PersonId, action: PersonAction) !void {
+        const al = self.a();
+        const g = self.state();
+        var buf: [96]u8 = undefined;
+        switch (action) {
+            .train => {
+                const pa = try q.personActions(al, g, id);
+                self.openCommand(std.fmt.bufPrint(&buf, "train {d} {s}", .{ @intFromEnum(id), @tagName(pa.primary_skill) }) catch "train ");
+            },
+            .seat => self.openModal(.{ .seat = id }),
+            .post => self.openModal(.{ .pick_hq = id }),
+            .transfer => self.openModal(.{ .pick_company = .{ .what = .person, .id = @intFromEnum(id) } }),
+            .leave => self.openAmount(
+                try std.fmt.allocPrint(al, "LEAVE · {s}", .{try q.personName(al, g, id)}),
+                .{ .leave = id },
+                &.{.{ .label = "days", .value = 7, .min = 1, .max = 90, .step = 1 }},
+            ),
+            .triage => self.openAmount(
+                try std.fmt.allocPrint(al, "TRIAGE · {s} (higher heals first)", .{try q.personName(al, g, id)}),
+                .{ .triage = id },
+                &.{.{ .label = "priority", .value = 1, .min = 0, .max = 9, .step = 1 }},
+            ),
+            .fire => self.modal = .{ .confirm = .{ .kind = .fire, .id = @intFromEnum(id) } },
+            .admit => {
+                _ = try self.execSay(.{ .admit = id }, .good, "{s} admitted to the medbay — healing starts tomorrow", .{try q.personName(al, g, id)});
+            },
+        }
+    }
+
     /// Change the emblem on every company (the crest is outfit-wide).
     fn applyEmblem(self: *App, image: []const u8) !void {
         if (try self.exec(.{ .set_outfit_emblem = image })) self.refreshEmblem();
@@ -2015,7 +2049,7 @@ pub const App = struct {
         .{ .name = "New campaign · company and back office", .legend = &company_legend },
         .{ .name = "New campaign · review", .legend = &review_legend },
         .{ .name = "Lists (pick a company, a part, a seat, …)", .legend = &list_legend },
-        .{ .name = "Sheets (hull, record, help, summary, …)", .legend = &sheet_legend },
+        .{ .name = "Sheets (hull, help, summary, …)", .legend = &sheet_legend },
         .{ .name = "Raise a company · hulls", .legend = &raise_hulls_legend },
         .{ .name = "Raise a company · support train", .legend = &raise_support_legend },
         .{ .name = "Raise a company · crews", .legend = &raise_crews_legend },
@@ -2793,6 +2827,19 @@ pub const App = struct {
         max_h: u16,
     };
 
+    /// Action key/label table for the person-detail modal.
+    /// One source for both the view rows and the listExtra dispatch (rule 20).
+    const person_action_keys = [_]struct { action: PersonAction, key: u8, label: []const u8 }{
+        .{ .action = .seat, .key = 'a', .label = "seat (assign to an open slot)" },
+        .{ .action = .transfer, .key = 'x', .label = "transfer to another company" },
+        .{ .action = .post, .key = 'P', .label = "post to an HQ" },
+        .{ .action = .train, .key = 't', .label = "train primary skill" },
+        .{ .action = .leave, .key = 'L', .label = "send on leave" },
+        .{ .action = .triage, .key = 'T', .label = "set triage priority (higher heals first)" },
+        .{ .action = .admit, .key = 'm', .label = "admit to the medbay" },
+        .{ .action = .fire, .key = 'D', .label = "dismiss (asks first)" },
+    };
+
     /// What the open list modal shows.
     fn listView(self: *App, al: std.mem.Allocator) !ListView {
         const full_h = self.screen.rows -| 2;
@@ -3024,7 +3071,41 @@ pub const App = struct {
                 return .{ .title = try listTitle(al, "EMBLEM", "use", "cancel", false), .right_title = try std.fmt.allocPrint(al, "pictures from {s}", .{try std.mem.join(al, ", ", self.asset_roots.logos)}), .rows = rows.items, .n = rows.items.len, .w = layout.modal.emblem_w, .max_h = layout.modal.emblem_max_h };
             },
             .hull => |uid| return .{ .title = try listTitle(al, "HULL", null, "close", false), .rows = try q.hull(al, self.state(), uid), .read_only = true, .w = layout.modal.hull_w, .max_h = full_h },
-            .record => |pid| return .{ .title = try listTitle(al, "RECORD", null, "close", false), .rows = try q.personRecord(al, self.state(), pid), .read_only = true, .w = layout.modal.record_w, .max_h = full_h },
+            .record => |pid| {
+                const g = self.state();
+                const pa = try q.personActions(al, g, pid);
+                var rows: std.ArrayListUnmanaged([]const u8) = .empty;
+                try rows.appendSlice(al, try q.personRecord(al, g, pid));
+                try rows.append(al, "");
+                try rows.append(al, "{a}ACTIONS{/}");
+                for (person_action_keys) |entry| {
+                    const eligible = switch (entry.action) {
+                        .seat => pa.can_seat,
+                        .transfer => pa.can_transfer,
+                        .post => pa.can_post,
+                        .train => pa.can_train,
+                        .leave => pa.can_leave,
+                        .triage => pa.can_triage,
+                        .admit => pa.can_admit,
+                        .fire => pa.can_fire,
+                    };
+                    if (!eligible) continue;
+                    const suffix = if (entry.action == .leave and pa.restless) " {a}← resolves restless{/}" else "";
+                    try rows.append(al, try std.fmt.allocPrint(al, "  [{c}] {s}{s}", .{ entry.key, entry.label, suffix }));
+                }
+                const head: []const []const u8 = if (pa.restless) try al.dupe([]const u8, &.{
+                    "{c}RESTLESS{/} — rolls to quit on payday: grant leave, rotate home, feed and rest",
+                    "",
+                }) else &.{};
+                return .{
+                    .title = try listTitle(al, "RECORD", null, "close", false),
+                    .head = head,
+                    .rows = rows.items,
+                    .scroll = true,
+                    .w = layout.modal.record_w,
+                    .max_h = full_h,
+                };
+            },
             .battle_list => {
                 const rows = try q.battleList(al, self.state());
                 return .{
@@ -3900,6 +3981,30 @@ pub const App = struct {
                     // `o` consolidates a resolved operation.
                     _ = try self.execSay(.{ .consolidate_operation = .{ .contract = cid, .operation = row.id } }, .good, "consolidated: {s}", .{row.name});
                     self.modal = .none;
+                    return true;
+                }
+                return false;
+            },
+            .record => |pid| {
+                // Person-detail modal: action keys from the person_action_keys table.
+                if (key != .char) return false;
+                const al = self.a();
+                const g = self.state();
+                const pa = try q.personActions(al, g, pid);
+                for (person_action_keys) |entry| {
+                    if (key.char != entry.key) continue;
+                    const eligible = switch (entry.action) {
+                        .seat => pa.can_seat,
+                        .transfer => pa.can_transfer,
+                        .post => pa.can_post,
+                        .train => pa.can_train,
+                        .leave => pa.can_leave,
+                        .triage => pa.can_triage,
+                        .admit => pa.can_admit,
+                        .fire => pa.can_fire,
+                    };
+                    if (!eligible) return false;
+                    try self.personAct(pid, entry.action);
                     return true;
                 }
                 return false;
@@ -4798,4 +4903,21 @@ test "a wide-only focus clamps into the narrow panes on resize" {
     try c.app.screen.resize(100, 50);
     try c.app.draw();
     try std.testing.expect(c.app.focus < c.app.paneCount());
+}
+
+test "person-detail modal: pressing m on a wounded un-admitted person admits them (rule 34/86)" {
+    // Open the detail modal on a wounded person, press `m`, verify the command ran.
+    const c = try clientForTest(std.testing.allocator);
+    defer deinitForTest(c, std.testing.allocator);
+    c.app.switchTab(.people);
+    // Grab the first person on the roster and wound them.
+    const id = (try c.app.selectedPerson()) orelse return error.NoPerson;
+    c.app.state().person(id).?.status = .wounded;
+    c.app.state().person(id).?.medbay_admitted = false;
+    // Open the record modal via pressing `r`.
+    try pressForTest(c, .{ .char = 'r' });
+    try std.testing.expect(c.app.modal == .record);
+    // Press `m` — should dispatch admit through the existing command path.
+    try pressForTest(c, .{ .char = 'm' });
+    try std.testing.expect(c.app.state().person(id).?.medbay_admitted);
 }

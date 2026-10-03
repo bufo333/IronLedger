@@ -45,22 +45,20 @@ pub const bindings = [_]app.keys.Binding(Action){
     .{ .match = app.keys.Match.char('/'), .action = .filter_next, .label = "filter", .group = .navigate, .shown = "/ ,", .title = 0, .help = "next / previous roster filter" },
     .{ .match = app.keys.Match.char(','), .action = .filter_prev, .label = "previous filter", .group = .navigate, .show_footer = false, .show_help = false },
     .{ .match = app.keys.Match.char('a'), .action = .seat, .label = "seat", .group = .act, .help = "assign the person under the cursor to an open seat" },
-    .{ .match = .{ .key = .enter }, .action = .seat, .label = "seat", .group = .act, .show_footer = false, .show_help = false },
+    .{ .match = .{ .key = .enter }, .action = .record, .label = "record", .group = .act, .show_footer = false, .show_help = false },
     .{ .match = app.keys.Match.char('x'), .action = .transfer, .label = "transfer", .group = .act, .help = "transfer to another company" },
     .{ .match = app.keys.Match.char('P'), .action = .post, .label = "post", .group = .act, .help = "post to an HQ" },
     .{ .match = app.keys.Match.char('t'), .action = .train, .label = "train", .group = .act, .help = "train the person's primary skill" },
     .{ .match = app.keys.Match.char('L'), .action = .leave, .label = "leave", .group = .act, .help = "send on leave for some days" },
     .{ .match = app.keys.Match.char('T'), .action = .triage, .label = "triage", .group = .act, .help = "set medical triage priority (higher heals first)" },
     .{ .match = app.keys.Match.char('m'), .action = .admit, .label = "admit", .group = .act, .help = "admit to the medbay" },
-    .{ .match = app.keys.Match.char('r'), .action = .record, .label = "record", .group = .act, .help = "open the full service record" },
+    .{ .match = app.keys.Match.char('r'), .action = .record, .label = "record", .group = .act, .help = "open the person's detail — file, skills and the actions you can take" },
     .{ .match = app.keys.Match.char('D'), .action = .fire, .label = "fire", .group = .money, .help = "dismiss the person (asks first)" },
 };
 pub const legend = app.keys.entries(Action, &bindings);
 
 pub fn handle(self: *App, k: app.Key) anyerror!bool {
     const hit = app.keys.lookup(Action, &bindings, self.focus, k) orelse return false;
-    const al = self.a();
-    const g = self.state();
     switch (hit.action) {
         .filter_next, .filter_prev => {
             self.people_filter = if (hit.action == .filter_next) self.people_filter.next() else self.people_filter.prev();
@@ -70,33 +68,17 @@ pub fn handle(self: *App, k: app.Key) anyerror!bool {
         else => {},
     }
     const id = (try self.selectedPerson()) orelse return true;
-    var buf: [96]u8 = undefined;
     switch (hit.action) {
         .filter_next, .filter_prev => unreachable,
-        .train => {
-            const row = (try self.selectedPersonRow()) orelse return true;
-            self.openCommand(std.fmt.bufPrint(&buf, "train {d} {s}", .{ @intFromEnum(id), @tagName(row.primary_skill) }) catch "train ");
-        },
-        .seat => {
-            self.openModal(.{ .seat = id });
-        },
-        .post => {
-            self.openModal(.{ .pick_hq = id });
-        },
-        .transfer => {
-            self.openModal(.{ .pick_company = .{ .what = .person, .id = @intFromEnum(id) } });
-        },
-        .leave => self.openAmount(try std.fmt.allocPrint(al, "LEAVE · {s}", .{try q.personName(al, g, id)}), .{ .leave = id }, &.{
-            .{ .label = "days", .value = 7, .min = 1, .max = 90, .step = 1 },
-        }),
-        .triage => self.openAmount(try std.fmt.allocPrint(al, "TRIAGE · {s} (higher heals first)", .{try q.personName(al, g, id)}), .{ .triage = id }, &.{
-            .{ .label = "priority", .value = 1, .min = 0, .max = 9, .step = 1 },
-        }),
-        .fire => self.modal = .{ .confirm = .{ .kind = .fire, .id = @intFromEnum(id) } },
         .record => self.modal = .{ .record = id },
-        .admit => {
-            _ = try self.execSay(.{ .admit = id }, .good, "{s} admitted to the medbay — healing starts tomorrow", .{try q.personName(al, g, id)});
-        },
+        .train => try self.personAct(id, .train),
+        .seat => try self.personAct(id, .seat),
+        .post => try self.personAct(id, .post),
+        .transfer => try self.personAct(id, .transfer),
+        .leave => try self.personAct(id, .leave),
+        .triage => try self.personAct(id, .triage),
+        .fire => try self.personAct(id, .fire),
+        .admit => try self.personAct(id, .admit),
     }
     return true;
 }
@@ -115,4 +97,12 @@ test "x on a person opens the company picker for that person" {
     try toTab(c, .people);
     try app.pressForTest(c, .{ .char = 'x' });
     try std.testing.expect(c.app.modal == .pick_company);
+}
+
+test "Enter on a person opens the detail modal (rule 86)" {
+    const c = try app.clientForTest(std.testing.allocator);
+    defer app.deinitForTest(c, std.testing.allocator);
+    try toTab(c, .people);
+    try app.pressForTest(c, .enter);
+    try std.testing.expect(c.app.modal == .record);
 }
