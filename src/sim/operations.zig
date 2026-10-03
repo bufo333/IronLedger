@@ -862,6 +862,21 @@ test "selectArcKeyFor: all arc-mapped kinds and arc-less kinds" {
     try testing.expectEqual(@as(?[]const u8, null), selectArcKeyFor(.recon_raid));
 }
 
+test "arcEligible: matches arc kinds; agrees with selectArcKeyFor (rule 20, 67)" {
+    const testing = std.testing;
+    const a = arc_mod.find("fracturing_garrison").?;
+    // fracturing_garrison covers garrison_duty and security_duty; not relief_duty.
+    try testing.expect(arcEligible(a, .garrison_duty));
+    try testing.expect(arcEligible(a, .security_duty));
+    try testing.expect(!arcEligible(a, .relief_duty));
+    // Consumer agreement: for eligible kinds, selectArcKeyFor returns the arc's key.
+    try testing.expectEqualStrings(a.key, selectArcKeyFor(.garrison_duty).?);
+    try testing.expectEqualStrings(a.key, selectArcKeyFor(.security_duty).?);
+    // For an arc-less kind, arcEligible is false and selectArcKeyFor returns null.
+    try testing.expect(!arcEligible(a, .cadre_duty));
+    try testing.expectEqual(@as(?[]const u8, null), selectArcKeyFor(.cadre_duty));
+}
+
 test "operationEligible: gates on active status, non-empty arc_key, and matching arc" {
     const testing = std.testing;
     var gs = @import("state.zig").GameState.init(testing.allocator, .{});
@@ -1136,6 +1151,54 @@ test "instantiateOpening: caller owns the id counter increment" {
     try testing.expectEqual(id_start + @as(u32, @intCast(a.opening.len)), gs.next_operation_id);
 }
 
+test "committedCombatOp: first committed combat op; skips non-committed and non-combat; null when none (rule 20, 67)" {
+    const testing = std.testing;
+    var c: contract_mod.Contract = .{
+        .id = @enumFromInt(1),
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 12, .base_pay_month = 100_000 },
+        .status = .active,
+        .arc_key = "fracturing_garrison",
+    };
+    defer c.operations.deinit(testing.allocator);
+
+    // No ops: null.
+    try testing.expectEqual(@as(?*operation_mod.Operation, null), committedCombatOp(&c));
+
+    // Available combat op: skipped (not committed).
+    try c.operations.append(testing.allocator, .{
+        .id = @enumFromInt(1),
+        .template_key = "repel_probe", // combat
+        .state = .available,
+        .opened_day = 0,
+    });
+    try testing.expectEqual(@as(?*operation_mod.Operation, null), committedCombatOp(&c));
+
+    // Committed non-combat op: skipped.
+    try c.operations.append(testing.allocator, .{
+        .id = @enumFromInt(2),
+        .template_key = "negotiate_terms", // non-combat
+        .state = .committed,
+        .opened_day = 0,
+    });
+    try testing.expectEqual(@as(?*operation_mod.Operation, null), committedCombatOp(&c));
+
+    // Committed combat op: returned.
+    try c.operations.append(testing.allocator, .{
+        .id = @enumFromInt(3),
+        .template_key = "repel_probe", // combat
+        .state = .committed,
+        .opened_day = 0,
+    });
+    const found = committedCombatOp(&c).?;
+    try testing.expectEqual(operation_mod.OperationState.committed, found.state);
+    const found_tmpl = operation_mod.findTemplate(found.template_key).?;
+    try testing.expect(found_tmpl.combat);
+}
+
 test "combatBand: maps engagement outcome to OutcomeBand" {
     const testing = std.testing;
     try testing.expectEqual(operation_mod.OutcomeBand.decisive, combatBand(.decisive_victory));
@@ -1260,6 +1323,44 @@ test "legalIntents / mandatedIntent / intentLegal: legal set × CommandRights" {
     try testing.expect(intentLegal(&c_integrated, t_combat, .secure_objective));
     try testing.expect(!intentLegal(&c_integrated, t_combat, .preserve_force));
     try testing.expect(!intentLegal(&c_integrated, t_combat, .break_enemy));
+}
+
+test "operationQuote: expected days, legal intents, and mandate agree with owners (rule 20, 67)" {
+    const testing = std.testing;
+    var gs = @import("state.zig").GameState.init(testing.allocator, .{});
+    defer gs.deinit();
+
+    var c: contract_mod.Contract = .{
+        .id = @enumFromInt(1),
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 12, .base_pay_month = 100_000, .command_rights = .independent },
+        .status = .active,
+        .arc_key = "fracturing_garrison",
+    };
+
+    const t_combat = operation_mod.findTemplate("repel_probe").?;
+    const t_noncombat = operation_mod.findTemplate("negotiate_terms").?;
+
+    // Independent rights: expected_days matches template; legal_intents matches owner;
+    // mandated is null.
+    const q_combat = operationQuote(&gs, &c, t_combat);
+    try testing.expectEqual(t_combat.expected_days, q_combat.expected_days);
+    try testing.expectEqual(legalIntents(t_combat.combat, .independent), q_combat.legal_intents);
+    try testing.expectEqual(@as(?operation_mod.Intent, null), q_combat.mandated);
+
+    const q_noncombat = operationQuote(&gs, &c, t_noncombat);
+    try testing.expectEqual(t_noncombat.expected_days, q_noncombat.expected_days);
+    try testing.expectEqual(legalIntents(t_noncombat.combat, .independent), q_noncombat.legal_intents);
+    try testing.expectEqual(@as(?operation_mod.Intent, null), q_noncombat.mandated);
+
+    // Integrated rights: legal_intents is the integrated set; mandated equals mandatedIntent.
+    c.terms.command_rights = .integrated;
+    const q_int = operationQuote(&gs, &c, t_combat);
+    try testing.expectEqual(legalIntents(t_combat.combat, .integrated), q_int.legal_intents);
+    try testing.expectEqual(@as(?operation_mod.Intent, mandatedIntent(t_combat.combat)), q_int.mandated);
 }
 
 test "intentProfile: internal consistency — break_enemy ≥ preserve_force; preserve_force salvage gated" {
@@ -1516,6 +1617,72 @@ test "taskEligible: representative refusals and accept case" {
     c.terms.command_rights = .independent;
 }
 
+test "taskCapabilitySatisfied: recovery requires an operational salvage lance; other tasks always satisfied (rule 20, 67)" {
+    const testing = std.testing;
+    const force_domain = @import("../domain/force.zig");
+    var gs = @import("state.zig").GameState.init(testing.allocator, .{});
+    defer gs.deinit();
+
+    // Config 1: company without a salvage lance.
+    const co1 = try gs.createForce("Alpha", .company, .none);
+    // Add an operational combat lance so taskEligible can reach the capability gate.
+    const lance1 = try gs.createForce("1st Lance", .lance, co1);
+    const uid1 = try gs.addUnit("LCT-1V");
+    const pid1 = try gs.hirePerson("P", "Q", .mekwarrior);
+    try @import("toe.zig").assignUnit(&gs, uid1, lance1, pid1);
+
+    var c1: contract_mod.Contract = .{
+        .id = @enumFromInt(1),
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 12, .base_pay_month = 100_000 },
+        .status = .active,
+        .arc_key = "fracturing_garrison",
+        .assigned_company = co1,
+    };
+    // No salvage lance: .recovery → false.
+    try testing.expect(!taskCapabilitySatisfied(&gs, &c1, .recovery));
+    // .escort always satisfied regardless.
+    try testing.expect(taskCapabilitySatisfied(&gs, &c1, .escort));
+
+    // Consumer agreement: taskEligible also returns false for .recovery in this config.
+    var op1: operation_mod.Operation = .{
+        .id = @enumFromInt(1),
+        .template_key = "repel_probe",
+        .state = .committed,
+        .opened_day = 0,
+    };
+    try testing.expect(!taskEligible(&gs, &c1, &op1, lance1, .recovery));
+    // taskEligible returns true for .escort (all gates including capability pass).
+    try testing.expect(taskEligible(&gs, &c1, &op1, lance1, .escort));
+
+    // Config 2: company with an operational salvage lance.
+    const co2 = try gs.createForce("Beta", .company, .none);
+    const omega2 = try gs.createForce("Omega", .support_company, co2);
+    const salvage2 = try gs.createForce("Salvage Lance", .support_lance, omega2);
+    gs.force(salvage2).?.support_kind = force_domain.SupportLanceKind.salvage;
+    const uid2 = try gs.addUnit("SVT-1");
+    const pid2 = try gs.hirePerson("R", "S", .vehicle_crew);
+    try @import("toe.zig").assignUnit(&gs, uid2, salvage2, pid2);
+
+    var c2: contract_mod.Contract = .{
+        .id = @enumFromInt(2),
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 12, .base_pay_month = 100_000 },
+        .status = .active,
+        .arc_key = "fracturing_garrison",
+        .assigned_company = co2,
+    };
+    // Operational salvage lance present: .recovery → true.
+    try testing.expect(taskCapabilitySatisfied(&gs, &c2, .recovery));
+    try testing.expect(taskCapabilitySatisfied(&gs, &c2, .escort));
+}
+
 test "taskSucceeded: representative verdicts" {
     const testing = std.testing;
     // main_effort / objective_security: need at least partial.
@@ -1579,6 +1746,35 @@ test "lanceTaskPower / operationTaskMods: tasked lance scales power; aggregate r
     try testing.expectEqual(@as(i32, 0), mods.surprise_reduction); // main_effort has 0
 }
 
+test "lanceTask: returns the assigned task or null; agrees with lanceTaskPower (rule 20, 67)" {
+    const testing = std.testing;
+    var op: operation_mod.Operation = .{
+        .id = @enumFromInt(1),
+        .template_key = "repel_probe",
+        .state = .committed,
+        .opened_day = 0,
+    };
+    const lid: types.ForceId = @enumFromInt(10);
+    const other: types.ForceId = @enumFromInt(11);
+
+    // No tasks yet: null for both.
+    try testing.expectEqual(@as(?operation_mod.LanceTask, null), lanceTask(&op, lid));
+    try testing.expectEqual(@as(?operation_mod.LanceTask, null), lanceTask(&op, other));
+
+    // Assign .screen to lid.
+    try op.tasks.append(testing.allocator, .{ .lance = lid, .task = .screen });
+    defer op.tasks.deinit(testing.allocator);
+
+    try testing.expectEqual(@as(?operation_mod.LanceTask, .screen), lanceTask(&op, lid));
+    try testing.expectEqual(@as(?operation_mod.LanceTask, null), lanceTask(&op, other));
+
+    // Consumer agreement: lanceTaskPower scales by taskProfile(.screen).line_power_bp.
+    const base: i64 = 1000;
+    try testing.expectEqual(types.applyBp(base, taskProfile(.screen).line_power_bp), lanceTaskPower(&op, lid, base));
+    // Unassigned lance: base returned unchanged.
+    try testing.expectEqual(base, lanceTaskPower(&op, other, base));
+}
+
 test "tempoLegal: advance/delay always legal; recon/prepare combat-only" {
     const testing = std.testing;
     // advance and delay are always legal.
@@ -1610,6 +1806,23 @@ test "tempoProfile: advance all-zero; recon surprise > 0; prepare bonus > 0; del
     const del = tempoProfile(.delay);
     try testing.expectEqual(@as(i32, 0), del.surprise_reduction);
     try testing.expectEqual(@as(i32, 0), del.prepared_roll_bonus);
+}
+
+test "operationTempoMods: equals tempoProfile(op.tempo) for each posture (rule 20, 67)" {
+    const testing = std.testing;
+    var op: operation_mod.Operation = .{
+        .id = @enumFromInt(1),
+        .template_key = "repel_probe",
+        .state = .committed,
+        .opened_day = 0,
+    };
+    for ([_]operation_mod.TempoPosture{ .advance, .recon, .prepare, .delay }) |posture| {
+        op.tempo = posture;
+        const mods = operationTempoMods(&op);
+        const profile = tempoProfile(posture);
+        try testing.expectEqual(profile.surprise_reduction, mods.surprise_reduction);
+        try testing.expectEqual(profile.prepared_roll_bonus, mods.prepared_roll_bonus);
+    }
 }
 
 test "tempoClockDelta: advance 0; others > 0; delay >= recon/prepare" {
@@ -1820,6 +2033,66 @@ test "interventionProfile / operationInterventionMods: aggregate mirrors sum" {
     const p2 = interventionProfile(.reinforce);
     try testing.expectEqual(p1.surprise_reduction + p2.surprise_reduction, mods.surprise_reduction);
     try testing.expectEqual(p1.prepared_roll_bonus + p2.prepared_roll_bonus, mods.prepared_roll_bonus);
+}
+
+test "interventionCost / interventionApplied / interventionSummary: cost, membership, and markup-safe labels (rule 20, 67)" {
+    const testing = std.testing;
+    const all_ivs = [_]operation_mod.Intervention{ .emergency_recon, .reinforce, .air_cover, .field_repair };
+
+    // interventionCost: each kind > 0; .reinforce is the strict maximum.
+    for (all_ivs) |iv| {
+        try testing.expect(interventionCost(iv) > 0);
+    }
+    try testing.expect(interventionCost(.reinforce) > interventionCost(.emergency_recon));
+    try testing.expect(interventionCost(.reinforce) > interventionCost(.air_cover));
+    try testing.expect(interventionCost(.reinforce) > interventionCost(.field_repair));
+
+    // interventionApplied: empty op → false for all kinds.
+    var op: operation_mod.Operation = .{
+        .id = @enumFromInt(1),
+        .template_key = "repel_probe",
+        .state = .committed,
+        .opened_day = 0,
+    };
+    for (all_ivs) |iv| {
+        try testing.expect(!interventionApplied(&op, iv));
+    }
+
+    // After appending .emergency_recon: true for it, false for the others.
+    try op.interventions.append(testing.allocator, .emergency_recon);
+    defer op.interventions.deinit(testing.allocator);
+    try testing.expect(interventionApplied(&op, .emergency_recon));
+    try testing.expect(!interventionApplied(&op, .reinforce));
+    try testing.expect(!interventionApplied(&op, .air_cover));
+    try testing.expect(!interventionApplied(&op, .field_repair));
+
+    // operationInterventionMods agrees with interventionProfile for that single kind.
+    const mods = operationInterventionMods(&op);
+    const profile = interventionProfile(.emergency_recon);
+    try testing.expectEqual(profile.surprise_reduction, mods.surprise_reduction);
+    try testing.expectEqual(profile.prepared_roll_bonus, mods.prepared_roll_bonus);
+
+    // interventionSummary: empty op → "".
+    var op_empty: operation_mod.Operation = .{
+        .id = @enumFromInt(2),
+        .template_key = "repel_probe",
+        .state = .committed,
+        .opened_day = 0,
+    };
+    const empty_summary = try interventionSummary(testing.allocator, &op_empty);
+    try testing.expectEqualStrings("", empty_summary);
+    // empty returns a static literal — no free needed.
+
+    // Two kinds → labels joined by ", "; no markup control characters.
+    try op.interventions.append(testing.allocator, .reinforce);
+    const summary = try interventionSummary(testing.allocator, &op);
+    defer testing.allocator.free(summary);
+    try testing.expect(std.mem.indexOf(u8, summary, "emergency recon") != null);
+    try testing.expect(std.mem.indexOf(u8, summary, "reinforce") != null);
+    try testing.expect(std.mem.indexOf(u8, summary, ", ") != null);
+    for (summary) |ch| {
+        try testing.expect(ch != '<' and ch != '>' and ch != '[' and ch != ']');
+    }
 }
 
 test "interventionGate: each of the four gates accept and refuse correctly" {

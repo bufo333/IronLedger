@@ -1623,8 +1623,11 @@ validated framework rather than adding a second story system.
   completion, breach, hull loss, operation success, clock progression,
   capacity spending and ending distribution through test assertions.
   *(shipped sim/p4j-scripts)*
-- P4i.5 Complete the contract-required verification for briefing, planning,
+- [x] P4i.5 Complete the contract-required verification for briefing, planning,
   commitment, intervention, post-operation choice, and finale.
+  *(shipped sim/p4j-verify: rule 67 sweep — seven new tests covering arcEligible,
+  operationQuote, committedCombatOp, taskCapabilitySatisfied, lanceTask,
+  operationTempoMods, and the intervention triple)*
 - P4i.6 Update `ARCHITECTURE.md`, `GAMEPLAY.md`, `docs/tui.md`, TUI mockups
   and the roadmap only when the corresponding behavior is live.
 
