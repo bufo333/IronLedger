@@ -29,7 +29,7 @@ D30 into C12, D28 into C7, and D31 into C8. D33 (C18) is now closed.
 These product packages begin only after all compliance and focused-test work
 above is complete.
 
-- [ ] P4 Campaign operations and stories:
+- [x] P4 Campaign operations and stories:
   - P4a operations-and-stories design and content boundary: approved
     (`docs/p4-operations-design.md`).
   - [x] P4b operation content/state foundation.
@@ -51,6 +51,13 @@ above is complete.
     *(increment sim/p4j-scripts: five-style deterministic campaign tests — aggressive, cautious, intelligence-heavy, logistics-heavy, force-preservation)*
     *(increment sim/p4j-verify: rule 67 sweep — nine untested operation rule owners)*
     *(increment docs/p4j-sync: ARCHITECTURE/GAMEPLAY/tui.md/ROADMAP/TODO doc sync — no behavior change)*
+- [ ] P3 MekLab depth — editable construction, A-F quotes, and custom variants:
+  - P3 design approval and content boundary: approved
+    (`docs/p3-meklab-design.md`), grounded in
+    `docs/p3d-meklab-location-layout.md`.
+  - [ ] P3-construction (P3a-P3b): editable construction parts and A-F quotes.
+  - [ ] P3-variants (P3c): persisted campaign-owned custom chassis.
+  - [ ] P3-client (P3d): construction editor and variant lifecycle.
 
 ## Not scheduled
 
@@ -69,9 +76,6 @@ reschedule only on explicit dispatch.
 - P2-artillery (P2e-P2g): verified domain facts, acquisition/attachment,
   crewing, readiness, and persistence.
 - P2-battle-ui (P2h-P2i): both battle effects and REPL/TUI surfaces.
-- P3-construction (P3a-P3b): editable construction parts and A-F quotes.
-- P3-variants (P3c): persisted campaign-owned custom chassis.
-- P3-client (P3d): construction editor and variant lifecycle.
 
 - A mobile field base as a buyable Repair support lance, adding to the repair
   push beyond the Logistics lance's workshop.
