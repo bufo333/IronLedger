@@ -12,6 +12,9 @@ own from what you built beforehand — training, maintenance, ammunition,
 provisions, morale, support echelons, the depth of your bench — and the
 after-action report tells you what your decisions were worth. The
 tabletop is deliberately skipped; the campaign around it is the game.
+Each deployment plays out as an operational story: you choose the operations,
+the mission intent and the lance tasking, then live with the local
+consequences.
 
 It is written in Zig 0.16 with no dependencies beyond the system SQLite
 library, runs in any terminal, and shows your outfit's crest as a real
@@ -119,6 +122,46 @@ the day now.
 - **Contract history** with grade, world, days served, victory points and
   pay, and every AAR kept in the log.
 
+### Campaign operations
+
+- **A deployment is an operational story.** An arc contract opens with a
+  briefing — the employer's goal, local pressure, opposition posture, known
+  actors and the current world state — and runs as an arc of beats: arrival, a
+  complication, escalation, a climax and an aftermath, with at least two
+  materially different endings. Arcs cover garrison/security, relief,
+  raid/guerrilla, extraction and planetary-assault work.
+- **An operations board** (`g` on the active contract) lists the operations the
+  current beat offers, combat and non-combat. Committing one picks a **mission
+  intent** — preserve force, secure an objective, break the enemy, protect
+  assets, secure intelligence, or recover people or equipment — and winning the
+  engagement and accomplishing the operation are separate results; command
+  rights can mandate or limit the intent.
+- **Lance tasking** gives each lance a job for the operation — screen, main
+  effort, reserve, escort, objective or security, recovery, recon — gated by
+  what the lance can actually field, so a company's scouts, reserves, escort and
+  recovery assets change how an operation plays even at comparable BV.
+- **Intelligence versus tempo**: before committing you choose to scout, advance,
+  prepare or delay, each with its own time, readiness and escalation cost,
+  against an escalation clock the arc runs.
+- **Command capacity** is a small, capped pool of command attention; spending it
+  on an intervention — emergency reconnaissance, reinforcing a task, air cover,
+  field-repair reprioritisation — is attention gone from the next problem.
+- **Momentum and withdrawal**: a held field can be exploited or consolidated; a
+  failing one can be given up by tactical or operational withdrawal, or the
+  contract recalled under the breach clause. The arc's state, operations,
+  relationships and clocks select a **finale** — a battle, negotiation,
+  evacuation, holdout, betrayal or withdrawal.
+- **The deployment has memory**: contract-local actors (liaisons, enemy
+  officers), persistent rival companies and compact officer arcs carry
+  relationship and standing forward, so returning to a world or meeting a former
+  liaison reflects earlier choices; per-world state — security, civilian
+  support, employer control, enemy influence — persists and feeds later
+  contracts, markets and intelligence.
+- **An operation report** (`G` on the active contract) answers "what changed
+  because of this operation?" — every decided operation with its intent, tempo,
+  outcome, command capacity spent and the campaign-state consequences its
+  resolution applied.
+
 ### Logistics and the HQ network
 
 - **Regional HQs project influence rings**; beachhead contracts let you
@@ -202,7 +245,7 @@ the day now.
 
 - **Ten screens** (Desk, Map, Forces, Contracts, Ledger, Supply, HQ, Lab,
   People, Market), a wizard, settings, modals for readiness, records,
-  hulls, negotiation, the summary and the emblem editor, and a `:` command
+  hulls, negotiation, the campaign summary, the operations board and its report, the person record and the emblem editor, and a `:` command
   line with Tab completion for simulation commands and common reports.
 - **Layouts that degrade** from a maximised terminal to 80×24, `--ascii`
   borders, 24-bit or 256 colours, and half-block pictures where no
@@ -337,7 +380,9 @@ the back office sized by hand, and a review.
 Where a turn starts and ends: the end-turn checklist (urgent items in
 red) under the outfit's Dragoons rating, the inbox with decisions and
 their deadlines, every company's posture, the log since last turn, and
-the HQ network.
+the HQ network. A REPORTS pane lists the campaign-wide reports — the campaign summary,
+readiness, and the engagements still on record — and `Enter` opens the
+selected one read-only.
 
 ![Desk](docs/screenshots/desk.svg)
 
@@ -385,6 +430,9 @@ exposure, salvage capacity and battle history. `b` opens a negotiation
 round on an offer. A HISTORY pane keeps every closed contract with its
 grade, world, days served, victory points and pay; a STANDINGS pane
 shows every house's opinion of you; the notes line carries your rating.
+On an arc contract, `g` opens the operations board — pick an operation, its
+intent and tempo, task the lances, and spend command capacity on
+interventions — and `G` opens the read-only operation report.
 
 ![Contracts](docs/screenshots/contracts.svg)
 
@@ -442,7 +490,7 @@ own tech fits them on the weekly repair pass.
 
 Everyone on the payroll with status, assignment and location. `/` cycles
 the filter (combat, techs, medical, each office desk, other, unassigned,
-wounded). `r` opens the record: skills with XP costs, rank, age,
+wounded). `Enter` or `r` opens the record: skills with XP costs, rank, age,
 loyalty, shares, kills, tours, awards, abilities, injuries. `m` admits
 the wounded, `t` trains a skill or ability, `a` seats a person, `P` posts
 them to an HQ, `x` transfers them, `L` grants leave, `D` fires (the
@@ -485,7 +533,8 @@ need acknowledgement.
   union, a golden-master hash for regression.
 - `GAMEPLAY.md` — the intended feel and the loops.
 - `ROADMAP.md` — the stages, built in order; every stage through 12G is
-  complete.
+  complete, and the P4 campaign-operations layer (arcs, operations, mission
+  intents, lance tasking, interventions and persistent actors) is built on it.
 - `TODO.md` — the one list of open work, in the order it is done.
 - `docs/tui.md` — the terminal client's architecture, with the generated
   mockups in `docs/tui-mockup.html`.
