@@ -413,6 +413,15 @@ and `untask` CLI verbs or the TUI 't' key on the active-contracts pane.
 `operationTaskMods` are the single rule owners; battle, queries and TUI
 consume only through those functions.  Each tasked lance appears in the AAR.
 
+**Operation report** (P4i.3): the Contracts screen's `G` key opens a read-only
+report (`queries.operationReport`) over an arc contract's decided and terminal
+operations. Each row carries the operation's intent, tempo, outcome, command
+capacity spent, interventions applied, tempo delay, and the campaign-state
+consequence its resolution applied — world-state, relationship, rival and
+officer deltas for a resolved non-combat operation. Every value is read from
+the operation rule owners, never re-derived (rule 86); the report adds no
+command path.
+
 Garrison-class contracts see §8 events (raids, sabotage, riots) and, since
 12D.6, a one-lance **probe** every six weeks or so.
 

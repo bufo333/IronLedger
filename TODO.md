@@ -44,11 +44,13 @@ above is complete.
     *(increment sim/p4i-world-state: world state 5-dim deltas + Operations/Map display, schema v45 — merged)*
     *(increment sim/p4i-rivals: rival companies + standing + recurrence + Operations display, schema v46 — merged)*
     *(increment sim/p4i-officers: officer arcs + performance + recurrence + Operations display, schema v47 — merged)*
-  - [ ] P4j additional arcs, variants, reports, balance scripts, and docs.
+  - [x] P4j additional arcs, variants, reports, balance scripts, and docs.
     *(increment sim/p4j-arcs: four arcs — aid_under_siege, enemy_supply_network, political_evacuation, beachhead_and_breakthrough)*
     *(increment sim/p4j-variants: operation variants across all five arcs + actor/rival archetype coverage for the four P4i.1 arcs)*
+    *(increment: operation report query (queries.operationReport) + Contracts 'G' binding and read-only report modal; commit 10dbb02)*
     *(increment sim/p4j-scripts: five-style deterministic campaign tests — aggressive, cautious, intelligence-heavy, logistics-heavy, force-preservation)*
     *(increment sim/p4j-verify: rule 67 sweep — nine untested operation rule owners)*
+    *(increment docs/p4j-sync: ARCHITECTURE/GAMEPLAY/tui.md/ROADMAP/TODO doc sync — no behavior change)*
 
 ## Not scheduled
 

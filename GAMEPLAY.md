@@ -351,3 +351,10 @@ display, groundwork for future proposals and personnel hooks (ROADMAP P4h.6).
 Operation arcs now cover garrison/security, relief, raid/guerrilla, extraction,
 and planetary-assault contract families, so every major deployment type draws a
 narrative arc with ordered beats and two possible endings.
+
+Each family offers several operation variants rather than one scripted beat, so
+repeat deployments of the same type play differently. The Contracts screen's
+read-only operation report answers "what changed because of this operation?":
+it lists every decided operation with its intent, tempo, outcome,
+command-capacity spent and the campaign-state consequences its resolution
+applied.

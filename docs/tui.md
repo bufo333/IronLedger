@@ -591,6 +591,29 @@ Lists the legal tempo postures for the operation type: all four for combat opera
 | `Enter` | set the tempo posture |
 | `Esc` | cancel |
 
+#### Operation report (P4i.3)
+
+Opened with `G` in the active pane for an arc contract. Read-only: `↑ ↓`
+scroll, `Esc` closes.
+
+The header shows the current beat briefing with the escalation clock
+(`esc:N/T` when a collapse finale is defined, `esc:N` otherwise), then
+`capacity available/cap (reserved N)  score S · VP V`, then the one-line
+world summary when present.
+
+One entry per decided or terminal operation (resolved, aftermath, declined or
+withdrawn):
+
+- a heading line — name, `combat`/`non-combat`, state, outcome band and an
+  `ok`/`miss` tag (success given the operation's intent), `intent:`, `tempo:`
+  and the clock delta `Δclk:N`;
+- a cost line — `cost: cap N (interventions) · delay Nd`;
+- for a resolved non-combat operation, a consequence line with the world-state,
+  relationship, rival-standing and officer deltas its resolution applied and
+  the counts of actors, rivals and officers affected.
+
+With no decided operations the body reads `no decided operations yet`.
+
 Money keys: Ledger `L` → `take_loan`, `R` → `repay_loan`; Forces `$` →
 `sell_unit`, `X` → `disband_company`; HQ `$` → `sell_hq`. Turn rules the
 client surfaces: urgent checklist items (untreated wounded, hungry or dry

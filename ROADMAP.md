@@ -1612,12 +1612,15 @@ validated framework rather than adding a second story system.
   work, `political evacuation` for extraction work, and `beachhead and
   breakthrough` for planetary assault. Each has at least two endings.
   *(shipped sim/p4j-arcs)*
-- P4i.2 Add operation variants for every major contract family and a
+- [x] P4i.2 Add operation variants for every major contract family and a
   bounded actor/rival archetype set. Content expansion changes data, not the
   operation engine.
-- P4i.3 Add reports for operation history, decision costs, world-state
+  *(shipped sim/p4j-variants)*
+- [x] P4i.3 Add reports for operation history, decision costs, world-state
   changes, actor/rival history, command-capacity use, and the visible answer to
   “what changed because of this operation?”
+  *(shipped: operation report query (queries.operationReport) + Contracts 'G'
+  binding; commit 10dbb02)*
 - [x] P4i.4 Add deterministic campaign scripts for aggressive, cautious,
   intelligence-heavy, logistics-heavy and force-preservation play. Track
   completion, breach, hull loss, operation success, clock progression,
@@ -1628,8 +1631,9 @@ validated framework rather than adding a second story system.
   *(shipped sim/p4j-verify: rule 67 sweep — seven new tests covering arcEligible,
   operationQuote, committedCombatOp, taskCapabilitySatisfied, lanceTask,
   operationTempoMods, and the intervention triple)*
-- P4i.6 Update `ARCHITECTURE.md`, `GAMEPLAY.md`, `docs/tui.md`, TUI mockups
+- [x] P4i.6 Update `ARCHITECTURE.md`, `GAMEPLAY.md`, `docs/tui.md`, TUI mockups
   and the roadmap only when the corresponding behavior is live.
+  *(shipped docs/p4j-sync)*
 
 **Acceptance:** the game supports replayable, legible deployment stories whose
 choices affect force readiness, money, people, contracts, worlds and future
