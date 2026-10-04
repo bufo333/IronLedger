@@ -323,6 +323,10 @@ pub const GameState = struct {
     /// Persistent hull instances: the lifecycle record of each physical hull (P3c).
     hull_instances: std.AutoArrayHashMapUnmanaged(types.HullInstanceId, hull_instance_mod.HullInstance) = .empty,
 
+    /// Per-engagement combat records for each hull instance that fought (P3c.2).
+    /// Flat child-row list; each record carries its own hull_instance_id.
+    hull_combat_records: std.ArrayListUnmanaged(hull_instance_mod.HullCombatRecord) = .empty,
+
     /// Persistent bounded per-world state, keyed by planet_key (P4h.4).
     world_states: std.StringArrayHashMapUnmanaged(world_state_mod.WorldState) = .empty,
 
@@ -914,6 +918,7 @@ pub const GameState = struct {
         .{ "officer_arcs", .persisted },
         .{ "next_officer_arc_id", .persisted },
         .{ "hull_instances", .persisted },
+        .{ "hull_combat_records", .persisted },
         .{ "next_hull_instance_id", .persisted },
         .{ "world_states", .persisted },
     };

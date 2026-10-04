@@ -339,16 +339,33 @@ pub fn manningHave(gs: *GameState, company: types.ForceId, role: person_mod.Role
     return have;
 }
 
+/// Per-unit kill tally for one engagement; scratch-owned by the caller.
+/// Used by battle.zig to build HullCombatRecord without re-attributing kills
+/// (rule 20: one owner for attribution). (P3c.2)
+pub const UnitKills = struct { unit: types.UnitId, kills: u16 };
+
 /// Kill credits: the enemy BV destroyed in an engagement becomes
 /// whole kills (one per ~1000 BV, the average 3025 mek), each handed to
 /// an engaged pilot at random weighted by their hull's BV and gunnery; the
 /// BV itself is split by the same weights. Every engaged pilot logs a
 /// battle. Returns kills credited.
-pub fn creditKills(gs: *GameState, engaged: []const types.UnitId, destroyed_bv: i64, stream: rng_mod.Stream) !u32 {
+///
+/// `per_unit`: optional scratch list to receive per-unit kill tallies,
+/// one entry per draw slot (same units as pilots/weights, parallel order).
+/// Filled only if non-null; Person.kills/kill_bv/battles are unchanged.
+pub fn creditKills(
+    gs: *GameState,
+    engaged: []const types.UnitId,
+    destroyed_bv: i64,
+    stream: rng_mod.Stream,
+    per_unit: ?*std.ArrayListUnmanaged(UnitKills),
+) !u32 {
     var weights: std.ArrayListUnmanaged(u32) = .empty;
     defer weights.deinit(gs.scratch());
     var pilots: std.ArrayListUnmanaged(types.PersonId) = .empty;
     defer pilots.deinit(gs.scratch());
+    var unit_ids: std.ArrayListUnmanaged(types.UnitId) = .empty;
+    defer unit_ids.deinit(gs.scratch());
     var total_w: u64 = 0;
     for (engaged) |uid| {
         const u = gs.unit(uid) orelse continue;
@@ -360,6 +377,7 @@ pub fn creditKills(gs: *GameState, engaged: []const types.UnitId, destroyed_bv: 
         const w: u32 = @max(1, bv * (9 - @min(8, gunnery)) / 100);
         try weights.append(gs.scratch(), w);
         try pilots.append(gs.scratch(), p.id);
+        try unit_ids.append(gs.scratch(), uid);
         total_w += w;
     }
     if (pilots.items.len == 0 or destroyed_bv <= 0) return 0;
@@ -369,11 +387,16 @@ pub fn creditKills(gs: *GameState, engaged: []const types.UnitId, destroyed_bv: 
     }
     // Whole kills, weighted draws.
     const kills: u32 = @import("battle.zig").estimatedKills(destroyed_bv);
+    // Populate per_unit scratch list (one entry per draw slot, zero-initialized).
+    if (per_unit) |pu| {
+        for (unit_ids.items) |uid| try pu.append(gs.scratch(), .{ .unit = uid, .kills = 0 });
+    }
     for (0..kills) |_| {
         var pick = gs.rng.random(stream).uintLessThan(u64, total_w);
-        for (pilots.items, weights.items) |pid, w| {
+        for (pilots.items, weights.items, 0..) |pid, w, idx| {
             if (pick < w) {
                 if (gs.person(pid)) |p| p.kills += 1;
+                if (per_unit) |pu| pu.items[idx].kills +|= 1;
                 break;
             }
             pick -= w;
@@ -659,7 +682,7 @@ test "kills are credited to engaged pilots and awards follow the counters" {
     defer engaged.deinit(gs.allocator());
     var uit = gs.units.iterator();
     while (uit.next()) |e| if (e.value_ptr.kind == .mek and gs.companyOf(e.value_ptr.force) == co) try engaged.append(gs.allocator(), e.value_ptr.id);
-    const kills = try creditKills(&gs, engaged.items, 5_400, .battle);
+    const kills = try creditKills(&gs, engaged.items, 5_400, .battle, null);
     try std.testing.expectEqual(@as(u32, 5), kills);
     var total_kills: u32 = 0;
     var total_bv: u32 = 0;
@@ -680,6 +703,40 @@ test "kills are credited to engaged pilots and awards follow the counters" {
     try std.testing.expect(ace.hasAward("first_blood") and ace.hasAward("ace") and !ace.hasAward("double_ace"));
     const again = try checkAwards(&gs, ace.id);
     try std.testing.expectEqual(@as(u32, 0), again); // no duplicates
+}
+
+test "per_unit kill tally agrees with creditKills return and Person.kills totals (P3c.2)" {
+    // P3c.2 kill-attribution agreement: sum of per_unit.kills equals the total
+    // kills credited (the creditKills return value and Person.kills sum), and
+    // Person.kills/kill_bv/battles semantics are unchanged by the out-param.
+    // Rule 20 / design §4: two views of the same event must not diverge.
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1236 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
+    const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
+    var engaged: std.ArrayListUnmanaged(types.UnitId) = .empty;
+    defer engaged.deinit(gs.allocator());
+    var uit = gs.units.iterator();
+    while (uit.next()) |e| if (e.value_ptr.kind == .mek and gs.companyOf(e.value_ptr.force) == co) try engaged.append(gs.allocator(), e.value_ptr.id);
+
+    var per_unit: std.ArrayListUnmanaged(UnitKills) = .empty;
+    defer per_unit.deinit(gs.scratch());
+    const kills = try creditKills(&gs, engaged.items, 5_400, .battle, &per_unit);
+
+    // Sum of per_unit kills must equal the credited total.
+    var sum_pu: u32 = 0;
+    for (per_unit.items) |pk| sum_pu += pk.kills;
+    try std.testing.expectEqual(kills, sum_pu);
+
+    // Person.kills totals must also equal the credited total (unchanged semantics).
+    var sum_person: u32 = 0;
+    var pit = gs.people.iterator();
+    while (pit.next()) |e| sum_person += e.value_ptr.kills;
+    try std.testing.expectEqual(kills, sum_person);
+
+    // per_unit must have at most one entry per engaged unit (one per on-books-pilot unit).
+    try std.testing.expect(per_unit.items.len <= engaged.items.len);
+    try std.testing.expect(per_unit.items.len > 0);
 }
 
 test "severance is a month per year served, capped; a firing pays half; under a year nothing" {

@@ -1,6 +1,6 @@
 -- IRON LEDGER — SQLite save store schema (design document)
 --
--- Matches schema_version 48. The executable DDL and its column migrations
+-- Matches schema_version 49. The executable DDL and its column migrations
 -- live in src/persist/store.zig; this file is the readable reference for
 -- what each table and column means. Column order here is the runtime order.
 --
@@ -30,7 +30,7 @@
 --     explicit FKs: person_skill/award/ability/injury -> person; unit_slot ->
 --     unit; force_unit/force_child -> force and unit; hq_facility/hq_project ->
 --     hq; battle_report_hit/ammo/salvage -> battle_report; refit_op ->
---     refit_plan; hull_loadout -> hull_instance. All FKs are DEFERRABLE
+--     refit_plan; hull_loadout -> hull_instance; hull_combat_record -> hull_instance. All FKs are DEFERRABLE
 --     INITIALLY DEFERRED so clearRows can
 --     delete parent rows before child rows within one transaction.
 --     Soft and polymorphic references that use NULL or 0-as-none (e.g.
@@ -1049,3 +1049,27 @@ CREATE TABLE hull_loadout (
     FOREIGN KEY (cid, hull_instance_id) REFERENCES hull_instance(cid, id) DEFERRABLE INITIALLY DEFERRED
 );
 CREATE INDEX IF NOT EXISTS ix_hull_loadout_cid ON hull_loadout(cid);
+
+-- P3c.2: per-engagement combat record for a physical hull.
+-- hull_combat_record -> hull_instance (containment FK).
+-- battle_id and contract_id are backlinks only; NOT reference-validated because
+-- battle reports age out of the bounded journal and contracts are removed after
+-- completion — a live row legitimately points at a gone battle/contract.
+-- Only hull_instance_id is a validated FK (schema + loader orphan check).
+CREATE TABLE hull_combat_record (
+    cid             INTEGER NOT NULL,
+    hull_instance_id INTEGER NOT NULL,                  -- -> hull_instance.id (validated)
+    ord             INTEGER NOT NULL,                   -- stable insertion order
+    battle_id       INTEGER NOT NULL DEFAULT 0,         -- BattleId backlink; not validated
+    contract_id     INTEGER NOT NULL DEFAULT 0,         -- ContractId backlink; not validated
+    kills           INTEGER NOT NULL DEFAULT 0,         -- kills credited this engagement
+    hits_taken      INTEGER NOT NULL DEFAULT 0,         -- count of HullHit rows for this unit
+    armor_lost      INTEGER NOT NULL DEFAULT 0,         -- first.armor_before - last.armor_after
+    slots_damaged   INTEGER NOT NULL DEFAULT 0,         -- HullHit.slot_result == .damaged count
+    slots_destroyed INTEGER NOT NULL DEFAULT 0,         -- HullHit.slot_result == .destroyed count
+    destroyed       INTEGER NOT NULL DEFAULT 0 CHECK (destroyed IN (0,1)), -- bool: unit destroyed
+    cause           TEXT    NOT NULL DEFAULT 'none',    -- WreckCause tag; .none if not destroyed
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED,
+    FOREIGN KEY (cid, hull_instance_id) REFERENCES hull_instance(cid, id) DEFERRABLE INITIALLY DEFERRED
+);
+CREATE INDEX IF NOT EXISTS ix_hull_combat_record_cid ON hull_combat_record(cid);

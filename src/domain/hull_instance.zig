@@ -31,6 +31,51 @@ pub const HullInstance = struct {
     }
 };
 
+/// Per-engagement combat record for a physical hull: kills credited to it and
+/// a damage summary, parallel to the pilot kill record in Person. No owned
+/// allocations; no deinit needed. (P3c.2, docs/p3c-hull-lifecycle-design.md §1, §4)
+pub const HullCombatRecord = struct {
+    hull_instance_id: types.HullInstanceId = .none,
+    /// Backlink to the battle report; may age out of the bounded journal.
+    /// Not reference-validated on load: battle reports are pruned, so a live
+    /// record legitimately points at a gone battle. Only hull_instance_id is a
+    /// validated FK.
+    battle_id: types.BattleId = .none,
+    /// Backlink to the contract; contracts are removed after completion.
+    /// Not reference-validated for the same reason as battle_id.
+    contract_id: types.ContractId = .none,
+    /// Kills credited to this hull this engagement, sourced from creditKills.
+    kills: u16 = 0,
+    // Damage summary — every field sourced from an existing battle_report.HullHit
+    // field (armor_before/after, slot_result, destroyed, cause); nothing invented.
+    /// Count of HullHit rows for this unit.
+    hits_taken: u16 = 0,
+    /// first.armor_before − last.armor_after, floored at 0.
+    armor_lost: u16 = 0,
+    /// HullHit.slot_result == .damaged count.
+    slots_damaged: u8 = 0,
+    /// HullHit.slot_result == .destroyed count.
+    slots_destroyed: u8 = 0,
+    /// True when any HullHit.destroyed was set for this unit.
+    destroyed: bool = false,
+    /// HullHit.cause from the destroying hit; .none if not destroyed.
+    cause: @import("unit.zig").WreckCause = .none,
+};
+
+test "HullCombatRecord defaults" {
+    const r: HullCombatRecord = .{};
+    try std.testing.expectEqual(types.HullInstanceId.none, r.hull_instance_id);
+    try std.testing.expectEqual(types.BattleId.none, r.battle_id);
+    try std.testing.expectEqual(types.ContractId.none, r.contract_id);
+    try std.testing.expectEqual(@as(u16, 0), r.kills);
+    try std.testing.expectEqual(@as(u16, 0), r.hits_taken);
+    try std.testing.expectEqual(@as(u16, 0), r.armor_lost);
+    try std.testing.expectEqual(@as(u8, 0), r.slots_damaged);
+    try std.testing.expectEqual(@as(u8, 0), r.slots_destroyed);
+    try std.testing.expect(!r.destroyed);
+    try std.testing.expectEqual(@import("unit.zig").WreckCause.none, r.cause);
+}
+
 test "HullInstance defaults and loadout append" {
     const inst: HullInstance = .{};
     try std.testing.expectEqual(types.HullInstanceId.none, inst.id);

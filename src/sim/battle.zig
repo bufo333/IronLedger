@@ -804,6 +804,7 @@ fn aftermath(
     enemy_destroyed_bv: i64,
     wounded: u8,
     kia: u8,
+    per_unit: *std.ArrayListUnmanaged(@import("personnel.zig").UnitKills),
 ) !Aftermath {
     const tb = tuning.battle;
     const rt = tuning.loss.roe;
@@ -858,9 +859,10 @@ fn aftermath(
                 p.xp += p.xpGain(gs.clock.day_index, if (score_delta > 0) tb.xp_scored else tb.xp_fought);
         }
     }
-    // Kill credits and the awards they earn.
+    // Kill credits and the awards they earn. per_unit is filled by creditKills
+    // and carries per-engaged-unit kill counts for HullCombatRecord writing (P3c.2).
     const personnel = @import("personnel.zig");
-    const kills_credited = try personnel.creditKills(gs, engaged, enemy_destroyed_bv, .battle);
+    const kills_credited = try personnel.creditKills(gs, engaged, enemy_destroyed_bv, .battle, per_unit);
     for (engaged) |uid| if (gs.unit(uid)) |u| {
         _ = try personnel.checkAwards(gs, u.pilot);
     };
@@ -1040,7 +1042,11 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     }
 
     // Score, morale, fatigue, experience.
-    const after = try aftermath(gs, c, &player, open, env, engaged, enemy_destroyed_bv, wounded, kia);
+    // per_unit_kills receives per-unit kill tallies from creditKills for
+    // HullCombatRecord writing below (P3c.2). Scratch-owned; freed after use.
+    var per_unit_kills: std.ArrayListUnmanaged(@import("personnel.zig").UnitKills) = .empty;
+    defer per_unit_kills.deinit(gs.scratch());
+    const after = try aftermath(gs, c, &player, open, env, engaged, enemy_destroyed_bv, wounded, kia, &per_unit_kills);
     const score_delta = after.score_delta;
     const morale_delta = after.morale_delta;
     const convoy_hit = after.convoy_hit;
@@ -1242,6 +1248,60 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     // changes the outcome. Last, so a salvage answer's spares and armour
     // are in the stores before the techs reach for them.
     try @import("contract_events.zig").queueFieldRepair(gs, c, report.id);
+
+    // Write one HullCombatRecord per engaged owned unit that has a linked hull
+    // instance (P3c.2). Failure-atomically: reserve capacity for the whole
+    // engaged slice FIRST (ensureUnusedCapacity is the last fallible step),
+    // then appendAssumeCapacity infallibly. A pre-reservation failure leaves
+    // hull_combat_records untouched (rule 7/13; held_hulls.holdUnit precedent).
+    // Units with hull_instance_id == .none are skipped; their pilot kill record
+    // is still written (no silent data loss for the person side).
+    try gs.hull_combat_records.ensureUnusedCapacity(gs.allocator(), engaged.len);
+    for (engaged) |uid| {
+        const u = gs.unit(uid) orelse continue;
+        if (u.hull_instance_id == .none) continue;
+        // Kills from the per_unit_kills tally built by creditKills.
+        var kills: u16 = 0;
+        for (per_unit_kills.items) |pk| {
+            if (pk.unit == uid) {
+                kills = pk.kills;
+                break;
+            }
+        }
+        // Damage summary folded from hit_log entries for this unit.
+        var rec_hits_taken: u16 = 0;
+        var first_armor: ?i32 = null;
+        var last_armor: i32 = 0;
+        var rec_slots_damaged: u8 = 0;
+        var rec_slots_destroyed: u8 = 0;
+        var rec_destroyed: bool = false;
+        var rec_cause: unit_mod.WreckCause = .none;
+        for (hit_log.items) |h| {
+            if (h.unit != uid) continue;
+            rec_hits_taken +|= 1;
+            if (first_armor == null) first_armor = h.armor_before;
+            last_armor = h.armor_after;
+            if (h.slot_result == .damaged) rec_slots_damaged +|= 1;
+            if (h.slot_result == .destroyed) rec_slots_destroyed +|= 1;
+            if (h.destroyed) {
+                rec_destroyed = true;
+                rec_cause = h.cause;
+            }
+        }
+        const armor_diff: i32 = if (first_armor) |fa| @max(0, fa - last_armor) else 0;
+        gs.hull_combat_records.appendAssumeCapacity(.{
+            .hull_instance_id = u.hull_instance_id,
+            .battle_id = report.id,
+            .contract_id = c.id,
+            .kills = kills,
+            .hits_taken = rec_hits_taken,
+            .armor_lost = @intCast(@min(std.math.maxInt(u16), armor_diff)),
+            .slots_damaged = rec_slots_damaged,
+            .slots_destroyed = rec_slots_destroyed,
+            .destroyed = rec_destroyed,
+            .cause = rec_cause,
+        });
+    }
 }
 
 /// An engagement with nobody to put in the line: the objective is given up
@@ -2598,7 +2658,7 @@ test "estimatedKills owns the BV-to-kills formula; kill credit and prisoner coun
         const pid4 = try gs4.hirePerson("K", "Kill", .mekwarrior);
         gs4.unit(uid4).?.pilot = pid4;
         const engaged4 = [_]types.UnitId{uid4};
-        const kills4 = try @import("personnel.zig").creditKills(&gs4, &engaged4, 1_500, .battle);
+        const kills4 = try @import("personnel.zig").creditKills(&gs4, &engaged4, 1_500, .battle, null);
         try std.testing.expectEqual(estimatedKills(1_500), kills4);
     }
 }
