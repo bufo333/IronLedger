@@ -1,575 +1,126 @@
 # IRON LEDGER
 
-*A mercenary command in the Succession Wars.*
+*A BattleTech mercenary company in the Succession Wars.*
 
 ![Title screen](docs/screenshots/splash.svg)
 
-IRON LEDGER is a terminal game about running a BattleTech mercenary
-outfit as an organisation: the people, the hulls, the money, the supply
-lines and the headquarters that keep a company fighting. You are the
-commander of the whole command, not a pilot. Battles resolve on their
-own from what you built beforehand — training, maintenance, ammunition,
-provisions, morale, support echelons, the depth of your bench — and the
-after-action report tells you what your decisions were worth. The
-tabletop is deliberately skipped; the campaign around it is the game.
-Each deployment plays out as an operational story: you choose the operations,
-the mission intent and the lance tasking, then live with the local
-consequences.
+IRON LEDGER is a terminal strategy game about running a mercenary outfit in
+the BattleTech universe, in the scarcity years of the 3025 Succession Wars.
+You are the commander of the whole command — not a pilot. You chase contracts
+across the Inner Sphere, keep the 'Mechs running, the troops paid and the
+supply lines open, and send your companies into battles that resolve on their
+own from everything you set up beforehand: training, maintenance, ammunition,
+provisions, morale and the support echelons behind them. You win through
+logistics, people and money; the tabletop is deliberately skipped, and the
+campaign around it is the game.
 
-It is written in Zig 0.16 with no dependencies beyond the system SQLite
-library, runs in any terminal, and shows your outfit's crest as a real
-picture on terminals that speak the kitty graphics protocol (Ghostty,
-kitty, WezTerm, Konsole) or iTerm2's inline images.
+Everything is turn-based. A turn is a day, and nothing happens while you think.
 
-Everything is turn-based. A day is a turn; nothing happens while you
-think, and the end-turn checklist tells you what would slip if you ended
-the day now.
+## What you do
 
-## Features
+You run several companies at once from a network of headquarters. Between
+turns you work the desk: read last night's after-action report, answer the
+inbox — an employer's off-contract request, a salvage dispute, a ransom demand,
+each with a deadline — approve an order, move money. Every month, payday lands
+a profit-and-loss statement on each company, so you learn which deployments are
+carrying themselves and which are bleeding you.
 
-### The outfit and its people
+Over a campaign you spend profit to grow your reach: found a forward base on a
+frontier world, upgrade it toward a full regional headquarters, link it into
+your supply network, hire the back-office staff the paperwork now demands, and
+take on bigger contracts than you could last year. Growth is
+infrastructure-first — a second company at full service means a second regional
+HQ, with the payroll and supply line that implies.
 
-- **A commander, an outfit, an emblem.** Faction of origin places your
-  starter regional HQ on a world in that house's space; profession grants
-  a small permanent edge; the start year (3015–3030) decides which
-  designs exist. Emblems are presets, an imported PNG, or a crest you draw
-  cell by cell in the editor.
-- **A generated company** of three line lances, a recon lance and a
-  support company (salvage, MASH, logistics, security lances), rolled from
-  your house's random assignment tables, with the back office sized by
-  hand. Companies can also be raised empty and built hull by hull from the
-  pool, cold storage and every HQ's market board, then crewed to
-  complement in one press.
-- **People are individuals**: role, skills on the MekHQ scale, experience
-  band, age, rank (from seat and experience, or pinned by promotion),
-  kills and BV credited per battle, tours served, awards, special
-  abilities with Edge, a fatigue band that costs gunnery and piloting,
-  morale, shares in the outfit, loyalty modifiers, per-location injuries
-  with permanent scars, and a full record screen.
-- **Careers**: the young learn faster, the old add a restless flag, and at
-  65 they retire. Monthly service XP, weekly drill in training lances,
-  and skill training at a training ground turn XP into levels.
-- **Turnover is a decision, not a disappearance.** Anyone restless after a
-  year in rolls to hand in notice on payday; the inbox offers a raise, a
-  retention bonus, a replacement from the hall, or the door. Founders
-  stand by the outfit while morale holds; veterans, a recent raise, a
-  recent award and a stake in the shares all cancel restless flags.
-- **Leaving costs money**: a month's pay per year served, capped, on
-  notice or retirement; half on a firing; all of it when a company is
-  disbanded. Shareholders take half.
-- **Shares**: founders, veterans and officers hold shares; a configurable
-  cut of every contract's income is paid out to them at completion (set in
-  Settings, or `:shares <pct>`).
-- **Difficulty** — green, regular, veteran, elite, the BattleTech
-  experience ladder — scales the economy and the opposition, never the
-  dice: the margin employers pay (×2.2 … ×1.1), the fabrication premium
-  (×1.2 … ×2.2), part and hull prices, the opposing force in every
-  engagement, and how readily a restless crew hands in notice. Regular is
-  the game as tuned; a full set of mek structure fabricates for 900 k.
-  Chosen in Settings, changeable any time (logged), saved per campaign;
-  the table is `data/tables/difficulty.zon`.
-- **Hiring halls** at every HQ churn daily with a floor under every role,
-  arrivals scaled by hall level and biased toward whatever your companies
-  are short of. Astechs and medics are hired to complement on demand,
-  MekHQ-style.
-- **Manning tables** per company — pilots, techs, astechs (as tech-hours
-  covered against needed), mechanics, doctors, medics, office — with a
-  checklist warning when any line runs short.
-- **Medical**: wounds triaged and healed on doctor and facility timelines,
-  a bed you admit them to (or auto-admit), MASH lances forward, medics
-  who carry patients and staff beds, and a restless-crew line on the
-  checklist.
+Each deployment plays out as an operational story. You pick the operations, set
+each one's intent, task your lances, decide whether to scout, strike, prepare
+or wait, and live with the local consequences. When battle comes it is
+hands-off: the after-action report tells you what your preparation was worth.
 
-### Contracts and combat
+## Key systems
 
-- **Twelve contract types** from garrison duty to planetary assault,
-  priced from average per-company operating cost and the offered operation
-  and opposition, with victory points, an opposition pool
-  to grind down on attrition work, duration objectives on garrison work,
-  a performance-failure line and a breach clause.
-- **Terms that matter**: command rights (integrated, house, liaison,
-  independent) change battle cadence, salvage share, lance-role freedom,
-  scoring and pay; salvage exchange pays the claim in cash; negotiation
-  rounds improve one term against the employer's mood.
-- **Faction standing** with every house: tours served and enemies fought
-  move it, it prices pay and shuns you when it sours, and it feeds the
-  event decks.
-- **A Dragoons rating** from experience, command, combat record,
-  transport, support and finances, F to A*, that sets how many offers
-  reach the board, who hires you, what a planetary assault requires, the
-  pay multiplier, your edge at the negotiating table and the quality of
-  walk-ins at the hall. A fresh outfit starts C.
-- **Scenario types** rolled per engagement by contract kind — stand-up
-  fight, hold the line, breakthrough, ambush, convoy escort, base
-  defence, recon in force, extraction — each with its own force ratio,
-  roll shift, salvage access and score weight. Scouting lances take the
-  edge off an ambush; a lost convoy escort hits the support train.
-- **Terrain and weather**: every world has a terrain class and every
-  battle rolls the weather. Close terrain evens the odds and dents recon;
-  night, storms and dust ground the fighters; harsh conditions cost
-  fatigue.
-- **Detailed after-action reports**: power against power, every hit on
-  record (which hull, what it lost, what happened to the crew), ammunition
-  expended by family, what the trucks hauled, and salvage as things — whole
-  wrecks and crated parts shipped home to the depot, never cash — after
-  the liaison's cut.
-- **Events with an inbox rule**: anything that only moves morale or
-  fatigue is a dice roll logged automatically; anything that touches money,
-  stock or damage lands as a decision with a deadline. Prisoners of war can
-  be ransomed, released for standing, or recruited.
-- **Morale from the field**: battle outcomes, weighted wins, a strong
-  contract finish that lifts the whole outfit, a breach that shames it.
-- **Contract history** with grade, world, days served, victory points and
-  pay, and every AAR kept in the log.
+- **Campaign operations.** A contract opens with a briefing and runs as an arc
+  of beats — arrival, complication, escalation, climax, aftermath — with
+  materially different endings. An operations board offers combat and
+  non-combat operations; committing one sets a mission intent (preserve force,
+  secure an objective, break the enemy, protect assets, secure intelligence, or
+  recover people or equipment), tasks each lance a job, and spends a capped pool
+  of command attention on interventions. Winning the fight and accomplishing
+  the operation are separate results.
+- **Contracts and hands-off combat.** Twelve contract types from garrison duty
+  to planetary assault, with terms that matter — command rights, salvage share,
+  negotiation. Each offer is rated in skulls for the company that would go.
+  Battles autoresolve from campaign state and produce a detailed after-action
+  report — every hit, every casualty, ammunition burned, salvage hauled — kept
+  in a journal, with a full contract history and a kill record for every pilot.
+- **Your company and its people.** Everyone is an individual: role, skills on
+  the MekHQ scale, rank, experience, kills and awards, fatigue, morale, shares
+  in the outfit, and per-location injuries. The young learn faster and the old
+  retire; a restless crew hands in notice on payday unless you keep them. A
+  Dragoons rating, F to A*, decides which offers reach your board and what you
+  are paid.
+- **Logistics and the HQ network.** Headquarters project influence rings that
+  gate the contract market; supply lines carry real tonnage between them on
+  routes with throughput limits; treasuries sit per outfit, HQ and deployed
+  company, with cash moving by courier over real transit time. Supplies are
+  physical pallets — munitions, armor, components, provisions, medical — and a
+  company in the field spends only the funds and stock it physically holds.
+- **The MekLab and the hangar.** Edit a BattleMech's weapon, equipment and
+  ammunition mounts; the lab validates tonnage, per-location criticals, heat and
+  ammunition and refuses an illegal fit by name, then quotes the refit class
+  (A-D) and gates it on the mek bay. Hulls take weekly maintenance against a
+  target set by quality and tech skill, repair in field and depot tiers, and can
+  be mothballed in cold storage to stop the bills. The hangar ranks every
+  machine by what it costs against what it contributes.
+- **The open market.** Every HQ posts boards for hulls, parts and ammunition —
+  staples always on hand, rarer gear in slots that may or may not hold it this
+  month, damaged hulls priced by condition, and transports at the bigger
+  spaceports. At a wired HQ a black-market fence may surface a rare machine —
+  which might be a fraud.
+- **A deployment with memory.** Named liaisons, enemy officers and rival
+  mercenary companies persist in your records, carrying their relationships and
+  standing from one contract to the next; your officers accumulate their own
+  track record; and every world keeps its own state — security, civilian
+  support, employer control, enemy influence — that later contracts, markets
+  and intelligence read. It all sits on a 234-system star map of the Inner
+  Sphere and near Periphery, where the market and the designs in service move
+  with the campaign year.
 
-### Campaign operations
+## Getting it running
 
-- **A deployment is an operational story.** An arc contract opens with a
-  briefing — the employer's goal, local pressure, opposition posture, known
-  actors and the current world state — and runs as an arc of beats: arrival, a
-  complication, escalation, a climax and an aftermath, with at least two
-  materially different endings. Arcs cover garrison/security, relief,
-  raid/guerrilla, extraction and planetary-assault work.
-- **An operations board** (`g` on the active contract) lists the operations the
-  current beat offers, combat and non-combat. Committing one picks a **mission
-  intent** — preserve force, secure an objective, break the enemy, protect
-  assets, secure intelligence, or recover people or equipment — and winning the
-  engagement and accomplishing the operation are separate results; command
-  rights can mandate or limit the intent.
-- **Lance tasking** gives each lance a job for the operation — screen, main
-  effort, reserve, escort, objective or security, recovery, recon — gated by
-  what the lance can actually field, so a company's scouts, reserves, escort and
-  recovery assets change how an operation plays even at comparable BV.
-- **Intelligence versus tempo**: before committing you choose to scout, advance,
-  prepare or delay, each with its own time, readiness and escalation cost,
-  against an escalation clock the arc runs.
-- **Command capacity** is a small, capped pool of command attention; spending it
-  on an intervention — emergency reconnaissance, reinforcing a task, air cover,
-  field-repair reprioritisation — is attention gone from the next problem.
-- **Momentum and withdrawal**: a held field can be exploited or consolidated; a
-  failing one can be given up by tactical or operational withdrawal, or the
-  contract recalled under the breach clause. The arc's state, operations,
-  relationships and clocks select a **finale** — a battle, negotiation,
-  evacuation, holdout, betrayal or withdrawal.
-- **The deployment has memory**: contract-local actors (liaisons, enemy
-  officers), persistent rival companies and compact officer arcs carry
-  relationship and standing forward, so returning to a world or meeting a former
-  liaison reflects earlier choices; per-world state — security, civilian
-  support, employer control, enemy influence — persists and feeds later
-  contracts, markets and intelligence.
-- **An operation report** (`G` on the active contract) answers "what changed
-  because of this operation?" — every decided operation with its intent, tempo,
-  outcome, command capacity spent and the campaign-state consequences its
-  resolution applied.
-
-### Logistics and the HQ network
-
-- **Regional HQs project influence rings**; beachhead contracts let you
-  found field HQs beyond them. A field HQ is a forward base: it hosts one
-  company to rest, resupply and stage. Its facilities provide forward
-  services, but structural depot work and XP training require regional tier.
-  Raise it to regional through paperwork and construction. Facilities (mek
-  bay, warehouse, hospital,
-  mess, training ground, hiring hall, comms, spaceport) upgrade the same
-  way and raise the staff you must keep.
-- **The back office is staff**: command admins shorten paperwork,
-  logistics admins work acquisition rolls, transport admins shave
-  shipping, HR admins improve hiring and training, finance admins the
-  books. Under-staffed facilities run a level lower.
-- **Supply lines** carry tonnage between HQs with throughput limits; a
-  dedicated line needs a jumpship you own.
-- **Supplies are pallets**: munitions by family, armor, structural
-  components, provisions and medical supplies, held in warehouses and in
-  a deployed company's trucks. A field plan sizes floors and targets to
-  the line's transit time; convoys leave when stock plus inbound drops
-  under the floor; anything over target rides home.
-- **Air wings, dropships and jumpships**: fighters fly in air lances under
-  an air wing at a spaceport; owned ships berth at HQs, lift your
-  companies for less charter, sail with them and come home with them.
-- **Acquisition** rolls against each part's TechManual availability code,
-  a periphery world's shelves and the HQ's comms reach; failed orders say
-  why. Structural components can always be fabricated in a capable regional
-  HQ bay.
-- **Markets** at every HQ: staples always, rare slots by rarity and
-  industry, damaged hulls with a condition and repair bill, transports at
-  bigger spaceports, and — at wired HQs with a hall — a fence's black
-  market offer that may be a fraud.
-
-### Money
-
-- **Treasuries** per outfit, HQ and deployed company; cash moves by
-  courier over real transit time. Standing top-up policies, loans at
-  simple interest against a credit line, hull upkeep running or not,
-  hardship pay on remote deployments, freight and charter.
-- **A structured ledger** with a P&L in two periods, every transaction
-  tagged by company, HQ and contract, and the liquidation value of
-  everything you own. A negative treasury holds the turn; couriered funds
-  count. Bankruptcy is game over.
-- **A campaign summary** of contracts by grade, battles, kills and losses,
-  money by category, people and hulls, and the rating year by year.
-
-### Machines and maintenance
-
-- **A curated 3025 catalogue**: 97 designs — 64 BattleMechs, 12 vehicles,
-  11 aerospace fighters, 3 dropships, 3 jumpships and the support
-  vehicles — with intro years, house random assignment tables, and 59
-  parts with availability codes.
-- **Weekly maintenance** by tech skill against a target from the hull's
-  quality, with astech teams scaling the hour budget; hull hours grow with
-  a worn or exotic machine and shrink in a veteran's hands. Quality drifts
-  with the roll and prices resale.
-- **Repairs in tiers**: field work by the company's techs from spares;
-  structural work in a regional HQ mek bay over real bay time. Depot repairs and
-  refits roll at the end: clean, a lingering fault, a redo, or a botch on
-  a natural 2 — with the odds shown before you commit.
-- **The MekLab** validates tonnage, per-location criticals, heat and ammunition
-  while editing weapon, equipment and ammunition mounts on the curated
-  chassis. Refits are classed A–D and gated by the bay; removed mounts go back
-  on the shelf. Full construction-component editing and persistent custom
-  variants are planned product depth.
-- **Cold storage**: mothball idle hulls to stop the bills; reactivation
-  takes bay time that depends on quality. A hangar view ranks every hull
-  by cost against contribution.
-
-### The universe
-
-- **A 234-system star map** of the Inner Sphere and near Periphery with
-  every house, the Periphery states, ComStar and the pirate bucket;
-  colour lenses by faction, industry, standing and activity; influence
-  rings and beachhead bands; offers pinned to worlds.
-- **Era progression**: the market, house tables and salvage only field
-  what is in service in the campaign year, and New Year's Day announces
-  the designs entering service.
-
-### The client
-
-- **Ten screens** (Desk, Map, Forces, Contracts, Ledger, Supply, HQ, Lab,
-  People, Market), a wizard, settings, modals for readiness, records,
-  hulls, negotiation, the campaign summary, the operations board and its report, the person record and the emblem editor, and a `:` command
-  line with Tab completion for simulation commands and common reports.
-- **Layouts that degrade** from a maximised terminal to 80×24, `--ascii`
-  borders, 24-bit or 256 colours, and half-block pictures where no
-  graphics protocol exists.
-- **A soundtrack** through the system's command-line player: every audio
-  file under `data/music/` plays, each sub-directory as a soundtrack of
-  its own — the game ships `OST`, `OST Part 2`, and `Supplimental Music`
-  — and any loose files as a default soundtrack.
-  All of them are mixed into one playlist and reshuffled every launch; `:music` browses soundtracks and tracks,
-  picks one soundtrack or the mix (remembered between runs), and plays a
-  track on demand. `M` toggles music anywhere; Settings has previous,
-  next and volume; the status strip names what is playing.
-- **Players own campaigns** in one SQLite file, with schema migrations
-  that carry old saves forward.
-
-### Data and engineering
-
-- **Every table is data**: designs, planets, parts, tuning knobs, MekLab
-  tables, names, ranks, awards, abilities, RATs, factions, scenarios,
-  terrain — `.zon` files imported at compile time into typed structs.
-  `zig build -Ddata=<dir>` overlays any of them from a mod directory
-  ([docs/modding.md](docs/modding.md)).
-- **A pure, deterministic core**: no I/O, no wall clock, integer C-bills
-  and basis points, named RNG streams, commands as a tagged union, a
-  golden-master hash. The terminal client and the console share one
-  parser and one command/query boundary. More than 450 tests, a pseudo-terminal
-  smoke test of the client, and a scripted smoke of the console.
-
-## Running it
-
-Requirements: [Zig 0.16](https://ziglang.org/download/), the system SQLite
-library (present on macOS; `libsqlite3-dev` on Debian/Ubuntu), and for
-music a command-line player on `PATH` — `afplay` (macOS), `mpv`, `ffplay`
-or `aplay`.
+You need [Zig 0.16](https://ziglang.org/download/) and the system SQLite
+library (present on macOS; `libsqlite3-dev` on Debian/Ubuntu). For the
+soundtrack, an optional command-line audio player on `PATH` — `afplay`
+(macOS), `mpv`, `ffplay` or `aplay`.
 
 ```sh
-zig build test --summary all      # the test suite
-zig build run -- --tui            # the game
-zig build run -- --tui --ascii    # plain-ASCII borders for terminals that draw box glyphs double-width
-zig build run -- --repl           # the scripting / debug console
-zig build run                     # a scripted demo campaign
-zig build -Ddata=mymod            # build with a mod directory overlaying data/
+zig build run -- --tui                            # play
+zig build run -- --tui --store path/to/save.db    # play, saving to a chosen file
+zig build -Doptimize=ReleaseFast --prefix dist    # build a standalone binary at dist/bin/game
 ```
 
-Flags: `--store <file>` picks the save file (one file holds every player
-and campaign); `--data <dir>` points at an asset root; `--no-splash` and
-`--no-music` for scripts. A maximised terminal at a 14–16 px font gives the
-full layout; everything degrades down to 80×24.
-
-Without `--store`, an existing `campaigns.db` in the launch directory wins.
-Otherwise the game creates it in the per-user data directory —
-`~/Library/Application Support/IRON LEDGER/` on macOS,
-`$XDG_DATA_HOME/iron-ledger/` (or `~/.local/share/iron-ledger/`) elsewhere.
-If no user data directory can be resolved or created, it falls back to the
-launch directory.
-
-### Packaging a build
-
-Every `data/*.zon` table is compiled into the binary. The soundtrack and
-the emblem pictures are not — they are read at run time from an *asset
-root*, tried in this order (`src/tui/paths.zig`):
-
-1. `--data <dir>` or `$IRON_LEDGER_DATA`
-2. `<exe dir>/../share/iron-ledger` — an install prefix
-3. `<exe dir>/data` — unpacked beside the binary
-4. `./data` — the source tree
-
-A root holds `music/` (one sub-directory per soundtrack) and `logos/`.
-None of it is required: a missing root just means no soundtrack.
-
-```sh
-zig build -Doptimize=ReleaseFast --prefix dist        # binary + logos
-zig build -Doptimize=ReleaseFast -Dbundle-music --prefix dist   # + the soundtrack
-tar -C dist -czf iron-ledger-macos-arm64.tar.gz .
-```
-
-`-Dbundle-music` is opt-in because the score is a few hundred megabytes:
-ship it as a separate archive that unpacks into
-`share/iron-ledger/music/`, and the game picks it up on the next launch.
-The binary still links the system SQLite library, so a package targets the
-platform it was built for.
-
-### Keys
-
-| Everywhere | |
-|---|---|
-| `F1`–`F10` or `1`–`9`, `0` | screens: Desk, Map, Forces, Contracts, Ledger, Supply, HQ, Lab, People, Market |
-| `Tab` / `Shift-Tab` | move between panes |
-| `j` `k` or arrows, `Enter` | move the cursor, act on the row |
-| `:` | command line with Tab completion for simulation commands and common reports (`:summary`, `:readiness`, `:manning co:N`) |
-| `n` / `N` | end the turn / end seven turns — prompting checklist rows open the advisory readiness prompt first |
-| `?` | help · `e` emblem · `F12` settings · `M` music on/off · `:music` soundtrack browser · `q` back to the welcome screen |
-
-Each screen's own keys are on its bottom line.
-
-## The screens
-
-### Welcome and settings
-
-Players own campaigns. Continue, create or delete a campaign; create or
-delete a player. Deleting asks for the name typed back.
-
-Settings (`F12`, or `s` on the welcome screen) is a form like every other
-picker: `j`/`k` highlight a row, `←`/`→` change it in place, `Enter` acts.
-Music on/off, volume, the track, the soundtrack browser; and, inside a
-campaign, medbay auto-admit, the **difficulty** (with every multiplier
-spelled out under it) and the **shareholders' cut** of contract income —
-`←`/`→` steps it by five, `Enter` opens the amount form to type a figure.
-The graphics path in use and where the data came from are shown below.
-
-![Welcome](docs/screenshots/welcome.svg)
-
-![Settings in a campaign](docs/screenshots/settings-campaign.svg)
-
-### New campaign
-
-Four steps: commander (name, house of origin, profession, start year),
-outfit and emblem (presets, or import a PNG from an asset root's `logos/`
-directory, `./`, `logos/` or `docs/logos/`), the generated company with
-the back office sized by hand, and a review.
-
-![Commander](docs/screenshots/wizard-commander.svg)
-
-![Emblem](docs/screenshots/wizard-emblem.svg)
-
-![Company and back office](docs/screenshots/wizard-company.svg)
-
-![Review](docs/screenshots/wizard-review.svg)
-
-### F1 Desk
-
-Where a turn starts and ends: the end-turn checklist (urgent items in
-red) under the outfit's Dragoons rating, the inbox with decisions and
-their deadlines, every company's posture, the log since last turn, and
-the HQ network. A REPORTS pane lists the campaign-wide reports — the campaign summary,
-readiness, and the engagements still on record — and `Enter` opens the
-selected one read-only.
-
-![Desk](docs/screenshots/desk.svg)
-
-### F2 Map
-
-The star map from the planet table: influence rings and beachhead bands
-around each HQ, offers pinned to worlds, deployed companies marked,
-worlds you have worked. `h j k l` move between worlds and the view
-follows; `+` and `-` zoom; `c` cycles the colour lens — faction,
-industry, standing, activity; `f` founds an HQ on the world under the
-cursor; `o` jumps to its offers.
-
-![Map by faction](docs/screenshots/map.svg)
-
-![Map by industry](docs/screenshots/map-industry.svg)
-
-### F3 Forces
-
-The TO&E as a tree with pilot, tech and state per hull, paged with `[`
-and `]` between all forces, each company, the unassigned pool and the
-hangar ranking. With the cursor on a company, `r` cycles the right-hand
-pane between DAMAGE (the components the home warehouse must have
-ready), READINESS (fatigue bands, morale, wounded, permanent injuries,
-banked XP, depot hulls, rotation) and MANNING (every role's have, need
-and open, with tech-hours covered). `c` crews the company to complement
-from the halls, `A` auto-assigns seats, `w` raises an air wing, `+`
-raises a new company through a wizard, `o` sets a lance's role, `d`
-sends a hull to the depot, `m` mothballs it, `R` recalls a company, `$`
-sells a hull, `X` disbands.
-
-![Forces](docs/screenshots/forces.svg)
-
-![Readiness](docs/screenshots/forces-readiness.svg)
-
-![Manning](docs/screenshots/forces-manning.svg)
-
-![Hangar](docs/screenshots/hangar.svg)
-
-### F4 Contracts
-
-The board with every column that matters — kind, world, employer, band,
-months, pay, enemy, salvage, command rights, transit — and the active
-contract with its opposition pool, duration, victory points, breach
-exposure, salvage capacity and battle history. `b` opens a negotiation
-round on an offer. A HISTORY pane keeps every closed contract with its
-grade, world, days served, victory points and pay; a STANDINGS pane
-shows every house's opinion of you; the notes line carries your rating.
-On an arc contract, `g` opens the operations board — pick an operation, its
-intent and tempo, task the lances, and spend command capacity on
-interventions — and `G` opens the read-only operation report.
-
-![Contracts](docs/screenshots/contracts.svg)
-
-![Negotiation](docs/screenshots/negotiate.svg)
-
-### F5 Ledger
-
-Money lives in places: treasuries, couriers in transit, standing top-up
-policies, loans against the credit line, the liquidation value of
-everything you own, a P&L in two periods, and the transactions.
-
-![Ledger](docs/screenshots/ledger.svg)
-
-### F6 Supply
-
-Every warehouse and field store as a tonnage bar; the selected site's
-stock as a table; everything inbound with delivery days and, for a
-failed order, why it could not be sourced. On a company row: `t` sends
-cash by courier, `p` sets a top-up policy, `P` a resupply policy, `s`
-ships provisions from home, `o` orders straight to the field, `R` trims
-the stores to the field plan, `H` ships spare components home. On an HQ
-row `K` sets a keep-stocked line and `$` sells part of a line.
-
-![Supply](docs/screenshots/supply.svg)
-
-### F7 HQ
-
-Facilities with built and effective level, the tier line and what a
-regional upgrade costs (`T`), bays and their queue with each repair's
-odds, projects, the back office against its requirement (`S`
-autostaffs), and the hiring hall (`Tab`) with a role filter, bonuses,
-ages and how long each candidate stays.
-
-![HQ](docs/screenshots/hq.svg)
-
-![Hiring hall](docs/screenshots/hall.svg)
-
-### F8 Lab
-
-The MekLab: tonnage budget, crits per location (dim = full), structure
-state with the component it needs, mounts, the staged plan with the
-rules' verdict, the bay queue at home. `+` picks a part and then a
-location the rules allow; `R` orders a replacement for damaged gear;
-`D` sends the hull to the depot for structural work; `Enter` commits the
-refit and shows its odds.
-
-The Lab is for BattleMechs only, but destroyed gear is field work on
-every hull kind: on the Forces screen, `R` on a truck, tank, fighter or
-MASH (or `:replace <unit>`) orders spares to the hull's site, and its
-own tech fits them on the weekly repair pass.
-
-![Lab](docs/screenshots/lab.svg)
-
-### F9 People
-
-Everyone on the payroll with status, assignment and location. `/` cycles
-the filter (combat, techs, medical, each office desk, other, unassigned,
-wounded). `Enter` or `r` opens the record: skills with XP costs, rank, age,
-loyalty, shares, kills, tours, awards, abilities, injuries. `m` admits
-the wounded, `t` trains a skill or ability, `a` seats a person, `P` posts
-them to an HQ, `x` transfers them, `L` grants leave, `D` fires (the
-severance owed is shown first).
-
-![People](docs/screenshots/people.svg)
-
-![Record](docs/screenshots/record.svg)
-
-### F10 Market
-
-The site boards for hulls, parts and ammo — staples, rare slots, damaged
-hulls with their condition, transports, and now and then a fence — an
-order catalogue with fabrication of structural components, keep-stocked
-lines, and a demand pane built from every damaged slot that orders the
-shortfall.
-
-![Market](docs/screenshots/market.svg)
-
-### Reports and the turn
-
-`:summary` rolls the campaign up; `:readiness` lists every company;
-ending the turn opens the advisory checklist when prompting readiness rows
-need acknowledgement.
-
-![Campaign summary](docs/screenshots/summary.svg)
-
-![Readiness](docs/screenshots/readiness.svg)
-
-![Emblem editor](docs/screenshots/emblem-editor.svg)
-
-![End turn](docs/screenshots/end-turn.svg)
-
-![Help](docs/screenshots/help.svg)
-
-## Design
-
-- `ARCHITECTURE.md` — the sim core is pure and deterministic: no I/O, no
-  wall clock, integer C-bills, named RNG streams, commands as a tagged
-  union, a golden-master hash for regression.
-- `GAMEPLAY.md` — the intended feel and the loops.
-- `ROADMAP.md` — the stages, built in order; every stage through 12G is
-  complete, and the P4 campaign-operations layer (arcs, operations, mission
-  intents, lance tasking, interventions and persistent actors) is built on it.
-- `TODO.md` — the one list of open work, in the order it is done.
-- `docs/tui.md` — the terminal client's architecture, with the generated
-  mockups in `docs/tui-mockup.html`.
-- `docs/modding.md` — the data files and how to overlay them.
-- `docs/mekhq-map.md` — which MekHQ concept each module corresponds to.
-- [bufo333/LeaningZig](https://github.com/bufo333/LeaningZig) — *Zig from
-  Zero to IRON LEDGER*, a 57-chapter, exercise-driven course in Zig 0.16
-  whose final part reads this game's source. Read it online at
-  <https://bufo333.github.io/LeaningZig/>, or clone it as `../zig-course`
-  next to this repo.
-
-The terminal client talks to the simulation only through commands and
-queries (`src/sim/commands.zig`, `src/sim/queries.zig`); the console
-(`--repl`) uses the same boundary and the same parser (`src/sim/cli.zig`).
-`docs/tui_smoke.py` drives the client through a pseudo-terminal and
-`docs/repl_smoke.sh` scripts the console; `docs/screenshots.py` produced
-the pictures above, answering the client's graphics probe so the crest
-appears as the placed picture a kitty-protocol terminal shows rather than
-as half-block cells.
+One SQLite file holds every player and campaign; without `--store` the game
+keeps it in a per-user data directory. A maximised terminal gives the fullest
+layout and everything degrades to 80×24; pass `--ascii` for terminals that draw
+box glyphs double-width.
+
+Design and contributor notes live in `ARCHITECTURE.md`, `GAMEPLAY.md`,
+`ROADMAP.md` and `docs/`.
 
 ## Attribution
 
 IRON LEDGER is inspired by [MekHQ](https://megamek.org/) and the wider
-[MegaMek](https://github.com/MegaMek) project, whose campaign systems —
-personnel, TO&E, the AtB contract and event model, maintenance, markets,
-finances, the unit rating — shaped what this game absorbs and what it
-leaves out. The rules it follows come from the BattleTech *Campaign
-Operations* and *TechManual* sourcebooks. It shares no code with MegaMek.
+[MegaMek](https://github.com/MegaMek) project, whose campaign systems shaped
+what this game absorbs and what it leaves out. The rules it follows come from
+the BattleTech *Campaign Operations* and *TechManual* sourcebooks. It shares no
+code with MegaMek.
 
-BattleTech and 'Mech are trademarks of The Topps Company, Inc. This is a
-fan project, unaffiliated with Topps, Catalyst Game Labs or MegaMek.
+BattleTech and 'Mech are trademarks of The Topps Company, Inc. This is a fan
+project, unaffiliated with Topps, Catalyst Game Labs or MegaMek.
 
 ## License
 
 The code is under the GNU General Public License v3.0; see
-[LICENSE](LICENSE). The soundtrack and the Unforgiven crest are not under
-the GPL: they belong to the project owner and may be redistributed only as
-part of IRON LEDGER. See [ASSETS.md](ASSETS.md).
+[LICENSE](LICENSE). The soundtrack and the Unforgiven crest are not under the
+GPL: they belong to the project owner and may be redistributed only as part of
+IRON LEDGER. See [ASSETS.md](ASSETS.md).
