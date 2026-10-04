@@ -143,6 +143,19 @@ const Modal = union(enum) {
     intervention_pick: struct { contract: types.ContractId, operation: types.OperationId },
     /// Read-only operation report for an arc contract: decided ops, decision costs, consequences (P4i.3).
     operation_report: types.ContractId,
+    /// Hull lifecycle record: combat history, maintenance log, ownership chain (P3c.6).
+    mech: MechRef,
+};
+
+const MechView = enum { summary, combat, maintenance, ownership };
+const MechRef = struct { id: types.HullInstanceId, view: MechView = .summary };
+
+/// Sub-view key/label table for the mech-detail modal.
+/// One source for both the view rows and the listExtra dispatch (rule 20).
+const mech_view_keys = [_]struct { view: MechView, key: u8, label: []const u8 }{
+    .{ .view = .combat, .key = 'c', .label = "combat history" },
+    .{ .view = .maintenance, .key = 'm', .label = "maintenance log" },
+    .{ .view = .ownership, .key = 'o', .label = "ownership chain" },
 };
 
 /// A yes/no over one command. `id` is the subject the kind names.
@@ -1385,7 +1398,7 @@ pub const App = struct {
         const al = self.a();
         switch (self.modal) {
             .none => {},
-            .help, .decision, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .seat, .emblem, .hull, .contract_log, .log_entry, .battle_list, .record, .operation_pick, .intent_pick, .task_pick, .tempo_pick, .intervention_pick, .operation_report => try self.drawList(al),
+            .help, .decision, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .seat, .emblem, .hull, .contract_log, .log_entry, .battle_list, .record, .operation_pick, .intent_pick, .task_pick, .tempo_pick, .intervention_pick, .operation_report, .mech => try self.drawList(al),
             .after_action => |id| try self.drawAfterAction(al, id),
             .end_turn => {
                 const g = self.state();
@@ -3428,6 +3441,60 @@ pub const App = struct {
                     .empty = "{d}no decided operations yet{/}",
                 };
             },
+            .mech => |m| {
+                var rows: std.ArrayListUnmanaged([]const u8) = .empty;
+                switch (m.view) {
+                    .summary => {
+                        const lines = try q.hullRecord(al, self.state(), m.id);
+                        try rows.appendSlice(al, lines);
+                        if (lines.len > 0) {
+                            try rows.append(al, "");
+                            try rows.append(al, "  sub-views:");
+                            for (mech_view_keys) |mk| {
+                                try rows.append(al, try std.fmt.allocPrint(al, "  [{c}] {s}", .{ mk.key, mk.label }));
+                            }
+                        }
+                    },
+                    .combat => {
+                        const lines = try q.hullCombatHistory(al, self.state(), m.id);
+                        if (lines.len == 0) {
+                            try rows.append(al, "{d}no combat records{/}");
+                        } else {
+                            try rows.appendSlice(al, lines);
+                        }
+                    },
+                    .maintenance => {
+                        const lines = try q.hullMaintenanceLog(al, self.state(), m.id);
+                        if (lines.len == 0) {
+                            try rows.append(al, "{d}no maintenance entries{/}");
+                        } else {
+                            try rows.appendSlice(al, lines);
+                        }
+                    },
+                    .ownership => {
+                        const lines = try q.hullOwnershipChain(al, self.state(), m.id);
+                        if (lines.len == 0) {
+                            try rows.append(al, "{d}no ownership records{/}");
+                        } else {
+                            try rows.appendSlice(al, lines);
+                        }
+                    },
+                }
+                const sub: []const u8 = switch (m.view) {
+                    .summary => "MECH",
+                    .combat => "MECH \xc2\xb7 COMBAT",
+                    .maintenance => "MECH \xc2\xb7 MAINTENANCE",
+                    .ownership => "MECH \xc2\xb7 OWNERSHIP",
+                };
+                return .{
+                    .title = try listTitle(al, sub, null, "close", false),
+                    .rows = rows.items,
+                    .read_only = true,
+                    .scroll = true,
+                    .w = layout.modal.hull_w,
+                    .max_h = full_h,
+                };
+            },
             else => unreachable,
         }
     }
@@ -4028,6 +4095,26 @@ pub const App = struct {
                 );
                 return true;
             },
+            .mech => |m| {
+                // Sub-view letter keys switch the view.
+                if (key == .char) {
+                    for (mech_view_keys) |mk| {
+                        if (key.char == mk.key) {
+                            self.modal.mech.view = mk.view;
+                            self.modal_cursor = 0;
+                            return true;
+                        }
+                    }
+                    return false;
+                }
+                // Esc from a sub-view steps back to summary rather than closing.
+                if (key == .escape and m.view != .summary) {
+                    self.modal.mech.view = .summary;
+                    self.modal_cursor = 0;
+                    return true;
+                }
+                return false;
+            },
             else => return false,
         }
         return true;
@@ -4201,7 +4288,7 @@ pub const App = struct {
     fn handleModalKey(self: *App, key: Key) !void {
         switch (self.modal) {
             .none => {},
-            .help, .decision, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .seat, .emblem, .hull, .contract_log, .log_entry, .battle_list, .record, .operation_pick, .intent_pick, .task_pick, .tempo_pick, .intervention_pick, .operation_report => try self.listKey(key),
+            .help, .decision, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .seat, .emblem, .hull, .contract_log, .log_entry, .battle_list, .record, .operation_pick, .intent_pick, .task_pick, .tempo_pick, .intervention_pick, .operation_report, .mech => try self.listKey(key),
             .after_action => |id| {
                 const hit = keys.lookup(AfterActionAction, &after_action_bindings, 0, key) orelse return;
                 switch (hit.action) {
@@ -4920,4 +5007,36 @@ test "person-detail modal: pressing m on a wounded un-admitted person admits the
     // Press `m` — should dispatch admit through the existing command path.
     try pressForTest(c, .{ .char = 'm' });
     try std.testing.expect(c.app.state().person(id).?.medbay_admitted);
+}
+
+test "mech-detail modal: pressing h on a hull opens the mech modal and sub-views browse correctly (P3c.6)" {
+    const c = try clientForTest(std.testing.allocator);
+    defer deinitForTest(c, std.testing.allocator);
+    // Navigate to Forces (F3).
+    c.app.switchTab(.forces);
+    // Find the first hull row in the TO&E.
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const rows = try c.app.toeRows();
+    // Locate a hull row (unit != .none) and position the cursor there.
+    var hull_row_idx: ?usize = null;
+    for (rows, 0..) |r, i| if (r.unit != .none and q.hullInstanceForUnit(c.app.state(), r.unit) != .none) {
+        hull_row_idx = i;
+        break;
+    };
+    const idx = hull_row_idx orelse return error.NoHullRow;
+    c.app.cur(0).* = idx;
+    // Press `h` — should open the mech-detail modal.
+    try pressForTest(c, .{ .char = 'h' });
+    try std.testing.expect(c.app.modal == .mech);
+    try std.testing.expectEqual(MechView.summary, c.app.modal.mech.view);
+    // Press `c` — should switch to combat sub-view.
+    try pressForTest(c, .{ .char = 'c' });
+    try std.testing.expectEqual(MechView.combat, c.app.modal.mech.view);
+    // Press Esc — should step back to summary.
+    try pressForTest(c, .escape);
+    try std.testing.expectEqual(MechView.summary, c.app.modal.mech.view);
+    // Press Esc again — should close the modal.
+    try pressForTest(c, .escape);
+    try std.testing.expect(c.app.modal == .none);
 }

@@ -504,6 +504,7 @@ fn runRepl(session: *game.lobby.Session, io: std.Io, gpa: std.mem.Allocator, sto
             \\views:    status | toe | hqs | offers | contracts | roster [co:<id>|hq:<id>] | medbay | hall [filter]
             \\          checklist | inbox | battles [id] | log [n] [filter] | pnl | ledger | treasuries | units | parts | orders | sop | candidates <offer#>
             \\          shop | supplies | demand | bays | projects | staff | lab <unit> | readiness | rating | summary | manning co:<id>
+            \\          mech <unit id>   (hull lifecycle: combat history, maintenance log, ownership chain)
             \\          briefing <contract id>   (battle orders before contact: `confirm`, `rush`, `roe`, `role`)
             \\turn:     day [n] [force]   (the checklist gates it)
             \\commands: `help` lists every verb with its usage — the same verbs the TUI's `:` line takes
@@ -683,6 +684,33 @@ fn runRepl(session: *game.lobby.Session, io: std.Io, gpa: std.mem.Allocator, sto
                 continue;
             };
             printLab(gs, al, @enumFromInt(uid)) catch |err| showError(err);
+        } else if (std.mem.eql(u8, verb, "mech")) {
+            const uid = std.fmt.parseInt(u32, tokens.next() orelse "", 10) catch {
+                std.debug.print("usage: mech <unit id>\n", .{});
+                continue;
+            };
+            const unit_id: game.types.UnitId = @enumFromInt(uid);
+            const hid = q.hullInstanceForUnit(gs, unit_id);
+            if (hid == .none) {
+                std.debug.print("usage: mech <unit id>\n", .{});
+                continue;
+            }
+            printLines(al, try q.hullRecord(al, gs, hid), "") catch |err| showError(err);
+            const combat = try q.hullCombatHistory(al, gs, hid);
+            if (combat.len > 0) {
+                std.debug.print("combat history:\n", .{});
+                printLines(al, combat, "  ") catch |err| showError(err);
+            }
+            const maint = try q.hullMaintenanceLog(al, gs, hid);
+            if (maint.len > 0) {
+                std.debug.print("maintenance log:\n", .{});
+                printLines(al, maint, "  ") catch |err| showError(err);
+            }
+            const chain = try q.hullOwnershipChain(al, gs, hid);
+            if (chain.len > 0) {
+                std.debug.print("ownership chain:\n", .{});
+                printLines(al, chain, "  ") catch |err| showError(err);
+            }
         } else if (std.mem.eql(u8, verb, "contracts")) {
             printContracts(gs, al) catch |err| showError(err);
             std.debug.print("standing:\n", .{});

@@ -59,6 +59,8 @@ printf '%s\n' \
   'tempo 999 999 notaposture' \
   'intervene 9 1 emergency_recon' \
   'intervene 999 999 notakind' \
+  'mech 3' \
+  'mech 999' \
   'save' \
   'quit' > "$work/input"
 # A watchdog kills a hung REPL (macOS has no `timeout`); the exit status
@@ -125,5 +127,8 @@ check 'under contract:'
 check 'readiest co.'
 check 'skull'
 check 'advanced 3 day'
+# P3c.6: mech <unit id> prints the lifecycle summary; unknown id prints the usage line.
+check 'engagements'
+check 'usage: mech'
 check 'saved campaign'
 echo "REPL SMOKE OK"

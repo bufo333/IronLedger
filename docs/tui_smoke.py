@@ -296,7 +296,15 @@ assert "quantity" in plain()[-30000:], plain()[-3000:]
 send("\r", 1.0)
 assert wait_for("done.", tail=2500) or "keep-stocked minimum" in plain()[-2500:], plain()[-800:]  # the footer redraw can push the message past a short window
 send("\x1b")
-send("3"); send("j", 0.6)       # forces: cursor on the company → damage pane
+send("3"); send("j", 0.6); send("j", 0.4); send("j", 0.4)  # forces: cursor onto a hull row (past company and lance header)
+send("h", 0.8)                 # P3c.6: open the mech-detail modal on the hull
+assert "MECH" in plain()[-30000:], plain()[-3000:]
+send("c", 0.6)                 # switch to the combat sub-view
+assert "MECH" in plain()[-30000:], plain()[-3000:]
+send("\x1b", 0.5)              # Esc: step back to summary
+send("\x1b", 0.5)              # Esc: close the modal
+send("k", 0.3); send("k", 0.3)  # move back to the company row (2 up from hull)
+send("j", 0.6)                 # cursor on the company → damage pane
 assert "DAMAGE ·" in plain()[-30000:] or "every hull is whole" in plain()[-30000:], plain()[-3000:]
 send("b", 0.8)
 assert "needs no structural components" in plain()[-400:] or "FABRICATE" in plain()[-30000:], plain()[-800:]

@@ -214,6 +214,7 @@ titles and the help modal come from the same tables.
 | `$` | any | sell the hull under the cursor |
 | `X` | any | disband the company under the cursor |
 | `b` | any | fabricate the structural parts the company's home HQ lacks |
+| `h` | any | open the hull's lifecycle: combat history, maintenance log and ownership chain |
 
 ### F4 Contracts
 
@@ -652,7 +653,8 @@ and the TUI:
 - `map` (worlds with ring/beachhead/dark classification per HQ, offers per
   world, HQ and company markers)
 - `toe` / `toeViews` (tree with slot states), `hull`, `personRecord`,
-  `unassigned`
+  `unassigned`, `hullInstanceForUnit`, `hullRecord`, `hullCombatHistory`,
+  `hullMaintenanceLog`, `hullOwnershipChain`
 - `contracts` (board + active with objective/pool/VP/clock/exposure)
 - `allTreasuries`, `ledger(selected, period_days, max_rows)`
 - `supply` (sites with tons/capacity/burn/days, inbound), `demandLines`

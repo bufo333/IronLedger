@@ -26,6 +26,7 @@ const crew = @import("crew.zig");
 const maintenance = @import("maintenance.zig");
 // Named `toe_mod`, not `toe`: this file already owns a public `toe` query.
 const toe_mod = @import("toe.zig");
+const hull_instance_mod = @import("../domain/hull_instance.zig");
 const GameState = state_mod.GameState;
 const founding = @import("founding.zig");
 const lift = @import("lift.zig");
@@ -1688,6 +1689,114 @@ pub fn hull(alloc: Alloc, gs: *GameState, uid: types.UnitId) ![]const []const u8
     try out.append(alloc, try std.fmt.allocPrint(alloc, "upkeep {s}/mo · maintenance {d} h/week ({d} in its tech's hands; quality {s}{s}) · depot needed: {s}", .{
         try money(alloc, u.monthlyBill()), maintenance.hullHours(gs, u), if (gs.person(u.tech)) |t| maintenance.techWeeklyHoursFor(gs, t, u) else maintenance.hullHours(gs, u), @tagName(u.quality), if (ch) |c| (if (c.rarity == .very_rare) ", exotic design" else "") else "", if (u.needsDepot()) "{c}yes{/}" else "no",
     }));
+    return out.toOwnedSlice(alloc);
+}
+
+// ---------------------------------------------------------------- hull lifecycle
+
+/// Resolve a unit's linked hull instance id (one owner of the UnitId→HullInstanceId
+/// bridge so neither the TUI nor the REPL reconstructs it inline — rule 3/20).
+/// Returns `.none` when the unit is unknown or has no linked instance.
+pub fn hullInstanceForUnit(gs: *GameState, uid: types.UnitId) types.HullInstanceId {
+    const u = gs.unit(uid) orelse return .none;
+    return u.hull_instance_id;
+}
+
+/// Summary header for one hull instance: chassis, status, intro year, pre-campaign
+/// flag, aggregate counts (engagements, kills, maintenance entries, ownership
+/// intervals), and the current owner line. Returns an empty slice when `id` is
+/// unknown (fail-soft read, rule 31/47). Markup-safe: stored strings go through
+/// `table.plain`.
+pub fn hullRecord(alloc: Alloc, gs: *GameState, id: types.HullInstanceId) ![]const []const u8 {
+    var out: std.ArrayListUnmanaged([]const u8) = .empty;
+    const inst = gs.hull_instances.getPtr(id) orelse return out.toOwnedSlice(alloc);
+    const ch = chassis_mod.find(inst.base_key);
+    const name_str: []const u8 = if (inst.name) |n| try table.plain(alloc, n) else "—";
+    const nick_str: []const u8 = if (inst.nickname) |n| try table.plain(alloc, n) else "—";
+    try out.append(alloc, try std.fmt.allocPrint(alloc, "{{a}}{s} {s}{{/}}  name {s}  nick {s}  intro {d}{s}", .{
+        inst.base_key,
+        if (ch) |c| c.name else "?",
+        name_str,
+        nick_str,
+        inst.intro_year,
+        if (inst.pre_campaign) "  {d}pre-campaign{/}" else "",
+    }));
+    try out.append(alloc, try std.fmt.allocPrint(alloc, "status  {s}", .{@tagName(inst.status)}));
+    // Count child rows.
+    var engagements: u32 = 0;
+    var kills_total: u32 = 0;
+    for (gs.hull_combat_records.items) |r| if (r.hull_instance_id == id) {
+        engagements += 1;
+        kills_total += r.kills;
+    };
+    var maint_count: u32 = 0;
+    for (gs.maintenance_entries.items) |e| {
+        if (e.hull_instance_id == id) maint_count += 1;
+    }
+    var own_count: u32 = 0;
+    var current_owner: ?[]const u8 = null;
+    for (gs.hull_ownership_history.items) |h| if (h.hull_instance_id == id) {
+        own_count += 1;
+        if (h.to_day == 0) current_owner = try table.plain(alloc, h.prior_owner_key);
+    };
+    try out.append(alloc, try std.fmt.allocPrint(alloc, "engagements {d}  kills {d}  maintenance entries {d}  ownership intervals {d}", .{
+        engagements, kills_total, maint_count, own_count,
+    }));
+    if (current_owner) |o| try out.append(alloc, try std.fmt.allocPrint(alloc, "current owner  prior: {s}", .{o}));
+    return out.toOwnedSlice(alloc);
+}
+
+/// Per-engagement combat records for one hull instance, one line each.
+/// Returns an empty slice when `id` is unknown (rule 31/47).
+pub fn hullCombatHistory(alloc: Alloc, gs: *GameState, id: types.HullInstanceId) ![]const []const u8 {
+    if (!gs.hull_instances.contains(id)) return &.{};
+    var out: std.ArrayListUnmanaged([]const u8) = .empty;
+    for (gs.hull_combat_records.items) |r| {
+        if (r.hull_instance_id != id) continue;
+        const bid: []const u8 = if (r.battle_id != .none) try std.fmt.allocPrint(alloc, "battle #{d}", .{@intFromEnum(r.battle_id)}) else "—";
+        const cid: []const u8 = if (r.contract_id != .none) try std.fmt.allocPrint(alloc, "contract #{d}", .{@intFromEnum(r.contract_id)}) else "—";
+        if (r.destroyed) {
+            try out.append(alloc, try std.fmt.allocPrint(alloc, "{s}  {s}  kills {d}  hits {d}  armor lost {d}  slots damaged {d}  slots destroyed {d}  {{c}}DESTROYED ({s}){{/}}", .{
+                bid, cid, r.kills, r.hits_taken, r.armor_lost, r.slots_damaged, r.slots_destroyed, @tagName(r.cause),
+            }));
+        } else {
+            try out.append(alloc, try std.fmt.allocPrint(alloc, "{s}  {s}  kills {d}  hits {d}  armor lost {d}  slots damaged {d}  slots destroyed {d}", .{
+                bid, cid, r.kills, r.hits_taken, r.armor_lost, r.slots_damaged, r.slots_destroyed,
+            }));
+        }
+    }
+    return out.toOwnedSlice(alloc);
+}
+
+/// Maintenance log entries for one hull instance, one line each.
+/// Returns an empty slice when `id` is unknown (rule 31/47).
+/// Day rendered as `d{N}` — the convention etaText uses (clock.zig:81–85).
+pub fn hullMaintenanceLog(alloc: Alloc, gs: *GameState, id: types.HullInstanceId) ![]const []const u8 {
+    if (!gs.hull_instances.contains(id)) return &.{};
+    var out: std.ArrayListUnmanaged([]const u8) = .empty;
+    for (gs.maintenance_entries.items) |e| {
+        if (e.hull_instance_id != id) continue;
+        const tech_str: []const u8 = if (gs.person(e.tech)) |p| try personText(alloc, p) else if (e.tech != .none) try std.fmt.allocPrint(alloc, "#{d}", .{@intFromEnum(e.tech)}) else "—";
+        const battle_str: []const u8 = if (e.battle_id != .none) try std.fmt.allocPrint(alloc, "  battle #{d}", .{@intFromEnum(e.battle_id)}) else "";
+        try out.append(alloc, try std.fmt.allocPrint(alloc, "d{d}  {s}  {s}  tech {s}  {s}{s}", .{
+            e.day, @tagName(e.action), e.description, tech_str, try money(alloc, e.cost), battle_str,
+        }));
+    }
+    return out.toOwnedSlice(alloc);
+}
+
+/// Ownership provenance chain for one hull instance, one line per interval.
+/// Returns an empty slice when `id` is unknown (rule 31/47).
+pub fn hullOwnershipChain(alloc: Alloc, gs: *GameState, id: types.HullInstanceId) ![]const []const u8 {
+    if (!gs.hull_instances.contains(id)) return &.{};
+    var out: std.ArrayListUnmanaged([]const u8) = .empty;
+    for (gs.hull_ownership_history.items) |h| {
+        if (h.hull_instance_id != id) continue;
+        const to_str: []const u8 = if (h.to_day == 0) "now" else try std.fmt.allocPrint(alloc, "d{d}", .{h.to_day});
+        try out.append(alloc, try std.fmt.allocPrint(alloc, "d{d}–{s}  {s}  prior: {s}", .{
+            h.from_day, to_str, @tagName(h.acquisition_type), try table.plain(alloc, h.prior_owner_key),
+        }));
+    }
     return out.toOwnedSlice(alloc);
 }
 
@@ -8341,4 +8450,100 @@ test "personActions eligibility invariants: wounded/admit, leave, admin, restles
         try std.testing.expectEqual(risk > 0, pa.restless);
         try std.testing.expect(pa.restless); // high fatigue+low morale over a year ⇒ restless
     }
+}
+
+test "hull lifecycle views render a seeded hull (rule 67)" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 77001 });
+    defer gs.deinit();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const al = arena.allocator();
+
+    // Create a unit with a chassis that exists in the catalog.
+    const uid = try gs.addUnit("WSP-1A");
+    const u = gs.unit(uid).?;
+
+    // Seed a pre-campaign hull: creates a HullInstance, one .initial ownership interval,
+    // and two scheduled-inspection maintenance entries.
+    gs.clock.day_index = 5;
+    try gs.seedPreCampaignHull(u, "Davion", true, 2);
+    const hid = u.hull_instance_id;
+    try std.testing.expect(hid != .none);
+
+    // Append a maintenance entry (a depot repair).
+    gs.appendMaintenanceEntry(u, .repair, 12_000);
+
+    // Append a combat record directly (no command wrapping needed for read-path test).
+    try gs.hull_combat_records.append(gs.allocator(), .{
+        .hull_instance_id = hid,
+        .battle_id = @enumFromInt(7),
+        .contract_id = @enumFromInt(3),
+        .kills = 2,
+        .hits_taken = 4,
+        .armor_lost = 15,
+        .slots_damaged = 1,
+        .slots_destroyed = 0,
+        .destroyed = false,
+        .cause = .none,
+    });
+
+    // hullInstanceForUnit must return the linked id.
+    try std.testing.expectEqual(hid, hullInstanceForUnit(&gs, uid));
+
+    // hullRecord: should contain the base_key, engagements count, and ownership count.
+    const rec = try hullRecord(al, &gs, hid);
+    try std.testing.expect(rec.len > 0);
+    {
+        var found_key = false;
+        var found_eng = false;
+        for (rec) |line| {
+            if (std.mem.indexOf(u8, line, "WSP-1A") != null) found_key = true;
+            if (std.mem.indexOf(u8, line, "engagements") != null) found_eng = true;
+        }
+        try std.testing.expect(found_key);
+        try std.testing.expect(found_eng);
+    }
+
+    // hullCombatHistory: the single combat record must appear.
+    const combat = try hullCombatHistory(al, &gs, hid);
+    try std.testing.expect(combat.len == 1);
+    try std.testing.expect(std.mem.indexOf(u8, combat[0], "kills 2") != null);
+    try std.testing.expect(std.mem.indexOf(u8, combat[0], "battle #7") != null);
+
+    // hullMaintenanceLog: seed added 2 inspection entries + 1 repair = 3 entries.
+    const maint = try hullMaintenanceLog(al, &gs, hid);
+    try std.testing.expectEqual(@as(usize, 3), maint.len);
+    {
+        var found_repair = false;
+        for (maint) |line| if (std.mem.indexOf(u8, line, "repair") != null) {
+            found_repair = true;
+            break;
+        };
+        try std.testing.expect(found_repair);
+    }
+
+    // hullOwnershipChain: one .initial interval (to_day == 0 → "now").
+    const chain = try hullOwnershipChain(al, &gs, hid);
+    try std.testing.expectEqual(@as(usize, 1), chain.len);
+    try std.testing.expect(std.mem.indexOf(u8, chain[0], "initial") != null);
+    try std.testing.expect(std.mem.indexOf(u8, chain[0], "now") != null);
+    try std.testing.expect(std.mem.indexOf(u8, chain[0], "Davion") != null);
+}
+
+test "unknown hull instance id yields empty views (rule 31/47)" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 77002 });
+    defer gs.deinit();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const al = arena.allocator();
+    const unknown: types.HullInstanceId = @enumFromInt(9999);
+
+    // hullInstanceForUnit on a nonexistent unit returns .none.
+    try std.testing.expectEqual(types.HullInstanceId.none, hullInstanceForUnit(&gs, @enumFromInt(9999)));
+
+    // Each view returns a zero-length slice and does not error.
+    try std.testing.expectEqual(@as(usize, 0), (try hullRecord(al, &gs, unknown)).len);
+    try std.testing.expectEqual(@as(usize, 0), (try hullCombatHistory(al, &gs, unknown)).len);
+    try std.testing.expectEqual(@as(usize, 0), (try hullMaintenanceLog(al, &gs, unknown)).len);
+    try std.testing.expectEqual(@as(usize, 0), (try hullOwnershipChain(al, &gs, unknown)).len);
 }

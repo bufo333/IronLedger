@@ -72,7 +72,7 @@ pub fn move(self: *App, delta: i32) anyerror!void {
     }
 }
 
-const Action = enum { prev_view, next_view, assign, seat, unassign, lance, transfer, crew, auto_assign, train_one, train_all, cycle_pane, order, depot, spares_recall, mothball, air_wing, raise, sell, disband, fabricate };
+const Action = enum { prev_view, next_view, assign, seat, unassign, lance, transfer, crew, auto_assign, train_one, train_all, cycle_pane, order, depot, spares_recall, mothball, air_wing, raise, sell, disband, fabricate, mech };
 
 pub const bindings = [_]app.keys.Binding(Action){
     .{ .match = app.keys.Match.char('['), .action = .prev_view, .label = "switch view", .group = .navigate, .shown = "[ ]", .title = 0, .help = "previous / next TO&E view: all forces, each company, unassigned hulls, the hangar" },
@@ -97,6 +97,7 @@ pub const bindings = [_]app.keys.Binding(Action){
     .{ .match = app.keys.Match.char('$'), .action = .sell, .label = "sell", .group = .money, .help = "sell the hull under the cursor" },
     .{ .match = app.keys.Match.char('X'), .action = .disband, .label = "disband", .group = .money, .help = "disband the company under the cursor" },
     .{ .match = app.keys.Match.char('b'), .action = .fabricate, .label = "fabricate", .group = .money, .help = "fabricate the structural parts the company's home HQ lacks" },
+    .{ .match = app.keys.Match.char('h'), .action = .mech, .label = "mech record", .group = .act, .help = "open the hull's lifecycle: combat history, maintenance log and ownership chain" },
 };
 pub const legend = app.keys.entries(Action, &bindings);
 
@@ -269,6 +270,18 @@ pub fn handle(self: *App, k: app.Key) anyerror!bool {
             const co = r.company;
             if (co == .none) return true;
             _ = try self.execSay(.{ .recall_idle = co }, .good, "{s} is coming home", .{try q.forceName(self.a(), g, co)});
+        },
+        .mech => if (row) |r| {
+            if (r.unit == .none) {
+                self.say(.dim, "put the cursor on a hull to open its lifecycle record", .{});
+                return true;
+            }
+            const hid = q.hullInstanceForUnit(g, r.unit);
+            if (hid != .none) {
+                self.openModal(.{ .mech = .{ .id = hid } });
+            } else {
+                self.say(.dim, "no lifecycle record for this hull", .{});
+            }
         },
     }
     return true;
