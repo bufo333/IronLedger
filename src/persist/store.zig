@@ -40,7 +40,7 @@ const rival_mod = @import("../domain/rival.zig");
 const officer_dom = @import("../domain/officer.zig");
 const world_state_dom = @import("../domain/world_state.zig");
 
-pub const schema_version = 47;
+pub const schema_version = 48;
 
 const ddl =
     \\CREATE TABLE IF NOT EXISTS player (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_seq INTEGER NOT NULL);
@@ -56,7 +56,7 @@ const ddl =
     \\CREATE TABLE IF NOT EXISTS ability (cid INTEGER NOT NULL, person_id INTEGER NOT NULL, key TEXT NOT NULL, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, person_id) REFERENCES person(cid, id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS person_skill (cid INTEGER NOT NULL, person_id INTEGER NOT NULL, skill TEXT NOT NULL, level INTEGER NOT NULL, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, person_id) REFERENCES person(cid, id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS injury (cid INTEGER NOT NULL, person_id INTEGER NOT NULL, ord INTEGER NOT NULL, location TEXT NOT NULL, severity INTEGER NOT NULL, incurred INTEGER NOT NULL, heal_done INTEGER, doctor INTEGER NOT NULL DEFAULT 0, permanent INTEGER NOT NULL DEFAULT 0 CHECK (permanent IN (0,1)), healed INTEGER NOT NULL DEFAULT 0 CHECK (healed IN (0,1)), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, person_id) REFERENCES person(cid, id) DEFERRABLE INITIALLY DEFERRED);
-    \\CREATE TABLE IF NOT EXISTS unit (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, chassis_key TEXT, name TEXT, kind TEXT, force INTEGER, pilot INTEGER, tech INTEGER, armor_pct INTEGER, quality TEXT, status TEXT, last_maint INTEGER, acquired_day INTEGER, price INTEGER, reactivation_done INTEGER, berth_hq INTEGER NOT NULL DEFAULT 0, wreck TEXT NOT NULL DEFAULT 'none', held_by TEXT NOT NULL DEFAULT '', held_day INTEGER NOT NULL DEFAULT 0, held_battle INTEGER NOT NULL DEFAULT 0, held_force INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (cid, id), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS unit (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, chassis_key TEXT, name TEXT, kind TEXT, force INTEGER, pilot INTEGER, tech INTEGER, armor_pct INTEGER, quality TEXT, status TEXT, last_maint INTEGER, acquired_day INTEGER, price INTEGER, reactivation_done INTEGER, berth_hq INTEGER NOT NULL DEFAULT 0, wreck TEXT NOT NULL DEFAULT 'none', held_by TEXT NOT NULL DEFAULT '', held_day INTEGER NOT NULL DEFAULT 0, held_battle INTEGER NOT NULL DEFAULT 0, held_force INTEGER NOT NULL DEFAULT 0, hull_instance_id INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (cid, id), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS unit_slot (cid INTEGER NOT NULL, unit_id INTEGER NOT NULL, ord INTEGER NOT NULL, slot_key TEXT, part_key TEXT, class TEXT, condition TEXT, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, unit_id) REFERENCES unit(cid, id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS force (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, parent INTEGER, name TEXT, emblem BLOB, local_funds INTEGER, echelon TEXT, commander INTEGER, supplying_hq INTEGER, role TEXT, support_kind TEXT, last_rotation INTEGER, contracts_since_rotation INTEGER, location_planet TEXT, return_eta INTEGER, shortage_days INTEGER, roe TEXT NOT NULL DEFAULT 'standard', PRIMARY KEY (cid, id), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS force_unit (cid INTEGER NOT NULL, force_id INTEGER NOT NULL, ord INTEGER NOT NULL, unit_id INTEGER NOT NULL, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, force_id) REFERENCES force(cid, id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, unit_id) REFERENCES unit(cid, id) DEFERRABLE INITIALLY DEFERRED);
@@ -98,15 +98,17 @@ const ddl =
     \\CREATE TABLE IF NOT EXISTS world_state (cid INTEGER NOT NULL, ord INTEGER NOT NULL, planet_key TEXT NOT NULL, security INTEGER NOT NULL DEFAULT 0, civilian_support INTEGER NOT NULL DEFAULT 0, infrastructure_strain INTEGER NOT NULL DEFAULT 0, employer_control INTEGER NOT NULL DEFAULT 0, enemy_influence INTEGER NOT NULL DEFAULT 0, last_cause TEXT NOT NULL DEFAULT '', last_cause_day INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (cid, planet_key), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS rival (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, archetype_key TEXT NOT NULL, commander_first TEXT NOT NULL, commander_last TEXT NOT NULL, unit_name TEXT NOT NULL, faction_key TEXT NOT NULL, side TEXT NOT NULL, doctrine TEXT NOT NULL, contract INTEGER NOT NULL DEFAULT 0, standing INTEGER NOT NULL DEFAULT 0, encounters INTEGER NOT NULL DEFAULT 1, last_cause TEXT NOT NULL DEFAULT '', last_cause_day INTEGER NOT NULL DEFAULT 0, recurring INTEGER NOT NULL DEFAULT 0 CHECK (recurring IN (0,1)), PRIMARY KEY (cid, id), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS officer_arc (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, person INTEGER NOT NULL, contract INTEGER NOT NULL DEFAULT 0, seat TEXT NOT NULL, performance INTEGER NOT NULL DEFAULT 0, encounters INTEGER NOT NULL DEFAULT 1, last_cause TEXT NOT NULL DEFAULT '', last_cause_day INTEGER NOT NULL DEFAULT 0, recurring INTEGER NOT NULL DEFAULT 0 CHECK (recurring IN (0,1)), PRIMARY KEY (cid, id), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS hull_instance (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, base_key TEXT, name TEXT, nickname TEXT, status TEXT NOT NULL DEFAULT 'active', intro_year INTEGER NOT NULL DEFAULT 0, pre_campaign INTEGER NOT NULL DEFAULT 0 CHECK (pre_campaign IN (0,1)), PRIMARY KEY (cid, id), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS hull_loadout (cid INTEGER NOT NULL, hull_instance_id INTEGER NOT NULL, slot_index INTEGER NOT NULL, part_key TEXT, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, hull_instance_id) REFERENCES hull_instance(cid, id) DEFERRABLE INITIALLY DEFERRED);
 ;
 
 const tables = [_][]const u8{
-    "meta",           "meta_text",              "rng",                "commander",        "person",            "person_skill",       "injury",                "award",       "ability",
-    "unit",           "unit_slot",              "force",              "force_unit",       "force_child",       "stock",              "hq",                    "hq_facility", "hq_project",
-    "contract",       "txn",                    "loan",               "courier",          "policy",            "bay_job",            "candidate",             "hq_link",     "unit_transfer",
-    "supply_policy",  "stock_policy",           "faction_cooling",    "faction_standing", "event_memory",      "listing",            "part_order",            "event_log",   "pending_event",
-    "refit_plan",     "refit_op",               "rating_snapshot",    "battle_report",    "battle_report_hit", "battle_report_ammo", "battle_report_salvage", "rng_stream",  "operation",
-    "operation_task", "operation_intervention", "battle_report_task", "actor",            "world_state",       "rival",              "officer_arc",
+    "meta",           "meta_text",              "rng",                "commander",        "person",            "person_skill",       "injury",                "award",         "ability",
+    "unit",           "unit_slot",              "force",              "force_unit",       "force_child",       "stock",              "hq",                    "hq_facility",   "hq_project",
+    "contract",       "txn",                    "loan",               "courier",          "policy",            "bay_job",            "candidate",             "hq_link",       "unit_transfer",
+    "supply_policy",  "stock_policy",           "faction_cooling",    "faction_standing", "event_memory",      "listing",            "part_order",            "event_log",     "pending_event",
+    "refit_plan",     "refit_op",               "rating_snapshot",    "battle_report",    "battle_report_hit", "battle_report_ammo", "battle_report_salvage", "rng_stream",    "operation",
+    "operation_task", "operation_intervention", "battle_report_task", "actor",            "world_state",       "rival",              "officer_arc",           "hull_instance", "hull_loadout",
 };
 
 // Indexes for per-campaign tables (A28/D31): cid filters on every load;
@@ -165,6 +167,8 @@ const index_ddl =
     \\CREATE INDEX IF NOT EXISTS ix_world_state_cid ON world_state(cid);
     \\CREATE INDEX IF NOT EXISTS ix_rival_cid ON rival(cid);
     \\CREATE INDEX IF NOT EXISTS ix_officer_arc_cid ON officer_arc(cid);
+    \\CREATE INDEX IF NOT EXISTS ix_hull_instance_cid ON hull_instance(cid);
+    \\CREATE INDEX IF NOT EXISTS ix_hull_loadout_cid ON hull_loadout(cid);
 ;
 
 /// The stream order of the single `rng` blob that saves before schema v32
@@ -283,6 +287,11 @@ pub const Store = struct {
         // Existing saves open with zero rivals, next_rival_id=1 (safe default).
         // v47: officer_arc table (P4i). New table — no ALTER TABLE migration needed; applySchema creates it.
         // Existing saves open with zero officer arcs, next_officer_arc_id=1 (safe default).
+        // v48: hull_instance + hull_loadout tables (P3c.1, docs/p3c-hull-lifecycle-design.md §3).
+        // New tables — applySchema's ddl creates them. The unit table gains
+        // hull_instance_id (added here); upgradeCampaign synthesizes one
+        // HullInstance per owned unit for campaigns saved before v48.
+        .{ .from = 47, .to = 48, .table = "unit", .column = "hull_instance_id", .sql = "ALTER TABLE unit ADD COLUMN hull_instance_id INTEGER NOT NULL DEFAULT 0" },
     };
 
     pub fn open(path: [*:0]const u8) !Store {
@@ -594,6 +603,7 @@ pub const Store = struct {
         try self.saveCommander(gs, cid);
         try self.savePerson(gs, cid);
         try self.saveUnit(gs, cid);
+        try self.saveHullInstances(gs, cid);
         try self.saveForce(gs, cid);
         try self.saveStock(cid, "outfit", 0, &gs.spare_parts);
         try self.saveHq(gs, cid);
@@ -665,22 +675,23 @@ pub const Store = struct {
         const st = try self.db.prepare("INSERT INTO meta VALUES (?1, ?2, ?3)");
         defer st.finalize();
         const ints = [_]struct { []const u8, i64 }{
-            .{ "day_index", gs.clock.day_index },                 .{ "year", gs.clock.date.year },
-            .{ "month", gs.clock.date.month },                    .{ "day", gs.clock.date.day },
-            .{ "funds", gs.funds },                               .{ "reputation", gs.reputation },
-            .{ "bankrupt", @as(i64, @intFromBool(gs.bankrupt)) }, .{ "auto_admit", @as(i64, @intFromBool(gs.auto_admit)) },
-            .{ "difficulty", difficulty_int },                    .{ "share_profit_bp", @as(i64, gs.share_profit_bp) },
-            .{ "stat_battles_won", gs.stats.battles_won },        .{ "stat_battles_drawn", gs.stats.battles_drawn },
-            .{ "stat_battles_lost", gs.stats.battles_lost },      .{ "stat_hulls_lost", gs.stats.hulls_lost },
-            .{ "stat_hulls_salvaged", gs.stats.hulls_salvaged },  .{ "stat_people_kia", gs.stats.people_kia },
-            .{ "stat_enemy_bv", enemy_bv_i64 },                   .{ "next_person_id", gs.next_person_id },
-            .{ "next_unit_id", gs.next_unit_id },                 .{ "next_force_id", gs.next_force_id },
-            .{ "next_hq_id", gs.next_hq_id },                     .{ "next_contract_id", gs.next_contract_id },
-            .{ "next_battle_id", gs.next_battle_id },             .{ "rng_seed", @as(i64, @bitCast(gs.rng.seed)) },
-            .{ "next_event_id", gs.event_queue.next_id },         .{ "next_listing_id", gs.next_listing_id },
-            .{ "next_candidate_id", gs.next_candidate_id },       .{ "next_loan_id", gs.next_loan_id },
-            .{ "next_operation_id", gs.next_operation_id },       .{ "next_actor_id", gs.next_actor_id },
-            .{ "next_rival_id", gs.next_rival_id },               .{ "next_officer_arc_id", gs.next_officer_arc_id },
+            .{ "day_index", gs.clock.day_index },                   .{ "year", gs.clock.date.year },
+            .{ "month", gs.clock.date.month },                      .{ "day", gs.clock.date.day },
+            .{ "funds", gs.funds },                                 .{ "reputation", gs.reputation },
+            .{ "bankrupt", @as(i64, @intFromBool(gs.bankrupt)) },   .{ "auto_admit", @as(i64, @intFromBool(gs.auto_admit)) },
+            .{ "difficulty", difficulty_int },                      .{ "share_profit_bp", @as(i64, gs.share_profit_bp) },
+            .{ "stat_battles_won", gs.stats.battles_won },          .{ "stat_battles_drawn", gs.stats.battles_drawn },
+            .{ "stat_battles_lost", gs.stats.battles_lost },        .{ "stat_hulls_lost", gs.stats.hulls_lost },
+            .{ "stat_hulls_salvaged", gs.stats.hulls_salvaged },    .{ "stat_people_kia", gs.stats.people_kia },
+            .{ "stat_enemy_bv", enemy_bv_i64 },                     .{ "next_person_id", gs.next_person_id },
+            .{ "next_unit_id", gs.next_unit_id },                   .{ "next_force_id", gs.next_force_id },
+            .{ "next_hq_id", gs.next_hq_id },                       .{ "next_contract_id", gs.next_contract_id },
+            .{ "next_battle_id", gs.next_battle_id },               .{ "rng_seed", @as(i64, @bitCast(gs.rng.seed)) },
+            .{ "next_event_id", gs.event_queue.next_id },           .{ "next_listing_id", gs.next_listing_id },
+            .{ "next_candidate_id", gs.next_candidate_id },         .{ "next_loan_id", gs.next_loan_id },
+            .{ "next_operation_id", gs.next_operation_id },         .{ "next_actor_id", gs.next_actor_id },
+            .{ "next_rival_id", gs.next_rival_id },                 .{ "next_officer_arc_id", gs.next_officer_arc_id },
+            .{ "next_hull_instance_id", gs.next_hull_instance_id },
         };
         for (ints) |kv| {
             try st.bindAll(.{ cid, kv[0], kv[1] });
@@ -766,7 +777,7 @@ pub const Store = struct {
 
     // Units and slots.
     fn saveUnit(self: Store, gs: *GameState, cid: i64) !void {
-        const st = try self.db.prepare("INSERT INTO unit VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22)");
+        const st = try self.db.prepare("INSERT INTO unit VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23)");
         defer st.finalize();
         const sl = try self.db.prepare("INSERT INTO unit_slot VALUES (?1,?2,?3,?4,?5,?6,?7)");
         defer sl.finalize();
@@ -776,12 +787,12 @@ pub const Store = struct {
             // never be saved by two loops that drift apart.
             fn put(unit_st: anytype, slot_st: anytype, c: i64, o: i64, u: *const unit_mod.Unit, held: unit_mod.HeldHull.Mark) !void {
                 try unit_st.bindAll(.{
-                    c,                                   o,                                       @intFromEnum(u.id),    u.chassis_key,
-                    u.name,                              u.kind,                                  @intFromEnum(u.force), @intFromEnum(u.pilot),
-                    @intFromEnum(u.tech),                @as(i64, u.armor_pct),                   u.quality,             u.status,
-                    u.last_maintenance_day,              @as(i64, u.acquired_day),                u.purchase_price,      u.reactivation_done_day,
-                    @intFromEnum(u.berth_hq),            u.wreck,                                 held.by,               @as(i64, held.day),
-                    @as(i64, @intFromEnum(held.battle)), @as(i64, @intFromEnum(held.from_force)),
+                    c,                                   o,                                       @intFromEnum(u.id),               u.chassis_key,
+                    u.name,                              u.kind,                                  @intFromEnum(u.force),            @intFromEnum(u.pilot),
+                    @intFromEnum(u.tech),                @as(i64, u.armor_pct),                   u.quality,                        u.status,
+                    u.last_maintenance_day,              @as(i64, u.acquired_day),                u.purchase_price,                 u.reactivation_done_day,
+                    @intFromEnum(u.berth_hq),            u.wreck,                                 held.by,                          @as(i64, held.day),
+                    @as(i64, @intFromEnum(held.battle)), @as(i64, @intFromEnum(held.from_force)), @intFromEnum(u.hull_instance_id),
                 });
                 try unit_st.run();
                 for (u.slots.items, 0..) |s, i| {
@@ -795,6 +806,24 @@ pub const Store = struct {
         for (gs.held_hulls.items) |*h| {
             try Writer.put(st, sl, cid, ord, &h.unit, h.mark());
             ord += 1;
+        }
+    }
+
+    fn saveHullInstances(self: Store, gs: *GameState, cid: i64) !void {
+        const st = try self.db.prepare("INSERT INTO hull_instance VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)");
+        defer st.finalize();
+        const ld = try self.db.prepare("INSERT INTO hull_loadout VALUES (?1,?2,?3,?4)");
+        defer ld.finalize();
+        var it = gs.hull_instances.iterator();
+        var ord: i64 = 0;
+        while (it.next()) |entry| : (ord += 1) {
+            const h = entry.value_ptr;
+            try st.bindAll(.{ cid, ord, @intFromEnum(h.id), h.base_key, h.name, h.nickname, @tagName(h.status), @as(i64, h.intro_year), @as(i64, @intFromBool(h.pre_campaign)) });
+            try st.run();
+            for (h.loadout.items, 0..) |l, i| {
+                try ld.bindAll(.{ cid, @intFromEnum(h.id), @as(i64, @intCast(i)), l.part_key });
+                try ld.run();
+            }
         }
     }
 
@@ -1719,6 +1748,7 @@ pub const Store = struct {
         try self.loadCommander(&gs, cid);
         try self.loadPerson(&gs, cid);
         try self.loadUnit(&gs, cid);
+        try self.loadHullInstances(&gs, cid);
         try self.loadForce(&gs, cid);
         try self.loadHq(&gs, cid);
         try self.loadStock(&gs, cid);
@@ -1856,6 +1886,7 @@ pub const Store = struct {
             if (std.mem.eql(u8, key, "next_actor_id")) gs.next_actor_id = try fit(@TypeOf(gs.next_actor_id), v);
             if (std.mem.eql(u8, key, "next_rival_id")) gs.next_rival_id = try fit(@TypeOf(gs.next_rival_id), v);
             if (std.mem.eql(u8, key, "next_officer_arc_id")) gs.next_officer_arc_id = try fit(@TypeOf(gs.next_officer_arc_id), v);
+            if (std.mem.eql(u8, key, "next_hull_instance_id")) gs.next_hull_instance_id = try fit(@TypeOf(gs.next_hull_instance_id), v);
             if (std.mem.eql(u8, key, "rng_seed")) {
                 gs.rng.seed = @bitCast(v);
                 has_seed = true;
@@ -1987,7 +2018,7 @@ pub const Store = struct {
     // Units.
     fn loadUnit(self: Store, gs: *GameState, cid: i64) !void {
         const alloc = gs.allocator();
-        const st = try self.db.prepare("SELECT id, chassis_key, name, kind, force, pilot, tech, armor_pct, quality, status, last_maint, acquired_day, price, reactivation_done, berth_hq, wreck, held_by, held_day, held_battle, held_force FROM unit WHERE cid = ?1 ORDER BY ord");
+        const st = try self.db.prepare("SELECT id, chassis_key, name, kind, force, pilot, tech, armor_pct, quality, status, last_maint, acquired_day, price, reactivation_done, berth_hq, wreck, held_by, held_day, held_battle, held_force, hull_instance_id FROM unit WHERE cid = ?1 ORDER BY ord");
         defer st.finalize();
         try st.bindAll(.{cid});
         while (try st.next()) {
@@ -2008,6 +2039,7 @@ pub const Store = struct {
                 .reactivation_done_day = try optU32(st.optInt(13)),
                 .berth_hq = try toId(types.HqId, st.int(14)),
                 .wreck = st.enumValue(unit_mod.WreckCause, 15) orelse return error.CorruptSave,
+                .hull_instance_id = try toId(types.HullInstanceId, st.int(20)),
             };
             // A non-empty `held_by` is what tells the two apart: the
             // enemy's hulls go to the limbo list, ours to the books.
@@ -2039,6 +2071,37 @@ pub const Store = struct {
                 .class = sl.enumValue(unit_mod.SlotClass, 3) orelse return error.CorruptSave,
                 .condition = sl.enumValue(unit_mod.PartCondition, 4) orelse return error.CorruptSave,
             });
+        }
+    }
+
+    fn loadHullInstances(self: Store, gs: *GameState, cid: i64) !void {
+        const alloc = gs.allocator();
+        const hull_mod = @import("../domain/hull_instance.zig");
+        const st = try self.db.prepare("SELECT id, base_key, name, nickname, status, intro_year, pre_campaign FROM hull_instance WHERE cid = ?1 ORDER BY ord");
+        defer st.finalize();
+        try st.bindAll(.{cid});
+        while (try st.next()) {
+            const status = st.enumValue(hull_mod.HullStatus, 4) orelse return error.CorruptSave;
+            const inst: hull_mod.HullInstance = .{
+                .id = try toId(types.HullInstanceId, st.int(0)),
+                .base_key = try st.text(1, alloc),
+                .name = try st.optText(2, alloc),
+                .nickname = try st.optText(3, alloc),
+                .status = status,
+                .intro_year = try st.intAs(u16, 5),
+                .pre_campaign = st.int(6) != 0,
+            };
+            const gop = try gs.hull_instances.getOrPut(alloc, inst.id);
+            if (gop.found_existing) return error.CorruptSave; // duplicate id
+            gop.value_ptr.* = inst;
+        }
+        const ld = try self.db.prepare("SELECT hull_instance_id, slot_index, part_key FROM hull_loadout WHERE cid = ?1 ORDER BY hull_instance_id, slot_index");
+        defer ld.finalize();
+        try ld.bindAll(.{cid});
+        while (try ld.next()) {
+            const hid = try toId(types.HullInstanceId, ld.int(0));
+            const h = gs.hull_instances.getPtr(hid) orelse return error.CorruptSave; // orphan loadout row
+            try h.loadout.append(alloc, .{ .part_key = try ld.text(2, alloc) });
         }
     }
 
@@ -2821,6 +2884,32 @@ pub const Store = struct {
         // Saves before v7 hold wounds with no located injury; triage
         // (medical.runDailyHealing) gives such a person a stand-in record,
         // so nothing is upgraded here.
+        // v48 (P3c.1): give every owned unit a HullInstance whose base_key is the
+        // unit's chassis_key and whose design loadout is built from the unit's slot
+        // part_keys (docs/p3c-hull-lifecycle-design.md §3). Deterministic (no RNG);
+        // runs only for campaigns saved before v48.
+        if (from_version < 48) {
+            const chassis = @import("../domain/chassis.zig");
+            const hull_mod = @import("../domain/hull_instance.zig");
+            const alloc = gs.allocator();
+            var it = gs.units.iterator();
+            while (it.next()) |e| {
+                const u = e.value_ptr;
+                const design = chassis.find(u.chassis_key) orelse return error.CorruptSave;
+                const id: types.HullInstanceId = @enumFromInt(gs.next_hull_instance_id);
+                gs.next_hull_instance_id += 1;
+                var inst: hull_mod.HullInstance = .{
+                    .id = id,
+                    .base_key = u.chassis_key,
+                    .status = .active,
+                    .intro_year = design.intro_year,
+                    .pre_campaign = true,
+                };
+                for (u.slots.items) |s| try inst.loadout.append(alloc, .{ .part_key = s.part_key });
+                try gs.hull_instances.put(alloc, id, inst);
+                u.hull_instance_id = id;
+            }
+        }
     }
 };
 
@@ -3015,6 +3104,18 @@ fn validateStoredStrings(gs: *GameState) error{CorruptSave}!void {
             if (e.value_ptr.last_cause.len > 0) try Check.shown(e.value_ptr.last_cause);
         }
     }
+    // Hull instances: base_key must name a known chassis; name and nickname must be markup-safe;
+    // each loadout part_key must name a known part (rules 47, 50).
+    {
+        var hiit = gs.hull_instances.iterator();
+        while (hiit.next()) |e| {
+            const inst = e.value_ptr;
+            try Check.hull(inst.base_key);
+            if (inst.name) |n| try Check.shown(n);
+            if (inst.nickname) |n| try Check.shown(n);
+            for (inst.loadout.items) |l| try Check.item(l.part_key);
+        }
+    }
     for (gs.battle_reports.kept.items) |r| {
         inline for (.{ r.kind, r.enemy_key, r.scenario, r.terrain, r.weather, r.command_rights, r.salvage.items, r.operation, r.operation_interventions }) |text| try Check.shown(text);
         if (r.operation_intent) |i| try Check.shown(@tagName(i));
@@ -3056,6 +3157,7 @@ fn validateReferences(gs: *GameState) error{CorruptSave}!void {
         try Ref.inMap(types.PersonId, u.pilot, gs.people);
         try Ref.inMap(types.PersonId, u.tech, gs.people);
         try Ref.inMap(types.HqId, u.berth_hq, gs.hqs);
+        try Ref.inMap(types.HullInstanceId, u.hull_instance_id, gs.hull_instances);
     }
     // Forces
     var fit_it = gs.forces.iterator();
@@ -3192,6 +3294,13 @@ fn reconcileCounters(gs: *GameState) error{CorruptSave}!void {
         while (it.next()) |e| max = @max(max, @intFromEnum(e.key_ptr.*));
         if (max == max_u32) return error.CorruptSave;
         gs.next_officer_arc_id = @max(gs.next_officer_arc_id, max + 1);
+    }
+    {
+        var max: u32 = 0;
+        var it = gs.hull_instances.iterator();
+        while (it.next()) |e| max = @max(max, @intFromEnum(e.key_ptr.*));
+        if (max == max_u32) return error.CorruptSave;
+        gs.next_hull_instance_id = @max(gs.next_hull_instance_id, max + 1);
     }
     // Battle and event counters: resumeBattleIds/resumeIds saturate at maxInt
     // when an entity holds the maximum id — detect that here (rule 48).
@@ -4237,8 +4346,8 @@ test "a rebuilt store loads to the identical digest" {
     // Digest is identical: the rebuild changed no data.
     var diff_buf: [128]u8 = undefined;
     try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &diff_buf) orelse "");
-    // Re-pinned by P4j variants (actor/rival archetypes added to four new arcs, changing stream consumption).
-    try std.testing.expectEqual(@as(u64, 7047980796043445587), hash_before);
+    // Re-pinned by P3c.1 (Unit.hull_instance_id + hull_instances in GameState, changing digest).
+    try std.testing.expectEqual(@as(u64, 7242255677106413895), hash_before);
 }
 
 test "every next-ID counter resumes past a higher owned id after load" {
@@ -4733,9 +4842,9 @@ test "golden master: a played year hashes to its pinned value, and a save of it 
     try playedYearForTest(&gs);
     try std.testing.expect(gs.battle_reports.kept.items.len > 0); // the year saw fighting
     // Any change to a simulated or saved result moves this; re-pin it only
-    // when the change is meant. Re-pinned by P4j variants (actor/rival archetypes
-    // added to four new arcs, changing stream consumption).
-    try std.testing.expectEqual(@as(u64, 7047980796043445587), digest.stateHash(&gs));
+    // when the change is meant. Re-pinned by P3c.1 (Unit.hull_instance_id + hull_instances
+    // in GameState, changing digest).
+    try std.testing.expectEqual(@as(u64, 7242255677106413895), digest.stateHash(&gs));
 
     const store = try Store.open(":memory:");
     defer store.close();
@@ -6341,4 +6450,206 @@ test "next_officer_arc_id resumes past owned ids after load (P4i counter-resume)
     while (it.next()) |e| {
         try std.testing.expect(loaded.next_officer_arc_id > @intFromEnum(e.key_ptr.*));
     }
+}
+
+// P3c.1 hull instance tests ------------------------------------------------
+
+/// Build a GameState with a starter company whose hull_instances are populated,
+/// two named instances (id=next_hull_instance_id..+2, owners of units[0] and [1]).
+/// Returns the gs ready for save; the caller must deinit.
+fn buildHullGs(alloc: std.mem.Allocator) !GameState {
+    const hull_mod = @import("../domain/hull_instance.zig");
+    var gs = GameState.init(alloc, .{ .seed = 30001 });
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    _ = try @import("../sim/starter_company.zig").generateInto(&gs, "Beta");
+    // starter_company creates owned units but leaves hull_instance_id at .none (P3c.1).
+    // Manually link the first two units with crafted HullInstances.
+    const a = gs.allocator();
+    var uit = gs.units.iterator();
+    var count: u32 = 0;
+    while (uit.next()) |e| {
+        count += 1;
+        if (count > 2) break;
+        const u = e.value_ptr;
+        const hid: types.HullInstanceId = @enumFromInt(gs.next_hull_instance_id);
+        gs.next_hull_instance_id += 1;
+        var inst: hull_mod.HullInstance = .{
+            .id = hid,
+            .base_key = u.chassis_key,
+            .status = .active,
+            .intro_year = 2750,
+            .pre_campaign = false,
+        };
+        if (count == 1) {
+            inst.name = "Ironside";
+            inst.nickname = "Lucky Seven";
+            try inst.loadout.append(a, .{ .part_key = "mlas" });
+            try inst.loadout.append(a, .{ .part_key = "srm4" });
+        }
+        try gs.hull_instances.put(a, hid, inst);
+        u.hull_instance_id = hid;
+    }
+    return gs;
+}
+
+/// Save a campaign with a hull instance row, corrupt it with `sql`, and try to load it back.
+fn loadHullInstanceAfterTampering(sql: [*:0]const u8) !void {
+    var gs = try buildHullGs(std.testing.allocator);
+    defer gs.deinit();
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    try store.db.exec("PRAGMA foreign_keys = OFF");
+    try store.db.exec(sql);
+    try store.db.exec("PRAGMA foreign_keys = ON");
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    loaded.deinit();
+}
+
+test "hull instances and linked units survive a save/load round-trip with identical stateHash (P3c.1)" {
+    // Rules 47, 67 / P3c.1: a campaign with hull instances (one named with loadout,
+    // one minimal) and two units linked to them survives save → load with an identical
+    // stateHash. Exercises saveHullInstances/loadHullInstances with real rows.
+    var gs = try buildHullGs(std.testing.allocator);
+    defer gs.deinit();
+
+    const before = digest.stateHash(&gs);
+    const inst_count = gs.hull_instances.count();
+    try std.testing.expect(inst_count >= 1);
+
+    // Locate the named first instance (loadout has 2 slots).
+    var named_id: types.HullInstanceId = .none;
+    var hit = gs.hull_instances.iterator();
+    while (hit.next()) |e| {
+        if (e.value_ptr.name != null) {
+            named_id = e.key_ptr.*;
+            break;
+        }
+    }
+    try std.testing.expect(named_id != .none);
+
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+
+    var diff_buf: [128]u8 = undefined;
+    try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &diff_buf) orelse "");
+    try std.testing.expectEqual(before, digest.stateHash(&loaded));
+
+    // Hull instances round-tripped.
+    try std.testing.expectEqual(inst_count, loaded.hull_instances.count());
+
+    // Named instance's fields survive.
+    const li = loaded.hull_instances.getPtr(named_id) orelse return error.TestFailed;
+    try std.testing.expectEqualStrings("Ironside", li.name.?);
+    try std.testing.expectEqualStrings("Lucky Seven", li.nickname.?);
+    try std.testing.expectEqual(@import("../domain/hull_instance.zig").HullStatus.active, li.status);
+    try std.testing.expectEqual(@as(u16, 2750), li.intro_year);
+    try std.testing.expect(!li.pre_campaign);
+    try std.testing.expectEqual(@as(usize, 2), li.loadout.items.len);
+    try std.testing.expectEqualStrings("mlas", li.loadout.items[0].part_key);
+    try std.testing.expectEqualStrings("srm4", li.loadout.items[1].part_key);
+
+    // Linked units' hull_instance_id survives.
+    var uit = loaded.units.iterator();
+    var linked: usize = 0;
+    while (uit.next()) |e| if (e.value_ptr.hull_instance_id != .none) {
+        linked += 1;
+    };
+    try std.testing.expect(linked >= 1);
+}
+
+test "v47→v48 migration synthesizes one HullInstance per owned unit (P3c.1)" {
+    // Rules 50, 51 / P3c.1: a store at schema v47 must migrate to v48 with exactly one
+    // HullInstance per owned unit, each having base_key == chassis_key, pre_campaign = true,
+    // status = active, loadout length == slot count.
+    // Note: SQLite cannot drop a column; hull_instance_id already exists in the unit table
+    // after fromDb adds it via the ALTER migration. Setting it to 0 faithfully reproduces
+    // the DEFAULT 0 state the real migration produces (same technique as actor tests).
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 30002 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    _ = try @import("../sim/starter_company.zig").generateInto(&gs, "Gamma");
+    const owned_count = gs.units.count();
+    try std.testing.expect(owned_count > 0);
+
+    // Record each owned unit's slot count before simulating a v47 store.
+    const alloc = std.testing.allocator;
+    var slot_counts = std.AutoArrayHashMapUnmanaged(types.UnitId, usize){};
+    defer slot_counts.deinit(alloc);
+    var uit = gs.units.iterator();
+    while (uit.next()) |e| {
+        try slot_counts.put(alloc, e.key_ptr.*, e.value_ptr.slots.items.len);
+    }
+
+    const raw = try sqlite.Db.open(":memory:");
+    var s1 = try Store.fromDb(raw);
+    try s1.save(&gs);
+
+    // Simulate a v47 store: remove the hull tables, reset hull_instance_id to 0,
+    // remove the next_hull_instance_id meta row, and downgrade schema_version.
+    try raw.exec("PRAGMA foreign_keys = OFF");
+    try raw.exec("DROP TABLE hull_loadout");
+    try raw.exec("DROP TABLE hull_instance");
+    try raw.exec("UPDATE unit SET hull_instance_id = 0");
+    try raw.exec("DELETE FROM meta WHERE key = 'next_hull_instance_id'");
+    try raw.exec("UPDATE setting SET value = 47 WHERE key = 'schema_version'");
+    try raw.exec("UPDATE campaign SET schema_version = 47");
+    try raw.exec("PRAGMA foreign_keys = ON");
+
+    // Re-open: fromDb sees v47, ddl creates hull_instance + hull_loadout, schema advances to 48.
+    const s2 = try Store.fromDb(raw);
+    defer s2.close();
+    try std.testing.expectEqual(@as(i64, schema_version), s2.getSetting("schema_version", 0));
+
+    var loaded = try s2.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+
+    // One HullInstance per owned unit.
+    try std.testing.expectEqual(owned_count, loaded.hull_instances.count());
+
+    // Each owned unit has a non-.none hull_instance_id resolving to a valid instance.
+    var luit = loaded.units.iterator();
+    while (luit.next()) |e| {
+        const u = e.value_ptr;
+        try std.testing.expect(u.hull_instance_id != .none);
+        const inst = loaded.hull_instances.getPtr(u.hull_instance_id) orelse return error.TestFailed;
+        try std.testing.expectEqualStrings(u.chassis_key, inst.base_key);
+        try std.testing.expect(inst.pre_campaign);
+        try std.testing.expectEqual(@import("../domain/hull_instance.zig").HullStatus.active, inst.status);
+        const expected_slots = slot_counts.get(u.id) orelse 0;
+        try std.testing.expectEqual(expected_slots, inst.loadout.items.len);
+    }
+
+    // next_hull_instance_id is past all owned ids.
+    try std.testing.expectEqual(owned_count + 1, loaded.next_hull_instance_id);
+}
+
+test "a bad base_key in a hull_instance row rejects the load as corrupt (P3c.1)" {
+    // Rule 47 / P3c.1: hull_instance.base_key must name a known chassis.
+    try std.testing.expectError(error.CorruptSave, loadHullInstanceAfterTampering(
+        "UPDATE hull_instance SET base_key = 'notachassis'",
+    ));
+}
+
+test "a bad part_key in a hull_loadout row rejects the load as corrupt (P3c.1)" {
+    // Rule 47 / P3c.1: hull_loadout.part_key must name a known part.
+    try std.testing.expectError(error.CorruptSave, loadHullInstanceAfterTampering(
+        "UPDATE hull_loadout SET part_key = 'notapart' WHERE slot_index = 0",
+    ));
+}
+
+test "a duplicate hull_instance id rejects the load as corrupt (P3c.1)" {
+    // Rule 47 / P3c.1: each hull_instance row must have a unique id per campaign.
+    // The hull_instance table has PRIMARY KEY (cid, id) which prevents a direct insert.
+    // We recreate the table without the PK constraint, then insert the duplicate.
+    try std.testing.expectError(error.CorruptSave, loadHullInstanceAfterTampering(
+        "ALTER TABLE hull_instance RENAME TO hull_instance_bak;" ++
+            "CREATE TABLE hull_instance (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, base_key TEXT, name TEXT, nickname TEXT, status TEXT NOT NULL DEFAULT 'active', intro_year INTEGER NOT NULL DEFAULT 0, pre_campaign INTEGER NOT NULL DEFAULT 0);" ++
+            "INSERT INTO hull_instance SELECT * FROM hull_instance_bak;" ++
+            "INSERT INTO hull_instance SELECT cid, 999, id, base_key, name, nickname, status, intro_year, pre_campaign FROM hull_instance_bak LIMIT 1;" ++
+            "DROP TABLE hull_instance_bak",
+    ));
 }

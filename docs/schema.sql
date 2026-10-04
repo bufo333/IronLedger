@@ -1,6 +1,6 @@
 -- IRON LEDGER — SQLite save store schema (design document)
 --
--- Matches schema_version 47. The executable DDL and its column migrations
+-- Matches schema_version 48. The executable DDL and its column migrations
 -- live in src/persist/store.zig; this file is the readable reference for
 -- what each table and column means. Column order here is the runtime order.
 --
@@ -30,7 +30,8 @@
 --     explicit FKs: person_skill/award/ability/injury -> person; unit_slot ->
 --     unit; force_unit/force_child -> force and unit; hq_facility/hq_project ->
 --     hq; battle_report_hit/ammo/salvage -> battle_report; refit_op ->
---     refit_plan. All FKs are DEFERRABLE INITIALLY DEFERRED so clearRows can
+--     refit_plan; hull_loadout -> hull_instance. All FKs are DEFERRABLE
+--     INITIALLY DEFERRED so clearRows can
 --     delete parent rows before child rows within one transaction.
 --     Soft and polymorphic references that use NULL or 0-as-none (e.g.
 --     stock.owner_id, unit.force, contract.offer_hq) are the loader's
@@ -79,7 +80,8 @@ CREATE TABLE campaign (
 -- next_contract_id, next_battle_id, next_event_id, rng_seed,
 -- next_listing_id, next_candidate_id, next_loan_id (added v35),
 -- next_operation_id (added v40), next_actor_id (added v44),
--- next_rival_id (added v46), next_officer_arc_id (added v47).
+-- next_rival_id (added v46), next_officer_arc_id (added v47),
+-- next_hull_instance_id (added v48).
 CREATE TABLE meta (
     cid             INTEGER NOT NULL,
     key             TEXT    NOT NULL,
@@ -259,6 +261,7 @@ CREATE TABLE unit (
     held_day        INTEGER NOT NULL DEFAULT 0,      -- day the field was lost
     held_battle     INTEGER NOT NULL DEFAULT 0,      -- BattleId that lost it
     held_force      INTEGER NOT NULL DEFAULT 0,      -- -> force.id it goes home to if won back
+    hull_instance_id INTEGER NOT NULL DEFAULT 0,     -- -> hull_instance.id; 0 = unlinked (added v48)
     PRIMARY KEY (cid, id),
     FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
@@ -1014,3 +1017,35 @@ CREATE TABLE officer_arc (
     FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 CREATE INDEX IF NOT EXISTS ix_officer_arc_cid ON officer_arc(cid);
+
+-- P3c.1: the lifecycle record of one physical hull from acquisition through
+-- use and eventual destruction. One row per hull instance per campaign.
+-- `ord` preserves insertion order for a deterministic round-trip digest.
+-- The design loadout (intended fit) lives in hull_loadout; unit_slot holds
+-- the live condition per owned unit.
+CREATE TABLE hull_instance (
+    cid             INTEGER NOT NULL,
+    ord             INTEGER NOT NULL,                -- stable insertion order for deterministic digest
+    id              INTEGER NOT NULL,                -- HullInstanceId enum value (u32); nonzero
+    base_key        TEXT,                            -- -> chassis.zon stable key
+    name            TEXT,                            -- display name (nullable; markup-safe)
+    nickname        TEXT,                            -- callsign (nullable; markup-safe)
+    status          TEXT    NOT NULL DEFAULT 'active', -- HullStatus tag: active | permanently_destroyed
+    intro_year      INTEGER NOT NULL DEFAULT 0,      -- TUNE: sourced from base chassis intro_year
+    pre_campaign    INTEGER NOT NULL DEFAULT 0 CHECK (pre_campaign IN (0,1)), -- bool: acquired before campaign start
+    PRIMARY KEY (cid, id),
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
+);
+CREATE INDEX IF NOT EXISTS ix_hull_instance_cid ON hull_instance(cid);
+
+-- P3c.1: one slot of a hull instance's design loadout.
+-- hull_loadout -> hull_instance (containment FK).
+CREATE TABLE hull_loadout (
+    cid             INTEGER NOT NULL,
+    hull_instance_id INTEGER NOT NULL,              -- -> hull_instance.id
+    slot_index      INTEGER NOT NULL,               -- positional ordinal; 0-based
+    part_key        TEXT,                           -- catalog key of the intended part
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED,
+    FOREIGN KEY (cid, hull_instance_id) REFERENCES hull_instance(cid, id) DEFERRABLE INITIALLY DEFERRED
+);
+CREATE INDEX IF NOT EXISTS ix_hull_loadout_cid ON hull_loadout(cid);

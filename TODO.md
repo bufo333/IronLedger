@@ -57,7 +57,7 @@ above is complete.
     `docs/p3d-meklab-location-layout.md`.
   - [ ] P3-construction (P3a): data-driven crit capacity and location rules.
   - P3c hull-lifecycle design approval: approved (`docs/p3c-hull-lifecycle-design.md`).
-    - [ ] P3c.1: hull instance entity, loadout, and the Unit link (entity, migration, digest).
+    - [x] P3c.1: hull instance entity, loadout, and the Unit link (entity, migration, digest).
     - [ ] P3c.2: combat records and dual kill attribution (battle aftermath, all participating hulls).
     - [ ] P3c.3: maintenance log and repair/modify commands (cli.zig, failure-atomic).
     - [ ] P3c.4: ownership history and market integration (ownership chain, market listing).

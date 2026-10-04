@@ -28,6 +28,7 @@ const actor_mod = @import("../domain/actor.zig");
 const rival_mod = @import("../domain/rival.zig");
 const world_state_mod = @import("../domain/world_state.zig");
 const officer_mod = @import("../domain/officer.zig");
+const hull_instance_mod = @import("../domain/hull_instance.zig");
 
 pub const Config = struct {
     seed: u64 = 3025,
@@ -319,6 +320,9 @@ pub const GameState = struct {
     /// Persistent officer arcs (P4i).
     officer_arcs: std.AutoArrayHashMapUnmanaged(types.OfficerArcId, officer_mod.OfficerArc) = .empty,
 
+    /// Persistent hull instances: the lifecycle record of each physical hull (P3c).
+    hull_instances: std.AutoArrayHashMapUnmanaged(types.HullInstanceId, hull_instance_mod.HullInstance) = .empty,
+
     /// Persistent bounded per-world state, keyed by planet_key (P4h.4).
     world_states: std.StringArrayHashMapUnmanaged(world_state_mod.WorldState) = .empty,
 
@@ -334,6 +338,7 @@ pub const GameState = struct {
     next_actor_id: u32 = 1,
     next_rival_id: u32 = 1,
     next_officer_arc_id: u32 = 1,
+    next_hull_instance_id: u32 = 1,
 
     pub fn init(gpa: std.mem.Allocator, config: Config) GameState {
         return .{
@@ -908,6 +913,8 @@ pub const GameState = struct {
         .{ "next_rival_id", .persisted },
         .{ "officer_arcs", .persisted },
         .{ "next_officer_arc_id", .persisted },
+        .{ "hull_instances", .persisted },
+        .{ "next_hull_instance_id", .persisted },
         .{ "world_states", .persisted },
     };
 

@@ -99,6 +99,9 @@ pub const RivalId = enum(u32) { none = 0, _ };
 /// One persistent officer arc (P4i); typed so an officer arc reference cannot
 /// be passed where a rival or actor index is expected (rule 56).
 pub const OfficerArcId = enum(u32) { none = 0, _ };
+/// One persisted hull instance (P3c); typed so a hull reference cannot be
+/// passed where a unit or actor index is expected (rule 56).
+pub const HullInstanceId = enum(u32) { none = 0, _ };
 
 /// Skill catalog, following MekHQ's SkillType. Lower level = better
 /// (target-number convention: a 3/4 mekwarrior has gunnery 3, piloting 4).

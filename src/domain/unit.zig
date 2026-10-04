@@ -211,6 +211,8 @@ pub const Unit = struct {
     berth_hq: types.HqId = .none,
     /// Why a destroyed hull died; `.none` while it runs.
     wreck: WreckCause = .none,
+    /// The persisted hull this unit embodies (P3c); `.none` until linked.
+    hull_instance_id: types.HullInstanceId = .none,
 
     pub fn deinit(self: *Unit, alloc: std.mem.Allocator) void {
         self.slots.deinit(alloc);
