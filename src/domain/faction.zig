@@ -77,8 +77,8 @@ test "data: every manufacturing chassis key resolves and is a mek; conflict_sens
                 return error.TestUnexpectedResult;
             }
         }
-        if (f.conflict_sensitivity_bp > 100_000) {
-            std.debug.print("faction {s}: conflict_sensitivity_bp {} > 100_000\n", .{ f.key, f.conflict_sensitivity_bp });
+        if (f.conflict_sensitivity_bp < 0 or f.conflict_sensitivity_bp > 100_000) {
+            std.debug.print("faction {s}: conflict_sensitivity_bp {} out of range 0..=100_000\n", .{ f.key, f.conflict_sensitivity_bp });
             return error.TestUnexpectedResult;
         }
     }
