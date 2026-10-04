@@ -331,6 +331,10 @@ pub const GameState = struct {
     /// Flat child-row list; each entry carries its own hull_instance_id.
     maintenance_entries: std.ArrayListUnmanaged(hull_instance_mod.MaintenanceEntry) = .empty,
 
+    /// Append-only ownership provenance chain, one interval row per owner
+    /// handover (P3c.4). Flat child-row list; each row carries its hull_instance_id.
+    hull_ownership_history: std.ArrayListUnmanaged(hull_instance_mod.HullOwnershipHistory) = .empty,
+
     /// Persistent bounded per-world state, keyed by planet_key (P4h.4).
     world_states: std.StringArrayHashMapUnmanaged(world_state_mod.WorldState) = .empty,
 
@@ -843,6 +847,40 @@ pub const GameState = struct {
         });
     }
 
+    /// The one writer for a runtime hull acquisition (rule 20): create and
+    /// link a HullInstance for the unit if it has none, close any open
+    /// ownership interval, then open a new one. prior_owner_key is duped into
+    /// the campaign arena so the provenance outlives any entity it names.
+    pub fn recordHullAcquisition(self: *GameState, u: *unit_mod.Unit, acq: hull_instance_mod.AcquisitionType, prior_owner_key: []const u8) !void {
+        const alloc = self.allocator();
+        if (u.hull_instance_id == .none) {
+            const design = chassis_mod.find(u.chassis_key) orelse return error.UnknownChassis;
+            const hid: types.HullInstanceId = @enumFromInt(self.next_hull_instance_id);
+            self.next_hull_instance_id += 1;
+            var inst: hull_instance_mod.HullInstance = .{
+                .id = hid,
+                .base_key = u.chassis_key, // static catalog memory
+                .status = .active,
+                .intro_year = design.intro_year,
+                .pre_campaign = false,
+            };
+            for (u.slots.items) |s| try inst.loadout.append(alloc, .{ .part_key = s.part_key });
+            try self.hull_instances.put(alloc, hid, inst);
+            u.hull_instance_id = hid;
+        }
+        const owned_key = try alloc.dupe(u8, prior_owner_key);
+        for (self.hull_ownership_history.items) |*h| {
+            if (h.hull_instance_id == u.hull_instance_id and h.to_day == 0) h.to_day = self.clock.day_index;
+        }
+        try self.hull_ownership_history.append(alloc, .{
+            .hull_instance_id = u.hull_instance_id,
+            .from_day = self.clock.day_index,
+            .to_day = 0,
+            .acquisition_type = acq,
+            .prior_owner_key = owned_key,
+        });
+    }
+
     /// Everything that points at a hull lets go of it. Shared by striking
     /// one off and by losing one to the enemy, so the two can never drift.
     pub fn detachUnit(self: *GameState, unit_id: types.UnitId) void {
@@ -940,6 +978,7 @@ pub const GameState = struct {
         .{ "hull_instances", .persisted },
         .{ "hull_combat_records", .persisted },
         .{ "maintenance_entries", .persisted },
+        .{ "hull_ownership_history", .persisted },
         .{ "next_hull_instance_id", .persisted },
         .{ "world_states", .persisted },
     };
@@ -1016,4 +1055,37 @@ test "postTreasury against a removed HQ returns UnknownTreasury" {
 
     const missing: types.HqId = @enumFromInt(999);
     try std.testing.expectError(error.UnknownTreasury, gs.postTreasury(.{ .hq = missing }, .{ .day = 0, .amount = 100, .category = .event }));
+}
+
+test "recordHullAcquisition creates instance, opens interval, and closes prior on re-acquisition" {
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+
+    // Unit with no hull instance yet.
+    const uid = try gs.addUnit("WSP-1A");
+    const u = gs.unit(uid).?;
+    try std.testing.expectEqual(types.HullInstanceId.none, u.hull_instance_id);
+
+    // First acquisition: instance created and linked, one open interval.
+    gs.clock.day_index = 10;
+    try gs.recordHullAcquisition(u, .purchase, "unknown");
+    try std.testing.expect(u.hull_instance_id != .none);
+    try std.testing.expectEqual(@as(usize, 1), gs.hull_ownership_history.items.len);
+    const first = gs.hull_ownership_history.items[0];
+    try std.testing.expectEqual(u.hull_instance_id, first.hull_instance_id);
+    try std.testing.expectEqual(@as(u32, 10), first.from_day);
+    try std.testing.expectEqual(@as(u32, 0), first.to_day);
+    try std.testing.expectEqual(hull_instance_mod.AcquisitionType.purchase, first.acquisition_type);
+    try std.testing.expectEqualStrings("unknown", first.prior_owner_key);
+
+    // Second acquisition on same unit: prior interval closed, new open interval appended.
+    gs.clock.day_index = 20;
+    try gs.recordHullAcquisition(u, .salvage, "DC");
+    try std.testing.expectEqual(@as(usize, 2), gs.hull_ownership_history.items.len);
+    try std.testing.expectEqual(@as(u32, 20), gs.hull_ownership_history.items[0].to_day); // closed
+    const second = gs.hull_ownership_history.items[1];
+    try std.testing.expectEqual(@as(u32, 20), second.from_day);
+    try std.testing.expectEqual(@as(u32, 0), second.to_day); // open
+    try std.testing.expectEqual(hull_instance_mod.AcquisitionType.salvage, second.acquisition_type);
+    try std.testing.expectEqualStrings("DC", second.prior_owner_key);
 }

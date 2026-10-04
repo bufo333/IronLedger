@@ -1,6 +1,6 @@
 -- IRON LEDGER — SQLite save store schema (design document)
 --
--- Matches schema_version 50. The executable DDL and its column migrations
+-- Matches schema_version 51. The executable DDL and its column migrations
 -- live in src/persist/store.zig; this file is the readable reference for
 -- what each table and column means. Column order here is the runtime order.
 --
@@ -31,7 +31,7 @@
 --     unit; force_unit/force_child -> force and unit; hq_facility/hq_project ->
 --     hq; battle_report_hit/ammo/salvage -> battle_report; refit_op ->
 --     refit_plan; hull_loadout -> hull_instance; hull_combat_record -> hull_instance;
---     maintenance_entry -> hull_instance. All FKs are DEFERRABLE
+--     maintenance_entry -> hull_instance; hull_ownership_history -> hull_instance. All FKs are DEFERRABLE
 --     INITIALLY DEFERRED so clearRows can
 --     delete parent rows before child rows within one transaction.
 --     Soft and polymorphic references that use NULL or 0-as-none (e.g.
@@ -1095,3 +1095,21 @@ CREATE TABLE maintenance_entry (
     FOREIGN KEY (cid, hull_instance_id) REFERENCES hull_instance(cid, id) DEFERRABLE INITIALLY DEFERRED
 );
 CREATE INDEX IF NOT EXISTS ix_maintenance_entry_cid ON maintenance_entry(cid);
+
+-- hull_ownership_history -> hull_instance (containment FK).
+-- prior_owner_key is a free provenance string (may name a faction that no longer exists);
+-- it is NOT a typed FK and is NOT catalogue-validated — only markup-safe (rule 50).
+-- Only hull_instance_id is a validated FK (schema + loader orphan check).
+-- Column order matches runtime (saveHullOwnershipHistory/loadHullOwnershipHistory).
+CREATE TABLE hull_ownership_history (
+    cid              INTEGER NOT NULL,
+    hull_instance_id INTEGER NOT NULL,                  -- -> hull_instance.id (validated)
+    ord              INTEGER NOT NULL,                  -- stable insertion order (append-only)
+    from_day         INTEGER NOT NULL DEFAULT 0,        -- day_index the interval opened
+    to_day           INTEGER NOT NULL DEFAULT 0,        -- day_index the interval closed; 0 = open
+    acquisition_type TEXT    NOT NULL DEFAULT 'initial', -- AcquisitionType tag
+    prior_owner_key  TEXT    NOT NULL DEFAULT '',        -- provenance: faction key, "player", or "unknown"
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED,
+    FOREIGN KEY (cid, hull_instance_id) REFERENCES hull_instance(cid, id) DEFERRABLE INITIALLY DEFERRED
+);
+CREATE INDEX IF NOT EXISTS ix_hull_ownership_history_cid ON hull_ownership_history(cid);

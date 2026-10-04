@@ -121,6 +121,37 @@ test "MaintenanceEntry defaults and describe" {
     try std.testing.expectEqualStrings("scheduled inspection", MaintenanceAction.inspection.describe());
 }
 
+/// How a hull came into its current owner's hands. .initial seeds the
+/// provenance chain for hulls that predate the ownership log (migration);
+/// .transfer is reserved for future depot/inter-force moves (P3e). (P3c.4)
+pub const AcquisitionType = enum { purchase, salvage, transfer, initial };
+
+/// One ownership interval for a physical hull: who it belonged to before
+/// this interval (prior_owner_key — a faction key, "player", or "unknown";
+/// a free provenance string that may name a gone entity, NOT a typed FK),
+/// how the current owner got it, and the day span. to_day == 0 is the
+/// still-open current interval. Child of HullInstance, keyed
+/// (cid, hull_instance_id, ord); hull_instance_id is the one validated FK.
+/// Append-only: a row is never deleted or rewritten; the single permitted
+/// mutation is stamping to_day when the open interval closes (P3c.4,
+/// docs/p3c-hull-lifecycle-design.md §1, §2).
+pub const HullOwnershipHistory = struct {
+    hull_instance_id: types.HullInstanceId = .none,
+    from_day: u32 = 0,
+    to_day: u32 = 0, // 0 = current owner (open interval)
+    acquisition_type: AcquisitionType = .initial,
+    prior_owner_key: []const u8 = "",
+};
+
+test "HullOwnershipHistory defaults" {
+    const h: HullOwnershipHistory = .{};
+    try std.testing.expectEqual(types.HullInstanceId.none, h.hull_instance_id);
+    try std.testing.expectEqual(@as(u32, 0), h.from_day);
+    try std.testing.expectEqual(@as(u32, 0), h.to_day);
+    try std.testing.expectEqual(AcquisitionType.initial, h.acquisition_type);
+    try std.testing.expectEqualStrings("", h.prior_owner_key);
+}
+
 test "HullInstance defaults and loadout append" {
     const inst: HullInstance = .{};
     try std.testing.expectEqual(types.HullInstanceId.none, inst.id);

@@ -1084,6 +1084,7 @@ pub fn buyListing(gs: *GameState, index: usize) !BuyResult {
         const uid = try gs.addUnit(listing.item_key);
         const bought_co = gs.unit(uid).?;
         if (listing.condition) |cond| market.applyHullCondition(bought_co, cond, gs.rng.random(.market));
+        try gs.recordHullAcquisition(bought_co, .purchase, "unknown");
         try toe.placeUnitInCompany(gs, uid, co);
         try gs.log(.market, .{ .company = co, .contract = c.id }, "[market] {s} bought {s} ({s}) on {s} for {d} from local funds — seat a pilot and a tech", .{
             if (gs.force(co)) |f| f.name else "company", listing.item_key, if (listing.condition) |cd| cd.label() else "new", c.planet_key, price,
@@ -1129,6 +1130,7 @@ pub fn buyListing(gs: *GameState, index: usize) !BuyResult {
                 const uid = try gs.addUnit(listing.item_key);
                 const bought_bm = gs.unit(uid).?;
                 if (listing.condition) |cond| market.applyHullCondition(bought_bm, cond, gs.rng.random(.market));
+                try gs.recordHullAcquisition(bought_bm, .purchase, "unknown");
                 return .{ .unit = uid };
             },
             .part => try gs.addStock(.{ .hq = hq_id }, listing.item_key, listing.quantity),
@@ -1143,6 +1145,7 @@ pub fn buyListing(gs: *GameState, index: usize) !BuyResult {
             const uid = try gs.addUnit(listing.item_key);
             const bought_hq = gs.unit(uid).?;
             if (listing.condition) |cond| market.applyHullCondition(bought_hq, cond, gs.rng.random(.market));
+            try gs.recordHullAcquisition(bought_hq, .purchase, "unknown");
             if (berth_kind != null) bought_hq.berth_hq = hq_id;
             try gs.log(.market, .{ .hq = hq_id }, "[market] bought {s} ({s}) for {d}{s}", .{
                 listing.item_key, if (listing.condition) |c| c.label() else "new", price,
@@ -1609,4 +1612,59 @@ test "offerBoardHq returns the offer's own HQ, not the seat (C10-B1)" {
     var legacy: @import("../domain/contract.zig").Contract = second_offer.*;
     legacy.offer_hq = .none;
     try std.testing.expectEqual(seat, offerBoardHq(&gs, &legacy));
+}
+
+test "buying a hull listing creates a HullInstance and an open purchase ownership row" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 73 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .FS, .profession = .chief_engineer } });
+    gs.hqs.values()[0].funds = 50_000_000;
+    gs.clock.day_index = 5;
+
+    try gs.market_listings.append(gs.allocator(), .{
+        .id = @enumFromInt(gs.next_listing_id),
+        .kind = .unit,
+        .item_key = "SHD-2H",
+        .rarity = .common,
+        .price = 900_000,
+        .listed_day = 0,
+        .expires_day = 90,
+    });
+    gs.next_listing_id += 1;
+    const lid = gs.market_listings.items[gs.market_listings.items.len - 1].id;
+    _ = try commands.execute(&gs, .{ .buy_listing = lid });
+
+    // Bought unit must have a linked instance and exactly one purchase row.
+    const u = &gs.units.values()[gs.units.count() - 1];
+    try std.testing.expect(u.hull_instance_id != .none);
+    try std.testing.expectEqual(@as(usize, 1), gs.hull_ownership_history.items.len);
+    const row = gs.hull_ownership_history.items[0];
+    try std.testing.expectEqual(u.hull_instance_id, row.hull_instance_id);
+    try std.testing.expectEqual(@import("../domain/hull_instance.zig").AcquisitionType.purchase, row.acquisition_type);
+    try std.testing.expectEqualStrings("unknown", row.prior_owner_key);
+    try std.testing.expectEqual(@as(u32, 5), row.from_day);
+    try std.testing.expectEqual(@as(u32, 0), row.to_day);
+}
+
+test "a funds-short buy refusal creates no HullInstance and no ownership row" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 73 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .FS, .profession = .chief_engineer } });
+    gs.hqs.values()[0].funds = 0; // guaranteed short
+
+    try gs.market_listings.append(gs.allocator(), .{
+        .id = @enumFromInt(gs.next_listing_id),
+        .kind = .unit,
+        .item_key = "SHD-2H",
+        .rarity = .common,
+        .price = 900_000,
+        .listed_day = 0,
+        .expires_day = 90,
+    });
+    gs.next_listing_id += 1;
+    const lid = gs.market_listings.items[gs.market_listings.items.len - 1].id;
+    try std.testing.expectError(error.HqTreasuryShort, commands.execute(&gs, .{ .buy_listing = lid }));
+    try std.testing.expectEqual(@as(usize, 0), gs.hull_ownership_history.items.len);
+    // No new unit added.
+    for (gs.units.values()) |u| try std.testing.expectEqual(@import("../domain/types.zig").HullInstanceId.none, u.hull_instance_id);
 }

@@ -1541,6 +1541,7 @@ pub fn takeSalvage(
         const uid = try gs.addUnit(cand.key);
         const u = gs.unit(uid).?;
         u.purchase_price = 0; // salvage owes nothing
+        try gs.recordHullAcquisition(u, .salvage, c.enemy_key);
         const cond: market.HullCondition = .{
             .armor_pct = cand.armor_pct,
             .quality = cand.quality,
@@ -3398,4 +3399,44 @@ test "tempo identity: advance posture produces the same battle outcome as pre-P4
     const r_adv = gs_adv.battle_reports.kept.items[0];
     try testing.expectEqual(r_no_op.outcome, r_adv.outcome);
     try testing.expectEqual(r_no_op.score_delta, r_adv.score_delta);
+}
+
+test "salvage recovery records a .salvage ownership row with the enemy key" {
+    // Rule 20 / P3c.4: takeSalvage must record one .salvage interval per recovered
+    // hull, with prior_owner_key == c.enemy_key and an open to_day. Uses
+    // rollSalvageCandidates + takeSalvage directly (the existing salvage-claim
+    // scaffold) to guarantee hull recovery without depending on resolveEngagement
+    // producing a held-field outcome.
+    const testing = std.testing;
+    const cid: types.ContractId = @enumFromInt(1);
+    var gs = GameState.init(testing.allocator, .{ .seed = 1223 });
+    defer gs.deinit();
+    _ = try @import("founding.zig").createCommander(&gs, "T", .LC, .line_officer);
+    const co = try @import("starter_company.zig").generateInto(&gs, "Ghost");
+    try gs.contracts.put(gs.allocator(), cid, contract_mod.Contract{
+        .id = cid,
+        .kind = .objective_raid,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 3, .base_pay_month = 400_000, .salvage_pct = 50 },
+        .status = .active,
+        .assigned_company = co,
+        .monthly_net = 300_000,
+    });
+    const c = gs.contracts.getPtr(cid).?;
+    const units_before = gs.units.count();
+    const candidates = try rollSalvageCandidates(&gs, c);
+    _ = try takeSalvage(&gs, c, candidates, 2_000, .most_hulls);
+    // At least one hull was salvaged (matching the existing salvage scaffold assertion).
+    try testing.expect(gs.units.count() > units_before);
+
+    // Every ownership row must be .salvage with prior_owner_key == "DC" and open interval.
+    try testing.expect(gs.hull_ownership_history.items.len > 0);
+    for (gs.hull_ownership_history.items) |row| {
+        try testing.expectEqual(@import("../domain/hull_instance.zig").AcquisitionType.salvage, row.acquisition_type);
+        try testing.expectEqualStrings("DC", row.prior_owner_key);
+        try testing.expectEqual(@as(u32, 0), row.to_day);
+        try testing.expect(gs.hull_instances.contains(row.hull_instance_id));
+    }
 }

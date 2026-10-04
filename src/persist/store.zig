@@ -40,7 +40,7 @@ const rival_mod = @import("../domain/rival.zig");
 const officer_dom = @import("../domain/officer.zig");
 const world_state_dom = @import("../domain/world_state.zig");
 
-pub const schema_version = 50;
+pub const schema_version = 51;
 
 const ddl =
     \\CREATE TABLE IF NOT EXISTS player (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_seq INTEGER NOT NULL);
@@ -102,16 +102,17 @@ const ddl =
     \\CREATE TABLE IF NOT EXISTS hull_loadout (cid INTEGER NOT NULL, hull_instance_id INTEGER NOT NULL, slot_index INTEGER NOT NULL, part_key TEXT, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, hull_instance_id) REFERENCES hull_instance(cid, id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS hull_combat_record (cid INTEGER NOT NULL, hull_instance_id INTEGER NOT NULL, ord INTEGER NOT NULL, battle_id INTEGER NOT NULL DEFAULT 0, contract_id INTEGER NOT NULL DEFAULT 0, kills INTEGER NOT NULL DEFAULT 0, hits_taken INTEGER NOT NULL DEFAULT 0, armor_lost INTEGER NOT NULL DEFAULT 0, slots_damaged INTEGER NOT NULL DEFAULT 0, slots_destroyed INTEGER NOT NULL DEFAULT 0, destroyed INTEGER NOT NULL DEFAULT 0 CHECK (destroyed IN (0,1)), cause TEXT NOT NULL DEFAULT 'none', FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, hull_instance_id) REFERENCES hull_instance(cid, id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS maintenance_entry (cid INTEGER NOT NULL, hull_instance_id INTEGER NOT NULL, ord INTEGER NOT NULL, day INTEGER NOT NULL DEFAULT 0, tech INTEGER NOT NULL DEFAULT 0, action TEXT NOT NULL DEFAULT 'repair', description TEXT NOT NULL DEFAULT '', battle_id INTEGER NOT NULL DEFAULT 0, cost INTEGER NOT NULL DEFAULT 0, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, hull_instance_id) REFERENCES hull_instance(cid, id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS hull_ownership_history (cid INTEGER NOT NULL, hull_instance_id INTEGER NOT NULL, ord INTEGER NOT NULL, from_day INTEGER NOT NULL DEFAULT 0, to_day INTEGER NOT NULL DEFAULT 0, acquisition_type TEXT NOT NULL DEFAULT 'initial', prior_owner_key TEXT NOT NULL DEFAULT '', FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, hull_instance_id) REFERENCES hull_instance(cid, id) DEFERRABLE INITIALLY DEFERRED);
 ;
 
 const tables = [_][]const u8{
-    "meta",               "meta_text",              "rng",                "commander",        "person",            "person_skill",       "injury",                "award",         "ability",
-    "unit",               "unit_slot",              "force",              "force_unit",       "force_child",       "stock",              "hq",                    "hq_facility",   "hq_project",
-    "contract",           "txn",                    "loan",               "courier",          "policy",            "bay_job",            "candidate",             "hq_link",       "unit_transfer",
-    "supply_policy",      "stock_policy",           "faction_cooling",    "faction_standing", "event_memory",      "listing",            "part_order",            "event_log",     "pending_event",
-    "refit_plan",         "refit_op",               "rating_snapshot",    "battle_report",    "battle_report_hit", "battle_report_ammo", "battle_report_salvage", "rng_stream",    "operation",
-    "operation_task",     "operation_intervention", "battle_report_task", "actor",            "world_state",       "rival",              "officer_arc",           "hull_instance", "hull_loadout",
-    "hull_combat_record", "maintenance_entry",
+    "meta",               "meta_text",              "rng",                    "commander",        "person",            "person_skill",       "injury",                "award",         "ability",
+    "unit",               "unit_slot",              "force",                  "force_unit",       "force_child",       "stock",              "hq",                    "hq_facility",   "hq_project",
+    "contract",           "txn",                    "loan",                   "courier",          "policy",            "bay_job",            "candidate",             "hq_link",       "unit_transfer",
+    "supply_policy",      "stock_policy",           "faction_cooling",        "faction_standing", "event_memory",      "listing",            "part_order",            "event_log",     "pending_event",
+    "refit_plan",         "refit_op",               "rating_snapshot",        "battle_report",    "battle_report_hit", "battle_report_ammo", "battle_report_salvage", "rng_stream",    "operation",
+    "operation_task",     "operation_intervention", "battle_report_task",     "actor",            "world_state",       "rival",              "officer_arc",           "hull_instance", "hull_loadout",
+    "hull_combat_record", "maintenance_entry",      "hull_ownership_history",
 };
 
 // Indexes for per-campaign tables (A28/D31): cid filters on every load;
@@ -174,6 +175,7 @@ const index_ddl =
     \\CREATE INDEX IF NOT EXISTS ix_hull_loadout_cid ON hull_loadout(cid);
     \\CREATE INDEX IF NOT EXISTS ix_hull_combat_record_cid ON hull_combat_record(cid);
     \\CREATE INDEX IF NOT EXISTS ix_maintenance_entry_cid ON maintenance_entry(cid);
+    \\CREATE INDEX IF NOT EXISTS ix_hull_ownership_history_cid ON hull_ownership_history(cid);
 ;
 
 /// The stream order of the single `rng` blob that saves before schema v32
@@ -303,6 +305,10 @@ pub const Store = struct {
         // v50: maintenance_entry table (P3c.3, docs/p3c-hull-lifecycle-design.md §1, §2).
         // New table — applySchema's ddl creates it. Old saves open with zero entries.
         .{ .from = 49, .to = 50, .table = "maintenance_entry", .column = "", .sql = "CREATE TABLE IF NOT EXISTS maintenance_entry (cid INTEGER NOT NULL, hull_instance_id INTEGER NOT NULL, ord INTEGER NOT NULL, day INTEGER NOT NULL DEFAULT 0, tech INTEGER NOT NULL DEFAULT 0, action TEXT NOT NULL DEFAULT 'repair', description TEXT NOT NULL DEFAULT '', battle_id INTEGER NOT NULL DEFAULT 0, cost INTEGER NOT NULL DEFAULT 0, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, hull_instance_id) REFERENCES hull_instance(cid, id) DEFERRABLE INITIALLY DEFERRED)" },
+        // v51: hull_ownership_history table (P3c.4, docs/p3c-hull-lifecycle-design.md §1, §2).
+        // New table — applySchema's ddl creates it. Old saves open with zero rows;
+        // upgradeCampaign seeds one .initial interval per owned hull (from_version < 51).
+        .{ .from = 50, .to = 51, .table = "hull_ownership_history", .column = "", .sql = "CREATE TABLE IF NOT EXISTS hull_ownership_history (cid INTEGER NOT NULL, hull_instance_id INTEGER NOT NULL, ord INTEGER NOT NULL, from_day INTEGER NOT NULL DEFAULT 0, to_day INTEGER NOT NULL DEFAULT 0, acquisition_type TEXT NOT NULL DEFAULT 'initial', prior_owner_key TEXT NOT NULL DEFAULT '', FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, hull_instance_id) REFERENCES hull_instance(cid, id) DEFERRABLE INITIALLY DEFERRED)" },
     };
 
     pub fn open(path: [*:0]const u8) !Store {
@@ -617,6 +623,7 @@ pub const Store = struct {
         try self.saveHullInstances(gs, cid);
         try self.saveHullCombatRecords(gs, cid);
         try self.saveMaintenanceEntries(gs, cid);
+        try self.saveHullOwnershipHistory(gs, cid);
         try self.saveForce(gs, cid);
         try self.saveStock(cid, "outfit", 0, &gs.spare_parts);
         try self.saveHq(gs, cid);
@@ -876,6 +883,23 @@ pub const Store = struct {
                 e.description,
                 @intFromEnum(e.battle_id),
                 e.cost,
+            });
+            try st.run();
+        }
+    }
+
+    fn saveHullOwnershipHistory(self: Store, gs: *GameState, cid: i64) !void {
+        const st = try self.db.prepare("INSERT INTO hull_ownership_history VALUES (?1,?2,?3,?4,?5,?6,?7)");
+        defer st.finalize();
+        for (gs.hull_ownership_history.items, 0..) |e, ord| {
+            try st.bindAll(.{
+                cid,
+                @intFromEnum(e.hull_instance_id),
+                @as(i64, @intCast(ord)),
+                @as(i64, e.from_day),
+                @as(i64, e.to_day),
+                @tagName(e.acquisition_type),
+                e.prior_owner_key,
             });
             try st.run();
         }
@@ -1805,6 +1829,7 @@ pub const Store = struct {
         try self.loadHullInstances(&gs, cid);
         try self.loadHullCombatRecords(&gs, cid);
         try self.loadMaintenanceEntries(&gs, cid);
+        try self.loadHullOwnershipHistory(&gs, cid);
         try self.loadForce(&gs, cid);
         try self.loadHq(&gs, cid);
         try self.loadStock(&gs, cid);
@@ -2209,6 +2234,26 @@ pub const Store = struct {
                 .description = try st.text(4, alloc),
                 .battle_id = try toId(types.BattleId, st.int(5)),
                 .cost = st.int(6),
+            });
+        }
+    }
+
+    fn loadHullOwnershipHistory(self: Store, gs: *GameState, cid: i64) !void {
+        const alloc = gs.allocator();
+        const hull_inst_mod = @import("../domain/hull_instance.zig");
+        const st = try self.db.prepare("SELECT hull_instance_id, from_day, to_day, acquisition_type, prior_owner_key FROM hull_ownership_history WHERE cid = ?1 ORDER BY ord");
+        defer st.finalize();
+        try st.bindAll(.{cid});
+        while (try st.next()) {
+            const hid = try toId(types.HullInstanceId, st.int(0));
+            _ = gs.hull_instances.getPtr(hid) orelse return error.CorruptSave; // orphan FK
+            const acq = st.enumValue(hull_inst_mod.AcquisitionType, 3) orelse return error.CorruptSave;
+            try gs.hull_ownership_history.append(alloc, .{
+                .hull_instance_id = hid,
+                .from_day = try st.intAs(u32, 1),
+                .to_day = try st.intAs(u32, 2),
+                .acquisition_type = acq,
+                .prior_owner_key = try st.text(4, alloc),
             });
         }
     }
@@ -3018,6 +3063,23 @@ pub const Store = struct {
                 u.hull_instance_id = id;
             }
         }
+        // v51 (P3c.4): seed one .initial ownership interval per owned hull for
+        // campaigns saved before the ownership log existed. Deterministic (no RNG).
+        if (from_version < 51) {
+            const alloc = gs.allocator();
+            var it = gs.units.iterator();
+            while (it.next()) |e| {
+                const u = e.value_ptr;
+                if (u.hull_instance_id == .none) continue;
+                try gs.hull_ownership_history.append(alloc, .{
+                    .hull_instance_id = u.hull_instance_id,
+                    .from_day = u.acquired_day,
+                    .to_day = 0,
+                    .acquisition_type = .initial,
+                    .prior_owner_key = "unknown",
+                });
+            }
+        }
     }
 };
 
@@ -3230,6 +3292,9 @@ fn validateStoredStrings(gs: *GameState) error{CorruptSave}!void {
             try Check.shown(e.description);
         }
     }
+    // Ownership history: prior_owner_key is free provenance (may name a gone
+    // entity) so it is NOT catalogue-validated, only markup-safe (rule 50).
+    for (gs.hull_ownership_history.items) |e| try Check.shown(e.prior_owner_key);
     for (gs.battle_reports.kept.items) |r| {
         inline for (.{ r.kind, r.enemy_key, r.scenario, r.terrain, r.weather, r.command_rights, r.salvage.items, r.operation, r.operation_interventions }) |text| try Check.shown(text);
         if (r.operation_intent) |i| try Check.shown(@tagName(i));
@@ -4460,8 +4525,8 @@ test "a rebuilt store loads to the identical digest" {
     // Digest is identical: the rebuild changed no data.
     var diff_buf: [128]u8 = undefined;
     try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &diff_buf) orelse "");
-    // Re-pinned by P3c.3 (maintenance_entries in GameState, changing digest; expected per design §1).
-    try std.testing.expectEqual(@as(u64, 6650936339129533491), hash_before);
+    // Re-pinned by P3c.4 (hull_ownership_history in GameState, changing digest; expected per design §1).
+    try std.testing.expectEqual(@as(u64, 6386929347133846504), hash_before);
 }
 
 test "every next-ID counter resumes past a higher owned id after load" {
@@ -4956,9 +5021,9 @@ test "golden master: a played year hashes to its pinned value, and a save of it 
     try playedYearForTest(&gs);
     try std.testing.expect(gs.battle_reports.kept.items.len > 0); // the year saw fighting
     // Any change to a simulated or saved result moves this; re-pin it only
-    // when the change is meant. Re-pinned by P3c.3 (maintenance_entries in
+    // when the change is meant. Re-pinned by P3c.4 (hull_ownership_history in
     // GameState, changing digest; expected per design §1).
-    try std.testing.expectEqual(@as(u64, 6650936339129533491), digest.stateHash(&gs));
+    try std.testing.expectEqual(@as(u64, 6386929347133846504), digest.stateHash(&gs));
 
     const store = try Store.open(":memory:");
     defer store.close();
@@ -6998,4 +7063,184 @@ test "maintenance_entry corruption is rejected on load (P3c.3)" {
     try store.db.exec("UPDATE maintenance_entry SET action = 'repair', description = char(27) || '[31m'");
     try store.db.exec("PRAGMA foreign_keys = ON");
     try std.testing.expectError(error.CorruptSave, store.load(std.testing.allocator, gs.campaign_id));
+}
+
+// P3c.4 hull_ownership_history tests -----------------------------------------
+
+test "hull_ownership_history survives a save/load round-trip with identical stateHash (P3c.4)" {
+    // Rules 45, 46, 67 / P3c.4: a campaign with two hull_ownership_history rows
+    // (one closed, one open) survives save → load with an identical stateHash.
+    const hull_inst_mod = @import("../domain/hull_instance.zig");
+    var gs = try buildHullGs(std.testing.allocator);
+    defer gs.deinit();
+
+    var hids: [2]types.HullInstanceId = .{ .none, .none };
+    var idx: usize = 0;
+    var hit = gs.hull_instances.iterator();
+    while (hit.next()) |e| : (idx += 1) {
+        if (idx < 2) hids[idx] = e.key_ptr.*;
+    }
+    try std.testing.expect(hids[0] != .none);
+    try std.testing.expect(hids[1] != .none);
+
+    // Row 0: closed interval (.purchase).
+    try gs.hull_ownership_history.append(gs.allocator(), .{
+        .hull_instance_id = hids[0],
+        .from_day = 10,
+        .to_day = 50,
+        .acquisition_type = .purchase,
+        .prior_owner_key = try gs.allocator().dupe(u8, "unknown"),
+    });
+    // Row 1: open interval (.salvage).
+    try gs.hull_ownership_history.append(gs.allocator(), .{
+        .hull_instance_id = hids[1],
+        .from_day = 55,
+        .to_day = 0,
+        .acquisition_type = .salvage,
+        .prior_owner_key = try gs.allocator().dupe(u8, "DC"),
+    });
+
+    const before = digest.stateHash(&gs);
+
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+
+    var diff_buf: [128]u8 = undefined;
+    try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &diff_buf) orelse "");
+    try std.testing.expectEqual(before, digest.stateHash(&loaded));
+
+    try std.testing.expectEqual(@as(usize, 2), loaded.hull_ownership_history.items.len);
+
+    const r0 = loaded.hull_ownership_history.items[0];
+    try std.testing.expectEqual(hids[0], r0.hull_instance_id);
+    try std.testing.expectEqual(@as(u32, 10), r0.from_day);
+    try std.testing.expectEqual(@as(u32, 50), r0.to_day);
+    try std.testing.expectEqual(hull_inst_mod.AcquisitionType.purchase, r0.acquisition_type);
+    try std.testing.expectEqualStrings("unknown", r0.prior_owner_key);
+
+    const r1 = loaded.hull_ownership_history.items[1];
+    try std.testing.expectEqual(hids[1], r1.hull_instance_id);
+    try std.testing.expectEqual(@as(u32, 55), r1.from_day);
+    try std.testing.expectEqual(@as(u32, 0), r1.to_day);
+    try std.testing.expectEqual(hull_inst_mod.AcquisitionType.salvage, r1.acquisition_type);
+    try std.testing.expectEqualStrings("DC", r1.prior_owner_key);
+}
+
+test "hull_ownership_history corruption is rejected on load (P3c.4)" {
+    // Rule 47 / P3c.4: orphan hull_instance_id, unknown acquisition_type tag, and
+    // markup-unsafe prior_owner_key each must reject the load as error.CorruptSave.
+    const hull_inst_mod = @import("../domain/hull_instance.zig");
+    var gs = try buildHullGs(std.testing.allocator);
+    defer gs.deinit();
+
+    var hid: types.HullInstanceId = .none;
+    var hit = gs.hull_instances.iterator();
+    if (hit.next()) |e| hid = e.key_ptr.*;
+    try std.testing.expect(hid != .none);
+
+    try gs.hull_ownership_history.append(gs.allocator(), .{
+        .hull_instance_id = hid,
+        .from_day = 1,
+        .to_day = 0,
+        .acquisition_type = .initial,
+        .prior_owner_key = try gs.allocator().dupe(u8, "unknown"),
+    });
+    _ = hull_inst_mod.AcquisitionType.initial; // verify symbol exists
+
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+
+    // (a) Orphan hull_instance_id.
+    try store.db.exec("PRAGMA foreign_keys = OFF");
+    try store.db.exec("UPDATE hull_ownership_history SET hull_instance_id = 99999");
+    try store.db.exec("PRAGMA foreign_keys = ON");
+    try std.testing.expectError(error.CorruptSave, store.load(std.testing.allocator, gs.campaign_id));
+
+    // (b) Unknown acquisition_type tag.
+    try store.db.exec("PRAGMA foreign_keys = OFF");
+    try store.db.exec("UPDATE hull_ownership_history SET hull_instance_id = (SELECT id FROM hull_instance LIMIT 1), acquisition_type = 'not_a_real_type'");
+    try store.db.exec("PRAGMA foreign_keys = ON");
+    try std.testing.expectError(error.CorruptSave, store.load(std.testing.allocator, gs.campaign_id));
+
+    // (c) Markup-unsafe prior_owner_key (validateStoredStrings check, rule 50).
+    try store.db.exec("PRAGMA foreign_keys = OFF");
+    try store.db.exec("UPDATE hull_ownership_history SET acquisition_type = 'initial', prior_owner_key = char(27) || '[31m'");
+    try store.db.exec("PRAGMA foreign_keys = ON");
+    try std.testing.expectError(error.CorruptSave, store.load(std.testing.allocator, gs.campaign_id));
+}
+
+test "v50→v51 migration seeds one .initial ownership interval per owned hull (P3c.4)" {
+    // Rules 50, 51 / P3c.4: a store at schema v50 must migrate to v51 with exactly one
+    // .initial ownership interval per owned unit, with from_day == acquired_day,
+    // to_day == 0, and prior_owner_key == "unknown".
+    const hull_inst_mod = @import("../domain/hull_instance.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 30003 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    _ = try @import("../sim/starter_company.zig").generateInto(&gs, "Delta");
+
+    // Manually link hull instances (as buildHullGs does) so the orphan check passes.
+    // Use gs.allocator() (the arena) so hull loadout memory is freed by gs.deinit().
+    const a = gs.allocator();
+    var uit = gs.units.iterator();
+    var count: u32 = 0;
+    while (uit.next()) |e| {
+        count += 1;
+        const u = e.value_ptr;
+        const hid: types.HullInstanceId = @enumFromInt(gs.next_hull_instance_id);
+        gs.next_hull_instance_id += 1;
+        var inst: hull_inst_mod.HullInstance = .{
+            .id = hid,
+            .base_key = u.chassis_key,
+            .status = .active,
+            .intro_year = 2750,
+            .pre_campaign = false,
+        };
+        for (u.slots.items) |s| try inst.loadout.append(a, .{ .part_key = s.part_key });
+        try gs.hull_instances.put(a, hid, inst);
+        u.hull_instance_id = hid;
+    }
+    const owned_count = gs.units.count();
+    try std.testing.expect(owned_count > 0);
+
+    // Record acquired_day values before simulating.
+    var acquired_days = std.AutoArrayHashMapUnmanaged(types.HullInstanceId, u32){};
+    defer acquired_days.deinit(std.testing.allocator);
+    var uit2 = gs.units.iterator();
+    while (uit2.next()) |e| {
+        try acquired_days.put(std.testing.allocator, e.value_ptr.hull_instance_id, e.value_ptr.acquired_day);
+    }
+
+    const raw = try sqlite.Db.open(":memory:");
+    var s1 = try Store.fromDb(raw);
+    try s1.save(&gs);
+
+    // Simulate a v50 store: drop hull_ownership_history and downgrade schema_version.
+    try raw.exec("PRAGMA foreign_keys = OFF");
+    try raw.exec("DROP TABLE hull_ownership_history");
+    try raw.exec("UPDATE setting SET value = 50 WHERE key = 'schema_version'");
+    try raw.exec("UPDATE campaign SET schema_version = 50");
+    try raw.exec("PRAGMA foreign_keys = ON");
+
+    // Re-open: fromDb sees v50, ddl creates hull_ownership_history, schema advances to 51.
+    const s2 = try Store.fromDb(raw);
+    defer s2.close();
+    try std.testing.expectEqual(@as(i64, schema_version), s2.getSetting("schema_version", 0));
+
+    var loaded = try s2.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+
+    // Exactly one .initial row per owned hull.
+    try std.testing.expectEqual(owned_count, loaded.hull_ownership_history.items.len);
+    for (loaded.hull_ownership_history.items) |row| {
+        try std.testing.expectEqual(hull_inst_mod.AcquisitionType.initial, row.acquisition_type);
+        try std.testing.expectEqual(@as(u32, 0), row.to_day);
+        try std.testing.expectEqualStrings("unknown", row.prior_owner_key);
+        const expected_day = acquired_days.get(row.hull_instance_id) orelse return error.TestFailed;
+        try std.testing.expectEqual(expected_day, row.from_day);
+    }
 }
