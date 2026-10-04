@@ -1380,7 +1380,7 @@ hull and pilot. Custom variants are loadout-only. Prerequisite: P3a.
 - P3c.1 — Hull instance entity, loadout, and the Unit link (entity, migration, digest).
 - P3c.2 — Combat records and dual kill attribution (battle aftermath, all participating hulls).
 - P3c.3 — Maintenance log and repair/modify commands (cli.zig, failure-atomic).
-- P3c.4 — Ownership history and market integration (ownership chain, market listing).
+- P3c.4 — Ownership chain and provenance (hull ownership history; current owner on the hull). The living faction/rival economy and conflict-governed market supply are P3e.
 - P3c.5 — Company-generation seeded history (deterministic pre-campaign history).
 - P3c.6 — Mech detail modal, queries, and verbs (queries.zig, TUI modal, cli.zig verbs).
 
@@ -1405,6 +1405,31 @@ within the rules), the lab quotes the correct A-D refit class and tech-time, a
 saved custom variant survives save/load and appears as a buildable design, and
 the per-location layout renders each chassis's structure and refuses an illegal
 placement inline with the rule named.
+
+### P3e — Mech economy (living rosters & market throughput)
+
+The living mech economy layered on the P3c hull entities: every major faction and every
+rival company (P4i) owns a finite pool of `HullInstance` records. Hulls are manufactured
+slowly (each faction only builds the chassis it historically produces, the 3025 lostech
+era), committed to battle from the pool, lost when destroyed, and transferred on salvage.
+A faction with a surplus sells hulls onto the existing market; a faction under conflict
+pressure (P4i `world_state`) replenishes its own roster first, so market supply tightens
+with the war. A rival that loses too many hulls cannot meet contract battle-value
+requirements and goes insolvent. Mechs only; conventional vehicles are out of scope.
+
+Two new persisted roster families (FactionRoster, RivalRoster), current-owner fields on
+`HullInstance` (`owner_type`/`owner_id`, complementing the P3c.4 provenance chain),
+campaign-start seeding from the existing RAT (`data/tables/rat.zon`), battle-aftermath
+roster draw/attrition/salvage, conflict-throttled monthly market surplus, and rival
+insolvency. No chassis weight, faction composition or balance value is invented;
+specifics are sourced from force sheets / TechManual at implementation. Prerequisite: P3c
+(the hull entity and its ownership chain). Faction manufacturing data extends
+`data/tables/factions.zon`, not a new data family.
+
+Design: `docs/p3c-economy-design.md`; TODO.md owns delivery order. Sub-increments
+P3e.1–P3e.7 (faction data; HullInstance owner fields; roster persistence; campaign-start
+seeding; battle aftermath; market throughput; rival insolvency), the economy design
+approval first.
 
 ## Product completion P4 — Campaign operations and stories
 
@@ -1702,6 +1727,16 @@ validated framework rather than adding a second story system.
 **Acceptance:** the game supports replayable, legible deployment stories whose
 choices affect force readiness, money, people, contracts, worlds and future
 opportunities without leaving the mercenary-command fantasy.
+
+## Distribution and packaging — not scheduled
+
+A design-discussion note, not a committed deliverable: cross-platform build and
+distribution. GitHub Actions CI building release artifacts for macOS, Windows and Linux;
+binary bundling with application icons; a macOS `.app` bundle; a Windows installer; and
+published GitHub Releases. The runtime already resolves its loose files through
+`src/tui/paths.zig` and ships via `zig build … --prefix dist` (CLAUDE.md), so this is a
+packaging and automation design, not a code-architecture change. Reschedule only on
+explicit owner dispatch; its design would be fixed here first.
 
 ## Later / icebox
 Edge points in play, audio beyond the music player, Stage 13 graphics.

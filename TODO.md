@@ -60,10 +60,19 @@ above is complete.
     - [x] P3c.1: hull instance entity, loadout, and the Unit link (entity, migration, digest).
     - [x] P3c.2: combat records and dual kill attribution (battle aftermath, all participating hulls).
     - [ ] P3c.3: maintenance log and repair/modify commands (cli.zig, failure-atomic).
-    - [ ] P3c.4: ownership history and market integration (ownership chain, market listing).
+    - [ ] P3c.4: ownership chain and provenance (hull ownership history; current owner on the hull). Market supply and the living economy move to P3e.
     - [ ] P3c.5: company-generation seeded history (deterministic pre-campaign history).
     - [ ] P3c.6: mech detail modal, queries, and verbs (queries.zig, TUI modal, cli.zig verbs).
   - [ ] P3-client (P3d): construction editor and variant lifecycle.
+  - [ ] P3e Mech economy — living faction rosters, rival hull pools, conflict-governed market throughput:
+    - P3e design approval and content boundary: pending (`docs/p3c-economy-design.md`), grounded in `docs/p3c-hull-lifecycle-design.md`. Prerequisite for every P3e item below.
+    - [ ] P3e.1: faction manufacturing data (extend `data/tables/factions.zon`; FactionId decision).
+    - [ ] P3e.2: HullInstance current-owner fields (owner_type/owner_id; schema change).
+    - [ ] P3e.3: FactionRoster + RivalRoster persistence (new collections, digest, round-trip).
+    - [ ] P3e.4: campaign-start roster seeding (deterministic gen/ from the RAT).
+    - [ ] P3e.5: battle aftermath integration (OpFor draw from roster; destroyed/salvaged/survivor updates).
+    - [ ] P3e.6: market surplus throughput (monthly surplus to listings, throttled by world_state conflict).
+    - [ ] P3e.7: rival insolvency (fieldable BV below threshold → inactive).
 
 ## Not scheduled
 
