@@ -327,6 +327,10 @@ pub const GameState = struct {
     /// Flat child-row list; each record carries its own hull_instance_id.
     hull_combat_records: std.ArrayListUnmanaged(hull_instance_mod.HullCombatRecord) = .empty,
 
+    /// Maintenance log entries: one per queued depot repair or loadout refit (P3c.3).
+    /// Flat child-row list; each entry carries its own hull_instance_id.
+    maintenance_entries: std.ArrayListUnmanaged(hull_instance_mod.MaintenanceEntry) = .empty,
+
     /// Persistent bounded per-world state, keyed by planet_key (P4h.4).
     world_states: std.StringArrayHashMapUnmanaged(world_state_mod.WorldState) = .empty,
 
@@ -823,6 +827,22 @@ pub const GameState = struct {
         return null;
     }
 
+    /// The one writer for a hull maintenance-log entry (rule 20). No-op when the
+    /// unit has no linked hull instance (nothing to attach to; the command's job
+    /// is unaffected). Caller MUST have reserved one slot of capacity in its
+    /// prepare phase so this append cannot fail at the commit point (rule 12/13).
+    pub fn appendMaintenanceEntry(self: *GameState, u: *const unit_mod.Unit, action: hull_instance_mod.MaintenanceAction, cost: types.CBills) void {
+        if (u.hull_instance_id == .none) return;
+        self.maintenance_entries.appendAssumeCapacity(.{
+            .hull_instance_id = u.hull_instance_id,
+            .day = self.clock.day_index,
+            .tech = u.tech,
+            .action = action,
+            .description = action.describe(),
+            .cost = cost,
+        });
+    }
+
     /// Everything that points at a hull lets go of it. Shared by striking
     /// one off and by losing one to the enemy, so the two can never drift.
     pub fn detachUnit(self: *GameState, unit_id: types.UnitId) void {
@@ -919,6 +939,7 @@ pub const GameState = struct {
         .{ "next_officer_arc_id", .persisted },
         .{ "hull_instances", .persisted },
         .{ "hull_combat_records", .persisted },
+        .{ "maintenance_entries", .persisted },
         .{ "next_hull_instance_id", .persisted },
         .{ "world_states", .persisted },
     };

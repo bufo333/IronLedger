@@ -40,7 +40,7 @@ const rival_mod = @import("../domain/rival.zig");
 const officer_dom = @import("../domain/officer.zig");
 const world_state_dom = @import("../domain/world_state.zig");
 
-pub const schema_version = 49;
+pub const schema_version = 50;
 
 const ddl =
     \\CREATE TABLE IF NOT EXISTS player (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_seq INTEGER NOT NULL);
@@ -101,6 +101,7 @@ const ddl =
     \\CREATE TABLE IF NOT EXISTS hull_instance (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, base_key TEXT, name TEXT, nickname TEXT, status TEXT NOT NULL DEFAULT 'active', intro_year INTEGER NOT NULL DEFAULT 0, pre_campaign INTEGER NOT NULL DEFAULT 0 CHECK (pre_campaign IN (0,1)), PRIMARY KEY (cid, id), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS hull_loadout (cid INTEGER NOT NULL, hull_instance_id INTEGER NOT NULL, slot_index INTEGER NOT NULL, part_key TEXT, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, hull_instance_id) REFERENCES hull_instance(cid, id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS hull_combat_record (cid INTEGER NOT NULL, hull_instance_id INTEGER NOT NULL, ord INTEGER NOT NULL, battle_id INTEGER NOT NULL DEFAULT 0, contract_id INTEGER NOT NULL DEFAULT 0, kills INTEGER NOT NULL DEFAULT 0, hits_taken INTEGER NOT NULL DEFAULT 0, armor_lost INTEGER NOT NULL DEFAULT 0, slots_damaged INTEGER NOT NULL DEFAULT 0, slots_destroyed INTEGER NOT NULL DEFAULT 0, destroyed INTEGER NOT NULL DEFAULT 0 CHECK (destroyed IN (0,1)), cause TEXT NOT NULL DEFAULT 'none', FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, hull_instance_id) REFERENCES hull_instance(cid, id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS maintenance_entry (cid INTEGER NOT NULL, hull_instance_id INTEGER NOT NULL, ord INTEGER NOT NULL, day INTEGER NOT NULL DEFAULT 0, tech INTEGER NOT NULL DEFAULT 0, action TEXT NOT NULL DEFAULT 'repair', description TEXT NOT NULL DEFAULT '', battle_id INTEGER NOT NULL DEFAULT 0, cost INTEGER NOT NULL DEFAULT 0, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, hull_instance_id) REFERENCES hull_instance(cid, id) DEFERRABLE INITIALLY DEFERRED);
 ;
 
 const tables = [_][]const u8{
@@ -110,7 +111,7 @@ const tables = [_][]const u8{
     "supply_policy",      "stock_policy",           "faction_cooling",    "faction_standing", "event_memory",      "listing",            "part_order",            "event_log",     "pending_event",
     "refit_plan",         "refit_op",               "rating_snapshot",    "battle_report",    "battle_report_hit", "battle_report_ammo", "battle_report_salvage", "rng_stream",    "operation",
     "operation_task",     "operation_intervention", "battle_report_task", "actor",            "world_state",       "rival",              "officer_arc",           "hull_instance", "hull_loadout",
-    "hull_combat_record",
+    "hull_combat_record", "maintenance_entry",
 };
 
 // Indexes for per-campaign tables (A28/D31): cid filters on every load;
@@ -172,6 +173,7 @@ const index_ddl =
     \\CREATE INDEX IF NOT EXISTS ix_hull_instance_cid ON hull_instance(cid);
     \\CREATE INDEX IF NOT EXISTS ix_hull_loadout_cid ON hull_loadout(cid);
     \\CREATE INDEX IF NOT EXISTS ix_hull_combat_record_cid ON hull_combat_record(cid);
+    \\CREATE INDEX IF NOT EXISTS ix_maintenance_entry_cid ON maintenance_entry(cid);
 ;
 
 /// The stream order of the single `rng` blob that saves before schema v32
@@ -298,6 +300,9 @@ pub const Store = struct {
         // v49: hull_combat_record table (P3c.2, docs/p3c-hull-lifecycle-design.md §1, §4).
         // New table — applySchema's ddl creates it. Old saves open with zero records (safe default).
         .{ .from = 48, .to = 49, .table = "hull_combat_record", .column = "", .sql = "CREATE TABLE IF NOT EXISTS hull_combat_record (cid INTEGER NOT NULL, hull_instance_id INTEGER NOT NULL, ord INTEGER NOT NULL, battle_id INTEGER NOT NULL DEFAULT 0, contract_id INTEGER NOT NULL DEFAULT 0, kills INTEGER NOT NULL DEFAULT 0, hits_taken INTEGER NOT NULL DEFAULT 0, armor_lost INTEGER NOT NULL DEFAULT 0, slots_damaged INTEGER NOT NULL DEFAULT 0, slots_destroyed INTEGER NOT NULL DEFAULT 0, destroyed INTEGER NOT NULL DEFAULT 0 CHECK (destroyed IN (0,1)), cause TEXT NOT NULL DEFAULT 'none', FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, hull_instance_id) REFERENCES hull_instance(cid, id) DEFERRABLE INITIALLY DEFERRED)" },
+        // v50: maintenance_entry table (P3c.3, docs/p3c-hull-lifecycle-design.md §1, §2).
+        // New table — applySchema's ddl creates it. Old saves open with zero entries.
+        .{ .from = 49, .to = 50, .table = "maintenance_entry", .column = "", .sql = "CREATE TABLE IF NOT EXISTS maintenance_entry (cid INTEGER NOT NULL, hull_instance_id INTEGER NOT NULL, ord INTEGER NOT NULL, day INTEGER NOT NULL DEFAULT 0, tech INTEGER NOT NULL DEFAULT 0, action TEXT NOT NULL DEFAULT 'repair', description TEXT NOT NULL DEFAULT '', battle_id INTEGER NOT NULL DEFAULT 0, cost INTEGER NOT NULL DEFAULT 0, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, hull_instance_id) REFERENCES hull_instance(cid, id) DEFERRABLE INITIALLY DEFERRED)" },
     };
 
     pub fn open(path: [*:0]const u8) !Store {
@@ -611,6 +616,7 @@ pub const Store = struct {
         try self.saveUnit(gs, cid);
         try self.saveHullInstances(gs, cid);
         try self.saveHullCombatRecords(gs, cid);
+        try self.saveMaintenanceEntries(gs, cid);
         try self.saveForce(gs, cid);
         try self.saveStock(cid, "outfit", 0, &gs.spare_parts);
         try self.saveHq(gs, cid);
@@ -851,6 +857,25 @@ pub const Store = struct {
                 @as(i64, r.slots_destroyed),
                 @as(i64, @intFromBool(r.destroyed)),
                 @tagName(r.cause),
+            });
+            try st.run();
+        }
+    }
+
+    fn saveMaintenanceEntries(self: Store, gs: *GameState, cid: i64) !void {
+        const st = try self.db.prepare("INSERT INTO maintenance_entry VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)");
+        defer st.finalize();
+        for (gs.maintenance_entries.items, 0..) |e, ord| {
+            try st.bindAll(.{
+                cid,
+                @intFromEnum(e.hull_instance_id),
+                @as(i64, @intCast(ord)),
+                @as(i64, e.day),
+                @intFromEnum(e.tech),
+                @tagName(e.action),
+                e.description,
+                @intFromEnum(e.battle_id),
+                e.cost,
             });
             try st.run();
         }
@@ -1779,6 +1804,7 @@ pub const Store = struct {
         try self.loadUnit(&gs, cid);
         try self.loadHullInstances(&gs, cid);
         try self.loadHullCombatRecords(&gs, cid);
+        try self.loadMaintenanceEntries(&gs, cid);
         try self.loadForce(&gs, cid);
         try self.loadHq(&gs, cid);
         try self.loadStock(&gs, cid);
@@ -2162,6 +2188,28 @@ pub const Store = struct {
                 .cause = cause,
             };
             try gs.hull_combat_records.append(alloc, rec);
+        }
+    }
+
+    fn loadMaintenanceEntries(self: Store, gs: *GameState, cid: i64) !void {
+        const alloc = gs.allocator();
+        const hull_inst_mod = @import("../domain/hull_instance.zig");
+        const st = try self.db.prepare("SELECT hull_instance_id, day, tech, action, description, battle_id, cost FROM maintenance_entry WHERE cid = ?1 ORDER BY ord");
+        defer st.finalize();
+        try st.bindAll(.{cid});
+        while (try st.next()) {
+            const hid = try toId(types.HullInstanceId, st.int(0));
+            _ = gs.hull_instances.getPtr(hid) orelse return error.CorruptSave; // orphan FK
+            const action = st.enumValue(hull_inst_mod.MaintenanceAction, 3) orelse return error.CorruptSave;
+            try gs.maintenance_entries.append(alloc, .{
+                .hull_instance_id = hid,
+                .day = try st.intAs(u32, 1),
+                .tech = try toId(types.PersonId, st.int(2)),
+                .action = action,
+                .description = try st.text(4, alloc),
+                .battle_id = try toId(types.BattleId, st.int(5)),
+                .cost = st.int(6),
+            });
         }
     }
 
@@ -3174,6 +3222,12 @@ fn validateStoredStrings(gs: *GameState) error{CorruptSave}!void {
             if (inst.name) |n| try Check.shown(n);
             if (inst.nickname) |n| try Check.shown(n);
             for (inst.loadout.items) |l| try Check.item(l.part_key);
+        }
+    }
+    // Maintenance entries: description must be markup-safe (rule 50).
+    {
+        for (gs.maintenance_entries.items) |e| {
+            try Check.shown(e.description);
         }
     }
     for (gs.battle_reports.kept.items) |r| {
@@ -4406,8 +4460,8 @@ test "a rebuilt store loads to the identical digest" {
     // Digest is identical: the rebuild changed no data.
     var diff_buf: [128]u8 = undefined;
     try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &diff_buf) orelse "");
-    // Re-pinned by P3c.2 (hull_combat_records in GameState, changing digest).
-    try std.testing.expectEqual(@as(u64, 1209726810074714630), hash_before);
+    // Re-pinned by P3c.3 (maintenance_entries in GameState, changing digest; expected per design §1).
+    try std.testing.expectEqual(@as(u64, 6650936339129533491), hash_before);
 }
 
 test "every next-ID counter resumes past a higher owned id after load" {
@@ -4902,9 +4956,9 @@ test "golden master: a played year hashes to its pinned value, and a save of it 
     try playedYearForTest(&gs);
     try std.testing.expect(gs.battle_reports.kept.items.len > 0); // the year saw fighting
     // Any change to a simulated or saved result moves this; re-pin it only
-    // when the change is meant. Re-pinned by P3c.2 (hull_combat_records in
-    // GameState, changing digest; expected per design §1, §7).
-    try std.testing.expectEqual(@as(u64, 1209726810074714630), digest.stateHash(&gs));
+    // when the change is meant. Re-pinned by P3c.3 (maintenance_entries in
+    // GameState, changing digest; expected per design §1).
+    try std.testing.expectEqual(@as(u64, 6650936339129533491), digest.stateHash(&gs));
 
     const store = try Store.open(":memory:");
     defer store.close();
@@ -6828,5 +6882,120 @@ test "an orphan hull_instance_id in a hull_combat_record rejects the load as cor
     try store.db.exec("UPDATE hull_combat_record SET hull_instance_id = (SELECT id FROM hull_instance LIMIT 1), cause = 'not_a_real_cause'");
     try store.db.exec("PRAGMA foreign_keys = ON");
 
+    try std.testing.expectError(error.CorruptSave, store.load(std.testing.allocator, gs.campaign_id));
+}
+
+// P3c.3 maintenance_entry tests -----------------------------------------------
+
+test "maintenance_entries survive a save/load round-trip with identical stateHash (P3c.3)" {
+    // Rules 45, 46, 67 / P3c.3: a campaign with two maintenance_entry rows
+    // referencing distinct hull_instances survives save → load with an identical
+    // stateHash. Exercises saveMaintenanceEntries/loadMaintenanceEntries.
+    const hull_inst_mod = @import("../domain/hull_instance.zig");
+    var gs = try buildHullGs(std.testing.allocator);
+    defer gs.deinit();
+
+    // Collect the two hull_instance ids that buildHullGs linked.
+    var hids: [2]types.HullInstanceId = .{ .none, .none };
+    var idx: usize = 0;
+    var hit = gs.hull_instances.iterator();
+    while (hit.next()) |e| : (idx += 1) {
+        if (idx < 2) hids[idx] = e.key_ptr.*;
+    }
+    try std.testing.expect(hids[0] != .none);
+    try std.testing.expect(hids[1] != .none);
+
+    // Add two distinct maintenance entries referencing the two hull instances.
+    try gs.maintenance_entries.append(gs.allocator(), .{
+        .hull_instance_id = hids[0],
+        .day = 42,
+        .tech = @enumFromInt(1),
+        .action = .repair,
+        .description = hull_inst_mod.MaintenanceAction.repair.describe(),
+        .battle_id = .none,
+        .cost = 500_000,
+    });
+    try gs.maintenance_entries.append(gs.allocator(), .{
+        .hull_instance_id = hids[1],
+        .day = 100,
+        .tech = @enumFromInt(2),
+        .action = .modify,
+        .description = hull_inst_mod.MaintenanceAction.modify.describe(),
+        .battle_id = .none,
+        .cost = 120_000,
+    });
+
+    const before = digest.stateHash(&gs);
+
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+
+    var diff_buf: [128]u8 = undefined;
+    try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &diff_buf) orelse "");
+    try std.testing.expectEqual(before, digest.stateHash(&loaded));
+
+    // Row count survives.
+    try std.testing.expectEqual(@as(usize, 2), loaded.maintenance_entries.items.len);
+
+    // First entry's fields survive.
+    const e0 = loaded.maintenance_entries.items[0];
+    try std.testing.expectEqual(hids[0], e0.hull_instance_id);
+    try std.testing.expectEqual(@as(u32, 42), e0.day);
+    try std.testing.expectEqual(hull_inst_mod.MaintenanceAction.repair, e0.action);
+    try std.testing.expectEqualStrings("depot structural repair", e0.description);
+    try std.testing.expectEqual(@as(types.CBills, 500_000), e0.cost);
+
+    // Second entry's fields survive.
+    const e1 = loaded.maintenance_entries.items[1];
+    try std.testing.expectEqual(hids[1], e1.hull_instance_id);
+    try std.testing.expectEqual(@as(u32, 100), e1.day);
+    try std.testing.expectEqual(hull_inst_mod.MaintenanceAction.modify, e1.action);
+    try std.testing.expectEqualStrings("loadout refit", e1.description);
+    try std.testing.expectEqual(@as(types.CBills, 120_000), e1.cost);
+}
+
+test "maintenance_entry corruption is rejected on load (P3c.3)" {
+    // Rule 47 / P3c.3: orphan hull_instance_id, unknown action tag, and
+    // markup-unsafe description each must reject the load as error.CorruptSave.
+    const hull_inst_mod = @import("../domain/hull_instance.zig");
+    var gs = try buildHullGs(std.testing.allocator);
+    defer gs.deinit();
+
+    var hid: types.HullInstanceId = .none;
+    var hit = gs.hull_instances.iterator();
+    if (hit.next()) |e| hid = e.key_ptr.*;
+    try std.testing.expect(hid != .none);
+
+    try gs.maintenance_entries.append(gs.allocator(), .{
+        .hull_instance_id = hid,
+        .day = 1,
+        .action = .repair,
+        .description = hull_inst_mod.MaintenanceAction.repair.describe(),
+        .cost = 10_000,
+    });
+
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+
+    // (a) Orphan hull_instance_id.
+    try store.db.exec("PRAGMA foreign_keys = OFF");
+    try store.db.exec("UPDATE maintenance_entry SET hull_instance_id = 99999");
+    try store.db.exec("PRAGMA foreign_keys = ON");
+    try std.testing.expectError(error.CorruptSave, store.load(std.testing.allocator, gs.campaign_id));
+
+    // (b) Unknown action tag.
+    try store.db.exec("PRAGMA foreign_keys = OFF");
+    try store.db.exec("UPDATE maintenance_entry SET hull_instance_id = (SELECT id FROM hull_instance LIMIT 1), action = 'not_a_real_action'");
+    try store.db.exec("PRAGMA foreign_keys = ON");
+    try std.testing.expectError(error.CorruptSave, store.load(std.testing.allocator, gs.campaign_id));
+
+    // (c) Markup-unsafe description (validateStoredStrings check, rule 50).
+    try store.db.exec("PRAGMA foreign_keys = OFF");
+    try store.db.exec("UPDATE maintenance_entry SET action = 'repair', description = char(27) || '[31m'");
+    try store.db.exec("PRAGMA foreign_keys = ON");
     try std.testing.expectError(error.CorruptSave, store.load(std.testing.allocator, gs.campaign_id));
 }

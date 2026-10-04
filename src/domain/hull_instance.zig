@@ -76,6 +76,51 @@ test "HullCombatRecord defaults" {
     try std.testing.expectEqual(@import("unit.zig").WreckCause.none, r.cause);
 }
 
+/// What a maintenance-log entry records. P3c.3 writes .repair (depot structural
+/// repair) and .modify (loadout refit); .inspection is reserved for later triggers.
+pub const MaintenanceAction = enum {
+    repair,
+    modify,
+    inspection,
+
+    /// The one owner of the stored short description for each action (rule 24).
+    /// Static literals (markup-safe, no allocation) so the write stays atomic.
+    pub fn describe(self: MaintenanceAction) []const u8 {
+        return switch (self) {
+            .repair => "depot structural repair",
+            .modify => "loadout refit",
+            .inspection => "scheduled inspection",
+        };
+    }
+};
+
+/// One maintenance event on a physical hull: who worked it, when, what kind,
+/// and the labor cost of the job it queued. Child of HullInstance, keyed
+/// (cid, hull_instance_id, ord). hull_instance_id is the one validated FK; tech
+/// and battle_id are historical backlinks and are NOT reference-validated
+/// (the tech may leave, battle reports age out — HullCombatRecord precedent).
+/// (P3c.3, docs/p3c-hull-lifecycle-design.md §1, §2)
+pub const MaintenanceEntry = struct {
+    hull_instance_id: types.HullInstanceId = .none,
+    day: u32 = 0,
+    tech: types.PersonId = .none,
+    action: MaintenanceAction = .repair,
+    description: []const u8 = "",
+    battle_id: types.BattleId = .none,
+    cost: types.CBills = 0,
+};
+
+test "MaintenanceEntry defaults and describe" {
+    const e: MaintenanceEntry = .{};
+    try std.testing.expectEqual(types.HullInstanceId.none, e.hull_instance_id);
+    try std.testing.expectEqual(types.PersonId.none, e.tech);
+    try std.testing.expectEqual(MaintenanceAction.repair, e.action);
+    try std.testing.expectEqual(@as(types.CBills, 0), e.cost);
+    try std.testing.expectEqualStrings("depot structural repair", MaintenanceAction.repair.describe());
+    try std.testing.expectEqualStrings("loadout refit", MaintenanceAction.modify.describe());
+    try std.testing.expectEqualStrings("scheduled inspection", MaintenanceAction.inspection.describe());
+}
+
 test "HullInstance defaults and loadout append" {
     const inst: HullInstance = .{};
     try std.testing.expectEqual(types.HullInstanceId.none, inst.id);

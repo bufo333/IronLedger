@@ -303,12 +303,15 @@ pub fn commitRefit(gs: *GameState, unit_id: types.UnitId) Error!Result {
         if (gs.stockCount(site, d.key_ptr.*) < d.value_ptr.*) return Error.MissingParts;
     }
     try gs.bay_jobs.ensureUnusedCapacity(gs.allocator(), 1);
+    const u_logs = u.hull_instance_id != .none;
+    if (u_logs) try gs.maintenance_entries.ensureUnusedCapacity(gs.allocator(), 1);
     dit = demand.iterator();
     while (dit.next()) |d| {
         if (!gs.takeStock(site, d.key_ptr.*, d.value_ptr.*)) return Error.MissingParts;
     }
 
     const hours = meklab.refitHours(plan.ops.items, u.slots.items, class);
+    const refit_cost: types.CBills = @as(types.CBills, hours) * tuning.hq_ops.refit_labor_per_hour;
     plan.committed = true;
     try gs.bay_jobs.append(gs.allocator(), .{
         .hq = hq_id,
@@ -316,8 +319,9 @@ pub fn commitRefit(gs: *GameState, unit_id: types.UnitId) Error!Result {
         .unit = unit_id,
         .duration_days = @max(1, std.math.divCeil(u32, hours, 8) catch unreachable),
         .queued_day = gs.clock.day_index,
-        .cost = @as(types.CBills, hours) * tuning.hq_ops.refit_labor_per_hour, // labor
+        .cost = refit_cost,
     });
+    if (u_logs) gs.appendMaintenanceEntry(u, .modify, refit_cost);
     try gs.log(.construction, .{ .hq = hq_id }, "[lab] {s} refit committed: class {s}, {d} tech-hours, {d} bay day(s) · {s}", .{
         u.chassis_key, @tagName(class), hours, @max(1, std.math.divCeil(u32, hours, 8) catch unreachable), try hq_ops.repairOddsText(gs.allocator(), gs, hq_id, unit_id),
     });
@@ -419,4 +423,114 @@ test "the lab refuses illegal fits, gates by bay class, and refits through the b
     }
     try std.testing.expect(has_slas);
     try std.testing.expect(gs.refitPlanFor(uid) == null);
+}
+
+test "commitRefit writes one .modify maintenance entry for a linked hull (P3c.3)" {
+    // Rule 67 / P3c.3: a successful refit_commit on a hull linked to a HullInstance
+    // writes exactly one .modify entry with the matching hull_instance_id, day, tech,
+    // and cost equal to the committed job's cost.
+    const hull_inst_mod = @import("../domain/hull_instance.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1012 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .chief_engineer } });
+    const hq_id = gs.seat();
+    _ = try commands.execute(&gs, .{ .new_company = "Alpha" });
+
+    // Find a unit and create + link a HullInstance to it.
+    var uid: types.UnitId = .none;
+    var weapon_slot: []const u8 = "";
+    var weapon_loc: @import("../domain/meklab.zig").Location = .ra;
+    var it = gs.units.iterator();
+    while (it.next()) |e| {
+        const u = e.value_ptr;
+        if (u.kind != .mek) continue;
+        for (u.slots.items) |s| {
+            if (s.class == .weapon) {
+                uid = u.id;
+                weapon_slot = s.slot_key;
+                weapon_loc = @import("../domain/meklab.zig").parseLocation(s.slot_key).?;
+                break;
+            }
+        }
+        if (uid != .none) break;
+    }
+    try std.testing.expect(uid != .none);
+
+    const u = gs.unit(uid).?;
+    const hid: types.HullInstanceId = @enumFromInt(gs.next_hull_instance_id);
+    gs.next_hull_instance_id += 1;
+    try gs.hull_instances.put(gs.allocator(), hid, .{
+        .id = hid,
+        .base_key = u.chassis_key,
+        .status = .active,
+        .intro_year = 2750,
+    });
+    u.hull_instance_id = hid;
+
+    // Set up a like-for-like swap: remove a weapon, install a small laser.
+    _ = try commands.execute(&gs, .{ .refit_remove = .{ .unit = uid, .slot_key = weapon_slot } });
+    _ = try commands.execute(&gs, .{ .refit_install = .{ .unit = uid, .location = weapon_loc, .part_key = "slas" } });
+    try gs.addStock(.{ .hq = hq_id }, "slas", 1);
+
+    // No entries before commit.
+    try std.testing.expectEqual(@as(usize, 0), gs.maintenance_entries.items.len);
+
+    _ = try commands.execute(&gs, .{ .refit_commit = uid });
+
+    // Exactly one .modify entry.
+    try std.testing.expectEqual(@as(usize, 1), gs.maintenance_entries.items.len);
+    const entry = gs.maintenance_entries.items[0];
+    try std.testing.expectEqual(hull_inst_mod.MaintenanceAction.modify, entry.action);
+    try std.testing.expectEqual(hid, entry.hull_instance_id);
+    try std.testing.expectEqual(gs.clock.day_index, entry.day);
+    try std.testing.expectEqual(gs.bay_jobs.items[gs.bay_jobs.items.len - 1].cost, entry.cost);
+}
+
+test "a refused refit_commit writes no maintenance entry (P3c.3)" {
+    // Rule 13 / P3c.3: an expected refusal (MissingParts) must leave
+    // maintenance_entries empty — a refusal changes nothing.
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1013 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .chief_engineer } });
+    _ = try commands.execute(&gs, .{ .new_company = "Alpha" });
+
+    var uid: types.UnitId = .none;
+    var weapon_slot: []const u8 = "";
+    var weapon_loc: @import("../domain/meklab.zig").Location = .ra;
+    var it = gs.units.iterator();
+    while (it.next()) |e| {
+        const u = e.value_ptr;
+        if (u.kind != .mek) continue;
+        for (u.slots.items) |s| {
+            if (s.class == .weapon) {
+                uid = u.id;
+                weapon_slot = s.slot_key;
+                weapon_loc = @import("../domain/meklab.zig").parseLocation(s.slot_key).?;
+                break;
+            }
+        }
+        if (uid != .none) break;
+    }
+    try std.testing.expect(uid != .none);
+
+    // Link a HullInstance so the guard doesn't explain the absence.
+    const u = gs.unit(uid).?;
+    const hid: types.HullInstanceId = @enumFromInt(gs.next_hull_instance_id);
+    gs.next_hull_instance_id += 1;
+    try gs.hull_instances.put(gs.allocator(), hid, .{
+        .id = hid,
+        .base_key = u.chassis_key,
+        .status = .active,
+        .intro_year = 2750,
+    });
+    u.hull_instance_id = hid;
+
+    // Plan is set up but no parts in stock → MissingParts refusal.
+    _ = try commands.execute(&gs, .{ .refit_remove = .{ .unit = uid, .slot_key = weapon_slot } });
+    _ = try commands.execute(&gs, .{ .refit_install = .{ .unit = uid, .location = weapon_loc, .part_key = "slas" } });
+    // No addStock call — MissingParts refusal.
+    try std.testing.expectError(Error.MissingParts, commands.execute(&gs, .{ .refit_commit = uid }));
+
+    // A refusal changes nothing.
+    try std.testing.expectEqual(@as(usize, 0), gs.maintenance_entries.items.len);
 }

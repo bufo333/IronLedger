@@ -405,6 +405,8 @@ pub fn queueDepotRepair(gs: *GameState, unit_id: types.UnitId) QueueError!bool {
     // after the takeStock loop must not fail with the hull already cored
     // or stock already consumed.
     try gs.bay_jobs.ensureUnusedCapacity(gs.allocator(), 1);
+    const u_logs = u.hull_instance_id != .none;
+    if (u_logs) try gs.maintenance_entries.ensureUnusedCapacity(gs.allocator(), 1);
     const prev_wreck = u.wreck;
     if (needs_coring) u.markWrecked();
 
@@ -428,14 +430,16 @@ pub fn queueDepotRepair(gs: *GameState, unit_id: types.UnitId) QueueError!bool {
         }
     }
 
+    const depot_cost = @divTrunc(u.purchase_price, tuning.hq_ops.depot_labour_divisor) * needed + engineCharge(u);
     gs.bay_jobs.appendAssumeCapacity(.{
         .hq = hq_id,
         .kind = .depot_repair,
         .unit = unit_id,
         .duration_days = tuning.hq_ops.depot_base_days + tuning.hq_ops.depot_days_per_component * needed + (if (u.wreck.needsEngine()) tuning.loss.engine_rebuild_days else 0),
         .queued_day = gs.clock.day_index,
-        .cost = @divTrunc(u.purchase_price, tuning.hq_ops.depot_labour_divisor) * needed + engineCharge(u), // a new engine goes in with an engine kill
+        .cost = depot_cost,
     });
+    if (u_logs) gs.appendMaintenanceEntry(u, .repair, depot_cost);
     return true;
 }
 
@@ -2406,6 +2410,51 @@ test "depotHqFor is the one owner of which HQ a hull's components must sit at" {
     try gs.addStock(.{ .hq = far }, "comp_ct", 1);
     try gs.addStock(.{ .hq = far }, "comp_torso", 2);
     try std.testing.expect(depotShortfall(&gs, gs.unit(pool).?) == null);
+}
+
+test "queueDepotRepair writes one .repair maintenance entry for a linked hull, none for unlinked (P3c.3)" {
+    // Rule 67 / P3c.3: a newly-queued depot repair on a hull linked to a
+    // HullInstance records exactly one .repair entry; a unit with hull_instance_id
+    // == .none records none; a second call on an already-queued hull also records none.
+    const hull_inst_mod = @import("../domain/hull_instance.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 33 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .chief_engineer);
+    const hq_id = gs.seat();
+
+    // Unit with a linked HullInstance.
+    const uid = try gs.addUnit("SHD-2H");
+    const u = gs.unit(uid).?;
+    u.slots.items[1].condition = .destroyed; // ct.structure → comp_ct
+    const hid: types.HullInstanceId = @enumFromInt(gs.next_hull_instance_id);
+    gs.next_hull_instance_id += 1;
+    try gs.hull_instances.put(gs.allocator(), hid, .{
+        .id = hid,
+        .base_key = u.chassis_key,
+        .status = .active,
+        .intro_year = 2750,
+    });
+    u.hull_instance_id = hid;
+
+    // First queueDepotRepair: creates the job and writes one entry.
+    try std.testing.expect(try queueDepotRepair(&gs, uid));
+    try std.testing.expectEqual(@as(usize, 1), gs.maintenance_entries.items.len);
+    try std.testing.expectEqual(hull_inst_mod.MaintenanceAction.repair, gs.maintenance_entries.items[0].action);
+    try std.testing.expectEqual(hid, gs.maintenance_entries.items[0].hull_instance_id);
+    try std.testing.expectEqual(gs.clock.day_index, gs.maintenance_entries.items[0].day);
+    try std.testing.expectEqual(gs.bay_jobs.items[gs.bay_jobs.items.len - 1].cost, gs.maintenance_entries.items[0].cost);
+
+    // Second call on the same unit (already queued): early return, no new entry.
+    _ = try queueDepotRepair(&gs, uid);
+    try std.testing.expectEqual(@as(usize, 1), gs.maintenance_entries.items.len);
+
+    // Unit with hull_instance_id == .none: no entry written.
+    const uid2 = try gs.addUnit("SHD-2H");
+    gs.unit(uid2).?.slots.items[1].condition = .destroyed;
+    _ = gs.takeStock(.{ .hq = hq_id }, "comp_ct", 1); // replenish for the second unit
+    try gs.addStock(.{ .hq = hq_id }, "comp_ct", 1);
+    try std.testing.expect(try queueDepotRepair(&gs, uid2));
+    try std.testing.expectEqual(@as(usize, 1), gs.maintenance_entries.items.len); // still 1
 }
 
 test "bayCanRebuild delegates to canFabricate with the hull's ct.structure component" {
