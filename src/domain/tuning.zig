@@ -732,6 +732,10 @@ pub const Tuning = struct {
         /// mek, anything higher a medium — no heavies or assaults the
         /// founding level-1 mek bay could not rebuild.
         starter_light_max: u8,
+        /// Pre-campaign inspection-log entries seeded per starter hull (P3c.5);
+        /// // TUNE — no canonical BattleTech source.
+        seed_inspections_min: u8,
+        seed_inspections_max: u8,
     },
     /// Real loss: how hulls die, what a rebuild needs, and when one is not
     /// worth it (TechManual hull destruction; CamOps salvage).

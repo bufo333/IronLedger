@@ -3426,14 +3426,18 @@ test "salvage recovery records a .salvage ownership row with the enemy key" {
     });
     const c = gs.contracts.getPtr(cid).?;
     const units_before = gs.units.count();
+    const own_before = gs.hull_ownership_history.items.len;
     const candidates = try rollSalvageCandidates(&gs, c);
     _ = try takeSalvage(&gs, c, candidates, 2_000, .most_hulls);
     // At least one hull was salvaged (matching the existing salvage scaffold assertion).
     try testing.expect(gs.units.count() > units_before);
 
-    // Every ownership row must be .salvage with prior_owner_key == "DC" and open interval.
-    try testing.expect(gs.hull_ownership_history.items.len > 0);
-    for (gs.hull_ownership_history.items) |row| {
+    // Every ownership row added by takeSalvage must be .salvage with
+    // prior_owner_key == "DC" and open interval. Only check the rows added
+    // after this call; starter-company rows (pre_campaign .initial) come first.
+    const salvage_rows = gs.hull_ownership_history.items[own_before..];
+    try testing.expect(salvage_rows.len > 0);
+    for (salvage_rows) |row| {
         try testing.expectEqual(@import("../domain/hull_instance.zig").AcquisitionType.salvage, row.acquisition_type);
         try testing.expectEqualStrings("DC", row.prior_owner_key);
         try testing.expectEqual(@as(u32, 0), row.to_day);

@@ -102,6 +102,25 @@ pub fn starterWeightClass(rng: *rng_mod.Rng, stream: rng_mod.Stream) chassis.Wei
 /// Max tonnage for the recon lance's scout meks.
 pub const scout_max_tonnage = tuning.generation.scout_max_tonnage;
 
+/// Pre-campaign inspection-log count roll (P3c.5): one value in
+/// [seed_inspections_min, seed_inspections_max] drawn on the caller's stream.
+/// Pure; never hard-codes a stream (contract rule 613–614).
+pub fn rollSeededInspections(rng: *rng_mod.Rng, stream: rng_mod.Stream) u8 {
+    const tg = tuning.generation;
+    return rng.random(stream).intRangeAtMost(u8, tg.seed_inspections_min, tg.seed_inspections_max);
+}
+
+test "rollSeededInspections stays in [min,max] and is deterministic" {
+    const tg = tuning.generation;
+    var rng1 = rng_mod.Rng.init(9999);
+    var rng2 = rng_mod.Rng.init(9999);
+    for (0..1_000) |_| {
+        const n = rollSeededInspections(&rng1, .generation);
+        try std.testing.expect(n >= tg.seed_inspections_min and n <= tg.seed_inspections_max);
+        try std.testing.expectEqual(n, rollSeededInspections(&rng2, .generation));
+    }
+}
+
 test "a mek company needs a real support tail" {
     const staff = supportStaffFor(12, 12);
     try std.testing.expectEqual(@as(u32, 12), staff.techs);

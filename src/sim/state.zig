@@ -847,6 +847,27 @@ pub const GameState = struct {
         });
     }
 
+    /// Create and link a new HullInstance for the unit (shared body for
+    /// recordHullAcquisition and seedPreCampaignHull — rule 20/3). The caller
+    /// must ensure `u.hull_instance_id == .none` before calling.
+    fn linkNewHullInstance(self: *GameState, u: *unit_mod.Unit, pre_campaign: bool) !types.HullInstanceId {
+        const alloc = self.allocator();
+        const design = chassis_mod.find(u.chassis_key) orelse return error.UnknownChassis;
+        const hid: types.HullInstanceId = @enumFromInt(self.next_hull_instance_id);
+        self.next_hull_instance_id += 1;
+        var inst: hull_instance_mod.HullInstance = .{
+            .id = hid,
+            .base_key = u.chassis_key, // static catalog memory
+            .status = .active,
+            .intro_year = design.intro_year,
+            .pre_campaign = pre_campaign,
+        };
+        for (u.slots.items) |s| try inst.loadout.append(alloc, .{ .part_key = s.part_key });
+        try self.hull_instances.put(alloc, hid, inst);
+        u.hull_instance_id = hid;
+        return hid;
+    }
+
     /// The one writer for a runtime hull acquisition (rule 20): create and
     /// link a HullInstance for the unit if it has none, close any open
     /// ownership interval, then open a new one. prior_owner_key is duped into
@@ -854,19 +875,7 @@ pub const GameState = struct {
     pub fn recordHullAcquisition(self: *GameState, u: *unit_mod.Unit, acq: hull_instance_mod.AcquisitionType, prior_owner_key: []const u8) !void {
         const alloc = self.allocator();
         if (u.hull_instance_id == .none) {
-            const design = chassis_mod.find(u.chassis_key) orelse return error.UnknownChassis;
-            const hid: types.HullInstanceId = @enumFromInt(self.next_hull_instance_id);
-            self.next_hull_instance_id += 1;
-            var inst: hull_instance_mod.HullInstance = .{
-                .id = hid,
-                .base_key = u.chassis_key, // static catalog memory
-                .status = .active,
-                .intro_year = design.intro_year,
-                .pre_campaign = false,
-            };
-            for (u.slots.items) |s| try inst.loadout.append(alloc, .{ .part_key = s.part_key });
-            try self.hull_instances.put(alloc, hid, inst);
-            u.hull_instance_id = hid;
+            _ = try self.linkNewHullInstance(u, false);
         }
         const owned_key = try alloc.dupe(u8, prior_owner_key);
         for (self.hull_ownership_history.items) |*h| {
@@ -879,6 +888,38 @@ pub const GameState = struct {
             .acquisition_type = acq,
             .prior_owner_key = owned_key,
         });
+    }
+
+    /// The one writer for pre-campaign hull seeding (rule 20): link a HullInstance
+    /// if the unit has none, open one `.initial` ownership interval, then append
+    /// `inspections` scheduled-inspection entries (P3c.5). prior_owner_key is duped
+    /// into the campaign arena. pre_campaign controls the instance flag and inspection
+    /// seeding — callers pass `day_index == 0` as the gate.
+    pub fn seedPreCampaignHull(self: *GameState, u: *unit_mod.Unit, prior_owner_key: []const u8, pre_campaign: bool, inspections: u8) !void {
+        const alloc = self.allocator();
+        if (u.hull_instance_id == .none) {
+            _ = try self.linkNewHullInstance(u, pre_campaign);
+        }
+        const owned_key = try alloc.dupe(u8, prior_owner_key);
+        try self.hull_ownership_history.append(alloc, .{
+            .hull_instance_id = u.hull_instance_id,
+            .from_day = self.clock.day_index,
+            .to_day = 0,
+            .acquisition_type = .initial,
+            .prior_owner_key = owned_key,
+        });
+        var i: u8 = 0;
+        while (i < inspections) : (i += 1) {
+            try self.maintenance_entries.append(alloc, .{
+                .hull_instance_id = u.hull_instance_id,
+                .day = self.clock.day_index,
+                .tech = .none,
+                .action = .inspection,
+                .description = hull_instance_mod.MaintenanceAction.inspection.describe(),
+                .battle_id = .none,
+                .cost = 0,
+            });
+        }
     }
 
     /// Everything that points at a hull lets go of it. Shared by striking

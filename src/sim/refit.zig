@@ -472,15 +472,25 @@ test "commitRefit writes one .modify maintenance entry for a linked hull (P3c.3)
     _ = try commands.execute(&gs, .{ .refit_install = .{ .unit = uid, .location = weapon_loc, .part_key = "slas" } });
     try gs.addStock(.{ .hq = hq_id }, "slas", 1);
 
-    // No entries before commit.
-    try std.testing.expectEqual(@as(usize, 0), gs.maintenance_entries.items.len);
+    // No .modify entries for this hull instance before commit.
+    // (The starter company may have seeded .inspection entries for other hulls.)
+    var count_before: usize = 0;
+    for (gs.maintenance_entries.items) |e| {
+        if (e.hull_instance_id == hid) count_before += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 0), count_before);
 
     _ = try commands.execute(&gs, .{ .refit_commit = uid });
 
-    // Exactly one .modify entry.
-    try std.testing.expectEqual(@as(usize, 1), gs.maintenance_entries.items.len);
-    const entry = gs.maintenance_entries.items[0];
-    try std.testing.expectEqual(hull_inst_mod.MaintenanceAction.modify, entry.action);
+    // Exactly one .modify entry for this hull instance.
+    var modify_entry: ?hull_inst_mod.MaintenanceEntry = null;
+    for (gs.maintenance_entries.items) |e| {
+        if (e.hull_instance_id == hid) {
+            try std.testing.expectEqual(hull_inst_mod.MaintenanceAction.modify, e.action);
+            modify_entry = e;
+        }
+    }
+    const entry = modify_entry orelse return error.TestFailed;
     try std.testing.expectEqual(hid, entry.hull_instance_id);
     try std.testing.expectEqual(gs.clock.day_index, entry.day);
     try std.testing.expectEqual(gs.bay_jobs.items[gs.bay_jobs.items.len - 1].cost, entry.cost);
@@ -531,6 +541,9 @@ test "a refused refit_commit writes no maintenance entry (P3c.3)" {
     // No addStock call — MissingParts refusal.
     try std.testing.expectError(Error.MissingParts, commands.execute(&gs, .{ .refit_commit = uid }));
 
-    // A refusal changes nothing.
-    try std.testing.expectEqual(@as(usize, 0), gs.maintenance_entries.items.len);
+    // A refusal changes nothing — no .modify entry for this hull instance.
+    // (The starter company may have seeded .inspection entries for other hulls.)
+    for (gs.maintenance_entries.items) |e| {
+        if (e.hull_instance_id == hid) return error.TestFailed;
+    }
 }

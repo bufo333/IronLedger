@@ -8,7 +8,9 @@
 //! tests call it: companies raised later start empty.
 
 const std = @import("std");
+const tuning = @import("../domain/tuning.zig").t;
 const types = @import("../domain/types.zig");
+const hull_instance_mod = @import("../domain/hull_instance.zig");
 const force = @import("../domain/force.zig");
 const person = @import("../domain/person.zig");
 const chassis = @import("../domain/chassis.zig");
@@ -102,6 +104,23 @@ pub fn generateInto(gs: *GameState, name: []const u8) !types.ForceId {
     // Every hull gets its tech: the tail is sized for it.
     _ = try crew.autoAssign(gs, company_id);
     _ = try personnel.refreshRanks(gs); // officers by seat
+
+    // Seed pre-campaign hull identity for every unit in this company (P3c.5).
+    // Draws run AFTER the full company build so all existing unit/pilot/staff
+    // generation output is byte-identical; only new hull/ownership/maintenance
+    // rows are added. Units already linked (e.g. a second generateInto call on
+    // the same GameState) are skipped by seedPreCampaignHull's .none guard.
+    const day0 = gs.clock.day_index == 0;
+    const owner_key: []const u8 = if (gs.commander) |c| c.origin.key() else "unknown";
+    var uit = gs.units.iterator();
+    while (uit.next()) |e| {
+        const u = e.value_ptr;
+        if (gs.companyOf(u.force) != company_id) continue;
+        if (u.hull_instance_id != .none) continue;
+        const n: u8 = if (day0) company_gen.rollSeededInspections(&gs.rng, .generation) else 0;
+        try gs.seedPreCampaignHull(u, owner_key, day0, n);
+    }
+
     return company_id;
 }
 
@@ -177,5 +196,89 @@ test "the starter company fields lights and mediums only — the founding bay re
             const class = chassis.find(u.chassis_key).?.weightClass();
             try std.testing.expect(class == .light or class == .medium);
         }
+    }
+}
+
+test "a fresh starter company seeds pre-campaign hull history (P3c.5)" {
+    // Rule 67 / P3c.5: every company unit has a pre_campaign HullInstance, one
+    // .initial ownership row, and [min,max] .inspection entries on day 0.
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 42 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    const co = try generateInto(&gs, "Bravo");
+    const tg = tuning.generation;
+
+    var uit = gs.units.iterator();
+    while (uit.next()) |e| {
+        const u = e.value_ptr;
+        if (gs.companyOf(u.force) != co) continue;
+
+        // Every company unit has a linked hull instance.
+        try std.testing.expect(u.hull_instance_id != .none);
+        const inst = gs.hull_instances.getPtr(u.hull_instance_id) orelse return error.TestFailed;
+        try std.testing.expect(inst.pre_campaign);
+
+        // Exactly one .initial ownership row per unit, open (to_day == 0), from day 0.
+        var own_count: usize = 0;
+        for (gs.hull_ownership_history.items) |row| {
+            if (row.hull_instance_id != u.hull_instance_id) continue;
+            own_count += 1;
+            try std.testing.expectEqual(hull_instance_mod.AcquisitionType.initial, row.acquisition_type);
+            try std.testing.expectEqual(@as(u32, 0), row.from_day);
+            try std.testing.expectEqual(@as(u32, 0), row.to_day);
+            // commander origin is LC; key() is a static string
+            try std.testing.expectEqualStrings("LC", row.prior_owner_key);
+        }
+        try std.testing.expectEqual(@as(usize, 1), own_count);
+
+        // [min,max] .inspection entries, all on day 0, cost 0, tech .none.
+        var insp_count: usize = 0;
+        for (gs.maintenance_entries.items) |entry| {
+            if (entry.hull_instance_id != u.hull_instance_id) continue;
+            try std.testing.expectEqual(hull_instance_mod.MaintenanceAction.inspection, entry.action);
+            try std.testing.expectEqual(@as(u32, 0), entry.day);
+            try std.testing.expectEqual(@as(types.CBills, 0), entry.cost);
+            try std.testing.expectEqual(types.PersonId.none, entry.tech);
+            insp_count += 1;
+        }
+        try std.testing.expect(insp_count >= tg.seed_inspections_min and insp_count <= tg.seed_inspections_max);
+    }
+}
+
+test "a company raised mid-campaign links instances but seeds no pre-campaign history (P3c.5)" {
+    // Rule 67 / P3c.5: when day_index > 0 generateInto links instances with
+    // pre_campaign == false, one .initial ownership row dated the current day,
+    // and zero .inspection entries.
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 43 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .DC, .line_officer);
+    gs.clock.day_index = 100;
+    const co = try generateInto(&gs, "Charlie");
+
+    var uit = gs.units.iterator();
+    while (uit.next()) |e| {
+        const u = e.value_ptr;
+        if (gs.companyOf(u.force) != co) continue;
+
+        try std.testing.expect(u.hull_instance_id != .none);
+        const inst = gs.hull_instances.getPtr(u.hull_instance_id) orelse return error.TestFailed;
+        try std.testing.expect(!inst.pre_campaign);
+
+        var own_count: usize = 0;
+        for (gs.hull_ownership_history.items) |row| {
+            if (row.hull_instance_id != u.hull_instance_id) continue;
+            own_count += 1;
+            try std.testing.expectEqual(hull_instance_mod.AcquisitionType.initial, row.acquisition_type);
+            try std.testing.expectEqual(@as(u32, 100), row.from_day);
+            try std.testing.expectEqual(@as(u32, 0), row.to_day);
+        }
+        try std.testing.expectEqual(@as(usize, 1), own_count);
+
+        // Zero inspection entries for mid-campaign generation.
+        var insp_count: usize = 0;
+        for (gs.maintenance_entries.items) |entry| {
+            if (entry.hull_instance_id == u.hull_instance_id) insp_count += 1;
+        }
+        try std.testing.expectEqual(@as(usize, 0), insp_count);
     }
 }

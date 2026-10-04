@@ -467,6 +467,8 @@
         // Starter line lances (HBS BattleTech / AtB starting lances):
         // lights on 2–5 (28%), mediums otherwise — the founding bay rebuilds both.
         .starter_light_max = 5,
+        .seed_inspections_min = 1, // TUNE
+        .seed_inspections_max = 3, // TUNE
     },
     // Real loss. TechManual "Destroying a 'Mech": a cored
     // centre torso, a destroyed engine (three engine criticals) or an

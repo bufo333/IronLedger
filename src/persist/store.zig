@@ -4525,8 +4525,8 @@ test "a rebuilt store loads to the identical digest" {
     // Digest is identical: the rebuild changed no data.
     var diff_buf: [128]u8 = undefined;
     try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &diff_buf) orelse "");
-    // Re-pinned by P3c.4 (hull_ownership_history in GameState, changing digest; expected per design §1).
-    try std.testing.expectEqual(@as(u64, 6386929347133846504), hash_before);
+    // Re-pinned by P3c.5 (seeded pre-campaign history).
+    try std.testing.expectEqual(@as(u64, 14040595446442428659), hash_before);
 }
 
 test "every next-ID counter resumes past a higher owned id after load" {
@@ -5021,9 +5021,8 @@ test "golden master: a played year hashes to its pinned value, and a save of it 
     try playedYearForTest(&gs);
     try std.testing.expect(gs.battle_reports.kept.items.len > 0); // the year saw fighting
     // Any change to a simulated or saved result moves this; re-pin it only
-    // when the change is meant. Re-pinned by P3c.4 (hull_ownership_history in
-    // GameState, changing digest; expected per design §1).
-    try std.testing.expectEqual(@as(u64, 6386929347133846504), digest.stateHash(&gs));
+    // when the change is meant. Re-pinned by P3c.5 (seeded pre-campaign history).
+    try std.testing.expectEqual(@as(u64, 14040595446442428659), digest.stateHash(&gs));
 
     const store = try Store.open(":memory:");
     defer store.close();
@@ -6633,23 +6632,20 @@ test "next_officer_arc_id resumes past owned ids after load (P4i counter-resume)
 
 // P3c.1 hull instance tests ------------------------------------------------
 
-/// Build a GameState with a starter company whose hull_instances are populated,
-/// two named instances (id=next_hull_instance_id..+2, owners of units[0] and [1]).
-/// Returns the gs ready for save; the caller must deinit.
+/// Build a GameState with two directly-added units and two crafted HullInstances,
+/// isolated from generation seeding (P3c.5). Two named instances (id=1 and id=2)
+/// are the owners of the two units. Returns the gs ready for save; caller must deinit.
 fn buildHullGs(alloc: std.mem.Allocator) !GameState {
     const hull_mod = @import("../domain/hull_instance.zig");
     var gs = GameState.init(alloc, .{ .seed = 30001 });
     _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
-    _ = try @import("../sim/starter_company.zig").generateInto(&gs, "Beta");
-    // starter_company creates owned units but leaves hull_instance_id at .none (P3c.1).
-    // Manually link the first two units with crafted HullInstances.
     const a = gs.allocator();
-    var uit = gs.units.iterator();
-    var count: u32 = 0;
-    while (uit.next()) |e| {
-        count += 1;
-        if (count > 2) break;
-        const u = e.value_ptr;
+    // Add two units directly so the fixture is independent of generation seeding.
+    const uid1 = try gs.addUnit("LCT-1V");
+    const uid2 = try gs.addUnit("JR7-D");
+    const units = [_]types.UnitId{ uid1, uid2 };
+    for (units, 0..) |uid, count| {
+        const u = gs.unit(uid).?;
         const hid: types.HullInstanceId = @enumFromInt(gs.next_hull_instance_id);
         gs.next_hull_instance_id += 1;
         var inst: hull_mod.HullInstance = .{
@@ -6659,7 +6655,7 @@ fn buildHullGs(alloc: std.mem.Allocator) !GameState {
             .intro_year = 2750,
             .pre_campaign = false,
         };
-        if (count == 1) {
+        if (count == 0) {
             inst.name = "Ironside";
             inst.nickname = "Lucky Seven";
             try inst.loadout.append(a, .{ .part_key = "mlas" });
@@ -6769,11 +6765,16 @@ test "v47→v48 migration synthesizes one HullInstance per owned unit (P3c.1)" {
 
     // Simulate a v47 store: remove the hull tables, reset hull_instance_id to 0,
     // remove the next_hull_instance_id meta row, and downgrade schema_version.
+    // Also clear P3c.2–P3c.4 child tables whose rows now exist (P3c.5 seeded
+    // them) and would orphan against migration-recreated instances on load.
     try raw.exec("PRAGMA foreign_keys = OFF");
     try raw.exec("DROP TABLE hull_loadout");
     try raw.exec("DROP TABLE hull_instance");
     try raw.exec("UPDATE unit SET hull_instance_id = 0");
     try raw.exec("DELETE FROM meta WHERE key = 'next_hull_instance_id'");
+    try raw.exec("DELETE FROM hull_combat_record");
+    try raw.exec("DELETE FROM maintenance_entry");
+    try raw.exec("DELETE FROM hull_ownership_history");
     try raw.exec("UPDATE setting SET value = 47 WHERE key = 'schema_version'");
     try raw.exec("UPDATE campaign SET schema_version = 47");
     try raw.exec("PRAGMA foreign_keys = ON");
@@ -7182,28 +7183,7 @@ test "v50→v51 migration seeds one .initial ownership interval per owned hull (
     defer gs.deinit();
     _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
     _ = try @import("../sim/starter_company.zig").generateInto(&gs, "Delta");
-
-    // Manually link hull instances (as buildHullGs does) so the orphan check passes.
-    // Use gs.allocator() (the arena) so hull loadout memory is freed by gs.deinit().
-    const a = gs.allocator();
-    var uit = gs.units.iterator();
-    var count: u32 = 0;
-    while (uit.next()) |e| {
-        count += 1;
-        const u = e.value_ptr;
-        const hid: types.HullInstanceId = @enumFromInt(gs.next_hull_instance_id);
-        gs.next_hull_instance_id += 1;
-        var inst: hull_inst_mod.HullInstance = .{
-            .id = hid,
-            .base_key = u.chassis_key,
-            .status = .active,
-            .intro_year = 2750,
-            .pre_campaign = false,
-        };
-        for (u.slots.items) |s| try inst.loadout.append(a, .{ .part_key = s.part_key });
-        try gs.hull_instances.put(a, hid, inst);
-        u.hull_instance_id = hid;
-    }
+    // generateInto now links every unit with a pre_campaign HullInstance (P3c.5).
     const owned_count = gs.units.count();
     try std.testing.expect(owned_count > 0);
 
