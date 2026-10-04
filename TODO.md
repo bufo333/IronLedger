@@ -67,7 +67,7 @@ above is complete.
   - [ ] P3e Mech economy — living faction rosters, rival hull pools, conflict-governed market throughput:
     - P3e design approval and content boundary: pending (`docs/p3c-economy-design.md`), grounded in `docs/p3c-hull-lifecycle-design.md`. Prerequisite for every P3e item below.
     - [x] P3e.1: faction manufacturing data (extend `data/tables/factions.zon`; FactionId decision). <!-- sim/p3e-1 -->
-    - [ ] P3e.2: HullInstance current-owner fields (owner_type/owner_id; schema change).
+    - [x] P3e.2: HullInstance current-owner fields (owner_type/owner_id; schema change). <!-- sim/p3e-2 -->
     - [ ] P3e.3: FactionRoster + RivalRoster persistence (new collections, digest, round-trip).
     - [ ] P3e.4: campaign-start roster seeding (deterministic gen/ from the RAT).
     - [ ] P3e.5: battle aftermath integration (OpFor draw from roster; destroyed/salvaged/survivor updates).

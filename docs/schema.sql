@@ -1,6 +1,6 @@
 -- IRON LEDGER — SQLite save store schema (design document)
 --
--- Matches schema_version 51. The executable DDL and its column migrations
+-- Matches schema_version 52. The executable DDL and its column migrations
 -- live in src/persist/store.zig; this file is the readable reference for
 -- what each table and column means. Column order here is the runtime order.
 --
@@ -1034,6 +1034,10 @@ CREATE TABLE hull_instance (
     status          TEXT    NOT NULL DEFAULT 'active', -- HullStatus tag: active | permanently_destroyed
     intro_year      INTEGER NOT NULL DEFAULT 0,      -- TUNE: sourced from base chassis intro_year
     pre_campaign    INTEGER NOT NULL DEFAULT 0 CHECK (pre_campaign IN (0,1)), -- bool: acquired before campaign start
+    -- P3e.2: current-owner fields (HullOwner union; OwnerType tags: player|faction|rival|market|destroyed)
+    owner_type      TEXT    NOT NULL DEFAULT 'player', -- OwnerType tag name (active union tag)
+    owner_faction_key TEXT  NOT NULL DEFAULT '',       -- FactionRow.key when owner_type='faction'; else ''
+    owner_rival_id  INTEGER NOT NULL DEFAULT 0,        -- RivalId int when owner_type='rival'; else 0
     PRIMARY KEY (cid, id),
     FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );

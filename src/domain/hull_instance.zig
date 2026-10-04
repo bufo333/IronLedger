@@ -8,6 +8,25 @@
 const std = @import("std");
 const types = @import("types.zig");
 
+/// Who owns this hull right now. One of five kinds (docs/p3c-economy-design.md §2).
+/// Persisted as three typed columns: owner_type (tag name), owner_faction_key
+/// (FactionRow.key when .faction, else ""), owner_rival_id (RivalId int when
+/// .rival, else 0).
+pub const OwnerType = enum { player, faction, rival, market, destroyed };
+
+/// Current owner of a HullInstance. Illegal states are unrepresentable: you
+/// cannot hold owner_type=faction with a rival id (rule 20, no-partial-truth).
+/// - .player / .market / .destroyed: no id payload
+/// - .faction: payload is the faction stable string key (FactionRow.key, e.g. "LC")
+/// - .rival: payload is types.RivalId (FK into GameState.rivals)
+pub const HullOwner = union(OwnerType) {
+    player,
+    faction: []const u8,
+    rival: types.RivalId,
+    market,
+    destroyed,
+};
+
 /// The operational status of this physical hull.
 pub const HullStatus = enum { active, permanently_destroyed };
 
@@ -25,6 +44,9 @@ pub const HullInstance = struct {
     intro_year: u16 = 0, // TUNE: sourced from base chassis intro_year
     pre_campaign: bool = false,
     loadout: std.ArrayListUnmanaged(HullLoadout) = .empty,
+    /// Current owner. Defaults to .player (all construction sites create player hulls).
+    /// Loaders never rely on this default — they read owner_type explicitly, fail-closed.
+    owner: HullOwner = .player,
 
     pub fn deinit(self: *HullInstance, alloc: std.mem.Allocator) void {
         self.loadout.deinit(alloc);
@@ -159,6 +181,9 @@ test "HullInstance defaults and loadout append" {
     try std.testing.expectEqual(@as(usize, 0), inst.loadout.items.len);
     try std.testing.expect(inst.name == null);
     try std.testing.expect(inst.nickname == null);
+    // P3e.2: default owner is .player
+    try std.testing.expectEqual(OwnerType.player, std.meta.activeTag(inst.owner));
+    try std.testing.expect(inst.owner == .player);
 
     var inst2: HullInstance = .{
         .id = @enumFromInt(1),
