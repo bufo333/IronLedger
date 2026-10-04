@@ -4,18 +4,70 @@
 // `pay_bp` is a project-chosen employer multiplier. // TUNE
 // `foes` feeds the contract market's enemy picks; `hires` whether the
 // faction posts contracts; `color` is the Map screen's political colouring.
+//
+// Economy columns (docs/p3c-economy-design.md §3):
+// `manufacturing_chassis` — chassis keys (data/chassis.zon) this faction
+//   manufactures. Provisional stand-in derived from that faction's own RAT
+//   heavy+assault pools (data/tables/rat.zon), deduplicated. These are
+//   UNVERIFIED manufacturing membership, distinct from RAT fielding; must be
+//   re-sourced from force sheets / TechManual before P3e.6 balances on them.
+//   PER (pirates / near Periphery), CS (ComStar), and the seven Periphery
+//   states with no RAT row have empty lists pending sourcing. // TUNE
+// `replenishment_hulls_per_year` — whole battlemechs the faction adds to its
+//   own roster per year; 0 for empty-list factions. // TUNE
+// `conflict_sensitivity_bp` — basis points (0..=100_000) governing how
+//   sharply faction conflict reduces surplus flow to market. // TUNE
 .{
-    .{ .key = "LC", .name = "Lyran Commonwealth", .color = .blue, .capital = "tharkad", .foes = .{ "DC", "FWL" }, .pay_bp = 10_500, .hires = true },
-    .{ .key = "DC", .name = "Draconis Combine", .color = .red, .capital = "luthien", .foes = .{ "LC", "FS" }, .pay_bp = 10_000, .hires = true },
-    .{ .key = "FS", .name = "Federated Suns", .color = .yellow, .capital = "new_avalon", .foes = .{ "DC", "CC" }, .pay_bp = 11_000, .hires = true },
-    .{ .key = "CC", .name = "Capellan Confederation", .color = .green, .capital = "sian", .foes = .{ "FS", "FWL" }, .pay_bp = 9_500, .hires = true },
-    .{ .key = "FWL", .name = "Free Worlds League", .color = .magenta, .capital = "atreus", .foes = .{ "LC", "CC" }, .pay_bp = 10_000, .hires = true },
-    .{ .key = "TC", .name = "Taurian Concordat", .color = .cyan, .capital = "taurus", .foes = .{ "FS", "PER" }, .pay_bp = 9_000, .hires = true },
-    .{ .key = "MOC", .name = "Magistracy of Canopus", .color = .white, .capital = "canopus4", .foes = .{ "FWL", "PER" }, .pay_bp = 9_000, .hires = true },
-    .{ .key = "OA", .name = "Outworlds Alliance", .color = .cyan, .capital = "alpheratz", .foes = .{ "DC", "PER" }, .pay_bp = 8_500, .hires = true },
-    .{ .key = "MH", .name = "Marian Hegemony", .color = .grey, .capital = "alphard_mh", .foes = .{ "FWL", "PER" }, .pay_bp = 8_500, .hires = true },
-    .{ .key = "CIR", .name = "Circinus Federation", .color = .grey, .capital = "circinus", .foes = .{ "LC", "MH" }, .pay_bp = 8_000, .hires = true },
-    .{ .key = "OBR", .name = "Oberon Confederation", .color = .grey, .capital = "oberon6", .foes = .{ "LC", "DC" }, .pay_bp = 8_000, .hires = true },
-    .{ .key = "CS", .name = "ComStar", .color = .white, .capital = "terra", .foes = .{}, .pay_bp = 10_000, .hires = false },
-    .{ .key = "PER", .name = "Periphery / pirates", .color = .grey, .capital = "galatea", .foes = .{"PER"}, .pay_bp = 8_000, .hires = true },
+    .{ .key = "LC", .name = "Lyran Commonwealth", .color = .blue, .capital = "tharkad", .foes = .{ "DC", "FWL" }, .pay_bp = 10_500, .hires = true,
+        .manufacturing_chassis = .{ "RFL-3N", "WHM-6R", "WHM-6D", "ARC-2R", "CPLT-C1", "TDR-5S", "OSR-2C", "JM6-S", "GHR-5H", "CRD-3R", "ZEU-6S", "BNC-3E", "AS7-D", "STK-3F", "AWS-8Q", "BLR-1G", "CGR-1A1" }, // TUNE
+        .replenishment_hulls_per_year = 12, // TUNE
+        .conflict_sensitivity_bp = 5_000 }, // TUNE
+    .{ .key = "DC", .name = "Draconis Combine", .color = .red, .capital = "luthien", .foes = .{ "LC", "FS" }, .pay_bp = 10_000, .hires = true,
+        .manufacturing_chassis = .{ "DRG-1N", "QKD-4G", "GHR-5H", "CRD-3R", "WHM-6R", "ARC-2R", "MAD-3R", "OTL-4D", "CGR-1A1", "AS7-D", "BLR-1G", "STK-3F", "VTR-9B", "AWS-8Q", "CP-10-Z" }, // TUNE
+        .replenishment_hulls_per_year = 12, // TUNE
+        .conflict_sensitivity_bp = 5_000 }, // TUNE
+    .{ .key = "FS", .name = "Federated Suns", .color = .yellow, .capital = "new_avalon", .foes = .{ "DC", "CC" }, .pay_bp = 11_000, .hires = true,
+        .manufacturing_chassis = .{ "JM6-S", "RFL-3N", "CRD-3R", "MAD-3R", "WHM-6R", "ARC-2R", "TDR-5S", "OSR-2C", "ON1-K", "VTR-9B", "AS7-D", "BLR-1G", "STK-3F", "ZEU-6S", "CP-10-Z", "LGB-0W" }, // TUNE
+        .replenishment_hulls_per_year = 12, // TUNE
+        .conflict_sensitivity_bp = 5_000 }, // TUNE
+    .{ .key = "CC", .name = "Capellan Confederation", .color = .green, .capital = "sian", .foes = .{ "FS", "FWL" }, .pay_bp = 9_500, .hires = true,
+        .manufacturing_chassis = .{ "CPLT-C1", "CPLT-K2", "WHM-6R", "MAD-3R", "RFL-3N", "OSR-2C", "TDR-5S", "CRD-3R", "AWS-8Q", "STK-3F", "BLR-1G", "CGR-1A1", "AS7-D", "GOL-1H" }, // TUNE
+        .replenishment_hulls_per_year = 12, // TUNE
+        .conflict_sensitivity_bp = 5_000 }, // TUNE
+    .{ .key = "FWL", .name = "Free Worlds League", .color = .magenta, .capital = "atreus", .foes = .{ "LC", "CC" }, .pay_bp = 10_000, .hires = true,
+        .manufacturing_chassis = .{ "ON1-K", "ARC-2R", "MAD-3D", "WHM-6R", "TDR-5S", "QKD-4G", "RFL-3N", "GHR-5H", "AWS-8Q", "THG-10E", "STK-3F", "BLR-1G", "AS7-D", "LGB-0W", "BNC-3E" }, // TUNE
+        .replenishment_hulls_per_year = 12, // TUNE
+        .conflict_sensitivity_bp = 5_000 }, // TUNE
+    .{ .key = "TC", .name = "Taurian Concordat", .color = .cyan, .capital = "taurus", .foes = .{ "FS", "PER" }, .pay_bp = 9_000, .hires = true,
+        .manufacturing_chassis = .{}, // TUNE — no RAT row; pending force-sheet sourcing
+        .replenishment_hulls_per_year = 0, // TUNE
+        .conflict_sensitivity_bp = 5_000 }, // TUNE
+    .{ .key = "MOC", .name = "Magistracy of Canopus", .color = .white, .capital = "canopus4", .foes = .{ "FWL", "PER" }, .pay_bp = 9_000, .hires = true,
+        .manufacturing_chassis = .{}, // TUNE — no RAT row; pending force-sheet sourcing
+        .replenishment_hulls_per_year = 0, // TUNE
+        .conflict_sensitivity_bp = 5_000 }, // TUNE
+    .{ .key = "OA", .name = "Outworlds Alliance", .color = .cyan, .capital = "alpheratz", .foes = .{ "DC", "PER" }, .pay_bp = 8_500, .hires = true,
+        .manufacturing_chassis = .{}, // TUNE — no RAT row; pending force-sheet sourcing
+        .replenishment_hulls_per_year = 0, // TUNE
+        .conflict_sensitivity_bp = 5_000 }, // TUNE
+    .{ .key = "MH", .name = "Marian Hegemony", .color = .grey, .capital = "alphard_mh", .foes = .{ "FWL", "PER" }, .pay_bp = 8_500, .hires = true,
+        .manufacturing_chassis = .{}, // TUNE — no RAT row; pending force-sheet sourcing
+        .replenishment_hulls_per_year = 0, // TUNE
+        .conflict_sensitivity_bp = 5_000 }, // TUNE
+    .{ .key = "CIR", .name = "Circinus Federation", .color = .grey, .capital = "circinus", .foes = .{ "LC", "MH" }, .pay_bp = 8_000, .hires = true,
+        .manufacturing_chassis = .{}, // TUNE — no RAT row; pending force-sheet sourcing
+        .replenishment_hulls_per_year = 0, // TUNE
+        .conflict_sensitivity_bp = 5_000 }, // TUNE
+    .{ .key = "OBR", .name = "Oberon Confederation", .color = .grey, .capital = "oberon6", .foes = .{ "LC", "DC" }, .pay_bp = 8_000, .hires = true,
+        .manufacturing_chassis = .{}, // TUNE — no RAT row; pending force-sheet sourcing
+        .replenishment_hulls_per_year = 0, // TUNE
+        .conflict_sensitivity_bp = 5_000 }, // TUNE
+    .{ .key = "CS", .name = "ComStar", .color = .white, .capital = "terra", .foes = .{}, .pay_bp = 10_000, .hires = false,
+        .manufacturing_chassis = .{}, // TUNE — no open 3025 manufacturing; pending sourcing
+        .replenishment_hulls_per_year = 0, // TUNE
+        .conflict_sensitivity_bp = 5_000 }, // TUNE
+    .{ .key = "PER", .name = "Periphery / pirates", .color = .grey, .capital = "galatea", .foes = .{"PER"}, .pay_bp = 8_000, .hires = true,
+        .manufacturing_chassis = .{}, // manufactures nothing (salvage only) per design §1.4
+        .replenishment_hulls_per_year = 0,
+        .conflict_sensitivity_bp = 5_000 }, // TUNE
 }

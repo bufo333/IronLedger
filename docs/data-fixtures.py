@@ -52,6 +52,7 @@ CASES = [
     ("a rival archetype referencing an unknown arc key (P4i)", lambda: {"tables/rival_archetypes.zon": mutate("tables/rival_archetypes.zon", r'"fracturing_garrison"', '"__no_such_arc__"')}, True),
     ("loc_rule bad tag on jump_jet (P3a)", lambda: {"parts.zon": mutate("parts.zon", r'\.loc_rule = \.torso_or_leg', ".loc_rule = .__bad_rule__")}, True),
     ("crit_slots out-of-range on LCT-1V (P3a)", lambda: {"chassis.zon": mutate("chassis.zon", r'(\.key = "LCT-1V".*?\.armor_half_tons = 8,)', r'\1 .crit_slots = .{ 1, 2, 12, 12, 8, 8, 2, 999 },', re.S)}, True),
+    ("a manufacturing_chassis entry with an unknown chassis key (P3e.1)", lambda: {"tables/factions.zon": mutate("tables/factions.zon", r'"RFL-3N"', '"__bad_chassis__"')}, True),
 ]
 
 

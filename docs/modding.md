@@ -55,7 +55,7 @@ overlay of each family and checks that every one fails; CI runs it.
 | `tables/awards.zon` | `domain/award.zig` `AwardRow` | decorations and the counters that earn them |
 | `tables/abilities.zon` | `domain/ability.zig` `AbilityRow` | special pilot abilities |
 | `tables/rat.zon` | `domain/rat.zig` `RatRow` | per-house design pools by weight class |
-| `tables/factions.zon` | `domain/faction.zig` `FactionRow` | houses, colours, foes, pay, whether they hire |
+| `tables/factions.zon` | `domain/faction.zig` `FactionRow` | houses, colours, foes, pay, whether they hire, manufacturing chassis list (provisional), replenishment rate, and conflict sensitivity |
 | `tables/scenarios.zon` | `domain/scenario.zig` `Table` | scenario types and the d6 table per contract kind (with `recovery_mod` for a lost field) |
 | `tables/opfor.zon` | `domain/opfor.zig` `Table` | the opposing force per contract kind: lances, quality roll, reinforcements |
 | `tables/skulls.zon` | `domain/skulls.zig` `Table` | half-skull bands by power ratio (keep them aligned with `battle.ratioBonus`), the outmatched line, the checklist warning level |
@@ -72,7 +72,8 @@ overlay of each family and checks that every one fails; CI runs it.
   with defaults may be omitted.
 - Keys are referenced across files: every loadout `part` must exist in
   `parts.zon`, every RAT entry in `chassis.zon`, every faction key in
-  `factions.zon`, every operation `arc_key` in `arcs.zon`, and every arc
+  `factions.zon`, every manufacturing chassis in `factions.zon` must exist in
+  `chassis.zon`, every operation `arc_key` in `arcs.zon`, and every arc
   `kinds` entry must name a known `ContractKind`. Additionally, every arc
   defined in `arcs.zon` must have at least one actor archetype in
   `actor_archetypes.zon` and at least one rival archetype in
