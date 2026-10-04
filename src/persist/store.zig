@@ -40,7 +40,7 @@ const rival_mod = @import("../domain/rival.zig");
 const officer_dom = @import("../domain/officer.zig");
 const world_state_dom = @import("../domain/world_state.zig");
 
-pub const schema_version = 52;
+pub const schema_version = 53;
 
 const ddl =
     \\CREATE TABLE IF NOT EXISTS player (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_seq INTEGER NOT NULL);
@@ -103,6 +103,8 @@ const ddl =
     \\CREATE TABLE IF NOT EXISTS hull_combat_record (cid INTEGER NOT NULL, hull_instance_id INTEGER NOT NULL, ord INTEGER NOT NULL, battle_id INTEGER NOT NULL DEFAULT 0, contract_id INTEGER NOT NULL DEFAULT 0, kills INTEGER NOT NULL DEFAULT 0, hits_taken INTEGER NOT NULL DEFAULT 0, armor_lost INTEGER NOT NULL DEFAULT 0, slots_damaged INTEGER NOT NULL DEFAULT 0, slots_destroyed INTEGER NOT NULL DEFAULT 0, destroyed INTEGER NOT NULL DEFAULT 0 CHECK (destroyed IN (0,1)), cause TEXT NOT NULL DEFAULT 'none', FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, hull_instance_id) REFERENCES hull_instance(cid, id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS maintenance_entry (cid INTEGER NOT NULL, hull_instance_id INTEGER NOT NULL, ord INTEGER NOT NULL, day INTEGER NOT NULL DEFAULT 0, tech INTEGER NOT NULL DEFAULT 0, action TEXT NOT NULL DEFAULT 'repair', description TEXT NOT NULL DEFAULT '', battle_id INTEGER NOT NULL DEFAULT 0, cost INTEGER NOT NULL DEFAULT 0, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, hull_instance_id) REFERENCES hull_instance(cid, id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS hull_ownership_history (cid INTEGER NOT NULL, hull_instance_id INTEGER NOT NULL, ord INTEGER NOT NULL, from_day INTEGER NOT NULL DEFAULT 0, to_day INTEGER NOT NULL DEFAULT 0, acquisition_type TEXT NOT NULL DEFAULT 'initial', prior_owner_key TEXT NOT NULL DEFAULT '', FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, hull_instance_id) REFERENCES hull_instance(cid, id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS faction_roster (cid INTEGER NOT NULL, ord INTEGER NOT NULL, faction_key TEXT NOT NULL, hull_instance_id INTEGER NOT NULL, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, hull_instance_id) REFERENCES hull_instance(cid, id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS rival_roster (cid INTEGER NOT NULL, ord INTEGER NOT NULL, rival_id INTEGER NOT NULL, hull_instance_id INTEGER NOT NULL, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, rival_id) REFERENCES rival(cid, id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, hull_instance_id) REFERENCES hull_instance(cid, id) DEFERRABLE INITIALLY DEFERRED);
 ;
 
 const tables = [_][]const u8{
@@ -112,7 +114,7 @@ const tables = [_][]const u8{
     "supply_policy",      "stock_policy",           "faction_cooling",        "faction_standing", "event_memory",      "listing",            "part_order",            "event_log",     "pending_event",
     "refit_plan",         "refit_op",               "rating_snapshot",        "battle_report",    "battle_report_hit", "battle_report_ammo", "battle_report_salvage", "rng_stream",    "operation",
     "operation_task",     "operation_intervention", "battle_report_task",     "actor",            "world_state",       "rival",              "officer_arc",           "hull_instance", "hull_loadout",
-    "hull_combat_record", "maintenance_entry",      "hull_ownership_history",
+    "hull_combat_record", "maintenance_entry",      "hull_ownership_history", "faction_roster",   "rival_roster",
 };
 
 // Indexes for per-campaign tables (A28/D31): cid filters on every load;
@@ -176,6 +178,8 @@ const index_ddl =
     \\CREATE INDEX IF NOT EXISTS ix_hull_combat_record_cid ON hull_combat_record(cid);
     \\CREATE INDEX IF NOT EXISTS ix_maintenance_entry_cid ON maintenance_entry(cid);
     \\CREATE INDEX IF NOT EXISTS ix_hull_ownership_history_cid ON hull_ownership_history(cid);
+    \\CREATE INDEX IF NOT EXISTS ix_faction_roster_cid ON faction_roster(cid);
+    \\CREATE INDEX IF NOT EXISTS ix_rival_roster_cid ON rival_roster(cid);
 ;
 
 /// The stream order of the single `rng` blob that saves before schema v32
@@ -315,6 +319,10 @@ pub const Store = struct {
         .{ .from = 51, .to = 52, .table = "hull_instance", .column = "owner_type", .sql = "ALTER TABLE hull_instance ADD COLUMN owner_type TEXT NOT NULL DEFAULT 'player'" },
         .{ .from = 51, .to = 52, .table = "hull_instance", .column = "owner_faction_key", .sql = "ALTER TABLE hull_instance ADD COLUMN owner_faction_key TEXT NOT NULL DEFAULT ''" },
         .{ .from = 51, .to = 52, .table = "hull_instance", .column = "owner_rival_id", .sql = "ALTER TABLE hull_instance ADD COLUMN owner_rival_id INTEGER NOT NULL DEFAULT 0" },
+        // v53 (P3e.3): faction_roster + rival_roster tables (docs/p3c-economy-design.md §2).
+        // New tables — applySchema's ddl creates them. Old saves open with zero rosters.
+        .{ .from = 52, .to = 53, .table = "faction_roster", .column = "", .sql = "CREATE TABLE IF NOT EXISTS faction_roster (cid INTEGER NOT NULL, ord INTEGER NOT NULL, faction_key TEXT NOT NULL, hull_instance_id INTEGER NOT NULL, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, hull_instance_id) REFERENCES hull_instance(cid, id) DEFERRABLE INITIALLY DEFERRED)" },
+        .{ .from = 52, .to = 53, .table = "rival_roster", .column = "", .sql = "CREATE TABLE IF NOT EXISTS rival_roster (cid INTEGER NOT NULL, ord INTEGER NOT NULL, rival_id INTEGER NOT NULL, hull_instance_id INTEGER NOT NULL, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, rival_id) REFERENCES rival(cid, id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, hull_instance_id) REFERENCES hull_instance(cid, id) DEFERRABLE INITIALLY DEFERRED)" },
     };
 
     pub fn open(path: [*:0]const u8) !Store {
@@ -639,6 +647,8 @@ pub const Store = struct {
         try self.saveRivals(gs, cid);
         try self.saveOfficerArcs(gs, cid);
         try self.saveWorldStates(gs, cid);
+        try self.saveFactionRosters(gs, cid);
+        try self.saveRivalRosters(gs, cid);
         try self.saveTxn(gs, cid);
         try self.saveLoan(gs, cid);
         try self.saveCourier(gs, cid);
@@ -1476,6 +1486,77 @@ pub const Store = struct {
         }
     }
 
+    // P3e.3: save and load faction/rival roster collections.
+
+    /// Save faction_rosters: one row per (faction_key, hull_instance_id) pair,
+    /// ordered by global insertion order so load restores exact map+list order
+    /// (docs/p3c-economy-design.md §2; rules 2, 49, 53).
+    fn saveFactionRosters(self: Store, gs: *GameState, cid: i64) !void {
+        const st = try self.db.prepare("INSERT INTO faction_roster VALUES (?1,?2,?3,?4)");
+        defer st.finalize();
+        var ord: i64 = 0;
+        var it = gs.faction_rosters.iterator();
+        while (it.next()) |entry| {
+            for (entry.value_ptr.items) |hid| {
+                try st.bindAll(.{ cid, ord, entry.key_ptr.*, @as(i64, @intFromEnum(hid)) });
+                try st.run();
+                ord += 1;
+            }
+        }
+    }
+
+    /// Load faction_rosters from the faction_roster table. Keys and values are
+    /// appended in ord order, restoring the original insertion order for both
+    /// the map and each hull list. faction_key is validated centrally by
+    /// validateStoredStrings (Check.house); member hull ids by validateReferences.
+    fn loadFactionRosters(self: Store, gs: *GameState, cid: i64) !void {
+        const alloc = gs.allocator();
+        const st = try self.db.prepare("SELECT faction_key, hull_instance_id FROM faction_roster WHERE cid = ?1 ORDER BY ord");
+        defer st.finalize();
+        try st.bindAll(.{cid});
+        while (try st.next()) {
+            const key = try st.text(0, alloc);
+            const hid = try toId(types.HullInstanceId, st.int(1));
+            if (hid == .none) return error.CorruptSave; // a roster member must be a real hull id
+            const gop = try gs.faction_rosters.getOrPut(alloc, key);
+            if (!gop.found_existing) gop.value_ptr.* = .empty;
+            try gop.value_ptr.append(alloc, hid);
+        }
+    }
+
+    /// Save rival_rosters: one row per (rival_id, hull_instance_id) pair.
+    fn saveRivalRosters(self: Store, gs: *GameState, cid: i64) !void {
+        const st = try self.db.prepare("INSERT INTO rival_roster VALUES (?1,?2,?3,?4)");
+        defer st.finalize();
+        var ord: i64 = 0;
+        var it = gs.rival_rosters.iterator();
+        while (it.next()) |entry| {
+            for (entry.value_ptr.items) |hid| {
+                try st.bindAll(.{ cid, ord, @as(i64, @intFromEnum(entry.key_ptr.*)), @as(i64, @intFromEnum(hid)) });
+                try st.run();
+                ord += 1;
+            }
+        }
+    }
+
+    /// Load rival_rosters from the rival_roster table. rival_id and member hull ids
+    /// are validated centrally by validateReferences (rule 47).
+    fn loadRivalRosters(self: Store, gs: *GameState, cid: i64) !void {
+        const alloc = gs.allocator();
+        const st = try self.db.prepare("SELECT rival_id, hull_instance_id FROM rival_roster WHERE cid = ?1 ORDER BY ord");
+        defer st.finalize();
+        try st.bindAll(.{cid});
+        while (try st.next()) {
+            const rid = try toId(types.RivalId, st.int(0));
+            if (rid == .none) return error.CorruptSave; // a roster keyed by none is corrupt
+            const hid = try toId(types.HullInstanceId, st.int(1));
+            if (hid == .none) return error.CorruptSave; // a roster member must be a real hull id
+            const gop = try gs.rival_rosters.getOrPut(alloc, rid);
+            if (!gop.found_existing) gop.value_ptr.* = .empty;
+            try gop.value_ptr.append(alloc, hid);
+        }
+    }
+
     // Ledger and the rest of the lists.
     fn saveTxn(self: Store, gs: *GameState, cid: i64) !void {
         const st = try self.db.prepare("INSERT INTO txn VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)");
@@ -1856,6 +1937,8 @@ pub const Store = struct {
         try self.loadRivals(&gs, cid);
         try self.loadOfficerArcs(&gs, cid);
         try self.loadWorldStates(&gs, cid);
+        try self.loadFactionRosters(&gs, cid);
+        try self.loadRivalRosters(&gs, cid);
         try self.loadTxn(&gs, cid);
         try self.loadLoan(&gs, cid);
         try self.loadCourier(&gs, cid);
@@ -3338,6 +3421,8 @@ fn validateStoredStrings(gs: *GameState) error{CorruptSave}!void {
             try Check.shown(e.description);
         }
     }
+    // Faction rosters: every roster key must name a known faction (rule 47, 50).
+    for (gs.faction_rosters.keys()) |k| try Check.house(k);
     // Ownership history: prior_owner_key is free provenance (may name a gone
     // entity) so it is NOT catalogue-validated, only markup-safe (rule 50).
     for (gs.hull_ownership_history.items) |e| try Check.shown(e.prior_owner_key);
@@ -3463,6 +3548,19 @@ fn validateReferences(gs: *GameState) error{CorruptSave}!void {
         .hq => |id| try Ref.inMap(types.HqId, id, gs.hqs),
         .company => |id| try Ref.inMap(types.ForceId, id, gs.forces),
     };
+    // Faction/rival rosters: every member hull must resolve to a live hull
+    // instance; each rival roster key must name a live rival (rule 47).
+    {
+        var frit = gs.faction_rosters.iterator();
+        while (frit.next()) |e| for (e.value_ptr.items) |hid|
+            try Ref.inMap(types.HullInstanceId, hid, gs.hull_instances);
+        var rrit = gs.rival_rosters.iterator();
+        while (rrit.next()) |e| {
+            try Ref.inMap(types.RivalId, e.key_ptr.*, gs.rivals);
+            for (e.value_ptr.items) |hid|
+                try Ref.inMap(types.HullInstanceId, hid, gs.hull_instances);
+        }
+    }
 }
 
 /// Ensure every entity counter exceeds the maximum owned id; detect
@@ -4580,8 +4678,8 @@ test "a rebuilt store loads to the identical digest" {
     // Digest is identical: the rebuild changed no data.
     var diff_buf: [128]u8 = undefined;
     try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &diff_buf) orelse "");
-    // Re-pinned by P3e.2 (HullInstance owner field).
-    try std.testing.expectEqual(@as(u64, 1794298748863454791), hash_before);
+    // Re-pinned by P3e.3 (FactionRoster/RivalRoster collections).
+    try std.testing.expectEqual(@as(u64, 16341266972671676801), hash_before);
 }
 
 test "every next-ID counter resumes past a higher owned id after load" {
@@ -5076,8 +5174,8 @@ test "golden master: a played year hashes to its pinned value, and a save of it 
     try playedYearForTest(&gs);
     try std.testing.expect(gs.battle_reports.kept.items.len > 0); // the year saw fighting
     // Any change to a simulated or saved result moves this; re-pin it only
-    // when the change is meant. Re-pinned by P3e.2 (HullInstance owner field).
-    try std.testing.expectEqual(@as(u64, 1794298748863454791), digest.stateHash(&gs));
+    // when the change is meant. Re-pinned by P3e.3 (FactionRoster/RivalRoster collections).
+    try std.testing.expectEqual(@as(u64, 16341266972671676801), digest.stateHash(&gs));
 
     const store = try Store.open(":memory:");
     defer store.close();
@@ -7419,6 +7517,166 @@ test "v51→v52 migration backfills all hull instances to owner='player' (P3e.2)
         try std.testing.expectEqual(hull_mod.OwnerType.player, std.meta.activeTag(e.value_ptr.owner));
         try std.testing.expect(e.value_ptr.owner == .player);
     }
+}
+
+// P3e.3: faction_roster + rival_roster persistence (rules 47, 67, 69).
+
+fn buildRosterGs(alloc: std.mem.Allocator) !GameState {
+    const hull_mod = @import("../domain/hull_instance.zig");
+    var gs = GameState.init(alloc, .{ .seed = 50001 });
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    const a = gs.allocator();
+
+    // One rival (id=1) so rival_rosters has a live FK target.
+    const rid1: types.RivalId = @enumFromInt(1);
+    const rv1: rival_mod.Rival = .{
+        .id = rid1,
+        .archetype_key = "enemy_raiders",
+        .commander_first = "Bo",
+        .commander_last = "Rex",
+        .unit_name = "Rex Raiders",
+        .faction_key = "DC",
+        .side = .enemy,
+        .doctrine = .aggressive,
+    };
+    try gs.commitRival(rv1);
+    gs.next_rival_id = 2;
+
+    // Three hull instances. Owners set consistently (hygiene; not validated by P3e.3).
+    const hid1: types.HullInstanceId = @enumFromInt(1);
+    const hid2: types.HullInstanceId = @enumFromInt(2);
+    const hid3: types.HullInstanceId = @enumFromInt(3);
+    try gs.hull_instances.put(a, hid1, .{ .id = hid1, .base_key = "LCT-1V", .status = .active, .owner = .{ .faction = "DC" } });
+    try gs.hull_instances.put(a, hid2, .{ .id = hid2, .base_key = "JR7-D", .status = .active, .owner = .{ .faction = "DC" } });
+    try gs.hull_instances.put(a, hid3, .{ .id = hid3, .base_key = "LCT-1V", .status = .active, .owner = .{ .rival = rid1 } });
+    gs.next_hull_instance_id = 4;
+
+    // Faction roster: DC owns hulls 1 and 2 (multi-element, tests order preservation).
+    const fr_gop = try gs.faction_rosters.getOrPut(a, "DC");
+    if (!fr_gop.found_existing) fr_gop.value_ptr.* = .empty;
+    try fr_gop.value_ptr.append(a, hid1);
+    try fr_gop.value_ptr.append(a, hid2);
+
+    // Rival roster: rival 1 owns hull 3.
+    const rr_gop = try gs.rival_rosters.getOrPut(a, rid1);
+    if (!rr_gop.found_existing) rr_gop.value_ptr.* = .empty;
+    try rr_gop.value_ptr.append(a, hid3);
+
+    _ = hull_mod.HullStatus.active; // suppress unused import warning
+    return gs;
+}
+
+/// Save a campaign with roster rows, corrupt it with `sql`, and try to load it.
+fn loadRosterAfterTampering(sql: [*:0]const u8) !void {
+    var gs = try buildRosterGs(std.testing.allocator);
+    defer gs.deinit();
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    try store.db.exec("PRAGMA foreign_keys = OFF");
+    try store.db.exec(sql);
+    try store.db.exec("PRAGMA foreign_keys = ON");
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    loaded.deinit();
+}
+
+test "faction and rival rosters survive a save/load round-trip with identical stateHash (P3e.3)" {
+    // Rules 47, 67 / P3e.3: a campaign with faction_rosters and rival_rosters survives
+    // save → load with an identical stateHash. Exercises saveFactionRosters/loadFactionRosters
+    // and saveRivalRosters/loadRivalRosters.
+    var gs = try buildRosterGs(std.testing.allocator);
+    defer gs.deinit();
+
+    const before = digest.stateHash(&gs);
+
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+
+    var diff_buf: [128]u8 = undefined;
+    try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &diff_buf) orelse "");
+    try std.testing.expectEqual(before, digest.stateHash(&loaded));
+
+    // Faction roster round-tripped with correct key count and order.
+    try std.testing.expectEqual(@as(usize, 1), loaded.faction_rosters.count());
+    const dc_list = loaded.faction_rosters.getPtr("DC") orelse return error.TestFailed;
+    try std.testing.expectEqual(@as(usize, 2), dc_list.items.len);
+    const hid1: types.HullInstanceId = @enumFromInt(1);
+    const hid2: types.HullInstanceId = @enumFromInt(2);
+    try std.testing.expectEqual(hid1, dc_list.items[0]);
+    try std.testing.expectEqual(hid2, dc_list.items[1]);
+
+    // Rival roster round-tripped.
+    try std.testing.expectEqual(@as(usize, 1), loaded.rival_rosters.count());
+    const rid1: types.RivalId = @enumFromInt(1);
+    const rv_list = loaded.rival_rosters.getPtr(rid1) orelse return error.TestFailed;
+    try std.testing.expectEqual(@as(usize, 1), rv_list.items.len);
+    const hid3: types.HullInstanceId = @enumFromInt(3);
+    try std.testing.expectEqual(hid3, rv_list.items[0]);
+}
+
+test "a v52 store migrates to v53 with the roster tables created (P3e.3)" {
+    // Rules 50, 51 / P3e.3: a store at schema v52 (no roster tables) must migrate to v53
+    // — applySchema creates both tables — and loading a campaign yields empty rosters.
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 50002 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+
+    const raw = try sqlite.Db.open(":memory:");
+    var s1 = try Store.fromDb(raw);
+    try s1.save(&gs);
+
+    // Simulate a v52 store: drop both roster tables and downgrade schema_version.
+    try raw.exec("PRAGMA foreign_keys = OFF");
+    try raw.exec("DROP TABLE faction_roster");
+    try raw.exec("DROP TABLE rival_roster");
+    try raw.exec("UPDATE setting SET value = 52 WHERE key = 'schema_version'");
+    try raw.exec("UPDATE campaign SET schema_version = 52");
+    try raw.exec("PRAGMA foreign_keys = ON");
+
+    // Re-open: fromDb sees v52, ddl creates both tables, schema advances to 53.
+    const s2 = try Store.fromDb(raw);
+    defer s2.close();
+    try std.testing.expectEqual(@as(i64, schema_version), s2.getSetting("schema_version", 0));
+
+    // Both tables exist and are empty.
+    const fc = try s2.db.prepare("SELECT COUNT(*) FROM faction_roster");
+    defer fc.finalize();
+    try std.testing.expect(try fc.next());
+    try std.testing.expectEqual(@as(i64, 0), fc.int(0));
+    const rc = try s2.db.prepare("SELECT COUNT(*) FROM rival_roster");
+    defer rc.finalize();
+    try std.testing.expect(try rc.next());
+    try std.testing.expectEqual(@as(i64, 0), rc.int(0));
+
+    // Loading yields empty rosters.
+    var loaded = try s2.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+    try std.testing.expectEqual(@as(usize, 0), loaded.faction_rosters.count());
+    try std.testing.expectEqual(@as(usize, 0), loaded.rival_rosters.count());
+}
+
+test "a faction_roster row naming no hull instance rejects the load as corrupt (P3e.3)" {
+    // Rule 47 / P3e.3: every faction_roster hull_instance_id must resolve to a live hull instance.
+    try std.testing.expectError(error.CorruptSave, loadRosterAfterTampering(
+        "UPDATE faction_roster SET hull_instance_id = 99999 WHERE hull_instance_id = 1",
+    ));
+}
+
+test "a faction_roster row with an unknown faction_key rejects the load as corrupt (P3e.3)" {
+    // Rule 47 / P3e.3: every faction_roster key must name a known faction (Check.house).
+    try std.testing.expectError(error.CorruptSave, loadRosterAfterTampering(
+        "UPDATE faction_roster SET faction_key = 'notahouse' WHERE faction_key = 'DC'",
+    ));
+}
+
+test "a rival_roster row naming no rival rejects the load as corrupt (P3e.3)" {
+    // Rule 47 / P3e.3: every rival_roster key must resolve to a live rival.
+    try std.testing.expectError(error.CorruptSave, loadRosterAfterTampering(
+        "UPDATE rival_roster SET rival_id = 99999 WHERE rival_id = 1",
+    ));
 }
 
 test "v50→v51 migration seeds one .initial ownership interval per owned hull (P3c.4)" {

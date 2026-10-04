@@ -335,6 +335,21 @@ pub const GameState = struct {
     /// handover (P3c.4). Flat child-row list; each row carries its hull_instance_id.
     hull_ownership_history: std.ArrayListUnmanaged(hull_instance_mod.HullOwnershipHistory) = .empty,
 
+    /// Living faction hull pools (P3e.3, docs/p3c-economy-design.md §2). Keyed
+    /// by FactionRow.key; the value is the ordered set of HullInstance ids the
+    /// faction currently owns. A key is present iff it owns ≥1 hull (an empty
+    /// pool is map absence). Empty at campaign start until P3e.4 seeds it. This
+    /// is the canonical source of which hulls a faction owns; HullInstance.owner
+    /// (.faction) is the per-hull mirror, and the two are kept consistent by the
+    /// producers added in P3e.4/P3e.5 (rule 20).
+    faction_rosters: std.StringArrayHashMapUnmanaged(std.ArrayListUnmanaged(types.HullInstanceId)) = .empty,
+
+    /// Living rival-company hull pools (P3e.3). Keyed by RivalId (FK into
+    /// GameState.rivals); value is the ordered set of owned HullInstance ids.
+    /// Same empty-pool-is-absence invariant and canonical-owner role as
+    /// faction_rosters. Empty until P3e.4 seeds it.
+    rival_rosters: std.AutoArrayHashMapUnmanaged(types.RivalId, std.ArrayListUnmanaged(types.HullInstanceId)) = .empty,
+
     /// Persistent bounded per-world state, keyed by planet_key (P4h.4).
     world_states: std.StringArrayHashMapUnmanaged(world_state_mod.WorldState) = .empty,
 
@@ -1021,6 +1036,8 @@ pub const GameState = struct {
         .{ "maintenance_entries", .persisted },
         .{ "hull_ownership_history", .persisted },
         .{ "next_hull_instance_id", .persisted },
+        .{ "faction_rosters", .persisted },
+        .{ "rival_rosters", .persisted },
         .{ "world_states", .persisted },
     };
 

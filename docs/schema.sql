@@ -1117,3 +1117,36 @@ CREATE TABLE hull_ownership_history (
     FOREIGN KEY (cid, hull_instance_id) REFERENCES hull_instance(cid, id) DEFERRABLE INITIALLY DEFERRED
 );
 CREATE INDEX IF NOT EXISTS ix_hull_ownership_history_cid ON hull_ownership_history(cid);
+
+-- faction_roster: living faction hull pools (P3e.3, docs/p3c-economy-design.md §2).
+-- One row per owned hull per faction. ord preserves insertion order for a deterministic
+-- round-trip digest (StringArrayHashMapUnmanaged key order is gameplay-significant).
+-- faction_key is a catalogue key (data/tables/factions.zon) validated by the loader
+-- (Check.house), NOT a DB FK — matching the hull owner_faction_key treatment.
+-- hull_instance_id is a validated containment FK.
+-- A key is present iff it owns ≥1 hull (empty pool = map absence; empty-list keys do not persist).
+-- Column order matches runtime (saveFactionRosters/loadFactionRosters).
+CREATE TABLE faction_roster (
+    cid              INTEGER NOT NULL,
+    ord              INTEGER NOT NULL,                  -- global insertion order (restores map+list order)
+    faction_key      TEXT    NOT NULL,                  -- FactionRow.key (catalogue-validated by loader)
+    hull_instance_id INTEGER NOT NULL,                  -- -> hull_instance.id (validated)
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED,
+    FOREIGN KEY (cid, hull_instance_id) REFERENCES hull_instance(cid, id) DEFERRABLE INITIALLY DEFERRED
+);
+CREATE INDEX IF NOT EXISTS ix_faction_roster_cid ON faction_roster(cid);
+
+-- rival_roster: living rival-company hull pools (P3e.3).
+-- One row per owned hull per rival. Same ord/order semantics as faction_roster.
+-- rival_id is a validated containment FK into rival; hull_instance_id likewise.
+-- Column order matches runtime (saveRivalRosters/loadRivalRosters).
+CREATE TABLE rival_roster (
+    cid              INTEGER NOT NULL,
+    ord              INTEGER NOT NULL,                  -- global insertion order
+    rival_id         INTEGER NOT NULL,                  -- -> rival.id (validated)
+    hull_instance_id INTEGER NOT NULL,                  -- -> hull_instance.id (validated)
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED,
+    FOREIGN KEY (cid, rival_id) REFERENCES rival(cid, id) DEFERRABLE INITIALLY DEFERRED,
+    FOREIGN KEY (cid, hull_instance_id) REFERENCES hull_instance(cid, id) DEFERRABLE INITIALLY DEFERRED
+);
+CREATE INDEX IF NOT EXISTS ix_rival_roster_cid ON rival_roster(cid);
