@@ -736,6 +736,10 @@ pub const Tuning = struct {
         /// // TUNE — no canonical BattleTech source.
         seed_inspections_min: u8,
         seed_inspections_max: u8,
+        /// Years of replenishment to seed into each manufacturing faction's pool
+        /// at campaign creation (docs/p3c-economy-design.md §4 — size TBD).
+        /// Pool size = replenishment_hulls_per_year × faction_roster_seed_years. // TUNE
+        faction_roster_seed_years: u16,
     },
     /// Real loss: how hulls die, what a rebuild needs, and when one is not
     /// worth it (TechManual hull destruction; CamOps salvage).

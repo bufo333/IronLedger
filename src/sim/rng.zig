@@ -17,6 +17,7 @@ pub const Stream = enum(u8) {
     travel,
     actors, // P4i: persistent actor identity and relationship seeds
     rivals, // P4i: persistent rival company identity seeds
+    rosters, // P3e.4: faction hull-pool seeding at campaign creation
 
     pub const count = @typeInfo(Stream).@"enum".fields.len;
 
@@ -35,6 +36,7 @@ pub const Stream = enum(u8) {
             .travel => 0xF1BBCDCBFA53E0A8,
             .actors => 0xC2B2AE3D27D4EB4F, // P4i actor identity generation
             .rivals => 0xA3F84D2E6B1C9057, // P4i rival company identity generation
+            .rosters => 0xBF58476D1CE4E5B9, // P3e.4 faction hull-pool seeding (save-meaning)
         };
     }
 };
@@ -127,4 +129,6 @@ test "stream salts are distinct and independent of enum order" {
     try std.testing.expectEqual(@as(u64, 0xC2B2AE3D27D4EB4F), Stream.actors.salt());
     // P4i: rivals stream salt pinned.
     try std.testing.expectEqual(@as(u64, 0xA3F84D2E6B1C9057), Stream.rivals.salt());
+    // P3e.4: rosters stream salt pinned.
+    try std.testing.expectEqual(@as(u64, 0xBF58476D1CE4E5B9), Stream.rosters.salt());
 }

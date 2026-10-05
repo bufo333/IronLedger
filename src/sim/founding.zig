@@ -15,6 +15,7 @@ const GameState = @import("state.zig").GameState;
 const hq_ops = @import("hq_ops.zig");
 const contract_market = @import("contract_market.zig");
 const commands = @import("commands.zig");
+const roster_seed = @import("roster_seed.zig");
 
 pub const CreateCommanderError = error{ CommanderExists, NoHomeWorld, UnknownSite } || std.mem.Allocator.Error;
 
@@ -238,6 +239,8 @@ pub fn execCreateCommander(gs: *GameState, c: @FieldType(Command, "create_comman
     try contract_market.refresh(gs);
     try contract_market.refreshListings(gs);
     try contract_market.refreshCandidates(gs);
+    // Seed manufacturing faction hull pools (P3e.4).
+    try roster_seed.seedFactionRosters(gs);
     return .{};
 }
 

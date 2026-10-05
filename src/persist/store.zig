@@ -4678,8 +4678,8 @@ test "a rebuilt store loads to the identical digest" {
     // Digest is identical: the rebuild changed no data.
     var diff_buf: [128]u8 = undefined;
     try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &diff_buf) orelse "");
-    // Re-pinned by P3e.3 (FactionRoster/RivalRoster collections).
-    try std.testing.expectEqual(@as(u64, 16341266972671676801), hash_before);
+    // Re-pinned by P3e.4 (faction hull-pool seeding at campaign creation).
+    try std.testing.expectEqual(@as(u64, 13407957612939265597), hash_before);
 }
 
 test "every next-ID counter resumes past a higher owned id after load" {
@@ -5174,8 +5174,8 @@ test "golden master: a played year hashes to its pinned value, and a save of it 
     try playedYearForTest(&gs);
     try std.testing.expect(gs.battle_reports.kept.items.len > 0); // the year saw fighting
     // Any change to a simulated or saved result moves this; re-pin it only
-    // when the change is meant. Re-pinned by P3e.3 (FactionRoster/RivalRoster collections).
-    try std.testing.expectEqual(@as(u64, 16341266972671676801), digest.stateHash(&gs));
+    // when the change is meant. Re-pinned by P3e.4 (faction hull-pool seeding at campaign creation).
+    try std.testing.expectEqual(@as(u64, 13407957612939265597), digest.stateHash(&gs));
 
     const store = try Store.open(":memory:");
     defer store.close();
@@ -7728,4 +7728,36 @@ test "v50→v51 migration seeds one .initial ownership interval per owned hull (
         const expected_day = acquired_days.get(row.hull_instance_id) orelse return error.TestFailed;
         try std.testing.expectEqual(expected_day, row.from_day);
     }
+}
+
+test "seeded faction hull pool survives a save/load round-trip with identical stateHash (P3e.4)" {
+    // Rules 47, 67 / P3e.4: a campaign seeded with faction hull pools via
+    // create_commander survives save → load with an identical stateHash.
+    // Exercises saveFactionRosters/loadFactionRosters on the production seeded
+    // shape (owner + provenance + membership), not the hand-built synthetic rows
+    // used by the P3e.3 round-trip test.
+    const commands = @import("../sim/commands.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 50010 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{
+        .name = "Kerensky",
+        .origin = .LC,
+        .profession = .line_officer,
+        .start_year = 3025,
+    } });
+
+    const before = digest.stateHash(&gs);
+    // Five manufacturing factions must have rosters.
+    try std.testing.expectEqual(@as(usize, 5), gs.faction_rosters.count());
+
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+
+    var diff_buf: [128]u8 = undefined;
+    try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &diff_buf) orelse "");
+    try std.testing.expectEqual(before, digest.stateHash(&loaded));
+    try std.testing.expectEqual(@as(usize, 5), loaded.faction_rosters.count());
 }

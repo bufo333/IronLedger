@@ -92,7 +92,9 @@ pub const contract_market = @import("sim/contract_market.zig");
 
 // gen/ — procedural generation
 pub const company_gen = @import("gen/company_gen.zig");
+pub const roster_gen = @import("gen/roster_gen.zig");
 pub const starter_company = @import("sim/starter_company.zig");
+pub const roster_seed = @import("sim/roster_seed.zig");
 pub const person_gen = @import("gen/person_gen.zig");
 
 test {

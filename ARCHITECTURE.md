@@ -853,6 +853,15 @@ pro-rated slice of the advance back, forfeits remaining payments, −2
 reputation, and a cooling period with the employer's faction (their offers
 run thinner and cheaper for about a year).
 
+**Faction hull pools** (P3e.4). At `create_commander`, every manufacturing
+faction (nonzero `replenishment_hulls_per_year`) receives a seeded pool of
+`replenishment_hulls_per_year × generation.faction_roster_seed_years` hull
+instances drawn deterministically from the RAT via `gen/roster_gen.zig` on
+the dedicated `.rosters` RNG stream. Each hull is a `HullInstance` with
+`owner = .{ .faction = key }` and one open `.initial` provenance interval;
+membership is written to `faction_rosters` in the same atomic commit as the
+hull record. Rival roster seeding is deferred to P3e.5.
+
 ## 12. Persistence
 
 SQLite: **one store file, many campaigns** (Stage 11). Every table carries a

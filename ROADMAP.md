@@ -1431,6 +1431,13 @@ P3e.1–P3e.7 (faction data; HullInstance owner fields; roster persistence; camp
 seeding; battle aftermath; market throughput; rival insolvency), the economy design
 approval first.
 
+P3e.4 delivered: at `create_commander`, every manufacturing faction (nonzero
+`replenishment_hulls_per_year`) is deterministically seeded a hull pool of
+`replenishment_hulls_per_year × faction_roster_seed_years` hulls drawn from the
+RAT via `gen/roster_gen.zig`; orchestrated by `sim/roster_seed.zig` on the
+dedicated `.rosters` RNG stream. Rival roster seeding deferred to P3e.5
+(no rivals exist at campaign creation).
+
 ## Product completion P4 — Campaign operations and stories
 
 Begins only after the ordered contract, test, data-verification, and P1–P3

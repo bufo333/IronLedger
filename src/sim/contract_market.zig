@@ -1634,11 +1634,12 @@ test "buying a hull listing creates a HullInstance and an open purchase ownershi
     const lid = gs.market_listings.items[gs.market_listings.items.len - 1].id;
     _ = try commands.execute(&gs, .{ .buy_listing = lid });
 
-    // Bought unit must have a linked instance and exactly one purchase row.
+    // Bought unit must have a linked instance and a purchase ownership row.
+    // Faction-pool rows seeded at campaign creation (P3e.4) precede it.
     const u = &gs.units.values()[gs.units.count() - 1];
     try std.testing.expect(u.hull_instance_id != .none);
-    try std.testing.expectEqual(@as(usize, 1), gs.hull_ownership_history.items.len);
-    const row = gs.hull_ownership_history.items[0];
+    // The purchase row is the last entry; earlier entries belong to seeded faction hulls.
+    const row = gs.hull_ownership_history.items[gs.hull_ownership_history.items.len - 1];
     try std.testing.expectEqual(u.hull_instance_id, row.hull_instance_id);
     try std.testing.expectEqual(@import("../domain/hull_instance.zig").AcquisitionType.purchase, row.acquisition_type);
     try std.testing.expectEqualStrings("unknown", row.prior_owner_key);
@@ -1663,8 +1664,11 @@ test "a funds-short buy refusal creates no HullInstance and no ownership row" {
     });
     gs.next_listing_id += 1;
     const lid = gs.market_listings.items[gs.market_listings.items.len - 1].id;
+    // Record the hull_ownership_history count before the failed buy (includes seeded faction-pool
+    // rows from P3e.4 create_commander seeding); a failed buy must add nothing.
+    const before_count = gs.hull_ownership_history.items.len;
     try std.testing.expectError(error.HqTreasuryShort, commands.execute(&gs, .{ .buy_listing = lid }));
-    try std.testing.expectEqual(@as(usize, 0), gs.hull_ownership_history.items.len);
+    try std.testing.expectEqual(before_count, gs.hull_ownership_history.items.len);
     // No new unit added.
     for (gs.units.values()) |u| try std.testing.expectEqual(@import("../domain/types.zig").HullInstanceId.none, u.hull_instance_id);
 }

@@ -469,6 +469,7 @@
         .starter_light_max = 5,
         .seed_inspections_min = 1, // TUNE
         .seed_inspections_max = 3, // TUNE
+        .faction_roster_seed_years = 2, // TUNE
     },
     // Real loss. TechManual "Destroying a 'Mech": a cored
     // centre torso, a destroyed engine (three engine criticals) or an
