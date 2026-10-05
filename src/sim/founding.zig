@@ -241,6 +241,8 @@ pub fn execCreateCommander(gs: *GameState, c: @FieldType(Command, "create_comman
     try contract_market.refreshCandidates(gs);
     // Seed manufacturing faction hull pools (P3e.4).
     try roster_seed.seedFactionRosters(gs);
+    // Seed world merc company hull pools (P3e.5a).
+    try roster_seed.seedMercCompanies(gs);
     return .{};
 }
 

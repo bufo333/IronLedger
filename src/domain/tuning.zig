@@ -740,6 +740,12 @@ pub const Tuning = struct {
         /// at campaign creation (docs/p3c-economy-design.md §4 — size TBD).
         /// Pool size = replenishment_hulls_per_year × faction_roster_seed_years. // TUNE
         faction_roster_seed_years: u16,
+        /// World merc companies to seed at campaign creation
+        /// (docs/p3c-economy-design.md §8.D). // TUNE
+        merc_company_count: u16,
+        /// Hull pool size for each world merc company at campaign creation
+        /// (docs/p3c-economy-design.md §8.D). // TUNE
+        merc_company_hulls_each: u16,
     },
     /// Real loss: how hulls die, what a rebuild needs, and when one is not
     /// worth it (TechManual hull destruction; CamOps salvage).

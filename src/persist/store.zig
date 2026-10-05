@@ -4797,9 +4797,8 @@ test "a rebuilt store loads to the identical digest" {
     // Digest is identical: the rebuild changed no data.
     var diff_buf: [128]u8 = undefined;
     try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &diff_buf) orelse "");
-    // Re-pinned by the pre-P3e.5 entity split (GameState field rename merc_company_rosters +
-    // new merc_companies/next_merc_company_id; collections empty).
-    try std.testing.expectEqual(@as(u64, 10587386975220911353), hash_before);
+    // Re-pinned by P3e.5a merc-company seeding (12 companies × 8 hulls at campaign start).
+    try std.testing.expectEqual(@as(u64, 9433690443265264857), hash_before);
 }
 
 test "every next-ID counter resumes past a higher owned id after load" {
@@ -5294,9 +5293,9 @@ test "golden master: a played year hashes to its pinned value, and a save of it 
     try playedYearForTest(&gs);
     try std.testing.expect(gs.battle_reports.kept.items.len > 0); // the year saw fighting
     // Any change to a simulated or saved result moves this; re-pin it only
-    // when the change is meant. Re-pinned by the pre-P3e.5 entity split (GameState field rename
-    // merc_company_rosters + new merc_companies/next_merc_company_id; collections empty).
-    try std.testing.expectEqual(@as(u64, 10587386975220911353), digest.stateHash(&gs));
+    // when the change is meant. Re-pinned by P3e.5a merc-company seeding
+    // (12 companies × 8 hulls at campaign start).
+    try std.testing.expectEqual(@as(u64, 9433690443265264857), digest.stateHash(&gs));
 
     const store = try Store.open(":memory:");
     defer store.close();
@@ -8033,4 +8032,40 @@ test "seeded faction hull pool survives a save/load round-trip with identical st
     try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &diff_buf) orelse "");
     try std.testing.expectEqual(before, digest.stateHash(&loaded));
     try std.testing.expectEqual(@as(usize, 5), loaded.faction_rosters.count());
+}
+
+test "seeded merc company hull pool survives a save/load round-trip with identical stateHash (P3e.5a)" {
+    // Rules 47, 67 / P3e.5a: a campaign seeded with merc company hull pools via
+    // create_commander survives save → load with an identical stateHash.
+    // Exercises saveMercCompanies/loadMercCompanies and
+    // saveMercCompanyRosters/loadMercCompanyRosters on the production seeded
+    // shape (owner + provenance + membership).
+    const commands = @import("../sim/commands.zig");
+    const tuning = @import("../domain/tuning.zig").t;
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 50011 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{
+        .name = "Kerensky",
+        .origin = .LC,
+        .profession = .line_officer,
+        .start_year = 3025,
+    } });
+
+    const before = digest.stateHash(&gs);
+    // Merc companies and rosters must be non-empty after seeding.
+    try std.testing.expect(gs.merc_companies.count() > 0);
+    try std.testing.expect(gs.merc_company_rosters.count() > 0);
+    try std.testing.expectEqual(@as(usize, tuning.generation.merc_company_count), gs.merc_companies.count());
+
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+
+    var diff_buf: [128]u8 = undefined;
+    try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &diff_buf) orelse "");
+    try std.testing.expectEqual(before, digest.stateHash(&loaded));
+    try std.testing.expectEqual(gs.merc_companies.count(), loaded.merc_companies.count());
+    try std.testing.expectEqual(gs.merc_company_rosters.count(), loaded.merc_company_rosters.count());
 }

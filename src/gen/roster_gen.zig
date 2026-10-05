@@ -9,6 +9,8 @@ const chassis = @import("../domain/chassis.zig");
 const rat = @import("../domain/rat.zig");
 const company_gen = @import("company_gen.zig");
 const rng_mod = @import("../sim/rng.zig");
+const person_gen = @import("person_gen.zig");
+const rival_mod = @import("../domain/rival.zig");
 
 /// Roll one chassis for a faction's hull pool.
 /// Draws weight class via the RAT 2d6 distribution (`company_gen.rollWeightClass`),
@@ -36,6 +38,53 @@ pub fn rollFactionPool(
 ) void {
     for (out) |*slot| {
         slot.* = rollFactionPoolOne(rng, stream, faction_key, year).key;
+    }
+}
+
+/// Roll identity fields for a world merc company (P3e.5a,
+/// docs/p3c-economy-design.md §8.D). Pure: no allocation, no GameState.
+/// Draws commander first/last from person_gen.names on the given stream.
+/// Side and doctrine are derived from the archetype (same derivation as
+/// rivals.generateRival). faction_key is accepted so the caller's signature
+/// is stable when pool selection is added; pool selection (rollFactionPoolOne)
+/// remains the caller's responsibility.
+pub fn rollMercCompanyIdentity(
+    rng: *rng_mod.Rng,
+    stream: rng_mod.Stream,
+    archetype: *const rival_mod.RivalArchetype,
+    faction_key: []const u8,
+) struct { first: []const u8, last: []const u8, side: rival_mod.FactionSide, doctrine: rival_mod.RivalDoctrine } {
+    _ = faction_key;
+    const r = rng.random(stream);
+    const first = person_gen.names.first[r.uintLessThan(usize, person_gen.names.first.len)];
+    const last = person_gen.names.last[r.uintLessThan(usize, person_gen.names.last.len)];
+    const side = std.meta.stringToEnum(rival_mod.FactionSide, archetype.faction_side) orelse .employer;
+    const doctrine = std.meta.stringToEnum(rival_mod.RivalDoctrine, archetype.doctrine) orelse .cautious;
+    return .{ .first = first, .last = last, .side = side, .doctrine = doctrine };
+}
+
+test "rollMercCompanyIdentity: deterministic and side/doctrine match archetype" {
+    // Table-driven: two archetypes, one representative invariant each.
+    const archetypes = rival_mod.table.archetypes;
+    try std.testing.expect(archetypes.len >= 2);
+
+    // For each test archetype: same seed + stream + archetype → identical result;
+    // side and doctrine exactly match the archetype's parsed values.
+    for ([_]usize{ 0, 1 }) |ai| {
+        const archetype = &archetypes[ai];
+        var rng_a = rng_mod.Rng.init(54321);
+        var rng_b = rng_mod.Rng.init(54321);
+        const id_a = rollMercCompanyIdentity(&rng_a, .rivals, archetype, "LC");
+        const id_b = rollMercCompanyIdentity(&rng_b, .rivals, archetype, "LC");
+        try std.testing.expectEqualStrings(id_a.first, id_b.first);
+        try std.testing.expectEqualStrings(id_a.last, id_b.last);
+        try std.testing.expectEqual(id_a.side, id_b.side);
+        try std.testing.expectEqual(id_a.doctrine, id_b.doctrine);
+        // side and doctrine must match the archetype exactly.
+        const expected_side = std.meta.stringToEnum(rival_mod.FactionSide, archetype.faction_side).?;
+        const expected_doctrine = std.meta.stringToEnum(rival_mod.RivalDoctrine, archetype.doctrine).?;
+        try std.testing.expectEqual(expected_side, id_a.side);
+        try std.testing.expectEqual(expected_doctrine, id_a.doctrine);
     }
 }
 
