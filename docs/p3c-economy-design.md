@@ -28,10 +28,12 @@ authoritative. They are not re-opened by implementation.
    `HullInstance` records owned by that faction. Hulls flow from the faction roster to
    the open market only when the faction has a surplus. Hulls committed to battle are
    drawn from the pool; destroyed hulls are gone; salvaged hulls transfer ownership.
-2. **Rival merc companies.** Each rival company (already persisted, `src/domain/rival.zig`,
-   P4i) has a hull pool under the same ownership model as a faction, subject to attrition
-   and insolvency. A rival that loses too many hulls cannot meet contract battle-value
-   requirements and eventually goes insolvent.
+2. **Rival merc companies.** The world has a fixed, deterministically-seeded set of
+   independent **merc companies**, each owning a hull pool under the same ownership model
+   as a faction, subject to attrition and insolvency. A P4i "rival" is a *relationship
+   status* an arc attaches to one of these merc companies, not a separate entity. The
+   entity boundary this implies is recorded in §8 (design revision, supersedes the
+   RivalRoster framing of §2 where they differ).
 3. **Market throughput governed by faction conflict state.** Factions under pressure
    replenish their own roster first, so surplus flow to the market drops. World state —
    faction conflict intensity, already represented via P4i `world_state`
@@ -50,6 +52,12 @@ integration", this document governs.
 ---
 
 ## §2 Entity model
+
+> Revision (P3e.5 prerequisite): the pool owner named 'RivalRoster' below is a world
+> **merc company**, not a P4i story rival. The collection and its key are renamed per §8.
+> The FactionRoster model and the HullInstance current-owner model are unchanged except
+> that the `.rival` owner kind is renamed to `.merc_company` (§8.F). Keep this section's
+> numbering: downstream code cites §2.
 
 The economy adds two persisted roster entity families and extends two existing records.
 It introduces no new world-state dimension and reuses the existing RAT.
@@ -210,6 +218,12 @@ prerequisite for all of it.
 - **P3e.4 — Campaign-start roster seeding.** Deterministic `src/gen/` seeding from the
   campaign seed, the RAT (`rat.zon`) and the faction manufacturing data; named RNG
   stream; pure core.
+  World-actor revision (§8): before P3e.5, a dedicated increment introduces the
+  `MercCompany` entity and `MercCompanyId`, renames `rival_rosters` →
+  `merc_company_rosters` and rekeys it, and renames the HullInstance `.rival` owner kind
+  to `.merc_company` (schema migration). P3e.5 then seeds merc companies at campaign
+  start and draws OpFor from faction, merc-company, and pirate (PER) pools. Exact
+  increment numbering is fixed when the owner dispatches it.
 - **P3e.5 — Battle aftermath integration.** OpFor force drawn from the faction/rival
   roster; post-battle destroyed/salvaged/surviving ownership and status updates in the
   existing failure-atomic aftermath path.
@@ -256,5 +270,183 @@ This design-approval increment is approved when the owner confirms:
       independently correct, prerequisite P3c.
 - [ ] Hull-lifecycle increments (§6): P3c.3/P3c.5/P3c.6 unblocked; P3c.4 re-scoped to the
       ownership chain.
+- [ ] World-actor model (§8): design revision recorded; merc-company entity,
+      rival-as-status boundary, PER pirate finding, campaign-start seeding, OpFor
+      sourcing, rename/rekey inventory, and delivery-order impact.
 
 Approval authorizes P3e.1 to begin; it commits no code.
+
+---
+
+## §8 World-actor model (design revision)
+
+This section records owner decisions made after §1–§7 were approved and after P3e.1–P3e.4
+shipped. Where it conflicts with the "Rival merc companies" framing of §1 decision 2 or the
+"RivalRoster" naming of §2, this section governs. It changes no shipped behaviour by itself;
+it defines the entity model the remaining increments (the pre-P3e.5 entity split, P3e.5,
+P3e.7, and P3f) implement. The P4i arc, standing, and recurrence machinery
+(`src/sim/rivals.zig`, `src/domain/rival.zig`) is unaffected in behaviour.
+
+### §8.A The world merc-company entity
+
+A "rival" is a *relationship status*, not an entity type. The persistent world actor is an
+independent **merc company** that exists in the world whether or not any story has selected
+it. The same company can be OpFor on one contract and an ally on another; becoming a "rival"
+is the P4i arc system choosing it for story beats (§8.B).
+
+**Decision: introduce a new entity `MercCompany` with its own typed id `MercCompanyId`**
+(`enum(u32) { none = 0, _ }`, the established typed-ID pattern in `src/domain/types.zig`).
+`MercCompany` owns the durable company identity: archetype key (into
+`rival_archetypes.zon`), generated commander name, unit name, home/affiliation faction key,
+and operational doctrine — the identity fields that today live on `Rival`
+(`src/domain/rival.zig`). The existing `RivalId` is **not** reused as the company id,
+because `RivalId` already names the P4i status overlay and its arc machinery; conflating the
+two is exactly the misnomer this revision removes.
+
+The hull-pool infrastructure delivered by P3e.3 is currently keyed by `RivalId`
+(`GameState.rival_rosters`) and the HullInstance `.rival` owner kind carries a `RivalId`
+(`src/domain/hull_instance.zig`, schema v52/v53). Under this model that keying moves to
+`MercCompanyId`; the full rename/rekey inventory is §8.F. No numeric `FactionId` is
+introduced — faction rosters stay keyed by the existing `FactionRow.key` string, as §2
+already recommends.
+
+One open sub-question, deferred to the entity-split implementation increment and marked
+`// TBD`: whether the identity fields currently duplicated on `Rival` (commander name, unit
+name, archetype, doctrine, faction key) are *removed from* `Rival` and read through the
+`MercCompanyId` FK, or retained on `Rival` as a snapshot. This is a persistence/migration
+shape decision, not a product-behaviour decision; it does not change the boundary in §8.B.
+
+### §8.B The P4i "rival" as a status overlay
+
+A P4i `Rival` record becomes a *relationship overlay* attached to a `MercCompany` that
+already exists. Arc introduction (`instantiateRivals`/`introduceRivals` in
+`src/sim/rivals.zig`) means "this world merc company has now been chosen for story beats",
+not entity creation. The boundary:
+
+- **On `MercCompany` (identity, world-persistent):** archetype key, commander name, unit
+  name, affiliation faction key, doctrine, and the owned hull pool (§8.F). Exists from
+  campaign start (§8.D).
+- **On the `Rival` overlay (relationship, story-scoped):** `standing` (clamped
+  `rival_min..rival_max`), derived `RivalStatus`, `encounters`,
+  `last_cause`/`last_cause_day`, `recurring`, the introducing `contract`, and `side`
+  (employer/enemy for that contract). It carries a `MercCompanyId` FK to the company it is
+  a status for.
+
+The standing/recurrence rules (`statusFor`, `priorRival`, `adjustRival`,
+`outcomeRivalStandingDelta`, `finaleRivalStandingDelta`) are unchanged; their recurrence
+lookup, today keyed by `(faction_key, archetype_key)`, is expressed against the merc company
+the overlay points at. // TBD: whether recurrence keys directly on `MercCompanyId` is
+settled at the entity-split increment.
+
+### §8.C Pirates / bandits / non-aligned — verified: the `PER` faction key
+
+Verified against `data/tables/factions.zon` and `data/tables/rat.zon` at the base commit:
+pirates/bandits/near-Periphery are **already a thin faction**, key `"PER"` ("Periphery /
+pirates"). It has:
+
+- a `FactionRow` in `factions.zon` with an **empty** `manufacturing_chassis` (salvage-only
+  per §1 decision 4) and `replenishment_hulls_per_year = 0`;
+- a real RAT row in `rat.zon` (light/medium/heavy/assault pools);
+- existing OpFor handling: `src/domain/opfor.zig` `roll(...)` special-cases
+  `enemy_key == "PER"` with a pirate quality modifier.
+
+No new faction key is invented and no separate pirate entity is needed. The third OpFor
+category is drawn from the `PER` faction pool exactly like a house faction, with a different
+*lifecycle*: because PER manufactures nothing, its pool is replenished only by salvage, never
+by manufacturing. Because P3e.4 seeds only factions with nonzero
+`replenishment_hulls_per_year`, PER is **not seeded** at campaign start today. Open
+decision, `// TBD`: whether PER (and other zero-replenishment thin factions) receive a
+seeded starting pool so pirate OpFor can be drawn from persisted hulls, or whether pirate
+OpFor continues to be RAT-rolled on demand (`opfor.roll`) and never persisted as a pool.
+This is settled at P3e.5.
+
+### §8.D Campaign-start merc-company seeding
+
+A fixed set of independent merc companies is seeded deterministically at campaign creation
+(`create_commander`), in the same founding path that P3e.4 uses to seed faction hull pools
+(`src/sim/roster_seed.zig` orchestrating `src/gen/roster_gen.zig`). They are **not** created
+by arc events; arcs select from this existing pool (§8.B).
+
+- **Archetype source:** the existing `rival_archetypes.zon` (`src/domain/rival.zig`
+  `table`). No new data family.
+- **Count:** a fixed campaign-start company count — `// TBD`, sourced at implementation;
+  not invented here.
+- **RNG:** company identity is generated on the existing `.rivals` named stream (the stream
+  `generateRival` already uses, so determinism and stream-isolation guarantees carry over);
+  each seeded company's hull pool is rolled on the `.rosters` stream P3e.4 introduced. Draw
+  order and whether a distinct stream is warranted are fixed at implementation and must
+  preserve the pure-core / named-stream contract (rules 2, 6, 57).
+
+**What changes relative to P3e.4:** P3e.4 seeds only faction pools and explicitly defers
+rival/company seeding ("no rivals exist at campaign creation"). Under this model the founding
+path additionally (a) instantiates the fixed set of `MercCompany` identities and (b) seeds
+each company's hull pool into `merc_company_rosters` (the renamed collection, §8.F). The P4i
+arc system then attaches `Rival` overlays to these pre-existing companies rather than minting
+new ones.
+
+### §8.E OpFor sourcing per contract type
+
+OpFor has three sources; a contract draws from one per its kind and arc (`ContractKind`,
+`src/domain/contract.zig`; current battle draw `src/domain/opfor.zig` `roll(...)`):
+
+- **Faction house troops** — the default for faction-vs-faction kinds (`garrison_duty`,
+  `cadre_duty`, `security_duty`, `riot_duty`, `planetary_assault`, `relief_duty`,
+  `guerrilla_warfare`, `diversionary_raid`, `objective_raid`, `recon_raid`,
+  `extraction_raid`): drawn from `faction_rosters[enemy_key]`.
+- **Merc companies** — when an arc/story selects a world merc company as the OpFor (a
+  "rival" contract, i.e. `arc_key`/`rival_ids` populated): drawn from that company's pool
+  in `merc_company_rosters`.
+- **Pirates / bandits / non-aligned** — `pirate_hunting`, and any contract whose
+  `enemy_key == "PER"`: drawn from the `PER` faction, per §8.C (persisted pool vs on-demand
+  RAT roll is the §8.C `// TBD`).
+
+Today `opfor.roll` RAT-rolls the enemy force rather than drawing from a persisted roster.
+Replacing that draw with a roster draw (and the destroyed/salvaged/survivor ownership
+updates) is P3e.5's scope; this section fixes only *which pool* each kind draws from.
+
+### §8.F What P3e.3's `rival_rosters` becomes (rename/rekey inventory)
+
+**Rename target (proposed): `merc_company_rosters`, rekeyed `RivalId → MercCompanyId`.**
+The exact field token is confirmed at the entity-split increment; the name must read as
+"merc-company hull pools", not "rival rosters". This is a scope callout, not implementation
+work; the following touchpoints will change in that future coded increment (schema migration
+required):
+
+- `src/sim/state.zig` — the `rival_rosters` field (line 351; rename + rekey to
+  `MercCompanyId`); add the `rivals`→merc-company relationship (the `rivals` map at line 318
+  and `next_rival_id` stay as the status overlay, gaining the `MercCompanyId` FK); add the
+  new `merc_companies` collection and `next_merc_company_id`; the `field_persistence` table
+  entries (lines 1030–1040).
+- `src/domain/types.zig` — add `MercCompanyId`.
+- `src/domain/rival.zig` — split identity fields out to the new `MercCompany` (new
+  `src/domain/merc_company.zig`, proposed); `Rival` gains a `MercCompanyId` FK (see §8.A
+  `// TBD` on field duplication).
+- `src/domain/hull_instance.zig` — `OwnerType` `.rival` → `.merc_company`; `HullOwner`
+  `.rival: RivalId` → `.merc_company: MercCompanyId`; persisted column `owner_rival_id` →
+  `owner_merc_company_id` (schema migration from v52's shape).
+- `src/persist/store.zig` — the v53 `rival_roster` table (line 322) renamed and rekeyed; a
+  forward-numbered migration; digest coverage; golden round-trip proof.
+- `src/sim/rivals.zig` — `generateRival`/`instantiateRivals`/`priorRival` expressed against
+  merc companies (arcs attach overlays to seeded companies).
+- `src/sim/roster_seed.zig`, `src/gen/roster_gen.zig` — extend to seed merc-company
+  identities and pools (§8.D).
+- Tests: the round-trip/digest tests for `rival_rosters`, and the `rivals.zig` tests, follow
+  the rename with their owners (behaviour-preserving move — no new test is created by the
+  rename itself).
+
+### §8.G Delivery-order impact
+
+- **New increment before P3e.5 (entity split):** introduce `MercCompany` /
+  `MercCompanyId`, perform the §8.F rename/rekey and owner-kind rename, and the schema
+  migration. Independently correct, green on the rule-72 gate, into local `main` before
+  P3e.5.
+- **P3e.5** gains campaign-start merc-company seeding (§8.D, formerly deferred here) and
+  draws OpFor from the three sources (§8.E), including the PER seeding `// TBD` (§8.C).
+- **P3e.6 (market surplus)** is unaffected by the entity model; it reads faction surplus and
+  is keyed by faction string key either way.
+- **P3e.7 (insolvency)** becomes **merc-company** insolvency (fieldable BV below threshold →
+  the company cannot take contracts), not "rival" insolvency.
+- **P3f (new-company formation and insolvency lifecycle)** — out of scope for this design
+  update, but the `MercCompany` entity model supports it naturally: formation adds a company
+  + pool; insolvency removes/retires one. No entity added by P3f that §8 does not already
+  define.
