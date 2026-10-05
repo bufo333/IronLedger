@@ -74,6 +74,7 @@ above is complete.
     - [x] P3e.5a: campaign-start merc-company seeding (12 companies × 8 hulls). <!-- sim/p3e-5a-merc-seed -->
     - [x] P3e.5b-1: PER/pirate campaign-start hull-pool seeding (flat pirate_pool_hulls = 16). <!-- sim/p3e-5b-pirate-pool -->
     - [ ] P3e.5b-2: Rival ↔ MercCompany link (Rival gains MercCompanyId FK; instantiateRivals selects an existing merc company).
+    - [x] P3e.5b prerequisite: minor-Periphery manufacturing data (TC/MOC/OA/MH/CIR/OBR get replenishment_hulls_per_year=4 + provisional RAT rows; resolves §8.C open owner decision). <!-- sim/p3e-5b-periphery-manufacturing -->
     - [ ] P3e.5b-3: OpFor roster draw + battle aftermath (draw from pool at battle start; destroyed/salvaged/survivor ownership updates; SalvageCandidate hull_instance_id; takeSalvage; combat_ineffective HullStatus; empty-roster default path).
     - [ ] P3e.6: market surplus throughput (monthly surplus to listings, throttled by world_state conflict).
     - [ ] P3e.7: rival insolvency (fieldable BV below threshold → inactive).

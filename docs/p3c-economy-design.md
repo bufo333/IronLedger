@@ -359,9 +359,13 @@ by manufacturing. Because P3e.4 seeds only factions with nonzero
 **Resolved — owner decision 3 (P3e.5b-1):** PER receives a flat-constant seeded starting
 pool at campaign creation (`pirate_pool_hulls` in `tuning.generation`, currently 16 `// TUNE`),
 seeded by `src/sim/roster_seed.zig` `seedPirateRoster` in the same `execCreateCommander`
-founding path as faction and merc-company seeding. Other zero-replenishment factions (TC,
-MOC, OA, MH, CIR, OBR, CS) remain unseeded; whether they receive a starting pool is an open
-owner decision to be resolved before P3e.5b-3 (empty-roster OpFor default path).
+founding path as faction and merc-company seeding.
+
+**Resolved — owner decision 4 (P3e.5b minor-Periphery manufacturing):** TC, MOC, OA, MH,
+CIR, and OBR now receive campaign-start faction pools via non-zero
+`replenishment_hulls_per_year = 4` and provisional RAT rows (`// TUNE`; per-faction
+composition TBD from force sheets). CS stays unseeded (`hires = false`, no open 3025
+manufacturing). PER keeps its flat `seedPirateRoster` pool.
 
 ### §8.D Campaign-start merc-company seeding
 

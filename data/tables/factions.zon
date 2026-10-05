@@ -11,8 +11,9 @@
 //   heavy+assault pools (data/tables/rat.zon), deduplicated. These are
 //   UNVERIFIED manufacturing membership, distinct from RAT fielding; must be
 //   re-sourced from force sheets / TechManual before P3e.6 balances on them.
-//   PER (pirates / near Periphery), CS (ComStar), and the seven Periphery
-//   states with no RAT row have empty lists pending sourcing. // TUNE
+//   TC/MOC/OA/MH/CIR/OBR now have provisional RAT rows and derived lists
+//   (// TUNE). PER (salvage-only) and CS (no open 3025 manufacturing) keep
+//   empty lists. // TUNE
 // `replenishment_hulls_per_year` — whole battlemechs the faction adds to its
 //   own roster per year; 0 for empty-list factions. // TUNE
 // `conflict_sensitivity_bp` — basis points (0..=100_000) governing how
@@ -39,28 +40,28 @@
         .replenishment_hulls_per_year = 12, // TUNE
         .conflict_sensitivity_bp = 5_000 }, // TUNE
     .{ .key = "TC", .name = "Taurian Concordat", .color = .cyan, .capital = "taurus", .foes = .{ "FS", "PER" }, .pay_bp = 9_000, .hires = true,
-        .manufacturing_chassis = .{}, // TUNE — no RAT row; pending force-sheet sourcing
-        .replenishment_hulls_per_year = 0, // TUNE
+        .manufacturing_chassis = .{ "RFL-3N", "WHM-6R", "ARC-2R", "TDR-5S", "OSR-2C", "DRG-1N", "CRD-3R", "STK-3F", "AWS-8Q", "BLR-1G", "CGR-1A1" }, // TUNE — derived from this faction's RAT heavy+assault pools; per-faction set TBD from force sheets
+        .replenishment_hulls_per_year = 4, // TUNE — small Periphery capacity, below the Great Houses' 12; exact rate TBD from force sheets
         .conflict_sensitivity_bp = 5_000 }, // TUNE
     .{ .key = "MOC", .name = "Magistracy of Canopus", .color = .white, .capital = "canopus4", .foes = .{ "FWL", "PER" }, .pay_bp = 9_000, .hires = true,
-        .manufacturing_chassis = .{}, // TUNE — no RAT row; pending force-sheet sourcing
-        .replenishment_hulls_per_year = 0, // TUNE
+        .manufacturing_chassis = .{ "RFL-3N", "WHM-6R", "ARC-2R", "TDR-5S", "OSR-2C", "DRG-1N", "CRD-3R", "STK-3F", "AWS-8Q", "BLR-1G", "CGR-1A1" }, // TUNE — derived from this faction's RAT heavy+assault pools; per-faction set TBD from force sheets
+        .replenishment_hulls_per_year = 4, // TUNE — small Periphery capacity, below the Great Houses' 12; exact rate TBD from force sheets
         .conflict_sensitivity_bp = 5_000 }, // TUNE
     .{ .key = "OA", .name = "Outworlds Alliance", .color = .cyan, .capital = "alpheratz", .foes = .{ "DC", "PER" }, .pay_bp = 8_500, .hires = true,
-        .manufacturing_chassis = .{}, // TUNE — no RAT row; pending force-sheet sourcing
-        .replenishment_hulls_per_year = 0, // TUNE
+        .manufacturing_chassis = .{ "RFL-3N", "WHM-6R", "ARC-2R", "TDR-5S", "OSR-2C", "DRG-1N", "CRD-3R", "STK-3F", "AWS-8Q", "BLR-1G", "CGR-1A1" }, // TUNE — derived from this faction's RAT heavy+assault pools; per-faction set TBD from force sheets
+        .replenishment_hulls_per_year = 4, // TUNE — small Periphery capacity, below the Great Houses' 12; exact rate TBD from force sheets
         .conflict_sensitivity_bp = 5_000 }, // TUNE
     .{ .key = "MH", .name = "Marian Hegemony", .color = .grey, .capital = "alphard_mh", .foes = .{ "FWL", "PER" }, .pay_bp = 8_500, .hires = true,
-        .manufacturing_chassis = .{}, // TUNE — no RAT row; pending force-sheet sourcing
-        .replenishment_hulls_per_year = 0, // TUNE
+        .manufacturing_chassis = .{ "RFL-3N", "WHM-6R", "ARC-2R", "TDR-5S", "OSR-2C", "DRG-1N", "CRD-3R", "STK-3F", "AWS-8Q", "BLR-1G", "CGR-1A1" }, // TUNE — derived from this faction's RAT heavy+assault pools; per-faction set TBD from force sheets
+        .replenishment_hulls_per_year = 4, // TUNE — small Periphery capacity, below the Great Houses' 12; exact rate TBD from force sheets
         .conflict_sensitivity_bp = 5_000 }, // TUNE
     .{ .key = "CIR", .name = "Circinus Federation", .color = .grey, .capital = "circinus", .foes = .{ "LC", "MH" }, .pay_bp = 8_000, .hires = true,
-        .manufacturing_chassis = .{}, // TUNE — no RAT row; pending force-sheet sourcing
-        .replenishment_hulls_per_year = 0, // TUNE
+        .manufacturing_chassis = .{ "RFL-3N", "WHM-6R", "ARC-2R", "TDR-5S", "OSR-2C", "DRG-1N", "CRD-3R", "STK-3F", "AWS-8Q", "BLR-1G", "CGR-1A1" }, // TUNE — derived from this faction's RAT heavy+assault pools; per-faction set TBD from force sheets
+        .replenishment_hulls_per_year = 4, // TUNE — small Periphery capacity, below the Great Houses' 12; exact rate TBD from force sheets
         .conflict_sensitivity_bp = 5_000 }, // TUNE
     .{ .key = "OBR", .name = "Oberon Confederation", .color = .grey, .capital = "oberon6", .foes = .{ "LC", "DC" }, .pay_bp = 8_000, .hires = true,
-        .manufacturing_chassis = .{}, // TUNE — no RAT row; pending force-sheet sourcing
-        .replenishment_hulls_per_year = 0, // TUNE
+        .manufacturing_chassis = .{ "RFL-3N", "WHM-6R", "ARC-2R", "TDR-5S", "OSR-2C", "DRG-1N", "CRD-3R", "STK-3F", "AWS-8Q", "BLR-1G", "CGR-1A1" }, // TUNE — derived from this faction's RAT heavy+assault pools; per-faction set TBD from force sheets
+        .replenishment_hulls_per_year = 4, // TUNE — small Periphery capacity, below the Great Houses' 12; exact rate TBD from force sheets
         .conflict_sensitivity_bp = 5_000 }, // TUNE
     .{ .key = "CS", .name = "ComStar", .color = .white, .capital = "terra", .foes = .{}, .pay_bp = 10_000, .hires = false,
         .manufacturing_chassis = .{}, // TUNE — no open 3025 manufacturing; pending sourcing
